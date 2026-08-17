@@ -1439,575 +1439,6 @@ export type RenderWarning = {
   reason: string | undefined;
 };
 
-// FittingStatus is the lifecycle state of a fitting session.
-export type FittingStatus =
-  | "FITTING_STATUS_UNKNOWN"
-  | "FITTING_STATUS_PLANNED"
-  | "FITTING_STATUS_DONE"
-  | "FITTING_STATUS_CANCELLED";
-// FittingVerdict is the outcome of a fitting session.
-export type FittingVerdict =
-  | "FITTING_VERDICT_UNKNOWN"
-  | "FITTING_VERDICT_PENDING"
-  | "FITTING_VERDICT_APPROVED"
-  | "FITTING_VERDICT_NEEDS_REWORK"
-  | "FITTING_VERDICT_REJECTED";
-// FittingSizeInsert is one size tried in a fitting, with an optional per-size note.
-export type FittingSizeInsert = {
-  sizeId: number | undefined;
-  fitNote: string | undefined;
-};
-
-// FittingInsert is the writable payload for a fitting session. A fitting anchors
-// to a tech card (the style) and/or a specific product (the colour/SKU sample);
-// at least one of tech_card_id / product_id must be set.
-export type FittingInsert = {
-  productId: number | undefined;
-  modelId: number | undefined;
-  fittingDate: wellKnownTimestamp | undefined;
-  comment: string | undefined;
-  status: FittingStatus | undefined;
-  verdict: FittingVerdict | undefined;
-  recordedBy: string | undefined;
-  sizes: FittingSizeInsert[] | undefined;
-  mediaIds: number[] | undefined;
-  techCardId: number | undefined;
-  // PDF выкройки measured in this fitting. The tech card holds the FINAL pattern per
-  // size; a fitting captures the ITERATION that was actually tried on (so you know which
-  // pattern you measured). A fitting may carry several (it can span sizes). Each PDF is
-  // uploaded via Admin.UploadPattern; the url is stored as a snapshot (immune to later
-  // tech-card edits).
-  patterns: FittingPattern[] | undefined;
-  // Callouts pinned onto the fitting's photos — a marker + note flagging what is
-  // wrong with the fit at a point on a specific photo (media_ids). Full-replace on
-  // update, like sizes/media/patterns.
-  callouts: FittingCallout[] | undefined;
-  // This fitting's number in the tech card's try-on sequence (task 13). 0 = unset: the
-  // server auto-assigns the next number (max+1) per tech card on create when the fitting is
-  // anchored to a card. A non-zero value is honoured (manual override); unique per card.
-  roundNumber: number | undefined;
-  // Structured round outcome (distinct from the free verdict): approved | new_round | dropped.
-  // "" = undecided.
-  outcome: string | undefined;
-  // The structured "what to change" work list produced by this fitting. Full-replace on update,
-  // like callouts; resolved is toggled when a change is carried into the tech card.
-  changeRequests: FittingChangeRequest[] | undefined;
-  sampleId: number | undefined;
-};
-
-// FittingPattern is one выкройка iteration tried in a fitting (snapshot of the
-// uploaded file, not a live reference to a tech-card pattern). The file is a PDF or a
-// DXF; the type is carried by the url's extension (.pdf / .dxf).
-export type FittingPattern = {
-  sizeId: number | undefined;
-  url: string | undefined;
-  filename: string | undefined;
-  sizeBytes: number | undefined;
-  // name is an optional operator-entered display name. Same presence semantics as
-  // TechCardSizePattern.name — absent preserves the stored name for the same
-  // (size_id, url) row across the full-replace save; present (even empty) is stored as sent
-  // (empty clears). JSON null reads as absent (preserve) — clear with the empty string.
-  name?: string;
-  // view_url / download_url are OUTPUT-ONLY tokenized read urls (see
-  // TechCardSizePattern.view_url). Ignored on write.
-  viewUrl: string | undefined;
-  downloadUrl: string | undefined;
-};
-
-// FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
-// problem at a point on the image ("here the shoulder is too tight"). It is the
-// fitting analogue of TechCardCallout but deliberately simpler: a pin + a note,
-// with no part/dimensions (a fitting flags posadka, not spec geometry).
-export type FittingCallout = {
-  number: number | undefined;
-  note: string | undefined;
-  mediaId: number | undefined;
-  posX: googletype_Decimal | undefined;
-  posY: googletype_Decimal | undefined;
-};
-
-// FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the
-// change CATEGORY; zone + piece_ids are the structured LOCATION (which replace the front's misuse of
-// target as a free "sleeve/collar" field, A2). status (open|resolved) replaces the old boolean
-// resolved; carried_from_id links this item to the one in the PREVIOUS round it continues, giving a
-// visible carry-over history (acceptance E.15). The free fitting.comment stays a separate free note.
-export type FittingChangeRequest = {
-  id: number | undefined;
-  target: string | undefined;
-  note: string | undefined;
-  calloutNumber: number | undefined;
-  resolved: boolean | undefined;
-  // WHERE on the garment, from the FITTING zone dictionary (see FittingChangeRequestInsert.zone for
-  // the full list); "" = unspecified. This is a fitting-owned vocabulary of garment AREAS — it is no
-  // longer the tech_card_operation.zone construction-band dictionary.
-  zone: string | undefined;
-  pieceId: number | undefined;
-  status: string | undefined;
-  carriedFromId: number | undefined;
-  createdBy: string | undefined;
-  fittingId: number | undefined;
-  roundNumber: number | undefined;
-  // FK tech_card_piece(id): which pieces the remark is about. A remark routinely spans several
-  // («обработка низа на полочке и спинке»), so this is a set, not one pin; empty = not pinned to a
-  // piece. Order is the selection order. A deleted piece drops out of the set; the remark survives.
-  pieceIds: number[] | undefined;
-};
-
-// FittingChangeRequestInsert is the write payload for the dedicated change-request CRUD (S26). Unlike
-// the embedded initial batch on FittingInsert, these items are managed individually so their id is
-// STABLE — which carried_from_id (and the resolve/carry-over flow) depends on. created_by is stamped
-// server-side.
-export type FittingChangeRequestInsert = {
-  fittingId: number | undefined;
-  target: string | undefined;
-  note: string | undefined;
-  calloutNumber: number | undefined;
-  // Optional garment AREA, from the fitting zone dictionary ("" = unspecified):
-  // outer | lining | interlining — the material band the change is in
-  // sleeve | collar | neckline | armhole | shoulder | chest | waist | hip | hem | pocket |
-  // closure | back | front — the area of the garment
-  // other, and the legacy `unknown` (equivalent to "")
-  // Tokens are lowercase; a TECH_CARD_CONSTRUCTION_ZONE_* enum name from an older client is
-  // normalised to its token rather than rejected.
-  zone: string | undefined;
-  pieceId: number | undefined;
-  status: string | undefined;
-  carriedFromId: number | undefined;
-  pieceIds: number[] | undefined;
-};
-
-// Fitting is a stored try-on session with resolved media for display.
-export type Fitting = {
-  id: number | undefined;
-  fitting: FittingInsert | undefined;
-  media: MediaFull[] | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  lockVersion: number | undefined;
-  createdBy: string | undefined;
-  updatedBy: string | undefined;
-};
-
-// FulfillmentColumn is a lane on the fulfillment board. Unlike TaskStatus (free
-// kanban columns), each column is bound to a concrete order status.
-export type FulfillmentColumn =
-  | "FULFILLMENT_COLUMN_UNKNOWN"
-  | "FULFILLMENT_COLUMN_TO_FULFILL"
-  | "FULFILLMENT_COLUMN_SHIPPED"
-  | "FULFILLMENT_COLUMN_DELIVERED";
-// FulfillmentChecklistItem is one packing-checklist row on a fulfillment card
-// (e.g. "picked", "packed", "label printed"). Managed by dedicated add/toggle/
-// delete RPCs, same as a task checklist item.
-export type FulfillmentChecklistItem = {
-  id: number | undefined;
-  content: string | undefined;
-  isDone: boolean | undefined;
-  position: number | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-};
-
-// FulfillmentAnnotation is the board-owned overlay on an order: an assignee,
-// internal packing notes and a checklist. It carries NO order status — that lives
-// on the order. Lazily created on first edit; keyed by order_uuid.
-export type FulfillmentAnnotation = {
-  orderUuid: string | undefined;
-  assignee: string | undefined;
-  notes: string | undefined;
-  checklist: FulfillmentChecklistItem[] | undefined;
-};
-
-// FulfillmentCard is one tile on the board: the compact order plus its annotation
-// summary. Full order detail + full annotation come from GetFulfillmentCard.
-export type FulfillmentCard = {
-  order: Order | undefined;
-  column: FulfillmentColumn | undefined;
-  assignee: string | undefined;
-  checklistDone: number | undefined;
-  checklistTotal: number | undefined;
-  hasNotes: boolean | undefined;
-};
-
-// FulfillmentColumnCards groups one column's cards. The active columns
-// (TO_FULFILL, SHIPPED) are oldest order first (longest-waiting picked first);
-// the historical DELIVERED column is newest first and bounded.
-export type FulfillmentColumnCards = {
-  column: FulfillmentColumn | undefined;
-  cards: FulfillmentCard[] | undefined;
-};
-
-export type HeroType =
-  | "HERO_TYPE_UNKNOWN"
-  | "HERO_TYPE_SINGLE"
-  | "HERO_TYPE_DOUBLE"
-  | "HERO_TYPE_MAIN"
-  | "HERO_TYPE_FEATURED_PRODUCTS"
-  | "HERO_TYPE_FEATURED_PRODUCTS_TAG"
-  | "HERO_TYPE_FEATURED_ARCHIVE"
-  | "HERO_TYPE_EMBED"
-  | "HERO_TYPE_DROP"
-  | "HERO_TYPE_LAST_CHANCE"
-  | "HERO_TYPE_MARQUEE"
-  | "HERO_TYPE_NEW_ARRIVALS"
-  | "HERO_TYPE_SLIDESHOW"
-  | "HERO_TYPE_MOSAIC"
-  | "HERO_TYPE_SPLIT"
-  | "HERO_TYPE_VIDEO"
-  | "HERO_TYPE_PRODUCT_SPOTLIGHT"
-  | "HERO_TYPE_NEWSLETTER"
-  | "HERO_TYPE_STATEMENT"
-  | "HERO_TYPE_LOOKBOOK";
-// HeroAudience is the TARGETING modifier: who a block is shown to. Enforcement
-// requires the frontend GetHero to know the viewer (auth → tier); until then it
-// is carried through and may be applied client-side.
-export type HeroAudience =
-  | "HERO_AUDIENCE_UNKNOWN"
-  | "HERO_AUDIENCE_ALL"
-  | "HERO_AUDIENCE_GUESTS"
-  | "HERO_AUDIENCE_MEMBERS"
-  | "HERO_AUDIENCE_TIER";
-// HeroMedia is a portrait/landscape media pair addressed by id (write side).
-// The per-slot presentation modifiers live here: disable_overlay toggles the
-// scrim, disable_tint toggles the frontend's background colour tint, and stroke
-// toggles a border/outline around the media.
-export type HeroMedia = {
-  portraitId: number | undefined;
-  landscapeId: number | undefined;
-  disableOverlay: boolean | undefined;
-  disableTint: boolean | undefined;
-  stroke: boolean | undefined;
-};
-
-// HeroMediaFull is the resolved form of HeroMedia (read side).
-export type HeroMediaFull = {
-  portrait: MediaFull | undefined;
-  landscape: MediaFull | undefined;
-  disableOverlay: boolean | undefined;
-  disableTint: boolean | undefined;
-  stroke: boolean | undefined;
-};
-
-export type HeroFullWithTranslations = {
-  entities: HeroEntityWithTranslations[] | undefined;
-  navFeatured: NavFeaturedWithTranslations | undefined;
-};
-
-export type HeroEntityWithTranslations = {
-  type: HeroType | undefined;
-  single: HeroSingleWithTranslations | undefined;
-  double: HeroDoubleWithTranslations | undefined;
-  main: HeroMainWithTranslations | undefined;
-  featuredProducts: HeroFeaturedProductsWithTranslations | undefined;
-  featuredProductsTag: HeroFeaturedProductsTagWithTranslations | undefined;
-  featuredArchive: HeroFeaturedArchiveWithTranslations | undefined;
-  embed: HeroEmbedWithTranslations | undefined;
-  drop: HeroDropWithTranslations | undefined;
-  lastChance: HeroLastChanceWithTranslations | undefined;
-  marquee: HeroMarqueeWithTranslations | undefined;
-  newArrivals: HeroNewArrivalsWithTranslations | undefined;
-  slideshow: HeroSlideshowWithTranslations | undefined;
-  mosaic: HeroMosaicWithTranslations | undefined;
-  split: HeroSplitWithTranslations | undefined;
-  video: HeroVideoWithTranslations | undefined;
-  productSpotlight: HeroProductSpotlightWithTranslations | undefined;
-  newsletter: HeroNewsletterWithTranslations | undefined;
-  statement: HeroStatementWithTranslations | undefined;
-  lookbook: HeroLookbookWithTranslations | undefined;
-  // modifiers
-  audience: HeroAudience | undefined;
-  minTierId: number | undefined;
-};
-
-export type HeroSingleWithTranslations = {
-  media: HeroMediaFull | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroDoubleWithTranslations = {
-  left: HeroSingleWithTranslations | undefined;
-  right: HeroSingleWithTranslations | undefined;
-};
-
-export type HeroMainWithTranslations = {
-  media: HeroMediaFull | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroFeaturedProductsWithTranslations = {
-  products: Colorway[] | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroFeaturedProductsTagWithTranslations = {
-  tag: string | undefined;
-  products: HeroFeaturedProductsWithTranslations | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroFeaturedArchiveWithTranslations = {
-  archive: ArchiveFull | undefined;
-  tag: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroEmbedWithTranslations = {
-  embedUrl: string | undefined;
-  fallback: HeroMediaFull | undefined;
-  ctaLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroDropWithTranslations = {
-  media: HeroMediaFull | undefined;
-  releaseAt: wellKnownTimestamp | undefined;
-  exploreLink: string | undefined;
-  tag: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroLastChanceWithTranslations = {
-  products: Colorway[] | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroMarqueeWithTranslations = {
-  link: string | undefined;
-  speed: number | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroNewArrivalsWithTranslations = {
-  products: Colorway[] | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroSlideshowWithTranslations = {
-  slides: HeroSingleWithTranslations[] | undefined;
-  intervalMs: number | undefined;
-};
-
-export type HeroMosaicWithTranslations = {
-  tiles: HeroSingleWithTranslations[] | undefined;
-  columns: number | undefined;
-};
-
-export type HeroSplitWithTranslations = {
-  media: HeroSingleWithTranslations | undefined;
-  products: Colorway[] | undefined;
-  mediaLeft: boolean | undefined;
-};
-
-export type HeroVideoWithTranslations = {
-  media: MediaFull | undefined;
-  posterMedia: MediaFull | undefined;
-  autoplay: boolean | undefined;
-  loop: boolean | undefined;
-  muted: boolean | undefined;
-  ctaLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroProductSpotlightWithTranslations = {
-  product: Colorway | undefined;
-  media: HeroMediaFull | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroNewsletterWithTranslations = {
-  media: HeroMediaFull | undefined;
-  translations: HeroNewsletterTranslation[] | undefined;
-};
-
-export type HeroStatementWithTranslations = {
-  media: HeroMediaFull | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroLookbookWithTranslations = {
-  frames: HeroSingleWithTranslations[] | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type NavFeaturedWithTranslations = {
-  men: NavFeaturedEntityWithTranslations | undefined;
-  women: NavFeaturedEntityWithTranslations | undefined;
-};
-
-export type NavFeaturedEntityWithTranslations = {
-  media: MediaFull | undefined;
-  featuredTag: string | undefined;
-  featuredArchiveId: string | undefined;
-  translations: NavFeaturedEntityInsertTranslation[] | undefined;
-};
-
-export type NavFeaturedInsert = {
-  men: NavFeaturedEntityInsert | undefined;
-  women: NavFeaturedEntityInsert | undefined;
-};
-
-export type NavFeaturedEntityInsert = {
-  mediaId: number | undefined;
-  featuredTag: string | undefined;
-  featuredArchiveId: number | undefined;
-  translations: NavFeaturedEntityInsertTranslation[] | undefined;
-};
-
-export type HeroFullInsert = {
-  entities: HeroEntityInsert[] | undefined;
-  navFeatured: NavFeaturedInsert | undefined;
-};
-
-export type HeroEntityInsert = {
-  type: HeroType | undefined;
-  single: HeroSingleInsert | undefined;
-  double: HeroDoubleInsert | undefined;
-  main: HeroMainInsert | undefined;
-  featuredProducts: HeroFeaturedProductsInsert | undefined;
-  featuredProductsTag: HeroFeaturedProductsTagInsert | undefined;
-  featuredArchive: HeroFeaturedArchiveInsert | undefined;
-  embed: HeroEmbedInsert | undefined;
-  drop: HeroDropInsert | undefined;
-  lastChance: HeroLastChanceInsert | undefined;
-  marquee: HeroMarqueeInsert | undefined;
-  newArrivals: HeroNewArrivalsInsert | undefined;
-  slideshow: HeroSlideshowInsert | undefined;
-  mosaic: HeroMosaicInsert | undefined;
-  split: HeroSplitInsert | undefined;
-  video: HeroVideoInsert | undefined;
-  productSpotlight: HeroProductSpotlightInsert | undefined;
-  newsletter: HeroNewsletterInsert | undefined;
-  statement: HeroStatementInsert | undefined;
-  lookbook: HeroLookbookInsert | undefined;
-  // modifiers
-  audience: HeroAudience | undefined;
-  minTierId: number | undefined;
-};
-
-export type HeroSingleInsert = {
-  media: HeroMedia | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroDoubleInsert = {
-  left: HeroSingleInsert | undefined;
-  right: HeroSingleInsert | undefined;
-};
-
-export type HeroMainInsert = {
-  media: HeroMedia | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroFeaturedProductsInsert = {
-  productIds: number[] | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroFeaturedProductsTagInsert = {
-  tag: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroFeaturedArchiveInsert = {
-  archiveId: number | undefined;
-  tag: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroEmbedInsert = {
-  embedUrl: string | undefined;
-  fallback: HeroMedia | undefined;
-  ctaLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroDropInsert = {
-  media: HeroMedia | undefined;
-  releaseAt: wellKnownTimestamp | undefined;
-  exploreLink: string | undefined;
-  tag: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroLastChanceInsert = {
-  stockThreshold: number | undefined;
-  limit: number | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroMarqueeInsert = {
-  link: string | undefined;
-  speed: number | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroNewArrivalsInsert = {
-  limit: number | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroSlideshowInsert = {
-  slides: HeroSingleInsert[] | undefined;
-  intervalMs: number | undefined;
-};
-
-export type HeroMosaicInsert = {
-  tiles: HeroSingleInsert[] | undefined;
-  columns: number | undefined;
-};
-
-export type HeroSplitInsert = {
-  media: HeroSingleInsert | undefined;
-  productIds: number[] | undefined;
-  mediaLeft: boolean | undefined;
-};
-
-export type HeroVideoInsert = {
-  mediaId: number | undefined;
-  posterMediaId: number | undefined;
-  autoplay: boolean | undefined;
-  loop: boolean | undefined;
-  muted: boolean | undefined;
-  ctaLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroProductSpotlightInsert = {
-  productId: number | undefined;
-  media: HeroMedia | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroNewsletterInsert = {
-  media: HeroMedia | undefined;
-  translations: HeroNewsletterTranslation[] | undefined;
-};
-
-export type HeroStatementInsert = {
-  media: HeroMedia | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
-export type HeroLookbookInsert = {
-  frames: HeroSingleInsert[] | undefined;
-  exploreLink: string | undefined;
-  translations: HeroCopyTranslation[] | undefined;
-};
-
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type TechCardStage =
@@ -4981,6 +4412,601 @@ export type TechCardListItem = {
   // colorway_count. The COUNT only — a "latest consumption" here would be a lie without naming
   // the size and the BOM slot it was measured for.
   markerCount: number | undefined;
+};
+
+// FittingStatus is the lifecycle state of a fitting session.
+export type FittingStatus =
+  | "FITTING_STATUS_UNKNOWN"
+  | "FITTING_STATUS_PLANNED"
+  | "FITTING_STATUS_DONE"
+  | "FITTING_STATUS_CANCELLED";
+// FittingVerdict is the outcome of a fitting session.
+export type FittingVerdict =
+  | "FITTING_VERDICT_UNKNOWN"
+  | "FITTING_VERDICT_PENDING"
+  | "FITTING_VERDICT_APPROVED"
+  | "FITTING_VERDICT_NEEDS_REWORK"
+  | "FITTING_VERDICT_REJECTED";
+// FittingSizeInsert is one size tried in a fitting, with an optional per-size note.
+export type FittingSizeInsert = {
+  sizeId: number | undefined;
+  fitNote: string | undefined;
+};
+
+// FittingInsert is the writable payload for a fitting session. A fitting anchors
+// to a tech card (the style) and/or a specific product (the colour/SKU sample);
+// at least one of tech_card_id / product_id must be set.
+export type FittingInsert = {
+  productId: number | undefined;
+  modelId: number | undefined;
+  fittingDate: wellKnownTimestamp | undefined;
+  comment: string | undefined;
+  status: FittingStatus | undefined;
+  verdict: FittingVerdict | undefined;
+  recordedBy: string | undefined;
+  sizes: FittingSizeInsert[] | undefined;
+  mediaIds: number[] | undefined;
+  techCardId: number | undefined;
+  // PDF выкройки measured in this fitting. The tech card holds the FINAL pattern per
+  // size; a fitting captures the ITERATION that was actually tried on (so you know which
+  // pattern you measured). A fitting may carry several (it can span sizes). Each PDF is
+  // uploaded via Admin.UploadPattern; the url is stored as a snapshot (immune to later
+  // tech-card edits).
+  patterns: FittingPattern[] | undefined;
+  // Callouts pinned onto the fitting's photos — a marker + note flagging what is
+  // wrong with the fit at a point on a specific photo (media_ids). Full-replace on
+  // update, like sizes/media/patterns.
+  callouts: FittingCallout[] | undefined;
+  // This fitting's number in the tech card's try-on sequence (task 13). 0 = unset: the
+  // server auto-assigns the next number (max+1) per tech card on create when the fitting is
+  // anchored to a card. A non-zero value is honoured (manual override); unique per card.
+  roundNumber: number | undefined;
+  // Structured round outcome (distinct from the free verdict): approved | new_round | dropped.
+  // "" = undecided.
+  outcome: string | undefined;
+  // The structured "what to change" work list produced by this fitting. Full-replace on update,
+  // like callouts; resolved is toggled when a change is carried into the tech card.
+  changeRequests: FittingChangeRequest[] | undefined;
+  sampleId: number | undefined;
+};
+
+// FittingPattern is one выкройка iteration tried in a fitting (snapshot of the
+// uploaded file, not a live reference to a tech-card pattern). The file is a PDF or a
+// DXF; the type is carried by the url's extension (.pdf / .dxf).
+export type FittingPattern = {
+  sizeId: number | undefined;
+  url: string | undefined;
+  filename: string | undefined;
+  sizeBytes: number | undefined;
+  // name is an optional operator-entered display name. Same presence semantics as
+  // TechCardSizePattern.name — absent preserves the stored name for the same
+  // (size_id, url) row across the full-replace save; present (even empty) is stored as sent
+  // (empty clears). JSON null reads as absent (preserve) — clear with the empty string.
+  name?: string;
+  // view_url / download_url are OUTPUT-ONLY tokenized read urls (see
+  // TechCardSizePattern.view_url). Ignored on write.
+  viewUrl: string | undefined;
+  downloadUrl: string | undefined;
+};
+
+// FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
+// problem at a point on the image ("here the shoulder is too tight"). It carries the
+// same drawn-instruction primitive as TechCardCallout (kind + anchors + colour), but
+// no part/dimensions: a fitting flags posadka on a PHOTO, and its remarks bind to
+// pieces through fitting_change_request, not through a name on the callout.
+export type FittingCallout = {
+  number: number | undefined;
+  note: string | undefined;
+  mediaId: number | undefined;
+  posX: googletype_Decimal | undefined;
+  posY: googletype_Decimal | undefined;
+  // Вид указания. UNKNOWN и PIN — одно и то же («просто нумерованная точка»).
+  // ЯВНОЕ ПРИСУТСТВИЕ, ровно как у TechCardCallout.kind, и по той же причине: выноски примерки
+  // сохраняются ПОЛНОЙ ЗАМЕНОЙ, поэтому вкладка со старым бандлом, которая поля не шлёт вовсе,
+  // прислала бы голый proto3-энум как UNKNOWN и стёрла бы геометрию КАЖДОГО указания примерки —
+  // сохранением, которое снимки даже не открывало. ОТСУТСТВИЕ ⇒ сервер несёт ХРАНИМУЮ геометрию
+  // дальше, перенос по НОМЕРУ выноски (единственная её идентичность: номером на неё ссылается
+  // fitting_change_request.callout_number). ЯВНЫЙ PIN ⇒ человек сам превратил указание обратно в
+  // точку, это осознанное действие. Новый клиент шлёт поле ВСЕГДА, круглым рейсом прочитанного.
+  // ГРУППА АТОМАРНА: присутствие ЭТОГО поля управляет всем, что описывает фигуру, — якорями,
+  // цветом, пунктиром и заливкой. Клиент, приславший вид, обязан прислать их все; иначе дуга без
+  // якорей досталась бы точками от прошлой правки, то есть чужими, и молча.
+  kind?: TechCardAnnotationKind;
+  // Якоря геометрии — БЕЗ маркера: маркер живёт в pos_x/pos_y, потому что на него ссылаются
+  // номером. Пусто у PIN; LABEL — 1, DIM/BRACKET — 2, ARC — 3, MULTI — 2..8, POLYGON — 3..40,
+  // INK — 2..200. Правило и слова отказа те же, что у эскиза: вид один и тот же тип.
+  points: TechCardAnnotationPoint[] | undefined;
+  // Цвет различает пересекающиеся указания на одном снимке и смысла не несёт. Белый читается на
+  // тёмной ткани — а тёмная ткань это половина снимков примерки.
+  color: TechCardAnnotationColor | undefined;
+  // Пунктир — построение, а не шов; штриховка — площадь, а не граница. На примерке разница ровно
+  // та же, что в цеху: обведённая зона заломов и линия, вдоль которой замеряли, — разные слова.
+  // Штриховка живёт только у полигона, пунктир — только там, где есть линия; бессмысленный флаг
+  // приводится к false, а не отвергается.
+  dashed: boolean | undefined;
+  filled: boolean | undefined;
+};
+
+// FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the
+// change CATEGORY; zone + piece_ids are the structured LOCATION (which replace the front's misuse of
+// target as a free "sleeve/collar" field, A2). status (open|resolved) replaces the old boolean
+// resolved; carried_from_id links this item to the one in the PREVIOUS round it continues, giving a
+// visible carry-over history (acceptance E.15). The free fitting.comment stays a separate free note.
+export type FittingChangeRequest = {
+  id: number | undefined;
+  target: string | undefined;
+  note: string | undefined;
+  calloutNumber: number | undefined;
+  resolved: boolean | undefined;
+  // WHERE on the garment, from the FITTING zone dictionary (see FittingChangeRequestInsert.zone for
+  // the full list); "" = unspecified. This is a fitting-owned vocabulary of garment AREAS — it is no
+  // longer the tech_card_operation.zone construction-band dictionary.
+  zone: string | undefined;
+  pieceId: number | undefined;
+  status: string | undefined;
+  carriedFromId: number | undefined;
+  createdBy: string | undefined;
+  fittingId: number | undefined;
+  roundNumber: number | undefined;
+  // FK tech_card_piece(id): which pieces the remark is about. A remark routinely spans several
+  // («обработка низа на полочке и спинке»), so this is a set, not one pin; empty = not pinned to a
+  // piece. Order is the selection order. A deleted piece drops out of the set; the remark survives.
+  pieceIds: number[] | undefined;
+};
+
+// FittingChangeRequestInsert is the write payload for the dedicated change-request CRUD (S26). Unlike
+// the embedded initial batch on FittingInsert, these items are managed individually so their id is
+// STABLE — which carried_from_id (and the resolve/carry-over flow) depends on. created_by is stamped
+// server-side.
+export type FittingChangeRequestInsert = {
+  fittingId: number | undefined;
+  target: string | undefined;
+  note: string | undefined;
+  calloutNumber: number | undefined;
+  // Optional garment AREA, from the fitting zone dictionary ("" = unspecified):
+  // outer | lining | interlining — the material band the change is in
+  // sleeve | collar | neckline | armhole | shoulder | chest | waist | hip | hem | pocket |
+  // closure | back | front — the area of the garment
+  // other, and the legacy `unknown` (equivalent to "")
+  // Tokens are lowercase; a TECH_CARD_CONSTRUCTION_ZONE_* enum name from an older client is
+  // normalised to its token rather than rejected.
+  zone: string | undefined;
+  pieceId: number | undefined;
+  status: string | undefined;
+  carriedFromId: number | undefined;
+  pieceIds: number[] | undefined;
+};
+
+// Fitting is a stored try-on session with resolved media for display.
+export type Fitting = {
+  id: number | undefined;
+  fitting: FittingInsert | undefined;
+  media: MediaFull[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  lockVersion: number | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
+};
+
+// FulfillmentColumn is a lane on the fulfillment board. Unlike TaskStatus (free
+// kanban columns), each column is bound to a concrete order status.
+export type FulfillmentColumn =
+  | "FULFILLMENT_COLUMN_UNKNOWN"
+  | "FULFILLMENT_COLUMN_TO_FULFILL"
+  | "FULFILLMENT_COLUMN_SHIPPED"
+  | "FULFILLMENT_COLUMN_DELIVERED";
+// FulfillmentChecklistItem is one packing-checklist row on a fulfillment card
+// (e.g. "picked", "packed", "label printed"). Managed by dedicated add/toggle/
+// delete RPCs, same as a task checklist item.
+export type FulfillmentChecklistItem = {
+  id: number | undefined;
+  content: string | undefined;
+  isDone: boolean | undefined;
+  position: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// FulfillmentAnnotation is the board-owned overlay on an order: an assignee,
+// internal packing notes and a checklist. It carries NO order status — that lives
+// on the order. Lazily created on first edit; keyed by order_uuid.
+export type FulfillmentAnnotation = {
+  orderUuid: string | undefined;
+  assignee: string | undefined;
+  notes: string | undefined;
+  checklist: FulfillmentChecklistItem[] | undefined;
+};
+
+// FulfillmentCard is one tile on the board: the compact order plus its annotation
+// summary. Full order detail + full annotation come from GetFulfillmentCard.
+export type FulfillmentCard = {
+  order: Order | undefined;
+  column: FulfillmentColumn | undefined;
+  assignee: string | undefined;
+  checklistDone: number | undefined;
+  checklistTotal: number | undefined;
+  hasNotes: boolean | undefined;
+};
+
+// FulfillmentColumnCards groups one column's cards. The active columns
+// (TO_FULFILL, SHIPPED) are oldest order first (longest-waiting picked first);
+// the historical DELIVERED column is newest first and bounded.
+export type FulfillmentColumnCards = {
+  column: FulfillmentColumn | undefined;
+  cards: FulfillmentCard[] | undefined;
+};
+
+export type HeroType =
+  | "HERO_TYPE_UNKNOWN"
+  | "HERO_TYPE_SINGLE"
+  | "HERO_TYPE_DOUBLE"
+  | "HERO_TYPE_MAIN"
+  | "HERO_TYPE_FEATURED_PRODUCTS"
+  | "HERO_TYPE_FEATURED_PRODUCTS_TAG"
+  | "HERO_TYPE_FEATURED_ARCHIVE"
+  | "HERO_TYPE_EMBED"
+  | "HERO_TYPE_DROP"
+  | "HERO_TYPE_LAST_CHANCE"
+  | "HERO_TYPE_MARQUEE"
+  | "HERO_TYPE_NEW_ARRIVALS"
+  | "HERO_TYPE_SLIDESHOW"
+  | "HERO_TYPE_MOSAIC"
+  | "HERO_TYPE_SPLIT"
+  | "HERO_TYPE_VIDEO"
+  | "HERO_TYPE_PRODUCT_SPOTLIGHT"
+  | "HERO_TYPE_NEWSLETTER"
+  | "HERO_TYPE_STATEMENT"
+  | "HERO_TYPE_LOOKBOOK";
+// HeroAudience is the TARGETING modifier: who a block is shown to. Enforcement
+// requires the frontend GetHero to know the viewer (auth → tier); until then it
+// is carried through and may be applied client-side.
+export type HeroAudience =
+  | "HERO_AUDIENCE_UNKNOWN"
+  | "HERO_AUDIENCE_ALL"
+  | "HERO_AUDIENCE_GUESTS"
+  | "HERO_AUDIENCE_MEMBERS"
+  | "HERO_AUDIENCE_TIER";
+// HeroMedia is a portrait/landscape media pair addressed by id (write side).
+// The per-slot presentation modifiers live here: disable_overlay toggles the
+// scrim, disable_tint toggles the frontend's background colour tint, and stroke
+// toggles a border/outline around the media.
+export type HeroMedia = {
+  portraitId: number | undefined;
+  landscapeId: number | undefined;
+  disableOverlay: boolean | undefined;
+  disableTint: boolean | undefined;
+  stroke: boolean | undefined;
+};
+
+// HeroMediaFull is the resolved form of HeroMedia (read side).
+export type HeroMediaFull = {
+  portrait: MediaFull | undefined;
+  landscape: MediaFull | undefined;
+  disableOverlay: boolean | undefined;
+  disableTint: boolean | undefined;
+  stroke: boolean | undefined;
+};
+
+export type HeroFullWithTranslations = {
+  entities: HeroEntityWithTranslations[] | undefined;
+  navFeatured: NavFeaturedWithTranslations | undefined;
+};
+
+export type HeroEntityWithTranslations = {
+  type: HeroType | undefined;
+  single: HeroSingleWithTranslations | undefined;
+  double: HeroDoubleWithTranslations | undefined;
+  main: HeroMainWithTranslations | undefined;
+  featuredProducts: HeroFeaturedProductsWithTranslations | undefined;
+  featuredProductsTag: HeroFeaturedProductsTagWithTranslations | undefined;
+  featuredArchive: HeroFeaturedArchiveWithTranslations | undefined;
+  embed: HeroEmbedWithTranslations | undefined;
+  drop: HeroDropWithTranslations | undefined;
+  lastChance: HeroLastChanceWithTranslations | undefined;
+  marquee: HeroMarqueeWithTranslations | undefined;
+  newArrivals: HeroNewArrivalsWithTranslations | undefined;
+  slideshow: HeroSlideshowWithTranslations | undefined;
+  mosaic: HeroMosaicWithTranslations | undefined;
+  split: HeroSplitWithTranslations | undefined;
+  video: HeroVideoWithTranslations | undefined;
+  productSpotlight: HeroProductSpotlightWithTranslations | undefined;
+  newsletter: HeroNewsletterWithTranslations | undefined;
+  statement: HeroStatementWithTranslations | undefined;
+  lookbook: HeroLookbookWithTranslations | undefined;
+  // modifiers
+  audience: HeroAudience | undefined;
+  minTierId: number | undefined;
+};
+
+export type HeroSingleWithTranslations = {
+  media: HeroMediaFull | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroDoubleWithTranslations = {
+  left: HeroSingleWithTranslations | undefined;
+  right: HeroSingleWithTranslations | undefined;
+};
+
+export type HeroMainWithTranslations = {
+  media: HeroMediaFull | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroFeaturedProductsWithTranslations = {
+  products: Colorway[] | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroFeaturedProductsTagWithTranslations = {
+  tag: string | undefined;
+  products: HeroFeaturedProductsWithTranslations | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroFeaturedArchiveWithTranslations = {
+  archive: ArchiveFull | undefined;
+  tag: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroEmbedWithTranslations = {
+  embedUrl: string | undefined;
+  fallback: HeroMediaFull | undefined;
+  ctaLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroDropWithTranslations = {
+  media: HeroMediaFull | undefined;
+  releaseAt: wellKnownTimestamp | undefined;
+  exploreLink: string | undefined;
+  tag: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroLastChanceWithTranslations = {
+  products: Colorway[] | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroMarqueeWithTranslations = {
+  link: string | undefined;
+  speed: number | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroNewArrivalsWithTranslations = {
+  products: Colorway[] | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroSlideshowWithTranslations = {
+  slides: HeroSingleWithTranslations[] | undefined;
+  intervalMs: number | undefined;
+};
+
+export type HeroMosaicWithTranslations = {
+  tiles: HeroSingleWithTranslations[] | undefined;
+  columns: number | undefined;
+};
+
+export type HeroSplitWithTranslations = {
+  media: HeroSingleWithTranslations | undefined;
+  products: Colorway[] | undefined;
+  mediaLeft: boolean | undefined;
+};
+
+export type HeroVideoWithTranslations = {
+  media: MediaFull | undefined;
+  posterMedia: MediaFull | undefined;
+  autoplay: boolean | undefined;
+  loop: boolean | undefined;
+  muted: boolean | undefined;
+  ctaLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroProductSpotlightWithTranslations = {
+  product: Colorway | undefined;
+  media: HeroMediaFull | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroNewsletterWithTranslations = {
+  media: HeroMediaFull | undefined;
+  translations: HeroNewsletterTranslation[] | undefined;
+};
+
+export type HeroStatementWithTranslations = {
+  media: HeroMediaFull | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroLookbookWithTranslations = {
+  frames: HeroSingleWithTranslations[] | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type NavFeaturedWithTranslations = {
+  men: NavFeaturedEntityWithTranslations | undefined;
+  women: NavFeaturedEntityWithTranslations | undefined;
+};
+
+export type NavFeaturedEntityWithTranslations = {
+  media: MediaFull | undefined;
+  featuredTag: string | undefined;
+  featuredArchiveId: string | undefined;
+  translations: NavFeaturedEntityInsertTranslation[] | undefined;
+};
+
+export type NavFeaturedInsert = {
+  men: NavFeaturedEntityInsert | undefined;
+  women: NavFeaturedEntityInsert | undefined;
+};
+
+export type NavFeaturedEntityInsert = {
+  mediaId: number | undefined;
+  featuredTag: string | undefined;
+  featuredArchiveId: number | undefined;
+  translations: NavFeaturedEntityInsertTranslation[] | undefined;
+};
+
+export type HeroFullInsert = {
+  entities: HeroEntityInsert[] | undefined;
+  navFeatured: NavFeaturedInsert | undefined;
+};
+
+export type HeroEntityInsert = {
+  type: HeroType | undefined;
+  single: HeroSingleInsert | undefined;
+  double: HeroDoubleInsert | undefined;
+  main: HeroMainInsert | undefined;
+  featuredProducts: HeroFeaturedProductsInsert | undefined;
+  featuredProductsTag: HeroFeaturedProductsTagInsert | undefined;
+  featuredArchive: HeroFeaturedArchiveInsert | undefined;
+  embed: HeroEmbedInsert | undefined;
+  drop: HeroDropInsert | undefined;
+  lastChance: HeroLastChanceInsert | undefined;
+  marquee: HeroMarqueeInsert | undefined;
+  newArrivals: HeroNewArrivalsInsert | undefined;
+  slideshow: HeroSlideshowInsert | undefined;
+  mosaic: HeroMosaicInsert | undefined;
+  split: HeroSplitInsert | undefined;
+  video: HeroVideoInsert | undefined;
+  productSpotlight: HeroProductSpotlightInsert | undefined;
+  newsletter: HeroNewsletterInsert | undefined;
+  statement: HeroStatementInsert | undefined;
+  lookbook: HeroLookbookInsert | undefined;
+  // modifiers
+  audience: HeroAudience | undefined;
+  minTierId: number | undefined;
+};
+
+export type HeroSingleInsert = {
+  media: HeroMedia | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroDoubleInsert = {
+  left: HeroSingleInsert | undefined;
+  right: HeroSingleInsert | undefined;
+};
+
+export type HeroMainInsert = {
+  media: HeroMedia | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroFeaturedProductsInsert = {
+  productIds: number[] | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroFeaturedProductsTagInsert = {
+  tag: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroFeaturedArchiveInsert = {
+  archiveId: number | undefined;
+  tag: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroEmbedInsert = {
+  embedUrl: string | undefined;
+  fallback: HeroMedia | undefined;
+  ctaLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroDropInsert = {
+  media: HeroMedia | undefined;
+  releaseAt: wellKnownTimestamp | undefined;
+  exploreLink: string | undefined;
+  tag: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroLastChanceInsert = {
+  stockThreshold: number | undefined;
+  limit: number | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroMarqueeInsert = {
+  link: string | undefined;
+  speed: number | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroNewArrivalsInsert = {
+  limit: number | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroSlideshowInsert = {
+  slides: HeroSingleInsert[] | undefined;
+  intervalMs: number | undefined;
+};
+
+export type HeroMosaicInsert = {
+  tiles: HeroSingleInsert[] | undefined;
+  columns: number | undefined;
+};
+
+export type HeroSplitInsert = {
+  media: HeroSingleInsert | undefined;
+  productIds: number[] | undefined;
+  mediaLeft: boolean | undefined;
+};
+
+export type HeroVideoInsert = {
+  mediaId: number | undefined;
+  posterMediaId: number | undefined;
+  autoplay: boolean | undefined;
+  loop: boolean | undefined;
+  muted: boolean | undefined;
+  ctaLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroProductSpotlightInsert = {
+  productId: number | undefined;
+  media: HeroMedia | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroNewsletterInsert = {
+  media: HeroMedia | undefined;
+  translations: HeroNewsletterTranslation[] | undefined;
+};
+
+export type HeroStatementInsert = {
+  media: HeroMedia | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
+};
+
+export type HeroLookbookInsert = {
+  frames: HeroSingleInsert[] | undefined;
+  exploreLink: string | undefined;
+  translations: HeroCopyTranslation[] | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is

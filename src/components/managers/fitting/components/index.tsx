@@ -21,6 +21,12 @@ import { Button } from 'ui/components/button';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
+import {
+  applyServerFieldErrors,
+  extractFieldViolations,
+  fieldErrorSummary,
+  revealField,
+} from 'utils/field-errors';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
@@ -176,7 +182,31 @@ export function FittingForm({
         navigate(returnTo || ROUTES.fittings);
       }
     } catch (error) {
-      showMessage(fittingSaveErrorMessage(error), 'error');
+      // ОТКАЗ, НАЗЫВАЮЩИЙ ПОЛЕ, САДИТСЯ НА ПОЛЕ. Сервер отвергает пин без записки адресно —
+      // `callouts[3].note` — и общий тост «Failed to save» на примерке с тридцатью заметками
+      // заставлял бы искать ту самую глазами, при том что индекс приехал в ответе.
+      //
+      // РАБОТАЕТ ЭТО ТОЛЬКО ПОТОМУ, ЧТО ПОСЫЛКА БОЛЬШЕ НЕ ФИЛЬТРУЕТСЯ: индекс выноски на проводе
+      // равен индексу в форме (см. mapFormToFittingInsert). Вернуть фильтр — значит посадить отказ
+      // на соседнюю заметку, и это будет выглядеть как ошибка сервера.
+      //
+      // Пиним ТОЛЬКО `.note`: это единственное поле выноски с нарисованным полем ввода (у него есть
+      // и `data-field`, и место под сообщение). Отказ про якорь или координату полю не
+      // соответствует — такой уходит в тост со своим путём, а не садится молча на чужой ввод.
+      const { applied } = applyServerFieldErrors(error, form.setError, {
+        allow: (path) => /^callouts\.\d+\.note$/.test(path),
+      });
+      // Список заметок может быть свёрнут — тогда подсветке не за что зацепиться, и человека
+      // выручает тот же тост. Поэтому сообщение показывается всегда, а не «вместо».
+      if (applied[0]) revealField(applied[0]);
+      showMessage(
+        // Путь поля читается ЧЕЛОВЕКОМ только вместе с описанием, поэтому для полевых отказов тост
+        // берётся из них; 409-й и сетевые остаются за прежним сообщением.
+        extractFieldViolations(error).length
+          ? fieldErrorSummary(error, 'Failed to save fitting')
+          : fittingSaveErrorMessage(error),
+        'error',
+      );
       console.error('Failed to submit fitting', error);
     }
   }

@@ -13,12 +13,15 @@ import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import { TaskBoard, TaskFormValues, TaskStatus } from '../api/types';
+import { TaskBoard, TaskFormValues, TaskMediaAnnotations, TaskStatus } from '../api/types';
 import { LinkChip } from '../components/link-chip';
 import { PriorityTag } from '../components/task-card';
 import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
+import { orderedMedia } from '../api/tasksService';
+import { annotationsOf, NotesMark, useTaskMediaViewer } from '../components/task-media-viewer';
+import { TaskText } from '../components/task-text';
 import {
   useArchiveTask,
   useDeleteTask,
@@ -40,6 +43,10 @@ import { BOARD_LABEL, BOARDS, dueMeta, STATUS_LABEL, STATUSES, toOptions } from 
 
 const boardOptions = toOptions(BOARDS, BOARD_LABEL);
 const statusOptions = toOptions(STATUSES, STATUS_LABEL);
+
+// Пока карточка грузится, вложений нет — но хук вызывается до всякого раннего возврата, и новый
+// литерал на каждый рендер пересобирал бы его мемоизацию впустую.
+const NO_ANNOTATIONS: TaskMediaAnnotations[] = [];
 
 // Local label node matching the fact rows' previous uppercase micro styling — the
 // shared `Row` takes a plain ReactNode label, it doesn't style it itself.
@@ -78,6 +85,40 @@ export function TaskDetail() {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
+
+  /**
+   * НА СТРАНИЦЕ КАРТОЧКИ УКАЗАНИЯ ТОЛЬКО ЧИТАЮТСЯ. Рисуют в модалке правки, где есть явная кнопка
+   * сохранения, — то же правило, что у описания, ссылок и состава вложений.
+   *
+   * Правка отсюда стоила бы записи ВСЕЙ карточки содержимым последнего чтения: `UpdateTask`
+   * заменяет заголовок, описание, метки и ссылки целиком, а чтение живёт пять минут и не
+   * обновляется по фокусу окна. То есть «посмотрел картинку и закрыл» молча откатывало бы чужую
+   * правку описания, сделанную минуту назад. Инлайновые селекты доски и колонки на этой же
+   * странице такого не делают и сравнением не годятся: они идут через `MoveTask`, которая
+   * содержимого не касается вовсе.
+   *
+   * Вместе с этим путём ушли и три его следствия: потеря нарисованного при уходе со страницы
+   * «назад», невозможность повторить запись после отказа сервера и затирание набранного в
+   * открытой модалке фоновым `reset(initial)` после инвалидации, которую порождал обычный
+   * просмотр картинки.
+   */
+  const annotations = task?.task.mediaAnnotations ?? NO_ANNOTATIONS;
+
+  /**
+   * ОДИН ИСТОЧНИК НУМЕРАЦИИ НА ОБА ЭКРАНА — список вложений САМОЙ КАРТОЧКИ (`mediaIds`), а не
+   * `task.media`, который сервер отдаёт уже разрешённым.
+   *
+   * Номер в чипе `▣ 3` называет позицию вложения в карточке, и форма правки нумерует именно по
+   * `mediaIds`. Если сервер не вернул медиа по какому-то id (удалено из бакета, не отдалось),
+   * `task.media` короче — и то же самое описание читалось бы на двух экранах с разными номерами,
+   * а живая ссылка рисовалась бы мёртвой. Той же функцией, что и форма: `orderedMedia` берёт
+   * миниатюры из кэша, который наполняет каждое серверное чтение.
+   */
+  const media = useMemo(() => orderedMedia(task?.task.mediaIds ?? []), [task?.task.mediaIds]);
+
+  // Единственная дверь к вложению на этом экране: ею открывают и плитку в галерее, и ссылку
+  // посреди описания, и ссылку из комментария.
+  const attachments = useTaskMediaViewer({ media, annotations });
 
   // Memoized so a background refetch of useTask doesn't hand the open edit modal
   // a fresh object and reset the form mid-edit (react-query structural sharing
@@ -214,9 +255,7 @@ export function TaskDetail() {
         <SectionStack className='min-w-0'>
           <Section title='description'>
             {t.description ? (
-              <Text size='micro' component='span' className='whitespace-pre-wrap break-words'>
-                {t.description}
-              </Text>
+              <TaskText text={t.description} media={media} onOpen={attachments.openMedia} />
             ) : (
               <Text size='micro' variant='label' component='span'>
                 No description.
@@ -236,11 +275,29 @@ export function TaskDetail() {
             </Section>
           )}
 
-          {(task.media.length > 0 || task.files.length > 0) && (
+          {(media.length > 0 || task.files.length > 0) && (
             /* Одна секция на оба источника: для читающего карточку «вложение» — это
-               вложение, независимо от того, в каком бакете лежат байты. */
-            <Section title={`attachments · ${task.media.length + task.files.length}`}>
-              <AttachmentTiles taskId={task.id} media={task.media} files={task.files} />
+               вложение, независимо от того, в каком бакете лежат байты.
+
+               ШОВ ДВУХ ВЕТОК, разрешённый в пользу ОБЕИХ. Плитки заменили список документов
+                (`task.v2`), а указания на снимках пришли отдельной веткой и уже стоят на бете —
+                поэтому плитки унесли с собой всё, что несла галерея: отметку числа указаний и
+                открытие ЧЕРЕЗ ОБЩИЙ просмотрщик страницы. Своего просмотрщика у плиток больше
+                нет: к вложению ведут три двери (плитка, ссылка в описании, ссылка из
+                комментария), и вторая дверь в другой зал означала бы, что выделенное ссылкой
+                указание видно не всегда.
+
+                Счёт по `media`, а не по `task.media`: нумерация вложений идёт от `mediaIds`
+                самой карточки, и если сервер не разрешил какой-то id, два экрана назвали бы одно
+                вложение разными номерами. */
+            <Section title={`attachments · ${media.length + task.files.length}`}>
+              <AttachmentTiles
+                taskId={task.id}
+                media={media}
+                files={task.files}
+                annotations={annotations}
+                onOpenMedia={attachments.openIndex}
+              />
             </Section>
           )}
         </SectionStack>
@@ -357,10 +414,12 @@ export function TaskDetail() {
               )}
             </Section>
 
-            <TaskComments taskId={task.id} />
+            <TaskComments taskId={task.id} media={media} onOpenMedia={attachments.openMedia} />
           </SectionStack>
         </aside>
       </div>
+
+      {attachments.node}
 
       {initial && (
         <TaskFormModal

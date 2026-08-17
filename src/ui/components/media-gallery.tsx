@@ -11,6 +11,20 @@ interface MediaGalleryProps {
   fit?: 'cover' | 'contain';
   /** Rendered when there are no items (nothing by default). */
   emptyLabel?: React.ReactNode;
+  /**
+   * Открывает ВЛАДЕЛЕЦ — галерея тогда своей смотрелки не заводит и остаётся рядом плиток.
+   *
+   * Нужно там, где открыть кадр просят не только плитки: у задачи это ещё и ссылка посреди
+   * описания. Со своей смотрелкой внутри галерея была бы второй дверью в ту же комнату, и
+   * заменять просмотрщик пришлось бы в двух местах сразу.
+   */
+  onOpen?: (index: number) => void;
+  /**
+   * Отметка в подвале плитки — то, что о кадре знает ВЛАДЕЛЕЦ, а не галерея (у задачи это число
+   * указаний на снимке). Полоса прижата к нижней кромке и залита белым: плитка здесь квадрат
+   * фиксированного размера, и настоящий подвал под ней сдвинул бы ряд.
+   */
+  badge?: (index: number) => React.ReactNode;
 }
 
 // Read-only, clickable thumbnail row. Any tile opens the shared MediaViewer at its
@@ -21,8 +35,11 @@ export function MediaGallery({
   tileClassName,
   fit = 'cover',
   emptyLabel,
+  onOpen,
+  badge,
 }: MediaGalleryProps) {
   const viewer = useMediaViewer();
+  const open = onOpen ?? viewer.openAt;
 
   if (items.length === 0) {
     return emptyLabel ? <>{emptyLabel}</> : null;
@@ -39,7 +56,7 @@ export function MediaGallery({
               key={i}
               type='button'
               aria-label={`View item ${i + 1} of ${items.length}`}
-              onClick={() => viewer.openAt(i)}
+              onClick={() => open(i)}
               className={cn(
                 'group relative block h-20 w-20 shrink-0 cursor-zoom-in overflow-hidden border border-textInactiveColor transition-colors hover:border-textInactiveColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                 tileClassName,
@@ -70,12 +87,17 @@ export function MediaGallery({
                   video
                 </span>
               )}
+              {badge?.(i) && (
+                <span className='absolute inset-x-0 bottom-0 border-t border-hairline bg-bgColor px-1 text-left leading-tight'>
+                  {badge(i)}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      <MediaViewer items={items} {...viewer} />
+      {!onOpen && <MediaViewer items={items} {...viewer} />}
     </>
   );
 }

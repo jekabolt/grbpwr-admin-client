@@ -3,12 +3,12 @@ import type { LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useCallback, useMemo, useRef } from 'react';
-import { MediaViewer, useMediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
+import { useCallback, useRef } from 'react';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
-import type { TaskMedia } from '../api/types';
+import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
+import { annotationsOf, NotesMark } from '../components/task-media-viewer';
 import { tasksKeys } from '../hooks/useTasks';
 
 /**
@@ -38,30 +38,29 @@ export function AttachmentTiles({
   taskId,
   media,
   files,
+  annotations,
+  onOpenMedia,
 }: {
   taskId: number;
   media: TaskMedia[];
   files: LibraryFile[];
+  /**
+   * Указания на снимках. Плитка их только СЧИТАЕТ — рисуют в модалке правки, где есть явная
+   * кнопка сохранения.
+   */
+  annotations: TaskMediaAnnotations[];
+  /**
+   * Открыть кадр. Просмотрщика у плиток СВОЕГО НЕТ и не должно быть: на этой странице к
+   * вложению ведут три двери — плитка, ссылка посреди описания и ссылка из комментария, — и
+   * второй просмотрщик означал бы, что выделенное по ссылке указание видно в одном из них, а
+   * открытый плиткой кадр про ссылки не знает. Индекс — позиция в `media`, ровно та же, по
+   * которой считает `useTaskMediaViewer`.
+   */
+  onOpenMedia: (index: number) => void;
 }) {
   const qc = useQueryClient();
   const { canRead } = usePermissions();
   const mayOpenLibrary = canRead(SECTION.files);
-  const viewer = useMediaViewer();
-
-  // Кадры БЕЗ адреса выброшены из ряда просмотрщика — иначе стрелка «дальше» листает в пустоту.
-  // Поэтому индекс плитки и индекс в просмотрщике — РАЗНЫЕ числа, и связь между ними держится
-  // здесь, одним проходом: считать их порознь значит однажды открыть не тот снимок.
-  const { items, viewerIndex } = useMemo(() => {
-    const list: MediaViewerItem[] = [];
-    const index = new Map<number, number>();
-    media.forEach((m, i) => {
-      const src = m.fullSize || m.thumbnail || '';
-      if (!src) return;
-      index.set(i, list.length);
-      list.push({ src, thumbnail: m.thumbnail, alt: '', meta: { id: m.id, blurhash: m.blurhash } });
-    });
-    return { items: list, viewerIndex: index };
-  }, [media]);
 
   // ПРОТУХШАЯ ПОДПИСЬ — НЕ ПОЛОМКА. Превью файла библиотеки приезжает подписанной ссылкой на
   // 6–12 часов, а вкладку с задачей держат открытой дольше. Первый же сорвавшийся `<img>`
@@ -110,7 +109,11 @@ export function AttachmentTiles({
       <Tiles min={130}>
         {media.map((m, i) => {
           const thumb = m.thumbnail || m.fullSize || '';
-          const at = viewerIndex.get(i);
+          // Кадр без единого адреса открыть нечем: просмотрщик показал бы пустоту. Плитка
+          // остаётся видимой (вложение существует, и молчаливо исчезнуть оно не должно), но
+          // выключена — ровно как было до объединения с указаниями.
+          const openable = !!(m.fullSize || m.thumbnail);
+          const notes = annotationsOf(annotations, m.id ?? 0).length;
           return (
             <div
               key={`m-${m.id}`}
@@ -118,10 +121,14 @@ export function AttachmentTiles({
             >
               <button
                 type='button'
-                disabled={at === undefined}
+                disabled={!openable}
                 title='site media · public'
-                aria-label={`media ${i + 1} of ${media.length} · public`}
-                onClick={() => at !== undefined && viewer.openAt(at)}
+                aria-label={
+                  notes
+                    ? `media ${i + 1} of ${media.length} · public · ${notes} notes`
+                    : `media ${i + 1} of ${media.length} · public`
+                }
+                onClick={() => openable && onOpenMedia(i)}
                 className='relative block w-full cursor-zoom-in bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
               >
                 {thumb ? (
@@ -136,6 +143,14 @@ export function AttachmentTiles({
                     <Text size='micro' variant='label' component='span' className='uppercase'>
                       no image
                     </Text>
+                  </span>
+                )}
+                {/* Отметка указаний — В ЛЕВОМ углу, потому что правый занят ответом на вопрос
+                    «что это за штука», и он один на оба ряда. Ставится ТОЛЬКО когда есть что
+                    отмечать: пустая отметка на каждой плитке перестаёт что-либо значить. */}
+                {notes > 0 && (
+                  <span className='absolute bottom-1 left-1'>
+                    <NotesMark count={notes} />
                   </span>
                 )}
                 {/* Бейдж в том же углу, что расширение у файла: угол отвечает на один вопрос —
@@ -181,8 +196,6 @@ export function AttachmentTiles({
           won’t open.
         </Text>
       )}
-
-      {items.length > 0 && <MediaViewer items={items} {...viewer} />}
     </div>
   );
 }

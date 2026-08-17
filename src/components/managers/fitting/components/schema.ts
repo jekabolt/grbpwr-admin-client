@@ -6,6 +6,14 @@ import {
   common_FittingVerdict,
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/fittings/components/utils';
+import {
+  ANNOTATION_COLOR_KEYS,
+  ANNOTATION_KIND_KEYS,
+  annotationColorFromWire,
+  annotationColorToWire,
+  annotationKindFromWire,
+  annotationKindToWire,
+} from 'ui/components/annotation/wire';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 import { normalizeFittingZone } from './zone-options';
@@ -29,6 +37,13 @@ const fittingPatternSchema = z.object({
   sizeBytes: z.number().optional().default(0),
 });
 
+// Якорь фигуры — доли кадра 0..1, СТРОКОЙ: тот же decimal, что на проводе и в колонке, круговой
+// рейс без округлений. То же правило, что у выносок тех-карты.
+const fittingAnnotationPointSchema = z.object({
+  x: z.string().default('0'),
+  y: z.string().default('0'),
+});
+
 // A numbered marker pinned onto a fitting photo, flagging what is wrong with the
 // fit at a point on the image. posX/posY are normalised (0..1) strings while in
 // the form (like the tech-card callouts) — converted to Decimal at the boundary.
@@ -38,6 +53,39 @@ const fittingCalloutSchema = z.object({
   mediaId: z.number().int().optional().default(0), // FK media(id); 0 = unanchored
   posX: z.string().optional().default(''),
   posY: z.string().optional().default(''),
+  // ГЕОМЕТРИЯ УКАЗАНИЯ (0319) — ТОТ ЖЕ реестр видов, что у эскиза, потому что ремесло одно:
+  // мерка между двумя точками, скобка над участком, обведённая зона заломов. `posX/posY`
+  // сохраняют смысл «где стоит нумерованный маркер» (на него ссылается номером замечание), а
+  // `points` держит якоря фигуры и у пина пуст.
+  kind: z.enum(ANNOTATION_KIND_KEYS).optional().default('pin'),
+  points: z.array(fittingAnnotationPointSchema).optional().default([]),
+  color: z.enum(ANNOTATION_COLOR_KEYS).optional().default(''),
+  // Пунктир и штриховка входят в АТОМАРНУЮ группу присутствия вместе с `kind`: бандл,
+  // промолчавший про вид, молчит про всю фигуру, и сервер несёт хранимую дальше целиком.
+  dashed: z.boolean().optional().default(false),
+  filled: z.boolean().optional().default(false),
+});
+
+/**
+ * ЗАПИСКА ОБЯЗАТЕЛЬНА У ПИНА — ЗЕРКАЛО СЕРВЕРНОГО ПРАВИЛА, ДОСЛОВНО, ВКЛЮЧАЯ ОБРЕЗКУ ПРОБЕЛОВ.
+ *
+ * Без него форма отпускала сабмит с пустой точкой, и отказ приходил с сервера — ПО ОДНОМУ ЗА РЕЙС:
+ * dto отвечает первым нарушением и остальные в тот же ответ не кладёт. Обвёл две зоны без подписи,
+ * снял снимок (обе стали пустыми точками) — отказ про первую, дописал, сохранил, отказ про вторую.
+ * Здесь же подсвечиваются ВСЕ виноватые строки разом и не тратится ни одного рейса.
+ *
+ * ПРАВИЛО СТОИТ НА СТРОКЕ, А НЕ НА ФОРМЕ ЦЕЛИКОМ: путь ошибки (`callouts.3.note`) обязан указывать
+ * на конкретное поле — на нём стоит и сообщение под полем, и подсветка, и посадка серверного
+ * отказа. Общий `.refine` на массиве назвал бы только сам массив.
+ */
+const fittingCalloutSchemaChecked = fittingCalloutSchema.superRefine((c, ctx) => {
+  if ((c.kind ?? 'pin') !== 'pin') return;
+  if ((c.note ?? '').trim()) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['note'],
+    message: 'у нумерованной точки записка и есть всё содержание — напишите, что не так, или нарисуйте фигуру',
+  });
 });
 
 // The structured "what to change" work list a fitting produces (S26). target is the change CATEGORY;
@@ -79,7 +127,7 @@ export const fittingSchema = z
     sizes: z.array(fittingSizeSchema).default([]),
     patterns: z.array(fittingPatternSchema).default([]),
     mediaIds: z.array(z.number()).default([]),
-    callouts: z.array(fittingCalloutSchema).default([]),
+    callouts: z.array(fittingCalloutSchemaChecked).default([]),
     // §4 round tracking: sequence number (0 = server auto-assigns per tech card), structured
     // outcome ('undecided' sentinel in the form ↔ '' on the wire), and the change-request work list.
     roundNumber: z.number().int().optional().default(0),
@@ -202,6 +250,17 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       mediaId: c.mediaId || 0,
       posX: decimalToInput(c.posX),
       posY: decimalToInput(c.posY),
+      // Вид приезжает ВСЕГДА (сервер отдаёт присутствующее поле), но `annotationKindFromWire`
+      // всё равно падает в пин на неизвестном значении: примерка, записанная до 0319, обязана
+      // прочитаться тем, чем была.
+      kind: annotationKindFromWire(c.kind),
+      points: (c.points ?? []).map((pt) => ({
+        x: decimalToInput(pt.x) || '0',
+        y: decimalToInput(pt.y) || '0',
+      })),
+      color: annotationColorFromWire(c.color),
+      dashed: !!c.dashed,
+      filled: !!c.filled,
     })),
     roundNumber: insert?.roundNumber || 0,
     // '' on the wire → the non-empty 'undecided' sentinel the Select needs
@@ -265,15 +324,40 @@ export function mapFormToFittingInsert(
         downloadUrl: undefined,
       })),
     mediaIds: data.mediaIds ?? [],
-    // note is required by the contract — drop markers left un-annotated on save.
+    // УЕЗЖАЮТ ВСЕ УКАЗАНИЯ, ВКЛЮЧАЯ БЕЗЫМЯННЫЕ. Здесь стоял фильтр `.filter(c => c.note?.trim())`:
+    // сервер требовал записку у КАЖДОЙ выноски, и обойти отказ, роняющий сохранение всей примерки,
+    // можно было только выбросив безымянную. Ценой того, что человек обводит зону заломов,
+    // сохраняет — и зоны нет: молчаливая потеря нарисованного руками.
+    //
+    // Правило сервера теперь другое: записка обязательна ТОЛЬКО У ПИНА, потому что у пина текст и
+    // есть всё содержание, а у фигуры содержание — сама фигура. Требовать подпись к обведённой зоне
+    // значит требовать подпись к предложению. Отсеивать здесь больше нечего и незачем.
+    //
+    // ИНДЕКС ПОСЫЛКИ ТЕПЕРЬ РАВЕН ИНДЕКСУ ФОРМЫ, и на это опирается разбор отказа: сервер называет
+    // поле как `callouts[3].note`, и форма сажает ошибку на `callouts.3.note` (см. index.tsx).
+    // Вернуть сюда любой фильтр — значит сдвинуть нумерацию и посадить отказ на ЧУЖУЮ заметку.
     callouts: (data.callouts ?? [])
-      .filter((c) => c.note?.trim())
       .map((c, i) => ({
         number: c.number || i + 1,
+        // Пусто — значит ПУСТО, а не строка из пробелов: `«   »` прошло бы клиентскую проверку
+        // «текст есть» и приехало бы на сервер записью, которую не видно и не найти поиском.
         note: c.note?.trim() || '',
         mediaId: c.mediaId || 0,
         posX: inputToDecimal(c.posX),
         posY: inputToDecimal(c.posY),
+        // ВИД ШЛЁТСЯ ВСЕГДА, круговым рейсом прочитанного. Присутствие поля и есть заявление «этот
+        // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
+        // переносит её по номеру + снимку + ОБЕИМ координатам маркера, поэтому промолчать здесь
+        // означало бы заморозить чужие фигуры навсегда. Группа атомарна: вместе с видом уезжают
+        // якоря, цвет, пунктир и штриховка — вид без якорей достался бы точками прошлой правки.
+        kind: annotationKindToWire(c.kind),
+        points: (c.points ?? []).map((pt) => ({
+          x: inputToDecimal(pt.x),
+          y: inputToDecimal(pt.y),
+        })),
+        color: annotationColorToWire(c.color),
+        dashed: !!c.dashed,
+        filled: !!c.filled,
       })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
     // the 'undecided' sentinel maps back to '' on the wire.
