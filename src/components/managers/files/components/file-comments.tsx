@@ -13,8 +13,8 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { commentsService } from '../api/commentsService';
-import { errorText, isForbidden, isUnknownRoute } from '../api/rpc-error';
-import { filesKeys } from '../hooks/useFiles';
+import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { filesKeys, invalidateFileViews } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 import { formatWhenShort } from '../utils/format';
 
@@ -140,8 +140,12 @@ export function FileComments({
     // ВЕСЬ префикс `['files']`, а не только карточка. Счётчик на плитке приезжает на
     // `comments_count`, а плитка рисуется из ВЫДАЧИ СПИСКА (`['files','list',…]`) — она не
     // потомок ключа карточки, и точечная инвалидация оставляла бы плитку со старым числом на
-    // все 30 минут её staleTime. То же и для плиток вложений на карточке задачи.
-    qc.invalidateQueries({ queryKey: filesKeys.all });
+    // все 30 минут её staleTime.
+    //
+    // Плитки вложений на карточке ЗАДАЧИ этим не накрывались, хотя строка выше это обещала:
+    // они приезжают из `['tasks','detail',id]`, а деревья ключей не пересекаются. Поэтому
+    // корня два — см. `invalidateFileViews`.
+    invalidateFileViews(qc);
   };
 
   const add = useMutation({
@@ -214,11 +218,13 @@ export function FileComments({
         </Text>
       ) : isError ? (
         <Text size='micro' variant='label'>
-          {isForbidden(error)
-            ? 'нет доступа к обсуждению этого файла.'
-            : isUnknownRoute(error)
-              ? 'обсуждение этот сервер ещё не отдаёт: либо оно не выкачено, либо файла уже нет.'
-              : errorText(error, 'лента не прочиталась')}
+          {isUnauthorized(error)
+            ? 'сессия истекла — войдите заново.'
+            : isForbidden(error)
+              ? 'нет доступа к обсуждению этого файла.'
+              : isUnknownRoute(error)
+                ? 'обсуждение этот сервер ещё не отдаёт: либо оно не выкачено, либо файла уже нет.'
+                : errorText(error, 'лента не прочиталась')}
         </Text>
       ) : comments.length === 0 ? (
         <Text size='micro' variant='label'>

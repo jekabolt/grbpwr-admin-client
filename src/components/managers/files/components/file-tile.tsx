@@ -3,7 +3,7 @@ import { cn } from 'lib/utility';
 import { Avatar } from 'ui/components/avatar';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { asAccessLevel } from '../api/accessService';
+import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
 
 /**
@@ -56,6 +56,7 @@ export function FileTile({
    * `team` не помечается: обычное состояние не бейджат, иначе бейдж перестаёт что-либо значить.
    */
   const level = asAccessLevel(file.accessLevel ?? undefined);
+  const badge = level ? ACCESS_LEVEL_BADGE[level] : undefined;
   const comments = Number(file.commentsCount ?? 0);
 
   return (
@@ -195,14 +196,12 @@ export function FileTile({
               без темы
             </Pill>
           )}
-          {level === 'link' && (
-            <Pill tone='attention' className='flex-none' title='файл открыт по публичной ссылке'>
-              по ссылке
-            </Pill>
-          )}
-          {level === 'people' && (
-            <Pill tone='ink' className='flex-none' title='файл виден только перечисленным людям'>
-              ограничен
+          {/* Слово, цвет и подсказка — из ACCESS_LEVEL_BADGE: тот же бейдж стоит на витрине
+              открытого и в шапке блока доступа, и три вписанных строками копии расходились бы
+              молча. */}
+          {!!badge && (
+            <Pill tone={badge.tone} className='flex-none' title={badge.title}>
+              {badge.label}
             </Pill>
           )}
         </span>

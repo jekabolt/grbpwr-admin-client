@@ -1,5 +1,12 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import type { LibraryFileSort } from 'api/proto-http/admin';
+import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
 import { filesService } from '../api/filesService';
 
 /** Порядок сетки. `new` — прежний порядок по дате; имя и размер имеют свои фиксированные
@@ -44,6 +51,28 @@ export const filesKeys = {
   file: (id: number) => [...filesKeys.all, 'file', id] as const,
   topics: () => [...filesKeys.all, 'topics'] as const,
 };
+
+/**
+ * ПРОТУХАНИЕ ПОСЛЕ ПРАВКИ ФАЙЛА — ДВУМЯ КОРНЯМИ, а не одним.
+ *
+ * Плитка файла рисуется не только на холсте: ту же `FileTile` показывают вложения карточки
+ * задачи, и там она приезжает из `['tasks','detail',id]` — ключа, который `['files']` не
+ * накрывает, потому что деревья не пересекаются. Пока корень был один, карточка задачи до
+ * получаса держала СТАРЫЙ счётчик обсуждения и, что хуже, СТАРЫЙ БЕЙДЖ УРОВНЯ: файл уже
+ * открыт по ссылке, а плитка в задаче всё ещё говорит «вся команда». Устаревший сигнал о том,
+ * что лежит наружу, — ровно то, чего этот бейдж заведён не допускать.
+ *
+ * `refetchType: 'none'` намеренно: задачи нужно ПОМЕТИТЬ устаревшими, а не тянуть заново с
+ * экрана файлов. Смонтированная карточка задачи перечитается сама, когда до неё дойдут; со
+ * стороны файлов лишний поход в чужой раздел на каждую реплику был бы платой ни за что.
+ *
+ * Ключ задач взят из `tasksKeys.all` — импорт живой, чтобы переименование корня задач ломало
+ * сборку здесь, а не молчало.
+ */
+export function invalidateFileViews(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: filesKeys.all });
+  qc.invalidateQueries({ queryKey: tasksKeys.all, refetchType: 'none' });
+}
 
 const PAGE_SIZE = 60;
 

@@ -15,7 +15,7 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { fileTasksService } from '../api/fileTasksService';
-import { errorText, isForbidden, isUnknownRoute } from '../api/rpc-error';
+import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys } from '../hooks/useFiles';
 import { formatDay } from '../utils/format';
 
@@ -213,11 +213,13 @@ export function FileTasksSection({
         </Text>
       ) : isError ? (
         <Text size='micro' variant='label'>
-          {isForbidden(error)
-            ? 'нет доступа к задачам — список того, что держит файл, виден с правом tasks:read.'
-            : isUnknownRoute(error)
-              ? 'задачи файла этот сервер ещё не отдаёт: либо сторона задач не выкачена, либо файла уже нет.'
-              : errorText(error, 'список задач не прочитался')}
+          {isUnauthorized(error)
+            ? 'сессия истекла — войдите заново.'
+            : isForbidden(error)
+              ? 'нет доступа к задачам — список того, что держит файл, виден с правом tasks:read.'
+              : isUnknownRoute(error)
+                ? 'задачи файла этот сервер ещё не отдаёт: либо сторона задач не выкачена, либо файла уже нет.'
+                : errorText(error, 'список задач не прочитался')}
         </Text>
       ) : tasks.length === 0 ? (
         <Text size='micro' variant='label'>

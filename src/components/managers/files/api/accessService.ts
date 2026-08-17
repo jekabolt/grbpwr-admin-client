@@ -29,11 +29,22 @@ export const ACCESS_LEVEL_HINT: Record<AccessLevel, string> = {
   link: 'кто угодно со ссылкой, без входа в админку. ссылку можно переслать дальше — и её перешлют.',
 };
 
-/** Бейдж уровня на плитке. У `team` бейджа нет: обычное состояние не помечают. */
-export const ACCESS_LEVEL_BADGE: Record<AccessLevel, string> = {
-  team: '',
-  people: 'ограничен',
-  link: 'по ссылке',
+/**
+ * БЕЙДЖ УРОВНЯ — ОДИН ИСТОЧНИК НА ТРИ ЭКРАНА: плитка холста, строка витрины открытого и шапка
+ * блока доступа в карточке. Слово, цвет и подсказка едут вместе, потому что расходятся они
+ * тоже вместе: пока они были вписаны строками в каждый экран, «ограничен» и «по ссылке» жили в
+ * трёх местах, и переименование одного из них никак не помечало два других.
+ *
+ * У `team` бейджа нет вовсе: обычное состояние не помечают, иначе бейдж перестаёт что-либо
+ * значить. Отсюда `undefined`, а не пустая строка — пустую строку можно нечаянно нарисовать.
+ */
+export const ACCESS_LEVEL_BADGE: Record<
+  AccessLevel,
+  { label: string; tone: 'attention' | 'ink'; title: string } | undefined
+> = {
+  team: undefined,
+  people: { label: 'ограничен', tone: 'ink', title: 'файл виден только перечисленным людям' },
+  link: { label: 'по ссылке', tone: 'attention', title: 'файл открыт по публичной ссылке' },
 };
 
 export function asAccessLevel(value: string | undefined): AccessLevel | undefined {
