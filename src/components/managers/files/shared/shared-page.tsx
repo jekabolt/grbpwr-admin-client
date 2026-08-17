@@ -575,6 +575,9 @@ function SharedRow({
                 size='micro'
                 variant='label'
                 component='span'
+                /* Ширина ограничена, чтобы строка ПЕРЕНОСИЛАСЬ, а не растягивала ячейку: в одну
+                   строку она сжимала соседние колонки таблицы и ломала «кому» на два ряда. */
+                className='max-w-[26ch] text-right'
                 title={
                   shareTokenOf(link.url)
                     ? 'выставьте VITE_PATTERN_VIEWER_ORIGIN (или VITE_FILE_SHARE_ORIGIN) на этом контуре'
