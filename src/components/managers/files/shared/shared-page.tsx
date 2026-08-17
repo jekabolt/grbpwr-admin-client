@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AdminRef, SharedLibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { publicFilePageUrl } from 'components/file-share-viewer/link';
+import { publicFilePageUrl, shareTokenOf } from 'components/file-share-viewer/link';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -77,9 +77,24 @@ export default function FilesSharedPage() {
   const closeAccess = useCloseSharedAccess();
 
   const rows = pageQuery.data?.files ?? [];
-  const total = Number(pageQuery.data?.total ?? 0);
-  const nLink = linkCount.data ?? 0;
-  const nPeople = peopleCount.data ?? 0;
+  /**
+   * НЕИЗВЕСТНО — ЭТО НЕ НОЛЬ, и на этом экране разница дороже, чем где-либо ещё.
+   *
+   * `?? 0` превращал любой отказ (401, 403, 501 до выката) в шапку «открыто наружу — 0 файлов
+   * видно не всей команде» и рельс «по ссылке 0 · ограниченные 0». Экран, заведённый ради
+   * единственного вопроса «что у нас сейчас лежит открытым наружу», отвечал «ничего» ровно
+   * тогда, когда он этого НЕ ЗНАЕТ, — и на бете это состояние по умолчанию, пока сторона
+   * доступа не выкачена. Успокоительный ноль хуже пустого места: пустое замечают.
+   *
+   * Поэтому число живёт только вместе с ответом сервера: нет данных — нет и цифры, ни в шапке,
+   * ни в рельсе. Ноль печатается тогда и только тогда, когда сервер сказал «ноль».
+   */
+  const total = pageQuery.data ? Number(pageQuery.data.total ?? 0) : undefined;
+  const nLink = linkCount.data;
+  const nPeople = peopleCount.data;
+  // «Всё особое» — сумма двух счётчиков, и она известна только когда известны ОБА: сложив
+  // приехавший счётчик с несостоявшимся, экран назвал бы половину правды целым числом.
+  const nAll = nLink !== undefined && nPeople !== undefined ? nLink + nPeople : undefined;
 
   const pick = (next: SharedFilter) => {
     setFilter(next);
@@ -122,7 +137,7 @@ export default function FilesSharedPage() {
       <SideRailGroup flush>доступ</SideRailGroup>
       <SideRailItem
         label='всё особое'
-        count={nLink + nPeople}
+        count={nAll}
         selected={filter === 'all'}
         onClick={() => pick('all')}
       />
@@ -141,22 +156,29 @@ export default function FilesSharedPage() {
     </SideRail>
   );
 
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + rows.length, total);
+  const shown = total ?? 0;
+  const from = shown === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + rows.length, shown);
 
   // ЧИСЛО В ШАПКЕ ПРИНАДЛЕЖИТ РЕЛЬСУ, а не экрану. `total` — счёт ТЕКУЩЕГО фильтра, и одна
   // неизменная фраза «видно не всей команде» превращала переключение рельса в подмену смысла
   // числа при тех же словах: на «по ссылке» она называла публичными и те файлы, что открыты
   // поимённо. Слова меняются вместе с числом.
-  const files = `${total} ${plural(total, 'файл', 'файла', 'файлов')}`;
+  //
+  // А пока числа нет, шапка НЕ НАЗЫВАЕТ НИ ОДНОГО: «неизвестно» — законный ответ, «0» — нет.
+  const files = `${shown} ${plural(shown, 'файл', 'файла', 'файлов')}`;
   const headline =
-    filter === 'link'
-      ? // Причастие склоняется вместе с числом: «1 файл открыт», «2 файла открыты», «5 файлов
-        // открыто». Одна форма на все три числа читается как недоделанный шаблон.
-        `— ${files} ${plural(total, 'открыт', 'открыты', 'открыто')} по ссылке`
-      : filter === 'people'
-        ? `— ${files} ${plural(total, 'ограничен', 'ограничены', 'ограничено')} списком людей`
-        : `— ${files} видно не всей команде`;
+    total === undefined
+      ? pageQuery.isLoading
+        ? '— считаем…'
+        : '— сколько именно, сейчас неизвестно: витрина не загрузилась'
+      : filter === 'link'
+        ? // Причастие склоняется вместе с числом: «1 файл открыт», «2 файла открыты», «5 файлов
+          // открыто». Одна форма на все три числа читается как недоделанный шаблон.
+          `— ${files} ${plural(shown, 'открыт', 'открыты', 'открыто')} по ссылке`
+        : filter === 'people'
+          ? `— ${files} ${plural(shown, 'ограничен', 'ограничены', 'ограничено')} списком людей`
+          : `— ${files} видно не всей команде`;
 
   return (
     <div className='flex flex-col gap-gutter'>
@@ -216,16 +238,27 @@ export default function FilesSharedPage() {
             ) : rows.length === 0 ? (
               <div className='space-y-2.5'>
                 <Text size='micro' variant='label'>
+                  {/* ПУСТО У НЕ-СУПЕРА ГОВОРИТ МЕНЬШЕ, чем у супера, и обещать одинаково нельзя:
+                      выдача идёт под предикатом видимости, поэтому «ничего не открыто» здесь
+                      правда только для того, кто видит всё. Прежняя фраза утверждала это всем — и
+                      опровергалась каллаутом двумя блоками ниже, который тут же объяснял, что
+                      список неполный. Экран не должен спорить сам с собой в двух абзацах. */}
                   {offset > 0
                     ? // Страница опустела под ногами: пока её смотрели, доступ закрыли (свой или
                       // чужой рукой), и список стал короче смещения. Без этой кнопки экран стал бы
                       // тупиком — постраничность ниже рисуется только рядом со строками.
                       'на этой странице списка больше ничего нет — список стал короче, пока вы его смотрели.'
                     : filter === 'link'
-                      ? 'ни одного файла не открыто по ссылке.'
+                      ? isSuper
+                        ? 'ни одного файла не открыто по ссылке.'
+                        : 'из видимого вам по ссылке не открыто ничего — но это не весь список.'
                       : filter === 'people'
-                        ? 'ни один файл не ограничен списком людей.'
-                        : 'ничего не открыто — всё видно только команде.'}
+                        ? isSuper
+                          ? 'ни один файл не ограничен списком людей.'
+                          : 'из видимого вам списком людей не ограничен ни один — но это не весь список.'
+                        : isSuper
+                          ? 'ничего не открыто — всё видно только команде.'
+                          : 'из видимого вам наружу не открыто ничего — но это не весь список.'}
                 </Text>
                 {offset > 0 && (
                   <Button size='xs' variant='secondary' onClick={() => setOffset(0)}>
@@ -255,6 +288,7 @@ export default function FilesSharedPage() {
                         me={me}
                         isSuper={isSuper}
                         writable={writable}
+                        mayWrite={mayWrite}
                         onClose={() => setClosing(row)}
                         onCopied={(ok) =>
                           ok
@@ -271,7 +305,7 @@ export default function FilesSharedPage() {
 
                 {/* Постраничность простая и честная: выдача фильтруется на сервере, поэтому
                     «сколько всего» — его число, а не длина того, что доехало. */}
-                {total > SHARED_PAGE_SIZE && (
+                {shown > SHARED_PAGE_SIZE && (
                   <div className='flex items-center gap-2.5'>
                     <Button
                       size='xs'
@@ -284,13 +318,13 @@ export default function FilesSharedPage() {
                     <Button
                       size='xs'
                       variant='secondary'
-                      disabled={to >= total}
+                      disabled={to >= shown}
                       onClick={() => setOffset(offset + SHARED_PAGE_SIZE)}
                     >
                       дальше
                     </Button>
                     <Text size='micro' variant='label' component='span' className='tabular-nums'>
-                      {from}–{to} из {total}
+                      {from}–{to} из {shown}
                     </Text>
                   </div>
                 )}
@@ -384,13 +418,17 @@ function SharedRow({
   me,
   isSuper,
   writable,
+  mayWrite,
   onClose,
   onCopied,
 }: {
   row: SharedLibraryFile;
   me: string;
   isSuper: boolean;
+  /** Право files:write И режим записи — этим кнопка и включается. */
   writable: boolean;
+  /** Одно право, без тумблера: им подсказка отличает «нет права» от «включено чтение». */
+  mayWrite: boolean;
   onClose: () => void;
   onCopied: (ok: boolean) => void;
 }) {
@@ -520,10 +558,34 @@ function SharedRow({
               приезжают сразу, и получатель не увидит ни имени, ни размера, а по мёртвой ссылке
               получит голый 404 браузера вместо фразы. Кнопка стоит рядом с «закрыть доступ»,
               потому что это второе действие над одной и той же ссылкой. */}
-          {pageUrl && (
+          {pageUrl ? (
             <Button size='xs' variant='secondary' onClick={copy} title={pageUrl}>
               скопировать ссылку
             </Button>
+          ) : (
+            byLink &&
+            !!link?.url && (
+              /* КНОПКА ПРОПАЛА — И ЭТО НАДО СКАЗАТЬ СЛОВАМИ. Пустой адрес бывает по двум разным
+                 причинам, и обе молчали: адрес маршрута не того вида (токен не разобрался) — или
+                 собирать адрес не из чего, потому что публичный домен контура не настроен, а
+                 вкладка стоит на заведомо эфемерном хосте. Различает их токен: разобрался —
+                 значит ссылка жива и виновата настройка, а не она. Строка на месте кнопки, а не
+                 пустая ячейка: пропавшую кнопку человек принимает за отобранное право. */
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                title={
+                  shareTokenOf(link.url)
+                    ? 'выставьте VITE_PATTERN_VIEWER_ORIGIN (или VITE_FILE_SHARE_ORIGIN) на этом контуре'
+                    : undefined
+                }
+              >
+                {shareTokenOf(link.url)
+                  ? 'публичный домен не настроен — копировать нечего, но сама ссылка жива'
+                  : 'адрес ссылки не разобрался — копировать нечего'}
+              </Text>
+            )
           )}
           {/* Кнопка ВЫКЛЮЧЕНА, а не спрятана: спрятанного не попросишь, а подпись называет круг.
               Право решает сервер — здесь оно повторено ради подсказки, а не вместо проверки. */}
@@ -531,12 +593,19 @@ function SharedRow({
             size='xs'
             variant='secondary'
             disabled={!mayClose}
+            /* ТРИ ПРИЧИНЫ, А НЕ ДВЕ. Выключить кнопку могут круг правки, отсутствующее право и
+               добровольный режим чтения — и подсказка «нужно право files:write» у человека,
+               у которого право ЕСТЬ, отправляла его просить уже выданное. Слова про режим — те
+               же, что у приёмника броска ниже и у строки над таблицей: один отказ, названный на
+               экране тремя способами, читается как три разных запрета. */
             title={
               mayClose
                 ? undefined
-                : writable
-                  ? 'доступ меняет загрузивший, действующий владелец или супер-админ'
-                  : 'нужно право files:write'
+                : !writable
+                  ? mayWrite
+                    ? 'включён режим чтения — переключите его на холсте или строкой выше'
+                    : 'нужно право files:write — попросите его у супер-админа'
+                  : 'доступ меняет загрузивший, действующий владелец или супер-админ'
             }
             onClick={onClose}
           >
