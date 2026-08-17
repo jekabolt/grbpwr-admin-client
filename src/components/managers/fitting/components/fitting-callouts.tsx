@@ -1,5 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import { kindDef } from 'ui/components/annotation/kinds';
+import type { AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Select from 'ui/components/select';
@@ -14,6 +16,11 @@ type FormCallout = {
   mediaId?: number;
   posX?: string;
   posY?: string;
+  kind?: AnnotationKindKey;
+  points?: { x: string; y: string }[];
+  color?: AnnotationColorKey;
+  dashed?: boolean;
+  filled?: boolean;
 };
 
 // The text detail behind the pins FittingMedia draws on the photos: the same `callouts` field
@@ -91,6 +98,15 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
           ) : (
             fields.map((f, index) => {
               const pinnedTo = values[index]?.mediaId ?? 0;
+              const c = values[index];
+              // ЗАГОЛОВОК НАЗЫВАЕТ НОМЕР, А НЕ ПОЗИЦИЮ. Здесь стояло `fit note ${index + 1}`, и
+              // после удаления заметки из середины список говорил «fit note 3» строке с номером 4 —
+              // а ссылается на неё замечание именно НОМЕРОМ. Позиция в списке не адресует ничего.
+              const number = c?.number ?? index + 1;
+              // ВИД — В ЗАГОЛОВКЕ. Без него обведённая зона и размерная линия выглядят в списке
+              // одинаково, как две записки, и найти ту, о которой говорят, можно только кликая
+              // пины на кадре.
+              const kind = kindDef(c?.kind);
               return (
                 <div key={f.id} className='flex flex-col gap-2'>
                   <GroupLabel
@@ -112,7 +128,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                       </Button>
                     }
                   >
-                    {`fit note ${index + 1}${
+                    {`fit note #${number} · ${kind.label}${
                       pinnedTo <= 0
                         ? ' · unanchored'
                         : viewIndex(pinnedTo) > 0
@@ -159,6 +175,13 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                                 setValue(`callouts.${index}.posY`, next ? '0.500' : '', {
                                   shouldDirty: true,
                                 });
+                                // ЯКОРЯ НЕ ПЕРЕЕЗЖАЮТ ВМЕСТЕ С МАРКЕРОМ. Доли кадра осмысленны
+                                // только на СВОЁМ снимке: маркер здесь честно ставят в середину, а
+                                // фигура легла бы на новую фотографию по координатам старой — с
+                                // виду нормальная линия, показывающая не туда. Заметка остаётся,
+                                // геометрию рисуют заново там, где она теперь стоит.
+                                setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
+                                setValue(`callouts.${index}.points`, [], { shouldDirty: true });
                               }
                               field.onChange(next);
                             }}
@@ -174,6 +197,16 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                     rows={2}
                     maxLength={2000}
                   />
+                  {/* БЕЗ ТЕКСТА УКАЗАНИЕ НЕ СОХРАНЯЕТСЯ, и сказать это надо ЗДЕСЬ. Записка
+                      обязательна на сервере («fitting callout note is required»), поэтому
+                      безымянная заметка отсеивается адаптером — иначе отказом падало бы сохранение
+                      ВСЕЙ примерки. Обведённая зона без подписи выглядит законченной работой:
+                      промолчав, экран дал бы человеку уйти со страницы, потеряв её. */}
+                  {!c?.note?.trim() && (
+                    <Text size='small' className='text-error'>
+                      без текста не сохранится — впишите, что не так с посадкой
+                    </Text>
+                  )}
                 </div>
               );
             })
@@ -196,6 +229,15 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                   mediaId: 0,
                   posX: '',
                   posY: '',
+                  // ГРУППА ГЕОМЕТРИИ ЗАВОДИТСЯ ЦЕЛИКОМ, даже когда она пустая: заметка без снимка
+                  // это точка, и она обязана уехать на провод ЯВНЫМ пином. Пропущенный `kind`
+                  // означал бы «этот бандл про геометрию молчит», и сервер понёс бы дальше
+                  // хранимую фигуру — чужую, от выноски с тем же номером.
+                  kind: 'pin',
+                  points: [],
+                  color: '',
+                  dashed: false,
+                  filled: false,
                 },
               ]);
             }}
