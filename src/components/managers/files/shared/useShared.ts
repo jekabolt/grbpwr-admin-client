@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { filesKeys } from '../hooks/useFiles';
+import { filesKeys, invalidateFileViews } from '../hooks/useFiles';
 
 /** Три положения рельса витрины. `all` — оба особых уровня разом, `team` тут не бывает. */
 export type SharedFilter = 'all' | 'link' | 'people';
@@ -39,6 +39,10 @@ export function useSharedFiles(filter: SharedFilter, offset: number, enabled = t
     queryFn: () =>
       adminService.ListSharedLibraryFiles({ level, limit: SHARED_PAGE_SIZE, offset }),
     staleTime: URL_SAFE_STALE_TIME,
+    // Тот же `retry: false`, что у трёх секций карточки, и по той же причине: до выката шлюз
+    // отвечает Unimplemented (501), а на 403 и 501 повтор не меняет ничего — он лишь удваивает
+    // каждый из трёх запросов экрана и вдвое оттягивает момент, когда человек прочтёт отказ.
+    retry: false,
     // Аккаунт без files:read получил бы 403 на каждый из трёх запросов ещё до того, как экран
     // успеет сказать ему «доступа нет». Молчать тут честнее, чем шуметь в консоль отказами.
     enabled,
@@ -58,6 +62,7 @@ export function useSharedCount(level: 'link' | 'people', enabled = true) {
     queryKey: sharedKeys.count(level),
     queryFn: () => adminService.ListSharedLibraryFiles({ level, limit: 1, offset: 0 }),
     staleTime: URL_SAFE_STALE_TIME,
+    retry: false,
     select: (r) => Number(r.total ?? 0),
     enabled,
   });
@@ -77,7 +82,8 @@ export function useCloseSharedAccess() {
     mutationFn: (fileId: number) =>
       adminService.SetLibraryFileAccess({ fileId, level: 'team', adminIds: [], linkTtl: 0 }),
     // Весь префикс `['files']`: закрытый файл меняет и витрину, и её счётчики, и сетку, и
-    // карточку — перечислять их поимённо значит однажды забыть одну.
-    onSuccess: () => qc.invalidateQueries({ queryKey: filesKeys.all }),
+    // карточку — перечислять их поимённо значит однажды забыть одну. Плюс корень задач: бейдж
+    // уровня едет и на плитке вложения задачи — см. `invalidateFileViews`.
+    onSuccess: () => invalidateFileViews(qc),
   });
 }

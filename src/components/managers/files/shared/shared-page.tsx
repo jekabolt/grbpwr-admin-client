@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AdminRef, SharedLibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { ROUTES, SECTION } from 'constants/routes';
+import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -13,6 +15,10 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import { SideRail, SideRailGroup, SideRailItem, SideRailLayout } from 'ui/components/side-rail';
 import Text from 'ui/components/text';
+import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
+import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { FilesDropOverlay } from '../components/drop-overlay';
+import { FilesUploadBar } from '../components/upload-bar';
 import { extensionOf, stemOf } from '../utils/format';
 import { plural } from '../upload/text';
 import {
@@ -40,11 +46,29 @@ export default function FilesSharedPage() {
   const { canRead, canWrite, resolved, isSuper, account } = usePermissions();
   const { showMessage } = useSnackBarStore();
   const mayRead = !resolved || canRead(SECTION.files);
-  const writable = canWrite(SECTION.files);
+  const mayWrite = canWrite(SECTION.files);
+  // РЕЖИМ ЧТЕНИЯ — ОДИН НА РАЗДЕЛ, и этот экран знал только про право. Тумблер, поставленный
+  // на холсте, здесь молча отменялся: человек включал «только чтение» ровно затем, чтобы не
+  // задеть ничего рукой, шёл сюда ССЫЛКОЙ В МЕНЮ — и «закрыть доступ» оказывалась включённой.
+  // Одно нажатие тут убивает выданную наружу ссылку у всех, кому её переслали. Тот же дефект
+  // уже чинился для экрана тем; третий экран повторил его буквально.
+  const writable = useFilesWritable(mayWrite);
+  const setMode = useFilesModeStore((s) => s.setMode);
+  const enqueue = useUploadQueueStore((s) => s.enqueue);
 
   const [filter, setFilter] = useState<SharedFilter>('all');
   const [offset, setOffset] = useState(0);
   const [closing, setClosing] = useState<SharedLibraryFile | undefined>(undefined);
+
+  // Бросок на витрине принимает файлы БЕЗ ТЕМ, как на экране тем: чипов холста здесь нет,
+  // наследовать нечего — пачка уезжает в «разобрать».
+  const intake = useCallback(
+    (list: File[]) => {
+      if (!writable || !list.length) return;
+      enqueue(list, { topicIds: [], newTopics: [] });
+    },
+    [writable, enqueue],
+  );
 
   const pageQuery = useSharedFiles(filter, offset, mayRead);
   const linkCount = useSharedCount('link', mayRead);
@@ -118,19 +142,52 @@ export default function FilesSharedPage() {
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + rows.length, total);
 
+  // ЧИСЛО В ШАПКЕ ПРИНАДЛЕЖИТ РЕЛЬСУ, а не экрану. `total` — счёт ТЕКУЩЕГО фильтра, и одна
+  // неизменная фраза «видно не всей команде» превращала переключение рельса в подмену смысла
+  // числа при тех же словах: на «по ссылке» она называла публичными и те файлы, что открыты
+  // поимённо. Слова меняются вместе с числом.
+  const files = `${total} ${plural(total, 'файл', 'файла', 'файлов')}`;
+  const headline =
+    filter === 'link'
+      ? // Причастие склоняется вместе с числом: «1 файл открыт», «2 файла открыты», «5 файлов
+        // открыто». Одна форма на все три числа читается как недоделанный шаблон.
+        `— ${files} ${plural(total, 'открыт', 'открыты', 'открыто')} по ссылке`
+      : filter === 'people'
+        ? `— ${files} ${plural(total, 'ограничен', 'ограничены', 'ограничено')} списком людей`
+        : `— ${files} видно не всей команде`;
+
   return (
     <div className='flex flex-col gap-gutter'>
       <SideRailLayout rail={rail}>
         <div className='flex flex-col gap-gutter'>
           <Section
             title='открыто наружу'
-            question={`— ${total} ${plural(total, 'файл', 'файла', 'файлов')} видно не всей команде`}
+            question={headline}
             action={
               <Button asChild size='xs' variant='secondary'>
                 <Link to={ROUTES.files}>к файлам</Link>
               </Button>
             }
           >
+            {/* ОТКАЗ ОБЪЯСНЯЕТСЯ СТРОКОЙ, а добровольный режим — ещё и выходом из него: тумблер
+                стоит на холсте, и человек, пришедший сюда с включённым чтением, иначе видел бы
+                ряд выключенных кнопок «закрыть доступ» без единой подсказки, куда идти их
+                включать. */}
+            {!writable && (
+              <div className='mb-2.5 flex flex-wrap items-center gap-2'>
+                <Text size='micro' variant='label'>
+                  {mayWrite
+                    ? 'режим чтения включён вами: «закрыть доступ» и загрузка выключены, пока он стоит.'
+                    : 'смотреть можно, менять нельзя: права files:write нет — попросите его у супер-админа.'}
+                </Text>
+                {mayWrite && (
+                  <Button size='xs' variant='secondary' onClick={() => setMode('write')}>
+                    включить запись
+                  </Button>
+                )}
+              </div>
+            )}
+
             {pageQuery.isLoading ? (
               <Text size='micro' variant='label'>
                 загружаем…
@@ -138,7 +195,22 @@ export default function FilesSharedPage() {
             ) : pageQuery.isError ? (
               // Без CalloutBox: он несёт свою рамку, а вокруг уже рамка блока — box-in-box,
               // который DESIGN.md запрещает. Красное слово внутри блока говорит ровно то же.
-              <Text variant='error'>витрина не загрузилась — обновите страницу</Text>
+              //
+              // РАЗБОР ОТКАЗА ТОТ ЖЕ, ЧТО У СЕКЦИЙ КАРТОЧКИ, и по той же причине: этих RPC
+              // нет ни на одном выкаченном бэкенде, значит первый настоящий заход сюда — это
+              // 501 от шлюза. «Обновите страницу» на него — совет, который не поможет никогда.
+              <div className='flex flex-col gap-1'>
+                <Text variant='error'>витрина не загрузилась</Text>
+                <Text size='micro' variant='label'>
+                  {isUnauthorized(pageQuery.error)
+                    ? 'сессия истекла — войдите заново.'
+                    : isForbidden(pageQuery.error)
+                      ? 'нет доступа к разделу «файлы» — витрина открывается вместе с ним.'
+                      : isUnknownRoute(pageQuery.error)
+                        ? 'этот сервер ещё не отдаёт витрину открытого: сторона доступа не выкачена. обновление страницы не поможет — ждите выката.'
+                        : errorText(pageQuery.error, 'сервер не ответил — попробуйте позже')}
+                </Text>
+              </div>
             ) : rows.length === 0 ? (
               <div className='space-y-2.5'>
                 <Text size='micro' variant='label'>
@@ -279,6 +351,28 @@ export default function FilesSharedPage() {
           </Text>
         </div>
       </ConfirmationModal>
+
+      {/* ПРИЁМНИК БРОСКА СТОИТ И ЗДЕСЬ — по тому же доводу, что и на экране тем. Витрина это
+          экран раздела, он в меню, и на нём написаны имена файлов; человек приходит сюда «с
+          файлом в руке» ровно так же. Без приёмника бросок принимал ГОЛЫЙ БРАУЗЕР: он уводил
+          вкладку по адресу брошенного файла — вместе с живой очередью отправки. Гашение стоит
+          и в режиме чтения: отказаться принять файл можно словами, а увести человека со
+          страницы — нельзя. */}
+      <FilesDropOverlay
+        enabled={writable}
+        disabledNote={
+          mayWrite
+            ? 'включён режим чтения — переключите его на холсте или строкой выше'
+            : 'нужно право files:write — попросите его у супер-админа'
+        }
+        topicLabels={[]}
+        onFiles={intake}
+      />
+
+      {/* Полоса загрузки стоит на ВСЕХ экранах раздела: пачку ставят на холсте и уходят сюда
+          смотреть, что открыто наружу, пока она едет — без полосы отправка стала бы невидимой.
+          Тумблер режима она читает из стора сама, поэтому сюда уезжает ПРАВО, а не `writable`. */}
+      <FilesUploadBar mayWrite={mayWrite} />
     </div>
   );
 }
@@ -301,7 +395,8 @@ function SharedRow({
   const file = row.file;
   const name = file?.fileName ?? '';
   const id = Number(file?.id ?? 0);
-  const level = file?.accessLevel ?? '';
+  const level = asAccessLevel(file?.accessLevel ?? undefined);
+  const badge = level ? ACCESS_LEVEL_BADGE[level] : undefined;
   const byLink = level === 'link';
   const link = row.link;
 
@@ -352,7 +447,12 @@ function SharedRow({
       </td>
 
       <td data-align='left'>
-        {byLink ? <Pill tone='attention'>по ссылке</Pill> : <Pill tone='ink'>ограничен</Pill>}
+        {/* Тот же бейдж, что на плитке холста и в шапке блока доступа, из одного источника. */}
+        {badge && (
+          <Pill tone={badge.tone} title={badge.title}>
+            {badge.label}
+          </Pill>
+        )}
       </td>
 
       <td data-align='left'>
