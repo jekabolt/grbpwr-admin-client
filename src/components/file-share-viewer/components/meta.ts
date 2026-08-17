@@ -1,0 +1,97 @@
+// Метаданные публичной ссылки на файл: GET {VITE_SERVER_URL}/api/f/{token}?mode=json.
+//
+// НАРОЧНО не через `adminService`: тот прикладывает JWT из localStorage и пишет [BE]-логи, а эту
+// страницу открывает человек ВНЕ компании, у которого аккаунта нет вовсе. Ручной fetch и ручные
+// типы — контракт маршрута snake_case (internal/fileaccess) и в generated-клиенты не входит.
+//
+// Бэк отвечает 200 с метаданными либо ГОЛЫМ 404 на ЛЮБОЙ отказ: битый токен, чужой скоуп,
+// пересозданная ссылка, возврат уровня в team/people, истёкший срок, лимит частоты. Неразличимость
+// там сделана специально — по разнице ответов иначе можно было бы перебором узнать, что файл
+// существует. Поэтому и здесь ровно два отказа: «ссылка не работает» (ответил сервер) и «нет
+// связи» (fetch не долетел — это НЕ приговор ссылке, повтор имеет смысл).
+
+/** Ответ `?mode=json`. Поля ровно те, что кодирует `Service.ServeFile`, и ни одного лишнего. */
+export type ShareMeta = {
+  /** Короткоживущий presigned url. Годится показать картинку; кнопки ведут НЕ сюда — см. ниже. */
+  url?: string;
+  /** Срок ЭТОЙ подписи (минуты), а не срок публичной ссылки. Наружу его показывать нельзя. */
+  expires_at?: string;
+  file_name?: string;
+  content_type?: string;
+  size_bytes?: number;
+  /**
+   * Отдаётся ли файл вложением. Сервер решает это сам: `?dl=1` ИЛИ тип не из аллоулиста
+   * inline-безопасных. Запрос без `dl` — значит `true` здесь читается как «этот тип в браузере
+   * не открывают», и кнопки «открыть» у него быть не должно.
+   */
+  download?: boolean;
+};
+
+export type ShareState =
+  | { phase: 'loading' }
+  // Единый 404 бэка. Причина не приезжает и не должна — зеркалим неразличимость, а не гадаем.
+  | { phase: 'invalid' }
+  // Сеть/CORS: fetch не долетел. Ссылка может быть жива — показываем «повторить».
+  | { phase: 'offline' }
+  // Ответ пришёл, но это не наши метаданные. ОТДЕЛЬНОЕ состояние, а не «не работает»: самый
+  // вероятный источник — незаданный VITE_SERVER_URL, тогда запрос уходит на СВОЙ origin, где
+  // catch-all rewrite Vercel отдаёт index.html с кодом 200. Назвать это мёртвой ссылкой значило
+  // бы отправить человека обратно к отправителю из-за опечатки в переменной окружения.
+  | { phase: 'broken' }
+  | { phase: 'ready'; meta: ShareMeta };
+
+const serverBase = () =>
+  ((import.meta.env.VITE_SERVER_URL as string | undefined) || '').replace(/\/$/, '');
+
+/**
+ * Адрес самого маршрута — то, куда ведут кнопки.
+ *
+ * Кнопки ведут НА ТОКЕН, а не на presigned url из ответа: подпись живёт минуты, а вкладку
+ * оставляют открытой. Поход по токену минтит свежую подпись на каждое нажатие, поэтому
+ * «скачать» работает и через час, и после перезагрузки страницы.
+ */
+export function fileEndpoint(token: string): string {
+  return `${serverBase()}/api/f/${encodeURIComponent(token)}`;
+}
+
+/** Тот же адрес, но принудительным вложением. `?dl=1` может сделать вложением безопасный тип,
+ * но НЕ может сделать inline небезопасный — это решает сервер, и переспорить его нечем. */
+export function downloadEndpoint(token: string): string {
+  return `${fileEndpoint(token)}?dl=1`;
+}
+
+/**
+ * Ссылка приехала С СЕРВЕРА, но уезжает в DOM (`<img src>`), поэтому схема проверяется здесь, а
+ * не принимается на веру. Сегодня подделать её некому — её собирает бакет; пустой PublicBaseURL,
+ * однако, дал бы ОТНОСИТЕЛЬНЫЙ адрес, который catch-all rewrite превратит в index.html внутри
+ * картинки. Заодно это навсегда закрывает `javascript:` и `data:` как класс.
+ */
+export function isSafeObjectUrl(url?: string): boolean {
+  return /^https?:\/\//i.test((url ?? '').trim());
+}
+
+export async function fetchShareMeta(token: string): Promise<ShareState> {
+  let res: Response;
+  try {
+    res = await fetch(`${fileEndpoint(token)}?mode=json`, {
+      headers: { Accept: 'application/json' },
+      // Ни куки, ни заголовка авторизации: страница обязана работать у человека без аккаунта, и
+      // молчаливая отправка чьей-то сессии сюда сделала бы публичный маршрут авторизованным.
+      credentials: 'omit',
+    });
+  } catch {
+    return { phase: 'offline' };
+  }
+  if (!res.ok) return { phase: 'invalid' };
+  try {
+    const data = (await res.json()) as ShareMeta;
+    // Валидный JSON, который не наш ответ, — тот же класс, что и HTML: чужой ответ на нашем
+    // адресе. Опознаём по обязательному полю, а не по «объект и ладно».
+    if (!data || typeof data !== 'object' || typeof data.file_name !== 'string') {
+      return { phase: 'broken' };
+    }
+    return { phase: 'ready', meta: data };
+  } catch {
+    return { phase: 'broken' };
+  }
+}

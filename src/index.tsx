@@ -189,6 +189,7 @@ const MyProfile = lazyRoute(() =>
 );
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
+const FilesShared = lazyRoute(() => import('components/managers/files/shared/shared-page'));
 
 const Tasks = lazyRoute(() =>
   import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
@@ -250,6 +251,9 @@ const PatternViewerPage = lazyRoute(() =>
 );
 const RunPackViewerPage = lazyRoute(() =>
   import('components/run-pack-viewer/page').then((m) => ({ default: m.RunPackViewerPage })),
+);
+const FileShareViewerPage = lazyRoute(() =>
+  import('components/file-share-viewer/page').then((m) => ({ default: m.FileShareViewerPage })),
 );
 // Стенд печати: обе бумаги на синтетических данных, без бэкенда и без логина. Существует потому,
 // что между «код компилируется» и «компонент выполняется» лежит целый класс ошибок — печать уже
@@ -418,6 +422,9 @@ root.render(
                   {/* Объявлен раньше `/files/:id` для читаемости; порядок здесь ни на что не
                       влияет — статический сегмент выигрывает у динамического по рангу. */}
                   <Route path={ROUTES.fileTopics} element={<FileTopics />} />
+                  {/* Витрина открытого. Статический сегмент, как и «topics», поэтому «shared»
+                      никогда не разберётся как `/files/:id`. */}
+                  <Route path={ROUTES.filesShared} element={<FilesShared />} />
                   <Route path={ROUTES.file} element={<FilesLibrary />} />
                   <Route path={ROUTES.opex} element={<Opex />} />
                   {/* All accounting screens share one TooltipProvider (the design in
@@ -467,6 +474,13 @@ root.render(
                     manifest). Its ?v= carries the run's lock version at print time, so the page
                     can tell the floor the paper in its hands is out of date. */}
                 <Route path={ROUTES.runPackViewer} element={<RunPackViewerPage />} />
+                {/* PUBLIC file-share landing — страница, которую открывает человек ВНЕ компании
+                    по присланной ссылке. Те же три исключения, что у двух вьюеров выше, и по тем
+                    же причинам: аккаунта у читателя нет (никакого JWT), навигация панели ему не
+                    принадлежит (никакого Layout), словарь — авторизованный запрос (никакого
+                    DictionaryProvider). Всё, что странице нужно, приезжает с публичного
+                    `/api/f/{token}?mode=json`. */}
+                <Route path={ROUTES.publicFile} element={<FileShareViewerPage />} />
                 {/* Стенд печати. DictionaryProvider свой: без токена он ничего не запрашивает и
                     отдаёт пустой словарь — ровно то состояние, в котором документ обязан
                     печататься, называя недостающее, а не падать. */}

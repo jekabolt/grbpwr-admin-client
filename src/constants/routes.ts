@@ -103,6 +103,16 @@ export enum ROUTES {
   // patternViewer and for the same reasons. The QR also carries ?v={run lock version at print
   // time}, which the page compares against the live manifest to tell the floor its paper is stale.
   runPackViewer = '/r/:token',
+  // PUBLIC file-share landing — адрес, который открывает человек ВНЕ компании: подрядчик,
+  // типография, фотограф. Регистрируется в src/index.tsx ВНЕ ProtectedRoute/Layout/
+  // DictionaryProvider рядом с двумя вьюерами выше и по тем же причинам: аккаунта у читателя нет,
+  // навигация панели ему не принадлежит, а словарь — авторизованный запрос.
+  //
+  // Токен тот же, что в `/api/f/{token}` бэкенда (скоуп 'f'), и страница — приземление ПЕРЕД
+  // байтами: имя, размер, тип и уже потом «скачать». Прямой адрес бэка тоже работает и отдаёт
+  // файл сразу; отличие в том, что сюда можно прийти по мёртвой ссылке и прочитать об этом
+  // фразу вместо голого 404 браузера.
+  publicFile = '/f/:token',
   materials = '/materials',
   workshop = '/workshop',
   productionRuns = '/production-runs',
@@ -122,6 +132,11 @@ export enum ROUTES {
   // Статический сегмент выигрывает у `/files/:id` по правилам ранжирования react-router,
   // поэтому «topics» никогда не разберётся как идентификатор файла.
   fileTopics = '/files/topics',
+  // Витрина открытого — отдельный экран, а не фильтр холста. Холст отвечает на вопрос «где мой
+  // файл», а этот — на вопрос, который иначе не задаст никто: что у нас сейчас лежит открытым
+  // наружу. Тот же приём со статическим сегментом, что и у «topics»: он выигрывает у `/files/:id`
+  // по рангу react-router, поэтому «shared» никогда не разберётся как идентификатор файла.
+  filesShared = '/files/shared',
   file = '/files/:id',
   accounts = '/accounts',
   // «Мой профиль» — СВОЙ аккаунт, отдельным адресом от `/accounts`.
@@ -166,6 +181,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },
       { label: 'files', route: ROUTES.files, section: SECTION.files },
+      // Витрина открытого. В меню, а не только ссылкой с холста: экран отвечает на вопрос «что у
+      // нас сейчас лежит открытым наружу», а такой вопрос задают НЕ приходя за файлом — по нему
+      // и приходят. Гейт тот же files:read, поэтому у кого нет раздела, у того нет и витрины.
+      // Стоит ПОСЛЕ files: `usePermissions().homeRoute` берёт первый читаемый пункт по порядку, и
+      // аккаунт с одними файлами обязан приземляться на библиотеку, а не на витрину.
+      // Подпись английская — как у одиннадцати соседей по меню; сам экран русский целиком.
+      { label: 'shared files', route: ROUTES.filesShared, section: SECTION.files },
     ],
   },
   {
