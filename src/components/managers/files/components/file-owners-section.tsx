@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { LibraryFile } from 'api/proto-http/admin';
+import { useEffect, useMemo, useState } from 'react';
+import type { AdminRef, LibraryFile } from 'api/proto-http/admin';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
@@ -38,7 +38,28 @@ export function FileOwnersSection({
   const { data: adminsData } = useAdmins();
 
   const fileId = Number(file.id ?? 0);
-  const owners = useMemo(() => file.owners ?? [], [file.owners]);
+  const stored = useMemo(() => file.owners ?? [], [file.owners]);
+
+  /**
+   * ЧТО ЛЕЖИТ НА СЕРВЕРЕ, ПОКА ВЫДАЧА ЕЩЁ НЕ ПЕРЕЧИТАНА.
+   *
+   * Каждая правка — replace всего набора, а ответ на неё приходит РАНЬШЕ, чем обновятся
+   * пропы: между ответом и перечитыванием списка проходит ещё один круг. Считай мы следующее
+   * «убрать» от пропов, второе нажатие подряд отправило бы набор, в котором первый снятый
+   * владелец жив, — и он бы воскрес. Поэтому набор берётся из ответа сервера (он возвращает
+   * то, что ЛЕЖИТ) и уступает место пропам, как только те догонят.
+   */
+  const [applied, setApplied] = useState<AdminRef[] | null>(null);
+  const storedKey = stored
+    .map((o) => Number(o.id ?? 0))
+    .sort((a, b) => a - b)
+    .join(',');
+  useEffect(() => {
+    setApplied(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedKey]);
+  const owners = applied ?? stored;
+
   const admins = useMemo(() => adminsData?.admins ?? [], [adminsData]);
   const me = account?.username ?? '';
 
@@ -47,9 +68,12 @@ export function FileOwnersSection({
   // Аккаунта загрузившего больше нет: строка-имя пережила его, id обнулился каскадом.
   const uploaderGone = !!uploaderName && uploaderId <= 0;
 
-  const uploaderIsOwner = owners.some(
-    (o) => (uploaderId > 0 && Number(o.id ?? 0) === uploaderId) || o.username === uploaderName,
-  );
+  // Схлопывание ролей идёт ПО ID, а не по имени. Совпадение имён здесь ничего не доказывает:
+  // если аккаунта загрузившего уже нет (`uploaded_by_id = 0`), владельцем он быть не может по
+  // определению — владельцы это живые аккаунты. Заведённая заново учётка с тем же именем —
+  // другой человек, и складывать его роли с чужими было бы враньём в самом чувствительном
+  // месте карточки.
+  const uploaderIsOwner = uploaderId > 0 && owners.some((o) => Number(o.id ?? 0) === uploaderId);
 
   // КРУГ ПРАВКИ ТОТ ЖЕ, ЧТО В ХЕНДЛЕРЕ: загрузивший, действующий владелец, супер. Клиент его
   // повторяет не вместо сервера, а чтобы не подсовывать кнопку, которая гарантированно
@@ -64,7 +88,12 @@ export function FileOwnersSection({
 
   const setOwners = useMutation({
     mutationFn: (adminIds: number[]) => filesService.setOwners(fileId, adminIds),
-    onSuccess: () => qc.invalidateQueries({ queryKey: filesKeys.all }),
+    onSuccess: (res) => {
+      // Сервер перечитывает владельцев у себя и возвращает СОХРАНЁННОЕ — по нему и рисуем,
+      // а не по тому, что надеялись отправить.
+      setApplied(res.owners ?? []);
+      qc.invalidateQueries({ queryKey: filesKeys.all });
+    },
   });
 
   const ownerIds = useMemo(
@@ -123,18 +152,11 @@ export function FileOwnersSection({
       ]
         .filter(Boolean)
         .join(' · '),
-      ownerId: uploaderIsOwner
-        ? (owners.find(
-            (o) =>
-              (uploaderId > 0 && Number(o.id ?? 0) === uploaderId) || o.username === uploaderName,
-          )?.id ?? undefined)
-        : undefined,
+      ownerId: uploaderIsOwner ? uploaderId : undefined,
     });
   }
   owners
-    .filter(
-      (o) => !((uploaderId > 0 && Number(o.id ?? 0) === uploaderId) || o.username === uploaderName),
-    )
+    .filter((o) => !(uploaderIsOwner && Number(o.id ?? 0) === uploaderId))
     .forEach((o) =>
       rows.push({
         key: `own:${o.id}`,
@@ -168,7 +190,12 @@ export function FileOwnersSection({
       const id = Number(a.id ?? 0);
       if (!id || seen.has(id)) return;
       seen.add(id);
-      list.push({ id, username: a.username ?? `#${id}`, specialties: a.specialties ?? [], missing: false });
+      list.push({
+        id,
+        username: a.username ?? `#${id}`,
+        specialties: a.specialties ?? [],
+        missing: false,
+      });
     });
     return list;
   }, [owners, admins]);
@@ -199,7 +226,10 @@ export function FileOwnersSection({
         ответственность
       </GroupLabel>
 
-      {rows.length === 0 && (
+      {/* Не «rows.length === 0»: у файла без загрузившего могут быть владельцы, и тогда
+          строка о неизвестном авторе всё равно обязана стоять — иначе список владельцев
+          читается как ответ на вопрос «кто его принёс». */}
+      {!uploaderName && (
         <Text size='micro' variant='label'>
           кто загрузил — неизвестно: файл старше, чем учёт людей в библиотеке.
         </Text>
@@ -314,21 +344,24 @@ export function FileOwnersSection({
                     {on && <span className='text-nano leading-none'>✓</span>}
                   </span>
                   <Avatar name={p.username} size={20} />
-                  <Text size='micro' component='span' className='truncate uppercase'>
-                    {p.username}
-                  </Text>
-                  <Text
-                    size='nano'
-                    variant='label'
-                    component='span'
-                    className='ml-auto truncate uppercase'
-                  >
-                    {p.missing
-                      ? 'аккаунт отключён · сняв отметку, вернуть его сюда будет нельзя'
-                      : p.specialties.length
+                  <span className='flex min-w-0 flex-col'>
+                    <Text size='micro' component='span' className='truncate uppercase'>
+                      {p.username}
+                    </Text>
+                    <Text size='nano' variant='label' component='span' className='truncate uppercase'>
+                      {p.specialties.length
                         ? p.specialties.join(', ')
                         : 'специальность не указана'}
-                  </Text>
+                    </Text>
+                    {/* Предупреждение об отключённом НЕ обрезается: это единственное место,
+                        где видно, что снятая здесь отметка необратима — в списке аккаунтов
+                        такого человека уже нет, и вернуть его во владельцы будет неоткуда. */}
+                    {p.missing && (
+                      <Text size='nano' variant='label' component='span' className='uppercase'>
+                        аккаунт отключён · сняв отметку, вернуть его сюда будет нельзя
+                      </Text>
+                    )}
+                  </span>
                 </button>
               );
             })}

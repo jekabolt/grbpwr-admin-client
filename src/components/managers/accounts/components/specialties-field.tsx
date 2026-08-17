@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
+import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -32,6 +33,7 @@ export function SpecialtiesField({
 }) {
   const { data: adminsData } = useAdmins();
   const save = useSetAccountSpecialties();
+  const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [typed, setTyped] = useState('');
 
@@ -87,19 +89,31 @@ export function SpecialtiesField({
     apply([...mine, v]);
   };
 
-  if (!editable) {
-    return mine.length ? (
-      <ChipRow>
-        {mine.map((s) => (
-          <Chip key={s} selected>
-            {s}
-          </Chip>
-        ))}
-      </ChipRow>
-    ) : (
-      <Text size='micro' variant='label'>
-        —
-      </Text>
+  // В ПОКОЕ ВИДНО ТОЛЬКО ВЫБРАННОЕ. Весь словарь на каждой строке списка аккаунтов — это
+  // четырнадцать чипов на человека вместо ответа на вопрос «чем он занимается», ради которого
+  // колонка и заводилась. Правка раскрывается по нажатию и там же закрывается.
+  if (!editable || !open) {
+    return (
+      <div className='flex flex-wrap items-center gap-1'>
+        {mine.length ? (
+          <ChipRow>
+            {mine.map((s) => (
+              <Chip key={s} selected>
+                {s}
+              </Chip>
+            ))}
+          </ChipRow>
+        ) : (
+          <Text size='micro' variant='label' component='span'>
+            —
+          </Text>
+        )}
+        {editable && (
+          <Button size='xs' variant='secondary' onClick={() => setOpen(true)}>
+            {mine.length ? 'изменить' : 'указать'}
+          </Button>
+        )}
+      </div>
     );
   }
 
@@ -147,11 +161,18 @@ export function SpecialtiesField({
           </Chip>
         )}
       </ChipRow>
-      <Text size='micro' variant='label'>
-        новая специальность попадает в общий список и станет доступна остальным аккаунтам — так
-        словарь растёт сам, но не превращается в свободный текст. прав специальность не даёт:
-        по ней вас находят, когда назначают владельца файла или упоминают в обсуждении.
-      </Text>
+      <div className='flex flex-wrap items-center gap-2'>
+        <Text size='micro' variant='label' component='span' className='max-w-[70ch]'>
+          новая специальность попадает в общий список и станет доступна остальным аккаунтам — так
+          словарь растёт сам, но не превращается в свободный текст. прав специальность не даёт: по
+          ней находят, когда назначают владельца файла или упоминают в обсуждении.
+        </Text>
+        {/* Отдельной кнопки «сохранить» нет намеренно: каждый клик по чипу уже сохранён,
+            «готово» только сворачивает список обратно. */}
+        <Button size='xs' variant='secondary' className='ml-auto' onClick={() => setOpen(false)}>
+          готово
+        </Button>
+      </div>
     </div>
   );
 }
