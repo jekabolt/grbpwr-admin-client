@@ -1063,291 +1063,337 @@ export function AnnotationSurface({
 
   return (
     <div className={cn('flex flex-col gap-1', heightPx != null && 'w-fit', className)}>
+      {/* ДОСТУПНОЕ МЕСТО ДЛЯ ВПИСАННОГО КАДРА — И ЕДИНИЦА ИЗМЕРЕНИЯ ДЛЯ НЕГО.
+          Кадр обязан иметь пропорции САМОГО СНИМКА: доли, в которых хранятся указания, меряются
+          по кадру, и коробка другой формы означает указание, показывающее не туда. Вписать
+          прямоугольник известных пропорций в доступное место так, чтобы он упирался в ту сторону,
+          которая кончится раньше, ЧИСТЫМ CSS можно только зная обе стороны этого места: `w-full`
+          с `max-height` врёт, когда упор по высоте, а `h-full` с `max-width` — когда по ширине
+          (замерено, оба варианта, портрет и альбом, широкое окно и узкое). Поэтому здесь заводится
+          контейнер размера, и ширина кадра берётся как `min(100%, высота-места × пропорции)`.
+          ВНЕ ВПИСАННОГО РЕЖИМА ОБЁРТКИ НЕТ ВОВСЕ: `display: contents` не создаёт коробки, и кадр
+          остаётся тем же flex-ребёнком колонки, что и раньше. */}
       <div
-        ref={boxRef}
-        className={cn(
-          'relative select-none border border-borderColor bg-bgZebra',
-          // КАДР НИКОГДА НЕ ТЯНЕТСЯ ПОД СОСЕДЕЙ СНИЗУ.
-          //
-          // Поверхность — flex-колонка: кадр, под ним легенда и редактор. У колонки
-          // `align-items: stretch` по умолчанию, поэтому кадр БЕЗ явной ширины растягивался до
-          // ширины самого широкого соседа — то есть до раскрытого редактора. Замерено в Chromium:
-          // клик по пину открывал редактор, кадр 150px становился 520px, а `max-height` резал
-          // высоту, НЕ трогая ширину, — картинку сплющивало (400×300 превращалось в 520×150).
-          //
-          // Доли кадра при этом продолжали мериться по кадру, но САМА КАРТИНКА в нём уже другая:
-          // пины оказывались не на своих местах, и это выглядело как «поехали точки». Повторный
-          // клик закрывал редактор и возвращал всё назад — отсюда «увеличивается и уменьшается».
-          'self-start',
-          // ...НО И НЕ СХЛОПЫВАЕТСЯ В НОЛЬ.
-          //
-          // `self-start` в колонке — это `align-self` по ПОПЕРЕЧНОЙ оси, то есть ширина кадра
-          // считается по содержимому. При заданных `aspectRatio` всё содержимое лежит
-          // `absolute inset-0` и в ширину не даёт НИЧЕГО: ширина выходит 0, а `aspect-ratio` от
-          // нулевой ширины даёт нулевую высоту. Кадр пропадал целиком — оставались висеть
-          // легенда и «зум» под пустым местом.
-          //
-          // Сетка эскизов этого не показала, потому что задаёт ширину явно (`w-full`, в полосе
-          // `w-auto` + высота): дефект жил ровно в раскладке `focused`, то есть только в
-          // примерке, — и выглядел как «фотографии не показываются».
-          //
-          // ТОЛЬКО ПРИ ЗАДАННЫХ ПРОПОРЦИЯХ, и это условие правильности, а не осторожность: БЕЗ
-          // `aspectRatio` кадр ОБНИМАЕТ картинку её собственного размера, и `w-full` растянул бы
-          // коробку шире снимка. Доли указаний меряются по КОРОБКЕ — каждый пин уехал бы вбок от
-          // того места, куда его поставили.
-          //
-          // `self-start` при этом продолжает делать своё дело: тянуться под самого широкого
-          // соседа кадр не может, потому что всё, что под ним, вынуто из ширины колонки
-          // (`w-0 min-w-full` ниже).
-          aspectRatio && heightPx == null && !fitting && 'w-full',
-          // Вписанный кадр занимает всё доступное место, упираясь в ту сторону, которая кончится
-          // раньше. Без `min-h-0` он не ужимается по высоте внутри flex-родителя.
-          fitting && 'h-auto max-h-full w-full min-h-0 self-center',
-          // ...А ПОКА ПРОПОРЦИЙ НЕТ — КАДР ВСЁ РАВНО ЗАНИМАЕТ МЕСТО. Собственные пропорции берутся
-          // у загруженного файла, и «ещё не загрузился» — не единственная причина их не получить:
-          // 404, CORS, пустой адрес. Раньше в этих случаях высота кадра выходила нулевой, а вместе
-          // с ней исчезали и слой указаний, и штатная заглушка «адрес не разрешён» — то есть
-          // сломанный снимок выглядел как пустой чёрный экран, без единого слова о причине.
-          fit && !fitting && 'w-full min-h-0 flex-1 self-center',
-          heightPx != null && 'w-fit',
-          // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент касания,
-          // и запрет, выставленный позже, уже ничего не решает — палец уводит страницу в
-          // прокрутку, прилетает pointercancel, и полштриха теряется.
-          (zoom || placing) && 'touch-none',
-          zoom && 'overflow-hidden',
-          frameClassName,
-          cursorClass,
-        )}
-        style={{
-          // Вписанный кадр держит СОБСТВЕННЫЕ пропорции картинки: тогда `object-cover` ничего не
-          // обрезает, и кадр совпадает с картинкой пиксель в пиксель.
-          aspectRatio: fitting ? String(naturalRatio) : aspectRatio,
-          ...frameStyle,
-        }}
-        onPointerDown={onFramePointerDown}
-        onPointerMove={onFramePointerMove}
-        onPointerUp={onFramePointerUp}
-        onPointerCancel={releasePointer}
-        onPointerLeave={() => placing && setCursor(null)}
+        className={fit ? 'flex min-h-0 flex-1 items-center justify-center [container-type:size]' : 'contents'}
       >
-        {/* ТРАНСФОРМ ОТДЕЛЬНО ОТ РАСКЛАДКИ. Раскладка решается пропорциями кадра, а не тем,
-            включён ли зум: у сеточной плитки кадр задан отношением сторон и картинка его
-            заполняет, у полосы и печати кадр ОБНИМАЕТ картинку её собственного размера. Свяжи их
-            — и увеличенный вид начал бы обрезать снимок, а доли кадра поехали бы вместе с
-            обрезкой, то есть указания стали бы показывать мимо. */}
-        {/* УСЛОВИЕ ЗДЕСЬ ОБЯЗАНО СОВПАДАТЬ С УСЛОВИЕМ У КАРТИНКИ И СЛОЯ ГЕОМЕТРИИ (`fitting ||
-            aspectRatio` ниже). Стояло `aspectRatio`, и во ВПИСАННОМ кадре — то есть в увеличенном
-            виде, где пропорции берутся у самой картинки, а проп не задан вовсе, — обёртка
-            оставалась `relative` с высотой по содержимому. Всё содержимое у неё
-            `absolute inset-0`, поэтому высота выходила НОЛЬ: кадр был 1264×624, а картинка и весь
-            слой указаний в нём — 1264×0. Замерено: полноэкранный вид показывал чёрный экран с
-            панелью, и на первом открытии тоже — при `img.complete === true`, то есть картинка была
-            загружена, а не «ещё не приехала». */}
         <div
-          className={fit || aspectRatio ? 'absolute inset-0' : 'relative'}
-          style={zoom ? { transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` } : undefined}
-        >
-          {!src ? (
-            /* АДРЕС НЕ РАЗРЕШЁН — ЭТО СОСТОЯНИЕ, А НЕ ПОВОД ИСЧЕЗНУТЬ.
-               Пустой `src` означает, что медиа по id найти не удалось: сервер его не вернул, а в
-               библиотеке оно дальше загруженной страницы. Раньше такой кадр вызывающие просто
-               ОТФИЛЬТРОВЫВАЛИ, и фотография пропадала молча — вместе со всеми стоящими на ней
-               указаниями, которые после этого нельзя было ни прочесть, ни снять, хотя они
-               продолжали сохраняться.
-               Кадр остаётся на месте в своих пропорциях, поэтому доли по-прежнему меряются по
-               нему и ПИНЫ РИСУЮТСЯ ТАМ ЖЕ, где стояли: указание можно прочесть, подвинуть и
-               убрать. `<img>` при этом не рисуется вовсе — пустой `src` в Chromium разрешается
-               в адрес самой страницы и даёт значок битой картинки, то есть врёт про причину. */
-            <div className='absolute inset-0 flex items-end justify-center p-2'>
-              <span className='max-w-full bg-bgColor/90 px-1.5 py-0.5 text-center text-nano uppercase leading-tight tracking-label text-labelColor'>
-                image address not resolved
-              </span>
-            </div>
-          ) : media === 'video' ? (
-            <video
-              src={src}
-              className={cn(
-                fit || aspectRatio ? 'absolute inset-0 h-full w-full object-cover' : 'block w-full',
-              )}
-              // ПРОПОРЦИИ У ВИДЕО СВОИ И ПРИЕЗЖАЮТ ИНАЧЕ: `onLoad` у `<video>` не бывает, а кадр
-              // обязан совпасть с картинкой — он и есть система координат указаний. Без этого
-              // вписанный кадр с роликом остался бы без пропорций навсегда.
-              onLoadedMetadata={(e) => {
-                const el = e.currentTarget;
-                if (fit && el.videoWidth > 0 && el.videoHeight > 0) {
-                  setNaturalRatio(el.videoWidth / el.videoHeight);
-                }
-              }}
-              muted
-              loop
-              playsInline
-              controls={zoom}
-            />
-          ) : (
-            /* `max-h` кладётся на САМО изображение, а не на контейнер: коробка с ограниченной
-               высотой и картинкой `w-full` внутри просто переполняется — на печати это обрезанный
-               снимок. Ограничив изображение, коробка ужимается по нему, а выноски остаются на
-               местах: они в долях кадра, а не в пикселях. */
-            <img
-              src={src}
-              alt={alt ?? ''}
-              // Вкладки карточки смонтированы ВСЕ разом (переключение — это `hidden`), поэтому без
-              // `lazy` открытие карточки ради опечатки в шапке тянет снимки шагов, весь мудборд и
-              // все эскизы в полный размер.
-              loading='lazy'
-              draggable={false}
-              onLoad={(e) => {
-                const el = e.currentTarget;
-                if (fit && el.naturalWidth > 0 && el.naturalHeight > 0) {
-                  setNaturalRatio(el.naturalWidth / el.naturalHeight);
-                }
-              }}
-              className={cn(
-                fit || aspectRatio
-                  ? 'absolute inset-0 h-full w-full object-cover'
-                  : heightPx != null
-                    ? 'block h-auto w-auto max-w-none'
-                    : // ШИРИНА ОТ КАРТИНКИ, А НЕ ОТ КОРОБКИ. Было `w-full`: ширину задавала
-                      // коробка, высоту резал `max-height` — и при несовпадении пропорций
-                      // картинку СПЛЮЩИВАЛО, а не уменьшало. Кадр обязан совпадать с картинкой
-                      // ровно потому, что он и есть система координат указаний: любое
-                      // расхождение — это указание, показывающее не туда.
-                      'block h-auto w-auto max-w-full',
-                maxHeightClass,
-              )}
-              style={heightPx != null && !aspectRatio ? { height: heightPx } : undefined}
-            />
+          ref={boxRef}
+          className={cn(
+            'relative select-none border border-borderColor bg-bgZebra',
+            // КАДР НИКОГДА НЕ ТЯНЕТСЯ ПОД СОСЕДЕЙ СНИЗУ.
+            //
+            // Поверхность — flex-колонка: кадр, под ним легенда и редактор. У колонки
+            // `align-items: stretch` по умолчанию, поэтому кадр БЕЗ явной ширины растягивался до
+            // ширины самого широкого соседа — то есть до раскрытого редактора. Замерено в Chromium:
+            // клик по пину открывал редактор, кадр 150px становился 520px, а `max-height` резал
+            // высоту, НЕ трогая ширину, — картинку сплющивало (400×300 превращалось в 520×150).
+            //
+            // Доли кадра при этом продолжали мериться по кадру, но САМА КАРТИНКА в нём уже другая:
+            // пины оказывались не на своих местах, и это выглядело как «поехали точки». Повторный
+            // клик закрывал редактор и возвращал всё назад — отсюда «увеличивается и уменьшается».
+            'self-start',
+            // ...НО И НЕ СХЛОПЫВАЕТСЯ В НОЛЬ.
+            //
+            // `self-start` в колонке — это `align-self` по ПОПЕРЕЧНОЙ оси, то есть ширина кадра
+            // считается по содержимому. При заданных `aspectRatio` всё содержимое лежит
+            // `absolute inset-0` и в ширину не даёт НИЧЕГО: ширина выходит 0, а `aspect-ratio` от
+            // нулевой ширины даёт нулевую высоту. Кадр пропадал целиком — оставались висеть
+            // легенда и «зум» под пустым местом.
+            //
+            // Сетка эскизов этого не показала, потому что задаёт ширину явно (`w-full`, в полосе
+            // `w-auto` + высота): дефект жил ровно в раскладке `focused`, то есть только в
+            // примерке, — и выглядел как «фотографии не показываются».
+            //
+            // ТОЛЬКО ПРИ ЗАДАННЫХ ПРОПОРЦИЯХ, и это условие правильности, а не осторожность: БЕЗ
+            // `aspectRatio` кадр ОБНИМАЕТ картинку её собственного размера, и `w-full` растянул бы
+            // коробку шире снимка. Доли указаний меряются по КОРОБКЕ — каждый пин уехал бы вбок от
+            // того места, куда его поставили.
+            //
+            // `self-start` при этом продолжает делать своё дело: тянуться под самого широкого
+            // соседа кадр не может, потому что всё, что под ним, вынуто из ширины колонки
+            // (`w-0 min-w-full` ниже).
+            aspectRatio && heightPx == null && !fitting && 'w-full',
+            // Вписанный кадр занимает всё доступное место, упираясь в ту сторону, которая кончится
+            // раньше. Высота выводится из ОБЪЯВЛЕННЫХ пропорций, ширина считается в стиле ниже —
+            // `max-height` здесь стоять не должен: он ужимал высоту, не трогая ширину, и кадр
+            // переставал совпадать с картинкой (портрет 360×480 показывался коробкой 2.03).
+            fitting && 'h-auto',
+            // ...А ПОКА ПРОПОРЦИЙ НЕТ — КАДР ВСЁ РАВНО ЗАНИМАЕТ МЕСТО. Собственные пропорции берутся
+            // у загруженного файла, и «ещё не загрузился» — не единственная причина их не получить:
+            // 404, CORS, пустой адрес. Раньше в этих случаях высота кадра выходила нулевой, а вместе
+            // с ней исчезали и слой указаний, и штатная заглушка «адрес не разрешён» — то есть
+            // сломанный снимок выглядел как пустой чёрный экран, без единого слова о причине.
+            fit && !fitting && 'size-full',
+            heightPx != null && 'w-fit',
+            // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент касания,
+            // и запрет, выставленный позже, уже ничего не решает — палец уводит страницу в
+            // прокрутку, прилетает pointercancel, и полштриха теряется.
+            (zoom || placing) && 'touch-none',
+            zoom && 'overflow-hidden',
+            frameClassName,
+            cursorClass,
           )}
+          style={{
+            // Вписанный кадр держит СОБСТВЕННЫЕ пропорции картинки: тогда `object-cover` ничего не
+            // обрезает, и кадр совпадает с картинкой пиксель в пиксель.
+            aspectRatio: fitting ? String(naturalRatio) : aspectRatio,
+            // ШИРИНА — МЕНЬШЕЕ ИЗ ДВУХ УПОРОВ: вся ширина места или та, при которой в него ещё
+            // влезает высота. Высоту дальше считает `aspect-ratio`, поэтому коробка выходит
+            // вписанной и ТОЧНО пропорциональной снимку с обеих сторон.
+            width: fitting ? `min(100%, calc(100cqh * ${naturalRatio}))` : undefined,
+            ...frameStyle,
+          }}
+          onPointerDown={onFramePointerDown}
+          onPointerMove={onFramePointerMove}
+          onPointerUp={onFramePointerUp}
+          onPointerCancel={releasePointer}
+          onPointerLeave={() => placing && setCursor(null)}
+        >
+          {/* ТРАНСФОРМ ОТДЕЛЬНО ОТ РАСКЛАДКИ. Раскладка решается пропорциями кадра, а не тем,
+              включён ли зум: у сеточной плитки кадр задан отношением сторон и картинка его
+              заполняет, у полосы и печати кадр ОБНИМАЕТ картинку её собственного размера. Свяжи их
+              — и увеличенный вид начал бы обрезать снимок, а доли кадра поехали бы вместе с
+              обрезкой, то есть указания стали бы показывать мимо. */}
+          {/* УСЛОВИЕ ЗДЕСЬ ОБЯЗАНО СОВПАДАТЬ С УСЛОВИЕМ У КАРТИНКИ И СЛОЯ ГЕОМЕТРИИ (`fitting ||
+              aspectRatio` ниже). Стояло `aspectRatio`, и во ВПИСАННОМ кадре — то есть в увеличенном
+              виде, где пропорции берутся у самой картинки, а проп не задан вовсе, — обёртка
+              оставалась `relative` с высотой по содержимому. Всё содержимое у неё
+              `absolute inset-0`, поэтому высота выходила НОЛЬ: кадр был 1264×624, а картинка и весь
+              слой указаний в нём — 1264×0. Замерено: полноэкранный вид показывал чёрный экран с
+              панелью, и на первом открытии тоже — при `img.complete === true`, то есть картинка была
+              загружена, а не «ещё не приехала». */}
+          <div
+            className={fit || aspectRatio ? 'absolute inset-0' : 'relative'}
+            style={zoom ? { transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` } : undefined}
+          >
+            {!src ? (
+              /* АДРЕС НЕ РАЗРЕШЁН — ЭТО СОСТОЯНИЕ, А НЕ ПОВОД ИСЧЕЗНУТЬ.
+                 Пустой `src` означает, что медиа по id найти не удалось: сервер его не вернул, а в
+                 библиотеке оно дальше загруженной страницы. Раньше такой кадр вызывающие просто
+                 ОТФИЛЬТРОВЫВАЛИ, и фотография пропадала молча — вместе со всеми стоящими на ней
+                 указаниями, которые после этого нельзя было ни прочесть, ни снять, хотя они
+                 продолжали сохраняться.
+                 Кадр остаётся на месте в своих пропорциях, поэтому доли по-прежнему меряются по
+                 нему и ПИНЫ РИСУЮТСЯ ТАМ ЖЕ, где стояли: указание можно прочесть, подвинуть и
+                 убрать. `<img>` при этом не рисуется вовсе — пустой `src` в Chromium разрешается
+                 в адрес самой страницы и даёт значок битой картинки, то есть врёт про причину. */
+              <div className='absolute inset-0 flex items-end justify-center p-2'>
+                <span className='max-w-full bg-bgColor/90 px-1.5 py-0.5 text-center text-nano uppercase leading-tight tracking-label text-labelColor'>
+                  image address not resolved
+                </span>
+              </div>
+            ) : media === 'video' ? (
+              <video
+                src={src}
+                className={cn(
+                  fit || aspectRatio ? 'absolute inset-0 h-full w-full object-cover' : 'block w-full',
+                )}
+                // ПРОПОРЦИИ У ВИДЕО СВОИ И ПРИЕЗЖАЮТ ИНАЧЕ: `onLoad` у `<video>` не бывает, а кадр
+                // обязан совпасть с картинкой — он и есть система координат указаний. Без этого
+                // вписанный кадр с роликом остался бы без пропорций навсегда.
+                onLoadedMetadata={(e) => {
+                  const el = e.currentTarget;
+                  if (fit && el.videoWidth > 0 && el.videoHeight > 0) {
+                    setNaturalRatio(el.videoWidth / el.videoHeight);
+                  }
+                }}
+                muted
+                loop
+                playsInline
+                controls={zoom}
+              />
+            ) : (
+              /* `max-h` кладётся на САМО изображение, а не на контейнер: коробка с ограниченной
+                 высотой и картинкой `w-full` внутри просто переполняется — на печати это обрезанный
+                 снимок. Ограничив изображение, коробка ужимается по нему, а выноски остаются на
+                 местах: они в долях кадра, а не в пикселях. */
+              <img
+                src={src}
+                alt={alt ?? ''}
+                // Вкладки карточки смонтированы ВСЕ разом (переключение — это `hidden`), поэтому без
+                // `lazy` открытие карточки ради опечатки в шапке тянет снимки шагов, весь мудборд и
+                // все эскизы в полный размер.
+                loading='lazy'
+                draggable={false}
+                onLoad={(e) => {
+                  const el = e.currentTarget;
+                  if (fit && el.naturalWidth > 0 && el.naturalHeight > 0) {
+                    setNaturalRatio(el.naturalWidth / el.naturalHeight);
+                  }
+                }}
+                className={cn(
+                  fit || aspectRatio
+                    ? 'absolute inset-0 h-full w-full object-cover'
+                    : heightPx != null
+                      ? 'block h-auto w-auto max-w-none'
+                      : // ШИРИНА ОТ КАРТИНКИ, А НЕ ОТ КОРОБКИ. Было `w-full`: ширину задавала
+                        // коробка, высоту резал `max-height` — и при несовпадении пропорций
+                        // картинку СПЛЮЩИВАЛО, а не уменьшало. Кадр обязан совпадать с картинкой
+                        // ровно потому, что он и есть система координат указаний: любое
+                        // расхождение — это указание, показывающее не туда.
+                        'block h-auto w-auto max-w-full',
+                  maxHeightClass,
+                )}
+                style={heightPx != null && !aspectRatio ? { height: heightPx } : undefined}
+              />
+            )}
 
-          {/* СЛОЙ ГЕОМЕТРИИ — внутри трансформа: мерка обязана ехать вместе с картинкой при зуме и
-              панораме, иначе она указывала бы мимо ровно тогда, когда её и приблизили, чтобы
-              рассмотреть. viewBox в ПИКСЕЛЯХ КАДРА, а не в процентах: замер сделан для экрана, а
-              печать меняет ширину коробки без ResizeObserver — с viewBox холст масштабируется
-              вместе с коробкой, а в процентах засечки на альбомном снимке стали бы косыми. */}
-          {size.w > 0 && !hideCallouts && (
-            <svg
-              className='pointer-events-none absolute inset-0 h-full w-full'
-              viewBox={`0 0 ${size.w} ${size.h}`}
-              preserveAspectRatio='none'
-              aria-hidden
-            >
-              <defs>
-                <AnnotationDefs />
-              </defs>
-              {callouts.map((c) =>
-                dim(c.key) ? null : (
-                  <CalloutShape
-                    key={c.key}
-                    kind={c.kind}
-                    pts={pointsOf(c).map(px)}
-                    label={px(labelOf(c))}
-                    color={c.color || undefined}
-                    dashed={c.dashed}
-                    filled={c.filled}
-                    halo={halo}
-                    strokeWidth={selected === c.key ? 2 : 1.5}
+            {/* СЛОЙ ГЕОМЕТРИИ — внутри трансформа: мерка обязана ехать вместе с картинкой при зуме и
+                панораме, иначе она указывала бы мимо ровно тогда, когда её и приблизили, чтобы
+                рассмотреть. viewBox в ПИКСЕЛЯХ КАДРА, а не в процентах: замер сделан для экрана, а
+                печать меняет ширину коробки без ResizeObserver — с viewBox холст масштабируется
+                вместе с коробкой, а в процентах засечки на альбомном снимке стали бы косыми. */}
+            {size.w > 0 && !hideCallouts && (
+              <svg
+                className='pointer-events-none absolute inset-0 h-full w-full'
+                viewBox={`0 0 ${size.w} ${size.h}`}
+                preserveAspectRatio='none'
+                aria-hidden
+              >
+                <defs>
+                  <AnnotationDefs />
+                </defs>
+                {callouts.map((c) =>
+                  dim(c.key) ? null : (
+                    <CalloutShape
+                      key={c.key}
+                      kind={c.kind}
+                      pts={pointsOf(c).map(px)}
+                      label={px(labelOf(c))}
+                      color={c.color || undefined}
+                      dashed={c.dashed}
+                      filled={c.filled}
+                      halo={halo}
+                      strokeWidth={selected === c.key ? 2 : 1.5}
+                    />
+                  ),
+                )}
+                {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
+                    нельзя, а выбирать фигуру надо именно по ней. Живут ТОЛЬКО когда правка
+                    возможна и инструмент выключен: во время постановки слой обязан быть прозрачным
+                    для кликов, иначе точку под чужой фигурой не поставить. */}
+                {editable &&
+                  !placing &&
+                  callouts.map((c) => {
+                    const pts = pointsOf(c).map(px);
+                    const d = hitPath(c.kind, pts, px(labelOf(c)));
+                    if (!d) return null;
+                    // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
+                    // а не в двухпиксельный контур по краю.
+                    const byArea = kindDef(c.kind).key === 'polygon' && !!c.filled;
+                    return (
+                      <path
+                        key={`hit:${c.key}`}
+                        d={d}
+                        fill={byArea ? 'transparent' : 'none'}
+                        stroke='transparent'
+                        strokeWidth={HIT_WIDTH}
+                        style={{ pointerEvents: byArea ? 'all' : 'stroke', cursor: 'pointer' }}
+                        onPointerEnter={() => setHovered(c.key)}
+                        onPointerLeave={() => setHovered((h) => (h === c.key ? null : h))}
+                        onPointerDown={(e) => {
+                          // ВЫБРАННУЮ фигуру нажатие тащит. НЕВЫБРАННУЮ — пропускает вниз, на кадр,
+                          // и это важнее, чем кажется: заштрихованная зона ловит клики по всей своей
+                          // площади, и глушение нажатия отняло бы у неё панораму в зуме — снимок
+                          // стало бы нельзя двигать иначе как мимо зоны. Выбор при этом не страдает:
+                          // он делается кликом, а клик приходит после отпускания и порога сдвига.
+                          if (selected === c.key) startShapeDrag(c, e);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (justDragged.current) {
+                            justDragged.current = false;
+                            return;
+                          }
+                          select(selected === c.key ? null : c.key, { focus: true });
+                        }}
+                      />
+                    );
+                  })}
+                {placing && points.length > 0 && (
+                  <PlacingShape
+                    kind={def.key}
+                    pts={points.map(px)}
+                    cursor={cursor ? px(cursor) : null}
+                    color={pen.color || undefined}
+                    snapClose={snapClose}
                   />
-                ),
-              )}
-              {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
-                  нельзя, а выбирать фигуру надо именно по ней. Живут ТОЛЬКО когда правка
-                  возможна и инструмент выключен: во время постановки слой обязан быть прозрачным
-                  для кликов, иначе точку под чужой фигурой не поставить. */}
-              {editable &&
-                !placing &&
-                callouts.map((c) => {
-                  const pts = pointsOf(c).map(px);
-                  const d = hitPath(c.kind, pts, px(labelOf(c)));
-                  if (!d) return null;
-                  // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
-                  // а не в двухпиксельный контур по краю.
-                  const byArea = kindDef(c.kind).key === 'polygon' && !!c.filled;
+                )}
+              </svg>
+            )}
+
+            {/* ПОДПИСНОЙ СЛОЙ. Плашки и маркеры — HTML поверх SVG, а не `<text>`: перенос строки,
+                обрезка и выделение мышью в SVG приходится изобретать заново. */}
+            {size.w > 0 &&
+              !hideCallouts &&
+              callouts.map((c) => {
+                const d = kindDef(c.kind);
+                const names = (c.pieceLineKeys ?? [])
+                  .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'деталь удалена' : undefined))
+                  .filter(Boolean) as string[];
+                const text = (c.text ?? '').trim();
+                if (d.key === 'pin') {
+                  // ГДЕ СТОИТ НУМЕРОВАННЫЙ КРУЖОК, РЕШАЕТ ВЛАДЕЛЕЦ, а не этот файл.
+                  //
+                  // У выноски на снимке шага якорь есть, и кружок стоит НА нём. У карточного указания
+                  // якорей ноль по построению: его единственная точка И ЕСТЬ маркер, и она живёт в
+                  // pos_x/pos_y — дублировать её в якорях значило бы завести два места для одной
+                  // координаты. Отсюда и правило: якорь, если он есть, иначе положение подписи.
+                  const anchored = c.points.length > 0;
+                  const p = anchored ? c.points[0] : labelOf(c);
                   return (
-                    <path
-                      key={`hit:${c.key}`}
-                      d={d}
-                      fill={byArea ? 'transparent' : 'none'}
-                      stroke='transparent'
-                      strokeWidth={HIT_WIDTH}
-                      style={{ pointerEvents: byArea ? 'all' : 'stroke', cursor: 'pointer' }}
-                      onPointerEnter={() => setHovered(c.key)}
-                      onPointerLeave={() => setHovered((h) => (h === c.key ? null : h))}
-                      onPointerDown={(e) => {
-                        // ВЫБРАННУЮ фигуру нажатие тащит. НЕВЫБРАННУЮ — пропускает вниз, на кадр,
-                        // и это важнее, чем кажется: заштрихованная зона ловит клики по всей своей
-                        // площади, и глушение нажатия отняло бы у неё панораму в зуме — снимок
-                        // стало бы нельзя двигать иначе как мимо зоны. Выбор при этом не страдает:
-                        // он делается кликом, а клик приходит после отпускания и порога сдвига.
-                        if (selected === c.key) startShapeDrag(c, e);
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
+                    <PinMarker
+                      key={`pin:${c.key}`}
+                      at={px(p)}
+                      // Кружок ТАЩИТСЯ ЗА ТО, ЧЕМ ОН ЯВЛЯЕТСЯ: якорь — значит правится якорь, подпись
+                      // — значит подпись. Одно правило на оба случая, без ветвления у владельца.
+                      onDragStart={
+                        editable && !placing
+                          ? (e) => (anchored ? startHandleDrag(c.key, 0, p, e) : startLabelDrag(c, e))
+                          : undefined
+                      }
+                      inv={inv}
+                      number={c.number ?? 0}
+                      // ПОЛЫЙ ПИН = ТЕКСТА ЕЩЁ НЕТ. Единственное состояние, которое видно, не открывая
+                      // выноску: на листе из пятнадцати пинов недописанный иначе неотличим.
+                      filled={!!(c.hasText ?? (c.text ?? '').trim())}
+                      color={c.color || undefined}
+                      title={[text, ...names].filter(Boolean).join(' · ') || `выноска ${c.number ?? ''}`}
+                      dimmed={dim(c.key)}
+                      selected={selected === c.key}
+                      interactive={!placing}
+                      onHover={(on) => setHovered(on ? c.key : null)}
+                      onPress={() => {
+                        // Клик после перетаскивания — ЭХО. Без этой проверки жест «подвинул маркер»
+                        // заканчивался открытым редактором и уехавшим в него фокусом (на планшете —
+                        // выехавшей клавиатурой), а если редактор был открыт — закрывал его.
                         if (justDragged.current) {
                           justDragged.current = false;
                           return;
                         }
-                        select(selected === c.key ? null : c.key, { focus: true });
+                        if (editable) select(selected === c.key ? null : c.key, { focus: true });
                       }}
                     />
                   );
-                })}
-              {placing && points.length > 0 && (
-                <PlacingShape
-                  kind={def.key}
-                  pts={points.map(px)}
-                  cursor={cursor ? px(cursor) : null}
-                  color={pen.color || undefined}
-                  snapClose={snapClose}
-                />
-              )}
-            </svg>
-          )}
-
-          {/* ПОДПИСНОЙ СЛОЙ. Плашки и маркеры — HTML поверх SVG, а не `<text>`: перенос строки,
-              обрезка и выделение мышью в SVG приходится изобретать заново. */}
-          {size.w > 0 &&
-            !hideCallouts &&
-            callouts.map((c) => {
-              const d = kindDef(c.kind);
-              const names = (c.pieceLineKeys ?? [])
-                .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'деталь удалена' : undefined))
-                .filter(Boolean) as string[];
-              const text = (c.text ?? '').trim();
-              if (d.key === 'pin') {
-                // ГДЕ СТОИТ НУМЕРОВАННЫЙ КРУЖОК, РЕШАЕТ ВЛАДЕЛЕЦ, а не этот файл.
-                //
-                // У выноски на снимке шага якорь есть, и кружок стоит НА нём. У карточного указания
-                // якорей ноль по построению: его единственная точка И ЕСТЬ маркер, и она живёт в
-                // pos_x/pos_y — дублировать её в якорях значило бы завести два места для одной
-                // координаты. Отсюда и правило: якорь, если он есть, иначе положение подписи.
-                const anchored = c.points.length > 0;
-                const p = anchored ? c.points[0] : labelOf(c);
+                }
+                // Пустая плашка у зоны и следа — прямоугольник «—» посреди снимка: контур уже сказал
+                // «вот здесь», и добавлять к этому нечего, пока текста нет.
+                if (!d.plateWhenEmpty && !text && names.length === 0) return null;
                 return (
-                  <PinMarker
-                    key={`pin:${c.key}`}
-                    at={px(p)}
-                    // Кружок ТАЩИТСЯ ЗА ТО, ЧЕМ ОН ЯВЛЯЕТСЯ: якорь — значит правится якорь, подпись
-                    // — значит подпись. Одно правило на оба случая, без ветвления у владельца.
-                    onDragStart={
-                      editable && !placing
-                        ? (e) => (anchored ? startHandleDrag(c.key, 0, p, e) : startLabelDrag(c, e))
-                        : undefined
-                    }
+                  <Plate
+                    key={`plate:${c.key}`}
+                    at={px(labelOf(c))}
                     inv={inv}
-                    number={c.number ?? 0}
-                    // ПОЛЫЙ ПИН = ТЕКСТА ЕЩЁ НЕТ. Единственное состояние, которое видно, не открывая
-                    // выноску: на листе из пятнадцати пинов недописанный иначе неотличим.
-                    filled={!!(c.hasText ?? (c.text ?? '').trim())}
-                    color={c.color || undefined}
-                    title={[text, ...names].filter(Boolean).join(' · ') || `выноска ${c.number ?? ''}`}
+                    number={c.number}
+                    text={text}
+                    names={names}
                     dimmed={dim(c.key)}
                     selected={selected === c.key}
                     interactive={!placing}
+                    editable={editable}
                     onHover={(on) => setHovered(on ? c.key : null)}
+                    onPointerDown={(e) => startLabelDrag(c, e)}
                     onPress={() => {
-                      // Клик после перетаскивания — ЭХО. Без этой проверки жест «подвинул маркер»
-                      // заканчивался открытым редактором и уехавшим в него фокусом (на планшете —
-                      // выехавшей клавиатурой), а если редактор был открыт — закрывал его.
                       if (justDragged.current) {
                         justDragged.current = false;
                         return;
@@ -1356,71 +1402,45 @@ export function AnnotationSurface({
                     }}
                   />
                 );
-              }
-              // Пустая плашка у зоны и следа — прямоугольник «—» посреди снимка: контур уже сказал
-              // «вот здесь», и добавлять к этому нечего, пока текста нет.
-              if (!d.plateWhenEmpty && !text && names.length === 0) return null;
-              return (
-                <Plate
-                  key={`plate:${c.key}`}
-                  at={px(labelOf(c))}
-                  inv={inv}
-                  number={c.number}
-                  text={text}
-                  names={names}
-                  dimmed={dim(c.key)}
-                  selected={selected === c.key}
-                  interactive={!placing}
-                  editable={editable}
-                  onHover={(on) => setHovered(on ? c.key : null)}
-                  onPointerDown={(e) => startLabelDrag(c, e)}
-                  onPress={() => {
-                    if (justDragged.current) {
-                      justDragged.current = false;
-                      return;
-                    }
-                    if (editable) select(selected === c.key ? null : c.key, { focus: true });
-                  }}
-                />
-              );
-            })}
+              })}
 
-          {/* РУЧКИ — HTML-слоем и последними: они обязаны лежать поверх подписей, иначе якорь под
-              плашкой не схватить. Экранно-постоянные: ручка, растущая с зумом, перекрыла бы саму
-              фигуру ровно тогда, когда её приблизили, чтобы поправить точнее. */}
-          {size.w > 0 && handlesVisible && selectedCallout && (
-            <Handles
-              callout={selectedCallout}
-              pts={pointsOf(selectedCallout)}
-              px={px}
-              inv={inv}
-              armed={armed}
-              justDragged={() => {
-                const v = justDragged.current;
-                justDragged.current = false;
-                return v;
-              }}
-              onArm={(index) => setArmed({ key: selectedCallout.key, index })}
-              onDrag={(index, from, e) => startHandleDrag(selectedCallout.key, index, from, e)}
-              onInsert={(index, p) => {
-                const next = [...selectedCallout.points];
-                next.splice(index + 1, 0, p);
-                if (next.length <= kindDef(selectedCallout.kind).points[1])
-                  mutate(() => live.current.onEditPoints?.(selectedCallout.key, next));
-              }}
+            {/* РУЧКИ — HTML-слоем и последними: они обязаны лежать поверх подписей, иначе якорь под
+                плашкой не схватить. Экранно-постоянные: ручка, растущая с зумом, перекрыла бы саму
+                фигуру ровно тогда, когда её приблизили, чтобы поправить точнее. */}
+            {size.w > 0 && handlesVisible && selectedCallout && (
+              <Handles
+                callout={selectedCallout}
+                pts={pointsOf(selectedCallout)}
+                px={px}
+                inv={inv}
+                armed={armed}
+                justDragged={() => {
+                  const v = justDragged.current;
+                  justDragged.current = false;
+                  return v;
+                }}
+                onArm={(index) => setArmed({ key: selectedCallout.key, index })}
+                onDrag={(index, from, e) => startHandleDrag(selectedCallout.key, index, from, e)}
+                onInsert={(index, p) => {
+                  const next = [...selectedCallout.points];
+                  next.splice(index + 1, 0, p);
+                  if (next.length <= kindDef(selectedCallout.kind).points[1])
+                    mutate(() => live.current.onEditPoints?.(selectedCallout.key, next));
+                }}
+              />
+            )}
+          </div>
+
+          {zoom && scale > 1 && (
+            <FrameButton
+              label={`${Math.round(scale * 100)}%`}
+              title='вернуть исходный масштаб'
+              onPress={resetZoom}
+              className='bottom-1 left-1'
             />
           )}
+          {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
         </div>
-
-        {zoom && scale > 1 && (
-          <FrameButton
-            label={`${Math.round(scale * 100)}%`}
-            title='вернуть исходный масштаб'
-            onPress={resetZoom}
-            className='bottom-1 left-1'
-          />
-        )}
-        {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
       </div>
 
       {/* ВСЁ ПОД КАДРОМ НЕ УЧАСТВУЕТ В ШИРИНЕ КОЛОНКИ.
