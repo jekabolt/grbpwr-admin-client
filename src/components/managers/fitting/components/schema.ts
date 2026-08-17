@@ -84,7 +84,8 @@ const fittingCalloutSchemaChecked = fittingCalloutSchema.superRefine((c, ctx) =>
   ctx.addIssue({
     code: z.ZodIssueCode.custom,
     path: ['note'],
-    message: 'у нумерованной точки записка и есть всё содержание — напишите, что не так, или нарисуйте фигуру',
+    message:
+      'for a numbered point the note is the whole content — write what is wrong, or draw a shape',
   });
 });
 
@@ -135,13 +136,13 @@ export const fittingSchema = z
     changeRequests: z.array(fittingChangeRequestSchema).default([]),
   })
   .refine((data) => !!data.techCardId, {
-    message: 'Укажите тех карту (примерка делается по её сэмплу)',
+    message: 'name the tech card (a fitting is done against its sample)',
     path: ['techCardId'],
   })
   // A fitting measures a SAMPLE — there is nothing to try on without one, so both the tech card and
   // the sample are required (the sample is picked once a tech card is chosen).
   .refine((data) => !!data.sampleId, {
-    message: 'Выберите сэмпл — примерка делается на конкретном сэмпле',
+    message: 'pick a sample — a fitting is done on one specific sample',
     path: ['sampleId'],
   });
 
@@ -336,29 +337,28 @@ export function mapFormToFittingInsert(
     // ИНДЕКС ПОСЫЛКИ ТЕПЕРЬ РАВЕН ИНДЕКСУ ФОРМЫ, и на это опирается разбор отказа: сервер называет
     // поле как `callouts[3].note`, и форма сажает ошибку на `callouts.3.note` (см. index.tsx).
     // Вернуть сюда любой фильтр — значит сдвинуть нумерацию и посадить отказ на ЧУЖУЮ заметку.
-    callouts: (data.callouts ?? [])
-      .map((c, i) => ({
-        number: c.number || i + 1,
-        // Пусто — значит ПУСТО, а не строка из пробелов: `«   »` прошло бы клиентскую проверку
-        // «текст есть» и приехало бы на сервер записью, которую не видно и не найти поиском.
-        note: c.note?.trim() || '',
-        mediaId: c.mediaId || 0,
-        posX: inputToDecimal(c.posX),
-        posY: inputToDecimal(c.posY),
-        // ВИД ШЛЁТСЯ ВСЕГДА, круговым рейсом прочитанного. Присутствие поля и есть заявление «этот
-        // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
-        // переносит её по номеру + снимку + ОБЕИМ координатам маркера, поэтому промолчать здесь
-        // означало бы заморозить чужие фигуры навсегда. Группа атомарна: вместе с видом уезжают
-        // якоря, цвет, пунктир и штриховка — вид без якорей достался бы точками прошлой правки.
-        kind: annotationKindToWire(c.kind),
-        points: (c.points ?? []).map((pt) => ({
-          x: inputToDecimal(pt.x),
-          y: inputToDecimal(pt.y),
-        })),
-        color: annotationColorToWire(c.color),
-        dashed: !!c.dashed,
-        filled: !!c.filled,
+    callouts: (data.callouts ?? []).map((c, i) => ({
+      number: c.number || i + 1,
+      // Пусто — значит ПУСТО, а не строка из пробелов: `«   »` прошло бы клиентскую проверку
+      // «текст есть» и приехало бы на сервер записью, которую не видно и не найти поиском.
+      note: c.note?.trim() || '',
+      mediaId: c.mediaId || 0,
+      posX: inputToDecimal(c.posX),
+      posY: inputToDecimal(c.posY),
+      // ВИД ШЛЁТСЯ ВСЕГДА, круговым рейсом прочитанного. Присутствие поля и есть заявление «этот
+      // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
+      // переносит её по номеру + снимку + ОБЕИМ координатам маркера, поэтому промолчать здесь
+      // означало бы заморозить чужие фигуры навсегда. Группа атомарна: вместе с видом уезжают
+      // якоря, цвет, пунктир и штриховка — вид без якорей достался бы точками прошлой правки.
+      kind: annotationKindToWire(c.kind),
+      points: (c.points ?? []).map((pt) => ({
+        x: inputToDecimal(pt.x),
+        y: inputToDecimal(pt.y),
       })),
+      color: annotationColorToWire(c.color),
+      dashed: !!c.dashed,
+      filled: !!c.filled,
+    })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
     // the 'undecided' sentinel maps back to '' on the wire.
     roundNumber: data.roundNumber || 0,

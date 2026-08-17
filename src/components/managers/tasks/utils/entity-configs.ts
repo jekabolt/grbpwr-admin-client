@@ -174,7 +174,7 @@ function fittingOption(f: common_Fitting): EntityOption {
   const date = formatFittingDate(f.fitting?.fittingDate);
   return {
     value: f.id ?? 0,
-    label: date ? `примерка · ${date}` : `примерка #${f.id}`,
+    label: date ? `fitting · ${date}` : `fitting #${f.id}`,
     sublabel: `#${f.id} · ${statusLabel(f.fitting?.status)}`,
   };
 }
@@ -183,7 +183,7 @@ export const fittingConfig: EntityConfig = {
   kind: 'fitting',
   empty: 0,
   mode: 'client',
-  searchPlaceholder: 'search примерки by date / status…',
+  searchPlaceholder: 'search fittings by date / status…',
   emptyResult: 'no fittings',
   load: async () => {
     const r = await adminService.ListFittings({
@@ -208,8 +208,8 @@ function sampleOption(s: common_Sample): EntityOption {
   const tc = s.sample?.techCardId;
   return {
     value: s.id ?? 0,
-    label: `образец #${s.number ?? '?'} · ${samplePurposeLabel(s.sample?.purpose)}`,
-    sublabel: `#${s.id}${tc ? ` · техкарта #${tc}` : ''}`,
+    label: `sample #${s.number ?? '?'} · ${samplePurposeLabel(s.sample?.purpose)}`,
+    sublabel: `#${s.id}${tc ? ` · tech card #${tc}` : ''}`,
   };
 }
 
@@ -217,7 +217,7 @@ export const sampleConfig: EntityConfig = {
   kind: 'sample',
   empty: 0,
   mode: 'client',
-  searchPlaceholder: 'search образцы by #/purpose…',
+  searchPlaceholder: 'search samples by #/purpose…',
   emptyResult: 'no samples',
   load: async () => {
     const r = await adminService.ListSamples({
@@ -242,8 +242,8 @@ function runOption(r: common_ProductionRun): EntityOption {
   const tc = r.run?.techCardId;
   return {
     value: r.id ?? 0,
-    label: `партия #${r.id} · ${runStatusLabel(r.run?.status)}`,
-    sublabel: tc ? `техкарта #${tc}` : `#${r.id}`,
+    label: `run #${r.id} · ${runStatusLabel(r.run?.status)}`,
+    sublabel: tc ? `tech card #${tc}` : `#${r.id}`,
   };
 }
 
@@ -251,7 +251,7 @@ export const runConfig: EntityConfig = {
   kind: 'run',
   empty: 0,
   mode: 'client',
-  searchPlaceholder: 'search партии by #/status…',
+  searchPlaceholder: 'search runs by #/status…',
   emptyResult: 'no production runs',
   load: async () => {
     const r = await adminService.ListProductionRuns({

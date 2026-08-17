@@ -239,115 +239,120 @@ export function FittingForm({
         </div>
 
         <SectionStack>
-        {/* Change requests are the actionable output of a fitting (what to fix, carried into the next
+          {/* Change requests are the actionable output of a fitting (what to fix, carried into the next
             round and the tech card) — surfaced full-width at the top, not buried below the fold. */}
-        <Section title='change requests (что доработать) — главный итог примерки'>
-          <ChangeRequestsFields
-            fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
-            techCardId={selectedTechCardId || undefined}
-            serverChangeRequests={fitting?.fitting?.changeRequests}
-          />
-        </Section>
+          <Section title='change requests (what to fix) — the main outcome of a fitting'>
+            <ChangeRequestsFields
+              fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
+              techCardId={selectedTechCardId || undefined}
+              serverChangeRequests={fitting?.fitting?.changeRequests}
+            />
+          </Section>
 
-        {/* Visual evidence for the change requests above: a photo carousel with fit-note pins
+          {/* Visual evidence for the change requests above: a photo carousel with fit-note pins
             shown in place on the photo (hover/focus a pin for its note), task 5. */}
-        <Section title='photos & fit notes (замечания по посадке)'>
-          <FittingMedia
-            mediaById={mediaById}
-            onPicked={(items) => setPicked((prev) => [...prev, ...items])}
-          />
-          <FittingCallouts mediaById={mediaById} />
-        </Section>
+          <Section title='photos & fit notes (remarks on the fit)'>
+            <FittingMedia
+              mediaById={mediaById}
+              onPicked={(items) => setPicked((prev) => [...prev, ...items])}
+            />
+            <FittingCallouts mediaById={mediaById} />
+          </Section>
 
-        <Section title='session'>
-          <div className='grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2'>
-            <div className='space-y-1 sm:col-span-2'>
-              <Text variant='uppercase' size='small'>
-                tech card (style) *
-              </Text>
-              <TechCardField />
-              {techCardError && (
-                <Text size='small' className='text-error'>
-                  {String(techCardError)}
-                </Text>
-              )}
-              <Text variant='inactive' size='small'>
-                примерка делается по тех карте и её сэмплу (а не по продукту)
-              </Text>
-            </div>
-
-            {!!selectedTechCardId && (
+          <Section title='session'>
+            <div className='grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2'>
               <div className='space-y-1 sm:col-span-2'>
                 <Text variant='uppercase' size='small'>
-                  sample (tried on) *
+                  tech card (style) *
                 </Text>
-                <SamplePicker
-                  techCardId={selectedTechCardId}
-                  value={selectedSampleId ?? 0}
-                  onChange={(sampleId) =>
-                    form.setValue('sampleId', sampleId, { shouldDirty: true })
-                  }
-                />
-                {sampleError && (
+                <TechCardField />
+                {techCardError && (
                   <Text size='small' className='text-error'>
-                    {String(sampleError)}
+                    {String(techCardError)}
                   </Text>
                 )}
                 <Text variant='inactive' size='small'>
-                  примерка делается на конкретном сэмпле — обязательно
+                  a fitting is done against a tech card and its sample (not against a product)
                 </Text>
-                <SampleSizeInfo sampleId={selectedSampleId ?? 0} sampleSizeId={sampleSizeId} />
               </div>
-            )}
 
-            <div className='space-y-3 sm:col-span-2'>
-              <SelectField
-                name='modelId'
-                label='model (optional)'
-                items={modelOptions}
-                valueAsNumber
-              />
-              {!!selectedModelId && (
-                <ModelMeasurementsView measurements={selectedModel?.model?.measurements} />
+              {!!selectedTechCardId && (
+                <div className='space-y-1 sm:col-span-2'>
+                  <Text variant='uppercase' size='small'>
+                    sample (tried on) *
+                  </Text>
+                  <SamplePicker
+                    techCardId={selectedTechCardId}
+                    value={selectedSampleId ?? 0}
+                    onChange={(sampleId) =>
+                      form.setValue('sampleId', sampleId, { shouldDirty: true })
+                    }
+                  />
+                  {sampleError && (
+                    <Text size='small' className='text-error'>
+                      {String(sampleError)}
+                    </Text>
+                  )}
+                  <Text variant='inactive' size='small'>
+                    a fitting is done on one specific sample — required
+                  </Text>
+                  <SampleSizeInfo sampleId={selectedSampleId ?? 0} sampleSizeId={sampleSizeId} />
+                </div>
               )}
-            </div>
 
-            <InputField name='fittingDate' type='date' label='fitting date' />
-            <SelectField name='status' label='status' items={fittingStatusOptions} />
+              <div className='space-y-3 sm:col-span-2'>
+                <SelectField
+                  name='modelId'
+                  label='model (optional)'
+                  items={modelOptions}
+                  valueAsNumber
+                />
+                {!!selectedModelId && (
+                  <ModelMeasurementsView measurements={selectedModel?.model?.measurements} />
+                )}
+              </div>
 
-            {/* Round is no longer typed in — it always mirrors the linked sample's development
+              <InputField name='fittingDate' type='date' label='fitting date' />
+              <SelectField name='status' label='status' items={fittingStatusOptions} />
+
+              {/* Round is no longer typed in — it always mirrors the linked sample's development
                 round (task 3), so there is nothing to disagree with the carry-over filter. */}
-            <div className='space-y-1'>
-              <Text variant='uppercase' size='small'>
-                round
-              </Text>
-              <div className='border-b border-hairline py-1.5'>
-                <Text>
-                  {selectedSampleId
-                    ? `round ${sampleRoundNumber || '—'} · from sample #${
-                        selectedSample?.number ?? selectedSampleId
-                      }`
-                    : 'round — · pick a sample first'}
+              <div className='space-y-1'>
+                <Text variant='uppercase' size='small'>
+                  round
                 </Text>
+                <div className='border-b border-hairline py-1.5'>
+                  <Text>
+                    {selectedSampleId
+                      ? `round ${sampleRoundNumber || '—'} · from sample #${
+                          selectedSample?.number ?? selectedSampleId
+                        }`
+                      : 'round — · pick a sample first'}
+                  </Text>
+                </div>
+              </div>
+              <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
+
+              <div className='sm:col-span-2'>
+                <RecordedByField isEditMode={isEditMode} />
+              </div>
+
+              <div className='sm:col-span-2'>
+                <TextareaField
+                  name='comment'
+                  label='comment (optional)'
+                  rows={4}
+                  maxLength={2000}
+                />
               </div>
             </div>
-            <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
+          </Section>
 
-            <div className='sm:col-span-2'>
-              <RecordedByField isEditMode={isEditMode} />
-            </div>
-
-            <div className='sm:col-span-2'>
-              <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={2000} />
-            </div>
-          </div>
-        </Section>
-
-        {/* Secondary/advanced: attaching the exact PDF выкройка measured is common but not part
+          {/* Secondary/advanced: attaching the exact PDF выкройка measured is common but not part
             of the primary decision flow, so it starts collapsed once there's nothing in it yet. */}
-        <Section title='выкройка (что мерили)' collapsible defaultOpen={patternsCount > 0}>
-          <PatternsFields sampleSizeId={sampleSizeId} />
-        </Section>
+          <Section title='pattern (what was measured)' collapsible defaultOpen={patternsCount > 0}>
+            <PatternsFields sampleSizeId={sampleSizeId} />
+          </Section>
         </SectionStack>
       </form>
 

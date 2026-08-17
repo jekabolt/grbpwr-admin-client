@@ -35,12 +35,12 @@ export type LinkField =
 type LinkType = { field: LinkField; label: string; config: EntityConfig };
 
 const LINK_TYPES: LinkType[] = [
-  { field: 'techCardId', label: 'техкарта', config: techCardConfig },
+  { field: 'techCardId', label: 'tech card', config: techCardConfig },
   { field: 'productId', label: 'product', config: productConfig },
   { field: 'orderUuid', label: 'order', config: orderConfig },
-  { field: 'fittingId', label: 'примерка', config: fittingConfig },
-  { field: 'sampleId', label: 'образец', config: sampleConfig },
-  { field: 'productionRunId', label: 'партия', config: runConfig },
+  { field: 'fittingId', label: 'fitting', config: fittingConfig },
+  { field: 'sampleId', label: 'sample', config: sampleConfig },
+  { field: 'productionRunId', label: 'run', config: runConfig },
   { field: 'archiveId', label: 'timeline drop', config: archiveConfig },
 ];
 
@@ -103,7 +103,13 @@ export function LinkEditor({
 
       <div className='flex flex-col gap-1.5'>
         <div className='flex items-center gap-2'>
-          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
             add link
           </Text>
           <div className='w-40'>

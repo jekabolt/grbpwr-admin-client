@@ -48,11 +48,9 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
   const patternSizeIds = fields
     .map((f) => (f as { sizeId?: number }).sizeId)
     .filter((id): id is number => !!id);
-  const optionSizeIds = [
-    ...new Set([...(sampleSizeId ? [sampleSizeId] : []), ...patternSizeIds]),
-  ];
+  const optionSizeIds = [...new Set([...(sampleSizeId ? [sampleSizeId] : []), ...patternSizeIds])];
   const sizeOptions = [
-    { value: 0, label: '— общий —' },
+    { value: 0, label: '— any size —' },
     ...optionSizeIds.map((id) => ({
       value: id,
       label: formatSizeName(sizeById.get(id) ?? `#${id}`),
@@ -84,20 +82,20 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
   return (
     <div className='space-y-3'>
       <Text variant='inactive' size='small'>
-        выкройка, которую мерили в этой примерке (итерация), PDF или DXF. Можно несколько; размер —
-        необязателен.
+        the pattern measured in this fitting (iteration), PDF or DXF. Several are allowed; the size
+        is optional.
       </Text>
 
       {fields.length === 0 ? (
         <Text variant='inactive' size='small'>
-          выкройка не прикреплена
+          no pattern attached
         </Text>
       ) : (
         <ul className='space-y-2'>
           {fields.map((f, index) => {
             // Structure/key from the snapshot, values live (see liveRows above).
             const row = { ...(f as Row), ...liveRows[index] };
-            const label = row.name || row.filename || '(без имени)';
+            const label = row.name || row.filename || '(no name)';
             return (
               <li
                 key={f.id}
@@ -108,7 +106,7 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
                     <Input
                       name={`fitting-pattern-rename-${index}`}
                       value={editing.value}
-                      placeholder={row.filename || 'название'}
+                      placeholder={row.filename || 'name'}
                       maxLength={MAX_PATTERN_NAME}
                       autoFocus
                       autoComplete='off'
@@ -167,7 +165,7 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
                 <div className='w-28 shrink-0'>
                   <SelectField
                     name={`patterns.${index}.sizeId`}
-                    label='размер'
+                    label='size'
                     items={sizeOptions}
                     valueAsNumber
                   />
@@ -179,14 +177,14 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
                     className='shrink-0'
                     onClick={() => setViewingDxf(row)}
                   >
-                    просмотр
+                    view
                   </Button>
                 )}
                 <Button
                   type='button'
                   variant='secondary'
                   aria-label='rename pattern'
-                  title='переименовать'
+                  title='rename'
                   className='shrink-0'
                   disabled={isSubmitting}
                   onClick={() => setEditing({ index, value: row.name ?? '' })}
@@ -210,12 +208,12 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
 
       <div className='flex flex-wrap items-center gap-2'>
         <PatternUploadButton
-          label='+ загрузить PDF/DXF'
+          label='+ upload PDF/DXF'
           onUploaded={(p) => append({ sizeId: 0, ...p })}
         />
         {cardPatterns.length > 0 && (
           <Button type='button' className='uppercase' onClick={copyFromCard}>
-            скопировать из тех карты ({cardPatterns.length})
+            copy from the tech card ({cardPatterns.length})
           </Button>
         )}
       </div>

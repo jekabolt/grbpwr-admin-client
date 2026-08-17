@@ -32,17 +32,13 @@ const numOf = (v?: string) => {
 };
 
 /**
- * «1 нарисованное указание · 3 нарисованных указания · 5 нарисованных указаний».
+ * «1 drawn callout · 3 drawn callouts».
  *
  * Число в этом вопросе — единственное, ради чего его вообще задают («сколько я сейчас потеряю»),
- * и склеенное с ним «1 нарисованных указание» читается как сбой, а не как предупреждение.
+ * и склеенное с ним «1 drawn callouts» читается как сбой, а не как предупреждение.
  */
 function drawnCalloutsPlural(n: number): string {
-  const mod100 = n % 100;
-  const mod10 = n % 10;
-  if (mod10 === 1 && mod100 !== 11) return 'нарисованное указание';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'нарисованных указания';
-  return 'нарисованных указаний';
+  return n === 1 ? 'drawn callout' : 'drawn callouts';
 }
 
 // The fitting's "photos & fit notes" — the SAME surface as the tech-card sketch and moodboard,
@@ -148,9 +144,10 @@ export function FittingMedia({
    * (у эскиза выноски адресуют деталь и операцию, у мудборда терять нечего), и вопрос, заданный
    * за них всех, был бы задан не о том.
    */
-  const [pendingRemoval, setPendingRemoval] = useState<{ view: FocusedView; shapes: number } | null>(
-    null,
-  );
+  const [pendingRemoval, setPendingRemoval] = useState<{
+    view: FocusedView;
+    shapes: number;
+  } | null>(null);
   function requestRemoveMedia(view: FocusedView) {
     const shapes = callouts.filter((c) => c.mediaId === view.mediaId && hasDrawnGeometry(c)).length;
     if (!shapes) {
@@ -418,9 +415,9 @@ export function FittingMedia({
       <ConfirmationModal
         open
         onOpenChange={(v) => !v && setPendingRemoval(null)}
-        title='снять снимок вместе с рисунками?'
-        confirmLabel='снять снимок'
-        cancelLabel='оставить'
+        title='remove the photo together with its drawings?'
+        confirmLabel='remove the photo'
+        cancelLabel='keep it'
         onCancel={() => setPendingRemoval(null)}
         onConfirm={() => {
           removeMedia(pendingRemoval.view);
@@ -429,9 +426,9 @@ export function FittingMedia({
         width='sm'
       >
         <Text size='small'>
-          {`на этом снимке ${pendingRemoval.shapes} ${drawnCalloutsPlural(pendingRemoval.shapes)}` +
-            ' — зоны, дуги, мерки. Они станут простыми точками: номера и записки останутся, а' +
-            ' нарисованное исчезнет. Вернуть его повторным добавлением той же фотографии нельзя.'}
+          {`this photo carries ${pendingRemoval.shapes} ${drawnCalloutsPlural(pendingRemoval.shapes)}` +
+            ' — zones, arcs, measurements. They will become plain points: the numbers and the notes' +
+            ' stay, but the drawing disappears. Adding the same photo again cannot bring it back.'}
         </Text>
       </ConfirmationModal>
     </>

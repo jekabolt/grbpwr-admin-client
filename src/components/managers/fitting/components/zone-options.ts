@@ -7,26 +7,26 @@
 // Values are the wire tokens (lowercase), mirroring entity.ValidFittingChangeZones on the backend and
 // the chk_fcr_zone_v2 CHECK from migration 0256. '' = zone not specified.
 export const fittingZoneOptions: Array<{ value: string; label: string }> = [
-  { value: '', label: '— зона —' },
+  { value: '', label: '— zone —' },
   // material bands, kept from the old dictionary: a remark can be about a layer as such
-  { value: 'outer', label: 'верх' },
-  { value: 'lining', label: 'подклад' },
-  { value: 'interlining', label: 'приклад / дублерин' },
+  { value: 'outer', label: 'outer shell' },
+  { value: 'lining', label: 'lining' },
+  { value: 'interlining', label: 'interlining / fusible' },
   // garment areas — what a fitting actually flags
-  { value: 'sleeve', label: 'рукав' },
-  { value: 'collar', label: 'воротник' },
-  { value: 'neckline', label: 'горловина' },
-  { value: 'armhole', label: 'пройма' },
-  { value: 'shoulder', label: 'плечо' },
-  { value: 'chest', label: 'грудь' },
-  { value: 'waist', label: 'талия' },
-  { value: 'hip', label: 'бёдра' },
-  { value: 'hem', label: 'низ' },
-  { value: 'pocket', label: 'карман' },
-  { value: 'closure', label: 'застёжка' },
-  { value: 'back', label: 'спинка' },
-  { value: 'front', label: 'полочка' },
-  { value: 'other', label: 'другое' },
+  { value: 'sleeve', label: 'sleeve' },
+  { value: 'collar', label: 'collar' },
+  { value: 'neckline', label: 'neckline' },
+  { value: 'armhole', label: 'armhole' },
+  { value: 'shoulder', label: 'shoulder' },
+  { value: 'chest', label: 'chest' },
+  { value: 'waist', label: 'waist' },
+  { value: 'hip', label: 'hip' },
+  { value: 'hem', label: 'hem' },
+  { value: 'pocket', label: 'pocket' },
+  { value: 'closure', label: 'closure' },
+  { value: 'back', label: 'back' },
+  { value: 'front', label: 'front' },
+  { value: 'other', label: 'other' },
 ];
 
 // Rows written before 0256 may carry the legacy `unknown` token, which the server now normalises to

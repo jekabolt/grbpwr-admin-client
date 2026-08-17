@@ -145,11 +145,11 @@ export function useSetAccountSpecialties() {
       // tech-card/components/useRoles). Без этой строки новая специальность не нашлась бы
       // поиском по людям до перезагрузки вкладки.
       queryClient.invalidateQueries({ queryKey: ['admins'] });
-      showMessage('специальности сохранены', 'success');
+      showMessage('specialties saved', 'success');
     },
     onError: (error) =>
       showMessage(
-        error instanceof Error ? error.message : 'не удалось сохранить специальности',
+        error instanceof Error ? error.message : "couldn't save the specialties",
         'error',
       ),
   });

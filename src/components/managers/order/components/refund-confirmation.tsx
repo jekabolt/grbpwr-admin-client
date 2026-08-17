@@ -188,22 +188,22 @@ export function RefundConfirmation({
             модели (уценка, пока не продаётся). */}
         <div className='space-y-1'>
           <Text variant='uppercase' size='micro' className='tracking-label'>
-            судьба возврата
+            fate of the returned units
           </Text>
           <select
             className='w-full border border-borderColor bg-bgColor p-2 text-textBaseSize outline-none'
             value={disposition}
             onChange={(e) => setDisposition(e.target.value)}
           >
-            <option value='restock'>restock — годен, обратно в продажу</option>
-            <option value='writeoff'>writeoff — изношен/повреждён, списать</option>
-            <option value='seconds'>seconds — уценка, в B-сток</option>
+            <option value='restock'>restock — fit to sell, back on the shelf</option>
+            <option value='writeoff'>writeoff — worn / damaged, write it off</option>
+            <option value='seconds'>seconds — marked down, into B-stock</option>
           </select>
           {disposition !== 'restock' ? (
             <Text size='small' variant='inactive'>
               {disposition === 'writeoff'
-                ? 'Единицы НЕ вернутся на склад; их себестоимость остаётся списанной в COGS.'
-                : 'Единицы вернутся B-стоком той же модели с нулевой стоимостью (продажа B — после решения по цене).'}
+                ? 'The units will NOT come back into stock; their cost stays written off to COGS.'
+                : 'The units come back as B-stock of the same model at zero cost (selling B comes after the price is decided).'}
             </Text>
           ) : null}
         </div>

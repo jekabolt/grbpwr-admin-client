@@ -633,10 +633,7 @@ export function MaterialModal({
       // Ф4.8 — толщина полотна в ОДИН слой. Артикул без толщины обязан остаться без неё: ноль
       // означал бы стопку 0 см, то есть «влезает всегда», — вердикт, собранный из отсутствующих
       // данных. Поэтому здесь ровно presenceDecimal и никаких `?? 0`.
-      fabricThicknessMm: presenceDecimal(
-        d.fabricThicknessMm,
-        material?.fabricThicknessMm,
-      ),
+      fabricThicknessMm: presenceDecimal(d.fabricThicknessMm, material?.fabricThicknessMm),
     };
     save.mutate(payload, {
       onSuccess: (data) => {
@@ -859,7 +856,7 @@ export function MaterialModal({
                 </label>
                 <label className='flex flex-col gap-1'>
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    кромка (cm/край)
+                    selvedge (cm per edge)
                   </Text>
                   <input
                     className={cell}
@@ -1145,45 +1142,45 @@ export function MaterialModal({
             снятием значения, а введённый 0 сервер отклоняет с подсказкой, что очистить надо поле. */}
           {d.materialClass === 'MATERIAL_CLASS_FABRIC' && (
             <>
-              <GroupLabel>раскрой</GroupLabel>
+              <GroupLabel>cutting</GroupLabel>
               <div className={grid}>
                 <label className='flex flex-col gap-1'>
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    коэффициент раскроя
+                    cutting coefficient
                   </Text>
                   <input
                     className={cell}
                     inputMode='decimal'
-                    placeholder='не задан'
+                    placeholder='not set'
                     value={d.cuttingCoefficient}
                     onChange={(e) =>
                       set({ cuttingCoefficient: sanitizeDecimal(e.target.value, 4) })
                     }
                   />
                   <Text variant='label' size='micro'>
-                    МНОЖИТЕЛЬ, а не процент: 1.03 = +3%. Один видимый рычаг вместо восьми потерь,
-                    которые никто не умеет мерить по отдельности, — усадка, обход пороков,
-                    сращивание, оттеночные полосы. Ориентиры: полотно ~1.03, трикотаж ~1.06,
-                    клетка/полоска 1.10–1.20. Пусто = не задан, и тогда потребность не домножается
-                    ни на что.
+                    A MULTIPLIER, not a percent: 1.03 = +3%. One visible lever instead of eight
+                    losses nobody can measure separately — shrinkage, working around flaws,
+                    splicing, shade bands. Rules of thumb: woven ~1.03, knit ~1.06, check/stripe
+                    1.10–1.20. Empty = not set, and then the requirement is not multiplied by
+                    anything.
                   </Text>
                 </label>
                 <label className='flex flex-col gap-1'>
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    толщина полотна, мм
+                    fabric thickness, mm
                   </Text>
                   <input
                     className={cell}
                     inputMode='decimal'
-                    placeholder='не замерена'
+                    placeholder='not measured'
                     value={d.fabricThicknessMm}
                     onChange={(e) => set({ fabricThicknessMm: sanitizeDecimal(e.target.value, 3) })}
                   />
                   <Text variant='label' size='micro'>
-                    В ОДИН СЛОЙ, миллиметры. Из неё и числа слоёв считается высота стопки, которая
-                    сверяется с пределом цеха. Ориентиры: шифон 0.1–0.2, поплин ~0.3, драп 1.5–2.5.
-                    Пусто = не замерена, и тогда высота стопки не проверяется вовсе — замерьте, и
-                    проверка начнёт работать.
+                    A SINGLE PLY, millimeters. Stack height is computed from it and the ply count,
+                    and checked against the workshop limit. Rules of thumb: chiffon 0.1–0.2, poplin
+                    ~0.3, heavy coating 1.5–2.5. Empty = not measured, and then stack height is not
+                    checked at all — measure it and the check starts working.
                   </Text>
                 </label>
               </div>

@@ -17,7 +17,10 @@ const ACCESS_ABBR: Record<string, string> = {
 function StatusBadge({ disabled }: { disabled?: boolean }) {
   return (
     <span
-      className={cn('shrink-0 border px-1.5 py-0.5', disabled ? 'border-error' : 'border-borderColor')}
+      className={cn(
+        'shrink-0 border px-1.5 py-0.5',
+        disabled ? 'border-error' : 'border-borderColor',
+      )}
     >
       <Text variant={disabled ? 'error' : 'uppercase'} size='small'>
         {disabled ? 'disabled' : 'active'}
@@ -135,7 +138,7 @@ export function AccountsTable({
                   accounts:write. */}
               <div className='flex flex-col gap-1'>
                 <Text variant='label' size='micro' component='span' className='uppercase'>
-                  чем занимается
+                  what they do
                 </Text>
                 <SpecialtiesField
                   username={a.username}

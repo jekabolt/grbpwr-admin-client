@@ -77,15 +77,15 @@ export function MyProfile() {
   return (
     <SectionStack className='pb-16'>
       <Section
-        title={`мой профиль · ${username ?? '—'}`}
-        question='— чем вы занимаетесь; прав это не даёт и не отнимает'
+        title={`my profile · ${username ?? '—'}`}
+        question='— what you do; it neither grants nor takes away any rights'
       >
         {!username && (
           <Text variant='label' size='micro'>
-            аккаунт не определился — обновите страницу. править пока нечего.
+            the account did not resolve — refresh the page. there is nothing to edit yet.
           </Text>
         )}
-        <GroupLabel flush>чем занимается</GroupLabel>
+        <GroupLabel flush>what they do</GroupLabel>
         <SpecialtiesField
           username={username}
           specialties={mySpecialties}
@@ -93,18 +93,21 @@ export function MyProfile() {
           editable={!!username}
         />
         <Text variant='label' size='micro' className='max-w-[70ch]'>
-          по этой подписи вас находят, когда назначают владельца файла или упоминают в обсуждении.
-          несколько специальностей — норма: в маленькой команде один и тот же человек и снимает, и
-          монтирует.
+          this is the caption people find you by when a file owner is assigned or somebody is
+          mentioned in a discussion. several specialties are normal: in a small team the same person
+          both shoots and edits.
         </Text>
       </Section>
 
-      <Section title='мои доступы' question='— что открыто вашему аккаунту; раздаёт их супер-админ'>
+      <Section
+        title='my access'
+        question='— what is open to your account; a super admin hands it out'
+      >
         {isSuper ? (
           <div className='flex flex-wrap items-center gap-2'>
-            <Pill tone='ink'>супер-админ</Pill>
+            <Pill tone='ink'>super admin</Pill>
             <Text variant='label' size='micro' component='span'>
-              открыты все разделы, включая аккаунты и права.
+              every section is open, accounts and rights included.
             </Text>
           </div>
         ) : granted.length ? (
@@ -117,13 +120,13 @@ export function MyProfile() {
                     {g.title}
                   </Text>
                 }
-                value={<Pill tone={g.write ? 'ink' : 'mut'}>{g.write ? 'запись' : 'чтение'}</Pill>}
+                value={<Pill tone={g.write ? 'ink' : 'mut'}>{g.write ? 'write' : 'read'}</Pill>}
               />
             ))}
           </div>
         ) : (
           <Text variant='label' size='micro'>
-            разделов не выдано: пока открыт только этот экран.
+            no sections granted: for now only this screen is open.
           </Text>
         )}
 
@@ -133,7 +136,7 @@ export function MyProfile() {
           (supers.length ? (
             <div className='flex flex-wrap items-center gap-2'>
               <Text variant='label' size='micro' component='span'>
-                доступ выдаёт кто-то из этих людей
+                one of these people hands out access
               </Text>
               {supers.map((a) => (
                 <span key={a.id ?? a.username} className='flex items-center gap-1'>
@@ -147,7 +150,7 @@ export function MyProfile() {
           ) : (
             !adminsLoading && (
               <Text variant='label' size='micro'>
-                попросите их у того, кто ведёт аккаунты.
+                ask whoever manages the accounts for it.
               </Text>
             )
           ))}

@@ -77,10 +77,9 @@ function trimQty(d?: googletype_Decimal): string {
 // навсегда. Найти и починить её должен человек, поэтому здесь есть, за что зацепиться.
 function DriftTile({ drift }: { drift: common_MaterialCoefficientLayDrift }) {
   const card =
-    drift.techCardName ||
-    (drift.techCardId ? `карта #${drift.techCardId}` : 'карточка не названа');
+    drift.techCardName || (drift.techCardId ? `card #${drift.techCardId}` : 'card not named');
   const lay =
-    drift.layName || drift.layKey || (drift.layId ? `настил #${drift.layId}` : 'настил не назван');
+    drift.layName || drift.layKey || (drift.layId ? `lay #${drift.layId}` : 'lay not named');
   // UNKNOWN — это «единицу не распознали», а НЕ «единицы нет»: число показывается всё равно, но без
   // подписи, которой нельзя доверять.
   const unit =
@@ -105,36 +104,36 @@ function DriftTile({ drift }: { drift: common_MaterialCoefficientLayDrift }) {
     >
       <Text size='micro' variant='label' tracking='label' className='uppercase'>
         {card}
-        {drift.runId ? ` · прогон #${drift.runId}` : ''}
+        {drift.runId ? ` · run #${drift.runId}` : ''}
       </Text>
       <Text size='control'>{lay}</Text>
       <Text size='micro' variant='label' className='tabular-nums'>
         {/* План уже пересчитан сервером в единицу факта — два числа встают рядом без второго
             перевода здесь. Пусто у плана значит «несводим либо его нет», а не ноль. */}
-        {planned ? `план ${planned}${suffix}` : 'план не сведён'}
+        {planned ? `plan ${planned}${suffix}` : 'plan not reconciled'}
         {' → '}
-        {actual ? `факт ${actual}${suffix}` : 'факт не введён'}
+        {actual ? `actual ${actual}${suffix}` : 'actual not entered'}
       </Text>
       {driftText ? (
         <Text size='micro' className='tabular-nums'>
-          дрейф {driftText}
+          drift {driftText}
         </Text>
       ) : null}
       {skipped ? (
         <Text size='micro' variant='label'>
           {/* Причина — дословно с сервера: перевранная или обобщённая, она перестаёт быть подсказкой
               о том, что именно чинить. */}
-          не вошёл в медиану — {skipped}
+          not in the median — {skipped}
         </Text>
       ) : null}
       {!driftText && !skipped ? (
         <Text size='micro' variant='label'>
-          дрейф не посчитан, и причина не названа
+          drift not computed, and no reason given
         </Text>
       ) : null}
       {when ? (
         <Text size='nano' variant='label'>
-          замер {when}
+          measured {when}
         </Text>
       ) : null}
     </div>
@@ -147,7 +146,7 @@ function Head({ badge }: { badge: React.ReactNode }) {
   return (
     <div className='flex flex-wrap items-baseline gap-2'>
       <Text variant='label' size='micro' tracking='label' className='uppercase'>
-        предложение по факту настилов
+        suggestion from lay actuals
       </Text>
       {badge}
     </div>
@@ -185,10 +184,10 @@ export function CuttingCoefficientSuggestion({
   // Артикул ещё не создан: настилов у него нет по построению, и запрос не уходил. Строка стоит
   // здесь не ради симметрии — иначе про калибровку по факту узнать неоткуда.
   if (materialId <= 0) {
-    return <Quiet>артикул ещё не сохранён — предложение считается по его настилам</Quiet>;
+    return <Quiet>the article isn't saved yet — the suggestion is computed from its lays</Quiet>;
   }
 
-  if (isLoading) return <Quiet>считаем по настилам…</Quiet>;
+  if (isLoading) return <Quiet>computing from the lays…</Quiet>;
 
   // 403 — НЕ ОШИБКА. RPC классифицирован production:read, а карточку артикула открывает и тот, у
   // кого этого права нет: для него предложения просто не существует, и красная плашка сообщила бы
@@ -198,8 +197,8 @@ export function CuttingCoefficientSuggestion({
     return (
       <Quiet>
         {forbidden
-          ? 'предложение недоступно на этом доступе'
-          : 'предложение не загрузилось — коэффициент можно поставить рукой'}
+          ? "the suggestion isn't available with this access"
+          : "the suggestion didn't load — the coefficient can be set by hand"}
       </Quiet>
     );
   }
@@ -222,16 +221,16 @@ export function CuttingCoefficientSuggestion({
   const badge =
     view === 'ready' ? (
       applicable ? (
-        <Pill tone='ok'>предложение готово</Pill>
+        <Pill tone='ok'>suggestion ready</Pill>
       ) : (
-        <Pill tone='mut'>число не пришло</Pill>
+        <Pill tone='mut'>no number came back</Pill>
       )
     ) : view === 'outOfRange' ? (
-      <Pill tone='attention'>поле такого не примет</Pill>
+      <Pill tone='attention'>the field won't take this</Pill>
     ) : view === 'tooFew' ? (
-      <Pill tone='mut'>мало замеров</Pill>
+      <Pill tone='mut'>not enough measurements</Pill>
     ) : (
-      <Pill tone='mut'>предложения нет</Pill>
+      <Pill tone='mut'>no suggestion</Pill>
     );
 
   return (
@@ -241,17 +240,19 @@ export function CuttingCoefficientSuggestion({
       {view === 'ready' || view === 'outOfRange' ? (
         <StatGrid min={170}>
           <Stat
-            label='медиана дрейфа план↔факт'
+            label='median plan↔actual drift'
             value={median || '—'}
-            sub={`измерение · по ${layCount} настилам`}
+            sub={`measurement · across ${layCount} lays`}
           />
           {/* Второе число — то самое, что ложится в поле. При OUT_OF_RANGE его нет, и на его месте
               стоит «—», а НЕ единица и не ближайшая граница: зажать −12% в 1.0 значило бы подменить
               измерение ближайшим сохраняемым значением и выдать подмену за замер. */}
           <Stat
-            label='коэффициент к подстановке'
+            label='coefficient to insert'
             value={applicable ? suggested : '—'}
-            sub={view === 'ready' ? 'множитель · как в поле выше' : 'поле принимает 1–3'}
+            sub={
+              view === 'ready' ? 'multiplier · same as the field above' : 'the field accepts 1–3'
+            }
           />
         </StatGrid>
       ) : null}
@@ -265,19 +266,19 @@ export function CuttingCoefficientSuggestion({
           переносить нечего. */}
       {view === 'ready' || view === 'outOfRange' ? (
         <CalloutBox tone='warning'>
-          Это число — только для поля «коэффициент раскроя» этого артикула: дрейф мерян от
-          ИЗМЕРЕННОЙ длины раскладки, межлекальных выпадов и концов настила в нём нет. В «est.
-          cutting wastage %» на строке BOM тех-карты его не переносить — тот процент гроссит
-          NETTO-норму, и эта медиана занизила бы закупку на все выпады.
+          This number is only for this article's “cutting coefficient” field: the drift is measured
+          from the MEASURED marker length, so waste between pieces and lay ends are not in it. Don't
+          carry it into “est. cutting wastage %” on a tech-card BOM line — that percent grosses up
+          the NETTO norm, and this median would understate the purchase by all the waste.
         </CalloutBox>
       ) : null}
 
       {view === 'tooFew' ? (
         <StatGrid min={170}>
           <Stat
-            label='настилов с планом и фактом'
-            value={`${layCount} из ${LAY_THRESHOLD}`}
-            sub='нужно три'
+            label='lays with plan and actual'
+            value={`${layCount} of ${LAY_THRESHOLD}`}
+            sub='three needed'
           />
         </StatGrid>
       ) : null}
@@ -291,30 +292,26 @@ export function CuttingCoefficientSuggestion({
 
       {view === 'outOfRange' ? (
         <Text size='micro' variant='label'>
-          измерение показано как есть и не подогнано под границу поля: подставлять нечего — разберите
-          настилы ниже, такой разброс обычно значит неверный замер.
+          the measurement is shown as it is and is not pinned to the boundary of the field: there is
+          nothing to substitute — go through the lays below, a spread like this usually means a
+          wrong measurement.
         </Text>
       ) : null}
 
       {view === 'tooFew' ? (
         <Text size='micro' variant='label'>
-          медиана из одного-двух замеров ничего не значит — пусть цех отчитается о расходе ещё на
-          настилах этого артикула, и предложение появится само.
+          a median of one or two measurements means nothing — let the workshop report consumption on
+          more lays of this article and the suggestion will appear on its own.
         </Text>
       ) : null}
 
       {applicable ? (
         <div className='flex flex-wrap items-center gap-2'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            onClick={() => onApply(suggested)}
-          >
-            подставить в поле
+          <Button type='button' variant='secondary' size='xs' onClick={() => onApply(suggested)}>
+            insert into the field
           </Button>
           <Text size='micro' variant='label'>
-            число встанет в «коэффициент раскроя» — карточку сохраняете вы, не сервер
+            the number goes into “cutting coefficient” — you save the card, not the server
           </Text>
         </div>
       ) : null}
@@ -326,8 +323,8 @@ export function CuttingCoefficientSuggestion({
       {drifts.length > 0 ? (
         <details>
           <summary className='cursor-pointer text-micro uppercase tracking-label text-labelColor'>
-            разбор по настилам: {counted} в медиане
-            {skippedCount > 0 ? `, ${skippedCount} не вошли` : ''}
+            breakdown by lay: {counted} in the median
+            {skippedCount > 0 ? `, ${skippedCount} left out` : ''}
           </summary>
           <div className='mt-1.5 grid gap-1.5 sm:grid-cols-2'>
             {drifts.map((d, i) => (

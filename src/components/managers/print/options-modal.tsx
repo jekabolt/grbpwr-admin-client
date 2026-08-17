@@ -20,11 +20,11 @@ import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 
 const BOOKLET_LABELS: Record<BookletId, string> = {
-  cover: 'маршрутный лист',
-  cut: 'крой',
-  sew: 'пошив',
-  qc: 'ОТК и упаковка',
-  internal: 'внутреннее',
+  cover: 'route sheet',
+  cut: 'cutting',
+  sew: 'sewing',
+  qc: 'QC and packing',
+  internal: 'internal',
 };
 
 // Профиль МОДАЛКИ шире профиля query: «в цех по релизу» — это не четвёртое значение ?profile=,
@@ -38,22 +38,18 @@ const BOOKLET_LABELS: Record<BookletId, string> = {
 type ModalProfile = PrintProfile | 'factory-release';
 
 const PROFILE_OPTIONS: { value: ModalProfile; label: string }[] = [
-  { value: 'factory', label: 'комплект в цех — без себестоимости' },
+  { value: 'factory', label: 'pack for the workshop — without cost' },
   {
     value: 'factory-release',
-    label: 'в цех по релизу — замороженный снапшот, без себестоимости',
+    label: 'to the workshop, by release — frozen snapshot, without cost',
   },
-  { value: 'internal', label: 'внутренний — всё, включая цены' },
-  { value: 'release', label: 'внутренний по релизу — замороженный снапшот, с ценами' },
+  { value: 'internal', label: 'internal — everything, prices included' },
+  { value: 'release', label: 'internal, by release — frozen snapshot, with prices' },
 ];
 
 const printPath = (techCardId: number) => ROUTES.techCardPrint.replace(':id', String(techCardId));
 
-const colorwaysWord = (n: number): string => {
-  if (n % 10 === 1 && n % 100 !== 11) return 'колорвей';
-  if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return 'колорвея';
-  return 'колорвеев';
-};
+const colorwaysWord = (n: number): string => (n === 1 ? 'colorway' : 'colorways');
 
 // Различимые колор-модели прогона: на основной карте колорвей линии — это её product,
 // outputVariantId живёт только на линиях aux-карт (то же правило, что в scope.buildPrintScope).
@@ -140,7 +136,7 @@ export function PrintOptionsModal({
     runId > 0 && runColorwayIds.length > 1 && colorways.length > 0 && colorwayId === 0;
 
   const runItems = [
-    { value: 0, label: 'без прогона (внутренний тех-пак)' },
+    { value: 0, label: 'no run (internal tech pack)' },
     ...runs.map((r) => ({
       value: r.id ?? 0,
       label: `PR-${r.id ?? 0} · ${runStatusLabel(r.run?.status)} · ${runDate(r.createdAt) || '—'}`,
@@ -150,7 +146,7 @@ export function PrintOptionsModal({
   const colorwayItems = [
     {
       value: 0,
-      label: 'все колорвеи',
+      label: 'all colorways',
       disabled: runId > 0 && runColorwayIds.length > 1 && colorways.length > 0,
     },
     ...colorways.map((cw) => {
@@ -196,13 +192,13 @@ export function PrintOptionsModal({
   const releasePicked = profile === 'release' || profile === 'factory-release';
 
   const blockReason = mustPickColorway
-    ? `в этой партии ${runColorwayIds.length} ${colorwaysWord(runColorwayIds.length)} — комплект печатается на один, выберите какой`
+    ? `this run has ${runColorwayIds.length} ${colorwaysWord(runColorwayIds.length)} — the pack prints for one, pick which`
     : releasePicked && releaseId === 0
       ? releases.length > 0
-        ? 'профиль «по релизу» требует выбрать релиз'
-        : 'у карты нет релизов — печать «по релизу» невозможна'
+        ? 'the "by release" profile needs a release picked'
+        : 'the card has no releases — printing "by release" is impossible'
       : booklets.size === 0
-        ? 'не выбрана ни одна тетрадь'
+        ? 'no booklet is selected'
         : null;
 
   const print = () => {
@@ -228,20 +224,20 @@ export function PrintOptionsModal({
       onOpenChange={(o) => {
         if (!o) onClose();
       }}
-      title='печать тех-пака'
-      confirmLabel='печать'
-      cancelLabel='закрыть'
+      title='print the tech pack'
+      confirmLabel='print'
+      cancelLabel='close'
       confirmDisabled={!!blockReason}
       onConfirm={print}
     >
       <div className='flex flex-col gap-3'>
         <label className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            прогон
+            run
           </Text>
           <Select
             name='print-run'
-            placeholder='без прогона (внутренний тех-пак)'
+            placeholder='no run (internal tech pack)'
             fullWidth
             value={String(runId)}
             items={runItems}
@@ -251,11 +247,11 @@ export function PrintOptionsModal({
 
         <label className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            колорвей
+            colorway
           </Text>
           <Select
             name='print-colorway'
-            placeholder='все колорвеи'
+            placeholder='all colorways'
             fullWidth
             value={String(colorwayId)}
             items={colorwayItems}
@@ -265,7 +261,7 @@ export function PrintOptionsModal({
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            размеры
+            sizes
           </Text>
           {gradeSizeIds.length > 0 ? (
             <ChipRow>
@@ -282,21 +278,21 @@ export function PrintOptionsModal({
             </ChipRow>
           ) : (
             <Text size='small' variant='label'>
-              у карты нет размерного ряда
+              the card has no size range
             </Text>
           )}
           <Text size='micro' variant='label'>
-            пусто — размеры прогона (без прогона — все размеры карты)
+            empty — the run's sizes (without a run — all the card's sizes)
           </Text>
         </div>
 
         <label className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            профиль
+            profile
           </Text>
           <Select
             name='print-profile'
-            placeholder='профиль'
+            placeholder='profile'
             fullWidth
             value={profile}
             items={PROFILE_OPTIONS}
@@ -307,11 +303,11 @@ export function PrintOptionsModal({
         {releasePicked && (
           <label className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              релиз
+              release
             </Text>
             <Select
               name='print-release'
-              placeholder='— выберите релиз —'
+              placeholder='— pick a release —'
               fullWidth
               value={releaseId ? String(releaseId) : undefined}
               items={releaseItems}
@@ -322,7 +318,7 @@ export function PrintOptionsModal({
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            тетради
+            booklets
           </Text>
           <div className='flex flex-col gap-1.5'>
             {ALL_BOOKLETS.map((id) => (
@@ -356,7 +352,7 @@ export function PrintOptionsModal({
               onClose();
             }}
           >
-            печать без скоупа
+            print without a scope
           </Button>
           {/* Наряд на партию умеет тот же фильтр по колорвею, но собрать ему query было неоткуда:
               единственная ссылка на его печать вела без параметров. Выбранный здесь цвет уезжает
@@ -375,7 +371,7 @@ export function PrintOptionsModal({
                 onClose();
               }}
             >
-              наряд на партию — pdf
+              run pack — pdf
             </Button>
           )}
         </div>

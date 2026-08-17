@@ -118,7 +118,9 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 autoFocus
                 className='text-lg'
                 value={field.value}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  field.onChange(e.target.value)
+                }
                 onBlur={field.onBlur}
               />
             )}
@@ -283,11 +285,11 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 и приватной библиотеки — факт хранилища, а не различие, которое человек
                 должен держать в голове, заполняя карточку. Подпись «сайт» у медиа
                 говорит единственное, что здесь практически важно: это уедет на CDN. */}
-            <Field label='вложения'>
+            <Field label='attachments'>
               <div className='flex flex-col gap-2.5'>
                 <div className='flex flex-col gap-1'>
                   <Text size='micro' variant='label' className='uppercase'>
-                    медиа сайта · публичные
+                    site media · public
                   </Text>
                   <Controller
                     control={control}
