@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { FileRole, FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { tasksService } from 'components/managers/tasks/api/tasksService';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -157,6 +158,36 @@ export default function FileTopicsPage() {
   );
 
   /**
+   * СКОЛЬКО КАРТОЧЕК КАНБАНА ПОКАЗЫВАЕТ НА ПРОЕКТ — тем же образцом и по той же причине, что
+   * вещи выше: число, которое система знает ДО нажатия, не называют после.
+   *
+   * ЭТО ТОТ ЖЕ `ListTasks`, ЧТО У ДОСКИ, и права у него те же — `tasks:read`. У смотрителя тем
+   * их может не быть: комбинация законная, а не поломка, и отказ поглощается состоянием
+   * `unknown` («скажем после сохранения»), а не превращается в плашку ошибки.
+   *
+   * `includeArchived` — ПРАВДА, А НЕ УДОБСТВО: сервер снимает ссылку у КАЖДОЙ строки задачи
+   * (`... WHERE project_topic_id = :id`), заархивированной в том числе. Спрашивать активные и
+   * называть это числом значило бы обещать меньше, чем произойдёт.
+   */
+  const projectTasks = (topicId: number, enabled: boolean) =>
+    ({
+      queryKey: ['tasks', 'project-count', topicId],
+      queryFn: () => tasksService.listTasks({ projectTopicId: topicId, includeArchived: true }),
+      enabled: enabled && topicId > 0,
+      retry: false,
+      staleTime: 30_000,
+    }) as const;
+  const deletingTasks = useQuery(
+    projectTasks(Number(deleting?.id ?? 0), !!deleting && isProjectTopic(deleting)),
+  );
+  const metaTasks = useQuery(
+    projectTasks(
+      Number(meta?.id ?? 0),
+      !!meta && isProjectTopic(meta) && metaKind === 'plain',
+    ),
+  );
+
+  /**
    * Число вещей СЛОВАМИ — одна машина на обе модалки.
    *
    * Пока ответ в пути, число не выдумывается: «0» на месте незагруженного счёта — это ровно то
@@ -164,12 +195,18 @@ export default function FileTopicsPage() {
    * не сумели спросить — так и скажем, и остаётся прежняя формулировка «число будет названо
    * после».
    */
-  const styleCount = (q: typeof deletingStyles) => {
+  const countState = (q: { isPending: boolean; isError: boolean }, n: number) => {
     if (q.isPending) return { state: 'wait' as const, n: 0 };
     if (q.isError) return { state: 'unknown' as const, n: 0 };
-    return { state: 'known' as const, n: (q.data?.styles ?? []).length };
+    return { state: 'known' as const, n };
   };
+  const styleCount = (q: typeof deletingStyles) =>
+    countState(q, (q.data?.styles ?? []).length);
+  // `total` СЕРВЕРА, а не длина страницы: список задач приезжает страницей, и на проекте с
+  // тысячей карточек длина сказала бы потолок вместо правды.
+  const taskCount = (q: typeof deletingTasks) => countState(q, Number(q.data?.total ?? 0));
   const garments = (n: number) => `${n} ${plural(n, 'garment')}`;
+  const tasksWord = (n: number) => `${n} ${plural(n, 'task')}`;
   const [newRole, setNewRole] = useState('');
   const [editRole, setEditRole] = useState<FileRole | undefined>(undefined);
   const [editRoleName, setEditRoleName] = useState('');
@@ -298,6 +335,7 @@ export default function FileTopicsPage() {
       });
       const cleared = Number(res.clearedRoles ?? 0);
       const clearedStyles = Number(res.clearedStyles ?? 0);
+      const clearedTasks = Number(res.clearedTasks ?? 0);
       setMeta(undefined);
       // ЧИСЛО СНЯТЫХ РОЛЕЙ НЕ ГЛОТАЕТСЯ. Понижение, тихо снявшее сорок ярлыков, выглядит
       // ровно так же, как понижение, не снявшее ни одного, — а это разные события.
@@ -319,11 +357,18 @@ export default function FileTopicsPage() {
       // СЛОВАРЬ РАЗВЕДЁН: строка «файл ↔ проект» называется FILE (проект один, и строка — это
       // один файл в нём), привязка вещи — LINK, сама вещь — GARMENT. Пока обе половины звали
       // себя «link», один тост означал этим словом две разные сущности подряд.
+      // ТРЕТЬЕ ЧИСЛО — ЗАДАЧИ (0322), и оно НЕ ТРЕТЬЯ КЛАУЗА. Правило здесь про фразу, а не
+      // про перечисление: роль снимается с ФАЙЛОВ и это своё событие, а вещь и задача теряют
+      // ОДНО И ТО ЖЕ — ссылку на проект. Разное разведено, одинаковое слито под общий глагол
+      // («8 garments and 2 tasks lost the link to this project»), потому что три части через
+      // точку с запятой человек читает как отчёт, а не как фразу.
+      const lostLink = [
+        clearedStyles ? `${clearedStyles} ${plural(clearedStyles, 'garment')}` : '',
+        clearedTasks ? `${clearedTasks} ${plural(clearedTasks, 'task')}` : '',
+      ].filter(Boolean);
       const said = [
         cleared ? `${cleared} ${plural(cleared, 'file')} lost the role in this project` : '',
-        clearedStyles
-          ? `${clearedStyles} ${plural(clearedStyles, 'garment')} lost the link to this project`
-          : '',
+        lostLink.length ? `${lostLink.join(' and ')} lost the link to this project` : '',
       ].filter(Boolean);
       showMessage(said.length ? `saved. ${said.join('; ')}` : 'saved', 'success');
     } catch (e) {
@@ -403,10 +448,18 @@ export default function FileTopicsPage() {
       // «убрал с глаз пустую съёмку» и «у восьми карточек пропал ответ, каким файлом их сделали»
       // обязаны быть ОДНИМ событием на экране, а не двумя с разницей в месяц.
       const unlinked = Number(res.unlinkedStyles ?? 0);
+      // ЗАДАЧА ПЕРЕЖИВАЕТ УДАЛЕНИЕ ТЕМЫ. Ключ стоит с SET NULL, а не с каскадом: карточка
+      // канбана про РАБОТУ, а не про съёмку, и умирать вместе с ней ей незачем. Поэтому
+      // числа складываются под глагол «потеряли ссылку» — и ни одно из них не «удалено».
+      const unlinkedTasks = Number(res.unlinkedTasks ?? 0);
+      const lost = [
+        unlinked ? `${unlinked} ${plural(unlinked, 'garment')}` : '',
+        unlinkedTasks ? `${unlinkedTasks} ${plural(unlinkedTasks, 'task')}` : '',
+      ].filter(Boolean);
       setDeleting(undefined);
       showMessage(
-        unlinked
-          ? `the topic is deleted. ${unlinked} ${plural(unlinked, 'garment')} lost the link to it`
+        lost.length
+          ? `the topic is deleted. ${lost.join(' and ')} lost the link to it`
           : 'the topic is deleted',
         'success',
       );
@@ -1056,6 +1109,18 @@ export default function FileTopicsPage() {
                     return 'no garment card points at this project, so there is nothing to unlink on that side.';
                   return `it also unlinks the ${garments(c.n)} whose cards point here, so “which files was this made with” goes unanswered on them.`;
                 })()}{' '}
+                {/* ТРЕТЬЕ ПОСЛЕДСТВИЕ, СКАЗАННОЕ ДО НАЖАТИЯ — тем же трёхсостоянием, что у
+                    вещей. И тем же порядком слов: карточка канбана ссылку ТЕРЯЕТ, а не
+                    удаляется, — она про работу, а не про съёмку. */}
+                {(() => {
+                  const c = taskCount(metaTasks);
+                  if (c.state === 'wait') return 'counting the task cards that point here…';
+                  if (c.state === 'unknown')
+                    return 'the same happens to the task cards that point here — how many could not be counted just now, and will be said after saving. the cards themselves stay: they are about work, not about the shoot.';
+                  if (c.n === 0)
+                    return 'no task card points at this project, so there is nothing to unlink on that side either.';
+                  return `${tasksWord(c.n)} point here too: they KEEP existing and only lose the link — a card is about work, not about the shoot.`;
+                })()}{' '}
                 neither comes back on its own: making it a project again returns the kind, not the
                 roles and not the links.
               </Text>
@@ -1185,6 +1250,42 @@ export default function FileTopicsPage() {
               <Text className='mt-2'>
                 but <b>{garments(c.n)}</b> point at it: deleting takes those links with it and
                 nothing brings them back. re-linking is done by hand, card by card.
+              </Text>
+            );
+          })()}
+        {/* ЗАДАЧИ — ТРЕТЬЯ СТОРОНА, И ОНА ВЕДЁТ СЕБЯ ИНАЧЕ, ЧЕМ ВЕЩИ. Привязка вещи уходит
+            каскадом вместе с темой; ссылка задачи всего лишь обнуляется (SET NULL), и сама
+            карточка остаётся жить. Слова обязаны различаться: сказать про задачи «deleted»
+            рядом с «deleted the topic» — значит пообещать, что удаление съёмки сносит работу
+            по ней, и человек откажется от законного жеста из-за выдуманной угрозы. */}
+        {isProjectTopic(deleting ?? {}) &&
+          (() => {
+            const c = taskCount(deletingTasks);
+            if (c.state === 'wait')
+              return (
+                <Text className='mt-2' variant='label'>
+                  counting the task cards that point at this project…
+                </Text>
+              );
+            if (c.state === 'unknown')
+              return (
+                <Text className='mt-2'>
+                  task cards are counted under their own rights, and the count could not be read
+                  just now. whatever their number, <b>no task is deleted</b> — a card that points
+                  here only loses the link and goes on living.
+                </Text>
+              );
+            if (c.n === 0)
+              return (
+                <Text className='mt-2' variant='label'>
+                  no task card points at this project either.
+                </Text>
+              );
+            return (
+              <Text className='mt-2'>
+                <b>{tasksWord(c.n)}</b> point at it, and <b>none of them is deleted</b>: a card is
+                about work, not about the shoot, so it stays where it is and only loses the link
+                to this project.
               </Text>
             );
           })()}
