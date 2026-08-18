@@ -351,6 +351,7 @@ export default function FilesPage() {
    */
   const needsRoleResolve = !untopiced && projectId === 0 && fileRole.roleId > 0;
   const roleIndexQuery = useRoleIndex(needsRoleResolve);
+  // ЖДЁМ ОТВЕТА, А НЕ УСПЕХА: отказ обязан ОТПУСТИТЬ сетку, иначе скелет висел бы вечно.
   const roleResolvePending = needsRoleResolve && !roleIndexQuery.isFetched;
 
   const filesQuery = useLibraryFiles(filter, !sectionMode && !roleResolvePending);
@@ -384,10 +385,15 @@ export default function FilesPage() {
     : undefined;
   const resolvedRoleOwner = Number(resolvedRole?.projectTopicId ?? 0);
   useEffect(() => {
-    if (!needsRoleResolve || !roleIndexQuery.isFetched) return;
+    // ТОЛЬКО НА УСПЕХЕ, А НЕ НА «ЗАПРОС ЗАКОНЧИЛСЯ». Индекс мог не прийти — сеть, 500, права.
+    // Снять по этому поводу `frole` значило бы молча выбросить фильтр, о котором мы ничего не
+    // узнали: обрыв связи выглядел бы как «такой роли нет». На отказе адрес остаётся как есть,
+    // и выдача уходит с одинокой ролью — ровно то, что делал клиент до 0323: для живой роли
+    // это её же проект (роль принадлежит одному), и неверно только на мёртвой строке переноса.
+    if (!needsRoleResolve || !roleIndexQuery.isSuccess) return;
     if (resolvedRoleOwner > 0) patch({ projectId: resolvedRoleOwner });
     else patch({ fileRole: { roleId: 0, withoutRole: false } });
-  }, [needsRoleResolve, roleIndexQuery.isFetched, resolvedRoleOwner, patch]);
+  }, [needsRoleResolve, roleIndexQuery.isSuccess, resolvedRoleOwner, patch]);
 
   const allTopics = topicsQuery.data?.topics ?? [];
   // ДВА РЯДА ИЗ ОДНОГО СЛОВАРЯ. Проект — это тема с типом, отдельного запроса у него нет; но
