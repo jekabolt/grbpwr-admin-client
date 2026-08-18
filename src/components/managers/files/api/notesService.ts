@@ -89,7 +89,14 @@ export const notesService = {
 
 /** Чем именно кончилось обращение к помощнику. Слова для человека собирает панель. */
 export type NoteFormatFailureKind =
-  /** ключа модели нет — FailedPrecondition. На бете это штатный ответ, а не поломка. */
+  /**
+   * помощника нет. Сюда ведут ТРИ разные причины, и клиент их не различает: ключа модели нет;
+   * ключ есть, а слуг модели у провайдера мёртв (`OPENROUTER_MODEL`) — оба приезжают ОДНИМ
+   * `FailedPrecondition`, и разделить их можно только сверкой с английской фразой сервера, что
+   * тут запрещено (см. `formatNoteMarkdown`); третья — 404/405/501, помощника на этом контуре
+   * не выкатывали вовсе. На бете такой отказ штатный, а не поломка. Поэтому панель называет
+   * СОСТОЯНИЕ и не называет причину, а причину ищут в консоли — её кладёт туда `logRefusal`.
+   */
   | 'off'
   /** текст длиннее, чем помощник берёт за раз. */
   | 'toolong'
@@ -98,6 +105,15 @@ export type NoteFormatFailureKind =
   /** всё остальное: сеть, шлюз, пустой ответ модели, права. */
   | 'error';
 
+/**
+ * `message` ЧИТАЕТСЯ НЕ ВСЕГДА, И ЭТО НАДО ЗНАТЬ ДО ТОГО, КАК ЕГО ПРАВИТЬ.
+ *
+ * Панель печатает его дословно только у `error`. У `off` и `toolong` она пишет СВОИ слова:
+ * первому нельзя называть причину (их три и они неразличимы), второму нужно назвать число
+ * знаков, которого здесь нет. Для этих двух `message` — диагностическая строка: она попадает в
+ * стек, но не на экран, и правка её экрана не меняет. Подробность отказа для человека кладёт в
+ * консоль `logRefusal`.
+ */
 export class NoteFormatError extends Error {
   readonly kind: NoteFormatFailureKind;
   constructor(kind: NoteFormatFailureKind, message: string) {
@@ -110,6 +126,30 @@ export class NoteFormatError extends Error {
 /** Коды grpc, которые шлюз кладёт в тело отказа. Нужны ровно два, остальное — «ошибка». */
 const GRPC_INVALID_ARGUMENT = 3;
 const GRPC_FAILED_PRECONDITION = 9;
+
+/** Путь помощника. Одна строка на запрос и на след в консоли — чтобы они не разошлись. */
+const NOTE_FORMAT_PATH = '/api/admin/files/note/format';
+
+/**
+ * ЕДИНСТВЕННЫЙ СЛЕД ОТКАЗА — И ОН ОБЯЗАН БЫТЬ.
+ *
+ * Обращение идёт мимо `requestHandler`, а вместе с ним мимо его `console.log('[BE] …')`. Пока
+ * панель называла причину сама, это была неточность; с тех пор как она НАМЕРЕННО причину не
+ * называет, отсутствие следа означало бы, что слова сервера не видны нигде, кроме вкладки сети,
+ * — то есть разбор следующего такого случая начинался бы с нуля. Форма строки та же, что у
+ * `requestHandler`: в консоли она ищется тем же «[BE]».
+ *
+ * ТЕКСТ ЗАМЕТКИ В ЛОГ НЕ ЕДЕТ НИКОГДА. Печатаются только `status`, путь и `code`/`message`
+ * ОТВЕТА — то есть слова сервера. Ни отправленное содержимое, ни тело успешного ответа (а это
+ * сама заметка) сюда не попадают: периметр утечки на сервере закрыт намеренно, и клиент не
+ * имеет права открыть его в консоли.
+ */
+function logRefusal(res: Response, body: { code?: number; message?: string } | null): void {
+  const detail = [typeof body?.code === 'number' ? `code=${body.code}` : '', body?.message ?? '']
+    .filter(Boolean)
+    .join(' ');
+  console.log('[BE] response: ', res.status, res.statusText, NOTE_FORMAT_PATH, detail);
+}
 
 function apiBase(): string {
   return (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
@@ -139,7 +179,7 @@ function authHeader(): string {
 export async function formatNoteMarkdown(content: string, signal: AbortSignal): Promise<string> {
   let res: Response;
   try {
-    res = await fetch(`${apiBase()}/api/admin/files/note/format`, {
+    res = await fetch(`${apiBase()}${NOTE_FORMAT_PATH}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -163,9 +203,15 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
   })();
 
   if (!res.ok) {
+    // ДО разбора: след обязан быть одинаковым для любого исхода — и для «помощника нет», и для
+    // «текст длинный», и для прав. Иначе в консоль попадали бы ровно те отказы, слова которых
+    // и так видны на экране.
+    logRefusal(res, body);
     const code = typeof body?.code === 'number' ? body.code : undefined;
     if (code === GRPC_FAILED_PRECONDITION) {
-      throw new NoteFormatError('off', 'the assistant is not connected');
+      // Диагностика, а не текст экрана: панель у `off` пишет свои слова. Строка называет
+      // ветку провода, потому что это единственное, что тут известно точно.
+      throw new NoteFormatError('off', 'off: FailedPrecondition (no key, or the model is dead)');
     }
     if (code === GRPC_INVALID_ARGUMENT) {
       // InvalidArgument сервер отдаёт не только на превышение потолка (ещё — на пустое
@@ -184,10 +230,12 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
     // 404/405/501 — шлюз ещё не знает этого пути: бэкенд с помощником не выкачен. Для человека
     // это тот же исход, что и отсутствующий ключ, и врать про «ошибку» здесь незачем.
     if (res.status === 404 || res.status === 405 || res.status === 501) {
-      throw new NoteFormatError('off', 'this deployment has no assistant');
+      throw new NoteFormatError('off', `off: ${res.status} (the assistant route is not deployed)`);
     }
     // Слова сервера сюда НЕ едут: панель печатает это сообщение дословно, а формулировки
-    // отказа принадлежат серверу. Подробность остаётся в консоли — `api.ts` логирует ответ.
+    // отказа принадлежат серверу. Подробность остаётся в консоли — её положил туда `logRefusal`
+    // выше. Раньше здесь стояла ссылка на `api.ts`, но эта функция ходит мимо него, и обещанной
+    // строки не существовало.
     throw new NoteFormatError('error', `the server answered with a refusal (${res.status})`);
   }
 
