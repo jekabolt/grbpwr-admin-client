@@ -251,8 +251,11 @@ export function EmptySearchState({
   search,
   narrowed,
   personLabel,
+  roleLabel,
   everywhereTotal,
+  anyRoleTotal,
   onSearchEverywhere,
+  onAnyRole,
   onClearPerson,
   onClearSearch,
 }: {
@@ -261,14 +264,29 @@ export function EmptySearchState({
   narrowed: boolean;
   /** Имя выбранного человека (или `#id`, если такого аккаунта уже нет). */
   personLabel?: string;
+  /**
+   * Роль файла, если выбрана: «исходники» либо «без роли».
+   *
+   * РОЛЬ СУЖАЕТ И БЕЗ ПРОЕКТА, и молчать о ней здесь нельзя по той же причине, по которой
+   * нельзя молчать о человеке: «ничего не нашлось» рядом с непрочитанным рядом ролей — это
+   * случай, когда виноват фильтр, а винят поиск.
+   */
+  roleLabel?: string;
   everywhereTotal?: number;
+  /** Сколько нашлось бы БЕЗ роли. `undefined` — не спрашивали. */
+  anyRoleTotal?: number;
   onSearchEverywhere: () => void;
+  onAnyRole: () => void;
   onClearPerson: () => void;
   onClearSearch: () => void;
 }) {
-  // Оба сужения называются ОДНОЙ фразой: два фильтра, перечисленные порознь, читаются как две
-  // разные причины одной пустоты.
-  const where = [narrowed ? 'в выбранных темах' : '', personLabel ? `у ${personLabel}` : '']
+  // Все сужения называются ОДНОЙ фразой: фильтры, перечисленные порознь, читаются как несколько
+  // разных причин одной пустоты.
+  const where = [
+    narrowed ? 'в выбранных темах' : '',
+    roleLabel ? `среди «${roleLabel}»` : '',
+    personLabel ? `у ${personLabel}` : '',
+  ]
     .filter(Boolean)
     .join(' и ');
   return (
@@ -279,6 +297,13 @@ export function EmptySearchState({
           {narrowed && everywhereTotal !== undefined && everywhereTotal > 0 && (
             <Button size='sm' variant='main' onClick={onSearchEverywhere}>
               искать во всех темах ({everywhereTotal})
+            </Button>
+          )}
+          {/* Кнопка НЕСЁТ ЧИСЛО — то же правило, что у соседних: без него она обещает
+              результат, которого может не быть. Нет числа или оно ноль — кнопки нет. */}
+          {roleLabel && !!anyRoleTotal && (
+            <Button size='sm' variant='secondary' onClick={onAnyRole}>
+              в любой роли ({anyRoleTotal})
             </Button>
           )}
           {personLabel && (
@@ -434,6 +459,12 @@ export function EmptyGroupingState({
     if (projectId > 0 && withoutRole) return `в проекте «${project}» всё разобрано по ролям`;
     if (projectId > 0 && role) return `в проекте «${project}» нет ничего в роли «${role}»`;
     if (projectId > 0) return `в проекте «${project}» пусто`;
+    // СТРАХОВКА, А НЕ ЖИВАЯ ВЕТКА, и это надо сказать вслух, чтобы через полгода её не сочли
+    // сломанной. «Без роли» без проекта до сюда не доходит: его гасит `fileRoleFromUrl` при
+    // разборе адреса и второй раз `normalizeGrouping` при сборке запроса. Но компонент —
+    // обычная функция, и её пропы не защищены ни одним из этих двух гейтов: следующий вызывающий
+    // может собрать такую пару руками. Строка стоит здесь ровно на этот случай, потому что
+    // альтернатива — «ни в одном проекте нет роли «»» с пустыми кавычками.
     if (withoutRole) return 'выберите проект — «без роли» спрашивают внутри него';
     return `ни в одном проекте нет роли «${role}»`;
   })();

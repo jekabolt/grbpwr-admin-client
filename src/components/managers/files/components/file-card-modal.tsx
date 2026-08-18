@@ -19,7 +19,7 @@ import { FileComments } from './file-comments';
 import { FileOwnersSection } from './file-owners-section';
 import { FileReaderModal } from './file-reader';
 import { FileTasksSection, useFileTasks } from './file-tasks-section';
-import { projectDates } from './topic-chips';
+import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 /**
  * Карточка файла — МОДАЛКА ПОВЕРХ СЕТКИ, а не отдельная страница.
@@ -335,7 +335,7 @@ export function FileCardModal({
               {projectChips.map((t) => {
                 const pid = Number(t.id);
                 const on = selected.includes(pid);
-                const d = projectDates(t);
+                const d = projectHint(t);
                 return (
                   <Chip
                     key={pid}
@@ -352,6 +352,7 @@ export function FileCardModal({
                     }
                   >
                     {t.name}
+                    <ProjectArchiveMark project={t} />
                   </Chip>
                 );
               })}

@@ -11,7 +11,7 @@ import { filesService } from '../api/filesService';
 import { failureText } from '../api/rpc-error';
 import { useFilesMutations } from '../hooks/useFiles';
 import { plural } from '../upload/text';
-import { projectDates } from './topic-chips';
+import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 type Refusal = { id: number; name: string; reason: string };
 
@@ -121,7 +121,11 @@ export function FilesSelectionBar({
         roleId,
       });
       const n = Number(res.updated ?? 0);
-      const project = projects.find((p) => Number(p.id) === roleProject)?.name ?? '';
+      // ПУСТАЯ СТРОКА ВМЕСТО ИМЕНИ — ЭТО ЛОЖЬ, а не отсутствие данных: тост «в проекте «» роль
+      // «исходники»» читается как поломка и не говорит, куда именно уехали файлы. Номер хуже
+      // имени, но он однозначен, и его можно сверить с адресом.
+      const project =
+        projects.find((p) => Number(p.id) === roleProject)?.name ?? `#${roleProject}`;
       const role = roles.find((r) => Number(r.id) === roleId)?.name ?? '';
       // Сервер считает СТРОКИ, которые теперь несут запрошенную роль, — включая созданные этим
       // вызовом и исключая те, что её уже несли. «Проставлено 8» на восьми файлах, из которых
@@ -328,7 +332,7 @@ export function FilesSelectionBar({
                 {projects.map((p) => {
                   const id = Number(p.id);
                   const on = pickTopics.includes(id);
-                  const d = projectDates(p);
+                  const d = projectHint(p);
                   return (
                     <Chip
                       key={id}
@@ -342,6 +346,7 @@ export function FilesSelectionBar({
                       }
                     >
                       {p.name}
+                      <ProjectArchiveMark project={p} />
                     </Chip>
                   );
                 })}
@@ -424,7 +429,7 @@ export function FilesSelectionBar({
                 {projects.map((p) => {
                   const id = Number(p.id);
                   const on = id === roleProject;
-                  const d = projectDates(p);
+                  const d = projectHint(p);
                   return (
                     <Chip
                       key={id}
@@ -434,6 +439,7 @@ export function FilesSelectionBar({
                       onClick={() => setRoleProject(on ? 0 : id)}
                     >
                       {p.name}
+                      <ProjectArchiveMark project={p} />
                     </Chip>
                   );
                 })}

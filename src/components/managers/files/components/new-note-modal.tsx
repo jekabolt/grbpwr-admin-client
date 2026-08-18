@@ -13,7 +13,7 @@ import { filesService } from '../api/filesService';
 import { notesService } from '../api/notesService';
 import { failureText } from '../api/rpc-error';
 import { invalidateFileViews } from '../hooks/useFiles';
-import { projectDates } from './topic-chips';
+import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 /**
  * Создание заметки: ИМЯ СПРАШИВАЕТСЯ СРАЗУ.
@@ -175,7 +175,7 @@ export function NewNoteModal({
               {projects.map((p) => {
                 const id = Number(p.id);
                 const on = selected.includes(id);
-                const d = projectDates(p);
+                const d = projectHint(p);
                 return (
                   <Chip
                     key={id}
@@ -189,6 +189,7 @@ export function NewNoteModal({
                     }
                   >
                     {p.name}
+                    <ProjectArchiveMark project={p} />
                   </Chip>
                 );
               })}

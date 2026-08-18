@@ -183,12 +183,19 @@ function normalizePerson(f: FilesFilter): { id: number; role: PersonRoleFilter }
 }
 
 /**
- * ГРУППИРОВКА ПРИВОДИТСЯ К ВИДУ ОДИН РАЗ, здесь же, — и по двум разным причинам.
+ * ГРУППИРОВКА ПРИВОДИТСЯ К ВИДУ ОДИН РАЗ, здесь же, — и по трём разным причинам.
  *
  * «Без роли» без проекта сервер ОТКАЗЫВАЕТ. Ослабление фильтра собирается из этого же объекта
  * (`{...filter, projectId: 0}` в кнопках пустого экрана), и забудь оно снять флажок — кнопка
  * «показать шире» вернула бы отказ вместо более широкой выдачи. Одно правило в одном месте
  * вместо трёх согласованных на трёх экранах.
+ *
+ * «РАЗОБРАТЬ» С ПРОЕКТОМ ИЛИ РОЛЬЮ СЕРВЕР ТОЖЕ ОТКАЗЫВАЕТ — `untopiced cannot be combined with
+ * a project or a role`, и это не придирка: «разобрать» значит «ни одной темы», а проект и есть
+ * тема, так что пара по построению пуста. Молча отбросить одно плечо нельзя (показали бы
+ * больше, чем просили), значит гасить надо здесь, до провода. Пока этого не было, человек,
+ * стоящий в съёмке и нажавший «разобрать», получал вместо сетки красную плашку отказа, и
+ * «повторить» не помогало: отказ был не сбоем, а ответом.
  *
  * Роль ЖЕ без проекта — полноценный вопрос («все исходники по всем съёмкам»), и обнулять её
  * здесь нельзя: это не тот случай, что `personRole`, которую сервер без человека игнорирует.
@@ -198,6 +205,7 @@ function normalizeGrouping(f: FilesFilter): {
   role: number;
   withoutRole: boolean;
 } {
+  if (f.untopiced) return { project: 0, role: 0, withoutRole: false };
   const project = Math.max(0, Math.trunc(Number(f.projectId ?? 0) || 0));
   const role = Math.max(0, Math.trunc(Number(f.roleId ?? 0) || 0));
   const withoutRole = project > 0 && !!f.withoutRole;
@@ -329,10 +337,16 @@ const PAGE_SIZE = 60;
  */
 const URL_SAFE_STALE_TIME = 30 * 60 * 1000;
 
-export function useFileTopics(includeArchived = false) {
+/**
+ * `enabled` — ради ОДНОГО случая: холст читает словарь без архива, но проект в адресе законно
+ * бывает архивным, и тогда его имя надо где-то взять. Второй запрос ради этого уходит только
+ * тогда, когда имя действительно не нашлось, а не на каждый показ сетки.
+ */
+export function useFileTopics(includeArchived = false, enabled = true) {
   return useQuery({
     queryKey: filesKeys.topics(includeArchived),
     queryFn: () => filesService.listTopics(includeArchived),
+    enabled,
     staleTime: URL_SAFE_STALE_TIME,
   });
 }

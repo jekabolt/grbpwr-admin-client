@@ -136,8 +136,17 @@ export default function FilesPage() {
   //
   // Разбор глух к мусору так же, как разбор человека: непонятое значение не фильтрует и не
   // роняет экран.
-  const projectId = idFromUrl(params.get('project'));
-  const fileRole: FileRoleFilter = fileRoleFromUrl(params.get('frole'), projectId > 0);
+  //
+  // «РАЗОБРАТЬ» ГАСИТ ГРУППИРОВКУ ТОЧНО ТАК ЖЕ, КАК ГАСИТ ТЕМЫ ДВАДЦАТЬЮ СТРОКАМИ ВЫШЕ, и по
+  // более жёсткой причине: пару untopiced × проект/роль сервер не игнорирует, а ОТКАЗЫВАЕТ
+  // (`untopiced cannot be combined with a project or a role`). Рукописный `?untopiced=1&project=2`
+  // без этой строки клал бы всю сетку красной плашкой отказа. Побеждает «разобрать» — тем же
+  // правилом старшинства, что уже действует для тем, чтобы у одного вопроса не оказалось двух
+  // разных ответов в зависимости от того, какое плечо смотреть.
+  const projectId = untopiced ? 0 : idFromUrl(params.get('project'));
+  const fileRole: FileRoleFilter = untopiced
+    ? { roleId: 0, withoutRole: false }
+    : fileRoleFromUrl(params.get('frole'), projectId > 0);
 
   // Строка ввода отзывается сразу, а URL догоняет: писать в адрес на каждую букву значит
   // гонять запрос на каждую букву.
@@ -216,6 +225,20 @@ export default function FilesPage() {
       // Разложи мы правило по веткам — «снять проект» и «поставить без роли» одним вызовом
       // оставили бы в адресе сочетание, на котором список отвечает ошибкой, а не выдачей.
       if (idFromUrl(p.get('project')) <= 0 && p.get('frole') === NO_ROLE_URL) p.delete('frole');
+      // «РАЗОБРАТЬ» И ГРУППИРОВКА ВЗАИМНО СНИМАЮТ ДРУГ ДРУГА, и решает не старшинство, а то,
+      // ЧТО ЧЕЛОВЕК ТОЛЬКО ЧТО НАЖАЛ. Сервер эту пару отвергает, значит один из двух чипов
+      // обязан погаснуть — и гаснуть должен старый, иначе нажатие «разобрать» внутри съёмки не
+      // делало бы ничего видимого, а нажатие проекта из «разобрать» — тем более. Правило стоит
+      // здесь, а не в трёх обработчиках чипов, ровно потому, что обработчиков три.
+      if (next.untopiced === true) {
+        p.delete('project');
+        p.delete('frole');
+      } else if (
+        (next.projectId !== undefined && next.projectId > 0) ||
+        (next.fileRole !== undefined && (next.fileRole.roleId > 0 || next.fileRole.withoutRole))
+      ) {
+        p.delete('untopiced');
+      }
       setParams(p, { replace: true });
     },
     [params, setParams],
@@ -268,7 +291,39 @@ export default function FilesPage() {
   // и разное продолжение (у проекта — роль).
   const topics = useMemo(() => allTopics.filter((t) => !isProjectTopic(t)), [allTopics]);
   const projects = useMemo(() => allTopics.filter(isProjectTopic), [allTopics]);
-  const activeProject = projects.find((p) => Number(p.id) === projectId);
+
+  /**
+   * ПРОЕКТ ИЗ АДРЕСА БЫВАЕТ АРХИВНЫМ, И ЭТО ПОДДЕРЖАННОЕ СОСТОЯНИЕ, А НЕ ПОЛОМКА.
+   *
+   * Холст просит словарь БЕЗ архива — там он предлагает, а предлагать архивное незачем. Но
+   * ссылка на архивную съёмку живёт в чате и открывается: фильтр по ней работает, сетка
+   * показывает файлы. Чипу этого хватало (он рисует сироту «#4» и объясняет её), а вот всем
+   * ПИСАТЕЛЯМ — нет: они резолвили имя по тому же списку без архива, не находили и молчали.
+   * Диалог роли преселектил проект, у которого не горит ни один чип, и печатал в тост
+   * «в проекте «» роль …»; оверлей броска обещал «уйдут в разобрать», а пачка уезжала в
+   * архивный проект; вставка и заметка уезжали туда же молча.
+   *
+   * ЧИНИТСЯ ОДНИМ МЕСТОМ: недостающий проект дорезолвивается из словаря С архивом и
+   * дописывается в список, который получают писатели. Выбран этот способ, а не сирота «#id» у
+   * каждого писателя: «#4» — честный ответ для ФИЛЬТРА (там номер и есть то, чем фильтруют), но
+   * для писателя вопрос другой — «куда именно уедет пачка», и номер на него не отвечает вовсе.
+   *
+   * ПИСАТЬ В АРХИВНЫЙ ПРОЕКТ МОЖНО, и кнопки здесь никто не глушит. Роль — слово словаря, её
+   * выводят из употребления и назначать заново нельзя; проект — коробка, её закрывают, и
+   * положить в закрытую коробку ещё один файл остаётся связным действием. Обязанность клиента
+   * не в отказе, а в том, чтобы НАЗВАТЬ проект и пометить его тем же словом «в архиве», которое
+   * стоит на экране словаря.
+   */
+  const projectMissing = projectId > 0 && !projects.some((p) => Number(p.id) === projectId);
+  const archivedTopicsQuery = useFileTopics(true, projectMissing);
+  const archivedProject = projectMissing
+    ? (archivedTopicsQuery.data?.topics ?? []).find(
+        (t) => Number(t.id) === projectId && isProjectTopic(t),
+      )
+    : undefined;
+  const activeProject = projects.find((p) => Number(p.id) === projectId) ?? archivedProject;
+  /** Список для ПИСАТЕЛЕЙ: живые проекты плюс тот архивный, в котором человек сейчас стоит. */
+  const writerProjects = archivedProject ? [...projects, archivedProject] : projects;
   const files = useMemo(
     () => (filesQuery.data?.pages ?? []).flatMap((p) => p.files ?? []),
     [filesQuery.data],
@@ -406,10 +461,16 @@ export default function FilesPage() {
   // ЧЕТВЁРТЫЙ СЧЁТ, по тому же правилу: «в этой роли пусто» и «в проекте пусто» — разные
   // ответы, и различает их одно число. Спрашивается только на пустой выдаче и только когда
   // роль действительно сузила, иначе он повторял бы то, что уже на экране.
+  //
+  // ПРОЕКТ ИЗ УСЛОВИЯ УБРАН. Роль сужает и БЕЗ проекта («все исходники по всем съёмкам»), и
+  // пустой поиск внутри такой роли до сих пор не признавался, что искали в одной роли: ни слова
+  // про роль, ни кнопки ослабления. Это тот же класс, ради которого счёт и заводился, — виноват
+  // фильтр, а винить будут поиск. Одно число отвечает обоим экранам, потому что ослабление у
+  // них одно и то же: снять роль.
   const roleNarrowed = fileRole.roleId > 0 || fileRole.withoutRole;
-  const wholeProjectQuery = useFilesTotal(
+  const noRoleQuery = useFilesTotal(
     { ...filter, roleId: 0, withoutRole: false },
-    projectId > 0 && roleNarrowed && nothingFound,
+    roleNarrowed && nothingFound,
   );
 
   if (!mayRead) return <NoAccessState />;
@@ -426,6 +487,17 @@ export default function FilesPage() {
   const pickedPerson = (adminsData?.admins ?? []).find((a) => Number(a.id ?? 0) === personId);
   const personLabel = personId ? (pickedPerson?.username ?? `#${personId}`) : '';
 
+  // Роль СЛОВОМ — для тех экранов, которые обязаны назвать, чем сужена выдача. «#id» тут по той
+  // же причине, что и у человека: архивную роль в словаре холста не найти, а фильтровать по ней
+  // она продолжает.
+  const roleLabel = fileRole.withoutRole
+    ? 'без роли'
+    : fileRole.roleId > 0
+      ? (roles.find((r) => Number(r.id) === fileRole.roleId)?.name ?? `#${fileRole.roleId}`)
+      : '';
+  const noRoleTotal = noRoleQuery.data ? Number(noRoleQuery.data.total ?? 0) : undefined;
+  const dropRole = () => patch({ fileRole: { roleId: 0, withoutRole: false } });
+
   const emptyState = () => {
     if (urlSearch) {
       return (
@@ -433,10 +505,13 @@ export default function FilesPage() {
           search={urlSearch}
           narrowed={narrowed}
           personLabel={personLabel || undefined}
+          roleLabel={roleLabel || undefined}
           everywhereTotal={
             everywhereQuery.data ? Number(everywhereQuery.data.total ?? 0) : undefined
           }
+          anyRoleTotal={noRoleTotal}
           onSearchEverywhere={() => patch({ topicIds: [], untopiced: false, projectId: 0 })}
+          onAnyRole={dropRole}
           onClearPerson={() => patch({ personId: 0 })}
           onClearSearch={() => {
             setSearchInput('');
@@ -474,10 +549,8 @@ export default function FilesPage() {
           roleId={fileRole.roleId}
           withoutRole={fileRole.withoutRole}
           narrowedByTopics={topicIds.length > 0 || untopiced}
-          wholeProjectTotal={
-            wholeProjectQuery.data ? Number(wholeProjectQuery.data.total ?? 0) : undefined
-          }
-          onWholeProject={() => patch({ fileRole: { roleId: 0, withoutRole: false } })}
+          wholeProjectTotal={noRoleTotal}
+          onWholeProject={dropRole}
           onShowAll={showAll}
         />
       );
@@ -566,6 +639,11 @@ export default function FilesPage() {
           <RoleChips
             roles={roles}
             value={fileRole}
+            // ПРОЕКТ ЕСТЬ и ИМЯ ПРОЕКТА ЕСТЬ — это два разных факта, и рядом ролей управляет
+            // первый. Пока чипом «без роли» управляло имя, прямая ссылка на архивный проект
+            // (`?project=4&frole=none`) фильтровала по «без роли», а ряд не показывал ничего
+            // нажатого: имя — это то, что мы не сумели показать, а не то, чего нет.
+            hasProject={projectId > 0}
             projectName={activeProject?.name ?? undefined}
             matched={total === undefined ? undefined : Number(total)}
             onChange={(next) => patch({ fileRole: next })}
@@ -645,7 +723,7 @@ export default function FilesPage() {
       <FilesSelectionBar
         selected={selectedFresh}
         topics={topics}
-        projects={projects}
+        projects={writerProjects}
         roles={roles}
         activeProjectId={projectId}
         writable={writable}
@@ -689,8 +767,14 @@ export default function FilesPage() {
         }
         // Проект называется В ТОМ ЖЕ списке, что и темы: оверлей обещает, куда попадёт пачка,
         // и умолчать о проекте значило бы пообещать «разобрать» там, где файлы уедут в съёмку.
+        //
+        // АРХИВ ПОМЕЧЕН ПРЯМО В ИМЕНИ, а не подсказкой: у оверлея нет ни чипов, ни наведения —
+        // это одна фраза, которую читают за полсекунды до того, как отпустят кнопку мыши. Класть
+        // в закрытую коробку можно, но узнать, что коробка закрыта, человек должен ДО броска.
         topicLabels={[
-          ...(activeProject ? [activeProject.name ?? ''] : []),
+          ...(activeProject
+            ? [`${activeProject.name ?? ''}${activeProject.archived ? ' (в архиве)' : ''}`]
+            : []),
           ...chosenTopics.map((t) => t.name ?? ''),
         ]}
         onFiles={intake}
@@ -702,7 +786,7 @@ export default function FilesPage() {
         <PasteIntakeModal
           files={pasted}
           topics={topics}
-          projects={projects}
+          projects={writerProjects}
           presetTopicIds={topicIds}
           presetProjectId={projectId}
           onCancel={() => setPasted([])}
@@ -728,7 +812,7 @@ export default function FilesPage() {
         <FileCardModal
           id={Number(id)}
           topics={topics}
-          projects={projects}
+          projects={writerProjects}
           roles={roles}
           writable={writable}
           onClose={closeCard}
@@ -744,7 +828,7 @@ export default function FilesPage() {
       {newNote && (
         <NewNoteModal
           topics={topics}
-          projects={projects}
+          projects={writerProjects}
           roles={roles}
           presetTopicIds={topicIds}
           presetProjectId={projectId}

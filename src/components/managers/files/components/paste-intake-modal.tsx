@@ -8,7 +8,7 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { inheritTopics, type BatchTopics } from '../upload/queue';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
-import { projectDates } from './topic-chips';
+import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 /**
  * ПРИЁМНАЯ МОДАЛКА ⌘V.
@@ -244,7 +244,7 @@ export function PasteIntakeModal({
               {projects.map((p) => {
                 const id = Number(p.id);
                 const on = selected.includes(id);
-                const d = projectDates(p);
+                const d = projectHint(p);
                 return (
                   <Chip
                     key={id}
@@ -260,6 +260,7 @@ export function PasteIntakeModal({
                     }
                   >
                     {p.name}
+                    <ProjectArchiveMark project={p} />
                   </Chip>
                 );
               })}
