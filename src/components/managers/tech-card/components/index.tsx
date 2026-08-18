@@ -65,6 +65,7 @@ import { LabelsField } from './labels-field';
 import { MoneyPanel } from './money-panel';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { LifecycleStrip } from './lifecycle-strip';
+import { StyleProjects, StyleProjectsAction } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
 import {
   activeVariantCount,
@@ -1185,6 +1186,10 @@ export function TechCardForm({
                 >
                   pdf…
                 </Button>
+                {/* Ф3: точка входа в привязку проекта, пока проектов НЕТ. Как только первый
+                    появился, блок под шапкой берёт это действие на себя, и кнопка исчезает —
+                    см. шапку style-projects.tsx. */}
+                <StyleProjectsAction techCardId={numId} />
               </>
             )}
             {canWrite(SECTION.techCards) && !frozen && isEditMode && (
@@ -1303,6 +1308,12 @@ export function TechCardForm({
           }
         />
       ) : null}
+
+      {/* Ф3: «в каких проектах библиотеки упомянута эта вещь». Стоит В ШАПКЕ, а не во вкладке и
+          не внутри `fieldset disabled={frozen}`: вопрос «каким .zprj это сшито» задают на любой
+          вкладке, и чаще всего — как раз про ЗАМОРОЖЕННУЮ, выпущенную карточку, у которой
+          fieldset погасил бы и переход в файлы. Пусто — блока нет вовсе. */}
+      {isEditMode && numId ? <StyleProjects techCardId={numId} /> : null}
 
       {/* Tasks as a drawer, opened from the header and deep-linkable via ?tasks=1. */}
       {isEditMode && numId ? (

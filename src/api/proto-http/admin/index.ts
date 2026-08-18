@@ -5337,6 +5337,16 @@ export type DeleteFileTopicRequest = {
 };
 
 export type DeleteFileTopicResponse = {
+  // unlinked_styles is how many STYLES lost their link to this topic when it went
+  // (0321). Styles do NOT refuse the deletion — a refusal would be a dead end: the
+  // topics screen counts FILES and knows nothing about style links, so the person
+  // would hit «нельзя» with no way to see what they hit. Silence would be worse
+  // still: «убрал пустую съёмку с глаз» and «у восьми вещей пропал ответ, каким
+  // файлом их сделали» have to be ONE event on screen rather than two a month apart.
+  // Counted EXACTLY, like cleared_styles on a demotion and unlike the file counts
+  // around it: a style is not a library file and the visibility predicate does not
+  // apply to it.
+  unlinkedStyles: number | undefined;
 };
 
 export type MergeFileTopicsRequest = {
@@ -5398,6 +5408,18 @@ export type UpdateFileTopicMetaResponse = {
   // that quietly dropped forty labels would be indistinguishable from one that
   // dropped none.
   clearedRoles: number | undefined;
+  // cleared_styles is the same fact for the OTHER project-only property: how many
+  // styles lost their link to this project because it stopped being one. A link to
+  // a style only means something on a project, so a demotion has to take them —
+  // and a demotion that quietly took the answer to «каким файлом сделана эта вещь»
+  // away from a dozen garments must say so.
+  // Counted EXACTLY, unlike cleared_roles next to it, which is counted under the
+  // visibility predicate. The asymmetry is real, not an oversight: roles hang off
+  // FILES, whose count is deliberately personal, while a style is not a library
+  // file at all — it lives under the tech-card section's own rbac, and hiding it
+  // from the person who is editing the project would invent a boundary the system
+  // does not have.
+  clearedStyles: number | undefined;
 };
 
 export type ListFileRolesRequest = {
@@ -5467,6 +5489,114 @@ export type SetLibraryFileRolesResponse = {
   // updated is how many link rows now carry the requested role — including rows
   // created by this call, excluding rows that already carried it.
   updated: number | undefined;
+};
+
+// FileTopicStyle is a garment as the PROJECT's page sees it: what the thing is
+// recognised by on screen, and nothing else.
+// Not a tech card and not even a short form of one. Carrying entity.TechCard here
+// would ship fifty fields for the sake of four and open a SECOND read path for a
+// style, which then drifts from the real one.
+export type FileTopicStyle = {
+  techCardId: number | undefined;
+  // style_number is the article. Empty is legal: an IDEA-stage card has no number
+  // yet, and a list that refused to show it would hide exactly the work in progress
+  // a shoot is most likely to be about.
+  styleNumber: string | undefined;
+  name: string | undefined;
+  // stage is idea|proto|fit|sms|pp|prod. It is here because «бекап CLO» means
+  // different things for an idea and for a style in production; without it the list
+  // reads as a flat run of names.
+  stage: string | undefined;
+  // preview_url is the SAME thumbnail the style lists show, resolved by the same
+  // rule in the same place rather than re-derived here — two implementations of
+  // «which picture represents this garment» would show different pictures for the
+  // same thing in two screens, and the search for why would end in SQL. Empty when
+  // the style has no media at all; the tile then draws a plate with the article.
+  previewUrl: string | undefined;
+  linkedAt: wellKnownTimestamp | undefined;
+};
+
+// StyleFileProject is a project as the GARMENT's card sees it — the answer to
+// «какие проекты меня касаются».
+// The project rides as the ordinary FileTopic the rail already uses, deliberately:
+// the card prints the name, the kind, the dates, the archive flag and the file
+// count, which is exactly what the rail's message already carries. A second,
+// narrower shape for the same fields would mean a second set of rules for filling
+// them.
+export type StyleFileProject = {
+  // project.files_count is counted UNDER THE VISIBILITY PREDICATE, like every other
+  // count in this library. Not tidiness — a boundary: otherwise the garment card
+  // becomes a side channel that reveals a project holds files the reader is not
+  // shown. Different people therefore see different numbers here, on purpose.
+  project: FileTopic | undefined;
+  linkedAt: wellKnownTimestamp | undefined;
+};
+
+// LinkFileTopicStyleRequest attaches ONE style to ONE project.
+// A REPEAT IS A NO-OP, not a unique-key refusal, and that is not leniency towards a
+// sloppy client. The button lives on two screens at once (the project page and the
+// garment card), and the second person to press it on an already-linked style got
+// precisely what they wanted — the link exists. Compare UpsertFileRole, where a
+// name collision REFUSES: there a repeat would create a second thing and silently
+// hand back somebody else's, here a repeat creates nothing.
+// An ARCHIVED project accepts links, unlike an archived ROLE which refuses
+// assignment. The difference is real: archiving a role retires a WORD from the
+// vocabulary, and going on labelling with it would keep the dictionary undead;
+// archiving a project means the work is finished — and a .zprj backup is filed
+// precisely AFTER the shoot. Refusing here would demand un-archiving a shoot in
+// order to record the truth about it.
+export type LinkFileTopicStyleRequest = {
+  // topic_id must be a topic of kind `project`: a style linked to a plain label is
+  // «эта вещь сделана ярлыком», which is refused rather than stored. Checked in
+  // code, not by a CHECK constraint — a retroactive CHECK validates the WHOLE table
+  // history and halts a production boot.
+  topicId: number | undefined;
+  techCardId: number | undefined;
+};
+
+export type LinkFileTopicStyleResponse = {
+  // The project's styles AFTER the change, so the page redraws from what was
+  // actually stored rather than from what it hoped it sent — the same reason
+  // SetLibraryFileOwners returns the resolved owners.
+  styles: FileTopicStyle[] | undefined;
+};
+
+export type UnlinkFileTopicStyleRequest = {
+  topicId: number | undefined;
+  techCardId: number | undefined;
+};
+
+export type UnlinkFileTopicStyleResponse = {
+  styles: FileTopicStyle[] | undefined;
+};
+
+export type ListFileTopicStylesRequest = {
+  topicId: number | undefined;
+};
+
+export type ListFileTopicStylesResponse = {
+  styles: FileTopicStyle[] | undefined;
+};
+
+export type ListStyleFileProjectsRequest = {
+  // A tech_card id that belongs to nothing is NOT an error — it answers with an
+  // empty list. Refusing it would make this rpc an ORACLE for «does style N exist»,
+  // answerable by counting up, for somebody holding files:read and no right to read
+  // tech cards at all. The topic-side call refuses on a missing topic instead,
+  // because topics are already enumerated in full to anybody with files:read, so
+  // confirming one exists tells them nothing new.
+  techCardId: number | undefined;
+};
+
+export type ListStyleFileProjectsResponse = {
+  // ARCHIVED PROJECTS ARE PRESENT AND FLAGGED, not hidden — the opposite of the
+  // chips rail, deliberately. The rail hides the archive because it is NAVIGATION
+  // over live work, where a finished shoot is only in the way. The garment card asks
+  // a HISTORICAL question: the shoot that photographed this thing is finished by
+  // definition, and that is exactly why it was archived. Hiding it here would hide
+  // the very answer the screen exists to give, so archived projects come back marked
+  // (project.archived) and sorted to the end.
+  projects: StyleFileProject[] | undefined;
 };
 
 export type SetLibraryFileOwnersRequest = {
@@ -13504,6 +13634,24 @@ export interface AdminService {
   // clears the role). Same batch semantics as AssignLibraryFileTopics: one
   // invisible id refuses the whole batch.
   SetLibraryFileRoles(request: SetLibraryFileRolesRequest): Promise<SetLibraryFileRolesResponse>;
+  // LinkFileTopicStyle attaches a style to a PROJECT topic. Idempotent — see the
+  // request for why a repeat is a no-op rather than a unique-key refusal.
+  LinkFileTopicStyle(request: LinkFileTopicStyleRequest): Promise<LinkFileTopicStyleResponse>;
+  // UnlinkFileTopicStyle detaches a style from a project. Idempotent as well: the
+  // link is a bare fact, so removing what is not there has already achieved what
+  // was asked.
+  UnlinkFileTopicStyle(request: UnlinkFileTopicStyleRequest): Promise<UnlinkFileTopicStyleResponse>;
+  // ListFileTopicStyles returns the garments a project is about — the style list on
+  // a project's page.
+  ListFileTopicStyles(request: ListFileTopicStylesRequest): Promise<ListFileTopicStylesResponse>;
+  // ListStyleFileProjects is THE call this whole thing exists for: asked from the
+  // garment's own card, «какие проекты меня касаются». Everything else here is the
+  // machinery that makes this answer possible.
+  // It needs files:read rather than techcards:read, and that is deliberate: the
+  // answer carries project NAMES and file COUNTS out of the library, so gating it on
+  // the tech-card section would turn the garment card into a side channel into the
+  // library. A person without files access simply does not get the block.
+  ListStyleFileProjects(request: ListStyleFileProjectsRequest): Promise<ListStyleFileProjectsResponse>;
   // SetLibraryFileOwners REPLACES the file's set of owners (owners come in ones
   // and twos, and the picker has just shown the caller the whole current set, so
   // a full replace is honest here — unlike the bulk topic write above).
@@ -17591,6 +17739,80 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetLibraryFileRoles",
       }) as Promise<SetLibraryFileRolesResponse>;
+    },
+    LinkFileTopicStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/projects/styles/link`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "LinkFileTopicStyle",
+      }) as Promise<LinkFileTopicStyleResponse>;
+    },
+    UnlinkFileTopicStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/projects/styles/unlink`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UnlinkFileTopicStyle",
+      }) as Promise<UnlinkFileTopicStyleResponse>;
+    },
+    ListFileTopicStyles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.topicId) {
+        throw new Error("missing required field request.topic_id");
+      }
+      const path = `api/admin/files/projects/${request.topicId}/styles`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFileTopicStyles",
+      }) as Promise<ListFileTopicStylesResponse>;
+    },
+    ListStyleFileProjects(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/files/styles/${request.techCardId}/projects`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStyleFileProjects",
+      }) as Promise<ListStyleFileProjectsResponse>;
     },
     SetLibraryFileOwners(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/owners`; // eslint-disable-line quotes

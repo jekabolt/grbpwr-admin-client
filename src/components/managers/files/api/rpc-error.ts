@@ -334,7 +334,13 @@ const RULES: Rule[] = [
         : `a role is set on no more than ${n} ${plural(n, 'file')} at a time`;
     },
   },
-  { when: 'project topic id is required', say: () => 'no project is chosen — a role is set inside one' },
+  // ФРАЗУ ДЕЛЯТ ДВА RPC: простановка роли и привязка стиля (`files_styles.go` отвечает ею на
+  // `topic_id <= 0`). Поэтому текст не называет, ЧТО именно ставили внутрь проекта: «a role is
+  // set inside one» на привязке стиля было бы про другой орган экрана.
+  {
+    when: 'project topic id is required',
+    say: () => 'no project is chosen — both a role and a style link are set inside one',
+  },
   { when: 'role id must not be negative', say: () => 'the role is chosen wrongly' },
   {
     // entity.ErrLibraryFilterInvalid, оба плеча. Экран таких сочетаний не собирает, но адрес
@@ -375,6 +381,52 @@ const RULES: Rule[] = [
     say: () =>
       'a project and an ordinary topic cannot be merged: a project has dates, an archive and roles on its files, and a label has nowhere to keep them',
   },
+
+  /* ── проект и стиль ────────────────────────────────────────────────────────────────────
+   *
+   * Продолжение блока выше, и стоит оно ЗДЕСЬ по тому же доводу: обе фразы про стиль говорят
+   * про ПРОЕКТ, и разбираться обязаны раньше, чем правила тем, которые ловят слово «topic»
+   * подстрокой. «styles can only be linked to a project topic» — родной брат «roles can only
+   * be set inside a project topic» строкой выше: одна и та же граница, разные свойства.
+   *
+   * Фразы сняты с `internal/apisrv/admin/files_styles.go` и `internal/entity/library_role.go`,
+   * а не придуманы: фраза, которой на сервере нет, не сработает никогда.
+   */
+  {
+    // files_styles.go: linkStyleError, ЕДИНСТВЕННЫЙ NotFound привязки. Он намеренно не говорит,
+    // чего из двух не нашлось: разные ответы на тему и на стиль сами подтверждали бы, какая из
+    // двух сущностей существует.
+    //
+    // САМОЕ ВАЖНОЕ ПРАВИЛО БЛОКА, ровно по тому же поводу, что «file, project or role not
+    // found» выше: без него 404 доезжал до ступени кода и печатал «сервер не знает такого
+    // запроса: либо эта часть не выкачена» — то есть отправлял чинить деплой там, где на деле
+    // съёмку удалили в соседней вкладке.
+    when: 'project or style not found',
+    say: () =>
+      'either the project or the style is gone — the server does not say which. refresh the page and pick again',
+  },
+  {
+    // entity.ErrStyleNeedsProjectTopic. Пикер обычных тем не предлагает — правило стоит на
+    // случай проекта, понижённого до ярлыка, пока список висел на экране.
+    when: 'styles can only be linked to a project topic',
+    say: () =>
+      'a style is linked to a PROJECT — an ordinary topic has nowhere to keep the link. make the topic a project on the topics screen, or pick another project',
+  },
+  {
+    // files_styles.go: afterWriteReadError. ЗАПИСЬ СОСТОЯЛАСЬ, не состоялось дочитывание —
+    // и это единственный отказ раздела, после которого повторять НЕ НАДО. Без правила он
+    // доезжал запасной фразой места плюс сырая строка в скобках, то есть звал нажать ещё раз
+    // ровно там, где всё уже сохранено.
+    //
+    // Опорный кусок обрезан до запятой намеренно: дальше в фразе сервера стоит апостроф. Он
+    // ломает и литерал правила, и разбор таблицы мутантом — сканер тела правила знает про
+    // кавычки, но не про комментарии, поэтому апостроф ЛЮБОГО комментария ВНУТРИ правила
+    // склеивает его со следующим.
+    when: 'styles changed, but',
+    say: () =>
+      'the link is saved — it is the list that did not read back. refresh the page: pressing again changes nothing',
+  },
+  { when: 'style id is required', say: () => 'no style is chosen' },
 
   /* ── темы ──────────────────────────────────────────────────────────────────────────── */
   {
