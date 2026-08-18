@@ -36,6 +36,7 @@ export function Tile({
   name,
   sub,
   selected,
+  pressed,
   dashed,
   tone,
   onClick,
@@ -47,6 +48,15 @@ export function Tile({
   name?: React.ReactNode;
   sub?: React.ReactNode;
   selected?: boolean;
+  /**
+   * Ставится у плиток-ПЕРЕКЛЮЧАТЕЛЕЙ, чтобы скринридер объявлял состояние. Тот же проп и тот же
+   * смысл, что у `Chip`, — намеренно, чтобы у выбора не завелось третьей формы записи.
+   *
+   * Отдельно от `selected` потому, что `selected` — это только рисунок (вес рамки), и его ставят
+   * и там, где выбор снять нельзя: одиночный пикер, подсветка текущей карточки в каталоге. Такая
+   * плитка не переключатель, и обещать скринридеру `aria-pressed` она не вправе.
+   */
+  pressed?: boolean;
   dashed?: boolean;
   tone?: 'default' | 'error';
   onClick?: () => void;
@@ -62,6 +72,7 @@ export function Tile({
   return (
     <Component
       {...(onClick ? { type: 'button' as const, onClick } : {})}
+      aria-pressed={pressed}
       title={title}
       className={cn(
         // ПОЧЕМУ ЗДЕСЬ ЧЕТЫРЕ КЛАССА РАСКЛАДКИ, А НЕ ОДИН `block`.

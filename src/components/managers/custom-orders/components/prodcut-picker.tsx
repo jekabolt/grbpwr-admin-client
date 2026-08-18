@@ -147,6 +147,9 @@ export function ProductPicker({
                     <Tile
                       key={product.id}
                       selected={pendingSelection.some((p) => p.id === product.id)}
+                      // Плитка здесь — переключатель (повторный клик снимает), значит состояние
+                      // обязано звучать, а не только краситься рамкой.
+                      pressed={pendingSelection.some((p) => p.id === product.id)}
                       onClick={() => togglePending(product)}
                       name={product.display?.translations?.[0]?.name}
                       sub={categoryName(product)}

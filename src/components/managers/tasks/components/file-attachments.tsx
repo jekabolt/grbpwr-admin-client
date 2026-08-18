@@ -49,6 +49,12 @@ export function FileAttachments({
   const files = resolved.map((q) => q.data?.file).filter((f): f is LibraryFile => !!f);
 
   const remove = (id: number) => onChange(value.filter((x) => x !== id));
+  // Повторный клик по плитке в пикере СНИМАЕТ выбор, и снимает его тем же выражением, что и
+  // «remove» в списке под модалкой. Раньше здесь стояло `value.includes(id) ? value : [...]` —
+  // то есть орган выглядел переключателем, показывал «включено» и на нажатие не отвечал ничем;
+  // снять файл можно было только закрыв модалку. Два места снятия обязаны сходиться в одно
+  // выражение, иначе счётчик в шапке и набор в форме начнут расходиться по путям.
+  const toggle = (id: number) => (value.includes(id) ? remove(id) : onChange([...value, id]));
 
   return (
     <div className='flex flex-col gap-1'>
@@ -103,24 +109,25 @@ export function FileAttachments({
       )}
 
       {pickerOpen && (
-        <FilePicker
-          selected={value}
-          onClose={() => setPickerOpen(false)}
-          onPick={(id) => onChange(value.includes(id) ? value : [...value, id])}
-        />
+        <FilePicker selected={value} onClose={() => setPickerOpen(false)} onToggle={toggle} />
       )}
     </div>
   );
 }
 
-/** Browse the library from inside a task. Same grid, same rail semantics, smaller. */
+/**
+ * Browse the library from inside a task. Same grid, same rail semantics, smaller.
+ *
+ * Every tile is a toggle: a tile already in the set comes back out on the next click, so the
+ * whole set can be assembled and taken apart without leaving the modal.
+ */
 function FilePicker({
   selected,
-  onPick,
+  onToggle,
   onClose,
 }: {
   selected: number[];
-  onPick: (id: number) => void;
+  onToggle: (id: number) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
@@ -157,14 +164,17 @@ function FilePicker({
           placeholder='file name or topic'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
         />
+        {/* `pressed` рядом с `selected` — как у чипов задач и файлов: `selected` красит, а
+            состояние органа скринридеру объявляет только `aria-pressed`. */}
         <ChipRow>
-          <Chip selected={topicId === 0} onClick={() => setTopicId(0)}>
+          <Chip selected={topicId === 0} pressed={topicId === 0} onClick={() => setTopicId(0)}>
             all
           </Chip>
           {topics.map((t) => (
             <Chip
               key={t.id}
               selected={topicId === Number(t.id)}
+              pressed={topicId === Number(t.id)}
               onClick={() => setTopicId(Number(t.id))}
             >
               {t.name}
@@ -190,7 +200,8 @@ function FilePicker({
                   name={f.fileName ?? ''}
                   sub={formatBytes(Number(f.sizeBytes ?? 0))}
                   selected={selected.includes(Number(f.id))}
-                  onClick={() => onPick(Number(f.id))}
+                  pressed={selected.includes(Number(f.id))}
+                  onClick={() => onToggle(Number(f.id))}
                   media={
                     f.previewUrl ? (
                       <img
