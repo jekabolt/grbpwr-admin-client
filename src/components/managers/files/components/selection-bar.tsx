@@ -492,8 +492,15 @@ export function FilesSelectionBar({
           убыток, а здесь работа не потеряна, она недоделана. */}
       {outcome && (
         <CalloutBox tone='warning'>
+          {/* ШАПКА НЕ ВРЁТ ПРО ЧИСЛО ЗАПИСЕЙ. «Две записи, одна не прошла» — правда только когда
+              их действительно было две и упала одна: за нажатием с пустой половиной стоит ОДИН
+              вызов, и говорить про вторую значило бы объяснять отказ тем, чего не было. */}
           <Text component='span' className='block'>
-            one press, two writes — and one of them did not go through.
+            {!outcome.topics || !outcome.project
+              ? 'the write did not go through.'
+              : outcome.topics.done || outcome.project.done
+                ? 'one press, two writes — and one of them did not go through.'
+                : 'one press, two writes — and neither of them went through.'}
           </Text>
           <ul className='mt-1.5 space-y-0.5'>
             {outcome.topics && (
@@ -526,9 +533,9 @@ export function FilesSelectionBar({
             )}
           </ul>
           <Text size='micro' variant='label' component='p' className='mt-1'>
-            nothing is half-written on a single file: the two writes are separate, so the one that
-            failed retries on its own and the one that went through is not repeated. the selection
-            stays until it does.
+            {outcome.topics && outcome.project
+              ? 'nothing is half-written on a single file: the two writes are separate, so the one that failed retries on its own and the one that went through is not repeated. the selection stays until it does.'
+              : 'nothing is half-written on a single file: the batch either went through or it did not, and the retry sends the very same one. the selection stays until it does.'}
           </Text>
           <div className='mt-2 flex flex-wrap items-center gap-2'>
             {outcome.topics && !outcome.topics.done && (
