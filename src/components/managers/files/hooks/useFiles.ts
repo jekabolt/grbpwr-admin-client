@@ -9,6 +9,7 @@ import {
 import type { LibraryFilePersonRole, LibraryFileSort } from 'api/proto-http/admin';
 import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
 import { filesService } from '../api/filesService';
+import { topicsService } from '../api/topicsService';
 
 /** Порядок сетки. `new` — прежний порядок по дате; имя и размер имеют свои фиксированные
  * направления (А→Я и «крупное сверху»), поэтому направлением их никто не управляет. */
@@ -296,6 +297,8 @@ export const filesKeys = {
   /** Архив разводит ключ по той же причине, что и у тем: пикеры архив не предлагают, словарь —
    * показывает, и один ключ на два ответа отдавал бы чужую страницу через раз. */
   roles: (includeArchived = false) => [...filesKeys.all, 'roles', includeArchived] as const,
+  /** Вещи, чья карточка показывает на эту тему. Спрашивается поштучно и только в модалках. */
+  topicStyles: (topicId: number) => [...filesKeys.all, 'topicStyles', topicId] as const,
 };
 
 /**
@@ -328,6 +331,21 @@ export const filesKeys = {
 export function invalidateFileViews(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: filesKeys.all });
   qc.invalidateQueries({ queryKey: tasksKeys.all, refetchType: 'none' });
+  /**
+   * ТРЕТИЙ КОРЕНЬ — БЛОК ПРОЕКТОВ НА КАРТОЧКЕ ВЕЩИ. Он живёт под `['fileStyleProjects', id]`,
+   * то есть снаружи и `['files']`, и `['tasks']`, и держит ответ пять минут.
+   *
+   * Без этой строки экран противоречил тосту сразу после операции, о которой тост только что
+   * отчитался числом: удалил проект, прочёл «3 garments lost the link», вернулся на карточку —
+   * а там прежний проект, «open ▸» ведёт на удалённый id, и «unlink» упирается в отказ «either
+   * the project or the style is gone».
+   *
+   * Ключ вписан СТРОКОЙ, а не импортом, и это осознанно: он принадлежит разделу тех-карт, а
+   * тянуть сюда его модуль значило бы завести зависимость файлов от тех-карт ради одного
+   * массива из двух элементов. Префикс без id накрывает все карточки разом — какая именно вещь
+   * потеряла привязку, отсюда не видно и знать не нужно.
+   */
+  qc.invalidateQueries({ queryKey: ['fileStyleProjects'] });
 }
 
 const PAGE_SIZE = 60;
@@ -371,6 +389,23 @@ export function useFileRoles(includeArchived = false, enabled = true) {
  * `enabled` НЕ УКРАШЕНИЕ: в режиме проекта плитки рисуют секции, и плоская выдача на 60 файлов
  * ушла бы вторым запросом за данными, которых никто не покажет.
  */
+/**
+ * Вещи темы — ТОЛЬКО чтобы назвать число до необратимого жеста.
+ *
+ * `enabled` здесь несущий: спрашивать этот список на каждой отрисовке экрана словаря значило бы
+ * по запросу на строку таблицы. Он уходит ровно в момент открытия модалки удаления или
+ * понижения — и только для темы-проекта: у обычного ярлыка привязок вещей не бывает, сервер их
+ * не принимает вовсе.
+ */
+export function useFileTopicStyles(topicId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: filesKeys.topicStyles(topicId),
+    queryFn: () => topicsService.listStyles(topicId),
+    enabled: enabled && topicId > 0,
+    staleTime: URL_SAFE_STALE_TIME,
+  });
+}
+
 export function useLibraryFiles(filter: FilesFilter, enabled = true) {
   return useInfiniteQuery({
     queryKey: filesKeys.list(filter),

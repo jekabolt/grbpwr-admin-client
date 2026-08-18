@@ -21,7 +21,13 @@ import { topicsService } from '../api/topicsService';
 import { FilesDropOverlay } from '../components/drop-overlay';
 import { FilesUploadBar } from '../components/upload-bar';
 import { ARCHIVED_WORD, projectDates } from '../components/topic-chips';
-import { invalidateFileViews, isProjectTopic, useFileRoles, useFileTopics } from '../hooks/useFiles';
+import {
+  invalidateFileViews,
+  isProjectTopic,
+  useFileRoles,
+  useFileTopics,
+  useFileTopicStyles,
+} from '../hooks/useFiles';
 import { plural } from '../upload/text';
 
 /**
@@ -128,6 +134,42 @@ export default function FileTopicsPage() {
   const [metaFrom, setMetaFrom] = useState('');
   const [metaTo, setMetaTo] = useState('');
   const [metaArchived, setMetaArchived] = useState(false);
+
+  /**
+   * СКОЛЬКО ВЕЩЕЙ ПОКАЗЫВАЕТ НА ТЕМУ — СПРАШИВАЕТСЯ ДО НЕОБРАТИМОГО ЖЕСТА, А НЕ ПОСЛЕ.
+   *
+   * Оба пути (удаление темы и понижение проекта) уносят привязки вещей каскадом, и «узнаете
+   * числом сразу после» — плохой ответ там, где ответ есть ДО: `ListFileTopicStyles` отдаёт
+   * список целиком, право у него `files:read`, то есть заведомо есть у всякого, кто дошёл до
+   * этих кнопок (им нужен `files:write`).
+   *
+   * Два вызова, а не один на «тему в фокусе»: модалки независимы, и общий запрос перепрашивался
+   * бы при каждом открытии соседней. Уходят они только при ОТКРЫТОЙ модалке и только на
+   * ПРОЕКТЕ — у обычного ярлыка привязок вещей не бывает, сервер их не принимает вовсе.
+   */
+  const deletingStyles = useFileTopicStyles(
+    Number(deleting?.id ?? 0),
+    !!deleting && isProjectTopic(deleting),
+  );
+  const metaStyles = useFileTopicStyles(
+    Number(meta?.id ?? 0),
+    !!meta && isProjectTopic(meta) && metaKind === 'plain',
+  );
+
+  /**
+   * Число вещей СЛОВАМИ — одна машина на обе модалки.
+   *
+   * Пока ответ в пути, число не выдумывается: «0» на месте незагруженного счёта — это ровно то
+   * враньё, ради которого запрос и заводился. Отказ тоже назван честно, а не подменён нулём:
+   * не сумели спросить — так и скажем, и остаётся прежняя формулировка «число будет названо
+   * после».
+   */
+  const styleCount = (q: typeof deletingStyles) => {
+    if (q.isPending) return { state: 'wait' as const, n: 0 };
+    if (q.isError) return { state: 'unknown' as const, n: 0 };
+    return { state: 'known' as const, n: (q.data?.styles ?? []).length };
+  };
+  const garments = (n: number) => `${n} ${plural(n, 'garment')}`;
   const [newRole, setNewRole] = useState('');
   const [editRole, setEditRole] = useState<FileRole | undefined>(undefined);
   const [editRoleName, setEditRoleName] = useState('');
@@ -274,8 +316,11 @@ export default function FileTopicsPage() {
       //
       // ТОЧКА С ЗАПЯТОЙ, А НЕ ВТОРОЙ ТОСТ: это одно нажатие и одно событие, а два тоста подряд
       // человек читает как «что-то пошло не так и повторилось».
+      // СЛОВАРЬ РАЗВЕДЁН: строка «файл ↔ проект» называется FILE (проект один, и строка — это
+      // один файл в нём), привязка вещи — LINK, сама вещь — GARMENT. Пока обе половины звали
+      // себя «link», один тост означал этим словом две разные сущности подряд.
       const said = [
-        cleared ? `${cleared} ${plural(cleared, 'link')} lost the role` : '',
+        cleared ? `${cleared} ${plural(cleared, 'file')} lost the role in this project` : '',
         clearedStyles
           ? `${clearedStyles} ${plural(clearedStyles, 'garment')} lost the link to this project`
           : '',
@@ -901,7 +946,7 @@ export default function FileTopicsPage() {
               // живой, как соседи, и слияние в неё уносит файлы из ряда чипов молча.
               items={topicMergeTargets.map((t) => ({
                 value: String(t.id),
-                label: `${t.name} · ${Number(t.filesCount ?? 0)}${t.archived ? ' · archived' : ''}`,
+                label: `${t.name} · ${Number(t.filesCount ?? 0)}${t.archived ? ` · ${ARCHIVED_WORD}` : ''}`,
               }))}
               fullWidth
             />
@@ -980,23 +1025,39 @@ export default function FileTopicsPage() {
                 project
               </Chip>
             </ChipRow>
+            {/* ЭТА ФРАЗА БЫЛА ПРАВДОЙ ДО 0321 И СТАЛА ЛОЖЬЮ, НЕ ИЗМЕНИВШИСЬ. Пока тип не нёс
+                последствий, «ничего никуда не денется» описывало обе стороны переключателя.
+                Теперь понижение сносит и роли, и привязки вещей — и человек читал успокоение
+                ровно над каллаутом, который говорит обратное. Направления разведены: вверх
+                по-прежнему безопасно, вниз — нет, и подробности внизу. */}
             <Text size='micro' variant='label'>
               a project is the same topic, only it has dates, an archive and roles on the files
-              inside. files and links do not go anywhere when the kind changes.
+              inside. making one is safe: nothing moves, nothing is lost. going back the other way
+              is not — see below.
             </Text>
           </div>
 
-          {/* ПРЕДУПРЕЖДЕНИЕ О ПОНИЖЕНИИ СТОИТ ДО НАЖАТИЯ, а число снятых ролей приходит после:
-              одно без другого — это либо неожиданность, либо непроверяемое обещание. */}
+          {/* ПРЕДУПРЕЖДЕНИЕ О ПОНИЖЕНИИ СТОИТ ДО НАЖАТИЯ — и теперь с ЧИСЛОМ вещей, а не с
+              обещанием назвать его потом. Число ролей по-прежнему приходит после: счёта строк
+              «файл ↔ проект» в контракте нет, и выдумывать его из `filesCount` нельзя — роль
+              стоит не на каждом файле проекта. */}
           {isProjectTopic(meta ?? {}) && metaKind === 'plain' && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
                 going back to a plain topic <b>zeroes the roles</b> on every file of this project:
                 a role lives on the link with a PROJECT, and a plain topic has nowhere to keep it.
-                it also <b>unlinks every garment</b> whose card points here, so “which files was
-                this made with” goes unanswered on those cards. both numbers will be said right
-                after saving. neither comes back on its own: making it a project again returns the
-                kind, not the labels and not the links.
+                how many files lost the role will be said right after saving.{' '}
+                {(() => {
+                  const c = styleCount(metaStyles);
+                  if (c.state === 'wait') return 'counting the garment cards that point here…';
+                  if (c.state === 'unknown')
+                    return 'it also unlinks every garment whose card points here — how many could not be counted just now, and will be said after saving.';
+                  if (c.n === 0)
+                    return 'no garment card points at this project, so there is nothing to unlink on that side.';
+                  return `it also unlinks the ${garments(c.n)} whose cards point here, so “which files was this made with” goes unanswered on them.`;
+                })()}{' '}
+                neither comes back on its own: making it a project again returns the kind, not the
+                roles and not the links.
               </Text>
             </CalloutBox>
           )}
@@ -1054,7 +1115,7 @@ export default function FileTopicsPage() {
                 pressed={metaArchived}
                 onClick={() => setMetaArchived((v) => !v)}
               >
-                {metaArchived ? 'archived' : 'put in the archive'}
+                {metaArchived ? ARCHIVED_WORD : 'put in the archive'}
               </Chip>
             </ChipRow>
             {/* СЛЕДСТВИЕ, КОТОРОЕ УЗНАЮТ ОПЫТОМ, ЕСЛИ НЕ СКАЗАТЬ. */}
@@ -1079,22 +1140,54 @@ export default function FileTopicsPage() {
       >
         {/* «ПУСТО» СЧИТАЕТСЯ ПО ФАЙЛАМ, А УНОСИТ ЭТА КНОПКА НЕ ТОЛЬКО ФАЙЛЫ. Кнопка отпирается
             числом файлов, но проект без единого файла может оставаться ответом на «каким .zprj
-            сшита эта вещь» у десятка карточек, и удаление снимает эти связи каскадом. Прежний
-            текст обещал, что «ничего не пропадёт», — на этом пути это неправда.
+            сшита эта вещь» у десятка карточек, и удаление снимает эти связи каскадом.
 
-            ЧИСЛА ВЕЩЕЙ ЗДЕСЬ НЕТ И ВЗЯТЬ ЕГО НЕГДЕ: `ListFileTopics` считает файлы и только их,
-            обратного счёта «сколько вещей смотрит на этот проект» в контракте нет вовсе. Врать
-            оценкой или молчать — оба хуже, чем сказать прямо: связи есть, число будет названо
-            сразу после. Появится счёт у темы — эта фраза станет точной, и только она. */}
+            ЧИСЛО НАЗЫВАЕТСЯ ЗДЕСЬ ЖЕ, А НЕ ПОСЛЕ. Прежняя версия этого текста утверждала, что
+            взять его негде, — неправда: `ListFileTopics` действительно считает одни файлы, но
+            `ListFileTopicStyles` отдаёт список вещей темы целиком, и права на него хватает
+            всякому, кто дошёл до этой кнопки. Дорого это только на КАЖДОЙ строке словаря; в
+            модалке, открытой на одной теме, это один вызов. Утверждение «узнаете после»
+            заставляло человека нажимать вслепую там, где система знала ответ заранее.
+
+            У ОБЫЧНОГО ЯРЛЫКА ЭТОГО АБЗАЦА НЕТ ВОВСЕ: привязать вещь можно только к проекту
+            (сервер отказывает `styles can only be linked to a project topic`), а понижение
+            сносит привязки. Показывать угрозу, которой не бывает, — тот же обман, только в
+            другую сторону. */}
         <Text>
           the topic is empty of FILES: not a single one carries it, so nothing disappears from the
           listings.
         </Text>
-        <Text className='mt-2'>
-          a style link is not a file, though. if any garment card points at this project, deleting
-          takes that link with it and nothing brings it back — the count is only known afterwards,
-          and re-linking is done by hand, card by card.
-        </Text>
+        {isProjectTopic(deleting ?? {}) &&
+          (() => {
+            const c = styleCount(deletingStyles);
+            if (c.state === 'wait')
+              return (
+                <Text className='mt-2' variant='label'>
+                  counting the garment cards that point at this project…
+                </Text>
+              );
+            if (c.state === 'unknown')
+              return (
+                <Text className='mt-2'>
+                  a link to a garment is not a file, though. the count could not be read just now —
+                  if any garment card points here, deleting takes that link with it and nothing
+                  brings it back.
+                </Text>
+              );
+            if (c.n === 0)
+              return (
+                <Text className='mt-2' variant='label'>
+                  no garment card points at this project either — there is nothing on that side to
+                  lose.
+                </Text>
+              );
+            return (
+              <Text className='mt-2'>
+                but <b>{garments(c.n)}</b> point at it: deleting takes those links with it and
+                nothing brings them back. re-linking is done by hand, card by card.
+              </Text>
+            );
+          })()}
       </ConfirmationModal>
 
       {/* ПРИЁМНИК БРОСКА СТОИТ И ЗДЕСЬ. Без него экран тем принимал бросок ГОЛЫМ БРАУЗЕРОМ:

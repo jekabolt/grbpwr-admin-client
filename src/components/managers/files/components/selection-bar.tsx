@@ -130,13 +130,17 @@ export function FilesSelectionBar({
       // Сервер считает СТРОКИ, которые теперь несут запрошенную роль, — включая созданные этим
       // вызовом и исключая те, что её уже несли. «Проставлено 8» на восьми файлах, из которых
       // шесть её уже имели, было бы враньём в обе стороны.
+      //
+      // Называются они FILE, а не «link»: проект здесь один, значит строка «файл ↔ проект» —
+      // это ровно один файл в нём. Слово «link» в разделе занято привязкой ВЕЩИ к проекту, и
+      // одно слово на две сущности читалось бы как одна.
       showMessage(
         roleId
           ? n
-            ? `“${role}” in the project “${project}” — ${n} ${plural(n, 'link')}`
+            ? `“${role}” in the project “${project}” — ${n} ${plural(n, 'file')}`
             : `this role already stood in “${project}”`
           : n
-            ? `the role is off, the files stayed in “${project}” — ${n} ${plural(n, 'link')}`
+            ? `the role is off, they stayed in “${project}” — ${n} ${plural(n, 'file')}`
             : `there was no role anyway — the files stayed in “${project}”`,
         'success',
       );
