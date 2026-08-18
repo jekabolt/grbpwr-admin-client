@@ -294,9 +294,19 @@ export const filesKeys = {
    * следующий получает чужую — молча и через раз. Ровно этот класс уже ловился в волне.
    */
   topics: (includeArchived = false) => [...filesKeys.all, 'topics', includeArchived] as const,
-  /** Архив разводит ключ по той же причине, что и у тем: пикеры архив не предлагают, словарь —
-   * показывает, и один ключ на два ответа отдавал бы чужую страницу через раз. */
-  roles: (includeArchived = false) => [...filesKeys.all, 'roles', includeArchived] as const,
+  /**
+   * ПРОЕКТ В КЛЮЧЕ ОБЯЗАТЕЛЕН (0323), и это не украшение: у роли появился владелец, словари
+   * двух проектов — РАЗНЫЕ ответы на один и тот же вопрос, и один ключ на них отдал бы чужой
+   * набор слов. Тот же класс, которым архив разводит ключ у тем: первый пришедший экран кладёт
+   * свою версию в кэш, следующий молча получает её же.
+   *
+   * `projectId = 0` — не «все проекты», а ИНДЕКС РАЗРЕШЕНИЯ старой ссылки (см. `useRoleIndex`):
+   * ключ у него свой по тому же правилу, потому что и ответ у него свой.
+   *
+   * Архив по-прежнему в ключе: пикеры архив не предлагают, словарь — показывает.
+   */
+  roles: (projectId: number, includeArchived = false) =>
+    [...filesKeys.all, 'roles', projectId, includeArchived] as const,
   /** Вещи, чья карточка показывает на эту тему. Спрашивается поштучно и только в модалках. */
   topicStyles: (topicId: number) => [...filesKeys.all, 'topicStyles', topicId] as const,
 };
@@ -373,16 +383,37 @@ export function useFileTopics(includeArchived = false, enabled = true) {
 }
 
 /**
- * Словарь ролей. Живёт тем же `staleTime`, что и темы: это такой же редко меняющийся справочник,
- * который читают пять мест сразу.
+ * Словарь ролей ОДНОГО ПРОЕКТА. Живёт тем же `staleTime`, что и темы: это такой же редко
+ * меняющийся справочник, который читают пять мест сразу.
+ *
+ * `projectId` первым и обязательным — тот же довод, что у `filesService.listRoles`: спросить
+ * «какие бывают роли» вообще, ни у кого, больше нельзя. Вне проекта хук ГЛУШИТСЯ вызывающим
+ * (`enabled`), а не отвечает пустотой: пустой словарь и «мы не спрашивали» — разные вещи, и
+ * первое рисовало бы «ролей нет» там, где их просто не у кого было спросить.
  */
-export function useFileRoles(includeArchived = false, enabled = true) {
+export function useFileRoles(projectId: number, includeArchived = false, enabled = true) {
   return useQuery({
-    queryKey: filesKeys.roles(includeArchived),
-    queryFn: () => filesService.listRoles(includeArchived),
+    queryKey: filesKeys.roles(projectId, includeArchived),
+    queryFn: () => filesService.listRoles(projectId, includeArchived),
     enabled,
     staleTime: URL_SAFE_STALE_TIME,
   });
+}
+
+/**
+ * ИНДЕКС РАЗРЕШЕНИЯ СТАРОЙ ССЫЛКИ — единственный законный потребитель `ListFileRoles(0)`.
+ *
+ * До 0323 роль была общей на всю библиотеку, и в чат уехали адреса вида `/files?frole=7` без
+ * проекта. Теперь роль принадлежит проекту, и такой адрес обязан ЛИБО дописать себе проект,
+ * ЛИБО снять фильтр — но не показывать пустую сетку молча: «в этой роли ничего нет» и «этой
+ * роли больше нет» выглядели бы одинаково, а значат разное.
+ *
+ * С архивом: заархивированная роль продолжает фильтровать, и разрешить её в проект надо ровно
+ * так же. Индекс НЕ словарь — предлагать из него нельзя ничего (чужую роль сервер отвергает на
+ * любой записи), поэтому и хук отдельный, со своим именем и своим ключом.
+ */
+export function useRoleIndex(enabled: boolean) {
+  return useFileRoles(0, true, enabled);
 }
 
 /**
@@ -561,8 +592,8 @@ export function useFilesMutations() {
   /**
    * Роль ходит ТЕМ ЖЕ путём, что и остальные правки: одна мутация на раздел, одна инвалидация.
    * Свой `invalidateQueries(filesKeys.all)` здесь оставил бы устаревшим счётчик самой роли
-   * (`ListFileRoles` считает файлы по всем проектам) — он лежит под тем же корнем и обновляется
-   * этой же строкой.
+   * (`ListFileRoles` считает файлы этой роли В ЕЁ ПРОЕКТЕ) — он лежит под тем же корнем и
+   * обновляется этой же строкой.
    */
   const setRoles = useMutation({
     mutationFn: filesService.setRoles,

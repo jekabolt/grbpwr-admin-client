@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { FileRole, FileTopic } from 'api/proto-http/admin';
+import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { tasksService } from 'components/managers/tasks/api/tasksService';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -25,7 +25,6 @@ import { ARCHIVED_WORD, projectDates } from '../components/topic-chips';
 import {
   invalidateFileViews,
   isProjectTopic,
-  useFileRoles,
   useFileTopics,
   useFileTopicStyles,
 } from '../hooks/useFiles';
@@ -66,8 +65,6 @@ export default function FileTopicsPage() {
   // пришедший экран клал бы в кэш свою версию, а второй молча получал чужую.
   const topicsQuery = useFileTopics(true);
   const topics = topicsQuery.data?.topics ?? [];
-  const rolesQuery = useFileRoles(true);
-  const roles = rolesQuery.data?.roles ?? [];
   const archivedCount = topics.filter((t) => t.archived).length;
   const untopicedCount = Number(topicsQuery.data?.untopicedCount ?? 0);
   const enqueue = useUploadQueueStore((s) => s.enqueue);
@@ -108,15 +105,6 @@ export default function FileTopicsPage() {
   });
   const updateMeta = useMutation({
     mutationFn: topicsService.updateMeta,
-    onSuccess: invalidate,
-  });
-  const upsertRole = useMutation({
-    mutationFn: topicsService.upsertRole,
-    onSuccess: invalidate,
-  });
-  const mergeRoles = useMutation({
-    mutationFn: (a: { sourceId: number; targetId: number }) =>
-      topicsService.mergeRoles(a.sourceId, a.targetId),
     onSuccess: invalidate,
   });
 
@@ -207,24 +195,14 @@ export default function FileTopicsPage() {
   const taskCount = (q: typeof deletingTasks) => countState(q, Number(q.data?.total ?? 0));
   const garments = (n: number) => `${n} ${plural(n, 'garment')}`;
   const tasksWord = (n: number) => `${n} ${plural(n, 'task')}`;
-  const [newRole, setNewRole] = useState('');
-  const [editRole, setEditRole] = useState<FileRole | undefined>(undefined);
-  const [editRoleName, setEditRoleName] = useState('');
-  const [editRoleOrder, setEditRoleOrder] = useState('0');
-  const [mergingRole, setMergingRole] = useState<FileRole | undefined>(undefined);
-  const [roleMergeTarget, setRoleMergeTarget] = useState('');
 
   /* ── ЧТО ВООБЩЕ ПРЕДЛАГАТЬ ЦЕЛЬЮ СЛИЯНИЯ ────────────────────────────────────────────────
    *
-   * Оба пикера показывали ВЕСЬ словарь, включая архив и другой тип, — то есть предлагали
-   * жесты, у которых разный исход, одинаково буднично. Разведено по существу, а не одним
-   * правилом на оба, потому что архив у темы и у роли значит РАЗНОЕ.
+   * Пикер показывал ВЕСЬ словарь, включая архив и другой тип, — то есть предлагал жесты, у
+   * которых разный исход, одинаково буднично.
    *
-   * АРХИВНАЯ РОЛЬ ЦЕЛЬЮ НЕ ПРЕДЛАГАЕТСЯ ВОВСЕ. Архив роли — это запрет: сервер отвечает
-   * `archived role cannot be assigned` на попытку поставить её одному файлу. Слияние в
-   * архивную роль поставило бы её сразу сотне связей и отказа бы не получило — у MergeRoles
-   * такой проверки нет. Предлагать в пикере обход собственного запрета нельзя; законный путь
-   * есть и он в одно движение — вернуть роль в словарь, слить, убрать обратно.
+   * ПРО РОЛЬ ЗДЕСЬ БОЛЬШЕ НИЧЕГО НЕТ: её словарь принадлежит проекту и правится на его
+   * странице, вместе с тем же самым правилом про архивную цель.
    *
    * АРХИВНАЯ ТЕМА ЦЕЛЬЮ ОСТАЁТСЯ. Архив темы — это не запрет, а «убрано с глаз»: тему в
    * архиве по-прежнему можно нести, и свернуть в неё оставшийся дубль — законный способ
@@ -242,9 +220,6 @@ export default function FileTopicsPage() {
     (t) => Number(t.id) !== Number(merging?.id) && isProjectTopic(t) === mergingIsProject,
   );
   const mergeTargetTopic = topics.find((t) => String(t.id) === mergeTarget);
-  const roleMergeTargets = roles.filter(
-    (r) => Number(r.id) !== Number(mergingRole?.id) && !r.archived,
-  );
 
   /**
    * КОНЕЦ РАНЬШЕ НАЧАЛА — ВИДНО У ПОЛЯ, А НЕ ОТКАЗОМ С ТОГО БЕРЕГА.
@@ -362,6 +337,14 @@ export default function FileTopicsPage() {
       // ОДНО И ТО ЖЕ — ссылку на проект. Разное разведено, одинаковое слито под общий глагол
       // («8 garments and 2 tasks lost the link to this project»), потому что три части через
       // точку с запятой человек читает как отчёт, а не как фразу.
+      //
+      // ⚠ ЭТИ ТРИ ВЫРАЖЕНИЯ — НЕСУЩИЕ ЯКОРЯ ЧУЖОЙ ПРОБЫ. `scratchpad/rpcerr/screen.mjs`
+      // ВЫРЕЗАЕТ из живого исходника куски по строкам `const lostLink = [`, `const said = [` и
+      // `showMessage(said.length ? ` — и ИСПОЛНЯЕТ их. Значит: (а) якоря обязаны оставаться
+      // ровно такими, буква в букву; (б) вырезанный кусок обязан быть САМОДОСТАТОЧНЫМ — ссылка
+      // на любой здешний помощник (`garments()`, `tasksWord()`) даёт `ReferenceError` в пробе,
+      // а не осмысленный красный. На это уже наступали: формулировку собрали помощниками, и
+      // проба упала «lostLink is not defined». Меняешь фразу — открывай screen.mjs.
       const lostLink = [
         clearedStyles ? `${clearedStyles} ${plural(clearedStyles, 'garment')}` : '',
         clearedTasks ? `${clearedTasks} ${plural(clearedTasks, 'task')}` : '',
@@ -373,70 +356,6 @@ export default function FileTopicsPage() {
       showMessage(said.length ? `saved. ${said.join('; ')}` : 'saved', 'success');
     } catch (e) {
       fail(e, "couldn't save");
-    }
-  };
-
-  const createRole = async () => {
-    const name = newRole.trim();
-    if (!name) return;
-    try {
-      await upsertRole.mutateAsync({ id: 0, name, sortOrder: roles.length, archived: false });
-      setNewRole('');
-      showMessage(`the role “${name}” is started`, 'success');
-    } catch (e) {
-      fail(e, "couldn't start the role");
-    }
-  };
-
-  const saveRole = async () => {
-    if (!editRole) return;
-    try {
-      await upsertRole.mutateAsync({
-        id: Number(editRole.id),
-        name: editRoleName.trim(),
-        sortOrder: Number(editRoleOrder) || 0,
-        archived: !!editRole.archived,
-      });
-      setEditRole(undefined);
-      showMessage('saved', 'success');
-    } catch (e) {
-      fail(e, "couldn't save the role");
-    }
-  };
-
-  const toggleRoleArchive = async (r: FileRole) => {
-    try {
-      await upsertRole.mutateAsync({
-        id: Number(r.id),
-        name: r.name ?? '',
-        sortOrder: Number(r.sortOrder ?? 0),
-        archived: !r.archived,
-      });
-      showMessage(
-        r.archived ? 'the role is back in the dictionary' : 'the role is put in the archive',
-        'success',
-      );
-    } catch (e) {
-      fail(e, "couldn't move the role");
-    }
-  };
-
-  const doMergeRoles = async () => {
-    if (!mergingRole || !roleMergeTarget) return;
-    try {
-      const res = await mergeRoles.mutateAsync({
-        sourceId: Number(mergingRole.id),
-        targetId: Number(roleMergeTarget),
-      });
-      const target = roles.find((r) => String(r.id) === roleMergeTarget);
-      setMergingRole(undefined);
-      setRoleMergeTarget('');
-      showMessage(
-        `“${mergingRole.name}” is merged into “${target?.name ?? ''}”, links moved: ${Number(res.movedLinks ?? 0)}`,
-        'success',
-      );
-    } catch (e) {
-      fail(e, "couldn't merge the roles");
     }
   };
 
@@ -686,248 +605,31 @@ export default function FileTopicsPage() {
         </div>
       </div>
 
-      {/* СЛОВАРЬ РОЛЕЙ — СВОЙ БЛОК, а не колонка в таблице тем. Роль отвечает на другой вопрос:
-          тема говорит, ПРО ЧТО файл, роль — ЧЕМ он был в конкретном проекте. Список у них
-          общий на всю библиотеку, а вот значение появляется только на связи. */}
+      {/* СЛОВАРЬ РОЛЕЙ ЖИЛ ЗДЕСЬ И УЕХАЛ (0323): у роли появился владелец-проект, и общего
+          списка на всю библиотеку больше нет. Экран, показывавший роли всех проектов сразу,
+          показывал бы теперь набор, из которого ни одну строку нельзя ни поставить, ни слить,
+          не спросив «а в каком проекте» — то есть предлагал бы жест, отвечающий отказом.
+
+          СТРОКА ОСТАЁТСЯ, А НЕ ИСЧЕЗАЕТ ВМЕСТЕ С БЛОКОМ. Роли на этом экране заводили, и
+          человек придёт сюда снова: пустое место на привычном ответило бы ему, что орган
+          сломался. Правка ролей теперь ровно в одном месте — на странице самого проекта. */}
       <div className='border border-borderColor bg-bgColor p-block'>
         <SectionHeader
           title='roles in projects'
-          question={`— ${roles.length} ${plural(roles.length, 'role')}`}
+          question={"— they live on each project's own page"}
         />
-        <Text size='micro' variant='label' className='mb-2 block max-w-[90ch]'>
+        <Text size='micro' variant='label' className='block max-w-[90ch]'>
           a role sits <b>on the link between the file and the project</b>, not as a label on the
           file: one shot is “raw” in a shoot and “idea” in a lookbook, and the pair “shoot × idea”
-          will not find it — it was not an idea there. the dictionary is <b>closed</b> on purpose:
-          “all the raws across all the shoots” means something only while “raw” is one and the same
-          everywhere, and free text drifts apart reliably — raw, raws, sources, originals.
+          will not find it — it was not an idea there. and the words are <b>each project's own</b>:
+          the shoot and the lookbook keep separate sets, so there is no library-wide list to show
+          here any more. open a project — from the chips or from{' '}
+          <Link to={ROUTES.files} className='underline'>
+            the files
+          </Link>{' '}
+          — and its roles are started, renamed, merged and retired on its own page.
         </Text>
-
-        {rolesQuery.isLoading ? (
-          <Text size='micro' variant='label'>
-            loading…
-          </Text>
-        ) : roles.length === 0 ? (
-          <Text size='micro' variant='label'>
-            no roles yet. start them here: without the dictionary the chip row on the canvas
-            cannot ask for “raw”, and the selection bar cannot set it.
-          </Text>
-        ) : (
-          <DataTable>
-            <thead>
-              <tr>
-                <th data-align='left'>role</th>
-                <th>order</th>
-                <th>files</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map((r) => {
-                // «Есть ли КУДА слить», а не «сколько ролей всего»: архивная роль целью не
-                // предлагается (довод — у списков целей выше), и на словаре, где живой осталась
-                // одна роль, кнопка обязана погаснуть, а не открыть пустой пикер.
-                const mergeable = roles.some(
-                  (o) => Number(o.id) !== Number(r.id) && !o.archived,
-                );
-                return (
-                  <tr key={r.id}>
-                    <td data-align='left'>
-                      <Chip selected={!r.archived} dashed={!!r.archived}>
-                        {r.name}
-                      </Chip>
-                      {r.archived && (
-                        <Text size='nano' variant='label' component='span' className='ml-1.5'>
-                          {ARCHIVED_WORD}
-                        </Text>
-                      )}
-                    </td>
-                    <td className='tabular-nums'>{Number(r.sortOrder ?? 0)}</td>
-                    {/* СЧЁТ СКВОЗНОЙ — по всем проектам сразу, и считается он под предикатом
-                        видимости, как и всё остальное в этой библиотеке: у разных людей числа
-                        здесь законно разные. */}
-                    <td className='tabular-nums'>{Number(r.filesCount ?? 0)}</td>
-                    <td>
-                      <div className='flex flex-wrap items-center justify-end gap-1.5'>
-                        <Button
-                          size='xs'
-                          variant='secondary'
-                          disabled={!writable}
-                          onClick={() => {
-                            setEditRole(r);
-                            setEditRoleName(r.name ?? '');
-                            setEditRoleOrder(String(Number(r.sortOrder ?? 0)));
-                          }}
-                        >
-                          rename
-                        </Button>
-                        <Button
-                          size='xs'
-                          variant='secondary'
-                          disabled={!writable || !mergeable}
-                          // ПОДСКАЗКА ЗНАЕТ, ЖИВА ЛИ САМА СТРОКА. «Кроме этой живых ролей нет»
-                          // на архивной роли называло живой её саму — при полностью архивном
-                          // словаре это была единственная строка на экране, и фраза противоречила
-                          // стоящему рядом слову «archived».
-                          title={
-                            mergeable
-                              ? undefined
-                              : r.archived
-                                ? 'there is nowhere to merge: not one live role is left, and an archived role cannot be the target — bring one back into the dictionary first'
-                                : 'there is nowhere to merge: apart from this one there are no live roles, and an archived role cannot be the target — bring one back into the dictionary first'
-                          }
-                          onClick={() => {
-                            setMergingRole(r);
-                            setRoleMergeTarget('');
-                          }}
-                        >
-                          merge
-                        </Button>
-                        {/* УДАЛЕНИЯ РОЛИ НЕТ ВОВСЕ — есть архив. Удалённая роль означала бы
-                            строки связи, ссылающиеся в никуда; архив же оставляет её на файлах и
-                            только перестаёт предлагать в пикерах. */}
-                        <Button
-                          size='xs'
-                          variant='secondary'
-                          disabled={!writable}
-                          title={
-                            r.archived
-                              ? 'bring it back into the dictionary — it can be set again'
-                              : 'in the archive the role stays on the files and in the filter, but it cannot be set again'
-                          }
-                          onClick={() => toggleRoleArchive(r)}
-                        >
-                          {r.archived ? 'bring back' : 'to the archive'}
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </DataTable>
-        )}
-
-        <div className='mt-2.5 flex flex-wrap items-end gap-2'>
-          <div className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              new role
-            </Text>
-            <Input
-              name='newRoleName'
-              value={newRole}
-              placeholder='for example picks'
-              disabled={!writable}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewRole(e.target.value)}
-              className='w-[220px]'
-            />
-          </div>
-          <Button
-            size='sm'
-            onClick={createRole}
-            disabled={!writable || !newRole.trim() || upsertRole.isPending}
-            title={writable ? undefined : 'right now it is read-only — roles are not started'}
-          >
-            {upsertRole.isPending ? 'starting…' : 'start'}
-          </Button>
-          <Text size='micro' variant='label' className='max-w-[60ch]'>
-            this is the ONLY place where a role comes into being: neither an upload, nor a paste,
-            nor setting topics in bulk can start one — they write into topics, and roles do not
-            live there.
-          </Text>
-        </div>
       </div>
-
-      <ConfirmationModal
-        open={!!editRole}
-        onOpenChange={(o) => !o && setEditRole(undefined)}
-        onConfirm={saveRole}
-        title={`role “${editRole?.name ?? ''}”`}
-        confirmLabel={upsertRole.isPending ? 'saving…' : 'save'}
-        confirmDisabled={upsertRole.isPending || !editRoleName.trim()}
-        closeOnConfirm={false}
-        width='sm'
-      >
-        <div className='flex flex-col gap-2'>
-          <div className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              name
-            </Text>
-            <Input
-              name='editRoleName'
-              value={editRoleName}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditRoleName(e.target.value)}
-            />
-          </div>
-          <div className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              order
-            </Text>
-            <Input
-              name='editRoleOrder'
-              type='number'
-              value={editRoleOrder}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditRoleOrder(e.target.value)}
-              className='w-[120px]'
-            />
-          </div>
-          <Text size='micro' variant='label'>
-            the order sets how the roles line up on a project page; on equal values they go by
-            name. renaming changes the label on every file at once — a role is one for the whole
-            library.
-          </Text>
-        </div>
-      </ConfirmationModal>
-
-      <ConfirmationModal
-        open={!!mergingRole}
-        onOpenChange={(o) => !o && setMergingRole(undefined)}
-        onConfirm={doMergeRoles}
-        title={`merge the role “${mergingRole?.name ?? ''}” into another`}
-        confirmLabel={mergeRoles.isPending ? 'merging…' : 'merge'}
-        confirmDisabled={mergeRoles.isPending || !roleMergeTarget}
-        closeOnConfirm={false}
-        width='sm'
-      >
-        <div className='flex flex-col gap-2'>
-          <CalloutBox tone='error'>
-            <Text size='micro' component='span'>
-              every link carrying the role “{mergingRole?.name}” will get the selected one, and “
-              {mergingRole?.name}” itself will disappear. <b>this does not come apart back.</b>
-            </Text>
-          </CalloutBox>
-          <div className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              what we merge into
-            </Text>
-            <SelectComponent
-              name='roleMergeTarget'
-              value={roleMergeTarget}
-              onValueChange={(v: string) => setRoleMergeTarget(v)}
-              placeholder='pick a role'
-              items={roleMergeTargets.map((r) => ({
-                value: String(r.id),
-                label: `${r.name} · ${Number(r.filesCount ?? 0)}`,
-              }))}
-              fullWidth
-            />
-          </div>
-          <Text size='micro' variant='label'>
-            merging roles is simpler than merging topics: a role is a column on the link row, not
-            the link itself, so there is nothing to deduplicate — no row can carry both.
-          </Text>
-          {/* ПОЧЕМУ СПИСОК КОРОЧЕ СЛОВАРЯ. Иначе отсутствие архивной роли читалось бы как
-              пропажа, а не как решение, — и человек искал бы её в пикере вместо того, чтобы
-              вернуть её на строку выше. */}
-          {roles.some((r) => r.archived) && (
-            <Text size='micro' variant='label'>
-              archived roles are not offered as a target: archiving a role means “it cannot be set
-              any more”, and merging would set it on every link of the source at once, around that
-              ban. if the target really has to be an archived one — bring it back into the
-              dictionary, merge, and put it away again.
-            </Text>
-          )}
-        </div>
-      </ConfirmationModal>
 
       <ConfirmationModal
         open={!!editing}
@@ -1121,8 +823,11 @@ export default function FileTopicsPage() {
                     return 'no task card points at this project, so there is nothing to unlink on that side either.';
                   return `${tasksWord(c.n)} point here too: they KEEP existing and only lose the link — a card is about work, not about the shoot.`;
                 })()}{' '}
-                neither comes back on its own: making it a project again returns the kind, not the
-                roles and not the links.
+                {/* «NEITHER» ГОВОРИЛО ПРО ДВА, А ПОСЛЕДСТВИЙ ТЕПЕРЬ ТРИ (роли, вещи, задачи).
+                    Слово, посчитавшее не то число, читается как обещание, что третье
+                    последствие обратимо. */}
+                none of the three comes back on its own: making it a project again returns the
+                kind, not the roles and not the links.
               </Text>
             </CalloutBox>
           )}

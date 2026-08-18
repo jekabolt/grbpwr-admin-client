@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { FileRole, FileTopic } from 'api/proto-http/admin';
+import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -11,7 +11,12 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { ACCESS_LEVEL_TITLE, asAccessLevel } from '../api/accessService';
-import { isProjectTopic, useFilesMutations, useLibraryFile } from '../hooks/useFiles';
+import {
+  isProjectTopic,
+  useFileRoles,
+  useFilesMutations,
+  useLibraryFile,
+} from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
 import { FailureText } from './failure-text';
@@ -24,6 +29,90 @@ import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 /** Что из карточки свёрнуто в строку. Ключи — те же четыре, что и строк. */
 type CardLineKey = 'own' | 'acc' | 'task' | 'talk';
+
+/** Одна строка «в каком проекте — с какой ролью». */
+type ProjectRole = { id: number; name: string; role?: { roleId: number; roleName: string } };
+
+/**
+ * СТРОКА РОЛИ — СВОЙ СЛОВАРЬ НА КАЖДЫЙ ПРОЕКТ (0323), а не один общий на карточку.
+ *
+ * Файл лежит в трёх проектах — значит и словарей три, РАЗНЫХ: с тех пор как у роли появился
+ * владелец, «исходники» съёмки и «исходники» лукбука это две строки, и предложить слово одного
+ * проекта в другом значит предложить жест, на который сервер отвечает
+ * `role belongs to another project`.
+ *
+ * Отдельный компонент, а не `useQueries` в карточке: число строк меняется от ответа сервера, и
+ * хук на строку живёт в самой строке — она монтируется и размонтируется вместе со своим
+ * запросом. Цена названа вслух: файл в трёх проектах стоит трёх `ListFileRoles`, по одному на
+ * строку. Дешевле было бы одним «индексом всех ролей», но им нельзя ПРЕДЛАГАТЬ — он отдаёт и
+ * чужие слова, и отличить их в нём можно только тем же самым проектом.
+ */
+function ProjectRoleRow({
+  row,
+  writable,
+  saving,
+  onPick,
+}: {
+  row: ProjectRole;
+  writable: boolean;
+  saving: boolean;
+  onPick: (projectTopicId: number, roleId: number) => void;
+}) {
+  const rolesQuery = useFileRoles(row.id, false, row.id > 0);
+  const roles = rolesQuery.data?.roles ?? [];
+  const known = roles.some((r) => Number(r.id) === row.role?.roleId);
+
+  return (
+    <div className='flex flex-wrap items-center gap-1.5'>
+      <Text size='micro' variant='label' component='span' className='uppercase'>
+        {row.name}
+      </Text>
+      <ChipRow>
+        <Chip
+          selected={!row.role?.roleId}
+          pressed={!row.role?.roleId}
+          disabled={!writable || saving}
+          onClick={() => onPick(row.id, 0)}
+        >
+          without a role
+        </Chip>
+        {roles.map((r) => {
+          const rid = Number(r.id);
+          const on = row.role?.roleId === rid;
+          return (
+            <Chip
+              key={rid}
+              selected={on}
+              pressed={on}
+              disabled={!writable || saving}
+              title={writable ? undefined : "read-only — the role can't be changed"}
+              onClick={() => onPick(row.id, on ? 0 : rid)}
+            >
+              {r.name}
+            </Chip>
+          );
+        })}
+        {/* Роль, которой нет в словаре этого проекта, — заархивированная (словарь просят без
+            архива). Показать её обязательно: она стоит на файле, и без чипа человек видел бы
+            «без роли» там, где роль есть. Снять её можно, назначить заново — нет.
+
+            Пока словарь в пути, чипа НЕТ: иначе живая роль на полсекунды объявлялась бы
+            архивной — утверждение, которого никто не проверял. */}
+        {!!row.role?.roleId && rolesQuery.isFetched && !known && (
+          <Chip selected pressed title='the role is archived: it can be taken off, but not put on again'>
+            {row.role?.roleName || `#${row.role?.roleId}`}
+          </Chip>
+        )}
+      </ChipRow>
+      {/* У ПРОЕКТА МОЖЕТ НЕ БЫТЬ НИ ОДНОГО СВОЕГО СЛОВА — и это состояние, а не сбой пикера. */}
+      {rolesQuery.isFetched && roles.length === 0 && !row.role?.roleId && (
+        <Text size='micro' variant='label' component='span'>
+          no roles in this project yet
+        </Text>
+      )}
+    </div>
+  );
+}
 
 /**
  * СТРОКА-СВОД: ярлык, значение и тело под ними.
@@ -91,7 +180,6 @@ export function FileCardModal({
   id,
   topics,
   projects,
-  roles,
   writable,
   onClose,
 }: {
@@ -99,7 +187,6 @@ export function FileCardModal({
   /** Только обычные темы: проекты приезжают отдельно и рисуются своей группой. */
   topics: FileTopic[];
   projects: FileTopic[];
-  roles: FileRole[];
   /** Уже с учётом и права files:write, и тумблера режима: карточка не решает это сама. */
   writable: boolean;
   onClose: () => void;
@@ -468,54 +555,19 @@ export function FileCardModal({
             <div className='flex flex-col gap-1'>
               <GroupLabel>role in the project</GroupLabel>
               {inProjects.map((p) => (
-                <div key={p.id} className='flex flex-wrap items-center gap-1.5'>
-                  <Text size='micro' variant='label' component='span' className='uppercase'>
-                    {p.name}
-                  </Text>
-                  <ChipRow>
-                    <Chip
-                      selected={!p.role?.roleId}
-                      pressed={!p.role?.roleId}
-                      disabled={!writable || setRoles.isPending}
-                      onClick={() => applyRole(p.id, 0)}
-                    >
-                      without a role
-                    </Chip>
-                    {roles.map((r) => {
-                      const rid = Number(r.id);
-                      const on = p.role?.roleId === rid;
-                      return (
-                        <Chip
-                          key={rid}
-                          selected={on}
-                          pressed={on}
-                          disabled={!writable || setRoles.isPending}
-                          title={writable ? undefined : "read-only — the role can't be changed"}
-                          onClick={() => applyRole(p.id, on ? 0 : rid)}
-                        >
-                          {r.name}
-                        </Chip>
-                      );
-                    })}
-                    {/* Роль, которой нет в словаре холста, — заархивированная. Показать её
-                        обязательно: она стоит на файле, и без чипа человек видел бы «без роли»
-                        там, где роль есть. Снять её можно, назначить заново — нет. */}
-                    {!!p.role?.roleId &&
-                      !roles.some((r) => Number(r.id) === p.role?.roleId) && (
-                        <Chip
-                          selected
-                          pressed
-                          title='the role is archived: it can be taken off, but not put on again'
-                        >
-                          {p.role?.roleName || `#${p.role?.roleId}`}
-                        </Chip>
-                      )}
-                  </ChipRow>
-                </div>
+                <ProjectRoleRow
+                  key={p.id}
+                  row={p}
+                  writable={writable}
+                  saving={setRoles.isPending}
+                  onPick={applyRole}
+                />
               ))}
               <Text size='micro' variant='label'>
                 the role applies at once, it does not wait for “save”. a project just ticked shows
                 up here only after saving: before that there is no link for the role to live on.
+                the words on each line are that project's own — the shoot next door keeps its own
+                set, and neither list is offered to the other.
               </Text>
             </div>
           )}

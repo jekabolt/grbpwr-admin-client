@@ -301,6 +301,49 @@ const RULES: Rule[] = [
       'one of the three is gone or is not visible to you: the file from the selection, the project, or the role. the server does not say which. refresh the screen and select again',
   },
   { when: 'role not found', say: () => 'the role is gone — refresh the role dictionary' },
+  /* ── роль принадлежит проекту (0323) ───────────────────────────────────────────────────
+   *
+   * ЧЕТЫРЕ ФРАЗЫ ОДНОГО СЛЕДСТВИЯ: у строки словаря появился владелец. Все они приезжали
+   * СЫРЫМИ с момента выкатки 0323 на бету — таблица их не знала, и человек читал внутренние
+   * слова сервера вместо того, что ему делать. Куски сняты с `internal/entity/library_role.go`
+   * и `internal/apisrv/admin/files_roles.go` живой беты, не придуманы.
+   *
+   * СТОЯТ ВЫШЕ БЛОКА ТЕМ, как и весь этот блок: «project topic not found» СОДЕРЖИТ «topic not
+   * found» целиком, и стой оно ниже — заведение роли в удалённом проекте отвечало бы «тема
+   * пропала, обновите список тем», то есть про другой орган экрана.
+   */
+  {
+    // entity.ErrFileRoleNeedsProject. Достижимо не только старым клиентом: экран, открытый до
+    // выкатки страницы проекта, шлёт создание без владельца.
+    when: 'a role can only be created inside a project topic',
+    say: () =>
+      "a role belongs to ONE project: its words are that project's own, so it is started on the project's own page rather than in a library-wide list",
+  },
+  {
+    // entity.ErrFileRoleForeignProject — простановка роли соседнего проекта. Отдельная фраза,
+    // а не тройной NotFound: подтверждать здесь нечего, роль клиент только что сам показал.
+    when: 'role belongs to another project',
+    say: () =>
+      "this role is another project's word — a role sits on the link with ITS project and cannot travel. refresh the page: the picker is showing a vocabulary that is not this project's",
+  },
+  {
+    // entity.ErrFileRoleProjectMismatch. Диалог слияния предлагает цели только своего проекта —
+    // правило страхует список, собранный не по тому словарю.
+    when: 'roles of different projects cannot be merged',
+    say: () =>
+      'these two roles live in different projects: merging would move link rows into a project they were never in. merge inside one project',
+  },
+  {
+    // entity.ErrFileRoleProjectImmutable — правка роли с ДРУГИМ проектом в запросе.
+    when: 'a role cannot be moved to another project',
+    say: () =>
+      'a role does not travel between projects: its link rows stay where they are. rename it here, or start a new word in the other project',
+  },
+  {
+    // files_roles.go: NotFound при СОЗДАНИИ роли — пропала тема-проект, а не сама роль.
+    when: 'project topic not found',
+    say: () => 'the project is gone — refresh the page and open it again',
+  },
   {
     // entity.ErrFileRoleArchived. Приезжает буднично: словарь ролей лежит в кэше запроса, и
     // коллега успевает убрать роль в архив, пока пикер показывает её живой.
@@ -314,7 +357,15 @@ const RULES: Rule[] = [
     say: () =>
       'a role lives on the link of a file with a PROJECT — an ordinary topic has nowhere to keep it. make the topic a project on the topics screen, or pick a project',
   },
-  { when: 'a role with this name already exists', say: () => 'a role with this name already exists' },
+  {
+    // УНИКАЛЬНОСТЬ ТЕПЕРЬ ПАРНАЯ (project_topic_id, name), и фраза обязана это сказать: то же
+    // слово в соседнем проекте совершенно законно, и «уже существует» без уточнения отправляло
+    // бы человека искать несуществующий дубль по всей библиотеке. Сервер сам добавил «in this
+    // project» к своей строке — якорь ловит её началом, а `say` повторяет уточнение, потому
+    // что печатается именно он.
+    when: 'a role with this name already exists',
+    say: () => 'a role with this name already exists in this project',
+  },
   // Правило ОДНО, а не два, как у темы по соседству: вторая фраза («cannot merge a role into
   // itself») живёт в сторе и наружу не выходит — RPC заворачивает всё, кроме ErrNoRows, в
   // глухой Internal. Проверить такое правило нечем, поэтому его здесь нет.

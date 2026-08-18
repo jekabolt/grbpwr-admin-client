@@ -55,6 +55,7 @@ import {
   useFileTopics,
   useLibraryFiles,
   useProjectSections,
+  useRoleIndex,
   type FileRoleFilter,
   type FilesFilter,
   type FilesSort,
@@ -296,10 +297,36 @@ export default function FilesPage() {
   const roleNarrowed = fileRole.roleId > 0 || fileRole.withoutRole;
   const sectionMode = projectId > 0 && !roleNarrowed;
 
-  const filesQuery = useLibraryFiles(filter, !sectionMode);
-  // Без архива: заархивированную роль сервер разрешает снять, но не назначить, и предлагать её
-  // в ряду чипов значило бы предлагать фильтр, который потом никому не проставить.
-  const rolesQuery = useFileRoles();
+  /**
+   * СТАРАЯ ССЫЛКА `?frole=N` БЕЗ `project=` — РАЗРЕШАЕТСЯ, А НЕ ПОКАЗЫВАЕТСЯ ПУСТОЙ (0323).
+   *
+   * До появления владельца роль была общей на всю библиотеку, и адрес «все исходники по всем
+   * съёмкам» уехал в чат без проекта. Теперь у роли ровно один проект, и такой адрес обязан
+   * ДОПИСАТЬ его себе. А если роль в индексе не нашлась вовсе или нашлась с нулевым владельцем
+   * (мёртвая строка переноса, в которую не смотрит ни одна связь) — `frole` СНИМАЕТСЯ. Это
+   * единственный тихий жест окна несовместимости: фильтр по такому id отдаёт пустую выдачу
+   * молча, и «в этой роли ничего нет» выглядит ровно как «этой роли больше нет».
+   *
+   * ВЫДАЧА ЖДЁТ РАЗРЕШЕНИЯ. Уйди список раньше — на полсекунды показалась бы пустая сетка,
+   * посчитанная фильтром, который сейчас будет переписан, и человек прочёл бы её как ответ.
+   */
+  const needsRoleResolve = !untopiced && projectId === 0 && fileRole.roleId > 0;
+  const roleIndexQuery = useRoleIndex(needsRoleResolve);
+  const roleResolvePending = needsRoleResolve && !roleIndexQuery.isFetched;
+
+  const filesQuery = useLibraryFiles(filter, !sectionMode && !roleResolvePending);
+  /**
+   * СЛОВАРЬ РОЛЕЙ СПРАШИВАЕТСЯ У ПРОЕКТА, А ВНЕ ПРОЕКТА НЕ СПРАШИВАЕТСЯ ВОВСЕ (0323).
+   *
+   * Роль принадлежит проекту: «исходники» съёмки и «исходники» лукбука — разные строки словаря.
+   * Спросить «какие бывают роли» безотносительно проекта больше не у кого, и хук поэтому
+   * ГЛУШИТСЯ, а не отвечает пустотой — пустой ответ рисовал бы «ролей нет» там, где вопроса не
+   * задавали.
+   *
+   * Без архива: заархивированную роль сервер разрешает снять, но не назначить, и предлагать её
+   * в ряду чипов значило бы предлагать фильтр, который потом никому не проставить.
+   */
+  const rolesQuery = useFileRoles(projectId, false, projectId > 0);
   const roles = rolesQuery.data?.roles ?? [];
   /**
    * СЕКЦИЯМ СЛОВАРЬ НУЖЕН ВМЕСТЕ С АРХИВОМ, и это не противоречие предыдущему абзацу.
@@ -310,10 +337,27 @@ export default function FilesPage() {
    * есть, роль у него есть, а раздела под неё нет. Пропажу заметили бы не сразу и списали бы на
    * права.
    *
-   * Ключ у этого запроса свой (`filesKeys.roles(true)`), тот же, что у экрана словаря, — это
-   * ровно то разведение, ради которого архив вошёл в ключ в Ф1.
+   * Ключ у этого запроса свой (`filesKeys.roles(projectId, true)`) — то же разведение архивом,
+   * ради которого он вошёл в ключ в Ф1, плюс проект: словари двух проектов это разные ответы.
    */
-  const sectionRolesQuery = useFileRoles(true, sectionMode);
+  const sectionRolesQuery = useFileRoles(projectId, true, sectionMode);
+
+  /**
+   * РАЗРЕШЕНИЕ РОЛИ-СИРОТЫ — ОДИН ЭФФЕКТ, ДВА ИСХОДА, И ТРЕТЬЕГО НЕТ.
+   *
+   * Нашлась с проектом → проект дописывается в адрес, фильтр остаётся тем же самым. Не нашлась
+   * или нашлась без владельца → фильтр СНИМАЕТСЯ. Оставить его значило бы показать пустую сетку
+   * и промолчать о причине; выдумать проект — солгать про то, где файлы лежат.
+   */
+  const resolvedRole = needsRoleResolve
+    ? (roleIndexQuery.data?.roles ?? []).find((r) => Number(r.id) === fileRole.roleId)
+    : undefined;
+  const resolvedRoleOwner = Number(resolvedRole?.projectTopicId ?? 0);
+  useEffect(() => {
+    if (!needsRoleResolve || !roleIndexQuery.isFetched) return;
+    if (resolvedRoleOwner > 0) patch({ projectId: resolvedRoleOwner });
+    else patch({ fileRole: { roleId: 0, withoutRole: false } });
+  }, [needsRoleResolve, roleIndexQuery.isFetched, resolvedRoleOwner, patch]);
 
   const allTopics = topicsQuery.data?.topics ?? [];
   // ДВА РЯДА ИЗ ОДНОГО СЛОВАРЯ. Проект — это тема с типом, отдельного запроса у него нет; но
@@ -585,9 +629,12 @@ export default function FilesPage() {
   // В режиме проекта тот же вопрос задаётся секциям, а не плоской выдаче (её попросту нет), и
   // пустотой считается только СОШЕДШИЙСЯ ноль: ни одна секция не в пути и ни одна не сорвалась.
   // Иначе кнопка «искать во всех темах (N)» появлялась бы на полсекунды в каждом проекте.
+  // Пока роль из старой ссылки не разрешилась, выдачи нет вовсе — и «ничего не нашлось» о ней
+  // сказать нельзя: не искали. Без этой оговорки на полсекунды уходили бы вторые счёты за
+  // числами для кнопок пустого экрана, которого сейчас не будет.
   const nothingFound = sectionMode
     ? !sectionsPending && !sectionsFailed && sectionSpecs.length > 0 && sectionTotal === 0
-    : !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
+    : !roleResolvePending && !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
   const everywhereQuery = useFilesTotal(
     // `withoutRole` здесь обнулять не нужно: `normalizeGrouping` гасит его вместе с проектом
     // одним правилом на весь раздел — иначе этот запрос ушёл бы за ОТКАЗОМ (сервер отказывает
@@ -964,7 +1011,7 @@ export default function FilesPage() {
             renderTile={tile}
           />
         )
-      ) : filesQuery.isLoading ? (
+      ) : roleResolvePending || filesQuery.isLoading ? (
         <GallerySkeleton />
       ) : filesQuery.isError && !files.length ? (
         <ListFailedState error={filesQuery.error} onRetry={() => filesQuery.refetch()} />
@@ -988,11 +1035,14 @@ export default function FilesPage() {
       {/* Набор отдаётся СВЕЖИМИ объектами из текущей выдачи, а не снимком на момент клика:
           у снимка через несколько часов мёртвая presigned-ссылка, а после переименования из
           карточки — устаревшее имя в списке того, что сейчас удалят. */}
+      {/* СЛОВАРЬ РОЛЕЙ ПОЛОСЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ. Он принадлежит проекту, а проект полоса
+          выбирает У СЕБЯ в диалоге — значит и словарь она обязана спрашивать сама, по своему
+          выбору. Проп `roles` здесь означал бы «словарь холста», то есть словарь ДРУГОГО
+          проекта, чем тот, в который сейчас кладут. */}
       <FilesSelectionBar
         selected={selectedFresh}
         topics={topics}
         projects={writerProjects}
-        roles={roles}
         activeProjectId={projectId}
         writable={writable}
         onClear={selection.clear}
@@ -1076,13 +1126,16 @@ export default function FilesPage() {
 
       {/* Карточка — модальный роут ПОВЕРХ сетки: сетка остаётся смонтированной, поэтому
           закрытие возвращает ровно тот экран, с которого ушли. Закрытие идёт с текущим
-          query, а не на голый /files: иначе оно стирало бы выбранные чипы и строку поиска. */}
+          query, а не на голый /files: иначе оно стирало бы выбранные чипы и строку поиска.
+
+          СЛОВАРЬ РОЛЕЙ КАРТОЧКА СПРАШИВАЕТ САМА, и по одному на каждую строку проекта: файл
+          лежит в трёх проектах — значит и словарей три, разных. Один общий проп отдал бы всем
+          трём строкам слова того проекта, который случайно выбран на холсте. */}
       {id && (
         <FileCardModal
           id={Number(id)}
           topics={topics}
           projects={writerProjects}
-          roles={roles}
           writable={writable}
           onClose={closeCard}
         />
@@ -1098,7 +1151,6 @@ export default function FilesPage() {
         <NewNoteModal
           topics={topics}
           projects={writerProjects}
-          roles={roles}
           presetTopicIds={topicIds}
           presetProjectId={projectId}
           onClose={() => setNewNote(false)}

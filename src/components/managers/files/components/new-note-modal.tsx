@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { FileRole, FileTopic } from 'api/proto-http/admin';
+import type { FileTopic } from 'api/proto-http/admin';
 import { notePath } from 'constants/routes';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -12,7 +12,7 @@ import Text from 'ui/components/text';
 import { filesService } from '../api/filesService';
 import { notesService } from '../api/notesService';
 import { failureText } from '../api/rpc-error';
-import { invalidateFileViews } from '../hooks/useFiles';
+import { invalidateFileViews, useFileRoles } from '../hooks/useFiles';
 import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 /**
@@ -30,7 +30,6 @@ import { ProjectArchiveMark, projectHint } from './topic-chips';
 export function NewNoteModal({
   topics,
   projects,
-  roles,
   presetTopicIds,
   presetProjectId,
   onClose,
@@ -38,7 +37,6 @@ export function NewNoteModal({
   /** Только обычные темы: проекты приезжают отдельно и рисуются своей группой. */
   topics: FileTopic[];
   projects: FileTopic[];
-  roles: FileRole[];
   /** Чипы холста: заметка — такой же писатель связи, как загрузка, бросок и ⌘V. */
   presetTopicIds: number[];
   presetProjectId: number;
@@ -70,6 +68,16 @@ export function NewNoteModal({
   const projectIds = new Set(projects.map((p) => Number(p.id)));
   const chosenProjects = selected.filter((id) => projectIds.has(id));
   const soleProject = chosenProjects.length === 1 ? chosenProjects[0] : 0;
+
+  /**
+   * СЛОВАРЬ РОЛЕЙ — У ЭТОГО ЕДИНСТВЕННОГО ПРОЕКТА (0323), а не с холста.
+   *
+   * Роль принадлежит проекту, и предлагать слова соседнего значило бы предлагать жест, на
+   * который сервер отвечает `role belongs to another project`. Смена проекта чипом меняет и
+   * запрос, и словарь; выбранная роль при этом сбрасывается там же, где меняется набор.
+   */
+  const rolesQuery = useFileRoles(soleProject, false, soleProject > 0);
+  const roles = rolesQuery.data?.roles ?? [];
 
   // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ВЫБОР. То же правило, что в карточке файла:
   // заполненное поле рядом с кнопкой, которая его не учитывает, — тупик.
@@ -185,11 +193,15 @@ export function NewNoteModal({
                     selected={on}
                     pressed={on}
                     title={presetProjectId === id ? 'chosen on the canvas' : d || undefined}
-                    onClick={() =>
+                    // СМЕНА НАБОРА ПРОЕКТОВ СБРАСЫВАЕТ РОЛЬ (0323): словарь принадлежит проекту,
+                    // и выбранное слово в соседнем — чужая строка, на которую сервер отвечает
+                    // отказом. Сброс здесь, а не отдельным эффектом: жест ровно один.
+                    onClick={() => {
                       setSelected((prev) =>
                         prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-                      )
-                    }
+                      );
+                      setRoleId(0);
+                    }}
                   >
                     {p.name}
                     <ProjectArchiveMark project={p} />
@@ -221,10 +233,16 @@ export function NewNoteModal({
                     );
                   })}
                 </ChipRow>
+                {!rolesQuery.isPending && roles.length === 0 && (
+                  <Text size='micro' variant='label'>
+                    this project has no roles of its own yet — its words are started on its own
+                    page. the note lands in it without a role, which is a lawful state.
+                  </Text>
+                )}
                 <Text size='micro' variant='label'>
                   a role is set inside the project, not on the note itself: it will sit on the link
-                  with “{projects.find((p) => Number(p.id) === soleProject)?.name}”. “without a
-                  role” is fine too — it can be sorted out later.
+                  with “{projects.find((p) => Number(p.id) === soleProject)?.name}”. the words are
+                  this project's own. “without a role” is fine too — it can be sorted out later.
                 </Text>
               </>
             ) : (

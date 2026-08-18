@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FileRole, FileTopic, LibraryFile } from 'api/proto-http/admin';
+import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -9,7 +9,7 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { filesService } from '../api/filesService';
 import { failureText } from '../api/rpc-error';
-import { useFilesMutations } from '../hooks/useFiles';
+import { useFileRoles, useFilesMutations } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 import { ProjectArchiveMark, projectHint } from './topic-chips';
 
@@ -33,7 +33,6 @@ export function FilesSelectionBar({
   selected,
   topics,
   projects,
-  roles,
   activeProjectId,
   writable,
   onClear,
@@ -43,7 +42,6 @@ export function FilesSelectionBar({
   /** Только обычные темы: проекты приезжают отдельным списком и рисуются своей группой. */
   topics: FileTopic[];
   projects: FileTopic[];
-  roles: FileRole[];
   /** Проект, выбранный на холсте: подставляется в диалог роли — чаще всего он и имелся в виду. */
   activeProjectId: number;
   writable: boolean;
@@ -66,6 +64,18 @@ export function FilesSelectionBar({
   const [rolling, setRolling] = useState(false);
   const [roleProject, setRoleProject] = useState(0);
   const [roleId, setRoleId] = useState(0);
+
+  /**
+   * СЛОВАРЬ РОЛЕЙ — У ВЫБРАННОГО В ЭТОМ ДИАЛОГЕ ПРОЕКТА, а не с холста (0323).
+   *
+   * Роль принадлежит проекту, и полоса выбирает проект СВОИМ пикером: словарь, приехавший
+   * пропом с холста, был бы словарём другого проекта — то есть готовым отказом
+   * `role belongs to another project` на каждой второй попытке.
+   *
+   * Хук стоит ДО раннего выхода ниже: порядок хуков не зависит от того, есть ли выделение.
+   */
+  const rolesQuery = useFileRoles(roleProject, false, roleProject > 0);
+  const roles = rolesQuery.data?.roles ?? [];
 
   if (!selected.length && !refusals.length) return null;
 
@@ -435,7 +445,14 @@ export function FilesSelectionBar({
                       selected={on}
                       pressed={on}
                       title={d ? `${p.name} · ${d}` : undefined}
-                      onClick={() => setRoleProject(on ? 0 : id)}
+                      // СМЕНА ПРОЕКТА СБРАСЫВАЕТ РОЛЬ (0323). Словарь принадлежит проекту, и
+                      // выбранная роль в соседнем проекте — не «то же слово», а чужая строка:
+                      // сервер отвечает на неё `role belongs to another project`. Молчаливый
+                      // перенос был бы худшим из ответов, сброс дешевле и честнее.
+                      onClick={() => {
+                        setRoleProject(on ? 0 : id);
+                        setRoleId(0);
+                      }}
                     >
                       {p.name}
                       <ProjectArchiveMark project={p} />
@@ -482,6 +499,15 @@ export function FilesSelectionBar({
                 );
               })}
             </ChipRow>
+            {/* У ПРОЕКТА МОЖЕТ НЕ БЫТЬ НИ ОДНОГО СВОЕГО СЛОВА, и это не поломка пикера: словарь
+                принадлежит проекту, и пустой он ровно до тех пор, пока подгруппы не понадобились.
+                Молча показать один чип «без роли» значило бы дать прочесть это как сбой. */}
+            {roleProject > 0 && !rolesQuery.isPending && roles.length === 0 && (
+              <Text size='micro' variant='label' component='p'>
+                this project has no roles of its own yet — they are started on its own page.
+                “without a role” is a lawful state inside a project, not a mistake.
+              </Text>
+            )}
           </div>
           <Text size='micro' variant='label'>
             {roleProject
