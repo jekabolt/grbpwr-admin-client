@@ -77,10 +77,10 @@ export function PackagingSheet({
             />
             {plannedTotal > 0 && (
               <>
-                <KV k='units in batch' v={plannedTotal} />
+                <KV k='units in run' v={plannedTotal} />
                 <KV k='cartons' v={cartons || ''} />
                 <KV
-                  k='batch weight'
+                  k='run weight'
                   v={
                     batchWeightG > 0
                       ? `${(batchWeightG / 1000).toFixed(batchWeightG >= 10000 ? 0 : 1)} kg`
