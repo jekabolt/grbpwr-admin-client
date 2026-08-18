@@ -68,10 +68,17 @@ export function Tags({
 
   const addTagValue = (raw: string) => {
     const trimmedTag = raw.trim();
-    if (trimmedTag === '' || localTags.includes(trimmedTag)) return;
-    const newTags = [...localTags, trimmedTag];
+    // Гард сверяется с тем списком, который сейчас ВИДЕН (см. `displayedTags` ниже — тот же
+    // порядок веток). Раньше он смотрел только на `localTags`, а его пишет одна ветка
+    // `isAddingProduct`: в режиме правки он всегда пуст, гард не срабатывал никогда, и повторный
+    // клик по словарной кнопке дописывал метку в `editedTags` второй раз. В форму дубль при этом
+    // не уезжал — `selectedTags` дедуплицирует, и оба `setValue('tags')` строятся из него, — то
+    // есть расходились ВИДИМЫЙ список и форма: на экране две плитки, в данных одна, а крестик на
+    // любой из них сносил обе разом (фильтр по значению), чем расхождение и обнаруживало себя.
+    const visibleTags = isAddingProduct ? localTags : isEditMode ? editedTags : [];
+    if (trimmedTag === '' || visibleTags.includes(trimmedTag)) return;
     if (isAddingProduct) {
-      setLocalTags(newTags);
+      setLocalTags([...localTags, trimmedTag]);
     }
     if (isEditMode) {
       setEditedTags((prevTags) => [...prevTags, trimmedTag]);
