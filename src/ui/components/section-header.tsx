@@ -30,7 +30,20 @@ export function SectionHeader({
     <div
       className={`mb-2.5 flex flex-wrap items-baseline gap-2 border-b-2 border-textColor pb-1 ${className ?? ''}`}
     >
-      <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
+      {/* `min-w-0` + `break-words` — НЕСУЩАЯ ПАРА, а не уборка, и ровно та же, что уже вшита в
+          `Tiles`. У флекс-элемента `min-width: auto`, то есть «не уже своего содержимого», а у
+          нерасторжимой строки min-content — весь заголовок целиком: он вылезает из ряда и тянет
+          за собой ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ ВСЕЙ СТРАНИЦЫ. Пока сюда приходили короткие константы,
+          этого не было видно; с именем из словаря (роль в библиотеке файлов — до 255 знаков, и
+          одним словом) замерено 2030px прокрутки при окне 1500. Перенос выбран вместо обрезки
+          намеренно: заголовок здесь единственное место, где имя названо, и обрезать его значило
+          бы прятать то, ради чего раздел открыли. */}
+      <Text
+        component='h3'
+        variant='uppercase'
+        tracking='section'
+        className='min-w-0 break-words font-bold'
+      >
         {title}
       </Text>
       {question && (

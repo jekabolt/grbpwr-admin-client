@@ -36,5 +36,17 @@ export function useFileSelection() {
     setSelected((prev) => prev.filter((f) => !gone.has(Number(f.id))));
   }, []);
 
-  return { selected, isSelected, toggle, clear, drop };
+  /**
+   * Оставить в наборе только то, что отвечает условию, — не сбрасывая остальное на ноль.
+   *
+   * Нужно ровно там, где следующий экран УЖЕ, но не другой: выбор, набранный в разделе проекта,
+   * переживает переход в плоскую сетку этого же раздела, а файлы, которых там не будет, уходят
+   * сами. Полное `clear` в этом месте стирало бы работу, а полное сохранение — обещало бы
+   * действие над тем, чего на экране нет.
+   */
+  const keep = useCallback((fits: (file: LibraryFile) => boolean) => {
+    setSelected((prev) => prev.filter(fits));
+  }, []);
+
+  return { selected, isSelected, toggle, clear, drop, keep };
 }

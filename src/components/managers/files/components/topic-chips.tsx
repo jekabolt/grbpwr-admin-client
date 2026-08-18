@@ -40,6 +40,23 @@ export function projectHint(t: FileTopic): string {
 }
 
 /**
+ * ИМЯ ИЗ СЛОВАРЯ ВНУТРИ ЧИПА — С ПОТОЛКОМ ШИРИНЫ.
+ *
+ * У чипа `white-space: nowrap` (и это правильно: подпись органа не переносят посреди слова), а
+ * имена тем, проектов и ролей пишет человек, и сервер пускает до 255 знаков. Одно длинное имя
+ * без пробелов растягивало чип шире холста и тянуло за собой ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ ВСЕЙ
+ * СТРАНИЦЫ — замерено: 1654px при окне 700.
+ *
+ * Здесь обрезка, а не перенос, и это не то же решение, что в заголовке секции. Заголовок —
+ * единственное место, где имя названо целиком, и прятать его там нечем оправдать; чип же орган
+ * выбора, его читают боковым зрением, и двадцати знаков хватает, чтобы отличить один от
+ * другого. Целое имя остаётся в подсказке.
+ */
+function ChipName({ children }: { children: React.ReactNode }) {
+  return <span className='max-w-[24ch] truncate'>{children}</span>;
+}
+
+/**
  * СЛОВО АРХИВА — ОДНО НА ВЕСЬ РАЗДЕЛ.
  *
  * Им помечены и чипы проектов у писателей, и секции ролей в режиме проекта, и строка на экране
@@ -193,11 +210,11 @@ export function TopicChips({
               title={
                 atLimit && !on
                   ? `no more than ${MAX_TOPIC_FILTERS} topics in one intersection`
-                  : undefined
+                  : (t.name ?? undefined)
               }
               onClick={() => toggle(id)}
             >
-              {t.name}
+              <ChipName>{t.name}</ChipName>
               <span className='tabular-nums opacity-70'>{Number(t.filesCount ?? 0)}</span>
             </Chip>
           );
@@ -289,13 +306,13 @@ export function ProjectChips({
               key={id}
               selected={on}
               pressed={on}
-              title={d ? `${p.name} · ${d}` : undefined}
+              title={d ? `${p.name} · ${d}` : (p.name ?? undefined)}
               // Повторное нажатие СНИМАЕТ выбор. Ряд одиночного выбора без этого превращается
               // в ловушку: поставить проект можно, а вернуться ко всей библиотеке — только
               // через соседний чип, о котором ещё надо догадаться.
               onClick={() => onChange(on ? 0 : id)}
             >
-              {p.name}
+              <ChipName>{p.name}</ChipName>
               <span className='tabular-nums opacity-70'>{Number(p.filesCount ?? 0)}</span>
             </Chip>
           );
@@ -401,11 +418,16 @@ export function RoleChips({
           return (
             <Chip
               key={id}
+              // Стабильный id: кнопка «show all» в секции размонтируется вместе с секциями, и
+              // фокус обязан переехать на орган, который ТЕПЕРЬ держит это состояние, — иначе
+              // клавиатурный человек оказывается в начале документа.
+              id={`frole-${id}`}
               selected={on}
               pressed={on}
+              title={r.name ?? undefined}
               onClick={() => onChange({ roleId: on ? 0 : id, withoutRole: false })}
             >
-              {r.name}
+              <ChipName>{r.name}</ChipName>
               <span className='tabular-nums opacity-70'>{Number(r.filesCount ?? 0)}</span>
             </Chip>
           );
@@ -422,6 +444,7 @@ export function RoleChips({
         )}
         {hasProject && (
           <Chip
+            id='frole-none'
             selected={value.withoutRole}
             pressed={value.withoutRole}
             onClick={() => onChange({ roleId: 0, withoutRole: !value.withoutRole })}

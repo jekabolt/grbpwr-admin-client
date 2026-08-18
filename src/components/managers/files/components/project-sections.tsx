@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -55,7 +56,7 @@ function ProjectSection({
   const truncated = section.total > shown;
 
   return (
-    <section className='flex flex-col'>
+    <>
       <SectionHeader
         title={section.title}
         question={
@@ -89,24 +90,67 @@ function ProjectSection({
         }
       />
       <Tiles min={190}>{section.files.map(renderTile)}</Tiles>
-    </section>
+    </>
   );
 }
 
-function FailedSection({ section }: { section: ProjectSectionView }) {
+function FailedSection({ section, onRetry }: { section: ProjectSectionView; onRetry: () => void }) {
   return (
-    <section className='flex flex-col'>
+    <>
       <SectionHeader title={section.title} question='this section did not load' />
       <CalloutBox tone='error'>
         <div className='flex flex-wrap items-center gap-2.5'>
           <Text size='micro' component='span'>
             <FailureText e={section.error} fallback="the server didn't answer." />
           </Text>
-          <Button size='sm' variant='secondary' className='ml-auto' onClick={section.onRetry}>
+          <Button size='sm' variant='secondary' className='ml-auto' onClick={onRetry}>
             try again
           </Button>
         </div>
       </CalloutBox>
+    </>
+  );
+}
+
+/**
+ * ОБОЛОЧКА СЕКЦИИ — ОДНА НА ОБА СОСТОЯНИЯ, и она же мишень фокуса.
+ *
+ * Кнопка «try again» исчезает ровно тогда, когда повтор УДАЛСЯ, — и фокус вместе с ней падает
+ * на `body`. Мишенью взята сама секция, а не первая плитка: человек нажимал «повторить» ради
+ * РАЗДЕЛА, и вернуть его надо к разделу, а не к случайному файлу внутри. `tabIndex={-1}` даёт
+ * секции принимать фокус программно, не влезая в порядок обхода табом.
+ */
+function SectionShell({
+  section,
+  renderTile,
+}: {
+  section: ProjectSectionView;
+  renderTile: (f: LibraryFile) => React.ReactNode;
+}) {
+  const ref = useRef<HTMLElement>(null);
+  const [retried, setRetried] = useState(false);
+  const failed = !!section.error;
+
+  useEffect(() => {
+    if (retried && !failed) {
+      setRetried(false);
+      ref.current?.focus();
+    }
+  }, [retried, failed]);
+
+  return (
+    <section ref={ref} tabIndex={-1} className='flex flex-col focus:outline-none'>
+      {failed ? (
+        <FailedSection
+          section={section}
+          onRetry={() => {
+            setRetried(true);
+            section.onRetry();
+          }}
+        />
+      ) : (
+        <ProjectSection section={section} renderTile={renderTile} />
+      )}
     </section>
   );
 }
@@ -138,19 +182,15 @@ export function ProjectSections({
 }) {
   return (
     <>
-      {sections.map((s) =>
-        s.error ? (
-          <FailedSection key={s.key} section={s} />
-        ) : (
-          <ProjectSection key={s.key} section={s} renderTile={renderTile} />
-        ),
-      )}
+      {sections.map((s) => (
+        <SectionShell key={s.key} section={s} renderTile={renderTile} />
+      ))}
       {(emptyRoles.length > 0 || pileEmpty) && (
         <div className='flex flex-col gap-1'>
           {emptyRoles.length > 0 && (
             <Text size='micro' variant='label'>
-              not in this project yet: {emptyRoles.join(' · ')}. a role is not set here — pick
-              the files and press “set a role” in the bar below.
+              not in this project yet: {emptyRoles.join(' · ')}. a role goes on files, from the
+              selection bar — not on the section.
             </Text>
           )}
           {pileEmpty && (

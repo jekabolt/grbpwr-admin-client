@@ -454,16 +454,53 @@ export default function FilesPage() {
     patch({ topicIds: next.topicIds, untopiced: next.untopiced });
 
   const selection = useFileSelection();
-  // Смена фильтра снимает выбор. Набранное в одном пересечении на экране следующего не видно
-  // целиком, а полоса продолжала бы обещать действие над файлами, которых на экране нет.
-  const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}|${personId}|${personRole}|${projectId}|${fileRole.roleId}|${fileRole.withoutRole}`;
-  const seenFilter = useRef(filterKey);
+  /**
+   * Смена фильтра снимает выбор — кроме ОДНОГО перехода, и вот чем он отличается.
+   *
+   * Общее правило (набранное в одном пересечении на экране следующего не видно целиком, а полоса
+   * продолжала бы обещать действие над файлами, которых на экране нет) держится на том, что
+   * следующая выдача — ДРУГАЯ. У «show all» она не другая, а УЖЕ: плоская сетка раздела это
+   * подмножество того же проекта, и все двенадцать плиток, из которых человек выбирал, остаются
+   * на экране. Сброс здесь стирал бы работу ровно в том жесте, который придуман, чтобы её
+   * продолжить: «выбрал шесть из кучи, открыл кучу целиком, добираю остальные».
+   *
+   * Но и сохранять ВЕСЬ набор нельзя: выбранное в соседней секции в новую выдачу не попадёт, и
+   * общее правило про «обещает невидимое» вернулось бы через другую дверь. Поэтому набор не
+   * сбрасывается, а ПРОСЕИВАЕТСЯ по той же паре «проект × роль», которой сужается выдача, —
+   * условие берётся из самих файлов (`roles` приезжает в каждом ответе), а не вторым запросом.
+   *
+   * Узость исключения существенна: тот же проект, и роль идёт из «не выбрана» в «выбрана», то
+   * есть человек ЗАХОДИТ в раздел, а не перескакивает из раздела в раздел. Переход «роль A →
+   * роль B» подмножеством не является и сбрасывает набор, как и раньше.
+   */
+  const viewKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}|${personId}|${personRole}|${projectId}`;
+  const roleKey = `${fileRole.roleId}|${fileRole.withoutRole}`;
+  const NO_ROLE_KEY = '0|false';
+  const seenFilter = useRef({ viewKey, roleKey });
   const clearSelection = selection.clear;
+  const keepSelection = selection.keep;
   useEffect(() => {
-    if (seenFilter.current === filterKey) return;
-    seenFilter.current = filterKey;
-    clearSelection();
-  }, [filterKey, clearSelection]);
+    const was = seenFilter.current;
+    if (was.viewKey === viewKey && was.roleKey === roleKey) return;
+    const zoomIntoSection =
+      projectId > 0 &&
+      was.viewKey === viewKey &&
+      was.roleKey === NO_ROLE_KEY &&
+      roleKey !== NO_ROLE_KEY;
+    seenFilter.current = { viewKey, roleKey };
+    if (!zoomIntoSection) {
+      clearSelection();
+      return;
+    }
+    keepSelection((f) => {
+      const here = (f.roles ?? []).find((r) => Number(r.projectTopicId) === projectId);
+      // «Без роли» — это связь с проектом БЕЗ строки роли, а не отсутствие связи: файл, которого
+      // в проекте нет вовсе, в приёмную кучу не попадает и из набора уходит.
+      if (fileRole.withoutRole)
+        return !here && (f.topics ?? []).some((t) => Number(t.id) === projectId);
+      return !!here && Number(here.roleId) === fileRole.roleId;
+    });
+  }, [viewKey, roleKey, projectId, fileRole.roleId, fileRole.withoutRole, clearSelection, keepSelection]);
 
   const selectedFresh = useMemo(
     () => selection.selected.map((s) => files.find((f) => Number(f.id) === Number(s.id)) ?? s),
@@ -642,12 +679,22 @@ export default function FilesPage() {
       total: Number(q.data?.total ?? 0),
       error: q.isError ? q.error : undefined,
       onRetry: () => q.refetch(),
-      onShowAll: () =>
+      onShowAll: () => {
         patch({
           fileRole: spec.withoutRole
             ? { roleId: 0, withoutRole: true }
             : { roleId: spec.roleId, withoutRole: false },
-        }),
+        });
+        // ФОКУС ПЕРЕЕЗЖАЕТ НА ЧИП ЭТОЙ ЖЕ РОЛИ. Нажатая кнопка исчезает вместе с секциями, и
+        // без этой строки фокус падает на `body`: клавиатурный человек начинает следующий шаг
+        // с начала документа и проходит весь тулбар заново. Чип — не случайная мишень, а тот
+        // самый орган, который теперь держит состояние, поставленное нажатием.
+        //
+        // Кадр ожидания обязателен: чип на экране уже есть, но фокус, поставленный до коммита,
+        // браузер снимет, размонтировав кнопку.
+        const target = spec.withoutRole ? 'frole-none' : `frole-${spec.roleId}`;
+        requestAnimationFrame(() => document.getElementById(target)?.focus());
+      },
     }));
   const emptyRoleNames = sectionViews
     .filter(
@@ -674,13 +721,20 @@ export default function FilesPage() {
    * он улетал в «исходники».
    */
   const dropLanding = (() => {
-    if (!activeProject) return undefined;
     // ПРИЧИНА НАЗВАНА, А НЕ ТОЛЬКО ИСХОД. «Роль не проставится» без «почему» читается как
     // недоделка загрузки; «её ставят на уже загруженный файл» — как устройство, и второй раз
     // человек этого не спрашивает.
     const why = 'a role is set on a file that already exists';
-    if (fileRole.withoutRole) return `no role will be set — “without a role” is exactly this row`;
     const role = roles.find((r) => Number(r.id) === fileRole.roleId)?.name;
+    // РОЛЬ БЕЗ ПРОЕКТА — ДОСТИЖИМОЕ СОСТОЯНИЕ, а не край карты: ряд ролей сам предлагает его
+    // подписью «“raw” across all projects at once». Пропажа там ровно та же и даже обиднее —
+    // проекта нет, значит и приёмной кучи, куда можно пойти посмотреть, тоже нет. Куда пачка
+    // уедет, уже сказано строкой тем выше, поэтому здесь — только про роль.
+    if (!activeProject) {
+      if (!role) return undefined;
+      return `“${role}” will not be set: ${why} — you will not see the batch in this view`;
+    }
+    if (fileRole.withoutRole) return `no role will be set — “without a role” is exactly this view`;
     // В ВЫБРАННОЙ РОЛИ ОБЕЩАНИЕ ОБЯЗАНО ПРЕДУПРЕДИТЬ О ПРОПАЖЕ. Плоская сетка показывает одну
     // роль, пачка ляжет без роли — и брошенного в этой выдаче не окажется вовсе. Промолчать
     // здесь значит дать человеку увидеть, как файл «загрузился» и исчез.

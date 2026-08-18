@@ -20,7 +20,7 @@ import { failureText } from '../api/rpc-error';
 import { topicsService } from '../api/topicsService';
 import { FilesDropOverlay } from '../components/drop-overlay';
 import { FilesUploadBar } from '../components/upload-bar';
-import { projectDates } from '../components/topic-chips';
+import { ARCHIVED_WORD, projectDates } from '../components/topic-chips';
 import { invalidateFileViews, isProjectTopic, useFileRoles, useFileTopics } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 
@@ -255,6 +255,7 @@ export default function FileTopicsPage() {
         archived: metaArchived,
       });
       const cleared = Number(res.clearedRoles ?? 0);
+      const clearedStyles = Number(res.clearedStyles ?? 0);
       setMeta(undefined);
       // ЧИСЛО СНЯТЫХ РОЛЕЙ НЕ ГЛОТАЕТСЯ. Понижение, тихо снявшее сорок ярлыков, выглядит
       // ровно так же, как понижение, не снявшее ни одного, — а это разные события.
@@ -266,10 +267,20 @@ export default function FileTopicsPage() {
       // ему счётчиком «ролей» значило бы не совпасть со своим же обещанием. По-английски числом
       // меняется только существительное — глагол `lost` одинаков на любом числе, поэтому
       // согласуется одно слово, а не два.
-      showMessage(
-        cleared ? `saved. ${cleared} ${plural(cleared, 'link')} lost the role` : 'saved',
-        'success',
-      );
+      // ВТОРОЕ ЧИСЛО ПОНИЖЕНИЯ. Роли снимаются с ФАЙЛОВ, привязки стилей — с ВЕЩЕЙ, и это два
+      // разных события: у проекта может не быть ни одной проставленной роли и при этом восемь
+      // карточек вещей, которые на него показывают. Одно число вместо двух означало бы, что
+      // половина последствия происходит молча.
+      //
+      // ТОЧКА С ЗАПЯТОЙ, А НЕ ВТОРОЙ ТОСТ: это одно нажатие и одно событие, а два тоста подряд
+      // человек читает как «что-то пошло не так и повторилось».
+      const said = [
+        cleared ? `${cleared} ${plural(cleared, 'link')} lost the role` : '',
+        clearedStyles
+          ? `${clearedStyles} ${plural(clearedStyles, 'garment')} lost the link to this project`
+          : '',
+      ].filter(Boolean);
+      showMessage(said.length ? `saved. ${said.join('; ')}` : 'saved', 'success');
     } catch (e) {
       fail(e, "couldn't save");
     }
@@ -342,9 +353,18 @@ export default function FileTopicsPage() {
   const doDelete = async () => {
     if (!deleting) return;
     try {
-      await removeTopic.mutateAsync(Number(deleting.id));
+      const res = await removeTopic.mutateAsync(Number(deleting.id));
+      // ЕДИНСТВЕННЫЙ НЕОБРАТИМЫЙ ПУТЬ ЭТОГО ЭКРАНА. Удаление уносит привязки вещей КАСКАДОМ, и
+      // «убрал с глаз пустую съёмку» и «у восьми карточек пропал ответ, каким файлом их сделали»
+      // обязаны быть ОДНИМ событием на экране, а не двумя с разницей в месяц.
+      const unlinked = Number(res.unlinkedStyles ?? 0);
       setDeleting(undefined);
-      showMessage('the topic is deleted', 'success');
+      showMessage(
+        unlinked
+          ? `the topic is deleted. ${unlinked} ${plural(unlinked, 'garment')} lost the link to it`
+          : 'the topic is deleted',
+        'success',
+      );
     } catch (e) {
       fail(e, "couldn't delete the topic");
     }
@@ -427,7 +447,7 @@ export default function FileTopicsPage() {
                       <div className='flex flex-col gap-0.5'>
                         <Text size='micro' variant='label' component='span' className='uppercase'>
                           {project ? 'project' : 'topic'}
-                          {t.archived ? ' · archived' : ''}
+                          {t.archived ? ` · ${ARCHIVED_WORD}` : ''}
                         </Text>
                         {!!dates && (
                           <Text size='nano' variant='label' component='span'>
@@ -619,7 +639,7 @@ export default function FileTopicsPage() {
                       </Chip>
                       {r.archived && (
                         <Text size='nano' variant='label' component='span' className='ml-1.5'>
-                          archived
+                          {ARCHIVED_WORD}
                         </Text>
                       )}
                     </td>
@@ -973,8 +993,10 @@ export default function FileTopicsPage() {
               <Text size='micro' component='span'>
                 going back to a plain topic <b>zeroes the roles</b> on every file of this project:
                 a role lives on the link with a PROJECT, and a plain topic has nowhere to keep it.
-                how many links lost the role will be said as a number right after saving. the roles
-                do not come back: making it a project again returns the kind, but not the labels.
+                it also <b>unlinks every garment</b> whose card points here, so “which files was
+                this made with” goes unanswered on those cards. both numbers will be said right
+                after saving. neither comes back on its own: making it a project again returns the
+                kind, not the labels and not the links.
               </Text>
             </CalloutBox>
           )}
@@ -1055,9 +1077,23 @@ export default function FileTopicsPage() {
         closeOnConfirm={false}
         width='sm'
       >
+        {/* «ПУСТО» СЧИТАЕТСЯ ПО ФАЙЛАМ, А УНОСИТ ЭТА КНОПКА НЕ ТОЛЬКО ФАЙЛЫ. Кнопка отпирается
+            числом файлов, но проект без единого файла может оставаться ответом на «каким .zprj
+            сшита эта вещь» у десятка карточек, и удаление снимает эти связи каскадом. Прежний
+            текст обещал, что «ничего не пропадёт», — на этом пути это неправда.
+
+            ЧИСЛА ВЕЩЕЙ ЗДЕСЬ НЕТ И ВЗЯТЬ ЕГО НЕГДЕ: `ListFileTopics` считает файлы и только их,
+            обратного счёта «сколько вещей смотрит на этот проект» в контракте нет вовсе. Врать
+            оценкой или молчать — оба хуже, чем сказать прямо: связи есть, число будет названо
+            сразу после. Появится счёт у темы — эта фраза станет точной, и только она. */}
         <Text>
-          the topic is empty, deleting is safe: not a single file carries it, so nothing disappears
-          from the listings.
+          the topic is empty of FILES: not a single one carries it, so nothing disappears from the
+          listings.
+        </Text>
+        <Text className='mt-2'>
+          a style link is not a file, though. if any garment card points at this project, deleting
+          takes that link with it and nothing brings it back — the count is only known afterwards,
+          and re-linking is done by hand, card by card.
         </Text>
       </ConfirmationModal>
 
