@@ -820,14 +820,12 @@ export default function FilesPage() {
     // человек этого не спрашивает.
     const why = 'a role is set on a file that already exists';
     const role = roles.find((r) => Number(r.id) === fileRole.roleId)?.name;
-    // РОЛЬ БЕЗ ПРОЕКТА — ДОСТИЖИМОЕ СОСТОЯНИЕ, а не край карты: ряд ролей сам предлагает его
-    // подписью «“raw” across all projects at once». Пропажа там ровно та же и даже обиднее —
-    // проекта нет, значит и приёмной кучи, куда можно пойти посмотреть, тоже нет. Куда пачка
-    // уедет, уже сказано строкой тем выше, поэтому здесь — только про роль.
-    if (!activeProject) {
-      if (!role) return undefined;
-      return `“${role}” will not be set: ${why} — you will not see the batch in this view`;
-    }
+    // РОЛЬ БЕЗ ПРОЕКТА БОЛЬШЕ НЕ ДОСТИЖИМА (0323), и ветка про неё снята, а не оставлена «на
+    // всякий случай». Раньше ряд чипов сам предлагал это состояние подписью «“raw” across all
+    // projects at once»; теперь ряда нет, роль без проекта гасится в `normalizeGrouping` и
+    // вычищается из адреса в `patch`, а пришедшая по старой ссылке — разрешается в свой проект.
+    // Мёртвая ветка здесь стоила бы дороже пустоты: она обещала бы, что такое состояние бывает.
+    if (!activeProject) return undefined;
     if (fileRole.withoutRole) return `no role will be set — “without a role” is exactly this view`;
     // В ВЫБРАННОЙ РОЛИ ОБЕЩАНИЕ ОБЯЗАНО ПРЕДУПРЕДИТЬ О ПРОПАЖЕ. Плоская сетка показывает одну
     // роль, пачка ляжет без роли — и брошенного в этой выдаче не окажется вовсе. Промолчать
