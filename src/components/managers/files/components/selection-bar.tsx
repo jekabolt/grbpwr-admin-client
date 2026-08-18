@@ -158,7 +158,12 @@ export function FilesSelectionBar({
       .map((f) => (f.roles ?? []).find((r) => Number(r.projectTopicId) === sortProject))
       .filter((r) => r && Number(r.roleId) > 0);
     const names = Array.from(new Set(carried.map((r) => r?.roleName ?? '').filter(Boolean)));
-    return { inIt: inside.length, out: selected.length - inside.length, carrying: carried.length, names };
+    return {
+      inIt: inside.length,
+      out: selected.length - inside.length,
+      carrying: carried.length,
+      names,
+    };
   }, [selected, sortProject]);
 
   if (!selected.length && !refusals.length && !outcome) return null;
@@ -191,7 +196,16 @@ export function FilesSelectionBar({
 
   /** Слово роли в строке разбора: обещание диалога обязано меняться вместе с выбором. */
   const roleWord = () => {
-    if (roleChoice > 0) return `move to “${roleName}”`;
+    if (roleChoice > 0) {
+      // «Уже лежат как “исходники” и переедут в “исходники”» — фраза, которая читается как
+      // поломка счётчика. Если выбранное слово и есть то, что на них стоит, так и говорим.
+      const already =
+        breakdown &&
+        breakdown.carrying === breakdown.inIt &&
+        breakdown.names.length === 1 &&
+        breakdown.names[0] === roleName;
+      return already ? 'already carry it' : `move to “${roleName}”`;
+    }
     if (roleChoice === TAKE_ROLE_OFF) {
       return breakdown?.carrying
         ? 'lose that role and stay in the project'
@@ -487,107 +501,133 @@ export function FilesSelectionBar({
         </CalloutBox>
       )}
 
-      {/* ПОЛУОТКАЗ. Плашка называет обе половины поимённо — что легло и что нет, — и причину
-          печатает ту, что пришла с сервера. Тон не «ошибка»: красный в этой админке значит
-          убыток, а здесь работа не потеряна, она недоделана. */}
-      {outcome && (
-        <CalloutBox tone='warning'>
-          {/* ШАПКА НЕ ВРЁТ ПРО ЧИСЛО ЗАПИСЕЙ. «Две записи, одна не прошла» — правда только когда
+      {/* ПОЛУОТКАЗ И ПОЛОСА — ОДИН ПРИЛИПАЮЩИЙ БЛОК, а не два соседних узла в конце документа.
+          Полоса живёт внизу ЭКРАНА, а плашка, оставленная в потоке, оказывается в конце
+          СТРАНИЦЫ: человек нажал «apply» в прилипшей полосе, диалог закрылся — и известие о том,
+          что половина не легла, лежит под сеткой из шестидесяти плиток. Замерено снимком:
+          после отказа на экране не было видно ничего. Две прилипшие коробки с `bottom-0`
+          наложились бы друг на друга, поэтому прилипает ОДИН контейнер, а внутри порядок:
+          плашка над полосой (как в прототипе, где полоса нарисована сверху). */}
+      {(outcome || selected.length > 0) && (
+        <div className='sticky bottom-0 z-[var(--z-sticky)] flex flex-col gap-1.5'>
+          {outcome && (
+            <CalloutBox tone='warning' className='bg-bgColor'>
+              {/* ШАПКА НЕ ВРЁТ ПРО ЧИСЛО ЗАПИСЕЙ. «Две записи, одна не прошла» — правда только когда
               их действительно было две и упала одна: за нажатием с пустой половиной стоит ОДИН
               вызов, и говорить про вторую значило бы объяснять отказ тем, чего не было. */}
-          <Text component='span' className='block'>
-            {!outcome.topics || !outcome.project
-              ? 'the write did not go through.'
-              : outcome.topics.done || outcome.project.done
-                ? 'one press, two writes — and one of them did not go through.'
-                : 'one press, two writes — and neither of them went through.'}
-          </Text>
-          <ul className='mt-1.5 space-y-0.5'>
-            {outcome.topics && (
-              <li>
-                <Text size='micro' component='span'>
-                  {outcome.topics.done
-                    ? `the topics are on all ${files(outcome.count)}${outcome.topics.names ? `: ${outcome.topics.names}` : ''}`
-                    : `the topics did not go on${outcome.topics.names ? ` (${outcome.topics.names})` : ''}`}
-                </Text>{' '}
-                {!outcome.topics.done && (
-                  <Text size='micro' variant='label' component='span'>
-                    {outcome.topics.reason}
-                  </Text>
+              <Text component='span' className='block'>
+                {!outcome.topics || !outcome.project
+                  ? 'the write did not go through.'
+                  : outcome.topics.done || outcome.project.done
+                    ? 'one press, two writes — and one of them did not go through.'
+                    : 'one press, two writes — and neither of them went through.'}
+              </Text>
+              <ul className='mt-1.5 space-y-0.5'>
+                {outcome.topics && (
+                  <li>
+                    <Text size='micro' component='span'>
+                      {outcome.topics.done
+                        ? `the topics are on all ${files(outcome.count)}${outcome.topics.names ? `: ${outcome.topics.names}` : ''}`
+                        : `the topics did not go on${outcome.topics.names ? ` (${outcome.topics.names})` : ''}`}
+                    </Text>{' '}
+                    {!outcome.topics.done && (
+                      <Text size='micro' variant='label' component='span'>
+                        {outcome.topics.reason}
+                      </Text>
+                    )}
+                  </li>
                 )}
-              </li>
-            )}
-            {outcome.project && (
-              <li>
-                <Text size='micro' component='span'>
-                  {outcome.project.done
-                    ? `the link to “${outcome.project.name}” is made`
-                    : `the link to “${outcome.project.name}” was not made`}
-                </Text>{' '}
-                {!outcome.project.done && (
-                  <Text size='micro' variant='label' component='span'>
-                    {outcome.project.reason}
-                  </Text>
+                {outcome.project && (
+                  <li>
+                    <Text size='micro' component='span'>
+                      {outcome.project.done
+                        ? `the link to “${outcome.project.name}” is made`
+                        : `the link to “${outcome.project.name}” was not made`}
+                    </Text>{' '}
+                    {!outcome.project.done && (
+                      <Text size='micro' variant='label' component='span'>
+                        {outcome.project.reason}
+                      </Text>
+                    )}
+                  </li>
                 )}
-              </li>
-            )}
-          </ul>
-          <Text size='micro' variant='label' component='p' className='mt-1'>
-            {outcome.topics && outcome.project
-              ? 'nothing is half-written on a single file: the two writes are separate, so the one that failed retries on its own and the one that went through is not repeated. the selection stays until it does.'
-              : 'nothing is half-written on a single file: the batch either went through or it did not, and the retry sends the very same one. the selection stays until it does.'}
-          </Text>
-          <div className='mt-2 flex flex-wrap items-center gap-2'>
-            {outcome.topics && !outcome.topics.done && (
-              <Button size='sm' disabled={!!retrying} onClick={() => retryHalf('topics')}>
-                {retrying === 'topics' ? 'retrying…' : 'retry the topics'}
-              </Button>
-            )}
-            {outcome.project && !outcome.project.done && (
-              <Button size='sm' disabled={!!retrying} onClick={() => retryHalf('project')}>
-                {retrying === 'project' ? 'retrying…' : 'retry the project'}
-              </Button>
-            )}
-            <Button size='sm' variant='secondary' onClick={() => setOutcome(null)}>
-              dismiss
-            </Button>
-          </div>
-        </CalloutBox>
-      )}
-
-      {selected.length > 0 && (
-        <div className='sticky bottom-0 z-[var(--z-sticky)] flex flex-wrap items-center gap-2.5 bg-textColor px-2.5 py-1.5 text-bgColor'>
-          <Text component='span' className='tabular-nums'>
-            selected {files(selected.length)}
-          </Text>
-          {!writable && (
-            <Text component='span' className='opacity-70'>
-              in read mode group actions are not available
-            </Text>
+              </ul>
+              <Text size='micro' variant='label' component='p' className='mt-1'>
+                {outcome.topics && outcome.project
+                  ? 'nothing is half-written on a single file: the two writes are separate, so the one that failed retries on its own and the one that went through is not repeated. the selection stays until it does.'
+                  : 'nothing is half-written on a single file: the batch either went through or it did not, and the retry sends the very same one. the selection stays until it does.'}
+              </Text>
+              <div className='mt-2 flex flex-wrap items-center gap-2'>
+                {/* ПОВТОР — ГЛАВНОЕ ДЕЙСТВИЕ ПЛАШКИ, и весом он обязан это показывать: рядом с
+                    обведённым «dismiss» подчёркнутая ссылка читалась бы как второстепенная,
+                    хотя закрывает плашку именно она, а доделывает работу — повтор. */}
+                {outcome.topics && !outcome.topics.done && (
+                  <Button
+                    size='sm'
+                    variant='main'
+                    disabled={!!retrying}
+                    onClick={() => retryHalf('topics')}
+                  >
+                    {retrying === 'topics' ? 'retrying…' : 'retry the topics'}
+                  </Button>
+                )}
+                {outcome.project && !outcome.project.done && (
+                  <Button
+                    size='sm'
+                    variant='main'
+                    disabled={!!retrying}
+                    onClick={() => retryHalf('project')}
+                  >
+                    {retrying === 'project' ? 'retrying…' : 'retry the project'}
+                  </Button>
+                )}
+                <Button size='sm' variant='secondary' onClick={() => setOutcome(null)}>
+                  dismiss
+                </Button>
+              </div>
+            </CalloutBox>
           )}
-          <div className='ml-auto flex flex-wrap items-center gap-2'>
-            {/* ОДНА КНОПКА НА ВЕСЬ РАЗБОР. «set a role» отсюда ушла вместе с «set a topic»: роль
+
+          {selected.length > 0 && (
+            <div className='flex flex-wrap items-center gap-2.5 bg-textColor px-2.5 py-1.5 text-bgColor'>
+              <Text component='span' className='tabular-nums'>
+                selected {files(selected.length)}
+              </Text>
+              {!writable && (
+                <Text component='span' className='opacity-70'>
+                  in read mode group actions are not available
+                </Text>
+              )}
+              <div className='ml-auto flex flex-wrap items-center gap-2'>
+                {/* ОДНА КНОПКА НА ВЕСЬ РАЗБОР. «set a role» отсюда ушла вместе с «set a topic»: роль
                 без проекта не существует, и кнопка, предлагавшая её отдельно, предлагала
                 невозможное — а проекты при этом лежали группой внутри диалога тем, то есть одна
                 пара заводилась из двух мест разными словами. */}
-            <Button size='sm' variant='simpleReverse' disabled={!writable} onClick={openSort}>
-              sort these out
-            </Button>
-            <Button size='sm' variant='simpleReverse' disabled={downloading} onClick={downloadAll}>
-              {downloading ? 'downloading…' : 'download'}
-            </Button>
-            <Button
-              size='sm'
-              variant='simpleReverse'
-              disabled={!writable}
-              onClick={() => setConfirmDelete(true)}
-            >
-              delete
-            </Button>
-            <Button size='sm' variant='simpleReverse' onClick={onClear}>
-              drop the selection
-            </Button>
-          </div>
+                <Button size='sm' variant='simpleReverse' disabled={!writable} onClick={openSort}>
+                  sort these out
+                </Button>
+                <Button
+                  size='sm'
+                  variant='simpleReverse'
+                  disabled={downloading}
+                  onClick={downloadAll}
+                >
+                  {downloading ? 'downloading…' : 'download'}
+                </Button>
+                <Button
+                  size='sm'
+                  variant='simpleReverse'
+                  disabled={!writable}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  delete
+                </Button>
+                <Button size='sm' variant='simpleReverse' onClick={onClear}>
+                  drop the selection
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -610,7 +650,13 @@ export function FilesSelectionBar({
           </Text>
 
           <div className='flex flex-col gap-1'>
-            <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
+            <Text
+              size='micro'
+              variant='uppercase'
+              tracking='group'
+              component='p'
+              className='font-bold'
+            >
               topics
             </Text>
             <ChipRow>
@@ -631,7 +677,11 @@ export function FilesSelectionBar({
                 </Chip>
               ))}
               {newTopics.map((n) => (
-                <Chip key={n} selected onRemove={() => setNewTopics((p) => p.filter((x) => x !== n))}>
+                <Chip
+                  key={n}
+                  selected
+                  onRemove={() => setNewTopics((p) => p.filter((x) => x !== n))}
+                >
                   {n}
                 </Chip>
               ))}
@@ -663,7 +713,13 @@ export function FilesSelectionBar({
 
           <div className='flex flex-col gap-1'>
             <div className='flex flex-wrap items-baseline gap-2'>
-              <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
+              <Text
+                size='micro'
+                variant='uppercase'
+                tracking='group'
+                component='p'
+                className='font-bold'
+              >
                 project
               </Text>
               <Text size='micro' variant='label' component='span'>
@@ -738,10 +794,10 @@ export function FilesSelectionBar({
                 узнать об этом человек должен там, где он в него смотрит, а не там, где он пуст. */}
             {projects.length > 0 && (
               <Text size='micro' variant='label' component='p'>
-                an archived project is offered here and carries the word: the archive takes a project
-                out of the pickers that start work, not out of the ones that finish it. a new project
-                is not made here — an ordinary topic is switched to the kind “project” on the topics
-                screen.
+                an archived project is offered here and carries the word: the archive takes a
+                project out of the pickers that start work, not out of the ones that finish it. a
+                new project is not made here — an ordinary topic is switched to the kind “project”
+                on the topics screen.
               </Text>
             )}
             {projectRows.length > PROJECT_ROWS && (
@@ -753,7 +809,13 @@ export function FilesSelectionBar({
 
           <div className='flex flex-col gap-1'>
             <div className='flex flex-wrap items-baseline gap-2'>
-              <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
+              <Text
+                size='micro'
+                variant='uppercase'
+                tracking='group'
+                component='p'
+                className='font-bold'
+              >
                 role
               </Text>
               <Text size='micro' variant='label' component='span'>
