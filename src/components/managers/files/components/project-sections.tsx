@@ -389,7 +389,13 @@ export function ProjectSections({
         <Button size='xs' variant='secondary' disabled={!writable} onClick={onAddRole}>
           + role
         </Button>
-        <Text size='micro' variant='label' component='span' className='min-w-0'>
+        {/* `min-w-0` + `break-words` — НЕСУЩАЯ ПАРА, а не уборка, и та же, что вшита в
+            `SectionHeader` и `Tiles`. Имя роли пишет человек, и сервер пускает до 255 знаков
+            ОДНИМ СЛОВОМ: у флекс-элемента `min-width: auto`, то есть «не уже содержимого», а у
+            нерасторжимой строки min-content — всё слово целиком. Оно вылезает из ряда и тянет
+            за собой ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ ВСЕЙ СТРАНИЦЫ — замерено пробой: 1540px при окне
+            1500 и при окне 700. */}
+        <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
           {roleNames.length
             ? `a new section is a new word, and the word belongs to “${projectName}” alone: ${roleNames.join(' · ')}. the shoot next door keeps its own set, and neither list is offered to the other.`
             : `“${projectName}” has no words of its own yet — files sit in it unsorted, which is a lawful state. a role names a sub-group of THIS project and is not shared with the library.`}
