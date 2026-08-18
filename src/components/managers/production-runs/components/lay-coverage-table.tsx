@@ -66,7 +66,7 @@ export function LayCoverageTable({
       <DataTable variant='grid'>
         <thead>
           <tr>
-            <th>колорвей · ткани</th>
+            <th>colourway · fabrics</th>
             {sizeIds.map((s) => (
               <th key={s}>{sizeLabel(s)}</th>
             ))}
@@ -107,10 +107,10 @@ export function LayCoverageTable({
           ни дальтонизм. Каждому вердикту здесь дано СЛОВО, и «не проверено» стоит отдельной
           строкой, а не в скобках у «покрыто». */}
       <div className='flex flex-wrap gap-x-4 gap-y-0.5'>
-        <LegendItem verdict='ok' word='покрыто' />
-        <LegendItem verdict='blocker' word='нехватка — ткань не раскроена' />
-        <LegendItem verdict='warning' word='перекрой — решает человек' />
-        <LegendItem verdict='unknown' word='не проверено — не «покрыто»' />
+        <LegendItem verdict='ok' word='covered' />
+        <LegendItem verdict='blocker' word="shortfall — the fabric isn't cut" />
+        <LegendItem verdict='warning' word='overcut — a human decides' />
+        <LegendItem verdict='unknown' word="not checked — not 'covered'" />
       </div>
     </div>
   );
@@ -150,28 +150,31 @@ function CoverageCell({
 
   return (
     <GenericPopover
-      title={`${covered} из ${planned}`}
+      title={`${covered} of ${planned}`}
       openElement={<span className='cursor-pointer underline decoration-dotted'>{body}</span>}
-      triggerProps={{ 'aria-label': 'почему покрытие такое' }}
+      triggerProps={{ 'aria-label': 'why the coverage is what it is' }}
     >
       <div className='flex flex-col gap-1'>
         {verdict === 'unknown' ? (
           <Text size='micro' variant='label'>
-            Покрытие этой клетки ПОСЧИТАТЬ НЕ УДАЛОСЬ
-            {unknownPieces > 0 ? ` — ${unknownPieces} дет. без ответа` : ''}. Это не «покрыто» и не
-            «нехватка»: перечисленное ниже надо доразметить, и тогда клетка получит вердикт.
+            the coverage of this cell COULD NOT BE COMPUTED
+            {unknownPieces > 0
+              ? ` — ${unknownPieces} ${unknownPieces === 1 ? 'piece' : 'pieces'} with no answer.`
+              : '.'}{' '}
+            this is neither “covered” nor “shortfall”: what is listed below has to be marked up,
+            and then the cell will get a verdict.
           </Text>
         ) : null}
 
         {blocking.length > 0 ? (
           <Text size='micro' variant='label'>
-            минимум дают: {blocking.join(', ')}
+            the minimum comes from: {blocking.join(', ')}
           </Text>
         ) : null}
 
         {yields.length === 0 ? (
           <Text size='small' variant='inactive'>
-            сервер не прислал разбор по деталям
+            the server sent no per-piece breakdown
           </Text>
         ) : (
           yields.map((y, i) => {
@@ -179,17 +182,19 @@ function CoverageCell({
             return (
               <div key={`${y.pieceLineKey || 'piece'}-${i}`} className='flex flex-col'>
                 <Text size='small' className={VERDICT_TEXT[yv]}>
-                  {VERDICT_GLYPH[yv]} {y.pieceName || y.pieceLineKey || 'деталь'}:{' '}
+                  {VERDICT_GLYPH[yv]} {y.pieceName || y.pieceLineKey || 'piece'}:{' '}
                   {/* «сколько изделий даёт эта деталь» — та самая цифра, из которой берётся
                       минимум по клетке. У UNKNOWN-детали её не печатаем: 0 прочиталось бы как
                       «выкроено ноль». */}
-                  {yv === 'unknown' ? 'не посчитана' : `${y.garmentYield ?? 0} изд.`}
-                  {(y.requiredPerGarment ?? 0) > 0 ? ` · нужно ${y.requiredPerGarment} на изд.` : ''}
+                  {yv === 'unknown' ? 'not computed' : `${y.garmentYield ?? 0} garments`}
+                  {(y.requiredPerGarment ?? 0) > 0
+                    ? ` · needs ${y.requiredPerGarment} per garment`
+                    : ''}
                 </Text>
                 {(y.overcutQty ?? 0) > 0 ? (
                   <Text size='micro' variant='label' className='text-warning'>
-                    перекрой {y.overcutQty} шт — деталь не входит в зеркальную пару, режется с
-                    запасом
+                    overcut {y.overcutQty} pcs — the piece isn't part of a mirrored pair, it's cut
+                    with a surplus
                   </Text>
                 ) : null}
                 {y.detail ? (

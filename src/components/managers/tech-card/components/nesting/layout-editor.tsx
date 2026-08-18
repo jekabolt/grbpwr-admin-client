@@ -212,7 +212,7 @@ export function LayoutEditor({
   // и «зеркало». Левая и правая полочки на маркере отличаются ТОЛЬКО хиральностью — если её нигде
   // не написать, человек, сверяющий раскладку с комплектом кроя, различить их не сможет.
   const marksOf = (pl: Placement): string => {
-    const m = [pl.rot ? `${pl.rot}°` : '', pl.flipped ? 'зеркало' : ''].filter(Boolean);
+    const m = [pl.rot ? `${pl.rot}°` : '', pl.flipped ? 'mirror' : ''].filter(Boolean);
     return m.length > 0 ? ` (${m.join(', ')})` : '';
   };
 
@@ -222,8 +222,8 @@ export function LayoutEditor({
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='nano' variant='label' component='span'>
             {selected != null && selPiece
-              ? `выбрано: ${selPiece.name}${marksOf(placements[selected])}`
-              : 'перетащите деталь · клик — выбрать · R — поворот'}
+              ? `selected: ${selPiece.name}${marksOf(placements[selected])}`
+              : 'drag a piece · click — select · R — rotate'}
           </Text>
           {selected != null &&
             selPiece &&
@@ -233,7 +233,7 @@ export function LayoutEditor({
                 className='text-nano uppercase underline hover:opacity-70'
                 onClick={rotateSelected}
               >
-                повернуть (R)
+                rotate (R)
               </button>
             )}
         </div>

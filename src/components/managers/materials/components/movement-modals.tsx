@@ -359,7 +359,7 @@ export function ReceiveStockModal({
           onChange={(e) => setOccurredAt(e.target.value)}
         />
       </Field>
-      <Field label='ожидалась к (обещанный срок)'>
+      <Field label='expected by (promised date)'>
         <input
           className={cell}
           type='date'

@@ -342,7 +342,7 @@ const pieceSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message:
-            'эта ячейка кроя не привязана к колорвею — сохранение стёрло бы её материал/заметку',
+            "this cut cell isn't bound to a colourway — saving would wipe its material / note",
           path: ['materials', mi, 'colorwayIndex'],
         });
       }
@@ -433,7 +433,7 @@ const bomItemSchema = z
     if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'укажите роль (название) — у строки без артикула имени взять неоткуда',
+        message: 'set a role (a name) — a line without an article has nowhere to take a name from',
         path: ['name'],
       });
     }
@@ -445,14 +445,14 @@ const bomItemSchema = z
     if (purpose && !isRollGoodsSection(item.section)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'назначение есть только у ткани (fabric / lining / interlining / insulation)',
+        message: 'only a fabric line has a purpose (fabric / lining / interlining / insulation)',
         path: ['purpose'],
       });
     }
     if (item.purposeNote?.trim() && !isOtherPurpose(purpose)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'примечание можно писать только к назначению «другое»',
+        message: 'a note can be written only for the “other” purpose',
         path: ['purposeNote'],
       });
     }
@@ -464,7 +464,7 @@ const bomItemSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          'вид есть у фурнитуры, ниток, тесьмы, декора и упаковки — у ткани это назначение, у этикетки её тип',
+          "a kind belongs to hardware, thread, trim, decoration and packaging — for fabric it is the purpose, for a label it is its type",
         path: ['kind'],
       });
     }
@@ -472,14 +472,14 @@ const bomItemSchema = z
     if (kind && home && home !== item.section) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'этот вид относится к другой секции',
+        message: 'this kind belongs to a different section',
         path: ['kind'],
       });
     }
     if (item.kindNote?.trim() && kind !== 'TECH_CARD_BOM_KIND_OTHER') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'примечание можно писать только к виду «другое»',
+        message: 'a note can be written only for the “other” kind',
         path: ['kindNote'],
       });
     }
@@ -1343,7 +1343,7 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
   if (data.season?.trim() && !parseSeasonToSku(data.season)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'сезон не распознан — SS25 / FW26 / PF26 / Resort 25 (Holiday не поддерживается)',
+      message: 'season not recognised — SS25 / FW26 / PF26 / Resort 25 (Holiday is not supported)',
       path: ['season'],
     });
   }
@@ -1398,10 +1398,10 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message:
-        `блок «${block}» уже сопоставлен с деталью «${nameOf(prev.piece)}» в этом же назначении — ` +
-        `две детали кроя на один блок сервер не примет и отклонит сохранение всей карты. ` +
-        `Откройте «детали кроя» на вкладке ВЫКРОЙКИ и оставьте одну связь ` +
-        `(сейчас спорят «${nameOf(prev.piece)}» и «${nameOf(piece)}»).`,
+        `block “${block}” is already matched to piece “${nameOf(prev.piece)}” under this same purpose — ` +
+        `the server won't accept two cut pieces on one block and will reject the save of the whole card. ` +
+        `open “cut pieces” on the PATTERNS tab and leave one link ` +
+        `(“${nameOf(prev.piece)}” and “${nameOf(piece)}” are the two in conflict right now).`,
       path: ['pieceDxfAliases', index, 'blockName'],
     });
   });

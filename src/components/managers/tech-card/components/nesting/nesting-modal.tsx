@@ -37,6 +37,7 @@ import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
+import { isFetchFailure } from './dxf-warnings';
 import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
 import {
   buildMarkerLayout,
@@ -93,25 +94,36 @@ import {
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
-// Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
-const MANUAL_NOTE_PREFIX = 'ручная правка:';
+// Prior manual-edit notes are replaced, not stacked, on each re-save of a marker.
+//
+// ПОМЕТКА — СОХРАНЁННОЕ ЗНАЧЕНИЕ, а не только текст: она уезжает в warnings блоба (:1828) и
+// оттуда же ЧИТАЕТСЯ ОБРАТНО, чтобы прежнюю пометку отбросить (:1730). Значит у пометки, как и у
+// фолбэка имени листа в `sheet-name.ts`, есть легаси-написание, лежащее в блобах, снятых до
+// перехода админки на английский. Отбирать надо по ОБОИМ: иначе на легаси-маркере старая пометка
+// не отбрасывается никогда и каждое пересохранение подкладывает к ней ещё одну.
+const MANUAL_NOTE_PREFIX = 'manual edit:';
+const LEGACY_MANUAL_NOTE_PREFIX = 'ручная правка:';
+
+/** Это пометка о ручной правке — в сегодняшнем написании либо в легаси? */
+const isManualNote = (w: string): boolean =>
+  w.startsWith(MANUAL_NOTE_PREFIX) || w.startsWith(LEGACY_MANUAL_NOTE_PREFIX);
 
 // Терминальная причина отказа сохранения — «прогон ещё не завершён» во всех его видах. Когда
 // она ЕДИНСТВЕННАЯ (обычное состояние до первого прогона), красный список не рендерится —
 // error-бокс при только что открытой модалке девальвировал бы тон, — а причина уезжает в
 // тултип кнопки. Константа, потому что это сравнение по идентичности строки.
 const TERMINAL_SAVE_REASON =
-  'сохранить можно завершённую раскладку, в которую поместились все детали';
+  'only a complete marker, one that every piece fitted into, can be saved';
 
 // Нарушение словами. У кромочного (otherIndex отсутствует) required — это отступ, и при
 // отступе 0 «0.00 см < 0.00 см» звучало бы бессмыслицей: деталь просто вышла за полотно.
 function violationText(v: Violation): string {
   if (v.otherIndex == null) {
     return v.required > 0
-      ? `деталь за пределами полотна (отступ ${v.required.toFixed(2)} см)`
-      : 'деталь за пределами полотна';
+      ? `piece outside the cloth (margin ${v.required.toFixed(2)} cm)`
+      : 'piece outside the cloth';
   }
-  return `зазор ${v.clearance.toFixed(2)} см < ${v.required.toFixed(2)} см`;
+  return `gap ${v.clearance.toFixed(2)} cm < ${v.required.toFixed(2)} cm`;
 }
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
@@ -552,10 +564,10 @@ export function NestingModal({
     contourMeasure?.verdict === 'cut' && (contourMeasure.allowanceCm ?? 0) > 0;
   const doubleAllowanceRefusal =
     !viewData && contourIsCutLine && allowanceMm > 0 && contourMeasure
-      ? `слой ${contourMeasure.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} мм снаружи линии шва (совпало на ${contourMeasure.stats.accepted} блоках). Раскладка добавит ещё ${allowanceMm.toFixed(1)} мм офсета — припуск будет посчитан ДВАЖДЫ, и длина завышена примерно на ${allowanceMm.toFixed(1)} мм по периметру каждой детали. Выходов два: поставить припуск 0 (контур уже с припуском) либо ${
+      ? `layer ${contourMeasure.layer || '—'} is the CUT LINE: it was measured lying ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} mm outside the seam line (agreed on ${contourMeasure.stats.accepted} blocks). the marker will add another ${allowanceMm.toFixed(1)} mm of offset — the allowance would be counted TWICE, and the length overstated by roughly ${allowanceMm.toFixed(1)} mm around the perimeter of every piece. there are two ways out: set the allowance to 0 (the contour already carries it) or ${
           seamLayerPick
-            ? `выбрать контурный слой ${seamLayerPick} — на нём замерена линия шва`
-            : 'выбрать контурный слой с линией шва'
+            ? `pick contour layer ${seamLayerPick} — the seam line was measured on it`
+            : 'pick a contour layer with the seam line'
         }.`
       : null;
   // УЛИК НЕТ — И ЭТО НЕ ПОВОД ЗАПРЕЩАТЬ (§5.4). Улики отсутствуют ЗАКОНОМЕРНО: у блока один
@@ -601,14 +613,14 @@ export function NestingModal({
   // припуска.
   const allowanceSourceText = (() => {
     const m = contourMeasure;
-    if (!m || parse.phase !== 'ready') return 'контур DXF — линия шва; кладётся линия кроя';
+    if (!m || parse.phase !== 'ready') return 'the DXF contour is the seam line; the cut line is what gets laid';
     if (m.verdict === 'cut') {
-      return `слой ${m.layer}: ЛИНИЯ КРОЯ — припуск ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} мм уже в контуре (замерено на ${m.stats.accepted} блоках)`;
+      return `layer ${m.layer}: CUT LINE — the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour (measured on ${m.stats.accepted} blocks)`;
     }
     if (m.verdict === 'seam') {
-      return `слой ${m.layer}: линия шва — линия кроя нарисована в ${(engineCmToMm(m.gapCm) ?? 0).toFixed(1)} мм снаружи (замерено на ${m.stats.accepted} блоках)`;
+      return `layer ${m.layer}: seam line — the cut line is drawn ${(engineCmToMm(m.gapCm) ?? 0).toFixed(1)} mm outside (measured on ${m.stats.accepted} blocks)`;
     }
-    return `крой или шов — по файлу не определить: ${allowanceUnknownText(m)}`;
+    return `cut or seam — the file can't tell: ${allowanceUnknownText(m)}`;
   })();
 
   // Cross-strip span in the allowed rotations; a piece that fits nowhere is auto-unchecked.
@@ -827,7 +839,7 @@ export function NestingModal({
     : null;
   const manualNote =
     manual && violations.length && worstViolation
-      ? `${MANUAL_NOTE_PREFIX} ${violations.length} нарушений (худшее — ${violationText(worstViolation)})`
+      ? `${MANUAL_NOTE_PREFIX} ${violations.length} ${violations.length === 1 ? 'violation' : 'violations'} (worst — ${violationText(worstViolation)})`
       : null;
   // Overlapping by hand shrinks the used length, so the naive ratio can exceed 100% —
   // and efficiency_pct is a 0..100 column. Clamp once, use everywhere.
@@ -850,7 +862,7 @@ export function NestingModal({
     !!effective && effective.totalCount > 0 && effective.placedCount !== effective.totalCount;
   const viewIsDraft = isDraftMarker(view?.summary);
   const partialExportRefusal = partialGeometry
-    ? `уложено ${effective?.placedCount ?? 0} из ${effective?.totalCount ?? 0} деталей: экспорт частичной раскладки запрещён — по такому файлу выкроят изделие без недостающих деталей. Поднимите бюджет поиска и пересчитайте${viewIsDraft ? ' (это ЧЕРНОВИК)' : ''}`
+    ? `${effective?.placedCount ?? 0} of ${effective?.totalCount ?? 0} pieces placed: exporting a partial marker is forbidden — a garment cut from such a file would come out without the missing pieces. raise the search budget and recompute${viewIsDraft ? ' (this is a DRAFT)' : ''}`
     : '';
 
   // «НЕ ВЛЕЗЛО» — a different fact from «нарушения», and the panel has to keep them apart.
@@ -869,7 +881,7 @@ export function NestingModal({
   const unplaced = !running ? displayResult?.unplaced ?? [] : [];
   const unplacedText = useMemo(() => {
     if (unplaced.length === 0) return '';
-    const nameOf = (id: number) => displayPieces.find((p) => p.id === id)?.name || `деталь ${id}`;
+    const nameOf = (id: number) => displayPieces.find((p) => p.id === id)?.name || `piece ${id}`;
     const byReason = new Map<string, Set<string>>();
     for (const u of unplaced) {
       const set = byReason.get(u.reason) ?? new Set<string>();
@@ -877,9 +889,9 @@ export function NestingModal({
       byReason.set(u.reason, set);
     }
     const word: Record<string, string> = {
-      width: 'шире полосы ни в одном повороте',
-      'no-space': 'не нашлось места на полосе',
-      missing: 'детали нет в разобранных файлах',
+      width: 'wider than the strip in every rotation',
+      'no-space': 'no room was found on the strip',
+      missing: 'the piece is not in the parsed files',
       // Зеркало заказано, а ткань его не терпит. Слово тут — не украшение: без него панель
       // печатала сырой токен «mirror», и оператор видел причину, по которой ничего сделать
       // нельзя. Действий ровно два, и оба названы.
@@ -887,7 +899,7 @@ export function NestingModal({
       // предупреждение движка (nest/index.ts), оно показывается рядом и точнее этой строки.
       // Здесь достаточно сказать, что делать: оба случая чинятся на вкладке BOM.
       mirror:
-        'ткань переворота не допускает — зеркальный экземпляр класть нечем: проставьте или исправьте направление у строки ткани на вкладке BOM (парные детали на ворсе кроят в два слоя лицом к лицу — это другой маркер)',
+        'the fabric allows no flipping — there is nothing to lay the mirrored instance with: set or fix the direction on the fabric line on the BOM tab (paired pieces on a nap are cut in two plies face to face — that is a different marker)',
     };
     return [...byReason.entries()]
       .map(([reason, names]) => `${[...names].join(', ')} — ${word[reason] ?? reason}`)
@@ -1028,7 +1040,7 @@ export function NestingModal({
   const downloadContoursOnly = () => {
     if (!effective || viewDegraded || running) return;
     download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf', [
-      'только контур',
+      'contour only',
     ]);
   };
 
@@ -1037,9 +1049,9 @@ export function NestingModal({
       ? effective.usedLengthCm <= displayTarget && effective.placedCount === effective.totalCount
         ? {
             ok: true,
-            text: `влезает · запас ${(displayTarget - effective.usedLengthCm).toFixed(1)} см`,
+            text: `fits · spare ${(displayTarget - effective.usedLengthCm).toFixed(1)} cm`,
           }
-        : { ok: false, text: `не влезает · нужно ${effective.usedLengthCm.toFixed(1)} см` }
+        : { ok: false, text: `doesn't fit · needs ${effective.usedLengthCm.toFixed(1)} cm` }
       : null;
 
   // ── «сохранить раскладку» (Ф4б) ────────────────────────────────────────────────────────
@@ -1064,7 +1076,7 @@ export function NestingModal({
   // «Cupro 90» может стоять и подкладкой, и карманкой, и по имени они неразличимы — а именно этот
   // список решает, на какую строку BOM ляжет измеренный расход.
   const slotLabel = (b: MarkerBomLine) =>
-    [b.role, b.name?.trim() || 'без названия'].filter(Boolean).join(' · ') +
+    [b.role, b.name?.trim() || 'unnamed'].filter(Boolean).join(' · ') +
     (b.unit ? ` · ${b.unit}` : '');
   const unsavedSlots = (bomLines ?? []).length - fabricLines.length;
   const slot = fabricLines.find((b) => b.lineKey === slotKey);
@@ -1096,10 +1108,10 @@ export function NestingModal({
     // на том же полотне — ровно то, ради чего поле тиража и существует.
     graded
       ? compositionLabel(composition, sizeNameOfId)
-      : sizeLabel || (ungradedUnits > 1 ? `${ungradedUnits} изд.` : ''),
-    (slot ? [slot.role, slot.name?.trim()].filter(Boolean).join(' ') : '') || 'раскладка',
+      : sizeLabel || (ungradedUnits > 1 ? `${ungradedUnits} garments` : ''),
+    (slot ? [slot.role, slot.name?.trim()].filter(Boolean).join(' ') : '') || 'marker',
     chosenColorway?.label ?? '',
-    `${widthCm} см`,
+    `${widthCm} cm`,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -1144,17 +1156,17 @@ export function NestingModal({
       const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
       if (!Number.isFinite(roll) || roll <= 0) return '';
       const sv = slotSelvedge(b);
-      return sv > 0 ? `рулон ${roll} − кромка 2×${sv}` : `рулон ${roll}, кромка не задана`;
+      return sv > 0 ? `roll ${roll} − selvedge 2×${sv}` : `roll ${roll}, selvedge not set`;
     };
     if (fabricLines.length === 1) return describe(fabricLines[0]);
     const each = fabricLines
       .map((b) => {
         const cut = slotCutWidth(b);
-        const name = [b.role, b.name?.trim()].filter(Boolean).join(' ') || 'материал';
+        const name = [b.role, b.name?.trim()].filter(Boolean).join(' ') || 'material';
         return Number.isFinite(cut) ? `${name} ${Math.round(cut * 10) / 10}` : '';
       })
       .filter(Boolean);
-    return each.length ? `раскрой по слотам, см: ${each.join(' · ')}` : '';
+    return each.length ? `cutting width by slot, cm: ${each.join(' · ')}` : '';
   })();
 
   // A binding can go stale while the card is open — the slot is deleted on the BOM tab, or its
@@ -1295,7 +1307,7 @@ export function NestingModal({
     const key = lockedSlot?.lineKey || slotKey;
     const pin = key ? chosenColorway?.widthByLine.get(key) : undefined;
     if (!pin || !Number.isFinite(pin.cutCm)) return '';
-    return `${pin.articleName || 'без названия'} · раскрой ${pin.cutCm} см`;
+    return `${pin.articleName || 'unnamed'} · cutting ${pin.cutCm} cm`;
   })();
   // Карточка предлагает рулонные строки, а слот не выбран. Раньше это молча сохраняло маркер с
   // пустой привязкой: длина измерена, костинг её не видит, и понять это можно только по тому, что
@@ -1386,7 +1398,7 @@ export function NestingModal({
   // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
   const fetchFailed =
-    parse.phase === 'ready' && parse.warnings.some((w) => w.includes('не удалось скачать'));
+    parse.phase === 'ready' && parse.warnings.some(isFetchFailure);
   // Размер, НА КОТОРЫЙ пишется маркер, — тот, что выбран в диалоге, а не тот, в чей слот файл
   // когда-то положили. Один DXF несёт весь ряд, и раскладка размера XS, записанная как маркер
   // размера M, испортила бы костинг молча: длина есть, размер не тот.
@@ -1436,8 +1448,8 @@ export function NestingModal({
   const directionRefusal =
     !viewData && layoutFlipsPiece && !allowsFlip(effectiveDirection)
       ? effectiveDirection === 'unknown'
-        ? 'раскладка кладёт деталь вверх ногами (180° или зеркало), а направление ткани у выбранного слота не проставлено — сервер такую норму не примет: проставьте направление у строки ткани на вкладке BOM либо пересоберите раскладку без переворотов'
-        : 'раскладка кладёт деталь вверх ногами (180° или зеркало), а выбранная ткань помечена one-way — на ворсовой так класть нельзя: смените слот, пересоберите раскладку без переворотов либо исправьте направление ткани, если она на самом деле не ворсовая'
+        ? 'the marker lays a piece upside down (180° or mirrored), and the fabric direction of the chosen slot is not set — the server will not accept such a norm: set the direction on the fabric line on the BOM tab, or rebuild the marker without flips'
+        : 'the marker lays a piece upside down (180° or mirrored), and the chosen fabric is marked one-way — on a napped fabric it cannot be laid that way: change the slot, rebuild the marker without flips, or fix the fabric direction if it is not actually napped'
       : null;
   const canSave =
     !viewData &&
@@ -1473,44 +1485,44 @@ export function NestingModal({
   const saveRefusals: string[] = (() => {
     if (viewData || canSave) return [];
     const out: string[] = [];
-    if (!canEdit) out.push('нет прав на изменение карточки, либо она released');
+    if (!canEdit) out.push('no rights to change the card, or it is released');
     if (fetchFailed)
-      out.push('часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход');
+      out.push("some of the DXF didn't download — the marker is incomplete, and such a marker would understate consumption");
     if (directionRefusal)
       out.push(
-        'отказ по направлению ткани — полный текст в секции «3 · как кладём», у строки направления',
+        'refused on fabric direction — the full text is in section “3 · how we lay”, at the direction row',
       );
     if (doubleAllowanceRefusal)
       out.push(
-        'двойной припуск — прогон не запускается; полный текст в секции «2 · как читаем файл», у выбора контурного слоя',
+        'double allowance — the search will not start; the full text is in section “2 · how we read the file”, at the contour layer picker',
       );
     // Полный текст стоит в секции «1 · что кроим», у состава: там же лежат счётчики, которые
     // этот конфликт делает недостоверными. Второй экземпляр абзаца на том же экране был бы дублем.
     if (uniRefusal)
       out.push(
-        'в выкройках спорят копии неградуируемой детали — полный текст в секции «1 · что кроим», под составом',
+        'copies of an ungraded piece disagree in the patterns — the full text is in section “1 · what we cut”, under the composition',
       );
     // Не было в цепочке вовсе: отказ по невыбранной ткани блокировал сохранение молча, а тултип
     // падал в терминальную ветку про «завершённую раскладку». Формулировка — та же, что в рейле.
     if (noSlotChosen)
       out.push(
-        'выберите ткань — иначе маркер сохранится без привязки и расход не попадёт в костинг',
+        "pick a fabric — otherwise the marker is saved unbound and its consumption won't reach the costing",
       );
     if (sizeUnresolved)
       out.push(
         unresolvedTokens.length > 0
-          ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
-          : 'размер раскладки неизвестен — в именах блоков нет размеров, и слот его не называет',
+          ? `sizes are missing from the card's size range: ${unresolvedTokens.join(', ')} — add them to the card or drop them from the composition`
+          : "the marker's size is unknown — the block names carry no sizes, and the slot does not name one",
       );
     if (sizeUnsaved)
-      out.push('размер добавлен, но карточка не сохранена — сначала сохраните карточку');
+      out.push('the size was added but the card is not saved — save the card first');
     if (sizesWithoutPieces.length > 0)
       out.push(
-        `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`,
+        `the composition took sizes with not a single piece picked: ${sizesWithoutPieces.join(', ')}`,
       );
     if (composition.length > MAX_MARKER_COMPOSITION_SIZES)
       out.push(
-        `в составе ${composition.length} размеров, потолок сервера — ${MAX_MARKER_COMPOSITION_SIZES}`,
+        `the composition holds ${composition.length} sizes, the server's cap is ${MAX_MARKER_COMPOSITION_SIZES}`,
       );
     // Терминальная ветка прежней цепочки — она же покрывает незавершённый прогон, пустой
     // состав и отсутствие серверного контекста (compute-only).
@@ -1528,14 +1540,8 @@ export function NestingModal({
   // при только что открытой модалке не рендерится (см. TERMINAL_SAVE_REASON), причина остаётся
   // в тултипе кнопки. Инвариант «массив непуст ⇔ disabled» это не трогает.
   const onlyTerminal = saveRefusals.length === 1 && saveRefusals[0] === TERMINAL_SAVE_REASON;
-  // «1 причина / 2 причины / 5 причин» — заголовок списка не должен врать падежом.
-  const reasonWord = (n: number) => {
-    const d10 = n % 10;
-    const d100 = n % 100;
-    if (d10 === 1 && d100 !== 11) return 'причина';
-    if (d10 >= 2 && d10 <= 4 && (d100 < 10 || d100 >= 20)) return 'причины';
-    return 'причин';
-  };
+  // «1 reason / 2 reasons» — заголовок списка не должен врать числом.
+  const reasonWord = (n: number) => (n === 1 ? 'reason' : 'reasons');
 
   // Отказ сохранения, разобранный по полям (Ф1.8). Сервер отвергает норму, у ткани которой не
   // задано направление, и делает это ПОЛЕВЫМ нарушением с описанием, называющим строку BOM. Тост
@@ -1594,8 +1600,8 @@ export function NestingModal({
           warnings: [
             ...effective.warnings,
             allowanceMm > 0
-              ? `припуск на шов: ${allowanceMm.toFixed(1)} мм — сохранён контур КРОЯ, линия шва лежит на отдельном слое SEAM. ДОПУЩЕНИЕ: припуск взят ровным по всему контуру, тогда как по низу изделия он обычно шире`
-              : 'припуск на шов: 0 — раскладывалась ЛИНИЯ ШВА, расход занижен относительно кроя',
+              ? `seam allowance: ${allowanceMm.toFixed(1)} mm — the CUT contour was saved, the seam line lies on a separate SEAM layer. ASSUMPTION: the allowance is taken even around the whole contour, whereas along the hem it is usually wider`
+              : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
             ...(manualNote ? [manualNote] : []),
           ],
         },
@@ -1693,7 +1699,7 @@ export function NestingModal({
           layout,
         },
       });
-      showMessage('маркер сохранён — расход виден в костинге', 'success');
+      showMessage('marker saved — the consumption is visible in the costing', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       // marker_count rides the list rows too.
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
@@ -1706,7 +1712,7 @@ export function NestingModal({
       // server cannot resolve on the next save in the same session.
       setSlotKey(lockedSlot?.lineKey || (fabricLines.length === 1 ? fabricLines[0].lineKey : ''));
     } catch (e) {
-      const msg = failMessage(e, 'не удалось сохранить маркер');
+      const msg = failMessage(e, "couldn't save the marker");
       setSaveError(msg);
       showMessage(msg, 'error');
     } finally {
@@ -1732,7 +1738,7 @@ export function NestingModal({
     setSaving(true);
     try {
       const keptWarnings = (view.layout?.warnings ?? []).filter(
-        (w) => !w.startsWith(MANUAL_NOTE_PREFIX),
+        (w) => !isManualNote(w),
       );
       // ВЕРСИЯ СХЕМЫ БЛОБА: сохранённая — пока в раскладке нет зеркала, ровно 3 — как только есть.
       //
@@ -1834,12 +1840,12 @@ export function NestingModal({
           },
         },
       });
-      showMessage('правки маркера сохранены', 'success');
+      showMessage('marker edits saved', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       onClose();
     } catch (e) {
-      const msg = failMessage(e, 'не удалось сохранить правки');
+      const msg = failMessage(e, "couldn't save the edits");
       setSaveError(msg);
       showMessage(msg, 'error');
     } finally {
@@ -1861,46 +1867,46 @@ export function NestingModal({
   const selSeeded = parse.phase === 'ready' && pieces.some((p) => sel[p.id] != null);
   const railS1: RailSectionStatus = {
     blockers: [
-      noSlotChosen ? 'ткань не выбрана' : '',
+      noSlotChosen ? 'no fabric picked' : '',
       unresolvedTokens.length > 0
-        ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')}`
+        ? `sizes missing from the card's size range: ${unresolvedTokens.join(', ')}`
         : '',
-      selSeeded && !graded && !sizeId ? 'размер раскладки неизвестен' : '',
-      sizeUnsaved ? 'размер добавлен, но карточка не сохранена' : '',
+      selSeeded && !graded && !sizeId ? "the marker's size is unknown" : '',
+      sizeUnsaved ? 'the size was added but the card is not saved' : '',
       selSeeded && sizesWithoutPieces.length > 0
-        ? `размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
+        ? `sizes with not a single piece picked: ${sizesWithoutPieces.join(', ')}`
         : '',
       composition.length > MAX_MARKER_COMPOSITION_SIZES
-        ? `в составе ${composition.length} размеров — потолок сервера ${MAX_MARKER_COMPOSITION_SIZES}`
+        ? `the composition holds ${composition.length} sizes — the server's cap is ${MAX_MARKER_COMPOSITION_SIZES}`
         : '',
       // Не про выбор оператора, а про файл, — но стоит здесь, потому что ломает именно счёт
       // изделий и деталей, который живёт в этой секции.
-      uniRefusal ? 'копии неградуируемой детали спорят между собой' : '',
+      uniRefusal ? 'copies of an ungraded piece disagree with each other' : '',
     ].filter(Boolean),
     warnings: [
-      colorwayNoPin ? `колорвей «${chosenColorway?.label}» не назначил артикул на эту ткань` : '',
-      mixed ? 'смешанный состав — расход на изделие в рецепт не пишется' : '',
+      colorwayNoPin ? `colourway “${chosenColorway?.label}” has not assigned an article to this fabric` : '',
+      mixed ? 'mixed composition — the per-unit consumption is not written into the recipe' : '',
     ].filter(Boolean),
   };
   const railS2: RailSectionStatus = {
     blockers: [
-      parse.phase === 'error' ? 'ошибка разбора DXF' : '',
-      fetchFailed ? 'часть DXF не скачалась — раскладка неполная' : '',
-      doubleAllowanceRefusal ? 'двойной припуск: на выбранном слое линия кроя' : '',
+      parse.phase === 'error' ? 'DXF parse error' : '',
+      fetchFailed ? "some of the DXF didn't download — the marker is incomplete" : '',
+      doubleAllowanceRefusal ? 'double allowance: the chosen layer carries the cut line' : '',
     ].filter(Boolean),
     warnings: [
       parse.phase === 'ready' && parse.warnings.length > 0
-        ? `предупреждений разбора: ${parse.warnings.length}`
+        ? `parse warnings: ${parse.warnings.length}`
         : '',
       missingOnLayer.length > 0
-        ? `на слое ${contourLayer || '—'} нет контура у ${missingOnLayer.length} блоков`
+        ? `layer ${contourLayer || '—'} has no contour for ${missingOnLayer.length} blocks`
         : '',
       grainLayer !== '' && oriented.missing.length > 0
-        ? `долевая не определена у ${oriented.missing.length} деталей`
+        ? `the grainline is undetermined on ${oriented.missing.length} pieces`
         : '',
-      grainLayer === '' ? 'детали лягут так, как нарисованы в файле' : '',
+      grainLayer === '' ? 'the pieces will lie as they are drawn in the file' : '',
       parse.phase === 'ready' && unitOverride !== 'auto' && unitOverride !== parse.detectedUnit
-        ? 'юниты DXF: ручной override'
+        ? 'DXF units: manual override'
         : '',
     ].filter(Boolean),
   };
@@ -1910,65 +1916,65 @@ export function NestingModal({
       // просто не проставлено, и сказать «ткань не допускает» было бы неправдой.
       directionRefusal
         ? effectiveDirection === 'unknown'
-          ? 'раскладка кладёт деталь вверх ногами, а направление ткани не проставлено'
-          : 'раскладка кладёт деталь вверх ногами, а ткань этого не допускает'
+          ? 'the marker lays a piece upside down, and the fabric direction is not set'
+          : 'the marker lays a piece upside down, and the fabric does not allow it'
         : '',
-      doubleAllowanceRefusal ? 'двойной припуск — прогон не запускается' : '',
+      doubleAllowanceRefusal ? 'double allowance — the search will not start' : '',
     ].filter(Boolean),
     warnings: [
-      allowanceMm === 0 && !contourIsCutLine ? 'припуск 0 — расход будет занижен' : '',
-      allowanceUnconfirmed ? 'припуск не подтверждён файлом' : '',
-      seam.hulled.length > 0 ? `контур с дефектом у ${seam.hulled.length} деталей` : '',
-      !viewData && effectiveDirection === 'unknown' ? 'направление ткани не задано' : '',
+      allowanceMm === 0 && !contourIsCutLine ? 'allowance 0 — the consumption will be understated' : '',
+      allowanceUnconfirmed ? 'the allowance is not confirmed by the file' : '',
+      seam.hulled.length > 0 ? `a defective contour on ${seam.hulled.length} pieces` : '',
+      !viewData && effectiveDirection === 'unknown' ? 'the fabric direction is not set' : '',
     ].filter(Boolean),
   };
   const unfitCount = pieces.filter((p) => !fitsWidth.get(p.id)).length;
   const railS4: RailSectionStatus = {
     blockers: [
-      overCap ? 'сверх потолка сервера — прогон не запускается' : '',
+      overCap ? "over the server's cap — the search will not start" : '',
       // Только после засева `sel` (см. selSeeded) — иначе секция «детали» вспыхивала бы
       // открытой на один кадр после каждого разбора. Когда ни одна деталь не влезает в
       // ширину, чекбоксы выключены и «не выбрана» была бы ложью: выбирать нечего.
       selSeeded && checkedCount === 0
         ? pieces.length > 0 && unfitCount === pieces.length
-          ? 'ни одна деталь не влезает в ширину полотна'
-          : 'не выбрана ни одна деталь'
+          ? 'not a single piece fits the cloth width'
+          : 'not a single piece is picked'
         : '',
     ].filter(Boolean),
-    warnings: [unfitCount > 0 ? `шире полотна: ${unfitCount} деталей` : ''].filter(Boolean),
+    warnings: [unfitCount > 0 ? `wider than the cloth: ${unfitCount} pieces` : ''].filter(Boolean),
   };
   // Сводка-ответ секции — то, что видно в свёрнутой шапке. Не новые вычисления, а те же числа,
   // что стоят внутри, свёрнутые в одну строку-ответ.
   const s1Summary = [
-    cwOptions.length > 0 ? chosenColorway?.label ?? 'общая' : '',
+    cwOptions.length > 0 ? chosenColorway?.label ?? 'shared' : '',
     lockedSlot
       ? slotLabel(lockedSlot)
       : slot
         ? slotLabel(slot)
         : fabricLines.length > 0
-          ? 'ткань не выбрана'
+          ? 'no fabric picked'
           : '',
     graded
-      ? activeRows.map((r) => `${r.label}×${r.qty}`).join(' ') || 'состав пуст'
-      : `${ungradedUnits} изд.${sizeLabel ? ` ${sizeLabel}` : ''}`,
-    pieces.length > 0 ? `${pieces.length} дет.` : '',
+      ? activeRows.map((r) => `${r.label}×${r.qty}`).join(' ') || 'composition is empty'
+      : `${ungradedUnits} garments${sizeLabel ? ` ${sizeLabel}` : ''}`,
+    pieces.length > 0 ? `${pieces.length} pieces` : '',
   ]
     .filter(Boolean)
     .join(' · ');
-  const unitWord = (u: Unit) => (u === 'mm' ? 'мм' : u === 'cm' ? 'см' : 'дюймы');
+  const unitWord = (u: Unit) => (u === 'mm' ? 'mm' : u === 'cm' ? 'cm' : 'inches');
   const s2Summary =
     parse.phase === 'loading'
-      ? 'загрузка и разбор DXF…'
+      ? 'downloading and parsing DXF…'
       : parse.phase === 'error'
-        ? 'ошибка разбора'
+        ? 'parse error'
         : parse.phase === 'ready'
           ? [
               unitOverride === 'auto'
-                ? `авто (${unitWord(parse.detectedUnit)})`
+                ? `auto (${unitWord(parse.detectedUnit)})`
                 : unitWord(unitOverride),
-              `контур: слой ${contourLayer || '—'}`,
-              grainLayer === '' ? 'долевая: как нарисовано' : `долевая: слой ${grainLayer}`,
-              sources.length > 1 ? `файлов: ${sources.length}` : '',
+              `contour: layer ${contourLayer || '—'}`,
+              grainLayer === '' ? 'grainline: as drawn' : `grainline: layer ${grainLayer}`,
+              sources.length > 1 ? `files: ${sources.length}` : '',
             ]
               .filter(Boolean)
               .join(' · ')
@@ -1976,11 +1982,11 @@ export function NestingModal({
   // Единица у КАЖДОГО числа: ширина и зазор — сантиметры, припуск — миллиметры, и в свёрнутой
   // строке они стоят вплотную. Пока припуск шёл без подписи, «10» рядом с «160 см» читалось как
   // сантиметры — та же ошибка на порядок, только в голове у оператора.
-  const s3Summary = `${widthCm} см · зазор ${gapCm} см · припуск ${allowanceMm.toFixed(1)} мм`;
+  const s3Summary = `${widthCm} cm · gap ${gapCm} cm · allowance ${allowanceMm.toFixed(1)} mm`;
   // Размещения — в свёрнутой сводке тоже: приближение к потолку 5000 должно быть видно и при
   // закрытой секции, а не открываться вместе с ней.
   const s4Summary =
-    parse.phase === 'ready' ? `${checkedCount} / ${pieces.length} · ${instanceCount} разм.` : '—';
+    parse.phase === 'ready' ? `${checkedCount} / ${pieces.length} · ${instanceCount} placements` : '—';
   // Открыта ОДНА секция за раз. Явный выбор оператора — в railPick; null = авто: первая секция
   // с блокером, иначе первая; 0 = все свёрнуты (повторный клик по открытой шапке).
   const [railPick, setRailPick] = useState<number | null>(null);
@@ -2005,8 +2011,8 @@ export function NestingModal({
       onConfirm={requestClose}
       title={
         viewData
-          ? `маркер — ${view?.summary?.name ?? ''}`
-          : `раскладка DXF${sizeLabel ? ` — ${sizeLabel}` : ''}`
+          ? `marker — ${view?.summary?.name ?? ''}`
+          : `DXF marker${sizeLabel ? ` — ${sizeLabel}` : ''}`
       }
       width='lg'
       hideActions
@@ -2019,7 +2025,7 @@ export function NestingModal({
         <div className={viewData ? 'hidden' : 'w-full shrink-0 space-y-2.5 lg:w-[300px]'}>
           <ModalRailSection
             index={1}
-            title='что кроим'
+            title='what we cut'
             summary={s1Summary}
             status={railS1}
             open={railOpen === 1}
@@ -2034,13 +2040,13 @@ export function NestingModal({
                 {cwOptions.length > 0 && (
                   <label className='block space-y-0.5'>
                     <Text size='nano' variant='label' component='span'>
-                      колорвей — чей артикул кроим
+                      colourway — whose article we cut
                     </Text>
                     <Selector
                       label=''
                       value={String(colorwayId)}
                       options={[
-                        { value: '0', label: 'общая — ширина у всех одинаковая' },
+                        { value: '0', label: 'shared — the width is the same for all' },
                         ...cwOptions.map((c) => ({
                           value: String(c.colorwayId),
                           label: c.label,
@@ -2053,13 +2059,13 @@ export function NestingModal({
                 {!lockedSlot && fabricLines.length > 0 && (
                   <label className='block space-y-0.5'>
                     <Text size='nano' variant='label' component='span'>
-                      ткань — куда пойдёт расход
+                      fabric — where the consumption goes
                     </Text>
                     <Selector
                       label=''
                       value={slotKey}
                       options={[
-                        { value: '', label: 'не выбрана' },
+                        { value: '', label: 'not picked' },
                         ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
                       ]}
                       onChange={(v: string | number) => setSlotKey(String(v))}
@@ -2068,24 +2074,25 @@ export function NestingModal({
                 )}
                 {lockedSlot && (
                   <Text size='nano' variant='label' component='p'>
-                    ткань: {slotLabel(lockedSlot)} — из привязки DXF
+                    fabric: {slotLabel(lockedSlot)} — from the DXF binding
                   </Text>
                 )}
                 {pinArticle && (
                   <Text size='nano' variant='label' component='p'>
-                    артикул колорвея: {pinArticle}
+                    colourway article: {pinArticle}
                   </Text>
                 )}
                 {noSlotChosen && (
                   <Text size='nano' component='p' className='text-error'>
-                    выберите ткань — иначе маркер сохранится без привязки и расход не попадёт в
-                    костинг
+                    pick a fabric — otherwise the marker is saved unbound and its consumption
+                    won't reach the costing
                   </Text>
                 )}
                 {colorwayNoPin && (
                   <Text size='nano' component='p' className='text-error'>
-                    колорвей «{chosenColorway?.label}» не назначил артикул на эту ткань — ширина
-                    взята по умолчанию у строки BOM, и раскладка не будет описывать его полотно
+                    colourway “{chosenColorway?.label}” has not assigned an article to this
+                    fabric — the width was taken by default from the BOM line, and the marker
+                    will not describe its cloth
                   </Text>
                 )}
               </div>
@@ -2098,7 +2105,7 @@ export function NestingModal({
             {!viewData && (
               <div className='space-y-1 border border-borderColor p-1.5'>
                 <Text size='nano' variant='label' component='p'>
-                  состав настила — сколько изделий каждого размера кроим за один раз
+                  lay composition — how many garments of each size we cut at once
                 </Text>
                 {graded ? (
                   compRows.map((r) => {
@@ -2111,9 +2118,9 @@ export function NestingModal({
                           {r.label}
                         </Text>
                         <Text size='nano' variant='label' component='span'>
-                          {r.count} дет.
+                          {r.count} pieces
                         </Text>
-                        {bad && r.qty >= 1 && <Pill tone='warn'>нет в карточке</Pill>}
+                        {bad && r.qty >= 1 && <Pill tone='warn'>not on the card</Pill>}
                         <Input
                           name={`nest-comp-${r.key}`}
                           type='number'
@@ -2134,7 +2141,7 @@ export function NestingModal({
                 ) : (
                   <label className='flex items-center gap-1.5'>
                     <Text size='micro' component='span' className='min-w-0 flex-1'>
-                      изделий, шт{sizeLabel ? ` · размер ${sizeLabel}` : ''}
+                      garments, pcs{sizeLabel ? ` · size ${sizeLabel}` : ''}
                     </Text>
                     <Input
                       name='nest-units'
@@ -2155,8 +2162,8 @@ export function NestingModal({
                 {graded && ungradedCount > 0 && (
                   <Text size='nano' variant='label' component='p'>
                     {ungradedAllUni
-                      ? `${ungradedCount} деталей UNI — не градуируются, кроятся на каждое изделие (по ${unitsTotal} шт)`
-                      : `${ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ изделие состава, то есть по ${unitsTotal} шт`}
+                      ? `${ungradedCount} UNI pieces — they are not graded, they are cut for every garment (${unitsTotal} pcs each)`
+                      : `${ungradedCount} pieces with no size in the block name — they are cut for EVERY garment of the composition, that is ${unitsTotal} pcs each`}
                   </Text>
                 )}
                 {/* Отказ, а не предупреждение: пока копии спорят, любое число здесь описывает
@@ -2167,29 +2174,30 @@ export function NestingModal({
                   секции «детали» (изделия, выбранные, к раскладке) и её свёрнутая сводка. */}
                 {mixed && (
                   <Text size='nano' component='p' className='text-warning'>
-                    смешанный состав: расход НА ИЗДЕЛИЕ у такой раскладки — среднее по составу
-                    (мелкие размеры завышает, крупные занижает), и в рецепт он не пишется. Сама
-                    длина настила и потребность по нему верны; пер-размерный расход придёт с Ф2.4
+                    mixed composition: the PER-UNIT consumption of such a marker is a mean over
+                    the composition (it overstates small sizes and understates large ones), and it
+                    is not written into the recipe. the lay length itself and the requirement from
+                    it are correct; per-size consumption arrives with phase 2.4
                   </Text>
                 )}
                 {unresolvedTokens.length > 0 && (
                   <Text size='nano' component='p' className='text-error'>
-                    размеров нет в размерном ряду карточки: {unresolvedTokens.join(', ')} —
-                    посчитать раскладку можно, сохранить нельзя: добавьте размер в карточку либо
-                    снимите его из состава (количество 0)
+                    sizes are missing from the card's size range: {unresolvedTokens.join(', ')} —
+                    the marker can be computed but not saved: add the size to the card, or drop it
+                    from the composition (quantity 0)
                   </Text>
                 )}
                 {sizesWithoutPieces.length > 0 && (
                   <Text size='nano' component='p' className='text-error'>
-                    в состав взяты размеры, у которых не выбрано ни одной детали:{' '}
-                    {sizesWithoutPieces.join(', ')} — длина настила делилась бы на изделия, которых
-                    он не кроит
+                    the composition took sizes with not a single piece picked:{' '}
+                    {sizesWithoutPieces.join(', ')} — the lay length would be divided by garments
+                    it does not cut
                   </Text>
                 )}
                 {!graded && !sizeId && (
                   <Text size='nano' component='p' className='text-error'>
-                    в именах блоков нет размеров, и размер слота неизвестен — сохранить такую
-                    раскладку нечем
+                    the block names carry no sizes, and the slot's size is unknown — there is
+                    nothing to save such a marker with
                   </Text>
                 )}
               </div>
@@ -2198,7 +2206,7 @@ export function NestingModal({
 
           <ModalRailSection
             index={2}
-            title='как читаем файл'
+            title='how we read the file'
             summary={s2Summary}
             status={railS2}
             open={railOpen === 2}
@@ -2207,7 +2215,7 @@ export function NestingModal({
           >
             <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
               <Selector
-                label='юниты DXF'
+                label='DXF units'
                 compact
                 value={unitOverride}
                 options={[
@@ -2218,12 +2226,12 @@ export function NestingModal({
                     // sleeve that should be in mm.
                     label:
                       parse.phase === 'ready'
-                        ? `авто (${parse.detectedUnit === 'mm' ? 'мм' : parse.detectedUnit === 'cm' ? 'см' : 'дюймы'})`
-                        : 'авто',
+                        ? `auto (${parse.detectedUnit === 'mm' ? 'mm' : parse.detectedUnit === 'cm' ? 'cm' : 'inches'})`
+                        : 'auto',
                   },
-                  { value: 'mm', label: 'мм' },
-                  { value: 'cm', label: 'см' },
-                  { value: 'in', label: 'дюймы' },
+                  { value: 'mm', label: 'mm' },
+                  { value: 'cm', label: 'cm' },
+                  { value: 'in', label: 'inches' },
                 ]}
                 onChange={(v: string | number) =>
                   guardManual(() => setUnitOverride(String(v) as Unit))
@@ -2236,13 +2244,13 @@ export function NestingModal({
               unitOverride !== 'auto' &&
               unitOverride !== parse.detectedUnit && (
                 <Text size='nano' variant='label'>
-                  файл заявляет{' '}
+                  the file declares{' '}
                   {parse.detectedUnit === 'mm'
-                    ? 'мм'
+                    ? 'mm'
                     : parse.detectedUnit === 'cm'
-                      ? 'см'
-                      : 'дюймы'}{' '}
-                  — выбран ручной override
+                      ? 'cm'
+                      : 'inches'}{' '}
+                  — a manual override is chosen
                 </Text>
               )}
 
@@ -2256,7 +2264,7 @@ export function NestingModal({
                 {layerOpts.length > 1 && (
                   <div className='flex flex-wrap items-center gap-1'>
                     <Text size='nano' variant='label' component='span'>
-                      контур:
+                      contour:
                     </Text>
                     {layerOpts.map((o) => {
                       // Замер — В САМОЙ КНОПКЕ, а не только в подсказке. Вопрос «крой или шов»
@@ -2272,8 +2280,8 @@ export function NestingModal({
                           disabled={running}
                           title={[
                             o.checked === 0
-                              ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
-                              : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`,
+                              ? `layer ${o.layer}: ${o.pieces} contours, nothing to compare sizes with`
+                              : `layer ${o.layer}: ${o.pieces} contours, graded on ${o.graded} of ${o.checked} pieces`,
                             o.allowance ? allowanceLabel(o.allowance) : '',
                             o.allowance?.verdict === 'unknown'
                               ? allowanceUnknownText(o.allowance)
@@ -2283,8 +2291,8 @@ export function NestingModal({
                             .join(' · ')}
                           onClick={() => guardManual(() => setActiveLayer(o.layer))}
                         >
-                          слой {o.layer || '—'}
-                          {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
+                          layer {o.layer || '—'}
+                          {o.checked > 0 && o.graded === 0 ? ' (not graded)' : ''}
                           {measured ? ` · ${measured}` : ''}
                         </Button>
                       );
@@ -2293,8 +2301,8 @@ export function NestingModal({
                 )}
                 {missingOnLayer.length > 0 && (
                   <Text size='nano' component='p' className='text-error'>
-                    на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков — они
-                    не попадут в раскладку: {missingOnLayer.slice(0, 6).join(', ')}
+                    layer {contourLayer || '—'} has no contour for {missingOnLayer.length} blocks —
+                    they will not enter the marker: {missingOnLayer.slice(0, 6).join(', ')}
                     {missingOnLayer.length > 6 ? '…' : ''}
                   </Text>
                 )}
@@ -2307,7 +2315,7 @@ export function NestingModal({
               же — в списке слоёв или в поле припуска (секция «как кладём»). */}
             {doubleAllowanceRefusal && (
               <CalloutBox tone='error'>
-                двойной припуск — прогон не запускается: {doubleAllowanceRefusal}
+                double allowance — the search will not start: {doubleAllowanceRefusal}
               </CalloutBox>
             )}
 
@@ -2319,7 +2327,7 @@ export function NestingModal({
             <div className='space-y-1 border border-borderColor p-1.5'>
               <div className='flex flex-wrap items-center gap-1'>
                 <Text size='nano' variant='label' component='span'>
-                  долевая:
+                  grainline:
                 </Text>
                 {grainLayers.map((o) => (
                   <Button
@@ -2328,10 +2336,10 @@ export function NestingModal({
                     variant={o.layer === grainLayer ? 'main' : 'secondary'}
                     size='xs'
                     disabled={running}
-                    title={`слой ${o.layer}: ровно один отрезок у ${o.exactlyOne} из ${o.seen} деталей, типичная длина ${o.medianLengthCm.toFixed(1)} см`}
+                    title={`layer ${o.layer}: exactly one segment on ${o.exactlyOne} of ${o.seen} pieces, typical length ${o.medianLengthCm.toFixed(1)} cm`}
                     onClick={() => guardManual(() => setGrainPick(o.layer))}
                   >
-                    слой {o.layer}
+                    layer {o.layer}
                   </Button>
                 ))}
                 <Button
@@ -2339,27 +2347,28 @@ export function NestingModal({
                   variant={grainLayer === '' ? 'main' : 'secondary'}
                   size='xs'
                   disabled={running}
-                  title='класть детали так, как они нарисованы'
+                  title='lay the pieces as they are drawn'
                   onClick={() => guardManual(() => setGrainPick(''))}
                 >
-                  не разворачивать
+                  do not rotate
                 </Button>
                 {grainLayer !== '' && (
                   <Text size='nano' variant='label' component='span'>
-                    повёрнуто: {oriented.rotated} из {pieces.length}
+                    rotated: {oriented.rotated} of {pieces.length}
                   </Text>
                 )}
               </div>
               {grainLayer !== '' && oriented.missing.length > 0 && (
                 <Text size='nano' component='p' className='text-error'>
-                  долевая не определена однозначно у {oriented.missing.length} деталей — они лягут
-                  так, как нарисованы: {oriented.missing.slice(0, 6).join(', ')}
+                  the grainline is not unambiguous on {oriented.missing.length} pieces — they will
+                  lie as they are drawn: {oriented.missing.slice(0, 6).join(', ')}
                   {oriented.missing.length > 6 ? '…' : ''}
                 </Text>
               )}
               {grainLayer === '' && (
                 <Text size='nano' component='p' className='text-error'>
-                  детали лягут так, как нарисованы в файле, — это может оказаться поперёк долевой
+                  the pieces will lie as they are drawn in the file — which may turn out to be
+                  across the grainline
                 </Text>
               )}
             </div>
@@ -2397,10 +2406,10 @@ export function NestingModal({
                         }
                       />
                       <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                        файл: {source}
+                        file: {source}
                       </Text>
                       <Text size='nano' variant='label' component='span' className='shrink-0'>
-                        {checkedN}/{ps.length} дет.
+                        {checkedN}/{ps.length} pieces
                       </Text>
                     </label>
                   );
@@ -2410,7 +2419,7 @@ export function NestingModal({
 
             {parse.phase === 'loading' && (
               <Text size='micro' variant='label'>
-                загрузка и разбор DXF…
+                downloading and parsing DXF…
               </Text>
             )}
             {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
@@ -2427,7 +2436,7 @@ export function NestingModal({
 
           <ModalRailSection
             index={3}
-            title='как кладём'
+            title='how we lay'
             summary={s3Summary}
             status={railS3}
             open={railOpen === 3}
@@ -2437,7 +2446,7 @@ export function NestingModal({
             <div className='grid grid-cols-2 gap-1.5'>
               <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  ширина раскроя, см
+                  cutting width, cm
                 </Text>
                 <Input
                   name='nest-width'
@@ -2468,13 +2477,13 @@ export function NestingModal({
               </label>
               <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  целевая длина, см
+                  target length, cm
                 </Text>
                 <Input
                   name='nest-target'
                   type='number'
                   value={targetCm}
-                  placeholder='без цели'
+                  placeholder='no target'
                   min={0}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                     const v = e.target.value.trim();
@@ -2485,7 +2494,7 @@ export function NestingModal({
               </label>
               <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  зазор, см
+                  gap, cm
                 </Text>
                 <Input
                   name='nest-gap'
@@ -2502,7 +2511,7 @@ export function NestingModal({
               </label>
               <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  отступ от кромки, см
+                  margin from the selvedge, cm
                 </Text>
                 <Input
                   name='nest-margin'
@@ -2522,7 +2531,7 @@ export function NestingModal({
                 то, что цех действительно вырежет. */}
               <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  припуск на шов, мм
+                  seam allowance, mm
                 </Text>
                 <Input
                   name='nest-allowance'
@@ -2559,7 +2568,7 @@ export function NestingModal({
                 </Text>
                 {!allowanceTouched && allowancePrefill && (
                   <Text size='nano' variant='label' component='span'>
-                    подставлено: {allowancePrefill.why}
+                    prefilled: {allowancePrefill.why}
                   </Text>
                 )}
               </label>
@@ -2573,9 +2582,10 @@ export function NestingModal({
             {allowanceMm > 0 ? (
               <CalloutBox tone='note'>
                 <Text size='nano' component='p'>
-                  припуск {allowanceMm.toFixed(1)} мм отложен РОВНО по всему контуру каждой детали и
-                  одинаков для всего комплекта. Подгиб низа в жизни шире, горловина уже — раскладка
-                  этого не знает. Линия шва остаётся нарисованной внутри линии кроя.
+                  the {allowanceMm.toFixed(1)} mm allowance is laid EVENLY around the whole contour
+                  of every piece and is the same for the whole kit. in real life the hem is wider
+                  and the neckline narrower — the marker does not know that. the seam line stays
+                  drawn inside the cut line.
                 </Text>
                 {/* ЧЕСТНАЯ ВЕТКА «УЛИК НЕТ» (§5.4). Замер не удался — и это законно, а не
                   недосмотр: у блока один замкнутый контур, второй контур пересекает первый,
@@ -2585,10 +2595,10 @@ export function NestingModal({
                   факта — не как двойной припуск. */}
                 {allowanceUnconfirmed && (
                   <Text size='nano' component='p'>
-                    по файлу НЕ ПОДТВЕРЖДЕНО, что в контуре припуска нет: {''}
-                    {contourMeasure ? allowanceUnknownText(contourMeasure) : ''}. Раскладка
-                    считается, маркер сохраняется — он будет помечен «припуск не подтверждён
-                    файлом».
+                    the file does NOT CONFIRM that the contour carries no allowance: {''}
+                    {contourMeasure ? allowanceUnknownText(contourMeasure) : ''}. the marker is
+                    computed and saved — it will be marked “allowance not confirmed by the
+                    file”.
                   </Text>
                 )}
               </CalloutBox>
@@ -2597,16 +2607,16 @@ export function NestingModal({
               // На слое с линией кроя припуск уже в контуре: добавить его значит посчитать дважды.
               <CalloutBox tone='note'>
                 <Text size='nano' component='p'>
-                  припуск 0 — и это верно для выбранного слоя: на нём ЛИНИЯ КРОЯ, припуск{' '}
-                  {(engineCmToMm(contourMeasure?.allowanceCm) ?? 0).toFixed(1)} мм уже заложен в
-                  контур. Раскладка
-                  кладёт его как есть.
+                  allowance 0 — and that is right for the chosen layer: it carries the CUT LINE,{' '}
+                  the {(engineCmToMm(contourMeasure?.allowanceCm) ?? 0).toFixed(1)} mm allowance is
+                  already built into the contour. the marker lays it as it is.
                 </Text>
               </CalloutBox>
             ) : (
               <CalloutBox tone='error'>
                 <Text size='nano' component='p'>
-                  припуск 0 — раскладывается ЛИНИЯ ШВА, а цех кроит шире. Расход будет занижен.
+                  allowance 0 — the SEAM LINE is nested, while the workshop cuts wider. the
+                  consumption will be understated.
                 </Text>
               </CalloutBox>
             )}
@@ -2614,14 +2624,14 @@ export function NestingModal({
               выбором слоя, который его вызвал. Здесь, у поля припуска, — только ссылка-строка. */}
             {doubleAllowanceRefusal && (
               <Text size='nano' component='p' className='text-error'>
-                двойной припуск — прогон не запускается; подробности и оба выхода — в секции «2 ·
-                как читаем файл», рядом с выбором контурного слоя
+                double allowance — the search will not start; the full text and both ways out are in
+                section “2 · how we read the file”, next to the contour layer picker
               </Text>
             )}
             {seam.hulled.length > 0 && (
               <Text size='nano' component='p' className='text-error'>
-                контур с дефектом у {seam.hulled.length} деталей — припуск посчитан по выпуклой
-                оболочке (с запасом): {seam.hulled.slice(0, 6).join(', ')}
+                a defective contour on {seam.hulled.length} pieces — the allowance was computed on
+                the convex hull (with room to spare): {seam.hulled.slice(0, 6).join(', ')}
                 {seam.hulled.length > 6 ? '…' : ''}
               </Text>
             )}
@@ -2633,14 +2643,14 @@ export function NestingModal({
               Заметить это на раскладке нечем — контур перевёрнутой детали выглядит ровно так же. */}
             {!viewData && (
               <Text size='nano' variant='label' component='p'>
-                направление ткани:{' '}
+                fabric direction:{' '}
                 {effectiveDirection === 'one_way'
-                  ? 'ворсовая (one-way) — переворот на 180° запрещён'
+                  ? 'napped (one-way) — a 180° flip is forbidden'
                   : effectiveDirection === 'two_way'
-                    ? 'two-way — переворот разрешён'
+                    ? 'two-way — flipping is allowed'
                     : effectiveDirection === 'any'
-                      ? 'без ворса — переворот разрешён'
-                      : 'НЕ ЗАДАНО'}
+                      ? 'no nap — flipping is allowed'
+                      : 'NOT SET'}
                 {/* Прежний текст здесь обещал безусловный отказ: «сохранить нельзя, пока направление
                   не проставлено». Сервер строже НЕ настолько — он отказывает только раскладке,
                   которая реально кладёт деталь вверх ногами (180° или зеркало), а раскладку без
@@ -2649,7 +2659,7 @@ export function NestingModal({
                   перестаёт верить плашке. Поэтому теперь тут сказано, что делает КЛИЕНТ — он
                   считает без 180°, — и почему это не блокирует сохранение. */}
                 {effectiveDirection === 'unknown'
-                  ? ' — пока никто не ответил, раскладка считается БЕЗ переворота на 180°: такая норма принимается на любой ткани. Проставьте направление у строки ткани на вкладке BOM, и на ненаправленной ткани раскладка станет плотнее'
+                  ? ' — while nobody has answered, the marker is computed WITHOUT the 180° flip: such a norm is accepted on any fabric. set the direction on the fabric line on the BOM tab, and on a non-directional fabric the marker will pack tighter'
                   : ''}
               </Text>
             )}
@@ -2659,7 +2669,7 @@ export function NestingModal({
               результат). Слот и прогон разнесены во времени, поэтому расхождение появляется уже
               после того, как ждать перестали. */}
             {directionRefusal && (
-              <CalloutBox tone='error'>сохранить нельзя: {directionRefusal}</CalloutBox>
+              <CalloutBox tone='error'>cannot be saved: {directionRefusal}</CalloutBox>
             )}
 
             <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
@@ -2671,17 +2681,17 @@ export function NestingModal({
                   disabled={running}
                 />
                 <Text size='micro' component='span'>
-                  разрешить поворот 90°
+                  allow a 90° rotation
                 </Text>
               </label>
               <Selector
-                label='время'
+                label='time'
                 compact
                 value={budgetS}
                 options={[
-                  { value: 5, label: '5 с' },
-                  { value: 20, label: '20 с' },
-                  { value: 60, label: '60 с' },
+                  { value: 5, label: '5 s' },
+                  { value: 20, label: '20 s' },
+                  { value: 60, label: '60 s' },
                 ]}
                 onChange={(v: string | number) => setBudgetS(Number(v))}
                 disabled={running}
@@ -2691,7 +2701,7 @@ export function NestingModal({
 
           <ModalRailSection
             index={4}
-            title='детали'
+            title='pieces'
             summary={s4Summary}
             status={railS4}
             open={railOpen === 4}
@@ -2703,11 +2713,11 @@ export function NestingModal({
               <div className='max-h-[46vh] space-y-1 overflow-y-auto border border-borderColor p-1.5'>
                 <div className='flex items-center justify-between'>
                   <Text size='nano' variant='label'>
-                    детали: {pieces.length} · выбрано {checkedCount}
-                    {instanceCount !== checkedCount ? ` · к раскладке: ${instanceCount}` : ''}
-                    {` · ${unitsTotal} изд.`}
+                    pieces: {pieces.length} · picked {checkedCount}
+                    {instanceCount !== checkedCount ? ` · to the marker: ${instanceCount}` : ''}
+                    {` · ${unitsTotal} garments`}
                     {checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS
-                      ? ` · СВЕРХ ПОТОЛКА (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку сервер не сохранит`
+                      ? ` · OVER THE CAP (${MAX_MARKER_PIECES} pieces / ${MAX_MARKER_PLACEMENTS} placements) — the server will not save such a marker`
                       : ''}
                   </Text>
                   <button
@@ -2725,7 +2735,7 @@ export function NestingModal({
                       })
                     }
                   >
-                    выбрать все
+                    select all
                   </button>
                 </div>
                 {pieces.map((p) => {
@@ -2750,21 +2760,21 @@ export function NestingModal({
                           ровно один размер, и подпись была бы шумом; теперь в нём лежат детали
                           нескольких размеров, у которых имена различаются одним хвостом. */}
                         <Text size='nano' variant='label' component='p'>
-                          {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} см
+                          {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
                           {graded
                             ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
                               // размера» читалось бы про неё как недостача. Подпись берётся с
                               // самой детали, а не с группы: в списке они лежат вперемешку.
                               ` · ${
                                 split.codeById.get(p.id)?.size ||
-                                (split.codeById.get(p.id)?.uni ? 'UNI' : 'без размера')
+                                (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
                               } · ×${
                                 Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
                               }`
                             : ''}
                         </Text>
                       </div>
-                      {!fits && <Pill tone='warn'>шире полотна</Pill>}
+                      {!fits && <Pill tone='warn'>wider than the cloth</Pill>}
                       <Input
                         name={`nest-qty-${p.id}`}
                         type='number'
@@ -2827,21 +2837,21 @@ export function NestingModal({
             <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
               <Text size='micro' variant='label'>
                 {running
-                  ? 'считаем раскладку…'
+                  ? 'computing the marker…'
                   : pieces.length > 0
-                    ? 'выберите детали и нажмите «запустить»'
+                    ? 'pick pieces and press “run”'
                     : '—'}
               </Text>
             </div>
           )}
           {!running && displayResult?.cancelled && displayResult.placements.length === 0 && (
             <CalloutBox tone='warning'>
-              остановлено до первой готовой раскладки — показывать нечего. Прежде тут появлялась
-              раскладка, досчитанная уже ПОСЛЕ «стопа»: её никто не ждал, и длина у неё была
-              настоящая, поэтому отличить её от результата было нельзя.
+              stopped before the first ready marker — there is nothing to show. a marker computed
+              already AFTER the “stop” used to appear here: nobody was waiting for it, and its
+              length was real, so there was no telling it apart from a result.
             </CalloutBox>
           )}
-          {saveError && <CalloutBox tone='error'>сохранить не удалось: {saveError}</CalloutBox>}
+          {saveError && <CalloutBox tone='error'>saving failed: {saveError}</CalloutBox>}
           {/* Отказы по ВВОДУ (направление ткани, двойной припуск) жили здесь стопкой — их полные
               тексты теперь стоят в своих секциях рейла, рядом с полями, которые их вызвали.
               Здесь — новости про результат прогона и сохранение/экспорт, плюс сводный список
@@ -2852,34 +2862,35 @@ export function NestingModal({
           {drawing.phase === 'error' && (
             <CalloutBox tone='error'>
               <Text size='nano' component='p'>
-                чертёж детали не восстановлен: {rebuildText}
+                the piece drawing was not restored: {rebuildText}
               </Text>
               <Text size='nano' component='p'>
-                «скачать DXF» и «скачать SVG» выключены: файл без линии шва и надсечек цех читает
-                как «у изделия их нет». Плоттерный экспорт остался — кнопкой «DXF: только контуры»,
-                и имя файла это называет.
+                “download DXF” and “download SVG” are switched off: a file without the seam line
+                and notches is read by the workshop as “the garment has none”. the plotter export
+                stayed — the “DXF: contours only” button, and the file name says so.
               </Text>
             </CalloutBox>
           )}
           {drawing.phase === 'running' && (
             <Text size='nano' variant='label' component='p'>
-              восстанавливаем чертёж детали по выкройкам карточки — экспорт откроется, когда контур
-              пересобранной детали сойдётся с сохранённым
+              restoring the piece drawing from the card's patterns — the export will open when the
+              contour of the rebuilt piece agrees with the saved one
             </Text>
           )}
           {drawing.phase === 'ok' && drawing.warnings.length > 0 && (
             <CalloutBox tone='note'>
               {drawing.warnings.map((w, i) => (
                 <Text key={i} size='nano' component='p'>
-                  пересборка чертежа: {w}
+                  drawing rebuild: {w}
                 </Text>
               ))}
             </CalloutBox>
           )}
           {unplaced.length > 0 && (
             <CalloutBox tone='error'>
-              не влезло: {unplaced.length} — {unplacedText}. Этих деталей на раскладке НЕТ, длина
-              посчитана без них; сохранить норму нельзя, пока каждая деталь не легла.
+              did not fit: {unplaced.length} — {unplacedText}. these pieces are NOT on the marker,
+              the length was computed without them; the norm cannot be saved until every piece
+              has been laid.
             </CalloutBox>
           )}
           {/* ЧЕРНОВИК НАЗЫВАЕТСЯ ЧЕРНОВИКОМ В ЕДИНСТВЕННОМ ОКНЕ, ГДЕ ЕГО ГЕОМЕТРИЮ ВИДНО.
@@ -2889,32 +2900,32 @@ export function NestingModal({
               не будет: печать и плоттер — это дорога в цех. */}
           {partialGeometry && (
             <CalloutBox tone='error'>
-              {viewIsDraft ? 'ЧЕРНОВИК: ' : 'частичная раскладка: '}
+              {viewIsDraft ? 'DRAFT: ' : 'partial marker: '}
               {partialExportRefusal}
             </CalloutBox>
           )}
           {violations.length > 0 && !running && (
             <CalloutBox tone='warning'>
-              нарушения: {violations.length}
-              {worstViolation ? ` · худшее — ${violationText(worstViolation)}` : ''} — экспорт и
-              сохранение не блокируются, решение за раскройщиком
+              violations: {violations.length}
+              {worstViolation ? ` · worst — ${violationText(worstViolation)}` : ''} — the export and
+              the save are not blocked, the decision is the cutter's
             </CalloutBox>
           )}
 
           {effective && (
             <StatGrid min={120}>
               <Stat
-                label='использовано'
-                value={`${effective.usedLengthCm.toFixed(1)} см`}
-                sub={manual ? 'с ручной правкой' : undefined}
+                label='used'
+                value={`${effective.usedLengthCm.toFixed(1)} cm`}
+                sub={manual ? 'with a manual edit' : undefined}
               />
               <Stat
-                label='эффективность'
+                label='efficiency'
                 value={`${effPct.toFixed(1)} %`}
-                sub={`ткань ${displayWidth} см`}
+                sub={`fabric ${displayWidth} cm`}
               />
               <Stat
-                label='размещено'
+                label='placed'
                 value={`${effective.placedCount}/${effective.totalCount}`}
                 tone={effective.placedCount === effective.totalCount ? undefined : 'down'}
               />
@@ -2924,11 +2935,11 @@ export function NestingModal({
                 // (proto3 роняет умолчание) — то есть весь настил показывался как норма одного
                 // изделия. Смешанному составу число не показывается вовсе: у него нормы нет.
                 <Stat
-                  label='расход / ед'
+                  label='consumption / unit'
                   value={
                     viewRefusal
                       ? '—'
-                      : `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} см`
+                      : `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} cm`
                   }
                   sub={
                     viewRefusal
@@ -2941,17 +2952,17 @@ export function NestingModal({
                         // Читается ТЕМ ЖЕ источником, что и сам отказ, — сводкой строки. viewData
                         // берёт состав из БЛОБА в первую очередь, и у маркера, чья проекция
                         // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом.
-                        `${refusalWord(view.summary)} — нормы нет`
-                      : `изделий: ${viewData.totalUnits || 1}`
+                        `${refusalWord(view.summary)} — no norm`
+                      : `garments: ${viewData.totalUnits || 1}`
                   }
                 />
               )}
               {verdict && (
                 <Stat
-                  label='вердикт'
+                  label='verdict'
                   value={
                     <Pill tone={verdict.ok ? 'ok' : 'warn'}>
-                      {verdict.ok ? 'влезает' : 'не влезает'}
+                      {verdict.ok ? 'fits' : 'does not fit'}
                     </Pill>
                   }
                   sub={verdict.text}
@@ -2959,15 +2970,15 @@ export function NestingModal({
               )}
               {!viewData && displayResult && (
                 <Stat
-                  label='поколение'
+                  label='generation'
                   value={
                     displayResult.generation === 0 ? (
-                      <Pill tone='warn'>поиска не было</Pill>
+                      <Pill tone='warn'>there was no search</Pill>
                     ) : (
                       String(displayResult.generation)
                     )
                   }
-                  sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} с${run.phase === 'done' && run.stopped ? ' · остановлено' : ''}`}
+                  sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} s${run.phase === 'done' && run.stopped ? ' · stopped' : ''}`}
                 />
               )}
             </StatGrid>
@@ -2976,18 +2987,18 @@ export function NestingModal({
               и ничего — сколько успели. Ноль поколений значит, что на экране лежит затравка. */}
           {greedyOnly && (
             <CalloutBox tone='warning'>
-              поиск не начинался — это жадная укладка «крупные детали вперёд», а не оптимум.
+              the search never started — this is a greedy “big pieces first” placement, not an optimum.
               {displayResult?.telemetry
-                ? ` Подготовка геометрии съела ${(displayResult.telemetry.prepassMs / 1000).toFixed(1)} с из бюджета (${displayResult.telemetry.nfpDone}/${displayResult.telemetry.nfpTotal} пар).`
+                ? ` preparing the geometry ate ${(displayResult.telemetry.prepassMs / 1000).toFixed(1)} s of the budget (${displayResult.telemetry.nfpDone}/${displayResult.telemetry.nfpTotal} pairs).`
                 : ''}{' '}
-              Дайте больше времени или снимите раскладку меньшим составом.
+              give it more time, or capture the marker with a smaller composition.
             </CalloutBox>
           )}
           {simplified && (
             <Text size='nano' variant='label' component='p'>
-              контуры упрощены до {simplified.rdpEpsCm} см вместо {simplified.requestedRdpEpsCm} см
-              — иначе подготовка геометрии не уложилась бы в бюджет и поиск не начался бы вовсе.
-              Детали от этого лежат чуть свободнее.
+              contours were simplified to {simplified.rdpEpsCm} cm instead of {simplified.requestedRdpEpsCm} cm
+              — otherwise preparing the geometry would not have fitted the budget and the search
+              would not have started at all. the pieces lie a little looser because of it.
             </Text>
           )}
           {displayResult && displayResult.warnings.length > 0 && (
@@ -3019,34 +3030,34 @@ export function NestingModal({
                   тексте отказа ниже. */}
               {forecast && (
                 <Text size='nano' variant='label' component='p'>
-                  до запуска: предрасчёт геометрии ~
-                  {(forecast.predictedPrepassMs / 1000).toFixed(1)} с при потолке{' '}
-                  {(forecast.prepassCapMs / 1000).toFixed(1)} с из бюджета{' '}
-                  {(forecast.timeBudgetMs / 1000).toFixed(0)} с · пар NFP {forecast.nfpRecords}
+                  before the start: geometry prepass ~
+                  {(forecast.predictedPrepassMs / 1000).toFixed(1)} s against a cap of{' '}
+                  {(forecast.prepassCapMs / 1000).toFixed(1)} s out of a budget of{' '}
+                  {(forecast.timeBudgetMs / 1000).toFixed(0)} s · NFP pairs {forecast.nfpRecords}
                 </Text>
               )}
               {overCap && (
                 <Text size='nano' component='p' className='text-error'>
-                  сверх потолка сервера ({MAX_MARKER_PIECES} деталей / {MAX_MARKER_PLACEMENTS}{' '}
-                  размещений) — прогон не запускается, потому что такую раскладку не сохранить:
+                  over the server's cap ({MAX_MARKER_PIECES} pieces / {MAX_MARKER_PLACEMENTS}{' '}
+                  placements) — the search will not start, because such a marker cannot be saved:
                   {checkedCount > MAX_MARKER_PIECES
-                    ? ` уберите ${checkedCount - MAX_MARKER_PIECES} деталей`
+                    ? ` remove ${checkedCount - MAX_MARKER_PIECES} pieces`
                     : ''}
                   {checkedCount > MAX_MARKER_PIECES && instanceCount > MAX_MARKER_PLACEMENTS
-                    ? ' и'
+                    ? ' and'
                     : ''}
                   {instanceCount > MAX_MARKER_PLACEMENTS
-                    ? ` уменьшите состав на ${instanceCount - MAX_MARKER_PLACEMENTS} размещений`
+                    ? ` shrink the composition by ${instanceCount - MAX_MARKER_PLACEMENTS} placements`
                     : ''}
                 </Text>
               )}
               {forecast?.coarsened && (
                 <Text size='nano' variant='label' component='p'>
-                  контуры упростятся до {forecast.effectiveEps} см вместо {forecast.requestedEps} —
+                  contours will be simplified to {forecast.effectiveEps} cm instead of {forecast.requestedEps} —
                   {forecast.mirrorPairs
-                    ? ' парные детали удваивают предрасчёт'
-                    : ` деталей много (${forecast.uniquePieces})`}
-                  , иначе поиску не осталось бы времени; раскладка от этого чуть свободнее
+                    ? ' mirrored pairs double the prepass'
+                    : ` there are many pieces (${forecast.uniquePieces})`}
+                  , otherwise no time would be left for the search; the marker gets a little looser
                 </Text>
               )}
               {/* Три исхода, и путать их нельзя: у первых двух поиск идёт, у третьего его
@@ -3057,44 +3068,44 @@ export function NestingModal({
               {forecast?.outlook === 'starved' ? (
                 <CalloutBox tone='error'>
                   <Text size='nano' component='p'>
-                    <b>предрасчёт не уложится в бюджет</b> — ~
-                    {(forecast.predictedPrepassMs / 1000).toFixed(1)} с против{' '}
-                    {(forecast.timeBudgetMs / 1000).toFixed(0)} с. Его оборвут по времени, поиск
-                    получит недосчитанную геометрию и аварийные 2 с: это ровно тот прогон, который
-                    возвращает НОЛЬ ПОКОЛЕНИЙ и жадную укладку. Ждать придётся дольше бюджета, и
-                    насколько — сказать нечем: недостающую геометрию поиск досчитывает внутри себя,
-                    а прерваться умеет только между особями (в замеренном случае бюджет 20 с
-                    обернулся 51 секундой).
+                    <b>the prepass will not fit the budget</b> — ~
+                    {(forecast.predictedPrepassMs / 1000).toFixed(1)} s against{' '}
+                    {(forecast.timeBudgetMs / 1000).toFixed(0)} s. it will be cut off by time, the
+                    search will get undercomputed geometry and an emergency 2 s: this is exactly the
+                    search that returns ZERO GENERATIONS and a greedy placement. the wait will be
+                    longer than the budget, and by how much there is nothing to say: the search
+                    finishes the missing geometry inside itself, and it can only break between
+                    individuals (in the measured case a 20 s budget turned into 51 seconds).
                   </Text>
                   <Text size='nano' component='p'>
-                    что делать: поставить бюджет от {Math.ceil(forecast.budgetToFitMs / 1000)} с
+                    what to do: set a budget of at least {Math.ceil(forecast.budgetToFitMs / 1000)} s
                     {forecast.effectiveEps >= 0.9
-                      ? ' (упрощать контуры дальше движку уже некуда — он на самой грубой ступени)'
+                      ? ' (there is nowhere further for the engine to simplify contours — it is on the coarsest step)'
                       : ''}
-                    , либо убрать самые сложные детали
+                    , or remove the most complex pieces
                     {forecast.heaviest.length > 0
-                      ? ` (дороже всех: ${forecast.heaviest
+                      ? ` (the most expensive: ${forecast.heaviest
                           .map(
                             (h) =>
-                              `${pieces.find((p) => p.id === h.id)?.name ?? h.id} — ${h.parts} выпуклых частей`,
+                              `${pieces.find((p) => p.id === h.id)?.name ?? h.id} — ${h.parts} convex parts`,
                           )
                           .join(', ')})`
                       : ''}
-                    , либо уменьшить состав.
+                    , or shrink the composition.
                   </Text>
                 </CalloutBox>
               ) : forecast?.outlook === 'squeezed' ? (
                 <Text size='nano' component='p' className='text-warning'>
-                  предрасчёт съест больше своей доли — поиску останется всего ~
-                  {(forecast.searchMsLeft / 1000).toFixed(1)} с из{' '}
-                  {(forecast.timeBudgetMs / 1000).toFixed(0)}. Бюджета от{' '}
-                  {Math.ceil(forecast.budgetToFitMs / 1000)} с хватило бы на полный предрасчёт.
+                  the prepass will eat more than its share — only ~
+                  {(forecast.searchMsLeft / 1000).toFixed(1)} s of{' '}
+                  {(forecast.timeBudgetMs / 1000).toFixed(0)} will be left for the search. a budget of{' '}
+                  {Math.ceil(forecast.budgetToFitMs / 1000)} s would have covered the full prepass.
                 </Text>
               ) : forecast ? (
                 <Text size='nano' variant='label' component='p'>
-                  поиску останется ~{(forecast.searchMsLeft / 1000).toFixed(1)} с из{' '}
-                  {(forecast.timeBudgetMs / 1000).toFixed(0)} — сколько это выйдет поколений,
-                  зависит от числа экземпляров и от машины, и наперёд этого не мерил никто
+                  ~{(forecast.searchMsLeft / 1000).toFixed(1)} s of{' '}
+                  {(forecast.timeBudgetMs / 1000).toFixed(0)} will be left for the search — how many
+                  generations that comes to depends on the number of instances and on the machine, and nobody has measured it in advance
                 </Text>
               ) : null}
               {/* ПРОГНОЗ ПРОТИВ ФАКТА, когда факт уже есть. Правка любого параметра прогона
@@ -3103,9 +3114,9 @@ export function NestingModal({
                   единственная, которую можно поймать на вранье. */}
               {forecast && displayResult?.telemetry && (
                 <Text size='nano' variant='label' component='p'>
-                  прошлый прогон: предрасчёт {(displayResult.telemetry.prepassMs / 1000).toFixed(1)}{' '}
-                  с при прогнозе ~{(displayResult.telemetry.predictedPrepassMs / 1000).toFixed(1)} с
-                  · поколений {displayResult.generation}
+                  previous search: prepass {(displayResult.telemetry.prepassMs / 1000).toFixed(1)}{' '}
+                  s against a forecast of ~{(displayResult.telemetry.predictedPrepassMs / 1000).toFixed(1)} s
+                  · generations {displayResult.generation}
                 </Text>
               )}
             </>
@@ -3119,7 +3130,7 @@ export function NestingModal({
             <CalloutBox tone='error'>
               <Text size='nano' component='p'>
                 <b>
-                  сохранить нельзя — {saveRefusals.length} {reasonWord(saveRefusals.length)}:
+                  cannot be saved — {saveRefusals.length} {reasonWord(saveRefusals.length)}:
                 </b>
               </Text>
               <ul className='list-disc space-y-0.5 pl-4'>
@@ -3138,27 +3149,27 @@ export function NestingModal({
           <div className='flex flex-wrap items-center justify-end gap-1.5 border-t border-hairline pt-2'>
             {running && run.nfp && (
               <Text size='nano' variant='label' className='mr-auto'>
-                подготовка геометрии {run.nfp.done}/{run.nfp.total}
+                preparing the geometry {run.nfp.done}/{run.nfp.total}
               </Text>
             )}
             {running && !run.nfp && run.best && (
               <Text size='nano' variant='label' className='mr-auto'>
-                поколение {run.generation} · лучшая длина {run.best.usedLengthCm.toFixed(1)} см
+                generation {run.generation} · best length {run.best.usedLengthCm.toFixed(1)} cm
               </Text>
             )}
             {manual && !running && (
               <Button
                 type='button'
                 variant='secondary'
-                title='вернуть раскладку к исходному результату'
+                title='return the marker to its original result'
                 onClick={() => setManual(null)}
               >
-                сбросить правки
+                reset the edits
               </Button>
             )}
             {viewData && !viewDegraded && canEdit && !editView && (
               <Button type='button' variant='secondary' onClick={() => setEditView(true)}>
-                редактировать
+                edit
               </Button>
             )}
             {viewData && editView && (
@@ -3168,12 +3179,12 @@ export function NestingModal({
                 disabled={!canSaveView || saving}
                 title={
                   canSaveView
-                    ? 'перезаписать маркер с ручными правками (source: manual)'
-                    : 'подвиньте или поверните деталь — сохранение включится'
+                    ? 'overwrite the marker with the manual edits (source: manual)'
+                    : 'move or rotate a piece — saving will switch on'
                 }
                 onClick={updateViewMarker}
               >
-                {saving ? 'сохраняем…' : 'сохранить правки'}
+                {saving ? 'saving…' : 'save the edits'}
               </Button>
             )}
             {!viewData && (
@@ -3197,12 +3208,12 @@ export function NestingModal({
                         : overCap
                           ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
                             // списка деталей и в тексте отказа на панели.
-                            'сверх потолка сервера — такую раскладку не сохранить: уберите детали или уменьшите состав'
+                            "over the server's cap — such a marker cannot be saved: remove pieces or shrink the composition"
                           : undefined
                   }
                   onClick={requestRun}
                 >
-                  запустить
+                  run
                 </Button>
                 <Button
                   type='button'
@@ -3210,7 +3221,7 @@ export function NestingModal({
                   disabled={!running || stopping}
                   onClick={stop}
                 >
-                  {stopping ? 'останавливаем…' : 'стоп'}
+                  {stopping ? 'stopping…' : 'stop'}
                 </Button>
                 <Button
                   type='button'
@@ -3223,16 +3234,16 @@ export function NestingModal({
                   // прогона (одна терминальная причина) он не рендерится вовсе.
                   title={
                     canSave
-                      ? 'сохранить маркер в тех-карту — расход уйдёт в костинг'
+                      ? 'save the marker into the tech card — the consumption goes into the costing'
                       : running
-                        ? 'идёт прогон — дождитесь завершения'
+                        ? 'a search is running — wait for it to finish'
                         : onlyTerminal
                           ? TERMINAL_SAVE_REASON
-                          : 'см. список причин ниже'
+                          : 'see the list of reasons below'
                   }
                   onClick={() => setSaveOpen(true)}
                 >
-                  сохранить раскладку
+                  save the marker
                 </Button>
               </>
             )}
@@ -3243,16 +3254,16 @@ export function NestingModal({
               title={
                 partialExportRefusal ||
                 (viewDegraded
-                  ? 'геометрия маркера нечитаема — доступна только сводка'
+                  ? 'the marker geometry is unreadable — only the summary is available'
                   : drawing.phase === 'running'
-                    ? 'восстанавливаем чертёж детали по выкройкам…'
+                    ? 'restoring the piece drawing from the patterns…'
                     : drawing.phase === 'error'
-                      ? `чертёж не восстановлен: ${rebuildText}`
+                      ? `the drawing was not restored: ${rebuildText}`
                       : undefined)
               }
               onClick={downloadSvg}
             >
-              скачать SVG
+              download SVG
             </Button>
             <Button
               type='button'
@@ -3261,16 +3272,16 @@ export function NestingModal({
               title={
                 partialExportRefusal ||
                 (viewDegraded
-                  ? 'геометрия маркера нечитаема — доступна только сводка'
+                  ? 'the marker geometry is unreadable — only the summary is available'
                   : drawing.phase === 'running'
-                    ? 'восстанавливаем чертёж детали по выкройкам…'
+                    ? 'restoring the piece drawing from the patterns…'
                     : drawing.phase === 'error'
-                      ? `чертёж не восстановлен: ${rebuildText}`
-                      : 'DXF R12 для реза — контуры на слое CUT, чертёж INNER/SEAM, кромка STRIP, подписи LABELS')
+                      ? `the drawing was not restored: ${rebuildText}`
+                      : 'DXF R12 for cutting — contours on the CUT layer, the drawing on INNER/SEAM, the selvedge on STRIP, the labels on LABELS')
               }
               onClick={downloadDxf}
             >
-              скачать DXF
+              download DXF
             </Button>
             {/* ЯВНАЯ ВТОРАЯ КНОПКА (решение Р4) — и появляется она ТОЛЬКО когда чертежа нет.
                 Постоянная кнопка «без чертежа» рядом с полной была бы приглашением выбрать
@@ -3285,15 +3296,15 @@ export function NestingModal({
                 disabled={!effective || running || partialGeometry}
                 title={
                   partialExportRefusal ||
-                  `то же, что система выдавала до починки: контуры и кромка, БЕЗ линии шва и надсечек. Причина: ${rebuildText}`
+                  `the same as the system produced before the fix: contours and the selvedge, WITHOUT the seam line and notches. reason: ${rebuildText}`
                 }
                 onClick={downloadContoursOnly}
               >
-                DXF: только контуры
+                DXF: contours only
               </Button>
             )}
             <Button type='button' variant='secondary' onClick={requestClose}>
-              закрыть
+              close
             </Button>
           </div>
         </div>
@@ -3309,15 +3320,15 @@ export function NestingModal({
         onCancel={() => {
           if (!saving) setSaveOpen(false);
         }}
-        title='сохранить раскладку как маркер'
-        confirmLabel={saving ? 'сохраняем…' : 'сохранить'}
+        title='save the marker as a marker'
+        confirmLabel={saving ? 'saving…' : 'save'}
         confirmDisabled={saving || !nameValue.trim()}
         closeOnConfirm={false}
       >
         <div className='space-y-2'>
           <label className='block space-y-0.5'>
             <Text size='nano' variant='label' component='span'>
-              название маркера
+              marker name
             </Text>
             <Input
               name='marker-name'
@@ -3335,22 +3346,22 @@ export function NestingModal({
             // invite a marker linked to a cloth its own DXFs are not cut from.
             <div className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
-                слот BOM (ткань) — куда пойдёт расход
+                BOM slot (fabric) — where the consumption goes
               </Text>
               <Text size='micro' component='p'>
-                {lockedSlot ? slotLabel(lockedSlot) : 'ткань'} — из привязки DXF
+                {lockedSlot ? slotLabel(lockedSlot) : 'fabric'} — from the DXF binding
               </Text>
             </div>
           ) : (
             <label className='block space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
-                слот BOM (ткань) — куда пойдёт расход
+                BOM slot (fabric) — where the consumption goes
               </Text>
               <Selector
                 label=''
                 value={slotKey}
                 options={[
-                  { value: '', label: 'не выбрана' },
+                  { value: '', label: 'not picked' },
                   ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
                 ]}
                 onChange={(v: string | number) => setSlotKey(String(v))}
@@ -3359,40 +3370,40 @@ export function NestingModal({
           )}
           {lockDangling && (
             <CalloutBox tone='warning'>
-              ткань, к которой привязаны эти DXF, больше не является тканевой строкой BOM карточки —
-              выберите слот вручную, иначе маркер сохранится без привязки и расход не попадёт в
-              костинг
+              the fabric these DXF are bound to is no longer a fabric line of the card's BOM —
+              pick a slot by hand, otherwise the marker is saved unbound and the consumption will
+              not reach the costing
             </CalloutBox>
           )}
           {lockedUnsaved && (
             <CalloutBox tone='note'>
-              ткань этих DXF ещё не сохранена в карточке — сохраните карточку, тогда маркер
-              привяжется к ней; сейчас он уйдёт без привязки
+              the fabric of these DXF is not saved on the card yet — save the card and the marker
+              will bind to it; right now it goes off unbound
             </CalloutBox>
           )}
           {unsavedSlots > 0 && !lockedSlot && !lockedUnsaved && (
             <Text size='nano' variant='label' component='p'>
-              новые слоты BOM появятся здесь после сохранения карточки
+              new BOM slots will appear here once the card is saved
             </Text>
           )}
           {widthMismatch && (
             <CalloutBox tone='warning'>
-              ширина раскроя ({widthCm} см) отличается от раскройной ширины артикула слота (
-              {slotWidth} см
-              {slotSelvedge(slot) > 0 ? `, кромка 2×${slotSelvedge(slot)} см уже вычтена` : ''}) —
-              расход будет применим только к этой ширине
+              the cutting width ({widthCm} cm) differs from the cutting width of the slot's article (
+              {slotWidth} cm
+              {slotSelvedge(slot) > 0 ? `, selvedge 2×${slotSelvedge(slot)} cm already subtracted` : ''}) —
+              the consumption will only apply to this width
             </CalloutBox>
           )}
           {slot && slotSelvedge(slot) === 0 && (
             <CalloutBox tone='note'>
-              у артикула слота не задана кромка — отходы кромки посчитаются как ноль; задайте её в
-              карточке материала, чтобы разложение отходов было полным
+              the slot's article has no selvedge set — the selvedge waste counts as zero; set it on
+              the material card so that the waste breakdown is complete
             </CalloutBox>
           )}
           {parse.phase === 'ready' && parse.warnings.length > 0 && (
             <CalloutBox tone='note' className='max-h-20 space-y-0.5 overflow-y-auto'>
               <Text size='nano' component='p'>
-                предупреждения парсинга сохранятся вместе с маркером:
+                the parse warnings will be saved together with the marker:
               </Text>
               {parse.warnings.map((w, i) => (
                 <Text key={i} size='nano' component='p'>
@@ -3404,30 +3415,30 @@ export function NestingModal({
           {manual && (
             <CalloutBox tone={violations.length ? 'warning' : 'note'}>
               {violations.length
-                ? `раскладка правлена вручную — ${manualNote?.replace(MANUAL_NOTE_PREFIX, 'в ней').trim()}; предупреждение сохранится в маркере`
-                : 'раскладка правлена вручную — маркер сохранится как source: manual'}
+                ? `the marker was edited by hand — ${manualNote?.replace(MANUAL_NOTE_PREFIX, 'it has').trim()}; the warning will be saved in the marker`
+                : 'the marker was edited by hand — it will be saved as source: manual'}
             </CalloutBox>
           )}
           {/* СОСТАВ И ЧТО ИЗ НЕГО СЛЕДУЕТ — последняя строка перед «сохранить», потому что
               именно она отвечает на вопрос «а какое число уедет в костинг». */}
           <Text size='nano' variant='label' component='p'>
-            состав:{' '}
+            composition:{' '}
             {graded
               ? compositionLabel(composition, (id) => sizeNameOfId(id))
-              : sizeLabel || 'один размер'}{' '}
-            · всего {unitsTotal} изделий · расход на изделие:{' '}
+              : sizeLabel || 'one size'}{' '}
+            · {unitsTotal} garments in total · per-unit consumption:{' '}
             {mixed
-              ? 'не выдаётся — среднее по составу'
+              ? 'not produced — a mean over the composition'
               : effective
-                ? `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} см`
+                ? `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} cm`
                 : '—'}
           </Text>
           {mixed && (
             <CalloutBox tone='note'>
-              смешанная раскладка сохранится целиком — и длина, и состав, и размеры деталей. Не
-              сохранится только расход НА ИЗДЕЛИЕ: у смешанного настила он средний по составу, а
-              такое число, попав в рецепт, неотличимо от измеренного. Пер-размерный расход придёт с
-              Ф2.4; до тех пор нормой служит однородная раскладка.
+              a mixed marker is saved whole — the length, the composition and the piece sizes. the
+              only thing not saved is the PER-UNIT consumption: on a mixed lay it is a mean over the
+              composition, and such a number, once in the recipe, is indistinguishable from a
+              measured one. per-size consumption arrives with phase 2.4; until then the norm is a homogeneous marker.
             </CalloutBox>
           )}
         </div>
@@ -3441,12 +3452,12 @@ export function NestingModal({
         }}
         onConfirm={startRun}
         onCancel={() => setRunConfirm(false)}
-        title='перезапустить раскладку?'
-        confirmLabel='перезапустить'
+        title='restart the marker?'
+        confirmLabel='restart'
       >
         <Text size='micro' component='p'>
-          В раскладке есть ручные правки — новый запуск их сотрёт. Экспортируйте или сохраните
-          маркер, если правки нужны.
+          the marker has manual edits — a new run will wipe them. export or save the marker
+          first, if you need the edits.
         </Text>
       </ConfirmationModal>
 
@@ -3464,14 +3475,14 @@ export function NestingModal({
         }}
         onCancel={() => setWipeConfirm(null)}
         title={
-          wipeConfirm?.kind === 'close' ? 'закрыть без сохранения?' : 'сбросить ручные правки?'
+          wipeConfirm?.kind === 'close' ? 'close without saving?' : 'reset the manual edits?'
         }
-        confirmLabel={wipeConfirm?.kind === 'close' ? 'закрыть' : 'сбросить'}
+        confirmLabel={wipeConfirm?.kind === 'close' ? 'close' : 'reset'}
       >
         <Text size='micro' component='p'>
           {wipeConfirm?.kind === 'close'
-            ? 'В раскладке есть ручные правки — при закрытии они потеряются. Сохраните маркер или скачайте SVG/DXF, если правки нужны.'
-            : 'Смена параметра пересчитает раскладку с нуля — ручные правки будут потеряны.'}
+            ? 'the marker has manual edits — closing will lose them. save the marker or download the SVG/DXF if you need the edits.'
+            : 'changing a parameter recomputes the marker from scratch — the manual edits will be lost.'}
         </Text>
       </ConfirmationModal>
     </ConfirmationModal>

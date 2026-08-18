@@ -167,7 +167,7 @@ export function InlinePlate({
 export function FileRefImage({ id, label }: { id: number; label: string }) {
   const state = useFileRef(id);
   const file = state.kind === 'ok' ? state.file : undefined;
-  const name = label || file?.fileName || `файл ${id}`;
+  const name = label || file?.fileName || `file ${id}`;
   const candidates = imageCandidates(file);
   const signature = candidates.join('|');
 
@@ -177,12 +177,12 @@ export function FileRefImage({ id, label }: { id: number; label: string }) {
   const [tried, setTried] = useState(0);
   useEffect(() => setTried(0), [signature]);
 
-  if (state.kind === 'loading') return <InlinePlate>картинка · читаем…</InlinePlate>;
+  if (state.kind === 'loading') return <InlinePlate>picture · reading…</InlinePlate>;
 
   if (state.kind === 'gone') {
     return (
       <InlinePlate tone='error'>
-        файла больше нет
+        the file is gone
         <span className='normal-case tracking-normal'>{name}</span>
       </InlinePlate>
     );
@@ -191,7 +191,7 @@ export function FileRefImage({ id, label }: { id: number; label: string }) {
   if (state.kind === 'error') {
     return (
       <InlinePlate>
-        картинка не прочиталась
+        the picture didn't read
         <Link to={fileCardPath(id)} className='text-highlightColor underline normal-case'>
           {name}
         </Link>
@@ -205,7 +205,7 @@ export function FileRefImage({ id, label }: { id: number; label: string }) {
       <InlinePlate>
         {/* Причина названа: «не показывается» без причины читается как поломка, а это решение
             сервера — такой файл отдают только скачиванием. */}
-        {candidates.length ? 'картинка не открылась' : 'этот файл не показывают в тексте'}
+        {candidates.length ? "the picture didn't open" : 'this file is not shown inside the text'}
         <Link to={fileCardPath(id)} className='text-highlightColor underline normal-case'>
           {name}
         </Link>
@@ -214,7 +214,7 @@ export function FileRefImage({ id, label }: { id: number; label: string }) {
   }
 
   return (
-    <Link to={fileCardPath(id)} title={`${name} — открыть карточку файла`}>
+    <Link to={fileCardPath(id)} title={`${name} — open the file card`}>
       <img
         src={src}
         alt={name}

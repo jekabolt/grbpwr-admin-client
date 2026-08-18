@@ -1015,7 +1015,7 @@ export function PieceMatchModal({
     const byFile = new Map<number, { name: string; pieces: PieceDTO[] }>();
     contourPieces.forEach((p, i) => {
       const idx = p.fileIndex ?? i;
-      const entry = byFile.get(idx) ?? { name: p.source || `лист ${idx + 1}`, pieces: [] };
+      const entry = byFile.get(idx) ?? { name: p.source || `sheet ${idx + 1}`, pieces: [] };
       entry.pieces.push(p);
       byFile.set(idx, entry);
     });
@@ -1160,13 +1160,13 @@ export function PieceMatchModal({
   const choiceSelect = (ci: string, block: string, instances: number, value: string) => (
     <select
       className='h-7 min-w-0 flex-1 border border-borderColor bg-bgColor px-1 text-micro'
-      aria-label={`деталь для блока ${block}`}
+      aria-label={`piece for block ${block}`}
       value={value}
       onChange={(e) => setChoice(ci, e.target.value)}
     >
-      <option value=''>пропустить</option>
+      <option value=''>skip</option>
       <option value={CREATE}>
-        + создать «{block}» (×{instances})
+        + create “{block}” (×{instances})
       </option>
       {pieceOptions.map((p) => (
         <option key={p.lineKey} value={p.lineKey}>
@@ -1413,7 +1413,7 @@ export function PieceMatchModal({
         className='mt-0.5 block min-h-[22px] w-full border border-borderColor bg-bgColor px-[7px] py-[3px] text-micro focus:border-textColor focus:outline-none'
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder='название детали'
+        placeholder='piece name'
       />
     </label>
   );
@@ -1427,7 +1427,7 @@ export function PieceMatchModal({
     outcome.created > 0 ? `${outcome.created} +` : '',
     outcome.removed > 0 ? `${outcome.removed} −` : '',
     outcome.updated > 0 ? `${outcome.updated} ×` : '',
-    toUnmap > 0 ? `${toUnmap} снять` : '',
+    toUnmap > 0 ? `${toUnmap} unlink` : '',
   ].filter(Boolean);
   // Четыре нуля подряд не значат ничего: на карточке, где ещё ничего не связано и ничего не
   // выбрано, сводка была бы строкой ради строки.
@@ -1435,10 +1435,10 @@ export function PieceMatchModal({
 
   const basisLabel = (r: BlockRow) => {
     if (!r.suggested) return null;
-    if (r.basis === 'similar') return <Pill tone='warn'>предложено по похожести</Pill>;
+    if (r.basis === 'similar') return <Pill tone='warn'>suggested by similarity</Pill>;
     if (r.basis === 'other-fabric') {
       const from = r.fromSlot ? scopeLabelByKey?.get(r.fromSlot) : '';
-      return <Pill tone='warn'>{from ? `по «${from}»` : 'по другой ткани'}</Pill>;
+      return <Pill tone='warn'>{from ? `from “${from}”` : 'from another fabric'}</Pill>;
     }
     return null;
   };
@@ -1451,9 +1451,9 @@ export function PieceMatchModal({
       }}
       onConfirm={apply}
       onCancel={onClose}
-      title={`детали кроя из DXF · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
+      title={`cut pieces from DXF · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
       confirmLabel={
-        confirmParts.length > 0 ? `применить (${confirmParts.join(', ')})` : 'применить'
+        confirmParts.length > 0 ? `apply (${confirmParts.join(', ')})` : 'apply'
       }
       // Пока хоть один спор не разрешён, применять НЕЧЕГО: набор, который ушёл бы на сервер, для
       // него невалиден, и он отклонит сохранение ВСЕЙ карты. Кнопка гаснет вместе с объяснением
@@ -1478,7 +1478,7 @@ export function PieceMatchModal({
       <div className='space-y-2'>
         {parse.phase === 'loading' && (
           <Text size='micro' variant='label' component='p'>
-            разбор DXF…
+            parsing DXF…
           </Text>
         )}
         {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
@@ -1493,9 +1493,10 @@ export function PieceMatchModal({
           <CalloutBox tone='error'>
             <div className='space-y-1'>
               <Text size='micro' component='p'>
-                <b>один блок — две детали кроя.</b> В это назначение разложено несколько строк BOM, и
-                их связи объединились. Выберите, какая деталь остаётся за блоком: вторая связь будет
-                снята. Пока спор не решён, сохранять нечего — сервер отклонит карту целиком.
+                <b>one block — two cut pieces.</b> several BOM lines are sorted into this purpose,
+                and their links merged. choose which piece stays with the block: the second link will
+                be dropped. until the dispute is settled there is nothing to save — the server will
+                reject the whole card.
               </Text>
               {[...collapses.entries()].map(([ci, c]) => (
                 <div key={ci} className='flex flex-wrap items-center gap-1.5'>
@@ -1504,13 +1505,13 @@ export function PieceMatchModal({
                   </Text>
                   <select
                     className='h-7 min-w-0 flex-1 border border-borderColor bg-bgColor px-1 text-micro'
-                    aria-label={`деталь кроя для спорного блока ${c.block}`}
+                    aria-label={`cut piece for the disputed block ${c.block}`}
                     value={collapseChoice[ci] ?? ''}
                     onChange={(e) =>
                       setCollapseChoice((prev) => ({ ...prev, [ci]: e.target.value }))
                     }
                   >
-                    <option value=''>выберите деталь…</option>
+                    <option value=''>choose a piece…</option>
                     {c.pieceKeys.map((k) => (
                       <option key={k} value={k}>
                         {nameByPieceKey.get(k.toLowerCase()) ?? k}
@@ -1543,8 +1544,8 @@ export function PieceMatchModal({
 
         {parse.phase === 'ready' && rows.length === 0 && alreadyMapped === 0 && (
           <CalloutBox tone='note'>
-            в файлах нет именованных блоков — привязать нечего; такие DXF раскладываются, но
-            детали из них не заводятся
+            the files carry no named blocks — there is nothing to link; such DXFs do nest, but no
+            pieces are created from them
           </CalloutBox>
         )}
 
@@ -1576,7 +1577,7 @@ export function PieceMatchModal({
               {layerOpts.length > 1 && (
                 <div className='mb-1 flex flex-wrap items-center gap-1'>
                   <Text size='nano' variant='label' component='span'>
-                    контур:
+                    contour:
                   </Text>
                   {layerOpts.map((o) => (
                     <Button
@@ -1586,13 +1587,13 @@ export function PieceMatchModal({
                       size='xs'
                       title={
                         o.checked === 0
-                          ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
-                          : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`
+                          ? `layer ${o.layer}: ${o.pieces} contours, nothing to compare sizes against`
+                          : `layer ${o.layer}: ${o.pieces} contours, graded on ${o.graded} of ${o.checked} pieces`
                       }
                       onClick={() => setActiveLayer(o.layer)}
                     >
-                      слой {o.layer || '—'}
-                      {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
+                      layer {o.layer || '—'}
+                      {o.checked > 0 && o.graded === 0 ? ' (not graded)' : ''}
                     </Button>
                   ))}
                 </div>
@@ -1603,7 +1604,7 @@ export function PieceMatchModal({
               {innerLayerNames.length > 0 && (
                 <div className='mb-1 flex flex-wrap items-center gap-2'>
                   <Text size='nano' variant='label' component='span'>
-                    слои чертежа:
+                    drawing layers:
                   </Text>
                   {innerLayerNames.map(([layer, n]) => (
                     <label key={layer} className='flex cursor-pointer items-center gap-1'>
@@ -1635,7 +1636,7 @@ export function PieceMatchModal({
                       onChange={(e) => setShowGrain(e.target.checked)}
                     />
                     <Text size='nano' variant='label' component='span'>
-                      показать долевую (слой {grainLayer}) — по ней раскладка разворачивает деталь
+                      show the grainline (layer {grainLayer}) — the marker turns the piece by it
                     </Text>
                   </label>
                 </div>
@@ -1648,8 +1649,8 @@ export function PieceMatchModal({
               {addedSizes.length > 0 && (
                 <CalloutBox tone='note'>
                   <Text size='micro' component='p'>
-                    размерный ряд карточки дополнен из файла: {addedSizes.join(', ')} — уже
-                    в форме, сохранится вместе с карточкой
+                    the card's size range was topped up from the file: {addedSizes.join(', ')} —
+                    already in the form, will be saved together with the card
                   </Text>
                 </CalloutBox>
               )}
@@ -1667,8 +1668,8 @@ export function PieceMatchModal({
                   return (
                     <CalloutBox tone='warning'>
                       <Text size='micro' component='p'>
-                        у {unnamed} контуров размер в имени не опознан — такие блоки заведут свои
-                        детали кроя, не общие с остальными размерами
+                        the size in the name was not recognised on {unnamed} contours — such blocks
+                        will create cut pieces of their own, not shared with the other sizes
                       </Text>
                     </CalloutBox>
                   );
@@ -1676,8 +1677,8 @@ export function PieceMatchModal({
               {missingOnLayer.length > 0 && (
                 <CalloutBox tone='warning'>
                   <Text size='micro' component='p'>
-                    на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков —
-                    их не видно ни на листе, ни в списке: {missingOnLayer.slice(0, 6).join(', ')}
+                    layer {contourLayer || '—'} has no contour for {missingOnLayer.length} blocks —
+                    they show neither on the sheet nor in the list: {missingOnLayer.slice(0, 6).join(', ')}
                     {missingOnLayer.length > 6 ? '…' : ''}
                   </Text>
                 </CalloutBox>
@@ -1689,7 +1690,7 @@ export function PieceMatchModal({
               {sizeOptions.length > 1 && (
                 <div className='mb-1 flex flex-wrap items-center gap-1'>
                   <Text size='nano' variant='label' component='span'>
-                    размер:
+                    size:
                   </Text>
                   {sizeOptions.map((o) => (
                     <Button
@@ -1697,13 +1698,13 @@ export function PieceMatchModal({
                       type='button'
                       variant={o.size === shownSize ? 'main' : 'secondary'}
                       size='xs'
-                      title={`${o.count} контуров`}
+                      title={`${o.count} contours`}
                       onClick={() => setActiveSize(o.size)}
                     >
                       {/* Группа целиком из помеченных контуров — это «UNI», а не «без размера»:
                           размер у них не потерян, его и не должно быть. Смешанная группа
                           подписывается прежним словом — там размер и правда не опознан. */}
-                      {o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'без размера')}
+                      {o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'no size')}
                     </Button>
                   ))}
                 </div>
@@ -1727,19 +1728,19 @@ export function PieceMatchModal({
             <div className='w-full shrink-0 space-y-1.5 lg:w-72'>
               {!focus && (
                 <Text size='micro' variant='label' component='p'>
-                  выберите деталь на листе — по форме и соседям видно, что это, чего не скажет
-                  имя блока из файла.
+                  pick a piece on the sheet — its shape and its neighbours show what it is, which
+                  the block name from the file will not tell you.
                 </Text>
               )}
               {focus && (
                 <div className='space-y-1.5 border border-borderColor p-2'>
                   <Text size='micro' component='p' className='break-words'>
-                    деталь <span className='uppercase'>{focus.block}</span> · ×{focus.instances} в
-                    изделии
+                    piece <span className='uppercase'>{focus.block}</span> · ×{focus.instances} per
+                    garment
                   </Text>
                   {focus.sizes.length > 0 && (
                     <Text size='nano' variant='label' component='p'>
-                      одна на размеры: {focus.sizes.join(' ')}
+                      one across sizes: {focus.sizes.join(' ')}
                     </Text>
                   )}
                   {focus.mappedTo && !focus.dropped ? (
@@ -1747,7 +1748,7 @@ export function PieceMatchModal({
                       {/* Renaming right here is the point of the sheet: the shape tells you what
                           the piece IS, so that is the moment the right name is known. It renames
                           the cut piece everywhere, because the alias points at its line_key. */}
-                      {nameField('деталь кроя', focus.mappedName ?? '', (v) =>
+                      {nameField('cut piece', focus.mappedName ?? '', (v) =>
                         renamePiece(focus.mappedTo!, v),
                       )}
                       <Button
@@ -1756,13 +1757,13 @@ export function PieceMatchModal({
                         size='xs'
                         onClick={() => toggleUnmap(focus.ci)}
                       >
-                        снять связь
+                        unlink
                       </Button>
                     </>
                   ) : focus.dropped ? (
                     <>
                       <Text size='micro' variant='label' component='p'>
-                        связь с «{focus.mappedName}» будет снята
+                        the link to “{focus.mappedName}” will be dropped
                       </Text>
                       <Button
                         type='button'
@@ -1770,7 +1771,7 @@ export function PieceMatchModal({
                         size='xs'
                         onClick={() => toggleUnmap(focus.ci)}
                       >
-                        вернуть
+                        restore
                       </Button>
                     </>
                   ) : focus.row ? (
@@ -1788,7 +1789,7 @@ export function PieceMatchModal({
                           exporter called it; the factory sheet needs «полочка правая». */}
                       {focus.row.choice === CREATE &&
                         nameField(
-                          'название новой детали',
+                          'name of the new piece',
                           draftNames[focus.ci] ?? defaultPieceName(focus.row),
                           (v) => setDraftNames((prev) => ({ ...prev, [focus.ci]: v })),
                         )}
@@ -1796,28 +1797,28 @@ export function PieceMatchModal({
                           same one-place edit as above. */}
                       {focus.row.choice && focus.row.choice !== CREATE &&
                         nameField(
-                          'деталь кроя',
+                          'cut piece',
                           nameByPieceKey.get(focus.row.choice.toLowerCase()) ?? '',
                           (v) => renamePiece(focus.row!.choice, v),
                         )}
                     </>
                   ) : (
                     <Text size='micro' variant='label' component='p'>
-                      этот блок не из текущего разбора — откройте диалог заново
+                      this block is not from the current parse — reopen the dialog
                     </Text>
                   )}
                 </div>
               )}
               <Text size='nano' variant='label' component='p'>
-                связь хранится по {scope.byPurpose ? 'НАЗНАЧЕНИЮ' : 'ТКАНИ'} и ведёт на деталь кроя,
-                а не на имя: имена блоков гуляют от файла к файлу. Поэтому следующий размер этой же
-                ткани приходит уже сопоставленным, и деталей кроя от него не прибавляется.
+                the link is stored by {scope.byPurpose ? 'PURPOSE' : 'FABRIC'} and points at the cut
+                piece, not at a name: block names wander from file to file. that is why the next size
+                of the same fabric arrives already matched, and adds no cut pieces of its own.
                 {scope.byPurpose && scope.lines.length > 1
-                  ? ' В это назначение разложено несколько артикулов — связь общая для всех: лекало одно, различается только полотно.'
+                  ? ' several articles are sorted into this purpose — the link is shared by all of them: the pattern piece is one, only the cloth differs.'
                   : ''}
               </Text>
               <Text size='nano' variant='label' component='p'>
-                связи и новые детали уйдут при сохранении карточки.
+                links and new pieces are written when the card is saved.
               </Text>
             </div>
           </div>
@@ -1831,34 +1832,34 @@ export function PieceMatchModal({
             совпало» — то есть ровно наоборот. */}
         {parse.phase === 'ready' && !parse.complete && (
           <div className='space-y-1'>
-            <GroupLabel flush>в чертеже больше нет (—)</GroupLabel>
+            <GroupLabel flush>no longer in the drawing (—)</GroupLabel>
             <CalloutBox tone='warning'>
               <div className='space-y-0.5'>
                 <Text size='micro' component='p'>
                   <b>
-                    разобрано файлов: {parse.filesParsed} из {parse.filesTotal}
+                    files parsed: {parse.filesParsed} of {parse.filesTotal}
                     {parse.blocksSkipped > 0
-                      ? `, пропущено блоков внутри файлов: ${parse.blocksSkipped}`
+                      ? `, blocks skipped inside the files: ${parse.blocksSkipped}`
                       : ''}
                   </b>{' '}
-                  — предложений об удалении деталей не будет. По неполному разбору нельзя
-                  утверждать, что деталь исчезла из чертежа: её блок мог лежать в листе, который не
-                  докачался или не прочитался
+                  — there will be no suggestions to delete pieces. an incomplete parse cannot claim
+                  that a piece is gone from the drawing: its block could have been in a sheet that
+                  didn't download or didn't read
                   {parse.blocksSkipped > 0
-                    ? ', либо в самом файле остаться неразвёрнутым (ссылка на отсутствующее определение блока, слишком глубокая вложенность, исчерпанный лимит вставок)'
+                    ? ', or could have stayed unexpanded inside the file itself (a reference to a missing block definition, nesting too deep, the insert limit exhausted)'
                     : ''}
-                  . Проверьте предупреждения разбора выше и откройте диалог заново.
+                  . check the parse warnings above and reopen the dialog.
                 </Text>
                 <Text size='micro' component='p'>
-                  <b>«× на изделие» и «как кроится» тоже не пересчитываются</b> — у уже заведённых
-                  деталей они останутся как есть. «Этой детали в изделии столько-то» — утверждение
-                  про ПОЛНЫЙ набор блоков: не доехал один лист, и число молча занизится, а вслед за
-                  ним сменится разметка кроя. Поэтому «обновить ×» здесь показывает ноль, а все
-                  привязанные детали идут в «без изменений».
+                  <b>“per garment” and “how it's cut” are not recomputed either</b> — on pieces that
+                  already exist they stay as they are. “there are so many of this piece per garment”
+                  is a claim about the FULL set of blocks: one sheet fails to arrive and the number
+                  quietly drops, and the cutting markup changes after it. that is why “update ×”
+                  shows zero here, and every linked piece goes to “unchanged”.
                 </Text>
                 <Text size='nano' variant='label' component='p'>
-                  сопоставление и заведение новых деталей работают как обычно: они утверждают про
-                  то, что В файлах есть, а не про то, чего в них нет и сколько его всего.
+                  matching and creating new pieces work as usual: they claim things about what IS in
+                  the files, not about what is missing from them and how much of it there is in all.
                 </Text>
               </div>
             </CalloutBox>
@@ -1876,24 +1877,25 @@ export function PieceMatchModal({
               <CalloutBox tone='error'>
                 <Text size='micro' component='p'>
                   <b>
-                    исчезло деталей: {deleteCandidates.length} из {scopeBoundPieces} привязанных к
-                    этой ткани.
+                    pieces vanished: {deleteCandidates.length} of {scopeBoundPieces} bound to this
+                    fabric.
                   </b>{' '}
-                  Похоже, файл заменён не тем или выбран не тот слой — проверьте список файлов и
-                  выбранный контур выше. Разбор при этом ПОЛОН — все файлы прочитаны и ни один блок
-                  внутри них не пропущен: по неполному разбору предложений об удалении не бывает
-                  вовсе. Применить всё равно можно — замена лекал целиком бывает и законной.
+                  it looks like the wrong file was uploaded or the wrong layer picked — check the
+                  file list and the chosen contour above. the parse itself is COMPLETE — every file
+                  was read and not one block inside them was skipped: an incomplete parse never
+                  yields deletion suggestions at all. you can apply anyway — replacing the pattern
+                  pieces wholesale is sometimes legitimate too.
                 </Text>
               </CalloutBox>
             )}
-            <GroupLabel flush>в чертеже больше нет ({deleteCandidates.length})</GroupLabel>
+            <GroupLabel flush>no longer in the drawing ({deleteCandidates.length})</GroupLabel>
             {/* Формулировка называет ИМЕННО тот критерий, по которому деталь сюда попала: блок не
                 встретился разбору ни разу. «Не нашлось контура» — это другое утверждение, и по нему
                 деталь не удаляют (находка 1 третьего ревью). */}
             <Text size='nano' variant='label' component='p'>
-              блоки этих деталей не встретились в разобранных файлах этой ткани ни разу — ни на
-              одном слое, ни в одном размере, — и ни к какой другой ткани они не привязаны. По
-              умолчанию такая деталь удаляется — вместе с тем, что на ней держится.
+              the blocks of these pieces were not met once in the parsed files of this fabric — not
+              on any layer, not in any size — and they are not bound to any other fabric either. by
+              default such a piece is deleted — together with everything that rests on it.
             </Text>
             {deleteCandidates.map((c) => {
               const decision = deleteDecision(c.lineKey);
@@ -1910,11 +1912,11 @@ export function PieceMatchModal({
                     {/* Состояние читается СЛОВОМ. Красный здесь по делу — «сейчас будет
                         разрушено», — но он второй, а не единственный носитель смысла. */}
                     <Pill tone={decision === 'delete' ? 'warn' : 'mut'}>
-                      {decision === 'delete' ? 'будет удалена' : 'остаётся'}
+                      {decision === 'delete' ? 'will be deleted' : 'stays'}
                     </Pill>
                     <select
                       className='h-7 border border-borderColor bg-bgColor px-1 text-micro'
-                      aria-label={`что сделать с деталью ${c.name?.trim() || c.lineKey}`}
+                      aria-label={`what to do with piece ${c.name?.trim() || c.lineKey}`}
                       value={decision}
                       onChange={(e) =>
                         setDeleteChoice((prev) =>
@@ -1925,20 +1927,20 @@ export function PieceMatchModal({
                         )
                       }
                     >
-                      <option value='delete'>удалить</option>
-                      <option value='keep'>оставить</option>
+                      <option value='delete'>delete</option>
+                      <option value='keep'>keep</option>
                     </select>
                   </div>
                   <Text size='nano' variant='label' component='p' className='break-words'>
-                    исчезли блоки: {c.blocks.join(', ')}
+                    blocks gone: {c.blocks.join(', ')}
                   </Text>
                   {decision === 'delete' ? (
                     <>
                       <Row
                         label={
                           <Text size='micro' component='span'>
-                            строки рецепта
-                            {hold ? ` (${hold.colorways.join(', ')})` : ' в колорвеях карточки'}
+                            recipe lines
+                            {hold ? ` (${hold.colorways.join(', ')})` : ' in the card colourways'}
                           </Text>
                         }
                         value={
@@ -1954,7 +1956,7 @@ export function PieceMatchModal({
                           tone='error'
                           label={
                             <Text size='micro' component='span'>
-                              из них с вписанной НОРМОЙ — восстановить будет неоткуда
+                              of them with a NORM typed in — there will be nowhere to restore it from
                             </Text>
                           }
                           value={
@@ -1967,7 +1969,7 @@ export function PieceMatchModal({
                       <Row
                         label={
                           <Text size='micro' component='span'>
-                            замеренные площади, строк по размерам
+                            measured areas, rows by size
                           </Text>
                         }
                         value={
@@ -1979,7 +1981,7 @@ export function PieceMatchModal({
                       <Row
                         label={
                           <Text size='micro' component='span'>
-                            операций сборки потеряют эту деталь
+                            assembly operations will lose this piece
                           </Text>
                         }
                         value={
@@ -1992,25 +1994,25 @@ export function PieceMatchModal({
                           рисунку, а не строке таблицы, и стирать его из-за смены лекал значило бы
                           переписывать эскиз чужими руками. */}
                       <Text size='nano' variant='label' component='p'>
-                        выноска на эскизе остаётся — её номер принадлежит рисунку, а не детали
+                        the sketch callout stays — its number belongs to the drawing, not to the piece
                       </Text>
                     </>
                   ) : (
                     <Text size='nano' variant='label' component='p'>
-                      деталь остаётся в карточке вместе со связью на блок, которого в чертеже больше
-                      нет
+                      the piece stays on the card together with its link to a block that is no longer
+                      in the drawing
                     </Text>
                   )}
                 </div>
               );
             })}
             <Text size='nano' variant='label' component='p'>
-              строки рецепта посчитаны по колорвеям, которые показывает карточка: архивные она не
-              читает, а их строки держат деталь так же и уедут вместе с ней.
+              recipe lines are counted across the colourways the card shows: it does not read archived
+              ones, and their lines hold the piece just the same and will go with it.
             </Text>
             <Text size='nano' variant='label' component='p'>
-              удаление применяется при СОХРАНЕНИИ карточки — до него ничего не потеряно, и отменить
-              его можно, перечитав карточку.
+              the deletion is applied when the card is SAVED — nothing is lost before that, and it
+              can be undone by re-reading the card.
             </Text>
           </div>
         )}
@@ -2021,7 +2023,7 @@ export function PieceMatchModal({
         {rows.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>
             <Text size='nano' variant='label' component='span'>
-              не сопоставлено: {rows.length}
+              not matched: {rows.length}
             </Text>
             <Button
               type='button'
@@ -2032,7 +2034,7 @@ export function PieceMatchModal({
                 setRows((prev) => prev.map((r) => (r.choice ? r : { ...r, choice: CREATE })))
               }
             >
-              завести все как детали кроя ({rows.filter((r) => !r.choice).length})
+              create all as cut pieces ({rows.filter((r) => !r.choice).length})
             </Button>
             <Button
               type='button'
@@ -2041,7 +2043,7 @@ export function PieceMatchModal({
               disabled={rows.every((r) => !r.choice)}
               onClick={() => setRows((prev) => prev.map((r) => ({ ...r, choice: '' })))}
             >
-              снять выбор
+              clear the choice
             </Button>
           </div>
         )}
@@ -2052,10 +2054,10 @@ export function PieceMatchModal({
           <DataTable variant='grid' className='[&_td]:text-micro'>
             <thead>
               <tr>
-                <th>деталь в DXF</th>
-                <th>размеры</th>
-                <th>в изделии</th>
-                <th>деталь кроя</th>
+                <th>piece in the DXF</th>
+                <th>sizes</th>
+                <th>per garment</th>
+                <th>cut piece</th>
               </tr>
             </thead>
             <tbody>
@@ -2072,7 +2074,7 @@ export function PieceMatchModal({
                         type='button'
                         className='text-left underline-offset-2 hover:underline'
                         onClick={() => setSelected(ci)}
-                        title='показать на листе'
+                        title='show on the sheet'
                       >
                         {r.block}
                       </button>
@@ -2098,9 +2100,8 @@ export function PieceMatchModal({
 
         {rows.length > 0 && (
           <Text size='nano' variant='label' component='p'>
-            имена нормализованы: BP_1_S и BP_1_XL — это одна деталь BP_1, и заводится она один
-            раз на все размеры. «пропустить» оставляет блок несопоставленным — диалог предложит
-            его снова.
+            names are normalised: BP_1_S and BP_1_XL are one piece BP_1, and it is created once for
+            all sizes. “skip” leaves the block unmatched — the dialog will offer it again.
           </Text>
         )}
 
@@ -2110,7 +2111,7 @@ export function PieceMatchModal({
         {mappedRows.length > 0 && (
           <div className='space-y-1'>
             <Text size='nano' variant='label' component='p'>
-              уже сопоставлено для «{fabricName}» ({mappedRows.length})
+              already matched for “{fabricName}” ({mappedRows.length})
             </Text>
             {mappedRows.map((m) => {
               const off = unmapped.includes(m.ci);
@@ -2120,7 +2121,7 @@ export function PieceMatchModal({
                     type='button'
                     className={`min-w-0 flex-1 truncate text-left text-micro underline-offset-2 hover:underline ${off ? 'line-through opacity-60' : ''}`}
                     onClick={() => setSelected(m.ci)}
-                    title='показать на листе'
+                    title='show on the sheet'
                   >
                     {m.block} → {m.pieceName}
                   </button>
@@ -2130,7 +2131,7 @@ export function PieceMatchModal({
                     size='xs'
                     onClick={() => toggleUnmap(m.ci)}
                   >
-                    {off ? 'вернуть' : 'снять'}
+                    {off ? 'restore' : 'unlink'}
                   </Button>
                 </div>
               );
@@ -2147,31 +2148,31 @@ export function PieceMatchModal({
         {parse.phase === 'ready' && hasOutcome && (
           <div className='space-y-0.5 border border-borderColor p-2'>
             <Text size='micro' component='p'>
-              применение: создать {outcome.created} · удалить {outcome.removed} · обновить ×{' '}
-              {outcome.updated} · без изменений {outcome.unchanged}
+              applying: create {outcome.created} · delete {outcome.removed} · update ×{' '}
+              {outcome.updated} · unchanged {outcome.unchanged}
             </Text>
             {/* Ноль в «обновить ×» имеет ДВА разных смысла — «чертёж сошёлся» и «считать не по
                 чему», — и по одной цифре они неразличимы. Второй называется прямо здесь, у самой
                 цифры: причина подробно разобрана выше, в блоке про неполный разбор. */}
             {!parseComplete && (
               <Text size='nano' variant='label' component='p'>
-                разбор неполон, поэтому «обновить ×» здесь всегда ноль: «× на изделие» и «как
-                кроится» у уже заведённых деталей не трогаются вовсе — см. блок про неполный разбор
-                выше.
+                the parse is incomplete, so “update ×” is always zero here: “per garment” and “how
+                it's cut” on pieces that already exist are not touched at all — see the block about
+                the incomplete parse above.
               </Text>
             )}
             <Text size='nano' variant='label' component='p'>
-              «обновить ×» — число на изделие пересчитывается по чертежу (сумма по разным деталям
-              чертежа; копии одной детали, разложенные по размерным выгрузкам, не складываются) и
-              заодно проставляется «как кроится: одинаковые копии» там, где ответа не было: чертёж
-              несёт каждый контур, значит деталь режется как нарисована.
+              “update ×” — the per-garment count is recomputed from the drawing (a sum over the
+              different drawing pieces; copies of one piece split across per-size exports are not
+              added up), and “how it's cut: identical copies” is set where there was no answer: the
+              drawing carries every contour, so the piece is cut as it is drawn.
             </Text>
             <Text size='nano' variant='label' component='p'>
-              явные «зеркальные пары» и «со сгибом» модалка не трогает — кроме случая, когда новое
-              число делает зеркальную пару невозможной (нечётное или меньше двух): тогда ставится
-              «одинаковые копии», иначе карточка не сохранится вовсе. Чертёж здесь прямо
-              противоречит пометке и несёт каждый контур отдельно — значит деталь режется как
-              нарисована.
+              explicit “mirrored pairs” and “on fold” are not touched by the modal — except when the
+              new count makes a mirrored pair impossible (odd, or fewer than two): then “identical
+              copies” is set, otherwise the card will not save at all. the drawing here directly
+              contradicts the mark and carries every contour separately — so the piece is cut as it
+              is drawn.
             </Text>
           </div>
         )}

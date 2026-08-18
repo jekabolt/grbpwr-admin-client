@@ -22,7 +22,6 @@ import {
   isBlocker,
   isOk,
   isWarning,
-  pluralRu,
 } from './run-readiness-keys';
 
 // Словарь ключей, карта вкладок и предикаты степеней живут в run-readiness-keys.ts (чистый модуль,
@@ -62,25 +61,24 @@ type Finding = ProductionRunReadinessFinding;
 // UNKNOWN — «у сервера НЕТ ИНСТРУМЕНТА ответить», а не суждение о данных. Поэтому у него СВОЙ вид:
 // не зелёный (это не «прошло»), не красный (это не поломка) и не синий (синий в этой системе значит
 // «на полпути, нужен человек» — а тут человек ничего сделать не может, инструмент появится с фазой).
-// Серый + «?» + слово «не проверено» — три независимых сигнала, из которых ни один не читается как
+// Серый + «?» + слово «not checked» — три независимых сигнала, из которых ни один не читается как
 // вердикт.
 //
 // UNSPECIFIED сюда же: степень, которую сервер не проставил, — это тоже отсутствие суждения. Пятой
-// корзины не заводим, но и в OK не складываем. Счётчик «не проверено» при этом ВСЕГДА берётся у
+// корзины не заводим, но и в OK не складываем. Счётчик «not checked» при этом ВСЕГДА берётся у
 // сервера (unknown_count) и никогда не пересчитывается здесь — бакетование наше, число его.
 const SEVERITY_UI: Record<string, { glyph: string; word: string; className: string }> = {
-  [SEV_BLOCKER]: { glyph: '✕', word: 'блокер', className: 'text-error' },
-  [SEV_WARNING]: { glyph: '!', word: 'внимание', className: 'text-warning' },
-  [SEV_UNKNOWN]: { glyph: '?', word: 'не проверено', className: 'text-labelColor' },
-  [SEV_OK]: { glyph: '✓', word: 'ок', className: 'text-success' },
+  [SEV_BLOCKER]: { glyph: '✕', word: 'blocker', className: 'text-error' },
+  [SEV_WARNING]: { glyph: '!', word: 'warning', className: 'text-warning' },
+  [SEV_UNKNOWN]: { glyph: '?', word: 'not checked', className: 'text-labelColor' },
+  [SEV_OK]: { glyph: '✓', word: 'ok', className: 'text-success' },
 };
 const UNSPECIFIED_UI = SEVERITY_UI[SEV_UNKNOWN];
 
 const uiOf = (s?: ProductionRunReadinessSeverity) => SEVERITY_UI[s ?? ''] ?? UNSPECIFIED_UI;
 
-const blockerCount = (n: number) => `${n} ${pluralRu(n, 'блокер', 'блокера', 'блокеров')}`;
-const unchecked = (n: number) =>
-  `${n} ${pluralRu(n, 'проверка', 'проверки', 'проверок')} не ${pluralRu(n, 'выполнялась', 'выполнялись', 'выполнялись')}`;
+const blockerCount = (n: number) => `${n} ${n === 1 ? 'blocker' : 'blockers'}`;
+const unchecked = (n: number) => `${n} ${n === 1 ? 'check was' : 'checks were'} not run`;
 
 /**
  * Одна проверка. Строка, а не Row: у неё нет колонки значения — есть факт, его причина и адрес,
@@ -104,7 +102,7 @@ export function FindingRow({
       </span>
       <span className='sr-only'>{ui.word}</span>
       <Text component='span' className='min-w-0'>
-        {finding.label || finding.key || 'проверка без имени'}
+        {finding.label || finding.key || 'unnamed check'}
       </Text>
       {detail ? (
         <Text size='micro' variant='label' component='span' className='min-w-0'>
@@ -120,7 +118,7 @@ export function FindingRow({
           rel='noreferrer'
           className='ml-auto shrink-0 text-micro uppercase tracking-label underline'
         >
-          починить ↗
+          fix ↗
         </Link>
       ) : null}
     </div>
@@ -187,28 +185,28 @@ export function ReadinessVerdict({
   return (
     <div className='flex flex-col gap-1'>
       <div className='flex flex-wrap items-center gap-2'>
-        <Pill tone={ready ? 'ok' : 'warn'}>{ready ? 'готово к запуску' : 'есть блокеры'}</Pill>
+        <Pill tone={ready ? 'ok' : 'warn'}>{ready ? 'ready to start' : 'there are blockers'}</Pill>
         {blockers > 0 ? (
           <Pill tone='warn'>
-            {blockers} {pluralRu(blockers, 'блокер', 'блокера', 'блокеров')}
+            {blockers} {blockers === 1 ? 'blocker' : 'blockers'}
           </Pill>
         ) : null}
         {warnings > 0 ? (
           <Pill tone='attention'>
-            {warnings} {pluralRu(warnings, 'предупреждение', 'предупреждения', 'предупреждений')}
+            {warnings} {warnings === 1 ? 'warning' : 'warnings'}
           </Pill>
         ) : null}
         {/* Отдельная плашка, СЕРАЯ и со своим словом: не «ещё N проблем» и не часть «готово». */}
-        {unknown > 0 ? <Pill tone='mut'>{unknown} не проверено</Pill> : null}
-        {stale ? <Pill tone='attention'>пересчитывается…</Pill> : null}
+        {unknown > 0 ? <Pill tone='mut'>{unknown} not checked</Pill> : null}
+        {stale ? <Pill tone='attention'>recomputing…</Pill> : null}
       </div>
       <Text size='micro' variant='label'>
         {ready
           ? unknown > 0
-            ? `Ничего сломанного не найдено. ${unchecked(unknown)} — у сервера нет инструмента, и это не «пройдено».`
-            : 'Ничего сломанного не найдено, и каждая проверка гейта смогла ответить.'
+            ? `nothing broken was found. ${unchecked(unknown)} — the server has no tool for them, and that is not “passed”.`
+            : 'nothing broken was found, and every gate check was able to answer.'
           : unknown > 0
-            ? `${blockerCount(blockers)}. Отдельно: ${unchecked(unknown)} вовсе — они ничего не блокируют и ничего не подтверждают.`
+            ? `${blockerCount(blockers)}. separately: ${unchecked(unknown)} at all — they block nothing and confirm nothing.`
             : `${blockerCount(blockers)}.`}
       </Text>
       {/* РЕЖИМ. Печатается ВСЕГДА — и когда всё зелено, и когда нет.
@@ -218,11 +216,11 @@ export function ReadinessVerdict({
       <Text size='micro' variant='label'>
         {blocking
           ? wouldBlock
-            ? 'Гейт БЛОКИРУЕТ создание: этот запрос будет отбит сервером.'
-            : 'Гейт блокирует создание — этот запрос сервер пропустит.'
+            ? 'the gate BLOCKS creation: this request will be refused by the server.'
+            : 'the gate blocks creation — the server will let this request through.'
           : ready
-            ? 'Гейт в режиме отчёта: создание не отбивается. Когда режим включат, этот запрос всё равно пройдёт.'
-            : 'Гейт в режиме отчёта: создание не отбивается. Когда режим включат, этот запрос будет отбит.'}
+            ? 'the gate is in report mode: creation is not refused. when the mode is turned on, this request will still pass.'
+            : 'the gate is in report mode: creation is not refused. when the mode is turned on, this request will be refused.'}
       </Text>
     </div>
   );
@@ -246,7 +244,7 @@ export function CoverageTable({
   if (coverage.length === 0 && unitCoverage.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        покрытие появится, когда в сетке будут количества
+        coverage will appear once the grid has quantities
       </Text>
     );
   }
@@ -259,11 +257,11 @@ export function CoverageTable({
         <table className='w-full border-collapse'>
           <thead>
             <tr>
-              <th className={`${cell} text-left uppercase`}>колорвей</th>
-              <th className={`${cell} text-left uppercase`}>слот / артикул</th>
-              <th className={`${cell} text-right uppercase`}>нужно</th>
-              <th className={`${cell} text-right uppercase`}>на складе</th>
-              <th className={`${cell} text-right uppercase`}>нехватка</th>
+              <th className={`${cell} text-left uppercase`}>colourway</th>
+              <th className={`${cell} text-left uppercase`}>slot / article</th>
+              <th className={`${cell} text-right uppercase`}>needed</th>
+              <th className={`${cell} text-right uppercase`}>on hand</th>
+              <th className={`${cell} text-right uppercase`}>shortage</th>
             </tr>
           </thead>
           <tbody>
@@ -283,7 +281,7 @@ export function CoverageTable({
                   <td
                     className={`${cell} text-right tabular-nums ${lacking ? 'text-error' : ''}`}
                   >
-                    {lacking ? `не хватает ${short_}` : '—'}
+                    {lacking ? `short by ${short_}` : '—'}
                   </td>
                 </tr>
               );
@@ -297,10 +295,10 @@ export function CoverageTable({
           <table className='w-full border-collapse'>
             <thead>
               <tr>
-                <th className={`${cell} text-left uppercase`}>колорвей · размер</th>
-                <th className={`${cell} text-right uppercase`}>план</th>
-                <th className={`${cell} text-right uppercase`}>рецепт полон</th>
-                <th className={`${cell} text-right uppercase`}>хватит остатка на</th>
+                <th className={`${cell} text-left uppercase`}>colourway · size</th>
+                <th className={`${cell} text-right uppercase`}>plan</th>
+                <th className={`${cell} text-right uppercase`}>recipe complete</th>
+                <th className={`${cell} text-right uppercase`}>stock covers</th>
               </tr>
             </thead>
             <tbody>
@@ -327,15 +325,15 @@ export function CoverageTable({
 
       <Text size='micro' variant='label'>
         {bySource
-          ? 'Потребность посчитана по настилам.'
-          : 'Потребность = количества × норма рецепта (source = NORM), а не план настилов: настилы строятся после создания, на странице прогона.'}{' '}
-        «Рецепт полон» — изделия, у которых КАЖДЫЙ обязательный слот имеет и артикул, и норму на этот
-        размер; 22 полочки и 20 подкладок — это 20 изделий. «Хватит остатка» — оценка по сегодняшнему
-        остатку без резервов.
+          ? 'the requirement is computed from the lays.'
+          : 'the requirement = quantities × recipe norm (source = NORM), not a lay plan: lays are built after creation, on the run page.'}{' '}
+        “recipe complete” — garments in which EVERY required slot has both an article and a norm for
+        this size; 22 fronts and 20 linings are 20 garments. “stock covers” — an estimate against
+        today's on hand, without reserves.
       </Text>
       <Text size='micro' variant='label'>
-        Метраж здесь — оценка ПО BOM: фактический процент раскроя вводится уже на странице прогона,
-        поэтому та же партия через минуту после создания покажет другое число.
+        the length here is an estimate FROM THE BOM: the actual cutting percentage is entered later,
+        on the run page, so the same run will show a different number a minute after it is created.
       </Text>
     </div>
   );
@@ -347,7 +345,7 @@ export function ReadinessCaveats({ caveats }: { caveats: string[] }) {
   return (
     <CalloutBox tone='note'>
       <Text size='micro' variant='label' component='span'>
-        оговорки расчёта:
+        calculation caveats:
       </Text>
       <ul className='list-disc pl-4'>
         {caveats.map((c, i) => (

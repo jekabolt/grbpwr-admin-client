@@ -29,9 +29,9 @@ export const SILHOUETTE_INK =
 /** Подпись контура: блок, размер, по которому нарисовано, и габарит — одна на все поверхности. */
 export function pieceShapeTitle(found: FoundPiece): string {
   const size = found.size
-    ? `размер ${found.size}${found.sizes.length > 1 ? ` из ${found.sizes.length}` : ''}`
+    ? `size ${found.size}${found.sizes.length > 1 ? ` of ${found.sizes.length}` : ''}`
     : '';
-  return [found.block, size, `${fmtCm(found.piece.bboxW)}×${fmtCm(found.piece.bboxH)} см`]
+  return [found.block, size, `${fmtCm(found.piece.bboxW)}×${fmtCm(found.piece.bboxH)} cm`]
     .filter(Boolean)
     .join(' · ');
 }

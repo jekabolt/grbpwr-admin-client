@@ -1,26 +1,27 @@
 /**
  * ОДИН РАЗБОР ОТКАЗА НА ВЕСЬ РАЗДЕЛ «ФАЙЛЫ».
  *
- * Раздел русский целиком, а сервер отвечает по-английски, и до этого модуля отказ печатался
- * дословно: под русской шапкой появлялось «не удалось сохранить: rpc error: code =
- * FailedPrecondition desc = topic still has files: 1». Это ровно то смешение, от которого
- * правило про язык и защищает, — и оно же лечится в одном месте, потому что вариантов отказа
- * у одного бэкенда конечное число.
+ * Раздел и сервер говорят по-английски, но сервер говорит НЕ ТЕМИ словами: до этого модуля
+ * отказ печатался дословно, и на экране появлялось «couldn't save: rpc error: code =
+ * FailedPrecondition desc = topic still has files: 1» — обёртка транспорта и внутреннее имя
+ * условия вместо того, что человеку делать. Лечится это в одном месте, потому что вариантов
+ * отказа у одного бэкенда конечное число.
  *
  * Разбор идёт СТУПЕНЯМИ, и порядок ступеней — не вкусовщина:
  *
  *   1. 401. Слова, приехавшие с истёкшей сессией, не значат ничего: важен сам факт, и лечится
  *      он входом заново, а не тем, что написано в теле.
- *   2. Сервер УЖЕ ПО-РУССКИ. Три отказа по правам (`libraryFileAccessMsg`,
- *      `libraryFileOwnersMsg`, `libraryCommentAuthorMsg`) написаны на бэкенде русскими словами
- *      и НАЗЫВАЮТ КРУГ: «доступ к файлу меняет загрузивший, действующий владелец или
- *      супер-админ». Подменить это на своё «нет прав» значило бы выбросить единственное, что
- *      подсказывает, у кого просить. Признак — кириллица ВНЕ КАВЫЧЕК: внутри них приезжает эхо
- *      того, что человек ввёл сам (`%q`), и оно про язык сервера не говорит ничего.
- *   3. ТАБЛИЦА узнаваемых английских фраз (ниже). Узнанное сообщение всегда точнее кода: 404 с
- *      «file not found» — это «файла больше нет», а не «сервер не знает такого запроса».
- *   4. КОД, когда сообщение не узнано: 403 — прав нет, 404/405/501 — шлюз такого не знает.
- *   5. Иначе — запасная фраза места И слова сервера рядом, мелким. Прятать их нельзя: когда
+ *   2. ТАБЛИЦА узнаваемых английских фраз (ниже). Узнанное сообщение всегда точнее кода: 404 с
+ *      «file not found» — это «the file is gone», а не «сервер не знает такого запроса».
+ *      Три отказа по правам (`libraryFileAccessMsg`, `libraryFileOwnersMsg`,
+ *      `libraryCommentAuthorMsg`) стоят в ней отдельными правилами и НАЗЫВАЮТ КРУГ ЛИЦ:
+ *      «file access is changed by the uploader, a current owner, or a super admin». Подменить
+ *      это на своё «нет прав» значило бы выбросить единственное, что подсказывает, у кого
+ *      просить, — поэтому их `say` отдаёт фразу сервера целиком. Ищется опорный кусок в ответе
+ *      БЕЗ ЭХА ВВОДА: то, что человек напечатал сам, приезжает обратно внутри `%q`, и тема с
+ *      именем «role not found» иначе угоняла бы чужое правило (`QUOTED_ECHO`).
+ *   3. КОД, когда сообщение не узнано: 403 — прав нет, 404/405/501 — шлюз такого не знает.
+ *   4. Иначе — запасная фраза места И слова сервера рядом, мелким. Прятать их нельзя: когда
  *      таблица случая не знает, это единственное, по чему можно понять, что произошло.
  *
  * `requestHandler` (`src/api/api.ts`) кладёт на ошибку HTTP-код полем `status`, а в `message` —
@@ -84,26 +85,16 @@ function serverWords(e: unknown): string {
 
 /**
  * ЭХО ВВОДА В КАВЫЧКАХ. Go-шный `%q` возвращает в сообщение то, что человек напечатал:
- * «date must be YYYY-MM-DD, got "вчера"», «unknown file topic kind: "…"», «failed to resolve
- * topic "съёмка"». Кавычки здесь всегда двойные — их ставит `%q`, а не автор фразы.
- */
-const QUOTED_ECHO = /"[^"]*"/g;
-
-/**
- * Сервер ответил по-русски — значит, сказал всё сам, и переводить нечего.
+ * «date must be YYYY-MM-DD, got "yesterday"», «unknown file topic kind: "…"», «failed to resolve
+ * topic "packaging"». Кавычки здесь всегда двойные — их ставит `%q`, а не автор фразы.
  *
- * КИРИЛЛИЦА СЧИТАЕТСЯ ТОЛЬКО ВНЕ КАВЫЧЕК, и это не тонкость: русского в ответе бывает два
- * рода. Первый — сам сервер (три отказа по правам, написанные русскими словами); второй —
- * ЭХО ТОГО, ЧТО ЧЕЛОВЕК ВВЁЛ, приехавшее обратно через `%q` внутри английской фразы. Считай мы
- * их одинаково — русская буква в поле даты или в имени темы выключала бы весь разбор, и под
- * русской шапкой печаталось бы `starts_at: date must be YYYY-MM-DD, got "вчера"` целиком.
- * Измерено узловым прогоном: без этой строки правило про формат даты мертво ровно на тех
- * значениях, ради которых оно и написано. Три русских сообщения бэкенда двойных кавычек не
- * содержат, поэтому вырезание эха их не задевает.
+ * РЕГУЛЯРКА ЗНАЕТ ПРО ЭКРАНИРОВАНИЕ, и это не педантизм. `%q` экранирует внутреннюю кавычку как
+ * `\"`, а наивная пара `/"[^"]*"/g` спаривает открывающую кавычку с экранированной и оставляет
+ * ХВОСТ эха снаружи: на `got "12 \"role not found\""` от эха остаётся `role not found`, и оно
+ * угоняет правило про пропавшую роль. Выход `%q` всегда сбалансирован, поэтому пара
+ * «не-кавычка ИЛИ экранированная пара» съедает его без остатка.
  */
-function alreadyRussian(raw: string): boolean {
-  return /[а-яё]/i.test(raw.replace(QUOTED_ECHO, ''));
-}
+const QUOTED_ECHO = /"(?:[^"\\]|\\.)*"/g;
 
 /**
  * Число ПОСЛЕ опорного куска фразы.
@@ -120,17 +111,17 @@ function numberAfter(raw: string, anchor: string): number | undefined {
 }
 
 /**
- * Правило таблицы: кусок английской фразы сервера → русские слова.
+ * Правило таблицы: кусок английской фразы сервера → слова для человека.
  *
  * `say` возвращает ПУСТУЮ СТРОКУ, когда случай узнан, но сказать сверх запасной фразы места
  * нечего. Это не то же самое, что «не узнали»: у `codes.Internal` сообщения на этом бэкенде по
  * построению глухие («can't set file access») — подробность ушла в серверный лог, а не в
- * ответ. Печатать её рядом с «не удалось изменить доступ» значило бы поставить английскую
- * строку под русскую шапку ровно ради нуля сведений.
+ * ответ. Печатать её рядом с «couldn't change the access» значило бы поставить сырую строку
+ * сервера под шапку места ровно ради нуля сведений.
  */
 type Rule = { when: string; say: (raw: string) => string };
 
-const znak = (n: number) => `${n} ${plural(n, 'знака', 'знаков', 'знаков')}`;
+const znak = (n: number) => `${n} ${plural(n, 'character')}`;
 
 /**
  * ТАБЛИЦА. Куски взяты из настоящих строк бэкенда (`internal/dto/library_*.go`,
@@ -151,8 +142,8 @@ const RULES: Rule[] = [
       const n = ids.length;
       const where = n ? ` (${ids.join(', ')})` : '';
       return n
-        ? `файл прикреплён к ${n} ${plural(n, 'задаче', 'задачам', 'задачам')}${where} — сначала открепите его, потом удаляйте`
-        : 'файл прикреплён к задачам — сначала открепите его, потом удаляйте';
+        ? `the file is attached to ${n} ${plural(n, 'task')}${where} — detach it first, then delete`
+        : 'the file is attached to tasks — detach it first, then delete';
     },
   },
   {
@@ -161,8 +152,8 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'still has files');
       return n === undefined
-        ? 'на теме ещё есть файлы — снимите её с них или объедините тему с другой'
-        : `на теме ещё ${n} ${plural(n, 'файл', 'файла', 'файлов')} — снимите её с них или объедините тему с другой`;
+        ? 'the topic still has files on it — take it off them or merge the topic into another'
+        : `the topic still has ${n} ${plural(n, 'file')} on it — take it off them or merge the topic into another`;
     },
   },
 
@@ -170,7 +161,7 @@ const RULES: Rule[] = [
   {
     // files_notes.go: noteNotAFileMsg
     when: 'not a markdown note',
-    say: () => 'этот файл не заметка — его открывают карточкой, а не редактором',
+    say: () => 'this file is not a note — it is opened as a card, not in the editor',
   },
   {
     // files_notes.go: конфликт, чужую версию не прочитали. Сервер ОТКАЗЫВАЕТ, а не отдаёт
@@ -178,7 +169,7 @@ const RULES: Rule[] = [
     // выглядело бы безобидным.
     when: 'nothing was overwritten',
     say: () =>
-      'кто-то сохранил свою версию, но прочитать её не удалось. ничего не перезаписано — попробуйте сохранить ещё раз',
+      "somebody saved their version, but reading it back didn't work out. nothing was overwritten — try saving again",
   },
   {
     // dto/library_note.go: «… — this is a note, not a book». Предел печатает `formatBytes`,
@@ -187,40 +178,40 @@ const RULES: Rule[] = [
     say: (raw) => {
       const limit = numberAfter(raw, '(limit');
       return limit === undefined
-        ? 'заметка длиннее, чем сервер принимает'
-        : `заметка длиннее, чем сервер принимает: предел ${formatBytes(limit)}`;
+        ? 'the note is longer than the server takes'
+        : `the note is longer than the server takes: the limit is ${formatBytes(limit)}`;
     },
   },
-  { when: 'valid utf-8', say: () => 'в тексте есть символы, которые сервер не принимает' },
+  { when: 'valid utf-8', say: () => 'the text has characters the server does not take' },
   {
     when: 'too large to open as a note',
-    say: () => 'этот файл слишком велик, чтобы открыть его заметкой',
+    say: () => 'this file is too large to open as a note',
   },
   {
     when: 'note was created but could not be read back',
-    say: () => 'заметка создана, но перечитать её не удалось',
+    say: () => "the note is created, but reading it back didn't work out",
   },
   {
     when: 'could not read the note',
-    say: () => 'текст заметки не прочитался',
+    say: () => "the note's text didn't read",
   },
   {
     when: "can't get the note",
-    say: () => 'текст заметки не прочитался',
+    say: () => "the note's text didn't read",
   },
   {
     // files_notes.go: «could not store the note» / «could not create the note» / «could not
     // save the note» — три Internal-исхода одной записи.
     when: 'could not store the note',
-    say: () => 'сервер не смог записать заметку — попробуйте ещё раз',
+    say: () => "the server couldn't write the note — try again",
   },
   {
     when: 'could not create the note',
-    say: () => 'сервер не смог записать заметку — попробуйте ещё раз',
+    say: () => "the server couldn't write the note — try again",
   },
   {
     when: 'could not save the note',
-    say: () => 'сервер не смог записать заметку — попробуйте ещё раз',
+    say: () => "the server couldn't write the note — try again",
   },
 
   /* ── имена ─────────────────────────────────────────────────────────────────────────── */
@@ -231,8 +222,8 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'имя заметки длиннее, чем сервер принимает'
-        : `имя заметки длиннее предела: не больше ${znak(n)}, и расширение сервер добавит сам`;
+        ? 'the note name is longer than the server takes'
+        : `the note name is over the limit: no more than ${znak(n)}, and the server appends the extension itself`;
     },
   },
   {
@@ -241,30 +232,30 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'имя файла длиннее, чем сервер принимает'
-        : `имя файла длиннее предела: не больше ${znak(n)}`;
+        ? 'the file name is longer than the server takes'
+        : `the file name is over the limit: no more than ${znak(n)}`;
     },
   },
   {
     when: 'file name must not contain',
-    say: () => 'в имени файла нельзя использовать косые черты, кавычки и управляющие символы',
+    say: () => 'a file name cannot use slashes, quotes and control characters',
   },
-  { when: 'file name is required', say: () => 'имя файла не может быть пустым' },
+  { when: 'file name is required', say: () => 'the file name cannot be empty' },
   {
     when: 'topic name must be at most',
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'название темы длиннее, чем сервер принимает'
-        : `название темы длиннее предела: не больше ${znak(n)}`;
+        ? 'the topic name is longer than the server takes'
+        : `the topic name is over the limit: no more than ${znak(n)}`;
     },
   },
   {
     when: 'topic name must not contain',
-    say: () => 'в названии темы нельзя использовать управляющие символы',
+    say: () => 'a topic name cannot use control characters',
   },
-  { when: 'topic name is required', say: () => 'название темы не может быть пустым' },
-  { when: 'topic name is empty', say: () => 'название темы не может быть пустым' },
+  { when: 'topic name is required', say: () => 'the topic name cannot be empty' },
+  { when: 'topic name is empty', say: () => 'the topic name cannot be empty' },
   {
     // dto/library_file.go: ValidateLibraryRoleName. Предел у имени роли ТОТ ЖЕ, что у темы
     // (maxLibraryTopicNameLen), но берётся всё равно из ответа: совпадение сегодня не значит,
@@ -273,18 +264,18 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'название роли длиннее, чем сервер принимает'
-        : `название роли длиннее предела: не больше ${znak(n)}`;
+        ? 'the role name is longer than the server takes'
+        : `the role name is over the limit: no more than ${znak(n)}`;
     },
   },
   {
     when: 'role name must not contain',
-    say: () => 'в названии роли нельзя использовать управляющие символы',
+    say: () => 'a role name cannot use control characters',
   },
   // Пары «is empty» здесь нет намеренно, хотя у темы по соседству она есть: «role name is
   // empty» живёт в сторе, а стор наружу выходит только глухим Internal. См. тот же довод у
   // слияния роли самой с собой.
-  { when: 'role name is required', say: () => 'название роли не может быть пустым' },
+  { when: 'role name is required', say: () => 'the role name cannot be empty' },
 
   /* ── проект и роль ─────────────────────────────────────────────────────────────────────
    *
@@ -307,30 +298,30 @@ const RULES: Rule[] = [
     // и нажатием.
     when: 'file, project or role not found',
     say: () =>
-      'кого-то из троих больше нет или он вам не виден: файла из выделения, проекта или роли. сервер не уточняет, кого именно. обновите экран и выделите заново',
+      'one of the three is gone or is not visible to you: the file from the selection, the project, or the role. the server does not say which. refresh the screen and select again',
   },
-  { when: 'role not found', say: () => 'роли больше нет — обновите словарь ролей' },
+  { when: 'role not found', say: () => 'the role is gone — refresh the role dictionary' },
   {
     // entity.ErrFileRoleArchived. Приезжает буднично: словарь ролей лежит в кэше запроса, и
     // коллега успевает убрать роль в архив, пока пикер показывает её живой.
     when: 'archived role cannot be assigned',
     say: () =>
-      'роль убрали в архив — ставить её больше нельзя (снять с файлов можно). обновите страницу: словарь ролей у вас старше серверного',
+      "the role was put in the archive — it cannot be set any more (taking it off files still works). refresh the page: your role dictionary is older than the server's",
   },
   {
     // entity.ErrRoleNeedsProjectTopic
     when: 'roles can only be set inside a project topic',
     say: () =>
-      'роль живёт на связи файла с ПРОЕКТОМ — у обычной темы её негде держать. переключите тему в проект на экране тем или выберите проект',
+      'a role lives on the link of a file with a PROJECT — an ordinary topic has nowhere to keep it. make the topic a project on the topics screen, or pick a project',
   },
-  { when: 'a role with this name already exists', say: () => 'роль с таким названием уже есть' },
+  { when: 'a role with this name already exists', say: () => 'a role with this name already exists' },
   // Правило ОДНО, а не два, как у темы по соседству: вторая фраза («cannot merge a role into
   // itself») живёт в сторе и наружу не выходит — RPC заворачивает всё, кроме ErrNoRows, в
   // глухой Internal. Проверить такое правило нечем, поэтому его здесь нет.
-  { when: 'a role cannot be merged into itself', say: () => 'роль нельзя объединить саму с собой' },
+  { when: 'a role cannot be merged into itself', say: () => 'a role cannot be merged into itself' },
   {
     when: 'source and target role ids are required',
-    say: () => 'не выбрано, какую роль в какую сливать',
+    say: () => 'it is not chosen which role goes into which',
   },
   {
     // roles.go: предел пачки у простановки роли — тот же maxPageLimit, что у тем, и печатается
@@ -339,42 +330,42 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'за раз роль проставляют меньшему числу файлов'
-        : `за раз роль проставляют не больше чем ${n} ${plural(n, 'файлу', 'файлам', 'файлам')}`;
+        ? 'a role is set on fewer files at a time'
+        : `a role is set on no more than ${n} ${plural(n, 'file')} at a time`;
     },
   },
-  { when: 'project topic id is required', say: () => 'проект не выбран — роль ставится в нём' },
-  { when: 'role id must not be negative', say: () => 'роль выбрана неверно' },
+  { when: 'project topic id is required', say: () => 'no project is chosen — a role is set inside one' },
+  { when: 'role id must not be negative', say: () => 'the role is chosen wrongly' },
   {
     // entity.ErrLibraryFilterInvalid, оба плеча. Экран таких сочетаний не собирает, но адрес
     // набирают руками и присылают ссылкой — а фильтры этого раздела живут в адресе.
     when: 'untopiced cannot be combined with a project or a role',
     say: () =>
-      '«разобрать» не сочетается с проектом и ролью: файл в проекте по построению не без темы. уберите из адреса одно из двух',
+      '“unsorted” does not go together with a project or a role: a file inside a project is by construction not without a topic. drop one of the two from the address',
   },
   {
     when: 'without_role is only meaningful together with a project',
     say: () =>
-      '«без роли» спрашивают внутри проекта — иначе это почти вся библиотека. выберите проект или снимите «без роли»',
+      '“without a role” is asked inside a project — otherwise it is almost the whole library. pick a project or drop “without a role”',
   },
   {
     // files_roles.go: UpdateFileTopicMeta. Клиент проверяет порядок дат сам и до сервера этого
     // не доводит — правило стоит последней линией: тот же диалог откроют из адреса, а поле
     // `type=date` в браузере без поддержки вырождается в обычный текст.
     when: 'ends_at cannot be earlier than starts_at',
-    say: () => 'конец проекта раньше его начала — поправьте даты',
+    say: () => 'the end of the project is earlier than its start — fix the dates',
   },
   {
     // dto.ParseLibraryDate, с префиксом поля: «starts_at: date must be YYYY-MM-DD, got "…"».
     when: 'date must be yyyy-mm-dd',
     say: (raw) => {
       const which = /^ends_at:/i.test(raw)
-        ? 'конец'
+        ? 'end'
         : /^starts_at:/i.test(raw)
-          ? 'начало'
+          ? 'start'
           : undefined;
-      const what = which ? `дата «${which}» записана` : 'дата записана';
-      return `${what} не так, как сервер её читает: нужен год-месяц-день, например 2026-09-12`;
+      const what = which ? `the “${which}” date is written` : 'the date is written';
+      return `${what} not the way the server reads it: it needs year-month-day, for example 2026-09-12`;
     },
   },
   {
@@ -382,7 +373,7 @@ const RULES: Rule[] = [
     // стоит на случай диалога, открытого со старой выдачей тем в руках.
     when: 'topics of different kinds cannot be merged',
     say: () =>
-      'проект и обычную тему слить нельзя: у проекта есть даты, архив и роли на файлах, а у ярлыка их негде держать',
+      'a project and an ordinary topic cannot be merged: a project has dates, an archive and roles on its files, and a label has nowhere to keep them',
   },
 
   /* ── темы ──────────────────────────────────────────────────────────────────────────── */
@@ -392,8 +383,8 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'выбрано слишком много тем сразу'
-        : `за раз можно пересечь не больше ${n} ${plural(n, 'темы', 'тем', 'тем')}`;
+        ? 'too many topics are chosen at once'
+        : `no more than ${n} ${plural(n, 'topic')} can be crossed at a time`;
     },
   },
   {
@@ -401,45 +392,65 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'за раз темы проставляют меньшему числу файлов'
-        : `за раз темы проставляют не больше чем ${n} ${plural(n, 'файлу', 'файлам', 'файлам')}`;
+        ? 'topics are set on fewer files at a time'
+        : `topics are set on no more than ${n} ${plural(n, 'file')} at a time`;
     },
   },
-  { when: 'a topic with this name already exists', say: () => 'тема с таким названием уже есть' },
-  { when: 'cannot be merged into itself', say: () => 'тему нельзя объединить саму с собой' },
-  { when: 'cannot merge a topic into itself', say: () => 'тему нельзя объединить саму с собой' },
+  {
+    when: 'a topic with this name already exists',
+    say: () => 'a topic with this name already exists',
+  },
+  { when: 'cannot be merged into itself', say: () => 'a topic cannot be merged into itself' },
+  { when: 'cannot merge a topic into itself', say: () => 'a topic cannot be merged into itself' },
   {
     when: 'topic_id does not reference an existing topic',
-    say: () => 'одной из выбранных тем больше нет — обновите список тем',
+    say: () => 'one of the chosen topics is gone — refresh the list of topics',
   },
-  { when: 'topic not found', say: () => 'темы больше нет — обновите список тем' },
-  { when: 'at least one topic is required', say: () => 'не выбрано ни одной темы' },
-  { when: 'source and target topic ids are required', say: () => 'не выбрано, что с чем сливать' },
-  { when: 'topic id must be positive', say: () => 'тема выбрана неверно' },
-  { when: 'topic id is required', say: () => 'тема не выбрана' },
+  { when: 'topic not found', say: () => 'the topic is gone — refresh the list of topics' },
+  { when: 'at least one topic is required', say: () => 'not a single topic is chosen' },
+  {
+    when: 'source and target topic ids are required',
+    say: () => 'it is not chosen what to merge into what',
+  },
+  { when: 'topic id must be positive', say: () => 'the topic is chosen wrong' },
+  { when: 'topic id is required', say: () => 'the topic is not chosen' },
 
   /* ── доступ ────────────────────────────────────────────────────────────────────────── */
   {
+    // files_access.go: libraryFileAccessMsg. Сервер САМ называет круг лиц, поэтому фраза
+    // отдаётся целиком: «нет прав» на её месте выбросило бы единственную подсказку, у кого
+    // просить.
+    when: 'file access is changed by the uploader',
+    say: (raw) => raw,
+  },
+  {
+    // files_people.go: libraryFileOwnersMsg. Отличается от предыдущей ТОЛЬКО подлежащим,
+    // поэтому якорь взят с начала фразы, а не по общему куску.
+    when: 'file owners are changed by the uploader',
+    say: (raw) => raw,
+  },
+  {
     // dto/library_access.go: ParseLibraryFileAccessLevel
     when: 'level must be one of',
-    say: () => 'неизвестный уровень доступа — обновите страницу, панель старше сервера',
+    say: () => 'an unknown access level — refresh the page, the admin is older than the server',
   },
   {
     // files_access.go: витрина «team» не показывает — это отрицание витрины, а не фильтр.
     when: 'team is not shared',
-    say: () => 'витрина показывает только «по ссылке» и «людям»: «команде» — это не особый доступ',
+    say: () =>
+      'the list of shared files shows only “by link” and “only these people”: “the whole team” is not a special access',
   },
   {
     when: 'link_ttl must not be negative',
-    say: () => 'срок жизни ссылки не может быть отрицательным (0 — без срока)',
+    say: () => "the link's lifetime cannot be negative (0 — no expiry)",
   },
   {
     when: 'link_ttl must be at most',
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'срок жизни ссылки больше, чем сервер принимает'
-        : `срок жизни ссылки больше предела: не больше ${n} ${plural(n, 'часа', 'часов', 'часов')}`;
+        ? "the link's lifetime is longer than the server takes"
+        : `the link's lifetime is over the limit: no more than ${n} ${plural(n, 'hour')}`;
     },
   },
   {
@@ -448,8 +459,8 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'людей в списке доступа больше, чем сервер принимает'
-        : `файл открывают не больше чем ${n} ${plural(n, 'человеку', 'людям', 'людям')} сразу`;
+        ? 'there are more people in the access list than the server takes'
+        : `a file is opened to no more than ${n} ${plural(n, 'person', 'people')} at once`;
     },
   },
   {
@@ -458,45 +469,51 @@ const RULES: Rule[] = [
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'владельцев больше, чем сервер принимает'
-        : `у файла не больше ${n} ${plural(n, 'владельца', 'владельцев', 'владельцев')}`;
+        ? 'there are more owners than the server takes'
+        : `a file has no more than ${n} ${plural(n, 'owner')}`;
     },
   },
   {
     when: 'owners were saved but could not be read back',
-    say: () => 'владельцы сохранены, но перечитать список не удалось — обновите карточку',
+    say: () => "the owners are saved, but reading the list back didn't work out — refresh the card",
   },
   {
     when: 'admin_id does not reference an existing account',
-    say: () => 'такой учётной записи больше нет — обновите список людей',
+    say: () => 'there is no such account any more — refresh the list of people',
   },
-  { when: 'admin id must be positive', say: () => 'человек выбран неверно' },
+  { when: 'admin id must be positive', say: () => 'the person is chosen wrong' },
 
   /* ── файл, задачи, реплики ─────────────────────────────────────────────────────────── */
-  { when: 'file not found', say: () => 'файла больше нет' },
-  { when: 'at least one file id is required', say: () => 'не выбрано ни одного файла' },
-  { when: 'file id must be positive', say: () => 'файл выбран неверно' },
-  { when: 'file id is required', say: () => 'файл не выбран' },
+  { when: 'file not found', say: () => 'the file is gone' },
+  { when: 'at least one file id is required', say: () => 'not a single file is chosen' },
+  { when: 'file id must be positive', say: () => 'the file is chosen wrong' },
+  { when: 'file id is required', say: () => 'the file is not chosen' },
   {
     // files_tasks.go: libraryFileTaskLinkMissingMsg — называет ОБА конца связи намеренно.
     when: 'task or file no longer exists',
-    say: () => 'задачи или файла больше нет — список устарел, обновите карточку',
+    say: () => 'the task or the file is gone — the list is stale, refresh the card',
   },
-  { when: 'task id is required', say: () => 'задача не выбрана' },
+  { when: 'task id is required', say: () => 'the task is not chosen' },
+  {
+    // files_comments.go: libraryCommentAuthorMsg. Сервер уже назвал и правило, и исключение
+    // (супер-админ), поэтому фраза отдаётся целиком.
+    when: 'only your own comment',
+    say: (raw) => raw,
+  },
   {
     when: 'comment body must be at most',
     say: (raw) => {
       const n = numberAfter(raw, 'at most');
       return n === undefined
-        ? 'реплика длиннее, чем сервер принимает'
-        : `реплика длиннее предела: не больше ${znak(n)}`;
+        ? 'the reply is longer than the server takes'
+        : `the reply is over the limit: no more than ${znak(n)}`;
     },
   },
-  { when: 'comment body is required', say: () => 'реплика пустая' },
-  { when: 'comment not found', say: () => 'реплики больше нет — обсуждение обновилось' },
+  { when: 'comment body is required', say: () => 'the reply is empty' },
+  { when: 'comment not found', say: () => 'the reply is gone — the discussion has moved on' },
   {
     when: 'comment author is unknown',
-    say: () => 'сервер не узнал автора реплики — войдите заново',
+    say: () => "the server didn't recognise the author of the reply — sign in again",
   },
 ];
 
@@ -512,25 +529,29 @@ const RULES: Rule[] = [
 const MUTE_INTERNAL = /^can't /i;
 
 export type Failure = {
-  /** Русские слова для человека. */
+  /** Слова для человека. */
   text: string;
   /**
    * Слова сервера — ТОЛЬКО когда таблица случая не знает. Печатаются РЯДОМ с `text`, мелким, а
-   * не вместо него: без них неузнанный отказ становится непроверяемым, а с ними одними —
-   * английским под русской шапкой.
+   * не вместо него: без них неузнанный отказ становится непроверяемым, а с ними одними — сырой
+   * строкой бэкенда вместо ответа на вопрос «что делать».
    */
   raw?: string;
 };
 
 /** Единственный разбор отказа в разделе. Ступени — в шапке модуля. */
 export function resolveFailure(e: unknown, fallback: string): Failure {
-  if (isUnauthorized(e)) return { text: 'сессия истекла — войдите заново' };
+  if (isUnauthorized(e)) return { text: 'the session expired — sign in again' };
 
   const raw = serverWords(e);
-  if (raw && alreadyRussian(raw)) return { text: raw };
 
   if (raw) {
-    const lower = raw.toLowerCase();
+    // ТАБЛИЦА СМОТРИТ НА ФРАЗУ СЕРВЕРА, А НЕ НА ВВОД ЧЕЛОВЕКА, приехавший в ней эхом. Опорные
+    // куски — это литералы бэкенда, и внутри `%q` их не бывает по построению; зато имя темы
+    // или роли человек набирает сам, а валидация запрещает в них только управляющие символы.
+    // Тема с именем «role not found» иначе угоняла бы чужое правило: «failed to resolve topic
+    // "role not found"» печаталось бы как «роли больше нет», то есть про другой орган экрана.
+    const lower = raw.toLowerCase().replace(QUOTED_ECHO, '');
     const hit = RULES.find((r) => lower.includes(r.when));
     if (hit) {
       const said = hit.say(raw);
@@ -539,9 +560,11 @@ export function resolveFailure(e: unknown, fallback: string): Failure {
     if (MUTE_INTERNAL.test(raw)) return { text: fallback };
   }
 
-  if (isForbidden(e)) return { text: 'прав на это действие нет' };
+  if (isForbidden(e)) return { text: 'there is no right for this action' };
   if (isUnknownRoute(e))
-    return { text: 'сервер не знает такого запроса: либо эта часть не выкачена, либо того, что вы просите, больше нет' };
+    return {
+      text: 'the server does not know this request: either this part is not rolled out, or what you are asking for is gone',
+    };
 
   return raw ? { text: fallback, raw } : { text: fallback };
 }
@@ -553,7 +576,7 @@ export function resolveFailure(e: unknown, fallback: string): Failure {
  */
 export function failureText(e: unknown, fallback: string): string {
   const f = resolveFailure(e, fallback);
-  return f.raw ? `${f.text} (ответ сервера: ${f.raw})` : f.text;
+  return f.raw ? `${f.text} (the server answered: ${f.raw})` : f.text;
 }
 
 /* ══ ОТКАЗ НЕ ОТ ШЛЮЗА: ЧИТАЛКА ═════════════════════════════════════════════════════════════
@@ -563,13 +586,14 @@ export function failureText(e: unknown, fallback: string): string {
  * Всё выше разбирает отказ НАШЕГО шлюза: `status` из ответа, обёртка `rpc error: code = …`,
  * таблица английских фраз бэкенда. У читалки источник другой — pdfjs идёт в БАКЕТ напрямую,
  * мимо шлюза, и ни одного из этих признаков в его ошибке нет. Прогнать её через
- * `resolveFailure` значило бы получить «не удалось открыть файл (ответ сервера: Failed to
- * fetch)»: английская строка под русской шапкой, ровно то, от чего первая машина и защищает.
+ * `resolveFailure` значило бы получить «couldn't open the file (the server answered: Failed to
+ * fetch)»: сырая строка чужого слоя вместо ответа на вопрос «что делать», ровно то, от чего
+ * первая машина и защищает.
  *
  * Поэтому машина отдельная, а МОДУЛЬ ТОТ ЖЕ: правило раздела — один дом у разбора отказов, и
  * второй файл разошёлся бы с этим молча. Разные здесь только вход (ошибка pdfjs, а не ответ
  * шлюза) и форма выхода: у читалки отказ занимает весь экран, поэтому у него шапка, объяснение
- * и признак «есть ли смысл жать «обновить»», а не строка с уликой.
+ * и признак «есть ли смысл жать «refresh»», а не строка с уликой.
  *
  * ЧТО ИЗМЕРЕНО (chromium + pdfjs 4.10.38, два origin'а, стенд в scratchpad/readerfix):
  *
@@ -582,7 +606,7 @@ export function failureText(e: unknown, fallback: string): string {
  * Первый и последний случай неотличимы от обрыва сети ПО ОШИБКЕ pdfjs — но отличимы пробой:
  * запрос в режиме `no-cors` правил CORS не проверяет вовсе, поэтому он resolve'ится, если
  * хранилище ответило хоть чем-нибудь, и reject'ится, только если до него не дошли. Это и есть
- * `reachable` ниже, и без него «ссылка истекла» приходилось бы писать наугад.
+ * `reachable` ниже, и без него «the link expired» приходилось бы писать наугад.
  */
 
 export type ReaderFailure = {
@@ -590,7 +614,7 @@ export type ReaderFailure = {
   head: string;
   /** Что произошло и что с этим делать. */
   detail: string;
-  /** Есть ли смысл в кнопке «обновить»: она перевыпускает подпись, а не чинит бакет. */
+  /** Есть ли смысл в кнопке «refresh»: она перевыпускает подпись, а не чинит бакет. */
   refreshable: boolean;
 };
 
@@ -644,9 +668,9 @@ export function resolveReaderFailure(args: {
 
   if (!url) {
     return {
-      head: 'нет ссылки на просмотр',
+      head: 'no link to view',
       detail:
-        'сервер не дал ссылку для чтения этого файла: в браузере открываются только типы из его списка, остальное отдаётся только на скачивание. если тип у файла записан верно — попробуйте обновить.',
+        'the server gave no link for reading this file: only the types from its list open in a browser, everything else is served for download only. if the type on the file is recorded correctly — try refreshing.',
       refreshable: true,
     };
   }
@@ -662,50 +686,51 @@ export function resolveReaderFailure(args: {
   if (name === 'UnexpectedResponseException' && status === 403) {
     if (trulyExpired) {
       return {
-        head: 'ссылка истекла',
+        head: 'the link expired',
         detail:
-          'срок подписи на файл вышел, а вкладка открыта дольше. обновим ссылку и вернёмся на ту же страницу.',
+          'the signature on the file has run out, and the tab has been open longer. we will refresh the link and come back to the same page.',
         refreshable: true,
       };
     }
     return {
-      head: 'хранилище не отдало файл',
+      head: 'the storage did not give the file',
       detail:
-        'хранилище ответило «доступ запрещён» (403), хотя срок ссылки ещё не вышел. обычно так выглядит убранный объект или изменённые права на бакет. файл всё ещё можно скачать.',
+        'the storage answered “access denied” (403), although the link has not run out yet. that is usually what a removed object or changed rights on the bucket look like. the file can still be downloaded.',
       refreshable: true,
     };
   }
 
   if (name === 'UnexpectedResponseException') {
     return {
-      head: 'хранилище ответило ошибкой',
-      detail: `на запрос файла хранилище вернуло ${status ?? 'ошибку'}. повторите позже; файл можно скачать.`,
+      head: 'the storage answered with an error',
+      detail: `the storage returned ${status ?? 'an error'} to the request for the file. retry later; the file can be downloaded.`,
       refreshable: true,
     };
   }
 
   if (name === 'MissingPDFException') {
     return {
-      head: 'файла нет в хранилище',
+      head: 'the file is not in the storage',
       detail:
-        'библиотека про этот файл знает, а в хранилище его нет — объект удалили мимо панели. обновление ссылки тут не поможет.',
+        'the library knows about this file, but it is not in the storage — the object was deleted past the admin. refreshing the link will not help here.',
       refreshable: false,
     };
   }
 
   if (name === 'InvalidPDFException') {
     return {
-      head: 'это не читается как pdf',
+      head: 'this does not read as a pdf',
       detail:
-        'файл не разбирается: он повреждён или под расширением .pdf лежит что-то другое. скачайте и откройте в своей программе.',
+        "the file doesn't parse: it is damaged, or something else lies under the .pdf extension. download it and open it in your own program.",
       refreshable: false,
     };
   }
 
   if (name === 'PasswordException') {
     return {
-      head: 'pdf под паролем',
-      detail: 'документ зашифрован, пароль читалка не спрашивает. скачайте и откройте в программе.',
+      head: 'the pdf is under a password',
+      detail:
+        'the document is encrypted, and the reader does not ask for a password. download it and open it in a program.',
       refreshable: false,
     };
   }
@@ -713,23 +738,24 @@ export function resolveReaderFailure(args: {
   // Ответа браузер странице не отдал. Что именно помешало — говорит проба.
   if (reachable === true) {
     return {
-      head: 'браузер не пустил файл',
+      head: 'the browser did not let the file through',
       detail:
-        'хранилище ответило, но браузер не отдал ответ странице: для этого адреса панели не открыт доступ к бакету (cors). файл цел — скачивание работает, чтение в браузере заработает после настройки хранилища.',
+        'the storage answered, but the browser did not give the answer to the page: the bucket is not opened to this admin address (cors). the file is intact — downloading works, and reading in the browser will work once the storage is configured.',
       refreshable: false,
     };
   }
   if (reachable === false) {
     return {
-      head: 'до хранилища не достучались',
-      detail: 'запрос к хранилищу не дошёл — похоже на обрыв связи. проверьте сеть и повторите.',
+      head: "the storage couldn't be reached",
+      detail:
+        'the request to the storage did not arrive — looks like a connection drop. check the network and retry.',
       refreshable: true,
     };
   }
   return {
-    head: 'файл не открылся',
+    head: "the file didn't open",
     detail:
-      'не удалось получить файл — возможно, не настроен доступ к хранилищу. файл можно скачать.',
+      "couldn't get the file — the access to the storage may not be set up. the file can be downloaded.",
     refreshable: true,
   };
 }

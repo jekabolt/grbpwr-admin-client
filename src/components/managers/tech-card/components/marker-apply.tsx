@@ -267,7 +267,7 @@ export function MarkerApplyHint({
   const sizeName = (id?: number) => sizeNameById.get(id ?? 0) ?? `#${id}`;
   const perSizeWhyNot = perSizeRefusal(plan, (id) => sizeName(id));
   const compLabel = (m: common_TechCardMarkerSummary) =>
-    compositionLabel(compositionOf(m), (id) => sizeName(id)) || 'состав не читается';
+    compositionLabel(compositionOf(m), (id) => sizeName(id)) || 'composition unreadable';
   // Label and number from the same marker — the CHOSEN one (the hint used to number by
   // `chosen` and label by the auto-picked marker, which diverged the moment the selector
   // was touched).
@@ -277,7 +277,7 @@ export function MarkerApplyHint({
     conv && !convZero
       ? `${conv.value} ${conv.unit}`
       : chosenCons != null
-        ? `${chosenCons} см`
+        ? `${chosenCons} cm`
         : '—';
   // Отказ по единице. Кг-слот обязан называть, ЧЕГО не хватает — ширины или плотности: «единица
   // не принимает длину» отправила бы оператора менять единицу вместо того, чтобы заполнить
@@ -287,15 +287,15 @@ export function MarkerApplyHint({
     unitKind === 'kg' && !weightBasis.ok
       ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
       : unit
-        ? `единица линии BOM (${unit}) не принимает ни длину, ни вес — применить можно в метрах, сантиметрах или килограммах`
-        : 'у линии BOM не заполнена единица — норма пишется в единице слота, и применить её не в чем; заполните единицу на вкладке BOM';
+        ? `the BOM line's unit (${unit}) accepts neither length nor weight — it can be applied in meters, centimeters or kilograms`
+        : "the BOM line has no unit — the norm is written in the slot's unit, and there's nothing to apply it in; fill in the unit on the BOM tab";
   // ОТКАЗ ПО НУЛЮ — своя причина, и совет разведён по РАЗМЕРНОСТИ единицы: на весовой строке
   // «выберите единицу мельче (см)» превратило бы её в длиновую и разъехалось с закупочной ценой
   // за килограмм (цена и остаток склада живут в единице артикула/строки).
   const zeroRefusal =
     unitKind === 'kg'
-      ? `после перевода в «${unit}» норма округляется в ноль — вес на изделие меньше половины грамма. Ноль означал бы «ткань не нужна». Слот весовой: единицу на сантиметры не менять (это сменит размерность строки и разойдётся с закупочной ценой за килограмм) — проверьте плотность и ширину артикула и саму раскладку`
-      : `после перевода в «${unit || '—'}» норма округляется в ноль — длина слишком мала для этой единицы. Ноль означал бы «ткань не нужна»; выберите единицу мельче (см) либо проверьте раскладку`;
+      ? `converted into “${unit}” the norm rounds to zero — the weight per unit is under half a gram. Zero would read as “no fabric needed”. The slot is by weight: do NOT switch its unit to centimeters (that changes the dimension of the line and diverges from the purchase price per kilogram) — check the article's density and width, and the marker itself`
+      : `converted into “${unit || '—'}” the norm rounds to zero — the length is too small for this unit. Zero would read as “no fabric needed”; pick a smaller unit (cm) or check the marker`;
 
   // Width honesty (design §1): a marker computed for another width is a different norm. Both
   // sides are CUTTING widths — the article's roll minus its кромка, and the width the layout
@@ -477,7 +477,9 @@ export function MarkerApplyHint({
       });
       if (sources.length === 0) {
         setAreas(null);
-        setAreaError('выкроек этой ткани на карточке нет — площади считать не по чему');
+        setAreaError(
+          'the card has no patterns for this fabric — nothing to measure the areas from',
+        );
         return;
       }
       // Блоб едет ОТДЕЛЬНЫМ запросом: в сводке его нет намеренно (60–100 КБ на раскладку), а без
@@ -485,7 +487,7 @@ export function MarkerApplyHint({
       const r = await adminService.GetTechCardMarker({ id: chosen.id ?? 0 });
       if (!r.marker) {
         setAreas(null);
-        setAreaError('раскладка не найдена — возможно, её удалили');
+        setAreaError('the marker was not found — it may have been deleted');
         return;
       }
       // Токены размера — ПО ВСЕМУ СЛОВАРЮ, а не по ряду карточки: иначе размер, лежащий в файле,
@@ -513,7 +515,9 @@ export function MarkerApplyHint({
     } catch (e) {
       setAreas(null);
       setAreaError(
-        e instanceof Error && e.message ? e.message : 'не удалось посчитать площади по выкройкам',
+        e instanceof Error && e.message
+          ? e.message
+          : "couldn't measure the areas from the patterns",
       );
     } finally {
       setAreaBusy(false);
@@ -533,37 +537,37 @@ export function MarkerApplyHint({
     <div className='flex flex-wrap items-center gap-1.5'>
       {!compact && (
         <Text size='nano' variant='label' component='span'>
-          из раскладки: {chosenRefusal ? '—' : preview} · «{chosen.name}» ({compLabel(chosen)})
+          from a marker: {chosenRefusal ? '—' : preview} · “{chosen.name}” ({compLabel(chosen)})
         </Text>
       )}
       {/* «Норма» — ПОДПИСЬ, а не порядок. Раньше назначенную раскладку можно было опознать только
           по тому, что её предложили первой, — то есть не отличить от «просто самой свежей». */}
       {chosen.isNorm === true && (
-        <Pill tone='ink' title='назначенная нормировочная раскладка этой ткани на карточке'>
-          норма
+        <Pill tone='ink' title='the marker set as the norm of this fabric on the card'>
+          norm
         </Pill>
       )}
       {pieceSetChanged(chosen) && (
         <Pill
           tone='attention'
-          title='набор деталей карточки изменился после съёмки этой раскладки — длина измерена по прежнему набору'
+          title="the card's piece set changed after this marker was captured — the length is measured on the previous set"
         >
-          набор изменился
+          piece set changed
         </Pill>
       )}
       {isLegacyNorm(chosen) && (
         <Pill
           tone='mut'
-          title='условия съёмки (припуск, слои, переворот) не записаны — раскладка снята до того, как их стали записывать'
+          title='the capture conditions (seam allowance, layers, flipping) are not recorded — this marker was captured before they started being recorded'
         >
-          старая норма
+          legacy norm
         </Pill>
       )}
       {/* Норма назначена, а предлагается не она — на строке это видно только здесь: диалог с
           объяснением ещё надо открыть, а прочитать число можно и не открывая. */}
       {notTheNorm && normRefusal && (
         <Pill tone='warn' title={normRefusal}>
-          норма не даёт расхода
+          the norm gives no consumption
         </Pill>
       )}
       {chosenRefusal && (
@@ -576,7 +580,7 @@ export function MarkerApplyHint({
           потому что лечится он заполнением артикула, а не сменой единицы. */}
       {unitKind === 'kg' && fabric && conv && (
         <Pill tone='mut' title={weightBasisNote(fabric)}>
-          вес: {weightBasisLabel(fabric)}
+          weight: {weightBasisLabel(fabric)}
         </Pill>
       )}
       {unitKind === 'kg' && !weightBasis.ok && (
@@ -586,7 +590,7 @@ export function MarkerApplyHint({
       )}
       {canEdit && (
         <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
-          применить…
+          apply…
         </Button>
       )}
 
@@ -601,8 +605,8 @@ export function MarkerApplyHint({
           setOpen(false);
           reset();
         }}
-        title='применить расход из раскладки'
-        confirmLabel='применить'
+        title='apply the consumption from a marker'
+        confirmLabel='apply'
         confirmDisabled={
           (mode === 'scalar' && (!conv || convZero || !!chosenRefusal)) ||
           (mode === 'perSize' && !perSizeApplicable)
@@ -623,7 +627,7 @@ export function MarkerApplyHint({
           {lineMarkers.length > 1 && (
             <div className='max-w-xl'>
               <Selector
-                label='маркер'
+                label='marker'
                 value={chosen.id ?? 0}
                 // Список идёт ПО РАНГУ (норма → свой колорвей → свежесть), а не в порядке,
                 // в котором строки приехали с сервера: первый пункт списка обязан совпадать с тем,
@@ -638,13 +642,13 @@ export function MarkerApplyHint({
                     // «набор изменился» стоит здесь же: это факт о ГОДНОСТИ числа, и узнать его надо
                     // до выбора, а не после. «Старая норма» намеренно осталась ниже, на выбранном
                     // маркере: до Ф3 её несёт КАЖДАЯ строка, и в списке это был бы шум, а не сигнал.
-                    label: `${m.isNorm === true ? 'норма · ' : ''}«${m.name}» · ${compLabel(m)} · ${
-                      c != null ? `${c} см/ед` : `нормы нет — ${refusalWord(m)}`
+                    label: `${m.isNorm === true ? 'norm · ' : ''}“${m.name}” · ${compLabel(m)} · ${
+                      c != null ? `${c} cm/unit` : `no norm — ${refusalWord(m)}`
                     }${
                       isDraftMarker(m) && Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
-                        ? ` (уложено ${m.placedCount ?? 0} из ${m.totalCount ?? 0})`
+                        ? ` (placed ${m.placedCount ?? 0} of ${m.totalCount ?? 0})`
                         : ''
-                    }${pieceSetChanged(m) ? ' · набор изменился' : ''}`,
+                    }${pieceSetChanged(m) ? ' · piece set changed' : ''}`,
                   };
                 })}
                 onChange={(v: string | number) => {
@@ -664,7 +668,7 @@ export function MarkerApplyHint({
               pressed={mode === 'scalar'}
               onClick={() => setMode('scalar')}
             >
-              единой нормой
+              as a single norm
             </Chip>
             {/* «По размерам» ТЕПЕРЬ ДОСТУПНО И ОТ ОДНОЙ СМЕШАННОЙ РАСКЛАДКИ. Раньше режим требовал
                 однородной раскладки на КАЖДЫЙ размер, потому что поделить смешанную было нечем;
@@ -678,11 +682,11 @@ export function MarkerApplyHint({
               title={
                 perSizeOffered
                   ? undefined
-                  : 'ни один размер карточки не нормирован раскладкой: нужна раскладка, чей состав режет хотя бы один из этих размеров. Смешанная годится — если она снята после того, как площади по размерам стали записываться (иначе поделить её длину по размерам нечем). ЧЕРНОВИК не годится ни в каком виде: у него не легла часть деталей, и длина короче настоящей'
+                  : "no size of the card is normed by a marker: you need a marker whose composition cuts at least one of these sizes. A mixed one will do — if it was captured after per-size areas started being recorded (otherwise there's nothing to split its length by size). A DRAFT will not do in any form: some of its pieces were not placed, and its length is shorter than the real one"
               }
               onClick={() => perSizeOffered && setMode('perSize')}
             >
-              по размерам
+              per size
             </Chip>
           </ChipRow>
 
@@ -716,8 +720,9 @@ export function MarkerApplyHint({
               ДЛИНЫ настила, а она у него короче настоящей. */}
           {mode === 'perSize' && isDraftMarker(chosen) && (
             <CalloutBox tone='error'>
-              {chosenRefusal} Продолжить по нему остальной ряд тоже нельзя: распределение выводится
-              из длины настила, и по черновику оно занизило бы сразу все размеры
+              {chosenRefusal} Continuing the rest of the range from it is impossible too: the
+              distribution is derived from the lay length, and on a draft it would understate every
+              size at once
             </CalloutBox>
           )}
           {/* ПОЧЕМУ ПО РАЗМЕРАМ НЕ ПОЛУЧАЕТСЯ — словами, а не погасшей кнопкой. */}
@@ -732,8 +737,8 @@ export function MarkerApplyHint({
               ни к чему не относится. */}
           {mode === 'perSize' && plan.continuation === 'blocked' && plan.areaCheck && (
             <CalloutBox tone='error'>
-              продолжение недействительно: {plan.areaCheck.reason}. Переснимите раскладку по
-              сегодняшним выкройкам — тогда и длина, и площади будут от одной геометрии
+              the continuation is invalid: {plan.areaCheck.reason}. Re-capture the marker from
+              today's patterns — then the length and the areas both come from one geometry
             </CalloutBox>
           )}
 
@@ -744,7 +749,7 @@ export function MarkerApplyHint({
               двадцать абзацев вокруг — проверить его было нечем. */}
           {mode === 'scalar' && !chosenRefusal && (
             <div>
-              <GroupLabel flush>{`норма из «${chosen.name}»`}</GroupLabel>
+              <GroupLabel flush>{`norm from “${chosen.name}”`}</GroupLabel>
               <div className='flex flex-col gap-1.5 pt-1'>
                 <MarkerLengthFormula
                   lengthCm={decNum(chosen.usedLengthCm)}
@@ -772,10 +777,10 @@ export function MarkerApplyHint({
                 {notTheNorm && normMarker && (
                   <CalloutBox tone={normRefusal ? 'warning' : 'note'}>
                     {normRefusal
-                      ? `назначенная норма «${normMarker.name}» расхода на изделие не даёт (${refusalWord(
+                      ? `the assigned norm “${normMarker.name}” gives no per-unit consumption (${refusalWord(
                           normMarker,
-                        )}) — применится «${chosen.name}», а не она`
-                      : `применится «${chosen.name}», а НЕ назначенная норма «${normMarker.name}»${
+                        )}) — “${chosen.name}” will be applied instead of it`
+                      : `“${chosen.name}” will be applied, and NOT the assigned norm “${normMarker.name}”${
                           normConv ? ` (${normConv.value} ${normConv.unit})` : ''
                         }`}
                   </CalloutBox>
@@ -786,7 +791,9 @@ export function MarkerApplyHint({
 
           {mode === 'perSize' && (
             <div>
-              <GroupLabel flush>норма по размерному ряду — это и уедет в строку</GroupLabel>
+              <GroupLabel flush>
+                the norm across the size range — this is what goes into the line
+              </GroupLabel>
               <div className='flex flex-col gap-1.5 pt-1'>
                 {/* ЧИСЛО И ЕГО ПРОИСХОЖДЕНИЕ — В ОДНОЙ СТРОКЕ ТАБЛИЦЫ. Три источника выглядят
                     одинаково убедительно, а стоят разного: «из раскладки» измерено, «по площади
@@ -802,11 +809,11 @@ export function MarkerApplyHint({
                     originLabel: originLabel(r.origin),
                     originTitle:
                       r.origin === 'area'
-                        ? `размера нет в составе «${chosen.name}» — расход продолжен по площади его выкроек (${(r.areaCm2 ?? 0).toFixed(0)} см² на изделие) той же формулой распределения`
+                        ? `the size is not in the composition of “${chosen.name}” — its consumption is continued from the area of its patterns (${(r.areaCm2 ?? 0).toFixed(0)} cm² per unit) by the same distribution formula`
                         : r.origin === 'mean'
-                          ? `выкроек этого размера на карточке нет — подставлено СРЕДНЕЕ по настилу «${chosen.name}». Мелкие размеры оно завышает, крупные занижает`
+                          ? `the card has no patterns for this size — the MEAN over the lay “${chosen.name}” is substituted. It overstates small sizes and understates large ones`
                           : r.marker
-                            ? `измерено раскладкой «${r.marker.name}»`
+                            ? `measured by the marker “${r.marker.name}”`
                             : undefined,
                   }))}
                   sizeNameById={sizeNameById}
@@ -833,20 +840,21 @@ export function MarkerApplyHint({
                       disabled={areaBusy}
                       onClick={continueByAreas}
                     >
-                      {areaBusy ? 'считаю площади…' : 'продолжить по выкройкам'}
+                      {areaBusy ? 'measuring areas…' : 'continue from the patterns'}
                     </Button>
                     <Text size='nano' variant='label' component='span'>
-                      посчитать площади размеров {plan.unansweredSizes.map(sizeName).join(', ')} по
-                      сегодняшним выкройкам и продолжить распределение «{chosen.name}»
+                      measure the areas of sizes {plan.unansweredSizes.map(sizeName).join(', ')} on
+                      today's patterns and continue the distribution of “{chosen.name}”
                     </Text>
                   </div>
                 )}
                 {plan.continuation === 'ok' && plan.continuedSizes.length > 0 && (
                   <CalloutBox tone='note'>
-                    размеры {plan.continuedSizes.map(sizeName).join(', ')} в составе «{chosen.name}»
-                    не резались: их расход ПРОДОЛЖЕН по площади выкроек тем же распределением, каким
-                    раскладка поделила свою длину между своими размерами. Площади сверены с
-                    записанными в раскладке — сегодняшние выкройки те же
+                    sizes {plan.continuedSizes.map(sizeName).join(', ')} were not cut in the
+                    composition of “{chosen.name}”: their consumption is CONTINUED from the pattern
+                    areas by the same distribution the marker used to split its own length between
+                    its own sizes. The areas are checked against the ones recorded in the marker —
+                    today's patterns are the same
                   </CalloutBox>
                 )}
               </div>
@@ -864,7 +872,7 @@ export function MarkerApplyHint({
               усреднённая процентная подпись ниже, как и было. */}
           {applyPossible && splitMarker && (
             <div>
-              <GroupLabel flush>из чего сложилась измеренная длина</GroupLabel>
+              <GroupLabel flush>what the measured length is made of</GroupLabel>
               <div className='pt-1'>
                 <MarkerAreaSplit
                   marker={splitMarker}
@@ -889,7 +897,8 @@ export function MarkerApplyHint({
               if (parts.length === 0) {
                 return (
                   <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-                    раскладка без записанной эффективности — отходы не разложить на кромку и выпады
+                    the marker has no recorded efficiency — the waste cannot be split into selvedge
+                    and waste between pieces
                   </Text>
                 );
               }
@@ -899,9 +908,9 @@ export function MarkerApplyHint({
               const cut = avg((d) => d.cutPct);
               return (
                 <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-                  в норме уже сидят отходы: кромка {sv.toFixed(1)}% + межлекальные выпады{' '}
-                  {cut.toFixed(1)}% (от площади деталей)
-                  {sv === 0 ? ' — кромка артикула не задана' : ''}
+                  the norm already carries the waste: selvedge {sv.toFixed(1)}% + waste between
+                  pieces {cut.toFixed(1)}% (of the piece area)
+                  {sv === 0 ? " — the article's selvedge is not set" : ''}
                 </Text>
               );
             })()}
@@ -911,7 +920,7 @@ export function MarkerApplyHint({
               состояние ЭТОГО числа. */}
           {applyPossible && Number.isFinite(wastage) && wastage > 0 && (
             <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-              {`у линии стоит ${wastage}% отходов — на применённой из раскладки норме костинг их НЕ начисляет: измеренная длина уже содержит и межлекальные выпады, и кромку. Процент снова начнёт работать, если норму перебить вручную`}
+              {`the line carries ${wastage}% wastage — on a norm applied from a marker costing does NOT add it: the measured length already contains both the waste between pieces and the selvedge. The percent starts working again if the norm is overridden by hand`}
             </Text>
           )}
 
@@ -924,38 +933,40 @@ export function MarkerApplyHint({
               которого затевался состав, и молча оно неотличимо от измеренного. */}
           {mode === 'perSize' && plan.meanSizes.length > 0 && (
             <CalloutBox tone='warning'>
-              у размеров {plan.meanSizes.map(sizeName).join(', ')} выкроек на карточке нет, и им
-              подставлено СРЕДНЕЕ по настилу «{chosen.name}»: мелкие размеры оно завышает, крупные
-              занижает. Загрузите их выкройки — расход посчитается по площади, как у остальных
+              sizes {plan.meanSizes.map(sizeName).join(', ')} have no patterns on the card, so the
+              MEAN over the lay “{chosen.name}” is substituted for them: it overstates small sizes
+              and understates large ones. Upload their patterns — the consumption gets measured by
+              area, like for the rest
             </CalloutBox>
           )}
           {mode === 'scalar' && widthMismatch && (
             <CalloutBox tone='warning'>
-              маркер «{chosen.name}» посчитан для полотна {chosenW} см, артикул слота — {artW} см:
-              расход не переносится между ширинами без пересчёта
+              the marker “{chosen.name}” was computed for {chosenW} cm cloth, the slot's article is{' '}
+              {artW} cm: consumption does not carry between widths without a recompute
             </CalloutBox>
           )}
           {mode === 'perSize' && mixedWidths && (
             <CalloutBox tone='warning'>
-              маркеры разных размеров посчитаны на разной ширине полотна (
-              {Math.min(...perSizeWidths)}–{Math.max(...perSizeWidths)} см) — нормы смешивают разные
-              ткани
+              markers of different sizes were computed on different cloth widths (
+              {Math.min(...perSizeWidths)}–{Math.max(...perSizeWidths)} cm) — the norms mix
+              different fabrics
             </CalloutBox>
           )}
           {mode === 'perSize' && perSizeWidthMismatch && (
             <CalloutBox tone='warning'>
-              маркеры посчитаны для полотна {[...new Set(perSizeWidths)].join(' / ')} см, артикул
-              слота — {artW} см: расход не переносится между ширинами без пересчёта
+              the markers were computed for {[...new Set(perSizeWidths)].join(' / ')} cm cloth, the
+              slot's article is {artW} cm: consumption does not carry between widths without a
+              recompute
             </CalloutBox>
           )}
           {mode === 'scalar' && (offRunSize || spreadPct > 5) && (
             <CalloutBox tone={offRunSize ? 'warning' : 'note'}>
               {[
                 offRunSize
-                  ? `единая норма взята с размера ${sizeName(chosenSizeId)}, которого НЕТ в размерном ряду карточки`
+                  ? `the single norm is taken from size ${sizeName(chosenSizeId)}, which is NOT in the card's size range`
                   : '',
                 spreadPct > 5
-                  ? `расход по размерам расходится на ${spreadPct.toFixed(0)}% — рассмотрите режим «по размерам»`
+                  ? `consumption across sizes differs by ${spreadPct.toFixed(0)}% — consider the “per size” mode`
                   : '',
               ]
                 .filter(Boolean)
@@ -967,27 +978,28 @@ export function MarkerApplyHint({
               оно есть. */}
           {mode === 'scalar' && pieceSetChanged(chosen) && (
             <CalloutBox tone='warning'>
-              набор деталей карточки изменился после съёмки «{chosen.name}»: длина измерена по
-              ПРЕЖНЕМУ набору деталей. Применить можно, но число стоит подтвердить пересъёмкой
+              the card's piece set changed after “{chosen.name}” was captured: the length is
+              measured on the PREVIOUS piece set. It can be applied, but the number is worth
+              confirming with a re-capture
             </CalloutBox>
           )}
           {mode === 'perSize' && perSizeChanged.length > 0 && (
             <CalloutBox tone='warning'>
-              набор деталей карточки изменился после съёмки раскладок размеров{' '}
-              {perSizeChanged.join(', ')}: их длины измерены по ПРЕЖНЕМУ набору деталей
+              the card's piece set changed after the markers of sizes {perSizeChanged.join(', ')}
+              were captured: their lengths are measured on the PREVIOUS piece set
             </CalloutBox>
           )}
           {mode === 'scalar' && isLegacyNorm(chosen) && (
             <CalloutBox tone='note'>
-              старая норма: у «{chosen.name}» не записаны условия съёмки — ни припуск, ни слои, ни
-              политика переворота, а значит по чему именно она снята, сказать нечем. Применить
-              можно; пересъёмка запишет условия
+              legacy norm: “{chosen.name}” has no capture conditions recorded — no seam allowance,
+              no layers, no flipping policy, so there is nothing to say what exactly it was captured
+              from. It can be applied; a re-capture will record the conditions
             </CalloutBox>
           )}
           {mode === 'perSize' && perSizeLegacy.length > 0 && (
             <CalloutBox tone='note'>
-              старая норма у размеров {perSizeLegacy.join(', ')}: условия съёмки (припуск, слои,
-              переворот) не записаны
+              legacy norm for sizes {perSizeLegacy.join(', ')}: the capture conditions (seam
+              allowance, layers, flipping) are not recorded
             </CalloutBox>
           )}
 
@@ -997,28 +1009,30 @@ export function MarkerApplyHint({
               карточке вкладка лежит внутри `<fieldset disabled>`, который глушит любую кнопку. */}
           <details className='border border-hairline px-2 py-1'>
             <summary className='cursor-pointer text-micro uppercase'>
-              что именно запишется в рецепт
+              what exactly gets written into the recipe
             </summary>
             <div className='flex max-w-[90ch] flex-col gap-1 pt-1.5'>
               {/* §6.4 сказанное там, где оно случается. Кнопка КОПИРУЕТ число: ссылки на раскладку в
                   рецепте не остаётся, и никакое последующее событие — ни пересъёмка, ни назначение
                   другой нормы — этот рецепт не тронет. */}
               <Text size='nano' variant='label' component='p'>
-                запись уйдёт при сохранении карточки (рецепт колорвея staged-сейвом). Число
-                КОПИРУЕТСЯ: связи рецепта с раскладкой нет — переназначат норму или переснимут
-                раскладку, рецепт сам не пересчитается, применять придётся заново.
+                the write goes out when the card is saved (the colorway recipe by staged save). The
+                number is COPIED: there is no link from the recipe to the marker — reassign the norm
+                or re-capture the marker, and the recipe does not recompute itself, it has to be
+                applied again.
               </Text>
               <Text size='nano' variant='label' component='p'>
-                Вместе с числом уходит ИСТОЧНИК — «из раскладки». По нему костинг понимает, что
-                отходы кроя уже внутри длины, и НЕ начисляет сверху процент раскроя слота. Перебьёте
-                число руками — источник снимется, и процент снова начнёт работать.
+                The SOURCE goes out together with the number — “from a marker”. From it costing
+                knows that the cutting waste is already inside the length, and does NOT add the
+                slot's wastage percent on top. Override the number by hand and the source is
+                cleared, and the percent starts working again.
               </Text>
               <Text size='nano' variant='label' component='p'>
-                Расчёт «по выкройкам» на этой же ткани даёт NETTO — площадь деталей ÷ раскройную
-                ширину, без межлекальных выпадов; за них там платит процент раскроя слота. Раскладка
-                измеряет ту же длину целиком, поэтому её число больше, а процент к нему не
-                применяется. Два инструмента, одна физика — разница между их числами и есть отходы
-                раскроя.
+                The “from the patterns” estimate on the same fabric gives NET — the piece area ÷ the
+                cutting width, without the waste between pieces; there it is the slot's wastage
+                percent that pays for it. A marker measures that whole length, so its number is
+                bigger, and the percent is not applied to it. Two tools, one physics — the
+                difference between their numbers IS the cutting waste.
               </Text>
             </div>
           </details>
@@ -1164,19 +1178,19 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
           }
         }
         const comparable = perSize
-          ? 'по размерам'
+          ? 'per size'
           : scalars.size === 0
             ? pinnedScalars.size > 0
               ? ''
               : '—'
             : scalars.size === 1
               ? [...scalars][0]
-              : `расходятся (${[...scalars].join(' / ')})`;
+              : `they differ (${[...scalars].join(' / ')})`;
         const current =
           !perSize && pinnedScalars.size > 0
             ? [
                 comparable,
-                `пин на другой артикул: ${[...pinnedScalars].join(' / ')} — не сверяется, другая ткань`,
+                `pinned to a different article: ${[...pinnedScalars].join(' / ')} — not compared, a different fabric`,
               ]
                 .filter(Boolean)
                 .join(' · ')
@@ -1240,21 +1254,21 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
   return (
     <div className='space-y-1'>
       <Text size='nano' variant='label' component='p'>
-        расход из раскладок (маркеров) — применяется в рецепте колорвея, вкладка colourways
+        consumption from markers — applied in the colorway recipe, the colourways tab
       </Text>
       {rows.map(({ line, best, conv, cons, refusal, current, delta, skipped, stale, kg }) => (
         <div key={line.lineKey} className='space-y-1'>
           <div className='flex flex-wrap items-center gap-1.5'>
             <Text size='micro' component='span' className='min-w-0 truncate'>
-              {line.name?.trim() || 'ткань'}
+              {line.name?.trim() || 'fabric'}
             </Text>
             {refusal ? (
               <Pill tone='warn' title={refusal}>
-                из раскладки: нормы нет — {refusalWord(best)}
+                from a marker: no norm — {refusalWord(best)}
               </Pill>
             ) : (
               <Pill tone='mut'>
-                из раскладки: {conv ? `${conv.value} ${conv.unit}` : `${cons} см`}
+                from a marker: {conv ? `${conv.value} ${conv.unit}` : `${cons} cm`}
               </Pill>
             )}
             {/* Кг-число обязано называть основу (Ф3): полная ширина рулона с кромкой ×
@@ -1262,7 +1276,7 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
                 лечится она заполнением артикула, а не сменой единицы слота. */}
             {kg?.basis && conv && (
               <Pill tone='mut' title={weightBasisNote(kg.basis)}>
-                вес: {weightBasisLabel(kg.basis)}
+                weight: {weightBasisLabel(kg.basis)}
               </Pill>
             )}
             {/* ТРИ СОСТОЯНИЯ КАТАЛОГА — СЛОВАМИ, и ни одно не называется «нет плотности»:
@@ -1271,25 +1285,25 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             {kg?.catalog === 'loading' && !refusal && (
               <Pill
                 tone='mut'
-                title='каталог материалов ещё читается — плотность и ширина артикула пока не прочитаны. Это загрузка, а не отказ: карточка материала может быть заполнена полностью'
+                title="the materials catalog is still being read — the article's density and width are not read yet. This is loading, not a refusal: the material card may well be filled in completely"
               >
-                вес: каталог читается…
+                weight: reading the catalog…
               </Pill>
             )}
             {kg?.catalog === 'error' && !refusal && (
               <Pill
                 tone='warn'
-                title='каталог материалов не прочитался — плотность и ширину артикула прочитать не удалось. Это ошибка чтения, а не пустая карточка материала: перезагрузите страницу'
+                title="the materials catalog didn't read — the article's density and width could not be read. This is a read error, not an empty material card: refresh the page"
               >
-                кг: каталог не прочитался
+                kg: the catalog didn't read
               </Pill>
             )}
             {kg?.catalog === 'missing' && !refusal && (
               <Pill
                 tone='warn'
-                title={`артикула #${kg.articleId} в каталоге материалов нет (удалён или недоступен) — основу веса взять неоткуда. Про его плотность это не говорит ничего`}
+                title={`article #${kg.articleId} is not in the materials catalog (deleted or unavailable) — there is nowhere to take the weight basis from. This says nothing about its density`}
               >
-                кг: артикул не найден в каталоге
+                kg: article not found in the catalog
               </Pill>
             )}
             {kg?.missing && !refusal && (
@@ -1300,24 +1314,24 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             {/* Чьё это число: назначенной нормы или просто лучшей раскладки. Без подписи полоса
                 называет цифру с одинаковой уверенностью в обоих случаях. */}
             {best.isNorm === true && (
-              <Pill tone='ink' title='назначенная нормировочная раскладка этой ткани на карточке'>
-                норма
+              <Pill tone='ink' title='the marker set as the norm of this fabric on the card'>
+                norm
               </Pill>
             )}
             {pieceSetChanged(best) && (
               <Pill
                 tone='attention'
-                title='набор деталей карточки изменился после съёмки этой раскладки — длина измерена по прежнему набору'
+                title="the card's piece set changed after this marker was captured — the length is measured on the previous set"
               >
-                набор изменился
+                piece set changed
               </Pill>
             )}
             {isLegacyNorm(best) && (
               <Pill
                 tone='mut'
-                title='условия съёмки (припуск, слои, переворот) не записаны — раскладка снята до того, как их стали записывать'
+                title='the capture conditions (seam allowance, layers, flipping) are not recorded — this marker was captured before they started being recorded'
               >
-                старая норма
+                legacy norm
               </Pill>
             )}
             {skipped && (
@@ -1326,15 +1340,15 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
                 title={scalarNormRefusal(skipped)}
               >
                 {skipped.isNorm === true
-                  ? 'назначенная норма'
+                  ? 'the assigned norm'
                   : isDraftMarker(skipped)
-                    ? 'свежий ЧЕРНОВИК'
-                    : 'свежее измерение'}{' '}
-                «{skipped.name}» расхода не даёт — {refusalWord(skipped)}
+                    ? 'a fresher DRAFT'
+                    : 'a fresher measurement'}{' '}
+                “{skipped.name}” gives no consumption — {refusalWord(skipped)}
               </Pill>
             )}
             <Text size='nano' variant='label' component='span'>
-              в рецептах: {current}
+              in the recipes: {current}
             </Text>
             {delta != null && Math.abs(delta) > 5 && (
               <Pill tone='warn'>
@@ -1344,16 +1358,16 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
           </div>
           {stale && (
             <CalloutBox tone='warning'>
-              рецепты не пересчитаны: применённое из раскладки {stale.applied.join(' / ')}{' '}
-              {stale.unit} против нормы «{stale.name}» — {stale.value} {stale.unit}. Связи рецепта с
-              раскладкой нет: переназначение нормы ничего не пересчитывает, и прежнее число будет
-              стоять, пока норму не применят заново
+              the recipes are not recomputed: applied from a marker {stale.applied.join(' / ')}{' '}
+              {stale.unit} against the norm “{stale.name}” — {stale.value} {stale.unit}. There is no
+              link from the recipe to the marker: reassigning the norm recomputes nothing, and the
+              old number stands until the norm is applied again
               {/* НА КГ-СЛОТЕ У РАСХОЖДЕНИЯ ЕСТЬ ВТОРАЯ ПРИЧИНА, и приписывать его одной раскладке
                   нельзя: обе стороны переведены в вес, но применённое — основой ТОГО дня, а
                   правая — сегодняшней. Правка плотности или ширины артикула даёт то же
                   расхождение, не тронув ни одной раскладки. */}
               {kg?.basis
-                ? `. Слот в килограммах: правая часть переведена сегодняшней основой (${weightBasisLabel(kg.basis)}) — правка ширины или плотности артикула даёт такое же расхождение сама по себе`
+                ? `. The slot is in kilograms: the right-hand side is converted with today's basis (${weightBasisLabel(kg.basis)}) — editing the article's width or density gives the same divergence all by itself`
                 : ''}
             </CalloutBox>
           )}

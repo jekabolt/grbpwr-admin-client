@@ -326,9 +326,9 @@ export function ProductionRunDetail() {
     plannedQty: plannedQtyTotal,
     colourCount: isAux ? runColourCount || liveVariants : colourModelCount,
     planProblem: auxNoMaterial
-      ? 'некуда приходовать выпуск'
+      ? 'nowhere to book the output'
       : unassignedPlanned > 0
-        ? `строки без продукта: ${unassignedPlanned}`
+        ? `lines without a product: ${unassignedPlanned}`
         : undefined,
     materials: materialsFact,
     hasUnissuedMaterials: frozenCoverage.current.unissued,
@@ -343,10 +343,10 @@ export function ProductionRunDetail() {
     costTotalsPartial: !!actuals && actuals.hasBase === false,
     recon: (run.recon ?? []).map((c) => ({ ok: !!c.ok, label: reconShort(c.key) })),
     unsaved: {
-      1: unsavedPlan ? [isAux ? 'план партии' : 'строки партии'] : undefined,
+      1: unsavedPlan ? [isAux ? 'run plan' : 'run lines'] : undefined,
       // Настил (шаг 3) правится в модальном редакторе с собственным состоянием — черновика на
       // странице он не оставляет, поэтому и метки «не сохранено» у него нет.
-      5: unsavedCosts ? ['статьи затрат'] : undefined,
+      5: unsavedCosts ? ['cost items'] : undefined,
     },
   });
   const currentStep = steps.find((s) => s.current)?.id ?? null;
@@ -388,7 +388,7 @@ export function ProductionRunDetail() {
     if (v)
       return `${v.colorCode ? `${v.colorCode} · ` : ''}${v.colorName || v.materialName || `#${variantId}`}`;
     if (variantId > 0) return `#${variantId}`;
-    return materialLabel(outputMaterial, outputMaterialId) || 'выпуск';
+    return materialLabel(outputMaterial, outputMaterialId) || 'output';
   };
 
   // The receive blocker text is the button's own hover title, verbatim — the guidance callout says
@@ -488,15 +488,15 @@ export function ProductionRunDetail() {
         return (
           <Section
             id={stepDomId(4)}
-            title='шаг 4 · приёмка'
-            question='В клетке «принято/план» по размеру. Каждая поставка — отдельная квитанция; финальная закрывает серию.'
+            title='step 4 · receipt'
+            question='in the “received/plan” cell, size by size. every delivery is its own receipt; the final one closes the run.'
             action={receiveButton('sm', 'secondary')}
           >
             <RunReceiptTable
               lines={lines}
               sizeOrder={techCard?.techCard?.sizeIds ?? []}
               sizeLabel={(s) => String(findInDictionary(dictionary, s, 'size') || s)}
-              rowHeader={isAux ? 'выпуск' : 'колор-модель'}
+              rowHeader={isAux ? 'output' : 'colour model'}
               rowLabel={isAux ? auxOutputLabel : colorwayLabel}
               groupBy={isAux ? 'variant' : 'product'}
             />
@@ -507,7 +507,7 @@ export function ProductionRunDetail() {
                 without costing:read, so the list is safe for every reader. */}
             {receipts.length > 0 ? (
               <>
-                <GroupLabel>квитанции</GroupLabel>
+                <GroupLabel>receipts</GroupLabel>
                 <div className='flex flex-col'>
                   {receipts.map((rc) => {
                     const good = (rc.lines ?? []).reduce(
@@ -538,43 +538,43 @@ export function ProductionRunDetail() {
                         <Text size='small'>{runDate(rc.receivedAt) || '—'}</Text>
                         {isReversalRow ? (
                           <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                            реверс квитанции #{rc.reversalOf}
+                            reversal of receipt #{rc.reversalOf}
                           </span>
                         ) : (
                           <>
                             <Text size='small'>
-                              {good} годных
+                              {good} good
                               {defect > 0
-                                ? ` · ${defect} брак${seconds > 0 ? ` (${seconds} → B-сток)` : ''}`
+                                ? ` · ${defect} defect${seconds > 0 ? ` (${seconds} → B-stock)` : ''}`
                                 : ''}
                             </Text>
                             {rc.final ? (
                               <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
-                                финальная
+                                final
                               </span>
                             ) : (
                               <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                                частичная
+                                partial
                               </span>
                             )}
                           </>
                         )}
                         {isReversed ? (
                           <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                            реверснута · #{rc.reversedBy}
+                            reversed · #{rc.reversedBy}
                           </span>
                         ) : null}
                         {!isReversalRow ? (
                           <Text
                             size='small'
                             variant='inactive'
-                            title='статус проводки в бухгалтерии; pending — воркер ещё не запостил'
+                            title="the accounting entry's status; pending — the worker hasn't posted it yet"
                           >
                             {rc.postingStatus === 'posted'
-                              ? 'проведена'
+                              ? 'posted'
                               : rc.postingStatus === 'dead_letter'
-                                ? 'постинг завис — см. бухгалтерию'
-                                : 'ждёт постинга'}
+                                ? 'posting is stuck — see accounting'
+                                : 'waiting to be posted'}
                           </Text>
                         ) : null}
                         {canReadCosting && rc.hasBase && rc.unitCostBase?.value ? (
@@ -601,7 +601,7 @@ export function ProductionRunDetail() {
                               setReverseTarget(rc.id ?? 0);
                             }}
                           >
-                            отменить
+                            undo
                           </Button>
                         ) : null}
                       </div>
@@ -652,12 +652,12 @@ export function ProductionRunDetail() {
                 «шаг 5» нет. Так что блок рендерится всегда и честно говорит, что сверять нечего. */}
             <Section
               id={stepDomId(6)}
-              title='шаг 6 · сверка'
-              question='Каждая цифра рана обязана сходиться с журналами; расхождение — сигнал, не косметика.'
+              title='step 6 · reconciliation'
+              question='every figure of the run must agree with the journals; a discrepancy is a signal, not cosmetics.'
             >
               {(run.recon ?? []).length === 0 ? (
                 <Text variant='inactive' size='small'>
-                  сверять нечего — партия ещё ничего не приняла
+                  nothing to reconcile — the run hasn't received anything yet
                 </Text>
               ) : null}
               <div className='flex flex-col'>
@@ -685,7 +685,7 @@ export function ProductionRunDetail() {
             {/* Журнал жизни рана (Phase 8): кто и когда создал/запустил/принял/реверснул/закрыл.
                 Append-only; receipt-события ссылаются на квитанции, не дублируют их. */}
             {(run.events?.length ?? 0) > 0 ? (
-              <Section title='журнал рана' collapsible defaultOpen={false}>
+              <Section title='run log' collapsible defaultOpen={false}>
                 <div className='flex flex-col'>
                   {(run.events ?? []).map((e) => (
                     <div
@@ -722,7 +722,7 @@ export function ProductionRunDetail() {
                 приёмки (production_run:<id>) и реверсы (receipt:<id>). Дополняет материальные
                 движения выше: там — ткань, тут — готовые изделия. */}
             {receipts.length > 0 ? (
-              <Section title='движения готовых изделий' collapsible defaultOpen={false}>
+              <Section title='finished goods movements' collapsible defaultOpen={false}>
                 <RunStockChanges runId={run.id ?? 0} createdAt={run.createdAt} />
               </Section>
             ) : null}
@@ -762,9 +762,11 @@ export function ProductionRunDetail() {
           {/* The planning window beside the identity: an operator asking "is this batch late" should
               not have to open the edit modal to find the date it was promised for. */}
           <Text variant='inactive' size='small'>
-            план {runDate(ins?.plannedStartAt) || '—'} → обещано {runDate(ins?.promisedAt) || '—'}
+            plan {runDate(ins?.plannedStartAt) || '—'} → promised {runDate(ins?.promisedAt) || '—'}
             {late > 0 ? (
-              <span className='ml-2 uppercase text-error'>опаздывает {late} дн</span>
+              <span className='ml-2 uppercase text-error'>
+                {late} {late === 1 ? 'day' : 'days'} late
+              </span>
             ) : null}
           </Text>
           <Text size='small'>{runTypeLabel}</Text>
@@ -784,7 +786,7 @@ export function ProductionRunDetail() {
               правку прогона от того, кто несёт бумагу в цех, значило бы запереть документ за
               ролью, которой у раскройщика нет. */}
           <Button asChild variant='secondary' size='lg' className='uppercase'>
-            <Link to={runPackPath(run.id ?? 0)}>наряд — pdf</Link>
+            <Link to={runPackPath(run.id ?? 0)}>run pack — pdf</Link>
           </Button>
           {/* Тех-пак, скоупнутый на ЭТУ партию (преднабранный прогон). Тоже вне гейта canEdit:
               печать — это чтение. */}
@@ -795,7 +797,7 @@ export function ProductionRunDetail() {
             className='uppercase'
             onClick={() => setPrintOptionsOpen(true)}
           >
-            тех-пак — pdf
+            tech pack — pdf
           </Button>
           {canEdit && (
             <>
@@ -856,14 +858,14 @@ export function ProductionRunDetail() {
             stay under the band and above the panel, exactly where they were before this column
             existed — otherwise a blocked receive is explained below a screen-high lines grid. */}
         <aside className='order-first flex flex-col gap-6 self-start lg:order-none lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
-          <Section title='партия целиком' question='— не одна фаза, а весь батч'>
-            <Row label='план' value={String(plannedQtyTotal)} />
+          <Section title='the whole run' question='— not one phase, but the run end to end'>
+            <Row label='plan' value={String(plannedQtyTotal)} />
             {/* received = GOOD units — the count that is posted to stock. Defective units are a
                 separate count that never reaches the warehouse, so they are not inside this number
                 and the defect rate below is measured against received + defect, as the server
                 does. */}
             <Row
-              label='принято годных'
+              label='received good'
               value={
                 hasReceivedAny
                   ? `${receivedQtyTotal}${
@@ -875,7 +877,7 @@ export function ProductionRunDetail() {
               }
             />
             <Row
-              label='брак'
+              label='defect'
               tone={defectQtyTotal > 0 ? 'error' : undefined}
               value={
                 hasReceivedAny
@@ -915,8 +917,8 @@ export function ProductionRunDetail() {
         onOpenChange={(o) => {
           if (!o) setReverseTarget(null);
         }}
-        title={`отменить квитанцию #${reverseTarget ?? ''}`}
-        confirmLabel={reverse.isPending ? 'отмена…' : 'реверсировать'}
+        title={`undo receipt #${reverseTarget ?? ''}`}
+        confirmLabel={reverse.isPending ? 'reversing…' : 'reverse'}
         confirmDisabled={reverse.isPending || reverseReason.trim() === ''}
         closeOnConfirm={false}
         onConfirm={() => {
@@ -931,10 +933,7 @@ export function ProductionRunDetail() {
             {
               onSuccess: () => {
                 setReverseTarget(null);
-                showMessage(
-                  'Квитанция реверсирована: сток снят, деньги возвращены в WIP',
-                  'success',
-                );
+                showMessage('receipt reversed: stock removed, money returned to WIP', 'success');
               },
               onError: (e) => showMessage(reversalErrorMessage(e), 'error'),
             },
@@ -943,14 +942,15 @@ export function ProductionRunDetail() {
       >
         <div className='flex flex-col gap-2'>
           <Text size='small' variant='inactive'>
-            Годные единицы этой квитанции снимутся со склада (нехватка из-за продаж заблокирует
-            реверс), FG-часть проводки вернётся в WIP, cost_price откатится к оценке тех-карты.
-            Выданные материалы НЕ возвращаются автоматически.
+            the good units of this receipt will be removed from the warehouse (a shortage caused by
+            sales will block the reversal), the FG part of the entry will return to WIP, cost_price
+            will roll back to the tech card's estimate. issued materials are NOT returned
+            automatically.
           </Text>
           <textarea
             className='w-full border border-borderColor bg-bgColor p-2 text-textBaseSize outline-none'
             rows={3}
-            placeholder='причина реверса (обязательно)'
+            placeholder='reason for the reversal (required)'
             value={reverseReason}
             onChange={(e) => setReverseReason(e.target.value)}
           />
@@ -999,19 +999,18 @@ const stepDomId = (step: RunStepId) => `run-step-${step}`;
 
 // The three server-side reconciliation checks, named. `reconLabel` is the sentence the сверка block
 // has always printed; `reconShort` is the same check in one word, for the conveyor's summary line
-// («сверка не сходится: единицы; затраты»). Unknown keys fall through to the costs check, exactly
+// («reconciliation does not agree: units; costs»). Unknown keys fall through to the costs check, exactly
 // as the block's original ternary did.
 const RECON_LABEL: Record<string, string> = {
-  units_receipts_vs_stock_journal: 'единицы: квитанции ↔ сток-журнал',
-  money_posted_vs_entries: 'проводки: posted-квитанции ↔ живые записи',
+  units_receipts_vs_stock_journal: 'units: receipts ↔ stock journal',
+  money_posted_vs_entries: 'entries: posted receipts ↔ live records',
 };
 const RECON_SHORT: Record<string, string> = {
-  units_receipts_vs_stock_journal: 'единицы',
-  money_posted_vs_entries: 'проводки',
+  units_receipts_vs_stock_journal: 'units',
+  money_posted_vs_entries: 'entries',
 };
-const reconLabel = (key?: string) =>
-  RECON_LABEL[key ?? ''] ?? 'затраты: начислено ↔ капитализировано';
-const reconShort = (key?: string) => RECON_SHORT[key ?? ''] ?? 'затраты';
+const reconLabel = (key?: string) => RECON_LABEL[key ?? ''] ?? 'costs: accrued ↔ capitalised';
+const reconShort = (key?: string) => RECON_SHORT[key ?? ''] ?? 'costs';
 
 // Status- (and blocker-) driven guidance banner. Folds the receive button's hover-only `title`
 // blockers (auxNoMaterial / unassignedPlanned — previously invisible until you happened to hover
@@ -1053,7 +1052,7 @@ function nextStepGuidance({
   if (status === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED') {
     return {
       tone: 'warning',
-      text: 'Частично принята: поставки бронируются на склад, серия открыта. Следующая поставка — той же кнопкой receive; финальная приёмка (галочка в модалке) закроет партию, остаток объявится непришедшим.',
+      text: 'partially received: deliveries are booked into the warehouse, the run stays open. the next delivery goes through the same receive button; the final receipt (the checkbox in the modal) closes the run and declares the remainder as never arrived.',
     };
   }
   if (status === 'PRODUCTION_RUN_STATUS_RECEIVED') {
@@ -1181,9 +1180,9 @@ function CostLedger({
 
   return (
     <>
-      <GroupLabel>деньги</GroupLabel>
+      <GroupLabel>money</GroupLabel>
       <Row
-        label='unit cost · план'
+        label='unit cost · plan'
         value={
           run.plannedUnitCost?.value
             ? `${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''}`
@@ -1191,7 +1190,7 @@ function CostLedger({
         }
       />
       <Row
-        label='unit cost · факт'
+        label='unit cost · actual'
         value={
           actuals?.actualUnitCost?.value ? (
             <span className='flex flex-wrap justify-end gap-x-1.5'>
@@ -1201,12 +1200,12 @@ function CostLedger({
               {variance(actuals?.unitCostVariance)}
             </span>
           ) : (
-            '— до приёмки'
+            '— until the receipt'
           )
         }
       />
       <Row
-        label='всего · план'
+        label='total · plan'
         value={
           actuals?.plannedTotalBase?.value
             ? `${decimalToInput(actuals.plannedTotalBase)} ${cur}`
@@ -1214,7 +1213,7 @@ function CostLedger({
         }
       />
       <RowTotal
-        label='всего · факт'
+        label='total · actual'
         value={
           actuals?.actualTotalBase?.value ? (
             <span className='flex flex-wrap justify-end gap-x-1.5'>
@@ -1224,7 +1223,7 @@ function CostLedger({
               {variance(actuals?.totalVariance)}
             </span>
           ) : (
-            '— до приёмки'
+            '— until the receipt'
           )
         }
       />
@@ -1241,8 +1240,9 @@ function CostLedger({
             <div className='flex flex-wrap items-center gap-2'>
               <Pill tone='mut'>snapshot not taken</Pill>
               <Text variant='inactive' size='small'>
-                плановая цена при создании прогона не снималась (костинг не в базовой валюте)
-                {planTodayText ? ` — сегодня та же формула даёт ${planTodayText}` : ''}
+                the planned price was not captured when the run was created (the costing is not in
+                the base currency)
+                {planTodayText ? ` — today the same formula gives ${planTodayText}` : ''}
               </Text>
             </div>
           );
@@ -1254,8 +1254,9 @@ function CostLedger({
             <div className='flex flex-wrap items-center gap-2'>
               <Pill tone='mut'>today not computed</Pill>
               <Text variant='inactive' size='small'>
-                плановая цена — снапшот от {snapshotDate}; по сегодняшней карточке цену посчитать не
-                удалось (карточки нет или её костинг не в базовой валюте) — расхождение неизвестно
+                the planned price is a snapshot from {snapshotDate}; the price couldn't be computed
+                from today's card (there is no card, or its costing is not in the base currency) —
+                the divergence is unknown
               </Text>
             </div>
           );
@@ -1276,10 +1277,10 @@ function CostLedger({
         // догадке о причине.
         return (
           <div className='flex flex-wrap items-start gap-2'>
-            <Pill tone='attention'>план устарел</Pill>
+            <Pill tone='attention'>plan is stale</Pill>
             <Text variant='inactive' size='small'>
-              снапшот от {snapshotDate} заморожен на момент планирования; сегодня та же формула даёт{' '}
-              {planTodayText} — {planToday > planSnapshot ? 'дороже' : 'дешевле'}
+              the snapshot from {snapshotDate} is frozen at the moment of planning; today the same
+              formula gives {planTodayText} — {planToday > planSnapshot ? 'more' : 'less'}
             </Text>
           </div>
         );
@@ -1293,16 +1294,16 @@ function CostLedger({
         const absorbed = actuals?.defectQtyTotal ?? 0;
         return absorbed > 0 && actuals?.actualUnitCost?.value ? (
           <Text variant='label' size='micro'>
-            unit cost поглощает {absorbed} бракованных единиц (нормальная потеря капитализируется в
-            годные; сверхнормативная списывается учётом при закрытии серии)
+            unit cost absorbs {absorbed} defective units (a normal loss is capitalised into the good
+            ones; anything above the norm is written off by accounting when the run is closed)
           </Text>
         ) : null;
       })()}
 
       {actuals?.materialsFromStockBase?.value ? (
         <Text variant='label' size='micro'>
-          включая {decimalToInput(actuals.materialsFromStockBase)} {cur} материалов, выданных со
-          склада
+          including {decimalToInput(actuals.materialsFromStockBase)} {cur} of materials issued from
+          the warehouse
         </Text>
       ) : null}
 
@@ -1416,8 +1417,8 @@ function RunStockChanges({ runId, createdAt }: { runId: number; createdAt?: stri
       }),
   });
   const rows = query.data?.changes ?? [];
-  if (query.isLoading) return <Text size='small'>загрузка…</Text>;
-  if (!rows.length) return <Text size='small'>движений нет</Text>;
+  if (query.isLoading) return <Text size='small'>loading…</Text>;
+  if (!rows.length) return <Text size='small'>no movements</Text>;
   return (
     <div className='flex flex-col'>
       {rows.map((r, i) => (

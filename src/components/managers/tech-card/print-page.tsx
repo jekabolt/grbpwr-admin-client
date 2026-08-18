@@ -4,11 +4,7 @@ import {
   useProductionRun,
   useRunCutPlan,
 } from 'components/managers/production-runs/components/useProductionRuns';
-import {
-  depStatus,
-  usePrintReady,
-  type PrintDep,
-} from 'components/managers/print/use-print-ready';
+import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
 import { useTechCardRelease } from 'components/managers/tech-card/components/useSamples';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -134,7 +130,9 @@ export function TechCardPrint() {
     ...(query.runId > 0
       ? [{ label: 'production run', status: depStatus(runLoading, runError) }]
       : []),
-    ...(releaseId ? [{ label: 'release snapshot', status: depStatus(releaseLoading, releaseError) }] : []),
+    ...(releaseId
+      ? [{ label: 'release snapshot', status: depStatus(releaseLoading, releaseError) }]
+      : []),
     // Кат-лист НЕ обязателен: без него тех-пак остаётся документом стиля, а отсутствие
     // количеств лист называет вслух. Отказ в гейте — это degraded, а не блокировка.
     ...(query.runId > 0
@@ -158,8 +156,8 @@ export function TechCardPrint() {
         </div>
         <div className='flex items-center gap-3'>
           <Text variant='inactive' size='small'>
-            choose “save as PDF” as the destination · колонтитул и номера страниц печатает только
-            Chrome
+            choose “save as PDF” as the destination · only Chrome prints the running head and page
+            numbers
           </Text>
           <Button
             variant='main'

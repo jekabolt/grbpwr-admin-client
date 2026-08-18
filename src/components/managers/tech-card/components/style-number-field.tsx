@@ -59,7 +59,7 @@ export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
                 <Input
                   {...field}
                   value={field.value ?? ''}
-                  placeholder={isIdea ? 'optional — set before PROTO' : 'артикул'}
+                  placeholder={isIdea ? 'optional — set before PROTO' : 'article'}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                     field.onChange(e);
                     // any hand-edit is a manual override (Q1)

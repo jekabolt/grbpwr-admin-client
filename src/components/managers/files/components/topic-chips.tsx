@@ -36,7 +36,7 @@ function RowLabel({ children }: { children: React.ReactNode }) {
  * и то же в двух местах.
  */
 export function projectHint(t: FileTopic): string {
-  return [projectDates(t), t.archived ? 'в архиве' : ''].filter(Boolean).join(' · ');
+  return [projectDates(t), t.archived ? 'archived' : ''].filter(Boolean).join(' · ');
 }
 
 /**
@@ -48,7 +48,7 @@ export function projectHint(t: FileTopic): string {
  */
 export function ProjectArchiveMark({ project }: { project: FileTopic }) {
   if (!project.archived) return null;
-  return <span className='opacity-70'>в архиве</span>;
+  return <span className='opacity-70'>archived</span>;
 }
 
 /** Даты проекта в подпись чипа: «12.09 — 14.09». Пустые не печатаются вовсе. */
@@ -57,8 +57,8 @@ export function projectDates(t: FileTopic): string {
   const to = (t.endsAt ?? '').trim();
   const short = (d: string) => d.split('-').reverse().slice(0, 2).join('.');
   if (from && to) return `${short(from)} — ${short(to)}`;
-  if (from) return `с ${short(from)}`;
-  if (to) return `до ${short(to)}`;
+  if (from) return `from ${short(from)}`;
+  if (to) return `until ${short(to)}`;
   return '';
 }
 
@@ -111,8 +111,8 @@ export function TopicChips({
 
   const toggle = (id: number) =>
     onChange({
-      // «Разобрать» и темы взаимоисключающи: сервер ставит untopiced выше topic_ids, так что
-      // выбранный чип поверх «разобрать» рисовал бы фильтр, которого в выдаче нет.
+      // «unsorted» и темы взаимоисключающи: сервер ставит untopiced выше topic_ids, так что
+      // выбранный чип поверх «unsorted» рисовал бы фильтр, которого в выдаче нет.
       untopiced: false,
       topicIds: selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id],
     });
@@ -128,39 +128,40 @@ export function TopicChips({
 
   // `matched` — размер ВСЕЙ текущей выдачи, а сервер применяет поиск в том же предикате, что
   // и темы. Приписать это число одному пересечению тем при непустом поиске значило бы
-  // поставить рядом чип «packaging 40» и подпись «packaging — 3 шт.» — два разных ответа про
+  // поставить рядом чип «packaging 40» и подпись «packaging — 3 pcs» — два разных ответа про
   // одно и то же в двух сантиметрах друг от друга.
-  const count = matched === undefined ? '' : ` — ${matched} шт.${searching ? ' по запросу' : ''}`;
+  const count =
+    matched === undefined ? '' : ` — ${matched} pcs${searching ? ' for the query' : ''}`;
 
   const caption = () => {
     if (untopiced) {
-      return 'файлы, на которых нет ни одной темы. разобрать — значит проставить ярлыки, а не разложить по папкам';
+      return 'files that have not a single topic on them. sorting them means putting labels on, not laying them out into folders';
     }
     if (orphans.length) {
-      return `${orphans.map((id) => `#${id}`).join(', ')} — этих тем нет в списке: они в архиве, стали проектами либо ссылка старая. фильтр по ним всё равно работает${count}`;
+      return `${orphans.map((id) => `#${id}`).join(', ')} — these topics are not in the list: they are archived, they became projects, or the link is old. the filter by them still works${count}`;
     }
     if (atLimit) {
-      return `${MAX_TOPIC_FILTERS} тем — предел одного пересечения${count}. снимите чип, чтобы выбрать другой`;
+      return `${MAX_TOPIC_FILTERS} topics — the limit of one intersection${count}. drop a chip to pick another`;
     }
     if (selected.length > 1) {
-      return `пересечение: файлы, у которых есть все выбранные темы (${names.join(' + ')})${count}`;
+      return `intersection: files that have all the selected topics (${names.join(' + ')})${count}`;
     }
     if (selected.length === 1) {
-      return `тема «${names[0] ?? ''}»${count}. нажмите вторую тему, чтобы сузить до пересечения`;
+      return `topic “${names[0] ?? ''}”${count}. press a second topic to narrow it down to an intersection`;
     }
-    return 'несколько тем сразу дают пересечение, а не сумму: так ищут «бирку из packaging, которая ещё и atelier»';
+    return 'several topics at once give an intersection, not a sum: this is how you look for “a hangtag from packaging that is also atelier”';
   };
 
   return (
     <div className='flex flex-col gap-1'>
       <ChipRow>
-        <RowLabel>темы</RowLabel>
+        <RowLabel>topics</RowLabel>
         <Chip
           selected={!selected.length && !untopiced}
           pressed={!selected.length && !untopiced}
           onClick={() => onChange({ topicIds: [], untopiced: false })}
         >
-          все
+          all
           <span className='tabular-nums opacity-70'>{totalFiles}</span>
         </Chip>
         <Chip
@@ -168,7 +169,7 @@ export function TopicChips({
           pressed={untopiced}
           onClick={() => onChange({ topicIds: [], untopiced: !untopiced })}
         >
-          разобрать
+          unsorted
           <span className='tabular-nums opacity-70'>{untopicedCount}</span>
         </Chip>
         {topics.map((t) => {
@@ -180,7 +181,11 @@ export function TopicChips({
               selected={on}
               pressed={on}
               disabled={atLimit && !on}
-              title={atLimit && !on ? `в одном пересечении не больше ${MAX_TOPIC_FILTERS} тем` : undefined}
+              title={
+                atLimit && !on
+                  ? `no more than ${MAX_TOPIC_FILTERS} topics in one intersection`
+                  : undefined
+              }
               onClick={() => toggle(id)}
             >
               {t.name}
@@ -193,7 +198,7 @@ export function TopicChips({
             key={`orphan-${id}`}
             selected
             pressed
-            title='темы нет в списке: она в архиве, стала проектом или ссылка старая — фильтр всё равно применён'
+            title='the topic is not in the list: it is archived, it became a project, or the link is old — the filter is applied all the same'
             onClick={() => toggle(id)}
           >
             #{id}
@@ -201,7 +206,7 @@ export function TopicChips({
         ))}
         {!topics.length && !orphans.length && (
           <Text size='micro' variant='label' component='span'>
-            тем пока нет — они заводятся прямо при загрузке файла
+            no topics yet — they are started right as a file is uploaded
           </Text>
         )}
       </ChipRow>
@@ -243,28 +248,28 @@ export function ProjectChips({
   // отфильтрована, а ни один чип не горит — экран спорил бы сам с собой, и пустая выдача
   // читалась бы как поломка. Тот же приём, что у пикера человека с «#id».
   const orphan = selected > 0 && !picked;
-  const count = matched === undefined ? '' : ` — ${matched} шт.`;
+  const count = matched === undefined ? '' : ` — ${matched} pcs`;
   const dates = picked ? projectDates(picked) : '';
 
   const caption = () => {
     if (orphan) {
-      return `проект #${selected} не в списке: он в архиве либо ссылка старая. фильтр при этом работает — он спрашивает по номеру, а не по имени`;
+      return `project #${selected} is not in the list: it is archived, or the link is old. the filter works all the same — it asks by number rather than by name`;
     }
     if (!projects.length) {
-      return 'проектов пока нет. проект — это обычная тема, которой в словаре тем поставили тип: у неё появляются даты, архив и роли у файлов внутри';
+      return 'no projects yet. a project is an ordinary topic that was given the kind in the topic dictionary: it gains dates, an archive, and roles on the files inside it';
     }
     if (picked) {
-      return `проект «${picked.name}»${dates ? ` · ${dates}` : ''}${count}. ряд роли ниже спрашивает уже про связь файла С ЭТИМ проектом`;
+      return `project “${picked.name}”${dates ? ` · ${dates}` : ''}${count}. the role row below already asks about the file's link WITH THIS project`;
     }
-    return 'проект выбирается один: два проекта через «и» — это файлы, лежащие сразу в обеих съёмках, а таких почти не бывает';
+    return 'one project at a time: two projects joined by “and” would mean files lying in both shoots at once, and there are almost none of those';
   };
 
   return (
     <div className='flex flex-col gap-1'>
       <ChipRow>
-        <RowLabel>проекты</RowLabel>
+        <RowLabel>projects</RowLabel>
         <Chip selected={!selected} pressed={!selected} onClick={() => onChange(0)}>
-          вне проекта
+          outside a project
         </Chip>
         {projects.map((p) => {
           const id = Number(p.id);
@@ -290,7 +295,7 @@ export function ProjectChips({
           <Chip
             selected
             pressed
-            title='проект в архиве или ссылка старая — фильтр всё равно применён'
+            title='the project is archived or the link is old — the filter is applied all the same'
             onClick={() => onChange(0)}
           >
             #{selected}
@@ -344,42 +349,42 @@ export function RoleChips({
   // То же, что и у проекта: роль в архиве или из старой ссылки фильтрует, но в словаре холста
   // её нет. Чип-сирота показывает, что фильтр стоит.
   const orphan = value.roleId > 0 && !picked;
-  const count = matched === undefined ? '' : ` — ${matched} шт.`;
+  const count = matched === undefined ? '' : ` — ${matched} pcs`;
   // Проект называется именем, а когда имени нет — прямо говорится, что его нет. Пустые кавычки
   // «в проекте «»» читаются как поломка и ничего не сообщают.
-  const where = projectName ? `«${projectName}»` : 'из ссылки (имени нет: он в архиве)';
+  const where = projectName ? `“${projectName}”` : 'from the link (no name: it is archived)';
 
   const caption = () => {
     if (orphan) {
-      return `роль #${value.roleId} не в списке: она в архиве либо ссылка старая. снять её с файлов можно, назначить заново — нет, пока она в архиве`;
+      return `role #${value.roleId} is not in the list: it is archived, or the link is old. it can be taken off files, but not put on again while it is archived`;
     }
     if (!roles.length) {
-      return 'словарь ролей пуст. роли заводят на экране тем: словарь закрытый — «все исходники по всем съёмкам» значит что-нибудь только пока «исходники» везде одно и то же';
+      return 'the role dictionary is empty. roles are started on the topics screen: the dictionary is closed — “all the raws across all the shoots” means something only while “raw” is one and the same everywhere';
     }
     if (value.withoutRole) {
-      return `файлы, которые в проекте ${where} уже лежат, а роли им ещё не дали${count}. сюда попадает всё, что в проект бросили`;
+      return `files that already lie in the project ${where}, but have not been given a role yet${count}. everything dropped into the project lands here`;
     }
     if (picked && hasProject) {
-      return `в проекте ${where} — «${picked.name}»${count}. оба условия проверяются на ОДНОЙ строке связи, поэтому файл, который «${picked.name}» в другом проекте, сюда не попадёт`;
+      return `in the project ${where} — “${picked.name}”${count}. both conditions are checked on ONE link row, so a file that is “${picked.name}” in another project will not land here`;
     }
     if (picked) {
-      return `«${picked.name}» во всех проектах сразу${count}. выберите проект выше, чтобы спросить про один`;
+      return `“${picked.name}” across all projects at once${count}. pick a project above to ask about one`;
     }
     return hasProject
-      ? 'роль отвечает, ЧЕМ файл в этом проекте является. она стоит на связи с проектом, а не ярлыком на файле: тот же файл бывает исходником в съёмке и идеей в лукбуке'
-      : 'роль без проекта — это вопрос «все исходники по всем съёмкам». с выбранным проектом она становится разделом его страницы';
+      ? 'a role answers WHAT the file is inside this project. it sits on the link with the project, not as a label on the file: the same file is a raw in a shoot and an idea in a lookbook'
+      : "a role without a project is the question “all the raws across all the shoots”. with a project chosen it becomes a section of that project's page";
   };
 
   return (
     <div className='flex flex-col gap-1'>
       <ChipRow>
-        <RowLabel>роль</RowLabel>
+        <RowLabel>role</RowLabel>
         <Chip
           selected={!value.roleId && !value.withoutRole}
           pressed={!value.roleId && !value.withoutRole}
           onClick={() => onChange({ roleId: 0, withoutRole: false })}
         >
-          любая
+          any
         </Chip>
         {roles.map((r) => {
           const id = Number(r.id);
@@ -400,7 +405,7 @@ export function RoleChips({
           <Chip
             selected
             pressed
-            title='роль в архиве или ссылка старая — фильтр всё равно применён'
+            title='the role is archived or the link is old — the filter is applied all the same'
             onClick={() => onChange({ roleId: 0, withoutRole: false })}
           >
             #{value.roleId}
@@ -412,7 +417,7 @@ export function RoleChips({
             pressed={value.withoutRole}
             onClick={() => onChange({ roleId: 0, withoutRole: !value.withoutRole })}
           >
-            без роли
+            without a role
           </Chip>
         )}
       </ChipRow>

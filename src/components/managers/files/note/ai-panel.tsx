@@ -26,15 +26,15 @@ import { MarkdownView } from './markdown-view';
  *    или выделенный фрагмент, столько-то знаков.
  * 3. КЛЮЧА МОЖЕТ НЕ БЫТЬ — И ЭКРАН ОБЯЗАН ОСТАТЬСЯ ЦЕЛЫМ. На бете ключ не задан штатно, то есть
  *    отказ `FailedPrecondition` — это НОРМАЛЬНЫЙ ответ, а не поломка. Он гасит блок в состояние
- *    «не подключён» и не трогает ни заметку, ни правку, ни сохранение.
+ *    «not connected» и не трогает ни заметку, ни правку, ни сохранение.
  */
 
 export type AiScope = 'all' | 'selection';
 
 export interface AiSuggestion {
-  /** Текст, который уходил в модель, — левая колонка «как сейчас». */
+  /** Текст, который уходил в модель, — левая колонка «how it is now». */
   before: string;
-  /** Ответ модели — правая колонка «станет». */
+  /** Ответ модели — правая колонка «how it will be». */
   after: string;
   scope: AiScope;
   /** Куда возвращать ответ: границы выделения или null для всего буфера. */
@@ -94,7 +94,7 @@ export function useNoteAssistant() {
       const scope = scopeOf(req);
       const runes = runeLength(req.text);
       // Потолок проверяется ЗДЕСЬ, а не по отказу сервера: на стенде без ключа сервер до
-      // проверки длины вообще не доходит (пре-чек «помощник не подключён» стоит первым), и
+      // проверки длины вообще не доходит (пре-чек «the assistant is not connected» стоит первым), и
       // состояние `toolong` иначе было бы недостижимо ровно там, где его показывают.
       if (runes > NOTE_FORMAT_MAX_RUNES) {
         stop();
@@ -123,7 +123,7 @@ export function useNoteAssistant() {
           if (e.kind === 'toolong') return setState({ kind: 'toolong', runes, scope });
           return setState({ kind: 'failed', message: e.message, request: req });
         }
-        setState({ kind: 'failed', message: 'помощник не ответил', request: req });
+        setState({ kind: 'failed', message: "the assistant didn't answer", request: req });
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
       }
@@ -131,7 +131,7 @@ export function useNoteAssistant() {
     [stop],
   );
 
-  /** «Отменить» — настоящая отмена: соединение рвётся, буфер не тронут ничем. */
+  /** «cancel» — настоящая отмена: соединение рвётся, буфер не тронут ничем. */
   const cancel = useCallback(() => {
     stop();
     setState({ kind: 'idle' });
@@ -159,9 +159,9 @@ export function AiPanel({
   stale?: boolean;
   onCancel: () => void;
   onDismiss: () => void;
-  /** `edit` — «править предложение»: тот же буфер, но сразу в режиме правки. */
+  /** `edit` — «edit the suggestion»: тот же буфер, но сразу в режиме правки. */
   onAccept: (suggestion: AiSuggestion, edit: boolean) => void;
-  /** Вернуть буфер к тому, что было до «принять». `next` — чтобы возврат отказался работать,
+  /** Вернуть буфер к тому, что было до «accept». `next` — чтобы возврат отказался работать,
    * если после принятия текст успели поправить руками. */
   onRevert: (previous: string, next: string) => void;
   onRetry: (request: AiRequest) => void;
@@ -176,13 +176,13 @@ export function AiPanel({
       <CalloutBox tone='note' className='bg-bgColor'>
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
-            <b>помощник не подключён.</b> ключ модели на этом стенде не задан — заметку это никак
-            не ограничивает, просто кнопка ничего не сделает.
+            <b>the assistant is not connected.</b> the model key is not set on this deployment — it
+            doesn't limit the note in any way, the button simply won't do anything.
           </Text>
-          {/* «Закрыть», а не «понятно»: соседние два состояния этой же панели закрываются
+          {/* «close», а не «got it»: соседние два состояния этой же панели закрываются
               кнопкой с таким именем, и кнопка называет действие, а не согласие. */}
           <Button size='xs' variant='secondary' className='ml-auto' onClick={onDismiss}>
-            закрыть
+            close
           </Button>
         </div>
       </CalloutBox>
@@ -194,13 +194,13 @@ export function AiPanel({
       <CalloutBox tone='warning'>
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
-            <b>текст длиннее, чем помощник берёт за раз</b> — {state.runes.toLocaleString('ru-RU')}{' '}
-            {plural(state.runes, 'знак', 'знака', 'знаков')} при пределе{' '}
-            {NOTE_FORMAT_MAX_RUNES.toLocaleString('ru-RU')}. выделите кусок в тексте и нажмите ещё
-            раз: уйдёт только выделенное, и заменится тоже только оно.
+            <b>the text is longer than the assistant takes at once</b> —{' '}
+            {state.runes.toLocaleString('ru-RU')} {plural(state.runes, 'character')} against a limit
+            of {NOTE_FORMAT_MAX_RUNES.toLocaleString('ru-RU')}. select a piece of the text and press
+            again: only the selected part goes, and only it gets replaced.
           </Text>
           <Button size='xs' variant='secondary' className='ml-auto' onClick={onDismiss}>
-            закрыть
+            close
           </Button>
         </div>
       </CalloutBox>
@@ -212,13 +212,13 @@ export function AiPanel({
       <CalloutBox tone='warning'>
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
-            <b>помощник читает текст…</b> уходит{' '}
-            {state.scope === 'selection' ? 'выделенный фрагмент' : 'содержимое заметки целиком'},{' '}
-            {state.runes.toLocaleString('ru-RU')} {plural(state.runes, 'знак', 'знака', 'знаков')}.
-            имя файла, темы и обсуждение не уходят.
+            <b>the assistant is reading the text…</b> what goes is{' '}
+            {state.scope === 'selection' ? 'the selected fragment' : 'the note contents in full'},{' '}
+            {state.runes.toLocaleString('ru-RU')} {plural(state.runes, 'character')}. the file name,
+            the topics and the discussion do not go.
           </Text>
           <Button size='xs' variant='secondary' className='ml-auto' onClick={onCancel}>
-            отменить
+            cancel
           </Button>
         </div>
       </CalloutBox>
@@ -230,14 +230,14 @@ export function AiPanel({
       <CalloutBox tone='error' className='bg-bgColor'>
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
-            <b>помощник не ответил.</b> {state.message}. текст заметки не тронут.
+            <b>the assistant didn't answer.</b> {state.message}. the note text is untouched.
           </Text>
           <div className='ml-auto flex gap-1.5'>
             <Button size='xs' variant='secondary' onClick={() => onRetry(state.request)}>
-              повторить
+              retry
             </Button>
             <Button size='xs' variant='secondary' onClick={onDismiss}>
-              закрыть
+              close
             </Button>
           </div>
         </div>
@@ -248,8 +248,8 @@ export function AiPanel({
   if (state.kind === 'applied') {
     return (
       <Section
-        title='предложение принято'
-        question='— текст в поле заменён, заметка при этом НЕ сохранена'
+        title='suggestion accepted'
+        question='— the text in the field is replaced, and the note is NOT saved'
         action={
           <>
             <Button
@@ -257,25 +257,25 @@ export function AiPanel({
               variant='secondary'
               onClick={() => onRevert(state.previous, state.next)}
             >
-              вернуть как было
+              put it back as it was
             </Button>
             <Button size='sm' variant='main' onClick={onDismiss}>
-              закрыть
+              close
             </Button>
           </>
         }
       >
         {/* Колонки те же и в том же порядке, что до принятия: слева прежний текст, справа
-            нынешний. Меняются только подписи — «как сейчас» после принятия означало бы уже не
+            нынешний. Меняются только подписи — «how it is now» после принятия означало бы уже не
             то, что означало минуту назад. */}
         <div className='grid gap-2.5 lg:grid-cols-2'>
-          <SuggestionColumn title='как было' source={state.previous} />
-          <SuggestionColumn title='стало' source={state.next} />
+          <SuggestionColumn title='how it was' source={state.previous} />
+          <SuggestionColumn title='how it is now' source={state.next} />
         </div>
 
         <Text size='micro' variant='label'>
-          возврат ставит в поле текст ровно до принятия. если после принятия вы уже правили текст
-          руками, возврат откажет — стирать набранное он не станет.
+          the revert puts exactly the pre-accept text into the field. if you have already edited the
+          text by hand after accepting, the revert will refuse — it won't erase what you typed.
         </Text>
       </Section>
     );
@@ -284,39 +284,39 @@ export function AiPanel({
   const { suggestion } = state;
   return (
     <Section
-      title='предложение помощника'
-      question={`— разметка расставлена, формулировки не переписаны${
-        suggestion.scope === 'selection' ? '; заменится только выделенное' : ''
+      title="the assistant's suggestion"
+      question={`— the markup is placed, the wording is not rewritten${
+        suggestion.scope === 'selection' ? '; only the selected part will be replaced' : ''
       }`}
       action={
         <>
           <Button size='sm' variant='secondary' onClick={onDismiss}>
-            отклонить
+            reject
           </Button>
           <Button size='sm' variant='secondary' onClick={() => onAccept(suggestion, true)}>
-            править предложение
+            edit the suggestion
           </Button>
           <Button size='sm' variant='main' onClick={() => onAccept(suggestion, false)}>
-            принять
+            accept
           </Button>
         </>
       }
     >
       {stale && (
         <Text size='micro' component='span' className='text-warning'>
-          текст изменился, пока помощник работал: слева — та версия, которую он читал, и принять
-          предложение поверх дописанного нельзя. попросите ещё раз.
+          the text changed while the assistant was working: on the left is the version it read, and
+          the suggestion can't be accepted on top of what you added. ask again.
         </Text>
       )}
 
       <div className='grid gap-2.5 lg:grid-cols-2'>
-        <SuggestionColumn title='как сейчас' source={suggestion.before} />
-        <SuggestionColumn title='станет' source={suggestion.after} />
+        <SuggestionColumn title='how it is now' source={suggestion.before} />
+        <SuggestionColumn title='how it will be' source={suggestion.after} />
       </div>
 
       <Text size='micro' variant='label'>
-        принять — заменит текст заметки и оставит его несохранённым: последнее слово всё равно за
-        вами. панель после этого не закроется, и принятое можно тут же вернуть.
+        accept — will replace the note text and leave it unsaved: the last word is yours anyway. the
+        panel won't close after that, and what was accepted can be put back right away.
       </Text>
     </Section>
   );

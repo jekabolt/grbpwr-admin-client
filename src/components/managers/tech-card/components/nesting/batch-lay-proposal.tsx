@@ -90,26 +90,26 @@ export type PliesDerivation =
  * докраивает партию, и оба варианта выглядят на экране одинаково нормальным целым числом.
  */
 export function derivePlies(sizes: readonly JobSizeRow[]): PliesDerivation {
-  if (sizes.length === 0) return { ok: false, reason: 'у раскладки нет состава' };
+  if (sizes.length === 0) return { ok: false, reason: 'the marker has no composition' };
   let plies = 0;
   const steps: string[] = [];
   for (const r of sizes) {
     if (!(r.units > 0)) {
       return {
         ok: false,
-        reason: `в составе размер ${r.sizeLabel} стоит нулём — слои по нему не считаются`,
+        reason: `size ${r.sizeLabel} stands at zero in the composition — plies are not counted from it`,
       };
     }
     if (!(r.batchQty > 0)) {
       return {
         ok: false,
-        reason: `партия не заказывает размер ${r.sizeLabel}, а он лежит в составе раскладки — сколько слоёв стелить, из этого не следует`,
+        reason: `the run does not order size ${r.sizeLabel}, yet it sits in the marker composition — how many plies to spread does not follow from that`,
       };
     }
     if (r.batchQty % r.units !== 0) {
       return {
         ok: false,
-        reason: `${r.batchQty} шт размера ${r.sizeLabel} не делятся нацело на ${r.units} в составе раскладки: число слоёв вышло бы дробным, а округление либо не докроит партию, либо накроит лишнего. Состав партии изменился после того, как эта раскладка была снята — переснимите её`,
+        reason: `${r.batchQty} pcs of size ${r.sizeLabel} do not divide evenly by the ${r.units} in the marker composition: the ply count would come out fractional, and rounding would either leave the run short or cut too much. the run composition changed after this marker was captured — re-capture it`,
       };
     }
     const p = r.batchQty / r.units;
@@ -117,7 +117,7 @@ export function derivePlies(sizes: readonly JobSizeRow[]): PliesDerivation {
     else if (p !== plies) {
       return {
         ok: false,
-        reason: `размеры дают РАЗНОЕ число слоёв (${steps.join(', ')}, а ${r.sizeLabel}: ${r.batchQty} ÷ ${r.units} = ${p}) — значит состав раскладки уже не является соотношением этой партии. Переснимите настил`,
+        reason: `the sizes give a DIFFERENT ply count (${steps.join(', ')}, while ${r.sizeLabel}: ${r.batchQty} ÷ ${r.units} = ${p}) — which means the marker composition is no longer the ratio of this run. re-capture the lay`,
       };
     }
     steps.push(`${r.sizeLabel}: ${r.batchQty} ÷ ${r.units} = ${p}`);
@@ -170,24 +170,24 @@ export function batchEndLossPrefill(lays: readonly common_ProductionRunLay[]): {
   const values = [...seen.values()];
   if (values.length === 0) {
     return {
-      why: `в партии ещё нет настилов, у которых можно спросить — форма подставит своё умолчание ${LAY_END_LOSS_DEFAULT_CM} см на конец слоя`,
+      why: `the run has no lays yet to ask — the form will substitute its own default of ${LAY_END_LOSS_DEFAULT_CM} cm per ply end`,
     };
   }
   if (values.length > 1) {
     return {
-      why: `на настилах этой партии стоят разные значения (${values.join(', ')} см) — подставить одно из них наугад нельзя, форма возьмёт своё умолчание ${LAY_END_LOSS_DEFAULT_CM} см`,
+      why: `the lays of this run carry different values (${values.join(', ')} cm) — none of them can be substituted at random, so the form will take its own default of ${LAY_END_LOSS_DEFAULT_CM} cm`,
     };
   }
   return {
     value: values[0],
-    why: `${values[0]} см взято с настилов этой партии — тот же цех и тот же стол`,
+    why: `${values[0]} cm taken from the lays of this run — the same workshop and the same table`,
   };
 }
 
-const meters = (cm: number) => `${(cm / 100).toFixed(2)} м`;
+const meters = (cm: number) => `${(cm / 100).toFixed(2)} m`;
 
 /** Как настил называется на экране. Безымянный — законное состояние, и молчать про него нельзя. */
-const layName = (l: common_ProductionRunLay) => l.name || l.bomItemName || l.layKey || 'без имени';
+const layName = (l: common_ProductionRunLay) => l.name || l.bomItemName || l.layKey || 'unnamed';
 
 /**
  * Блок предложения под итогом по одной ткани одного колорвея.
@@ -275,9 +275,9 @@ export function BatchLayProposal({
   // настилу: открыть его на закрытой партии нельзя ровно так же, как создать новый, и кнопка,
   // погашенная без причины, читается как поломка.
   const writeRefusal = locked
-    ? 'партия принята или закрыта — настил это план, а не история, и правится только на открытой партии'
+    ? 'the run is received or closed — a lay is a plan, not history, and is edited only on an open run'
     : !canEdit
-      ? 'нет прав на изменение производства — настил не сохранить'
+      ? "you don't have the rights to change production — the lay can't be saved"
       : '';
   // ПОРЯДОК — ОТ НЕПОЧИНИМОГО К ПРОХОДЯЩЕМУ САМО. Закрытая партия не станет открытой оттого, что
   // раскладку пересняли в этой сессии, и сказать про сессию первой значило бы послать человека
@@ -287,17 +287,17 @@ export function BatchLayProposal({
     (!plies.ok
       ? plies.reason
       : uncovered.length > 0
-        ? `настил НЕ ПОКРОЕТ размеры ${uncovered.join(', ')} этой партии: их нет в составе раскладки. Строка настила по нему сказала бы, что колорвей раскроен, — а он раскроен частично`
+        ? `the lay WILL NOT COVER sizes ${uncovered.join(', ')} of this run: they are not in the marker composition. a lay row built on it would say the colourway is cut — while it is cut only in part`
         : markerId <= 0
-          ? 'раскладка этой ткани сохранялась не в этой сессии — её номер здесь неизвестен, а угадывать его по имени нельзя: одноимённых раскладок у партии бывает несколько'
+          ? "this fabric's marker was not saved in this session — its id is unknown here, and guessing it by name is not allowed: a run can hold several markers of the same name"
           : laysLoading
-            ? 'читаем настилы партии — пока список не прочитан, предложить настил нельзя: он мог бы оказаться дублем уже существующего'
+            ? 'reading the lays of the run — until the list is read, no lay can be proposed: it could turn out to be a duplicate of an existing one'
             : !marker
               ? queueRunning
-                ? 'раскладка сохранена, но список раскладок партии перечитывается по окончании ОЧЕРЕДИ — дождитесь, пока она досчитает остальные ткани'
-                : 'сохранённая раскладка не найдена в списке раскладок партии — откройте страницу партии, чтобы прочитать его заново'
+                ? 'the marker is saved, but the list of the run markers is re-read when the QUEUE finishes — wait until it counts out the remaining fabrics'
+                : 'the saved marker was not found in the list of the run markers — open the run page to read it again'
               : fit && !fit.eligible
-                ? `эта раскладка в секцию настила не встанет: ${fit.reason}`
+                ? `this marker will not fit into a lay section: ${fit.reason}`
                 : '');
   // ЖДЁМ — НЕ ЗНАЧИТ СЛОМАНО. Оба состояния чтения (список ещё едет, раскладка в нём ещё не
   // появилась) проходят сами, и красный цвет объявил бы их поломкой; красное здесь только то, что
@@ -327,15 +327,15 @@ export function BatchLayProposal({
 
   return (
     <div className='flex flex-col gap-0.5'>
-      <GroupLabel>строка раскроя партии по этой раскладке</GroupLabel>
+      <GroupLabel>the run's cutting row built on this marker</GroupLabel>
 
       {/* СОСТАВ И СЛОИ — СЛОВАМИ И ЧИСЛАМИ. Число слоёв здесь единственное, что выведено, и
           показать его без арифметики значило бы попросить поверить на слово. */}
       <Text size='micro' variant='label'>
-        {`партия заказывает ${job.sizes.map((r) => `${r.batchQty} ${r.sizeLabel}`).join(' + ')};` +
+        {`the run orders ${job.sizes.map((r) => `${r.batchQty} ${r.sizeLabel}`).join(' + ')};` +
           (singleGarment
-            ? ` раскладка снята на ОДНО изделие ${job.sizeLabel}`
-            : ` раскладка снята на состав ${job.sizeLabel} — то же соотношение, ужатое на НОД`)}
+            ? ` the marker was captured on ONE garment ${job.sizeLabel}`
+            : ` the marker was captured on composition ${job.sizeLabel} — the same ratio, squeezed by the GCD`)}
       </Text>
       {/* ВЫРОЖДЕННЫЙ СЛУЧАЙ НАЗЫВАЕТСЯ ЗДЕСЬ ЖЕ, А НЕ ТОЛЬКО В ИЗМЕРЕНИИ ВЫШЕ. Оговорка про
           «настила здесь нет» стоит над этим блоком красным, и предложить под ней обычную кнопку с
@@ -344,51 +344,51 @@ export function BatchLayProposal({
           нормальный настил, неверна не идея, а ДЛИНА, которой он посчитан. */}
       {singleGarment ? (
         <Text size='micro' className='text-error'>
-          {`в партии этот колорвей заказан в одном размере, поэтому измерена РАЗРЕЖЕННАЯ однокомплектная укладка, а не настил: её длина идёт с запасом, и план настила наследует этот запас целиком.${
+          {`the run orders this colourway in a single size, so what was measured is a SPARSE single-kit placement, not a lay: its length carries a margin, and the lay plan inherits that margin whole.${
             plies.ok
-              ? ` ${plies.plies} слоёв — это весь заказ одной стопкой: проверьте высоту стопки (её считает сервер при сохранении) и при необходимости разложите настил на секции.`
+              ? ` ${plies.plies} plies is the whole order in one stack: check the stack height (the server computes it on save) and, if needed, split the lay into sections.`
               : ''
           }`}
         </Text>
       ) : null}
       {plies.ok ? (
         <Text size='micro' variant='label'>
-          {`слоёв = количество в партии ÷ количество в составе: ${plies.steps.join(
+          {`plies = quantity in the run ÷ quantity in the composition: ${plies.steps.join(
             ' · ',
-          )} — одно число на каждом размере, потому что состав получен делением на общий делитель`}
+          )} — one and the same number on every size, because the composition came from dividing by a common divisor`}
         </Text>
       ) : null}
 
       {geo && plies.ok ? (
         <>
-          <Row label='слоёв' value={String(geo.totalPlies)} />
+          <Row label='plies' value={String(geo.totalPlies)} />
           <Row
-            label={`ткань · ${markerLenCm.toFixed(0)} см × ${geo.totalPlies} сл`}
+            label={`fabric · ${markerLenCm.toFixed(0)} cm × ${geo.totalPlies} plies`}
             value={meters(geo.clothCm)}
           />
           <Row
-            label={`концевые · 2 × ${endLossCm} см × ${geo.totalPlies} сл`}
+            label={`lay ends · 2 × ${endLossCm} cm × ${geo.totalPlies} plies`}
             value={meters(geo.endLossTotalCm)}
           />
-          <Row emphasis label='план настила' value={meters(geo.plannedCm)} />
+          <Row emphasis label='lay plan' value={meters(geo.plannedCm)} />
           {/* ЧЕГО В ЭТОМ ПЛАНЕ НЕТ. Коэффициент раскроя артикула к настилу не применяется
               (решение Ф4): он покрывает усадку, обход пороков и сращивание, то есть ровно то,
               чего геометрия не видит, — и применённый здесь сделал бы калибровку круговой. */}
           <Text size='micro' variant='label'>
-            план настила — это ткань плюс концевые и НИЧЕГО СВЕРХ: коэффициент раскроя артикула к
-            настилу не применяется (усадка, обход пороков и сращивание в него не входят), а высоту
-            стопки считает сервер при сохранении.
+            the lay plan is the fabric plus the lay ends and NOTHING BEYOND: the article's cutting
+            coefficient is not applied to a lay (shrinkage, working around faults and splicing are
+            not part of it), and the stack height is computed by the server on save.
           </Text>
           <Text size='micro' variant='label'>
-            {`концевые потери — ваше число, а не измерение: ${endLoss.why}. Из геометрии раскладки они не выводятся ничем — это свойство стола.`}
+            {`the lay end loss is your number, not a measurement: ${endLoss.why}. nothing derives it from the geometry of the marker — it is a property of the table.`}
           </Text>
           <Text size='micro' variant='label'>
-            режим — ЛИЦОМ ВВЕРХ: очередь кладёт каждый контур так, как он нарисован, и ни одного
-            зеркального размещения не заводит — значит ОДИН слой даёт ровно состав. Лицом к лицу
-            потребовало бы чётного числа слоёв (а их тут {geo.totalPlies}) и запрещено на
-            направленной ткани. Если в чертеже нарисована только одна деталь зеркальной пары, это
-            скажет проверка секции «развёртка зеркальных деталей»: она появится здесь же, как только
-            настил сохранится, а режим переключается в той же форме.
+            the mode is FACE UP: the queue places every contour exactly as it is drawn and creates
+            no mirrored placement — which means ONE ply gives exactly the composition. face to face
+            would require an even ply count (and here there are {geo.totalPlies}) and is forbidden
+            on directional fabric. if the drawing holds only one piece of a mirrored pair, the
+            section check “mirrored piece expansion” will say so: it appears right here as soon as
+            the lay is saved, and the mode is switched in the same form.
           </Text>
         </>
       ) : null}
@@ -401,13 +401,13 @@ export function BatchLayProposal({
         <div className='flex flex-col items-start gap-0.5'>
           <Text size='micro' variant='label'>
             {already
-              ? `настил «${layName(already)}» уже собран по ЭТОЙ раскладке — второго по ней быть не должно.`
-              : `на эту ткань и колорвей в партии уже есть настил — и он планирует ту же самую партию. Если раскладку ПЕРЕСЧИТАЛИ, у неё теперь другой номер: замените её в СЕКЦИИ существующего настила, а не заводите второй — иначе оба спланируют весь заказ, и потребность в ткани удвоится.`}
+              ? `lay “${layName(already)}” is already built on THIS marker — there must not be a second one on it.`
+              : `this fabric and colourway already have a lay in the run — and it plans that very same run. if the marker was RECOMPUTED, it now has a different id: replace it in the SECTION of the existing lay instead of creating a second one — otherwise both will plan the whole order, and the fabric requirement will double.`}
             {/* ИМЯ СВЕЖЕЙ РАСКЛАДКИ — иначе «замените в секции» отправляет искать её в пикере
                 среди одноимённых: пересъёмка, которая не смогла заменить прежнюю, получает то же
                 имя с суффиксом «#2», и различить их по одному названию невозможно. */}
-            {!already && marker?.name ? ` Свежая раскладка называется «${marker.name}».` : ''}
-            {plies.ok ? ` Партии нужно ${plies.plies} сл.` : ''}
+            {!already && marker?.name ? ` the fresh marker is called “${marker.name}”.` : ''}
+            {plies.ok ? ` the run needs ${plies.plies} plies.` : ''}
           </Text>
           {/* Слои не вывелись — причина обязана доехать и сюда: без неё совет «сверьте число
               слоёв» повисает без числа, и непонятно, потерялось оно или его не бывает. */}
@@ -430,13 +430,13 @@ export function BatchLayProposal({
             return (
               <div key={l.layKey || l.id} className='flex flex-col items-start gap-0.5'>
                 <Text size='micro' variant='label'>
-                  {`«${layName(l)}» — ${l.totalPlies ?? 0} сл., план ${meters(decNum(l.plannedLengthCm))}`}
+                  {`“${layName(l)}” — ${l.totalPlies ?? 0} plies, plan ${meters(decNum(l.plannedLengthCm))}`}
                 </Text>
                 {checks.map((c, i) => {
                   const v = layVerdict(c.status);
                   return (
                     <Text key={`${c.key || 'check'}-${i}`} size='micro' className={VERDICT_TEXT[v]}>
-                      {VERDICT_GLYPH[v]} {v === 'unknown' ? 'не проверено: ' : ''}
+                      {VERDICT_GLYPH[v]} {v === 'unknown' ? 'not checked: ' : ''}
                       {c.label || c.key}
                       {c.detail ? ` — ${c.detail}` : ''}
                     </Text>
@@ -449,7 +449,7 @@ export function BatchLayProposal({
                   disabled={!!writeRefusal}
                   onClick={() => setOpenKey(l.layKey ?? '')}
                 >
-                  {`открыть «${layName(l)}»`}
+                  {`open “${layName(l)}”`}
                 </Button>
               </div>
             );
@@ -466,13 +466,13 @@ export function BatchLayProposal({
       ) : (
         <div className='flex flex-col items-start gap-0.5'>
           <Button type='button' size='xs' variant='secondary' onClick={() => setOpenKey('new')}>
-            собрать настил из этой раскладки
+            build a lay from this marker
           </Button>
           <Text size='micro' variant='label'>
-            откроется та же форма настила, что на странице партии, с заполненными полями —
-            предлагаем, а не создаём: запись происходит по вашей кнопке в форме. Проверки сервера
-            (развёртка зеркальных деталей, ширина рулона, высота стопки) появятся здесь же, как
-            только настил сохранится.
+            the same lay form as on the run page will open, with the fields filled in — we propose,
+            we do not create: the write happens on your button in the form. the server checks
+            (mirrored piece expansion, roll width, stack height) will appear right here as soon as
+            the lay is saved.
           </Text>
         </div>
       )}

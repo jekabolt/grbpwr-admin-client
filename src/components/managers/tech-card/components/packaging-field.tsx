@@ -91,7 +91,7 @@ export function PackagingField() {
               <InputField
                 name='packaging.boxDimensions'
                 label='box dimensions (L×W×H)'
-                placeholder='напр. 40×30×20'
+                placeholder='e.g. 40×30×20'
               />
               <InputField
                 name='packaging.weightGrossGrams'

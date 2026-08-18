@@ -154,7 +154,11 @@ console.log('\n2 · предел 95 MiB: один и тот же у машины
 {
   ck(m.DEFAULT_MAX_UPLOAD_BYTES === 95 * 1024 * 1024, 'предел машины — 95 MiB');
   eq(m.classifySize(95 * MB, m.DEFAULT_MAX_UPLOAD_BYTES), 'ok', 'ровно предел проходит');
-  eq(m.classifySize(95 * MB + 1, m.DEFAULT_MAX_UPLOAD_BYTES), 'big', 'предел + 1 байт — не проходит');
+  eq(
+    m.classifySize(95 * MB + 1, m.DEFAULT_MAX_UPLOAD_BYTES),
+    'big',
+    'предел + 1 байт — не проходит',
+  );
 
   // Предел живёт в двух местах: у машины (значение по умолчанию) и в filesService, откуда его
   // берёт стор. Разъехавшись, они дадут отказ 413 после минут отправки — то самое, ради чего
@@ -232,7 +236,10 @@ console.log('\n4 · сеть: по одному файлу, в порядке п
 console.log('\n5 · дубликат: вскрывается только на 100% — sha256 считает сервер');
 {
   const h = harness();
-  h.engine.enqueue([src('same.jpg', 2 * MB, 'image/jpeg')], { topicIds: [4], newTopics: ['съёмка'] });
+  h.engine.enqueue([src('same.jpg', 2 * MB, 'image/jpeg')], {
+    topicIds: [4],
+    newTopics: ['съёмка'],
+  });
   h.net.previews[0].ok({ preview: true });
   await tick();
   // Последнее событие прогресса до 100% может и не прийти — XHR его не гарантирует. Ответ
@@ -247,11 +254,7 @@ console.log('\n5 · дубликат: вскрывается только на 1
   eq(h.at(0).duplicateOf, { id: 9, name: 'IMG_4821.jpg' }, 'оригинал назван — «показать тот файл»');
   eq(h.at(0).topicIds, [4], 'темы пачки при строке остались — «дать ему темы» есть что дать');
   eq(h.at(0).newTopics, ['съёмка'], 'и новые темы тоже');
-  eq(
-    m.rowActions(h.at(0)),
-    ['reveal', 'assignTopics', 'dismiss'],
-    'три действия дубликата',
-  );
+  eq(m.rowActions(h.at(0)), ['reveal', 'assignTopics', 'dismiss'], 'три действия дубликата');
   ck(m.statusTone(h.at(0)) === 'ink', 'дубликат нейтрального тона, не тревожного');
 
   // Главное утверждение раздела — про ВСЮ историю, а не про конечное состояние.
@@ -278,7 +281,11 @@ console.log('\n6 · обрыв связи и отказ сервера — ра�
   h.net.uploads[0].no(new m.UploadError(0, 'connection dropped'));
   await tick();
   eq(h.st(), ['lost', 'run'], 'обрыв на первой, очередь поехала дальше');
-  ck(h.at(0).progress === 0.41, 'проценты обрыва сохранены — человек их видел', String(h.at(0).progress));
+  ck(
+    h.at(0).progress === 0.41,
+    'проценты обрыва сохранены — человек их видел',
+    String(h.at(0).progress),
+  );
   eq(h.at(0).failure.kind, 'lost', 'исход записан');
 
   h.net.uploads[1].req.onProgress(0.88);
@@ -289,9 +296,9 @@ console.log('\n6 · обрыв связи и отказ сервера — ра�
 
   const lost = m.rowWhy(h.at(0));
   const fail = m.rowWhy(h.at(1));
-  ck(lost.includes('связь оборвалась на 41%'), 'текст обрыва называет проценты', lost);
-  ck(lost.includes('сервер файл не получил'), 'и говорит, что на сервере файла нет');
-  ck(fail.includes('сервер ответил 500'), 'текст отказа называет код', fail);
+  ck(lost.includes('the connection dropped at 41%'), 'текст обрыва называет проценты', lost);
+  ck(lost.includes('the server never got the file'), 'и говорит, что на сервере файла нет');
+  ck(fail.includes('the server answered 500'), 'текст отказа называет код', fail);
   ck(lost !== fail, 'тексты разные');
   eq(m.rowActions(h.at(0)), ['retry'], 'у обрыва одно действие');
   eq(m.rowActions(h.at(1)), ['retry'], 'и у отказа то же');
@@ -313,7 +320,11 @@ console.log('\n7 · повтор всегда с нуля: докачки у mul
 
   h.engine.retry(h.at(0).id);
   eq(h.st(), ['run'], 'повтор сразу поехал: сеть свободна');
-  ck(h.at(0).progress === 0, 'проценты обнулены — 41% никуда не «сохранились»', String(h.at(0).progress));
+  ck(
+    h.at(0).progress === 0,
+    'проценты обнулены — 41% никуда не «сохранились»',
+    String(h.at(0).progress),
+  );
   ck(h.at(0).tries === 2, 'вторая попытка засчитана', String(h.at(0).tries));
   ck(h.at(0).failure === undefined, 'прошлый отказ стёрт — иначе строка носила бы два исхода');
   ck(h.net.uploads.length === 2, 'ушёл второй запрос');
@@ -397,15 +408,21 @@ console.log('\n8b · отмена строки не снимает ограни�
   );
   h.engine.cancel(h.at(0).id);
   await tick();
-  ck(h.net.previews.length === 1, 'и вторая отмена тоже: канал занят, пока рендер не кончится',
-    String(h.net.previews.length));
+  ck(
+    h.net.previews.length === 1,
+    'и вторая отмена тоже: канал занят, пока рендер не кончится',
+    String(h.net.previews.length),
+  );
 
   // Но канал обязан ОТПУСТИТЬСЯ, когда рендер отменённой строки всё-таки доедет: иначе
   // очередь встала бы навсегда, что не лучше трёх параллельных.
   h.net.previews[0].ok({ preview: true });
   await tick();
-  ck(h.net.previews.length === 2, 'доехавший рендер отменённой строки отпустил канал',
-    String(h.net.previews.length));
+  ck(
+    h.net.previews.length === 2,
+    'доехавший рендер отменённой строки отпустил канал',
+    String(h.net.previews.length),
+  );
   eq(h.st(), ['prev'], 'осталась одна строка — она и рисуется');
 }
 
@@ -462,29 +479,39 @@ console.log('\n10 · сводка: свёрнутая полоса несёт в
   };
   const line = m.summaryLine(all);
   ck(
-    line === 'готово 4 из 9 · идёт 1 · превью 1 · в очереди 1 · 1 обрыв · 1 отказ · 1 дубликат · 1 не пролезет',
+    line ===
+      "done 4 of 9 · going 1 · preview 1 · queued 1 · 1 drop · 1 failure · 1 duplicate · 1 won't fit",
     'все восемь исходов в одной строке; из знаменателя вынут только big — он в сеть не уходил',
     line,
   );
-  ck(m.summaryLine(m.createQueue()) === 'очередь пуста', 'пустая очередь говорит это прямо');
+  ck(m.summaryLine(m.createQueue()) === 'the queue is empty', 'пустая очередь говорит это прямо');
 
-  eq(m.plural(1, 'обрыв', 'обрыва', 'обрывов'), 'обрыв', '1 обрыв');
-  eq(m.plural(2, 'обрыв', 'обрыва', 'обрывов'), 'обрыва', '2 обрыва');
-  eq(m.plural(5, 'обрыв', 'обрыва', 'обрывов'), 'обрывов', '5 обрывов');
-  eq(m.plural(11, 'обрыв', 'обрыва', 'обрывов'), 'обрывов', '11 обрывов — не «обрыв»');
-  eq(m.plural(21, 'обрыв', 'обрыва', 'обрывов'), 'обрыв', '21 обрыв');
+  // Двухформенный английский плюрал: -s достраивается сам, нерегулярное идёт вторым
+  // аргументом. Русские три формы (1 / 2 / 5) умерли вместе с русским текстом раздела.
+  eq(m.plural(1, 'drop'), 'drop', '1 drop');
+  eq(m.plural(2, 'drop'), 'drops', '2 drops');
+  eq(m.plural(5, 'drop'), 'drops', '5 drops');
+  eq(m.plural(0, 'drop'), 'drops', '0 drops — ноль не единственное');
+  eq(m.plural(21, 'drop'), 'drops', '21 drops — английское не считает по последней цифре');
+  eq(m.plural(1, 'is', 'are'), 'is', 'нерегулярная форма: единственное');
+  eq(m.plural(3, 'is', 'are'), 'are', 'нерегулярная форма берётся вторым аргументом');
 
-  ck(m.statusLabel(mk('run', 1)) === 'отправка 63%', 'проценты в метке', m.statusLabel(mk('run', 1)));
-  ck(m.statusLabel(mk('dup', 1)) === 'дубликат', 'дубликат назван словом');
+  ck(
+    m.statusLabel(mk('run', 1)) === 'uploading 63%',
+    'проценты в метке',
+    m.statusLabel(mk('run', 1)),
+  );
+  ck(m.statusLabel(mk('dup', 1)) === 'duplicate', 'дубликат назван словом');
   const sum = m.batchSummary(all, ['съёмка', 'лукбук']);
-  ck(sum.includes('отправлено 4 из 9'), 'итог считает всю пачку', sum);
-  ck(sum.includes('темы: съёмка, лукбук'), 'итог называет темы');
+  ck(sum.includes('sent 4 of 9'), 'итог считает всю пачку', sum);
+  // Имена тем — ДАННЫЕ, а не слова интерфейса: они приходят из библиотеки как есть.
+  ck(sum.includes('topics: съёмка, лукбук'), 'итог называет темы');
 
   // ОДИН РЕЗУЛЬТАТ — ОДНА ПАРА ЧИСЕЛ. Свёрнутая полоса печатает сводку, а ушедшему со страницы
   // тот же исход достаётся тостом. Разойтись им нельзя: «готово 3 из 8» против «отправлено
   // 3 из 10» — это два разных ответа на один вопрос, и оба видит один и тот же человек за
   // одну минуту. Дубликат при этом СОХРАНЁН второй копией — значит он доехал и считается.
-  const pair = (s) => (s.match(/(\d+) из (\d+)/) ?? []).slice(1).join('/');
+  const pair = (s) => (s.match(/(\d+) of (\d+)/) ?? []).slice(1).join('/');
   ck(
     pair(line) !== '' && pair(line) === pair(sum),
     'сводка полосы и итог пачки называют одни и те же числа',
@@ -492,21 +519,26 @@ console.log('\n10 · сводка: свёрнутая полоса несёт в
   );
   ck(pair(sum) === '4/9', 'дубликат посчитан доехавшим, слишком большой — нет', pair(sum));
   ck(
-    m.batchSummary(all, []).includes('без тем — уехало в «разобрать»'),
+    m.batchSummary(all, []).includes('without topics — went to “unsorted”'),
     'пачка без тем сказана словами',
   );
   const strings = [
     line,
-    sum,
+    // Итог БЕЗ тем: имена тем — данные библиотеки, они бывают любыми, и проверять на них
+    // язык интерфейса значит проверять содержимое чужой базы.
+    m.batchSummary(all, []),
     m.statusLabel(mk('wait', 1)),
     m.actionLabel('retry'),
     m.actionLabel('assignTopics'),
     m.rowWhy(mk('wait', 1)),
   ];
+  // ЗЕРКАЛО ПРЕЖНЕЙ ПРОВЕРКИ. Раздел стал английским целиком, и стеречь теперь надо остаток
+  // кириллицы: одна недопереведённая строка среди английских читается так же чужеродно, как
+  // раньше читалась английская среди русских.
   ck(
-    strings.every((s) => !/[A-Za-z]/.test(s.replace(/\d/g, ''))),
-    'ни одной латинской буквы в словах для человека',
-    strings.find((s) => /[A-Za-z]/.test(s.replace(/\d/g, ''))) ?? '',
+    strings.every((s) => !/[Ѐ-ӿ]/.test(s)),
+    'ни одной кириллической буквы в словах для человека',
+    strings.find((s) => /[Ѐ-ӿ]/.test(s)) ?? '',
   );
   ck(
     strings.every((s) => s === s.toLocaleLowerCase('ru')),
@@ -515,22 +547,22 @@ console.log('\n10 · сводка: свёрнутая полоса несёт в
   );
 
   // ЕДИНИЦЫ РАЗМЕРА — ТОЖЕ СЛОВА ДЛЯ ЧЕЛОВЕКА. На одном экране стояли плитка «500 KB», оверлей
-  // «до 95 мб» и строка «412 MB при пределе 95 MB»: три написания одной величины в одном
-  // разделе. Р4 говорит по-русски и строчными — значит и «мб».
+  // «up to 95 mb» и строка «412 MB при пределе 95 MB»: три написания одной величины в одном
+  // разделе. Раздел говорит строчными — значит и «mb».
   const heavy = { ...mk('big', 11), size: 412 * MB };
   const flying = { ...mk('run', 12), size: 8 * MB, progress: 0.5 };
   const sized = [m.rowWhy(heavy), m.rowWhy(flying)];
   ck(
-    sized.every((s) => !/[A-Za-z]/.test(s)),
-    'ни KB, ни MB: единицы размера русские',
-    sized.find((s) => /[A-Za-z]/.test(s)) ?? '',
+    sized.every((s) => !/\d+(\.\d+)?\s(B|KB|MB|GB)\b/.test(s)),
+    'ни KB, ни MB: единицы размера строчные',
+    sized.find((s) => /\d+(\.\d+)?\s(B|KB|MB|GB)\b/.test(s)) ?? '',
   );
   ck(
     sized.every((s) => s === s.toLocaleLowerCase('ru')),
     'и они строчные, как весь раздел',
     sized.find((s) => s !== s.toLocaleLowerCase('ru')) ?? '',
   );
-  ck(m.rowWhy(heavy).includes('412 мб'), 'размер назван целиком', m.rowWhy(heavy));
+  ck(m.rowWhy(heavy).includes('412 mb'), 'размер назван целиком', m.rowWhy(heavy));
 }
 
 /* ── 11 · НАСЛЕДОВАНИЕ ТЕМ ────────────────────────────────────────────────────────────── */
@@ -580,8 +612,14 @@ console.log('\n12 · опоздавшие и незаконные события
     cap: m.DEFAULT_MAX_UPLOAD_BYTES,
   });
   const before = JSON.stringify(s0);
-  ck(m.reduce(s0, { type: 'progress', id: 'нет-такой', fraction: 0.5 }) === s0, 'чужой id — то же состояние');
-  ck(m.reduce(s0, { type: 'uploaded', id: 'q1', fileId: 1, duplicates: [] }) === s0, 'ответ по неотправленной строке отвергнут');
+  ck(
+    m.reduce(s0, { type: 'progress', id: 'нет-такой', fraction: 0.5 }) === s0,
+    'чужой id — то же состояние',
+  );
+  ck(
+    m.reduce(s0, { type: 'uploaded', id: 'q1', fileId: 1, duplicates: [] }) === s0,
+    'ответ по неотправленной строке отвергнут',
+  );
   ck(m.reduce(s0, { type: 'retry', id: 'q1' }) === s0, 'повторять нечего — состояние то же');
   ck(JSON.stringify(s0) === before, 'reduce ничего не мутировал по дороге');
 
@@ -646,8 +684,14 @@ console.log('\n13 · бросок: ссылка гасится везде, те�
   // Блокер: уход по адресу невозможен НИГДЕ, включая поле ввода. Исключение «поле + нет
   // Files» пропустило бы ссылку в поле и оставило бы уход со страницы на обещании браузера.
   ck(m.swallowsDrag(target(), LINK), 'ссылка над сеткой гасится');
-  ck(m.swallowsDrag(field(), LINK), 'ссылка гасится и над полем ввода — обещаний браузера не берём');
-  ck(m.swallowsDrag(field({ tag: 'textarea', type: '' }), IMAGE), 'картинка гасится и над textarea');
+  ck(
+    m.swallowsDrag(field(), LINK),
+    'ссылка гасится и над полем ввода — обещаний браузера не берём',
+  );
+  ck(
+    m.swallowsDrag(field({ tag: 'textarea', type: '' }), IMAGE),
+    'картинка гасится и над textarea',
+  );
   ck(m.swallowsDrag(target({ editable: true }), LINK), 'ссылка гасится и над редактируемым узлом');
   ck(m.swallowsDrag(target(), FILES), 'файл гасится: его принимает раздел, а не браузер');
   ck(m.swallowsDrag(field(), FILES), 'файл, брошенный в поле, тоже наш — поле его не съест');
@@ -662,7 +706,10 @@ console.log('\n13 · бросок: ссылка гасится везде, те�
 
   // Границы исключения: всё, что текст не примет, остаётся под гашением — умолчание браузера
   // над такой целью ничем не обещано.
-  ck(m.swallowsDrag(field({ readOnly: true }), TEXT), 'поле только для чтения — не приёмник текста');
+  ck(
+    m.swallowsDrag(field({ readOnly: true }), TEXT),
+    'поле только для чтения — не приёмник текста',
+  );
   ck(m.swallowsDrag(field({ disabled: true }), TEXT), 'выключенное поле — тоже');
   ck(m.swallowsDrag(field({ type: 'file' }), TEXT), 'input type=file текст не принимает');
   ck(m.swallowsDrag(field({ type: 'checkbox' }), TEXT), 'галочка — не поле ввода');

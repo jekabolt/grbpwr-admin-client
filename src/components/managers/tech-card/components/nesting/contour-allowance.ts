@@ -607,14 +607,14 @@ function measureOnIndex(idx: AllowanceIndex, contourLayer: string): ContourAllow
 // «измерено ноль» звучали по-разному ВЕЗДЕ, где их показывают.
 export function allowanceLabel(m: ContourAllowance): string {
   if (m.verdict === 'cut') {
-    return `линия кроя, припуск уже в контуре +${m.allowanceCm?.toFixed(2)} см`;
+    return `cut line, the allowance is already in the contour +${m.allowanceCm?.toFixed(2)} cm`;
   }
   if (m.verdict === 'seam') {
     return m.gapCm != null
-      ? `линия шва, припуск снаружи ${m.gapCm.toFixed(2)} см`
-      : 'линия шва, припуска в контуре нет';
+      ? `seam line, allowance outside ${m.gapCm.toFixed(2)} cm`
+      : 'seam line, no allowance in the contour';
   }
-  return 'припуск не измерен';
+  return 'allowance not measured';
 }
 
 // Развёрнутое «почему не измерено» — для панели предупреждений и для строки, которая уедет в
@@ -622,15 +622,15 @@ export function allowanceLabel(m: ContourAllowance): string {
 export function allowanceUnknownText(m: ContourAllowance): string {
   switch (m.reason) {
     case 'no_layer':
-      return 'слой контура не выбран — сравнивать нечего';
+      return 'no contour layer picked — nothing to compare';
     case 'layer_absent':
-      return 'на этом слое нет ни одного контура';
+      return 'this layer has no contours at all';
     case 'no_origin':
-      return 'детали восстановлены из сохранённого маркера: их места в чертеже нет, замерить припуск по файлу нельзя';
+      return "the pieces were restored from a saved marker: their place in the drawing is gone, so the allowance can't be measured from the file";
     case 'too_few_blocks':
-      return `замер удался на ${m.stats.accepted} блоках — нужно хотя бы ${ALLOWANCE_MIN_BLOCKS}`;
+      return `the measurement succeeded on ${m.stats.accepted} blocks — at least ${ALLOWANCE_MIN_BLOCKS} are needed`;
     case 'no_majority':
-      return `блоки не сошлись: ${m.stats.votesChosenOutside} за «линия кроя», ${m.stats.votesChosenInside} за «линия шва»`;
+      return `the blocks disagreed: ${m.stats.votesChosenOutside} for “cut line”, ${m.stats.votesChosenInside} for “seam line”`;
     default:
       return '';
   }

@@ -128,10 +128,10 @@ export function SpecialtiesField({
           <Button
             size='xs'
             variant='secondary'
-            aria-label={`${mine.length ? 'изменить' : 'указать'} специальности · ${username ?? ''}`}
+            aria-label={`${mine.length ? 'edit' : 'set'} specialties · ${username ?? ''}`}
             onClick={() => setOpen(true)}
           >
-            {mine.length ? 'изменить' : 'указать'}
+            {mine.length ? 'edit' : 'set'}
           </Button>
         )}
       </div>
@@ -159,10 +159,10 @@ export function SpecialtiesField({
               // быть открыто несколько, а два одинаковых id — это подпись, указывающая не на
               // то поле.
               name={`newSpecialty-${username ?? 'me'}`}
-              aria-label='новая специальность'
+              aria-label='new specialty'
               value={typed}
               autoFocus
-              placeholder='своя специальность'
+              placeholder='your own specialty'
               className='h-[22px] w-[170px]'
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTyped(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -179,25 +179,26 @@ export function SpecialtiesField({
             {/* Явная кнопка вместо коммита по blur: набранное мышью тоже должно уметь
                 сохраниться, а уход фокуса записью быть не может. */}
             <Button size='xs' variant='secondary' disabled={busy} onClick={commitTyped}>
-              добавить
+              add
             </Button>
           </span>
         ) : (
           <Chip dashed disabled={busy} onClick={() => setAdding(true)}>
-            + добавить специальность
+            + add a specialty
           </Chip>
         )}
       </ChipRow>
       <div className='flex flex-wrap items-center gap-2'>
         <Text size='micro' variant='label' component='span' className='max-w-[70ch]'>
-          новая специальность попадает в общий список и станет доступна остальным аккаунтам — так
-          словарь растёт сам, но не превращается в свободный текст. прав специальность не даёт: по
-          ней находят, когда назначают владельца файла или упоминают в обсуждении.
+          a new specialty joins the shared list and becomes available to the other accounts — that
+          way the vocabulary grows by itself without turning into free text. a specialty grants no
+          rights: it is how people are found when a file owner is assigned or somebody is mentioned
+          in a discussion.
         </Text>
         {/* Отдельной кнопки «сохранить» нет намеренно: каждый клик по чипу уже сохранён,
             «готово» только сворачивает список обратно. */}
         <Button size='xs' variant='secondary' className='ml-auto' onClick={() => setOpen(false)}>
-          готово
+          done
         </Button>
       </div>
     </div>

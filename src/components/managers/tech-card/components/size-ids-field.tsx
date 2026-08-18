@@ -223,28 +223,28 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           if (pendingRemove != null) pruneAndRemove(pendingRemove);
           setPendingRemove(null);
         }}
-        title='удалить размер?'
-        confirmLabel='удалить размер'
-        cancelLabel='отмена'
+        title='delete the size?'
+        confirmLabel='delete the size'
+        cancelLabel='cancel'
       >
         <Text size='micro' variant='label' className='mb-2'>
-          Размер {pendingName} используется. Что произойдёт:
+          size {pendingName} is in use. what will happen:
         </Text>
         {pendingRemove != null && patternCount(pendingRemove) > 0 && (
-          <Row label='выкройки PDF' value={patternCount(pendingRemove)} />
+          <Row label='pattern PDFs' value={patternCount(pendingRemove)} />
         )}
         {pendingRemove != null && dxfCount(pendingRemove) > 0 && (
           <Row
             label={
               refileTarget(pendingRemove) > 0
-                ? `DXF — не удалятся, перевесятся на ${nameOf(refileTarget(pendingRemove))}`
-                : 'DXF — не удалятся, останутся БЕЗ размера: размеров в ряду не останется, а размеры и так записаны в самих файлах'
+                ? `DXF — won't be deleted, they'll be re-filed onto ${nameOf(refileTarget(pendingRemove))}`
+                : "DXF — won't be deleted, they'll stay WITHOUT a size: no sizes will be left in the range, and the sizes are written in the files themselves anyway"
             }
             value={dxfCount(pendingRemove)}
           />
         )}
         <Row
-          label='строки расхода по размерам (колорвеи)'
+          label='per-size consumption lines (colourways)'
           value={pendingRemove != null ? usageLineCount(pendingRemove) : 0}
         />
       </ConfirmationModal>

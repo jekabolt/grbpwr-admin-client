@@ -168,7 +168,7 @@ export function ProductionRuns() {
   // The row's controls, in the order they are reached for: the batch's NEXT STEP first, then the
   // two edits.
   //
-  // `принять` is withheld from an AUXILIARY run. It books its output into a material bucket (or one
+  // `receive` is withheld from an AUXILIARY run. It books its output into a material bucket (or one
   // per colour) that only its tech card names, and this list holds no tech cards; the run's own page
   // passes that context to the same modal, so an aux-shaped row links there instead of opening a
   // product-shaped receive over it.
@@ -184,7 +184,7 @@ export function ProductionRuns() {
       return (
         <span className='flex justify-end'>
           <Button asChild variant='secondary' size='xs'>
-            <Link to={runDetailPath(r.id ?? 0)}>открыть</Link>
+            <Link to={runDetailPath(r.id ?? 0)}>open</Link>
           </Button>
         </span>
       );
@@ -193,7 +193,7 @@ export function ProductionRuns() {
       <span className='flex flex-wrap justify-end gap-1'>
         {canReceive && (
           <Button type='button' variant='secondary' size='xs' onClick={() => setReceiving(r)}>
-            принять
+            receive
           </Button>
         )}
         {canModify && (
@@ -235,13 +235,13 @@ export function ProductionRuns() {
           stopped, and the old one answered by printing every batch's size grid instead. */}
       {attention.length > 0 && (
         <Section
-          title='требует действия'
+          title='needs action'
           question={
             filtered
-              ? '— среди партий текущего фильтра'
+              ? '— among the runs of the current filter'
               : pageFull
-                ? '— партии, которые не поедут дальше сами (из первых 200)'
-                : '— партии, которые не поедут дальше сами'
+                ? '— runs that will not move on their own (of the first 200)'
+                : '— runs that will not move on their own'
           }
         >
           <div className='flex flex-col'>
@@ -273,11 +273,11 @@ export function ProductionRuns() {
                       size='xs'
                       onClick={() => setReceiving(a.run)}
                     >
-                      принять
+                      receive
                     </Button>
                   ) : (
                     <Button asChild variant='secondary' size='xs'>
-                      <Link to={runDetailPath(a.run.id ?? 0)}>открыть</Link>
+                      <Link to={runDetailPath(a.run.id ?? 0)}>open</Link>
                     </Button>
                   )
                 }
@@ -285,7 +285,9 @@ export function ProductionRuns() {
             ))}
             {attention.length > ATTENTION_LIMIT && (
               <Text size='micro' variant='label' className='pt-1.5'>
-                {`ещё ${attention.length - ATTENTION_LIMIT} партий требуют внимания — они ниже, в списке`}
+                {`${attention.length - ATTENTION_LIMIT} more ${
+                  attention.length - ATTENTION_LIMIT === 1 ? 'run needs' : 'runs need'
+                } attention — see the list below`}
               </Text>
             )}
           </div>
@@ -295,25 +297,25 @@ export function ProductionRuns() {
       {/* Quantities of the OPEN batches only: a closed run's plan is history and would inflate
           "how much is in flight" with everything ever produced. */}
       <StatGrid>
-        <Stat label='в работе' value={String(totals.open)} sub={`из ${runs.length} загруженных`} />
-        <Stat label='единиц в плане' value={totals.planned > 0 ? String(totals.planned) : '—'} />
+        <Stat label='in progress' value={String(totals.open)} sub={`of ${runs.length} loaded`} />
+        <Stat label='units planned' value={totals.planned > 0 ? String(totals.planned) : '—'} />
         <Stat
-          label='принято годных'
+          label='received good'
           value={totals.produced > 0 ? String(totals.received) : '—'}
           sub={
             totals.produced > 0 && totals.planned > 0
-              ? `${Math.round((totals.received / totals.planned) * 100)}% плана`
+              ? `${Math.round((totals.received / totals.planned) * 100)}% of the plan`
               : undefined
           }
         />
         <Stat
-          label='брак'
+          label='defect'
           value={totals.produced > 0 ? String(totals.defect) : '—'}
           // Same denominator the server uses for defect_pct_actual: what came off the line, not
           // what passed.
           sub={
             totals.defect > 0
-              ? `${((totals.defect / totals.produced) * 100).toFixed(1)}% выпуска`
+              ? `${((totals.defect / totals.produced) * 100).toFixed(1)}% of output`
               : undefined
           }
           tone={totals.defect > 0 ? 'down' : undefined}
@@ -324,7 +326,7 @@ export function ProductionRuns() {
         <select
           className={cell}
           value={status}
-          aria-label='статус партии'
+          aria-label='run status'
           onChange={(e) => patchFilters({ status: e.target.value })}
         >
           {statusFilterOptions.map((o) => (
@@ -349,7 +351,7 @@ export function ProductionRuns() {
           aria-pressed={overdueOnly}
           onClick={() => patchFilters({ overdue: overdueOnly ? '' : '1' })}
         >
-          опаздывает {overdueOnly ? '✕' : ''}
+          late {overdueOnly ? '✕' : ''}
         </button>
         {staleDays > 0 ? (
           <button
@@ -376,8 +378,8 @@ export function ProductionRuns() {
           {openRuns.length > 0 && (
             <Section
               key='open'
-              title={`в работе (${openRuns.length})`}
-              question='— партии, которые ещё что-то должны'
+              title={`in progress (${openRuns.length})`}
+              question='— runs that still owe something'
             >
               <RunTable
                 runs={openRuns}
@@ -390,8 +392,8 @@ export function ProductionRuns() {
           {draftRuns.length > 0 && (
             <Section
               key='draft'
-              title={`черновики (${draftRuns.length})`}
-              question='— расчёт: ткань не занята, наряда нет; готовность проверится при переводе в план'
+              title={`drafts (${draftRuns.length})`}
+              question='— an estimate: no fabric is committed, there is no run pack; readiness is checked when it moves to planned'
             >
               <RunTable
                 runs={draftRuns}
@@ -404,8 +406,8 @@ export function ProductionRuns() {
           {doneRuns.length > 0 && (
             <Section
               key='done'
-              title={`завершённые и отменённые (${doneRuns.length})`}
-              question='— записи; из правок остаётся только реверс квитанции'
+              title={`finished and cancelled (${doneRuns.length})`}
+              question='— records; the only edit left is reversing a receipt'
               collapsible
               defaultOpen={openRuns.length === 0}
             >

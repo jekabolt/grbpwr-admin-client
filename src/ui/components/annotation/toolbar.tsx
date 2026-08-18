@@ -41,7 +41,7 @@ export function AnnotationToolbar({
   if (remaining != null && remaining <= 0) {
     return (
       <Text size='micro' variant='label' component='span' className={className}>
-        предел указаний на этом кадре исчерпан — дальше их не прочесть
+        the limit of callouts on this frame is reached — any more and they can't be read
       </Text>
     );
   }
@@ -67,8 +67,8 @@ export function AnnotationToolbar({
               {hint}
             </Text>
           )}
-          <Chip nonForm dashed onClick={() => onTool(null)} title='выйти из режима постановки'>
-            отменить
+          <Chip nonForm dashed onClick={() => onTool(null)} title='leave the placing mode'>
+            cancel
           </Chip>
         </>
       )}

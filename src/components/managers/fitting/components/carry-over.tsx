@@ -63,7 +63,7 @@ export function FittingCarryOver({
   return (
     <div className='flex flex-col gap-2'>
       <Text variant='inactive' size='small'>
-        Открытые пункты прошлых раундов — отметьте resolved (сделано) или перенесите в этот раунд.
+        Open items from previous rounds — mark them resolved (done) or carry them into this round.
       </Text>
       {items.map((cr) => (
         <CalloutBox

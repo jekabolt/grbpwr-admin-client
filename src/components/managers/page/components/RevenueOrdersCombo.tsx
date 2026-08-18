@@ -23,9 +23,7 @@ export const RevenueOrdersCombo: FC<{
   const rev = revenue ?? [];
   if (rev.length === 0) return null;
   const dates = rev.map((p) =>
-    p.date
-      ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      : '',
+    p.date ? new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
   );
   const revVals = rev.map((p) => parseDecimal(p.value));
   const ordVals = rev.map((_, i) => {

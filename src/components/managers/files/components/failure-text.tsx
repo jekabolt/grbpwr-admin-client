@@ -20,7 +20,7 @@ export function FailureText({ e, fallback }: { e: unknown; fallback: string }) {
     <>
       {f.text}
       <Text size='nano' variant='label' component='span' className='mt-0.5 block break-all'>
-        ответ сервера: {f.raw}
+        the server answered: {f.raw}
       </Text>
     </>
   );

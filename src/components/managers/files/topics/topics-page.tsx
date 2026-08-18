@@ -66,7 +66,7 @@ export default function FileTopicsPage() {
   const enqueue = useUploadQueueStore((s) => s.enqueue);
 
   // Бросок здесь принимает файлы БЕЗ ТЕМ: чипов холста на этом экране нет, наследовать
-  // нечего — пачка уезжает в «разобрать», и оверлей говорит это прямо.
+  // нечего — пачка уезжает в «unsorted», и оверлей говорит это прямо.
   const intake = useCallback(
     (list: File[]) => {
       if (!writable || !list.length) return;
@@ -185,15 +185,15 @@ export default function FileTopicsPage() {
   if (!mayRead) {
     return (
       <div className='border border-borderColor bg-bgColor p-block'>
-        <Text className='uppercase'>доступа к файлам нет</Text>
+        <Text className='uppercase'>no access to files</Text>
         <Text size='micro' variant='label' className='mt-1'>
-          словарь тем открывается тем же правом files:read, что и сама библиотека.
+          the topic dictionary is opened by the same files:read right as the library itself.
         </Text>
       </div>
     );
   }
 
-  // Один разбор на раздел: русская фраза по коду ответа и по таблице узнаваемых сообщений
+  // Один разбор на раздел: английская фраза по коду ответа и по таблице узнаваемых сообщений
   // сервера, а неузнанный отказ едет со словами сервера в скобках — тост берёт только строку.
   const fail = (e: unknown, fallback: string) => showMessage(failureText(e, fallback), 'error');
 
@@ -204,9 +204,9 @@ export default function FileTopicsPage() {
       await createTopic.mutateAsync({ name, description: newDesc.trim() });
       setNewName('');
       setNewDesc('');
-      showMessage(`тема «${name}» заведена`, 'success');
+      showMessage(`topic “${name}” created`, 'success');
     } catch (e) {
-      fail(e, 'не удалось завести тему');
+      fail(e, "couldn't create the topic");
     }
   };
 
@@ -219,9 +219,9 @@ export default function FileTopicsPage() {
         description: editDesc.trim(),
       });
       setEditing(undefined);
-      showMessage('сохранено', 'success');
+      showMessage('saved', 'success');
     } catch (e) {
-      fail(e, 'не удалось сохранить');
+      fail(e, "couldn't save");
     }
   };
 
@@ -236,11 +236,11 @@ export default function FileTopicsPage() {
       setMerging(undefined);
       setMergeTarget('');
       showMessage(
-        `«${merging.name}» слита в «${target?.name ?? ''}», перевешено файлов: ${Number(res.movedFiles ?? 0)}`,
+        `“${merging.name}” is merged into “${target?.name ?? ''}”, files rehung: ${Number(res.movedFiles ?? 0)}`,
         'success',
       );
     } catch (e) {
-      fail(e, 'не удалось слить темы');
+      fail(e, "couldn't merge the topics");
     }
   };
 
@@ -261,18 +261,17 @@ export default function FileTopicsPage() {
       //
       // ОДНА ФРАЗА, А НЕ ДВЕ СКЛЕЕННЫЕ. Было «ролей обнулено: 3 связи потеряли роль» — тот же
       // факт, сказанный дважды и сросшийся в строку без грамматики. Оставлена та половина,
-      // которую ОБЕЩАЕТ предупреждение в самом диалоге («сколько связей потеряли роль — будет
-      // сказано числом сразу после сохранения»): человек ждёт ответа именно про связи, и
-      // ответить ему счётчиком «ролей» значило бы не совпасть со своим же обещанием. Глагол
-      // согласован числом — иначе на единственной связи получалось бы «1 связь потеряли роль».
+      // которую ОБЕЩАЕТ предупреждение в самом диалоге («how many links lost the role will be
+      // said as a number right after saving»): человек ждёт ответа именно про связи, и ответить
+      // ему счётчиком «ролей» значило бы не совпасть со своим же обещанием. По-английски числом
+      // меняется только существительное — глагол `lost` одинаков на любом числе, поэтому
+      // согласуется одно слово, а не два.
       showMessage(
-        cleared
-          ? `сохранено. ${cleared} ${plural(cleared, 'связь', 'связи', 'связей')} ${plural(cleared, 'потеряла', 'потеряли', 'потеряли')} роль`
-          : 'сохранено',
+        cleared ? `saved. ${cleared} ${plural(cleared, 'link')} lost the role` : 'saved',
         'success',
       );
     } catch (e) {
-      fail(e, 'не удалось сохранить');
+      fail(e, "couldn't save");
     }
   };
 
@@ -282,9 +281,9 @@ export default function FileTopicsPage() {
     try {
       await upsertRole.mutateAsync({ id: 0, name, sortOrder: roles.length, archived: false });
       setNewRole('');
-      showMessage(`роль «${name}» заведена`, 'success');
+      showMessage(`the role “${name}” is started`, 'success');
     } catch (e) {
-      fail(e, 'не удалось завести роль');
+      fail(e, "couldn't start the role");
     }
   };
 
@@ -298,9 +297,9 @@ export default function FileTopicsPage() {
         archived: !!editRole.archived,
       });
       setEditRole(undefined);
-      showMessage('сохранено', 'success');
+      showMessage('saved', 'success');
     } catch (e) {
-      fail(e, 'не удалось сохранить роль');
+      fail(e, "couldn't save the role");
     }
   };
 
@@ -312,9 +311,12 @@ export default function FileTopicsPage() {
         sortOrder: Number(r.sortOrder ?? 0),
         archived: !r.archived,
       });
-      showMessage(r.archived ? 'роль вернулась в словарь' : 'роль убрана в архив', 'success');
+      showMessage(
+        r.archived ? 'the role is back in the dictionary' : 'the role is put in the archive',
+        'success',
+      );
     } catch (e) {
-      fail(e, 'не удалось убрать роль в архив');
+      fail(e, "couldn't move the role");
     }
   };
 
@@ -329,11 +331,11 @@ export default function FileTopicsPage() {
       setMergingRole(undefined);
       setRoleMergeTarget('');
       showMessage(
-        `«${mergingRole.name}» слита в «${target?.name ?? ''}», связей переехало: ${Number(res.movedLinks ?? 0)}`,
+        `“${mergingRole.name}” is merged into “${target?.name ?? ''}”, links moved: ${Number(res.movedLinks ?? 0)}`,
         'success',
       );
     } catch (e) {
-      fail(e, 'не удалось слить роли');
+      fail(e, "couldn't merge the roles");
     }
   };
 
@@ -342,9 +344,9 @@ export default function FileTopicsPage() {
     try {
       await removeTopic.mutateAsync(Number(deleting.id));
       setDeleting(undefined);
-      showMessage('тема удалена', 'success');
+      showMessage('the topic is deleted', 'success');
     } catch (e) {
-      fail(e, 'не удалось удалить тему');
+      fail(e, "couldn't delete the topic");
     }
   };
 
@@ -352,16 +354,16 @@ export default function FileTopicsPage() {
     <div className='flex flex-col gap-gutter'>
       <div className='border border-borderColor bg-bgColor p-block'>
         <SectionHeader
-          title='темы'
+          title='topics'
           // Архив назван ОТДЕЛЬНЫМ числом, а не спрятан в общем: этот экран — единственное
           // место, где заархивированную тему вообще видно, и «12 тем» без оговорки разошлось
           // бы с рядом чипов холста, где их девять.
-          question={`— ${topics.length} ${plural(topics.length, 'тема', 'темы', 'тем')}${
-            archivedCount ? ` (${archivedCount} в архиве)` : ''
-          } · ${untopicedCount} ${plural(untopicedCount, 'файл', 'файла', 'файлов')} без темы`}
+          question={`— ${topics.length} ${plural(topics.length, 'topic')}${
+            archivedCount ? ` (${archivedCount} archived)` : ''
+          } · ${untopicedCount} ${plural(untopicedCount, 'file')} without a topic`}
           action={
             <Button asChild size='xs' variant='secondary'>
-              <Link to={ROUTES.files}>к файлам</Link>
+              <Link to={ROUTES.files}>to the files</Link>
             </Button>
           }
         />
@@ -373,12 +375,12 @@ export default function FileTopicsPage() {
           <div className='mb-2.5 flex flex-wrap items-center gap-2'>
             <Text size='micro' variant='label'>
               {mayWrite
-                ? 'режим чтения включён вами: правка тем, удаление и загрузка выключены, пока он стоит.'
-                : 'смотреть можно, менять нельзя: права files:write нет — попросите его у супер-админа.'}
+                ? 'read mode is switched on by you: editing topics, deleting and uploading are off while it stands.'
+                : "you can look but you can't change: there is no files:write right — ask a super admin for it."}
             </Text>
             {mayWrite && (
               <Button size='xs' variant='secondary' onClick={() => setMode('write')}>
-                включить запись
+                switch writing on
               </Button>
             )}
           </div>
@@ -386,21 +388,21 @@ export default function FileTopicsPage() {
 
         {topicsQuery.isLoading ? (
           <Text size='micro' variant='label'>
-            загружаем…
+            loading…
           </Text>
         ) : topics.length === 0 ? (
           <Text size='micro' variant='label'>
-            тем пока нет. тема — ярлык, а не папка: её заводят в момент, когда она впервые
-            понадобилась файлу, и здесь она потом приводится в порядок.
+            no topics yet. a topic is a label, not a folder: it is created the moment a file first
+            needs it, and here it is later put in order.
           </Text>
         ) : (
           <DataTable>
             <thead>
               <tr>
-                <th data-align='left'>тема</th>
-                <th data-align='left'>тип</th>
-                <th>файлов</th>
-                <th data-align='left'>описание</th>
+                <th data-align='left'>topic</th>
+                <th data-align='left'>kind</th>
+                <th>files</th>
+                <th data-align='left'>description</th>
                 <th />
               </tr>
             </thead>
@@ -424,8 +426,8 @@ export default function FileTopicsPage() {
                     <td data-align='left'>
                       <div className='flex flex-col gap-0.5'>
                         <Text size='micro' variant='label' component='span' className='uppercase'>
-                          {project ? 'проект' : 'тема'}
-                          {t.archived ? ' · в архиве' : ''}
+                          {project ? 'project' : 'topic'}
+                          {t.archived ? ' · archived' : ''}
                         </Text>
                         {!!dates && (
                           <Text size='nano' variant='label' component='span'>
@@ -456,7 +458,7 @@ export default function FileTopicsPage() {
                             setEditDesc(t.description ?? '');
                           }}
                         >
-                          переименовать
+                          rename
                         </Button>
                         <Button
                           size='xs'
@@ -470,7 +472,7 @@ export default function FileTopicsPage() {
                             setMetaArchived(!!t.archived);
                           }}
                         >
-                          тип и даты
+                          kind and dates
                         </Button>
                         <Button
                           size='xs'
@@ -480,15 +482,15 @@ export default function FileTopicsPage() {
                             mergeable
                               ? undefined
                               : project
-                                ? 'проект сливается только в другой проект — а других проектов нет'
-                                : 'тема сливается только в другую тему — а других тем нет'
+                                ? 'a project merges only into another project — and there are no other projects'
+                                : 'a topic merges only into another topic — and there are no other topics'
                           }
                           onClick={() => {
                             setMerging(t);
                             setMergeTarget('');
                           }}
                         >
-                          слить
+                          merge
                         </Button>
                         {/* Кнопка ВЫКЛЮЧЕНА, а не спрятана: причина отказа — число файлов в
                             теме, и она стоит рядом в той же строке. Спрятанная кнопка
@@ -505,13 +507,13 @@ export default function FileTopicsPage() {
                           title={
                             n > 0
                               ? project
-                                ? 'проект нельзя удалить, пока в нём есть файлы — а они в нём есть всегда. уберите его в архив: он исчезнет из чипов и пикеров, но останется здесь и по прямой ссылке'
-                                : 'в теме есть файлы — сначала снимите ярлык или слейте её с другой'
+                                ? 'a project cannot be deleted while it has files in it — and it always does. put it in the archive: it goes out of the chips and the pickers, but stays here and on a direct link'
+                                : 'the topic has files — take the label off them first or merge it with another'
                               : undefined
                           }
                           onClick={() => setDeleting(t)}
                         >
-                          удалить
+                          delete
                         </Button>
                       </div>
                     </td>
@@ -527,16 +529,16 @@ export default function FileTopicsPage() {
           спрятанного не попросишь, а исчезнувший при переключении тумблера блок читается как
           поломка экрана. Причина отказа названа строкой выше, у таблицы. */}
       <div className='border border-borderColor bg-bgColor p-block'>
-        <SectionHeader title='новая тема' question='— описание объясняет, что сюда класть' />
+        <SectionHeader title='new topic' question='— the description explains what goes here' />
         <div className='flex flex-wrap items-end gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              имя
+              name
             </Text>
             <Input
               name='newTopicName'
               value={newName}
-              placeholder='например packaging'
+              placeholder='for example packaging'
               disabled={!writable}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
               className='w-[200px]'
@@ -544,12 +546,12 @@ export default function FileTopicsPage() {
           </div>
           <div className='flex flex-1 flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              описание
+              description
             </Text>
             <Input
               name='newTopicDesc'
               value={newDesc}
-              placeholder='бирки, коробки, дилайны'
+              placeholder='hangtags, boxes, dielines'
               disabled={!writable}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewDesc(e.target.value)}
               className='min-w-[220px]'
@@ -559,9 +561,9 @@ export default function FileTopicsPage() {
             size='sm'
             onClick={create}
             disabled={!writable || !newName.trim() || createTopic.isPending}
-            title={writable ? undefined : 'сейчас только чтение — темы не заводятся'}
+            title={writable ? undefined : 'right now it is read-only — topics are not created'}
           >
-            {createTopic.isPending ? 'заводим…' : 'завести'}
+            {createTopic.isPending ? 'creating…' : 'create'}
           </Button>
         </div>
       </div>
@@ -571,33 +573,33 @@ export default function FileTopicsPage() {
           общий на всю библиотеку, а вот значение появляется только на связи. */}
       <div className='border border-borderColor bg-bgColor p-block'>
         <SectionHeader
-          title='роли в проектах'
-          question={`— ${roles.length} ${plural(roles.length, 'роль', 'роли', 'ролей')}`}
+          title='roles in projects'
+          question={`— ${roles.length} ${plural(roles.length, 'role')}`}
         />
         <Text size='micro' variant='label' className='mb-2 block max-w-[90ch]'>
-          роль стоит <b>на связи файла с проектом</b>, а не ярлыком на файле: один снимок бывает
-          «исходники» в съёмке и «идея» в лукбуке, и пара «съёмка × идея» его не найдёт — идеей
-          он был не там. словарь <b>закрытый</b> намеренно: «все исходники по всем съёмкам» значит
-          что-нибудь, только пока «исходники» везде одно и то же, а свободный текст разъезжается
-          надёжно — исходники, исходные, raw, сырцы.
+          a role sits <b>on the link between the file and the project</b>, not as a label on the
+          file: one shot is “raw” in a shoot and “idea” in a lookbook, and the pair “shoot × idea”
+          will not find it — it was not an idea there. the dictionary is <b>closed</b> on purpose:
+          “all the raws across all the shoots” means something only while “raw” is one and the same
+          everywhere, and free text drifts apart reliably — raw, raws, sources, originals.
         </Text>
 
         {rolesQuery.isLoading ? (
           <Text size='micro' variant='label'>
-            загружаем…
+            loading…
           </Text>
         ) : roles.length === 0 ? (
           <Text size='micro' variant='label'>
-            ролей пока нет. заведите их здесь: без словаря ряд чипов на холсте не сможет
-            спросить «исходники», а полоса выделения — их проставить.
+            no roles yet. start them here: without the dictionary the chip row on the canvas
+            cannot ask for “raw”, and the selection bar cannot set it.
           </Text>
         ) : (
           <DataTable>
             <thead>
               <tr>
-                <th data-align='left'>роль</th>
-                <th>порядок</th>
-                <th>файлов</th>
+                <th data-align='left'>role</th>
+                <th>order</th>
+                <th>files</th>
                 <th />
               </tr>
             </thead>
@@ -617,7 +619,7 @@ export default function FileTopicsPage() {
                       </Chip>
                       {r.archived && (
                         <Text size='nano' variant='label' component='span' className='ml-1.5'>
-                          в архиве
+                          archived
                         </Text>
                       )}
                     </td>
@@ -638,23 +640,29 @@ export default function FileTopicsPage() {
                             setEditRoleOrder(String(Number(r.sortOrder ?? 0)));
                           }}
                         >
-                          переименовать
+                          rename
                         </Button>
                         <Button
                           size='xs'
                           variant='secondary'
                           disabled={!writable || !mergeable}
+                          // ПОДСКАЗКА ЗНАЕТ, ЖИВА ЛИ САМА СТРОКА. «Кроме этой живых ролей нет»
+                          // на архивной роли называло живой её саму — при полностью архивном
+                          // словаре это была единственная строка на экране, и фраза противоречила
+                          // стоящему рядом слову «archived».
                           title={
                             mergeable
                               ? undefined
-                              : 'сливать некуда: кроме этой, живых ролей нет, а в архивную роль слить нельзя — сначала верните её в словарь'
+                              : r.archived
+                                ? 'there is nowhere to merge: not one live role is left, and an archived role cannot be the target — bring one back into the dictionary first'
+                                : 'there is nowhere to merge: apart from this one there are no live roles, and an archived role cannot be the target — bring one back into the dictionary first'
                           }
                           onClick={() => {
                             setMergingRole(r);
                             setRoleMergeTarget('');
                           }}
                         >
-                          слить
+                          merge
                         </Button>
                         {/* УДАЛЕНИЯ РОЛИ НЕТ ВОВСЕ — есть архив. Удалённая роль означала бы
                             строки связи, ссылающиеся в никуда; архив же оставляет её на файлах и
@@ -665,12 +673,12 @@ export default function FileTopicsPage() {
                           disabled={!writable}
                           title={
                             r.archived
-                              ? 'вернуть в словарь — её снова можно будет назначать'
-                              : 'в архиве роль остаётся на файлах и в фильтре, но назначить её заново нельзя'
+                              ? 'bring it back into the dictionary — it can be set again'
+                              : 'in the archive the role stays on the files and in the filter, but it cannot be set again'
                           }
                           onClick={() => toggleRoleArchive(r)}
                         >
-                          {r.archived ? 'вернуть' : 'в архив'}
+                          {r.archived ? 'bring back' : 'to the archive'}
                         </Button>
                       </div>
                     </td>
@@ -684,12 +692,12 @@ export default function FileTopicsPage() {
         <div className='mt-2.5 flex flex-wrap items-end gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              новая роль
+              new role
             </Text>
             <Input
               name='newRoleName'
               value={newRole}
-              placeholder='например отобранное'
+              placeholder='for example picks'
               disabled={!writable}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewRole(e.target.value)}
               className='w-[220px]'
@@ -699,13 +707,14 @@ export default function FileTopicsPage() {
             size='sm'
             onClick={createRole}
             disabled={!writable || !newRole.trim() || upsertRole.isPending}
-            title={writable ? undefined : 'сейчас только чтение — роли не заводятся'}
+            title={writable ? undefined : 'right now it is read-only — roles are not started'}
           >
-            {upsertRole.isPending ? 'заводим…' : 'завести'}
+            {upsertRole.isPending ? 'starting…' : 'start'}
           </Button>
           <Text size='micro' variant='label' className='max-w-[60ch]'>
-            это ЕДИНСТВЕННОЕ место, где роль появляется: ни загрузка, ни вставка, ни групповая
-            простановка тем завести её не могут — они пишут в темы, а роли живут не там.
+            this is the ONLY place where a role comes into being: neither an upload, nor a paste,
+            nor setting topics in bulk can start one — they write into topics, and roles do not
+            live there.
           </Text>
         </div>
       </div>
@@ -714,8 +723,8 @@ export default function FileTopicsPage() {
         open={!!editRole}
         onOpenChange={(o) => !o && setEditRole(undefined)}
         onConfirm={saveRole}
-        title={`роль «${editRole?.name ?? ''}»`}
-        confirmLabel={upsertRole.isPending ? 'сохраняем…' : 'сохранить'}
+        title={`role “${editRole?.name ?? ''}”`}
+        confirmLabel={upsertRole.isPending ? 'saving…' : 'save'}
         confirmDisabled={upsertRole.isPending || !editRoleName.trim()}
         closeOnConfirm={false}
         width='sm'
@@ -723,7 +732,7 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              имя
+              name
             </Text>
             <Input
               name='editRoleName'
@@ -733,7 +742,7 @@ export default function FileTopicsPage() {
           </div>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              порядок
+              order
             </Text>
             <Input
               name='editRoleOrder'
@@ -744,9 +753,9 @@ export default function FileTopicsPage() {
             />
           </div>
           <Text size='micro' variant='label'>
-            порядок задаёт, в каком виде роли идут на странице проекта; при равных значениях они
-            встают по имени. переименование меняет ярлык у всех файлов сразу — роль одна на всю
-            библиотеку.
+            the order sets how the roles line up on a project page; on equal values they go by
+            name. renaming changes the label on every file at once — a role is one for the whole
+            library.
           </Text>
         </div>
       </ConfirmationModal>
@@ -755,8 +764,8 @@ export default function FileTopicsPage() {
         open={!!mergingRole}
         onOpenChange={(o) => !o && setMergingRole(undefined)}
         onConfirm={doMergeRoles}
-        title={`слить роль «${mergingRole?.name ?? ''}» в другую`}
-        confirmLabel={mergeRoles.isPending ? 'сливаем…' : 'слить'}
+        title={`merge the role “${mergingRole?.name ?? ''}” into another`}
+        confirmLabel={mergeRoles.isPending ? 'merging…' : 'merge'}
         confirmDisabled={mergeRoles.isPending || !roleMergeTarget}
         closeOnConfirm={false}
         width='sm'
@@ -764,19 +773,19 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <CalloutBox tone='error'>
             <Text size='micro' component='span'>
-              все связи с ролью «{mergingRole?.name}» получат выбранную, а сама «
-              {mergingRole?.name}» исчезнет. <b>обратно это не разбирается.</b>
+              every link carrying the role “{mergingRole?.name}” will get the selected one, and “
+              {mergingRole?.name}” itself will disappear. <b>this does not come apart back.</b>
             </Text>
           </CalloutBox>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              во что сливаем
+              what we merge into
             </Text>
             <SelectComponent
               name='roleMergeTarget'
               value={roleMergeTarget}
               onValueChange={(v: string) => setRoleMergeTarget(v)}
-              placeholder='выберите роль'
+              placeholder='pick a role'
               items={roleMergeTargets.map((r) => ({
                 value: String(r.id),
                 label: `${r.name} · ${Number(r.filesCount ?? 0)}`,
@@ -785,17 +794,18 @@ export default function FileTopicsPage() {
             />
           </div>
           <Text size='micro' variant='label'>
-            слияние ролей проще слияния тем: роль — это колонка на строке связи, а не сама
-            связь, поэтому дедуплицировать нечего — ни одна строка не может нести обе.
+            merging roles is simpler than merging topics: a role is a column on the link row, not
+            the link itself, so there is nothing to deduplicate — no row can carry both.
           </Text>
           {/* ПОЧЕМУ СПИСОК КОРОЧЕ СЛОВАРЯ. Иначе отсутствие архивной роли читалось бы как
               пропажа, а не как решение, — и человек искал бы её в пикере вместо того, чтобы
               вернуть её на строку выше. */}
           {roles.some((r) => r.archived) && (
             <Text size='micro' variant='label'>
-              архивные роли целью не предлагаются: архив роли значит «ставить больше нельзя», и
-              слияние поставило бы её сразу всем связям источника в обход этого запрета. нужно
-              слить именно в архивную — верните её в словарь, слейте и уберите обратно.
+              archived roles are not offered as a target: archiving a role means “it cannot be set
+              any more”, and merging would set it on every link of the source at once, around that
+              ban. if the target really has to be an archived one — bring it back into the
+              dictionary, merge, and put it away again.
             </Text>
           )}
         </div>
@@ -805,8 +815,8 @@ export default function FileTopicsPage() {
         open={!!editing}
         onOpenChange={(o) => !o && setEditing(undefined)}
         onConfirm={saveEdit}
-        title={`тема «${editing?.name ?? ''}»`}
-        confirmLabel={renameTopic.isPending ? 'сохраняем…' : 'сохранить'}
+        title={`topic “${editing?.name ?? ''}”`}
+        confirmLabel={renameTopic.isPending ? 'saving…' : 'save'}
         confirmDisabled={renameTopic.isPending || !editName.trim()}
         closeOnConfirm={false}
         width='md'
@@ -816,7 +826,7 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              имя
+              name
             </Text>
             <Input
               name='editTopicName'
@@ -826,7 +836,7 @@ export default function FileTopicsPage() {
           </div>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              описание
+              description
             </Text>
             <Input
               name='editTopicDesc'
@@ -835,8 +845,8 @@ export default function FileTopicsPage() {
             />
           </div>
           <Text size='micro' variant='label'>
-            имя темы участвует в поиске по библиотеке: понятное имя здесь — это то, чем файлы
-            темы потом находятся.
+            the topic name takes part in the library search: a clear name here is what the files of
+            the topic are later found by.
           </Text>
         </div>
       </ConfirmationModal>
@@ -845,8 +855,8 @@ export default function FileTopicsPage() {
         open={!!merging}
         onOpenChange={(o) => !o && setMerging(undefined)}
         onConfirm={doMerge}
-        title={`слить «${merging?.name ?? ''}» ${mergingIsProject ? 'в другой проект' : 'в другую тему'}`}
-        confirmLabel={mergeTopics.isPending ? 'сливаем…' : 'слить'}
+        title={`merge “${merging?.name ?? ''}” into another ${mergingIsProject ? 'project' : 'topic'}`}
+        confirmLabel={mergeTopics.isPending ? 'merging…' : 'merge'}
         confirmDisabled={mergeTopics.isPending || !mergeTarget}
         closeOnConfirm={false}
         width='sm'
@@ -854,24 +864,24 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <CalloutBox tone='error'>
             <Text size='micro' component='span'>
-              все файлы темы «{merging?.name}» получат выбранную тему, а сама «{merging?.name}»
-              исчезнет. <b>обратно это не разбирается.</b>
+              all files of the topic “{merging?.name}” will get the selected topic, and “
+              {merging?.name}” itself will disappear. <b>this does not come apart back.</b>
             </Text>
           </CalloutBox>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              во что сливаем
+              what we merge into
             </Text>
             <SelectComponent
               name='mergeTarget'
               value={mergeTarget}
               onValueChange={(v: string) => setMergeTarget(v)}
-              placeholder={mergingIsProject ? 'выберите проект' : 'выберите тему'}
+              placeholder={mergingIsProject ? 'pick a project' : 'pick a topic'}
               // ПОДПИСЬ НАЗЫВАЕТ АРХИВ. Без неё «съёмка весна» в списке выглядит такой же
               // живой, как соседи, и слияние в неё уносит файлы из ряда чипов молча.
               items={topicMergeTargets.map((t) => ({
                 value: String(t.id),
-                label: `${t.name} · ${Number(t.filesCount ?? 0)}${t.archived ? ' · в архиве' : ''}`,
+                label: `${t.name} · ${Number(t.filesCount ?? 0)}${t.archived ? ' · archived' : ''}`,
               }))}
               fullWidth
             />
@@ -882,10 +892,10 @@ export default function FileTopicsPage() {
           {mergeTargetTopic?.archived && (
             <CalloutBox tone='warning'>
               <Text size='micro' component='span'>
-                цель в архиве. файлы «{merging?.name}» переедут в тему, которой нет ни в ряду
-                чипов, ни в пикерах: найти их можно будет поиском, по прямой ссылке и с этого
-                экрана. архив с темы снимается обратно одним движением — слияние не снимается
-                никак.
+                the target is archived. the files of “{merging?.name}” will move into a topic that
+                is neither in the chip row nor in the pickers: they will be findable by search, by a
+                direct link and from this screen. the archive comes off a topic in one move — a
+                merge comes off in no way at all.
               </Text>
             </CalloutBox>
           )}
@@ -901,14 +911,15 @@ export default function FileTopicsPage() {
               бывает. */}
           {mergingIsProject && (
             <Text size='micro'>
-              у проектов роль стоит на связи файла с проектом. если файл УЖЕ лежал в целевом
-              проекте, побеждает роль ЦЕЛЕВОГО: роль из «{merging?.name}» его не переписывает.
-              у файлов, которых в цели не было, роль переезжает вместе с ними.
+              in projects a role sits on the link between the file and the project. if the file
+              ALREADY lay in the target project, the role of the TARGET wins: the role from
+              “{merging?.name}” does not overwrite it. for files that were not in the target, the
+              role moves along with them.
             </Text>
           )}
           <Text size='micro' variant='label'>
-            слияние — единственный выход из дублей: удаление отказывает на непустой теме, а
-            сливать надо ровно такую.
+            merging is the only way out of duplicates: deleting refuses on a non-empty topic, and it
+            is exactly such a topic that has to be merged.
           </Text>
         </div>
       </ConfirmationModal>
@@ -919,8 +930,8 @@ export default function FileTopicsPage() {
         open={!!meta}
         onOpenChange={(o) => !o && setMeta(undefined)}
         onConfirm={saveMeta}
-        title={`тема «${meta?.name ?? ''}» — тип и даты`}
-        confirmLabel={updateMeta.isPending ? 'сохраняем…' : 'сохранить'}
+        title={`topic “${meta?.name ?? ''}” — kind and dates`}
+        confirmLabel={updateMeta.isPending ? 'saving…' : 'save'}
         // ЕДИНСТВЕННЫЙ ЗАПОР НА ПЕРЕВЁРНУТЫХ ДАТАХ — здесь, а не ещё и внутри `saveMeta`:
         // модалка не отправляет форму по Enter, кнопка у неё одна, и второй запрет означал бы
         // два места, которые обязаны договориться о том, что считается «нельзя».
@@ -931,7 +942,7 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              тип
+              kind
             </Text>
             <ChipRow>
               <Chip
@@ -939,19 +950,19 @@ export default function FileTopicsPage() {
                 pressed={metaKind === 'plain'}
                 onClick={() => setMetaKind('plain')}
               >
-                обычная тема
+                plain topic
               </Chip>
               <Chip
                 selected={metaKind === 'project'}
                 pressed={metaKind === 'project'}
                 onClick={() => setMetaKind('project')}
               >
-                проект
+                project
               </Chip>
             </ChipRow>
             <Text size='micro' variant='label'>
-              проект — та же тема, только у неё есть даты, архив и роли у файлов внутри. файлы
-              и связи от смены типа никуда не деваются.
+              a project is the same topic, only it has dates, an archive and roles on the files
+              inside. files and links do not go anywhere when the kind changes.
             </Text>
           </div>
 
@@ -960,10 +971,10 @@ export default function FileTopicsPage() {
           {isProjectTopic(meta ?? {}) && metaKind === 'plain' && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                понижение до обычной темы <b>обнуляет роли</b> у всех файлов этого проекта: роль
-                живёт на связи с ПРОЕКТОМ, и у обычной темы её негде держать. сколько связей
-                потеряли роль — будет сказано числом сразу после сохранения. обратно роли не
-                восстанавливаются: повышение вернёт тип, но не ярлыки.
+                going back to a plain topic <b>zeroes the roles</b> on every file of this project:
+                a role lives on the link with a PROJECT, and a plain topic has nowhere to keep it.
+                how many links lost the role will be said as a number right after saving. the roles
+                do not come back: making it a project again returns the kind, but not the labels.
               </Text>
             </CalloutBox>
           )}
@@ -971,7 +982,7 @@ export default function FileTopicsPage() {
           <div className='flex flex-wrap items-end gap-2'>
             <div className='flex flex-col gap-1'>
               <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                начало
+                start
               </Text>
               <Input
                 name='metaFrom'
@@ -984,7 +995,7 @@ export default function FileTopicsPage() {
             </div>
             <div className='flex flex-col gap-1'>
               <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                конец
+                end
               </Text>
               <Input
                 name='metaTo'
@@ -1002,17 +1013,18 @@ export default function FileTopicsPage() {
               осталось — оно последняя линия, а не первая. */}
           {datesReversed && (
             <Text size='micro' variant='error'>
-              конец раньше начала
+              the end is earlier than the start
             </Text>
           )}
           <Text size='micro' variant='label'>
-            даты — это дни, а не моменты: «12–14 сентября» часового пояса не имеет, и дай мы ему
-            время, пришлось бы отвечать, чья полночь начинает день. пустое поле снимает дату.
+            dates here are days, not moments: “12–14 september” has no time zone, and had we given
+            it a time, we would have to answer whose midnight starts the day. an empty field takes
+            the date off.
           </Text>
 
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              архив
+              archive
             </Text>
             <ChipRow>
               <Chip
@@ -1020,14 +1032,14 @@ export default function FileTopicsPage() {
                 pressed={metaArchived}
                 onClick={() => setMetaArchived((v) => !v)}
               >
-                {metaArchived ? 'в архиве' : 'убрать в архив'}
+                {metaArchived ? 'archived' : 'put in the archive'}
               </Chip>
             </ChipRow>
             {/* СЛЕДСТВИЕ, КОТОРОЕ УЗНАЮТ ОПЫТОМ, ЕСЛИ НЕ СКАЗАТЬ. */}
             <Text size='micro' variant='label'>
-              архив прячет тему из чипов холста и из пикеров, но оставляет её здесь и по прямой
-              ссылке. проекту это единственный выход: удалить его нельзя, пока в нём есть файлы,
-              — а они в нём есть всегда.
+              the archive hides the topic from the canvas chips and from the pickers, but leaves it
+              here and on a direct link. for a project this is the only way out: it cannot be
+              deleted while it has files in it — and it always does.
             </Text>
           </div>
         </div>
@@ -1037,15 +1049,15 @@ export default function FileTopicsPage() {
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(undefined)}
         onConfirm={doDelete}
-        title={`удалить тему «${deleting?.name ?? ''}»`}
-        confirmLabel={removeTopic.isPending ? 'удаляем…' : 'удалить тему'}
+        title={`delete the topic “${deleting?.name ?? ''}”`}
+        confirmLabel={removeTopic.isPending ? 'deleting…' : 'delete the topic'}
         confirmDisabled={removeTopic.isPending}
         closeOnConfirm={false}
         width='sm'
       >
         <Text>
-          тема пустая, удаление безопасно: ни один файл её не несёт, поэтому из выдач ничего не
-          пропадёт.
+          the topic is empty, deleting is safe: not a single file carries it, so nothing disappears
+          from the listings.
         </Text>
       </ConfirmationModal>
 
@@ -1056,8 +1068,8 @@ export default function FileTopicsPage() {
         enabled={writable}
         disabledNote={
           mayWrite
-            ? 'включён режим чтения — переключите его на холсте или строкой выше'
-            : 'нужно право files:write — попросите его у супер-админа'
+            ? 'read mode is on — switch it on the canvas or in the line above'
+            : 'the files:write right is needed — ask a super admin for it'
         }
         topicLabels={[]}
         onFiles={intake}

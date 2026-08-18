@@ -40,11 +40,11 @@ import { readNoteDraft, useNoteDraft } from './use-note-draft';
  *    произошёл буфер. Разошёлся отпечаток — сервер отвечает конфликтом ДАННЫМИ (вместе с чужим
  *    текстом целиком), и человек получает выбор из трёх исходов, а не отказ.
  * 2. ЧУЖОЙ ОТПЕЧАТОК НЕ ПОДБИРАЕТСЯ АВТОМАТИЧЕСКИ. После конфликта база сравнения остаётся
- *    прежней: если бы клиент принял `current_sha256` за новую базу, следующее нажатие «сохранить»
+ *    прежней: если бы клиент принял `current_sha256` за новую базу, следующее нажатие «save»
  *    прошло бы сравнение и стёрло чужую версию — то есть ровно то, от чего вся конструкция и
  *    защищает, но на один шаг позже. Записать поверх можно только явно, кнопкой с подтверждением.
  * 3. ЧТЕНИЕ ПОКАЗЫВАЕТ БУФЕР, А НЕ СОХРАНЁННЫЙ ТЕКСТ. Esc из правки не должен выглядеть как
- *    «мой текст пропал»: в чтении остаётся то, что набрано, и pill «не сохранено» вместе с
+ *    «мой текст пропал»: в чтении остаётся то, что набрано, и pill «not saved» вместе с
  *    кнопкой сохранения никуда не деваются.
  */
 
@@ -119,9 +119,11 @@ export function NotePage() {
   const caretRef = useRef<NoteCaret | null>(null);
 
   const draft = useNoteDraft(Number.isFinite(id) && id > 0 ? id : undefined);
-  const [draftOffer, setDraftOffer] = useState<{ content: string; base: string; at: number } | null>(
-    null,
-  );
+  const [draftOffer, setDraftOffer] = useState<{
+    content: string;
+    base: string;
+    at: number;
+  } | null>(null);
 
   /** Буфер разошёлся с тем, что лежит на сервере. Стоит ВЫШЕ засева намеренно: засев про него
    * спрашивает, и порядок объявления здесь — часть смысла, а не оформление. */
@@ -134,7 +136,7 @@ export function NotePage() {
    *
    * ДАЛЬШЕ — ТОЛЬКО ПО ЧИСТОМУ БУФЕРУ. Набранное фоновое перечитывание переписывать не имеет
    * права, и раньше здесь стоял глухой запрет на второй засев вообще. Цена оказалась выше:
-   * кнопка «перечитать» в баннере отказа гасила баннер, но текст на экране навсегда оставался
+   * кнопка «re-read» в баннере отказа гасила баннер, но текст на экране навсегда оставался
    * прошлой версией, а `base` — прошлым отпечатком, и следующее сохранение уезжало в конфликт
    * на ровном месте. Поэтому запрет сужен до трёх случаев, где переписывать действительно
    * нечего: буфер разошёлся с сервером, на экране конфликт, на экране предложение черновика.
@@ -192,7 +194,7 @@ export function NotePage() {
    * ЧУЖОЕ ПЕРЕИМЕНОВАНИЕ ПОДХВАТЫВАЕТСЯ, ПОКА СВОЁ ИМЯ НЕ ТРОГАЛИ. Пока засев был однократным,
    * переименование коллеги превращалось в дефект на ровном месте: карточка перечитывалась,
    * `file.fileName` становился новым, поле оставалось старым — и от этого САМА зажигалась
-   * плашка «не сохранено», а следующее сохранение молча возвращало старое имя. Нового человек
+   * плашка «not saved», а следующее сохранение молча возвращало старое имя. Нового человек
    * не видел вообще.
    *
    * Если своё имя УЖЕ правили, серверное не подставляется (это стёрло бы набранное), но и
@@ -251,7 +253,7 @@ export function NotePage() {
       if (!writable) return;
       if (tooBig) {
         showMessage(
-          `заметка весит ${formatBytes(bytes)} при пределе ${formatBytes(NOTE_MAX_BYTES)} — сервер такую не примет`,
+          `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — the server won't take one like that`,
           'error',
         );
         return;
@@ -281,7 +283,7 @@ export function NotePage() {
           setShowDiff(false);
           draft.clear();
           setSavedLabel(
-            new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+            new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
           );
           qc.setQueryData(noteContentKey(file.id), {
             ...(contentQuery.data ?? {}),
@@ -312,7 +314,7 @@ export function NotePage() {
         // знает про оба корня и уже используется тремя другими мутациями раздела.
         invalidateFileViews(qc);
       } catch (e) {
-        showMessage(failureText(e, 'не удалось сохранить заметку'), 'error');
+        showMessage(failureText(e, "couldn't save the note"), 'error');
       } finally {
         setSaving(false);
       }
@@ -336,7 +338,7 @@ export function NotePage() {
     ],
   );
 
-  /** «Сохранить как отдельную заметку»: ваш буфер уезжает НОВЫМ файлом, чужая версия остаётся
+  /** «save as a separate note»: ваш буфер уезжает НОВЫМ файлом, чужая версия остаётся
    * на месте. Единственный исход конфликта, в котором не теряет никто. */
   const saveSeparately = useCallback(async () => {
     if (!file?.id || savingSeparate || !writable) return;
@@ -344,14 +346,14 @@ export function NotePage() {
       // Тот же потолок, что и у обычной записи: исход «где не теряет никто» не должен быть
       // единственным, который выясняет свой отказ дольше всех — уже отправив 512 КиБ.
       showMessage(
-        `заметка весит ${formatBytes(bytes)} при пределе ${formatBytes(NOTE_MAX_BYTES)} — сервер такую не примет`,
+        `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — the server won't take one like that`,
         'error',
       );
       return;
     }
     setSavingSeparate(true);
     try {
-      const copyName = `${stemOf(name || file.fileName || 'заметка')} — моя версия`.slice(0, 240);
+      const copyName = `${stemOf(name || file.fileName || 'note')} — my version`.slice(0, 240);
       const res = await notesService.createNote({
         fileName: copyName,
         topicIds: (file.topics ?? []).map((t) => t.id ?? 0).filter(Boolean),
@@ -363,10 +365,10 @@ export function NotePage() {
       // вложениях, а не только в сетке. Тот же довод, что у обычного сохранения.
       invalidateFileViews(qc);
       const newId = res.file?.id;
-      showMessage('ваша версия сохранена отдельной заметкой', 'success');
+      showMessage('your version is saved as a separate note', 'success');
       if (newId) navigate(notePath(newId));
     } catch (e) {
-      showMessage(failureText(e, 'не удалось создать отдельную заметку'), 'error');
+      showMessage(failureText(e, "couldn't create a separate note"), 'error');
     } finally {
       setSavingSeparate(false);
     }
@@ -387,7 +389,7 @@ export function NotePage() {
   /* ── горячие клавиши ──────────────────────────────────────────────────────────────────── */
 
   // `!!file?.id` — не украшение: запись идёт ПО НОМЕРУ ФАЙЛА, и без прочитанной карточки
-  // `save` выходит первой же строкой. Пока этого условия не было, кнопка «сохранить» оставалась
+  // `save` выходит первой же строкой. Пока этого условия не было, кнопка «save» оставалась
   // активной и на нажатие не делала ничего и молча — замерено: ноль запросов, ноль сообщений.
   const canSave = dirty && !tooBig && writable && !!file?.id;
 
@@ -466,9 +468,7 @@ export function NotePage() {
     return (
       <PageShell>
         <CalloutBox tone='error' className='bg-bgColor'>
-          <Text size='micro'>
-            такого адреса заметки не бывает — в нём должен стоять номер файла
-          </Text>
+          <Text size='micro'>there is no such note address — a file number must stand in it</Text>
         </CalloutBox>
       </PageShell>
     );
@@ -479,7 +479,7 @@ export function NotePage() {
       <PageShell>
         <Toolbar>
           <Text size='micro' variant='label'>
-            открываем заметку…
+            opening the note…
           </Text>
         </Toolbar>
       </PageShell>
@@ -487,9 +487,9 @@ export function NotePage() {
   }
 
   // ЭКРАН ОТКАЗА — ТОЛЬКО ДО ЗАСЕВА. После того как текст один раз приехал, провалившееся
-  // фоновое перечитывание (а его запускает даже собственная инвалидация после «сохранить как
-  // отдельную заметку») в react-query ставит статус `error` при живых данных — и человек
-  // вместо своего редактора с набранным текстом увидел бы «этой заметки нет». Текст остался бы
+  // фоновое перечитывание (а его запускает даже собственная инвалидация после «save as a
+  // separate note») в react-query ставит статус `error` при живых данных — и человек
+  // вместо своего редактора с набранным текстом увидел бы «this note doesn't exist». Текст остался бы
   // в черновике, но с экрана исчез бы, а очевидного пути назад нет.
   if (contentQuery.isError && seededRef.current !== id) {
     const e = contentQuery.error;
@@ -498,20 +498,22 @@ export function NotePage() {
         <CalloutBox tone='error' className='bg-bgColor'>
           <div className='space-y-1.5'>
             <Text size='micro'>
-              {isForbidden(e)
-                ? 'эту заметку вам не показывают — нужно право files:read или доступ к самому файлу'
-                : isUnknownRoute(e)
-                  ? // 404 значит и «файла нет», и «шлюз такого не знает»: на стенде без выката
-                    // Ф8 это второе. Различить их клиент не может и не притворяется.
-                    'этой заметки нет: либо файл удалён, либо бэкенд с заметками ещё не выкачен на этот стенд'
-                  : <FailureText e={e} fallback='заметка не открылась' />}
+              {isForbidden(e) ? (
+                'this note is not shown to you — the files:read right or access to the file itself is needed'
+              ) : isUnknownRoute(e) ? (
+                // 404 значит и «файла нет», и «шлюз такого не знает»: на стенде без выката
+                // Ф8 это второе. Различить их клиент не может и не притворяется.
+                "this note doesn't exist: either the file is deleted, or the backend with notes is not rolled out to this deployment yet"
+              ) : (
+                <FailureText e={e} fallback="the note didn't open" />
+              )}
             </Text>
             <div className='flex gap-1.5'>
               <Button size='sm' variant='secondary' onClick={() => contentQuery.refetch()}>
-                повторить
+                retry
               </Button>
               <Button asChild size='sm' variant='secondary'>
-                <Link to={`${ROUTES.files}/${id}`}>открыть карточку файла</Link>
+                <Link to={`${ROUTES.files}/${id}`}>open the file card</Link>
               </Button>
             </div>
           </div>
@@ -525,19 +527,19 @@ export function NotePage() {
   const editedBy = file?.contentUpdatedBy ?? '';
   const editedAt = formatWhenShort(file?.contentUpdatedAt ?? undefined);
   const meta = editedBy
-    ? `правил ${editedBy}${editedAt ? ` · ${editedAt}` : ''}`
+    ? `edited by ${editedBy}${editedAt ? ` · ${editedAt}` : ''}`
     : // Заметка, ни разу не правленная редактором (её залили файлом), честно показывает того,
-      // кто её принёс: пустое «правил » выглядело бы как потерянные данные.
-      `загрузил ${file?.uploadedBy ?? '—'}${
+      // кто её принёс: пустое «edited by » выглядело бы как потерянные данные.
+      `uploaded by ${file?.uploadedBy ?? '—'}${
         formatWhenShort(file?.createdAt ?? undefined)
           ? ` · ${formatWhenShort(file?.createdAt ?? undefined)}`
           : ''
       }`;
 
   const sizeHint = tooBig
-    ? `заметка весит ${formatBytes(bytes)} при пределе ${formatBytes(NOTE_MAX_BYTES)} — сохранение откажет.`
+    ? `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — saving will refuse.`
     : bytes > NOTE_MAX_BYTES * 0.9
-      ? `осталось ${formatBytes(NOTE_MAX_BYTES - bytes)} до предела заметки.`
+      ? `${formatBytes(NOTE_MAX_BYTES - bytes)} left until the note limit.`
       : undefined;
 
   const banners = (
@@ -545,8 +547,8 @@ export function NotePage() {
       {draft.blocked && (
         <CalloutBox tone='note' className='bg-bgColor'>
           <Text size='micro'>
-            браузер не даёт сохранить черновик (приватное окно или переполненное хранилище) — до
-            нажатия «сохранить» текст живёт только в этой вкладке
+            the browser won't let the draft be saved (a private window or full storage) — until
+            “save” is pressed the text lives only in this tab
           </Text>
         </CalloutBox>
       )}
@@ -557,8 +559,8 @@ export function NotePage() {
         <CalloutBox tone='note' className='bg-bgColor'>
           <div className='flex flex-wrap items-baseline gap-2'>
             <Text size='micro' component='span'>
-              перечитать заметку не удалось — на экране последняя прочитанная версия, ваш текст
-              цел. сохранение при этом всё равно сверит отпечатки.
+              re-reading the note didn't work out — on the screen is the last version read, your
+              text is intact. saving will still check the digests.
             </Text>
             <Button
               size='xs'
@@ -566,7 +568,7 @@ export function NotePage() {
               className='ml-auto'
               onClick={() => contentQuery.refetch()}
             >
-              перечитать
+              re-read
             </Button>
           </div>
         </CalloutBox>
@@ -576,11 +578,14 @@ export function NotePage() {
         <CalloutBox tone='warning'>
           <div className='flex flex-wrap items-baseline gap-2'>
             <Text size='micro' component='span'>
-              <b>в браузере остался несохранённый черновик</b>
-              {draftOffer.at ? ` от ${formatWhenShort(new Date(draftOffer.at).toISOString())}` : ''}.
-              он не подставлен сам: за это время заметку мог сохранить кто-то другой, и тихая
-              подстановка была бы откатом чужой работы.
-              {contentDirty && ' в поле уже набрано другое — восстановление сначала спросит.'}
+              <b>an unsaved draft is left in the browser</b>
+              {draftOffer.at
+                ? ` from ${formatWhenShort(new Date(draftOffer.at).toISOString())}`
+                : ''}
+              . it is not substituted on its own: in that time someone else could have saved the
+              note, and a quiet substitution would be a rollback of their work.
+              {contentDirty &&
+                ' something else is already typed in the field — restoring will ask first.'}
             </Text>
             <div className='ml-auto flex gap-1.5'>
               <Button
@@ -588,7 +593,7 @@ export function NotePage() {
                 variant='secondary'
                 onClick={() => (contentDirty ? setConfirmRestore(true) : restoreDraft())}
               >
-                восстановить
+                restore
               </Button>
               <Button
                 size='xs'
@@ -598,7 +603,7 @@ export function NotePage() {
                   setDraftOffer(null);
                 }}
               >
-                отбросить
+                discard
               </Button>
             </div>
           </div>
@@ -609,14 +614,14 @@ export function NotePage() {
         <CalloutBox tone='warning'>
           <div className='space-y-stack'>
             <Text size='micro' component='span'>
-              <b>{conflict.by || 'кто-то'} сохранил свою версию, пока вы правили.</b> ваш текст
-              остался здесь и никуда не делся — записано ничего не было. запись поверх сотрёт его
-              правки{formatWhenShort(conflict.at) ? ` от ${formatWhenShort(conflict.at)}` : ''}.
-              посмотрите, что изменилось, и решите.
+              <b>{conflict.by || 'someone'} saved their version while you were editing.</b> your
+              text stayed here and went nowhere — nothing was written. writing over will erase their
+              edits{formatWhenShort(conflict.at) ? ` from ${formatWhenShort(conflict.at)}` : ''}.
+              look at what changed and decide.
             </Text>
             <div className='flex flex-wrap gap-1.5'>
               <Button size='sm' variant='secondary' onClick={() => setShowDiff((v) => !v)}>
-                {showDiff ? 'скрыть различия' : 'показать различия'}
+                {showDiff ? 'hide the differences' : 'show the differences'}
               </Button>
               <Button
                 size='sm'
@@ -624,10 +629,10 @@ export function NotePage() {
                 disabled={savingSeparate}
                 onClick={saveSeparately}
               >
-                {savingSeparate ? 'создаём…' : 'сохранить как отдельную заметку'}
+                {savingSeparate ? 'creating…' : 'save as a separate note'}
               </Button>
               <Button size='sm' variant='secondary' onClick={() => setConfirmOverwrite(true)}>
-                всё равно записать поверх
+                write over anyway
               </Button>
             </div>
           </div>
@@ -641,9 +646,9 @@ export function NotePage() {
         <CalloutBox tone='warning'>
           <div className='flex flex-wrap items-baseline gap-2'>
             <Text size='micro' component='span'>
-              <b>файл переименовали, пока вы правили имя.</b> сейчас он называется «
-              {renamedElsewhere}», в вашем поле — «{name}». сохранение поставит ваше: у имени нет
-              сравнения версий, как у текста.
+              <b>the file was renamed while you were editing the name.</b> now it is called “
+              {renamedElsewhere}”, in your field — “{name}”. saving will set yours: the name has no
+              version comparison, the way the text does.
             </Text>
             <div className='ml-auto flex gap-1.5'>
               <Button
@@ -654,10 +659,10 @@ export function NotePage() {
                   setRenamedElsewhere('');
                 }}
               >
-                взять новое имя
+                take the new name
               </Button>
               <Button size='xs' variant='secondary' onClick={() => setRenamedElsewhere('')}>
-                оставить своё
+                keep mine
               </Button>
             </div>
           </div>
@@ -670,8 +675,8 @@ export function NotePage() {
         <CalloutBox tone='error' className='bg-bgColor'>
           <div className='flex flex-wrap items-baseline gap-2'>
             <Text size='micro' component='span'>
-              <b>карточка файла не прочиталась — сохранить не выйдет.</b> текст цел, он на экране и
-              в черновике браузера; сохранение вернётся, как только карточка прочитается.
+              <b>the file card didn't read — saving won't work out.</b> the text is intact, it is on
+              the screen and in the browser draft; saving will come back as soon as the card reads.
             </Text>
             <Button
               size='xs'
@@ -679,7 +684,7 @@ export function NotePage() {
               className='ml-auto'
               onClick={() => fileQuery.refetch()}
             >
-              перечитать карточку
+              re-read the card
             </Button>
           </div>
         </CalloutBox>
@@ -687,8 +692,8 @@ export function NotePage() {
 
       {conflict && showDiff && (
         <Section
-          title='что разошлось'
-          question='— чем именно ваша версия отличается от сохранённой'
+          title='what diverged'
+          question='— how exactly your version differs from the saved one'
         >
           <NoteDiff theirs={conflict.content} mine={value} theirsBy={conflict.by} />
         </Section>
@@ -718,23 +723,23 @@ export function NotePage() {
         <>
           <Toolbar>
             {/* Имя берётся из ПОЛЯ, а не из файла: переименовали, вышли по Esc — в шапке
-                обязано стоять то, что сохранится, иначе pill «не сохранено» относился бы к
+                обязано стоять то, что сохранится, иначе pill «not saved» относился бы к
                 чему-то невидимому. */}
             <Text component='h1' size='large'>
-              {name || file?.fileName || 'заметка'}
+              {name || file?.fileName || 'note'}
             </Text>
             <Text size='micro' variant='label' component='span'>
               {meta}
             </Text>
             <ToolbarSpacer />
-            {dirty && <Pill tone='attention'>не сохранено</Pill>}
+            {dirty && <Pill tone='attention'>not saved</Pill>}
             {file?.downloadUrl && (
               <Button asChild size='sm' variant='secondary'>
-                <a href={file.downloadUrl}>скачать .md</a>
+                <a href={file.downloadUrl}>download .md</a>
               </Button>
             )}
             <Button asChild size='sm' variant='secondary'>
-              <Link to={`${ROUTES.files}/${id}`}>карточка файла</Link>
+              <Link to={`${ROUTES.files}/${id}`}>file card</Link>
             </Button>
             {writable ? (
               <>
@@ -745,16 +750,16 @@ export function NotePage() {
                     disabled={!canSave || saving}
                     onClick={() => void save(false)}
                   >
-                    {saving ? 'сохраняем…' : 'сохранить ⌘s'}
+                    {saving ? 'saving…' : 'save ⌘s'}
                   </Button>
                 )}
                 <Button size='sm' variant='main' onClick={() => setEditing(true)}>
-                  править ⌘e
+                  edit ⌘e
                 </Button>
               </>
             ) : (
               <Text size='micro' variant='label' component='span'>
-                только чтение
+                read only
               </Text>
             )}
           </Toolbar>
@@ -766,7 +771,7 @@ export function NotePage() {
               <MarkdownView source={value} />
             ) : (
               <Text size='micro' variant='label'>
-                заметка пока пустая{writable ? ' — ⌘e, и можно писать' : ''}
+                the note is still empty{writable ? ' — ⌘e, and you can write' : ''}
               </Text>
             )}
           </div>
@@ -777,15 +782,15 @@ export function NotePage() {
         open={confirmOverwrite}
         onOpenChange={setConfirmOverwrite}
         onConfirm={() => void save(true)}
-        title='записать поверх'
-        confirmLabel='записать поверх'
-        cancelLabel='не записывать'
+        title='write over'
+        confirmLabel='write over'
+        cancelLabel="don't write"
         width='sm'
       >
         <Text>
-          версия, которую сохранил {conflict?.by || 'коллега'}, будет заменена вашим текстом и
-          восстановить её будет неоткуда. если нужны обе — закройте это окно и выберите «сохранить
-          как отдельную заметку».
+          the version that {conflict?.by || 'a colleague'} saved will be replaced by your text, and
+          there will be nowhere to restore it from. if you need both — close this window and choose
+          “save as a separate note”.
         </Text>
       </ConfirmationModal>
 
@@ -793,15 +798,15 @@ export function NotePage() {
         open={confirmRestore}
         onOpenChange={setConfirmRestore}
         onConfirm={restoreDraft}
-        title='восстановить черновик'
-        confirmLabel='заменить набранное'
-        cancelLabel='оставить набранное'
+        title='restore the draft'
+        confirmLabel='replace what is typed'
+        cancelLabel='keep what is typed'
         width='sm'
       >
         <Text>
-          в поле уже набрано то, чего в черновике нет. восстановление заменит набранное целиком, и
-          вернуть его будет неоткуда: ⌘z сюда не достаёт, а в браузерном черновике с первой же
-          набранной буквы лежит уже новый текст.
+          the field already holds what the draft does not. restoring will replace what is typed
+          entirely, and there will be nowhere to bring it back from: ⌘z does not reach here, and
+          from the very first typed letter the browser draft already holds the new text.
         </Text>
       </ConfirmationModal>
     </PageShell>
@@ -830,7 +835,7 @@ export function NotePage() {
  * на витрине, здесь её нет: принятая пачка ехала бы невидимо — ни хода, ни отмены, ни причины
  * отказа. Наследовать темы тоже не от чего (чипов холста здесь нет). Поэтому бросок гасится и
  * объясняется словами, а законный путь назван там же: файл кладут в библиотеку и вставляют в
- * заметку кнопкой «файл» над полем — она вставляет НОМЕР файла, который живёт столько же,
+ * заметку кнопкой «file» над полем — она вставляет НОМЕР файла, который живёт столько же,
  * сколько сама заметка, в отличие от подписанного адреса.
  *
  * Перетаскивание простого ТЕКСТА в поле остаётся браузерным: предикат `upload/drop.ts`
@@ -842,7 +847,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
       {children}
       <FilesDropOverlay
         enabled={false}
-        disabledNote='заметка файлов не принимает — положите файл в библиотеку и вставьте его в текст кнопкой «файл»'
+        disabledNote='the note does not take files — put the file into the library and insert it into the text with the “file” button'
         topicLabels={[]}
         onFiles={() => {}}
       />

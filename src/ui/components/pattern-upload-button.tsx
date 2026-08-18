@@ -166,20 +166,20 @@ export function PatternUploadModal({
       onCancel={() => {
         if (!busy) onClose();
       }}
-      title={staged.length === 1 ? 'название выкройки' : `названия выкроек (${staged.length})`}
-      confirmLabel={doneCount > 0 ? 'повторить незагруженные' : 'загрузить'}
-      cancelLabel={doneCount > 0 ? 'закрыть' : 'отмена'}
+      title={staged.length === 1 ? 'pattern name' : `pattern names (${staged.length})`}
+      confirmLabel={doneCount > 0 ? 'retry the ones not uploaded' : 'upload'}
+      cancelLabel={doneCount > 0 ? 'close' : 'cancel'}
       confirmDisabled={busy || staged.every((r) => r.status === 'done') || missingSlot}
       closeOnConfirm={false}
     >
       <div className='space-y-2.5'>
         <Text size='micro' variant='label'>
-          название необязательно — пустое поле оставит только имя файла
+          the name is optional — an empty field leaves just the file name
           {slots.length === 0
             ? ''
             : dxfOnly
-              ? '; материал обязателен — из него берутся ширина и кромка'
-              : '; для DXF обязателен материал — из него берутся ширина и кромка'}
+              ? '; the material is required — the width and the selvedge are taken from it'
+              : '; a material is required for DXF — the width and the selvedge are taken from it'}
         </Text>
         {staged.map((row, i) => (
           <div key={`${row.file.name}-${i}`} className='space-y-0.5'>
@@ -212,7 +212,7 @@ export function PatternUploadModal({
             {slots.length > 0 && isDxfFile(row.file) && (
               <select
                 className='h-8 w-full border border-borderColor bg-bgColor px-1.5 text-micro'
-                aria-label={`материал для ${row.file.name}`}
+                aria-label={`material for ${row.file.name}`}
                 value={row.scopeKey}
                 disabled={busy || row.status === 'done'}
                 onChange={(e) =>
@@ -221,7 +221,7 @@ export function PatternUploadModal({
                   )
                 }
               >
-                <option value=''>выберите материал…</option>
+                <option value=''>pick a material…</option>
                 {slots.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
@@ -231,12 +231,12 @@ export function PatternUploadModal({
             )}
             {row.status === 'uploading' && (
               <Text size='micro' variant='label'>
-                загрузка…
+                uploading…
               </Text>
             )}
             {row.status === 'done' && (
               <Text size='micro' variant='label'>
-                ✓ загружено
+                ✓ uploaded
               </Text>
             )}
             {row.status === 'error' && (
@@ -296,7 +296,7 @@ export function PatternUploadButton({
       .map((f) => ({ f, err: patternFileError(f, { dxfOnly }) }))
       .filter((x) => x.err);
     for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
-    if (bad.length > 0) setError(bad.length === 1 ? bad[0].err : `отклонено файлов: ${bad.length}`);
+    if (bad.length > 0) setError(bad.length === 1 ? bad[0].err : `${bad.length} files rejected`);
     const good = files.filter((f) => !patternFileError(f, { dxfOnly }));
     if (good.length > 0) setPicked(good);
   }

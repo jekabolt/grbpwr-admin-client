@@ -25,22 +25,22 @@ export function markerFitness(
 ): MarkerFitness {
   // Слот настила ещё не выбран: годность неизвестна, и предлагать выбор наугад значило бы
   // готовить отказ сервера. Это не «не подходит», а «нечем сравнивать» — так и сказано.
-  if (!bomLineKey) return { eligible: false, reason: 'сначала выберите ткань настила' };
+  if (!bomLineKey) return { eligible: false, reason: 'select the lay fabric first' };
   // ЧЕРНОВИК (0299) В СЕКЦИЮ НЕ ВСТАЁТ — сервер отказывает, и правильно: у такой раскладки не
   // легла часть деталей, то есть настил по ней выкроил бы неполное изделие. Причина названа здесь
   // же, потому что во всём остальном черновик выглядит обычной раскладкой этого слота и цвета.
   if (m.isDraft === true)
     return {
       eligible: false,
-      reason: 'черновик — уложены не все детали; пересчитайте раскладку с бо́льшим бюджетом',
+      reason: 'draft — not all pieces are placed; recompute the marker with a bigger search budget',
     };
   const mk = (m.bomLineKey ?? '').trim();
-  if (!mk) return { eligible: false, reason: 'раскладка потеряла слот BOM — перепривяжите её' };
-  if (mk !== bomLineKey) return { eligible: false, reason: 'снята для другой ткани настила' };
+  if (!mk) return { eligible: false, reason: 'the marker lost its BOM slot — re-bind it' };
+  if (mk !== bomLineKey) return { eligible: false, reason: 'captured for a different lay fabric' };
   const mcw = m.colorwayId ?? 0;
   if (mcw !== 0 && colorwayId > 0 && mcw !== colorwayId)
-    return { eligible: false, reason: 'снята для другого колорвея' };
-  return { eligible: true, reason: mcw === 0 ? 'общая — годна любому цвету' : '' };
+    return { eligible: false, reason: 'captured for a different colourway' };
+  return { eligible: true, reason: mcw === 0 ? 'generic — fits any colour' : '' };
 }
 
 function markerLine(m: common_TechCardMarkerSummary): string {
@@ -49,9 +49,9 @@ function markerLine(m: common_TechCardMarkerSummary): string {
   const eff = decimalToInput(m.efficiencyPct);
   const units = m.totalUnits ?? 0;
   return [
-    len ? `${len} см` : '',
-    width ? `ш ${width}` : '',
-    units ? `${units} изд.` : '',
+    len ? `${len} cm` : '',
+    width ? `w ${width}` : '',
+    units ? `${units} ${units === 1 ? 'garment' : 'garments'}` : '',
     eff ? `${eff}%` : '',
   ]
     .filter(Boolean)
@@ -92,11 +92,11 @@ export function MarkerPicker({
       open={open && !disabled}
       onOpenChange={setOpen}
       noTail
-      title='раскладка секции'
+      title='section marker'
       className='w-[300px]'
       triggerProps={{
         disabled,
-        'aria-label': 'выбрать раскладку',
+        'aria-label': 'select a marker',
         className: cn(
           'flex w-[200px] items-center gap-2 border bg-bgColor px-[7px] py-[3px] text-left',
           // Секция без раскладки не сохранится — поле краснеет сразу, а не после отказа сервера.
@@ -107,7 +107,7 @@ export function MarkerPicker({
         <>
           <span className='min-w-0 flex-1'>
             <Text component='span' size='control' className='block truncate'>
-              {selected ? selected.name || `#${selected.id}` : '— выбрать раскладку —'}
+              {selected ? selected.name || `#${selected.id}` : '— select a marker —'}
             </Text>
             {selected ? (
               <Text component='span' size='micro' variant='label' className='block truncate'>
@@ -124,11 +124,11 @@ export function MarkerPicker({
       {/* Список во всю ширину поповера — тот же приём, что у пикера слота в рецепте колорвея:
           текущий вариант помечается зеброй и галочкой, а не заливкой чернилами (заливка — контракт
           Chip, кликабельного токена, а не строки списка). */}
-      <div role='listbox' aria-label='раскладка секции' className='-mx-2 -my-1.5'>
+      <div role='listbox' aria-label='section marker' className='-mx-2 -my-1.5'>
         {runMarkers.length === 0 ? (
           <div className='px-2 py-2.5'>
             <Text size='micro' variant='label'>
-              у этого прогона ещё нет ни одной раскройной раскладки
+              this run has no cutting markers yet
             </Text>
           </div>
         ) : (
@@ -184,14 +184,14 @@ export function MarkerPicker({
       </div>
 
       <div className='flex flex-col gap-1'>
-        <GroupLabel>взять готовую геометрию</GroupLabel>
+        <GroupLabel>take ready geometry</GroupLabel>
         {/* Секция НЕ МОЖЕТ ссылаться на карточный маркер — поэтому не «выбрать норму», а
             «скопировать норму в прогон»: копия фиксирует условия ЭТОГО прогона и умирает вместе с
             ним, тогда как ссылка на норму молча пересняла бы условия при её следующей пересъёмке
             (§5.5). Цена — дубликат блоба, и она названа. */}
         {copySources.length === 0 ? (
           <Text size='micro' variant='label'>
-            у этого слота нет карточных раскладок, которые можно скопировать
+            this slot has no card markers that can be copied
           </Text>
         ) : (
           copySources.map((m) => {
@@ -214,17 +214,18 @@ export function MarkerPicker({
                     setOpen(false);
                   }}
                 >
-                  {copying ? 'копирую…' : `копировать «${m.name || `#${m.id}`}»`}
-                  {m.isNorm ? ' — норма' : ''}
-                  {draft ? ' — черновик' : ''}
+                  {copying ? 'copying…' : `copy “${m.name || `#${m.id}`}”`}
+                  {m.isNorm ? ' — norm' : ''}
+                  {draft ? ' — draft' : ''}
                 </Button>
                 {draft ? (
                   <Text size='micro' className='text-error'>
-                    черновик: уложены не все детали
+                    draft: not all pieces are placed
                     {(m.totalCount ?? 0) > (m.placedCount ?? 0)
-                      ? ` (${m.placedCount ?? 0} из ${m.totalCount ?? 0})`
+                      ? ` (${m.placedCount ?? 0} of ${m.totalCount ?? 0})`
                       : ''}{' '}
-                    — копировать в прогон нечего, пересчитайте раскладку с бо́льшим бюджетом
+                    — there is nothing to copy into the run, recompute the marker with a bigger
+                    search budget
                   </Text>
                 ) : null}
               </div>
@@ -236,8 +237,8 @@ export function MarkerPicker({
             живёт в тех-карте и получает проп production_run_id отдельной задачей; до тех пор
             путь описан словами, а не кнопкой, которая никуда не ведёт. */}
         <Text size='micro' variant='label'>
-          Новую раскладку снимают в разделе «раскладки» тех-карты — снятая для этого прогона, она
-          появится здесь.
+          a new marker is captured in the tech card's “markers” section — once captured for this
+          run, it shows up here.
         </Text>
       </div>
     </GenericPopover>

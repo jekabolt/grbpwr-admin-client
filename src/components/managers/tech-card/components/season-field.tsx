@@ -65,7 +65,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
         <Input
           value={value}
           readOnly
-          placeholder='— сезон —'
+          placeholder='— season —'
           className='flex-1'
           aria-invalid={!!error}
         />
@@ -79,7 +79,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
             setOpen(true);
           }}
         >
-          выбрать
+          pick
         </Button>
       </div>
       {error?.message && (
@@ -91,9 +91,9 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
       <ConfirmationModal
         open={open}
         width='sm'
-        title='выбор сезона'
-        confirmLabel='ок'
-        cancelLabel='отмена'
+        title='pick a season'
+        confirmLabel='ok'
+        cancelLabel='cancel'
         // The chip path commits on the year click; the footer commits whatever is typed by hand.
         confirmDisabled={!manual.trim()}
         onConfirm={() => commit(manual)}
@@ -102,7 +102,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
           if (!o) reset();
         }}
       >
-        <GroupLabel flush>1 · тип</GroupLabel>
+        <GroupLabel flush>1 · type</GroupLabel>
         <ChipRow>
           {SEASON_TYPES.map((t) => (
             <Chip
@@ -117,13 +117,13 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
           ))}
         </ChipRow>
 
-        <GroupLabel>2 · год</GroupLabel>
+        <GroupLabel>2 · year</GroupLabel>
         <ChipRow>
           {years.map((y) => (
             <Chip
               key={y}
               disabled={!type}
-              title={type ? buildSeason(type, y) : 'сначала выберите тип'}
+              title={type ? buildSeason(type, y) : 'pick a type first'}
               onClick={() => type && commit(buildSeason(type, y))}
             >
               {y}
@@ -131,7 +131,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
           ))}
         </ChipRow>
 
-        <GroupLabel>или вручную</GroupLabel>
+        <GroupLabel>or by hand</GroupLabel>
         <Input
           name='season-manual'
           value={manual}
@@ -140,7 +140,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
           placeholder='SS25'
         />
         <Text size='micro' variant='label' className='mt-1'>
-          тип + год пишет сезон сразу; «ок» сохраняет то, что вписано вручную
+          type + year writes the season straight away; “ok” saves whatever is typed by hand
         </Text>
       </ConfirmationModal>
     </div>

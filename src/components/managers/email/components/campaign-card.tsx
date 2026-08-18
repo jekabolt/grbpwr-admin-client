@@ -25,7 +25,7 @@ function fmtDate(epoch: number | string | undefined): string {
   const iso = epochSecondsToRfc3339(epoch);
   if (!iso) return '';
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return new Date(iso).toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',

@@ -139,10 +139,10 @@ export function AssemblyCreateDialog({
   const codeProblem = (() => {
     if (produces !== 'unit') return '';
     const code = unitKey.trim();
-    if (!code) return 'узлу нужен код — им он и называется во всех остальных шагах';
-    if (pieceKeys.has(code)) return `ключ «${code}» занят деталью — у деталей и узлов одно пространство имён`;
-    if (unitKeys.has(code)) return `узел «${code}» уже существует — второй производитель того же узла невозможен`;
-    if (new TextEncoder().encode(code).length > 64) return 'код длиннее 64 байт — столько не влезет в колонку';
+    if (!code) return 'a unit needs a code — that is what every other step calls it by';
+    if (pieceKeys.has(code)) return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
+    if (unitKeys.has(code)) return `unit “${code}” already exists — a second producer of the same unit is impossible`;
+    if (new TextEncoder().encode(code).length > 64) return "the code is longer than 64 bytes — that won't fit the column";
     return '';
   })();
 
@@ -150,30 +150,30 @@ export function AssemblyCreateDialog({
   const needsPress = PRESS_TYPES.has(operationType);
 
   const problem = (() => {
-    if (distinct.length === 0) return 'у шага должен быть хотя бы один вход';
+    if (distinct.length === 0) return 'a step must have at least one input';
     // ВХОД ОБЯЗАН ЛЕЖАТЬ НА СТОЛЕ (правило 1). Прийти сюда мёртвый ключ может: выбор на полотне
     // переживает соседний жест, который эту деталь съел, и «обработка · 1» по ней родила бы шаг,
     // который движок и сервер отвергнут. Диалог, обещающий валидный шаг, обязан это ловить.
     const dead = distinct.find((k) => !frontier.includes(k));
-    if (dead) return `«${dead}» больше не лежит на столе — входом его не взять`;
+    if (dead) return `“${dead}” is no longer on the table — it can't be taken as an input`;
     // Поглощение теряет смысл, если поглощаемый узел сняли из входов: получился бы ВТОРОЙ
     // производитель живого узла, а не его дособирание.
     if (produces === 'absorb') {
       if (!distinct.includes(absorbInto)) {
-        return `узел ${absorbInto} снят из входов — дособрать можно только то, что шаг берёт`;
+        return `unit ${absorbInto} has been removed from the inputs — you can only add to what the step takes`;
       }
       // Поглощение — тоже сборка узла, и правило 3 на него распространяется: `GARMENT → GARMENT`
       // не дособирает ничего, движок отвечает too-few-inputs.
       if (distinct.length < 2) {
-        return `дособрать ${absorbInto} нечем — возьмите на шаг ещё хотя бы один вход`;
+        return `there is nothing to add to ${absorbInto} with — take at least one more input into the step`;
       }
     }
-    if (!operationType || operationType === UNKNOWN_TYPE) return 'выберите, что шаг делает';
-    if (!zone || zone === UNKNOWN_ZONE) return 'выберите зону — «other» это законный ответ';
-    if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'выберите машинку';
-    if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS)) return 'выберите оборудование ВТО';
+    if (!operationType || operationType === UNKNOWN_TYPE) return 'pick what the step does';
+    if (!zone || zone === UNKNOWN_ZONE) return 'pick a zone — “other” is a legitimate answer';
+    if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'pick a machine';
+    if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS)) return 'pick the pressing equipment';
     if (produces === 'unit' && !canBeUnit) {
-      return 'узел из одного входа — это обработка, а не узел: возьмите хотя бы два входа';
+      return 'a unit made of a single input is processing, not a unit: take at least two inputs';
     }
     return codeProblem;
   })();
@@ -203,23 +203,23 @@ export function AssemblyCreateDialog({
       }}
       onConfirm={submit}
       onCancel={onClose}
-      title='новая операция'
-      confirmLabel='создать'
-      cancelLabel='отменить'
+      title='new operation'
+      confirmLabel='create'
+      cancelLabel='cancel'
       confirmDisabled={problem !== ''}
       closeOnConfirm={false}
     >
       <div className='flex flex-col gap-2.5'>
         <div>
-          <GroupLabel>входы</GroupLabel>
+          <GroupLabel>inputs</GroupLabel>
           <ChipRow>
             {distinct.length === 0 && (
               <Text size='micro' variant='label' component='span'>
-                входов нет — возьмите хотя бы один
+                no inputs — take at least one
               </Text>
             )}
             {distinct.map((k) => (
-              <Chip key={k} onClick={() => setInputs((cur) => cur.filter((x) => x !== k))} title='снять вход'>
+              <Chip key={k} onClick={() => setInputs((cur) => cur.filter((x) => x !== k))} title='remove the input'>
                 {labelOf(k)} ✕
               </Chip>
             ))}
@@ -227,10 +227,10 @@ export function AssemblyCreateDialog({
           {addable.length > 0 && (
             <ChipRow className='mt-1'>
               <Text size='micro' variant='label' component='span' className='uppercase'>
-                добавить:
+                add:
               </Text>
               {addable.map((k) => (
-                <Chip key={k} dashed onClick={() => setInputs((cur) => [...cur, k])} title='взять входом'>
+                <Chip key={k} dashed onClick={() => setInputs((cur) => [...cur, k])} title='take as an input'>
                   {labelOf(k)}
                 </Chip>
               ))}
@@ -239,29 +239,29 @@ export function AssemblyCreateDialog({
         </div>
 
         <div>
-          <GroupLabel>результат</GroupLabel>
+          <GroupLabel>result</GroupLabel>
           <ChipRow>
             <Chip
               dashed={produces !== 'process'}
               onClick={() => setProduces('process')}
-              title='шаг ничего не собирает — входы остаются доступными следующим шагам'
+              title='the step assembles nothing — the inputs stay available to the next steps'
             >
-              обработка
+              processing
             </Chip>
             <Chip
               dashed={produces !== 'unit'}
               onClick={() => setProduces('unit')}
-              title={canBeUnit ? 'собрать новый узел' : 'узлу нужно минимум два входа'}
+              title={canBeUnit ? 'assemble a new unit' : 'a unit needs at least two inputs'}
             >
-              ▣ новый узел
+              ▣ new unit
             </Chip>
             {absorbInto && (
               <Chip
                 dashed={produces !== 'absorb'}
                 onClick={() => setProduces('absorb')}
-                title='дособрать существующий узел — он сохранит свой код'
+                title='add to an existing unit — it keeps its own code'
               >
-                дособрать ▣ {absorbInto}
+                add to ▣ {absorbInto}
               </Chip>
             )}
           </ChipRow>
@@ -274,14 +274,14 @@ export function AssemblyCreateDialog({
                   setUnitKeyTouched(true);
                   setUnitKey(e.target.value);
                 }}
-                placeholder='код узла'
+                placeholder='unit code'
                 maxLength={64}
               />
               <Input
                 name='assemblyUnitName'
                 value={unitName}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUnitName(e.target.value)}
-                placeholder='имя узла — необязательно, но на печати читают его'
+                placeholder='unit name — optional, but it is what people read in print'
                 maxLength={255}
               />
             </div>
@@ -289,7 +289,7 @@ export function AssemblyCreateDialog({
         </div>
 
         <div className='flex flex-col gap-1'>
-          <GroupLabel>что и где</GroupLabel>
+          <GroupLabel>what and where</GroupLabel>
           <Select
             name='assemblyOperationType'
             value={operationType}

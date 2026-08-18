@@ -79,7 +79,7 @@ export function QtyBar({
       </span>
       <span className='shrink-0 tabular-nums'>
         {hasReceived ? received : '—'} / {planned}
-        {defect > 0 ? ` · брак ${defect}` : ''}
+        {defect > 0 ? ` · defect ${defect}` : ''}
       </span>
     </span>
   );
@@ -94,7 +94,7 @@ export function QtyBar({
  * legacy single-output aux run carries one product-less, SIZE-less line (a sellable line always has
  * a size, even when its product is not published yet).
  *
- * Used only to decide whether a LIST row may offer «принять». The receiving modal needs the card's
+ * Used only to decide whether a LIST row may offer «receive». The receiving modal needs the card's
  * output material and colour variants to book an aux run correctly, and a list has neither, so an
  * aux-shaped run is sent to its own page instead. Erring either way is cheap: a false positive
  * costs one extra click, a false negative is the bug this guards against.
@@ -134,14 +134,14 @@ export function RunTable({
     <DataTable>
       <thead>
         <tr>
-          <th>партия</th>
-          {showTechCard && <th>стиль</th>}
-          <th data-align='left'>статус</th>
-          <th data-align='left'>план → принято</th>
-          <th>обещано</th>
-          {canReadCosting && <th>unit план / факт</th>}
+          <th>run</th>
+          {showTechCard && <th>style</th>}
+          <th data-align='left'>status</th>
+          <th data-align='left'>plan → received</th>
+          <th>promised</th>
+          {canReadCosting && <th>unit plan / actual</th>}
           <th>
-            <span className='sr-only'>действие</span>
+            <span className='sr-only'>action</span>
           </th>
         </tr>
       </thead>
@@ -180,7 +180,7 @@ export function RunTable({
                   <RunStatusBadge status={ins?.status} />
                   {late > 0 && (
                     <span className='inline-block border border-error px-1.5 py-0.5 text-textBaseSize uppercase text-error'>
-                      опаздывает {late} дн
+                      {late} {late === 1 ? 'day' : 'days'} late
                     </span>
                   )}
                 </span>
@@ -196,10 +196,10 @@ export function RunTable({
                       no units is a lie whenever those differ. */}
                   <span className='flex flex-col items-end'>
                     <span>
-                      план {decimalToInput(r.plannedUnitCost) || '—'} {planCur}
+                      plan {decimalToInput(r.plannedUnitCost) || '—'} {planCur}
                     </span>
                     <span>
-                      факт {decimalToInput(r.actuals?.actualUnitCost) || '—'}{' '}
+                      actual {decimalToInput(r.actuals?.actualUnitCost) || '—'}{' '}
                       {r.actuals?.actualUnitCost?.value ? factCur : ''}
                     </span>
                     {hasVariance && (
@@ -222,7 +222,7 @@ export function RunTable({
                 ) : (
                   <Link to={runDetailPath(r.id ?? 0)} className='uppercase underline'>
                     <Text size='micro' component='span' tracking='label'>
-                      открыть
+                      open
                     </Text>
                   </Link>
                 )}

@@ -37,7 +37,7 @@ export function StockTrendChart({
     return sorted.map((c) => ({
       date: c.createdAt ? format(new Date(c.createdAt), 'MMM d yy') : '',
       quantity: Number(c.quantityAfter?.value ?? 0),
-      fullDate: c.createdAt ? new Date(c.createdAt).toLocaleString() : '',
+      fullDate: c.createdAt ? new Date(c.createdAt).toLocaleString('en-US') : '',
     }));
   }, [changes]);
 

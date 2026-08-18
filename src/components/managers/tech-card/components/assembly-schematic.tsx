@@ -159,10 +159,10 @@ export function AssemblySchematic({
 
   /**
    * Состояние узла СЛОВОМ, а не значком. «✓», «→GARMENT» и «✕» требовали держать в голове
-   * словарь из трёх символов; строчкой хватает места сказать это по-русски.
+   * словарь из трёх символов; строчкой хватает места сказать это словом.
    */
   const stateWord = (b: AssemblyBlock, terminal: boolean): string =>
-    terminal ? '✓ изделие' : b.absorbedInto ? `→ ▣ ${b.absorbedInto}` : '✕ разрыв';
+    terminal ? '✓ garment' : b.absorbedInto ? `→ ▣ ${b.absorbedInto}` : '✕ break';
 
   /**
    * Состав узла КОМПАКТНО: узлы поимённо, детали числом.
@@ -175,7 +175,7 @@ export function AssemblySchematic({
     const inputs = directInputsOf.get(key) ?? [];
     const units = inputs.filter((k) => res.units.has(k)).map((k) => `▣ ${k}`);
     const pieces = inputs.filter((k) => !res.units.has(k)).length;
-    const parts = [...units, ...(pieces ? [`${pieces} дет`] : [])];
+    const parts = [...units, ...(pieces ? [`${pieces} ${pieces === 1 ? 'piece' : 'pieces'}`] : [])];
     return parts.length ? `← ${parts.join(' + ')}` : '';
   };
 
@@ -462,8 +462,8 @@ export function AssemblySchematic({
   const hint = (() => {
     if (!verdict) return '';
     if (!verdict.ok) return verdict.reason;
-    if (verdict.absorbInto) return `отпустите: дособрать ▣ ${verdict.absorbInto}`;
-    return `отпустите: сшить ${nameOfNode(drag!.key)} + ${nameOfNode(target!.key)}`;
+    if (verdict.absorbInto) return `release: add to ▣ ${verdict.absorbInto}`;
+    return `release: join ${nameOfNode(drag!.key)} + ${nameOfNode(target!.key)}`;
   })();
 
   /**
@@ -491,10 +491,11 @@ export function AssemblySchematic({
     return (
       <div className='flex flex-col items-center gap-1 border border-dashed border-borderColor px-3 py-8 text-center'>
         <Text size='micro' variant='label'>
-          деталей ещё нет — схеме нечего рисовать
+          no pieces yet — the schematic has nothing to draw
         </Text>
         <Text size='micro' variant='label'>
-          детали приходят из выкроек; появятся здесь плитками, и сборка начнётся с них
+          pieces come from the patterns; they show up here as tiles, and the assembly starts from
+          them
         </Text>
       </div>
     );
@@ -618,13 +619,13 @@ export function AssemblySchematic({
       {manual > 0 && (
         <ChipRow className='mb-1.5'>
           <Text size='micro' variant='label' component='span' className='uppercase'>
-            раскладка: ручная · {manual}
+            layout: manual · {manual}
           </Text>
           {/* nonForm по той же причине, что у переключателя режима: сброс раскладки не меняет
               данных, но под внешним `<fieldset disabled>` настоящая кнопка мертва — и сбросить
               чужую расстановку на выпущенной карточке было бы нечем. */}
-          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='вернуть автоматическую раскладку'>
-            авто
+          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='restore the automatic layout'>
+            auto
           </Chip>
         </ChipRow>
       )}
@@ -718,11 +719,11 @@ export function AssemblySchematic({
                     // Полный текст шапки — в подсказке: ключ и имя узла обрезаются по ширине, и
                     // прочесть их целиком иначе было бы негде.
                     title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
-                      terminal ? ' · готовое изделие' : b.absorbedInto ? ` · уходит в ▣ ${b.absorbedInto}` : ' · разрыв'
+                      terminal ? ' · finished garment' : b.absorbedInto ? ` · goes into ▣ ${b.absorbedInto}` : ' · break'
                     }\n${
                       onTable.has(box.key)
-                        ? 'узел на столе — кликните, чтобы взять его в следующую сборку'
-                        : 'узел уже вошёл в другой; кликните, чтобы открыть шаг, который его съел'
+                        ? 'the unit is on the table — click to take it into the next assembly'
+                        : 'the unit has already gone into another one; click to open the step that consumed it'
                     }`}
                   >
                     {/* ПЕРВАЯ СТРОКА — ТОЛЬКО КЛЮЧ. Он идентифицирует узел во всех остальных
@@ -739,7 +740,7 @@ export function AssemblySchematic({
                     </Text>
                     {/* ВТОРАЯ СТРОКА — ИМЯ И СОСТОЯНИЕ СЛОВОМ. «✓», «→GARMENT» и «✕» требовали
                         держать в голове словарь из трёх значков; строкой хватает места сказать
-                        это по-русски. Красным — только разрыв: сборка не сошлась, и это ошибка,
+                        это словом. Красным — только разрыв: сборка не сошлась, и это ошибка,
                         а не оттенок. */}
                     <span className='flex w-full items-baseline gap-1 overflow-hidden'>
                       {b.name && (
@@ -784,16 +785,16 @@ export function AssemblySchematic({
                       <Chip
                         dashed
                         onClick={clickGuard(() => onCreate({ inputKeys: [box.key], intent: 'process' }))}
-                        title='добавить обработку по этому узлу'
+                        title='add a processing step on this unit'
                       >
-                        + операция
+                        + operation
                       </Chip>
                       <Chip
                         dashed
                         onClick={clickGuard(() => onDissolve(b.producedAt))}
-                        title='шаг перестанет собирать узел; входы вернутся на стол следующим шагам'
+                        title='the step stops assembling the unit; its inputs return to the table for the next steps'
                       >
-                        растворить
+                        dissolve
                       </Chip>
                     </div>
                   )}
@@ -803,7 +804,7 @@ export function AssemblySchematic({
                       {...activate(clickGuard(() => onPickStep(i)))}
                       className='flex w-full items-center gap-1 px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                       style={{ height: LINE_H }}
-                      title='открыть шаг в списке'
+                      title='open the step in the list'
                     >
                       <Text size='nano' component='span' className='min-w-0 truncate'>
                         {(i + 1) * 10} · {labelOf(i)}
@@ -825,7 +826,7 @@ export function AssemblySchematic({
                   <div
                     className='absolute inset-x-0 bottom-0 flex items-baseline gap-1 overflow-hidden border-t border-hairline px-1'
                     style={{ height: FOOT_H }}
-                    title={`берёт: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`}
+                    title={`takes: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`}
                   >
                     <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
                       {compositionOf(box.key)}
@@ -869,10 +870,10 @@ export function AssemblySchematic({
                 style={{ height: HEAD_H }}
               >
                 <Text size='micro' variant='uppercase' tracking='label' component='span' className='block truncate font-bold'>
-                  ◌ вне узлов
+                  ◌ outside units
                 </Text>
                 <Text size='nano' variant='label' component='span' className='block truncate'>
-                  цель шага — не узел
+                  the step's target isn't a unit
                 </Text>
               </div>
               {looseSteps.map((i) => (
@@ -881,7 +882,7 @@ export function AssemblySchematic({
                   {...activate(clickGuard(() => onPickStep(i)))}
                   className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                   style={{ height: LINE_H }}
-                  title='открыть шаг в списке'
+                  title='open the step in the list'
                 >
                   <Text size='nano' component='span' className='min-w-0 truncate'>
                     {(i + 1) * 10} · {labelOf(i)}
@@ -893,7 +894,7 @@ export function AssemblySchematic({
                 style={{ height: FOOT_H }}
               >
                 <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-                  {looseSteps.length} шаг
+                  {looseSteps.length} {looseSteps.length === 1 ? 'step' : 'steps'}
                 </Text>
                 {smvOfBlock.get('') && (
                   <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
@@ -941,8 +942,8 @@ export function AssemblySchematic({
               style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
               title={
                 t.state === 'free'
-                  ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
-                  : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}; кликните, чтобы открыть шаг, который её съел`
+                  ? `${pieceNameOf(t.key)} — hasn't gone into any unit yet; click to take it into the assembly`
+                  : `${pieceNameOf(t.key)} — already in unit ▣ ${t.into}; click to open the step that consumed it`
               }
               {...dragHandlers(t.key, t.x, t.y)}
               {...hoverHandlers(t.key)}
@@ -964,14 +965,14 @@ export function AssemblySchematic({
           onResetPositions();
           setResetOpen(false);
         }}
-        title='вернуть автоматическую раскладку'
-        confirmLabel='сбросить'
-        cancelLabel='оставить'
+        title='restore the automatic layout'
+        confirmLabel='reset'
+        cancelLabel='keep'
         width='sm'
       >
         <Text size='micro' variant='label'>
-          все ручные позиции этой карточки будут забыты, и схема снова расставит узлы сама. Данные
-          карточки не изменятся: позиции — только способ смотреть.
+          every manual position on this card will be forgotten, and the schematic will place the
+          units by itself again. the card's data doesn't change: positions are only a way of looking.
         </Text>
       </ConfirmationModal>
     </>
@@ -1002,21 +1003,21 @@ function ActionPanel({
   return (
     <ChipRow className='mb-1.5'>
       <Text size='micro' variant='label' component='span' className='uppercase'>
-        выбрано:
+        selected:
       </Text>
       <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
         {picked.map(labelOf).join(' + ')}
       </Text>
       {picked.length >= 2 && (
-        <Chip onClick={() => onCreate('unit')} title='собрать из выбранного новый узел'>
-          сшить · {picked.length}
+        <Chip onClick={() => onCreate('unit')} title='assemble a new unit from the selection'>
+          join · {picked.length}
         </Chip>
       )}
-      <Chip dashed onClick={() => onCreate('process')} title='шаг по выбранному, ничего не собирающий'>
-        обработка · {picked.length}
+      <Chip dashed onClick={() => onCreate('process')} title='a step on the selection that assembles nothing'>
+        processing · {picked.length}
       </Chip>
-      <Chip dashed onClick={onClear} title='снять выбор'>
-        отменить
+      <Chip dashed onClick={onClear} title='clear the selection'>
+        cancel
       </Chip>
     </ChipRow>
   );

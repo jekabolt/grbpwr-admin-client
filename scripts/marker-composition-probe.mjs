@@ -221,7 +221,7 @@ console.log('\nH · имя файла экспорта: префикс прог�
   ck(m.exportFileName(parts, 'dxf', 0) === cardName, 'runId = 0 не добавляет НИ ОДНОГО байта');
   const runName = m.exportFileName(parts, 'dxf', 7);
   ck(runName === `PR7_${cardName}`, 'раскройное имя = PR<runId>_ + прежнее', runName);
-  ck(m.exportFileName([], 'dxf', 7) === 'PR7_раскладка.dxf', 'префикс переживает пустые части', m.exportFileName([], 'dxf', 7));
+  ck(m.exportFileName([], 'dxf', 7) === 'PR7_marker.dxf', 'префикс переживает пустые части', m.exportFileName([], 'dxf', 7));
   ck(m.exportFileName(parts, 'dxf', 8) !== runName,
      'два прогона одного маркера дают РАЗНЫЕ имена (ради чего префикс и заводился)');
 }

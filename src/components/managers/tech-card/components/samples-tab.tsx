@@ -458,7 +458,7 @@ function resolveColorways(
 // A colourway's label for a picker / display cell (keyed by its stable id, not index).
 function colorwayLabel(c?: { code?: string; name?: string; id?: number }): string {
   if (!c) return '—';
-  return c.name || c.code || `колорвей #${c.id ?? '?'}`;
+  return c.name || c.code || `colourway #${c.id ?? '?'}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +690,7 @@ function SampleEditor({
         { id: 'fittings', label: 'fittings', count: fittings.length, alert: openRequests > 0 },
         { id: 'materials', label: 'materials', count: movementCount },
         { id: 'subs', label: 'substitutions', count: subsCount },
-        { id: 'cut', label: 'детали кроя', count: pieceCount },
+        { id: 'cut', label: 'cut pieces', count: pieceCount },
         { id: 'fabric', label: 'fabric map' },
         { id: 'assembly', label: 'assembly' },
         ...(canReadCosting ? [{ id: 'dev', label: 'R&D' }] : []),
@@ -796,7 +796,7 @@ function SampleEditor({
     staging.stage({
       key: stagingKey,
       // Naming the fields beats counting them while the list is short enough to read at a glance.
-      label: `сэмпл #${sample.number ?? sampleId} — ${
+      label: `sample #${sample.number ?? sampleId} — ${
         changed.length <= 3 ? changed.join('/') : `${changed.length} fields`
       }`,
       order: COMMIT_ORDER.samples,
@@ -964,7 +964,7 @@ function SampleEditor({
                 {/* A saved colourway the picker no longer offers (renamed then re-saved, so its id
                     changed) — keep it selectable so an existing link isn't silently dropped on save. */}
                 {d.colorwayId > 0 && !colorways.some((c) => c.id === d.colorwayId) ? (
-                  <option value={d.colorwayId}>колорвей #{d.colorwayId}</option>
+                  <option value={d.colorwayId}>colourway #{d.colorwayId}</option>
                 ) : null}
                 {colorways.map((c) => (
                   <option key={c.id} value={c.id ?? 0}>
@@ -1175,7 +1175,7 @@ function SampleEditor({
                     onChange={(id) => set({ previousSampleId: id === sampleId ? 0 : id })}
                   />
                 </Field>
-                <Field label='pattern url (выкройка snapshot)'>
+                <Field label='pattern url (pattern snapshot)'>
                   <input
                     className={selectCell}
                     disabled={!canEdit}
@@ -1188,7 +1188,7 @@ function SampleEditor({
                   <input
                     className={selectCell}
                     disabled={!canEdit}
-                    placeholder='e.g. выкройка v2, размер S'
+                    placeholder='e.g. pattern v2, size S'
                     value={d.patternNote}
                     onChange={(e) => set({ patternNote: e.target.value })}
                   />

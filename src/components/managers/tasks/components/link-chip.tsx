@@ -63,7 +63,7 @@ function useLinkName(link: TaskLink) {
           const r = await adminService.GetProductionRun({ id: link.id });
           const run = r?.run?.run;
           if (!run) return { name: null };
-          const tc = run.techCardId ? ` · техкарта #${run.techCardId}` : '';
+          const tc = run.techCardId ? ` · tech card #${run.techCardId}` : '';
           return { name: `#${link.id} · ${runStatusLabel(run.status)}${tc}` };
         }
         return { name: null };
@@ -75,13 +75,13 @@ function useLinkName(link: TaskLink) {
 }
 
 const KIND_PREFIX: Record<TaskLink['kind'], string> = {
-  techcard: 'техкарта',
+  techcard: 'tech card',
   product: 'product',
   order: 'order',
   archive: 'drop',
-  fitting: 'примерка',
-  sample: 'образец',
-  run: 'партия',
+  fitting: 'fitting',
+  sample: 'sample',
+  run: 'run',
 };
 
 export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: () => void }) {

@@ -944,13 +944,13 @@ function UsagePerSizeLocal({
     <div className='flex flex-col gap-1.5'>
       {editing && sizeIds.length > 0 && canEdit && (
         <div className='flex flex-wrap items-center justify-between gap-2'>
-          <FieldLabel>расход на изделие{unit ? ` (${unit})` : ''}</FieldLabel>
+          <FieldLabel>per-unit consumption{unit ? ` (${unit})` : ''}</FieldLabel>
           <ChipRow>
             <Chip selected={!perSize} pressed={!perSize} onClick={disablePerSize}>
-              один на изделие
+              one per unit
             </Chip>
             <Chip selected={perSize} pressed={perSize} onClick={enablePerSize}>
-              по размерам
+              per size
             </Chip>
           </ChipRow>
         </div>
@@ -958,9 +958,9 @@ function UsagePerSizeLocal({
       <DataTable>
         <thead>
           <tr>
-            <th>расход на изделие{unit ? `, ${unit}` : ''}</th>
+            <th>per-unit consumption{unit ? `, ${unit}` : ''}</th>
             {scalarMode ? (
-              <th>на изделие</th>
+              <th>per unit</th>
             ) : (
               colSizes.map((id) => (
                 <th key={id} className={sizeIds.includes(id) ? undefined : 'text-warning'}>
@@ -975,12 +975,12 @@ function UsagePerSizeLocal({
                 ячейки, а бейдж стоял у левого, то есть подпись стояла не над значением. Заодно
                 текст разбора под «?» перестаёт печататься с рваным левым краем. Метка, а не класс:
                 `text-left` на ячейке проигрывает по специфичности правилу таблицы. */}
-            {sourceCell != null && <th data-align='left'>источник</th>}
+            {sourceCell != null && <th data-align='left'>source</th>}
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>{unit ? `${unit} / изделие` : 'на изделие'}</td>
+            <td>{unit ? `${unit} / unit` : 'per unit'}</td>
             {scalarMode ? (
               <td className={editing ? 'p-0' : undefined}>
                 {editing ? (
@@ -989,7 +989,7 @@ function UsagePerSizeLocal({
                     inputMode='decimal'
                     disabled={!canEdit}
                     placeholder='0.000'
-                    aria-label={`расход на изделие${unit ? ` (${unit})` : ''}`}
+                    aria-label={`per-unit consumption${unit ? ` (${unit})` : ''}`}
                     value={draft.consumption}
                     onChange={(e) =>
                       onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))
@@ -1008,7 +1008,7 @@ function UsagePerSizeLocal({
                       inputMode='decimal'
                       disabled={!canEdit}
                       placeholder='0.000'
-                      aria-label={`расход ${formatSizeName(sizeNameById.get(id) ?? `#${id}`)}`}
+                      aria-label={`consumption ${formatSizeName(sizeNameById.get(id) ?? `#${id}`)}`}
                       value={consumptionBySize.get(id) ?? ''}
                       onChange={(e) => setSizeCell(id, e.target.value)}
                     />
@@ -1032,9 +1032,9 @@ function UsagePerSizeLocal({
       </DataTable>
       {extraSizes.length > 0 && (
         <Text size='nano' variant='label' component='p'>
-          * этих размеров в ряду карточки нет, а числа на них сохранены и продолжают работать:
-          сервер по непустым пер-размерным числам скаляр игнорирует. Уберите их или верните размер в
-          ряд
+          * these sizes are not in the card's range, yet the numbers on them are saved and keep
+          working: while the per-size numbers are non-empty the server ignores the scalar. remove
+          them or put the size back in the range
         </Text>
       )}
     </div>
@@ -1078,12 +1078,10 @@ function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate
   const seam = decimalToInput(estimate.seamAllowanceMm).trim();
   const parsedDay = formatTechCardDate(estimate.parsedAt);
   const basis = [
-    pieceCount > 0
-      ? `${pieceCount} ${plural(pieceCount, 'деталь', 'детали', 'деталей')} назначено`
-      : '',
-    estimate.contourLayer?.trim() ? `слой ${estimate.contourLayer.trim()}` : '',
-    seam ? `припуск ${seam} мм` : '',
-    parsedDay !== '—' ? `выкройки разобраны ${parsedDay}` : '',
+    pieceCount > 0 ? `${pieceCount} ${plural(pieceCount, 'piece')} assigned` : '',
+    estimate.contourLayer?.trim() ? `layer ${estimate.contourLayer.trim()}` : '',
+    seam ? `seam allowance ${seam} mm` : '',
+    parsedDay !== '—' ? `patterns parsed ${parsedDay}` : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -1095,18 +1093,18 @@ function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate
     <div className='flex flex-wrap items-center gap-1.5'>
       {stale ? (
         <Pill tone='attention' title={refusalText || undefined}>
-          замер устарел
+          the measurement is stale
         </Pill>
       ) : value ? (
-        <Pill tone='mut'>оценка по площади</Pill>
+        <Pill tone='mut'>estimate from the area</Pill>
       ) : (
-        <Pill tone='mut'>оценка не посчитана</Pill>
+        <Pill tone='mut'>the estimate is not computed</Pill>
       )}
       <details className='inline-block text-nano'>
         <summary
           className='inline-flex h-[18px] w-[18px] cursor-pointer list-none items-center justify-center border border-borderColor text-labelColor [&::-webkit-details-marker]:hidden'
-          title='на чём посчитана оценка'
-          aria-label='на чём посчитана оценка'
+          title='what the estimate is computed on'
+          aria-label='what the estimate is computed on'
         >
           ?
         </summary>
@@ -1118,10 +1116,10 @@ function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate
           )}
           {value && (
             <Text size='nano' variant='label' component='p'>
-              это NETTO и нижняя граница: межлекальных выпадов и концов настила в ней нет — их знает
-              только раскладка. Число считает сервер по сегодняшним площадям, оно не хранится и не
-              правится: уточните раскладкой либо впишите своё — вписанная норма всегда сильнее
-              выведенной
+              this is NETTO and a lower bound: it holds no waste between pieces and no lay ends —
+              only the marker knows those. the server computes the number from today's areas, it is
+              neither stored nor editable: refine it with a marker or type your own — a typed-in
+              norm always beats a derived one
             </Text>
           )}
           {/* ОТКАЗ ПЕЧАТАЕТСЯ ДОСЛОВНО И БЕЗ ДОБАВОК. Сервер уже назвал причину и уже назвал
@@ -1234,17 +1232,17 @@ function NormSummary({
   if (isMarker) {
     explain.push(
       draft.wasteSelvedgePct || draft.wasteCutPct
-        ? `измеренная длина раскладки на изделие; отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + межлекальные ${draft.wasteCutPct || '0'}% от площади деталей`
-        : 'измеренная длина раскладки на изделие; отходы уже внутри, разложение не записано',
+        ? `the measured marker length per unit; the waste is already inside: selvedge ${draft.wasteSelvedgePct || '0'}% + between-piece ${draft.wasteCutPct || '0'}% of the piece area`
+        : 'the measured marker length per unit; the waste is already inside, the breakdown is not recorded',
     );
     explain.push(
       slotWastagePercent.trim()
-        ? `процент раскроя слота (${slotWastagePercent}%) НЕ начисляется — иначе отходы посчитались бы дважды`
-        : 'процент раскроя слота не начисляется — иначе отходы посчитались бы дважды',
+        ? `the slot's wastage percent (${slotWastagePercent}%) is NOT charged — otherwise the waste would be counted twice`
+        : "the slot's wastage percent is not charged — otherwise the waste would be counted twice",
     );
   } else if (isDxf) {
     explain.push(
-      `NETTO: Σ(площадь деталей × количество на изделие) ÷ раскройная ширина${articleWidth ? ` (${articleWidth} см)` : ''}`,
+      `NETTO: Σ(piece area × quantity per garment) ÷ the cutting width${articleWidth ? ` (${articleWidth} cm)` : ''}`,
     );
     // КРОМКА ЗДЕСЬ НЕ НАЗЫВАЕТСЯ СРЕДИ ТОГО, ЧТО ДОНАЧИСЛЯЕТ ПРОЦЕНТ, — и это арифметика, а не
     // формулировка (прежний текст называл, и оператор, поверивший ему, заложил бы кромочную
@@ -1254,16 +1252,16 @@ function NormSummary({
     // dxf-apply-dialog.tsx.
     explain.push(
       slotWastagePercent.trim()
-        ? `межлекальные выпады и концы настила в число НЕ входят — их доначисляет процент раскроя слота (${slotWastagePercent}%); кромка в процент не входит: она уже оплачена делением на раскройную ширину, и закладывать её туда — посчитать дважды`
-        : '⚠ межлекальные выпады и концы настила в число не входят, а процент раскроя слота НЕ ЗАДАН — себестоимость и потребность занижены (кромки это не касается: она уже внутри, делением на раскройную ширину)',
+        ? `waste between pieces and lay ends are NOT in the number — the slot's wastage percent (${slotWastagePercent}%) adds them on top; the selvedge is not part of that percent: it is already paid for by dividing by the cutting width, and putting it there too is counting it twice`
+        : "⚠ waste between pieces and lay ends are not in the number, and the slot's wastage percent is NOT SET — the cost and the requirement are understated (this does not concern the selvedge: it is already inside, through the division by the cutting width)",
     );
-    explain.push('раскладка, когда появится, даст измеренное число и заменит это');
+    explain.push('a marker, once there is one, will give a measured number and replace this');
   } else {
-    explain.push('число набрано руками — проверить его не по чему');
+    explain.push('the number was typed by hand — there is nothing to check it against');
     explain.push(
       slotWastagePercent.trim()
-        ? `костинг начисляет сверху процент раскроя слота (${slotWastagePercent}%)`
-        : 'процент раскроя слота не задан — сверху ничего не начисляется',
+        ? `costing charges the slot's wastage percent (${slotWastagePercent}%) on top`
+        : "the slot's wastage percent is not set — nothing is charged on top",
     );
   }
   // Кг-слот (Ф3): инструментальная норма в килограммах посчитана ЧЕРЕЗ ДЛИНУ, и основа перевода
@@ -1276,8 +1274,8 @@ function NormSummary({
   if ((isMarker || isDxf) && bomUnitKind(unit) === 'kg') {
     explain.push(
       weightBasis.ok
-        ? `килограммы — через длину: метры × ${weightBasisLabel(weightBasis.basis)} ÷ 100000. Основа сегодняшняя: плотность — артикула, ширина — строки BOM, если она переопределяет артикул`
-        : `килограммы считаются через длину, но сегодня основы веса нет: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`,
+        ? `kilograms — through length: metres × ${weightBasisLabel(weightBasis.basis)} ÷ 100000. the basis is today's: the density from the article, the width from the BOM line if it overrides the article`
+        : `kilograms are computed through length, but today there is no weight basis: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`,
     );
   }
 
@@ -1321,14 +1319,14 @@ function NormSummary({
   const recheckBlocked =
     unitStep == null
       ? unit
-        ? `для единицы «${unit}» пересчёт по текущим выкройкам не считается — сравнивать умеем метры, сантиметры и килограммы`
+        ? `for the unit “${unit}” a recheck against the current patterns is not computed — we can compare metres, centimetres and kilograms`
         : // Пустая единица — не «неизвестная»: у неё есть адресная починка, и отказ обязан её
           // называть — заполнить единицу на вкладке BOM, а не менять что-то в рецепте.
-          'у слота не заполнена единица — норма пишется и читается в единице слота; заполните её на вкладке BOM'
+          "the slot has no unit filled in — the norm is written and read in the slot's unit; fill it in on the BOM tab"
       : bomUnitKind(unit) === 'kg' && !weightBasis.ok
-        ? `пересчёт по текущим выкройкам не делается: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`
+        ? `no recheck against the current patterns is done: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`
         : !(parseDecimalNumber(articleWidth) > 0)
-          ? 'пересчёт по текущим выкройкам не делается: раскройная ширина артикула неизвестна — либо не заполнена ширина рулона, либо кромка съедает её целиком'
+          ? "no recheck against the current patterns is done: the article's cutting width is unknown — either the roll width is not filled in, or the selvedge eats it whole"
           : '';
 
   // ЧИСЛА ЗДЕСЬ БОЛЬШЕ НЕ ПЕЧАТАЮТСЯ. Они живут в таблице расхода — одном-единственном виде на
@@ -1345,8 +1343,8 @@ function NormSummary({
         <details className='inline-block text-nano' onToggle={(e) => setOpen(e.currentTarget.open)}>
           <summary
             className='inline-flex h-[18px] w-[18px] cursor-pointer list-none items-center justify-center border border-borderColor text-labelColor [&::-webkit-details-marker]:hidden'
-            title='из чего сложилось это число'
-            aria-label='из чего сложилось'
+            title='what this number adds up from'
+            aria-label='what it adds up from'
           >
             ?
           </summary>
@@ -1374,7 +1372,7 @@ function NormSummary({
                     <Suspense
                       fallback={
                         <Text size='nano' variant='label' component='span'>
-                          пересчитываем по текущим данным карточки…
+                          rechecking against the card's current data…
                         </Text>
                       }
                     >
@@ -1401,19 +1399,19 @@ function NormSummary({
           него не увидит вовсе. */}
       {scalarFallback && (
         <Text size='nano' variant='label' component='p'>
-          {`единая норма ${scalarFallback} осталась в строке и работает только на размеры вне ряда`}
+          {`the single norm ${scalarFallback} stayed in the line and works only on sizes outside the range`}
         </Text>
       )}
       {uncoveredSizes.length > 0 && (
         <div className='flex flex-wrap items-center gap-1.5'>
           <Pill tone='attention'>
-            {`нет нормы: ${uncoveredSizes
+            {`no norm: ${uncoveredSizes
               .map((id) => formatSizeName(sizeNameById.get(id) ?? `#${id}`))
               .join(', ')}`}
           </Pill>
           <Text size='nano' variant='label' component='span'>
-            ряд не покрывает эти размеры, а единой нормы в строке нет — план прогона для них не
-            увидит расход вовсе
+            the range does not cover these sizes, and the line has no single norm — for them the run
+            plan will not see any consumption at all
           </Text>
         </div>
       )}
@@ -1445,7 +1443,7 @@ function RecipeMaterialCard({
   // only when it says something the section doesn't (e.g. a thread-class article on a trim slot).
   const rawKlass = materialClassLabel(material?.materialClass);
   const klass = rawKlass === section ? '' : rawKlass;
-  const name = material?.name?.trim() || (materialId ? `артикул #${materialId}` : 'нет артикула');
+  const name = material?.name?.trim() || (materialId ? `article #${materialId}` : 'no article');
   const code = material ? composeArticleFromMaterial(material, true) : '';
   const spec = material
     ? [materialSpec(material), material.color?.trim()].filter(Boolean).join(' · ')
@@ -1586,13 +1584,13 @@ function ArticlePinSelect({
       className={cell}
       value={draft.materialId}
       disabled={!canEdit || !slot}
-      aria-label='артикул колорвея'
+      aria-label='colourway article'
       onChange={(e) => onChange(wireInt(e.target.value))}
     >
-      <option value={0}>default — {slot?.material?.name?.trim() || 'нет'}</option>
+      <option value={0}>default — {slot?.material?.name?.trim() || 'none'}</option>
       {missingPin && <option value={draft.materialId}>(unknown / removed article)</option>}
       {pinned && archivedPinOutsideSection && (
-        <option value={draft.materialId}>{materialLabel(pinned)} (не для секции)</option>
+        <option value={draft.materialId}>{materialLabel(pinned)} (not for the section)</option>
       )}
       {sameSection.map((material) => (
         <option key={wireInt(material.id)} value={wireInt(material.id)}>
@@ -1600,7 +1598,7 @@ function ArticlePinSelect({
         </option>
       ))}
       {otherSections.length > 0 && (
-        <optgroup label='другие секции'>
+        <optgroup label='other sections'>
           {otherSections.map((material) => (
             <option key={wireInt(material.id)} value={wireInt(material.id)}>
               {materialLabel(material)} · {sectionShort(material.section) || 'unknown'}
@@ -1810,9 +1808,9 @@ function SlotNormBlock({
   const normStale = markerNormStaleness(stampedMarker, articleWidth);
   const normStampText = [
     appliedDay !== '—'
-      ? `норма применена ${appliedDay} из раскладки ${stampedName}`
-      : `норма применена из раскладки ${stampedName}`,
-    normDrifted ? `раскладка изменена ${markerDay} — число могло устареть` : '',
+      ? `the norm was applied ${appliedDay} from marker ${stampedName}`
+      : `the norm was applied from marker ${stampedName}`,
+    normDrifted ? `the marker changed ${markerDay} — the number may be out of date` : '',
   ]
     .filter(Boolean)
     .join('; ');
@@ -1856,7 +1854,7 @@ function SlotNormBlock({
           ней же. */}
       {draft.materialId > 0 && (
         <span>
-          <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
+          <Pill tone='mut'>pin: {material?.name?.trim() || `article #${draft.materialId}`}</Pill>
         </span>
       )}
       {isMeasured && !legacyCountedMeasured ? (
@@ -2040,11 +2038,12 @@ function SlotNormBlock({
               ).length;
               return (
                 <Text size='nano' variant='label' component='p'>
-                  расход не вводят руками, его считают: с раскладки — измеренной длиной настила,
-                  либо по выкройкам — площадью деталей кроя ÷ раскройную ширину.{' '}
+                  consumption is not typed in by hand, it is computed: from a marker — by the
+                  measured lay length, or from the patterns — by the cut-piece area ÷ the cutting
+                  width.{' '}
                   {foreign > 0
-                    ? `Раскладки на этот слот сняты (${foreign}), но в ДРУГОМ колорвее: их длина измерена на его артикуле, и предложить её здесь значило бы подменить ширину полотна — отличие выглядело бы совершенно нормальным числом. Снимите раскладку в этом колорвее либо посчитайте по выкройкам.`
-                    : 'Раскладки на этот слот пока нет, поэтому предложить снять с неё нечего.'}
+                    ? `markers have been captured for this slot (${foreign}), but in a DIFFERENT colourway: their length is measured on that colourway's article, and offering it here would substitute the cloth width — the difference would look like a perfectly normal number. capture a marker in this colourway, or compute it from the patterns.`
+                    : 'there is no marker for this slot yet, so there is nothing to offer capturing from.'}
                 </Text>
               );
             })()}
@@ -2069,14 +2068,14 @@ function SlotNormBlock({
                 size='xs'
                 onClick={() => setSelfEditing((v) => !v)}
               >
-                {selfEditing ? 'готово' : 'редактировать'}
+                {selfEditing ? 'done' : 'edit'}
               </Button>
             </span>
           )}
           {rowEditing && normEditable && (
             <Text size='nano' variant='label' component='p'>
-              правится вручную — источник сменится на «введено руками», и костинг снова начнёт
-              начислять сверху процент раскроя слота
+              edited by hand — the source will switch to “entered by hand”, and costing will start
+              charging the slot's wastage percent on top again
             </Text>
           )}
         </div>
@@ -2085,7 +2084,7 @@ function SlotNormBlock({
           {/* Слово «расход» — то же, что у измеряемых слотов, и это не оговорка: у пуговицы расход
               тоже расход, просто считается штуками. Прежнее «quantity» было единственным местом на
               карточке, где та же величина называлась по-английски и другим словом. */}
-          <FieldLabel>расход на изделие{unit ? ` (${unit})` : ''}</FieldLabel>
+          <FieldLabel>per-unit consumption{unit ? ` (${unit})` : ''}</FieldLabel>
           <input
             className={cell}
             inputMode='decimal'
@@ -2101,12 +2100,14 @@ function SlotNormBlock({
           must be able to see on the row that causes it. */}
       {draft.consumptionSource === 'marker' && (
         <div className='flex flex-wrap items-center gap-1.5'>
-          <Pill tone='mut'>из раскладки</Pill>
+          <Pill tone='mut'>from the marker</Pill>
           <Text size='nano' variant='label' component='span'>
             {draft.wasteSelvedgePct || draft.wasteCutPct
-              ? `отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + выпады ${draft.wasteCutPct || '0'}%`
-              : 'отходы уже внутри нормы; разложение не записано'}
-            {slot.wastagePercent?.trim() ? ` · ${slot.wastagePercent}% слота не начисляются` : ''}
+              ? `the waste is already inside: selvedge ${draft.wasteSelvedgePct || '0'}% + between-piece ${draft.wasteCutPct || '0'}%`
+              : 'the waste is already inside the norm; the breakdown is not recorded'}
+            {slot.wastagePercent?.trim()
+              ? ` · the slot's ${slot.wastagePercent}% is not charged`
+              : ''}
           </Text>
           {/* МАРОЧНАЯ СТРОКА БЕЗ ШТАМПА — НЕ ТО ЖЕ, ЧТО МАРОЧНАЯ СО ШТАМПОМ, и молчать об этом
               нельзя. До 0291 штамп не ставили, а пер-размерное применение из нескольких раскладок
@@ -2116,9 +2117,9 @@ function SlotNormBlock({
           {(draft.normMarkerId ?? 0) === 0 && (
             <Pill
               tone='mut'
-              title='у этой нормы не записано, из какой именно раскладки её сняли (применение до Ф6.8 либо несколько раскладок на размерный ряд). Число верное, но следить за изменениями раскладки нечем — примените заново, если нужна прослеживаемость'
+              title="this norm does not record which marker it was captured from (an application before phase 6.8, or several markers across the size range). the number is correct, but there is nothing to watch the marker's changes with — re-apply it if you need traceability"
             >
-              ссылка на раскладку потеряна
+              the link to the marker is lost
             </Pill>
           )}
         </div>
@@ -2140,17 +2141,17 @@ function SlotNormBlock({
           {normDrifted && (
             <Pill
               tone='attention'
-              title={`раскладку ${stampedName} перемеряли после того, как с неё сняли эту норму — число в строке может относиться к прежней геометрии. Пересчёта нет и не будет: примените расход заново, если хотите свежий`}
+              title={`marker ${stampedName} was re-measured after this norm was captured from it — the number in the line may belong to the previous geometry. there is no recompute and there will not be one: re-apply the consumption if you want a fresh one`}
             >
-              раскладка изменена после применения
+              the marker changed after the application
             </Pill>
           )}
           {!stampedMarker && (
             <Pill
               tone='mut'
-              title={`раскладки ${stampedName} среди раскладок этого колорвея больше нет — её удалили. Ссылки (FK) на раскладку не заводили намеренно: число в строке КОПИЯ и остаётся верным, но пересмотреть его источник уже нельзя`}
+              title={`marker ${stampedName} is no longer among this colourway's markers — it was deleted. no FK to the marker was created on purpose: the number in the line is a COPY and stays correct, but its source can no longer be reviewed`}
             >
-              раскладка удалена
+              the marker is deleted
             </Pill>
           )}
           {/* ОТПЕЧАТОК ВХОДА РАЗОШЁЛСЯ — дешёвая половина вердикта (набор деталей карточки по
@@ -2162,9 +2163,9 @@ function SlotNormBlock({
           {normStale.stale && (
             <Pill
               tone='attention'
-              title={`${normStale.reasons.join('; ')}. Пересчитать: «раскладка комплекта…» на этой карточке — она заменит ту же раскладку и применит свежее число`}
+              title={`${normStale.reasons.join('; ')}. to recompute: “kit marker…” on this card — it replaces the same marker and applies a fresh number`}
             >
-              норма протухла: вход изменился
+              the norm is stale: the input changed
             </Pill>
           )}
           <Text size='nano' variant='label' component='span'>
@@ -2188,11 +2189,11 @@ function SlotNormBlock({
           руками» про число, которого нет, — неправда, а прочерк уже сказан выше. */}
       {isMeasured && rollGoods && !legacyCountedMeasured && hasNorm && !derivedNorm && (
         <div className='flex flex-wrap items-center gap-1.5'>
-          <Pill tone='attention'>расход введён руками</Pill>
+          <Pill tone='attention'>consumption entered by hand</Pill>
           <Text size='nano' variant='label' component='span'>
-            норма не снята с раскладки
+            the norm was not captured from a marker
             {slot.wastagePercent?.trim()
-              ? ` · костинг начисляет сверху ${slot.wastagePercent}% раскроя слота`
+              ? ` · costing charges the slot's ${slot.wastagePercent}% wastage on top`
               : ''}
           </Text>
         </div>
@@ -2212,7 +2213,7 @@ function SlotNormBlock({
       {canEdit && hasRow && !toolsInHeader && (
         <div className='flex justify-end'>
           <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
-            убрать расход
+            remove the consumption
           </Button>
         </div>
       )}
@@ -2285,7 +2286,7 @@ function PieceLinkRow({
             (s) =>
               `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`).toUpperCase()} ${(s.consumption ?? '').trim()}`,
           )
-          .join(' · ')}${unit ? ` — в ${unit}` : ''}`
+          .join(' · ')}${unit ? ` — in ${unit}` : ''}`
       : legacyScalar
         ? `${legacyScalar}${unit ? ` ${unit}` : ''}`
         : '';
@@ -2311,31 +2312,31 @@ function PieceLinkRow({
           </Text>
         </span>
         {pinnedDifferent && (
-          <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
+          <Pill tone='mut'>pin: {material?.name?.trim() || `article #${draft.materialId}`}</Pill>
         )}
         {canEdit && (
           <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
-            убрать
+            remove
           </Button>
         )}
       </div>
       {legacyText && (
         <div className='flex flex-col gap-1 pb-1'>
           <div className='flex flex-wrap items-center gap-1.5'>
-            <Pill tone='attention'>легаси-расход на детали</Pill>
+            <Pill tone='attention'>legacy consumption on the pieces</Pill>
             <Text size='small' component='span' className='font-mono tabular-nums'>
               {legacyText}
             </Text>
           </div>
           <Text size='nano' variant='label' component='p'>
-            это число сервер прибавляет к норме ткани — в себестоимость и в потребность прогона:
-            строки одного слота суммируются. Расход изделия ведётся расходом этой ткани выше —
-            заведите норму там, а это число уберите
+            the server adds this number to the fabric's norm — into the cost and into the run's
+            requirement: the lines of one slot are summed. the garment's consumption is kept as this
+            fabric's consumption above — set the norm there, and remove this number
           </Text>
           {canEdit && (
             <span>
               <Button type='button' variant='secondary' size='xs' onClick={clearLegacy}>
-                убрать число
+                remove the number
               </Button>
             </span>
           )}
@@ -2345,14 +2346,10 @@ function PieceLinkRow({
   );
 }
 
-// Русское числительное при существительном — без библиотеки: карточка теперь называет числа вслух
-// («9 деталей»), и «9 деталь» читается как опечатка ровно там, где нужно доверие к числам.
-function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
+// Number agreement for a noun — without a library: the card now says its numbers out loud
+// («9 pieces»), and «9 piece» reads as a typo exactly where the numbers have to be trusted.
+function plural(n: number, one: string, many: string = `${one}s`): string {
+  return n === 1 ? one : many;
 }
 
 // ПРАВИЛА ЦЕЛОСТНОСТИ СЛОЁВ (T4) — те же три, что держит сервер (отказ рецепта
@@ -2533,7 +2530,7 @@ function FabricRecipeCard({
   // ткань» — основная, подкладка, дублерин), затем имя артикула. Роль — проекция строки BOM
   // (piece-layer-role.ts), у нерулонной секции её нет, и там шапку открывает сама секция.
   const roleWord = rollGoods ? pieceLayerRoleLabel(layerRole) : sectionShort(slot.section);
-  const named = material?.name?.trim() || slot.name?.trim() || 'без названия';
+  const named = material?.name?.trim() || slot.name?.trim() || 'unnamed';
   const heading = [roleWord, `«${named}»`].filter(Boolean).join(' · ');
   const code = material ? composeArticleFromMaterial(material, true) : '';
   const spec = material
@@ -2546,7 +2543,7 @@ function FabricRecipeCard({
   const price = article?.unitPrice?.trim()
     ? `${article.unitPrice}${article.currency ? ` ${article.currency}` : ''}${unit ? ` / ${unit}` : ''}`
     : '';
-  const meta = [code, spec, rollWidth ? `рулон ${rollWidth} см` : '', price]
+  const meta = [code, spec, rollWidth ? `roll ${rollWidth} cm` : '', price]
     .filter(Boolean)
     .join(' · ');
 
@@ -2680,7 +2677,7 @@ function FabricRecipeCard({
         )}
         {normEditable && (
           <Button type='button' variant='secondary' size='xs' onClick={() => setEditing((v) => !v)}>
-            {editing ? 'готово' : 'редактировать'}
+            {editing ? 'done' : 'edit'}
           </Button>
         )}
         {/* «УБРАТЬ РАСХОД» — бывший unlink строки «на изделие», и он всё ещё нужен: без него норму
@@ -2696,7 +2693,7 @@ function FabricRecipeCard({
               onRemoveRow(garment.index);
             }}
           >
-            убрать расход
+            remove the consumption
           </Button>
         )}
       </>
@@ -2704,13 +2701,13 @@ function FabricRecipeCard({
 
   const piecePicker = (label: string) => (
     <GenericPopover
-      title='детали из этой ткани'
+      title='pieces cut from this fabric'
       // Шире прежних 256px, потому что выбор стал ВИЗУАЛЬНЫМ: четыре силуэта в ряд — это тот
       // размер, на котором форма детали ещё узнаётся, а список из тридцати не превращается в
       // рулон. Ниже 340px сетка схлопывается в три колонки и начинает резать имена.
       className='w-[340px]'
       triggerProps={{
-        'aria-label': 'назначить детали',
+        'aria-label': 'assign pieces',
         className: buttonVariants({ variant: 'secondary', size: 'xs' }),
       }}
       openElement={label}
@@ -2738,8 +2735,8 @@ function FabricRecipeCard({
             перекрывает карточку, и посчитать галочки глазами по сетке из тридцати плиток нельзя. */}
         <Text size='nano' variant='label' component='p' className='border-t border-hairline pt-1'>
           {assignedKeys.length === 0
-            ? `выбрано 0 из ${pieces.length} — из этой ткани пока ничего не кроится`
-            : `выбрано ${assignedKeys.length} из ${pieces.length} ${plural(pieces.length, 'детали', 'деталей', 'деталей')} карточки`}
+            ? `0 of ${pieces.length} selected — nothing is cut from this fabric yet`
+            : `${assignedKeys.length} of the card's ${pieces.length} ${plural(pieces.length, 'piece')} selected`}
         </Text>
       </div>
     </GenericPopover>
@@ -2766,13 +2763,13 @@ function FabricRecipeCard({
                   open={pinOpen}
                   onOpenChange={setPinOpen}
                   noTail
-                  title='артикул колорвея'
+                  title='colourway article'
                   className='w-[280px]'
                   triggerProps={{
-                    'aria-label': 'артикул колорвея',
+                    'aria-label': 'colourway article',
                     className: buttonVariants({ variant: 'secondary', size: 'xs' }),
                   }}
-                  openElement={draft.materialId > 0 ? 'пин ✎' : 'другой артикул…'}
+                  openElement={draft.materialId > 0 ? 'pin ✎' : 'another article…'}
                 >
                   <div className='flex flex-col gap-1.5'>
                     <ArticlePinSelect
@@ -2808,8 +2805,8 @@ function FabricRecipeCard({
                       }}
                     />
                     <Text size='micro' variant='label'>
-                      Переопределяет артикул слота только в этом колорвее. «default» возвращает
-                      артикул из BOM.
+                      overrides the slot's article in this colourway only. “default” brings back the
+                      article from the BOM.
                     </Text>
                   </div>
                 </GenericPopover>
@@ -2832,13 +2829,13 @@ function FabricRecipeCard({
           {/* Пин здесь НЕ повторяется: он свойство строки и стоит в её блоке расхода (SlotNormBlock). */}
           {(missingArticle || offRecipeSection) && (
             <div className='flex flex-wrap items-center gap-1.5'>
-              {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
+              {missingArticle && <Pill tone='warn'>no article — a production blocker</Pill>}
               {offRecipeSection && (
                 <Pill
                   tone='attention'
-                  title='рецепт колорвея заводится на ткани, нитки, фурнитуру, тесьму и декор; строки этой секции остались от прежней модели. Перенести строку некуда — уберите её и заведите расход на нужной ткани'
+                  title='a colourway recipe is written on fabrics, threads, hardware, trim and decoration; the lines of this section are left over from the previous model. there is nowhere to move the line to — remove it and set the consumption on the right fabric'
                 >
-                  секция не заводится в рецепт
+                  the section is not written into a recipe
                 </Pill>
               )}
             </div>
@@ -2868,10 +2865,10 @@ function FabricRecipeCard({
               <div key={i}>
                 {i > 0 && (
                   <div className='flex flex-col gap-1 pb-1'>
-                    <Pill tone='warn'>вторая строка расхода на эту ткань</Pill>
+                    <Pill tone='warn'>a second consumption line on this fabric</Pill>
                     <Text size='nano' variant='label' component='p'>
-                      на один слот заведено больше одной строки без детали; сервер их СУММИРУЕТ —
-                      расход этой ткани складывается из всех. Оставьте одну
+                      more than one line without a piece is set on a single slot; the server SUMS
+                      them — this fabric's consumption is the total of all of them. leave one
                     </Text>
                   </div>
                 )}
@@ -2912,61 +2909,61 @@ function FabricRecipeCard({
               на всём. Стоит на КАРТОЧКЕ: роль — свойство ткани, чинится на вкладке BOM. */}
           {rollGoods && isUnsortedLayerRole(layerRole) && (
             <div className='flex flex-wrap items-center gap-1.5'>
-              <Pill tone='attention'>роль слоя неизвестна — назначение не задано</Pill>
+              <Pill tone='attention'>the layer role is unknown — the purpose is not set</Pill>
               <Text size='nano' variant='label' component='span'>
-                задай назначение этой строке на вкладке BOM: из него выводится, основная это ткань,
-                подкладка или дублерин
+                set the purpose of this line on the BOM tab: whether this is the main fabric, the
+                lining or the fusing is derived from it
               </Text>
             </div>
           )}
 
           {twoMainsRows.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill tone='warn'>две основные ткани на одной детали</Pill>
+              <Pill tone='warn'>two main fabrics on one piece</Pill>
               <Text size='nano' variant='label' component='p'>
-                {uniq(twoMainsRows.map((x) => x.name)).join(', ')} — на каждой, кроме этой ткани,
-                стоит ещё одна с назначением «основной материал»:{' '}
-                {rivalNames(twoMainsRows.flatMap((x) => x.issue.mainNames)).join(', ')}. Цельная
-                деталь кроится из одной основной: сервер не примет такой рецепт, а наряд
-                остановится. Задай второй ткани её назначение на вкладке BOM (подкладка, дублерин,
-                контраст…) — или разбей деталь на две
+                {uniq(twoMainsRows.map((x) => x.name)).join(', ')} — on each of them, besides this
+                fabric, there is another one with the purpose “main material”:{' '}
+                {rivalNames(twoMainsRows.flatMap((x) => x.issue.mainNames)).join(', ')}. a whole
+                piece is cut from one main fabric: the server will not accept such a recipe, and the
+                run pack will stop. set the second fabric's purpose on the BOM tab (lining, fusing,
+                contrast…) — or split the piece in two
               </Text>
             </div>
           )}
           {unsortedRows.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill tone='warn'>назначения слоёв не разобраны</Pill>
+              <Pill tone='warn'>the layer purposes are unsorted</Pill>
               <Text size='nano' variant='label' component='p'>
-                у {uniq(unsortedRows.map((x) => x.name)).join(', ')} несколько слоёв, и у{' '}
+                {uniq(unsortedRows.map((x) => x.name)).join(', ')} have several layers, and{' '}
                 {[
                   ...(selfIsUnsorted ? [selfName] : []),
                   ...rivalNames(unsortedRows.flatMap((x) => x.issue.unsortedNames)),
                 ].join(', ')}{' '}
-                не задано назначение — не доказать, что это не вторая основная, и наряд остановится.
-                Задай назначение на вкладке BOM
+                have no purpose set — there is no proving it is not a second main fabric, and the
+                run pack will stop. set the purpose on the BOM tab
               </Text>
             </div>
           )}
           {mainlessRows.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill tone='attention'>у детали нет основной ткани</Pill>
+              <Pill tone='attention'>the piece has no main fabric</Pill>
               <Text size='nano' variant='label' component='p'>
-                {uniq(mainlessRows.map((x) => x.name)).join(', ')} привязаны к{' '}
-                {uniq(mainlessRows.flatMap((x) => x.issue.layerRoleNames)).join(', ')}, но не к
-                основной. Добавь этим деталям ткань назначения «основной материал» — или подтверди,
-                что состав детали такой и есть
+                {uniq(mainlessRows.map((x) => x.name)).join(', ')} are bound to{' '}
+                {uniq(mainlessRows.flatMap((x) => x.issue.layerRoleNames)).join(', ')}, but not to a
+                main one. add a fabric with the purpose “main material” to these pieces — or confirm
+                that the piece really is composed this way
               </Text>
             </div>
           )}
 
           {legacyPieceNames.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill tone='attention'>своё число расхода на деталях</Pill>
+              <Pill tone='attention'>the pieces carry a consumption number of their own</Pill>
               <Text size='nano' variant='label' component='p'>
-                {legacyPieceNames.join(', ')} несут собственный расход, оставшийся от прежней
-                модели. Сервер СУММИРУЕТ строки одного слота — эти числа прибавляются к расходу этой
-                ткани сверху, и в себестоимость, и в потребность прогона. Разверните список деталей
-                и уберите их
+                {legacyPieceNames.join(', ')} carry a consumption of their own, left over from the
+                previous model. the server SUMS the lines of one slot — these numbers are added on
+                top of this fabric's consumption, both into the cost and into the run's requirement.
+                expand the list of pieces and remove them
               </Text>
             </div>
           )}
@@ -2997,13 +2994,13 @@ function FabricRecipeCard({
             <div className='-mx-4 -mb-4 mt-1 flex flex-col items-start gap-1.5 border-t border-hairline bg-bgZebra px-4 py-2.5'>
               {pieceRows.length === 0 ? (
                 <Text size='nano' variant='label' component='p'>
-                  детали не назначены — из этой ткани пока ничего не кроится
+                  no pieces assigned — nothing is cut from this fabric yet
                 </Text>
               ) : (
                 <div className='flex w-full min-w-0 flex-col gap-1.5'>
                   <div className='flex flex-wrap items-baseline gap-2'>
                     <Text size='micro' variant='label' component='span' className='uppercase'>
-                      {`кроится из этой ткани · ${pieceRows.length}`}
+                      {`cut from this fabric · ${pieceRows.length}`}
                     </Text>
                   </div>
                   {/* Деталь БЕЗ контура остаётся в полосе пустой клеткой с обрезком имени, а не
@@ -3029,8 +3026,9 @@ function FabricRecipeCard({
                                 component='span'
                                 className='text-center'
                               >
-                                нет
-                                <br />в выкройках
+                                not
+                                <br />
+                                in the patterns
                               </Text>
                             )}
                           </span>
@@ -3075,21 +3073,20 @@ function FabricRecipeCard({
               {canEdit &&
                 rollGoods &&
                 (pieces.length > 0 ? (
-                  piecePicker(
-                    pieceRows.length === 0 ? 'назначить детали' : 'изменить набор деталей',
-                  )
+                  piecePicker(pieceRows.length === 0 ? 'assign pieces' : 'change the set of pieces')
                 ) : (
                   <Text size='nano' variant='label' component='p'>
-                    деталей кроя на карточке ещё нет — объявите их на вкладке деталей, и их можно
-                    будет назначить этой ткани
+                    the card has no cut pieces yet — declare them on the pieces tab, and they can
+                    then be assigned to this fabric
                   </Text>
                 ))}
               {/* Секция уехала из рулонной уже после того, как связи завели. Новые назначать
                   нельзя (деталь кроят из полотна, а не из нитки), а эти — убрать можно и нужно. */}
               {!rollGoods && pieceRows.length > 0 && (
                 <Text size='nano' variant='label' component='p'>
-                  секция этой строки BOM больше не рулонная — новые детали ей не назначают. Связи,
-                  оставшиеся от прежней секции, перечислены строками выше: уберите их
+                  the section of this BOM line is no longer roll goods — new pieces are not assigned
+                  to it. the links left over from the previous section are listed in the rows above:
+                  remove them
                 </Text>
               )}
             </div>
@@ -3128,13 +3125,13 @@ function StraySlotAssign({
       className={cn(cell, 'w-56')}
       value=''
       disabled={!canEdit || slots.length === 0}
-      aria-label='назначить слот'
+      aria-label='assign a slot'
       onChange={(e) => {
         if (e.target.value) onAssign(e.target.value);
       }}
     >
       <option value=''>
-        {slots.length === 0 ? '— в BOM нет подходящих строк —' : '— назначить слот —'}
+        {slots.length === 0 ? '— no suitable lines in the BOM —' : '— assign a slot —'}
       </option>
       {slots.map((b) => (
         <option key={b.lineKey} value={b.lineKey}>
@@ -3207,12 +3204,12 @@ function OrphanRecipeCard({
           )}
           {!savableUsage(draft) && (
             <div className='flex flex-col gap-1'>
-              <Pill tone='warn'>слот тоже потерян — строка не сохранится</Pill>
+              <Pill tone='warn'>the slot is lost too — the line will not be saved</Pill>
               <Text size='nano' variant='label' component='p'>
-                у этой строки нет ни живой детали, ни разрешимой ссылки на строку BOM. Полная замена
-                рецепта отправить её не может и удалит на первом же сохранении — «оставить» здесь
-                ничего не сохранит, поэтому и не предлагается. Заведите расход заново на нужной
-                ткани, а эту уберите
+                this line has neither a live piece nor a resolvable reference to a BOM line. the
+                full replacement of the recipe cannot send it and will delete it on the very first
+                save — “keep” would save nothing here, which is why it is not offered. set the
+                consumption up again on the right fabric, and remove this one
               </Text>
             </div>
           )}
@@ -3372,7 +3369,7 @@ function LabDipTimeline({
     }
     staging.stage({
       key: stagingKey,
-      label: `колорвей ${colorwayTitle(colorway)} · lab-dip R${round || 1}`,
+      label: `colourway ${colorwayTitle(colorway)} · lab-dip R${round || 1}`,
       order: COMMIT_ORDER.labDip,
       commit: commitLabDip,
       settle: () => setDirty(false),
@@ -3454,7 +3451,7 @@ function LabDipTimeline({
     <div className='flex flex-col gap-1.5'>
       {rounds.length === 0 ? (
         <Text size='micro' variant='label'>
-          лаб-дип ещё не отправляли
+          no lab dip has been sent yet
         </Text>
       ) : (
         rounds.map((r, i) => {
@@ -4026,7 +4023,7 @@ function ColorwayRecipeEditor({
     }
     staging.stage({
       key: stagingKey,
-      label: `колорвей ${title} · recipe — ${lines} ${lines === 1 ? 'line' : 'lines'}`,
+      label: `colourway ${title} · recipe — ${lines} ${lines === 1 ? 'line' : 'lines'}`,
       order: COMMIT_ORDER.recipe,
       commit: commitRecipe,
       settle: () => setDirty(false),
@@ -4063,11 +4060,11 @@ function ColorwayRecipeEditor({
   return (
     <SectionStack>
       <Section
-        title={`${title} · ткани и расход`}
+        title={`${title} · fabrics and consumption`}
         question={[
           colorway.baseSku,
-          `${cardSlots.length} ${plural(cardSlots.length, 'материал', 'материала', 'материалов')}`,
-          `${saveUsages.length} ${plural(saveUsages.length, 'строка', 'строки', 'строк')} рецепта`,
+          `${cardSlots.length} ${plural(cardSlots.length, 'material')}`,
+          `${saveUsages.length} recipe ${plural(saveUsages.length, 'line')}`,
         ]
           .filter(Boolean)
           .join(' · ')}
@@ -4078,29 +4075,32 @@ function ColorwayRecipeEditor({
             жалобы: два раздела читались как два способа завести одно и то же, а нормой обладал
             только один из них, ниже по странице. */}
         <Text size='micro' variant='label'>
-          одна ткань — одна карточка: расход на изделие, цена и детали, которые из неё кроятся.
-          Расход — свойство ИЗДЕЛИЯ: он один на ткань, сколько бы деталей из неё ни кроили; список
-          деталей отвечает только на вопрос «что из неё кроится» и своей нормы не несёт
+          one fabric — one card: the per-unit consumption, the price and the pieces cut from it.
+          consumption is a property of the GARMENT: there is one per fabric, however many pieces are
+          cut from it; the list of pieces only answers “what is cut from it” and carries no norm of
+          its own
         </Text>
 
         {bomItems.length === 0 ? (
           <CalloutBox tone='note'>
             <Text size='micro' component='span'>
-              в BOM ещё нет ни одной строки. Рецепт колорвея назначает артикулы и расход именно
-              строкам BOM — заведите их на вкладке <b>BOM</b>, и здесь появится карточка на каждую
+              the BOM has no lines yet. a colourway recipe assigns articles and consumption to BOM
+              lines specifically — set them up on the <b>BOM</b> tab, and a card will appear here
+              for each one
             </Text>
           </CalloutBox>
         ) : cardSlots.length === 0 ? (
           <Text size='micro' variant='label'>
-            в BOM нет ни одной строки тех секций, что заводятся в рецепт (ткани, подкладка,
-            дублерин, утеплитель, нитки, фурнитура, тесьма, декор)
+            the BOM has no lines of the sections that go into a recipe (fabrics, lining, fusing,
+            insulation, threads, hardware, trim, decoration)
           </Text>
         ) : (
           <>
             {pieces.length === 0 && (
               <Text size='micro' variant='label'>
-                деталей кроя на карточке ещё нет — расход завести можно уже сейчас, а «какие детали
-                кроятся из этой ткани» появится, когда детали объявят на вкладке деталей кроя
+                the card has no cut pieces yet — the consumption can be set up right now, and “which
+                pieces are cut from this fabric” will appear once the pieces are declared on the cut
+                pieces tab
               </Text>
             )}
             {/* ТЯЖЁЛОЕ ПОДДЕРЕВО — ТОЛЬКО У ОТКРЫТОГО КОЛОРВЕЯ. Редакторы всех колорвеев
@@ -4153,13 +4153,13 @@ function ColorwayRecipeEditor({
                 </div>
                 {hasSilhouettes && (
                   <Text size='micro' variant='label'>
-                    силуэты — из разобранных DXF, по срединному размеру ряда
+                    the silhouettes come from the parsed DXF, at the middle size of the range
                   </Text>
                 )}
               </>
             ) : (
               <Text size='micro' variant='label'>
-                выберите этот колорвей плиткой выше, чтобы открыть его ткани
+                pick this colourway with the tile above to open its fabrics
               </Text>
             )}
           </>
@@ -4176,25 +4176,25 @@ function ColorwayRecipeEditor({
             выбирают выпадашкой) либо убрать самому. */}
         {strayRows.length > 0 && (
           <div>
-            <GroupLabel>строки без слота</GroupLabel>
+            <GroupLabel>lines without a slot</GroupLabel>
             <Text size='nano' variant='label' component='p' className='pb-1'>
-              эти строки не называют ни одной живой строки BOM — слот удалили на вкладке BOM либо он
-              не был назван вовсе. <b>Сохранение рецепта их удалит</b>: отправить строку с
-              неразрешимой ссылкой нельзя, и уйдёт она вместе с любой соседней правкой. Назначьте
-              слот (число при этом снимется — в какой единице оно было записано, проверить уже
-              нечем) либо уберите строку сами
+              these lines name no live BOM line — the slot was deleted on the BOM tab, or it was
+              never named at all. <b>saving the recipe will delete them</b>: a line with an
+              unresolvable reference cannot be sent, and it goes away together with any neighbouring
+              edit. assign a slot (the number will be dropped in the process — there is nothing left
+              to check which unit it was written in) or remove the line yourself
             </Text>
             {strayRows.map(({ draft, index }) => (
               <Row
                 key={`${usageKey(draft)}:${index}`}
                 label={
                   <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
-                    <Pill tone='warn'>слот потерян</Pill>
+                    <Pill tone='warn'>the slot is lost</Pill>
                     <Text size='micro' variant='label' component='span' className='truncate'>
                       {[
                         draft.pieceLineKey
                           ? pieceByKey.get(draft.pieceLineKey)?.name || draft.pieceLineKey
-                          : 'на изделие',
+                          : 'per unit',
                         draft.consumption.trim() || draft.quantity.trim(),
                       ]
                         .filter(Boolean)
@@ -4216,7 +4216,7 @@ function ColorwayRecipeEditor({
                         size='xs'
                         onClick={() => removeUsage(index)}
                       >
-                        убрать
+                        remove
                       </Button>
                     </span>
                   ) : undefined
@@ -4363,7 +4363,7 @@ function CreateColorwayForm({
   return (
     <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
-        title='новый колорвей'
+        title='new colourway'
         question='a DRAFT colourway — colour only, so its recipe can be edited here; media, price and the rest come from the product manager afterwards'
       />
       {availableColors.length === 0 ? (
@@ -4630,7 +4630,7 @@ export function ColorwayRecipes({
       {/* This half shares the tab with the cut-piece table above it, so it has to announce itself —
           an unlabelled swatch grid under «детали кроя» reads as part of that block. */}
       <SectionHeader
-        title='колорвеи'
+        title='colourways'
         question='— which catalog article goes on each part, in what colour and at what consumption'
       />
       <Text size='micro' variant='label'>

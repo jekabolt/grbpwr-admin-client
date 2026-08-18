@@ -112,7 +112,7 @@ function fmtDate(iso?: string): string {
   if (!d) return '';
   const [y, m, dd] = d.split('-').map(Number);
   if (!y || !m || !dd) return d;
-  return new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString(undefined, {
+  return new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

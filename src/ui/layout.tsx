@@ -66,7 +66,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
               asChild
               className='px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70'
             >
-              <Link to={ROUTES.me}>мой профиль</Link>
+              <Link to={ROUTES.me}>my profile</Link>
             </Button>
           </div>
           <Button

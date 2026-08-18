@@ -47,7 +47,7 @@ export async function uploadLibraryPreview(id: number, preview: Blob): Promise<v
       body: form,
     });
   } catch {
-    throw new Error('связь оборвалась — превью не заменилось');
+    throw new Error("the connection dropped — the preview wasn't replaced");
   }
   if (res.ok) return;
 
@@ -73,15 +73,15 @@ function previewErrorMessage(status: number, body: string): string {
   if (parsed) return parsed;
   switch (status) {
     case 401:
-      return 'сессия истекла — войдите заново';
+      return 'the session expired — sign in again';
     case 403:
-      return 'нужно право files:write';
+      return 'the files:write right is needed';
     case 404:
-      return 'файла больше нет';
+      return 'the file is gone';
     case 413:
-      return 'превью получилось слишком большим';
+      return 'the preview came out too big';
     default:
-      return `превью не заменилось (${status})`;
+      return `the preview wasn't replaced (${status})`;
   }
 }
 
@@ -117,12 +117,8 @@ export const filesService = {
       withoutRole: req.withoutRole ?? false,
     }),
   getFile: (id: number) => adminService.GetLibraryFile({ id }),
-  updateFile: (args: {
-    id: number;
-    fileName: string;
-    topicIds: number[];
-    newTopics: string[];
-  }) => adminService.UpdateLibraryFile(args),
+  updateFile: (args: { id: number; fileName: string; topicIds: number[]; newTopics: string[] }) =>
+    adminService.UpdateLibraryFile(args),
   deleteFile: (id: number) => adminService.DeleteLibraryFile({ id }),
   /**
    * ДОПИСЫВАЕТ темы пачке файлов, а не заменяет набор.

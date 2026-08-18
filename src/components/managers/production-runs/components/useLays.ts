@@ -96,7 +96,7 @@ export function useCopyMarkerToRun() {
       const src = await adminService.GetTechCardMarker({ id: input.sourceMarkerId });
       const s = src.marker?.summary;
       const layout = src.marker?.layout;
-      if (!s || !layout) throw new Error('Исходная раскладка не читается — копировать нечего');
+      if (!s || !layout) throw new Error('the source marker cannot be read — there is nothing to copy');
       // Каждое поле передаётся ЯВНО, включая undefined: генерированные типы запроса не
       // опциональны (§14 п.15), и пропуск поля здесь — ошибка компиляции, а не «поле по умолчанию».
       const marker: common_TechCardMarkerInsert = {
@@ -104,7 +104,7 @@ export function useCopyMarkerToRun() {
         // принял бы), и согласие на черновик к копированию отношения не имеет.
         isDraft: false,
         sizeId: s.sizeId,
-        name: `${(s.name ?? 'раскладка').trim()} · PR-${input.runId}`,
+        name: `${(s.name ?? 'marker').trim()} · PR-${input.runId}`,
         source: s.source,
         bomLineKey: s.bomLineKey,
         fabricWidthCm: s.fabricWidthCm,
@@ -147,9 +147,10 @@ export function layErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
   const msg = e instanceof Error ? e.message : '';
   if (status === 409) return updateRunErrorMessage(e);
-  if (status === 400 || status === 412) return msg || 'Настил не принят в текущем состоянии партии';
-  if (status === 404) return 'Настил не найден — возможно, он уже удалён';
-  return msg || 'Не удалось сохранить настил';
+  if (status === 400 || status === 412)
+    return msg || "the lay isn't accepted in the run's current state";
+  if (status === 404) return 'lay not found — it may have already been deleted';
+  return msg || "couldn't save the lay";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,10 +234,10 @@ export function allLayChecks(lay: {
 }
 
 export const VERDICT_WORD: Record<LayVerdict, string> = {
-  ok: 'годен',
-  warning: 'с оговорками',
-  blocker: 'не годен',
-  unknown: 'не проверен',
+  ok: 'passes',
+  warning: 'with caveats',
+  blocker: 'fails',
+  unknown: 'not checked',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ export function stampWhen(ts?: string): string {
   if (!ts) return '';
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString('en-US', {
     day: '2-digit',
     month: 'short',
     hour: '2-digit',
@@ -268,18 +269,18 @@ export const MATERIAL_UNIT_LABEL: Record<common_MaterialUnit, string> = {
   // клиент не имеет права читать её как отсутствие. Поэтому у неё своя подпись, и в выбор она не
   // попадает (см. FACT_UNIT_OPTIONS) — выбрать «не распознано» нельзя, это ответ сервера, а не
   // намерение человека.
-  MATERIAL_UNIT_UNKNOWN: 'единица не распознана',
-  MATERIAL_UNIT_M: 'м',
-  MATERIAL_UNIT_CM: 'см',
-  MATERIAL_UNIT_MM: 'мм',
-  MATERIAL_UNIT_M2: 'м²',
-  MATERIAL_UNIT_G: 'г',
-  MATERIAL_UNIT_KG: 'кг',
-  MATERIAL_UNIT_PCS: 'шт',
-  MATERIAL_UNIT_PAIR: 'пара',
-  MATERIAL_UNIT_SET: 'компл.',
-  MATERIAL_UNIT_CONE: 'конус',
-  MATERIAL_UNIT_ROLL: 'рулон',
+  MATERIAL_UNIT_UNKNOWN: 'unit not recognised',
+  MATERIAL_UNIT_M: 'm',
+  MATERIAL_UNIT_CM: 'cm',
+  MATERIAL_UNIT_MM: 'mm',
+  MATERIAL_UNIT_M2: 'm²',
+  MATERIAL_UNIT_G: 'g',
+  MATERIAL_UNIT_KG: 'kg',
+  MATERIAL_UNIT_PCS: 'pcs',
+  MATERIAL_UNIT_PAIR: 'pair',
+  MATERIAL_UNIT_SET: 'set',
+  MATERIAL_UNIT_CONE: 'cone',
+  MATERIAL_UNIT_ROLL: 'roll',
 };
 
 // Что можно ВЫБРАТЬ в форме факта: весь словарь, кроме UNKNOWN.
@@ -306,9 +307,9 @@ export const FACT_UNIT_OPTIONS: common_MaterialUnit[] = [
 // рулон до/после наследует ошибку измерения остатка и не видит ушедшего в обрезки, а взвешивание
 // переводится в метры через плотность и ширину и потому чувствительно к обеим.
 export const LAY_ACTUAL_METHOD_LABEL: Record<common_ProductionLayActualMethod, string> = {
-  PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED: 'метод не назван',
-  PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER: 'замер рулона до/после',
-  PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED: 'взвешивание',
+  PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED: 'method not named',
+  PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER: 'roll measured before/after',
+  PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED: 'weighing',
 };
 
 export const LAY_ACTUAL_METHODS: common_ProductionLayActualMethod[] = [

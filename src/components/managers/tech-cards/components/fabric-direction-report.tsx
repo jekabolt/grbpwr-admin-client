@@ -68,14 +68,14 @@ const SECTION_LABEL: Record<string, string> = Object.fromEntries(
 // bom-purpose.ts, which reaches the form schema through bom-line-picker — importing it here would
 // drag the whole card editor into the list route's chunk to render eight words.
 const PURPOSE_LABEL: Record<string, string> = {
-  TECH_CARD_BOM_PURPOSE_MAIN: 'основной материал',
-  TECH_CARD_BOM_PURPOSE_LINING: 'подкладка',
-  TECH_CARD_BOM_PURPOSE_POCKETING: 'карманка',
-  TECH_CARD_BOM_PURPOSE_INTERFACING: 'бортовка / прокладка',
-  TECH_CARD_BOM_PURPOSE_INSULATION: 'утеплитель',
-  TECH_CARD_BOM_PURPOSE_CONTRAST: 'контраст / отделочная',
-  TECH_CARD_BOM_PURPOSE_MESH: 'сетка / второй слой',
-  TECH_CARD_BOM_PURPOSE_OTHER: 'другое',
+  TECH_CARD_BOM_PURPOSE_MAIN: 'main material',
+  TECH_CARD_BOM_PURPOSE_LINING: 'lining',
+  TECH_CARD_BOM_PURPOSE_POCKETING: 'pocketing',
+  TECH_CARD_BOM_PURPOSE_INTERFACING: 'canvas / interfacing',
+  TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
+  TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast / facing',
+  TECH_CARD_BOM_PURPOSE_MESH: 'mesh / second layer',
+  TECH_CARD_BOM_PURPOSE_OTHER: 'other',
 };
 
 /** Section · назначение — the two facts that tell two cloth lines on one card apart. */
@@ -85,7 +85,7 @@ function lineMeta(line: GapLine): string {
   // on the same row, and worth seeing here.
   const purpose =
     !line.purpose || line.purpose === 'TECH_CARD_BOM_PURPOSE_UNSET'
-      ? 'назначение не задано'
+      ? 'purpose not set'
       : PURPOSE_LABEL[line.purpose] ?? '';
   return [section, purpose].filter(Boolean).join(' · ');
 }
@@ -104,18 +104,15 @@ function lineName(line: GapLine): string {
  * every one of them can legitimately be 1 — «1 cards» reads as a rendering bug and makes the
  * neighbouring figures look untrustworthy too.
  *
- * English for the counted nouns even where the domain word is Russian: «раскладка» declines three
- * ways by number, so a counted «раскладок» would be wrong two thirds of the time. The Russian term
- * stays in the hint sentences, where nothing is being counted.
  */
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
 const LINE_MARKERS_HINT =
-  'раскладки bound to this line. An upper bound on what an unset направление could refuse — never a count of refusals: a layout carrying neither a 180° nor a mirror saves whatever the cloth says.';
+  'markers bound to this line. An upper bound on what an unset direction could refuse — never a count of refusals: a layout carrying neither a 180° nor a mirror saves whatever the cloth says.';
 const CARD_MARKERS_HINT =
-  'КАРТОЧНЫЕ раскладки bound to any BOM line of this card — every marker a gap here could possibly refuse. Раскройные (снятые под прогон, Ф4.2) НЕ считаются: они умирают вместе со своим прогоном, а направление берут с тех же строк BOM, которые этот отчёт уже покрывает через карточку. Deliberately over-inclusive within card markers: a sibling line under the same назначение can be the one that refuses.';
+  'CARD markers bound to any BOM line of this card — every marker a gap here could possibly refuse. Cutting markers (captured for a run) are NOT counted: they die together with their run, and they take the direction from the same BOM lines this report already covers through the card. Deliberately over-inclusive within card markers: a sibling line under the same purpose can be the one that refuses.';
 
 type Tier = {
   key: string;
@@ -206,7 +203,7 @@ export function FabricDirectionReport() {
         {
           key: 'urgent',
           title: 'markers already bound',
-          hint: 'These cards have markers on file and can be saved today, so an unanswered направление is what a re-save runs into. Start here.',
+          hint: 'These cards have markers on file and can be saved today, so an unanswered direction is what a re-save runs into. Start here.',
           cards: urgent,
           defaultOpen: true,
         },
@@ -220,7 +217,7 @@ export function FabricDirectionReport() {
         {
           key: 'frozen',
           title: 'released & frozen',
-          hint: 'Every marker write on a released card is refused outright, before направление is consulted — so these gaps block nothing today. They are counted and not dismissed because re-opening the card to draft is one ordinary edit, and the lines come back with it.',
+          hint: 'Every marker write on a released card is refused outright, before the direction is consulted — so these gaps block nothing today. They are counted and not dismissed because re-opening the card to draft is one ordinary edit, and the lines come back with it.',
           cards: frozen,
           defaultOpen: false,
         },
@@ -318,7 +315,7 @@ export function FabricDirectionReport() {
       {report.isError ? (
         <div className='flex justify-center py-20'>
           <Text variant='label' className='uppercase'>
-            failed to read the направление report — refresh to retry
+            failed to read the fabric-direction report — refresh to retry
           </Text>
         </div>
       ) : report.isPending ? (
@@ -332,15 +329,15 @@ export function FabricDirectionReport() {
       ) : (
         <>
           <Section
-            title='направление ткани'
+            title='fabric direction'
             question='— which cloth lines nobody has answered, and what that stops'
           >
             <Text size='micro' variant='label'>
-              Направление is a property of the CLOTH: whether the roll may be laid head-to-toe
-              (ворс, twill, a directional print) or turned freely. Until a line has one, any
-              раскладка whose layout puts a piece upside down or mirrors it on that cloth is refused
-              on save — a marker that saves fine today included. Answering the field is the whole
-              job; it lives on the BOM tab, under «how this style uses it».
+              Direction is a property of the CLOTH: whether the roll may be laid head-to-toe (nap,
+              twill, a directional print) or turned freely. Until a line has one, any marker whose
+              layout puts a piece upside down or mirrors it on that cloth is refused on save — a
+              marker that saves fine today included. Answering the field is the whole job; it lives
+              on the BOM tab, under “how this style uses it”.
             </Text>
 
             <ExcludedBreakdown
@@ -356,7 +353,7 @@ export function FabricDirectionReport() {
             <div className='flex justify-center py-16'>
               <Text variant='label' className='max-w-[420px] text-center uppercase'>
                 {query.trim()
-                  ? `nothing in this list matches «${query.trim()}»`
+                  ? `nothing in this list matches “${query.trim()}”`
                   : 'every card in this filter is answered — the rest are deferred above'}
               </Text>
             </div>
@@ -507,16 +504,16 @@ function ExcludedBreakdown({
  */
 function CampaignFinished({ includeInactive }: { includeInactive: boolean }) {
   return (
-    <Section title='кампания закончена' question='— every cloth line has a направление'>
+    <Section title='campaign finished' question='— every cloth line has a direction'>
       <Text>
         Nothing is missing and nothing is deferred: no roll-goods BOM line anywhere in the portfolio
-        is waiting for a направление, released cards included. No раскладка can be refused for an
+        is waiting for a direction, released cards included. No marker can be refused for an
         unanswered cloth.
       </Text>
       <Text size='micro' variant='label'>
         {includeInactive
           ? 'Released cards are already in this count, and turning the filter off cannot change it — the figure above is the complete one either way.'
-          : 'Released cards are counted in this figure even though they are not listed, so turning «include released» on cannot uncover anything more.'}{' '}
+          : 'Released cards are counted in this figure even though they are not listed, so turning “include released” on cannot uncover anything more.'}{' '}
         A new cloth line starts unanswered, so the number will move again the next time somebody
         adds a fabric to a BOM.
       </Text>
@@ -548,10 +545,10 @@ function GapCardTile({
       const remaining = openLines(res);
       if (remaining === 0) {
         onCleared(id);
-        onMessage('направление answered — nothing left on this card', 'success');
+        onMessage('direction answered — nothing left on this card', 'success');
       } else {
         onMessage(
-          `still ${remaining} line${remaining === 1 ? '' : 's'} without направление`,
+          `still ${remaining} line${remaining === 1 ? '' : 's'} without a direction`,
           'error',
         );
       }
@@ -598,7 +595,7 @@ function GapCardTile({
         {!card.markerSavePossible && (
           <Pill
             tone='mut'
-            title='a marker write on a released card is refused before направление is consulted'
+            title='a marker write on a released card is refused before the direction is consulted'
           >
             frozen
           </Pill>
@@ -618,7 +615,7 @@ function GapCardTile({
         {card.hasPatterns && (
           <Pill
             tone='mut'
-            title='DXF sheets on file — this card can be nested, so a раскладка is imminent'
+            title='DXF sheets on file — this card can be nested, so a marker is imminent'
           >
             dxf
           </Pill>
@@ -643,7 +640,7 @@ function GapCardTile({
                   {lineName(line)}
                 </Text>
                 {line.isSample && (
-                  <Pill tone='mut' title='семпловая ярдажа — sample раскладки ask this cloth too'>
+                  <Pill tone='mut' title='sample yardage — sample markers ask this cloth too'>
                     sample
                   </Pill>
                 )}

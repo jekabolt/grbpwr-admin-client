@@ -114,7 +114,7 @@ export function groupToPieces(
   tolChain: number,
   warnings: string[],
 ): RawPiece[] {
-  const label = group.blockName ?? 'модель';
+  const label = group.blockName ?? 'model';
 
   // Кандидаты в долевую: прямые незамкнутые отрезки. Двухточечные — потому что долевую рисуют
   // одной линией; ломаная из восьми точек на том же слое (встречается на слое внутренних линий)
@@ -207,7 +207,7 @@ export function groupToPieces(
     }
   }
   if (small > 0 && group.blockName == null) {
-    warnings.push(`мелких контуров (< ${MIN_PIECE_AREA_CM2} см²) отброшено: ${small}`);
+    warnings.push(`${small} small contours (< ${MIN_PIECE_AREA_CM2} cm²) dropped`);
   }
   return pieces;
 }

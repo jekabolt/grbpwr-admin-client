@@ -259,15 +259,15 @@ function SnapshotPieces({ pieces }: { pieces: common_TechCardPiece[] }) {
   if (pieces.length === 0) return null;
   return (
     <>
-      <GroupLabel>детали кроя (frozen) · {pieces.length}</GroupLabel>
+      <GroupLabel>cut pieces (frozen) · {pieces.length}</GroupLabel>
       <DataTable>
         <thead>
           <tr>
-            <th>деталь</th>
-            <th>× на изделие</th>
-            <th>как кроится</th>
-            <th>долевая</th>
-            <th>дублирование</th>
+            <th>piece</th>
+            <th>per garment</th>
+            <th>how it's cut</th>
+            <th>grainline</th>
+            <th>fusing</th>
           </tr>
         </thead>
         <tbody>
@@ -278,13 +278,11 @@ function SnapshotPieces({ pieces }: { pieces: common_TechCardPiece[] }) {
                 {p.ungraded ? ' · UNI' : ''}
               </td>
               <td>{p.piecesPerGarment ?? <EmptyCell />}</td>
-              <td>
-                {printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment) || <EmptyCell />}
-              </td>
+              <td>{printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment) || <EmptyCell />}</td>
               <td>{p.grainline || <EmptyCell />}</td>
               <td>
                 {p.fused ? (
-                  fusingPrintCaption(p.fusingMode, decimalToInput(p.fusingWidthMm)) || 'да'
+                  fusingPrintCaption(p.fusingMode, decimalToInput(p.fusingWidthMm)) || 'yes'
                 ) : (
                   <EmptyCell />
                 )}
@@ -321,7 +319,7 @@ function SnapshotOperations({
     // БЫВАЕТ вовсе — их тогда не существовало, — и печатать там «▣ FRONT» значит утверждать про
     // подписанный документ то, чего в нём быть не могло.
     const legacy = !o.inputKeys?.length;
-    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
+    const keys = legacy ? o.pieceLineKeys ?? [] : o.inputKeys ?? [];
     return keys
       .map((k) => {
         if (!k) return '';
@@ -444,7 +442,9 @@ function SnapshotOperations({
                   // Имя детали — ИЗ ЭТОГО ЖЕ СНАПШОТА, а не из живой карточки: подписан был тот
                   // набор деталей, и переименованная сегодня деталь не имеет права переписать то,
                   // что стоит под подписью. Без резолвера связь хранилась бы, но не читалась.
-                  pieceLabel={(k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || undefined}
+                  pieceLabel={(k) =>
+                    pieces.find((pc) => pc.lineKey === k)?.name?.trim() || undefined
+                  }
                 />
                 {m.caption?.trim() && (
                   <Text size='nano' variant='label' className='mt-1'>

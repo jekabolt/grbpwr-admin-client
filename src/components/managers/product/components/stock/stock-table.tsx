@@ -10,7 +10,7 @@ function formatStockSource(source: string | undefined): string {
 
 function formatDateShort(value: string | undefined): string {
   if (!value) return '—';
-  return new Date(value).toLocaleString();
+  return new Date(value).toLocaleString('en-US');
 }
 
 interface SizeOption {

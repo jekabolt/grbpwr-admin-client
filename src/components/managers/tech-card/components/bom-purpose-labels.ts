@@ -8,22 +8,22 @@
 export const UNSET_PURPOSE = 'TECH_CARD_BOM_PURPOSE_UNSET' as const;
 
 export const PURPOSE_LABEL: Record<string, string> = {
-  TECH_CARD_BOM_PURPOSE_MAIN: 'основной материал',
-  TECH_CARD_BOM_PURPOSE_LINING: 'подкладка',
-  TECH_CARD_BOM_PURPOSE_POCKETING: 'карманка',
-  TECH_CARD_BOM_PURPOSE_INTERFACING: 'бортовка / прокладка',
-  TECH_CARD_BOM_PURPOSE_INSULATION: 'утеплитель',
-  TECH_CARD_BOM_PURPOSE_CONTRAST: 'контраст / отделочная',
-  TECH_CARD_BOM_PURPOSE_MESH: 'сетка / второй слой',
-  TECH_CARD_BOM_PURPOSE_OTHER: 'другое',
+  TECH_CARD_BOM_PURPOSE_MAIN: 'main material',
+  TECH_CARD_BOM_PURPOSE_LINING: 'lining',
+  TECH_CARD_BOM_PURPOSE_POCKETING: 'pocketing',
+  TECH_CARD_BOM_PURPOSE_INTERFACING: 'canvas / interfacing',
+  TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
+  TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast / facing',
+  TECH_CARD_BOM_PURPOSE_MESH: 'mesh / second layer',
+  TECH_CARD_BOM_PURPOSE_OTHER: 'other',
 };
 
 // The heading an UNSET roll-goods line collects under. Worded as an instruction, not as a value: a
 // line lands here because nobody has sorted it yet, and every line that predates 0265 starts here
 // deliberately — nothing guessed a purpose for them, because section=fabric is precisely where a
-// карманка, a контраст and a сетка hide, and a guess would have labelled all three «основной
-// материал» confidently and wrongly.
-export const UNSET_PURPOSE_LABEL = 'назначение не задано';
+// карманка, a контраст and a сетка hide, and a guess would have labelled all three «main
+// material» confidently and wrongly.
+export const UNSET_PURPOSE_LABEL = 'purpose not set';
 
 export function bomPurposeLabel(purpose?: string): string {
   if (!purpose || purpose === UNSET_PURPOSE) return UNSET_PURPOSE_LABEL;

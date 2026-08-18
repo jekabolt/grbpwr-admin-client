@@ -50,6 +50,7 @@ import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { isDxfUrl } from 'utils/pattern';
 
 import { decNum } from './marker-io';
+import { patternSheetName, sameSheetName } from './sheet-name';
 
 // ── условия съёмки, прочитанные со строки ───────────────────────────────────────────────
 
@@ -150,23 +151,23 @@ export const ROUNDING_ENVELOPE_CM = 0.005 * Math.SQRT2;
 // («чертёж детали не восстановлен») говорят об одном и том же факте, и два места, где он
 // формулируется, однажды скажут разное.
 export function describeRebuildError(e: RebuildError): string {
-  const more = (n: number) => (n > 0 ? ` (и ещё ${n} ${n === 1 ? 'деталь' : 'деталей'})` : '');
+  const more = (n: number) => (n > 0 ? ` (and ${n} more ${n === 1 ? 'piece' : 'pieces'})` : '');
   switch (e.kind) {
     case 'no-patterns':
-      return 'выкройки этой ткани не загружены — чертёж детали (линия шва, надсечки) восстановить не из чего';
+      return 'the patterns for this fabric are not uploaded — there is nothing to restore the piece drawing (seam line, notches) from';
     case 'conditions-missing':
-      return 'раскладка снята до того, как условия съёмки стали записываться: слой контура, слой долевой и припуск неизвестны, и повторить их нечем. Чертёж не восстановить — пересними раскладку';
+      return "the marker was captured before capture conditions started being recorded: the contour layer, the grainline layer and the seam allowance are unknown, and there is nothing to repeat them with. the drawing can't be restored — re-capture the marker";
     case 'fetch-failed':
-      return `не удалось скачать выкройку ${e.names.join(', ')} — перезалей выкройку; без файла чертёж не восстановить`;
+      return `couldn't download pattern ${e.names.join(', ')} — re-upload it; without the file the drawing can't be restored`;
     case 'block-missing':
-      return `в текущей выкройке нет блока ${e.blockName}${more(e.more)} — файл заменён. Перезалей прежнюю выкройку или пересними раскладку`;
+      return `the current pattern has no block ${e.blockName}${more(e.more)} — the file was replaced. re-upload the previous pattern or re-capture the marker`;
     case 'piece-unidentified':
       return e.reason === 'no-block-name'
-        ? `деталь «${e.pieceName}»${more(e.more)} сохранена без имени блока (старая раскладка), и в выкройке нет ровно одного контура, совпадающего с ней. Чертёж не восстановить — пересними раскладку`
-        : `деталь «${e.pieceName}»${more(e.more)} совпадает сразу с несколькими блоками выкройки, и чертёж у них разный — какой из них тот самый, неизвестно. Пересними раскладку`;
+        ? `piece “${e.pieceName}”${more(e.more)} was saved without a block name (an old marker), and the pattern holds no single contour that matches it. the drawing can't be restored — re-capture the marker`
+        : `piece “${e.pieceName}”${more(e.more)} matches several blocks of the pattern at once, and their drawings differ — which of them is the one is unknown. re-capture the marker`;
     case 'geometry-drift':
       if (e.deltaCm === null) {
-        return `выкройка заменена: у детали ${e.blockName}${more(e.more)} другое число точек контура (было ${e.storedPoints}, стало ${e.rebuiltPoints}). Экспорт с чертежом невозможен — пересними раскладку`;
+        return `the pattern was replaced: piece ${e.blockName}${more(e.more)} has a different number of contour points (was ${e.storedPoints}, now ${e.rebuiltPoints}). export with the drawing is impossible — re-capture the marker`;
       }
       // Расхождение ВНУТРИ шага хранения (0.005·√2 см) — это не «чуть-чуть заменили». Габарит
       // совпал, а точки нет: так выглядит ЗЕРКАЛЬНЫЙ двойник почти симметричной детали (правая
@@ -174,16 +175,16 @@ export function describeRebuildError(e: RebuildError): string {
       // разошёлся на 7 сотых миллиметра» значит подсказать оператору, что можно не обращать
       // внимания, — а обращать надо в первую очередь.
       if (e.deltaCm <= ROUNDING_ENVELOPE_CM) {
-        return `деталь ${e.blockName}${more(e.more)} совпадает по габариту, но не по точкам контура (расхождение ${cm(e.deltaCm)} см). Так выглядит ЗЕРКАЛЬНАЯ версия детали на месте прежней или файл, пересохранённый другой программой. Экспорт с чертежом невозможен — пересними раскладку`;
+        return `piece ${e.blockName}${more(e.more)} matches by bounding box but not by contour points (divergence ${cm(e.deltaCm)} cm). this is what a MIRRORED version of the piece standing in for the previous one looks like, or a file re-saved by a different program. export with the drawing is impossible — re-capture the marker`;
       }
-      return `выкройка заменена: контур детали ${e.blockName}${more(e.more)} больше не совпадает с сохранённым (расхождение ${cm(e.deltaCm)} см). Экспорт с чертежом невозможен — пересними раскладку`;
+      return `the pattern was replaced: the contour of piece ${e.blockName}${more(e.more)} no longer matches the saved one (divergence ${cm(e.deltaCm)} cm). export with the drawing is impossible — re-capture the marker`;
   }
 }
 
 // ── вход/выход ──────────────────────────────────────────────────────────────────────────
 
 // Файл выкройки так, как его видит раскладка: то же имя, что уехало в `piece.source` при съёмке
-// (`filesOf` в patterns-field.tsx: `name || filename || 'выкройка.dxf'`). Совпадение имён — не
+// (`filesOf` в patterns-field.tsx зовёт `patternSheetName` из `./sheet-name`). Совпадение имён — не
 // украшение: при коллизии имён блоков в двух файлах именно оно решает, из какого брать блок.
 export type PatternSource = { name: string; url: string };
 
@@ -275,7 +276,7 @@ export function patternSourcesForMarker(
     seen.add(url);
     // ИМЯ — тем же правилом, что и при съёмке (`filesOf`), иначе `piece.source` в блобе не с чем
     // будет сопоставить.
-    out.push({ name: row.name || row.filename || 'выкройка.dxf', url });
+    out.push({ name: patternSheetName(row), url });
   }
   return out;
 }
@@ -330,7 +331,7 @@ type StoredPiece = {
 function storedPiecesOf(layout?: common_TechCardMarkerLayout): StoredPiece[] {
   return (layout?.pieces ?? []).map((p: common_TechCardMarkerPiece) => ({
     id: p.pieceId ?? 0,
-    name: p.name || `деталь ${p.pieceId ?? 0}`,
+    name: p.name || `piece ${p.pieceId ?? 0}`,
     blockName: (p.blockName ?? '').trim(),
     source: p.source ?? '',
     poly: (p.poly ?? []).map((pt) => ({ x: pt.xCm ?? 0, y: pt.yCm ?? 0 })),
@@ -412,7 +413,7 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
   const seam = applySeamAllowance(oriented.pieces, mmToEngineCm(conditions.seamAllowanceMm));
   const candidates = seam.pieces;
   if (seam.hulled.length > 0) {
-    warnings.push(`контур заменён выпуклой оболочкой: ${seam.hulled.join(', ')}`);
+    warnings.push(`contour replaced by its convex hull: ${seam.hulled.join(', ')}`);
   }
 
   // Индекс по имени блока. Регистронезависимый — запасной: одна и та же выкройка, пересохранённая
@@ -486,8 +487,8 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
           best = { cand: c, cmp };
           continue;
         }
-        const sameSource = c.source === sp.source ? 1 : 0;
-        const bestSource = best.cand.source === sp.source ? 1 : 0;
+        const sameSource = sameSheetName(c.source, sp.source) ? 1 : 0;
+        const bestSource = sameSheetName(best.cand.source, sp.source) ? 1 : 0;
         if (sameSource !== bestSource) {
           if (sameSource > bestSource) best = { cand: c, cmp };
           continue;
@@ -519,7 +520,7 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
 
     let pick = matched[0];
     if (matched.length > 1) {
-      const fromSameSheet = matched.filter((c) => c.source === sp.source);
+      const fromSameSheet = matched.filter((c) => sameSheetName(c.source, sp.source));
       if (fromSameSheet.length === 1) {
         pick = fromSameSheet[0];
       } else {
@@ -597,7 +598,7 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
   // оператор обязан знать, что часть карточки недоступна.
   if (failedFiles.length > 0) {
     warnings.push(
-      `не скачались файлы: ${failedFiles.join(', ')} — на чертёж этой раскладки они не влияют`,
+      `files that didn't arrive: ${failedFiles.join(', ')} — they don't affect the drawing of this marker`,
     );
   }
 

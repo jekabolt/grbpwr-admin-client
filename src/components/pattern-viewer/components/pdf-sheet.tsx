@@ -13,7 +13,7 @@ export function PdfSheet({ sheet }: { sheet: PvSheet }) {
   if (!url || !isSafePatternUrl(url)) {
     return (
       <Text size='micro' variant='label' component='p'>
-        у листа нет ссылки на файл
+        the sheet has no file link
       </Text>
     );
   }
@@ -22,15 +22,15 @@ export function PdfSheet({ sheet }: { sheet: PvSheet }) {
       data={url}
       type='application/pdf'
       className='h-[70vh] w-full border border-borderColor bg-bgColor'
-      aria-label={sheet.name || sheet.filename || 'выкройка (PDF)'}
+      aria-label={sheet.name || sheet.filename || 'pattern (PDF)'}
     >
       <div className='flex h-40 w-full flex-col items-center justify-center gap-2 border border-borderColor bg-bgColor px-4'>
         <Text size='micro' variant='label' component='p' className='text-center'>
-          браузер не показывает PDF внутри страницы
+          the browser doesn't show a PDF inside the page
         </Text>
         <Button asChild variant='secondary' size='lg' className='flex min-h-11 items-center'>
           <a href={url} target='_blank' rel='noopener noreferrer'>
-            открыть в новой вкладке
+            open in a new tab
           </a>
         </Button>
       </div>

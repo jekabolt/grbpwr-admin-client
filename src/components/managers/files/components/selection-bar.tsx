@@ -15,10 +15,10 @@ import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 type Refusal = { id: number; name: string; reason: string };
 
-/** «1 файл», «2 файла», «5 файлов» — склонение берётся из модуля очереди загрузки
+/** «1 file», «2 files» — форма по числу берётся из модуля очереди загрузки
  *  (`upload/text.ts`), второй машины в разделе нет и заводить её нельзя: две расходятся молча. */
 function files(n: number): string {
-  return `${n} ${plural(n, 'файл', 'файла', 'файлов')}`;
+  return `${n} ${plural(n, 'file')}`;
 }
 
 /**
@@ -90,14 +90,14 @@ export function FilesSelectionBar({
       const n = Number(res.assigned ?? 0);
       // Сервер считает СОЗДАННЫЕ пары, а не файлы: у тех, кто ярлык уже нёс, ничего не
       // произошло, и «проставлено 12» на восьми файлах было бы враньём в обе стороны.
-      showMessage(n ? `новых связей: ${n}` : 'эти темы уже стояли', 'success');
+      showMessage(n ? `new links: ${n}` : 'these topics were already set', 'success');
       setAssigning(false);
       setPickTopics([]);
       setNewTopics([]);
       setNewTopic('');
       onClear();
     } catch (e) {
-      showMessage(failureText(e, 'не удалось проставить темы'), 'error');
+      showMessage(failureText(e, "couldn't set the topics"), 'error');
     }
   };
 
@@ -133,17 +133,17 @@ export function FilesSelectionBar({
       showMessage(
         roleId
           ? n
-            ? `в проекте «${project}» роль «${role}» — строк: ${n}`
-            : `эта роль в «${project}» уже стояла`
+            ? `“${role}” in the project “${project}” — ${n} ${plural(n, 'link')}`
+            : `this role already stood in “${project}”`
           : n
-            ? `роль снята, файлы остались в «${project}» — строк: ${n}`
-            : `роли и не было — файлы в «${project}» остались`,
+            ? `the role is off, the files stayed in “${project}” — ${n} ${plural(n, 'link')}`
+            : `there was no role anyway — the files stayed in “${project}”`,
         'success',
       );
       setRolling(false);
       onClear();
     } catch (e) {
-      showMessage(failureText(e, 'не удалось проставить роль'), 'error');
+      showMessage(failureText(e, "couldn't set the role"), 'error');
     }
   };
 
@@ -179,8 +179,8 @@ export function FilesSelectionBar({
       if (skipped) {
         showMessage(
           skipped === selected.length
-            ? 'ни у одного файла нет свежей ссылки — обновите страницу'
-            : `${files(skipped)} без свежей ссылки — обновите страницу и повторите для них`,
+            ? 'not a single file has a fresh link — refresh the page'
+            : `${files(skipped)} without a fresh link — refresh the page and retry for them`,
           'error',
         );
       }
@@ -203,7 +203,7 @@ export function FilesSelectionBar({
           id,
           name: f.fileName ?? String(id),
           // Причина строкой: список отказов печатает её в строке файла, а не блоком.
-          reason: failureText(e, 'отказ без объяснения'),
+          reason: failureText(e, 'a refusal without an explanation'),
         });
       }
     }
@@ -213,7 +213,7 @@ export function FilesSelectionBar({
     onDropped(gone);
     setRefusals(failed);
     if (!failed.length) {
-      showMessage(`удалено: ${files(gone.length)}`, 'success');
+      showMessage(`deleted: ${files(gone.length)}`, 'success');
       onClear();
     }
   };
@@ -223,8 +223,8 @@ export function FilesSelectionBar({
       {refusals.length > 0 && (
         <CalloutBox tone='error'>
           <Text component='span' className='block'>
-            не удалось удалить {files(refusals.length)}. почти всегда причина одна: файл
-            прикреплён к задаче, и в ней осталась бы ссылка в никуда.
+            couldn't delete {files(refusals.length)}. the reason is almost always the same: the file
+            is attached to a task, and a link to nowhere would be left in it.
           </Text>
           <ul className='mt-1.5 space-y-0.5'>
             {refusals.map((r) => (
@@ -241,7 +241,7 @@ export function FilesSelectionBar({
           {/* Кнопка называет ДЕЙСТВИЕ, а не согласие: «понятно» ничего не обещает, а нажатие
               убирает со страницы именно этот список имён. */}
           <Button size='sm' className='mt-2' onClick={() => setRefusals([])}>
-            убрать список
+            dismiss the list
           </Button>
         </CalloutBox>
       )}
@@ -249,11 +249,11 @@ export function FilesSelectionBar({
       {selected.length > 0 && (
         <div className='sticky bottom-0 z-[var(--z-sticky)] flex flex-wrap items-center gap-2.5 bg-textColor px-2.5 py-1.5 text-bgColor'>
           <Text component='span' className='tabular-nums'>
-            выбрано {files(selected.length)}
+            selected {files(selected.length)}
           </Text>
           {!writable && (
             <Text component='span' className='opacity-70'>
-              в режиме чтения групповые действия недоступны
+              in read mode group actions are not available
             </Text>
           )}
           <div className='ml-auto flex flex-wrap items-center gap-2'>
@@ -263,7 +263,7 @@ export function FilesSelectionBar({
               disabled={!writable}
               onClick={() => setAssigning(true)}
             >
-              проставить тему
+              set a topic
             </Button>
             {/* КНОПКА ЕСТЬ ВСЕГДА, а не только при выбранном проекте: без неё роль негде
                 поставить вовсе, и ряд чипов ролей на холсте фильтровал бы в ноль. Что роль
@@ -278,15 +278,10 @@ export function FilesSelectionBar({
                 setRolling(true);
               }}
             >
-              проставить роль
+              set a role
             </Button>
-            <Button
-              size='sm'
-              variant='simpleReverse'
-              disabled={downloading}
-              onClick={downloadAll}
-            >
-              {downloading ? 'качаем…' : 'скачать'}
+            <Button size='sm' variant='simpleReverse' disabled={downloading} onClick={downloadAll}>
+              {downloading ? 'downloading…' : 'download'}
             </Button>
             <Button
               size='sm'
@@ -294,10 +289,10 @@ export function FilesSelectionBar({
               disabled={!writable}
               onClick={() => setConfirmDelete(true)}
             >
-              удалить
+              delete
             </Button>
             <Button size='sm' variant='simpleReverse' onClick={onClear}>
-              снять выбор
+              drop the selection
             </Button>
           </div>
         </div>
@@ -307,8 +302,8 @@ export function FilesSelectionBar({
         open={assigning}
         onOpenChange={setAssigning}
         onConfirm={applyTopics}
-        title={`проставить тему · ${files(selected.length)}`}
-        confirmLabel={assignTopics.isPending ? 'ставим…' : 'проставить'}
+        title={`set a topic · ${files(selected.length)}`}
+        confirmLabel={assignTopics.isPending ? 'setting…' : 'set'}
         confirmDisabled={assignTopics.isPending || (!pickTopics.length && !pendingTopics.length)}
         closeOnConfirm={false}
         width='md'
@@ -317,7 +312,7 @@ export function FilesSelectionBar({
           {/* ДОПИСЫВАЕТ, А НЕ ЗАМЕНЯЕТ, и это сказано прямо: выделение помнит темы на момент
               клика, а чужая правка набора между кликом и отправкой при replace стёрлась бы. */}
           <Text>
-            выбранные темы ДОБАВЯТСЯ к тем, что уже стоят на файлах. ничего не снимется.
+            the selected topics WILL BE ADDED to those already on the files. nothing comes off.
           </Text>
           {/* ПРОЕКТЫ — СВОЯ ГРУППА, а не вперемешку с темами. Технически это те же ярлыки и
               тот же вызов, но кладут их с другой мыслью: проект — контейнер работы, и файл,
@@ -326,7 +321,7 @@ export function FilesSelectionBar({
           {projects.length > 0 && (
             <div className='flex flex-col gap-1'>
               <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
-                проекты
+                projects
               </Text>
               <ChipRow>
                 {projects.map((p) => {
@@ -352,13 +347,13 @@ export function FilesSelectionBar({
                 })}
               </ChipRow>
               <Text size='micro' variant='label' component='p'>
-                файлы попадут в проект без роли — это законное состояние, приёмная куча. роль
-                ставится соседней кнопкой «проставить роль».
+                the files land in the project without a role — a lawful state, the intake pile. the
+                role is set with the “set a role” button next door.
               </Text>
             </div>
           )}
           <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
-            темы
+            topics
           </Text>
           <ChipRow>
             {topics.map((t) => (
@@ -386,7 +381,7 @@ export function FilesSelectionBar({
           <Input
             name='bulkNewTopic'
             value={newTopic}
-            placeholder='новая тема'
+            placeholder='new topic'
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
             onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
               if (e.key !== 'Enter') return;
@@ -406,8 +401,8 @@ export function FilesSelectionBar({
         open={rolling}
         onOpenChange={setRolling}
         onConfirm={applyRoles}
-        title={`проставить роль · ${files(selected.length)}`}
-        confirmLabel={setRoles.isPending ? 'ставим…' : 'проставить'}
+        title={`set a role · ${files(selected.length)}`}
+        confirmLabel={setRoles.isPending ? 'setting…' : 'set'}
         confirmDisabled={setRoles.isPending || !roleProject}
         closeOnConfirm={false}
         width='md'
@@ -417,12 +412,12 @@ export function FilesSelectionBar({
               и узнать об этом нажатием — худший из способов: человек прочтёт отказ как поломку
               кнопки. Поэтому «сначала проект» написано, а кнопка до выбора проекта мертва. */}
           <Text>
-            роль стоит на связи файла С ПРОЕКТОМ, а не ярлыком на файле. поэтому сначала проект,
-            потом роль: «исходники» без проекта — это «исходники чего».
+            a role sits on the link of the file WITH A PROJECT, not as a label on the file. that is
+            why the project first, then the role: “raw” without a project is “raw of what”.
           </Text>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
-              проект
+              project
             </Text>
             {projects.length ? (
               <ChipRow>
@@ -446,14 +441,14 @@ export function FilesSelectionBar({
               </ChipRow>
             ) : (
               <Text size='micro' variant='label' component='p'>
-                проектов пока нет: обычную тему повышают до проекта на экране «темы». пока их
-                нет, роль ставить некуда.
+                no projects yet: an ordinary topic is made a project on the “topics” screen. while
+                there are none, there is nowhere to put a role.
               </Text>
             )}
           </div>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
-              роль
+              role
             </Text>
             <ChipRow>
               {/* «БЕЗ РОЛИ» — ЗАКОННОЕ ЗНАЧЕНИЕ, а не отказ от действия: оно снимает роль,
@@ -464,7 +459,7 @@ export function FilesSelectionBar({
                 disabled={!roleProject}
                 onClick={() => setRoleId(0)}
               >
-                без роли
+                without a role
               </Chip>
               {roles.map((r) => {
                 const id = Number(r.id);
@@ -475,7 +470,7 @@ export function FilesSelectionBar({
                     selected={on}
                     pressed={on}
                     disabled={!roleProject}
-                    title={roleProject ? undefined : 'сначала выберите проект'}
+                    title={roleProject ? undefined : 'pick a project first'}
                     onClick={() => setRoleId(on ? 0 : id)}
                   >
                     {r.name}
@@ -486,8 +481,8 @@ export function FilesSelectionBar({
           </div>
           <Text size='micro' variant='label'>
             {roleProject
-              ? 'файлы, которых в проекте ещё не было, в него попадут — связь создаётся этим же действием. прежняя роль в ЭТОМ проекте заменится; в других проектах у файлов всё останется как было.'
-              : 'выберите проект — до этого роль ставить некуда, и сервер откажет.'}
+              ? 'files that were not in the project yet will land in it — the link is created by this same action. the previous role in THIS project is replaced; in other projects everything stays as it was.'
+              : 'pick a project — before that there is nowhere to put a role, and the server will refuse.'}
           </Text>
         </div>
       </ConfirmationModal>
@@ -496,19 +491,19 @@ export function FilesSelectionBar({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onConfirm={deleteAll}
-        title={`удалить из библиотеки ${files(ids.length)}`}
-        confirmLabel={deleting ? 'удаляем…' : 'удалить безвозвратно'}
+        title={`delete ${files(ids.length)} from the library`}
+        confirmLabel={deleting ? 'deleting…' : 'delete for good'}
         confirmDisabled={deleting}
         closeOnConfirm={false}
         width='sm'
       >
         <div className='flex flex-col gap-2'>
           <Text>
-            файлы и их байты уходят навсегда — вернуть их будет неоткуда.
+            the files and their bytes go for good — there will be nowhere to bring them back from.
           </Text>
           <Text variant='label'>
-            те, что прикреплены к задачам, откажут поимённо, и список останется на экране: удалять
-            их нужно, сняв вложение в самой задаче.
+            the ones attached to tasks will refuse by name, and the list stays on the screen: to
+            delete them, take the attachment off in the task itself.
           </Text>
           <Text size='micro' component='p' className='max-h-40 overflow-y-auto'>
             {selected.map((f) => f.fileName).join(', ')}

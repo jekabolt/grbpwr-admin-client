@@ -158,7 +158,7 @@ export function checkClientAreas(
       ok: false,
       rows,
       reason:
-        'ни один размер состава раскладки не удалось посчитать по сегодняшним выкройкам — сверить площади не с чем, а непроверенная площадь продолжения не основание',
+        "not one size of the marker composition could be computed from today's patterns — there is nothing to check the areas against, and an unchecked continuation area is no ground to stand on",
     };
   }
   const off = rows.filter((r) => !r.within);
@@ -167,11 +167,11 @@ export function checkClientAreas(
     return {
       ok: false,
       rows,
-      reason: `площади по сегодняшним выкройкам разошлись с записанными в раскладке (максимум ${worst.clientCm2.toFixed(
+      reason: `areas from today's patterns diverged from the ones recorded in the marker (worst ${worst.clientCm2.toFixed(
         1,
-      )} против ${worst.serverCm2.toFixed(1)} см², ${(worst.relative * 100).toFixed(
+      )} against ${worst.serverCm2.toFixed(1)} cm², ${(worst.relative * 100).toFixed(
         1,
-      )}%) — выкройки менялись после съёмки, и продолжать норму по ним нельзя: длина измерена по прежней геометрии`,
+      )}%) — the patterns changed after the capture, so the norm can't be continued from them: the length was measured on the previous geometry`,
     };
   }
   return { ok: true, rows, reason: '' };
@@ -341,28 +341,28 @@ export function perSizeRefusal(plan: PerSizePlan, sizeName: (id: number) => stri
   // базисом продолжения, так что «нет площадей» и «размера нет в составе» здесь были бы правдой,
   // ведущей чинить не то (пересохранять раскладку, догружать выкройки).
   if (plan.draftBasisRefusal) {
-    return `${plan.draftBasisRefusal} Размеры ${names} остались без нормы: продолжать по черновику нечего — его длина короче настоящей на не уложенные детали.`;
+    return `${plan.draftBasisRefusal} sizes ${names} were left without a norm: there is nothing to continue from in a draft — its length is shorter than the real one by the pieces that were never placed.`;
   }
   if (plan.continuation === 'blocked' && plan.areaCheck) {
-    return `${plan.areaCheck.reason}. Без продолжения размеры ${names} остались без нормы`;
+    return `${plan.areaCheck.reason}. without the continuation, sizes ${names} were left without a norm`;
   }
   if (plan.continuation === 'unavailable') {
-    return `у размеров ${names} нет своей раскладки, а продолжить норму по площадям нечем: выбранная раскладка снята до того, как площади по размерам стали записываться. Пересохраните её из модалки`;
+    return `sizes ${names} have no marker of their own, and there is nothing to continue the norm from by area: the chosen marker was captured before per-size areas started being recorded. re-save it from the modal`;
   }
-  return `у размеров ${names} нормы нет: своей раскладки у них нет, и по выкройкам они не посчитаны`;
+  return `sizes ${names} have no norm: they have no marker of their own, and they are not computed from the patterns either`;
 }
 
 // Пометка происхождения для экрана — одно слово на строку, в одном месте.
 export function originLabel(origin: PerSizeOrigin | null): string {
   switch (origin) {
     case 'marker':
-      return 'из раскладки';
+      return 'from the marker';
     case 'area':
-      return 'по площади выкроек';
+      return 'by pattern area';
     case 'mean':
-      return 'СРЕДНЕЕ';
+      return 'MEAN';
     default:
-      return 'нормы нет';
+      return 'no norm';
   }
 }
 

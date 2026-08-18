@@ -71,13 +71,13 @@ export function FileShareViewerPage() {
     };
   }, [token, attempt]);
 
-  const name = state.phase === 'ready' ? (state.meta.file_name ?? '') : '';
+  const name = state.phase === 'ready' ? state.meta.file_name ?? '' : '';
 
   useEffect(() => {
     // Имя файла в заголовке вкладки — только когда ссылка ЖИВА. На отказе вкладка называется
     // нейтрально: заголовок читается в истории браузера и в списке вкладок, и подставлять туда
     // имя закрытого файла значило бы отдавать наружу ровно то, что скрывает 404.
-    document.title = name || 'файл';
+    document.title = name || 'file';
   }, [name]);
 
   if (state.phase === 'loading') {
@@ -85,7 +85,7 @@ export function FileShareViewerPage() {
       <Shell>
         <Section>
           <Text size='micro' variant='label' component='p'>
-            загрузка…
+            loading…
           </Text>
         </Section>
       </Shell>
@@ -99,13 +99,13 @@ export function FileShareViewerPage() {
             box-in-box, который DESIGN.md запрещает. На сером ground он и есть блок. */}
         <CalloutBox tone='error'>
           <Text component='p'>
-            <b>ссылка не работает</b>
+            <b>the link doesn't work</b>
           </Text>
           {/* Ни причины, ни даты, ни имени файла. Причина есть — но она на сервере, и там она
               и остаётся: «отозвана», «истекла» и «такого файла нет» снаружи обязаны выглядеть
               одинаково. Единственный полезный совет — спросить того, кто прислал. */}
           <Text size='micro' variant='label' component='p'>
-            попросите новую у того, кто её прислал
+            ask for a new one from whoever sent it
           </Text>
         </CalloutBox>
       </Shell>
@@ -120,10 +120,11 @@ export function FileShareViewerPage() {
       <Shell>
         <CalloutBox tone='error'>
           <Text component='p'>
-            <b>страница настроена неправильно</b>
+            <b>the page is configured wrong</b>
           </Text>
           <Text size='micro' variant='label' component='p'>
-            сервер ответил не тем — покажите этот экран отправителю, новая ссылка не нужна
+            the server answered with the wrong thing — show this screen to the sender, a new link is
+            not needed
           </Text>
         </CalloutBox>
       </Shell>
@@ -135,7 +136,7 @@ export function FileShareViewerPage() {
       <Shell>
         <Section>
           <div className='space-y-2.5'>
-            <Text component='p'>не удалось загрузить — похоже, нет связи</Text>
+            <Text component='p'>couldn't load — looks like there is no connection</Text>
             <Button
               type='button'
               variant='main'
@@ -143,7 +144,7 @@ export function FileShareViewerPage() {
               className='min-h-11'
               onClick={() => setAttempt((n) => n + 1)}
             >
-              повторить
+              retry
             </Button>
           </div>
         </Section>
@@ -169,7 +170,7 @@ export function FileShareViewerPage() {
                   («birka_sostav_RU_v2_final.pdf») — на телефоне такое имя иначе уезжает за край
                   экрана вместе с обеими кнопками. */}
               <Text size='large' component='h1' className='break-all'>
-                {name || 'файл'}
+                {name || 'file'}
               </Text>
               <Text variant='label' component='p'>
                 {kindWord(meta.content_type, name)}
@@ -183,13 +184,13 @@ export function FileShareViewerPage() {
                   Навигация же переживает редирект без единой настройки. */}
               <Button asChild variant='main' size='lg' className='min-h-11'>
                 <a href={downloadEndpoint(token)} rel='noopener'>
-                  скачать
+                  download
                 </a>
               </Button>
               {inline && (
                 <Button asChild variant='secondary' size='lg' className='min-h-11'>
                   <a href={fileEndpoint(token)} target='_blank' rel='noopener noreferrer'>
-                    открыть
+                    open
                   </a>
                 </Button>
               )}
@@ -200,7 +201,8 @@ export function FileShareViewerPage() {
               // неё честная: подписанный адрес смотрит в origin бакета, и svg или html,
               // отрисованные на месте, исполнили бы скрипты в его контексте.
               <Text size='micro' variant='label' component='p'>
-                такой файл отдаётся только скачиванием — открыть его прямо в браузере нельзя
+                a file like this is served by download only — it can't be opened right in the
+                browser
               </Text>
             )}
           </div>
@@ -223,8 +225,8 @@ export function FileShareViewerPage() {
 
         <Section>
           <Text size='micro' variant='label' component='p'>
-            файл из библиотеки grbpwr, открытый по ссылке. ссылку могут закрыть или пересоздать в
-            любой момент — тогда эта страница перестанет открываться.
+            a file from the grbpwr library, opened by link. the link can be closed or rotated at any
+            moment — then this page stops opening.
           </Text>
         </Section>
       </SectionStack>

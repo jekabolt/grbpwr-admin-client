@@ -167,8 +167,7 @@ export function FileComments({
     },
   });
   const update = useMutation({
-    mutationFn: (args: { id: number; body: string }) =>
-      commentsService.update(args.id, args.body),
+    mutationFn: (args: { id: number; body: string }) => commentsService.update(args.id, args.body),
     // Правка сама по себе переписывает одно и то же поле, но повтор на 403 — второй отказ на
     // одно нажатие и вдвое отложенная фраза о нём. Один клик — один запрос, как у соседей.
     retry: 0,
@@ -213,44 +212,46 @@ export function FileComments({
         action={
           hidden > 0 ? (
             <Button size='xs' variant='secondary' onClick={() => setExpanded(true)}>
-              показать все
+              show all
             </Button>
           ) : comments.length > PREVIEW_COUNT && expanded ? (
             <Button size='xs' variant='secondary' onClick={() => setExpanded(false)}>
-              свернуть
+              collapse
             </Button>
           ) : undefined
         }
       >
-        обсуждение{comments.length ? ` · ${comments.length}` : ''}
+        discussion{comments.length ? ` · ${comments.length}` : ''}
       </GroupLabel>
 
       {isLoading ? (
         <Text size='micro' variant='label'>
-          загружаем…
+          loading…
         </Text>
       ) : isError ? (
         <Text size='micro' variant='label'>
-          {isUnauthorized(error)
-            ? 'сессия истекла — войдите заново.'
-            : isForbidden(error)
-              ? 'нет доступа к обсуждению этого файла.'
-              : isUnknownRoute(error)
-                ? 'обсуждение этот сервер ещё не отдаёт: либо оно не выкачено, либо файла уже нет.'
-                : /* «Лента» была третьим словом для того, что шапка зовёт обсуждением, а строка
+          {isUnauthorized(error) ? (
+            'the session expired — sign in again.'
+          ) : isForbidden(error) ? (
+            'no access to the discussion of this file.'
+          ) : isUnknownRoute(error) ? (
+            "this server doesn't serve the discussion yet: either it isn't rolled out, or the file is already gone."
+          ) : (
+            /* «Лента» была третьим словом для того, что шапка зовёт обсуждением, а строка
                      внутри — репликой. Три слова на два предмета человек читает как три предмета. */
-                  <FailureText e={error} fallback='обсуждение не прочиталось' />}
+            <FailureText e={error} fallback="the discussion didn't read" />
+          )}
         </Text>
       ) : comments.length === 0 ? (
         <Text size='micro' variant='label'>
-          пока никто ничего не написал. здесь спрашивают «это финальная версия?» и отвечают
-          «нет, бери соседний файл».
+          nobody has written anything yet. here people ask “is this the final version?” and answer
+          “no, take the file next to it”.
         </Text>
       ) : (
         <div className='flex flex-col'>
           {hidden > 0 && (
             <Text size='nano' variant='label' className='uppercase'>
-              выше ещё {hidden} {plural(hidden, 'реплика', 'реплики', 'реплик')}
+              {hidden} more {plural(hidden, 'reply', 'replies')} above
             </Text>
           )}
           {shown.map((c, i) => {
@@ -267,7 +268,7 @@ export function FileComments({
                 <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
                   <div className='flex flex-wrap items-baseline gap-1.5'>
                     <Text size='micro' component='span' className='font-bold uppercase'>
-                      {author || 'неизвестно кто'}
+                      {author || 'unknown'}
                     </Text>
                     {!!spec && (
                       <Text size='nano' variant='label' component='span' className='uppercase'>
@@ -277,11 +278,11 @@ export function FileComments({
                     <Text size='nano' variant='label' component='span' className='tabular-nums'>
                       {formatWhenShort(c.createdAt)}
                     </Text>
-                    {/* «изменено» — по серверному `edited_at`. Молча переписанная реплика это
+                    {/* «edited» — по серверному `edited_at`. Молча переписанная реплика это
                         переписанный разговор, и метка здесь стоит ровно за этим. */}
                     {!!c.editedAt && (
                       <Text size='nano' variant='label' component='span' className='uppercase'>
-                        изменено {formatWhenShort(c.editedAt)}
+                        edited {formatWhenShort(c.editedAt)}
                       </Text>
                     )}
                   </div>
@@ -303,7 +304,7 @@ export function FileComments({
                           disabled={!editDraft.trim() || update.isPending}
                           onClick={() => update.mutate({ id, body: editDraft.trim() })}
                         >
-                          {update.isPending ? 'сохраняем…' : 'сохранить'}
+                          {update.isPending ? 'saving…' : 'save'}
                         </Button>
                         <Button
                           size='xs'
@@ -313,7 +314,7 @@ export function FileComments({
                             setEditingId(undefined);
                           }}
                         >
-                          отмена
+                          cancel
                         </Button>
                       </div>
                     </div>
@@ -337,7 +338,7 @@ export function FileComments({
                         setEditingId(id);
                       }}
                     >
-                      править
+                      edit
                     </Button>
                     <Button
                       size='xs'
@@ -345,7 +346,7 @@ export function FileComments({
                       disabled={remove.isPending}
                       onClick={() => setConfirmDelete(c)}
                     >
-                      удалить
+                      delete
                     </Button>
                   </div>
                 )}
@@ -357,7 +358,7 @@ export function FileComments({
 
       {!!failure && (
         <CalloutBox tone='error'>
-          {/* Плашка одна на три мутации, а запасная фраза была одна — «реплика не отправилась»,
+          {/* Плашка одна на три мутации, а запасная фраза была одна — «the reply didn't send»,
               и она же появлялась после неудачного удаления. Называем то действие, которое
               действительно не прошло. */}
           <Text size='micro' component='span'>
@@ -365,10 +366,10 @@ export function FileComments({
               e={failure}
               fallback={
                 add.error
-                  ? 'реплика не отправилась'
+                  ? "the reply didn't send"
                   : update.error
-                    ? 'правка реплики не сохранилась'
-                    : 'реплика не удалилась'
+                    ? "the reply edit didn't save"
+                    : "the reply didn't delete"
               }
             />
           </Text>
@@ -381,7 +382,7 @@ export function FileComments({
             name='newFileComment'
             value={draft}
             rows={2}
-            placeholder='написать в обсуждение'
+            placeholder='write in the discussion'
             className='mb-0 min-h-[44px]'
             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
             onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -394,7 +395,7 @@ export function FileComments({
           />
           <div className='flex flex-wrap items-center gap-1.5'>
             <Text size='micro' variant='label' component='span' className='mr-auto'>
-              «@» подставит человека — ищет по имени и по специальности
+              “@” inserts a person — searches by name and by specialty
             </Text>
             <Button
               size='xs'
@@ -412,16 +413,16 @@ export function FileComments({
               disabled={!draft.trim() || add.isPending}
               onClick={() => add.mutate(draft.trim())}
             >
-              {add.isPending ? 'отправляем…' : 'отправить'}
+              {add.isPending ? 'sending…' : 'send'}
             </Button>
           </div>
           {mentioning && (
             <div className='flex flex-col gap-1'>
               <Input
                 name='mentionQuery'
-                aria-label='поиск человека по имени или специальности'
+                aria-label='search for a person by name or specialty'
                 value={mentionQuery}
-                placeholder='имя или специальность'
+                placeholder='name or specialty'
                 className='max-w-[240px]'
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setMentionQuery(e.target.value)
@@ -441,13 +442,13 @@ export function FileComments({
                   >
                     {a.username}
                     <Text size='nano' variant='label' component='span'>
-                      {(a.specialties ?? []).join(', ') || 'без специальности'}
+                      {(a.specialties ?? []).join(', ') || 'no specialty'}
                     </Text>
                   </Chip>
                 ))}
                 {!mentionRows.length && (
                   <Text size='micro' variant='label' component='span'>
-                    никого с таким именем или специальностью нет.
+                    there is nobody with such a name or specialty.
                   </Text>
                 )}
               </ChipRow>
@@ -456,7 +457,7 @@ export function FileComments({
         </div>
       ) : (
         <Text size='micro' variant='label'>
-          только чтение — писать в обсуждение нельзя. читается оно при этом целиком.
+          read-only — writing in the discussion isn't allowed. it still reads in full.
         </Text>
       )}
 
@@ -467,14 +468,14 @@ export function FileComments({
           if (confirmDelete?.id) remove.mutate(Number(confirmDelete.id));
           setConfirmDelete(undefined);
         }}
-        title='удалить реплику'
-        confirmLabel='удалить'
-        cancelLabel='оставить'
+        title='delete the reply'
+        confirmLabel='delete'
+        cancelLabel='keep'
         width='sm'
       >
         <Text>
-          реплика исчезнет у всех, вернуть её будет неоткуда. если она уже кому-то ответила,
-          останется ответ без вопроса.
+          the reply will disappear for everyone, there will be nowhere to bring it back from. if it
+          has already answered someone, an answer without a question will remain.
         </Text>
       </ConfirmationModal>
     </div>

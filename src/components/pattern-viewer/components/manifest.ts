@@ -102,11 +102,11 @@ export function isSafePatternUrl(url?: string): boolean {
 // поэтому у бэка есть JSON-хоп: ?mode=json возвращает {url} вместо редиректа. view_url может
 // уже нести query-string, отсюда выбор разделителя.
 export async function resolvePatternUrl(viewUrl: string): Promise<string> {
-  if (!isSafePatternUrl(viewUrl)) throw new Error('ссылка на файл выглядит неправильно');
+  if (!isSafePatternUrl(viewUrl)) throw new Error('the file link looks wrong');
   const sep = viewUrl.includes('?') ? '&' : '?';
   const res = await fetch(`${viewUrl}${sep}mode=json`, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`файл недоступен (${res.status})`);
+  if (!res.ok) throw new Error(`the file is unavailable (${res.status})`);
   const data = (await res.json()) as { url?: string };
-  if (!data.url) throw new Error('пустой ответ mode=json');
+  if (!data.url) throw new Error('empty mode=json response');
   return data.url;
 }

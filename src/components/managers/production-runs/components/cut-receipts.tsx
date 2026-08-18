@@ -112,7 +112,7 @@ const digits = (v: string) => v.replace(/[^0-9]/g, '');
 // одинаковы, различают их собственное имя либо рулон. На уровне модуля, а не компонента: функцию
 // читают useMemo, стоящие в коде РАНЬШЕ места, где const в теле компонента успел бы объявиться.
 const layShortName = (lay: common_ProductionRunLay) =>
-  (lay.name ?? '').trim() || (lay.lotCode ? `настил (${lay.lotCode})` : `настил #${wireInt(lay.id)}`);
+  (lay.name ?? '').trim() || (lay.lotCode ? `lay (${lay.lotCode})` : `lay #${wireInt(lay.id)}`);
 
 // Идентификатор СЛОТА настила; '' = идентификатора нет ВОВСЕ (легаси-запись без bomLineKey и
 // bomItemId — текущий редактор таких не создаёт). Пустоту обязан обрабатывать вызывающий сам:
@@ -197,7 +197,7 @@ export function CutReceipts({
       const name = dc?.name ?? cw.colorCode ?? '';
       byId.set(wireInt(cw.colorwayId), `${cw.colorCode ? `${cw.colorCode} · ` : ''}${name}`);
     }
-    return (cwId: number) => byId.get(cwId) || (cwId > 0 ? `#${cwId}` : '(без колорвея)');
+    return (cwId: number) => byId.get(cwId) || (cwId > 0 ? `#${cwId}` : '(no colourway)');
   }, [techCard?.colorways, dictionary?.colors]);
 
   // Порядок размеров — градация карточки; всё, что встретилось помимо неё (настил или строка
@@ -561,11 +561,11 @@ export function CutReceipts({
         });
       }
       if (res.failed.length === 0) {
-        showMessage(`Приёмка сохранена — строк: ${res.saved.length}`, 'success');
+        showMessage(`receipt saved — lines: ${res.saved.length}`, 'success');
       } else {
         // Частичный успех называется вслух: без «сохранено N» оператор не знает, надо ли повторять
         // весь настил или только оставшиеся красными строки.
-        const saved = res.saved.length > 0 ? `сохранено ${res.saved.length}; ` : '';
+        const saved = res.saved.length > 0 ? `saved ${res.saved.length}; ` : '';
         showMessage(
           `${saved}${res.failed.map((f) => `${sizeLabel(f.sizeId)}: ${f.message}`).join('; ')}`,
           'error',
@@ -589,7 +589,7 @@ export function CutReceipts({
         delete next[rowKey(layKey, sizeId)];
         return next;
       });
-      showMessage('Строка приёмки удалена', 'success');
+      showMessage('receipt line deleted', 'success');
     } catch (e) {
       showMessage(cutReceiptErrorMessage(e), 'error');
     } finally {
@@ -598,7 +598,7 @@ export function CutReceipts({
   };
 
   const layTitle = (lay: common_ProductionRunLay) => {
-    const slot = lay.bomItemName || lay.materialName || 'слот';
+    const slot = lay.bomItemName || lay.materialName || 'slot';
     const own = (lay.name ?? '').trim();
     return `${colorwayLabel(wireInt(lay.colorwayId))} · ${slot}${own ? ` · ${own}` : ''}`;
   };
@@ -606,39 +606,39 @@ export function CutReceipts({
   return (
     <Section
       id={id}
-      title='приёмка кроя'
-      question='Что реально вышло со стола: выкроено и принято в пошив, в ИЗДЕЛИЯХ. Расхождение с заказом показывается, а не запрещается.'
+      title='cut receipt'
+      question='What actually came off the table: cut and accepted for sewing, in GARMENTS. A discrepancy against the order is shown, not forbidden.'
     >
       {isLoading ? (
         <Text size='small' variant='inactive'>
-          приёмка кроя читается…
+          reading the cut receipt…
         </Text>
       ) : isError ? (
         <Text size='small' className='text-error'>
-          приёмка кроя не читается — обновите страницу
+          the cut receipt won't read — refresh the page
         </Text>
       ) : lays.length === 0 ? (
         <Text size='small' variant='inactive'>
-          настилов ещё нет — принимать нечего
+          no lays yet — nothing to receive
         </Text>
       ) : (
         <>
           {locked ? (
             <CalloutBox tone='note'>
               <Text size='small'>
-                Партия закрыта, но приёмку кроя вносить МОЖНО: крой предшествует пошиву, а пошив —
-                приёмке, и раскроенная ткань отменённой партии это ровно тот убыток, который кто-то
-                обязан посчитать.
+                The run is closed, but the cut receipt CAN still be entered: cutting precedes
+                sewing, and sewing precedes receiving, and the fabric cut for a cancelled run is
+                exactly the loss somebody has to count.
               </Text>
             </CalloutBox>
           ) : null}
 
-          <GroupLabel flush>цепочка чисел</GroupLabel>
+          <GroupLabel flush>chain of numbers</GroupLabel>
           <Text size='micro' variant='label'>
-            заказано → выкроено → принято в пошив → сдано готовым → брак. Заказанное и сданное
-            берутся из строки партии РОВНО ОДИН РАЗ на пару (колорвей, размер); выкроенное и
-            принятое складываются по настилам внутри слота и сводятся минимумом между слотами —
-            изделию нужны все его слои.
+            ordered → cut → accepted for sewing → handed over finished → defect. Ordered and handed
+            over are taken from the run line EXACTLY ONCE per (colourway, size) pair; cut and
+            accepted are summed across the lays inside a slot and reconciled by the minimum between
+            slots — a garment needs all of its layers.
           </Text>
 
           {/* Колорвей, у которого настилы есть, но ни одного размера в них ещё нет, пропускается:
@@ -654,14 +654,14 @@ export function CutReceipts({
 
           {plannedWithoutLays > 0 ? (
             <Text size='micro' variant='label'>
-              ещё {plannedWithoutLays} колорвей(ев) заказано, но не настелено — они в плане настилов
-              выше, приёмке кроя их предъявить нечего.
+              another {plannedWithoutLays} colourway(s) ordered but not laid — they are in the lay
+              plan above, and the cut receipt has nothing to show for them.
             </Text>
           ) : null}
           {unassignedPlanned > 0 ? (
             <Text size='micro' variant='label'>
-              в плане партии {unassignedPlanned} строк(и) без продукта — их заказ не сопоставим с
-              колорвеем настила, поэтому в колонке «заказано» у соответствующих размеров стоит «—».
+              the run plan has {unassignedPlanned} line(s) without a product — their order can't be
+              matched to a lay's colourway, so the “ordered” column shows “—” for those sizes.
             </Text>
           ) : null}
 
@@ -669,39 +669,41 @@ export function CutReceipts({
               впервые встречается с выкроенным. ЭТО НЕ ДРЕЙФ НАСТИЛА (actualDriftPercent — факт
               против геометрии настила, его владелец — сервер): здесь другая пара чисел — факт на
               изделие против нормы на изделие. */}
-          <GroupLabel>ткань на изделие · пары (колорвей × слот)</GroupLabel>
+          <GroupLabel>cloth per unit · pairs (colourway × slot)</GroupLabel>
           <Text size='micro' variant='label'>
-            факт полотна ÷ выкроено — сколько ткани стоил КРОЙ (брак кроя внутри: ткань на него
-            потрачена); факт ÷ принято в пошив — сколько стоило ГОДНОЕ изделие; разница — цена брака
-            кроя в ткани. Настилы складываются только ВНУТРИ пары; полотно разных слотов и разных
-            единиц не складывается — изделию нужны все его слои.
+            actual cloth ÷ cut — how much fabric the CUTTING cost (cutting defects included: the
+            fabric was spent on them); actual ÷ accepted for sewing — how much a GOOD garment cost;
+            the difference is the price of cutting defects in fabric. Lays are summed only INSIDE a
+            pair; cloth of different slots and different units is not summed — a garment needs all
+            of its layers.
           </Text>
           {!anyFact ? (
             factFrozen ? (
               // Необратимость называется вслух: иначе оператор ищет кнопку, которой нет.
               <CalloutBox tone='note'>
                 <Text size='small'>
-                  Замеров полотна нет, а запись факта закрыта статусом партии — «ткань на изделие»
-                  по этим настилам не посчитается уже никогда: приёмка кроя правится и на закрытой
-                  партии (знаменатель уточняем), но числитель уже не появится.
+                  There are no cloth measurements, and recording the actual is closed by the run's
+                  status — “cloth per unit” for these lays will never be computed now: the cut
+                  receipt can still be edited on a closed run (we refine the denominator), but the
+                  numerator will no longer appear.
                 </Text>
               </CalloutBox>
             ) : (
               <Text size='small' variant='inactive'>
-                замеры полотна ещё не внесены — «на изделие» посчитается после замера (факт расхода
-                вносится на настиле в плане настилов выше)
+                cloth measurements not entered yet — “per unit” will be computed after the
+                measurement (the actual consumption is entered on the lay in the lay plan above)
               </Text>
             )
           ) : (
             <DataTable>
               <thead>
                 <tr>
-                  <th>пара</th>
-                  <th>полотно</th>
-                  <th>выкроено / годных</th>
-                  <th>на крой</th>
-                  <th>на годное</th>
-                  <th data-align='left' className='w-full'>оговорки</th>
+                  <th>pair</th>
+                  <th>cloth</th>
+                  <th>cut / good</th>
+                  <th>per cut</th>
+                  <th>per good</th>
+                  <th data-align='left' className='w-full'>caveats</th>
                 </tr>
               </thead>
               <tbody>
@@ -731,8 +733,8 @@ export function CutReceipts({
                         <td data-align='left'>
                           {p.slotless ? (
                             <Text size='micro' component='span' className='block text-warning'>
-                              у настила нет идентификатора слота BOM (легаси-запись) — строка
-                              показана отдельно и ни с чем не складывается
+                              the lay has no BOM slot identifier (a legacy record) — the line is
+                              shown separately and is not summed with anything
                             </Text>
                           ) : null}
                           <Text size='micro' component='span' className='block text-labelColor'>
@@ -746,10 +748,11 @@ export function CutReceipts({
                   const notes: { text: string; tone: 'error' | 'warning' | 'label' }[] = [];
                   if (p.slotless)
                     notes.push({
-                      text: 'у настила нет идентификатора слота BOM (легаси-запись) — строка показана отдельно и ни с чем не складывается',
+                      text: 'the lay has no BOM slot identifier (a legacy record) — the line is shown separately and is not summed with anything',
                       tone: 'warning',
                     });
-                  if (perUnit.mixed) notes.push({ text: 'среднее по составу пары', tone: 'label' });
+                  if (perUnit.mixed)
+                    notes.push({ text: "average across the pair's composition", tone: 'label' });
                   // Признака «добор» в данных нет: настил, кроивший ЗАМЕНУ бракованных панелей, а
                   // не новые комплекты, раздувает знаменатель, и посчитать правильно НЕЛЬЗЯ —
                   // поэтому каждый агрегат из >1 настила несёт оговорку с направлением ошибки.
@@ -757,31 +760,31 @@ export function CutReceipts({
                   // а оговорка — нет.
                   if (perUnit.layCount > 1)
                     notes.push({
-                      text: `настилов в паре: ${perUnit.layCount} — если какой-то из них добор (замена бракованных панелей, а не новые комплекты), знаменатель раздут: «на изделие» и процент к норме занижены`,
+                      text: `lays in the pair: ${perUnit.layCount} — if one of them is a top-up (replacing defective panels rather than new sets), the denominator is inflated: “per unit” and the percentage against the norm are understated`,
                       tone: 'warning',
                     });
                   if (perUnit.unreportedLays.length > 0)
                     notes.push({
-                      text: `крой не отчитан: «${perUnit.unreportedLays.join('», «')}» — знаменатель занижен`,
+                      text: `cutting not reported: “${perUnit.unreportedLays.join('”, “')}” — the denominator is understated`,
                       tone: 'warning',
                     });
                   if (perUnit.missingSizes.length > 0)
                     notes.push({
-                      text: `нет приёмки по размерам: ${perUnit.missingSizes
+                      text: `no receipt for sizes: ${perUnit.missingSizes
                         .map(sizeLabel)
-                        .join(', ')} — «на изделие» завышено и будет уменьшаться по мере ввода`,
+                        .join(', ')} — “per unit” is overstated and will come down as entries are made`,
                       tone: 'warning',
                     });
                   // «Принято больше выкроенного» — невозможное состояние данных, и никакая другая
                   // строка его не красит (цепочка чисел отмечает только принято < выкроено).
                   if (perUnit.acceptedOverCut)
                     notes.push({
-                      text: `принято ${perUnit.acceptedTotal} при выкроенных ${perUnit.cutTotal} — так не бывает: какое-то из чисел врёт, проверьте строки приёмки`,
+                      text: `accepted ${perUnit.acceptedTotal} against ${perUnit.cutTotal} cut — that can't happen: one of the numbers is lying, check the receipt lines`,
                       tone: 'error',
                     });
                   if (perUnit.scrapPerGood != null)
                     notes.push({
-                      text: `цена брака кроя: +${fmtQty(perUnit.scrapPerGood)} ${u} на годное`,
+                      text: `price of cutting defects: +${fmtQty(perUnit.scrapPerGood)} ${u} per good unit`,
                       tone: 'error',
                     });
                   // «Принято меньше выкроенного» имеет ДВЕ причины, и данные их не различают:
@@ -791,9 +794,9 @@ export function CutReceipts({
                   // соседнего, а без имени настила оператору в паре негде искать.
                   if (perUnit.acceptedZeroRows.length > 0)
                     notes.push({
-                      text: `принято ровно 0: ${perUnit.acceptedZeroRows
-                        .map((z) => `${sizeLabel(z.sizeId)} на «${z.lay}»`)
-                        .join(', ')} — если приёмку там не заполнили, годное занижено и «цена брака» завышена`,
+                      text: `accepted exactly 0: ${perUnit.acceptedZeroRows
+                        .map((z) => `${sizeLabel(z.sizeId)} on “${z.lay}”`)
+                        .join(', ')} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
                       tone: 'warning',
                     });
                   if (norm) {
@@ -802,13 +805,13 @@ export function CutReceipts({
                       // partlyGrossed: процент начислен только на слагаемые без отходов внутри —
                       // общая фраза «+10% раскроя» читалась бы как процент на всю норму.
                       notes.push({
-                        text: `к норме ${fmtQty(norm.normPerUnit)} ${norm.unitLabel}/изд (${norm.sourceLabel}${
+                        text: `against the norm ${fmtQty(norm.normPerUnit)} ${norm.unitLabel}/unit (${norm.sourceLabel}${
                           norm.grossed
                             ? norm.partlyGrossed
-                              ? ` + ${fmtQty(norm.wastagePct ?? 0)}% раскроя только на часть без отходов внутри`
-                              : ` + ${fmtQty(norm.wastagePct ?? 0)}% раскроя`
+                              ? ` + ${fmtQty(norm.wastagePct ?? 0)}% cutting wastage only on the part without waste inside`
+                              : ` + ${fmtQty(norm.wastagePct ?? 0)}% cutting wastage`
                             : ''
-                        }${norm.weighted ? ', взвешенной по составу' : ''}): ${d.text}`,
+                        }${norm.weighted ? ', weighted by composition' : ''}): ${d.text}`,
                         tone: d.over ? 'error' : 'label',
                       });
                       // С ЧЕМ сравнивали — ревизия прогона или живая карточка. Отдельной строкой,
@@ -820,7 +823,7 @@ export function CutReceipts({
                       });
                     } else {
                       notes.push({
-                        text: `к норме — ${normRefusalText(norm.refusal, sizeLabel)}`,
+                        text: `against the norm — ${normRefusalText(norm.refusal, sizeLabel)}`,
                         tone: 'label',
                       });
                       // Отказ тоже говорит, в ЧЬЕЙ рецептуре искали: «нормы на пару нет» в
@@ -849,7 +852,7 @@ export function CutReceipts({
                           в примечаниях. */}
                       <td className={perUnit.perAccepted == null ? 'text-error' : ''}>
                         {perUnit.perAccepted == null
-                          ? 'принято 0'
+                          ? 'accepted 0'
                           : `${fmtQty(perUnit.perAccepted)} ${u}`}
                       </td>
                       <td data-align='left'>
@@ -881,12 +884,13 @@ export function CutReceipts({
             </DataTable>
           )}
 
-          <GroupLabel>ввод по настилам</GroupLabel>
+          <GroupLabel>entry by lay</GroupLabel>
           <Text size='micro' variant='label'>
-            Строка приёмки — пара (настил, размер); повторное сохранение ПРАВИТ её, а не заводит
-            вторую. Пустая клетка — «не считали», но лишь до сохранения строки: сохранённая хранит
-            оба числа, и пустое поле уедет нулём, потом неотличимым от посчитанного. Чтобы сказать
-            «этого размера на этом настиле не кроили», удалите строку.
+            A receipt line is a (lay, size) pair; saving again EDITS it rather than creating a
+            second one. An empty cell means “not counted”, but only until the line is saved: a saved
+            line holds both numbers, and an empty field goes off as a zero, afterwards
+            indistinguishable from a counted one. To say “this size wasn't cut on this lay”, delete
+            the line.
           </Text>
 
           {lays.map((lay) => {
@@ -907,10 +911,10 @@ export function CutReceipts({
                         onClick={() => saveLay(lay)}
                       >
                         {savingLay === layKey
-                          ? 'сохраняем…'
+                          ? 'saving…'
                           : dirty.length > 0
-                            ? `сохранить · ${dirty.length}`
-                            : 'сохранить'}
+                            ? `save · ${dirty.length}`
+                            : 'save'}
                       </Button>
                     ) : null
                   }
@@ -920,18 +924,19 @@ export function CutReceipts({
 
                 {sizes.length === 0 ? (
                   <Text size='small' variant='inactive'>
-                    у настила ещё нет состава — добавьте секцию с раскладкой в плане настилов выше
-                    {editable && addable.length > 0 ? ' или внесите размер вручную' : ''}
+                    the lay has no composition yet — add a section with a marker in the lay plan
+                    above
+                    {editable && addable.length > 0 ? ' or enter a size by hand' : ''}
                   </Text>
                 ) : (
                   <DataTable>
                     <thead>
                       <tr>
-                        <th>размер</th>
-                        <th title='сколько изделий этого размера кроит сам настил'>по настилу</th>
-                        <th>выкроено</th>
-                        <th>принято в пошив</th>
-                        <th data-align='left' className='w-full'>заметка</th>
+                        <th>size</th>
+                        <th title='how many garments of this size the lay itself cuts'>by lay</th>
+                        <th>cut</th>
+                        <th>accepted for sewing</th>
+                        <th data-align='left' className='w-full'>note</th>
                         <th />
                       </tr>
                     </thead>
@@ -952,7 +957,7 @@ export function CutReceipts({
                                   component='span'
                                   className='ml-1 uppercase text-warning'
                                 >
-                                  не сохранено
+                                  not saved
                                 </Text>
                               ) : null}
                             </td>
@@ -962,7 +967,7 @@ export function CutReceipts({
                                 <Input
                                   className='ml-auto w-16 text-right'
                                   inputMode='numeric'
-                                  aria-label={`${label} выкроено`}
+                                  aria-label={`${label} cut`}
                                   value={d.cut}
                                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                                     setField(layKey, sizeId, 'cut', digits(e.target.value))
@@ -979,7 +984,7 @@ export function CutReceipts({
                                 <Input
                                   className='ml-auto w-16 text-right'
                                   inputMode='numeric'
-                                  aria-label={`${label} принято в пошив`}
+                                  aria-label={`${label} accepted for sewing`}
                                   value={d.accepted}
                                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                                     setField(layKey, sizeId, 'accepted', digits(e.target.value))
@@ -994,7 +999,7 @@ export function CutReceipts({
                             <td data-align='left'>
                               {editable ? (
                                 <Input
-                                  aria-label={`${label} заметка`}
+                                  aria-label={`${label} note`}
                                   value={d.note}
                                   maxLength={512}
                                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -1019,7 +1024,7 @@ export function CutReceipts({
                                   type='button'
                                   variant='secondary'
                                   size='xs'
-                                  aria-label={`удалить строку приёмки · ${label}`}
+                                  aria-label={`delete the receipt line · ${label}`}
                                   onClick={() => setDeleting({ lay, sizeId })}
                                 >
                                   ✕
@@ -1046,7 +1051,7 @@ export function CutReceipts({
                   <div className='mt-1'>
                     <select
                       className='border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize'
-                      aria-label={`добавить размер в приёмку · ${layTitle(lay)}`}
+                      aria-label={`add a size to the receipt · ${layTitle(lay)}`}
                       value=''
                       onChange={(e) => {
                         const s = Number(e.target.value);
@@ -1057,7 +1062,7 @@ export function CutReceipts({
                         }));
                       }}
                     >
-                      <option value=''>+ размер…</option>
+                      <option value=''>+ size…</option>
                       {addable.map((s) => (
                         <option key={s} value={s}>
                           {sizeLabel(s)}
@@ -1076,14 +1081,14 @@ export function CutReceipts({
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
         onConfirm={confirmDelete}
-        title='удалить строку приёмки кроя'
-        confirmLabel='удалить'
+        title='delete the cut receipt line'
+        confirmLabel='delete'
         closeOnConfirm={false}
         width='sm'
       >
         <Text size='small'>
           {deleting
-            ? `${layTitle(deleting.lay)} · ${sizeLabel(deleting.sizeId)}. Удаление говорит «этого размера на этом настиле не кроили» — это не то же самое, что счёт, равный нулю.`
+            ? `${layTitle(deleting.lay)} · ${sizeLabel(deleting.sizeId)}. Deleting says “this size wasn't cut on this lay” — which is not the same as a count equal to zero.`
             : ''}
         </Text>
       </ConfirmationModal>
@@ -1139,35 +1144,35 @@ function LayClothSummary({ report }: { report?: ClothReport }) {
     if (r.kind === 'zero-cut') {
       return (
         <Text size='micro' component='span' className='block text-error'>
-          выкроено 0 — полотно {fmtQty(r.factTotal)} {r.unitLabel} без записанных изделий; ноль мог
-          быть и не введён (пустое поле сохраняется нулём)
+          cut 0 — cloth {fmtQty(r.factTotal)} {r.unitLabel} with no garments recorded; the zero may
+          not even have been typed (an empty field is saved as a zero)
         </Text>
       );
     }
     if (r.kind === 'no-receipts') {
       return (
         <Text size='micro' component='span' className='block text-labelColor'>
-          полотно {fmtQty(r.factTotal)} {r.unitLabel} — крой не отчитан, «на изделие» делить не на
-          что
+          cloth {fmtQty(r.factTotal)} {r.unitLabel} — cutting not reported, there is nothing to
+          divide “per unit” by
         </Text>
       );
     }
     return (
       <Text size='micro' component='span' className='block text-labelColor'>
         {clothRefusalText(r)}
-        {r.kind === 'no-fact' && !r.frozen ? ' — «на изделие» посчитается после замера' : ''}
+        {r.kind === 'no-fact' && !r.frozen ? ' — “per unit” will be computed after the measurement' : ''}
       </Text>
     );
   }
   const u = perUnit.unitLabel;
   return (
     <Text size='micro' component='span' className='block text-labelColor'>
-      полотно {fmtQty(perUnit.factTotal)} {u} → {fmtQty(perUnit.perCut)} {u}/изд кроя
+      cloth {fmtQty(perUnit.factTotal)} {u} → {fmtQty(perUnit.perCut)} {u}/unit cut
       {perUnit.perAccepted != null
-        ? ` · ${fmtQty(perUnit.perAccepted)} ${u}/изд годного`
-        : ' · принято 0'}
-      {perUnit.acceptedOverCut ? ' · принято больше выкроенного — так не бывает' : ''}
-      {perUnit.missingSizes.length > 0 ? ' · не по всем размерам — завышено' : ''}
+        ? ` · ${fmtQty(perUnit.perAccepted)} ${u}/unit good`
+        : ' · accepted 0'}
+      {perUnit.acceptedOverCut ? " · accepted more than cut — that can't happen" : ''}
+      {perUnit.missingSizes.length > 0 ? ' · not for every size — overstated' : ''}
     </Text>
   );
 }
@@ -1190,13 +1195,13 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
     <DataTable>
       <thead>
         <tr>
-          <th>размер</th>
-          <th>заказано</th>
-          <th>выкроено</th>
-          <th>принято в пошив</th>
-          <th>сдано готовым</th>
-          <th>брак</th>
-          <th data-align='left' className='w-full'>расхождение</th>
+          <th>size</th>
+          <th>ordered</th>
+          <th>cut</th>
+          <th>accepted for sewing</th>
+          <th>handed over finished</th>
+          <th>defect</th>
+          <th data-align='left' className='w-full'>discrepancy</th>
         </tr>
       </thead>
       <tbody>
@@ -1217,23 +1222,23 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
           if (r.expected === 0) {
             // Размер заказан, но ни один настил его не кроит. Это находка ПЛАНА настилов (там она и
             // красная, в матрице покрытия), а не приёмки: приёмке тут физически не о чем отчитаться.
-            notes.push({ text: 'размер ни в одном настиле', tone: 'label' });
+            notes.push({ text: 'size is not on any lay', tone: 'label' });
           } else if (r.reported === 0) {
-            notes.push({ text: 'приёмка не введена', tone: 'label' });
+            notes.push({ text: 'receipt not entered', tone: 'label' });
           } else if (r.reported < r.expected) {
             // Недокрой при неполном вводе — не факт, а следствие незаполненной формы, и красным он
             // был бы ложной тревогой. Поэтому здесь говорится ровно то, что известно.
             notes.push({
-              text: `введено по ${r.reported} из ${r.expected} настилов`,
+              text: `entered for ${r.reported} of ${r.expected} lays`,
               tone: 'label',
             });
           }
-          if (undercut > 0) notes.push({ text: `недокрой ${undercut}`, tone: 'error' });
-          if (overcut > 0) notes.push({ text: `перекрой ${overcut}`, tone: 'warning' });
-          if (cutScrap > 0) notes.push({ text: `брак раскроя ${cutScrap}`, tone: 'error' });
+          if (undercut > 0) notes.push({ text: `shortfall ${undercut}`, tone: 'error' });
+          if (overcut > 0) notes.push({ text: `overcut ${overcut}`, tone: 'warning' });
+          if (cutScrap > 0) notes.push({ text: `cutting defect ${cutScrap}`, tone: 'error' });
           if (slotSpread)
             notes.push({
-              text: `слоты расходятся: ${r.slots.map((s) => `${s.label} ${s.cut}`).join(' · ')}`,
+              text: `slots disagree: ${r.slots.map((s) => `${s.label} ${s.cut}`).join(' · ')}`,
               tone: 'warning',
             });
 
@@ -1250,7 +1255,7 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
               <td>{r.defect == null ? <EmptyCell /> : r.defect}</td>
               <td data-align='left'>
                 {notes.length === 0 ? (
-                  <EmptyCell>сходится</EmptyCell>
+                  <EmptyCell>matches</EmptyCell>
                 ) : (
                   notes.map((n) => (
                     <Text
@@ -1277,7 +1282,7 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
           <td data-align='left'>
             {anyIncomplete ? (
               <Text size='micro' component='span' className='text-labelColor'>
-                итог кроя неполный — не по всем настилам введено
+                the cut total is incomplete — not entered for every lay
               </Text>
             ) : null}
           </td>

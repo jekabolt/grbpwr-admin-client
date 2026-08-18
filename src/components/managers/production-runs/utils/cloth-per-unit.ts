@@ -53,13 +53,13 @@ const MASS_TO_KG: Partial<Record<common_MaterialUnit, number>> = {
   MATERIAL_UNIT_G: 0.001,
 };
 
-export const KIND_UNIT: Record<ClothKind, string> = { length: 'м', mass: 'кг' };
+export const KIND_UNIT: Record<ClothKind, string> = { length: 'm', mass: 'kg' };
 
 // Подпись сырой (несводимой) единицы. UNKNOWN — «единицу не распознали», а не «единицы нет», но в
 // позицию «X {ед}/изд» полная фраза не встаёт, поэтому короткое «ед.?» с длинным объяснением у
 // вызывающего, когда оно нужно.
 const rawUnitLabel = (uom?: common_MaterialUnit): string =>
-  !uom || uom === 'MATERIAL_UNIT_UNKNOWN' ? 'ед.?' : MATERIAL_UNIT_LABEL[uom] ?? 'ед.?';
+  !uom || uom === 'MATERIAL_UNIT_UNKNOWN' ? 'unit?' : MATERIAL_UNIT_LABEL[uom] ?? 'unit?';
 
 type NormalizedFact =
   | { kind: ClothKind; qty: number }
@@ -325,10 +325,10 @@ export type NormCardBasis =
 export function normBasisText(basis?: NormCardBasis): string {
   if (!basis) return '';
   if (basis.kind === 'release')
-    return `норма из ревизии №${basis.releaseNumber || '?'}, по которой создан прогон`;
+    return `norm from revision #${basis.releaseNumber || '?'}, the one the run was created from`;
   if (basis.kind === 'live-broken-snapshot')
-    return `у прогона есть ревизия №${basis.releaseNumber || '?'}, но её снапшот не прочитался (или ревизия не принадлежит этой карте) — сравнение с ЖИВОЙ карточкой, а не с замороженной ревизией`;
-  return 'норма из живой карточки — прогон не привязан к ревизии';
+    return `the run has revision #${basis.releaseNumber || '?'}, but its snapshot didn't read (or the revision doesn't belong to this card) — the comparison is against the LIVE card, not a frozen revision`;
+  return 'norm from the live card — the run is not linked to a revision';
 }
 
 export type NormInput = {
@@ -348,9 +348,9 @@ const dec = (d?: googletype_Decimal): number | null => {
 };
 
 const SOURCE_LABEL: Record<string, string> = {
-  manual: 'руками',
-  marker: 'по раскладке',
-  dxf: 'по выкройкам',
+  manual: 'by hand',
+  marker: 'from the marker',
+  dxf: 'from the patterns',
 };
 const sourceLabelOf = (s: string) => SOURCE_LABEL[s] ?? s;
 
@@ -609,64 +609,64 @@ export function fmtDeltaPct(n: number): { text: string; over: boolean } {
 
 /** Длинное объяснение необратимости — одно на все места, где о ней приходится говорить. */
 export const FROZEN_FACT_NOTE =
-  'запись факта расхода закрыта статусом партии, а приёмка кроя правится и на закрытой: знаменатель ещё уточняется, но числитель уже не появится — «на изделие» по этому настилу не посчитается никогда.';
+  "recording the consumption actual is closed by the run status, while the cut receipt stays editable even on a closed run: the denominator is still being refined, but the numerator will never appear — “per garment” for this lay will never be computed.";
 
 export function clothRefusalText(r: ClothRefusal, ctx: { pair?: boolean } = {}): string {
   switch (r.kind) {
     case 'no-fact': {
       if (ctx.pair) {
-        return `не считается: замера полотна нет у «${r.lays.join('», «')}» — агрегат по части настилов пары дал бы число ни о чём${
-          r.frozen ? '; запись факта закрыта статусом партии, и это уже не изменится' : ''
+        return `not computed: there is no cloth measurement for “${r.lays.join('”, “')}” — an aggregate over part of the pair's lays would give a number about nothing${
+          r.frozen ? '; recording the actual is closed by the run status, and that will no longer change' : ''
         }`;
       }
       return r.frozen
-        ? 'замер полотна не внесён — и внести уже нельзя: запись факта закрыта статусом партии'
-        : 'замер полотна не внесён';
+        ? "the cloth measurement isn't entered — and can't be entered any more: recording the actual is closed by the run status"
+        : "the cloth measurement isn't entered";
     }
     case 'mixed-units':
-      return `замеры в несводимых единицах (${r.units.join(', ')}) — складывать полотно разных единиц нельзя`;
+      return `measurements in units that don't reconcile (${r.units.join(', ')}) — cloth in different units can't be added up`;
     case 'no-receipts':
       return ctx.pair
-        ? 'крой по настилам пары не отчитан — делить не на что'
-        : 'крой по этому настилу не отчитан — делить не на что';
+        ? "the cutting for the pair's lays isn't reported — there is nothing to divide by"
+        : "the cutting for this lay isn't reported — there is nothing to divide by";
     case 'zero-cut':
       // «Посчитанный ноль» не утверждается: пустое поле формы уезжает нулём (cut_qty NOT NULL), и
       // сохранённая строка не различает «посчитали, вышло 0» и «не заполнили».
-      return 'выкроено стоит нулём — полотно потрачено, изделий не записано; посчитанный это ноль или незаполненное поле, сохранённая строка не различает';
+      return "cut stands at zero — cloth was spent, no garments recorded; whether that is a counted zero or an unfilled field, the saved row doesn't distinguish";
   }
 }
 
 export function normRefusalText(r: NormRefusal, sizeLabel: (id: number) => string): string {
   switch (r.kind) {
     case 'fact-unit':
-      return `факт не в длине и не в весе («${r.unitLabel}») — с нормой не сравнивается`;
+      return `the actual is neither length nor mass (“${r.unitLabel}”) — it isn't compared with the norm`;
     case 'no-usage':
-      return 'нормы на пару (колорвей · слот) в рецептуре нет — сравнить не с чем';
+      return 'the recipe has no norm for the pair (colourway · slot) — there is nothing to compare with';
     case 'no-size-norm':
-      return `в рецептуре нет нормы для размеров: ${r.sizeIds.map(sizeLabel).join(', ')}`;
+      return `the recipe has no norm for the sizes: ${r.sizeIds.map(sizeLabel).join(', ')}`;
     case 'no-wastage':
-      return `норма (${r.sourceLabel}) — без отходов кроя, а процент раскроя слота не задан: netto против факта всегда выглядит провалом, и это было бы свойством пустого процента, а не производства`;
+      return `the norm (${r.sourceLabel}) is without cutting waste, and the slot's wastage percent is not set: net against the actual always looks like a failure, and that would be a property of the empty percent, not of production`;
     case 'zero-norm':
-      return 'норма нулевая — сравнение не определено';
+      return 'the norm is zero — the comparison is undefined';
     case 'incomplete-receipts': {
       const parts = [
-        r.sizeIds.length > 0 ? `нет строк по размерам: ${r.sizeIds.map(sizeLabel).join(', ')}` : '',
-        r.lays.length > 0 ? `не отчитан настил: «${r.lays.join('», «')}»` : '',
+        r.sizeIds.length > 0 ? `no rows for the sizes: ${r.sizeIds.map(sizeLabel).join(', ')}` : '',
+        r.lays.length > 0 ? `lay not reported: “${r.lays.join('”, “')}”` : '',
       ]
         .filter(Boolean)
         .join('; ');
-      return `приёмка неполна (${parts}) — знаменатель занижен, и сравнивать с нормой пока нечего: вердикт по неполным данным хуже отсутствия вердикта, процент появится после ввода`;
+      return `the receipt is incomplete (${parts}) — the denominator is understated, and there is nothing to compare with the norm yet: a verdict on incomplete data is worse than no verdict, the percent will appear once it's entered`;
     }
     case 'card-failed':
-      return 'тех-карта не загрузилась — норму взять неоткуда; обновите страницу';
+      return "the tech card didn't load — there is nowhere to take the norm from; refresh the page";
     case 'unit-mismatch':
       // Пустая единица слота — своё сообщение со своей починкой: единица нормы = единица слота,
       // и только (тем же правилом живёт тех-карта — фолбэка в единицу артикула нет нигде).
       // Починка называется адресно: заполнить единицу на вкладке BOM, а не менять что-то здесь.
       return r.normUnitKnown
-        ? `факт в ${r.factUnit}, норма слота в «${r.normUnit}» — не конвертируем: перевод требует ширины и плотности полотна, это другой вопрос с другим владельцем`
+        ? `the actual is in ${r.factUnit}, the slot norm is in “${r.normUnit}” — not convertible: the conversion needs the cloth's width and density, which is a different question with a different owner`
         : r.normUnit
-          ? `единица нормы слота («${r.normUnit}») не принимает ни длину, ни вес — сравнение не определено`
-          : 'у слота BOM не заполнена единица — норма живёт в единице слота, и сравнивать её не в чем; заполните единицу на вкладке BOM тех-карты';
+          ? `the slot's norm unit (“${r.normUnit}”) accepts neither length nor mass — the comparison is undefined`
+          : "the BOM slot has no unit filled in — the norm lives in the slot's unit, and there is nothing to compare it in; fill the unit in on the tech card's BOM tab";
   }
 }

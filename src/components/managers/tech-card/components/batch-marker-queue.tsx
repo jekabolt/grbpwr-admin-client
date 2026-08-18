@@ -147,15 +147,15 @@ const round3 = (v: number) => String(Math.round(v * 1000) / 1000);
 // Пометка, что число в рецепте — СВЁРНУТЫЙ РЯД, а не одно записанное значение. Без неё «в рецепте
 // 1.10» читается как «в поле стоит 1.10», а в поле стоят M = 1.00 и L = 2.00.
 const perSizeWord = (kind: 'scalar' | 'perSize') =>
-  kind === 'perSize' ? ' (ряд по размерам, свёрнут миксом партии)' : '';
-const meters = (cm: number) => `${(cm / 100).toFixed(2)} м`;
+  kind === 'perSize' ? ' (a per-size range, collapsed by the run mix)' : '';
+const meters = (cm: number) => `${(cm / 100).toFixed(2)} m`;
 
 /** Слово для источника расхода, лежащего в рецепте. */
 function sourceWord(source: string | undefined): string {
   const s = (source ?? '').trim();
-  if (s === 'dxf') return 'оценка по площади выкроек';
-  if (s === 'marker') return 'из раскладки';
-  return 'введено руками';
+  if (s === 'dxf') return 'estimated from pattern areas';
+  if (s === 'marker') return 'from a marker';
+  return 'entered by hand';
 }
 
 export function BatchMarkerQueue({
@@ -483,11 +483,11 @@ export function BatchMarkerQueue({
   // где он и нужен.
   const releasedRefusal =
     frozen && mode === 'norms'
-      ? 'карточка выпущена: сервер не принимает на неё карточные раскладки (SaveMarker требует изменяемую карточку), а размерная норма может быть только карточной. Переснять норму стиля можно, лишь сняв карточку с релиза; настил ЭТОЙ партии снимается и на выпущенной — переключите режим.'
+      ? 'the card is released: the server does not accept card markers on it (SaveMarker requires an editable card), and a per-size norm can only be a card marker. Re-capturing the style norm is possible only by taking the card off the release; the lay of THIS run is captured on a released card too — switch the mode.'
       : '';
-  const rightsRefusal = !canEdit ? 'нет прав на изменение тех-карт — раскладку не сохранить' : '';
+  const rightsRefusal = !canEdit ? "no rights to edit tech cards — the marker can't be saved" : '';
   const savedRefusal = !techCardId
-    ? 'карточка ещё не сохранена — привязать раскладку не к чему'
+    ? 'the card is not saved yet — there is nothing to attach the marker to'
     : '';
   const blocked = releasedRefusal || rightsRefusal || savedRefusal;
 
@@ -594,7 +594,7 @@ export function BatchMarkerQueue({
           out.push({
             ...base,
             failedSheets: failed.length > 0 ? failed : sheets.map((s) => s.name),
-            parseWarnings: [`не скачались листы: ${failed.join(', ') || 'все'}`],
+            parseWarnings: [`sheets didn't download: ${failed.join(', ') || 'all'}`],
           });
           continue;
         }
@@ -617,7 +617,7 @@ export function BatchMarkerQueue({
       setPhase('ready');
     } catch (e) {
       if (!aliveRef.current) return;
-      setPrepError(e instanceof Error && e.message ? e.message : 'не удалось разобрать выкройки');
+      setPrepError(e instanceof Error && e.message ? e.message : "couldn't parse the patterns");
       setPhase('idle');
     }
   };
@@ -734,8 +734,8 @@ export function BatchMarkerQueue({
       urlBySource,
       provenanceNote:
         job.mode === 'batch'
-          ? `снято очередью раскроя партии #${run.id ?? 0}: НАСТИЛ ПАРТИИ, состав ${job.sizeLabel} (соотношение размеров партии, ужатое на НОД) — измеренный КПД и есть реальный процент раскроя этой партии.`
-          : `снято очередью раскроя партии #${run.id ?? 0}: настил на ОДНО изделие размера ${job.sizeLabel}. Многокомплектный настил кладётся плотнее, поэтому измеренный здесь расход идёт с запасом.`,
+          ? `captured by the run cutting queue of run #${run.id ?? 0}: RUN LAY, composition ${job.sizeLabel} (the size ratio of the run, reduced by the GCD) — the measured efficiency IS the real cutting percent of this run.`
+          : `captured by the run cutting queue of run #${run.id ?? 0}: a lay for ONE garment of size ${job.sizeLabel}. A multi-kit lay packs tighter, so the consumption measured here runs on the high side.`,
     });
   };
 
@@ -759,7 +759,7 @@ export function BatchMarkerQueue({
         // «жив» — сильнее: при нём цикл обязан выйти, ничего больше не записав на сервер.
         if (!aliveRef.current) return;
         if (stopRef.current) {
-          patch(job.id, { status: 'skipped', error: 'очередь остановлена' });
+          patch(job.id, { status: 'skipped', error: 'the queue was stopped' });
           continue;
         }
         skipRef.current = false;
@@ -776,7 +776,7 @@ export function BatchMarkerQueue({
         if (!parseId) {
           const files = filesRef.current.get(filesKeyOf(job.scopeKey)) ?? [];
           if (files.length === 0) {
-            patch(job.id, { status: 'failed', error: 'выкройки этой ткани не скачаны' });
+            patch(job.id, { status: 'failed', error: "this fabric's patterns are not downloaded" });
             continue;
           }
           const res = await client().parse(files, {
@@ -792,12 +792,16 @@ export function BatchMarkerQueue({
         const result = await nestOne(job, parseId);
         if (!aliveRef.current) return;
         if (!result) {
-          patch(job.id, { status: 'skipped', error: 'прогон прерван' });
+          patch(job.id, { status: 'skipped', error: 'the search was aborted' });
           if (stopRef.current) break;
           continue;
         }
         if (result.cancelled || skipRef.current) {
-          patch(job.id, { status: 'skipped', error: 'прогон отменён оператором', result });
+          patch(job.id, {
+            status: 'skipped',
+            error: 'the search was cancelled by the operator',
+            result,
+          });
           if (stopRef.current) break;
           continue;
         }
@@ -841,7 +845,7 @@ export function BatchMarkerQueue({
     // обязаны считать раскладку черновиком одинаково.
     const partial = result.placedCount !== result.totalCount;
     const draftError = partial
-      ? `уложил ${result.placedCount} из ${result.totalCount} деталей — сохранено ЧЕРНОВИКОМ: расход по нему не считается. Поднимите бюджет поиска (сейчас ${budgetS} с) и пересчитайте — пересчёт заменит эту же раскладку`
+      ? `placed ${result.placedCount} of ${result.totalCount} pieces — saved as a DRAFT: no consumption is computed from it. Raise the search budget (now ${budgetS} s) and recompute — the recompute will replace this very marker`
       : '';
     patch(job.id, { status: 'saving', result, error: '' });
     try {
@@ -854,7 +858,7 @@ export function BatchMarkerQueue({
         patch(job.id, { status: 'failed', result, error: saveErrorText(e) });
         return;
       }
-      patch(job.id, { status: 'saving', result, error: `${saveErrorText(e)} — повторяем…` });
+      patch(job.id, { status: 'saving', result, error: `${saveErrorText(e)} — retrying…` });
     }
     try {
       const markerId = await saveJob(job, result);
@@ -867,7 +871,7 @@ export function BatchMarkerQueue({
   const stopAll = () => {
     stopRef.current = true;
     cancelRef.current?.();
-    showMessage('очередь останавливается — уже сохранённые раскладки остаются', 'success');
+    showMessage('the queue is stopping — the markers already saved stay', 'success');
   };
   const skipCurrent = () => {
     skipRef.current = true;
@@ -1018,22 +1022,22 @@ export function BatchMarkerQueue({
               disabled={phase === 'preparing' || !!blocked}
               onClick={prepare}
             >
-              {phase === 'preparing' ? 'разбираем выкройки…' : 'раскроить партию'}
+              {phase === 'preparing' ? 'parsing the patterns…' : 'cut the run'}
             </Button>
           ) : running ? (
             <div className='flex gap-2'>
               <Button type='button' size='xs' variant='secondary' onClick={skipCurrent}>
-                пропустить
+                skip
               </Button>
               <Button type='button' size='xs' variant='secondary' onClick={stopAll}>
-                остановить
+                stop
               </Button>
             </div>
           ) : (
             <div className='flex items-center gap-2'>
               <label className='flex items-center gap-1'>
                 <Text size='micro' variant='label' component='span'>
-                  бюджет, с
+                  budget, s
                 </Text>
                 <input
                   className='w-12 border border-borderColor bg-bgColor px-1 text-right text-textBaseSize'
@@ -1046,7 +1050,7 @@ export function BatchMarkerQueue({
                   экран не имеет права: разбор стоит скачивания всех DXF карточки, и делать это на
                   каждое нажатие клавиши в BOM соседней вкладки нельзя. */}
               <Button type='button' size='xs' variant='secondary' onClick={prepare}>
-                {stale ? 'подготовить заново' : 'переподготовить'}
+                {stale ? 'prepare again' : 're-prepare'}
               </Button>
               <Button
                 type='button'
@@ -1055,20 +1059,20 @@ export function BatchMarkerQueue({
                 disabled={selectedJobs.length === 0 || !!blocked || stale || laysLoading}
                 title={
                   stale
-                    ? 'данные карточки изменились — подготовьте заново'
+                    ? 'the card data changed — prepare it again'
                     : laysLoading
-                      ? 'читаем раскладки партии — пока список не прочитан, план не знает, что в партии уже снято'
+                      ? "reading the run's markers — until the list is read, the plan does not know what is already captured in the run"
                       : undefined
                 }
                 onClick={start}
               >
-                {laysLoading ? 'читаем раскладки партии…' : `запустить (${selectedJobs.length})`}
+                {laysLoading ? "reading the run's markers…" : `start (${selectedJobs.length})`}
               </Button>
             </div>
           )
         }
       >
-        раскрой партии — раскладки по колорвеям и размерам
+        run cutting — markers by colorway and size
       </GroupLabel>
 
       {/* ЧТО СНИМАЕМ — ВЫБОР ДО ПРОГОНА, а не после. Оба режима считает один и тот же движок по
@@ -1080,19 +1084,19 @@ export function BatchMarkerQueue({
           selected={mode === 'norms'}
           pressed={mode === 'norms'}
           disabled={running}
-          title='по раскладке на каждый (колорвей × размер), настил на ОДНО изделие. Такая норма переиспользуется между партиями и живёт на карточке'
+          title='a marker for every (colorway × size), a lay for ONE garment. Such a norm is reused between runs and lives on the card'
           onClick={() => !running && setMode('norms')}
         >
-          размерные нормы
+          per-size norms
         </Chip>
         <Chip
           selected={mode === 'batch'}
           pressed={mode === 'batch'}
           disabled={running}
-          title='одна раскладка на (колорвей × ткань), состав — соотношение размеров ЭТОЙ партии, ужатое на НОД. Принадлежит партии и нормой стать не может'
+          title='one marker per (colorway × fabric), the composition is the size ratio of THIS run, reduced by the GCD. It belongs to the run and cannot become a norm'
           onClick={() => !running && setMode('batch')}
         >
-          настил партии
+          run lay
         </Chip>
       </ChipRow>
 
@@ -1102,11 +1106,11 @@ export function BatchMarkerQueue({
         </Text>
       ) : (
         <Text size='micro' variant='label'>
-          движок раскладки работает в ЭТОЙ вкладке: вкладки карточки не размонтируются, поэтому
-          очередь считает и когда вы ушли на другую, — но уход со страницы карточки её убивает.{' '}
+          the nesting engine runs in THIS tab: the card's tabs are not unmounted, so the queue keeps
+          computing while you are on another one — but leaving the card page kills it.{' '}
           {mode === 'batch'
-            ? 'Настил кладётся на СОБСТВЕННОЕ соотношение размеров партии, ужатое на НОД (60 M + 40 L → 3 M + 2 L): его КПД и есть реальный процент раскроя этой партии. Раскладка принадлежит партии и нормой стиля стать не может — соотношение у каждой партии своё.'
-            : 'Настил снимается на ОДНО изделие каждого размера: многокомплектный кладётся плотнее, так что измеренный расход идёт с запасом, а КПД ниже цехового. Реальный процент раскроя показывает режим «настил партии».'}
+            ? "The lay is placed on the run's OWN size ratio, reduced by the GCD (60 M + 40 L → 3 M + 2 L): its efficiency IS the real cutting percent of this run. The marker belongs to the run and cannot become a style norm — every run has a ratio of its own."
+            : "The lay is captured for ONE garment of each size: a multi-kit one packs tighter, so the measured consumption runs on the high side and the efficiency is lower than the workshop's. The real cutting percent is shown by the “run lay” mode."}
         </Text>
       )}
 
@@ -1117,9 +1121,9 @@ export function BatchMarkerQueue({
       {stale ? (
         <CalloutBox tone='warning'>
           <Text size='micro'>
-            данные карточки изменились после подготовки (ширина, состав тканей или набор выкроек) —
-            план снят по устаревшему снимку. Подготовьте заново, иначе раскладка будет измерена не
-            на том полотне.
+            the card data changed after the preparation (width, fabric composition or the set of
+            patterns) — the plan was taken on a stale snapshot. Prepare it again, otherwise the
+            marker will be measured on the wrong cloth.
           </Text>
         </CalloutBox>
       ) : null}
@@ -1135,16 +1139,16 @@ export function BatchMarkerQueue({
             <thead>
               <tr>
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'> </th>
-                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>колорвей</th>
-                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>ткань</th>
+                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>colorway</th>
+                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>fabric</th>
                 {/* СОСТАВ, а не «размер»: у настила партии одного размера нет — там «3M+2L». */}
-                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>состав</th>
-                <th className='border-b border-hairline px-1 py-1 text-right uppercase'>ширина</th>
-                <th className='border-b border-hairline px-1 py-1 text-right uppercase'>детали</th>
-                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>прогноз</th>
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'>
-                  состояние
+                  composition
                 </th>
+                <th className='border-b border-hairline px-1 py-1 text-right uppercase'>width</th>
+                <th className='border-b border-hairline px-1 py-1 text-right uppercase'>pieces</th>
+                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>forecast</th>
+                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>status</th>
               </tr>
             </thead>
             <tbody>
@@ -1165,13 +1169,13 @@ export function BatchMarkerQueue({
                       <div className='flex flex-col'>
                         <span>{j.scopeLabel}</span>
                         <Text size='micro' variant='label' component='span'>
-                          {`${j.articleName}${j.pinned ? ' · пин колорвея' : ' · артикул слота'}`}
+                          {`${j.articleName}${j.pinned ? ' · colorway pin' : ' · slot article'}`}
                         </Text>
                       </div>
                     </td>
                     <td className='border-b border-hairline px-1 py-1'>{j.sizeLabel}</td>
                     <td className='border-b border-hairline px-1 py-1 text-right tabular-nums'>
-                      {`${j.widthCm} см`}
+                      {`${j.widthCm} cm`}
                     </td>
                     <td className='border-b border-hairline px-1 py-1 text-right tabular-nums'>
                       <div className='flex flex-col'>
@@ -1183,7 +1187,7 @@ export function BatchMarkerQueue({
                             секунд, считает прогноз слева. */}
                         {j.instanceCount !== j.pieceCount ? (
                           <Text size='micro' variant='label' component='span'>
-                            {`${j.instanceCount} экз.`}
+                            {`${j.instanceCount} instances`}
                           </Text>
                         ) : null}
                       </div>
@@ -1197,10 +1201,10 @@ export function BatchMarkerQueue({
                           // единственного задания, которое как раз надо пересчитать.
                           <Pill tone={j.replaces.isNorm || j.replaces.isDraft ? 'warn' : 'mut'}>
                             {j.replaces.isDraft
-                              ? 'лежит ЧЕРНОВИК'
+                              ? 'a DRAFT is lying there'
                               : j.replaces.isNorm
-                                ? 'уже снята · НОРМА'
-                                : 'уже снята'}
+                                ? 'already captured · NORM'
+                                : 'already captured'}
                           </Pill>
                         ) : null}
                         {j.notes.map((n) => (
@@ -1219,9 +1223,9 @@ export function BatchMarkerQueue({
                         {r?.status === 'draft' ? (
                           <Pill
                             tone='warn'
-                            title='часть деталей не легла: раскладка сохранена, но расход по ней не считается — ни скалярный, ни по размерам. Пересчёт с бо́льшим бюджетом заменит её'
+                            title='some pieces were not placed: the marker is saved, but no consumption is computed from it — neither scalar nor per size. A recompute with a bigger budget will replace it'
                           >
-                            черновик
+                            draft
                           </Pill>
                         ) : null}
                       </div>
@@ -1245,7 +1249,7 @@ export function BatchMarkerQueue({
                           disabled={!!blocked}
                           onClick={() => void saveWithRetry(j, r.result as NestResult)}
                         >
-                          сохранить ещё раз
+                          save it again
                         </Button>
                       ) : null}
                     </td>
@@ -1261,7 +1265,7 @@ export function BatchMarkerQueue({
         <CalloutBox tone='note'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label'>
-              {`не раскладывается (${plan.refusals.length})`}
+              {`won't nest (${plan.refusals.length})`}
             </Text>
             {plan.refusals.map((r) => (
               <Text key={r.key + r.reason} size='micro'>
@@ -1275,8 +1279,8 @@ export function BatchMarkerQueue({
 
       {plan && jobs.length === 0 && plan.refusals.length === 0 ? (
         <Text size='micro' variant='label'>
-          раскладывать нечего: в партии нет ни одной клетки с количеством, либо у карточки нет
-          рулонных тканей с выкройками
+          nothing to nest: the run has no cell with a quantity, or the card has no roll-goods
+          fabrics with patterns
         </Text>
       ) : null}
 
@@ -1286,9 +1290,9 @@ export function BatchMarkerQueue({
       {draftCount > 0 ? (
         <CalloutBox tone='warning'>
           <Text size='micro'>
-            {`сохранено черновиков: ${draftCount}. Они видны ${
-              mode === 'batch' ? 'на странице партии' : 'в списке раскладок карточки'
-            } и их можно пересчитать, но расход по ним не считается нигде — ни в итоге ниже, ни в костинге, ни в рецепте: часть деталей не легла, и длина короче настоящей. Поднимите бюджет поиска и запустите эти строки заново.`}
+            {`drafts saved: ${draftCount}. They are visible ${
+              mode === 'batch' ? 'on the run page' : "in the card's marker list"
+            } and can be recomputed, but no consumption is computed from them anywhere — not in the total below, not in costing, not in the recipe: some pieces were not placed, and the length is shorter than the real one. Raise the search budget and run these rows again.`}
           </Text>
         </CalloutBox>
       ) : null}
@@ -1299,7 +1303,7 @@ export function BatchMarkerQueue({
           {results.map((g) => (
             <div key={`${g.head.scopeKey}|${g.head.colorwayId}`} className='flex flex-col'>
               <GroupLabel>
-                {`${g.head.scopeLabel} · ${g.head.colorwayLabel} · ${g.head.widthCm} см`}
+                {`${g.head.scopeLabel} · ${g.head.colorwayLabel} · ${g.head.widthCm} cm`}
               </GroupLabel>
               {g.lines.map((l) => (
                 <Row
@@ -1308,20 +1312,20 @@ export function BatchMarkerQueue({
                   // это и есть предмет замера, и КПД рядом относится именно к нему.
                   label={
                     l.job.mode !== 'batch'
-                      ? `${l.job.sizeLabel} · ${l.job.batchQty} шт`
+                      ? `${l.job.sizeLabel} · ${l.job.batchQty} pcs`
                       : l.job.unitsTotal > 1
-                        ? `настил ${l.job.sizeLabel} · покрывает ${l.job.batchQty} шт партии`
+                        ? `lay ${l.job.sizeLabel} · covers ${l.job.batchQty} pcs of the run`
                         : // НАСТИЛОМ ЭТО НЕ НАЗЫВАЕТСЯ: соотношение свелось к одному изделию, и
                           // подпись «настил» приписала бы одиночной укладке цеховую плотность.
-                          `ОДНО изделие ${l.job.sizeLabel} · покрывает ${l.job.batchQty} шт партии`
+                          `ONE garment ${l.job.sizeLabel} · covers ${l.job.batchQty} pcs of the run`
                   }
-                  value={`${l.result.usedLengthCm.toFixed(0)} см · КПД ${pct(l.result.efficiency)}`}
+                  value={`${l.result.usedLengthCm.toFixed(0)} cm · efficiency ${pct(l.result.efficiency)}`}
                 />
               ))}
               <Row
                 emphasis
                 label={
-                  g.lines.length > 1 ? 'на изделие — взвешенно по количествам партии' : 'на изделие'
+                  g.lines.length > 1 ? 'per unit — weighted by the run quantities' : 'per unit'
                 }
                 value={g.measured ? `${g.measured.value} ${g.measured.unit}` : meters(g.avgCm)}
               />
@@ -1334,20 +1338,20 @@ export function BatchMarkerQueue({
                   настоящего настила, ровно как в режиме размерных норм. */}
               {g.head.mode === 'batch' && g.head.unitsTotal === 1 ? (
                 <Text size='micro' className='text-error'>
-                  {`в партии этот колорвей заказан в одном размере (${g.head.sizeLabel}) — настила здесь нет: движок положил ОДНО изделие. Это та же разреженная укладка, что и размерная норма, поэтому КПД ниже цехового, а расход идёт с запасом; реальным процентом раскроя партии это число называть нельзя`}
+                  {`in this run the colorway is ordered in a single size (${g.head.sizeLabel}) — there is no lay here: the engine placed ONE garment. This is the same sparse placement as a per-size norm, so the efficiency is lower than the workshop's and the consumption runs on the high side; this number cannot be called the real cutting percent of the run`}
                 </Text>
               ) : null}
               {g.head.mode === 'batch' && g.head.unitsTotal > 1 ? (
                 <Text size='micro' variant='label'>
                   {g.normMeasured == null
-                    ? 'сравнить с размерными нормами нечем: они сняты не на все размеры этого настила, сняты на другой ширине полотна либо расхода не дают (например, лежит черновик). Снимите режим «размерные нормы» на те же размеры'
+                    ? 'nothing to compare with the per-size norms: they are not captured for all sizes of this lay, are captured on a different cloth width, or give no consumption (a draft is lying there, for instance). Capture the “per-size norms” mode for the same sizes'
                     : g.normDeltaPct == null
-                      ? `размерные нормы на этот микс дают ${g.normMeasured.value} ${g.normMeasured.unit}`
-                      : `размерная норма давала ${g.normMeasured.value} ${g.normMeasured.unit} — ${
+                      ? `the per-size norms give ${g.normMeasured.value} ${g.normMeasured.unit} on this mix`
+                      : `the per-size norm gave ${g.normMeasured.value} ${g.normMeasured.unit} — ${
                           g.normDeltaPct >= 0
-                            ? `занижала на ${Math.abs(g.normDeltaPct).toFixed(0)}%`
-                            : `завышала на ${Math.abs(g.normDeltaPct).toFixed(0)}%`
-                        } (процент — от нормы, как и в сверке с рецептом ниже)`}
+                            ? `understated by ${Math.abs(g.normDeltaPct).toFixed(0)}%`
+                            : `overstated by ${Math.abs(g.normDeltaPct).toFixed(0)}%`
+                        } (the percent is of the norm, as in the check against the recipe below)`}
                 </Text>
               ) : null}
               {/* ЧАСТИЧНОЕ ПОКРЫТИЕ НАЗЫВАЕТСЯ ВСЛУХ. Взвешенное среднее по ПОЛОВИНЕ партии — это
@@ -1355,7 +1359,7 @@ export function BatchMarkerQueue({
                   рецептом ниже опиралось бы на вес, которого нет. */}
               {g.totalQty > 0 && g.plannedQty > g.totalQty ? (
                 <Text size='micro' className='text-error'>
-                  {`посчитано ${g.totalQty} из ${g.plannedQty} изделий этого колорвея — по остальным размерам раскладка не снялась (см. отказы выше), и число выше описывает только посчитанную часть партии`}
+                  {`computed ${g.totalQty} of ${g.plannedQty} garments of this colorway — for the remaining sizes no marker was captured (see the refusals above), and the number above describes only the computed part of the run`}
                 </Text>
               ) : null}
               {/* СВЕРКА С РЕЦЕПТОМ — с тем числом, по которому расчёт РЕАЛЬНО идёт: пер-размерный
@@ -1364,21 +1368,21 @@ export function BatchMarkerQueue({
                   описывала бы другую партию. */}
               <Text size='micro' variant='label'>
                 {g.current == null
-                  ? 'в рецепте этого колорвея расхода по этой ткани нет — сравнивать не с чем'
+                  ? "this colorway's recipe has no consumption for this fabric — nothing to compare with"
                   : g.current.kind === 'perSizeGap'
-                    ? `в рецепте расход задан ПО РАЗМЕРАМ (${sourceWord(g.current.source)}), но в нём нет размеров ${g.current.missing.join(', ')} этой партии — сравнивать не с чем: усечённый ряд описывал бы другую партию`
+                    ? `the recipe sets the consumption PER SIZE (${sourceWord(g.current.source)}), but it has no sizes ${g.current.missing.join(', ')} of this run — nothing to compare with: a truncated range would describe a different run`
                     : g.measured == null
-                      ? `в рецепте ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} (${sourceWord(g.current.source)}); перевести измеренную длину в единицу слота нечем — ${
+                      ? `the recipe holds ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} (${sourceWord(g.current.source)}); there is nothing to convert the measured length into the slot's unit with — ${
                           bomUnitKind(g.head.unit) === 'kg'
-                            ? 'кг-слоту нужны полная ширина рулона и плотность артикула'
-                            : `единица «${g.head.unit || '—'}» длину не принимает`
+                            ? 'a kg slot needs the full roll width and the density of the article'
+                            : `the unit “${g.head.unit || '—'}” does not accept length`
                         }`
                       : g.deltaPct == null
-                        ? `в рецепте ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} (${sourceWord(g.current.source)})`
-                        : `${sourceWord(g.current.source)} давала ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} — ${
+                        ? `the recipe holds ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} (${sourceWord(g.current.source)})`
+                        : `the recipe number (${sourceWord(g.current.source)}) gave ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} — ${
                             g.deltaPct >= 0
-                              ? `занижала на ${Math.abs(g.deltaPct).toFixed(0)}%`
-                              : `завышала на ${Math.abs(g.deltaPct).toFixed(0)}%`
+                              ? `understated by ${Math.abs(g.deltaPct).toFixed(0)}%`
+                              : `overstated by ${Math.abs(g.deltaPct).toFixed(0)}%`
                           }`}
               </Text>
               {/* ═══ СЛЕДУЮЩИЙ ШАГ НАСТИЛА ПАРТИИ — СТРОКА РАСКРОЯ ПРОГОНА.
@@ -1417,16 +1421,18 @@ export function BatchMarkerQueue({
           <Text size='micro' variant='label'>
             {mode === 'batch' ? (
               <>
-                собрать раскрой руками, вместе с остальными тканями партии, можно на{' '}
+                the cutting can be assembled by hand, together with the rest of the run's fabrics,
+                on the{' '}
                 <Button asChild variant='underline' size='xs'>
-                  <Link to={`/production-runs/${run.id ?? 0}`}>странице партии ↗</Link>
+                  <Link to={`/production-runs/${run.id ?? 0}`}>run page ↗</Link>
                 </Button>
               </>
             ) : (
               <>
-                назначить раскладку нормой ткани и применить расход в рецепт —{' '}
+                to set a marker as the norm of the fabric and apply the consumption into the recipe
+                —{' '}
                 <Button asChild variant='underline' size='xs'>
-                  <Link to='?tab=patterns'>раскладки карточки ↗</Link>
+                  <Link to='?tab=patterns'>the card's markers ↗</Link>
                 </Button>
               </>
             )}
@@ -1441,50 +1447,50 @@ export function BatchMarkerQueue({
 
 function forecastText(j: MarkerJob): string {
   const e = j.estimate;
-  if (!e) return 'оценить нечего';
+  if (!e) return 'nothing to estimate';
   const seconds = e.predictedElapsedMs != null ? Math.ceil(e.predictedElapsedMs / 1000) : null;
   const head =
     e.outlook === 'starved'
-      ? 'поиска не будет'
+      ? 'there will be no search'
       : e.outlook === 'squeezed'
-        ? `поиску ~${Math.round(e.searchMsLeft / 1000)} с`
-        : `до ${seconds ?? Math.ceil(e.timeBudgetMs / 1000)} с`;
-  const coarse = e.coarsened ? ` · контуры огрублены до ${e.effectiveEps} см` : '';
-  return `${head} · предпросчёт ~${Math.round(e.predictedPrepassMs / 1000)} с${coarse}`;
+        ? `~${Math.round(e.searchMsLeft / 1000)} s for the search`
+        : `up to ${seconds ?? Math.ceil(e.timeBudgetMs / 1000)} s`;
+  const coarse = e.coarsened ? ` · contours coarsened to ${e.effectiveEps} cm` : '';
+  return `${head} · prepass ~${Math.round(e.predictedPrepassMs / 1000)} s${coarse}`;
 }
 
 function statusText(r: JobRun | undefined): string {
   if (!r) return '—';
   switch (r.status) {
     case 'queued':
-      return 'в очереди';
+      return 'queued';
     case 'running':
       return r.nfp
-        ? `предпросчёт ${r.nfp.done}/${r.nfp.total}`
-        : `поколение ${r.generation}${r.bestPct != null ? ` · КПД ${r.bestPct.toFixed(1)}%` : ''}`;
+        ? `prepass ${r.nfp.done}/${r.nfp.total}`
+        : `generation ${r.generation}${
+            r.bestPct != null ? ` · efficiency ${r.bestPct.toFixed(1)}%` : ''
+          }`;
     case 'saving':
-      return 'сохраняем…';
+      return 'saving…';
     case 'done':
       return r.result
-        ? `готово · ${r.result.usedLengthCm.toFixed(0)} см · КПД ${pct(r.result.efficiency)}`
-        : 'готово';
+        ? `done · ${r.result.usedLengthCm.toFixed(0)} cm · efficiency ${pct(r.result.efficiency)}`
+        : 'done';
     case 'draft':
       // Ни длины, ни КПД: они относятся к НЕПОЛНОЙ укладке, и напечатанные в той же колонке, что у
       // готовой раскладки, читались бы как замер. Что именно не сошлось — говорит строка ошибки.
-      return r.result
-        ? `сохранено · ${r.result.placedCount} из ${r.result.totalCount}`
-        : 'сохранено';
+      return r.result ? `saved · ${r.result.placedCount} of ${r.result.totalCount}` : 'saved';
     case 'failed':
-      return 'отказ';
+      return 'refused';
     case 'skipped':
-      return 'пропущено';
+      return 'skipped';
   }
 }
 
 function saveErrorText(e: unknown): string {
   const vs = extractFieldViolations(e);
   if (vs.length > 0) return vs.map((v) => v.description).join('; ');
-  return e instanceof Error && e.message ? e.message : 'не удалось сохранить раскладку';
+  return e instanceof Error && e.message ? e.message : "couldn't save the marker";
 }
 
 /**

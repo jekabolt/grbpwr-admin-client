@@ -23,7 +23,7 @@ import { renderLayoutDxf, type LayHeader } from 'lib/nesting/render/dxf';
 // их неоткуда, значит пересобрать нечем. Выход тот же, что принят решением Р4 в Ф3: контурный DXF
 // остаётся рабочим плоттерным файлом — резаку нужна линия кроя, а линия шва нужна швейному цеху, —
 // но файл обязан НАЗВАТЬ себя, потому что на диске он ничем не отличается от полного. Отсюда
-// сегмент «только контур» в имени, ровно как у второй кнопки модалки.
+// сегмент «contour only» в имени, ровно как у второй кнопки модалки.
 //
 // ШАПКА — ТО, РАДИ ЧЕГО ВСЁ ЭТО. Распечатанный лист без неё неотличим от такого же листа соседней
 // партии, а раскроить не тот настил стоит рулона.
@@ -86,7 +86,7 @@ export async function buildLaySectionPlotterFile(
   nowISO: string,
 ): Promise<LayPlotterResult> {
   const markerId = section.markerId ?? 0;
-  if (!markerId) return { ok: false, reason: 'у секции нет раскладки' };
+  if (!markerId) return { ok: false, reason: 'the section has no marker' };
 
   let marker;
   try {
@@ -94,15 +94,15 @@ export async function buildLaySectionPlotterFile(
     const res = await adminService.GetTechCardMarker({ id: markerId });
     marker = res.marker;
   } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : 'раскладка не загрузилась' };
+    return { ok: false, reason: e instanceof Error ? e.message : "the marker didn't load" };
   }
-  if (!marker) return { ok: false, reason: 'раскладка не найдена' };
+  if (!marker) return { ok: false, reason: 'marker not found' };
 
   const view = markerToView(marker);
   // ВЫРОЖДЕННЫЙ БЛОБ — ОТКАЗ, А НЕ ПУСТОЙ ФАЙЛ. Без деталей или без размещений DXF получился бы
   // одной рамкой полосы, и плоттер послушно прорезал бы её по всей длине рулона.
   if (view.pieces.length === 0 || view.result.placements.length === 0) {
-    return { ok: false, reason: 'у раскладки не сохранена геометрия — выпускать нечего' };
+    return { ok: false, reason: "the marker has no saved geometry — there's nothing to issue" };
   }
 
   const dxf = renderLayoutDxf(view.result, view.pieces, view.widthCm, {
@@ -116,7 +116,7 @@ export async function buildLaySectionPlotterFile(
       lay.bomItemName,
       marker.summary?.name,
       // Признак в ИМЕНИ, а не только в подсказке: файл переживает вкладку, из которой скачан.
-      'только контур',
+      'contour only',
     ],
     'dxf',
     ctx.runId,

@@ -315,7 +315,7 @@ export default function KitMarkerDialog({
           setScopeWithPieces({
             ...skeleton,
             failedSheets: failed.length > 0 ? failed : sheets.map((s) => s.name),
-            parseWarnings: [`не скачались листы: ${failed.join(', ') || 'все'}`],
+            parseWarnings: [`sheets didn't download: ${failed.join(', ') || 'all'}`],
           });
           setPhase('ready');
           return;
@@ -336,9 +336,7 @@ export default function KitMarkerDialog({
         setPhase('ready');
       } catch (e) {
         if (dead || !aliveRef.current) return;
-        setParseError(
-          e instanceof Error && e.message ? e.message : 'не удалось разобрать выкройки',
-        );
+        setParseError(e instanceof Error && e.message ? e.message : "couldn't parse the patterns");
         setPhase('stuck');
       }
     })();
@@ -412,12 +410,12 @@ export default function KitMarkerDialog({
   // средний размер ряда — ровно та молчаливая догадка, которой здесь быть не должно.
   const noBaseSize =
     baseSizeId <= 0
-      ? 'у карточки не выбран БАЗОВЫЙ размер (шапка карточки, «базовый размер семпла»). Себестоимость считается по нему, без фолбэка, поэтому и комплект кроим именно его — подставить средний размер ряда значило бы посчитать норму другого изделия'
+      ? 'the card has no BASE size picked (card header, “base sample size”). Cost is computed from it, with no fallback, so the kit is cut in exactly that size — substituting the middle size of the range would mean measuring the norm of a different garment'
       : '';
   const baseSizeName = baseSizeId > 0 ? sizeLabelOf(baseSizeId) : '';
   const noScope =
     !scopeDef && !noBaseSize
-      ? 'строка BOM этой ткани не найдена среди рулонных секций карточки — раскладывать не на чем'
+      ? "the BOM line of this fabric is not among the card's roll-goods sections — nothing to make a marker on"
       : '';
   const widthDisagreement = job
     ? kitWidthDisagreement(job.widthCm, Number((articleWidth || '').replace(',', '.')))
@@ -429,9 +427,9 @@ export default function KitMarkerDialog({
   // отказ верный, но минуты уже потрачены, а починка лежит на вкладке BOM.
   const unitKind = bomUnitKind(unit);
   const unitRefusal = !unit
-    ? 'у линии BOM не заполнена единица — норма пишется в единице слота, и применить измеренную длину не в чем. Заполните единицу на вкладке BOM'
+    ? "the BOM line has no unit — the norm is written in the slot's unit, and there's nothing to apply the measured length in. Fill in the unit on the BOM tab"
     : unitKind == null
-      ? `единица линии BOM («${unit}») не принимает ни длину, ни вес — норму можно записать в метрах, сантиметрах или килограммах`
+      ? `the BOM line's unit (“${unit}”) accepts neither length nor weight — the norm can be written in meters, centimeters or kilograms`
       : unitKind === 'kg' && !weightBasis.ok
         ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
         : '';
@@ -461,8 +459,8 @@ export default function KitMarkerDialog({
     return job.config.pieces
       .map((c) => {
         const p = byId.get(c.pieceId);
-        const name = p?.name?.trim() || p?.blockName?.trim() || `деталь ${c.pieceId}`;
-        const area = p ? ` · ${p.areaCm2.toFixed(0)} см² каждая` : '';
+        const name = p?.name?.trim() || p?.blockName?.trim() || `piece ${c.pieceId}`;
+        const area = p ? ` · ${p.areaCm2.toFixed(0)} cm² each` : '';
         return { key: String(c.pieceId), name, text: `${name} × ${c.quantity}${area}` };
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
@@ -523,7 +521,7 @@ export default function KitMarkerDialog({
         setParseId(0);
         setPhase('stuck');
         setParseError(
-          'поиск не отозвался на «остановить», и воркер пришлось убить. Вместе с ним умер разбор выкроек — закройте и откройте окно, чтобы разобрать их заново',
+          "the search didn't answer “stop”, and the worker had to be killed. The pattern parse died with it — close and reopen the window to parse them again",
         );
       }, HARD_STOP_MS);
     };
@@ -543,8 +541,8 @@ export default function KitMarkerDialog({
       setPhase('ready');
       setSaveError(
         out
-          ? 'поиск не уложил ни одной детали — сохранять нечего. Такое бывает, когда бюджета не хватило даже на предпросчёт геометрии: запустите ещё раз'
-          : 'прогон прерван — результата нет',
+          ? "the search placed no piece at all — there's nothing to save. That happens when the budget wasn't even enough for the geometry prepass: run it again"
+          : 'the search was aborted — no result',
       );
       return;
     }
@@ -577,7 +575,7 @@ export default function KitMarkerDialog({
       if (!aliveRef.current) return;
       const summary = read.marker?.summary;
       if (!summary) {
-        setSaveError('раскладка сохранена, но перечитать её не удалось — примените норму вручную');
+        setSaveError('the marker is saved, but re-reading it failed — apply the norm by hand');
         setPhase('ready');
         invalidate();
         return;
@@ -600,7 +598,7 @@ export default function KitMarkerDialog({
           ? vs.map((v) => v.description).join('; ')
           : e instanceof Error && e.message
             ? e.message
-            : 'не удалось сохранить раскладку',
+            : "couldn't save the marker",
       );
       setPhase('ready');
     }
@@ -629,7 +627,9 @@ export default function KitMarkerDialog({
     const cm = consumptionCm(summary);
     if (cm == null) {
       setPhase('ready');
-      setSaveError('сервер не выдал расход на изделие по этой раскладке — применить нечего');
+      setSaveError(
+        'the server published no per-unit consumption for this marker — nothing to apply',
+      );
       return;
     }
     const conv = toBomUnit(cm, unit, weightBasis.ok ? weightBasis.basis : undefined);
@@ -637,8 +637,8 @@ export default function KitMarkerDialog({
       setPhase('ready');
       setSaveError(
         unit
-          ? `раскладка снята (${cm} см на изделие), но единица линии BOM «${unit}» не принимает ни длину, ни вес — записать норму можно в метрах, сантиметрах или килограммах`
-          : 'раскладка снята, но у линии BOM не заполнена единица — норма пишется в единице слота. Заполните единицу на вкладке BOM и примените раскладку из подсказки «из раскладки»',
+          ? `the marker is captured (${cm} cm per unit), but the BOM line's unit “${unit}” accepts neither length nor weight — the norm can be written in meters, centimeters or kilograms`
+          : "the marker is captured, but the BOM line has no unit — the norm is written in the slot's unit. Fill in the unit on the BOM tab and apply the marker from the “from a marker” hint",
       );
       return;
     }
@@ -646,7 +646,7 @@ export default function KitMarkerDialog({
     if (!(conv.value > 0)) {
       setPhase('ready');
       setSaveError(
-        `после перевода в «${unit}» норма округляется в ноль (измерено ${cm} см на изделие) — ноль означал бы «ткань не нужна». Раскладка сохранена; проверьте единицу слота и ширину артикула`,
+        `converted into “${unit}” the norm rounds to zero (measured ${cm} cm per unit) — zero would read as “no fabric needed”. The marker is saved; check the slot's unit and the article width`,
       );
       return;
     }
@@ -659,18 +659,21 @@ export default function KitMarkerDialog({
     });
     setAppliedText(`${conv.value} ${conv.unit}`);
     setPhase('applied');
-    showMessage('норма применена в черновик рецепта — уйдёт при сохранении карточки', 'success');
+    showMessage(
+      'the norm is applied into the recipe draft — it goes out when the card is saved',
+      'success',
+    );
   };
 
   // ── экран ─────────────────────────────────────────────────────────────────────────────────
   const forecast = job?.estimate;
   const forecastText = !forecast
-    ? 'оценить нечего'
+    ? 'nothing to estimate'
     : forecast.outlook === 'starved'
-      ? `бюджета не хватит даже на предпросчёт геометрии: поиска не будет вовсе, и прогон вернул бы пустой настил. Нужен бюджет от ${Math.ceil(forecast.budgetToFitMs / 1000)} с — поднимите его выше; если и 180 с мало, задание слишком велико для браузера, и раскладку надо снимать из вкладки «выкройки», выбрав детали руками`
+      ? `the budget won't even cover the geometry prepass: there will be no search at all, and the run would return an empty lay. A budget from ${Math.ceil(forecast.budgetToFitMs / 1000)} s is needed — raise it higher; if even 180 s is not enough, the job is too big for the browser, and the marker has to be captured from the “patterns” tab with the pieces picked by hand`
       : forecast.outlook === 'squeezed'
-        ? `предпросчёт ~${Math.round(forecast.predictedPrepassMs / 1000)} с, поиску останется ~${Math.round(forecast.searchMsLeft / 1000)} с`
-        : `до ${Math.ceil((forecast.predictedElapsedMs ?? forecast.timeBudgetMs) / 1000)} с (предпросчёт ~${Math.round(forecast.predictedPrepassMs / 1000)} с)`;
+        ? `prepass ~${Math.round(forecast.predictedPrepassMs / 1000)} s, ~${Math.round(forecast.searchMsLeft / 1000)} s left for the search`
+        : `up to ${Math.ceil((forecast.predictedElapsedMs ?? forecast.timeBudgetMs) / 1000)} s (prepass ~${Math.round(forecast.predictedPrepassMs / 1000)} s)`;
   // «Поиска не будет вовсе» — не предупреждение, а бесполезно потраченные минуты: предпросчёт не
   // успевает построить ни одной пары NFP, и укладывать нечем. Кнопка гаснет, причина стоит рядом.
   const starved = forecast?.outlook === 'starved';
@@ -686,7 +689,7 @@ export default function KitMarkerDialog({
         if (!o && phase !== 'saving') onClose();
       }}
       onConfirm={onClose}
-      title={`раскладка комплекта${baseSizeName ? ` · размер ${baseSizeName}` : ''}`}
+      title={`kit marker${baseSizeName ? ` · size ${baseSizeName}` : ''}`}
       hideActions
     >
       <div className='space-y-2.5'>
@@ -705,7 +708,7 @@ export default function KitMarkerDialog({
 
         {phase === 'parsing' && (
           <Text size='nano' variant='label' component='p'>
-            качаем и разбираем выкройки этой ткани…
+            downloading and parsing this fabric's patterns…
           </Text>
         )}
 
@@ -713,17 +716,17 @@ export default function KitMarkerDialog({
             вообще кроим» обязано быть видно ДО того, как их потратят. */}
         {job && (
           <>
-            <GroupLabel>задание</GroupLabel>
+            <GroupLabel>job</GroupLabel>
             <div className='flex flex-wrap items-center gap-1.5'>
               <Pill tone='mut'>{job.scopeLabel}</Pill>
-              <Pill tone='mut'>{job.pinned ? `пин: ${job.articleName}` : job.articleName}</Pill>
-              <Pill tone='mut'>полотно {job.widthCm} см</Pill>
+              <Pill tone='mut'>{job.pinned ? `pin: ${job.articleName}` : job.articleName}</Pill>
+              <Pill tone='mut'>cloth {job.widthCm} cm</Pill>
               <Pill tone='mut'>
-                {job.pieceCount} контуров · {job.instanceCount} экз.
+                {job.pieceCount} contours · {job.instanceCount} instances
               </Pill>
             </div>
             <Text size='nano' variant='label' component='p'>
-              {`слой контура ${job.contourLayer || '—'}, долевая ${job.grainLayer || 'не разворачивать'}, припуск ${job.seamAllowanceMm} мм (${job.seamAllowanceWhy}), кромка ${job.selvedgeCm} см на сторону`}
+              {`contour layer ${job.contourLayer || '—'}, grainline ${job.grainLayer || 'no rotation'}, seam allowance ${job.seamAllowanceMm} mm (${job.seamAllowanceWhy}), selvedge ${job.selvedgeCm} cm per side`}
             </Text>
             {/* ЧТО ИМЕННО КРОИМ — СПИСКОМ, А НЕ ОДНИМ СЧЁТЧИКОМ.
                 Ради этого списка всё и затевалось: одна и та же ткань в роли основной и в роли
@@ -734,7 +737,7 @@ export default function KitMarkerDialog({
             <details>
               <summary className='cursor-pointer'>
                 <Text size='nano' variant='label' component='span' className='uppercase'>
-                  детали комплекта ({job.pieceCount})
+                  kit pieces ({job.pieceCount})
                 </Text>
               </summary>
               <div className='flex flex-col gap-0.5 pt-1'>
@@ -752,13 +755,13 @@ export default function KitMarkerDialog({
             ))}
             {job.replaces && (
               <CalloutBox tone='note'>
-                {`пересчёт ЗАМЕНИТ раскладку «${job.replaces.name}»${job.replaces.isNorm ? ' (она назначена нормой этой ткани)' : ''}${job.replaces.isDraft ? ' — сейчас это черновик, часть деталей не легла' : ''}: у неё тот же слот, тот же колорвей и тот же размер, и вторая такая же копилась бы рядом`}
+                {`a recompute will REPLACE the marker “${job.replaces.name}”${job.replaces.isNorm ? ' (it is set as the norm of this fabric)' : ''}${job.replaces.isDraft ? " — right now it's a draft, some pieces were not placed" : ''}: it has the same slot, the same colorway and the same size, and a second one just like it would pile up beside it`}
               </CalloutBox>
             )}
             {/* ПРОТУХАНИЕ — ТОЧНАЯ ПОЛОВИНА. Сравнивается отпечаток входа: экземпляры и ширина. */}
             {drift && (
               <CalloutBox tone='warning'>
-                {`норма строки снята с раскладки «${stampedMarker?.name ?? ''}», и вход с тех пор изменился: ${drift}. Число в строке остаётся верным для тех условий — пересчитайте, если нужны сегодняшние`}
+                {`the line's norm was captured from the marker “${stampedMarker?.name ?? ''}”, and the input has changed since: ${drift}. The number on the line stays true for those conditions — recompute it if you need today's`}
               </CalloutBox>
             )}
           </>
@@ -778,7 +781,7 @@ export default function KitMarkerDialog({
                   pressed={budgetS === s}
                   onClick={() => setBudgetS(s)}
                 >
-                  бюджет {s} с
+                  budget {s} s
                 </Chip>
               ))}
             </ChipRow>
@@ -791,7 +794,7 @@ export default function KitMarkerDialog({
                 title={starved ? forecastText : undefined}
                 onClick={run}
               >
-                посчитать раскладку
+                compute the marker
               </Button>
               <Text size='nano' variant='label' component='span'>
                 {forecastText}
@@ -803,28 +806,28 @@ export default function KitMarkerDialog({
         {phase === 'running' && (
           <div className='flex flex-wrap items-center gap-1.5'>
             <Button type='button' variant='secondary' size='xs' disabled={stopping} onClick={stop}>
-              {stopping ? 'останавливаем…' : 'остановить'}
+              {stopping ? 'stopping…' : 'stop'}
             </Button>
             <Text size='nano' variant='label' component='span'>
               {progress.nfp
-                ? `предпросчёт геометрии ${progress.nfp.done}/${progress.nfp.total}`
-                : `поколение ${progress.generation}${progress.bestPct != null ? ` · КПД ${progress.bestPct.toFixed(1)}%` : ''}`}
+                ? `geometry prepass ${progress.nfp.done}/${progress.nfp.total}`
+                : `generation ${progress.generation}${progress.bestPct != null ? ` · efficiency ${progress.bestPct.toFixed(1)}%` : ''}`}
             </Text>
             <Text size='nano' variant='label' component='span'>
-              «остановить» отдаёт лучшее из найденного, а не выбрасывает счёт
+              “stop” gives back the best found so far — it doesn't throw the computation away
             </Text>
           </div>
         )}
 
         {phase === 'saving' && (
           <Text size='nano' variant='label' component='p'>
-            сохраняем раскладку и перечитываем расход у сервера…
+            saving the marker and re-reading the consumption from the server…
           </Text>
         )}
 
         {result && (
           <Text size='nano' variant='label' component='p'>
-            {`уложено ${result.placedCount} из ${result.totalCount} · длина настила ${result.usedLengthCm.toFixed(0)} см · КПД ${(result.efficiency * 100).toFixed(1)}%${result.cancelled ? ' · поиск остановлен, это лучшее из найденного' : ''}`}
+            {`placed ${result.placedCount} of ${result.totalCount} · lay length ${result.usedLengthCm.toFixed(0)} cm · efficiency ${(result.efficiency * 100).toFixed(1)}%${result.cancelled ? ' · the search was stopped, this is the best found' : ''}`}
           </Text>
         )}
         {result?.warnings.map((w, i) => (
@@ -838,11 +841,11 @@ export default function KitMarkerDialog({
         {phase === 'applied' && savedSummary && (
           <>
             <CalloutBox tone='note'>
-              {`норма ${appliedText} применена в строку рецепта из раскладки «${savedSummary.name}» с источником «из раскладки»: костинг НЕ начисляет на неё процент раскроя слота — отходы уже измерены. Запись уйдёт при сохранении карточки.`}
+              {`the norm ${appliedText} is applied into the recipe line from the marker “${savedSummary.name}” with the source “from a marker”: costing does NOT add the slot's wastage percent on top of it — the waste is already measured. The write goes out when the card is saved.`}
             </CalloutBox>
             <div className='flex flex-wrap items-center gap-1.5'>
               <Button type='button' variant='secondary' size='xs' onClick={onClose}>
-                готово
+                done
               </Button>
             </div>
           </>
@@ -851,15 +854,15 @@ export default function KitMarkerDialog({
         {phase === 'stuck' && (
           <div className='flex flex-wrap items-center gap-1.5'>
             <Button type='button' variant='secondary' size='xs' onClick={onClose}>
-              закрыть
+              close
             </Button>
           </div>
         )}
 
         {!busy && phase !== 'applied' && phase !== 'stuck' && (
           <Text size='nano' variant='label' component='p'>
-            раскладка считается В ЭТОМ БРАУЗЕРЕ: другого исполнителя нет — DXF на сервере разбирать
-            нечем. Закрытие окна или уход со страницы останавливают счёт
+            the marker is computed IN THIS BROWSER: there is no other executor — nothing on the
+            server can parse DXF. Closing the window or leaving the page stops the computation
           </Text>
         )}
       </div>

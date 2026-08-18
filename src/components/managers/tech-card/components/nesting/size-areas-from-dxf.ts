@@ -103,20 +103,20 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     return {
       ok: false,
       reason:
-        'у раскладки не записаны условия съёмки (припуск, слои) — повторить преобразование контура нечем, а площади, посчитанные другим припуском, с записанными не сойдутся',
+        'the marker has no capture conditions recorded (seam allowance, layers) — there is nothing to repeat the contour transform with, and areas computed with a different allowance would not meet the recorded ones',
     };
   }
   const stored = (input.marker.layout?.pieces ?? []) as common_TechCardMarkerPiece[];
   if (stored.length === 0) {
-    return { ok: false, reason: 'в раскладке не сохранено ни одной детали — продолжать нечем' };
+    return { ok: false, reason: 'the marker has no pieces saved at all — there is nothing to continue from' };
   }
   if (input.parsed.length === 0) {
     return {
       ok: false,
       reason:
         (input.failedFiles ?? []).length > 0
-          ? `не скачались или не разобрались выкройки: ${(input.failedFiles ?? []).join(', ')}`
-          : 'сегодняшних выкроек этой ткани на карточке нет — считать площади не по чему',
+          ? `pattern sheets that didn't download or didn't parse: ${(input.failedFiles ?? []).join(', ')}`
+          : 'the card carries no current patterns for this fabric — there is nothing to compute areas from',
     };
   }
 
@@ -132,7 +132,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   const candidates = seam.pieces;
   const warnings: string[] = [];
   if (seam.hulled.length > 0) {
-    warnings.push(`контур заменён выпуклой оболочкой: ${seam.hulled.join(', ')}`);
+    warnings.push(`contour replaced by its convex hull: ${seam.hulled.join(', ')}`);
   }
 
   // ВЕРДИКТ О РАЗМЕРНЫХ ХВОСТАХ — ПО СОЮЗУ ИМЁН, сегодняшних и сохранённых. Правило deriveBlockSizes
@@ -179,7 +179,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
       // без неё площадь любого размера неполна — и неполная площадь ЗАНИЖАЕТ норму.
       return {
         ok: false,
-        reason: `деталь «${sp.name || sp.pieceId}» сохранена без имени блока — сопоставить её с сегодняшней выкройкой нечем`,
+        reason: `piece “${sp.name || sp.pieceId}” was saved without a block name — there is nothing to match it against today's pattern with`,
       };
     }
     const qty = Math.max(1, Math.round(sp.quantity ?? 1));
@@ -187,14 +187,14 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     const { identity, size } = codeOf(raw);
     if (!size) {
       if (graded.has(identity)) {
-        return { ok: false, reason: `блок «${identity}» встречается и с размерным хвостом, и без` };
+        return { ok: false, reason: `block “${identity}” occurs both with a size suffix and without one` };
       }
       agnosticIdentities.add(identity);
       agnosticCm2 += qty * area;
       continue;
     }
     if (agnosticIdentities.has(identity)) {
-      return { ok: false, reason: `блок «${identity}» встречается и с размерным хвостом, и без` };
+      return { ok: false, reason: `block “${identity}” occurs both with a size suffix and without one` };
     }
     const g = graded.get(identity) ?? { identity, qty, sizes: new Map<string, number>() };
     // РАЗНОЕ КОЛИЧЕСТВО НА ИЗДЕЛИЕ У ОДНОЙ ДЕТАЛИ В РАЗНЫХ РАЗМЕРАХ — отказ, а не выбор большего.
@@ -204,13 +204,13 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     if (g.qty !== qty) {
       return {
         ok: false,
-        reason: `деталь «${identity}» разложена разным числом на изделие в разных размерах (${g.qty} и ${qty}) — какое из них у размера вне состава, сказать нечем`,
+        reason: `piece “${identity}” is laid out with a different per-garment count in different sizes (${g.qty} and ${qty}) — nothing here can say which of them applies to a size outside the composition`,
       };
     }
     if (g.sizes.has(size)) {
       return {
         ok: false,
-        reason: `блок «${raw}» сохранён в раскладке дважды — сопоставить его с сегодняшней выкройкой однозначно нельзя`,
+        reason: `block “${raw}” is saved twice in the marker — it can't be matched to today's pattern unambiguously`,
       };
     }
     g.sizes.set(size, area);
@@ -247,7 +247,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
       ...uniDuplicateConflicts(groups).filter((c) => !flagged.has(c.subject.toLowerCase())),
     ];
     if (conflicts.length > 0) {
-      return { ok: false, reason: `${uniConflictReason(conflicts)}. Переснимите раскладку` };
+      return { ok: false, reason: `${uniConflictReason(conflicts)}. re-capture the marker` };
     }
   }
 
@@ -276,7 +276,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     return {
       ok: false,
       reason:
-        'в раскладке ни одна деталь не градуируется по размерам — площадь любого размера получилась бы одинаковой, и это была бы не норма размера, а копия соседней',
+        'in the marker not a single piece is graded by size — the area of any size would come out the same, and that would not be a size norm but a copy of its neighbour',
     };
   }
 
@@ -298,7 +298,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
       if (ambiguous.has(`${g.identity} ${token}`)) {
         return {
           ok: false,
-          reason: `в сегодняшних выкройках блок «${g.identity}_${token}» встречается несколько раз — какая из копий та самая, сказать нечем`,
+          reason: `in today's patterns block “${g.identity}_${token}” occurs several times — nothing here can say which copy is the one`,
         };
       }
       sum += g.qty * fileArea.get(`${g.identity} ${token}`)!;
@@ -338,11 +338,11 @@ export async function sizeAreasForMarker(req: SizeAreasRequest): Promise<SizeAre
     return {
       ok: false,
       reason:
-        'у раскладки не записаны условия съёмки (припуск, слои) — повторить преобразование контура нечем',
+        'the marker has no capture conditions recorded (seam allowance, layers) — there is nothing to repeat the contour transform with',
     };
   }
   if (req.sources.length === 0) {
-    return { ok: false, reason: 'выкроек этой ткани на карточке нет — считать площади не по чему' };
+    return { ok: false, reason: 'the card carries no patterns for this fabric — there is nothing to compute areas from' };
   }
   // Параметры РАЗБОРА — из блоба, а не из умолчаний: тесселяция дуг зависит от tol напрямую, и
   // разбор с другим допуском даёт другую площадь на той же дуге.
@@ -357,7 +357,7 @@ export async function sizeAreasForMarker(req: SizeAreasRequest): Promise<SizeAre
   } catch {
     return {
       ok: false,
-      reason: `не удалось разобрать выкройки: ${req.sources.map((s) => s.name).join(', ')}`,
+      reason: `couldn't parse the patterns: ${req.sources.map((s) => s.name).join(', ')}`,
     };
   }
   return sizeAreasFromParsed({ ...req, parsed, failedFiles: failed, conditions });

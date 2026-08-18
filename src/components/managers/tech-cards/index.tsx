@@ -69,7 +69,7 @@ export function TechCards() {
             selected={view === 'direction'}
             pressed={view === 'direction'}
             onClick={() => setView('direction')}
-            title='кампания Д1 — BOM lines still waiting for a направление ткани'
+            title='campaign D1 — BOM lines still waiting for a fabric direction'
           >
             direction{openDirectionLines > 0 ? ` ${openDirectionLines}` : ''}
           </Chip>

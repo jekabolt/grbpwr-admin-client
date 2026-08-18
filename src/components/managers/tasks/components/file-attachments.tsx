@@ -2,7 +2,11 @@ import { useQueries } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { filesService } from 'components/managers/files/api/filesService';
-import { filesKeys, useFileTopics, useLibraryFiles } from 'components/managers/files/hooks/useFiles';
+import {
+  filesKeys,
+  useFileTopics,
+  useLibraryFiles,
+} from 'components/managers/files/hooks/useFiles';
 import { extensionOf } from 'components/managers/files/utils/format';
 // ВЕС БЕРЁТСЯ У ОБЩЕГО ФОРМАТТЕРА, а не у раздела «файлы», хотя рядом с ним стоит
 // `extensionOf` оттуда же. Расширение языка не имеет, а единицы имеют: у раздела «файлы»
@@ -42,9 +46,7 @@ export function FileAttachments({
       staleTime: 30 * 60 * 1000,
     })),
   });
-  const files = resolved
-    .map((q) => q.data?.file)
-    .filter((f): f is LibraryFile => !!f);
+  const files = resolved.map((q) => q.data?.file).filter((f): f is LibraryFile => !!f);
 
   const remove = (id: number) => onChange(value.filter((x) => x !== id));
 

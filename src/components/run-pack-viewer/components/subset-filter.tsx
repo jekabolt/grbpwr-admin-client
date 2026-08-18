@@ -69,34 +69,34 @@ export function SubsetFilter({
   const colorwayOptions = lines.map((l) => ({ key: lineKeyOf(l), label: lineLabelOf(l) }));
   const sizeOptions = sizes.map((s) => ({
     key: s.id ?? 0,
-    label: (s.name ?? '').trim() || ((s.id ?? 0) > 0 ? `#${s.id}` : 'б/р'),
+    label: (s.name ?? '').trim() || ((s.id ?? 0) > 0 ? `#${s.id}` : 'no size'),
   }));
   const layOptions = lays.map((l, i) => ({
     key: layKeyOf(l, i),
-    label: (l.name ?? '').trim() || `настил ${i + 1}`,
+    label: (l.name ?? '').trim() || `lay ${i + 1}`,
   }));
 
   return (
     <div className='space-y-stack'>
       <Text size='micro' variant='label' component='p'>
-        выберите своё — адрес страницы запомнит выбор, и такую ссылку можно отдать бригаде. Данных
-        она не прячет: сервер отдаёт партию целиком, фильтр только наводит взгляд.
+        pick your own — the page address remembers the choice, and such a link can be handed to a
+        crew. it hides no data: the server returns the whole run, the filter only guides the eye.
       </Text>
 
       <Group
-        title='колор-модель'
+        title='colourway'
         options={colorwayOptions}
         selected={subset.colorways}
         onToggle={(key) => onChange({ ...subset, colorways: toggleIn(subset.colorways, key) })}
       />
       <Group
-        title='размеры'
+        title='sizes'
         options={sizeOptions}
         selected={subset.sizes}
         onToggle={(key) => onChange({ ...subset, sizes: toggleIn(subset.sizes, key) })}
       />
       <Group
-        title='настилы'
+        title='lays'
         options={layOptions}
         selected={subset.lays}
         onToggle={(key) => onChange({ ...subset, lays: toggleIn(subset.lays, key) })}
@@ -111,11 +111,12 @@ export function SubsetFilter({
             className='min-h-11'
             onClick={() => onChange(emptySubset())}
           >
-            показать всю партию
+            show the whole run
           </Button>
           <Text size='micro' variant='label' component='p'>
-            выбор настилов сужает только блок настилов — кат-лист он не режет: настил и деталь
-            связаны через слот, и вывести одно из другого здесь значило бы догадаться за технолога.
+            the lay selection narrows only the lays block — it doesn't cut the cut list down: a lay
+            and a piece are linked through a slot, and deriving one from the other here would mean
+            guessing on the technologist's behalf.
           </Text>
         </div>
       )}

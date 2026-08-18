@@ -33,7 +33,7 @@ export function RunHeader({
             PR-{m.run_id ?? '—'}
           </Text>
           <Text component='p'>
-            {styleNumber || 'стиль не назван'}
+            {styleNumber || 'style not named'}
             {styleName ? ` · ${styleName}` : ''}
           </Text>
         </div>
@@ -44,44 +44,46 @@ export function RunHeader({
 
       {stop && (
         <Text component='p'>
-          <b>партия отменена</b> — по этому наряду не кроят. Наряд остался открытым намеренно:
-          ссылка, погасшая вместе с отменой, была бы неотличима от битой, и в цеху это читалось бы
-          как «QR не работает».
+          <b>the run is cancelled</b> — nothing is cut from this run pack. the run pack was left open
+          deliberately: a link that went dark together with the cancellation would be
+          indistinguishable from a broken one, and on the floor that would read as “the QR doesn't
+          work”.
         </Text>
       )}
 
       <div>
         <Row
-          label='изделий в партии'
+          label='garments in the run'
           value={
             <Text size='stat' component='span'>
               {garments}
             </Text>
           }
         />
-        <Row label='фабрика' value={factory || 'не назначена'} />
-        <Row label='план старта' value={dayOf(m.planned_start_at) || 'не задан'} />
-        <Row label='обещано' value={dayOf(m.promised_at) || 'не задано'} />
+        <Row label='factory' value={factory || 'not assigned'} />
+        <Row label='planned start' value={dayOf(m.planned_start_at) || 'not set'} />
+        <Row label='promised' value={dayOf(m.promised_at) || 'not set'} />
         {/* ПО КАКОЙ КАРТЕ КРОИМ. Отсутствие релиза — не «мелочь по умолчанию», а факт, который цех
             обязан знать: живая карта меняется под ним прямо сейчас.
             И два разных нуля: ранняя партия без релиза — норма, а СОРВАВШИЙСЯ снапшот утверждённого
             релиза — тревога. Сервер их различает (spec_source), и слить их обратно в одну фразу
             значило бы спрятать единственный случай, когда цех кроит не по тому, что утверждали. */}
         <Row
-          label='спецификация'
+          label='specification'
           value={
             releaseId > 0
               ? `Rev.${releaseNumber > 0 ? releaseNumber : `#${releaseId}`}`
               : m.spec_source === 'live_card_fallback'
-                ? '⚠ снапшот релиза не прочитан — кроим по ЖИВОЙ карте, спросите технолога'
-                : 'живая карта, ревизия не зафиксирована'
+                ? "⚠ the release snapshot wasn't read — cutting from the LIVE card, ask the technologist"
+                : 'live card, no revision recorded'
           }
         />
       </div>
 
       {garmentsRecomputed && (
         <Text size='micro' variant='label' component='p'>
-          показано подмножество партии — числа пересчитаны по выбранному, а не взяты у сервера
+          a subset of the run is shown — the numbers are recomputed from the selection, not taken
+          from the server
         </Text>
       )}
     </div>

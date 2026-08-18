@@ -165,7 +165,9 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 autoFocus
                 className='text-lg'
                 value={field.value}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  field.onChange(e.target.value)
+                }
                 onBlur={field.onBlur}
               />
             )}

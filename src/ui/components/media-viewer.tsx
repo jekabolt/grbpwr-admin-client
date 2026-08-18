@@ -505,7 +505,9 @@ function MetaPanel({
         <MetaRow label='id' value={meta.id ?? '—'} />
         <MetaRow
           label='uploaded'
-          value={created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString() : '—'}
+          value={
+            created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString('en-US') : '—'
+          }
         />
         <MetaRow label='blurhash' value={meta.blurhash ? `${meta.blurhash.slice(0, 10)}…` : '—'} />
       </dl>

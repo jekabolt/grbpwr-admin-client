@@ -73,7 +73,7 @@ export function FilesDropOverlay({
   enabled: boolean;
   /** Почему нельзя — одной строкой, на самом оверлее. */
   disabledNote?: string;
-  /** Что унаследует пачка: имена выбранных чипов холста. Пусто — «разобрать». */
+  /** Что унаследует пачка: имена выбранных чипов холста. Пусто — «unsorted». */
   topicLabels: string[];
   onFiles: (files: File[]) => void;
 }) {
@@ -139,13 +139,13 @@ export function FilesDropOverlay({
 
       const { files, folders } = pickFiles(e.dataTransfer);
       // ПАПКА — НЕ ФАЙЛ. Браузер отдаёт её в `files` наравне с остальным, и до сих пор она
-      // становилась строкой-призраком: отправка уходила пустой и падала с диагнозом «связь
-      // оборвалась», хотя связь была в полном порядке.
+      // становилась строкой-призраком: отправка уходила пустой и падала с диагнозом «the
+      // connection dropped», хотя связь была в полном порядке.
       if (folders.length) {
         useSnackBarStore
           .getState()
           .showMessage(
-            `папку загрузить нельзя: ${folders.join(', ')}. откройте её и бросьте файлы`,
+            `a folder can't be uploaded: ${folders.join(', ')}. open it and drop the files`,
             'error',
           );
       }
@@ -168,7 +168,7 @@ export function FilesDropOverlay({
 
   if (!dragging) return null;
 
-  const files = count ? `${count} ${plural(count, 'файл', 'файла', 'файлов')}` : 'файлы';
+  const files = count ? `${count} ${plural(count, 'file')}` : 'files';
 
   return createPortal(
     <div
@@ -180,24 +180,25 @@ export function FilesDropOverlay({
         {enabled ? (
           <>
             <Text size='stat' component='p' variant='uppercase' tracking='section'>
-              отпустите — {files}
+              let go — {files}
             </Text>
             <Text size='micro' component='p'>
               {topicLabels.length
-                ? `темы проставятся сразу: ${topicLabels.join(', ')}`
-                : 'тем нет — файлы уйдут в «разобрать»'}
+                ? `topics will be set right away: ${topicLabels.join(', ')}`
+                : 'no topics — the files will go to “unsorted”'}
             </Text>
             <Text size='micro' component='p' className='opacity-75'>
-              до {formatBytes(MAX_UPLOAD_BYTES)} на файл · превью браузер нарисует до отправки
+              up to {formatBytes(MAX_UPLOAD_BYTES)} per file · the browser draws the preview before
+              the upload
             </Text>
           </>
         ) : (
           <>
             <Text size='stat' component='p' variant='uppercase' tracking='section'>
-              загрузка выключена
+              uploading is off
             </Text>
             <Text size='micro' component='p'>
-              {disabledNote ?? 'файлы не примутся — но со страницы вас никто не унесёт'}
+              {disabledNote ?? "the files won't be taken — but nobody will carry you off the page"}
             </Text>
           </>
         )}

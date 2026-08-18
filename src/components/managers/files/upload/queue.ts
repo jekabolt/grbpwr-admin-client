@@ -162,11 +162,11 @@ export function failureKind(status: number): 'lost' | 'fail' {
 export function hopelessReason(status?: number): string | null {
   switch (status) {
     case 401:
-      return 'сессия истекла';
+      return 'the session expired';
     case 403:
-      return 'нет права files:write';
+      return 'no files:write right';
     case 413:
-      return 'больше предела сервера';
+      return 'over the server limit';
     default:
       return null;
   }

@@ -323,7 +323,7 @@ for (const [label, header] of dirtyCases) {
     continue;
   }
   const scan = mod.scanDxf(out);
-  const bad = ['undefined', 'NaN', 'null', 'PR0', 'слоёв 0', 'длина 0.00'].filter((s) => out.includes(s));
+  const bad = ['undefined', 'NaN', 'null', 'PR0', 'plies 0', 'length 0.00'].filter((s) => out.includes(s));
   check(bad.length === 0, `${label}: в файле нет мусорных значений`, bad.length ? bad.join(', ') : 'чисто');
   check(scan.wellFormed, `${label}: поток пар цел`, `${scan.pairCount} пар`);
   check(
@@ -396,8 +396,8 @@ console.log('\nF · шапка собирается из НАСТИЛА и СЕ�
   // И главное — рендер такой шапки печатает слои секции, а не настила.
   const dxf = mod.render(h);
   const texts = mod.dxfTexts(mod.scanDxf(dxf)).filter((t) => t.layer === 'HEADER').map((t) => t.text).join(' | ');
-  check(texts.includes('слоёв 24'), 'на ЛИСТЕ напечатаны слои секции', texts.slice(0, 90));
-  check(!texts.includes('слоёв 46'), 'слоёв настила на листе НЕТ — их режут не одним проходом');
+  check(texts.includes('plies 24'), 'на ЛИСТЕ напечатаны слои секции', texts.slice(0, 90));
+  check(!texts.includes('plies 46'), 'слоёв настила на листе НЕТ — их режут не одним проходом');
   check(texts.includes('M') && texts.includes('L'), 'размеры на листе словами, не идентификаторами');
 }
 

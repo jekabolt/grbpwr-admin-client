@@ -98,7 +98,7 @@ export function DxfQuickViewModal({
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title={title || 'выкройка (DXF)'}
+      title={title || 'pattern (DXF)'}
       width='lg'
       hideActions
     >
@@ -110,14 +110,14 @@ export function DxfQuickViewModal({
           </Text>
           <Button asChild variant='secondary' size='xs'>
             <a href={url || '#'} target='_blank' rel='noopener noreferrer'>
-              скачать файл
+              download the file
             </a>
           </Button>
         </div>
         {state === 'error' ? (
           <div className='flex h-[50vh] w-full flex-col items-center justify-center gap-2 border border-borderColor bg-bgColor'>
             <Text size='micro' variant='label'>
-              не удалось отрисовать DXF — файл можно скачать и открыть в CAD
+              couldn't render the DXF — the file can be downloaded and opened in a CAD
             </Text>
           </div>
         ) : (
@@ -127,7 +127,7 @@ export function DxfQuickViewModal({
             {state === 'loading' && (
               <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
                 <Text size='micro' variant='label'>
-                  загрузка DXF…
+                  loading the DXF…
                 </Text>
               </div>
             )}

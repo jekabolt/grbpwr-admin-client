@@ -37,7 +37,6 @@ import {
   isOk,
   isUnchecked,
   isWarning,
-  pluralRu,
 } from './run-readiness';
 import { useRunReadiness, useSaveProductionRun } from './useProductionRuns';
 
@@ -311,7 +310,7 @@ export function CreateRunModal({
 
   const submit = () => {
     if (!d.techCardId) {
-      showMessage('Выберите тех-карту', 'error');
+      showMessage('select a tech card', 'error');
       return;
     }
     setRefusal(null);
@@ -347,7 +346,7 @@ export function CreateRunModal({
       },
       {
         onSuccess: (res) => {
-          showMessage('Прогон создан', 'success');
+          showMessage('run created', 'success');
           onOpenChange(false);
           const id = (res as { id?: number })?.id;
           if (id) navigate(runDetailPath(id));
@@ -359,12 +358,12 @@ export function CreateRunModal({
           const violations = extractFieldViolations(e);
           if (violations.length > 0) {
             setRefusal({
-              message: e instanceof Error ? e.message : 'Гейт готовности отклонил создание',
+              message: e instanceof Error ? e.message : 'the readiness gate refused the creation',
               rows: violations.map((v) => `${v.field} — ${v.description}`),
             });
             return;
           }
-          showMessage(e instanceof Error ? e.message : 'Не удалось создать прогон', 'error');
+          showMessage(e instanceof Error ? e.message : "couldn't create the run", 'error');
         },
       },
     );
@@ -377,7 +376,7 @@ export function CreateRunModal({
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[860px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
-              новый прогон
+              new run
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
               <Button type='button' className='shrink-0 cursor-pointer'>
@@ -386,14 +385,15 @@ export function CreateRunModal({
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
-            Тех-карта, релиз, колорвеи и количества будущего прогона, с вердиктом гейта готовности.
+            the tech card, release, colourways and quantities of the future run, with the readiness
+            gate's verdict.
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
             {/* ── 1–2. карточка и релиз ───────────────────────────────────────────────────── */}
             <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>тех-карта *</Text>
+                <Text size='small'>tech card *</Text>
                 <select
                   className={cell}
                   value={d.techCardId || 0}
@@ -404,7 +404,7 @@ export function CreateRunModal({
                     setRefusal(null);
                   }}
                 >
-                  <option value={0}>— выбрать —</option>
+                  <option value={0}>— select —</option>
                   {techCards.map((t) => (
                     <option key={t.id} value={t.id}>
                       TC-{t.id} · {t.styleNumber || t.name || 'untitled'}
@@ -414,13 +414,13 @@ export function CreateRunModal({
               </label>
               <div className='flex flex-col gap-1'>
                 <label className='flex flex-col gap-1'>
-                  <Text size='small'>релиз (необязательно — план от снимка)</Text>
+                  <Text size='small'>release (optional — the plan comes from the snapshot)</Text>
                   <select
                     className={cell}
                     value={d.releaseId || 0}
                     onChange={(e) => set({ releaseId: Number(e.target.value) || 0 })}
                   >
-                    <option value={0}>— последняя версия карточки —</option>
+                    <option value={0}>— the card's latest version —</option>
                     {releases.map((r) => (
                       <option key={r.id} value={r.id}>
                         Rev.{r.releaseNumber ?? '—'}
@@ -449,22 +449,22 @@ export function CreateRunModal({
             {/* ── AUX: гейт коротко замкнут СЕРВЕРОМ ──────────────────────────────────────── */}
             {isAux ? (
               <div className='flex flex-col gap-2'>
-                <GroupLabel flush>вспомогательная карточка</GroupLabel>
+                <GroupLabel flush>auxiliary card</GroupLabel>
                 <CalloutBox tone='note'>
                   <Text size='small'>
-                    Эта карточка производит МАТЕРИАЛ, а не изделие: колорвеев у неё нет, и гейт норм
-                    ткани к ней неприменим — сервер замыкает его накоротко, а не «проходит» проверки.
-                    Цвета выпуска и количества планируются на странице прогона.
+                    this card produces MATERIAL, not a garment: it has no colourways, and the fabric
+                    norm gate doesn't apply to it — the server short-circuits the gate rather than
+                    “passing” the checks. output colours and quantities are planned on the run page.
                   </Text>
                 </CalloutBox>
                 {auxShortCircuit ? (
                   <Text size='micro' variant='label'>
-                    Сервер подтвердил короткое замыкание (card_auxiliary). Ни одна из проверок ткани
-                    не выполнялась — и ни одна не считается пройденной.
+                    the server confirmed the short circuit (card_auxiliary). not one of the fabric
+                    checks was run — and not one counts as passed.
                   </Text>
                 ) : survey.isPending ? (
                   <Text size='micro' variant='label'>
-                    спрашиваем гейт…
+                    asking the gate…
                   </Text>
                 ) : null}
               </div>
@@ -476,19 +476,19 @@ export function CreateRunModal({
                     flush
                     action={
                       <Text size='micro' variant='label' component='span'>
-                        выбрано {selected.length} из {colorways.length}
+                        {selected.length} of {colorways.length} selected
                       </Text>
                     }
                   >
-                    колорвеи
+                    colourways
                   </GroupLabel>
                   {d.techCardId === 0 ? (
                     <Text size='micro' variant='label'>
-                      выберите тех-карту
+                      select a tech card
                     </Text>
                   ) : colorways.length === 0 ? (
                     <Text size='micro' variant='label'>
-                      у карточки нет живых колорвеев с продуктом
+                      the card has no live colourways with a product
                     </Text>
                   ) : (
                     colorways.map((c) => {
@@ -522,15 +522,15 @@ export function CreateRunModal({
                             />
                             <Text component='span'>{c.label}</Text>
                             {known === false ? (
-                              <Pill tone='warn'>не готов</Pill>
+                              <Pill tone='warn'>not ready</Pill>
                             ) : known === true ? (
-                              <Pill tone='ok'>готов</Pill>
+                              <Pill tone='ok'>ready</Pill>
                             ) : (
-                              <Pill tone='mut'>вердикта нет</Pill>
+                              <Pill tone='mut'>no verdict</Pill>
                             )}
                             {lockedOut ? (
                               <Text size='micro' variant='label' component='span'>
-                                гейт блокирует — этот колорвей нельзя добавить в прогон
+                                the gate blocks — this colourway can't be added to the run
                               </Text>
                             ) : null}
                           </label>
@@ -554,17 +554,15 @@ export function CreateRunModal({
                   )}
                   {unpublishedCount > 0 ? (
                     <Text size='micro' variant='label'>
-                      ещё {unpublishedCount}{' '}
-                      {pluralRu(unpublishedCount, 'колорвей', 'колорвея', 'колорвеев')} без продукта
-                      — строку прогона ключует
-                      product_id, поэтому сначала{' '}
+                      {unpublishedCount} more {unpublishedCount === 1 ? 'colourway' : 'colourways'}{' '}
+                      without a product — the run line is keyed by product_id, so first{' '}
                       <Link
                         to={ROUTES.addProduct}
                         target='_blank'
                         rel='noreferrer'
                         className='underline'
                       >
-                        создайте продукт ↗
+                        create a product ↗
                       </Link>
                     </Text>
                   ) : null}
@@ -573,13 +571,13 @@ export function CreateRunModal({
                 {/* ── 4. количества ─────────────────────────────────────────────────────── */}
                 {selected.length > 0 && sizeIds.length > 0 ? (
                   <div className='flex flex-col gap-1'>
-                    <GroupLabel flush>количества (колорвей × размер)</GroupLabel>
+                    <GroupLabel flush>quantities (colourway × size)</GroupLabel>
                     <div className='overflow-x-auto'>
                       <table className='border-collapse'>
                         <thead>
                           <tr>
                             <th className='border border-hairline px-2 py-1 text-left uppercase'>
-                              колорвей
+                              colourway
                             </th>
                             {sizeIds.map((s) => (
                               <th
@@ -627,7 +625,7 @@ export function CreateRunModal({
                   </div>
                 ) : selected.length > 0 ? (
                   <Text size='micro' variant='label'>
-                    у карточки пустой размерный ряд — количества вводить не по чему
+                    the card has an empty size range — there is nothing to enter quantities against
                   </Text>
                 ) : null}
               </>
@@ -635,48 +633,48 @@ export function CreateRunModal({
 
             {/* ── ВЕРДИКТ ГЕЙТА ───────────────────────────────────────────────────────────── */}
             <div className='flex flex-col gap-2'>
-              <GroupLabel flush>готовность прогона</GroupLabel>
+              <GroupLabel flush>run readiness</GroupLabel>
               {d.techCardId === 0 ? (
                 <Text size='micro' variant='label'>
-                  вердикт появится, когда выбрана карточка
+                  the verdict appears once a card is selected
                 </Text>
               ) : (isAux ? survey : verdict).isError ? (
                 <CalloutBox tone='error'>
                   <Text size='small'>
-                    Проверить готовность не удалось. Это не «готово» и не «не готово» — вердикта
-                    сейчас нет. Создать прогон всё ещё можно: гейт пересчитывается на сервере при
-                    создании, и отказ придёт оттуда.
+                    the readiness check failed. this is neither “ready” nor “not ready” — there is
+                    no verdict right now. the run can still be created: the gate is recomputed on the
+                    server at creation, and a refusal will come from there.
                   </Text>
                 </CalloutBox>
               ) : !report ? (
                 <Text size='micro' variant='label'>
                   {selected.length === 0 && !isAux
-                    ? 'выберите хотя бы один колорвей — гейт судит тот прогон, который создастся'
-                    : 'спрашиваем гейт…'}
+                    ? 'select at least one colourway — the gate judges the run that will be created'
+                    : 'asking the gate…'}
                 </Text>
               ) : (
                 <>
                   <ReadinessVerdict data={report} stale={recomputing} />
                   {colorwayBlockers > 0 ? (
                     <Text size='micro' variant='label'>
-                      Из них {colorwayBlockers} — на колорвеях: причина каждого напечатана рядом со
-                      своим колорвеем выше.
+                      {colorwayBlockers} of them are on colourways: the reason for each is printed
+                      next to its own colourway above.
                     </Text>
                   ) : null}
                   <FindingGroup
-                    title='блокеры карточки и прогона'
+                    title='card and run blockers'
                     findings={blockerRows}
                     techCardId={d.techCardId}
                   />
                   <FindingGroup
-                    title='предупреждения карточки и прогона'
+                    title='card and run warnings'
                     findings={warningRows}
                     techCardId={d.techCardId}
                   />
                   {/* НЕ ПРОВЕРЕНО — своя группа, своё слово, и она НИКОГДА не сворачивается вместе
                       с пройденными: «не проверяли» и «проверили, всё хорошо» — разные ответы. */}
                   <FindingGroup
-                    title='не проверялось — у сервера нет инструмента'
+                    title="not checked — the server has no instrument for it"
                     findings={uncheckedRows}
                     techCardId={d.techCardId}
                   />
@@ -691,11 +689,11 @@ export function CreateRunModal({
                             size='xs'
                             onClick={() => setShowPassed((v) => !v)}
                           >
-                            {showPassed ? 'скрыть' : 'показать'}
+                            {showPassed ? 'hide' : 'show'}
                           </Button>
                         }
                       >
-                        {`пройдено — ${passedRows.length}`}
+                        {`passed — ${passedRows.length}`}
                       </GroupLabel>
                       {showPassed
                         ? passedRows.map((f, i) => (
@@ -716,7 +714,7 @@ export function CreateRunModal({
             {/* ── 5. покрытие ─────────────────────────────────────────────────────────────── */}
             {!isAux && report && (report.coverage?.length || report.unitCoverage?.length) ? (
               <div className='flex flex-col gap-2'>
-                <GroupLabel flush>покрытие — оценка по норме</GroupLabel>
+                <GroupLabel flush>coverage — an estimate from the norm</GroupLabel>
                 <CoverageTable
                   coverage={report.coverage ?? []}
                   unitCoverage={report.unitCoverage ?? []}
@@ -729,7 +727,7 @@ export function CreateRunModal({
             {/* ── шапка прогона ───────────────────────────────────────────────────────────── */}
             <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>статус</Text>
+                <Text size='small'>status</Text>
                 <select
                   className={cell}
                   value={d.status}
@@ -746,7 +744,7 @@ export function CreateRunModal({
                 </select>
               </label>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>плановый старт</Text>
+                <Text size='small'>planned start</Text>
                 <input
                   className={cell}
                   type='date'
@@ -755,7 +753,7 @@ export function CreateRunModal({
                 />
               </label>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>обещано</Text>
+                <Text size='small'>promised</Text>
                 <input
                   className={cell}
                   type='date'
@@ -764,7 +762,7 @@ export function CreateRunModal({
                 />
               </label>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>начато</Text>
+                <Text size='small'>started</Text>
                 <input
                   className={cell}
                   type='date'
@@ -772,24 +770,24 @@ export function CreateRunModal({
                   onChange={(e) => set({ startedAt: e.target.value })}
                 />
                 <Text variant='label' size='small'>
-                  когда работа реально началась — факт, не план
+                  when the work actually started — actual, not plan
                 </Text>
               </label>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>фактический % раскроя</Text>
+                <Text size='small'>actual cutting %</Text>
                 <input
                   className={cell}
                   inputMode='decimal'
-                  placeholder='напр. 12.5'
+                  placeholder='e.g. 12.5'
                   value={d.actualWastagePercent}
                   onChange={(e) => set({ actualWastagePercent: sanitizeDecimal(e.target.value) })}
                 />
                 <Text variant='label' size='small'>
-                  пусто = оценка BOM; покрытие выше посчитано именно по ней
+                  empty = the BOM estimate; the coverage above is computed from exactly that
                 </Text>
               </label>
               <label className='flex flex-col gap-1 sm:col-span-2'>
-                <Text size='small'>заметки</Text>
+                <Text size='small'>notes</Text>
                 <textarea
                   className={cell}
                   rows={2}
@@ -802,7 +800,7 @@ export function CreateRunModal({
             {refusal ? (
               <CalloutBox tone='error'>
                 <Text size='small'>
-                  <b>Сервер отклонил создание.</b> {refusal.message}
+                  <b>the server refused the creation.</b> {refusal.message}
                 </Text>
                 <ul className='list-disc pl-4'>
                   {refusal.rows.map((r, i) => (
@@ -814,8 +812,9 @@ export function CreateRunModal({
                   ))}
                 </ul>
                 <Text size='micro' variant='label'>
-                  Причины пересчитаны сервером НА МОМЕНТ отправки и могут отличаться от вердикта
-                  выше: карточку могли изменить, пока модалка была открыта.
+                  the reasons were recomputed by the server AT THE MOMENT of submission and may
+                  differ from the verdict above: the card could have been changed while the modal
+                  was open.
                 </Text>
               </CalloutBox>
             ) : null}
@@ -824,8 +823,8 @@ export function CreateRunModal({
           <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
             <Text size='micro' variant='label' className='mr-auto'>
               {totalUnits > 0
-                ? `${totalUnits} ${pluralRu(totalUnits, 'изделие', 'изделия', 'изделий')} в плане`
-                : 'количества не введены'}
+                ? `${totalUnits} ${totalUnits === 1 ? 'garment' : 'garments'} in the plan`
+                : 'no quantities entered'}
               {/* ПОЧЕМУ КНОПКА ПОГАШЕНА — рядом с самой кнопкой. Вердикт печатает причину подробно,
                   но подвал липкий, а вердикт остаётся выше по прокрутке: погашенная кнопка, чьё
                   объяснение уехало за край экрана, читается как поломка интерфейса. Когда блокер
@@ -833,16 +832,18 @@ export function CreateRunModal({
                   промолчать, иначе совет «снимите колорвеи» отправляет чинить не то. */}
               {gateBlocksSubmit
                 ? blockedSelection.length > 0
-                  ? ` · снимите ${blockedSelection.length} ${pluralRu(blockedSelection.length, 'неготовый колорвей', 'неготовых колорвея', 'неготовых колорвеев')}, чтобы создать`
-                  : ' · гейт блокирует создание: причина не на колорвее, а на карточке или прогоне — см. вердикт выше'
+                  ? ` · unselect ${blockedSelection.length} not-ready ${
+                      blockedSelection.length === 1 ? 'colourway' : 'colourways'
+                    } to create`
+                  : ' · the gate blocks creation: the reason is not on a colourway but on the card or the run — see the verdict above'
                 : /* Вердикт есть, но он не запрещает: сказать это надо ЗДЕСЬ, у кнопки, иначе
                      красный вердикт над живой кнопкой читается как сломанный интерфейс. */
                   gateBlocks
-                  ? ' · черновик ничего не резервирует; готовность проверится при переводе в план'
+                  ? ' · a draft reserves nothing; readiness is checked when it is promoted to a plan'
                   : ''}
             </Text>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
-              отмена
+              cancel
             </Button>
             <Button
               type='button'
@@ -851,7 +852,7 @@ export function CreateRunModal({
               disabled={create.isPending || !d.techCardId || gateBlocksSubmit}
               onClick={submit}
             >
-              {create.isPending ? 'создаём…' : 'создать'}
+              {create.isPending ? 'creating…' : 'create'}
             </Button>
           </div>
         </DialogPrimitives.Content>

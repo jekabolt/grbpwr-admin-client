@@ -53,7 +53,7 @@ export function Waitlist() {
           <Text variant='uppercase' size='large' component='h1' className='font-bold'>
             waitlist
           </Text>
-          {total > 0 ? <Pill tone='mut'>{total.toLocaleString()} total</Pill> : null}
+          {total > 0 ? <Pill tone='mut'>{total.toLocaleString('en-US')} total</Pill> : null}
         </div>
       </div>
 

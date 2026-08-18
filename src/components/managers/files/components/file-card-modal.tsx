@@ -142,7 +142,7 @@ export function FileCardModal({
       await setRoles.mutateAsync({ fileIds: [id], projectTopicId, roleId });
       await refetch();
     } catch (e) {
-      setFailure({ e, fallback: 'не удалось сменить роль' });
+      setFailure({ e, fallback: "couldn't change the role" });
     }
   };
 
@@ -204,14 +204,14 @@ export function FileCardModal({
         setSelected((f.topics ?? []).map((t) => Number(t.id)));
         setNewTopics([]);
         setNewTopic('');
-        showMessage('сохранено', 'success');
+        showMessage('saved', 'success');
       } else {
         // Сохранить вышло, перечитать — нет. Гасить чипы новых тем в этом месте нельзя: они
         // исчезли бы с экрана, хотя на сервере уже стоят, и файл выглядел бы непроставленным.
-        showMessage('сохранено, но список тем не перечитался — обновите страницу', 'success');
+        showMessage("saved, but the topic list didn't re-read — refresh the page", 'success');
       }
     } catch (e) {
-      setFailure({ e, fallback: 'не удалось сохранить' });
+      setFailure({ e, fallback: "couldn't save" });
     }
   };
 
@@ -225,7 +225,7 @@ export function FileCardModal({
       // Отказ ОСТАЁТСЯ НА ЭКРАНЕ: сервер называет задачи, которые держат файл, и это
       // единственный способ узнать, почему удаление не прошло. Тост уносит эти имена через
       // шесть секунд вместе с ответом на вопрос.
-      setFailure({ e, fallback: 'не удалось удалить' });
+      setFailure({ e, fallback: "couldn't delete" });
       setConfirmDelete(false);
     }
   };
@@ -246,33 +246,36 @@ export function FileCardModal({
         onClose();
       }}
       onConfirm={onClose}
-      title={file?.fileName || 'файл'}
+      title={file?.fileName || 'file'}
       width='lg'
       hideActions
     >
       {isLoading ? (
         <Text size='micro' variant='label'>
-          загружаем…
+          loading…
         </Text>
       ) : !file ? (
         /* УПАВШИЙ ЗАПРОС — НЕ ЗАГРУЗКА. У react-query у ошибки `isLoading` уже false, и без
            этой ветки карточка файла, удалённого после того, как ссылку кинули в чат, вечно
-           показывала бы «загружаем…». Сюда же приходит /files/abc, где id вовсе не число. */
+           показывала бы «loading…». Сюда же приходит /files/abc, где id вовсе не число. */
         <div className='flex flex-col items-start gap-2'>
-          <Text className='uppercase'>файл не открылся</Text>
+          <Text className='uppercase'>the file didn't open</Text>
           <Text size='micro' variant='label'>
             {Number.isFinite(id) && id > 0 ? (
-              <FailureText e={error} fallback='сервер не ответил про этот файл. возможно, его удалили.' />
+              <FailureText
+                e={error}
+                fallback="the server didn't answer about this file. it may have been deleted."
+              />
             ) : (
-              'в адресе не номер файла — ссылка испорчена.'
+              'the address holds no file number — the link is broken.'
             )}
           </Text>
           <div className='flex items-center gap-1.5'>
             <Button size='sm' variant='secondary' onClick={() => refetch()}>
-              повторить
+              retry
             </Button>
             <Button size='sm' variant='secondary' onClick={onClose}>
-              к списку
+              to the list
             </Button>
           </div>
         </div>
@@ -299,7 +302,7 @@ export function FileCardModal({
 
             <div className='flex min-w-[260px] flex-1 flex-col gap-2.5'>
               <div className='flex flex-col gap-1'>
-                <GroupLabel flush>имя</GroupLabel>
+                <GroupLabel flush>name</GroupLabel>
                 <Input
                   name='fileName'
                   value={name}
@@ -307,18 +310,18 @@ export function FileCardModal({
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                 />
                 <Text size='micro' variant='label'>
-                  поиск идёт по имени — понятное имя здесь и есть то, чем файл потом находится
+                  search goes by name — a clear name here is exactly what the file is found by later
                 </Text>
               </div>
 
               <div>
-                <GroupLabel>что это</GroupLabel>
+                <GroupLabel>what this is</GroupLabel>
                 <Text size='micro' variant='label'>
                   {formatBytes(Number(file.sizeBytes ?? 0))} ·{' '}
                   {kindWord(file.contentType ?? undefined, file.fileName ?? '')} ·{' '}
-                  {file.contentType || 'тип неизвестен'}
+                  {file.contentType || 'type unknown'}
                 </Text>
-                {/* Кто загрузил и когда — в блоке «ответственность» ниже: там же живут
+                {/* Кто загрузил и когда — в блоке «responsibility» ниже: там же живут
                     владельцы, и печатать загрузившего дважды значит показать одну роль как
                     две. */}
               </div>
@@ -330,7 +333,7 @@ export function FileCardModal({
               ещё и роль. Пока они лежали в одном ряду, снятие «съёмки» читалось как снятие
               ярлыка, а стоило роли. */}
           <div className='flex flex-col gap-1'>
-            <GroupLabel>проекты</GroupLabel>
+            <GroupLabel>projects</GroupLabel>
             <ChipRow>
               {projectChips.map((t) => {
                 const pid = Number(t.id);
@@ -345,7 +348,7 @@ export function FileCardModal({
                     title={
                       writable
                         ? d || undefined
-                        : 'только чтение — проекты не переставить'
+                        : "read-only — the projects can't be moved around"
                     }
                     onClick={() =>
                       setSelected((p) => (p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]))
@@ -358,7 +361,7 @@ export function FileCardModal({
               })}
               {!projectChips.length && (
                 <Text size='micro' variant='label' component='span'>
-                  проектов пока нет
+                  no projects yet
                 </Text>
               )}
             </ChipRow>
@@ -367,9 +370,9 @@ export function FileCardModal({
                 проекта не существует), но человек обязан узнать о нём отсюда, а не обнаружив
                 пропажу. */}
             <Text size='micro' variant='label'>
-              снимете чип проекта — исчезнет и роль файла в нём: роль стоит на самой связи, и
-              вместе со связью удаляется. вернуть её можно, снова поставив проект и выбрав роль
-              ниже.
+              take the project chip off and the file's role in it goes too: the role sits on the
+              link itself and is deleted along with it. it comes back by putting the project on
+              again and picking a role below.
             </Text>
             {/* ПРЕДУПРЕЖДЕНИЕ ИМЕНЕМ, а не общей фразой: оно печатается ровно тогда, когда
                 снятый проект действительно нёс роль, и называет, какую именно. */}
@@ -380,9 +383,9 @@ export function FileCardModal({
               if (!losing.length) return null;
               return (
                 <Text size='micro'>
-                  не сохранено:{' '}
-                  {losing.map((p) => `«${p.name}» — «${p.role?.roleName}»`).join(', ')} — эта роль
-                  пропадёт вместе со связью, когда вы нажмёте «сохранить»
+                  not saved:{' '}
+                  {losing.map((p) => `“${p.name}” — “${p.role?.roleName}”`).join(', ')} — this role
+                  will go along with the link the moment you press “save”
                 </Text>
               );
             })()}
@@ -392,7 +395,7 @@ export function FileCardModal({
               вызовом: она применяется сразу, кнопки «сохранить» не ждёт. */}
           {inProjects.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <GroupLabel>роль в проекте</GroupLabel>
+              <GroupLabel>role in the project</GroupLabel>
               {inProjects.map((p) => (
                 <div key={p.id} className='flex flex-wrap items-center gap-1.5'>
                   <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -405,7 +408,7 @@ export function FileCardModal({
                       disabled={!writable || setRoles.isPending}
                       onClick={() => applyRole(p.id, 0)}
                     >
-                      без роли
+                      without a role
                     </Chip>
                     {roles.map((r) => {
                       const rid = Number(r.id);
@@ -416,7 +419,7 @@ export function FileCardModal({
                           selected={on}
                           pressed={on}
                           disabled={!writable || setRoles.isPending}
-                          title={writable ? undefined : 'только чтение — роль не сменить'}
+                          title={writable ? undefined : "read-only — the role can't be changed"}
                           onClick={() => applyRole(p.id, on ? 0 : rid)}
                         >
                           {r.name}
@@ -428,7 +431,11 @@ export function FileCardModal({
                         там, где роль есть. Снять её можно, назначить заново — нет. */}
                     {!!p.role?.roleId &&
                       !roles.some((r) => Number(r.id) === p.role?.roleId) && (
-                        <Chip selected pressed title='роль в архиве: снять можно, назначить заново — нет'>
+                        <Chip
+                          selected
+                          pressed
+                          title='the role is archived: it can be taken off, but not put on again'
+                        >
                           {p.role?.roleName || `#${p.role?.roleId}`}
                         </Chip>
                       )}
@@ -436,14 +443,14 @@ export function FileCardModal({
                 </div>
               ))}
               <Text size='micro' variant='label'>
-                роль применяется сразу, «сохранить» её не ждёт. только что отмеченный проект
-                появится здесь после сохранения: до него связи, на которой живёт роль, ещё нет.
+                the role applies at once, it does not wait for “save”. a project just ticked shows
+                up here only after saving: before that there is no link for the role to live on.
               </Text>
             </div>
           )}
 
           <div className='flex flex-col gap-1'>
-            <GroupLabel>темы</GroupLabel>
+            <GroupLabel>topics</GroupLabel>
             <ChipRow>
               {topicChips.map((t) => (
                 // В ЧТЕНИИ ЧИП ВЫКЛЮЧЕН, А НЕ ПРОСТО МЁРТВ. Раньше он оставался кликабельным
@@ -454,7 +461,7 @@ export function FileCardModal({
                   selected={selected.includes(Number(t.id))}
                   pressed={selected.includes(Number(t.id))}
                   disabled={!writable}
-                  title={writable ? undefined : 'только чтение — темы не переставить'}
+                  title={writable ? undefined : "read-only — the topics can't be moved"}
                   onClick={() =>
                     setSelected((p) =>
                       p.includes(Number(t.id))
@@ -477,7 +484,7 @@ export function FileCardModal({
               ))}
               {!topicChips.length && !newTopics.length && (
                 <Text size='micro' variant='label' component='span'>
-                  тем пока нет
+                  no topics yet
                 </Text>
               )}
             </ChipRow>
@@ -488,7 +495,7 @@ export function FileCardModal({
               name='newTopic'
               value={newTopic}
               disabled={!writable}
-              placeholder={writable ? 'новая тема' : 'только чтение'}
+              placeholder={writable ? 'new topic' : 'read-only'}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                 if (e.key !== 'Enter') return;
@@ -502,11 +509,11 @@ export function FileCardModal({
               className='max-w-[220px]'
             />
             <Text size='micro' variant='label'>
-              тема — ярлык, а не папка: файл несёт сразу несколько или ни одной
+              a topic is a label, not a folder: a file carries several at once or none at all
             </Text>
           </div>
 
-          {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «сохранить»:
+          {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «save»:
               владельцы меняются отдельным RPC, и складывать их в ту же «грязную» форму
               значило бы обещать откат правки, которого у replace-набора нет. */}
           <FileOwnersSection file={file} writable={writable} />
@@ -533,22 +540,23 @@ export function FileCardModal({
           <div className='sticky bottom-0 -mx-2.5 -mb-2.5 flex flex-wrap items-center gap-1.5 border-t border-borderColor bg-bgColor px-2.5 py-1.5'>
             {writable && (
               <Button size='sm' onClick={save} disabled={!dirty || updateFile.isPending}>
-                {updateFile.isPending ? 'сохраняем…' : 'сохранить'}
+                {updateFile.isPending ? 'saving…' : 'save'}
               </Button>
             )}
-            {/* «читать» — только у pdf. Остальным читалка отвечает «не читается в браузере», и
+            {/* «read» — только у pdf. Остальным читалка отвечает «this file is not readable in
+                a browser», и
                 приводить туда из карточки нечестно: кнопка обещала бы чтение. */}
             {readable && (
               <Button size='sm' variant='secondary' onClick={() => setReading(true)}>
-                читать
+                read
               </Button>
             )}
             {/* У ЗАМЕТКИ ЭТО ЕДИНСТВЕННАЯ КНОПКА ОТКРЫТИЯ. `text/markdown` в inline-аллоулист
-                сервер сознательно не берёт, поэтому `file.url` у неё пуст и кнопка «открыть»
-                ниже не рисуется вовсе; «скачать» отдаёт .md файлом, а не показывает текст. */}
+                сервер сознательно не берёт, поэтому `file.url` у неё пуст и кнопка «open»
+                ниже не рисуется вовсе; «download» отдаёт .md файлом, а не показывает текст. */}
             {note && (
               <Button size='sm' onClick={openNote}>
-                открыть заметку
+                open the note
               </Button>
             )}
             {/* url пуст у типов, которым inline запрещён (svg, html): сервер его не выдаёт —
@@ -556,26 +564,26 @@ export function FileCardModal({
             {file.url && (
               <Button asChild size='sm' variant='secondary'>
                 <a href={file.url} target='_blank' rel='noopener noreferrer'>
-                  открыть
+                  open
                 </a>
               </Button>
             )}
             {file.downloadUrl && (
               <Button asChild size='sm' variant='secondary'>
-                <a href={file.downloadUrl}>скачать</a>
+                <a href={file.downloadUrl}>download</a>
               </Button>
             )}
             <div className='ml-auto flex items-center gap-1.5'>
               {!writable && (
                 <Text size='micro' variant='label' component='span'>
-                  только чтение
+                  read-only
                 </Text>
               )}
               {/* ПРИЧИНА СТОИТ РЯДОМ С ВЫКЛЮЧЕННОЙ КНОПКОЙ, а не только в подсказке при
                   наведении: подсказку не увидит тот, кто вообще не понял, почему кнопка серая. */}
               {writable && heldByTasks > 0 && (
                 <Text size='micro' variant='label' component='span'>
-                  отцепите его в разделе «задачи» выше
+                  detach it in the “tasks” section above
                 </Text>
               )}
               <Button
@@ -584,12 +592,12 @@ export function FileCardModal({
                 disabled={!writable || deleteFile.isPending || heldByTasks > 0}
                 title={
                   heldByTasks > 0
-                    ? 'файл держат задачи — сервер откажет в удалении, пока он в них числится'
+                    ? 'tasks hold the file — the server will refuse the deletion while it is listed in them'
                     : undefined
                 }
                 onClick={() => setConfirmDelete(true)}
               >
-                удалить
+                delete
               </Button>
             </div>
           </div>
@@ -602,14 +610,14 @@ export function FileCardModal({
         open={confirmClose}
         onOpenChange={setConfirmClose}
         onConfirm={() => (closeIntent === 'note' ? navigate(notePath(id)) : onClose())}
-        title='закрыть без сохранения'
-        confirmLabel={closeIntent === 'note' ? 'открыть заметку' : 'закрыть'}
-        cancelLabel='остаться'
+        title='close without saving'
+        confirmLabel={closeIntent === 'note' ? 'open the note' : 'close'}
+        cancelLabel='stay'
         width='sm'
       >
         <Text>
-          имя или набор тем изменены и не сохранены. закроете — правка пропадёт, вернуть её
-          будет неоткуда.
+          the name or the set of topics is changed and not saved. close it and the edit is gone,
+          with nowhere to bring it back from.
         </Text>
       </ConfirmationModal>
 
@@ -617,15 +625,16 @@ export function FileCardModal({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onConfirm={remove}
-        title='удалить файл'
-        confirmLabel={deleteFile.isPending ? 'удаляем…' : 'удалить'}
+        title='delete the file'
+        confirmLabel={deleteFile.isPending ? 'deleting…' : 'delete'}
         confirmDisabled={deleteFile.isPending}
         closeOnConfirm={false}
         width='sm'
       >
         <Text>
-          файл и его байты удаляются безвозвратно — вернуть их будет неоткуда. если файл
-          прикреплён к задачам, удаление не пройдёт и сообщение назовёт карточки.
+          the file and its bytes are deleted irreversibly — there will be nowhere to bring them back
+          from. if the file is attached to tasks, the deletion won't go through and the message will
+          name the cards.
         </Text>
       </ConfirmationModal>
     </ConfirmationModal>

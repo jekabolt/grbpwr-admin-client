@@ -110,8 +110,8 @@ export function NewNoteModal({
         } catch (e) {
           invalidateFileViews(qc);
           setFailure(
-            failureText(e, 'роль не проставилась') +
-              '. заметка создана — откройте её и поставьте роль в карточке.',
+            failureText(e, "the role didn't get set") +
+              '. the note is created — open it and put the role on in the card.',
           );
           return;
         }
@@ -126,10 +126,13 @@ export function NewNoteModal({
       }
       // Создалась, но id не приехал: закрывать молча нельзя — человек решит, что не вышло, и
       // нажмёт второй раз, получив вторую заметку с тем же именем.
-      showMessage('заметка создана, но открыть её не вышло — найдите её в библиотеке', 'success');
+      showMessage(
+        "the note is created, but opening it didn't work out — find it in the library",
+        'success',
+      );
       onClose();
     } catch (e) {
-      setFailure(failureText(e, 'не удалось создать заметку'));
+      setFailure(failureText(e, "couldn't create the note"));
     } finally {
       setSaving(false);
     }
@@ -143,24 +146,24 @@ export function NewNoteModal({
       }}
       onConfirm={create}
       closeOnConfirm={false}
-      title='новая заметка'
-      confirmLabel={saving ? 'создаём…' : created ? 'открыть заметку' : 'создать и открыть'}
+      title='new note'
+      confirmLabel={saving ? 'creating…' : created ? 'open the note' : 'create and open'}
       confirmDisabled={(!created && !name.trim()) || saving}
-      cancelLabel='отмена'
+      cancelLabel='cancel'
       width='sm'
     >
       <div className='flex flex-col gap-2.5'>
         <div className='flex flex-col gap-1'>
-          <GroupLabel>имя</GroupLabel>
+          <GroupLabel>name</GroupLabel>
           <Input
             name='noteName'
             value={name}
             autoFocus
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-            placeholder='например: бриф на съёмку'
+            placeholder='for example: a brief for the shoot'
           />
           <Text size='micro' variant='label'>
-            расширение .md дописывается само — искать заметку потом будут по этому имени
+            the .md extension is appended by itself — the note will later be looked for by this name
           </Text>
         </div>
 
@@ -170,7 +173,7 @@ export function NewNoteModal({
             которого эта роль заведена. */}
         {projects.length > 0 && (
           <div className='flex flex-col gap-1'>
-            <GroupLabel>проекты</GroupLabel>
+            <GroupLabel>projects</GroupLabel>
             <ChipRow>
               {projects.map((p) => {
                 const id = Number(p.id);
@@ -181,7 +184,7 @@ export function NewNoteModal({
                     key={id}
                     selected={on}
                     pressed={on}
-                    title={presetProjectId === id ? 'выбран на холсте' : d || undefined}
+                    title={presetProjectId === id ? 'chosen on the canvas' : d || undefined}
                     onClick={() =>
                       setSelected((prev) =>
                         prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
@@ -198,10 +201,10 @@ export function NewNoteModal({
               <>
                 <ChipRow>
                   <Text size='micro' variant='label' component='span' className='uppercase'>
-                    роль
+                    role
                   </Text>
                   <Chip selected={!roleId} pressed={!roleId} onClick={() => setRoleId(0)}>
-                    без роли
+                    without a role
                   </Chip>
                   {roles.map((r) => {
                     const rid = Number(r.id);
@@ -219,16 +222,16 @@ export function NewNoteModal({
                   })}
                 </ChipRow>
                 <Text size='micro' variant='label'>
-                  роль ставится в проекте, а не на самой заметке: она встанет на связь с
-                  «{projects.find((p) => Number(p.id) === soleProject)?.name}». «без роли» —
-                  тоже нормально, разобрать можно позже.
+                  a role is set inside the project, not on the note itself: it will sit on the link
+                  with “{projects.find((p) => Number(p.id) === soleProject)?.name}”. “without a
+                  role” is fine too — it can be sorted out later.
                 </Text>
               </>
             ) : (
               chosenProjects.length > 1 && (
                 <Text size='micro' variant='label'>
-                  выбрано несколько проектов: роль стоит на связи с ОДНИМ, поэтому здесь её не
-                  спрашивают — проставите в карточке заметки, отдельно по каждому.
+                  several projects are chosen: a role sits on the link with ONE of them, so it is
+                  not asked here — set it in the note card, separately for each.
                 </Text>
               )
             )}
@@ -236,7 +239,7 @@ export function NewNoteModal({
         )}
 
         <div className='flex flex-col gap-1'>
-          <GroupLabel>темы</GroupLabel>
+          <GroupLabel>topics</GroupLabel>
           <ChipRow>
             {topics.map((t) => (
               <Chip
@@ -261,7 +264,7 @@ export function NewNoteModal({
             ))}
             {!topics.length && !newTopics.length && (
               <Text size='micro' variant='label' component='span'>
-                тем пока нет
+                no topics yet
               </Text>
             )}
           </ChipRow>
@@ -279,7 +282,7 @@ export function NewNoteModal({
               }
               setNewTopic('');
             }}
-            placeholder='новая тема — enter'
+            placeholder='new topic — enter'
           />
         </div>
 

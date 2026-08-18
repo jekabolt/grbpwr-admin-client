@@ -149,11 +149,11 @@ export const techCardAuxSubtypeFormOptions: Array<{ value: string; label: string
   { value: 'TECH_CARD_AUX_SUBTYPE_SIZE_LABEL', label: 'size label' },
   { value: 'TECH_CARD_AUX_SUBTYPE_HANGTAG', label: 'hangtag' },
   { value: 'TECH_CARD_AUX_SUBTYPE_STICKER', label: 'sticker' },
-  { value: 'TECH_CARD_AUX_SUBTYPE_DUST_BAG', label: 'dust bag (пыльник)' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_DUST_BAG', label: 'dust bag' },
   // Its own kind, not a dust bag: a кофр is cut and sewn as its own item, and the assembly bill has
   // to be able to say which of the two a style ships with.
-  { value: 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE', label: 'garment case (кофр)' },
-  { value: 'TECH_CARD_AUX_SUBTYPE_TOTE_BAG', label: 'tote bag (шоппер)' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE', label: 'garment case' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_TOTE_BAG', label: 'tote bag' },
   { value: 'TECH_CARD_AUX_SUBTYPE_BOX', label: 'box' },
   { value: 'TECH_CARD_AUX_SUBTYPE_INSERT', label: 'insert' },
   { value: 'TECH_CARD_AUX_SUBTYPE_HANGER', label: 'hanger' },
@@ -207,10 +207,10 @@ export const techCardBomSectionOptions: Array<{ value: common_TechCardBomSection
     { value: 'TECH_CARD_BOM_SECTION_LINING', label: 'lining' },
     { value: 'TECH_CARD_BOM_SECTION_INTERLINING', label: 'interlining' },
     { value: 'TECH_CARD_BOM_SECTION_INSULATION', label: 'insulation' },
-    { value: 'TECH_CARD_BOM_SECTION_HARDWARE', label: 'hardware (пуговицы / молнии / кнопки)' },
+    { value: 'TECH_CARD_BOM_SECTION_HARDWARE', label: 'hardware' },
     { value: 'TECH_CARD_BOM_SECTION_THREAD', label: 'thread' },
-    { value: 'TECH_CARD_BOM_SECTION_TRIM', label: 'trim (бейка / тесьма / резинка)' },
-    { value: 'TECH_CARD_BOM_SECTION_DECORATION', label: 'decoration (принт / вышивка / патч)' },
+    { value: 'TECH_CARD_BOM_SECTION_TRIM', label: 'trim' },
+    { value: 'TECH_CARD_BOM_SECTION_DECORATION', label: 'decoration' },
     { value: 'TECH_CARD_BOM_SECTION_LABEL', label: 'label' },
     { value: 'TECH_CARD_BOM_SECTION_PACKAGING', label: 'packaging' },
   ];

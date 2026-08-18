@@ -73,14 +73,14 @@ function PiecePicker({
   if (!optionsReady) {
     return (
       <Text variant='inactive' size='small'>
-        загрузка деталей…
+        loading the pieces…
       </Text>
     );
   }
   if (options.length === 0 && orphans.length === 0) {
     return (
       <Text variant='inactive' size='small'>
-        у этой тех карты ещё нет деталей — укажите зону
+        this tech card has no pieces yet — name a zone instead
       </Text>
     );
   }
@@ -103,7 +103,7 @@ function PiecePicker({
           selected
           tone='error'
           disabled={disabled}
-          title='этой детали больше нет в тех карте'
+          title='this piece is no longer in the tech card'
           onClick={() => toggle(id)}
         >
           {`#${id}`}
@@ -172,7 +172,7 @@ function CRFields({
         </label>
       </div>
       <div className='flex flex-col gap-1'>
-        <Text size='small'>детали</Text>
+        <Text size='small'>pieces</Text>
         <PiecePicker
           selected={value.pieceIds ?? []}
           options={pieceOptions}
@@ -260,7 +260,7 @@ function CreateModeList({
       />
       {fields.length === 0 ? (
         <Text variant='inactive' size='small'>
-          нет замечаний к доработке
+          no change requests
         </Text>
       ) : (
         fields.map((f, index) => (
@@ -431,7 +431,7 @@ function EditModeList({
       <FittingCarryOver techCardId={techCardId} roundNumber={roundNumber} fittingId={fittingId} />
       {serverChangeRequests.length === 0 ? (
         <Text variant='inactive' size='small'>
-          нет замечаний — добавьте первый
+          no change requests — add the first one
         </Text>
       ) : (
         serverChangeRequests.map((cr, index) => (
@@ -534,10 +534,6 @@ export function ChangeRequestsFields({
       piecesReady={piecesReady}
     />
   ) : (
-    <CreateModeList
-      techCardId={techCardId}
-      pieceOptions={pieceOptions}
-      piecesReady={piecesReady}
-    />
+    <CreateModeList techCardId={techCardId} pieceOptions={pieceOptions} piecesReady={piecesReady} />
   );
 }

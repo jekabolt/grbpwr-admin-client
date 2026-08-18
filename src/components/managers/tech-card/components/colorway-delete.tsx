@@ -104,7 +104,7 @@ export function ColorwayDeleteControl({
       {
         onSuccess: () => {
           setOpen(false);
-          showMessage(`продукт ${code} удалён`, 'success');
+          showMessage(`product ${code} deleted`, 'success');
           onDeleted();
         },
         onError: (e) => {
@@ -113,7 +113,7 @@ export function ColorwayDeleteControl({
           // оператора — «почему», и ответ уже приехал.
           const fresh = extractFieldViolations(e).map((v) => v.description);
           if (fresh.length > 0) setLateBlockers(fresh);
-          else showMessage(e instanceof Error ? e.message : 'не удалось удалить продукт', 'error');
+          else showMessage(e instanceof Error ? e.message : "couldn't delete the product", 'error');
         },
       },
     );
@@ -144,7 +144,7 @@ export function ColorwayDeleteControl({
       <span
         role='button'
         tabIndex={0}
-        aria-label={`удалить продукт ${code} безвозвратно`}
+        aria-label={`delete product ${code} irreversibly`}
         onClick={openDialog}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -155,7 +155,7 @@ export function ColorwayDeleteControl({
         className='cursor-pointer self-start underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
       >
         <Text size='micro' variant='error' tracking='label' component='span'>
-          удалить продукт
+          delete the product
         </Text>
       </span>
 
@@ -165,11 +165,11 @@ export function ColorwayDeleteControl({
           setOpen(next);
           if (!next) setLateBlockers([]);
         }}
-        title={`удалить продукт ${code}`}
+        title={`delete product ${code}`}
         // Футера нет во всех состояниях, кроме «сервер разрешил»: см. offerDelete. Закрывается
         // крестом в шапке — единственное действие, которое там вообще осмысленно.
         hideActions={!offerDelete}
-        confirmLabel='удалить продукт'
+        confirmLabel='delete the product'
         confirmDisabled={del.isPending}
         // Печатать нужно КОД КОЛОРВЕЯ, а не «delete»: слово, которое оператор видит на плитке,
         // заставляет его сверить, тот ли продукт он сейчас сотрёт.
@@ -182,7 +182,7 @@ export function ColorwayDeleteControl({
         <div className='flex flex-col gap-1.5'>
           {preview.isPending && (
             <Text size='micro' variant='label'>
-              считаем, что будет удалено…
+              working out what will be deleted…
             </Text>
           )}
 
@@ -191,7 +191,7 @@ export function ColorwayDeleteControl({
               <Text size='micro'>
                 {preview.error instanceof Error
                   ? preview.error.message
-                  : 'не удалось получить вердикт'}
+                  : "couldn't get the verdict"}
               </Text>
             </CalloutBox>
           )}
@@ -199,24 +199,24 @@ export function ColorwayDeleteControl({
           {verdict && !deletable && (
             <>
               <Text size='micro'>
-                этот продукт удалить нельзя — он уже оставил следы, которые нельзя стереть задним
-                числом.
+                this product can't be deleted — it has already left traces that can't be erased
+                after the fact.
               </Text>
-              <GroupLabel flush>что держит</GroupLabel>
+              <GroupLabel flush>what holds it</GroupLabel>
               <EntryList entries={verdict.blockers} />
               {/* Архивирование живёт на странице самого продукта (LifecycleControls) и здесь
                   НЕ дублируется: две кнопки «архивировать» в разных местах разъезжаются в первый же
                   раз, когда одна из них научится чему-то новому. Отсюда — ссылка туда. */}
               <Text size='micro' variant='label'>
-                вместо удаления его можно архивировать — он уйдёт с витрины, а история заказов,
-                партий и остатков останется целой.
+                instead of deleting it you can archive it — it leaves the storefront, while the
+                history of orders, runs and stock stays intact.
               </Text>
               <Link
                 to={productPath}
                 className='underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
               >
                 <Text size='micro' variant='uppercase' tracking='label' component='span'>
-                  страница продукта ↗
+                  product page ↗
                 </Text>
               </Link>
             </>
@@ -225,27 +225,27 @@ export function ColorwayDeleteControl({
           {verdict && deletable && (
             <>
               <Text size='micro'>
-                продукт <b>{code}</b> будет удалён физически и безвозвратно — не архивирован и не
-                скрыт. восстановить его будет нельзя.
+                product <b>{code}</b> will be deleted physically and irreversibly — not archived and
+                not hidden. it won't be possible to restore it.
               </Text>
               {/* ПОЧЕМУ удаление вообще разрешено — отдельной строкой и серым: это факт сервера
                   (граница удаляемости), а не обещание, что архивировать нечего. Заархивировать
                   такой колорвей по-прежнему можно, и на странице продукта эта кнопка на месте. */}
               <Text size='micro' variant='label'>
-                удаление разрешено потому, что он никогда не продавался и никогда не производился.
+                deleting is allowed because it was never sold and never produced.
               </Text>
 
               {isLastColorway && (
                 <Text size='micro' variant='label'>
-                  это последний колорвей стиля — после удаления у карточки не останется ни одного
-                  продукта.
+                  this is the last colourway of the style — after the deletion the card will have no
+                  products left at all.
                 </Text>
               )}
 
               {/* КАСКАД — умрёт ВМЕСТЕ с колорвеем. */}
               {(verdict.cascade?.length ?? 0) > 0 && (
                 <>
-                  <GroupLabel flush>удалится вместе с ним</GroupLabel>
+                  <GroupLabel flush>will be deleted along with it</GroupLabel>
                   <EntryList entries={verdict.cascade} />
                 </>
               )}
@@ -257,7 +257,7 @@ export function ColorwayDeleteControl({
                   а не общий список с каскадом. */}
               {(verdict.orphans?.length ?? 0) > 0 && (
                 <CalloutBox tone='warning' className='mt-1.5'>
-                  <GroupLabel flush>переживёт удаление и потеряет колорвей</GroupLabel>
+                  <GroupLabel flush>will survive the deletion and lose the colourway</GroupLabel>
                   <EntryList entries={verdict.orphans} />
                 </CalloutBox>
               )}
@@ -269,7 +269,7 @@ export function ColorwayDeleteControl({
               сервера, а не «не удалось»: они и есть ответ на «почему». */}
           {lateBlockers.length > 0 && (
             <CalloutBox tone='error' className='mt-1.5'>
-              <GroupLabel flush>удаление отменено — карточка изменилась</GroupLabel>
+              <GroupLabel flush>deletion cancelled — the card changed</GroupLabel>
               {lateBlockers.map((text, i) => (
                 <Row
                   key={i}
@@ -281,8 +281,8 @@ export function ColorwayDeleteControl({
                 />
               ))}
               <Text size='micro' variant='label' className='mt-1'>
-                эти факты появились уже после того, как проверка разрешила удаление. закройте и
-                откройте диалог, чтобы пересчитать вердикт.
+                these facts appeared after the check had already allowed the deletion. close and
+                reopen the dialog to recompute the verdict.
               </Text>
             </CalloutBox>
           )}

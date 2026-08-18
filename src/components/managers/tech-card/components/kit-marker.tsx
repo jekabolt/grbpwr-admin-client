@@ -116,10 +116,10 @@ export function KitMarkerHint({
   if (frozen) {
     return (
       <Text size='nano' variant='label' component='p'>
-        раскладку комплекта на выпущенной карточке не снять: сервер не принимает на неё карточные
-        раскладки, а нормой может быть только карточная. Снимите карточку с релиза либо снимайте
-        настил партии из очереди раскроя на вкладке костинга — он принадлежит прогону, и релиз ему
-        не мешает
+        a kit marker can't be captured on a released card: the server doesn't accept card markers on
+        it, and only a card marker can be the norm. take the card off release, or capture the run's
+        lay from the cutting queue on the costing tab — it belongs to the run, and release doesn't
+        stand in its way
       </Text>
     );
   }
@@ -128,10 +128,11 @@ export function KitMarkerHint({
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
       <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
-        раскладка комплекта…
+        kit marker…
       </Button>
       <Text size='nano' variant='label' component='span'>
-        разложить детали ЭТОЙ ткани на ширине этого артикула — измеренная длина, отходы уже внутри
+        lay out the pieces of THIS fabric at this article's width — a measured length, waste already
+        inside it
       </Text>
       {open && (
         <Suspense fallback={null}>

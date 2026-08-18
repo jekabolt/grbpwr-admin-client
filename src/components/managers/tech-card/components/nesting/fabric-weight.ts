@@ -107,29 +107,29 @@ export function weightBasisOf(
 export function weightRefusalText(missing: WeightBasisMissing, pinned = false): string {
   if (missing === 'both') {
     return pinned
-      ? 'слот в килограммах, а колорвей пинован на другой артикул — основа веса берётся с него, и у него не заполнены ни полная ширина рулона, ни плотность (г/м²). Перевести длину в вес нечем; заполните обе в карточке пинованного материала'
-      : 'слот в килограммах, но не заполнены ни полная ширина рулона, ни плотность (г/м²) артикула — перевести длину в вес нечем. Заполните обе в карточке материала';
+      ? "the slot is in kilograms, and the colourway is pinned to a different article — the weight basis is taken from that one, and it has neither a full roll width nor a density (g/m²) filled in. there is nothing to convert length into weight with; fill both in on the pinned material's card"
+      : "the slot is in kilograms, but neither the full roll width nor the article's density (g/m²) is filled in — there is nothing to convert length into weight with. fill both in on the material's card";
   }
   if (missing === 'width') {
     return pinned
-      ? 'слот в килограммах, а колорвей пинован на другой артикул — ширина берётся с него, и у него она не заполнена. Ширина на строке BOM может стоять, но она описывает другую ткань (артикул слота). Заполните ширину пинованного артикула'
-      : 'слот в килограммах, но полная ширина рулона неизвестна (не заполнена ни на строке BOM, ни у артикула) — перевести длину в вес нечем. Заполните ширину артикула';
+      ? "the slot is in kilograms, and the colourway is pinned to a different article — the width is taken from that one, and it isn't filled in there. the BOM line may carry a width, but it describes a different fabric (the slot's article). fill in the width of the pinned article"
+      : "the slot is in kilograms, but the full roll width is unknown (filled in neither on the BOM line nor on the article) — there is nothing to convert length into weight with. fill in the article's width";
   }
   return pinned
-    ? 'слот в килограммах, а колорвей пинован на другой артикул — у него не заполнена плотность (г/м²). Перевести длину в вес нечем; заполните плотность в карточке пинованного материала'
-    : 'слот в килограммах, но у артикула не заполнена плотность (г/м²) — перевести длину в вес нечем. Заполните плотность в карточке материала';
+    ? "the slot is in kilograms, and the colourway is pinned to a different article — that one has no density (g/m²) filled in. there is nothing to convert length into weight with; fill the density in on the pinned material's card"
+    : "the slot is in kilograms, but the article has no density (g/m²) filled in — there is nothing to convert length into weight with. fill the density in on the material's card";
 }
 
 /** Короткая подпись основы — рядом с килограммовым числом. */
 export function weightBasisLabel(b: FabricWeightBasis): string {
-  return `полная ширина ${b.fullWidthCm} см (с кромкой) × ${b.gsm} г/м²`;
+  return `full width ${b.fullWidthCm} cm (with selvedge) × ${b.gsm} g/m²`;
 }
 
 /** Короткое имя нехватки — в пилюлю; полная причина (weightRefusalText) идёт в title/колаут. */
 export function weightMissingShort(missing: WeightBasisMissing): string {
-  if (missing === 'both') return 'кг: нет ширины и плотности';
-  if (missing === 'width') return 'кг: нет ширины рулона';
-  return 'кг: нет плотности артикула';
+  if (missing === 'both') return 'kg: no width and no density';
+  if (missing === 'width') return 'kg: no roll width';
+  return 'kg: no article density';
 }
 
 // Полная фраза честности — там, где килограммовое число применяется. Ширина названа ПОЛНОЙ с
@@ -148,5 +148,5 @@ export function weightMissingShort(missing: WeightBasisMissing): string {
 // потери настила — кромку НЕТ: заложить её туда значит посчитать дважды. Усадку и обход пороков
 // он тоже НЕ покрывает: за них платит коэффициент раскроя артикула, отдельным множителем (0303).
 export function weightBasisNote(b: FabricWeightBasis): string {
-  return `килограммы посчитаны через длину: метры × полная ширина рулона ${b.fullWidthCm} см × плотность ${b.gsm} г/м² ÷ 100000. Ширина — полная, кромка входит: её покупают, и она весит — и входит она сюда РОВНО ОДИН РАЗ: netto-длина получена делением площади на раскройную ширину (рулон − 2×кромка), кромка учтена этим делением, и процент раскроя слота её НЕ добавляет (он покрывает межлекальные выпады и концы настила; усадку и пороки платит коэффициент артикула). Плотность — всегда артикула; ширина — строки BOM, когда та её переопределяет, иначе артикула (при пине колорвея на другой артикул обе — с него). Ошибка любой из них входит в вес линейно и не видна ни в одном числе`;
+  return `kilograms are computed through length: metres × full roll width ${b.fullWidthCm} cm × density ${b.gsm} g/m² ÷ 100000. the width is the full one, selvedge included: it is bought and it weighs — and it enters here EXACTLY ONCE: the net length comes from dividing the area by the cutting width (roll − 2×selvedge), the selvedge is accounted for by that division, and the slot's cutting percent does NOT add it again (that percent covers the waste between pieces and the lay ends; shrinkage and faults are paid by the article's coefficient). the density is always the article's; the width is the BOM line's when that line overrides it, otherwise the article's (when the colourway is pinned to a different article, both come from that one). an error in either enters the weight linearly and is invisible in every single number`;
 }

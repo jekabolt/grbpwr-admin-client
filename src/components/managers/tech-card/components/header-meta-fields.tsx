@@ -251,9 +251,9 @@ function CategoryBrowser() {
       <ConfirmationModal
         open={pending != null}
         width='sm'
-        title='сменить категорию?'
-        confirmLabel='сменить категорию'
-        cancelLabel='отмена'
+        title='change the category?'
+        confirmLabel='change the category'
+        cancelLabel='cancel'
         onOpenChange={(o) => {
           if (!o) setPending(null);
         }}
@@ -263,17 +263,17 @@ function CategoryBrowser() {
         }}
       >
         <Text size='micro' variant='label' className='mb-2'>
-          Категория задаёт разрешённые размерные системы и колонки мерок в таблице размеров. Смена
-          на «{pendingLabel}» затронет уже собранный ряд:
+          the category sets the allowed size systems and the measurement columns of the size chart.
+          changing it to “{pendingLabel}” affects the size range already assembled:
         </Text>
-        <Row label='размеров в ряду' value={sizeIds.length} />
+        <Row label='sizes in the range' value={sizeIds.length} />
         <Row
-          label='из них вне систем новой категории'
+          label="of them outside the new category's systems"
           value={pending != null ? outsideCount(pending) : 0}
         />
         <Text size='micro' variant='label' className='mt-2'>
-          размеры не удаляются — но ряд перестанет соответствовать категории, а колонки мерок в size
-          chart пересчитаются под новую.
+          sizes are not deleted — but the range will stop matching the category, and the measurement
+          columns in the size chart will be recomputed for the new one.
         </Text>
       </ConfirmationModal>
     </div>

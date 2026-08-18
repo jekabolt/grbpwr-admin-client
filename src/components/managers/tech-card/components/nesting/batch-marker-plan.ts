@@ -64,6 +64,7 @@ import { applySeamPrefill } from './dxf-apply-conditions';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { compositionOf, type MarkerCompositionEntry } from './marker-io';
 import { uniConflictReason } from './block-code';
+import { sameMarkerName } from './scope-label';
 import {
   dedupeUniPieces,
   markerUnits,
@@ -472,15 +473,15 @@ export function planBatchMarkers(args: {
   if (args.looseSheets.length > 0) {
     refusals.push({
       key: 'loose',
-      scopeLabel: 'выкройки без ткани',
+      scopeLabel: 'patterns without a fabric',
       colorwayLabel: '',
       sizeLabel: '',
-      reason: `${args.looseSheets.length} ${args.looseSheets.length === 1 ? 'лист' : 'листов'} не привязан ни к одной строке BOM (${args.looseSheets
+      reason: `${args.looseSheets.length} ${args.looseSheets.length === 1 ? 'sheet is' : 'sheets are'} not bound to any BOM line (${args.looseSheets
         .map((s) => s.name)
         .slice(0, 4)
         .join(
           ', ',
-        )}) — раскладывать их не на чем: ширина и кромка приходят с артикула. Привяжите их к ткани на вкладке «выкройки».`,
+        )}) — there is no cloth to nest them on: the width and the selvedge come from the article. bind them to a fabric on the “patterns” tab.`,
     });
   }
 
@@ -496,7 +497,7 @@ export function planBatchMarkers(args: {
 
     if (scope.sheets.length === 0) {
       scopeRefusal(
-        'у этой ткани нет ни одного DXF — раскладывать нечего. Загрузите выкройки на вкладке «выкройки».',
+        'this fabric has no DXF at all — there is nothing to nest. upload the patterns on the “patterns” tab.',
       );
       continue;
     }
@@ -507,7 +508,7 @@ export function planBatchMarkers(args: {
     // раскладка выглядела чистой полной нормой. Модалка этот случай блокирует ровно так же.
     if (scope.failedSheets.length > 0) {
       scopeRefusal(
-        `не скачались листы выкроек (${scope.failedSheets.join(', ')}) — разбор неполон, и раскладка по нему описывала бы изделие без этих деталей. Повторите подготовку; если лист не открывается и вручную, перезалейте его.`,
+        `pattern sheets didn't download (${scope.failedSheets.join(', ')}) — the parse is incomplete, and a marker built on it would describe a garment without those pieces. run the preparation again; if a sheet won't open by hand either, re-upload it.`,
       );
       continue;
     }
@@ -516,12 +517,12 @@ export function planBatchMarkers(args: {
       // несколько артикулов. Выбрать за оператора значило бы измерить длину на полотне, которое
       // он не выбирал, — и записать её как норму.
       scopeRefusal(
-        `назначение владеет ${scope.lineCount} строками BOM — на какую из них ложится длина, машина решить не может: снимите раскладку из вкладки «выкройки», где ткань выбирают руками`,
+        `the purpose owns ${scope.lineCount} BOM lines — no machine can decide which of them the length lands on: capture the marker from the “patterns” tab, where the fabric is picked by hand`,
       );
       continue;
     }
     if (scope.pieces.length === 0) {
-      scopeRefusal('в выкройках этой ткани не нашлось ни одного замкнутого контура детали');
+      scopeRefusal("no closed piece contour was found in this fabric's patterns");
       continue;
     }
 
@@ -565,8 +566,8 @@ export function planBatchMarkers(args: {
         colorwayLabel: '',
         sizeLabel: args.sizeLabel(sizeId),
         reason: prep.ungradedOnly
-          ? 'в выкройках этой ткани нет размерной градации — в именах блоков размера нет вовсе, и одна геометрия отвечает за весь ряд. Такую раскладку снимают из вкладки «выкройки», одну на ткань.'
-          : `в выкройках этой ткани нет деталей этого размера (в файле есть: ${prep.tokens.join(', ') || '—'})`,
+          ? "this fabric's patterns carry no size grading — the block names hold no size at all, and one geometry answers for the whole range. a marker like that is captured from the “patterns” tab, one per fabric."
+          : `this fabric's patterns have no pieces of this size (the file has: ${prep.tokens.join(', ') || '—'})`,
       });
     }
 
@@ -646,12 +647,12 @@ export function planBatchMarkers(args: {
       const widthCm = pinnedArticle ? pin.cutCm : scope.slotCutCm;
       const selvedgeCm = pinnedArticle ? pin.selvedgeCm : scope.slotSelvedgeCm;
       const articleName =
-        (pinnedArticle ? pin.articleName : scope.slotArticleName) || 'без названия';
+        (pinnedArticle ? pin.articleName : scope.slotArticleName) || 'unnamed';
       if (!Number.isFinite(widthCm) || widthCm <= 0) {
         refuse(
           pinnedArticle
-            ? `ширина полотна не известна: у артикула «${articleName}», приколотого этим колорвеем, не заполнена ширина рулона. Ширину артикула слота сюда подставить нельзя — это другая ткань.`
-            : 'ширина полотна не известна: у артикула не заполнена ширина рулона',
+            ? `the cloth width is unknown: article “${articleName}”, pinned by this colourway, has no roll width filled in. the slot article's width can't be substituted here — that is a different fabric.`
+            : 'the cloth width is unknown: the article has no roll width filled in',
         );
         continue;
       }
@@ -667,18 +668,18 @@ export function planBatchMarkers(args: {
       if (missing.length > 0) {
         if (args.mode === 'batch') {
           refuse(
-            `в выкройках этой ткани нет деталей размеров ${missing
+            `this fabric’s patterns have no pieces of sizes ${missing
               .map((r) => args.sizeLabel(r.sizeId))
               .join(
                 ', ',
-              )} — а партия их кроит. Настил без них имел бы ДРУГОЕ соотношение размеров, то есть мерил бы партию, которой никто не шьёт. Догрузите выкройки этих размеров либо снимайте размерные нормы.`,
+              )} — and the run cuts them. a lay without them would have a DIFFERENT size ratio, that is, it would measure a run nobody sews. upload the patterns of those sizes, or capture size norms instead.`,
           );
         }
         continue;
       }
       if (spec.rows.length > MAX_COMPOSITION_SIZES) {
         refuse(
-          `в составе настила ${spec.rows.length} размеров, потолок сервера — ${MAX_COMPOSITION_SIZES}: такую раскладку он не примет. Разбейте партию на части.`,
+          `the lay composition holds ${spec.rows.length} sizes, the server ceiling is ${MAX_COMPOSITION_SIZES}: it won't accept a marker like that. split the run into parts.`,
         );
         continue;
       }
@@ -720,10 +721,10 @@ export function planBatchMarkers(args: {
       // двадцать минут ожидания ради отказа на сохранении хуже, чем отказ сейчас с числом в руках.
       if (built.pieceCount > MAX_MARKER_PIECES || built.instanceCount > MAX_MARKER_PLACEMENTS) {
         refuse(
-          `задание больше того, что примет сервер: ${built.pieceCount} контуров (потолок ${MAX_MARKER_PIECES}) и ${built.instanceCount} размещений (потолок ${MAX_MARKER_PLACEMENTS}). ${
+          `the job is bigger than the server will accept: ${built.pieceCount} contours (ceiling ${MAX_MARKER_PIECES}) and ${built.instanceCount} placements (ceiling ${MAX_MARKER_PLACEMENTS}). ${
             args.mode === 'batch'
-              ? 'Соотношение партии уже ужато на НОД и сильнее не ужимается — иначе это была бы другая партия. Разбейте партию на части либо снимайте размерные нормы.'
-              : 'Уберите лишние детали или снимите раскладку из вкладки «выкройки», где состав набирают руками.'
+              ? 'the run ratio is already squeezed by the GCD and squeezes no further — otherwise it would be a different run. split the run into parts, or capture size norms instead.'
+              : 'remove the extra pieces, or capture the marker from the “patterns” tab, where the composition is assembled by hand.'
           }`,
         );
         continue;
@@ -760,18 +761,20 @@ export function planBatchMarkers(args: {
               colorwayId: spec.colorwayId,
               sizeId: spec.rows[0].sizeId,
             })
-          : runPeers.filter((m) => m.name === baseName && !args.referencedMarkerIds.has(m.id));
+          : runPeers.filter(
+              (m) => sameMarkerName(m.name, baseName) && !args.referencedMarkerIds.has(m.id),
+            );
       // ДВА КАНДИДАТА — ОТКАЗ В ОБОИХ РЕЖИМАХ. У настила партии предикат выше сузил выбор до
       // раскладки с ТЕМ ЖЕ именем, а имя внутри прогона уникально по схеме — то есть двух быть не
       // может; проверка стоит потому, что «не может» здесь опирается на чужой индекс, а цена
       // ошибки — перезапись произвольной из двух производственных строк.
       if (match.length > 1) {
         refuse(
-          `на эту ткань, колорвей и размер уже снято ${match.length} раскладки: ${match
-            .map((m) => `«${m.name}»${m.isNorm ? ' (НОРМА)' : ''}${m.isDraft ? ' (ЧЕРНОВИК)' : ''}`)
-            .join(', ')}. Какую из них пересчитывать — решает человек: удалите лишнюю ${
-            args.mode === 'batch' ? 'на странице партии' : 'на вкладке «выкройки»'
-          } либо переснимите нужную оттуда же.`,
+          `${match.length} markers have already been captured for this fabric, colourway and size: ${match
+            .map((m) => `“${m.name}”${m.isNorm ? ' (NORM)' : ''}${m.isDraft ? ' (DRAFT)' : ''}`)
+            .join(', ')}. which of them to recompute is a person's call: delete the extra one ${
+            args.mode === 'batch' ? 'on the run page' : 'on the “patterns” tab'
+          } or re-capture the one you need from the same place.`,
         );
         continue;
       }
@@ -783,31 +786,31 @@ export function planBatchMarkers(args: {
       const untouched = runPeers.filter((m) => m.id !== (replaces?.id ?? 0));
       if (untouched.length > 0) {
         notes.push(
-          `в партии на эту ткань и колорвей уже есть ${untouched
+          `the run already holds, for this fabric and colourway, ${untouched
             .map(
               (m) =>
-                `«${m.name}»${args.referencedMarkerIds.has(m.id) ? ' (стоит в настиле)' : ''}${m.isDraft ? ' (черновик)' : ''}`,
+                `“${m.name}”${args.referencedMarkerIds.has(m.id) ? ' (used in a lay)' : ''}${m.isDraft ? ' (draft)' : ''}`,
             )
             .join(
               ', ',
-            )} — их эта очередь НЕ ТРОГАЕТ: раскладку, на которую ссылается настил, подменять нельзя. Новая встанет рядом; лишнюю удаляют на странице партии`,
+            )} — this queue DOES NOT TOUCH them: a marker a lay refers to must never be swapped out. the new one will stand alongside; the extra one is deleted on the run page`,
         );
       }
       if (replaces?.isNorm) {
         notes.push(
-          `эта раскладка сейчас НОРМА ткани — пересъёмка двигает число, по которому считается себестоимость; применять новую норму в рецепт придётся руками`,
+          `this marker is currently the NORM of the fabric — re-capturing moves the number the cost is computed from; applying the new norm to the recipe has to be done by hand`,
         );
       }
       if (replaces?.isDraft) {
         notes.push(
-          `сейчас это ЧЕРНОВИК — уложились не все детали. Пересчёт заменит его по id; чтобы он стал полной раскладкой, бюджета должно хватить на всю укладку`,
+          `this is a DRAFT right now — not all pieces were placed. a recompute replaces it by id; for it to become a full marker, the budget must be enough for the whole placement`,
         );
       }
       if (args.mode === 'norms') {
         const shared = sharedMarkerFor(args.markers, scope.lineKey, spec.rows[0].sizeId);
         if (!replaces && shared) {
           notes.push(
-            `на этот слот и размер уже есть ОБЩАЯ раскладка «${shared}» (без колорвея) — она снята на ширине слота, и новая её не заменит, а встанет рядом`,
+            `this slot and size already have a SHARED marker “${shared}” (no colourway) — it was captured on the slot width, and the new one will not replace it but stand alongside`,
           );
         }
       }
@@ -825,24 +828,24 @@ export function planBatchMarkers(args: {
       // соотношение партии.
       if (args.mode === 'batch' && unitsTotal === 1) {
         notes.push(
-          `состав свёлся к ОДНОМУ изделию (${sizeLabel}): в партии этот колорвей заказан в одном размере, и настила как такового здесь нет — движок положит одно изделие, то есть ту же разреженную укладку, что и размерная норма. КПД выйдет ниже цехового, а расход — с запасом`,
+          `the composition collapsed to ONE garment (${sizeLabel}): the run orders this colourway in a single size, and there is no lay as such here — the engine will place one garment, that is, the same sparse placement as a size norm. the efficiency will come out below the workshop's, and the consumption with a margin`,
         );
       }
       if (args.mode === 'batch' && unitsTotal > 1) {
         const secs = built.estimate?.predictedElapsedMs;
         notes.push(
-          `настил кроит ${unitsTotal} изделий (${sizeLabel}) — это соотношение партии, ужатое на НОД; ${built.pieceCount} уникальных контуров, ${built.instanceCount} экземпляров на полотне${
-            secs != null ? `, прогноз ~${Math.ceil(secs / 1000)} с` : ''
-          }. Дорого — снимите галочку: сильнее соотношение не ужимается, иначе это была бы другая партия`,
+          `the lay cuts ${unitsTotal} garments (${sizeLabel}) — this is the run ratio squeezed by the GCD; ${built.pieceCount} unique contours, ${built.instanceCount} instances on the cloth${
+            secs != null ? `, forecast ~${Math.ceil(secs / 1000)} s` : ''
+          }. expensive — untick the box: the ratio squeezes no further, otherwise it would be a different run`,
         );
       }
       if (built.estimate?.outlook === 'starved') {
         notes.push(
-          `бюджета не хватит даже на предпросчёт геометрии: поиска не будет вовсе. Нужен бюджет от ${Math.ceil(built.estimate.budgetToFitMs / 1000)} с.`,
+          `the budget won't even cover the geometry prepass: there will be no search at all. a budget from ${Math.ceil(built.estimate.budgetToFitMs / 1000)} s is needed.`,
         );
       } else if (built.estimate?.outlook === 'squeezed') {
         notes.push(
-          `предпросчёт съест больше своей доли бюджета — поиску останется ${Math.round(built.estimate.searchMsLeft / 1000)} с`,
+          `the prepass will eat more than its share of the budget — the search will be left with ${Math.round(built.estimate.searchMsLeft / 1000)} s`,
         );
       }
 
@@ -1059,7 +1062,7 @@ function buildJobConfig(args: {
   const { scope, prep, widthCm } = args;
   const { pieces, unitsOfPiece } = args.geom;
   if (pieces.length === 0) {
-    return { ok: false, reason: 'на выбранном контурном слое нет ни одной детали этого состава' };
+    return { ok: false, reason: 'the chosen contour layer holds no piece of this composition' };
   }
 
   // ═══ ДЕТАЛЬ ШИРЕ ПОЛОТНА ОТМЕНЯЕТ ВСЁ ЗАДАНИЕ ═══════════════════════════════════════════════
@@ -1089,16 +1092,16 @@ function buildJobConfig(args: {
       .slice(0, 3)
       .map((p) => {
         const across = Math.min(...rotations.map((r) => crossSpanCm(p, r)));
-        return `«${p.blockName || p.name}» ${across.toFixed(1)} см поперёк`;
+        return `“${p.blockName || p.name}” ${across.toFixed(1)} cm across`;
       })
       .join(', ');
-    const more = tooWide.length > 3 ? ` и ещё ${tooWide.length - 3}` : '';
+    const more = tooWide.length > 3 ? ` and ${tooWide.length - 3} more` : '';
     return {
       ok: false,
       reason:
-        `${tooWide.length === 1 ? 'деталь не влезает' : `${tooWide.length} деталей не влезают`} в раскройную ширину ${usable.toFixed(1)} см: ${named}${more}. ` +
-        `Раскладка без них описывала бы изделие без этих деталей, поэтому задание не запускается: нужна ткань шире, ` +
-        `разрешённый поперечный крой либо правка выкройки.`,
+        `${tooWide.length === 1 ? "a piece doesn't fit" : `${tooWide.length} pieces don't fit`} into the cutting width ${usable.toFixed(1)} cm: ${named}${more}. ` +
+        `a marker without them would describe a garment without those pieces, so the job does not start: a wider fabric is needed, ` +
+        `cross-grain cutting allowed, or a fix to the pattern.`,
     };
   }
   const fits = pieces;

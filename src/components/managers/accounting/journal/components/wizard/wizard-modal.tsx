@@ -379,7 +379,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                 <Input
                   value={query}
                   autoFocus
-                  placeholder='search: stripe, аренда, influencer, ндс…'
+                  placeholder='search: stripe, rent, influencer, vat…'
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
                 />
 

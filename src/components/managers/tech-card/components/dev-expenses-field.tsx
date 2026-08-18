@@ -22,15 +22,15 @@ import { SamplePicker } from './sample-picker';
 import { sampleKeys, useSamples } from './useSamples';
 import { devExpenseKeys } from './useStyleReadViews';
 
-// The server's kind vocabulary — these strings travel to the API — and its Russian face. The
-// label map is used in all three places a kind is shown (the breakdown list, the ledger column,
-// the composer's select), so one expense never reads «материалы» in one and «MATERIALS» in another.
+// The server's kind vocabulary — these strings travel to the API — and its operator-facing face.
+// The label map is used in all three places a kind is shown (the breakdown list, the ledger column,
+// the composer's select), so one expense never reads «materials» in one and «MATERIALS» in another.
 const KIND_RU: Record<string, string> = {
-  sample: 'образцы',
-  materials: 'материалы',
-  labour: 'работа',
-  outsourcing: 'подряд',
-  other: 'прочее',
+  sample: 'samples',
+  materials: 'materials',
+  labour: 'labour',
+  outsourcing: 'outsourcing',
+  other: 'other',
 };
 const KINDS = ['sample', 'materials', 'labour', 'outsourcing', 'other'];
 const KIND_ITEMS = KINDS.map((k) => ({ value: k, label: KIND_RU[k] ?? k }));
@@ -57,7 +57,7 @@ const num = (s?: string) => {
 };
 
 const shortDate = (ts?: string) =>
-  ts ? new Date(ts).toLocaleDateString(undefined, { day: '2-digit', month: 'short' }) : '';
+  ts ? new Date(ts).toLocaleDateString('en-US', { day: '2-digit', month: 'short' }) : '';
 
 // A labelled control at reference field density, for the add-expense composer.
 function Field({
@@ -149,7 +149,7 @@ function SortHeader({
 // without costing:read (the tab is hidden), and add/delete need costing:write.
 //
 // DELIBERATE — this panel does NOT stage into the card's one save (phase 19, same reasoning as
-// roles-field). It is a ledger, not a draft: «добавить расход» IS the commit — the row appears, the
+// roles-field). It is a ledger, not a draft: «add an expense» IS the commit — the row appears, the
 // totals move, the sample's composed cost changes. Staging it would mean pressing add wrote nothing
 // and showed nothing until the operator found the header save, which is a worse card than the one
 // phase 19 is fixing. Delete is the same in reverse, and it is destructive and confirmed: nothing
@@ -221,10 +221,10 @@ export function DevExpensesField({
       // Close HERE, not on confirm (closeOnConfirm={false}): a backend rejection must leave the
       // filled form standing instead of dismissing the dialog and wiping what was typed.
       closeAdd();
-      showMessage('расход добавлен', 'success');
+      showMessage('expense added', 'success');
     },
     onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'не удалось добавить расход', 'error'),
+      showMessage(e instanceof Error ? e.message : "couldn't add the expense", 'error'),
   });
 
   const del = useMutation({
@@ -232,9 +232,9 @@ export function DevExpensesField({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: sampleKeys.all });
-      showMessage('расход удалён', 'success');
+      showMessage('expense deleted', 'success');
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'не удалось удалить', 'error'),
+    onError: (e) => showMessage(e instanceof Error ? e.message : "couldn't delete", 'error'),
   });
 
   // Deleting a financial record is immediate and permanent server-side (no undo) — confirm first,
@@ -272,7 +272,7 @@ export function DevExpensesField({
   //   here               R&D ÷ (realised gross margin ÷ units sold) → the payback at the margin the
   //                      style ACTUALLY earns (GetStyleEconomics), available only once it has sold.
   // Both used to be labelled «break-even», 700px apart, with nothing on screen naming the
-  // difference. Everything this column prints therefore says «по фактической марже» out loud, and
+  // difference. Everything this column prints therefore says «at the actual margin» out loud, and
   // the ? next to the group label states the split.
   const { data: econData } = useStyleEconomics(techCardId, canReadCosting && !scoped);
   const sales = econData?.economics?.sales;
@@ -284,12 +284,12 @@ export function DevExpensesField({
 
   // Each unavailable input gets its OWN sentence: «нет данных» sends people to the wrong screen.
   const breakEvenBasis = (): string => {
-    if (!(totalBaseNum > 0)) return 'расходов на разработку ещё нет';
-    if (!sales) return 'нет данных о продажах стиля';
-    if (!sales.hasCost) return 'у проданных изделий нет себестоимости — маржу не посчитать';
-    if (unitsSold <= 0) return 'стиль ещё не продавался — фактической маржи нет';
-    if (!(unitMargin > 0)) return 'фактическая маржа продаж не положительная';
-    return `по фактической марже ${unitMargin.toFixed(2)} с проданного изделия`;
+    if (!(totalBaseNum > 0)) return 'no development expenses yet';
+    if (!sales) return 'no sales data for the style';
+    if (!sales.hasCost) return "the sold garments have no cost — the margin can't be computed";
+    if (unitsSold <= 0) return "the style hasn't sold yet — there is no actual margin";
+    if (!(unitMargin > 0)) return 'the actual sales margin is not positive';
+    return `at the actual margin of ${unitMargin.toFixed(2)} per sold garment`;
   };
 
   const perUnit = plannedUnits > 0 ? totalBaseNum / plannedUnits : undefined;
@@ -324,23 +324,25 @@ export function DevExpensesField({
   const ariaSort = (by: 'date' | 'amount'): 'ascending' | 'descending' | undefined =>
     sort.by === by ? (sort.dir === 'desc' ? 'descending' : 'ascending') : undefined;
 
-  if (isLoading) return <Text size='micro'>загрузка…</Text>;
+  if (isLoading) return <Text size='micro'>loading…</Text>;
 
   return (
     <div className='flex flex-col gap-3'>
       {scoped ? (
         <>
           <Text size='micro' variant='label'>
-            расходы разработки, отнесённые на этот образец — часть R&amp;D стиля, вне unit cost
-            изделия.
+            development expenses attributed to this sample — part of the style's R&amp;D, outside
+            the garment's unit cost.
           </Text>
           {expenses.length > 0 && (
             <div>
-              <GroupLabel flush>вложено в образец</GroupLabel>
+              <GroupLabel flush>put into the sample</GroupLabel>
               <BigFigure
                 value={scopedTotal > 0 ? scopedTotal.toFixed(2) : '—'}
                 sub={
-                  scopedHasUnconverted ? `неполно — по части строк ${noFx()}` : 'в базовой валюте'
+                  scopedHasUnconverted
+                    ? `incomplete — for some lines, ${noFx()}`
+                    : 'in the base currency'
                 }
               />
             </div>
@@ -351,15 +353,15 @@ export function DevExpensesField({
            to be nine stat cells lives inside one of the two. */
         <div className='grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-2'>
           <div>
-            <GroupLabel flush>вложено в стиль</GroupLabel>
+            <GroupLabel flush>put into the style</GroupLabel>
             <BigFigure
               value={totalBaseNum > 0 ? totalBaseNum.toFixed(2) : '—'}
               sub={
                 totalBaseNum <= 0
-                  ? 'расходов на разработку ещё нет'
+                  ? 'no development expenses yet'
                   : summary?.hasUnconverted
-                    ? `неполно — по части строк ${noFx()}`
-                    : 'в базовой валюте'
+                    ? `incomplete — for some lines, ${noFx()}`
+                    : 'in the base currency'
               }
             />
             {byKind.length > 0 && (
@@ -388,18 +390,19 @@ export function DevExpensesField({
             <GroupLabel
               flush
               action={
-                <HelpMark title='когда отобьётся'>
-                  Считается по ФАКТИЧЕСКОЙ марже проданных штук. break-even вверху вкладки — от
-                  каталожной розницы, то есть план. Цифры расходятся законно: одна про то, как стиль
-                  продаётся, другая про то, как он задуман.
+                <HelpMark title='when it pays back'>
+                  Computed from the ACTUAL margin of the pieces sold. The break-even at the top of
+                  the tab is from the catalogue retail, that is, the plan. The figures disagree
+                  legitimately: one is about how the style sells, the other about how it was
+                  conceived.
                 </HelpMark>
               }
             >
-              когда отобьётся
+              when it pays back
             </GroupLabel>
             <BigFigure
               value={recoveredAtUnits != null ? String(recoveredAtUnits) : '—'}
-              unit={recoveredAtUnits != null ? 'шт' : undefined}
+              unit={recoveredAtUnits != null ? 'pcs' : undefined}
               sub={breakEvenBasis()}
             />
             {coverPct != null && (
@@ -407,18 +410,18 @@ export function DevExpensesField({
                 <Progress value={coverPct} />
                 <Text size='micro' variant='label'>
                   {coverPct <= 100
-                    ? `${recoveredAtUnits} из ${plannedUnits} плановых штук`
-                    : `${recoveredAtUnits} шт при плане ${plannedUnits} — плановый тираж не отбивает R&D`}
+                    ? `${recoveredAtUnits} of ${plannedUnits} planned pcs`
+                    : `${recoveredAtUnits} pcs against a plan of ${plannedUnits} — the planned quantity doesn't pay back R&D`}
                 </Text>
               </div>
             )}
             <div className='mt-2 flex flex-col'>
               <Row
-                label='по фактической марже продаж'
+                label='at the actual sales margin'
                 value={unitMargin > 0 ? unitMargin.toFixed(2) : '—'}
               />
               <Row
-                label={plannedUnits > 0 ? `на изделие при ${plannedUnits} шт` : 'на изделие'}
+                label={plannedUnits > 0 ? `per garment at ${plannedUnits} pcs` : 'per garment'}
                 value={perUnit != null ? perUnit.toFixed(2) : '—'}
                 tone={plannedUnits > 0 ? undefined : 'label'}
               />
@@ -428,10 +431,10 @@ export function DevExpensesField({
       )}
 
       <div>
-        <GroupLabel flush>{scoped ? 'расходы' : 'журнал'}</GroupLabel>
+        <GroupLabel flush>{scoped ? 'expenses' : 'ledger'}</GroupLabel>
         {expenses.length === 0 ? (
           <Text size='micro' variant='label'>
-            расходов на разработку ещё нет
+            no development expenses yet
           </Text>
         ) : (
           <DataTable>
@@ -439,25 +442,25 @@ export function DevExpensesField({
               <tr>
                 <th aria-sort={ariaSort('date')}>
                   <SortHeader
-                    label='дата'
+                    label='date'
                     active={sort.by === 'date'}
                     dir={sort.dir}
                     onToggle={() => toggleSort('date')}
                   />
                 </th>
-                <th>описание</th>
-                <th>вид</th>
-                {!scoped && <th>образец</th>}
-                <th>сумма</th>
+                <th>description</th>
+                <th>kind</th>
+                {!scoped && <th>sample</th>}
+                <th>amount</th>
                 <th aria-sort={ariaSort('amount')}>
                   <SortHeader
-                    label='база'
+                    label='base'
                     active={sort.by === 'amount'}
                     dir={sort.dir}
                     onToggle={() => toggleSort('amount')}
                   />
                 </th>
-                {canWriteCosting && <th aria-label='действия' />}
+                {canWriteCosting && <th aria-label='actions' />}
               </tr>
             </thead>
             <tbody>
@@ -491,7 +494,7 @@ export function DevExpensesField({
                         type='button'
                         className='text-labelColor hover:text-error'
                         onClick={() => setPendingDelete(e)}
-                        aria-label='удалить'
+                        aria-label='delete'
                       >
                         ✕
                       </button>
@@ -502,7 +505,7 @@ export function DevExpensesField({
             </tbody>
             <tfoot>
               <TotalRow>
-                <td>итого</td>
+                <td>total</td>
                 <td />
                 <td />
                 {!scoped && <td />}
@@ -529,7 +532,7 @@ export function DevExpensesField({
       {canWriteCosting && (
         <div>
           <Button type='button' variant='secondary' size='sm' onClick={() => setAddOpen(true)}>
-            добавить расход
+            add an expense
           </Button>
         </div>
       )}
@@ -539,24 +542,24 @@ export function DevExpensesField({
         onOpenChange={(open) => (open ? setAddOpen(true) : closeAdd())}
         onConfirm={() => add.mutate()}
         closeOnConfirm={false}
-        title='добавить расход'
-        confirmLabel={add.isPending ? 'добавляем…' : 'добавить'}
+        title='add an expense'
+        confirmLabel={add.isPending ? 'adding…' : 'add'}
         confirmDisabled={!form.amount.trim() || add.isPending}
         width='md'
       >
         <div className='flex flex-col gap-2 lg:min-w-[500px]'>
           <div className='grid grid-cols-2 gap-2'>
-            <Field label='вид'>
+            <Field label='kind'>
               <Select
                 name='dev-expense-kind'
                 items={KIND_ITEMS}
                 value={form.kind}
                 onValueChange={(v: string) => setForm((f) => ({ ...f, kind: v }))}
-                placeholder='вид'
+                placeholder='kind'
                 fullWidth
               />
             </Field>
-            <Field label='дата'>
+            <Field label='date'>
               <Input
                 name='dev-expense-date'
                 type='date'
@@ -567,10 +570,10 @@ export function DevExpensesField({
               />
             </Field>
           </div>
-          <Field label='описание'>
+          <Field label='description'>
             <Input
               name='dev-expense-description'
-              placeholder='что купили'
+              placeholder='what was bought'
               value={form.description}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 setForm((f) => ({ ...f, description: e.target.value }))
@@ -578,7 +581,7 @@ export function DevExpensesField({
             />
           </Field>
           <div className={`grid grid-cols-2 gap-2 ${scoped ? '' : 'sm:grid-cols-3'}`}>
-            <Field label='сумма'>
+            <Field label='amount'>
               <Input
                 name='dev-expense-amount'
                 type='number'
@@ -590,20 +593,20 @@ export function DevExpensesField({
                 }
               />
             </Field>
-            <Field label='валюта'>
+            <Field label='currency'>
               <Select
                 name='dev-expense-currency'
                 items={CURRENCY_ITEMS}
                 value={form.currency}
                 onValueChange={(v: string) => setForm((f) => ({ ...f, currency: v }))}
-                placeholder='валюта'
+                placeholder='currency'
                 fullWidth
               />
             </Field>
             {/* Attribution to a specific sample is optional, and hidden when the panel is already
                 scoped to one. */}
             {!scoped && (
-              <Field label='образец'>
+              <Field label='sample'>
                 <SamplePicker
                   techCardId={techCardId}
                   value={form.sampleId}
@@ -613,8 +616,9 @@ export function DevExpensesField({
             )}
           </div>
           <Text size='micro' variant='label'>
-            расход попадёт в R&amp;D стиля и НЕ меняет unit cost / COGS изделия — сдвинется только
-            break-even. привязка к образцу дополнительно войдёт в стоимость этого образца.
+            the expense lands in the style's R&amp;D and does NOT change the garment's unit cost /
+            COGS — only the break-even moves. attribution to a sample additionally enters that
+            sample's cost.
           </Text>
         </div>
       </ConfirmationModal>
@@ -623,17 +627,17 @@ export function DevExpensesField({
         open={!!pendingDelete}
         onOpenChange={(open) => !open && setPendingDelete(null)}
         onConfirm={() => pendingDelete?.id && del.mutate(pendingDelete.id)}
-        title='удалить расход?'
-        confirmLabel='удалить'
+        title='delete the expense?'
+        confirmLabel='delete'
         width='sm'
       >
         <Text size='micro'>
-          Расход «{kindLabel(pendingDelete?.kind) || '—'}»
-          {pendingDelete?.description ? ` — «${pendingDelete.description}»` : ''}
+          The “{kindLabel(pendingDelete?.kind) || '—'}” expense
+          {pendingDelete?.description ? ` — “${pendingDelete.description}”` : ''}
           {pendingDelete
             ? ` (${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency})`
             : ''}{' '}
-          будет удалён навсегда. Отменить нельзя.
+          will be deleted permanently. This can't be undone.
         </Text>
       </ConfirmationModal>
     </div>

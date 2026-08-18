@@ -14,9 +14,9 @@ import { filesService } from '../api/filesService';
 export type FilesSort = 'new' | 'name' | 'size';
 
 export const SORT_LABEL: Record<FilesSort, string> = {
-  new: 'сначала новые',
-  name: 'по имени',
-  size: 'по размеру',
+  new: 'newest first',
+  name: 'by name',
+  size: 'by size',
 };
 
 function sortBy(sort: FilesSort): LibraryFileSort | undefined {
@@ -42,9 +42,9 @@ export type PersonRoleFilter = 'any' | 'uploaded' | 'owner';
 
 /** Короткая подпись положения переключателя. */
 export const PERSON_ROLE_CHIP: Record<PersonRoleFilter, string> = {
-  any: 'любая',
-  uploaded: 'загрузил',
-  owner: 'ведёт',
+  any: 'any',
+  uploaded: 'uploaded',
+  owner: 'owns',
 };
 
 /**
@@ -55,9 +55,9 @@ export const PERSON_ROLE_CHIP: Record<PersonRoleFilter, string> = {
  * Короткие намеренно — они стоят в полосе управления, а не в справке.
  */
 export const PERSON_ROLE_HINT: Record<PersonRoleFilter, string> = {
-  any: 'и загруженное им, и то, что он ведёт',
-  uploaded: 'только принесённое им — этот факт не снимается ничем',
-  owner: 'только то, за что он отвечает сейчас',
+  any: 'both what they uploaded and what they own',
+  uploaded: "only what they brought in — nothing ever takes that fact off a file",
+  owner: 'only what they are answerable for now',
 };
 
 function personRoleEnum(role: PersonRoleFilter): LibraryFilePersonRole | undefined {

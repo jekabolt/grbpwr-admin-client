@@ -208,7 +208,7 @@ function HeaderCarePicker({
         <FormLabel>care symbols</FormLabel>
         <div className='flex min-h-9 items-center gap-2 border border-borderColor p-1.5'>
           <Text variant='label' size='micro'>
-            — на карточке нет этикетки «care» —
+            — the card has no “care” label —
           </Text>
           {canEdit && (
             <Button
@@ -218,13 +218,13 @@ function HeaderCarePicker({
               className='ml-auto shrink-0'
               onClick={createCareLabel}
             >
-              создать
+              create
             </Button>
           )}
         </div>
         <Text size='micro' variant='label'>
-          символы ухода хранятся на этикетке «care» (вкладка LABELS) — здесь то же самое поле.
-          «создать» добавит туда строку.
+          the care symbols live on the “care” label (the LABELS tab) — this is the very same field.
+          “create” adds a row there.
         </Text>
       </div>
     );
@@ -238,17 +238,17 @@ function HeaderCarePicker({
         // read the FIRST one. Saying «the same field» here would then be false for whoever is editing
         // the other row on the labels tab, so name which row actually reaches the storefront.
         <Text size='micro' className='text-error'>
-          этикеток «care» на карточке: {careCount} — сюда и на витрину идёт первая, остальные
-          редактируются только на вкладке LABELS
+          “care” labels on the card: {careCount} — the first one is what reaches this field and the
+          storefront, the rest are edited only on the LABELS tab
         </Text>
       ) : (
         <Text size='micro' variant='label'>
-          то же поле, что и на вкладке LABELS (этикетка «care»)
+          the same field as on the LABELS tab (the “care” label)
         </Text>
       )}
       {canEdit && removable && (
         <Button type='button' variant='simple' size='xs' onClick={removeCareLabel}>
-          убрать пустую этикетку
+          remove the empty label
         </Button>
       )}
     </div>
@@ -316,12 +316,12 @@ export function StyleFactsField({
     name: ['fit', 'careInstructions', 'brand', 'collection', 'season', 'targetGender'],
   });
   const changed = [
-    dirtyFields.fit ? 'фасон' : '',
-    dirtyFields.careInstructions ? 'уход' : '',
-    dirtyFields.brand ? 'бренд' : '',
-    dirtyFields.collection ? 'коллекция' : '',
-    dirtyFields.season ? 'сезон' : '',
-    dirtyFields.targetGender ? 'пол' : '',
+    dirtyFields.fit ? 'fit' : '',
+    dirtyFields.careInstructions ? 'care' : '',
+    dirtyFields.brand ? 'brand' : '',
+    dirtyFields.collection ? 'collection' : '',
+    dirtyFields.season ? 'season' : '',
+    dirtyFields.targetGender ? 'gender' : '',
   ].filter(Boolean);
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's

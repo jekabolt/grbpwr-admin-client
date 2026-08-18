@@ -27,10 +27,10 @@ const SYMMETRY_PREFIX = 'TECH_CARD_PIECE_CUT_SYMMETRY_';
 // несёт серверное слово секции (bomSectionWord) — глубже секции наряд роль не знает (назначение по
 // проводу кат-плана не едет), и этого достаточно: подпись различает слои, не пересказывая BOM.
 const SECTION_LAYER_WORD: Record<string, string> = {
-  fabric: 'ткань',
-  lining: 'подкладка',
-  interlining: 'дублерин',
-  insulation: 'утеплитель',
+  fabric: 'fabric',
+  lining: 'lining',
+  interlining: 'interlining',
+  insulation: 'insulation',
 };
 const sectionLayerWord = (section?: string): string =>
   SECTION_LAYER_WORD[(section ?? '').trim().toLowerCase()] ?? '';
@@ -47,18 +47,19 @@ export function CutBlockers({ blockers }: { blockers: RpCutBlocker[] }) {
   return (
     <CalloutBox tone='error' className='space-y-1'>
       <Text component='p' className='uppercase'>
-        <b>стоп — {blockers.length} дет. × колорвей не привязаны к артикулу</b>
+        <b>stop — {blockers.length} piece × colourway not linked to an article</b>
       </Text>
       {blockers.map((b, i) => (
         <Text key={`${b.piece_id ?? 0}-${b.colorway_id ?? 0}-${i}`} component='p'>
-          {(b.piece_name ?? '').trim() || `деталь #${b.piece_id}`} ·{' '}
-          {(b.colorway_name ?? '').trim() || `колорвей #${b.colorway_id}`} — {b.garments ?? 0} изд.:{' '}
-          {(b.reason ?? '').trim() || 'причина не названа'}
+          {(b.piece_name ?? '').trim() || `piece #${b.piece_id}`} ·{' '}
+          {(b.colorway_name ?? '').trim() || `colourway #${b.colorway_id}`} — {b.garments ?? 0}{' '}
+          garments:{' '}
+          {(b.reason ?? '').trim() || 'reason not named'}
         </Text>
       ))}
       <Text size='micro' variant='label' component='p'>
-        этих деталей нет в таблице ниже — их нельзя кроить, пока технолог не назовёт артикул.
-        Блокеры показаны по ВСЕЙ партии: их не прячет ни один фильтр.
+        these pieces are not in the table below — they can't be cut until the technologist names an
+        article. blockers are shown across the WHOLE run: no filter hides them.
       </Text>
     </CalloutBox>
   );
@@ -98,14 +99,16 @@ export function CutList({
       <DataTable variant='grid' className={RUNPACK_GRID}>
         <thead>
           <tr>
-            <th>деталь</th>
-            <th>колорвей</th>
-            <th>на изд.</th>
-            <th>из чего кроить</th>
+            <th>piece</th>
+            <th>colourway</th>
+            <th>per garment</th>
+            <th>what to cut from</th>
             {columns.map((s) => (
-              <th key={s.id}>{(s.name ?? '').trim() || ((s.id ?? 0) > 0 ? `#${s.id}` : 'б/р')}</th>
+              <th key={s.id}>
+                {(s.name ?? '').trim() || ((s.id ?? 0) > 0 ? `#${s.id}` : 'no size')}
+              </th>
             ))}
-            <th>выкроить</th>
+            <th>to cut</th>
           </tr>
         </thead>
         <tbody>
@@ -125,18 +128,18 @@ export function CutList({
               >
                 <td className={DESC_CELL}>
                   <div className='font-medium'>
-                    {(r.piece_name ?? '').trim() || `деталь #${r.piece_id}`}
+                    {(r.piece_name ?? '').trim() || `piece #${r.piece_id}`}
                   </div>
                   {/* Долевая дублируется в КАЖДОЙ строке колорвея намеренно (так же её дублирует
                       сервер): деталь без долевой в СВОЕЙ строке — это деталь, которую раскроят
                       неправильно, даже если та же долевая написана строкой выше у другого цвета. */}
                   <Text size='nano' variant='label' component='p' className='uppercase'>
-                    долевая: {(r.grainline ?? '').trim() || 'не задана'}
+                    grainline: {(r.grainline ?? '').trim() || 'not set'}
                     {arrow ? ` ${arrow}` : ''}
                   </Text>
                   {r.fused ? (
                     <Text size='nano' component='p' className='uppercase'>
-                      клеевая: {(r.fusing_material_name ?? '').trim() || 'артикул не назван'}
+                      fusing: {(r.fusing_material_name ?? '').trim() || 'article not named'}
                       {/* КАК ИМЕННО дублировать (0304) — по тому же доводу, что и долевая строкой
                           выше: по этому экрану режут, и строка режется отдельно. Манифест несёт
                           режим уже словом (fusingModeWord на сервере), поэтому здесь оно только
@@ -164,11 +167,11 @@ export function CutList({
                 </td>
                 <td className={DESC_CELL}>
                   <div className='font-medium'>
-                    {(r.slot_name ?? '').trim() || 'слот не назван'}
+                    {(r.slot_name ?? '').trim() || 'slot not named'}
                   </div>
-                  <div>{(r.material_name ?? '').trim() || 'артикул не назначен'}</div>
+                  <div>{(r.material_name ?? '').trim() || 'article not assigned'}</div>
                   <Text size='nano' variant='label' component='p' className='uppercase'>
-                    {[sectionLayerWord(r.section), r.pinned ? 'пин рецепта' : 'дефолт слота']
+                    {[sectionLayerWord(r.section), r.pinned ? 'recipe pin' : 'slot default']
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>
@@ -188,7 +191,7 @@ export function CutList({
                             {cell.pieces_to_cut ?? '?'}
                           </Text>
                           <Text size='nano' variant='label' component='p'>
-                            {cell.garments ?? '?'} изд.
+                            {cell.garments ?? '?'} garments
                           </Text>
                         </>
                       )}
@@ -200,17 +203,17 @@ export function CutList({
                     {rowTotal(r) ?? '?'}
                   </Text>
                   <Text size='nano' variant='label' component='p' className='uppercase'>
-                    панелей
+                    panels
                   </Text>
                 </td>
               </tr>
             );
           })}
           <TotalRow>
-            {/* colSpan = описательные колонки (деталь, колорвей, на изд., из чего) + вся градация.
-                Разъедется — итог встанет под чужой колонкой. */}
+            {/* colSpan = описательные колонки (piece, colourway, per garment, what to cut from) +
+                вся градация. Разъедется — итог встанет под чужой колонкой. */}
             <td className='uppercase' colSpan={4 + columns.length}>
-              всего панелей
+              panels in total
             </td>
             <td>{total ?? '?'}</td>
           </TotalRow>
@@ -221,8 +224,8 @@ export function CutList({
         {CUT_SYMMETRY_PRINT_LEGEND}
       </Text>
       <Text size='micro' variant='label' component='p'>
-        «пин рецепта» — артикул назначен рецептом колорвея; «дефолт слота» — взят артикул по
-        умолчанию у роли в BOM.
+        “recipe pin” — the article is assigned by the colourway recipe; “slot default” — the default
+        article of the role in the BOM was taken.
       </Text>
       {caveats.map((c, i) => (
         <Text key={i} size='micro' variant='label' component='p'>

@@ -54,7 +54,7 @@ export const techCardBomPurposeOptions: Array<{
 // is also where a WRONG sort has to be undoable — including back to «не знаю», which is a different
 // and more honest answer than leaving «основной материал» standing.
 export const purposeEditorOptions: Array<{ value: string; label: string }> = [
-  { value: UNSET_PURPOSE, label: '— не задано —' },
+  { value: UNSET_PURPOSE, label: '— unset —' },
   ...bomPurposeOrder.map((value) => ({ value: value as string, label: bomPurposeLabel(value) })),
 ];
 

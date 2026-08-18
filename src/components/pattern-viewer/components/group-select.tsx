@@ -13,9 +13,9 @@ const PURPOSE_PREFIX = 'TECH_CARD_BOM_PURPOSE_';
 
 export function groupLabel(g: PvGroup): string {
   const key = (g.key ?? '').trim();
-  if (key === '_unbound') return 'листы без привязки';
+  if (key === '_unbound') return 'unbound sheets';
   if (g.by_purpose) return bomPurposeLabel(`${PURPOSE_PREFIX}${key.toUpperCase()}`);
-  return (g.line_name ?? '').trim() || 'строка BOM';
+  return (g.line_name ?? '').trim() || 'BOM line';
 }
 
 export function GroupSelect({
@@ -31,7 +31,7 @@ export function GroupSelect({
   return (
     <div className='space-y-1'>
       <Text size='nano' variant='label' component='p' className='uppercase' tracking='label'>
-        выкройка
+        pattern
       </Text>
       <div className='flex flex-wrap gap-1.5'>
         {groups.map((g, i) => {

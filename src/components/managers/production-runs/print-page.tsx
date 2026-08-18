@@ -73,13 +73,13 @@ export function RunPackPrint() {
             <Link to={runId > 0 ? runDetailPath(runId) : ROUTES.productionRuns}>← back</Link>
           </Button>
           <Text variant='uppercase' size='large'>
-            наряд на партию — pdf
+            run pack — pdf
           </Text>
         </div>
         <div className='flex items-center gap-3'>
           <Text variant='inactive' size='small'>
-            choose “save as PDF” as the destination · колонтитул и номера страниц печатает только
-            Chrome
+            choose “save as PDF” as the destination · only Chrome prints the running head and page
+            numbers
           </Text>
           <Button
             variant='main'

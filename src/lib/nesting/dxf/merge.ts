@@ -106,11 +106,11 @@ function parseTags(text: string, where: string): Tag[] {
     // молчаливая порча вместо честного отказа.
     if (raw === '') {
       if (lines.slice(i).every((l) => l.trim() === '')) break;
-      throw new Error(`${where}: пустая строка кода на позиции ${i + 1} — поток пар разъехался`);
+      throw new Error(`${where}: an empty code line at position ${i + 1} — the stream of pairs is out of step`);
     }
     const code = Number(raw);
     if (!Number.isInteger(code)) {
-      throw new Error(`${where}: не ASCII DXF — на строке ${i + 1} вместо кода «${raw}»`);
+      throw new Error(`${where}: not an ASCII DXF — line ${i + 1} carries “${raw}” instead of a code`);
     }
     out.push({ code, value: lines[i + 1].replace(/\r$/, '') });
   }
@@ -160,7 +160,7 @@ function blockChunks(tags: readonly Tag[], where: string): { name: string; tags:
     if (start < 0) return;
     const chunk = tags.slice(start, end);
     const nameTag = chunk.find((t) => t.code === 2);
-    if (!nameTag) throw new Error(`${where}: блок без имени`);
+    if (!nameTag) throw new Error(`${where}: a block without a name`);
     out.push({ name: nameTag.value, tags: chunk });
     start = -1;
   };
@@ -214,7 +214,7 @@ export function mergeDxfSheets(
   sources: readonly MergeSource[],
   offsets?: MergeOffsets,
 ): MergeResult {
-  if (sources.length === 0) throw new Error('нечего склеивать — не выбрано ни одного файла');
+  if (sources.length === 0) throw new Error('nothing to merge — not a single file is selected');
 
   const parsed = sources.map((s) => ({ name: s.name, tags: parseTags(s.text, s.name) }));
 
@@ -224,8 +224,8 @@ export function mergeDxfSheets(
     const ver = headerValue(p.tags, '$ACADVER') ?? '';
     if (!R2000_PLUS.has(ver)) {
       throw new Error(
-        `${p.name}: версия DXF ${ver || 'не указана'} — склейка берёт выгрузки AAMA R2000+ ` +
-          `(AC1015 и новее), какие CLO отдаёт по размеру`,
+        `${p.name}: DXF version ${ver || 'not specified'} — the merge takes AAMA R2000+ exports ` +
+          `(AC1015 and newer), the ones CLO gives out per size`,
       );
     }
   }
@@ -236,23 +236,23 @@ export function mergeDxfSheets(
   const distinct = new Set(units.map((u) => u.u ?? ''));
   if (distinct.size > 1) {
     const list = units.map((u) => `${u.name}: ${u.u ?? '—'}`).join(', ');
-    throw new Error(`разные единицы чертежа ($INSUNITS) — склейка исказит размеры (${list})`);
+    throw new Error(`different drawing units ($INSUNITS) — the merge would distort the dimensions (${list})`);
   }
 
   const template = parsed[0];
   const brTable = tableInfo(template.tags, 'BLOCK_RECORD');
   const layerTable = tableInfo(template.tags, 'LAYER');
-  if (!brTable) throw new Error(`${template.name}: в файле нет таблицы BLOCK_RECORD`);
-  if (!layerTable) throw new Error(`${template.name}: в файле нет таблицы слоёв`);
+  if (!brTable) throw new Error(`${template.name}: the file has no BLOCK_RECORD table`);
+  if (!layerTable) throw new Error(`${template.name}: the file has no layer table`);
 
   // Владелец вставок — запись *Model_Space; без неё INSERT'ы висли бы в воздухе.
   const msHandle = modelSpaceHandle(template.tags);
-  if (!msHandle) throw new Error(`${template.name}: не нашлась запись *Model_Space`);
+  if (!msHandle) throw new Error(`${template.name}: the *Model_Space record wasn't found`);
   // Секцию ENTITIES мы печатаем ЦЕЛИКОМ своей — значит в шаблоне обязана быть та, вместо которой
   // она встанет. Без неё вставки было бы некуда положить, и файл вышел бы с блоками, но пустым на
   // экране: пятьсот килобайт геометрии, которых не видно.
   if (!sectionRange(template.tags, 'ENTITIES')) {
-    throw new Error(`${template.name}: в файле нет секции ENTITIES — вставки некуда положить`);
+    throw new Error(`${template.name}: the file has no ENTITIES section — there is nowhere to put the inserts`);
   }
 
   let nextHandle = firstFreeHandle(template.tags);
@@ -272,7 +272,7 @@ export function mergeDxfSheets(
     (b) => !b.name.startsWith('*'),
   );
   if (templateBlocks.length === 0) {
-    throw new Error(`${template.name}: в файле нет блоков — это не по-детальная выгрузка AAMA`);
+    throw new Error(`${template.name}: the file has no blocks — this is not a per-piece AAMA export`);
   }
   for (const b of templateBlocks) {
     ownerOf.set(b.name, template.name);
@@ -282,7 +282,7 @@ export function mergeDxfSheets(
   for (const src of parsed.slice(1)) {
     const chunks = blockChunks(src.tags, src.name).filter((b) => !b.name.startsWith('*'));
     if (chunks.length === 0) {
-      warnings.push(`${src.name}: нет блоков — файл пропущен`);
+      warnings.push(`${src.name}: no blocks — the file is skipped`);
       continue;
     }
     // Берём из файла ТОЛЬКО блоки. Геометрия, нарисованная прямо в модельном пространстве, в
@@ -290,7 +290,7 @@ export function mergeDxfSheets(
     // мог нести рамку или отдельный контур, и оператор должен знать, что их в чертеже нет.
     if (nonInsertEntities(src.tags).length > 0) {
       warnings.push(
-        `${src.name}: в модельном пространстве есть геометрия вне блоков — она не вошла`,
+        `${src.name}: model space carries geometry outside the blocks — it didn't make it in`,
       );
     }
     for (const chunk of chunks) {
@@ -349,7 +349,7 @@ export function mergeDxfSheets(
     );
   }
   if (newLayers.length > 0)
-    warnings.push(`слои, которых не было в первом файле: ${newLayers.join(', ')}`);
+    warnings.push(`layers that were not in the first file: ${newLayers.join(', ')}`);
 
   // Вставки: по одной на блок, в порядке появления. Позиция — сдвиг вкладывания.
   const inserts: Tag[] = [];
@@ -372,7 +372,7 @@ export function mergeDxfSheets(
   // но чужой файл вправе нести и рамку, и текст) — переносим как есть, своими хендлами.
   const keptEntities = nonInsertEntities(template.tags);
   if (keptEntities.length > 0) {
-    warnings.push('в модельном пространстве первого файла были не только вставки — они сохранены');
+    warnings.push('model space of the first file held more than inserts — that geometry is kept');
   }
 
   const text = emitTags(

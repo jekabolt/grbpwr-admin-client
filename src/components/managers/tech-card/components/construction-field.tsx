@@ -56,7 +56,7 @@ export function ConstructionField() {
           // Written as counters rather than as a phrase: «1 machines» is the shape a plural rule
           // would have to exist to avoid, and this pill has room for neither.
           <Pill tone='mut'>
-            machines {machineCount} · ВТО {pressCount}
+            machines {machineCount} · pressing {pressCount}
           </Pill>
         ) : (
           <Text size='micro' variant='label' component='span'>
@@ -66,8 +66,8 @@ export function ConstructionField() {
       }
     >
       <Text size='micro' variant='label' className='mb-2'>
-        Что шаг наследует, когда не переопределяет. Пустое поле здесь — «не задано»; пустое поле в
-        шаге — «как на карточке».
+        what a step inherits when it doesn't override it. an empty field here means “not set”; an
+        empty field in a step means “as on the card”.
       </Text>
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
         <SelectField

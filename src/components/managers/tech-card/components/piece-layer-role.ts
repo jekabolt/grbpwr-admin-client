@@ -58,6 +58,6 @@ export const isUnsortedLayerRole = (r: PieceLayerRole): boolean => r.rollGoods &
  */
 export function pieceLayerRoleLabel(r: PieceLayerRole): string {
   if (!r.rollGoods) return '';
-  if (r.role === null) return 'не разложено';
+  if (r.role === null) return 'unsorted';
   return bomPurposeLabel(r.role);
 }

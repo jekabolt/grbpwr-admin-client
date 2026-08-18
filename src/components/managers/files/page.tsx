@@ -491,7 +491,7 @@ export default function FilesPage() {
   // же причине, что и у человека: архивную роль в словаре холста не найти, а фильтровать по ней
   // она продолжает.
   const roleLabel = fileRole.withoutRole
-    ? 'без роли'
+    ? 'without a role'
     : fileRole.roleId > 0
       ? (roles.find((r) => Number(r.id) === fileRole.roleId)?.name ?? `#${fileRole.roleId}`)
       : '';
@@ -656,8 +656,8 @@ export default function FilesPage() {
           <div className='border-t border-hairline px-2.5 py-2'>
             <Text size='micro' variant='label'>
               {mayWrite
-                ? 'режим чтения включён вами: загрузка, правка и удаление выключены, пока он стоит.'
-                : 'смотреть и скачивать можно, менять нельзя: права files:write нет.'}
+                ? 'read mode is switched on by you: uploading, editing and deleting are off while it stands.'
+                : "you can look and download but you can't change: there is no files:write right."}
             </Text>
           </div>
         )}
@@ -676,10 +676,7 @@ export default function FilesPage() {
       {filesQuery.isLoading ? (
         <GallerySkeleton />
       ) : filesQuery.isError && !files.length ? (
-        <ListFailedState
-          error={filesQuery.error}
-          onRetry={() => filesQuery.refetch()}
-        />
+        <ListFailedState error={filesQuery.error} onRetry={() => filesQuery.refetch()} />
       ) : files.length === 0 ? (
         emptyState()
       ) : (
@@ -697,10 +694,9 @@ export default function FilesPage() {
               {/* Кнопка есть только там, где превью ОБЯЗАНО было получиться: на .zip она
                   обещала бы невозможное. В режиме чтения она ВЫКЛЮЧЕНА, а не спрятана — то же
                   правило, что и у остальных писателей раздела. */}
-              {!f.previewUrl &&
-                previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
-                  <RebuildPreview file={f} writable={writable} />
-                )}
+              {!f.previewUrl && previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
+                <RebuildPreview file={f} writable={writable} />
+              )}
             </FileTile>
           ))}
         </Tiles>
@@ -739,11 +735,11 @@ export default function FilesPage() {
             disabled={filesQuery.isFetchingNextPage}
             onClick={() => filesQuery.fetchNextPage()}
           >
-            {filesQuery.isFetchingNextPage ? 'загружаем…' : 'показать ещё'}
+            {filesQuery.isFetchingNextPage ? 'loading…' : 'show more'}
           </Button>
           <Text size='micro' variant='label'>
-            показано {files.length}
-            {total === undefined ? '' : ` из ${total}`}
+            shown {files.length}
+            {total === undefined ? '' : ` of ${total}`}
           </Text>
         </div>
       )}
@@ -760,10 +756,10 @@ export default function FilesPage() {
         enabled={writable && !id && !pasted.length}
         disabledNote={
           id || pasted.length
-            ? 'сначала закройте окно: очередь встанет под ним, и пачку не будет видно'
+            ? 'close the window first: the queue stands under it, and the batch would not be visible'
             : mayWrite
-              ? 'включён режим чтения — переключите его в полосе сверху'
-              : 'нужно право files:write — попросите его у супер-админа'
+              ? 'read mode is on — switch it in the bar above'
+              : 'the files:write right is needed — ask a super admin for it'
         }
         // Проект называется В ТОМ ЖЕ списке, что и темы: оверлей обещает, куда попадёт пачка,
         // и умолчать о проекте значило бы пообещать «разобрать» там, где файлы уедут в съёмку.
@@ -773,7 +769,7 @@ export default function FilesPage() {
         // в закрытую коробку можно, но узнать, что коробка закрыта, человек должен ДО броска.
         topicLabels={[
           ...(activeProject
-            ? [`${activeProject.name ?? ''}${activeProject.archived ? ' (в архиве)' : ''}`]
+            ? [`${activeProject.name ?? ''}${activeProject.archived ? ' (archived)' : ''}`]
             : []),
           ...chosenTopics.map((t) => t.name ?? ''),
         ]}

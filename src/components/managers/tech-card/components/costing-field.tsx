@@ -2,7 +2,10 @@ import { common_ColorwayPrice, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { runColorwayRows } from 'components/managers/production-runs/components/run-composition';
-import { useProductionRun, useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
+import {
+  useProductionRun,
+  useProductionRuns,
+} from 'components/managers/production-runs/components/useProductionRuns';
 import {
   useCostingMigrationExceptions,
   useRepriceTechCardBom,
@@ -72,15 +75,16 @@ export const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as
 // живёт внутри `fieldset disabled` выпущенной карточки, где кнопка была бы мёртвой, а блок базы
 // расчёта с этими действиями стоит ВЫШЕ и заморозке не подлежит).
 const ESTIMATE_CTA =
-  'расход части тканей выведен из геометрии (площадь деталей ÷ раскройную ширину): межлекальных ' +
-  'выпадов в этом числе нет, поэтому себестоимость занижена, а маржа завышена. Норму даёт ' +
-  'раскладка — выберите партию базой расчёта вверху вкладки и постройте её, либо впишите расход ' +
-  'руками в рецепте колорвея.';
+  'the consumption of some fabrics is derived from geometry (piece area ÷ cutting width): there is ' +
+  'no waste between pieces in this number, so the cost is understated and the margin overstated. ' +
+  'The norm comes from a marker — pick a run as the calculation basis at the top of the tab and ' +
+  'build it, or enter the consumption by hand in the colourway recipe.';
 
 const BREAK_EVEN_NO_FX =
-  'R&D учитывается в базовой валюте, а маржа выше — в валюте костинга. Пересчитать нечем: ' +
-  'нужна нетто-розница в базовой валюте и серверный unit_cost_base (он появляется, когда для ' +
-  'всех валют BOM есть курс). Делить базовую сумму на маржу в другой валюте нельзя.';
+  'R&D is accounted for in the base currency, and the margin above is in the costing currency. ' +
+  'There is nothing to convert with: a net retail in the base currency and the server-side ' +
+  'unit_cost_base are needed (it appears once every BOM currency has a rate). A base-currency ' +
+  'amount cannot be divided by a margin in another currency.';
 
 /**
  * The retail the margin descends from, and — the part that used to be missing — whether it is
@@ -102,9 +106,13 @@ const BREAK_EVEN_NO_FX =
 function useRetail(techCard: common_TechCard | undefined, currency: string) {
   const colorways = techCard?.colorways ?? [];
 
-  if (!currency) return { gross: undefined, net: undefined, reason: 'не выбрана валюта костинга' };
+  if (!currency) return { gross: undefined, net: undefined, reason: 'no costing currency picked' };
   if (colorways.length === 0)
-    return { gross: undefined, net: undefined, reason: 'нет колорвеев, не из чего читать цену' };
+    return {
+      gross: undefined,
+      net: undefined,
+      reason: 'no colourways, nothing to read a price from',
+    };
 
   const pick = (list: common_ColorwayPrice[] | undefined) => {
     const line = (list ?? []).find((p) => p.currency === currency);
@@ -133,7 +141,10 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
       new Set(
         colorways.flatMap((c) =>
           (c.prices ?? [])
-            .filter((p) => p.currency && p.currency !== currency && parseDecimalNumber(p.price?.value) > 0)
+            .filter(
+              (p) =>
+                p.currency && p.currency !== currency && parseDecimalNumber(p.price?.value) > 0,
+            )
             .map((p) => p.currency as string),
         ),
       ),
@@ -142,15 +153,15 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
       gross: undefined,
       net: undefined,
       reason: others.length
-        ? `у колорвеев нет цены в ${currency} — она задана в ${others.join(' / ')}. Добавьте цену в ${currency} или ведите костинг в той же валюте`
-        : `у колорвеев не задана розничная цена ни в одной валюте`,
+        ? `the colourways have no price in ${currency} — it is set in ${others.join(' / ')}. Add a price in ${currency} or run the costing in that same currency`
+        : `the colourways have no retail price in any currency`,
     };
   }
   if (gross.distinct.length > 1)
     return {
       gross: undefined,
       net: undefined,
-      reason: `колорвеи расходятся в цене (${gross.distinct.join(' / ')} ${currency})`,
+      reason: `the colourways disagree on the price (${gross.distinct.join(' / ')} ${currency})`,
     };
   // A NET disagreement is its own fact and must not be reported as a missing VAT rate. Gross can
   // agree while net does not — two colourways sold into two rates — and the old code let `net.value`
@@ -160,7 +171,7 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
     return {
       gross: gross.value,
       net: undefined,
-      reason: `колорвеи расходятся в нетто-цене (${net.distinct.join(' / ')} ${currency})`,
+      reason: `the colourways disagree on the net price (${net.distinct.join(' / ')} ${currency})`,
     };
   // net is absent when the read's VAT country has no rate on file — an export destination has no
   // VAT to remove. That is reported next to the figure, not silently substituted with gross.
@@ -176,7 +187,7 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
  *
  *  • VERDICT PANEL — the gap as one big number, its cause named, and the one control that closes
  *    it. Previously a coloured sentence competing with five status pills.
- *  • PRICE AXIS — розница → −VAT → −себестоимость → =маржа as four cells of ONE arithmetic chain.
+ *  • PRICE AXIS — retail → −VAT → −cost → =margin as four cells of ONE arithmetic chain.
  *    Previously four cells from three different universes (plan, plan-with-VAT, plan-without-VAT,
  *    period R&D) at equal weight.
  *  • ONE BREAKDOWN, NOT TWO — the waterfall is the breakdown, and the input that moves each step
@@ -281,7 +292,7 @@ export function CostingField({
   const colorwayLabel = (id?: number) => {
     const cw = colorwayOf(id);
     const dc = cw ? dictionary?.colors?.find((c) => c.code === cw.colorCode) : undefined;
-    return dc?.name || cw?.colorCode || (id ? `колорвей #${id}` : 'основной');
+    return dc?.name || cw?.colorCode || (id ? `colourway #${id}` : 'base');
   };
   // AdminColorwayRef is output-only and carries no shade of its own (no colorHexOverride, no
   // resolved dictionaryColor) — only colorCode — so the swatch resolves through the dictionary.
@@ -392,7 +403,7 @@ export function CostingField({
   // cards are price-editable through a normal save, so they reprice too.
   const isReleased = approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   const stateLabel = isDraft
-    ? 'draft план'
+    ? 'draft plan'
     : approvalState === 'TECH_CARD_APPROVAL_STATE_IN_REVIEW'
       ? 'in review'
       : approvalState === 'TECH_CARD_APPROVAL_STATE_APPROVED'
@@ -447,13 +458,15 @@ export function CostingField({
         const changed = lines.filter((l) => l.changed).length;
         const noPrice = lines.filter((l) => !l.newPrice).length;
         showMessage(
-          `цены из каталога: изменено ${changed} из ${lines.length}` +
-            (noPrice ? `, без каталожной цены: ${noPrice}` : '') +
-            ((r.skippedUnlinked ?? 0) > 0 ? `, без привязки к каталогу: ${r.skippedUnlinked}` : ''),
+          `catalog prices: ${changed} of ${lines.length} changed` +
+            (noPrice ? `, no catalog price: ${noPrice}` : '') +
+            ((r.skippedUnlinked ?? 0) > 0
+              ? `, not linked to the catalog: ${r.skippedUnlinked}`
+              : ''),
           'success',
         );
       },
-      onError: () => showMessage('не удалось обновить цены из каталога', 'error'),
+      onError: () => showMessage("couldn't refresh prices from the catalog", 'error'),
     });
   };
 
@@ -480,21 +493,22 @@ export function CostingField({
   const baseRetail = useRetail(vatCard, !sameCurrency && baseCur ? baseCur : '');
   const breakEven = ((): { value: string; why: string } => {
     if (!(devTotal > 0)) return { value: '', why: '' };
-    if (fxIncomplete) return { value: 'н/д', why: 'нет курсов — базовая себестоимость не сошлась' };
+    if (fxIncomplete) return { value: 'n/a', why: "no rates — the base cost didn't add up" };
     if (sameCurrency) {
-      if (grossMargin == null) return { value: 'н/д', why: 'нет нетто-розницы' };
-      if (!(grossMargin > 0)) return { value: 'н/д', why: 'маржа не положительна' };
-      return { value: `${Math.ceil(devTotal / grossMargin)} шт`, why: '' };
+      if (grossMargin == null) return { value: 'n/a', why: 'no net retail' };
+      if (!(grossMargin > 0)) return { value: 'n/a', why: 'the margin is not positive' };
+      return { value: `${Math.ceil(devTotal / grossMargin)} pcs`, why: '' };
     }
     // Cross-currency: fold both sides through the server's base figures. Each unavailable input
-    // has its OWN message — «нет курса» used to stand in for all three, sending people to the FX
+    // has its OWN message — «no rate» used to stand in for all three, sending people to the FX
     // settings when the actual gap was a missing base-currency price or just unsaved edits.
-    if (costingDirty) return { value: 'н/д', why: 'черновик — сохраните для пересчёта' };
-    if (!(serverUnitCostBase > 0)) return { value: 'н/д', why: 'нет курса' };
-    if (baseRetail.net == null) return { value: 'н/д', why: `нет розницы в ${baseCur}` };
+    if (costingDirty) return { value: 'n/a', why: 'draft — save to recompute' };
+    if (!(serverUnitCostBase > 0)) return { value: 'n/a', why: 'no rate' };
+    if (baseRetail.net == null) return { value: 'n/a', why: `no retail in ${baseCur}` };
     const marginInBase = baseRetail.net - serverUnitCostBase;
-    if (!(marginInBase > 0)) return { value: 'н/д', why: `маржа не положительна (${baseCur})` };
-    return { value: `${Math.ceil(devTotal / marginInBase)} шт`, why: baseCur };
+    if (!(marginInBase > 0))
+      return { value: 'n/a', why: `the margin is not positive (${baseCur})` };
+    return { value: `${Math.ceil(devTotal / marginInBase)} pcs`, why: baseCur };
   })();
 
   // ── THE GAP. Target margin t on net retail R means a unit cost of at most R×(1−t), so the gap is
@@ -525,7 +539,7 @@ export function CostingField({
   // считала окупаемость R&D по марже, которой не бывает на фабрике.
   const lowerBound = hasCosting && !!rollup?.hasEstimate;
   // ...and every GREEN thing on the tab has to consult that, not just the verdict sentence. Without
-  // this gate the panel said «маржу по этой себестоимости считать нельзя» while, two blocks down,
+  // this gate the panel said «the margin can't be computed from this cost» while, two blocks down,
   // the margin cell rendered `tone='up'`, the closing waterfall bar rendered green, and the
   // break-even footnote quoted a confident unit count — all from the same understated cost. A
   // pending currency switch is the same class of "the money on screen is not comparable yet".
@@ -557,18 +571,18 @@ export function CostingField({
   }[] = [
     {
       key: 'materials',
-      name: 'материалы',
+      name: 'materials',
       amount: materials,
       // Ступень стоит У САМОЙ ДЛИННОЙ ПОЛОСЫ, а не только в заголовке: вердикт называет
-      // «материалы» местом, куда идти за деньгами, и пришедший сюда по его совету обязан здесь же
+      // «materials» местом, куда идти за деньгами, и пришедший сюда по его совету обязан здесь же
       // увидеть, что часть этой полосы — выведенное netto, а не измеренный факт.
       aside: [
-        unitCost > 0 ? `${Math.round((materials / unitCost) * 100)}% себестоимости` : '',
+        unitCost > 0 ? `${Math.round((materials / unitCost) * 100)}% of the cost` : '',
         lowerBound ? TIER_ESTIMATE : '',
       ]
         .filter(Boolean)
         .join(' · '),
-      help: `Считает сервер из BOM × рецептов колорвеев, ПРИ СОХРАНЕНИИ карты: правки BOM, рецепта колорвея или цены материала не попадают в эту цифру, пока карта не сохранена и перечитана. Руками здесь не задаётся.${
+      help: `The server computes it from BOM × colourway recipes, ON SAVING the card: edits to the BOM, to a colourway recipe or to a material's price do not reach this figure until the card is saved and re-read. It is not set by hand here.${
         lowerBound ? ` ${ESTIMATE_WHY}` : ''
       }`,
       // A Link, not a button: the tab lives in the URL (?tab=), and an anchor survives both the
@@ -581,26 +595,26 @@ export function CostingField({
     },
     {
       key: 'cmt',
-      name: 'CMT (работа)',
+      name: 'CMT (labour)',
       amount: cmt,
-      aside: impliedPerMinute != null ? `≈ ${impliedPerMinute.toFixed(2)} ${cur}/мин` : undefined,
-      help: `Квота фабрики за изделие — единственная money-цифра, которую человек приносит извне. ${
+      aside: impliedPerMinute != null ? `≈ ${impliedPerMinute.toFixed(2)} ${cur}/min` : undefined,
+      help: `The factory's quote per garment — the only money figure a person brings in from outside. ${
         impliedPerMinute != null
-          ? `При общем SAM конструктива ${totalSam.toFixed(1)} мин это ≈ ${impliedPerMinute.toFixed(2)} ${cur}/мин — производная ставка, нигде не хранится; сверьте с обычной ставкой фабрики.`
-          : 'Ставка за минуту появится рядом, когда в конструктиве будут операции с SAM.'
+          ? `At the construction's total SAM of ${totalSam.toFixed(1)} min that is ≈ ${impliedPerMinute.toFixed(2)} ${cur}/min — a derived rate, stored nowhere; check it against the factory's usual rate.`
+          : 'The per-minute rate will appear beside it once the construction has operations with a SAM.'
       }`,
-      lever: <Lever canWrite={canWriteCosting} name='costing.cmtCost' label='CMT за изделие' />,
+      lever: <Lever canWrite={canWriteCosting} name='costing.cmtCost' label='CMT per garment' />,
     },
     {
       key: 'logistics',
-      name: 'логистика',
+      name: 'logistics',
       amount: logistics,
-      help: 'За 1 изделие, в валюте костинга. Вводится вручную: вывести её системе не из чего.',
+      help: 'Per 1 garment, in the costing currency. Entered by hand: the system has nothing to derive it from.',
       lever: (
         <Lever
           canWrite={canWriteCosting}
           name='costing.logisticsCost'
-          label='логистика за изделие'
+          label='logistics per garment'
         />
       ),
     },
@@ -608,24 +622,28 @@ export function CostingField({
       key: 'overhead',
       name: 'overhead',
       amount: overhead,
-      help: 'За 1 изделие, в валюте костинга. Ценообразование (наценка, опт, розница) живёт на опубликованном продукте, не здесь.',
+      help: 'Per 1 garment, in the costing currency. Pricing (markup, wholesale, retail) lives on the published product, not here.',
       lever: (
-        <Lever canWrite={canWriteCosting} name='costing.overheadCost' label='overhead за изделие' />
+        <Lever
+          canWrite={canWriteCosting}
+          name='costing.overheadCost'
+          label='overhead per garment'
+        />
       ),
     },
     {
       key: 'defect',
-      name: `брак ${defectPct.toFixed(0)}%`,
+      name: `defects ${defectPct.toFixed(0)}%`,
       // At a 0% reject rate the residual plug is pure rounding noise (the server rounds unit_cost
       // and materials_per_unit to 2dp independently, so it lands within ±0.005). Printing «0.01»
-      // beside «брак 0%» states a cost nobody entered.
+      // beside «defects 0%» states a cost nobody entered.
       amount: defectPct > 0 ? defectAmount : 0,
       help:
         avgWastage != null
-          ? `Только брак ГОТОВЫХ изделий. Кроёные потери уже в материалах: средний cutting wastage по BOM-строкам ${avgWastage.toFixed(1)}% (${bomWastages.length} строк с wastage).`
-          : 'Только брак ГОТОВЫХ изделий. Потери кроя задаются per-строчно в BOM (wastage %) и уже заложены в материалы.',
+          ? `Only defects in FINISHED garments. Cutting losses are already in the materials: the average cutting wastage across BOM lines is ${avgWastage.toFixed(1)}% (${bomWastages.length} lines with wastage).`
+          : 'Only defects in FINISHED garments. Cutting losses are set per line in the BOM (wastage %) and are already built into the materials.',
       lever: (
-        <Lever canWrite={canWriteCosting} name='costing.defectPercent' label='процент брака' />
+        <Lever canWrite={canWriteCosting} name='costing.defectPercent' label='defect percent' />
       ),
     },
   ];
@@ -640,7 +658,7 @@ export function CostingField({
   // A narrowed const, not a boolean flag: `descend === true` does not tell the compiler that
   // `retail` is a number, and every geometry expression below would need its own null check.
   const retailScale = retail != null && retail > 0 ? retail : undefined;
-  // The verdict names this row as the place to go looking. It used to say «материалы» unconditionally,
+  // The verdict names this row as the place to go looking. It used to say «materials» unconditionally,
   // which is right for most garments and actively misleading for the ones where it isn't — a card
   // with CMT 30 and materials 8 sent the operator to the BOM to find 5.58 in the shortest bar.
   const biggestStep = steps.reduce((a, b) => (b.amount > a.amount ? b : a), steps[0]);
@@ -756,21 +774,22 @@ export function CostingField({
       blocking: true,
       text: noColorways ? (
         <>
-          <b>у карточки нет колорвеев — расход задавать не на чем.</b> Рецепт (какая ткань и сколько
-          её идёт на изделие) живёт на колорвее, поэтому материалы считаются нулевыми независимо от
-          того, насколько полон BOM.
+          <b>the card has no colourways — there is nothing to set the consumption on.</b> The recipe
+          (which fabric and how much of it goes into the garment) lives on a colourway, so the
+          materials count as zero no matter how complete the BOM is.
         </>
       ) : (
         <>
-          <b>рецепт колорвея не даёт расхода — нет ни одной строки «на изделие».</b> Строка детали
-          отвечает только на вопрос «из какой ткани кроится деталь» и нормы не несёт: расход — это
-          свойство изделия. Пока у ткани не назван расход на изделие, материалы считаются нулевыми,
-          и себестоимость ниже — не заниженная, а несчитанная.
+          <b>the colourway recipe gives no consumption — there is not a single “per unit” line.</b>{' '}
+          A piece line answers only the question “which fabric is the piece cut from” and carries no
+          norm: consumption is a property of the garment. Until a per-unit consumption is named for
+          the fabric, the materials count as zero, and the cost below is not understated — it is
+          uncomputed.
         </>
       ),
       action: (
         <Button asChild size='xs' variant='secondary'>
-          <Link to='?tab=colorways'>к колорвеям</Link>
+          <Link to='?tab=colorways'>to colorways</Link>
         </Button>
       ),
     });
@@ -783,17 +802,20 @@ export function CostingField({
       blocking: false,
       text: (
         <>
-          <b>площади деталей не замерены — оценки расхода по выкройкам не будет.</b> Слот умеет
-          получить цену и БЕЗ строки «на изделие»: если ему назначены детали кроя, сервер считает
-          оценку снизу — площадь деталей ÷ раскройную ширину (netto, без межлекальных выпадов). Но
-          площади нужно один раз замерить по DXF, и делает это только браузер. Без годного замера
-          (не мерили вовсе либо замер устарел — файлы или связи менялись после него):{' '}
-          {unmeasuredCloth.join(', ')}.
+          <b>
+            the piece areas are not measured — there will be no consumption estimate from the
+            patterns.
+          </b>{' '}
+          A slot can get a price even WITHOUT a “per unit” line: if cut pieces are assigned to it,
+          the server computes a lower-bound estimate — piece area ÷ cutting width (netto, without
+          the waste between pieces). But the areas have to be measured from the DXF once, and only
+          the browser does that. Without a usable measurement (never measured at all, or the
+          measurement went stale — files or links changed after it): {unmeasuredCloth.join(', ')}.
         </>
       ),
       action: (
         <Button asChild size='xs' variant='secondary'>
-          <Link to='?tab=patterns'>к выкройкам</Link>
+          <Link to='?tab=patterns'>to patterns</Link>
         </Button>
       ),
     });
@@ -804,19 +826,22 @@ export function CostingField({
       blocking: true,
       text: (
         <>
-          <b>строка без цены — unit cost занижен и НЕ сеется в cost_price.</b> Нет цены в BOM или в
-          каталоге, пин на артикул с несовпадающей единицей измерения, не задана норма расхода, либо
-          норма задана по размерам не на всех размерах ряда — среднее по ряду требует нормы на
-          каждом. Такая строка не попадает ни в один валютный итог, поэтому цифры выше выглядят
-          правдоподобно, но занижены на целый материал.
+          <b>
+            a line without a price — unit cost is understated and is NOT seeded into cost_price.
+          </b>{' '}
+          There is no price in the BOM or in the catalog, a pin onto an article with a mismatched
+          unit of measure, no consumption norm set, or the norm is set per size but not on every
+          size of the range — the mean across the range requires a norm on each. Such a line enters
+          no currency total, so the figures above look plausible but are understated by a whole
+          material.
           {colorwayCosts.some((cc) => cc.hasUnpriced)
-            ? ' Проблемный колорвей отмечен в плитках ниже.'
+            ? ' The offending colourway is marked in the tiles below.'
             : ''}
         </>
       ),
       action: (
         <Button asChild size='xs' variant='secondary'>
-          <Link to='?tab=bom'>к BOM</Link>
+          <Link to='?tab=bom'>to the BOM</Link>
         </Button>
       ),
     });
@@ -827,14 +852,14 @@ export function CostingField({
       blocking: true,
       text: (
         <>
-          <b>часть строк BOM в другой валюте</b> и не попала в итог валюты костинга — unit cost выше
-          занижен. Заголовок останется в валюте костинга и этих строк всё равно не включит, пока нет
-          курса.
+          <b>some BOM lines are in another currency</b> and did not make it into the
+          costing-currency total — the unit cost above is understated. The headline stays in the
+          costing currency and still will not include those lines while there is no rate.
         </>
       ),
       action: (
         <Button asChild size='xs' variant='secondary'>
-          <Link to={ROUTES.settings}>курсы</Link>
+          <Link to={ROUTES.settings}>rates</Link>
         </Button>
       ),
     });
@@ -845,9 +870,10 @@ export function CostingField({
       blocking: false,
       text: (
         <>
-          <b>черновик — сохраните для пересчёта.</b> unit cost, маржа, break-even и разбивка
-          посчитаны в браузере по несохранённым правкам статей. Итоговую цифру считает сервер (из
-          BOM + FX-курсов), и именно она уходит в cost_price продукта.
+          <b>draft — save to recompute.</b> unit cost, the margin, break-even and the breakdown are
+          computed in the browser from unsaved edits to the cost items. The final figure is computed
+          by the server (from the BOM + FX rates), and it is the one that goes into the product's
+          cost_price.
         </>
       ),
     });
@@ -858,9 +884,9 @@ export function CostingField({
       blocking: false,
       text: (
         <>
-          <b>{`брак ${defectPct.toFixed(0)}% при нулевом wastage на всех ${bomLines.length} строках BOM`}</b>
+          <b>{`defects ${defectPct.toFixed(0)}% with zero wastage on all ${bomLines.length} BOM lines`}</b>
           {
-            ' — похоже, в брак свалены и потери кроя. Раздельно честнее: wastage на строках материалов, брак — только на готовые изделия.'
+            ' — it looks like the cutting losses were dumped into the defect rate too. Keeping them apart is more honest: wastage on the material lines, defects only on finished garments.'
           }
         </>
       ),
@@ -872,9 +898,10 @@ export function CostingField({
       blocking: false,
       text: (
         <>
-          <b>деньги ждут ручного переноса в BOM.</b> Миграция «hardware/packaging → BOM» не смогла
-          перенести эти суммы автоматически. Перенос: строка BOM с этой суммой + usage на каждый
-          колорвей. Отчёт исторический и не самоочищается.
+          <b>money is waiting to be carried into the BOM by hand.</b> The “hardware/packaging → BOM”
+          migration could not carry these amounts over automatically. To carry them: a BOM line with
+          this amount + a usage on every colourway. The report is historical and does not clean
+          itself up.
         </>
       ),
       detail: (
@@ -883,10 +910,10 @@ export function CostingField({
             <Text size='micro' variant='label' key={i}>
               {`· ${e.article}: ${e.amount?.value ?? '—'} ${e.currency || ''} — ${
                 e.kind === 'not_draft'
-                  ? 'карта была released (перенесите при пере-релизе)'
+                  ? 'the card was released (carry it over at the next re-release)'
                   : e.kind === 'zero_colorways'
-                    ? 'нет колорвеев, некуда повесить usage'
-                    : 'в секции уже была строка с ценой (double-count; BOM победил)'
+                    ? 'no colourways, nowhere to hang a usage'
+                    : 'the section already had a priced line (double-count; the BOM won)'
               }`}
             </Text>
           ))}
@@ -909,58 +936,59 @@ export function CostingField({
   } = !hasCosting
     ? {
         figure: '—',
-        figureLabel: 'себестоимость',
+        figureLabel: 'cost',
         tone: 'note',
-        sentence: 'себестоимость ещё не посчитана',
+        sentence: 'the cost is not computed yet',
         // ВЕРДИКТ ОБЯЗАН НАЗЫВАТЬ БЛИЖАЙШИЙ НЕДОСТАЮЩИЙ ФАКТ, А НЕ ПЕРВЫЙ ПОПАВШИЙСЯ ЭКРАН.
-        // «Заполните BOM» на заполненном BOM — не подсказка, а отправка туда, где всё уже сделано:
-        // человек проверяет спецификацию, находит её полной и остаётся без следующего шага.
+        // «fill in the BOM» на заполненном BOM — не подсказка, а отправка туда, где всё уже
+        // сделано: человек проверяет спецификацию, находит её полной и остаётся без следующего шага.
         cause: !bomHasLines
-          ? 'заполните BOM или впишите статью в разбивке ниже — цифры появятся после сохранения'
+          ? 'fill in the BOM or enter a cost item in the breakdown below — the figures will appear after saving'
           : recipeGaveNothing && noColorways
-            ? 'BOM заполнен, но у карточки нет колорвеев — расход задаётся в рецепте колорвея'
+            ? 'the BOM is filled in, but the card has no colourways — consumption is set in the colourway recipe'
             : recipeGaveNothing
-              ? // ВТОРАЯ ПОЛОВИНА ФАКТА — ТУТ ЖЕ. «Нет строк расхода на изделие» было правдой ровно
+              ? // ВТОРАЯ ПОЛОВИНА ФАКТА — ТУТ ЖЕ. «no per-unit consumption lines» было правдой ровно
                 // наполовину с тех пор, как сервер научился считать слот с деталями по ПЛОЩАДИ:
                 // выход есть и без такой строки, но он требует замеренных площадей, а их не было
                 // ни у одной карточки беты. Оговорка появляется только когда замерить и правда
                 // есть что (выкройки в DXF на месте, площадей нет) — иначе она звала бы на вкладку,
                 // где делать нечего.
                 areasWouldPrice
-                ? 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие, а годного замера площадей деталей нет — по площадям сервер считает оценку снизу и без такой строки, если детали назначены слоту (вкладка выкроек)'
-                : 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие — расход задаётся на ткани, а не на детали'
-            : 'у строк BOM нет цены, либо рецепт не назначен ни на один колорвей — цифры появятся после сохранения',
+                ? 'the BOM is filled in, but the colourway recipes have no per-unit consumption lines, and there is no usable measurement of the piece areas — from areas the server computes a lower-bound estimate even without such a line, if pieces are assigned to the slot (the patterns tab)'
+                : 'the BOM is filled in, but the colourway recipes have no per-unit consumption lines — consumption is set on the fabric, not on the pieces'
+              : 'the BOM lines have no price, or the recipe is not assigned to any colourway — the figures will appear after saving',
         action:
           bomHasLines && recipeGaveNothing ? (
             <Button asChild size='xs' variant='secondary'>
-              <Link to='?tab=colorways'>к колорвеям</Link>
+              <Link to='?tab=colorways'>to colorways</Link>
             </Button>
           ) : (
             <Button asChild size='xs' variant='secondary'>
-              <Link to='?tab=bom'>заполнить BOM</Link>
+              <Link to='?tab=bom'>fill in the BOM</Link>
             </Button>
           ),
       }
     : currencyDirty
       ? {
           figure: '—',
-          figureLabel: `валюта → ${cur || '—'}`,
+          figureLabel: `currency → ${cur || '—'}`,
           tone: 'error',
-          sentence: 'валюта костинга изменена — считать пока нечем',
+          sentence: 'the costing currency was changed — there is nothing to compute with yet',
           cause:
-            'материалы и себестоимость по колорвеям всё ещё в прежней валюте: пересчитать их может только сервер, по курсам костинга. Сохраните карту.',
+            'the materials and the per-colourway costs are still in the previous currency: only the server can convert them, at the costing rates. Save the card.',
         }
       : costIncomplete
         ? {
             figure: money(unitCost),
-            figureLabel: 'unit cost занижен',
+            figureLabel: 'unit cost understated',
             tone: 'error',
             figureTone: 'text-error',
-            sentence: 'маржу по этой себестоимости считать нельзя',
-            cause: 'в расчёте есть строки без цены или без курса — они не вошли ни в один итог',
+            sentence: "the margin can't be computed from this cost",
+            cause:
+              'the calculation contains lines without a price or without a rate — they entered no total',
             action: (
               <Button asChild size='xs' variant='secondary'>
-                <Link to='?tab=bom'>найти строку</Link>
+                <Link to='?tab=bom'>find the line</Link>
               </Button>
             ),
           }
@@ -971,12 +999,12 @@ export function CostingField({
               // есть, и правило «ступень у каждой цифры» не знает исключения «зато маржа не
               // посчиталась». Ветка ниже (`lowerBound`) сюда не достаёт по построению: она
               // говорит о марже, а её тут нет.
-              figureLabel: lowerBound ? `себестоимость · ${TIER_ESTIMATE}` : 'себестоимость',
+              figureLabel: lowerBound ? `cost · ${TIER_ESTIMATE}` : 'cost',
               tone: 'note',
-              sentence: 'нетто-маржа не считается',
+              sentence: 'the net margin is not computed',
               cause:
                 retailReason ||
-                (netted ? 'нет розничной цены' : `нет ставки VAT для ${vatCountry || 'страны'}`),
+                (netted ? 'no retail price' : `no VAT rate for ${vatCountry || 'the country'}`),
             }
           : // ── ОЦЕНКА СНИЗУ ГОВОРИТ ЗА ВСЕ ТРИ МАРЖИНАЛЬНЫЕ ВЕТКИ, И ЭТО НЕ ПЕРЕСТРАХОВКА.
             // Ниже стоят три ветки про цель: «цели нет», «цель выполнена» и «не хватает столько-то».
@@ -997,64 +1025,65 @@ export function CostingField({
             ? !hasTarget || onTarget || !gapWorthShowing
               ? {
                   figure: money(unitCost),
-                  figureLabel: `себестоимость · ${TIER_ESTIMATE}`,
+                  figureLabel: `cost · ${TIER_ESTIMATE}`,
                   tone: 'warning',
                   sentence:
-                    `маржа не выше ${marginPct.toFixed(1)}%` +
-                    (hasTarget ? ` — цель ${targetPct.toFixed(0)}% проходит только по ней` : ''),
+                    `the margin is no higher than ${marginPct.toFixed(1)}%` +
+                    (hasTarget ? ` — the ${targetPct.toFixed(0)}% target passes only on it` : ''),
                   cause: ESTIMATE_CTA,
                 }
               : {
                   figure: `−${(gap ?? 0).toFixed(2)}`,
-                  figureLabel: `не хватает минимум, ${cur || 'на изделие'}`,
+                  figureLabel: `short by at least, ${cur || 'per garment'}`,
                   tone: 'error',
                   figureTone: 'text-error',
-                  sentence: `маржа не выше ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}%`,
-                  cause: `разрыв посчитан от ЗАНИЖЕННОЙ себестоимости, настоящий больше. ${ESTIMATE_CTA}`,
+                  sentence: `the margin is no higher than ${marginPct.toFixed(1)}% against a ${targetPct.toFixed(0)}% target`,
+                  cause: `the gap is computed from an UNDERSTATED cost, the real one is bigger. ${ESTIMATE_CTA}`,
                 }
             : !hasTarget
-            ? {
-                figure: `${marginPct.toFixed(1)}%`,
-                figureLabel: 'маржа нетто',
-                tone: 'note',
-                sentence: `${money(grossMargin ?? 0)} с изделия`,
-                cause: 'цель маржи не задана — ни своя у стиля, ни дефолт компании',
-              }
-            : // Тот же порог полкопейки, что и в ветке оценки выше: недобор, который печатается
-              // как «−0.00», это остаток округления, а не дыра в марже, и красная плашка о нём
-              // отправляет искать деньги, которых нет.
-              onTarget || !gapWorthShowing
               ? {
                   figure: `${marginPct.toFixed(1)}%`,
-                  figureLabel: 'маржа нетто',
+                  figureLabel: 'net margin',
                   tone: 'note',
-                  figureTone: 'text-success',
-                  sentence: `цель ${targetPct.toFixed(0)}% выполнена`,
-                  cause: `${money(grossMargin ?? 0)} с изделия · запас ${money(Math.abs(gap ?? 0))} на изделие`,
-                }
-              : {
-                  figure: `−${(gap ?? 0).toFixed(2)}`,
-                  figureLabel: `не хватает, ${cur || 'на изделие'}`,
-                  tone: 'error',
-                  figureTone: 'text-error',
-                  sentence: `маржа ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}%`,
-                  // Name the row that is ACTUALLY the longest, not the one that usually is.
+                  sentence: `${money(grossMargin ?? 0)} per garment`,
                   cause:
-                    biggestStep && biggestStep.amount > 0 && unitCost > 0
-                      ? `самая длинная полоса — ${biggestStep.name}, ${money(biggestStep.amount)} (${Math.round(
-                          (biggestStep.amount / unitCost) * 100,
-                        )}% себестоимости)`
-                      : undefined,
-                  // ...and only offer the BOM when the BOM is where that row is edited. For a CMT- or
-                  // overhead-dominated garment the lever is the input in the breakdown below, and
-                  // sending someone to the BOM would be sending them away from it.
-                  action:
-                    biggestStep?.key === 'materials' ? (
-                      <Button asChild size='xs' variant='secondary'>
-                        <Link to='?tab=bom'>открыть BOM</Link>
-                      </Button>
-                    ) : undefined,
-                };
+                    "no margin target is set — neither the style's own nor the company default",
+                }
+              : // Тот же порог полкопейки, что и в ветке оценки выше: недобор, который печатается
+                // как «−0.00», это остаток округления, а не дыра в марже, и красная плашка о нём
+                // отправляет искать деньги, которых нет.
+                onTarget || !gapWorthShowing
+                ? {
+                    figure: `${marginPct.toFixed(1)}%`,
+                    figureLabel: 'net margin',
+                    tone: 'note',
+                    figureTone: 'text-success',
+                    sentence: `the ${targetPct.toFixed(0)}% target is met`,
+                    cause: `${money(grossMargin ?? 0)} per garment · ${money(Math.abs(gap ?? 0))} headroom per garment`,
+                  }
+                : {
+                    figure: `−${(gap ?? 0).toFixed(2)}`,
+                    figureLabel: `short by, ${cur || 'per garment'}`,
+                    tone: 'error',
+                    figureTone: 'text-error',
+                    sentence: `margin ${marginPct.toFixed(1)}% against a ${targetPct.toFixed(0)}% target`,
+                    // Name the row that is ACTUALLY the longest, not the one that usually is.
+                    cause:
+                      biggestStep && biggestStep.amount > 0 && unitCost > 0
+                        ? `the longest bar is ${biggestStep.name}, ${money(biggestStep.amount)} (${Math.round(
+                            (biggestStep.amount / unitCost) * 100,
+                          )}% of the cost)`
+                        : undefined,
+                    // ...and only offer the BOM when the BOM is where that row is edited. For a CMT- or
+                    // overhead-dominated garment the lever is the input in the breakdown below, and
+                    // sending someone to the BOM would be sending them away from it.
+                    action:
+                      biggestStep?.key === 'materials' ? (
+                        <Button asChild size='xs' variant='secondary'>
+                          <Link to='?tab=bom'>open the BOM</Link>
+                        </Button>
+                      ) : undefined,
+                  };
 
   // Партия отвечает своей ценой: снапшот плана и «сегодня по той же формуле». Пусто — сервер
   // называет причину словами (Ф2 BE-3), и показать надо ЕЁ, а не собственную догадку по пустоте.
@@ -1071,7 +1100,7 @@ export function CostingField({
           <div className='flex flex-col gap-2'>
             <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
               <Text size='micro' variant='label' component='span'>
-                база расчёта
+                calculation basis
               </Text>
               {runs.length > 0 && (
                 <Button
@@ -1083,7 +1112,7 @@ export function CostingField({
                     setComposing(false);
                   }}
                 >
-                  стиль · средняя по ряду
+                  style · mean across the range
                 </Button>
               )}
               {basisRuns.map((r) => (
@@ -1097,7 +1126,7 @@ export function CostingField({
                     setComposing(false);
                   }}
                 >
-                  {`партия #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
+                  {`run #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
                 </Button>
               ))}
               {/* СОСТАВИТЬ ПАРТИЮ, НЕ УХОДЯ СО СТРАНИЦЫ. Черновик не занимает ткань и не проходит
@@ -1119,19 +1148,20 @@ export function CostingField({
                     setComposing(true);
                   }}
                 >
-                  + новая партия
+                  + new run
                 </Button>
               )}
               {canPlanRuns && runColorways.length === 0 && (
                 <Text size='micro' variant='label' component='span'>
-                  у карточки нет живых колорвеев с продуктом — составлять партию не из чего
+                  the card has no live colourways with a product — there is nothing to compose a run
+                  from
                 </Text>
               )}
               {batchRunId > 0 && (
                 <Text size='micro' component='span'>
                   {batchCost?.value
-                    ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} за изделие — взвешенно по миксу ЭТОЙ партии (колорвеи × размеры), с её пинами`
-                    : batchReason || 'цена партии не посчитана'}
+                    ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} per garment — weighted by THIS run's mix (colourways × sizes), with its pins`
+                    : batchReason || "the run's cost is not computed"}
                 </Text>
               )}
             </div>
@@ -1151,7 +1181,7 @@ export function CostingField({
                 />
               ) : (
                 <Text size='micro' variant='label'>
-                  загружаем состав партии…
+                  loading the run's composition…
                 </Text>
               )
             ) : composing ? (
@@ -1189,7 +1219,7 @@ export function CostingField({
         <Suspense
           fallback={
             <Text size='micro' variant='label'>
-              загружаем движок раскладки…
+              loading the nesting engine…
             </Text>
           }
         >
@@ -1212,538 +1242,552 @@ export function CostingField({
           Классы повторяют внешний контейнер (flex-col gap-3): fieldset встаёт между ним и его
           бывшими детьми, и без этого все промежутки между блоками вкладки схлопнулись бы в один. */}
       <fieldset disabled={frozen} className='m-0 flex min-w-0 flex-col gap-3 border-0 p-0'>
-      {/* ═══ ВЕРДИКТ — the gap as a number, its cause, and the way to close it. */}
-      <CalloutBox tone={verdict.tone}>
-        <div className='flex flex-wrap items-center gap-x-5 gap-y-2'>
-          <div className='min-w-[110px]'>
-            <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              {verdict.figureLabel}
-            </Text>
-            <Text size='statBig' className={verdict.figureTone}>
-              {verdict.figure}
-            </Text>
-          </div>
-          <div className='flex min-w-0 flex-1 flex-col items-start gap-1'>
-            <Text className='font-bold'>{verdict.sentence}</Text>
-            {verdict.cause && (
-              <Text size='micro' variant='label'>
-                {verdict.cause}
+        {/* ═══ ВЕРДИКТ — the gap as a number, its cause, and the way to close it. */}
+        <CalloutBox tone={verdict.tone}>
+          <div className='flex flex-wrap items-center gap-x-5 gap-y-2'>
+            <div className='min-w-[110px]'>
+              <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                {verdict.figureLabel}
               </Text>
-            )}
-            {verdict.action}
+              <Text size='statBig' className={verdict.figureTone}>
+                {verdict.figure}
+              </Text>
+            </div>
+            <div className='flex min-w-0 flex-1 flex-col items-start gap-1'>
+              <Text className='font-bold'>{verdict.sentence}</Text>
+              {verdict.cause && (
+                <Text size='micro' variant='label'>
+                  {verdict.cause}
+                </Text>
+              )}
+              {verdict.action}
+            </div>
           </div>
-        </div>
-      </CalloutBox>
+        </CalloutBox>
 
-      {/* State of the CARD, not of the calculation — the calculation's own state is the problem
+        {/* State of the CARD, not of the calculation — the calculation's own state is the problem
           list below. Three pills, not six. */}
-      <div className='flex flex-wrap items-center gap-1.5'>
-        <Pill tone={isReleased ? 'attention' : 'mut'}>{stateLabel}</Pill>
-        {cur && <Pill tone='mut'>{cur}</Pill>}
-        {/* Ступень — теми же словами, что на полосе себестоимости справа (общий словарь). Полоса
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Pill tone={isReleased ? 'attention' : 'mut'}>{stateLabel}</Pill>
+          {cur && <Pill tone='mut'>{cur}</Pill>}
+          {/* Ступень — теми же словами, что на полосе себестоимости справа (общий словарь). Полоса
             носит эту пилюлю с Ф6.1, вкладка — нет, и человек, видевший обе, читал два разных
             ответа об одной цифре. */}
-        {lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
-        {draftPreview && <Pill tone='attention'>черновик</Pill>}
-        {/* ОДНА БАЗА НА ЭКРАНЕ. Переключатель вверху меняет базу расчёта, но перерисовать по
+          {lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
+          {draftPreview && <Pill tone='attention'>draft</Pill>}
+          {/* ОДНА БАЗА НА ЭКРАНЕ. Переключатель вверху меняет базу расчёта, но перерисовать по
             партии сервер сегодня умеет ровно одну цифру — её цену за изделие (planned_unit_cost);
             ни разбивки, ни маржи, ни колорвейного разреза по партии он не отдаёт. Пока это так,
             экран обязан хотя бы СКАЗАТЬ, что всё ниже — про стиль: молчащая подпись при нажатой
-            кнопке «партия #12» читается как «вот её деньги», а это средняя по размерному ряду,
+            кнопке «run #12» читается как «вот её деньги», а это средняя по размерному ряду,
             которая на партии из одних XL врёт на всю разницу градации. */}
-        <Text size='micro' variant='label'>
-          {batchRunId > 0
-            ? `база расчёта — партия #${batchRunId}, но всё ниже описывает СТИЛЬ: ` +
-              'цену партии сервер отдаёт одной цифрой выше, разбивки и маржи по её миксу пока нет. '
-            : ''}
-          плановая себестоимость · нормы по размерам входят СРЕДНИМ ПО РАЗМЕРНОМУ РЯДУ (это не
-          прогноз партии — план партии считается по её линиям) · пересчитывается при сохранении
-          карты
-        </Text>
-      </div>
+          <Text size='micro' variant='label'>
+            {batchRunId > 0
+              ? `the calculation basis is run #${batchRunId}, but everything below describes the STYLE: ` +
+                "the server returns the run's cost as the single figure above; there is no breakdown or margin by its mix yet. "
+              : ''}
+            planned cost · per-size norms enter as the MEAN ACROSS THE SIZE RANGE (this is not a run
+            forecast — a run plan is computed from its own lines) · recomputed when the card is
+            saved
+          </Text>
+        </div>
 
-      {/* ═══ ПРОБЛЕМЫ — counted, collapsed, each with the link to where it is fixed.
+        {/* ═══ ПРОБЛЕМЫ — counted, collapsed, each with the link to where it is fixed.
           `<details>`, not a button: a RELEASED card wraps this whole tab in `<fieldset disabled>`,
           which would make a button-driven disclosure unreadable on exactly the cards people read
           most. */}
-      {problems.length > 0 && (
+        {problems.length > 0 && (
+          <details className='group'>
+            <summary
+              className={`flex cursor-pointer list-none items-center gap-2 border px-2.5 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden ${
+                blockingCount > 0 ? 'border-error' : 'border-warning bg-warning/5'
+              }`}
+            >
+              <Text
+                size='micro'
+                tracking='label'
+                component='span'
+                className={`font-bold uppercase ${blockingCount > 0 ? 'text-error' : 'text-warning'}`}
+              >
+                {blockingCount > 0
+                  ? `${blockingCount} ${plural(blockingCount, 'problem')} ${plural(blockingCount, 'blocks', 'block')} the calculation`
+                  : `${warningCount} ${plural(warningCount, 'warning')}`}
+              </Text>
+              {blockingCount > 0 && warningCount > 0 && (
+                <Text size='micro' variant='label' component='span'>
+                  {`+ ${warningCount} ${plural(warningCount, 'warning')}`}
+                </Text>
+              )}
+              <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
+                <span className='group-open:hidden'>▸</span>
+                <span className='hidden group-open:inline'>▾</span>
+              </Text>
+            </summary>
+            <div className='flex flex-col border border-t-0 border-borderColor'>
+              {problems.map((p) => (
+                <div
+                  key={p.key}
+                  className='flex flex-wrap items-start gap-2 border-b border-hairline px-2.5 py-1.5 last:border-b-0'
+                >
+                  <Pill tone={p.blocking ? 'warn' : 'attention'}>
+                    {p.blocking ? 'blocking' : 'warning'}
+                  </Pill>
+                  <div className='min-w-[200px] flex-1'>
+                    <Text size='micro'>{p.text}</Text>
+                    {p.detail}
+                  </div>
+                  {p.action}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {/* ═══ ОСЬ ЦЕНЫ — one arithmetic chain, left to right. VAT stops being a footnote and
+          becomes the step it actually is. */}
+        <GroupLabel flush>{`price → cost → margin${cur ? ` · ${cur}` : ''}`}</GroupLabel>
+        {retail != null && showMoney ? (
+          <StatGrid min={140}>
+            <Stat
+              label={
+                <span className='inline-flex items-center gap-1'>
+                  retail
+                  <HelpMark title='retail'>
+                    Read from the {cur} price of the linked colourways, and only when they all
+                    agree: a disagreement is reported, not averaged. Catalogue prices are
+                    VAT-inclusive.
+                  </HelpMark>
+                </span>
+              }
+              value={(grossRetail ?? 0).toFixed(2)}
+              sub='catalog, with VAT'
+            />
+            <Stat
+              label={netted ? `− VAT ${vatRate.toFixed(0)}% ${vatCountry}` : '− VAT'}
+              value={netted ? (netRetail ?? 0).toFixed(2) : '—'}
+              sub={
+                netted
+                  ? 'net — the margin comes off it'
+                  : `no rate for ${vatCountry || 'the country'}`
+              }
+            />
+            <Stat
+              label={
+                <span className='inline-flex items-center gap-1'>
+                  − cost
+                  <HelpMark title='cost'>
+                    The planned unit cost per garment: materials from the BOM + CMT + logistics +
+                    overhead, all of it multiplied by the defect percent. VAT is not in it — which
+                    is why the margin is computed off the net retail.
+                    {lowerBound ? ` ${ESTIMATE_WHY}` : ''}
+                  </HelpMark>
+                </span>
+              }
+              value={unitCost.toFixed(2)}
+              // Ступень ВЫТЕСНЯЕТ валютную приписку, а не приписывается к ней: «база EUR 41.20» — это
+              // где ЕЩЁ живёт та же цифра, а «оценка снизу» — ЧЕМ она является. Второе важнее, и в
+              // одну строку `sub` помещается только одно из двух.
+              sub={
+                lowerBound
+                  ? `${TIER_ESTIMATE} — the real one is higher`
+                  : usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
+                    ? `plan · base ${baseCur} ${serverUnitCostBase.toFixed(2)}`
+                    : 'plan, per garment'
+              }
+            />
+            <Stat
+              label='= margin'
+              // «≤» — ТА ЖЕ ОГОВОРКА, ЧТО СЛОВАМИ В `sub`, но у самой цифры: подпись под ячейкой
+              // читают не всегда, а число — всегда. Без знака ячейка утверждала точные «42.00» ровно
+              // там, где вердикт двумя блоками выше говорит «не выше».
+              value={
+                grossMargin != null ? `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}` : '—'
+              }
+              // `certifiable`, not just `hasTarget`: a green «up» on a margin the verdict has already
+              // called uncomputable is the contradiction this gate exists to prevent.
+              tone={
+                !certifiable || marginPct == null || !hasTarget
+                  ? undefined
+                  : onTarget
+                    ? 'up'
+                    : 'down'
+              }
+              // «to list price» is the gross-of-VAT margin, and the docstring above promises it stays
+              // visible while the house target is re-anchored against net. It used to appear only in
+              // the no-target branch — i.e. never on the cards actually being re-anchored.
+              sub={
+                marginPct == null
+                  ? retailReason || 'no net retail'
+                  : // «no higher than» — не украшение, а знак неравенства: маржа от нижней границы
+                    // себестоимости сама является верхней границей, и число без этой оговорки
+                    // читается как достигнутое.
+                    `${lowerBound ? 'no higher than ' : ''}${marginPct.toFixed(1)}%${
+                      hasTarget ? ` · target ${targetPct.toFixed(0)}%` : ''
+                    }${grossMarginPct != null ? ` · to list price ${grossMarginPct.toFixed(1)}%` : ''}`
+              }
+            />
+          </StatGrid>
+        ) : (
+          <StatGrid min={140}>
+            <Stat
+              label='cost'
+              big
+              value={hasCosting && showMoney ? money(unitCost) : '—'}
+              sub={
+                !showMoney
+                  ? `will be recomputed in ${cur} on save`
+                  : hasCosting && materials > 0 && unitCost > 0
+                    ? `materials ${Math.round((materials / unitCost) * 100)}%`
+                    : 'per garment'
+              }
+            />
+            <Stat
+              label='margin'
+              value='—'
+              sub={
+                !showMoney ? 'the costing currency was changed' : retailReason || 'no retail price'
+              }
+            />
+          </StatGrid>
+        )}
+
+        {/* ═══ РАЗБИВКА — the waterfall IS the breakdown, and the input that moves each step sits on
+          that step's row. One picture, not two. */}
+        <GroupLabel>
+          {!showMoney
+            ? 'what it adds up from · the amounts will appear after saving'
+            : retailScale != null
+              ? `where the ${netted ? 'net retail' : 'retail'} goes · ${money(unitCost)} of cost out of ${money(retailScale)}`
+              : `what it adds up from${hasCosting ? ` · ${money(unitCost)} per garment` : ''}`}
+        </GroupLabel>
+        {retailScale != null && showMoney && (
+          <StepRow
+            // `retail` falls back to the GROSS price when the destination has no VAT rate on file, so
+            // this row must not hardcode «net» — it spent one revision calling a VAT-inclusive
+            // number a net one, which is the exact confusion the netting work existed to end.
+            name={netted ? 'net retail' : 'retail (with VAT)'}
+            left={0}
+            width={100}
+            value={retailScale.toFixed(2)}
+            kind='pos'
+            emphasis
+          />
+        )}
+        {stepRows.map((s) => (
+          <StepRow
+            key={s.key}
+            name={s.name}
+            aside={s.aside}
+            help={s.help}
+            left={showMoney ? s.left : 0}
+            width={showMoney ? s.width : 0}
+            value={showMoney && s.amount > 0 ? `−${s.amount.toFixed(2)}` : '—'}
+            kind='neg'
+            lever={s.lever}
+          />
+        ))}
+        {retailScale != null && showMoney && grossMargin != null && marginPct != null && (
+          <StepRow
+            name={hasTarget ? `margin · target ${targetPct.toFixed(0)}%` : 'margin'}
+            left={0}
+            width={Math.max(0, (grossMargin / retailScale) * 100)}
+            // Та же оговорка, что у ячейки маржи выше: полоса водопада — вторая поверхность того же
+            // числа, и молчащая здесь она возвращала бы точное утверждение, которое экран только что
+            // отозвал.
+            value={`${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)} · ${marginPct.toFixed(0)}%`}
+            // Green only when the figure can actually certify something. On an understated cost the
+            // bar goes neutral ink rather than red: «below target» is a claim we cannot make either,
+            // and painting it red would be as wrong as painting it green.
+            kind={!certifiable ? 'pos' : onTarget || !hasTarget ? 'final' : 'neg'}
+            emphasis
+          />
+        )}
+        {!hasCosting && (
+          <Text size='micro' variant='label'>
+            nothing to break down yet — add materials to the BOM or enter a cost item in the row
+            above, and the bars will appear as soon as the first number does.
+          </Text>
+        )}
+        {/* Not on an understated cost: a confident unit count derived from a margin the verdict has
+          just refused to certify is the same contradiction as a green bar. */}
+        {breakEven.value && certifiable && (
+          <Text size='micro' variant='label'>
+            {`R&D ${baseCur || cur} ${devTotal.toFixed(2)} pays back at ${breakEven.value} on the PLANNED margin (catalogue retail)`}
+            {breakEven.why ? ` — ${breakEven.why}` : ''}
+            {
+              '. The payback from actual sales is in the R&D section below; these are different questions. '
+            }
+            {fxIncomplete && (
+              <HelpMark title='why it is not computed' label='why'>
+                {BREAK_EVEN_NO_FX}
+              </HelpMark>
+            )}
+          </Text>
+        )}
+
+        {/* ═══ ПАРАМЕТРЫ — collapsed to the line of assumptions the figures were computed under.
+          `<details>` again, so the values stay readable on a frozen card. */}
         <details className='group'>
-          <summary
-            className={`flex cursor-pointer list-none items-center gap-2 border px-2.5 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden ${
-              blockingCount > 0 ? 'border-error' : 'border-warning bg-warning/5'
-            }`}
-          >
+          <summary className='mt-3 flex cursor-pointer list-none flex-wrap items-center gap-1.5 border-b border-borderColor pb-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
             <Text
               size='micro'
-              tracking='label'
+              variant='label'
+              tracking='group'
               component='span'
-              className={`font-bold uppercase ${blockingCount > 0 ? 'text-error' : 'text-warning'}`}
+              className='font-bold uppercase'
             >
-              {blockingCount > 0
-                ? `${blockingCount} ${plural(blockingCount, 'проблема', 'проблемы', 'проблем')} ${plural(blockingCount, 'блокирует', 'блокируют', 'блокируют')} расчёт`
-                : `${warningCount} ${plural(warningCount, 'предупреждение', 'предупреждения', 'предупреждений')}`}
+              calculation parameters
             </Text>
-            {blockingCount > 0 && warningCount > 0 && (
-              <Text size='micro' variant='label' component='span'>
-                {`+ ${warningCount} ${plural(warningCount, 'предупреждение', 'предупреждения', 'предупреждений')}`}
-              </Text>
-            )}
+            <Pill tone='mut'>{cur || 'no currency picked'}</Pill>
+            <Pill tone='mut'>
+              {hasTarget ? `target ${targetPct.toFixed(0)}%` : 'no target set'}
+            </Pill>
+            <Pill tone='mut'>
+              {vatCountry
+                ? `market ${vatCountry}${vatRate > 0 ? ` · VAT ${vatRate.toFixed(0)}%` : ' · no VAT'}`
+                : 'default market'}
+            </Pill>
+            {costing.notes ? <Pill tone='mut'>has a note</Pill> : null}
             <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
               <span className='group-open:hidden'>▸</span>
               <span className='hidden group-open:inline'>▾</span>
             </Text>
           </summary>
-          <div className='flex flex-col border border-t-0 border-borderColor'>
-            {problems.map((p) => (
-              <div
-                key={p.key}
-                className='flex flex-wrap items-start gap-2 border-b border-hairline px-2.5 py-1.5 last:border-b-0'
-              >
-                <Pill tone={p.blocking ? 'warn' : 'attention'}>
-                  {p.blocking ? 'блок' : 'внимание'}
-                </Pill>
-                <div className='min-w-[200px] flex-1'>
-                  <Text size='micro'>{p.text}</Text>
-                  {p.detail}
-                </div>
-                {p.action}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-
-      {/* ═══ ОСЬ ЦЕНЫ — one arithmetic chain, left to right. VAT stops being a footnote and
-          becomes the step it actually is. */}
-      <GroupLabel flush>{`цена → себестоимость → маржа${cur ? ` · ${cur}` : ''}`}</GroupLabel>
-      {retail != null && showMoney ? (
-        <StatGrid min={140}>
-          <Stat
-            label={
-              <span className='inline-flex items-center gap-1'>
-                розница
-                <HelpMark title='розница'>
-                  Читается из {cur}-цены связанных колорвеев и только когда все они согласны:
-                  расхождение сообщается, а не усредняется. Каталожные цены VAT-inclusive.
-                </HelpMark>
-              </span>
-            }
-            value={(grossRetail ?? 0).toFixed(2)}
-            sub='каталог, с VAT'
-          />
-          <Stat
-            label={netted ? `− VAT ${vatRate.toFixed(0)}% ${vatCountry}` : '− VAT'}
-            value={netted ? (netRetail ?? 0).toFixed(2) : '—'}
-            sub={netted ? 'нетто — от неё маржа' : `нет ставки для ${vatCountry || 'страны'}`}
-          />
-          <Stat
-            label={
-              <span className='inline-flex items-center gap-1'>
-                − себестоимость
-                <HelpMark title='себестоимость'>
-                  Плановый unit cost за изделие: материалы из BOM + CMT + логистика + overhead, всё
-                  это умножено на процент брака. VAT в него не входит — поэтому маржа и считается от
-                  нетто-розницы.
-                  {lowerBound ? ` ${ESTIMATE_WHY}` : ''}
-                </HelpMark>
-              </span>
-            }
-            value={unitCost.toFixed(2)}
-            // Ступень ВЫТЕСНЯЕТ валютную приписку, а не приписывается к ней: «база EUR 41.20» — это
-            // где ЕЩЁ живёт та же цифра, а «оценка снизу» — ЧЕМ она является. Второе важнее, и в
-            // одну строку `sub` помещается только одно из двух.
-            sub={
-              lowerBound
-                ? `${TIER_ESTIMATE} — настоящая выше`
-                : usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
-                  ? `план · база ${baseCur} ${serverUnitCostBase.toFixed(2)}`
-                  : 'план, за изделие'
-            }
-          />
-          <Stat
-            label='= маржа'
-            // «≤» — ТА ЖЕ ОГОВОРКА, ЧТО СЛОВАМИ В `sub`, но у самой цифры: подпись под ячейкой
-            // читают не всегда, а число — всегда. Без знака ячейка утверждала точные «42.00» ровно
-            // там, где вердикт двумя блоками выше говорит «не выше».
-            value={
-              grossMargin != null
-                ? `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}`
-                : '—'
-            }
-            // `certifiable`, not just `hasTarget`: a green «up» on a margin the verdict has already
-            // called uncomputable is the contradiction this gate exists to prevent.
-            tone={
-              !certifiable || marginPct == null || !hasTarget ? undefined : onTarget ? 'up' : 'down'
-            }
-            // «к списку» is the gross-of-VAT margin, and the docstring above promises it stays
-            // visible while the house target is re-anchored against net. It used to appear only in
-            // the no-target branch — i.e. never on the cards actually being re-anchored.
-            sub={
-              marginPct == null
-                ? retailReason || 'нет нетто-розницы'
-                : // «не выше» — не украшение, а знак неравенства: маржа от нижней границы
-                  // себестоимости сама является верхней границей, и число без этой оговорки
-                  // читается как достигнутое.
-                  `${lowerBound ? 'не выше ' : ''}${marginPct.toFixed(1)}%${
-                    hasTarget ? ` · цель ${targetPct.toFixed(0)}%` : ''
-                  }${grossMarginPct != null ? ` · к списку ${grossMarginPct.toFixed(1)}%` : ''}`
-            }
-          />
-        </StatGrid>
-      ) : (
-        <StatGrid min={140}>
-          <Stat
-            label='себестоимость'
-            big
-            value={hasCosting && showMoney ? money(unitCost) : '—'}
-            sub={
-              !showMoney
-                ? `пересчитается в ${cur} при сохранении`
-                : hasCosting && materials > 0 && unitCost > 0
-                  ? `материалы ${Math.round((materials / unitCost) * 100)}%`
-                  : 'за изделие'
-            }
-          />
-          <Stat
-            label='маржа'
-            value='—'
-            sub={!showMoney ? 'валюта костинга изменена' : retailReason || 'нет розничной цены'}
-          />
-        </StatGrid>
-      )}
-
-      {/* ═══ РАЗБИВКА — the waterfall IS the breakdown, and the input that moves each step sits on
-          that step's row. One picture, not two. */}
-      <GroupLabel>
-        {!showMoney
-          ? 'из чего сложилось · суммы появятся после сохранения'
-          : retailScale != null
-            ? `куда уходит ${netted ? 'нетто-розница' : 'розница'} · ${money(unitCost)} себестоимости из ${money(retailScale)}`
-            : `из чего сложилось${hasCosting ? ` · ${money(unitCost)} за изделие` : ''}`}
-      </GroupLabel>
-      {retailScale != null && showMoney && (
-        <StepRow
-          // `retail` falls back to the GROSS price when the destination has no VAT rate on file, so
-          // this row must not hardcode «нетто» — it spent one revision calling a VAT-inclusive
-          // number a net one, which is the exact confusion the netting work existed to end.
-          name={netted ? 'розница нетто' : 'розница (с VAT)'}
-          left={0}
-          width={100}
-          value={retailScale.toFixed(2)}
-          kind='pos'
-          emphasis
-        />
-      )}
-      {stepRows.map((s) => (
-        <StepRow
-          key={s.key}
-          name={s.name}
-          aside={s.aside}
-          help={s.help}
-          left={showMoney ? s.left : 0}
-          width={showMoney ? s.width : 0}
-          value={showMoney && s.amount > 0 ? `−${s.amount.toFixed(2)}` : '—'}
-          kind='neg'
-          lever={s.lever}
-        />
-      ))}
-      {retailScale != null && showMoney && grossMargin != null && marginPct != null && (
-        <StepRow
-          name={hasTarget ? `маржа · цель ${targetPct.toFixed(0)}%` : 'маржа'}
-          left={0}
-          width={Math.max(0, (grossMargin / retailScale) * 100)}
-          // Та же оговорка, что у ячейки маржи выше: полоса водопада — вторая поверхность того же
-          // числа, и молчащая здесь она возвращала бы точное утверждение, которое экран только что
-          // отозвал.
-          value={`${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)} · ${marginPct.toFixed(0)}%`}
-          // Green only when the figure can actually certify something. On an understated cost the
-          // bar goes neutral ink rather than red: «below target» is a claim we cannot make either,
-          // and painting it red would be as wrong as painting it green.
-          kind={!certifiable ? 'pos' : onTarget || !hasTarget ? 'final' : 'neg'}
-          emphasis
-        />
-      )}
-      {!hasCosting && (
-        <Text size='micro' variant='label'>
-          пока нечего разбирать — добавьте материалы в BOM или впишите статью в строке выше, и
-          полосы появятся, как только появится первое число.
-        </Text>
-      )}
-      {/* Not on an understated cost: a confident unit count derived from a margin the verdict has
-          just refused to certify is the same contradiction as a green bar. */}
-      {breakEven.value && certifiable && (
-        <Text size='micro' variant='label'>
-          {`R&D ${baseCur || cur} ${devTotal.toFixed(2)} отобьётся на ${breakEven.value} по ПЛАНОВОЙ марже (каталожная розница)`}
-          {breakEven.why ? ` — ${breakEven.why}` : ''}
-          {'. Окупаемость по фактическим продажам — в секции R&D ниже; это разные вопросы. '}
-          {fxIncomplete && (
-            <HelpMark title='почему не считается' label='почему'>
-              {BREAK_EVEN_NO_FX}
-            </HelpMark>
-          )}
-        </Text>
-      )}
-
-      {/* ═══ ПАРАМЕТРЫ — collapsed to the line of assumptions the figures were computed under.
-          `<details>` again, so the values stay readable on a frozen card. */}
-      <details className='group'>
-        <summary className='mt-3 flex cursor-pointer list-none flex-wrap items-center gap-1.5 border-b border-borderColor pb-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
-          <Text
-            size='micro'
-            variant='label'
-            tracking='group'
-            component='span'
-            className='font-bold uppercase'
-          >
-            параметры расчёта
-          </Text>
-          <Pill tone='mut'>{cur || 'валюта не выбрана'}</Pill>
-          <Pill tone='mut'>{hasTarget ? `цель ${targetPct.toFixed(0)}%` : 'цель не задана'}</Pill>
-          <Pill tone='mut'>
-            {vatCountry
-              ? `рынок ${vatCountry}${vatRate > 0 ? ` · VAT ${vatRate.toFixed(0)}%` : ' · без VAT'}`
-              : 'рынок по умолчанию'}
-          </Pill>
-          {costing.notes ? <Pill tone='mut'>заметка есть</Pill> : null}
-          <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
-            <span className='group-open:hidden'>▸</span>
-            <span className='hidden group-open:inline'>▾</span>
-          </Text>
-        </summary>
-        <div className='flex flex-col gap-3 pt-2'>
-          <fieldset
-            disabled={!canWriteCosting}
-            className='m-0 grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
-          >
-            <CurrencySelect name='costing.currency' label='валюта костинга' />
-            {/* This style's own target. Left empty it falls back to the house default, which the
+          <div className='flex flex-col gap-3 pt-2'>
+            <fieldset
+              disabled={!canWriteCosting}
+              className='m-0 grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
+            >
+              <CurrencySelect name='costing.currency' label='costing currency' />
+              {/* This style's own target. Left empty it falls back to the house default, which the
                 server resolves onto the read — so an empty field is not "no target", it is "the
                 usual one". */}
-            <DecimalField
-              name='costing.targetMarginPct'
-              label={`цель маржи, %${hasTarget && !num(costing.targetMarginPct) ? ` (дефолт ${targetPct.toFixed(0)})` : ''}`}
-            />
-          </fieldset>
-          {/* WHICH MARKET the margin is for. Catalogue prices are VAT-inclusive, so the net retail —
+              <DecimalField
+                name='costing.targetMarginPct'
+                label={`margin target, %${hasTarget && !num(costing.targetMarginPct) ? ` (default ${targetPct.toFixed(0)})` : ''}`}
+              />
+            </fieldset>
+            {/* WHICH MARKET the margin is for. Catalogue prices are VAT-inclusive, so the net retail —
               and therefore the margin — depends entirely on the destination's rate. An empty country
               dictionary hides the control rather than offering an empty select. */}
-          {countryItems.length > 0 && (
-            <div className='flex flex-wrap items-end gap-3'>
-              <div className='flex min-w-56 flex-col gap-1'>
-                <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                  рынок для маржи (VAT)
+            {countryItems.length > 0 && (
+              <div className='flex flex-wrap items-end gap-3'>
+                <div className='flex min-w-56 flex-col gap-1'>
+                  <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                    market for the margin (VAT)
+                  </Text>
+                  <MarketPicker
+                    value={vatScenarioCountry}
+                    items={countryItems}
+                    onPick={setVatScenarioCountry}
+                  />
+                </div>
+                <Text size='micro' variant='label' className='min-w-0 flex-1 pb-0.5'>
+                  {vatScenarioLoading
+                    ? "re-reading the card at this country's rate…"
+                    : vatCountry
+                      ? vatRate > 0
+                        ? `the net retail and the margin are computed at the ${vatRate.toFixed(0)}% ${vatCountry} rate${vatScenarioCountry ? '' : " — the company's domestic rate"}.`
+                        : `there is no VAT rate for ${vatCountry} — nothing is deducted, and the margin comes out “against the list price”.`
+                      : "the company's domestic rate. Pick a destination to see the margin that market leaves."}
                 </Text>
-                <MarketPicker
-                  value={vatScenarioCountry}
-                  items={countryItems}
-                  onPick={setVatScenarioCountry}
-                />
               </div>
-              <Text size='micro' variant='label' className='min-w-0 flex-1 pb-0.5'>
-                {vatScenarioLoading
-                  ? 'перечитываю карту по ставке этой страны…'
-                  : vatCountry
-                    ? vatRate > 0
-                      ? `нетто-розница и маржа считаются по ставке ${vatRate.toFixed(0)}% ${vatCountry}${vatScenarioCountry ? '' : ' — домашней ставке компании'}.`
-                      : `для ${vatCountry} ставки VAT нет — ничего не вычитается, и маржа получается «к списочной цене».`
-                    : 'домашняя ставка компании. Выберите направление, чтобы увидеть маржу, которую оставляет этот рынок.'}
-              </Text>
-            </div>
-          )}
-          <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
-            <TextareaField name='costing.notes' label='заметки' rows={2} maxLength={2000} />
-          </fieldset>
-        </div>
-      </details>
+            )}
+            <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
+              <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
+            </fieldset>
+          </div>
+        </details>
 
-      {/* ═══ КОЛОРВЕИ — a set of tiles, because the question is "which one is dearer and why",
+        {/* ═══ КОЛОРВЕИ — a set of tiles, because the question is "which one is dearer and why",
           and a three-column table answered it only in the reader's head. */}
-      {colorwayCosts.length > 0 && (
-        <>
-          <GroupLabel>по колорвеям</GroupLabel>
-          <Tiles min={170}>
-            {colorwayCosts.map((cc, i) => {
-              const ccUnit = num(decimalToInput(cc.unitCost));
-              const ccMaterials = num(decimalToInput(cc.materialsPerUnit));
-              const broken = !!cc.hasUnpriced || !!cc.hasUnconvertedCurrencies;
-              // Per-colourway margin needs THIS colourway's own net price, not the style's — two
-              // colourways of one style can be priced differently. The base row (colorwayId 0) is
-              // not tied to a colourway, so it falls back to the style-level agreed retail.
-              const cw = colorwayOf(cc.colorwayId);
-              const ccNet = cc.colorwayId
-                ? parseDecimalNumber(
-                    (cw?.netPrices ?? []).find((p) => p.currency === cur)?.price?.value,
-                  )
-                : netRetail;
-              const ccMarginPct =
-                !broken && ccNet != null && Number.isFinite(ccNet) && ccNet > 0 && ccUnit > 0
-                  ? ((ccNet - ccUnit) / ccNet) * 100
-                  : undefined;
-              // Δ against the style's own plan unit cost — the number people actually compare.
-              // Measured against the SERVER's figure, not the live preview: `cc.unitCost` is a
-              // server rollup, and subtracting a browser-side draft from it made every tile's delta
-              // twitch while someone typed a CMT quote that had not reached the server yet.
-              // Ступень ЭТОГО колорвея. Она своя у каждого: детали на ткань назначает его рецепт,
-              // поэтому один цвет может считаться нормой, а соседний — оценкой снизу.
-              const ccLowerBound = !!cc.hasEstimate;
-              // РАЗНЫЕ СТУПЕНИ НЕ ВЫЧИТАЮТСЯ. Корень rollup'а — ОСНОВНОЙ колорвей; если он посчитан
-              // нормой, а этот оценкой (или наоборот), разность содержит не разницу между цветами, а
-              // разницу между способами счёта: «дешевле на 4.10» читалось бы как экономия ткани там,
-              // где у одного из двух просто нет выпадов в числе.
-              // ДВЕ ОЦЕНКИ ВЫЧИТАТЬ ТОЖЕ НЕЛЬЗЯ, хотя ступень у них одна. Первая редакция этой
-              // правки гасила дельту только при РАЗНЫХ ступенях — на том основании, что одинаковые
-              // сравнимы. Это неверно: каждая оценка прячет СВОЙ, неизвестный объём выпадов.
-              // Оценки 80 и 90 при скрытых выпадах 30 и 10 дают настоящие 110 и 100 — знак
-              // фактической разницы ОБРАТНЫЙ показанному, а плитка красит его уверенным цветом.
-              //
-              // `costIncomplete` — про вторую сторону вычитания: `broken` проверяет только саму
-              // плитку, поэтому здоровый колорвей продолжал показывать «−4.10 к плану стиля», где
-              // «план стиля» — это корень, о котором вкладка сверху уже сказала «маржу по этой
-              // себестоимости считать нельзя».
-              const delta =
-                !broken &&
-                !ccLowerBound &&
-                !rollup?.hasEstimate &&
-                !costIncomplete &&
-                ccUnit > 0 &&
-                serverUnitCost > 0
-                  ? ccUnit - serverUnitCost
-                  : undefined;
-              const swatch = colorwaySwatch(cc.colorwayId);
-              return (
-                <Tile key={cc.colorwayId || `base-${i}`} tone={broken ? 'error' : 'default'}>
-                  <div className='flex items-center gap-1.5'>
-                    {swatch && (
-                      <span
-                        aria-hidden
-                        className='inline-block size-[9px] shrink-0 border border-borderColor'
-                        style={{ background: swatch }}
-                      />
-                    )}
-                    <Text size='micro' component='span' className='truncate font-bold uppercase'>
-                      {colorwayLabel(cc.colorwayId)}
-                    </Text>
-                    {cc.colorwayId === 0 && <Pill tone='mut'>основной</Pill>}
-                    {ccLowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
-                  </div>
-                  {/* Same withholding as the axis above: these are server rollups denominated in
+        {colorwayCosts.length > 0 && (
+          <>
+            <GroupLabel>by colourway</GroupLabel>
+            <Tiles min={170}>
+              {colorwayCosts.map((cc, i) => {
+                const ccUnit = num(decimalToInput(cc.unitCost));
+                const ccMaterials = num(decimalToInput(cc.materialsPerUnit));
+                const broken = !!cc.hasUnpriced || !!cc.hasUnconvertedCurrencies;
+                // Per-colourway margin needs THIS colourway's own net price, not the style's — two
+                // colourways of one style can be priced differently. The base row (colorwayId 0) is
+                // not tied to a colourway, so it falls back to the style-level agreed retail.
+                const cw = colorwayOf(cc.colorwayId);
+                const ccNet = cc.colorwayId
+                  ? parseDecimalNumber(
+                      (cw?.netPrices ?? []).find((p) => p.currency === cur)?.price?.value,
+                    )
+                  : netRetail;
+                const ccMarginPct =
+                  !broken && ccNet != null && Number.isFinite(ccNet) && ccNet > 0 && ccUnit > 0
+                    ? ((ccNet - ccUnit) / ccNet) * 100
+                    : undefined;
+                // Δ against the style's own plan unit cost — the number people actually compare.
+                // Measured against the SERVER's figure, not the live preview: `cc.unitCost` is a
+                // server rollup, and subtracting a browser-side draft from it made every tile's delta
+                // twitch while someone typed a CMT quote that had not reached the server yet.
+                // Ступень ЭТОГО колорвея. Она своя у каждого: детали на ткань назначает его рецепт,
+                // поэтому один цвет может считаться нормой, а соседний — оценкой снизу.
+                const ccLowerBound = !!cc.hasEstimate;
+                // РАЗНЫЕ СТУПЕНИ НЕ ВЫЧИТАЮТСЯ. Корень rollup'а — ОСНОВНОЙ колорвей; если он посчитан
+                // нормой, а этот оценкой (или наоборот), разность содержит не разницу между цветами, а
+                // разницу между способами счёта: «дешевле на 4.10» читалось бы как экономия ткани там,
+                // где у одного из двух просто нет выпадов в числе.
+                // ДВЕ ОЦЕНКИ ВЫЧИТАТЬ ТОЖЕ НЕЛЬЗЯ, хотя ступень у них одна. Первая редакция этой
+                // правки гасила дельту только при РАЗНЫХ ступенях — на том основании, что одинаковые
+                // сравнимы. Это неверно: каждая оценка прячет СВОЙ, неизвестный объём выпадов.
+                // Оценки 80 и 90 при скрытых выпадах 30 и 10 дают настоящие 110 и 100 — знак
+                // фактической разницы ОБРАТНЫЙ показанному, а плитка красит его уверенным цветом.
+                //
+                // `costIncomplete` — про вторую сторону вычитания: `broken` проверяет только саму
+                // плитку, поэтому здоровый колорвей продолжал показывать «−4.10 к плану стиля», где
+                // «план стиля» — это корень, о котором вкладка сверху уже сказала «маржу по этой
+                // себестоимости считать нельзя».
+                const delta =
+                  !broken &&
+                  !ccLowerBound &&
+                  !rollup?.hasEstimate &&
+                  !costIncomplete &&
+                  ccUnit > 0 &&
+                  serverUnitCost > 0
+                    ? ccUnit - serverUnitCost
+                    : undefined;
+                const swatch = colorwaySwatch(cc.colorwayId);
+                return (
+                  <Tile key={cc.colorwayId || `base-${i}`} tone={broken ? 'error' : 'default'}>
+                    <div className='flex items-center gap-1.5'>
+                      {swatch && (
+                        <span
+                          aria-hidden
+                          className='inline-block size-[9px] shrink-0 border border-borderColor'
+                          style={{ background: swatch }}
+                        />
+                      )}
+                      <Text size='micro' component='span' className='truncate font-bold uppercase'>
+                        {colorwayLabel(cc.colorwayId)}
+                      </Text>
+                      {cc.colorwayId === 0 && <Pill tone='mut'>base</Pill>}
+                      {ccLowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
+                    </div>
+                    {/* Same withholding as the axis above: these are server rollups denominated in
                       the SAVED currency, so mid-switch they must not be printed under the new one. */}
-                  <Text
-                    size='stat'
-                    className={broken || !showMoney ? 'text-labelColor' : undefined}
-                  >
-                    {showMoney && ccUnit > 0 ? ccUnit.toFixed(2) : '—'}
-                  </Text>
-                  <Text size='micro' variant='label'>
-                    {!showMoney
-                      ? `пересчитается в ${cur} при сохранении`
-                      : `материалы ${ccMaterials > 0 ? ccMaterials.toFixed(2) : '—'}${
-                          ccMarginPct != null
-                            ? ` · маржа ${ccLowerBound ? 'не выше ' : ''}${ccMarginPct.toFixed(1)}%`
-                            : ''
-                        }`}
-                  </Text>
-                  {showMoney && delta != null && Math.abs(delta) >= 0.005 && (
                     <Text
-                      size='micro'
-                      component='span'
-                      className={delta > 0 ? 'text-error' : 'text-success'}
+                      size='stat'
+                      className={broken || !showMoney ? 'text-labelColor' : undefined}
                     >
-                      {`${delta > 0 ? '+' : '−'}${Math.abs(delta).toFixed(2)} к плану стиля`}
+                      {showMoney && ccUnit > 0 ? ccUnit.toFixed(2) : '—'}
                     </Text>
-                  )}
-                  <div className='mt-1'>
-                    {/* No `currency` here on purpose. `hasUnconvertedCurrencies` means some BOM line
+                    <Text size='micro' variant='label'>
+                      {!showMoney
+                        ? `will be recomputed in ${cur} on save`
+                        : `materials ${ccMaterials > 0 ? ccMaterials.toFixed(2) : '—'}${
+                            ccMarginPct != null
+                              ? ` · margin ${ccLowerBound ? 'no higher than ' : ''}${ccMarginPct.toFixed(1)}%`
+                              : ''
+                          }`}
+                    </Text>
+                    {showMoney && delta != null && Math.abs(delta) >= 0.005 && (
+                      <Text
+                        size='micro'
+                        component='span'
+                        className={delta > 0 ? 'text-error' : 'text-success'}
+                      >
+                        {`${delta > 0 ? '+' : '−'}${Math.abs(delta).toFixed(2)} vs the style plan`}
+                      </Text>
+                    )}
+                    <div className='mt-1'>
+                      {/* No `currency` here on purpose. `hasUnconvertedCurrencies` means some BOM line
                         is in a currency that has NO rate — which is never the costing currency, the
                         one every other figure on this tile is already in. Passing `cur` made the
                         pill read «нет курса EUR» and sent people to add the one rate that exists.
                         The rollup does not say which currency offended, so the honest pill is the
                         bare «нет курса». */}
-                    <LineProblems
-                      noPrice={!!cc.hasUnpriced}
-                      noFxRate={!!cc.hasUnconvertedCurrencies}
-                    />
-                  </div>
-                </Tile>
-              );
-            })}
-          </Tiles>
-        </>
-      )}
+                      <LineProblems
+                        noPrice={!!cc.hasUnpriced}
+                        noFxRate={!!cc.hasUnconvertedCurrencies}
+                      />
+                    </div>
+                  </Tile>
+                );
+              })}
+            </Tiles>
+          </>
+        )}
 
-      {/* Reprice: the one write this band owns. Server-side, frozen only for RELEASED cards,
+        {/* Reprice: the one write this band owns. Server-side, frozen only for RELEASED cards,
           catalog-linked lines only. */}
-      {canWriteCosting && !isReleased && catalogLinkedLines > 0 && (
-        <div className='flex flex-wrap items-center gap-3'>
-          <Button
-            type='button'
-            size='sm'
-            variant='secondary'
-            disabled={reprice.isPending}
-            onClick={onReprice}
-          >
-            {reprice.isPending ? 'обновляю цены…' : 'обновить цены из каталога'}
-          </Button>
-          <Text size='micro' variant='label' className='min-w-0 flex-1'>
-            {`перезапишет unit price у ${catalogLinkedLines} привязанных к каталогу строк BOM и пометит их источник «каталог»; подписанный MATERIALS sign-off станет устаревшим.`}
-          </Text>
-        </div>
-      )}
-
-      {/* ═══ ДОКАЗАТЕЛЬСТВА — one click away, never in the way. */}
-      <details className='group'>
-        <summary className='mt-3 flex cursor-pointer list-none items-baseline gap-2 border-b border-borderColor pb-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
-          <Text
-            size='micro'
-            variant='label'
-            tracking='group'
-            component='span'
-            className='font-bold uppercase'
-          >
-            материалы построчно
-          </Text>
-          <Text size='micro' variant='label' component='span'>
-            раскладки · суммы по валютам · курсы
-          </Text>
-          <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
-            <span className='group-open:hidden'>▸</span>
-            <span className='hidden group-open:inline'>▾</span>
-          </Text>
-        </summary>
-        <div className='flex flex-col gap-2 pt-2'>
-          {/* Ф4: measured fabric consumption from saved раскладки, beside what the recipes say.
-              Display-only — the write path is the recipe editor's «применить…». */}
-          <MarkerConsumptionBand techCard={techCard} />
-          {materialsTotal.length > 0 && (
-            <div>
-              {materialsTotal.map((line, i) => (
-                <Row
-                  key={i}
-                  label={`материалы · ${line.currency || 'без валюты'}`}
-                  value={decimalToInput(line.amount) || '—'}
-                />
-              ))}
-            </div>
-          )}
-          {colorwayCosts.length === 0 && materialsTotal.length === 0 && (
-            <Text size='micro' variant='label'>
-              материалов пока нет — заполните BOM и рецепты колорвеев, суммы посчитаются при
-              сохранении. Источник и дату каждой цены видно в смете ниже.
+        {canWriteCosting && !isReleased && catalogLinkedLines > 0 && (
+          <div className='flex flex-wrap items-center gap-3'>
+            <Button
+              type='button'
+              size='sm'
+              variant='secondary'
+              disabled={reprice.isPending}
+              onClick={onReprice}
+            >
+              {reprice.isPending ? 'refreshing prices…' : 'refresh prices from the catalog'}
+            </Button>
+            <Text size='micro' variant='label' className='min-w-0 flex-1'>
+              {`will overwrite the unit price on ${catalogLinkedLines} catalog-linked BOM lines and mark their source as “catalog”; a signed MATERIALS sign-off will become stale.`}
             </Text>
-          )}
-          <Text size='micro' variant='label'>
-            Строки BOM в других валютах сворачиваются в базовую
-            {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} по общим курсам костинга — они
-            же засевают cost_price продукта.{' '}
-            <Link to={ROUTES.settings} className='underline hover:text-textColor'>
-              Курсы в настройках
-            </Link>
-            . Здесь план стиля (его основной колорвей), а не сохранённый cost_price каждого
-            продукта; построчная точность — в смете ниже. R&D в базовой валюте и в unit cost не
-            входит.
-          </Text>
-        </div>
-      </details>
+          </div>
+        )}
+
+        {/* ═══ ДОКАЗАТЕЛЬСТВА — one click away, never in the way. */}
+        <details className='group'>
+          <summary className='mt-3 flex cursor-pointer list-none items-baseline gap-2 border-b border-borderColor pb-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
+            <Text
+              size='micro'
+              variant='label'
+              tracking='group'
+              component='span'
+              className='font-bold uppercase'
+            >
+              materials line by line
+            </Text>
+            <Text size='micro' variant='label' component='span'>
+              markers · totals by currency · rates
+            </Text>
+            <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
+              <span className='group-open:hidden'>▸</span>
+              <span className='hidden group-open:inline'>▾</span>
+            </Text>
+          </summary>
+          <div className='flex flex-col gap-2 pt-2'>
+            {/* Ф4: measured fabric consumption from saved раскладки, beside what the recipes say.
+              Display-only — the write path is the recipe editor's «применить…». */}
+            <MarkerConsumptionBand techCard={techCard} />
+            {materialsTotal.length > 0 && (
+              <div>
+                {materialsTotal.map((line, i) => (
+                  <Row
+                    key={i}
+                    label={`materials · ${line.currency || 'no currency'}`}
+                    value={decimalToInput(line.amount) || '—'}
+                  />
+                ))}
+              </div>
+            )}
+            {colorwayCosts.length === 0 && materialsTotal.length === 0 && (
+              <Text size='micro' variant='label'>
+                no materials yet — fill in the BOM and the colourway recipes, and the amounts will
+                be computed on save. The source and date of every price are visible in the estimate
+                below.
+              </Text>
+            )}
+            <Text size='micro' variant='label'>
+              BOM lines in other currencies are folded into the base one
+              {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} at the shared costing rates
+              — the same ones that seed the product's cost_price.{' '}
+              <Link to={ROUTES.settings} className='underline hover:text-textColor'>
+                Rates in settings
+              </Link>
+              . This is the style plan (its base colourway), not the saved cost_price of each
+              product; line-by-line precision is in the estimate below. R&D is in the base currency
+              and is not part of the unit cost.
+            </Text>
+          </div>
+        </details>
       </fieldset>
     </div>
   );
@@ -1773,7 +1817,7 @@ function MarketPicker({
 }) {
   const [open, setOpen] = useState(false);
   // DOMESTIC is a sentinel, not '': '' is "the page's own read", i.e. the company's domestic rate.
-  const all = [{ value: DOMESTIC, label: 'по умолчанию (домашний)' }, ...items];
+  const all = [{ value: DOMESTIC, label: 'default (domestic)' }, ...items];
   const current = all.find((i) => i.value === (value || DOMESTIC));
   const key = (fn: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -1787,7 +1831,7 @@ function MarketPicker({
     <GenericPopover
       open={open}
       onOpenChange={setOpen}
-      title='рынок для маржи'
+      title='market for the margin'
       triggerProps={{ asChild: true }}
       openElement={
         <span
@@ -1831,13 +1875,9 @@ function MarketPicker({
   );
 }
 
-/** Russian count agreement — 1 проблема / 2 проблемы / 5 проблем. */
-function plural(n: number, one: string, few: string, many: string) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
+/** English count agreement — 1 problem / 2 problems. */
+function plural(n: number, one: string, many = `${one}s`) {
+  return n === 1 ? one : many;
 }
 
 /**
@@ -1879,7 +1919,7 @@ function StepRow({
       <span className='min-w-0'>
         <span className={`flex items-center gap-1 ${emphasis ? 'font-bold' : ''}`}>
           <span className='truncate'>{name}</span>
-          {help && <HelpMark title={typeof name === 'string' ? name : 'строка'}>{help}</HelpMark>}
+          {help && <HelpMark title={typeof name === 'string' ? name : 'row'}>{help}</HelpMark>}
         </span>
         {aside && (
           <Text size='nano' variant='label' component='span' className='block truncate'>

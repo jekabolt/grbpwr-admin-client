@@ -17,10 +17,10 @@ export function parseDxf(buf: ArrayBuffer, unitOverride: Unit): ParsedDxf {
   const head = new Uint8Array(buf.slice(0, 22));
   const headStr = new TextDecoder('latin1').decode(head);
   if (headStr.startsWith(BINARY_SENTINEL)) {
-    throw new Error('бинарный DXF — пересохраните файл как ASCII DXF');
+    throw new Error('binary DXF — re-save the file as ASCII DXF');
   }
   if (headStr.startsWith('AC10') || headStr.startsWith('AC12') || headStr.startsWith('AC14')) {
-    throw new Error('это DWG, а не DXF — экспортируйте DXF из CAD');
+    throw new Error('this is DWG, not DXF — export DXF from your CAD');
   }
 
   // UTF-8 first; broken sequences (cp1251 block names are common) fall back to latin1 so
@@ -37,9 +37,9 @@ export function parseDxf(buf: ArrayBuffer, unitOverride: Unit): ParsedDxf {
   try {
     dxf = parser.parseSync(text);
   } catch (e) {
-    throw new Error(`не удалось разобрать DXF: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`couldn't parse DXF: ${e instanceof Error ? e.message : String(e)}`);
   }
-  if (!dxf) throw new Error('не удалось разобрать DXF (пустой результат парсера)');
+  if (!dxf) throw new Error("couldn't parse DXF (the parser returned nothing)");
 
   const header = (dxf.header ?? {}) as Record<string, unknown>;
   const insunits = typeof header['$INSUNITS'] === 'number' ? (header['$INSUNITS'] as number) : undefined;

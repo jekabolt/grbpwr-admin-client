@@ -19,7 +19,7 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
     links.push({
       kind: 'techcard',
       id: t.techCardId,
-      label: `техкарта #${t.techCardId}`,
+      label: `tech card #${t.techCardId}`,
       to: `/tech-cards/${t.techCardId}`,
     });
   if (t.productId > 0)
@@ -50,7 +50,7 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
     links.push({
       kind: 'fitting',
       id: t.fittingId,
-      label: `примерка #${t.fittingId}`,
+      label: `fitting #${t.fittingId}`,
       to: `/fittings/${t.fittingId}`,
     });
   // A sample lives inside its tech card's samples tab. The task's techCardId is only a guess at
@@ -60,7 +60,7 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
     links.push({
       kind: 'sample',
       id: t.sampleId,
-      label: `образец #${t.sampleId}`,
+      label: `sample #${t.sampleId}`,
       to:
         t.techCardId > 0
           ? `/tech-cards/${t.techCardId}?tab=samples&sample=${t.sampleId}`
@@ -70,7 +70,7 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
     links.push({
       kind: 'run',
       id: t.productionRunId,
-      label: `партия #${t.productionRunId}`,
+      label: `run #${t.productionRunId}`,
       to: `/production-runs/${t.productionRunId}`,
     });
   return links;

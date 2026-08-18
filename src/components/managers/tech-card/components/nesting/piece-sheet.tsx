@@ -253,7 +253,7 @@ export function PieceSheet({
     return (
       <div className='flex h-[46vh] w-full items-center justify-center border border-borderColor bg-bgColor'>
         <Text size='micro' variant='label'>
-          в файле не нашлось контуров, которые можно показать
+          no contours that can be shown were found in the file
         </Text>
       </div>
     );
@@ -468,14 +468,14 @@ export function PieceSheet({
       </div>
       <div className='flex flex-wrap items-center gap-2'>
         <Text size='nano' variant='label' component='span'>
-          клик по детали — выбрать · колесо — масштаб · тянуть — двигать
+          click a piece — select · wheel — zoom · drag — pan
         </Text>
         <Button type='button' variant='secondary' size='xs' onClick={() => setView(null)}>
-          весь лист
+          whole sheet
         </Button>
         {hidden > 0 && (
           <Text size='nano' component='span' className='text-error'>
-            не показано деталей: {hidden} (нет координат в разборе)
+            pieces not shown: {hidden} (no coordinates in the parse)
           </Text>
         )}
       </div>

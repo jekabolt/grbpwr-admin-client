@@ -370,8 +370,8 @@ export function AnnotationCanvas({
             {cornerSlot}
             {zoomable && (
               <FrameButton
-                label='зум'
-                title='открыть снимок во весь экран — там же и ставить указания точнее'
+                label='zoom'
+                title='open the picture full screen — callouts are placed more precisely there too'
                 onPress={() => {
                   // ЗУМ ОБРЫВАЕТ НЕЗАВЕРШЁННУЮ ПОСТАНОВКУ. Полноэкранная поверхность — другая,
                   // со своей панелью и своими точками; продолжить в ней мерку, начатую на
@@ -394,7 +394,7 @@ export function AnnotationCanvas({
           {...surface}
           open={zoomOpen}
           onOpenChange={setZoomOpen}
-          title={alt || 'снимок узла'}
+          title={alt || 'unit picture'}
         />
       )}
     </div>

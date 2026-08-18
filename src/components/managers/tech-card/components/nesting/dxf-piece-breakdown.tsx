@@ -128,7 +128,7 @@ export function BreakdownSizeChips({
   sizeId,
   sizeNameById,
   onChange,
-  label = 'разобрано по размеру',
+  label = 'broken down by size',
 }: {
   sizeIds: readonly number[];
   sizeId: number;
@@ -148,7 +148,7 @@ export function BreakdownSizeChips({
       )}
       <div
         role='radiogroup'
-        aria-label='размер, по которому показан разбор'
+        aria-label='the size the breakdown is shown for'
         className='flex flex-wrap items-center gap-1'
       >
         {sizeIds.map((id) => {
@@ -234,16 +234,16 @@ export function NettoFormula({
 }) {
   return (
     <StatGrid min={150}>
-      <Stat label='Σ площадь деталей' value={fmtInt(areaCm2)} sub={`см² · размер ${sizeLabel}`} />
+      <Stat label='Σ piece area' value={fmtInt(areaCm2)} sub={`cm² · size ${sizeLabel}`} />
       <Stat
-        label='÷ раскройная ширина'
+        label='÷ cutting width'
         value={cuttingWidthCm > 0 ? fmtInt(cuttingWidthCm) : '—'}
-        sub='см · рулон − 2×кромка'
+        sub='cm · roll − 2×selvedge'
       />
       <Stat
-        label='= netto на изделие'
+        label='= netto per unit'
         value={netto != null ? netto : '—'}
-        sub={unit ? `${unit} · без межлекальных выпадов` : 'единица слота не задана'}
+        sub={unit ? `${unit} · without the waste between pieces` : 'slot unit not set'}
       />
     </StatGrid>
   );
@@ -314,11 +314,11 @@ export function DxfPieceBreakdown({
       <DataTable>
         <thead>
           <tr>
-            <th>деталь</th>
-            <th>× на изделие</th>
-            <th>площадь ед., см²</th>
-            <th>вклад, см²</th>
-            <th>доля</th>
+            <th>piece</th>
+            <th>× per garment</th>
+            <th>area each, cm²</th>
+            <th>contribution, cm²</th>
+            <th>share</th>
             {widthOk && <th>netto{unit ? `, ${unit}` : ''}</th>}
           </tr>
         </thead>
@@ -346,21 +346,21 @@ export function DxfPieceBreakdown({
                           {/* Неградуируемая деталь входит в КАЖДЫЙ размер целиком — на переключении
                               чипа её число не двинется, и без этой пометки это читалось бы как
                               подозрительное совпадение. */}
-                          {r.ungraded && <Pill tone='mut'>во всех размерах</Pill>}
+                          {r.ungraded && <Pill tone='mut'>in all sizes</Pill>}
                           {r.hulled && (
                             <Pill
                               tone='attention'
-                              title='контур не сошёлся при раздутии припуском и заменён выпуклой оболочкой — площадь этой детали С ЗАПАСОМ'
+                              title='the contour did not close when inflated by the seam allowance and was replaced with a convex hull — the area of this piece is AN OVERESTIMATE'
                             >
-                              оболочка
+                              hull
                             </Pill>
                           )}
                           {r.ambiguousPick && (
                             <Pill
                               tone='attention'
-                              title='на выбранном слое лежало несколько совпадающих по площади копий этой детали — взята первая по порядку листов в пачке'
+                              title='the chosen layer carried several copies of this piece with matching areas — the first one in sheet order within the pack was taken'
                             >
-                              копий несколько
+                              several copies
                             </Pill>
                           )}
                         </span>
@@ -394,7 +394,7 @@ export function DxfPieceBreakdown({
         </tbody>
         <tfoot>
           <TotalRow>
-            <td>изделие {sizeLabel}</td>
+            <td>garment {sizeLabel}</td>
             <td />
             <td />
             <td>{fmtInt(garmentCm2)}</td>
@@ -406,7 +406,7 @@ export function DxfPieceBreakdown({
 
       {unlisted && (
         <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-          {`строки выше складываются в ${fmtInt(listedCm2)} см² из ${fmtInt(garmentCm2)} см² — часть деталей ещё не сохранена, и её площади не на что записать. Норма при этом считается по ПОЛНОЙ площади: расхождение только в этой разбивке`}
+          {`the rows above add up to ${fmtInt(listedCm2)} cm² out of ${fmtInt(garmentCm2)} cm² — some of the pieces are not saved yet, and there is nothing to record their areas against. the norm is still computed on the FULL area: the discrepancy is in this breakdown only`}
         </Text>
       )}
       {/* ОКРУГЛЕНИЕ НАЗЫВАЕТСЯ ВСЛУХ. Строки печатаются целыми см², итог — тоже целым, но он
@@ -415,18 +415,18 @@ export function DxfPieceBreakdown({
           процента, — и подгонять под него сами числа нельзя: итог обязан остаться той площадью, из
           которой посчитана норма (иначе таблица перестанет быть проверкой). Остаётся сказать. */}
       <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-        строки округлены до целых см², итог — нет: сумма столбца «вклад» может разойтись с итогом на
-        единицы. Итог — это площадь ИЗ РАСЧЁТА нормы, и подгонять её под округлённые строки значило
-        бы сделать таблицу непроверяемой
+        the rows are rounded to whole cm², the total is not: the sum of the “contribution” column may
+        differ from the total by a few units. the total is the area FROM THE NORM CALCULATION, and
+        fitting it to the rounded rows would make the table unverifiable
       </Text>
       {widthOk ? (
         <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-          {`netto детали — её доля полотна: вклад ÷ раскройную ширину ${fmtInt(cuttingWidthCm)} см. Это не отдельная норма и никуда не сохраняется: ткань покупается одним куском на изделие, а строки складываются в него`}
+          {`the netto of a piece is its share of the cloth: contribution ÷ cutting width ${fmtInt(cuttingWidthCm)} cm. this is not a separate norm and is saved nowhere: the fabric is bought as one piece per garment, and the rows add up into it`}
         </Text>
       ) : (
         <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-          раскройная ширина неизвестна — площади показаны, а метры из них не выводятся: делить не на
-          что
+          the cutting width is unknown — the areas are shown, but no metres are derived from them:
+          there is nothing to divide by
         </Text>
       )}
     </div>

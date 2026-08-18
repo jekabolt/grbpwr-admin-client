@@ -132,7 +132,7 @@ const emptyBomItem = {
 // existing line can never disagree about what a linked line ends up carrying.
 function materialLineFields(m: common_Material) {
   return {
-    // NO `name` here — the line's name is the slot ROLE («основная молния»), owned by the operator
+    // NO `name` here — the line's name is the slot ROLE («main zipper»), owned by the operator
     // and never derived from the article. Stamping the article name in was the regression that made
     // duplicate-looking slots and printed «YKK → YKK» in the production material plan (SlotName vs
     // MaterialName). An empty role is legal: the server falls back to the article name on read.
@@ -165,13 +165,13 @@ function useNoPriceWarning() {
   return (m: common_Material) => {
     if (!canReadCosting || m.latestPrice?.price?.value) return;
     showMessage(
-      `${m.name || 'этот материал'} без закупочной цены — костинг будет считать 0, пока цену не добавят в materials → prices`,
+      `${m.name || 'this material'} has no purchase price — costing will count 0 until a price is added in materials → prices`,
       'error',
     );
   };
 }
 
-// Выпущенная карта заморожена целиком — вместе с кнопкой «обновить цены из каталога» на костинге.
+// Выпущенная карта заморожена целиком — вместе с кнопкой «refresh prices from the catalog» на костинге.
 const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
@@ -239,13 +239,13 @@ function SlotIdentityFields({ index }: { index: number }) {
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
         <ComboField
           name={`bomItems.${index}.name`}
-          label='роль в изделии *'
+          label='role in the garment *'
           options={roleSuggestions(rowSection)}
-          placeholder='основная ткань / подкладка / молния…'
+          placeholder='main fabric / lining / zipper…'
         />
         <SelectField
           name={`bomItems.${index}.section`}
-          label='секция *'
+          label='section *'
           items={techCardBomSectionOptions}
         />
       </div>
@@ -256,17 +256,17 @@ function SlotIdentityFields({ index }: { index: number }) {
         <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
           <SelectField
             name={`bomItems.${index}.purpose`}
-            label='назначение'
+            label='purpose'
             items={purposeEditorOptions}
           />
           <div className='flex items-end pb-1'>
-            <CheckboxField name={`bomItems.${index}.isSample`} label='семпловая' />
+            <CheckboxField name={`bomItems.${index}.isSample`} label='sample fabric' />
           </div>
           {isOtherPurpose(rowPurpose) && (
             <div className='sm:col-span-2'>
               <InputField
                 name={`bomItems.${index}.purposeNote`}
-                label='что это за назначение'
+                label='what purpose is this'
                 maxLength={255}
               />
             </div>
@@ -274,20 +274,20 @@ function SlotIdentityFields({ index }: { index: number }) {
         </div>
       )}
       {/* ЧТО ЭТО ЗА ПОЗИЦИЯ — the mirror axis, shown exactly where назначение is not. The role
-          above stays free text and stays the slot's identity: «основная молния» and «молния
-          кармана» are both ZIPPER, and the card has to keep telling them apart. This says which
+          above stays free text and stays the slot's identity: «main zipper» and «pocket zipper»
+          are both ZIPPER, and the card has to keep telling them apart. This says which
           of those two questions the line answers, so a picker can group and a step can suggest. */}
       {kindEligible && (
         <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
           <SelectField
             name={`bomItems.${index}.kind`}
-            label='вид'
-            items={[{ value: UNSET_KIND, label: '— не задан —' }, ...kindItems]}
+            label='kind'
+            items={[{ value: UNSET_KIND, label: '— unset —' }, ...kindItems]}
           />
           {rowKind === 'TECH_CARD_BOM_KIND_OTHER' && (
             <InputField
               name={`bomItems.${index}.kindNote`}
-              label='что это за вид'
+              label='what kind is this'
               maxLength={255}
             />
           )}
@@ -343,12 +343,12 @@ function slotNormRows(
   return rows;
 }
 
-/** Список SKU колорвеев коротко: три и «ещё N» — строка рецепта не должна распирать колонку. */
+/** Список SKU колорвеев коротко: три и «N more» — строка рецепта не должна распирать колонку. */
 const skuList = (rows: SlotNormRow[]): string => {
   const names = rows.map((r) => r.sku);
   return names.length <= 3
     ? names.join(', ')
-    : `${names.slice(0, 3).join(', ')} и ещё ${names.length - 3}`;
+    : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
 };
 
 // Процент как читаемая величина: «+22%» вместо «22.00». Хвостовые нули — артефакт колонки
@@ -472,15 +472,15 @@ function CountedNote({ index }: { index: number }) {
   return (
     <div className='mt-1 space-y-1'>
       <Text variant='label' size='micro'>
-        Счётная строка: расход задаётся штуками в рецепте колорвея, надбавок на раскрой у неё нет —
-        четыре пуговицы остаются четырьмя пуговицами.
+        A counted line: consumption is set in pieces in the colourway recipe, and it gets no cutting
+        allowance — four buttons stay four buttons.
       </Text>
       {stale !== '' && (
         <div className='flex flex-wrap items-center gap-1.5'>
           <Pill tone='mut'>{pctLabel(stale) || `${stale}%`}</Pill>
           <Text size='nano' variant='label' component='span'>
-            процент остался на строке с прежних времён — ни один расчёт его не берёт, и тех-пак его
-            больше не печатает. Убрать стоит, чтобы он не выглядел действующим
+            the percent stayed on the line from earlier times — no calculation takes it, and the
+            tech pack no longer prints it. Worth removing so it doesn't look like it applies
           </Text>
           <Button
             type='button'
@@ -488,13 +488,13 @@ function CountedNote({ index }: { index: number }) {
             size='xs'
             onClick={() => {
               setValue(`bomItems.${index}.wastagePercent`, '', { shouldDirty: true });
-              // Провенанс уходит вместе с числом: «медиана по N раскроям» без числа — подпись под
+              // Провенанс уходит вместе с числом: «median across N lays» без числа — подпись под
               // прочерком, а сервер про пару (источник, счётчик) судит по значению.
               setValue(`bomItems.${index}.wastageSource`, 'manual', { shouldDirty: true });
               setValue(`bomItems.${index}.wastageLayCount`, 0, { shouldDirty: true });
             }}
           >
-            убрать
+            remove
           </Button>
         </div>
       )}
@@ -512,13 +512,13 @@ function TrimAllowance({ index }: { index: number }) {
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
         <DecimalField
           name={`bomItems.${index}.wastagePercent`}
-          label='запас на обрезки и стыки, %'
+          label='allowance for offcuts and joins, %'
         />
       </div>
       <Text variant='label' size='micro'>
-        Множитель на мерную норму строки: в закупку и в себестоимость идёт норма × (1 + %/100).
-        Раскладок и выкроек у мерной фурнитуры нет, поэтому число здесь ставится руками — и означает
-        оно обрезки при отрезании и стыки в рулоне, а не раскрой полотна.
+        A multiplier on the line's measured norm: purchasing and cost take norm × (1 + %/100).
+        Measured hardware has no markers and no patterns, so the number here is set by hand — and it
+        means offcuts when cutting to length and joins in the roll, not cutting cloth.
       </Text>
     </div>
   );
@@ -566,11 +566,11 @@ function CuttingAllowance({
   // РУЧНАЯ ПРАВКА ЗНАЧЕНИЯ ГАСИТ ПРОВЕНАНС «lays» СРАЗУ, НЕ ДОЖИДАЯСЬ СЕРВЕРА — та же дисциплина,
   // что у ручной правки нормы в рецепте (colorway-recipe: правка числа пишет source=''). Сервер
   // сделал бы то же самое при сохранении (смена значения → 'manual', что бы клиент ни прислал),
-  // но до сохранения бейдж «медиана по N раскроям» стоял бы рядом с числом, которое человек
+  // но до сохранения бейдж «median across N lays» стоял бы рядом с числом, которое человек
   // только что выдумал, — то есть врал бы ровно в момент, когда провенанс важнее всего.
   //
   // Якорь — значение, ПРИ КОТОРОМ источник стал 'lays' (загрузка карточки или нажатие
-  // «подставить»); сравнение числовое, чтобы «22.00» и «22» не читались как правка. Ссылку
+  // «substitute»); сравнение числовое, чтобы «22.00» и «22» не читались как правка. Ссылку
   // обновляет и applySuggestion ниже — иначе повторное применение уехавшей медианы выглядело бы
   // для этого эффекта как ручная правка и само же гасило бы только что поставленный источник.
   const laysAnchor = useRef<string | null>(null);
@@ -644,34 +644,34 @@ function CuttingAllowance({
   // Величина и её происхождение — ОДНОЙ плиткой, потому что порознь они не значат ничего: «22%»
   // без провенанса неотличимо от привычки, а «введено руками» без числа не говорит о закупке.
   const appliesNowhere = rung === 'measured' && grossedRows.length === 0;
-  const statValue = appliesNowhere ? 'не начисляется' : pct || '—';
+  const statValue = appliesNowhere ? 'not applied' : pct || '—';
   const statSub = appliesNowhere
-    ? 'норма измерена раскладкой'
+    ? 'the norm is measured from the marker'
     : rung === 'lays'
       ? `${laysProvenancePhrase(wastageLayCount, stampWhen(wastageAppliedAt))}${
-          stampWhen(wastageAppliedAt) ? '' : ' — применится при сохранении'
+          stampWhen(wastageAppliedAt) ? '' : ' — will apply on save'
         }`
       : wastageValue !== ''
-        ? 'введено руками — ничем не подтверждено'
-        : 'значения нет';
+        ? 'entered by hand — nothing confirms it'
+        : 'no value';
 
   // Путь наверх называется вслух и одинаково на всех нижних ступенях: измеренная длина — это то,
   // что закрывает вопрос совсем, а не ещё одна оценка получше.
   const kitMarkerRoute = frozen ? (
     <Text size='nano' variant='label'>
-      Выше по лестнице — измеренная длина: «раскладка комплекта…» в рецепте колорвея. На выпущенной
-      карточке её не снять — сначала верните карточку в draft.
+      Higher up the ladder is the measured length: “kit marker…” in the colourway recipe. It can't
+      be captured on a released card — return the card to draft first.
     </Text>
   ) : (
     <div className='flex flex-wrap items-center gap-1.5'>
       {onOpenColorways && (
         <Button type='button' variant='secondary' size='xs' onClick={onOpenColorways}>
-          → к рецепту колорвея
+          → to the colourway recipe
         </Button>
       )}
       <Text size='nano' variant='label' component='span'>
-        выше по лестнице — измеренная длина: «раскладка комплекта…» разложит детали ЭТОГО слота на
-        ширине пина колорвея, и процент перестанет применяться вовсе
+        higher up the ladder is the measured length: “kit marker…” lays out the pieces of THIS slot
+        on the width of the colourway's pin, and the percent stops applying altogether
       </Text>
     </div>
   );
@@ -687,17 +687,18 @@ function CuttingAllowance({
       </div>
 
       <StatGrid min={170}>
-        <Stat label='надбавка на раскрой' value={statValue} sub={statSub} />
+        <Stat label='cutting allowance' value={statValue} sub={statSub} />
       </StatGrid>
 
       {/* ЧТО ЭТО ЗА ЧИСЛО — ОДИН РАЗ НА ЭКРАН, и оба множителя названы вместе: порознь они и
           разъезжаются. Процент = геометрия настила, коэффициент = реальность рулона. */}
       <Text variant='label' size='micro'>
-        Процент платит ровно за ГЕОМЕТРИЮ настила: межлекальные выпады и концы. Кромка в него не
-        входит — она оплачена делением площади на раскройную ширину. Усадку, обход пороков и
-        сращивание платит другой множитель — коэффициент раскроя артикула
-        {coefSet ? ` (${coefRaw})` : ' (у этого артикула не задан)'}: он начисляется ВСЕГДА, включая
-        измеренную норму, потому что ни одна раскладка этого увидеть не может.
+        The percent pays for exactly the GEOMETRY of the lay: the waste between pieces and the lay
+        ends. The selvedge is not in it — it is paid for by dividing the area by the cutting width.
+        Shrinkage, working around flaws and splicing are paid for by the other multiplier — the
+        article's cutting coefficient
+        {coefSet ? ` (${coefRaw})` : ' (not set on this article)'}: it applies ALWAYS, including on
+        a measured norm, because no marker can see it.
       </Text>
 
       {rung === 'measured' ? (
@@ -705,10 +706,11 @@ function CuttingAllowance({
         // сервера (wastageApplies), и умножать ему нечего.
         <CalloutBox tone='note'>
           <Text size='micro'>
-            Норма снята с раскладки в рецептах: {skuList(measuredRows)}. Там надбавка не начисляется
-            — измеренная длина уже содержит межлекальные выпады и концы настила.
+            The norm is captured from the marker in these recipes: {skuList(measuredRows)}. There
+            the allowance is not applied — the measured length already contains the waste between
+            pieces and the lay ends.
             {grossedRows.length > 0
-              ? ` В остальных (${skuList(grossedRows)}) норма не измерена — там всё ещё начисляется ${pct || 'ноль: значения нет'}.`
+              ? ` In the rest (${skuList(grossedRows)}) the norm is not measured — there ${pct || 'zero: no value'} still applies.`
               : ''}
           </Text>
         </CalloutBox>
@@ -720,17 +722,18 @@ function CuttingAllowance({
         <>
           <CalloutBox tone='warning'>
             <Text size='micro'>
-              У карточки есть раскладка этого слота, но норма с неё не снята — пока начисляется{' '}
-              {pct || 'ноль: значения нет'}. Снимите расход с раскладки в рецепте колорвея, и
-              надбавка перестанет применяться вовсе.
+              The card has a marker for this slot, but the norm has not been captured from it — for
+              now {pct || 'zero: no value'} applies. Capture the consumption from the marker in the
+              colourway recipe, and the allowance will stop applying altogether.
             </Text>
           </CalloutBox>
           {kitMarkerRoute}
         </>
       ) : (
         <>
-          {/* СТУПЕНЬ 2. Живая панель: она сама говорит и «фактов n из 3, вот что сделать», и «вне
-              диапазона», и «готово, по N раскроям из M», и кладёт медиану в форму по нажатию —
+          {/* СТУПЕНЬ 2. Живая панель: она сама говорит и «n of 3 lays with an actual, вот что
+              сделать», и «the field won't take this», и «median across N of M lays», и кладёт
+              медиану в форму по нажатию —
               вместе со счётчиком настилов, по которому сервер признаёт применение. Ленивость по
               построению: компонент живёт только в открытом редакторе ОДНОЙ строки. */}
           <BomWastageSuggestion
@@ -746,9 +749,10 @@ function CuttingAllowance({
           {rung === 'none' && (
             <CalloutBox tone='warning'>
               <Text size='micro'>
-                Надбавки нет. Netto-норма уйдёт в закупку и в себестоимость КАК ЕСТЬ — без
-                межлекальных выпадов и концов настила, то есть заниженной. Гейт готовности прогона
-                на паре «норма по выкройкам + процент не задан» прогон не выпустит.
+                There is no allowance. The netto norm will go into purchasing and into the cost AS
+                IS — without the waste between pieces and the lay ends, that is, understated. The
+                run readiness gate will not release a run on the pair “norm from the patterns + percent
+                not set”.
               </Text>
             </CalloutBox>
           )}
@@ -762,16 +766,16 @@ function CuttingAllowance({
           внутри <fieldset disabled>, и раскрывашка на <button> там умерла бы молча. */}
       <details className='border border-hairline px-2 py-1'>
         <summary className='cursor-pointer text-micro uppercase tracking-label text-labelColor'>
-          вписать своё
+          enter your own
         </summary>
         <div className='flex flex-col gap-1 pt-1.5'>
           <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-            <DecimalField name={`bomItems.${index}.wastagePercent`} label='процент раскроя, %' />
+            <DecimalField name={`bomItems.${index}.wastagePercent`} label='cutting wastage, %' />
           </div>
           <Text size='nano' variant='label'>
-            Число станет «введено руками»: подтвердить его нечем, пока у слота нет ни раскладки, ни
-            трёх замеренных настилов. На прогоне его можно переопределить фактическим процентом цеха
-            — тот тоже остаётся геометрией настила.
+            The number will become “entered by hand”: there is nothing to confirm it with while the
+            slot has neither a marker nor three measured lays. On a run it can be overridden by the
+            workshop's actual percent — that one, too, stays the geometry of the lay.
           </Text>
           {coefSet && (
             // Ошибка, ради которой предупреждение и живёт ИМЕННО ЗДЕСЬ: единственное место, где
@@ -780,9 +784,10 @@ function CuttingAllowance({
             // все межлекальные выпады, линейно и незаметно.
             <CalloutBox tone='warning'>
               <Text size='nano'>
-                Не вписывайте сюда коэффициент раскроя артикула ({coefRaw}): у него ДРУГАЯ база —
-                измеренная длина, выпады уже внутри, — и он начисляется отдельно и поверх. Здесь
-                ждут выпады настила: обычно 15–30%, а не 2–6%.
+                Don't enter the article's cutting coefficient here ({coefRaw}): it has a DIFFERENT
+                base — the measured length, with the waste already inside — and it applies
+                separately and on top. What is expected here is the lay's waste: usually 15–30%, not
+                2–6%.
               </Text>
             </CalloutBox>
           )}
@@ -843,7 +848,7 @@ function BomItemRow({
   const linkedMaterial = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
-  // Warehouse facts for the plate's «склад: 41.6 m · средняя ≈ 1.05 EUR / m». Only fetched once a
+  // Warehouse facts for the plate's «stock: 41.6 m · average ≈ 1.05 EUR / m». Only fetched once a
   // line is actually linked AND being edited (this row only mounts inside the open editor dialog).
   const stockFacts = useMaterialStockFacts(linked);
 
@@ -905,7 +910,7 @@ function BomItemRow({
   // котировка следующей закупки. Никаких конвертаций и процентов расхождения на клиенте: валюты
   // разные, вычитать их нельзя.
   const avgLabel = stock?.avgUnitCostBase
-    ? `средняя ≈ ${stock.avgUnitCostBase} ${stock.baseCurrency}${stockUnit ? ` / ${stockUnit}` : ''}`
+    ? `average ≈ ${stock.avgUnitCostBase} ${stock.baseCurrency}${stockUnit ? ` / ${stockUnit}` : ''}`
     : '';
   const stockLine = join(onHandLabel, avgLabel);
 
@@ -915,13 +920,13 @@ function BomItemRow({
   // который некуда выполнить, — та же ложь, что «set it in materials» на проценённом артикуле,
   // только этажом выше, поэтому действие называется по состоянию карты.
   const priceAction = frozen
-    ? 'Перенести её на карту можно только после возврата в draft: на выпущенной карте цены заморожены вместе с остальной спецификацией.'
-    : 'Перенести: «обновить цены из каталога» на вкладке costing.';
+    ? 'It can be carried onto the card only after a return to draft: on a released card the prices are frozen together with the rest of the spec.'
+    : 'To carry it over: “refresh prices from the catalog” on the costing tab.';
   const priceHint =
     linePrice.source === 'catalog'
-      ? `Цена взята из справочника и на этой карте не зафиксирована — артикул проценили уже после привязки. ${priceAction}`
+      ? `The price is taken from the catalog and is not fixed on this card — the article was priced after it was linked. ${priceAction}`
       : linePrice.drift
-        ? `На карте зафиксировано ${linePrice.label}, в справочнике сейчас ${formatBomMoney(linePrice.drift.value, linePrice.drift.currency, linePrice.drift.unit)}. ${priceAction}`
+        ? `The card has ${linePrice.label} fixed, the catalog now says ${formatBomMoney(linePrice.drift.value, linePrice.drift.currency, linePrice.drift.unit)}. ${priceAction}`
         : '';
 
   // The composition cell carries the deep-link anchor + pulse the labels tab uses to point an
@@ -951,7 +956,8 @@ function BomItemRow({
 
   const colorwayHint = (
     <Text variant='label' size='micro'>
-      Цвет, размещение и расход этого артикула задаются на вкладке colorways (в карточке колорвея).
+      The colour, placement and consumption of this article are set on the colorways tab (inside the
+      colourway card).
     </Text>
   );
 
@@ -988,7 +994,7 @@ function BomItemRow({
                   {/* The ARTICLE's catalog name — under a "catalog article" header the role would
                       be a lie (the role names the slot, this plate names its default material). */}
                   <Text component='span' className='min-w-0 truncate font-bold'>
-                    {linkedMaterial?.name?.trim() || `артикул #${materialId}`}
+                    {linkedMaterial?.name?.trim() || `article #${materialId}`}
                   </Text>
                 </div>
                 <Text variant='label' size='micro' className='truncate'>
@@ -1027,7 +1033,7 @@ function BomItemRow({
                     разницу, которой не существует. */}
                 {stockLine ? (
                   <Text variant='label' size='micro' className='truncate'>
-                    склад: {stockLine}
+                    stock: {stockLine}
                   </Text>
                 ) : null}
               </div>
@@ -1044,9 +1050,9 @@ function BomItemRow({
               {linePrice.source === 'none' ? (
                 <Pill tone='attention'>no price — set it in materials</Pill>
               ) : linePrice.source === 'catalog' ? (
-                <Pill tone='attention'>цена из каталога</Pill>
+                <Pill tone='attention'>catalog price</Pill>
               ) : linePrice.drift ? (
-                <Pill tone='attention'>каталог {linePrice.drift.label}</Pill>
+                <Pill tone='attention'>catalog {linePrice.drift.label}</Pill>
               ) : null}
             </div>
             {priceHint && (
@@ -1105,7 +1111,7 @@ function BomItemRow({
       </div>
       <CalloutBox tone='error'>
         <Text size='micro'>
-          Привяжите артикул из справочника материалов — <b>an unlinked line blocks the release</b>.
+          Link an article from the materials catalog — <b>an unlinked line blocks the release</b>.
         </Text>
       </CalloutBox>
 
@@ -1118,7 +1124,7 @@ function BomItemRow({
             name={`bomItems.${index}.unit`}
             label='unit'
             options={unitOptions}
-            placeholder='м / pcs'
+            placeholder='m / pcs'
           />
           <InputField name={`bomItems.${index}.supplier`} label='supplier' />
           <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
@@ -1245,15 +1251,15 @@ function BomTile({
         {price.label}
       </Text>
       {price.source === 'catalog' ? (
-        <Pill tone='attention'>из каталога</Pill>
+        <Pill tone='attention'>from the catalog</Pill>
       ) : price.drift ? (
         // Расхождение видно на строке, а не всплывает на костинге через две вкладки: ради этого
-        // случая ручная кнопка «обновить цены из каталога» и остаётся.
+        // случая ручная кнопка «refresh prices from the catalog» и остаётся.
         // `min-w-0 truncate` обязательны: у Pill свой `whitespace-nowrap`, и длинное значение
-        // («каталог 1250.00 USD / kg») распирало бы 160-пиксельную колонку плиточной сетки —
+        // («catalog 1250.00 USD / kg») распирало бы 160-пиксельную колонку плиточной сетки —
         // соседний Text усекается, а плашка тянула бы трек за собой.
         <Pill tone='attention' className='min-w-0 truncate'>
-          каталог {price.drift.label}
+          catalog {price.drift.label}
         </Pill>
       ) : null}
     </>
@@ -1308,12 +1314,12 @@ function BomTile({
           {/* Семпловая rides INSIDE its purpose group as a badge, never as a group of its own: a
               sample is a sample MAIN plus a sample LINING, and a «семплы» heading would put those
               two in one bucket and throw away the roles that make them useful. */}
-          {row.isSample ? <Pill tone='ink'>семпл</Pill> : null}
+          {row.isSample ? <Pill tone='ink'>sample</Pill> : null}
         </div>
 
         {/* The ROLE, bold — the slot's identity. The article is the line below it. */}
         <Text component='span' size='micro' className='min-w-0 truncate font-bold uppercase'>
-          {row.name?.trim() || `слот ${index + 1}`}
+          {row.name?.trim() || `slot ${index + 1}`}
         </Text>
 
         {/* the default article: catalog name + self-describing code, once a material is linked */}
@@ -1343,7 +1349,7 @@ function BomTile({
             operator looked and none of the seven fitted. The note is the part that means something. */}
         {isOtherPurpose(row.purpose) && row.purposeNote?.trim() ? (
           <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
-            назначение: {row.purposeNote.trim()}
+            purpose: {row.purposeNote.trim()}
           </Text>
         ) : null}
 
@@ -1353,15 +1359,15 @@ function BomTile({
               falls back on read), and a role that IS the article name is the tell of the fixed
               picker bug — both mean nobody has named the slot's place in the garment yet. */}
           {!row.name?.trim() || (linked && looksLikeArticleName(row.name, material?.name)) ? (
-            <Pill tone='attention'>роль не задана</Pill>
+            <Pill tone='attention'>role not set</Pill>
           ) : null}
-          {roleDuplicate ? <Pill tone='attention'>дубль роли</Pill> : null}
+          {roleDuplicate ? <Pill tone='attention'>duplicate role</Pill> : null}
           {/* НАПРАВЛЕНИЕ ТКАНИ, не проставленное на рулонной строке (Ф1). Поле есть с 0073 и
               обязательным никогда не было, поэтому пустое оно почти везде — а с Ф1 оно решает,
               можно ли переворачивать деталь на раскладке, и сервер не примет норму, пока ответа
               нет. Плашка стоит ЗДЕСЬ, потому что чинится это здесь: отказ приходит в модалке
               раскладки, за две вкладки отсюда, и без метки его пришлось бы искать перебором. */}
-          {needsDirection ? <Pill tone='attention'>направление ткани?</Pill> : null}
+          {needsDirection ? <Pill tone='attention'>fabric direction?</Pill> : null}
         </div>
       </button>
 
@@ -1411,7 +1417,7 @@ export function BomField({
   const [blocked, setBlocked] = useState<{ name: string; users: BlockingUser[] } | null>(null);
   // "add BOM article" is TWO steps in two stacked dialogs: the catalog picker first, then — on its
   // "add" — a small role modal OVER it. The article answers "what is it", the role answers "what is
-  // it FOR» («основная ткань», «подкладка»…), and the line is created linked AND role-named, never
+  // it FOR» («main fabric», «lining»…), and the line is created linked AND role-named, never
   // named after the article (see materialLineFields). Cancelling the role modal falls back to the
   // still-open picker with the selection intact — half a decision is never silently committed.
   const [adding, setAdding] = useState(false);
@@ -1531,7 +1537,7 @@ export function BomField({
   // question returns to the swatch grid with the selection still armed. Prefill answers the easy
   // case only: the section's natural first role when this card has no slot in that section yet. A
   // second fabric gets an empty required field — naming the new role IS the deliberate answer, and
-  // the exact moment «добавить ту же ткань ещё раз» turns into either «ткань капюшона» or a pin on
+  // the exact moment «добавить ту же ткань ещё раз» turns into either «hood fabric» or a pin on
   // the colorways tab.
   const stageAdd = (m?: common_Material) => {
     if (!m || !wireInt(m.id)) {
@@ -1581,7 +1587,7 @@ export function BomField({
       // место, где угадывать можно: оператор ТОЛЬКО ЧТО его выбрал, это не догадка по секции.
       //
       // Но само поле остаётся, и не из осторожности. Во-первых, у ниток, фурнитуры и отделки
-      // назначения нет вовсе, и «основная молния» против «молния кармана» — единственное, чем они
+      // назначения нет вовсе, и «main zipper» против «pocket zipper» — единственное, чем они
       // различаются. Во-вторых, модель прямо допускает НЕСКОЛЬКО строк на одно назначение (в этом
       // и смысл «сабсета тканей»), и две «основной материал» — полочка и капюшон — без роли стали
       // бы неразличимы в раскладке, cut list и плане материалов.
@@ -1627,7 +1633,7 @@ export function BomField({
     next.set('tab', 'colorways');
     if (colorwayId) next.set('colorway', String(colorwayId));
     setParams(next, { replace: true });
-    showMessage('уберите этот артикул из рецепта колорвея и сохраните его', 'success');
+    showMessage('remove this article from the colourway recipe and save it', 'success');
   };
 
   // Stable line_key (§2.3): downstream refs point at the article's key, not its position — so
@@ -1642,7 +1648,7 @@ export function BomField({
     const users = colorwayUsers(removedKey, wireInt(getValues(`bomItems.${bi}.id`)));
     if (users.length > 0) {
       setBlocked({
-        name: (getValues(`bomItems.${bi}.name`) as string)?.trim() || `артикул ${bi + 1}`,
+        name: (getValues(`bomItems.${bi}.name`) as string)?.trim() || `article ${bi + 1}`,
         users,
       });
       return;
@@ -1708,8 +1714,8 @@ export function BomField({
   return (
     <div className='space-y-2.5'>
       <Text variant='label' size='micro'>
-        Справочник артикулов: внесите каждый материал один раз. На вкладке colorways вы выбираете,
-        какой артикул идёт на какую часть, в каком цвете и с каким расходом.
+        A catalog of articles: enter each material once. On the colorways tab you choose which
+        article goes on which part, in what colour and at what consumption.
       </Text>
 
       {fields.length === 0 ? (
@@ -1737,9 +1743,9 @@ export function BomField({
                   not a category, and nothing filled it in automatically on purpose. */}
               {g.unsorted && (
                 <Text variant='label' size='micro'>
-                  У этих тканей назначение не задано. Автоматически оно не проставляется: «основная
-                  / карманка / контраст» отличаются только тем, зачем они в изделии, и угадать это
-                  по секции нельзя. Откройте карточку и выберите назначение.
+                  These fabrics have no purpose set. It is not filled in automatically: “main /
+                  pocketing / contrast” differ only in why they are in the garment, and that cannot
+                  be guessed from the section. Open the card and pick a purpose.
                 </Text>
               )}
               <Tiles min={160}>
@@ -1769,7 +1775,7 @@ export function BomField({
           width='lg'
           hideActions
           title={join(
-            bomWatch[editing]?.name?.trim() || `слот ${editing + 1}`,
+            bomWatch[editing]?.name?.trim() || `slot ${editing + 1}`,
             sectionShort(bomWatch[editing]?.section),
           )}
         >
@@ -1790,9 +1796,9 @@ export function BomField({
           open
           onOpenChange={(v) => !v && setBlocked(null)}
           width='sm'
-          title='артикул ещё используется'
+          title='the article is still in use'
           cancelLabel='close'
-          confirmLabel={blocked.users[0] ? `открыть ${blocked.users[0].sku} →` : 'close'}
+          confirmLabel={blocked.users[0] ? `open ${blocked.users[0].sku} →` : 'close'}
           closeOnConfirm={false}
           onConfirm={() =>
             blocked.users[0] ? goToColorway(blocked.users[0].colorwayId) : setBlocked(null)
@@ -1800,8 +1806,8 @@ export function BomField({
         >
           <div className='flex flex-col gap-2'>
             <Text size='micro'>
-              «{blocked.name}» стоит в рецептах этих колорвеев. Уберите его оттуда — тогда артикул
-              можно будет удалить.
+              “{blocked.name}” is in the recipes of these colourways. Remove it from there — then
+              the article can be deleted.
             </Text>
             <div className='flex flex-col'>
               {blocked.users.map((u) => (
@@ -1826,8 +1832,8 @@ export function BomField({
               ))}
             </div>
             <Text size='micro' variant='label'>
-              Рецепт колорвея сохраняется отдельно от карточки, поэтому его нельзя почистить этим же
-              сохранением.
+              The colourway recipe is saved separately from the card, so it can't be cleaned up by
+              this same save.
             </Text>
           </div>
         </ConfirmationModal>
@@ -1874,7 +1880,7 @@ export function BomField({
           open
           onOpenChange={(v) => !v && setAddMaterial(undefined)}
           width='sm'
-          title={addNeedsPurpose ? 'назначение ткани' : 'роль в изделии'}
+          title={addNeedsPurpose ? 'fabric purpose' : 'role in the garment'}
           confirmLabel='add'
           confirmDisabled={!roleAnswered || !addPurposeAnswered}
           closeOnConfirm={false}
@@ -1895,7 +1901,7 @@ export function BomField({
             </div>
             <div>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                {addNeedsPurpose ? 'роль в изделии' : 'роль в изделии *'}
+                {addNeedsPurpose ? 'role in the garment' : 'role in the garment *'}
               </Text>
               <div className='mt-1'>
                 <Input
@@ -1907,8 +1913,8 @@ export function BomField({
                   placeholder={
                     addNeedsPurpose
                       ? defaultRoleForPurpose(addPurpose) ||
-                        'необязательно — подставится назначение'
-                      : 'основная молния / нитки верха / бейка…'
+                        'optional — the purpose will be substituted'
+                      : 'main zipper / shell thread / binding…'
                   }
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddRole(e.target.value)}
                   onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -1936,14 +1942,14 @@ export function BomField({
             {addKindEligible && (
               <div>
                 <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                  вид
+                  kind
                 </Text>
                 <div className='mt-1'>
                   <Select
                     name='bom-add-kind'
                     items={addKindItems}
                     value={addKind === UNSET_KIND ? undefined : addKind}
-                    placeholder='молния / кнопка / резинка…'
+                    placeholder='zipper / snap / elastic…'
                     fullWidth
                     onValueChange={(v: string) => setAddKind(v)}
                   />
@@ -1954,14 +1960,14 @@ export function BomField({
               <>
                 <div>
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    назначение *
+                    purpose *
                   </Text>
                   <div className='mt-1'>
                     <Select
                       name='bom-add-purpose'
                       items={techCardBomPurposeOptions}
                       value={addPurpose === UNSET_PURPOSE ? undefined : addPurpose}
-                      placeholder='выберите назначение'
+                      placeholder='pick a purpose'
                       fullWidth
                       onValueChange={(v: string) => setAddPurpose(v)}
                     />
@@ -1970,7 +1976,7 @@ export function BomField({
                 {isOtherPurpose(addPurpose) && (
                   <div>
                     <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                      что это за назначение
+                      what purpose is this
                     </Text>
                     <div className='mt-1'>
                       <Input
@@ -1978,7 +1984,7 @@ export function BomField({
                         value={addPurposeNote}
                         autoComplete='off'
                         maxLength={255}
-                        placeholder='опишите роль этой ткани'
+                        placeholder='describe the role of this fabric'
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           setAddPurposeNote(e.target.value)
                         }
@@ -1993,23 +1999,23 @@ export function BomField({
                     onChange={(v: boolean) => setAddSample(v)}
                   />
                   <Text component='span' size='micro'>
-                    семпловая — из этого метража шьётся семпл
+                    sample fabric — the sample is sewn from this length
                   </Text>
                 </label>
               </>
             )}
             {addExistingSlotIdx >= 0 && (
               <Text variant='label' size='micro'>
-                этот артикул уже стоит в слоте «
-                {bomWatch[addExistingSlotIdx]?.name?.trim() || `слот ${addExistingSlotIdx + 1}`}» —
-                новый слот нужен только для другой роли. Другой цвет/артикул в колорвее задаётся
-                пином на вкладке colorways, не вторым слотом.
+                this article already sits in the slot “
+                {bomWatch[addExistingSlotIdx]?.name?.trim() || `slot ${addExistingSlotIdx + 1}`}” —
+                a new slot is only needed for a different role. A different colour/article in a
+                colourway is set by a pin on the colourways tab, not by a second slot.
               </Text>
             )}
             {addCollision >= 0 && (
               <Text size='micro' variant='error'>
-                роль «{addRole.trim()}» уже есть на этой карточке — одинаковые роли неразличимы в
-                рецептах колорвеев и в плане закупки
+                the role “{addRole.trim()}” already exists on this card — identical roles are
+                indistinguishable in colourway recipes and in the purchasing plan
               </Text>
             )}
           </div>

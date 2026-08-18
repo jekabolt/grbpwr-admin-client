@@ -46,7 +46,7 @@ export function ReaderRail({
           ref={n === current ? currentRef : undefined}
           type='button'
           aria-pressed={visible.includes(n)}
-          aria-label={`страница ${n}`}
+          aria-label={`page ${n}`}
           onClick={() => onPick(n)}
           className={cn(
             'flex flex-col items-center gap-1 border-b border-hairline p-1.5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor',

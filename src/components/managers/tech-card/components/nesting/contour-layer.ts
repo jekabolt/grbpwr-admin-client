@@ -145,9 +145,9 @@ export function layerAllowanceLabel(o: LayerOption): string {
   if (!m) return '';
   // ЗАМЕР ЖИВЁТ В САНТИМЕТРАХ (это геометрия файла), ПОКАЗЫВАЕТСЯ В МИЛЛИМЕТРАХ (это припуск).
   // Конверсия здесь и в предзаполнении ниже — по одной и той же функции, других в файле нет.
-  if (m.verdict === 'cut') return `линия кроя, +${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} мм`;
-  if (m.verdict === 'seam') return 'линия шва';
-  return 'не измерено';
+  if (m.verdict === 'cut') return `cut line, +${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm`;
+  if (m.verdict === 'seam') return 'seam line';
+  return 'not measured';
 }
 
 // Слой, на котором ЗАМЕРЕНА линия шва, — то есть тот, который надо предложить оператору взамен,
@@ -217,21 +217,21 @@ export function seamAllowancePrefill(args: {
     return {
       value: 0,
       source: 'contour_is_cut',
-      why: `на слое ${m.layer} лежит линия КРОЯ — припуск ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} мм уже в контуре, офсет не нужен`,
+      why: `layer ${m.layer} carries the CUT line — the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour, no offset needed`,
     };
   }
   if (args.cardRequiredMm != null && Number.isFinite(args.cardRequiredMm)) {
     return {
       value: clampSeamAllowanceMm(args.cardRequiredMm),
       source: 'card',
-      why: 'требуемый припуск карточки',
+      why: 'the allowance the card requires',
     };
   }
   if (args.workshopDefaultMm != null && Number.isFinite(args.workshopDefaultMm)) {
     return {
       value: clampSeamAllowanceMm(args.workshopDefaultMm),
       source: 'workshop',
-      why: 'припуск цеха по умолчанию',
+      why: "the workshop's default allowance",
     };
   }
   // Замеренная дистанция между двумя контурами — последнее, что ИЗМЕРЕНО, и потому последнее, что
@@ -240,13 +240,13 @@ export function seamAllowancePrefill(args: {
     return {
       value: clampSeamAllowanceMm(engineCmToMm(m.gapCm)),
       source: 'measured_gap',
-      why: `замерено по файлу: линия кроя нарисована в ${(engineCmToMm(m.gapCm) ?? 0).toFixed(1)} мм снаружи линии шва`,
+      why: `measured from the file: the cut line is drawn ${(engineCmToMm(m.gapCm) ?? 0).toFixed(1)} mm outside the seam line`,
     };
   }
   return {
     value: clampSeamAllowanceMm(args.fallbackMm),
     source: 'fallback',
-    why: 'умолчание раскладки — ни карточка, ни цех, ни файл припуска не назвали',
+    why: "the marker's default — neither the card, nor the workshop, nor the file named an allowance",
   };
 }
 

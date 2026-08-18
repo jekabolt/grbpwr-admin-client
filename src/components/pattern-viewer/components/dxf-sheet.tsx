@@ -11,6 +11,9 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import type { NestingFile } from 'components/managers/tech-card/components/nesting/use-nesting';
+// Из `sheet-name`, а не из `dxf-by-scope`: реэкспорт там тянет за собой proto-типы и пикер строк
+// BOM, а это публичная страница на телефоне. Сам модуль намеренно без зависимостей (см. его шапку).
+import { FALLBACK_SHEET_NAME } from 'components/managers/tech-card/components/nesting/sheet-name';
 import { resolvePatternUrl, type PvSheet } from './manifest';
 
 const DxfSheetView = lazy(() =>
@@ -41,7 +44,7 @@ export function DxfSheet({
     resolvePatternUrl(view)
       .then((url) => {
         if (dead) return;
-        setFiles([{ name: sheet.filename || sheet.name || 'выкройка.dxf', url }]);
+        setFiles([{ name: sheet.filename || sheet.name || FALLBACK_SHEET_NAME, url }]);
       })
       .catch(() => {
         if (!dead) setFailed(true);
@@ -55,7 +58,7 @@ export function DxfSheet({
     return (
       <CalloutBox tone='error'>
         <Text size='micro' component='p'>
-          не удалось открыть DXF — скачайте файл и откройте его в CAD
+          couldn't open the DXF — download the file and open it in a CAD
         </Text>
       </CalloutBox>
     );
@@ -63,7 +66,7 @@ export function DxfSheet({
   if (!files) {
     return (
       <Text size='micro' variant='label' component='p'>
-        получение файла…
+        fetching the file…
       </Text>
     );
   }
@@ -71,7 +74,7 @@ export function DxfSheet({
     <Suspense
       fallback={
         <Text size='micro' variant='label' component='p'>
-          загрузка просмотра DXF…
+          loading the DXF view…
         </Text>
       }
     >

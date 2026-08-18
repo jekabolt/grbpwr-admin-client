@@ -196,7 +196,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                   </div>
                   <TextareaField
                     name={`callouts.${index}.note`}
-                    label='note (что не так с посадкой)'
+                    label='note (what is wrong with the fit)'
                     rows={2}
                     maxLength={2000}
                   />
@@ -208,7 +208,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                       подпись к предложению. */}
                   {kind.key === 'pin' && !c?.note?.trim() && (
                     <Text size='small' className='text-error'>
-                      без текста не сохранится — у точки записка и есть всё содержание
+                      it won't save without text — for a point, the note is the whole content
                     </Text>
                   )}
                 </div>

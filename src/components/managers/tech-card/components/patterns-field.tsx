@@ -86,10 +86,10 @@ const PieceAreasDialog = lazy(() => import('./piece-areas-dialog'));
 // `ROLE[section]` used as a membership test would let those through as truthy inherited functions.
 // Unreachable with today's proto enum, but the shape should not depend on that.
 const ROLE_OF_SECTION = new Map<string, string>([
-  ['TECH_CARD_BOM_SECTION_FABRIC', 'основная ткань'],
-  ['TECH_CARD_BOM_SECTION_LINING', 'подкладка'],
-  ['TECH_CARD_BOM_SECTION_INTERLINING', 'бортовка'],
-  ['TECH_CARD_BOM_SECTION_INSULATION', 'утеплитель'],
+  ['TECH_CARD_BOM_SECTION_FABRIC', 'main fabric'],
+  ['TECH_CARD_BOM_SECTION_LINING', 'lining'],
+  ['TECH_CARD_BOM_SECTION_INTERLINING', 'interlining'],
+  ['TECH_CARD_BOM_SECTION_INSULATION', 'insulation'],
 ]);
 const SECTION_ORDER = [...ROLE_OF_SECTION.keys()];
 
@@ -99,14 +99,9 @@ const SECTION_ORDER = [...ROLE_OF_SECTION.keys()];
 const LOOSE_KEY = '__loose';
 const PDF_KEY = '__pdf';
 
-/** Русская форма счётного существительного: 1 лист, 2 листа, 5 листов. */
-function plural(n: number, one: string, few: string, many: string): string {
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 14) return many;
-  const mod10 = n % 10;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-  return many;
+/** English count noun: 1 sheet, 2 sheets. */
+function plural(n: number, one: string, many = `${one}s`): string {
+  return n === 1 ? one : many;
 }
 
 /** Сколько РАЗНЫХ деталей чертежа лежит в этом скоупе — счёт по идентичностям, не по контурам. */
@@ -158,7 +153,7 @@ type FabricLine = {
 
 // What the operator calls the sheet — the display name when given, else the filename.
 function labelOf(row?: PatternRow): string {
-  return row?.name || row?.filename || '(без имени)';
+  return row?.name || row?.filename || '(unnamed)';
 }
 
 // Rev.N of this sheet, straight off the row — the server numbers a url it has not seen on this
@@ -430,7 +425,7 @@ export function PatternsField({
   const scopeLabel = (s: FabricScope<FabricLine>): string => {
     if (!s.byPurpose) {
       const l = s.lines[0];
-      return [l?.role, l?.name.trim()].filter(Boolean).join(' · ') || 'без названия';
+      return [l?.role, l?.name.trim()].filter(Boolean).join(' · ') || 'unnamed';
     }
     const names = s.lines
       .map((l) => l.name.trim())
@@ -456,7 +451,7 @@ export function PatternsField({
 
   const inRange = useMemo(() => new Set(sizeIds), [sizeIds]);
   const nameOf = (id: number) =>
-    id > 0 ? formatSizeName(sizeById.get(id) ?? `#${id}`) : 'без размера';
+    id > 0 ? formatSizeName(sizeById.get(id) ?? `#${id}`) : 'sizeless';
 
   // Куда ложится НОВАЯ строка выкройки. Это АРТЕФАКТ ХРАНЕНИЯ, а не смысл: у ГРАДУИРОВАННОГО файла
   // размер везде берётся из имён блоков, и ни просмотр, ни раскладка, ни сопоставление деталей, ни
@@ -579,7 +574,7 @@ export function PatternsField({
           uniOnly: scoped?.uniOnly ?? false,
         };
       } else if (geometry.isError) {
-        out[sig] = { phase: 'error', message: geometry.error?.message ?? 'причина неизвестна' };
+        out[sig] = { phase: 'error', message: geometry.error?.message ?? 'reason unknown' };
       } else if (armed) {
         out[sig] = { phase: 'loading' };
       }
@@ -694,7 +689,7 @@ export function PatternsField({
     if (g.entries.length === 0) return [];
     const missing = missingIn(audits[sigOf(g.entries)]);
     if (missing.length === 0) return [];
-    return [`${scopeLabel(g.scope)} — нет ${missing.map(nameOf).join(', ')}`];
+    return [`${scopeLabel(g.scope)} — missing ${missing.map(nameOf).join(', ')}`];
   });
 
   // Загрузку гейтит ТКАНЬ, а не размерный ряд: выкройка привязывается к материалу, и без строки BOM
@@ -824,7 +819,7 @@ export function PatternsField({
             <Input
               name={`pattern-rename-${index}`}
               value={editing.value}
-              placeholder={row.filename || 'название'}
+              placeholder={row.filename || 'name'}
               maxLength={MAX_PATTERN_NAME}
               autoFocus
               autoComplete='off'
@@ -847,15 +842,15 @@ export function PatternsField({
                 <button
                   type='button'
                   onClick={() => setViewing(row)}
-                  title={`посмотреть ${labelOf(row)}`}
+                  title={`view ${labelOf(row)}`}
                   className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
                 >
                   {labelOf(row)}
                 </button>
                 {/* Уже загруженный PDF не ошибка и не поломка — он просто больше не тот формат, в
                     котором заводят выкройки. Серый нейтральный тон, а не красный. */}
-                {!dxf && <Pill tone='mut'>устаревший формат</Pill>}
-                {stray && <Pill tone='warn'>размер вне ряда</Pill>}
+                {!dxf && <Pill tone='mut'>legacy format</Pill>}
+                {stray && <Pill tone='warn'>size out of range</Pill>}
               </span>
               {/* When a name is set the filename still matters (it is what the factory's CAD
                   saved) — keep it readable underneath rather than only in a tooltip. */}
@@ -865,14 +860,14 @@ export function PatternsField({
               {stray && (
                 <span className='mt-0.5 flex flex-wrap items-center gap-1.5'>
                   <Text size='nano' component='span' className='text-error'>
-                    размер этой строки не входит в ряд карточки — сервер отвергнет сохранение
+                    the size of this row is not in the card's range — the server will refuse the save
                   </Text>
                   {canEdit && storageSizeId > 0 && (
                     <Button
                       type='button'
                       variant='secondary'
                       size='xs'
-                      title='перевесить строку на актуальный размер ряда (размер — только место хранения)'
+                      title="re-file the row onto a size that is in the range (the size is only a storage slot)"
                       onClick={() =>
                         // Смена size_id — это keyed replacement: сервер перенумерует ревизию
                         // (MAX+1). Файл при этом тот же, и ни один потребитель размер строки не
@@ -880,7 +875,7 @@ export function PatternsField({
                         setValue(`patterns.${index}.sizeId`, storageSizeId, { shouldDirty: true })
                       }
                     >
-                      перевесить
+                      re-file
                     </Button>
                   )}
                 </span>
@@ -901,7 +896,7 @@ export function PatternsField({
               {dxf && uploadScopes.length > 0 && (rebinding === index || !rowScope) && (
                 <select
                   className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
-                  aria-label={`материал для ${labelOf(row)}`}
+                  aria-label={`material for ${labelOf(row)}`}
                   value={rowScope}
                   disabled={isSubmitting || !canEdit}
                   onChange={(e) => {
@@ -922,8 +917,8 @@ export function PatternsField({
                       выбирал: выбор просто перестал на что-то указывать, и это разные новости. */}
                   <option value=''>
                     {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
-                      ? 'привязка потеряна — выберите заново'
-                      : 'материал не выбран'}
+                      ? 'the binding is lost — pick again'
+                      : 'no material picked'}
                   </option>
                   {uploadScopes.map((s) => (
                     <option key={s.key} value={s.key}>
@@ -955,7 +950,7 @@ export function PatternsField({
                 variant='secondary'
                 size='xs'
                 aria-label='rebind pattern'
-                title='перепривязать лист к другому материалу'
+                title='rebind the sheet to another material'
                 onClick={() => setRebinding((r) => (r === index ? null : index))}
               >
                 ⇄
@@ -966,7 +961,7 @@ export function PatternsField({
               variant='secondary'
               size='xs'
               aria-label='rename pattern'
-              title='переименовать'
+              title='rename'
               disabled={isSubmitting}
               onClick={() => setEditing({ index, value: row.name ?? '' })}
             >
@@ -992,13 +987,13 @@ export function PatternsField({
     return (
       <thead>
         <tr className='border-b border-borderColor text-nano uppercase tracking-label text-labelColor'>
-          <th className='py-1 pr-2 text-left font-normal'>лист</th>
-          <th className='py-1 pr-2 text-left font-normal'>тип</th>
+          <th className='py-1 pr-2 text-left font-normal'>sheet</th>
+          <th className='py-1 pr-2 text-left font-normal'>type</th>
           <th className='py-1 pr-2 text-right font-normal'>v</th>
           {/* «вес», а не «размер»: в этом блоке размер — это S/M/L, и рядом стоят «размер вне
               ряда» и полоска покрытия размеров. Колонка «размер: 2.4 MB» читалась размерной. */}
-          <th className='py-1 pr-2 text-right font-normal'>вес</th>
-          <th className='py-1 pr-2 text-right font-normal'>загружен</th>
+          <th className='py-1 pr-2 text-right font-normal'>weight</th>
+          <th className='py-1 pr-2 text-right font-normal'>uploaded</th>
           <th className='py-1 text-right font-normal' />
         </tr>
       </thead>
@@ -1018,7 +1013,7 @@ export function PatternsField({
     if (!a || a.phase === 'loading') {
       return (
         <Text size='nano' variant='label' component='span'>
-          разбор файлов…
+          parsing the files…
         </Text>
       );
     }
@@ -1028,7 +1023,7 @@ export function PatternsField({
       // одного сорвавшегося скачивания достаточно, чтобы ответ пропал, а причина обычно разовая.
       return (
         <Text size='nano' component='span' className='text-error'>
-          проверка не удалась: {a.message}
+          the check failed: {a.message}
         </Text>
       );
     }
@@ -1039,8 +1034,8 @@ export function PatternsField({
       return (
         <Text size='nano' variant='label' component='span'>
           {a.uniOnly
-            ? 'детали не градуируются (UNI) — идут во все размеры'
-            : 'в именах блоков размеров нет — файл не градуирован'}
+            ? 'the pieces are ungraded (UNI) — they go into every size'
+            : 'there are no sizes in the block names — the file is not graded'}
         </Text>
       );
     }
@@ -1056,7 +1051,7 @@ export function PatternsField({
             </Chip>
           ))}
           <Text size='nano' variant='label' component='span'>
-            ряд карточки пуст, сверять не с чем
+            the card's range is empty, there is nothing to check against
           </Text>
         </span>
       );
@@ -1071,7 +1066,7 @@ export function PatternsField({
               key={id}
               selected={!gone}
               tone={gone ? 'error' : 'default'}
-              title={gone ? 'этого размера в файлах нет' : 'есть в файлах'}
+              title={gone ? 'this size is not in the files' : 'present in the files'}
             >
               {nameOf(id)}
             </Chip>
@@ -1079,7 +1074,7 @@ export function PatternsField({
         })}
         {missing.size > 0 && (
           <Text size='nano' component='span' className='text-error'>
-            нет {[...missing].map(nameOf).join(', ')}
+            missing {[...missing].map(nameOf).join(', ')}
           </Text>
         )}
       </span>
@@ -1098,17 +1093,17 @@ export function PatternsField({
     const st = areaStateOf(scopeKey);
     // Несохранённая правка выкроек или связей делает серверный ответ ответом про ВЧЕРАШНИЙ
     // источник — и это надо сказать там же, где показан сам ответ.
-    const asOf = st.phase !== 'none' && sourceDirty ? ' · по сохранённым данным' : '';
+    const asOf = st.phase !== 'none' && sourceDirty ? ' · from the saved data' : '';
     if (st.phase === 'stale' || st.phase === 'partial') {
       return (
         <span className='flex flex-wrap items-center gap-1'>
           <Pill tone='attention'>
-            {st.phase === 'stale' ? 'площади устарели' : 'площади замерены не полностью'}
+            {st.phase === 'stale' ? 'the areas are stale' : 'the areas are measured only in part'}
           </Pill>
           <Text size='nano' variant='label' component='span'>
             {st.phase === 'stale'
-              ? `замер был по другим файлам или связям${asOf}`
-              : `часть листов этой ткани без замера: ${st.missing}${asOf}`}
+              ? `the measurement was made against other files or links${asOf}`
+              : `some sheets of this fabric are unmeasured: ${st.missing}${asOf}`}
           </Text>
         </span>
       );
@@ -1116,8 +1111,8 @@ export function PatternsField({
     return (
       <Text size='nano' variant='label' component='span'>
         {st.phase === 'fresh'
-          ? `площади деталей замерены · ${st.pieces}${asOf}`
-          : 'площади деталей не замерены'}
+          ? `piece areas measured · ${st.pieces}${asOf}`
+          : 'piece areas are not measured'}
       </Text>
     );
   }
@@ -1176,12 +1171,12 @@ export function PatternsField({
                 // разобранный файл, в котором для этого материала контуров не нашлось.
                 label={
                   !has
-                    ? 'нет dxf'
+                    ? 'no dxf'
                     : geometry.isError
-                      ? 'ошибка разбора'
+                      ? 'parse error'
                       : dxfIndex
-                        ? 'форм не найдено'
-                        : 'разбор…'
+                        ? 'no shapes found'
+                        : 'parsing…'
                 }
                 className='h-[84px] w-full'
               />
@@ -1190,12 +1185,12 @@ export function PatternsField({
           name={label}
           sub={
             has
-              ? `${g.entries.length} ${plural(g.entries.length, 'лист', 'листа', 'листов')}${
-                  blocks > 0 ? ` · ${blocks} бл.` : ''
+              ? `${g.entries.length} ${plural(g.entries.length, 'sheet')}${
+                  blocks > 0 ? ` · ${blocks} blocks` : ''
                 }`
               : main
-                ? 'раскроить этот материал нечем'
-                : 'своего DXF нет — возможно, в файле основной ткани'
+                ? 'there is nothing to cut this material from'
+                : 'it has no DXF of its own — possibly in the main fabric file'
           }
         >
           {has && (
@@ -1228,7 +1223,7 @@ export function PatternsField({
           <Placeholder
             dashed
             tone={tone}
-            label={`${list.length} ${plural(list.length, 'файл', 'файла', 'файлов')}`}
+            label={`${list.length} ${plural(list.length, 'file')}`}
             className='h-[84px] w-full'
           />
         }
@@ -1244,10 +1239,11 @@ export function PatternsField({
     if (selectedKey === LOOSE_KEY) {
       return (
         <div>
-          <GroupLabel>DXF без материала</GroupLabel>
+          <GroupLabel>DXF without a material</GroupLabel>
           <Text size='nano' variant='label' className='mb-1'>
-            залиты до появления привязки либо потеряли строку BOM. Выберите материал в строке — без
-            него не считается ни ширина, ни кромка, и раскладка не знает, что меряет.
+            uploaded before binding existed, or they lost their BOM line. pick a material on the row
+            — without one neither the width nor the selvedge is computed, and the marker doesn't
+            know what it measures.
           </Text>
           <table className='w-full border-collapse text-micro'>
             {sheetHead()}
@@ -1259,12 +1255,12 @@ export function PatternsField({
     if (selectedKey === PDF_KEY) {
       return (
         <div>
-          <GroupLabel>PDF — устаревший формат</GroupLabel>
+          <GroupLabel>PDF — legacy format</GroupLabel>
           <Text size='nano' variant='label' className='mb-1'>
-            новые выкройки принимаются только в DXF: из PDF нельзя ни разложить детали, ни
-            сопоставить их с деталями кроя, ни прочитать размер. Эти файлы остаются на карточке и
-            сохраняются вместе с ней — их можно открыть и скачать; заменить их можно, загрузив DXF
-            на нужный материал и удалив PDF.
+            new patterns are accepted only as DXF: from a PDF you can neither build a marker, nor
+            match its pieces to cut pieces, nor read a size. these files stay on the card and are
+            saved with it — they can be opened and downloaded; to replace one, upload a DXF onto the
+            right material and delete the PDF.
           </Text>
           <table className='w-full border-collapse text-micro'>
             {sheetHead()}
@@ -1305,7 +1301,7 @@ export function PatternsField({
                   type='button'
                   variant='secondary'
                   size='xs'
-                  title={`авто-раскладка деталей «${label}» на полосе`}
+                  title={`automatic marker of “${label}” pieces on a strip`}
                   onClick={() =>
                     setNesting({
                       // Размер тут ничего не решает у ГРАДУИРОВАННОГО файла: он выбирается внутри
@@ -1346,7 +1342,7 @@ export function PatternsField({
                     })
                   }
                 >
-                  ⌗ раскладка
+                  ⌗ marker
                 </Button>
               )}
               {/* Алиас пишется в скоуп ткани, и стор ОТКАЗЫВАЕТ паре (слот, блок), чей слот не
@@ -1364,7 +1360,7 @@ export function PatternsField({
                   variant='secondary'
                   size='xs'
                   data-field='patterns.match'
-                  title={`сопоставить детали DXF с деталями кроя для «${label}»`}
+                  title={`match the DXF pieces to the cut pieces of “${label}”`}
                   onClick={() =>
                     setMatching({
                       scope: g.scope,
@@ -1373,7 +1369,7 @@ export function PatternsField({
                     })
                   }
                 >
-                  ↔ детали кроя
+                  ↔ cut pieces
                 </Button>
               )}
               {/* ЗАМЕР ПЛОЩАДЕЙ — ОТДЕЛЬНОЕ ДЕЙСТВИЕ, И ЖИВЁТ ОНО ЗДЕСЬ.
@@ -1391,7 +1387,7 @@ export function PatternsField({
                   type='button'
                   variant='secondary'
                   size='xs'
-                  title={`замерить площади деталей «${label}» по DXF — из них костинг считает оценку снизу, когда нормы «на изделие» нет`}
+                  title={`measure the piece areas of “${label}” from the DXF — costing computes a lower-bound estimate from them when there is no “per garment” norm`}
                   onClick={() =>
                     setMeasuring({
                       scope: g.scope,
@@ -1402,7 +1398,7 @@ export function PatternsField({
                     })
                   }
                 >
-                  ∑ площади деталей
+                  ∑ piece areas
                 </Button>
               )}
               {canUpload && (
@@ -1436,9 +1432,9 @@ export function PatternsField({
             className={isMainScope(g) ? 'text-error' : 'text-labelColor'}
           >
             {isMainScope(g)
-              ? 'раскроить этот материал нечем'
-              : 'своего DXF нет — возможно, детали лежат в файле основной ткани'}
-            {canUpload ? ' — перетащите DXF сюда или нажмите «+ DXF»' : ''}
+              ? 'there is nothing to cut this material from'
+              : 'it has no DXF of its own — the pieces may be in the main fabric file'}
+            {canUpload ? ' — drop a DXF here or press “+ DXF”' : ''}
           </Text>
         )}
       </div>
@@ -1448,9 +1444,9 @@ export function PatternsField({
   if (fields.length === 0 && fabricBomLines.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        заведите строки ткани в BOM — выкройка привязывается к материалу.
+        add fabric lines in the BOM — a pattern binds to a material.
         {sizeIds.length === 0
-          ? ' Размерный ряд для загрузки не нужен: размеры читаются из самого файла.'
+          ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
           : ''}
       </Text>
     );
@@ -1463,23 +1459,23 @@ export function PatternsField({
           занимает секунды, и без него плитки просто молчат. */}
       <div className='flex flex-wrap items-center gap-1.5 border-b border-borderColor pb-1'>
         <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-          материалов: {scopeGroups.length}
+          materials: {scopeGroups.length}
         </Text>
         {materialsWithoutDxf.length > 0 && (
           <Pill tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
-            без DXF: {materialsWithoutDxf.length}
+            without DXF: {materialsWithoutDxf.length}
           </Pill>
         )}
         {missingSizeNotes.length > 0 && (
           <Pill tone='warn' title={missingSizeNotes.join('; ')}>
-            дырки по размерам: {missingSizeNotes.length}
+            size gaps: {missingSizeNotes.length}
           </Pill>
         )}
-        {looseDxf.length > 0 && <Pill tone='attention'>без материала: {looseDxf.length}</Pill>}
+        {looseDxf.length > 0 && <Pill tone='attention'>without a material: {looseDxf.length}</Pill>}
         <div className='ml-auto flex flex-wrap items-center gap-1.5'>
           {geometry.isFetching && (
             <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-              разбор файлов…
+              parsing the files…
             </Text>
           )}
           {canUpload && (
@@ -1492,9 +1488,9 @@ export function PatternsField({
                 variant='secondary'
                 size='xs'
                 onClick={() => setMerging(true)}
-                title='CLO выгружает припуск только для текущего размера — соберите размеры в один чертёж'
+                title='CLO exports the seam allowance only for the current size — merge the sizes into one drawing'
               >
-                склеить размеры
+                merge sizes
               </Button>
               <PatternUploadButton
                 label='+ DXF'
@@ -1518,11 +1514,11 @@ export function PatternsField({
       {geometry.isError && (
         <div className='flex flex-wrap items-center gap-1.5'>
           <Text size='nano' component='span' className='text-error'>
-            разбор файлов не удался: {geometry.error?.message ?? 'причина неизвестна'} — силуэтов и
-            покрытия размеров показать нечем
+            parsing the files failed: {geometry.error?.message ?? 'reason unknown'} — there is
+            nothing to show the silhouettes or the size coverage from
           </Text>
           <Button type='button' variant='secondary' size='xs' onClick={() => geometry.refetch()}>
-            ещё раз
+            again
           </Button>
         </div>
       )}
@@ -1543,7 +1539,7 @@ export function PatternsField({
         )
         .map(([sig, reason]) => (
           <Text key={sig} size='nano' component='p' className='text-error'>
-            индекс размеров не сохранён — {reason}
+            the size index was not saved — {reason}
           </Text>
         ))}
 
@@ -1554,17 +1550,17 @@ export function PatternsField({
       {outOfRange.length > 0 && (
         <CalloutBox tone='error'>
           <Text size='micro' component='p'>
-            <b>вне размерного ряда:</b> {outOfRange.length}{' '}
-            {outOfRange.length === 1 ? 'строка отвергнет' : 'строки отвергнут'} сохранение карточки
-            — откройте их материал и нажмите «перевесить».
+            <b>out of the size range:</b> {outOfRange.length}{' '}
+            {outOfRange.length === 1 ? 'row will reject' : 'rows will reject'} the save of the card
+            — open their material and press “re-file”.
           </Text>
         </CalloutBox>
       )}
 
       {fabricBomLines.length === 0 && (
         <Text size='micro' variant='label'>
-          в BOM нет строк ткани — выкройку не к чему привязать. Заведите основную ткань (и
-          подкладку/бортовку/утеплитель, если они есть) на вкладке BOM.
+          there are no fabric lines in the BOM — a pattern has nothing to bind to. add the main
+          fabric (and lining / interlining / insulation, if there are any) on the BOM tab.
         </Text>
       )}
 
@@ -1592,8 +1588,8 @@ export function PatternsField({
               {looseDxf.length > 0 &&
                 renderExtraTile(
                   LOOSE_KEY,
-                  'без материала',
-                  'раскладка и детали кроя недоступны',
+                  'without a material',
+                  'the marker and the cut pieces are unavailable',
                   looseDxf,
                   // НЕ error: файл не сломан, у него просто ещё не выбрана ткань, а пилюля этого же
                   // дефекта в шапке блока — синяя (mid-flight). Красная плитка рядом с синей пилюлей
@@ -1602,7 +1598,7 @@ export function PatternsField({
                   'default',
                 )}
               {pdfEntries.length > 0 &&
-                renderExtraTile(PDF_KEY, 'PDF', 'устаревший формат', pdfEntries, 'default')}
+                renderExtraTile(PDF_KEY, 'PDF', 'legacy format', pdfEntries, 'default')}
             </Tiles>
           </div>
           {renderSelected()}
@@ -1615,22 +1611,22 @@ export function PatternsField({
           не с чем. Это не ошибка карточки, поэтому нейтральный тон. */}
       {sizeIds.length === 0 && fabricBomLines.length > 0 && (
         <Text size='micro' variant='label'>
-          размерный ряд не задан — DXF грузятся и просматриваются как обычно, лист хранится без
-          размера (размеры и так живут в самом файле). Ряд понадобится, чтобы СОХРАНИТЬ раскладку:
-          маркер ложится на конкретный размер карточки. Какие размеры есть в файлах, полоска на
-          плитке покажет сама, а «↔ детали кроя» заведёт однозначные из них в ряд карточки.
+          the size range is not set — DXFs upload and open as usual, and a sheet is stored sizeless
+          (the sizes live in the file itself anyway). the range is needed to SAVE a marker: a marker
+          lands on a specific size of the card. which sizes are in the files, the strip on the tile
+          shows by itself, and “↔ cut pieces” adds the unambiguous ones into the card's range.
         </Text>
       )}
 
       {/* Объяснение материи — В ПОДВАЛЕ, а не над полкой. Оно верное и нужное, но это справка, а
           не ответ: наверху блока оно стояло между вопросом и ответом и читалось раньше их. */}
       <Text size='nano' variant='label' component='p' className='border-t border-hairline pt-1.5'>
-        выкройки — DXF, по МАТЕРИАЛАМ. Один чертёж несёт весь размерный ряд: размер записан в именах
-        блоков, выбирается при просмотре и в раскладке, а недостающие размеры карточка добирает из
-        файла сама. Поэтому файл привязывается к материалу — основная ткань, подкладка, бортовка,
-        утеплитель, — и на один материал файлов может быть несколько (основная ткань и карманка это
-        две разные строки BOM). Колорвей на файл не влияет — лекала общие, — но артикул и его ширину
-        каждый колорвей подставляет свои.
+        patterns are DXF, by MATERIAL. one drawing carries the whole size range: the size is written
+        in the block names, is picked when viewing and in the marker, and the card collects the
+        missing sizes from the file by itself. that is why a file binds to a material — main fabric,
+        lining, interlining, insulation — and one material may have several files (the main fabric
+        and the pocketing are two different BOM lines). the colourway does not affect the file — the
+        pattern pieces are shared — but the article and its width are substituted per colourway.
       </Text>
 
       {/* Склейка по-размерных выгрузок. Отдаёт ОДИН собранный файл в ту же модалку названия и
@@ -1668,7 +1664,7 @@ export function PatternsField({
           if (!o) setViewing(null);
         }}
         onConfirm={() => setViewing(null)}
-        title={viewing ? labelOf(viewing) : 'выкройка'}
+        title={viewing ? labelOf(viewing) : 'pattern'}
         width='lg'
         hideActions
       >
@@ -1686,7 +1682,7 @@ export function PatternsField({
           </div>
           <iframe
             src={viewing?.url}
-            title={viewing ? labelOf(viewing) : 'выкройка'}
+            title={viewing ? labelOf(viewing) : 'pattern'}
             className='h-[75vh] w-full border border-borderColor bg-bgColor'
           />
         </div>
@@ -1711,7 +1707,7 @@ export function PatternsField({
         <Suspense
           fallback={
             <Text size='micro' variant='label'>
-              загрузка модуля раскладки…
+              loading the marker module…
             </Text>
           }
         >
@@ -1741,7 +1737,7 @@ export function PatternsField({
         <Suspense
           fallback={
             <Text size='micro' variant='label'>
-              загрузка модуля разбора DXF…
+              loading the DXF parsing module…
             </Text>
           }
         >
@@ -1792,7 +1788,7 @@ export function PatternsField({
         <Suspense
           fallback={
             <Text size='micro' variant='label'>
-              загрузка модуля разбора DXF…
+              loading the DXF parsing module…
             </Text>
           }
         >

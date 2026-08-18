@@ -190,16 +190,16 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     return {
       ok: false,
       reason:
-        'у этой ткани нет деталей кроя, привязанных к блокам чертежа — площадь изделия складывать не из чего',
+        'this fabric has no cut pieces bound to drawing blocks — there is nothing to add the garment area up from',
     };
   }
   if (input.sizeIds.length === 0) {
-    return { ok: false, reason: 'у карточки не заявлен размерный ряд — считать норму не для кого' };
+    return { ok: false, reason: 'the card declares no size range — there is nobody to compute the norm for' };
   }
   if (input.unaliasedPieces.length > 0) {
     return {
       ok: false,
-      reason: `детали этой ткани не связаны ни с одним блоком чертежа: ${input.unaliasedPieces.join(', ')} — площадь изделия вышла бы неполной, а неполная норма занижает и себестоимость, и закупку. Свяжите их на вкладке деталей кроя`,
+      reason: `the pieces of this fabric are not linked to any drawing block: ${input.unaliasedPieces.join(', ')} — the garment area would come out incomplete, and an incomplete norm understates both the cost and the purchasing. link them on the cut pieces tab`,
     };
   }
 
@@ -270,7 +270,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     if (graded && norm.has('')) {
       return {
         ok: false,
-        reason: `деталь «${piece.name}» нарисована и с размерным хвостом, и без него — понять, справочный это контур базового размера или деталь, одинаковая во всех размерах, нечем. Разница — целая деталь в площади каждого размера`,
+        reason: `piece “${piece.name}” is drawn both with a size suffix and without one — there is nothing to tell whether this is a reference contour of the base size or a piece identical across all sizes. the difference is a whole piece in the area of every size`,
       };
     }
     // ТОКЕН ЧИТАЕТСЯ У КАЖДОГО КОНТУРА, А НЕ У ПЕРВОГО. Деталь законно нарисована несколькими
@@ -322,7 +322,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     // Частичная площадь ЗАНИЖАЕТ норму, и молча: экран показал бы число, склад — недостачу.
     return {
       ok: false,
-      reason: `в сегодняшних выкройках нет деталей: ${unmatched.join(', ')} — площадь изделия вышла бы неполной, а неполная норма занижает закупку`,
+      reason: `today's patterns have no pieces: ${unmatched.join(', ')} — the garment area would come out incomplete, and an incomplete norm understates purchasing`,
     };
   }
 
@@ -410,7 +410,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       if (picked === 'ambiguous') {
         return {
           ok: false,
-          reason: `деталь «${resolved[i].piece.name}» лежит на слое ${input.contourLayer} в нескольких вариантах с разной площадью — похоже, в пачке две ревизии выкройки. Какая из них норма, сказать нечем`,
+          reason: `piece “${resolved[i].piece.name}” lies on layer ${input.contourLayer} in several variants with different areas — it looks like the pack holds two revisions of the pattern. nothing here can say which of them is the norm`,
         };
       }
       if (!picked) {
@@ -450,8 +450,8 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       ok: false,
       reason:
         input.contourLayer === ''
-          ? 'в выкройках не нашлось ни одного контура — выбирать слой не из чего'
-          : `ни у одного размера не собрался полный комплект деталей на слое ${input.contourLayer} — возможно, деталь нарисована на другом слое`,
+          ? 'not a single contour was found in the patterns — there is nothing to pick a layer from'
+          : `not one size assembled a full set of pieces on layer ${input.contourLayer} — the piece may be drawn on a different layer`,
     };
   }
 
@@ -548,7 +548,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     return {
       ok: false,
       reason:
-        'ни у одного размера ряда в сегодняшних выкройках не нашлось полного комплекта деталей — норму по площади считать нечем',
+        "not one size of the range assembled a full set of pieces in today's patterns — there is nothing to compute an area norm from",
     };
   }
 
@@ -569,7 +569,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     return {
       ok: false,
       reason:
-        'в выкройках этой ткани ни одна деталь не градуируется по размерам — площадь каждого размера вышла бы одинаковой, и это была бы не норма размера, а копия соседней. Похоже, выгружен только один размер',
+        "in this fabric's patterns not a single piece is graded by size — the area of every size would come out the same, and that would not be a size norm but a copy of its neighbour. it looks like only one size was exported",
     };
   }
 

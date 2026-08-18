@@ -168,24 +168,25 @@ function WastageCell({ m, prov }: { m: StyleCostMaterialLine; prov?: BomWastageP
         <Text size='micro' variant='label' component='span'>
           {prov?.source === 'lays'
             ? laysProvenancePhrase(prov.layCount, stampWhen(prov.appliedAt))
-            : 'введено руками'}
+            : 'entered by hand'}
         </Text>
       </span>
     );
   }
   return (
     <span className='flex flex-col items-end gap-0.5'>
-      <Pill tone='mut'>из раскладки</Pill>
+      <Pill tone='mut'>from the marker</Pill>
       <Text size='micro' variant='label' component='span'>
         {/* A marker with no recorded efficiency (hand-built or imported) stores no decomposition,
             and the server's wastage_pct is the SUM of the two components — so it is 0 there too,
-            not an independently known total. Printing «кромка 0% + выпады 0%» would state a split
-            nobody measured; the norm still contains its waste, we just cannot say how it divides. */}
+            not an independently known total. Printing «selvedge 0% + between-piece waste 0%» would
+            state a split nobody measured; the norm still contains its waste, we just cannot say how
+            it divides. */}
         {decimalToInput(m.wastageSelvedgePct) || decimalToInput(m.wastageCutPct)
-          ? `кромка ${decimalToInput(m.wastageSelvedgePct) || '0'}% + выпады ${
+          ? `selvedge ${decimalToInput(m.wastageSelvedgePct) || '0'}% + between-piece waste ${
               decimalToInput(m.wastageCutPct) || '0'
-            }% — уже в норме`
-          : 'отходы уже в норме; разложение не записано'}
+            }% — already in the norm`
+          : 'the waste is already in the norm; the split is not recorded'}
       </Text>
     </span>
   );
@@ -197,7 +198,7 @@ function RightCell({ children }: { children: React.ReactNode }) {
 }
 
 const BREAKDOWN_COLS = 8;
-/** Всё до «сумма» — заголовок группы занимает эти колонки, чтобы итог группы встал в свой столбец. */
+/** Всё до «amount» — заголовок группы занимает эти колонки, чтобы итог группы встал в свой столбец. */
 const BREAKDOWN_LEAD = BREAKDOWN_COLS - 2;
 
 /**
@@ -227,7 +228,7 @@ function Breakdown({
   const unitCost = num(decimalToInput(estimate.unitCostBase));
   // Подсумма материалов — СЕРВЕРНАЯ (materials_per_unit_base), а не сумма строк ниже: строка без
   // курса в серверный итог не попала, и пересчитать её здесь значило бы показать unit cost, которого
-  // сервер не считал. Ровно эти строки помечены в колонке «проблема».
+  // сервер не считал. Ровно эти строки помечены в колонке «problem».
   const materialsSubtotal = num(decimalToInput(estimate.materialsPerUnitBase));
   // У статей серверного агрегата нет — складываем те, что свернулись в базовую валюту.
   const articlesSubtotal = articles.reduce(
@@ -235,7 +236,7 @@ function Breakdown({
     0,
   );
   // Брак — ОСТАТОК, а не пересчёт процента: сервер округляет составляющие независимо, и только
-  // остаток гарантирует, что столбец «сумма» действительно складывается в заголовочную цифру.
+  // остаток гарантирует, что столбец «amount» действительно складывается в заголовочную цифру.
   const defectAmount = Math.max(0, unitCost - materialsSubtotal - articlesSubtotal);
   const defectPct = num(decimalToInput(estimate.defectPct));
 
@@ -248,18 +249,18 @@ function Breakdown({
 
   return (
     <div className='flex flex-col gap-2 py-1'>
-      <GroupLabel flush>из чего складывается unit cost</GroupLabel>
+      <GroupLabel flush>what unit cost is made of</GroupLabel>
       <DataTable>
         <thead>
           <tr>
-            <th>строка</th>
-            <th>расход</th>
-            <th>цена</th>
-            <th>откуда цена</th>
-            <th>проблема</th>
+            <th>line</th>
+            <th>consumption</th>
+            <th>price</th>
+            <th>price from</th>
+            <th>problem</th>
             <th>wastage</th>
-            <th>сумма{cur ? ` (${cur})` : ''}</th>
-            <th>доля</th>
+            <th>amount{cur ? ` (${cur})` : ''}</th>
+            <th>share</th>
           </tr>
         </thead>
         <tbody>
@@ -272,7 +273,7 @@ function Breakdown({
                 component='span'
                 className='font-bold uppercase'
               >
-                материалы
+                materials
               </Text>
             </td>
             <td>{materialsSubtotal > 0 ? materialsSubtotal.toFixed(2) : <EmptyCell />}</td>
@@ -282,7 +283,7 @@ function Breakdown({
             <tr>
               <td colSpan={BREAKDOWN_COLS}>
                 <Text size='micro' variant='label' component='span'>
-                  в BOM нет материалов
+                  no materials in the BOM
                 </Text>
               </td>
             </tr>
@@ -316,10 +317,10 @@ function Breakdown({
                         <span>{`${est?.perGarment} ${est?.unit || ''}`.trim()}</span>
                         <Text size='micro' variant='label' component='span'>
                           {est?.pieceCount
-                            ? `по площади ${est.pieceCount} ${
-                                est.pieceCount === 1 ? 'детали' : 'деталей'
+                            ? `by the area of ${est.pieceCount} ${
+                                est.pieceCount === 1 ? 'piece' : 'pieces'
                               }`
-                            : 'по площади деталей'}
+                            : 'by piece area'}
                         </Text>
                       </span>
                     ) : (
@@ -351,7 +352,7 @@ function Breakdown({
                       <span className='flex flex-col items-end gap-0.5'>
                         <Pill tone='attention'>netto</Pill>
                         <Text size='micro' variant='label' component='span'>
-                          выпадов нет в числе — их знает раскладка
+                          no between-piece waste in the number — the marker knows it
                         </Text>
                       </span>
                     ) : (
@@ -381,7 +382,7 @@ function Breakdown({
                 component='span'
                 className='font-bold uppercase'
               >
-                статьи
+                cost items
               </Text>
             </td>
             <td>{articlesSubtotal > 0 ? articlesSubtotal.toFixed(2) : <EmptyCell />}</td>
@@ -391,7 +392,7 @@ function Breakdown({
             <tr>
               <td colSpan={BREAKDOWN_COLS}>
                 <Text size='micro' variant='label' component='span'>
-                  статей нет
+                  no cost items
                 </Text>
               </td>
             </tr>
@@ -428,12 +429,12 @@ function Breakdown({
           {/* Закрывающая строка-остаток. Порог ≥ 0.005, не > 0: округление составляющих даёт
               ±0.005, и фантомная строка «· 0.00» читалась бы как настоящая надбавка.
 
-              ИМЕНЕМ «брак N%» она называется, ТОЛЬКО когда процент брака действительно
+              ИМЕНЕМ «defects N%» она называется, ТОЛЬКО когда процент брака действительно
               положительный. Остаток считается от КЛИЕНТСКОЙ суммы статей, поэтому всё, что клиент
               не сумел свернуть в базовую валюту, всплывает здесь же — и печатать над этими деньгами
-              «брак 0%» значило бы объявить ставку, которой нет. При нулевой ставке строка остаётся
-              (иначе столбец «сумма» перестанет складываться в unit cost), но называет себя тем, что
-              она есть: неразнесённой разницей. */}
+              «defects 0%» значило бы объявить ставку, которой нет. При нулевой ставке строка
+              остаётся (иначе столбец «amount» перестанет складываться в unit cost), но называет
+              себя тем, что она есть: неразнесённой разницей. */}
           {defectAmount >= 0.005 && (
             <tr className='bg-bgZebra'>
               <td colSpan={BREAKDOWN_LEAD}>
@@ -444,11 +445,11 @@ function Breakdown({
                   component='span'
                   className='font-bold uppercase'
                 >
-                  {defectPct > 0 ? `брак ${defectPct}%` : 'не разнесено'}
+                  {defectPct > 0 ? `defects ${defectPct}%` : 'unallocated'}
                 </Text>
                 {defectPct <= 0 && (
                   <Text size='micro' variant='label' component='span'>
-                    {' · разница между unit cost и суммой строк выше'}
+                    {' · the difference between unit cost and the sum of the lines above'}
                   </Text>
                 )}
               </td>
@@ -465,12 +466,13 @@ function Breakdown({
       </DataTable>
       {excluded > 0 && (
         <Text size='micro' variant='label'>
-          {`Строки с пометкой «${NO_PRICE}» или «${noFx()}» (${excluded}) в сумму не входят — unit cost занижен ровно на них.`}
+          {`Lines marked “${NO_PRICE}” or “${noFx()}” (${excluded}) are not in the sum — unit cost is understated by exactly them.`}
         </Text>
       )}
       <Text size='micro' variant='label'>
-        У строки с нормами по размерам «расход» — среднее по размерному ряду (простое среднее норм
-        по всем размерам ряда). Это не прогноз партии: план партии считается по её линиям.
+        For a line with per-size norms, “consumption” is the mean across the size range (a simple
+        mean of the norms over all sizes of the range). This is not a run forecast: a run's plan is
+        computed from its own lines.
       </Text>
 
       {estimate.caveat && (
@@ -490,7 +492,7 @@ function Breakdown({
       {planIsLowerBound && (
         <CalloutBox tone='note'>
           <Text size='micro'>
-            {`Итог этой сметы — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей ÷ раскройную ширину, межлекальных выпадов в нём нет. Настоящий unit cost ВЫШЕ, поэтому все Δ ниже (к факту, к snapshot'у) преувеличены в сторону перерасхода, а по знаку могут быть обратными.`}
+            {`The bottom line of this estimate is a “${TIER_ESTIMATE}”: the consumption of some fabrics is derived from piece area ÷ cutting width, and there is no waste between pieces in it. The real unit cost is HIGHER, so every Δ below (to the actual, to the snapshot) is exaggerated towards overspend, and its sign may be the opposite.`}
           </Text>
         </CalloutBox>
       )}
@@ -541,7 +543,7 @@ function SnapshotReconciliation({
 
   return (
     <>
-      <GroupLabel>проведённый snapshot</GroupLabel>
+      <GroupLabel>booked snapshot</GroupLabel>
       <StatGrid min={130}>
         <Stat
           label={`snapshot${comparison.snapshotSource ? ` · ${comparison.snapshotSource}` : ''}`}
@@ -552,13 +554,13 @@ function SnapshotReconciliation({
                 // НАСТОЯЩЕЕ значение не больше напечатанного. Слова («не более») читались бы про
                 // модуль и на отрицательной разнице означали бы обратное; знак неравенства
                 // алгебраичен и не зависит от того, в какую сторону смотрит цифра.
-                `Δ к плану ${planIsLowerBound ? '≤ ' : ''}${money(snapshotVsPlan)}`
+                `Δ to plan ${planIsLowerBound ? '≤ ' : ''}${money(snapshotVsPlan)}`
               : undefined
           }
         />
         {comparison.hasActual && (
           <Stat
-            label='Δ факт к snapshot'
+            label='Δ actual to snapshot'
             value={actualVsSnapshot != null ? money(actualVsSnapshot) : '—'}
             tone={statTone(actualVsSnapshot)}
           />
@@ -601,7 +603,7 @@ function VarianceByKind({
   // Два РАЗНЫХ повода для пустого списка, и путать их нельзя: «ни один вид не сдвинулся» — это
   // хорошая новость, а «ни у одного вида нет факта» — это отсутствие данных. Итоговый факт по
   // колорвею (`hasActual`) может существовать без разбивки по видам, и печатать над такой картой
-  // «все виды затрат уложились в план» значит подтвердить сходимость, которую никто не проверял.
+  // «every cost kind came in on plan» значит подтвердить сходимость, которую никто не проверял.
   const anyLineActual = rows.some((r) => r.lineHasActual);
   const moved = rows.filter((r) => r.lineHasActual && Math.abs(r.delta) >= 0.005);
   const shown = hasActual ? moved : rows.filter((r) => r.estimate > 0);
@@ -611,14 +613,14 @@ function VarianceByKind({
 
   return (
     <>
-      <GroupLabel>{hasActual ? 'отклонение по видам затрат' : 'план по видам затрат'}</GroupLabel>
+      <GroupLabel>{hasActual ? 'variance by cost kind' : 'plan by cost kind'}</GroupLabel>
       {sorted.length === 0 ? (
         <Text size='micro' variant='label'>
           {!hasActual
-            ? 'цифр по видам нет'
+            ? 'no figures by kind'
             : anyLineActual
-              ? 'все виды затрат уложились в план'
-              : 'факта по видам затрат нет — сравнивать не с чем'}
+              ? 'every cost kind came in on plan'
+              : 'there is no actual by cost kind — nothing to compare with'}
         </Text>
       ) : (
         <div className='flex flex-col'>
@@ -631,7 +633,7 @@ function VarianceByKind({
             return (
               <BarRow
                 key={r.kind}
-                name={unproven ? `${r.kind} · план занижен` : r.kind}
+                name={unproven ? `${r.kind} · plan understated` : r.kind}
                 pct={max > 0 ? (measure(r) / max) * 100 : 0}
                 tone={!hasActual ? 'ink' : unproven ? 'ink' : r.delta > 0 ? 'down' : 'up'}
                 value={hasActual ? signed(r.delta) : `${r.estimate.toFixed(2)} ${cur}`}
@@ -699,7 +701,7 @@ function RowDisclosure({
 }: {
   open: boolean;
   onToggle: () => void;
-  /** Строк в таблице столько же, сколько колорвеев; без этого все контролы зовутся «разбор». */
+  /** Строк в таблице столько же, сколько колорвеев; без этого все контролы зовутся «breakdown». */
   label: string;
 }) {
   return (
@@ -707,7 +709,7 @@ function RowDisclosure({
       role='button'
       tabIndex={0}
       aria-expanded={open}
-      aria-label={`разбор — ${label}`}
+      aria-label={`breakdown — ${label}`}
       onClick={onToggle}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -717,7 +719,7 @@ function RowDisclosure({
       }}
       className='inline-flex cursor-pointer items-center gap-1 whitespace-nowrap border border-borderColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
     >
-      разбор
+      breakdown
       <span aria-hidden>{open ? '▾' : '▸'}</span>
     </span>
   );
@@ -812,7 +814,7 @@ export function CostEstimateField({
   if (!canReadCosting) {
     return (
       <Text size='micro' variant='label'>
-        нужен доступ к костингу
+        costing access is required
       </Text>
     );
   }
@@ -820,7 +822,7 @@ export function CostEstimateField({
   if (colorways.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        колорвеев пока нет — добавьте колорвей, тогда посчитается и его себестоимость
+        no colourways yet — add a colourway and its cost will be computed too
       </Text>
     );
   }
@@ -833,7 +835,7 @@ export function CostEstimateField({
   if (results.length > 0 && results.every((r, i) => r.isError && forbiddenAt(i))) {
     return (
       <Text size='micro' variant='label'>
-        нужен доступ к костингу
+        costing access is required
       </Text>
     );
   }
@@ -842,8 +844,8 @@ export function CostEstimateField({
     const r = results[i];
     const dc = c.colorCode ? dictionary?.colors?.find((d) => d.code === c.colorCode) : undefined;
     // Ровно та же лестница, что и в costing-field.tsx (colorwayLabel): имя из словаря → код цвета →
-    // «колорвей #id». baseSku идёт приписком, потому что в BOM и на складе ищут именно по нему.
-    const label = dc?.name || c.colorCode || `колорвей #${c.colorwayId ?? 0}`;
+    // «colourway #id». baseSku идёт приписком, потому что в BOM и на складе ищут именно по нему.
+    const label = dc?.name || c.colorCode || `colorway #${c.colorwayId ?? 0}`;
     const base: MatrixRow = {
       colorwayId: c.colorwayId ?? 0,
       label,
@@ -933,27 +935,27 @@ export function CostEstimateField({
   const totalIsLowerBound = lowerBoundInTotal > 0;
   const totalLabel =
     both.length > 0
-      ? `среднее по ${both.length} ${both.length === 1 ? 'колорвею' : 'колорвеям'} с планом и фактом`
-      : `среднее плана по ${withPlan.length} ${withPlan.length === 1 ? 'колорвею' : 'колорвеям'}`;
+      ? `mean across ${both.length} ${both.length === 1 ? 'colourway' : 'colorways'} with plan and actual`
+      : `mean plan across ${withPlan.length} ${withPlan.length === 1 ? 'colourway' : 'colorways'}`;
 
   return (
     <div className='flex flex-col gap-2'>
       <DataTable>
         <thead>
           <tr>
-            <th>колорвей</th>
-            <th>план{cur ? ` (${cur})` : ''}</th>
-            <th>факт</th>
+            <th>colourway</th>
+            <th>plan{cur ? ` (${cur})` : ''}</th>
+            <th>actual</th>
             <th>Δ</th>
             <th>Δ%</th>
-            <th>главное отклонение</th>
+            <th>main variance</th>
             <th />
           </tr>
         </thead>
         {rows.map((row) => {
           const open = openId === row.colorwayId;
           return (
-            // По <tbody> на колорвей: разбор — вторая строка той же группы, поэтому он физически
+            // По <tbody> на колорвей: breakdown — вторая строка той же группы, поэтому он физически
             // не может оторваться от своей строки при любом порядке рендера.
             <tbody key={row.colorwayId}>
               <tr>
@@ -967,14 +969,14 @@ export function CostEstimateField({
                       </Text>
                     )}
                     {/* Ступень — В СВЁРНУТОЙ строке, а не только в разборе: развернуть её человек
-                        может и не собираться, а «план» в колонке рядом читается как полноценный
+                        может и не собираться, а «plan» в колонке рядом читается как полноценный
                         план всегда. */}
                     {row.lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
-                    {row.state === 'forbidden' && <Pill tone='warn'>нет доступа</Pill>}
-                    {row.state === 'error' && <Pill tone='warn'>не загрузилось</Pill>}
+                    {row.state === 'forbidden' && <Pill tone='warn'>no access</Pill>}
+                    {row.state === 'error' && <Pill tone='warn'>didn't load</Pill>}
                     {/* warn (красный) занят «показать нечего»; здесь цифры ЕСТЬ, просто несвежие —
                         а «stale» в системе (DESIGN.md, «Blue») это attention. */}
-                    {row.stale && <Pill tone='attention'>не обновилось</Pill>}
+                    {row.stale && <Pill tone='attention'>didn't refresh</Pill>}
                   </span>
                 </td>
                 <td>
@@ -1010,7 +1012,7 @@ export function CostEstimateField({
                     <MatrixValue row={row} />
                   ) : row.actual == null ? (
                     <Text size='micro' variant='label' component='span'>
-                      прогонов не было
+                      there were no runs
                     </Text>
                   ) : row.top ? (
                     <span className={row.lowerBound ? undefined : deltaTone(row.top.delta)}>
@@ -1048,24 +1050,18 @@ export function CostEstimateField({
           <TotalRow>
             <td>{totalLabel}</td>
             <td>
-              {meanPlan != null
-                ? `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}`
-                : '—'}
+              {meanPlan != null ? `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}` : '—'}
             </td>
             <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
             {/* Цвет — утверждение о знаке, а знак средней Δ от смешанных ступеней недоказуем ровно
                 так же, как у строки: план занижен на неизвестную величину. */}
             <td
-              className={
-                meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined
-              }
+              className={meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined}
             >
               {meanDelta != null ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}` : '—'}
             </td>
             <td
-              className={
-                meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined
-              }
+              className={meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined}
             >
               {meanDeltaPct != null
                 ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
@@ -1077,9 +1073,9 @@ export function CostEstimateField({
       </DataTable>
 
       <Text size='micro' variant='label'>
-        {`Итог — простое среднее: выпуска по колорвеям у стиля нет, взвешивать нечем.${
+        {`The bottom line is a simple mean: the style has no output per colourway, so there is nothing to weight by.${
           both.length > 0 && both.length < withPlan.length
-            ? ` План и факт есть у ${both.length} из ${withPlan.length} колорвеев — по ним и посчитано.`
+            ? ` ${both.length} of ${withPlan.length} colourways have both a plan and an actual — those are the ones it is computed from.`
             : ''
         }`}
       </Text>
@@ -1089,11 +1085,11 @@ export function CostEstimateField({
           остаётся одно, а рядом сказано, из чего оно сложено. */}
       {totalIsLowerBound && (
         <Text size='micro' variant='label'>
-          {`У ${lowerBoundInTotal} из ${totalBase.length} колорвеев, попавших в итог, план — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей, без межлекальных выпадов. Такой план занижен, поэтому Δ к факту у этих строк и у итога идут без цвета — знак разности может быть обратным.`}
+          {`For ${lowerBoundInTotal} of the ${totalBase.length} colourways that made it into the bottom line, the plan is a “${TIER_ESTIMATE}”: the consumption of some fabrics is derived from piece area, without waste between pieces. Such a plan is understated, so Δ to the actual on these rows and on the bottom line goes without colour — the sign of the difference may be the opposite.`}
         </Text>
       )}
       <Text size='micro' variant='label'>
-        {`Все суммы в ${cur || 'базовой валюте стиля'}, свёрнуты по курсам костинга. План ≠ факт ≠ проведённый snapshot COGS — три разные цифры, и они намеренно не сливаются.`}
+        {`All amounts in ${cur || "the style's base currency"}, converted at the costing rates. Plan ≠ actual ≠ booked COGS snapshot — three different figures, and they deliberately do not merge.`}
       </Text>
     </div>
   );

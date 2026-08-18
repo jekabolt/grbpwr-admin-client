@@ -178,12 +178,13 @@ export async function nest(
     // раскройщика решать проблему, которой нет.
     const why =
       config.fabricDirection === 'one_way'
-        ? 'ткань направленная (ворс)'
-        : 'направление ткани не задано у строки BOM, а без ответа переворот запрещён (иначе норму не сохранить)';
+        ? 'the fabric is directional (nap)'
+        : 'the fabric direction is not set on the BOM line, and without an answer flipping is forbidden (the norm could not be saved otherwise)';
     warnings.push(
-      `${why} — зеркальные экземпляры не размещены: ${namesWithCount(mirrorRefused)}. ` +
-        'Переворот на такой ткани кладёт деталь против ворса, как и полуоборот, и маркер с ним ' +
-        'не сохранить. Парные детали на ворсе кроят в два слоя лицом к лицу — это другой маркер.',
+      `${why} — the mirrored instances are not placed: ${namesWithCount(mirrorRefused)}. ` +
+        'a flip on such a fabric lays the piece against the nap, and so does a half-turn, and a ' +
+        'marker with it cannot be saved. mirrored pieces on a napped fabric are cut in two plies ' +
+        'face to face — that is a different marker.',
     );
   }
 
@@ -273,7 +274,7 @@ export async function nest(
     p.parts0 = [d.parts, mirrorParts(d.parts)];
     if (d.degenerate) {
       warnings.push(
-        `«${byId.get(p.id)?.name ?? p.id}»: контур с дефектом — раскладка считает его с запасом (выпуклая оболочка)`,
+        `“${byId.get(p.id)?.name ?? p.id}”: a contour with a defect — the marker counts it on the safe side (convex hull)`,
       );
     }
   });
@@ -283,8 +284,8 @@ export async function nest(
     // пара «левая + правая» требует ВТОРОЙ записи NFP. Оператор, прочитавший неверную причину,
     // пойдёт убирать детали вместо того, чтобы дать больше времени.
     warnings.push(
-      `${mirrorPairs ? 'парные детали удваивают предрасчёт' : `деталей много (${uniquePieces.length})`}` +
-        ` — контуры упрощены до ${effectiveEps} см, чтобы поиск успел пройти; раскладка от этого чуть свободнее`,
+      `${mirrorPairs ? 'mirrored pieces double the pre-computation' : `there are many pieces (${uniquePieces.length})`}` +
+        ` — contours are simplified to ${effectiveEps} cm so the search can finish in time; the marker comes out a little looser for it`,
     );
   }
 

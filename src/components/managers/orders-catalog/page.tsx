@@ -161,7 +161,7 @@ export function OrdersCatalog() {
             orders
           </Text>
           {total !== undefined ? (
-            <Pill tone='mut'>{total.toLocaleString()} total</Pill>
+            <Pill tone='mut'>{total.toLocaleString('en-US')} total</Pill>
           ) : (
             orders.length > 0 && <Pill tone='mut'>{orders.length} loaded</Pill>
           )}

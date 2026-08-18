@@ -24,7 +24,7 @@ function formatChange(value: string | undefined): string {
 
 function formatDate(value: string | undefined): string {
   if (!value) return '';
-  return new Date(value).toLocaleString();
+  return new Date(value).toLocaleString('en-US');
 }
 
 interface SizeOption {

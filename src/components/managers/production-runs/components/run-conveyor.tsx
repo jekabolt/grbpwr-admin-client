@@ -150,13 +150,9 @@ export type RunConveyorFacts = {
   unsaved: Partial<Record<RunStepId, string[]>>;
 };
 
-// 1 цвет / 2 цвета / 5 цветов. The band reads as a sentence, and «5 цвета» reads as a bug.
-function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
+// 1 colour / 2 colours. The band reads as a sentence, and «5 colour» reads as a bug.
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? one : many;
 }
 
 /**
@@ -188,61 +184,61 @@ export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
 
   const planSummary =
     f.plannedQty > 0
-      ? `${f.plannedQty} ед · ${f.colourCount} ${plural(f.colourCount, 'цвет', 'цвета', 'цветов')}` +
+      ? `${f.plannedQty} units · ${f.colourCount} ${plural(f.colourCount, 'colour', 'colours')}` +
         (planProblem ? ` · ${planProblem}` : '')
       : planProblem
-        ? `плана ещё нет · ${planProblem}`
-        : 'плана ещё нет';
+        ? `no plan yet · ${planProblem}`
+        : 'no plan yet';
 
   const materialsSummary = f.materials
     ? [
         f.materials.positions === 0
-          ? 'материалов в плане нет'
-          : `выдано ${f.materials.issued} из ${f.materials.positions} материалов`,
-        f.materials.short > 0 ? `нехватка ${f.materials.short}` : '',
-        f.materials.blockers > 0 ? `не посчитано ${f.materials.blockers}` : '',
+          ? 'no materials in the plan'
+          : `issued ${f.materials.issued} of ${f.materials.positions} materials`,
+        f.materials.short > 0 ? `shortage ${f.materials.short}` : '',
+        f.materials.blockers > 0 ? `not counted ${f.materials.blockers}` : '',
       ]
         .filter(Boolean)
         .join(' · ')
     : f.materialsUnavailable
-      ? 'план материалов недоступен'
-      : 'план материалов читается…';
+      ? 'the material plan is unavailable'
+      : 'reading the material plan…';
 
   // 3 · раскрой. «настилов ещё нет» is NOT a defect — it is the phase's own work, and every run is
   // born with none; the figures that ARE defects (an unfit lay, a coverage cell short of fabric)
   // only get named once something has actually been laid, in the same words the panel uses.
   const cutSummary = !f.lays
     ? f.laysUnavailable
-      ? 'план настилов недоступен'
-      : 'план настилов читается…'
+      ? 'the lay plan is unavailable'
+      : 'reading the lay plan…'
     : f.lays.lays === 0
-      ? 'настилов ещё нет'
+      ? 'no lays yet'
       : [
-          `${f.lays.lays} ${plural(f.lays.lays, 'настил', 'настила', 'настилов')} · ${f.lays.sections} ${plural(f.lays.sections, 'секция', 'секции', 'секций')}`,
-          f.lays.unfit > 0 ? `не годен: ${f.lays.unfit}` : '',
-          f.lays.stale > 0 ? `количества изменились: ${f.lays.stale}` : '',
+          `${f.lays.lays} ${plural(f.lays.lays, 'lay', 'lays')} · ${f.lays.sections} ${plural(f.lays.sections, 'section', 'sections')}`,
+          f.lays.unfit > 0 ? `unfit: ${f.lays.unfit}` : '',
+          f.lays.stale > 0 ? `quantities changed: ${f.lays.stale}` : '',
           f.lays.shortCells > 0
-            ? `нехватка: ${f.lays.shortCells} ${plural(f.lays.shortCells, 'клетка', 'клетки', 'клеток')}`
+            ? `shortage: ${f.lays.shortCells} ${plural(f.lays.shortCells, 'cell', 'cells')}`
             : '',
         ]
           .filter(Boolean)
           .join(' · ');
 
-  const series = cancelled ? '' : open ? ' · серия открыта' : ' · серия закрыта';
+  const series = cancelled ? '' : open ? ' · run open' : ' · run closed';
   const receiptSummary =
-    `${f.receivedQty} из ${f.plannedQty}${series}` + (f.postingStuck ? ' · постинг завис' : '');
+    `${f.receivedQty} of ${f.plannedQty}${series}` + (f.postingStuck ? ' · posting is stuck' : '');
 
   const costSummary =
-    (f.accrued ? `начислено ${f.accrued}` : 'затрат ещё нет') +
-    (f.costTotalsPartial ? ' · итог неполный' : '');
+    (f.accrued ? `accrued ${f.accrued}` : 'no costs yet') +
+    (f.costTotalsPartial ? ' · total is incomplete' : '');
 
   const failed = f.recon.filter((c) => !c.ok);
   const closeSummary =
     f.recon.length === 0
-      ? 'сверка не проводилась'
+      ? 'reconciliation was not run'
       : failed.length === 0
-        ? 'сверка сходится'
-        : `сверка не сходится: ${failed.map((c) => c.label).join('; ')}`;
+        ? 'reconciliation agrees'
+        : `reconciliation does not agree: ${failed.map((c) => c.label).join('; ')}`;
 
   const problem: Partial<Record<RunStepId, boolean>> = {
     1: !!planProblem,
@@ -287,16 +283,16 @@ export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
   });
 
   const steps: RunStep[] = [
-    step(1, '1 · план', planSummary),
-    step(2, '2 · материалы', materialsSummary),
+    step(1, '1 · plan', planSummary),
+    step(2, '2 · materials', materialsSummary),
   ];
   // The two conditional phases leave a numbered GAP rather than renumbering what follows — see the
   // note at the top of the file. An auxiliary run reads 1,2,4,5,6; an account without costing:read
   // reads 1,2,3,4,6.
-  if (f.hasLayStep) steps.push(step(3, '3 · раскрой', cutSummary));
-  steps.push(step(4, '4 · приёмка', receiptSummary));
-  if (f.canReadCosting) steps.push(step(5, '5 · затраты', costSummary));
-  steps.push(step(6, '6 · закрытие', closeSummary));
+  if (f.hasLayStep) steps.push(step(3, '3 · cutting', cutSummary));
+  steps.push(step(4, '4 · receipt', receiptSummary));
+  if (f.canReadCosting) steps.push(step(5, '5 · costs', costSummary));
+  steps.push(step(6, '6 · closing', closeSummary));
   return steps;
 }
 
@@ -308,10 +304,10 @@ const GLYPH: Record<RunStepState, string> = {
 };
 
 const STATE_WORD: Record<RunStepState, string> = {
-  done: 'пройден',
-  current: 'текущий шаг',
-  future: 'впереди',
-  problem: 'проблема',
+  done: 'done',
+  current: 'current step',
+  future: 'ahead',
+  problem: 'problem',
 };
 
 /**
@@ -366,7 +362,7 @@ export function StepGlyph({
  * the glyph beside it; the title names which draft.
  */
 export function UnsavedBadge({ what, inverted }: { what: string[]; inverted?: boolean }) {
-  const title = `не сохранено: ${what.join(', ')}`;
+  const title = `unsaved: ${what.join(', ')}`;
   return (
     <Text
       size='nano'
@@ -375,7 +371,7 @@ export function UnsavedBadge({ what, inverted }: { what: string[]; inverted?: bo
       className={cn('whitespace-nowrap uppercase', inverted ? 'text-bgColor' : 'text-warning')}
       title={title}
     >
-      <span aria-hidden>• не сохранено</span>
+      <span aria-hidden>• unsaved</span>
       <span className='sr-only'>{title}</span>
     </Text>
   );
@@ -429,7 +425,7 @@ export function RunConveyor({
   const openId = active ?? steps.find((s) => s.current)?.id ?? null;
   return (
     <ol
-      aria-label='этапы партии'
+      aria-label='run phases'
       className={cn('grid border border-borderColor bg-bgColor', className)}
       // 150px: six phases have to fit on one row at the admin's content width before the band
       // starts wrapping into a second row of cells.
@@ -451,7 +447,7 @@ export function RunConveyor({
               </Text>
               <span className='sr-only'>
                 {STATE_WORD[s.state]}
-                {open ? ', открыт' : ''}
+                {open ? ', open' : ''}
               </span>
               {s.unsaved?.length ? <UnsavedBadge what={s.unsaved} inverted={open} /> : null}
             </div>

@@ -1,18 +1,18 @@
 /**
- * Размер файла ПО-РУССКИ и строчными.
+ * Размер файла СТРОЧНЫМИ.
  *
  * Свой, а не `utils/pattern`: тот подписывает `B/KB/MB/GB`, и на одном экране раздела
- * оказывались плитка «500 KB», оверлей броска «до 95 мб» и строка очереди «412 MB при пределе
- * 95 MB» — три написания одной величины подряд. Р4 говорит: раздел русский, строчными.
+ * оказывались плитка «500 KB», оверлей броска «up to 95 mb» и строка очереди «412 MB при
+ * пределе 95 MB» — три написания одной величины подряд. Р4 говорит: раздел строчными.
  *
- * Делим на 1024, и подпись это признаёт: «мб» в русском обиходе — ровно мебибайт, а предел
- * сервера (95 MiB) и подпись «до 95 мб» после этого совпадают буква в букву. Пока подписью
+ * Делим на 1024, и подпись это признаёт: «mb» в обиходе — ровно мебибайт, а предел
+ * сервера (95 MiB) и подпись «up to 95 mb» после этого совпадают буква в букву. Пока подписью
  * было «MB», они расходились на 4%, и отказ 413 приходил на файл, который клиент назвал
  * проходным.
  */
 export function formatBytes(bytes?: number): string {
-  if (!bytes || bytes <= 0) return '0 б';
-  const units = ['б', 'кб', 'мб', 'гб'];
+  if (!bytes || bytes <= 0) return '0 b';
+  const units = ['b', 'kb', 'mb', 'gb'];
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
   const v = bytes / 1024 ** i;
   return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
@@ -40,7 +40,7 @@ export function formatWhen(value: string | undefined): string {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('ru-RU', {
+  return d.toLocaleString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -62,7 +62,7 @@ export function formatWhenShort(value: string | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleString('ru-RU', {
+  return d.toLocaleString('en-US', {
     day: '2-digit',
     month: '2-digit',
     ...(sameYear ? {} : { year: '2-digit' }),
@@ -77,7 +77,7 @@ export function formatDay(value: string | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString('ru-RU', {
+  return d.toLocaleDateString('en-US', {
     day: '2-digit',
     month: '2-digit',
     ...(sameYear ? {} : { year: '2-digit' }),
@@ -116,51 +116,51 @@ export function kindWord(contentType?: string, fileName?: string): string {
     return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
   })();
 
-  if (ext === 'svg' || ct === 'image/svg+xml') return 'вектор';
-  if (ct.startsWith('image/')) return 'картинка';
-  if (ct.startsWith('video/')) return 'видео';
-  if (ct.startsWith('audio/')) return 'звук';
-  if (ct === 'application/pdf' || ext === 'pdf') return 'документ';
+  if (ext === 'svg' || ct === 'image/svg+xml') return 'vector';
+  if (ct.startsWith('image/')) return 'picture';
+  if (ct.startsWith('video/')) return 'video';
+  if (ct.startsWith('audio/')) return 'sound';
+  if (ct === 'application/pdf' || ext === 'pdf') return 'document';
 
   const byExt: Record<string, string> = {
-    ai: 'вектор',
-    eps: 'вектор',
-    zip: 'архив',
-    rar: 'архив',
-    '7z': 'архив',
-    gz: 'архив',
-    tar: 'архив',
-    doc: 'текст',
-    docx: 'текст',
-    odt: 'текст',
-    rtf: 'текст',
-    txt: 'текст',
-    md: 'заметка',
-    xls: 'таблица',
-    xlsx: 'таблица',
-    csv: 'таблица',
-    numbers: 'таблица',
-    ppt: 'презентация',
-    pptx: 'презентация',
-    key: 'презентация',
-    step: '3d-модель',
-    stp: '3d-модель',
-    stl: '3d-модель',
-    obj: '3d-модель',
-    blend: '3d-модель',
-    '3dm': '3d-модель',
-    dxf: 'чертёж',
-    dwg: 'чертёж',
-    otf: 'шрифт',
-    ttf: 'шрифт',
-    woff: 'шрифт',
-    woff2: 'шрифт',
-    psd: 'макет',
-    sketch: 'макет',
-    fig: 'макет',
-    indd: 'макет',
+    ai: 'vector',
+    eps: 'vector',
+    zip: 'archive',
+    rar: 'archive',
+    '7z': 'archive',
+    gz: 'archive',
+    tar: 'archive',
+    doc: 'text',
+    docx: 'text',
+    odt: 'text',
+    rtf: 'text',
+    txt: 'text',
+    md: 'note',
+    xls: 'spreadsheet',
+    xlsx: 'spreadsheet',
+    csv: 'spreadsheet',
+    numbers: 'spreadsheet',
+    ppt: 'presentation',
+    pptx: 'presentation',
+    key: 'presentation',
+    step: '3d model',
+    stp: '3d model',
+    stl: '3d model',
+    obj: '3d model',
+    blend: '3d model',
+    '3dm': '3d model',
+    dxf: 'drawing',
+    dwg: 'drawing',
+    otf: 'font',
+    ttf: 'font',
+    woff: 'font',
+    woff2: 'font',
+    psd: 'design',
+    sketch: 'design',
+    fig: 'design',
+    indd: 'design',
   };
-  return byExt[ext] ?? 'файл';
+  return byExt[ext] ?? 'file';
 }
 
 /**

@@ -52,12 +52,12 @@ export function FittingCardList() {
     if (!id) return null;
     const tc = techCardMap.get(id)?.techCard;
     const parts = [tc?.styleNumber, tc?.name].filter(Boolean);
-    return parts.length ? parts.join(' · ') : `тех карта #${id}`;
+    return parts.length ? parts.join(' · ') : `tech card #${id}`;
   };
   const sampleName = (id?: number) => {
     if (!id) return null;
     const s = sampleMap.get(id);
-    return s ? sampleLabel(s) : `сэмпл #${id}`;
+    return s ? sampleLabel(s) : `sample #${id}`;
   };
 
   function confirmDelete() {
@@ -74,7 +74,7 @@ export function FittingCardList() {
     <div className='flex flex-col gap-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <Text variant='uppercase' size='small'>
-          примерки
+          fittings
         </Text>
         <Text variant='inactive' size='small'>
           {fittings.length} of {total}

@@ -167,7 +167,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: '',
-        message: `имя узла «${s.outputUnitName}» набрано, но ключа нет: шаг ничего не собирает`,
+        message: `the unit name “${s.outputUnitName}” is typed in, but there is no key: the step assembles nothing`,
       });
     }
 
@@ -183,7 +183,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
           step: i,
           input: j,
           key: input.key,
-          message: `вход повторяется в этом же шаге (впервые — вход ${first + 1})`,
+          message: `this input repeats within the same step (first seen at input ${first + 1})`,
         });
         return;
       }
@@ -200,7 +200,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
                   step: i,
                   input: j,
                   key: input.key,
-                  message: `«${input.key}» — это выход самого этого шага: узел появляется после шага, а не до него`,
+                  message: `“${input.key}” is this step's own output: a unit appears after the step, not before it`,
                 }
               : {
                   rule: AssemblyRule.frontier,
@@ -208,7 +208,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
                   step: i,
                   input: j,
                   key: input.key,
-                  message: `узел «${input.key}» появится только на шаге ${humanStep(at)} — он не может быть входом раньше`,
+                  message: `unit “${input.key}” appears only at step ${humanStep(at)} — it can't be an input any earlier`,
                 },
           );
           return;
@@ -219,7 +219,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
           step: i,
           input: j,
           key: input.key,
-          message: `вход «${input.key}» не существует: нет ни такой детали, ни такого узла`,
+          message: `input “${input.key}” doesn't exist: there is no such piece and no such unit`,
         });
         return;
       }
@@ -235,7 +235,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
             step: i,
             input: j,
             key: input.key,
-            message: `вход «${input.key}» больше не лежит на столе`,
+            message: `input “${input.key}” is no longer on the table`,
           });
           return;
         }
@@ -246,7 +246,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
           step: i,
           input: j,
           key: input.key,
-          message: `«${input.key}» уже съеден шагом ${humanStep(eater)} и лежит внутри узла ${eaterUnit}`,
+          message: `“${input.key}” is already consumed by step ${humanStep(eater)} and sits inside unit ${eaterUnit}`,
         });
         return;
       }
@@ -268,7 +268,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: out,
-        message: `ключ узла «${out}» занят деталью «${shown}»: у деталей и узлов одно пространство имён`,
+        message: `the unit key “${out}” is taken by piece “${shown}”: pieces and units share one namespace`,
       });
       return;
     }
@@ -280,7 +280,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: out,
-        message: 'узел из одного входа — это обработка, а не узел: джойну нужно не меньше двух разных входов',
+        message: 'a unit made of a single input is processing, not a unit: a join needs at least two different inputs',
       });
       return;
     }
@@ -289,10 +289,10 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
     const absorb = prev !== undefined && usable.has(out);
 
     if (prev !== undefined && !absorb) {
-      let advice = ': чтобы дособрать его, возьмите его же входом';
+      let advice = ': to add to it, take it as an input of this step as well';
       const eaten = res.consumedBy.get(out);
       if (eaten !== undefined) {
-        advice = ` и уже съеден шагом ${humanStep(eaten)}: дособрать его больше нельзя`;
+        advice = ` and is already consumed by step ${humanStep(eaten)}: it can't be added to any more`;
       } else if (!live.get(out)) {
         advice = '';
       }
@@ -302,7 +302,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: out,
-        message: `узел «${out}» уже произведён шагом ${humanStep(prev.producedAt)}${advice}`,
+        message: `unit “${out}” is already produced by step ${humanStep(prev.producedAt)}${advice}`,
       });
       // Узел НЕ переписывается: сохранённое замыкание остаётся честным.
       return;
@@ -360,7 +360,7 @@ export function assemblyReleaseCheck(
       step: -1,
       input: -1,
       key: '',
-      message: 'сборка не сходится: ни одного готового узла в конце',
+      message: 'the assembly doesn\'t converge: not a single finished unit at the end',
     });
   } else if (terminals.length > 1) {
     out.push({
@@ -369,7 +369,7 @@ export function assemblyReleaseCheck(
       step: -1,
       input: -1,
       key: '',
-      message: `терминальных узлов должно быть ровно один, а их ${terminals.length}: ${terminals.join(', ')}`,
+      message: `there must be exactly one terminal unit, and there are ${terminals.length}: ${terminals.join(', ')}`,
     });
   }
 
@@ -386,7 +386,7 @@ export function assemblyReleaseCheck(
       step: -1,
       input: -1,
       key: '',
-      message: `не попадают в готовое изделие: ${orphans.join(', ')}`,
+      message: `these never reach the finished garment: ${orphans.join(', ')}`,
     });
   }
   return out;

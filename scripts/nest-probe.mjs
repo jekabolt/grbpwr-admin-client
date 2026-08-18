@@ -647,7 +647,7 @@ const CHIRAL = [
     `${oneWay.placedCount}+${oneWay.unplaced.length}/${oneWay.totalCount}`,
   );
   check(
-    oneWay.warnings.some((w) => w.includes('ворс')),
+    oneWay.warnings.some((w) => w.includes('nap')),
     'и объяснены словами, а не только кодом причины',
     JSON.stringify(oneWay.warnings),
   );

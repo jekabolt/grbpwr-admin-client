@@ -94,8 +94,8 @@ export function ProductionTab({
   return (
     <SectionStack>
       <Section
-        title='дата дропа'
-        question='— когда стиль обязан быть на складе, и успевают ли партии к этой дате'
+        title='drop date'
+        question='— when the style must be in stock, and whether the runs make that date'
       >
         <div className='flex flex-wrap items-end gap-4'>
           <label className='flex flex-col gap-1'>
@@ -123,7 +123,7 @@ export function ProductionTab({
               block (DESIGN.md), and three dates comparing to each other read as a ledger anyway. */}
           <div className='min-w-[280px] flex-1'>
             <Row
-              label='дроп'
+              label='drop'
               // A past drop date on a shipped style is history, not an alarm — «просрочен» forever
               // on every old card would train people to ignore the one place it matters (open
               // batches).
@@ -132,35 +132,35 @@ export function ProductionTab({
                 !dropDate || dropIn == null
                   ? '—'
                   : dropIn > 0
-                    ? `прошёл ${dropIn} дн назад${dropPassedWithOpenRuns ? ' · партии ещё открыты' : ''}`
+                    ? `passed ${dropIn} d ago${dropPassedWithOpenRuns ? ' · runs are still open' : ''}`
                     : dropIn === 0
-                      ? 'сегодня'
-                      : `через ${-dropIn} дн`
+                      ? 'today'
+                      : `in ${-dropIn} d`
               }
             />
             <Row
-              label='последняя обещанная'
+              label='last promised'
               value={
                 lastPromise
                   ? `${runDate(lastPromise.promisedAt)} · PR-${lastPromise.id}`
                   : openRunCount > 0
-                    ? 'открытые партии без обещанной даты'
-                    : 'открытых партий нет'
+                    ? 'open runs without a promised date'
+                    : 'no open runs'
               }
             />
             <Row
-              label='запас до дропа'
+              label='slack to the drop'
               tone={slack != null && (slack < 0 || promiseMissed) ? 'error' : undefined}
               value={
                 slack == null ? (
-                  <span className='text-labelColor'>нужны дата дропа и открытая партия</span>
+                  <span className='text-labelColor'>a drop date and an open run are needed</span>
                 ) : promiseMissed ? (
                   // The arithmetic is still shown — it is just not a reassurance any more.
-                  `${slack > 0 ? '+' : ''}${slack} дн · обещание уже просрочено`
+                  `${slack > 0 ? '+' : ''}${slack} d · the promise is already overdue`
                 ) : slack < 0 ? (
-                  `${slack} дн · партия обещана позже дропа`
+                  `${slack} d · the run is promised later than the drop`
                 ) : (
-                  <span className='text-success'>{`+${slack} дн · партии укладываются в дату`}</span>
+                  <span className='text-success'>{`+${slack} d · the runs fit the date`}</span>
                 )
               }
             />
@@ -168,12 +168,13 @@ export function ProductionTab({
         </div>
         {frozen ? (
           <Text variant='label' size='micro'>
-            карта released и заморожена — дату дропа можно менять только после возврата в draft
+            the card is released and frozen — the drop date can only be changed after it goes back
+            to draft
           </Text>
         ) : null}
         {!dropDate ? (
           <Text variant='label' size='micro'>
-            дата дропа не задана — партиям не с чем сверяться
+            no drop date is set — the runs have nothing to check themselves against
           </Text>
         ) : null}
       </Section>
@@ -185,22 +186,22 @@ export function ProductionTab({
           comparable (see the note on summarise). */}
       <StatGrid>
         <Stat
-          label='план, шт'
+          label='plan, pcs'
           value={summary.plannedQty > 0 ? String(summary.plannedQty) : '—'}
-          sub={summary.cancelled > 0 ? `без ${summary.cancelled} отменённых` : undefined}
+          sub={summary.cancelled > 0 ? `without ${summary.cancelled} cancelled` : undefined}
         />
         <Stat
-          label='принято годных'
+          label='received good'
           value={summary.anyReceived ? String(summary.receivedQty) : '—'}
           sub={
             summary.anyReceived && summary.plannedQty > 0
-              ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% плана`
+              ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% of the plan`
               : undefined
           }
         />
         {canReadCosting ? (
           <Stat
-            label='unit план → факт'
+            label='unit plan → actual'
             value={
               summary.planUnit != null
                 ? `${summary.planUnit.toFixed(2)}${
@@ -213,7 +214,7 @@ export function ProductionTab({
                 ? `Δ ${(summary.factUnit - summary.planUnit).toFixed(2)} ${summary.baseCurrency}`
                 : summary.comparableRuns > 0
                   ? summary.baseCurrency
-                  : 'нет сопоставимых партий'
+                  : 'no comparable runs'
             }
             // Over the frozen plan is money lost; under it is money saved.
             tone={
@@ -226,7 +227,7 @@ export function ProductionTab({
           />
         ) : null}
         <Stat
-          label='брак план / факт'
+          label='defects plan / actual'
           value={`${defectPlan ? Number(defectPlan).toFixed(1) : '—'} / ${
             summary.defectPct != null ? summary.defectPct.toFixed(1) : '—'
           }`}
@@ -240,8 +241,8 @@ export function ProductionTab({
       </StatGrid>
 
       <Section
-        title={`партии стиля (${runs.length})`}
-        question='— что они обещают этой дате'
+        title={`runs of the style (${runs.length})`}
+        question='— what they promise for this date'
         action={
           // The existing deep link into the runs manager, which seeds the tech card and opens the
           // create modal. Withheld without production:write — that modal refuses to open for such
@@ -249,7 +250,7 @@ export function ProductionTab({
           canPlanRuns ? (
             <Button asChild variant='secondary' size='sm' className='uppercase'>
               <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>
-                создать партию
+                create a run
               </Link>
             </Button>
           ) : undefined
@@ -265,8 +266,8 @@ export function ProductionTab({
         ) : runs.length === 0 ? (
           <Text variant='inactive' size='small'>
             {canPlanRuns
-              ? 'партий пока нет — «создать партию» открывает планирование первой'
-              : 'партий пока нет'}
+              ? 'no runs yet — “create a run” opens the planning of the first one'
+              : 'no runs yet'}
           </Text>
         ) : (
           <RunTable runs={runs} canReadCosting={canReadCosting} />

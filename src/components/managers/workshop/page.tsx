@@ -17,12 +17,13 @@ import { Form } from 'ui/form';
 import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors, fieldErrorSummary } from 'utils/field-errors';
-import {
-  SEAM_ALLOWANCE_MAX_MM,
-  validateSeamAllowanceStandard,
-} from 'utils/seam-allowance';
+import { SEAM_ALLOWANCE_MAX_MM, validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import z from 'zod';
-import { CLEAR_SETTING, useUpdateWorkshopSettings, useWorkshopSettings } from './useWorkshopSettings';
+import {
+  CLEAR_SETTING,
+  useUpdateWorkshopSettings,
+  useWorkshopSettings,
+} from './useWorkshopSettings';
 
 // Plausibility band for the cutting table, mirrored from entity.Min/MaxCuttingTableLengthCm. The
 // floor is not «> 0»: the single likeliest mistake on this field is typing METRES into a field
@@ -61,32 +62,32 @@ const workshopSchema = z
       if (!Number.isFinite(n)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'длина стола задаётся числом в сантиметрах',
+          message: 'the table length is a number in centimetres',
           path: ['cuttingTableLengthCm'],
         });
       } else if (decimals > 2) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'не больше двух знаков после запятой — колонка хранит сотые',
+          message: 'no more than two decimal places — the column stores hundredths',
           path: ['cuttingTableLengthCm'],
         });
       } else if (n <= 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message:
-            'ноль здесь не значит ничего: чтобы записать «стол не настроен», очистите поле, а не ставьте 0',
+            'zero means nothing here: to record "table not configured", clear the field instead of putting 0',
           path: ['cuttingTableLengthCm'],
         });
       } else if (n < MIN_TABLE_LENGTH_CM) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `значение в САНТИМЕТРАХ — стол 6 м это 600, а не 6 (минимум ${MIN_TABLE_LENGTH_CM})`,
+          message: `the value is in CENTIMETRES — a 6 m table is 600, not 6 (minimum ${MIN_TABLE_LENGTH_CM})`,
           path: ['cuttingTableLengthCm'],
         });
       } else if (n > MAX_TABLE_LENGTH_CM) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `самые длинные настилочные столы — около 50 м (${MAX_TABLE_LENGTH_CM} см); похоже на лишний ноль или миллиметры`,
+          message: `the longest spreading tables are about 50 m (${MAX_TABLE_LENGTH_CM} cm); this looks like an extra zero or millimetres`,
           path: ['cuttingTableLengthCm'],
         });
       }
@@ -110,26 +111,26 @@ const workshopSchema = z
       if (!Number.isFinite(n)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'предел стопки задаётся числом в сантиметрах',
+          message: 'the stack limit is a number in centimetres',
           path: ['maxStackHeightCm'],
         });
       } else if (decimals > 2) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'не больше двух знаков после запятой — колонка хранит сотые',
+          message: 'no more than two decimal places — the column stores hundredths',
           path: ['maxStackHeightCm'],
         });
       } else if (n <= 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message:
-            'ноль здесь запретил бы любой настил: чтобы записать «предела нет», очистите поле — тогда высота просто не проверяется',
+            'zero here would forbid every lay: to record "no limit", clear the field — then the height is simply not checked',
           path: ['maxStackHeightCm'],
         });
       } else if (n > MAX_STACK_HEIGHT_CM) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `значение в САНТИМЕТРАХ — самый длинный нож берёт около 30 см, больше ${MAX_STACK_HEIGHT_CM} это ошибка единицы`,
+          message: `the value is in CENTIMETRES — the longest knife takes about 30 cm, anything over ${MAX_STACK_HEIGHT_CM} is a unit mistake`,
           path: ['maxStackHeightCm'],
         });
       }
@@ -218,7 +219,7 @@ export function WorkshopSettingsPage() {
 
     try {
       await update.mutateAsync(patch);
-      showMessage('настройки цеха сохранены', 'success');
+      showMessage('workshop settings saved', 'success');
     } catch (error) {
       // The server tags its refusals with the offending column (cutting_table_length_cm →
       // cuttingTableLengthCm), so pin them on the control the operator touched instead of raising a
@@ -227,7 +228,7 @@ export function WorkshopSettingsPage() {
       // Toast only what the form cannot show by itself: a refusal already pinned on its field would
       // otherwise be said twice, and a plain 4xx/5xx would be said nowhere.
       if (applied.length === 0 || unmapped.length > 0) {
-        showMessage(fieldErrorSummary(error, 'не удалось сохранить настройки цеха'), 'error');
+        showMessage(fieldErrorSummary(error, "couldn't save the workshop settings"), 'error');
       }
     }
   };
@@ -240,11 +241,11 @@ export function WorkshopSettingsPage() {
       >
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <Text variant='uppercase' size='large'>
-            цех
+            workshop
           </Text>
           {settings?.updatedAt && (
             <Text variant='inactive' size='small'>
-              изменено {settings.updatedBy || '—'} · {formatStamp(settings.updatedAt)}
+              changed by {settings.updatedBy || '—'} · {formatStamp(settings.updatedAt)}
             </Text>
           )}
         </div>
@@ -256,64 +257,66 @@ export function WorkshopSettingsPage() {
           {isError && (
             <CalloutBox tone='error'>
               <Text size='small'>
-                не удалось прочитать настройки цеха — поля ниже пусты не потому, что настроек нет.
-                Обновите страницу; сохранять сейчас нельзя.
+                couldn't read the workshop settings — the fields below are empty not because nothing
+                is configured. Refresh the page; saving right now is not allowed.
               </Text>
             </CalloutBox>
           )}
           <Section
-            title='постоянные цеха'
-            question='— то, что верно для комнаты и оборудования, а не для отдельной карточки или раскладки. Пустое поле значит «не настроено» и НЕ значит ноль: без настройки вердикт просто не выносится.'
+            title='workshop constants'
+            question='— what is true for the room and the equipment, not for an individual card or marker. An empty field means "not configured" and does NOT mean zero: without the setting the verdict is simply not given.'
           >
             <div className='grid grid-cols-1 gap-block sm:grid-cols-2'>
               <div className='flex flex-col gap-1'>
                 <DecimalField
                   name='cuttingTableLengthCm'
-                  label='длина раскройного стола, см'
+                  label='cutting table length, cm'
                   maxDecimals={2}
-                  placeholder='не настроена'
+                  placeholder='not configured'
                   disabled={!canEdit || isLoading || isError}
                 />
                 <Text size='micro' variant='label'>
-                  Полезная длина стола настилки. Раскладка может задать свою длину — цеховая нужна,
-                  чтобы не вводить её заново на каждой. Пусто = не настроена, и тогда вердикт
-                  «раскладка длиннее стола» не выносится вовсе. Значение в САНТИМЕТРАХ: стол 6 м —
-                  это 600, а не 6.
+                  The usable length of the spreading table. A marker can set a length of its own —
+                  the workshop one is here so it doesn't have to be entered again on every marker.
+                  Empty = not configured, and then the “marker is longer than the table” verdict is
+                  not given at all. The value is in CENTIMETRES: a 6 m table is 600, not 6.
                 </Text>
               </div>
 
               <div className='flex flex-col gap-1'>
                 <DecimalField
                   name='defaultSeamAllowanceMm'
-                  label='припуск по умолчанию, мм'
+                  label='default seam allowance, mm'
                   maxDecimals={2}
-                  placeholder='не настроен'
+                  placeholder='not configured'
                   disabled={!canEdit || isLoading || isError}
                 />
                 <Text size='micro' variant='label'>
-                  ФОЛБЭК, а не копия: карточка перебивает его своим «требуемым припуском», а сама
-                  раскладка перебивает и то и другое собственным полем. Пусто = эталона нет, и тогда
-                  припуск раскладки не с чем сравнивать. 0 — законное значение и значит «наши
-                  выкройки несут линию кроя, офсет не нужен»; чтобы снять эталон, очистите поле, а не
-                  ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_MM} мм, до одного знака.
+                  A FALLBACK, not a copy: the card overrides it with its own “required seam
+                  allowance”, and the marker itself overrides both with a field of its own. Empty =
+                  there is no reference, and then the marker's seam allowance has nothing to be
+                  compared with. 0 is a legal value and means “our patterns carry the cut line, no
+                  offset needed”; to drop the reference, clear the field instead of putting zero.
+                  From 0 to {SEAM_ALLOWANCE_MAX_MM} mm, to one decimal place.
                 </Text>
               </div>
 
               <div className='flex flex-col gap-1'>
                 <DecimalField
                   name='maxStackHeightCm'
-                  label='предел высоты стопки, см'
+                  label='stack height limit, cm'
                   maxDecimals={2}
-                  placeholder='не настроен'
+                  placeholder='not configured'
                   disabled={!canEdit || isLoading || isError}
                 />
                 <Text size='micro' variant='label'>
-                  САНТИМЕТРЫ, А НЕ ЧИСЛО СЛОЁВ — 30 слоёв шифона это 2 см, 30 слоёв драпа — 30 см;
-                  ограничивает нож, а нож режет ВЫСОТУ. Высота настила считается как число слоёв ×
-                  толщина ткани, толщина берётся с артикула. Один предел на весь цех. Пусто = не
-                  настроен, и тогда высота не проверяется вовсе — чтобы снять проверку, очистите
-                  поле, а не ставьте 0: ноль запретил бы любой настил. Самый длинный нож берёт около
-                  30 см, максимум {MAX_STACK_HEIGHT_CM}.
+                  CENTIMETRES, NOT A PLY COUNT — 30 plies of chiffon is 2 cm, 30 plies of heavy
+                  coating is 30 cm; the knife is the constraint, and a knife cuts HEIGHT. Lay height
+                  is computed as the ply count × the fabric thickness, and the thickness comes from
+                  the article. One limit for the whole workshop. Empty = not configured, and then
+                  the height is not checked at all — to drop the check, clear the field instead of
+                  putting 0: zero would forbid every lay. The longest knife takes about 30 cm,
+                  maximum {MAX_STACK_HEIGHT_CM}.
                 </Text>
               </div>
             </div>
@@ -323,7 +326,7 @@ export function WorkshopSettingsPage() {
         {canEdit && (
           <div className='flex items-center justify-between gap-3'>
             <Text variant='inactive' size='small'>
-              {isDirty ? 'есть несохранённые изменения' : ' '}
+              {isDirty ? 'there are unsaved changes' : ' '}
             </Text>
             <Button
               type='submit'
@@ -333,7 +336,7 @@ export function WorkshopSettingsPage() {
               disabled={!isDirty || isError || update.isPending}
               loading={update.isPending}
             >
-              сохранить
+              save
             </Button>
           </div>
         )}
@@ -344,7 +347,7 @@ export function WorkshopSettingsPage() {
 
 function formatStamp(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('en-US');
 }
 
 export default WorkshopSettingsPage;

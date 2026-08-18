@@ -70,7 +70,7 @@ export function statusOf(err: unknown): number {
 
 export function messageOf(err: unknown): string {
   if (err instanceof Error) return err.message;
-  return typeof err === 'string' ? err : 'не удалось загрузить';
+  return typeof err === 'string' ? err : "couldn't upload";
 }
 
 export interface EngineOptions<S extends UploadSource, P> {

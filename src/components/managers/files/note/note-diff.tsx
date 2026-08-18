@@ -35,7 +35,7 @@ const MAX_LINES = 1200;
 /** Совпадающие начало и конец срезаются до таблицы: в реальном конфликте расходится середина. */
 export function diffLines(theirs: string, mine: string): { rows: Row[]; tooBig: boolean } {
   // Пустой текст — это НОЛЬ строк, а не одна пустая: `''.split('\n')` даёт `['']`, и раскладка
-  // рисовала бы «1 строка есть только у коллеги» там, где стирать нечего.
+  // рисовала бы «1 line only a colleague has» там, где стирать нечего.
   const a = theirs === '' ? [] : theirs.split('\n');
   const b = mine === '' ? [] : mine.split('\n');
 
@@ -120,11 +120,11 @@ export function NoteDiff({
     return (
       <div className='space-y-stack'>
         <Text size='micro' variant='label'>
-          версии слишком велики, чтобы сверить их построчно, — вот обе целиком
+          the versions are too large to check them line by line — here are both in full
         </Text>
         <div className='grid gap-2.5 lg:grid-cols-2'>
-          <VersionColumn title={`версия ${theirsBy || 'коллеги'}`} text={theirs} />
-          <VersionColumn title='ваш текст' text={mine} />
+          <VersionColumn title={`version by ${theirsBy || 'a colleague'}`} text={theirs} />
+          <VersionColumn title='your text' text={mine} />
         </div>
       </div>
     );
@@ -135,12 +135,12 @@ export function NoteDiff({
       <div className='flex flex-wrap items-baseline gap-3'>
         <Text size='micro' variant='label' component='span'>
           <span className='text-error'>
-            − {lost} {plural(lost, 'строка', 'строки', 'строк')}
+            − {lost} {plural(lost, 'line')}
           </span>{' '}
-          есть только у {theirsBy || 'коллеги'} — запись поверх сотрёт именно их
+          only {theirsBy || 'a colleague'} has — writing over will erase exactly those
         </Text>
         <Text size='micro' variant='label' component='span'>
-          + {added} {plural(added, 'строка', 'строки', 'строк')} есть только у вас
+          + {added} {plural(added, 'line')} only you have
         </Text>
       </div>
       {/* Полоса с линейками сверху и снизу, а не коробка: блок внутри блока система запрещает,
@@ -172,9 +172,7 @@ function VersionColumn({ title, text }: { title: string; text: string }) {
   return (
     <div>
       <GroupLabel flush>{title}</GroupLabel>
-      <div
-        className='max-h-[40vh] overflow-auto border-y border-hairline py-1 whitespace-pre-wrap break-words'
-      >
+      <div className='max-h-[40vh] overflow-auto border-y border-hairline py-1 whitespace-pre-wrap break-words'>
         {text}
       </div>
     </div>

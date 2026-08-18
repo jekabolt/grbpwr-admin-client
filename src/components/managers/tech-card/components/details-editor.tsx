@@ -160,13 +160,13 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
   return (
     <div className='space-y-2.5'>
       <Text size='micro' variant='label'>
-        Описание конструкции по аспектам: текст + референс-картинки. Показаны только заполненные —
-        добавляйте нужные ниже. Пустые аспекты не сохраняются.
+        construction described aspect by aspect: text + reference images. only the filled-in ones
+        are shown — add the ones you need below. empty aspects are not saved.
       </Text>
 
       {allKeys.length === 0 && (
         <Text size='micro' variant='label'>
-          аспекты ещё не добавлены — выберите тип ниже или впишите свой
+          no aspects added yet — pick a type below or type your own
         </Text>
       )}
 
@@ -187,7 +187,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                     onClick={() => removeAspect(key)}
                     className='shrink-0 text-micro uppercase tracking-label text-labelColor hover:text-textColor'
                   >
-                    удалить ✕
+                    remove ✕
                   </button>
                 </div>
                 <Textarea
@@ -213,7 +213,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                             url && setViewer({ items: viewerItemsFor(ids), index: imgIndex })
                           }
                           disabled={!url}
-                          aria-label='посмотреть картинку'
+                          aria-label='view the image'
                           className='block size-full cursor-zoom-in'
                         >
                           {url ? (
@@ -242,7 +242,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                     frameAspect='1/1'
                     heightPx={100}
                     compact
-                    label='+ картинка'
+                    label='+ image'
                     purpose='construction reference'
                     allowMultiple
                     showVideos={false}
@@ -258,12 +258,12 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
       <Toolbar>
         {remainingStandard.length > 0 && (
           <select
-            aria-label='добавить стандартный аспект'
+            aria-label='add a standard aspect'
             value=''
             onChange={(e) => addStandard(e.target.value)}
             className='min-h-[22px] w-40 appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
           >
-            <option value=''>выбрать тип…</option>
+            <option value=''>pick a type…</option>
             {remainingStandard.map((a) => (
               <option key={a.key} value={a.key}>
                 {a.label}
@@ -275,11 +275,11 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
           name='new-aspect'
           value={newAspect}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAspect(e.target.value)}
-          placeholder='свой аспект (напр. подкладка)'
+          placeholder='your own aspect (e.g. lining)'
           className='w-48'
         />
         <Button type='button' variant='main' size='sm' onClick={addCustom}>
-          + аспект
+          + aspect
         </Button>
       </Toolbar>
 

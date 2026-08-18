@@ -218,16 +218,16 @@ export async function fetchRunPack(token: string): Promise<RunPackState> {
  * («full» / «seam_allowance» / «strip»), поэтому здесь только оформление — второй словарь развёл бы
  * телефон раскройщика с бумагой из тех-пака.
  *
- * Пустой режим печатается как «способ не указан», а НЕ опускается: строка «клеевая: G210» без
+ * Пустой режим печатается как «method not specified», а НЕ опускается: строка «fusing: G210» без
  * продолжения читается как «дублировать целиком», то есть как ответ, которого никто не давал.
  */
 export function fusingViewerCaption(mode?: string, widthMm?: string): string {
   const v = (mode ?? '').trim();
   if (v === 'strip') {
     const w = (widthMm ?? '').trim();
-    return w ? `полосой ${w} мм` : 'полосой (ширина не указана)';
+    return w ? `a ${w} mm strip` : 'a strip (width not specified)';
   }
-  if (v === 'seam_allowance') return 'по припуску';
-  if (v === 'full') return 'вся деталь';
-  return 'способ не указан';
+  if (v === 'seam_allowance') return 'on the seam allowance';
+  if (v === 'full') return 'the whole piece';
+  return 'method not specified';
 }

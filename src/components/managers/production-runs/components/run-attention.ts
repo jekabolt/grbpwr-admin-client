@@ -59,9 +59,9 @@ export function runAttention(
       const promised = runDate(ins?.promisedAt);
       out.push({
         run: r,
-        reason: `опаздывает ${late} дн — обещано ${promised || '—'}, принято ${
-          q.hasReceived ? q.received : 0
-        } из ${q.planned}`,
+        reason: `${late} ${late === 1 ? 'day' : 'days'} late — promised ${
+          promised || '—'
+        }, received ${q.hasReceived ? q.received : 0} of ${q.planned}`,
         tone: 'error',
         action: 'open',
         weight: 1000 + late,
@@ -73,7 +73,7 @@ export function runAttention(
     if (q.planned === 0) {
       out.push({
         run: r,
-        reason: 'в партии нет плана — принимать нечего',
+        reason: 'the run has no plan — nothing to receive',
         tone: 'error',
         action: 'open',
         weight: 900,
@@ -84,7 +84,7 @@ export function runAttention(
     if (ins?.status === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED') {
       out.push({
         run: r,
-        reason: `серия открыта — принято ${q.received} из ${q.planned}, ждёт следующей поставки`,
+        reason: `the run is open — received ${q.received} of ${q.planned}, waiting for the next delivery`,
         tone: 'attention',
         // PARTIALLY_RECEIVED is receivable by definition (isRunReceivable lists it), so this arm
         // never needs a fallback.
@@ -97,7 +97,7 @@ export function runAttention(
     if (!q.hasReceived && idle >= staleAfterDays) {
       out.push({
         run: r,
-        reason: `${idle} дн без движения — ничего не принято`,
+        reason: `${idle} ${idle === 1 ? 'day' : 'days'} without movement — nothing received`,
         tone: 'attention',
         action: 'open',
         weight: 100 + idle,

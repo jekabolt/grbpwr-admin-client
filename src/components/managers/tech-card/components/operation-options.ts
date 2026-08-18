@@ -52,12 +52,12 @@ export const OPERATION_TYPE_LABELS: Record<common_TechCardOperationType, string>
   TECH_CARD_OPERATION_TYPE_BUTTONHOLE: 'buttonhole',
   TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: 'button attach',
   // 10-15: the six a step may be given today.
-  TECH_CARD_OPERATION_TYPE_FUSING: 'fusing (дублирование)',
+  TECH_CARD_OPERATION_TYPE_FUSING: 'fusing',
   TECH_CARD_OPERATION_TYPE_HANDWORK: 'hand work',
   TECH_CARD_OPERATION_TYPE_OTHER: 'other',
   TECH_CARD_OPERATION_TYPE_MACHINE: 'machine — sewn on…',
-  TECH_CARD_OPERATION_TYPE_PRESS: 'press (заутюжить / отпарить)',
-  TECH_CARD_OPERATION_TYPE_PRESS_OPEN: 'press open (разутюжить)',
+  TECH_CARD_OPERATION_TYPE_PRESS: 'press (to one side / steam)',
+  TECH_CARD_OPERATION_TYPE_PRESS_OPEN: 'press open',
 };
 
 // The PICKER is a curated SUBSET of the dictionary above — the label map is total because rendering

@@ -9,7 +9,7 @@ import { RpLine, RpSize } from './manifest';
 import { DESC_CELL, RUNPACK_GRID } from './table';
 
 const sizeHead = (s: RpSize): string =>
-  (s.name ?? '').trim() || ((s.id ?? 0) > 0 ? `#${s.id}` : 'б/р');
+  (s.name ?? '').trim() || ((s.id ?? 0) > 0 ? `#${s.id}` : 'no size');
 
 export function LinesMatrix({
   lines,
@@ -25,8 +25,8 @@ export function LinesMatrix({
   if (lines.length === 0 || axis.length === 0) {
     return (
       <Text component='p'>
-        в выбранном подмножестве нет ни одной клетки «колор-модель × размер». Пока их нет, кат-лист
-        ниже считать не от чего.
+        the selected subset has no “colourway × size” cell at all. until it has one, there is nothing
+        for the cut list below to be counted from.
       </Text>
     );
   }
@@ -41,7 +41,7 @@ export function LinesMatrix({
     <DataTable variant='grid' className={RUNPACK_GRID}>
       <thead>
         <tr>
-          <th>колор-модель</th>
+          <th>colourway</th>
           {axis.map((s) => (
             <th key={s.id}>{sizeHead(s)}</th>
           ))}

@@ -167,7 +167,7 @@ export function planSizeMerge(
     // Двигаем только против БОЛЬШИНСТВА: один выпавший из пяти — это чужой кадр, два из четырёх
     // — это уже не «выпавший», а другой ряд, и решать за оператора здесь нечего.
     if (fx.inliers < pts.length - 1 || fy.inliers < pts.length - 1) {
-      warnings.push(`${identity}: размеры не выстроились в один ряд — детали оставлены как есть`);
+      warnings.push(`${identity}: sizes didn't line up into one row — pieces left as they are`);
       continue;
     }
 
@@ -199,7 +199,7 @@ export function planSizeMerge(
   });
 
   for (const r of rows) {
-    if (r.blocks === 0) warnings.push(`${r.name}: деталей не нашлось`);
+    if (r.blocks === 0) warnings.push(`${r.name}: no pieces found`);
     // Размер вычитывается из ХВОСТА имени блока, а хвост опознаётся тем, что МЕНЯЕТСЯ у своей
     // основы (deriveBlockSizes). На одном файле меняться нечему, поэтому молчим: «размера нет»
     // там было бы неправдой про файл, у которого он есть.
@@ -208,9 +208,9 @@ export function planSizeMerge(
     // не потому, что разбор не справился, — «не опознан размер» звучало бы там как поломка.
     // Смешанный файл предупреждает по-прежнему: не опознан именно НЕ-uni блок, и он реален.
     else if (r.sizes.length === 0 && !r.uniOnly && fileNames.length > 1)
-      warnings.push(`${r.name}: в именах блоков не опознан размер`);
+      warnings.push(`${r.name}: no size recognised in the block names`);
     else if (r.sizes.length > 1)
-      warnings.push(`${r.name}: файл несёт сразу несколько размеров (${r.sizes.join(', ')})`);
+      warnings.push(`${r.name}: the file carries several sizes at once (${r.sizes.join(', ')})`);
   }
 
   return { rows, offsets, maxShiftMm, warnings };

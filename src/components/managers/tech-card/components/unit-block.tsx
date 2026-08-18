@@ -32,7 +32,7 @@ export function UnitBlockHeader({
       )}
     >
       <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
-        {isTail ? '◌ вне узлов' : `▣ ${block.key}`}
+        {isTail ? '◌ outside units' : `▣ ${block.key}`}
       </Text>
       {!isTail && block.name && (
         <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
@@ -45,15 +45,15 @@ export function UnitBlockHeader({
       {!isTail && (
         <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
           {terminal
-            ? '✓ изделие'
+            ? '✓ garment'
             : block.absorbedInto
               ? `→ ▣ ${block.absorbedInto}`
-              : '✕ разрыв'}
+              : '✕ break'}
         </Text>
       )}
       {isTail && (
         <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-          цель шага — не узел
+          the step's target isn't a unit
         </Text>
       )}
       {smv && (
