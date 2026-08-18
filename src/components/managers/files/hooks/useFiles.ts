@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -235,27 +236,35 @@ function toRequest(filter: FilesFilter) {
   };
 }
 
+/**
+ * Условие фильтра, приведённое к виду, — ОДНОЙ функцией на все три ключа.
+ *
+ * Ключей стало три (страница, счёт, секция режима проекта), и три вписанных вручную копии
+ * одного и того же перечисления разошлись бы на первой правке: забытое поле в одном из них
+ * означает не ошибку сборки, а ДВА РАЗНЫХ ФИЛЬТРА ПОД ОДНИМ КЛЮЧОМ — то есть чужой ответ,
+ * молча отданный из кэша.
+ *
+ * Список тем СОРТИРУЕТСЯ: [3,1] и [1,3] — один и тот же фильтр, и два ключа под ним означали
+ * бы два запроса и две копии кэша на одну выдачу.
+ */
+function keyParts(f: FilesFilter) {
+  const p = normalizePerson(f);
+  const g = normalizeGrouping(f);
+  return [
+    [...f.topicIds].sort((a, b) => a - b).join(','),
+    f.untopiced,
+    f.search,
+    p.id,
+    p.role,
+    g.project,
+    g.role,
+    g.withoutRole,
+  ] as const;
+}
+
 export const filesKeys = {
   all: ['files'] as const,
-  // Ключ несёт ОТСОРТИРОВАННЫЙ список тем: [3,1] и [1,3] — один и тот же фильтр, и два
-  // разных ключа под ним означали бы два запроса и две копии кэша на одну выдачу.
-  list: (f: FilesFilter) => {
-    const p = normalizePerson(f);
-    const g = normalizeGrouping(f);
-    return [
-      ...filesKeys.all,
-      'list',
-      [...f.topicIds].sort((a, b) => a - b).join(','),
-      f.untopiced,
-      f.search,
-      f.sort,
-      p.id,
-      p.role,
-      g.project,
-      g.role,
-      g.withoutRole,
-    ] as const;
-  },
+  list: (f: FilesFilter) => [...filesKeys.all, 'list', ...keyParts(f), f.sort] as const,
   /**
    * Сколько ВСЕГО отвечает набору условий — для кнопок, которые предлагают фильтр пошире
    * («искать во всех темах (N)», «в любой роли (N)»).
@@ -263,22 +272,16 @@ export const filesKeys = {
    * Порядка в ключе нет: сортировка на размер выдачи не влияет, и держи мы её здесь — смена
    * порядка перезапрашивала бы то же самое число.
    */
-  total: (f: FilesFilter) => {
-    const p = normalizePerson(f);
-    const g = normalizeGrouping(f);
-    return [
-      ...filesKeys.all,
-      'total',
-      [...f.topicIds].sort((a, b) => a - b).join(','),
-      f.untopiced,
-      f.search,
-      p.id,
-      p.role,
-      g.project,
-      g.role,
-      g.withoutRole,
-    ] as const;
-  },
+  total: (f: FilesFilter) => [...filesKeys.all, 'total', ...keyParts(f)] as const,
+  /**
+   * ОДНА СЕКЦИЯ РЕЖИМА ПРОЕКТА — своя ветка кэша, а не `list` с другим пределом.
+   *
+   * Под `list` лежит бесконечный запрос, и его данные — это `{pages, pageParams}`, а не
+   * `{files, total}`. Положи мы сюда обычный `useQuery` под тем же ключом — два хука начали бы
+   * писать в одну ячейку данные разной формы, и первый же переход «секции → плоская сетка»
+   * отдал бы одному из них чужую структуру.
+   */
+  section: (f: FilesFilter) => [...filesKeys.all, 'section', ...keyParts(f), f.sort] as const,
   file: (id: number) => [...filesKeys.all, 'file', id] as const,
   /**
    * АРХИВ ВХОДИТ В КЛЮЧ, И ЭТО НЕ УКРАШЕНИЕ. Один и тот же хук зовут пять экранов, и они
@@ -355,17 +358,23 @@ export function useFileTopics(includeArchived = false, enabled = true) {
  * Словарь ролей. Живёт тем же `staleTime`, что и темы: это такой же редко меняющийся справочник,
  * который читают пять мест сразу.
  */
-export function useFileRoles(includeArchived = false) {
+export function useFileRoles(includeArchived = false, enabled = true) {
   return useQuery({
     queryKey: filesKeys.roles(includeArchived),
     queryFn: () => filesService.listRoles(includeArchived),
+    enabled,
     staleTime: URL_SAFE_STALE_TIME,
   });
 }
 
-export function useLibraryFiles(filter: FilesFilter) {
+/**
+ * `enabled` НЕ УКРАШЕНИЕ: в режиме проекта плитки рисуют секции, и плоская выдача на 60 файлов
+ * ушла бы вторым запросом за данными, которых никто не покажет.
+ */
+export function useLibraryFiles(filter: FilesFilter, enabled = true) {
   return useInfiniteQuery({
     queryKey: filesKeys.list(filter),
+    enabled,
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       filesService.listFiles({
@@ -404,6 +413,61 @@ export function useFilesTotal(filter: FilesFilter, enabled: boolean) {
     queryFn: () => filesService.listFiles({ ...toRequest(filter), limit: 1, offset: 0 }),
     enabled,
     staleTime: URL_SAFE_STALE_TIME,
+  });
+}
+
+/* ── режим проекта: секции по ролям ───────────────────────────────────────────────────── */
+
+/**
+ * Сколько плиток показывает одна секция.
+ *
+ * СЕКЦИЯ НЕ ЛИСТАЕТСЯ. У проекта бывает две тысячи файлов, и «показать ещё» внутри каждой из
+ * пяти секций означало бы пять независимых бесконечных лент на одном экране — с общим
+ * выделением поверх них и без единого места, где написано, сколько всего. Секция показывает
+ * начало и честно говорит размер; дальше — «показать все», то есть плоская сетка с той же
+ * машиной листания, что была до всяких секций.
+ */
+export const SECTION_TILES = 12;
+
+/** Что показывает одна секция. `withoutRole` — приёмная куча проекта. */
+export type ProjectSectionSpec = {
+  key: string;
+  title: string;
+  roleId: number;
+  withoutRole: boolean;
+  /** Роль в архиве: её нельзя назначить, но снять — можно, поэтому файлы под ней показываем. */
+  archived?: boolean;
+};
+
+/**
+ * СЕКЦИИ РЕЖИМА ПРОЕКТА — по одному запросу на секцию, и это главное решение всей фазы.
+ *
+ * Счётчик секции обязан быть `total` ТОГО ЖЕ ответа, которым нарисованы её плитки. Соблазн
+ * сделать иначе велик: один «обзорный» запрос под поиском отдал бы все числа разом и сэкономил
+ * четыре похода. Но он считает СВОИМ условием, а плитки рисуются другим, и первое же
+ * расхождение (чужое удаление, предикат видимости, гонка кэша) даёт «исходники · 412» над
+ * тремя плитками. Ровно этот дефект уже ловили на витрине, и в сторе про него стоит
+ * комментарий: `total` считается тем же условием, что и страница.
+ *
+ * `useQueries`, а не список `useQuery` в цикле: словарь ролей приезжает асинхронно, число
+ * секций меняется с 0 на N между двумя отрисовками — цикл хуков этого не переживёт.
+ */
+export function useProjectSections(
+  base: FilesFilter,
+  specs: ProjectSectionSpec[],
+  enabled: boolean,
+) {
+  return useQueries({
+    queries: specs.map((s) => {
+      const f: FilesFilter = { ...base, roleId: s.roleId, withoutRole: s.withoutRole };
+      return {
+        queryKey: filesKeys.section(f),
+        queryFn: () =>
+          filesService.listFiles({ ...toRequest(f), limit: SECTION_TILES, offset: 0 }),
+        enabled,
+        staleTime: URL_SAFE_STALE_TIME,
+      };
+    }),
   });
 }
 

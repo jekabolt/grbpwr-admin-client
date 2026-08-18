@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import type { FileRole, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
@@ -15,6 +16,7 @@ import { FilesToolbar } from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
 import { NewNoteModal } from './components/new-note-modal';
 import { PasteIntakeModal } from './components/paste-intake-modal';
+import { ProjectSections, type ProjectSectionView } from './components/project-sections';
 import {
   EmptyGroupingState,
   EmptyLibraryState,
@@ -52,9 +54,12 @@ import {
   useFilesTotal,
   useFileTopics,
   useLibraryFiles,
+  useProjectSections,
   type FileRoleFilter,
+  type FilesFilter,
   type FilesSort,
   type PersonRoleFilter,
+  type ProjectSectionSpec,
 } from './hooks/useFiles';
 import { previewExpected } from './utils/format';
 import { useQueryClient } from '@tanstack/react-query';
@@ -268,7 +273,7 @@ export default function FilesPage() {
   // ОДИН ОБЪЕКТ ФИЛЬТРА на страницу и на оба вторых счёта: ослабленные варианты собираются из
   // него же (`{...filter, topicIds: []}`), поэтому число в кнопке не может оказаться посчитанным
   // не тем условием, под которым его потом покажут.
-  const filter = {
+  const filter: FilesFilter = {
     topicIds,
     untopiced,
     search: urlSearch,
@@ -279,11 +284,35 @@ export default function FilesPage() {
     roleId: fileRole.roleId,
     withoutRole: fileRole.withoutRole,
   };
-  const filesQuery = useLibraryFiles(filter);
+
+  // РЕЖИМ ПРОЕКТА — ЭТО ОДНА СТРОКА, А НЕ ВТОРОЙ ЭКРАН.
+  //
+  // Проект выбран, роль — нет: холст показывает проект целиком, разложенный по ролям. Выбрана
+  // роль (любая, включая «без роли») — секции исчезают, и остаётся ровно та плоская сетка,
+  // которая была до этой фазы. Режимы НЕ НАСЛАИВАЮТСЯ: сетка, разложенная по ролям, внутри
+  // выбранной роли значила бы одну секцию и четыре пустых, то есть тот же экран с лишней
+  // рамкой вокруг.
+  const roleNarrowed = fileRole.roleId > 0 || fileRole.withoutRole;
+  const sectionMode = projectId > 0 && !roleNarrowed;
+
+  const filesQuery = useLibraryFiles(filter, !sectionMode);
   // Без архива: заархивированную роль сервер разрешает снять, но не назначить, и предлагать её
   // в ряду чипов значило бы предлагать фильтр, который потом никому не проставить.
   const rolesQuery = useFileRoles();
   const roles = rolesQuery.data?.roles ?? [];
+  /**
+   * СЕКЦИЯМ СЛОВАРЬ НУЖЕН ВМЕСТЕ С АРХИВОМ, и это не противоречие предыдущему абзацу.
+   *
+   * Чипы ПРЕДЛАГАЮТ — там архива быть не должно. Секции ПОКАЗЫВАЮТ то, что в проекте уже лежит,
+   * а роль, ушедшую в архив после того, как её проставили, никто с файлов не снимал. Без этого
+   * запроса такой файл не попал бы ни в одну секцию и пропал бы с экрана целиком: в проекте он
+   * есть, роль у него есть, а раздела под неё нет. Пропажу заметили бы не сразу и списали бы на
+   * права.
+   *
+   * Ключ у этого запроса свой (`filesKeys.roles(true)`), тот же, что у экрана словаря, — это
+   * ровно то разведение, ради которого архив вошёл в ключ в Ф1.
+   */
+  const sectionRolesQuery = useFileRoles(true, sectionMode);
 
   const allTopics = topicsQuery.data?.topics ?? [];
   // ДВА РЯДА ИЗ ОДНОГО СЛОВАРЯ. Проект — это тема с типом, отдельного запроса у него нет; но
@@ -324,11 +353,82 @@ export default function FilesPage() {
   const activeProject = projects.find((p) => Number(p.id) === projectId) ?? archivedProject;
   /** Список для ПИСАТЕЛЕЙ: живые проекты плюс тот архивный, в котором человек сейчас стоит. */
   const writerProjects = archivedProject ? [...projects, archivedProject] : projects;
-  const files = useMemo(
+
+  /**
+   * ПОРЯДОК СЕКЦИЙ: сначала приёмная куча, потом словарь, потом архивные хвосты.
+   *
+   * Куча стоит первой не из симметрии со словарём, а потому что она единственная называет
+   * РАБОТУ, и потому что именно в неё попадает всё, что в проект бросают: загрузка роли не
+   * ставит. Поставь её последней — свежий бросок оказался бы под четырьмя полными секциями
+   * ровно в тот момент, когда человек его ищет. В разобранном проекте кучи нет вовсе, и экран
+   * начинается со словаря, как и ожидается.
+   *
+   * АРХИВНАЯ РОЛЬ СПРАШИВАЕТСЯ, ТОЛЬКО ЕСЛИ ФАЙЛЫ С НЕЙ ГДЕ-ТО ЕСТЬ. `filesCount` в словаре —
+   * счёт по ВСЕМ проектам, то есть верхняя оценка: ноль в нём означает, что роли нет ни у
+   * одного файла нигде, и спрашивать про неё в этом проекте незачем. Для живых ролей этот
+   * приём не годится и не применяется — там ноль надо ПРОВЕРИТЬ запросом, иначе строка «в
+   * проекте пока нет: планирование» окажется утверждением, взятым из чужого числа.
+   */
+  const sectionSpecs = useMemo<ProjectSectionSpec[]>(() => {
+    if (!sectionMode) return [];
+    const dict = sectionRolesQuery.data?.roles ?? [];
+    const order = (a: FileRole, b: FileRole) =>
+      Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0) ||
+      (a.name ?? '').localeCompare(b.name ?? '');
+    const spec = (r: FileRole): ProjectSectionSpec => ({
+      key: `role-${r.id}`,
+      title: r.name ?? `#${r.id}`,
+      roleId: Number(r.id),
+      withoutRole: false,
+      archived: !!r.archived,
+    });
+    return [
+      { key: 'pile', title: 'without a role', roleId: 0, withoutRole: true },
+      ...dict.filter((r) => !r.archived).sort(order).map(spec),
+      ...dict
+        .filter((r) => r.archived && Number(r.filesCount ?? 0) > 0)
+        .sort(order)
+        .map(spec),
+    ];
+  }, [sectionMode, sectionRolesQuery.data]);
+
+  const sectionQueries = useProjectSections(filter, sectionSpecs, sectionMode);
+  const sectionsPending =
+    sectionMode && (sectionRolesQuery.isPending || sectionQueries.some((q) => q.isPending));
+  const sectionsFailed = sectionQueries.filter((q) => q.isError).length;
+  // Словарь не пришёл — секций не построить вовсе: спрашивать «сколько тут исходников», не
+  // зная, что бывают исходники, нечем.
+  const sectionsAllFailed =
+    sectionMode &&
+    (sectionRolesQuery.isError ||
+      (sectionSpecs.length > 0 && sectionsFailed === sectionSpecs.length));
+
+  const flatFiles = useMemo(
     () => (filesQuery.data?.pages ?? []).flatMap((p) => p.files ?? []),
     [filesQuery.data],
   );
+  // ВЫДЕЛЕНИЕ ЖИВЁТ ПОВЕРХ ВСЕГО ПРОЕКТА, а не внутри секции, и вот единственная строка, которой
+  // это делается: набор свежих объектов собирается из ВСЕХ секций сразу. Полоса выделения
+  // ставит роль в проекте — значит «взять шесть штук из кучи и одну лежащую не в той роли» и
+  // есть тот жест, ради которого она нужна. Своего выделения у секции нет и не будет: два
+  // набора на одном экране означали бы два разных ответа на вопрос «что сейчас выбрано».
+  const sectionFiles = sectionMode ? sectionQueries.flatMap((q) => q.data?.files ?? []) : [];
+  const files = sectionMode ? sectionFiles : flatFiles;
   const total = filesQuery.data?.pages?.[0]?.total;
+  const sectionTotal = sectionQueries.reduce((n, q) => n + Number(q.data?.total ?? 0), 0);
+  /**
+   * Число под чипами. В плоской сетке это `total` её единственного запроса; в режиме проекта —
+   * СУММА ответов, которыми нарисованы секции, и ничего другого: секции делят проект без
+   * остатка (у файла ровно одна строка связи с проектом, значит ровно один раздел), а сорванный
+   * или ещё не пришедший ответ обнуляет число целиком, а не занижает его молча.
+   */
+  const matched = sectionMode
+    ? sectionsPending || sectionsFailed
+      ? undefined
+      : sectionTotal
+    : total === undefined
+      ? undefined
+      : Number(total);
   const totalFiles = Number(topicsQuery.data?.totalFiles ?? 0);
   const untopicedCount = Number(topicsQuery.data?.untopicedCount ?? 0);
 
@@ -443,7 +543,13 @@ export default function FilesPage() {
   // «Ничего не нашлось» — это ОТВЕТ, а не отказ. Пока список не прочитался (`isError`), экран
   // показывает `ListFailedState`, и второй счёт под ним не будет ни показан, ни осмыслен: он
   // уйдёт в тот же не отвечающий сервер вторым запросом.
-  const nothingFound = !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
+  //
+  // В режиме проекта тот же вопрос задаётся секциям, а не плоской выдаче (её попросту нет), и
+  // пустотой считается только СОШЕДШИЙСЯ ноль: ни одна секция не в пути и ни одна не сорвалась.
+  // Иначе кнопка «искать во всех темах (N)» появлялась бы на полсекунды в каждом проекте.
+  const nothingFound = sectionMode
+    ? !sectionsPending && !sectionsFailed && sectionSpecs.length > 0 && sectionTotal === 0
+    : !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
   const everywhereQuery = useFilesTotal(
     // `withoutRole` здесь обнулять не нужно: `normalizeGrouping` гасит его вместе с проектом
     // одним правилом на весь раздел — иначе этот запрос ушёл бы за ОТКАЗОМ (сервер отказывает
@@ -467,7 +573,6 @@ export default function FilesPage() {
   // про роль, ни кнопки ослабления. Это тот же класс, ради которого счёт и заводился, — виноват
   // фильтр, а винить будут поиск. Одно число отвечает обоим экранам, потому что ослабление у
   // них одно и то же: снять роль.
-  const roleNarrowed = fileRole.roleId > 0 || fileRole.withoutRole;
   const noRoleQuery = useFilesTotal(
     { ...filter, roleId: 0, withoutRole: false },
     roleNarrowed && nothingFound,
@@ -497,6 +602,92 @@ export default function FilesPage() {
       : '';
   const noRoleTotal = noRoleQuery.data ? Number(noRoleQuery.data.total ?? 0) : undefined;
   const dropRole = () => patch({ fileRole: { roleId: 0, withoutRole: false } });
+
+  /**
+   * ПЛИТКА ОДНА НА ОБА РЕЖИМА. Секции получают ровно ту же функцию, которой рисуется плоская
+   * сетка: выбор, открытие карточки, перевыдача протухшей ссылки и кнопка «построить заново»
+   * написаны один раз. Копия плитки внутри секции разошлась бы с оригиналом на первой правке —
+   * и разошлась бы молча, потому что обе выглядят одинаково.
+   */
+  const tile = (f: LibraryFile) => (
+    <FileTile
+      key={f.id}
+      file={f}
+      selectable
+      selected={selection.isSelected(Number(f.id))}
+      onToggleSelect={() => selection.toggle(f)}
+      onOpen={() => openCard(Number(f.id))}
+      onPreviewError={onPreviewError}
+    >
+      {/* Кнопка есть только там, где превью ОБЯЗАНО было получиться: на .zip она обещала бы
+          невозможное. В режиме чтения она ВЫКЛЮЧЕНА, а не спрятана — то же правило, что и у
+          остальных писателей раздела. */}
+      {!f.previewUrl && previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
+        <RebuildPreview file={f} writable={writable} />
+      )}
+    </FileTile>
+  );
+
+  const sectionViews = sectionSpecs.map((s, i) => ({ spec: s, q: sectionQueries[i] }));
+  // ПУСТАЯ СЕКЦИЯ НЕ РИСУЕТСЯ. Сорвавшаяся — рисуется: молча пропасть она не имеет права,
+  // иначе «в проекте нет исходников» и «про исходники не спросили» выглядели бы одинаково.
+  const visibleSections: ProjectSectionView[] = sectionViews
+    .filter(({ q }) => q.isError || Number(q.data?.total ?? 0) > 0)
+    .map(({ spec, q }) => ({
+      key: spec.key,
+      title: spec.title,
+      archived: spec.archived,
+      question: spec.withoutRole ? 'dropped into the project and not sorted out yet' : undefined,
+      files: q.data?.files ?? [],
+      total: Number(q.data?.total ?? 0),
+      error: q.isError ? q.error : undefined,
+      onRetry: () => q.refetch(),
+      onShowAll: () =>
+        patch({
+          fileRole: spec.withoutRole
+            ? { roleId: 0, withoutRole: true }
+            : { roleId: spec.roleId, withoutRole: false },
+        }),
+    }));
+  const emptyRoleNames = sectionViews
+    .filter(
+      ({ spec, q }) =>
+        !spec.withoutRole && !spec.archived && !q.isError && Number(q.data?.total ?? 0) === 0,
+    )
+    .map(({ spec }) => spec.title);
+  const pile = sectionViews.find(({ spec }) => spec.withoutRole);
+  const pileEmpty = !!pile && !pile.q.isError && Number(pile.q.data?.total ?? 0) === 0;
+
+  /**
+   * КУДА ПОПАДЁТ БРОШЕННОЕ — СКАЗАНО ДО ТОГО, КАК ОТПУСТИЛИ.
+   *
+   * Загрузка ставит ТЕМЫ и не ставит роль: роль живёт на строке связи, а строки связи ещё нет —
+   * файла нет. Значит в проекте пачка ложится в приёмную кучу, и это законное состояние, а не
+   * недоделка. Но человек, стоящий в разделе «исходники» и бросающий туда файл, ждёт исходников,
+   * а получит пропажу: файла не будет ни в этом разделе, ни в этой выдаче. Поэтому в выбранной
+   * роли оверлей прямо говорит, что в ЭТОЙ выдаче брошенного не появится.
+   *
+   * СЕКЦИЯ НЕ ЯВЛЯЕТСЯ ПРИЁМНИКОМ, и это решение, а не пропуск. Приёмник — всё окно, потому что
+   * промах мимо рамки уносит вкладку по ссылке на брошенный файл; вернуть прицеливание ради
+   * пяти секций значило бы вернуть ровно ту поломку. Плюс роль на брошенное можно поставить
+   * только вторым запросом после загрузки — и его отказ оставил бы файл в куче, хотя на глазах
+   * он улетал в «исходники».
+   */
+  const dropLanding = (() => {
+    if (!activeProject) return undefined;
+    // ПРИЧИНА НАЗВАНА, А НЕ ТОЛЬКО ИСХОД. «Роль не проставится» без «почему» читается как
+    // недоделка загрузки; «её ставят на уже загруженный файл» — как устройство, и второй раз
+    // человек этого не спрашивает.
+    const why = 'a role is set on a file that already exists';
+    if (fileRole.withoutRole) return `no role will be set — “without a role” is exactly this row`;
+    const role = roles.find((r) => Number(r.id) === fileRole.roleId)?.name;
+    // В ВЫБРАННОЙ РОЛИ ОБЕЩАНИЕ ОБЯЗАНО ПРЕДУПРЕДИТЬ О ПРОПАЖЕ. Плоская сетка показывает одну
+    // роль, пачка ляжет без роли — и брошенного в этой выдаче не окажется вовсе. Промолчать
+    // здесь значит дать человеку увидеть, как файл «загрузился» и исчез.
+    if (role)
+      return `“${role}” will not be set: ${why}. the batch lands in “without a role” — you will not see it in this view`;
+    return `no role will be set: ${why}. the batch lands in “without a role” — sort it out later`;
+  })();
 
   const emptyState = () => {
     if (urlSearch) {
@@ -617,7 +808,7 @@ export default function FilesPage() {
             untopiced={untopiced}
             totalFiles={totalFiles}
             untopicedCount={untopicedCount}
-            matched={total === undefined ? undefined : Number(total)}
+            matched={matched}
             searching={!!urlSearch}
             onChange={onTopics}
           />
@@ -626,7 +817,7 @@ export default function FilesPage() {
           <ProjectChips
             projects={projects}
             selected={projectId}
-            matched={total === undefined ? undefined : Number(total)}
+            matched={matched}
             // Смена проекта СНИМАЕТ роль: роль осмысленна только на связи с проектом, и
             // перенесённая в соседнюю съёмку она означала бы уже другой вопрос — тот, который
             // человек не задавал. «Без роли» уходит вместе с проектом тем же правилом в `patch`.
@@ -645,7 +836,7 @@ export default function FilesPage() {
             // нажатого: имя — это то, что мы не сумели показать, а не то, чего нет.
             hasProject={projectId > 0}
             projectName={activeProject?.name ?? undefined}
-            matched={total === undefined ? undefined : Number(total)}
+            matched={matched}
             onChange={(next) => patch({ fileRole: next })}
           />
         </div>
@@ -673,33 +864,42 @@ export default function FilesPage() {
         )}
       </div>
 
-      {filesQuery.isLoading ? (
+      {/* РЕЖИМ ПРОЕКТА ЗАНИМАЕТ МЕСТО СЕТКИ, и только его. Всё, что ниже — полоса выделения,
+          приём броска, очередь загрузки, карточка, — общее для обоих режимов и написано один
+          раз. Скелет, отказ и пустые состояния тоже общие: в секциях они отвечают на те же
+          вопросы, просто спрашивают их у пяти запросов вместо одного. */}
+      {sectionMode ? (
+        sectionsPending ? (
+          // ОДИН СКЕЛЕТ НА ВСЕ СЕКЦИИ, а не заголовок с крутилкой вместо числа. Заголовок без
+          // счётчика — это заголовок, который ничего не сообщает, а счётчик и есть смысл секции.
+          // Запросы уходят одновременно, так что ждут ровно самый медленный из них.
+          <GallerySkeleton />
+        ) : sectionsAllFailed ? (
+          <ListFailedState
+            error={sectionRolesQuery.error ?? sectionQueries.find((q) => q.isError)?.error}
+            onRetry={() => {
+              sectionRolesQuery.refetch();
+              sectionQueries.forEach((q) => q.refetch());
+            }}
+          />
+        ) : nothingFound ? (
+          emptyState()
+        ) : (
+          <ProjectSections
+            sections={visibleSections}
+            emptyRoles={emptyRoleNames}
+            pileEmpty={pileEmpty}
+            renderTile={tile}
+          />
+        )
+      ) : filesQuery.isLoading ? (
         <GallerySkeleton />
       ) : filesQuery.isError && !files.length ? (
         <ListFailedState error={filesQuery.error} onRetry={() => filesQuery.refetch()} />
       ) : files.length === 0 ? (
         emptyState()
       ) : (
-        <Tiles min={190}>
-          {files.map((f) => (
-            <FileTile
-              key={f.id}
-              file={f}
-              selectable
-              selected={selection.isSelected(Number(f.id))}
-              onToggleSelect={() => selection.toggle(f)}
-              onOpen={() => openCard(Number(f.id))}
-              onPreviewError={onPreviewError}
-            >
-              {/* Кнопка есть только там, где превью ОБЯЗАНО было получиться: на .zip она
-                  обещала бы невозможное. В режиме чтения она ВЫКЛЮЧЕНА, а не спрятана — то же
-                  правило, что и у остальных писателей раздела. */}
-              {!f.previewUrl && previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
-                <RebuildPreview file={f} writable={writable} />
-              )}
-            </FileTile>
-          ))}
-        </Tiles>
+        <Tiles min={190}>{files.map(tile)}</Tiles>
       )}
 
       {/* ОБРЫВ ПРИ ЛИСТАНИИ — ПОЛОСА ПОД СПИСКОМ, а не вместо него: уже показанные страницы
@@ -773,6 +973,7 @@ export default function FilesPage() {
             : []),
           ...chosenTopics.map((t) => t.name ?? ''),
         ]}
+        landingNote={dropLanding}
         onFiles={intake}
       />
 

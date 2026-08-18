@@ -36,8 +36,17 @@ function RowLabel({ children }: { children: React.ReactNode }) {
  * и то же в двух местах.
  */
 export function projectHint(t: FileTopic): string {
-  return [projectDates(t), t.archived ? 'archived' : ''].filter(Boolean).join(' · ');
+  return [projectDates(t), t.archived ? ARCHIVED_WORD : ''].filter(Boolean).join(' · ');
 }
+
+/**
+ * СЛОВО АРХИВА — ОДНО НА ВЕСЬ РАЗДЕЛ.
+ *
+ * Им помечены и чипы проектов у писателей, и секции ролей в режиме проекта, и строка на экране
+ * словаря. Три места, где человек читает про одно и то же состояние, обязаны читаться одинаково:
+ * `archived`, `retired` и `hidden` — это три разных факта на слух и один в базе.
+ */
+export const ARCHIVED_WORD = 'archived';
 
 /**
  * ВИДИМАЯ метка архива внутри чипа проекта — подсказки на наведении здесь мало.
@@ -48,7 +57,7 @@ export function projectHint(t: FileTopic): string {
  */
 export function ProjectArchiveMark({ project }: { project: FileTopic }) {
   if (!project.archived) return null;
-  return <span className='opacity-70'>archived</span>;
+  return <span className='opacity-70'>{ARCHIVED_WORD}</span>;
 }
 
 /** Даты проекта в подпись чипа: «12.09 — 14.09». Пустые не печатаются вовсе. */

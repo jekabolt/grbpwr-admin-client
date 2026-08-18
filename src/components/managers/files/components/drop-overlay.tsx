@@ -67,6 +67,7 @@ export function FilesDropOverlay({
   enabled,
   disabledNote,
   topicLabels,
+  landingNote,
   onFiles,
 }: {
   /** Можно ли принимать. Выключенный приёмник всё равно гасит бросок — он только отказывает. */
@@ -75,6 +76,15 @@ export function FilesDropOverlay({
   disabledNote?: string;
   /** Что унаследует пачка: имена выбранных чипов холста. Пусто — «unsorted». */
   topicLabels: string[];
+  /**
+   * Что НЕ унаследует пачка — вторая строка обещания, и она нужнее первой.
+   *
+   * Загрузка ставит темы и не ставит роль: строки связи «файл ↔ проект» ещё нет, потому что нет
+   * файла. Значит в проекте пачка ложится в приёмную кучу, а человек, стоящий в разделе
+   * «исходники», ждёт исходников. Умолчать здесь — значит дать ему увидеть, как файл
+   * «загрузился» и исчез из выдачи.
+   */
+  landingNote?: string;
   onFiles: (files: File[]) => void;
 }) {
   const [dragging, setDragging] = useState(false);
@@ -187,6 +197,11 @@ export function FilesDropOverlay({
                 ? `topics will be set right away: ${topicLabels.join(', ')}`
                 : 'no topics — the files will go to “unsorted”'}
             </Text>
+            {landingNote && (
+              <Text size='micro' component='p'>
+                {landingNote}
+              </Text>
+            )}
             <Text size='micro' component='p' className='opacity-75'>
               up to {formatBytes(MAX_UPLOAD_BYTES)} per file · the browser draws the preview before
               the upload
