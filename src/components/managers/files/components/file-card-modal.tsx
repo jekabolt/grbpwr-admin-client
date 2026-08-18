@@ -10,6 +10,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import { ACCESS_LEVEL_TITLE, asAccessLevel } from '../api/accessService';
 import { isProjectTopic, useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
@@ -20,6 +21,60 @@ import { FileOwnersSection } from './file-owners-section';
 import { FileReaderModal } from './file-reader';
 import { FileTasksSection, useFileTasks } from './file-tasks-section';
 import { ProjectArchiveMark, projectHint } from './topic-chips';
+
+/** Что из карточки свёрнуто в строку. Ключи — те же четыре, что и строк. */
+type CardLineKey = 'own' | 'acc' | 'task' | 'talk';
+
+/**
+ * СТРОКА-СВОД: ярлык, значение и тело под ними.
+ *
+ * Карточка держала восемь вещей развёрнутыми сразу, и «что это за файл» приходилось искать
+ * прокруткой между лентой обсуждения и списком людей. Четыре нижних блока — владельцы, доступ,
+ * задачи, обсуждение — свёрнуты в строки: ЗНАЧЕНИЕ каждой видно и свёрнутой («nobody»,
+ * «the whole team», «#141», число реплик), поэтому разворачивают их ради правки, а не ради
+ * ответа на вопрос.
+ *
+ * Тела строк — те же самые секции, что стояли здесь раньше, целиком и без переделки: у каждой
+ * своя мутация и свой заголовок с действием, и переписывать их ради складывания было бы
+ * заменой работающего на новое в самом чувствительном месте.
+ *
+ * Значок ▸/▾ — `aria-hidden`: доступное имя кнопки обязано остаться словом («kept by»), иначе
+ * скринридер читает название юникодного треугольника. Состояние сказано `aria-expanded`.
+ */
+function CardLine({
+  label,
+  value,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  value: React.ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className='border-b border-hairline'>
+      <div className='flex min-w-0 items-center gap-1.5 py-1'>
+        <Button
+          size='xs'
+          variant='secondary'
+          aria-expanded={open}
+          onClick={onToggle}
+          className='min-w-[92px] max-w-full text-left'
+        >
+          <span aria-hidden>{open ? '▾ ' : '▸ '}</span>
+          {label}
+        </Button>
+        <Text size='micro' variant='label' component='span' className='min-w-0 flex-1 truncate'>
+          {value}
+        </Text>
+      </div>
+      {open && <div className='pb-2 pl-3'>{children}</div>}
+    </div>
+  );
+}
 
 /**
  * Карточка файла — МОДАЛКА ПОВЕРХ СЕТКИ, а не отдельная страница.
@@ -77,6 +132,18 @@ export function FileCardModal({
   // отрисовке, а запасная фраза у сохранения и у удаления разная — поэтому она едет рядом.
   const [failure, setFailure] = useState<{ e: unknown; fallback: string } | undefined>(undefined);
   const [reading, setReading] = useState(false);
+  /**
+   * СВЁРНУТО ПО УМОЛЧАНИЮ — И ЭТО НЕ ТОЛЬКО ПРО МЕСТО НА ЭКРАНЕ. Доступ и обсуждение спрашивают
+   * сервер каждый своим запросом на монтировании; свёрнутая строка их не монтирует, и открытие
+   * карточки перестало стоить три запроса там, где смотрели имя файла.
+   */
+  const [lines, setLines] = useState<Record<CardLineKey, boolean>>({
+    own: false,
+    acc: false,
+    task: false,
+    talk: false,
+  });
+  const toggleLine = (k: CardLineKey) => setLines((p) => ({ ...p, [k]: !p[k] }));
   // Куда вести после вопроса «закрыть без сохранения». Вопрос один на оба выхода, потому что
   // цена у них одна: набранное имя пропадает и там и там. Хранить намерение строкой, а не
   // функцией: setState с функцией React принимает за обновляющую и зовёт её вместо записи.
@@ -513,18 +580,78 @@ export function FileCardModal({
             </Text>
           </div>
 
-          {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «save»:
-              владельцы меняются отдельным RPC, и складывать их в ту же «грязную» форму
-              значило бы обещать откат правки, которого у replace-набора нет. */}
-          <FileOwnersSection file={file} writable={writable} />
+          {/* ЧЕТЫРЕ СТРОКИ ВМЕСТО ЧЕТЫРЁХ РАЗВЁРНУТЫХ БЛОКОВ.
+              Порядок держится на том же доводе, что и раньше: лента обсуждения идёт последней —
+              она единственная растёт без предела. Задачи стоят выше подвала, потому что
+              объясняют выключенное «удалить», а объяснение обязано быть выше того, что
+              объясняет.
 
-          {/* Порядок секций не случаен и держится на двух доводах. Задачи стоят выше доступа,
-              потому что объясняют выключенную кнопку в подвале — объяснение обязано быть выше
-              того, что объясняет. Лента идёт последней: она единственная растёт без предела, и
-              всё, что стоит под ней, на длинном треде уезжает за экран. */}
-          <FileTasksSection file={file} writable={writable} />
-          <FileAccessSection file={file} writable={writable} />
-          <FileComments file={file} writable={writable} />
+              ЗНАЧЕНИЯ — ИЗ ТОГО ЖЕ ОТВЕТА, КОТОРЫМ НАРИСОВАНА КАРТОЧКА (`GetLibraryFile`) и из
+              уже спрошенного подвалом списка задач. Второго счёта тем же вопросом здесь не
+              заводится: строка «discussion · 3» ради выдержки последней реплики стоила бы
+              запроса ленты на каждое открытие карточки — ровно того, от чего сворачивание и
+              избавляет. */}
+          <div className='mt-0.5 flex flex-col border-t border-borderColor'>
+            <CardLine
+              label='kept by'
+              value={
+                (file.owners ?? []).length
+                  ? (file.owners ?? []).map((o) => o.username || `#${o.id}`).join(', ')
+                  : 'nobody'
+              }
+              open={lines.own}
+              onToggle={() => toggleLine('own')}
+            >
+              {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «save»:
+                  владельцы меняются отдельным RPC, и складывать их в ту же «грязную» форму
+                  значило бы обещать откат правки, которого у replace-набора нет. */}
+              <FileOwnersSection file={file} writable={writable} />
+            </CardLine>
+
+            <CardLine
+              label='access'
+              value={(() => {
+                const lvl = asAccessLevel(file.accessLevel ?? undefined);
+                // Пустой уровень не заменяется на «team»: угадать здесь значило бы напечатать
+                // «видит вся команда» про файл, о котором сервер ничего не сказал.
+                return lvl ? ACCESS_LEVEL_TITLE[lvl] : 'not said';
+              })()}
+              open={lines.acc}
+              onToggle={() => toggleLine('acc')}
+            >
+              <FileAccessSection file={file} writable={writable} />
+            </CardLine>
+
+            <CardLine
+              label='tasks'
+              value={
+                // Без права `tasks:read` запрос погашен, и число сказать нечем. Молчание
+                // честнее нуля: «none» здесь означало бы «файл ни к чему не прицеплен».
+                !canRead(SECTION.tasks)
+                  ? 'no access to tasks'
+                  : heldByTasks
+                    ? (fileTasks?.tasks ?? []).map((t) => `#${t.taskId}`).join(', ')
+                    : 'none'
+              }
+              open={lines.task}
+              onToggle={() => toggleLine('task')}
+            >
+              <FileTasksSection file={file} writable={writable} />
+            </CardLine>
+
+            <CardLine
+              label='discussion'
+              value={
+                Number(file.commentsCount ?? 0) > 0
+                  ? `${Number(file.commentsCount ?? 0)}`
+                  : 'nothing yet'
+              }
+              open={lines.talk}
+              onToggle={() => toggleLine('talk')}
+            >
+              <FileComments file={file} writable={writable} />
+            </CardLine>
+          </div>
 
           {failure && (
             <div className='border border-error px-2.5 py-2'>
@@ -583,7 +710,7 @@ export function FileCardModal({
                   наведении: подсказку не увидит тот, кто вообще не понял, почему кнопка серая. */}
               {writable && heldByTasks > 0 && (
                 <Text size='micro' variant='label' component='span'>
-                  detach it in the “tasks” section above
+                  open the “tasks” row above and detach it there
                 </Text>
               )}
               <Button

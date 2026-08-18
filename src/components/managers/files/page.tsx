@@ -6,7 +6,7 @@ import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
-import { ROUTES, SECTION } from 'constants/routes';
+import { notePath, ROUTES, SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -62,6 +62,7 @@ import {
   type ProjectSectionSpec,
 } from './hooks/useFiles';
 import { previewExpected } from './utils/format';
+import { isMarkdownNote } from './utils/reader-find';
 import { useQueryClient } from '@tanstack/react-query';
 
 /**
@@ -653,7 +654,24 @@ export default function FilesPage() {
       selectable
       selected={selection.isSelected(Number(f.id))}
       onToggleSelect={() => selection.toggle(f)}
-      onOpen={() => openCard(Number(f.id))}
+      onDetails={() => openCard(Number(f.id))}
+      /**
+       * ВТОРОЙ ПУТЬ — САМ ФАЙЛ. Зовётся только там, где плитка нашла путь просмотра
+       * (`hasViewPath`), поэтому обе ветки здесь — ровно два слагаемых того же условия и
+       * разойтись с ним не могут.
+       *
+       * Заметку показывает её экран: `text/markdown` сервер в inline-аллоулист не берёт, и
+       * `url` у неё пуст. Остальным — новая вкладка тем же способом, что кнопка «open»
+       * карточки: уход по маршруту размонтировал бы холст вместе с выделением и позицией
+       * прокрутки, а на файл смотрят В ХОДЕ разбора сетки.
+       */
+      onView={() => {
+        if (isMarkdownNote(f.fileName ?? '', f.contentType ?? undefined)) {
+          navigate(notePath(Number(f.id)));
+          return;
+        }
+        if (f.url) window.open(f.url, '_blank', 'noopener,noreferrer');
+      }}
       onPreviewError={onPreviewError}
     >
       {/* Кнопка есть только там, где превью ОБЯЗАНО было получиться: на .zip она обещала бы

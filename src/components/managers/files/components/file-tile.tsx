@@ -8,19 +8,46 @@ import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../
 import { isMarkdownNote } from '../utils/reader-find';
 
 /**
+ * У ФАЙЛА ЕСТЬ ПУТЬ ПРОСМОТРА ИЛИ ЕГО НЕТ — и решает это одно правило на весь раздел.
+ *
+ * Заметку показывает свой экран (`text/markdown` сервер сознательно не отдаёт inline, поэтому
+ * `url` у неё пуст и без этой ветки заметка выглядела бы файлом без просмотра). Всем остальным
+ * просмотр даёт `url`: у svg и html его нет намеренно — браузер выполнил бы их на origin
+ * бакета, — и обещать «посмотреть» там нельзя.
+ *
+ * Экспортируется, потому что то же правило нужно вызывающей стороне: она пишет САМО открытие
+ * (новая вкладка или маршрут заметки), а плитка — подпись и мишень. Две копии условия
+ * разошлись бы молча: подпись обещала бы «view», а щелчок открывал карточку.
+ */
+export function hasViewPath(file: LibraryFile): boolean {
+  const name = file.fileName ?? '';
+  return isMarkdownNote(name, file.contentType ?? undefined) || !!file.url;
+}
+
+/**
  * Плитка холста.
  *
  * `div`, а не `Tile`: внутри живут собственные кнопки (выбор, «построить заново»), а кнопка
  * внутри кнопки — невалидная разметка, которую браузер разбирает по-своему и разносит сетку.
  * По той же причине выделение рисуется `outline`, а не вторым пикселем рамки: `border-2`
  * менял бы ширину плитки, а высота кадра считается от неё — ряд дёргался бы на каждом щелчке.
+ *
+ * ДВЕ ПОЛОВИНЫ, А НЕ ОДНА КНОПКА. Кадр смотрит файл, подвал открывает сведения: до этого
+ * плитка умела ровно одно — открыть карточку, — и посмотреть сам файл можно было только через
+ * неё. Обе половины — обычные мишени, ничего не спрятано за наведением: на сенсоре наведения
+ * нет, а «скрытый путь» здесь означал бы, что просмотра нет вовсе.
+ *
+ * Подвал становится кнопкой ТОЛЬКО там, где второй путь действительно предложен (`onView`).
+ * У вложений карточки задачи его нет — там плитка отдаёт файл ОДНИМ жестом, и вторая кнопка
+ * с тем же самым действием удвоила бы число остановок табуляции, не добавив ни одного пути.
  */
 export function FileTile({
   file,
   selected,
   selectable,
   onToggleSelect,
-  onOpen,
+  onDetails,
+  onView,
   onPreviewError,
   children,
 }: {
@@ -29,14 +56,21 @@ export function FileTile({
   /** Выбор доступен вообще (сам режим), независимо от того, выбран ли этот файл. */
   selectable?: boolean;
   onToggleSelect?: () => void;
-  onOpen: () => void;
+  /** Открыть карточку файла. Единственное действие плитки там, где `onView` не передан. */
+  onDetails: () => void;
+  /**
+   * Показать САМ файл. Не передаётся — плитка остаётся односоставной (вложения задачи).
+   * Зовётся только когда путь просмотра есть (`hasViewPath`): у .zip без ссылки кадр честно
+   * открывает карточку и подписан «details», потому что показывать там нечего.
+   */
+  onView?: () => void;
   /**
    * Превью не открылось. Почти всегда это протухшая presigned-ссылка, а не порча файла.
    * Отдаётся именно адрес: перепрашивать выдачу можно один раз на адрес, иначе по-настоящему
    * битый объект гоняет её по кругу.
    */
   onPreviewError?: (url: string) => void;
-  /** Досыл в подвал плитки — кнопка «построить заново» у состояния «превью не вышло». */
+  /** Досыл под подвал плитки — кнопка «построить заново» у состояния «превью не вышло». */
   children?: React.ReactNode;
 }) {
   const name = file.fileName ?? '';
@@ -68,6 +102,62 @@ export function FileTile({
   const excerpt = isMarkdownNote(name, file.contentType ?? undefined)
     ? (file.contentExcerpt ?? '').trim()
     : '';
+
+  // Разделена ли плитка надвое. Не «есть ли у файла превью» и не «можно ли его посмотреть»:
+  // это вопрос к ЭКРАНУ — предлагает ли он второй путь вообще.
+  const split = !!onView;
+  const viewable = split && hasViewPath(file);
+  // ПОДПИСЬ НЕ ОБЕЩАЕТ БОЛЬШЕ, ЧЕМ СДЕЛАЕТ ЩЕЛЧОК. У файла без пути просмотра кадр открывает
+  // карточку — и говорит «details», а не «view».
+  const frameWord = viewable ? 'view' : 'details';
+  // «details OF имя», а не «details имя»: обе половины называются одинаково ровно тогда, когда
+  // делают одно и то же, и разночтение в предлоге читалось бы как разные действия.
+  const frameLabel = split
+    ? `${viewable ? `view ${name}` : `details of ${name}`}${
+        uploader ? ` · uploaded by ${uploader}` : ''
+      }`
+    : uploader
+      ? `${name} · uploaded by ${uploader}`
+      : name;
+
+  // Тело подвала одно на обе раскладки: кнопкой он становится или остаётся `div`, но читается
+  // одинаково. Две копии этой разметки разошлись бы на первой же правке.
+  const foot = (
+    <>
+      {/* Имя БЕЗ расширения: оно уже стоит бейджем, а «.pdf» в конце каждого второго имени
+          съедает ровно те символы, которыми одна раскладка отличается от другой. */}
+      <Text
+        size='micro'
+        component='span'
+        className={cn('truncate font-bold uppercase', split && 'group-hover/foot:text-bgColor')}
+      >
+        {stemOf(name)}
+      </Text>
+      <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className={cn('flex-none tabular-nums', split && 'group-hover/foot:text-bgColor')}
+        >
+          {formatBytes(Number(file.sizeBytes ?? 0))}
+        </Text>
+        {noTopics && (
+          <Pill tone='warn' className='flex-none'>
+            no topic
+          </Pill>
+        )}
+        {/* Слово, цвет и подсказка — из ACCESS_LEVEL_BADGE: тот же бейдж стоит на витрине
+            открытого и в шапке блока доступа, и три вписанных строками копии расходились бы
+            молча. */}
+        {!!badge && (
+          <Pill tone={badge.tone} className='flex-none' title={badge.title}>
+            {badge.label}
+          </Pill>
+        )}
+      </span>
+    </>
+  );
 
   return (
     <div
@@ -110,7 +200,7 @@ export function FileTile({
           className={cn(
             // z-20 — локальный стек ПЛИТКИ, а не слой страницы: поднимает отметку над кадром
             // внутри одной карточки.
-            'absolute left-1 top-1 z-20 flex size-3.5 items-center justify-center border transition-opacity',
+            'absolute left-1 top-1 z-20 flex size-3.5 min-w-0 max-w-full items-center justify-center border transition-opacity',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
             selected
               ? 'border-textColor bg-textColor text-bgColor opacity-100'
@@ -123,14 +213,17 @@ export function FileTile({
 
       <button
         type='button'
-        onClick={onOpen}
+        onClick={viewable ? onView : onDetails}
         // Имя загрузившего дописано к подсказке и к имени самой плитки, а не повешено на
         // инициалы: у инициалов `pointer-events-none` (иначе прозрачный кружок съедал бы клик
         // по углу превью), своей подсказки у них быть не может — а «кто такой AL» спрашивают
         // ровно на наведении.
         title={uploader ? `${name}\nuploaded by ${uploader}` : name}
-        aria-label={uploader ? `${name} · uploaded by ${uploader}` : name}
-        className='relative block w-full cursor-pointer bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        aria-label={frameLabel}
+        // `min-w-0 max-w-full` — ЛОВУШКА ПРИМИТИВА, а не украшение: `button` меряется по
+        // содержимому, вылезает за колонку грида и ложится поверх соседней плитки, а `truncate`
+        // внутри неё при этом молчит — обрезать нечего, разъехалась сама коробка.
+        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (
           <img
@@ -174,6 +267,20 @@ export function FileTile({
             </Text>
           </span>
         )}
+        {/* ПОДПИСЬ, НАЗЫВАЮЩАЯ КУДА УЙДЁТ ЩЕЛЧОК. По центру кадра, а не полосой у нижней
+            кромки, как в прототипе: там оба нижних угла свободны, а здесь в них уже стоят
+            счётчик обсуждения и бейдж расширения — полоса легла бы поверх них.
+
+            `aria-hidden` и `pointer-events-none`: доступное имя кнопки уже сказано `aria-label`,
+            второй раз читать его незачем, а перехватывать собственный клик подпись не должна. */}
+        {split && (
+          <span
+            aria-hidden
+            className='pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-textColor bg-bgColor px-1.5 py-0.5 text-nano uppercase tracking-pill opacity-0 transition-opacity group-hover/frame:opacity-100 group-focus-visible/frame:opacity-100 motion-reduce:transition-none'
+          >
+            {frameWord}
+          </span>
+        )}
         {/* ОДНА ПОЛОСА НА ДВЕ ПЛАШКИ, а не две абсолютные метки в противоположных углах: на
             узкой плитке (сетка вложений задачи начинается со 130px) «обсуждение · 128» и
             шестибуквенное расширение наезжали бы друг на друга двумя чёрными прямоугольниками.
@@ -210,32 +317,30 @@ export function FileTile({
         </span>
       </button>
 
-      <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
-        {/* Имя БЕЗ расширения: оно уже стоит бейджем, а «.pdf» в конце каждого второго имени
-            съедает ровно те символы, которыми одна раскладка отличается от другой. */}
-        <Text size='micro' component='span' className='truncate font-bold uppercase'>
-          {stemOf(name)}
-        </Text>
-        <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
-          <Text size='micro' variant='label' component='span' className='flex-none tabular-nums'>
-            {formatBytes(Number(file.sizeBytes ?? 0))}
-          </Text>
-          {noTopics && (
-            <Pill tone='warn' className='flex-none'>
-              no topic
-            </Pill>
-          )}
-          {/* Слово, цвет и подсказка — из ACCESS_LEVEL_BADGE: тот же бейдж стоит на витрине
-              открытого и в шапке блока доступа, и три вписанных строками копии расходились бы
-              молча. */}
-          {!!badge && (
-            <Pill tone={badge.tone} className='flex-none' title={badge.title}>
-              {badge.label}
-            </Pill>
-          )}
-        </span>
-        {children}
-      </div>
+      {split ? (
+        <button
+          type='button'
+          onClick={onDetails}
+          aria-label={`details of ${name}`}
+          // Мишень под палец: 34px — не украшение, а нижняя граница, на которой большой палец
+          // попадает в подвал, а не в кадр над ним.
+          //
+          // Инверсия на наведении — единственное, чем разделённая плитка объясняет себя на
+          // глаз: без неё подвал выглядит подписью, а не второй половиной.
+          className='group/foot flex min-h-[34px] w-full min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-hairline px-1.5 py-1 text-left hover:bg-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        >
+          {foot}
+        </button>
+      ) : (
+        <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
+          {foot}
+        </div>
+      )}
+
+      {/* ДОСЫЛ — СОСЕД ПОДВАЛА, А НЕ ЕГО СОДЕРЖИМОЕ. Внутри едет «построить заново», то есть
+          кнопка, а кнопка внутри кнопки — невалидная разметка: React её отрисует, а щелчок по
+          ней уйдёт и в неё, и в подвал, открыв карточку поверх начатой перестройки. */}
+      {!!children && <div className='flex min-w-0 flex-col px-1.5 pb-1'>{children}</div>}
     </div>
   );
 }
