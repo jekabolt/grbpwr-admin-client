@@ -190,6 +190,9 @@ const MyProfile = lazyRoute(() =>
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 const FilesShared = lazyRoute(() => import('components/managers/files/shared/shared-page'));
+const FileProjects = lazyRoute(
+  () => import('components/managers/files/projects/projects-index'),
+);
 const FileNote = lazyRoute(() => import('components/managers/files/note/note-page'));
 
 const Tasks = lazyRoute(() =>
@@ -426,6 +429,9 @@ root.render(
                   {/* Витрина открытого. Статический сегмент, как и «topics», поэтому «shared»
                       никогда не разберётся как `/files/:id`. */}
                   <Route path={ROUTES.filesShared} element={<FilesShared />} />
+                  {/* Индекс проектов — третий статический сегмент того же семейства: тридцать
+                      проектов ряд чипов не вмещает, а список сортируется и ищется. */}
+                  <Route path={ROUTES.filesProjects} element={<FileProjects />} />
                   {/* Заметка объявлена раньше `/files/:id` для читаемости; порядок и здесь ни
                       на что не влияет — маршруты различаются длиной, а не рангом сегмента. */}
                   <Route path={ROUTES.fileNote} element={<FileNote />} />
