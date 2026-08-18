@@ -25,6 +25,13 @@ import { invalidateFileViews, isProjectTopic, useFileRoles, useFileTopics } from
 import { plural } from '../upload/text';
 
 /**
+ * День без часового пояса, как его принимает сервер. Ровно в этом виде строки сравнимы
+ * лексикографически, и сравнение совпадает с хронологическим — потому проверка порядка дат ниже
+ * и обходится без разбора в `Date`.
+ */
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
  * Управление темами — ОТДЕЛЬНЫЙ экран.
  *
  * В холсте чипы остаются чистым фильтром: клик по теме там фильтрует, и второй жест ради
@@ -128,6 +135,53 @@ export default function FileTopicsPage() {
   const [mergingRole, setMergingRole] = useState<FileRole | undefined>(undefined);
   const [roleMergeTarget, setRoleMergeTarget] = useState('');
 
+  /* ── ЧТО ВООБЩЕ ПРЕДЛАГАТЬ ЦЕЛЬЮ СЛИЯНИЯ ────────────────────────────────────────────────
+   *
+   * Оба пикера показывали ВЕСЬ словарь, включая архив и другой тип, — то есть предлагали
+   * жесты, у которых разный исход, одинаково буднично. Разведено по существу, а не одним
+   * правилом на оба, потому что архив у темы и у роли значит РАЗНОЕ.
+   *
+   * АРХИВНАЯ РОЛЬ ЦЕЛЬЮ НЕ ПРЕДЛАГАЕТСЯ ВОВСЕ. Архив роли — это запрет: сервер отвечает
+   * `archived role cannot be assigned` на попытку поставить её одному файлу. Слияние в
+   * архивную роль поставило бы её сразу сотне связей и отказа бы не получило — у MergeRoles
+   * такой проверки нет. Предлагать в пикере обход собственного запрета нельзя; законный путь
+   * есть и он в одно движение — вернуть роль в словарь, слить, убрать обратно.
+   *
+   * АРХИВНАЯ ТЕМА ЦЕЛЬЮ ОСТАЁТСЯ. Архив темы — это не запрет, а «убрано с глаз»: тему в
+   * архиве по-прежнему можно нести, и свернуть в неё оставшийся дубль — законный способ
+   * прибраться. Но исход у этого жеста не тот, что у обычного слияния (файлы уходят из ряда
+   * чипов и из пикеров), поэтому цель подписана «в архиве», а следствие названо словами в
+   * диалоге, когда она выбрана.
+   *
+   * РАЗНЫЕ ТИПЫ НЕ ПРЕДЛАГАЮТСЯ НИ У ТЕМ, НИ У ПРОЕКТОВ: сервер отвечает на них
+   * `topics of different kinds cannot be merged`, потому что роли уехали бы на строки темы,
+   * которая проектом не является. Бэкенд прямо пишет, что «клиент разнотипных целей не
+   * предлагает», — до этой правки не было правдой.
+   */
+  const mergingIsProject = isProjectTopic(merging ?? {});
+  const topicMergeTargets = topics.filter(
+    (t) => Number(t.id) !== Number(merging?.id) && isProjectTopic(t) === mergingIsProject,
+  );
+  const mergeTargetTopic = topics.find((t) => String(t.id) === mergeTarget);
+  const roleMergeTargets = roles.filter(
+    (r) => Number(r.id) !== Number(mergingRole?.id) && !r.archived,
+  );
+
+  /**
+   * КОНЕЦ РАНЬШЕ НАЧАЛА — ВИДНО У ПОЛЯ, А НЕ ОТКАЗОМ С ТОГО БЕРЕГА.
+   *
+   * Сервер это правило держит (`ends_at cannot be earlier than starts_at`) и остаётся
+   * последней линией — тот же диалог откроют с несвежей выдачей, а поле `type=date` в браузере
+   * без поддержки вырождается в обычный текст. Но ответ на вопрос «эта дата раньше той» не
+   * требует ни сервера, ни знания о мире: он целиком в двух полях, которые человек видит.
+   *
+   * Проверка включается ТОЛЬКО на двух настоящих днях (`ISO_DAY`). На выродившемся в текст поле
+   * сравнение строк ничего не значит, и запрещать по нему сохранение значило бы держать человека
+   * за кнопкой из-за собственной догадки; там правило сервера и сработает.
+   */
+  const datesReversed =
+    metaKind === 'project' && ISO_DAY.test(metaFrom) && ISO_DAY.test(metaTo) && metaTo < metaFrom;
+
   if (!mayRead) {
     return (
       <div className='border border-borderColor bg-bgColor p-block'>
@@ -204,9 +258,16 @@ export default function FileTopicsPage() {
       setMeta(undefined);
       // ЧИСЛО СНЯТЫХ РОЛЕЙ НЕ ГЛОТАЕТСЯ. Понижение, тихо снявшее сорок ярлыков, выглядит
       // ровно так же, как понижение, не снявшее ни одного, — а это разные события.
+      //
+      // ОДНА ФРАЗА, А НЕ ДВЕ СКЛЕЕННЫЕ. Было «ролей обнулено: 3 связи потеряли роль» — тот же
+      // факт, сказанный дважды и сросшийся в строку без грамматики. Оставлена та половина,
+      // которую ОБЕЩАЕТ предупреждение в самом диалоге («сколько связей потеряли роль — будет
+      // сказано числом сразу после сохранения»): человек ждёт ответа именно про связи, и
+      // ответить ему счётчиком «ролей» значило бы не совпасть со своим же обещанием. Глагол
+      // согласован числом — иначе на единственной связи получалось бы «1 связь потеряли роль».
       showMessage(
         cleared
-          ? `сохранено. ролей обнулено: ${cleared} ${plural(cleared, 'связь', 'связи', 'связей')} потеряли роль`
+          ? `сохранено. ${cleared} ${plural(cleared, 'связь', 'связи', 'связей')} ${plural(cleared, 'потеряла', 'потеряли', 'потеряли')} роль`
           : 'сохранено',
         'success',
       );
@@ -348,6 +409,11 @@ export default function FileTopicsPage() {
                 const n = Number(t.filesCount ?? 0);
                 const project = isProjectTopic(t);
                 const dates = projectDates(t);
+                // Кнопка знает не «сколько тем всего», а «есть ли КУДА слить эту»: цель обязана
+                // быть того же типа. Иначе живая кнопка вела бы в диалог с пустым пикером.
+                const mergeable = topics.some(
+                  (o) => Number(o.id) !== Number(t.id) && isProjectTopic(o) === project,
+                );
                 return (
                   <tr key={t.id}>
                     <td data-align='left'>
@@ -409,7 +475,14 @@ export default function FileTopicsPage() {
                         <Button
                           size='xs'
                           variant='secondary'
-                          disabled={!writable || topics.length < 2}
+                          disabled={!writable || !mergeable}
+                          title={
+                            mergeable
+                              ? undefined
+                              : project
+                                ? 'проект сливается только в другой проект — а других проектов нет'
+                                : 'тема сливается только в другую тему — а других тем нет'
+                          }
                           onClick={() => {
                             setMerging(t);
                             setMergeTarget('');
@@ -529,68 +602,81 @@ export default function FileTopicsPage() {
               </tr>
             </thead>
             <tbody>
-              {roles.map((r) => (
-                <tr key={r.id}>
-                  <td data-align='left'>
-                    <Chip selected={!r.archived} dashed={!!r.archived}>
-                      {r.name}
-                    </Chip>
-                    {r.archived && (
-                      <Text size='nano' variant='label' component='span' className='ml-1.5'>
-                        в архиве
-                      </Text>
-                    )}
-                  </td>
-                  <td className='tabular-nums'>{Number(r.sortOrder ?? 0)}</td>
-                  {/* СЧЁТ СКВОЗНОЙ — по всем проектам сразу, и считается он под предикатом
-                      видимости, как и всё остальное в этой библиотеке: у разных людей числа
-                      здесь законно разные. */}
-                  <td className='tabular-nums'>{Number(r.filesCount ?? 0)}</td>
-                  <td>
-                    <div className='flex flex-wrap items-center justify-end gap-1.5'>
-                      <Button
-                        size='xs'
-                        variant='secondary'
-                        disabled={!writable}
-                        onClick={() => {
-                          setEditRole(r);
-                          setEditRoleName(r.name ?? '');
-                          setEditRoleOrder(String(Number(r.sortOrder ?? 0)));
-                        }}
-                      >
-                        переименовать
-                      </Button>
-                      <Button
-                        size='xs'
-                        variant='secondary'
-                        disabled={!writable || roles.length < 2}
-                        onClick={() => {
-                          setMergingRole(r);
-                          setRoleMergeTarget('');
-                        }}
-                      >
-                        слить
-                      </Button>
-                      {/* УДАЛЕНИЯ РОЛИ НЕТ ВОВСЕ — есть архив. Удалённая роль означала бы
-                          строки связи, ссылающиеся в никуда; архив же оставляет её на файлах и
-                          только перестаёт предлагать в пикерах. */}
-                      <Button
-                        size='xs'
-                        variant='secondary'
-                        disabled={!writable}
-                        title={
-                          r.archived
-                            ? 'вернуть в словарь — её снова можно будет назначать'
-                            : 'в архиве роль остаётся на файлах и в фильтре, но назначить её заново нельзя'
-                        }
-                        onClick={() => toggleRoleArchive(r)}
-                      >
-                        {r.archived ? 'вернуть' : 'в архив'}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {roles.map((r) => {
+                // «Есть ли КУДА слить», а не «сколько ролей всего»: архивная роль целью не
+                // предлагается (довод — у списков целей выше), и на словаре, где живой осталась
+                // одна роль, кнопка обязана погаснуть, а не открыть пустой пикер.
+                const mergeable = roles.some(
+                  (o) => Number(o.id) !== Number(r.id) && !o.archived,
+                );
+                return (
+                  <tr key={r.id}>
+                    <td data-align='left'>
+                      <Chip selected={!r.archived} dashed={!!r.archived}>
+                        {r.name}
+                      </Chip>
+                      {r.archived && (
+                        <Text size='nano' variant='label' component='span' className='ml-1.5'>
+                          в архиве
+                        </Text>
+                      )}
+                    </td>
+                    <td className='tabular-nums'>{Number(r.sortOrder ?? 0)}</td>
+                    {/* СЧЁТ СКВОЗНОЙ — по всем проектам сразу, и считается он под предикатом
+                        видимости, как и всё остальное в этой библиотеке: у разных людей числа
+                        здесь законно разные. */}
+                    <td className='tabular-nums'>{Number(r.filesCount ?? 0)}</td>
+                    <td>
+                      <div className='flex flex-wrap items-center justify-end gap-1.5'>
+                        <Button
+                          size='xs'
+                          variant='secondary'
+                          disabled={!writable}
+                          onClick={() => {
+                            setEditRole(r);
+                            setEditRoleName(r.name ?? '');
+                            setEditRoleOrder(String(Number(r.sortOrder ?? 0)));
+                          }}
+                        >
+                          переименовать
+                        </Button>
+                        <Button
+                          size='xs'
+                          variant='secondary'
+                          disabled={!writable || !mergeable}
+                          title={
+                            mergeable
+                              ? undefined
+                              : 'сливать некуда: кроме этой, живых ролей нет, а в архивную роль слить нельзя — сначала верните её в словарь'
+                          }
+                          onClick={() => {
+                            setMergingRole(r);
+                            setRoleMergeTarget('');
+                          }}
+                        >
+                          слить
+                        </Button>
+                        {/* УДАЛЕНИЯ РОЛИ НЕТ ВОВСЕ — есть архив. Удалённая роль означала бы
+                            строки связи, ссылающиеся в никуда; архив же оставляет её на файлах и
+                            только перестаёт предлагать в пикерах. */}
+                        <Button
+                          size='xs'
+                          variant='secondary'
+                          disabled={!writable}
+                          title={
+                            r.archived
+                              ? 'вернуть в словарь — её снова можно будет назначать'
+                              : 'в архиве роль остаётся на файлах и в фильтре, но назначить её заново нельзя'
+                          }
+                          onClick={() => toggleRoleArchive(r)}
+                        >
+                          {r.archived ? 'вернуть' : 'в архив'}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </DataTable>
         )}
@@ -691,12 +777,10 @@ export default function FileTopicsPage() {
               value={roleMergeTarget}
               onValueChange={(v: string) => setRoleMergeTarget(v)}
               placeholder='выберите роль'
-              items={roles
-                .filter((r) => Number(r.id) !== Number(mergingRole?.id))
-                .map((r) => ({
-                  value: String(r.id),
-                  label: `${r.name} · ${Number(r.filesCount ?? 0)}`,
-                }))}
+              items={roleMergeTargets.map((r) => ({
+                value: String(r.id),
+                label: `${r.name} · ${Number(r.filesCount ?? 0)}`,
+              }))}
               fullWidth
             />
           </div>
@@ -704,6 +788,16 @@ export default function FileTopicsPage() {
             слияние ролей проще слияния тем: роль — это колонка на строке связи, а не сама
             связь, поэтому дедуплицировать нечего — ни одна строка не может нести обе.
           </Text>
+          {/* ПОЧЕМУ СПИСОК КОРОЧЕ СЛОВАРЯ. Иначе отсутствие архивной роли читалось бы как
+              пропажа, а не как решение, — и человек искал бы её в пикере вместо того, чтобы
+              вернуть её на строку выше. */}
+          {roles.some((r) => r.archived) && (
+            <Text size='micro' variant='label'>
+              архивные роли целью не предлагаются: архив роли значит «ставить больше нельзя», и
+              слияние поставило бы её сразу всем связям источника в обход этого запрета. нужно
+              слить именно в архивную — верните её в словарь, слейте и уберите обратно.
+            </Text>
+          )}
         </div>
       </ConfirmationModal>
 
@@ -751,7 +845,7 @@ export default function FileTopicsPage() {
         open={!!merging}
         onOpenChange={(o) => !o && setMerging(undefined)}
         onConfirm={doMerge}
-        title={`слить «${merging?.name ?? ''}» в другую тему`}
+        title={`слить «${merging?.name ?? ''}» ${mergingIsProject ? 'в другой проект' : 'в другую тему'}`}
         confirmLabel={mergeTopics.isPending ? 'сливаем…' : 'слить'}
         confirmDisabled={mergeTopics.isPending || !mergeTarget}
         closeOnConfirm={false}
@@ -772,23 +866,40 @@ export default function FileTopicsPage() {
               name='mergeTarget'
               value={mergeTarget}
               onValueChange={(v: string) => setMergeTarget(v)}
-              placeholder='выберите тему'
-              items={topics
-                .filter((t) => Number(t.id) !== Number(merging?.id))
-                .map((t) => ({
-                  value: String(t.id),
-                  label: `${t.name} · ${Number(t.filesCount ?? 0)}`,
-                }))}
+              placeholder={mergingIsProject ? 'выберите проект' : 'выберите тему'}
+              // ПОДПИСЬ НАЗЫВАЕТ АРХИВ. Без неё «съёмка весна» в списке выглядит такой же
+              // живой, как соседи, и слияние в неё уносит файлы из ряда чипов молча.
+              items={topicMergeTargets.map((t) => ({
+                value: String(t.id),
+                label: `${t.name} · ${Number(t.filesCount ?? 0)}${t.archived ? ' · в архиве' : ''}`,
+              }))}
               fullWidth
             />
           </div>
+          {/* СЛЕДСТВИЕ ВЫБОРА, А НЕ СВОЙСТВО ДИАЛОГА, — поэтому строка появляется вместе с
+              выбранной архивной целью, а не висит всегда. Сам жест законен: так тему и
+              «убирают». Несимметрично только время: архив снимается обратно, слияние нет. */}
+          {mergeTargetTopic?.archived && (
+            <CalloutBox tone='warning'>
+              <Text size='micro' component='span'>
+                цель в архиве. файлы «{merging?.name}» переедут в тему, которой нет ни в ряду
+                чипов, ни в пикерах: найти их можно будет поиском, по прямой ссылке и с этого
+                экрана. архив с темы снимается обратно одним движением — слияние не снимается
+                никак.
+              </Text>
+            </CalloutBox>
+          )}
           {/* ФРАЗА, КОТОРУЮ ИНАЧЕ УЗНАЮТ ОПЫТОМ. У проекта на строке связи живёт роль, и при
               слиянии файл может оказаться в цели уже с СВОЕЙ ролью. Побеждает роль ЦЕЛЕВОГО
               проекта — источник её не переписывает. Это единственное правило, при котором
               слияние не портит то, что в цели уже разобрано; но человек, не знающий его,
-              решит, что роли «пропали». */}
-          {(isProjectTopic(merging ?? {}) ||
-            isProjectTopic(topics.find((t) => String(t.id) === mergeTarget) ?? {})) && (
+              решит, что роли «пропали».
+
+              УСЛОВИЕ СВЕЛОСЬ К ОДНОМУ ПЛЕЧУ вместе с фильтром по типу: разнотипной пары в
+              пикере больше нет, поэтому «источник ИЛИ цель — проект» и «источник — проект»
+              теперь одно и то же, а два плеча читались бы как обещание случая, которого не
+              бывает. */}
+          {mergingIsProject && (
             <Text size='micro'>
               у проектов роль стоит на связи файла с проектом. если файл УЖЕ лежал в целевом
               проекте, побеждает роль ЦЕЛЕВОГО: роль из «{merging?.name}» его не переписывает.
@@ -810,7 +921,10 @@ export default function FileTopicsPage() {
         onConfirm={saveMeta}
         title={`тема «${meta?.name ?? ''}» — тип и даты`}
         confirmLabel={updateMeta.isPending ? 'сохраняем…' : 'сохранить'}
-        confirmDisabled={updateMeta.isPending}
+        // ЕДИНСТВЕННЫЙ ЗАПОР НА ПЕРЕВЁРНУТЫХ ДАТАХ — здесь, а не ещё и внутри `saveMeta`:
+        // модалка не отправляет форму по Enter, кнопка у неё одна, и второй запрет означал бы
+        // два места, которые обязаны договориться о том, что считается «нельзя».
+        confirmDisabled={updateMeta.isPending || datesReversed}
         closeOnConfirm={false}
         width='md'
       >
@@ -882,6 +996,15 @@ export default function FileTopicsPage() {
               />
             </div>
           </div>
+          {/* СЛОВА У ПОЛЯ, А НЕ ОТКАЗ ПОСЛЕ НАЖАТИЯ. Ответ на «раньше ли конец начала» целиком
+              в двух полях, которые человек видит; идти за ним к серверу значило бы отвечать на
+              него в другом месте экрана и на несколько секунд позже. Правило сервера при этом
+              осталось — оно последняя линия, а не первая. */}
+          {datesReversed && (
+            <Text size='micro' variant='error'>
+              конец раньше начала
+            </Text>
+          )}
           <Text size='micro' variant='label'>
             даты — это дни, а не моменты: «12–14 сентября» часового пояса не имеет, и дай мы ему
             время, пришлось бы отвечать, чья полночь начинает день. пустое поле снимает дату.
