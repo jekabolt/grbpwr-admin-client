@@ -66,17 +66,39 @@ export function Tags({
     }
   }, [isEditMode]);
 
+  // Список, который сейчас ВИДЕН на экране. Стоит здесь, выше `addTagValue`, намеренно: гард
+  // добавления обязан сверяться ровно с тем, что нарисовано, а не с параллельной копией того же
+  // условия. Копия у гарда была, и она совпадала с этим `useMemo` в двух живых ветках и
+  // РАСХОДИЛАСЬ в третьей — при `editMode` без обоих флагов (сегодня так не вызывают, но пропсы
+  // позволяют) она давала пустой список, гард не держал ничего, и клик по словарной кнопке в
+  // режиме, где редактировать нечего, молча метил метку в `selectedTags` — то есть в то, что
+  // позже уезжает в форму эффектом на смене `isEditMode`. Один источник закрывает это сам собой.
+  const displayedTags = useMemo(() => {
+    return (
+      (isAddingProduct && localTags) ||
+      (isEditMode && editedTags) ||
+      (!isEditMode &&
+        values.tags?.map((tag) => tag?.tag).filter((tag): tag is string => tag !== undefined)) ||
+      []
+    );
+  }, [isAddingProduct, localTags, editedTags, isEditMode, values.tags]);
+
   const addTagValue = (raw: string) => {
     const trimmedTag = raw.trim();
-    // Гард сверяется с тем списком, который сейчас ВИДЕН (см. `displayedTags` ниже — тот же
-    // порядок веток). Раньше он смотрел только на `localTags`, а его пишет одна ветка
-    // `isAddingProduct`: в режиме правки он всегда пуст, гард не срабатывал никогда, и повторный
-    // клик по словарной кнопке дописывал метку в `editedTags` второй раз. В форму дубль при этом
-    // не уезжал — `selectedTags` дедуплицирует, и оба `setValue('tags')` строятся из него, — то
-    // есть расходились ВИДИМЫЙ список и форма: на экране две плитки, в данных одна, а крестик на
-    // любой из них сносил обе разом (фильтр по значению), чем расхождение и обнаруживало себя.
-    const visibleTags = isAddingProduct ? localTags : isEditMode ? editedTags : [];
-    if (trimmedTag === '' || visibleTags.includes(trimmedTag)) return;
+    // Гард сверяется с ВИДИМЫМ списком. Раньше он смотрел только на `localTags`, а его пишет одна
+    // ветка `isAddingProduct`: в режиме правки список всегда пуст, гард не срабатывал никогда, и
+    // повторный клик по словарной кнопке дописывал метку в `editedTags` второй раз. В форму дубль
+    // при этом не уезжал — `selectedTags` дедуплицирует, и оба `setValue('tags')` строятся из
+    // него, — то есть расходились ВИДИМЫЙ список и форма: на экране две плитки, в данных одна, а
+    // крестик на любой из них сносил обе разом (фильтр по значению), чем расхождение себя и
+    // обнаруживало.
+    //
+    // Следствие, которое стоит знать: у метки, снятой кликом по ПЛИТКЕ (метка остаётся на экране,
+    // но уходит из `selectedTags` и из формы), словарная кнопка её больше не вернёт — гард видит
+    // метку в видимом списке. Вернуть её — повторным кликом по той же плитке. Это ровно та
+    // семантика, которой всегда жил режим добавления товара; режим правки до этого возвращал
+    // метку, но ценой второй плитки на экране.
+    if (trimmedTag === '' || displayedTags.includes(trimmedTag)) return;
     if (isAddingProduct) {
       setLocalTags([...localTags, trimmedTag]);
     }
@@ -133,16 +155,6 @@ export function Tags({
       );
     }
   }, [isAddingProduct, isEditMode, selectedTags, setValue]);
-
-  const displayedTags = useMemo(() => {
-    return (
-      (isAddingProduct && localTags) ||
-      (isEditMode && editedTags) ||
-      (!isEditMode &&
-        values.tags?.map((tag) => tag?.tag).filter((tag): tag is string => tag !== undefined)) ||
-      []
-    );
-  }, [isAddingProduct, localTags, editedTags, isEditMode, values.tags]);
 
   return (
     <div className='grid items-center gap-2'>
