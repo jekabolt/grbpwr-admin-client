@@ -63,6 +63,15 @@ export type AiState =
    */
   | { kind: 'applied'; previous: string; next: string; scope: AiScope }
   | { kind: 'off' }
+  /**
+   * НАСТРОЙКА СЛОМАНА — и это отдельное состояние ровно потому, что выглядеть оно обязано иначе.
+   *
+   * `off` спокоен намеренно: на бете помощника нет, это норма развёртывания. Но на проде ключ
+   * ЕСТЬ, и снятый с обслуживания слуг приезжал тем же самым `FailedPrecondition` — то есть
+   * поломка на проде выглядела нормой и никого не побуждала разбираться. Сервер теперь называет
+   * причину машинночитаемо (`ErrorInfo.reason`), и громкая причина получает громкий вид.
+   */
+  | { kind: 'misconfigured' }
   | { kind: 'toolong'; runes: number; scope: AiScope }
   | { kind: 'failed'; message: string; request: AiRequest };
 
@@ -122,6 +131,7 @@ export function useNoteAssistant() {
         if (e instanceof NoteFormatError) {
           if (e.kind === 'aborted') return;
           if (e.kind === 'off') return setState({ kind: 'off' });
+          if (e.kind === 'misconfigured') return setState({ kind: 'misconfigured' });
           if (e.kind === 'toolong') return setState({ kind: 'toolong', runes, scope });
           return setState({ kind: 'failed', message: e.message, request: req });
         }
@@ -176,7 +186,7 @@ export function AiPanel({
       // прямо на сером холсте страницы, а не внутри белой секции. Без заливки холст просвечивал
       // бы сквозь текст, и сообщение читалось бы как дыра в странице, а не как её материал.
       <CalloutBox tone='note' className='bg-bgColor'>
-        <div className='flex flex-wrap items-baseline gap-2'>
+        <div data-ai-state='off' className='flex flex-wrap items-baseline gap-2'>
           {/* ПРИЧИНА НЕ НАЗЫВАЕТСЯ — и это не скромность, а единственное верное, что тут можно
               сказать. В это состояние ведут ТРИ разных пути (`notesService`): ключа модели нет;
               ключ есть, а слуг модели у провайдера мёртв; помощника на этом контуре не выкатывали
@@ -200,10 +210,34 @@ export function AiPanel({
     );
   }
 
+  if (state.kind === 'misconfigured') {
+    return (
+      // tone='error', а не 'note': это единственное, чем поломка отличается от нормы ДО того, как
+      // текст прочитан. Сосед `off` намеренно тихий, и если оба выглядят одинаково, то различать
+      // их на проводе было незачем.
+      <CalloutBox tone='error' className='bg-bgColor'>
+        <div data-ai-state='misconfigured' className='flex flex-wrap items-baseline gap-2'>
+          <Text size='micro' component='span'>
+            <b>the assistant is misconfigured.</b> the model this deployment asks for is not served
+            any more — that is a setting on the server, not a hiccup, so pressing again won't help.
+            tell whoever keeps the deployment. the note itself is untouched: the text, the edit and
+            the save work as usual.
+          </Text>
+          {/* «retry» здесь НЕТ, и это не забывчивость: повтор обречён ровно так же, как был обречён
+              до того, как отказ научился называть причину. Кнопка, предлагающая бессмысленное
+              действие, — это то же самое обещание «попробуйте через минуту», только кнопкой. */}
+          <Button size='xs' variant='secondary' className='ml-auto' onClick={onDismiss}>
+            close
+          </Button>
+        </div>
+      </CalloutBox>
+    );
+  }
+
   if (state.kind === 'toolong') {
     return (
       <CalloutBox tone='warning'>
-        <div className='flex flex-wrap items-baseline gap-2'>
+        <div data-ai-state='toolong' className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
             <b>the text is longer than the assistant takes at once</b> —{' '}
             {state.runes.toLocaleString('ru-RU')} {plural(state.runes, 'character')} against a limit
@@ -221,7 +255,7 @@ export function AiPanel({
   if (state.kind === 'working') {
     return (
       <CalloutBox tone='warning'>
-        <div className='flex flex-wrap items-baseline gap-2'>
+        <div data-ai-state='working' className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
             <b>the assistant is reading the text…</b> what goes is{' '}
             {state.scope === 'selection' ? 'the selected fragment' : 'the note contents in full'},{' '}
@@ -239,7 +273,7 @@ export function AiPanel({
   if (state.kind === 'failed') {
     return (
       <CalloutBox tone='error' className='bg-bgColor'>
-        <div className='flex flex-wrap items-baseline gap-2'>
+        <div data-ai-state='failed' className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
             <b>the assistant didn't answer.</b> {state.message}. the note text is untouched.
           </Text>

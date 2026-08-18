@@ -98,6 +98,17 @@ export type NoteFormatFailureKind =
    * СОСТОЯНИЕ и не называет причину, а причину ищут в консоли — её кладёт туда `logRefusal`.
    */
   | 'off'
+  /**
+   * НАСТРОЙКА СЛОМАНА: ключ есть, а слуг модели у провайдера не обслуживается
+   * (`AI_MODEL_UNAVAILABLE` в `details`). Отделено от `off` намеренно и не ради точности слов.
+   *
+   * На бете ключа нет, и «помощник не подключён» — правда, спокойное штатное состояние. НА ПРОДЕ
+   * КЛЮЧ ЕСТЬ, и снятый слуг выглядел там ровно так же: норма, которая никого не побудит
+   * разбираться. То есть, убрав из текста неправду, мы заодно сделали поломку ТИХОЙ — а прошлый
+   * случай был плох ровно тем, что о поломке никто не знал, пока человек не пожаловался.
+   * Повторять по-прежнему бессмысленно, поэтому кнопки «retry» у этого состояния нет.
+   */
+  | 'misconfigured'
   /** текст длиннее, чем помощник берёт за раз. */
   | 'toolong'
   /** человек нажал «отменить». */
@@ -127,6 +138,31 @@ export class NoteFormatError extends Error {
 const GRPC_INVALID_ARGUMENT = 3;
 const GRPC_FAILED_PRECONDITION = 9;
 
+/**
+ * Машинночитаемая причина отказа: `google.rpc.Status.details` → `ErrorInfo.reason`.
+ *
+ * Канал не новый и не выдуманный под этот случай: шлюз проносит `details` в тело JSON, а
+ * `api.ts` уже разбирает их для нарушений полей (`utils/field-errors.ts`) — здесь та же форма
+ * разбора, только про другой тип детали. Именно поэтому причина едет ТАК, а не подстрокой
+ * английской фразы сервера: фраза принадлежит серверу и может быть переписана в любой момент,
+ * а `reason` — это контракт.
+ */
+const AI_REASON_MODEL_UNAVAILABLE = 'AI_MODEL_UNAVAILABLE';
+
+function errorInfoReason(body: { details?: unknown } | null): string | undefined {
+  const details = body?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue;
+    const type = (d as { '@type'?: unknown })['@type'];
+    // Сверка по суффиксу типа, как в `field-errors.ts`; голый объект с `reason` тоже принимается.
+    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
+    const reason = (d as { reason?: unknown }).reason;
+    if (typeof reason === 'string' && reason) return reason;
+  }
+  return undefined;
+}
+
 /** Путь помощника. Одна строка на запрос и на след в консоли — чтобы они не разошлись. */
 const NOTE_FORMAT_PATH = '/api/admin/files/note/format';
 
@@ -144,8 +180,16 @@ const NOTE_FORMAT_PATH = '/api/admin/files/note/format';
  * сама заметка) сюда не попадают: периметр утечки на сервере закрыт намеренно, и клиент не
  * имеет права открыть его в консоли.
  */
-function logRefusal(res: Response, body: { code?: number; message?: string } | null): void {
-  const detail = [typeof body?.code === 'number' ? `code=${body.code}` : '', body?.message ?? '']
+function logRefusal(
+  res: Response,
+  body: { code?: number; message?: string; details?: unknown[] } | null,
+): void {
+  const reason = errorInfoReason(body);
+  const detail = [
+    typeof body?.code === 'number' ? `code=${body.code}` : '',
+    reason ? `reason=${reason}` : '',
+    body?.message ?? '',
+  ]
     .filter(Boolean)
     .join(' ');
   console.log('[BE] response: ', res.status, res.statusText, NOTE_FORMAT_PATH, detail);
@@ -196,7 +240,12 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
   const text = await res.text().catch(() => '');
   const body = (() => {
     try {
-      return JSON.parse(text) as { code?: number; message?: string; content?: string };
+      return JSON.parse(text) as {
+        code?: number;
+        message?: string;
+        content?: string;
+        details?: unknown[];
+      };
     } catch {
       return null;
     }
@@ -209,9 +258,20 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
     logRefusal(res, body);
     const code = typeof body?.code === 'number' ? body.code : undefined;
     if (code === GRPC_FAILED_PRECONDITION) {
+      // ОТСУТСТВИЕ ПРИЧИНЫ — ЭТО ТОЖЕ ОТВЕТ, И ОН ЗНАЧИТ «КАК РАНЬШЕ». Бэкенд без `details` —
+      // это выкаченный ранее сервер, и клиент уезжает на бету отдельно от него: порядок деплоя
+      // не гарантирован никем. Поэтому неизвестная причина и отсутствующая причина ведут в тот
+      // же тихий `off`, что и до появления этого канала, а громкое состояние включает только
+      // явно названный `AI_MODEL_UNAVAILABLE`.
+      if (errorInfoReason(body) === AI_REASON_MODEL_UNAVAILABLE) {
+        throw new NoteFormatError(
+          'misconfigured',
+          'misconfigured: AI_MODEL_UNAVAILABLE (the configured model is not served)',
+        );
+      }
       // Диагностика, а не текст экрана: панель у `off` пишет свои слова. Строка называет
       // ветку провода, потому что это единственное, что тут известно точно.
-      throw new NoteFormatError('off', 'off: FailedPrecondition (no key, or the model is dead)');
+      throw new NoteFormatError('off', 'off: FailedPrecondition (no key, or a backend without details)');
     }
     if (code === GRPC_INVALID_ARGUMENT) {
       // InvalidArgument сервер отдаёт не только на превышение потолка (ещё — на пустое
