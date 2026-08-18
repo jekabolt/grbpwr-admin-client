@@ -6,6 +6,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   failureText,
   isForbidden,
+  isUnauthorized,
   isUnknownRoute,
 } from 'components/managers/files/api/rpc-error';
 import { ARCHIVED_WORD, projectDates } from 'components/managers/files/components/topic-chips';
@@ -293,14 +294,23 @@ export function StyleProjects({ techCardId }: { techCardId: number }) {
   if (isError && (isForbidden(error) || isUnknownRoute(error))) return null;
 
   if (isError) {
+    // СЛОВА БЕРУТСЯ У ОБЩЕГО РАЗБОРА, а не пишутся здесь заново: он один на весь раздел и уже
+    // знает, что 401 — это «войдите заново», а не «не загрузилось».
+    //
+    // И КНОПКА СЛЕДУЕТ ЗА СЛОВАМИ. У истёкшей сессии «retry» не лечит ничего: повтор принесёт
+    // тот же 401, а починка — вход, а не запрос. Вкладка, пролежавшая открытой, попадает сюда
+    // буднично: маршрут она не меняла, значит локальную проверку `exp` не проходила.
+    const expired = isUnauthorized(error);
     return (
       <div className='-mx-2.5 flex items-center gap-3 border-b border-borderColor bg-bgColor px-2.5 py-1.5'>
         <Text size='micro' variant='error' component='span'>
-          the projects of this style could not be loaded
+          {failureText(error, 'the projects of this style could not be loaded')}
         </Text>
-        <Button type='button' variant='underline' size='xs' onClick={() => refetch()}>
-          retry
-        </Button>
+        {!expired && (
+          <Button type='button' variant='underline' size='xs' onClick={() => refetch()}>
+            retry
+          </Button>
+        )}
       </div>
     );
   }
@@ -380,7 +390,16 @@ export function StyleProjectsAction({ techCardId }: { techCardId: number }) {
   const [linking, setLinking] = useState(false);
 
   if (!canView || !writable || isError) return null;
-  if ((data?.projects ?? []).length > 0) return null;
+  // «ПРОЕКТОВ НЕТ» И «ЕЩЁ НЕ ЗНАЮ» — РАЗНЫЕ ОТВЕТЫ, и `data ?? []` их склеивал: пока запрос
+  // висит, кнопка появлялась на КАЖДОЙ карточке, в том числе на той, у которой проекты есть,
+  // и пропадала по приезде данных.
+  //
+  // Мигание — не главная беда. На медленной сети человек успевает НАЖАТЬ: пикер открывается с
+  // пустым `linkedIds`, помечать «already linked» нечем, выбирается дубль — а в этот момент
+  // приезжает список, компонент размонтируется, и диалог испаряется под курсором. Дубль
+  // спасает идемпотентность сервера, исчезнувший диалог — ничто.
+  if (!data) return null;
+  if (data.projects?.length) return null;
 
   return (
     <>
