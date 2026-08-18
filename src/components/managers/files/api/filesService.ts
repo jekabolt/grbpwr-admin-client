@@ -145,6 +145,26 @@ export const filesService = {
   // Архивные проекты копятся, роли нет: без архива ряд чипов растёт монотонно и со временем
   // делает холст хуже. Холст архив НЕ просит, экран словаря — просит.
   listTopics: (includeArchived = false) => adminService.ListFileTopics({ includeArchived }),
+  /**
+   * СЛОВАРЬ РОЛЕЙ ДЛЯ ХОЛСТА — без архива, по тому же правилу, что и темы выше.
+   *
+   * Архивную роль сервер разрешает СНЯТЬ, но не разрешает поставить заново. Предлагать её в
+   * пикере значило бы предлагать жест, который отвечает отказом: архив тогда читался бы как
+   * пожелание, а не как решение.
+   */
+  listRoles: (includeArchived = false) => adminService.ListFileRoles({ includeArchived }),
+  /**
+   * РОЛЬ ПАЧКЕ — В ОДНОМ ПРОЕКТЕ. Роль живёт на СТРОКЕ СВЯЗИ «файл ↔ проект», поэтому у этого
+   * вызова три обязательных участника, а не два: без проекта роль ставить некуда.
+   *
+   * Файл, которого в проекте ещё не было, в него ПОПАДЁТ — строка связи создаётся здесь же.
+   * Именно это и делает кнопку работающей на свежем броске.
+   *
+   * `roleId = 0` СНИМАЕТ роль, оставляя файл в проекте: «без роли» — законное состояние, это
+   * приёмная куча внутри проекта, а не ошибка.
+   */
+  setRoles: (args: { fileIds: number[]; projectTopicId: number; roleId: number }) =>
+    adminService.SetLibraryFileRoles(args),
   createTopic: (name: string, description = '') =>
     adminService.CreateFileTopic({ name, description }),
   renameTopic: (id: number, name: string, description = '') =>

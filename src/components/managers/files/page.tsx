@@ -16,6 +16,7 @@ import { FileTile } from './components/file-tile';
 import { NewNoteModal } from './components/new-note-modal';
 import { PasteIntakeModal } from './components/paste-intake-modal';
 import {
+  EmptyGroupingState,
   EmptyLibraryState,
   EmptyPersonState,
   EmptySearchState,
@@ -28,17 +29,30 @@ import {
   RebuildPreview,
 } from './components/gallery-states';
 import { FilesSelectionBar } from './components/selection-bar';
-import { MAX_TOPIC_FILTERS, TopicChips, type TopicSelection } from './components/topic-chips';
+import {
+  MAX_TOPIC_FILTERS,
+  ProjectChips,
+  RoleChips,
+  TopicChips,
+  type TopicSelection,
+} from './components/topic-chips';
 import { FilesUploadBar } from './components/upload-bar';
 import { useFileSelection } from './hooks/useFileSelection';
 import {
+  fileRoleFromUrl,
+  fileRoleToUrl,
   filesKeys,
+  NO_ROLE_URL,
+  idFromUrl,
+  isProjectTopic,
   personIdFromUrl,
   personRoleFromUrl,
   personRoleToUrl,
+  useFileRoles,
   useFilesTotal,
   useFileTopics,
   useLibraryFiles,
+  type FileRoleFilter,
   type FilesSort,
   type PersonRoleFilter,
 } from './hooks/useFiles';
@@ -112,6 +126,19 @@ export default function FilesPage() {
     ? personRoleFromUrl(params.get('role'))
     : 'any';
 
+  // ГРУППИРОВКА — ТОЖЕ АДРЕС, и по той же причине: «вот вся съёмка» и «вот её исходники»
+  // кидают в чат ссылкой.
+  //
+  // ПАРАМЕТР РОЛИ НАЗВАН `frole`, А НЕ `role`, И ЭТО НЕ КАПРИЗ. `role` на этом же экране уже
+  // занят ролью ЧЕЛОВЕКА при файле (`up` / `own`), и одно имя на два разных фильтра стоило бы
+  // ровно одного молчаливого дефекта: снятие человека вычищает `role` из адреса одной строкой
+  // ниже — и унесло бы вместе с ним роль файла, которую никто не трогал.
+  //
+  // Разбор глух к мусору так же, как разбор человека: непонятое значение не фильтрует и не
+  // роняет экран.
+  const projectId = idFromUrl(params.get('project'));
+  const fileRole: FileRoleFilter = fileRoleFromUrl(params.get('frole'), projectId > 0);
+
   // Строка ввода отзывается сразу, а URL догоняет: писать в адрес на каждую букву значит
   // гонять запрос на каждую букву.
   const [searchInput, setSearchInput] = useState(urlSearch);
@@ -140,6 +167,8 @@ export default function FilesPage() {
         sort: FilesSort;
         personId: number;
         personRole: PersonRoleFilter;
+        projectId: number;
+        fileRole: FileRoleFilter;
       }>,
     ) => {
       const p = new URLSearchParams(params);
@@ -173,6 +202,20 @@ export default function FilesPage() {
       // роль пережила бы человека), а в ссылке оставался бы фильтр, которого сервер не
       // применяет. Одно правило в одном месте вместо двух согласованных.
       if (personIdFromUrl(p.get('person')) <= 0) p.delete('role');
+      if (next.projectId !== undefined) {
+        if (next.projectId > 0) p.set('project', String(next.projectId));
+        else p.delete('project');
+      }
+      if (next.fileRole !== undefined) {
+        const v = fileRoleToUrl(next.fileRole);
+        if (v) p.set('frole', v);
+        else p.delete('frole');
+      }
+      // «БЕЗ РОЛИ» БЕЗ ПРОЕКТА ВЫЧИЩАЕТСЯ ОДНОЙ СТРОКОЙ — тем же приёмом, что роль человека
+      // выше, и по более жёсткой причине: этот фильтр сервер не игнорирует, а ОТКАЗЫВАЕТ.
+      // Разложи мы правило по веткам — «снять проект» и «поставить без роли» одним вызовом
+      // оставили бы в адресе сочетание, на котором список отвечает ошибкой, а не выдачей.
+      if (idFromUrl(p.get('project')) <= 0 && p.get('frole') === NO_ROLE_URL) p.delete('frole');
       setParams(p, { replace: true });
     },
     [params, setParams],
@@ -202,10 +245,30 @@ export default function FilesPage() {
   // ОДИН ОБЪЕКТ ФИЛЬТРА на страницу и на оба вторых счёта: ослабленные варианты собираются из
   // него же (`{...filter, topicIds: []}`), поэтому число в кнопке не может оказаться посчитанным
   // не тем условием, под которым его потом покажут.
-  const filter = { topicIds, untopiced, search: urlSearch, sort, personId, personRole };
+  const filter = {
+    topicIds,
+    untopiced,
+    search: urlSearch,
+    sort,
+    personId,
+    personRole,
+    projectId,
+    roleId: fileRole.roleId,
+    withoutRole: fileRole.withoutRole,
+  };
   const filesQuery = useLibraryFiles(filter);
+  // Без архива: заархивированную роль сервер разрешает снять, но не назначить, и предлагать её
+  // в ряду чипов значило бы предлагать фильтр, который потом никому не проставить.
+  const rolesQuery = useFileRoles();
+  const roles = rolesQuery.data?.roles ?? [];
 
-  const topics = topicsQuery.data?.topics ?? [];
+  const allTopics = topicsQuery.data?.topics ?? [];
+  // ДВА РЯДА ИЗ ОДНОГО СЛОВАРЯ. Проект — это тема с типом, отдельного запроса у него нет; но
+  // рисовать их вперемешку нельзя: у рядов разная семантика выбора (пересечение против одного)
+  // и разное продолжение (у проекта — роль).
+  const topics = useMemo(() => allTopics.filter((t) => !isProjectTopic(t)), [allTopics]);
+  const projects = useMemo(() => allTopics.filter(isProjectTopic), [allTopics]);
+  const activeProject = projects.find((p) => Number(p.id) === projectId);
   const files = useMemo(
     () => (filesQuery.data?.pages ?? []).flatMap((p) => p.files ?? []),
     [filesQuery.data],
@@ -238,7 +301,7 @@ export default function FilesPage() {
   const selection = useFileSelection();
   // Смена фильтра снимает выбор. Набранное в одном пересечении на экране следующего не видно
   // целиком, а полоса продолжала бы обещать действие над файлами, которых на экране нет.
-  const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}|${personId}|${personRole}`;
+  const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}|${personId}|${personRole}|${projectId}|${fileRole.roleId}|${fileRole.withoutRole}`;
   const seenFilter = useRef(filterKey);
   const clearSelection = selection.clear;
   useEffect(() => {
@@ -259,12 +322,23 @@ export default function FilesPage() {
   // пачку. Выбранный человек — свойство ВЗГЛЯДА: он ничего не говорит о том, что кладут в
   // библиотеку. Загрузивший ставится сервером по сессии, а владельцем человек не становится от
   // того, что кто-то смотрел на его файлы, — назначают владельца в карточке, осознанно.
+  //
+  // ПРОЕКТ ВХОДИТ В НАСЛЕДОВАНИЕ, потому что это ТЕМА, а не взгляд. Пока он жил отдельным
+  // параметром адреса, а очередь наследовала только чипы тем, бросок при активном проекте
+  // уезжал в «разобрать»: человек стоит внутри съёмки, кладёт в неё файлы — и не находит их
+  // там же. Роль при этом не ставится ни в одном из трёх входов, и это правильно: файл в
+  // проекте без роли — законное состояние, та самая приёмная куча, которую разбирают потом
+  // чипом «без роли» и кнопкой «проставить роль».
+  const inheritedTopicIds = useMemo(
+    () => (projectId > 0 ? [...topicIds, projectId] : topicIds),
+    [topicIds, projectId],
+  );
   const intake = useCallback(
     (list: File[]) => {
       if (!writable || !list.length) return;
-      enqueue(list, { topicIds, newTopics: [] });
+      enqueue(list, { topicIds: inheritedTopicIds, newTopics: [] });
     },
-    [writable, enqueue, topicIds],
+    [writable, enqueue, inheritedTopicIds],
   );
 
   const openPicker = () => pickerRef.current?.click();
@@ -289,21 +363,37 @@ export default function FilesPage() {
   // именно из-за человека, не изменила бы ничего видимого, а это худший исход из возможных:
   // орган, который на глаз не работает.
   //
-  // «Искать во всех темах (N)» названо ТЕМАМИ и снимает только их — а число рядом с ним
-  // посчитано с живым человеком (см. `everywhereQuery`), потому что именно он переживёт
-  // нажатие. Печатать там счёт без человека значило бы обещать сорок файлов и показать три.
-  const showAll = () => patch({ topicIds: [], untopiced: false, personId: 0 });
+  // «Искать во всех темах (N)» названо ТЕМАМИ и снимает ровно темы — ВКЛЮЧАЯ ПРОЕКТ, потому
+  // что проект и есть тема с типом: кнопка, оставившая его, показала бы после нажатия одну
+  // съёмку, а обещала всю библиотеку. Роль при этом переживает нажатие — она не тема, и
+  // «исходники во всех съёмках» остаётся осмысленным вопросом. Число рядом с кнопкой считается
+  // ТЕМ ЖЕ условием (см. `everywhereQuery`): с живым человеком и с живой ролью, без тем и без
+  // проекта.
+  //
+  // ПРОЕКТ И РОЛЬ СНИМАЮТСЯ ЗДЕСЬ ЖЕ. Проект — это тема, и кнопка, оставившая его стоять,
+  // показала бы после нажатия не «все файлы», а одну съёмку; роль сузила бы их ещё раз.
+  const showAll = () =>
+    patch({
+      topicIds: [],
+      untopiced: false,
+      personId: 0,
+      projectId: 0,
+      fileRole: { roleId: 0, withoutRole: false },
+    });
 
   // Второй счёт спрашивается только тогда, когда в узком фильтре не нашлось ничего: это
   // и есть число в кнопке «искать во всех темах (N)». Спрашивать его заранее — лишний
   // запрос на каждую букву в поиске.
-  const narrowed = topicIds.length > 0 || untopiced;
+  const narrowed = topicIds.length > 0 || untopiced || projectId > 0;
   // «Ничего не нашлось» — это ОТВЕТ, а не отказ. Пока список не прочитался (`isError`), экран
   // показывает `ListFailedState`, и второй счёт под ним не будет ни показан, ни осмыслен: он
   // уйдёт в тот же не отвечающий сервер вторым запросом.
   const nothingFound = !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
   const everywhereQuery = useFilesTotal(
-    { ...filter, topicIds: [], untopiced: false },
+    // `withoutRole` здесь обнулять не нужно: `normalizeGrouping` гасит его вместе с проектом
+    // одним правилом на весь раздел — иначе этот запрос ушёл бы за ОТКАЗОМ (сервер отказывает
+    // на «без роли» без проекта), и кнопка «искать во всех темах» осталась бы без числа.
+    { ...filter, topicIds: [], untopiced: false, projectId: 0 },
     narrowed && nothingFound && !!urlSearch.trim(),
   );
   // ТРЕТИЙ СЧЁТ, по тому же правилу и с той же оговоркой: он один отличает «у паши тут ничего
@@ -312,6 +402,14 @@ export default function FilesPage() {
   const anyRoleQuery = useFilesTotal(
     { ...filter, personRole: 'any' },
     personId > 0 && personRole !== 'any' && nothingFound,
+  );
+  // ЧЕТВЁРТЫЙ СЧЁТ, по тому же правилу: «в этой роли пусто» и «в проекте пусто» — разные
+  // ответы, и различает их одно число. Спрашивается только на пустой выдаче и только когда
+  // роль действительно сузила, иначе он повторял бы то, что уже на экране.
+  const roleNarrowed = fileRole.roleId > 0 || fileRole.withoutRole;
+  const wholeProjectQuery = useFilesTotal(
+    { ...filter, roleId: 0, withoutRole: false },
+    projectId > 0 && roleNarrowed && nothingFound,
   );
 
   if (!mayRead) return <NoAccessState />;
@@ -338,7 +436,7 @@ export default function FilesPage() {
           everywhereTotal={
             everywhereQuery.data ? Number(everywhereQuery.data.total ?? 0) : undefined
           }
-          onSearchEverywhere={() => patch({ topicIds: [], untopiced: false })}
+          onSearchEverywhere={() => patch({ topicIds: [], untopiced: false, projectId: 0 })}
           onClearPerson={() => patch({ personId: 0 })}
           onClearSearch={() => {
             setSearchInput('');
@@ -360,6 +458,26 @@ export default function FilesPage() {
           narrowed={narrowed}
           anyRoleTotal={anyRoleQuery.data ? Number(anyRoleQuery.data.total ?? 0) : undefined}
           onAnyRole={() => patch({ personRole: 'any' })}
+          onShowAll={showAll}
+        />
+      );
+    }
+    // ГРУППИРОВКА СТОИТ ВЫШЕ ТЕМ И «РАЗОБРАТЬ» по тому же доводу, что и человек: это
+    // свежее сужение, заданное одним движением, и «в теме пусто» на непустой теме прочлось
+    // бы как поломка темы.
+    if (projectId > 0 || roleNarrowed) {
+      return (
+        <EmptyGroupingState
+          projectId={projectId}
+          projectName={activeProject?.name ?? undefined}
+          roleName={roles.find((r) => Number(r.id) === fileRole.roleId)?.name ?? undefined}
+          roleId={fileRole.roleId}
+          withoutRole={fileRole.withoutRole}
+          narrowedByTopics={topicIds.length > 0 || untopiced}
+          wholeProjectTotal={
+            wholeProjectQuery.data ? Number(wholeProjectQuery.data.total ?? 0) : undefined
+          }
+          onWholeProject={() => patch({ fileRole: { roleId: 0, withoutRole: false } })}
           onShowAll={showAll}
         />
       );
@@ -414,6 +532,11 @@ export default function FilesPage() {
           onNewNote={() => setNewNote(true)}
           className='border-0'
         />
+        {/* ТРИ РЯДА, А НЕ ОДИН, и разделяет их волосяная линия — та же внутренняя структура
+            блока, что и у остальных полос этой поверхности. Ряды разные по смыслу: темы —
+            пересечение ярлыков, проект — один контейнер, роль — связь файла с этим
+            контейнером. Один ряд на всё означал бы, что одинаковые на вид чипы значат три
+            разные вещи и переключаются тремя разными правилами. */}
         <div className='border-t border-hairline px-2.5 py-2'>
           <TopicChips
             topics={topics}
@@ -424,6 +547,28 @@ export default function FilesPage() {
             matched={total === undefined ? undefined : Number(total)}
             searching={!!urlSearch}
             onChange={onTopics}
+          />
+        </div>
+        <div className='border-t border-hairline px-2.5 py-2'>
+          <ProjectChips
+            projects={projects}
+            selected={projectId}
+            matched={total === undefined ? undefined : Number(total)}
+            // Смена проекта СНИМАЕТ роль: роль осмысленна только на связи с проектом, и
+            // перенесённая в соседнюю съёмку она означала бы уже другой вопрос — тот, который
+            // человек не задавал. «Без роли» уходит вместе с проектом тем же правилом в `patch`.
+            onChange={(next) =>
+              patch({ projectId: next, fileRole: { roleId: 0, withoutRole: false } })
+            }
+          />
+        </div>
+        <div className='border-t border-hairline px-2.5 py-2'>
+          <RoleChips
+            roles={roles}
+            value={fileRole}
+            projectName={activeProject?.name ?? undefined}
+            matched={total === undefined ? undefined : Number(total)}
+            onChange={(next) => patch({ fileRole: next })}
           />
         </div>
         {/* ТОЛЬКО ЧТЕНИЕ ОБЪЯСНЯЕТСЯ СТРОКОЙ. Кнопки выключены, а не спрятаны: спрятанного не
@@ -438,10 +583,13 @@ export default function FilesPage() {
             </Text>
           </div>
         )}
-        {activeTopic?.description && (
+        {/* Описание печатает и проект: у него оно и есть та самая «страница проекта» без
+            заведения новой сущности — «что сюда класть» словами человека, который проект
+            завёл. Приоритет у проекта, потому что он — более узкое и более свежее сужение. */}
+        {(activeProject?.description || activeTopic?.description) && (
           <div className='border-t border-hairline px-2.5 py-2'>
             <Text size='micro' variant='label' className='max-w-[80ch]'>
-              {activeTopic.description}
+              {activeProject?.description || activeTopic?.description}
             </Text>
           </div>
         )}
@@ -497,6 +645,9 @@ export default function FilesPage() {
       <FilesSelectionBar
         selected={selectedFresh}
         topics={topics}
+        projects={projects}
+        roles={roles}
+        activeProjectId={projectId}
         writable={writable}
         onClear={selection.clear}
         onDropped={selection.drop}
@@ -536,7 +687,12 @@ export default function FilesPage() {
               ? 'включён режим чтения — переключите его в полосе сверху'
               : 'нужно право files:write — попросите его у супер-админа'
         }
-        topicLabels={chosenTopics.map((t) => t.name ?? '')}
+        // Проект называется В ТОМ ЖЕ списке, что и темы: оверлей обещает, куда попадёт пачка,
+        // и умолчать о проекте значило бы пообещать «разобрать» там, где файлы уедут в съёмку.
+        topicLabels={[
+          ...(activeProject ? [activeProject.name ?? ''] : []),
+          ...chosenTopics.map((t) => t.name ?? ''),
+        ]}
         onFiles={intake}
       />
 
@@ -546,7 +702,9 @@ export default function FilesPage() {
         <PasteIntakeModal
           files={pasted}
           topics={topics}
+          projects={projects}
           presetTopicIds={topicIds}
+          presetProjectId={projectId}
           onCancel={() => setPasted([])}
           onSubmit={(list, batch) => {
             enqueue(list, batch);
@@ -570,6 +728,8 @@ export default function FilesPage() {
         <FileCardModal
           id={Number(id)}
           topics={topics}
+          projects={projects}
+          roles={roles}
           writable={writable}
           onClose={closeCard}
         />
@@ -577,7 +737,20 @@ export default function FilesPage() {
 
       {/* Модалка живёт РЯДОМ с карточкой, а не внутри полосы: полоса — управление сеткой, и
           модалка, смонтированная в ней, исчезла бы вместе с полосой на экране тем. */}
-      {newNote && <NewNoteModal topics={topics} onClose={() => setNewNote(false)} />}
+      {/* ЗАМЕТКА — ПЯТЫЙ ПИСАТЕЛЬ СВЯЗИ, и наследует она то же, что остальные четыре: чипы
+          холста и активный проект. Пока она наследовала пустоту, созданная внутри съёмки
+          заметка уезжала в «разобрать» — при том, что «планирование» стоит прямо в словаре
+          ролей, то есть заметка и есть тот файл, ради которого роль заводили. */}
+      {newNote && (
+        <NewNoteModal
+          topics={topics}
+          projects={projects}
+          roles={roles}
+          presetTopicIds={topicIds}
+          presetProjectId={projectId}
+          onClose={() => setNewNote(false)}
+        />
+      )}
     </div>
   );
 }

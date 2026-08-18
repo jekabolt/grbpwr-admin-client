@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { FileTopic } from 'api/proto-http/admin';
+import type { FileRole, FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -10,7 +10,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
-import { useFilesMutations, useLibraryFile } from '../hooks/useFiles';
+import { isProjectTopic, useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
 import { FailureText } from './failure-text';
@@ -19,6 +19,7 @@ import { FileComments } from './file-comments';
 import { FileOwnersSection } from './file-owners-section';
 import { FileReaderModal } from './file-reader';
 import { FileTasksSection, useFileTasks } from './file-tasks-section';
+import { projectDates } from './topic-chips';
 
 /**
  * Карточка файла — МОДАЛКА ПОВЕРХ СЕТКИ, а не отдельная страница.
@@ -34,17 +35,22 @@ import { FileTasksSection, useFileTasks } from './file-tasks-section';
 export function FileCardModal({
   id,
   topics,
+  projects,
+  roles,
   writable,
   onClose,
 }: {
   id: number;
+  /** Только обычные темы: проекты приезжают отдельно и рисуются своей группой. */
   topics: FileTopic[];
+  projects: FileTopic[];
+  roles: FileRole[];
   /** Уже с учётом и права files:write, и тумблера режима: карточка не решает это сама. */
   writable: boolean;
   onClose: () => void;
 }) {
   const { data, isLoading, isError, error, refetch } = useLibraryFile(id);
-  const { updateFile, deleteFile } = useFilesMutations();
+  const { updateFile, deleteFile, setRoles } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
   const { canRead } = usePermissions();
 
@@ -77,6 +83,68 @@ export function FileCardModal({
   const [closeIntent, setCloseIntent] = useState<'close' | 'note'>('close');
   const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
   const note = isMarkdownNote(file?.fileName ?? '', file?.contentType ?? undefined);
+
+  // ЧТО РИСОВАТЬ ЧИПАМИ — СЛОВАРЬ ПЛЮС ТО, ЧТО ФАЙЛ УЖЕ НЕСЁТ.
+  //
+  // Холст просит словарь БЕЗ архива, и заархивированная тема на файле осталась бы невидимой:
+  // чипа нет, а id сидит в `selected` и уезжает обратно при каждом сохранении. Снять её было
+  // бы нечем — членство есть, а органа нет. Поэтому набор чипов — объединение: словарь и то,
+  // что на файле уже стоит.
+  const carried = useMemo(() => (file?.topics ?? []) as FileTopic[], [file]);
+  const merge = (dict: FileTopic[], want: (t: FileTopic) => boolean) => {
+    const out = dict.slice();
+    for (const t of carried) {
+      if (out.some((x) => Number(x.id) === Number(t.id))) continue;
+      if (want(t)) out.push(t);
+    }
+    return out;
+  };
+  // Что проект, знает СЛОВАРЬ: `LibraryFile.topics` поле `kind` может и не нести, а вот
+  // `LibraryFile.roles` называет id проектов прямо — из двух источников и собирается признак.
+  const projectIds = useMemo(() => {
+    const set = new Set<number>(projects.map((p) => Number(p.id)));
+    for (const r of file?.roles ?? []) set.add(Number(r.projectTopicId));
+    for (const t of carried) if (isProjectTopic(t)) set.add(Number(t.id));
+    return set;
+  }, [projects, carried, file]);
+  const projectChips = merge(projects, (t) => projectIds.has(Number(t.id)));
+  const topicChips = merge(topics, (t) => !projectIds.has(Number(t.id)));
+
+  /**
+   * РОЛЬ ПРАВИТСЯ СВОИМ ВЫЗОВОМ, а не общей кнопкой «сохранить», — тот же довод, что у блока
+   * владельцев: у неё свой RPC и замещающая семантика, и складывать её в «грязную» форму
+   * значило бы обещать откат правки, которого у замены нет.
+   *
+   * ИСТОЧНИК СПИСКА — СЕРВЕР, А НЕ ФОРМА. Проект, только что отмеченный чипом и ещё не
+   * сохранённый, строки связи не имеет — ставить на неё роль некуда, и предложить это значило
+   * бы предложить жест, который отвечает отказом.
+   */
+  const inProjects = useMemo(() => {
+    const roleOf = new Map<number, { roleId: number; roleName: string }>();
+    for (const r of file?.roles ?? []) {
+      roleOf.set(Number(r.projectTopicId), {
+        roleId: Number(r.roleId ?? 0),
+        roleName: r.roleName ?? '',
+      });
+    }
+    return carried
+      .filter((t) => projectIds.has(Number(t.id)))
+      .map((t) => ({
+        id: Number(t.id),
+        name: t.name ?? '',
+        role: roleOf.get(Number(t.id)),
+      }));
+  }, [carried, projectIds, file]);
+
+  const applyRole = async (projectTopicId: number, roleId: number) => {
+    setFailure(undefined);
+    try {
+      await setRoles.mutateAsync({ fileIds: [id], projectTopicId, roleId });
+      await refetch();
+    } catch (e) {
+      setFailure({ e, fallback: 'не удалось сменить роль' });
+    }
+  };
 
   // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ПРАВКА. Поле с текстом и мёртвая кнопка
   // рядом — тупик: человек видит заполненное поле и не понимает, чего от него ещё хотят.
@@ -257,10 +325,126 @@ export function FileCardModal({
             </div>
           </div>
 
+          {/* ПРОЕКТЫ — ОТДЕЛЬНАЯ ГРУППА, И ЭТО НЕ КОСМЕТИКА. Чип проекта и чип темы выглядят
+              одинаково, а значат разное: тема — ярлык, проект — контейнер, у которого внутри
+              ещё и роль. Пока они лежали в одном ряду, снятие «съёмки» читалось как снятие
+              ярлыка, а стоило роли. */}
+          <div className='flex flex-col gap-1'>
+            <GroupLabel>проекты</GroupLabel>
+            <ChipRow>
+              {projectChips.map((t) => {
+                const pid = Number(t.id);
+                const on = selected.includes(pid);
+                const d = projectDates(t);
+                return (
+                  <Chip
+                    key={pid}
+                    selected={on}
+                    pressed={on}
+                    disabled={!writable}
+                    title={
+                      writable
+                        ? d || undefined
+                        : 'только чтение — проекты не переставить'
+                    }
+                    onClick={() =>
+                      setSelected((p) => (p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]))
+                    }
+                  >
+                    {t.name}
+                  </Chip>
+                );
+              })}
+              {!projectChips.length && (
+                <Text size='micro' variant='label' component='span'>
+                  проектов пока нет
+                </Text>
+              )}
+            </ChipRow>
+            {/* ФРАЗА, КОТОРУЮ ИНАЧЕ УЗНАЮТ ОПЫТОМ. Снятие чипа проекта удаляет строку связи —
+                вместе с ролью, которая на ней стоит. Это правильное поведение (роль без
+                проекта не существует), но человек обязан узнать о нём отсюда, а не обнаружив
+                пропажу. */}
+            <Text size='micro' variant='label'>
+              снимете чип проекта — исчезнет и роль файла в нём: роль стоит на самой связи, и
+              вместе со связью удаляется. вернуть её можно, снова поставив проект и выбрав роль
+              ниже.
+            </Text>
+            {/* ПРЕДУПРЕЖДЕНИЕ ИМЕНЕМ, а не общей фразой: оно печатается ровно тогда, когда
+                снятый проект действительно нёс роль, и называет, какую именно. */}
+            {(() => {
+              const losing = inProjects.filter(
+                (p) => !selected.includes(p.id) && p.role && p.role.roleId > 0,
+              );
+              if (!losing.length) return null;
+              return (
+                <Text size='micro'>
+                  не сохранено:{' '}
+                  {losing.map((p) => `«${p.name}» — «${p.role?.roleName}»`).join(', ')} — эта роль
+                  пропадёт вместе со связью, когда вы нажмёте «сохранить»
+                </Text>
+              );
+            })()}
+          </div>
+
+          {/* РОЛЬ ФАЙЛА В ПРОЕКТЕ — тем же жестом, что и всё остальное в карточке, но своим
+              вызовом: она применяется сразу, кнопки «сохранить» не ждёт. */}
+          {inProjects.length > 0 && (
+            <div className='flex flex-col gap-1'>
+              <GroupLabel>роль в проекте</GroupLabel>
+              {inProjects.map((p) => (
+                <div key={p.id} className='flex flex-wrap items-center gap-1.5'>
+                  <Text size='micro' variant='label' component='span' className='uppercase'>
+                    {p.name}
+                  </Text>
+                  <ChipRow>
+                    <Chip
+                      selected={!p.role?.roleId}
+                      pressed={!p.role?.roleId}
+                      disabled={!writable || setRoles.isPending}
+                      onClick={() => applyRole(p.id, 0)}
+                    >
+                      без роли
+                    </Chip>
+                    {roles.map((r) => {
+                      const rid = Number(r.id);
+                      const on = p.role?.roleId === rid;
+                      return (
+                        <Chip
+                          key={rid}
+                          selected={on}
+                          pressed={on}
+                          disabled={!writable || setRoles.isPending}
+                          title={writable ? undefined : 'только чтение — роль не сменить'}
+                          onClick={() => applyRole(p.id, on ? 0 : rid)}
+                        >
+                          {r.name}
+                        </Chip>
+                      );
+                    })}
+                    {/* Роль, которой нет в словаре холста, — заархивированная. Показать её
+                        обязательно: она стоит на файле, и без чипа человек видел бы «без роли»
+                        там, где роль есть. Снять её можно, назначить заново — нет. */}
+                    {!!p.role?.roleId &&
+                      !roles.some((r) => Number(r.id) === p.role?.roleId) && (
+                        <Chip selected pressed title='роль в архиве: снять можно, назначить заново — нет'>
+                          {p.role?.roleName || `#${p.role?.roleId}`}
+                        </Chip>
+                      )}
+                  </ChipRow>
+                </div>
+              ))}
+              <Text size='micro' variant='label'>
+                роль применяется сразу, «сохранить» её не ждёт. только что отмеченный проект
+                появится здесь после сохранения: до него связи, на которой живёт роль, ещё нет.
+              </Text>
+            </div>
+          )}
+
           <div className='flex flex-col gap-1'>
             <GroupLabel>темы</GroupLabel>
             <ChipRow>
-              {topics.map((t) => (
+              {topicChips.map((t) => (
                 // В ЧТЕНИИ ЧИП ВЫКЛЮЧЕН, А НЕ ПРОСТО МЁРТВ. Раньше он оставался кликабельным
                 // на вид (та же рамка, тот же курсор) и молчал на нажатие — а молчащий на
                 // нажатие элемент читается как поломка, а не как запрет.
@@ -290,7 +474,7 @@ export function FileCardModal({
                   {n}
                 </Chip>
               ))}
-              {!topics.length && !newTopics.length && (
+              {!topicChips.length && !newTopics.length && (
                 <Text size='micro' variant='label' component='span'>
                   тем пока нет
                 </Text>

@@ -8,6 +8,7 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { inheritTopics, type BatchTopics } from '../upload/queue';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
+import { projectDates } from './topic-chips';
 
 /**
  * ПРИЁМНАЯ МОДАЛКА ⌘V.
@@ -70,21 +71,31 @@ function renameFile(file: File, name: string): File {
 export function PasteIntakeModal({
   files,
   topics,
+  projects,
   presetTopicIds,
+  presetProjectId,
   onCancel,
   onSubmit,
 }: {
   /** Что уже вставили. Повторный ⌘V ДОПИСЫВАЕТ сюда — модалка при этом не переоткрывается. */
   files: File[];
+  /** Только обычные темы: проекты приезжают отдельно и рисуются своей группой. */
   topics: FileTopic[];
+  projects: FileTopic[];
   /** Выбранные чипы холста: та же наследственность, что у броска и у кнопки «загрузить». */
   presetTopicIds: number[];
+  /**
+   * Активный проект холста. Наследуется НАРАВНЕ с темами: проект — это тема, и вставка внутри
+   * съёмки, уехавшая в «разобрать», — ровно тот шов, из-за которого группировку и чинили.
+   */
+  presetProjectId: number;
   onCancel: () => void;
   onSubmit: (files: File[], topics: BatchTopics) => void;
 }) {
+  const preset = presetProjectId > 0 ? [...presetTopicIds, presetProjectId] : presetTopicIds;
   const [names, setNames] = useState<string[]>([]);
   const [dims, setDims] = useState<Record<number, string>>({});
-  const [selected, setSelected] = useState<number[]>(presetTopicIds);
+  const [selected, setSelected] = useState<number[]>(preset);
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [newTopic, setNewTopic] = useState('');
 
@@ -114,9 +125,9 @@ export function PasteIntakeModal({
       ? [...newTopics, typed]
       : newTopics;
 
-  const inheritedNames = presetTopicIds
-    .map((id) => topics.find((t) => Number(t.id) === id)?.name)
-    .filter(Boolean) as string[];
+  const nameOf = (id: number) =>
+    [...topics, ...projects].find((t) => Number(t.id) === id)?.name;
+  const inheritedNames = preset.map(nameOf).filter(Boolean) as string[];
 
   const ready = files.length > 0 && names.length === files.length && names.every((n) => n.trim());
   const noExtension = names.some((n) => n.trim() && !/\.[a-z0-9]{1,5}$/i.test(n.trim()));
@@ -219,6 +230,46 @@ export function PasteIntakeModal({
           </Text>
         )}
 
+        {/* ПРОЕКТЫ — СВОЯ ГРУППА. Тот же довод, что в карточке файла: чип проекта и чип темы
+            выглядят одинаково, а кладут их с разной мыслью. Роли здесь нет намеренно —
+            вставка попадает в проект БЕЗ роли, как и бросок: приёмная куча законна, а
+            спрашивать роль в момент вставки значило бы задерживать отправку вопросом, ответ на
+            который чаще всего «потом разберу». */}
+        {projects.length > 0 && (
+          <div className='flex flex-col gap-1 border-t border-hairline pt-2'>
+            <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
+              проекты
+            </Text>
+            <ChipRow>
+              {projects.map((p) => {
+                const id = Number(p.id);
+                const on = selected.includes(id);
+                const d = projectDates(p);
+                return (
+                  <Chip
+                    key={id}
+                    selected={on}
+                    pressed={on}
+                    title={
+                      presetProjectId === id ? 'выбран на холсте' : d || undefined
+                    }
+                    onClick={() =>
+                      setSelected((prev) =>
+                        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                      )
+                    }
+                  >
+                    {p.name}
+                  </Chip>
+                );
+              })}
+            </ChipRow>
+            <Text size='micro' variant='label' component='p'>
+              вставка попадёт в проект без роли — роль проставляют потом, выделив файлы в сетке
+            </Text>
+          </div>
+        )}
+
         <div className='flex flex-col gap-1 border-t border-hairline pt-2'>
           <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
             темы
@@ -270,12 +321,7 @@ export function PasteIntakeModal({
           </div>
           <Text size='micro' variant='label' component='p'>
             {selected.length || pendingNew.length
-              ? `встанут на вставку: ${[
-                  ...selected
-                    .map((id) => topics.find((t) => Number(t.id) === id)?.name)
-                    .filter(Boolean),
-                  ...pendingNew,
-                ].join(', ')}`
+              ? `встанут на вставку: ${[...selected.map(nameOf).filter(Boolean), ...pendingNew].join(', ')}`
               : inheritedNames.length
                 ? 'темы сняты — вставка уедет в «разобрать»'
                 : 'тем нет — вставка уедет в «разобрать». это нормальный ход, разобрать можно позже'}

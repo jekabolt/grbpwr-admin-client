@@ -75,9 +75,14 @@ function personRoleEnum(role: PersonRoleFilter): LibraryFilePersonRole | undefin
  * имя роли, — и ни один из этих случаев не стоит того, чтобы экран упал или показал пустоту:
  * непонятое значение просто не фильтрует.
  */
-export function personIdFromUrl(v: string | null): number {
+/** Положительный id из адреса; всё остальное — ноль, то есть «фильтра нет». */
+export function idFromUrl(v: string | null): number {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+}
+
+export function personIdFromUrl(v: string | null): number {
+  return idFromUrl(v);
 }
 
 export function personRoleFromUrl(v: string | null): PersonRoleFilter {
@@ -89,6 +94,46 @@ export function personRoleToUrl(role: PersonRoleFilter): string | undefined {
   if (role === 'uploaded') return 'up';
   if (role === 'owner') return 'own';
   return undefined;
+}
+
+/* ── группировка: проект и роль ───────────────────────────────────────────────────────── */
+
+/**
+ * ПРОЕКТ — ЭТО ТЕМА С ТИПОМ, а не отдельная сущность. Пустой `kind` значит «plain»: так
+ * выглядит тема, заведённая до того, как поле появилось.
+ */
+export function isProjectTopic(t: { kind?: string }): boolean {
+  return (t.kind ?? '') === 'project';
+}
+
+/**
+ * ФИЛЬТР РОЛИ — ОДИН РЯД С ДВУМЯ РОДАМИ ПОЛОЖЕНИЙ.
+ *
+ * `roleId` — роль из закрытого словаря. `withoutRole` — приёмная куча ВНУТРИ проекта: «что я
+ * сюда бросил и ещё не разобрал». Вместе они не встречаются: «в роли X и без роли» пусто по
+ * построению, и ряд одиночного выбора этого просто не даёт собрать.
+ */
+export type FileRoleFilter = { roleId: number; withoutRole: boolean };
+
+export const NO_ROLE_URL = 'none';
+
+/**
+ * РАЗБОР ГЛУХ К МУСОРУ — то же правило, что у человека выше.
+ *
+ * `hasProject` не украшение: «без роли» без проекта сервер ОТКАЗЫВАЕТ, а не игнорирует (в
+ * одиночку это «почти вся библиотека», и тихо показанное «больше, чем просили» — ровно тот
+ * способ, которым из этой библиотеки утекает имя). Поэтому положение, оставшееся в адресе
+ * после снятия проекта, здесь и гасится.
+ */
+export function fileRoleFromUrl(v: string | null, hasProject: boolean): FileRoleFilter {
+  if (v === NO_ROLE_URL) return { roleId: 0, withoutRole: hasProject };
+  return { roleId: idFromUrl(v), withoutRole: false };
+}
+
+/** `undefined` — в адресе роли не будет: умолчание в ссылке только шумит. */
+export function fileRoleToUrl(r: FileRoleFilter): string | undefined {
+  if (r.withoutRole) return NO_ROLE_URL;
+  return r.roleId > 0 ? String(r.roleId) : undefined;
 }
 
 export type FilesFilter = {
@@ -107,6 +152,21 @@ export type FilesFilter = {
    */
   personId?: number;
   personRole?: PersonRoleFilter;
+  /**
+   * ОДИН проект, а не набор. Технически это обычный id темы, поэтому он СКЛАДЫВАЕТСЯ с
+   * `topicIds`, а не заменяет их.
+   *
+   * Одиночный выбор держится на трёх вещах: одно значение в адресе, одна семантика на весь
+   * тулбар и картинка «я работаю в одном проекте». НЕ на том, что «двух ролей не бывает по
+   * построению» — это неверно: файл со строками (F, съёмка, исходники) и (F, лукбук, готовое)
+   * удовлетворяет обоим условиям, и «И» по двум ролям даёт не пустоту, а множество
+   * ПЕРЕИСПОЛЬЗОВАННЫХ файлов. Довод записан здесь целиком, чтобы через полгода его не
+   * «починили» на мультивыбор, обнаружив ложность прежнего.
+   */
+  projectId?: number;
+  roleId?: number;
+  /** Только вместе с проектом; в одиночку сервер отказывает. */
+  withoutRole?: boolean;
 };
 
 /**
@@ -123,6 +183,28 @@ function normalizePerson(f: FilesFilter): { id: number; role: PersonRoleFilter }
 }
 
 /**
+ * ГРУППИРОВКА ПРИВОДИТСЯ К ВИДУ ОДИН РАЗ, здесь же, — и по двум разным причинам.
+ *
+ * «Без роли» без проекта сервер ОТКАЗЫВАЕТ. Ослабление фильтра собирается из этого же объекта
+ * (`{...filter, projectId: 0}` в кнопках пустого экрана), и забудь оно снять флажок — кнопка
+ * «показать шире» вернула бы отказ вместо более широкой выдачи. Одно правило в одном месте
+ * вместо трёх согласованных на трёх экранах.
+ *
+ * Роль ЖЕ без проекта — полноценный вопрос («все исходники по всем съёмкам»), и обнулять её
+ * здесь нельзя: это не тот случай, что `personRole`, которую сервер без человека игнорирует.
+ */
+function normalizeGrouping(f: FilesFilter): {
+  project: number;
+  role: number;
+  withoutRole: boolean;
+} {
+  const project = Math.max(0, Math.trunc(Number(f.projectId ?? 0) || 0));
+  const role = Math.max(0, Math.trunc(Number(f.roleId ?? 0) || 0));
+  const withoutRole = project > 0 && !!f.withoutRole;
+  return { project, role: withoutRole ? 0 : role, withoutRole };
+}
+
+/**
  * ОДНО МЕСТО, ГДЕ ФИЛЬТР ПРЕВРАЩАЕТСЯ В ЗАПРОС.
  *
  * Страницу и счёт «сколько нашлось бы шире» спрашивают два разных хука, и разойдись они хоть
@@ -131,6 +213,7 @@ function normalizePerson(f: FilesFilter): { id: number; role: PersonRoleFilter }
  */
 function toRequest(filter: FilesFilter) {
   const { id, role } = normalizePerson(filter);
+  const g = normalizeGrouping(filter);
   return {
     topicIds: filter.topicIds,
     untopiced: filter.untopiced,
@@ -138,6 +221,9 @@ function toRequest(filter: FilesFilter) {
     sortBy: sortBy(filter.sort),
     personId: id,
     personRole: personRoleEnum(role),
+    projectTopicId: g.project,
+    roleId: g.role,
+    withoutRole: g.withoutRole,
   };
 }
 
@@ -147,6 +233,7 @@ export const filesKeys = {
   // разных ключа под ним означали бы два запроса и две копии кэша на одну выдачу.
   list: (f: FilesFilter) => {
     const p = normalizePerson(f);
+    const g = normalizeGrouping(f);
     return [
       ...filesKeys.all,
       'list',
@@ -156,6 +243,9 @@ export const filesKeys = {
       f.sort,
       p.id,
       p.role,
+      g.project,
+      g.role,
+      g.withoutRole,
     ] as const;
   },
   /**
@@ -167,6 +257,7 @@ export const filesKeys = {
    */
   total: (f: FilesFilter) => {
     const p = normalizePerson(f);
+    const g = normalizeGrouping(f);
     return [
       ...filesKeys.all,
       'total',
@@ -175,6 +266,9 @@ export const filesKeys = {
       f.search,
       p.id,
       p.role,
+      g.project,
+      g.role,
+      g.withoutRole,
     ] as const;
   },
   file: (id: number) => [...filesKeys.all, 'file', id] as const,
@@ -188,6 +282,9 @@ export const filesKeys = {
    * следующий получает чужую — молча и через раз. Ровно этот класс уже ловился в волне.
    */
   topics: (includeArchived = false) => [...filesKeys.all, 'topics', includeArchived] as const,
+  /** Архив разводит ключ по той же причине, что и у тем: пикеры архив не предлагают, словарь —
+   * показывает, и один ключ на два ответа отдавал бы чужую страницу через раз. */
+  roles: (includeArchived = false) => [...filesKeys.all, 'roles', includeArchived] as const,
 };
 
 /**
@@ -236,6 +333,18 @@ export function useFileTopics(includeArchived = false) {
   return useQuery({
     queryKey: filesKeys.topics(includeArchived),
     queryFn: () => filesService.listTopics(includeArchived),
+    staleTime: URL_SAFE_STALE_TIME,
+  });
+}
+
+/**
+ * Словарь ролей. Живёт тем же `staleTime`, что и темы: это такой же редко меняющийся справочник,
+ * который читают пять мест сразу.
+ */
+export function useFileRoles(includeArchived = false) {
+  return useQuery({
+    queryKey: filesKeys.roles(includeArchived),
+    queryFn: () => filesService.listRoles(includeArchived),
     staleTime: URL_SAFE_STALE_TIME,
   });
 }
@@ -327,6 +436,16 @@ export function useFilesMutations() {
     mutationFn: filesService.assignTopics,
     onSuccess: invalidate,
   });
+  /**
+   * Роль ходит ТЕМ ЖЕ путём, что и остальные правки: одна мутация на раздел, одна инвалидация.
+   * Свой `invalidateQueries(filesKeys.all)` здесь оставил бы устаревшим счётчик самой роли
+   * (`ListFileRoles` считает файлы по всем проектам) — он лежит под тем же корнем и обновляется
+   * этой же строкой.
+   */
+  const setRoles = useMutation({
+    mutationFn: filesService.setRoles,
+    onSuccess: invalidate,
+  });
 
-  return { updateFile, deleteFile, assignTopics, invalidate };
+  return { updateFile, deleteFile, assignTopics, setRoles, invalidate };
 }
