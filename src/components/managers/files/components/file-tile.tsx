@@ -25,6 +25,20 @@ export function hasViewPath(file: LibraryFile): boolean {
 }
 
 /**
+ * ПОЛОСА ИНВЕРТИРУЕТСЯ ЦЕЛИКОМ, ВКЛЮЧАЯ БЕЙДЖИ.
+ *
+ * Тон `ink` («restricted») — это чернильные рамка и текст, а инвертированный подвал чернильный
+ * фоном: бейдж пропадал на наведении целиком, и «файл виден не всем» читалось как «виден всем».
+ * Цветные (`no topic`, `by link`) выживали, но оставались на чёрной полосе вторым цветовым
+ * языком — полоса, инвертированная наполовину, читается как сбой отрисовки, а не как состояние.
+ *
+ * Поэтому на наведении бейджи печатаются фоном плитки, а смысл остаётся при СЛОВЕ: «restricted»
+ * и «no topic» названы, а не только раскрашены. В покое тон возвращается — инверсия это
+ * состояние, а не новая палитра.
+ */
+const PILL_INVERTS = 'group-hover/foot:border-bgColor group-hover/foot:text-bgColor';
+
+/**
  * Плитка холста.
  *
  * `div`, а не `Tile`: внутри живут собственные кнопки (выбор, «построить заново»), а кнопка
@@ -143,7 +157,7 @@ export function FileTile({
           {formatBytes(Number(file.sizeBytes ?? 0))}
         </Text>
         {noTopics && (
-          <Pill tone='warn' className='flex-none'>
+          <Pill tone='warn' className={cn('flex-none', split && PILL_INVERTS)}>
             no topic
           </Pill>
         )}
@@ -151,7 +165,11 @@ export function FileTile({
             открытого и в шапке блока доступа, и три вписанных строками копии расходились бы
             молча. */}
         {!!badge && (
-          <Pill tone={badge.tone} className='flex-none' title={badge.title}>
+          <Pill
+            tone={badge.tone}
+            className={cn('flex-none', split && PILL_INVERTS)}
+            title={badge.title}
+          >
             {badge.label}
           </Pill>
         )}

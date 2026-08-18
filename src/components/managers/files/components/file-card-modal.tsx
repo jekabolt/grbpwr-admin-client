@@ -117,7 +117,11 @@ export function FileCardModal({
    * повторён здесь буква в букву — иначе секция гасила бы запрос, а подвал его включал, и на
    * аккаунте без права он всё равно уходил бы за заведомым отказом.
    */
-  const { data: fileTasks } = useFileTasks(id, canRead(SECTION.tasks));
+  const {
+    data: fileTasks,
+    isLoading: tasksLoading,
+    isError: tasksFailed,
+  } = useFileTasks(id, canRead(SECTION.tasks));
   const heldByTasks = (fileTasks?.tasks ?? []).length;
 
   const file = data?.file;
@@ -625,13 +629,26 @@ export function FileCardModal({
             <CardLine
               label='tasks'
               value={
-                // Без права `tasks:read` запрос погашен, и число сказать нечем. Молчание
-                // честнее нуля: «none» здесь означало бы «файл ни к чему не прицеплен».
+                /**
+                 * «NONE» — ЭТО УТВЕРЖДЕНИЕ, А НЕ ЗАГЛУШКА, и говорить его можно ТОЛЬКО когда
+                 * сервер ответил пустым списком.
+                 *
+                 * Три состояния до ответа различаются, потому что их различает и тело строки:
+                 * оно говорит «loading…» и «сервер ещё не отдаёт задачи файла». Свёрнутая
+                 * строка, утверждающая обратное, врёт молча — а свёрнута она по умолчанию, и
+                 * тела человек не увидит. Отказ здесь навсегда: у `useFileTasks` стоит
+                 * `retry: false`, то есть 404 невыкаченного роута приходит один раз и живёт до
+                 * перезагрузки.
+                 */
                 !canRead(SECTION.tasks)
                   ? 'no access to tasks'
-                  : heldByTasks
-                    ? (fileTasks?.tasks ?? []).map((t) => `#${t.taskId}`).join(', ')
-                    : 'none'
+                  : tasksLoading
+                    ? '…'
+                    : tasksFailed
+                      ? 'unknown'
+                      : heldByTasks
+                        ? (fileTasks?.tasks ?? []).map((t) => `#${t.taskId}`).join(', ')
+                        : 'none'
               }
               open={lines.task}
               onToggle={() => toggleLine('task')}
