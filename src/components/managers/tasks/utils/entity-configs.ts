@@ -1,5 +1,6 @@
 import { adminService } from 'api/api';
 import type {
+  FileTopic,
   common_ArchiveList,
   common_Fitting,
   common_Order,
@@ -8,6 +9,9 @@ import type {
   common_Sample,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
+import { filesService } from 'components/managers/files/api/filesService';
+import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
+import { isProjectTopic } from 'components/managers/files/hooks/useFiles';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
@@ -267,6 +271,56 @@ export const runConfig: EntityConfig = {
   resolve: async (value) => {
     const r = await adminService.GetProductionRun({ id: value as number });
     return r?.run ? runOption(r.run) : null;
+  },
+};
+
+// ---- project / проект библиотеки файлов (0322) ------------------------------
+// Тема с типом `project` — съёмка, лукбук, дроп. Своего списка у неё нет: словарь тем
+// отдаётся целиком одним запросом, поэтому режим `client` — как у продуктов и партий.
+function projectOption(t: FileTopic): EntityOption {
+  const id = t.id ?? 0;
+  return {
+    value: id,
+    label: t.name || `project #${id}`,
+    // Число файлов — из ТОГО ЖЕ ответа, которым нарисован список: второго счёта тем же
+    // вопросом раздел не заводит.
+    sublabel: [`#${id}`, t.filesCount ? `${t.filesCount} files` : '', t.archived ? ARCHIVED_WORD : '']
+      .filter(Boolean)
+      .join(' · '),
+  };
+}
+
+export const projectConfig: EntityConfig = {
+  kind: 'project',
+  empty: 0,
+  mode: 'client',
+  searchPlaceholder: 'search projects by name…',
+  emptyResult: 'no projects',
+  /**
+   * ПИКЕР ПРЕДЛАГАЕТ ТОЛЬКО ЖИВЫЕ ПРОЕКТЫ — двумя разными отсевами, и оба несущие.
+   *
+   * АРХИВ снимается ЗАПРОСОМ (`listTopics(false)`): архив темы значит «работа закончена»,
+   * и заводить с доски задачу на законченную съёмку — не тот жест, который предлагают
+   * буднично. Путь к ней остаётся: страница самого проекта.
+   *
+   * ЯРЛЫК снимается УСЛОВИЕМ `isProjectTopic` — тем самым, что живёт в разделе файлов, а не
+   * второй его копией: сервер отвечает `tasks can only be linked to a project topic`, и
+   * предлагать в пикере жест, у которого один исход — отказ, нельзя.
+   */
+  load: async () => {
+    const r = await filesService.listTopics(false);
+    return (r.topics ?? []).filter(isProjectTopic).map(projectOption);
+  },
+  /**
+   * РАЗРЕШЕНИЕ ИМЕНИ — СО СЛОВАРЁМ ЦЕЛИКОМ, ВКЛЮЧАЯ АРХИВ. Чип старой задачи обязан
+   * называться именем и после того, как съёмку заархивировали: «project #17» на карточке,
+   * которая вчера звалась «съёмка осень», читается как потерянная ссылка. Пометка архива
+   * при этом стоит рядом — тем же словом, что на экране тем.
+   */
+  resolve: async (value) => {
+    const r = await filesService.listTopics(true);
+    const t = (r.topics ?? []).find((x) => Number(x.id) === Number(value));
+    return t ? projectOption(t) : null;
   },
 };
 

@@ -142,9 +142,6 @@ function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
  */
 function taskInsertToWire(t: TaskInsert): common_TaskInsert {
   return {
-    // Поле приехало регеном раньше своей волны; пока форма задачи о проекте не знает, на провод
-    // уходит тот же ноль, что уходил до регена.
-    projectTopicId: 0,
     ...t,
     mediaAnnotations: (t.mediaAnnotations ?? [])
       .filter((m) => m.mediaId > 0 && t.mediaIds.includes(m.mediaId))
@@ -173,6 +170,7 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     fittingId: i?.fittingId ?? 0,
     productionRunId: i?.productionRunId ?? 0,
     sampleId: i?.sampleId ?? 0,
+    projectTopicId: i?.projectTopicId ?? 0,
     mediaAnnotations: (i?.mediaAnnotations ?? []).map(mapMediaAnnotations),
   };
 }
@@ -249,8 +247,7 @@ export const tasksService: TasksService = {
         fittingId: filter.fittingId ?? 0,
         productionRunId: filter.productionRunId ?? 0,
         sampleId: filter.sampleId ?? 0,
-        // См. довод у `taskInsertToWire`: фильтр по проекту приезжает своей волной.
-        projectTopicId: 0,
+        projectTopicId: filter.projectTopicId ?? 0,
         includeArchived: filter.includeArchived,
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),

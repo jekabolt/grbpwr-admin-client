@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { filesService } from 'components/managers/files/api/filesService';
+import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
@@ -58,6 +60,15 @@ function useLinkName(link: TaskLink) {
             to: tcId ? `/tech-cards/${tcId}?tab=samples&sample=${link.id}` : undefined,
           };
         }
+        if (link.kind === 'project') {
+          // СЛОВАРЬ С АРХИВОМ: чип обязан звать съёмку по имени и после того, как её убрали
+          // с глаз, иначе «project #17» читается как оборванная ссылка. Пометка архива —
+          // тем же словом, что на экране тем.
+          const r = await filesService.listTopics(true);
+          const t = (r.topics ?? []).find((x) => Number(x.id) === link.id);
+          if (!t?.name) return { name: null };
+          return { name: t.archived ? `${t.name} · ${ARCHIVED_WORD}` : t.name };
+        }
         if (link.kind === 'run') {
           // No name field — compose status + owning style.
           const r = await adminService.GetProductionRun({ id: link.id });
@@ -82,6 +93,7 @@ const KIND_PREFIX: Record<TaskLink['kind'], string> = {
   fitting: 'fitting',
   sample: 'sample',
   run: 'run',
+  project: 'project',
 };
 
 export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: () => void }) {

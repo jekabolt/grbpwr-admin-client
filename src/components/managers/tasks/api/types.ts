@@ -91,6 +91,13 @@ export interface TaskInsert {
   fittingId: number; // примерка / try-on session (GetFitting)
   productionRunId: number; // производственная партия / production run (GetProductionRun); 0 = none
   sampleId: number; // образец / sample (GetSample); 0 = none (new-flow NF link)
+  // ПРОЕКТ БИБЛИОТЕКИ ФАЙЛОВ — восьмая типизированная ссылка (0322). Съёмка, лукбук, дроп:
+  // контекст, В КОТОРОМ делается работа. Колонка, а не связь многие-ко-многим — задача это
+  // единица работы, и работа происходит в ОДНОМ контексте.
+  //
+  // Ссылка ПЕРЕЖИВАЕТ судьбу проекта: понижение проекта в обычную тему и удаление темы
+  // обнуляют её (SET NULL), а сама карточка остаётся — она про работу, а не про съёмку.
+  projectTopicId: number; // тема kind='project' (ListFileTopics); 0 = none
   // УКАЗАНИЯ НА ВЛОЖЕНИЯХ — ЧАСТЬ СОДЕРЖИМОГО, а не отдельный ресурс: сервер заменяет их ЦЕЛИКОМ
   // вместе с карточкой, ровно как mediaIds. Присутствия у repeated-поля нет, поэтому клиент обязан
   // слать то, что прочитал, — иначе первое же сохранение карточки стёрло бы всё нарисованное.
@@ -154,6 +161,10 @@ export interface ListTasksFilter {
   fittingId?: number;
   productionRunId?: number;
   sampleId?: number;
+  // «Какие задачи у этого проекта» — тот же фильтр, что у семи соседей, а не отдельный RPC:
+  // список тот же, просто суженный, и ходит он под тем же rd(tasks), что и доска.
+  // Несуществующий проект отдаёт пустой список, а не отличимый отказ.
+  projectTopicId?: number;
   includeArchived?: boolean; // false/undefined = active only; true = include archived
 }
 
@@ -181,6 +192,7 @@ export function emptyTaskInsert(): TaskInsert {
     fittingId: 0,
     productionRunId: 0,
     sampleId: 0,
+    projectTopicId: 0,
     mediaAnnotations: [],
   };
 }

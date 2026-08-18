@@ -87,7 +87,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
 
-  // The combined type-first link picker edits all seven FKs at once, so it reads them
+  // The combined type-first link picker edits all eight FKs at once, so it reads them
   // via useWatch and writes them back through setValue rather than one Controller each.
   const links = {
     techCardId: useWatch({ control, name: 'techCardId' }),
@@ -97,6 +97,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     fittingId: useWatch({ control, name: 'fittingId' }),
     sampleId: useWatch({ control, name: 'sampleId' }),
     productionRunId: useWatch({ control, name: 'productionRunId' }),
+    projectTopicId: useWatch({ control, name: 'projectTopicId' }),
   };
 
   // Вставка ссылки правит поле СНАРУЖИ Controller'а: она меняет строку целиком и возвращает

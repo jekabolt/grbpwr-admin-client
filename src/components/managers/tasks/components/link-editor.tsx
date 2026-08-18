@@ -9,6 +9,7 @@ import {
   fittingConfig,
   orderConfig,
   productConfig,
+  projectConfig,
   runConfig,
   sampleConfig,
   techCardConfig,
@@ -30,7 +31,8 @@ export type LinkField =
   | 'archiveId'
   | 'fittingId'
   | 'sampleId'
-  | 'productionRunId';
+  | 'productionRunId'
+  | 'projectTopicId';
 
 type LinkType = { field: LinkField; label: string; config: EntityConfig };
 
@@ -42,6 +44,7 @@ const LINK_TYPES: LinkType[] = [
   { field: 'sampleId', label: 'sample', config: sampleConfig },
   { field: 'productionRunId', label: 'run', config: runConfig },
   { field: 'archiveId', label: 'timeline drop', config: archiveConfig },
+  { field: 'projectTopicId', label: 'project', config: projectConfig },
 ];
 
 const typeItems = LINK_TYPES.map((t) => ({ value: t.field, label: t.label }));

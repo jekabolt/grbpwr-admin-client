@@ -1,6 +1,14 @@
 import { TaskInsert } from '../api/types';
 
-export type LinkKind = 'techcard' | 'product' | 'order' | 'archive' | 'fitting' | 'sample' | 'run';
+export type LinkKind =
+  | 'techcard'
+  | 'product'
+  | 'order'
+  | 'archive'
+  | 'fitting'
+  | 'sample'
+  | 'run'
+  | 'project';
 
 export interface TaskLink {
   kind: LinkKind;
@@ -73,6 +81,15 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
       label: `run #${t.productionRunId}`,
       to: `/production-runs/${t.productionRunId}`,
     });
+  // ПРОЕКТ БИБЛИОТЕКИ — не свой роут, а РЕЖИМ холста файлов: `?project=N` уже живой, и
+  // страница проекта появится под тем же адресом. Отдельного `/files/:id` заводить нечего.
+  if (t.projectTopicId > 0)
+    links.push({
+      kind: 'project',
+      id: t.projectTopicId,
+      label: `project #${t.projectTopicId}`,
+      to: `/files?project=${t.projectTopicId}`,
+    });
   return links;
 }
 
@@ -84,6 +101,7 @@ export function taskLinkCount(t: TaskInsert): number {
     (t.archiveId > 0 ? 1 : 0) +
     (t.fittingId > 0 ? 1 : 0) +
     (t.sampleId > 0 ? 1 : 0) +
-    (t.productionRunId > 0 ? 1 : 0)
+    (t.productionRunId > 0 ? 1 : 0) +
+    (t.projectTopicId > 0 ? 1 : 0)
   );
 }
