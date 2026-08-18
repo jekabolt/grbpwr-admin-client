@@ -327,21 +327,10 @@ export function ProjectSections({
   sections,
   emptyRoles,
   pileEmpty,
-  projectName,
-  roleNames,
-  writable,
-  onAddRole,
   renderTile,
 }: {
   /** Только непустые (и сломавшиеся): пустая секция — это строка внизу, а не блок. */
   sections: ProjectSectionView[];
-  /** Имя проекта — в строке про то, чьи это слова. */
-  projectName: string;
-  /** Весь живой словарь ЭТОГО проекта, по порядку: строка называет его целиком. */
-  roleNames: string[];
-  writable: boolean;
-  /** Открывает словарь ролей этого проекта — единственное место, где роли правят. */
-  onAddRole: () => void;
   /**
    * Живые роли словаря, которых в этом проекте нет ни у одного файла.
    *
@@ -381,26 +370,53 @@ export function ProjectSections({
           )}
         </div>
       )}
-      {/* НОВЫЙ РАЗДЕЛ — ЭТО НОВОЕ СЛОВО, И СЛОВО ПРИНАДЛЕЖИТ ЭТОМУ ПРОЕКТУ. Ряд стоит внизу
-          страницы, а не в шапке: сначала смотрят, что уже есть, и только потом заводят ещё
-          одно. Он же единственный вход в правку словаря — переименование, порядок, архив и
-          слияние живут за той же кнопкой. */}
-      <div className='flex flex-wrap items-center gap-2 border-t border-hairline pt-2'>
-        <Button size='xs' variant='secondary' disabled={!writable} onClick={onAddRole}>
-          + role
-        </Button>
-        {/* `min-w-0` + `break-words` — НЕСУЩАЯ ПАРА, а не уборка, и та же, что вшита в
-            `SectionHeader` и `Tiles`. Имя роли пишет человек, и сервер пускает до 255 знаков
-            ОДНИМ СЛОВОМ: у флекс-элемента `min-width: auto`, то есть «не уже содержимого», а у
-            нерасторжимой строки min-content — всё слово целиком. Оно вылезает из ряда и тянет
-            за собой ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ ВСЕЙ СТРАНИЦЫ — замерено пробой: 1540px при окне
-            1500 и при окне 700. */}
-        <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
-          {roleNames.length
-            ? `a new section is a new word, and the word belongs to “${projectName}” alone: ${roleNames.join(' · ')}. the shoot next door keeps its own set, and neither list is offered to the other.`
-            : `“${projectName}” has no words of its own yet — files sit in it unsorted, which is a lawful state. a role names a sub-group of THIS project and is not shared with the library.`}
-        </Text>
-      </div>
     </>
+  );
+}
+
+/**
+ * РЯД «+ ROLE» — ЕДИНСТВЕННЫЙ ВХОД В СЛОВАРЬ ЭТОГО ПРОЕКТА, и живёт он на СТРАНИЦЕ, а не
+ * внутри секций.
+ *
+ * Так было не сразу, и цена ошибки названа вслух: пока ряд стоял внутри `ProjectSections`, он
+ * исчезал вместе с ними — а исчезают они ровно на ПУСТОМ проекте, где вместо секций рисуется
+ * пустое состояние. То есть свежесозданный проект (главный путь новой кнопки «+ new project»)
+ * не давал ни увидеть засеянные сервером роли, ни завести, ни переименовать, ни слить — пока в
+ * него не упадёт первый файл. При этом экран тем обещает обратное: «open a project — and its
+ * roles are started, renamed, merged and retired on its own page».
+ *
+ * Ряд стоит ВНИЗУ страницы, а не в шапке: сначала смотрят, что уже есть, и только потом
+ * заводят ещё одно слово.
+ */
+export function ProjectRolesRow({
+  projectName,
+  roleNames,
+  writable,
+  onAddRole,
+}: {
+  projectName: string;
+  /** Весь живой словарь ЭТОГО проекта, по порядку: строка называет его целиком. */
+  roleNames: string[];
+  writable: boolean;
+  /** Открывает словарь ролей этого проекта — единственное место, где роли правят. */
+  onAddRole: () => void;
+}) {
+  return (
+    <div className='flex flex-wrap items-center gap-2 border-t border-hairline pt-2'>
+      <Button size='xs' variant='secondary' disabled={!writable} onClick={onAddRole}>
+        + role
+      </Button>
+      {/* `min-w-0` + `break-words` — НЕСУЩАЯ ПАРА, а не уборка, и та же, что вшита в
+          `SectionHeader` и `Tiles`. Имя роли пишет человек, и сервер пускает до 255 знаков
+          ОДНИМ СЛОВОМ: у флекс-элемента `min-width: auto`, то есть «не уже содержимого», а у
+          нерасторжимой строки min-content — всё слово целиком. Оно вылезает из ряда и тянет
+          за собой ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ ВСЕЙ СТРАНИЦЫ — замерено пробой: 1540px при окне
+          1500 и при окне 700. */}
+      <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
+        {roleNames.length
+          ? `a new section is a new word, and the word belongs to “${projectName}” alone: ${roleNames.join(' · ')}. the shoot next door keeps its own set, and neither list is offered to the other.`
+          : `“${projectName}” has no words of its own yet — files sit in it unsorted, which is a lawful state. a role names a sub-group of THIS project and is not shared with the library.`}
+      </Text>
+    </div>
   );
 }

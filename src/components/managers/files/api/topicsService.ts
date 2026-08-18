@@ -62,13 +62,9 @@ export const topicsService = {
     endsAt: string;
     archived: boolean;
   }) => adminService.UpdateFileTopicMeta(a),
-  /**
-   * СЛОВАРЬ РОЛЕЙ ОДНОГО ПРОЕКТА С АРХИВОМ — умолчание архива противоположно
-   * `filesService.listRoles`, ровно по тому же доводу, что и у тем: холст спрашивает «чем
-   * сузить», словарь — «что вообще заведено». Проект обязателен и здесь: см. довод там же.
-   */
-  listRoles: (projectTopicId: number, includeArchived = true) =>
-    adminService.ListFileRoles({ includeArchived, projectTopicId }),
+  // СЛОВАРЬ РОЛЕЙ ОТСЮДА УБРАН: потребителей у него не осталось ни одного. Роли читает
+  // `useFileRoles` (`hooks/useFiles.ts`) — один хук, один ключ react-query с проектом внутри;
+  // второй путь к тому же ответу заводил бы вторую копию кэша и второе умолчание про архив.
   /**
    * ЕДИНСТВЕННЫЙ путь, которым роль появляется на свет. Ни `newTopics` при загрузке, ни
    * приёмная модалка, ни групповая простановка тем роль завести не могут: они пишут в темы, а

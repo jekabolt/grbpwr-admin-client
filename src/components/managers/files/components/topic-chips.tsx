@@ -287,7 +287,10 @@ export function ProjectChips({
       return 'no projects yet. a project is a topic that has dates, an archive and roles on the files inside it — start one with “all projects →”, in one press';
     }
     if (picked) {
-      return `project “${picked.name}”${dates ? ` · ${dates}` : ''}${count}. the role row below already asks about the file's link WITH THIS project`;
+      // ПОДПИСЬ ЦИТИРОВАЛА ОРГАН, КОТОРОГО БОЛЬШЕ НЕТ: «the role row below» умер вместе с
+      // общим словарём ролей, а сам этот ряд чипов остался в тулбаре — то есть ложь была видна
+      // на КАЖДОЙ странице проекта. Теперь подпись называет то, что действительно ниже.
+      return `project “${picked.name}”${dates ? ` · ${dates}` : ''}${count}. its page is below: the roles of THIS project are its sections, and its own vocabulary is edited there`;
     }
     return 'one project at a time: two projects joined by “and” would mean files lying in both shoots at once, and there are almost none of those';
   };
