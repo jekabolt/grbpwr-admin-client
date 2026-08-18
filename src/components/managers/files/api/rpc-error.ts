@@ -339,7 +339,7 @@ const RULES: Rule[] = [
   // set inside one» на привязке стиля было бы про другой орган экрана.
   {
     when: 'project topic id is required',
-    say: () => 'no project is chosen — both a role and a style link are set inside one',
+    say: () => 'no project is chosen — both a role and a link to a garment are set inside one',
   },
   { when: 'role id must not be negative', say: () => 'the role is chosen wrongly' },
   {
@@ -391,6 +391,13 @@ const RULES: Rule[] = [
    *
    * Фразы сняты с `internal/apisrv/admin/files_styles.go` и `internal/entity/library_role.go`,
    * а не придуманы: фраза, которой на сервере нет, не сработает никогда.
+   *
+   * ЯКОРЬ ЦИТИРУЕТ СЕРВЕР, ТЕКСТ ГОВОРИТ С ЧЕЛОВЕКОМ, И СЛОВАРИ У НИХ РАЗНЫЕ. Сервер зовёт вещь
+   * `style`, экраны раздела — `garment`, и совпадать они не обязаны: `when` обязан совпасть с
+   * ответом бэкенда буква в букву, `say` — с тем, как вещь называется на всех остальных экранах.
+   * Поэтому `when: 'style id is required'` отвечает «no garment is chosen», и это не рассинхрон,
+   * а единственный способ не завести в разделе два имени одной вещи. Слово `style` остаётся
+   * человеку видимым ровно там, где фраза сервера печатается дословно (`say: (raw) => raw`).
    */
   {
     // files_styles.go: linkStyleError, ЕДИНСТВЕННЫЙ NotFound привязки. Он намеренно не говорит,
@@ -403,14 +410,14 @@ const RULES: Rule[] = [
     // съёмку удалили в соседней вкладке.
     when: 'project or style not found',
     say: () =>
-      'either the project or the style is gone — the server does not say which. refresh the page and pick again',
+      'either the project or the garment is gone — the server does not say which. refresh the page and pick again',
   },
   {
     // entity.ErrStyleNeedsProjectTopic. Пикер обычных тем не предлагает — правило стоит на
     // случай проекта, понижённого до ярлыка, пока список висел на экране.
     when: 'styles can only be linked to a project topic',
     say: () =>
-      'a style is linked to a PROJECT — an ordinary topic has nowhere to keep the link. make the topic a project on the topics screen, or pick another project',
+      'a garment is linked to a PROJECT — an ordinary topic has nowhere to keep the link. make the topic a project on the topics screen, or pick another project',
   },
   {
     // files_styles.go: afterWriteReadError. ЗАПИСЬ СОСТОЯЛАСЬ, не состоялось дочитывание —
@@ -430,7 +437,7 @@ const RULES: Rule[] = [
     say: () =>
       'the change went through — it is the list that did not read back, so what is on screen is older than the server. refresh the page rather than pressing again',
   },
-  { when: 'style id is required', say: () => 'no style is chosen' },
+  { when: 'style id is required', say: () => 'no garment is chosen' },
 
   /* ── темы ──────────────────────────────────────────────────────────────────────────── */
   {

@@ -304,7 +304,7 @@ export function StyleProjects({ techCardId }: { techCardId: number }) {
     return (
       <div className='-mx-2.5 flex items-center gap-3 border-b border-borderColor bg-bgColor px-2.5 py-1.5'>
         <Text size='micro' variant='error' component='span'>
-          {failureText(error, 'the projects of this style could not be loaded')}
+          {failureText(error, 'the projects of this garment could not be loaded')}
         </Text>
         {!expired && (
           <Button type='button' variant='underline' size='xs' onClick={() => refetch()}>
