@@ -204,7 +204,7 @@ export function FilesSelectionBar({
     if (!breakdown) return '';
     const n = selected.length;
     const head = breakdown.out
-      ? `${breakdown.out} of ${n} ${breakdown.out === 1 ? 'is' : 'are'} not in “${projectName}” yet and get a link by this same action${roleChoice > 0 ? '' : ', with no role on it'}`
+      ? `${breakdown.out} of ${n} ${breakdown.out === 1 ? 'is' : 'are'} not in “${projectName}” yet and ${breakdown.out === 1 ? 'gets' : 'get'} a link by this same action${roleChoice > 0 ? '' : ', with no role on it'}`
       : `all ${n} are already in “${projectName}”, so no new link is made`;
     if (!breakdown.inIt) return `${head}.`;
     const carried = breakdown.names.length
