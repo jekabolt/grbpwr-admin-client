@@ -499,6 +499,11 @@ export function AuxCardMultiPickerModal({
                 <Tile
                   key={id}
                   selected={isSelected}
+                  // Состояние объявляется ровно у тех плиток, которые переключаются: `toggle` —
+                  // честный add/remove по множеству, так что здесь плитка и ставит, и снимает
+                  // выбор. У уже добавленной карточки `onClick` нет, она рисуется <div>, и
+                  // `aria-pressed` на ней был бы обещанием органа, которого там нет.
+                  pressed={isAdded ? undefined : isSelected}
                   // An already-added card is a plain (non-toggling) tile — clicking it must not queue
                   // a duplicate the bill would only drop again.
                   onClick={isAdded ? undefined : () => toggle(id)}

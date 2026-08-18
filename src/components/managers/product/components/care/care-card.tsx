@@ -102,10 +102,16 @@ interface CareCardProps {
  * The name and the CODE are both always shown. The old card swapped one for the other on selection,
  * so reading back what you had picked meant deselecting it — and the code is the thing that ends up
  * on the tag, so hiding it until selection had it backwards.
+ *
+ * `pressed` рядом с `selected` — не дублирование: плитка здесь НАСТОЯЩИЙ переключатель. Повторный
+ * клик по символу, уже стоящему в слоте, снимает его (`care-picker.tsx`, `onSelect`), то есть тот
+ * же орган и ставит, и снимает выбор. Значит состояние обязано быть объявлено, а не только
+ * нарисовано весом рамки: иначе скринридер слышит голую кнопку.
  */
 export const CareCard: FC<CareCardProps> = ({ symbol, isSelected, onSelect }) => (
   <Tile
     selected={isSelected}
+    pressed={isSelected}
     onClick={() => onSelect(symbol)}
     media={
       <div className='bg-bgZebra p-1'>
