@@ -287,6 +287,15 @@ export function FilesSelectionBar({
     showMessage(parts.join(' · '), 'success');
   };
 
+  /**
+   * НАЗВАНО, НО НЕ ПОЧИНЕНО (решение о переносе долга — следующей волной): УСПЕШНЫЙ `apply`
+   * СПИСЫВАЕТ ДОЛГ ПРЕДЫДУЩЕГО ПОЛУОТКАЗА МОЛЧА. `openSort` не трогает `outcome`, а конец этой
+   * функции его перезаписывает: плашка «темы не легли» стоит, человек открывает диалог заново,
+   * кладёт ДРУГУЮ тему, получает успех — и известие о недолёгшей половине исчезает без слова.
+   * Правило «выделение не снимается, пока половина не долегла» этим обходится. Замерено, а не
+   * предположено. Дёшево лечится переносом непогашенной половины в новый `outcome`, но это
+   * меняет поведение, а не текст, и делается отдельно.
+   */
   const apply = async () => {
     if (!wantTopics && !wantProject) return;
     const batch = ids;
@@ -301,6 +310,14 @@ export function FilesSelectionBar({
       .join(' · ');
     setApplying(true);
     // ОБЕ ПОЛОВИНЫ ИДУТ ВСЕГДА, и падение одной не отменяет другую: `allSettled`, а не `all`.
+    //
+    // КАНДИДАТ НА ПРАВКУ (не сейчас, перед самым промоушеном поведение не трогаем): половины
+    // летят КОНКУРЕНТНО, а пишущие транзакции стора идут в SERIALIZABLE и по одним и тем же
+    // строкам `library_file_topic` — отсюда ожидание блокировки и редкий дедлок. Сейчас это
+    // случайно смягчено глобальным `mutations.retry: 1` (`src/index.tsx`), который молча
+    // повторяет упавшую половину; цена — любой НАСТОЯЩИЙ отказ уходит на провод дважды, прежде
+    // чем дойти до плашки (проба потому и ждёт 2500 мс). Последовательный `await` закрыл бы окно
+    // бесплатно: семантика «падение одной не отменяет другую» держится try/catch-ем.
     const [tRes, pRes] = await Promise.allSettled([
       wantTopics ? writeTopics(batch, picked, fresh) : Promise.resolve(null),
       wantProject ? writeProject(batch, sortProject, roleChoice) : Promise.resolve(null),
@@ -475,41 +492,44 @@ export function FilesSelectionBar({
 
   return (
     <>
-      {refusals.length > 0 && (
-        <CalloutBox tone='error'>
-          <Text component='span' className='block'>
-            couldn't delete {files(refusals.length)}. the reason is almost always the same: the file
-            is attached to a task, and a link to nowhere would be left in it.
-          </Text>
-          <ul className='mt-1.5 space-y-0.5'>
-            {refusals.map((r) => (
-              <li key={r.id}>
-                <Text size='micro' component='span'>
-                  {r.name}
-                </Text>{' '}
-                <Text size='micro' variant='label' component='span'>
-                  {r.reason}
-                </Text>
-              </li>
-            ))}
-          </ul>
-          {/* Кнопка называет ДЕЙСТВИЕ, а не согласие: «понятно» ничего не обещает, а нажатие
-              убирает со страницы именно этот список имён. */}
-          <Button size='sm' className='mt-2' onClick={() => setRefusals([])}>
-            dismiss the list
-          </Button>
-        </CalloutBox>
-      )}
-
-      {/* ПОЛУОТКАЗ И ПОЛОСА — ОДИН ПРИЛИПАЮЩИЙ БЛОК, а не два соседних узла в конце документа.
+      {/* ОБЕ ПЛАШКИ И ПОЛОСА — ОДИН ПРИЛИПАЮЩИЙ БЛОК, а не соседние узлы в конце документа.
           Полоса живёт внизу ЭКРАНА, а плашка, оставленная в потоке, оказывается в конце
           СТРАНИЦЫ: человек нажал «apply» в прилипшей полосе, диалог закрылся — и известие о том,
           что половина не легла, лежит под сеткой из шестидесяти плиток. Замерено снимком:
           после отказа на экране не было видно ничего. Две прилипшие коробки с `bottom-0`
           наложились бы друг на друга, поэтому прилипает ОДИН контейнер, а внутри порядок:
-          плашка над полосой (как в прототипе, где полоса нарисована сверху). */}
-      {(outcome || selected.length > 0) && (
+          плашки над полосой (как в прототипе, где полоса нарисована сверху).
+
+          СПИСОК ОТКАЗОВ УДАЛЕНИЯ БОЛЕЛ ТЕМ ЖЕ И ДОЛЬШЕ: «couldn't delete N files» с именами и
+          причинами лежал под сеткой ровно так же — нажал «delete for good», на экране ничего.
+          Лечится тем же контейнером и меряется тем же утверждением в низком окне. */}
+      {(refusals.length > 0 || outcome || selected.length > 0) && (
         <div className='sticky bottom-0 z-[var(--z-sticky)] flex flex-col gap-1.5'>
+          {refusals.length > 0 && (
+            <CalloutBox tone='error' className='bg-bgColor'>
+              <Text component='span' className='block'>
+                couldn't delete {files(refusals.length)}. the reason is almost always the same: the
+                file is attached to a task, and a link to nowhere would be left in it.
+              </Text>
+              <ul className='mt-1.5 space-y-0.5'>
+                {refusals.map((r) => (
+                  <li key={r.id}>
+                    <Text size='micro' component='span'>
+                      {r.name}
+                    </Text>{' '}
+                    <Text size='micro' variant='label' component='span'>
+                      {r.reason}
+                    </Text>
+                  </li>
+                ))}
+              </ul>
+              {/* Кнопка называет ДЕЙСТВИЕ, а не согласие: «понятно» ничего не обещает, а нажатие
+                убирает со страницы именно этот список имён. */}
+              <Button size='sm' className='mt-2' onClick={() => setRefusals([])}>
+                dismiss the list
+              </Button>
+            </CalloutBox>
+          )}
           {outcome && (
             <CalloutBox tone='warning' className='bg-bgColor'>
               {/* ШАПКА НЕ ВРЁТ ПРО ЧИСЛО ЗАПИСЕЙ. «Две записи, одна не прошла» — правда только когда
@@ -833,6 +853,23 @@ export function FilesSelectionBar({
               <Text size='micro' variant='label' component='p'>
                 loading…
               </Text>
+            ) : !rolesQuery.isSuccess ? (
+              /* ОТКАЗ СЛОВАРЯ — НЕ «РОЛЕЙ НЕТ». Правило раздела записано дважды (докстрока
+                 `useFileRoles`: «пустой словарь и „мы не спрашивали" — разные вещи»; `page.tsx`
+                 у ряда ролей: гейт на `isSuccess`, а не на «не в пути»), и здесь оно обязано
+                 держаться тоже: `isPending` уже false, `data` не приехала, и ветка пустоты
+                 утверждала бы про проект факт, которого клиент не знает. Цена молчания видна на
+                 сценарии «сеть мигнула»: человек с чистой совестью применяет дефолт, и пачка
+                 уезжает в кучу, хотя роль была и он бы её поставил. */
+              <div className='flex flex-wrap items-center gap-2'>
+                <Text size='micro' variant='label' component='span'>
+                  the roles of “{projectName}” did not load — this says nothing about whether it has
+                  any. applying now would land the batch in the project with no role.
+                </Text>
+                <Button size='sm' variant='secondary' onClick={() => rolesQuery.refetch()}>
+                  retry the roles
+                </Button>
+              </div>
             ) : roles.length === 0 ? (
               <Text size='micro' variant='label' component='p'>
                 “{projectName}” has no roles yet — the files will land in it unsorted, which is a
