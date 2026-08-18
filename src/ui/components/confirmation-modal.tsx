@@ -45,6 +45,12 @@ interface Props {
   /** Hide the footer entirely — for shells that render their own actions. */
   hideActions?: boolean;
   /**
+   * Подпись у САМИХ КНОПОК, слева в подвале. Место ровно для одного рода вещей — сочетания
+   * клавиш, которое делает то же, что кнопка рядом. В теле формы такая подпись уезжает со
+   * скроллом и теряется среди полей, а подвал не скроллится и всегда виден.
+   */
+  footerHint?: React.ReactNode;
+  /**
    * Cascade guard. When set, the confirm button stays disabled until the user types
    * this string exactly. Use for anything that destroys data it cannot recover.
    */
@@ -66,6 +72,7 @@ export function ConfirmationModal({
   confirmDisabled,
   width = 'md',
   hideActions,
+  footerHint,
   typeToConfirm,
   closeOnConfirm = true,
 }: Props) {
@@ -146,7 +153,17 @@ export function ConfirmationModal({
           </div>
 
           {!hideActions && (
-            <div className='flex shrink-0 justify-end gap-1.5 border-t border-borderColor px-2.5 py-1.5'>
+            <div className='flex shrink-0 items-center justify-end gap-1.5 border-t border-borderColor px-2.5 py-1.5'>
+              {footerHint && (
+                <Text
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  className='mr-auto min-w-0 truncate'
+                >
+                  {footerHint}
+                </Text>
+              )}
               <Button type='button' onClick={handleCancel} variant='secondary' size='sm'>
                 {cancelLabel}
               </Button>

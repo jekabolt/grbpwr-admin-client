@@ -588,6 +588,8 @@ export function AnnotationSurface({
     fromX: number;
     fromY: number;
     moved: boolean;
+    /** Захват уже взят — брать его второй раз на каждое движение незачем. */
+    captured: boolean;
   } | null>(null);
   /** Живой штрих маркера. В ref, потому что его дописывает слушатель движения. */
   const inking = useRef<{ id: number; pts: ShapePoint[] } | null>(null);
@@ -670,7 +672,20 @@ export function AnnotationSurface({
       (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
       return;
     }
-    if (zoom) (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    // ЗАХВАТ УКАЗАТЕЛЯ — НЕ ЗДЕСЬ, А КОГДА ЖЕСТ ПЕРЕСТАЛ БЫТЬ КЛИКОМ (см. `onFramePointerMove`).
+    //
+    // Стояло `if (zoom) setPointerCapture(...)` прямо на нажатии, и это отнимало у увеличенного
+    // вида ВЫБОР ФИГУРЫ. Захват переадресует кадру не только последующие `pointer*`, но и
+    // совместимостные `mouseup`/`click`: замерено в Chromium — `pointerdown` и `mousedown`
+    // приходят на хит-путь фигуры, а `pointerup`, `mouseup` и `click` на сам кадр. То есть
+    // `onClick` штриха не стреляет никогда, и поставленную фигуру нельзя выбрать иначе как за её
+    // плашку. У зоны и следа плашки нет, пока нет текста (`plateWhenEmpty: false`), а след ещё и
+    // не открывает редактор после постановки (липкий инструмент) — нарисованный в зуме штрих
+    // становился НЕДОСЯГАЕМ: ни подписать, ни перекрасить, ни удалить мышью.
+    //
+    // На инлайновом кадре (`zoom` выключен) захвата не было, и там выбор работал — поэтому дефект
+    // не показывали ни эскиз, ни примерка, ни полоса шагов: у них есть кадр на странице. У
+    // вложения задачи другого кадра нет вовсе, там правят ТОЛЬКО в увеличенном виде.
     pan.current = {
       id: e.pointerId,
       startX: e.clientX,
@@ -678,6 +693,7 @@ export function AnnotationSurface({
       fromX: posRef.current.x,
       fromY: posRef.current.y,
       moved: false,
+      captured: false,
     };
   }
 
@@ -720,6 +736,15 @@ export function AnnotationSurface({
     if (!p.moved && Math.hypot(dx, dy) > CLICK_MOVE_THRESHOLD) {
       p.moved = true;
       if (zoom && scaleRef.current > 1) setPanning(true);
+    }
+    // ЗАХВАТ БЕРЁТСЯ ЗДЕСЬ — В МОМЕНТ, КОГДА ЖЕСТ УЖЕ ПЕРЕСТАЛ БЫТЬ КЛИКОМ. Панораме он нужен:
+    // рука уходит за край кадра, и без захвата снимок бросало бы там, где курсор с него сошёл.
+    // Клику он смертелен: захват переадресует кадру `mouseup` и `click`, и `onClick` фигуры не
+    // стреляет. Порог сдвига (6 пикселей) разделяет эти два случая — тот же, по которому жест уже
+    // отличает нажатие от перетаскивания везде на этой поверхности.
+    if (p.moved && !p.captured && zoom) {
+      p.captured = true;
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     }
     if (p.moved && zoom && scaleRef.current > 1) {
       const r = boxRef.current?.getBoundingClientRect();

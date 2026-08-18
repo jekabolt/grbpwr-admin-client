@@ -47,6 +47,20 @@ const priorityOptions = [
   ...toOptions(PRIORITIES, PRIORITY_LABEL),
 ];
 
+/**
+ * Как называется сочетание сохранения НА ЭТОЙ машине.
+ *
+ * «⌘» на windows — несуществующая клавиша: подпись обещала бы то, чего на клавиатуре нет.
+ * Обработчик ловит и `metaKey`, и `ctrlKey`, так что различие чисто в словах — ровно как у
+ * подписи поиска в читалке файлов.
+ */
+const SAVE_HOTKEY = /Mac|iPhone|iPad/.test(
+  (typeof navigator === 'undefined' ? '' : navigator.platform) ||
+    (typeof navigator === 'undefined' ? '' : navigator.userAgent),
+)
+  ? '⌘ + enter'
+  : 'ctrl + enter';
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className='flex flex-col gap-1'>
@@ -94,6 +108,32 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
   const attachments = useMemo(() => orderedMedia(mediaIds ?? []), [mediaIds]);
   const mediaAnnotations = useWatch({ control, name: 'mediaAnnotations' }) ?? [];
 
+  /**
+   * ⌘/CTRL+ENTER СОХРАНЯЕТ КАРТОЧКУ.
+   *
+   * Голый Enter отправителем здесь не будет: половина формы — многострочное описание, и
+   * «сохранить» на той же клавише, что «новая строка», двусмысленно по построению. Раньше
+   * неявная отправка тут была, но случайной: первой кнопкой формы оказывалась «attach», и
+   * Enter в заголовке ОДНОВРЕМЕННО открывал пикер и отправлял карточку.
+   *
+   * Обработчик висит НА ФОРМЕ, а не на двух полях: клавиатурное обещание раздела — про всю
+   * форму, и заводить его отдельно на заголовке, описании и метках значило бы три копии
+   * одной проверки. Проверка перед отправкой — та же, что у кнопки подвала
+   * (`confirmDisabled={saving}`), иначе клавиша умеет то, чего не умеет кнопка.
+   */
+  const onModEnter = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+    // ПОРТАЛ — НЕ ПОДДЕРЕВО ФОРМЫ В DOM, НО ВСПЛЫВАЕТ СЮДА. События react'а идут по дереву
+    // КОМПОНЕНТОВ, а пикер файлов, библиотека медиа и редактор указаний рисуются
+    // `<Portal>`ами внутри этой формы: без проверки ⌘Enter в поиске пикера сохранял бы
+    // карточку ПОД ним и закрывал форму из-под открытого поверх неё окна. По DOM же
+    // портал лежит в `body`, и `contains` отсекает ровно его.
+    if (!e.currentTarget.contains(e.target as Node)) return;
+    e.preventDefault();
+    if (saving) return;
+    handleSubmit(onSubmit)();
+  };
+
   return (
     <ConfirmationModal
       open={open}
@@ -102,10 +142,17 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
       title={mode === 'create' ? 'new task' : 'edit task'}
       confirmLabel={mode === 'create' ? 'create' : 'save'}
       confirmDisabled={saving}
+      // Неподписанное сочетание — то же, что отсутствующее: о нём узнают только те, кто
+      // читал этот файл. Место — у самой кнопки, которую оно заменяет.
+      footerHint={`${SAVE_HOTKEY} ${mode === 'create' ? 'creates' : 'saves'}`}
       closeOnConfirm={false}
       width='lg'
     >
-      <form onSubmit={handleSubmit(onSubmit)} className='flex flex-col gap-4'>
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        onKeyDown={onModEnter}
+        className='flex flex-col gap-4'
+      >
         <div className='flex flex-col gap-1'>
           <Controller
             control={control}
@@ -281,10 +328,14 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 setLink={(f, v) => setValue(f, v as never, { shouldDirty: true })}
               />
             </Field>
-            {/* Одно поле «вложения» на два источника. Разделение публичного медиа-бакета
+            {/* Одно поле «attachments» на два источника. Разделение публичного медиа-бакета
                 и приватной библиотеки — факт хранилища, а не различие, которое человек
-                должен держать в голове, заполняя карточку. Подпись «сайт» у медиа
-                говорит единственное, что здесь практически важно: это уедет на CDN. */}
+                должен держать в голове, заполняя карточку. Подпись «site media» говорит
+                единственное, что здесь практически важно: это уедет на CDN.
+
+                ЯЗЫК ЭКРАНА, А НЕ ЯЗЫК ВОЛНЫ: раздел задач английский целиком, и подписи
+                блока, пришедшего сюда из русского раздела «файлы», английские — как у
+                плиток вложений на самой карточке (`task-detail/attachment-tiles.tsx`). */}
             <Field label='attachments'>
               <div className='flex flex-col gap-2.5'>
                 <div className='flex flex-col gap-1'>

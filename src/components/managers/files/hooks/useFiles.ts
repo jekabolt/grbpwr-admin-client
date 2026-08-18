@@ -5,7 +5,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import type { LibraryFileSort } from 'api/proto-http/admin';
+import type { LibraryFilePersonRole, LibraryFileSort } from 'api/proto-http/admin';
 import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
 import { filesService } from '../api/filesService';
 
@@ -25,31 +25,169 @@ function sortBy(sort: FilesSort): LibraryFileSort | undefined {
   return undefined;
 }
 
+/**
+ * РОЛЬ ЧЕЛОВЕКА ПРИ ФАЙЛЕ — ОДНО ПОЛЕ, А НЕ ДВА ОТДЕЛЬНЫХ ФИЛЬТРА.
+ *
+ * У файла два разных отношения к человеку, и живут они разное время. «Загрузил» — исторический
+ * факт: строка `uploaded_by` переживает удаление аккаунта, потому и лежит рядом с живой ссылкой
+ * `uploaded_by_id`, а не вместо неё. «Ведёт» — сегодняшняя ответственность: список владельцев
+ * меняется, не меняя сам файл.
+ *
+ * Спрашивают про них ОДНИМ вопросом — «а что там числится за Пашей», — и выбрать между двумя
+ * отдельными фильтрами человек не может до того, как разницу увидел. Поэтому человек
+ * спрашивается один раз, а роль говорит, какое из двух отношений имелось в виду. `any` — оба
+ * сразу, и это умолчание: именно оно и значит «где он числится».
+ */
+export type PersonRoleFilter = 'any' | 'uploaded' | 'owner';
+
+/** Короткая подпись положения переключателя. */
+export const PERSON_ROLE_CHIP: Record<PersonRoleFilter, string> = {
+  any: 'any',
+  uploaded: 'uploaded',
+  owner: 'owns',
+};
+
+/**
+ * Что именно окажется в сетке — словами, рядом с переключателем.
+ *
+ * ОДИН НАБОР строк на подпись под чипами и на их подсказки: два набора про одно и то же
+ * разошлись бы на первой правке, и наведение говорило бы не то, что написано в сантиметре ниже.
+ * Короткие намеренно — они стоят в полосе управления, а не в справке.
+ */
+export const PERSON_ROLE_HINT: Record<PersonRoleFilter, string> = {
+  any: 'both what they uploaded and what they own',
+  uploaded: "only what they brought in — nothing ever takes that fact off a file",
+  owner: 'only what they are answerable for now',
+};
+
+function personRoleEnum(role: PersonRoleFilter): LibraryFilePersonRole | undefined {
+  if (role === 'uploaded') return 'LIBRARY_FILE_PERSON_ROLE_UPLOADED';
+  if (role === 'owner') return 'LIBRARY_FILE_PERSON_ROLE_OWNER';
+  return undefined;
+}
+
+/**
+ * ФИЛЬТР ЧЕЛОВЕКА ЕЗДИТ В АДРЕСЕ, поэтому разбор адреса живёт здесь же, рядом с машиной, а не
+ * на экране: ссылку «всё, что ведёт паша» кидают в чат, и разбирать её будет тот же код,
+ * который её собрал.
+ *
+ * РАЗБОР ГЛУХ К МУСОРУ. В адресе бывает что угодно — обрезанная ссылка, ручная правка, старое
+ * имя роли, — и ни один из этих случаев не стоит того, чтобы экран упал или показал пустоту:
+ * непонятое значение просто не фильтрует.
+ */
+export function personIdFromUrl(v: string | null): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+}
+
+export function personRoleFromUrl(v: string | null): PersonRoleFilter {
+  return v === 'up' ? 'uploaded' : v === 'own' ? 'owner' : 'any';
+}
+
+/** `undefined` — роли в адресе не будет вовсе: умолчание в ссылке только шумит. */
+export function personRoleToUrl(role: PersonRoleFilter): string | undefined {
+  if (role === 'uploaded') return 'up';
+  if (role === 'owner') return 'own';
+  return undefined;
+}
+
 export type FilesFilter = {
   /** Пересечение: файл обязан нести ВСЕ эти темы. */
   topicIds: number[];
   untopiced: boolean;
   search: string;
   sort: FilesSort;
+  /**
+   * id ЖИВОГО аккаунта, 0 — фильтра нет. Не имя: `admins.username` уникален и освобождается
+   * при удалении, так что нанятый позже однофамилец унаследовал бы всю историю ушедшего.
+   *
+   * Необязателен намеренно: этой же машиной листают пикеры внутри задач и заметок, у которых
+   * фильтра по человеку нет вовсе, и требовать от них явного нуля значило бы править чужие
+   * экраны ради нашего поля.
+   */
+  personId?: number;
+  personRole?: PersonRoleFilter;
 };
+
+/**
+ * РОЛЬ БЕЗ ЧЕЛОВЕКА — НЕ ФИЛЬТР, и обнуляется она ОДИН раз, здесь.
+ *
+ * Сервер роль без `person_id` игнорирует. Пока то же самое не было сказано на этой стороне,
+ * рукописный адрес `?role=own` давал бы свой ключ кэша и второй запрос на ту же самую выдачу, а
+ * экран рисовал бы нажатое положение переключателя, которого в ответе нет.
+ */
+function normalizePerson(f: FilesFilter): { id: number; role: PersonRoleFilter } {
+  const raw = Number(f.personId ?? 0);
+  const id = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 0;
+  return { id, role: id > 0 ? (f.personRole ?? 'any') : 'any' };
+}
+
+/**
+ * ОДНО МЕСТО, ГДЕ ФИЛЬТР ПРЕВРАЩАЕТСЯ В ЗАПРОС.
+ *
+ * Страницу и счёт «сколько нашлось бы шире» спрашивают два разных хука, и разойдись они хоть
+ * одним полем — кнопка обещала бы число, посчитанное не тем условием, под которым его потом
+ * покажут.
+ */
+function toRequest(filter: FilesFilter) {
+  const { id, role } = normalizePerson(filter);
+  return {
+    topicIds: filter.topicIds,
+    untopiced: filter.untopiced,
+    search: filter.search,
+    sortBy: sortBy(filter.sort),
+    personId: id,
+    personRole: personRoleEnum(role),
+  };
+}
 
 export const filesKeys = {
   all: ['files'] as const,
   // Ключ несёт ОТСОРТИРОВАННЫЙ список тем: [3,1] и [1,3] — один и тот же фильтр, и два
   // разных ключа под ним означали бы два запроса и две копии кэша на одну выдачу.
-  list: (f: FilesFilter) =>
-    [
+  list: (f: FilesFilter) => {
+    const p = normalizePerson(f);
+    return [
       ...filesKeys.all,
       'list',
       [...f.topicIds].sort((a, b) => a - b).join(','),
       f.untopiced,
       f.search,
       f.sort,
-    ] as const,
-  /** Сколько всего найдётся по этому запросу БЕЗ фильтра тем — для «искать во всех темах (N)». */
-  searchTotal: (search: string) => [...filesKeys.all, 'search-total', search] as const,
+      p.id,
+      p.role,
+    ] as const;
+  },
+  /**
+   * Сколько ВСЕГО отвечает набору условий — для кнопок, которые предлагают фильтр пошире
+   * («искать во всех темах (N)», «в любой роли (N)»).
+   *
+   * Порядка в ключе нет: сортировка на размер выдачи не влияет, и держи мы её здесь — смена
+   * порядка перезапрашивала бы то же самое число.
+   */
+  total: (f: FilesFilter) => {
+    const p = normalizePerson(f);
+    return [
+      ...filesKeys.all,
+      'total',
+      [...f.topicIds].sort((a, b) => a - b).join(','),
+      f.untopiced,
+      f.search,
+      p.id,
+      p.role,
+    ] as const;
+  },
   file: (id: number) => [...filesKeys.all, 'file', id] as const,
-  topics: () => [...filesKeys.all, 'topics'] as const,
+  /**
+   * АРХИВ ВХОДИТ В КЛЮЧ, И ЭТО НЕ УКРАШЕНИЕ. Один и тот же хук зовут пять экранов, и они
+   * спрашивают РАЗНОЕ: холст, полоса загрузки, пикер заметки и вложения задачи — «чем сузить
+   * сетку» (архив там мешает), словарь тем — «что вообще заведено» (без архива он врёт: тема
+   * никуда не делась, её убрали с глаз).
+   *
+   * Один ключ на два ответа означал бы, что первый пришедший экран кладёт свою версию в кэш, а
+   * следующий получает чужую — молча и через раз. Ровно этот класс уже ловился в волне.
+   */
+  topics: (includeArchived = false) => [...filesKeys.all, 'topics', includeArchived] as const,
 };
 
 /**
@@ -94,25 +232,21 @@ const PAGE_SIZE = 60;
  */
 const URL_SAFE_STALE_TIME = 30 * 60 * 1000;
 
-export function useFileTopics() {
+export function useFileTopics(includeArchived = false) {
   return useQuery({
-    queryKey: filesKeys.topics(),
-    queryFn: () => filesService.listTopics(),
+    queryKey: filesKeys.topics(includeArchived),
+    queryFn: () => filesService.listTopics(includeArchived),
     staleTime: URL_SAFE_STALE_TIME,
   });
 }
 
 export function useLibraryFiles(filter: FilesFilter) {
-  const { topicIds, untopiced, search, sort } = filter;
   return useInfiniteQuery({
     queryKey: filesKeys.list(filter),
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       filesService.listFiles({
-        topicIds,
-        untopiced,
-        search,
-        sortBy: sortBy(sort),
+        ...toRequest(filter),
         limit: PAGE_SIZE,
         offset: pageParam as number,
       }),
@@ -130,17 +264,22 @@ export function useLibraryFiles(filter: FilesFilter) {
 }
 
 /**
- * Второй счёт: сколько тот же запрос находит БЕЗ фильтра тем.
+ * ВТОРОЙ СЧЁТ: сколько нашлось бы под ОСЛАБЛЕННЫМ фильтром.
  *
- * Спрашивается только тогда, когда внутри выбранных чипов не нашлось ничего — иначе это
- * лишний запрос на каждое нажатие клавиши. Ответ и есть число в кнопке «искать во всех
- * темах (N)»: без него кнопка обещает результат, которого может не быть.
+ * Спрашивается только тогда, когда узкий фильтр не нашёл ничего, — иначе это лишний запрос на
+ * каждое нажатие клавиши. Ответ и есть число в кнопке пустого экрана: без него кнопка обещает
+ * результат, которого может не быть.
+ *
+ * Ослабление передаётся ГОТОВЫМ фильтром, а не флажком «без тем»: положений у пустого экрана
+ * два («искать во всех темах» снимает темы, «в любой роли» снимает роль), и оба обязаны считать
+ * тем же условием, под которым потом покажут выдачу. Один хук на оба — единственный способ
+ * этого не разойтись.
  */
-export function useSearchTotalEverywhere(search: string, enabled: boolean) {
+export function useFilesTotal(filter: FilesFilter, enabled: boolean) {
   return useQuery({
-    queryKey: filesKeys.searchTotal(search),
-    queryFn: () => filesService.listFiles({ search, limit: 1, offset: 0 }),
-    enabled: enabled && !!search.trim(),
+    queryKey: filesKeys.total(filter),
+    queryFn: () => filesService.listFiles({ ...toRequest(filter), limit: 1, offset: 0 }),
+    enabled,
     staleTime: URL_SAFE_STALE_TIME,
   });
 }

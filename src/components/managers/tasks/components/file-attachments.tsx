@@ -94,12 +94,7 @@ export function FileAttachments({
                   </a>
                 </Button>
               )}
-              <Button
-                type='button'
-                size='xs'
-                variant='secondary'
-                onClick={() => remove(Number(f.id))}
-              >
+              <Button type='button' size='xs' variant='secondary' onClick={() => remove(Number(f.id))}>
                 remove
               </Button>
             </div>

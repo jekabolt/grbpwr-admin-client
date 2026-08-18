@@ -121,7 +121,14 @@ export function TaskDetail() {
 
   // Единственная дверь к вложению на этом экране: ею открывают и плитку в галерее, и ссылку
   // посреди описания, и ссылку из комментария.
-  const attachments = useTaskMediaViewer({ media, annotations });
+  // Указания здесь ТОЛЬКО ЧИТАЮТСЯ (см. довод у `canWrite` в хуке) — и об этом сказано прямо на
+  // месте панели видов. Пустое место там читалось как «на вложении карточки указаний не рисуют»,
+  // хотя вся палитра доступна в правке. Подсказка только тому, у кого кнопка «edit» есть.
+  const attachments = useTaskMediaViewer({
+    media,
+    annotations,
+    readOnlyNote: canWrite ? 'press edit on the card to draw on this attachment' : undefined,
+  });
 
   /**
    * СЧИТАЕТСЯ ПО СОДЕРЖИМОМУ ФОРМЫ, А НЕ ПО ВСЕМУ ОТВЕТУ. Открытая модалка делает

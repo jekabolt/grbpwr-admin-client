@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ViewerAction } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
@@ -41,12 +41,23 @@ export function AnnotationZoomDialog({
   onPrev,
   onNext,
   position,
+  readOnlyNote,
   ...surface
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
   toolKinds?: string[];
+  /**
+   * Строка на месте панели видов, когда рисовать здесь нельзя. ЗАДАЁТ ВЛАДЕЛЕЦ, потому что
+   * причина у каждого своя: у выпущенной тех-карты правки нет вовсе, а у карточки задачи она есть
+   * — но живёт за кнопкой «edit», потому что `UpdateTask` заменяет содержимое целиком и писать по
+   * закрытию просмотрщика значило бы откатывать чужую правку описания.
+   *
+   * Без неё пустое место на месте инструментов читается как «указания тут только смотрят» —
+   * ровно тот вывод, из-за которого палитру вложений считали урезанной, хотя она полная.
+   */
+  readOnlyNote?: ReactNode;
   /** Предыдущий / следующий кадр ряда. Не заданы — стрелок нет и клавиши ← → ничего не делают. */
   onPrev?: () => void;
   onNext?: () => void;
@@ -237,6 +248,11 @@ export function AnnotationZoomDialog({
                 remaining={maxCallouts != null ? maxCallouts - surface.callouts.length : undefined}
                 hint={tool ? placingHint(tool, placed) : undefined}
               />
+            )}
+            {!editable && readOnlyNote && (
+              <Text size='micro' variant='label' component='span'>
+                {readOnlyNote}
+              </Text>
             )}
           </div>
         </Dialog.Content>
