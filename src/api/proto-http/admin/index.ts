@@ -4903,6 +4903,21 @@ export type common_TaskInsert = {
   fittingId: number | undefined;
   productionRunId: number | undefined;
   sampleId: number | undefined;
+  // ПРОЕКТ БИБЛИОТЕКИ ФАЙЛОВ — ВОСЬМОЙ ТИП ССЫЛКИ (0322). Съёмка, лукбук, дроп: контекст, В
+  // КОТОРОМ делается эта работа. Тот же пикер и тот же чип, что у семи соседей выше.
+  // КОЛОНКА, А НЕ СВЯЗЬ МНОГИЕ-КО-МНОГИМ, в отличие от пары «проект ↔ стиль». Задача — единица
+  // работы, и работа происходит в ОДНОМ контексте: «отретушировать отобранное» принадлежит одной
+  // съёмке и не может принадлежать двум, не перестав быть одной задачей. У стиля множественность
+  // настоящая (одна съёмка покрывает капсулу, одна вещь попадает и в съёмку, и в лукбук).
+  // ССЫЛАТЬСЯ МОЖНО ТОЛЬКО НА ТЕМУ kind='project'. Ярлык отвергается InvalidArgument с фразой; на
+  // несуществующий id отвечает внешний ключ — тем же отказом, что и у остальных семи ссылок.
+  // Проверка в коде, а не CHECK'ом: ретроактивный CHECK проверяет всю историю и валит старт прода.
+  // ЗААРХИВИРОВАННЫЙ ПРОЕКТ ССЫЛКУ ПРИНИМАЕТ — как и у стилей (0321). Архив съёмки значит «работа
+  // закончена», а не «о ней запрещено говорить»; хвост задач по законченной съёмке нормален, и
+  // требовать разархивации ради записи правды значило бы сделать архив препятствием.
+  // Понижение проекта в обычную тему и удаление темы ОБНУЛЯЮТ эту ссылку и называют, у скольких
+  // карточек. Сама карточка при этом остаётся: она про работу, а не про съёмку.
+  projectTopicId: number | undefined;
   // Planned start (when work SHOULD begin), the manual counterpart of due_date.
   // The ACTUAL start (when the card first entered IN_PROGRESS) is the
   // server-stamped Task.started_at, not this field. Unset = no planned start.
@@ -5181,12 +5196,15 @@ export type LibraryFileRole = {
   roleName: string | undefined;
 };
 
-// FileRole is one entry of the CLOSED role vocabulary.
-// Closed on purpose, and the reason is the cross-project question: «все исходники
-// по всем съёмкам» only means anything while «исходники» is the SAME thing
-// everywhere. Free text diverges — not «might», but reliably: исходники /
-// исходные / raw / сырцы — and the filter starts quietly returning half the
-// truth. Autocomplete does not help: it suggests, it does not prevent.
+// FileRole is one entry of the closed role vocabulary OF ONE PROJECT.
+// The vocabulary is closed (only UpsertFileRole creates a role) and, since the
+// per-project wave, it BELONGS TO A PROJECT: «исходники» in a shoot and
+// «исходники» in a lookbook are two different rows that merely spell the same.
+// The cross-project question «все исходники по всем съёмкам» therefore stops
+// being a question about one entity and becomes a SEARCH BY WORD — the search
+// input already matches role names — which finds every project where the role is
+// NAMED so, and stays silent about the one where it was renamed. That price is
+// the direct cost of «у каждого проекта свои», and it is accepted.
 export type FileRole = {
   id: number | undefined;
   name: string | undefined;
@@ -5194,10 +5212,18 @@ export type FileRole = {
   // fall back to the name.
   sortOrder: number | undefined;
   archived: boolean | undefined;
-  // files_count is the CROSS-PROJECT count: how many files carry this role in any
-  // project. Counted under the visibility predicate, like every other count in
-  // this library, so different people legitimately see different numbers.
+  // files_count is how many files carry this role IN ITS PROJECT — the role
+  // belongs to one project, so «in this role» and «in this role in this project»
+  // are the same question. Counted under the visibility predicate, like every
+  // other count in this library, so different people legitimately see different
+  // numbers.
   filesCount: number | undefined;
+  // project_topic_id is the OWNER. 0 only ever appears on the dead rows the
+  // migration left behind (a role that existed but was never used anywhere): they
+  // are reachable by no screen and assignable by no write — the composite foreign
+  // key (topic_id, role_id) -> file_role (project_topic_id, id) makes a link row
+  // pointing at an ownerless role inexpressible.
+  projectTopicId: number | undefined;
 };
 
 export type GetLibraryFileRequest = {
@@ -5347,6 +5373,15 @@ export type DeleteFileTopicResponse = {
   // around it: a style is not a library file and the visibility predicate does not
   // apply to it.
   unlinkedStyles: number | undefined;
+  // unlinked_tasks is the same fact for kanban cards (0322): how many lost their link
+  // to this project when it went. The KEYS differ and the difference matters — a style
+  // link CASCADES away (it means nothing without the topic), while a task's
+  // project_topic_id is merely SET NULL: the card survives, because it is about work,
+  // not about the shoot. Taking someone's to-do list along with a label would be a far
+  // worse answer than losing a pointer.
+  // Counted EXACTLY, for the same reason as unlinked_styles: a task is not a library
+  // file, it lives under the tasks section's own rbac.
+  unlinkedTasks: number | undefined;
 };
 
 export type MergeFileTopicsRequest = {
@@ -5420,12 +5455,31 @@ export type UpdateFileTopicMetaResponse = {
   // from the person who is editing the project would invent a boundary the system
   // does not have.
   clearedStyles: number | undefined;
+  // cleared_tasks is the THIRD project-only property a demotion takes (0322): how many
+  // kanban cards lost their link to this project because it stopped being one. The
+  // cards themselves survive — they are about WORK, not about the shoot — and lose
+  // only the context.
+  // Counted EXACTLY, like cleared_styles and unlike cleared_roles: a task is not a
+  // library file either, it lives under the tasks section's own rbac.
+  // ТРИ ЧИСЛА В ОДНОМ ТОСТЕ — это уже перечисление, и на экране его надо сказать так, как человек
+  // читает, а не выложить тремя строчками отчёта. Поля названы отдельно именно поэтому: клиент
+  // волен собрать фразу, а сервер не имеет права склеить числа за него — склеенные, они больше не
+  // разбираются, и «сняли 7» перестаёт отвечать на «семь чего».
+  clearedTasks: number | undefined;
 };
 
 export type ListFileRolesRequest = {
   // include_archived — same split as the topics rail: the topics screen shows the
   // archive, the chips and the pickers do not.
   includeArchived: boolean | undefined;
+  // project_topic_id = N returns the vocabulary OF THAT PROJECT — the only form a
+  // picker or a chip row may use, because a role of another project is refused by
+  // every write anyway.
+  // 0 returns every role, each tagged with its owner, and it is an INDEX FOR
+  // RESOLUTION rather than a vocabulary: the topics screen lists the projects'
+  // dictionaries side by side, and an old `?frole=N` link uses it to find which
+  // project the role lives in and put the project into the address.
+  projectTopicId: number | undefined;
 };
 
 export type ListFileRolesResponse = {
@@ -5442,6 +5496,15 @@ export type UpsertFileRoleRequest = {
   name: string | undefined;
   sortOrder: number | undefined;
   archived: boolean | undefined;
+  // project_topic_id is REQUIRED when creating and IMMUTABLE when editing: a role
+  // does not travel between projects, ever. Its link rows live in its project, so
+  // a move would leave them pointing at a foreign role — the one state the
+  // invariant forbids. On an edit, 0 means «leave the owner alone» (that is what
+  // a client which predates the owner sends), and a DIFFERENT project is refused
+  // rather than silently applied.
+  // Creating with a topic that is a plain label is refused too: «это исходник
+  // ничего» does not mean anything, exactly as when setting the role.
+  projectTopicId: number | undefined;
 };
 
 export type UpsertFileRoleResponse = {
@@ -5482,6 +5545,9 @@ export type SetLibraryFileRolesRequest = {
   projectTopicId: number | undefined;
   // role_id = 0 clears the role. A role that is archived can still be CLEARED but
   // not newly assigned — otherwise the archive would be a suggestion.
+  // The role must belong to THIS project. The request does not say so twice: the
+  // owner is a property of the role, and the server compares it itself, which is
+  // why this message did not change when roles became per-project.
   roleId: number | undefined;
 };
 
@@ -5980,6 +6046,16 @@ export type ListTasksRequest = {
   fittingId: number | undefined;
   productionRunId: number | undefined;
   sampleId: number | undefined;
+  // ЗАДАЧИ ПРОЕКТА (0322) — обратная сторона восьмой глубокой ссылки: страница проекта
+  // спрашивает, что по нему ещё осталось сделать.
+  // ФИЛЬТР СУЩЕСТВУЮЩЕГО СПИСКА, А НЕ НОВЫЙ RPC, И ЭТО РЕШЕНИЕ О ПРАВАХ, А НЕ ОБ ЭКОНОМИИ. «Какие
+  // задачи у проекта» — тот же список задач, просто суженный, и он обязан идти под rd(tasks), как
+  // доска. Отдельный RPC завёл бы ВТОРОЙ путь к тем же данным, которому нечем помешать однажды
+  // разойтись в правах, — то есть проект стал бы боковым каналом к задачам, которых человек иначе
+  // не видит.
+  // Несуществующий проект отдаёт пустой список, а не отличимый отказ: у семи соседних фильтров так
+  // же, и различимость сделала бы чтение оракулом по темам.
+  projectTopicId: number | undefined;
 };
 
 export type ListTasksResponse = {
@@ -13620,15 +13696,21 @@ export interface AdminService {
   // with full-replacement semantics — see the request for why this is not folded
   // into RenameFileTopic.
   UpdateFileTopicMeta(request: UpdateFileTopicMetaRequest): Promise<UpdateFileTopicMetaResponse>;
-  // ListFileRoles returns the role vocabulary with CROSS-PROJECT counts, each
-  // counted under the visibility predicate like every other count here.
+  // ListFileRoles returns ONE PROJECT's role vocabulary (project_topic_id = N),
+  // each role counted under the visibility predicate like every other count here.
+  // With 0 it returns every role tagged with its owner — an index for resolving an
+  // old link, not a vocabulary to pick from.
   ListFileRoles(request: ListFileRolesRequest): Promise<ListFileRolesResponse>;
-  // UpsertFileRole creates or edits one role. THE ONLY path that creates one —
-  // that is what «closed vocabulary» means mechanically rather than by discipline.
+  // UpsertFileRole creates or edits one role IN A PROJECT. THE ONLY path that
+  // creates one — that is what «closed vocabulary» means mechanically rather than
+  // by discipline. Creating requires a project topic; editing never moves the role
+  // to another one.
   UpsertFileRole(request: UpsertFileRoleRequest): Promise<UpsertFileRoleResponse>;
   // MergeFileRoles folds one role into another and deletes the source. The
   // standard repair for a vocabulary that drifted; simpler than merging topics,
-  // because a role is a column and cannot collide with itself on a row.
+  // because a role is a column and cannot collide with itself on a row. Both roles
+  // must belong to the SAME project — the request does not carry it, the server
+  // reads it off the roles themselves.
   MergeFileRoles(request: MergeFileRolesRequest): Promise<MergeFileRolesResponse>;
   // SetLibraryFileRoles puts a batch of files into one project in one role (or
   // clears the role). Same batch semantics as AssignLibraryFileTopics: one
@@ -17328,6 +17410,9 @@ export function createAdminServiceClient(
       if (request.sampleId) {
         queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`)
       }
+      if (request.projectTopicId) {
+        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -17675,6 +17760,9 @@ export function createAdminServiceClient(
       const queryParams: string[] = [];
       if (request.includeArchived) {
         queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      if (request.projectTopicId) {
+        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

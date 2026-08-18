@@ -66,7 +66,9 @@ export const topicsService = {
    * СЛОВАРЬ РОЛЕЙ С АРХИВОМ — умолчание противоположно `filesService.listRoles`, ровно по тому
    * же доводу, что и у тем: холст спрашивает «чем сузить», словарь — «что вообще заведено».
    */
-  listRoles: (includeArchived = true) => adminService.ListFileRoles({ includeArchived }),
+  // `projectTopicId: 0` — см. довод у `filesService.listRoles`.
+  listRoles: (includeArchived = true) =>
+    adminService.ListFileRoles({ includeArchived, projectTopicId: 0 }),
   /**
    * ЕДИНСТВЕННЫЙ путь, которым роль появляется на свет. Ни `newTopics` при загрузке, ни
    * приёмная модалка, ни групповая простановка тем роль завести не могут: они пишут в темы, а
@@ -74,7 +76,9 @@ export const topicsService = {
    * что-нибудь только пока «исходники» везде одно и то же.
    */
   upsertRole: (a: { id: number; name: string; sortOrder: number; archived: boolean }) =>
-    adminService.UpsertFileRole(a),
+    // `projectTopicId: 0` на правке значит «владельца не трогать» — то же, что слал клиент до
+    // регена. Заведение роли В ПРОЕКТЕ приезжает своей волной.
+    adminService.UpsertFileRole({ ...a, projectTopicId: 0 }),
   /**
    * Слияние ролей — починка словаря, который всё-таки разъехался. Оно ПРОЩЕ слияния тем: роль
    * это колонка, а не связь, дедуплицировать нечего — ни одна строка не может нести обе.

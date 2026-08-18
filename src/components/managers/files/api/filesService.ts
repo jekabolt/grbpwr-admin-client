@@ -148,7 +148,10 @@ export const filesService = {
    * пикере значило бы предлагать жест, который отвечает отказом: архив тогда читался бы как
    * пожелание, а не как решение.
    */
-  listRoles: (includeArchived = false) => adminService.ListFileRoles({ includeArchived }),
+  // `projectTopicId: 0` — «весь словарь, каждая роль помечена своим проектом»: ровно то, что
+  // холст просил и до появления владельца у роли. Настоящий проект подставит своя волна.
+  listRoles: (includeArchived = false) =>
+    adminService.ListFileRoles({ includeArchived, projectTopicId: 0 }),
   /**
    * РОЛЬ ПАЧКЕ — В ОДНОМ ПРОЕКТЕ. Роль живёт на СТРОКЕ СВЯЗИ «файл ↔ проект», поэтому у этого
    * вызова три обязательных участника, а не два: без проекта роль ставить некуда.
