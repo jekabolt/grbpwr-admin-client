@@ -44,7 +44,15 @@ export function Tasks() {
    * в чужой чат. Сессионный фильтр этого не умеет по построению.
    */
   const [params, setParams] = useSearchParams();
-  const projectId = Number(params.get('project') ?? 0) || 0;
+  /**
+   * КЛАМП `> 0` — НЕ ПЕДАНТИЗМ. Сервер сужает `ListTasks` только по ПОЛОЖИТЕЛЬНОМУ id
+   * (`if f.ProjectTopicId > 0`), поэтому `?project=-5` уехал бы на него и не сузил ничего, а
+   * чип над доской утверждал бы сужение — экран говорил бы одно, а показывал другое. Дробное
+   * режется тем же движением: id темы целый, и «2.5» на проводе значит ровно то, что клиент
+   * не посмотрел на свой адрес.
+   */
+  const rawProject = Math.trunc(Number(params.get('project') ?? 0));
+  const projectId = Number.isFinite(rawProject) && rawProject > 0 ? rawProject : 0;
   const dropProject = () => {
     const next = new URLSearchParams(params);
     next.delete('project');

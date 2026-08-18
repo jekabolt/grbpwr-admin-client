@@ -10,7 +10,6 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { isForbidden, isUnknownRoute } from '../api/rpc-error';
 
 /**
  * ЗАДАЧИ ПРОЕКТА — ОДНА СТРОКА-СВОДКА, А НЕ СПИСОК.
@@ -23,18 +22,6 @@ import { isForbidden, isUnknownRoute } from '../api/rpc-error';
  * монтирует, — от места не зависит ничего из написанного ниже.
  */
 
-/**
- * ОТКАЗ ПРАВ — ЗАКОННАЯ КОМБИНАЦИЯ, А НЕ ПОЛОМКА. Файловому человеку могли не дать
- * `tasks:read`; тогда строки просто нет — ни её самой, ни плашки ошибки. Плашка сказала бы,
- * что сломалось то, чего ему и не обещали.
- *
- * Невыкаченный роут — сюда же: на бете, где бэкенда задач ещё нет, страница проекта обязана
- * работать целиком, а не показывать красное.
- */
-function isSilent(e: unknown): boolean {
-  return isForbidden(e) || isUnknownRoute(e);
-}
-
 export function ProjectTasks({ projectId }: { projectId: number }) {
   const { canRead, canWrite, resolved } = usePermissions();
   // Право читается ДО запроса: спрашивать заведомо запрещённое, чтобы промолчать по ответу,
@@ -42,7 +29,7 @@ export function ProjectTasks({ projectId }: { projectId: number }) {
   const mayRead = resolved && canRead(SECTION.tasks);
   const mayWrite = canWrite(SECTION.tasks);
 
-  const { data, isError, error } = useQuery({
+  const { data, isPending, isError } = useQuery({
     queryKey: ['tasks', 'project-summary', projectId],
     queryFn: () => tasksService.listTasks({ projectTopicId: projectId }),
     enabled: mayRead && projectId > 0,
@@ -86,12 +73,36 @@ export function ProjectTasks({ projectId }: { projectId: number }) {
     }
   }
 
-  if (!mayRead) return null;
-  if (isError && isSilent(error)) return null;
+  /**
+   * СТРОКА МОЛЧИТ, ПОКА НЕ ЗНАЕТ, И МОЛЧИТ, ЕСЛИ НЕ УЗНАЛА. Три состояния сводятся в одно, и
+   * это решение, а не экономия ветки.
+   *
+   * ПОКА ОТВЕТ ЛЕТИТ, рисовать пустую ветку нельзя: «no active tasks in this project» — это
+   * УТВЕРЖДЕНИЕ О ФАКТЕ, а факта ещё нет. Человек читал бы неправду на каждом открытии
+   * страницы, и она успевала бы отпечататься раньше, чем её сменит правда.
+   *
+   * ЛЮБОЙ ОТКАЗ — ТОЖЕ МОЛЧАНИЕ, а не только «нет прав» и «роут не выкачен». `retry: false`
+   * значит, что 500 или оборванная сеть оставят экран в этом состоянии НАВСЕГДА, и проект с
+   * полусотней задач так и будет утверждать, что задач нет. Отказ прав при этом остаётся
+   * законной комбинацией (файловому человеку могли не дать `tasks:read`), поэтому и здесь
+   * плашки нет: сказать «сломалось» о том, чего не обещали, — тот же обман, только громкий.
+   *
+   * Цена названа вслух: сбой чтения задач у проекта, у которого они есть, выглядит как их
+   * отсутствие СТРОКИ, а не как ложное «их нет». Доска стоит рядом и говорит правду.
+   */
+  if (!mayRead || isPending || isError) return null;
 
   const newTask = mayWrite && (
     <Button variant='underline' size='xs' onClick={() => setCreating(true)}>
       + new task
+    </Button>
+  );
+  // «Куда читать остальное» — тот же адрес, которым доска сужается проектом. Стоит в ОБЕИХ
+  // ветках: пустая строка считает только НЕархивные задачи, и без этого выхода проект, где всю
+  // работу закончили и убрали в архив, выглядел бы как проект, где её не было.
+  const openBoard = (
+    <Button asChild variant='underline' size='xs'>
+      <Link to={`${ROUTES.tasks}?project=${projectId}`}>open board</Link>
     </Button>
   );
 
@@ -102,12 +113,18 @@ export function ProjectTasks({ projectId }: { projectId: number }) {
            ОРГАН ЗАВЕДЕНИЯ: страница архивного проекта открывается прямой ссылкой, и «+ new
            task» на ней — единственный путь завести задачу на законченную съёмку (пикер доски
            предлагает только живые проекты). Спрятать строку вовсе значило бы закрыть этот
-           путь. */
+           путь.
+
+           СЛОВА — РОВНО ПРО ТО, ЧТО СПРОШЕНО. Запрос идёт БЕЗ архива (как и доска), поэтому
+           «no tasks linked to this project yet» было бы враньём про проект, где всю работу
+           сделали и карточки убрали: связь у них никуда не делась. «No active tasks» верно и
+           там, и там, а архив досягаем соседней кнопкой. */
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='micro' variant='label' component='span'>
-            no tasks linked to this project yet
+            no active tasks in this project
           </Text>
           {newTask}
+          {openBoard}
         </div>
       ) : (
         <div className='flex flex-wrap items-center gap-2 border border-borderColor px-2.5 py-1.5'>
@@ -122,10 +139,7 @@ export function ProjectTasks({ projectId }: { projectId: number }) {
           )}
           <span className='ml-auto' />
           {newTask}
-          {/* «Куда читать остальное» — тот же адрес, которым доска сужается проектом. */}
-          <Button asChild variant='underline' size='xs'>
-            <Link to={`${ROUTES.tasks}?project=${projectId}`}>open board</Link>
-          </Button>
+          {openBoard}
         </div>
       )}
 

@@ -459,10 +459,12 @@ export function EmptyGroupingState({
     if (projectId > 0 && role) return `nothing in “${project}” carries the role “${role}”`;
     if (projectId > 0) return `the project “${project}” is empty`;
     // СТРАХОВКА, А НЕ ЖИВАЯ ВЕТКА, и это надо сказать вслух, чтобы через полгода её не сочли
-    // сломанной. «Без роли» без проекта до сюда не доходит: его гасит `fileRoleFromUrl` при
-    // разборе адреса и второй раз `normalizeGrouping` при сборке запроса. Но компонент —
-    // обычная функция, и её пропы не защищены ни одним из этих двух гейтов: следующий вызывающий
-    // может собрать такую пару руками. Строка стоит здесь ровно на этот случай, потому что
+    // сломанной. Ни «без роли» без проекта, ни РОЛЬ без проекта до сюда больше не доходят:
+    // первое гасит `fileRoleFromUrl` при разборе адреса и второй раз `normalizeGrouping` при
+    // сборке запроса, второе с 0323 нормализуется в свой проект или снимается с адреса вовсе
+    // (у роли есть владелец, и «во всех проектах сразу» перестало быть вопросом). Но компонент
+    // — обычная функция, и её пропы не защищены ни одним из этих гейтов: следующий вызывающий
+    // может собрать такую пару руками. Обе строки стоят здесь ровно на этот случай, потому что
     // альтернатива — «ни в одном проекте нет роли «»» с пустыми кавычками.
     if (withoutRole) return 'pick a project — “without a role” is asked inside one';
     return `no project holds anything in the role “${role}”`;
@@ -494,6 +496,19 @@ export function EmptyGroupingState({
         idea” will not find it, because it was not an idea in the shoot. this is not strictness for
         its own sake: flat labels would find it silently and wrongly.
       </Text>
+      {/* ПУСТОЙ ПРОЕКТ — ЭТО МЕСТО, ГДЕ МОДЕЛЬ ОБЪЯСНЯЮТ. Рамка, которая молчит, в пустом
+          проекте бесполезна: человек только что его завёл и не знает, что «положить файл в
+          проект» это не перемещение в папку. Приёмных чипов «куда класть» здесь пока нет —
+          они приезжают вместе со слотами приёма отдельной волной. */}
+      {projectId > 0 && !roleId && !withoutRole && (
+        <Text size='micro' variant='label'>
+          a file is not moved into a project the way it is moved into a folder: a link is made
+          between the file and the project, and the role lives on that link. drop or upload
+          anything while this project is chosen and it lands here with no role — a lawful state,
+          the intake pile. <b>the roles belong to this project alone</b>: its own words for its own
+          sub-groups, not a list shared with the library.
+        </Text>
+      )}
       {projectId > 0 && withoutRole && (
         <Text size='micro' variant='label'>
           “without a role” is the project's intake pile: everything dropped into it and not sorted
@@ -509,11 +524,15 @@ export function EmptyGroupingState({
           hides it from the chips, it does not delete it.
         </Text>
       )}
+      {/* ВОПРОС «ВСЕ ИСХОДНИКИ ПО ВСЕМ СЪЁМКАМ» УМЕР ВМЕСТЕ С ОБЩИМ СЛОВАРЁМ (0323): у роли
+          появился владелец, и «исходники» съёмки — не та же строка, что «исходники» лукбука.
+          Абзац, объяснявший этот вопрос, стоял здесь; сквозной ответ теперь даёт ПОИСК ПО СЛОВУ
+          — он идёт и по имени роли, и пара «проект × роль» в нём точна. */}
       {projectId === 0 && !withoutRole && (
         <Text size='micro' variant='label'>
-          a role without a project is the question “all the raws across all the shoots” at once.
-          empty here means nobody has been given this role yet: that is done in the selection bar,
-          with the “set a role” button.
+          a role belongs to ONE project, so “this role everywhere at once” is no longer a question
+          this filter can be asked: type the word into the search instead — it looks at role names
+          too, and finds the files of every project where a role is called that.
         </Text>
       )}
       {narrowedByTopics && (

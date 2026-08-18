@@ -1,7 +1,9 @@
-import type { FileRole, FileTopic } from 'api/proto-http/admin';
+import { Link } from 'react-router-dom';
+import type { FileTopic } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
+import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
-import type { FileRoleFilter } from '../hooks/useFiles';
 
 export type TopicSelection = { topicIds: number[]; untopiced: boolean };
 
@@ -282,7 +284,7 @@ export function ProjectChips({
       return `project #${selected} is not in the list: it is archived, or the link is old. the filter works all the same — it asks by number rather than by name`;
     }
     if (!projects.length) {
-      return 'no projects yet. a project is an ordinary topic that was given the kind in the topic dictionary: it gains dates, an archive, and roles on the files inside it';
+      return 'no projects yet. a project is a topic that has dates, an archive and roles on the files inside it — start one with “all projects →”, in one press';
     }
     if (picked) {
       return `project “${picked.name}”${dates ? ` · ${dates}` : ''}${count}. the role row below already asks about the file's link WITH THIS project`;
@@ -327,131 +329,13 @@ export function ProjectChips({
             #{selected}
           </Chip>
         )}
-      </ChipRow>
-      <Text size='micro' variant='label'>
-        {caption()}
-      </Text>
-    </div>
-  );
-}
-
-/**
- * Роли холста — второй ряд одиночного выбора.
- *
- * РОЛЬ ЖИВЁТ НА СВЯЗИ «файл ↔ проект», а не ярлыком на файле, и весь этот ряд существует
- * ради одного следствия: пара «проект × роль» относится к ОДНОЙ строке связи. Снимок,
- * который в съёмке «отобранное», а в лукбуке «референс», при плоских метках нашёлся бы по
- * «съёмка × референс» — молча и неправильно. Здесь не найдётся.
- *
- * «БЕЗ РОЛИ» ПОКАЗЫВАЕТСЯ ТОЛЬКО ПРИ ВЫБРАННОМ ПРОЕКТЕ, и это не прихоть: в одиночку такой
- * фильтр значит «почти вся библиотека», и сервер его ОТКАЗЫВАЕТ, а не игнорирует. Тот же
- * приём, что у переключателя роли человека в полосе: орган появляется вместе с вопросом, на
- * который отвечает, — просить тут не у кого, спрятанного никто не ищет.
- */
-export function RoleChips({
-  roles,
-  value,
-  hasProject,
-  projectName,
-  matched,
-  onChange,
-}: {
-  roles: FileRole[];
-  value: FileRoleFilter;
-  /**
-   * Проект выбран — независимо от того, нашлось ли его имя.
-   *
-   * Разделено с `projectName` намеренно. Пока «без роли» показывался по имени, архивный проект
-   * из прямой ссылки давал ряд, в котором фильтр применён, а нажатым не выглядит ничего: имя —
-   * это то, что мы не сумели показать, а не то, чего нет.
-   */
-  hasProject: boolean;
-  /** Имя выбранного проекта; пусто — его нет в словаре холста (архив или старая ссылка). */
-  projectName?: string;
-  matched?: number;
-  onChange: (next: FileRoleFilter) => void;
-}) {
-  const picked = roles.find((r) => Number(r.id) === value.roleId);
-  // То же, что и у проекта: роль в архиве или из старой ссылки фильтрует, но в словаре холста
-  // её нет. Чип-сирота показывает, что фильтр стоит.
-  const orphan = value.roleId > 0 && !picked;
-  const count = matched === undefined ? '' : ` — ${matched} pcs`;
-  // Проект называется именем, а когда имени нет — прямо говорится, что его нет. Пустые кавычки
-  // «в проекте «»» читаются как поломка и ничего не сообщают.
-  const where = projectName ? `“${projectName}”` : 'from the link (no name: it is archived)';
-
-  const caption = () => {
-    if (orphan) {
-      return `role #${value.roleId} is not in the list: it is archived, or the link is old. it can be taken off files, but not put on again while it is archived`;
-    }
-    if (!roles.length) {
-      return 'the role dictionary is empty. roles are started on the topics screen: the dictionary is closed — “all the raws across all the shoots” means something only while “raw” is one and the same everywhere';
-    }
-    if (value.withoutRole) {
-      return `files that already lie in the project ${where}, but have not been given a role yet${count}. everything dropped into the project lands here`;
-    }
-    if (picked && hasProject) {
-      return `in the project ${where} — “${picked.name}”${count}. both conditions are checked on ONE link row, so a file that is “${picked.name}” in another project will not land here`;
-    }
-    if (picked) {
-      return `“${picked.name}” across all projects at once${count}. pick a project above to ask about one`;
-    }
-    return hasProject
-      ? 'a role answers WHAT the file is inside this project. it sits on the link with the project, not as a label on the file: the same file is a raw in a shoot and an idea in a lookbook'
-      : "a role without a project is the question “all the raws across all the shoots”. with a project chosen it becomes a section of that project's page";
-  };
-
-  return (
-    <div className='flex flex-col gap-1'>
-      <ChipRow>
-        <RowLabel>role</RowLabel>
-        <Chip
-          selected={!value.roleId && !value.withoutRole}
-          pressed={!value.roleId && !value.withoutRole}
-          onClick={() => onChange({ roleId: 0, withoutRole: false })}
-        >
-          any
-        </Chip>
-        {roles.map((r) => {
-          const id = Number(r.id);
-          const on = id === value.roleId;
-          return (
-            <Chip
-              key={id}
-              // Стабильный id: кнопка «show all» в секции размонтируется вместе с секциями, и
-              // фокус обязан переехать на орган, который ТЕПЕРЬ держит это состояние, — иначе
-              // клавиатурный человек оказывается в начале документа.
-              id={`frole-${id}`}
-              selected={on}
-              pressed={on}
-              title={r.name ?? undefined}
-              onClick={() => onChange({ roleId: on ? 0 : id, withoutRole: false })}
-            >
-              <ChipName>{r.name}</ChipName>
-              <span className='tabular-nums opacity-70'>{Number(r.filesCount ?? 0)}</span>
-            </Chip>
-          );
-        })}
-        {orphan && (
-          <Chip
-            selected
-            pressed
-            title='the role is archived or the link is old — the filter is applied all the same'
-            onClick={() => onChange({ roleId: 0, withoutRole: false })}
-          >
-            #{value.roleId}
-          </Chip>
-        )}
-        {hasProject && (
-          <Chip
-            id='frole-none'
-            selected={value.withoutRole}
-            pressed={value.withoutRole}
-            onClick={() => onChange({ roleId: 0, withoutRole: !value.withoutRole })}
-          >
-            without a role
-          </Chip>
-        )}
+        {/* ХВОСТ РЯДА — ВЫХОД В СПИСОК. Ряд чипов держится до десятка проектов; дальше нужен
+            список, который сортируется и ищется, и там же заводят новый. Ссылка стоит В РЯДУ, а
+            не отдельной кнопкой сверху: она отвечает на тот же вопрос, что и сам ряд («какой
+            проект»), просто на большем числе проектов. */}
+        <Button asChild size='xs' variant='underline'>
+          <Link to={ROUTES.filesProjects}>all projects →</Link>
+        </Button>
       </ChipRow>
       <Text size='micro' variant='label'>
         {caption()}
