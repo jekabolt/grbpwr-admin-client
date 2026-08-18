@@ -1,7 +1,10 @@
+import { useQuery } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { filesService } from 'components/managers/files/api/filesService';
+import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { SectionHeader } from 'ui/components/section-header';
@@ -35,6 +38,36 @@ const ARCHIVED_KEY = 'grbpwr.kanban.archived';
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
   const navigate = useNavigate();
+  /**
+   * СУЖЕНИЕ ПРОЕКТОМ ЖИВЁТ В АДРЕСЕ, а не в сессионных фильтрах: сюда приходят ссылкой со
+   * страницы проекта («open board»), и такая ссылка обязана пережить перезагрузку и уехать
+   * в чужой чат. Сессионный фильтр этого не умеет по построению.
+   */
+  const [params, setParams] = useSearchParams();
+  const projectId = Number(params.get('project') ?? 0) || 0;
+  const dropProject = () => {
+    const next = new URLSearchParams(params);
+    next.delete('project');
+    setParams(next, { replace: true });
+  };
+  // Имя проекта — ИЗ СЛОВАРЯ С АРХИВОМ: доска законно сужается и по заархивированной съёмке
+  // (хвост задач по законченной работе нормален), и «project #17» вместо имени читалось бы
+  // как поломка. Запрос уходит только когда сужение есть.
+  const { data: projectTopics } = useQuery({
+    queryKey: ['tasks', 'project-scope', projectId],
+    enabled: projectId > 0,
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: () => filesService.listTopics(true),
+  });
+  const projectTopic = (projectTopics?.topics ?? []).find((t) => Number(t.id) === projectId);
+  const projectLabel = projectId
+    ? projectTopic?.name
+      ? projectTopic.archived
+        ? `${projectTopic.name} · ${ARCHIVED_WORD}`
+        : projectTopic.name
+      : `#${projectId}`
+    : undefined;
 
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
@@ -53,14 +86,15 @@ export function Tasks() {
   useEffect(() => sessionStorage.setItem(ARCHIVED_KEY, showArchived ? '1' : '0'), [showArchived]);
 
   const filter = useMemo(
-    () => ({ board: activeBoard, includeArchived: showArchived }),
-    [activeBoard, showArchived],
+    () => ({ board: activeBoard, includeArchived: showArchived, projectTopicId: projectId }),
+    [activeBoard, showArchived, projectId],
   );
   const { data, isLoading, isError, error, refetch } = useTasks(filter);
   const tasks = data?.tasks ?? [];
 
-  // Per-board open-task counts for the rail — one all-boards, active-only read.
-  const countsFilter = useMemo(() => ({}), []);
+  // Per-board open-task counts for the rail — one all-boards, active-only read. Сужение
+  // проектом входит и сюда: иначе число в рельсе противоречило бы колонкам под ним.
+  const countsFilter = useMemo(() => ({ projectTopicId: projectId }), [projectId]);
   const { data: countsData } = useTasks(countsFilter);
 
   // ListTasks is a single page capped at TASKS_PAGE_LIMIT. Past that the board silently drops
@@ -100,9 +134,11 @@ export function Tasks() {
   const [creating, setCreating] = useState<TaskStatus | null>(null);
   const createTask = useCreateTask();
 
+  // Заводя карточку на суженной проектом доске, человек заводит её ПО ЭТОМУ ПРОЕКТУ:
+  // преселект ссылки — то же самое, что преселект колонки, из которой нажали «+».
   const initial: TaskFormValues = useMemo(
-    () => emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'),
-    [activeBoard, creating],
+    () => ({ ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'), projectTopicId: projectId }),
+    [activeBoard, creating, projectId],
   );
 
   async function handleCreate(values: TaskFormValues) {
@@ -118,6 +154,9 @@ export function Tasks() {
   function clearFilters() {
     setFilters(emptyFilters);
     setShowArchived(false);
+    // «Clear» значит одно и то же для всех сужений экрана: оставить проект зажжённым после
+    // него означало бы, что слово на кнопке врёт про часть ряда.
+    if (projectId) dropProject();
   }
 
   if (!canView) {
@@ -172,6 +211,8 @@ export function Tasks() {
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived((v) => !v)}
               onClear={clearFilters}
+              projectLabel={projectLabel}
+              onClearProject={dropProject}
             />
           </Toolbar>
 

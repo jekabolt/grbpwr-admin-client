@@ -9,6 +9,11 @@ import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
  * whole-board mode flip. The old search box + column/priority selects are gone: a
  * board already IS its columns, so a status filter only emptied them, and free-text
  * search over six cards a column earned less than the chrome it cost.
+ *
+ * ПРОЕКТ — ЧИП ОСОБОГО РОДА: он живёт в АДРЕСЕ (`/tasks?project=N`), а не в сессионных
+ * фильтрах, потому что приходят по нему ссылкой со страницы проекта. Поэтому он рисуется
+ * здесь, но состояние его снаружи, и снимается он тем же жестом, что и приоритет, — щелчком
+ * по зажжённому.
  */
 
 export interface TaskFilters {
@@ -37,6 +42,8 @@ export function FiltersBar({
   showArchived,
   onToggleArchived,
   onClear,
+  projectLabel,
+  onClearProject,
 }: {
   filters: TaskFilters;
   onChange: (f: TaskFilters) => void;
@@ -44,12 +51,22 @@ export function FiltersBar({
   showArchived: boolean;
   onToggleArchived: () => void;
   onClear: () => void;
+  /** Имя проекта из адреса; пусто = доска не сужена проектом. */
+  projectLabel?: string;
+  onClearProject?: () => void;
 }) {
   const set = (patch: Partial<TaskFilters>) => onChange({ ...filters, ...patch });
-  const dirty = filtersActive(filters) || showArchived;
+  const dirty = filtersActive(filters) || showArchived || !!projectLabel;
 
   return (
     <ChipRow className='gap-1.5'>
+      {/* Сужение проектом стоит ПЕРВЫМ: остальные чипы работают внутри него, и человек,
+          пришедший сюда ссылкой, обязан видеть, почему на доске не все карточки. */}
+      {projectLabel && (
+        <Chip selected pressed aria-label={`project: ${projectLabel}`} onClick={onClearProject}>
+          project: {projectLabel}
+        </Chip>
+      )}
       {PRIORITIES.map((p) => {
         const on = filters.priority === p;
         return (
