@@ -37,6 +37,7 @@ import Textarea from 'ui/components/text-area';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 import { FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
@@ -90,7 +91,7 @@ import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './a
 import { suggestUnitCode } from './assembly-suggest';
 import { AssemblySchematic } from './assembly-schematic';
 import { OperationMediaStrip } from './operation-media-strip';
-import { useSchematicPrefs } from './use-schematic-prefs';
+import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
@@ -1191,6 +1192,47 @@ function StepNumberDrift() {
         steps automatically, but the numbers already printed in issued tech packs do not.
       </Text>
     </CalloutBox>
+  );
+}
+
+const SEQUENCE_VIEWS = [
+  {
+    value: 'schematic',
+    label: 'schematic',
+    hint: 'units and what feeds them, laid out on a canvas',
+  },
+  { value: 'list', label: 'list', hint: 'the steps in order, one line each' },
+] as const satisfies readonly ViewSwitchOption<SchematicMode>[];
+
+/**
+ * Переключатель вида последовательности: схема сборки или список шагов.
+ *
+ * НАЗЫВАЕТ ПОЛОЖЕНИЕ, А НЕ ЦЕЛЬ. До этого здесь стоял один чип с подписью «as a list» / «as a
+ * schematic» — то есть подписью следующего вида, а не текущего. С открытой схемой он читался
+ * «список», и понять, где ты находишься, можно было только по полотну под ним. Оба вида на виду
+ * сразу: вопрос «где я» отвечен подписью, а не догадкой.
+ *
+ * ОБА СЕГМЕНТА ВСЕГДА НАРИСОВАНЫ, поэтому ширина полосы не зависит от выбора. Подпись «as a
+ * schematic» была на пять знаков длиннее «as a list», и орган ёрзал даже там, где контейнер стоял
+ * на месте.
+ *
+ * Виды правят ОДНИ И ТЕ ЖЕ данные, поэтому это переключатель вида, а не две вкладки с разным
+ * содержимым; подсказки сегментов говорят, что показывает каждый.
+ */
+function SequenceViewSwitch({
+  mode,
+  onMode,
+}: {
+  mode: SchematicMode;
+  onMode: (next: SchematicMode) => void;
+}) {
+  return (
+    <ViewSwitch<SchematicMode>
+      label='sequence view'
+      value={mode}
+      onChange={onMode}
+      options={SEQUENCE_VIEWS}
+    />
   );
 }
 
@@ -3604,159 +3646,158 @@ export function OperationsField({
           </div>
         </div>
       ) : (
-        <div
-          className={cn(
-            'flex flex-col gap-3',
-            effectiveMode === 'list' && 'lg:flex-row lg:items-start',
-          )}
-        >
+        // ОБЁРТКА, А НЕ ФРАГМЕНТ. Родитель — `space-y-2.5`, то есть 10px между СВОИМИ детьми;
+        // фрагмент своих детей в него и высыпает, и заголовок отъезжал от размеченного им
+        // содержимого на 4px (`mb-1`) + 10px вместо положенных 4px. Подпись группы обязана
+        // сидеть вплотную к тому, что подписывает, — иначе линейка читается как разделитель
+        // между двумя разными вещами.
+        <div>
+          {/* ЗАГОЛОВОК ГРУППЫ ВЫНЕСЕН ИЗ КОЛОНКИ, КОТОРАЯ МЕНЯЕТ ШИРИНУ. Он жил внутри неё, а
+              переключатель вида сидел в правом слоте — то есть был прижат к правому краю
+              контейнера шириной то 320px (список), то во всю секцию (схема). Одно нажатие
+              перебрасывало орган через полэкрана, и второе приходилось искать глазами. Здесь же
+              он был `sticky` только в списке: у прокрученной страницы переключение роняло
+              заголовок с прилипшей строки обратно в поток, то есть двигало его и по вертикали.
+
+              Полоса заголовка одинакова в обоих режимах и не прилипает ни в одном, поэтому
+              переключатель стоит на месте при любом состоянии прокрутки. Прилипание осталось у
+              рельса списка: прилипающая полоса поверх полотна схемы мешала бы таскать узлы.
+
+              Подсказка «⠿ drag» отсюда убрана. Она повторяла вводный абзац секции слово в слово
+              («drag ⠿ to change the order») и вдобавок висела над схемой, где никакого ⠿ нет. */}
+          <GroupLabel flush lead={<SequenceViewSwitch mode={effectiveMode} onMode={setMode} />}>
+            sequence
+          </GroupLabel>
           <div
             className={cn(
-              'w-full',
-              effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
+              'flex flex-col gap-3',
+              effectiveMode === 'list' && 'lg:flex-row lg:items-start',
             )}
           >
-            <GroupLabel
-              flush
-              action={
-                <div className='flex items-center gap-2'>
-                  {/* nonForm: переключатель ничего не меняет в данных, но обязан работать и на
-                      выпущенной карточке — иначе разрешённое Р9 ручное раскладывание недостижимо
-                      с карточки, сохранённой в режиме списка. Под `<fieldset disabled>` настоящая
-                      кнопка мертва, и своими пропами этого не исправить. */}
-                  <Chip
-                    nonForm
-                    dashed
-                    onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
-                    title='the assembly schematic or the list of steps — both edit the same data'
-                  >
-                    {effectiveMode === 'schematic' ? 'as a list' : 'as a schematic'}
-                  </Chip>
-                  <Text size='micro' variant='label' component='span'>
-                    ⠿ drag
-                  </Text>
-                </div>
-              }
+            <div
+              className={cn(
+                'w-full',
+                effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
+              )}
             >
-              sequence
-            </GroupLabel>
-            {effectiveMode === 'schematic' ? (
-              <AssemblySchematic
-                blocks={grouping.schematicBlocks}
-                steps={grouping.schematicSteps}
-                res={grouping.res}
-                labelOf={(i) =>
-                  ((getValues(`operations.${i}.note`) as string) || '').trim() ||
-                  operationHeading({
-                    operationType: getValues(`operations.${i}.operationType`) as Parameters<
-                      typeof operationHeading
-                    >[0]['operationType'],
-                    machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
-                    zone: getValues(`operations.${i}.zone`) as Parameters<
-                      typeof operationHeading
-                    >[0]['zone'],
-                    pieceNames: [],
-                  }) ||
-                  'step'
-                }
-                pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
-                onPickStep={(i) => {
-                  setSelected(i);
-                  // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
-                  // «открыть шаг» открывает его за пределами экрана.
-                  requestAnimationFrame(() =>
-                    editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
-                  );
-                }}
-                onCreate={setPendingCreate}
+              {effectiveMode === 'schematic' ? (
+                <AssemblySchematic
+                  blocks={grouping.schematicBlocks}
+                  steps={grouping.schematicSteps}
+                  res={grouping.res}
+                  labelOf={(i) =>
+                    ((getValues(`operations.${i}.note`) as string) || '').trim() ||
+                    operationHeading({
+                      operationType: getValues(`operations.${i}.operationType`) as Parameters<
+                        typeof operationHeading
+                      >[0]['operationType'],
+                      machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
+                      zone: getValues(`operations.${i}.zone`) as Parameters<
+                        typeof operationHeading
+                      >[0]['zone'],
+                      pieceNames: [],
+                    }) ||
+                    'step'
+                  }
+                  pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+                  onPickStep={(i) => {
+                    setSelected(i);
+                    // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
+                    // «открыть шаг» открывает его за пределами экрана.
+                    requestAnimationFrame(() =>
+                      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                    );
+                  }}
+                  onCreate={setPendingCreate}
+                  pieceShapes={pieceShapes}
+                  smvOfBlock={grouping.smvOfBlock}
+                  onDissolve={dissolveUnit}
+                  positions={prefs.pos}
+                  onMove={prefs.move}
+                  onResetPositions={prefs.reset}
+                  frozen={frozen}
+                />
+              ) : (
+              <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  modifiers={[restrictToVerticalAxis]}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={fields.map((f) => f.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className='flex flex-col gap-0.5'>
+                      {fields.map((f, index) => (
+                        <Fragment key={f.id}>
+                          {grouped && grouping.headerBefore.has(index) && (
+                            <UnitBlockHeader
+                              block={grouping.headerBefore.get(index)!.block}
+                              smv={grouping.headerBefore.get(index)!.smv}
+                              terminal={grouping.headerBefore.get(index)!.terminal}
+                            />
+                          )}
+                          <RailStep
+                            uid={f.id}
+                          index={index}
+                          selected={index === selectedIndex}
+                          onSelect={() => setSelected(index)}
+                          hasError={errorIndices.has(index)}
+                          assemblyBroken={brokenSteps.has(index)}
+                          activePin={activePin}
+                          activeBom={activeBom}
+                          pieceShapes={pieceShapes}
+                          onHoverPin={(n) => onActivePinChange?.(n)}
+                          onDropPiece={addInputToOperation}
+                          />
+                        </Fragment>
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </div>
+              )}
+              <button
+                type='button'
+                onClick={addOperation}
+                className='mt-0.5 w-full border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+              >
+                <Text size='control' variant='uppercase' tracking='label' component='span'>
+                  + operation
+                </Text>
+              </button>
+              <RailTotal />
+            </div>
+
+            {selectedIndex >= 0 && (
+              <div ref={editorRef}>
+              <OperationEditor
+                // Keyed on the row's identity AND its position: both of the editor's "skip the first
+                // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
+                // the open step changes the index without remounting, which would fire the
+                // operation-type preset and the thread-from-BOM fill as if the user had just picked
+                // them — quietly writing into blank machine / stitch / thread fields on a drag.
+                key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
+                index={selectedIndex}
+                bomLines={bomItems}
+                pieces={pieces}
                 pieceShapes={pieceShapes}
-                smvOfBlock={grouping.smvOfBlock}
-                onDissolve={dissolveUnit}
-                positions={prefs.pos}
-                onMove={prefs.move}
-                onResetPositions={prefs.reset}
+                tiled={tiled}
+                pinOptions={pinOptions}
+                colorwayArticles={colorwayArticles}
+                onInsertAfter={() => insertAfter(selectedIndex)}
+                onRemove={() => removeOperation(selectedIndex)}
+                onFlashPieces={flashPieces}
+                onActiveBomChange={onActiveBomChange}
+                onDropPiece={addInputToOperation}
+                mediaUrls={operationMediaUrls}
                 frozen={frozen}
               />
-            ) : (
-            <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                modifiers={[restrictToVerticalAxis]}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext
-                  items={fields.map((f) => f.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className='flex flex-col gap-0.5'>
-                    {fields.map((f, index) => (
-                      <Fragment key={f.id}>
-                        {grouped && grouping.headerBefore.has(index) && (
-                          <UnitBlockHeader
-                            block={grouping.headerBefore.get(index)!.block}
-                            smv={grouping.headerBefore.get(index)!.smv}
-                            terminal={grouping.headerBefore.get(index)!.terminal}
-                          />
-                        )}
-                        <RailStep
-                          uid={f.id}
-                        index={index}
-                        selected={index === selectedIndex}
-                        onSelect={() => setSelected(index)}
-                        hasError={errorIndices.has(index)}
-                        assemblyBroken={brokenSteps.has(index)}
-                        activePin={activePin}
-                        activeBom={activeBom}
-                        pieceShapes={pieceShapes}
-                        onHoverPin={(n) => onActivePinChange?.(n)}
-                        onDropPiece={addInputToOperation}
-                        />
-                      </Fragment>
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            </div>
+              </div>
             )}
-            <button
-              type='button'
-              onClick={addOperation}
-              className='mt-0.5 w-full border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-            >
-              <Text size='control' variant='uppercase' tracking='label' component='span'>
-                + operation
-              </Text>
-            </button>
-            <RailTotal />
           </div>
-
-          {selectedIndex >= 0 && (
-            <div ref={editorRef}>
-            <OperationEditor
-              // Keyed on the row's identity AND its position: both of the editor's "skip the first
-              // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
-              // the open step changes the index without remounting, which would fire the
-              // operation-type preset and the thread-from-BOM fill as if the user had just picked
-              // them — quietly writing into blank machine / stitch / thread fields on a drag.
-              key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
-              index={selectedIndex}
-              bomLines={bomItems}
-              pieces={pieces}
-              pieceShapes={pieceShapes}
-              tiled={tiled}
-              pinOptions={pinOptions}
-              colorwayArticles={colorwayArticles}
-              onInsertAfter={() => insertAfter(selectedIndex)}
-              onRemove={() => removeOperation(selectedIndex)}
-              onFlashPieces={flashPieces}
-              onActiveBomChange={onActiveBomChange}
-              onDropPiece={addInputToOperation}
-              mediaUrls={operationMediaUrls}
-              frozen={frozen}
-            />
-            </div>
-          )}
         </div>
       )}
 
