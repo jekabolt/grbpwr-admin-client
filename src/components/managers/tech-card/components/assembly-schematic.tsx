@@ -7,7 +7,15 @@ import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
-import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
+import { assemblyLayout } from './assembly-layout';
+import {
+  buildWires,
+  directInputsOf,
+  makeRowY,
+  NODE_TOUCH,
+  TailBoxView,
+  UnitBoxView,
+} from './assembly-node-views';
 import type { CreatePrefill } from './assembly-create-dialog';
 import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
 import { pieceRefKey } from './piece-block-refs';
@@ -44,15 +52,6 @@ const DRAG_THRESHOLD = 4;
 const AUTOSCROLL_EDGE = 32;
 /** Постоянная скорость автоскролла: ускорение под неподвижным курсором дезориентирует. */
 const AUTOSCROLL_SPEED = 12;
-/**
- * Ноды не отдают палец прокрутке.
- *
- * Объявляется ЗАРАНЕЕ и на самой ноде: браузер выбирает поведение жеста в момент касания, и
- * запрет, выставленный после `pointerdown`, уже ничего не решает — палец уводит страницу в
- * прокрутку, прилетает `pointercancel`, нода возвращается назад. Полотно при этом остаётся
- * прокручиваемым: касание мимо нод ведёт себя как обычно.
- */
-const NODE_TOUCH = 'none' as const;
 
 type DragState = {
   key: string;
@@ -138,7 +137,6 @@ export function AssemblySchematic({
   // Живые УЗЛЫ фронтира (детали на столе — не узлы). Ровно та величина, которой рельс решает,
   // сошёлся ли граф: правило выпуска требует РОВНО ОДИН терминал.
   const liveUnits = res.frontier.filter((k) => res.units.has(k));
-  const { LINE_H, HEAD_H, FOOT_H } = SCHEMATIC_METRICS;
   const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
   // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
@@ -157,39 +155,6 @@ export function AssemblySchematic({
   const showMessage = useSnackBarStore((st) => st.showMessage);
   /** Человеческое имя ноды: имя детали или код узла. */
   const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
-
-  /**
-   * ВИД ШАГА ОДНИМ ЗНАКОМ. В строке блока раньше стояли только номер и подпись, и три разных по
-   * смыслу шага выглядели одинаково: тот, что рождает узел, тот, что дособирает существующий, и
-   * тот, что просто обрабатывает и ничего не собирает. Глиф отвечает на это, не занимая строки.
-   */
-  const stepGlyph = (i: number): string => {
-    const st = steps[i];
-    if (!st?.outputUnitKey) return '·';
-    return st.inputs.some((inp) => inp.key === st.outputUnitKey) ? '+▣' : '▣';
-  };
-
-  /**
-   * Состояние узла СЛОВОМ, а не значком. «✓», «→GARMENT» и «✕» требовали держать в голове
-   * словарь из трёх символов; строчкой хватает места сказать это словом.
-   */
-  const stateWord = (b: AssemblyBlock, terminal: boolean): string =>
-    terminal ? '✓ garment' : b.absorbedInto ? `→ ▣ ${b.absorbedInto}` : '✕ break';
-
-  /**
-   * Состав узла КОМПАКТНО: узлы поимённо, детали числом.
-   *
-   * Имена деталей в подвал не влезают и не нужны — их видно плитками рядом и стрелками к ним.
-   * Число же отвечает на вопрос, которого плитки не закрывают: «сколько всего в этот узел
-   * вошло», особенно когда часть плиток утащена рукой на другой конец полотна.
-   */
-  const compositionOf = (key: string): string => {
-    const inputs = directInputsOf.get(key) ?? [];
-    const units = inputs.filter((k) => res.units.has(k)).map((k) => `▣ ${k}`);
-    const pieces = inputs.filter((k) => !res.units.has(k)).length;
-    const parts = [...units, ...(pieces ? [`${pieces} ${pieces === 1 ? 'piece' : 'pieces'}`] : [])];
-    return parts.length ? `← ${parts.join(' + ')}` : '';
-  };
 
   /**
    * Состояние детали. Ключа в карте НЕТ = рецепт про эту деталь молчит, и это `unbound` — тот же
@@ -550,97 +515,14 @@ export function AssemblySchematic({
     );
   }
 
-  // Шаг → блок, которому он принадлежит (включая хвостовой с пустым ключом).
-  const blockOfStep = new Map<number, string>();
-  for (const b of blocks) for (const i of b.steps) blockOfStep.set(i, b.key);
-
-  // ЧТО УЗЕЛ БЕРЁТ — его ПРЯМЫЕ входы, а не замыкание по деталям.
-  //
-  // Разница принципиальна. Замыкание (`block.leaves`) для готового изделия — это ВСЕ детали
-  // карточки, и сводка выродилась бы в список из пятнадцати имён ровно на том узле, ради
-  // которого схему открывают. Прямые входы отвечают на настоящий вопрос — «из чего собран
-  // именно этот узел»: у корпуса это полочка и спинка, у изделия — ▣ SHELL и ▣ HOOD.
-  //
-  // Собственный ключ отбрасывается: в поглощении `GARMENT + HEM → GARMENT` узел входит сам в
-  // себя, и «берёт: ▣ GARMENT» не сообщает ничего.
-  const directInputsOf = new Map<string, string[]>();
-  for (const b of blocks) {
-    const seen = new Set<string>();
-    const acc: string[] = [];
-    for (const i of b.steps) {
-      for (const input of steps[i]?.inputs ?? []) {
-        if (!input.key || input.key === b.key || seen.has(input.key)) continue;
-        seen.add(input.key);
-        acc.push(input.key);
-      }
-    }
-    directInputsOf.set(b.key, acc);
-  }
-
-  const boxOf = (blockKey: string) => (blockKey === '' ? layout.tail : layout.byKey.get(blockKey));
-
-  // Строка бокса → её y. Нужна проводам: они целятся в строку, а не в бокс.
-  const rowY = (blockKey: string, stepIndex: number): number => {
-    const box = boxOf(blockKey);
-    if (!box) return 0;
-    const b = blocks.find((x) => x.key === blockKey);
-    const pos = b ? b.steps.indexOf(stepIndex) : -1;
-    if (pos < 0) return box.y + HEAD_H / 2;
-    return box.y + HEAD_H + 2 + pos * LINE_H + LINE_H / 2;
-  };
-
-  const wire = (x1: number, y1: number, x2: number, y2: number) => {
-    const mid = (x1 + x2) / 2;
-    return `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`;
-  };
-
-  // Провод помнит СВОИ КОНЦЫ: без этого «подсветить всё, что входит и выходит из ноды»
-  // выродилось бы в разбор строки пути.
-  const wires: Array<{ d: string; key: string; from: string; to: string; faint?: boolean }> = [];
+  // Прямые входы блока и провода считает `assembly-node-views`: это презентация нод, а не жест, и
+  // фулскрин рисует их той же арифметикой. Здесь остаётся только сборка — и она сознательно стоит
+  // ПОСЛЕ пустого состояния, как стояла: на карточке без деталей считать нечего.
+  const directInputs = directInputsOf(blocks, steps);
+  const rowY = makeRowY(blocks, layout);
+  const wires = buildWires(blocks, steps, layout, rowY);
   /** Маркер-стрелка: провод обязан говорить НАПРАВЛЕНИЕ, а не только факт связи. */
   const ARROW = 'url(#assembly-arrow)';
-  // Узел → строка-потребитель.
-  for (const b of blocks) {
-    if (b.key === '') continue;
-    for (const i of b.steps) {
-      for (const input of steps[i]?.inputs ?? []) {
-        if (input.kind !== 'unit' || input.key === b.key) continue;
-        const from = layout.byKey.get(input.key);
-        const to = layout.byKey.get(b.key);
-        if (!from || !to) continue;
-        wires.push({
-          key: `${input.key}->${b.key}:${i}`,
-          from: input.key,
-          to: b.key,
-          d: wire(from.x + from.w, from.y + from.h / 2, to.x, rowY(b.key, i)),
-        });
-      }
-    }
-  }
-  // ДЕТАЛЬ → СТРОКА-ПОТРЕБИТЕЛЬ, ВСЕГДА, включая её собственный узел.
-  //
-  // Раньше смежная связь провода не получала: плитка стоит вплотную к своему боксу, и считалось,
-  // что соседство само за себя говорит. Не говорит. Соседство показывает, ЧТО деталь относится к
-  // узлу, но не показывает, на КАКОМ ШАГЕ она в него вошла, — а это главный вопрос к схеме; и
-  // стоит ноду подвинуть рукой, как соседство исчезает, не оставив вместо себя ничего.
-  for (const t of layout.tiles) {
-    for (const i of t.consumers) {
-      const target = blockOfStep.get(i);
-      if (target === undefined) continue;
-      const to = boxOf(target);
-      if (!to) continue;
-      const eatenHere = t.state === 'eaten' && t.into === target;
-      wires.push({
-        key: `tile:${t.key}->${target}:${i}`,
-        from: t.key,
-        to: target,
-        d: wire(t.x + t.w, t.y + t.h / 2, to.x, rowY(target, i)),
-        // Вошла в узел — полный провод; просто обработана этим шагом — бледный пунктир: связь
-        // есть, но деталь осталась на столе, и путать одно с другим нельзя.
-        faint: !eatenHere,
-      });
-    }
-  }
 
   return (
     <>
@@ -733,236 +615,61 @@ export function AssemblySchematic({
             // именно про то, выпустится она или нет: правило 4 требует РОВНО ОДИН терминал.
             const terminal = liveUnits.length === 1 && liveUnits[0] === box.key;
             return (
-              <div key={box.key}>
-                <div
-                  className={cn(
-                    'absolute border-2 border-textColor bg-bgColor',
-                    drag?.key === box.key && drag.started && 'opacity-70',
-                    nodeRing(box.key),
-                  )}
-                  style={{ left: box.x, top: box.y, width: box.w, height: box.h, touchAction: NODE_TOUCH }}
-                  {...dragHandlers(box.key, box.x, box.y)}
-                  {...hoverHandlers(box.key)}
-                >
-                  {/* ШАПКА — PICK-ЗОНА БОКСА. Строки внутри уже кнопки шагов, поэтому выбор узла
-                      переехал на заголовок: одна нода — одно место, куда по ней кликают. Кнопка, а
-                      не div, ради клавиатуры: Enter на сфокусированной шапке — тот же выбор, и
-                      путь «сшить» с клавиатуры не потерян. */}
-                  <div
-                    {...activate(
-                      !frozen && onTable.has(box.key)
-                        ? clickGuard(() => toggle(box.key))
-                        : // Съеденный узел входом не взять, зато вопрос «куда он делся» законен —
-                          // и шапка на него отвечает, как отвечает плитка съеденной детали.
-                          (() => {
-                            const eater = res.consumedBy.get(box.key);
-                            return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
-                          })(),
-                    )}
-                    className={cn(
-                      // `overflow-hidden` — последняя преграда: высота шапки посчитана
-                      // раскладкой, и третья строка текста, откуда бы она ни взялась, легла бы
-                      // поверх первой строки шага.
-                      'flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1 text-left',
-                      !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
-                      picked.includes(box.key) && 'bg-bgZebra',
-                    )}
-                    style={{ height: HEAD_H }}
-                    // Полный текст шапки — в подсказке: ключ и имя узла обрезаются по ширине, и
-                    // прочесть их целиком иначе было бы негде.
-                    title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
-                      terminal ? ' · finished garment' : b.absorbedInto ? ` · goes into ▣ ${b.absorbedInto}` : ' · break'
-                    }\n${
-                      onTable.has(box.key)
-                        ? 'the unit is on the table — click to take it into the next assembly'
-                        : 'the unit has already gone into another one; click to open the step that consumed it'
-                    }`}
-                  >
-                    {/* ПЕРВАЯ СТРОКА — ТОЛЬКО КЛЮЧ. Он идентифицирует узел во всех остальных
-                        шагах, и делить строку с чем-либо ему нельзя: раньше имя теснило ключ,
-                        ключ теснил состояние, и двухсловный «ДВА РУКАВА» уезжал поверх шага. */}
-                    <Text
-                      size='micro'
-                      variant='uppercase'
-                      tracking='label'
-                      component='span'
-                      className='block w-full truncate font-bold'
-                    >
-                      {picked.includes(box.key) ? '✓ ' : ''}▣ {box.key}
-                    </Text>
-                    {/* ВТОРАЯ СТРОКА — ИМЯ И СОСТОЯНИЕ СЛОВОМ. «✓», «→GARMENT» и «✕» требовали
-                        держать в голове словарь из трёх значков; строкой хватает места сказать
-                        это словом. Красным — только разрыв: сборка не сошлась, и это ошибка,
-                        а не оттенок. */}
-                    <span className='flex w-full items-baseline gap-1 overflow-hidden'>
-                      {b.name && (
-                        <Text size='nano' variant='label' component='span' className='min-w-0 shrink truncate'>
-                          {b.name}
-                        </Text>
-                      )}
-                      <Text
-                        size='nano'
-                        variant='label'
-                        component='span'
-                        className={cn(
-                          'ml-auto max-w-[60%] shrink-0 truncate',
-                          !terminal && !b.absorbedInto && 'text-error',
-                        )}
-                      >
-                        {stateWord(b, terminal)}
-                      </Text>
-                    </span>
-                  </div>
-                  {/* ДЕЙСТВИЯ УЗЛА ПОКАЗЫВАЮТСЯ ПО НАВЕДЕНИЮ. Постоянно висящие чипы над каждым
-                      боксом — это два лишних объекта на узел, и на схеме из десяти узлов их
-                      двадцать: полотно читается как панель кнопок, а не как карта сборки.
-                      Пропасть между боксом и чипами не возникает: чипы — потомки бокса в DOM, а
-                      pointerenter/leave считают вложенность, а не нарисованные границы, поэтому
-                      увести курсор на чип, не потеряв наведение, можно. */}
-                  {!frozen && hovered === box.key && (
-                    // ПОЗИЦИЯ СЧИТАЕТСЯ ОТ КРАЯ БОКСА, А НЕ ПОДБИРАЕТСЯ ЧИСЛОМ. `-top-4` было
-                    // магическими шестнадцатью пикселями: чуть выше строка чипа — и она залезала
-                    // на сам бокс, чуть ниже — отрывалась от него. `bottom-full` ставит нижний
-                    // край полосы ровно на верхний край бокса при любом кегле.
-                    //
-                    // `pb-1` внутри — МОСТИК: без него между чипами и боксом остаётся пустота, и
-                    // провести через неё курсор, не потеряв наведение, нельзя — чипы исчезали бы
-                    // ровно на пути к ним.
-                    //
-                    // Фон и `z-10` — потому что полоса живёт в зазоре между колонками и рядами, и
-                    // соседняя нода там же. Прозрачная полоса поверх чужого бокса читается как
-                    // наезд; непрозрачная и заведомо верхняя — как то, чем она и является:
-                    // временный слой над схемой.
-                    <div className='absolute bottom-full left-0 z-10 flex max-w-full items-center gap-1 bg-bgColor pb-1'>
-                      <Chip
-                        dashed
-                        onClick={clickGuard(() => onCreate({ inputKeys: [box.key], intent: 'process' }))}
-                        title='add a processing step on this unit'
-                      >
-                        + operation
-                      </Chip>
-                      <Chip
-                        dashed
-                        onClick={clickGuard(() => onDissolve(b.producedAt))}
-                        title='the step stops assembling the unit; its inputs return to the table for the next steps'
-                      >
-                        dissolve
-                      </Chip>
-                    </div>
-                  )}
-                  {b.steps.map((i) => (
-                    <div
-                      key={i}
-                      {...activate(clickGuard(() => onPickStep(i)))}
-                      className='flex w-full items-center gap-1 px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-                      style={{ height: LINE_H }}
-                      title='open the step in the list'
-                    >
-                      <Text size='nano' component='span' className='min-w-0 truncate'>
-                        {(i + 1) * 10} · {labelOf(i)}
-                      </Text>
-                      {/* Вид шага одним знаком: ▣ рождает узел, +▣ дособирает его, · только
-                          обрабатывает. Три разных по смыслу шага выглядели одинаково. */}
-                      <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
-                        {stepGlyph(i)}
-                      </Text>
-                    </div>
-                  ))}
-
-                  {/* ПОДВАЛ — ПОСТОЯННЫЙ, а не по наведению. Состав и трудоёмкость это два
-                      вопроса, которые задают узлу чаще всего, и прятать ответы за мышь нельзя:
-                      ноды размечены `touch-action: none`, то есть рассчитаны на палец, а
-                      наведения на планшете не существует вовсе. Состав компактный — узлы
-                      поимённо, детали числом: имена деталей сюда не влезут и не нужны, их видно
-                      плитками и стрелками к ним. */}
-                  <div
-                    className='absolute inset-x-0 bottom-0 flex items-baseline gap-1 overflow-hidden border-t border-hairline px-1'
-                    style={{ height: FOOT_H }}
-                    // Вторая строка подсказки — ТКАНЬ УЗЛА: состав отвечает «из чего собран», а
-                    // свёртка — «из чего сшит», и это разные вопросы к одному боксу. Пустой она не
-                    // приезжает: у узла без единой детали её просто нет.
-                    title={[
-                      `takes: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`,
-                      unitClothLine(box.key),
-                    ]
-                      .filter(Boolean)
-                      .join('\n')}
-                  >
-                    <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-                      {compositionOf(box.key)}
-                    </Text>
-                    {smvOfBlock.get(box.key) && (
-                      <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
-                        Σ {smvOfBlock.get(box.key)}
-                      </Text>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <UnitBoxView
+                key={box.key}
+                box={box}
+                block={b}
+                steps={steps}
+                units={res.units}
+                directInputs={directInputs}
+                smvOfBlock={smvOfBlock}
+                labelOf={labelOf}
+                nameOfNode={nameOfNode}
+                unitClothLine={unitClothLine}
+                terminal={terminal}
+                onTable={onTable.has(box.key)}
+                isPicked={picked.includes(box.key)}
+                frozen={frozen}
+                hovered={hovered === box.key}
+                dragging={drag?.key === box.key && drag.started}
+                ringClassName={nodeRing(box.key)}
+                dragProps={dragHandlers(box.key, box.x, box.y)}
+                hoverProps={hoverHandlers(box.key)}
+                // ОРГАНЫ СОБИРАЮТСЯ ЗДЕСЬ, А НЕ ВО ВЬЮШКЕ. `activate` знает про клавиатуру и про
+                // то, почему это div, а `clickGuard` — про клик-эхо после драга; и то и другое —
+                // механика ОДНОГО полотна, живущая в одном экземпляре. Вьюшка получает готовые
+                // пропы и раскладывает их.
+                headProps={activate(
+                  !frozen && onTable.has(box.key)
+                    ? clickGuard(() => toggle(box.key))
+                    : // Съеденный узел входом не взять, зато вопрос «куда он делся» законен —
+                      // и шапка на него отвечает, как отвечает плитка съеденной детали.
+                      (() => {
+                        const eater = res.consumedBy.get(box.key);
+                        return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
+                      })(),
+                )}
+                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                onAddOperation={clickGuard(() =>
+                  onCreate({ inputKeys: [box.key], intent: 'process' }),
+                )}
+                onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
+              />
             );
           })}
 
-          {/* ХВОСТОВОЙ БОКС: шаги, не достигающие ни одного узла. До Ф7 их на полотне не было
-              вовсе — неразмеченная карточка показывала пустоту вместо существующего маршрута.
-              Пунктир и лексикон те же, что у врезки рельса, чтобы две вьюшки называли одно
-              одинаково. */}
           {layout.tail && (
-            <div
-              className={cn(
-                'absolute border-2 border-dashed border-borderColor bg-bgColor',
-                drag?.key === '' && drag.started && 'opacity-70',
-                nodeRing(''),
-              )}
-              style={{
-                left: layout.tail.x,
-                top: layout.tail.y,
-                width: layout.tail.w,
-                height: layout.tail.h,
-                touchAction: NODE_TOUCH,
-              }}
-              {...dragHandlers('', layout.tail.x, layout.tail.y)}
-              {...hoverHandlers('')}
-            >
-              {/* Хвост носит ту же шапку в две строки, что и узлы: одна геометрия на все боксы
-                  полотна дешевле двух, а вопрос «что это за коробка» у него тот же. */}
-              <div
-                className='flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1'
-                style={{ height: HEAD_H }}
-              >
-                <Text size='micro' variant='uppercase' tracking='label' component='span' className='block truncate font-bold'>
-                  ◌ outside units
-                </Text>
-                <Text size='nano' variant='label' component='span' className='block truncate'>
-                  the step's target isn't a unit
-                </Text>
-              </div>
-              {looseSteps.map((i) => (
-                <div
-                  key={i}
-                  {...activate(clickGuard(() => onPickStep(i)))}
-                  className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-                  style={{ height: LINE_H }}
-                  title='open the step in the list'
-                >
-                  <Text size='nano' component='span' className='min-w-0 truncate'>
-                    {(i + 1) * 10} · {labelOf(i)}
-                  </Text>
-                </div>
-              ))}
-              <div
-                className='absolute inset-x-0 bottom-0 flex items-baseline gap-1 overflow-hidden border-t border-hairline px-1'
-                style={{ height: FOOT_H }}
-              >
-                <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-                  {looseSteps.length} {looseSteps.length === 1 ? 'step' : 'steps'}
-                </Text>
-                {smvOfBlock.get('') && (
-                  <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
-                    Σ {smvOfBlock.get('')}
-                  </Text>
-                )}
-              </div>
-            </div>
+            <TailBoxView
+              tail={layout.tail}
+              looseSteps={looseSteps}
+              smvOfBlock={smvOfBlock}
+              labelOf={labelOf}
+              dragging={drag?.key === '' && drag.started}
+              ringClassName={nodeRing('')}
+              dragProps={dragHandlers('', layout.tail.x, layout.tail.y)}
+              hoverProps={hoverHandlers('')}
+              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+            />
           )}
 
           {/* ВСЕ ДЕТАЛИ КАРТОЧКИ — по одной плитке на деталь, место следует из состояния: съеденная
