@@ -30,6 +30,7 @@
     "marker:area-field": "node scripts/area-field-probe.mjs",
     "lay:header": "node scripts/lay-header-probe.mjs",
     "view:switch": "node scripts/view-switch-probe.mjs",
+    "cloth:pieces": "node scripts/piece-cloth-probe.mjs",
     "fix": "yarn lint && yarn format",
     "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
     "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",
