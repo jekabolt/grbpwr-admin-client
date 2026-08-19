@@ -184,6 +184,7 @@ export function AssemblyShelf({
   collapsed,
   onToggleCollapsed,
   intoOf,
+  unitOrder,
   unitNameOf,
   selection,
   onPick,
@@ -207,6 +208,15 @@ export function AssemblyShelf({
   onToggleCollapsed: () => void;
   /** Ключ узла-потребителя детали или `null` — деталь на столе. */
   intoOf: (lineKey: string) => string | null;
+  /**
+   * Порядок узлов ТАК, КАК ИХ КЛАДЁТ ПОЛОТНО — то есть в порядке шагов, а не выкроек.
+   * Без него полка сортирует по первому появлению узла среди деталей, и на одном экране
+   * полотно показывает CUFF→SHELL, а полка под ним SHELL→CUFF: мотивировка дефолтной оси
+   * («группы зеркалят боксы узлов») перестаёт быть правдой. Родитель отдаёт `[...units.keys()]`
+   * — Map фронтира хранит порядок вставки, а он и есть `producedAt`. Опционален: узлы, которых
+   * в списке нет, встают следом в прежнем порядке первого появления.
+   */
+  unitOrder?: readonly string[];
   unitNameOf: (unitKey: string) => string;
   selection: ReadonlySet<string>;
   /** Клик по плитке ВНЕ режима добора: выбрать и довести панорамой. Всегда. */
@@ -304,8 +314,10 @@ export function AssemblyShelf({
   const groups = useMemo<ShelfGroup[]>(() => {
     if (axis === 'unit') {
       // Ведущая группа `on the table` — ядровый неотвеченный вопрос экрана. Порядок остальных —
-      // ПЕРВОЕ ПОЯВЛЕНИЕ узла в порядке деталей карточки: другого порядка узлов у полки нет
-      // (контракт даёт только `intoOf`), а стабильный и выводимый лучше выдуманного.
+      // `unitOrder`, то есть порядок ШАГОВ, в котором узлы кладёт полотно: полка обязана их
+      // зеркалить, иначе два соседних органа рассказывают о карточке разное. Узлы вне списка
+      // (и весь случай, когда родитель порядка не дал) падают на прежний фолбэк — первое
+      // появление узла в порядке деталей: стабильный и выводимый, просто не тот же самый.
       const table: ShelfPiece[] = [];
       const byUnit = new Map<string, ShelfPiece[]>();
       for (const r of visible) {
@@ -319,8 +331,19 @@ export function AssemblyShelf({
       }
       const out: ShelfGroup[] = [];
       if (table.length > 0) out.push({ key: 'table', unitKey: null, pieces: table });
-      for (const [unitKey, list] of byUnit) {
-        out.push({ key: `unit:${unitKey}`, unitKey, pieces: list });
+      const rank = new Map<string, number>();
+      (unitOrder ?? []).forEach((k, i) => {
+        if (!rank.has(k)) rank.set(k, i);
+      });
+      const seen = [...byUnit.keys()];
+      const ordered = seen
+        .map((k, i) => ({ k, r: rank.get(k) ?? Number.POSITIVE_INFINITY, i }))
+        // Сортировка стабильная и без обращения к float-NaN: равные ранги (в том числе оба
+        // «не названы») сохраняют прежний порядок первого появления через запасной ключ `i`.
+        .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r - b.r))
+        .map((x) => x.k);
+      for (const unitKey of ordered) {
+        out.push({ key: `unit:${unitKey}`, unitKey, pieces: byUnit.get(unitKey)! });
       }
       return out;
     }
@@ -339,7 +362,7 @@ export function AssemblyShelf({
     // Внутри одного состояния группы идут в порядке первого появления — тем же правилом, что узлы.
     const seen = [...byKey.values()];
     return CLOTH_GROUP_ORDER.flatMap((s) => seen.filter((g) => g.state === s));
-  }, [visible, axis]);
+  }, [visible, axis, unitOrder]);
 
   // --- органы шапки -----------------------------------------------------------------------------
 
