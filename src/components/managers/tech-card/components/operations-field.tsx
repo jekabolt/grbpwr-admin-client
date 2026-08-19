@@ -3501,6 +3501,13 @@ export function OperationsField({
   // Считается через getValues НА СОБЫТИИ, а не подпиской: подписка на весь массив operations в
   // корне поля перерисовывала бы всё на каждое нажатие клавиши.
   const addInputToOperation = (index: number, key: string) => {
+    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у `appendStep` и `dissolveUnit`. Внешний
+    // `<fieldset disabled>` карточки глушит клик и фокус, но НЕ pointer/DnD-жест на div — а
+    // единственный настоящий вызыватель этого мутатора и есть дроп чипа детали на строку рельса
+    // (`onDropPiece`). То есть на ВЫПУЩЕННОЙ карточке дроп правил форму, взводя isDirty, и никакая
+    // разметка этого не останавливала. Тем более он не остановит фулскрин: тот живёт порталом в
+    // body, куда fieldset не достаёт вовсе.
+    if (frozen) return;
     if (index < 0 || !key) return;
     const cur = (getValues(`operations.${index}.inputKeys`) ?? []) as string[];
     if (cur.includes(key)) return;
@@ -3568,6 +3575,10 @@ export function OperationsField({
   };
 
   const addOperation = () => {
+    // Тот же гейт и по той же причине: сегодня кнопку «+ operation» душит внешний fieldset, но
+    // мутатор про заморозку не знает, и любой вызыватель ВНЕ формы (фулскрин в портале) дописал бы
+    // шаг в выпущенную карточку. Гейт стоит у мутатора, а не у каждой кнопки.
+    if (frozen) return;
     setSelected(fields.length);
     append({ ...emptyOperation });
   };
