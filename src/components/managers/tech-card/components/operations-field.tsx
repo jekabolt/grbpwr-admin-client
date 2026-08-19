@@ -3757,59 +3757,67 @@ export function OperationsField({
                 effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
               )}
             >
+              {/* Строка-слово живёт ЗДЕСЬ, а не внутри схемы рядом с «layout: manual»: та полоса
+                  появляется только у карточки с ручными позициями, и строка про ткань, написанная
+                  в ней, исчезала бы вместе с ней — то есть ровно на карточке, которую никто не
+                  двигал руками, и молчала бы про весь неразложенный рецепт.
+
+                  И НАД ОБОИМИ РЕЖИМАМИ, а не только над схемой. Лоток деталей штрихуется в списке
+                  ровно так же, как на полотне, а список — дефолт карточки без узлов, то есть самое
+                  частое состояние экрана. Строка, живущая только в ветке схемы, оставляла бы это
+                  состояние с одной текстурой и без единого слова: колорвей не назван, «без ткани» и
+                  «не разложено» не посчитаны, — а состояние не имеет права нестись одной текстурой.
+
+                  ТЕКСТ ПРЕДЛОЖЕНИЕМ, а не капслоком: строка бывает длиннее четырёх слов («cloth —
+                  BLK · 3 without cloth · 2 unsorted»), а капслок в этом приложении носят только
+                  вещи в четыре слова и короче. Подсказка идёт цветом label и остаётся подсказкой. */}
+              {clothWord && (
+                <ChipRow className='mb-1.5'>
+                  <Text size='micro' variant='label' component='span'>
+                    {clothWord}
+                  </Text>
+                </ChipRow>
+              )}
               {effectiveMode === 'schematic' ? (
-                <>
-                  {/* Строка-слово живёт ЗДЕСЬ, а не внутри схемы рядом с «layout: manual»: та
-                      полоса появляется только у карточки с ручными позициями, и строка про ткань,
-                      написанная в ней, исчезала бы вместе с ней — то есть ровно на карточке,
-                      которую никто не двигал руками, и молчала бы про весь неразложенный рецепт. */}
-                  {clothWord && (
-                    <ChipRow className='mb-1.5'>
-                      <Text size='micro' variant='label' component='span' className='uppercase'>
-                        {clothWord}
-                      </Text>
-                    </ChipRow>
-                  )}
-                  <AssemblySchematic
-                    blocks={grouping.schematicBlocks}
-                    steps={grouping.schematicSteps}
-                    res={grouping.res}
-                    labelOf={(i) =>
-                      ((getValues(`operations.${i}.note`) as string) || '').trim() ||
-                      operationHeading({
-                        operationType: getValues(`operations.${i}.operationType`) as Parameters<
-                          typeof operationHeading
-                        >[0]['operationType'],
-                        machineType: getValues(
-                          `operations.${i}.machineType`,
-                        ) as common_TechCardMachineType,
-                        zone: getValues(`operations.${i}.zone`) as Parameters<
-                          typeof operationHeading
-                        >[0]['zone'],
-                        pieceNames: [],
-                      }) ||
-                      'step'
-                    }
-                    pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
-                    onPickStep={(i) => {
-                      setSelected(i);
-                      // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
-                      // «открыть шаг» открывает его за пределами экрана.
-                      requestAnimationFrame(() =>
-                        editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
-                      );
-                    }}
-                    onCreate={setPendingCreate}
-                    pieceShapes={pieceShapes}
-                    cloth={inlineCloth?.map ?? null}
-                    smvOfBlock={grouping.smvOfBlock}
-                    onDissolve={dissolveUnit}
-                    positions={prefs.pos}
-                    onMove={prefs.move}
-                    onResetPositions={prefs.reset}
-                    frozen={frozen}
-                  />
-                </>
+                <AssemblySchematic
+                  blocks={grouping.schematicBlocks}
+                  steps={grouping.schematicSteps}
+                  res={grouping.res}
+                  labelOf={(i) =>
+                    ((getValues(`operations.${i}.note`) as string) || '').trim() ||
+                    operationHeading({
+                      operationType: getValues(`operations.${i}.operationType`) as Parameters<
+                        typeof operationHeading
+                      >[0]['operationType'],
+                      machineType: getValues(
+                        `operations.${i}.machineType`,
+                      ) as common_TechCardMachineType,
+                      zone: getValues(`operations.${i}.zone`) as Parameters<
+                        typeof operationHeading
+                      >[0]['zone'],
+                      pieceNames: [],
+                    }) ||
+                    'step'
+                  }
+                  pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+                  onPickStep={(i) => {
+                    setSelected(i);
+                    // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
+                    // «открыть шаг» открывает его за пределами экрана.
+                    requestAnimationFrame(() =>
+                      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                    );
+                  }}
+                  onCreate={setPendingCreate}
+                  pieceShapes={pieceShapes}
+                  cloth={inlineCloth?.map ?? null}
+                  smvOfBlock={grouping.smvOfBlock}
+                  onDissolve={dissolveUnit}
+                  positions={prefs.pos}
+                  onMove={prefs.move}
+                  onResetPositions={prefs.reset}
+                  frozen={frozen}
+                />
               ) : (
               <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
                 <DndContext

@@ -2,7 +2,7 @@ import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Canvas, Pin } from 'ui/components/canvas';
@@ -440,6 +440,19 @@ function shapesAffordance(shapes: PieceShapes): React.ReactNode | undefined {
 }
 
 /**
+ * Отпечаток строк BOM по ЧЕТЫРЁМ полям, из которых выводится ткань детали.
+ *
+ * Функция модуля, а не тело хука: её зовут из двух мест — ленивый инициализатор состояния (один
+ * счёт при монтировании) и колбэк подписки, — и вторая копия формулы разошлась бы с первой молча,
+ * дав «отпечаток не изменился» там, где он изменился.
+ */
+function clothFingerprintOf(lines: TechCardFormData['bomItems'] | undefined): string {
+  return (lines ?? [])
+    .map((l) => [l.lineKey, l.purpose, l.section, l.materialId].join('|'))
+    .join('~');
+}
+
+/**
  * Одна и та же ткань детали или уже другая.
  *
  * Нужна РОВНО для переиспользования прежнего объекта: `pieceClothMap` — чистая функция и на каждом
@@ -476,10 +489,13 @@ export function ConstructionTab({
   // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
   // this whole workspace (and with it every row of the sequence rail).
   //
-  // `bomItems` — единственное исключение, и оно осознанное: ткань детали выводится из строк BOM, а
-  // строки BOM правят на ДРУГОЙ вкладке. То есть подписка здесь не оживает под пальцами того, кто
-  // работает со сборкой, а выведенная карта всё равно защищена отпечатком (см. ниже).
-  const { control, getValues } = useFormContext<TechCardFormData>();
+  // `bomItems` тоже НЕ смотрится через useWatch — по той же причине и с тем же исходом: вкладки
+  // тех-карты смонтированы ВСЕ СРАЗУ и лишь спрятаны, так что рендерящая подписка отсюда
+  // реконсилировала бы спрятанную вкладку сборки целиком (эскиз, Canvas, редактор операций со
+  // всеми строками рельса) на каждый символ, набранный в любом поле BOM на соседней вкладке.
+  // Подписка на ткань живёт ниже, в `useEffect` через `watch(cb)`, и рендер вызывает только на
+  // смене отпечатка — см. там же.
+  const { getValues, watch } = useFormContext<TechCardFormData>();
 
   // Sketch pin ↔ operation and BOM line ↔ operation are the same mechanism, so both come from the
   // shared hook the pieces tab reuses for its mini-diagram.
@@ -599,23 +615,38 @@ export function ConstructionTab({
   // любом поле любой строки (имя, расход, примечание), а на штриховку влияют ровно четыре поля.
   // Без отпечатка карта пересоздавалась бы на каждое нажатие и перерисовывала все силуэты
   // карточки — ровно та ловушка memo, ради которой контуры считаются один раз на вкладке.
-  const bomWatch = useWatch({ control, name: 'bomItems' });
-  const clothFingerprint = useMemo(
-    () =>
-      (bomWatch ?? [])
-        .map((l) => [l.lineKey, l.purpose, l.section, l.materialId].join('|'))
-        .join('~'),
-    [bomWatch],
+  //
+  // И ПОДПИСКА НЕ РЕНДЕРЯЩАЯ. `useWatch` защищал бы только ПЕРЕСЧЁТ карты: сам он рендерит эту
+  // вкладку на каждое изменение массива, то есть на каждый символ, — а вкладки смонтированы все
+  // сразу, так что спрятанная сборка реконсилировалась бы целиком (эскиз, Canvas, редактор
+  // операций на все строки рельса) ради отпечатка, который в 99 нажатиях из 100 тот же самый.
+  // `watch(cb)` рендера не вызывает вовсе; рендер здесь делает ровно один функциональный сеттер, и
+  // только когда одно из четырёх полей действительно изменилось.
+  //
+  // Пустое `name` — это `reset()` (восстановление черновика, приезд карточки с сервера): оно
+  // меняет весь массив разом и обязано пересчитать отпечаток, поэтому под гардом стоит именно
+  // «имя есть И оно не про bomItems».
+  const [clothFingerprint, setClothFingerprint] = useState(() =>
+    clothFingerprintOf(getValues('bomItems')),
   );
+  useEffect(() => {
+    const sub = watch((_, { name }) => {
+      if (name && !name.startsWith('bomItems')) return;
+      const next = clothFingerprintOf(getValues('bomItems'));
+      setClothFingerprint((prev) => (prev === next ? prev : next));
+    });
+    return () => sub.unsubscribe();
+  }, [watch, getValues]);
   // Прошлый результат — для ПЕРЕИСПОЛЬЗОВАНИЯ ССЫЛОК. Отпечаток решает, считать ли заново; этот
   // кэш решает, менять ли идентичность посчитанного. Смена отпечатка почти всегда меняет ткань
   // одной строки из двадцати, и без него девятнадцать нетронутых деталей всё равно перерисовались
   // бы: пропы плиток сравниваются по ссылке.
   const clothCache = useRef<ColorwayCloth[]>([]);
   const pieceClothByColorway = useMemo<ColorwayCloth[]>(() => {
-    // Через getValues, а не через сам `bomWatch`: значение то же самое, но зависимостью остаётся
-    // отпечаток — то есть memo пересчитывается ровно тогда, когда изменилось влияющее поле, а не
-    // тогда, когда RHF выдал новый массив.
+    // Через getValues, а не через значение из подписки: зависимостью остаётся отпечаток — то есть
+    // memo пересчитывается ровно тогда, когда изменилось влияющее поле, а не тогда, когда RHF выдал
+    // новый массив. Свежесть при этом не страдает: сеттер отпечатка уже отработал, и `getValues`
+    // читает текущее состояние формы, а не снимок момента подписки.
     //
     // Проекция, а не приведение: строка формы возит два десятка полей, из которых ткань выводят
     // ровно четыре, и `ClothSlot` перечисляет их именно затем, чтобы пятое нельзя было прочитать

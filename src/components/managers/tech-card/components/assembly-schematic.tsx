@@ -197,10 +197,20 @@ export function AssemblySchematic({
    */
   const clothOf = (lineKey: string): PieceClothState => cloth?.get(lineKey)?.state ?? 'unbound';
 
-  /** `N pieces · main ×3 · lining ×1` — свёртка множества деталей. Пустое множество — пусто. */
+  /**
+   * `N pieces · main ×3 · lining ×1` — свёртка множества деталей. Пустое множество — пусто.
+   *
+   * `cloth == null` — ВОПРОС НЕ ЗАДАВАЛСЯ, и свёртки тогда нет вовсе. Карты нет ровно там, где у
+   * карточки нет ни одного колорвея (а у aux-карточек их не бывает никогда), и рецепт про ткань не
+   * молчит — его просто не существует. Печатать в этом состоянии `no cloth ×4` значило бы выдать
+   * отсутствие вопроса за отрицательный ответ и написать претензию к технологу на каждом узле
+   * каждой aux-карточки навсегда. Отсутствие ключа в СУЩЕСТВУЮЩЕЙ карте — другое дело: там рецепт
+   * есть и про эту деталь он действительно промолчал, и `unbound` называется словами.
+   */
   const clothLine = (lineKeys: string[]): string => {
     if (lineKeys.length === 0) return '';
     const count = `${lineKeys.length} ${lineKeys.length === 1 ? 'piece' : 'pieces'}`;
+    if (!cloth) return count;
     const rollup = clothRollup(lineKeys.map(clothOf));
     return rollup ? `${count} · ${rollup}` : count;
   };
