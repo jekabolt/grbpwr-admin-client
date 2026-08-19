@@ -7,6 +7,7 @@
 // что этот файл отвечает ровно за одно: как деталь выглядит рядом со своим именем.
 import { cn } from 'lib/utility';
 import { fmtCm, PieceShape, type FoundPiece } from './nesting/dxf-geometry';
+import type { PieceCloth } from './piece-cloth';
 
 /**
  * ЧИТАЕМОСТЬ КОНТУРА В МАЛОМ РАЗМЕРЕ — правкой ПОКАЗА, а не размера бокса.
@@ -25,6 +26,36 @@ import { fmtCm, PieceShape, type FoundPiece } from './nesting/dxf-geometry';
  */
 export const SILHOUETTE_INK =
   '[&_polygon]:fill-[#dedede] [&_polygon]:[vector-effect:non-scaling-stroke] [&_polygon]:[stroke-width:1px]';
+
+/**
+ * ВНЕШНИЙ CSS-бокс плитки по умолчанию — тот, что кладёт раскладка (`assembly-layout.ts`: TILE=48).
+ * Именно ВНЕШНИЙ: паддинги своей обёртки плитка вычитает сама, ниже. Отдать сюда внутренний бокс
+ * (или отдать внешний туда, где ждут внутренний) значит сдвинуть `u` и увести шаг решётки по
+ * аспекту детали на десятки процентов — молча, потому что картинка при этом остаётся картинкой.
+ */
+export const TILE_BOX = { w: 48, h: 48 };
+
+// Паддинги обёртки контура — ровно то, что стоит классами `p-1 pb-3.5` ниже: 4+4 по горизонтали,
+// 4+14 по вертикали. Держатся константами, потому что их читает расчёт `u`, а не только вёрстка:
+// правка класса без правки числа рассогласует шаг штриховки с боксом рисования.
+const TILE_PAD_X = 8;
+const TILE_PAD_Y = 18;
+
+/**
+ * Ткань детали словами — хвост подписи плитки. Три не-роли называются фразами, а не терминами
+ * рампы: «unsorted» и «unbound» в одном ряду с ролями читались бы как ещё две ткани, тогда как это
+ * два РАЗНЫХ отсутствия ответа (строки нет вовсе / строка есть, назначения нет).
+ */
+function clothWords(cloth: PieceCloth): string {
+  const word =
+    cloth.state === 'unsorted'
+      ? 'purpose not set'
+      : cloth.state === 'unbound'
+        ? 'cloth not assigned'
+        : cloth.state;
+  const article = cloth.article ? `${cloth.article.code} ${cloth.article.name}`.trim() : '';
+  return article ? `${word} · ${article}` : word;
+}
 
 /** Подпись контура: блок, размер, по которому нарисовано, и габарит — одна на все поверхности. */
 export function pieceShapeTitle(found: FoundPiece): string {
@@ -94,12 +125,22 @@ export function PieceTile({
   found,
   name,
   className,
+  cloth,
+  pxBox = TILE_BOX,
 }: {
   found: FoundPiece | null;
   name: string;
   className?: string;
+  /** Из чего деталь кроят (`pieceClothMap`). null/undefined — вопрос не задавали: плитка как была. */
+  cloth?: PieceCloth | null;
+  /** ВНЕШНИЙ бокс плитки в CSS-пикселях: тот, что дала раскладка. Паддинги вычитаются здесь. */
+  pxBox?: { w: number; h: number };
 }) {
-  const title = found ? `${name} · ${pieceShapeTitle(found)}` : name;
+  const base = found ? `${name} · ${pieceShapeTitle(found)}` : name;
+  const title = cloth ? `${base} — ${clothWords(cloth)}` : base;
+  // `unbound` — не роль, а её отсутствие: знака у неё нет, и плитка обязана остаться байт-в-байт
+  // такой, какой была до появления штриховки вообще.
+  const hatchRole = cloth && cloth.state !== 'unbound' ? cloth.state : undefined;
   return (
     <span
       title={title}
@@ -113,7 +154,14 @@ export function PieceTile({
           Паддинг живёт на обёртке, а не на <svg>: у svg он режет область просмотра, а не поле. */}
       {found ? (
         <span className='flex size-full items-center justify-center p-1 pb-3.5'>
-          <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+          <PieceShape
+            piece={found.piece}
+            grainLayer=''
+            outlineOnly
+            hatchRole={hatchRole}
+            hatchW={Math.max(1, pxBox.w - TILE_PAD_X)}
+            hatchH={Math.max(1, pxBox.h - TILE_PAD_Y)}
+          />
         </span>
       ) : null}
       <span className='absolute inset-x-0 bottom-0 truncate bg-bgColor/80 px-0.5 text-center text-nano leading-[1.35] tracking-pill uppercase'>

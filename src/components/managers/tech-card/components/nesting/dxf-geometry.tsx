@@ -29,7 +29,9 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
-import { memo, useMemo } from 'react';
+import { memo, useId, useMemo } from 'react';
+import { clothPatternDefs, hatchId } from '../cloth-hatch';
+import type { PieceClothState } from '../piece-cloth';
 import { normBlock } from './block-code';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
@@ -251,6 +253,11 @@ const vy = (y: number) => -y;
 /** Габарит в сантиметрах, как его печатают рядом с контуром. */
 export const fmtCm = (cm: number) => (cm >= 100 ? cm.toFixed(0) : cm.toFixed(1));
 
+// Бокс рисования по умолчанию — на случай, когда роль ткани дали, а бокс нет: плитка 48×48 за
+// вычетом паддингов её обёртки. Точность здесь не важна (шаг решётки уедет на проценты), важно, что
+// делить на ноль нечем: bbox детали всегда положителен, а вот проп мог не доехать.
+const HATCH_BOX_FALLBACK = { w: 40, h: 30 };
+
 /**
  * Одна деталь в СВОИХ координатах: контур, внутренняя геометрия (линия шва, надсечки, свёрла) и
  * долевая. `poly` и `inner` уже нормализованы к габариту детали, `grain` — нет: он приходит в
@@ -262,17 +269,30 @@ export const fmtCm = (cm: number) => (cm >= 100 ? cm.toFixed(0) : cm.toFixed(1))
  * сериализовала бы 40 полных SVG. `outlineOnly` — для тех же плиток: внешний контур и долевая без
  * внутренней геометрии (линия шва, надсечки), которая на миниатюре всё равно не читается; крупный
  * контур панели рисует всё.
+ *
+ * ШТРИХОВКА ТКАНИ приезжает СКАЛЯРАМИ (`hatchRole` / `hatchW` / `hatchH`), а не объектом, и это
+ * условие работы memo, а не вкус: memo сравнивает пропсы поверхностно, и собранный в JSX объект
+ * `hatch={{…}}` был бы новым на каждый рендер — сорок силуэтов пересобирались бы на каждый символ,
+ * введённый в примечание шага. `hatchW`/`hatchH` — БОКС РИСОВАНИЯ в CSS-пикселях (вызывающий уже
+ * вычел свои паддинги), из него считается `u`; ResizeObserver здесь не заводится сознательно —
+ * бокс известен раскладке, и мерить его с экрана значит платить лэйаутом за то, что уже посчитано.
  */
 export const PieceShape = memo(function PieceShape({
   piece,
   grainLayer,
   className,
   outlineOnly,
+  hatchRole,
+  hatchW,
+  hatchH,
 }: {
   piece: PieceDTO;
   grainLayer: string;
   className?: string;
   outlineOnly?: boolean;
+  hatchRole?: PieceClothState;
+  hatchW?: number;
+  hatchH?: number;
 }) {
   const pad = Math.max(piece.bboxW, piece.bboxH, 1) * 0.06;
   const box = {
@@ -292,6 +312,22 @@ export const PieceShape = memo(function PieceShape({
   const ox = piece.originX ?? 0;
   const oy = piece.originY ?? 0;
 
+  // id паттерна — на ИНСТАНС компонента, не на роль и не на деталь. `url(#id)` резолвится
+  // документо-глобально в ПЕРВЫЙ подходящий def, а `u` считается из viewBox конкретной детали —
+  // общий id молча выдал бы всем плиткам решётку чужого масштаба, и дефект выглядел бы как «шаг
+  // штриховки почему-то разный», а не как ошибка идентификатора.
+  const patternId = hatchId('hatch', useId());
+  // `xMidYMid meet` вписывает viewBox в бокс по МЕНЬШЕЙ из двух долей — она и есть число
+  // CSS-пикселей на user unit; `u` обратно ей. Перепутать оси здесь = увести шаг решётки на
+  // десятки процентов по аспекту детали.
+  const px = Math.min(
+    (hatchW && hatchW > 0 ? hatchW : HATCH_BOX_FALLBACK.w) / box.w,
+    (hatchH && hatchH > 0 ? hatchH : HATCH_BOX_FALLBACK.h) / box.h,
+  );
+  // Роли без знака (`unbound`, и любая будущая `flat`) отдают null — и путь ниже уходит на
+  // сегодняшнюю разметку буква в букву, без единого лишнего узла.
+  const patternDefs = hatchRole ? clothPatternDefs(patternId, hatchRole, 1 / (px || 1)) : null;
+
   return (
     <svg
       xmlns='http://www.w3.org/2000/svg'
@@ -300,13 +336,39 @@ export const PieceShape = memo(function PieceShape({
       role='img'
       aria-label={`piece contour ${piece.blockName ?? piece.name}`}
     >
-      <polygon
-        points={points}
-        fill='#f2f2f2'
-        stroke='#111111'
-        strokeWidth={box.w / 120 || 0.01}
-        strokeLinejoin='round'
-      />
+      {patternDefs ? (
+        <>
+          <defs>{patternDefs}</defs>
+          {/* ТРИ слоя по одним и тем же точкам, и у каждого paint-свойства — ИНЛАЙНОВЫМ style.
+              Поверхности с силуэтами кроют потомков классом SILHOUETTE_INK
+              (`[&_polygon]:fill-[#dedede] … [stroke-width:1px]`), а CSS бьёт presentation-атрибуты:
+              поставь то же самое атрибутами — паттерн зальётся серым, а белая обкладка ужмётся с
+              3px до 1px. Дифф при этом будет идеальным, а дефект — в другом файле. */}
+          <polygon points={points} style={{ fill: `url(#${patternId})` }} />
+          {/* Обкладка: немасштабируемые 3px белого ПОД контуром — гарантия, что заливка (у
+              утеплителя это почти половина площади) не съест линию кроя. Так разрез и рисуют на
+              бумаге. */}
+          <polygon
+            points={points}
+            style={{ fill: 'none', stroke: '#fff', strokeWidth: 3 }}
+            vectorEffect='non-scaling-stroke'
+          />
+          <polygon
+            points={points}
+            style={{ fill: 'none', stroke: '#000', strokeWidth: 1 }}
+            vectorEffect='non-scaling-stroke'
+            strokeLinejoin='round'
+          />
+        </>
+      ) : (
+        <polygon
+          points={points}
+          fill='#f2f2f2'
+          stroke='#111111'
+          strokeWidth={box.w / 120 || 0.01}
+          strokeLinejoin='round'
+        />
+      )}
       {inner.length > 0 && (
         <g fill='none' stroke='#8a8a8a' strokeWidth={box.w / 300 || 0.01}>
           {inner.map((c, i) => {
