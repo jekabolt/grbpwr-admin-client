@@ -19,14 +19,51 @@ import type { PosOverrides } from './assembly-positions';
 // НА НЕСОХРАНЁННОЙ КАРТОЧКЕ (`/add-tech-card`, id нет) — только память сессии: ключа нет, писать
 // некуда, и придумывать суррогатный ключ значило бы оставить мусор, который никто не свяжет с
 // будущей карточкой.
+//
+// ПОЧЕМУ ОДИН BUILDER НА ВСЕХ ПИСАТЕЛЕЙ. Раньше хранимый объект собирался руками в четырёх местах
+// (`read`, `move`, `reset`, `setMode`), и каждое новое поле приходилось помнить во всех четырёх.
+// Поле, о котором писатель не знает, стирается его первым же вызовом: ось полки, переключённая
+// один раз, молча возвращалась бы к дефолту после первого перетаскивания ноды — а связь между
+// «подвинул узел» и «сбросилась группировка полки» с места не видна вовсе. Поэтому запись собирает
+// РОВНО ОДНА чистая функция `buildStored`, писатели дают ей только патч, и поле переживает чужой
+// вызов по построению, а не по внимательности. Проба — `scripts/schematic-prefs-probe.mjs`.
+//
+// ФОРМАТ `v: 1` НЕ ЛОМАЕТСЯ. Новые поля — только опциональные, чтение back-compat: старая запись
+// без `axis` читается как есть, ось выходит `undefined`, дефолт выбирает потребитель. Поднять
+// версию значило бы отбросить чужие ручные раскладки, которые никто заново не расставит.
 
 export type SchematicMode = 'list' | 'schematic';
 
-type Stored = {
+/** Ось группировки полки деталей на полотне: по узлам сборки или по тканям. */
+export type SchematicAxis = 'unit' | 'cloth';
+
+export type Stored = {
   v: 1;
   mode?: SchematicMode;
   pos: PosOverrides;
+  axis?: SchematicAxis;
 };
+
+/** Текущее состояние записи в памяти — то, поверх чего builder кладёт патч. */
+export type StoredState = {
+  mode?: SchematicMode;
+  pos: PosOverrides;
+  axis?: SchematicAxis;
+};
+
+/**
+ * ЕДИНСТВЕННОЕ место, где рождается хранимая запись. Любой писатель — включая `read` — обязан идти
+ * сюда: поле, которого нет в патче, берётся из текущего состояния и потому не теряется.
+ *
+ * Пустые поля в объект не кладутся вовсе (не `mode: undefined`), чтобы форма записи была ровно
+ * `{v, mode?, pos, axis?}` и сравнение снимков не спотыкалось о ключ со значением `undefined`.
+ */
+export function buildStored(cur: StoredState, patch: Partial<StoredState> = {}): Stored {
+  const mode = patch.mode ?? cur.mode;
+  const axis = patch.axis ?? cur.axis;
+  const pos = patch.pos ?? cur.pos ?? {};
+  return { v: 1, ...(mode ? { mode } : {}), pos, ...(axis ? { axis } : {}) };
+}
 
 const keyOf = (cardId: number) => `plm.techcard.schematic.${cardId}`;
 
@@ -36,11 +73,14 @@ const POS_CEILING = 200;
 /** Дебаунс записи — драг генерирует поток коммитов, а localStorage синхронный. */
 const WRITE_DELAY_MS = 400;
 
-function read(cardId: number | undefined): Stored {
-  if (cardId === undefined) return { v: 1, pos: {} };
+/**
+ * Разбор хранимой записи. Функция от СТРОКИ, а не от localStorage: back-compat (старая запись без
+ * `axis`) и отбраковка мусора — единственное, что тут можно сделать неправильно, и проверяться это
+ * обязано пробой, а не руками в браузере.
+ */
+export function parseStored(raw: string | null): Stored {
+  if (!raw) return buildStored({ pos: {} });
   try {
-    const raw = localStorage.getItem(keyOf(cardId));
-    if (!raw) return { v: 1, pos: {} };
     const parsed = JSON.parse(raw) as Partial<Stored>;
     // Хранилище правит кто угодно и когда угодно — чужая вкладка, ручная чистка, старая версия.
     // Поэтому не «доверять и упасть», а взять только то, что похоже на правду.
@@ -51,9 +91,20 @@ function read(cardId: number | undefined): Stored {
       }
     }
     const mode = parsed?.mode === 'list' || parsed?.mode === 'schematic' ? parsed.mode : undefined;
-    return { v: 1, mode, pos };
+    const axis = parsed?.axis === 'unit' || parsed?.axis === 'cloth' ? parsed.axis : undefined;
+    return buildStored({ mode, pos, axis });
   } catch {
-    return { v: 1, pos: {} };
+    return buildStored({ pos: {} });
+  }
+}
+
+function read(cardId: number | undefined): Stored {
+  if (cardId === undefined) return buildStored({ pos: {} });
+  try {
+    return parseStored(localStorage.getItem(keyOf(cardId)));
+  } catch {
+    // Само хранилище может быть запрещено политикой — тогда `getItem` бросает до всякого разбора.
+    return buildStored({ pos: {} });
   }
 }
 
@@ -67,6 +118,12 @@ function read(cardId: number | undefined): Stored {
 export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Set<string>) {
   const [pos, setPos] = useState<PosOverrides>(() => read(cardId).pos);
   const [mode, setModeState] = useState<SchematicMode | null>(() => read(cardId).mode ?? null);
+  const [axis, setAxisState] = useState<SchematicAxis | null>(() => read(cardId).axis ?? null);
+
+  // Полное состояние записи ОДНИМ объектом, синхронно. Писатели патчат его, а не собирают запись из
+  // своих замыканий: замыкание видит только то поле, о котором писатель знал, — и остальные ушли бы
+  // в хранилище пустыми (см. шапку про builder).
+  const cur = useRef<StoredState>({ mode: mode ?? undefined, pos, axis: axis ?? undefined });
 
   // Карточка сменилась под тем же компонентом (переход между тех-картами) — перечитать.
   const loadedFor = useRef(cardId);
@@ -74,8 +131,10 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
     if (loadedFor.current === cardId) return;
     loadedFor.current = cardId;
     const s = read(cardId);
+    cur.current = { mode: s.mode, pos: s.pos, axis: s.axis };
     setPos(s.pos);
     setModeState(s.mode ?? null);
+    setAxisState(s.axis ?? null);
   }, [cardId]);
 
   // Отложенная запись + её принудительный сброс. Без flush на `pagehide` быстрый F5 в окне
@@ -118,32 +177,54 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
     };
   }, [flush]);
 
+  /**
+   * Единственная дорога в хранилище: патч ложится поверх полного состояния, запись пересобирается.
+   */
+  const commit = useCallback(
+    (patch: Partial<StoredState>) => {
+      const next = buildStored(cur.current, patch);
+      cur.current = { mode: next.mode, pos: next.pos, axis: next.axis };
+      schedule(next);
+    },
+    [schedule],
+  );
+
   const move = useCallback(
     (key: string, at: { x: number; y: number }) => {
-      setPos((cur) => {
-        const next: PosOverrides = { ...cur, [key]: { x: Math.max(0, at.x), y: Math.max(0, at.y) } };
+      setPos((prev) => {
+        const next: PosOverrides = { ...prev, [key]: { x: Math.max(0, at.x), y: Math.max(0, at.y) } };
         const cleaned = Object.keys(next).length > POS_CEILING ? prune(next, liveKeys()) : next;
-        schedule({ v: 1, mode: mode ?? undefined, pos: cleaned });
+        commit({ pos: cleaned });
         return cleaned;
       });
     },
-    [liveKeys, mode, schedule],
+    [commit, liveKeys],
   );
 
+  // Сброс РАСКЛАДКИ, а не предпочтений: режим и ось — не расстановка нод, и «расставь заново»
+  // не значит «забудь, как я смотрю на эту карточку».
   const reset = useCallback(() => {
     setPos({});
-    schedule({ v: 1, mode: mode ?? undefined, pos: {} });
-  }, [mode, schedule]);
+    commit({ pos: {} });
+  }, [commit]);
 
   const setMode = useCallback(
     (next: SchematicMode) => {
       setModeState(next);
-      schedule({ v: 1, mode: next, pos });
+      commit({ mode: next });
     },
-    [pos, schedule],
+    [commit],
   );
 
-  return { pos, move, reset, mode, setMode };
+  const setAxis = useCallback(
+    (next: SchematicAxis) => {
+      setAxisState(next);
+      commit({ axis: next });
+    },
+    [commit],
+  );
+
+  return { pos, move, reset, mode, setMode, axis, setAxis };
 }
 
 /** Убрать позиции нод, которых в графе больше нет. Зовётся только при переполнении потолка. */
