@@ -3236,7 +3236,13 @@ export function OperationsField({
     });
   }, [getValues, setValue]);
 
+  // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ У КАЖДОГО МУТАТОРА, как у `appendStep` и `addInputToOperation`.
+  // Сегодня все трое прикрыты косвенно: кнопки редактора и ручка перетаскивания — настоящие
+  // <button> под внешним `<fieldset disabled>`, а док фулскрина обёрнут своим fieldset. Но
+  // прикрытие разметкой — не контракт: `moveOperation` уже уезжает пропом в портал (потребитель
+  // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
+    if (frozen) return;
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
     // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
@@ -3247,12 +3253,14 @@ export function OperationsField({
   };
 
   const insertAfter = (index: number) => {
+    if (frozen) return;
     remapIssues((old) => (old > index ? old + 1 : old));
     insert(index + 1, { ...emptyOperation });
     setSelected(index + 1);
   };
 
   const moveOperation = (from: number, to: number) => {
+    if (frozen) return;
     if (from === to) return;
     remapIssues((old) => {
       if (old === from) return to;
