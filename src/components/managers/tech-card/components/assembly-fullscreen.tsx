@@ -94,9 +94,14 @@ export type AssemblyFullscreenProps = {
  * `closest`, а не сравнение тега: Radix Select — это `<button role="combobox">` с тайпахедом по
  * буквам, и событие приходит с его внутреннего спана. Без гарда буква в поле заметки дёргала бы
  * полотно, а в Ф4 та же буква растворяла бы узел.
+ *
+ * `option`/`listbox` — про тот же селект, но РАСКРЫТЫЙ: его список живёт в собственном портале,
+ * фокус стоит на пункте (`[role="option"]`), а React-события из портала вещают по дереву
+ * компонентов — то есть прилетают в роутер фулскрина. Без этих двух селекторов тайпахед по
+ * буквам в раскрытом списке («f» в поиске fusing) вписывал бы полотно и брал ладонь.
  */
 const TYPING_TARGETS =
-  'input, textarea, select, button, [role="combobox"], [role="radio"], [contenteditable=""], [contenteditable="true"]';
+  'input, textarea, select, button, [role="combobox"], [role="radio"], [role="option"], [role="listbox"], [contenteditable=""], [contenteditable="true"]';
 
 const isTyping = (target: EventTarget | null): boolean => {
   const el = target as HTMLElement | null;
@@ -115,7 +120,6 @@ export function AssemblyFullscreen({
   prefs,
   selectedIndex,
   onPickStep,
-  setSelected,
   setPendingCreate,
   dissolveUnit,
   addOperation,
@@ -148,14 +152,6 @@ export function AssemblyFullscreen({
   const dockH = panels.dockH ?? DOCK_DEFAULT;
 
   const cloth = pieceClothByColorway[0]?.map ?? null;
-
-  const openDock = useCallback(
-    (index: number) => {
-      setSelected(index);
-      setDockStep(index);
-    },
-    [setSelected],
-  );
 
   /**
    * Клик по шагу ВНУТРИ фулскрина — единственное, что открывает док. `onPickStep` родителя зовётся
@@ -333,8 +329,15 @@ export function AssemblyFullscreen({
 
                 <span className='ml-auto flex flex-wrap items-center gap-1'>
                   {/* Переключатель вида в хром НЕ дублируется: настоящий приедет в Ф6. Один
-                      задизейбленный чип честнее второго живого органа, спорящего с инлайновым. */}
-                  <Chip nonForm disabled title='the list view arrives later'>
+                      задизейбленный чип честнее второго живого органа, спорящего с инлайновым.
+                      Вид задизейбленности — классами: без onClick чип рендерится простым span,
+                      до которого ни `:disabled`, ни span-гейт самого Chip не достают. */}
+                  <Chip
+                    nonForm
+                    disabled
+                    title='the list view arrives later'
+                    className='cursor-not-allowed opacity-40'
+                  >
                     list
                   </Chip>
                   <Chip
@@ -488,7 +491,10 @@ export function AssemblyFullscreen({
                   заполнение нитки из BOM) срабатывают на изменения полей, откуда бы те ни пришли,
                   — то есть закрытый док правил бы карточку. Плюс три десятка подписок `useWatch`,
                   перерисовывающихся на каждый символ, за экран, которого нет на глазах. */}
-              <fieldset disabled={frozen} className='min-h-0 flex-1 overflow-y-auto p-2'>
+              {/* `min-w-0` — против дефолтного `min-inline-size: min-content` самого fieldset:
+                  без него широкая строка редактора распирала бы док шире вьюпорта вместо того,
+                  чтобы переноситься. */}
+              <fieldset disabled={frozen} className='min-h-0 min-w-0 flex-1 overflow-y-auto p-2'>
                 {!dockOpen ? null : selectedIndex >= 0 ? (
                   renderDockEditor(flashPieces)
                 ) : (

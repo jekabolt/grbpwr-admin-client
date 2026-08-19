@@ -266,6 +266,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     }, 240);
   }, []);
 
+  // Семантика ПОСЛЕДНЕГО состоявшегося вписывания. Авто-пере-вписывание (ресайз, сплиттер дока)
+  // обязано её наследовать: открытие фулскрина стоит на полу читаемости 0.5, и без памяти первый
+  // же клик по шагу — док открылся, вьюпорт сжался — пере-вписывал бы БЕЗ пола, роняя большую
+  // карточку в те самые нечитаемые 0.3×, от которых пол и защищал. Ручной «fit» кнопкой её
+  // честно перезаписывает: его попросили показать всё, и наследники ресайза показывают всё же.
+  const lastFitOpen = useRef(true);
   /**
    * Вписать содержимое. Возвращает `false`, если коммитить было нечего.
    *
@@ -279,6 +285,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       if (!vp) return false;
       const r = vp.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) return false;
+      lastFitOpen.current = open;
       if (animate) animateOnce();
       viewRef.current = fitView(
         contentRef.current,
@@ -322,7 +329,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         pendingRefit.current = true;
         return;
       }
-      runFit(true);
+      runFit(true, lastFitOpen.current);
     });
     ro.observe(vp);
     return () => ro.disconnect();
@@ -432,7 +439,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       setPanning(false);
       if (pendingRefit.current) {
         pendingRefit.current = false;
-        if (fitted.current) runFit(true);
+        if (fitted.current) runFit(true, lastFitOpen.current);
       }
     };
     window.addEventListener('pointermove', move);
@@ -578,7 +585,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       commitDrag(null);
       if (pendingRefit.current) {
         pendingRefit.current = false;
-        if (fitted.current) runFit(true);
+        if (fitted.current) runFit(true, lastFitOpen.current);
       }
       if (!d?.started) return;
       justDragged.current = true;
@@ -849,18 +856,21 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
           масштабируется вместе с содержимым, перестаёт быть органом. */}
       <div className='pointer-events-none absolute inset-x-2 bottom-2 flex items-end gap-1.5'>
         <div className='pointer-events-auto flex items-center gap-1.5'>
+          {/* Тултипы НЕ называют букв v/h: клавиши-глаголы инструментов приедут с роутером Ф4, а
+              обещать мёртвую клавишу — врать подсказкой. Ф4, заводя клавиши, возвращает их и в
+              подписи. */}
           <HudGroup>
             <HudButton
               pressed={!hand}
               onClick={() => setTool('select')}
-              title='select — click and drag the nodes (v)'
+              title='select — click and drag the nodes'
             >
               ▣
             </HudButton>
             <HudButton
               pressed={hand}
               onClick={() => setTool('hand')}
-              title='pan the canvas (h, or hold space)'
+              title='pan the canvas (hold space)'
             >
               ✋
             </HudButton>

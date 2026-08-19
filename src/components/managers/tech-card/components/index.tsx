@@ -687,6 +687,14 @@ export function TechCardForm({
     if (!isTabVisible(activeTab)) navTo('header');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isIdea, canReadCosting, isEditMode, isAux]);
+  // Фулскрин сборки (`?fs=1`) — вид вкладки CONSTRUCTION. Там, где эта вкладка невидима (IDEA
+  // без поданных на неё ошибок), параметр снимается ЗДЕСЬ и первым: иначе энфорсер
+  // `tab=construction` в OperationsField и фолбэк `navTo('header')` выше зациклились бы,
+  // бесконечно переписывая адрес друг за другом — каждый прав в своём правиле, и уступить некому.
+  useEffect(() => {
+    if (params.get('fs') === '1' && !isTabVisible('construction')) leaveFullscreen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, isIdea, canReadCosting, isEditMode, isAux]);
 
   // Walk the user to the field a failed save flagged. This has to run AFTER the tab switch commits
   // (it's a router param update) and after any collapsed container that owns the field expands
@@ -1067,6 +1075,10 @@ export function TechCardForm({
                   .join('; ')}. ` +
                 'Nothing else is pending — retry each one from «output material» on the header tab.',
             );
+            // Неуспех ПОСЛЕ состоявшегося сохранения — но и отчёт с перечнем незарегистрированных
+            // цветов, и путь к повтору («output material» на вкладке шапки) стоят под оверлеем:
+            // правило «любой неуспех закрывает» покрывает и хвост управляемого перевода.
+            leaveFullscreen();
             showMessage('switched to auxiliary — some colours were not registered', 'error');
           } else {
             showMessage(
@@ -1103,6 +1115,10 @@ export function TechCardForm({
   const onInvalid = (errors: FieldErrors<TechCardFormData>) => {
     const flat = flattenFieldErrors(errors as FieldErrors);
     if (flat.length === 0) {
+      // Тот же закон «любой неуспех закрывает», что и ниже: отвести к полю нечем, но красные
+      // рамки, которые тост просит проверить, стоят под оверлеем — совет смотреть на то, чего
+      // не видно, хуже, чем просто показать страницу.
+      leaveFullscreen();
       showMessage('check the fields with errors', 'error');
       return;
     }
