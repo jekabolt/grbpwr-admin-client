@@ -3665,7 +3665,16 @@ export function OperationsField({
 
               Подсказка «⠿ drag» отсюда убрана. Она повторяла вводный абзац секции слово в слово
               («drag ⠿ to change the order») и вдобавок висела над схемой, где никакого ⠿ нет. */}
-          <GroupLabel flush lead={<SequenceViewSwitch mode={effectiveMode} onMode={setMode} />}>
+          {/* Отбивка снизу шире дефолтных 4px и равна 10px — шагу `stack`, на котором стоит вся
+              секция (`space-y-2.5` у родителя). Дефолт рассчитан на заголовок из ОДНОГО текста;
+              этот держит ещё и орган, стал вдвое выше, и линейка под ним прижималась к первой
+              строке содержимого. Правка местная: у прочих заголовков в приложении в слоте ничего
+              не стоит, и трогать их ритм не за что. */}
+          <GroupLabel
+            flush
+            className='mb-2.5'
+            lead={<SequenceViewSwitch mode={effectiveMode} onMode={setMode} />}
+          >
             sequence
           </GroupLabel>
           <div

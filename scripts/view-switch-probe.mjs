@@ -75,7 +75,7 @@ check(
   'заголовок последовательности вынесен из колонки, меняющей ширину',
   // Между заголовком и колонкой с `lg:w-[320px]` стоит открытие flex-контейнера — значит
   // заголовок снаружи неё.
-  /<GroupLabel flush lead=\{<SequenceViewSwitch[\s\S]{0,400}?'flex flex-col gap-3'[\s\S]{0,300}?lg:w-\[320px\]/.test(
+  /<GroupLabel[\s\S]{0,200}?lead=\{<SequenceViewSwitch[\s\S]{0,600}?'flex flex-col gap-3'[\s\S]{0,300}?lg:w-\[320px\]/.test(
     ops,
   ),
 );
