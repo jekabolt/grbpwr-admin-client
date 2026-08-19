@@ -95,7 +95,7 @@ import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
-import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
+import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
@@ -1622,6 +1622,7 @@ function OperationEditor({
   bomLines,
   pieces,
   pieceShapes,
+  cloth,
   tiled,
   pinOptions,
   colorwayArticles,
@@ -1638,6 +1639,11 @@ function OperationEditor({
   pieces: PieceRef[];
   /** Контуры деталей карточки — та же карта, что у рельса и у тарелки. */
   pieceShapes: PieceShapeMap;
+  /**
+   * Ткань деталей ПЕРВОГО колорвея — та же карта, что у лотка и у полотна схемы. Здесь она ЧИТАЕТСЯ
+   * плиткой состава шага и больше ничем: редактор пишет в форму шаг, а не рецепт.
+   */
+  cloth?: Map<string, PieceCloth> | null;
   /** Детали показываются плитками — решает вкладка, одинаково для тарелки и состава шага. */
   tiled: boolean;
   pinOptions: PickerOption[];
@@ -2314,9 +2320,19 @@ function OperationEditor({
             // крупная, чтобы по ней хотелось нажать, и «нажал посмотреть — отвязал деталь» здесь
             // стоило бы молча потерянной связи шага с деталью.
             <span key={k} className='relative inline-flex border border-borderColor bg-bgColor'>
+              {/* Ткань — той же картой, что у лотка прямо над этим списком: одна деталь не имеет
+                  права быть заштрихованной в лотке и чистой здесь. Ключ СЫРОЙ (`chosenPieces`
+                  отфильтрован по `byKey`, то есть это lineKey детали), не `pieceRefKey` — им
+                  ключуются только контуры чертежа.
+                  `pxBox` — ВНЕШНИЙ бокс плитки: обёртка размера не задаёт, плитка рисуется
+                  собственным `size-14`, то есть ровно `TILE_BOX` 56×56. Передан явно, потому что
+                  шаг решётки штриховки считается из него, и молчаливое совпадение с дефолтом —
+                  не то же самое, что проверенное: сменят бокс здесь — увидят и это число. */}
               <PieceTile
                 found={pieceShapes?.get(pieceRefKey(k)) ?? null}
                 name={byKey.get(k)?.name ?? ''}
+                cloth={cloth?.get(k) ?? null}
+                pxBox={TILE_BOX}
               />
               <button
                 type='button'
@@ -3885,6 +3901,7 @@ export function OperationsField({
                 bomLines={bomItems}
                 pieces={pieces}
                 pieceShapes={pieceShapes}
+                cloth={inlineCloth?.map ?? null}
                 tiled={tiled}
                 pinOptions={pinOptions}
                 colorwayArticles={colorwayArticles}
