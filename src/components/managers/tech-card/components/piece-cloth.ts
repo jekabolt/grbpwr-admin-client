@@ -19,7 +19,11 @@
 // получит крест клеевой вместо штриха основной ткани, и увидят это только на фабрике.
 
 import { derivePieceLayerRole } from './piece-layer-role';
-import { wireInt } from './schema';
+// Оба импорта — ЛИСТЬЯ, и это условие, а не совпадение: wireInt берётся из ./wire-int, а не из
+// schema.ts, ровно по той же причине, по которой piece-layer-role.ts избегает bom-purpose.ts —
+// schema тянет за собой zod и словарь карточки, а этот модуль просится на печать и в публичный
+// кат-лист /r/:token.
+import { wireInt } from './wire-int';
 
 /** Роль слоя, как её видит рисующий: восемь назначений роллгудс-строки. */
 export type PieceClothRole =

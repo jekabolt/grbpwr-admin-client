@@ -28,16 +28,11 @@ await build({
   outfile,
   logLevel: 'silent',
   absWorkingDir: root,
-  // Модуль тянет wireInt из схемы карточки, а схема ходит по алиасам проекта — без них esbuild
-  // не соберёт бандл вовсе.
-  alias: {
-    components: resolve(root, 'src/components'),
-    lib: resolve(root, 'src/lib'),
-    api: resolve(root, 'src/api'),
-    utils: resolve(root, 'src/utils'),
-    ui: resolve(root, 'src/ui'),
-    constants: resolve(root, 'src/constants'),
-  },
+  // Алиасов проекта здесь НЕТ намеренно. Весь граф модуля — четыре листа (piece-cloth →
+  // piece-layer-role → bom-purpose-labels, wire-int), и ни один из них не ходит по алиасам. Пока
+  // это так, сборка проходит; первый же импорт из schema.ts (→ zod, react-hook-form) или любой
+  // относительный путь через алиас уронит пробу на резолве — громко и до того, как чистый модуль
+  // утянет схему карточки в публичные бандлы /p/:token и /r/:token.
 });
 const { CLOTH_GEOMETRY, CLOTH_RAMP, clothGroupKey, clothRollup, pickPrimaryLayer, pieceClothMap } =
   await import(pathToFileURL(outfile).href);
@@ -94,6 +89,13 @@ for (let i = 0; i < PRIORITY.length - 1; i++) {
 }
 is('приоритет: весь набор разом → main', pickPrimaryLayer([...PRIORITY].reverse()), 'main');
 is('приоритет: пустой набор слоёв → unbound', pickPrimaryLayer([]), 'unbound');
+// Две отложенные подряд — единственная пара, которую спека не называет. Разбирается порядком рампы
+// (interfacing стоит раньше insulation), и кейс держит этот ответ от случайной перестановки рампы.
+is(
+  'приоритет: две отложенные — interfacing раньше insulation',
+  pickPrimaryLayer(['insulation', 'interfacing']),
+  'interfacing',
+);
 
 is(
   'CLOTH_RAMP — точный порядок рампы',
@@ -309,6 +311,28 @@ is(
   });
 }
 
+{
+  // Артикул от ВЫИГРАВШЕГО слоя, а не от первого по порядку строк рецепта: клеевая со своим
+  // артикулом идёт ПЕРВОЙ строкой, основная — второй; подпись обязана назвать ткань основной.
+  const slots = [
+    { lineKey: 'SL-FUSE', section: INTERLINING, materialId: 7701 },
+    { lineKey: 'SL-MAIN', section: FABRIC, purpose: P('MAIN'), materialId: 4412 },
+  ];
+  const m = pieceClothMap(
+    slots,
+    [
+      { pieceLineKey: 'PC-1', bomLineKey: 'SL-FUSE' },
+      { pieceLineKey: 'PC-1', bomLineKey: 'SL-MAIN' },
+    ],
+    CATALOG,
+    new Map(),
+  );
+  is('артикул берётся от выигравшего слоя, не от первой строки', m.get('PC-1'), {
+    state: 'main',
+    article: { id: 4412, code: 'CORD-01', name: 'вельвет синий' },
+  });
+}
+
 // --- 7. два артикула под одним назначением = две группы ------------------------------------------------
 
 {
@@ -416,9 +440,9 @@ is(
   // Пустая карта — это «ответа нет», а не «ответ по умолчанию»: читатель трактует отсутствие как
   // unbound и рисует сегодняшнюю плоскую заливку.
   is('пустые usages → пустая карта', pairs(m), []);
-  is('пустая карта: деталь читается как unbound', m.get('PC-1') ?? { state: 'unbound' }, {
-    state: 'unbound',
-  });
+  // Проверяется ФАКТ отсутствия, а не подставленный самой пробой фолбэк: сравнение с `?? unbound`
+  // зелено при любом поведении модуля и только надувает счёт.
+  is('пустая карта: детали в ней нет', m.has('PC-1'), false);
 }
 
 // --- 11. свёртка словами -----------------------------------------------------------------------------------
