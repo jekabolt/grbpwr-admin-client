@@ -12,15 +12,14 @@ import {
   buildWires,
   directInputsOf,
   makeRowY,
-  NODE_TOUCH,
   TailBoxView,
+  TileView,
   UnitBoxView,
+  WireLayer,
 } from './assembly-node-views';
 import type { CreatePrefill } from './assembly-create-dialog';
 import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
-import { pieceRefKey } from './piece-block-refs';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
-import { PieceTile } from './piece-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 // Схема сборки: карта чёрных ящиков.
@@ -521,8 +520,6 @@ export function AssemblySchematic({
   const directInputs = directInputsOf(blocks, steps);
   const rowY = makeRowY(blocks, layout);
   const wires = buildWires(blocks, steps, layout, rowY);
-  /** Маркер-стрелка: провод обязан говорить НАПРАВЛЕНИЕ, а не только факт связи. */
-  const ARROW = 'url(#assembly-arrow)';
 
   return (
     <>
@@ -569,42 +566,17 @@ export function AssemblySchematic({
         style={{ maxHeight: 640 }}
       >
         <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
-          <svg width={layout.width} height={layout.height} className='absolute inset-0' aria-hidden>
-            <defs>
-              <marker
-                id='assembly-arrow'
-                viewBox='0 0 8 8'
-                refX={7}
-                refY={4}
-                markerWidth={5}
-                markerHeight={5}
-                orient='auto-start-reverse'
-              >
-                <path d='M0,1 L7,4 L0,7 z' fill='currentColor' />
-              </marker>
-            </defs>
-            {wires.map((w) => {
-              // Провод «этой ноды» — тот, у которого она на любом конце: вопрос читателя звучит
-              // как «что с ней связано», а не «что из неё выходит».
-              const lit = hovered !== null && (w.from === hovered || w.to === hovered);
-              // Пока что-то наведено, остальные провода УХОДЯТ НА ЗАДНИЙ ПЛАН, а не остаются как
-              // были: подсветить связи, не приглушив прочее, значит не ответить на вопрос — на
-              // плотной схеме жирная линия теряется среди двух десятков таких же.
-              const dimmed = hovered !== null && !lit;
-              return (
-                <path
-                  key={w.key}
-                  d={w.d}
-                  fill='none'
-                  stroke='currentColor'
-                  strokeWidth={lit ? 2 : 1}
-                  strokeDasharray={w.faint ? '3 3' : undefined}
-                  markerEnd={ARROW}
-                  opacity={lit ? 0.9 : dimmed ? 0.12 : w.faint ? 0.3 : 0.45}
-                />
-              );
-            })}
-          </svg>
+          {/* Инлайн держит СТАБИЛЬНЫЙ id маркера: пока вид один, дубликата в документе нет, а
+              снимок разметки (golden пробы вьюшек) канонизирует только токены `useId` — id на
+              инстанс здесь ломал бы гейт на шуме. Уникальный заводит фулскрин: два смонтированных
+              полотна — как раз тот случай, ради которого id стал пропом. */}
+          <WireLayer
+            wires={wires}
+            hovered={hovered}
+            width={layout.width}
+            height={layout.height}
+            markerId='assembly-arrow'
+          />
 
           {layout.boxes.map((box) => {
             const b = blocks.find((x) => x.key === box.key);
@@ -685,9 +657,16 @@ export function AssemblySchematic({
               шагу, который её съел. Роль кнопки на div, а не сама <button>: см. `activate` —
               внешний `<fieldset disabled>` карточки убил бы и клик, и перетаскивание. */}
           {layout.tiles.map((t) => (
-            <div
+            <TileView
               key={`tile:${t.key}`}
-              {...activate(
+              tile={t}
+              name={pieceNameOf(t.key)}
+              pieceShapes={pieceShapes}
+              cloth={cloth}
+              picked={picked.includes(t.key)}
+              dragging={drag?.key === t.key && drag.started}
+              ringClassName={nodeRing(t.key)}
+              organProps={activate(
                 t.state === 'free'
                   ? !frozen
                     ? clickGuard(() => toggle(t.key))
@@ -699,34 +678,9 @@ export function AssemblySchematic({
                       return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
                     })(),
               )}
-              className={cn(
-                'absolute flex items-center justify-center overflow-hidden border',
-                t.state === 'free' ? 'border-dashed border-borderColor' : 'border-borderColor',
-                picked.includes(t.key) && 'border-solid border-textColor',
-                drag?.key === t.key && drag.started && 'opacity-70',
-                nodeRing(t.key),
-              )}
-              style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
-              title={
-                t.state === 'free'
-                  ? `${pieceNameOf(t.key)} — hasn't gone into any unit yet; click to take it into the assembly`
-                  : `${pieceNameOf(t.key)} — already in unit ▣ ${t.into}; click to open the step that consumed it`
-              }
-              {...dragHandlers(t.key, t.x, t.y)}
-              {...hoverHandlers(t.key)}
-            >
-              {/* `pxBox` — ВНЕШНИЙ бокс плитки, тот, что положила раскладка (free 64×48, stack
-                  52×48). Паддинги своей обёртки плитка вычитает сама; передать сюда бокс
-                  РИСОВАНИЯ значило бы вычесть их дважды, и шаг штриховки поехал бы по аспекту
-                  детали. Дефолтный 48×48 здесь не годится: free-плитка шире. */}
-              <PieceTile
-                found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
-                name={pieceNameOf(t.key)}
-                cloth={cloth?.get(t.key) ?? null}
-                pxBox={{ w: t.w, h: t.h }}
-                className='size-full'
-              />
-            </div>
+              dragProps={dragHandlers(t.key, t.x, t.y)}
+              hoverProps={hoverHandlers(t.key)}
+            />
           ))}
         </div>
       </div>

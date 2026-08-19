@@ -5,7 +5,16 @@ import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep, AssemblyUnit } from './assembly-frontier';
-import { SCHEMATIC_METRICS, type BoxLayout, type SchematicLayout } from './assembly-layout';
+import {
+  SCHEMATIC_METRICS,
+  type BoxLayout,
+  type SchematicLayout,
+  type TileLayout,
+} from './assembly-layout';
+import { pieceRefKey } from './piece-block-refs';
+import type { PieceCloth } from './piece-cloth';
+import { PieceTile } from './piece-silhouette';
+import type { PieceShapeMap } from './use-piece-shapes';
 
 // ПРЕЗЕНТАЦИОННЫЙ РЕНДЕР НОД СХЕМЫ СБОРКИ — боксы узлов, хвост, провода, глифы.
 //
@@ -215,6 +224,74 @@ export function buildWires(
     }
   }
   return wires;
+}
+
+/**
+ * СЛОЙ ПРОВОДОВ — svg на всё полотно: маркер-стрелка в `<defs>` и по пути на связь.
+ *
+ * `markerId` ПРИХОДИТ ПРОПОМ, а не заводится здесь через `useId`, и это не мелочь. Ссылка
+ * `url(#…)` разрешается по ДОКУМЕНТУ, а не по поддереву: как только инлайновая схема и портал
+ * фулскрина смонтированы одновременно, фиксированный `assembly-arrow` есть в документе дважды, и
+ * WebKit вправе разрешить ссылку в маркер внутри спрятанного (`display:none`) поддерева — стрелки
+ * молча исчезают. Инстанс-уникальный id снимает это; отдаётся он снаружи, потому что снимок
+ * разметки (`scripts/assembly-views-probe.mjs`) канонизирует ТОЛЬКО токены `useId`, а стабильные
+ * идентификаторы оставляет как есть — иначе переименование маркера проходило бы гейт молча.
+ */
+export function WireLayer({
+  wires,
+  hovered,
+  width,
+  height,
+  markerId,
+}: {
+  wires: SchematicWire[];
+  /** Ключ ноды под курсором: от него считаются `lit` и `dimmed`. */
+  hovered: string | null;
+  width: number;
+  height: number;
+  /** Идентификатор маркера-стрелки. Уникален на инстанс полотна — см. шапку. */
+  markerId: string;
+}) {
+  /** Маркер-стрелка: провод обязан говорить НАПРАВЛЕНИЕ, а не только факт связи. */
+  const ARROW = `url(#${markerId})`;
+  return (
+    <svg width={width} height={height} className='absolute inset-0' aria-hidden>
+      <defs>
+        <marker
+          id={markerId}
+          viewBox='0 0 8 8'
+          refX={7}
+          refY={4}
+          markerWidth={5}
+          markerHeight={5}
+          orient='auto-start-reverse'
+        >
+          <path d='M0,1 L7,4 L0,7 z' fill='currentColor' />
+        </marker>
+      </defs>
+      {wires.map((w) => {
+        // Провод «этой ноды» — тот, у которого она на любом конце: вопрос читателя звучит
+        // как «что с ней связано», а не «что из неё выходит».
+        const lit = hovered !== null && (w.from === hovered || w.to === hovered);
+        // Пока что-то наведено, остальные провода УХОДЯТ НА ЗАДНИЙ ПЛАН, а не остаются как
+        // были: подсветить связи, не приглушив прочее, значит не ответить на вопрос — на
+        // плотной схеме жирная линия теряется среди двух десятков таких же.
+        const dimmed = hovered !== null && !lit;
+        return (
+          <path
+            key={w.key}
+            d={w.d}
+            fill='none'
+            stroke='currentColor'
+            strokeWidth={lit ? 2 : 1}
+            strokeDasharray={w.faint ? '3 3' : undefined}
+            markerEnd={ARROW}
+            opacity={lit ? 0.9 : dimmed ? 0.12 : w.faint ? 0.3 : 0.45}
+          />
+        );
+      })}
+    </svg>
+  );
 }
 
 /**
@@ -522,6 +599,82 @@ export function TailBoxView({
           </Text>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * ПЛИТКА ДЕТАЛИ КАК НОДА ПОЛОТНА: бокс, состояние рамкой, подпись и сам контур с штриховкой.
+ *
+ * Вынута сюда по той же причине, что боксы: фулскрин рисует ТУ ЖЕ плитку, а второй экземпляр
+ * восьмидесяти строк органного JSX разошёлся бы с оригиналом молча.
+ *
+ * ДВА ПРОСТРАНСТВА КЛЮЧЕЙ, и путать их нельзя: ткань ключуется СЫРЫМ `lineKey` (он же ключ ноды и
+ * ручной позиции), а контур чертежа — `pieceRefKey(lineKey)`. Перепутанные, они дают пустую
+ * штриховку при живом рецепте, ничего не сломав на глаз, — поэтому обе выборки стоят здесь, в
+ * одном месте, а не у каждого вызывателя.
+ *
+ * Органы (`role`/`tabIndex`/`onClick`/`onKeyDown`) собирает РОДИТЕЛЬ своим `activate()` и отдаёт
+ * готовым объектом: вьюшка не знает ни про клик-эхо после драга, ни про то, разрешено ли действие.
+ */
+export function TileView({
+  tile: t,
+  name,
+  pieceShapes,
+  cloth,
+  picked,
+  dragging,
+  ringClassName,
+  organProps,
+  dragProps,
+  hoverProps,
+}: {
+  tile: TileLayout;
+  /** Человеческое имя детали. */
+  name: string;
+  pieceShapes: PieceShapeMap;
+  /** Карта ткани деталей показываемого колорвея; `null` — вопрос не задавался. */
+  cloth?: Map<string, PieceCloth> | null;
+  picked: boolean;
+  /** Плитку тащат прямо сейчас. */
+  dragging: boolean;
+  /** Рамка ноды: цель жеста или наведение. Считает родитель — знание про жест живёт там. */
+  ringClassName?: string;
+  /** Пропы плитки как органа: пусто, когда по ней кликать нечем. */
+  organProps: OrganProps;
+  dragProps: OrganProps;
+  hoverProps: OrganProps;
+}) {
+  return (
+    <div
+      {...organProps}
+      className={cn(
+        'absolute flex items-center justify-center overflow-hidden border',
+        t.state === 'free' ? 'border-dashed border-borderColor' : 'border-borderColor',
+        picked && 'border-solid border-textColor',
+        dragging && 'opacity-70',
+        ringClassName,
+      )}
+      style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
+      title={
+        t.state === 'free'
+          ? `${name} — hasn't gone into any unit yet; click to take it into the assembly`
+          : `${name} — already in unit ▣ ${t.into}; click to open the step that consumed it`
+      }
+      {...dragProps}
+      {...hoverProps}
+    >
+      {/* `pxBox` — ВНЕШНИЙ бокс плитки, тот, что положила раскладка (free 64×48, stack
+          52×48). Паддинги своей обёртки плитка вычитает сама; передать сюда бокс
+          РИСОВАНИЯ значило бы вычесть их дважды, и шаг штриховки поехал бы по аспекту
+          детали. Дефолтный 48×48 здесь не годится: free-плитка шире. */}
+      <PieceTile
+        found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
+        name={name}
+        cloth={cloth?.get(t.key) ?? null}
+        pxBox={{ w: t.w, h: t.h }}
+        className='size-full'
+      />
     </div>
   );
 }
