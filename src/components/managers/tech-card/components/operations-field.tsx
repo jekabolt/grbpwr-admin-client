@@ -21,7 +21,7 @@ import {
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Accordion } from 'ui/components/accordion';
@@ -90,6 +90,7 @@ import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
+import { AssemblyFullscreen } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
@@ -3122,6 +3123,10 @@ export function OperationsField({
   storedHasMedia = false,
   frozen = false,
   operationMediaUrls,
+  draftPending = false,
+  onSave,
+  saving = false,
+  sketchNote,
 }: {
   /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
   storedHasUnits?: boolean;
@@ -3157,6 +3162,21 @@ export function OperationsField({
   // request from the construction panel to append an operation for a part (nonce dedupes)
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
+  /**
+   * У карточки есть НЕВОССТАНОВЛЕННЫЙ черновик. Нужен ровно одному решению: подавить автооткрытие
+   * фулскрина по `?fs=1`. Коллаут черновика живёт в корне карточки, под оверлеем его не видно, а
+   * «restore», нажатый после выхода, затирает всё, что сделано в фулскрине.
+   */
+  draftPending?: boolean;
+  /** Сохранение карточки — то же самое, что жмёт кнопка в шапке. Хром фулскрина зовёт его же. */
+  onSave?: () => void;
+  /** Сохранение идёт: кнопка фулскрина обязана знать это так же, как шапка. */
+  saving?: boolean;
+  /**
+   * ЗАРЕЗЕРВИРОВАН под эскиз-заметку над полотном фулскрина (Ф6б). Принимается и прокидывается как
+   * есть: этот файл о содержимом узла ничего не знает и знать не должен.
+   */
+  sketchNote?: ReactNode;
 } = {}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove, replace, insert, move } = useFieldArray({
@@ -3636,6 +3656,112 @@ export function OperationsField({
     setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
   };
 
+  // --- общее для ВСЕХ ТРЁХ видов ----------------------------------------------------------------
+  //
+  // Подпись шага и имя детали считаются в одном экземпляре по той же причине, по которой в одном
+  // экземпляре живут мутаторы: разойдутся — разойдутся молча, и «шаг 30» на схеме перестанет
+  // совпадать с «шагом 30» в фулскрине.
+
+  /** Короткая подпись шага: заметка, иначе — выведенный заголовок операции. */
+  const labelOfStep = (i: number) =>
+    ((getValues(`operations.${i}.note`) as string) || '').trim() ||
+    operationHeading({
+      operationType: getValues(`operations.${i}.operationType`) as Parameters<
+        typeof operationHeading
+      >[0]['operationType'],
+      machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
+      zone: getValues(`operations.${i}.zone`) as Parameters<typeof operationHeading>[0]['zone'],
+      pieceNames: [],
+    }) ||
+    'step';
+
+  const pieceNameOf = (k: string) => pieces.find((p) => p.lineKey === k)?.name ?? k;
+
+  const pickStepInline = (i: number) => {
+    setSelected(i);
+    // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе «открыть шаг»
+    // открывает его за пределами экрана.
+    requestAnimationFrame(() =>
+      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    );
+  };
+
+  // --- фулскрин: ТРЕТИЙ ВИД ---------------------------------------------------------------------
+  //
+  // Открытость живёт в URL: F5 возвращает туда же, ссылкой можно поделиться, Back работает. Правил
+  // у записи два, и оба неочевидны. ФУНКЦИОНАЛЬНЫЙ апдейтер — потому что снимок `params` в замыкании
+  // затирает всё, что успели поставить соседи (открытый ящик задач, вкладка); `{ replace: true }` —
+  // потому что вход и выход из вида не событие истории: без него Back начинает возить по фулскрину
+  // вместо того, чтобы уводить со страницы.
+  const fsOpen = params.get('fs') === '1';
+  const fsChipRef = useRef<HTMLElement>(null);
+  /** Автооткрытие — это `?fs=1`, ПРИШЕДШИЙ С АДРЕСОМ, а не поставленный рукой. */
+  const fsFromUrl = useRef(params.get('fs') === '1');
+  const fsAutoResolved = useRef(false);
+
+  const setFullscreen = useCallback(
+    (on: boolean) => {
+      if (on) fsAutoResolved.current = true; // ручной вход подавлению больше не подлежит
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          if (on) {
+            p.set('fs', '1');
+            // Фулскрин — вид ВКЛАДКИ СБОРКИ. Пришедший по ссылке без `tab` иначе открывал бы
+            // оверлей над заголовком карточки, а по выходу оставлял бы человека не там, где он
+            // только что работал.
+            p.set('tab', 'construction');
+          } else {
+            p.delete('fs');
+          }
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
+  // ЧЕРНОВИК СИЛЬНЕЕ АДРЕСА. Восстановленный черновик объявляет себя коллаутом в корне карточки —
+  // под оверлеем его не видно, а «restore», нажатый после выхода, затёр бы всю работу, сделанную в
+  // фулскрине. Поэтому автооткрытие по адресу подавляется; ручной вход позже работает как обычно.
+  //
+  // Не «эффект на маунт»: `draft.pending` вычисляется эффектом РОДИТЕЛЯ, а детские эффекты бегут
+  // раньше родительских — на маунте здесь всегда false.
+  useEffect(() => {
+    if (fsAutoResolved.current || !fsFromUrl.current || !draftPending) return;
+    fsAutoResolved.current = true;
+    setFullscreen(false);
+  }, [draftPending, setFullscreen]);
+
+  // ВКЛАДКА ДОПИСЫВАЕТСЯ И ПРИШЕДШЕМУ ПО ССЫЛКЕ `?fs=1`, а не только ручному входу. Вкладки
+  // смонтированы все сразу, поэтому оверлей открывается и поверх заголовка карточки — а по выходу
+  // человек оказывается не там, где только что работал. Правка идемпотентна и стоит ровно одну
+  // замену адреса на весь визит.
+  const tabParam = params.get('tab');
+  useEffect(() => {
+    if (!fsOpen || tabParam === 'construction') return;
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('tab', 'construction');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [fsOpen, tabParam, setParams]);
+
+  // ФОКУС ВОЗВРАЩАЕТСЯ НА ЧИП ВХОДА РУКАМИ. Radix возвращает его на элемент, который был активным
+  // при открытии, но чип живёт внутри блока, который на время фулскрина не рендерится вовсе — то
+  // есть возвращать Radix некуда, и фокус уходит на body.
+  const wasFsOpen = useRef(fsOpen);
+  useEffect(() => {
+    const closed = wasFsOpen.current && !fsOpen;
+    wasFsOpen.current = fsOpen;
+    if (!closed) return;
+    requestAnimationFrame(() => fsChipRef.current?.focus());
+  }, [fsOpen]);
+
   return (
     <div className='space-y-2.5'>
       <Text size='micro' variant='label'>
@@ -3718,7 +3844,12 @@ export function OperationsField({
           деталями и нулём шагов — ПЕРВОЕ состояние любой тех-карты, и именно с него сборку и
           начинают; закрывать его заглушкой значило бы не пустить на схему ровно там, где она
           нужнее всего. */}
-      {fields.length === 0 && effectiveMode !== 'schematic' ? (
+      {/* ПОКА ФУЛСКРИН ОТКРЫТ, БЛОК «SEQUENCE» НЕ РЕНДЕРИТСЯ ВОВСЕ — и накрыт условием ровно он.
+          Два смонтированных `OperationEditor` на одни имена полей дали бы каждому полю двух
+          писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
+          блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
+          инлайну. */}
+      {fsOpen ? null : fields.length === 0 && effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
             the assembly sequence is empty so far. add the first step — or describe the construction
@@ -3768,7 +3899,23 @@ export function OperationsField({
           <GroupLabel
             flush
             className='mb-2.5'
-            lead={<SequenceViewSwitch mode={effectiveMode} onMode={setMode} />}
+            lead={
+              <div className='flex items-center gap-2'>
+                <SequenceViewSwitch mode={effectiveMode} onMode={setMode} />
+                {/* `nonForm` — ОБЯЗАТЕЛЬНО: на выпущенной карточке всё это живёт под внешним
+                    `<fieldset disabled>`, а он глушит настоящую кнопку насмерть. Смотреть и
+                    раскладывать разрешено и там (R10), значит и вход обязан работать. */}
+                <Chip
+                  ref={fsChipRef}
+                  nonForm
+                  dashed
+                  onClick={() => setFullscreen(true)}
+                  title='open the assembly on a full-screen canvas'
+                >
+                  fullscreen ⤢
+                </Chip>
+              </div>
+            }
           >
             sequence
           </GroupLabel>
@@ -3810,31 +3957,9 @@ export function OperationsField({
                   blocks={grouping.schematicBlocks}
                   steps={grouping.schematicSteps}
                   res={grouping.res}
-                  labelOf={(i) =>
-                    ((getValues(`operations.${i}.note`) as string) || '').trim() ||
-                    operationHeading({
-                      operationType: getValues(`operations.${i}.operationType`) as Parameters<
-                        typeof operationHeading
-                      >[0]['operationType'],
-                      machineType: getValues(
-                        `operations.${i}.machineType`,
-                      ) as common_TechCardMachineType,
-                      zone: getValues(`operations.${i}.zone`) as Parameters<
-                        typeof operationHeading
-                      >[0]['zone'],
-                      pieceNames: [],
-                    }) ||
-                    'step'
-                  }
-                  pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
-                  onPickStep={(i) => {
-                    setSelected(i);
-                    // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
-                    // «открыть шаг» открывает его за пределами экрана.
-                    requestAnimationFrame(() =>
-                      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
-                    );
-                  }}
+                  labelOf={labelOfStep}
+                  pieceNameOf={pieceNameOf}
+                  onPickStep={pickStepInline}
                   onCreate={setPendingCreate}
                   pieceShapes={pieceShapes}
                   cloth={inlineCloth?.map ?? null}
@@ -3928,6 +4053,73 @@ export function OperationsField({
             )}
           </div>
         </div>
+      )}
+
+      {fsOpen && (
+        <AssemblyFullscreen
+          blocks={grouping.schematicBlocks}
+          steps={grouping.schematicSteps}
+          res={grouping.res}
+          pieces={pieces}
+          pieceNameOf={pieceNameOf}
+          labelOf={labelOfStep}
+          pieceShapes={pieceShapes}
+          smvOfBlock={grouping.smvOfBlock}
+          // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её
+          // писатель, и они обязаны дойти до потребителя без правки этого файла.
+          prefs={prefs}
+          selectedIndex={selectedIndex}
+          onPickStep={pickStepInline}
+          setSelected={setSelected}
+          setPendingCreate={setPendingCreate}
+          dissolveUnit={dissolveUnit}
+          addInputToOperation={addInputToOperation}
+          addOperation={addOperation}
+          moveOperation={moveOperation}
+          // БИЛДЕР, А НЕ ГОТОВЫЙ ЭЛЕМЕНТ. `OperationEditor` — приватная функция этого файла с
+          // полутора десятками пропов; вытаскивать её наружу ради фулскрина значило бы затеять
+          // незапланированный рефакторинг там, где он опаснее всего. Билдер замыкает её со всеми
+          // пропами прямо здесь, а обработчик «＋ piece» решает ФУЛСКРИН и передаёт аргументом:
+          // в Ф3 это снекбар-заглушка, в Ф5в — арм режима добора, и этот файл не тронется.
+          renderDockEditor={(onFlashPieces) =>
+            selectedIndex >= 0 ? (
+              <OperationEditor
+                // ТОТ ЖЕ KEY-КОНТРАКТ, что у инлайна, и упрощать его нельзя: оба «пропусти первый
+                // прогон» сторожа редактора привязаны к монтированию, а их эффекты зависят от
+                // `index`. Пере-сортировка открытого шага меняет индекс без ремаунта — и пресет
+                // типа операции с заполнением нитки из BOM отрабатывают так, будто их только что
+                // выбрали, тихо записывая в пустые поля машины и нитки.
+                key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
+                index={selectedIndex}
+                bomLines={bomItems}
+                pieces={pieces}
+                pieceShapes={pieceShapes}
+                cloth={inlineCloth?.map ?? null}
+                tiled={tiled}
+                pinOptions={pinOptions}
+                colorwayArticles={colorwayArticles}
+                onInsertAfter={() => insertAfter(selectedIndex)}
+                onRemove={() => removeOperation(selectedIndex)}
+                onFlashPieces={onFlashPieces}
+                onActiveBomChange={onActiveBomChange}
+                onDropPiece={addInputToOperation}
+                mediaUrls={operationMediaUrls}
+                frozen={frozen}
+              />
+            ) : null
+          }
+          // Второй экземпляр: корневой остался под оверлеем, а удалить шаг можно прямо из дока.
+          // Компонент самодостаточен — форму он читает через контекст, а контекст в порталы
+          // проникает.
+          dockChrome={<StepNumberDrift />}
+          frozen={frozen}
+          draftPending={draftPending}
+          onSave={() => onSave?.()}
+          saving={saving}
+          pieceClothByColorway={pieceClothByColorway ?? []}
+          sketchNote={sketchNote}
+          onExit={() => setFullscreen(false)}
+        />
       )}
 
       <AssemblyCreateDialog

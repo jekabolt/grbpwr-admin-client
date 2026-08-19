@@ -480,10 +480,22 @@ function sameCloth(a: PieceCloth, b: PieceCloth): boolean {
 export function ConstructionTab({
   techCard,
   active = false,
+  onSave,
+  saving = false,
+  draftPending = false,
 }: {
   techCard?: common_TechCard;
   /** Вкладка открыта. Вкладки смонтированы все сразу — без этого разбор заказывался бы всегда. */
   active?: boolean;
+  /**
+   * Сохранение карточки и его состояние — ПРОКЛАДКА ДО ФУЛСКРИНА. Хром полноэкранной схемы несёт
+   * свою кнопку save: оверлей закрывает шапку карточки целиком, и без неё единственным выходом из
+   * фулскрина к сохранению был бы выход из фулскрина.
+   */
+  onSave?: () => void;
+  saving?: boolean;
+  /** У карточки есть невосстановленный черновик: подавляет автооткрытие фулскрина по `?fs=1`. */
+  draftPending?: boolean;
 }) {
   // Deliberately NOT watching `operations` here. The summary and the sketch each hold their own
   // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
@@ -760,6 +772,9 @@ export function ConstructionTab({
               storedHasMedia={(techCard?.techCard?.operations ?? []).some(
                 (o) => (o?.media ?? []).length > 0,
               )}
+              onSave={onSave}
+              saving={saving}
+              draftPending={draftPending}
             />
           </section>
         </div>

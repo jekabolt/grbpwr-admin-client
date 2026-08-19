@@ -339,6 +339,28 @@ export function TechCardForm({
       { replace: true },
     );
   const setActiveTab = (id: TabId) => navTo(id);
+  /**
+   * УСПЕХ ОСТАВЛЯЕТ ФУЛСКРИН ОТКРЫТЫМ, ЛЮБОЙ НЕУСПЕХ ЗАКРЫВАЕТ. Правило одно, и механика его живёт
+   * ЗДЕСЬ, а не в фулскрине: об исходе сохранения знает только эта страница.
+   *
+   * Почему закрывает. Всё, чем отказ объясняется и лечится, стоит ПОД оверлеем: переключение на
+   * вкладку с ошибочным полем и его пульс (`revealField`), баннер частично сохранённых панелей,
+   * модалка конфликта версий, кнопка «снять разметку узлов» — единственный выход из серверного
+   * щита. Оставить фулскрин открытым значит показать тост и спрятать от человека ответ на него.
+   * Тост при этом виден в обоих случаях: `--z-toast` (70) выше `--z-modal` (50).
+   *
+   * Функциональный апдейтер и `replace` — по той же причине, что у `navTo`: снимок параметров в
+   * замыкании затирает соседей, а push засоряет Back.
+   */
+  const leaveFullscreen = () =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('fs');
+        return p;
+      },
+      { replace: true },
+    );
   const [conflict, setConflict] = useState(false);
   // A sellable→auxiliary save held back until the operator answers for the live colourways it has to
   // retire first (NF-07 purpose lock). Carries the validated payload so «archive & switch» re-runs
@@ -848,6 +870,8 @@ export function TechCardForm({
             `saved ${done} of ${planned} — «${change.label}» failed: ${techCardErrorMessage(error, 'unknown error')}. Everything not yet saved is still staged.`,
           );
           showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
+          // Баннер «сохранено 2 из 4» стоит на странице, то есть под оверлеем фулскрина.
+          leaveFullscreen();
           return { bodySaved, ok: false };
         }
         // A committed panel bumps the SHARED tech_card.lock_version server-side (UpdateStyleSizeChart
@@ -886,6 +910,10 @@ export function TechCardForm({
       }
       return { bodySaved, ok: true };
     } catch (error) {
+      // Серверный отказ: и модалка конфликта, и пришпиленные к полям нарушения, и — главное —
+      // `ClearAssemblyButton`, единственный выход из щита «карточка несёт узлы», живут под
+      // оверлеем. Фулскрин уходит раньше, чем что-либо из этого показывается.
+      leaveFullscreen();
       if ((error as { status?: number })?.status === 409) setConflict(true);
       // Pin server field-violations (google.rpc.BadRequest) onto the exact inputs, then surface the
       // owning tab so the error dot + focus land where the user can act (Q1/S24).
@@ -1000,6 +1028,9 @@ export function TechCardForm({
             'The card is STILL SELLABLE and nothing was flipped — restore each archived colourway ' +
             'from its own page while it stays sellable, or press save again to retry the rest.',
         );
+        // Тот же неуспех и тот же довод: отчёт о наполовину состоявшемся переводе — баннер на
+        // странице, и под оверлеем его никто не прочтёт.
+        leaveFullscreen();
         showMessage('convert stopped — the card is still sellable', 'error');
         return;
       }
@@ -1077,6 +1108,10 @@ export function TechCardForm({
     }
     const first = flat[0];
     const tab = errorTabFor(errorRootKey(first.path));
+    // Фулскрин уходит ПЕРВЫМ: и переключение вкладки, и пульс поля ниже происходят под оверлеем,
+    // и без этого «save» из полноэкранной схемы кончался бы одним тостом над неизменившимся
+    // экраном.
+    leaveFullscreen();
     setActiveTab(tab);
     setFocusTarget((prev) => ({ path: first.path, nonce: (prev?.nonce ?? 0) + 1 }));
     // The toast ALWAYS carries the concrete dotted path AND the message — never just a tab name.
@@ -1905,7 +1940,18 @@ export function TechCardForm({
                   спрятаны, а разбор выкроек на вкладке заказывается автоматически. Без флага
                   каждое открытие любой тех-карты качало бы её DXF — включая правку одного поля в
                   шапке. */}
-              <ConstructionTab techCard={techCard} active={activeTab === 'construction'} />
+              <ConstructionTab
+                techCard={techCard}
+                active={activeTab === 'construction'}
+                // Прокладка до хрома фулскрина: его кнопка save обязана быть той же самой, что в
+                // шапке карточки, — второй путь сохранения разошёлся бы с первым.
+                onSave={save}
+                // `converting` наравне с `isSubmitting`: управляемый перевод в aux гоняет свою
+                // пере-запись МИМО handleSubmit, и без него кнопка фулскрина оставалась бы живой
+                // всё время, пока летит переворот.
+                saving={form.formState.isSubmitting || converting}
+                draftPending={Boolean(draft.pending)}
+              />
             </SectionStack>
 
             {/* LABELS & PACKAGING */}
