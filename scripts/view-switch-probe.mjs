@@ -85,8 +85,14 @@ check(
 );
 check(
   'слот `lead` у GroupLabel действительно левый (без `ml-auto`)',
-  /\{lead && <div className='self-center'>\{lead\}<\/div>\}/.test(groupLabel) &&
+  /\{lead && <div>\{lead\}<\/div>\}/.test(groupLabel) &&
     /\{action && <div className='ml-auto'>\{action\}<\/div>\}/.test(groupLabel),
+);
+check(
+  'слот `lead` не перебивает выравнивание ряда своим `self-*`',
+  // Ряд — `items-baseline`. Центрирование органа В ОДИНОЧКУ опускает его текст на 2px: подпись
+  // и полоса оказываются на разной высоте. Найдено владельцем на бете 2026-08-19.
+  !/\{lead && <div className='self-/.test(groupLabel),
 );
 check(
   'заголовок и размеченное им содержимое лежат в ОДНОЙ обёртке, а не высыпаны фрагментом',
@@ -180,6 +186,15 @@ await page.setContent(`
   </div>
 </div>
 
+<!-- ВЫРАВНИВАНИЕ: подпись и полоса на одной базовой линии. Слева — как есть, справа —
+     негативный контроль с align-self:center, который эту линию и ломал. -->
+<div class="section">
+  <div class="grp"><span class="title" id="alTitle">sequence</span>
+    <div><span class="sw"><span class="seg on" id="alSeg">schematic</span><span class="seg">list</span></span></div></div>
+  <div class="grp"><span class="title" id="badTitle">sequence</span>
+    <div style="align-self:center"><span class="sw"><span class="seg on" id="badSeg">schematic</span><span class="seg">list</span></span></div></div>
+</div>
+
 <!-- НОВО: заголовок снаружи колонки, орган в левом слоте -->
 <div class="section">
   <div id="newSchemHdr" class="grp"><span class="title">sequence</span>
@@ -199,6 +214,29 @@ const box = (id) =>
     const r = document.getElementById(id).getBoundingClientRect();
     return { x: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) };
   }, id);
+
+// БАЗОВАЯ ЛИНИЯ. Меряется прямоугольником Range по текстовым узлам: кегль и интерлиньяж у подписи
+// и у сегмента одинаковы, поэтому совпадение верха прямоугольника = совпадение базовой линии.
+const textShift = (a, b) =>
+  page.evaluate(
+    ([a, b]) => {
+      const box = (id) => {
+        const r = document.createRange();
+        r.selectNodeContents(document.getElementById(id));
+        return r.getBoundingClientRect().top;
+      };
+      return +(box(b) - box(a)).toFixed(2);
+    },
+    [a, b],
+  );
+const goodShift = await textShift('alTitle', 'alSeg');
+const badShift = await textShift('badTitle', 'badSeg');
+check('подпись и полоса стоят на одной базовой линии', goodShift === 0, `сдвиг ${goodShift}px`);
+check(
+  '`self-center` на слоте действительно ломал эту линию',
+  badShift !== 0,
+  `негативный контроль дал ${badShift}px`,
+);
 
 // НЕГАТИВНЫЙ КОНТРОЛЬ №1 — прижатый вправо орган внутри колонки переменной ширины реально уезжает.
 const oldSchem = await box('oldChipSchem');
