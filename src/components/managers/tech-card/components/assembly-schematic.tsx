@@ -11,6 +11,7 @@ import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
 import type { CreatePrefill } from './assembly-create-dialog';
 import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
 import { pieceRefKey } from './piece-block-refs';
+import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 
@@ -82,6 +83,7 @@ export function AssemblySchematic({
   onCreate,
   onDissolve,
   pieceShapes,
+  cloth,
   smvOfBlock,
   positions,
   onMove,
@@ -108,6 +110,16 @@ export function AssemblySchematic({
    * по форме, а не по имени.
    */
   pieceShapes: PieceShapeMap;
+  /**
+   * Из какой ткани кроится каждая деталь — ПЕРВОГО колорвея карточки. Ключ карты — СЫРОЙ lineKey
+   * детали, тот же, которым ключуются ноды полотна; контуры чертежа рядом ключуются
+   * `pieceRefKey(lineKey)`, и это ДРУГОЕ пространство ключей. Перепутать их — получить пустую
+   * штриховку при живом рецепте, ничего не сломав на глаз.
+   *
+   * Схема ткань только ПОКАЗЫВАЕТ: карту считает вкладка, потому что источников у неё два (слоты
+   * из формы, рецепт с чтения) и ни один из них схеме не виден.
+   */
+  cloth?: Map<string, PieceCloth> | null;
   /** Σ SMV блока по ключу ('' — хвостовой). Считает досье, схема только показывает. */
   smvOfBlock: Map<string, string>;
   /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
@@ -177,6 +189,33 @@ export function AssemblySchematic({
     const pieces = inputs.filter((k) => !res.units.has(k)).length;
     const parts = [...units, ...(pieces ? [`${pieces} ${pieces === 1 ? 'piece' : 'pieces'}`] : [])];
     return parts.length ? `← ${parts.join(' + ')}` : '';
+  };
+
+  /**
+   * Состояние детали. Ключа в карте НЕТ = рецепт про эту деталь молчит, и это `unbound` — тот же
+   * договор, что у `pieceClothMap`: «нет ответа» не имеет права превратиться в ответ по умолчанию.
+   */
+  const clothOf = (lineKey: string): PieceClothState => cloth?.get(lineKey)?.state ?? 'unbound';
+
+  /** `N pieces · main ×3 · lining ×1` — свёртка множества деталей. Пустое множество — пусто. */
+  const clothLine = (lineKeys: string[]): string => {
+    if (lineKeys.length === 0) return '';
+    const count = `${lineKeys.length} ${lineKeys.length === 1 ? 'piece' : 'pieces'}`;
+    const rollup = clothRollup(lineKeys.map(clothOf));
+    return rollup ? `${count} · ${rollup}` : count;
+  };
+
+  /**
+   * ИЗ ЧЕГО СОБРАН УЗЕЛ — по ЛИСТЬЯМ, а не по прямым входам.
+   *
+   * Прямые входы узла — это его подсборки («← ▣ SHELL + 2 pieces»), и свёртка по ним отвечала бы
+   * на вопрос «сколько деталей вошло НЕПОСРЕДСТВЕННО», которого никто не задаёт. Вопрос к узлу
+   * звучит «из какой ткани он сшит», и отвечают на него все детали, которые в нём в итоге лежат, —
+   * ровно то же множество, которым лоток называет узел «a unit of N pieces».
+   */
+  const unitClothLine = (key: string): string => {
+    const line = clothLine(res.units.get(key)?.leaves ?? []);
+    return line ? `${key} — ${line}` : '';
   };
 
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -599,6 +638,9 @@ export function AssemblySchematic({
         <ActionPanel
           picked={picked}
           labelOf={pieceNameOf}
+          // Свёртка ТОЛЬКО по деталям выделения: узел — не деталь, ткани у него нет, и посчитать
+          // его наравне с деталями значило бы соврать в знаменателе («3 pieces» при двух).
+          clothLine={clothLine(picked.filter((k) => !res.units.has(k)))}
           onCreate={(intent) => {
             onCreate({ inputKeys: picked, intent });
             setPicked([]);
@@ -826,7 +868,15 @@ export function AssemblySchematic({
                   <div
                     className='absolute inset-x-0 bottom-0 flex items-baseline gap-1 overflow-hidden border-t border-hairline px-1'
                     style={{ height: FOOT_H }}
-                    title={`takes: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`}
+                    // Вторая строка подсказки — ТКАНЬ УЗЛА: состав отвечает «из чего собран», а
+                    // свёртка — «из чего сшит», и это разные вопросы к одному боксу. Пустой она не
+                    // приезжает: у узла без единой детали её просто нет.
+                    title={[
+                      `takes: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`,
+                      unitClothLine(box.key),
+                    ]
+                      .filter(Boolean)
+                      .join('\n')}
                   >
                     <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
                       {compositionOf(box.key)}
@@ -948,9 +998,15 @@ export function AssemblySchematic({
               {...dragHandlers(t.key, t.x, t.y)}
               {...hoverHandlers(t.key)}
             >
+              {/* `pxBox` — ВНЕШНИЙ бокс плитки, тот, что положила раскладка (free 64×48, stack
+                  52×48). Паддинги своей обёртки плитка вычитает сама; передать сюда бокс
+                  РИСОВАНИЯ значило бы вычесть их дважды, и шаг штриховки поехал бы по аспекту
+                  детали. Дефолтный 48×48 здесь не годится: free-плитка шире. */}
               <PieceTile
                 found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
                 name={pieceNameOf(t.key)}
+                cloth={cloth?.get(t.key) ?? null}
+                pxBox={{ w: t.w, h: t.h }}
                 className='size-full'
               />
             </div>
@@ -991,11 +1047,18 @@ export function AssemblySchematic({
 function ActionPanel({
   picked,
   labelOf,
+  clothLine,
   onCreate,
   onClear,
 }: {
   picked: string[];
   labelOf: (k: string) => string;
+  /**
+   * Ткань выделения свёрткой. Отвечает на вопрос, который у выбранной кучи деталей встаёт раньше
+   * всех прочих: сшивают вместе то, что кроят из одного, и «main ×2 · lining ×1» в строке выбора
+   * ловит промах ДО того, как из него родится узел.
+   */
+  clothLine: string;
   onCreate: (intent: 'unit' | 'process') => void;
   onClear: () => void;
 }) {
@@ -1008,6 +1071,11 @@ function ActionPanel({
       <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
         {picked.map(labelOf).join(' + ')}
       </Text>
+      {clothLine && (
+        <Text size='micro' variant='label' component='span' className='shrink-0'>
+          {clothLine}
+        </Text>
+      )}
       {picked.length >= 2 && (
         <Chip onClick={() => onCreate('unit')} title='assemble a new unit from the selection'>
           join · {picked.length}

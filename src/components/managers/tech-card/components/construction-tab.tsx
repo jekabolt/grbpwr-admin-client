@@ -2,7 +2,7 @@ import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Canvas, Pin } from 'ui/components/canvas';
@@ -16,7 +16,13 @@ import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionField } from './construction-field';
 import { zoneOptions } from './operation-options';
-import { ColorwayArticles, OPERATION_EXPECTED_SECTIONS, OperationsField } from './operations-field';
+import {
+  ColorwayArticles,
+  ColorwayCloth,
+  OPERATION_EXPECTED_SECTIONS,
+  OperationsField,
+} from './operations-field';
+import { pieceClothMap, type ClothSlot, type PieceCloth } from './piece-cloth';
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
@@ -433,6 +439,27 @@ function shapesAffordance(shapes: PieceShapes): React.ReactNode | undefined {
   return undefined;
 }
 
+/**
+ * Одна и та же ткань детали или уже другая.
+ *
+ * Нужна РОВНО для переиспользования прежнего объекта: `pieceClothMap` — чистая функция и на каждом
+ * прогоне мастерит новые `PieceCloth`, а плитка сравнивает пропы по ссылке. Без этого сравнения
+ * любая правка любого поля BOM перерисовывала бы все силуэты карточки, ничего в них не изменив.
+ *
+ * Сравнивается не только `state` + `article.id`, но и подпись артикула: каталог материалов
+ * приезжает ОТДЕЛЬНЫМ запросом и позже карточки, поэтому первый прогон резолвит артикул в «#1234»
+ * (кода и имени ещё нет), а второй — уже в «CORD-14 · вельвет». По id эти два объекта неотличимы,
+ * и сравнение только по нему навсегда заморозило бы подпись на числе.
+ */
+function sameCloth(a: PieceCloth, b: PieceCloth): boolean {
+  return (
+    a.state === b.state &&
+    (a.article?.id ?? 0) === (b.article?.id ?? 0) &&
+    (a.article?.code ?? '') === (b.article?.code ?? '') &&
+    (a.article?.name ?? '') === (b.article?.name ?? '')
+  );
+}
+
 // Construction workspace: the sketch (assembly map) on the left, the general finishing defaults
 // and the ordered operations on the right — so a step and its place on the drawing are visible
 // together, without switching tabs. Colourway / material selection lives on the colorways tab;
@@ -448,6 +475,11 @@ export function ConstructionTab({
   // Deliberately NOT watching `operations` here. The summary and the sketch each hold their own
   // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
   // this whole workspace (and with it every row of the sequence rail).
+  //
+  // `bomItems` — единственное исключение, и оно осознанное: ткань детали выводится из строк BOM, а
+  // строки BOM правят на ДРУГОЙ вкладке. То есть подписка здесь не оживает под пальцами того, кто
+  // работает со сборкой, а выведенная карта всё равно защищена отпечатком (см. ниже).
+  const { control, getValues } = useFormContext<TechCardFormData>();
 
   // Sketch pin ↔ operation and BOM line ↔ operation are the same mechanism, so both come from the
   // shared hook the pieces tab reuses for its mini-diagram.
@@ -491,27 +523,51 @@ export function ConstructionTab({
   // picked, not-yet-saved default still resolves. The catalog query is the exact one the colorways
   // tab already holds ('', true), so this is a React Query cache hit rather than a second fetch.
   const { data: materialsData } = useMaterials('', true);
-  const colorwayArticles = useMemo<ColorwayArticles>(() => {
-    // EVERY id here goes through wireInt. material_id and id are int64 in techcard.proto, and
-    // grpc-gateway serialises int64 as a STRING while the generated TS type claims `number` — so
-    // an unnormalised Map keyed by the raw value type-checks and then misses on every lookup
-    // (schema.ts:846 documents the same trap on the form side). The slot default already arrives
-    // wireInt'd through mapBomItemToForm, so without this the two sides are different runtime
-    // types and a colourway inheriting the default would read as diverging from one that pins it.
-    const materialNameById = new Map<number, string>();
+  // ДВА СЛОВАРЯ, ОБЩИЕ НА ДВУХ ЧИТАТЕЛЕЙ — `colorwayArticles` (артикул слота на шаге) и
+  // `pieceClothByColorway` (ткань детали). Собранные в каждом по разу, они разъехались бы первой же
+  // правкой одного из них, а расходиться им есть где: и нормализация int64, и гард `id > 0 && key`
+  // ниже нужны обоим одинаково и одинаково молча ломаются.
+  //
+  // EVERY id here goes through wireInt. material_id and id are int64 in techcard.proto, and
+  // grpc-gateway serialises int64 as a STRING while the generated TS type claims `number` — so
+  // an unnormalised Map keyed by the raw value type-checks and then misses on every lookup
+  // (schema.ts:846 documents the same trap on the form side). The slot default already arrives
+  // wireInt'd through mapBomItemToForm, so without this the two sides are different runtime
+  // types and a colourway inheriting the default would read as diverging from one that pins it.
+  const materialCatalog = useMemo(() => {
+    const nameById = new Map<number, string>();
+    // Артикул для штриховки везёт код и имя РАЗДЕЛЬНО и без фолбэков: подписью распоряжается
+    // `pieceClothMap`, и подставленное здесь «#1234» вместо пустого имени заставило бы его
+    // напечатать id там, где он рассчитывает напечатать имя.
+    const articleById = new Map<number, { code: string; name: string }>();
     for (const material of materialsData?.materials ?? []) {
       const id = wireInt(material.id);
-      if (id > 0) materialNameById.set(id, material.name?.trim() || `#${id}`);
+      if (id <= 0) continue;
+      nameById.set(id, material.name?.trim() || `#${id}`);
+      articleById.set(id, { code: material.code?.trim() ?? '', name: material.name?.trim() ?? '' });
     }
-    // Legacy usages carry no bom_line_key, only the resolved bom_item_id. Both come from the same
-    // read payload, so mapping id → line_key here is exact — unlike guessing by position, which is
-    // the bug 0200's read path was written to avoid.
-    const lineKeyByBomId = new Map<number, string>();
+    return { nameById, articleById };
+  }, [materialsData?.materials]);
+
+  // Legacy usages carry no bom_line_key, only the resolved bom_item_id. Both come from the same
+  // read payload, so mapping id → line_key here is exact — unlike guessing by position, which is
+  // the bug 0200's read path was written to avoid.
+  const lineKeyByBomId = useMemo(() => {
+    const m = new Map<number, string>();
     for (const line of techCard?.techCard?.bomItems ?? []) {
       const id = wireInt(line.id);
       const key = line.lineKey?.trim();
-      if (id > 0 && key) lineKeyByBomId.set(id, key);
+      // ГАРД ОБЯЗАТЕЛЕН И ЦЕЛИКОМ. Ещё не сохранённая строка BOM приходит с `id: 0`; попав в мост
+      // ключом 0, она поймала бы ЛЮБОЙ легаси-usage с пустым `bomItemId` (wireInt даёт из него тот
+      // же 0) и привязала бы деталь к строке, которой на сервере ещё нет. Экран при этом остаётся
+      // правдоподобным: деталь просто заштрихована не той тканью.
+      if (id > 0 && key) m.set(id, key);
     }
+    return m;
+  }, [techCard?.techCard?.bomItems]);
+
+  const colorwayArticles = useMemo<ColorwayArticles>(() => {
+    const materialNameById = materialCatalog.nameById;
     const colorways = (techCard?.colorways ?? []).map((cw) => {
       const pinsByLineKey = new Map<string, number[]>();
       for (const usage of cw.usages ?? []) {
@@ -530,7 +586,82 @@ export function ConstructionTab({
       };
     });
     return { colorways, materialNameById };
-  }, [techCard?.colorways, techCard?.techCard?.bomItems, materialsData?.materials]);
+  }, [techCard?.colorways, lineKeyByBomId, materialCatalog]);
+
+  // ТКАНЬ ДЕТАЛЕЙ — ДВА ИСТОЧНИКА, И ЭТО НЕ НЕБРЕЖНОСТЬ (та же развилка, что у соседа сверху).
+  //
+  // СЛОТЫ — ИЗ ФОРМЫ. Назначение строки BOM правят на соседней вкладке, и несохранённая правка
+  // обязана менять штриховку сразу: «поменял purpose — штриховка та же» читается как поломка, а не
+  // как «сохрани сначала». USAGES — С ЧТЕНИЯ: рецепта колорвея в форме нет вовсе, и брать его
+  // оттуда значит получить пустую карту на живой карточке.
+  //
+  // ПОДПИСКА ЧЕРЕЗ ОТПЕЧАТОК, а не на сам массив: `bomItems` меняет идентичность на каждый символ в
+  // любом поле любой строки (имя, расход, примечание), а на штриховку влияют ровно четыре поля.
+  // Без отпечатка карта пересоздавалась бы на каждое нажатие и перерисовывала все силуэты
+  // карточки — ровно та ловушка memo, ради которой контуры считаются один раз на вкладке.
+  const bomWatch = useWatch({ control, name: 'bomItems' });
+  const clothFingerprint = useMemo(
+    () =>
+      (bomWatch ?? [])
+        .map((l) => [l.lineKey, l.purpose, l.section, l.materialId].join('|'))
+        .join('~'),
+    [bomWatch],
+  );
+  // Прошлый результат — для ПЕРЕИСПОЛЬЗОВАНИЯ ССЫЛОК. Отпечаток решает, считать ли заново; этот
+  // кэш решает, менять ли идентичность посчитанного. Смена отпечатка почти всегда меняет ткань
+  // одной строки из двадцати, и без него девятнадцать нетронутых деталей всё равно перерисовались
+  // бы: пропы плиток сравниваются по ссылке.
+  const clothCache = useRef<ColorwayCloth[]>([]);
+  const pieceClothByColorway = useMemo<ColorwayCloth[]>(() => {
+    // Через getValues, а не через сам `bomWatch`: значение то же самое, но зависимостью остаётся
+    // отпечаток — то есть memo пересчитывается ровно тогда, когда изменилось влияющее поле, а не
+    // тогда, когда RHF выдал новый массив.
+    //
+    // Проекция, а не приведение: строка формы возит два десятка полей, из которых ткань выводят
+    // ровно четыре, и `ClothSlot` перечисляет их именно затем, чтобы пятое нельзя было прочитать
+    // молча. Строка без ключа доезжает как есть — её отбрасывает сам `pieceClothMap`.
+    const slots: ClothSlot[] = (getValues('bomItems') ?? []).map((l) => ({
+      lineKey: l.lineKey ?? '',
+      purpose: l.purpose,
+      section: l.section,
+      materialId: l.materialId,
+    }));
+    const prev = clothCache.current;
+    const list = techCard?.colorways ?? [];
+    let allSame = prev.length === list.length;
+    const next = list.map((cw, i) => {
+      // Правило имени — то же, что у `colorwayArticles` и у печатного комплекта: слово оператора,
+      // никогда не числовой id колорвея. Словаря цветов на этой вкладке нет, и заводить ради
+      // подписи второй запрос незачем — код колорвея и есть то, чем его называют в цехе.
+      const label = cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId}`;
+      const map = pieceClothMap(
+        slots,
+        cw.usages ?? [],
+        materialCatalog.articleById,
+        lineKeyByBomId,
+      );
+      const before = prev[i];
+      if (!before) {
+        allSame = false;
+        return { label, map };
+      }
+      // Обход идёт ВСЕГДА, даже когда карта выросла: заведённая двадцать первая деталь не повод
+      // менять ссылки у двадцати прежних. Размер участвует только в вердикте «карта та же».
+      let same = before.label === label && before.map.size === map.size;
+      for (const [key, cloth] of map) {
+        const was = before.map.get(key);
+        if (was && sameCloth(was, cloth)) map.set(key, was);
+        else same = false;
+      }
+      if (!same) allSame = false;
+      // Размеры равны и каждый ключ новой карты нашёлся прежним — значит карты совпадают целиком,
+      // и прежнюю пару можно вернуть как есть: тогда не меняется и идентичность массива.
+      return same ? before : { label, map };
+    });
+    if (allSame) return prev;
+    clothCache.current = next;
+    return next;
+  }, [clothFingerprint, techCard?.colorways, materialCatalog, lineKeyByBomId, getValues]);
 
   // The assembly map pins onto the technical sketches (callouts live there).
   const mediaById = useMemo(() => {
@@ -578,6 +709,7 @@ export function ConstructionTab({
               activeBom={bom.active}
               onActiveBomChange={bom.setActive}
               colorwayArticles={colorwayArticles}
+              pieceClothByColorway={pieceClothByColorway}
               pieceShapes={pieceShapes.shapeByKey}
               // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
               // принимает намерение «снять разметку» только против карточки, которая её несёт,

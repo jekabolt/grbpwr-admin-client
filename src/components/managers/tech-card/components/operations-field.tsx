@@ -80,6 +80,7 @@ import { kindLabel, preferredBomKinds } from './bom-kind';
 import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
+import type { PieceCloth } from './piece-cloth';
 import {
   assemblySweep,
   classifyAssemblyInputs,
@@ -398,6 +399,23 @@ export type ColorwayArticles = {
   materialNameById: Map<number, string>;
 };
 
+// Из чего кроится каждая деталь — по колорвеям, в порядке карточки.
+//
+// СОСЕД `ColorwayArticles`, А НЕ ЕГО ЧАСТЬ, и это не дробление: тот отвечает на вопрос ШАГА («какой
+// артикул этот колорвей берёт на слот, который операция потребляет»), этот — на вопрос ДЕТАЛИ («из
+// какой ткани её кроят»). Ключи у них разные (line_key СЛОТА против line_key ДЕТАЛИ), и склеенные
+// в один тип они заставили бы каждого читателя разбираться, какой из двух ключей ему нужен.
+//
+// Карта КЛЮЧУЕТСЯ СЫРЫМ lineKey ДЕТАЛИ — не `pieceRefKey(lineKey)`, которым ключуются контуры
+// чертежа: это два разных пространства ключей на одном экране, и перепутать их значит получить
+// пустую карту при живом рецепте, ничего при этом не сломав на глаз.
+export type ColorwayCloth = {
+  /** Слово оператора: цвет из кода колорвея, иначе базовый SKU, иначе `#id`. */
+  label: string;
+  /** lineKey ДЕТАЛИ → её ткань. Ключа нет = рецепт про эту деталь молчит (`unbound`). */
+  map: Map<string, PieceCloth>;
+};
+
 // Mirrors the server's entity.EffectiveMaterialId (internal/entity/techcard.go): the colourway pin
 // wins, else the slot default, else 0 = no article at all. Same rule as colorway-recipe.tsx's
 // effectiveMaterialId, which resolves it over that file's own draft/slot types — deliberately not
@@ -605,6 +623,7 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
 function AssemblyTray({
   pieces,
   pieceShapes,
+  cloth,
   tiled,
   highlighted,
   stepIndex,
@@ -612,6 +631,8 @@ function AssemblyTray({
 }: {
   pieces: PieceRef[];
   pieceShapes: PieceShapeMap;
+  /** Ткань деталей ПЕРВОГО колорвея. Лоток — не место выбирать колорвей: он приедет с полкой. */
+  cloth?: Map<string, PieceCloth> | null;
   tiled: boolean;
   highlighted: boolean;
   stepIndex: number;
@@ -645,6 +666,7 @@ function AssemblyTray({
           key={p.lineKey}
           piece={p}
           shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
+          cloth={cloth?.get(p.lineKey) ?? null}
           tiled={tiled}
           highlighted={highlighted}
           onAdd={() => onAdd(p.lineKey)}
@@ -682,6 +704,7 @@ function AssemblyTray({
 function TrayChip({
   piece,
   shape,
+  cloth,
   tiled,
   onAdd,
   highlighted = false,
@@ -689,6 +712,8 @@ function TrayChip({
   piece: PieceRef;
   /** Контур детали из общего разбора; null — привязки нет, кэш холодный или разбор не заказан. */
   shape: FoundPiece | null;
+  /** Ткань детали; null — рецепт про неё молчит, и плитка остаётся ровно такой, какой была. */
+  cloth?: PieceCloth | null;
   /** Карточка показывает детали плитками (у неё есть хоть один контур), а не чипами. */
   tiled: boolean;
   onAdd: () => void;
@@ -721,7 +746,7 @@ function TrayChip({
           highlighted && 'motion-safe:animate-pulse border-textColor',
         )}
       >
-        <PieceTile found={shape} name={piece.name} />
+        <PieceTile found={shape} name={piece.name} cloth={cloth} />
       </button>
     );
   }
@@ -3073,6 +3098,7 @@ export function OperationsField({
   activeBom = null,
   onActiveBomChange,
   colorwayArticles,
+  pieceClothByColorway,
   pieceShapes = null,
   addRequest = null,
   onAdded,
@@ -3097,6 +3123,16 @@ export function OperationsField({
   activeBom?: string | null;
   onActiveBomChange?: (k: string | null) => void;
   colorwayArticles?: ColorwayArticles;
+  /**
+   * Ткань деталей по колорвеям, в порядке карточки. Считается вкладкой (два источника — слоты из
+   * формы, рецепт с чтения) и приезжает сюда готовой картой: собирать её здесь значило бы считать
+   * заново на каждый введённый в шаг символ.
+   *
+   * ИНЛАЙН ВСЕГДА БЕРЁТ `[0]`, и переключателя колорвея тут нет: он приедет с полкой фулскрина.
+   * Пока его нет, экран обязан НАЗЫВАТЬ показанный колорвей словом — иначе одноцветная штриховка
+   * молча выдаёт первый колорвей за единственный.
+   */
+  pieceClothByColorway?: ColorwayCloth[];
   // Контуры деталей, посчитанные ОДИН раз на вкладке и стабильные по ссылке. Приходят пропом, а не
   // своим хуком: здесь их читают тарелка, каждый чип открытого шага и каждая строка рельса, а этот
   // компонент перерисовывается на каждый символ — считать карту заново на каждый рендер значило бы
@@ -3289,6 +3325,37 @@ export function OperationsField({
     () => !!pieceShapes && [...pieceShapes.values()].some(Boolean),
     [pieceShapes],
   );
+
+  // Инлайновые поверхности (полотно схемы и лоток) показывают ПЕРВЫЙ колорвей карточки. Выбирать
+  // колорвей здесь нечем и не нужно: орган выбора приедет с полкой фулскрина, а до тех пор экран
+  // отвечает за то, чтобы показанный колорвей был НАЗВАН.
+  const inlineCloth = pieceClothByColorway?.[0] ?? null;
+
+  // СТРОКА-СЛОВО (M8). Штриховка — текстура, а текстура одна не имеет права нести состояние:
+  // «полосатая» не читается как «основная ткань» без легенды, а полки с легендой на инлайне ещё
+  // нет. Поэтому над схемой стоит строка, называющая колорвей и то, о чём рецепт промолчал.
+  //
+  // Молчит, когда сказать нечего: один колорвей и все детали разложены — строка была бы шумом над
+  // экраном, который и так весь про сборку. Это ТЕКСТ, а не орган: нажимать здесь не на что.
+  const clothWord = useMemo(() => {
+    if (pieces.length === 0) return '';
+    // Колорвеев нет вовсе — рецепта не существует, вся штриховка `unbound`. Счётчик «12 без ткани»
+    // здесь был бы претензией к технологу вместо факта: считать нечего, пока считать не из чего.
+    if (!inlineCloth) return 'cloth — no recipe yet';
+    let unbound = 0;
+    let unsorted = 0;
+    for (const p of pieces) {
+      const state = inlineCloth.map.get(p.lineKey)?.state ?? 'unbound';
+      if (state === 'unbound') unbound += 1;
+      else if (state === 'unsorted') unsorted += 1;
+    }
+    const many = (pieceClothByColorway?.length ?? 0) > 1;
+    if (!unbound && !unsorted && !many) return '';
+    const parts = [inlineCloth.label];
+    if (unbound) parts.push(`${unbound} without cloth`);
+    if (unsorted) parts.push(`${unsorted} unsorted`);
+    return `cloth — ${parts.join(' · ')}`;
+  }, [pieces, inlineCloth, pieceClothByColorway]);
 
   const pinOptions = useMemo<PickerOption[]>(
     () => [
@@ -3586,6 +3653,7 @@ export function OperationsField({
             <AssemblyTray
               pieces={pieces}
               pieceShapes={pieceShapes}
+              cloth={inlineCloth?.map ?? null}
               tiled={tiled}
               highlighted={highlightPieces}
               stepIndex={selectedIndex}
@@ -3690,42 +3758,58 @@ export function OperationsField({
               )}
             >
               {effectiveMode === 'schematic' ? (
-                <AssemblySchematic
-                  blocks={grouping.schematicBlocks}
-                  steps={grouping.schematicSteps}
-                  res={grouping.res}
-                  labelOf={(i) =>
-                    ((getValues(`operations.${i}.note`) as string) || '').trim() ||
-                    operationHeading({
-                      operationType: getValues(`operations.${i}.operationType`) as Parameters<
-                        typeof operationHeading
-                      >[0]['operationType'],
-                      machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
-                      zone: getValues(`operations.${i}.zone`) as Parameters<
-                        typeof operationHeading
-                      >[0]['zone'],
-                      pieceNames: [],
-                    }) ||
-                    'step'
-                  }
-                  pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
-                  onPickStep={(i) => {
-                    setSelected(i);
-                    // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
-                    // «открыть шаг» открывает его за пределами экрана.
-                    requestAnimationFrame(() =>
-                      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
-                    );
-                  }}
-                  onCreate={setPendingCreate}
-                  pieceShapes={pieceShapes}
-                  smvOfBlock={grouping.smvOfBlock}
-                  onDissolve={dissolveUnit}
-                  positions={prefs.pos}
-                  onMove={prefs.move}
-                  onResetPositions={prefs.reset}
-                  frozen={frozen}
-                />
+                <>
+                  {/* Строка-слово живёт ЗДЕСЬ, а не внутри схемы рядом с «layout: manual»: та
+                      полоса появляется только у карточки с ручными позициями, и строка про ткань,
+                      написанная в ней, исчезала бы вместе с ней — то есть ровно на карточке,
+                      которую никто не двигал руками, и молчала бы про весь неразложенный рецепт. */}
+                  {clothWord && (
+                    <ChipRow className='mb-1.5'>
+                      <Text size='micro' variant='label' component='span' className='uppercase'>
+                        {clothWord}
+                      </Text>
+                    </ChipRow>
+                  )}
+                  <AssemblySchematic
+                    blocks={grouping.schematicBlocks}
+                    steps={grouping.schematicSteps}
+                    res={grouping.res}
+                    labelOf={(i) =>
+                      ((getValues(`operations.${i}.note`) as string) || '').trim() ||
+                      operationHeading({
+                        operationType: getValues(`operations.${i}.operationType`) as Parameters<
+                          typeof operationHeading
+                        >[0]['operationType'],
+                        machineType: getValues(
+                          `operations.${i}.machineType`,
+                        ) as common_TechCardMachineType,
+                        zone: getValues(`operations.${i}.zone`) as Parameters<
+                          typeof operationHeading
+                        >[0]['zone'],
+                        pieceNames: [],
+                      }) ||
+                      'step'
+                    }
+                    pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+                    onPickStep={(i) => {
+                      setSelected(i);
+                      // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
+                      // «открыть шаг» открывает его за пределами экрана.
+                      requestAnimationFrame(() =>
+                        editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                      );
+                    }}
+                    onCreate={setPendingCreate}
+                    pieceShapes={pieceShapes}
+                    cloth={inlineCloth?.map ?? null}
+                    smvOfBlock={grouping.smvOfBlock}
+                    onDissolve={dissolveUnit}
+                    positions={prefs.pos}
+                    onMove={prefs.move}
+                    onResetPositions={prefs.reset}
+                    frozen={frozen}
+                  />
+                </>
               ) : (
               <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
                 <DndContext
