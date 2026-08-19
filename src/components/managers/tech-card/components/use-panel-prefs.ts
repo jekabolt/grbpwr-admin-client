@@ -16,8 +16,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 //
 // ПОЧЕМУ ПАТЧЕМ, А НЕ ОТДЕЛЬНЫМИ ПИСАТЕЛЯМИ. Соседний модуль пересобирает хранимый объект целиком
 // в каждом писателе, и это уже дало один тихий баг: поле, о котором писатель не знает, стирается
-// первым же вызовом. Здесь writer один и он СЛИВАЕТ патч с текущим состоянием — поле, добавленное
-// поздней фазой, переживает любой чужой вызов по построению.
+// первым же вызовом. Здесь writer один, копит именно ПАТЧ и на записи сливает его со свежим
+// чтением хранилища — поле, добавленное поздней фазой или чужим инстансом, переживает любой чужой
+// вызов по построению.
 
 /**
  * Поля полки объявлены ЗАРАНЕЕ и не используются до Ф5.
@@ -91,16 +92,21 @@ export function usePanelPrefs() {
   const pending = useRef<PanelPrefs | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // В ХРАНИЛИЩЕ УХОДИТ ПАТЧ ПОВЕРХ СВЕЖЕГО ЧТЕНИЯ, а не состояние этого инстанса. Состояние —
+  // снимок на маунте плюс свои правки: записанное как есть, оно тихо откатывало бы поля, которые
+  // после маунта записал ДРУГОЙ писатель — второй инстанс хука (док и полка в разных компонентах
+  // с Ф5) или соседняя вкладка. Это та же ловушка каталога, что у писателей соседнего модуля,
+  // только уровнем выше: там объект пересобирал каждый писатель, здесь — каждый инстанс.
   const flush = useCallback(() => {
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    const next = pending.current;
+    const patch = pending.current;
     pending.current = null;
-    if (!next) return;
+    if (!patch) return;
     try {
-      localStorage.setItem(KEY, JSON.stringify(next));
+      localStorage.setItem(KEY, JSON.stringify({ ...read(), ...patch }));
     } catch {
       // Квота или запрещённое хранилище: раскладка не переживёт перезагрузку, но работать мешать
       // не должна.
@@ -117,13 +123,12 @@ export function usePanelPrefs() {
 
   const set = useCallback(
     (patch: PanelPrefs) => {
-      setPrefs((cur) => {
-        const next: PanelPrefs = { ...cur, ...patch };
-        pending.current = next;
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(flush, WRITE_DELAY_MS);
-        return next;
-      });
+      // Побочные эффекты — ВНЕ апдейтера состояния: StrictMode зовёт апдейтеры дважды, и таймер,
+      // взведённый внутри, взводился бы с ним.
+      pending.current = { ...pending.current, ...patch };
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(flush, WRITE_DELAY_MS);
+      setPrefs((cur) => ({ ...cur, ...patch }));
     },
     [flush],
   );
