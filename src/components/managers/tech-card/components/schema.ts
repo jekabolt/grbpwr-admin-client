@@ -1462,6 +1462,21 @@ const operationSchema = z.object({
         'pressureScale',
         'engraving is not pressed — clear the pressure, or pick another print method',
       );
+      // И ВЕСЬ ВТО-БЛОК ЦЕЛИКОМ (F2-FINAL §5.4, правило 5). Термопресс печать берёт взаймы — но
+      // только та, у которой есть носитель: лазер выжигает материал сам, плиты у него нет, и семь
+      // ВТО-полей сервер на этом методе отвергает ПО ИМЕНИ, отказывая вместе с ними всей карточке.
+      // Отказ стоит на КАЖДОМ поле отдельно, а не на блоке, потому что чинить его оператор будет
+      // на контроле, где стоит число.
+      const pressAtLaser =
+        'engraving has no platen — clear the pressing settings, or pick another print method';
+      refuseAtLaser(stepEnumSet(o.pressEquipment), 'pressEquipment', pressAtLaser);
+      refuseAtLaser(stepTextSet(o.pressProfileKey), 'pressProfileKey', pressAtLaser);
+      refuseAtLaser(!!o.pressTemperatureC, 'pressTemperatureC', pressAtLaser);
+      refuseAtLaser(!!o.pressDwellSec, 'pressDwellSec', pressAtLaser);
+      refuseAtLaser(stepTextSet(o.pressPressureNCm2), 'pressPressureNCm2', pressAtLaser);
+      // Проставленный `false` — это сказанное «без пара», а не пустота: его тоже отвергают.
+      refuseAtLaser(o.pressSteam !== undefined, 'pressSteam', pressAtLaser);
+      refuseAtLaser(stepEnumSet(o.pressCloth), 'pressCloth', pressAtLaser);
     }
 
     // СВАРКА СОЕДИНЯЕТ ТЕПЛОМ, А НЕ НИТКОЙ. У проклейки шва и ультразвука нет ни иглы, ни нитки —
@@ -2963,10 +2978,14 @@ export function mapFormToTechCardInsert(
       const operationType = (o.operationType ||
         'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType;
       const isMachineStep = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
-      const isPressStep =
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
-        operationType === 'TECH_CARD_OPERATION_TYPE_FUSING';
+      // ПЕЧАТЬ БЕРЁТ ТЕРМОПРЕСС ВЗАЙМЫ, и гейт ВТО-полей отвечает не на тот вопрос, что список трёх
+      // ВТО-глаголов: не «шаг ЕСТЬ ВТО», а «шагу МОЖНО дать настройки пресса». Термотрансфер
+      // прижимают температурой, выдержкой и силиконовой бумагой, не будучи ВТО-шагом, и контракт
+      // ВТО-блок при PRINT разрешает: `press_equipment` там ОПЦИОНАЛЕН, а REQUIRED-if-aware живёт
+      // у press/press_open/fusing — поэтому обязательность пикера в `superRefine` стоит на трёх
+      // глаголах и здесь ни при чём. Списком трёх глаголов температура 160 и выдержка 12 секунд
+      // печатного шага уезжали на провод нулями, и печатный лист рисовал их из ничего.
+      const ownsPressSettings = stepTypeOwnsBlock(operationType, 'pressSettings');
       // A legacy type (LOCKSTITCH…) is canonicalised into (MACHINE, machine_type) by the server, and
       // it derives the machine from the token itself — so this client neither invents one for it nor
       // sends the block: the step is not MACHINE on the wire yet.
@@ -3184,18 +3203,18 @@ export function mapFormToTechCardInsert(
             ? o.threadTensionNote?.trim() || ''
             : '',
         stitchWidthMm: isMachineStep && !isWeldStep ? optionalDecimal(o.stitchWidthMm) : undefined,
-        // --- the ВТО block: only on PRESS / PRESS_OPEN / FUSING ---------------------------------
-        pressEquipment: (isPressStep
+        // --- the ВТО block: on PRESS / PRESS_OPEN / FUSING — and on PRINT, which borrows the press
+        pressEquipment: (ownsPressSettings
           ? o.pressEquipment || 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'
           : 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') as common_TechCardPressEquipment,
-        pressProfileKey: isPressStep ? o.pressProfileKey?.trim() || '' : '',
-        pressTemperatureC: isPressStep ? o.pressTemperatureC || 0 : 0,
-        pressDwellSec: isPressStep ? o.pressDwellSec || 0 : 0,
-        pressPressureNCm2: isPressStep ? optionalDecimal(o.pressPressureNCm2) : undefined,
+        pressProfileKey: ownsPressSettings ? o.pressProfileKey?.trim() || '' : '',
+        pressTemperatureC: ownsPressSettings ? o.pressTemperatureC || 0 : 0,
+        pressDwellSec: ownsPressSettings ? o.pressDwellSec || 0 : 0,
+        pressPressureNCm2: ownsPressSettings ? optionalDecimal(o.pressPressureNCm2) : undefined,
         // undefined drops the key, which IS the wire shape of an unset optional bool — and the
         // server reads a present `false` as the stated instruction «without steam».
-        pressSteam: isPressStep ? o.pressSteam : undefined,
-        pressCloth: (isPressStep
+        pressSteam: ownsPressSettings ? o.pressSteam : undefined,
+        pressCloth: (ownsPressSettings
           ? o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN'
           : 'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
         // --- ВИДЫ ОПЕРАЦИЙ (0324): порядок — номера полей контракта 51..63 (дыры 50/62 обещаны) --
