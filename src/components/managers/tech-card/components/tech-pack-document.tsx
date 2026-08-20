@@ -161,6 +161,7 @@ import {
   operationHeading,
   pressProfileSummary,
   seamClassOptions,
+  topstitchModeHasWidth,
   zoneOptions,
   type EffectiveSetting,
 } from './operation-options';
@@ -324,7 +325,12 @@ const topstitchText = (t?: common_TechCardTopstitch): string => {
   if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
   const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
   if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
-  const w = dec(t.widthMm);
+  // «FROM EDGE» IS A CLAIM ABOUT THE REFERENCE POINT, so it is printed only for a mode this bundle
+  // can classify as carrying a width (TOPSTITCH_MODE_HAS_WIDTH). An unclassified mode leaves the
+  // sheet saying «topstitch» and no more — incomplete, which the floor can see, instead of a
+  // distance measured from a reference the mode never named, which the floor cannot. Nothing is
+  // lost by the omission: print reads the wire and never writes it.
+  const w = topstitchModeHasWidth(t.mode) ? dec(t.widthMm) : '';
   return `topstitch ${rows}${w ? `${w} mm from edge` : ''}`.trim();
 };
 // A setting and the one bit that says where it came from: the marker means «the step's own value»,

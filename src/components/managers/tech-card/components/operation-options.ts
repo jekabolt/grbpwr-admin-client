@@ -189,6 +189,47 @@ export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; 
   { value: 'TECH_CARD_TOPSTITCH_MODE_WIDTH', label: 'at width' },
 ];
 
+// DOES THIS MODE CARRY A WIDTH — one answer, stated PER MODE, and deliberately not written as
+// «anything that is not WIDTH». Four surfaces asked that question separately and all four asked it
+// by negation; this map is the single place they now ask.
+//
+// WHY POSITIVE. The negative form is a sentence about a mode the bundle has never heard of, and it
+// gets that sentence wrong. An older bundle reading a card saved by a newer one is the normal state
+// of this project between a backend deploy and a client deploy, and «not WIDTH» made every consumer
+// act on it: the editor wiped the width AND the row count merely by OPENING the step (with
+// shouldDirty, so the next save wrote the loss), the schema refused the step and the whole card
+// with it, and the mapper dropped the number on the way out. Three silent losses, all of them about
+// a mode that may well have a width.
+//
+// Stated positively the same token matches no key, the lookup is `undefined` — neither «has a
+// width» nor «has none» — and every consumer leaves it alone. The positive form has its own failure
+// and it is the cheap one: a new mode that DOES carry a width, not yet classified here, hides its
+// input until somebody adds the line. A control that is missing gets fixed by editing this map; a
+// number that was erased is not fixed at all.
+//
+// A total `Record`, not an array, for the reason every dictionary in this feature is one (see the
+// header of equipment-options.ts): nothing in this repo diffs the client against the contract, so
+// tsc is the diff — a member added by a proto bump fails to compile until it is classified here.
+export const TOPSTITCH_MODE_HAS_WIDTH: Record<common_TechCardTopstitchMode, boolean> = {
+  // «none» — there is no topstitch for a width to belong to.
+  TECH_CARD_TOPSTITCH_MODE_UNKNOWN: false,
+  // Run along the very edge: the distance IS the edge, so there is nothing left to state.
+  TECH_CARD_TOPSTITCH_MODE_EDGE: false,
+  // The inset from the edge is the entire instruction.
+  TECH_CARD_TOPSTITCH_MODE_WIDTH: true,
+};
+
+/** The mode is KNOWN and carries a width: show the input, require the number, print it. An unknown
+ *  token answers `false` — the safe direction, one control missing and nothing touched. */
+export const topstitchModeHasWidth = (mode?: string): boolean =>
+  TOPSTITCH_MODE_HAS_WIDTH[mode as common_TechCardTopstitchMode] === true;
+
+/** The mode is KNOWN and carries NO width — the only licence to CLEAR, to REFUSE or to DROP one.
+ *  Not `!topstitchModeHasWidth`: an unknown token answers `false` to BOTH, and that third state is
+ *  the whole reason this pair exists rather than a single predicate. */
+export const topstitchModeHasNoWidth = (mode?: string): boolean =>
+  TOPSTITCH_MODE_HAS_WIDTH[mode as common_TechCardTopstitchMode] === false;
+
 // THE VERB OF A STEP HEADING — total, not `Partial`, and that change is the point: as a Partial this
 // map went silently blank on every token the contract added, which is precisely what a bump is
 // supposed to surface. UNKNOWN maps to '' because a step with no type has no verb to speak.

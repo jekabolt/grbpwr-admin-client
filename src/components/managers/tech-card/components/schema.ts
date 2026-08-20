@@ -58,6 +58,7 @@ import {
   cutSymmetryCountInvalid,
   isCutSymmetryMarked,
 } from './piece-codes';
+import { topstitchModeHasNoWidth, topstitchModeHasWidth } from './operation-options';
 import { wireInt } from './wire-int';
 import { z } from 'zod';
 import {
@@ -1026,15 +1027,18 @@ const operationSchema = z.object({
       });
     }
     // A width beside «edge» is a shadow value the server refuses; catching it here keeps the
-    // refusal next to the control that caused it.
-    if (o.topstitchMode !== 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (o.topstitchWidthMm ?? '').trim()) {
+    // refusal next to the control that caused it. BOTH halves ask TOPSTITCH_MODE_HAS_WIDTH rather
+    // than compare against WIDTH: a refusal written as «≠ WIDTH» blocks the whole card over a mode
+    // this bundle simply has not learnt yet, and a step nobody can save is worse than a width
+    // nobody validated.
+    if (topstitchModeHasNoWidth(o.topstitchMode) && (o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
-        message: 'edge topstitching has no width — clear it, or switch the mode to width',
+        message: 'this topstitch mode has no width — clear it, or switch the mode to width',
       });
     }
-    if (o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && !(o.topstitchWidthMm ?? '').trim()) {
+    if (topstitchModeHasWidth(o.topstitchMode) && !(o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
@@ -2530,17 +2534,19 @@ export function mapFormToTechCardInsert(
         seamAllowanceMm: optionalDecimal(o.seamAllowanceMm),
         // The sub-message travels only when there IS topstitching: an always-present wrapper
         // carrying MODE_UNKNOWN reads as «somebody considered it» on every step that has none. And
-        // the width rides only with WIDTH — beside «edge» it would be a shadow value the server
-        // refuses anyway.
+        // the width is dropped only for a mode KNOWN to have none — beside «edge» it would be a
+        // shadow value the server refuses anyway. Written as «only with WIDTH» this line was the
+        // last of the three losses: even with the editor and the schema fixed, the round trip
+        // «load → open → save» would have deleted the width of a mode this bundle cannot classify,
+        // on the wire, where nothing on screen could show it going.
         topstitch:
           topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
             ? undefined
             : {
                 mode: topstitchMode,
-                widthMm:
-                  topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH'
-                    ? inputToDecimal(o.topstitchWidthMm)
-                    : undefined,
+                widthMm: topstitchModeHasNoWidth(topstitchMode)
+                  ? undefined
+                  : inputToDecimal(o.topstitchWidthMm),
                 rows: o.topstitchRows || 0,
               },
         attachmentKind: (o.attachmentKind ||

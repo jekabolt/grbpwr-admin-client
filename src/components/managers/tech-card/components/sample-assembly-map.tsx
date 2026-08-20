@@ -13,6 +13,7 @@ import {
   attachmentOptions,
   operationHeading,
   seamClassOptions,
+  topstitchModeHasWidth,
 } from './operation-options';
 
 // ---------------------------------------------------------------------------
@@ -79,9 +80,11 @@ function specLine(o: FormOperation, pieceNames: string[]): string {
     // surface said st/cm — two different quantities under one number.
     o.stitchesPerCm?.trim() ? `${o.stitchesPerCm.trim()} st/cm` : '',
     o.seamAllowanceMm?.trim() ? `SA ${o.seamAllowanceMm.trim()} mm` : '',
+    // The millimetres are shown for the modes that HAVE a width (TOPSTITCH_MODE_HAS_WIDTH), not for
+    // the one member that happens to be the only such mode today.
     o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_EDGE'
       ? 'topstitch edge'
-      : o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && o.topstitchWidthMm?.trim()
+      : topstitchModeHasWidth(o.topstitchMode) && o.topstitchWidthMm?.trim()
         ? `topstitch ${o.topstitchWidthMm.trim()} mm`
         : '',
     label(attachmentOptions, o.attachmentKind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),

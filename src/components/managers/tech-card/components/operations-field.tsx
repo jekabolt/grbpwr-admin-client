@@ -38,6 +38,8 @@ import {
   operationTypeOptionsFor,
   seamClassOptions,
   stitchLengthMm,
+  topstitchModeHasNoWidth,
+  topstitchModeHasWidth,
   topstitchModeOptions,
   zoneOptions,
 } from './operation-options';
@@ -1830,8 +1832,14 @@ function OperationEditor({
   // attachment. Without this, typing a width and then switching to «edge» leaves the number in the
   // form, hides the input that holds it, and blocks the save demanding the operator clear a field
   // that is not on screen.
+  //
+  // CLEARING NEEDS THE MODE TO SAY SO, not merely to differ from WIDTH. `topstitchModeHasNoWidth`
+  // answers `false` for a token this bundle does not know, so a step saved by a newer client keeps
+  // its width and its row count instead of losing both to the effect that runs on OPEN — see the
+  // argument at TOPSTITCH_MODE_HAS_WIDTH. The write below is the destructive half of that rule and
+  // is the reason it is stated positively.
   useEffect(() => {
-    if (topstitchMode !== 'TECH_CARD_TOPSTITCH_MODE_WIDTH') {
+    if (topstitchModeHasNoWidth(topstitchMode)) {
       if ((getValues(`operations.${index}.topstitchWidthMm`) ?? '') !== '') {
         setValue(`operations.${index}.topstitchWidthMm`, '', { shouldDirty: true });
       }
@@ -2858,9 +2866,11 @@ function OperationEditor({
                 items={topstitchModeOptions}
                 className={selectNoGrow}
               />
-              {/* The width belongs to «at width» and nowhere else — beside «edge» it is a shadow
-                  value the server refuses anyway, so the control simply is not there. */}
-              {topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (
+              {/* The width belongs to the modes that HAVE one and nowhere else — beside «edge» it is
+                  a shadow value the server refuses anyway, so the control simply is not there. The
+                  list is TOPSTITCH_MODE_HAS_WIDTH; a mode this bundle cannot classify shows no
+                  input, which is the harmless half of that trade (the value keeps travelling). */}
+              {topstitchModeHasWidth(topstitchMode) && (
                 <>
                   <DecimalField
                     name={`operations.${index}.topstitchWidthMm`}
