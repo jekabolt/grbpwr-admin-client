@@ -130,6 +130,23 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
 const STICKER_W = 280;
 const STICKER_MARGIN = 8;
 
+/**
+ * СЛОВА ПРО ТО, ОТКУДА В ШАГ КЛАДУТ ДЕТАЛЬ — на ЭТОЙ поверхности.
+ *
+ * Инлайновые слова говорят про лоток («click a piece in the tray», «drag it here»), и в фулскрине
+ * лгут обе половины: `AssemblyTray` здесь не рендерится вовсе, а источника нативного DnD нет —
+ * полка возит плитки pointer-портом. Человек, следующий написанному, шёл кликать полку и получал
+ * «выбрать и довести панорамой», то есть ровно не то, что ему обещали.
+ *
+ * Механизм, про который тут написано, НОВЫМ НЕ ЗАВОДИТСЯ: режим добора уже работает и кладёт
+ * детали по одной. Слова всего лишь начинают говорить про него.
+ */
+const SHELF_PIECE_SOURCE = {
+  groupHint: 'press ＋ piece, then click them on the shelf above',
+  chipTitle: 'add pieces from the shelf above — click to arm, click again to stop',
+  emptyNote: 'not linked to any piece — press ＋ piece, then click one on the shelf above',
+};
+
 export type AssemblyFullscreenProps = {
   blocks: AssemblyBlock[];
   steps: AssemblyStep[];
@@ -159,7 +176,6 @@ export type AssemblyFullscreenProps = {
    * глушит, и пояс с подтяжками дешевле одного тихого дописывания в выпущенную карточку.
    */
   addInputToOperation: (index: number, key: string) => void;
-  addOperation: () => void;
   /** Потребитель — Ф6в (перестановка шагов в списке). */
   moveOperation: (from: number, to: number) => void;
   /**
@@ -205,8 +221,22 @@ export type AssemblyFullscreenProps = {
    * «ой» сразу после жеста, а не откат всего, что напечатали следом.
    */
   onDockEdit: () => void;
-  /** Строит настоящий `OperationEditor` открытого шага; аргумент — обработчик «＋ piece». */
-  renderDockEditor: (onFlashPieces: () => void) => ReactNode;
+  /**
+   * Строит настоящий `OperationEditor` открытого шага.
+   *
+   * АРГУМЕНТ — ОРГАН ДОБОРА ЦЕЛИКОМ: обработчик «＋ piece» И СЛОВА, которыми он описывается.
+   * Раньше приезжал один обработчик, а слова стояли в редакторе намертво — и звали к ЛОТКУ,
+   * которого в фулскрине нет вовсе (`AssemblyTray` здесь не рендерится). Человек, читавший
+   * написанное, шёл кликать полку и получал «выбрать и довести панорамой». Механизм и его
+   * описание — две половины одного факта, и владелец у них обязан быть один: раздай их по разным
+   * файлам — и слова снова разойдутся с делом, ничего не сломав на глаз.
+   */
+  renderDockEditor: (addPiece: {
+    onArm: () => void;
+    groupHint: string;
+    chipTitle: string;
+    emptyNote: string;
+  }) => ReactNode;
   /** Второй экземпляр `<StepNumberDrift />`: корневой остался под оверлеем и не виден. */
   dockChrome: ReactNode;
   /**
@@ -364,7 +394,6 @@ export function AssemblyFullscreen({
   setPendingCreate,
   dissolveUnit,
   addInputToOperation,
-  addOperation,
   moveOperation,
   railFields,
   railMarked,
@@ -833,16 +862,39 @@ export function AssemblyFullscreen({
     if (addMode && !addModeLive) setAddMode(null);
   }, [addMode, addModeLive]);
 
-  const addStepFromDock = () => {
-    // Гейт на СТОРОНЕ ВЫЗОВА, хотя мутатор гейтован и сам: без него `setDockStep` открыл бы док на
-    // индексе шага, которого заморозка не дала создать.
+  /**
+   * ОРГАН ДОБОРА, отдаваемый редактору шага одним объектом: обработчик И слова про него. Собран
+   * здесь, а не в двух местах рендера, чтобы док и колонка списка не могли разъехаться словами.
+   */
+  const dockAddPiece = useMemo(() => ({ onArm: armAddMode, ...SHELF_PIECE_SOURCE }), [armAddMode]);
+
+  /**
+   * «＋ NEW OPERATION» В ХРОМЕ ЭКРАНА — ДИАЛОГ СОЗДАНИЯ, А НЕ ПУСТОЙ ШАГ.
+   *
+   * До этого единственная ПОДПИСАННАЯ кнопка экрана вела мимо диалога: `addOperation()` дописывал
+   * шаг из `emptyOperation` — с нулём входов, UNKNOWN-типом и UNKNOWN-зоной, то есть заведомо
+   * невалидный. Ровно тот «долг вместо результата», который докстринг `AssemblyCreateDialog`
+   * объявляет побеждённым дефектом. Набрать джоин из нескольких деталей ею было нельзя вовсе, а
+   * все пять путей, которыми это делается (маркиза, накопление кликов, ⌘A, дроп ноды на ноду,
+   * дроп плитки с полки), — жесты, и про них говорит одна шпаргалка «?».
+   *
+   * Состав НЕ подставляется — `inputKeys: []`. Диалог такой приход умеет: отказывает словами
+   * («a step must have at least one input») и предлагает ряд «add:» на ВЕСЬ фронтир, из которого
+   * состав и набирается. Подставить сюда текущее выделение значило бы дать одной кнопке два
+   * разных результата в зависимости от невидимого состояния.
+   *
+   * R1 цел: ни тип, ни зона, ни машина не подставлены. R3 цел: писатель по-прежнему один —
+   * `appendStep` в `operations-field.tsx`, диалог только собирает ему аргументы.
+   *
+   * ДОК ОТКРЫВАТЬ НЕ НАДО. В схеме этот чип живёт в шапке САМОГО дока и недостижим, пока док
+   * закрыт; в списке дока нет вовсе. Созданный шаг покажет `appendStep` — он зовёт `setSelected`,
+   * а редактор на экране смотрит в `selectedIndex`, не в `dockStep`.
+   */
+  const openCreateDialog = () => {
+    // Гейт на СТОРОНЕ ВЫЗОВА, хотя писатель гейтован и сам: диалог, открывшийся над выпущенной
+    // карточкой, кончился бы молчаливым отказом «create» — а орган при заморозке просто снят.
     if (frozen) return;
-    const at = steps.length;
-    addOperation();
-    // В СПИСКЕ ДОК НЕ ОТКРЫВАЕТСЯ: редактор уже стоит в его колонке, и второй экземпляр на те же
-    // имена полей — ровно то, ради чего док перед списком и отступает. Выбор нового шага делает
-    // сам мутатор (`addOperation` зовёт `setSelected`), поэтому списку хватает его одного.
-    if (!listMode) setDockStep(at);
+    setPendingCreate({ inputKeys: [] });
   };
 
   // --- глаголы выделения --------------------------------------------------------------------------
@@ -1532,19 +1584,24 @@ export function AssemblyFullscreen({
                       onMoveOperation={moveOperation}
                       readPieceDrag={readPieceDrag}
                     />
-                    {/* «＋ OPERATION» ОБЯЗАТЕЛЬНА ИМЕННО ЗДЕСЬ. В схеме она стоит в шапке дока, а
-                        в списке док закрыт — и без этой кнопки карточка с нулём шагов (а список и
-                        есть её дефолт) не давала бы завести первый шаг вовсе. Настоящая
+                    {/* «＋ NEW OPERATION» ОБЯЗАТЕЛЬНА ИМЕННО ЗДЕСЬ. В схеме она стоит в шапке
+                        дока, а в списке док закрыт — и без этой кнопки карточка с нулём шагов (а
+                        список и есть её дефолт) не давала бы завести первый шаг вовсе. Настоящая
                         `<button>`, потому что она ПИШЕТ; при заморозке её нет, как нет и чипа в
-                        доке. */}
+                        доке.
+                        СЛОВО «NEW» — НЕ УКРАШЕНИЕ: «+ operation» носит ещё и ховер-чип на боксе
+                        узла (`assembly-node-views.tsx`), и делает он другое — операцию НА ЭТОМ
+                        узле, с ним же в составе. Два органа под одной надписью читаются как
+                        один. */}
                     {!frozen && (
                       <button
                         type='button'
-                        onClick={addStepFromDock}
+                        onClick={openCreateDialog}
+                        title='a new step from scratch — pick what it joins in the dialog'
                         className='mt-0.5 w-full shrink-0 border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                       >
                         <Text size='control' variant='uppercase' tracking='label' component='span'>
-                          + operation
+                          + new operation
                         </Text>
                       </button>
                     )}
@@ -1571,7 +1628,7 @@ export function AssemblyFullscreen({
                         НЕСУЩЕСТВУЮЩЕЙ строки — getValues отдаёт undefined, а первый же ввод
                         создал бы `operations.0` в значениях формы МИМО field array. */}
                     {selectedIndex >= 0 && selectedIndex < steps.length ? (
-                      renderDockEditor(armAddMode)
+                      renderDockEditor(dockAddPiece)
                     ) : (
                       <Text size='micro' variant='label'>
                         {emptySequenceNote}
@@ -1672,10 +1729,10 @@ export function AssemblyFullscreen({
                   {!frozen && (
                     <Chip
                       dashed
-                      onClick={addStepFromDock}
-                      title='append an empty step and open it here'
+                      onClick={openCreateDialog}
+                      title='a new step from scratch — pick what it joins in the dialog'
                     >
-                      + operation
+                      + new operation
                     </Chip>
                   )}
                 </span>
@@ -1697,7 +1754,7 @@ export function AssemblyFullscreen({
                   же ввод создал бы `operations.0` в значениях формы МИМО field array. */}
               <fieldset disabled={frozen} className='min-h-0 min-w-0 flex-1 overflow-y-auto p-2'>
                 {!dockOpen ? null : selectedIndex >= 0 && selectedIndex < steps.length ? (
-                  renderDockEditor(armAddMode)
+                  renderDockEditor(dockAddPiece)
                 ) : (
                   <Text size='micro' variant='label'>
                     {emptySequenceNote}

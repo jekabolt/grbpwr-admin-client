@@ -1385,6 +1385,22 @@ function StitchLengthMirror({
   );
 }
 
+/**
+ * СЛОВА ПРО ТО, ОТКУДА В ШАГ КЛАДУТ ДЕТАЛЬ — на ИНЛАЙНОВОЙ вкладке. Ровно те, что стояли в
+ * редакторе намертво.
+ *
+ * Теперь их приносит ПОВЕРХНОСТЬ, потому что механизм у поверхностей разный: здесь лоток прямо над
+ * списком (клик по чипу кладёт деталь) и нативный DnD (чип можно бросить в редактор), а в
+ * фулскрине лоток не рендерится вовсе и источника нативного драга нет — там полка и режим добора.
+ * Одни и те же слова на обеих поверхностях означали бы, что на одной из них они врут; выбирать,
+ * на какой именно, не пришлось: врали в фулскрине, и человек шёл кликать полку.
+ */
+const TRAY_PIECE_SOURCE = {
+  groupHint: 'click a piece in the tray to add it',
+  chipTitle: 'pick a piece from the tray above the list',
+  emptyNote: 'not linked to any piece — click one in the tray above, or drag it here',
+};
+
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
 // The whole sewing spec for ONE step. Remounted (keyed on the field id) whenever the selection
 // moves, so the "skip the first run" guards below start clean and selecting a step never dirties
@@ -1401,6 +1417,7 @@ function OperationEditor({
   onInsertAfter,
   onRemove,
   onFlashPieces,
+  pieceSource,
   onActiveBomChange,
   onDropPiece,
   mediaUrls,
@@ -1424,6 +1441,14 @@ function OperationEditor({
   onInsertAfter: () => void;
   onRemove: () => void;
   onFlashPieces: () => void;
+  /**
+   * ТРИ НАДПИСИ ПРО ИСТОЧНИК ДЕТАЛЕЙ — ОТ ПОВЕРХНОСТИ, а не намертво в редакторе. Редактор один на
+   * две поверхности, а орган, которым в шаг кладут деталь, у них разный: инлайн — лоток над
+   * списком, фулскрин — полка и режим добора. Обработчик «＋ piece» поверхность решала и раньше
+   * (`onFlashPieces`), а слова оставались инлайновыми — и в фулскрине звали к лотку, которого там
+   * нет. Слова и механизм ездят вместе: разъехаться они могут только молча.
+   */
+  pieceSource: { groupHint: string; chipTitle: string; emptyNote: string };
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
   /** Адреса операционных снимков; форма возит только media_id. */
@@ -2087,7 +2112,7 @@ function OperationEditor({
       <GroupLabel
         action={
           <Text size='micro' variant='label' component='span'>
-            click a piece in the tray to add it
+            {pieceSource.groupHint}
           </Text>
         }
       >
@@ -2153,13 +2178,13 @@ function OperationEditor({
             ▣ {k}
           </Chip>
         ))}
-        <Chip dashed onClick={onFlashPieces} title='pick a piece from the tray above the list'>
+        <Chip dashed onClick={onFlashPieces} title={pieceSource.chipTitle}>
           ＋ piece
         </Chip>
       </ChipRow>
       {chosenPieces.length === 0 && danglingPieces.length === 0 && chosenUnits.length === 0 && (
         <Text size='micro' variant='label' className='mt-1'>
-          not linked to any piece — click one in the tray above, or drag it here
+          {pieceSource.emptyNote}
         </Text>
       )}
 
@@ -3459,10 +3484,19 @@ export function OperationsField({
     }, 120);
   };
 
+  /**
+   * «+ operation» ВКЛАДКИ: пустой шаг и редактор под ним.
+   *
+   * ТОЛЬКО ЭТА ПОВЕРХНОСТЬ. Фулскрин ту же надпись носил, но там пустой шаг оказывался тупиком:
+   * лотка нет, состав набрать нечем, и владелец, нажавший единственную подписанную кнопку, не мог
+   * сшить несколько деталей вовсе — его «+ new operation» теперь открывает диалог создания.
+   * Здесь пустой шаг тупиком не является: лоток стоит прямо над списком, клик по чипу кладёт
+   * деталь в открытый шаг, а редактор — тут же под рельсом.
+   */
   const addOperation = () => {
     // Тот же гейт и по той же причине: сегодня кнопку «+ operation» душит внешний fieldset, но
-    // мутатор про заморозку не знает, и любой вызыватель ВНЕ формы (фулскрин в портале) дописал бы
-    // шаг в выпущенную карточку. Гейт стоит у мутатора, а не у каждой кнопки.
+    // мутатор про заморозку не знает, а вызыватель ВНЕ формы дописал бы шаг в выпущенную
+    // карточку. Гейт стоит у мутатора, а не у каждой кнопки.
     if (frozen) return;
     // (6/9) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
     // указывала бы на шаг, стоящий уже не там.
@@ -4012,6 +4046,9 @@ export function OperationsField({
                 onInsertAfter={() => insertAfter(selectedIndex)}
                 onRemove={() => removeOperation(selectedIndex)}
                 onFlashPieces={flashPieces}
+                // Слова про источник деталей — ИНЛАЙНОВЫЕ: лоток стоит прямо над списком, и
+                // «click a piece in the tray» здесь правда.
+                pieceSource={TRAY_PIECE_SOURCE}
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearLastMutation}
                 onDropPiece={addInputToOperation}
@@ -4042,7 +4079,10 @@ export function OperationsField({
           setPendingCreate={setPendingCreate}
           dissolveUnit={dissolveUnit}
           addInputToOperation={addInputToOperation}
-          addOperation={addOperation}
+          // `addOperation` ФУЛСКРИНУ БОЛЬШЕ НЕ ОТДАЁТСЯ. Его «+ new operation» ведёт в диалог
+          // создания (`setPendingCreate`), а не дописывает пустой шаг: там нет ни лотка, ни
+          // способа набрать состав руками, и пустой шаг с нулём входов оказывался тупиком. Здесь,
+          // на вкладке, кнопка остаётся прежней — лоток стоит прямо над списком.
           moveOperation={moveOperation}
           // РЕЛЬС РЕЖИМА СПИСКА (Ф6в) — ТЕ ЖЕ ДАННЫЕ И ТЕ ЖЕ КОЛБЭКИ, ЧТО У ИНЛАЙНОВОГО ниже, и
           // приезжают они пропами по той же причине, что и всё остальное: `useFieldArray` живёт в
@@ -4069,9 +4109,11 @@ export function OperationsField({
           // БИЛДЕР, А НЕ ГОТОВЫЙ ЭЛЕМЕНТ. `OperationEditor` — приватная функция этого файла с
           // полутора десятками пропов; вытаскивать её наружу ради фулскрина значило бы затеять
           // незапланированный рефакторинг там, где он опаснее всего. Билдер замыкает её со всеми
-          // пропами прямо здесь, а обработчик «＋ piece» решает ФУЛСКРИН и передаёт аргументом:
-          // в Ф3 это снекбар-заглушка, в Ф5в — арм режима добора, и этот файл не тронется.
-          renderDockEditor={(onFlashPieces) =>
+          // пропами прямо здесь, а ОРГАН ДОБОРА решает ФУЛСКРИН и передаёт аргументом: в Ф3 это
+          // была снекбар-заглушка, в Ф5в — арм режима добора, и этот файл не тронулся. Теперь тем
+          // же аргументом приезжают и СЛОВА про этот орган: инлайновые звали к лотку, которого в
+          // фулскрине нет вовсе.
+          renderDockEditor={(addPiece) =>
             selectedIndex >= 0 ? (
               <OperationEditor
                 // ТОТ ЖЕ KEY-КОНТРАКТ, что у инлайна, и упрощать его нельзя: оба «пропусти первый
@@ -4090,7 +4132,10 @@ export function OperationsField({
                 colorwayArticles={colorwayArticles}
                 onInsertAfter={() => insertAfter(selectedIndex)}
                 onRemove={() => removeOperation(selectedIndex)}
-                onFlashPieces={onFlashPieces}
+                onFlashPieces={addPiece.onArm}
+                // Слова — ОТТУДА ЖЕ, ОТКУДА ОБРАБОТЧИК. Иначе редактор фулскрина продолжал бы
+                // звать к лотку, а вооружал бы полку.
+                pieceSource={addPiece}
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearLastMutation}
                 onDropPiece={addInputToOperation}
