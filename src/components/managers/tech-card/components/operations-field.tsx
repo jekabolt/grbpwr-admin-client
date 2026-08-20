@@ -778,11 +778,22 @@ function ProducesBlock({
   inputKeys,
   pieces,
   assembly,
+  onEdit,
 }: {
   index: number;
   inputKeys: string[];
   pieces: PieceRef[];
   assembly: AssemblyView;
+  /**
+   * Шаг ИЗМЕНЁН кнопкой этого блока — гасит формовую историю отмены.
+   *
+   * Восьмая точка сброса — `focusin` на доке, то есть прикрытие РАЗМЕТКОЙ, а не контракт. В Chrome
+   * оно случайно работает: `mousedown` фокусирует кнопку, и `focusin` успевает до `click`. **В
+   * Safari нативная кнопка по клику фокуса не получает вовсе**, и сценарий «создал шаг → нажал
+   * здесь „make it a unit“ → ⌘Z» снёс бы шаг вместе со свежей разметкой. Тот же довод, которым
+   * это чинили у писателей полосы снимков: писатель объявляет правку сам.
+   */
+  onEdit?: () => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
@@ -837,6 +848,7 @@ function ProducesBlock({
     // «снял → передумал → объявил заново» уходил бы в отказ «снял и одновременно прислал узлы»,
     // а снять флаг руками нечем.
     setValue('assemblyCleared', false, { shouldDirty: true });
+    onEdit?.();
   };
 
   return (
@@ -875,6 +887,7 @@ function ProducesBlock({
               onClick={() => {
                 setValue(`operations.${index}.outputUnitKey`, '', { shouldDirty: true });
                 setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
+                onEdit?.();
               }}
               title='the step stops assembling the unit; its inputs return to the table for the next steps'
             >
@@ -2236,6 +2249,7 @@ function OperationEditor({
         inputKeys={selectedPieceKeys}
         pieces={pieces}
         assembly={assembly}
+        onEdit={onEdit}
       />
 
       {/* ФОТО УЗЛА С УКАЗАНИЯМИ. Стоит рядом с материалами, а не в аккордеоне отклонений:
