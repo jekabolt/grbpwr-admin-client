@@ -525,13 +525,26 @@ head('структура — расчёт живёт в одном экземп�
     const inline = src('src/components/managers/tech-card/components/assembly-schematic.tsx');
     const writers = (inline.match(/useEffect\(\(\) => \{\s*setPicked\(/g) ?? []).length;
     is('инлайн: выбор правит ровно один эффект', writers, 1);
-    const remap = inline.indexOf('renamePicked(cur');
-    const prune = inline.indexOf('res.frontier.includes(k)');
+    // ПИН СПРАШИВАЕТ ПРО ИНВАРИАНТ, А НЕ ПРО НАПИСАНИЕ. Первая редакция грепала дословное
+    // `res.frontier.includes(k)` — и Т10, законно заменив фронтир-фильтр на вопрос к раскладке,
+    // уронила пробу, ничего не сломав. Хуже: мутация «вернуть фронтир-фильтр» делала пробу
+    // ЗЕЛЁНОЙ, то есть единственная проверка этого куска поощряла откат. Теперь берётся тело
+    // самого апдейтера, и в нём спрашивается порядок двух действий — чем именно выражена чистка,
+    // проба не знает и знать не должна.
+    const at = inline.indexOf('setPicked((cur) => {');
+    const tail = inline.indexOf('}, [', at);
+    const body = inline.slice(at, tail);
+    const remap = body.indexOf('renamePicked(');
+    const prune = body.indexOf('.filter(');
     yes('инлайн: перенос стоит выше чистки — в том же апдейтере', remap > 0 && remap < prune);
     // ВЕСТЬ СЪЕДАЕТСЯ: без обнуления рефа чистка применяла бы давнее переименование на каждом
     // последующем свипе, и выбор ноды, заведённой со старым кодом, молча уезжал бы на новый.
     yes('инлайн: весть съедается, а не читается заново', /pendingRename\.current = null;/.test(inline));
-    yes('инлайн: и весть, и свип держат эффект', /\}, \[res, renamedUnit\]\);/.test(inline));
+    // Деп-массив спрашивается СОСТАВОМ, а не строкой: надмножество законно (Т10 дописала туда
+    // раскладку), а вот пропажа любого из двух означала бы, что эффект не проснётся на своём
+    // событии.
+    const deps = inline.slice(tail + 3, inline.indexOf(']', tail) + 1);
+    yes('инлайн: и весть, и свип держат эффект', /\bres\b/.test(deps) && /\brenamedUnit\b/.test(deps));
   }
 
   const hist = src('scripts/last-mutation-probe.mjs');
