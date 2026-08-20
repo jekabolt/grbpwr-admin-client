@@ -839,11 +839,15 @@ function useUnitCodeAct({
   // Через `getValues`, а не подпиской: редактор и так перерисовывается на каждую правку операций
   // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
   const plan = pending ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey) : null;
-  const dissolving = pending && (draft ?? '').trim() === '';
+  // ТОТ ЖЕ КЛЮЧ, КОТОРЫЙ ЛЯЖЕТ В ФОРМУ: вердикт нормализует набранное (подрезает), и подсказка
+  // обязана называть результат, а не черновик. Хвостовой пробел невидим — подсказка, печатающая
+  // «→ BODY⎵», читается как «→ BODY», то есть обещает не то, что произойдёт.
+  const typed = (draft ?? '').trim();
+  const dissolving = pending && typed === '';
   // ДЛИНА ГОВОРИТСЯ ПРЯМО ВО ВРЕМЯ НАБОРА, а не после Enter: тем же счётом, каким её посчитает
   // мутатор, — второй счёт разошёлся бы с первым молча. Отказ мутатора при этом остаётся: слова
   // под полем гаснут вместе с черновиком, а жест обязан отказать и мимо этого поля.
-  const tooLong = pending && !dissolving ? unitKeyLengthRefusal(draft ?? '') : null;
+  const tooLong = pending && !dissolving ? unitKeyLengthRefusal(typed) : null;
 
   // ЖИВОЙ НАБОР ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ ЭКРАНА — как драг ноды, маркиза и драг плитки с полки, и
   // слушатель по той же причине window-капчурный. Radix ловит Escape на ДОКУМЕНТЕ в фазе
@@ -946,10 +950,12 @@ function useUnitCodeAct({
           for the next steps
         </Text>
       )}
-      {refusal === null && tooLong === null && pending && !dissolving && (
+      {/* `typed !== outputKey` — набрали тот же код, только с пробелами: вердикт ответит `noop`,
+          и обещать «переписано в N шагах» было бы обещанием жеста, которого не будет. */}
+      {refusal === null && tooLong === null && pending && !dissolving && typed !== outputKey && (
         <>
           <Text size='micro' variant='label' className='mt-1'>
-            press Enter: ▣ {outputKey} → {draft} is rewritten in {plan?.steps ?? 0}{' '}
+            press Enter: ▣ {outputKey} → {typed} is rewritten in {plan?.steps ?? 0}{' '}
             {plan?.steps === 1 ? 'step' : 'steps'} at once — until then nothing has moved
           </Text>
           {/* НЕПЕРЕПИСЫВАЕМОЕ НАЗЫВАЕТСЯ ДО ПОДТВЕРЖДЕНИЯ, а не после. Код узла печатается на
@@ -3973,7 +3979,10 @@ export function OperationsField({
       dissolveUnit(stepIndex);
       return { ok: true };
     }
-    const { from, plan } = act;
+    // `to`, А НЕ `next`: вердикт отдаёт ключ НОРМАЛИЗОВАННЫМ (подрезанным), потому что подрезанным
+    // он и уедет на провод. Записать сюда набранное значило бы развести тождество ключа на экране
+    // и тождество ключа на сервере — см. `unitRenameAct`.
+    const { from, to, plan } = act;
     // АДРЕСА СВЕРЯЮТСЯ ДО ПЕРВОЙ ЗАПИСИ. Без `fieldId` записи истории нет, а жест без отмены
     // хуже отказа: пусть лучше не состоится ничего, чем состоится неотменяемое.
     const outputs: RenameOutputSite[] = [];
@@ -3989,13 +3998,13 @@ export function OperationsField({
       for (const at of s.at) inputs.push({ index: s.index, fieldId: id, at });
     }
 
-    rewriteUnitKeySites({ outputs, inputs }, next);
+    rewriteUnitKeySites({ outputs, inputs }, to);
     // РУЧНАЯ ПОЗИЦИЯ НОДЫ ЕДЕТ ВМЕСТЕ С КЛЮЧОМ, и едет ДО записи истории: `restore` отдаёт
     // обратную пачку по своему синхронному снимку оверрайдов, и другой возможности узнать «где
     // нода стояла до жеста» у записи нет. По тому же снимку (`peek`, а не `pos` из рендера)
     // считается и прямая пачка — иначе половины разошлись бы на кадр. Пустая пачка законна: ноду
     // могли ни разу не двигать, и выдумывать ей позицию значит приколотить её навсегда.
-    const posForward = renamePosEdits(prefs.peek(), from, next);
+    const posForward = renamePosEdits(prefs.peek(), from, to);
     const posBack = prefs.restore(posForward);
     setHistory(
       record(history.current, {
@@ -4003,22 +4012,22 @@ export function OperationsField({
         index: stepIndex,
         fieldId: fields[stepIndex]?.id ?? '',
         from,
-        to: next,
+        to,
         outputs,
         inputs,
         posBack,
         posForward,
-        label: renameLabel(from, next),
+        label: renameLabel(from, to),
       }),
     );
-    setRenamedUnit({ from, to: next });
+    setRenamedUnit({ from, to });
     // Жест подтверждён уходом фокуса — и этот же уход сейчас дёрнет восьмую точку сброса. Щит
     // ровно на один такт: иначе запись, только что легшая, умрёт до первого ⌘Z.
     settleGesture();
     // УСПЕХ ПРОИЗНОСИТСЯ, и число в нём считает ВСЕ ТРИ ВИДА МЕСТ: перенумерация шагов не молчит
     // (R9), а переименование, переписавшее полкарточки, — тем более.
     showMessage(
-      `renamed ${from} → ${next} in ${plan.steps} ${plan.steps === 1 ? 'step' : 'steps'}`,
+      `renamed ${from} → ${to} in ${plan.steps} ${plan.steps === 1 ? 'step' : 'steps'}`,
       'success',
     );
     return { ok: true };

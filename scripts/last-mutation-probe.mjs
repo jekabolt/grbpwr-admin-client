@@ -627,17 +627,20 @@ function stand(initialIds = [], pieces = []) {
         said.push(act.why);
         return { ok: false, why: act.why };
       }
-      const { from, plan } = act;
+      // `to`, А НЕ `next`: ключ нормализует вердикт, и модель обязана писать ровно то, что пишет
+      // мутатор. Взять здесь набранное значило бы завести ВТОРУЮ правду о ключе — ту самую, ради
+      // изведения которой копия расчёта и была снята.
+      const { from, to, plan } = act;
       const outputs = plan.outputs.map((i) => ({ index: i, fieldId: fields[i].id }));
       const inputs = [];
       for (const s of plan.inputs) {
         for (const at of s.at) inputs.push({ index: s.index, fieldId: fields[s.index].id, at });
       }
-      api.write({ outputs, inputs }, next);
+      api.write({ outputs, inputs }, to);
       // РАСКЛАДОЧНАЯ ПОЛОВИНА ТОГО ЖЕ ЖЕСТА. Оверрайды ключуются кодом узла — тем самым, который
       // жест и переписывает; не перенеси его, и нода прыгнет в авто-раскладку, а мусор останется
       // под мёртвым ключом. Обратная пачка считается ДО применения и по тому же снимку.
-      const posForward = renamePosEdits(pos, from, next);
+      const posForward = renamePosEdits(pos, from, to);
       const posBack = inverseEdits(pos, posForward);
       pos = applyEdits(pos, posForward);
       hist = record(hist, {
@@ -645,14 +648,14 @@ function stand(initialIds = [], pieces = []) {
         index,
         fieldId: fields[index].id,
         from,
-        to: next,
+        to,
         outputs,
         inputs,
         posBack,
         posForward,
-        label: renameLabel(from, next),
+        label: renameLabel(from, to),
       });
-      said.push(`renamed ${from} → ${next} in ${plan.steps} steps`);
+      said.push(`renamed ${from} → ${to} in ${plan.steps} steps`);
       return { ok: true };
     },
 

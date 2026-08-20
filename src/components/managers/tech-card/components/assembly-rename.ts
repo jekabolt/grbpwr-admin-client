@@ -55,7 +55,9 @@ export type UnitRenamePlan = {
  * оставило бы их со старым кодом, то есть починка ломала бы.
  *
  * СРАВНЕНИЕ ПОБАЙТНОЕ: никаких `trim` и `toLowerCase`. «SHELL» и «Shell» — два разных узла, ровно
- * как в колонке `utf8mb4_bin`.
+ * как в колонке `utf8mb4_bin`. Подрезка живёт ВЫШЕ, в `unitRenameAct`, и ровно одна: сюда ключ
+ * приходит уже нормализованным, а искать надо и по НЕнормализованному старому — на карточке, где
+ * такой ключ успели завести, места с ним обязаны найтись и починиться.
  */
 export function planUnitRename(ops: UnitKeyRow[], from: string): UnitRenamePlan {
   const outputs: number[] = [];
@@ -81,6 +83,10 @@ export function planUnitRename(ops: UnitKeyRow[], from: string): UnitRenamePlan 
  * вдвое разное: 64 набранных символа это 128 байт, и сервер отвечает `too_long` уже ПОСЛЕ того,
  * как интерфейс разрешил их набрать. Отказ, прилетевший с провода на давно набранное поле,
  * читается как поломка, а не как правило.
+ *
+ * МЕРЯЕТСЯ КЛЮЧ, КАКИМ ОН УЕДЕТ, то есть уже подрезанный: сервер считает то, что получил, а
+ * получает он `(o.outputUnitKey ?? '').trim()`. Мерить набранное с пробелами значило бы отказывать
+ * там, где сервер бы принял, — тот же разлад, только в другую сторону.
  */
 export const UNIT_KEY_MAX_BYTES = 64;
 
@@ -120,7 +126,11 @@ export type UnitRenameAct =
   | { kind: 'noop' }
   | { kind: 'dissolve' }
   | { kind: 'refuse'; why: string }
-  | { kind: 'rewrite'; from: string; plan: UnitRenamePlan };
+  /**
+   * `to` — ключ, каким он ЛЯЖЕТ В ФОРМУ, а не каким его набрали: подрезанный. Вызывающий обязан
+   * писать именно его, иначе клиент и сервер разойдутся тождеством ключа (см. `unitRenameAct`).
+   */
+  | { kind: 'rewrite'; from: string; to: string; plan: UnitRenamePlan };
 
 /**
  * ВСЕ ОТКАЗЫ ПЕРЕИМЕНОВАНИЯ В ОДНОМ МЕСТЕ И ДО ЕДИНОЙ ЗАПИСИ.
@@ -149,42 +159,51 @@ export function unitRenameAct(
   if (!from) {
     return { kind: 'refuse', why: 'this step assembles nothing — there is no code to rename' };
   }
-  if (next === from) return { kind: 'noop' };
-  // ОДИН `trim` НА ВЕСЬ МОДУЛЬ, и он не про идентичность: движок читает выход подрезанным, значит
-  // ключ из одних пробелов — это ОТСУТСТВИЕ ключа. Сравнения ключей ниже остаются побайтными.
-  if (next.trim() === '') return { kind: 'dissolve' };
+  // ПОДРЕЗКА ОДИН РАЗ И ЗДЕСЬ — потому что подрезает КЛИЕНТ ЖЕ, только позже: на провод ключ уезжает
+  // через `(o.outputUnitKey ?? '').trim()` (`schema.ts`). Пока набранное не нормализовано прямо тут,
+  // у ключа ДВА ТОЖДЕСТВА — побайтное на экране и подрезанное на проводе, — и расходятся они молча.
+  // Замерено стендом: «BODY⎵» на карточке, где BODY уже производится, проходит проверку занятости
+  // (побайтно это другой ключ), подсказка печатает «▣ SHELL → BODY», то есть ровно тот код, который
+  // только что был бы отвергнут, свип клиента считает карточку целой — а на сервер уезжают ДВА
+  // производителя одного узла и вход, ссылающийся на собственный выход. Правило 2 отвергает
+  // сохранение, и причину человек ищет где угодно, только не в невидимом пробеле.
+  //
+  // Сравнения НИЖЕ остаются побайтными: нормализация — это не «мягкое сравнение». «SHELL» и «Shell»
+  // по-прежнему два разных узла, ровно как в колонке `utf8mb4_bin`.
+  const to = next.trim();
+  if (to === from) return { kind: 'noop' };
+  // Ключ из одних пробелов — это ОТСУТСТВИЕ ключа, то есть растворение, а не узел с пустым именем.
+  if (to === '') return { kind: 'dissolve' };
 
   // ГИГИЕНА ДО ГРАФА — тем же порядком, каким проверяет сервер: «код длиннее 64 байт» полезнее,
   // чем «этот код уже занят», полученное из того же набора.
-  const tooLong = unitKeyLengthRefusal(next);
+  const tooLong = unitKeyLengthRefusal(to);
   if (tooLong) return { kind: 'refuse', why: tooLong };
 
-  const piece = pieces.find((p) => p.lineKey === next);
+  const piece = pieces.find((p) => p.lineKey === to);
   if (piece) {
     return {
       kind: 'refuse',
-      why: `the unit key “${next}” is taken by piece “${piece.name || next}”: pieces and units share one namespace`,
+      why: `the unit key “${to}” is taken by piece “${piece.name || to}”: pieces and units share one namespace`,
     };
   }
-  const taken = ops.findIndex((o) => ((o?.outputUnitKey ?? '') as string) === next);
+  const taken = ops.findIndex((o) => ((o?.outputUnitKey ?? '') as string) === to);
   if (taken >= 0) {
     return {
       kind: 'refuse',
-      why: `unit “${next}” is already produced by step ${(taken + 1) * 10} — pick another code, or dissolve that unit first`,
+      why: `unit “${to}” is already produced by step ${(taken + 1) * 10} — pick another code, or dissolve that unit first`,
     };
   }
 
   const plan = planUnitRename(ops, from);
-  const clash = plan.inputs.find((s) =>
-    ((ops[s.index]?.inputKeys ?? []) as string[]).includes(next),
-  );
+  const clash = plan.inputs.find((s) => ((ops[s.index]?.inputKeys ?? []) as string[]).includes(to));
   if (clash) {
     return {
       kind: 'refuse',
-      why: `step ${(clash.index + 1) * 10} already takes “${next}” as an input: renaming “${from}” would put the same input there twice — drop one of them first`,
+      why: `step ${(clash.index + 1) * 10} already takes “${to}” as an input: renaming “${from}” would put the same input there twice — drop one of them first`,
     };
   }
-  return { kind: 'rewrite', from, plan };
+  return { kind: 'rewrite', from, to, plan };
 }
 
 /**
@@ -206,8 +225,11 @@ export function unitRenameAct(
  * Новый ключ к этому моменту гарантированно не принадлежит живой ноде: `unitRenameAct` отказывает
  * и на занятый узел, и на деталь, а пустой ключ уводит в растворение.
  *
- * ПОРЯДОК ПРАВОК НЕСУЩИЙ: снятие идёт первым. Обратный порядок на карточке, где под новым ключом
- * лежал чужой оверрайд, записал бы точку и тут же её удалил.
+ * ПОРЯДОК ПРАВОК В ПАЧКЕ НИЧЕГО НЕ РЕШАЕТ, и говорить обратное — вредно: правки адресуют РАЗНЫЕ
+ * ключи (`to !== from` гарантирован вердиктом — равные дают `noop`), а `applyEdits` пишет и снимает
+ * по ключу. Снятие стоит первым только затем, чтобы пачка читалась как рассказ «отсюда — сюда».
+ * Единственный порядок, который тут действительно несущий, — снаружи: обратную пачку обязан
+ * посчитать `restore` по снимку ДО применения, иначе отмена вернёт уже переехавшее состояние.
  */
 export function renamePosEdits(pos: PosOverrides, from: string, to: string): PosEdit[] {
   const at = pos[from];

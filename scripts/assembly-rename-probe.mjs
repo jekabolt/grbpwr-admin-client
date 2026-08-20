@@ -146,6 +146,15 @@ head('план — ТРИ вида мест, а не два');
   is('и шагов нет', p.steps, 0);
 }
 {
+  // ПРОБЕЛ — ТОЖЕ БАЙТ. Планировщик ищет ключ БУКВАЛЬНО, без подрезки: подрезка живёт этажом выше
+  // (`unitRenameAct`), и если она протечёт сюда, «SHELL⎵» начнёт находить места живого «SHELL» —
+  // то есть чинить не тот узел. Мутационный замер этой пробы ловил ровно эту дыру.
+  const p = planUnitRename(CHAIN, 'SHELL ');
+  is('хвостовой пробел — другой ключ, мест нет', p, { outputs: [], inputs: [], steps: 0 });
+  const q = planUnitRename([op([' SHELL'], 'X'), op(['SHELL'], 'Y')], 'SHELL');
+  is('и ведущий пробел во входе тоже не совпал', q.inputs, [{ index: 1, at: [0] }]);
+}
+{
   const p = planUnitRename([{}, { inputKeys: undefined }, { outputUnitKey: undefined }], 'SHELL');
   is('пустые строки формы плана не рождают', p, { outputs: [], inputs: [], steps: 0 });
 }
@@ -163,6 +172,7 @@ head('вердикт — четыре исхода, и ни один не мол
   const a = unitRenameAct(CHAIN, 0, 'CARCASS', PIECES);
   is('успех', a.kind, 'rewrite');
   is('старый ключ назван вердиктом, а не вызывающим', a.from, 'SHELL');
+  is('и новый — тоже вердиктом', a.to, 'CARCASS');
   is('и план тот же, что считает планировщик', a.plan, planUnitRename(CHAIN, 'SHELL'));
 }
 is('побайтно то же самое — жеста не было', unitRenameAct(CHAIN, 0, 'SHELL', PIECES).kind, 'noop');
@@ -174,6 +184,36 @@ is('пробелы — тоже растворение', unitRenameAct(CHAIN, 0,
   const a = unitRenameAct([op(['FRONT'], '')], 0, 'SHELL', PIECES);
   is('шагу без узла отказано', a.kind, 'refuse');
   yes('и отказ назвал причину', /assembles nothing/.test(a.why));
+}
+
+head('ключ нормализуется РОВНО ЗДЕСЬ — потому что подрезанным он и уедет на провод');
+{
+  // САМАЯ ТИХАЯ ИЗ ВСЕХ: «BODY⎵» побайтно не равен живому «BODY», проверка занятости его
+  // пропускает, свип клиента считает карточку целой — а на провод ключ уезжает подрезанным
+  // (`schema.ts`), и сервер видит ДВА производителя BODY. Правило 2 отвергает сохранение, а
+  // невидимый пробел человек не найдёт никогда.
+  const a = unitRenameAct(CHAIN, 0, 'BODY ', PIECES);
+  is('хвостовой пробел не проносит ключ мимо занятости', a.kind, 'refuse');
+  yes('и отказ — про занятый узел', /already produced by step 20/.test(a.why));
+}
+{
+  const a = unitRenameAct(CHAIN, 0, '  CARCASS  ', PIECES);
+  is('обвязка пробелами не мешает жесту', a.kind, 'rewrite');
+  is('НО В ФОРМУ ЛЯЖЕТ ПОДРЕЗАННОЕ', a.to, 'CARCASS');
+}
+is('тот же код с пробелами — жеста нет', unitRenameAct(CHAIN, 0, ' SHELL ', PIECES).kind, 'noop');
+{
+  // Длина меряется по тому, что УЕДЕТ: 64 байта плюс пробелы сервер примет, потому что подрежет.
+  const a = unitRenameAct(CHAIN, 0, `${'A'.repeat(64)}   `, PIECES);
+  is('пробелы в потолок не считаются', a.kind, 'rewrite');
+  is('и в форму ляжет ровно потолок', a.to.length, 64);
+}
+{
+  // Деталь и дубль входа спрашиваются тоже подрезанным ключом, а не набранным.
+  is('деталь ловится и с пробелами', unitRenameAct(CHAIN, 0, 'FRONT ', PIECES).kind, 'refuse');
+  const a = unitRenameAct(DANGLE, 0, ' LOST', PIECES);
+  is('дубль во входах — тоже', a.kind, 'refuse');
+  yes('и назван тем же шагом', /step 20/.test(a.why));
 }
 
 head('три коллизии, а не одна');
