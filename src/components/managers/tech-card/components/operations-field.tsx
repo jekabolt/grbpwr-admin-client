@@ -3732,15 +3732,12 @@ export function OperationsField({
   //
   // Закрытий у диалога три (cancel/Esc/✕, «create» и гонка RELEASE), и все три проходят через
   // `setPendingCreate(null)` в этом файле — сторожить приходится ровно одно состояние.
-  const hadPendingCreate = useRef(false);
-  useEffect(() => {
-    const closed = hadPendingCreate.current && pendingCreate === null;
-    hadPendingCreate.current = pendingCreate !== null;
-    if (!closed) return;
-    // В инлайне фулскрина нет, `restoreScreenFocus` это видит и не делает ничего: там роутера
-    // клавиш нет, и фокус в `body` ничего не ломает.
-    requestAnimationFrame(() => restoreScreenFocus());
-  }, [pendingCreate]);
+  // Возврат фокуса после диалога создания делает САМ ДИАЛОГ, пропом `onCloseAutoFocus` — Radix
+  // зовёт его ровно тогда, когда готов отдать фокус. Здесь стоял эффект на закрытии `pendingCreate`
+  // с откладыванием на кадр, и кадр был не осторожностью, а необходимостью: эффект бежит раньше,
+  // чем `Presence` снимает портал, и в тот момент кнопка «cancel» ещё жива и держит фокус. Возврат,
+  // зависящий от такта рендера, — это возврат, который однажды перестанет попадать; проп попадает
+  // всегда.
 
   // ДЕСЯТАЯ ТОЧКА СБРОСА (ревью Ф4) — ГРАНИЦА ВИЗИТА ФУЛСКРИНА, обе стороны. Девять точек стерегут
   // массив и правки внутри фулскрина, но ⌘Z и чип живут ТОЛЬКО в нём, а запись — здесь, и она
@@ -4127,6 +4124,7 @@ export function OperationsField({
         unitKeys={new Set(grouping.res.units.keys())}
         pieceKeys={new Set(pieces.map((p) => p.lineKey))}
         labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+        onCloseAutoFocus={restoreScreenFocus}
       />
 
       <GenerateOperationsPanel

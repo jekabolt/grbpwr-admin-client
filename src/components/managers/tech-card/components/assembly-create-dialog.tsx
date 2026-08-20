@@ -68,6 +68,7 @@ export function AssemblyCreateDialog({
   unitKeys,
   pieceKeys,
   labelOf,
+  onCloseAutoFocus,
 }: {
   prefill: CreatePrefill | null;
   onClose: () => void;
@@ -80,6 +81,12 @@ export function AssemblyCreateDialog({
   pieceKeys: Set<string>;
   /** Человеческое имя ноды: имя детали или код узла. */
   labelOf: (key: string) => string;
+  /**
+   * Куда вернуть фокус, когда диалог закрылся. Нужен ФУЛСКРИНУ: его роутер клавиш — обработчик на
+   * контенте оверлея, и фокус, упавший в `body`, гасит ⌘Z, ⌘F, ⌘A и все глаголы до первого клика
+   * внутри. В инлайне роутера нет, проп не передаётся, поведение прежнее.
+   */
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const [inputs, setInputs] = useState<string[]>([]);
   // Начальное значение — UNKNOWN-сентинел словаря, а не пустая строка: именно он и означает
@@ -208,6 +215,15 @@ export function AssemblyCreateDialog({
       cancelLabel='cancel'
       confirmDisabled={problem !== ''}
       closeOnConfirm={false}
+      // ФОКУС ВОЗВРАЩАЕТСЯ ЭКРАНУ ПРЯМО ЗДЕСЬ, а не эффектом вызывателя по следующему кадру.
+      // Radix на закрытии делает `preventDefault()` и метит фокус на триггер — а триггера нет,
+      // диалог открывается состоянием. Восстановление подавлено и ничем не заменено: фокус падает
+      // в `body`, и весь клавиатурный роутер фулскрина умирает до первого клика внутри.
+      // Вызыватель умеет то же самое эффектом, но эффект бежит РАНЬШЕ, чем `Presence` снимает
+      // портал: на тот момент кнопка «cancel» ещё жива и держит фокус, и возврат приходится
+      // откладывать на кадр. Здесь такта ждать не надо — Radix зовёт это ровно тогда, когда сам
+      // готов отдать фокус.
+      onCloseAutoFocus={onCloseAutoFocus}
     >
       <div className='flex flex-col gap-2.5'>
         <div>
