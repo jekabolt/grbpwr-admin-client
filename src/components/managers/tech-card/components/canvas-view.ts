@@ -140,7 +140,9 @@ export function fitView(content: Rect, viewport: { w: number; h: number }, opts:
 export function zoomAt(view: View, factor: number, px: number, py: number): View {
   const z0 = view.zoom;
   const z1 = clamp(z0 * factor, ZOOM_MIN, ZOOM_MAX);
-  if (z1 === z0) return view;
+  // NaN-фактор (деление на ноль у будущего вызывающего) не имеет права отравить вид: кламп NaN не
+  // ловит (`min(max(NaN))` = NaN), а NaN в трансформе — пустое полотно, из которого нет пути назад.
+  if (!Number.isFinite(z1) || z1 === z0) return view;
   const k = z1 / z0;
   return {
     zoom: z1,

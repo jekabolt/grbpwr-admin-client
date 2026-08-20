@@ -342,6 +342,125 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     setZoomPct(Math.round(zoom * 100));
   }, []);
 
+  // --- маркиза: состояние и живопись -------------------------------------------------------------
+  //
+  // Объявлены ВЫШЕ вида, потому что вид их зовёт: каждый писатель `viewRef` обязан перерисовать
+  // рамку (она живёт в экранных координатах) и передвинуть мировые точки живого жеста —
+  // `syncGestureToView` ниже. Сами слушатели жеста остаются в секции «маркиза».
+
+  const marqueeRef = useRef<MarqueeState | null>(null);
+  const marqueeElRef = useRef<HTMLDivElement>(null);
+  /** Последнее выделение, ОТПРАВЛЕННОЕ наверх: рамка ползёт кадрами, а выбор меняется редко. */
+  const emitted = useRef<string[]>([]);
+  /** Где сейчас палец, в координатах ОКНА: по нему считаются автопан и компенсация смены вида. */
+  const lastClient = useRef<{ x: number; y: number } | null>(null);
+
+  /** Рамка рисуется в ЭКРАННЫХ координатах и пишется императивно — как и сам трансформ мира. */
+  const paintMarquee = useCallback(() => {
+    const el = marqueeElRef.current;
+    if (!el) return;
+    const m = marqueeRef.current;
+    if (!m) {
+      el.style.display = 'none';
+      return;
+    }
+    const { pan, zoom } = viewRef.current;
+    const x = Math.min(m.x0, m.x1);
+    const y = Math.min(m.y0, m.y1);
+    el.style.display = 'block';
+    el.style.left = `${x * zoom + pan.x}px`;
+    el.style.top = `${y * zoom + pan.y}px`;
+    el.style.width = `${Math.abs(m.x1 - m.x0) * zoom}px`;
+    el.style.height = `${Math.abs(m.y1 - m.y0) * zoom}px`;
+  }, []);
+
+  /**
+   * Пересчитать выделение под рамкой.
+   *
+   * Наверх уходит ТОЛЬКО СМЕНА НАБОРА: `onPicked` перерисовывает весь фулскрин, а рамка ползёт по
+   * пустой земле большую часть жеста.
+   *
+   * Фильтр по фронтиру — тот же инвариант, что у эффекта очистки выбора ниже: съеденная деталь
+   * входом не годится, и мигать ею в полосе выбора нечестно.
+   */
+  const applyMarquee = useCallback(() => {
+    const m = marqueeRef.current;
+    if (!m) return;
+    const eff = layoutRef.current;
+    const rect: Rect = {
+      x: Math.min(m.x0, m.x1),
+      y: Math.min(m.y0, m.y1),
+      w: Math.abs(m.x1 - m.x0),
+      h: Math.abs(m.y1 - m.y0),
+    };
+    const hits = marqueeHits(rect, [...eff.boxes, ...eff.tiles]).filter((k) =>
+      onTableRef.current.has(k),
+    );
+    const next = m.add ? [...m.base, ...hits.filter((k) => !m.base.includes(k))] : hits;
+    // Сравнение поэлементное, а не по склейке: ключ детали приходит из чертежа и любой разделитель
+    // содержать вправе, а склейка с общим разделителем склеила бы два разных набора в один.
+    const prev = emitted.current;
+    if (next.length === prev.length && next.every((k, i) => k === prev[i])) return;
+    emitted.current = next;
+    onPickedRef.current(next);
+  }, []);
+
+  /**
+   * ЖЕСТ ЕДЕТ ВМЕСТЕ С МИРОМ — та же вторая половина, что у автопана, но для ЛЮБОГО писателя вида.
+   *
+   * Колесо, зум клавишей или кнопкой HUD, fit посреди живого драга или маркизы двигают мир, а рука
+   * стоит: без сдвига мировых точек жеста hit-test бьёт туда, где курсор уже не стоит, дроп сразу
+   * после колеса ложится мимо руки на всю величину прокрутки, а рамка маркизы остаётся нарисованной
+   * по старому экрану. Зовётся ПОСЛЕ записи `viewRef` с ПРЕЖНИМ видом аргументом; точка пересчёта —
+   * `lastClient` (в неё пишут и жест ноды, и маркиза, и внешний драг над сценой).
+   */
+  const syncGestureToView = useCallback(
+    (prev: View) => {
+      const m = marqueeRef.current;
+      const d = dragRef.current;
+      if (!d && !m) return;
+      const vp = viewportRef.current;
+      const c = lastClient.current;
+      if (vp && c) {
+        const r = vp.getBoundingClientRect();
+        const before = toWorld(c.x, c.y, r, prev);
+        const after = toWorld(c.x, c.y, r, viewRef.current);
+        const dx = after.x - before.x;
+        const dy = after.y - before.y;
+        if (dx || dy) {
+          if (d?.started) {
+            commitDrag({
+              ...d,
+              ptrX: d.ptrX + dx,
+              ptrY: d.ptrY + dy,
+              items: d.items.map((it) => ({ ...it, x: it.x + dx, y: it.y + dy })),
+            });
+          } else if (d) {
+            // Порог ещё не пройден: нода стоит на месте, поэтому едут ТОЧКА ЗАХВАТА и начало
+            // жеста — иначе прокрутка под зажатой рукой сама начинала бы перетаскивание.
+            commitDrag({
+              ...d,
+              fromX: d.fromX + dx,
+              fromY: d.fromY + dy,
+              items: d.items.map((it) => ({ ...it, offX: it.offX + dx, offY: it.offY + dy })),
+            });
+          }
+          if (m) {
+            // Якорь рамки — точка МИРА и остаётся на месте (ровно как при автопане); за рукой
+            // едет только живой угол.
+            m.x1 += dx;
+            m.y1 += dy;
+            applyMarquee();
+          }
+        }
+      }
+      // Рамку перерисовывает ЛЮБАЯ смена вида, даже с нулевой мировой дельтой: зум у курсора
+      // держит точку под рукой, но экранное положение якоря меняет.
+      if (m) paintMarquee();
+    },
+    [commitDrag, applyMarquee, paintMarquee],
+  );
+
   const paintSheet = useCallback((settle: boolean) => {
     const el = sheetElRef.current;
     if (!el) return;
@@ -386,6 +505,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       if (r.width < 1 || r.height < 1) return false;
       lastFitOpen.current = open;
       if (animate) animateOnce();
+      const prev = viewRef.current;
       viewRef.current = fitView(
         contentRef.current,
         { w: r.width, h: r.height },
@@ -395,9 +515,11 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       );
       fitted.current = true;
       applyView();
+      // «f» с клавиатуры может прилететь и посреди живого жеста — жест обязан уехать вместе с миром.
+      syncGestureToView(prev);
       return true;
     },
-    [animateOnce, applyView],
+    [animateOnce, applyView, syncGestureToView],
   );
 
   // ВПИСЫВАНИЕ — В `useLayoutEffect`, ДО ПОКРАСКИ. В обычном `useEffect` по `open` первый
@@ -423,8 +545,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         return;
       }
       if (!fitted.current) return;
-      // Жест жив — мир не имеет права уехать из-под руки. Откладываем до отпускания.
-      if (dragRef.current || panRef.current) {
+      // Жест жив — мир не имеет права уехать из-под руки. Откладываем до отпускания. Маркиза
+      // здесь наравне с драгом и паном (спека Ф3 называет её поимённо): пере-вписывание посреди
+      // рамки — тот же незваный автопан, только рывком.
+      if (dragRef.current || panRef.current || marqueeRef.current) {
         pendingRefit.current = true;
         return;
       }
@@ -444,9 +568,29 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    */
   const settleRefit = useCallback(() => {
     if (!pendingRefit.current) return;
+    // ДРУГОЙ жест ещё жив (второй указатель, чужая половина внешнего драга) — долг остаётся
+    // висеть до ЕГО конца: пере-вписаться из-под живой руки нельзя ни на одном из концов.
+    if (dragRef.current || panRef.current || marqueeRef.current) return;
     pendingRefit.current = false;
     if (fitted.current) runFit(true, lastFitOpen.current);
   }, [runFit]);
+
+  // МИР МОНТИРУЕТСЯ ЗАНОВО на переходе «пусто → первый узел» — и монтируется БЕЗ ТРАНСФОРМА:
+  // `applyView` пишет стиль императивно, а на пустом полотне писать было некуда, так что записи
+  // просто не случилось. Без этого эффекта первый шаг пустой карточки рисуется в мире 1:1, тогда
+  // как `viewRef` продолжает жить видом, вписанным на маунте, — маркиза, дроп и первое же колесо
+  // бьют мимо на разницу двух систем, а колесо ещё и дёргает мир скачком, применяя накопленное.
+  // Вид, оставшийся вписанным, честно пере-вписывается под НАСТОЯЩИЙ контент (вписывание на маунте
+  // считалось по умолчальному 400×300); тронутый рукой — просто применяется к новому миру.
+  const wasEmpty = useRef(empty);
+  useLayoutEffect(() => {
+    if (wasEmpty.current === empty) return;
+    wasEmpty.current = empty;
+    if (empty) return;
+    paintSheet(true);
+    if (fitted.current) runFit(false, lastFitOpen.current);
+    else applyView();
+  }, [empty, paintSheet, runFit, applyView]);
 
   // --- координаты и общий хвост дропа -----------------------------------------------------------
   //
@@ -555,6 +699,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       e.preventDefault();
       const r = vp.getBoundingClientRect();
       fitted.current = false;
+      const prev = viewRef.current;
       if (e.ctrlKey || e.metaKey) {
         viewRef.current = zoomAt(
           viewRef.current,
@@ -573,11 +718,22 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
           },
         };
       }
+      // ПАНОРАМУ РУКОЙ КОЛЕСО ПЕРЕБАЗИРУЕТ: её move-обработчик пишет `база + (client − from)`
+      // абсолютно, и без новой базы следующий же кадр руки молча перетёр бы сдвиг колеса.
+      const pn = panRef.current;
+      if (pn) {
+        pn.panX = viewRef.current.pan.x;
+        pn.panY = viewRef.current.pan.y;
+        pn.fromX = e.clientX;
+        pn.fromY = e.clientY;
+      }
       applyView();
+      // Колесо посреди драга или маркизы — жест едет вместе с миром (вторая половина автопана).
+      syncGestureToView(prev);
     };
     vp.addEventListener('wheel', onWheel, { passive: false });
     return () => vp.removeEventListener('wheel', onWheel);
-  }, [applyView]);
+  }, [applyView, syncGestureToView]);
 
   // --- инструмент и панорама рукой --------------------------------------------------------------
 
@@ -586,9 +742,20 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   const hand = tool === 'hand' || spaceHeld;
   const handRef = useRef(hand);
   handRef.current = hand;
-  const panRef = useRef<{ pointerId: number; fromX: number; fromY: number; panX: number; panY: number } | null>(
-    null,
-  );
+  const panRef = useRef<{
+    pointerId: number;
+    fromX: number;
+    fromY: number;
+    panX: number;
+    panY: number;
+    /** Бит кнопки, ВЕДУЩЕЙ жест (1 — левая в ладони, 4 — средняя): pointerup чужой кнопки того же
+     *  указателя (chord на мыши) пан не кончает — кончает отпускание своей. */
+    bit: number;
+    /** Рука реально возила полотно (порог тот же, что у драга). Ладонь-пан, НАЧАТЫЙ на ноде,
+     *  кончается ещё и `click` по ней — preventDefault на pointerdown его не гасит (замерено), —
+     *  и без этого флага каждый такой пан заодно переключал бы выбор ноды. */
+    moved: boolean;
+  } | null>(null);
   const [panning, setPanning] = useState(false);
 
   // Пробел держат — ладонь, отпустили — прежний инструмент. Слушать приходится на window: фокус
@@ -602,14 +769,19 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     const blur = () => setSpaceHeld(false);
     window.addEventListener('keyup', up);
     window.addEventListener('blur', blur);
+    // Потеря видимости без blur (экран заблокировали) — keyup не придёт, ладонь не должна залипнуть.
+    document.addEventListener('visibilitychange', blur);
     return () => {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
+      document.removeEventListener('visibilitychange', blur);
     };
   }, [spaceHeld]);
 
   const startPan = (e: React.PointerEvent) => {
-    if (panRef.current || dragRef.current) return;
+    // Живой жест полотна сильнее — ЛЮБОЙ из трёх: средняя кнопка, нажатая посреди маркизы,
+    // иначе заводила бы второй жест на том же указателе.
+    if (panRef.current || dragRef.current || marqueeRef.current) return;
     // Средняя кнопка панорамирует всегда — привычка из любого редактора схем.
     if (!(e.button === 1 || (e.button === 0 && handRef.current))) return;
     const { pan } = viewRef.current;
@@ -619,6 +791,8 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       fromY: e.clientY,
       panX: pan.x,
       panY: pan.y,
+      bit: e.button === 1 ? 4 : 1,
+      moved: false,
     };
     setPanning(true);
     fitted.current = false;
@@ -627,29 +801,71 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
 
   useEffect(() => {
     if (!panning) return;
+    const end = () => {
+      // Пан с реальным движением гасит своё клик-эхо: ладонь-пан, начатый на ноде, иначе кончался
+      // бы ещё и переключением её выбора. Клик БЕЗ движения остаётся кликом.
+      if (panRef.current?.moved) justDragged.current = true;
+      panRef.current = null;
+      setPanning(false);
+      settleRefit();
+    };
     const move = (e: PointerEvent) => {
       const p = panRef.current;
       if (!p || e.pointerId !== p.pointerId) return;
+      // Отпускание, съеденное системой (pointerup так и не пришёл): первое же движение без кнопок
+      // гасит жест, а не возит полотно приклеенным к пустой руке. То же самолечение, что у драга.
+      if (e.buttons === 0) {
+        end();
+        return;
+      }
+      if (
+        Math.abs(e.clientX - p.fromX) > DRAG_THRESHOLD ||
+        Math.abs(e.clientY - p.fromY) > DRAG_THRESHOLD
+      ) {
+        p.moved = true;
+      }
       viewRef.current = {
         zoom: viewRef.current.zoom,
         pan: { x: p.panX + (e.clientX - p.fromX), y: p.panY + (e.clientY - p.fromY) },
       };
       applyView();
     };
-    const end = () => {
-      panRef.current = null;
-      setPanning(false);
-      settleRefit();
+    const up = (e: PointerEvent) => {
+      const p = panRef.current;
+      if (!p || e.pointerId !== p.pointerId) return;
+      // Chord: отпущена ЧУЖАЯ кнопка той же мыши, ведущая ещё зажата — жест продолжается.
+      if (e.buttons & p.bit) return;
+      end();
+    };
+    const cancel = (e: PointerEvent) => {
+      const p = panRef.current;
+      if (p && e.pointerId !== p.pointerId) return;
+      end();
+    };
+    // Потеря окна И потеря видимости — оба аварийные конца (blur может и не прийти); та же пара,
+    // что у драга ноды и у владельца внешнего жеста.
+    const lost = () => end();
+    // Esc посреди панорамы — конец жеста, а не ступень Esc-лестницы: живой жест выше всей лестницы,
+    // ровно как у драга ноды и маркизы. Отматывать панораму назад нечего — она не пишет ничего.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      end();
     };
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    window.addEventListener('blur', end);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', lost);
+    document.addEventListener('visibilitychange', lost);
+    window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-      window.removeEventListener('blur', end);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', lost);
+      document.removeEventListener('visibilitychange', lost);
+      window.removeEventListener('keydown', onKey, true);
     };
   }, [panning, applyView, settleRefit]);
 
@@ -664,13 +880,18 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         if (!vp) return;
         const r = vp.getBoundingClientRect();
         fitted.current = false;
+        const prev = viewRef.current;
         viewRef.current = zoomAt(viewRef.current, factor, r.width / 2, r.height / 2);
         applyView();
+        // «+»/«−» с клавиатуры живут и посреди жеста — жест едет вместе с миром.
+        syncGestureToView(prev);
       },
       zoomReset: () => {
         fitted.current = false;
+        const prev = viewRef.current;
         viewRef.current = { ...viewRef.current, zoom: 1 };
         applyView();
+        syncGestureToView(prev);
       },
       setSpaceHand: setSpaceHeld,
       setTool,
@@ -695,8 +916,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         // ВСЁ, и наследовать ему кадр одного узла значило бы молча подменить смысл.
         fitted.current = false;
         animateOnce();
+        const prev = viewRef.current;
         viewRef.current = fitView(box, { w: r.width, h: r.height });
         applyView();
+        syncGestureToView(prev);
       },
       reveal: (key) => {
         const vp = viewportRef.current;
@@ -715,20 +938,27 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         if (!d.x && !d.y) return; // уже видно — увозить экран не за чем
         fitted.current = false;
         animateOnce();
+        const prev = viewRef.current;
         const { pan, zoom } = viewRef.current;
         viewRef.current = { zoom, pan: { x: pan.x + d.x, y: pan.y + d.y } };
         applyView();
+        syncGestureToView(prev);
       },
 
       // --- порт внешнего жеста (драг из полки) ---------------------------------------------
 
       beginExternalDrag: (key, clientX, clientY) => {
-        // Живой жест полотна сильнее: два перетаскивания на одном состоянии не живут. А вот
-        // ИНСТРУМЕНТ здесь ни при чём — ладонь возит полотно указателем, НАЧАТЫМ НА ПОЛОТНЕ, и
-        // отказывать из-за неё жесту, начатому в полке, значило бы гасить его молча и без причины.
-        if (dragRef.current || panRef.current) return;
+        // Живой жест полотна сильнее — ЛЮБОЙ из трёх: два перетаскивания на одном состоянии не
+        // живут, а маркиза (второй указатель — тач) спорила бы с внешним драгом за автопан и
+        // выделение. А вот ИНСТРУМЕНТ здесь ни при чём — ладонь возит полотно указателем, НАЧАТЫМ
+        // НА ПОЛОТНЕ, и отказывать из-за неё жесту, начатому в полке, значило бы гасить его молча
+        // и без причины.
+        if (dragRef.current || panRef.current || marqueeRef.current) return;
         const p = toWorldPoint({ clientX, clientY });
         if (!p) return;
+        // Точка автопана и компенсации вида — с первого кадра жеста, но ТОЛЬКО над сценой:
+        // над полкой автопану делать нечего (см. moveExternalDrag).
+        lastClient.current = overStage(clientX, clientY) ? { x: clientX, y: clientY } : null;
         // Плитка встаёт ЦЕНТРОМ под курсор: точки захвата внутри ноды у этого жеста нет — в полке
         // деталь взяли за другую, меньшую картинку, и переносить оттуда угол не во что.
         const n = layoutRef.current.tileByKey.get(key) ?? layoutRef.current.byKey.get(key);
@@ -795,7 +1025,17 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         settleRefit();
       },
     }),
-    [runFit, applyView, animateOnce, commitDrag, toWorldPoint, overStage, finishDrop, settleRefit],
+    [
+      runFit,
+      applyView,
+      animateOnce,
+      commitDrag,
+      toWorldPoint,
+      overStage,
+      finishDrop,
+      settleRefit,
+      syncGestureToView,
+    ],
   );
 
   // --- жест ноды --------------------------------------------------------------------------------
@@ -805,10 +1045,15 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // Ладонь сильнее ноды: в режиме панорамы полотно возят целиком, и нода под курсором к жесту
       // отношения не имеет.
       if (handRef.current) return;
-      if (dragRef.current) return;
+      // Живой жест полотна сильнее: пан или маркиза ВТОРЫМ указателем (средняя кнопка + тач)
+      // иначе получали бы драг-соседа, и оба возили бы мир и ноду одним движением.
+      if (dragRef.current || panRef.current || marqueeRef.current) return;
       if (e.button !== 0) return;
       const p = toWorldPoint(e);
       if (!p) return;
+      // Точка автопана и компенсации вида — с первого касания: колесо может прийти раньше
+      // первого pointermove.
+      lastClient.current = { x: e.clientX, y: e.clientY };
       justDragged.current = false;
       // МУЛЬТИДРАГ ТОЛЬКО ИЗ ВЫДЕЛЕНИЯ. Взяли ноду, которая в выделении, — едет всё выделение;
       // взяли постороннюю — едет она одна, и выделение НЕ ТРОГАЕТСЯ. Прототип на захвате
@@ -839,65 +1084,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     },
   });
 
-  // --- маркиза ------------------------------------------------------------------------------------
+  // --- маркиза: жест ------------------------------------------------------------------------------
+  //
+  // Состояние и живопись рамки объявлены выше вида (см. «маркиза: состояние и живопись»): их зовёт
+  // каждый писатель `viewRef`. Здесь остаются начало жеста и его слушатели.
 
-  const marqueeRef = useRef<MarqueeState | null>(null);
   const [marqueeOn, setMarqueeOn] = useState(false);
-  const marqueeElRef = useRef<HTMLDivElement>(null);
-  /** Последнее выделение, ОТПРАВЛЕННОЕ наверх: рамка ползёт кадрами, а выбор меняется редко. */
-  const emitted = useRef<string[]>([]);
-  /** Где сейчас палец, в координатах ОКНА: по нему считается автопан. */
-  const lastClient = useRef<{ x: number; y: number } | null>(null);
-
-  /** Рамка рисуется в ЭКРАННЫХ координатах и пишется императивно — как и сам трансформ мира. */
-  const paintMarquee = useCallback(() => {
-    const el = marqueeElRef.current;
-    if (!el) return;
-    const m = marqueeRef.current;
-    if (!m) {
-      el.style.display = 'none';
-      return;
-    }
-    const { pan, zoom } = viewRef.current;
-    const x = Math.min(m.x0, m.x1);
-    const y = Math.min(m.y0, m.y1);
-    el.style.display = 'block';
-    el.style.left = `${x * zoom + pan.x}px`;
-    el.style.top = `${y * zoom + pan.y}px`;
-    el.style.width = `${Math.abs(m.x1 - m.x0) * zoom}px`;
-    el.style.height = `${Math.abs(m.y1 - m.y0) * zoom}px`;
-  }, []);
-
-  /**
-   * Пересчитать выделение под рамкой.
-   *
-   * Наверх уходит ТОЛЬКО СМЕНА НАБОРА: `onPicked` перерисовывает весь фулскрин, а рамка ползёт по
-   * пустой земле большую часть жеста.
-   *
-   * Фильтр по фронтиру — тот же инвариант, что у эффекта очистки выбора ниже: съеденная деталь
-   * входом не годится, и мигать ею в полосе выбора нечестно.
-   */
-  const applyMarquee = useCallback(() => {
-    const m = marqueeRef.current;
-    if (!m) return;
-    const eff = layoutRef.current;
-    const rect: Rect = {
-      x: Math.min(m.x0, m.x1),
-      y: Math.min(m.y0, m.y1),
-      w: Math.abs(m.x1 - m.x0),
-      h: Math.abs(m.y1 - m.y0),
-    };
-    const hits = marqueeHits(rect, [...eff.boxes, ...eff.tiles]).filter((k) =>
-      onTableRef.current.has(k),
-    );
-    const next = m.add ? [...m.base, ...hits.filter((k) => !m.base.includes(k))] : hits;
-    // Сравнение поэлементное, а не по склейке: ключ детали приходит из чертежа и любой разделитель
-    // содержать вправе, а склейка с общим разделителем склеила бы два разных набора в один.
-    const prev = emitted.current;
-    if (next.length === prev.length && next.every((k, i) => k === prev[i])) return;
-    emitted.current = next;
-    onPickedRef.current(next);
-  }, []);
 
   /**
    * Жест начался с ПУСТОЙ ЗЕМЛИ — рамка. Нода до этого места событие не пускает (`stopPropagation`
@@ -933,9 +1125,23 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
 
   useEffect(() => {
     if (!marqueeOn) return;
+    const end = () => {
+      marqueeRef.current = null;
+      lastClient.current = null;
+      setMarqueeOn(false);
+      paintMarquee();
+      // Ресайз, отложенный живой рамкой (спека Ф3: re-fit ждёт конца жеста), — по её концу.
+      settleRefit();
+    };
     const move = (e: PointerEvent) => {
       const m = marqueeRef.current;
       if (!m || e.pointerId !== m.pointerId) return;
+      // Отпускание, съеденное системой: движение без кнопок гасит рамку, а не тянет её за пустой
+      // рукой. То же самолечение, что у драга и пана.
+      if (e.buttons === 0) {
+        end();
+        return;
+      }
       const p = toWorldPoint(e);
       if (!p) return;
       lastClient.current = { x: e.clientX, y: e.clientY };
@@ -944,23 +1150,34 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       paintMarquee();
       applyMarquee();
     };
-    const end = () => {
-      marqueeRef.current = null;
-      lastClient.current = null;
-      setMarqueeOn(false);
-      paintMarquee();
+    const up = (e: PointerEvent) => {
+      const m = marqueeRef.current;
+      if (!m || e.pointerId !== m.pointerId) return;
+      // Chord: отпущена другая кнопка той же мыши, рамку ведёт левая — она ещё зажата.
+      if (e.buttons & 1) return;
+      end();
     };
+    const cancel = (e: PointerEvent) => {
+      const m = marqueeRef.current;
+      if (m && e.pointerId !== m.pointerId) return;
+      end();
+    };
+    // Потеря окна И потеря видимости — оба аварийные конца, как у всех жестов полотна: blur может
+    // и не прийти, а фантомная рамка продолжала бы менять выделение под рукой без кнопки.
+    const lost = () => end();
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    window.addEventListener('blur', end);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', lost);
+    document.addEventListener('visibilitychange', lost);
     return () => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-      window.removeEventListener('blur', end);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', lost);
+      document.removeEventListener('visibilitychange', lost);
     };
-  }, [marqueeOn, toWorldPoint, paintMarquee, applyMarquee]);
+  }, [marqueeOn, toWorldPoint, paintMarquee, applyMarquee, settleRefit]);
 
   // --- автопан у края -----------------------------------------------------------------------------
   //
@@ -1094,6 +1311,9 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       const d = dragRef.current;
       if (d?.external) return;
       if (d && e.pointerId !== d.pointerId) return;
+      // Chord: отпущена другая кнопка той же мыши, ноду ведёт левая — она ещё зажата, и бросать
+      // жест на её месте значило бы дропнуть ноду там, куда никто не целился.
+      if (d && e.buttons & 1) return;
       commitDrag(null);
       settleRefit();
       if (!d) return;
@@ -1105,6 +1325,8 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       if (d && e.pointerId !== d.pointerId) return;
       justDragged.current = true;
       commitDrag(null);
+      lastClient.current = null;
+      settleRefit();
     };
     // ПОТЕРЯ ОКНА ГАСИТ И ВНЕШНИЙ ЖЕСТ. Здесь исключения нет и быть не может: `blur` владельцу
     // жеста может и не прийти, а полотно, оставшееся с фантомным драгом, продолжало бы светить
@@ -1115,6 +1337,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       justDragged.current = d.started;
       commitDrag(null);
       lastClient.current = null;
+      settleRefit();
     };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
@@ -1140,10 +1363,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       e.stopPropagation();
       justDragged.current = true;
       commitDrag(null);
+      lastClient.current = null;
+      settleRefit();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [drag?.started, commitDrag]);
+  }, [drag?.started, commitDrag, settleRefit]);
 
   // Escape во время МАРКИЗЫ — тот же откат жеста, симметрично драгу. Без него Esc посреди рамки
   // проваливался в Esc-лестницу фулскрина: при пустом выборе она закрывала ВЕСЬ экран прямо под
@@ -1163,10 +1388,11 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       lastClient.current = null;
       setMarqueeOn(false);
       paintMarquee();
+      settleRefit();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [marqueeOn, paintMarquee]);
+  }, [marqueeOn, paintMarquee, settleRefit]);
 
   // --- вердикт и подсказка ----------------------------------------------------------------------
 
@@ -1285,6 +1511,16 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // должна ни при каких обстоятельствах.
       style={{ touchAction: 'none' }}
       onPointerDown={onCanvasPointerDown}
+      // Средняя кнопка на полотне — ПАН, а не браузерный автоскролл. Обычный путь гасит его сам:
+      // `startPan` зовёт preventDefault на pointerdown, и совместимостный mousedown умирает вместе
+      // с ним. Но у CHORD-нажатия (средняя ПОСРЕДИ живого левого жеста) pointerdown не бывает
+      // вовсе — только pointermove со сменой buttons (замерено на стенде), — а mousedown браузер
+      // шлёт всё равно, и его дефолт (автоскролл Chromium) остаётся не погашенным никем. Гасим
+      // дефолт средней кнопки здесь, чтобы chord-клик посреди драга не заводил автоскролл поверх
+      // живого жеста.
+      onMouseDown={(e) => {
+        if (e.button === 1) e.preventDefault();
+      }}
     >
       {empty ? (
         // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, слово в слово как у инлайна: два экрана, по-разному
@@ -1447,8 +1683,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 const vp = viewportRef.current;
                 if (!vp) return;
                 const r = vp.getBoundingClientRect();
+                const prev = viewRef.current;
                 viewRef.current = zoomAt(viewRef.current, 1 / ZOOM_STEP, r.width / 2, r.height / 2);
                 applyView();
+                // Кнопка HUD достижима вторым указателем (тач) посреди живого жеста — жест едет
+                // вместе с миром, как и у клавиш.
+                syncGestureToView(prev);
               }}
               disabled={zoomPct <= ZOOM_MIN * 100}
               title='zoom out (−)'
@@ -1458,8 +1698,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             <HudButton
               onClick={() => {
                 fitted.current = false;
+                const prev = viewRef.current;
                 viewRef.current = { ...viewRef.current, zoom: 1 };
                 applyView();
+                syncGestureToView(prev);
               }}
               title='reset to 100% (⌘0)'
               className='min-w-[46px] tabular-nums'
@@ -1472,8 +1714,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 const vp = viewportRef.current;
                 if (!vp) return;
                 const r = vp.getBoundingClientRect();
+                const prev = viewRef.current;
                 viewRef.current = zoomAt(viewRef.current, ZOOM_STEP, r.width / 2, r.height / 2);
                 applyView();
+                syncGestureToView(prev);
               }}
               disabled={zoomPct >= ZOOM_MAX * 100}
               title='zoom in (+)'
