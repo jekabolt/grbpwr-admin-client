@@ -1,10 +1,27 @@
 import {
   common_TechCardAttachmentKind,
+  common_TechCardBindingStyle,
+  common_TechCardButtonAttachPattern,
+  common_TechCardButtonholeOrientation,
+  common_TechCardButtonholeStyle,
+  common_TechCardCleaningKind,
   common_TechCardGarmentZone,
+  common_TechCardHardwareAttachMethod,
+  common_TechCardHolePrep,
+  common_TechCardInspectCoverage,
+  common_TechCardLabelAttachStitch,
   common_TechCardMachineType,
   common_TechCardOperationType,
+  common_TechCardPeelMode,
+  common_TechCardPressureScale,
+  common_TechCardPrintMethod,
+  common_TechCardReinforcement,
   common_TechCardSeamClass,
+  common_TechCardSeamSecuring,
   common_TechCardTopstitchMode,
+  common_TechCardTrimAction,
+  common_TechCardWetProcessKind,
+  common_TechCardZipperApplication,
 } from 'api/proto-http/admin';
 import { parseDecimalNumber } from 'utils/decimal';
 import {
@@ -624,4 +641,424 @@ export function effectivePressSettings(
   if (step.pressSteam !== undefined) own.add('steam');
   if (enumSet(step.pressCloth)) own.add('cloth');
   return pressProfileParts(merged).map((p) => ({ ...p, overridden: own.has(p.field) }));
+}
+
+// --- THE FAMILIES THE OPERATION-KINDS WAVE ADDED (Ф2) --------------------------------------------
+//
+// ELEVEN NEW FAMILIES OF FACT ARRIVE ON A STEP, and every one of them has to reach PAPER or it does
+// not exist: the sheet is the only copy of a tech card that stands beside the machine. The wave put
+// them on the wire as block messages (stitching, placement_layout, hardware, print, weld, trim,
+// thread_trim, clean, inspect, fastening) plus two bare discriminator fields (print_method,
+// wet_process_kind), and the printed sheet composes them here — beside machineProfileParts and
+// pressProfileParts, for the reason those two live here: a summary written twice is two answers to
+// the same question, and the paper one is the one nobody can check against the form.
+//
+// THE COMPOSERS PRINT WHAT ARRIVED AND ASK NO PERMISSION. Which family a verb is ALLOWED to carry is
+// STEP_TYPE_BLOCKS' question and it is a question about WRITING — the server refuses a field from
+// the wrong family by name. Gating the printers on it as well would mean a fact that IS stored and
+// IS in the response silently missing from the sheet, which is the one failure paper cannot survive:
+// a wrong verb is visible to the floor, a missing setting is not. So a block that came back is
+// printed, whatever verb it came back on.
+//
+// UNITS ARE IN THE TEXT, always — the same rule press pressure earned the hard way. A bare «6.4» on
+// a sheet is read in whatever unit the reader works in, and these numbers get copied onto machines.
+//
+// DECIMALS ARE STRINGS on the way in, exactly like MachineSettings: a caller reading the wire passes
+// them through decimalToInput first, and the form already holds them that way.
+
+const enumText = <T extends string>(labels: Record<T, string>, v?: string): string => {
+  const t = (v ?? '').trim();
+  // '' for the UNKNOWN member and for a token this bundle has never heard of — the same direction
+  // the equipment label helpers take. A raw «TECH_CARD_TRIM_ACTION_…» on a sheet for the floor is
+  // worse than a blank, because a blank is visibly incomplete and a token looks like an answer.
+  return !t || t.endsWith('_UNKNOWN') ? '' : (labels[t as T] ?? '');
+};
+const mm = (v?: string): string => ((v ?? '').trim() ? `${(v ?? '').trim()} mm` : '');
+const positive = (n?: number): number => ((n ?? 0) > 0 ? (n as number) : 0);
+
+// A «none» member is an ANSWER and is printed as one — «no backtack» is an instruction, and a step
+// that says it must not read the same as a step that says nothing. Every map below is a total
+// `Record`, for the reason every dictionary of this feature is (see the header of
+// equipment-options.ts): nothing in this repo diffs the client against the contract, so tsc is the
+// diff, and a member added by a proto bump fails the build until somebody words it.
+
+/** S3 — how the ends of a stitch line are secured. */
+export const SEAM_SECURING_LABELS: Record<common_TechCardSeamSecuring, string> = {
+  TECH_CARD_SEAM_SECURING_UNKNOWN: '',
+  TECH_CARD_SEAM_SECURING_NONE: 'no backtack',
+  TECH_CARD_SEAM_SECURING_BACKTACK: 'backtack',
+  TECH_CARD_SEAM_SECURING_CONDENSED: 'condensed stitches',
+  TECH_CARD_SEAM_SECURING_LATCHED: 'latch-back',
+};
+
+/** S14 — how the binding is folded. */
+export const BINDING_STYLE_LABELS: Record<common_TechCardBindingStyle, string> = {
+  TECH_CARD_BINDING_STYLE_UNKNOWN: '',
+  TECH_CARD_BINDING_STYLE_RAW: 'raw-edge binding',
+  TECH_CARD_BINDING_STYLE_SINGLE_FOLD: 'single-fold binding',
+  TECH_CARD_BINDING_STYLE_DOUBLE_FOLD: 'double-fold binding',
+};
+
+/** S17 — the stitch scheme a label is attached with. Each label carries the word «label» so the
+ *  fact stands alone in a settings list where nothing above it says what is being stitched. */
+export const LABEL_ATTACH_STITCH_LABELS: Record<common_TechCardLabelAttachStitch, string> = {
+  TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN: '',
+  TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES: 'label stitched on four sides',
+  TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM: 'label stitched top and bottom',
+  TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT: 'label stitched left and right',
+  TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE: 'label stitched along one edge',
+  TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM: 'label caught in the seam',
+  TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK: 'label tacked at the corners',
+  TECH_CARD_LABEL_ATTACH_STITCH_OTHER: 'label stitched, other scheme',
+};
+
+/** H1 — how the hardware is held on. The discriminator of a HARDWARE_SET step, so it is the head of
+ *  the «machine / mode» column and not one of its settings: it is what the step IS. */
+export const HARDWARE_ATTACH_METHOD_LABELS: Record<common_TechCardHardwareAttachMethod, string> = {
+  TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN: '',
+  TECH_CARD_HARDWARE_ATTACH_METHOD_SEW: 'sewn on',
+  TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH: 'prong-clinched',
+  TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET: 'press-set',
+  TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP: 'crimped',
+  TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED: 'threaded through',
+};
+
+/** H2 — how the hole under the hardware is made. */
+export const HOLE_PREP_LABELS: Record<common_TechCardHolePrep, string> = {
+  TECH_CARD_HOLE_PREP_UNKNOWN: '',
+  TECH_CARD_HOLE_PREP_NONE: 'no hole prep',
+  TECH_CARD_HOLE_PREP_PRONG_PIERCE: 'prong pierces the cloth',
+  TECH_CARD_HOLE_PREP_AWL_PIERCE: 'awl-pierced hole',
+  TECH_CARD_HOLE_PREP_PUNCH: 'punched hole',
+};
+
+/** H3 — what sits behind the hardware, the buttonhole or the bartack. The MATERIAL of it is a BOM
+ *  line; this says only which way it is done. */
+export const REINFORCEMENT_LABELS: Record<common_TechCardReinforcement, string> = {
+  TECH_CARD_REINFORCEMENT_UNKNOWN: '',
+  TECH_CARD_REINFORCEMENT_NONE: 'no reinforcement',
+  TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH: 'fusible patch behind',
+  TECH_CARD_REINFORCEMENT_FABRIC_STAY: 'fabric stay behind',
+  TECH_CARD_REINFORCEMENT_TAPE: 'tape behind',
+  TECH_CARD_REINFORCEMENT_SEAM_CATCH: 'caught into the seam',
+  TECH_CARD_REINFORCEMENT_OTHER: 'other reinforcement',
+};
+
+/** P1 — the discriminator of a PRINT step, and the head of its «machine / mode» column. */
+export const PRINT_METHOD_LABELS: Record<common_TechCardPrintMethod, string> = {
+  TECH_CARD_PRINT_METHOD_UNKNOWN: '',
+  TECH_CARD_PRINT_METHOD_SCREEN: 'screen print',
+  TECH_CARD_PRINT_METHOD_DTF: 'DTF transfer',
+  TECH_CARD_PRINT_METHOD_HEAT_TRANSFER: 'heat transfer',
+  TECH_CARD_PRINT_METHOD_FOIL: 'foil',
+  TECH_CARD_PRINT_METHOD_LASER_ENGRAVE: 'laser engrave',
+};
+
+/** P2 — when the carrier film comes off, and the temperature word is the whole instruction: a hot
+ *  peel pulled cold lifts the print. NONE says there is no carrier at all. */
+export const PEEL_MODE_LABELS: Record<common_TechCardPeelMode, string> = {
+  TECH_CARD_PEEL_MODE_UNKNOWN: '',
+  TECH_CARD_PEEL_MODE_NONE: 'no carrier to peel',
+  TECH_CARD_PEEL_MODE_HOT: 'hot peel',
+  TECH_CARD_PEEL_MODE_WARM: 'warm peel',
+  TECH_CARD_PEEL_MODE_COLD: 'cold peel',
+};
+
+/** P6 — an ordered scale, and therefore printed as words: the number the platen gauge shows is a
+ *  cylinder reading, not the pressure on the cloth (that one, when it is known, is
+ *  press_pressure_n_cm2 and prints in N/cm²). */
+export const PRESSURE_SCALE_LABELS: Record<common_TechCardPressureScale, string> = {
+  TECH_CARD_PRESSURE_SCALE_UNKNOWN: '',
+  TECH_CARD_PRESSURE_SCALE_LIGHT: 'light pressure',
+  TECH_CARD_PRESSURE_SCALE_MEDIUM: 'medium pressure',
+  TECH_CARD_PRESSURE_SCALE_FIRM: 'firm pressure',
+};
+
+/** T1 — the discriminator of a TRIM step: WHICH cut, with the shape of the edge it is made on,
+ *  because «clip» and «notch» are opposite operations and the curve is what tells them apart. */
+export const TRIM_ACTION_LABELS: Record<common_TechCardTrimAction, string> = {
+  TECH_CARD_TRIM_ACTION_UNKNOWN: '',
+  TECH_CARD_TRIM_ACTION_TRIM_EVEN: 'trim even',
+  TECH_CARD_TRIM_ACTION_GRADE_LAYERS: 'grade the layers',
+  TECH_CARD_TRIM_ACTION_CLIP_CONCAVE: 'clip the concave curve',
+  TECH_CARD_TRIM_ACTION_NOTCH_CONVEX: 'notch the convex curve',
+  TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL: 'trim the corner diagonally',
+  TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE: 'turn and shape',
+};
+
+/** C1 — the discriminator of a CLEAN step. */
+export const CLEANING_KIND_LABELS: Record<common_TechCardCleaningKind, string> = {
+  TECH_CARD_CLEANING_KIND_UNKNOWN: '',
+  TECH_CARD_CLEANING_KIND_SPOT_CLEAN: 'spot clean',
+  TECH_CARD_CLEANING_KIND_DUST_LINT: 'dust / lint removal',
+  TECH_CARD_CLEANING_KIND_CHALK_REMOVAL: 'chalk removal',
+  TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL: 'adhesive removal',
+};
+
+/** Q1 — the discriminator of an INSPECT step, and the one fact that says how much work it is:
+ *  «every unit» and «one per bundle» are the same verb over a hundredfold difference in time. */
+export const INSPECT_COVERAGE_LABELS: Record<common_TechCardInspectCoverage, string> = {
+  TECH_CARD_INSPECT_COVERAGE_UNKNOWN: '',
+  TECH_CARD_INSPECT_COVERAGE_EACH_UNIT: 'check every unit',
+  TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE: 'sample per bundle',
+  TECH_CARD_INSPECT_COVERAGE_AQL_PLAN: 'AQL plan',
+  TECH_CARD_INSPECT_COVERAGE_FIRST_OUTPUT: 'first output of the run',
+};
+
+/** WP1 — the discriminator of a WET_PROCESS step. */
+export const WET_PROCESS_KIND_LABELS: Record<common_TechCardWetProcessKind, string> = {
+  TECH_CARD_WET_PROCESS_KIND_UNKNOWN: '',
+  TECH_CARD_WET_PROCESS_KIND_RINSE: 'rinse',
+  TECH_CARD_WET_PROCESS_KIND_ENZYME: 'enzyme wash',
+  TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE: 'garment dye',
+  TECH_CARD_WET_PROCESS_KIND_SOFTENER: 'softener',
+};
+
+// FA1 and FA5 are ADJECTIVES, not phrases, because they describe the same buttonhole and are
+// printed as one item: «horizontal round-end buttonhole». Worded as standalone phrases they would
+// have to repeat the noun, and «round-end buttonhole · horizontal buttonhole» is one buttonhole
+// reported twice on a sheet with no room for it.
+const BUTTONHOLE_STYLE_ADJECTIVE: Record<common_TechCardButtonholeStyle, string> = {
+  TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN: '',
+  TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT: 'straight',
+  TECH_CARD_BUTTONHOLE_STYLE_EYELET: 'eyelet',
+  TECH_CARD_BUTTONHOLE_STYLE_ROUND_END: 'round-end',
+  TECH_CARD_BUTTONHOLE_STYLE_OTHER: 'other-shape',
+};
+
+const BUTTONHOLE_ORIENTATION_ADJECTIVE: Record<common_TechCardButtonholeOrientation, string> = {
+  TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN: '',
+  TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL: 'horizontal',
+  TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL: 'vertical',
+  TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED: 'angled',
+};
+
+/** FA9 — how the thread lies across the holes of a button. Self-standing phrases: this one is not
+ *  merged with anything, and «cross (X)» alone would not say what is crossed. */
+export const BUTTON_ATTACH_PATTERN_LABELS: Record<common_TechCardButtonAttachPattern, string> = {
+  TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN: '',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X: 'button sewn cross (X)',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL: 'button sewn parallel bars',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE: 'button sewn square',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE: 'button sewn U-shape',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER: 'button sewn, other pattern',
+};
+
+/** FA13 — how the zip is set in. The word «zip» is in every member for the same reason the label
+ *  scheme carries «label»: in a settings list nothing above it says what is being set. */
+export const ZIPPER_APPLICATION_LABELS: Record<common_TechCardZipperApplication, string> = {
+  TECH_CARD_ZIPPER_APPLICATION_UNKNOWN: '',
+  TECH_CARD_ZIPPER_APPLICATION_CENTERED: 'centred zip',
+  TECH_CARD_ZIPPER_APPLICATION_LAPPED: 'lapped zip',
+  TECH_CARD_ZIPPER_APPLICATION_INVISIBLE: 'invisible zip',
+  TECH_CARD_ZIPPER_APPLICATION_EXPOSED: 'exposed zip',
+  TECH_CARD_ZIPPER_APPLICATION_FLY: 'fly zip',
+  TECH_CARD_ZIPPER_APPLICATION_SEPARATING_CF: 'separating zip, centre front',
+  TECH_CARD_ZIPPER_APPLICATION_IN_SEAM_POCKET: 'in-seam pocket zip',
+  TECH_CARD_ZIPPER_APPLICATION_OTHER: 'zip, other application',
+};
+
+export const seamSecuringLabel = (v?: string): string => enumText(SEAM_SECURING_LABELS, v);
+export const bindingStyleLabel = (v?: string): string => enumText(BINDING_STYLE_LABELS, v);
+export const labelAttachStitchLabel = (v?: string): string =>
+  enumText(LABEL_ATTACH_STITCH_LABELS, v);
+export const hardwareAttachMethodLabel = (v?: string): string =>
+  enumText(HARDWARE_ATTACH_METHOD_LABELS, v);
+export const holePrepLabel = (v?: string): string => enumText(HOLE_PREP_LABELS, v);
+export const reinforcementLabel = (v?: string): string => enumText(REINFORCEMENT_LABELS, v);
+export const printMethodLabel = (v?: string): string => enumText(PRINT_METHOD_LABELS, v);
+export const peelModeLabel = (v?: string): string => enumText(PEEL_MODE_LABELS, v);
+export const pressureScaleLabel = (v?: string): string => enumText(PRESSURE_SCALE_LABELS, v);
+export const trimActionLabel = (v?: string): string => enumText(TRIM_ACTION_LABELS, v);
+export const cleaningKindLabel = (v?: string): string => enumText(CLEANING_KIND_LABELS, v);
+export const inspectCoverageLabel = (v?: string): string => enumText(INSPECT_COVERAGE_LABELS, v);
+export const wetProcessKindLabel = (v?: string): string => enumText(WET_PROCESS_KIND_LABELS, v);
+export const buttonAttachPatternLabel = (v?: string): string =>
+  enumText(BUTTON_ATTACH_PATTERN_LABELS, v);
+export const zipperApplicationLabel = (v?: string): string =>
+  enumText(ZIPPER_APPLICATION_LABELS, v);
+
+// --- the blocks, as the sheet reads them ---------------------------------------------------------
+
+/** The step's own field names of each block, so a printed setting can be pointed at. Same role
+ *  MachineSettingField plays for the equipment park. */
+export type StepFactField =
+  | 'needles'
+  | 'securing'
+  | 'rowSpacing'
+  | 'fullness'
+  | 'binding'
+  | 'labelStitch'
+  | 'holePrep'
+  | 'reinforcement'
+  | 'foldback'
+  | 'cycleStitches'
+  | 'peel'
+  | 'secondPress'
+  | 'pressure'
+  | 'weldAir'
+  | 'weldFeed'
+  | 'residualTail'
+  | 'buttonhole'
+  | 'bartack'
+  | 'buttonPattern'
+  | 'zipper';
+
+/** The wave's blocks, typed over exactly what is read and with decimals as strings — so the wire
+ *  shape (decimals as messages, passed through decimalToInput) and the form's row shape both
+ *  satisfy it, the same trick the ladder resolvers use. */
+export type StepFacts = {
+  operationType?: string;
+  printMethod?: string;
+  wetProcessKind?: string;
+  stitching?: {
+    needleCount?: number;
+    needleGaugeMm?: string;
+    seamSecuring?: string;
+    rowSpacingMm?: string;
+    fullnessRatio?: string;
+    bindingStyle?: string;
+    labelAttachStitch?: string;
+  };
+  placementLayout?: { count?: number; pitchMm?: string };
+  hardware?: {
+    attachMethod?: string;
+    holePrep?: string;
+    reinforcement?: string;
+    foldbackMm?: string;
+    cycleStitchCount?: number;
+  };
+  print?: { peelMode?: string; secondPressSec?: number; pressureScale?: string };
+  weld?: { airTemperatureC?: number; feedSpeedMMin?: string };
+  trim?: { action?: string; residualAllowanceMm?: string };
+  threadTrim?: { residualTailMaxMm?: string };
+  clean?: { kind?: string };
+  inspect?: { coverageMode?: string };
+  fastening?: {
+    buttonholeStyle?: string;
+    cutLengthMm?: string;
+    buttonholeOrientation?: string;
+    bartackLengthMm?: string;
+    attachPattern?: string;
+    zipperApplication?: string;
+  };
+};
+
+/** The six REQUIRED discriminators alone — no decimals, so the WIRE step satisfies this directly and
+ *  a caller that only wants the phrase does not have to convert its numbers first. */
+export type StepDiscriminators = {
+  printMethod?: string;
+  wetProcessKind?: string;
+  hardware?: { attachMethod?: string };
+  trim?: { action?: string };
+  clean?: { kind?: string };
+  inspect?: { coverageMode?: string };
+};
+
+/** WHAT KIND OF WORK THIS STEP IS, in one phrase — the REQUIRED discriminator of whichever of the
+ *  new verbs it carries. It heads the «machine / mode» column of the printed sheet exactly where a
+ *  sewing step names its machine, and it is the line the frozen release prints beside the heading:
+ *  one function, so a signed release and the sheet of the same card cannot describe a step
+ *  differently. Empty for the verbs that have no discriminator (fold, pack, the press family and
+ *  every legacy token) — and empty is the honest answer there, not a gap. */
+export function stepDiscriminatorText(o: StepDiscriminators): string {
+  return [
+    printMethodLabel(o.printMethod),
+    hardwareAttachMethodLabel(o.hardware?.attachMethod),
+    trimActionLabel(o.trim?.action),
+    cleaningKindLabel(o.clean?.kind),
+    inspectCoverageLabel(o.inspect?.coverageMode),
+    wetProcessKindLabel(o.wetProcessKind),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** HOW MANY OF THEM AND HOW FAR APART — printed in the ZONE column, under the zone word, because
+ *  that column answers «where on the garment» and this is the rest of that same answer. A count of
+ *  one is not printed: the contract says an unset count MEANS one repeat, so the two are the same
+ *  fact and only one of them deserves ink. */
+export function stepPlacementText(o: StepFacts): string {
+  const count = positive(o.placementLayout?.count);
+  const pitch = mm(o.placementLayout?.pitchMm);
+  return [count > 1 ? `× ${count}` : '', pitch ? `pitch ${pitch}` : ''].filter(Boolean).join(' · ');
+}
+
+/** THE FACTS ABOUT THE SEAM ITSELF, for the seam column — securing, the gap between rows, the
+ *  fullness fed in, how the binding is folded, how a label is stitched on, and how much allowance a
+ *  TRIM step leaves behind. That last one belongs here and not with the equipment for one reason:
+ *  the cell above it already prints the allowance the piece was cut with, and «12 mm → trim back to
+ *  5 mm» is one instruction split across two lines of the same cell. */
+export function stepSeamFactTexts(o: StepFacts): string[] {
+  const s = o.stitching;
+  const fullness = (s?.fullnessRatio ?? '').trim();
+  const residual = mm(o.trim?.residualAllowanceMm);
+  return [
+    seamSecuringLabel(s?.seamSecuring),
+    mm(s?.rowSpacingMm) ? `rows ${mm(s?.rowSpacingMm)} apart` : '',
+    // A RATIO, NOT A PERCENTAGE, and printed as one: 1.0 is «ply for ply», 2.0 is «gather it to
+    // half its length». Quoted as «15%» the same number would be read as an allowance to add.
+    fullness ? `fullness ${fullness} : 1` : '',
+    bindingStyleLabel(s?.bindingStyle),
+    labelAttachStitchLabel(s?.labelAttachStitch),
+    residual ? `trim back to ${residual}` : '',
+  ].filter(Boolean);
+}
+
+/** THE FACTS ABOUT THE TOOL AND ITS PROGRAM, for the «machine / mode» column — everything the
+ *  operator sets before the first unit. The needle count and gauge lead because they join the
+ *  needle point and size already printed there off the machine profile: one needle bar, one reading
+ *  («2 needles · gauge 6.4 mm · ballpoint Nm 90»). */
+export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField>> {
+  const s = o.stitching;
+  const h = o.hardware;
+  const p = o.print;
+  const w = o.weld;
+  const f = o.fastening;
+  const needleCount = positive(s?.needleCount);
+  const gauge = mm(s?.needleGaugeMm);
+  const needles = [
+    needleCount > 0 ? `${needleCount} ${needleCount === 1 ? 'needle' : 'needles'}` : '',
+    gauge ? `gauge ${gauge}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  // ONE BUTTONHOLE, ONE ITEM. Shape and direction are adjectives on the same hole and the cut is
+  // its size, so they are joined rather than listed: three items would read as three settings.
+  const bhWords = [
+    enumText(BUTTONHOLE_ORIENTATION_ADJECTIVE, f?.buttonholeOrientation),
+    enumText(BUTTONHOLE_STYLE_ADJECTIVE, f?.buttonholeStyle),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const cut = mm(f?.cutLengthMm);
+  const buttonhole = [bhWords || cut ? `${bhWords ? `${bhWords} ` : ''}buttonhole` : '', cut ? `cut ${cut}` : '']
+    .filter(Boolean)
+    .join(', ');
+  const secondPress = positive(p?.secondPressSec);
+  const air = positive(w?.airTemperatureC);
+  const cycle = positive(h?.cycleStitchCount);
+  const feed = (w?.feedSpeedMMin ?? '').trim();
+  const foldback = mm(h?.foldbackMm);
+  const bartack = mm(f?.bartackLengthMm);
+  const tail = mm(o.threadTrim?.residualTailMaxMm);
+  return nonEmpty<StepFactField>([
+    { field: 'needles', text: needles },
+    { field: 'holePrep', text: holePrepLabel(h?.holePrep) },
+    { field: 'reinforcement', text: reinforcementLabel(h?.reinforcement) },
+    { field: 'foldback', text: foldback ? `foldback ${foldback}` : '' },
+    { field: 'cycleStitches', text: cycle > 0 ? `${cycle} stitches per cycle` : '' },
+    { field: 'peel', text: peelModeLabel(p?.peelMode) },
+    { field: 'secondPress', text: secondPress > 0 ? `second press ${secondPress} s` : '' },
+    { field: 'pressure', text: pressureScaleLabel(p?.pressureScale) },
+    // ТОЛЬКО у проклейки: у ультразвука горячего воздуха нет вовсе, и «hot air» на его строке
+    // отправило бы оператора искать регулятор, которого на машине не существует.
+    { field: 'weldAir', text: air > 0 ? `hot air ${air} °C` : '' },
+    { field: 'weldFeed', text: feed ? `feed ${feed} m/min` : '' },
+    { field: 'residualTail', text: tail ? `thread tails max ${tail}` : '' },
+    { field: 'buttonhole', text: buttonhole },
+    { field: 'bartack', text: bartack ? `bartack ${bartack}` : '' },
+    { field: 'buttonPattern', text: buttonAttachPatternLabel(f?.attachPattern) },
+    { field: 'zipper', text: zipperApplicationLabel(f?.zipperApplication) },
+  ]);
 }

@@ -128,6 +128,25 @@ const techCard = {
     bomItems: [
       { id: 100, lineKey: 'B1', name: 'shell fabric', section: 'TECH_CARD_BOM_SECTION_FABRIC', unit: 'm' },
       { id: 101, lineKey: 'B2', name: 'main zip', kind: 'TECH_CARD_BOM_KIND_ZIPPER', unit: 'pcs' },
+      // ДВА ВИДА BOM ИЗ ВОЛНЫ. Их подписи живут в Partial-картах с фолбэком «?? kind», то есть tsc
+      // о пропуске молчит, а на бумагу для цеха уходит сырой токен. Обе строки здесь ровно затем,
+      // чтобы этот токен было видно глазами: «TECH_CARD_BOM_KIND_…» на листе = подпись не завели.
+      {
+        id: 102,
+        lineKey: 'B3',
+        name: 'seam tape 20 mm',
+        kind: 'TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE',
+        section: 'TECH_CARD_BOM_SECTION_TRIM',
+        unit: 'm',
+      },
+      {
+        id: 103,
+        lineKey: 'B4',
+        name: 'cut-away backing',
+        kind: 'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER',
+        section: 'TECH_CARD_BOM_SECTION_INTERLINING',
+        unit: 'm',
+      },
     ],
     operations: [
       {
@@ -188,6 +207,212 @@ const techCard = {
         pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS',
         zone: 'TECH_CARD_GARMENT_ZONE_COLLAR',
         pressTemperatureC: 150,
+      },
+      // ── СЕМЕЙСТВА СВОЙСТВ ШАГА (волна operation-kinds) ───────────────────────────────────────
+      //
+      // Каждый блок обязан ДОЙТИ ДО БУМАГИ, и проверить это может только рендер: ячейка «seam»
+      // собирается перечислением фактов руками, колонка «machine / mode» — резолвером, который
+      // знает ровно те семейства, что в него вписали, и tsc не видит ни одного пропуска в обоих.
+      // Ниже — по шагу на семейство плюс те деградации, о которых бумага обязана говорить честно.
+      {
+        // СТРОЧКА: две иглы с расстоянием между ними, «без закрепки» как ЯВНЫЙ ответ (не молчание),
+        // шаг между рядами и посадка отношением. Иглы уходят в колонку машинки — к точке и номеру
+        // с профиля, потому что игольница одна; остальное — в колонку шва.
+        operationNumber: 70,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE',
+        zone: 'TECH_CARD_GARMENT_ZONE_BACK',
+        pieceLineKeys: ['P1'],
+        stitching: {
+          needleCount: 2,
+          needleGaugeMm: dec('6.4'),
+          seamSecuring: 'TECH_CARD_SEAM_SECURING_NONE',
+          rowSpacingMm: dec('6'),
+          fullnessRatio: dec('1.15'),
+        },
+        smv: dec('0.8'),
+      },
+      {
+        // Бейка и этикетка — тоже строчка, но факты про шов: как сложена окантовка, какой схемой
+        // пришита этикетка. Обе подписи самостоятельны: в списке настроек над ними ничего не
+        // говорит, о чём речь.
+        operationNumber: 80,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING',
+        zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
+        stitching: {
+          bindingStyle: 'TECH_CARD_BINDING_STYLE_DOUBLE_FOLD',
+          labelAttachStitch: 'TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM',
+        },
+      },
+      {
+        // ПЕТЕЛЬНЫЙ АВТОМАТ: расстановка (шесть штук через 90 мм) + цикловая тройка фурнитуры,
+        // законная на MACHINE (подготовка отверстия, усилитель, стежков в цикле), + сама петля.
+        // Петля печатается ОДНИМ фактом: направление и форма — прилагательные к одной прорези.
+        operationNumber: 90,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+        zone: 'TECH_CARD_GARMENT_ZONE_CLOSURE',
+        placementLayout: { count: 6, pitchMm: dec('90') },
+        hardware: {
+          holePrep: 'TECH_CARD_HOLE_PREP_PUNCH',
+          reinforcement: 'TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH',
+          cycleStitchCount: 42,
+        },
+        fastening: {
+          buttonholeStyle: 'TECH_CARD_BUTTONHOLE_STYLE_ROUND_END',
+          buttonholeOrientation: 'TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL',
+          cutLengthMm: dec('18'),
+          bartackLengthMm: dec('6'),
+        },
+        smv: dec('0.4'),
+      },
+      {
+        // Пуговицы и молния — те же FA-поля, но каждое отвечает своей машинке. Расстановка здесь
+        // ЕДИНИЦА, и она не печатается: контракт говорит, что незаполненный счётчик и значит один
+        // повтор, то есть два способа сказать одно и то же, а чернил стоит один.
+        operationNumber: 100,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+        zone: 'TECH_CARD_GARMENT_ZONE_CLOSURE',
+        placementLayout: { count: 1 },
+        fastening: { attachPattern: 'TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X' },
+      },
+      {
+        operationNumber: 110,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING',
+        zone: 'TECH_CARD_GARMENT_ZONE_CLOSURE',
+        bomLineKeys: ['B2'],
+        fastening: { zipperApplication: 'TECH_CARD_ZIPPER_APPLICATION_INVISIBLE' },
+      },
+      {
+        // СВАРКА. Деградация §6.5: у проклейки НЕТ номера стежка по ISO 4915 — она соединяет
+        // теплом, а не ниткой. На бумаге обязано стоять «seam-sealing tape (hot air)» БЕЗ номера, и
+        // это не «машинку не назвали», а «стежка не существует». Горячий воздух — только у неё.
+        operationNumber: 120,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_SEAM_TAPING',
+        zone: 'TECH_CARD_GARMENT_ZONE_SHOULDER',
+        bomLineKeys: ['B3'],
+        weld: { airTemperatureC: 550, feedSpeedMMin: dec('4.5') },
+        smv: dec('1.2'),
+      },
+      {
+        // Ультразвук: горячего воздуха у него нет вовсе, и в строке остаётся одна подача. Пустая
+        // половина здесь — правда о машине, а не недозаполненная карточка.
+        operationNumber: 130,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER',
+        zone: 'TECH_CARD_GARMENT_ZONE_HEM',
+        weld: { feedSpeedMMin: dec('2.8') },
+      },
+      {
+        // ФУРНИТУРА. Дискриминатор («press-set») встаёт туда, где швейный шаг называет машинку:
+        // колонка «machine / mode» у этих глаголов иначе печатала бы прочерк при заполненном шаге.
+        operationNumber: 140,
+        operationType: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+        zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+        placementLayout: { count: 4, pitchMm: dec('120') },
+        hardware: {
+          attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET',
+          holePrep: 'TECH_CARD_HOLE_PREP_PUNCH',
+          reinforcement: 'TECH_CARD_REINFORCEMENT_FABRIC_STAY',
+        },
+        smv: dec('0.6'),
+      },
+      {
+        // Стропа через пряжку: подгиб печатается только у этого способа крепления.
+        operationNumber: 150,
+        operationType: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+        zone: 'TECH_CARD_GARMENT_ZONE_WAIST',
+        hardware: {
+          attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED',
+          foldbackMm: dec('40'),
+        },
+      },
+      {
+        // ПЕЧАТЬ БЕРЁТ ПРЕСС ВЗАЙМЫ. Термотрансфер прижимают температурой, выдержкой, давлением и
+        // силиконовой бумагой — ВТО-блок здесь законен, хотя шаг не «утюжка», и до этой волны все
+        // четыре числа не печатались нигде: колонка спрашивала isPressStepType, а он на PRINT ложь.
+        operationNumber: 160,
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRINT',
+        zone: 'TECH_CARD_GARMENT_ZONE_CHEST',
+        printMethod: 'TECH_CARD_PRINT_METHOD_HEAT_TRANSFER',
+        placementLayout: { count: 2, pitchMm: dec('60') },
+        print: {
+          peelMode: 'TECH_CARD_PEEL_MODE_HOT',
+          secondPressSec: 5,
+          pressureScale: 'TECH_CARD_PRESSURE_SCALE_FIRM',
+        },
+        pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_PRESS',
+        pressTemperatureC: 165,
+        pressDwellSec: 12,
+        pressCloth: 'TECH_CARD_PRESS_CLOTH_SILICONE_PAPER',
+        smv: dec('0.9'),
+      },
+      {
+        // Шелкография: носителя нет ВООБЩЕ, и «no carrier to peel» — ответ, а не пустота.
+        operationNumber: 170,
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRINT',
+        zone: 'TECH_CARD_GARMENT_ZONE_BACK',
+        printMethod: 'TECH_CARD_PRINT_METHOD_SCREEN',
+        print: { peelMode: 'TECH_CARD_PEEL_MODE_NONE' },
+      },
+      {
+        // ПОДРЕЗКА. Остаток припуска стоит в колонке шва, прямо под тем припуском, с которым
+        // кроили: «12 mm» и «trim back to 5 mm» — одно указание, разорванное на две строки было бы
+        // двумя разными числами про один срез.
+        operationNumber: 180,
+        operationType: 'TECH_CARD_OPERATION_TYPE_TRIM',
+        zone: 'TECH_CARD_GARMENT_ZONE_ARMHOLE',
+        seamAllowanceMm: dec('12'),
+        trim: {
+          action: 'TECH_CARD_TRIM_ACTION_GRADE_LAYERS',
+          residualAllowanceMm: dec('5'),
+        },
+        smv: dec('0.5'),
+      },
+      {
+        operationNumber: 190,
+        operationType: 'TECH_CARD_OPERATION_TYPE_THREAD_TRIM',
+        zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+        threadTrim: { residualTailMaxMm: dec('3') },
+      },
+      {
+        operationNumber: 200,
+        operationType: 'TECH_CARD_OPERATION_TYPE_CLEAN',
+        zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+        clean: { kind: 'TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL' },
+      },
+      {
+        operationNumber: 210,
+        operationType: 'TECH_CARD_OPERATION_TYPE_INSPECT',
+        zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+        inspect: { coverageMode: 'TECH_CARD_INSPECT_COVERAGE_AQL_PLAN' },
+        smv: dec('1.0'),
+      },
+      {
+        // МОКРАЯ ОБРАБОТКА — вид лежит ПОЛЕМ шага, а не блоком: семейство из одного факта.
+        operationNumber: 220,
+        operationType: 'TECH_CARD_OPERATION_TYPE_WET_PROCESS',
+        zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+        wetProcessKind: 'TECH_CARD_WET_PROCESS_KIND_ENZYME',
+      },
+      {
+        // СЛОЖИТЬ И УПАКОВАТЬ — полей у них НЕТ, и это находка волны, а не пропуск. Здесь они
+        // держат другую проверку: карточная плотность («4 st/cm») — ШВЕЙНЫЙ дефолт, и до этой
+        // волны она наследовалась на любой не-ВТО шаг, то есть каждая такая строка печатала бы в
+        // колонке шва число, которому на упаковке нечего описывать.
+        operationNumber: 230,
+        operationType: 'TECH_CARD_OPERATION_TYPE_FOLD',
+        zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+      },
+      {
+        operationNumber: 240,
+        operationType: 'TECH_CARD_OPERATION_TYPE_PACK',
+        zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+        smv: dec('0.3'),
       },
     ],
     labels: [
