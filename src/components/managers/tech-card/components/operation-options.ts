@@ -58,6 +58,21 @@ export const OPERATION_TYPE_LABELS: Record<common_TechCardOperationType, string>
   TECH_CARD_OPERATION_TYPE_MACHINE: 'machine — sewn on…',
   TECH_CARD_OPERATION_TYPE_PRESS: 'press (to one side / steam)',
   TECH_CARD_OPERATION_TYPE_PRESS_OPEN: 'press open',
+  // 16-24: the work that is neither sewing nor pressing. Until this wave every one of them was a
+  // HANDWORK or OTHER step with the instruction typed into the note, which is why none of them had
+  // a duration anybody could cost or a field anybody could check.
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: 'hardware set (rivet / snap / eyelet)',
+  TECH_CARD_OPERATION_TYPE_PRINT: 'print (screen / transfer / foil)',
+  // «trim» here is the ALLOWANCE — grade, clip, notch — and not the thread tails, which are their
+  // own step below. Two different tools, two different moments, and the floor confuses them if the
+  // sheet calls both «trim».
+  TECH_CARD_OPERATION_TYPE_TRIM: 'trim allowance (grade / clip / notch)',
+  TECH_CARD_OPERATION_TYPE_THREAD_TRIM: 'thread trim (tails)',
+  TECH_CARD_OPERATION_TYPE_CLEAN: 'clean (spot / lint / chalk)',
+  TECH_CARD_OPERATION_TYPE_INSPECT: 'inspect (QC)',
+  TECH_CARD_OPERATION_TYPE_FOLD: 'fold',
+  TECH_CARD_OPERATION_TYPE_PACK: 'pack',
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: 'wet process (rinse / dye / softener)',
 };
 
 // The PICKER is a curated SUBSET of the dictionary above — the label map is total because rendering
@@ -65,20 +80,45 @@ export const OPERATION_TYPE_LABELS: Record<common_TechCardOperationType, string>
 // somebody create new work in a retired vocabulary. Only the values are listed here; the labels come
 // from the one map, so the picker and the printed sheet cannot say different things about a token.
 //
-// SIX CHOICES, DOWN FROM THIRTEEN, and the nine that left are not a simplification: they were the
-// answer to a DIFFERENT question. «Overlock» never said what the step does, it said what it is done
-// on, so the list forced «стачать» and «обметать» into one field and had no room at all for the
-// machines the shop actually owns (coverlock, zigzag, the automats). Since 0306 the step says
-// MACHINE and the machine picker beside it says which one — see equipment-options.ts.
+// SIX CHOICES BECAME FIFTEEN, and the two movements are opposite in kind. The NINE THAT LEFT were
+// not a simplification: they were the answer to a DIFFERENT question. «Overlock» never said what
+// the step does, it said what it is done on, so the list forced «стачать» and «обметать» into one
+// field and had no room at all for the machines the shop actually owns (coverlock, zigzag, the
+// automats). Since 0306 the step says MACHINE and the machine picker beside it says which one —
+// see equipment-options.ts.
 //
-// Ordered by how often a step is one of them, not alphabetically: almost every step is machine work,
-// and press / press open are the межоперационные steps that used to be smuggled into a seam class.
+// The NINE THAT ARRIVED are work that is not sewing and not pressing, and until now had exactly one
+// home: a HANDWORK or OTHER step with the instruction typed into the note. Setting a rivet,
+// pressing a transfer, grading an allowance, rinsing, inspecting, folding and packing each take
+// time, happen in a zone and cost money, and none of them borrows a verb from a machine_type the
+// way a MACHINE step does — each is its own answer to «what is done».
+//
+// Ordered the way the work happens, not alphabetically. The assembly verbs first (almost every step
+// is machine work, and press / press open are the межоперационные steps that used to be smuggled
+// into a seam class), then the processes that are their own trade — hardware, print, wet — then the
+// finishing chain in the order the floor walks it: thread trim, clean, inspect, fold, pack.
+// HANDWORK and OTHER stay LAST on purpose: they are the escape hatches, and an escape hatch offered
+// early is an escape hatch taken early — which is precisely how these nine verbs spent years as
+// free text in a note.
 const OPERATION_TYPE_PICKER: common_TechCardOperationType[] = [
   'TECH_CARD_OPERATION_TYPE_UNKNOWN',
+  // assembly
   'TECH_CARD_OPERATION_TYPE_MACHINE',
   'TECH_CARD_OPERATION_TYPE_PRESS',
   'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
   'TECH_CARD_OPERATION_TYPE_FUSING',
+  'TECH_CARD_OPERATION_TYPE_TRIM',
+  // processes of their own
+  'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+  'TECH_CARD_OPERATION_TYPE_PRINT',
+  'TECH_CARD_OPERATION_TYPE_WET_PROCESS',
+  // finishing, in floor order
+  'TECH_CARD_OPERATION_TYPE_THREAD_TRIM',
+  'TECH_CARD_OPERATION_TYPE_CLEAN',
+  'TECH_CARD_OPERATION_TYPE_INSPECT',
+  'TECH_CARD_OPERATION_TYPE_FOLD',
+  'TECH_CARD_OPERATION_TYPE_PACK',
+  // escape hatches
   'TECH_CARD_OPERATION_TYPE_HANDWORK',
   'TECH_CARD_OPERATION_TYPE_OTHER',
 ];
@@ -183,11 +223,36 @@ export const attachmentKindLabel = (v?: string): string =>
     ? ''
     : (ATTACHMENT_KIND_LABELS[v as common_TechCardAttachmentKind] ?? '');
 
+// THE LABELS NAME WHAT THE DISTANCE IS MEASURED FROM, because two of these five modes carry a
+// number and they do not measure it from the same place: `width` is an inset from the EDGE, and
+// `parallel_to_seam` is an offset from the SEAM LINE, which on a lapped or felled seam is a
+// different line entirely. The old label «at width» was unambiguous only while it was the sole mode
+// with a number; beside «parallel» it stops being one, and the operator with a guide bar has no way
+// to tell which line to set it against. Same fact governs the input's own caption and the printed
+// sheet — see TOPSTITCH_MODE_HAS_WIDTH below, which is where the question «is there a number at
+// all» is asked.
 export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; label: string }> = [
   { value: 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN', label: '— none —' },
   { value: 'TECH_CARD_TOPSTITCH_MODE_EDGE', label: 'edge' },
-  { value: 'TECH_CARD_TOPSTITCH_MODE_WIDTH', label: 'at width' },
+  { value: 'TECH_CARD_TOPSTITCH_MODE_WIDTH', label: 'at width from the edge' },
+  { value: 'TECH_CARD_TOPSTITCH_MODE_IN_DITCH', label: 'in the ditch' },
+  { value: 'TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM', label: 'parallel — offset from the seam' },
 ];
+
+/** The picker for ONE step: the whole list plus whatever that step already holds. Same defensive
+ *  shape as operationTypeOptionsFor, for a sharper reason — this vocabulary has no deprecated half,
+ *  so a token missing from the list is not legacy, it is a mode NEWER than this bundle, which is the
+ *  normal state of the project between a backend deploy and a client deploy. Radix renders a select
+ *  whose value is absent from its own items as a BLANK trigger, so without this the row would read
+ *  «no topstitch» on a step that has one — and, because the editor writes the form back on save,
+ *  that reading is what the next save records. */
+export function topstitchModeOptionsFor(
+  current?: string,
+): Array<{ value: common_TechCardTopstitchMode; label: string }> {
+  const v = (current ?? '') as common_TechCardTopstitchMode;
+  if (!v || topstitchModeOptions.some((o) => o.value === v)) return topstitchModeOptions;
+  return [...topstitchModeOptions, { value: v, label: `${v} — unknown to this app version` }];
+}
 
 // DOES THIS MODE CARRY A WIDTH — one answer, stated PER MODE, and deliberately not written as
 // «anything that is not WIDTH». Four surfaces asked that question separately and all four asked it
@@ -217,6 +282,14 @@ export const TOPSTITCH_MODE_HAS_WIDTH: Record<common_TechCardTopstitchMode, bool
   TECH_CARD_TOPSTITCH_MODE_EDGE: false,
   // The inset from the edge is the entire instruction.
   TECH_CARD_TOPSTITCH_MODE_WIDTH: true,
+  // Sunk into the seam line itself. The distance is zero by definition, and a number offered here
+  // would be a number about nothing — the server refuses one outright.
+  TECH_CARD_TOPSTITCH_MODE_IN_DITCH: false,
+  // A number, and NOT the same number as `width`: this one is measured from the SEAM LINE, not from
+  // the finished edge. The classification here answers only «is there a number»; what it is
+  // measured from is said by the label (topstitchModeOptions) and has to be said again by the
+  // input's caption and by the printed sheet, or the operator sets the guide against the wrong line.
+  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: true,
 };
 
 /** The mode is KNOWN and carries a width: show the input, require the number, print it. An unknown
@@ -255,6 +328,21 @@ const OPERATION_TYPE_VERB: Record<common_TechCardOperationType, string> = {
   TECH_CARD_OPERATION_TYPE_MACHINE: 'machine',
   TECH_CARD_OPERATION_TYPE_PRESS: 'press',
   TECH_CARD_OPERATION_TYPE_PRESS_OPEN: 'press open',
+  // The nine verbs of this wave DO carry their own word: unlike MACHINE they have no second axis to
+  // borrow one from, so what stands here is what the heading says. «set hardware» rather than the
+  // machine verb «attach hardware» (that one is a sewn-on attachment, this one is clinched or
+  // pressed), and «trim allowance» / «trim threads» kept apart for the reason their labels are.
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: 'set hardware',
+  TECH_CARD_OPERATION_TYPE_PRINT: 'print',
+  TECH_CARD_OPERATION_TYPE_TRIM: 'trim allowance',
+  TECH_CARD_OPERATION_TYPE_THREAD_TRIM: 'trim threads',
+  TECH_CARD_OPERATION_TYPE_CLEAN: 'clean',
+  TECH_CARD_OPERATION_TYPE_INSPECT: 'inspect',
+  TECH_CARD_OPERATION_TYPE_FOLD: 'fold',
+  TECH_CARD_OPERATION_TYPE_PACK: 'pack',
+  // The kind of bath is the step's own required field (rinse / enzyme / dye / softener), so the
+  // heading states the family and lets the field say which one.
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: 'wet-process',
 };
 
 export function zoneLabel(zone?: common_TechCardGarmentZone): string {

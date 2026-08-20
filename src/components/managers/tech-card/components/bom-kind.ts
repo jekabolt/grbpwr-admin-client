@@ -51,6 +51,22 @@ export const KIND_HOME_SECTION: Partial<Record<common_TechCardBomKind, string>> 
   TECH_CARD_BOM_KIND_BONING: 'TECH_CARD_BOM_SECTION_TRIM',
   TECH_CARD_BOM_KIND_LACE: 'TECH_CARD_BOM_SECTION_TRIM',
   TECH_CARD_BOM_KIND_RIBBING: 'TECH_CARD_BOM_SECTION_TRIM',
+  // Лента с ГОРЯЧИМ КЛЕЕМ, а не пришивная: её кладёт машинка seam_taping поверх готового шва. Дом —
+  // TRIM, к остальным лентам (tape, binding, piping, webbing): секция отвечает на «чем это лежит в
+  // спецификации», а не «чем это ставят», и по этой мерке она соседка ленты, а не машинки.
+  TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE: 'TECH_CARD_BOM_SECTION_TRIM',
+  // прокладки
+  //
+  // ЭТА СЕКЦИЯ НЕ ВЫДАЁТ ВИДОВ В ПИКЕРЕ, и запись здесь всё равно обязательна. INTERLINING —
+  // рулонный материал, он не входит в KIND_ELIGIBLE_SECTIONS ниже, поэтому строка прокладки
+  // контрола «вид» не показывает вовсе и стабилизатор из интерфейса выбрать нельзя. Но дом —
+  // зеркало серверного bomKindHomeSection, из которого выведен сам список допустимых видов
+  // (ValidTechCardBomKinds): вид без дома для валидации не существует. Поставить его в
+  // DECORATION ради того, чтобы он появился в пикере, значит предложить оператору значение,
+  // которое стор отвергнет по bom_items[i].kind, — ровно та беда, ради которой этот файл и
+  // написан. Подпись при этом работает: строка, приехавшая по проводу, читается словом и на
+  // экране, и на бумаге, а это и есть то, что чинится здесь.
+  TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER: 'TECH_CARD_BOM_SECTION_INTERLINING',
   // декор
   TECH_CARD_BOM_KIND_PRINT: 'TECH_CARD_BOM_SECTION_DECORATION',
   TECH_CARD_BOM_KIND_EMBROIDERY: 'TECH_CARD_BOM_SECTION_DECORATION',
@@ -108,6 +124,8 @@ export const KIND_LABEL: Partial<Record<common_TechCardBomKind, string>> = {
   TECH_CARD_BOM_KIND_BONING: 'boning',
   TECH_CARD_BOM_KIND_LACE: 'lace',
   TECH_CARD_BOM_KIND_RIBBING: 'ribbing',
+  TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE: 'seam sealing tape',
+  TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER: 'embroidery stabilizer',
   TECH_CARD_BOM_KIND_PRINT: 'print',
   TECH_CARD_BOM_KIND_EMBROIDERY: 'embroidery',
   TECH_CARD_BOM_KIND_APPLIQUE: 'applique',
@@ -197,7 +215,11 @@ export const MACHINE_TYPE_PREFERRED_KINDS: Partial<
   TECH_CARD_MACHINE_TYPE_COVERLOCK: ['TECH_CARD_BOM_KIND_OVERLOCK_THREAD'],
   TECH_CARD_MACHINE_TYPE_BARTACK: ['TECH_CARD_BOM_KIND_SEWING_THREAD'],
   TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE: ['TECH_CARD_BOM_KIND_TOPSTITCH_THREAD'],
-  TECH_CARD_MACHINE_TYPE_EMBROIDERY: ['TECH_CARD_BOM_KIND_EMBROIDERY_THREAD'],
+  TECH_CARD_MACHINE_TYPE_EMBROIDERY: [
+    'TECH_CARD_BOM_KIND_EMBROIDERY_THREAD',
+    'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER',
+  ],
+  TECH_CARD_MACHINE_TYPE_SEAM_TAPING: ['TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE'],
   TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING: [
     'TECH_CARD_BOM_KIND_ZIPPER',
     'TECH_CARD_BOM_KIND_ZIPPER_SLIDER',
