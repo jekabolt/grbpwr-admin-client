@@ -74,7 +74,12 @@ import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
-import { planUnitRename, unitRenameAct, type UnitKeyRow } from './assembly-rename';
+import {
+  planUnitRename,
+  renamePosEdits,
+  unitRenameAct,
+  type UnitKeyRow,
+} from './assembly-rename';
 import {
   appendLabel,
   canRedo,
@@ -3969,6 +3974,13 @@ export function OperationsField({
     }
 
     rewriteUnitKeySites({ outputs, inputs }, next);
+    // РУЧНАЯ ПОЗИЦИЯ НОДЫ ЕДЕТ ВМЕСТЕ С КЛЮЧОМ, и едет ДО записи истории: `restore` отдаёт
+    // обратную пачку по своему синхронному снимку оверрайдов, и другой возможности узнать «где
+    // нода стояла до жеста» у записи нет. По тому же снимку (`peek`, а не `pos` из рендера)
+    // считается и прямая пачка — иначе половины разошлись бы на кадр. Пустая пачка законна: ноду
+    // могли ни разу не двигать, и выдумывать ей позицию значит приколотить её навсегда.
+    const posForward = renamePosEdits(prefs.peek(), from, next);
+    const posBack = prefs.restore(posForward);
     setHistory(
       record(history.current, {
         kind: 'rename',
@@ -3978,6 +3990,8 @@ export function OperationsField({
         to: next,
         outputs,
         inputs,
+        posBack,
+        posForward,
         label: renameLabel(from, next),
       }),
     );
@@ -4099,6 +4113,9 @@ export function OperationsField({
       // адресам, записанным жестом, а не по повторному скану: шаг, дописавший ссылку на НОВЫЙ ключ
       // уже после переименования, эту ссылку сделал сам, и отмена чужой работы не касается.
       applyToForm(() => rewriteUnitKeySites(rec, rec.from));
+      // И РАСКЛАДКУ — ТЕМ ЖЕ НАЖАТИЕМ. Вернуть ссылки, оставив ноду под новым кодом, значит
+      // оставить её в авто-раскладке: жест был один, и половин у него нет.
+      prefs.restore(rec.posBack);
     } else {
       applyToForm(() => {
         setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
@@ -4150,6 +4167,7 @@ export function OperationsField({
     }
     if (rec.kind === 'rename') {
       applyToForm(() => rewriteUnitKeySites(rec, rec.to));
+      prefs.restore(rec.posForward); // зеркало отмены: раскладка возвращается тем же нажатием
       setHistory(redoStep(history.current));
       return;
     }

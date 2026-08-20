@@ -255,6 +255,14 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
     [restore],
   );
 
+  /**
+   * СИНХРОННЫЙ СНИМОК ОВЕРРАЙДОВ — для тех, кто считает пачку правок сам (переезд оверрайда при
+   * переименовании узла). Читать для этого `pos` из рендера нельзя: он отстаёт на кадр, и пачка,
+   * посчитанная по нему, разошлась бы с обратной пачкой, которую `restore` считает по этому же
+   * снимку. Читатель, а не писатель: в хранилище отсюда дороги нет.
+   */
+  const peek = useCallback(() => cur.current.pos, []);
+
   // Сброс РАСКЛАДКИ, а не предпочтений: режим и ось — не расстановка нод, и «расставь заново»
   // не значит «забудь, как я смотрю на эту карточку».
   const reset = useCallback(() => {
@@ -278,7 +286,7 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
     [commit],
   );
 
-  return { pos, move, restore, reset, mode, setMode, axis, setAxis };
+  return { pos, peek, move, restore, reset, mode, setMode, axis, setAxis };
 }
 
 /** Убрать позиции нод, которых в графе больше нет. Зовётся только при переполнении потолка. */

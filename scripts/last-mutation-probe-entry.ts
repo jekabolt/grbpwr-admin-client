@@ -28,4 +28,7 @@ export {
   undoStep,
   undoTitle,
 } from '../src/components/managers/tech-card/components/last-mutation';
-export { unitRenameAct } from '../src/components/managers/tech-card/components/assembly-rename';
+export {
+  renamePosEdits,
+  unitRenameAct,
+} from '../src/components/managers/tech-card/components/assembly-rename';

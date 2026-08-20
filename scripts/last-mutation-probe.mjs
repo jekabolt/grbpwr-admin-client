@@ -63,6 +63,7 @@ const {
   resolvePending,
   undoStep,
   undoTitle,
+  renamePosEdits,
   unitRenameAct,
 } = await import(pathToFileURL(outfile).href);
 
@@ -129,6 +130,8 @@ is(
     to: 'BODY',
     outputs: [],
     inputs: [],
+    posBack: [],
+    posForward: [],
     label: renameLabel('SHELL', 'BODY'),
   }),
   'undo — rename ▣ SHELL → BODY',
@@ -318,6 +321,9 @@ const REN = {
     { index: 1, fieldId: 'r2', at: 0 },
     { index: 2, fieldId: 'r3', at: 1 },
   ],
+  // Ноду не двигали: пустая пачка законна, и щит отмены о раскладке не спрашивает вовсе.
+  posBack: [],
+  posForward: [],
   label: renameLabel('SHELL', 'BODY'),
 };
 const R3 = rows('r1', 'r2', 'r3');
@@ -628,6 +634,12 @@ function stand(initialIds = [], pieces = []) {
         for (const at of s.at) inputs.push({ index: s.index, fieldId: fields[s.index].id, at });
       }
       api.write({ outputs, inputs }, next);
+      // РАСКЛАДОЧНАЯ ПОЛОВИНА ТОГО ЖЕ ЖЕСТА. Оверрайды ключуются кодом узла — тем самым, который
+      // жест и переписывает; не перенеси его, и нода прыгнет в авто-раскладку, а мусор останется
+      // под мёртвым ключом. Обратная пачка считается ДО применения и по тому же снимку.
+      const posForward = renamePosEdits(pos, from, next);
+      const posBack = inverseEdits(pos, posForward);
+      pos = applyEdits(pos, posForward);
       hist = record(hist, {
         kind: 'rename',
         index,
@@ -636,6 +648,8 @@ function stand(initialIds = [], pieces = []) {
         to: next,
         outputs,
         inputs,
+        posBack,
+        posForward,
         label: renameLabel(from, next),
       });
       said.push(`renamed ${from} → ${next} in ${plan.steps} steps`);
@@ -719,6 +733,7 @@ function stand(initialIds = [], pieces = []) {
         applying = true;
         api.write(rec, rec.from);
         applying = false;
+        pos = applyEdits(pos, rec.posBack); // одно нажатие возвращает и ссылки, и раскладку
       } else {
         applying = true;
         units.set(fields[rec.index].id, rec.unitKey);
@@ -758,6 +773,7 @@ function stand(initialIds = [], pieces = []) {
         applying = true;
         api.write(rec, rec.to);
         applying = false;
+        pos = applyEdits(pos, rec.posForward);
         hist = redoStep(hist);
         return;
       }
@@ -1026,6 +1042,65 @@ function chain() {
   is('а переименование осталось', s.card[1].ins, ['CARCASS', 'SLEEVE']);
   s.undo();
   is('второй ⌘Z снял переименование', s.card[1].ins, ['SHELL', 'SLEEVE']);
+}
+
+{
+  // РУЧНАЯ РАСКЛАДКА ПЕРЕЕЗЖАЕТ ВМЕСТЕ С КЛЮЧОМ, И ВОЗВРАЩАЕТСЯ ТЕМ ЖЕ НАЖАТИЕМ. Хранилище позиций
+  // ключуется КОДОМ УЗЛА — тем самым, который жест переписывает. Не перенеси оверрайд, и
+  // переименованная нода прыгнет в авто-раскладку: ровно та потеря, с жалобы на которую и начался
+  // переписыватель. Верни ссылки без раскладки — и одно ⌘Z оставит карточку в состоянии, которого
+  // автор не создавал.
+  const s = chain();
+  s.move([{ key: 'SHELL', at: { x: 400, y: 300 } }]);
+  s.clearForm(); // жест раскладки формовых записей не гасит, но и мешать сцене незачем
+  s.rename(0, 'CARCASS');
+  is('позиция переехала на новый код', s.pos, { CARCASS: { x: 400, y: 300 } });
+  is('и под старым ничего не осталось', s.pos.SHELL, undefined);
+  is('жест по-прежнему ОДНА запись', s.history.undo.filter((e) => e.kind === 'rename').length, 1);
+  s.undo();
+  is('одно ⌘Z вернуло раскладку', s.pos, { SHELL: { x: 400, y: 300 } });
+  is('и ссылки — тем же нажатием', s.card[1].ins, ['SHELL', 'SLEEVE']);
+  s.redo();
+  is('⇧⌘Z вернул и то, и другое', s.pos, { CARCASS: { x: 400, y: 300 } });
+  is('и ссылки', s.card[1].ins, ['CARCASS', 'SLEEVE']);
+}
+
+{
+  // НОДУ НЕ ДВИГАЛИ — пачка пустая, и выдумывать позицию нельзя: приколоченная инверсией нода
+  // навсегда осталась бы там, куда её однажды поставила авто-раскладка.
+  const s = chain();
+  s.rename(0, 'CARCASS');
+  is('хранилище пусто, как и было', s.pos, {});
+  s.undo();
+  is('и после отмены пусто', s.pos, {});
+}
+
+{
+  // ОВЕРРАЙД ПОД НОВЫМ КЛЮЧОМ УЖЕ БЫЛ: узел CARCASS когда-то жил, его растворили, позиция
+  // осталась. Отмена обязана вернуть ОБА оверрайда, а не затереть чужой.
+  const s = chain();
+  s.move([{ key: 'SHELL', at: { x: 400, y: 300 } }]);
+  s.move([{ key: 'CARCASS', at: { x: 700, y: 40 } }]);
+  s.clearForm();
+  s.rename(0, 'CARCASS');
+  is('нода встала туда, где стояла', s.pos, { CARCASS: { x: 400, y: 300 } });
+  s.undo();
+  is('и отмена вернула ОБА', s.pos, {
+    CARCASS: { x: 700, y: 40 },
+    SHELL: { x: 400, y: 300 },
+  });
+}
+
+{
+  // ЩИТ ОТМЕНЫ НЕ ПУСТИЛ — не возвращается НИ ОДНА половина. Нода, вернувшаяся под старый код без
+  // своих ссылок, стояла бы под именем, которого в карточке нет.
+  const s = chain();
+  s.move([{ key: 'SHELL', at: { x: 400, y: 300 } }]);
+  s.rename(0, 'CARCASS');
+  s.saveAndReset();
+  s.undo();
+  is('отказ произнесён', s.said.at(-1), 'the sequence has changed — nothing to undo');
+  is('и раскладка осталась на новом коде', s.pos, { CARCASS: { x: 400, y: 300 } });
 }
 
 {

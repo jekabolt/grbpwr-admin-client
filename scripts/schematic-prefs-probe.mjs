@@ -560,7 +560,7 @@ function splitTop(body) {
   );
   ok(
     'структура: restore отдан наружу',
-    /return \{ pos, move, restore, reset, mode, setMode, axis, setAxis \};/.test(hook),
+    /return \{ pos, peek, move, restore, reset, mode, setMode, axis, setAxis \};/.test(hook),
     'restore не в возвращаемом объекте — истории нечем отменять перестановку',
   );
   // СНЯТИЕ КЛЮЧА — НЕ ЗАПИСЬ НУЛЯ. Без `delete` отмена первого перетаскивания оставляла бы ноду
