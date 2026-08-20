@@ -1,9 +1,24 @@
-// Точка входа пробы записи последнего жеста: esbuild бандлит только с файла, а модуль чистый —
-// одного реэкспорта хватает.
+// Точка входа пробы истории жестов: esbuild бандлит только с файла, а модуль чистый — одного
+// реэкспорта хватает.
 export {
+  HISTORY_DEPTH,
   appendLabel,
+  canRedo,
   canUndo,
   dissolveLabel,
+  dropForm,
+  dropMove,
+  dropRedoTop,
+  emptyHistory,
+  isFormEntry,
+  moveLabel,
+  peekRedo,
+  peekUndo,
+  pushUndo,
+  record,
+  redoStep,
+  redoTitle,
   resolvePending,
+  undoStep,
   undoTitle,
 } from '../src/components/managers/tech-card/components/last-mutation';

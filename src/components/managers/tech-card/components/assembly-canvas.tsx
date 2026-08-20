@@ -223,7 +223,13 @@ export type AssemblyCanvasProps = {
   cloth?: Map<string, PieceCloth> | null;
   smvOfBlock: Map<string, string>;
   positions: PosOverrides;
-  onMove: (key: string, at: { x: number; y: number }) => void;
+  /**
+   * Ноды переехали. ПАЧКОЙ, А НЕ ПО ОДНОЙ, потому что жест бывает мультидроп и стрелка по
+   * выделению: разбитый на N вызовов, он лёг бы в историю отмены как N отдельных жестов, и ⌘Z
+   * возвращал бы мультидраг из четырёх нод по одной ноде за нажатие. Пишет вызывающий — полотно
+   * не знает ни про предпочтения, ни про историю.
+   */
+  onMove: (moves: { key: string; at: { x: number; y: number } }[]) => void;
   /** Карточка выпущена: читать и раскладывать можно, соединять и растворять нельзя (R10). */
   frozen?: boolean;
   /**
@@ -663,7 +669,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // отклонили), поэтому `onMove` идёт ПЕРВЫМ и до гейта заморозки — раскладывать чужую
       // выпущенную карточку разрешено (R10). Соединять — нет. Съеденная деталь здесь тоже
       // легитимна: она нода раскладки (стопка у своего бокса), и переносить её — раскладка.
-      for (const it of d.items) onMove(it.key, landed[it.key]);
+      onMove(d.items.map((it) => ({ key: it.key, at: landed[it.key] })));
       if (frozen) return;
       const eff = applyOverrides(auto, { ...positions, ...landed });
       // ВСЁ ЕДУЩЕЕ ВЫРЕЗАНО ИЗ HIT-TEST, а не только та нода, за которую взяли: остальные едут под
@@ -924,12 +930,16 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       nodeKeys: () => [...layoutRef.current.tileByKey.keys(), ...layoutRef.current.byKey.keys()],
       nudge: (dx, dy) => {
         const eff = layoutRef.current;
+        // ОДНИМ ВЫЗОВОМ НА НАЖАТИЕ, а не по ноде: стрелка по выделению из четырёх нод — один жест,
+        // и ⌘Z обязан вернуть все четыре разом.
+        const moves: { key: string; at: { x: number; y: number } }[] = [];
         for (const k of pickedRef.current) {
           const n = eff.byKey.get(k) ?? eff.tileByKey.get(k);
           if (!n) continue;
           // Кламп в ноль — тот же, что у драга: за левым/верхним краем нода недостижима.
-          onMoveRef.current(k, { x: Math.max(0, n.x + dx), y: Math.max(0, n.y + dy) });
+          moves.push({ key: k, at: { x: Math.max(0, n.x + dx), y: Math.max(0, n.y + dy) } });
         }
+        if (moves.length) onMoveRef.current(moves);
       },
       fitSelection: () => {
         const vp = viewportRef.current;

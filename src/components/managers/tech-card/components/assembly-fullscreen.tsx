@@ -116,7 +116,8 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
   ['u', 'join the picked into a unit', 'schematic'],
   ['o', 'an operation on the picked', 'schematic'],
   ['d', 'dissolve the picked unit', 'schematic'],
-  ['⌘z', 'undo the last gesture', 'both'],
+  ['⌘z', 'undo — step by step, layout and sequence alike', 'both'],
+  ['⇧⌘z', 'redo the gesture just undone', 'both'],
   ['⌘f', 'find a piece or a unit', 'both'],
   ['⌘l', 'the sequence as a list · back to the schematic', 'both'],
   ['[', 'collapse or open the pieces shelf', 'both'],
@@ -212,15 +213,30 @@ export type AssemblyFullscreenProps = {
    */
   readPieceDrag: (dt: DataTransfer) => string;
   /**
-   * Отмена последнего жеста, глубина 1. Инверсию делает `operations-field.tsx` — там же, где
-   * мутаторы (R3); фулскрин только зовёт её и показывает чип. Гейт заморозки и отказ словами — на
-   * той стороне: отказывать обязан тот, кто знает, что именно отменял.
+   * Ноды переехали — ПАЧКОЙ на жест (мультидроп и стрелка двигают сколько угодно нод сразу).
+   * Пишет `operations-field.tsx`: он владеет и предпочтениями, и историей, а запись раскладки и
+   * запись о ней обязаны случиться в одном месте, иначе одна из двух однажды не случится.
+   */
+  onMoveNodes: (moves: { key: string; at: { x: number; y: number } }[]) => void;
+  /**
+   * Шаг назад по истории. Инверсию делает `operations-field.tsx` — там же, где мутаторы (R3);
+   * фулскрин только зовёт её и показывает чипы.
+   *
+   * ГЕЙТА ЗАМОРОЗКИ ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ. Гейт стал ПО-РОДОВЫМ: на выпущенной
+   * карточке отмена перестановки ноды законна (раскладывать можно — R10), а отмена создания шага
+   * нет. Род записи знает только та сторона, где история живёт; здешний общий гейт резал бы оба
+   * рода скопом — ровно тот дефект, из-за которого подвинутый на выпущенной карточке блок нельзя
+   * было вернуть.
    */
   onUndo: () => void;
   /** Подпись чипа: `undo — create step 90` либо `nothing to undo`. Считается `last-mutation.ts`. */
   undoTitle: string;
   /** Есть ли что отменять. Чип без записи задизейблен, а не молчит при нажатии. */
   canUndo: boolean;
+  /** Шаг вперёд: вернуть только что отменённое. */
+  onRedo: () => void;
+  redoTitle: string;
+  canRedo: boolean;
   /**
    * В доке начали править поля. ВОСЬМАЯ ИЗ ДЕВЯТИ ТОЧЕК СБРОСА записи отмены: жестовый ⌘Z обещает
    * «ой» сразу после жеста, а не откат всего, что напечатали следом.
@@ -410,9 +426,13 @@ export function AssemblyFullscreen({
   activeBom,
   onHoverPin,
   readPieceDrag,
+  onMoveNodes,
   onUndo,
   undoTitle,
   canUndo,
+  onRedo,
+  redoTitle,
+  canRedo,
   onDockEdit,
   renderDockEditor,
   dockChrome,
@@ -1013,15 +1033,10 @@ export function AssemblyFullscreen({
     setPicked([]);
   }, [frozen, freeOfPicked, res, blocks, dissolveUnit, showMessage]);
 
-  const undo = useCallback(() => {
-    // Гейт стоит и здесь, и внутри `onUndo`: молчаливый выход мутатора отказом не является, а
-    // произносит отказ сторона, знающая, что именно отменялось.
-    if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
-      return;
-    }
-    onUndo();
-  }, [frozen, onUndo, showMessage]);
+  // ОТМЕНА И ВОЗВРАТ ПРОХОДЯТ НАСКВОЗЬ — без здешнего гейта заморозки. Он тут был и резал оба рода
+  // записей скопом; после того как гейт стал по-родовым (раскладка на выпущенной карточке законна,
+  // правка формы — нет), решение принимает только владелец истории. Слова отказа — тоже там: их
+  // произносит тот, кто знает, ЧТО именно отменялось.
 
   const fitSelection = useCallback(() => {
     if (picked.length === 0) {
@@ -1166,11 +1181,14 @@ export function AssemblyFullscreen({
         e.preventDefault();
         return;
       }
-      // ⇧⌘Z — это redo, а redo здесь НЕТ. Тихо отменить вместо него — худшее, что можно сделать:
-      // человек просил вернуть, а получил ещё один шаг назад.
-      if (k === 'z' && !e.shiftKey) {
+      // ⌘Z и ⇧⌘Z — две стороны ОДНОЙ истории, и разбираются они здесь вместе, чтобы «вперёд» не
+      // могло однажды оказаться вторым «назад»: человек просил вернуть, а получил ещё шаг назад —
+      // худшее, что тут можно сделать. Обе уступают НАБОРУ ТЕКСТА: у поля есть родная отмена
+      // ввода, и перехват ⌘Z в поле её убил бы.
+      if (k === 'z') {
         if (isTextField(e.target)) return; // в поле — родной откат ввода
-        undo();
+        if (e.shiftKey) onRedo();
+        else onUndo();
         e.preventDefault();
         return;
       }
@@ -1433,18 +1451,22 @@ export function AssemblyFullscreen({
                   >
                     list
                   </Chip>
-                  {/* ЧИП ОТМЕНЫ — НАСТОЯЩАЯ КНОПКА (`nonForm` тут был бы ошибкой): он ПИШЕТ в
-                      форму, а всё пишущее обязано умирать под `<fieldset disabled>`, если однажды
-                      окажется под ним. Задизейблен без записи — обещать отмену, которой нет, значит
-                      предлагать заведомый отказ. Честное обещание чипа — «ой» сразу после жеста:
-                      глубина одна, redo нет, а первая правка массива или полей шага запись гасит. */}
-                  <Chip
-                    dashed
-                    disabled={!canUndo}
-                    onClick={undo}
-                    title={frozen ? FROZEN_REFUSAL : undoTitle}
-                  >
+                  {/* ЧИПЫ ИСТОРИИ — НАСТОЯЩИЕ КНОПКИ (`nonForm` тут был бы ошибкой): они ПИШУТ, и
+                      всё пишущее обязано умирать под `<fieldset disabled>`, если однажды окажется
+                      под ним. Задизейблены без записи — обещать отмену, которой нет, значит
+                      предлагать заведомый отказ.
+
+                      ЗАГОЛОВОК БОЛЬШЕ НЕ ПОДМЕНЯЕТСЯ НА `FROZEN_REFUSAL`. На выпущенной карточке
+                      формовые записи умирают сами (владелец истории гасит их эффектом заморозки), а
+                      те, что остаются, — раскладка, и она там законна: чип обязан честно называть
+                      жест, который вернёт, а не отказывать заранее. Что чип живёт вне обоих
+                      `<fieldset disabled>` (хром — не форма), проверено стендом: отмена
+                      перестановки на RELEASED доезжает и мышью, и клавишей. */}
+                  <Chip dashed disabled={!canUndo} onClick={onUndo} title={undoTitle}>
                     undo
+                  </Chip>
+                  <Chip dashed disabled={!canRedo} onClick={onRedo} title={redoTitle}>
+                    redo
                   </Chip>
                   <Chip nonForm dashed onClick={openFind} title='find a piece or a unit (⌘f)'>
                     find
@@ -1696,7 +1718,7 @@ export function AssemblyFullscreen({
                   cloth={cloth}
                   smvOfBlock={smvOfBlock}
                   positions={prefs.pos}
-                  onMove={prefs.move}
+                  onMove={onMoveNodes}
                   frozen={frozen}
                   picked={picked}
                   onPicked={setPicked}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { PosOverrides } from './assembly-positions';
+import type { PosEdit } from './last-mutation';
 
 // Предпочтения схемы сборки: ручные позиции нод и выбранный режим — НА КАРТОЧКУ, в localStorage.
 //
@@ -27,6 +28,11 @@ import type { PosOverrides } from './assembly-positions';
 // «подвинул узел» и «сбросилась группировка полки» с места не видна вовсе. Поэтому запись собирает
 // РОВНО ОДНА чистая функция `buildStored`, писатели дают ей только патч, и поле переживает чужой
 // вызов по построению, а не по внимательности. Проба — `scripts/schematic-prefs-probe.mjs`.
+//
+// ПОЗИЦИИ ПИШЕТ ОДИН `restore`, А `move` — ЕГО ЧАСТНЫЙ СЛУЧАЙ. Второй писатель позиций собрал бы
+// объект `pos` по-своему, и первая же пачка правок (отмена мультидрага — это несколько нод сразу)
+// разъехалась бы с одиночным перетаскиванием в клампе или в чистке потолка. Заодно `restore` умеет
+// то, чего у `move` не было: СНЯТЬ ключ. Без снятия отмена первого перетаскивания невыразима.
 //
 // ФОРМАТ `v: 1` НЕ ЛОМАЕТСЯ. Новые поля — только опциональные, чтение back-compat: старая запись
 // без `axis` читается как есть, ось выходит `undefined`, дефолт выбирает потребитель. Поднять
@@ -63,6 +69,32 @@ export function buildStored(cur: StoredState, patch: Partial<StoredState> = {}):
   const axis = patch.axis ?? cur.axis;
   const pos = patch.pos ?? cur.pos ?? {};
   return { v: 1, ...(mode ? { mode } : {}), pos, ...(axis ? { axis } : {}) };
+}
+
+/**
+ * Применить пачку правок раскладки к снимку оверрайдов. `at: null` — УДАЛИТЬ ключ, а не записать
+ * нулевую позицию: «позицию давала авто-раскладка» и «человек поставил ноду в (0,0)» — разные
+ * состояния, и отмена первого перетаскивания обязана вернуть первое из них.
+ *
+ * Кламп в ноль — тот же, что у жеста полотна: за левым и верхним краем нода недостижима.
+ */
+export function applyEdits(pos: PosOverrides, edits: PosEdit[]): PosOverrides {
+  const next: PosOverrides = { ...pos };
+  for (const e of edits) {
+    if (e.at) next[e.key] = { x: Math.max(0, e.at.x), y: Math.max(0, e.at.y) };
+    else delete next[e.key];
+  }
+  return next;
+}
+
+/**
+ * ОБРАТНАЯ ПАЧКА — то, чем правку отменяют. Считается ДО применения и по тому же снимку, что и
+ * сама правка: ключ, которого в снимке не было, инвертируется в `at: null` (снять оверрайд), а не
+ * в позицию по умолчанию. Изобретать «позицию до жеста» не приходится вовсе — она либо есть в
+ * снимке, либо её не было.
+ */
+export function inverseEdits(pos: PosOverrides, edits: PosEdit[]): PosEdit[] {
+  return edits.map((e) => ({ key: e.key, at: pos[e.key] ?? null }));
 }
 
 const keyOf = (cardId: number) => `plm.techcard.schematic.${cardId}`;
@@ -189,23 +221,38 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
     [schedule],
   );
 
-  const move = useCallback(
-    (key: string, at: { x: number; y: number }) => {
-      // Побочные эффекты — ВНЕ апдейтера состояния (та же дисциплина, что записана в шапке
-      // use-panel-prefs): апдейтер React вправе прогнать повторно (StrictMode — дважды всегда) и
-      // выбросить, а `commit` изнутри взводил бы таймер и мутировал `cur` из фазы рендера —
-      // выброшенный рендер оставил бы запись в хранилище впереди состояния. Прежние позиции
-      // читаются из `cur.current.pos`: его синхронно ведут те же писатели, что и state
-      // (`commit`, перечитывание при смене карточки), так что снимок один на чтение и запись.
-      const next: PosOverrides = {
-        ...cur.current.pos,
-        [key]: { x: Math.max(0, at.x), y: Math.max(0, at.y) },
-      };
+  /**
+   * ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ РАСКЛАДКИ — и он же умеет СНЯТЬ ключ, чего у прежнего `move` не было
+   * вовсе. Без снятия отмена первого перетаскивания не выражается: вернуть ноду «туда, где её
+   * ставила авто-раскладка» можно только удалив оверрайд, а не записав его текущее значение.
+   *
+   * ВОЗВРАЩАЕТ ОБРАТНУЮ ПАЧКУ, и это не удобство, а единственный способ не соврать: снимок
+   * `cur.current.pos` синхронен и свеж, а `pos` из пропа отстаёт на рендер — две стрелки подряд,
+   * нажатые быстрее кадра, записали бы в историю одну и ту же «позицию до жеста».
+   *
+   * Побочные эффекты — ВНЕ апдейтера состояния (та же дисциплина, что записана в шапке
+   * use-panel-prefs): апдейтер React вправе прогнать повторно (StrictMode — дважды всегда) и
+   * выбросить, а `commit` изнутри взводил бы таймер и мутировал `cur` из фазы рендера —
+   * выброшенный рендер оставил бы запись в хранилище впереди состояния.
+   */
+  const restore = useCallback(
+    (edits: PosEdit[]): PosEdit[] => {
+      if (edits.length === 0) return [];
+      const back = inverseEdits(cur.current.pos, edits);
+      const next = applyEdits(cur.current.pos, edits);
       const cleaned = Object.keys(next).length > POS_CEILING ? prune(next, liveKeys()) : next;
       commit({ pos: cleaned });
       setPos(cleaned);
+      return back;
     },
     [commit, liveKeys],
+  );
+
+  const move = useCallback(
+    (key: string, at: { x: number; y: number }) => {
+      restore([{ key, at }]);
+    },
+    [restore],
   );
 
   // Сброс РАСКЛАДКИ, а не предпочтений: режим и ось — не расстановка нод, и «расставь заново»
@@ -231,7 +278,7 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
     [commit],
   );
 
-  return { pos, move, reset, mode, setMode, axis, setAxis };
+  return { pos, move, restore, reset, mode, setMode, axis, setAxis };
 }
 
 /** Убрать позиции нод, которых в графе больше нет. Зовётся только при переполнении потолка. */

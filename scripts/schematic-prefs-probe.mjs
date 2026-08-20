@@ -59,7 +59,9 @@ await build({
   logLevel: 'silent',
   define: { 'process.env.NODE_ENV': '"production"' },
 });
-const { buildStored, parseStored } = await import(pathToFileURL(outfile).href);
+const { applyEdits, buildStored, inverseEdits, parseStored } = await import(
+  pathToFileURL(outfile).href,
+);
 
 let checks = 0;
 const failed = new Set();
@@ -95,9 +97,16 @@ function session(c) {
     c.raw = JSON.stringify(next);
     return next;
   };
+  // Патчи — дословно те, что стоят у писателей хука; за дословностью следит структурная половина.
+  // Позиции пишет ОДИН `restore`, а `move` — его частный случай ровно так же, как в хуке.
+  const restore = (edits) => {
+    const back = inverseEdits(cur.pos, edits);
+    commit({ pos: applyEdits(cur.pos, edits) });
+    return back;
+  };
   return {
-    // Патчи — дословно те, что стоят у писателей хука; за дословностью следит структурная половина.
-    move: (key, at) => commit({ pos: { ...cur.pos, [key]: at } }),
+    restore,
+    move: (key, at) => restore([{ key, at }]),
     reset: () => commit({ pos: {} }),
     setMode: (m) => commit({ mode: m }),
     setAxis: (a) => commit({ axis: a }),
@@ -235,6 +244,106 @@ function splitTop(body) {
   // И следующий драг после сброса всё ещё несёт ось.
   s.move('SHELL', P.SHELL);
   is(name + ' (драг после сброса)', load(c).axis, 'cloth');
+}
+
+// --- 3.5 restore: поставить, СНЯТЬ и не задеть чужое ---------------------------------------------
+//
+// Дефект, ради которого написана эта половина: у писателя раскладки не было удаления ключа вовсе.
+// Пока его нет, отмена ПЕРВОГО перетаскивания невыразима — «вернуть как было» для ноды, которую
+// никогда не двигали, значит УБРАТЬ оверрайд, а не записать в него текущее место. Запиши — и нода
+// навсегда останется приколоченной туда, куда её поставила инверсия, а авто-раскладка перестанет
+// её видеть. Разница не видна на экране в момент отмены и всплывает через сутки, когда граф
+// поменялся, а нода стоит.
+
+{
+  const name = 'restore ставит оверрайд и говорит, чем его снять';
+  const c = cell();
+  const s = session(c);
+  s.setAxis('cloth');
+  const back = s.restore([{ key: 'SHELL', at: P.SHELL }]);
+  is(name, load(c).pos, { SHELL: P.SHELL });
+  // Ноды в снимке НЕ БЫЛО — обратная правка обязана быть снятием, а не позицией по умолчанию.
+  is(name + ' (обратная правка — снятие)', back, [{ key: 'SHELL', at: null }]);
+  is(name + ' (ось цела)', load(c).axis, 'cloth');
+}
+
+{
+  const name = 'restore снимает ключ, а не пишет нули';
+  const c = cell();
+  const s = session(c);
+  s.restore([{ key: 'SHELL', at: P.SHELL }]);
+  s.restore([{ key: 'HOOD', at: P.HOOD }]);
+  const back = s.restore([{ key: 'SHELL', at: null }]);
+  is(name, load(c).pos, { HOOD: P.HOOD });
+  is(name + ' (ключа нет вовсе, а не {x:0,y:0})', 'SHELL' in load(c).pos, false);
+  // …и снятие тоже обратимо: обратная правка называет то место, откуда ноду сняли.
+  is(name + ' (обратная правка — прежнее место)', back, [{ key: 'SHELL', at: P.SHELL }]);
+  s.restore(back);
+  // Порядок ключей в записи — тот, в котором их последний раз записали: SHELL сняли и вернули.
+  is(name + ' (цикл замкнулся)', load(c).pos, { HOOD: P.HOOD, SHELL: P.SHELL });
+}
+
+{
+  const name = 'restore не трогает чужие поля и чужие ноды';
+  const c = cell();
+  const s = session(c);
+  s.setMode('schematic');
+  s.setAxis('cloth');
+  s.restore([{ key: 'SHELL', at: P.SHELL }]);
+  s.restore([{ key: 'HOOD', at: P.HOOD }]);
+  s.restore([{ key: 'HOOD', at: { x: 7, y: 8 } }]);
+  const after = load(c);
+  is(name + ' (соседняя нода на месте)', after.pos.SHELL, P.SHELL);
+  is(name + ' (своя нода переехала)', after.pos.HOOD, { x: 7, y: 8 });
+  is(name + ' (режим и ось целы)', [after.mode, after.axis], ['schematic', 'cloth']);
+  is(name + ' (форма записи не изменилась)', Object.keys(after), ['v', 'mode', 'pos', 'axis']);
+}
+
+{
+  // МУЛЬТИДРАГ И СТРЕЛКА ПО ВЫДЕЛЕНИЮ — ОДИН ЖЕСТ. Разбей его на вызовы по ноде — и история
+  // получит N записей, а ⌘Z начнёт возвращать перетащенную четвёрку по одной ноде за нажатие.
+  const name = 'пачка правок — один вызов и одна обратная пачка';
+  const c = cell();
+  const s = session(c);
+  s.restore([{ key: 'SHELL', at: P.SHELL }]);
+  const back = s.restore([
+    { key: 'SHELL', at: { x: 1, y: 1 } },
+    { key: 'HOOD', at: { x: 2, y: 2 } },
+  ]);
+  is(name, load(c).pos, { SHELL: { x: 1, y: 1 }, HOOD: { x: 2, y: 2 } });
+  is(name + ' (обратная пачка разнородна)', back, [
+    { key: 'SHELL', at: P.SHELL },
+    { key: 'HOOD', at: null },
+  ]);
+  s.restore(back);
+  is(name + ' (отмена вернула обе ноды разом)', load(c).pos, { SHELL: P.SHELL });
+}
+
+{
+  const name = 'restore клампит в ноль';
+  is(name, applyEdits({}, [{ key: 'A', at: { x: -30, y: 12 } }]), { A: { x: 0, y: 12 } });
+  is(name + ' (обе оси)', applyEdits({}, [{ key: 'A', at: { x: -1, y: -2 } }]), {
+    A: { x: 0, y: 0 },
+  });
+}
+
+{
+  const name = 'applyEdits и inverseEdits — чистые';
+  const pos = { SHELL: P.SHELL };
+  const before = j(pos);
+  const edits = [{ key: 'SHELL', at: { x: 9, y: 9 } }];
+  const out = applyEdits(pos, edits);
+  is(name + ' (вход не мутирован)', j(pos), before);
+  is(name + ' (выход новый)', out, { SHELL: { x: 9, y: 9 } });
+  // Обратная пачка считается ПО СНИМКУ ДО ПРАВКИ — иначе она описывала бы то же состояние, в
+  // которое жест только что привёл, и отмена стала бы тождеством.
+  is(name + ' (инверсия по снимку ДО)', inverseEdits(pos, edits), [
+    { key: 'SHELL', at: P.SHELL },
+  ]);
+  is(name + ' (инверсия ничего не пишет)', j(pos), before);
+  is(name + ' (пустая пачка — пустая инверсия)', inverseEdits(pos, []), []);
+  is(name + ' (пустая пачка ничего не меняет)', applyEdits(pos, []), { SHELL: P.SHELL });
+  is(name + ' (снятие отсутствующего ключа безвредно)', applyEdits({}, [{ key: 'X', at: null }]), {});
 }
 
 // --- 4. back-compat: старая запись без axis ------------------------------------------------------
@@ -404,7 +513,7 @@ function splitTop(body) {
 
   // Каждый писатель передаёт РОВНО своё поле: на этом стоит верность модели сессии выше.
   const writers = [
-    ['move', /commit\(\{\s*pos:\s*cleaned\s*\}\)/],
+    ['restore', /commit\(\{\s*pos:\s*cleaned\s*\}\)/],
     ['reset', /commit\(\{\s*pos:\s*\{\}\s*\}\)/],
     ['setMode', /commit\(\{\s*mode:\s*next\s*\}\)/],
     ['setAxis', /commit\(\{\s*axis:\s*next\s*\}\)/],
@@ -437,6 +546,29 @@ function splitTop(body) {
     'структура: файл по-прежнему не знает про RHF',
     !/react-hook-form|useFormContext|setValue\(/.test(code),
     'в файл заехала форма — драг начнёт взводить isDirty',
+  );
+
+  // ВТОРОЙ ПИСАТЕЛЬ ПОЗИЦИЙ — ТОТ ЖЕ КЛАСС ДЕФЕКТА, ЧТО И ВТОРОЙ СБОРЩИК ЗАПИСИ. `move` обязан
+  // быть частным случаем `restore`, иначе пачка правок (отмена мультидрага) и одиночное
+  // перетаскивание разъедутся в клампе или в чистке потолка — молча и только на живой карточке.
+  ok(
+    'структура: move делегирует restore, а не пишет сам',
+    /const move = useCallback\(\s*\(key: string, at: \{ x: number; y: number \}\) => \{\s*restore\(\[\{ key, at \}\]\);/.test(
+      hook,
+    ),
+    'move снова пишет позиции сам — у раскладки появился второй писатель',
+  );
+  ok(
+    'структура: restore отдан наружу',
+    /return \{ pos, move, restore, reset, mode, setMode, axis, setAxis \};/.test(hook),
+    'restore не в возвращаемом объекте — истории нечем отменять перестановку',
+  );
+  // СНЯТИЕ КЛЮЧА — НЕ ЗАПИСЬ НУЛЯ. Без `delete` отмена первого перетаскивания оставляла бы ноду
+  // приколоченной там, куда её поставила инверсия, вместо возврата под авто-раскладку.
+  ok(
+    'структура: applyEdits снимает ключ удалением',
+    /delete next\[e\.key\]/.test(code),
+    'нет `delete` — `at: null` где-то превратился в запись позиции',
   );
 }
 
@@ -572,6 +704,32 @@ if (!chromium) {
   rec = await stored(77);
   is('живой хук: setMode не стёр ось', [rec.axis, rec.mode], ['cloth', 'list']);
   is('живой хук: setMode не стёр позиции', Object.keys(rec.pos).sort(), ['HOOD', 'SHELL']);
+
+  // ЖИВОЙ RESTORE. Модель выше проверяет замысел; здесь тот же цикл проходит настоящий хук с
+  // настоящим localStorage — и снятие ключа проверяется по записи, а не по возвращённому объекту.
+  const back = await run(() =>
+    window.__api.restore([
+      { key: 'SHELL', at: { x: 11, y: 12 } },
+      { key: 'FR', at: { x: 13, y: 14 } },
+    ]),
+  );
+  await settle();
+  rec = await stored(77);
+  is('живой хук: restore записал пачку одним вызовом', rec.pos, {
+    SHELL: { x: 11, y: 12 },
+    HOOD: { x: 300, y: 40 },
+    FR: { x: 13, y: 14 },
+  });
+  is('живой хук: обратная пачка знает, чего в записи не было', back, [
+    { key: 'SHELL', at: { x: 120, y: 40 } },
+    { key: 'FR', at: null },
+  ]);
+  await run((edits) => window.__api.restore(edits), back);
+  await settle();
+  rec = await stored(77);
+  is('живой хук: отмена сняла ключ, которого не было', 'FR' in rec.pos, false);
+  is('живой хук: и вернула прежнее место соседке', rec.pos.SHELL, { x: 120, y: 40 });
+  is('живой хук: ось пережила и restore', rec.axis, 'cloth');
 
   await run(() => window.__api.reset());
   await settle();

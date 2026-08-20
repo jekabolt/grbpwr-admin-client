@@ -76,12 +76,26 @@ import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './a
 import { suggestUnitCode } from './assembly-suggest';
 import {
   appendLabel,
+  canRedo,
   canUndo,
   dissolveLabel,
+  dropForm,
+  dropMove,
+  dropRedoTop,
+  emptyHistory,
+  moveLabel,
+  peekRedo,
+  peekUndo,
+  pushUndo,
+  record,
+  redoStep,
+  redoTitle,
   resolvePending,
+  undoStep,
   undoTitle,
-  type LastMutation,
+  type History,
   type PendingAppend,
+  type PosEdit,
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
@@ -3065,25 +3079,48 @@ export function OperationsField({
     });
   }, [getValues, setValue]);
 
-  // --- ОТМЕНА ЖЕСТА, ГЛУБИНА 1 --------------------------------------------------------------------
+  // --- ИСТОРИЯ ЖЕСТОВ ------------------------------------------------------------------------------
   //
-  // Запись живёт РЯДОМ С МУТАТОРАМИ, а не в фулскрине (R3): отменяет она их же, и разъехаться
+  // История живёт РЯДОМ С МУТАТОРАМИ, а не в фулскрине (R3): отменяет она их же, и разъехаться
   // записи с тем, что она отменяет, негде только здесь. Вся чистая арифметика — в
-  // `last-mutation.ts` под пробой; тут остаётся дисциплина «кто пишет и кто сбрасывает».
+  // `last-mutation.ts` под пробой; тут остаётся дисциплина «кто пишет, кто сбрасывает, кто гейтует».
   //
-  // REF — ИСТИНА, СОСТОЯНИЕ — ТОЛЬКО ДЛЯ ЧИПА. Ref нужен потому, что запись читают и пишут
-  // обработчики, которым нельзя ждать следующего рендера; состояние — потому что чип обязан гаснуть
-  // и зажигаться, а ref никого не перерисовывает. Оба пишутся ОДНОЙ функцией, чтобы разойтись им
-  // было негде.
-  const lastMutation = useRef<LastMutation | null>(null);
-  const pendingAppend = useRef<PendingAppend | null>(null);
-  const [undoRec, setUndoRec] = useState<LastMutation | null>(null);
+  // ОДНА СТОПКА НА ОБА ХРАНИЛИЩА, И ЭТО НЕ КОМПРОМИСС. Позиции нод — презентация (localStorage),
+  // последовательность — форма; но человек делает жесты В ОДНОМ ПОРЯДКЕ, и «создал шаг → подвигал
+  // ноды → ⌘Z» обязано отменить ПЕРЕСТАНОВКУ. Две отдельные стопки этот порядок потеряли бы, и ⌘Z
+  // молча снёс бы созданный шаг — ровно тот дефект, на который упёрся владелец. Смешанной записи
+  // при этом не существует: род `move` не касается RHF ВООБЩЕ (иначе перетаскивание начнёт
+  // взводить isDirty и пугать beforeunload), а формовые роды не трогают раскладку.
+  //
+  // REF — ИСТИНА, СОСТОЯНИЕ — ТОЛЬКО ДЛЯ ЧИПОВ. Ref нужен потому, что историю читают и пишут
+  // обработчики, которым нельзя ждать следующего рендера; состояние — потому что чипы обязаны
+  // гаснуть и зажигаться, а ref никого не перерисовывает. Оба пишутся ОДНОЙ функцией, чтобы
+  // разойтись им было негде.
+  type Hist = History<OperationFormValue>;
+  const history = useRef<Hist>(emptyHistory<OperationFormValue>());
+  const [histView, setHistView] = useState<Hist>(history.current);
+  const pendingAppend = useRef<PendingAppend<OperationFormValue> | null>(null);
+  // ИНВЕРСИЯ ИДЁТ ЧЕРЕЗ ТЕ ЖЕ МУТАТОРЫ, А ОНИ САМИ — ТОЧКИ СБРОСА. `removeOperation` гасит формовую
+  // историю (массив поехал), и отмена создания, зовущая его, стёрла бы всю остальную историю
+  // первым же ⌘Z. Флаг поднят ровно на синхронное время применения записи.
+  const applying = useRef(false);
 
-  const clearLastMutation = useCallback(() => {
-    pendingAppend.current = null;
-    lastMutation.current = null;
-    setUndoRec(null);
+  const setHistory = useCallback((next: Hist) => {
+    if (next === history.current) return; // чистые функции отдают ТОТ ЖЕ объект, когда менять нечего
+    history.current = next;
+    setHistView(next);
   }, []);
+
+  /**
+   * ВСЕ ДЕСЯТЬ ТОЧЕК СБРОСА — ЭТО ОНА. Формовые записи умирают, раскладочные живут: ни перестановка
+   * строк, ни правка полей, ни выпуск карточки, ни закрытие фулскрина раскладку не трогают, и
+   * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
+   */
+  const clearFormHistory = useCallback(() => {
+    if (applying.current) return;
+    pendingAppend.current = null;
+    setHistory(dropForm(history.current));
+  }, [setHistory]);
 
   // ВТОРОЙ ТАКТ ЗАПИСИ append. `append()` из RHF ничего не возвращает, а `fields` в замыкании
   // мутатора — снимок ДО вставки: `fields[at]?.id` там всегда `undefined`, и записанный синхронно
@@ -3095,9 +3132,11 @@ export function OperationsField({
     if (!p) return;
     pendingAppend.current = null;
     const rec = resolvePending(p, fields);
-    lastMutation.current = rec;
-    setUndoRec(rec);
-  }, [fields]);
+    if (!rec) return;
+    // ПОВТОР (⇧⌘Z) НЕ ГАСИТ СТОПКУ ВОЗВРАТА, новый жест — гасит. Иначе ⇧⌘Z, нажатое трижды,
+    // вернуло бы ровно один жест и молча забыло два.
+    setHistory(p.redone ? pushUndo(history.current, rec) : record(history.current, rec));
+  }, [fields, setHistory]);
 
   // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ У КАЖДОГО МУТАТОРА, как у `appendStep` и `addInputToOperation`.
   // Сегодня все трое прикрыты косвенно: кнопки редактора и ручка перетаскивания — настоящие
@@ -3106,7 +3145,7 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
-    clearLastMutation(); // (1/9) массив поехал — запись протухла
+    clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
     // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
@@ -3118,7 +3157,7 @@ export function OperationsField({
 
   const insertAfter = (index: number) => {
     if (frozen) return;
-    clearLastMutation(); // (2/9)
+    clearFormHistory(); // (2/10)
     remapIssues((old) => (old > index ? old + 1 : old));
     insert(index + 1, { ...emptyOperation });
     setSelected(index + 1);
@@ -3134,9 +3173,9 @@ export function OperationsField({
       return;
     }
     if (from === to) return;
-    // (3/9) САМАЯ ДОРОГАЯ ИЗ ДЕВЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
+    // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
     // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
-    clearLastMutation();
+    clearFormHistory();
     remapIssues((old) => {
       if (old === from) return to;
       if (from < to) return old > from && old <= to ? old - 1 : old;
@@ -3156,7 +3195,7 @@ export function OperationsField({
   // pre-fill (`node`, `placement`) were the same piece name written twice.
   useEffect(() => {
     if (!addRequest) return;
-    clearLastMutation(); // (4/9) шаг дописала ПАНЕЛЬ, а не жест полотна
+    clearFormHistory(); // (4/10) шаг дописала ПАНЕЛЬ, а не жест полотна
     append({ ...emptyOperation });
     setSelected(fields.length);
     onAdded?.();
@@ -3182,9 +3221,9 @@ export function OperationsField({
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    // (5/9) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни другое
-    // жестовым ⌘Z не отменяется, а адрес записи после `replace` указывает на другой шаг.
-    clearLastMutation();
+    // (5/10) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни
+    // другое жестовым ⌘Z не отменяется, а адрес записи после `replace` указывает на другой шаг.
+    clearFormHistory();
     const mapped = generated.map(mapGeneratedOperationToForm);
     if (mode === 'replace') {
       clearIssueOperationRefs();
@@ -3360,11 +3399,14 @@ export function OperationsField({
   useEffect(() => {
     if (!frozen) return;
     setPendingCreate(null);
-    // (9/9) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду назад,
-    // отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на самом ⌘Z и
-    // на чипе стоит тоже, но запись обязана умереть, а не ждать, пока в неё упрутся.
-    clearLastMutation();
-  }, [frozen, clearLastMutation]);
+    // (9/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
+    // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
+    // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
+    //
+    // УМИРАЮТ ТОЛЬКО ФОРМОВЫЕ, и это ровно то, ради чего сброс стал по-родовым: раскладка на
+    // выпущенной карточке ЗАКОННА (R10), значит и отмена перестановки обязана её пережить.
+    clearFormHistory();
+  }, [frozen, clearFormHistory]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -3462,11 +3504,11 @@ export function OperationsField({
       );
       return;
     }
-    // (7/9) НЕ СТРУКТУРНАЯ, НО ШАГ ИЗМЕНЁН — и сброс стоит здесь, ПОСЛЕ отказа фронтира: жест,
+    // (7/10) НЕ СТРУКТУРНАЯ, НО ШАГ ИЗМЕНЁН — и сброс стоит здесь, ПОСЛЕ отказа фронтира: жест,
     // который движок отклонил, ничего не менял и гасить чужую отмену не вправе. Массив при
     // добавлении входа тот же, `fieldId` на месте — guard пропустил бы, — а устаревший ⌘Z снёс бы
     // шаг ВМЕСТЕ с только что добавленной деталью.
-    clearLastMutation();
+    clearFormHistory();
     setValue(`operations.${index}.inputKeys`, [...cur, key], { shouldDirty: true });
   };
 
@@ -3505,9 +3547,9 @@ export function OperationsField({
     // мутатор про заморозку не знает, а вызыватель ВНЕ формы дописал бы шаг в выпущенную
     // карточку. Гейт стоит у мутатора, а не у каждой кнопки.
     if (frozen) return;
-    // (6/9) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
+    // (6/10) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
     // указывала бы на шаг, стоящий уже не там.
-    clearLastMutation();
+    clearFormHistory();
     setSelected(fields.length);
     append({ ...emptyOperation });
   };
@@ -3535,20 +3577,10 @@ export function OperationsField({
     // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
     if (frozen) return;
     const at = fields.length;
-    // ПОЛУЗАПИСЬ ОТМЕНЫ — до самого append, чтобы эффект на `[fields]` застал её уже стоящей.
-    // Сначала гасим прежнюю: между тактами она не имеет права пережить новый жест.
-    clearLastMutation();
-    pendingAppend.current = {
-      kind: 'append',
-      index: at,
-      expectedLength: at + 1,
-      label: appendLabel(at),
-      // Жест с узлом ниже перезапишет `assemblyCleared` — снимаем значение ДО жеста, чтобы
-      // инверсия вернула и его: «снял разметку → сшил → ⌘Z» без отката флага молча теряло
-      // намерение снятия, и следующее сохранение не доносило его до сервера.
-      ...(r.outputUnitKey ? { clearedBefore: !!getValues('assemblyCleared') } : {}),
-    };
-    append({
+    // СТРОКА СОБИРАЕТСЯ ОТДЕЛЬНОЙ ПЕРЕМЕННОЙ, потому что её берёт себе запись истории: ⇧⌘Z
+    // дописывает ЕЁ ЖЕ, а не пустой шаг. Собрать её второй раз в повторе значило бы завести второе
+    // определение того, что такое «созданный этим жестом шаг».
+    const row = {
       ...emptyOperation,
       inputKeys: r.inputKeys,
       outputUnitKey: r.outputUnitKey,
@@ -3559,7 +3591,21 @@ export function OperationsField({
       ...(r.pressEquipment
         ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
         : {}),
-    });
+    };
+    // ПОЛУЗАПИСЬ ИСТОРИИ — до самого append, чтобы эффект на `[fields]` застал её уже стоящей.
+    // Прежние записи здесь НЕ гасятся: в этом вся история — жест ложится ПОВЕРХ предыдущих.
+    pendingAppend.current = {
+      kind: 'append',
+      index: at,
+      expectedLength: at + 1,
+      row,
+      label: appendLabel(at),
+      // Жест с узлом ниже перезапишет `assemblyCleared` — снимаем значение ДО жеста, чтобы
+      // инверсия вернула и его: «снял разметку → сшил → ⌘Z» без отката флага молча теряло
+      // намерение снятия, и следующее сохранение не доносило его до сервера.
+      ...(r.outputUnitKey ? { clearedBefore: !!getValues('assemblyCleared') } : {}),
+    };
+    append(row);
     // Разметка появилась — намерение «снять разметку» отменено. Сегодняшний `joinIntoUnit` этого
     // НЕ делал (в отличие от `declare()`), и сценарий «снял → передумал → сшил заново» уходил в
     // отказ «снял и одновременно прислал узлы». Починка попутная и намеренная.
@@ -3581,59 +3627,164 @@ export function OperationsField({
     const fieldId = fields[stepIndex]?.id;
     setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
     setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
-    clearLastMutation();
     if (!fieldId || !unitKey) return; // растворять было нечего — и отменять нечего
-    lastMutation.current = {
-      kind: 'dissolve',
-      index: stepIndex,
-      fieldId,
-      unitKey,
-      unitName,
-      label: dissolveLabel(unitKey),
-    };
-    setUndoRec(lastMutation.current);
+    setHistory(
+      record(history.current, {
+        kind: 'dissolve',
+        index: stepIndex,
+        fieldId,
+        unitKey,
+        unitName,
+        label: dissolveLabel(unitKey),
+      }),
+    );
   };
 
   /**
-   * ⌘Z и чип отмены — ЕДИНСТВЕННЫЙ вызыватель инверсии.
+   * ПЕРЕЕЗД НОД — ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ РАСКЛАДКИ НА ЭТОМ ЭКРАНЕ, и он же кладёт запись в историю.
    *
-   * ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ И СО СЛОВАМИ. `removeOperation` с недавних пор гейтован и сам, но
-   * молчаливый выход мутатора — не отказ: человек нажал ⌘Z, ничего не произошло, и объяснения нет.
-   * На выпущенной карточке отказ обязан быть произнесён.
+   * ПОЧЕМУ ЗДЕСЬ, А НЕ В ПОЛОТНЕ И НЕ В ФУЛСКРИНЕ. Стопка одна на оба хранилища (иначе теряется
+   * порядок жестов, и «создал → подвигал → ⌘Z» сносит созданное), а формовые мутаторы живут только
+   * здесь (R3). Значит и раскладочная запись обязана рождаться здесь.
    *
-   * ПРОВАЛИВШИЙСЯ GUARD — ТОЖЕ СЛОВА, а не молчание: «последовательность изменилась» объясняет,
-   * почему отмена честно не сработала, и почему нажимать ещё раз бессмысленно.
+   * НИ ОДНОГО `setValue`. Перемещение ноды не взводит `isDirty` — инвариант с Ф3: раскладка это
+   * презентация, и «подвинул блок» не имеет права попросить сохранение и разбудить beforeunload.
+   * Отмена перемещения — по той же причине — тоже идёт мимо формы, одним `prefs.restore`.
+   *
+   * «Позицию до жеста» изобретать не приходится: `restore` возвращает обратную пачку, посчитанную
+   * по своему СИНХРОННОМУ снимку оверрайдов. Ноды, которую не двигали, в снимке нет — и обратная
+   * правка честно говорит «снять оверрайд», то есть вернуть ноду авто-раскладке.
    */
-  const undoLastMutation = () => {
-    if (frozen) {
+  const moveNodes = useCallback(
+    (moves: { key: string; at: { x: number; y: number } }[]) => {
+      if (moves.length === 0) return;
+      const back = prefs.restore(moves);
+      setHistory(
+        record(history.current, {
+          kind: 'move',
+          back,
+          forward: moves.map((m) => ({ key: m.key, at: m.at }) as PosEdit),
+          label: moveLabel(moves.length),
+        }),
+      );
+    },
+    [prefs, setHistory],
+  );
+
+  /**
+   * СБРОС РАСКЛАДКИ уносит и раскладочную историю. «Расставь заново» — подтверждённый жест (R8), и
+   * после него отмена одного давнего перетаскивания вернула бы ОДНУ ноду в место, которого на
+   * экране больше нигде нет: это не «отменил», а «поломал заново». Формовые записи он не трогает —
+   * последовательность шагов сбросом раскладки не менялась.
+   */
+  const resetPositions = useCallback(() => {
+    setHistory(dropMove(history.current));
+    prefs.reset();
+  }, [prefs, setHistory]);
+
+  /**
+   * ⌘Z, ⇧⌘Z и чипы истории — ЕДИНСТВЕННЫЕ вызыватели инверсии.
+   *
+   * ГЕЙТ ЗАМОРОЗКИ — ПО-РОДОВОЙ. На выпущенной карточке (R10) раскладывать можно, править нельзя:
+   * значит отмена перестановки обязана РАБОТАТЬ, а формовая — отказать словами. Прежний общий гейт
+   * резал оба рода скопом, и подвинутый на выпущенной карточке блок нельзя было вернуть вовсе.
+   * Формовых записей на замороженной карточке к этому моменту и так нет — эффект заморозки (9/10)
+   * их гасит, — но щит стоит поясом и подтяжками: гонка Release живёт в этом файле не первый раз.
+   *
+   * ПУСТАЯ ИСТОРИЯ — ТИХИЙ `return`, ни звука. Прямое требование владельца, и оно отменяет решение
+   * ревью Ф4 («молчание на ⌘Z хуже»). Провалившийся guard молчанием НЕ покрывается: там запись
+   * БЫЛА, и молчание читалось бы как «отменил», хотя не отменено ничего.
+   */
+  const outputUnitKeyOf = (i: number) =>
+    (getValues(`operations.${i}.outputUnitKey`) as string) ?? '';
+
+  /** Применить формовую половину инверсии, не дав мутаторам погасить остальную историю. */
+  const applyToForm = (fn: () => void) => {
+    applying.current = true;
+    try {
+      fn();
+    } finally {
+      applying.current = false;
+    }
+  };
+
+  const undoGesture = () => {
+    const rec = peekUndo(history.current);
+    if (!rec) return; // тишина: отменять нечего, и говорить не о чем
+    if (rec.kind !== 'move' && frozen) {
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    const rec = lastMutation.current;
-    if (!rec) {
-      showMessage('nothing to undo', 'error');
-      return;
-    }
-    const outputOf = (i: number) => ((getValues(`operations.${i}.outputUnitKey`) as string) ?? '');
-    if (!canUndo(rec, fields, outputOf)) {
-      clearLastMutation();
+    if (!canUndo(rec, fields, outputUnitKeyOf)) {
+      // Ряд строк уехал (чаще всего — ресет формы после save). Умирает ВСЯ формовая половина
+      // истории, а не одна запись: они все из той же, уже несуществующей эпохи. Раскладочные живут.
+      setHistory(dropForm(history.current));
       showMessage('the sequence has changed — nothing to undo', 'error');
       return;
     }
-    if (rec.kind === 'append') {
-      // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
-      removeOperation(rec.index);
-      // Жест перезаписал `assemblyCleared` — инверсия возвращает и его. Между жестом и ⌘Z флаг
-      // смениться не мог: все его писатели живут за фокусом дока или вне фулскрина, то есть за
-      // точками сброса записи.
-      if (rec.clearedBefore !== undefined) {
-        setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
-      }
+    if (rec.kind === 'move') {
+      prefs.restore(rec.back);
+    } else if (rec.kind === 'append') {
+      applyToForm(() => {
+        // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
+        removeOperation(rec.index);
+        // Жест перезаписал `assemblyCleared` — инверсия возвращает и его.
+        if (rec.clearedBefore !== undefined) {
+          setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
+        }
+      });
     } else {
-      setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
-      setValue(`operations.${rec.index}.outputUnitName`, rec.unitName, { shouldDirty: true });
+      applyToForm(() => {
+        setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
+        setValue(`operations.${rec.index}.outputUnitName`, rec.unitName, { shouldDirty: true });
+      });
     }
-    clearLastMutation();
+    setHistory(undoStep(history.current));
+  };
+
+  const redoGesture = () => {
+    const rec = peekRedo(history.current);
+    if (!rec) return; // та же тишина: возвращать нечего
+    if (rec.kind !== 'move' && frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    if (!canRedo(rec, fields, outputUnitKeyOf)) {
+      setHistory(dropForm(history.current));
+      showMessage('the sequence has changed — nothing to redo', 'error');
+      return;
+    }
+    if (rec.kind === 'move') {
+      prefs.restore(rec.forward);
+      setHistory(redoStep(history.current));
+      return;
+    }
+    if (rec.kind === 'append') {
+      // ПОВТОР СОЗДАНИЯ ИДЁТ ЧЕРЕЗ ТОТ ЖЕ ДВУХТАКТНЫЙ ЗАХВАТ: RHF выдаёт новой строке НОВЫЙ id, и
+      // запись, вернувшаяся в стопку отмены со старым, отказала бы на первом же ⌘Z. Поэтому запись
+      // снимается со стопки возврата здесь, а в стопку отмены её кладёт эффект `[fields]`.
+      setHistory(dropRedoTop(history.current));
+      pendingAppend.current = {
+        kind: 'append',
+        index: rec.index,
+        expectedLength: rec.index + 1,
+        row: rec.row,
+        label: rec.label,
+        redone: true,
+        ...(rec.clearedBefore !== undefined ? { clearedBefore: rec.clearedBefore } : {}),
+      };
+      applyToForm(() => {
+        append({ ...rec.row });
+        if (rec.clearedBefore !== undefined) setValue('assemblyCleared', false, { shouldDirty: true });
+      });
+      setSelected(rec.index);
+      return;
+    }
+    applyToForm(() => {
+      setValue(`operations.${rec.index}.outputUnitKey`, '', { shouldDirty: true });
+      setValue(`operations.${rec.index}.outputUnitName`, '', { shouldDirty: true });
+    });
+    setHistory(redoStep(history.current));
   };
 
   // --- общее для ВСЕХ ТРЁХ видов ----------------------------------------------------------------
@@ -3771,15 +3922,15 @@ export function OperationsField({
   // фокус, — такт ждать не нужно.
 
   // ДЕСЯТАЯ ТОЧКА СБРОСА (ревью Ф4) — ГРАНИЦА ВИЗИТА ФУЛСКРИНА, обе стороны. Девять точек стерегут
-  // массив и правки внутри фулскрина, но ⌘Z и чип живут ТОЛЬКО в нём, а запись — здесь, и она
+  // массив и правки внутри фулскрина, но ⌘Z и чипы живут ТОЛЬКО в нём, а история — здесь, и она
   // переживала закрытие оверлея. Снаружи же шаг правится мимо всех девяти: редактор списка не имеет
   // focusin-сброса, «make it a unit» и «clear the unit markup» пишут в форму напрямую. Сценарий
   // «create в фулскрине → закрыл → дописал заметку в списке → открыл → ⌘Z» сносил шаг ВМЕСТЕ с
   // заметкой — ровно то, от чего точка 7 стережёт добор детали. Отмена обещает «ой» сразу после
   // жеста; жест из прошлого визита — уже не «сразу».
   useEffect(() => {
-    clearLastMutation();
-  }, [fsOpen, clearLastMutation]);
+    clearFormHistory();
+  }, [fsOpen, clearFormHistory]);
 
   return (
     <div className='space-y-2.5'>
@@ -3985,8 +4136,12 @@ export function OperationsField({
                   smvOfBlock={grouping.smvOfBlock}
                   onDissolve={dissolveUnit}
                   positions={prefs.pos}
-                  onMove={prefs.move}
-                  onResetPositions={prefs.reset}
+                  // ИНЛАЙНОВАЯ СХЕМА ПИШЕТ В ТУ ЖЕ ИСТОРИЮ, хотя ⌘Z в ней нет. Иначе жест,
+                  // сделанный здесь, оказался бы невидим для истории, и первое же ⌘Z в фулскрине
+                  // отменило бы что-то ДРУГОЕ — жест старше последнего. Сигнатура у инлайна
+                  // одиночная (`key, at`), поэтому пачка из одной правки.
+                  onMove={(key, at) => moveNodes([{ key, at }])}
+                  onResetPositions={resetPositions}
                   frozen={frozen}
                 />
               ) : (
@@ -4047,7 +4202,7 @@ export function OperationsField({
                 // «click a piece in the tray» здесь правда.
                 pieceSource={TRAY_PIECE_SOURCE}
                 onActiveBomChange={onActiveBomChange}
-                onEdit={clearLastMutation}
+                onEdit={clearFormHistory}
                 onDropPiece={addInputToOperation}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
@@ -4070,7 +4225,12 @@ export function OperationsField({
           smvOfBlock={grouping.smvOfBlock}
           // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её
           // писатель, и они обязаны дойти до потребителя без правки этого файла.
-          prefs={prefs}
+          //
+          // `reset` ПОДМЕНЁН ОБЁРТКОЙ, потому что сброс раскладки обязан унести и раскладочную
+          // историю — иначе ⌘Z после «reset layout» вернул бы ОДНУ ноду в место, которого на
+          // экране больше нет. Подменой, а не новым пропом: писатель раскладки у экрана один, и
+          // второй канал к нему означал бы, что однажды позовут не тот.
+          prefs={{ ...prefs, reset: resetPositions }}
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
           setPendingCreate={setPendingCreate}
@@ -4094,15 +4254,20 @@ export function OperationsField({
           activeBom={activeBom}
           onHoverPin={(n) => onActivePinChange?.(n)}
           readPieceDrag={readPieceDrag}
-          onUndo={undoLastMutation}
-          undoTitle={undoTitle(undoRec)}
-          canUndo={undoRec !== null}
-          // ВОСЬМАЯ ИЗ ДЕВЯТИ ТОЧЕК СБРОСА, и listener у неё ОДИН — на контейнере дока (вешает его
-          // фулскрин, потому что док — его орган). Правки ПОЛЕЙ после create жестовым ⌘Z не
+          onMoveNodes={moveNodes}
+          onUndo={undoGesture}
+          undoTitle={undoTitle(peekUndo(histView))}
+          canUndo={peekUndo(histView) !== null}
+          onRedo={redoGesture}
+          redoTitle={redoTitle(peekRedo(histView))}
+          canRedo={peekRedo(histView) !== null}
+          // ВОСЬМАЯ ИЗ ДЕСЯТИ ТОЧЕК СБРОСА, и listener у неё ОДИН — на контейнере дока (вешает
+          // его фулскрин, потому что док — его орган). Правки ПОЛЕЙ после create жестовым ⌘Z не
           // отменяются: возражение «undo возвращает больше, чем жест» живёт внутри выбранного
           // варианта, и снять его можно только так — перестав обещать отмену, как только начали
-          // печатать.
-          onDockEdit={clearLastMutation}
+          // печатать. У поля есть СВОЯ, родная отмена ввода, и перехватывать ⌘Z в поле нельзя:
+          // ровно поэтому правки полей в историю не попадают вовсе, а не «попадают позже».
+          onDockEdit={clearFormHistory}
           // БИЛДЕР, А НЕ ГОТОВЫЙ ЭЛЕМЕНТ. `OperationEditor` — приватная функция этого файла с
           // полутора десятками пропов; вытаскивать её наружу ради фулскрина значило бы затеять
           // незапланированный рефакторинг там, где он опаснее всего. Билдер замыкает её со всеми
@@ -4134,7 +4299,7 @@ export function OperationsField({
                 // звать к лотку, а вооружал бы полку.
                 pieceSource={addPiece}
                 onActiveBomChange={onActiveBomChange}
-                onEdit={clearLastMutation}
+                onEdit={clearFormHistory}
                 onDropPiece={addInputToOperation}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
