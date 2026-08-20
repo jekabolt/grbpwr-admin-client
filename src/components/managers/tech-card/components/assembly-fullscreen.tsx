@@ -90,28 +90,34 @@ const GHOST_H = 48;
 /**
  * Шпаргалка. Список — данные, а не разметка: клавиша, попавшая в роутер и забытая здесь, — та же
  * ложь, что подпись про несуществующую клавишу.
+ *
+ * ТРЕТЬЕ ПОЛЕ — В КАКОМ ВИДЕ КЛАВИША ЖИВА, и фильтр по нему обязателен: шпаргалка открывается и в
+ * списке, где клавиши полотна гашены белым списком роутера, — строка про мёртвые `v`/`u`/маркизу
+ * там была бы той же ложью, что подпись про несуществующую клавишу. И наоборот: драг ⠿ — живой
+ * жест списка, и жест без строки в шпаргалке лжёт ровно так же.
  */
-const HELP_KEYS: [string, string][] = [
-  ['v · h', 'select tool · pan tool'],
-  ['space', 'pan while held'],
-  ['f · ⌘1', 'fit everything on screen'],
-  ['⌘0', 'zoom back to 100%'],
-  ['+ · −', 'zoom in · out'],
-  ['⇧2', 'frame the selection'],
-  ['⌘a', 'pick everything on the table'],
-  ['drag on empty ground', 'marquee — touching a node picks it (shift adds)'],
-  ['drag from the shelf', 'drop on a node to join, on empty ground to place the piece'],
-  ['arrows', 'nudge the picked by 8px (shift: 1px)'],
-  ['u', 'join the picked into a unit'],
-  ['o', 'an operation on the picked'],
-  ['d', 'dissolve the picked unit'],
-  ['⌘z', 'undo the last gesture'],
-  ['⌘f', 'find a piece or a unit'],
-  ['⌘l', 'the sequence as a list · back to the schematic'],
-  ['[', 'collapse or open the pieces shelf'],
-  [']', 'collapse or open the step dock'],
-  ['s', 'show or hide the sketch sticker (drag it by its head)'],
-  ['esc', 'find → shortcuts → adding → selection → leave'],
+const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
+  ['v · h', 'select tool · pan tool', 'schematic'],
+  ['space', 'pan while held', 'schematic'],
+  ['f · ⌘1', 'fit everything on screen', 'schematic'],
+  ['⌘0', 'zoom back to 100%', 'schematic'],
+  ['+ · −', 'zoom in · out', 'schematic'],
+  ['⇧2', 'frame the selection', 'schematic'],
+  ['⌘a', 'pick everything on the table', 'both'],
+  ['drag on empty ground', 'marquee — touching a node picks it (shift adds)', 'schematic'],
+  ['drag from the shelf', 'drop on a node to join, on empty ground to place the piece', 'schematic'],
+  ['drag ⠿ on a step', 'reorder the sequence', 'list'],
+  ['arrows', 'nudge the picked by 8px (shift: 1px)', 'schematic'],
+  ['u', 'join the picked into a unit', 'schematic'],
+  ['o', 'an operation on the picked', 'schematic'],
+  ['d', 'dissolve the picked unit', 'schematic'],
+  ['⌘z', 'undo the last gesture', 'both'],
+  ['⌘f', 'find a piece or a unit', 'both'],
+  ['⌘l', 'the sequence as a list · back to the schematic', 'both'],
+  ['[', 'collapse or open the pieces shelf', 'both'],
+  [']', 'collapse or open the step dock', 'schematic'],
+  ['s', 'show or hide the sketch sticker (drag it by its head)', 'both'],
+  ['esc', 'find → shortcuts → adding → selection → leave', 'both'],
 ];
 
 /**
@@ -148,8 +154,10 @@ export type AssemblyFullscreenProps = {
   /** Потребитель — Ф4. */
   dissolveUnit: (stepIndex: number) => void;
   /**
-   * Добавить деталь во входы шага. Единственный вызыватель отсюда — РЕЖИМ ДОБОРА полки; своего
-   * гейта заморозки у мутатора нет исторически, поэтому вызов гейтуется и на этой стороне.
+   * Добавить деталь во входы шага. Единственный вызыватель отсюда — РЕЖИМ ДОБОРА полки. Гейт
+   * заморозки у мутатора теперь СВОЙ, первой строкой (`operations-field.tsx`, черри-пик-кандидат
+   * `e0eb0021`); вызов всё равно гейтуется и на этой стороне — жест pointer-ный, разметка его не
+   * глушит, и пояс с подтяжками дешевле одного тихого дописывания в выпущенную карточку.
    */
   addInputToOperation: (index: number, key: string) => void;
   addOperation: () => void;
@@ -369,6 +377,16 @@ export function AssemblyFullscreen({
    * виден всегда.
    */
   const editorOnScreen = dockOpen || listMode;
+
+  /**
+   * Пустая последовательность на месте редактора (док в схеме, колонка в списке). НА ВЫПУЩЕННОЙ
+   * КАРТОЧКЕ «add the first step» обещал бы орган, которого нет: «+ operation» при заморозке
+   * снята и из шапки дока, и из-под рельса. Отказ — тем же предложением, что у всех органов
+   * (`FROZEN_REFUSAL`): два текста об одном правиле читаются как два разных правила.
+   */
+  const emptySequenceNote = frozen
+    ? `the assembly sequence is empty. ${FROZEN_REFUSAL}`
+    : 'the assembly sequence is empty so far — add the first step';
 
   // Выбор живёт здесь, а не в полотне: его гасит Esc-лестница, а лестница одна на экран.
   const [picked, setPicked] = useState<string[]>([]);
@@ -901,6 +919,10 @@ export function AssemblyFullscreen({
   }, [findRows, findQuery]);
 
   const openFind = useCallback(() => {
+    // ШПАРГАЛКА УСТУПАЕТ ПАЛИТРЕ. Её scrim лежит ВЫШЕ палитры (z-20 против z-10), и ⌘F из-под
+    // него открывал бы поле, в котором печатаешь вслепую, — а Esc первой ступенью гасил бы
+    // невидимую палитру под видимой шпаргалкой. Справка уступает без потерь: состояния у неё нет.
+    setHelpOpen(false);
     // ПОВТОРНЫЙ ⌘F НЕ СТИРАЕТ ЗАПРОС, а выделяет его — как родной поиск: набранное слово чаще
     // хотят уточнить, чем выбросить.
     if (!findOpen) {
@@ -1011,6 +1033,10 @@ export function AssemblyFullscreen({
         e.preventDefault();
         return;
       }
+      // В СПИСКЕ ПОЛОТНА НЕТ — ⌘0/⌘1 не глотаются ради no-op'а по пустому ref'у: у браузера на
+      // них свои жесты (сброс зума страницы, первая вкладка), и отнимать их, ничего не делая
+      // взамен, хуже, чем уступить.
+      if (listMode) return;
       if (e.key === '0') {
         canvasRef.current?.zoomReset();
         e.preventDefault();
@@ -1470,7 +1496,7 @@ export function AssemblyFullscreen({
                       renderDockEditor(armAddMode)
                     ) : (
                       <Text size='micro' variant='label'>
-                        the assembly sequence is empty so far — add the first step
+                        {emptySequenceNote}
                       </Text>
                     )}
                   </fieldset>
@@ -1596,7 +1622,7 @@ export function AssemblyFullscreen({
                   renderDockEditor(armAddMode)
                 ) : (
                   <Text size='micro' variant='label'>
-                    the assembly sequence is empty so far — add the first step
+                    {emptySequenceNote}
                   </Text>
                 )}
               </fieldset>
@@ -1712,7 +1738,11 @@ export function AssemblyFullscreen({
                   keyboard
                 </Text>
                 <dl className='mt-2 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1'>
-                  {HELP_KEYS.map(([keys, what]) => (
+                  {/* Только клавиши ЭТОГО вида: строка про мёртвую в списке `v` — та же ложь, что
+                      подпись про несуществующую клавишу. */}
+                  {HELP_KEYS.filter(
+                    ([, , where]) => where === 'both' || where === (listMode ? 'list' : 'schematic'),
+                  ).map(([keys, what]) => (
                     <Fragment key={keys}>
                       <dt className='whitespace-nowrap'>
                         <Text size='micro' component='span' className='tabular-nums'>
@@ -1828,23 +1858,75 @@ function SplitBar({
     (el?.closest('[role="dialog"]') as HTMLElement | null)?.focus();
   }, [active]);
 
-  const write = (px: number) => {
-    const v = Math.min(max, Math.max(min, px));
-    live.current = v;
-    // `aria-valuenow` — ЖИВОЙ, и пишется он руками. React-атрибутом он обновлялся бы только на
-    // коммите: высота во время жеста идёт мимо состояния, рендера нет, и скринридер всё
-    // перетаскивание читал бы число, с которого начали. React перезапишет атрибут своим значением
-    // на первом же рендере с ИЗМЕНИВШИМСЯ `value` — то есть ровно после коммита.
-    elRef.current?.setAttribute('aria-valuenow', String(v));
-    onLive(v);
-  };
+  const write = useCallback(
+    (px: number) => {
+      const v = Math.min(max, Math.max(min, px));
+      live.current = v;
+      // `aria-valuenow` — ЖИВОЙ, и пишется он руками. React-атрибутом он обновлялся бы только на
+      // коммите: высота во время жеста идёт мимо состояния, рендера нет, и скринридер всё
+      // перетаскивание читал бы число, с которого начали. React перезапишет атрибут своим значением
+      // на первом же рендере с ИЗМЕНИВШИМСЯ `value` — то есть ровно после коммита.
+      elRef.current?.setAttribute('aria-valuenow', String(v));
+      onLive(v);
+    },
+    [min, max, onLive],
+  );
+
+  /** Указатель зажат на полосе. Пока true, аварийные концы жеста слушают окно и только окно. */
+  const [dragging, setDragging] = useState(false);
 
   const endGesture = (e: React.PointerEvent) => {
     const g = gesture.current;
     if (!g || e.pointerId !== g.pointerId) return;
     gesture.current = null;
+    setDragging(false);
     onCommit(live.current);
   };
+
+  // ЖИВОЙ ЖЕСТ ПОЛОСЫ — ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ, как драг ноды, маркиза, плитка из полки и стикер:
+  // Esc посреди перетаскивания значит «верни высоту, какой была», а не «поднимись на ступень» — и
+  // уж точно не «закрой фулскрин под зажатым указателем» (ровно это и происходило: полоса была
+  // единственным живым жестом экрана без своего слушателя, Radix ловил Escape на документе и при
+  // пустой лестнице закрывал оверлей, не дав жесту кончиться). Потеря окна и потеря видимости —
+  // аварийные концы: `pointerup` после них может не прийти никогда, и незакрытый жест оставил бы
+  // высоту панели живущей мимо предпочтений до следующего касания. Аварийный конец закрывается как
+  // `pointercancel` — коммитом достигнутой высоты; отменяет (возвращает высоту ДО жеста) только Esc.
+  useEffect(() => {
+    if (!dragging) return;
+    const finish = (commit: boolean) => {
+      const g = gesture.current;
+      if (!g) return;
+      gesture.current = null;
+      setDragging(false);
+      // Захват мог быть уже снят браузером — исключение уронило бы конец жеста, а не начало.
+      try {
+        elRef.current?.releasePointerCapture(g.pointerId);
+      } catch {
+        /* указатель уже отпущен */
+      }
+      if (commit) {
+        onCommit(live.current);
+        return;
+      }
+      // Отмена: высота ДО жеста. В предпочтения не пишем — там она и лежит.
+      write(g.base);
+    };
+    const lost = () => finish(true);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !gesture.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    };
+    window.addEventListener('blur', lost);
+    document.addEventListener('visibilitychange', lost);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('blur', lost);
+      document.removeEventListener('visibilitychange', lost);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [dragging, onCommit, write]);
 
   return (
     <div
@@ -1862,6 +1944,7 @@ function SplitBar({
         if (!active || e.button !== 0) return;
         gesture.current = { pointerId: e.pointerId, fromY: e.clientY, base: live.current };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        setDragging(true);
         e.preventDefault();
       }}
       onPointerMove={(e) => {

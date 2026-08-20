@@ -803,10 +803,12 @@ export function ConstructionTab({
                   mediaById={mediaById}
                   activePin={pin.active}
                   onActivePinChange={pin.setActive}
-                  // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ. Пин светит строки списка и только их: на
-                  // полотне активный пин не потребляет НИКТО, и заводить потребителя нельзя —
-                  // это было бы новое визуальное состояние, которого у инлайна нет.
-                  note='hover a pin — it lights that step in the list, never anything on the canvas'
+                  // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ, — В ОБОИХ ВИДАХ ФУЛСКРИНА. Пин светит
+                  // строки рельса и только их, а рельс стоит на экране только в виде СПИСКА:
+                  // фраза без оговорки «in the list view» обещала бы подсветку и над полотном,
+                  // где активный пин не потребляет НИКТО — и заводить потребителя нельзя, это
+                  // было бы новое визуальное состояние, которого у инлайна нет.
+                  note='hover a pin — in the list view it lights that step; the canvas never reacts'
                 />
               }
             />
