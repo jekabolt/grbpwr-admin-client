@@ -924,41 +924,41 @@ function useUnitCodeAct({
   };
 
   const field = (
-      <div className='space-y-px' data-field={`operations.${index}.outputUnitKey`}>
-        <label htmlFor={id} className='block leading-none'>
-          <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
-            unit code
-          </Text>
-        </label>
-        {/* Голый `Input`, а не `InputField`: связь с формой здесь и есть то, что убрано. Значение
-            в форму кладёт мутатор одной записью, а `maxLength` остаётся по колонке сервера
-            (VARCHAR(64)) — отказ по длине бесполезен, поле просто не должно позволять её набрать. */}
-        <Input
-          name={id}
-          ref={ref}
-          value={draft ?? outputKey}
-          placeholder='SHELL'
-          maxLength={64}
-          title='rename the unit: type a new code and press Enter — every step that references it is rewritten in one act'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-            setDraft(e.target.value);
-            if (refusal !== null) setRefusal(null); // набрали другое — вопрос снят, можно пробовать снова
-          }}
-          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-            if (e.key === 'Enter') {
-              // `preventDefault` обязателен: у карточки настоящая <form>, и Enter в поле иначе
-              // отправляет её целиком — то есть переименование превращалось бы в сохранение.
-              e.preventDefault();
-              commit();
-              return;
-            }
-            // Esc здесь НЕ разбирается: до этого обработчика он не доходит — его снимает
-            // window-капчурный слушатель выше, и снимает потому, что иначе его первым увидит
-            // Radix и закроет весь экран.
-          }}
-          onBlur={commit}
-        />
-      </div>
+    <div className='space-y-px' data-field={`operations.${index}.outputUnitKey`}>
+      <label htmlFor={id} className='block leading-none'>
+        <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
+          unit code
+        </Text>
+      </label>
+      {/* Голый `Input`, а не `InputField`: связь с формой здесь и есть то, что убрано. Значение
+          в форму кладёт мутатор одной записью, а `maxLength` остаётся по колонке сервера
+          (VARCHAR(64)) — отказ по длине бесполезен, поле просто не должно позволять её набрать. */}
+      <Input
+        name={id}
+        ref={ref}
+        value={draft ?? outputKey}
+        placeholder='SHELL'
+        maxLength={64}
+        title='rename the unit: type a new code and press Enter — every step that references it is rewritten in one act'
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+          setDraft(e.target.value);
+          if (refusal !== null) setRefusal(null); // набрали другое — вопрос снят, можно пробовать снова
+        }}
+        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'Enter') {
+            // `preventDefault` обязателен: у карточки настоящая <form>, и Enter в поле иначе
+            // отправляет её целиком — то есть переименование превращалось бы в сохранение.
+            e.preventDefault();
+            commit();
+            return;
+          }
+          // Esc здесь НЕ разбирается: до этого обработчика он не доходит — его снимает
+          // window-капчурный слушатель выше, и снимает потому, что иначе его первым увидит
+          // Radix и закроет весь экран.
+        }}
+        onBlur={commit}
+      />
+    </div>
   );
 
   const note = (
