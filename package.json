@@ -25,6 +25,7 @@
     "assembly:layout": "node scripts/assembly-layout-probe.mjs",
     "assembly:positions": "node scripts/assembly-positions-probe.mjs",
     "assembly:rename": "node scripts/assembly-rename-probe.mjs",
+    "assembly:cause": "node scripts/assembly-cause-probe.mjs",
     "stitch:type": "node scripts/stitch-type-probe.mjs",
     "annotation:shapes": "node scripts/annotation-shape-probe.mjs",
     "draft:shape": "node scripts/draft-shape-probe.mjs",
