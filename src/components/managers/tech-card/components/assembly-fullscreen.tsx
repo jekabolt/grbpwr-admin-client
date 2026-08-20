@@ -26,6 +26,7 @@ import {
   type CanvasHandle,
   type CanvasHint,
 } from './assembly-canvas';
+import { renamePicked, type UnitRenameNotice } from './assembly-rename';
 import type { CreatePrefill } from './assembly-create-dialog';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
@@ -169,6 +170,11 @@ export type AssemblyFullscreenProps = {
    * `operations-field.tsx`.
    */
   prefs: ReturnType<typeof useSchematicPrefs>;
+  /**
+   * Последнее состоявшееся переименование узла — весть от мутатора, живущего в поле операций.
+   * Новый объект на каждый жест, включая ⌘Z: тождеством и распознаётся «весть новая».
+   */
+  renamedUnit: UnitRenameNotice | null;
   selectedIndex: number;
   /** Открыть шаг. ЕДИНСТВЕННОЕ, что открывает док. */
   onPickStep: (index: number) => void;
@@ -443,6 +449,7 @@ export function AssemblyFullscreen({
   saving,
   pieceClothByColorway,
   sketchNote,
+  renamedUnit,
   onExit,
 }: AssemblyFullscreenProps) {
   const showMessage = useSnackBarStore((st) => st.showMessage);
@@ -502,6 +509,25 @@ export function AssemblyFullscreen({
 
   // Выбор живёт здесь, а не в полотне: его гасит Esc-лестница, а лестница одна на экран.
   const [picked, setPicked] = useState<string[]>([]);
+
+  // ВЫДЕЛЕНИЕ ПЕРЕЖИВАЕТ ПЕРЕИМЕНОВАНИЕ. Полотно чистит выбор от ключей, которых больше нет в
+  // раскладке, — верно для растворения и неверно здесь: нода никуда не делась, у неё другое имя.
+  //
+  // ПЕРЕНОС ИДЁТ В РЕНДЕРЕ, А НЕ В ЭФФЕКТЕ, и здесь это вынужденно: чистка живёт в ДОЧЕРНЕМ
+  // полотне, а эффекты React сливаются СНИЗУ ВВЕРХ — эффект этого экрана опоздал бы навсегда, и
+  // ключ был бы выброшен раньше, чем перенесён. Правка состояния прямо в рендере — та самая
+  // санкционированная «подгонка состояния под смену пропа»: React перерисовывает экран ДО детей,
+  // и полотно видит уже перенесённый набор.
+  //
+  // ДЕРЖИТСЯ ЭТО НА ТОМ, ЧТО ЧИСТКА ПОЛОТНА СУДИТ ПО ПРОПУ `picked`, а не по функциональному
+  // апдейтеру: пропы доезжают повторным рендером, а апдейтер получил бы набор, каким он был ДО
+  // переноса. Инлайновая схема, где выбор и чистка живут в одном компоненте, решает то же самое
+  // ПОРЯДКОМ ЭФФЕКТОВ — там иначе и нельзя (замерено стендом обоих видов).
+  const [seenRename, setSeenRename] = useState(renamedUnit);
+  if (renamedUnit !== seenRename) {
+    setSeenRename(renamedUnit);
+    if (renamedUnit) setPicked((cur) => renamePicked(cur, renamedUnit.from, renamedUnit.to));
+  }
   const [hint, setHint] = useState<CanvasHint>(null);
   const [resetOpen, setResetOpen] = useState(false);
   // Две верхние ступени Esc-лестницы. Обе — состояния экрана, а не полотна: гасит их лестница, а

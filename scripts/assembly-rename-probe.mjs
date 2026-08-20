@@ -56,7 +56,9 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { planUnitRename, renamePosEdits, unitRenameAct } = await import(pathToFileURL(outfile).href);
+const { planUnitRename, renamePicked, renamePosEdits, unitRenameAct } = await import(
+  pathToFileURL(outfile).href,
+);
 
 let checks = 0;
 const failed = new Set();
@@ -269,6 +271,22 @@ head('раскладка — переименование не имеет пра
   is('снимок не тронут', pos, { SHELL: { x: 5, y: 6 } });
 }
 
+// --- renamePicked: выделение не слетает молча -----------------------------------------------------
+
+head('выделение — нода не делась никуда, у неё другое имя');
+{
+  is('ключ перенесён', renamePicked(['SHELL', 'COLLAR'], 'SHELL', 'CARCASS'), ['CARCASS', 'COLLAR']);
+  is('порядок выбора не сдвинут', renamePicked(['COLLAR', 'SHELL'], 'SHELL', 'CARCASS'), [
+    'COLLAR',
+    'CARCASS',
+  ]);
+  const same = ['COLLAR', 'CUFF'];
+  yes('чужое переименование отдаёт ТОТ ЖЕ массив', renamePicked(same, 'SHELL', 'CARCASS') === same);
+  is('пустой выбор остаётся пустым', renamePicked([], 'SHELL', 'CARCASS'), []);
+  // Идентичность побайтна и здесь: «Shell» в выборе — другая нода.
+  is('регистр не переносится', renamePicked(['Shell'], 'SHELL', 'CARCASS'), ['Shell']);
+}
+
 // --- СТРУКТУРА: второй копии расчёта в репозитории нет ---------------------------------------------
 
 head('структура — расчёт живёт в одном экземпляре');
@@ -288,6 +306,29 @@ head('структура — расчёт живёт в одном экземп�
     'проба истории тянет тот же расчёт',
     /assembly-rename/.test(src('scripts/last-mutation-probe-entry.ts')),
   );
+  // ЛИБО ОБА ВИДА, ЛИБО НИ ОДНОГО. Один вид, помнящий выделение, и второй, теряющий, хуже двух
+  // теряющих: правило перестаёт читаться. Поэтому весть о переименовании проверяется в обоих.
+  for (const view of ['assembly-schematic.tsx', 'assembly-fullscreen.tsx']) {
+    const code = src('src/components/managers/tech-card/components/' + view);
+    yes(`${view}: весть принимается пропом`, /renamedUnit: UnitRenameNotice \| null;/.test(code));
+    yes(`${view}: и переносит выделение`, /renamePicked\(cur, renamedUnit\.from, renamedUnit\.to\)/.test(code));
+  }
+  yes(
+    'и поле операций шлёт её обоим',
+    (field.match(/renamedUnit=\{renamedUnit\}/g) ?? []).length === 2,
+  );
+  // ПОРЯДОК ЭФФЕКТОВ В ИНЛАЙНЕ — НЕСУЩИЙ, а не косметический: выбор и чистка живут там в одном
+  // компоненте, оба эффекта срабатывают в ОДНОМ коммите, и функциональные апдейтеры складываются
+  // в порядке объявления. Переставь их местами — и чистка увидит ещё старый ключ и выбросит его,
+  // а стенд ловит это только на одном из двух видов. Пин текстовый, потому что порядок объявления
+  // ничем другим не выражается.
+  {
+    const inline = src('src/components/managers/tech-card/components/assembly-schematic.tsx');
+    const remap = inline.indexOf('renamePicked(cur');
+    const prune = inline.indexOf('res.frontier.includes(k)');
+    yes('инлайн: перенос объявлен ВЫШЕ чистки', remap > 0 && prune > 0 && remap < prune);
+  }
+
   const hist = src('scripts/last-mutation-probe.mjs');
   yes('и зовёт его в модели жеста', /unitRenameAct\(/.test(hist));
   // Признак вернувшейся копии — не слова отказа (их проба вправе ЖДАТЬ строкой), а повторный СКАН

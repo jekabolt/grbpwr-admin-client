@@ -2,6 +2,7 @@
 // одного реэкспорта хватает.
 export {
   planUnitRename,
+  renamePicked,
   renamePosEdits,
   unitRenameAct,
 } from '../src/components/managers/tech-card/components/assembly-rename';

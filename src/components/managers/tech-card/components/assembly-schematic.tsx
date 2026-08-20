@@ -19,6 +19,7 @@ import {
 } from './assembly-node-views';
 import type { CreatePrefill } from './assembly-create-dialog';
 import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
+import { renamePicked, type UnitRenameNotice } from './assembly-rename';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
 
@@ -86,6 +87,7 @@ export function AssemblySchematic({
   positions,
   onMove,
   onResetPositions,
+  renamedUnit,
   frozen = false,
 }: {
   blocks: AssemblyBlock[];
@@ -124,6 +126,11 @@ export function AssemblySchematic({
   positions: PosOverrides;
   onMove: (key: string, at: { x: number; y: number }) => void;
   onResetPositions: () => void;
+  /**
+   * Последнее состоявшееся переименование узла — весть от мутатора, живущего в поле операций.
+   * Новый объект на каждый жест, включая ⌘Z: тождеством и распознаётся «весть новая».
+   */
+  renamedUnit: UnitRenameNotice | null;
   /** Карточка выпущена: схема остаётся читаемой и раскладываемой, но не редактируемой. */
   frozen?: boolean;
 }) {
@@ -132,6 +139,7 @@ export function AssemblySchematic({
   const [picked, setPicked] = useState<string[]>([]);
   const toggle = (key: string) =>
     setPicked((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+
   const onTable = new Set(res.frontier);
   // Живые УЗЛЫ фронтира (детали на столе — не узлы). Ровно та величина, которой рельс решает,
   // сошёлся ли граф: правило выпуска требует РОВНО ОДИН терминал.
@@ -149,6 +157,19 @@ export function AssemblySchematic({
   // фронтир, и единственный путь наружу это «выбрал, потом сам же скормил». Тогда его надо снять:
   // `ActionPanel` инлайна берёт весь `picked` целиком, огранки, как у полосы выбора полотна, у него
   // нет. Появится в инлайне маркиза — придётся завести и её.
+  // ВЫДЕЛЕНИЕ ПЕРЕЖИВАЕТ ПЕРЕИМЕНОВАНИЕ, И ЭТОТ ЭФФЕКТ ОБЯЗАН СТОЯТЬ ВЫШЕ ЧИСТКИ. Чистка судит по
+  // фронтиру, а переименованный узел выглядит для неё исчезнувшим, хотя не делся никуда — просто
+  // называется иначе. Порядок объявления и есть порядок исполнения: оба эффекта срабатывают в
+  // ОДНОМ коммите (весть и новый свип приезжают одним рендером родителя), и функциональные
+  // апдейтеры складываются в очередь — чистка получает уже перенесённый набор.
+  //
+  // Переносом в РЕНДЕРЕ это не решается: правка состояния в фазе рендера до апдейтера чистки не
+  // доезжает — она получает набор, каким он был ДО переноса (замерено стендом, выделение слетало).
+  useEffect(() => {
+    if (!renamedUnit) return;
+    setPicked((cur) => renamePicked(cur, renamedUnit.from, renamedUnit.to));
+  }, [renamedUnit]);
+
   useEffect(() => {
     setPicked((cur) => {
       const live = cur.filter((k) => res.frontier.includes(k));

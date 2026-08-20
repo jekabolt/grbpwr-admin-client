@@ -212,6 +212,7 @@ export function renderSchematic(frozen: boolean): string {
         positions={CONVERGED_POSITIONS}
         onMove={noop}
         onResetPositions={noop}
+        renamedUnit={null}
         frozen={frozen}
       />
       <AssemblySchematic
@@ -231,6 +232,7 @@ export function renderSchematic(frozen: boolean): string {
         positions={{}}
         onMove={noop}
         onResetPositions={noop}
+        renamedUnit={null}
         frozen={frozen}
       />
     </>,

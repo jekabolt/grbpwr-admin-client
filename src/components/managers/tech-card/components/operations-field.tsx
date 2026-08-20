@@ -79,6 +79,7 @@ import {
   renamePosEdits,
   unitRenameAct,
   type UnitKeyRow,
+  type UnitRenameNotice,
 } from './assembly-rename';
 import {
   appendLabel,
@@ -3995,6 +3996,7 @@ export function OperationsField({
         label: renameLabel(from, next),
       }),
     );
+    setRenamedUnit({ from, to: next });
     // Жест подтверждён уходом фокуса — и этот же уход сейчас дёрнет восьмую точку сброса. Щит
     // ровно на один такт: иначе запись, только что легшая, умрёт до первого ⌘Z.
     settleGesture();
@@ -4044,6 +4046,25 @@ export function OperationsField({
    * экране больше нигде нет: это не «отменил», а «поломал заново». Формовые записи он не трогает —
    * последовательность шагов сбросом раскладки не менялась.
    */
+  /**
+   * ВЕСТЬ О СОСТОЯВШЕМСЯ ПЕРЕИМЕНОВАНИИ — чтобы выделение не слетало молча.
+   *
+   * Ключи узлов держит у себя ВЫДЕЛЕНИЕ, и живёт оно в двух местах: у инлайновой схемы и у
+   * фулскрина. Оба чистят выбор от ключей, которых больше нет на полотне, — и переименованный
+   * узел выглядит для этой чистки исчезнувшим, хотя не делся никуда.
+   *
+   * ЛИБО ОБА ВИДА, ЛИБО НИ ОДНОГО: один вид, помнящий выделение, и второй, теряющий, хуже двух
+   * теряющих — человек перестаёт понимать правило. Поэтому весть уходит обоим одним пропом.
+   *
+   * НЕ ПОДНИМАЕМ САМО ВЫДЕЛЕНИЕ СЮДА: это состояние ЖЕСТА, а не данных, у видов оно разное
+   * (инлайн режет фронтиром, полотно берёт маркизой что угодно), и общее хранилище связало бы два
+   * экрана, которым знать о выборе друг друга незачем.
+   *
+   * НОВЫЙ ОБЪЕКТ НА КАЖДЫЙ ЖЕСТ, включая ⌘Z и ⇧⌘Z: тождеством и распознаётся «весть новая», иначе
+   * цикл «A → B → A» дошёл бы до вида один раз.
+   */
+  const [renamedUnit, setRenamedUnit] = useState<UnitRenameNotice | null>(null);
+
   const resetPositions = useCallback(() => {
     setHistory(dropMove(history.current));
     prefs.reset();
@@ -4116,6 +4137,8 @@ export function OperationsField({
       // И РАСКЛАДКУ — ТЕМ ЖЕ НАЖАТИЕМ. Вернуть ссылки, оставив ноду под новым кодом, значит
       // оставить её в авто-раскладке: жест был один, и половин у него нет.
       prefs.restore(rec.posBack);
+      // …и выделение: инверсия переименования — тоже переименование, только в другую сторону.
+      setRenamedUnit({ from: rec.to, to: rec.from });
     } else {
       applyToForm(() => {
         setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
@@ -4168,6 +4191,7 @@ export function OperationsField({
     if (rec.kind === 'rename') {
       applyToForm(() => rewriteUnitKeySites(rec, rec.to));
       prefs.restore(rec.posForward); // зеркало отмены: раскладка возвращается тем же нажатием
+      setRenamedUnit({ from: rec.from, to: rec.to });
       setHistory(redoStep(history.current));
       return;
     }
@@ -4533,6 +4557,9 @@ export function OperationsField({
                   // одиночная (`key, at`), поэтому пачка из одной правки.
                   onMove={(key, at) => moveNodes([{ key, at }])}
                   onResetPositions={resetPositions}
+                  // ВЕСТЬ ИДЁТ ОБОИМ ВИДАМ, а не одному: полуразведённый проп — ровно тот дефект,
+                  // который этот раунд вычищал.
+                  renamedUnit={renamedUnit}
                   frozen={frozen}
                 />
               ) : (
@@ -4627,6 +4654,7 @@ export function OperationsField({
           // экране больше нет. Подменой, а не новым пропом: писатель раскладки у экрана один, и
           // второй канал к нему означал бы, что однажды позовут не тот.
           prefs={{ ...prefs, reset: resetPositions }}
+          renamedUnit={renamedUnit}
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
           setPendingCreate={setPendingCreate}
