@@ -272,7 +272,7 @@ export function resolvePending<TRow>(
  * а не отменить свою.
  *
  * Раскладка не спрашивается ни о чём: она не адресуется индексом строки и ресет формы её не
- * касается. Ноды, которой больше нет, отмена просто не найдёт — оверрайд без ноды никого не двигает.
+ * касается. Ноды, которой больше нет, отмена не найдёт — оверрайд без ноды никого не двигает.
  */
 export function canUndo<TRow>(
   rec: HistoryEntry<TRow>,
@@ -305,7 +305,8 @@ export function canRedo<TRow>(
   if (rec.kind === 'move') return true;
   if (rec.index < 0) return false;
   if (rec.kind === 'append') return fields.length === rec.index;
-  return fields[rec.index]?.id === rec.fieldId && getOutputUnitKey(rec.index).trim() === rec.unitKey;
+  if (fields[rec.index]?.id !== rec.fieldId) return false;
+  return getOutputUnitKey(rec.index).trim() === rec.unitKey;
 }
 
 /**
