@@ -197,6 +197,26 @@ ck(
   JSON.stringify(f.brokenLiveUnits),
 );
 ck(f.brokenViolations.length === 0, 'разорванный граф валиден по проходу', f.brokenViolations.join(', '));
+// ТРЕТЬЕ ПОЛОТНО — ЕДИНСТВЕННОЕ, ГДЕ ХВОСТ ВООБЩЕ ЕСТЬ. Стоит ему выродиться (появись в нём узел,
+// или окажись обработка над ОДНОЙ деталью), шаг уехал бы на плитку, хвоста не стало бы — и его
+// разметка перестала бы проверяться, оставив снимок зелёным.
+ck(
+  JSON.stringify(f.tailBlockKeys) === JSON.stringify(['']),
+  'граф хвоста: ни одного узла, только хвостовой псевдоблок',
+  JSON.stringify(f.tailBlockKeys),
+);
+ck(
+  JSON.stringify(f.tailLooseSteps) === JSON.stringify([0, 1, 2]),
+  'граф хвоста: атрибуция держит все три шага — ни один не достаёт до узла',
+  JSON.stringify(f.tailLooseSteps),
+);
+ck(
+  JSON.stringify(f.tailDrawnSteps) === JSON.stringify([1, 2]),
+  'граф хвоста: строк в хвосте две — обработка одной детали уехала на её плитку',
+  JSON.stringify(f.tailDrawnSteps),
+);
+ck(f.tailLiveUnits.length === 0, 'граф хвоста: живых узлов нет', JSON.stringify(f.tailLiveUnits));
+ck(f.tailViolations.length === 0, 'граф хвоста валиден по проходу', f.tailViolations.join(', '));
 
 /**
  * Токены-ссылки снимка: `[{ to, text }]` в порядке появления. Ищется по СОБСТВЕННОЙ подсказке
@@ -247,6 +267,16 @@ for (const frozen of ['false', 'true']) {
     );
   }
 
+  // ХВОСТОВОЙ БОКС ЖИВЁТ ТОЛЬКО В ТРЕТЬЕМ ПОЛОТНЕ, и до него золото не доставало вовсе.
+  ck(s.includes('◌ waiting for a unit'), `frozen=${frozen}: хвост назван ожиданием`);
+  ck(s.includes('joins a unit with its piece'), `frozen=${frozen}: хвост говорит про будущее`);
+  ck(s.includes('nothing here reaches a unit yet.'), `frozen=${frozen}: подсказка хвоста на месте`);
+  ck(
+    s.includes('border border-dashed border-borderColor bg-bgColor'),
+    `frozen=${frozen}: край хвоста 1px — рангом обычной коробки, а не узла`,
+  );
+  ck(s.includes('>2 steps<'), `frozen=${frozen}: подвал хвоста считает свои две строки`);
+  ck(s.includes('Σ 2.4'), `frozen=${frozen}: Σ хвоста на месте — подвал не пустой`);
   for (const glyph of ['·', '▣', '+▣']) {
     ck(s.includes(`>${glyph}</span>`), `frozen=${frozen}: глиф «${glyph}» на месте`);
   }

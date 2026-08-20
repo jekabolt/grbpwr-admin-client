@@ -9,16 +9,30 @@
 // изменивший класс, title, порядок узлов, координату style, глиф или роль органа, обязан упасть
 // сравнением. Проверять при этом вьюшки поимённо значило бы сверять новое с новым.
 //
-// ДВА ЭКЗЕМПЛЯРА В ОДНОМ СНИМКЕ — вынужденно и намеренно. Слово состояния узла (`stateWord`)
-// имеет три ветки, и три в одном графе не встречаются никогда: «✓ garment» требует РОВНО ОДНОГО
-// живого узла (правило 4), а «✕ break» — двух и более. Поэтому снимок несёт два полотна: сошедшийся
-// граф (терминал + поглощённые) и разорванный (два живых узла). Побочная выгода — снимок заодно
-// фиксирует, что два полотна на одной странице не путают свои генерируемые id.
+// ТРИ ЭКЗЕМПЛЯРА В ОДНОМ СНИМКЕ — вынужденно и намеренно, и у каждого своя причина.
+//
+//   1. СОШЕДШИЙСЯ ГРАФ и 2. РАЗОРВАННЫЙ — потому что слово состояния узла (`stateWord`) имеет три
+//      ветки, а три в одном графе не встречаются никогда: «✓ garment» требует РОВНО ОДНОГО живого
+//      узла (правило 4), а «✕ break» — двух и более.
+//   3. ХВОСТ — потому что после Т9 хвостового бокса в первых двух НЕТ НИ В ОДНОМ: обработка одной
+//      детали уехала на её плитку, а пустого хвоста не бывает вовсе. Вид хвоста Т9б переписала
+//      целиком («◌ waiting for a unit», рамка 1px, подсказка про будущее), и без третьего полотна
+//      золото не проверяло бы его ни байтом. Хвост выживает ровно там, где шаг не приписывается
+//      НИ УЗЛУ, НИ ПЛИТКЕ: обработка над ДВУМЯ разными деталями и ни одного джойна на карточке
+//      (`assembly-blocks.ts` — ветка `loose`; `assembly-layout.ts` — `processingOf` требует
+//      единственного различного входа). Замерено на этом самом графе, а не выведено из чтения.
+//
+// Побочная выгода — снимок заодно фиксирует, что полотна на одной странице не путают свои
+// генерируемые id, а третье вдобавок закрывает ветку раскладки «узлов нет вовсе» (`real.length
+// === 0`), которой в золоте тоже не было.
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { AssemblySchematic } from '../src/components/managers/tech-card/components/assembly-schematic';
 import { assemblyBlocks } from '../src/components/managers/tech-card/components/assembly-blocks';
-import { SCHEMATIC_METRICS } from '../src/components/managers/tech-card/components/assembly-layout';
+import {
+  assemblyLayout,
+  SCHEMATIC_METRICS,
+} from '../src/components/managers/tech-card/components/assembly-layout';
 import {
   buildWires,
   compositionOf,
@@ -188,8 +202,48 @@ const BROKEN_SMV = new Map<string, string>([
   ['RIGHT', ''],
 ]);
 
+// --- граф с ЖИВЫМ ХВОСТОМ: ни одного узла, обработки над парами деталей ------------------------
+//
+// Отделочная мелочёвка, которую ещё ни к чему не пришили, — состояние, в котором карточка живёт
+// первые полчаса своей жизни. Шаг 10 берёт ОДНУ деталь и потому уезжает строкой НА ЕЁ ПЛИТКУ;
+// шаги 20 и 30 берут по ДВЕ разные и приписаться не могут никуда — они и есть хвост. Обе строки
+// в одном снимке нужны вместе: строка плитки и строка хвоста намеренно разной грамматики, и
+// разъехаться они могут только молча.
+const TAIL_PIECES: AssemblyPiece[] = [
+  { lineKey: 'TAPE', name: 'binding tape' },
+  { lineKey: 'TRIM', name: 'edge trim' },
+  { lineKey: 'LBL', name: 'care label' },
+];
+
+const TAIL_STEPS: RawStep[] = [
+  { in: ['TAPE'] },
+  { in: ['TAPE', 'TRIM'] },
+  { in: ['TRIM', 'LBL'] },
+];
+
+const TAIL_LABELS = [
+  'fuse the binding tape',
+  'press the tape onto the trim',
+  'stitch the label to the trim',
+];
+
+// Σ у хвоста НЕ пустая: подвал хвостового бокса спрашивает `smvOfBlock.get('')`, и без числа
+// половина его разметки в снимок не попала бы.
+const TAIL_SMV = new Map<string, string>([['', '2.4']]);
+
+// Карта ткани СУЩЕСТВУЕТ, но знает лишь про одну деталь: остальные две — «рецепт промолчал», а
+// это не то же, что «вопрос не задавался» (у разорванного графа карты нет вовсе).
+const TAIL_CLOTH = new Map<string, PieceCloth>([
+  ['TAPE', cloth('interfacing', { id: 12, code: 'TP-08', name: 'fusible tape' })],
+]);
+
+const TAIL_SHAPES: PieceShapeMap = new Map<string, FoundPiece | null>([
+  [pieceRefKey('TRIM'), shape(7, 'TR_1', 4, 90, ['M'])],
+]);
+
 const converged = buildCase(CONVERGED_PIECES, CONVERGED_STEPS);
 const broken = buildCase(BROKEN_PIECES, BROKEN_STEPS);
+const tailed = buildCase(TAIL_PIECES, TAIL_STEPS);
 
 const nameOf = (pieces: AssemblyPiece[]) => (key: string) =>
   pieces.find((p) => p.lineKey === key)?.name ?? key;
@@ -238,6 +292,27 @@ export function renderSchematic(frozen: boolean): string {
         renamedUnit={null}
         frozen={frozen}
       />
+      {/* ТРЕТЬЕ ПОЛОТНО — РАДИ ХВОСТА. Единственное, где хвостовой бокс вообще существует: в
+          первых двух все обработки уехали на плитки своих деталей, а пустого хвоста не бывает.
+          Ручных позиций нет — строка «layout: manual» тоже обязана отсутствовать. */}
+      <AssemblySchematic
+        blocks={tailed.blocks}
+        steps={tailed.steps}
+        res={tailed.res}
+        labelOf={labelFrom(TAIL_LABELS)}
+        pieceNameOf={nameOf(TAIL_PIECES)}
+        onPickStep={noop}
+        onCreate={noop}
+        onDissolve={noop}
+        pieceShapes={TAIL_SHAPES}
+        cloth={TAIL_CLOTH}
+        smvOfBlock={TAIL_SMV}
+        positions={{}}
+        onMove={noop}
+        onResetPositions={noop}
+        renamedUnit={null}
+        frozen={frozen}
+      />
     </>,
   );
 }
@@ -268,4 +343,16 @@ export const fixtureFacts = {
   convergedViolations: converged.res.violations.map((v) => v.detail),
   brokenLiveUnits: broken.res.frontier.filter((k) => broken.res.units.has(k)),
   brokenViolations: broken.res.violations.map((v) => v.detail),
+  // Хвост существует только пока шаг не приписался ни узлу, ни плитке. Выродись фикстура — и
+  // третье полотно молча перестало бы что-либо характеризовать, оставшись зелёным.
+  //
+  // ДВА СПИСКА, И РАЗНИЦА МЕЖДУ НИМИ И ЕСТЬ ПРАВИЛО Т9а. Атрибуция (`loose.steps`) держит ВСЕ три
+  // шага, включая обработку одной детали; раскладка (`tailSteps`) отдаёт под строки только те
+  // два, которым не досталось плитки. Совпади эти списки — либо обработка перестала уезжать на
+  // плитку, либо хвост рисует больше строк, чем ему отмерено высоты.
+  tailBlockKeys: tailed.blocks.map((b) => b.key),
+  tailLooseSteps: tailed.blocks.find((b) => b.key === '')?.steps ?? [],
+  tailDrawnSteps: assemblyLayout(tailed.blocks, tailed.steps, tailed.res).tailSteps,
+  tailLiveUnits: tailed.res.frontier.filter((k) => tailed.res.units.has(k)),
+  tailViolations: tailed.res.violations.map((v) => v.detail),
 };
