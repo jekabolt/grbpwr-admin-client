@@ -244,8 +244,10 @@ export function revealDelta(
     const s0 = b0 * view.zoom + pan;
     const sz = size * view.zoom;
     // Нода не влезает целиком ни при каком сдвиге: гнаться за её концом значит увезти начало за
-    // кромку. Тогда единственная забота — чтобы начало было видно.
-    if (sz > span - margin * 2) return s0 < margin ? margin - s0 : 0;
+    // кромку. Тогда единственная забота — чтобы начало было видно. ОБЕ СТОРОНЫ: начало, ушедшее
+    // ЗА ПРАВУЮ кромку, — тоже невидимое начало, и «s0 < margin ? … : 0» здесь возвращал бы ноль
+    // на ноде, которой на экране нет вовсе, — find находил бы её словами, а панорама стояла.
+    if (sz > span - margin * 2) return s0 < margin || s0 > span - margin ? margin - s0 : 0;
     if (s0 < margin) return margin - s0;
     if (s0 + sz > span - margin) return span - margin - (s0 + sz);
     return 0;

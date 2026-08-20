@@ -31,7 +31,19 @@ export type FieldRow = { id: string };
  * моменту показа узла уже может не быть (его растворили), а чип обязан называть то, что отменяет.
  */
 export type LastMutation =
-  | { kind: 'append'; index: number; fieldId: string; label: string }
+  | {
+      kind: 'append';
+      index: number;
+      fieldId: string;
+      label: string;
+      /**
+       * Значение `assemblyCleared` ДО жеста — есть только у жеста, который этот флаг ПЕРЕЗАПИСАЛ
+       * (`appendStep` с узлом гасит намерение «снять разметку»). Инверсия обязана вернуть и его:
+       * сценарий «снял разметку → сшил → ⌘Z» без отката флага молча терял намерение снятия, и
+       * следующее сохранение не доносило его до сервера.
+       */
+      clearedBefore?: boolean;
+    }
   | {
       kind: 'dissolve';
       index: number;
@@ -50,7 +62,14 @@ export type LastMutation =
  * append: между мутатором и эффектом мог успеть пройти чужой апдейт (генератор заменил весь
  * список), и дозаполнить в этом случае значило бы записать id постороннего шага.
  */
-export type PendingAppend = { kind: 'append'; index: number; expectedLength: number; label: string };
+export type PendingAppend = {
+  kind: 'append';
+  index: number;
+  expectedLength: number;
+  label: string;
+  /** См. `LastMutation.clearedBefore`: снимается в мутаторе, вторым тактом только переносится. */
+  clearedBefore?: boolean;
+};
 
 /** Подпись жеста создания. Номер ЭКРАННЫЙ — `(i + 1) * 10`, как на рельсе и в боксах. */
 export function appendLabel(index: number): string {
@@ -74,7 +93,13 @@ export function resolvePending(p: PendingAppend, fields: FieldRow[]): LastMutati
   if (fields.length !== p.expectedLength) return null;
   const id = fields[p.index]?.id;
   if (!id) return null;
-  return { kind: 'append', index: p.index, fieldId: id, label: p.label };
+  return {
+    kind: 'append',
+    index: p.index,
+    fieldId: id,
+    label: p.label,
+    ...(p.clearedBefore !== undefined ? { clearedBefore: p.clearedBefore } : {}),
+  };
 }
 
 /**

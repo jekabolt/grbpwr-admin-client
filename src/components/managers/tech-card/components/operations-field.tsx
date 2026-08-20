@@ -3707,6 +3707,10 @@ export function OperationsField({
       index: at,
       expectedLength: at + 1,
       label: appendLabel(at),
+      // Жест с узлом ниже перезапишет `assemblyCleared` — снимаем значение ДО жеста, чтобы
+      // инверсия вернула и его: «снял разметку → сшил → ⌘Z» без отката флага молча теряло
+      // намерение снятия, и следующее сохранение не доносило его до сервера.
+      ...(r.outputUnitKey ? { clearedBefore: !!getValues('assemblyCleared') } : {}),
     };
     append({
       ...emptyOperation,
@@ -3783,6 +3787,12 @@ export function OperationsField({
     if (rec.kind === 'append') {
       // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
       removeOperation(rec.index);
+      // Жест перезаписал `assemblyCleared` — инверсия возвращает и его. Между жестом и ⌘Z флаг
+      // смениться не мог: все его писатели живут за фокусом дока или вне фулскрина, то есть за
+      // точками сброса записи.
+      if (rec.clearedBefore !== undefined) {
+        setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
+      }
     } else {
       setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
       setValue(`operations.${rec.index}.outputUnitName`, rec.unitName, { shouldDirty: true });
@@ -3908,6 +3918,17 @@ export function OperationsField({
     if (!closed) return;
     requestAnimationFrame(() => fsChipRef.current?.focus());
   }, [fsOpen]);
+
+  // ДЕСЯТАЯ ТОЧКА СБРОСА (ревью Ф4) — ГРАНИЦА ВИЗИТА ФУЛСКРИНА, обе стороны. Девять точек стерегут
+  // массив и правки внутри фулскрина, но ⌘Z и чип живут ТОЛЬКО в нём, а запись — здесь, и она
+  // переживала закрытие оверлея. Снаружи же шаг правится мимо всех девяти: редактор списка не имеет
+  // focusin-сброса, «make it a unit» и «clear the unit markup» пишут в форму напрямую. Сценарий
+  // «create в фулскрине → закрыл → дописал заметку в списке → открыл → ⌘Z» сносил шаг ВМЕСТЕ с
+  // заметкой — ровно то, от чего точка 7 стережёт добор детали. Отмена обещает «ой» сразу после
+  // жеста; жест из прошлого визита — уже не «сразу».
+  useEffect(() => {
+    clearLastMutation();
+  }, [fsOpen, clearLastMutation]);
 
   return (
     <div className='space-y-2.5'>
