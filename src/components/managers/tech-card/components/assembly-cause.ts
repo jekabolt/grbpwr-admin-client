@@ -50,10 +50,16 @@ function stepList(idx: number[]): string {
 /**
  * Изъян шага глазами человека, а не движка.
  *
- * ПРИЧИНА — ошибка, которую чинят ЗДЕСЬ. СЛЕДСТВИЕ — шаг, у которого своего изъяна нет вовсе: он
- * ждёт узел, который не родился выше, и починится сам, как только починят причину. Разница не
- * косметическая: следствие не нужно ни читать, ни чинить, и весь смысл раздела — снять с
- * конструктора две ошибки из трёх.
+ * ПРИЧИНА — ошибка, которую чинят ЗДЕСЬ. СЛЕДСТВИЕ — шаг, у которого СЕГОДНЯ своего изъяна нет
+ * вовсе: он ждёт узел, который не родился выше. Разница не косметическая: следствие не нужно ни
+ * читать, ни чинить, и весь смысл раздела — снять с конструктора две ошибки из трёх.
+ *
+ * ЧЕГО «СЛЕДСТВИЕ» НЕ ОБЕЩАЕТ: что после починки причины шаг соберётся. Изъян может ЖДАТЬ за
+ * мёртвым узлом — два шага, взявшие один и тот же не родившийся узел, сегодня оба следствия, а
+ * стоит узлу появиться, и второй получит «уже съеден шагом k» (правило 2). Разглядеть это заранее
+ * можно только сухим прогоном свипа по карточке, где причина уже починена, а починить её за
+ * человека расчёт не может: опечатку он не угадает. Обещание сформулировано ровно по тому, что
+ * известно, — «чинить здесь нечего», а не «починится само».
  */
 export type StepFault = {
   step: number;
@@ -63,9 +69,13 @@ export type StepFault = {
    * ждать чужой узел и вдобавок иметь свой изъян, и тогда он причина — но ждёт по-прежнему.
    */
   waitingFor: string[];
-  /** Шаги-КОНЕЧНЫЕ причины, по возрастанию; у самой причины пусто. Первый — цель клика. */
+  /**
+   * ВСЕ шаги-конечные причины, по возрастанию; у самой причины пусто. Первый — цель клика.
+   * Именно все: у следствия глубиной в два звена корней бывает несколько, и назвать один значит
+   * послать чинить половину.
+   */
   causes: number[];
-  /** Шаги, осиротевшие из-за этого; у следствия пусто. */
+  /** Шаги, осиротевшие из-за этого, включая дальние по цепи; у следствия пусто. */
   orphans: number[];
   /** Готовая строка человеку. У причины — слова движка, у следствия — чего ждёт и кто виноват. */
   message: string;
@@ -168,26 +178,50 @@ export function assemblyFaults(steps: AssemblyStep[], res: AssemblyResult): Map<
   const drafts = draftFaults(steps, res);
 
   /**
-   * Спуск ДО КОНЕЧНОЙ ПРИЧИНЫ, а не до ближайшей: владелец жаловался ровно на цепочку из трёх, и
+   * Спуск ДО КОНЕЧНЫХ ПРИЧИН, а не до ближайшей: владелец жаловался ровно на цепочку из трёх, и
    * следствие, показывающее адрес другого следствия, отправляет чинить туда, где чинить нечего.
+   *
+   * ПРИЧИН У ОДНОГО СЛЕДСТВИЯ БЫВАЕТ НЕСКОЛЬКО, и на глубине это видно не сразу. Шаг, ждущий двух
+   * мёртвых узлов, называет обе причины сам; шаг ПОД НИМ ждёт уже один узел — и спуск одной
+   * веткой оставил бы ему один адрес из двух. Человек чинит названное, шаг остаётся красным, и
+   * доверие к подписи уходит целиком: «показало не туда» запоминается лучше, чем девять раз туда.
+   * Поэтому обходятся ВСЕ мёртвые входы, а не первый по номеру.
    *
    * Спуск монотонен — производитель мёртвого ключа всегда СТРОГО выше потребителя, иначе свип
    * сказал бы «appears only at step k», — поэтому зациклиться сегодня нечем. Множество посещённых
    * всё равно стоит: расчёт крутится на каждый символ, который печатает человек, и цена ошибки в
    * будущей правке — не неверный ответ, а повисший экран на испорченной карточке.
+   *
+   * Память по шагам — не украшение: карточка, сломанная в самом верху длинной цепи, и есть та,
+   * ради которой модуль написан, и без памяти обход по ней квадратичен по длине цепи.
    */
-  const rootOf = (from: number): number => {
-    let at = from;
+  const rootMemo = new Map<number, number[]>();
+  const rootsOf = (from: number): number[] => {
+    const done = rootMemo.get(from);
+    if (done) return done;
+    const roots = new Set<number>();
     const seen = new Set<number>([from]);
-    for (;;) {
+    const stack = [from];
+    for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
+      const cached = rootMemo.get(at);
+      if (cached) {
+        for (const r of cached) roots.add(r);
+        continue;
+      }
       const d = drafts.get(at);
-      if (!d || d.own.length > 0 || d.dead.size === 0) return at;
-      let next = -1;
-      for (const p of d.dead.values()) if (next < 0 || p < next) next = p;
-      if (next < 0 || seen.has(next)) return at;
-      seen.add(next);
-      at = next;
+      if (!d || d.own.length > 0 || d.dead.size === 0) {
+        roots.add(at);
+        continue;
+      }
+      for (const p of d.dead.values()) {
+        if (seen.has(p)) continue;
+        seen.add(p);
+        stack.push(p);
+      }
     }
+    const out = [...roots].sort((a, b) => a - b);
+    rootMemo.set(from, out);
+    return out;
   };
 
   const faults = new Map<number, StepFault>();
@@ -208,7 +242,9 @@ export function assemblyFaults(steps: AssemblyStep[], res: AssemblyResult): Map<
       });
       return;
     }
-    const causes = [...new Set([...d.dead.values()].map(rootOf))].sort((a, b) => a - b);
+    const causes = [...new Set([...d.dead.values()].flatMap((p) => rootsOf(p)))].sort(
+      (a, b) => a - b,
+    );
     const waitingFor = [...d.dead.keys()];
     faults.set(i, {
       step: i,
@@ -257,6 +293,11 @@ export type AssemblyPrice = {
   orphans: number[];
   /** Узлы, которые перестанут собираться, хотя карточка их по-прежнему объявляет. */
   unitsLost: string[];
+  /**
+   * Детали, выпадающие из уцелевших узлов: узел собрался под тем же кодом, но уже без них, и ни
+   * в один другой узел они не попали. Ключи строк деталей, в порядке объявления.
+   */
+  piecesDropped: string[];
   /** Шаги, чей изъян жест СНИМАЕТ. Цена честна только вместе с этой половиной. */
   heals: number[];
   /** Одна строка человеку. Пустой не бывает: «ничего не сломается» тоже цена. */
@@ -304,12 +345,34 @@ export function assemblyPrice(
   const declared = new Set(after.map((s) => s.outputUnitKey).filter(Boolean));
   const unitsLost = [...wasRes.units.keys()].filter((k) => !nowRes.units.has(k) && declared.has(k));
 
+  // УЦЕЛЕВШИЙ УЗЕЛ — ЕЩЁ НЕ ЦЕЛЫЙ УЗЕЛ, и это вторая половина той же честности. Джойн, потерявший
+  // вход, но сохранивший законные два, собирает узел ПОД ТЕМ ЖЕ КОДОМ — а внутри у него больше
+  // нет деталей, приходивших через потерянный вход. Свип это знает (замыкание `leaves`), и
+  // молчать нельзя: «▣ BODY still assembles» без этой строки читается как «ничего страшного»,
+  // тогда как перед и спинка только что выпали из изделия, и увидит это разве что релизный гейт.
+  //
+  // Считаются ТОЛЬКО узлы, дожившие до карточки-после, и только детали, не попавшие после жеста
+  // НИ В ОДИН узел. Узел, исчезнувший целиком, — это `unitsLost` или сам жест: растворение затем
+  // и зовут, чтобы его входы вернулись на стол, и объявлять это потерей значит пересказывать
+  // человеку его же намерение.
+  const inAfter = new Set<string>();
+  nowRes.units.forEach((u) => u.leaves.forEach((k) => inAfter.add(k)));
+  const dropped = new Set<string>();
+  wasRes.units.forEach((u, k) => {
+    if (!nowRes.units.has(k)) return;
+    for (const leaf of u.leaves) if (!inAfter.has(leaf)) dropped.add(leaf);
+  });
+  const piecesDropped = pieces.map((p) => p.lineKey).filter((k) => dropped.has(k));
+
   // ПРИЯТНОЕ ГОВОРИТСЯ, ЕСЛИ ОНО ПРАВДА. Джойн, потерявший один вход из трёх, остаётся с двумя
   // законными и собирает свой узел: сломан он, а не цепь под ним. Без этой половины предупреждение
   // станет шумом, который перестают читать, — и перестанут читать заодно и настоящее.
-  const held = breaks
-    .map((i) => after[i]?.outputUnitKey ?? '')
-    .filter((k) => !!k && nowRes.units.has(k));
+  // Дедуп: один код у двух сломанных шагов законен (поглощение), а «▣ SHELL, ▣ SHELL» — нет.
+  const held = [
+    ...new Set(
+      breaks.map((i) => after[i]?.outputUnitKey ?? '').filter((k) => !!k && nowRes.units.has(k)),
+    ),
+  ];
 
   const parts: string[] = [];
   if (breaks.length === 0) {
@@ -324,11 +387,19 @@ export function assemblyPrice(
       );
     }
   }
+  if (piecesDropped.length > 0) {
+    // Деталь человек знает по имени — так её зовут и чипы входа, и релизный гейт («these never
+    // reach the finished garment»). Ключ строки остаётся фолбэком: имя может быть и пустым.
+    const named = new Map(pieces.map((p) => [p.lineKey, p.name]));
+    parts.push(
+      `and ${piecesDropped.map((k) => named.get(k) || k).join(', ')} no longer reach any unit`,
+    );
+  }
   if (heals.length > 0) {
     parts.push(`and ${stepList(heals)} stop${heals.length > 1 ? '' : 's'} being broken`);
   }
 
-  return { breaks, orphans, unitsLost, heals, summary: parts.join(', ') };
+  return { breaks, orphans, unitsLost, piecesDropped, heals, summary: parts.join(', ') };
 }
 
 /**
