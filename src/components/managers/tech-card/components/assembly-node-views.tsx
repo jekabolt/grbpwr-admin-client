@@ -145,7 +145,8 @@ export function makeRowY(
     // её плитку, и в хвосте её строки больше нет; блок про это не знает — атрибуция шагов
     // намеренно осталась прежней. Считай провод по блоку — и он целился бы в строку, сдвинутую
     // на все уехавшие, то есть мимо всех оставшихся.
-    const rows = blockKey === '' ? layout.tailSteps : (blocks.find((x) => x.key === blockKey)?.steps ?? []);
+    const rows =
+      blockKey === '' ? layout.tailSteps : (blocks.find((x) => x.key === blockKey)?.steps ?? []);
     const pos = rows.indexOf(stepIndex);
     if (pos < 0) return box.y + HEAD_H / 2;
     return box.y + HEAD_H + 2 + pos * LINE_H + LINE_H / 2;
@@ -597,7 +598,8 @@ export function TailBoxView({
       // собственного действия, и человек не должен искать его.
       title={
         'nothing here reaches a unit yet.\n' +
-        "as soon as a step's piece goes into an assembly, the step moves into that unit's block by itself. there is nothing to do here."
+        "as soon as a step's piece goes into an assembly, the step moves into that unit's " +
+        'block by itself. there is nothing to do here.'
       }
       {...dragProps}
       {...hoverProps}

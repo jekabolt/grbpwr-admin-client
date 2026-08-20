@@ -515,7 +515,17 @@ console.log('\nbuildWires — из правого края источника в
   // ШАГ, УЕХАВШИЙ НА ПЛИТКУ, ИЗ ХВОСТА УШЁЛ — и провода в несуществующую строку быть не должно.
   // Блок хвоста про переезд не знает: атрибуция шагов намеренно осталась прежней.
   const looseStep = [step([['piece', 'CUF']])];
-  const looseTile = { key: 'CUF', x: -60, y: 0, w: 52, h: 60, state: 'free', into: '', consumers: [0], processing: [0] };
+  const looseTile = {
+    key: 'CUF',
+    x: -60,
+    y: 0,
+    w: 52,
+    h: 60,
+    state: 'free',
+    into: '',
+    consumers: [0],
+    processing: [0],
+  };
   const tailBox = { key: '', x: 400, y: 16, w: 180, h: 68 };
   const wt = buildWires(
     [blk('', [0])],
@@ -523,7 +533,11 @@ console.log('\nbuildWires — из правого края источника в
     { byKey: new Map(), tail: tailBox, tiles: [looseTile], tailSteps: [] },
     makeRowY([blk('', [0])], { byKey: new Map(), tail: tailBox, tiles: [], tailSteps: [] }),
   );
-  ck(wt.length === 0, 'провода в строку, уехавшую на плитку, нет', JSON.stringify(wt.map((w) => w.key)));
+  ck(
+    wt.length === 0,
+    'провода в строку, уехавшую на плитку, нет',
+    JSON.stringify(wt.map((w) => w.key)),
+  );
 
   // А оставшийся в хвосте шаг провод получает как прежде: правило снимает лишнее, а не всё.
   const stays = buildWires(
@@ -532,7 +546,11 @@ console.log('\nbuildWires — из правого края источника в
     { byKey: new Map(), tail: tailBox, tiles: [{ ...looseTile, processing: [] }], tailSteps: [0] },
     makeRowY([blk('', [0])], { byKey: new Map(), tail: tailBox, tiles: [], tailSteps: [0] }),
   );
-  ck(stays.length === 1, 'оставшийся в хвосте шаг провод получает', JSON.stringify(stays.map((w) => w.key)));
+  ck(
+    stays.length === 1,
+    'оставшийся в хвосте шаг провод получает',
+    JSON.stringify(stays.map((w) => w.key)),
+  );
 }
 
 console.log(bad === 0 ? '\nвсё сошлось' : `\nрасхождений: ${bad}`);
