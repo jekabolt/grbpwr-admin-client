@@ -24,7 +24,7 @@
 import { build } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -227,6 +227,58 @@ for (const state of CLOTH_RAMP) {
   is('hatchId сводит id к ASCII', hatchId('hatch', '«R1»'), 'hatch-R1');
   is('hatchId сохраняет цифры и буквы', hatchId('sw', 'R2:1'), 'sw-R21');
   is('hatchId не теряет префикс на пустом вводе', hatchId('hatch', '»«'), 'hatch-');
+}
+
+// --- 5. CSS-половина знака: классы `.hx*` и печатный кламп в global.css ------------------------
+//
+// Разметка выше пинит только ИМЕНА классов. Их ТЕЛА живут в src/global.css, и до этой секции их не
+// держало ничто: убери `scale(var(--hk, 1))` — кламп читаемости исчезает на всех зумах; поменяй
+// знак угла у `.hx135` — встречные семейства (лицо/изнанка) сливаются в одно, а проба разметки
+// остаётся зелёной, потому что класс в атрибуте тот же. Печатный кламп — та же история: без
+// `@media print { :root { --hk: 1 } }` (и `.world` с `!important` поверх инлайнового писателя
+// applyView) бумага уносит экранную плотность.
+{
+  const css = readFileSync(resolve(root, 'src/global.css'), 'utf8');
+  const rule = (name, body) =>
+    new RegExp(`\\.${name}\\s*\\{\\s*${body}\\s*\\}`);
+
+  checks++;
+  if (!rule('hx45', String.raw`transform:\s*rotate\(45deg\)\s*scale\(var\(--hk,\s*1\)\);`).test(css))
+    fail('css: .hx45 = rotate(45deg) + кламп', 'тело .hx45 в global.css не совпало со знаком');
+  checks++;
+  if (!rule('hx135', String.raw`transform:\s*rotate\(-45deg\)\s*scale\(var\(--hk,\s*1\)\);`).test(css))
+    fail('css: .hx135 = rotate(-45deg) + кламп', 'тело .hx135 в global.css не совпало со знаком');
+  checks++;
+  if (!rule('hx0', String.raw`transform:\s*scale\(var\(--hk,\s*1\)\);`).test(css))
+    fail('css: .hx0 = только кламп, без поворота', 'тело .hx0 в global.css не совпало со знаком');
+  checks++;
+  if (/\.hx0\s*\{[^}]*rotate/.test(css))
+    fail('css: у .hx0 нет поворота', 'в .hx0 появился rotate — точка получила ложную ориентацию');
+
+  // Печатный кламп: ищется ВНУТРИ блока @media print, а не по всему файлу, — правило вне печати
+  // прибило бы кламп и на экране.
+  const printBlocks = [];
+  for (let i = css.indexOf('@media print'); i >= 0; i = css.indexOf('@media print', i + 1)) {
+    const open = css.indexOf('{', i);
+    let depth = 0;
+    for (let k = open; k < css.length; k++) {
+      if (css[k] === '{') depth++;
+      else if (css[k] === '}' && --depth === 0) {
+        printBlocks.push(css.slice(open, k));
+        break;
+      }
+    }
+  }
+  checks++;
+  if (!printBlocks.some((b) => /:root\s*\{\s*--hk:\s*1;\s*\}/.test(b)))
+    fail('css: печать сбрасывает --hk на :root', 'в @media print нет `:root { --hk: 1; }`');
+  checks++;
+  if (!printBlocks.some((b) => /\.world\s*\{\s*--hk:\s*1 !important;\s*\}/.test(b)))
+    fail(
+      'css: печать перебивает инлайнового писателя .world',
+      'в @media print нет `.world { --hk: 1 !important; }` — applyView пишет --hk инлайновым ' +
+        'стилем, и правило без !important его не перебьёт',
+    );
 }
 
 console.log(`\n${checks - failed.size} из ${checks} проверок прошло`);

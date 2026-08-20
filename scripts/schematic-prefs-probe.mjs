@@ -493,6 +493,12 @@ window.__unmount = () => {
   root.unmount();
   root = null;
 };
+// Смена карточки ПОД ТЕМ ЖЕ смонтированным компонентом (переход между тех-картами): ре-рендер с
+// новым cardId, без размонтирования — ровно путь эффекта loadedFor и пересоздания flush.
+window.__setCard = (id) => {
+  cardId = id;
+  root.render(createElement(Stand));
+};
 `;
 
 const pw = resolvePlaywright();
@@ -604,6 +610,39 @@ if (!chromium) {
   );
   await run(() => window.__mount(99));
   is('живой хук: у другой карточки своя ось', await run(() => window.__api.axis), 'cloth');
+
+  // СМЕНА КАРТОЧКИ ПОД ЖИВЫМ ХУКОМ, ВНУТРИ ОКНА ДЕБАУНСА. Отложенная запись обязана доехать до
+  // СТАРОГО ключа немедленно (flush пересоздаётся вместе с cardId, и его cleanup сбрасывает
+  // хвост), а новая карточка — прочитаться с нуля и не унаследовать чужого поля. Провались
+  // cleanup — и последний драг перед переходом молча пропал бы; уйди запись на НОВЫЙ ключ — чужая
+  // карточка получила бы и раскладку, и ось соседки.
+  await run(() => window.__unmount());
+  await run((keys) => {
+    for (const k of keys) localStorage.removeItem(k);
+    window.__mount(101);
+  }, [KEY(101), KEY(102)]);
+  await run(() => window.__api.setAxis('cloth'));
+  await settle();
+  await run(() => {
+    window.__api.move('FR', { x: 11, y: 12 });
+    window.__setCard(102); // тем же кадром, дебаунс 400ms ещё не истёк
+  });
+  // Ждём МЕНЬШЕ дебаунса: если запись уже в хранилище, её положил cleanup, а не таймер.
+  await page.waitForTimeout(150);
+  rec = await stored(101);
+  is('живой хук: смена карточки сбросила отложенный драг на СТАРЫЙ ключ', rec?.pos, {
+    FR: { x: 11, y: 12 },
+  });
+  is('живой хук: ось уехала вместе с отложенной записью', rec?.axis, 'cloth');
+  is('живой хук: новая карточка стартует пустой', await run(() => window.__api.axis), null);
+  await run(() => window.__api.move('BK', { x: 1, y: 2 }));
+  await settle();
+  rec = await stored(102);
+  is('живой хук: запись новой карточки без чужой оси', Object.keys(rec), ['v', 'pos']);
+  is('живой хук: и без чужих позиций', rec.pos, { BK: { x: 1, y: 2 } });
+  is('живой хук: старая карточка не перетёрлась', (await stored(101)).pos, {
+    FR: { x: 11, y: 12 },
+  });
 
   await browser.close();
   for (const f of [standTs, standJs]) rmSync(f, { force: true });
