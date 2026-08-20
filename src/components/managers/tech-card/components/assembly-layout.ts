@@ -29,6 +29,24 @@ import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 //     представления (`real` фильтрует псевдоблок с пустым ключом), то есть на неразмеченной
 //     карточке схема показывала пустоту вместо существующего маршрута.
 //
+// Т9 добавила третье поле — и тоже не тронув ни одного из трёх проходов:
+//
+//   • `TileLayout.processing` — ОБРАБОТКИ ДЕТАЛИ на её собственной плитке. До Т9 у такого шага
+//     было ровно одно место, и оно зависело от того, размечена ли уже сборка: пока деталь
+//     свободна — хвостовой бокс, как только её съели — строка блока (атрибуция в
+//     `assembly-blocks.ts` транзитивная и остаётся такой). Владелец видел это как кучу:
+//     «создаётся блок вне узла и туда падают все такие операции». Теперь у обработки есть
+//     ПРЕДМЕТ, и представление стабильно: строка появляется у своей детали в момент создания и
+//     больше никуда не прыгает, а переезд «хвост → блок» перестаёт быть единственным местом,
+//     где шаг вообще виден.
+//
+// ЦЕНА, ЗАЯВЛЕННАЯ, А НЕ СПРЯТАННАЯ. Плитка с обработками выше голой, поэтому следующая за ней
+// плитка — в колонке или в стопке у бокса — едет вниз ровно на этот рост. Плитка без обработок не
+// меняется ни на число, пока над ней ничего не выросло. Зарезервированное место стопки (`stackH`
+// третьего прохода) при этом НЕ пересчитывается: пересчёт сдвинул бы боксы, а их обещано не
+// двигать. Значит, длинная стопка обработок вправе уйти ниже своего бокса — полотно её вмещает
+// высотой, но соседства с чужой стопкой это не гарантирует.
+//
 // Модуль ЧИСТЫЙ: ни React, ни SVG, ни DOM. Раскладку можно проверить пробой, картинку — нет;
 // проба-характеризация `scripts/assembly-layout-probe.mjs` держит числа этого файла.
 
@@ -69,6 +87,18 @@ export type TileLayout = {
   into: string;
   /** Индексы ВСЕХ шагов, берущих деталь входом, — включая обработки, которые её не съедают. */
   consumers: number[];
+  /**
+   * Обработки ЭТОЙ детали, в авторском порядке: шаг с пустым выходным ключом, все входы которого
+   * — она одна. Подмножество `consumers`, и высота плитки посчитана под эти строки.
+   *
+   * Обработки на УЗЛЕ здесь нет по построению, обработки на двух и более различных входах — по
+   * правилу: у неё нет одного предмета, и приписать её одному значило бы соврать; она остаётся
+   * там, где была. Строка живёт тут С МОМЕНТА СОЗДАНИЯ И НАВСЕГДА — съедена деталь или нет.
+   *
+   * Двойное представление намеренно: тот же шаг остаётся строкой своего блока, если блок у него
+   * есть. Блок отвечает «какая работа скатывается в узел», плитка — «в каком состоянии деталь».
+   */
+  processing: number[];
 };
 
 export type SchematicLayout = {
@@ -80,8 +110,19 @@ export type SchematicLayout = {
    * НЕ ВХОДИТ в `boxes` и `byKey` намеренно: `boxes` — это узлы, а хвост узлом не является
    * (его ключ пуст, и пустой ключ узла невалиден по контракту). Держать его отдельным полем
    * дешевле, чем учить каждого читателя `boxes` отфильтровывать самозванца.
+   *
+   * Высота посчитана по `tailSteps`, а не по `loose.steps` — см. поле.
    */
   tail?: BoxLayout;
+  /**
+   * Строки, которые хвостовой бокс рисует: `loose.steps` МИНУС обработки, уехавшие на плитки
+   * своих деталей. В хвосте они были только потому, что им больше негде было быть.
+   *
+   * Поле существует, чтобы разметка не считала этот список второй раз: высоту бокса задаёт
+   * раскладка, а строки рисует вьюшка, и разойдись они — бокс молча обрежет последнюю строку
+   * или оставит под ней дыру. Пусто ⇔ `tail` отсутствует.
+   */
+  tailSteps: number[];
   width: number;
   height: number;
   /**
@@ -116,6 +157,16 @@ const FREE_TILE_X = 8;
 const STACK_TILE_W = 52;
 /** Смещение стопки влево от левого края бокса. */
 const STACK_DX = -60;
+/**
+ * Строка обработки под головой плитки.
+ *
+ * Ниже строки бокса (15) намеренно: стопка отвечает не «какая работа скатывается в узел», а «в
+ * каком состоянии деталь», и строка в рост блочной читалась бы как второй список работ на том же
+ * полотне. Разделительная линия входит В строку (рисуется её верхней границей), поэтому число
+ * здесь ОДНО: вторая пара чисел на стороне разметки означала бы, что раскладка и картинка
+ * однажды разойдутся, а разойдутся они молча.
+ */
+const PROC_ROW_H = 12;
 
 export function assemblyLayout(
   blocks: AssemblyBlock[],
@@ -150,6 +201,36 @@ export function assemblyLayout(
   });
   const stateOf = (key: string): 'free' | 'eaten' => (intoOf.has(key) ? 'eaten' : 'free');
 
+  // Обработки, принадлежащие плитке детали. Считается ИЗ `consumersOf`, а не вторым обходом
+  // шагов: два обхода одного и того же однажды разойдутся, и разойдутся молча — на плитке
+  // появится строка, которой нет ни у одного провода.
+  //
+  // Условие ровно два: шаг ничего не собирает (`!outputUnitKey`) и среди его входов нет ключа,
+  // отличного от этой детали. Второе и означает «ровно один различный вход, и он — деталь»:
+  // обработка на узле сюда не дойдёт вовсе (её ключа нет среди деталей), а обработка на двух
+  // предметах отсеется — одного предмета у неё нет, и приписать её одному значило бы соврать.
+  const processingOf = new Map<string, number[]>();
+  consumersOf.forEach((indexes, key) => {
+    const own = indexes.filter((i, n) => {
+      // Индекс приходит дважды, когда шаг взял одну деталь входом дважды: это нарушение правила
+      // 7, карточка невалидна, а рисовать её всё равно надо. Две одинаковые строки на плитке
+      // соврали бы о числе обработок и вдобавок вырастили бы её на лишнюю строку.
+      if (indexes[n - 1] === i) return false;
+      const s = steps[i];
+      return !s.outputUnitKey && !s.inputs.some((input) => input.key !== key);
+    });
+    if (own.length) processingOf.set(key, own);
+  });
+  /** Высота плитки: голова детали плюс её строки обработки. Без обработок — ровно голова. */
+  const tileH = (key: string) => TILE + (processingOf.get(key)?.length ?? 0) * PROC_ROW_H;
+
+  // Хвост — шаги, не принадлежащие вообще ничему. Обработка, получившая свою плитку, из него
+  // уходит: держать её в обоих местах значило бы вернуть ту самую кучу, из-за которой всё и
+  // затевалось. Остальное в хвосте остаётся как было.
+  const onTile = new Set<number>();
+  processingOf.forEach((indexes) => indexes.forEach((i) => onTile.add(i)));
+  const tailSteps = (loose?.steps ?? []).filter((i) => !onTile.has(i));
+
   /** Собрать плитки по готовым координатам. Порядок массива — авторский порядок деталей. */
   const buildTiles = (place: Map<string, { x: number; y: number; w: number; h: number }>) => {
     const tiles: TileLayout[] = [];
@@ -166,6 +247,7 @@ export function assemblyLayout(
         state: stateOf(key),
         into: intoOf.get(key) ?? '',
         consumers: consumersOf.get(key) ?? [],
+        processing: processingOf.get(key) ?? [],
       };
       tiles.push(tile);
       tileByKey.set(key, tile);
@@ -175,7 +257,7 @@ export function assemblyLayout(
 
   /** Хвостовой бокс: геометрия строк та же, что у боксов узлов. */
   const tailBox = (col: number, x: number): BoxLayout | undefined => {
-    if (!loose || loose.steps.length === 0) return undefined;
+    if (tailSteps.length === 0) return undefined;
     return {
       key: '',
       x,
@@ -183,7 +265,7 @@ export function assemblyLayout(
       w: W,
       // Хвост считается по той же формуле, что и узлы: одна геометрия на все боксы полотна
       // дешевле двух, а подвал у него не пустой — Σ SMV шагов вне узлов такой же вопрос.
-      h: HEAD_H + 2 + loose.steps.length * LINE_H + 4 + FOOT_H,
+      h: HEAD_H + 2 + tailSteps.length * LINE_H + 4 + FOOT_H,
       col,
       stackTop: 16,
       pieceInputs: [],
@@ -195,18 +277,18 @@ export function assemblyLayout(
     // неразмеченной карточке выглядела поломкой; между тем именно с этого экрана сборку и
     // начинают.
     const place = new Map<string, { x: number; y: number; w: number; h: number }>();
-    allPieces.forEach((key, i) => {
-      place.set(key, {
-        x: FREE_TILE_X,
-        y: 16 + i * (TILE + TILE_GAP),
-        w: FREE_TILE_W,
-        h: TILE,
-      });
-    });
+    // Курсор вместо шага по индексу: без него плитка с обработками легла бы строками на голову
+    // следующей. На карточке без обработок курсор даёт ровно прежний шаг 48+8.
+    let cursor = 16;
+    for (const key of allPieces) {
+      const h = tileH(key);
+      place.set(key, { x: FREE_TILE_X, y: cursor, w: FREE_TILE_W, h });
+      cursor += h + TILE_GAP;
+    }
     const { tiles, tileByKey } = buildTiles(place);
     const x0 = (tiles.length ? 76 : 0) + 104;
     const tail = tailBox(0, x0);
-    const tilesH = tiles.length ? 16 + tiles.length * (TILE + TILE_GAP) : 0;
+    const tilesH = tiles.length ? cursor : 0;
     const height = Math.max(tilesH, tail ? tail.y + tail.h : 0);
     // Правый отступ тот же, что закладывает `applyOverrides`: разойдись они — «пустой набор
     // оверрайдов даёт точное тождество» перестало бы быть правдой в этой ветке.
@@ -222,6 +304,7 @@ export function assemblyLayout(
       unassigned: [],
       tiles,
       tileByKey,
+      tailSteps,
     };
   }
 
@@ -338,35 +421,43 @@ export function assemblyLayout(
   // деталь рисовалась ДВАЖДЫ — и у бокса, и в колонке, — и это был самый частый вид дубля.
   const place = new Map<string, { x: number; y: number; w: number; h: number }>();
   for (const box of boxes) {
+    // Рост плиток с обработками копится ВНУТРИ стопки: слот зарезервирован под голую плитку, и
+    // без сдвига следующая деталь легла бы на строки предыдущей. Слот, оставшийся пустым
+    // (свободная деталь ушла в колонку), роста не даёт — как и не давал места.
+    let grown = 0;
     box.pieceInputs.forEach((key, i) => {
       if (place.has(key) || stateOf(key) !== 'eaten' || intoOf.get(key) !== box.key) return;
+      const h = tileH(key);
       place.set(key, {
         x: box.x + STACK_DX,
-        y: box.stackTop + i * (TILE + TILE_GAP),
+        y: box.stackTop + i * (TILE + TILE_GAP) + grown,
         w: STACK_TILE_W,
-        h: TILE,
+        h,
       });
+      grown += h - TILE;
     });
   }
   // Колонка у левого края: свободные в порядке фронта, следом — детали, которым не нашлось
   // места у бокса. Второе возможно только на битом графе (съевший узел не родился), но нода
   // нужна и там: «одна деталь — ровно одна плитка» не должно зависеть от валидности карточки.
   const columnKeys = [...unassigned, ...allPieces.filter((k) => !place.has(k) && !unassigned.includes(k))];
-  columnKeys.forEach((key, i) => {
-    place.set(key, {
-      x: FREE_TILE_X,
-      y: 16 + i * (TILE + TILE_GAP),
-      w: FREE_TILE_W,
-      h: TILE,
-    });
-  });
+  let cursor = 16;
+  for (const key of columnKeys) {
+    const h = tileH(key);
+    place.set(key, { x: FREE_TILE_X, y: cursor, w: FREE_TILE_W, h });
+    cursor += h + TILE_GAP;
+  }
   const { tiles, tileByKey } = buildTiles(place);
 
   const tail = tailBox(maxCol + 1, x0 + (maxCol + 1) * (W + GAP_X));
   if (tail && tail.y + tail.h > height) height = tail.y + tail.h;
 
-  const tilesH = 16 + columnKeys.length * (TILE + TILE_GAP);
+  const tilesH = cursor;
   if (tilesH > height) height = tilesH;
+  // Стопка с обработками вправе оказаться ниже своего бокса (её место в третьем проходе
+  // считается по голым плиткам). Полотно обязано её вместить: иначе строки уедут за край
+  // прокрутки, а `overflow: auto` вниз за границу контента не листает.
+  for (const t of tiles) if (t.y + t.h > height) height = t.y + t.h;
 
   return {
     boxes,
@@ -377,6 +468,7 @@ export function assemblyLayout(
     unassigned,
     tiles,
     tileByKey,
+    tailSteps,
   };
 }
 
@@ -386,4 +478,7 @@ function bary(b: AssemblyBlock, rank: Map<string, number>, ins: Map<string, stri
   return keys.reduce((s, k) => s + (rank.get(k) ?? 0), 0) / keys.length;
 }
 
-export const SCHEMATIC_METRICS = { W, LINE_H, HEAD_H, FOOT_H, TILE, TILE_GAP };
+// Числа для разметки. `TILE` — это ГОЛОВА плитки, а не её высота: высота растёт под строки
+// обработки и приходит в `TileLayout.h`. Кто нарисует силуэт по `h`, растянет деталь на её же
+// строки, а кто отсчитает строки не от `TILE` — положит первую поверх силуэта.
+export const SCHEMATIC_METRICS = { W, LINE_H, HEAD_H, FOOT_H, TILE, TILE_GAP, PROC_ROW_H };
