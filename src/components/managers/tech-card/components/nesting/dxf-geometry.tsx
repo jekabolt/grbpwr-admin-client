@@ -347,11 +347,15 @@ export const PieceShape = memo(function PieceShape({
           <polygon points={points} style={{ fill: `url(#${patternId})` }} />
           {/* Обкладка: немасштабируемые 3px белого ПОД контуром — гарантия, что заливка (у
               утеплителя это почти половина площади) не съест линию кроя. Так разрез и рисуют на
-              бумаге. */}
+              бумаге. `strokeLinejoin='round'` обязателен ЗДЕСЬ ТАК ЖЕ, как у чернильного контура:
+              митровый угол белой обкладки на остром мысу (воротник, вытачка) выстреливает шипом до
+              4× толщины — до 12px белого ЗА пределами детали, которые верхняя 1px линия не
+              накрывает. */}
           <polygon
             points={points}
             style={{ fill: 'none', stroke: '#fff', strokeWidth: 3 }}
             vectorEffect='non-scaling-stroke'
+            strokeLinejoin='round'
           />
           <polygon
             points={points}

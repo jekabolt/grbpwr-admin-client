@@ -191,12 +191,19 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
 
   const move = useCallback(
     (key: string, at: { x: number; y: number }) => {
-      setPos((prev) => {
-        const next: PosOverrides = { ...prev, [key]: { x: Math.max(0, at.x), y: Math.max(0, at.y) } };
-        const cleaned = Object.keys(next).length > POS_CEILING ? prune(next, liveKeys()) : next;
-        commit({ pos: cleaned });
-        return cleaned;
-      });
+      // Побочные эффекты — ВНЕ апдейтера состояния (та же дисциплина, что записана в шапке
+      // use-panel-prefs): апдейтер React вправе прогнать повторно (StrictMode — дважды всегда) и
+      // выбросить, а `commit` изнутри взводил бы таймер и мутировал `cur` из фазы рендера —
+      // выброшенный рендер оставил бы запись в хранилище впереди состояния. Прежние позиции
+      // читаются из `cur.current.pos`: его синхронно ведут те же писатели, что и state
+      // (`commit`, перечитывание при смене карточки), так что снимок один на чтение и запись.
+      const next: PosOverrides = {
+        ...cur.current.pos,
+        [key]: { x: Math.max(0, at.x), y: Math.max(0, at.y) },
+      };
+      const cleaned = Object.keys(next).length > POS_CEILING ? prune(next, liveKeys()) : next;
+      commit({ pos: cleaned });
+      setPos(cleaned);
     },
     [commit, liveKeys],
   );
