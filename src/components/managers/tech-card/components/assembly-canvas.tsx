@@ -988,6 +988,29 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     return () => window.removeEventListener('keydown', onKey, true);
   }, [drag?.started, commitDrag]);
 
+  // Escape во время МАРКИЗЫ — тот же откат жеста, симметрично драгу. Без него Esc посреди рамки
+  // проваливался в Esc-лестницу фулскрина: при пустом выборе она закрывала ВЕСЬ экран прямо под
+  // зажатым указателем, а при непустом — гасила выбор, оставляя рамку жить и молча воскрешать его
+  // на первой же новой ноде (сравнение в `applyMarquee` идёт с `emitted`, а не с внешним выбором).
+  // Выбор возвращается к БАЗЕ жеста: не-shift маркиза начинается с очистки, и очистка остаётся —
+  // ровно как у клика по пустому месту.
+  useEffect(() => {
+    if (!marqueeOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const m = marqueeRef.current;
+      if (m) onPickedRef.current(m.base);
+      marqueeRef.current = null;
+      lastClient.current = null;
+      setMarqueeOn(false);
+      paintMarquee();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [marqueeOn, paintMarquee]);
+
   // --- вердикт и подсказка ----------------------------------------------------------------------
 
   // Цель ищется в раскладке БЕЗ едущих нод — по той же причине, что и на отпускании: они едут под

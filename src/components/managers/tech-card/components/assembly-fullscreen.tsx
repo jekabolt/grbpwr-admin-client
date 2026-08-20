@@ -164,6 +164,36 @@ const isTextField = (target: EventTarget | null): boolean => {
 };
 
 /**
+ * Клавиша глагола: символ, а с не-латинской раскладки — ФИЗИЧЕСКАЯ клавиша.
+ *
+ * Тот же случай, что ⇧2 в роутере (там код физический с самого начала): на кириллической
+ * раскладке `e.key` даёт «г»/«щ»/«в»/«ъ», и все одноклавишные глаголы вместе с ⌘Z/⌘A/⌘F молча
+ * умирали бы ровно у той половины пользователей, что печатает кириллицей. Латинские раскладки
+ * остаются хозяйками своих букв (на Dvorak/AZERTY жмут то, что написано на клавише) — фолбэк
+ * просыпается только когда символ не латиница. Shift сохраняет прежнее поведение глаголов:
+ * шифтованная буква глаголом не была и не становится, поэтому фолбэк под Shift молчит, а
+ * латинская заглавная проходит мимо первой ветки и остаётся `e.key`.
+ */
+const verbKey = (e: { key: string; code: string; shiftKey: boolean }): string => {
+  if (/^[a-z]$/.test(e.key)) return e.key;
+  if (!e.shiftKey && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
+  if (!e.shiftKey && e.code === 'BracketRight') return ']';
+  if (!e.shiftKey && e.code === 'BracketLeft') return '[';
+  return e.key;
+};
+
+/**
+ * Модификаторные комбинации регистра и Shift не различают (⌘⇧Z обязана ДОЙТИ до проверки redo,
+ * а не отсеяться раскладкой), поэтому нормализация своя: латиница в нижний регистр, не-латиница —
+ * через физическую клавишу.
+ */
+const comboKey = (e: { key: string; code: string }): string => {
+  if (/^[a-zA-Z]$/.test(e.key)) return e.key.toLowerCase();
+  if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
+  return e.key;
+};
+
+/**
  * Отказ выпущенной карточки. ОДНА формулировка на все органы, включая инверсию отмены в
  * `operations-field.tsx` (она импортирует её отсюда): два текста об одном правиле читаются как два
  * разных правила.
@@ -442,7 +472,7 @@ export function AssemblyFullscreen({
     if (e.metaKey || e.ctrlKey) {
       // Модификаторные — ДО typing-гарда глаголов: ⌘0/⌘1 текста не набирают. Уступают они не
       // всякому органу, а НАБОРУ ТЕКСТА (`isTextField`), и каждой — по своей причине.
-      const k = e.key.toLowerCase();
+      const k = comboKey(e);
       if (k === 'f') {
         // ⌘F не уступает никому: родного поиска внутри модального оверлея нет вовсе, а палитра
         // ничего не меняет. Открытую — просто пере-фокусирует.
@@ -481,7 +511,7 @@ export function AssemblyFullscreen({
       e.preventDefault();
       return;
     }
-    switch (e.key) {
+    switch (verbKey(e)) {
       case ' ':
         canvasRef.current?.setSpaceHand(true);
         e.preventDefault();
@@ -779,7 +809,10 @@ export function AssemblyFullscreen({
                   </Text>
                 </button>
                 <Text size='micro' variant='uppercase' tracking='label' component='span' className='min-w-0 truncate font-bold'>
-                  {selectedIndex >= 0
+                  {/* ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА: `selected` родителя всегда ≥ 0 (useState(0)),
+                      и на карточке без операций `]` подписывал бы док «step 10» по строке,
+                      которой нет. */}
+                  {selectedIndex >= 0 && selectedIndex < steps.length
                     ? `step ${(selectedIndex + 1) * 10} · ${labelOf(selectedIndex)}`
                     : 'no step open'}
                 </Text>
@@ -806,8 +839,12 @@ export function AssemblyFullscreen({
               {/* `min-w-0` — против дефолтного `min-inline-size: min-content` самого fieldset:
                   без него широкая строка редактора распирала бы док шире вьюпорта вместо того,
                   чтобы переноситься. */}
+              {/* ВЕРХНЯЯ ГРАНИЦА — НЕ ПЕРЕСТРАХОВКА: `selected` родителя всегда ≥ 0, и без неё
+                  ветка пустой последовательности была мертва, а `]` на карточке без операций
+                  монтировал редактор НЕСУЩЕСТВУЮЩЕЙ строки — getValues отдаёт undefined, а первый
+                  же ввод создал бы `operations.0` в значениях формы МИМО field array. */}
               <fieldset disabled={frozen} className='min-h-0 min-w-0 flex-1 overflow-y-auto p-2'>
-                {!dockOpen ? null : selectedIndex >= 0 ? (
+                {!dockOpen ? null : selectedIndex >= 0 && selectedIndex < steps.length ? (
                   renderDockEditor(flashPieces)
                 ) : (
                   <Text size='micro' variant='label'>
