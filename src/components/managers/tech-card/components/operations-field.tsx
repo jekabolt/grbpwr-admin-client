@@ -850,10 +850,15 @@ function planUnitRename(ops: UnitKeyRow[], from: string): UnitRenamePlan {
  * редактором — человек, ушедший со страницы посреди набора, НЕ получает половину переименования;
  * ровно поэтому строка под полем всё время набора говорит, что жест ещё не применён.
  *
- * ESC ВОЗВРАЩАЕТ ПРЕЖНИЙ КОД и НЕ всплывает дальше: Esc — верхняя ступень лестницы фулскрина
- * (палитра, шпаргалка, выделение), и без остановки он уносил бы со слоя вместе с набором.
+ * ESC ВОЗВРАЩАЕТ ПРЕЖНИЙ КОД и НЕ уносит со слоя: Esc — верхняя ступень лестницы фулскрина
+ * (палитра, шпаргалка, выделение), и живой набор стоит выше неё, как драг ноды и маркиза.
+ *
+ * ДВА КУСКА, А НЕ ОДИН, И РАЗМЕЩАЕТ ИХ ВЫЗЫВАЮЩИЙ. Поле стоит в строке с именем узла и чипом
+ * растворения, а слова про цену — ПОД строкой: верни их одним фрагментом, и они встали бы между
+ * кодом и именем, разорвав строку надвое (замерено скриншотом стенда). Владелец акта при этом
+ * остаётся один — этот хук.
  */
-function UnitCodeField({
+function useUnitCodeAct({
   index,
   outputKey,
   onRename,
@@ -863,11 +868,12 @@ function UnitCodeField({
   outputKey: string;
   /** Единственный мутатор переименования (живёт в `OperationsField`, R3). */
   onRename: (index: number, next: string) => RenameOutcome;
-}) {
+}): { field: ReactNode; note: ReactNode } {
   const { getValues } = useFormContext<TechCardFormData>();
   const [draft, setDraft] = useState<string | null>(null);
   /** Отказ движка стоит под полем, пока набранное не изменили: снекбар гаснет, а вопрос — нет. */
   const [refusal, setRefusal] = useState<string | null>(null);
+  const ref = useRef<HTMLInputElement>(null);
   const id = `op-${index}-unit-code`;
   const pending = draft !== null && draft !== outputKey;
   // ЦЕНА СЧИТАЕТСЯ ТЕМ ЖЕ ПЛАНИРОВЩИКОМ, КОТОРЫЙ ЕЁ И ОПЛАТИТ. Второй счёт «сколько шагов
@@ -876,6 +882,28 @@ function UnitCodeField({
   // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
   const plan = pending ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey) : null;
   const dissolving = pending && (draft ?? '').trim() === '';
+
+  // ЖИВОЙ НАБОР ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ ЭКРАНА — как драг ноды, маркиза и драг плитки с полки, и
+  // слушатель по той же причине window-капчурный. Radix ловит Escape на ДОКУМЕНТЕ в фазе
+  // перехвата, то есть раньше, чем событие вообще дойдёт до поля: `stopPropagation` в
+  // React-обработчике опаздывает навсегда, и Esc, которым отменяют набор, уносил бы со ВСЕГО
+  // экрана (замерено стендом — фулскрин закрывался).
+  //
+  // ФОКУС СПРАШИВАЕТСЯ В САМОМ ОБРАБОТЧИКЕ: отклонённый черновик переживает уход фокуса (набранное
+  // не выбрасывается в ответ на «так нельзя»), и слушатель, судящий только по его наличию, глотал
+  // бы Esc всего экрана, пока человек смотрит совсем в другое место.
+  useEffect(() => {
+    if (draft === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || document.activeElement !== ref.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDraft(null);
+      setRefusal(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [draft]);
 
   const commit = () => {
     if (draft === null) return;
@@ -895,8 +923,7 @@ function UnitCodeField({
     setRefusal(outcome.why);
   };
 
-  return (
-    <>
+  const field = (
       <div className='space-y-px' data-field={`operations.${index}.outputUnitKey`}>
         <label htmlFor={id} className='block leading-none'>
           <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
@@ -908,6 +935,7 @@ function UnitCodeField({
             (VARCHAR(64)) — отказ по длине бесполезен, поле просто не должно позволять её набрать. */}
         <Input
           name={id}
+          ref={ref}
           value={draft ?? outputKey}
           placeholder='SHELL'
           maxLength={64}
@@ -924,16 +952,17 @@ function UnitCodeField({
               commit();
               return;
             }
-            if (e.key === 'Escape' && draft !== null) {
-              e.preventDefault();
-              e.stopPropagation();
-              setDraft(null);
-              setRefusal(null);
-            }
+            // Esc здесь НЕ разбирается: до этого обработчика он не доходит — его снимает
+            // window-капчурный слушатель выше, и снимает потому, что иначе его первым увидит
+            // Radix и закроет весь экран.
           }}
           onBlur={commit}
         />
       </div>
+  );
+
+  const note = (
+    <>
       {refusal !== null && (
         <Text size='micro' variant='label' className='mt-1'>
           not renamed: {refusal}
@@ -963,6 +992,8 @@ function UnitCodeField({
       )}
     </>
   );
+
+  return { field, note };
 }
 
 function ProducesBlock({
@@ -1004,6 +1035,8 @@ function ProducesBlock({
 
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
+  // Акт переименования: поле встаёт в строку, слова про цену — под неё (см. шапку хука).
+  const rename = useUnitCodeAct({ index, outputKey, onRename });
 
   // СПРЯТАЛ КОНТРОЛ — ОЧИСТИ ЗНАЧЕНИЕ. Ключ можно стереть бэкспейсом, а не только «растворить»:
   // ветка переключается на чип «сделать узлом», оба инпута размонтируются, и оставшееся имя
@@ -1072,7 +1105,7 @@ function ProducesBlock({
                 входы других шагов, он и есть идентичность узла; имя не адресует ничего, поэтому
                 живая запись имени не рвёт ни одной ссылки. maxLength у имени — по колонке сервера
                 (VARCHAR(255)). */}
-            <UnitCodeField index={index} outputKey={outputKey} onRename={onRename} />
+            {rename.field}
             <InputField
               name={`operations.${index}.outputUnitName`}
               label='unit name'
@@ -1090,6 +1123,7 @@ function ProducesBlock({
               dissolve
             </Chip>
           </div>
+          {rename.note}
           {absorbs && (
             <Text size='micro' variant='label' className='mt-1'>
               absorption: unit {outputKey} keeps its identity and gains the contents of this step
@@ -3326,6 +3360,29 @@ export function OperationsField({
   // первым же ⌘Z. Флаг поднят ровно на синхронное время применения записи.
   const applying = useRef(false);
 
+  /**
+   * ФОКУС, ПОДТВЕРДИВШИЙ ЖЕСТ, НЕ ИМЕЕТ ПРАВА ЕГО ЖЕ И ЗАБЫТЬ.
+   *
+   * Переименование узла подтверждается уходом фокуса — и ровно этот уход дёргает восьмую точку
+   * сброса (`focusin` на fieldset редактора), потому что фокус приземляется в соседнее поле того же
+   * редактора. Порядок событий тут неумолим: `focusout` (жест состоялся, запись легла) → `focusin`
+   * (запись умерла). Без этого щита подтверждение уходом фокуса рождало бы запись мёртвой, то есть
+   * один из двух объявленных способов подтвердить жест был бы способом сделать его неотменяемым.
+   *
+   * ЩИТ ДЛИНОЙ В ОДИН ТАКТ, и это не «на всякий случай»: blur и следующий focus браузер
+   * рассылает синхронно в одной задаче, а всё остальное, что гасит формовую историю (перестановка,
+   * удаление, генератор, выпуск карточки), приходит отдельными жестами человека — в тот же такт
+   * попасть не может. Родня ему `applying`: инверсия тоже ходит через мутаторы, а те сами точки
+   * сброса.
+   */
+  const settling = useRef(false);
+  const settleGesture = () => {
+    settling.current = true;
+    window.setTimeout(() => {
+      settling.current = false;
+    }, 0);
+  };
+
   const setHistory = useCallback((next: Hist) => {
     // Чистые функции отдают ТОТ ЖЕ объект, когда менять нечего, — и ре-рендера тогда не будет.
     if (next === history.current) return;
@@ -3339,7 +3396,7 @@ export function OperationsField({
    * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
    */
   const clearFormHistory = useCallback(() => {
-    if (applying.current) return;
+    if (applying.current || settling.current) return;
     pendingAppend.current = null;
     setHistory(dropForm(history.current));
   }, [setHistory]);
@@ -3963,6 +4020,9 @@ export function OperationsField({
         label: renameLabel(from, next),
       }),
     );
+    // Жест подтверждён уходом фокуса — и этот же уход сейчас дёрнет восьмую точку сброса. Щит
+    // ровно на один такт: иначе запись, только что легшая, умрёт до первого ⌘Z.
+    settleGesture();
     // УСПЕХ ПРОИЗНОСИТСЯ, и число в нём считает ВСЕ ТРИ ВИДА МЕСТ: перенумерация шагов не молчит
     // (R9), а переименование, переписавшее полкарточки, — тем более.
     showMessage(
