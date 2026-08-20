@@ -1900,7 +1900,12 @@ function SketchSticker({
       }
     >
       <div
-        className='flex h-6 shrink-0 cursor-move select-none items-center gap-1 border-b border-hairline px-1'
+        className={cn(
+          'flex h-6 shrink-0 cursor-move select-none items-center gap-1 px-1',
+          // Внутреннее правило — только когда под ним есть что отделять: у свёрнутого стикера оно
+          // легло бы вплотную к его собственной рамке и читалось бы одной жирной чертой.
+          !folded && 'border-b border-hairline',
+        )}
         // Палец на шапке таскает стикер, а не страницу под оверлеем.
         style={{ touchAction: 'none' }}
         onPointerDown={onHeadPointerDown}
