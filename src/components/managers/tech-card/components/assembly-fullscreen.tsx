@@ -108,8 +108,19 @@ const HELP_KEYS: [string, string][] = [
   ['⌘f', 'find a piece or a unit'],
   ['[', 'collapse or open the pieces shelf'],
   [']', 'collapse or open the step dock'],
+  ['s', 'show or hide the sketch sticker (drag it by its head)'],
   ['esc', 'find → shortcuts → adding → selection → leave'],
 ];
+
+/**
+ * Стикер эскиза: ширина и отступ от края сцены.
+ *
+ * 280px — УЖЕ инлайновой колонки (320px), и намеренно: там эскиз стоит рядом с работой, здесь он
+ * лежит ПОВЕРХ неё, и каждый лишний пиксель ширины отнимается у полотна, ради которого экран и
+ * открыли.
+ */
+const STICKER_W = 280;
+const STICKER_MARGIN = 8;
 
 export type AssemblyFullscreenProps = {
   blocks: AssemblyBlock[];
@@ -277,6 +288,8 @@ export function AssemblyFullscreen({
   const showMessage = useSnackBarStore((st) => st.showMessage);
   const canvasRef = useRef<CanvasHandle>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  /** Сцена — и система координат стикера эскиза, и его кламп. */
+  const stageRef = useRef<HTMLDivElement>(null);
 
   // ДОК ЗАКРЫТ ПРИ ВХОДЕ — и это ОТДЕЛЬНОЕ состояние, а не производная от `selectedIndex`.
   // Производная равна −1 только при нуле шагов: на любой карточке с операциями она ≥ 0 с первого
@@ -824,6 +837,40 @@ export function AssemblyFullscreen({
     gridRef.current?.style.setProperty(name, `${px}px`);
   }, []);
 
+  // --- стикер эскиза ------------------------------------------------------------------------------
+  //
+  // ЗАКРЫТ ПРИ ВХОДЕ. Эскиз — справка, а не рабочее поле: экран открывают, чтобы разбирать сборку,
+  // и панель, которую никто не звал, начинала бы каждый визит с перекрытого куска полотна.
+  //
+  // ВСЁ ТРИ СОСТОЯНИЯ — СЕССИОННЫЕ И МИМО RHF (открыт / где лежит / свёрнут): это положение рук, а
+  // не факт карточки. В предпочтения они тоже не идут — в отличие от высот панелей и оси полки,
+  // позиция плавающей справки не переживает даже смену размера окна осмысленно.
+  //
+  // ЗАКРЫТИЕ СТИКЕРА НЕ СТУПЕНЬ ESC-ЛЕСТНИЦЫ, и это решение, а не пропуск. Лестница гасит СЛОИ,
+  // перехватывающие смысл экрана (палитра, шпаргалка, вооружённый добор, выделение); стикер не
+  // перехватывает ничего — он сосед дока и полки, а те закрываются `]` и `[` и Esc не слушают.
+  // Отдай ему ступень — и Esc, которым сбрасывают выделение, попутно уносил бы справку с экрана.
+  // Выше лестницы стоит только ЖИВОЙ ЖЕСТ: драг стикера гасит Esc своим слушателем (см. ниже),
+  // ровно как драг ноды, маркиза и драг плитки из полки.
+  const [sketchOpen, setSketchOpen] = useState(false);
+  const [sketchFolded, setSketchFolded] = useState(false);
+  /**
+   * Позиция в координатах сцены. `null` — «ещё не мерили»: стартовый угол ставит сам стикер, когда
+   * узнает свой размер. ПЕРЕЖИВАЕТ ЗАКРЫТИЕ: положенную под руку справку, закрытую и вызванную
+   * снова, возвращать в угол — значит терять выбор, который человек уже сделал.
+   */
+  const [sketchPos, setSketchPos] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * Орган без ручки не заводится, и ручка без органа тоже: клавиша `s` и чип живут ровно тогда,
+   * когда эскиз действительно приехал сверху.
+   */
+  const hasSketch = sketchNote != null;
+  const toggleSketch = useCallback(() => {
+    if (!hasSketch) return;
+    setSketchOpen((v) => !v);
+  }, [hasSketch]);
+
   // --- роутер клавиш ------------------------------------------------------------------------------
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -906,6 +953,12 @@ export function AssemblyFullscreen({
         break;
       case 'd':
         dissolveSelection();
+        e.preventDefault();
+        break;
+      case 's':
+        // Показать/спрятать стикер эскиза. Через `verbKey`, как и все прочие глаголы: на
+        // кириллической раскладке `e.key` даёт «ы», и клавиша молча умерла бы у половины цеха.
+        toggleSketch();
         e.preventDefault();
         break;
       case '?':
@@ -1075,6 +1128,22 @@ export function AssemblyFullscreen({
                   <Chip nonForm dashed onClick={openFind} title='find a piece or a unit (⌘f)'>
                     find
                   </Chip>
+                  {/* ЧИП ЭСКИЗА — `nonForm`, как и весь читающий хром: стикер ничего не пишет и
+                      обязан работать на выпущенной карточке. И он ТОГГЛ, поэтому несёт своё
+                      состояние заливкой и `aria-pressed`: орган, открывающий панель и молчащий о
+                      том, что она уже открыта, читается как не сработавший. */}
+                  {hasSketch && (
+                    <Chip
+                      nonForm
+                      dashed
+                      selected={sketchOpen}
+                      pressed={sketchOpen}
+                      onClick={toggleSketch}
+                      title='the construction sketch, floating over the canvas (s)'
+                    >
+                      sketch
+                    </Chip>
+                  )}
                   <Chip nonForm dashed onClick={() => setHelpOpen(true)} title='keyboard shortcuts (?)'>
                     ?
                   </Chip>
@@ -1179,7 +1248,7 @@ export function AssemblyFullscreen({
             />
 
             {/* ── сцена ────────────────────────────────────────────────────────────────────── */}
-            <div className='relative grid min-h-0 min-w-0'>
+            <div ref={stageRef} className='relative grid min-h-0 min-w-0'>
               <AssemblyCanvas
                 ref={canvasRef}
                 blocks={blocks}
@@ -1200,9 +1269,25 @@ export function AssemblyFullscreen({
                 onPicked={setPicked}
                 onHint={setHint}
               />
-              {/* ЗАРЕЗЕРВИРОВАНО ПОД ЭСКИЗ (Ф6б): фулскрин принимает узел и кладёт его над сценой
-                  как есть, ничего о нём не зная. */}
-              {sketchNote}
+              {/* СТИКЕР ЭСКИЗА — СЛОЙ ПОВЕРХ СЦЕНЫ, А НЕ ВОСЬМОЙ ТРЕК ГРИДА. Грид-ребёнком он был
+                  бы обязан отнять у полотна высоту НАВСЕГДА (справка, которую нельзя убрать с
+                  дороги, — уже не справка), а его ширина растягивала бы единственную колонку —
+                  ровно тот дефект узкого окна, ради которого на гриде лежит пояс
+                  `minmax(0,1fr)`/`min-w-0`. Поэтому он абсолютный внутри `relative`-сцены и
+                  клампится её прямоугольником; узел содержимого фулскрин кладёт внутрь как есть,
+                  ничего о нём не зная. */}
+              {hasSketch && sketchOpen && (
+                <SketchSticker
+                  stageRef={stageRef}
+                  pos={sketchPos}
+                  onPos={setSketchPos}
+                  folded={sketchFolded}
+                  onFold={() => setSketchFolded((v) => !v)}
+                  onClose={() => setSketchOpen(false)}
+                >
+                  {sketchNote}
+                </SketchSticker>
+              )}
             </div>
 
             {/* ── сплиттер дока ────────────────────────────────────────────────────────────── */}
@@ -1570,6 +1655,292 @@ function SplitBar({
       }}
     >
       <span className='pointer-events-none absolute left-1/2 top-1/2 h-[3px] w-8 -translate-x-1/2 -translate-y-1/2 border-y border-borderColor transition-colors group-hover:border-textColor' />
+    </div>
+  );
+}
+
+/**
+ * СТИКЕР ЭСКИЗА — плавающая справка над сценой.
+ *
+ * ЧУЖОЙ УЗЕЛ ВНУТРИ, И ЭТО ВСЁ, ЧТО О НЁМ ИЗВЕСТНО. Эскиз приезжает ЭЛЕМЕНТОМ с вкладки: его
+ * подписки на форму (`operations`, `callouts`, `technicalMedia`) остаются в листе, который их
+ * завёл, а фулскрин даёт узлу шапку, место и умение уйти. Смонтируй здесь второй такой же
+ * компонент — и получишь второй комплект подписок с собственным мнением о том, какой пин активен.
+ *
+ * ПОЗИЦИЯ ВО ВРЕМЯ ЖЕСТА ПИШЕТСЯ ИМПЕРАТИВНО, как трансформ мира, рамка маркизы, ghost плитки и
+ * высоты панелей: состояние React на каждый кадр перерисовывало бы полотно и редактор шага
+ * целиком. В состояние она уходит по отпусканию — одним рендером на весь жест.
+ *
+ * АНИМАЦИЙ ПЕРЕЛЁТА НЕТ ВООБЩЕ (ни `transition`, ни доводки): стикер стоит там, где его отпустили,
+ * поэтому `prefers-reduced-motion` ему нечего уважать — уважать нечего по построению.
+ *
+ * ЗАМОРОЗКА ЕГО НЕ КАСАЕТСЯ (R10): это чтение и раскладка, а не правка. Ни одного `disabled` на
+ * его органах нет и быть не должно — на выпущенной карточке эскиз обязан открываться и таскаться
+ * так же, как на живой.
+ */
+function SketchSticker({
+  stageRef,
+  pos,
+  onPos,
+  folded,
+  onFold,
+  onClose,
+  children,
+}: {
+  /** Сцена: система координат стикера и его кламп. */
+  stageRef: React.RefObject<HTMLDivElement | null>;
+  /** `null` — размер ещё не мерян; стартовый угол ставит первый же layout-эффект. */
+  pos: { x: number; y: number } | null;
+  onPos: (p: { x: number; y: number }) => void;
+  folded: boolean;
+  onFold: () => void;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const elRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    pointerId: number;
+    /** Где внутри стикера держат указатель: без этого он прыгал бы углом под курсор. */
+    offX: number;
+    offY: number;
+    /** Шапка, захватившая указатель: с неё же его и снимаем. */
+    el: HTMLElement;
+    /** Позиция ДО жеста. Esc возвращает ровно её. */
+    from: { x: number; y: number };
+  } | null>(null);
+  /** Живая позиция жеста. Коммитится в состояние по отпусканию — не на каждый кадр. */
+  const live = useRef({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+
+  /**
+   * Кламп в прямоугольник сцены. Стикер шире или выше сцены (узкое окно, открытый док) — прижимаем
+   * к левому верхнему углу: уехавший за край угол с шапкой не вернуть уже ничем.
+   */
+  const clampTo = useCallback(
+    (x: number, y: number) => {
+      const stage = stageRef.current?.getBoundingClientRect();
+      const el = elRef.current?.getBoundingClientRect();
+      if (!stage || !el) return { x, y };
+      return {
+        x: Math.max(0, Math.min(x, stage.width - el.width)),
+        y: Math.max(0, Math.min(y, stage.height - el.height)),
+      };
+    },
+    [stageRef],
+  );
+
+  const paintAt = useCallback((p: { x: number; y: number }) => {
+    const el = elRef.current;
+    if (!el) return;
+    el.style.left = `${p.x}px`;
+    el.style.top = `${p.y}px`;
+  }, []);
+
+  // СТАРТОВЫЙ УГОЛ — ВЕРХНИЙ ПРАВЫЙ, и ставится он ПОСЛЕ ЗАМЕРА. Внизу у полотна свой HUD
+  // (инструмент и зум) во всю ширину, слева его органы; верх сцены пуст. Layout-эффект успевает до
+  // покраски, поэтому первого кадра в чужом углу не будет: до замера стикер прижат `right`, после —
+  // живёт в `left`/`top`, как и всё остальное время.
+  useLayoutEffect(() => {
+    if (pos) return;
+    const stage = stageRef.current?.getBoundingClientRect();
+    const el = elRef.current?.getBoundingClientRect();
+    if (!stage || !el) return;
+    onPos(clampTo(stage.width - el.width - STICKER_MARGIN, STICKER_MARGIN));
+  }, [pos, stageRef, clampTo, onPos]);
+
+  /**
+   * ПЕРЕ-КЛАМП. Сцена меняет размер без единого рендера стикера: открылся док, потянули сплиттер
+   * (высота пишется прямо в CSS-переменную), сузили окно, свернули полку. Стикер, положенный у
+   * нижнего края, после этого висел бы ПОВЕРХ дока — сцена его не обрезает.
+   */
+  const reclamp = useCallback(() => {
+    if (drag.current) return; // посреди жеста позицию ведёт рука, а не наблюдатель
+    const stage = stageRef.current?.getBoundingClientRect();
+    const el = elRef.current?.getBoundingClientRect();
+    if (!stage || !el) return;
+    const x = el.left - stage.left;
+    const y = el.top - stage.top;
+    const c = clampTo(x, y);
+    if (c.x !== x || c.y !== y) onPos(c);
+  }, [stageRef, clampTo, onPos]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const ro = new ResizeObserver(reclamp);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [stageRef, reclamp]);
+
+  // Разворот растит стикер вниз и может вывести его за нижний край; свёртка — только уменьшает,
+  // но эффект один на оба перехода, чтобы не заводить правило «в одну сторону клампим».
+  useLayoutEffect(reclamp, [folded, reclamp]);
+
+  const onHeadPointerDown = (e: React.PointerEvent) => {
+    // Правая и средняя кнопки жеста не начинают; тач и перо приходят с `button === 0`.
+    if (e.button !== 0) return;
+    // Кнопки шапки жеста НЕ начинают: иначе каждое нажатие «свернуть» было бы ещё и
+    // микро-перетаскиванием на дрожание руки.
+    if ((e.target as HTMLElement).closest('button')) return;
+    const stage = stageRef.current?.getBoundingClientRect();
+    const el = elRef.current?.getBoundingClientRect();
+    if (!stage || !el) return;
+    const head = e.currentTarget as HTMLElement;
+    const from = { x: el.left - stage.left, y: el.top - stage.top };
+    drag.current = {
+      pointerId: e.pointerId,
+      offX: e.clientX - el.left,
+      offY: e.clientY - el.top,
+      el: head,
+      from,
+    };
+    live.current = from;
+    // Захват — чтобы жест не потерялся, уйдя с шапки: дальше он живёт над полотном, у которого
+    // свои pointer-обработчики. `preventDefault` не зовём — он отнял бы у шапки фокус вместе с
+    // клавиатурным путём к её кнопкам; выделение текста гасит `select-none`.
+    try {
+      head.setPointerCapture(e.pointerId);
+    } catch {
+      /* без захвата обойдёмся — слушатели всё равно на окне */
+    }
+    setDragging(true);
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const finish = (commit: boolean) => {
+      const g = drag.current;
+      if (!g) return;
+      drag.current = null;
+      setDragging(false);
+      // Захват мог быть уже снят браузером (`pointercancel`) — исключение здесь уронило бы конец
+      // жеста, а не его начало.
+      try {
+        g.el.releasePointerCapture(g.pointerId);
+      } catch {
+        /* указатель уже отпущен */
+      }
+      if (commit) {
+        onPos(live.current);
+        return;
+      }
+      // Отмена: возвращаем позицию ДО жеста. Состояние её и держит, поэтому пишем только стиль —
+      // рендера здесь не нужно вовсе.
+      live.current = g.from;
+      paintAt(g.from);
+    };
+    const move = (e: PointerEvent) => {
+      const g = drag.current;
+      if (!g || e.pointerId !== g.pointerId) return;
+      const stage = stageRef.current?.getBoundingClientRect();
+      if (!stage) return;
+      const p = clampTo(e.clientX - g.offX - stage.left, e.clientY - g.offY - stage.top);
+      live.current = p;
+      paintAt(p);
+    };
+    const up = (e: PointerEvent) => {
+      const g = drag.current;
+      if (!g || e.pointerId !== g.pointerId) return;
+      finish(true);
+    };
+    /** Палец увела прокрутка или система забрала жест: `pointerup` не придёт НИКОГДА. */
+    const cancel = (e: PointerEvent) => {
+      const g = drag.current;
+      if (g && e.pointerId !== g.pointerId) return;
+      finish(false);
+    };
+    // Потеря окна И потеря видимости — оба аварийные конца, и слушать надо оба: `blur` владельцу
+    // жеста может и не прийти, а стикер, оставшийся приклеенным к курсору без единой зажатой
+    // кнопки, — тот же зависший ghost, только крупнее.
+    const lost = () => finish(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !drag.current) return;
+      // ЖИВОЙ ЖЕСТ ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ — ровно как драг ноды, маркиза и драг плитки из полки:
+      // Esc посреди жеста значит «отменить жест», а не «подняться на ступень». Сам по себе стикер
+      // ступени не занимает: он сосед дока и полки, а не слой, перехватывающий смысл экрана.
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', lost);
+    document.addEventListener('visibilitychange', lost);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', lost);
+      document.removeEventListener('visibilitychange', lost);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [dragging, clampTo, onPos, paintAt, stageRef]);
+
+  const close = () => {
+    // ФОКУС НЕ ИМЕЕТ ПРАВА ПРОВАЛИТЬСЯ В BODY — та же причина, что у полосы-сплиттера: стикер
+    // уходит ВМЕСТЕ с кнопкой, на которой стоит фокус, браузер отдаёт его `<body>`, то есть ЗА
+    // пределы `Dialog.Content` с роутером клавиш, и дальше не работает ни одна клавиша экрана,
+    // пока не кликнешь внутрь.
+    (elRef.current?.closest('[role="dialog"]') as HTMLElement | null)?.focus();
+    onClose();
+  };
+
+  return (
+    <div
+      ref={elRef}
+      role='group'
+      aria-label='construction sketch'
+      className='absolute z-10 flex max-h-[calc(100%-16px)] flex-col border border-textColor bg-bgColor'
+      style={
+        pos
+          ? { left: pos.x, top: pos.y, width: STICKER_W }
+          : { right: STICKER_MARGIN, top: STICKER_MARGIN, width: STICKER_W }
+      }
+    >
+      <div
+        className='flex h-6 shrink-0 cursor-move select-none items-center gap-1 border-b border-hairline px-1'
+        // Палец на шапке таскает стикер, а не страницу под оверлеем.
+        style={{ touchAction: 'none' }}
+        onPointerDown={onHeadPointerDown}
+      >
+        <button
+          type='button'
+          onClick={onFold}
+          aria-expanded={!folded}
+          aria-label={folded ? 'open the sketch' : 'collapse the sketch to its head'}
+          title={folded ? 'open the sketch' : 'collapse the sketch to its head'}
+          className='text-labelColor transition-colors hover:text-textColor'
+        >
+          <Text size='micro' component='span'>
+            {folded ? '▸' : '▾'}
+          </Text>
+        </button>
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          className='min-w-0 truncate font-bold'
+        >
+          sketch
+        </Text>
+        <button
+          type='button'
+          onClick={close}
+          aria-label='hide the sketch'
+          title='hide the sketch (s)'
+          className='ml-auto text-labelColor transition-colors hover:text-textColor'
+        >
+          <Text size='micro' component='span'>
+            ✕
+          </Text>
+        </button>
+      </div>
+      {/* СВЁРНУТЫЙ СТИКЕР — РОВНО ЕГО ШАПКА: тело снимается, а не прячется `visibility`, иначе
+          свёрнутая справка продолжала бы отнимать место у полотна, ничего не показывая. */}
+      {!folded && <div className='min-h-0 overflow-y-auto p-1.5'>{children}</div>}
     </div>
   );
 }

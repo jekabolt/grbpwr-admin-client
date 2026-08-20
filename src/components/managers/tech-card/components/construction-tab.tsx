@@ -279,10 +279,21 @@ function ConstructionSketch({
   mediaById,
   activePin,
   onActivePinChange,
+  note,
 }: {
   mediaById: Map<number, common_MediaFull>;
   activePin: number | null;
   onActivePinChange: (n: number | null) => void;
+  /**
+   * Подвал под эскизом, и он ПРИЕЗЖАЕТ ПРОПОМ.
+   *
+   * Один и тот же эскиз живёт на двух экранах — колонкой рядом с операциями и плавающим стикером
+   * над полотном фулскрина, — а подсвечивает он на них разное: рядом со списком работают обе
+   * половины кросс-подсветки, над полотном — только одна, и полотно активный пин не потребляет
+   * вовсе. Подпись, честная на одном экране, на другом обещала бы поведение, которого там нет, —
+   * ровно та ложь, ради которой подвал и вынесен в проп.
+   */
+  note: string;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   // Which pins an operation actually claims — computed here, for the same reason the summary
@@ -329,9 +340,10 @@ function ConstructionSketch({
             no technical sketch
           </Text>
         </Canvas>
+        {/* Без «рядом с операциями»: этот же эскиз показывается и стикером над полотном
+            фулскрина, где рядом с ним никаких операций нет. */}
         <Text size='micro' variant='label'>
           add a technical sketch on the sketch tab and place pins on it — it will show up here
-          beside the operations
         </Text>
       </div>
     );
@@ -386,7 +398,7 @@ function ConstructionSketch({
       </div>
 
       <Text size='micro' variant='label'>
-        hover an operation — its pin lights up (and the other way round)
+        {note}
       </Text>
     </div>
   );
@@ -733,6 +745,7 @@ export function ConstructionTab({
               mediaById={mediaById}
               activePin={pin.active}
               onActivePinChange={pin.setActive}
+              note='hover an operation — its pin lights up (and the other way round)'
             />
           </section>
           <PieceLegend />
@@ -775,6 +788,27 @@ export function ConstructionTab({
               onSave={onSave}
               saving={saving}
               draftPending={draftPending}
+              // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
+              // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
+              // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
+              // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
+              //
+              // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
+              // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
+              // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
+              // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
+              // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
+              sketchNote={
+                <ConstructionSketch
+                  mediaById={mediaById}
+                  activePin={pin.active}
+                  onActivePinChange={pin.setActive}
+                  // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ. Пин светит строки списка и только их: на
+                  // полотне активный пин не потребляет НИКТО, и заводить потребителя нельзя —
+                  // это было бы новое визуальное состояние, которого у инлайна нет.
+                  note='hover a pin — it lights that step in the list, never anything on the canvas'
+                />
+              }
             />
           </section>
         </div>
