@@ -2650,6 +2650,7 @@ function GenerateOperationsPanel({
   hasExistingOperations,
   readReplaceImpact,
   onAccept,
+  frozen = false,
 }: {
   techCardId?: number;
   hasExistingOperations: boolean;
@@ -2657,6 +2658,8 @@ function GenerateOperationsPanel({
   // not need to re-render on every keystroke in the 14 operations above it.
   readReplaceImpact: () => ReplaceImpact;
   onAccept: (operations: common_TechCardOperation[], mode: 'append' | 'replace') => void;
+  /** Карточка выпущена: свои кнопки глушит внешний fieldset, но модалка replace — портал. */
+  frozen?: boolean;
 }) {
   const [description, setDescription] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -2667,6 +2670,14 @@ function GenerateOperationsPanel({
     model?: string;
     notes?: string;
   } | null>(null);
+
+  // Карточку выпустили, пока модалка «replace the whole list» открыта, — модалка обязана закрыться
+  // сама: она живёт ПОРТАЛОМ в body, куда внешний `<fieldset disabled>` не достаёт (тот же приём,
+  // что у кнопок «снять фотографии шагов» и «снять разметку узлов»). Гейт стоит и в самом
+  // мутаторе `acceptGeneratedOperations`.
+  useEffect(() => {
+    if (frozen) setImpact(null);
+  }, [frozen]);
 
   const generate = async () => {
     if (!techCardId || !description.trim() || generating) return;
@@ -3076,7 +3087,14 @@ export function OperationsField({
   };
 
   const moveOperation = (from: number, to: number) => {
-    if (frozen) return;
+    // ГЕЙТ С ОТКАЗОМ СЛОВАМИ, а не молчанием: ручка ⠿ рельса в СПИСКЕ ФУЛСКРИНА — настоящая
+    // <button> в портале, вне обоих fieldset (внешнего карточки и докового), и на выпущенной
+    // карточке жест перетаскивания честно начинается и доезжает досюда — строка прыгала бы
+    // обратно без единого слова. Инлайновую ручку глушит внешний fieldset, снекбар не спамит.
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
     if (from === to) return;
     // (3/9) САМАЯ ДОРОГАЯ ИЗ ДЕВЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
     // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
@@ -3117,6 +3135,15 @@ export function OperationsField({
     generated: common_TechCardOperation[],
     mode: 'append' | 'replace',
   ) => {
+    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у остальных мутаторов массива. Кнопки панели — настоящие
+    // <button> под внешним fieldset и на выпущенной карточке мертвы, но модалка «replace the whole
+    // list» — ПОРТАЛ: карточку могли выпустить, пока она открыта (та же гонка Release, что у
+    // `appendStep`), и «replace» переписал бы выпущенную карточку целиком. Отказ произносится:
+    // жест начат на живом органе.
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
     // (5/9) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни другое
     // жестовым ⌘Z не отменяется, а адрес записи после `replace` указывает на другой шаг.
     clearLastMutation();
@@ -4067,6 +4094,7 @@ export function OperationsField({
         hasExistingOperations={fields.length > 0}
         readReplaceImpact={readReplaceImpact}
         onAccept={acceptGeneratedOperations}
+        frozen={frozen}
       />
     </div>
   );

@@ -275,10 +275,18 @@ export function OperationMediaStrip({
                     </Text>
                     {!frozen && fields.length > 1 && (
                       <ChipRow>
+                        {/* Перестановка — тоже ПИСАТЕЛЬ полосы, и `onEdit` зовётся у неё, как у
+                            приёмки, снятия, подписи и выносок: правило «зовётся у писателей»
+                            не терпит одного исключения. Клик у границы — не жест: гасить чужую
+                            запись отмены нечем. */}
                         <Chip
                           nonForm
                           dashed
-                          onClick={() => i > 0 && move(i, i - 1)}
+                          onClick={() => {
+                            if (i <= 0) return;
+                            move(i, i - 1);
+                            onEdit?.();
+                          }}
                           title='earlier in the display and print order'
                         >
                           ←
@@ -286,7 +294,11 @@ export function OperationMediaStrip({
                         <Chip
                           nonForm
                           dashed
-                          onClick={() => i < fields.length - 1 && move(i, i + 1)}
+                          onClick={() => {
+                            if (i >= fields.length - 1) return;
+                            move(i, i + 1);
+                            onEdit?.();
+                          }}
                           title='later in the display and print order'
                         >
                           →
