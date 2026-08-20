@@ -1,7 +1,16 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
@@ -13,9 +22,18 @@ import type { AssemblyBlock } from './assembly-blocks';
 import { AssemblyCanvas, ZOOM_STEP, type CanvasHandle, type CanvasHint } from './assembly-canvas';
 import type { CreatePrefill } from './assembly-create-dialog';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
+import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
-import { DOCK_DEFAULT, DOCK_MAX, DOCK_MIN, usePanelPrefs } from './use-panel-prefs';
+import {
+  DOCK_DEFAULT,
+  DOCK_MAX,
+  DOCK_MIN,
+  SHELF_DEFAULT,
+  SHELF_MAX,
+  SHELF_MIN,
+  usePanelPrefs,
+} from './use-panel-prefs';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { useSchematicPrefs } from './use-schematic-prefs';
 
@@ -34,8 +52,8 @@ import type { useSchematicPrefs } from './use-schematic-prefs';
 // `operations-field.tsx` с полутора десятками пропов, и вытаскивать её наружу ради фулскрина
 // значило бы затеять незапланированный рефакторинг ровно там, где он опаснее всего. Билдер
 // замыкает её со всеми пропами (включая key-контракт `id:index`), а обработчик «＋ piece» решает
-// ФУЛСКРИН и передаёт аргументом: в Ф3 это снекбар-заглушка, в Ф5в её заменит арм режима добора —
-// и `operations-field.tsx` для этого трогать не придётся.
+// ФУЛСКРИН и передаёт аргументом: в Ф3 это был снекбар-заглушка, теперь — арм режима добора, и
+// `operations-field.tsx` ради этого трогать не пришлось.
 //
 // ВСЁ ПРЕЗЕНТАЦИОННОЕ ИДЁТ МИМО ФОРМЫ. Позиции, зум, панорама, высоты панелей, открытость дока —
 // ничего из этого не касается RHF: иначе перетаскивание ноды взводило бы `isDirty`, а с ним
@@ -45,10 +63,15 @@ import type { useSchematicPrefs } from './use-schematic-prefs';
 const GRID_GAP = 8;
 
 /**
+ * Свёрнутая полка = ровно её шапка, и число обязано совпадать с `h-6` этой шапки
+ * (`assembly-shelf.tsx`). Меньше — шапку обрежет, больше — под ней ляжет полоса пустоты, которая
+ * читается как «полка сломалась, а не свёрнута».
+ */
+const SHELF_HEAD = 24;
+
+/**
  * Шпаргалка. Список — данные, а не разметка: клавиша, попавшая в роутер и забытая здесь, — та же
  * ложь, что подпись про несуществующую клавишу.
- *
- * `[` (полка деталей) тут НЕ значится: она приедет в Ф5.
  */
 const HELP_KEYS: [string, string][] = [
   ['v · h', 'select tool · pan tool'],
@@ -65,8 +88,9 @@ const HELP_KEYS: [string, string][] = [
   ['d', 'dissolve the picked unit'],
   ['⌘z', 'undo the last gesture'],
   ['⌘f', 'find a piece or a unit'],
+  ['[', 'collapse or open the pieces shelf'],
   [']', 'collapse or open the step dock'],
-  ['esc', 'find → shortcuts → selection → leave'],
+  ['esc', 'find → shortcuts → adding → selection → leave'],
 ];
 
 export type AssemblyFullscreenProps = {
@@ -92,7 +116,10 @@ export type AssemblyFullscreenProps = {
   setPendingCreate: (p: CreatePrefill | null) => void;
   /** Потребитель — Ф4. */
   dissolveUnit: (stepIndex: number) => void;
-  /** Потребитель — Ф5в (режим добора деталей в шаг). */
+  /**
+   * Добавить деталь во входы шага. Единственный вызыватель отсюда — РЕЖИМ ДОБОРА полки; своего
+   * гейта заморозки у мутатора нет исторически, поэтому вызов гейтуется и на этой стороне.
+   */
   addInputToOperation: (index: number, key: string) => void;
   addOperation: () => void;
   /** Потребитель — Ф6в (перестановка шагов в списке). */
@@ -214,6 +241,7 @@ export function AssemblyFullscreen({
   onPickStep,
   setPendingCreate,
   dissolveUnit,
+  addInputToOperation,
   addOperation,
   onUndo,
   undoTitle,
@@ -250,8 +278,69 @@ export function AssemblyFullscreen({
 
   const { prefs: panels, set: setPanels } = usePanelPrefs();
   const dockH = panels.dockH ?? DOCK_DEFAULT;
+  const shelfH = panels.shelfH ?? SHELF_DEFAULT;
+  // Полка по умолчанию РАЗВЁРНУТА: она отвечает на вопрос «всё ли собрано», с которого экран и
+  // открывают. Свёрнутость — выбор человека, и он живёт на пользователя, а не на карточку.
+  const shelfCollapsed = panels.shelfCollapsed ?? false;
 
-  const cloth = pieceClothByColorway[0]?.map ?? null;
+  const toggleShelf = useCallback(
+    () => setPanels({ shelfCollapsed: !shelfCollapsed }),
+    [shelfCollapsed, setPanels],
+  );
+
+  // --- активный колорвей --------------------------------------------------------------------------
+  //
+  // ОДИН НА ВЕСЬ ЭКРАН: полка группируется по нему, полотно им же штрихует. Разведи их — и одна
+  // деталь на одном экране получит два ответа про свою ткань, причём оба «правильные».
+  //
+  // ИНДЕКС ЧИНИТ РОДИТЕЛЬ (полка клампит только ПОКАЗ): рецепт живёт в форме, колорвей из него
+  // можно убрать прямо сейчас, и индекс, переживший своё значение, оставил бы полотно без
+  // штриховки при живом рецепте. Кламп — в рендере, чтобы обе поверхности одного кадра видели
+  // одно число; эффект догоняет им состояние, иначе чипы полки светили бы выбранным то, чего нет.
+  const [colorwayIndex, setColorwayIndex] = useState(0);
+  const cwIndex =
+    colorwayIndex >= 0 && colorwayIndex < pieceClothByColorway.length ? colorwayIndex : 0;
+  useEffect(() => {
+    if (colorwayIndex !== cwIndex) setColorwayIndex(cwIndex);
+  }, [colorwayIndex, cwIndex]);
+
+  const cloth = pieceClothByColorway[cwIndex]?.map ?? null;
+
+  // --- полка ---------------------------------------------------------------------------------------
+  //
+  // Ось — В ПРЕДПОЧТЕНИЯХ КАРТОЧКИ (Ф5б): «по узлам» и «по тканям» суть два разных вопроса к одной
+  // карточке, и выбранный держится между визитами. Фильтр — СЕССИОННЫЙ: он сворачивает длинную
+  // полосу под текущую задачу и, переживи он визит, встречал бы человека полкой, где половины
+  // деталей нет, без единого следа почему.
+  const axis = prefs.axis ?? 'unit';
+  const [shelfFilter, setShelfFilter] = useState<ShelfFilter>('all');
+
+  const pickedSet = useMemo(() => new Set(picked), [picked]);
+
+  /**
+   * Узел-потребитель детали. ТА ЖЕ ВЫВОДКА, ЧТО В `assembly-layout.ts`, и это не совпадение: полка
+   * и полотно обязаны считать деталь съеденной в один и тот же момент. Шаг-ОБРАБОТКА (пустой
+   * выходной ключ) деталь не съедает — она остаётся на столе.
+   */
+  const intoByPiece = useMemo(() => {
+    const m = new Map<string, string>();
+    res.consumedBy.forEach((stepIdx, key) => {
+      if (res.units.has(key)) return; // это узел, не деталь
+      const into = steps[stepIdx]?.outputUnitKey ?? '';
+      if (into) m.set(key, into);
+    });
+    return m;
+  }, [res, steps]);
+
+  const intoOf = useCallback((lineKey: string) => intoByPiece.get(lineKey) ?? null, [intoByPiece]);
+  const unitNameOf = useCallback((key: string) => res.units.get(key)?.name ?? '', [res]);
+
+  /**
+   * Порядок групп полки = порядок боксов полотна. `Map` фронтира хранит порядок вставки, а он и
+   * есть порядок производящих шагов: без этого полка сортирует по первому появлению узла среди
+   * деталей, и два соседних органа рассказывают о карточке разное.
+   */
+  const unitOrder = useMemo(() => [...res.units.keys()], [res]);
 
   /**
    * Клик по шагу ВНУТРИ фулскрина — единственное, что открывает док. `onPickStep` родителя зовётся
@@ -271,18 +360,97 @@ export function AssemblyFullscreen({
     setDockStep((cur) => (cur === null ? Math.max(0, selectedIndex) : null));
   }, [selectedIndex]);
 
+  // --- режим добора деталей в шаг -------------------------------------------------------------------
+  //
+  // ОДНО ПРАВИЛО КЛИКА ПО ПЛИТКЕ: клик — ВСЕГДА «выбрать и довести панорамой». Добавление детали в
+  // шаг живёт отдельным режимом, в который экран входит явно — «＋ piece» в доке. Иначе один и тот
+  // же клик значил бы разное в зависимости от того, открыт ли док: пишущий жест, отличающийся от
+  // читающего только невидимым контекстом.
+  //
+  // Состояние СЕССИОННОЕ и мимо RHF: это не факт карточки, а положение рук.
+  const [addMode, setAddMode] = useState<{ stepIndex: number; stepLabel: string } | null>(null);
+
   /**
-   * «＋ piece» редактора. Решение принимает ФУЛСКРИН, а не `operations-field`: полка деталей —
-   * его орган, и в Ф5в этот же колбэк включит режим добора, не тронув файл с мутаторами.
-   *
-   * Жест обязан иметь видимое следствие: молчащая кнопка читается как сломанная.
+   * УСЛОВИЯ ЖИЗНИ РЕЖИМА ПРОВЕРЯЮТСЯ В РЕНДЕРЕ, а не только эффектом-сторожем ниже: эффект
+   * отрабатывает ПОСЛЕ покраски, и кадр между «док закрыли» и «сторож убрал состояние» показывал бы
+   * полку, зовущую класть детали в шаг, которого на экране уже нет.
    */
-  const flashPieces = useCallback(() => {
-    showMessage(
-      'the pieces shelf arrives in a later phase — exit fullscreen to add pieces to this step',
-      'error',
-    );
-  }, [showMessage]);
+  const addModeLive =
+    addMode &&
+    !frozen &&
+    dockStep !== null &&
+    addMode.stepIndex === selectedIndex &&
+    selectedIndex < steps.length
+      ? addMode
+      : null;
+
+  /**
+   * Фронтир целевого шага — ТОТ ЖЕ, что сверяет `addInputToOperation`: `frontierBefore[i]`. Считается
+   * НА КАЖДЫЙ РЕНДЕР, а не снимается на входе в режим: добавленная деталь уходит со стола тем же
+   * жестом, и замороженный снимок предлагал бы её второй раз — с отказом движка в ответ.
+   */
+  const shelfAddMode = useMemo(
+    () =>
+      addModeLive
+        ? {
+            ...addModeLive,
+            frontier: new Set(res.frontierBefore[addModeLive.stepIndex] ?? res.frontier),
+          }
+        : null,
+    [addModeLive, res],
+  );
+
+  const exitAddMode = useCallback(() => setAddMode(null), []);
+
+  /**
+   * «＋ piece» редактора шага: ВООРУЖИТЬ ДОБОР. Решение принимает фулскрин, а не
+   * `operations-field` — полка его орган, и файл с мутаторами ради этого не тронут.
+   *
+   * Повторное нажатие — выход: орган, которым вошли, обязан уметь вывести.
+   */
+  const armAddMode = useCallback(() => {
+    // Пояс и подтяжки. Кнопка живёт под `<fieldset disabled={frozen}>` дока и на выпущенной
+    // карточке мертва, но дыра здесь самая тихая: портал выносит и док, и полку из-под fieldset
+    // карточки целиком, а у `addInputToOperation` собственный гейт появился позже вызывающих.
+    if (frozen) return;
+    // ШАГ БЕРЁТСЯ ИЗ `selectedIndex`, а не из `dockStep`: редактор с этой кнопкой смонтирован
+    // именно на `selectedIndex`, и разойдись эти два числа — детали уехали бы в чужой шаг.
+    // `dockStep` отвечает только за «док открыт»; верхняя граница обязательна — `selected`
+    // родителя всегда ≥ 0 и на карточке без операций указывает на строку, которой нет.
+    if (dockStep === null || selectedIndex < 0 || selectedIndex >= steps.length) return;
+    if (addModeLive) {
+      setAddMode(null);
+      return;
+    }
+    setAddMode({ stepIndex: selectedIndex, stepLabel: String((selectedIndex + 1) * 10) });
+    // СВЁРНУТУЮ ПОЛКУ РАЗВОРАЧИВАЕМ: режим, чьи органы не видны, читается как сломанная кнопка.
+    if (shelfCollapsed) setPanels({ shelfCollapsed: false });
+  }, [frozen, dockStep, selectedIndex, steps.length, addModeLive, shelfCollapsed, setPanels]);
+
+  /**
+   * Клик по годной плитке в режиме добора. Отказ вне фронтира произносит САМ мутатор — словами
+   * движка и по свежим значениям формы; полка негодные плитки приглушает заранее, так что сюда
+   * они и не доходят.
+   */
+  const addPieceToStep = useCallback(
+    (lineKey: string) => {
+      if (frozen) return; // тот же пояс: жест pointer-ный, fieldset его не глушит
+      if (!addModeLive) return;
+      addInputToOperation(addModeLive.stepIndex, lineKey);
+    },
+    [frozen, addModeLive, addInputToOperation],
+  );
+
+  /**
+   * СТОРОЖ РЕЖИМА. Выходов из добора четыре — Esc, повторный «＋ piece», закрытие дока, смена шага,
+   * — но три последних суть одно и то же условие, а сверх них есть случаи, которых ни один жест не
+   * видит: шаг удалили из дока, карточку заморозили, `selectedIndex` уехал снаружи. Показ уже
+   * погашен `addModeLive` в рендере; здесь снимается само состояние, чтобы повторный «＋ piece» не
+   * читался как «выйти» из режима, которого на экране давно нет.
+   */
+  useEffect(() => {
+    if (addMode && !addModeLive) setAddMode(null);
+  }, [addMode, addModeLive]);
 
   const addStepFromDock = () => {
     // Гейт на СТОРОНЕ ВЫЗОВА, хотя мутатор гейтован и сам: без него `setDockStep` открыл бы док на
@@ -304,6 +472,20 @@ export function AssemblyFullscreen({
   // утверждение, которого никто не делал. Прототип здесь НЕ эталон.
 
   const onTable = useMemo(() => new Set(res.frontier), [res]);
+
+  /**
+   * Клик по плитке полки ВНЕ режима добора: выбрать и довести панорамой. Ровно то же, что делает
+   * find-палитра, и той же ручкой — доводка МИНИМАЛЬНЫМ сдвигом. Выбирается ТОЛЬКО то, что на
+   * столе: съеденная деталь входом не годится, и эффект очистки выбора всё равно выбросил бы её
+   * следующим кадром — мигание вместо ответа. Довести до глаз при этом можно любую.
+   */
+  const pickPiece = useCallback(
+    (lineKey: string) => {
+      if (onTable.has(lineKey)) setPicked([lineKey]);
+      canvasRef.current?.reveal(lineKey);
+    },
+    [onTable],
+  );
 
   const sewSelection = useCallback(() => {
     if (frozen) {
@@ -432,38 +614,16 @@ export function AssemblyFullscreen({
     [findHits, onTable],
   );
 
-  // --- сплиттер дока ------------------------------------------------------------------------------
+  // --- сплиттеры панелей --------------------------------------------------------------------------
   //
-  // Порт `wireSplit`/`setBar` прототипа. Во время перетаскивания высота пишется ПРЯМО в CSS-переменную
-  // грида, а в предпочтения уходит только по отпусканию: состояние React на каждый кадр
-  // перерисовывало бы редактор шага целиком, со всеми его двумя десятками полей.
-  const splitRef = useRef<{ pointerId: number; fromY: number; base: number } | null>(null);
-  const liveH = useRef(dockH);
-
-  const writeDockH = (px: number) => {
-    const v = Math.min(DOCK_MAX, Math.max(DOCK_MIN, px));
-    liveH.current = v;
-    gridRef.current?.style.setProperty('--dock-h', `${v}px`);
-  };
-
-  const onSplitDown = (e: React.PointerEvent) => {
-    if (!dockOpen || e.button !== 0) return;
-    splitRef.current = { pointerId: e.pointerId, fromY: e.clientY, base: liveH.current };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    e.preventDefault();
-  };
-  const onSplitMove = (e: React.PointerEvent) => {
-    const s = splitRef.current;
-    if (!s || e.pointerId !== s.pointerId) return;
-    // dir = −1: сплиттер стоит НАД доком, и движение вверх обязано его растить.
-    writeDockH(s.base - (e.clientY - s.fromY));
-  };
-  const onSplitUp = (e: React.PointerEvent) => {
-    const s = splitRef.current;
-    if (!s || e.pointerId !== s.pointerId) return;
-    splitRef.current = null;
-    setPanels({ dockH: liveH.current });
-  };
+  // Порт `wireSplit`/`setBar` прототипа, и он ОДИН на обе панели (`SplitBar` внизу файла): у дока и
+  // полки различаются только знак движения, кламп и смысл двойного клика. Во время перетаскивания
+  // высота пишется ПРЯМО в CSS-переменную грида, а в предпочтения уходит только по отпусканию:
+  // состояние React на каждый кадр перерисовывало бы редактор шага целиком, со всеми его двумя
+  // десятками полей.
+  const writeTrack = useCallback((name: string, px: number) => {
+    gridRef.current?.style.setProperty(name, `${px}px`);
+  }, []);
 
   // --- роутер клавиш ------------------------------------------------------------------------------
 
@@ -573,8 +733,10 @@ export function AssemblyFullscreen({
         e.preventDefault();
         break;
       case '[':
-        // Полка деталей приедет в Ф5. До неё клавиша молчит — обещать полосой подсказок то, чего
-        // нет, хуже, чем не обещать ничего. По той же причине её нет и в шпаргалке.
+        // Свернуть/развернуть полку. Полного скрытия у полки нет: свёрнутая — это её 24px шапка со
+        // счётчиками и осями, и `[` переключает ровно эти два состояния.
+        toggleShelf();
+        e.preventDefault();
         break;
       default:
         break;
@@ -585,9 +747,22 @@ export function AssemblyFullscreen({
     if (e.key === ' ') canvasRef.current?.setSpaceHand(false);
   };
 
-  const rows = dockOpen
-    ? `auto ${GRID_GAP}px minmax(0, 1fr) ${GRID_GAP}px var(--dock-h, ${DOCK_DEFAULT}px)`
-    : `auto ${GRID_GAP}px minmax(0, 1fr) 0 0`;
+  // ТРЕКИ ГРИДА, сверху вниз: хром / зазор / полка / сплиттер полки / сцена / сплиттер дока / док.
+  // Порядок ДЕТЕЙ ниже обязан совпадать с этим списком один в один: грид раскладывает их подряд, и
+  // выпавший ребёнок сдвигает всех следующих на трек вверх — полотно уезжает в нулевой.
+  //
+  // Закрытый док отдаёт полотну и свой трек, и трек своего сплиттера (0 и 0); свёрнутая полка
+  // схлопывается до шапки, но трек её сплиттера ОСТАЁТСЯ — 8px пустоты между шапкой и полотном
+  // дешевле, чем ещё одна пара нулей в списке.
+  const rows = [
+    'auto',
+    `${GRID_GAP}px`,
+    shelfCollapsed ? `${SHELF_HEAD}px` : `var(--shelf-h, ${SHELF_DEFAULT}px)`,
+    `${GRID_GAP}px`,
+    'minmax(0, 1fr)',
+    dockOpen ? `${GRID_GAP}px` : '0',
+    dockOpen ? `var(--dock-h, ${DOCK_DEFAULT}px)` : '0',
+  ].join(' ');
 
   return (
     <Dialog.Root
@@ -603,8 +778,11 @@ export function AssemblyFullscreen({
           onEscapeKeyDown={(e) => {
             // ESC-ЛЕСТНИЦА, каноническая и единая для всех фаз: find → шпаргалка → режим добора →
             // выделение → выход. Каждый Esc гасит верхнюю НЕПУСТУЮ ступень; ступени, чьей фазы ещё
-            // нет, просто пусты (режим добора — Ф5в). Без `preventDefault` Radix закрывает фулскрин
-            // раньше любого кастомного слоя — он слушает Escape на документе.
+            // нет, просто пусты. ВЫШЕ ВСЕЙ ЛЕСТНИЦЫ стоит ЖИВОЙ ЖЕСТ — драг ноды и маркиза гасят
+            // Escape своими слушателями на window (`assembly-canvas.tsx`) и до сюда его не пускают:
+            // Esc посреди жеста означает «отменить жест», а не «подняться на ступень».
+            // Без `preventDefault` Radix закрывает фулскрин раньше любого кастомного слоя — он
+            // слушает Escape на документе.
             if (findOpen) {
               e.preventDefault();
               setFindOpen(false);
@@ -613,6 +791,13 @@ export function AssemblyFullscreen({
             if (helpOpen) {
               e.preventDefault();
               setHelpOpen(false);
+              return;
+            }
+            // Режим добора — ПЕРЕД выделением: пока он вооружён, клики полки значат другое, и
+            // сначала гасится именно он. Шапка полки это и обещает: «esc to finish».
+            if (addModeLive) {
+              e.preventDefault();
+              setAddMode(null);
               return;
             }
             if (picked.length > 0) {
@@ -628,7 +813,15 @@ export function AssemblyFullscreen({
             the assembly graph on a pan and zoom canvas, with the open step in a dock below
           </Dialog.Description>
 
-          <div ref={gridRef} className='grid h-full' style={{ gridTemplateRows: rows, ['--dock-h' as string]: `${dockH}px` }}>
+          <div
+            ref={gridRef}
+            className='grid h-full'
+            style={{
+              gridTemplateRows: rows,
+              ['--dock-h' as string]: `${dockH}px`,
+              ['--shelf-h' as string]: `${shelfH}px`,
+            }}
+          >
             {/* ── хром ─────────────────────────────────────────────────────────────────────── */}
             <header className='flex flex-col gap-1 border border-borderColor bg-bgColor px-2 py-1.5'>
               <div className='flex flex-wrap items-center gap-2'>
@@ -727,6 +920,60 @@ export function AssemblyFullscreen({
                 свой трек, и трек сплиттера целиком, а `gap` остаётся между нулевыми треками. */}
             <div />
 
+            {/* ── полка деталей ────────────────────────────────────────────────────────────── */}
+            {/* ПОЛКА ГОВОРИТ, ЧТО СУЩЕСТВУЕТ, полотно — как оно собрано, find — где оно лежит.
+                Лоток (`AssemblyTray`) в фулскрине НЕ рендерится вовсе: две поверхности одного
+                факта с разной семантикой клика расходятся не в диффе, а на фабрике. */}
+            {/* ОБЁРТКА РАДИ `min-w-0`, и это не косметика. Грид-ребёнок с `min-width:auto` не умеет
+                стать уже своего min-content, а единственная колонка грида — `auto`: она вырастает
+                до САМОГО ШИРОКОГО ребёнка и растягивает по нему всех остальных. Замерено на окне
+                900px: шапка полки давала 1018px, и на эти 1018 растягивались хром, полотно и док —
+                `save` и переключатели уезжали за край экрана. Ширину полке снаружи не задать, свою
+                `<section>` она рисует сама, поэтому `min-w-0` кладётся и на обёртку (чтобы колонка
+                считала её вклад нулём), и через child-вариант на саму секцию (чтобы та ужалась в
+                трек). Дальше ужимается уже полка: счётчики `truncate`, полоса плиток скроллится. */}
+            <div className='grid min-h-0 min-w-0 [&>section]:min-w-0'>
+              <AssemblyShelf
+                pieces={pieces}
+                // КАРТА КАК ЕСТЬ, без перекладки ключей: полка сама сворачивает `lineKey` в
+                // `pieceRefKey` для контура, а ткань ключует сырым `lineKey`. Переложи здесь — и
+                // получишь пустую штриховку при живом рецепте, ничего не сломав на глаз.
+                pieceShapes={pieceShapes}
+                pieceClothByColorway={pieceClothByColorway}
+                colorwayIndex={cwIndex}
+                onColorwayIndex={setColorwayIndex}
+                axis={axis}
+                onAxis={prefs.setAxis}
+                filter={shelfFilter}
+                onFilter={setShelfFilter}
+                collapsed={shelfCollapsed}
+                onToggleCollapsed={toggleShelf}
+                intoOf={intoOf}
+                unitOrder={unitOrder}
+                unitNameOf={unitNameOf}
+                selection={pickedSet}
+                onPick={pickPiece}
+                addMode={shelfAddMode}
+                onAddToStep={addPieceToStep}
+                onExitAddMode={exitAddMode}
+                frozen={frozen}
+              />
+            </div>
+
+            {/* ── сплиттер полки ───────────────────────────────────────────────────────────── */}
+            <SplitBar
+              value={shelfH}
+              min={SHELF_MIN}
+              max={SHELF_MAX}
+              // +1: сплиттер стоит ПОД полкой, и движение вниз обязано её растить.
+              dir={1}
+              active={!shelfCollapsed}
+              label='resize the pieces shelf'
+              onLive={(px) => writeTrack('--shelf-h', px)}
+              onCommit={(px) => setPanels({ shelfH: px })}
+              onCollapse={toggleShelf}
+            />
+
             {/* ── сцена ────────────────────────────────────────────────────────────────────── */}
             <div className='relative grid min-h-0 min-w-0'>
               <AssemblyCanvas
@@ -754,35 +1001,19 @@ export function AssemblyFullscreen({
               {sketchNote}
             </div>
 
-            {/* ── сплиттер ─────────────────────────────────────────────────────────────────── */}
-            {/* СВЁРНУТЫЙ ДОК ОСТАВЛЯЕТ СПЛИТТЕР В ГРИДЕ, спрятав его `visibility`. `display:none`
-                убирает грид-ЭЛЕМЕНТ, и все следующие дети съезжают на трек вверх: полотно
-                оказывается в нулевом треке высотой 0px, то есть исчезает. */}
-            <div
-              role='separator'
-              aria-orientation='horizontal'
-              aria-label='resize the step dock'
-              aria-valuenow={dockH}
-              aria-valuemin={DOCK_MIN}
-              aria-valuemax={DOCK_MAX}
-              tabIndex={dockOpen ? 0 : -1}
-              className='group relative cursor-row-resize focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-              style={{ touchAction: 'none', visibility: dockOpen ? undefined : 'hidden' }}
-              onPointerDown={onSplitDown}
-              onPointerMove={onSplitMove}
-              onPointerUp={onSplitUp}
-              onPointerCancel={onSplitUp}
-              onDoubleClick={closeDock}
-              onKeyDown={(e) => {
-                if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-                e.preventDefault();
-                e.stopPropagation();
-                writeDockH(liveH.current + (e.key === 'ArrowUp' ? 12 : -12));
-                setPanels({ dockH: liveH.current });
-              }}
-            >
-              <span className='pointer-events-none absolute left-1/2 top-1/2 h-[3px] w-8 -translate-x-1/2 -translate-y-1/2 border-y border-borderColor transition-colors group-hover:border-textColor' />
-            </div>
+            {/* ── сплиттер дока ────────────────────────────────────────────────────────────── */}
+            <SplitBar
+              value={dockH}
+              min={DOCK_MIN}
+              max={DOCK_MAX}
+              // −1: сплиттер стоит НАД доком, и движение вверх обязано его растить.
+              dir={-1}
+              active={dockOpen}
+              label='resize the step dock'
+              onLive={(px) => writeTrack('--dock-h', px)}
+              onCommit={(px) => setPanels({ dockH: px })}
+              onCollapse={closeDock}
+            />
 
             {/* ── док ──────────────────────────────────────────────────────────────────────── */}
             {/* ОДИН LISTENER `focusin` НА ВЕСЬ ДОК — восьмая точка сброса записи отмены. React
@@ -845,7 +1076,7 @@ export function AssemblyFullscreen({
                   же ввод создал бы `operations.0` в значениях формы МИМО field array. */}
               <fieldset disabled={frozen} className='min-h-0 min-w-0 flex-1 overflow-y-auto p-2'>
                 {!dockOpen ? null : selectedIndex >= 0 && selectedIndex < steps.length ? (
-                  renderDockEditor(flashPieces)
+                  renderDockEditor(armAddMode)
                 ) : (
                   <Text size='micro' variant='label'>
                     the assembly sequence is empty so far — add the first step
@@ -930,8 +1161,7 @@ export function AssemblyFullscreen({
           )}
 
           {/* ── шпаргалка ─────────────────────────────────────────────────────────────────── */}
-          {/* Оверлей-scrim: перекрывает экран целиком и гасится кликом мимо. `[` в ней НЕ значится —
-              полка деталей приедет в Ф5, а обещать мёртвую клавишу хуже, чем молчать. */}
+          {/* Оверлей-scrim: перекрывает экран целиком и гасится кликом мимо. */}
           {helpOpen && (
             <div
               className='absolute inset-0 z-20 flex items-center justify-center bg-overlay p-4'
@@ -964,7 +1194,8 @@ export function AssemblyFullscreen({
                 </dl>
                 <div className='mt-2'>
                   <Text size='micro' variant='label'>
-                    esc closes this; esc again clears the selection, and once more leaves fullscreen
+                    esc closes this; each esc after it drops the top layer — adding pieces, then the
+                    selection, then fullscreen itself
                   </Text>
                 </div>
               </div>
@@ -995,6 +1226,129 @@ export function AssemblyFullscreen({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/**
+ * ПОЛОСА-СПЛИТТЕР ПАНЕЛИ — одна на обе панели экрана.
+ *
+ * У дока и полки различаются ровно три вещи: знак движения (`dir`), кламп и то, что делает двойной
+ * клик. Всё остальное — захват указателя, живая запись высоты в CSS-переменную грида мимо React,
+ * стрелки с шагом 12px, фокус-кольцо, `aria` — обязано быть ОДНИМ кодом: два экземпляра этой
+ * механики уже разошлись однажды (`aria-valuenow` дока не обновлялся во время перетаскивания), и
+ * второй экземпляр расходится ровно так же, только позже.
+ *
+ * СВЁРНУТАЯ ПАНЕЛЬ ОСТАВЛЯЕТ ПОЛОСУ В ГРИДЕ, спрятав её `visibility`. `display:none` убирает
+ * грид-ЭЛЕМЕНТ, и все следующие дети съезжают на трек вверх: полотно оказывается в нулевом треке
+ * высотой 0px, то есть исчезает.
+ */
+function SplitBar({
+  value,
+  min,
+  max,
+  dir,
+  active,
+  label,
+  onLive,
+  onCommit,
+  onCollapse,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  /** Знак, переводящий движение указателя ВНИЗ в прирост высоты: −1 для панели под полосой, +1 — над. */
+  dir: 1 | -1;
+  /** Панель развёрнута. У свёрнутой полоса остаётся в гриде, но жеста и фокуса у неё нет. */
+  active: boolean;
+  label: string;
+  /** Живая высота — прямо в стиль грида, мимо состояния. */
+  onLive: (px: number) => void;
+  /** Отпустили: высота уходит в предпочтения. */
+  onCommit: (px: number) => void;
+  /** Двойной клик по полосе. */
+  onCollapse: () => void;
+}) {
+  const elRef = useRef<HTMLDivElement>(null);
+  const gesture = useRef<{ pointerId: number; fromY: number; base: number } | null>(null);
+  const live = useRef(value);
+  // ВНЕ ЖЕСТА ЖИВОЕ ЧИСЛО СЛЕДУЕТ ЗА КОММИТОМ: высоту меняет не только эта полоса (стрелки, чужая
+  // вкладка, дефолт после чтения хранилища), и жест, стартовавший с устаревшей базы, прыгнул бы на
+  // первом же движении.
+  if (!gesture.current) live.current = value;
+
+  // ФОКУС НЕ ИМЕЕТ ПРАВА ПРОВАЛИТЬСЯ В BODY, и это не про вежливость. Свёртка прячет полосу
+  // `visibility:hidden`, а спрятанный элемент фокус не держит: браузер отдаёт его `<body>` — то
+  // есть ЗА пределы `Dialog.Content`, на котором висит роутер клавиш. Замерено на стенде: `[` с
+  // фокусом на полосе сворачивал полку и дальше не работала НИ ОДНА клавиша экрана, пока не
+  // кликнешь внутрь. Возвращаем фокус контенту диалога — туда же, куда его ставит Radix на входе.
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
+    const lost = wasActive.current && !active;
+    wasActive.current = active;
+    if (!lost) return;
+    const el = elRef.current;
+    const a = document.activeElement;
+    // Фокус уже забрал кто-то живой — отбирать его не за что.
+    if (a && a !== el && a !== document.body) return;
+    (el?.closest('[role="dialog"]') as HTMLElement | null)?.focus();
+  }, [active]);
+
+  const write = (px: number) => {
+    const v = Math.min(max, Math.max(min, px));
+    live.current = v;
+    // `aria-valuenow` — ЖИВОЙ, и пишется он руками. React-атрибутом он обновлялся бы только на
+    // коммите: высота во время жеста идёт мимо состояния, рендера нет, и скринридер всё
+    // перетаскивание читал бы число, с которого начали. React перезапишет атрибут своим значением
+    // на первом же рендере с ИЗМЕНИВШИМСЯ `value` — то есть ровно после коммита.
+    elRef.current?.setAttribute('aria-valuenow', String(v));
+    onLive(v);
+  };
+
+  const endGesture = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    if (!g || e.pointerId !== g.pointerId) return;
+    gesture.current = null;
+    onCommit(live.current);
+  };
+
+  return (
+    <div
+      ref={elRef}
+      role='separator'
+      aria-orientation='horizontal'
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      tabIndex={active ? 0 : -1}
+      className='group relative cursor-row-resize focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+      style={{ touchAction: 'none', visibility: active ? undefined : 'hidden' }}
+      onPointerDown={(e) => {
+        if (!active || e.button !== 0) return;
+        gesture.current = { pointerId: e.pointerId, fromY: e.clientY, base: live.current };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        e.preventDefault();
+      }}
+      onPointerMove={(e) => {
+        const g = gesture.current;
+        if (!g || e.pointerId !== g.pointerId) return;
+        write(g.base + dir * (e.clientY - g.fromY));
+      }}
+      onPointerUp={endGesture}
+      onPointerCancel={endGesture}
+      onDoubleClick={onCollapse}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        // Стрелки принадлежат полосе, пока фокус на ней: без остановки они дошли бы до роутера
+        // фулскрина и двигали бы выбранные ноды, пока человек меняет высоту панели.
+        e.preventDefault();
+        e.stopPropagation();
+        write(live.current + dir * (e.key === 'ArrowDown' ? 12 : -12));
+        onCommit(live.current);
+      }}
+    >
+      <span className='pointer-events-none absolute left-1/2 top-1/2 h-[3px] w-8 -translate-x-1/2 -translate-y-1/2 border-y border-borderColor transition-colors group-hover:border-textColor' />
+    </div>
   );
 }
 
