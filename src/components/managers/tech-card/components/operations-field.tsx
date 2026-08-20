@@ -4163,7 +4163,7 @@ export function OperationsField({
                   onHoverPin={(n) => onActivePinChange?.(n)}
                   onDropPiece={addInputToOperation}
                   // Перестановка остаётся МУТАТОРОМ ЭТОГО ФАЙЛА: гейт `frozen`, ремап
-                  // issues[].operationNumber и сброс записи отмены (3/9) стоят у него.
+                  // issues[].operationNumber и сброс формовой истории (3/10) стоят у него.
                   onMoveOperation={moveOperation}
                   readPieceDrag={readPieceDrag}
                 />
