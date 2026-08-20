@@ -911,9 +911,13 @@ export function AssemblyFullscreen({
 
   /**
    * Клик по плитке полки ВНЕ режима добора: выбрать и довести панорамой. Ровно то же, что делает
-   * find-палитра, и той же ручкой — доводка МИНИМАЛЬНЫМ сдвигом. Выбирается ТОЛЬКО то, что на
-   * столе: съеденная деталь входом не годится, и эффект очистки выбора всё равно выбросил бы её
-   * следующим кадром — мигание вместо ответа. Довести до глаз при этом можно любую.
+   * find-палитра, и той же ручкой — доводка МИНИМАЛЬНЫМ сдвигом.
+   *
+   * ВЫБИРАЕТСЯ ЛЮБАЯ, а не только лежащая на столе. Прежний гейт стоял здесь по двум причинам, и
+   * обе перестали быть правдой: съеденная деталь входом действительно не годится — но выделение
+   * больше не «входы следующего жеста», а презентация (R10); и эффект очистки выбора её больше не
+   * выбрасывает следующим кадром. Оставленный гейт означал бы, что клик по съеденной плитке возит
+   * панораму, ничего не подсвечивая, — то есть молча не отвечает на «где она».
    */
   const pickPiece = useCallback(
     (lineKey: string) => {
@@ -921,40 +925,63 @@ export function AssemblyFullscreen({
       // ретаргетит и совместимостные мышиные события, — и без гашения жест «утащил деталь на
       // полотно» кончался бы ещё и сменой выделения с доводкой панорамой.
       if (takeTileClickEcho()) return;
-      if (onTable.has(lineKey)) setPicked([lineKey]);
+      setPicked([lineKey]);
       canvasRef.current?.reveal(lineKey);
     },
-    [onTable, takeTileClickEcho],
+    [takeTileClickEcho],
   );
+
+  /**
+   * ОГРАНКА ВЫДЕЛЕНИЯ ЖИВЁТ ЗДЕСЬ, У ГЛАГОЛОВ, а не на маркизе. Рамка берёт что угодно — выделение
+   * стало презентацией (R10), потому что на собранной карточке фронтир схлопывается почти в одну
+   * ноду и «выделить несколько блоков» было невозможно физически. Но ВХОДОМ съеденная нода не
+   * годится: это правило 2 движка, и сервер отвергнет такой шаг. Значит глагол обязан взять ту
+   * часть выделения, что лежит на столе, и про остальную сказать словами — теми же, которыми
+   * считает полоса выбора («N already in units»).
+   */
+  const freeOfPicked = useCallback(() => picked.filter((k) => onTable.has(k)), [picked, onTable]);
 
   const sewSelection = useCallback(() => {
     if (frozen) {
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    if (picked.length < 2) {
+    const free = freeOfPicked();
+    const spent = picked.length - free.length;
+    if (free.length < 2) {
+      const areIn = `${spent} of the picked ${spent === 1 ? 'is' : 'are'} already in units`;
       showMessage(
-        'a unit needs at least two nodes picked — draw a marquee or click their heads',
+        spent
+          ? `a unit needs two nodes still on the table — ${areIn}`
+          : 'a unit needs at least two nodes picked — draw a marquee or click their heads',
         'error',
       );
       return;
     }
-    setPendingCreate({ inputKeys: picked, intent: 'unit' });
+    setPendingCreate({ inputKeys: free, intent: 'unit' });
     setPicked([]);
-  }, [frozen, picked, setPendingCreate, showMessage]);
+  }, [frozen, picked, freeOfPicked, setPendingCreate, showMessage]);
 
   const processSelection = useCallback(() => {
     if (frozen) {
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    if (picked.length === 0) {
-      showMessage('pick a piece or a unit first', 'error');
+    const free = freeOfPicked();
+    const spent = picked.length - free.length;
+    if (free.length === 0) {
+      const nodes = `${spent} ${spent === 1 ? 'node' : 'nodes'}`;
+      showMessage(
+        spent
+          ? `everything picked is already in units — ${nodes}, and none of them can be an input`
+          : 'pick a piece or a unit first',
+        'error',
+      );
       return;
     }
-    setPendingCreate({ inputKeys: picked, intent: 'process' });
+    setPendingCreate({ inputKeys: free, intent: 'process' });
     setPicked([]);
-  }, [frozen, picked, setPendingCreate, showMessage]);
+  }, [frozen, picked, freeOfPicked, setPendingCreate, showMessage]);
 
   const dissolveSelection = useCallback(() => {
     if (frozen) {
@@ -963,7 +990,7 @@ export function AssemblyFullscreen({
     }
     // ТОТ ЖЕ ГЕЙТ, ЧТО У КНОПКИ В БОКСЕ: ровно один узел, и он на столе. В прототипе это был
     // починенный дефект — клавиша растворяла произвольного члена маркизы.
-    const free = picked.filter((k) => onTable.has(k));
+    const free = freeOfPicked();
     if (free.length !== 1 || !res.units.has(free[0])) {
       showMessage(
         'dissolve needs exactly one unit picked, and it must still be on the table',
@@ -978,7 +1005,7 @@ export function AssemblyFullscreen({
     }
     dissolveUnit(block.producedAt);
     setPicked([]);
-  }, [frozen, picked, onTable, res, blocks, dissolveUnit, showMessage]);
+  }, [frozen, freeOfPicked, res, blocks, dissolveUnit, showMessage]);
 
   const undo = useCallback(() => {
     // Гейт стоит и здесь, и внутри `onUndo`: молчаливый выход мутатора отказом не является, а
@@ -1050,12 +1077,18 @@ export function AssemblyFullscreen({
       const hit = findHits[i];
       if (!hit) return;
       setFindOpen(false);
-      // ВЫБИРАЕТСЯ ТОЛЬКО ТО, ЧТО НА СТОЛЕ. Съеденная деталь и хвостовой бокс входами не годятся, и
-      // эффект очистки выбора всё равно выбросил бы их следующим кадром — мигание вместо ответа.
-      if (onTable.has(hit.key)) setPicked([hit.key]);
+      // ВЫБИРАЕТСЯ ЛЮБАЯ НАЙДЕННАЯ НОДА, включая съеденную: выделение — презентация (R10), и его
+      // единственная работа здесь — ответить «вот она». Прежний гейт по фронтиру оставлял самый
+      // обидный случай палитры без ответа вовсе: нашли то, что и так на экране, панорама не
+      // двинулась, подсветки нет — и человек не знает, нашлось ли хоть что-нибудь.
+      //
+      // КРОМЕ ХВОСТОВОГО БОКСА: узлом он не является, его ключ пуст, и в выделении пустой ключ
+      // заставил бы полосу выбора сказать про него «already in units» — то есть соврать. Довести
+      // до глаз панорамой его при этом можно, и это ровно то, зачем его ищут.
+      if (hit.key) setPicked([hit.key]);
       canvasRef.current?.reveal(hit.key);
     },
-    [findHits, onTable],
+    [findHits],
   );
 
   // --- сплиттеры панелей --------------------------------------------------------------------------
@@ -1137,7 +1170,13 @@ export function AssemblyFullscreen({
       }
       if (k === 'a') {
         if (isTextField(e.target)) return; // в поле — выделить текст
-        setPicked([...res.frontier]); // всё, что на столе
+        // «ВЫДЕЛИТЬ ВСЁ» ЗНАЧИТ ВСЁ. Раньше здесь стоял фронтир — «всё, что на столе», — под
+        // прежний контракт «выделение = входы следующего жеста». На собранной карточке фронтир это
+        // одна нода, и ⌘A выделял одну ноду из четырёх: ровно та же поломка, что была у маркизы,
+        // только другим органом. Состав нод знает раскладка, поэтому спрашиваем полотно.
+        // В списке полотна нет и ручка пуста — там остаётся стол, единственное, что можно назвать
+        // без раскладки.
+        setPicked(canvasRef.current?.nodeKeys() ?? [...res.frontier]);
         e.preventDefault();
         return;
       }

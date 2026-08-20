@@ -160,6 +160,12 @@ export type CanvasHandle = {
   /** Инструмент клавишами `v`/`h`. Кнопки HUD зовут то же состояние. */
   setTool: (tool: 'select' | 'hand') => void;
   /**
+   * ВСЕ НОДЫ ПОЛОТНА — детали, потом узлы, в порядке раскладки. Нужна ⌘A: «выделить всё» обязано
+   * значить ВСЁ, включая поглощённое (выделение — презентация, R10), а состав нод знает раскладка,
+   * живущая здесь. Хвостовой бокс не входит: узлом он не является, и выделять его нечем.
+   */
+  nodeKeys: () => string[];
+  /**
    * Сдвинуть выделение стрелками. Мимо формы — это раскладка, а не данные; и мимо фулскрина —
    * координаты нод знает только раскладка, живущая здесь.
    */
@@ -273,15 +279,27 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   const toggle = (key: string) =>
     onPicked(picked.includes(key) ? picked.filter((k) => k !== key) : [...picked, key]);
 
-  // ВЫБОР ЖИВЁТ, ПОКА ЖИВЫ ЕГО КЛЮЧИ — тот же инвариант, что у инлайна: деталь, съеденная соседним
-  // жестом, входом больше не годится.
-  useEffect(() => {
-    const live = picked.filter((k) => res.frontier.includes(k));
-    if (live.length !== picked.length) onPicked(live);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [res]);
+  /**
+   * ЧАСТЬ ВЫДЕЛЕНИЯ, ГОДНАЯ ВО ВХОДЫ. Выделять можно ЧТО УГОДНО (выделение — презентация, R10), а
+   * собирать — только со стола: съеденная нода входом не годится, это правило 2 движка. Огранка
+   * стоит здесь, у глаголов и чипов, а не на маркизе: на собранной карточке фронтир схлопывается
+   * почти в одну ноду, и фильтр на маркизе делал «выделить несколько блоков» невозможным физически.
+   */
+  const pickedFree = picked.filter((k) => onTable.has(k));
 
   const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+
+  // ВЫБОР ЖИВЁТ, ПОКА ЖИВА САМА НОДА, а не пока она на столе. Раньше здесь стоял фильтр по
+  // фронтиру — под прежний контракт «выделение = входы следующего жеста». Контракт отменён:
+  // выделение стало презентацией, и съеденная нода вправе остаться выделенной — она никуда с
+  // полотна не делась. Выбрасывать надо только то, чего БОЛЬШЕ НЕТ: деталь, ушедшую из рецепта, и
+  // узел, растворённый соседним жестом. Множество живых нод — это ровно то, что нарисовала
+  // раскладка, поэтому спрашиваем её, а не пересчитываем состав деталей второй формулой.
+  useEffect(() => {
+    const live = picked.filter((k) => auto.byKey.has(k) || auto.tileByKey.has(k));
+    if (live.length !== picked.length) onPicked(live);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto]);
 
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -302,15 +320,13 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   // их на каждое движение мыши значило бы снимать и вешать четыре подписки шестьдесят раз в секунду.
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
-  // По той же причине — выбор, его писатель, писатель позиций и фронтир.
+  // По той же причине — выбор, его писатель и писатель позиций.
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
   const onPickedRef = useRef(onPicked);
   onPickedRef.current = onPicked;
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
-  const onTableRef = useRef(onTable);
-  onTableRef.current = onTable;
 
   const empty = layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail;
 
@@ -386,8 +402,13 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    * Наверх уходит ТОЛЬКО СМЕНА НАБОРА: `onPicked` перерисовывает весь фулскрин, а рамка ползёт по
    * пустой земле большую часть жеста.
    *
-   * Фильтр по фронтиру — тот же инвариант, что у эффекта очистки выбора ниже: съеденная деталь
-   * входом не годится, и мигать ею в полосе выбора нечестно.
+   * ФИЛЬТРА ПО ФРОНТИРУ ЗДЕСЬ БОЛЬШЕ НЕТ, и это отмена прежнего контракта, а не его нарушение.
+   * Рамка брала только то, что лежит на столе, потому что выделение задумывалось как «входы
+   * следующего жеста». На собранной карточке фронтир схлопывается почти в одну ноду — и «выделить
+   * несколько блоков» становилось невозможным ФИЗИЧЕСКИ, при том что подсказка продолжала звать
+   * тащить рамку поверх нод. Выделение теперь презентация (R10): рамка берёт всё, что накрыла, а
+   * годность во входы проверяют глаголы и чипы — там же, где жест исполняется, и там же, где
+   * отказ можно произнести словами движка.
    */
   const applyMarquee = useCallback(() => {
     const m = marqueeRef.current;
@@ -399,9 +420,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       w: Math.abs(m.x1 - m.x0),
       h: Math.abs(m.y1 - m.y0),
     };
-    const hits = marqueeHits(rect, [...eff.boxes, ...eff.tiles]).filter((k) =>
-      onTableRef.current.has(k),
-    );
+    const hits = marqueeHits(rect, [...eff.boxes, ...eff.tiles]);
     const next = m.add ? [...m.base, ...hits.filter((k) => !m.base.includes(k))] : hits;
     // Сравнение поэлементное, а не по склейке: ключ детали приходит из чертежа и любой разделитель
     // содержать вправе, а склейка с общим разделителем склеила бы два разных набора в один.
@@ -902,6 +921,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       },
       setSpaceHand: setSpaceHeld,
       setTool,
+      nodeKeys: () => [...layoutRef.current.tileByKey.keys(), ...layoutRef.current.byKey.keys()],
       nudge: (dx, dy) => {
         const eff = layoutRef.current;
         for (const k of pickedRef.current) {
@@ -1442,10 +1462,13 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     if (parts) bits.push(`${parts} ${parts === 1 ? 'piece' : 'pieces'}`);
     if (units) bits.push(`${units} ${units === 1 ? 'unit' : 'units'}`);
     const spent = keys.length - free.length;
-    return (
-      (bits.length ? `picked: ${bits.join(' · ')}` : 'picked: nothing that can be taken') +
-      (spent ? ` · ${spent} already in units` : '')
-    );
+    // «NOTHING THAT CAN BE TAKEN» ЗДЕСЬ БОЛЬШЕ НЕ ГОВОРИТСЯ. С тех пор как рамка берёт что угодно,
+    // эта фраза стала прямой ложью: ноды ВЗЯТЫ, они обведены на полотне и их видно. Не годятся они
+    // только во ВХОДЫ — и ровно это надо сказать, теми же словами, которыми движок отказывает.
+    if (!bits.length) {
+      return `picked: ${keys.length} already in units — nothing here can be an input`;
+    }
+    return `picked: ${bits.join(' · ')}` + (spent ? ` · ${spent} already in units` : '');
   };
 
   const hintText = (() => {
@@ -1473,11 +1496,34 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   // Полотно ушло — подсказка не имеет права остаться висеть в хроме.
   useEffect(() => () => onHint(null), [onHint]);
 
+  /**
+   * РАМКА НОДЫ — ТРИ СОСТОЯНИЯ, ТРИ РАЗНЫХ РАМКИ. Приоритет: цель живого жеста > выделение > ховер.
+   *
+   * До этой правки выделение не рисовало НИЧЕГО: единственным его признаком был фон шапки
+   * `bg-bgZebra` — тот же самый цвет, которым красится шапка под курсором. Замерено: контраст
+   * «выделено» ↔ «под курсором» = 1.000, то есть буквально один цвет, и выделенный блок выглядел
+   * как случайно задетый мышью, только хуже — у задетого хотя бы была обводка.
+   *
+   * ПОЧЕМУ РАМКИ РАЗНЫЕ, А НЕ РАЗНОГО ЦВЕТА. Монохром: состояние никогда не несётся одним цветом.
+   * Различают толщина и штрих:
+   *   ховер     1px сплошная  — самое мимолётное: курсор ушёл, и её нет;
+   *   выделение 2px ПУНКТИР   — пунктиром нарисована и сама рамка маркизы, поэтому её улов носит
+   *                             тот же штрих: «это то, что забрала рамка»;
+   *   цель жеста 2px сплошная — утверждение о том, что произойдёт по отпусканию, и оно сильнее
+   *                             всего остального; отказ — тем же весом, но `outline-error`.
+   *
+   * ВНУТРЬ ОБЩИХ ВЬЮШЕК НОД ЭТО НЕ УЕЗЖАЕТ: там уже стоит `ringClassName`, и второй источник
+   * outline-классов дрался бы с ним за одно и то же свойство непредсказуемым порядком. Приоритет
+   * живёт здесь, у родителя, потому что знание про жест — тоже здесь.
+   */
   const nodeRing = (key: string) => {
     if (target?.key === key && verdict) {
       return verdict.ok
         ? 'outline outline-2 outline-offset-2 outline-textColor'
         : 'outline outline-2 outline-offset-2 outline-error';
+    }
+    if (picked.includes(key)) {
+      return 'outline-dashed outline-2 outline-offset-2 outline-textColor';
     }
     return hovered === key ? 'outline outline-1 outline-offset-2 outline-textColor' : undefined;
   };
@@ -1760,36 +1806,45 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 {clothLine(picked.filter((k) => !res.units.has(k)))}
               </Text>
             )}
-            {!frozen && picked.length >= 2 && (
+            {/* ЧИПЫ СЧИТАЮТ И БЕРУТ `pickedFree`, А НЕ ВЕСЬ ВЫБОР. С тех пор как рамка берёт что
+                угодно, в выделении законно лежат съеденные ноды — входами они не годятся (правило 2
+                движка), и передать их в диалог значило бы собрать форму, которую сервер отвергнет.
+                Число на чипе поэтому равно тому, что он ДЕЙСТВИТЕЛЬНО возьмёт, а про разницу
+                говорит предложение слева: «N already in units». Когда брать нечего, чипа нет
+                вовсе — по той же причине, что и на выпущенной карточке: кнопка, которая молча
+                выбросит заполненную форму, хуже отсутствующей кнопки. */}
+            {!frozen && pickedFree.length >= 2 && (
               <Chip
                 onClick={() => {
-                  onCreate({ inputKeys: picked, intent: 'unit' });
+                  onCreate({ inputKeys: pickedFree, intent: 'unit' });
                   onPicked([]);
                 }}
                 title='assemble a new unit from the selection (u)'
               >
-                join · {picked.length}
+                join · {pickedFree.length}
               </Chip>
             )}
-            {!frozen && (
+            {!frozen && pickedFree.length > 0 && (
               <Chip
                 dashed
                 onClick={() => {
-                  onCreate({ inputKeys: picked, intent: 'process' });
+                  onCreate({ inputKeys: pickedFree, intent: 'process' });
                   onPicked([]);
                 }}
                 title='a step on the selection that assembles nothing (o)'
               >
-                processing · {picked.length}
+                processing · {pickedFree.length}
               </Chip>
             )}
             {/* РАСТВОРИТЬ — гейт тот же, что у клавиши `d` и у кнопки в боксе: ровно один узел, и
-                он на столе. Полотно только зовёт мутатор; отказы формулирует клавиша. */}
-            {!frozen && picked.length === 1 && res.units.has(picked[0]) && (
+                он НА СТОЛЕ. Проверка стола здесь не украшение: выделение больше не ограничено
+                фронтиром, и без неё чип предлагал бы растворить уже съеденный узел — ровно то, что
+                клавиша `d` отказывается делать словами. */}
+            {!frozen && pickedFree.length === 1 && res.units.has(pickedFree[0]) && (
               <Chip
                 dashed
                 onClick={() => {
-                  const b = blocks.find((x) => x.key === picked[0]);
+                  const b = blocks.find((x) => x.key === pickedFree[0]);
                   if (!b) return;
                   onDissolve(b.producedAt);
                   onPicked([]);
