@@ -362,7 +362,7 @@ console.log('\nmakeRowY — строка бокса, а не бокс');
 {
   const { HEAD_H, LINE_H } = METRICS;
   const box = { key: 'S', x: 100, y: 40, w: 180, h: 90 };
-  const layout = { byKey: new Map([['S', box]]), tail: undefined, tiles: [] };
+  const layout = { byKey: new Map([['S', box]]), tail: undefined, tiles: [], tailSteps: [] };
   const blocks = [blk('S', [3, 7, 9])];
   const rowY = makeRowY(blocks, layout);
   ck(rowY('S', 3) === 40 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2, 'первая строка', String(rowY('S', 3)));
@@ -371,12 +371,29 @@ console.log('\nmakeRowY — строка бокса, а не бокс');
   ck(rowY('NOPE', 3) === 0, 'бокса нет в раскладке — 0', String(rowY('NOPE', 3)));
 
   const tail = { key: '', x: 500, y: 16, w: 180, h: 70 };
-  const withTail = { byKey: new Map(), tail, tiles: [] };
+  const withTail = { byKey: new Map(), tail, tiles: [], tailSteps: [4] };
   const rowYTail = makeRowY([blk('', [4])], withTail);
   ck(
     rowYTail('', 4) === 16 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2,
     'хвост ищется полем tail, а не byKey',
     String(rowYTail('', 4)),
+  );
+
+  // ХВОСТ СЧИТАЕТСЯ ПО `tailSteps`, А НЕ ПО СВОЕМУ БЛОКУ. Блок хвоста по-прежнему держит ВСЕ
+  // шаги вне узлов, включая обработки, уехавшие на плитки своих деталей: атрибуция намеренно не
+  // тронута. Считай провод по блоку — и он целился бы в строку, сдвинутую на все уехавшие, то
+  // есть мимо всех оставшихся.
+  const trimmed = { byKey: new Map(), tail, tiles: [], tailSteps: [7] };
+  const rowYTrim = makeRowY([blk('', [4, 7])], trimmed);
+  ck(
+    rowYTrim('', 7) === 16 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2,
+    'уехавшая на плитку строка не сдвигает оставшуюся',
+    String(rowYTrim('', 7)),
+  );
+  ck(
+    rowYTrim('', 4) === 16 + HEAD_H / 2,
+    'шага, уехавшего на плитку, в хвосте нет — центр шапки',
+    String(rowYTrim('', 4)),
   );
 }
 
@@ -410,6 +427,7 @@ console.log('\nbuildWires — из правого края источника в
     ]),
     tail: undefined,
     tiles: [tile, free],
+    tailSteps: [],
   };
   const rowY = makeRowY(blocks, layout);
   const wires = buildWires(blocks, steps, layout, rowY);
@@ -446,12 +464,17 @@ console.log('\nbuildWires — из правого края источника в
   ck(w2[w2.length - 1].faint === true, 'съедена не здесь — бледный провод', JSON.stringify(w2[w2.length - 1]));
 
   // Бокса нет в раскладке — провод не рисуется вовсе, а не целится в нули.
-  const noBox = buildWires(blocks, steps, { byKey: new Map([['SHELL', shell]]), tail: undefined, tiles: [] }, rowY);
+  const noBox = buildWires(
+    blocks,
+    steps,
+    { byKey: new Map([['SHELL', shell]]), tail: undefined, tiles: [], tailSteps: [] },
+    rowY,
+  );
   ck(noBox.length === 0, 'нет бокса потребителя — провода нет', JSON.stringify(noBox));
   const noSource = buildWires(
     blocks,
     steps,
-    { byKey: new Map([['GARMENT', garment]]), tail: undefined, tiles: [] },
+    { byKey: new Map([['GARMENT', garment]]), tail: undefined, tiles: [], tailSteps: [] },
     rowY,
   );
   ck(noSource.length === 0, 'нет бокса источника — провода нет', JSON.stringify(noSource));
@@ -477,6 +500,39 @@ console.log('\nbuildWires — из правого края источника в
   // Хвостовой блок источником проводов не бывает: узлом он не является.
   const w5 = buildWires([blk('', [0])], selfSteps, { ...layout, tiles: [] }, rowY);
   ck(w5.length === 0, 'хвост не тянет проводов от себя', JSON.stringify(w5));
+
+  // ПРОВОД ВЫХОДИТ ИЗ СЕРЕДИНЫ ГОЛОВЫ ПЛИТКИ, А НЕ ИЗ СЕРЕДИНЫ ПЛИТКИ. Высота выросла под
+  // строки обработки, и точка выхода, посчитанная по ней, уехала бы к строкам — провод целился
+  // бы в деталь мимо детали.
+  const grown = { ...tile, h: METRICS.TILE + 2 * METRICS.PROC_ROW_H, processing: [0] };
+  const wg = buildWires(blocks, steps, { ...layout, tiles: [grown] }, rowY);
+  ck(
+    wg[wg.length - 1].d.startsWith(`M${grown.x + grown.w},${grown.y + METRICS.TILE / 2} `),
+    'провод детали выходит из середины ГОЛОВЫ, а не выросшей плитки',
+    wg[wg.length - 1].d,
+  );
+
+  // ШАГ, УЕХАВШИЙ НА ПЛИТКУ, ИЗ ХВОСТА УШЁЛ — и провода в несуществующую строку быть не должно.
+  // Блок хвоста про переезд не знает: атрибуция шагов намеренно осталась прежней.
+  const looseStep = [step([['piece', 'CUF']])];
+  const looseTile = { key: 'CUF', x: -60, y: 0, w: 52, h: 60, state: 'free', into: '', consumers: [0], processing: [0] };
+  const tailBox = { key: '', x: 400, y: 16, w: 180, h: 68 };
+  const wt = buildWires(
+    [blk('', [0])],
+    looseStep,
+    { byKey: new Map(), tail: tailBox, tiles: [looseTile], tailSteps: [] },
+    makeRowY([blk('', [0])], { byKey: new Map(), tail: tailBox, tiles: [], tailSteps: [] }),
+  );
+  ck(wt.length === 0, 'провода в строку, уехавшую на плитку, нет', JSON.stringify(wt.map((w) => w.key)));
+
+  // А оставшийся в хвосте шаг провод получает как прежде: правило снимает лишнее, а не всё.
+  const stays = buildWires(
+    [blk('', [0])],
+    looseStep,
+    { byKey: new Map(), tail: tailBox, tiles: [{ ...looseTile, processing: [] }], tailSteps: [0] },
+    makeRowY([blk('', [0])], { byKey: new Map(), tail: tailBox, tiles: [], tailSteps: [0] }),
+  );
+  ck(stays.length === 1, 'оставшийся в хвосте шаг провод получает', JSON.stringify(stays.map((w) => w.key)));
 }
 
 console.log(bad === 0 ? '\nвсё сошлось' : `\nрасхождений: ${bad}`);

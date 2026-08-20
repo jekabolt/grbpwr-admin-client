@@ -144,7 +144,6 @@ export function AssemblySchematic({
   // Живые УЗЛЫ фронтира (детали на столе — не узлы). Ровно та величина, которой рельс решает,
   // сошёлся ли граф: правило выпуска требует РОВНО ОДИН терминал.
   const liveUnits = res.frontier.filter((k) => res.units.has(k));
-  const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
   // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
   // больше не годится, а чип «выбрано: A» продолжал бы предлагать её — и «обработка · 1» родила бы
@@ -681,7 +680,10 @@ export function AssemblySchematic({
           {layout.tail && (
             <TailBoxView
               tail={layout.tail}
-              looseSteps={looseSteps}
+              // СТРОКИ БЕРУТСЯ У РАСКЛАДКИ, а не у хвостового псевдоблока: она одна знает,
+              // какие обработки уехали на плитки своих деталей, и высоту коробки отмерила
+              // ровно по этому списку.
+              tailSteps={layout.tailSteps}
               smvOfBlock={smvOfBlock}
               labelOf={labelOf}
               dragging={drag?.key === '' && drag.started}
@@ -711,6 +713,7 @@ export function AssemblySchematic({
               name={pieceNameOf(t.key)}
               pieceShapes={pieceShapes}
               cloth={cloth}
+              labelOf={labelOf}
               picked={picked.includes(t.key)}
               dragging={drag?.key === t.key && drag.started}
               ringClassName={nodeRing(t.key)}
@@ -728,6 +731,9 @@ export function AssemblySchematic({
               )}
               dragProps={dragHandlers(t.key, t.x, t.y)}
               hoverProps={hoverHandlers(t.key)}
+              // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
+              // способа открыть шаг в системе заводить нельзя.
+              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
             />
           ))}
         </div>

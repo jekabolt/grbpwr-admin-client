@@ -141,8 +141,12 @@ export function makeRowY(
   return (blockKey: string, stepIndex: number): number => {
     const box = boxOfBlock(layout, blockKey);
     if (!box) return 0;
-    const b = blocks.find((x) => x.key === blockKey);
-    const pos = b ? b.steps.indexOf(stepIndex) : -1;
+    // ХВОСТ СЧИТАЕТСЯ ПО `tailSteps`, А НЕ ПО СВОЕМУ БЛОКУ. Обработка одной детали уехала на
+    // её плитку, и в хвосте её строки больше нет; блок про это не знает — атрибуция шагов
+    // намеренно осталась прежней. Считай провод по блоку — и он целился бы в строку, сдвинутую
+    // на все уехавшие, то есть мимо всех оставшихся.
+    const rows = blockKey === '' ? layout.tailSteps : (blocks.find((x) => x.key === blockKey)?.steps ?? []);
+    const pos = rows.indexOf(stepIndex);
     if (pos < 0) return box.y + HEAD_H / 2;
     return box.y + HEAD_H + 2 + pos * LINE_H + LINE_H / 2;
   };
@@ -209,6 +213,10 @@ export function buildWires(
     for (const i of t.consumers) {
       const target = blockOfStep.get(i);
       if (target === undefined) continue;
+      // ШАГ, УЕХАВШИЙ НА ПЛИТКУ, В ХВОСТЕ БОЛЬШЕ НЕ РИСУЕТСЯ — и провод в него вёл бы в
+      // строку, которой там нет: `blocks` про переезд не знает (атрибуция намеренно не
+      // тронута), знает только раскладка, и спрашивать надо её.
+      if (target === '' && !layout.tailSteps.includes(i)) continue;
       const to = boxOfBlock(layout, target);
       if (!to) continue;
       const eatenHere = t.state === 'eaten' && t.into === target;
@@ -216,7 +224,10 @@ export function buildWires(
         key: `tile:${t.key}->${target}:${i}`,
         from: t.key,
         to: target,
-        d: wire(t.x + t.w, t.y + t.h / 2, to.x, rowY(target, i)),
+        // ИЗ СЕРЕДИНЫ ГОЛОВЫ, А НЕ ИЗ СЕРЕДИНЫ ПЛИТКИ: у плитки с обработками высота выросла
+        // под её собственные строки, и точка выхода уехала бы к ним — провод целился бы в
+        // деталь мимо детали.
+        d: wire(t.x + t.w, t.y + SCHEMATIC_METRICS.TILE / 2, to.x, rowY(target, i)),
         // Вошла в узел — полный провод; просто обработана этим шагом — бледный пунктир: связь
         // есть, но деталь осталась на столе, и путать одно с другим нельзя.
         faint: !eatenHere,
@@ -522,7 +533,7 @@ export function UnitBoxView({
  */
 export function TailBoxView({
   tail,
-  looseSteps,
+  tailSteps,
   smvOfBlock,
   labelOf,
   dragging,
@@ -532,8 +543,13 @@ export function TailBoxView({
   stepProps,
 }: {
   tail: BoxLayout;
-  /** Индексы шагов вне узлов, в порядке последовательности. */
-  looseSteps: number[];
+  /**
+   * Строки, которые хвост РИСУЕТ, — `SchematicLayout.tailSteps`, а не `steps` хвостового
+   * псевдоблока. Разница ровно в обработках, уехавших на плитки своих деталей: высоту коробки
+   * раскладка отмерила по первому списку, и нарисуй вьюшка второй — лишняя строка легла бы
+   * поверх подвала (замерено: две строки в коробке, отмеренной на одну).
+   */
+  tailSteps: number[];
   smvOfBlock: Map<string, string>;
   labelOf: (index: number) => string;
   dragging: boolean;
@@ -573,7 +589,7 @@ export function TailBoxView({
           the step's target isn't a unit
         </Text>
       </div>
-      {looseSteps.map((i) => (
+      {tailSteps.map((i) => (
         <div
           key={i}
           {...stepProps(i)}
@@ -591,7 +607,7 @@ export function TailBoxView({
         style={{ height: FOOT_H }}
       >
         <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-          {looseSteps.length} {looseSteps.length === 1 ? 'step' : 'steps'}
+          {tailSteps.length} {tailSteps.length === 1 ? 'step' : 'steps'}
         </Text>
         {smvOfBlock.get('') && (
           <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
@@ -622,12 +638,14 @@ export function TileView({
   name,
   pieceShapes,
   cloth,
+  labelOf,
   picked,
   dragging,
   ringClassName,
   organProps,
   dragProps,
   hoverProps,
+  stepProps,
 }: {
   tile: TileLayout;
   /** Человеческое имя детали. */
@@ -635,21 +653,25 @@ export function TileView({
   pieceShapes: PieceShapeMap;
   /** Карта ткани деталей показываемого колорвея; `null` — вопрос не задавался. */
   cloth?: Map<string, PieceCloth> | null;
+  /** Короткая подпись шага — та же, что в строке блока. */
+  labelOf: (index: number) => string;
   picked: boolean;
   /** Плитку тащат прямо сейчас. */
   dragging: boolean;
   /** Рамка ноды: цель жеста или наведение. Считает родитель — знание про жест живёт там. */
   ringClassName?: string;
-  /** Пропы плитки как органа: пусто, когда по ней кликать нечем. */
+  /** Пропы ГОЛОВЫ плитки как органа: пусто, когда по ней кликать нечем. */
   organProps: OrganProps;
   dragProps: OrganProps;
   hoverProps: OrganProps;
+  /** Пропы строки обработки: тот же орган, что у строки блока, — открыть шаг в списке. */
+  stepProps: (index: number) => OrganProps;
 }) {
+  const { TILE, PROC_ROW_H } = SCHEMATIC_METRICS;
   return (
     <div
-      {...organProps}
       className={cn(
-        'absolute flex items-center justify-center overflow-hidden border',
+        'absolute flex flex-col overflow-hidden border',
         t.state === 'free' ? 'border-dashed border-borderColor' : 'border-borderColor',
         picked && 'border-solid border-textColor',
         dragging && 'opacity-70',
@@ -664,17 +686,69 @@ export function TileView({
       {...dragProps}
       {...hoverProps}
     >
-      {/* `pxBox` — ВНЕШНИЙ бокс плитки, тот, что положила раскладка (free 64×48, stack
-          52×48). Паддинги своей обёртки плитка вычитает сама; передать сюда бокс
-          РИСОВАНИЯ значило бы вычесть их дважды, и шаг штриховки поехал бы по аспекту
-          детали. Дефолтный 48×48 здесь не годится: free-плитка шире. */}
-      <PieceTile
-        found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
-        name={name}
-        cloth={cloth?.get(t.key) ?? null}
-        pxBox={{ w: t.w, h: t.h }}
-        className='size-full'
-      />
+      {/* ГОЛОВА — САМА ДЕТАЛЬ, и она же PICK-ЗОНА плитки. Орган переехал с внешней коробки
+          сюда ровно по образцу бокса узла: строки под головой — уже кнопки шагов, и оставь
+          роль снаружи, клик по строке сработал бы ДВАЖДЫ (открыл шаг и заодно взял деталь
+          в выбор). У плитки без обработок голова занимает её целиком, поэтому зона клика
+          не изменилась ни на пиксель.
+
+          РОСТ ГОЛОВЫ — ОСТАТОК, а не число: строки ниже фиксированы `PROC_ROW_H`, и остаток
+          сам равен `TILE` минус рамка плитки. Напиши здесь `TILE` числом — и голова окажется
+          на два пикселя выше своего места, потому что рамку раскладка считает внутри плитки
+          (замерено: силуэт голой плитки 46, а не 48). */}
+      <div {...organProps} className='flex min-h-0 flex-1 items-center justify-center'>
+        {/* `pxBox` — бокс ГОЛОВЫ, тот, в котором силуэт действительно рисуется (free 64×48,
+            stack 52×48). Паддинги своей обёртки плитка вычитает сама; передать сюда бокс
+            РИСОВАНИЯ значило бы вычесть их дважды, и шаг штриховки поехал бы по аспекту
+            детали. Дефолтный 48×48 здесь не годится: free-плитка шире. */}
+        <PieceTile
+          found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
+          name={name}
+          cloth={cloth?.get(t.key) ?? null}
+          pxBox={{ w: t.w, h: TILE }}
+          className='size-full'
+        />
+      </div>
+      {/* ОБРАБОТКИ ЭТОЙ ДЕТАЛИ — её СОСТОЯНИЕ, а не список работ. Плитка обязана читаться
+          как «полочка, обработанная топстичем и фьюзингом»: движок запрещает узел из
+          одного входа, обработка не рождает новой вещи, а меняет состояние той же детали.
+
+          СТРОКА ЗЕРКАЛЬНА СТРОКЕ БЛОКА, И ЭТО НАМЕРЕННО. Тот же шаг законно виден в обоих
+          местах (блок отвечает «какая работа скатывается в узел», плитка — «в каком
+          состоянии деталь»), и две одинаковые строки читались бы как дубль. Поэтому здесь
+          грамматика `Row` — подпись слева, значение справа, — а не грамматика блока, где
+          слева номер, а справа глиф: в 44 пикселях содержимого различить их иначе нечем.
+
+          Высота строки и её разделитель приходят из раскладки одним числом (`PROC_ROW_H`,
+          линия входит В строку её верхней границей): вторая пара чисел здесь означала бы,
+          что картинка и раскладка однажды разойдутся, и разойдутся молча. */}
+      {t.processing.map((i) => (
+        <div
+          key={i}
+          {...stepProps(i)}
+          className='flex shrink-0 items-center gap-1 overflow-hidden border-t border-hairline bg-bgColor px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+          style={{ height: PROC_ROW_H }}
+          title={`${labelOf(i)} — processing on this piece; click to open the step in the list`}
+        >
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            className='min-w-0 truncate leading-none'
+          >
+            {labelOf(i)}
+          </Text>
+          {/* НОМЕР ШАГА, а не порядковый на плитке: он связывает плитку с рельсом
+              последовательности, и второй нумерации у одного шага быть не должно. */}
+          <Text
+            size='nano'
+            component='span'
+            className='ml-auto shrink-0 tabular-nums leading-none'
+          >
+            {(i + 1) * 10}
+          </Text>
+        </div>
+      ))}
     </div>
   );
 }

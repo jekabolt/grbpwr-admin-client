@@ -280,7 +280,6 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
 
   const onTable = new Set(res.frontier);
   const liveUnits = res.frontier.filter((k) => res.units.has(k));
-  const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
   const toggle = (key: string) =>
     onPicked(picked.includes(key) ? picked.filter((k) => k !== key) : [...picked, key]);
@@ -1665,7 +1664,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
           {layout.tail && (
             <TailBoxView
               tail={layout.tail}
-              looseSteps={looseSteps}
+              // СТРОКИ БЕРУТСЯ У РАСКЛАДКИ, а не у хвостового псевдоблока: она одна знает,
+              // какие обработки уехали на плитки своих деталей, и высоту коробки отмерила
+              // ровно по этому списку.
+              tailSteps={layout.tailSteps}
               smvOfBlock={smvOfBlock}
               labelOf={labelOf}
               dragging={!!heldNow?.has('')}
@@ -1683,6 +1685,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               name={pieceNameOf(t.key)}
               pieceShapes={pieceShapes}
               cloth={cloth}
+              labelOf={labelOf}
               picked={picked.includes(t.key)}
               dragging={!!heldNow?.has(t.key)}
               ringClassName={nodeRing(t.key)}
@@ -1698,6 +1701,9 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               )}
               dragProps={dragHandlers(t.key, t.x, t.y)}
               hoverProps={hoverHandlers(t.key)}
+              // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
+              // способа открыть шаг в системе заводить нельзя.
+              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
             />
           ))}
         </div>
