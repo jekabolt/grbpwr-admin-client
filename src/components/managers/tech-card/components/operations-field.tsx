@@ -1642,6 +1642,7 @@ function OperationEditor({
   onActiveBomChange,
   onDropPiece,
   mediaUrls,
+  onEdit,
   frozen = false,
 }: {
   index: number;
@@ -1665,6 +1666,13 @@ function OperationEditor({
   onDropPiece: (index: number, lineKey: string) => void;
   /** Адреса операционных снимков; форма возит только media_id. */
   mediaUrls?: Map<number, string>;
+  /**
+   * Шаг ИЗМЕНЁН редактором. Сегодня зовут только писатели полосы снимков: их приёмная модалка и
+   * холст выносок живут в порталах, и сброс записи отмены по `focusin` секции дока их не видит.
+   * Остальные поля редактора — обычные инпуты внутри дока, фокус в них есть, но прикрытие
+   * разметкой не контракт: новый писатель, ушедший в портал, обязан позвать это же.
+   */
+  onEdit?: () => void;
   /** Карточка выпущена: снимки и выноски читаются, но не правятся. */
   frozen?: boolean;
 }) {
@@ -2442,6 +2450,7 @@ function OperationEditor({
           />
         )}
         pieceLabel={(k) => pieces.find((p) => p.lineKey === k)?.name}
+        onEdit={onEdit}
       />
 
       <GroupLabel>materials this step consumes</GroupLabel>
@@ -4213,6 +4222,7 @@ export function OperationsField({
                 onRemove={() => removeOperation(selectedIndex)}
                 onFlashPieces={flashPieces}
                 onActiveBomChange={onActiveBomChange}
+                onEdit={clearLastMutation}
                 onDropPiece={addInputToOperation}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
@@ -4279,6 +4289,7 @@ export function OperationsField({
                 onRemove={() => removeOperation(selectedIndex)}
                 onFlashPieces={onFlashPieces}
                 onActiveBomChange={onActiveBomChange}
+                onEdit={clearLastMutation}
                 onDropPiece={addInputToOperation}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}

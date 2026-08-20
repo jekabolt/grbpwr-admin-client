@@ -61,6 +61,7 @@ export function OperationMediaStrip({
   frozen = false,
   renderPiecePicker,
   pieceLabel,
+  onEdit,
 }: {
   /** Путь поля-массива: `operations.${index}.media`. */
   name: `operations.${number}.media`;
@@ -73,6 +74,14 @@ export function OperationMediaStrip({
     onPick: (lineKey: string) => void;
   }) => ReactNode;
   pieceLabel?: (lineKey: string) => string | undefined;
+  /**
+   * Шаг ИЗМЕНЁН этой полосой. Зовётся у писателей, а не у разметки: приёмная модалка и холст
+   * выносок живут в ПОРТАЛАХ, из секции дока фокус не всплывает, и сброс записи отмены по
+   * `focusin` их не видит. Без этого «создал шаг в фулскрине → бросил на него снимок → ⌘Z»
+   * сносил бы шаг вместе со снимком: запись отмены пережила бы правку, которой не заметила.
+   * Наведения мышью для ⌘V достаточно — фокус не нужен, поэтому дыра не теоретическая.
+   */
+  onEdit?: () => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { fields, append, remove, move } = useFieldArray({ control, name });
@@ -121,6 +130,8 @@ export function OperationMediaStrip({
     }
     if (rows.length === 0) return;
     append(rows, { shouldFocus: false });
+    // Приёмка пришла из портала — `focusin` секции дока её не видит; гасим запись отмены здесь.
+    onEdit?.();
     // НАМЕРЕНИЕ СНЯТЬ ОТМЕНЯЕТСЯ ДОБАВЛЕНИЕМ. Иначе «снял всё → передумал → добавил снимок»
     // уезжает на сервер как «снял и одновременно прислал», гейт отвергает противоречие, а
     // снять невидимый флаг в интерфейсе нечем — тупик до перезагрузки.
@@ -146,8 +157,11 @@ export function OperationMediaStrip({
   // Считается ТОЛЬКО по живым кадрам: запись снятого снимка иначе жила бы в словаре вечно.
   const placed = list.reduce((m, f) => Math.max(m, placedByMedia[wireInt(f.mediaId)] ?? 0), 0);
 
-  const setAnnotations = (index: number, next: AnnotationForm[]) =>
+  const setAnnotations = (index: number, next: AnnotationForm[]) => {
     setValue(`${name}.${index}.annotations`, next, { shouldDirty: true });
+    // Холст выносок — тоже портал: см. `onEdit`.
+    onEdit?.();
+  };
 
   return (
     <div className='flex flex-col gap-1.5' {...intake.regionHandlers}>
@@ -237,7 +251,10 @@ export function OperationMediaStrip({
                           <StripButton
                             label='✕'
                             title='remove the shot from the step; the file itself stays in the library'
-                            onPress={() => remove(i)}
+                            onPress={() => {
+                              remove(i);
+                              onEdit?.();
+                            }}
                           />
                         ) : undefined
                       }
@@ -281,9 +298,10 @@ export function OperationMediaStrip({
                   {!frozen && (
                     <input
                       value={current.caption ?? ''}
-                      onChange={(e) =>
-                        setValue(`${name}.${i}.caption`, e.target.value, { shouldDirty: true })
-                      }
+                      onChange={(e) => {
+                        setValue(`${name}.${i}.caption`, e.target.value, { shouldDirty: true });
+                        onEdit?.();
+                      }}
                       placeholder="caption — what's on the shot"
                       maxLength={255}
                       className={cn(
