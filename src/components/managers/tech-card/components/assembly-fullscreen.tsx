@@ -149,7 +149,6 @@ export type AssemblyFullscreenProps = {
   selectedIndex: number;
   /** Открыть шаг. ЕДИНСТВЕННОЕ, что открывает док. */
   onPickStep: (index: number) => void;
-  setSelected: (index: number) => void;
   setPendingCreate: (p: CreatePrefill | null) => void;
   /** Потребитель — Ф4. */
   dissolveUnit: (stepIndex: number) => void;
@@ -211,8 +210,6 @@ export type AssemblyFullscreenProps = {
   /** Второй экземпляр `<StepNumberDrift />`: корневой остался под оверлеем и не виден. */
   dockChrome: ReactNode;
   frozen: boolean;
-  /** Ф4+: восстановленный черновик меняет то, что фулскрин вправе делать при входе. */
-  draftPending: boolean;
   onSave: () => void;
   saving: boolean;
   pieceClothByColorway: { label: string; map: Map<string, PieceCloth> }[];
@@ -1880,6 +1877,14 @@ function SplitBar({
     if (!g || e.pointerId !== g.pointerId) return;
     gesture.current = null;
     setDragging(false);
+    // Захват снимается и здесь: на пути «отпускание не доехало» браузер сам его не отдаст, а
+    // висящий захват держит указатель на полосе и после конца жеста. Исключение уронило бы конец
+    // жеста, а не начало, — поэтому в try, как в аварийном `finish`.
+    try {
+      elRef.current?.releasePointerCapture(g.pointerId);
+    } catch {
+      /* указатель уже отпущен */
+    }
     onCommit(live.current);
   };
 
@@ -1950,6 +1955,15 @@ function SplitBar({
       onPointerMove={(e) => {
         const g = gesture.current;
         if (!g || e.pointerId !== g.pointerId) return;
+        // САМОЛЕЧЕНИЕ ПО `buttons`: отпускание может не доехать вовсе — его съедает системный
+        // диалог, переключение окна на другом мониторе, всплывшее меню. Тогда `pointerup` не
+        // придёт никогда, а движения продолжают приходить, и полоса возит панель за рукой БЕЗ
+        // ЕДИНОЙ ЗАЖАТОЙ КНОПКИ до следующего клика. Полотно эту проверку уже носит у пана и
+        // маркизы; полоса была последним жестом экрана без неё.
+        if (e.buttons === 0) {
+          endGesture(e);
+          return;
+        }
         write(g.base + dir * (e.clientY - g.fromY));
       }}
       onPointerUp={endGesture}

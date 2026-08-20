@@ -4008,7 +4008,6 @@ export function OperationsField({
           prefs={prefs}
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
-          setSelected={setSelected}
           setPendingCreate={setPendingCreate}
           dissolveUnit={dissolveUnit}
           addInputToOperation={addInputToOperation}
@@ -4074,7 +4073,6 @@ export function OperationsField({
           // проникает.
           dockChrome={<StepNumberDrift />}
           frozen={frozen}
-          draftPending={draftPending}
           onSave={() => onSave?.()}
           saving={saving}
           pieceClothByColorway={pieceClothByColorway ?? []}
