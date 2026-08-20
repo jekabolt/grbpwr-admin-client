@@ -73,8 +73,14 @@ import type { PieceShapeMap } from './use-piece-shapes';
 // прямо в стиль мира. В состоянии остаётся только ОКРУГЛЁННЫЙ процент зума — он меняется на
 // порядки реже и нужен подписи HUD.
 
-/** Порог, разводящий клик и перетаскивание. Тот же, что у инлайна. */
-const DRAG_THRESHOLD = 4;
+/**
+ * Порог, разводящий клик и перетаскивание. Тот же, что у инлайна.
+ *
+ * ЭКСПОРТИРУЕТСЯ ради жеста ИЗ ПОЛКИ: он начинается за пределами полотна, и порог ему считает
+ * владелец жеста (`assembly-fullscreen.tsx`). Второе число здесь означало бы, что одна и та же
+ * рука разводит клик и драг по-разному на двух сторонах одной границы.
+ */
+export const DRAG_THRESHOLD = 4;
 
 /** Шаг зума кнопками и клавишами. Порт прототипа. */
 export const ZOOM_STEP = 1.2;
@@ -105,6 +111,15 @@ type DragState = {
   ptrX: number;
   ptrY: number;
   started: boolean;
+  /**
+   * Жест начат СНАРУЖИ — плиткой полки, через ручку `beginExternalDrag`.
+   *
+   * Состояние у него то же самое, и это главное: подсветка цели, вердикт, подсказка, автопан и
+   * живая позиция плитки читают одно поле, а хвост дропа — один на оба жеста. Отличается ровно
+   * одно — КТО его ведёт: оконные слушатели полотна такой драг пропускают целиком, потому что
+   * указатель захвачен чужим элементом и решение «состоялся ли дроп» принимает владелец.
+   */
+  external?: boolean;
 };
 
 /**
@@ -153,6 +168,29 @@ export type CanvasHandle = {
   fitSelection: () => void;
   /** Довести ноду до глаз панорамой, МИНИМАЛЬНЫМ сдвигом. Потребитель — find-палитра. */
   reveal: (key: string) => void;
+
+  // --- ПОРТ ВНЕШНЕГО ЖЕСТА ---------------------------------------------------------------------
+  //
+  // Драг плитки ИЗ ПОЛКИ на полотно. Жест начинается ВНЕ полотна, поэтому ведёт его владелец экрана
+  // (`assembly-fullscreen.tsx`): он держит захват указателя, считает порог, рисует ghost и гасит
+  // клик-эхо. Полотно отдаёт наружу ровно то, чего снаружи не достать: свою систему координат, свою
+  // подсветку цели и СВОЙ ХВОСТ ДРОПА — тот же `hitNode` → `combineVerdict` → отказ словами движка
+  // → `onCreate`, что и у драга нод.
+  //
+  // POINTER, А НЕ HTML5 DnD (решение плана, M4): под нативным драгом pointer-события не летят вовсе,
+  // и hit-тест узлов перестал бы работать — дроп «на узел» молча стал бы переносом.
+
+  /** Рука поехала: взять деталь `key` в мир. Порог владелец жеста уже прошёл. */
+  beginExternalDrag: (key: string, clientX: number, clientY: number) => void;
+  /**
+   * Указатель переехал. Возвращает, находится ли он НАД СЦЕНОЙ: там плитку уже везёт само полотно,
+   * и ghost владельцу больше не нужен.
+   */
+  moveExternalDrag: (clientX: number, clientY: number) => boolean;
+  /** Отпустили. Мимо сцены — жеста не было; над сценой — общий хвост дропа. */
+  dropExternalDrag: (clientX: number, clientY: number) => void;
+  /** Жест оборвали: Escape, `pointercancel` от браузера, потеря окна. */
+  cancelExternalDrag: () => void;
 };
 
 export type AssemblyCanvasProps = {
@@ -396,6 +434,109 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     return () => ro.disconnect();
   }, [runFit]);
 
+  /**
+   * Отложенное пере-вписывание, накопленное ЖИВЫМ ЖЕСТОМ, — по его окончании.
+   *
+   * ОДНА функция на все концы жеста: панораму рукой, драг ноды и драг из полки. Ресайз вьюпорта
+   * посреди перетаскивания (сплиттер, свёртка панели) мир из-под руки уводить не имеет права,
+   * поэтому он ждёт здесь; забыть его на одном из трёх концов — оставить экран не вписанным ровно
+   * после того жеста, который панель и подвинул.
+   */
+  const settleRefit = useCallback(() => {
+    if (!pendingRefit.current) return;
+    pendingRefit.current = false;
+    if (fitted.current) runFit(true, lastFitOpen.current);
+  }, [runFit]);
+
+  // --- координаты и общий хвост дропа -----------------------------------------------------------
+  //
+  // Обе функции стоят ЗДЕСЬ, выше и жестов, и императивной ручки, ровно потому, что зовут их ОБЕ
+  // стороны: и жест ноды, начатый на полотне, и жест плитки, начатый в полке. Разведи их по местам
+  // употребления — и вторая сторона неминуемо заведёт свою копию.
+
+  /** Точка события в координатах МИРА. Ровно та формула, что в пробе. */
+  const toWorldPoint = useCallback((e: { clientX: number; clientY: number }) => {
+    const vp = viewportRef.current;
+    if (!vp) return null;
+    return toWorld(e.clientX, e.clientY, vp.getBoundingClientRect(), viewRef.current);
+  }, []);
+
+  /**
+   * Точка окна лежит В СЦЕНЕ.
+   *
+   * Нужна только внешнему жесту: у драга ноды указатель со сцены выходит редко и осмысленно (нода
+   * едет к кромке, работает автопан), а деталь из полки половину пути несут НАД полкой и хромом, и
+   * там ни бросать, ни автопанорамировать нечего.
+   */
+  const overStage = useCallback((clientX: number, clientY: number): boolean => {
+    const vp = viewportRef.current;
+    if (!vp) return false;
+    const r = vp.getBoundingClientRect();
+    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  }, []);
+
+  /**
+   * ХВОСТ ДРОПА — ОДИН НА ВСЕ ЖЕСТЫ ПОЛОТНА.
+   *
+   * Сюда приходит и отпускание ноды, и отпускание плитки, притащенной из полки: начала у них
+   * разные (одно ловится оконным слушателем ниже, второе приезжает ручкой `dropExternalDrag`), а
+   * конец обязан быть общим. Второй хвост означал бы вторую матрицу трансформа, второй hit-тест и
+   * второй порядок «переместить → вердикт → диалог» — и разошлись бы они не в диффе, а на карточке.
+   */
+  const finishDrop = useCallback(
+    (d: DragState) => {
+      if (!d.started) return;
+      justDragged.current = true;
+      const landed: PosOverrides = {};
+      for (const it of d.items) landed[it.key] = { x: Math.max(0, it.x), y: Math.max(0, it.y) };
+      // ПОРЯДОК ХВОСТА — ТОТ ЖЕ, ЧТО У ИНЛАЙНА, и он не про удобство: перемещение состоялось в
+      // любом случае (жест композитен, и «перенёс» не отменяется тем, что «соединить» потом
+      // отклонили), поэтому `onMove` идёт ПЕРВЫМ и до гейта заморозки — раскладывать чужую
+      // выпущенную карточку разрешено (R10). Соединять — нет.
+      for (const it of d.items) onMove(it.key, landed[it.key]);
+      if (frozen) return;
+      const eff = applyOverrides(auto, { ...positions, ...landed });
+      // ВСЁ ЕДУЩЕЕ ВЫРЕЗАНО ИЗ HIT-TEST, а не только та нода, за которую взяли: остальные едут под
+      // тем же курсором и заслоняли бы цель. `hitNode` умеет исключать одну ноду, и менять его
+      // сигнатуру ради этого — лезть в чужой модуль; вырезать их из раскладки честнее и дешевле.
+      const held = new Set(d.items.map((i) => i.key));
+      const probe = {
+        ...eff,
+        boxes: eff.boxes.filter((b) => !held.has(b.key)),
+        tiles: eff.tiles.filter((t) => !held.has(t.key)),
+        tail: eff.tail && held.has(eff.tail.key) ? undefined : eff.tail,
+      };
+      const hit = hitNode(probe, d.ptrX, d.ptrY, d.key);
+      if (!hit) return;
+      // МУЛЬТИДРОП — ЕСТЕСТВЕННОЕ ОБОБЩЕНИЕ, а не новый жест: вердикт спрашивается за КАЖДУЮ
+      // едущую ноду против одной цели, первый отказ произносится и жест кончается. Соглашаться
+      // выборочно нельзя — человек бросал их вместе.
+      const keys = d.items.map((i) => i.key);
+      const verdicts = keys.map((k) => combineVerdict(k, hit.key, res, steps));
+      const bad = verdicts.find((v) => v && !v.ok);
+      if (bad && !bad.ok) {
+        // Отказ ДО диалога, словами движка: открывать форму, которую нельзя отправить, — предлагать
+        // заведомый отказ (R2).
+        showMessage(bad.reason, 'error');
+        return;
+      }
+      let joined = false;
+      let absorbInto: string | undefined;
+      for (const v of verdicts) {
+        if (!v || !v.ok) continue;
+        joined = true;
+        absorbInto = v.absorbInto;
+      }
+      if (!joined) return; // жеста не было вовсе: бросили саму в себя или в хвостовой бокс
+      onCreate({
+        inputKeys: [...keys, hit.key],
+        absorbInto,
+        intent: absorbInto ? undefined : 'unit',
+      });
+    },
+    [auto, positions, res, steps, frozen, onMove, onCreate, showMessage],
+  );
+
   // Габарит работы поменялся (родился узел, приехали детали) — лист догоняет. Во время жеста лист
   // только растёт: сжимающийся уводит землю из-под руки.
   useEffect(() => {
@@ -498,10 +639,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     const end = () => {
       panRef.current = null;
       setPanning(false);
-      if (pendingRefit.current) {
-        pendingRefit.current = false;
-        if (fitted.current) runFit(true, lastFitOpen.current);
-      }
+      settleRefit();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
@@ -513,7 +651,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       window.removeEventListener('pointercancel', end);
       window.removeEventListener('blur', end);
     };
-  }, [panning, applyView, runFit]);
+  }, [panning, applyView, settleRefit]);
 
   useImperativeHandle(
     handleRef,
@@ -581,18 +719,86 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         viewRef.current = { zoom, pan: { x: pan.x + d.x, y: pan.y + d.y } };
         applyView();
       },
+
+      // --- порт внешнего жеста (драг из полки) ---------------------------------------------
+
+      beginExternalDrag: (key, clientX, clientY) => {
+        // Живой жест полотна сильнее: два перетаскивания на одном состоянии не живут. А вот
+        // ИНСТРУМЕНТ здесь ни при чём — ладонь возит полотно указателем, НАЧАТЫМ НА ПОЛОТНЕ, и
+        // отказывать из-за неё жесту, начатому в полке, значило бы гасить его молча и без причины.
+        if (dragRef.current || panRef.current) return;
+        const p = toWorldPoint({ clientX, clientY });
+        if (!p) return;
+        // Плитка встаёт ЦЕНТРОМ под курсор: точки захвата внутри ноды у этого жеста нет — в полке
+        // деталь взяли за другую, меньшую картинку, и переносить оттуда угол не во что.
+        const n = layoutRef.current.tileByKey.get(key) ?? layoutRef.current.byKey.get(key);
+        const offX = n ? n.w / 2 : 0;
+        const offY = n ? n.h / 2 : 0;
+        justDragged.current = false;
+        commitDrag({
+          key,
+          // Указатель ЧУЖОЙ: сравнивать оконным слушателям не с чем, и это ровно то, что нужно —
+          // такой драг они пропускают целиком.
+          pointerId: -1,
+          external: true,
+          items: [{ key, offX, offY, x: p.x - offX, y: p.y - offY }],
+          fromX: p.x,
+          fromY: p.y,
+          ptrX: p.x,
+          ptrY: p.y,
+          // Порог владелец жеста уже прошёл — иначе он бы сюда не позвал.
+          started: true,
+        });
+      },
+      moveExternalDrag: (clientX, clientY) => {
+        const d = dragRef.current;
+        if (!d?.external) return false;
+        const p = toWorldPoint({ clientX, clientY });
+        if (!p) return false;
+        const over = overStage(clientX, clientY);
+        // АВТОПАН — ТОЛЬКО НАД СЦЕНОЙ, и это не мелочь: пока палец идёт над полкой, он по меркам
+        // `autopanDelta` стоит за ВЕРХНЕЙ кромкой вьюпорта, и полотно уезжало бы вниз всё время,
+        // пока деталь ещё несут. Пустой `lastClient` останавливает тик, не трогая его арифметику.
+        lastClient.current = over ? { x: clientX, y: clientY } : null;
+        commitDrag({
+          ...d,
+          items: d.items.map((it) => ({ ...it, x: p.x - it.offX, y: p.y - it.offY })),
+          ptrX: p.x,
+          ptrY: p.y,
+        });
+        return over;
+      },
+      dropExternalDrag: (clientX, clientY) => {
+        const d = dragRef.current;
+        if (!d?.external) return;
+        commitDrag(null);
+        lastClient.current = null;
+        settleRefit();
+        // ОТПУСТИЛИ МИМО СЦЕНЫ — ЖЕСТА НЕ БЫЛО. Над полкой, хромом и доком бросать некуда, а
+        // записать позицию туда, куда не целились, хуже, чем не делать ничего.
+        if (!overStage(clientX, clientY)) return;
+        const p = toWorldPoint({ clientX, clientY });
+        if (!p) return;
+        // Позиция пересчитывается по КООРДИНАТАМ ОТПУСКАНИЯ, а не по последнему движению: между
+        // ними лежит целый кадр, и на быстром жесте деталь легла бы там, где рука уже не была.
+        finishDrop({
+          ...d,
+          items: d.items.map((it) => ({ ...it, x: p.x - it.offX, y: p.y - it.offY })),
+          ptrX: p.x,
+          ptrY: p.y,
+        });
+      },
+      cancelExternalDrag: () => {
+        if (!dragRef.current?.external) return;
+        commitDrag(null);
+        lastClient.current = null;
+        settleRefit();
+      },
     }),
-    [runFit, applyView, animateOnce],
+    [runFit, applyView, animateOnce, commitDrag, toWorldPoint, overStage, finishDrop, settleRefit],
   );
 
   // --- жест ноды --------------------------------------------------------------------------------
-
-  /** Точка события в координатах МИРА. Ровно та формула, что в пробе. */
-  const toWorldPoint = useCallback((e: { clientX: number; clientY: number }) => {
-    const vp = viewportRef.current;
-    if (!vp) return null;
-    return toWorld(e.clientX, e.clientY, vp.getBoundingClientRect(), viewRef.current);
-  }, []);
 
   const dragHandlers = (key: string, nodeX: number, nodeY: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -856,7 +1062,13 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     if (!dragActive) return;
     const onPointerMove = (e: PointerEvent) => {
       const d = dragRef.current;
-      if (!d || e.pointerId !== d.pointerId) return;
+      if (!d) return;
+      // ВНЕШНИЙ ЖЕСТ ВЕДЁТ ВЛАДЕЛЕЦ, и вести его вдвоём нельзя: указатель захвачен плиткой полки,
+      // события всё равно всплывают сюда, и без этой строки один и тот же `pointermove` двигал бы
+      // деталь дважды за кадр. Отпускание и отмену такого жеста тоже решает он — ниже те же две
+      // строки по той же причине.
+      if (d.external) return;
+      if (e.pointerId !== d.pointerId) return;
       if (e.buttons === 0) {
         justDragged.current = d.started;
         commitDrag(null);
@@ -880,71 +1092,29 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     };
     const onPointerUp = (e: PointerEvent) => {
       const d = dragRef.current;
+      if (d?.external) return;
       if (d && e.pointerId !== d.pointerId) return;
       commitDrag(null);
-      if (pendingRefit.current) {
-        pendingRefit.current = false;
-        if (fitted.current) runFit(true, lastFitOpen.current);
-      }
-      if (!d?.started) return;
-      justDragged.current = true;
-      const landed: PosOverrides = {};
-      for (const it of d.items) landed[it.key] = { x: Math.max(0, it.x), y: Math.max(0, it.y) };
-      // ПОРЯДОК ХВОСТА — ТОТ ЖЕ, ЧТО У ИНЛАЙНА, и он не про удобство: перемещение состоялось в
-      // любом случае (жест композитен, и «перенёс» не отменяется тем, что «соединить» потом
-      // отклонили), поэтому `onMove` идёт ПЕРВЫМ и до гейта заморозки — раскладывать чужую
-      // выпущенную карточку разрешено (R10). Соединять — нет.
-      for (const it of d.items) onMove(it.key, landed[it.key]);
-      if (frozen) return;
-      const eff = applyOverrides(auto, { ...positions, ...landed });
-      // ВСЁ ЕДУЩЕЕ ВЫРЕЗАНО ИЗ HIT-TEST, а не только та нода, за которую взяли: остальные едут под
-      // тем же курсором и заслоняли бы цель. `hitNode` умеет исключать одну ноду, и менять его
-      // сигнатуру ради этого — лезть в чужой модуль; вырезать их из раскладки честнее и дешевле.
-      const held = new Set(d.items.map((i) => i.key));
-      const probe = {
-        ...eff,
-        boxes: eff.boxes.filter((b) => !held.has(b.key)),
-        tiles: eff.tiles.filter((t) => !held.has(t.key)),
-        tail: eff.tail && held.has(eff.tail.key) ? undefined : eff.tail,
-      };
-      const hit = hitNode(probe, d.ptrX, d.ptrY, d.key);
-      if (!hit) return;
-      // МУЛЬТИДРОП — ЕСТЕСТВЕННОЕ ОБОБЩЕНИЕ, а не новый жест: вердикт спрашивается за КАЖДУЮ
-      // едущую ноду против одной цели, первый отказ произносится и жест кончается. Соглашаться
-      // выборочно нельзя — человек бросал их вместе.
-      const keys = d.items.map((i) => i.key);
-      const verdicts = keys.map((k) => combineVerdict(k, hit.key, res, steps));
-      const bad = verdicts.find((v) => v && !v.ok);
-      if (bad && !bad.ok) {
-        // Отказ ДО диалога, словами движка: открывать форму, которую нельзя отправить, — предлагать
-        // заведомый отказ (R2).
-        showMessage(bad.reason, 'error');
-        return;
-      }
-      let joined = false;
-      let absorbInto: string | undefined;
-      for (const v of verdicts) {
-        if (!v || !v.ok) continue;
-        joined = true;
-        absorbInto = v.absorbInto;
-      }
-      if (!joined) return; // жеста не было вовсе: бросили саму в себя или в хвостовой бокс
-      onCreate({
-        inputKeys: [...keys, hit.key],
-        absorbInto,
-        intent: absorbInto ? undefined : 'unit',
-      });
+      settleRefit();
+      if (!d) return;
+      finishDrop(d);
     };
     const onPointerCancel = (e: PointerEvent) => {
-      if (dragRef.current && e.pointerId !== dragRef.current.pointerId) return;
+      const d = dragRef.current;
+      if (d?.external) return;
+      if (d && e.pointerId !== d.pointerId) return;
       justDragged.current = true;
       commitDrag(null);
     };
+    // ПОТЕРЯ ОКНА ГАСИТ И ВНЕШНИЙ ЖЕСТ. Здесь исключения нет и быть не может: `blur` владельцу
+    // жеста может и не прийти, а полотно, оставшееся с фантомным драгом, продолжало бы светить
+    // подсветкой цели по ноде, которую никто уже не несёт.
     const onLost = () => {
       const d = dragRef.current;
       if (!d) return;
       justDragged.current = d.started;
       commitDrag(null);
+      lastClient.current = null;
     };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
@@ -958,20 +1128,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       window.removeEventListener('blur', onLost);
       document.removeEventListener('visibilitychange', onLost);
     };
-  }, [
-    dragActive,
-    auto,
-    positions,
-    res,
-    steps,
-    frozen,
-    onMove,
-    onCreate,
-    showMessage,
-    toWorldPoint,
-    commitDrag,
-    runFit,
-  ]);
+  }, [dragActive, toWorldPoint, commitDrag, finishDrop, settleRefit]);
 
   // Escape во время драга — откат жеста. Стоит ДО Esc-лестницы фулскрина по естественной причине:
   // слушатель на window ловит событие раньше, чем `onEscapeKeyDown` Radix, и гасит его сам.

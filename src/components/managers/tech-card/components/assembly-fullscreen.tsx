@@ -19,7 +19,13 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
-import { AssemblyCanvas, ZOOM_STEP, type CanvasHandle, type CanvasHint } from './assembly-canvas';
+import {
+  AssemblyCanvas,
+  DRAG_THRESHOLD,
+  ZOOM_STEP,
+  type CanvasHandle,
+  type CanvasHint,
+} from './assembly-canvas';
 import type { CreatePrefill } from './assembly-create-dialog';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
@@ -70,6 +76,17 @@ const GRID_GAP = 8;
 const SHELF_HEAD = 24;
 
 /**
+ * Ghost детали, которую несут из полки на полотно.
+ *
+ * Размер — СВОБОДНОЙ ПЛИТКИ ПОЛОТНА (64×48 из `assembly-layout.ts`), а не плитки полки: ghost
+ * показывает, чем деталь станет, а не то, откуда её взяли. Живёт он в ЭКРАННЫХ координатах и гаснет,
+ * едва указатель войдёт в сцену — там ту же деталь уже везёт само полотно, и два её изображения под
+ * одним курсором читались бы как две детали.
+ */
+const GHOST_W = 64;
+const GHOST_H = 48;
+
+/**
  * Шпаргалка. Список — данные, а не разметка: клавиша, попавшая в роутер и забытая здесь, — та же
  * ложь, что подпись про несуществующую клавишу.
  */
@@ -82,6 +99,7 @@ const HELP_KEYS: [string, string][] = [
   ['⇧2', 'frame the selection'],
   ['⌘a', 'pick everything on the table'],
   ['drag on empty ground', 'marquee — touching a node picks it (shift adds)'],
+  ['drag from the shelf', 'drop on a node to join, on empty ground to place the piece'],
   ['arrows', 'nudge the picked by 8px (shift: 1px)'],
   ['u', 'join the picked into a unit'],
   ['o', 'an operation on the picked'],
@@ -360,6 +378,174 @@ export function AssemblyFullscreen({
     setDockStep((cur) => (cur === null ? Math.max(0, selectedIndex) : null));
   }, [selectedIndex]);
 
+  // --- драг плитки полки на полотно ---------------------------------------------------------------
+  //
+  // POINTER-ПОРТ, А НЕ HTML5 DnD (решение плана, M4). У инлайнового лотка драг нативный
+  // (`dataTransfer`), и полке он не даётся: под нативным драгом pointer-события не летят ВОВСЕ, то
+  // есть hit-тест узлов полотна перестал бы работать и дроп «на узел» молча стал бы переносом.
+  //
+  // ЖЕСТ ВЕДЁТ ЭТОТ ФАЙЛ, потому что начинается он ВНЕ полотна: полка отдаёт наружу только
+  // `onTilePointerDown` (своего гарда драга у неё нет намеренно). Полотно даёт то, чего снаружи не
+  // достать, — свои координаты, свою подсветку цели и свой хвост дропа (`beginExternalDrag` и
+  // соседи); здесь остаются захват указателя, порог, ghost и гашение клик-эха.
+
+  const tileDrag = useRef<{
+    pointerId: number;
+    key: string;
+    /** Плитка, захватившая указатель: с неё же его и снимаем. */
+    el: HTMLElement;
+    fromX: number;
+    fromY: number;
+    /** Порог пройден — жест стал перетаскиванием, и полотно про него уже знает. */
+    started: boolean;
+  } | null>(null);
+  /** Указатель зажат на плитке. Пока true, жест слушают окно и только окно. */
+  const [tileDragOn, setTileDragOn] = useState(false);
+  /** Что несут; `null` — ghost не смонтирован. */
+  const [tileDragKey, setTileDragKey] = useState<string | null>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  /** Где ghost и надо ли его гасить. Пишется ИМПЕРАТИВНО — как трансформ мира и рамка маркизы. */
+  const ghostAt = useRef({ x: 0, y: 0, over: false });
+
+  /**
+   * ГАШЕНИЕ КЛИК-ЭХА (проброс ревью Ф5а).
+   *
+   * Своего гарда у полки нет по построению: жест ведёт родитель, и второй сторож, не знающий про
+   * начатый жест, гасил бы клики, которые родитель считает живыми. Без этого флага драг плитки на
+   * полотно кончался бы ещё и «выбрать деталь»: захват указателя ретаргетит и совместимостные
+   * мышиные события, поэтому `click` приходит на плитку даже когда отпустили над полотном.
+   *
+   * Сбрасывается на КАЖДОМ pointerdown, а не по таймеру: жест, отпущенный там, где клика не будет
+   * вовсе, иначе съел бы следующий честный клик.
+   */
+  const tileClickEcho = useRef(false);
+  const takeTileClickEcho = useCallback(() => {
+    if (!tileClickEcho.current) return false;
+    tileClickEcho.current = false;
+    return true;
+  }, []);
+
+  const paintGhost = useCallback(() => {
+    const el = ghostRef.current;
+    if (!el) return;
+    const g = ghostAt.current;
+    el.style.display = g.over ? 'none' : 'block';
+    el.style.transform = `translate3d(${g.x - GHOST_W / 2}px, ${g.y - GHOST_H / 2}px, 0)`;
+  }, []);
+  // ПЕРВЫЙ КАДР GHOST'А. Элемент появляется тем же рендером, что и состояние, — до него ставить
+  // позицию некуда, и без этого он мигнул бы в левом верхнем углу экрана.
+  useLayoutEffect(paintGhost, [tileDragKey, paintGhost]);
+
+  const endTileDrag = useCallback((drop: { x: number; y: number } | null) => {
+    const g = tileDrag.current;
+    if (!g) return;
+    tileDrag.current = null;
+    setTileDragOn(false);
+    setTileDragKey(null);
+    // Захват мог быть уже снят браузером (`pointercancel`) или плитки может уже не быть в дереве:
+    // исключение здесь уронило бы конец жеста, а не начало.
+    try {
+      g.el.releasePointerCapture(g.pointerId);
+    } catch {
+      /* указатель уже отпущен */
+    }
+    // Порог не пройден — перетаскивания не было: это обычный клик по плитке, и трогать его нельзя.
+    if (!g.started) return;
+    tileClickEcho.current = true;
+    if (drop) canvasRef.current?.dropExternalDrag(drop.x, drop.y);
+    else canvasRef.current?.cancelExternalDrag();
+  }, []);
+
+  const onTilePointerDown = useCallback((lineKey: string, e: React.PointerEvent) => {
+    // Правая и средняя кнопки жеста не начинают; тач и перо приходят с `button === 0`.
+    if (e.button !== 0) return;
+    const el = e.currentTarget as HTMLElement;
+    tileClickEcho.current = false;
+    tileDrag.current = {
+      pointerId: e.pointerId,
+      key: lineKey,
+      el,
+      fromX: e.clientX,
+      fromY: e.clientY,
+      started: false,
+    };
+    // Захват — чтобы жест не потерялся, уйдя с плитки: дальше он живёт над полотном. `preventDefault`
+    // здесь НЕ зовём: он отнял бы у плитки фокус, а вместе с ним клавиатурный путь к той же детали.
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* без захвата обойдёмся — слушатели всё равно на окне */
+    }
+    setTileDragOn(true);
+  }, []);
+
+  useEffect(() => {
+    if (!tileDragOn) return;
+    const move = (e: PointerEvent) => {
+      const g = tileDrag.current;
+      if (!g || e.pointerId !== g.pointerId) return;
+      if (!g.started) {
+        // Порог — ТОТ ЖЕ, что у полотна (`DRAG_THRESHOLD`), но в ЭКРАННЫХ пикселях: жест начинается
+        // над полкой, где ни мира, ни зума ещё нет.
+        if (
+          Math.abs(e.clientX - g.fromX) <= DRAG_THRESHOLD &&
+          Math.abs(e.clientY - g.fromY) <= DRAG_THRESHOLD
+        ) {
+          return;
+        }
+        g.started = true;
+        canvasRef.current?.beginExternalDrag(g.key, e.clientX, e.clientY);
+        setTileDragKey(g.key);
+      }
+      const over = canvasRef.current?.moveExternalDrag(e.clientX, e.clientY) ?? false;
+      ghostAt.current = { x: e.clientX, y: e.clientY, over };
+      paintGhost();
+    };
+    const up = (e: PointerEvent) => {
+      const g = tileDrag.current;
+      if (!g || e.pointerId !== g.pointerId) return;
+      endTileDrag({ x: e.clientX, y: e.clientY });
+    };
+    /**
+     * ТАЧ ОБЯЗАН ПЕРЕЖИВАТЬСЯ, А НЕ РОНЯТЬ ЖЕСТ (проброс ревью Ф5а, п. 5).
+     *
+     * Плитки полки несут `touch-action: pan-x` — полоса деталей это горизонтальный скроллер, и
+     * глухая `none` убила бы прокрутку пальцем на всей её площади. Значит палец, поехавший ВБОК,
+     * забирает браузер: жест приходит `pointercancel` и `pointerup` не приходит НИКОГДА. Драг на
+     * полотно вертикальный (полотно лежит прямо под полкой) и потому живёт; горизонтальный просто
+     * отменяется — без дропа, без записи и без зависшего ghost'а.
+     */
+    const cancel = (e: PointerEvent) => {
+      const g = tileDrag.current;
+      if (g && e.pointerId !== g.pointerId) return;
+      endTileDrag(null);
+    };
+    const lost = () => endTileDrag(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const g = tileDrag.current;
+      // Порог не пройден — жеста нет, и Esc принадлежит лестнице: гасить ею нечего.
+      if (!g?.started) return;
+      // ЖИВОЙ ЖЕСТ ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ — ровно как драг ноды и маркиза в полотне: Esc посреди
+      // жеста значит «отменить жест», а не «подняться на ступень».
+      e.preventDefault();
+      e.stopPropagation();
+      endTileDrag(null);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', lost);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', lost);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [tileDragOn, endTileDrag, paintGhost]);
+
   // --- режим добора деталей в шаг -------------------------------------------------------------------
   //
   // ОДНО ПРАВИЛО КЛИКА ПО ПЛИТКЕ: клик — ВСЕГДА «выбрать и довести панорамой». Добавление детали в
@@ -434,11 +620,14 @@ export function AssemblyFullscreen({
    */
   const addPieceToStep = useCallback(
     (lineKey: string) => {
+      // Клик-эхо драга гасится ПЕРВЫМ и здесь тоже: жест на полотно, начатый в режиме добора,
+      // иначе кончался бы ещё и молчаливым добавлением детали в открытый шаг.
+      if (takeTileClickEcho()) return;
       if (frozen) return; // тот же пояс: жест pointer-ный, fieldset его не глушит
       if (!addModeLive) return;
       addInputToOperation(addModeLive.stepIndex, lineKey);
     },
-    [frozen, addModeLive, addInputToOperation],
+    [frozen, addModeLive, addInputToOperation, takeTileClickEcho],
   );
 
   /**
@@ -481,10 +670,14 @@ export function AssemblyFullscreen({
    */
   const pickPiece = useCallback(
     (lineKey: string) => {
+      // ДРАГ НЕ ВЫБИРАЕТ. `click` приходит после каждого перетаскивания плитки — захват указателя
+      // ретаргетит и совместимостные мышиные события, — и без гашения жест «утащил деталь на
+      // полотно» кончался бы ещё и сменой выделения с доводкой панорамой.
+      if (takeTileClickEcho()) return;
       if (onTable.has(lineKey)) setPicked([lineKey]);
       canvasRef.current?.reveal(lineKey);
     },
-    [onTable],
+    [onTable, takeTileClickEcho],
   );
 
   const sewSelection = useCallback(() => {
@@ -813,9 +1006,19 @@ export function AssemblyFullscreen({
             the assembly graph on a pan and zoom canvas, with the open step in a dock below
           </Dialog.Description>
 
+          {/* ПОЯС `minmax(0,1fr)` НА КОЛОНКЕ — И `min-w-0` НА КАЖДОМ РЕБЁНКЕ. Единственная колонка
+              грида по умолчанию `auto`: она вырастает до САМОГО ШИРОКОГО ребёнка и растягивает по
+              нему всех остальных, а грид-ребёнок с `min-width:auto` уже своего min-content стать не
+              умеет. Замерено на окне 900px: шапка полки давала 1018px, и на эти 1018 растягивались
+              хром, полотно и док — `save` и переключатели уезжали за край экрана. Полка была первой,
+              но природа общая: широкая строка редактора в доке сделала бы ровно то же. Поэтому пояс
+              общий — колонка не растёт, дети ужимаются в трек, а дальше каждый разбирается сам
+              (полка скроллит полосу плиток, док переносит строки). `min-h-0` там же и по той же
+              причине, только по вертикали: без него панель не умеет стать ниже своего содержимого и
+              вылезает из трека. */}
           <div
             ref={gridRef}
-            className='grid h-full'
+            className='grid h-full grid-cols-[minmax(0,1fr)] [&>*]:min-h-0 [&>*]:min-w-0'
             style={{
               gridTemplateRows: rows,
               ['--dock-h' as string]: `${dockH}px`,
@@ -924,41 +1127,36 @@ export function AssemblyFullscreen({
             {/* ПОЛКА ГОВОРИТ, ЧТО СУЩЕСТВУЕТ, полотно — как оно собрано, find — где оно лежит.
                 Лоток (`AssemblyTray`) в фулскрине НЕ рендерится вовсе: две поверхности одного
                 факта с разной семантикой клика расходятся не в диффе, а на фабрике. */}
-            {/* ОБЁРТКА РАДИ `min-w-0`, и это не косметика. Грид-ребёнок с `min-width:auto` не умеет
-                стать уже своего min-content, а единственная колонка грида — `auto`: она вырастает
-                до САМОГО ШИРОКОГО ребёнка и растягивает по нему всех остальных. Замерено на окне
-                900px: шапка полки давала 1018px, и на эти 1018 растягивались хром, полотно и док —
-                `save` и переключатели уезжали за край экрана. Ширину полке снаружи не задать, свою
-                `<section>` она рисует сама, поэтому `min-w-0` кладётся и на обёртку (чтобы колонка
-                считала её вклад нулём), и через child-вариант на саму секцию (чтобы та ужалась в
-                трек). Дальше ужимается уже полка: счётчики `truncate`, полоса плиток скроллится. */}
-            <div className='grid min-h-0 min-w-0 [&>section]:min-w-0'>
-              <AssemblyShelf
-                pieces={pieces}
-                // КАРТА КАК ЕСТЬ, без перекладки ключей: полка сама сворачивает `lineKey` в
-                // `pieceRefKey` для контура, а ткань ключует сырым `lineKey`. Переложи здесь — и
-                // получишь пустую штриховку при живом рецепте, ничего не сломав на глаз.
-                pieceShapes={pieceShapes}
-                pieceClothByColorway={pieceClothByColorway}
-                colorwayIndex={cwIndex}
-                onColorwayIndex={setColorwayIndex}
-                axis={axis}
-                onAxis={prefs.setAxis}
-                filter={shelfFilter}
-                onFilter={setShelfFilter}
-                collapsed={shelfCollapsed}
-                onToggleCollapsed={toggleShelf}
-                intoOf={intoOf}
-                unitOrder={unitOrder}
-                unitNameOf={unitNameOf}
-                selection={pickedSet}
-                onPick={pickPiece}
-                addMode={shelfAddMode}
-                onAddToStep={addPieceToStep}
-                onExitAddMode={exitAddMode}
-                frozen={frozen}
-              />
-            </div>
+            {/* СВОЕЙ ОБЁРТКИ У ПОЛКИ БОЛЬШЕ НЕТ: она стояла ради `min-w-0` на секции, а теперь
+                этот пояс лежит на самом гриде и достаётся ВСЕМ его детям сразу — полке, доку и
+                хрому. Одна обёртка вокруг одного органа была бы уже не поясом, а заплатой на том
+                месте, где порвалось первым. */}
+            <AssemblyShelf
+              pieces={pieces}
+              // КАРТА КАК ЕСТЬ, без перекладки ключей: полка сама сворачивает `lineKey` в
+              // `pieceRefKey` для контура, а ткань ключует сырым `lineKey`. Переложи здесь — и
+              // получишь пустую штриховку при живом рецепте, ничего не сломав на глаз.
+              pieceShapes={pieceShapes}
+              pieceClothByColorway={pieceClothByColorway}
+              colorwayIndex={cwIndex}
+              onColorwayIndex={setColorwayIndex}
+              axis={axis}
+              onAxis={prefs.setAxis}
+              filter={shelfFilter}
+              onFilter={setShelfFilter}
+              collapsed={shelfCollapsed}
+              onToggleCollapsed={toggleShelf}
+              intoOf={intoOf}
+              unitOrder={unitOrder}
+              unitNameOf={unitNameOf}
+              selection={pickedSet}
+              onPick={pickPiece}
+              addMode={shelfAddMode}
+              onAddToStep={addPieceToStep}
+              onExitAddMode={exitAddMode}
+              onTilePointerDown={onTilePointerDown}
+              frozen={frozen}
+            />
 
             {/* ── сплиттер полки ───────────────────────────────────────────────────────────── */}
             <SplitBar
@@ -1085,6 +1283,24 @@ export function AssemblyFullscreen({
               </fieldset>
             </section>
           </div>
+
+          {/* ── ghost детали, летящей из полки на полотно ──────────────────────────────────── */}
+          {/* ВНЕ ГРИДА И В ЭКРАННЫХ КООРДИНАТАХ — как рамка маркизы в полотне: положение пишется
+              императивно, потому что меняется со скоростью кадров, а состояние React перерисовывало
+              бы весь экран вместе с редактором шага. `aria-hidden` и `pointer-events-none`: это
+              изображение руки, а не орган — под ним обязан жить hit-тест полотна. */}
+          {tileDragKey !== null && (
+            <div
+              ref={ghostRef}
+              aria-hidden
+              className='pointer-events-none fixed left-0 top-0 z-30 flex items-center justify-center border border-textColor bg-bgColor px-1 opacity-80'
+              style={{ width: GHOST_W, height: GHOST_H, display: 'none' }}
+            >
+              <Text size='micro' component='span' className='min-w-0 truncate uppercase'>
+                {tileDragKey}
+              </Text>
+            </div>
+          )}
 
           {/* ── find ──────────────────────────────────────────────────────────────────────── */}
           {/* Полка говорит, ЧТО существует; палитра — ГДЕ оно лежит. Первая ступень Esc-лестницы:
