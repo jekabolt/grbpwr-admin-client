@@ -74,6 +74,7 @@ import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
+import { planUnitRename, unitRenameAct, type UnitKeyRow } from './assembly-rename';
 import {
   appendLabel,
   canRedo,
@@ -777,9 +778,6 @@ function TrayChip({
 // выражается тем, что автор берёт узел входом и пишет его же ключ выходом. Движок узнаёт
 // поглощение сам; отдельная кнопка «поглотить» была бы вторым способом сказать то же самое.
 
-/** Ровно то, что переписывателю ссылок нужно от строки формы: два места, где живёт ключ узла. */
-type UnitKeyRow = { outputUnitKey?: string; inputKeys?: string[] };
-
 /**
  * Ответ мутатора переименования полю.
  *
@@ -788,53 +786,6 @@ type UnitKeyRow = { outputUnitKey?: string; inputKeys?: string[] };
  * «переименовал». Слова у обоих одни и те же, движковые.
  */
 type RenameOutcome = { ok: true } | { ok: false; why: string };
-
-/** План перезаписи: где стоит ключ и сколько ШАГОВ жест затронет. */
-type UnitRenamePlan = {
-  /** Индексы шагов, у которых ключ стоит ВЫХОДОМ: производитель и каждый поглощающий. */
-  outputs: number[];
-  /** Потребители: адрес шага и позиции ключа внутри его `inputKeys`. */
-  inputs: { index: number; at: number[] }[];
-  /** Сколько РАЗНЫХ шагов затронуто — это число и произносится в успехе. */
-  steps: number;
-};
-
-/**
- * ТРИ ВИДА МЕСТ, ГДЕ СТОИТ КЛЮЧ УЗЛА, а не два.
- *
- *  1. `outputUnitKey` производителя — сама правка;
- *  2. `outputUnitKey` каждого ПОГЛОЩАЮЩЕГО шага: поглощение выражено тем же ключом в ВЫХОДЕ
- *     (`GARMENT + HEM → GARMENT`). Пропустить это значит превратить поглотителей во ВТОРЫХ
- *     ПРОИЗВОДИТЕЛЕЙ старого кода, то есть в новые узлы, — самая тихая из трёх ошибок: на глаз
- *     переименование выглядит удавшимся, а движок начинает отвергать половину карточки;
- *  3. элементы `inputKeys` каждого потребителя.
- *
- * Всё остальное (блоки, фронтир, печать, серверная запись полной заменой) — деривативы, они
- * пересчитаются сами.
- *
- * СКАН ЛЕКСИЧЕСКИЙ, А НЕ ПО РЕЗУЛЬТАТУ СВИПА, и это осознанно: свип знает только ЗАКОННЫЕ узлы, а
- * переписывать надо ВСЕ места, где ключ стоит буквально. На сломанной карточке (второй
- * производитель, отвергнутый джойн) свип половины этих мест не видит вовсе — и переименование
- * оставило бы их со старым кодом, то есть починка ломала бы.
- *
- * СРАВНЕНИЕ ПОБАЙТНОЕ: никаких `trim` и `toLowerCase`. «SHELL» и «Shell» — два разных узла, ровно
- * как в колонке `utf8mb4_bin`.
- */
-function planUnitRename(ops: UnitKeyRow[], from: string): UnitRenamePlan {
-  const outputs: number[] = [];
-  const inputs: { index: number; at: number[] }[] = [];
-  ops.forEach((o, i) => {
-    if (((o?.outputUnitKey ?? '') as string) === from) outputs.push(i);
-    const at: number[] = [];
-    (o?.inputKeys ?? []).forEach((k, j) => {
-      if (k === from) at.push(j);
-    });
-    if (at.length > 0) inputs.push({ index: i, at });
-  });
-  const touched = new Set<number>(outputs);
-  for (const s of inputs) touched.add(s.index);
-  return { outputs, inputs, steps: touched.size };
-}
 
 /**
  * КОД УЗЛА — ПОДТВЕРЖДАЕМЫЙ АКТ, А НЕ ЖИВОЕ ПОЛЕ ФОРМЫ.
@@ -3983,55 +3934,25 @@ export function OperationsField({
   const renameUnit = (stepIndex: number, next: string): RenameOutcome => {
     if (frozen) return { ok: false, why: FROZEN_REFUSAL }; // гейт первой строкой, как у всех мутаторов
     const formOps = ((getValues('operations') ?? []) as UnitKeyRow[]) ?? [];
-    const from = (formOps[stepIndex]?.outputUnitKey ?? '') as string;
-    // Переименовывать нечего: шаг ничего не собирает. Сюда попадают только через поле кода,
-    // которое на таком шаге не рендерится вовсе, — но мутатор про разметку не знает.
-    if (!from) return { ok: false, why: 'this step assembles nothing — there is no code to rename' };
-    if (next === from) return { ok: true }; // побайтно то же самое: жеста не было
-    // ПУСТОЙ КЛЮЧ — ЭТО НЕ ПЕРЕИМЕНОВАНИЕ, А РАСТВОРЕНИЕ, и ведёт оно в СУЩЕСТВУЮЩИЙ мутатор.
-    // Второй растворитель рядом с первым разошёлся бы с ним ровно так же, как разошёлся чип
-    // редактора: тот писал в форму сам и не клал записи в историю.
-    //
-    // ОДИН `trim` НА ВЕСЬ ФАЙЛ, и он не про идентичность: движок читает выход подрезанным, значит
-    // ключ из одних пробелов — это ОТСУТСТВИЕ ключа, и назвать его переименованием значило бы
-    // завести узел, которого свип не видит. Сравнения ключей ниже остаются побайтными.
-    if (next.trim() === '') {
+    // ВЕСЬ РАЗБОР — В ЧИСТОМ МОДУЛЕ, а здесь только его исполнение. Пока лестница условий жила
+    // тут, удостоверяла её лишь копия, написанная в пробе истории, — и копия успела разойтись с
+    // оригиналом на две ветки. `unitRenameAct` покрыт `scripts/assembly-rename-probe.mjs`.
+    const act = unitRenameAct(formOps, stepIndex, next, pieces);
+    if (act.kind === 'noop') return { ok: true }; // побайтно то же самое: жеста не было
+    if (act.kind === 'refuse') {
+      // ОТКАЗ — СЛОВАМИ ДВИЖКА И БЕЗ ЕДИНОЙ ЗАПИСИ, причём и в снекбар, и возвратом: снекбар
+      // гаснет, а поле с набранным, но не применённым кодом остаётся на экране.
+      showMessage(act.why, 'error');
+      return { ok: false, why: act.why };
+    }
+    if (act.kind === 'dissolve') {
+      // ПУСТОЙ КЛЮЧ — ЭТО НЕ ПЕРЕИМЕНОВАНИЕ, А РАСТВОРЕНИЕ, и ведёт оно в СУЩЕСТВУЮЩИЙ мутатор.
+      // Второй растворитель рядом с первым разошёлся бы с ним ровно так же, как разошёлся чип
+      // редактора: тот писал в форму сам и не клал записи в историю.
       dissolveUnit(stepIndex);
       return { ok: true };
     }
-    // КОЛЛИЗИЯ — СЛОВАМИ ДВИЖКА И БЕЗ ЕДИНОЙ ЗАПИСИ. Пространство имён у деталей и узлов одно
-    // (правило 6), поэтому спрашиваются оба.
-    const piece = pieces.find((p) => p.lineKey === next);
-    if (piece) {
-      const why = `the unit key “${next}” is taken by piece “${piece.name || next}”: pieces and units share one namespace`;
-      showMessage(why, 'error');
-      return { ok: false, why };
-    }
-    const taken = formOps.findIndex((o) => ((o?.outputUnitKey ?? '') as string) === next);
-    if (taken >= 0) {
-      // Номер ЭКРАННЫЙ — `(i + 1) * 10`, как на рельсе и в боксах: движок считает шаги
-      // порядковыми (`step 3`), а человек читает «шаг 30», и назвать ему порядковый значит
-      // отправить искать не тот шаг.
-      const why = `unit “${next}” is already produced by step ${(taken + 1) * 10} — pick another code, or dissolve that unit first`;
-      showMessage(why, 'error');
-      return { ok: false, why };
-    }
-
-    const plan = planUnitRename(formOps, from);
-    // ТРЕТЬЯ КОЛЛИЗИЯ — ДУБЛЬ ВО ВХОДАХ ОДНОГО ШАГА (правило 7). Двух проверок выше мало: новый
-    // ключ может нигде не производиться и не быть деталью — и всё равно СТОЯТЬ ВХОДОМ там же, где
-    // стоит старый. Это состояние живое: растворение узла оставляет у потребителей висячие ссылки
-    // именно на такой ключ. Переписав старый ключ в новый, жест ставит один и тот же вход дважды —
-    // движок отвергает шаг правилом 7, а слова показывает не о переименовании, и человек ищет
-    // причину не там. Отказ произносится ЗДЕСЬ и до единой записи.
-    const clash = plan.inputs.find((s) =>
-      ((formOps[s.index]?.inputKeys ?? []) as string[]).includes(next),
-    );
-    if (clash) {
-      const why = `step ${(clash.index + 1) * 10} already takes “${next}” as an input: renaming “${from}” would put the same input there twice — drop one of them first`;
-      showMessage(why, 'error');
-      return { ok: false, why };
-    }
+    const { from, plan } = act;
     // АДРЕСА СВЕРЯЮТСЯ ДО ПЕРВОЙ ЗАПИСИ. Без `fieldId` записи истории нет, а жест без отмены
     // хуже отказа: пусть лучше не состоится ничего, чем состоится неотменяемое.
     const outputs: RenameOutputSite[] = [];

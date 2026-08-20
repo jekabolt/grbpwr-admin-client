@@ -63,6 +63,7 @@ const {
   resolvePending,
   undoStep,
   undoTitle,
+  unitRenameAct,
 } = await import(pathToFileURL(outfile).href);
 
 let checks = 0;
@@ -518,7 +519,7 @@ const applyEdits = (pos, edits) => {
 };
 const inverseEdits = (pos, edits) => edits.map((e) => ({ key: e.key, at: pos[e.key] ?? null }));
 
-function stand(initialIds = []) {
+function stand(initialIds = [], pieces = []) {
   let hist = emptyHistory();
   let pending = null;
   let fields = initialIds.map((id) => ({ id }));
@@ -603,33 +604,28 @@ function stand(initialIds = []) {
     /**
      * `renameUnit` — переписыватель ссылок. ТРИ ВИДА МЕСТ, одна запись, одно слово.
      *
-     * Модель повторяет мутатор ровно там, где он ошибается тихо: собирает адреса ДО первой записи,
-     * пишет их одним проходом и кладёт ОДНУ запись, инвертирующую всё разом.
+     * РАСЧЁТ ЗДЕСЬ НАСТОЯЩИЙ — `unitRenameAct` из `assembly-rename.ts`, тот же, что зовёт мутатор.
+     * Раньше на этом месте стояла КОПИЯ, и она успела разойтись с оригиналом на две ветки: в ней
+     * не было ни растворения по пустому ключу, ни коллизии с деталью. Модель повторяет только то,
+     * ради чего написана, — двухтактную запись истории и перезапись формы по её адресам.
      */
     rename(index, next) {
       if (frozen) return { ok: false, why: 'frozen' };
-      const from = outputOf(index);
-      if (!from || next === from) return { ok: false, why: 'nothing to rename' };
-      // Коллизия — отказ БЕЗ ЕДИНОЙ ЗАПИСИ. Сравнение побайтное: «Shell» не занят «SHELL».
-      if (fields.some((_, i) => outputOf(i) === next)) {
-        said.push(`unit “${next}” is already produced`);
-        return { ok: false, why: 'taken' };
+      const act = unitRenameAct(api.card.map((r) => ({ outputUnitKey: r.out, inputKeys: r.ins })), index, next, pieces);
+      if (act.kind === 'noop') return { ok: true };
+      if (act.kind === 'dissolve') {
+        api.dissolve(index);
+        return { ok: true };
       }
-      const outputs = [];
+      if (act.kind === 'refuse') {
+        said.push(act.why);
+        return { ok: false, why: act.why };
+      }
+      const { from, plan } = act;
+      const outputs = plan.outputs.map((i) => ({ index: i, fieldId: fields[i].id }));
       const inputs = [];
-      fields.forEach((f, i) => {
-        if (outputOf(i) === from) outputs.push({ index: i, fieldId: f.id });
-        inputsOf(i).forEach((k, j) => {
-          if (k === from) inputs.push({ index: i, fieldId: f.id, at: j });
-        });
-      });
-      // ТРЕТЬЯ КОЛЛИЗИЯ — ДУБЛЬ ВО ВХОДАХ ОДНОГО ШАГА (правило 7). Новый ключ может нигде не
-      // производиться и всё равно СТОЯТЬ ВХОДОМ там же, где старый: висячая ссылка на растворённый
-      // узел выглядит ровно так. Перезапись поставила бы один и тот же вход дважды.
-      const clash = inputs.find((s) => inputsOf(s.index).includes(next));
-      if (clash) {
-        said.push(`step ${(clash.index + 1) * 10} already takes “${next}” as an input`);
-        return { ok: false, why: 'duplicate-input' };
+      for (const s of plan.inputs) {
+        for (const at of s.at) inputs.push({ index: s.index, fieldId: fields[s.index].id, at });
       }
       api.write({ outputs, inputs }, next);
       hist = record(hist, {
@@ -642,7 +638,7 @@ function stand(initialIds = []) {
         inputs,
         label: renameLabel(from, next),
       });
-      said.push(`renamed ${from} → ${next} in ${new Set([...outputs, ...inputs].map((x) => x.index)).size} steps`);
+      said.push(`renamed ${from} → ${next} in ${plan.steps} steps`);
       return { ok: true };
     },
 
@@ -967,7 +963,11 @@ function chain() {
   no('коллизия отказала', r.ok);
   is('карточка не тронута', j(s.card), before);
   is('истории не появилось', s.history.undo.length, 0);
-  is('и отказ произнесён', s.said.at(-1), 'unit “GARMENT” is already produced');
+  is(
+    'и отказ произнесён словами движка',
+    s.said.at(-1),
+    'unit “GARMENT” is already produced by step 40 — pick another code, or dissolve that unit first',
+  );
 }
 
 {
@@ -984,7 +984,11 @@ function chain() {
   no('дубль во входах отказал', r.ok);
   is('карточка не тронута', j(s.card), before);
   is('истории не появилось', s.history.undo.length, 0);
-  is('и отказ назвал шаг', s.said.at(-1), 'step 20 already takes “LOST” as an input');
+  is(
+    'и отказ назвал шаг',
+    s.said.at(-1),
+    'step 20 already takes “LOST” as an input: renaming “SHELL” would put the same input there twice — drop one of them first',
+  );
   // А безопасное переименование на той же карточке проходит, и отмена возвращает ИСХОДНЫЕ строки,
   // а не «переименовывает обратно»: висячая ссылка на LOST жестом не тронута ни разу.
   s.rename(0, 'CARCASS');
