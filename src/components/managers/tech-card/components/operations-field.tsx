@@ -1,5 +1,7 @@
 import { adminService } from 'api/api';
 import {
+  common_TechCardButtonholeOrientation,
+  common_TechCardButtonholeStyle,
   common_TechCardMachineType,
   common_TechCardOperation,
   common_TechCardOperationType,
@@ -32,6 +34,24 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary, revealField } from 'utils/field-errors';
 import {
+  // ВИДЫ ОПЕРАЦИЙ (0324): подписи пятнадцати новых словарей берутся ТАМ ЖЕ, где их берёт печатный
+  // лист. Второй набор слов здесь означал бы, что экран и бумага могут разойтись в названии одного
+  // и того же токена, — а расходятся они молча и обнаруживаются в цеху.
+  BUTTON_ATTACH_PATTERN_LABELS,
+  BINDING_STYLE_LABELS,
+  CLEANING_KIND_LABELS,
+  HARDWARE_ATTACH_METHOD_LABELS,
+  HOLE_PREP_LABELS,
+  INSPECT_COVERAGE_LABELS,
+  LABEL_ATTACH_STITCH_LABELS,
+  PEEL_MODE_LABELS,
+  PRESSURE_SCALE_LABELS,
+  PRINT_METHOD_LABELS,
+  REINFORCEMENT_LABELS,
+  SEAM_SECURING_LABELS,
+  TRIM_ACTION_LABELS,
+  WET_PROCESS_KIND_LABELS,
+  ZIPPER_APPLICATION_LABELS,
   attachmentKindLabel,
   attachmentOptions,
   operationHeading,
@@ -40,15 +60,16 @@ import {
   stitchLengthMm,
   topstitchModeHasNoWidth,
   topstitchModeHasWidth,
-  topstitchModeOptions,
+  topstitchModeOptionsFor,
   zoneOptions,
 } from './operation-options';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
   isMachineStepType,
   isPressStepType,
+  isWeldMachineType,
   machineProfileName,
-  machineTypeOptions,
+  machineTypeOptionsFor,
   needleTypeLabel,
   needleTypeOptions,
   pressClothLabel,
@@ -59,6 +80,7 @@ import {
   pressProfileName,
   resolveMachineProfile,
   resolvePressProfile,
+  stepTypeOwnsBlock,
   threadTensionLabel,
   threadTensionOptions,
 } from './equipment-options';
@@ -136,6 +158,180 @@ const NONE_NEEDLE = 'TECH_CARD_NEEDLE_TYPE_UNKNOWN';
 const NONE_TENSION = 'TECH_CARD_THREAD_TENSION_UNKNOWN';
 const NONE_PRESS_CLOTH = 'TECH_CARD_PRESS_CLOTH_UNKNOWN';
 
+// ВИДЫ ОПЕРАЦИЙ (0324): незаданный член пятнадцати новых словарей. UNSET ЗДЕСЬ — «НЕ УКАЗАНО», И
+// ЭТО НЕ «НЕТ»: явное «нет» у семи из них есть отдельным ответом (`NONE` — «без закрепки», «нет
+// носителя», «отверстие не готовят»), и стереть его в UNKNOWN значило бы стереть инструкцию.
+// Наследования у этих полей нет ни от профиля, ни от карточки — пусто здесь означает ровно
+// «никто не сказал».
+const NONE_SEAM_SECURING = 'TECH_CARD_SEAM_SECURING_UNKNOWN';
+const NONE_BINDING_STYLE = 'TECH_CARD_BINDING_STYLE_UNKNOWN';
+const NONE_LABEL_ATTACH = 'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN';
+const NONE_ATTACH_METHOD = 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN';
+const NONE_HOLE_PREP = 'TECH_CARD_HOLE_PREP_UNKNOWN';
+const NONE_REINFORCEMENT = 'TECH_CARD_REINFORCEMENT_UNKNOWN';
+const NONE_PRINT_METHOD = 'TECH_CARD_PRINT_METHOD_UNKNOWN';
+const NONE_PEEL_MODE = 'TECH_CARD_PEEL_MODE_UNKNOWN';
+const NONE_PRESSURE_SCALE = 'TECH_CARD_PRESSURE_SCALE_UNKNOWN';
+const NONE_TRIM_ACTION = 'TECH_CARD_TRIM_ACTION_UNKNOWN';
+const NONE_CLEANING_KIND = 'TECH_CARD_CLEANING_KIND_UNKNOWN';
+const NONE_COVERAGE_MODE = 'TECH_CARD_INSPECT_COVERAGE_UNKNOWN';
+const NONE_WET_PROCESS = 'TECH_CARD_WET_PROCESS_KIND_UNKNOWN';
+const NONE_BUTTONHOLE_STYLE = 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN';
+const NONE_BUTTONHOLE_ORIENTATION = 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN';
+const NONE_ATTACH_PATTERN = 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN';
+const NONE_ZIPPER_APPLICATION = 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN';
+
+// The machine types that make a WELD rather than a stitch — the same pair isWeldMachineType names,
+// split apart here because only one of them blows hot air: an ultrasonic horn heats the material
+// itself and has no air temperature to state.
+const SEAM_TAPING = 'TECH_CARD_MACHINE_TYPE_SEAM_TAPING';
+// Цикловые автоматы: у петли, пуговицы и закрепки есть отверстие, усилитель и программа цикла — но
+// нет «способа крепления» и нет стропы. Тот же список, что в маппере записи.
+const CYCLE_MACHINES = [
+  'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+  'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+  'TECH_CARD_MACHINE_TYPE_BARTACK',
+];
+const BUTTONHOLE_MACHINE = 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE';
+const BARTACK_MACHINE = 'TECH_CARD_MACHINE_TYPE_BARTACK';
+const BUTTON_ATTACH_MACHINE = 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH';
+const ZIPPER_MACHINE = 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING';
+const BINDER_MACHINE = 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING';
+const LASER_ENGRAVE = 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE';
+const THREADED_HARDWARE = 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED';
+
+// ТРИ ДИСЦИПЛИНЫ ПУСТОТЫ — ТРИ СПИСКА ИМЁН, а не один: у enum'а пусто это токен `*_UNKNOWN`, у
+// целого — 0, у децимала — пустая строка (на проводе `inputToDecimal('')` вернёт undefined, ключ
+// выпадет, колонка останется NULL). Очистка скрытого ходит по ним типизированно, чтобы поле,
+// переехавшее из одной дисциплины в другую, роняло сборку здесь, а не записывало '' в int.
+type StepEnumField =
+  | 'seamSecuring'
+  | 'bindingStyle'
+  | 'labelAttachStitch'
+  | 'attachMethod'
+  | 'holePrep'
+  | 'reinforcement'
+  | 'printMethod'
+  | 'peelMode'
+  | 'pressureScale'
+  | 'trimAction'
+  | 'cleaningKind'
+  | 'coverageMode'
+  | 'wetProcessKind'
+  | 'buttonholeStyle'
+  | 'buttonholeOrientation'
+  | 'attachPattern'
+  | 'zipperApplication';
+type StepTextField =
+  | 'needleGaugeMm'
+  | 'rowSpacingMm'
+  | 'fullnessRatio'
+  | 'pitchMm'
+  | 'foldbackMm'
+  | 'feedSpeedMMin'
+  | 'residualAllowanceMm'
+  | 'residualTailMaxMm'
+  | 'cutLengthMm'
+  | 'bartackLengthMm';
+type StepIntField =
+  | 'needleCount'
+  | 'placementCount'
+  | 'cycleStitchCount'
+  | 'secondPressSec'
+  | 'airTemperatureC';
+
+// ПИКЕР ИЗ ПЕЧАТНОГО СЛОВАРЯ, И ТОЛЬКО ОДНА СТРОКА ДОБАВЛЕНА СВОЯ. Карты подписей в
+// operation-options пишут UNKNOWN пустой строкой намеренно: на бумаге «не указано» печатается
+// НИЧЕМ. В селекте пустая строка — это пустая первая строка списка, поэтому шапку («— не указано —»)
+// даёт вызывающий, а все содержательные слова остаются одними на экран и на лист.
+//
+// И ТА ЖЕ ЗАЩИТА ОТ НЕЗНАКОМОГО ТОКЕНА, что у machineTypeOptionsFor: каждая из этих карт ТОТАЛЬНА
+// над контрактом, значит токен вне списка — не легаси, а значение НОВЕЕ этого бандла (обычное
+// состояние проекта между выкаткой бэка и выкаткой клиента). Radix рисует селект со значением вне
+// своих items ПУСТЫМ триггером, и технолог читает «свойства нет» там, где оно есть.
+function stepEnumOptions<T extends string>(
+  labels: Record<T, string>,
+  unsetCaption: string,
+  current?: string,
+): Array<{ value: string; label: string }> {
+  const items = (Object.keys(labels) as T[]).map((value) => ({
+    value: value as string,
+    label: labels[value] || unsetCaption,
+  }));
+  const v = (current ?? '').trim();
+  if (!v || v in labels) return items;
+  return [...items, { value: v, label: `${v} — unknown to this app version` }];
+}
+
+// FA1 / FA5 — ЕДИНСТВЕННЫЕ ДВЕ ПОДПИСИ, ЖИВУЩИЕ ЗДЕСЬ, А НЕ В ОБЩЕМ СЛОВАРЕ, и причина в форме
+// слова: на листе форма и направление петли печатаются ОДНОЙ вещью («horizontal round-end
+// buttonhole»), поэтому там они заведены прилагательными и приватны. Селекту нужен самостоятельный
+// пункт с существительным, иначе список читается «straight / eyelet / round-end» без ответа на
+// вопрос «чего». Тотальный `Record` — тот же диффчек контракта, что у остальных карт.
+const BUTTONHOLE_STYLE_ITEMS: Record<common_TechCardButtonholeStyle, string> = {
+  TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN: '',
+  TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT: 'straight buttonhole',
+  TECH_CARD_BUTTONHOLE_STYLE_EYELET: 'eyelet buttonhole',
+  TECH_CARD_BUTTONHOLE_STYLE_ROUND_END: 'round-end buttonhole',
+  TECH_CARD_BUTTONHOLE_STYLE_OTHER: 'other shape (see note)',
+};
+const BUTTONHOLE_ORIENTATION_ITEMS: Record<common_TechCardButtonholeOrientation, string> = {
+  TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN: '',
+  TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL: 'horizontal',
+  TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL: 'vertical',
+  TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED: 'angled',
+};
+
+// ДИСКРИМИНАТОР ГЛАГОЛА — ВТОРАЯ ОСЬ ТОЧНО ТАК ЖЕ, КАК МАШИНКА У «MACHINE». Шесть новых глаголов
+// без своего поля — заголовок, а не инструкция: «печать» не говорит, шелкография это или
+// гравировка, «контроль» — сплошной он или по выборке. Сервер требует их БЕЗУСЛОВНО, поэтому они
+// стоят в ЯДРЕ сетки рядом с типом, а не в фолде: обязательное поле за закрытым аккордеоном — это
+// сохранение, падающее на контроле, которого нет на экране (тот же довод, что у machine * и
+// equipment *).
+const STEP_DISCRIMINATORS: Partial<
+  Record<
+    common_TechCardOperationType,
+    { field: string; label: string; labels: Record<string, string>; unset: string }
+  >
+> = {
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: {
+    field: 'attachMethod',
+    label: 'held on by *',
+    labels: HARDWARE_ATTACH_METHOD_LABELS,
+    unset: '— how —',
+  },
+  TECH_CARD_OPERATION_TYPE_PRINT: {
+    field: 'printMethod',
+    label: 'print method *',
+    labels: PRINT_METHOD_LABELS,
+    unset: '— method —',
+  },
+  TECH_CARD_OPERATION_TYPE_TRIM: {
+    field: 'trimAction',
+    label: 'cut *',
+    labels: TRIM_ACTION_LABELS,
+    unset: '— which cut —',
+  },
+  TECH_CARD_OPERATION_TYPE_CLEAN: {
+    field: 'cleaningKind',
+    label: 'clean off *',
+    labels: CLEANING_KIND_LABELS,
+    unset: '— what —',
+  },
+  TECH_CARD_OPERATION_TYPE_INSPECT: {
+    field: 'coverageMode',
+    label: 'coverage *',
+    labels: INSPECT_COVERAGE_LABELS,
+    unset: '— how much —',
+  },
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: {
+    field: 'wetProcessKind',
+    label: 'bath *',
+    labels: WET_PROCESS_KIND_LABELS,
+    unset: '— which bath —',
+  },
+};
+
 // WHICH OF THE TWO EQUIPMENT BLOCKS A STEP OWNS. One step type answers «machine», three answer
 // «ВТО», the rest own neither — and the server refuses a field from the wrong block BY NAME, so
 // these two predicates decide what is rendered, what is cleared and what is counted as an override.
@@ -160,6 +356,15 @@ const CORE_STEP_FIELDS = new Set([
   // этих полях не должен раскрывать фолд, в котором нужного контрола нет.
   'outputUnitKey',
   'outputUnitName',
+  // ШЕСТЬ ДИСКРИМИНАТОРОВ ВОЛНЫ 0324 — по одному на глагол, и все шестеро REQUIRED. Они стоят в
+  // ядре сетки (STEP_DISCRIMINATORS), значит и здесь: попади любой из них в этот фолд, его
+  // серверный или зодовский отказ раскрывал бы аккордеон, в котором контрола нет вовсе.
+  'attachMethod',
+  'printMethod',
+  'trimAction',
+  'cleaningKind',
+  'coverageMode',
+  'wetProcessKind',
 ]);
 
 // What a step INHERITS, written the way it is shown: «4 (оверлок у окна)», «4 (card)», «not set».
@@ -303,6 +508,48 @@ export const emptyOperation = {
   // a default of false would state the instruction «dry» on every step nobody has answered.
   pressSteam: undefined as boolean | undefined,
   pressCloth: NONE_PRESS_CLOTH,
+  // ВИДЫ ОПЕРАЦИЙ (0324): ТРИДЦАТЬ ДВА КЛЮЧА, И НИ ОДНОГО НЕЛЬЗЯ ОПУСТИТЬ. Довод — тот же, что у
+  // блоков оборудования выше, и он сильнее всего именно здесь: объект расстилается прямо в строку
+  // массива полей, и ключ, которого тут нет, RHF НЕ РЕГИСТРИРУЕТ ВОВСЕ. Контрол такого поля читает
+  // с формы `undefined`, а круг «загрузил → сохранил» теряет значение молча — увидеть потерю
+  // нечем, потому что терять нечего: поля в форме не существовало.
+  //
+  // Дисциплина пустоты — ровно как в схеме: enum → `*_UNKNOWN`, int32 → `0`, decimal → `''`.
+  // Порядок — канон плана (S → PL → H → P → W → T → F → C → Q → WP, затем дельта), тот же, что у
+  // схемы, маппера и колонок стора: разъезд порядка между четырьмя списками и есть тот дефект шва,
+  // ради которого канон назначен.
+  needleCount: 0,
+  needleGaugeMm: '',
+  seamSecuring: NONE_SEAM_SECURING,
+  rowSpacingMm: '',
+  fullnessRatio: '',
+  placementCount: 0,
+  pitchMm: '',
+  attachMethod: NONE_ATTACH_METHOD,
+  holePrep: NONE_HOLE_PREP,
+  reinforcement: NONE_REINFORCEMENT,
+  foldbackMm: '',
+  cycleStitchCount: 0,
+  printMethod: NONE_PRINT_METHOD,
+  peelMode: NONE_PEEL_MODE,
+  secondPressSec: 0,
+  pressureScale: NONE_PRESSURE_SCALE,
+  airTemperatureC: 0,
+  feedSpeedMMin: '',
+  trimAction: NONE_TRIM_ACTION,
+  residualAllowanceMm: '',
+  residualTailMaxMm: '',
+  cleaningKind: NONE_CLEANING_KIND,
+  coverageMode: NONE_COVERAGE_MODE,
+  wetProcessKind: NONE_WET_PROCESS,
+  buttonholeStyle: NONE_BUTTONHOLE_STYLE,
+  cutLengthMm: '',
+  buttonholeOrientation: NONE_BUTTONHOLE_ORIENTATION,
+  bartackLengthMm: '',
+  attachPattern: NONE_ATTACH_PATTERN,
+  zipperApplication: NONE_ZIPPER_APPLICATION,
+  bindingStyle: NONE_BINDING_STYLE,
+  labelAttachStitch: NONE_LABEL_ATTACH,
   note: '',
   inputKeys: [] as string[],
   outputUnitKey: '',
@@ -375,6 +622,51 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     // Verbatim, undefined included — see emptyOperation.
     pressSteam: o.pressSteam,
     pressCloth: o.pressCloth || NONE_PRESS_CLOTH,
+    // ВИДЫ ОПЕРАЦИЙ (0324): ВТОРОЙ КОНСТРУКТОР СТРОКИ ШАГА, И ОН РАСХОДИТСЯ С ПЕРВЫМ МОЛЧА. Ключ,
+    // забытый здесь, у AI-черновика просто отсутствует — RHF его не регистрирует, поле пустует, и
+    // ничто в типах об этом не скажет (возвращаемый тип — строка формы, а у неё все новые ключи
+    // необязательны на входе).
+    //
+    // ЧИТАЕТСЯ ЧЕРЕЗ `?.`, как и в techCardToForm: незаполненное блок-сообщение приходит с провода
+    // ЯВНЫМ `null` (EmitUnpopulated), а не отсутствующим ключом, поэтому `o.stitching.needleCount`
+    // упал бы на первом же шаге без строчки. Модель сегодня не заполняет ни одного из этих блоков
+    // (aiOperationToPb их не строит) — фолбэки написаны заранее, ровно как у узловых входов выше:
+    // научившийся им генератор иначе молча ронял бы половину шага.
+    needleCount: o.stitching?.needleCount || 0,
+    needleGaugeMm: decimalToInput(o.stitching?.needleGaugeMm),
+    seamSecuring: o.stitching?.seamSecuring || NONE_SEAM_SECURING,
+    rowSpacingMm: decimalToInput(o.stitching?.rowSpacingMm),
+    fullnessRatio: decimalToInput(o.stitching?.fullnessRatio),
+    // Имя поля на проводе — `placementLayout`: «placement» занято reserved-именем легаси-поля
+    // свободного текста, снять его нельзя (на JSON-ключах легаси держится разбор архивных
+    // релизных снапшотов). Колонки при этом остались placement_count / pitch_mm.
+    placementCount: o.placementLayout?.count || 0,
+    pitchMm: decimalToInput(o.placementLayout?.pitchMm),
+    attachMethod: o.hardware?.attachMethod || NONE_ATTACH_METHOD,
+    holePrep: o.hardware?.holePrep || NONE_HOLE_PREP,
+    reinforcement: o.hardware?.reinforcement || NONE_REINFORCEMENT,
+    foldbackMm: decimalToInput(o.hardware?.foldbackMm),
+    cycleStitchCount: o.hardware?.cycleStitchCount || 0,
+    printMethod: o.printMethod || NONE_PRINT_METHOD,
+    peelMode: o.print?.peelMode || NONE_PEEL_MODE,
+    secondPressSec: o.print?.secondPressSec || 0,
+    pressureScale: o.print?.pressureScale || NONE_PRESSURE_SCALE,
+    airTemperatureC: o.weld?.airTemperatureC || 0,
+    feedSpeedMMin: decimalToInput(o.weld?.feedSpeedMMin),
+    trimAction: o.trim?.action || NONE_TRIM_ACTION,
+    residualAllowanceMm: decimalToInput(o.trim?.residualAllowanceMm),
+    residualTailMaxMm: decimalToInput(o.threadTrim?.residualTailMaxMm),
+    cleaningKind: o.clean?.kind || NONE_CLEANING_KIND,
+    coverageMode: o.inspect?.coverageMode || NONE_COVERAGE_MODE,
+    wetProcessKind: o.wetProcessKind || NONE_WET_PROCESS,
+    buttonholeStyle: o.fastening?.buttonholeStyle || NONE_BUTTONHOLE_STYLE,
+    cutLengthMm: decimalToInput(o.fastening?.cutLengthMm),
+    buttonholeOrientation: o.fastening?.buttonholeOrientation || NONE_BUTTONHOLE_ORIENTATION,
+    bartackLengthMm: decimalToInput(o.fastening?.bartackLengthMm),
+    attachPattern: o.fastening?.attachPattern || NONE_ATTACH_PATTERN,
+    zipperApplication: o.fastening?.zipperApplication || NONE_ZIPPER_APPLICATION,
+    bindingStyle: o.stitching?.bindingStyle || NONE_BINDING_STYLE,
+    labelAttachStitch: o.stitching?.labelAttachStitch || NONE_LABEL_ATTACH,
     note: o.note?.trim() || '',
   };
 }
@@ -1552,7 +1844,20 @@ function InheritableNumberField({
   value,
   placeholder,
 }: {
-  name: `operations.${number}.${'threadCount' | 'needleSizeNm' | 'pressTemperatureC' | 'pressDwellSec'}`;
+  name: `operations.${number}.${
+    | 'threadCount'
+    | 'needleSizeNm'
+    | 'pressTemperatureC'
+    | 'pressDwellSec'
+    // ВИДЫ ОПЕРАЦИЙ (0324). Пятеро новых пришли за ОБОИМИ доводами выше — ноль обязан читаться
+    // пустой коробкой, а `step='any'` обязан снять нативную проверку шага, — и НЕ пришли за
+    // третьим: наследовать им неоткуда, лестницы у этих полей нет. Плейсхолдер у них поэтому
+    // ПРИМЕР («1..12»), а не обещание, и на месте он стоит только потому, что коробка пуста.
+    | 'needleCount'
+    | 'placementCount'
+    | 'cycleStitchCount'
+    | 'secondPressSec'
+    | 'airTemperatureC'}`;
   label: string;
   value: number;
   placeholder: string;
@@ -1783,8 +2088,129 @@ function OperationEditor({
   const pressCloth = (useWatch({ control, name: `operations.${index}.pressCloth` }) ??
     NONE_PRESS_CLOTH) as string;
 
+  // --- ВИДЫ ОПЕРАЦИЙ (0324): тридцать два факта девяти новых глаголов -------------------------
+  // По одному `useWatch` на поле, как и у двух осей выше. Не «на всякий случай»: каждое из этих
+  // значений читают счётчик фолда (пилюля решает, ОТКРЫТЬ ли аккордеон на монтировании — заполненный
+  // факт за закрытой створкой равносилен потерянному) и правила показа соседей.
+  const needleCount = (useWatch({ control, name: `operations.${index}.needleCount` }) ??
+    0) as number;
+  const needleGaugeMm = (useWatch({ control, name: `operations.${index}.needleGaugeMm` }) ??
+    '') as string;
+  const seamSecuring = (useWatch({ control, name: `operations.${index}.seamSecuring` }) ??
+    NONE_SEAM_SECURING) as string;
+  const rowSpacingMm = (useWatch({ control, name: `operations.${index}.rowSpacingMm` }) ??
+    '') as string;
+  const fullnessRatio = (useWatch({ control, name: `operations.${index}.fullnessRatio` }) ??
+    '') as string;
+  const placementCount = (useWatch({ control, name: `operations.${index}.placementCount` }) ??
+    0) as number;
+  const pitchMm = (useWatch({ control, name: `operations.${index}.pitchMm` }) ?? '') as string;
+  const attachMethod = (useWatch({ control, name: `operations.${index}.attachMethod` }) ??
+    NONE_ATTACH_METHOD) as string;
+  const holePrep = (useWatch({ control, name: `operations.${index}.holePrep` }) ??
+    NONE_HOLE_PREP) as string;
+  const reinforcement = (useWatch({ control, name: `operations.${index}.reinforcement` }) ??
+    NONE_REINFORCEMENT) as string;
+  const foldbackMm = (useWatch({ control, name: `operations.${index}.foldbackMm` }) ?? '') as string;
+  const cycleStitchCount = (useWatch({ control, name: `operations.${index}.cycleStitchCount` }) ??
+    0) as number;
+  const printMethod = (useWatch({ control, name: `operations.${index}.printMethod` }) ??
+    NONE_PRINT_METHOD) as string;
+  const peelMode = (useWatch({ control, name: `operations.${index}.peelMode` }) ??
+    NONE_PEEL_MODE) as string;
+  const secondPressSec = (useWatch({ control, name: `operations.${index}.secondPressSec` }) ??
+    0) as number;
+  const pressureScale = (useWatch({ control, name: `operations.${index}.pressureScale` }) ??
+    NONE_PRESSURE_SCALE) as string;
+  const airTemperatureC = (useWatch({ control, name: `operations.${index}.airTemperatureC` }) ??
+    0) as number;
+  const feedSpeedMMin = (useWatch({ control, name: `operations.${index}.feedSpeedMMin` }) ??
+    '') as string;
+  const trimAction = (useWatch({ control, name: `operations.${index}.trimAction` }) ??
+    NONE_TRIM_ACTION) as string;
+  const residualAllowanceMm = (useWatch({
+    control,
+    name: `operations.${index}.residualAllowanceMm`,
+  }) ?? '') as string;
+  const residualTailMaxMm = (useWatch({
+    control,
+    name: `operations.${index}.residualTailMaxMm`,
+  }) ?? '') as string;
+  const cleaningKind = (useWatch({ control, name: `operations.${index}.cleaningKind` }) ??
+    NONE_CLEANING_KIND) as string;
+  const coverageMode = (useWatch({ control, name: `operations.${index}.coverageMode` }) ??
+    NONE_COVERAGE_MODE) as string;
+  const wetProcessKind = (useWatch({ control, name: `operations.${index}.wetProcessKind` }) ??
+    NONE_WET_PROCESS) as string;
+  const buttonholeStyle = (useWatch({ control, name: `operations.${index}.buttonholeStyle` }) ??
+    NONE_BUTTONHOLE_STYLE) as string;
+  const cutLengthMm = (useWatch({ control, name: `operations.${index}.cutLengthMm` }) ??
+    '') as string;
+  const buttonholeOrientation = (useWatch({
+    control,
+    name: `operations.${index}.buttonholeOrientation`,
+  }) ?? NONE_BUTTONHOLE_ORIENTATION) as string;
+  const bartackLengthMm = (useWatch({ control, name: `operations.${index}.bartackLengthMm` }) ??
+    '') as string;
+  const attachPattern = (useWatch({ control, name: `operations.${index}.attachPattern` }) ??
+    NONE_ATTACH_PATTERN) as string;
+  const zipperApplication = (useWatch({ control, name: `operations.${index}.zipperApplication` }) ??
+    NONE_ZIPPER_APPLICATION) as string;
+  const bindingStyle = (useWatch({ control, name: `operations.${index}.bindingStyle` }) ??
+    NONE_BINDING_STYLE) as string;
+  const labelAttachStitch = (useWatch({ control, name: `operations.${index}.labelAttachStitch` }) ??
+    NONE_LABEL_ATTACH) as string;
+
   const isMachineStep = isMachineType(opType);
   const isPressStep = isPressType(opType);
+
+  // --- ЧТО ЭТОТ ГЛАГОЛ ВООБЩЕ НЕСЁТ (0324) ---------------------------------------------------
+  //
+  // ДВА РАЗНЫХ ВОПРОСА, И ИХ НЕЛЬЗЯ ПУТАТЬ. `isPressStep` отвечает «шаг ЕСТЬ ВТО», из чего следует
+  // ОБЯЗАТЕЛЬНОСТЬ пикера оборудования, — и печать в этот список намеренно не входит.
+  // `ownsBlock('pressSettings')` отвечает «шагу МОЖНО дать настройки пресса»: термотрансфер
+  // прижимают температурой, выдержкой и силиконовой бумагой, не будучи ВТО-шагом. Ниже нужен
+  // второй, иначе очистка скрытого сотрёт ВТО-факты печатного шага при первом же открытии.
+  const ownsBlock = (b: Parameters<typeof stepTypeOwnsBlock>[1]) => stepTypeOwnsBlock(opType, b);
+  const ownsPressSettings = ownsBlock('pressSettings');
+  // ЯВНЫЙ тип машины — тот, что назван НА ШАГЕ. Разрешённый через профиль не засчитывается ни
+  // здесь, ни в маппере, ни на сервере: профиль можно перенаправить на другую машинку, не тронув
+  // ни одного шага, и правило, стоящее на разрешённой лестнице, поменяло бы смысл сохранённых
+  // карточек задним числом.
+  const onMachine = (...tokens: string[]) => isMachineStep && tokens.includes(machineType);
+  const isHardwareStep = opType === 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET';
+  const onCycleMachine = onMachine(...CYCLE_MACHINES);
+  const isWeldStep = isMachineStep && isWeldMachineType(machineType);
+  const isLaserPrint = printMethod === LASER_ENGRAVE;
+  // Семейства ровно в том виде, в каком их принимает сервер: гейт глагола И, где он есть, гейт
+  // явной машинки. Ими гейтится ВСЁ — рендер, очистка скрытого и счётчик фолда, — потому что три
+  // разных ответа на «несёт ли шаг это поле» и есть тот дефект, от которого карточка отказывается
+  // сохраняться, показывая ошибку на контроле, которого нет на экране.
+  const showStitching = ownsBlock('stitching');
+  const showPlacement = ownsBlock('placement');
+  const showHardware = ownsBlock('hardware') && (isHardwareStep || onCycleMachine);
+  const showPrint = ownsBlock('print') && !isLaserPrint;
+  const showWeld = ownsBlock('weld') && isWeldStep;
+  const showTrim = ownsBlock('trim');
+  const showThreadTrim = ownsBlock('threadTrim');
+  const showFastening =
+    ownsBlock('fastening') &&
+    onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE);
+  // Обязательный вопрос глагола — один на глагол, и его текущее значение нужно пикеру, чтобы
+  // токен новее этого бандла не превратился в пустой триггер (см. stepEnumOptions).
+  const stepDiscriminator = STEP_DISCRIMINATORS[opType as common_TechCardOperationType];
+  const discriminatorValue = stepDiscriminator
+    ? ((
+        {
+          attachMethod,
+          printMethod,
+          trimAction,
+          cleaningKind,
+          coverageMode,
+          wetProcessKind,
+        } as Record<string, string>
+      )[stepDiscriminator.field] ?? '')
+    : '';
 
   // The sewing overrides, counted apart from the equipment ones: a ВТО step has no seam class and
   // no stitch density, so on those steps this half of the fold is hidden — but ONLY while it is
@@ -1811,7 +2237,49 @@ function OperationEditor({
     isPressStep && pressSteam !== undefined,
     isPressStep && pressCloth !== NONE_PRESS_CLOTH,
   ].filter(Boolean).length;
-  const overrideCount = sewingOverrideCount + equipmentOverrideCount;
+  // ФАКТЫ НОВЫХ СЕМЕЙСТВ — СЧИТАЮТСЯ ТОЙ ЖЕ ПИЛЮЛЕЙ, И ЭТО НЕ УКРАШЕНИЕ. Створка открывается на
+  // монтировании ровно тогда, когда счётчик не ноль (`useState(overrideCount > 0)`): не посчитав
+  // их, редактор открывал бы шаг с семью заполненными фактами, показывая «inherits everything» и
+  // пряча их за закрытым аккордеоном — то же самое, что потерять.
+  //
+  // ШЕСТЬ ДИСКРИМИНАТОРОВ СЮДА НЕ ВХОДЯТ: они стоят в ядре сетки, всегда на экране, и пилюля
+  // считает то, что фолд прячет.
+  //
+  // Гейт — те же `show*`, что у рендера: непоказанный факт чужого семейства не имеет права
+  // накручивать счётчик створки, в которой его нет (он и не переживёт очистку ниже).
+  const stepFactCount = [
+    showStitching && needleCount > 0,
+    showStitching && needleGaugeMm.trim() !== '',
+    showStitching && seamSecuring !== NONE_SEAM_SECURING,
+    showStitching && rowSpacingMm.trim() !== '',
+    showStitching && fullnessRatio.trim() !== '',
+    showStitching && onMachine(BINDER_MACHINE) && bindingStyle !== NONE_BINDING_STYLE,
+    showStitching && labelAttachStitch !== NONE_LABEL_ATTACH,
+    showPlacement && placementCount > 0,
+    showPlacement && pitchMm.trim() !== '',
+    showHardware && holePrep !== NONE_HOLE_PREP,
+    showHardware && reinforcement !== NONE_REINFORCEMENT,
+    showHardware && cycleStitchCount > 0,
+    showHardware && isHardwareStep && foldbackMm.trim() !== '',
+    showPrint && peelMode !== NONE_PEEL_MODE,
+    showPrint && secondPressSec > 0,
+    showPrint && pressureScale !== NONE_PRESSURE_SCALE,
+    showWeld && onMachine(SEAM_TAPING) && airTemperatureC > 0,
+    showWeld && feedSpeedMMin.trim() !== '',
+    showTrim && residualAllowanceMm.trim() !== '',
+    showThreadTrim && residualTailMaxMm.trim() !== '',
+    showFastening && onMachine(BUTTONHOLE_MACHINE) && buttonholeStyle !== NONE_BUTTONHOLE_STYLE,
+    showFastening && onMachine(BUTTONHOLE_MACHINE) && cutLengthMm.trim() !== '',
+    showFastening &&
+      onMachine(BUTTONHOLE_MACHINE) &&
+      buttonholeOrientation !== NONE_BUTTONHOLE_ORIENTATION,
+    showFastening &&
+      onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE) &&
+      bartackLengthMm.trim() !== '',
+    showFastening && onMachine(BUTTON_ATTACH_MACHINE) && attachPattern !== NONE_ATTACH_PATTERN,
+    showFastening && onMachine(ZIPPER_MACHINE) && zipperApplication !== NONE_ZIPPER_APPLICATION,
+  ].filter(Boolean).length;
+  const overrideCount = sewingOverrideCount + equipmentOverrideCount + stepFactCount;
   const showSewingOverrides = !isPressStep || sewingOverrideCount > 0;
   const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
 
@@ -1887,7 +2355,12 @@ function OperationEditor({
       if ((getValues(`${p}.stitchWidthMm`) ?? '') !== '')
         setValue(`${p}.stitchWidthMm`, '', { shouldDirty: true });
     }
-    if (!isPressStep) {
+    // ВТО-ПОЛОВИНА СПРАШИВАЕТ ДРУГОЙ ВОПРОС, ЧЕМ ПИКЕР ОБОРУДОВАНИЯ (0324). Здесь стоит
+    // `ownsPressSettings`, а не `isPressStep`: печать берёт термопресс взаймы, и её температура,
+    // выдержка и силиконовая бумага — законные факты шага, хотя ВТО и не является тем, ЧТО шаг
+    // делает. С `isPressStep` эта очистка стирала бы их у PRINT-шага при первом же открытии
+    // карточки — молча, до всякого сохранения.
+    if (!ownsPressSettings) {
       if ((getValues(`${p}.pressEquipment`) ?? NONE_PRESS_EQUIPMENT) !== NONE_PRESS_EQUIPMENT)
         setValue(`${p}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: true });
       if ((getValues(`${p}.pressProfileKey`) ?? '') !== '')
@@ -1902,7 +2375,119 @@ function OperationEditor({
       if ((getValues(`${p}.pressCloth`) ?? NONE_PRESS_CLOTH) !== NONE_PRESS_CLOTH)
         setValue(`${p}.pressCloth`, NONE_PRESS_CLOTH, { shouldDirty: true });
     }
-  }, [isMachineStep, isPressStep, index, getValues, setValue]);
+  }, [isMachineStep, ownsPressSettings, index, getValues, setValue]);
+
+  // ТО ЖЕ ПРАВИЛО — НА ДЕВЯТЬ НОВЫХ СЕМЕЙСТВ (0324), и по той же причине: сервер отвергает поле
+  // чужого семейства ПО ИМЕНИ и отказывает вместе с ним ВСЕЙ карточкой. Переключил шаг с «печать»
+  // на «контроль», не убрав режим отслойки, — и сохранение шести вкладок возвращается с отказом на
+  // контроле, которого больше нет на экране.
+  //
+  // ГЕЙТ ЗДЕСЬ ТОТ ЖЕ, ЧТО У МАППЕРА ЗАПИСИ, ПОЛЕ В ПОЛЕ. Разойдись они — и получится либо поле,
+  // которое видно и заполняется, но выбрасывается на проводе (молчаливая потеря), либо значение,
+  // которое стёрто на экране, но уехало из состояния формы. Оба конца проверяются одной таблицей
+  // STEP_TYPE_BLOCKS плюс ЯВНЫЙ тип машины, названный на самом шаге.
+  //
+  // ДВА ПРАВИЛА ВНУТРИ СЕМЕЙСТВА — тот же приём, что у ширины отстрочки: калибр меряет расстояние
+  // МЕЖДУ иглами, шаг — МЕЖДУ повторами, и оба контрола скрыты, пока счётчик меньше двух. Скрытый
+  // контрол обязан быть пустым, иначе zod поставит отказ туда, где его нечем прочитать.
+  //
+  // Пишется только то, что реально заполнено: безусловная запись пометила бы форму грязной от
+  // одного открытия шага, а «unsaved changes» на карточке, которую никто не правил, — это то, как
+  // людей приучают кликать сквозь предупреждение.
+  useEffect(() => {
+    const p = `operations.${index}` as const;
+    const mt = isMachineStep ? machineType : '';
+    const dropEnum = (field: StepEnumField, none: string) => {
+      const path = `${p}.${field}` as const;
+      if ((getValues(path) ?? none) !== none) setValue(path, none, { shouldDirty: true });
+    };
+    const dropText = (field: StepTextField) => {
+      const path = `${p}.${field}` as const;
+      if ((getValues(path) ?? '') !== '') setValue(path, '', { shouldDirty: true });
+    };
+    const dropInt = (field: StepIntField) => {
+      const path = `${p}.${field}` as const;
+      if (getValues(path)) setValue(path, 0, { shouldDirty: true });
+    };
+
+    // S — параметры строчки. Бейка живёт при явном окантовывателе, шов этикетки — при любой машинке.
+    if (!showStitching) {
+      dropInt('needleCount');
+      dropEnum('seamSecuring', NONE_SEAM_SECURING);
+      dropText('rowSpacingMm');
+      dropText('fullnessRatio');
+      dropEnum('labelAttachStitch', NONE_LABEL_ATTACH);
+    }
+    if (!showStitching || needleCount < 2) dropText('needleGaugeMm');
+    if (!showStitching || mt !== BINDER_MACHINE) dropEnum('bindingStyle', NONE_BINDING_STYLE);
+
+    // PL — сколько раз и с каким шагом.
+    if (!showPlacement) dropInt('placementCount');
+    if (!showPlacement || placementCount < 2) dropText('pitchMm');
+
+    // H — установка фурнитуры. На цикловом автомате из блока легальна только тройка «отверстие /
+    // усилитель / стежки цикла»: способа крепления и подгиба стропы у петли и закрепки нет вовсе.
+    if (!isHardwareStep) dropEnum('attachMethod', NONE_ATTACH_METHOD);
+    if (!showHardware) {
+      dropEnum('holePrep', NONE_HOLE_PREP);
+      dropEnum('reinforcement', NONE_REINFORCEMENT);
+      dropInt('cycleStitchCount');
+    }
+    if (!isHardwareStep || attachMethod !== THREADED_HARDWARE) dropText('foldbackMm');
+
+    // P — печать. Гравировка снимает материал сама: носителя нет, прижима нет.
+    if (opType !== 'TECH_CARD_OPERATION_TYPE_PRINT') dropEnum('printMethod', NONE_PRINT_METHOD);
+    if (!showPrint) {
+      dropEnum('peelMode', NONE_PEEL_MODE);
+      dropInt('secondPressSec');
+      dropEnum('pressureScale', NONE_PRESSURE_SCALE);
+    }
+
+    // W — сварка. Горячий воздух есть только у проклейки шва: ультразвук греет сам материал.
+    if (!showWeld) dropText('feedSpeedMMin');
+    if (!showWeld || mt !== SEAM_TAPING) dropInt('airTemperatureC');
+
+    // T / F / C / Q / WP — подрезка, хвосты ниток, чистка, контроль, мокрая обработка.
+    if (!showTrim) {
+      dropEnum('trimAction', NONE_TRIM_ACTION);
+      dropText('residualAllowanceMm');
+    }
+    if (!showThreadTrim) dropText('residualTailMaxMm');
+    if (!ownsBlock('clean')) dropEnum('cleaningKind', NONE_CLEANING_KIND);
+    if (!ownsBlock('inspect')) dropEnum('coverageMode', NONE_COVERAGE_MODE);
+    if (opType !== 'TECH_CARD_OPERATION_TYPE_WET_PROCESS')
+      dropEnum('wetProcessKind', NONE_WET_PROCESS);
+
+    // FA — петли, закрепки, пуговицы, молнии: каждое поле при СВОЁМ явном типе машины.
+    if (mt !== BUTTONHOLE_MACHINE) {
+      dropEnum('buttonholeStyle', NONE_BUTTONHOLE_STYLE);
+      dropText('cutLengthMm');
+      dropEnum('buttonholeOrientation', NONE_BUTTONHOLE_ORIENTATION);
+    }
+    if (mt !== BUTTONHOLE_MACHINE && mt !== BARTACK_MACHINE) dropText('bartackLengthMm');
+    if (mt !== BUTTON_ATTACH_MACHINE) dropEnum('attachPattern', NONE_ATTACH_PATTERN);
+    if (mt !== ZIPPER_MACHINE) dropEnum('zipperApplication', NONE_ZIPPER_APPLICATION);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ownsBlock is rebuilt each render;
+    // the verb it closes over is `opType`, which IS in the list.
+  }, [
+    opType,
+    machineType,
+    isMachineStep,
+    isHardwareStep,
+    attachMethod,
+    needleCount,
+    placementCount,
+    showStitching,
+    showPlacement,
+    showHardware,
+    showPrint,
+    showWeld,
+    showTrim,
+    showThreadTrim,
+    index,
+    getValues,
+    setValue,
+  ]);
 
   // --- the card's equipment park, and what this step inherits from it ---------------------------
   const parkMachines = (useWatch({
@@ -2335,7 +2920,7 @@ function OperationEditor({
           <SelectField
             name={`operations.${index}.machineType`}
             label='machine *'
-            items={machineTypeOptions}
+            items={machineTypeOptionsFor(machineType)}
             className={selectNoGrow}
           />
         )}
@@ -2344,6 +2929,23 @@ function OperationEditor({
             name={`operations.${index}.pressEquipment`}
             label='equipment *'
             items={pressEquipmentOptions}
+            className={selectNoGrow}
+          />
+        )}
+        {/* ДИСКРИМИНАТОР ГЛАГОЛА — та же вторая ось, что машинка у «machine» и оборудование у ВТО,
+            и стоит она здесь по тому же доводу: сервер требует её БЕЗУСЛОВНО, а обязательное поле
+            за закрытым аккордеоном — это сохранение, падающее на контроле, которого нет на экране.
+            У каждого из шести глаголов ровно один такой вопрос, поэтому в сетке всегда не больше
+            одного лишнего селекта. */}
+        {stepDiscriminator && (
+          <SelectField
+            name={`operations.${index}.${stepDiscriminator.field}`}
+            label={stepDiscriminator.label}
+            items={stepEnumOptions(
+              stepDiscriminator.labels,
+              stepDiscriminator.unset,
+              discriminatorValue,
+            )}
             className={selectNoGrow}
           />
         )}
@@ -2860,10 +3462,14 @@ function OperationEditor({
                 density={stitchesPerCm}
                 placeholder={inherited.stitchLength}
               />
+              {/* Список — с оглядкой на то, что в шаге уже лежит: словарь режимов ТОТАЛЕН над
+                  контрактом, поэтому токен вне списка означает режим НОВЕЕ этого бандла (обычное
+                  состояние между выкаткой бэка и выкаткой клиента), а Radix рисует такое значение
+                  ПУСТЫМ триггером — и технолог читает «отстрочки нет» на шаге, где она есть. */}
               <SelectField
                 name={`operations.${index}.topstitchMode`}
                 label='topstitch'
-                items={topstitchModeOptions}
+                items={topstitchModeOptionsFor(topstitchMode)}
                 className={selectNoGrow}
               />
               {/* The width belongs to the modes that HAVE one and nowhere else — beside «edge» it is
@@ -2902,6 +3508,309 @@ function OperationEditor({
                     placeholder='8'
                   />
                 )}
+            </div>
+          </>
+        )}
+
+        {/* ── ВИДЫ ОПЕРАЦИЙ (0324): по блоку на семейство ───────────────────────────────────────
+            Каждый показан РОВНО СВОЕМУ глаголу (и, где правило про машинку, — своей машинке), теми
+            же предикатами, которыми маппер решает, что уедет на провод. Пусто здесь не значит ноль
+            и не значит «нет»: явное «нет» у семи словарей есть отдельным ответом. Наследовать этим
+            полям неоткуда — лестницы у них нет, — поэтому плейсхолдер числовых полей ПРИМЕР, а не
+            обещание. */}
+
+        {/* S — как ложится строчка. Только MACHINE, при любой машинке. */}
+        {showStitching && (
+          <>
+            <GroupLabel>stitch detail</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <InheritableNumberField
+                name={`operations.${index}.needleCount`}
+                label='needles'
+                value={needleCount}
+                placeholder='1'
+              />
+              {/* КАЛИБР МЕРЯЕТ РАССТОЯНИЕ МЕЖДУ ИГЛАМИ, поэтому на одной игле он измеряет ничто —
+                  сервер такую пару отвергает, а очистка выше стирает число, оставшееся от двух. */}
+              {needleCount >= 2 && (
+                <DecimalField
+                  name={`operations.${index}.needleGaugeMm`}
+                  label='needle gauge, mm'
+                  maxDecimals={1}
+                  placeholder='6.4'
+                />
+              )}
+              <SelectField
+                name={`operations.${index}.seamSecuring`}
+                label='securing'
+                items={stepEnumOptions(SEAM_SECURING_LABELS, '— not stated —', seamSecuring)}
+                className={selectNoGrow}
+              />
+              {/* Между РЯДАМИ строчек. Не путать с калибром выше: тот — между иглами одного ряда. */}
+              <DecimalField
+                name={`operations.${index}.rowSpacingMm`}
+                label='row spacing, mm'
+                maxDecimals={1}
+                placeholder='6'
+              />
+              {/* ОТНОШЕНИЕ, а не проценты: 1.0 — слои идут один в один, 2.0 — присборить вдвое. */}
+              <DecimalField
+                name={`operations.${index}.fullnessRatio`}
+                label='ease / gathering, ratio'
+                maxDecimals={2}
+                placeholder='1.0'
+              />
+              {onMachine(BINDER_MACHINE) && (
+                <SelectField
+                  name={`operations.${index}.bindingStyle`}
+                  label='binding fold'
+                  items={stepEnumOptions(BINDING_STYLE_LABELS, '— not stated —', bindingStyle)}
+                  className={selectNoGrow}
+                />
+              )}
+              <SelectField
+                name={`operations.${index}.labelAttachStitch`}
+                label='label stitched'
+                items={stepEnumOptions(
+                  LABEL_ATTACH_STITCH_LABELS,
+                  '— not stated —',
+                  labelAttachStitch,
+                )}
+                className={selectNoGrow}
+              />
+            </div>
+          </>
+        )}
+
+        {/* FA — петли, закрепки, пуговицы, молнии. Каждое поле при СВОЁМ явном типе машины: это
+            факт о машинке, а не о глаголе, и тип, разрешённый через профиль, не засчитывается. */}
+        {showFastening && (
+          <>
+            <GroupLabel>fastening detail</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              {onMachine(BUTTONHOLE_MACHINE) && (
+                <>
+                  <SelectField
+                    name={`operations.${index}.buttonholeStyle`}
+                    label='buttonhole shape'
+                    items={stepEnumOptions(
+                      BUTTONHOLE_STYLE_ITEMS,
+                      '— not stated —',
+                      buttonholeStyle,
+                    )}
+                    className={selectNoGrow}
+                  />
+                  <DecimalField
+                    name={`operations.${index}.cutLengthMm`}
+                    label='buttonhole cut, mm'
+                    maxDecimals={1}
+                    placeholder='19'
+                  />
+                  <SelectField
+                    name={`operations.${index}.buttonholeOrientation`}
+                    label='buttonhole direction'
+                    items={stepEnumOptions(
+                      BUTTONHOLE_ORIENTATION_ITEMS,
+                      '— not stated —',
+                      buttonholeOrientation,
+                    )}
+                    className={selectNoGrow}
+                  />
+                </>
+              )}
+              {/* Закрепка есть и у петлевой машины — ею закрепляют концы прорези. */}
+              {onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE) && (
+                <DecimalField
+                  name={`operations.${index}.bartackLengthMm`}
+                  label='bartack length, mm'
+                  maxDecimals={1}
+                  placeholder='7'
+                />
+              )}
+              {onMachine(BUTTON_ATTACH_MACHINE) && (
+                <SelectField
+                  name={`operations.${index}.attachPattern`}
+                  label='button pattern'
+                  items={stepEnumOptions(
+                    BUTTON_ATTACH_PATTERN_LABELS,
+                    '— not stated —',
+                    attachPattern,
+                  )}
+                  className={selectNoGrow}
+                />
+              )}
+              {onMachine(ZIPPER_MACHINE) && (
+                <SelectField
+                  name={`operations.${index}.zipperApplication`}
+                  label='zip application'
+                  items={stepEnumOptions(
+                    ZIPPER_APPLICATION_LABELS,
+                    '— not stated —',
+                    zipperApplication,
+                  )}
+                  className={selectNoGrow}
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        {/* W — сварка и проклейка: две машинки, соединяющие теплом, а не ниткой. */}
+        {showWeld && (
+          <>
+            <GroupLabel>welding</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              {/* Горячий воздух есть только у проклейки шва: ультразвуковой горн греет сам
+                  материал, воздуха у него нет вовсе — и сервер отвергает число по имени. */}
+              {onMachine(SEAM_TAPING) && (
+                <InheritableNumberField
+                  name={`operations.${index}.airTemperatureC`}
+                  label='hot air, °C'
+                  value={airTemperatureC}
+                  placeholder='450'
+                />
+              )}
+              <DecimalField
+                name={`operations.${index}.feedSpeedMMin`}
+                label='feed speed, m/min'
+                maxDecimals={1}
+                placeholder='4.0'
+              />
+            </div>
+          </>
+        )}
+
+        {/* PL — сколько раз шаг повторяется по изделию и с каким шагом. MACHINE | HARDWARE_SET |
+            PRINT: три кнопки в ряд, четыре люверса по краю и два отпечатка — один вопрос. */}
+        {showPlacement && (
+          <>
+            <GroupLabel>repeats</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <InheritableNumberField
+                name={`operations.${index}.placementCount`}
+                label='repeats'
+                value={placementCount}
+                placeholder='1'
+              />
+              {/* Шаг меряет промежуток МЕЖДУ повторами: на одном повторе мерить нечего. */}
+              {placementCount >= 2 && (
+                <DecimalField
+                  name={`operations.${index}.pitchMm`}
+                  label='pitch, mm'
+                  maxDecimals={1}
+                  placeholder='80'
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        {/* H — установка фурнитуры. На цикловом автомате (петля / пуговица / закрепка) от блока
+            остаётся ровно тройка «отверстие / усилитель / стежки цикла»: способа крепления и
+            стропы, которую подгибают, у них нет, и сервер отвергает эти два поля по имени. */}
+        {showHardware && (
+          <>
+            <GroupLabel>hardware detail</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <SelectField
+                name={`operations.${index}.holePrep`}
+                label='hole prep'
+                items={stepEnumOptions(HOLE_PREP_LABELS, '— not stated —', holePrep)}
+                className={selectNoGrow}
+              />
+              {/* ЧЕМ усилено — строка BOM; здесь только КАК. */}
+              <SelectField
+                name={`operations.${index}.reinforcement`}
+                label='reinforcement'
+                items={stepEnumOptions(REINFORCEMENT_LABELS, '— not stated —', reinforcement)}
+                className={selectNoGrow}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.cycleStitchCount`}
+                label='cycle stitches'
+                value={cycleStitchCount}
+                placeholder='28'
+              />
+              {/* Подгиб стропы есть только у продеваемой фурнитуры — у пряжки и рамки. */}
+              {isHardwareStep && attachMethod === THREADED_HARDWARE && (
+                <DecimalField
+                  name={`operations.${index}.foldbackMm`}
+                  label='webbing foldback, mm'
+                  maxDecimals={1}
+                  placeholder='40'
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        {/* P — что происходит с нанесением после прижима. Гравировки здесь нет вовсе: лазер снимает
+            материал сам, носителя нет и прижимать нечем — при выборе метода блок исчезает, а
+            очистка выше стирает то, что успели поставить.
+
+            ТЕМПЕРАТУРЫ, ВЫДЕРЖКИ И СИЛИКОНОВОЙ БУМАГИ ЗДЕСЬ ПОКА НЕТ, и это не забывчивость.
+            Печать берёт термопресс взаймы, контракт ей ВТО-блок разрешает, но маппер записи
+            (schema.ts, `isPressStep` — три ВТО-глагола списком) выбрасывает ВТО-поля на любом
+            другом глаголе. Нарисовать их сейчас значило бы дать заполнить контрол, чьё значение
+            молча не доедет до сервера. Когда маппер спросит `stepTypeOwnsBlock(t,'pressSettings')`
+            вместо `isPressStep`, блок «pressing mode» ниже открывается печати одним предикатом —
+            очистка скрытого его уже не трогает. */}
+        {showPrint && (
+          <>
+            <GroupLabel>press &amp; peel</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              {/* Слово о температуре — вся инструкция: горячий пилинг, стянутый холодным, поднимает
+                  печать вместе с плёнкой. */}
+              <SelectField
+                name={`operations.${index}.peelMode`}
+                label='peel'
+                items={stepEnumOptions(PEEL_MODE_LABELS, '— not stated —', peelMode)}
+                className={selectNoGrow}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.secondPressSec`}
+                label='second press, sec'
+                value={secondPressSec}
+                placeholder='5'
+              />
+              {/* ШКАЛА, а не число: манометр плиты показывает давление в цилиндре, а не на ткани. */}
+              <SelectField
+                name={`operations.${index}.pressureScale`}
+                label='pressure'
+                items={stepEnumOptions(PRESSURE_SCALE_LABELS, '— not stated —', pressureScale)}
+                className={selectNoGrow}
+              />
+            </div>
+          </>
+        )}
+
+        {/* T — сколько припуска ОСТАЁТСЯ после подрезки. Не тот, с каким кроили (seam allowance
+            выше): это два разных числа об одном шве, и на листе они стоят рядом. */}
+        {showTrim && (
+          <>
+            <GroupLabel>trim detail</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <DecimalField
+                name={`operations.${index}.residualAllowanceMm`}
+                label='allowance left, mm'
+                maxDecimals={1}
+                placeholder='3'
+              />
+            </div>
+          </>
+        )}
+
+        {/* F — самый длинный хвост нитки, который допускается оставить. Пусто = стандарт цеха. */}
+        {showThreadTrim && (
+          <>
+            <GroupLabel>thread tails</GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <DecimalField
+                name={`operations.${index}.residualTailMaxMm`}
+                label='longest tail, mm'
+                maxDecimals={1}
+                placeholder='3'
+              />
             </div>
           </>
         )}
