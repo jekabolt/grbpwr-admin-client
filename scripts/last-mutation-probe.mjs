@@ -51,6 +51,7 @@ const {
   dropMove,
   dropRedoTop,
   emptyHistory,
+  insertLabel,
   isFormEntry,
   moveLabel,
   peekRedo,
@@ -94,6 +95,9 @@ console.log('подписи жестов — номер ЭКРАННЫЙ, (i + 1
 is('первый шаг — 10', appendLabel(0), 'create step 10');
 is('девятый шаг — 90', appendLabel(8), 'create step 90');
 is('растворение называет узел', dissolveLabel('SHELL'), 'dissolve ▣ SHELL');
+// ВСТАВКА НАЗЫВАЕТСЯ СВОИМ ГЛАГОЛОМ: «create step 50» и «insert step 50» — разные обещания, и
+// второе честнее там, где следом за отменой поедут назад номера всех следующих шагов.
+is('вставка называет себя вставкой', insertLabel(4), 'insert step 50');
 // РАСКЛАДКА НАЗЫВАЕТСЯ СЧЁТОМ, а не именем ноды: мультидраг и стрелка двигают сколько угодно нод
 // разом, и «move ▣ SHELL» у жеста из четырёх нод было бы прямой неправдой.
 is('одна нода — единственное число', moveLabel(1), 'move 1 node');
@@ -237,6 +241,103 @@ is(
     ),
   false,
 );
+
+// --- resolvePending: вставка --------------------------------------------------------------------
+console.log('\nresolvePending (insert) — тот же второй такт, но длина едет в запись');
+
+// ВСТАВКА В СЕРЕДИНУ. Массив вырос на строку, по адресу 1 стоит новая — и `lengthAfter` уезжает в
+// запись, потому что щит повтора судит по ней, а не по адресу.
+is(
+  'вставка дозаполняется и несёт длину',
+  resolvePending(
+    { kind: 'insert', index: 1, expectedLength: 4, row: row('COLLAR'), label: insertLabel(1) },
+    rows('r1', 'rNEW', 'r2', 'r3'),
+  ),
+  {
+    kind: 'insert',
+    index: 1,
+    fieldId: 'rNEW',
+    row: row('COLLAR'),
+    lengthAfter: 4,
+    label: 'insert step 20',
+  },
+);
+
+// СНИМОК ДО ВСТАВКИ — ловушка вставки острее, чем у дописывания: по адресу `index` в нём стоит
+// СОСЕДНЯЯ строка, та самая, которую жест сдвинул вниз. Синхронная запись взяла бы её id и
+// удаляла бы потом ЧУЖОЙ шаг — молча, потому что id существует и выглядит настоящим.
+is(
+  'снимок ДО вставки — сброс, а не чужой id',
+  resolvePending(
+    { kind: 'insert', index: 1, expectedLength: 4, row: row(), label: insertLabel(1) },
+    rows('r1', 'r2', 'r3'),
+  ),
+  null,
+);
+is(
+  'чужая мутация между тактами — сброс',
+  resolvePending(
+    { kind: 'insert', index: 1, expectedLength: 4, row: row(), label: insertLabel(1) },
+    rows('r1', 'rNEW', 'r2', 'r3', 'r4'),
+  ),
+  null,
+);
+// Вставка ХВОСТОМ (`at === fields.length`) законна и остаётся вставкой: это тот же жест точки
+// вставки, просто последней. Род от этого не меняется — иначе щит повтора зависел бы от того,
+// куда пришёлся жест.
+is(
+  'вставка последней строкой — тот же род',
+  resolvePending(
+    { kind: 'insert', index: 3, expectedLength: 4, row: row(), label: insertLabel(3) },
+    rows('r1', 'r2', 'r3', 'rNEW'),
+  ).kind,
+  'insert',
+);
+is(
+  'clearedBefore переносится и у вставки',
+  resolvePending(
+    {
+      kind: 'insert',
+      index: 1,
+      expectedLength: 3,
+      row: row('COLLAR'),
+      label: insertLabel(1),
+      clearedBefore: false,
+    },
+    rows('r1', 'rNEW', 'r2'),
+  ).clearedBefore,
+  false,
+);
+
+// --- canUndo/canRedo: вставка -------------------------------------------------------------------
+console.log('\nвставка — отмена по тождеству строки, повтор по длине после отмены');
+
+const INS = {
+  kind: 'insert',
+  index: 1,
+  fieldId: 'rNEW',
+  row: row(),
+  lengthAfter: 4,
+  label: insertLabel(1),
+};
+
+yes('живой id по адресу', canUndo(INS, rows('r1', 'rNEW', 'r2', 'r3'), noUnits));
+no('после ресета формы', canUndo(INS, rows('n1', 'n2', 'n3', 'n4'), noUnits));
+no('строку переставили', canUndo(INS, rows('rNEW', 'r1', 'r2', 'r3'), noUnits));
+yes('вставка — запись формовая', isFormEntry(INS));
+
+// ЩИТ ПОВТОРА СУДИТ ПО ДЛИНЕ ПОСЛЕ ОТМЕНЫ, а не по адресу. Мерой хвостового создания
+// («длина равна адресу») эта запись была бы отвергнута: длина 3, адрес 1 — и повтор всякой
+// вставки, кроме последней, отказывал бы словами про изменившуюся последовательность.
+yes(
+  'после отмены строк на одну меньше — повтор честен',
+  canRedo(INS, rows('r1', 'r2', 'r3'), noUnits),
+);
+no('мера хвостового создания здесь неверна', canRedo(INS, rows('r1'), noUnits));
+no('между ⌘Z и ⇧⌘Z дописали шаг', canRedo(INS, rows('r1', 'r2', 'r3', 'r4'), noUnits));
+no('между ⌘Z и ⇧⌘Z удалили шаг', canRedo(INS, rows('r1', 'r2'), noUnits));
+no('отрицательный адрес', canRedo({ ...INS, index: -1 }, rows('r1', 'r2', 'r3'), noUnits));
+is('чип называет жест вставки', undoTitle(INS), 'undo — insert step 20');
 
 // --- canUndo: append ------------------------------------------------------------------------------
 console.log('\ncanUndo (append) — тождество строки, а не её наличие');
@@ -608,6 +709,29 @@ function stand(initialIds = [], pieces = []) {
     },
 
     /**
+     * `insertStepAt` — тот же жест создания, но НА ПОЗИЦИЮ (Т6). Отличий от `create` ровно два, и
+     * оба несущие: строка ложится в середину (значит `expectedLength` считается от текущей длины,
+     * а не от адреса) и запись рода `insert` — потому что щит повтора судит по длине.
+     */
+    insertAt(at, unitKey = '', clearedBefore, inputKeys = []) {
+      if (frozen) return;
+      const r = { outputUnitKey: unitKey };
+      pending = {
+        kind: 'insert',
+        index: at,
+        expectedLength: fields.length + 1,
+        row: r,
+        label: insertLabel(at),
+        ...(clearedBefore !== undefined ? { clearedBefore } : {}),
+      };
+      const id = newId();
+      fields = [...fields.slice(0, at), { id }, ...fields.slice(at)];
+      units.set(id, unitKey);
+      ins.set(id, [...inputKeys]);
+      api.settle();
+    },
+
+    /**
      * `renameUnit` — переписыватель ссылок. ТРИ ВИДА МЕСТ, одна запись, одно слово.
      *
      * РАСЧЁТ ЗДЕСЬ НАСТОЯЩИЙ — `unitRenameAct` из `assembly-rename.ts`, тот же, что зовёт мутатор.
@@ -728,7 +852,8 @@ function stand(initialIds = [], pieces = []) {
       }
       if (rec.kind === 'move') {
         pos = applyEdits(pos, rec.back);
-      } else if (rec.kind === 'append') {
+      } else if (rec.kind === 'append' || rec.kind === 'insert') {
+        // ОДНА ИНВЕРСИЯ НА ОБА РОДА: удаление строки по адресу. Разводит их только повтор.
         applying = true;
         api.remove(rec.index);
         applying = false;
@@ -772,6 +897,27 @@ function stand(initialIds = [], pieces = []) {
         api.settle();
         return;
       }
+      if (rec.kind === 'insert') {
+        // ТОТ ЖЕ ДВУХТАКТНЫЙ ЗАХВАТ, ЧТО У СОЗДАНИЯ, и по той же причине: строка получает НОВЫЙ id.
+        // Позиция берётся из записи — повтор обязан вернуть шаг туда, откуда его сняли, а не в
+        // конец листа.
+        hist = dropRedoTop(hist);
+        pending = {
+          kind: 'insert',
+          index: rec.index,
+          expectedLength: fields.length + 1,
+          row: rec.row,
+          label: rec.label,
+          redone: true,
+          ...(rec.clearedBefore !== undefined ? { clearedBefore: rec.clearedBefore } : {}),
+        };
+        const id = newId();
+        fields = [...fields.slice(0, rec.index), { id }, ...fields.slice(rec.index)];
+        units.set(id, rec.row.outputUnitKey ?? '');
+        ins.set(id, []);
+        api.settle();
+        return;
+      }
       if (rec.kind === 'rename') {
         applying = true;
         api.write(rec, rec.to);
@@ -787,6 +933,54 @@ function stand(initialIds = [], pieces = []) {
     },
   };
   return api;
+}
+
+console.log('\nвставка на позицию — цикл жест → отмена → повтор (Т6)');
+
+{
+  const s = stand();
+  s.create('SHELL');
+  s.create('SLEEVES');
+  s.create('GARMENT');
+  s.insertAt(1, 'COLLAR', undefined, ['SHELL']);
+  is('строк стало четыре', s.rows.length, 4);
+  is('вставленный стоит ВТОРЫМ, а не последним', s.card[1].out, 'COLLAR');
+  is('чип называет вставку её номером', s.undoName, 'undo — insert step 20');
+  is('предыдущие жесты не погашены', s.history.undo.length, 4);
+
+  const inserted = s.rows[1];
+  s.undo();
+  is('⌘Z снял вставку', s.rows.length, 3);
+  no('вставленной строки больше нет', s.rows.includes(inserted));
+  is('соседи на местах', j(s.card.map((r) => r.out)), j(['SHELL', 'SLEEVES', 'GARMENT']));
+  is('и осталось что отменять дальше', s.undoName, 'undo — create step 30');
+
+  s.redo();
+  is('⇧⌘Z вернул строку', s.rows.length, 4);
+  is('вернул НА ПОЗИЦИЮ, а не в конец', s.card[1].out, 'COLLAR');
+  is('ни слова отказа', j(s.said), j([]));
+  is('и её снова можно отменить', s.undoName, 'undo — insert step 20');
+}
+
+{
+  // ПОСЛЕ SAVE ФОРМОВАЯ ЗАПИСЬ МЕРТВА — вставка не исключение: id строк другие, и удаление по
+  // адресу вынесло бы шаг из СОХРАНЁННОЙ карточки.
+  const s = stand();
+  s.create('SHELL');
+  s.insertAt(0, 'COLLAR');
+  s.saveAndReset();
+  s.undo();
+  is('после ресета формы отмена вставки отказывает словами', s.said.length, 1);
+  is('и карточка цела', s.rows.length, 2);
+}
+
+{
+  // ВЫПУЩЕННАЯ КАРТОЧКА: вставки нет вовсе, и отменять после заморозки нечего.
+  const s = stand();
+  s.create('SHELL');
+  s.freeze(true);
+  s.insertAt(0, 'COLLAR');
+  is('на выпущенной карточке вставки не происходит', s.rows.length, 1);
 }
 
 console.log('\nмногошаговость — ⌘Z несколько раз подряд, ⇧⌘Z обратно');

@@ -126,6 +126,29 @@ export type HistoryEntry<TRow = unknown> =
       clearedBefore?: boolean;
     }
   | {
+      /**
+       * ВСТАВКА ЗАПОЛНЕННОГО ШАГА НА ПОЗИЦИЮ (Т6). Инвертируется тем же, чем `append`, — удалением
+       * строки по адресу, — и родом отличается ровно по одной причине: у создания В КОНЕЦ роль щита
+       * повтора играет сам `index` («длина равна адресу»), а у вставки в СЕРЕДИНУ он этой роли
+       * играть не может. Отсюда `lengthAfter` и отдельная ветка в `canRedo`; слить оба рода в один
+       * значило бы либо ослабить щит хвостового создания, либо отказывать повтору вставки словами
+       * «последовательность изменилась», которых никто не заслужил.
+       */
+      kind: 'insert';
+      index: number;
+      fieldId: string;
+      /** Строка, которую жест вставил. Повтор вставляет ЕЁ ЖЕ и на ту же позицию. */
+      row: TRow;
+      /**
+       * Длина массива, которую жест оставил после себя. Щит повтора: после отмены строк обязано
+       * быть ровно на одну меньше, иначе между ⌘Z и ⇧⌘Z массив трогали и повтор вставил бы не туда.
+       */
+      lengthAfter: number;
+      label: string;
+      /** См. `clearedBefore` у `append`: та же половина жеста и та же её инверсия. */
+      clearedBefore?: boolean;
+    }
+  | {
       kind: 'dissolve';
       index: number;
       fieldId: string;
@@ -280,7 +303,13 @@ export function dropMove<TRow>(h: History<TRow>): History<TRow> {
  * стопку возврата: иначе ⇧⌘Z, нажатое трижды, вернуло бы только один жест.
  */
 export type PendingAppend<TRow = unknown> = {
-  kind: 'append';
+  /**
+   * Куда лёг шаг: в конец листа или на позицию (Т6). Полузапись у обоих одна и та же — второй такт
+   * нужен вставке ровно по той же причине, что дописыванию: `insert()` из RHF тоже ничего не
+   * возвращает, а `fields` в замыкании мутатора — снимок ДО вставки, где по адресу `index` стоит
+   * СОСЕДНЯЯ строка, та, которую жест сдвинул вниз.
+   */
+  kind: 'append' | 'insert';
   index: number;
   expectedLength: number;
   row: TRow;
@@ -293,6 +322,15 @@ export type PendingAppend<TRow = unknown> = {
 /** Подпись жеста создания. Номер ЭКРАННЫЙ — `(i + 1) * 10`, как на рельсе и в боксах. */
 export function appendLabel(index: number): string {
   return `create step ${(index + 1) * 10}`;
+}
+
+/**
+ * Подпись жеста вставки. ДРУГИМ ГЛАГОЛОМ, а не тем же: чип отмены обязан отличать «сейчас исчезнет
+ * дописанный в конец шаг» от «сейчас исчезнет вставленный в середину, и номера следующих поедут
+ * назад». Номер — тот же экранный `(i + 1) * 10`, каким шаг и родился.
+ */
+export function insertLabel(index: number): string {
+  return `insert step ${(index + 1) * 10}`;
 }
 
 /** Подпись жеста растворения. */
@@ -331,6 +369,19 @@ export function resolvePending<TRow>(
   if (fields.length !== p.expectedLength) return null;
   const id = fields[p.index]?.id;
   if (!id) return null;
+  // `expectedLength` — она же длина ПОСЛЕ жеста, и вставке она нужна дальше первого такта: щит
+  // повтора судит по ней. Переписывать её вторым числом было бы двумя определениями одного факта.
+  if (p.kind === 'insert') {
+    return {
+      kind: 'insert',
+      index: p.index,
+      fieldId: id,
+      row: p.row,
+      lengthAfter: p.expectedLength,
+      label: p.label,
+      ...(p.clearedBefore !== undefined ? { clearedBefore: p.clearedBefore } : {}),
+    };
+  }
   return {
     kind: 'append',
     index: p.index,
@@ -404,7 +455,9 @@ export function canUndo<TRow>(
   if (rec.kind === 'move') return true;
   if (rec.index < 0) return false;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
-  if (rec.kind === 'append') return true;
+  // Тождество строки — весь щит и для вставки: инвертируется она тем же удалением по адресу, и
+  // спрашивать у вставки больше нечего, как и у создания.
+  if (rec.kind === 'append' || rec.kind === 'insert') return true;
   if (rec.kind === 'rename') {
     return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.to);
   }
@@ -418,6 +471,10 @@ export function canUndo<TRow>(
  * `fieldId` спрашивать не у чего. Создание всегда дописывает В КОНЕЦ, поэтому единственное, что
  * удостоверяет «ряд строк тот же, что был сразу после отмены», — длина, равная адресу записи.
  * Разошлась длина — значит между ⌘Z и ⇧⌘Z массив трогали, и повтор дописал бы строку не туда.
+ *
+ * У ВСТАВКИ (Т6) тот же вопрос задаётся своим числом: адрес у неё любой, а длина после отмены —
+ * `lengthAfter - 1`. Это и есть вся причина, по которой вставка отдельный род, а не `append` с
+ * другим индексом.
  *
  * У растворения — зеркало щита отмены: узел на месте и это ТОТ ЖЕ код. Иначе ⇧⌘Z растворил бы
  * узел, которого запись не растворяла.
@@ -434,6 +491,12 @@ export function canRedo<TRow>(
   if (rec.kind === 'move') return true;
   if (rec.index < 0) return false;
   if (rec.kind === 'append') return fields.length === rec.index;
+  // У ВСТАВКИ ЩИТ ТОТ ЖЕ ПО СМЫСЛУ, НО ДРУГОЙ ПО ЧИСЛУ. Отменённой строки в форме нет, тождества
+  // спрашивать не у чего; но «длина равна адресу» верно только для хвоста, а вставка в середину
+  // оставляет после отмены `lengthAfter - 1` строк ПРИ ЛЮБОМ адресе. Судить её мерой хвоста
+  // значило бы отказывать повтору всякой вставки, кроме последней, — словами про изменившуюся
+  // последовательность, которой никто не менял.
+  if (rec.kind === 'insert') return fields.length === rec.lengthAfter - 1;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
   if (rec.kind === 'rename') {
     return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.from);
