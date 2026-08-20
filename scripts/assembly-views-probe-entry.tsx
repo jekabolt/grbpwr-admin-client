@@ -22,8 +22,11 @@ import { SCHEMATIC_METRICS } from '../src/components/managers/tech-card/componen
 import {
   buildWires,
   compositionOf,
+  compositionParts,
   directInputsOf,
   makeRowY,
+  partsText,
+  stateParts,
   stateWord,
   stepGlyph,
 } from '../src/components/managers/tech-card/components/assembly-node-views';
@@ -248,7 +251,10 @@ export function renderSchematic(frozen: boolean): string {
 export const views = {
   stepGlyph,
   stateWord,
+  stateParts,
   compositionOf,
+  compositionParts,
+  partsText,
   directInputsOf,
   buildWires,
   makeRowY,

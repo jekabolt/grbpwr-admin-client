@@ -20,6 +20,7 @@ import {
 import type { CreatePrefill } from './assembly-create-dialog';
 import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
 import { renamePicked, type UnitRenameNotice } from './assembly-rename';
+import { revealDelta } from './canvas-view';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
 
@@ -145,19 +146,28 @@ export function AssemblySchematic({
   // сошёлся ли граф: правило выпуска требует РОВНО ОДИН терминал.
   const liveUnits = res.frontier.filter((k) => res.units.has(k));
 
+  /**
+   * ЧАСТЬ ВЫДЕЛЕНИЯ, ГОДНАЯ ВО ВХОДЫ — ровно то же, что `pickedFree` на полотне фулскрина, и
+   * заведено ровно по той же причине. Выделять можно что угодно, а собирать — только со стола:
+   * съеденная нода входом не годится, это правило 2 движка. Пока шапка съеденного узла выбором не
+   * была, огранка не требовалась; теперь она обязательна, иначе «сшить» уехало бы в диалог с
+   * входом, который сервер отвергнет.
+   */
+  const pickedFree = picked.filter((k) => onTable.has(k));
+
   // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
   // больше не годится, а чип «выбрано: A» продолжал бы предлагать её — и «обработка · 1» родила бы
   // шаг со съеденным входом, то есть ровно ту невалидность, ради устранения которой затевался
   // диалог.
   //
-  // ФРОНТИР-ФИЛЬТР ЗДЕСЬ ОСТАЁТСЯ, хотя на полотне фулскрина он снят. Причина не в разнобое, а в
-  // разных ИСТОЧНИКАХ выбора: маркизы в инлайне нет, а клик по шапке съеденного узла и по съеденной
-  // плитке уводит к съевшему шагу и НЕ выбирает — значит выбор здесь по построению не выходит за
-  // фронтир, и единственный путь наружу это «выбрал, потом сам же скормил». Тогда его надо снять:
-  // `ActionPanel` инлайна берёт весь `picked` целиком, огранки, как у полосы выбора полотна, у него
-  // нет. Появится в инлайне маркиза — придётся завести и её.
+  // ФРОНТИР-ФИЛЬТРА ЗДЕСЬ БОЛЬШЕ НЕТ, и это не разнобой с полотном, а догонка. Он держался на
+  // одном факте: клик по шапке съеденного узла НЕ выбирал, а уводил к съевшему шагу, — то есть
+  // выбор по построению не выходил за фронтир. Шапка теперь выделяет всегда (один орган — один
+  // смысл), факта не стало, и огранка переехала туда же, где живёт на полотне: в глаголы
+  // (`pickedFree` ниже), а не в само выделение. Выделение — презентация (R10).
+  //
   // ВЫДЕЛЕНИЕ ПЕРЕЖИВАЕТ ПЕРЕИМЕНОВАНИЕ — И ПРАВИТ ВЫБОР РОВНО ОДИН ЭФФЕКТ. Чистка судит по
-  // фронтиру, а переименованный узел выглядит для неё исчезнувшим, хотя не делся никуда: просто
+  // раскладке, а переименованный узел выглядит для неё исчезнувшим, хотя не делся никуда: просто
   // называется иначе. Значит перенос обязан случиться РАНЬШЕ чистки — но «раньше» здесь не порядок
   // объявления двух эффектов, а порядок двух строк ВНУТРИ одного апдейтера.
   //
@@ -180,17 +190,24 @@ export function AssemblySchematic({
     pendingRename.current = renamedUnit;
   }
 
+  // Объявлена ВЫШЕ чистки выбора намеренно: чистка спрашивает у раскладки, жива ли нода, и
+  // порядок объявления здесь — не стиль, а условие того, что она спрашивает свежую.
+  const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+
   useEffect(() => {
     setPicked((cur) => {
       const notice = pendingRename.current;
       pendingRename.current = null;
       const moved = notice ? renamePicked(cur, notice.from, notice.to) : cur;
-      const live = moved.filter((k) => res.frontier.includes(k));
+      // ВЫБОР ЖИВЁТ, ПОКА ЖИВА САМА НОДА, а не пока она на столе — то же правило, что на полотне
+      // фулскрина. Фронтир-фильтр стоял здесь, пока шапка съеденного узла НЕ выделяла; теперь
+      // выделяет, и фильтр по фронтиру выбрасывал бы ровно то, что человек только что выбрал, —
+      // молча и на первой же пересборке. Выбрасывать надо то, чего БОЛЬШЕ НЕТ, а множество живых
+      // нод знает раскладка.
+      const live = moved.filter((k) => auto.byKey.has(k) || auto.tileByKey.has(k));
       return live.length === moved.length ? moved : live;
     });
-  }, [res, renamedUnit]);
-
-  const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+  }, [auto, res, renamedUnit]);
 
   const showMessage = useSnackBarStore((st) => st.showMessage);
   /** Человеческое имя ноды: имя детали или код узла. */
@@ -325,17 +342,24 @@ export function AssemblySchematic({
    * Space), а наследуемая задизейбленность до div'а не достаёт. Запреты Р9 продолжает решать
    * `frozen`, а не fieldset — явно, как и требовалось.
    */
-  const activate = (fn?: () => void) =>
+  const activate = (fn?: () => void, stop = false) =>
     fn
       ? {
           role: 'button' as const,
           tabIndex: 0,
-          onClick: fn,
+          onClick: (e: React.MouseEvent) => {
+            // ОРГАН ВНУТРИ ОРГАНА ГАСИТ ВСПЛЫТИЕ. Токен-ссылка живёт ВНУТРИ шапки, а у шапки
+            // свой смысл — выделить: без этой строки один клик по токену делал бы обе вещи
+            // разом, и «перейти к соседу» заодно выделяло бы того, от кого уходят.
+            if (stop) e.stopPropagation();
+            fn();
+          },
           // Клавиатура зовёт действие НАПРЯМУЮ, минуя защиту от клик-эха: эхо бывает только у
           // указателя, и общий сторож съедал бы первый Enter после отменённого жеста.
           onKeyDown: (e: React.KeyboardEvent) => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
             e.preventDefault();
+            if (stop) e.stopPropagation();
             justDragged.current = false;
             fn();
           },
@@ -365,6 +389,37 @@ export function AssemblySchematic({
       return;
     }
     fn();
+  };
+
+  /**
+   * ПЕРЕЙТИ К УЗЛУ ПО ТОКЕНУ `▣ ИМЯ`: выделить названный и, если он за краем, довезти прокруткой.
+   *
+   * ВЫДЕЛЕНИЕ ЗАМЕЩАЕТСЯ, а не пополняется: это навигация, и после неё человек смотрит на ОДИН
+   * узел — тот, который назвал. Пополняй она выбор, второй клик по тому же токену снимал бы
+   * выделение, то есть переход отменял бы сам себя.
+   *
+   * ДОВОДКА СЧИТАЕТСЯ ТОЙ ЖЕ `revealDelta`, ЧТО У ПОЛОТНА, хотя двигает прокрутку, а не трансформ:
+   * инлайн — это `overflow: auto` без зума, то есть тот же вид при `zoom = 1` и `pan = −scroll`.
+   * Вторая формула здесь означала бы, что «довезти до ноды» однажды поедет на двух поверхностях
+   * по-разному, а разъезд этот молчаливый.
+   */
+  const goToNode = (key: string) => {
+    setPicked([key]);
+    const el = canvasRef.current;
+    const n = layout.byKey.get(key) ?? layout.tileByKey.get(key);
+    if (!el || !n) return;
+    const d = revealDelta(
+      { x: n.x, y: n.y, w: n.w, h: n.h },
+      { w: el.clientWidth, h: el.clientHeight },
+      { zoom: 1, pan: { x: -el.scrollLeft, y: -el.scrollTop } },
+    );
+    if (!d.x && !d.y) return; // уже видно — прокручивать не за чем
+    el.scrollTo({
+      left: el.scrollLeft - d.x,
+      top: el.scrollTop - d.y,
+      // Движение под запретом — значит его нет: то же правило, что у панорамы полотна.
+      behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
   };
 
   // Жизнь жеста целиком: движение, отпускание, срыв. Подписка держится, пока жест жив.
@@ -573,12 +628,17 @@ export function AssemblySchematic({
       {!frozen && (
         <ActionPanel
           picked={picked}
+          // ГЛАГОЛЫ БЕРУТ ОГРАНЁННЫЙ ВЫБОР, А СВОДКА — ВЕСЬ. Съеденная нода в выделении законна
+          // (выделение — презентация, R10), но входом не годится: правило 2 движка. То же
+          // разделение, что у полосы выбора полотна, и заведено оно тем же жестом — шапкой,
+          // которая теперь выделяет что угодно.
+          free={pickedFree}
           labelOf={pieceNameOf}
           // Свёртка ТОЛЬКО по деталям выделения: узел — не деталь, ткани у него нет, и посчитать
           // его наравне с деталями значило бы соврать в знаменателе («3 pieces» при двух).
           clothLine={clothLine(picked.filter((k) => !res.units.has(k)))}
           onCreate={(intent) => {
-            onCreate({ inputKeys: picked, intent });
+            onCreate({ inputKeys: pickedFree, intent });
             setPicked([]);
           }}
           onClear={() => setPicked([])}
@@ -646,7 +706,6 @@ export function AssemblySchematic({
                 nameOfNode={nameOfNode}
                 unitClothLine={unitClothLine}
                 terminal={terminal}
-                onTable={onTable.has(box.key)}
                 isPicked={picked.includes(box.key)}
                 frozen={frozen}
                 hovered={hovered === box.key}
@@ -658,17 +717,14 @@ export function AssemblySchematic({
                 // то, почему это div, а `clickGuard` — про клик-эхо после драга; и то и другое —
                 // механика ОДНОГО полотна, живущая в одном экземпляре. Вьюшка получает готовые
                 // пропы и раскладывает их.
-                headProps={activate(
-                  !frozen && onTable.has(box.key)
-                    ? clickGuard(() => toggle(box.key))
-                    : // Съеденный узел входом не взять, зато вопрос «куда он делся» законен —
-                      // и шапка на него отвечает, как отвечает плитка съеденной детали.
-                      (() => {
-                        const eater = res.consumedBy.get(box.key);
-                        return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
-                      })(),
-                )}
+                // ШАПКА ВЫДЕЛЯЕТ ВСЕГДА — и съеденный узел, и на выпущенной карточке. Раньше
+                // здесь стояла развилка `!frozen && onTable ? выделить : уйти к съевшему шагу`:
+                // один орган значил две противоположные вещи по невидимому на глаз состоянию.
+                // Вопрос «куда узел делся» никуда не делся — на него отвечает ТОКЕН в стрелке,
+                // и отвечает адресно.
+                headProps={activate(clickGuard(() => toggle(box.key)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 onAddOperation={clickGuard(() =>
                   onCreate({ inputKeys: [box.key], intent: 'process' }),
                 )}
@@ -771,12 +827,18 @@ export function AssemblySchematic({
 // их числу — переигрывать его выбор.
 function ActionPanel({
   picked,
+  free,
   labelOf,
   clothLine,
   onCreate,
   onClear,
 }: {
   picked: string[];
+  /**
+   * Часть выделения, годная во входы. Считает вызывающий — знание про фронтир живёт там; панель
+   * только не смеет предлагать действие на том, чего оно не возьмёт.
+   */
+  free: string[];
   labelOf: (k: string) => string;
   /**
    * Ткань выделения свёрткой. Отвечает на вопрос, который у выбранной кучи деталей встаёт раньше
@@ -801,14 +863,24 @@ function ActionPanel({
           {clothLine}
         </Text>
       )}
-      {picked.length >= 2 && (
+      {/* ЧИСЛО НА ЧИПЕ РАВНО ТОМУ, ЧТО ОН ДЕЙСТВИТЕЛЬНО ВОЗЬМЁТ, а не размеру выделения: в
+          выделении законно лежат съеденные ноды, и передать их в диалог значило бы собрать
+          форму, которую сервер отвергнет. Брать нечего — чипа нет вовсе: кнопка, которая молча
+          выбросит заполненную форму, хуже отсутствующей кнопки. */}
+      {free.length >= 2 && (
         <Chip onClick={() => onCreate('unit')} title='assemble a new unit from the selection'>
-          join · {picked.length}
+          join · {free.length}
         </Chip>
       )}
-      <Chip dashed onClick={() => onCreate('process')} title='a step on the selection that assembles nothing'>
-        processing · {picked.length}
-      </Chip>
+      {free.length > 0 && (
+        <Chip
+          dashed
+          onClick={() => onCreate('process')}
+          title='a step on the selection that assembles nothing'
+        >
+          processing · {free.length}
+        </Chip>
+      )}
       <Chip dashed onClick={onClear} title='clear the selection'>
         cancel
       </Chip>

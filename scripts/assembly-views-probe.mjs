@@ -198,11 +198,55 @@ ck(
 );
 ck(f.brokenViolations.length === 0, 'разорванный граф валиден по проходу', f.brokenViolations.join(', '));
 
+/**
+ * Токены-ссылки снимка: `[{ to, text }]` в порядке появления. Ищется по СОБСТВЕННОЙ подсказке
+ * токена, а не по классу: класс — оформление и вправе меняться, адресат — контракт.
+ */
+const tokensIn = (html) =>
+  [...html.matchAll(/title="go to ▣ ([^"]*) on the canvas"[^>]*>([^<]*)</g)].map((m) => ({
+    to: m[1],
+    text: m[2],
+  }));
+
 for (const frozen of ['false', 'true']) {
   const s = shots[frozen];
   ck(s.includes('✓ garment'), `frozen=${frozen}: терминал назван словом`);
-  ck(s.includes('→ ▣ GARMENT'), `frozen=${frozen}: поглощённый узел назван словом`);
+  ck(s.includes('>▣ GARMENT</span>'), `frozen=${frozen}: поглощённый узел назван словом`);
   ck(s.includes('✕ break'), `frozen=${frozen}: разрыв назван словом`);
+
+  // ТОКЕН `▣ ИМЯ` — ССЫЛКА НА УЗЕЛ, ВЕЗДЕ И ВСЕГДА, включая выпущенную карточку: переход это
+  // способ СМОТРЕТЬ, а смотреть на RELEASED разрешено (R10). Разъедься эти два снимка по числу
+  // токенов — и половина навигации умирала бы ровно там, где карточку только и читают.
+  const tk = tokensIn(s);
+  // ЧЕТЫРЕ — И ВОТ КАКИЕ: шапки SHELL и HOOD («→ ▣ GARMENT» у обоих) плюс подвал GARMENT
+  // («← ▣ SHELL + ▣ HOOD + 2 pieces»). У разорванного графа токенов нет вовсе — оба узла живы
+  // («✕ break»), а в их подвалах только детали; у графа хвоста нет и боксов.
+  ck(tk.length === 4, `frozen=${frozen}: четыре токена-ссылки в снимке`, JSON.stringify(tk));
+  ck(
+    tk.every((t) => t.text === `▣ ${t.to}`),
+    `frozen=${frozen}: текст токена и его адресат — одно и то же имя`,
+    JSON.stringify(tk),
+  );
+  // Стрелка состояния и стрелка состава — РАЗНЫЕ строки бокса, и обе обязаны нести ссылку:
+  // «куда узел ушёл» и «из чего собран» — два вопроса, и оба ведут к соседям по графу.
+  ck(
+    s.includes('→ <span role="button"'),
+    `frozen=${frozen}: стрелка состояния ведёт токеном, а не текстом`,
+  );
+  ck(
+    s.includes('← <span role="button"'),
+    `frozen=${frozen}: стрелка состава ведёт токеном, а не текстом`,
+  );
+  // «✓ garment», «✕ break» и «N pieces» ссылками НЕ становятся: у первых двух адресата нет, у
+  // третьего его нет тоже — числу некуда вести. Орган, который иногда работает, а иногда нет, —
+  // ровно тот перегруз, ради снятия которого токен и заведён.
+  for (const dead of ['✓ garment', '✕ break', '2 pieces', '1 piece']) {
+    ck(
+      !new RegExp(`role="button"[^>]*>${dead.replace(/[+]/g, '\\$&')}<`).test(s),
+      `frozen=${frozen}: «${dead}» органом не стало`,
+    );
+  }
+
   for (const glyph of ['·', '▣', '+▣']) {
     ck(s.includes(`>${glyph}</span>`), `frozen=${frozen}: глиф «${glyph}» на месте`);
   }
@@ -233,7 +277,18 @@ if (!views) {
   console.log('\nЮНИТ-КЕЙСЫ НЕ ПРОГНАНЫ: энтри не отдаёт `views` — модуль ещё не извлечён.');
   process.exit(1);
 }
-const { stepGlyph, stateWord, compositionOf, directInputsOf, buildWires, makeRowY, METRICS } = views;
+const {
+  stepGlyph,
+  stateWord,
+  stateParts,
+  compositionOf,
+  compositionParts,
+  partsText,
+  directInputsOf,
+  buildWires,
+  makeRowY,
+  METRICS,
+} = views;
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const step = (inputs, out = '') => ({
@@ -289,6 +344,30 @@ console.log('\nstateWord — три ветки');
   // Терминал СИЛЬНЕЕ поглощения: узел, съеденный кем-то и при этом единственный живой, — это
   // невозможное состояние, и порядок веток решает, каким словом схема о нём скажет.
   ck(stateWord(blk('S', [0], { absorbedInto: 'G' }), true) === '✓ garment', 'терминал бьёт поглощение');
+}
+
+console.log('\nstateParts — адресат ровно у одной ветки из трёх');
+{
+  // ГЛАВНОЕ СВОЙСТВО ТОКЕНА: он есть там и только там, где есть КУДА идти. «✓ garment» — конец
+  // пути, «✕ break» не ведёт никуда, и кликабельной СТРОКОЙ они не станут — органа в них нет.
+  const to = (parts) => parts.filter((p) => p.to !== undefined).map((p) => p.to);
+  ck(eq(to(stateParts(blk('G', [0]), true)), []), 'терминал адресата не имеет');
+  ck(eq(to(stateParts(blk('X', [0]), false)), []), 'разрыв адресата не имеет');
+  const absorbed = stateParts(blk('S', [0], { absorbedInto: 'G' }), false);
+  ck(eq(to(absorbed), ['G']), 'поглощение ведёт к съевшему узлу', JSON.stringify(absorbed));
+  ck(
+    absorbed.find((p) => p.to === 'G')?.text === '▣ G',
+    'текст токена — имя узла целиком, вместе с глифом',
+    JSON.stringify(absorbed),
+  );
+  // Разбиение обязано быть БЕЗ ПОТЕРЬ: видимая строка ровно та же, что печаталась до токенов.
+  for (const [b, t] of [
+    [blk('G', [0]), true],
+    [blk('S', [0], { absorbedInto: 'G' }), false],
+    [blk('X', [0]), false],
+  ]) {
+    ck(partsText(stateParts(b, t)) === stateWord(b, t), `склейка кусков = строка (${stateWord(b, t)})`);
+  }
 }
 
 console.log('\ndirectInputsOf — дедуп, свой ключ, порядок первого вхождения');
@@ -356,6 +435,24 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
   ];
   const chained = compositionOf('G', directInputsOf([blk('G', [0])], steps), new Map([['G', {}]]));
   ck(chained === '← 1 piece', 'поглощение не пишет «берёт сам себя»', chained);
+
+  // АДРЕСАТЫ СОСТАВА — только узлы. Детали приезжают ЧИСЛОМ, и числу некуда вести: ссылка на
+  // «2 pieces» либо врала бы про одну из двух, либо требовала бы выбирать за автора.
+  const to = (parts) => parts.filter((p) => p.to !== undefined).map((p) => p.to);
+  ck(
+    eq(to(compositionParts('G', di, units)), ['SHELL', 'HOOD']),
+    'ссылками стали узлы и только они',
+    JSON.stringify(compositionParts('G', di, units)),
+  );
+  ck(eq(to(compositionParts('ONE', di, units)), []), 'состав из одних деталей ссылок не даёт');
+  ck(eq(compositionParts('NONE', di, units), []), 'пустой вход — ни одного куска');
+  for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING']) {
+    ck(
+      partsText(compositionParts(k, di, units)) === compositionOf(k, di, units),
+      `склейка кусков = строка состава (${k})`,
+      partsText(compositionParts(k, di, units)),
+    );
+  }
 }
 
 console.log('\nmakeRowY — строка бокса, а не бокс');

@@ -900,6 +900,53 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     };
   }, [panning, applyView, settleRefit]);
 
+  /**
+   * ДОВЕСТИ НОДУ ДО ГЛАЗ МИНИМАЛЬНЫМ СДВИГОМ. Живёт локальным колбэком, а не только в ручке:
+   * потребителей стало двое — find-палитра снаружи и токен-ссылка на самом боксе, — а вторая
+   * копия этой арифметики означала бы, что панорама «к ноде» однажды поедет по-разному в
+   * зависимости от того, кто попросил.
+   */
+  const revealKey = useCallback(
+    (key: string) => {
+      const vp = viewportRef.current;
+      if (!vp) return;
+      const r = vp.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return;
+      const eff = layoutRef.current;
+      const n =
+        eff.byKey.get(key) ?? eff.tileByKey.get(key) ?? (key === '' ? eff.tail : undefined);
+      if (!n) return;
+      const d = revealDelta(
+        { x: n.x, y: n.y, w: n.w, h: n.h },
+        { w: r.width, h: r.height },
+        viewRef.current,
+      );
+      if (!d.x && !d.y) return; // уже видно — увозить экран не за чем
+      fitted.current = false;
+      animateOnce();
+      const prev = viewRef.current;
+      const { pan, zoom } = viewRef.current;
+      viewRef.current = { zoom, pan: { x: pan.x + d.x, y: pan.y + d.y } };
+      applyView();
+      syncGestureToView(prev);
+    },
+    [animateOnce, applyView, syncGestureToView],
+  );
+
+  /**
+   * ПЕРЕЙТИ К УЗЛУ ПО ТОКЕНУ `▣ ИМЯ`. Ровно два действия и оба обязательны: выделить названный
+   * узел и, если он за краем, довезти его панорамой. Без второго «переход» означал бы «выделено
+   * где-то там», а на полотне в пять экранов это не ответ.
+   *
+   * ВЫДЕЛЕНИЕ ЗАМЕЩАЕТСЯ, а не пополняется: это навигация, и после неё человек смотрит на ОДИН
+   * узел — тот, который назвал. Пополняй она выбор, второй клик по тому же токену снимал бы
+   * выделение, то есть переход отменял бы сам себя.
+   */
+  const goToNode = (key: string) => {
+    onPicked([key]);
+    revealKey(key);
+  };
+
   useImperativeHandle(
     handleRef,
     () => ({
@@ -957,29 +1004,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         applyView();
         syncGestureToView(prev);
       },
-      reveal: (key) => {
-        const vp = viewportRef.current;
-        if (!vp) return;
-        const r = vp.getBoundingClientRect();
-        if (r.width < 1 || r.height < 1) return;
-        const eff = layoutRef.current;
-        const n =
-          eff.byKey.get(key) ?? eff.tileByKey.get(key) ?? (key === '' ? eff.tail : undefined);
-        if (!n) return;
-        const d = revealDelta(
-          { x: n.x, y: n.y, w: n.w, h: n.h },
-          { w: r.width, h: r.height },
-          viewRef.current,
-        );
-        if (!d.x && !d.y) return; // уже видно — увозить экран не за чем
-        fitted.current = false;
-        animateOnce();
-        const prev = viewRef.current;
-        const { pan, zoom } = viewRef.current;
-        viewRef.current = { zoom, pan: { x: pan.x + d.x, y: pan.y + d.y } };
-        applyView();
-        syncGestureToView(prev);
-      },
+      reveal: revealKey,
 
       // --- порт внешнего жеста (драг из полки) ---------------------------------------------
 
@@ -1071,6 +1096,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       finishDrop,
       settleRefit,
       syncGestureToView,
+      revealKey,
     ],
   );
 
@@ -1271,12 +1297,18 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    * `<button>` под общим `<fieldset disabled>` умирает. Здесь fieldset до портала не достаёт, но
    * разводить две механики органов на два вида — верный способ развести и их поведение.
    */
-  const activate = (fn?: () => void) =>
+  const activate = (fn?: () => void, stop = false) =>
     fn
       ? {
           role: 'button' as const,
           tabIndex: 0,
-          onClick: fn,
+          onClick: (e: React.MouseEvent) => {
+            // ОРГАН ВНУТРИ ОРГАНА ГАСИТ ВСПЛЫТИЕ. Токен-ссылка живёт ВНУТРИ шапки, а у шапки
+            // свой смысл — выделить: без этой строки один клик по токену делал бы обе вещи
+            // разом, и «перейти к соседу» заодно выделяло бы того, от кого уходят.
+            if (stop) e.stopPropagation();
+            fn();
+          },
           onKeyDown: (e: React.KeyboardEvent) => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
             e.preventDefault();
@@ -1636,7 +1668,6 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 nameOfNode={nameOfNode}
                 unitClothLine={unitClothLine}
                 terminal={terminal}
-                onTable={onTable.has(box.key)}
                 isPicked={picked.includes(box.key)}
                 frozen={frozen}
                 hovered={hovered === box.key}
@@ -1644,15 +1675,14 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 ringClassName={nodeRing(box.key)}
                 dragProps={dragHandlers(box.key, box.x, box.y)}
                 hoverProps={hoverHandlers(box.key)}
-                headProps={activate(
-                  !frozen && onTable.has(box.key)
-                    ? clickGuard(() => toggle(box.key))
-                    : (() => {
-                        const eater = res.consumedBy.get(box.key);
-                        return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
-                      })(),
-                )}
+                // ШАПКА ВЫДЕЛЯЕТ ВСЕГДА — и съеденный узел, и на выпущенной карточке. Раньше
+                // здесь стояла развилка `!frozen && onTable ? выделить : уйти к съевшему шагу`:
+                // один орган значил две противоположные вещи по невидимому на глаз состоянию.
+                // Вопрос «куда узел делся» никуда не делся — на него отвечает ТОКЕН в стрелке,
+                // и отвечает адресно.
+                headProps={activate(clickGuard(() => toggle(box.key)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 onAddOperation={clickGuard(() =>
                   onCreate({ inputKeys: [box.key], intent: 'process' }),
                 )}

@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import type { HTMLAttributes } from 'react';
+import { Fragment, type HTMLAttributes } from 'react';
 import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
@@ -68,11 +68,39 @@ export const stepGlyph = (steps: AssemblyStep[], i: number): string => {
 };
 
 /**
+ * КУСОК СТРОКИ БОКСА: либо просто текст, либо ССЫЛКА НА УЗЕЛ (`to` — его ключ).
+ *
+ * Строки бокса печатали соседей по графу с самого начала («→ ▣ GARMENT», «← ▣ SHELL + 2 pieces»),
+ * но печатали их СТРОКОЙ, и адресат существовал только в глазах читателя. Ссылке не хватало ровно
+ * этого поля: разобрать её обратно из готового текста значило бы парсить собственную разметку.
+ */
+export type NodeToken = { text: string; to?: string };
+
+/** Видимый текст набора кусков — та самая строка, что печаталась до разбиения. */
+export const partsText = (parts: NodeToken[]): string => parts.map((p) => p.text).join('');
+
+/**
  * Состояние узла СЛОВОМ, а не значком. «✓», «→GARMENT» и «✕» требовали держать в голове
  * словарь из трёх символов; строчкой хватает места сказать это словом.
+ *
+ * КУСКАМИ, А НЕ СТРОКОЙ, потому что ровно у одной из трёх веток есть АДРЕСАТ: «✓ garment» — это
+ * конец пути, «✕ break» не ведёт никуда, и только поглощение называет узел, к которому можно
+ * перейти. Сделать кликабельной всю строку значило бы завести орган, который иногда работает, а
+ * иногда нет; кликается ТОКЕН, а токена в двух других ветках нет вовсе.
+ */
+export const stateParts = (b: AssemblyBlock, terminal: boolean): NodeToken[] =>
+  terminal
+    ? [{ text: '✓ garment' }]
+    : b.absorbedInto
+      ? [{ text: '→ ' }, { text: `▣ ${b.absorbedInto}`, to: b.absorbedInto }]
+      : [{ text: '✕ break' }];
+
+/**
+ * Та же строка целиком. Остаётся экспортом ради характеризации: проба сверяет и ВИДИМЫЙ ТЕКСТ, и
+ * адресата токена, и расхождение между ними ловится ею, а не глазами на ревью.
  */
 export const stateWord = (b: AssemblyBlock, terminal: boolean): string =>
-  terminal ? '✓ garment' : b.absorbedInto ? `→ ▣ ${b.absorbedInto}` : '✕ break';
+  partsText(stateParts(b, terminal));
 
 /**
  * ЧТО УЗЕЛ БЕРЁТ — его ПРЯМЫЕ входы, а не замыкание по деталям.
@@ -112,16 +140,101 @@ export function directInputsOf(
  * Число же отвечает на вопрос, которого плитки не закрывают: «сколько всего в этот узел
  * вошло», особенно когда часть плиток утащена рукой на другой конец полотна.
  */
+export function compositionParts(
+  key: string,
+  directInputs: Map<string, string[]>,
+  units: Map<string, AssemblyUnit>,
+): NodeToken[] {
+  const inputs = directInputs.get(key) ?? [];
+  const named: NodeToken[] = inputs
+    .filter((k) => units.has(k))
+    .map((k) => ({ text: `▣ ${k}`, to: k }));
+  const pieces = inputs.filter((k) => !units.has(k)).length;
+  // ДЕТАЛИ ОСТАЮТСЯ ЧИСЛОМ И ССЫЛКОЙ НЕ СТАНОВЯТСЯ: числу некуда вести. Это честно и менять
+  // этого не надо — имена деталей в подвал не влезают, а их плитки видно рядом.
+  const all: NodeToken[] = [
+    ...named,
+    ...(pieces ? [{ text: `${pieces} ${pieces === 1 ? 'piece' : 'pieces'}` }] : []),
+  ];
+  if (all.length === 0) return [];
+  const out: NodeToken[] = [{ text: '← ' }];
+  all.forEach((p, i) => {
+    if (i) out.push({ text: ' + ' });
+    out.push(p);
+  });
+  return out;
+}
+
+/** Та же строка целиком — характеризация видимого текста, см. `stateWord`. */
 export function compositionOf(
   key: string,
   directInputs: Map<string, string[]>,
   units: Map<string, AssemblyUnit>,
 ): string {
-  const inputs = directInputs.get(key) ?? [];
-  const named = inputs.filter((k) => units.has(k)).map((k) => `▣ ${k}`);
-  const pieces = inputs.filter((k) => !units.has(k)).length;
-  const parts = [...named, ...(pieces ? [`${pieces} ${pieces === 1 ? 'piece' : 'pieces'}`] : [])];
-  return parts.length ? `← ${parts.join(' + ')}` : '';
+  return partsText(compositionParts(key, directInputs, units));
+}
+
+/**
+ * ВИД ТОКЕНА-ССЫЛКИ. Один класс на все места, где токен печатается: разойдись они — одна и та же
+ * вещь читалась бы на двух строках одного бокса по-разному.
+ *
+ * ЧЕМ ИМЕННО ОН ГОВОРИТ «СЮДА МОЖНО ПЕРЕЙТИ», и почему не иначе:
+ *
+ *   • СПЛОШНОЕ ПОДЧЁРКИВАНИЕ — словарь этого приложения для «пойти туда» (`patterns-field.tsx`:
+ *     `underline hover:opacity-70` на имени выкройки). ПУНКТИР ЗАНЯТ И ЗНАЧИТ ДРУГОЕ: `underline
+ *     decoration-dotted` в `costing-vocab.tsx` — это термин с объяснением под курсором, и токен,
+ *     одетый в пунктир, обещал бы справку вместо перехода.
+ *   • ЦВЕТА НЕТ ВОВСЕ. Красный занят ошибкой (им же горит соседнее «✕ break»), синий читался бы
+ *     как ссылка из чужого языка — этот экран монохромный, и состояние здесь не носят цветом.
+ *   • ПОДЧЁРКИВАНИЕ СТОИТ В ПОКОЕ, а не под курсором. Ноды размечены `touch-action: none`, то
+ *     есть рассчитаны и на палец, а наведения на планшете не существует: спрячь признак ссылки в
+ *     ховер — и вопрос «по чему тут можно кликнуть» остался бы без ответа ровно у того, кто его
+ *     задаёт. Ховер только ПОДТВЕРЖДАЕТ (#666 → чернила), он не единственный сигнал.
+ *   • НИ КОРОБКИ, НИ ЧИПА, НИ ПАДДИНГА. Строка бокса — 180 пикселей на всё; чип съел бы ширину у
+ *     имени узла, а высота шапки посчитана раскладкой и лишний бокс лёг бы поверх первой строки
+ *     шага. Токен — инлайновый span внутри той же `Text`, поэтому геометрия не двигается вовсе.
+ */
+export const NODE_TOKEN_CLASS = [
+  'cursor-pointer underline underline-offset-2 hover:text-textColor',
+  'focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1',
+  'focus-visible:outline-textColor',
+].join(' ');
+
+/**
+ * Строка бокса, собранная из кусков: текст — текстом, токен — органом.
+ *
+ * Текстовые куски печатаются БЕЗ обёртки (фрагментом): лишний span на каждое «+» и «←» — это
+ * разметка, не несущая ни смысла, ни поведения, а `truncate` родительской `Text` работает по
+ * инлайновому потоку одинаково с ними и без них.
+ */
+function NodeTokens({
+  parts,
+  tokenProps,
+}: {
+  parts: NodeToken[];
+  /** Пропы токена как органа. Пусто — токен остаётся текстом: идти всё равно некуда. */
+  tokenProps?: (key: string) => OrganProps;
+}) {
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.to === undefined || !tokenProps ? (
+          <Fragment key={i}>{p.text}</Fragment>
+        ) : (
+          <span
+            key={i}
+            {...tokenProps(p.to)}
+            className={NODE_TOKEN_CLASS}
+            // Подсказка на самом токене, а не на шапке: у шапки свой смысл («выделить»), и
+            // объяснять переход её словами значило бы вернуть тот же перегруз органа.
+            title={`go to ▣ ${p.to} on the canvas`}
+          >
+            {p.text}
+          </span>
+        ),
+      )}
+    </>
+  );
 }
 
 const boxOfBlock = (layout: SchematicLayout, blockKey: string): BoxLayout | undefined =>
@@ -311,6 +424,25 @@ export function WireLayer({
  *
  * `block` принимается под именем `b` намеренно: тело — дословный перенос из `AssemblySchematic`, и
  * переименование локали в нём сделало бы дифф переноса нечитаемым ровно там, где его и читают.
+ *
+ * ЧЕТЫРЕ ОРГАНА, ЧЕТЫРЕ СМЫСЛА, и ни одного перегруженного:
+ *
+ *   шапка          — ВЫДЕЛИТЬ. Всегда: свободный узел, съеденный, на выпущенной карточке;
+ *   строка шага    — открыть шаг в списке;
+ *   токен `▣ ИМЯ`  — перейти к соседу по графу;
+ *   полоса чипов   — глаголы над узлом (только на живой карточке и только под наведением).
+ *
+ * ЧТО ЗДЕСЬ БЫЛО НЕ ТАК. Шапка съеденного узла уводила В ШАГ, КОТОРЫЙ ЕГО СЪЕЛ, — навигация,
+ * переодетая в жест выделения. Претензия владельца дословно: «я кликнул на ноду "два рукава", но
+ * у меня открылся в нижнем баре step 70 outer shell aka перед с руковами. это не очень
+ * интуитивно». Один орган значил две противоположные вещи в зависимости от состояния, которого на
+ * глаз не видно, — а вдобавок расходился с рамкой выделения (та берёт что угодно, R10) и умирал
+ * на `frozen`, где смотреть как раз разрешено.
+ *
+ * ЧТО ВЗАМЕН. Навигацию не пришлось изобретать: обе стрелки уже НАПЕЧАТАНЫ на боксе и уже
+ * называют то место, куда человек хочет попасть. Им не хватало быть кликабельными. Одноклик «к
+ * съевшему ШАГУ» при этом исчезает — взамен два предсказуемых: токен довозит до бокса, где строка
+ * этого шага видна и кликается.
  */
 export function UnitBoxView({
   box,
@@ -323,7 +455,6 @@ export function UnitBoxView({
   nameOfNode,
   unitClothLine,
   terminal,
-  onTable,
   isPicked,
   frozen,
   hovered,
@@ -333,6 +464,7 @@ export function UnitBoxView({
   hoverProps,
   headProps,
   stepProps,
+  tokenProps,
   onAddOperation,
   onDissolveUnit,
 }: {
@@ -351,8 +483,6 @@ export function UnitBoxView({
   unitClothLine: (key: string) => string;
   /** Единственный живой узел карточки — то есть готовое изделие. */
   terminal: boolean;
-  /** Узел лежит на столе (не съеден другим). */
-  onTable: boolean;
   isPicked: boolean;
   frozen: boolean;
   hovered: boolean;
@@ -365,6 +495,11 @@ export function UnitBoxView({
   /** Пропы шапки как органа: пусто, когда по ней кликать нечем. */
   headProps: OrganProps;
   stepProps: (index: number) => OrganProps;
+  /**
+   * Пропы токена `▣ ИМЯ` как органа — по ключу узла, к которому он ведёт. Собирает родитель: он
+   * один знает и про клик-эхо после драга, и про то, как довезти ноду до глаз.
+   */
+  tokenProps: (key: string) => OrganProps;
   onAddOperation: () => void;
   onDissolveUnit: () => void;
 }) {
@@ -381,10 +516,15 @@ export function UnitBoxView({
         {...dragProps}
         {...hoverProps}
       >
-        {/* ШАПКА — PICK-ЗОНА БОКСА. Строки внутри уже кнопки шагов, поэтому выбор узла
-            переехал на заголовок: одна нода — одно место, куда по ней кликают. Кнопка, а
-            не div, ради клавиатуры: Enter на сфокусированной шапке — тот же выбор, и
-            путь «сшить» с клавиатуры не потерян. */}
+        {/* ШАПКА — PICK-ЗОНА БОКСА, И ТОЛЬКО ОНА. Строки внутри уже кнопки шагов, поэтому
+            выбор узла переехал на заголовок: одна нода — одно место, куда по ней кликают.
+            Роль кнопки на div, а не сама <button>, ради клавиатуры под внешним
+            `<fieldset disabled>` — см. шапку файла (R4).
+
+            ВЫДЕЛЯЕТ ВСЕГДА: и свободный узел, и съеденный, и на выпущенной карточке.
+            Съеденный не исключение, потому что выделение — ПРЕЗЕНТАЦИЯ (R10): рамка берёт
+            его уже сейчас, и шапка догоняет рамку. `frozen` не исключение по той же
+            причине — смотреть на RELEASED разрешено. */}
         <div
           {...headProps}
           className={cn(
@@ -392,18 +532,21 @@ export function UnitBoxView({
             // раскладкой, и третья строка текста, откуда бы она ни взялась, легла бы
             // поверх первой строки шага.
             'flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1 text-left',
-            !frozen && onTable && 'hover:bg-bgZebra',
+            // Подсветка под курсором БЕЗ ОГОВОРОК — потому что и действие теперь без
+            // оговорок. Раньше здесь стояло `!frozen && onTable`, ровно по гейту органа;
+            // гейта не стало, и оговорка превратилась бы в обещание мёртвой шапки.
+            'hover:bg-bgZebra',
             isPicked && 'bg-bgZebra',
           )}
           style={{ height: HEAD_H }}
           // Полный текст шапки — в подсказке: ключ и имя узла обрезаются по ширине, и
-          // прочесть их целиком иначе было бы негде.
+          // прочесть их целиком иначе было бы негде. Вторая строка говорит, что делает
+          // КЛИК ПО ШАПКЕ, и с тех пор как он делает одно и то же везде, ветка у неё
+          // одна: обещать съеденному узлу чужой шаг больше нечем.
           title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
             terminal ? ' · finished garment' : b.absorbedInto ? ` · goes into ▣ ${b.absorbedInto}` : ' · break'
-          }\n${
-            onTable
-              ? 'the unit is on the table — click to take it into the next assembly'
-              : 'the unit has already gone into another one; click to open the step that consumed it'
+          }\nclick to select the unit${
+            b.absorbedInto ? `; follow the underlined ▣ ${b.absorbedInto} to go there` : ''
           }`}
         >
           {/* ПЕРВАЯ СТРОКА — ТОЛЬКО КЛЮЧ. Он идентифицирует узел во всех остальных
@@ -437,7 +580,9 @@ export function UnitBoxView({
                 !terminal && !b.absorbedInto && 'text-error',
               )}
             >
-              {stateWord(b, terminal)}
+              {/* ТОКЕН, А НЕ СТРОКА. Адресат есть ровно у поглощения; «✓ garment» и
+                  «✕ break» приезжают одним текстовым куском и органами не становятся. */}
+              <NodeTokens parts={stateParts(b, terminal)} tokenProps={tokenProps} />
             </Text>
           </span>
         </div>
@@ -513,7 +658,10 @@ export function UnitBoxView({
             .join('\n')}
         >
           <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-            {compositionOf(box.key, directInputs, units)}
+            <NodeTokens
+              parts={compositionParts(box.key, directInputs, units)}
+              tokenProps={tokenProps}
+            />
           </Text>
           {smvOfBlock.get(box.key) && (
             <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
