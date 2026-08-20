@@ -209,6 +209,15 @@ export type AssemblyFullscreenProps = {
   renderDockEditor: (onFlashPieces: () => void) => ReactNode;
   /** Второй экземпляр `<StepNumberDrift />`: корневой остался под оверлеем и не виден. */
   dockChrome: ReactNode;
+  /**
+   * Σ SMV под рельсом — тем же приёмом «готовый узел пропом», что и `dockChrome`.
+   *
+   * `RailTotal` — приватный компонент `operations-field.tsx` без единого пропа (читает форму
+   * контекстом). Вытаскивать его наружу ради фулскрина значило бы затевать рефакторинг там, где
+   * он не нужен: узел собирает владелец и отдаёт готовым. Показывается ТОЛЬКО в режиме списка —
+   * в схеме итога времени нет и в инлайне: он принадлежит рельсу, а рельс есть только в списке.
+   */
+  railTotal: ReactNode;
   frozen: boolean;
   onSave: () => void;
   saving: boolean;
@@ -323,6 +332,7 @@ export function AssemblyFullscreen({
   onDockEdit,
   renderDockEditor,
   dockChrome,
+  railTotal,
   frozen,
   onSave,
   saving,
@@ -1472,6 +1482,11 @@ export function AssemblyFullscreen({
                         </Text>
                       </button>
                     )}
+                    {/* Σ SMV — ровно там же, где в инлайне: под рельсом, последней строкой
+                        колонки. Без неё фулскрин-список читал бы ту же последовательность, что
+                        инлайн, но молчал о её длительности — а это единственное число, которым
+                        технолог меряет сборку целиком. */}
+                    {railTotal}
                   </div>
                   {/* СВОЙ `<fieldset disabled>` — РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО У ДОКА: внешний,
                       что стоит на карточке, до портала не достаёт вовсе, и редактор выпущенной

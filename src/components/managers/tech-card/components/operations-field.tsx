@@ -4072,6 +4072,10 @@ export function OperationsField({
           // Компонент самодостаточен — форму он читает через контекст, а контекст в порталы
           // проникает.
           dockChrome={<StepNumberDrift />}
+          // Готовым узлом, как `dockChrome`: `RailTotal` — приватный компонент этого файла без
+          // пропов, и вытаскивать его наружу ради фулскрина значило бы затевать рефакторинг там,
+          // где он не нужен.
+          railTotal={<RailTotal />}
           frozen={frozen}
           onSave={() => onSave?.()}
           saving={saving}
