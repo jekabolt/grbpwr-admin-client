@@ -31,6 +31,7 @@ import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
+import { SequenceRail } from './sequence-rail';
 import {
   DOCK_DEFAULT,
   DOCK_MAX,
@@ -106,6 +107,7 @@ const HELP_KEYS: [string, string][] = [
   ['d', 'dissolve the picked unit'],
   ['⌘z', 'undo the last gesture'],
   ['⌘f', 'find a piece or a unit'],
+  ['⌘l', 'the sequence as a list · back to the schematic'],
   ['[', 'collapse or open the pieces shelf'],
   [']', 'collapse or open the step dock'],
   ['s', 'show or hide the sketch sticker (drag it by its head)'],
@@ -153,6 +155,34 @@ export type AssemblyFullscreenProps = {
   addOperation: () => void;
   /** Потребитель — Ф6в (перестановка шагов в списке). */
   moveOperation: (from: number, to: number) => void;
+  /**
+   * РЕЛЬС РЕЖИМА СПИСКА — ТЕ ЖЕ ДАННЫЕ И ТЕ ЖЕ КОЛБЭКИ, ЧТО У ИНЛАЙНА, и приезжают они пропами по
+   * той же причине, по какой приезжает пропом всё остальное: `useFieldArray('operations')`
+   * существует в приложении в единственном экземпляре — в `OperationsField`, — и второй с ним не
+   * синхронизируется. Сам `SequenceRail` — ОДИН модуль на оба вида: два похожих списка одних и тех
+   * же шагов разъезжаются первой же правкой.
+   */
+  railFields: { id: string }[];
+  /**
+   * Размечена ли карточка узлами. Отвечает за ДВЕ вещи сразу: врезку шапок узлов в рельс и дефолт
+   * вида, когда `prefs.mode` пуст (то же правило `effectiveMode`, что у инлайна).
+   */
+  railMarked: boolean;
+  /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним (`useRailGrouping`). */
+  railHeaderBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Шаги с незаполненным обязательным полем. */
+  railErrorIndices: ReadonlySet<number>;
+  /** Шаги, ломающие сборочный граф. */
+  railBrokenSteps: ReadonlySet<number>;
+  /** Активный пин эскиза: строка рельса светится вместе с ним (R6 — заливки у пина нет). */
+  activePin: number | null;
+  activeBom: string | null;
+  onHoverPin: (n: number | null) => void;
+  /**
+   * Разбор перетаскиваемой нагрузки в lineKey детали. ПРОПОМ, а не импортом: протокол живёт в
+   * `operations-field.tsx` вместе с двумя своими константами и используется не только рельсом.
+   */
+  readPieceDrag: (dt: DataTransfer) => string;
   /**
    * Отмена последнего жеста, глубина 1. Инверсию делает `operations-field.tsx` — там же, где
    * мутаторы (R3); фулскрин только зовёт её и показывает чип. Гейт заморозки и отказ словами — на
@@ -272,6 +302,16 @@ export function AssemblyFullscreen({
   dissolveUnit,
   addInputToOperation,
   addOperation,
+  moveOperation,
+  railFields,
+  railMarked,
+  railHeaderBefore,
+  railErrorIndices,
+  railBrokenSteps,
+  activePin,
+  activeBom,
+  onHoverPin,
+  readPieceDrag,
   onUndo,
   undoTitle,
   canUndo,
@@ -296,7 +336,39 @@ export function AssemblyFullscreen({
   // кадра, и выведенный из неё док был бы открыт с порога — то есть весь возврат высоты полотна
   // (+176px) аннулирован ровно там, где фулскрин и открывают.
   const [dockStep, setDockStep] = useState<number | null>(null);
-  const dockOpen = dockStep !== null;
+
+  // --- вид: схема или список ----------------------------------------------------------------------
+  //
+  // ПРАВИЛО ТО ЖЕ, ЧТО У ИНЛАЙНА (`effectiveMode` в `operations-field.tsx`), и это не совпадение:
+  // вид — свойство КАРТОЧКИ, а не поверхности. Явный выбор человека сильнее вывода; вывод остаётся
+  // дефолтом: размеченная карточка открывается схемой, неразмеченная — списком (пустое полотно на
+  // первом открытии читается как «сломалось»).
+  //
+  // ДО Ф6в ФУЛСКРИН ФОРСИЛ СХЕМУ, НЕ ЗАПИСЫВАЯ `prefs.mode` (M13) — чтобы вход сюда не ломал
+  // R11-дефолт неразмеченной карточки. Теперь режим ожил, но ПИСАТЕЛЬ у него ровно один: явный жест
+  // человека (чип `list` и ⌘L). Ни вход в фулскрин, ни выход из него в предпочтения не пишут.
+  const setMode = prefs.setMode;
+  const fsMode = prefs.mode ?? (railMarked ? 'schematic' : 'list');
+  const listMode = fsMode === 'list';
+  const toggleMode = useCallback(
+    () => setMode(listMode ? 'schematic' : 'list'),
+    [listMode, setMode],
+  );
+
+  // «ДОК ОТКРЫТ» — ЭТО ДВА УСЛОВИЯ, И ВТОРОЕ ОБЯЗАНО ЖИТЬ В РЕНДЕРЕ, а не только в эффекте ниже.
+  // Эффект отрабатывает ПОСЛЕ рендера, то есть кадр между «нажали list» и «эффект закрыл док»
+  // держал бы на экране ДВА `OperationEditor` на одни имена полей — с двумя писателями, двумя
+  // комплектами эффектов пресетов и сломанным фокусом. Здесь же док гаснет тем же рендером, каким
+  // появляется список.
+  const dockOpen = dockStep !== null && !listMode;
+
+  /**
+   * РЕДАКТОР ШАГА НА ЭКРАНЕ: в схеме это открытый док, в списке — его колонка. Условие живёт
+   * отдельно от `dockOpen`, потому что им проверяется режим добора: «＋ piece» стоит в САМОМ
+   * редакторе, и привязка режима к доку сделала бы кнопку мёртвой ровно в том виде, где редактор
+   * виден всегда.
+   */
+  const editorOnScreen = dockOpen || listMode;
 
   // Выбор живёт здесь, а не в полотне: его гасит Esc-лестница, а лестница одна на экран.
   const [picked, setPicked] = useState<string[]>([]);
@@ -390,6 +462,32 @@ export function AssemblyFullscreen({
   const toggleDock = useCallback(() => {
     setDockStep((cur) => (cur === null ? Math.max(0, selectedIndex) : null));
   }, [selectedIndex]);
+
+  /**
+   * ДОК ОТСТУПАЕТ ПЕРЕД СПИСКОМ И ВОЗВРАЩАЕТСЯ ТЕМ ЖЕ, КАКИМ БЫЛ (`dockBeforeList` прототипа).
+   *
+   * Список несёт рельс И редактор шага; держать под ним открытый док значило бы положить те же
+   * поля на экран дважды. Показ гасит уже `dockOpen` в рендере — здесь снимается САМО состояние,
+   * чтобы «док открыт» не оставалось истинным для органов, которые про вид ничего не знают
+   * (режим добора, `toggleDock`, подпись шага).
+   *
+   * ПЕРЕХОД ЛОВИТСЯ ПО ФАКТУ, А НЕ В ОБРАБОТЧИКЕ ЧИПА: вид может смениться и без жеста — карточка
+   * без сохранённого режима переезжает в схему, как только в ней появляется первый узел. Дока,
+   * забытого открытым в этом случае, не увидел бы ни один обработчик.
+   */
+  const dockBeforeList = useRef<number | null>(null);
+  const wasList = useRef(listMode);
+  useLayoutEffect(() => {
+    if (listMode === wasList.current) return;
+    wasList.current = listMode;
+    if (listMode) {
+      dockBeforeList.current = dockStep;
+      setDockStep(null);
+      return;
+    }
+    setDockStep(dockBeforeList.current);
+    dockBeforeList.current = null;
+  }, [listMode, dockStep]);
 
   // --- драг плитки полки на полотно ---------------------------------------------------------------
   //
@@ -583,7 +681,7 @@ export function AssemblyFullscreen({
   const addModeLive =
     addMode &&
     !frozen &&
-    dockStep !== null &&
+    editorOnScreen &&
     addMode.stepIndex === selectedIndex &&
     selectedIndex < steps.length
       ? addMode
@@ -620,9 +718,10 @@ export function AssemblyFullscreen({
     if (frozen) return;
     // ШАГ БЕРЁТСЯ ИЗ `selectedIndex`, а не из `dockStep`: редактор с этой кнопкой смонтирован
     // именно на `selectedIndex`, и разойдись эти два числа — детали уехали бы в чужой шаг.
-    // `dockStep` отвечает только за «док открыт»; верхняя граница обязательна — `selected`
-    // родителя всегда ≥ 0 и на карточке без операций указывает на строку, которой нет.
-    if (dockStep === null || selectedIndex < 0 || selectedIndex >= steps.length) return;
+    // `editorOnScreen` отвечает только за «редактор виден» (док в схеме, колонка в списке);
+    // верхняя граница обязательна — `selected` родителя всегда ≥ 0 и на карточке без операций
+    // указывает на строку, которой нет.
+    if (!editorOnScreen || selectedIndex < 0 || selectedIndex >= steps.length) return;
     if (addModeLive) {
       setAddMode(null);
       return;
@@ -630,7 +729,7 @@ export function AssemblyFullscreen({
     setAddMode({ stepIndex: selectedIndex, stepLabel: String((selectedIndex + 1) * 10) });
     // СВЁРНУТУЮ ПОЛКУ РАЗВОРАЧИВАЕМ: режим, чьи органы не видны, читается как сломанная кнопка.
     if (shelfCollapsed) setPanels({ shelfCollapsed: false });
-  }, [frozen, dockStep, selectedIndex, steps.length, addModeLive, shelfCollapsed, setPanels]);
+  }, [frozen, editorOnScreen, selectedIndex, steps.length, addModeLive, shelfCollapsed, setPanels]);
 
   /**
    * Клик по годной плитке в режиме добора. Отказ вне фронтира произносит САМ мутатор — словами
@@ -666,7 +765,10 @@ export function AssemblyFullscreen({
     if (frozen) return;
     const at = steps.length;
     addOperation();
-    setDockStep(at);
+    // В СПИСКЕ ДОК НЕ ОТКРЫВАЕТСЯ: редактор уже стоит в его колонке, и второй экземпляр на те же
+    // имена полей — ровно то, ради чего док перед списком и отступает. Выбор нового шага делает
+    // сам мутатор (`addOperation` зовёт `setSelected`), поэтому списку хватает его одного.
+    if (!listMode) setDockStep(at);
   };
 
   // --- глаголы выделения --------------------------------------------------------------------------
@@ -886,6 +988,15 @@ export function AssemblyFullscreen({
         e.preventDefault();
         return;
       }
+      if (k === 'l') {
+        // ⌘L — ЯВНЫЙ ЖЕСТ, и потому единственный (вместе с чипом) писатель `prefs.mode` на этом
+        // экране. Набору текста он не уступает: родного смысла внутри модального оверлея у него
+        // нет, а вид ничего не правит — как и ⌘F выше. Через `comboKey`: на кириллической
+        // раскладке `e.key` даёт «д», и клавиша молча умерла бы у половины цеха.
+        toggleMode();
+        e.preventDefault();
+        return;
+      }
       // ⇧⌘Z — это redo, а redo здесь НЕТ. Тихо отменить вместо него — худшее, что можно сделать:
       // человек просил вернуть, а получил ещё один шаг назад.
       if (k === 'z' && !e.shiftKey) {
@@ -912,12 +1023,24 @@ export function AssemblyFullscreen({
     if (isTyping(e.target)) return;
     // ⇧2 — кадрировать выделение. По `code`, а не по `key`: на не-латинской раскладке Shift+2 даёт
     // не «@», и клавиша молча пропала бы ровно у той половины пользователей, что печатает кириллицей.
-    if (e.shiftKey && (e.code === 'Digit2' || e.key === '@')) {
+    if (!listMode && e.shiftKey && (e.code === 'Digit2' || e.key === '@')) {
       fitSelection();
       e.preventDefault();
       return;
     }
-    switch (verbKey(e)) {
+    const verb = verbKey(e);
+    // В СПИСКЕ ПОЛОТНА НЕТ — И КЛАВИШИ ПОЛОТНА В НЁМ МОЛЧАТ, все разом, а не по одной.
+    //
+    // Молчат СОВСЕМ, и это не тот случай, когда «молчаливый выход не отказ»: `u` в списке ответило
+    // бы «нарисуйте маркизу или кликните по головам», то есть отправило бы искать органы, которых
+    // в этом виде не существует. Неправильные слова хуже молчания. Прочие клавиши полотна
+    // (v/h/f/±/стрелки/пробел) без этого гарда и так были бы no-op — `canvasRef` в списке пуст, —
+    // но вместе с ними умирал бы и `preventDefault`: пробел и стрелки обязаны остаться прокруткой
+    // рельса и колонки редактора. Списку принадлежат ровно `[`, `]` (отказом), `?` и `s`.
+    if (listMode && verb !== '[' && verb !== ']' && verb !== '?' && verb !== '/' && verb !== 's') {
+      return;
+    }
+    switch (verb) {
       case ' ':
         canvasRef.current?.setSpaceHand(true);
         e.preventDefault();
@@ -981,6 +1104,14 @@ export function AssemblyFullscreen({
         break;
       }
       case ']':
+        // В СПИСКЕ — ОТКАЗ СЛОВАМИ, а не тихий no-op и тем более не второй редактор (починенный
+        // дефект прототипа: `]` в списке открывал док с теми же полями поверх той же строки).
+        // Клавиша жива в обоих видах, значит и объяснить обязана в обоих.
+        if (listMode) {
+          showMessage('the list already carries the step editor', 'error');
+          e.preventDefault();
+          break;
+        }
         toggleDock();
         e.preventDefault();
         break;
@@ -1100,15 +1231,23 @@ export function AssemblyFullscreen({
                 <UnsavedBadge />
 
                 <span className='ml-auto flex flex-wrap items-center gap-1'>
-                  {/* Переключатель вида в хром НЕ дублируется: настоящий приедет в Ф6. Один
-                      задизейбленный чип честнее второго живого органа, спорящего с инлайновым.
-                      Вид задизейбленности — классами: без onClick чип рендерится простым span,
-                      до которого ни `:disabled`, ни span-гейт самого Chip не достают. */}
+                  {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДА — ТОГГЛ, НЕСУЩИЙ СВОЁ СОСТОЯНИЕ, как чип эскиза рядом:
+                      орган, меняющий вид и молчащий о том, какой вид сейчас, читается как не
+                      сработавший. `nonForm` — он ЧИТАЮЩИЙ: вид это способ смотреть, а не правка, и
+                      на выпущенной карточке он обязан работать (R10). Пишет он в предпочтения
+                      карточки, и вместе с ⌘L это ЕДИНСТВЕННЫЙ писатель `prefs.mode` на экране:
+                      вход в фулскрин и выход из него режим не трогают. */}
                   <Chip
                     nonForm
-                    disabled
-                    title='the list view arrives later'
-                    className='cursor-not-allowed opacity-40'
+                    dashed
+                    selected={listMode}
+                    pressed={listMode}
+                    onClick={toggleMode}
+                    title={
+                      listMode
+                        ? 'back to the schematic — the assembly on a canvas (⌘l)'
+                        : 'the sequence as a list — the rail and the open step (⌘l)'
+                    }
                   >
                     list
                   </Chip>
@@ -1229,7 +1368,11 @@ export function AssemblyFullscreen({
               addMode={shelfAddMode}
               onAddToStep={addPieceToStep}
               onExitAddMode={exitAddMode}
-              onTilePointerDown={onTilePointerDown}
+              // ДРАГ НА ПОЛОТНО В СПИСКЕ НЕ ВООРУЖАЕТСЯ ВОВСЕ: полотна нет, нести деталь некуда, а
+              // жест, начавшийся и не кончившийся ничем, читается как сломанная полка. Клик по
+              // плитке (выбрать / доложить в шаг) работает в обоих видах — обе оси аудита полки от
+              // вида не зависят.
+              onTilePointerDown={listMode ? undefined : onTilePointerDown}
               frozen={frozen}
             />
 
@@ -1248,27 +1391,112 @@ export function AssemblyFullscreen({
             />
 
             {/* ── сцена ────────────────────────────────────────────────────────────────────── */}
+            {/* ТРЕК ОДИН НА ОБА ВИДА, и стикер эскиза остаётся его слоем. Список мог бы приехать
+                отдельным треком грида, но тогда сцена перестала бы быть системой координат
+                стикера — а стикер в списке нужен ровно так же, как на полотне: пины эскиза и
+                строки рельса светятся друг от друга, и без эскиза светиться нечему. */}
             <div ref={stageRef} className='relative grid min-h-0 min-w-0'>
-              <AssemblyCanvas
-                ref={canvasRef}
-                blocks={blocks}
-                steps={steps}
-                res={res}
-                labelOf={labelOf}
-                pieceNameOf={pieceNameOf}
-                onPickStep={pickStep}
-                onCreate={setPendingCreate}
-                onDissolve={dissolveUnit}
-                pieceShapes={pieceShapes}
-                cloth={cloth}
-                smvOfBlock={smvOfBlock}
-                positions={prefs.pos}
-                onMove={prefs.move}
-                frozen={frozen}
-                picked={picked}
-                onPicked={setPicked}
-                onHint={setHint}
-              />
+              {listMode ? (
+                /* ── список: рельс и колонка редактора ──────────────────────────────────────
+                   ДВЕ КОЛОНКИ, СКРОЛЛЯЩИЕСЯ ПОРОЗНЬ. Рельс на карточке в сорок шагов длиннее
+                   экрана, а редактор шага — сам по себе высокий: общий скролл увозил бы один,
+                   пока читают другой. Ровно та же геометрия, что у инлайна (320px + остаток),
+                   только высоту здесь задаёт трек грида, а не страница. */
+                <div className='flex min-h-0 min-w-0 gap-2'>
+                  <div className='flex min-h-0 w-[320px] shrink-0 flex-col overflow-y-auto'>
+                    {/* ТОТ ЖЕ МОДУЛЬ, ЧТО У ИНЛАЙНА, и те же данные — они приезжают пропами из
+                        `OperationsField`. Второго рельса на те же шаги здесь нет и быть не может:
+                        два списка одних и тех же операций разъезжаются первой же правкой, и «шаг
+                        30» в оверлее перестаёт совпадать с «шагом 30» на странице. */}
+                    <SequenceRail
+                      fields={railFields}
+                      // В списке шапки узлов врезаются всегда, когда есть что врезать: вид уже
+                      // список, второе слагаемое инлайнового условия здесь тождественно истинно.
+                      grouped={railMarked}
+                      headerBefore={railHeaderBefore}
+                      selectedIndex={selectedIndex}
+                      // ТОЛЬКО ВЫБОР, БЕЗ `setDockStep`: редактор стоит в колонке справа, и
+                      // открытый заодно док положил бы те же поля на экран дважды. `onPickStep`
+                      // родителя нужен и здесь — за ним стоит прокрутка инлайнового редактора,
+                      // которая понадобится после выхода.
+                      onSelect={onPickStep}
+                      errorIndices={railErrorIndices}
+                      brokenSteps={railBrokenSteps}
+                      activePin={activePin}
+                      activeBom={activeBom}
+                      pieceShapes={pieceShapes}
+                      onHoverPin={onHoverPin}
+                      // Дроп детали на строку — жест НАТИВНОГО DnD, а в фулскрине его источника
+                      // нет вовсе (полка возит плитки pointer-портом). Колбэк всё равно тот же
+                      // мутатор: рельс один на два вида, и его контракт не должен различаться.
+                      onDropPiece={addInputToOperation}
+                      onMoveOperation={moveOperation}
+                      readPieceDrag={readPieceDrag}
+                    />
+                    {/* «＋ OPERATION» ОБЯЗАТЕЛЬНА ИМЕННО ЗДЕСЬ. В схеме она стоит в шапке дока, а
+                        в списке док закрыт — и без этой кнопки карточка с нулём шагов (а список и
+                        есть её дефолт) не давала бы завести первый шаг вовсе. Настоящая
+                        `<button>`, потому что она ПИШЕТ; при заморозке её нет, как нет и чипа в
+                        доке. */}
+                    {!frozen && (
+                      <button
+                        type='button'
+                        onClick={addStepFromDock}
+                        className='mt-0.5 w-full shrink-0 border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                      >
+                        <Text size='control' variant='uppercase' tracking='label' component='span'>
+                          + operation
+                        </Text>
+                      </button>
+                    )}
+                  </div>
+                  {/* СВОЙ `<fieldset disabled>` — РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО У ДОКА: внешний,
+                      что стоит на карточке, до портала не достаёт вовсе, и редактор выпущенной
+                      карточки был бы полностью правимым. `min-w-0` — против дефолтного
+                      `min-inline-size: min-content` самого fieldset.
+                      `onFocus` — ЗЕРКАЛО ВОСЬМОЙ ТОЧКИ СБРОСА записи отмены: `focusin` всплывает,
+                      одного обработчика на колонке хватает на все поля редактора, и правки полей
+                      после create жестовым ⌘Z не отменяются — в списке ровно так же, как в доке. */}
+                  <fieldset
+                    disabled={frozen}
+                    onFocus={onDockEdit}
+                    className='min-h-0 min-w-0 flex-1 overflow-y-auto border border-borderColor bg-bgColor p-2'
+                  >
+                    {/* ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА, и слова те же, что в доке: `selected`
+                        родителя всегда ≥ 0, и без неё колонка монтировала бы редактор
+                        НЕСУЩЕСТВУЮЩЕЙ строки — getValues отдаёт undefined, а первый же ввод
+                        создал бы `operations.0` в значениях формы МИМО field array. */}
+                    {selectedIndex >= 0 && selectedIndex < steps.length ? (
+                      renderDockEditor(armAddMode)
+                    ) : (
+                      <Text size='micro' variant='label'>
+                        the assembly sequence is empty so far — add the first step
+                      </Text>
+                    )}
+                  </fieldset>
+                </div>
+              ) : (
+                <AssemblyCanvas
+                  ref={canvasRef}
+                  blocks={blocks}
+                  steps={steps}
+                  res={res}
+                  labelOf={labelOf}
+                  pieceNameOf={pieceNameOf}
+                  onPickStep={pickStep}
+                  onCreate={setPendingCreate}
+                  onDissolve={dissolveUnit}
+                  pieceShapes={pieceShapes}
+                  cloth={cloth}
+                  smvOfBlock={smvOfBlock}
+                  positions={prefs.pos}
+                  onMove={prefs.move}
+                  frozen={frozen}
+                  picked={picked}
+                  onPicked={setPicked}
+                  onHint={setHint}
+                />
+              )}
               {/* СТИКЕР ЭСКИЗА — СЛОЙ ПОВЕРХ СЦЕНЫ, А НЕ ВОСЬМОЙ ТРЕК ГРИДА. Грид-ребёнком он был
                   бы обязан отнять у полотна высоту НАВСЕГДА (справка, которую нельзя убрать с
                   дороги, — уже не справка), а его ширина растягивала бы единственную колонку —

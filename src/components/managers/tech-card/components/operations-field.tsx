@@ -3983,6 +3983,19 @@ export function OperationsField({
           addInputToOperation={addInputToOperation}
           addOperation={addOperation}
           moveOperation={moveOperation}
+          // РЕЛЬС РЕЖИМА СПИСКА (Ф6в) — ТЕ ЖЕ ДАННЫЕ И ТЕ ЖЕ КОЛБЭКИ, ЧТО У ИНЛАЙНОВОГО ниже, и
+          // приезжают они пропами по той же причине, что и всё остальное: `useFieldArray` живёт в
+          // единственном экземпляре здесь, второй с ним не синхронизируется. Сам `SequenceRail`
+          // фулскрин импортирует сам — модуль ОДИН на оба вида.
+          railFields={fields}
+          railMarked={grouping.marked}
+          railHeaderBefore={grouping.headerBefore}
+          railErrorIndices={errorIndices}
+          railBrokenSteps={brokenSteps}
+          activePin={activePin}
+          activeBom={activeBom}
+          onHoverPin={(n) => onActivePinChange?.(n)}
+          readPieceDrag={readPieceDrag}
           onUndo={undoLastMutation}
           undoTitle={undoTitle(undoRec)}
           canUndo={undoRec !== null}
