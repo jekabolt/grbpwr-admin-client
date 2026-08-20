@@ -103,7 +103,12 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
   ['⌘0', 'zoom back to 100%', 'schematic'],
   ['+ · −', 'zoom in · out', 'schematic'],
   ['⇧2', 'frame the selection', 'schematic'],
-  ['⌘a', 'pick everything on the table', 'both'],
+  // ⌘A — ДВЕ СТРОКИ, потому что дело в двух видах разное: в схеме роутер спрашивает у полотна
+  // ВЕСЬ состав нод (`nodeKeys`, включая съеденные — выделение это презентация, R10), а в списке
+  // полотна нет и остаётся стол. Одна строка «on the table» на оба вида врала бы схеме — ровно
+  // той ложью, от которой этот список и заведён.
+  ['⌘a', 'pick every node on the canvas', 'schematic'],
+  ['⌘a', 'pick everything on the table', 'list'],
   ['drag on empty ground', 'marquee — touching a node picks it (shift adds)', 'schematic'],
   ['drag from the shelf', 'drop on a node to join, on empty ground to place the piece', 'schematic'],
   ['drag ⠿ on a step', 'reorder the sequence', 'list'],
@@ -361,12 +366,13 @@ const SCREEN_MARK = 'data-assembly-screen';
  * держится на том, УБРАЛ ЛИ React хоть один узел, — то есть на детали рендера, а не на правиле;
  * поэтому возврат делается явно и на всех путях, а не только там, где случайно повезло.
  *
- * Событие НЕОБЯЗАТЕЛЬНО, потому что зовут её двумя способами. Модалки, до которых этот файл и
- * `operations-field.tsx` дотягиваются пропом, отдают её в `onCloseAutoFocus` — там событие надо
- * ГАСИТЬ, иначе следом отработает дефолт Radix. Диалог создания живёт снаружи и пропа не имеет:
- * его закрытие ловится состоянием, и гасить там нечего.
+ * Зовут её ровно одним способом — пропом `onCloseAutoFocus` (reset-layout здесь; диалог создания
+ * и модалки `operations-field.tsx` — у себя), поэтому событие обязательно. Гасить его нужно:
+ * непогашенное, оно отдаёт ход дефолту Radix — фокус на несуществующий триггер, то есть ровно та
+ * дыра, которую возврат закрывает. Ветки раннего выхода события НЕ гасят сознательно: без экрана
+ * и при живом владельце фокуса дефолт Radix обязан остаться дефолтом Radix.
  */
-export function restoreScreenFocus(event?: Event) {
+export function restoreScreenFocus(event: Event) {
   const screen = document.querySelector<HTMLElement>(`[${SCREEN_MARK}]`);
   // Инлайн: фулскрина на экране нет. Ничего не гасим и ничего не двигаем — там нет роутера клавиш,
   // фокус в `body` ничего не ломает, и дефолт Radix обязан остаться ровно тем, чем был.
@@ -375,7 +381,7 @@ export function restoreScreenFocus(event?: Event) {
   // Фокус уже забрал кто-то живой — отбирать его не за что. Тот же guard, что у сплиттера: экран
   // возвращает себе только ПОТЕРЯННЫЙ фокус, а не любой.
   if (a && a !== document.body && a !== screen) return;
-  event?.preventDefault();
+  event.preventDefault();
   screen.focus();
 }
 
