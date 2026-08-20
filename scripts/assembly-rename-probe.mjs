@@ -56,9 +56,15 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { planUnitRename, renamePicked, renamePosEdits, unitRenameAct } = await import(
-  pathToFileURL(outfile).href,
-);
+const {
+  UNIT_KEY_MAX_BYTES,
+  planUnitRename,
+  renamePicked,
+  renamePosEdits,
+  unitKeyBytes,
+  unitKeyLengthRefusal,
+  unitRenameAct,
+} = await import(pathToFileURL(outfile).href);
 
 let checks = 0;
 const failed = new Set();
@@ -205,6 +211,33 @@ head('три коллизии, а не одна');
   is('и висячий вход в план не попал', a.plan.inputs, [{ index: 1, at: [0] }]);
 }
 
+head('длина кода — В БАЙТАХ, как её меряет сервер');
+{
+  is('потолок тот же, что в dto', UNIT_KEY_MAX_BYTES, 64);
+  is('латиница — байт на символ', unitKeyBytes('SHELL'), 5);
+  is('кириллица — ДВА байта на символ', unitKeyBytes('КОРПУС'), 12);
+  is('эмодзи — четыре', unitKeyBytes('🧵'), 4);
+  is('ровно потолок проходит', unitKeyLengthRefusal('A'.repeat(64)), null);
+  yes('на байт больше — отказ', unitKeyLengthRefusal('A'.repeat(65)) !== null);
+  // ВОТ РАДИ ЧЕГО ВСЁ: 64 кириллических символа — это 64 единицы UTF-16, то есть ровно столько,
+  // сколько разрешал `maxLength`, и 128 байт, то есть вдвое больше, чем примет сервер.
+  const cyr = 'Я'.repeat(64);
+  is('64 кириллицы = 64 единицы UTF-16', cyr.length, 64);
+  is('и 128 байт', unitKeyBytes(cyr), 128);
+  yes('поэтому отказ приходит ДО отправки', unitKeyLengthRefusal(cyr) !== null);
+  yes('и называет число', /128 bytes/.test(unitKeyLengthRefusal(cyr)));
+  {
+    const a = unitRenameAct(CHAIN, 0, cyr, PIECES);
+    is('вердикт отказывает по длине', a.kind, 'refuse');
+    yes('теми же словами', /128 bytes/.test(a.why));
+  }
+  {
+    // 32 кириллицы = 64 байта: ровно потолок, и жест обязан пройти.
+    const a = unitRenameAct(CHAIN, 0, 'Я'.repeat(32), PIECES);
+    is('ровно потолок кириллицей проходит', a.kind, 'rewrite');
+  }
+}
+
 head('порядок отказов — тот же, что у сервера: гигиена до графа');
 {
   // Ключ занят И деталью, И узлом: слова обязаны быть про деталь — она ближе к тому, что человек
@@ -213,6 +246,13 @@ head('порядок отказов — тот же, что у сервера: �
   const a = unitRenameAct(ops, 0, 'FRONT', PIECES);
   is('деталь названа первой', a.kind, 'refuse');
   yes('и это именно она', /taken by piece/.test(a.why));
+}
+{
+  // Длина спрашивается РАНЬШЕ коллизий: ключ может быть и длинным, и занятым, а полезнее сказать
+  // про длину — она чинится стиранием, а не выбором другого кода.
+  const a = unitRenameAct(CHAIN, 0, 'Я'.repeat(64), [{ lineKey: 'Я'.repeat(64), name: 'ткань' }]);
+  is('длина названа раньше детали', a.kind, 'refuse');
+  yes('и это именно длина', /bytes/.test(a.why));
 }
 {
   // Растворение сильнее любой коллизии: пустой ключ никого не занимает.

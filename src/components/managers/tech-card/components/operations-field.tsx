@@ -77,6 +77,7 @@ import { suggestUnitCode } from './assembly-suggest';
 import {
   planUnitRename,
   renamePosEdits,
+  unitKeyLengthRefusal,
   unitRenameAct,
   type UnitKeyRow,
   type UnitRenameNotice,
@@ -839,6 +840,10 @@ function useUnitCodeAct({
   // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
   const plan = pending ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey) : null;
   const dissolving = pending && (draft ?? '').trim() === '';
+  // ДЛИНА ГОВОРИТСЯ ПРЯМО ВО ВРЕМЯ НАБОРА, а не после Enter: тем же счётом, каким её посчитает
+  // мутатор, — второй счёт разошёлся бы с первым молча. Отказ мутатора при этом остаётся: слова
+  // под полем гаснут вместе с черновиком, а жест обязан отказать и мимо этого поля.
+  const tooLong = pending && !dissolving ? unitKeyLengthRefusal(draft ?? '') : null;
 
   // ЖИВОЙ НАБОР ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ ЭКРАНА — как драг ноды, маркиза и драг плитки с полки, и
   // слушатель по той же причине window-капчурный. Radix ловит Escape на ДОКУМЕНТЕ в фазе
@@ -887,15 +892,20 @@ function useUnitCodeAct({
           unit code
         </Text>
       </label>
-      {/* Голый `Input`, а не `InputField`: связь с формой здесь и есть то, что убрано. Значение
-          в форму кладёт мутатор одной записью, а `maxLength` остаётся по колонке сервера
-          (VARCHAR(64)) — отказ по длине бесполезен, поле просто не должно позволять её набрать. */}
+      {/* Голый `Input`, а не `InputField`: связь с формой здесь и есть то, что убрано. Значение в
+          форму кладёт мутатор одной записью.
+
+          `maxLength` СНЯТ НАМЕРЕННО. Он считает единицы UTF-16, а сервер — БАЙТЫ
+          (`assemblyUnitKeyMaxLen`): на кириллице потолок расходился вдвое, и поле сначала молча
+          обрезало набранное на 64-м символе, а потом сервер всё равно отвечал `too_long` на 128
+          байт. Обрезка посреди набора — худший из двух отказов: она не называет правила и портит
+          работу молча. Теперь длину считает `unitKeyLengthRefusal` — словами, до отправки, и тем
+          же счётом, что у мутатора. */}
       <Input
         name={id}
         ref={ref}
         value={draft ?? outputKey}
         placeholder='SHELL'
-        maxLength={64}
         title='rename the unit: type a new code and press Enter — every step that references it is rewritten in one act'
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
           setDraft(e.target.value);
@@ -925,13 +935,18 @@ function useUnitCodeAct({
           not renamed: {refusal}
         </Text>
       )}
-      {refusal === null && dissolving && (
+      {refusal === null && tooLong !== null && (
+        <Text size='micro' variant='label' className='mt-1'>
+          too long: {tooLong}
+        </Text>
+      )}
+      {refusal === null && tooLong === null && dissolving && (
         <Text size='micro' variant='label' className='mt-1'>
           press Enter to clear the code: ▣ {outputKey} dissolves and its inputs go back on the table
           for the next steps
         </Text>
       )}
-      {refusal === null && pending && !dissolving && (
+      {refusal === null && tooLong === null && pending && !dissolving && (
         <>
           <Text size='micro' variant='label' className='mt-1'>
             press Enter: ▣ {outputKey} → {draft} is rewritten in {plan?.steps ?? 0}{' '}
