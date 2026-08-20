@@ -59,6 +59,7 @@ const {
   record,
   redoStep,
   redoTitle,
+  renameLabel,
   resolvePending,
   undoStep,
   undoTitle,
@@ -114,6 +115,23 @@ is(
   }),
   'undo — dissolve ▣ SHELL',
 );
+is('переименование называет ОБА ключа', renameLabel('SHELL', 'BODY'), 'rename ▣ SHELL → BODY');
+// «rename ▣ SHELL» не отличает «сейчас вернётся SHELL» от «сейчас вернётся BODY»: чип обязан
+// называть то, что произойдёт по нажатию, а не то, чего жест касался.
+is(
+  'чип называет жест переименования',
+  undoTitle({
+    kind: 'rename',
+    index: 0,
+    fieldId: 'r1',
+    from: 'SHELL',
+    to: 'BODY',
+    outputs: [],
+    inputs: [],
+    label: renameLabel('SHELL', 'BODY'),
+  }),
+  'undo — rename ▣ SHELL → BODY',
+);
 is(
   'чип называет жест раскладки',
   undoTitle({ kind: 'move', back: [], forward: [], label: moveLabel(2) }),
@@ -130,6 +148,7 @@ console.log('\nрод записи — на нём стоят и гейт зам
 
 yes('append — формовая', isFormEntry({ kind: 'append' }));
 yes('dissolve — формовая', isFormEntry({ kind: 'dissolve' }));
+yes('rename — формовая', isFormEntry({ kind: 'rename' }));
 no('move — не формовая', isFormEntry({ kind: 'move' }));
 
 // --- resolvePending -------------------------------------------------------------------------------
@@ -277,6 +296,79 @@ yes(
 // Тождество строки проверяется и здесь — первым.
 no('после ресета формы', canUndo(DIS, rows('n1', 'n2', 'n3'), noUnits));
 no('после перестановки', canUndo(DIS, rows('r2', 'r1', 'r3'), noUnits));
+
+// --- canUndo/canRedo: rename ----------------------------------------------------------------------
+console.log('\ncanUndo (rename) — ВСЕ переписанные места разом, иначе не отменяем ничего');
+
+// Жест переименовал SHELL → BODY на карточке из трёх шагов:
+//   r1 производит BODY (был SHELL), r2 поглощает его (тот же ключ ВЫХОДОМ) и берёт входом,
+//   r3 берёт входом. Три вида мест ровно те, что перечисляет план переписывателя.
+const REN = {
+  kind: 'rename',
+  index: 0,
+  fieldId: 'r1',
+  from: 'SHELL',
+  to: 'BODY',
+  outputs: [
+    { index: 0, fieldId: 'r1' },
+    { index: 1, fieldId: 'r2' },
+  ],
+  inputs: [
+    { index: 1, fieldId: 'r2', at: 0 },
+    { index: 2, fieldId: 'r3', at: 1 },
+  ],
+  label: renameLabel('SHELL', 'BODY'),
+};
+const R3 = rows('r1', 'r2', 'r3');
+/** Карточка ПОСЛЕ жеста: везде новый ключ. */
+const outNew = (i) => (i === 0 || i === 1 ? 'BODY' : '');
+const inNew = (i) => (i === 1 ? ['BODY', 'SLEEVES'] : i === 2 ? ['COLLAR', 'BODY'] : ['FRONT', 'BACK']);
+/** Карточка ПОСЛЕ отмены: везде старый. */
+const outOld = (i) => (i === 0 || i === 1 ? 'SHELL' : '');
+const inOld = (i) => (i === 1 ? ['SHELL', 'SLEEVES'] : i === 2 ? ['COLLAR', 'SHELL'] : ['FRONT', 'BACK']);
+
+yes('все места на месте — отмена честна', canUndo(REN, R3, outNew, inNew));
+
+// ПОГЛОЩАЮЩИЙ ШАГ — САМОЕ ТИХОЕ МЕСТО. Его выход правили тем же жестом; вернули руками старый код
+// — и отмена, вернувшая остальные места, оставила бы карточку с ДВУМЯ разными ключами одного узла.
+no(
+  'поглотителю вернули старый код руками',
+  canUndo(REN, R3, (i) => (i === 0 ? 'BODY' : i === 1 ? 'SHELL' : ''), inNew),
+);
+no(
+  'производителю дали ТРЕТИЙ код',
+  canUndo(REN, R3, (i) => (i === 0 ? 'CARCASS' : i === 1 ? 'BODY' : ''), inNew),
+);
+// Ссылку потребителя переписали руками — тот же довод, только со стороны входов.
+no(
+  'потребитель больше не смотрит на новый ключ',
+  canUndo(REN, R3, outNew, (i) => (i === 2 ? ['COLLAR', 'CUFFS'] : inNew(i))),
+);
+// Позиция внутри `inputKeys` несущая: тот же ключ, но сдвинутый, значит порядок входов трогали.
+no(
+  'ключ уехал на другую позицию входов',
+  canUndo(REN, R3, outNew, (i) => (i === 2 ? ['BODY', 'COLLAR'] : inNew(i))),
+);
+// Ресет формы после save и перестановка убивают запись целиком — как и все формовые.
+no('после ресета формы', canUndo(REN, rows('n1', 'n2', 'n3'), outNew, inNew));
+no('после перестановки строк', canUndo(REN, rows('r1', 'r3', 'r2'), outNew, inNew));
+no('строки потребителя больше нет', canUndo(REN, rows('r1', 'r2'), outNew, inNew));
+
+// ЧИТАТЕЛЬ ВХОДОВ НЕОБЯЗАТЕЛЕН: без него щит удостоверяет тождество строк и выходы. Слабее — но
+// это осознанная граница, а не дыра: отказывать из-за того, что вызывающий не дал читателя, значит
+// сделать отмену мёртвой у того, кто просто не знает про четвёртый аргумент.
+yes('без читателя входов — щит слабее, но не отказывает', canUndo(REN, R3, outNew));
+no('и выходы он всё равно проверяет', canUndo(REN, R3, outOld));
+
+console.log('\ncanRedo (rename) — зеркало: все места носят СТАРЫЙ ключ');
+
+yes('после отмены повтор честен', canRedo(REN, R3, outOld, inOld));
+no('повтор по непеременённой карточке', canRedo(REN, R3, outNew, inNew));
+no(
+  'между ⌘Z и ⇧⌘Z поглотителя тронули',
+  canRedo(REN, R3, (i) => (i === 0 ? 'SHELL' : i === 1 ? 'CARCASS' : ''), inOld),
+);
+no('после ресета формы повторять нечего', canRedo(REN, rows('n1', 'n2', 'n3'), outOld, inOld));
 
 // --- canUndo: move --------------------------------------------------------------------------------
 console.log('\ncanUndo (move) — раскладку не адресуют строкой формы');
@@ -432,6 +524,8 @@ function stand(initialIds = []) {
   let fields = initialIds.map((id) => ({ id }));
   /** Выход шага держится по `fieldId`, а не по индексу: перестановка строк его не двигает. */
   const units = new Map();
+  /** Входы шага — по тому же ключу и по той же причине. Переименование правит и их. */
+  const ins = new Map();
   let pos = {};
   let seq = 0;
   let frozen = false;
@@ -439,6 +533,7 @@ function stand(initialIds = []) {
   const said = [];
   const newId = () => `f${++seq}`;
   const outputOf = (i) => units.get(fields[i]?.id) ?? '';
+  const inputsOf = (i) => ins.get(fields[i]?.id) ?? [];
 
   const api = {
     get history() {
@@ -449,6 +544,10 @@ function stand(initialIds = []) {
     },
     get pos() {
       return pos;
+    },
+    /** Карточка целиком — по ней и проверяется, что переписаны ВСЕ три вида мест. */
+    get card() {
+      return fields.map((_, i) => ({ out: outputOf(i), ins: inputsOf(i) }));
     },
     get said() {
       return said;
@@ -482,7 +581,7 @@ function stand(initialIds = []) {
     },
 
     /** `appendStep` — жест полотна: строка дописывается в конец, запись доезжает вторым тактом. */
-    create(unitKey = '', clearedBefore) {
+    create(unitKey = '', clearedBefore, inputKeys = []) {
       if (frozen) return;
       const at = fields.length;
       const r = { outputUnitKey: unitKey };
@@ -497,14 +596,66 @@ function stand(initialIds = []) {
       const id = newId();
       fields = [...fields, { id }];
       units.set(id, unitKey);
+      ins.set(id, [...inputKeys]);
       api.settle();
+    },
+
+    /**
+     * `renameUnit` — переписыватель ссылок. ТРИ ВИДА МЕСТ, одна запись, одно слово.
+     *
+     * Модель повторяет мутатор ровно там, где он ошибается тихо: собирает адреса ДО первой записи,
+     * пишет их одним проходом и кладёт ОДНУ запись, инвертирующую всё разом.
+     */
+    rename(index, next) {
+      if (frozen) return { ok: false, why: 'frozen' };
+      const from = outputOf(index);
+      if (!from || next === from) return { ok: false, why: 'nothing to rename' };
+      // Коллизия — отказ БЕЗ ЕДИНОЙ ЗАПИСИ. Сравнение побайтное: «Shell» не занят «SHELL».
+      if (fields.some((_, i) => outputOf(i) === next)) {
+        said.push(`unit “${next}” is already produced`);
+        return { ok: false, why: 'taken' };
+      }
+      const outputs = [];
+      const inputs = [];
+      fields.forEach((f, i) => {
+        if (outputOf(i) === from) outputs.push({ index: i, fieldId: f.id });
+        inputsOf(i).forEach((k, j) => {
+          if (k === from) inputs.push({ index: i, fieldId: f.id, at: j });
+        });
+      });
+      api.write({ outputs, inputs }, next);
+      hist = record(hist, {
+        kind: 'rename',
+        index,
+        fieldId: fields[index].id,
+        from,
+        to: next,
+        outputs,
+        inputs,
+        label: renameLabel(from, next),
+      });
+      said.push(`renamed ${from} → ${next} in ${new Set([...outputs, ...inputs].map((x) => x.index)).size} steps`);
+      return { ok: true };
+    },
+
+    /** Перезапись по списку мест — одна на жест и на обе его инверсии. */
+    write(sites, key) {
+      for (const s of sites.outputs) units.set(fields[s.index].id, key);
+      for (const s of sites.inputs) {
+        const cur = [...inputsOf(s.index)];
+        cur[s.at] = key;
+        ins.set(fields[s.index].id, cur);
+      }
     },
 
     /** `removeOperation` — мутатор массива, и он же точка сброса №1. */
     remove(index) {
       const id = fields[index]?.id;
       api.clearForm();
-      if (id) units.delete(id);
+      if (id) {
+        units.delete(id);
+        ins.delete(id);
+      }
       fields = fields.filter((_, i) => i !== index);
     },
 
@@ -535,7 +686,10 @@ function stand(initialIds = []) {
     /** Ресет формы после успешного save: RHF раздаёт строкам НОВЫЕ id. */
     saveAndReset() {
       const fresh = fields.map((f) => ({ id: newId(), was: f.id }));
-      for (const f of fresh) units.set(f.id, units.get(f.was) ?? '');
+      for (const f of fresh) {
+        units.set(f.id, units.get(f.was) ?? '');
+        ins.set(f.id, ins.get(f.was) ?? []);
+      }
       fields = fresh.map((f) => ({ id: f.id }));
     },
 
@@ -546,7 +700,7 @@ function stand(initialIds = []) {
         said.push('frozen');
         return;
       }
-      if (!canUndo(rec, fields, outputOf)) {
+      if (!canUndo(rec, fields, outputOf, inputsOf)) {
         hist = dropForm(hist);
         said.push('the sequence has changed — nothing to undo');
         return;
@@ -556,6 +710,10 @@ function stand(initialIds = []) {
       } else if (rec.kind === 'append') {
         applying = true;
         api.remove(rec.index);
+        applying = false;
+      } else if (rec.kind === 'rename') {
+        applying = true;
+        api.write(rec, rec.from);
         applying = false;
       } else {
         applying = true;
@@ -572,7 +730,7 @@ function stand(initialIds = []) {
         said.push('frozen');
         return;
       }
-      if (!canRedo(rec, fields, outputOf)) {
+      if (!canRedo(rec, fields, outputOf, inputsOf)) {
         hist = dropForm(hist);
         said.push('the sequence has changed — nothing to redo');
         return;
@@ -588,7 +746,15 @@ function stand(initialIds = []) {
         const id = newId();
         fields = [...fields, { id }];
         units.set(id, rec.row.outputUnitKey ?? '');
+        ins.set(id, []);
         api.settle();
+        return;
+      }
+      if (rec.kind === 'rename') {
+        applying = true;
+        api.write(rec, rec.to);
+        applying = false;
+        hist = redoStep(hist);
         return;
       }
       applying = true;
@@ -732,6 +898,112 @@ console.log('\nсмешение родов — порядок жестов, а �
   is('и назвалась счётом', peekUndo(s.history).label, 'move 3 nodes');
   s.undo();
   is('одно нажатие вернуло все три', s.pos, { A: { x: 1, y: 1 } });
+}
+
+console.log('\nпереименование — три вида мест, одна запись, одно нажатие ⌘Z');
+
+/** Цепочка из трёх нод: SHELL → BODY → GARMENT, плюс поглощение BODY на четвёртом шаге. */
+function chain() {
+  const s = stand();
+  s.create('SHELL', undefined, ['FRONT', 'BACK']);
+  s.create('BODY', undefined, ['SHELL', 'SLEEVE']);
+  s.create('BODY', undefined, ['BODY', 'POCKET']); // поглощение: тот же ключ ВЫХОДОМ
+  s.create('GARMENT', undefined, ['BODY', 'COLLAR']);
+  // Карточку СОБРАЛИ, история сборки к делу не относится: в жизни первый же `focusin` в поле кода
+  // (восьмая точка сброса) гасит формовые записи, и переименование ложится в пустую стопку.
+  s.clearForm();
+  return s;
+}
+
+{
+  const s = chain();
+  const before = j(s.card);
+  s.rename(0, 'CARCASS');
+  is('производитель переименован', s.card[0].out, 'CARCASS');
+  is('потребитель переписан на новый ключ', s.card[1].ins, ['CARCASS', 'SLEEVE']);
+  is('порядок входов не сдвинут', s.card[1].ins[1], 'SLEEVE');
+  is('цепочка ниже не тронута', s.card[3].ins, ['BODY', 'COLLAR']);
+  is('успех произнесён с числом шагов', s.said.at(-1), 'renamed SHELL → CARCASS in 2 steps');
+  is('жест — ОДНА запись, а не три', s.history.undo.length, 1);
+  is('и чип называет оба ключа', s.undoName, 'undo — rename ▣ SHELL → CARCASS');
+  s.undo();
+  is('одно нажатие ⌘Z вернуло ВСЁ разом', j(s.card), before);
+  is('и сделало это одной записью', s.history.undo.length, 0);
+  s.redo();
+  is('⇧⌘Z вернул переименование целиком', s.card[1].ins, ['CARCASS', 'SLEEVE']);
+  is('и выход производителя', s.card[0].out, 'CARCASS');
+}
+
+{
+  // ПОГЛОЩЕНИЕ — САМАЯ ТИХАЯ ИЗ ТРЁХ ОШИБОК. Поглощающий шаг несёт тот же ключ ВЫХОДОМ; пропусти
+  // его переписыватель — и он станет ВТОРЫМ ПРОИЗВОДИТЕЛЕМ старого кода, то есть новым узлом.
+  // На глаз переименование при этом выглядит удавшимся.
+  const s = chain();
+  s.rename(1, 'TORSO');
+  is('выход производителя', s.card[1].out, 'TORSO');
+  is('ВЫХОД ПОГЛОТИТЕЛЯ — тоже', s.card[2].out, 'TORSO');
+  is('и его вход', s.card[2].ins, ['TORSO', 'POCKET']);
+  is('вход следующего узла', s.card[3].ins, ['TORSO', 'COLLAR']);
+  is('старого кода не осталось нигде', s.card.filter((r) => r.out === 'BODY' || r.ins.includes('BODY')).length, 0);
+  is('число шагов считает ВСЕ три вида мест', s.said.at(-1), 'renamed BODY → TORSO in 3 steps');
+  s.undo();
+  is('⌘Z вернул и поглотителя', s.card[2].out, 'BODY');
+  is('и все ссылки', j(s.card.map((r) => r.ins)), j([['FRONT', 'BACK'], ['SHELL', 'SLEEVE'], ['BODY', 'POCKET'], ['BODY', 'COLLAR']]));
+}
+
+{
+  // КОЛЛИЗИЯ — ОТКАЗ СЛОВАМИ И НИ ОДНОЙ ЗАПИСИ.
+  const s = chain();
+  const before = j(s.card);
+  const r = s.rename(0, 'GARMENT');
+  no('коллизия отказала', r.ok);
+  is('карточка не тронута', j(s.card), before);
+  is('истории не появилось', s.history.undo.length, 0);
+  is('и отказ произнесён', s.said.at(-1), 'unit “GARMENT” is already produced');
+}
+
+{
+  // ПОБАЙТНОСТЬ. «Shell» — ДРУГОЙ узел, а не тот же в другом регистре: коллация ключа utf8mb4_bin.
+  const s = chain();
+  const r = s.rename(0, 'Shell');
+  yes('регистр — не коллизия', r.ok);
+  is('и переписан он побайтно', s.card[1].ins, ['Shell', 'SLEEVE']);
+}
+
+{
+  // РЕСЕТ ФОРМЫ ПОСЛЕ SAVE убивает и эту запись: адреса те же, id новые.
+  const s = chain();
+  s.rename(0, 'CARCASS');
+  s.saveAndReset();
+  s.undo();
+  is('отказ произнесён', s.said.at(-1), 'the sequence has changed — nothing to undo');
+  is('и ни одно место не тронуто', s.card[1].ins, ['CARCASS', 'SLEEVE']);
+}
+
+{
+  // ПЕРЕИМЕНОВАНИЕ И ПЕРЕСТАНОВКА В ОДНОЙ СТОПКЕ — порядок жестов, а не два списка.
+  const s = chain();
+  s.rename(0, 'CARCASS');
+  s.move([{ key: 'CARCASS', at: { x: 5, y: 5 } }]);
+  is('вершина — перестановка', peekUndo(s.history).kind, 'move');
+  s.undo();
+  is('первый ⌘Z вернул раскладку', s.pos, {});
+  is('а переименование осталось', s.card[1].ins, ['CARCASS', 'SLEEVE']);
+  s.undo();
+  is('второй ⌘Z снял переименование', s.card[1].ins, ['SHELL', 'SLEEVE']);
+}
+
+{
+  // ЗАМОРОЗКА: род формовый, значит на выпущенной карточке отмена отказывает СЛОВАМИ.
+  const s = chain();
+  s.rename(0, 'CARCASS');
+  s.freeze(true);
+  is('формовая запись умерла при выпуске', s.history.undo.length, 0);
+  const t = chain();
+  t.freeze(true);
+  const r = t.rename(0, 'CARCASS');
+  no('на выпущенной карточке переименование не состоялось', r.ok);
+  is('и карточка цела', t.card[0].out, 'SHELL');
 }
 
 console.log('\nресет формы после save — формовые записи мертвы, раскладочные живы');

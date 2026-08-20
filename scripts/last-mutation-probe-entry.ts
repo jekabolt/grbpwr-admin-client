@@ -18,6 +18,7 @@ export {
   record,
   redoStep,
   redoTitle,
+  renameLabel,
   resolvePending,
   undoStep,
   undoTitle,

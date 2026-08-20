@@ -90,11 +90,14 @@ import {
   record,
   redoStep,
   redoTitle,
+  renameLabel,
   resolvePending,
   undoStep,
   undoTitle,
   type History,
   type PendingAppend,
+  type RenameInputSite,
+  type RenameOutputSite,
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
@@ -773,17 +776,216 @@ function TrayChip({
 // ПОГЛОЩЕНИЯ КАК ОТДЕЛЬНОЙ МЕХАНИКИ ЗДЕСЬ НЕТ, и это не упущение: «GARMENT + HEM → GARMENT»
 // выражается тем, что автор берёт узел входом и пишет его же ключ выходом. Движок узнаёт
 // поглощение сам; отдельная кнопка «поглотить» была бы вторым способом сказать то же самое.
+
+/** Ровно то, что переписывателю ссылок нужно от строки формы: два места, где живёт ключ узла. */
+type UnitKeyRow = { outputUnitKey?: string; inputKeys?: string[] };
+
+/**
+ * Ответ мутатора переименования полю.
+ *
+ * ОТКАЗ ВОЗВРАЩАЕТСЯ, А НЕ ТОЛЬКО ПРОИЗНОСИТСЯ. Снекбар гаснет через несколько секунд, а поле с
+ * набранным, но не применённым кодом остаётся на экране — и без причины под ним читалось бы как
+ * «переименовал». Слова у обоих одни и те же, движковые.
+ */
+type RenameOutcome = { ok: true } | { ok: false; why: string };
+
+/** План перезаписи: где стоит ключ и сколько ШАГОВ жест затронет. */
+type UnitRenamePlan = {
+  /** Индексы шагов, у которых ключ стоит ВЫХОДОМ: производитель и каждый поглощающий. */
+  outputs: number[];
+  /** Потребители: адрес шага и позиции ключа внутри его `inputKeys`. */
+  inputs: { index: number; at: number[] }[];
+  /** Сколько РАЗНЫХ шагов затронуто — это число и произносится в успехе. */
+  steps: number;
+};
+
+/**
+ * ТРИ ВИДА МЕСТ, ГДЕ СТОИТ КЛЮЧ УЗЛА, а не два.
+ *
+ *  1. `outputUnitKey` производителя — сама правка;
+ *  2. `outputUnitKey` каждого ПОГЛОЩАЮЩЕГО шага: поглощение выражено тем же ключом в ВЫХОДЕ
+ *     (`GARMENT + HEM → GARMENT`). Пропустить это значит превратить поглотителей во ВТОРЫХ
+ *     ПРОИЗВОДИТЕЛЕЙ старого кода, то есть в новые узлы, — самая тихая из трёх ошибок: на глаз
+ *     переименование выглядит удавшимся, а движок начинает отвергать половину карточки;
+ *  3. элементы `inputKeys` каждого потребителя.
+ *
+ * Всё остальное (блоки, фронтир, печать, серверная запись полной заменой) — деривативы, они
+ * пересчитаются сами.
+ *
+ * СКАН ЛЕКСИЧЕСКИЙ, А НЕ ПО РЕЗУЛЬТАТУ СВИПА, и это осознанно: свип знает только ЗАКОННЫЕ узлы, а
+ * переписывать надо ВСЕ места, где ключ стоит буквально. На сломанной карточке (второй
+ * производитель, отвергнутый джойн) свип половины этих мест не видит вовсе — и переименование
+ * оставило бы их со старым кодом, то есть починка ломала бы.
+ *
+ * СРАВНЕНИЕ ПОБАЙТНОЕ: никаких `trim` и `toLowerCase`. «SHELL» и «Shell» — два разных узла, ровно
+ * как в колонке `utf8mb4_bin`.
+ */
+function planUnitRename(ops: UnitKeyRow[], from: string): UnitRenamePlan {
+  const outputs: number[] = [];
+  const inputs: { index: number; at: number[] }[] = [];
+  ops.forEach((o, i) => {
+    if (((o?.outputUnitKey ?? '') as string) === from) outputs.push(i);
+    const at: number[] = [];
+    (o?.inputKeys ?? []).forEach((k, j) => {
+      if (k === from) at.push(j);
+    });
+    if (at.length > 0) inputs.push({ index: i, at });
+  });
+  const touched = new Set<number>(outputs);
+  for (const s of inputs) touched.add(s.index);
+  return { outputs, inputs, steps: touched.size };
+}
+
+/**
+ * КОД УЗЛА — ПОДТВЕРЖДАЕМЫЙ АКТ, А НЕ ЖИВОЕ ПОЛЕ ФОРМЫ.
+ *
+ * Раньше здесь стоял `InputField`, писавший в форму на каждый символ. Переписыватель ссылок,
+ * работающий так же, переписал бы потребителей сначала на `S`, потом на `SH`, потом на `SHE` — и
+ * цепочка рвалась бы на каждом нажатии, а свип на каждом нажатии заливал бы экран красным везде,
+ * КРОМЕ места правки. Поэтому набор живёт в локальном черновике, а в форму уходит ОДНА атомарная
+ * перезапись — по Enter или по уходу фокуса.
+ *
+ * ЧЕРНОВИК МИМО RHF, и это не мелочь: новое поле формы протухало бы черновик карточки (zod-дефолт
+ * стирает отсутствующие поля при восстановлении). Незаписанный черновик умирает вместе с
+ * редактором — человек, ушедший со страницы посреди набора, НЕ получает половину переименования;
+ * ровно поэтому строка под полем всё время набора говорит, что жест ещё не применён.
+ *
+ * ESC ВОЗВРАЩАЕТ ПРЕЖНИЙ КОД и НЕ всплывает дальше: Esc — верхняя ступень лестницы фулскрина
+ * (палитра, шпаргалка, выделение), и без остановки он уносил бы со слоя вместе с набором.
+ */
+function UnitCodeField({
+  index,
+  outputKey,
+  onRename,
+}: {
+  index: number;
+  /** Ключ, как он стоит В ФОРМЕ. Черновик его не трогает до подтверждения. */
+  outputKey: string;
+  /** Единственный мутатор переименования (живёт в `OperationsField`, R3). */
+  onRename: (index: number, next: string) => RenameOutcome;
+}) {
+  const { getValues } = useFormContext<TechCardFormData>();
+  const [draft, setDraft] = useState<string | null>(null);
+  /** Отказ движка стоит под полем, пока набранное не изменили: снекбар гаснет, а вопрос — нет. */
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const id = `op-${index}-unit-code`;
+  const pending = draft !== null && draft !== outputKey;
+  // ЦЕНА СЧИТАЕТСЯ ТЕМ ЖЕ ПЛАНИРОВЩИКОМ, КОТОРЫЙ ЕЁ И ОПЛАТИТ. Второй счёт «сколько шагов
+  // затронет» разошёлся бы с первым молча — и баннер обещал бы не то, что произошло.
+  // Через `getValues`, а не подпиской: редактор и так перерисовывается на каждую правку операций
+  // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
+  const plan = pending ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey) : null;
+  const dissolving = pending && (draft ?? '').trim() === '';
+
+  const commit = () => {
+    if (draft === null) return;
+    if (draft === outputKey) {
+      setDraft(null); // набрали ровно то же самое — жеста не было
+      return;
+    }
+    if (refusal !== null) return; // отказ уже произнесён и стоит под полем; молча повторять его незачем
+    const outcome = onRename(index, draft);
+    if (outcome.ok) {
+      // Применилось: поле возвращается к значению ФОРМЫ, а там уже новый ключ.
+      setDraft(null);
+      return;
+    }
+    // ОТКАЗ ОСТАВЛЯЕТ НАБРАННОЕ В ПОЛЕ. Стереть его значило бы выбросить работу человека в ответ
+    // на «так нельзя»; вернуть прежний код он может Esc'ом.
+    setRefusal(outcome.why);
+  };
+
+  return (
+    <>
+      <div className='space-y-px' data-field={`operations.${index}.outputUnitKey`}>
+        <label htmlFor={id} className='block leading-none'>
+          <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
+            unit code
+          </Text>
+        </label>
+        {/* Голый `Input`, а не `InputField`: связь с формой здесь и есть то, что убрано. Значение
+            в форму кладёт мутатор одной записью, а `maxLength` остаётся по колонке сервера
+            (VARCHAR(64)) — отказ по длине бесполезен, поле просто не должно позволять её набрать. */}
+        <Input
+          name={id}
+          value={draft ?? outputKey}
+          placeholder='SHELL'
+          maxLength={64}
+          title='rename the unit: type a new code and press Enter — every step that references it is rewritten in one act'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            setDraft(e.target.value);
+            if (refusal !== null) setRefusal(null); // набрали другое — вопрос снят, можно пробовать снова
+          }}
+          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') {
+              // `preventDefault` обязателен: у карточки настоящая <form>, и Enter в поле иначе
+              // отправляет её целиком — то есть переименование превращалось бы в сохранение.
+              e.preventDefault();
+              commit();
+              return;
+            }
+            if (e.key === 'Escape' && draft !== null) {
+              e.preventDefault();
+              e.stopPropagation();
+              setDraft(null);
+              setRefusal(null);
+            }
+          }}
+          onBlur={commit}
+        />
+      </div>
+      {refusal !== null && (
+        <Text size='micro' variant='label' className='mt-1'>
+          not renamed: {refusal}
+        </Text>
+      )}
+      {refusal === null && dissolving && (
+        <Text size='micro' variant='label' className='mt-1'>
+          press Enter to clear the code: ▣ {outputKey} dissolves and its inputs go back on the table
+          for the next steps
+        </Text>
+      )}
+      {refusal === null && pending && !dissolving && (
+        <>
+          <Text size='micro' variant='label' className='mt-1'>
+            press Enter: ▣ {outputKey} → {draft} is rewritten in {plan?.steps ?? 0}{' '}
+            {plan?.steps === 1 ? 'step' : 'steps'} at once — until then nothing has moved
+          </Text>
+          {/* НЕПЕРЕПИСЫВАЕМОЕ НАЗЫВАЕТСЯ ДО ПОДТВЕРЖДЕНИЯ, а не после. Код узла печатается на
+              бумаге и уезжает в QR (шапка 0307), а сам он входит в подпись раздела CONSTRUCTION —
+              значит уже выданные в цех комплекты после переименования врут, и подпись протухает.
+              Это по дизайну; человек обязан узнать это от интерфейса, а не от технолога в цеху. */}
+          <Text size='micro' variant='label'>
+            printed packets and QR already in the workshop keep “{outputKey}”, and the CONSTRUCTION
+            signature goes stale
+          </Text>
+        </>
+      )}
+    </>
+  );
+}
+
 function ProducesBlock({
   index,
   inputKeys,
   pieces,
   assembly,
+  onRename,
+  onDissolve,
   onEdit,
 }: {
   index: number;
   inputKeys: string[];
   pieces: PieceRef[];
   assembly: AssemblyView;
+  /** Мутатор переименования узла — один на все точки входа (R3), живёт в `OperationsField`. */
+  onRename: (index: number, next: string) => RenameOutcome;
+  /**
+   * Мутатор растворения — ТОТ ЖЕ, что зовут полотно и схема. Свой `setValue` здесь стоял и делал
+   * ровно то же самое, только мимо истории: растворение чипом отменить было нельзя, а
+   * растворение с полотна — можно, хотя это один и тот же поступок.
+   */
+  onDissolve: (index: number) => void;
   /**
    * Шаг ИЗМЕНЁН кнопкой этого блока — гасит формовую историю отмены.
    *
@@ -866,29 +1068,23 @@ function ProducesBlock({
       ) : (
         <>
           <div className='flex flex-wrap items-center gap-2'>
-            {/* InputField, а не голый Input: последний — это <input> без привязки к форме, и
-                набранный код узла молча не доезжал бы до сабмита. maxLength по колонкам сервера
-                (VARCHAR(64) / VARCHAR(255)) — отказ по длине здесь бесполезен, поле просто не
-                должно позволять её набрать. */}
-            <InputField
-              name={`operations.${index}.outputUnitKey`}
-              label='unit code'
-              placeholder='SHELL'
-              maxLength={64}
-            />
+            {/* КОД — ЧЕРЕЗ АКТ, ИМЯ — ЖИВЫМ ПОЛЕМ, и разница не в аккуратности. На ключ ссылаются
+                входы других шагов, он и есть идентичность узла; имя не адресует ничего, поэтому
+                живая запись имени не рвёт ни одной ссылки. maxLength у имени — по колонке сервера
+                (VARCHAR(255)). */}
+            <UnitCodeField index={index} outputKey={outputKey} onRename={onRename} />
             <InputField
               name={`operations.${index}.outputUnitName`}
               label='unit name'
               placeholder='body'
               maxLength={255}
             />
+            {/* ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
+                чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
+                отменялся из редактора. */}
             <Chip
               dashed
-              onClick={() => {
-                setValue(`operations.${index}.outputUnitKey`, '', { shouldDirty: true });
-                setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
-                onEdit?.();
-              }}
+              onClick={() => onDissolve(index)}
               title='the step stops assembling the unit; its inputs return to the table for the next steps'
             >
               dissolve
@@ -1453,6 +1649,8 @@ function OperationEditor({
   pieceSource,
   onActiveBomChange,
   onDropPiece,
+  onRenameUnit,
+  onDissolveUnit,
   mediaUrls,
   onEdit,
   frozen = false,
@@ -1484,6 +1682,14 @@ function OperationEditor({
   pieceSource: { groupHint: string; chipTitle: string; emptyNote: string };
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
+  /**
+   * ПЕРЕИМЕНОВАНИЕ УЗЛА — ОДИН МУТАТОР НА ВСЕ ТОЧКИ ВХОДА. Поле кода живёт в редакторе шага, а
+   * когда появится редактор узла (Т6) — и в нём; обе поверхности обязаны звать ЭТОТ колбэк, иначе
+   * «переименовать» на одном экране и на другом разойдутся в мелочах, и разойдутся молча (R3).
+   */
+  onRenameUnit: (index: number, next: string) => RenameOutcome;
+  /** Растворение — тот же мутатор, что зовут полотно и схема. */
+  onDissolveUnit: (index: number) => void;
   /** Адреса операционных снимков; форма возит только media_id. */
   mediaUrls?: Map<number, string>;
   /**
@@ -2249,6 +2455,8 @@ function OperationEditor({
         inputKeys={selectedPieceKeys}
         pieces={pieces}
         assembly={assembly}
+        onRename={onRenameUnit}
+        onDissolve={onDissolveUnit}
         onEdit={onEdit}
       />
 
@@ -3655,6 +3863,116 @@ export function OperationsField({
   };
 
   /**
+   * ПЕРЕЗАПИСЬ КЛЮЧА ПО СПИСКУ МЕСТ — одна на жест и на обе его инверсии.
+   *
+   * Второй экземпляр этой арифметики (свой в мутаторе, свой в ⌘Z) означал бы, что отмена
+   * переименования однажды перестанет попадать ровно в те места, которые переписал жест, — и
+   * разойдутся они молча, на карточке, где ключ стоит в десятке мест.
+   */
+  const rewriteUnitKeySites = (
+    sites: { outputs: RenameOutputSite[]; inputs: RenameInputSite[] },
+    key: string,
+  ) => {
+    for (const s of sites.outputs) {
+      setValue(`operations.${s.index}.outputUnitKey`, key, { shouldDirty: true });
+    }
+    for (const s of sites.inputs) {
+      // Читается ЗАНОВО на каждой записи: у одного шага ключ может стоять несколькими входами
+      // (законной такая строка не будет, но переписать её обязаны все, а не первый), и снимок,
+      // взятый один раз, потерял бы предыдущую правку.
+      const cur = [...(((getValues(`operations.${s.index}.inputKeys`) as string[]) ?? []) as string[])];
+      cur[s.at] = key;
+      setValue(`operations.${s.index}.inputKeys`, cur, { shouldDirty: true });
+    }
+  };
+
+  /**
+   * ПЕРЕИМЕНОВАНИЕ УЗЛА — АТОМАРНАЯ ПЕРЕЗАПИСЬ ПОТРЕБИТЕЛЕЙ. Недостающая половина того, что
+   * задумано схемой: шапка `0307_assembly_units.sql` дословно обещает «переименование кода —
+   * атомарная перезапись потребителей в том же сохранении, поэтому внешней durable-идентичности
+   * узлу не нужно». Идентичность узла и есть его код, и переписыватель — единственное, что делает
+   * это решение верным.
+   *
+   * ЖЕСТ ОДИН, ЗАПИСЬ ОДНА, СЛОВО ОДНО. Три вида мест (см. `planUnitRename`) переписываются
+   * вместе; в историю ложится ОДНА запись, инвертирующая все три разом — человек сделал один
+   * поступок, и ⌘Z обязано вернуть его целиком, а не третями.
+   */
+  const renameUnit = (stepIndex: number, next: string): RenameOutcome => {
+    if (frozen) return { ok: false, why: FROZEN_REFUSAL }; // гейт первой строкой, как у всех мутаторов
+    const formOps = ((getValues('operations') ?? []) as UnitKeyRow[]) ?? [];
+    const from = (formOps[stepIndex]?.outputUnitKey ?? '') as string;
+    // Переименовывать нечего: шаг ничего не собирает. Сюда попадают только через поле кода,
+    // которое на таком шаге не рендерится вовсе, — но мутатор про разметку не знает.
+    if (!from) return { ok: false, why: 'this step assembles nothing — there is no code to rename' };
+    if (next === from) return { ok: true }; // побайтно то же самое: жеста не было
+    // ПУСТОЙ КЛЮЧ — ЭТО НЕ ПЕРЕИМЕНОВАНИЕ, А РАСТВОРЕНИЕ, и ведёт оно в СУЩЕСТВУЮЩИЙ мутатор.
+    // Второй растворитель рядом с первым разошёлся бы с ним ровно так же, как разошёлся чип
+    // редактора: тот писал в форму сам и не клал записи в историю.
+    //
+    // ОДИН `trim` НА ВЕСЬ ФАЙЛ, и он не про идентичность: движок читает выход подрезанным, значит
+    // ключ из одних пробелов — это ОТСУТСТВИЕ ключа, и назвать его переименованием значило бы
+    // завести узел, которого свип не видит. Сравнения ключей ниже остаются побайтными.
+    if (next.trim() === '') {
+      dissolveUnit(stepIndex);
+      return { ok: true };
+    }
+    // КОЛЛИЗИЯ — СЛОВАМИ ДВИЖКА И БЕЗ ЕДИНОЙ ЗАПИСИ. Пространство имён у деталей и узлов одно
+    // (правило 6), поэтому спрашиваются оба.
+    const piece = pieces.find((p) => p.lineKey === next);
+    if (piece) {
+      const why = `the unit key “${next}” is taken by piece “${piece.name || next}”: pieces and units share one namespace`;
+      showMessage(why, 'error');
+      return { ok: false, why };
+    }
+    const taken = formOps.findIndex((o) => ((o?.outputUnitKey ?? '') as string) === next);
+    if (taken >= 0) {
+      // Номер ЭКРАННЫЙ — `(i + 1) * 10`, как на рельсе и в боксах: движок считает шаги
+      // порядковыми (`step 3`), а человек читает «шаг 30», и назвать ему порядковый значит
+      // отправить искать не тот шаг.
+      const why = `unit “${next}” is already produced by step ${(taken + 1) * 10} — pick another code, or dissolve that unit first`;
+      showMessage(why, 'error');
+      return { ok: false, why };
+    }
+
+    const plan = planUnitRename(formOps, from);
+    // АДРЕСА СВЕРЯЮТСЯ ДО ПЕРВОЙ ЗАПИСИ. Без `fieldId` записи истории нет, а жест без отмены
+    // хуже отказа: пусть лучше не состоится ничего, чем состоится неотменяемое.
+    const outputs: RenameOutputSite[] = [];
+    const inputs: RenameInputSite[] = [];
+    for (const i of plan.outputs) {
+      const id = fields[i]?.id;
+      if (!id) return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
+      outputs.push({ index: i, fieldId: id });
+    }
+    for (const s of plan.inputs) {
+      const id = fields[s.index]?.id;
+      if (!id) return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
+      for (const at of s.at) inputs.push({ index: s.index, fieldId: id, at });
+    }
+
+    rewriteUnitKeySites({ outputs, inputs }, next);
+    setHistory(
+      record(history.current, {
+        kind: 'rename',
+        index: stepIndex,
+        fieldId: fields[stepIndex]?.id ?? '',
+        from,
+        to: next,
+        outputs,
+        inputs,
+        label: renameLabel(from, next),
+      }),
+    );
+    // УСПЕХ ПРОИЗНОСИТСЯ, и число в нём считает ВСЕ ТРИ ВИДА МЕСТ: перенумерация шагов не молчит
+    // (R9), а переименование, переписавшее полкарточки, — тем более.
+    showMessage(
+      `renamed ${from} → ${next} in ${plan.steps} ${plan.steps === 1 ? 'step' : 'steps'}`,
+      'success',
+    );
+    return { ok: true };
+  };
+
+  /**
    * ПЕРЕЕЗД НОД — ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ РАСКЛАДКИ НА ЭТОМ ЭКРАНЕ, и он же кладёт запись в историю.
    *
    * ПОЧЕМУ ЗДЕСЬ, А НЕ В ПОЛОТНЕ И НЕ В ФУЛСКРИНЕ. Стопка одна на оба хранилища (иначе теряется
@@ -3700,6 +4018,13 @@ export function OperationsField({
   const outputUnitKeyOf = (i: number) =>
     (getValues(`operations.${i}.outputUnitKey`) as string) ?? '';
 
+  /**
+   * Входы шага — второй читатель щита, нужный ПЕРЕИМЕНОВАНИЮ: его инверсия правит не только
+   * выходы, и «переписанное место всё ещё носит мой ключ» надо спрашивать у обоих видов мест.
+   */
+  const inputKeysOf = (i: number) =>
+    ((getValues(`operations.${i}.inputKeys`) as string[]) ?? []) as string[];
+
   /** Применить формовую половину инверсии, не дав мутаторам погасить остальную историю. */
   const applyToForm = (fn: () => void) => {
     applying.current = true;
@@ -3730,7 +4055,7 @@ export function OperationsField({
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    if (!canUndo(rec, fields, outputUnitKeyOf)) {
+    if (!canUndo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
       // Ряд строк уехал (чаще всего — ресет формы после save). Умирает ВСЯ формовая половина
       // истории, а не одна запись: они все из той же, уже несуществующей эпохи. Раскладочные живут.
       setHistory(dropForm(history.current));
@@ -3748,6 +4073,11 @@ export function OperationsField({
           setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
         }
       });
+    } else if (rec.kind === 'rename') {
+      // ОДНО НАЖАТИЕ ВОЗВРАЩАЕТ ВСЕ ТРИ ВИДА МЕСТ. Тем же переписывателем, что их и правил, — по
+      // адресам, записанным жестом, а не по повторному скану: шаг, дописавший ссылку на НОВЫЙ ключ
+      // уже после переименования, эту ссылку сделал сам, и отмена чужой работы не касается.
+      applyToForm(() => rewriteUnitKeySites(rec, rec.from));
     } else {
       applyToForm(() => {
         setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
@@ -3764,7 +4094,7 @@ export function OperationsField({
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    if (!canRedo(rec, fields, outputUnitKeyOf)) {
+    if (!canRedo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
       setHistory(dropForm(history.current));
       showMessage('the sequence has changed — nothing to redo', 'error');
       return;
@@ -3795,6 +4125,11 @@ export function OperationsField({
         }
       });
       setSelected(rec.index);
+      return;
+    }
+    if (rec.kind === 'rename') {
+      applyToForm(() => rewriteUnitKeySites(rec, rec.to));
+      setHistory(redoStep(history.current));
       return;
     }
     applyToForm(() => {
@@ -4221,6 +4556,11 @@ export function OperationsField({
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearFormHistory}
                 onDropPiece={addInputToOperation}
+                // ОДИН МУТАТОР НА ОБЕ ПОВЕРХНОСТИ: тот же экземпляр, что уезжает в док фулскрина
+                // ниже. Второй «переименовать», написанный для второго экрана, разошёлся бы с
+                // первым молча — ровно то, от чего стережёт R3.
+                onRenameUnit={renameUnit}
+                onDissolveUnit={dissolveUnit}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
               />
@@ -4318,6 +4658,10 @@ export function OperationsField({
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearFormHistory}
                 onDropPiece={addInputToOperation}
+                // ТЕ ЖЕ ЭКЗЕМПЛЯРЫ, что у инлайнового редактора выше, и это весь смысл R3: поле
+                // кода узла стоит на двух поверхностях, а переписыватель ссылок — один.
+                onRenameUnit={renameUnit}
+                onDissolveUnit={dissolveUnit}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
               />

@@ -13,7 +13,14 @@
 //   ────────── ─────────────────────────────────────── ────────────────────────────────────────
 //   append     удаление строки + возврат assemblyCleared  форма (RHF)
 //   dissolve   два setValue назад                         форма (RHF)
+//   rename     ВСЕ переписанные ключом места разом        форма (RHF)
 //   move       возврат оверрайдов раскладки               localStorage, презентация
+//
+// ПЕРЕИМЕНОВАНИЕ УЗЛА — ОДНА ЗАПИСЬ, А НЕ ТРИ. Жест переписывает три вида мест (выход
+// производителя, выход каждого ПОГЛОЩАЮЩЕГО шага, ссылки потребителей во входах), но человек
+// сделал ОДИН поступок, и ⌘Z обязано вернуть все три вида разом. Три записи означали бы, что
+// половина отмены оставляет карточку в состоянии, которого автор никогда не создавал: потребители
+// уже смотрят на старый ключ, а производитель ещё носит новый.
 //
 // Запись, трогающая оба хранилища сразу, означала бы, что отмена ПЕРЕСТАНОВКИ правит форму, — то
 // есть перетаскивание ноды начинает просить сохранение. Раскладка мимо RHF — инвариант с Ф3, и
@@ -55,6 +62,21 @@ export type Pos = { x: number; y: number };
 export type PosEdit = { key: string; at: Pos | null };
 
 /**
+ * Одно место, где стоял ключ узла ВЫХОДОМ шага: производитель или поглощающий шаг.
+ *
+ * `index` — адрес, `fieldId` — тождество строки: индекс сам по себе ничего не удостоверяет
+ * (перестановка строк и ресет формы после save двигают адреса, не двигая работу).
+ */
+export type RenameOutputSite = { index: number; fieldId: string };
+
+/**
+ * Одно место, где ключ стоял ВХОДОМ шага. Позиция внутри `inputKeys`, а не сам ключ: порядок
+ * входов авторский, он попадает в подпись секции, и «убрать старый, дописать новый» сдвигало бы
+ * его молча.
+ */
+export type RenameInputSite = { index: number; fieldId: string; at: number };
+
+/**
  * Состоявшийся жест, который ⌘Z умеет обратить, а ⇧⌘Z — повторить.
  *
  * `label` — имя жеста ЧЕЛОВЕЧЕСКИМИ словами, посчитанное в момент записи, а не при показе: к
@@ -94,6 +116,25 @@ export type HistoryEntry<TRow = unknown> =
       /** Значения ДО обнуления — их и возвращает отмена. */
       unitKey: string;
       unitName: string;
+      label: string;
+    }
+  | {
+      /**
+       * ПЕРЕИМЕНОВАНИЕ УЗЛА — атомарная перезапись потребителей, обещанная шапкой миграции
+       * `0307_assembly_units.sql`: «переименование кода — атомарная перезапись потребителей в том
+       * же сохранении, поэтому внешней durable-идентичности узлу не нужно».
+       */
+      kind: 'rename';
+      /** Шаг, на котором стоял жест (производитель). Остальные адреса — в `outputs`/`inputs`. */
+      index: number;
+      fieldId: string;
+      /** Ключ ДО и ПОСЛЕ. Сравнение везде ПОБАЙТНОЕ: это контракт (`COLLATE utf8mb4_bin`). */
+      from: string;
+      to: string;
+      /** Выходы, переписанные жестом: производитель И каждый поглощающий шаг. */
+      outputs: RenameOutputSite[];
+      /** Ссылки потребителей — адрес строки плюс позиция внутри её `inputKeys`. */
+      inputs: RenameInputSite[];
       label: string;
     };
 
@@ -227,6 +268,14 @@ export function dissolveLabel(unitKey: string): string {
 }
 
 /**
+ * Подпись жеста переименования. НАЗЫВАЕТ ОБА КЛЮЧА: «rename ▣ SHELL» не отличает «сейчас вернётся
+ * SHELL» от «сейчас вернётся BODY», а чип обязан называть то, что произойдёт по нажатию.
+ */
+export function renameLabel(from: string, to: string): string {
+  return `rename ▣ ${from} → ${to}`;
+}
+
+/**
  * Подпись жеста раскладки. СЧЁТОМ, а не именем ноды: мультидраг и стрелки двигают сколько угодно
  * нод сразу, и «move ▣ SHELL» у жеста из четырёх нод было бы прямой неправдой.
  */
@@ -260,6 +309,40 @@ export function resolvePending<TRow>(
 }
 
 /**
+ * ДЕРЖАТСЯ ЛИ ЕЩЁ ВСЕ МЕСТА, ПЕРЕПИСАННЫЕ ПЕРЕИМЕНОВАНИЕМ, — и держат ли они `expected`.
+ *
+ * Жест был атомарным, значит и его инверсия обязана быть атомарной: уехала хоть одна строка или
+ * хоть один ключ переписан после жеста руками — отменять нельзя ВООБЩЕ. Частичный откат оставил бы
+ * карточку в состоянии, которого автор не создавал: половина мест смотрит на старый ключ, половина
+ * на новый.
+ *
+ * СРАВНЕНИЕ ПОБАЙТНОЕ, без `trim` — в отличие от щита растворения. Тот спрашивает «шаг всё ещё
+ * ничего не собирает», а движок читает выход подрезанным; здесь вопрос другой — «это ТОТ САМЫЙ
+ * ключ, который я написал», а идентичность узла побайтна по контракту.
+ *
+ * `getInputKeys` необязателен: без него щит удостоверяет только тождество строк потребителей. Это
+ * слабее, но честно — читателя входов даёт вызывающий, и его отсутствие не повод отказывать.
+ */
+function renameSitesHold<TRow>(
+  rec: Extract<HistoryEntry<TRow>, { kind: 'rename' }>,
+  fields: FieldRow[],
+  getOutputUnitKey: (index: number) => string,
+  getInputKeys: ((index: number) => string[]) | undefined,
+  expected: string,
+): boolean {
+  for (const s of rec.outputs) {
+    if (s.index < 0 || fields[s.index]?.id !== s.fieldId) return false;
+    if (getOutputUnitKey(s.index) !== expected) return false;
+  }
+  for (const s of rec.inputs) {
+    if (s.index < 0 || fields[s.index]?.id !== s.fieldId) return false;
+    if (!getInputKeys) continue;
+    if ((getInputKeys(s.index) ?? [])[s.at] !== expected) return false;
+  }
+  return true;
+}
+
+/**
  * Можно ли ещё обратить записанный жест.
  *
  * ГЛАВНАЯ ПРОВЕРКА — ТОЖДЕСТВО СТРОКИ, а не её наличие. `fields[index].id` меняется у RHF при
@@ -271,6 +354,9 @@ export function resolvePending<TRow>(
  * вернули выход руками или новым жестом, возвращать старый код поверх — значит переписать работу,
  * а не отменить свою.
  *
+ * Для переименования тот же вопрос задаётся КАЖДОМУ переписанному месту: жест был один, и отмена
+ * либо возвращает все места, либо не трогает ни одного.
+ *
  * Раскладка не спрашивается ни о чём: она не адресуется индексом строки и ресет формы её не
  * касается. Ноды, которой больше нет, отмена не найдёт — оверрайд без ноды никого не двигает.
  */
@@ -278,11 +364,15 @@ export function canUndo<TRow>(
   rec: HistoryEntry<TRow>,
   fields: FieldRow[],
   getOutputUnitKey: (index: number) => string,
+  getInputKeys?: (index: number) => string[],
 ): boolean {
   if (rec.kind === 'move') return true;
   if (rec.index < 0) return false;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
   if (rec.kind === 'append') return true;
+  if (rec.kind === 'rename') {
+    return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.to);
+  }
   return getOutputUnitKey(rec.index).trim() === '';
 }
 
@@ -296,16 +386,23 @@ export function canUndo<TRow>(
  *
  * У растворения — зеркало щита отмены: узел на месте и это ТОТ ЖЕ код. Иначе ⇧⌘Z растворил бы
  * узел, которого запись не растворяла.
+ *
+ * У переименования зеркало полное: все места на месте и все носят СТАРЫЙ ключ — то есть ровно то
+ * состояние, в которое их привела отмена. Тронули хоть одно — повторять нечего.
  */
 export function canRedo<TRow>(
   rec: HistoryEntry<TRow>,
   fields: FieldRow[],
   getOutputUnitKey: (index: number) => string,
+  getInputKeys?: (index: number) => string[],
 ): boolean {
   if (rec.kind === 'move') return true;
   if (rec.index < 0) return false;
   if (rec.kind === 'append') return fields.length === rec.index;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
+  if (rec.kind === 'rename') {
+    return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.from);
+  }
   return getOutputUnitKey(rec.index).trim() === rec.unitKey;
 }
 
