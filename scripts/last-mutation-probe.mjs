@@ -623,6 +623,14 @@ function stand(initialIds = []) {
           if (k === from) inputs.push({ index: i, fieldId: f.id, at: j });
         });
       });
+      // ТРЕТЬЯ КОЛЛИЗИЯ — ДУБЛЬ ВО ВХОДАХ ОДНОГО ШАГА (правило 7). Новый ключ может нигде не
+      // производиться и всё равно СТОЯТЬ ВХОДОМ там же, где старый: висячая ссылка на растворённый
+      // узел выглядит ровно так. Перезапись поставила бы один и тот же вход дважды.
+      const clash = inputs.find((s) => inputsOf(s.index).includes(next));
+      if (clash) {
+        said.push(`step ${(clash.index + 1) * 10} already takes “${next}” as an input`);
+        return { ok: false, why: 'duplicate-input' };
+      }
       api.write({ outputs, inputs }, next);
       hist = record(hist, {
         kind: 'rename',
@@ -960,6 +968,29 @@ function chain() {
   is('карточка не тронута', j(s.card), before);
   is('истории не появилось', s.history.undo.length, 0);
   is('и отказ произнесён', s.said.at(-1), 'unit “GARMENT” is already produced');
+}
+
+{
+  // КОЛЛИЗИЯ ТРЕТЬЕГО РОДА: новый ключ нигде не производится, но УЖЕ СТОИТ ВХОДОМ там же, где
+  // старый. Так выглядит висячая ссылка на растворённый узел — состояние живое и частое, а
+  // перезапись поставила бы один и тот же вход дважды (правило 7, duplicate-input). Отказ обязан
+  // прийти ДО первой записи: движок иначе показал бы слова о ЧУЖОМ шаге, и причину ищут не там.
+  const s = stand();
+  s.create('SHELL', undefined, ['FRONT', 'BACK']);
+  s.create('BODY', undefined, ['SHELL', 'LOST']); // LOST не производит никто
+  s.clearForm();
+  const before = j(s.card);
+  const r = s.rename(0, 'LOST');
+  no('дубль во входах отказал', r.ok);
+  is('карточка не тронута', j(s.card), before);
+  is('истории не появилось', s.history.undo.length, 0);
+  is('и отказ назвал шаг', s.said.at(-1), 'step 20 already takes “LOST” as an input');
+  // А безопасное переименование на той же карточке проходит, и отмена возвращает ИСХОДНЫЕ строки,
+  // а не «переименовывает обратно»: висячая ссылка на LOST жестом не тронута ни разу.
+  s.rename(0, 'CARCASS');
+  is('висячая ссылка не тронута', s.card[1].ins, ['CARCASS', 'LOST']);
+  s.undo();
+  is('отмена вернула байт-в-байт', j(s.card), before);
 }
 
 {
