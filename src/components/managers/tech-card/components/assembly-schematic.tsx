@@ -155,6 +155,26 @@ export function AssemblySchematic({
    */
   const pickedFree = picked.filter((k) => onTable.has(k));
 
+  /**
+   * РАЗНИЦА МЕЖДУ ВЫБРАННЫМ И ГОДНЫМ — СЛОВАМИ, а не молча уменьшенным числом на чипе.
+   *
+   * Огранка переехала в глаголы, и без этой строки полоса выбора называла бы ДВЕ ноды, а чип
+   * предлагал бы взять ОДНУ — молча, без объяснения, куда делась вторая; а когда годного нет
+   * вовсе, чипы исчезали бы целиком, оставив человека с обведёнными нодами и без единого слова
+   * о том, почему по ним нечего сделать.
+   *
+   * СЛОВА ТЕ ЖЕ, ЧТО У ПОЛОСЫ ВЫБОРА ПОЛОТНА (`selectionSentence` в `assembly-canvas.tsx`):
+   * «already in units» — это отказ движка правилом 2, и произносить его на двух поверхностях
+   * двумя разными фразами значило бы завести два словаря на одно правило.
+   */
+  const spentWord = (() => {
+    const spent = picked.length - pickedFree.length;
+    if (!spent) return '';
+    return pickedFree.length === 0
+      ? `${spent} already in units — nothing here can be an input`
+      : `${spent} already in units`;
+  })();
+
   // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
   // больше не годится, а чип «выбрано: A» продолжал бы предлагать её — и «обработка · 1» родила бы
   // шаг со съеденным входом, то есть ровно ту невалидность, ради устранения которой затевался
@@ -628,6 +648,7 @@ export function AssemblySchematic({
       {!frozen && (
         <ActionPanel
           picked={picked}
+          spent={spentWord}
           // ГЛАГОЛЫ БЕРУТ ОГРАНЁННЫЙ ВЫБОР, А СВОДКА — ВЕСЬ. Съеденная нода в выделении законна
           // (выделение — презентация, R10), но входом не годится: правило 2 движка. То же
           // разделение, что у полосы выбора полотна, и заведено оно тем же жестом — шапкой,
@@ -828,6 +849,7 @@ export function AssemblySchematic({
 function ActionPanel({
   picked,
   free,
+  spent,
   labelOf,
   clothLine,
   onCreate,
@@ -839,6 +861,11 @@ function ActionPanel({
    * только не смеет предлагать действие на том, чего оно не возьмёт.
    */
   free: string[];
+  /**
+   * Чего из выбора глаголы не возьмут — словами движка. Пусто, когда годно всё: молчание здесь
+   * означает «разницы нет», а не «объяснять нечем».
+   */
+  spent: string;
   labelOf: (k: string) => string;
   /**
    * Ткань выделения свёрткой. Отвечает на вопрос, который у выбранной кучи деталей встаёт раньше
@@ -858,6 +885,11 @@ function ActionPanel({
       <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
         {picked.map(labelOf).join(' + ')}
       </Text>
+      {spent && (
+        <Text size='micro' variant='label' component='span' className='shrink-0'>
+          · {spent}
+        </Text>
+      )}
       {clothLine && (
         <Text size='micro' variant='label' component='span' className='shrink-0'>
           {clothLine}
