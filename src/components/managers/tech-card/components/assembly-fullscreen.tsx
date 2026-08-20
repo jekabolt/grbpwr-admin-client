@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
@@ -44,6 +44,31 @@ import type { useSchematicPrefs } from './use-schematic-prefs';
 /** Высота строки-заглушки между хромом и полотном. Тот же зазор, что у прочих треков грида. */
 const GRID_GAP = 8;
 
+/**
+ * Шпаргалка. Список — данные, а не разметка: клавиша, попавшая в роутер и забытая здесь, — та же
+ * ложь, что подпись про несуществующую клавишу.
+ *
+ * `[` (полка деталей) тут НЕ значится: она приедет в Ф5.
+ */
+const HELP_KEYS: [string, string][] = [
+  ['v · h', 'select tool · pan tool'],
+  ['space', 'pan while held'],
+  ['f · ⌘1', 'fit everything on screen'],
+  ['⌘0', 'zoom back to 100%'],
+  ['+ · −', 'zoom in · out'],
+  ['⇧2', 'frame the selection'],
+  ['⌘a', 'pick everything on the table'],
+  ['drag on empty ground', 'marquee — touching a node picks it (shift adds)'],
+  ['arrows', 'nudge the picked by 8px (shift: 1px)'],
+  ['u', 'join the picked into a unit'],
+  ['o', 'an operation on the picked'],
+  ['d', 'dissolve the picked unit'],
+  ['⌘z', 'undo the last gesture'],
+  ['⌘f', 'find a piece or a unit'],
+  [']', 'collapse or open the step dock'],
+  ['esc', 'find → shortcuts → selection → leave'],
+];
+
 export type AssemblyFullscreenProps = {
   blocks: AssemblyBlock[];
   steps: AssemblyStep[];
@@ -72,6 +97,21 @@ export type AssemblyFullscreenProps = {
   addOperation: () => void;
   /** Потребитель — Ф6в (перестановка шагов в списке). */
   moveOperation: (from: number, to: number) => void;
+  /**
+   * Отмена последнего жеста, глубина 1. Инверсию делает `operations-field.tsx` — там же, где
+   * мутаторы (R3); фулскрин только зовёт её и показывает чип. Гейт заморозки и отказ словами — на
+   * той стороне: отказывать обязан тот, кто знает, что именно отменял.
+   */
+  onUndo: () => void;
+  /** Подпись чипа: `undo — create step 90` либо `nothing to undo`. Считается `last-mutation.ts`. */
+  undoTitle: string;
+  /** Есть ли что отменять. Чип без записи задизейблен, а не молчит при нажатии. */
+  canUndo: boolean;
+  /**
+   * В доке начали править поля. ВОСЬМАЯ ИЗ ДЕВЯТИ ТОЧЕК СБРОСА записи отмены: жестовый ⌘Z обещает
+   * «ой» сразу после жеста, а не откат всего, что напечатали следом.
+   */
+  onDockEdit: () => void;
   /** Строит настоящий `OperationEditor` открытого шага; аргумент — обработчик «＋ piece». */
   renderDockEditor: (onFlashPieces: () => void) => ReactNode;
   /** Второй экземпляр `<StepNumberDrift />`: корневой остался под оверлеем и не виден. */
@@ -108,6 +148,28 @@ const isTyping = (target: EventTarget | null): boolean => {
   return !!el?.closest?.(TYPING_TARGETS);
 };
 
+/**
+ * Гард ⌘Z и ⌘A — УЖЕ, чем гард глаголов, и намеренно.
+ *
+ * Глаголы уступают всякому органу: буква на кнопке или в раскрытом селекте не жест полотна. А ⌘Z
+ * уступает ровно НАБОРУ ТЕКСТА — там он родной откат ввода. Пропусти сюда `button`, и отмена
+ * умирала бы после каждого нажатия чипа: фокус остаётся на кнопке, а ⌘Z оттуда уже «в поле».
+ * Ровно так же ⌘A: в тексте это выделить текст, на кнопке — выделить всё на столе.
+ */
+const TEXT_TARGETS = 'input, textarea, [contenteditable=""], [contenteditable="true"]';
+
+const isTextField = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  return !!el?.closest?.(TEXT_TARGETS);
+};
+
+/**
+ * Отказ выпущенной карточки. ОДНА формулировка на все органы, включая инверсию отмены в
+ * `operations-field.tsx` (она импортирует её отсюда): два текста об одном правиле читаются как два
+ * разных правила.
+ */
+export const FROZEN_REFUSAL = 'the card is released — it can be read and laid out, not edited';
+
 export function AssemblyFullscreen({
   blocks,
   steps,
@@ -123,6 +185,10 @@ export function AssemblyFullscreen({
   setPendingCreate,
   dissolveUnit,
   addOperation,
+  onUndo,
+  undoTitle,
+  canUndo,
+  onDockEdit,
   renderDockEditor,
   dockChrome,
   frozen,
@@ -147,6 +213,10 @@ export function AssemblyFullscreen({
   const [picked, setPicked] = useState<string[]>([]);
   const [hint, setHint] = useState<CanvasHint>(null);
   const [resetOpen, setResetOpen] = useState(false);
+  // Две верхние ступени Esc-лестницы. Обе — состояния экрана, а не полотна: гасит их лестница, а
+  // лестница одна.
+  const [findOpen, setFindOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const { prefs: panels, set: setPanels } = usePanelPrefs();
   const dockH = panels.dockH ?? DOCK_DEFAULT;
@@ -193,6 +263,145 @@ export function AssemblyFullscreen({
     setDockStep(at);
   };
 
+  // --- глаголы выделения --------------------------------------------------------------------------
+  //
+  // КАЖДЫЙ НАЧИНАЕТСЯ С ГЕЙТА ЗАМОРОЗКИ И ПОВТОРЯЕТ ГЕЙТ СВОЕЙ КНОПКИ. Мутаторы гейтованы и сами,
+  // но молчаливый выход мутатора — не отказ: человек нажал клавишу, ничего не произошло, и объяснить
+  // это некому. Клавиша обязана уметь ровно то же, что кнопка, и отказывать теми же словами.
+  //
+  // И КАЖДЫЙ КОНЧАЕТСЯ `setPendingCreate` (R1). Ни тип операции, ни зона, ни машина жестом не
+  // подставляются: подставленное значение проходит все проверки и уезжает на печать как
+  // утверждение, которого никто не делал. Прототип здесь НЕ эталон.
+
+  const onTable = useMemo(() => new Set(res.frontier), [res]);
+
+  const sewSelection = useCallback(() => {
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    if (picked.length < 2) {
+      showMessage(
+        'a unit needs at least two nodes picked — draw a marquee or click their heads',
+        'error',
+      );
+      return;
+    }
+    setPendingCreate({ inputKeys: picked, intent: 'unit' });
+    setPicked([]);
+  }, [frozen, picked, setPendingCreate, showMessage]);
+
+  const processSelection = useCallback(() => {
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    if (picked.length === 0) {
+      showMessage('pick a piece or a unit first', 'error');
+      return;
+    }
+    setPendingCreate({ inputKeys: picked, intent: 'process' });
+    setPicked([]);
+  }, [frozen, picked, setPendingCreate, showMessage]);
+
+  const dissolveSelection = useCallback(() => {
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    // ТОТ ЖЕ ГЕЙТ, ЧТО У КНОПКИ В БОКСЕ: ровно один узел, и он на столе. В прототипе это был
+    // починенный дефект — клавиша растворяла произвольного члена маркизы.
+    const free = picked.filter((k) => onTable.has(k));
+    if (free.length !== 1 || !res.units.has(free[0])) {
+      showMessage(
+        'dissolve needs exactly one unit picked, and it must still be on the table',
+        'error',
+      );
+      return;
+    }
+    const block = blocks.find((b) => b.key === free[0]);
+    if (!block) {
+      showMessage(`“${free[0]}” has no producing step to dissolve`, 'error');
+      return;
+    }
+    dissolveUnit(block.producedAt);
+    setPicked([]);
+  }, [frozen, picked, onTable, res, blocks, dissolveUnit, showMessage]);
+
+  const undo = useCallback(() => {
+    // Гейт стоит и здесь, и внутри `onUndo`: молчаливый выход мутатора отказом не является, а
+    // произносит отказ сторона, знающая, что именно отменялось.
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    onUndo();
+  }, [frozen, onUndo, showMessage]);
+
+  const fitSelection = useCallback(() => {
+    if (picked.length === 0) {
+      showMessage('nothing picked — the view has nothing to frame', 'error');
+      return;
+    }
+    canvasRef.current?.fitSelection();
+  }, [picked, showMessage]);
+
+  // --- find-палитра -------------------------------------------------------------------------------
+  //
+  // Полка говорит, ЧТО существует; палитра — ГДЕ оно лежит. Доводка панорамой минимальным сдвигом
+  // (`revealDelta`): найденная деталь рядом с той, что уже перед глазами, не имеет права увозить
+  // весь экран.
+
+  const [findQuery, setFindQuery] = useState('');
+  const [findIndex, setFindIndex] = useState(0);
+  const findInputRef = useRef<HTMLInputElement>(null);
+
+  const findRows = useMemo(() => {
+    const rows: { key: string; label: string; sub: string }[] = [];
+    for (const [key, unit] of res.units) rows.push({ key, label: `▣ ${key}`, sub: unit.name });
+    if ((blocks.find((b) => b.key === '')?.steps.length ?? 0) > 0) {
+      rows.push({ key: '', label: '◌ outside units', sub: 'steps outside any unit' });
+    }
+    for (const p of pieces) rows.push({ key: p.lineKey, label: p.lineKey, sub: p.name });
+    return rows;
+  }, [res, blocks, pieces]);
+
+  const findHits = useMemo(() => {
+    const q = findQuery.trim().toLowerCase();
+    const all = q
+      ? findRows.filter((r) => `${r.label} ${r.sub}`.toLowerCase().includes(q))
+      : findRows;
+    return all.slice(0, 40);
+  }, [findRows, findQuery]);
+
+  const openFind = useCallback(() => {
+    // ПОВТОРНЫЙ ⌘F НЕ СТИРАЕТ ЗАПРОС, а выделяет его — как родной поиск: набранное слово чаще
+    // хотят уточнить, чем выбросить.
+    if (!findOpen) {
+      setFindQuery('');
+      setFindIndex(0);
+    }
+    setFindOpen(true);
+    // Поле монтируется этим же рендером — фокус ставится следующим кадром, иначе его некуда ставить.
+    requestAnimationFrame(() => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    });
+  }, [findOpen]);
+
+  const chooseFind = useCallback(
+    (i: number) => {
+      const hit = findHits[i];
+      if (!hit) return;
+      setFindOpen(false);
+      // ВЫБИРАЕТСЯ ТОЛЬКО ТО, ЧТО НА СТОЛЕ. Съеденная деталь и хвостовой бокс входами не годятся, и
+      // эффект очистки выбора всё равно выбросил бы их следующим кадром — мигание вместо ответа.
+      if (onTable.has(hit.key)) setPicked([hit.key]);
+      canvasRef.current?.reveal(hit.key);
+    },
+    [findHits, onTable],
+  );
+
   // --- сплиттер дока ------------------------------------------------------------------------------
   //
   // Порт `wireSplit`/`setBar` прототипа. Во время перетаскивания высота пишется ПРЯМО в CSS-переменную
@@ -231,8 +440,30 @@ export function AssemblyFullscreen({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.defaultPrevented || e.repeat) return;
     if (e.metaKey || e.ctrlKey) {
-      // Модификаторные — ДО typing-гарда: ⌘0/⌘1 текста не набирают. А ⌘Z сюда не попадает вовсе,
-      // и правильно: в поле это родной откат ввода.
+      // Модификаторные — ДО typing-гарда глаголов: ⌘0/⌘1 текста не набирают. Уступают они не
+      // всякому органу, а НАБОРУ ТЕКСТА (`isTextField`), и каждой — по своей причине.
+      const k = e.key.toLowerCase();
+      if (k === 'f') {
+        // ⌘F не уступает никому: родного поиска внутри модального оверлея нет вовсе, а палитра
+        // ничего не меняет. Открытую — просто пере-фокусирует.
+        openFind();
+        e.preventDefault();
+        return;
+      }
+      // ⇧⌘Z — это redo, а redo здесь НЕТ. Тихо отменить вместо него — худшее, что можно сделать:
+      // человек просил вернуть, а получил ещё один шаг назад.
+      if (k === 'z' && !e.shiftKey) {
+        if (isTextField(e.target)) return; // в поле — родной откат ввода
+        undo();
+        e.preventDefault();
+        return;
+      }
+      if (k === 'a') {
+        if (isTextField(e.target)) return; // в поле — выделить текст
+        setPicked([...res.frontier]); // всё, что на столе
+        e.preventDefault();
+        return;
+      }
       if (e.key === '0') {
         canvasRef.current?.zoomReset();
         e.preventDefault();
@@ -243,6 +474,13 @@ export function AssemblyFullscreen({
       return;
     }
     if (isTyping(e.target)) return;
+    // ⇧2 — кадрировать выделение. По `code`, а не по `key`: на не-латинской раскладке Shift+2 даёт
+    // не «@», и клавиша молча пропала бы ровно у той половины пользователей, что печатает кириллицей.
+    if (e.shiftKey && (e.code === 'Digit2' || e.key === '@')) {
+      fitSelection();
+      e.preventDefault();
+      return;
+    }
     switch (e.key) {
       case ' ':
         canvasRef.current?.setSpaceHand(true);
@@ -261,13 +499,52 @@ export function AssemblyFullscreen({
         canvasRef.current?.fit();
         e.preventDefault();
         break;
+      case 'v':
+        canvasRef.current?.setTool('select');
+        e.preventDefault();
+        break;
+      case 'h':
+        canvasRef.current?.setTool('hand');
+        e.preventDefault();
+        break;
+      case 'u':
+        sewSelection();
+        e.preventDefault();
+        break;
+      case 'o':
+        processSelection();
+        e.preventDefault();
+        break;
+      case 'd':
+        dissolveSelection();
+        e.preventDefault();
+        break;
+      case '?':
+      case '/':
+        setHelpOpen((v) => !v);
+        e.preventDefault();
+        break;
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'ArrowUp':
+      case 'ArrowDown': {
+        // Ноды двигает СТРЕЛКА, а не форма: это раскладка. Пустой выбор — не отказ, а отсутствие
+        // жеста: объяснять нечего, и снекбар был бы шумом на каждое нажатие стрелки.
+        if (picked.length === 0) break;
+        const d = e.shiftKey ? 1 : 8;
+        const dx = e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0;
+        const dy = e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0;
+        canvasRef.current?.nudge(dx, dy);
+        e.preventDefault();
+        break;
+      }
       case ']':
         toggleDock();
         e.preventDefault();
         break;
       case '[':
         // Полка деталей приедет в Ф5. До неё клавиша молчит — обещать полосой подсказок то, чего
-        // нет, хуже, чем не обещать ничего.
+        // нет, хуже, чем не обещать ничего. По той же причине её нет и в шпаргалке.
         break;
       default:
         break;
@@ -296,8 +573,18 @@ export function AssemblyFullscreen({
           onEscapeKeyDown={(e) => {
             // ESC-ЛЕСТНИЦА, каноническая и единая для всех фаз: find → шпаргалка → режим добора →
             // выделение → выход. Каждый Esc гасит верхнюю НЕПУСТУЮ ступень; ступени, чьей фазы ещё
-            // нет, просто пусты. Без `preventDefault` Radix закрывает фулскрин раньше любого
-            // кастомного слоя — он слушает Escape на документе.
+            // нет, просто пусты (режим добора — Ф5в). Без `preventDefault` Radix закрывает фулскрин
+            // раньше любого кастомного слоя — он слушает Escape на документе.
+            if (findOpen) {
+              e.preventDefault();
+              setFindOpen(false);
+              return;
+            }
+            if (helpOpen) {
+              e.preventDefault();
+              setHelpOpen(false);
+              return;
+            }
             if (picked.length > 0) {
               e.preventDefault();
               setPicked([]);
@@ -339,6 +626,25 @@ export function AssemblyFullscreen({
                     className='cursor-not-allowed opacity-40'
                   >
                     list
+                  </Chip>
+                  {/* ЧИП ОТМЕНЫ — НАСТОЯЩАЯ КНОПКА (`nonForm` тут был бы ошибкой): он ПИШЕТ в
+                      форму, а всё пишущее обязано умирать под `<fieldset disabled>`, если однажды
+                      окажется под ним. Задизейблен без записи — обещать отмену, которой нет, значит
+                      предлагать заведомый отказ. Честное обещание чипа — «ой» сразу после жеста:
+                      глубина одна, redo нет, а первая правка массива или полей шага запись гасит. */}
+                  <Chip
+                    dashed
+                    disabled={!canUndo}
+                    onClick={undo}
+                    title={frozen ? FROZEN_REFUSAL : undoTitle}
+                  >
+                    undo
+                  </Chip>
+                  <Chip nonForm dashed onClick={openFind} title='find a piece or a unit (⌘f)'>
+                    find
+                  </Chip>
+                  <Chip nonForm dashed onClick={() => setHelpOpen(true)} title='keyboard shortcuts (?)'>
+                    ?
                   </Chip>
                   <Chip
                     nonForm
@@ -449,10 +755,16 @@ export function AssemblyFullscreen({
             </div>
 
             {/* ── док ──────────────────────────────────────────────────────────────────────── */}
+            {/* ОДИН LISTENER `focusin` НА ВЕСЬ ДОК — восьмая точка сброса записи отмены. React
+                вешает `onFocus` поверх нативного `focusin`, то есть он всплывает: одного
+                обработчика на контейнере хватает на все два десятка полей редактора шага, и
+                добавлять его к каждому не нужно. Смысл: правки ПОЛЕЙ после create жестовым ⌘Z не
+                отменяются — «undo возвращает больше, чем жест» снимается только так. */}
             <section
               className='flex min-h-0 flex-col border border-borderColor bg-bgColor'
               style={{ visibility: dockOpen ? undefined : 'hidden' }}
               aria-hidden={!dockOpen}
+              onFocus={onDockEdit}
             >
               <div className='flex shrink-0 items-center gap-2 border-b border-hairline px-2 py-1'>
                 <button
@@ -505,6 +817,122 @@ export function AssemblyFullscreen({
               </fieldset>
             </section>
           </div>
+
+          {/* ── find ──────────────────────────────────────────────────────────────────────── */}
+          {/* Полка говорит, ЧТО существует; палитра — ГДЕ оно лежит. Первая ступень Esc-лестницы:
+              Esc здесь закрывает ТОЛЬКО палитру. */}
+          {findOpen && (
+            <div
+              className='absolute left-1/2 top-16 z-10 w-[min(420px,calc(100%-2rem))] -translate-x-1/2 border border-textColor bg-bgColor'
+              role='dialog'
+              aria-label='find a piece or a unit'
+            >
+              <input
+                ref={findInputRef}
+                value={findQuery}
+                onChange={(e) => {
+                  setFindQuery(e.target.value);
+                  setFindIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  // Стрелки и Enter принадлежат палитре — до роутера полотна им хода нет, иначе
+                  // ↑↓ двигали бы выделенные ноды, пока в поле выбирают строку. Escape НЕ
+                  // останавливаем: его ловит Esc-лестница, и первой ступенью гасит именно find.
+                  if (e.key === 'ArrowDown') {
+                    setFindIndex((i) => Math.min(i + 1, Math.max(0, findHits.length - 1)));
+                  } else if (e.key === 'ArrowUp') {
+                    setFindIndex((i) => Math.max(0, i - 1));
+                  } else if (e.key === 'Enter') {
+                    chooseFind(findIndex);
+                  } else {
+                    return;
+                  }
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                placeholder='find a piece or a unit'
+                aria-label='find a piece or a unit'
+                className='h-7 w-full border-b border-hairline bg-transparent px-2 text-micro outline-none placeholder:text-labelColor'
+              />
+              <div className='max-h-64 overflow-y-auto' role='listbox' aria-label='matches'>
+                {findHits.length === 0 ? (
+                  <div className='px-2 py-1'>
+                    <Text size='micro' variant='label'>
+                      nothing by that name
+                    </Text>
+                  </div>
+                ) : (
+                  findHits.map((r, i) => (
+                    <div
+                      key={`${r.key}:${r.label}`}
+                      role='option'
+                      aria-selected={i === findIndex}
+                      tabIndex={-1}
+                      onMouseEnter={() => setFindIndex(i)}
+                      onClick={() => chooseFind(i)}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 px-2 py-1',
+                        i === findIndex && 'bg-textColor text-bgColor',
+                      )}
+                    >
+                      <Text size='micro' component='span' className='shrink-0'>
+                        {r.label}
+                      </Text>
+                      <Text
+                        size='micro'
+                        component='span'
+                        className={cn('min-w-0 truncate', i !== findIndex && 'text-labelColor')}
+                      >
+                        {r.sub}
+                      </Text>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── шпаргалка ─────────────────────────────────────────────────────────────────── */}
+          {/* Оверлей-scrim: перекрывает экран целиком и гасится кликом мимо. `[` в ней НЕ значится —
+              полка деталей приедет в Ф5, а обещать мёртвую клавишу хуже, чем молчать. */}
+          {helpOpen && (
+            <div
+              className='absolute inset-0 z-20 flex items-center justify-center bg-overlay p-4'
+              onClick={() => setHelpOpen(false)}
+            >
+              <div
+                className='max-h-full w-[min(520px,100%)] overflow-y-auto border border-textColor bg-bgColor p-3'
+                role='dialog'
+                aria-label='keyboard shortcuts'
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Text size='micro' variant='uppercase' tracking='label' className='font-bold'>
+                  keyboard
+                </Text>
+                <dl className='mt-2 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1'>
+                  {HELP_KEYS.map(([keys, what]) => (
+                    <Fragment key={keys}>
+                      <dt className='whitespace-nowrap'>
+                        <Text size='micro' component='span' className='tabular-nums'>
+                          {keys}
+                        </Text>
+                      </dt>
+                      <dd>
+                        <Text size='micro' variant='label' component='span'>
+                          {what}
+                        </Text>
+                      </dd>
+                    </Fragment>
+                  ))}
+                </dl>
+                <div className='mt-2'>
+                  <Text size='micro' variant='label'>
+                    esc closes this; esc again clears the selection, and once more leaves fullscreen
+                  </Text>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* R8: ЕДИНСТВЕННОЕ подтверждение на всём экране, и текст его — слово в слово тот же, что
               у инлайна. Два экрана, по-разному объясняющих одно и то же, читаются как два разных

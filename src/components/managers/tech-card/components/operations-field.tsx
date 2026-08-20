@@ -90,7 +90,16 @@ import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
-import { AssemblyFullscreen } from './assembly-fullscreen';
+import {
+  appendLabel,
+  canUndo,
+  dissolveLabel,
+  resolvePending,
+  undoTitle,
+  type LastMutation,
+  type PendingAppend,
+} from './last-mutation';
+import { AssemblyFullscreen, FROZEN_REFUSAL } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
@@ -3236,6 +3245,40 @@ export function OperationsField({
     });
   }, [getValues, setValue]);
 
+  // --- ОТМЕНА ЖЕСТА, ГЛУБИНА 1 --------------------------------------------------------------------
+  //
+  // Запись живёт РЯДОМ С МУТАТОРАМИ, а не в фулскрине (R3): отменяет она их же, и разъехаться
+  // записи с тем, что она отменяет, негде только здесь. Вся чистая арифметика — в
+  // `last-mutation.ts` под пробой; тут остаётся дисциплина «кто пишет и кто сбрасывает».
+  //
+  // REF — ИСТИНА, СОСТОЯНИЕ — ТОЛЬКО ДЛЯ ЧИПА. Ref нужен потому, что запись читают и пишут
+  // обработчики, которым нельзя ждать следующего рендера; состояние — потому что чип обязан гаснуть
+  // и зажигаться, а ref никого не перерисовывает. Оба пишутся ОДНОЙ функцией, чтобы разойтись им
+  // было негде.
+  const lastMutation = useRef<LastMutation | null>(null);
+  const pendingAppend = useRef<PendingAppend | null>(null);
+  const [undoRec, setUndoRec] = useState<LastMutation | null>(null);
+
+  const clearLastMutation = useCallback(() => {
+    pendingAppend.current = null;
+    lastMutation.current = null;
+    setUndoRec(null);
+  }, []);
+
+  // ВТОРОЙ ТАКТ ЗАПИСИ append. `append()` из RHF ничего не возвращает, а `fields` в замыкании
+  // мутатора — снимок ДО вставки: `fields[at]?.id` там всегда `undefined`, и записанный синхронно
+  // guard отказывал бы всегда. Поэтому мутатор пишет полузапись, а id дозаполняется здесь, когда
+  // массив строк уже приехал. Не дозаполнилось — значит между тактами прошла чужая мутация, и
+  // запись обязана умереть, а не дождаться следующего массива.
+  useEffect(() => {
+    const p = pendingAppend.current;
+    if (!p) return;
+    pendingAppend.current = null;
+    const rec = resolvePending(p, fields);
+    lastMutation.current = rec;
+    setUndoRec(rec);
+  }, [fields]);
+
   // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ У КАЖДОГО МУТАТОРА, как у `appendStep` и `addInputToOperation`.
   // Сегодня все трое прикрыты косвенно: кнопки редактора и ручка перетаскивания — настоящие
   // <button> под внешним `<fieldset disabled>`, а док фулскрина обёрнут своим fieldset. Но
@@ -3243,6 +3286,7 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
+    clearLastMutation(); // (1/9) массив поехал — запись протухла
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
     // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
@@ -3254,6 +3298,7 @@ export function OperationsField({
 
   const insertAfter = (index: number) => {
     if (frozen) return;
+    clearLastMutation(); // (2/9)
     remapIssues((old) => (old > index ? old + 1 : old));
     insert(index + 1, { ...emptyOperation });
     setSelected(index + 1);
@@ -3262,6 +3307,9 @@ export function OperationsField({
   const moveOperation = (from: number, to: number) => {
     if (frozen) return;
     if (from === to) return;
+    // (3/9) САМАЯ ДОРОГАЯ ИЗ ДЕВЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
+    // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
+    clearLastMutation();
     remapIssues((old) => {
       if (old === from) return to;
       if (from < to) return old > from && old <= to ? old - 1 : old;
@@ -3281,6 +3329,7 @@ export function OperationsField({
   // pre-fill (`node`, `placement`) were the same piece name written twice.
   useEffect(() => {
     if (!addRequest) return;
+    clearLastMutation(); // (4/9) шаг дописала ПАНЕЛЬ, а не жест полотна
     append({ ...emptyOperation });
     setSelected(fields.length);
     onAdded?.();
@@ -3297,6 +3346,9 @@ export function OperationsField({
     generated: common_TechCardOperation[],
     mode: 'append' | 'replace',
   ) => {
+    // (5/9) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни другое
+    // жестовым ⌘Z не отменяется, а адрес записи после `replace` указывает на другой шаг.
+    clearLastMutation();
     const mapped = generated.map(mapGeneratedOperationToForm);
     if (mode === 'replace') {
       clearIssueOperationRefs();
@@ -3466,8 +3518,13 @@ export function OperationsField({
   // Карточку выпустили, пока диалог открыт — диалог обязан закрыться сам: он живёт порталом, и
   // никакая заморозка разметки его не гасит.
   useEffect(() => {
-    if (frozen) setPendingCreate(null);
-  }, [frozen]);
+    if (!frozen) return;
+    setPendingCreate(null);
+    // (9/9) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду назад,
+    // отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на самом ⌘Z и
+    // на чипе стоит тоже, но запись обязана умереть, а не ждать, пока в неё упрутся.
+    clearLastMutation();
+  }, [frozen, clearLastMutation]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -3565,6 +3622,11 @@ export function OperationsField({
       );
       return;
     }
+    // (7/9) НЕ СТРУКТУРНАЯ, НО ШАГ ИЗМЕНЁН — и сброс стоит здесь, ПОСЛЕ отказа фронтира: жест,
+    // который движок отклонил, ничего не менял и гасить чужую отмену не вправе. Массив при
+    // добавлении входа тот же, `fieldId` на месте — guard пропустил бы, — а устаревший ⌘Z снёс бы
+    // шаг ВМЕСТЕ с только что добавленной деталью.
+    clearLastMutation();
     setValue(`operations.${index}.inputKeys`, [...cur, key], { shouldDirty: true });
   };
 
@@ -3607,6 +3669,9 @@ export function OperationsField({
     // мутатор про заморозку не знает, и любой вызыватель ВНЕ формы (фулскрин в портале) дописал бы
     // шаг в выпущенную карточку. Гейт стоит у мутатора, а не у каждой кнопки.
     if (frozen) return;
+    // (6/9) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
+    // указывала бы на шаг, стоящий уже не там.
+    clearLastMutation();
     setSelected(fields.length);
     append({ ...emptyOperation });
   };
@@ -3634,6 +3699,15 @@ export function OperationsField({
     // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
     if (frozen) return;
     const at = fields.length;
+    // ПОЛУЗАПИСЬ ОТМЕНЫ — до самого append, чтобы эффект на `[fields]` застал её уже стоящей.
+    // Сначала гасим прежнюю: между тактами она не имеет права пережить новый жест.
+    clearLastMutation();
+    pendingAppend.current = {
+      kind: 'append',
+      index: at,
+      expectedLength: at + 1,
+      label: appendLabel(at),
+    };
     append({
       ...emptyOperation,
       inputKeys: r.inputKeys,
@@ -3660,8 +3734,60 @@ export function OperationsField({
   /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
   const dissolveUnit = (stepIndex: number) => {
     if (frozen) return; // тот же гейт: растворение — мутация, и разметке она не подотчётна
+    // ЗНАЧЕНИЯ ЧИТАЮТСЯ ДО ОБНУЛЕНИЯ — возвращать отмене больше неоткуда. `fieldId` здесь доступен
+    // синхронно (строка существует, массив не двигался), и второй такт не нужен.
+    const unitKey = ((getValues(`operations.${stepIndex}.outputUnitKey`) as string) ?? '').trim();
+    const unitName = ((getValues(`operations.${stepIndex}.outputUnitName`) as string) ?? '').trim();
+    const fieldId = fields[stepIndex]?.id;
     setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
     setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
+    clearLastMutation();
+    if (!fieldId || !unitKey) return; // растворять было нечего — и отменять нечего
+    lastMutation.current = {
+      kind: 'dissolve',
+      index: stepIndex,
+      fieldId,
+      unitKey,
+      unitName,
+      label: dissolveLabel(unitKey),
+    };
+    setUndoRec(lastMutation.current);
+  };
+
+  /**
+   * ⌘Z и чип отмены — ЕДИНСТВЕННЫЙ вызыватель инверсии.
+   *
+   * ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ И СО СЛОВАМИ. `removeOperation` с недавних пор гейтован и сам, но
+   * молчаливый выход мутатора — не отказ: человек нажал ⌘Z, ничего не произошло, и объяснения нет.
+   * На выпущенной карточке отказ обязан быть произнесён.
+   *
+   * ПРОВАЛИВШИЙСЯ GUARD — ТОЖЕ СЛОВА, а не молчание: «последовательность изменилась» объясняет,
+   * почему отмена честно не сработала, и почему нажимать ещё раз бессмысленно.
+   */
+  const undoLastMutation = () => {
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    const rec = lastMutation.current;
+    if (!rec) {
+      showMessage('nothing to undo', 'error');
+      return;
+    }
+    const outputOf = (i: number) => ((getValues(`operations.${i}.outputUnitKey`) as string) ?? '');
+    if (!canUndo(rec, fields, outputOf)) {
+      clearLastMutation();
+      showMessage('the sequence has changed — nothing to undo', 'error');
+      return;
+    }
+    if (rec.kind === 'append') {
+      // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
+      removeOperation(rec.index);
+    } else {
+      setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
+      setValue(`operations.${rec.index}.outputUnitName`, rec.unitName, { shouldDirty: true });
+    }
+    clearLastMutation();
   };
 
   // --- общее для ВСЕХ ТРЁХ видов ----------------------------------------------------------------
@@ -4097,6 +4223,15 @@ export function OperationsField({
           addInputToOperation={addInputToOperation}
           addOperation={addOperation}
           moveOperation={moveOperation}
+          onUndo={undoLastMutation}
+          undoTitle={undoTitle(undoRec)}
+          canUndo={undoRec !== null}
+          // ВОСЬМАЯ ИЗ ДЕВЯТИ ТОЧЕК СБРОСА, и listener у неё ОДИН — на контейнере дока (вешает его
+          // фулскрин, потому что док — его орган). Правки ПОЛЕЙ после create жестовым ⌘Z не
+          // отменяются: возражение «undo возвращает больше, чем жест» живёт внутри выбранного
+          // варианта, и снять его можно только так — перестав обещать отмену, как только начали
+          // печатать.
+          onDockEdit={clearLastMutation}
           // БИЛДЕР, А НЕ ГОТОВЫЙ ЭЛЕМЕНТ. `OperationEditor` — приватная функция этого файла с
           // полутора десятками пропов; вытаскивать её наружу ради фулскрина значило бы затеять
           // незапланированный рефакторинг там, где он опаснее всего. Билдер замыкает её со всеми

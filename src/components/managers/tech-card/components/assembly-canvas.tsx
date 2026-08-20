@@ -27,11 +27,21 @@ import {
   WireLayer,
 } from './assembly-node-views';
 import type { CreatePrefill } from './assembly-create-dialog';
-import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
 import {
+  applyOverrides,
+  combineVerdict,
+  hitNode,
+  type CombineVerdict,
+  type PosOverrides,
+} from './assembly-positions';
+import {
+  autopanDelta,
+  autopanTick,
   fitView,
   hatchK,
+  marqueeHits,
   OPEN_FLOOR,
+  revealDelta,
   sheetRect,
   toWorld,
   zoomAt,
@@ -69,20 +79,49 @@ const DRAG_THRESHOLD = 4;
 /** Шаг зума кнопками и клавишами. Порт прототипа. */
 export const ZOOM_STEP = 1.2;
 
-type DragState = {
+/** Одна едущая нода. Их больше одной, когда взяли ноду из выделения. */
+type DragItem = {
   key: string;
-  pointerId: number;
   /** Где внутри ноды её взяли — чтобы нода не прыгала под курсор углом. Координаты МИРА. */
   offX: number;
   offY: number;
   x: number;
   y: number;
+};
+
+type DragState = {
+  /** Нода, ЗА КОТОРУЮ взяли: по ней считается вердикт, остальные едут следом. */
+  key: string;
+  pointerId: number;
+  /**
+   * Всё, что едет. МУЛЬТИДРАГ — ЛИСТ, СОБРАННЫЙ НА pointerdown И БОЛЬШЕ НЕ РАСТУЩИЙ: выделение во
+   * время жеста меняться не может (маркиза и клики заблокированы зажатым указателем), а
+   * пересобирать список на каждом кадре значило бы возить ноды, которых в жесте не было.
+   */
+  items: DragItem[];
   fromX: number;
   fromY: number;
   /** Где сейчас указатель, в координатах мира: по нему ищется цель под курсором. */
   ptrX: number;
   ptrY: number;
   started: boolean;
+};
+
+/**
+ * Маркиза — рамка по пустой земле.
+ *
+ * Углы живут в МИРЕ, а рисуется рамка в ЭКРАННЫХ координатах (`r * zoom + pan`): иначе автопан
+ * посреди жеста растягивал бы её вместе с миром, вместо того чтобы оставить под рукой.
+ */
+type MarqueeState = {
+  pointerId: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /** Shift — добавление к тому, что было выбрано на старте. */
+  add: boolean;
+  base: string[];
 };
 
 /** Подсказка вердикта: полотно её СЧИТАЕТ, а показывает зарезервированная строка хрома. */
@@ -103,6 +142,17 @@ export type CanvasHandle = {
    * пробел в поле заметки и на кнопке — не «взять ладонь». Полотно только исполняет.
    */
   setSpaceHand: (on: boolean) => void;
+  /** Инструмент клавишами `v`/`h`. Кнопки HUD зовут то же состояние. */
+  setTool: (tool: 'select' | 'hand') => void;
+  /**
+   * Сдвинуть выделение стрелками. Мимо формы — это раскладка, а не данные; и мимо фулскрина —
+   * координаты нод знает только раскладка, живущая здесь.
+   */
+  nudge: (dx: number, dy: number) => void;
+  /** Кадрировать габарит выделения (`⇧2`). Пустое выделение отвергает вызывающий — он же и объясняет. */
+  fitSelection: () => void;
+  /** Довести ноду до глаз панорамой, МИНИМАЛЬНЫМ сдвигом. Потребитель — find-палитра. */
+  reveal: (key: string) => void;
 };
 
 export type AssemblyCanvasProps = {
@@ -204,14 +254,25 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   const justDragged = useRef(false);
   const [hovered, setHovered] = useState<string | null>(null);
 
-  const layout = useMemo(
-    () =>
-      applyOverrides(
-        auto,
-        drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions,
-      ),
-    [auto, positions, drag],
-  );
+  const layout = useMemo(() => {
+    if (!drag?.started) return applyOverrides(auto, positions);
+    const live: PosOverrides = { ...positions };
+    for (const it of drag.items) live[it.key] = { x: it.x, y: it.y };
+    return applyOverrides(auto, live);
+  }, [auto, positions, drag]);
+  // Слушатели жестов живут на window и не имеют права держать раскладку в замыкании: пересоздавать
+  // их на каждое движение мыши значило бы снимать и вешать четыре подписки шестьдесят раз в секунду.
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  // По той же причине — выбор, его писатель, писатель позиций и фронтир.
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
+  const onPickedRef = useRef(onPicked);
+  onPickedRef.current = onPicked;
+  const onMoveRef = useRef(onMove);
+  onMoveRef.current = onMove;
+  const onTableRef = useRef(onTable);
+  onTableRef.current = onTable;
 
   const empty = layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail;
 
@@ -474,8 +535,54 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         applyView();
       },
       setSpaceHand: setSpaceHeld,
+      setTool,
+      nudge: (dx, dy) => {
+        const eff = layoutRef.current;
+        for (const k of pickedRef.current) {
+          const n = eff.byKey.get(k) ?? eff.tileByKey.get(k);
+          if (!n) continue;
+          // Кламп в ноль — тот же, что у драга: за левым/верхним краем нода недостижима.
+          onMoveRef.current(k, { x: Math.max(0, n.x + dx), y: Math.max(0, n.y + dy) });
+        }
+      },
+      fitSelection: () => {
+        const vp = viewportRef.current;
+        if (!vp) return;
+        const r = vp.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) return;
+        const box = boxOfKeys(layoutRef.current, pickedRef.current);
+        if (!box) return;
+        // ТОТ ЖЕ КЛАМП, ЧТО У fitView, и БЕЗ пола открытия: «показать выбранное» просили явно,
+        // ровно как ручной fit. Но `fitted` не взводим — авто-пере-вписывание на ресайзе показывает
+        // ВСЁ, и наследовать ему кадр одного узла значило бы молча подменить смысл.
+        fitted.current = false;
+        animateOnce();
+        viewRef.current = fitView(box, { w: r.width, h: r.height });
+        applyView();
+      },
+      reveal: (key) => {
+        const vp = viewportRef.current;
+        if (!vp) return;
+        const r = vp.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) return;
+        const eff = layoutRef.current;
+        const n =
+          eff.byKey.get(key) ?? eff.tileByKey.get(key) ?? (key === '' ? eff.tail : undefined);
+        if (!n) return;
+        const d = revealDelta(
+          { x: n.x, y: n.y, w: n.w, h: n.h },
+          { w: r.width, h: r.height },
+          viewRef.current,
+        );
+        if (!d.x && !d.y) return; // уже видно — увозить экран не за чем
+        fitted.current = false;
+        animateOnce();
+        const { pan, zoom } = viewRef.current;
+        viewRef.current = { zoom, pan: { x: pan.x + d.x, y: pan.y + d.y } };
+        applyView();
+      },
     }),
-    [runFit, applyView],
+    [runFit, applyView, animateOnce],
   );
 
   // --- жест ноды --------------------------------------------------------------------------------
@@ -497,21 +604,206 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       const p = toWorldPoint(e);
       if (!p) return;
       justDragged.current = false;
+      // МУЛЬТИДРАГ ТОЛЬКО ИЗ ВЫДЕЛЕНИЯ. Взяли ноду, которая в выделении, — едет всё выделение;
+      // взяли постороннюю — едет она одна, и выделение НЕ ТРОГАЕТСЯ. Прототип на захвате
+      // невыделенной ноды делал её единственной выбранной, но там клик = выбрать; здесь клик по
+      // шапке ПЕРЕКЛЮЧАЕТ, и выбор на pointerdown спорил бы с переключением на click.
+      const group = picked.includes(key) ? picked : [key];
+      const eff = layoutRef.current;
+      const items: DragItem[] = [];
+      for (const k of group) {
+        const n = k === key ? { x: nodeX, y: nodeY } : eff.byKey.get(k) ?? eff.tileByKey.get(k);
+        if (!n) continue;
+        items.push({ key: k, offX: p.x - n.x, offY: p.y - n.y, x: n.x, y: n.y });
+      }
+      if (!items.some((i) => i.key === key)) return;
       commitDrag({
         key,
         pointerId: e.pointerId,
-        offX: p.x - nodeX,
-        offY: p.y - nodeY,
-        x: nodeX,
-        y: nodeY,
+        items,
         fromX: p.x,
         fromY: p.y,
         ptrX: p.x,
         ptrY: p.y,
         started: false,
       });
+      // Жест ноды состоялся — маркиза его не перехватывает. Виджет-предок иначе завёл бы рамку
+      // прямо поверх начатого перетаскивания.
+      e.stopPropagation();
     },
   });
+
+  // --- маркиза ------------------------------------------------------------------------------------
+
+  const marqueeRef = useRef<MarqueeState | null>(null);
+  const [marqueeOn, setMarqueeOn] = useState(false);
+  const marqueeElRef = useRef<HTMLDivElement>(null);
+  /** Последнее выделение, ОТПРАВЛЕННОЕ наверх: рамка ползёт кадрами, а выбор меняется редко. */
+  const emitted = useRef<string[]>([]);
+  /** Где сейчас палец, в координатах ОКНА: по нему считается автопан. */
+  const lastClient = useRef<{ x: number; y: number } | null>(null);
+
+  /** Рамка рисуется в ЭКРАННЫХ координатах и пишется императивно — как и сам трансформ мира. */
+  const paintMarquee = useCallback(() => {
+    const el = marqueeElRef.current;
+    if (!el) return;
+    const m = marqueeRef.current;
+    if (!m) {
+      el.style.display = 'none';
+      return;
+    }
+    const { pan, zoom } = viewRef.current;
+    const x = Math.min(m.x0, m.x1);
+    const y = Math.min(m.y0, m.y1);
+    el.style.display = 'block';
+    el.style.left = `${x * zoom + pan.x}px`;
+    el.style.top = `${y * zoom + pan.y}px`;
+    el.style.width = `${Math.abs(m.x1 - m.x0) * zoom}px`;
+    el.style.height = `${Math.abs(m.y1 - m.y0) * zoom}px`;
+  }, []);
+
+  /**
+   * Пересчитать выделение под рамкой.
+   *
+   * Наверх уходит ТОЛЬКО СМЕНА НАБОРА: `onPicked` перерисовывает весь фулскрин, а рамка ползёт по
+   * пустой земле большую часть жеста.
+   *
+   * Фильтр по фронтиру — тот же инвариант, что у эффекта очистки выбора ниже: съеденная деталь
+   * входом не годится, и мигать ею в полосе выбора нечестно.
+   */
+  const applyMarquee = useCallback(() => {
+    const m = marqueeRef.current;
+    if (!m) return;
+    const eff = layoutRef.current;
+    const rect: Rect = {
+      x: Math.min(m.x0, m.x1),
+      y: Math.min(m.y0, m.y1),
+      w: Math.abs(m.x1 - m.x0),
+      h: Math.abs(m.y1 - m.y0),
+    };
+    const hits = marqueeHits(rect, [...eff.boxes, ...eff.tiles]).filter((k) =>
+      onTableRef.current.has(k),
+    );
+    const next = m.add ? [...m.base, ...hits.filter((k) => !m.base.includes(k))] : hits;
+    // Сравнение поэлементное, а не по склейке: ключ детали приходит из чертежа и любой разделитель
+    // содержать вправе, а склейка с общим разделителем склеила бы два разных набора в один.
+    const prev = emitted.current;
+    if (next.length === prev.length && next.every((k, i) => k === prev[i])) return;
+    emitted.current = next;
+    onPickedRef.current(next);
+  }, []);
+
+  /**
+   * Жест начался с ПУСТОЙ ЗЕМЛИ — рамка. Нода до этого места событие не пускает (`stopPropagation`
+   * в её `onPointerDown`), лист и слой проводов — пускают, и это правильно: и то и другое фон.
+   */
+  const onCanvasPointerDown = (e: React.PointerEvent) => {
+    // ХРОМ ПОЛОТНА — НЕ ЗЕМЛЯ. HUD и полоса выбора живут ВНУТРИ вьюпорта (они не должны ехать с
+    // миром), и их pointerdown всплывает сюда: без этой строки нажатие «fit» заводило бы рамку и
+    // сбрасывало выделение, а в режиме ладони — начинало панораму прямо с кнопки.
+    if ((e.target as HTMLElement | null)?.closest?.('[data-canvas-chrome]')) return;
+    startPan(e);
+    if (panRef.current || dragRef.current || marqueeRef.current) return;
+    if (e.button !== 0 || handRef.current) return;
+    const p = toWorldPoint(e);
+    if (!p) return;
+    const base = e.shiftKey ? picked : [];
+    marqueeRef.current = {
+      pointerId: e.pointerId,
+      x0: p.x,
+      y0: p.y,
+      x1: p.x,
+      y1: p.y,
+      add: e.shiftKey,
+      base,
+    };
+    lastClient.current = { x: e.clientX, y: e.clientY };
+    emitted.current = base;
+    if (!e.shiftKey && picked.length > 0) onPicked([]);
+    setMarqueeOn(true);
+    paintMarquee();
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!marqueeOn) return;
+    const move = (e: PointerEvent) => {
+      const m = marqueeRef.current;
+      if (!m || e.pointerId !== m.pointerId) return;
+      const p = toWorldPoint(e);
+      if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
+      m.x1 = p.x;
+      m.y1 = p.y;
+      paintMarquee();
+      applyMarquee();
+    };
+    const end = () => {
+      marqueeRef.current = null;
+      lastClient.current = null;
+      setMarqueeOn(false);
+      paintMarquee();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    window.addEventListener('blur', end);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      window.removeEventListener('blur', end);
+    };
+  }, [marqueeOn, toWorldPoint, paintMarquee, applyMarquee]);
+
+  // --- автопан у края -----------------------------------------------------------------------------
+  //
+  // Порт scroll-модели инлайна СО СМЕНОЙ ЗНАКА и делением на зум: прокрутка двигает окно по миру,
+  // трансформ — мир под окном. Обе половины (`autopanDelta`, `autopanTick`) живут в `canvas-view.ts`
+  // под пробой; здесь остаётся только применить их к состоянию жеста.
+  //
+  // ЖЕСТ ЕДЕТ ВМЕСТЕ С МИРОМ. Палец стоит, мир уехал — значит и точка прицела, и все едущие ноды
+  // сместились в мире на одну и ту же величину. Без второй половины автопан довозил бы ноду до
+  // цели, а hit-test продолжал бить в исходную точку: дроп «на подъехавший узел» молча становился
+  // бы перемещением, и даже отказа бы не было.
+  const autopanOn = (drag?.started ?? false) || marqueeOn;
+  useEffect(() => {
+    if (!autopanOn) return;
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const vp = viewportRef.current;
+      const c = lastClient.current;
+      if (!vp || !c) return;
+      const r = vp.getBoundingClientRect();
+      const delta = autopanDelta(r, c);
+      if (!delta.x && !delta.y) return;
+      const d = dragRef.current;
+      const m = marqueeRef.current;
+      const ptr = d ? { x: d.ptrX, y: d.ptrY } : m ? { x: m.x1, y: m.y1 } : null;
+      if (!ptr) return;
+      const next = autopanTick(viewRef.current, ptr, delta);
+      const dw = { x: next.ptrWorld.x - ptr.x, y: next.ptrWorld.y - ptr.y };
+      viewRef.current = next.view;
+      fitted.current = false;
+      applyView();
+      if (d) {
+        commitDrag({
+          ...d,
+          ptrX: next.ptrWorld.x,
+          ptrY: next.ptrWorld.y,
+          items: d.items.map((it) => ({ ...it, x: it.x + dw.x, y: it.y + dw.y })),
+        });
+      } else if (m) {
+        m.x1 = next.ptrWorld.x;
+        m.y1 = next.ptrWorld.y;
+        paintMarquee();
+        applyMarquee();
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [autopanOn, applyView, commitDrag, paintMarquee, applyMarquee]);
 
   /**
    * Кликабельный элемент полотна, НЕ являющийся формой (R4).
@@ -572,12 +864,19 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       }
       const p = toWorldPoint(e);
       if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
       // Порог считается в МИРЕ, но сравнивается с экранными пикселями: на 0.5× четыре мировых
       // пикселя — это два экранных, и жест разъезжался бы с рукой. Делим порог на зум.
       const t = DRAG_THRESHOLD / viewRef.current.zoom;
       const far = Math.abs(p.x - d.fromX) > t || Math.abs(p.y - d.fromY) > t;
       if (!d.started && !far) return;
-      commitDrag({ ...d, started: true, x: p.x - d.offX, y: p.y - d.offY, ptrX: p.x, ptrY: p.y });
+      commitDrag({
+        ...d,
+        started: true,
+        items: d.items.map((it) => ({ ...it, x: p.x - it.offX, y: p.y - it.offY })),
+        ptrX: p.x,
+        ptrY: p.y,
+      });
     };
     const onPointerUp = (e: PointerEvent) => {
       const d = dragRef.current;
@@ -589,27 +888,52 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       }
       if (!d?.started) return;
       justDragged.current = true;
-      const at = { x: Math.max(0, d.x), y: Math.max(0, d.y) };
+      const landed: PosOverrides = {};
+      for (const it of d.items) landed[it.key] = { x: Math.max(0, it.x), y: Math.max(0, it.y) };
       // ПОРЯДОК ХВОСТА — ТОТ ЖЕ, ЧТО У ИНЛАЙНА, и он не про удобство: перемещение состоялось в
       // любом случае (жест композитен, и «перенёс» не отменяется тем, что «соединить» потом
       // отклонили), поэтому `onMove` идёт ПЕРВЫМ и до гейта заморозки — раскладывать чужую
       // выпущенную карточку разрешено (R10). Соединять — нет.
-      onMove(d.key, at);
+      for (const it of d.items) onMove(it.key, landed[it.key]);
       if (frozen) return;
-      const eff = applyOverrides(auto, { ...positions, [d.key]: at });
-      const hit = hitNode(eff, d.ptrX, d.ptrY, d.key);
-      const v = hit ? combineVerdict(d.key, hit.key, res, steps) : null;
-      if (v && !v.ok) {
+      const eff = applyOverrides(auto, { ...positions, ...landed });
+      // ВСЁ ЕДУЩЕЕ ВЫРЕЗАНО ИЗ HIT-TEST, а не только та нода, за которую взяли: остальные едут под
+      // тем же курсором и заслоняли бы цель. `hitNode` умеет исключать одну ноду, и менять его
+      // сигнатуру ради этого — лезть в чужой модуль; вырезать их из раскладки честнее и дешевле.
+      const held = new Set(d.items.map((i) => i.key));
+      const probe = {
+        ...eff,
+        boxes: eff.boxes.filter((b) => !held.has(b.key)),
+        tiles: eff.tiles.filter((t) => !held.has(t.key)),
+        tail: eff.tail && held.has(eff.tail.key) ? undefined : eff.tail,
+      };
+      const hit = hitNode(probe, d.ptrX, d.ptrY, d.key);
+      if (!hit) return;
+      // МУЛЬТИДРОП — ЕСТЕСТВЕННОЕ ОБОБЩЕНИЕ, а не новый жест: вердикт спрашивается за КАЖДУЮ
+      // едущую ноду против одной цели, первый отказ произносится и жест кончается. Соглашаться
+      // выборочно нельзя — человек бросал их вместе.
+      const keys = d.items.map((i) => i.key);
+      const verdicts = keys.map((k) => combineVerdict(k, hit.key, res, steps));
+      const bad = verdicts.find((v) => v && !v.ok);
+      if (bad && !bad.ok) {
         // Отказ ДО диалога, словами движка: открывать форму, которую нельзя отправить, — предлагать
         // заведомый отказ (R2).
-        showMessage(v.reason, 'error');
-      } else if (v?.ok && hit) {
-        onCreate({
-          inputKeys: [d.key, hit.key],
-          absorbInto: v.absorbInto,
-          intent: v.absorbInto ? undefined : 'unit',
-        });
+        showMessage(bad.reason, 'error');
+        return;
       }
+      let joined = false;
+      let absorbInto: string | undefined;
+      for (const v of verdicts) {
+        if (!v || !v.ok) continue;
+        joined = true;
+        absorbInto = v.absorbInto;
+      }
+      if (!joined) return; // жеста не было вовсе: бросили саму в себя или в хвостовой бокс
+      onCreate({
+        inputKeys: [...keys, hit.key],
+        absorbInto,
+        intent: absorbInto ? undefined : 'unit',
+      });
     };
     const onPointerCancel = (e: PointerEvent) => {
       if (dragRef.current && e.pointerId !== dragRef.current.pointerId) return;
@@ -666,14 +990,62 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
 
   // --- вердикт и подсказка ----------------------------------------------------------------------
 
-  const target = drag?.started ? hitNode(layout, drag.ptrX, drag.ptrY, drag.key) : null;
-  const verdict = target && !frozen ? combineVerdict(drag!.key, target.key, res, steps) : null;
+  // Цель ищется в раскладке БЕЗ едущих нод — по той же причине, что и на отпускании: они едут под
+  // тем же курсором и заслоняли бы то, во что целятся.
+  const heldNow = drag?.started ? new Set(drag.items.map((i) => i.key)) : null;
+  const probeLayout = heldNow
+    ? {
+        ...layout,
+        boxes: layout.boxes.filter((b) => !heldNow.has(b.key)),
+        tiles: layout.tiles.filter((t) => !heldNow.has(t.key)),
+        tail: layout.tail && heldNow.has(layout.tail.key) ? undefined : layout.tail,
+      }
+    : layout;
+  const target = drag?.started ? hitNode(probeLayout, drag.ptrX, drag.ptrY, drag.key) : null;
+  const verdict: CombineVerdict | null = (() => {
+    if (!target || frozen || !drag?.started) return null;
+    let okV: CombineVerdict | null = null;
+    for (const it of drag.items) {
+      const v = combineVerdict(it.key, target.key, res, steps);
+      if (v && !v.ok) return v; // первый отказ и есть ответ: соглашаться выборочно нельзя
+      if (v?.ok) okV = v;
+    }
+    return okV;
+  })();
   const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
+
+  /**
+   * ОДНО ПРЕДЛОЖЕНИЕ О ВЫДЕЛЕНИИ — и подсказка маркизы, и полоса выбора зовут именно его.
+   *
+   * Урок прототипа: «одно выделение, два словаря». Пока рамку тянут, счётчик в подсказке считался
+   * по всем задетым нодам, а полоса — по тем, что можно взять, и два органа описывали одно
+   * выделение разными числами одновременно.
+   */
+  const selectionSentence = (keys: string[]): string => {
+    const free = keys.filter((k) => onTable.has(k));
+    const units = free.filter((k) => res.units.has(k)).length;
+    const parts = free.length - units;
+    const bits: string[] = [];
+    if (parts) bits.push(`${parts} ${parts === 1 ? 'piece' : 'pieces'}`);
+    if (units) bits.push(`${units} ${units === 1 ? 'unit' : 'units'}`);
+    const spent = keys.length - free.length;
+    return (
+      (bits.length ? `picked: ${bits.join(' · ')}` : 'picked: nothing that can be taken') +
+      (spent ? ` · ${spent} already in units` : '')
+    );
+  };
+
   const hintText = (() => {
+    // Маркиза говорит ТЕМ ЖЕ предложением, что и полоса выбора, — иначе рамка и панель считают
+    // одно выделение по-разному.
+    if (marqueeOn) {
+      return picked.length ? selectionSentence(picked) : 'drag over nodes to pick them up';
+    }
     if (!drag?.started || !verdict) return '';
     if (!verdict.ok) return verdict.reason;
     if (verdict.absorbInto) return `release: add to ▣ ${verdict.absorbInto}`;
-    return `release: join ${nameOfNode(drag.key)} + ${nameOfNode(target!.key)}`;
+    const held = drag.items.map((i) => nameOfNode(i.key)).join(' + ');
+    return `release: join ${held} + ${nameOfNode(target!.key)}`;
   })();
   const hintBad = !!verdict && !verdict.ok;
 
@@ -732,7 +1104,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // Полотно не отдаёт палец прокрутке: жест здесь свой, и страница под оверлеем ехать не
       // должна ни при каких обстоятельствах.
       style={{ touchAction: 'none' }}
-      onPointerDown={startPan}
+      onPointerDown={onCanvasPointerDown}
     >
       {empty ? (
         // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, слово в слово как у инлайна: два экрана, по-разному
@@ -790,7 +1162,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 isPicked={picked.includes(box.key)}
                 frozen={frozen}
                 hovered={hovered === box.key}
-                dragging={drag?.key === box.key && drag.started}
+                dragging={!!heldNow?.has(box.key)}
                 ringClassName={nodeRing(box.key)}
                 dragProps={dragHandlers(box.key, box.x, box.y)}
                 hoverProps={hoverHandlers(box.key)}
@@ -817,7 +1189,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               looseSteps={looseSteps}
               smvOfBlock={smvOfBlock}
               labelOf={labelOf}
-              dragging={drag?.key === '' && drag.started}
+              dragging={!!heldNow?.has('')}
               ringClassName={nodeRing('')}
               dragProps={dragHandlers('', layout.tail.x, layout.tail.y)}
               hoverProps={hoverHandlers('')}
@@ -833,7 +1205,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               pieceShapes={pieceShapes}
               cloth={cloth}
               picked={picked.includes(t.key)}
-              dragging={drag?.key === t.key && drag.started}
+              dragging={!!heldNow?.has(t.key)}
               ringClassName={nodeRing(t.key)}
               organProps={activate(
                 t.state === 'free'
@@ -852,25 +1224,38 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         </div>
       )}
 
+      {/* РАМКА МАРКИЗЫ — ВНЕ МИРА и в экранных координатах: внутри мира её обводка масштабировалась
+          бы вместе с ним (на 2.5× пунктир втрое жирнее контуров нод), а автопан растягивал бы её
+          вместо того, чтобы оставить под рукой. Позиция пишется императивно — как и сам трансформ. */}
+      <div
+        ref={marqueeElRef}
+        aria-hidden
+        className='pointer-events-none absolute border border-dashed border-textColor bg-textColor/5'
+        style={{ display: 'none', left: 0, top: 0, width: 0, height: 0 }}
+      />
+
       {/* HUD — инструмент и зум. Внизу слева, поверх мира и вне его трансформа: орган, который
           масштабируется вместе с содержимым, перестаёт быть органом. */}
-      <div className='pointer-events-none absolute inset-x-2 bottom-2 flex items-end gap-1.5'>
+      <div
+        data-canvas-chrome
+        className='pointer-events-none absolute inset-x-2 bottom-2 flex items-end gap-1.5'
+      >
         <div className='pointer-events-auto flex items-center gap-1.5'>
-          {/* Тултипы НЕ называют букв v/h: клавиши-глаголы инструментов приедут с роутером Ф4, а
-              обещать мёртвую клавишу — врать подсказкой. Ф4, заводя клавиши, возвращает их и в
-              подписи. */}
+          {/* БУКВЫ ВЕРНУЛИСЬ В ПОДПИСИ вместе с клавишами: Ф3 сняла их ровно с формулировкой «Ф4,
+              заводя клавиши, возвращает их». Подсказка, обещающая мёртвую клавишу, — ложь; молчащая
+              о живой — потеря. */}
           <HudGroup>
             <HudButton
               pressed={!hand}
               onClick={() => setTool('select')}
-              title='select — click and drag the nodes'
+              title='select — click and drag the nodes (v)'
             >
               ▣
             </HudButton>
             <HudButton
               pressed={hand}
               onClick={() => setTool('hand')}
-              title='pan the canvas (hold space)'
+              title='pan the canvas (h, or hold space)'
             >
               ✋
             </HudButton>
@@ -922,11 +1307,19 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         </div>
 
         {/* ПОЛОСА ВЫБОРА — ровно те же два действия и те же подписи, что у инлайна: два входа
-            бывают и у обработки, и решать за автора по их числу значит переигрывать его выбор. */}
-        {!frozen && picked.length > 0 && (
+            бывают и у обработки, и решать за автора по их числу значит переигрывать его выбор.
+            Считает она ТЕМ ЖЕ предложением, что и подсказка маркизы (`selectionSentence`).
+
+            НА ВЫПУЩЕННОЙ КАРТОЧКЕ ДЕЙСТВИЙ НЕТ ВОВСЕ — зеркало инлайна, где `ActionPanel` стоит за
+            `{!frozen && …}`. Маркиза на RELEASED законна (выделение — способ смотреть, R10), но
+            кнопка, которая молча выбросит заполненную форму (`appendStep` выходит на первой
+            строке), хуже отсутствующей кнопки. Остаются предложение и `clear`. */}
+        {picked.length > 0 && (
           <div className='pointer-events-auto ml-auto flex max-w-[60%] flex-wrap items-center gap-1 border border-textColor bg-bgColor px-1.5 py-1'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              selected:
+            {/* ПРЕДЛОЖЕНИЕМ, а не капслоком: строка бывает длиннее четырёх слов, а капслок в этом
+                приложении носят только вещи в четыре слова и короче. */}
+            <Text size='micro' variant='label' component='span' className='shrink-0'>
+              {selectionSentence(picked)}
             </Text>
             <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
               {picked.map(pieceNameOf).join(' + ')}
@@ -936,29 +1329,47 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 {clothLine(picked.filter((k) => !res.units.has(k)))}
               </Text>
             )}
-            {picked.length >= 2 && (
+            {!frozen && picked.length >= 2 && (
               <Chip
                 onClick={() => {
                   onCreate({ inputKeys: picked, intent: 'unit' });
                   onPicked([]);
                 }}
-                title='assemble a new unit from the selection'
+                title='assemble a new unit from the selection (u)'
               >
                 join · {picked.length}
               </Chip>
             )}
-            <Chip
-              dashed
-              onClick={() => {
-                onCreate({ inputKeys: picked, intent: 'process' });
-                onPicked([]);
-              }}
-              title='a step on the selection that assembles nothing'
-            >
-              processing · {picked.length}
-            </Chip>
-            <Chip dashed onClick={() => onPicked([])} title='clear the selection'>
-              cancel
+            {!frozen && (
+              <Chip
+                dashed
+                onClick={() => {
+                  onCreate({ inputKeys: picked, intent: 'process' });
+                  onPicked([]);
+                }}
+                title='a step on the selection that assembles nothing (o)'
+              >
+                processing · {picked.length}
+              </Chip>
+            )}
+            {/* РАСТВОРИТЬ — гейт тот же, что у клавиши `d` и у кнопки в боксе: ровно один узел, и
+                он на столе. Полотно только зовёт мутатор; отказы формулирует клавиша. */}
+            {!frozen && picked.length === 1 && res.units.has(picked[0]) && (
+              <Chip
+                dashed
+                onClick={() => {
+                  const b = blocks.find((x) => x.key === picked[0]);
+                  if (!b) return;
+                  onDissolve(b.producedAt);
+                  onPicked([]);
+                }}
+                title='dissolve the unit — its inputs return to the table (d)'
+              >
+                dissolve
+              </Chip>
+            )}
+            <Chip dashed onClick={() => onPicked([])} title='clear the selection (esc)'>
+              clear
             </Chip>
           </div>
         )}
@@ -987,6 +1398,29 @@ function contentBox(layout: SchematicLayout): Rect {
     y1 = Math.max(y1, n.y + n.h);
   }
   if (!Number.isFinite(x0)) return { x: 0, y: 0, w: 400, h: 300 };
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * Габарит НАБОРА нод в координатах мира — для `⇧2` (кадрировать выделение).
+ *
+ * `null`, когда кадрировать нечего: пустой выбор или ключи, которых в раскладке уже нет. Отказ
+ * произносит вызывающий — полотно о словах не знает.
+ */
+function boxOfKeys(layout: SchematicLayout, keys: string[]): Rect | null {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const k of keys) {
+    const n = layout.byKey.get(k) ?? layout.tileByKey.get(k) ?? (k === '' ? layout.tail : undefined);
+    if (!n) continue;
+    x0 = Math.min(x0, n.x);
+    y0 = Math.min(y0, n.y);
+    x1 = Math.max(x1, n.x + n.w);
+    y1 = Math.max(y1, n.y + n.h);
+  }
+  if (!Number.isFinite(x0)) return null;
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
