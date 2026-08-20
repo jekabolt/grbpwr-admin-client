@@ -30,6 +30,7 @@ import { renamePicked, type UnitRenameNotice } from './assembly-rename';
 import type { CreatePrefill } from './assembly-create-dialog';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
+import { AssemblyUnitEditor, unitDockTitle } from './assembly-unit-editor';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
 import { SequenceRail } from './sequence-rail';
@@ -117,6 +118,7 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
   ['u', 'join the picked into a unit', 'schematic'],
   ['o', 'an operation on the picked', 'schematic'],
   ['d', 'dissolve the picked unit', 'schematic'],
+  ['e', "the picked unit's steps in the dock, with insertion points", 'schematic'],
   ['⌘z', 'undo — step by step, layout and sequence alike', 'both'],
   ['⇧⌘z', 'redo the gesture just undone', 'both'],
   ['⌘f', 'find a piece or a unit', 'both'],
@@ -153,6 +155,15 @@ const SHELF_PIECE_SOURCE = {
   chipTitle: 'add pieces from the shelf above — click to arm, click again to stop',
   emptyNote: 'not linked to any piece — press ＋ piece, then click one on the shelf above',
 };
+
+/**
+ * ЧТО ИМЕННО ОТКРЫТО В ДОКЕ. `null` — док закрыт.
+ *
+ * Две роли, а не одна с флажком: у них разные адресаты. Шаг адресуется индексом строки, узел —
+ * КОДОМ, потому что принадлежность шагов узлу нигде не хранится и пересчитывается на каждое
+ * изменение — индекса, который переживёт эту пересборку, у узла попросту нет.
+ */
+type DockView = { role: 'step'; index: number } | { role: 'unit'; unitKey: string };
 
 export type AssemblyFullscreenProps = {
   blocks: AssemblyBlock[];
@@ -462,7 +473,12 @@ export function AssemblyFullscreen({
   // Производная равна −1 только при нуле шагов: на любой карточке с операциями она ≥ 0 с первого
   // кадра, и выведенный из неё док был бы открыт с порога — то есть весь возврат высоты полотна
   // (+176px) аннулирован ровно там, где фулскрин и открывают.
-  const [dockStep, setDockStep] = useState<number | null>(null);
+  //
+  // РОЛЬ ДОКА ХРАНИТСЯ, А НЕ ВЫВОДИТСЯ. Ролей стало две — редактор ОДНОГО ШАГА и редактор УЗЛА, —
+  // и вывести вторую не из чего: `selectedIndex` родителя всегда ≥ 0 (ловушка каталога), а ключ
+  // узла в нём не живёт вовсе. Поэтому «что именно открыто» — явное состояние: пока «док открыт»
+  // значило «открыт шаг», выводить было можно; с двумя ролями любая производная стала бы догадкой.
+  const [dock, setDock] = useState<DockView | null>(null);
 
   // --- вид: схема или список ----------------------------------------------------------------------
   //
@@ -487,7 +503,7 @@ export function AssemblyFullscreen({
   // держал бы на экране ДВА `OperationEditor` на одни имена полей — с двумя писателями, двумя
   // комплектами эффектов пресетов и сломанным фокусом. Здесь же док гаснет тем же рендером, каким
   // появляется список.
-  const dockOpen = dockStep !== null && !listMode;
+  const dockOpen = dock !== null && !listMode;
 
   /**
    * РЕДАКТОР ШАГА НА ЭКРАНЕ: в схеме это открытый док, в списке — его колонка. Условие живёт
@@ -527,6 +543,16 @@ export function AssemblyFullscreen({
   if (renamedUnit !== seenRename) {
     setSeenRename(renamedUnit);
     if (renamedUnit) setPicked((cur) => renamePicked(cur, renamedUnit.from, renamedUnit.to));
+    // ОТКРЫТЫЙ РЕЖИМ УЗЛА ПЕРЕЖИВАЕТ ПЕРЕИМЕНОВАНИЕ ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО И ВЫДЕЛЕНИЕ: узел
+    // никуда не делся, у него другое имя. Без переноса док сказал бы «▣ SHELL больше не узел» про
+    // узел, который переименовали прямо в нём.
+    if (renamedUnit) {
+      setDock((cur) =>
+        cur?.role === 'unit' && cur.unitKey === renamedUnit.from
+          ? { role: 'unit', unitKey: renamedUnit.to }
+          : cur,
+      );
+    }
   }
   const [hint, setHint] = useState<CanvasHint>(null);
   const [resetOpen, setResetOpen] = useState(false);
@@ -608,16 +634,64 @@ export function AssemblyFullscreen({
   const pickStep = useCallback(
     (index: number) => {
       onPickStep(index);
-      setDockStep(index);
+      setDock({ role: 'step', index });
     },
     [onPickStep],
   );
 
-  const closeDock = useCallback(() => setDockStep(null), []);
+  const closeDock = useCallback(() => setDock(null), []);
 
   const toggleDock = useCallback(() => {
-    setDockStep((cur) => (cur === null ? Math.max(0, selectedIndex) : null));
+    setDock((cur) => (cur === null ? { role: 'step', index: Math.max(0, selectedIndex) } : null));
   }, [selectedIndex]);
+
+  /**
+   * ОТКРЫТЬ ДОК В РЕЖИМЕ УЗЛА. Второй вход сюда приедет чипом `steps · N` в ховер-полосе бокса
+   * (Т6б) — и приедет в ЭТУ ЖЕ функцию: два жеста с одним смыслом обязаны ходить одной дорогой,
+   * иначе однажды разойдутся поведением.
+   *
+   * ВЫДЕЛЕНИЕ ПЕРЕВОДИТСЯ НА УЗЕЛ, а не оставляется как есть: обещание режима — «полотно видно,
+   * узел на нём подсвечен», и подсветка на этом экране одна, выделение.
+   */
+  const openUnitDock = useCallback((unitKey: string) => {
+    setDock({ role: 'unit', unitKey });
+    setPicked([unitKey]);
+  }, []);
+
+  /**
+   * Узел открытого режима — ЗАНОВО ИЗ ПРОЕКЦИИ на каждый рендер, а не снимок, снятый при открытии.
+   * Блоки пересчитываются на каждое изменение последовательности, и снимок разошёлся бы с полотном
+   * первой же вставкой: в шапке «3 steps», на схеме четыре.
+   */
+  const dockUnit =
+    dock?.role === 'unit' ? (blocks.find((b) => b.key === dock.unitKey) ?? null) : null;
+
+  /** Живые узлы — ими же считается «изделие» в шапках рельса; счёт обязан быть один. */
+  const liveUnitKeys = useMemo(() => res.frontier.filter((k) => res.units.has(k)), [res]);
+
+  /**
+   * ТОЧКА ВСТАВКИ МИНИ-РЕЛЬСА НАЖАТА.
+   *
+   * ОБА УСЛОВИЯ ПОПАДАНИЯ В УЗЕЛ ОБЕСПЕЧИВАЮТСЯ ЗДЕСЬ, потому что больше их обеспечить негде:
+   * позиция едет числом `at`, а состав — ключом узла во входах. Проекция отнесёт такой шаг к узлу
+   * (`assembly-blocks.ts`: блок решает первый вход, ведущий к узлу), и обработка входы не съедает —
+   * узел останется на столе для следующих шагов.
+   *
+   * R1 НЕ НАРУШЕН: `inputKeys` — это СОСТАВ, назначенный жестом, а не подставленный тип, зона или
+   * машина. Ни одного из трёх здесь нет и быть не может: их спрашивает диалог.
+   */
+  const insertIntoUnit = useCallback(
+    (at: number) => {
+      if (frozen || dock?.role !== 'unit') return;
+      setPendingCreate({
+        inputKeys: [dock.unitKey],
+        intent: 'process',
+        at,
+        intoUnit: dock.unitKey,
+      });
+    },
+    [frozen, dock, setPendingCreate],
+  );
 
   /**
    * ДОК ОТСТУПАЕТ ПЕРЕД СПИСКОМ И ВОЗВРАЩАЕТСЯ ТЕМ ЖЕ, КАКИМ БЫЛ (`dockBeforeList` прототипа).
@@ -631,19 +705,19 @@ export function AssemblyFullscreen({
    * без сохранённого режима переезжает в схему, как только в ней появляется первый узел. Дока,
    * забытого открытым в этом случае, не увидел бы ни один обработчик.
    */
-  const dockBeforeList = useRef<number | null>(null);
+  const dockBeforeList = useRef<DockView | null>(null);
   const wasList = useRef(listMode);
   useLayoutEffect(() => {
     if (listMode === wasList.current) return;
     wasList.current = listMode;
     if (listMode) {
-      dockBeforeList.current = dockStep;
-      setDockStep(null);
+      dockBeforeList.current = dock;
+      setDock(null);
       return;
     }
-    setDockStep(dockBeforeList.current);
+    setDock(dockBeforeList.current);
     dockBeforeList.current = null;
-  }, [listMode, dockStep]);
+  }, [listMode, dock]);
 
   // --- драг плитки полки на полотно ---------------------------------------------------------------
   //
@@ -1060,6 +1134,39 @@ export function AssemblyFullscreen({
     setPicked([]);
   }, [frozen, freeOfPicked, res, blocks, dissolveUnit, showMessage]);
 
+  /**
+   * РЕЖИМ УЗЛА ПО КЛАВИШЕ — ЖЕСТ БЕЗ ГЕЙТА ЗАМОРОЗКИ, и это не забывчивость: читать и раскладывать
+   * выпущенную карточку законно (R10), а режим узла — чтение. Править в нём нечего: точки вставки
+   * при заморозке не рисуются вовсе.
+   *
+   * УЗЕЛ ВЫБИРАЕТСЯ ВЫДЕЛЕНИЕМ, и отказ произносится СЛОВАМИ. Молчаливый выход на нажатую клавишу
+   * означал бы «экран сломан»: человек нажал орган, объявленный шпаргалкой, и не получил ничего.
+   */
+  const openUnitFromSelection = useCallback(() => {
+    if (listMode) {
+      // В СПИСКЕ ДОКА НЕТ ВОВСЕ, и отказ обязан назвать не только препятствие, но и выход — как это
+      // делает `]`. Шаги узла в списке видны и так: рельс врезает шапки блоков.
+      showMessage(
+        'the unit editor lives in the dock, and the list has none — ⌘l goes back to the schematic',
+        'error',
+      );
+      return;
+    }
+    const units = picked.filter((k) => res.units.has(k));
+    if (units.length === 1) {
+      openUnitDock(units[0]);
+      return;
+    }
+    showMessage(
+      units.length > 1
+        ? `${units.length} units picked — the unit editor opens one at a time`
+        : picked.length === 0
+          ? 'pick a unit first — click its head on the canvas'
+          : 'nothing picked is a unit: pieces have no steps of their own, units do',
+      'error',
+    );
+  }, [listMode, picked, res, openUnitDock, showMessage]);
+
   // ⌘Z И ⇧⌘Z ИДУТ НАСКВОЗЬ, БЕЗ ЗДЕШНЕГО ГЕЙТА ЗАМОРОЗКИ — в отличие от трёх глаголов выше, и это
   // намеренно. Гейт тут был и резал оба рода записей скопом; после того как он стал по-родовым
   // (раскладка на выпущенной карточке законна — R10, правка формы нет), решение принимает только
@@ -1262,7 +1369,17 @@ export function AssemblyFullscreen({
     // (v/h/f/±/стрелки/пробел) без этого гарда и так были бы no-op — `canvasRef` в списке пуст, —
     // но вместе с ними умирал бы и `preventDefault`: пробел и стрелки обязаны остаться прокруткой
     // рельса и колонки редактора. Списку принадлежат ровно `[`, `]` (отказом), `?` и `s`.
-    if (listMode && verb !== '[' && verb !== ']' && verb !== '?' && verb !== '/' && verb !== 's') {
+    // `e` — В БЕЛОМ СПИСКЕ СПИСКА, хотя дока там нет: клавиша, объявленная шпаргалкой, обязана
+    // отвечать в обоих видах, как отвечает `]`. Отказ произносится словами и называет выход.
+    if (
+      listMode &&
+      verb !== '[' &&
+      verb !== ']' &&
+      verb !== '?' &&
+      verb !== '/' &&
+      verb !== 's' &&
+      verb !== 'e'
+    ) {
       return;
     }
     switch (verb) {
@@ -1301,6 +1418,13 @@ export function AssemblyFullscreen({
         break;
       case 'd':
         dissolveSelection();
+        e.preventDefault();
+        break;
+      case 'e':
+        // Операции выделенного узла — в доке, со вставками между ними. Через `verbKey`, как и все
+        // прочие глаголы: на кириллической раскладке `e.key` даёт «у», и клавиша молча умерла бы
+        // у половины цеха.
+        openUnitFromSelection();
         e.preventDefault();
         break;
       case 's':
@@ -1813,22 +1937,41 @@ export function AssemblyFullscreen({
                   </Text>
                 </button>
                 <Text size='micro' variant='uppercase' tracking='label' component='span' className='min-w-0 truncate font-bold'>
-                  {/* ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА: `selected` родителя всегда ≥ 0 (useState(0)),
-                      и на карточке без операций `]` подписывал бы док «step 10» по строке,
-                      которой нет. */}
-                  {selectedIndex >= 0 && selectedIndex < steps.length
-                    ? `step ${(selectedIndex + 1) * 10} · ${labelOf(selectedIndex)}`
-                    : 'no step open'}
+                  {/* ПОДПИСЬ НАЗЫВАЕТ РОЛЬ, а не всегда шаг. ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА:
+                      `selected` родителя всегда ≥ 0 (useState(0)), и на карточке без операций `]`
+                      подписывал бы док «step 10» по строке, которой нет. */}
+                  {dock?.role === 'unit'
+                    ? dockUnit
+                      ? unitDockTitle(dockUnit, smvOfBlock.get(dockUnit.key) ?? '')
+                      : `▣ ${dock.unitKey}`
+                    : selectedIndex >= 0 && selectedIndex < steps.length
+                      ? `step ${(selectedIndex + 1) * 10} · ${labelOf(selectedIndex)}`
+                      : 'no step open'}
                 </Text>
                 <span className='ml-auto flex items-center gap-1'>
-                  {!frozen && (
+                  {/* В РЕЖИМЕ УЗЛА СПРАВА СТОИТ ВОЗВРАТ, А НЕ «+ NEW OPERATION». Второй чип тут
+                      приглашал бы ровно к тому, на что жаловался владелец: дописать операцию в
+                      конец листа с экрана, который обещает работу ВНУТРИ узла. Возврат называет,
+                      куда вернёт, — «back» в одиночку не отличает шаг от выхода из дока. */}
+                  {dock?.role === 'unit' ? (
                     <Chip
-                      dashed
-                      onClick={openCreateDialog}
-                      title='a new step from scratch — pick what it joins in the dialog'
+                      onClick={() => setDock({ role: 'step', index: Math.max(0, selectedIndex) })}
+                      title='back to the open step'
                     >
-                      + new operation
+                      {selectedIndex >= 0 && selectedIndex < steps.length
+                        ? `← step ${(selectedIndex + 1) * 10}`
+                        : '← the step'}
                     </Chip>
+                  ) : (
+                    !frozen && (
+                      <Chip
+                        dashed
+                        onClick={openCreateDialog}
+                        title='a new step from scratch — pick what it joins in the dialog'
+                      >
+                        + new operation
+                      </Chip>
+                    )
                   )}
                 </span>
               </div>
@@ -1848,7 +1991,29 @@ export function AssemblyFullscreen({
                   монтировал редактор НЕСУЩЕСТВУЮЩЕЙ строки — getValues отдаёт undefined, а первый
                   же ввод создал бы `operations.0` в значениях формы МИМО field array. */}
               <fieldset disabled={frozen} className='min-h-0 min-w-0 flex-1 overflow-y-auto p-2'>
-                {!dockOpen ? null : selectedIndex >= 0 && selectedIndex < steps.length ? (
+                {!dockOpen ? null : dock?.role === 'unit' ? (
+                  dockUnit ? (
+                    <AssemblyUnitEditor
+                      block={dockUnit}
+                      blocks={blocks}
+                      res={res}
+                      smv={smvOfBlock.get(dockUnit.key) ?? ''}
+                      terminal={liveUnitKeys.length === 1 && liveUnitKeys[0] === dockUnit.key}
+                      frozen={frozen}
+                      selectedIndex={selectedIndex}
+                      pieceShapes={pieceShapes}
+                      onPickStep={pickStep}
+                      onInsert={insertIntoUnit}
+                    />
+                  ) : (
+                    // УЗЕЛ ИСЧЕЗ, ПОКА РЕЖИМ БЫЛ ОТКРЫТ (растворили соседним жестом). Молча
+                    // подменить содержимое редактором шага значило бы ответить не на тот вопрос:
+                    // человек смотрит на узел, а увидел бы поля постороннего шага.
+                    <Text size='micro' variant='label'>
+                      ▣ {dock.unitKey} is not a unit any more — it was dissolved or renamed
+                    </Text>
+                  )
+                ) : selectedIndex >= 0 && selectedIndex < steps.length ? (
                   renderDockEditor(dockAddPiece)
                 ) : (
                   <Text size='micro' variant='label'>
