@@ -520,6 +520,10 @@ export function AssemblyFullscreen({
       if (g && e.pointerId !== g.pointerId) return;
       endTileDrag(null);
     };
+    // Потеря окна И потеря видимости — оба аварийные конца, и слушать надо оба: полотно гасит
+    // свою половину жеста на `visibilitychange` тоже («blur владельцу жеста может и не прийти» —
+    // его onLost), и без зеркала здесь ghost переживал бы деталь, которую полотно уже не везёт, —
+    // до первого pointerup висел бы за курсором без единой зажатой кнопки.
     const lost = () => endTileDrag(null);
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -536,12 +540,14 @@ export function AssemblyFullscreen({
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', cancel);
     window.addEventListener('blur', lost);
+    document.addEventListener('visibilitychange', lost);
     window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', cancel);
       window.removeEventListener('blur', lost);
+      document.removeEventListener('visibilitychange', lost);
       window.removeEventListener('keydown', onKey, true);
     };
   }, [tileDragOn, endTileDrag, paintGhost]);
