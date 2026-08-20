@@ -58,6 +58,21 @@ interface Props {
   // Form-style dialogs set this false and close themselves in the mutation's onSuccess —
   // the default auto-close would dismiss (and wipe) the form on a validation/backend error.
   closeOnConfirm?: boolean;
+  /**
+   * Куда уходит фокус на закрытии. ОПЦИОНАЛЬНЫЙ, и не задавать его — штатно: без него шелл ведёт
+   * себя ровно так, как вёл до появления пропа.
+   *
+   * Дефолт Radix на закрытии — `event.preventDefault(); triggerRef.current?.focus()`. Триггера у
+   * этой модалки нет НИ У ОДНОГО вызывателя: она открывается состоянием, а не `Dialog.Trigger`.
+   * Значит `triggerRef` пуст, восстановление фокуса подавлено и ничем не заменено — кнопка, на
+   * которой стоял фокус, уезжает вместе с диалогом, и браузер отдаёт фокус `<body>`.
+   *
+   * Обычной странице это ничего не стоит. Экрану, у которого роутер клавиш висит React-обработчиком
+   * `onKeyDown` на СВОЁМ `Dialog.Content` (фулскрин сборки), это смерть всей клавиатуры до первого
+   * клика внутрь: React-события до обработчика не доходят вовсе. Такие вызыватели передают сюда
+   * свой возврат фокуса; для всех остальных дефолт Radix остаётся дефолтом Radix.
+   */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 export function ConfirmationModal({
@@ -75,6 +90,7 @@ export function ConfirmationModal({
   footerHint,
   typeToConfirm,
   closeOnConfirm = true,
+  onCloseAutoFocus,
 }: Props) {
   const [typed, setTyped] = useState('');
   // Never carry a satisfied guard across openings — reopening must re-arm it.
@@ -107,6 +123,7 @@ export function ConfirmationModal({
             z-[var(--z-nav)] = 45. max-h-[90vh] keeps a tall form scrollable and its buttons
             reachable on a short viewport; inset-x-2.5 already spans nearly the full width there. */}
         <DialogPrimitives.Content
+          onCloseAutoFocus={onCloseAutoFocus}
           className={`fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:-translate-x-1/2 ${WIDTH[width]}`}
         >
           <DialogPrimitives.Description className='sr-only'>

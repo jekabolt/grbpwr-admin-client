@@ -83,7 +83,7 @@ import {
   type LastMutation,
   type PendingAppend,
 } from './last-mutation';
-import { AssemblyFullscreen, FROZEN_REFUSAL } from './assembly-fullscreen';
+import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import { OperationMediaStrip } from './operation-media-strip';
@@ -2848,6 +2848,12 @@ function GenerateOperationsPanel({
         confirmLabel='replace'
         cancelLabel='cancel'
         onConfirm={() => accept('replace')}
+        // ЩИТ ТОТ ЖЕ, ЧТО У ОСТАЛЬНЫХ МОДАЛОК ТЕХ-КАРТЫ, и сегодня он не срабатывает ни разу:
+        // генератор живёт только в инлайне, а из-под открытого фулскрина до него не дотянуться —
+        // оверлей гасит указатель и держит фокус. `restoreScreenFocus` это видит (экрана в DOM нет)
+        // и не делает ничего. Оставлено сознательно: панель уже переезжала между видами, и правило
+        // «после портала фокус возвращается экрану» должно ехать вместе с ней.
+        onCloseAutoFocus={restoreScreenFocus}
       >
         <div className='space-y-1.5'>
           <CalloutBox tone='error'>
@@ -3707,6 +3713,34 @@ export function OperationsField({
     if (!closed) return;
     requestAnimationFrame(() => fsChipRef.current?.focus());
   }, [fsOpen]);
+
+  // И ЗЕРКАЛЬНО — ФОКУС ПОСЛЕ ДИАЛОГА СОЗДАНИЯ, СНАРУЖИ ВНУТРЬ. Через этот диалог проходит КАЖДОЕ
+  // создание шага, и он единственная модалка фулскрина, которая живёт СНАРУЖИ него: диалог нужен
+  // обоим видам и потому смонтирован всегда, вне блока `sequence`. Значит `Dialog.Content` экрана
+  // отсюда не достать ни `closest`, ни ref-ом — экран находит себя сам, по своему признаку, и это
+  // делает `restoreScreenFocus`.
+  //
+  // КАДРОМ ПОЗЖЕ, ТОЧНО ТАК ЖЕ, КАК ВОЗВРАТ НА ЧИП ВЫШЕ, И ПО ЗАМЕРУ, А НЕ ПО ОСТОРОЖНОСТИ. Портал
+  // уезжает НЕ в том коммите, где сменилось состояние: `Presence` снимает контент отдельным тактом,
+  // и на момент этого эффекта кнопка «cancel» ЖИВА и ДЕРЖИТ ФОКУС (стенд: возврат зовётся на 643.4,
+  // а `focusout … to null` приходит на 643.8). Забрать фокус там значило бы отнять его у живого
+  // органа — ровно то, чего guard возврата не делает; поэтому ждём кадр и застаём уже `<body>`.
+  //
+  // Дефолт Radix при этом гасить не надо и нечем: без `Dialog.Trigger` он только подавляет
+  // восстановление и сам не фокусирует ничего — что бы ни успело сработать первым, фокус остаётся
+  // там, куда его поставили здесь.
+  //
+  // Закрытий у диалога три (cancel/Esc/✕, «create» и гонка RELEASE), и все три проходят через
+  // `setPendingCreate(null)` в этом файле — сторожить приходится ровно одно состояние.
+  const hadPendingCreate = useRef(false);
+  useEffect(() => {
+    const closed = hadPendingCreate.current && pendingCreate === null;
+    hadPendingCreate.current = pendingCreate !== null;
+    if (!closed) return;
+    // В инлайне фулскрина нет, `restoreScreenFocus` это видит и не делает ничего: там роутера
+    // клавиш нет, и фокус в `body` ничего не ломает.
+    requestAnimationFrame(() => restoreScreenFocus());
+  }, [pendingCreate]);
 
   // ДЕСЯТАЯ ТОЧКА СБРОСА (ревью Ф4) — ГРАНИЦА ВИЗИТА ФУЛСКРИНА, обе стороны. Девять точек стерегут
   // массив и правки внутри фулскрина, но ⌘Z и чип живут ТОЛЬКО в нём, а запись — здесь, и она

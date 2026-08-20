@@ -300,6 +300,44 @@ const comboKey = (e: { key: string; code: string }): string => {
  */
 export const FROZEN_REFUSAL = 'the card is released — it can be read and laid out, not edited';
 
+/**
+ * Признак `Dialog.Content` этого экрана в DOM. Нужен именно атрибут, а не ref: модалки живут в
+ * СВОИХ порталах у `document.body`, `closest('[role="dialog"]')` из них находит их самих, а
+ * `operations-field.tsx` держит диалог создания снаружи фулскрина и ссылки на его контент не имеет
+ * вовсе.
+ */
+const SCREEN_MARK = 'data-assembly-screen';
+
+/**
+ * ФОКУС НЕ ИМЕЕТ ПРАВА ПРОВАЛИТЬСЯ В BODY — третий случай того же класса, что у полосы-сплиттера и
+ * у стикера ниже, и самый частый из трёх: через него проходит КАЖДОЕ закрытие модалки над этим
+ * экраном, то есть каждое создание шага.
+ *
+ * Механизм: `ConfirmationModal` открывается состоянием, `Dialog.Trigger` у неё нет, а дефолт Radix
+ * на закрытии — `preventDefault()` плюс фокус на триггер. Триггера нет → восстановление подавлено
+ * и ничем не заменено: кнопка с фокусом уезжает вместе с диалогом, браузер отдаёт фокус `<body>`,
+ * и роутер клавиш экрана (React-`onKeyDown` на `Dialog.Content`) перестаёт получать события —
+ * мертвы ⌘Z, ⌘F, ⌘A, глаголы и стрелки, пока не кликнешь внутрь. `MutationObserver` FocusScope
+ * следит только за своим контейнером и удаления в ЧУЖОМ портале не видит.
+ *
+ * Событие НЕОБЯЗАТЕЛЬНО, потому что зовут её двумя способами. Модалки, до которых этот файл и
+ * `operations-field.tsx` дотягиваются пропом, отдают её в `onCloseAutoFocus` — там событие надо
+ * ГАСИТЬ, иначе следом отработает дефолт Radix. Диалог создания живёт снаружи и пропа не имеет:
+ * его закрытие ловится состоянием, и гасить там нечего.
+ */
+export function restoreScreenFocus(event?: Event) {
+  const screen = document.querySelector<HTMLElement>(`[${SCREEN_MARK}]`);
+  // Инлайн: фулскрина на экране нет. Ничего не гасим и ничего не двигаем — там нет роутера клавиш,
+  // фокус в `body` ничего не ломает, и дефолт Radix обязан остаться ровно тем, чем был.
+  if (!screen) return;
+  const a = document.activeElement;
+  // Фокус уже забрал кто-то живой — отбирать его не за что. Тот же guard, что у сплиттера: экран
+  // возвращает себе только ПОТЕРЯННЫЙ фокус, а не любой.
+  if (a && a !== document.body && a !== screen) return;
+  event?.preventDefault();
+  screen.focus();
+}
+
 export function AssemblyFullscreen({
   blocks,
   steps,
@@ -1190,6 +1228,9 @@ export function AssemblyFullscreen({
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
         <Dialog.Content
+          // По этому признаку экран находят те, кому надо вернуть ему фокус после своей модалки:
+          // порталы у `document.body` до него не дотягиваются ни `closest`, ни ref-ом.
+          {...{ [SCREEN_MARK]: '' }}
           className='fixed inset-0 z-[var(--z-modal)] bg-pageBg p-4 focus:outline-none'
           onEscapeKeyDown={(e) => {
             // ESC-ЛЕСТНИЦА, каноническая и единая для всех фаз: find → шпаргалка → режим добора →
@@ -1316,8 +1357,22 @@ export function AssemblyFullscreen({
                       sketch
                     </Chip>
                   )}
+                  {/* СЛОВО, А НЕ ГЛИФ — И ЭТО РЕШЕНИЕ ЗАМЕРА, а не вкуса. Пиксельный замер на
+                      настоящем FeatureMono (не на фолбэчной гельветике) говорит, что «?» стоял в
+                      своей коробке РОВНО: центр чернил на −0.03px (DPR 4) и −0.16px (DPR 1) от
+                      центра чипа — точнее, чем у соседнего «find» (−0.23 и −0.60). Вертикальный
+                      подъём (−1.00px на DPR 1) одинаков у ВСЕХ чипов ряда: это кап-строка ряда, а
+                      не кривизна этого органа, и чинить её у одного значило бы выбить его из строя.
+                      «Честный квадрат» 19×19 замер ОТВЕРГ: чернила шириной 4px в коробке нечётной
+                      ширины на DPR 1 дают зазоры 8 и 7 пикселей — целый пиксель разницы вместо
+                      нынешних 0.3.
+                      Остаётся то, на что жалуются на самом деле: одинокий глиф в пустой пунктирной
+                      коробке 22×19 читается относительно КОРОБКИ, а не строки, и в ряду словесных
+                      чипов он единственный такой. Слово снимает класс целиком — чип становится
+                      таким же, как соседи (замер: dx −0.10, dy как у всего ряда). Клавишу называет
+                      подпись: она и была единственным местом, где про неё сказано. */}
                   <Chip nonForm dashed onClick={() => setHelpOpen(true)} title='keyboard shortcuts (?)'>
-                    ?
+                    help
                   </Chip>
                   <Chip
                     nonForm
@@ -1793,6 +1848,7 @@ export function AssemblyFullscreen({
             confirmLabel='reset'
             cancelLabel='keep'
             width='sm'
+            onCloseAutoFocus={restoreScreenFocus}
           >
             <Text size='micro' variant='label'>
               every manual position on this card will be forgotten, and the schematic will place the
