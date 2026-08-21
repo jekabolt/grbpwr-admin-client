@@ -647,8 +647,28 @@ export function AssemblyFullscreen({
 
   const closeDock = useCallback(() => setDock(null), []);
 
+  /**
+   * ЧЕМ ДОК БЫЛ, КОГДА ЕГО СВЕРНУЛИ. Ровно та же память, что у `dockBeforeList` ниже, и заведена по
+   * той же причине: «свернуть» и «развернуть» — один орган, и между ними экран обязан остаться тем
+   * же. Без неё `]` на открытом режиме узла молча подменял содержимое редактором ПОСТОРОННЕГО шага
+   * вместе с потерей всех точек вставки — то есть отвечал не на тот вопрос, который задали.
+   *
+   * Пишется в рендере, а не эффектом: это «последнее виденное», и выброшенный рендер запишет то же
+   * самое. Роль `step` не запоминается вовсе — её адрес всё равно берётся свежим из `selectedIndex`,
+   * и хранить второе мнение о том же было бы ловушкой каталога наоборот.
+   */
+  const dockBeforeCollapse = useRef<DockView | null>(null);
+  if (dock) dockBeforeCollapse.current = dock;
+
   const toggleDock = useCallback(() => {
-    setDock((cur) => (cur === null ? { role: 'step', index: Math.max(0, selectedIndex) } : null));
+    setDock((cur) => {
+      if (cur !== null) return null;
+      const was = dockBeforeCollapse.current;
+      // УЗЕЛ, ИСЧЕЗНУВШИЙ ПОКА ДОК БЫЛ СВЁРНУТ, вернётся сюда же и скажет о себе словами («…is not
+      // a unit any more») — ровно как если бы его растворили при открытом доке. Молчаливой подмены
+      // экрана нет ни в одном из двух случаев, и второго объяснения для этого заводить не надо.
+      return was?.role === 'unit' ? was : { role: 'step', index: Math.max(0, selectedIndex) };
+    });
   }, [selectedIndex]);
 
   /**
