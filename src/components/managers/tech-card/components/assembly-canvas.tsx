@@ -21,8 +21,10 @@ import {
   buildWires,
   directInputsOf,
   makeRowY,
+  pieceAddPrefill,
   TailBoxView,
   TileView,
+  unitAddPrefill,
   UnitBoxView,
   WireLayer,
 } from './assembly-node-views';
@@ -212,6 +214,11 @@ export type AssemblyCanvasProps = {
    * подставляет тип, зону и машину — всё кончается диалогом (R1).
    */
   onCreate: (prefill: CreatePrefill) => void;
+  /**
+   * Открыть УЗЕЛ в доке — вторая роль дока, та же, в которую ведёт клавиша `e`. Необязателен, и
+   * это не небрежность: дока нет у инлайна, а чип, которому некуда вести, не рисуется вовсе.
+   */
+  onOpenUnit?: (unitKey: string) => void;
   /** Растворить узел — по индексу его производящего шага. */
   onDissolve: (stepIndex: number) => void;
   pieceShapes: PieceShapeMap;
@@ -255,6 +262,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     pieceNameOf,
     onPickStep,
     onCreate,
+    onOpenUnit,
     onDissolve,
     pieceShapes,
     cloth,
@@ -941,6 +949,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    * ВЫДЕЛЕНИЕ ЗАМЕЩАЕТСЯ, а не пополняется: это навигация, и после неё человек смотрит на ОДИН
    * узел — тот, который назвал. Пополняй она выбор, второй клик по тому же токену снимал бы
    * выделение, то есть переход отменял бы сам себя.
+   *
+   * SHIFT ЗДЕСЬ НЕ ЗНАЧИТ НИЧЕГО, И ЭТО РЕШЕНО, А НЕ ЗАБЫТО. На маркизе shift пополняет выбор, и
+   * соблазн отдать ему то же значение на токене велик — «перейти и добавить к выбранным». Но
+   * тогда один орган снова получил бы два смысла, различаемых невидимым состоянием клавиши:
+   * ровно тот перегруз, который Т10 с этого бокса и сняла. Токен — орган НАВИГАЦИИ; модификаторы
+   * выбора принадлежат органам выбора (шапка, маркиза), и там shift работает как работал.
    */
   const goToNode = (key: string) => {
     onPicked([key]);
@@ -1655,6 +1669,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             const b = blocks.find((x) => x.key === box.key);
             if (!b) return null;
             const terminal = liveUnits.length === 1 && liveUnits[0] === box.key;
+            const addPrefill = unitAddPrefill(b, res);
             return (
               <UnitBoxView
                 key={box.key}
@@ -1683,9 +1698,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 headProps={activate(clickGuard(() => toggle(box.key)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
-                onAddOperation={clickGuard(() =>
-                  onCreate({ inputKeys: [box.key], intent: 'process' }),
-                )}
+                surfaceWords='on the canvas'
+                onOpenUnit={onOpenUnit && clickGuard(() => onOpenUnit(box.key))}
+                // ЧИП КЛАДЁТ ШАГ ВНУТРЬ БЛОКА, а не в низ листа: позицию и обещание попадания в
+                // узел считает `unitAddPrefill` — та же арифметика, что у хвостовой точки вставки
+                // мини-рельса. Вернула `null` — вставлять некуда, и чипа не будет вовсе.
+                onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
                 onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
               />
             );
@@ -1708,34 +1726,42 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             />
           )}
 
-          {layout.tiles.map((t) => (
-            <TileView
-              key={`tile:${t.key}`}
-              tile={t}
-              name={pieceNameOf(t.key)}
-              pieceShapes={pieceShapes}
-              cloth={cloth}
-              labelOf={labelOf}
-              picked={picked.includes(t.key)}
-              dragging={!!heldNow?.has(t.key)}
-              ringClassName={nodeRing(t.key)}
-              organProps={activate(
-                t.state === 'free'
-                  ? !frozen
-                    ? clickGuard(() => toggle(t.key))
-                    : undefined
-                  : (() => {
-                      const eater = res.consumedBy.get(t.key);
-                      return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
-                    })(),
-              )}
-              dragProps={dragHandlers(t.key, t.x, t.y)}
-              hoverProps={hoverHandlers(t.key)}
-              // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
-              // способа открыть шаг в системе заводить нельзя.
-              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
-            />
-          ))}
+          {layout.tiles.map((t) => {
+            const addPrefill = pieceAddPrefill(t.key, steps, res);
+            return (
+              <TileView
+                key={`tile:${t.key}`}
+                tile={t}
+                name={pieceNameOf(t.key)}
+                pieceShapes={pieceShapes}
+                cloth={cloth}
+                labelOf={labelOf}
+                picked={picked.includes(t.key)}
+                frozen={frozen}
+                hovered={hovered === t.key}
+                dragging={!!heldNow?.has(t.key)}
+                ringClassName={nodeRing(t.key)}
+                surfaceWords='on the canvas'
+                // ГОЛОВА ПЛИТКИ ВЫДЕЛЯЕТ ВСЕГДА — свободная, съеденная, на выпущенной карточке.
+                // Раньше здесь стояла та же развилка, что снята с шапки бокса: свободная
+                // выделяет, съеденная уводит к съевшему шагу, под `frozen` свободная мертва.
+                // Один орган, три смысла, и смысл зависел от невидимого на глаз состояния;
+                // «уйти к съевшему» переехало на чип полосы, где у него своё место.
+                organProps={activate(clickGuard(() => toggle(t.key)))}
+                dragProps={dragHandlers(t.key, t.x, t.y)}
+                hoverProps={hoverHandlers(t.key)}
+                // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
+                // способа открыть шаг в системе заводить нельзя.
+                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
+                // ТОТ ЖЕ `goToNode`, ЧТО У ТОКЕНА: «перейти к узлу» — одно действие, и второго
+                // его исполнителя в системе быть не должно.
+                onGoToUnit={
+                  t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
+                }
+              />
+            );
+          })}
         </div>
       )}
 

@@ -1871,6 +1871,10 @@ export function AssemblyFullscreen({
                   pieceNameOf={pieceNameOf}
                   onPickStep={pickStep}
                   onCreate={setPendingCreate}
+                  // Чип `steps · N` в ховер-полосе бокса — ВТОРОЙ ВХОД в режим узла, тот же, в
+                  // который ведёт клавиша `e`: одна функция на оба, иначе орган и клавиша
+                  // однажды разойдутся в том, что именно они открывают.
+                  onOpenUnit={openUnitDock}
                   onDissolve={dissolveUnit}
                   pieceShapes={pieceShapes}
                   cloth={cloth}

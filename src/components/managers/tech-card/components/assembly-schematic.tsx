@@ -12,8 +12,10 @@ import {
   buildWires,
   directInputsOf,
   makeRowY,
+  pieceAddPrefill,
   TailBoxView,
   TileView,
+  unitAddPrefill,
   UnitBoxView,
   WireLayer,
 } from './assembly-node-views';
@@ -418,6 +420,10 @@ export function AssemblySchematic({
    * узел — тот, который назвал. Пополняй она выбор, второй клик по тому же токену снимал бы
    * выделение, то есть переход отменял бы сам себя.
    *
+   * SHIFT ЗДЕСЬ НЕ ЗНАЧИТ НИЧЕГО, И ЭТО РЕШЕНО, А НЕ ЗАБЫТО: на маркизе он пополняет выбор, но
+   * токен — орган НАВИГАЦИИ, и отдай ему модификатор выбора, один орган снова получил бы два
+   * смысла по невидимому состоянию клавиши. Модификаторы выбора остаются у органов выбора.
+   *
    * ДОВОДКА СЧИТАЕТСЯ ТОЙ ЖЕ `revealDelta`, ЧТО У ПОЛОТНА, хотя двигает прокрутку, а не трансформ:
    * инлайн — это `overflow: auto` без зума, то есть тот же вид при `zoom = 1` и `pan = −scroll`.
    * Вторая формула здесь означала бы, что «довезти до ноды» однажды поедет на двух поверхностях
@@ -714,6 +720,7 @@ export function AssemblySchematic({
             // пока рельс на том же графе показывал ✕ разрыв. Два ответа про одну карточку, причём
             // именно про то, выпустится она или нет: правило 4 требует РОВНО ОДИН терминал.
             const terminal = liveUnits.length === 1 && liveUnits[0] === box.key;
+            const addPrefill = unitAddPrefill(b, res);
             return (
               <UnitBoxView
                 key={box.key}
@@ -746,9 +753,14 @@ export function AssemblySchematic({
                 headProps={activate(clickGuard(() => toggle(box.key)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
-                onAddOperation={clickGuard(() =>
-                  onCreate({ inputKeys: [box.key], intent: 'process' }),
-                )}
+                // СЛОВА ПОВЕРХНОСТИ. В инлайне полотна нет вовсе — есть прокручиваемая коробка,
+                // и `revealDelta` здесь двигает прокрутку, а не трансформ; обещать «on the
+                // canvas» значило бы назвать место, которого человек на этом экране не найдёт.
+                surfaceWords='in the schematic'
+                // ПРОПА `onOpenUnit` ЗДЕСЬ НЕТ, и потому нет чипа `steps · N`: вторая роль дока
+                // живёт в фулскрине, а у инлайна дока нет вовсе. Вести чипу некуда — значит его
+                // не рисуют; то же правило, по которому на выпущенной карточке нет точек вставки.
+                onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
                 onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
               />
             );
@@ -780,39 +792,42 @@ export function AssemblySchematic({
               целилась бы в то, чего не видит. В авто-раскладке ноды не пересекаются, но ручные
               позиции пересечение разрешают.
 
-              Плитка кликабельна в обоих состояниях: свободная берётся в сборку, съеденная уводит к
-              шагу, который её съел. Роль кнопки на div, а не сама <button>: см. `activate` —
-              внешний `<fieldset disabled>` карточки убил бы и клик, и перетаскивание. */}
-          {layout.tiles.map((t) => (
-            <TileView
-              key={`tile:${t.key}`}
-              tile={t}
-              name={pieceNameOf(t.key)}
-              pieceShapes={pieceShapes}
-              cloth={cloth}
-              labelOf={labelOf}
-              picked={picked.includes(t.key)}
-              dragging={drag?.key === t.key && drag.started}
-              ringClassName={nodeRing(t.key)}
-              organProps={activate(
-                t.state === 'free'
-                  ? !frozen
-                    ? clickGuard(() => toggle(t.key))
-                    : undefined
-                  : // Съеденную деталь входом не взять — правило 2. Зато главный вопрос читателя о
-                    // ней «куда она делась», и клик отвечает: уводит к шагу, который её съел.
-                    (() => {
-                      const eater = res.consumedBy.get(t.key);
-                      return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
-                    })(),
-              )}
-              dragProps={dragHandlers(t.key, t.x, t.y)}
-              hoverProps={hoverHandlers(t.key)}
-              // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
-              // способа открыть шаг в системе заводить нельзя.
-              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
-            />
-          ))}
+              Клик по плитке значит ОДНО И ТО ЖЕ в обоих состояниях — выделить деталь. Роль
+              кнопки на div, а не сама <button>: см. `activate` — внешний `<fieldset disabled>`
+              карточки убил бы и клик, и перетаскивание. */}
+          {layout.tiles.map((t) => {
+            const addPrefill = pieceAddPrefill(t.key, steps, res);
+            return (
+              <TileView
+                key={`tile:${t.key}`}
+                tile={t}
+                name={pieceNameOf(t.key)}
+                pieceShapes={pieceShapes}
+                cloth={cloth}
+                labelOf={labelOf}
+                picked={picked.includes(t.key)}
+                frozen={frozen}
+                hovered={hovered === t.key}
+                dragging={drag?.key === t.key && drag.started}
+                ringClassName={nodeRing(t.key)}
+                surfaceWords='in the schematic'
+                // ГОЛОВА ВЫДЕЛЯЕТ ВСЕГДА — как и шапка бокса. Раньше съеденная плитка уводила к
+                // шагу, который её съел: навигация, переодетая в жест выделения, и выбор между
+                // двумя смыслами по невидимому состоянию. Вопрос «куда деталь делась» никуда не
+                // делся — на него отвечает чип `→ ▣ ИМЯ` в ховер-полосе, и отвечает адресно.
+                organProps={activate(clickGuard(() => toggle(t.key)))}
+                dragProps={dragHandlers(t.key, t.x, t.y)}
+                hoverProps={hoverHandlers(t.key)}
+                // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
+                // способа открыть шаг в системе заводить нельзя.
+                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
+                onGoToUnit={
+                  t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
+                }
+              />
+            );
+          })}
         </div>
       </div>
 
