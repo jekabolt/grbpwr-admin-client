@@ -240,6 +240,51 @@ head('цитата А — форма → провод: заполненное з
   ck(w.print?.peelMode === T.HOT_PEEL, 'режим отслойки при гравировке едет', String(w.print?.peelMode));
 }
 
+// ─── МАТРИЦА ЧЕТЫРЁХ СОСТОЯНИЙ ОТСТРОЧКИ — ШОВ Ф3↔Ф4 ─────────────────────────────────────────
+// Главный шов фазы: одно поле, две стороны. Клиент решает, ЧТО поедет; сервер (строгий разбор
+// `parseTopstitch`) решает, ЧЕМ ответить. Проверяется КЛИЕНТСКАЯ половина всех четырёх строк —
+// серверная половина держится тестом в `internal/dto`.
+head('матрица отстрочки (§6.1) — клиентская половина шва');
+{
+  const base = { operationType: T.MACHINE, machineType: T.LOCKSTITCH };
+  // 1. режим пуст, отступ пуст → обёртки нет, серверу отвечать не на что
+  const a = wireOne({ ...base });
+  ck(a.topstitch === undefined, '1) режим пуст + отступ пуст → обёртка не едет');
+  // 2. «по краю», отступ пуст → едет один режим; сервер принимает (0326: отступ у края опционален)
+  const b = wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE' });
+  ck(b.topstitch?.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE', '2) «по краю» без отступа → едет режим');
+  ck(dec(b.topstitch?.widthMm) === undefined, '2) ключ отступа при этом отсутствует', String(dec(b.topstitch?.widthMm)));
+  // 3. «в шов» + отступ → едут ОБА; отказ по имени ставят zod (на контроле) и сервер
+  const c = wireOne({ ...base, topstitchMode: T.IN_DITCH, topstitchWidthMm: '4' });
+  ck(dec(c.topstitch?.widthMm) === '4', '3) «в шов» + отступ → едут оба, отказывает сервер');
+  // 4. режим пуст + отступ → едет {UNKNOWN, 4}; сервер (Ф3) отвечает `topstitch_mode: required`
+  const d = wireOne({ ...base, topstitchWidthMm: '4' });
+  ck(
+    d.topstitch?.mode === T.MODE_UNSET && dec(d.topstitch?.widthMm) === '4',
+    '4) режим пуст + отступ → едет {UNKNOWN, 4}, а не пустота',
+    JSON.stringify(d.topstitch),
+  );
+  // 4-БИС. КЛЕТКА, КОТОРОЙ В МАТРИЦЕ ПЛАНА НЕ БЫЛО: одни РЯДЫ, без отступа. Серверное правило Ф3
+  // стреляет и на них («ширина ИЛИ ряды присланы при неназванном режиме»), значит обёртка обязана
+  // ехать и здесь — иначе ряды исчезали бы молча ровно так же, как исчезал отступ.
+  const e = wireOne({ ...base, topstitchRows: 2 });
+  ck(
+    e.topstitch?.mode === T.MODE_UNSET && e.topstitch?.rows === 2,
+    '4-бис) режим пуст + одни РЯДЫ → едет {UNKNOWN, rows: 2}',
+    JSON.stringify(e.topstitch),
+  );
+  ck(dec(e.topstitch?.widthMm) === undefined, '4-бис) пустого отступа при этом на проводе нет');
+
+  // ЧТО ОСТАЁТСЯ НА ПРОВОДЕ ПОСЛЕ [CLEAR]. Жест полосы пишет в форму пустую строку, а пустая
+  // строка обязана ПРОПАСТЬ С ПРОВОДА КЛЮЧОМ, а не приехать как `{value: ""}`: сервер меряет
+  // присланность децимала содержимым, и пустое значение с непустым указателем он прочитал бы как
+  // «отступ прислан» — то есть [clear] по отступу упёрся бы в отказ «назови режим».
+  const cleared = JSON.stringify(wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', topstitchWidthMm: '' }));
+  ck(!cleared.includes('widthMm'), 'после [clear] ключа отступа в JSON нет вовсе', cleared.slice(0, 160));
+  const clearedAll = JSON.stringify(wireOne({ ...base, topstitchWidthMm: '', topstitchRows: 0 }));
+  ck(!clearedAll.includes('topstitch'), 'очищены оба поля и режим пуст → обёртки в JSON нет');
+}
+
 // РЕГРЕСС: шаг без единого факта волны шлёт ТЕ ЖЕ БАЙТЫ, что и раньше — ни одной пустой обёртки.
 head('регресс — неосведомлённая запись не растолстела');
 {
