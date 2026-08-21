@@ -21,6 +21,7 @@ import {
   buildWires,
   directInputsOf,
   makeRowY,
+  notifyWorldMoved,
   pieceAddPrefill,
   TailBoxView,
   TileView,
@@ -382,6 +383,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     // видно, пока не приблизишь.
     world.style.setProperty('--hk', String(hatchK(zoom)));
     setZoomPct(Math.round(zoom * 100));
+    // МИР ПОЕХАЛ — И ОБ ЭТОМ НАДО СКАЗАТЬ ВСЛУХ. Всё, что решается по ЭКРАННОМУ положению ноды
+    // (сегодня — в какую сторону встаёт ховер-полоса), рендера на зуме и панораме не получает
+    // вовсе: трансформ пишется сюда, в стиль, мимо React. Весть стоит РОВНО ЗДЕСЬ, у
+    // единственного писателя трансформа, — второе место означало бы, что однажды мир поедет
+    // молча. Цикл `notifyWorldMoved` пуст, пока никто ни на что не наведён.
+    notifyWorldMoved();
   }, []);
 
   // --- маркиза: состояние и живопись -------------------------------------------------------------
@@ -526,6 +533,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     world.style.transition = 'transform .22s cubic-bezier(.22,1,.36,1)';
     window.setTimeout(() => {
       if (worldRef.current) worldRef.current.style.transition = '';
+      // ВТОРАЯ ВЕСТЬ — КОГДА МИР ВСТАЛ. `applyView` кричит в момент ЗАПИСИ трансформа, а под
+      // переходом запись — это только начало движения: замер, снятый тогда, читает ещё СТАРУЮ
+      // геометрию, и вписывание клавишей «f» оставило бы полосу с решением от прошлого кадра.
+      notifyWorldMoved();
     }, 240);
   }, []);
 
