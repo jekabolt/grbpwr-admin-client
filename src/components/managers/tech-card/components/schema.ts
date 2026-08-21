@@ -2953,6 +2953,21 @@ export function mapFormToTechCardInsert(
     // при этом ничего не менялось, и объявлять снятие незачем.
     mediaCleared:
       !!data.mediaCleared && (original?.operations ?? []).some((o) => (o?.media ?? []).length > 0),
+    // ЧЕТВЁРТЫЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — для полей волны видов операций (0324). Ставится ВСЕГДА, как
+    // machineFieldsAware, а не по факту заполненности: восемнадцать полей волны сидят на СТАРЫХ
+    // парах (глагол, machine_type), которые этот клиент шлёт каждый день, а расширенные словари
+    // (machineType +2, topstitchMode +2, pressCloth +1, bomItem.kind +2) живут на колонках,
+    // которым годы. Операции пишутся полной заменой, стабильного ключа у шага нет — значит
+    // отставшая вкладка стёрла бы факты молча, и сервер отвечает на запись БЕЗ флага
+    // FailedPrecondition против карточки, эти факты несущей.
+    //
+    // Парного *_cleared у него НЕТ и не будет, в отличие от узлов и снимков: «поле пусто» здесь
+    // рядовая правка (технолог стёр стиль петли, потому что он больше не нужен), и бекстоп
+    // «осведомлённая пустота против непустой карточки» сделал бы восемнадцать полей НЕСТИРАЕМЫМИ.
+    //
+    // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
+    // подпись.
+    operationKindsAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
