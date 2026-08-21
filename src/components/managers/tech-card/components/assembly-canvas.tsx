@@ -26,6 +26,7 @@ import {
   TailBoxView,
   TileView,
   unitAddPrefill,
+  unitHeadOpen,
   UnitBoxView,
   WireLayer,
 } from './assembly-node-views';
@@ -216,8 +217,9 @@ export type AssemblyCanvasProps = {
    */
   onCreate: (prefill: CreatePrefill) => void;
   /**
-   * Открыть УЗЕЛ в доке — вторая роль дока, та же, в которую ведёт клавиша `e`. Необязателен, и
-   * это не небрежность: дока нет у инлайна, а чип, которому некуда вести, не рисуется вовсе.
+   * Открыть УЗЕЛ в доке — вторая роль дока, та же, в которую ведёт клавиша `e`, и та же, в
+   * которую ведёт клик по шапке узла с двумя и более операциями. Необязателен, и это не
+   * небрежность: дока нет у инлайна, и там клик по шапке открывает первую операцию узла.
    */
   onOpenUnit?: (unitKey: string) => void;
   /** Растворить узел — по индексу его производящего шага. */
@@ -1648,6 +1650,8 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // до обработчика ноды событие больше не доходит, флаг остаётся взведённым, и `clickGuard`
       // чипа съедает ПЕРВЫЙ законный клик. Замерено: утащить ноду за подвал в пустое место,
       // навести другую, нажать «steps · N» — выделение пусто, срабатывает только второй клик.
+      // (Того чипа больше нет — замер снят на нём; починка касается ЛЮБОГО чипа полосы, и
+      // «+ operation» с «dissolve» держатся ею ровно так же.)
       //
       // ФАЗА ПЕРЕХВАТА РАЗВОДИТ ЭТИ ДВА СВОЙСТВА, не жертвуя ни одним: перехват идёт от корня К
       // ЦЕЛИ и завершается ЦЕЛИКОМ до всплытия, поэтому полоса гасит жест ровно как гасила, а
@@ -1729,16 +1733,15 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 ringClassName={nodeRing(box.key)}
                 dragProps={dragHandlers(box.key, box.x, box.y)}
                 hoverProps={hoverHandlers(box.key)}
-                // ШАПКА ВЫДЕЛЯЕТ ВСЕГДА — и съеденный узел, и на выпущенной карточке. Раньше
-                // здесь стояла развилка `!frozen && onTable ? выделить : уйти к съевшему шагу`:
-                // один орган значил две противоположные вещи по невидимому на глаз состоянию.
-                // Вопрос «куда узел делся» никуда не делся — на него отвечает ТОКЕН в стрелке,
-                // и отвечает адресно.
-                headProps={activate(clickGuard(() => toggle(box.key)))}
+                // ШАПКА ПОКАЗЫВАЕТ ОПЕРАЦИИ ЭТОГО УЗЛА — одну самой ею, несколько списком в
+                // доке. Решение считает `unitHeadOpen`, ОДИН на обе поверхности: вьюшка бокса
+                // общая, и разведи мы решение — полотно с инлайном разошлись бы молча.
+                // Выделение при этом не теряется: `openUnitDock` сам переводит его на узел, а
+                // набирает выделение маркиза.
+                headProps={activate(clickGuard(unitHeadOpen(b, onPickStep, onOpenUnit)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 surfaceWords='on the canvas'
-                onOpenUnit={onOpenUnit && clickGuard(() => onOpenUnit(box.key))}
                 // ЧИП КЛАДЁТ ШАГ ВНУТРЬ БЛОКА, а не в низ листа: позицию и обещание попадания в
                 // узел считает `unitAddPrefill` — та же арифметика, что у хвостовой точки вставки
                 // мини-рельса. Вернула `null` — вставлять некуда, и чипа не будет вовсе.
@@ -1766,7 +1769,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
           )}
 
           {layout.tiles.map((t) => {
-            const addPrefill = pieceAddPrefill(t.key, steps, res);
+            // ПОЗИЦИЯ ШАГА НА ПЛИТКЕ СЧИТАЕТСЯ ПО РАСКЛАДКЕ — «сразу за ближайшим блоком», и
+            // раскладка сюда идёт ЭФФЕКТИВНАЯ, с ручными позициями: догадка обязана считать по
+            // тому, что человек видит, а не по автоматической расстановке под ней.
+            const addPrefill = pieceAddPrefill(t.key, steps, res, blocks, layout);
             return (
               <TileView
                 key={`tile:${t.key}`}

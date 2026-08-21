@@ -718,9 +718,10 @@ export function AssemblyFullscreen({
   }, [selectedIndex]);
 
   /**
-   * ОТКРЫТЬ ДОК В РЕЖИМЕ УЗЛА. Второй вход сюда приедет чипом `steps · N` в ховер-полосе бокса
-   * (Т6б) — и приедет в ЭТУ ЖЕ функцию: два жеста с одним смыслом обязаны ходить одной дорогой,
-   * иначе однажды разойдутся поведением.
+   * ОТКРЫТЬ ДОК В РЕЖИМЕ УЗЛА. Второй вход сюда — КЛИК ПО ШАПКЕ узла, у которого операций больше
+   * одной (`unitHeadOpen`), и приходит он в ЭТУ ЖЕ функцию: два жеста с одним смыслом обязаны
+   * ходить одной дорогой, иначе однажды разойдутся поведением. Чип `steps · N`, стоявший здесь
+   * третьим входом, снят — он делал ровно то же, что теперь делает клик по самой ноде.
    *
    * ВЫДЕЛЕНИЕ ПЕРЕВОДИТСЯ НА УЗЕЛ, а не оставляется как есть: обещание режима — «полотно видно,
    * узел на нём подсвечен», и подсветка на этом экране одна, выделение.
@@ -1236,7 +1237,7 @@ export function AssemblyFullscreen({
       units.length > 1
         ? `${units.length} units picked — the unit editor opens one at a time`
         : picked.length === 0
-          ? 'pick a unit first — click its head on the canvas'
+          ? 'pick a unit first — drag a marquee around it on the canvas'
           : 'nothing picked is a unit: pieces have no steps of their own, units do',
       'error',
     );
@@ -1940,9 +1941,9 @@ export function AssemblyFullscreen({
                   pieceNameOf={pieceNameOf}
                   onPickStep={pickStep}
                   onCreate={setPendingCreate}
-                  // Чип `steps · N` в ховер-полосе бокса — ВТОРОЙ ВХОД в режим узла, тот же, в
-                  // который ведёт клавиша `e`: одна функция на оба, иначе орган и клавиша
-                  // однажды разойдутся в том, что именно они открывают.
+                  // КЛИК ПО ШАПКЕ УЗЛА с двумя и более операциями — ВТОРОЙ ВХОД в режим узла,
+                  // тот же, в который ведёт клавиша `e`: одна функция на оба, иначе орган и
+                  // клавиша однажды разойдутся в том, что именно они открывают.
                   onOpenUnit={openUnitDock}
                   onDissolve={dissolveUnit}
                   pieceShapes={pieceShapes}

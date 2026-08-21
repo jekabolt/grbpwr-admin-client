@@ -45,6 +45,11 @@ import {
   stateWord,
   stepGlyph,
 } from '../src/components/managers/tech-card/components/assembly-node-views';
+// НАБОРОМ, А НЕ ИМЕНАМИ — ради ОДНОЙ ВЕЩИ: проба обязана уметь сказать «такой функции ещё нет»
+// словами, а не падать сборкой бандла. Именованный импорт несуществующего экспорта роняет esbuild
+// до первого замера, и контроль слепоты («проверка до правки падает и НАЗЫВАЕТ дефект») выродился
+// бы в стек-трейс. Взамен проба сама проверяет `typeof … === 'function'` первым же кейсом.
+import * as nodeViews from '../src/components/managers/tech-card/components/assembly-node-views';
 import {
   assemblySweep,
   classifyAssemblyInputs,
@@ -370,7 +375,19 @@ export const views = {
   buildWires,
   makeRowY,
   METRICS: SCHEMATIC_METRICS,
+  // Клик по шапке узла и позиция шага, добавленного на плитку детали, — см. пояснение у
+  // namespace-импорта выше.
+  unitHeadTarget: (nodeViews as Record<string, unknown>).unitHeadTarget,
+  unitHeadOpen: (nodeViews as Record<string, unknown>).unitHeadOpen,
+  pieceAddPrefill: (nodeViews as Record<string, unknown>).pieceAddPrefill,
 };
+
+/**
+ * Конвейер карточки, отданный пробе целиком: `pieceAddPrefill` спрашивает НАСТОЯЩИЙ результат
+ * прохода (`consumedBy`, `frontierBefore`), и подделать его объектным литералом значило бы
+ * проверять свою же выдумку вместо движка.
+ */
+export const engine = { buildCase, assemblyLayout };
 
 /** Состав фикстуры — чтобы проба могла проверить, что снимает то, что обещала. */
 export const fixtureFacts = {
