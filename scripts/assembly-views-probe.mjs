@@ -439,7 +439,14 @@ console.log('\ndirectInputsOf — дедуп, свой ключ, порядок 
   ];
   const blocks = [blk('SHELL', [0, 1, 2])];
   const got = directInputsOf(blocks, steps).get('SHELL');
-  ck(eq(got, ['FR', 'BK', 'SL', 'HOOD']), 'порядок первого вхождения, свой ключ выброшен, дублей нет', JSON.stringify(got));
+  ck(eq(got.map((i) => i.key), ['FR', 'BK', 'SL', 'HOOD']), 'порядок первого вхождения, свой ключ выброшен, дублей нет', JSON.stringify(got));
+  // РОД ВХОДА ДОЕЗЖАЕТ ЦЕЛЫМ. Выброси его здесь — и `compositionParts` начнёт угадывать род
+  // заново «есть ли ключ среди состоявшихся узлов», а на битой ссылке угадает деталью.
+  ck(
+    eq(got.map((i) => i.kind), ['piece', 'piece', 'piece', 'unit']),
+    'род входа, каким его назвал движок, едет вместе с ключом',
+    JSON.stringify(got),
+  );
 
   const empty = directInputsOf([blk('T', [])], steps).get('T');
   ck(eq(empty, []), 'блок без шагов — пустой список', JSON.stringify(empty));
@@ -455,11 +462,15 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
     ['SHELL', {}],
     ['HOOD', {}],
   ]);
+  const inp = (...pairs) => pairs.map(([kind, key]) => ({ kind, key }));
   const di = new Map([
-    ['G', ['SHELL', 'HOOD', 'FR', 'BK']],
-    ['ONE', ['FR']],
-    ['UNITS', ['SHELL']],
+    ['G', inp(['unit', 'SHELL'], ['unit', 'HOOD'], ['piece', 'FR'], ['piece', 'BK'])],
+    ['ONE', inp(['piece', 'FR'])],
+    ['UNITS', inp(['unit', 'SHELL'])],
     ['NONE', []],
+    // БИТАЯ ССЫЛКА: шаг взял ключ узла, которого не производит никто. Движок зовёт его узлом
+    // (правило 1 ругается), в карте состоявшихся его нет — и деталью он не становится.
+    ['BROKEN', inp(['piece', 'FR'], ['unit', 'LOST'], ['piece', 'BK'])],
   ]);
   ck(
     compositionOf('G', di, units) === '← ▣ SHELL + ▣ HOOD + 2 pieces',
@@ -470,6 +481,11 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
   ck(compositionOf('UNITS', di, units) === '← ▣ SHELL', 'без деталей — без счётчика', compositionOf('UNITS', di, units));
   ck(compositionOf('NONE', di, units) === '', 'пустой вход — пустая строка', compositionOf('NONE', di, units));
   ck(compositionOf('MISSING', di, units) === '', 'ключа нет в карте — пустая строка');
+  ck(
+    compositionOf('BROKEN', di, units) === '← ▣ LOST + 2 pieces',
+    'битая ссылка на узел названа именем и в детали НЕ записана',
+    compositionOf('BROKEN', di, units),
+  );
   // Свой ключ выбрасывает directInputsOf, и связка обязана оставаться сквозной.
   const steps = [
     step(
@@ -492,8 +508,12 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
     JSON.stringify(compositionParts('G', di, units)),
   );
   ck(eq(to(compositionParts('ONE', di, units)), []), 'состав из одних деталей ссылок не даёт');
+  // Орган, который иногда работает, а иногда нет, — тот самый перегруз, ради снятия которого
+  // токен и заведён: бокса с ключом `LOST` на полотне нет, вести некуда, ссылкой не становится.
+  ck(eq(to(compositionParts('BROKEN', di, units)), []), 'битая ссылка ОРГАНОМ не стала — вести некуда',
+     JSON.stringify(compositionParts('BROKEN', di, units)));
   ck(eq(compositionParts('NONE', di, units), []), 'пустой вход — ни одного куска');
-  for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING']) {
+  for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING', 'BROKEN']) {
     ck(
       partsText(compositionParts(k, di, units)) === compositionOf(k, di, units),
       `склейка кусков = строка состава (${k})`,

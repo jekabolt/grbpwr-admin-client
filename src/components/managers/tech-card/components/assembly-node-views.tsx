@@ -5,7 +5,12 @@ import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { CreatePrefill } from './assembly-create-dialog';
-import type { AssemblyResult, AssemblyStep, AssemblyUnit } from './assembly-frontier';
+import type {
+  AssemblyResult,
+  AssemblyStep,
+  AssemblyUnit,
+  OperationInput,
+} from './assembly-frontier';
 import {
   SCHEMATIC_METRICS,
   type BoxLayout,
@@ -113,20 +118,26 @@ export const stateWord = (b: AssemblyBlock, terminal: boolean): string =>
  *
  * Собственный ключ отбрасывается: в поглощении `GARMENT + HEM → GARMENT` узел входит сам в
  * себя, и «берёт: ▣ GARMENT» не сообщает ничего.
+ *
+ * РОД ВХОДА ЕДЕТ ВМЕСТЕ С КЛЮЧОМ, а не выбрасывается. Раньше здесь оставались одни ключи, и
+ * `compositionParts` угадывала род заново — «есть ли ключ в карте состоявшихся узлов». На битой
+ * ссылке (шаг берёт узел, которого не производит никто) ответ выходил «деталь», и подвал печатал
+ * «← 3 pieces» там, где деталей две. Род определяет движок один раз
+ * (`classifyAssemblyInputs`: `pieceKeys.has(key) ? 'piece' : 'unit'`), и спрашивать его надо там же.
  */
 export function directInputsOf(
   blocks: AssemblyBlock[],
   steps: AssemblyStep[],
-): Map<string, string[]> {
-  const directInputs = new Map<string, string[]>();
+): Map<string, OperationInput[]> {
+  const directInputs = new Map<string, OperationInput[]>();
   for (const b of blocks) {
     const seen = new Set<string>();
-    const acc: string[] = [];
+    const acc: OperationInput[] = [];
     for (const i of b.steps) {
       for (const input of steps[i]?.inputs ?? []) {
         if (!input.key || input.key === b.key || seen.has(input.key)) continue;
         seen.add(input.key);
-        acc.push(input.key);
+        acc.push(input);
       }
     }
     directInputs.set(b.key, acc);
@@ -140,17 +151,24 @@ export function directInputsOf(
  * Имена деталей в подвал не влезают и не нужны — их видно плитками рядом и стрелками к ним.
  * Число же отвечает на вопрос, которого плитки не закрывают: «сколько всего в этот узел
  * вошло», особенно когда часть плиток утащена рукой на другой конец полотна.
+ *
+ * БИТАЯ ССЫЛКА НА УЗЕЛ — ТРЕТИЙ РОД, а не второй. Шаг может взять ключ узла, которого не
+ * производит никто (растворили узел, а ссылку на него оставили): движок называет такой вход
+ * узлом и ругается правилом 1, но в карте состоявшихся узлов его нет. Считать его деталью
+ * значило бы соврать о числе деталей ровно на той карточке, которую и открывают, чтобы понять,
+ * что сломалось. Он называется ИМЕНЕМ, но органом не становится: ссылке некуда вести — бокса с
+ * таким ключом на полотне нет вовсе.
  */
 export function compositionParts(
   key: string,
-  directInputs: Map<string, string[]>,
+  directInputs: Map<string, OperationInput[]>,
   units: Map<string, AssemblyUnit>,
 ): NodeToken[] {
   const inputs = directInputs.get(key) ?? [];
   const named: NodeToken[] = inputs
-    .filter((k) => units.has(k))
-    .map((k) => ({ text: `▣ ${k}`, to: k }));
-  const pieces = inputs.filter((k) => !units.has(k)).length;
+    .filter((i) => i.kind === 'unit')
+    .map((i) => (units.has(i.key) ? { text: `▣ ${i.key}`, to: i.key } : { text: `▣ ${i.key}` }));
+  const pieces = inputs.filter((i) => i.kind === 'piece').length;
   // ДЕТАЛИ ОСТАЮТСЯ ЧИСЛОМ И ССЫЛКОЙ НЕ СТАНОВЯТСЯ: числу некуда вести. Это честно и менять
   // этого не надо — имена деталей в подвал не влезают, а их плитки видно рядом.
   const all: NodeToken[] = [
@@ -169,7 +187,7 @@ export function compositionParts(
 /** Та же строка целиком — характеризация видимого текста, см. `stateWord`. */
 export function compositionOf(
   key: string,
-  directInputs: Map<string, string[]>,
+  directInputs: Map<string, OperationInput[]>,
   units: Map<string, AssemblyUnit>,
 ): string {
   return partsText(compositionParts(key, directInputs, units));
@@ -475,7 +493,12 @@ export function unitAddPrefill(b: AssemblyBlock, res: AssemblyResult): CreatePre
  * ПЛИТКЕ», а не «шаг ляжет в такой-то узел»: у свободной детали узла нет вовсе, а у съеденной
  * подмена одного обещания другим прошла бы мимо настоящей потери — состав, где деталь заменили
  * соседней по тому же узлу, оставил бы предупреждение молчать, хотя строка уехала на чужую плитку.
- * Предупреждение про деталь — своё поле диалога, и его заводит не этот файл (см. отчёт задачи).
+ *
+ * ПЕРЕДАЁТСЯ `ontoPiece` — СВОЁ ОБЕЩАНИЕ ЭТОГО ЖЕСТА, и щит под него уже стоит в диалоге: сними
+ * человек ключ детали из состава, строка не появится на плитке, с которой он нажал, и диалог
+ * говорит об этом словами ДО подтверждения. Поле отдельное, а не вывод из `inputKeys`, ровно по
+ * той же причине, что `intoUnit`: состав в диалоге переигрывают, и после этого он уже не помнит,
+ * с чего жест начинался.
  */
 export function pieceAddPrefill(
   pieceKey: string,
@@ -485,7 +508,7 @@ export function pieceAddPrefill(
   const at = res.consumedBy.get(pieceKey) ?? steps.length;
   const frontier = res.frontierBefore[at] ?? res.frontier;
   if (!frontier.includes(pieceKey)) return null;
-  return { inputKeys: [pieceKey], intent: 'process', at };
+  return { inputKeys: [pieceKey], intent: 'process', at, ontoPiece: pieceKey };
 }
 
 /**
@@ -524,7 +547,21 @@ export function pieceAddPrefill(
  */
 function NodeHoverBar({ children }: { children: ReactNode }) {
   return (
-    <div className='absolute bottom-full left-0 z-10 flex items-center gap-1 bg-bgColor pb-1'>
+    <div
+      className='absolute bottom-full left-0 z-10 flex items-center gap-1 bg-bgColor pb-1'
+      // ЖЕСТ НОДЫ НЕ НАЧИНАЕТСЯ С ПОЛОСЫ. `dragProps` висят на коробке ноды, а полоса — её потомок,
+      // и без этой строки нажатие на чип заводит ПЕРЕТАСКИВАНИЕ: замерено — сдвиг руки на 6px между
+      // нажатием и отпусканием увозит ноду на 8px, а обещанное чипом действие не случается вовсе
+      // (порог драга ~4px). Человек, промахнувшийся мимо порога, получал не диалог, а переехавшую
+      // ноду и записанную ручную позицию — молча.
+      //
+      // ГЛУШИТСЯ В ПРИМИТИВЕ, А НЕ В ВЫЗЫВАЮЩЕМ, и это та же причина, по которой полоса вынесена
+      // из-под органа выделения: починка, живущая у вызывающего, забывается при следующем чипе.
+      // Здесь она одна на все полосы обеих поверхностей и на все чипы, какие в них ещё появятся.
+      // `stopPropagation` без `preventDefault`: клик, фокус и клавиатура чипа остаются как были —
+      // не заводится только жест предка (драг ноды и маркиза полотна).
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       {children}
     </div>
   );
@@ -585,7 +622,7 @@ export function UnitBoxView({
   block: AssemblyBlock;
   steps: AssemblyStep[];
   units: Map<string, AssemblyUnit>;
-  directInputs: Map<string, string[]>;
+  directInputs: Map<string, OperationInput[]>;
   /** Σ SMV блока по ключу. Считает досье, схема только показывает. */
   smvOfBlock: Map<string, string>;
   /** Короткая подпись шага для строки бокса. */
@@ -799,7 +836,7 @@ export function UnitBoxView({
           // свёртка — «из чего сшит», и это разные вопросы к одному боксу. Пустой она не
           // приезжает: у узла без единой детали её просто нет.
           title={[
-            `takes: ${(directInputs.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`,
+            `takes: ${(directInputs.get(box.key) ?? []).map((i) => nameOfNode(i.key)).join(' + ') || '—'}`,
             unitClothLine(box.key),
           ]
             .filter(Boolean)
