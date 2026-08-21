@@ -1006,13 +1006,15 @@ export function TechCardForm({
           })),
         });
       }
-      const base = techCardErrorMessage(error, 'Failed to submit tech card');
-      showMessage(
+      // Непришпиленное нарушение дописывается к тосту В ЛЮБОЙ ветке, включая баннерную:
+      // отказ, который никуда не встал — ни на контрол, ни в баннер, ни в тост, — и есть та
+      // самая невидимая потеря, ради которой затевалась фаза.
+      const base =
         transport || contradictions.length > 0
           ? 'the backend did not recognise part of this card — see the banner on the card'
-          : unmapped.length
-            ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
-            : base,
+          : techCardErrorMessage(error, 'Failed to submit tech card');
+      showMessage(
+        unmapped.length ? `${base} — ${unmapped.map((u) => u.description).join('; ')}` : base,
         'error',
       );
       console.error('Failed to submit tech card', error);
