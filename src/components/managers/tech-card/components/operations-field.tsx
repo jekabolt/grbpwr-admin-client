@@ -71,7 +71,7 @@ import {
   type AssemblyResult,
 } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
-import { drawnTailSteps } from './assembly-layout';
+import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
@@ -4018,6 +4018,31 @@ export function OperationsField({
     [pendingCreate?.at, pieces, grouping.schematicSteps],
   );
 
+  /**
+   * НА ЧЬЕЙ ПЛИТКЕ ПОЯВИТСЯ ШАГ С ТАКИМ СОСТАВОМ — ТЕМ ЖЕ ПРАВИЛОМ, ПО КОТОРОМУ СТРОКА РИСУЕТСЯ.
+   *
+   * Щит диалога до сих пор спрашивал вопрос СЛАБЕЕ дела: «остался ли этот вход в составе». Строка
+   * же появляется на плитке только у шага, у которого вход ОДИН РАЗЛИЧНЫЙ и это та самая деталь, и
+   * который ничего не собирает. Добавь человек второй вход или переключи результат на новый узел —
+   * строка не появится, а щит молчал: обещание жеста «строка будет НА ЭТОЙ плитке» переставало
+   * держаться, и диалог об этом не говорил.
+   *
+   * Правило не переписано здесь второй раз, а взято `processedPieceOf` — оттуда, где оно живёт и
+   * откуда его читает раскладка. Позиция не спрашивается вовсе: принадлежность плитке от места в
+   * последовательности не зависит (в отличие от принадлежности узлу), и вводить сюда `at` значило
+   * бы завести зависимость, которой у правила нет.
+   */
+  const pieceOfPlanned = useCallback(
+    (draft: { inputKeys: string[]; outputUnitKey: string }) => {
+      const pieceKeys = new Set(pieces.map((p) => p.lineKey));
+      return processedPieceOf({
+        inputs: classifyAssemblyInputs(pieceKeys, draft.inputKeys.filter(Boolean)),
+        outputUnitKey: draft.outputUnitKey.trim(),
+        outputUnitName: '',
+      });
+    },
+    [pieces],
+  );
 
   /**
    * ДИАЛОГ СОЗДАНИЯ ЗАКОНЧИЛСЯ «CREATE». Позицию несёт САМО НАМЕРЕНИЕ, а не второй колбэк: жест,
@@ -4952,6 +4977,7 @@ export function OperationsField({
         pieceKeys={new Set(pieces.map((p) => p.lineKey))}
         labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
         unitOfPlanned={unitOfPlanned}
+        pieceOfPlanned={pieceOfPlanned}
         onCloseAutoFocus={restoreScreenFocus}
       />
 

@@ -92,6 +92,7 @@ export function AssemblyCreateDialog({
   pieceKeys,
   labelOf,
   unitOfPlanned,
+  pieceOfPlanned,
   onCloseAutoFocus,
 }: {
   prefill: CreatePrefill | null;
@@ -119,6 +120,15 @@ export function AssemblyCreateDialog({
    * человек читает «попадёт в COLLAR» и получает шаг в хвосте «вне узлов».
    */
   unitOfPlanned?: (draft: { inputKeys: string[]; outputUnitKey: string }) => string;
+  /**
+   * НА ЧЬЕЙ ПЛИТКЕ ПОЯВИТСЯ ШАГ С ТАКИМ СОСТАВОМ. Пусто — ни на чьей.
+   *
+   * Считает это ТО ЖЕ ПРАВИЛО, по которому строка на плитке рисуется (`processedPieceOf` в
+   * `assembly-layout.ts`), а не пересказ правила: раньше диалог спрашивал вопрос СЛАБЕЕ дела —
+   * «остался ли этот вход в составе», — и молчал в двух случаях из трёх, когда обещание жеста
+   * уже не держалось.
+   */
+  pieceOfPlanned?: (draft: { inputKeys: string[]; outputUnitKey: string }) => string;
   /**
    * Куда вернуть фокус, когда диалог закрылся. Нужен ФУЛСКРИНУ: его роутер клавиш — обработчик на
    * контенте оверлея, и фокус, упавший в `body`, гасит ⌘Z, ⌘F, ⌘A и все глаголы до первого клика
@@ -278,17 +288,34 @@ export function AssemblyCreateDialog({
    * УЗЛА: у детали его нет вовсе (свободная деталь ни в каком узле не лежит), и спроси мы про неё
    * тем же органом — предупреждение горело бы ВСЕГДА, то есть перестало бы что-либо значить.
    *
-   * Вопрос здесь другой и простой: остался ли ТОТ САМЫЙ вход в составе. Плитка детали показывает
-   * шаги, которые её берут, и стоит убрать её из входов — шаг на плитке не появится вовсе.
+   * ВОПРОС ЗАДАЁТСЯ РОВНО ТОТ, ПО КОТОРОМУ СТРОКА РИСУЕТСЯ, и берётся он оттуда, где живёт, —
+   * `pieceOfPlanned` зовёт `processedPieceOf` из `assembly-layout.ts`, ту же функцию, которой
+   * раскладка решает, какие строки растит плитка.
    *
-   * СРАВНЕНИЕ БУКВАЛЬНОЕ, и это не расходится с подрезкой выше: там спрашивалось ТОЖДЕСТВО ключа
-   * в общем пространстве имён (что станет с ним на проводе), здесь — «этот конкретный вход всё
-   * ещё на месте». Ключ приезжает из того же массива деталей, что и сам вход, байт в байт.
+   * ЧТО БЫЛО НЕ ТАК. Здесь стояло `distinct.includes(ontoPiece)` — «остался ли этот вход в
+   * составе», условие СЛАБЕЕ дела. Строка появляется на плитке только у шага, у которого вход
+   * один различный и это та самая деталь, и который ничего не собирает. Значит щит молчал в двух
+   * случаях из трёх (замерено): добавили второй вход — шаг уезжает в хвост, на плитке его нет;
+   * переключили результат на новый узел — деталь съедена, строка уходит в блок узла. Обещание
+   * жеста («строка появится на ЭТОЙ плитке») переставало держаться молча.
+   *
+   * ПРИЧИНА НАЗЫВАЕТСЯ, А НЕ ТОЛЬКО ФАКТ: три разных дела читаются одинаково плохо под одной
+   * фразой «it no longer takes it», а последняя из них была бы вдобавок неправдой — деталь шаг
+   * по-прежнему берёт.
    */
-  const keepsPiece = !prefill?.ontoPiece || distinct.includes(prefill.ontoPiece);
-  const pieceProblem = keepsPiece
-    ? ''
-    : `◌ this step will not appear on ▣ ${prefill!.ontoPiece} — it no longer takes it`;
+  const ontoPiece = prefill?.ontoPiece ?? '';
+  const pieceJudged = !!ontoPiece && !!pieceOfPlanned;
+  const pieceLands = pieceJudged ? pieceOfPlanned!(draft) : '';
+  const keepsPiece = !pieceJudged || pieceLands === ontoPiece;
+  const pieceProblem = (() => {
+    if (keepsPiece) return '';
+    const onto = `◌ this step will not appear on ▣ ${ontoPiece}`;
+    if (!distinct.includes(ontoPiece)) return `${onto} — it no longer takes it`;
+    if (draft.outputUnitKey) {
+      return `${onto} — it assembles ▣ ${draft.outputUnitKey}, and that is a row of the unit`;
+    }
+    return `${onto} — a step on more than one piece belongs to none of them`;
+  })();
 
   const belongProblem = holds
     ? ''
