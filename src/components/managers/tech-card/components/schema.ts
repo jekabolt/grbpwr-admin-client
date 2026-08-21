@@ -1530,6 +1530,12 @@ const operationSchema = z.object({
       refuseAtWeld(stepEnumSet(o.needleType), 'needleType', 'needle');
       refuseAtWeld(!!o.needleSizeNm, 'needleSizeNm', 'needle');
       refuseAtWeld(stepEnumSet(o.threadTension), 'threadTension', 'thread to tension');
+      // ЗАМЕТКА О НАТЯЖЕНИИ — ШЕСТОЙ ЧЛЕН ТОГО ЖЕ СПИСКА У СЕРВЕРА, и стоит она на его месте:
+      // между шкалой и шириной стежка. Без неё пара «шкала + заметка» отвергалась наполовину —
+      // шкалу называл zod на контроле, а заметку сервер тостом после сохранения шести вкладок.
+      // ОТКАЗ ПОПАДАЕТ НА ВИДИМЫЙ КОНТРОЛ: поле рисуется по «шкала задана ИЛИ текст непуст», то
+      // есть непустая заметка на экране есть ВСЕГДА — ровно тогда же, когда её и отвергают.
+      refuseAtWeld(stepTextSet(o.threadTensionNote), 'threadTensionNote', 'thread to tension');
       refuseAtWeld(stepTextSet(o.stitchWidthMm), 'stitchWidthMm', 'stitch');
       // И ЧЕТВЁРКА S-БЛОКА — ПО ТОМУ ЖЕ ПРАВИЛУ И ТЕМ ЖЕ СПИСКОМ, ЧТО У СЕРВЕРА. Собственный гейт
       // семейства — «это машинный шаг», а сварочная машина машинная: без этих четырёх строк на

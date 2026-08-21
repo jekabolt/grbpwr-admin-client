@@ -41,6 +41,7 @@ import {
   pressProfileSummary,
   seamClassOptions,
   stepDiscriminatorText,
+  stepPressText,
 } from './operation-options';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
@@ -380,9 +381,25 @@ function SnapshotOperations({
               // стежков имеется в виду, и сказать это вслух честнее перечисления.
               machineTypeLabelWithStitch(o.machineType, o.threadCount)
           : isPressStepType(o.operationType)
-            ? pressProfile
-              ? pressProfileName(pressProfile)
-              : [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
+            ? // ВТО НАЗЫВАЕТ СЕБЯ ПОД-ГЛАГОЛОМ, А НЕ ПОДПИСЬЮ СВОЕГО ТИПА (0325). Ветка ВТО была
+              // единственной, которая не звала НИ ОДНОГО составителя фактов, и архив печатал
+              // `press (to one side / steam)` — подпись пикера, обещающую «на одну сторону» и не
+              // умеющую сказать какую, — а под-глагола не показывал вовсе. Тем же составителем,
+              // что и печатный лист, и в том же порядке: что делают утюгом первым («press to one
+              // side, toward the front»), на чём — вторым. Здесь это дороже, чем на листе: лист
+              // перепечатывают, а подписанную ревизию задним числом не чинят.
+              //
+              // ФОЛБЭК НА `typeLabel` ОСТАЁТСЯ ПОСЛЕДНИМ, а не стоит в списке: у релиза,
+              // подписанного ДО волны, под-глагола нет, и подпись типа — всё, что о шаге было
+              // записано; рядом же с названным приёмом она пересказывала бы его худшими словами.
+              [
+                stepPressText({ press: o.press }),
+                pressProfile
+                  ? pressProfileName(pressProfile)
+                  : pressEquipmentLabel(o.pressEquipment),
+              ]
+                .filter(Boolean)
+                .join(' · ') || typeLabel
             : stepDiscriminatorText(o) || typeLabel;
         // Фотографии шага — те же правила, что у печати: адрес есть только для картинки в
         // словаре снапшота, у остальных ничего не показываем (не заглушка).
