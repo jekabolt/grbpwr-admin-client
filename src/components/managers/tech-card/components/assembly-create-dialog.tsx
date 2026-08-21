@@ -8,14 +8,25 @@ import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 
 import { suggestUnitCode } from './assembly-suggest';
-import { machineTypeOptions, pressEquipmentOptions } from './equipment-options';
+import { machineTypeOptionsFor, pressEquipmentOptions } from './equipment-options';
 import {
   STEP_DISCRIMINATORS,
-  operationTypeOptionsFor,
   stepDiscriminatorUnset,
   stepEnumOptions,
   zoneOptions,
 } from './operation-options';
+// ПИКЕР ВИДА СТОИТ В ДВУХ МЕСТАХ, И ЭТО НЕ ДУБЛИРОВАНИЕ. Владелец открыл СУЩЕСТВУЮЩИЙ шаг и не
+// нашёл там топстич — пикер только на создании жалобу не закрывает. Модуль один, вызывающих мест
+// два, список строк собирает один `kindPickerItems`: свой список здесь разошёлся бы с редактором
+// на первом же добавленном виде, и разошёлся бы молча.
+import {
+  KIND_MORE,
+  KIND_UNSET,
+  OPERATION_KIND_BY_ID,
+  isKindSentinel,
+  kindPickerItems,
+  kindWrites,
+} from './operation-kinds';
 
 // Диалог создания операции из схемы.
 //
@@ -81,6 +92,13 @@ export type CreateResult = {
    */
   discriminatorField?: string;
   discriminatorValue?: string;
+  /**
+   * ОСТАЛЬНОЕ, ЧТО ПРОСТАВИЛ ПУНКТ ПИКЕРА, — плоской картой «имя поля строки формы → значение».
+   * Сегодня это класс шва у отстрочки, завтра — ВТО-подглагол. Плоской, а не типизированной, по
+   * той же причине, что и в `operation-kinds`: имени, которого в строке формы ЕЩЁ нет, писатель
+   * обязан уметь молча не заметить.
+   */
+  kindWrites?: Record<string, string>;
   /** Пусто = обработка: шаг ничего не собирает, входы остаются на столе. */
   outputUnitKey: string;
   outputUnitName: string;
@@ -160,6 +178,12 @@ export function AssemblyCreateDialog({
   // Ответ на обязательный вопрос глагола. Пусто — пока глагол его не задаёт: селекта на экране
   // нет вовсе, и хранить в нём нечего.
   const [discriminator, setDiscriminator] = useState('');
+  // ВИД — ТО, ЧТО ВЫБИРАЕТ ЧЕЛОВЕК; глагол, машинка и дискриминатор ниже — то, что из него следует.
+  // Состояния три, а не одно, потому что диалог по-прежнему обязан уметь ДОСПРОСИТЬ то, чего вид
+  // не назвал (пресс у «press flat», метод у печати), и валидируется именно набранный минимум.
+  const [kindId, setKindId] = useState('');
+  const [rareKindsOpen, setRareKindsOpen] = useState(false);
+  const [kindExtraWrites, setKindExtraWrites] = useState<Record<string, string>>({});
   const [produces, setProduces] = useState<'process' | 'unit' | 'absorb'>('process');
   const [unitKey, setUnitKey] = useState('');
   const [unitKeyTouched, setUnitKeyTouched] = useState(false);
@@ -177,6 +201,9 @@ export function AssemblyCreateDialog({
     setMachineType(UNKNOWN_MACHINE);
     setPressEquipment(UNKNOWN_PRESS);
     setDiscriminator('');
+    setKindId('');
+    setRareKindsOpen(false);
+    setKindExtraWrites({});
     setProduces(
       prefill.absorbInto
         ? 'absorb'
@@ -245,6 +272,8 @@ export function AssemblyCreateDialog({
     return '';
   })();
 
+  // Машинку ДОСПРАШИВАЕТ только тот вид, чей якорь не машинка (отстрочка): у остальных машинных
+  // видов машинка и ЕСТЬ вид, и второй вопрос про неё был бы вопросом о том, что уже отвечено.
   const needsMachine = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
   const needsPress = PRESS_TYPES.has(operationType);
   /**
@@ -261,16 +290,38 @@ export function AssemblyCreateDialog({
   // диалог спрашивает. Имя поля на проводе живёт рядом, в `stepDiscriminator.field`.
   const discriminatorWord = stepDiscriminator ? stepDiscriminator.label.replace(/\s*\*$/, '') : '';
 
+  const kind = kindId ? OPERATION_KIND_BY_ID.get(kindId) : undefined;
+  const kindItems = kindPickerItems(kindId || undefined, rareKindsOpen, '— what kind of step —');
+
   /**
-   * СМЕНА ГЛАГОЛА СБРАСЫВАЕТ ОТВЕТ, И ЭТО НЕ ПРИБОРКА. Словари у шести дискриминаторов разные:
-   * оставленный от предыдущего выбора токен — значение ЧУЖОГО enum, и сервер отвергает его по
-   * имени поля. Сентинел «не выбрано» ставится сразу: Radix запрещает `Select.Item` с пустым
+   * ВЫБОР ВИДА ПРОСТАВЛЯЕТ ОБЕ ОСИ И ДИСКРИМИНАТОР, где вид на него отвечает.
+   *
+   * СМЕНА ВИДА СБРАСЫВАЕТ ОТВЕТ ДИСКРИМИНАТОРА, И ЭТО НЕ ПРИБОРКА. Словари у шести дискриминаторов
+   * разные: оставленный от предыдущего выбора токен — значение ЧУЖОГО enum, и сервер отвергает его
+   * по имени поля. Сентинел «не выбрано» ставится сразу: Radix запрещает `Select.Item` с пустым
    * value, и пустая строка нарисовала бы пустой триггер вместо плейсхолдера.
    */
-  const pickType = (next: string) => {
-    setOperationType(next);
-    const d = STEP_DISCRIMINATORS[next as common_TechCardOperationType];
-    setDiscriminator(d ? stepDiscriminatorUnset(d.labels) : '');
+  const pickKind = (id: string) => {
+    const k = OPERATION_KIND_BY_ID.get(id);
+    if (!k) return;
+    setKindId(id);
+    // Машинка «на чём» здесь ставится ДЕФОЛТОМ ПУНКТА, а не парком: парк живёт в форме карточки, а
+    // диалог формы не видит вовсе. Единственный подходящий профиль подставит редактор шага, куда
+    // диалог и приводит сразу после создания.
+    const w = kindWrites(k, '');
+    const verb = w.operationType ?? UNKNOWN_TYPE;
+    setOperationType(verb);
+    setMachineType(w.machineType ?? UNKNOWN_MACHINE);
+    setPressEquipment(w.pressEquipment ?? UNKNOWN_PRESS);
+    const d = STEP_DISCRIMINATORS[verb as common_TechCardOperationType];
+    setDiscriminator(d ? (w[d.field] ?? stepDiscriminatorUnset(d.labels)) : '');
+    // Всё, о чём диалог не спрашивает отдельным контролом, едет в результат как есть.
+    const rest: Record<string, string> = { ...w };
+    delete rest.operationType;
+    delete rest.machineType;
+    delete rest.pressEquipment;
+    if (d) delete rest[d.field];
+    setKindExtraWrites(rest);
   };
 
   const problem = (() => {
@@ -292,7 +343,7 @@ export function AssemblyCreateDialog({
         return `there is nothing to add to ${absorbInto} with — take at least one more input into the step`;
       }
     }
-    if (!operationType || operationType === UNKNOWN_TYPE) return 'pick what the step does';
+    if (!kind) return 'pick what kind of step this is';
     if (!zone || zone === UNKNOWN_ZONE) return 'pick a zone — “other” is a legitimate answer';
     if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'pick a machine';
     if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS)) return 'pick the pressing equipment';
@@ -390,6 +441,7 @@ export function AssemblyCreateDialog({
       // остаётся тем, чем его завёл `emptyOperation`, и шаг не несёт ответа на незаданный вопрос.
       discriminatorField: stepDiscriminator?.field,
       discriminatorValue: stepDiscriminator ? discriminator : undefined,
+      kindWrites: kindExtraWrites,
     });
   };
 
@@ -531,19 +583,24 @@ export function AssemblyCreateDialog({
 
         <div className='flex flex-col gap-1'>
           <GroupLabel>what and where</GroupLabel>
+          {/* ВИД ВМЕСТО ГЛАГОЛА. Раньше здесь стоял селект `operation_type`, и он спрашивал ось, а
+              не работу: «machine» не инструкция, а «topstitch» в списке не было вовсе. Теперь
+              спрашивается ОДНО слово, а обе оси проставляются из него; доспрашивается только то,
+              на что вид не отвечает. Сентинелы («ещё», шапка семейства) выбором не являются —
+              значение остаётся прежним, и промах ничего не стоит. */}
           <Select
-            name='assemblyOperationType'
-            value={operationType}
-            onValueChange={pickType}
-            // Плейсхолдер — это UNKNOWN-значение словаря, а НЕ пустая строка: Radix запрещает
-            // `Select.Item` с пустым value (пустое значение зарезервировано за «выбор снят») и
-            // роняет весь экран. ВСЕ четыре словаря несут такой пункт сами — включая тип операции:
-            // `OPERATION_TYPE_PICKER` открывается с `UNKNOWN` (`operation-options.ts`). Раньше здесь
-            // стоял свой пункт-плейсхолдер сверху, и он ДУБЛИРОВАЛ словарный: `Select` кладёт
-            // `key={item.value}`, так что React ругался на два ребёнка с одним ключом, а в открытом
-            // списке плейсхолдер стоял дважды подряд. Метка берётся из общей карты и по той же
-            // причине, что и все остальные: пикер и печатный лист не должны говорить о токене разное.
-            items={operationTypeOptionsFor(operationType)}
+            name='assemblyOperationKind'
+            placeholder='what kind of step'
+            value={kindId || KIND_UNSET}
+            onValueChange={(v: string) => {
+              if (v === KIND_MORE) {
+                setRareKindsOpen(true);
+                return;
+              }
+              if (isKindSentinel(v)) return;
+              pickKind(v);
+            }}
+            items={kindItems}
             fullWidth
           />
           <Select
@@ -553,15 +610,27 @@ export function AssemblyCreateDialog({
             items={zoneOptions}
             fullWidth
           />
-          {needsMachine && (
+          {/* «НА ЧЁМ» — только у вида, чей якорь не машинка, и списком, суженным этим видом.
+              У остальных машинных видов машинка и ЕСТЬ вид: спрашивать её второй раз значило бы
+              разрешить ответ, противоречащий уже сделанному выбору. */}
+          {needsMachine && kind?.askMachine && (
             <Select
               name='assemblyMachineType'
+              placeholder='on what'
               value={machineType}
               onValueChange={setMachineType}
-              items={machineTypeOptions}
+              items={machineTypeOptionsFor(machineType).filter(
+                (o) =>
+                  (kind.askMachine as readonly string[]).includes(o.value) ||
+                  o.value === machineType,
+              )}
               fullWidth
             />
           )}
+          {/* Оборудование ВТО спрашивается ВСЕГДА, а вид его лишь ПРЕДЗАПОЛНЯЕТ: «press flat»
+              делают и утюгом, и прессом — это разные инструкции цеху, — а «steam» и «fuse»
+              называют своё сами. Гасить контрол после предзаполнения нельзя: тогда подставленное
+              значение стало бы неоспоримым, а оно всего лишь вероятное. */}
           {needsPress && (
             <Select
               name='assemblyPressEquipment'
