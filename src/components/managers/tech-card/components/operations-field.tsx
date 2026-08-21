@@ -47,7 +47,6 @@ import {
   PEEL_MODE_LABELS,
   PRESS_ACTION_LABELS,
   PRESS_TOWARD_LABELS,
-  PRESSURE_SCALE_LABELS,
   PRINT_METHOD_LABELS,
   REINFORCEMENT_LABELS,
   SEAM_SECURING_LABELS,
@@ -61,6 +60,7 @@ import {
   type OperationFormStringField,
   attachmentKindLabel,
   attachmentOptions,
+  canonicalReinforcement,
   effectiveMachineSettings,
   effectivePressSettings,
   operationHeading,
@@ -203,7 +203,6 @@ const NONE_HOLE_PREP = 'TECH_CARD_HOLE_PREP_UNKNOWN';
 const NONE_REINFORCEMENT = 'TECH_CARD_REINFORCEMENT_UNKNOWN';
 const NONE_PRINT_METHOD = 'TECH_CARD_PRINT_METHOD_UNKNOWN';
 const NONE_PEEL_MODE = 'TECH_CARD_PEEL_MODE_UNKNOWN';
-const NONE_PRESSURE_SCALE = 'TECH_CARD_PRESSURE_SCALE_UNKNOWN';
 const NONE_TRIM_ACTION = 'TECH_CARD_TRIM_ACTION_UNKNOWN';
 const NONE_CLEANING_KIND = 'TECH_CARD_CLEANING_KIND_UNKNOWN';
 const NONE_COVERAGE_MODE = 'TECH_CARD_INSPECT_COVERAGE_UNKNOWN';
@@ -233,7 +232,10 @@ const BUTTONHOLE_MACHINE = 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE';
 const BARTACK_MACHINE = 'TECH_CARD_MACHINE_TYPE_BARTACK';
 const BUTTON_ATTACH_MACHINE = 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH';
 const ZIPPER_MACHINE = 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING';
-const BINDER_MACHINE = 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING';
+// КЛАСС ШВА «ОКАНТОВОЧНЫЙ» — ВЕДУЩЕЕ ПОЛЕ ОКАНТОВКИ (0328). Окантовочная машинка говорит «это
+// окантовка» во второй раз и обязательным спутником не является: кант притачивают и на
+// прямострочке, и до F22 такая окантовка своё исполнение назвать не могла.
+const BOUND_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_BS_BOUND';
 const LASER_ENGRAVE = 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE';
 const THREADED_HARDWARE = 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED';
 
@@ -250,7 +252,6 @@ type StepEnumField =
   | 'reinforcement'
   | 'printMethod'
   | 'peelMode'
-  | 'pressureScale'
   | 'trimAction'
   | 'cleaningKind'
   | 'coverageMode'
@@ -506,7 +507,6 @@ export const emptyOperation = {
   printMethod: NONE_PRINT_METHOD,
   peelMode: NONE_PEEL_MODE,
   secondPressSec: 0,
-  pressureScale: NONE_PRESSURE_SCALE,
   airTemperatureC: 0,
   feedSpeedMMin: '',
   trimAction: NONE_TRIM_ACTION,
@@ -619,13 +619,14 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     pitchMm: decimalToInput(o.placementLayout?.pitchMm),
     attachMethod: o.hardware?.attachMethod || NONE_ATTACH_METHOD,
     holePrep: o.hardware?.holePrep || NONE_HOLE_PREP,
-    reinforcement: o.hardware?.reinforcement || NONE_REINFORCEMENT,
+    // 0328 — ПЕРЕНОС: `fusible_patch` и `fabric_stay` читаются как `patch`, иначе редактор
+    // показал бы «— not stated —» там, где ответ есть, и стёр бы его первым же сохранением.
+    reinforcement: canonicalReinforcement(o.hardware?.reinforcement) || NONE_REINFORCEMENT,
     foldbackMm: decimalToInput(o.hardware?.foldbackMm),
     cycleStitchCount: o.hardware?.cycleStitchCount || 0,
     printMethod: o.printMethod || NONE_PRINT_METHOD,
     peelMode: o.print?.peelMode || NONE_PEEL_MODE,
     secondPressSec: o.print?.secondPressSec || 0,
-    pressureScale: o.print?.pressureScale || NONE_PRESSURE_SCALE,
     airTemperatureC: o.weld?.airTemperatureC || 0,
     feedSpeedMMin: decimalToInput(o.weld?.feedSpeedMMin),
     trimAction: o.trim?.action || NONE_TRIM_ACTION,
@@ -2130,8 +2131,6 @@ function OperationEditor({
     NONE_PEEL_MODE) as string;
   const secondPressSec = (useWatch({ control, name: `operations.${index}.secondPressSec` }) ??
     0) as number;
-  const pressureScale = (useWatch({ control, name: `operations.${index}.pressureScale` }) ??
-    NONE_PRESSURE_SCALE) as string;
   const airTemperatureC = (useWatch({ control, name: `operations.${index}.airTemperatureC` }) ??
     0) as number;
   const feedSpeedMMin = (useWatch({ control, name: `operations.${index}.feedSpeedMMin` }) ??
@@ -2309,7 +2308,7 @@ function OperationEditor({
     showNeedleFacts && seamSecuring !== NONE_SEAM_SECURING,
     showNeedleFacts && rowSpacingMm.trim() !== '',
     showStitching && fullnessRatio.trim() !== '',
-    showStitching && onMachine(BINDER_MACHINE) && bindingStyle !== NONE_BINDING_STYLE,
+    showStitching && seamClass === BOUND_SEAM_CLASS && bindingStyle !== NONE_BINDING_STYLE,
     showStitching && labelAttachStitch !== NONE_LABEL_ATTACH,
     showPlacement && placementCount > 0,
     showPlacement && pitchMm.trim() !== '',
@@ -2319,7 +2318,6 @@ function OperationEditor({
     showHardware && isHardwareStep && foldbackMm.trim() !== '',
     showPrint && peelMode !== NONE_PEEL_MODE,
     showPrint && secondPressSec > 0,
-    showPrint && pressureScale !== NONE_PRESSURE_SCALE,
     showWeld && onMachine(SEAM_TAPING) && airTemperatureC > 0,
     showWeld && feedSpeedMMin.trim() !== '',
     showTrim && residualAllowanceMm.trim() !== '',
@@ -2502,7 +2500,8 @@ function OperationEditor({
       dropText('rowSpacingMm');
     }
     if (!showNeedleFacts || needleCount < 2) dropText('needleGaugeMm');
-    if (!showStitching || mt !== BINDER_MACHINE) dropEnum('bindingStyle', NONE_BINDING_STYLE);
+    if (!showStitching || seamClass !== BOUND_SEAM_CLASS)
+      dropEnum('bindingStyle', NONE_BINDING_STYLE);
 
     // PL — сколько раз и с каким шагом.
     if (!showPlacement) dropInt('placementCount');
@@ -2523,7 +2522,6 @@ function OperationEditor({
     if (!showPrint) {
       dropEnum('peelMode', NONE_PEEL_MODE);
       dropInt('secondPressSec');
-      dropEnum('pressureScale', NONE_PRESSURE_SCALE);
     }
 
     // W — сварка. Горячий воздух есть только у проклейки шва: ультразвук греет сам материал.
@@ -3614,7 +3612,7 @@ function OperationEditor({
               maxDecimals={2}
               placeholder='1.0'
             />
-            {onMachine(BINDER_MACHINE) && (
+            {seamClass === BOUND_SEAM_CLASS && (
               <SelectField
                 name={`operations.${index}.bindingStyle`}
                 label='binding fold'
@@ -3826,13 +3824,6 @@ function OperationEditor({
               label='second press, sec'
               value={secondPressSec}
               placeholder='5'
-            />
-            {/* ШКАЛА, а не число: манометр плиты показывает давление в цилиндре, а не на ткани. */}
-            <SelectField
-              name={`operations.${index}.pressureScale`}
-              label='pressure'
-              items={stepEnumOptions(PRESSURE_SCALE_LABELS, '— not stated —', pressureScale)}
-              className={selectNoGrow}
             />
           </div>
         </>

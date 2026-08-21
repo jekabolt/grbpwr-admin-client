@@ -258,6 +258,10 @@ const techCard = {
         placementLayout: { count: 6, pitchMm: dec('90') },
         hardware: {
           holePrep: 'TECH_CARD_HOLE_PREP_PUNCH',
+          // СНЯТОЕ НАПИСАНИЕ, ОСТАВЛЕННОЕ НАРОЧНО. 0328 свёл `fusible_patch` и `fabric_stay` в один
+          // `patch`, и строка, записанная до этого, обязана печататься СЛОВОМ, а не пустотой:
+          // канонизация стоит в reinforcementLabel, и стенд — единственное место, где видно, что
+          // она работает на самой бумаге, а не только в редакторе.
           reinforcement: 'TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH',
           cycleStitchCount: 42,
         },
@@ -319,7 +323,7 @@ const techCard = {
         hardware: {
           attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET',
           holePrep: 'TECH_CARD_HOLE_PREP_PUNCH',
-          reinforcement: 'TECH_CARD_REINFORCEMENT_FABRIC_STAY',
+          reinforcement: 'TECH_CARD_REINFORCEMENT_PATCH',
         },
         smv: dec('0.6'),
       },
@@ -345,7 +349,6 @@ const techCard = {
         print: {
           peelMode: 'TECH_CARD_PEEL_MODE_HOT',
           secondPressSec: 5,
-          pressureScale: 'TECH_CARD_PRESSURE_SCALE_FIRM',
         },
         pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_PRESS',
         pressTemperatureC: 165,
@@ -354,12 +357,13 @@ const techCard = {
         smv: dec('0.9'),
       },
       {
-        // Шелкография: носителя нет ВООБЩЕ, и «no carrier to peel» — ответ, а не пустота.
+        // Шелкография: носителя нет ВООБЩЕ — и с 0327 это ПРАВИЛО, а не член словаря. `peel_mode`
+        // при этом методе сервер отвергает по имени, поэтому блока печати у шага нет вовсе, а
+        // колонка обязана промолчать про съём, не потеряв самого шага.
         operationNumber: 170,
         operationType: 'TECH_CARD_OPERATION_TYPE_PRINT',
         zone: 'TECH_CARD_GARMENT_ZONE_BACK',
         printMethod: 'TECH_CARD_PRINT_METHOD_SCREEN',
-        print: { peelMode: 'TECH_CARD_PEEL_MODE_NONE' },
       },
       {
         // ПОДРЕЗКА. Остаток припуска стоит в колонке шва, прямо под тем припуском, с которым
@@ -385,7 +389,7 @@ const techCard = {
         operationNumber: 200,
         operationType: 'TECH_CARD_OPERATION_TYPE_CLEAN',
         zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
-        clean: { kind: 'TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL' },
+        clean: { kind: 'TECH_CARD_CLEANING_KIND_SPOT_CLEAN' },
       },
       {
         operationNumber: 210,

@@ -35,12 +35,18 @@ function optionsFrom<T extends string>(labels: Record<T, string>): Array<{ value
   return (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
 }
 
-// The 24 machines of the park + OTHER. UNKNOWN is «not picked yet» and reads as a picker
-// placeholder; use machineTypeLabel() where a blank is wanted instead.
+// The machines of the park + OTHER. UNKNOWN is «not picked yet» and reads as a picker placeholder;
+// use machineTypeLabel() where a blank is wanted instead.
 //
-// LOCKSTITCH_DOUBLE_NEEDLE is not a duplicate of «topstitch»: it exists so migration 0306 could
-// carry the legacy `double_needle` operation type across without collapsing it into the plain
-// lockstitch and losing the fact somebody recorded.
+// LOCKSTITCH_DOUBLE_NEEDLE ЖИВЁТ В СЛОВАРЕ, НО НЕ В ПИКЕРЕ (см. machineTypeOptions ниже). Он
+// единственная цель канонизации замороженного легаси-глагола `double_needle`, поэтому снять его с
+// контракта нельзя — старые строки перестали бы читаться; но двухигольность выразима числом игл, и
+// с 0328 сервер ТРЕБУЕТ при этой машинке needle_count = 2. Писать её теперь полагается прямострочкой
+// с двумя иглами, а подпись здесь нужна, чтобы уже записанный шаг прочитался словами.
+//
+// HARDWARE_ATTACH СНЯТ (0328): `MACHINE + hardware_attach` и `HARDWARE_SET + attach_method` говорили
+// об одном факте, и машинки, которая делает только это, на floor не существует — прессы для
+// фурнитуры не шьют. Глагол `HARDWARE_SET` остался единственным написанием.
 export const MACHINE_TYPE_LABELS: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_UNKNOWN: '— machine —',
   TECH_CARD_MACHINE_TYPE_LOCKSTITCH: 'lockstitch 301',
@@ -56,7 +62,6 @@ export const MACHINE_TYPE_LABELS: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: 'button attach',
   TECH_CARD_MACHINE_TYPE_EMBROIDERY: 'embroidery',
   TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION: 'AMF hand-stitch imitation',
-  TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH: 'hardware attach',
   TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH: 'elastic attach',
   TECH_CARD_MACHINE_TYPE_BINDING_TAPING: 'binding / taping',
   TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING: 'zipper setting',
@@ -128,12 +133,15 @@ export const AUTOMATION_LEVEL_LABELS: Record<common_TechCardAutomationLevel, str
 // A CLOSED SCALE relative to the machine's own normal, plus a free note for the dial number a
 // particular machine wants. A raw dial number as the only field was rejected: it means nothing
 // across two machines of the same class.
+//
+// И ПОТОМУ БЕЗ `OTHER` (снят 0327): шкала с «другим» перестаёт быть шкалой — прецедент
+// TechCardAutomationLevel. Всё, что «другое», это ступень плюс проза в threadTensionNote, а сам по
+// себе `OTHER` не говорил даже, туже или слабее, — и на печатный лист уезжало слово ни о чём.
 export const THREAD_TENSION_LABELS: Record<common_TechCardThreadTension, string> = {
   TECH_CARD_THREAD_TENSION_UNKNOWN: '— inherit —',
   TECH_CARD_THREAD_TENSION_LOOSER: 'looser than normal',
   TECH_CARD_THREAD_TENSION_NORMAL: 'normal',
   TECH_CARD_THREAD_TENSION_TIGHTER: 'tighter than normal',
-  TECH_CARD_THREAD_TENSION_OTHER: 'other (see note)',
 };
 
 // NONE IS NOT A SPELLING OF UNKNOWN HERE, and the labels have to keep them apart on screen: with a
@@ -182,7 +190,6 @@ export const MACHINE_TYPE_VERB: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: 'button attach',
   TECH_CARD_MACHINE_TYPE_EMBROIDERY: 'embroider',
   TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION: 'AMF stitch',
-  TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH: 'attach hardware',
   TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH: 'attach elastic',
   TECH_CARD_MACHINE_TYPE_BINDING_TAPING: 'bind',
   TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING: 'set zip',
@@ -201,7 +208,19 @@ export const MACHINE_TYPE_VERB: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_OTHER: '',
 };
 
-export const machineTypeOptions = optionsFrom(MACHINE_TYPE_LABELS);
+// ПИКЕР — НЕ ВЕСЬ СЛОВАРЬ. Ровно одно исключение, и оно выписано здесь, а не спрятано в вызывающем:
+// двухигольная прямострочка говорит то же, что прямострочка с needle_count = 2, и с 0328 сервер
+// ТРЕБУЕТ при ней это число. Предлагать её значит предлагать выбор между двумя написаниями одного
+// факта, из которых второе ещё и заставляет заполнить соседнюю ячейку строго определённым образом.
+// Подпись при этом остаётся в MACHINE_TYPE_LABELS: уже записанный шаг обязан прочитаться словами, и
+// machineTypeOptionsFor вернёт ему его собственную строку.
+const OFF_THE_PICKER: ReadonlySet<common_TechCardMachineType> = new Set([
+  'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE',
+]);
+
+export const machineTypeOptions = optionsFrom(MACHINE_TYPE_LABELS).filter(
+  (o) => !OFF_THE_PICKER.has(o.value),
+);
 export const pressEquipmentOptions = optionsFrom(PRESS_EQUIPMENT_LABELS);
 export const needleTypeOptions = optionsFrom(NEEDLE_TYPE_LABELS);
 export const bedTypeOptions = optionsFrom(BED_TYPE_LABELS);
@@ -219,8 +238,13 @@ export function machineTypeOptionsFor(
   current?: string,
 ): Array<{ value: common_TechCardMachineType; label: string }> {
   const v = (current ?? '') as common_TechCardMachineType;
-  if (!v || v in MACHINE_TYPE_LABELS) return machineTypeOptions;
-  return [...machineTypeOptions, { value: v, label: `${v} — unknown to this app version` }];
+  if (!v || (v in MACHINE_TYPE_LABELS && !OFF_THE_PICKER.has(v))) return machineTypeOptions;
+  // ДВА РАЗНЫХ СЛУЧАЯ, ОДИН ОТВЕТ — ДОБАВИТЬ СТРОКУ ЭТОГО ШАГА. Токен, снятый с пикера, но живой в
+  // словаре, получает СВОЮ подпись; токен вне словаря — это машинка НОВЕЕ бандла, и подпись у неё
+  // честно техническая. Пустой триггер не годится ни там, ни там: он читается как «никто не сказал,
+  // на чём», а это ровно то, что ось «на чём» существует чтобы исключить.
+  const label = MACHINE_TYPE_LABELS[v] ?? `${v} — unknown to this app version`;
+  return [...machineTypeOptions, { value: v, label }];
 }
 
 // WHICH PROCESS a press profile is for, so the step form can offer the right one by default. The

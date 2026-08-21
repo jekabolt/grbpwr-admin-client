@@ -23,7 +23,6 @@ import {
   common_TechCardPeelMode,
   common_TechCardPressAction,
   common_TechCardPressToward,
-  common_TechCardPressureScale,
   common_TechCardPrintMethod,
   common_TechCardReinforcement,
   common_TechCardSeamSecuring,
@@ -72,12 +71,13 @@ import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import {
   UNSET_CUT_SYMMETRY,
   UNSET_FUSING_MODE,
-  fusingNeedsWidth,
+  fusingTakesWidth,
   isFusingMarked,
   cutSymmetryCountInvalid,
   isCutSymmetryMarked,
 } from './piece-codes';
 import {
+  canonicalReinforcement,
   topstitchDatumOf,
   topstitchModeNeedsWidth,
   topstitchModeRefusesWidth,
@@ -1149,7 +1149,6 @@ const operationSchema = z.object({
   printMethod: z.string().optional().default('TECH_CARD_PRINT_METHOD_UNKNOWN'),
   peelMode: z.string().optional().default('TECH_CARD_PEEL_MODE_UNKNOWN'),
   secondPressSec: z.number().optional().default(0), // сек, 1..30; 0 = второго прижима нет
-  pressureScale: z.string().optional().default('TECH_CARD_PRESSURE_SCALE_UNKNOWN'),
 
   // W — сварка и проклейка. MACHINE + ЯВНЫЙ seam_taping | ultrasonic_welder.
   airTemperatureC: z.number().optional().default(0), // °C, 100..750; только seam_taping
@@ -1468,12 +1467,6 @@ const operationSchema = z.object({
       'zipperApplication',
       'a zipper application is a zipper-setting machine setting — name that machine on the step, or clear it',
     );
-    needsMachineType(
-      stepEnumSet(o.bindingStyle),
-      ['TECH_CARD_MACHINE_TYPE_BINDING_TAPING'],
-      'bindingStyle',
-      'how the binding is folded is a binder setting — name the binding machine on the step, or clear it',
-    );
     // Горячий воздух есть ТОЛЬКО у проклейки шва: ультразвук греет сам материал, воздуха у него нет.
     needsMachineType(
       !!o.airTemperatureC,
@@ -1488,6 +1481,18 @@ const operationSchema = z.object({
       'a feed speed belongs to a welding machine — name seam taping or the ultrasonic welder, or clear it',
     );
 
+    // ШЕЛКОГРАФИЯ — ТОЖЕ МЕТОД БЕЗ НОСИТЕЛЯ, НО С ПРИЖИМОМ. До 0327 это выражалось членом словаря
+    // `peel_mode.none`, и на шелкографии он был истинен ОДНОВРЕМЕННО с «не указано»: заполняющий
+    // выбирал наугад между двумя правдами. Теперь это правило, и отвергается РОВНО ОДНО поле —
+    // ВТО-блок при шелкографии законен целиком, в отличие от лазера.
+    if (o.printMethod === 'TECH_CARD_PRINT_METHOD_SCREEN' && stepEnumSet(o.peelMode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['peelMode'],
+        message:
+          'screen printing lays ink straight onto the cloth — there is no carrier to peel; clear it, or pick another print method',
+      });
+    }
     // ГРАВИРОВКА — МЕТОД БЕЗ НОСИТЕЛЯ И БЕЗ ПРИЖИМА. Лазер снимает материал сам: снимать нечего,
     // прижимать нечем, и сервер отвергает все три поля по имени.
     if (o.printMethod === 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE') {
@@ -1504,11 +1509,6 @@ const operationSchema = z.object({
         !!o.secondPressSec,
         'secondPressSec',
         'engraving is not pressed — clear the second press, or pick another print method',
-      );
-      refuseAtLaser(
-        stepEnumSet(o.pressureScale),
-        'pressureScale',
-        'engraving is not pressed — clear the pressure, or pick another print method',
       );
       // И ВЕСЬ ВТО-БЛОК ЦЕЛИКОМ (F2-FINAL §5.4, правило 5). Термопресс печать берёт взаймы — но
       // только та, у которой есть носитель: лазер выжигает материал сам, плиты у него нет, и семь
@@ -1593,6 +1593,66 @@ const operationSchema = z.object({
         message: 'only threaded hardware has webbing folded back through it — clear it, or switch the method',
       });
     }
+    // F7 (0328): ДВУХИГОЛЬНАЯ МАШИНА И `needleCount = 2` — ОДИН ФАКТ, СКАЗАННЫЙ ДВАЖДЫ.
+    // До этого правила законны были все четыре комбинации, включая «двухигольная машина, игл 1»:
+    // связи не было ни здесь, ни на сервере, а единственная перекрёстная проверка (калибр требует
+    // 2+) молчит, когда калибр не назван. Член словаря при этом НЕ снят — он единственная цель
+    // канонизации замороженного легаси-глагола `double_needle`, — но из пикера ушёл: писать
+    // двухигольность полагается прямострочкой с двумя иглами (см. machineTypeOptions).
+    if (stepIsMachine && stepMachineType === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE') {
+      const needles = o.needleCount ?? 0;
+      if (needles !== 2) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['needleCount'],
+          message: needles
+            ? 'a twin-needle lockstitch sews with exactly two needles — set it to 2, or pick the plain lockstitch'
+            : 'a twin-needle lockstitch sews with exactly two needles — say 2, or pick the plain lockstitch and say how many needles it runs',
+        });
+      }
+    }
+
+    // F11 (0328): КЛАСС ШВА И БЛОК ОТСТРОЧКИ ГОВОРЯТ ОБ ОДНОМ ШАГЕ, И ТЕПЕРЬ ОНИ СВЯЗАНЫ.
+    // `os_topstitch` — не класс наравне с прочими, а утверждение «соединительного шва у этого шага
+    // нет, есть только отделочная строчка»; соседний блок говорит, ГДЕ она лежит.
+    //
+    // ВТОРАЯ ПОЛОВИНА ВАЖНЕЕ ПЕРВОЙ: НЕНАЗВАННЫЙ класс НАСЛЕДУЕТ умолчание карточки, а оно бывает
+    // `ss_plain`, — то есть чисто декоративная отстрочка, у которой заполнили только блок, МОЛЧА
+    // объявлялась стачным швом и уезжала такой в подпись и на печатный лист. Наследование от ответа
+    // здесь не отличить ничем, поэтому шаг обязан сказать одно из двух.
+    if (o.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' && !stepEnumSet(o.topstitchMode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['topstitchMode'],
+        message:
+          'a topstitch seam class says the step has no joining seam, only a decorative line — say WHERE that line runs, or pick the seam class the step actually makes',
+      });
+    }
+    if (stepEnumSet(o.topstitchMode) && !stepEnumSet(o.seamClass)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['seamClass'],
+        message:
+          'an unnamed seam class inherits the card default, and this step is topstitched — name the class it makes, or set «topstitch» to say it makes no joining seam at all',
+      });
+    }
+
+    // F22 (0328): ВЕДУЩЕЕ ПОЛЕ ОКАНТОВКИ — КЛАСС ШВА, А НЕ МАШИНКА.
+    // Один приём описывали ЧЕТЫРЕ поля: класс `bs_bound`, машинка `binding_taping`, окантовыватель
+    // и само исполнение. Собственный факт несёт только последнее, а привязано оно было к САМОМУ
+    // СЛАБОМУ из трёх — к машинке. Отсюда следовало, что окантовка на прямострочке (кант притачан
+    // вручную — обычная работа) своё исполнение назвать НЕ МОГЛА, а бессмысленная пара «стачной шов
+    // на окантовочной машине» оставалась законной. Правило БЕЗ оглядки на глагол: класс шва есть у
+    // шага любого семейства, и `stepIsMachine` здесь сузил бы отказ там, где сервер не сужает.
+    if (stepEnumSet(o.bindingStyle) && o.seamClass !== 'TECH_CARD_SEAM_CLASS_BS_BOUND') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['bindingStyle'],
+        message:
+          'how a binding is folded belongs to a BOUND seam — set the seam class to «bound», or clear the binding style',
+      });
+    }
+
     // Четвёртое (`airTemperatureC` ⇒ явный seam_taping) записано выше, вместе с остальными
     // правилами явного типа машины: оно и есть одно из них, и разводить его на два места значило
     // бы получить два ответа на один вопрос.
@@ -2369,13 +2429,16 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       pitchMm: decimalToInput(o.placementLayout?.pitchMm),
       attachMethod: o.hardware?.attachMethod || 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN',
       holePrep: o.hardware?.holePrep || 'TECH_CARD_HOLE_PREP_UNKNOWN',
-      reinforcement: o.hardware?.reinforcement || 'TECH_CARD_REINFORCEMENT_UNKNOWN',
+      // ПЕРЕНОС, А НЕ УДАЛЕНИЕ (0328): строка, записанная `fusible_patch` или `fabric_stay`,
+      // читается как `patch` — и на провод из формы уходит уже он. Прочитать её пустотой значило
+      // бы стереть ответ технолога на экране, а следующим сохранением — и в базе.
+      reinforcement:
+        canonicalReinforcement(o.hardware?.reinforcement) || 'TECH_CARD_REINFORCEMENT_UNKNOWN',
       foldbackMm: decimalToInput(o.hardware?.foldbackMm),
       cycleStitchCount: o.hardware?.cycleStitchCount || 0,
       printMethod: o.printMethod || 'TECH_CARD_PRINT_METHOD_UNKNOWN',
       peelMode: o.print?.peelMode || 'TECH_CARD_PEEL_MODE_UNKNOWN',
       secondPressSec: o.print?.secondPressSec || 0,
-      pressureScale: o.print?.pressureScale || 'TECH_CARD_PRESSURE_SCALE_UNKNOWN',
       airTemperatureC: o.weld?.airTemperatureC || 0,
       feedSpeedMMin: decimalToInput(o.weld?.feedSpeedMMin),
       trimAction: o.trim?.action || 'TECH_CARD_TRIM_ACTION_UNKNOWN',
@@ -2864,7 +2927,7 @@ export function mapFormToTechCardInsert(
         // такую пару отвергает по имени поля (chk_tcp_fusing_width). Пустая строка — это «числа
         // нет», поэтому она уходит как отсутствие поля, а не как «0».
         fusingWidthMm:
-          fusingNeedsWidth(p.fusingMode) && p.fusingWidthMm?.trim()
+          fusingTakesWidth(p.fusingMode) && p.fusingWidthMm?.trim()
             ? { value: p.fusingWidthMm.trim() }
             : undefined,
         // НЕ 0, а «поля нет». Ноль сервер принимает как настоящий номер (dto: `!= nil`), не находит
@@ -3112,8 +3175,10 @@ export function mapFormToTechCardInsert(
           'TECH_CARD_SEAM_SECURING_UNKNOWN') as common_TechCardSeamSecuring,
         rowSpacingMm: optionalDecimal(o.rowSpacingMm),
         fullnessRatio: optionalDecimal(o.fullnessRatio),
-        // Бейка — только при явном окантовывателе; шов этикетки — при любой машинке.
-        bindingStyle: (onMachineType('TECH_CARD_MACHINE_TYPE_BINDING_TAPING')
+        // Бейка — только при КЛАССЕ ШВА «окантовочный» (0328), а не при окантовочной машинке: кант
+        // притачивают и на прямострочке, и до F22 такая окантовка своё исполнение назвать не могла.
+        // Шов этикетки — при любой машинке, как и был.
+        bindingStyle: (o.seamClass === 'TECH_CARD_SEAM_CLASS_BS_BOUND'
           ? o.bindingStyle || 'TECH_CARD_BINDING_STYLE_UNKNOWN'
           : 'TECH_CARD_BINDING_STYLE_UNKNOWN') as common_TechCardBindingStyle,
         labelAttachStitch: (o.labelAttachStitch ||
@@ -3142,8 +3207,6 @@ export function mapFormToTechCardInsert(
       const print = blockOut(ownsBlock('print') && !isLaser, () => ({
         peelMode: (o.peelMode || 'TECH_CARD_PEEL_MODE_UNKNOWN') as common_TechCardPeelMode,
         secondPressSec: o.secondPressSec || 0,
-        pressureScale: (o.pressureScale ||
-          'TECH_CARD_PRESSURE_SCALE_UNKNOWN') as common_TechCardPressureScale,
       }));
       const weld = blockOut(ownsBlock('weld') && isWeldStep, () => ({
         // Горячий воздух — только у проклейки шва: ультразвук греет материал сам.

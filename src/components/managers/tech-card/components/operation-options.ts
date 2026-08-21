@@ -15,7 +15,6 @@ import {
   common_TechCardPeelMode,
   common_TechCardPressAction,
   common_TechCardPressToward,
-  common_TechCardPressureScale,
   common_TechCardPrintMethod,
   common_TechCardReinforcement,
   common_TechCardSeamClass,
@@ -297,10 +296,6 @@ export const TOPSTITCH_MODES: Record<common_TechCardTopstitchMode, TopstitchMode
   // ОТ КРАЯ ДЕТАЛИ, и число НЕОБЯЗАТЕЛЬНО: заполнено — отступ в мм от края, пусто — строчка идёт
   // вплотную к краю. Это и есть тот единственный приём, который прежде стоял в списке дважды.
   TECH_CARD_TOPSTITCH_MODE_EDGE: { label: 'at the edge', need: 'optional', datum: 'the edge' },
-  // ПЕНСИОНИРОВАН ВМЕСТЕ С ЭТОЙ ВОЛНОЙ: `EDGE` с числом говорит ровно то же. Строка стоит здесь
-  // только пока сгенерированные типы несут снятый член, и уходит ОДНОЙ СТРОКОЙ при регенерации.
-  // `null`, а не «числа нет»: врать про чужую запись нельзя даже тогда, когда таких записей ноль.
-  TECH_CARD_TOPSTITCH_MODE_WIDTH: null,
   // Утоплена в сам шов: расстояние ноль по определению, и число здесь было бы числом ни о чём —
   // сервер отвергает его прямо.
   TECH_CARD_TOPSTITCH_MODE_IN_DITCH: { label: 'in the ditch', need: 'none' },
@@ -837,11 +832,12 @@ export const HARDWARE_ATTACH_METHOD_LABELS: Record<common_TechCardHardwareAttach
   TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER: 'held on some other way (see note)',
 };
 
-/** H2 — how the hole under the hardware is made. */
+/** H2 — how the hole under the hardware is made: the axis is «is the hole prepared as a step of its
+ *  own, or not». `PRONG_PIERCE` was retired in 0327 — «the prong pierces the cloth itself» is the
+ *  same answer as `NONE`, and offering both made the technologist pick between two spellings of it. */
 export const HOLE_PREP_LABELS: Record<common_TechCardHolePrep, string> = {
   TECH_CARD_HOLE_PREP_UNKNOWN: '',
   TECH_CARD_HOLE_PREP_NONE: 'no hole prep',
-  TECH_CARD_HOLE_PREP_PRONG_PIERCE: 'prong pierces the cloth',
   TECH_CARD_HOLE_PREP_AWL_PIERCE: 'awl-pierced hole',
   TECH_CARD_HOLE_PREP_PUNCH: 'punched hole',
 };
@@ -851,12 +847,32 @@ export const HOLE_PREP_LABELS: Record<common_TechCardHolePrep, string> = {
 export const REINFORCEMENT_LABELS: Record<common_TechCardReinforcement, string> = {
   TECH_CARD_REINFORCEMENT_UNKNOWN: '',
   TECH_CARD_REINFORCEMENT_NONE: 'no reinforcement',
-  TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH: 'fusible patch behind',
-  TECH_CARD_REINFORCEMENT_FABRIC_STAY: 'fabric stay behind',
+  // ОДИН ЧЛЕН ВМЕСТО ДВУХ (0328). `FUSIBLE_PATCH` и `FABRIC_STAY` описывали ОДИН способ — заплату
+  // за деталью — и различались тем, ЧЕМ она сделана; а материал усилителя живёт строкой BOM, где
+  // ему и место. Подпись поэтому не называет материал: «patch behind», а чем именно — в строке.
+  TECH_CARD_REINFORCEMENT_PATCH: 'patch behind',
   TECH_CARD_REINFORCEMENT_TAPE: 'tape behind',
   TECH_CARD_REINFORCEMENT_SEAM_CATCH: 'caught into the seam',
   TECH_CARD_REINFORCEMENT_OTHER: 'other reinforcement',
 };
+
+/** ДВА СНЯТЫХ НАПИСАНИЯ ЧИТАЮТСЯ КАК `PATCH`, А НЕ КАК ПУСТОТА. 0328 — ПЕРЕНОС, а не удаление:
+ *  строки, записанные до неё, несут старый токен, и прочитать его пустотой значило бы стереть
+ *  ответ технолога на экране, а следующим сохранением — и в базе. Канонизация стоит ОДНА на
+ *  клиент: её зовут оба пути чтения (`schema.operationsFromPb`, редактор шагов) и подпись, поэтому
+ *  на провод из формы уходит уже только `PATCH`.
+ *
+ *  Карта НЕ типизирована `Record<common_TechCardReinforcement, …>` намеренно: её ключи — токены,
+ *  которых в контракте больше НЕТ, и тотальная запись их бы просто не приняла. */
+const RETIRED_REINFORCEMENT: Record<string, common_TechCardReinforcement> = {
+  TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH: 'TECH_CARD_REINFORCEMENT_PATCH',
+  TECH_CARD_REINFORCEMENT_FABRIC_STAY: 'TECH_CARD_REINFORCEMENT_PATCH',
+};
+
+/** Токен усилителя, каким его понимает ЭТОТ бандл: снятое написание — как `PATCH`, всё остальное —
+ *  как есть (в том числе член НОВЕЕ бандла: выдумывать за него нельзя). */
+export const canonicalReinforcement = (v?: string): string =>
+  (v && RETIRED_REINFORCEMENT[v]) || v || '';
 
 /** P1 — the discriminator of a PRINT step, and the head of its «machine / mode» column. */
 export const PRINT_METHOD_LABELS: Record<common_TechCardPrintMethod, string> = {
@@ -870,23 +886,17 @@ export const PRINT_METHOD_LABELS: Record<common_TechCardPrintMethod, string> = {
 };
 
 /** P2 — when the carrier film comes off, and the temperature word is the whole instruction: a hot
- *  peel pulled cold lifts the print. NONE says there is no carrier at all. */
+ *  peel pulled cold lifts the print.
+ *
+ *  «НОСИТЕЛЯ НЕТ» ЗДЕСЬ БОЛЬШЕ НЕ ЧЛЕН, А ПРАВИЛО (0327). `NONE` был истинен ОДНОВРЕМЕННО с «не
+ *  указано» ровно на тех методах, у которых носителя нет вовсе, — шелкография и гравировка, — то
+ *  есть заполняющий выбирал наугад между двумя правдами. Теперь поле при этих методах просто
+ *  отвергается, и отказ называет метод. */
 export const PEEL_MODE_LABELS: Record<common_TechCardPeelMode, string> = {
   TECH_CARD_PEEL_MODE_UNKNOWN: '',
-  TECH_CARD_PEEL_MODE_NONE: 'no carrier to peel',
   TECH_CARD_PEEL_MODE_HOT: 'hot peel',
   TECH_CARD_PEEL_MODE_WARM: 'warm peel',
   TECH_CARD_PEEL_MODE_COLD: 'cold peel',
-};
-
-/** P6 — an ordered scale, and therefore printed as words: the number the platen gauge shows is a
- *  cylinder reading, not the pressure on the cloth (that one, when it is known, is
- *  press_pressure_n_cm2 and prints in N/cm²). */
-export const PRESSURE_SCALE_LABELS: Record<common_TechCardPressureScale, string> = {
-  TECH_CARD_PRESSURE_SCALE_UNKNOWN: '',
-  TECH_CARD_PRESSURE_SCALE_LIGHT: 'light pressure',
-  TECH_CARD_PRESSURE_SCALE_MEDIUM: 'medium pressure',
-  TECH_CARD_PRESSURE_SCALE_FIRM: 'firm pressure',
 };
 
 /** T1 — the discriminator of a TRIM step: WHICH cut, with the shape of the edge it is made on,
@@ -907,19 +917,20 @@ export const CLEANING_KIND_LABELS: Record<common_TechCardCleaningKind, string> =
   TECH_CARD_CLEANING_KIND_UNKNOWN: '',
   TECH_CARD_CLEANING_KIND_SPOT_CLEAN: 'spot clean',
   TECH_CARD_CLEANING_KIND_DUST_LINT: 'dust / lint removal',
-  TECH_CARD_CLEANING_KIND_CHALK_REMOVAL: 'chalk removal',
-  TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL: 'adhesive removal',
   TECH_CARD_CLEANING_KIND_OTHER: 'something else (see note)',
 };
 
 /** Q1 — the discriminator of an INSPECT step, and the one fact that says how much work it is:
- *  «every unit» and «one per bundle» are the same verb over a hundredfold difference in time. */
+ *  «every unit» and «one per bundle» are the same verb over a hundredfold difference in time.
+ *
+ *  СЛОВАРЬ ОТВЕЧАЕТ НА ОДИН ВОПРОС — СКОЛЬКО ИЗДЕЛИЙ СМОТРИМ. `FIRST_OUTPUT` отвечал на другой
+ *  («когда смотрим») и снят в 0327: первая единица прогона — это выборка по правилу «одна на
+ *  запуск», а МОМЕНТ контроля несёт порядок шага в сборке. */
 export const INSPECT_COVERAGE_LABELS: Record<common_TechCardInspectCoverage, string> = {
   TECH_CARD_INSPECT_COVERAGE_UNKNOWN: '',
   TECH_CARD_INSPECT_COVERAGE_EACH_UNIT: 'check every unit',
   TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE: 'sample per bundle',
   TECH_CARD_INSPECT_COVERAGE_AQL_PLAN: 'AQL plan',
-  TECH_CARD_INSPECT_COVERAGE_FIRST_OUTPUT: 'first output of the run',
   TECH_CARD_INSPECT_COVERAGE_OTHER: 'another coverage (see note)',
 };
 
@@ -946,14 +957,16 @@ export const WET_PROCESS_KIND_LABELS: Record<common_TechCardWetProcessKind, stri
 // `*_UNKNOWN`, и он тут ровно один (см. `stepDiscriminatorUnset`).
 
 /** G1 — ЧТО ИМЕННО делает ВТО-шаг. Не required ни на одном глаголе: старая строка PRESS без
- *  под-глагола обязана читаться и сохраняться как есть. */
+ *  под-глагола обязана читаться и сохраняться как есть.
+ *
+ *  РАЗУТЮЖКИ В СПИСКЕ НЕТ, И ЭТО НЕ ПРОПУСК: она выражается ГЛАГОЛОМ `PRESS_OPEN` — единственным
+ *  написанием. Член `OPEN` был вторым написанием того же факта, и два написания давали два разных
+ *  кортежа в проекции дайджеста секции: одна и та же разутюжка на двух карточках получала разные
+ *  отпечатки. 0327 снял его — за глаголом стояли живые строки прода, за членом ни одной. */
 export const PRESS_ACTION_LABELS: Record<common_TechCardPressAction, string> = {
   TECH_CARD_PRESS_ACTION_UNKNOWN: '',
   TECH_CARD_PRESS_ACTION_PRESS_FLAT: 'press flat',
   TECH_CARD_PRESS_ACTION_TO_ONE_SIDE: 'press to one side',
-  // Уживается с ГЛАГОЛОМ `PRESS_OPEN` и не заменяет его: канонической записью разутюжки остаётся
-  // глагол, а этот член существует, чтобы прочитать шаг, записанный вторым написанием.
-  TECH_CARD_PRESS_ACTION_OPEN: 'press open',
   TECH_CARD_PRESS_ACTION_STEAM: 'steam',
   TECH_CARD_PRESS_ACTION_FINAL: 'final press',
   TECH_CARD_PRESS_ACTION_EASE_IN: 'ease in the fullness',
@@ -978,7 +991,6 @@ export const PRESS_TOWARD_LABELS: Record<common_TechCardPressToward, string> = {
   TECH_CARD_PRESS_TOWARD_FACING: 'onto the facing',
   TECH_CARD_PRESS_TOWARD_SHELL: 'onto the shell, away from the facing',
   TECH_CARD_PRESS_TOWARD_LINING: 'toward the lining',
-  TECH_CARD_PRESS_TOWARD_SIDE: 'toward the side seam',
   TECH_CARD_PRESS_TOWARD_OTHER: 'somewhere else (see note)',
 };
 
@@ -1013,7 +1025,11 @@ export const BUTTON_ATTACH_PATTERN_LABELS: Record<common_TechCardButtonAttachPat
 };
 
 /** FA13 — how the zip is set in. The word «zip» is in every member for the same reason the label
- *  scheme carries «label»: in a settings list nothing above it says what is being set. */
+ *  scheme carries «label»: in a settings list nothing above it says what is being set.
+ *
+ *  ЗДЕСЬ ТОЛЬКО ИСПОЛНЕНИЕ — то, КАК закрыта лента. Ни МЕСТА, ни свойств самого артикула: 0327 снял
+ *  `SEPARATING_CF` (место — это zone шага, разъёмность — свойство молнии из строки BOM) и
+ *  `IN_SEAM_POCKET` (втачивание в шов — это `CENTERED` в кармане, а карман — снова zone). */
 export const ZIPPER_APPLICATION_LABELS: Record<common_TechCardZipperApplication, string> = {
   TECH_CARD_ZIPPER_APPLICATION_UNKNOWN: '',
   TECH_CARD_ZIPPER_APPLICATION_CENTERED: 'centred zip',
@@ -1021,8 +1037,6 @@ export const ZIPPER_APPLICATION_LABELS: Record<common_TechCardZipperApplication,
   TECH_CARD_ZIPPER_APPLICATION_INVISIBLE: 'invisible zip',
   TECH_CARD_ZIPPER_APPLICATION_EXPOSED: 'exposed zip',
   TECH_CARD_ZIPPER_APPLICATION_FLY: 'fly zip',
-  TECH_CARD_ZIPPER_APPLICATION_SEPARATING_CF: 'separating zip, centre front',
-  TECH_CARD_ZIPPER_APPLICATION_IN_SEAM_POCKET: 'in-seam pocket zip',
   TECH_CARD_ZIPPER_APPLICATION_OTHER: 'zip, other application',
 };
 
@@ -1033,10 +1047,10 @@ export const labelAttachStitchLabel = (v?: string): string =>
 export const hardwareAttachMethodLabel = (v?: string): string =>
   enumText(HARDWARE_ATTACH_METHOD_LABELS, v);
 export const holePrepLabel = (v?: string): string => enumText(HOLE_PREP_LABELS, v);
-export const reinforcementLabel = (v?: string): string => enumText(REINFORCEMENT_LABELS, v);
+export const reinforcementLabel = (v?: string): string =>
+  enumText(REINFORCEMENT_LABELS, canonicalReinforcement(v));
 export const printMethodLabel = (v?: string): string => enumText(PRINT_METHOD_LABELS, v);
 export const peelModeLabel = (v?: string): string => enumText(PEEL_MODE_LABELS, v);
-export const pressureScaleLabel = (v?: string): string => enumText(PRESSURE_SCALE_LABELS, v);
 export const trimActionLabel = (v?: string): string => enumText(TRIM_ACTION_LABELS, v);
 export const cleaningKindLabel = (v?: string): string => enumText(CLEANING_KIND_LABELS, v);
 export const inspectCoverageLabel = (v?: string): string => enumText(INSPECT_COVERAGE_LABELS, v);
@@ -1065,7 +1079,6 @@ export type StepFactField =
   | 'cycleStitches'
   | 'peel'
   | 'secondPress'
-  | 'pressure'
   | 'weldAir'
   | 'weldFeed'
   | 'residualTail'
@@ -1098,7 +1111,7 @@ export type StepFacts = {
     foldbackMm?: string;
     cycleStitchCount?: number;
   };
-  print?: { peelMode?: string; secondPressSec?: number; pressureScale?: string };
+  print?: { peelMode?: string; secondPressSec?: number };
   weld?: { airTemperatureC?: number; feedSpeedMMin?: string };
   trim?: { action?: string; residualAllowanceMm?: string };
   threadTrim?: { residualTailMaxMm?: string };
@@ -1257,7 +1270,6 @@ export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField
     { field: 'cycleStitches', text: cycle > 0 ? `${cycle} stitches per cycle` : '' },
     { field: 'peel', text: peelModeLabel(p?.peelMode) },
     { field: 'secondPress', text: secondPress > 0 ? `second press ${secondPress} s` : '' },
-    { field: 'pressure', text: pressureScaleLabel(p?.pressureScale) },
     // ТОЛЬКО у проклейки: у ультразвука горячего воздуха нет вовсе, и «hot air» на его строке
     // отправило бы оператора искать регулятор, которого на машине не существует.
     { field: 'weldAir', text: air > 0 ? `hot air ${air} °C` : '' },

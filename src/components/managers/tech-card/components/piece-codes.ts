@@ -247,17 +247,18 @@ export const CUT_SYMMETRY_PRINT_LEGEND =
 // поверхности (вкладка деталей, тех-пак, кат-лист стиля, наряд на партию), и «не размечено» на
 // экране обязано означать то же, что молчание на бумаге.
 //
-// «ПО ПРИПУСКУ» И «ПОЛОСОЙ» — РАЗНЫЕ ПУНКТЫ, хотя обе кладут полосу вдоль среза: первая берёт
-// ширину из эталона припуска карточки (иначе цеха), вторая — из введённого числа. Один пункт с
-// обязательным числом заставлял бы вписывать припуск руками на каждой детали и расходиться с
-// эталоном, ради которого эталон и заводили.
+// ПОЛОСА ВДОЛЬ СРЕЗА — ОДИН ПУНКТ, А НЕ ДВА (0328). «По припуску» и «полосой» различались ровно
+// тем, названо число или нет, — дословно `width`/`edge` отстрочки, — и технолог выбирал между ними
+// так, будто это разные приёмы. Возражение «свести их значило бы вписывать припуск руками на каждой
+// детали» било мимо: сводить надо не обязательным числом, а правилом «пусто = наследуй», которым
+// живёт вся карточка. Теперь «полосой» с пустым числом берёт эталон припуска карточки (иначе цеха),
+// с числом — переопределяет его. Связь с эталоном не потеряна, а укреплена: раньше его читал только
+// один из двух пунктов.
 
 export const UNSET_FUSING_MODE: common_TechCardPieceFusingMode =
   'TECH_CARD_PIECE_FUSING_MODE_UNKNOWN';
 export const FUSING_MODE_STRIP: common_TechCardPieceFusingMode =
   'TECH_CARD_PIECE_FUSING_MODE_STRIP';
-const FUSING_MODE_SEAM: common_TechCardPieceFusingMode =
-  'TECH_CARD_PIECE_FUSING_MODE_SEAM_ALLOWANCE';
 
 export const fusingModeOptions: Array<{
   value: common_TechCardPieceFusingMode;
@@ -267,8 +268,9 @@ export const fusingModeOptions: Array<{
   // как «значение по умолчанию», то есть как ответ «целиком», которого никто не давал.
   { value: UNSET_FUSING_MODE, label: '— not marked' },
   { value: 'TECH_CARD_PIECE_FUSING_MODE_FULL', label: 'the whole piece' },
-  { value: FUSING_MODE_SEAM, label: 'along the seam allowance' },
-  { value: FUSING_MODE_STRIP, label: 'as a strip, mm' },
+  // ЧИСЛО В ПОДПИСИ НЕ ОБЕЩАНО: «полосой» с пустой ячейкой — законный ответ, он берёт эталон
+  // припуска. «as a strip, mm» читалось бы как «впиши миллиметры», то есть как требование.
+  { value: FUSING_MODE_STRIP, label: 'as a strip along the cut edge' },
 ];
 
 const fusingModeValues = new Set<string>(fusingModeOptions.map((o) => o.value));
@@ -290,9 +292,12 @@ export function isFusingMarked(value?: string): boolean {
   return !!v && v !== UNSET_FUSING_MODE;
 }
 
-/** Нужна ли этому режиму своя ширина. Только «полосой»: у «по припуску» ширина приходит из
- * эталона, и второе число рядом с ним спорило бы с ним молча. */
-export function fusingNeedsWidth(value?: string): boolean {
+/** ПРИНИМАЕТ ли этот режим своё число, а не «требует» — и слово в имени выбрано после 0328, когда
+ * два режима свелись в один. Ширина у «полосой» НЕОБЯЗАТЕЛЬНА: пусто значит «по эталону припуска»,
+ * заполнено — «столько миллиметров». Функция гейтит показ поля и отправку числа на провод; ответом
+ * «обязательно» она не является ни там, ни там, и контрол, помечавший пустую ячейку невалидной,
+ * утверждал ровно то, что 0328 отменил. */
+export function fusingTakesWidth(value?: string): boolean {
   return (value ?? '').trim() === FUSING_MODE_STRIP;
 }
 
@@ -308,9 +313,10 @@ export function fusingPrintCaption(value: string | undefined, widthMm?: string):
   const v = (value ?? '').trim();
   if (v === FUSING_MODE_STRIP) {
     const w = (widthMm ?? '').trim();
-    return w ? `strip ${w} mm` : 'strip (width not specified)';
+    // ПУСТО — ЭТО ОТВЕТ, А НЕ ПРОБЕЛ: полоса шириной в припуск. «width not specified» на бумаге
+    // отправляло бы раскройщика спрашивать число, которое карточка уже назвала за него.
+    return w ? `strip ${w} mm` : 'strip along the seam allowance';
   }
-  if (v === FUSING_MODE_SEAM) return 'along the seam allowance';
   if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the whole piece';
   return 'method not specified';
 }
@@ -324,9 +330,8 @@ export function fusingPrintCaption(value: string | undefined, widthMm?: string):
  */
 export function fusingHint(mode?: string): string {
   const v = (mode ?? '').trim();
-  if (v === FUSING_MODE_STRIP) return 'strip width along the cut edge, in millimetres (up to 100)';
-  if (v === FUSING_MODE_SEAM)
-    return "strip width = the card's seam allowance (otherwise the workshop settings)";
+  if (v === FUSING_MODE_STRIP)
+    return "strip width in millimetres (up to 100); leave it empty and the strip is as wide as the card's seam allowance (otherwise the workshop settings)";
   if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the fusing is cut whole, from the same pattern piece';
   return 'not marked: the workshop will see “fused” with no indication of where exactly the fusing sits';
 }

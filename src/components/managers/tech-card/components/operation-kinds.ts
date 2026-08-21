@@ -429,11 +429,14 @@ const NONE = (v?: string) => !v || v.endsWith('_UNKNOWN');
  * добавленная в прото, роняет сборку здесь — на пропущенном ключе, — а не превращается молча в
  * «нестандартную комбинацию» на совершенно законном шаге.
  *
- * ДВЕ ЗАПИСИ ЗДЕСЬ — СОГЛАШЕНИЯ ЧТЕНИЯ, А НЕ ЗАПИСИ, и обе выписаны рядом с таблицей нарочно:
- *  · `LOCKSTITCH_DOUBLE_NEEDLE` → A2 БЕЗУСЛОВНО: её собственный глагол в `MACHINE_TYPE_VERB`
- *    буквально `topstitch`, класса шва спрашивать незачем;
- *  · `HARDWARE_ATTACH` → F5: `MACHINE + hardware_attach` и `HARDWARE_SET + sew` описывают один
- *    факт. Пикер ПИШЕТ только второе (там блок фурнитуры законен целиком), а ЧИТАЕТ оба.
+ * ОДНА ЗАПИСЬ ЗДЕСЬ — СОГЛАШЕНИЕ ЧТЕНИЯ, А НЕ ЗАПИСИ, и выписана рядом с таблицей нарочно:
+ * `LOCKSTITCH_DOUBLE_NEEDLE` → A2 БЕЗУСЛОВНО: её собственный глагол в `MACHINE_TYPE_VERB` буквально
+ * `topstitch`, класса шва спрашивать незачем. Пикер эту машинку не предлагает (0328: двухигольность
+ * пишется прямострочкой с needle_count = 2), но записанный ею шаг обязан находить свой пункт.
+ *
+ * ВТОРОЙ ТАКОЙ ЗАПИСИ БОЛЬШЕ НЕТ: `HARDWARE_ATTACH` → F5 держалась на том, что
+ * `MACHINE + hardware_attach` и `HARDWARE_SET + sew` описывают один факт, — и 0328 снял член,
+ * оставив глагол единственным написанием. F5 резолвится по нему (см. `kindOf`, ветка HARDWARE_SET).
  */
 const MACHINE_TO_KIND: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_UNKNOWN: '',
@@ -450,7 +453,6 @@ const MACHINE_TO_KIND: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: 'C2',
   TECH_CARD_MACHINE_TYPE_EMBROIDERY: 'C4',
   TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION: 'A9',
-  TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH: 'F5',
   TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH: 'B2',
   TECH_CARD_MACHINE_TYPE_BINDING_TAPING: 'B1',
   TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING: 'B3',
@@ -516,12 +518,15 @@ const VERB_TO_KIND: Record<common_TechCardOperationType, string> = {
  * под-глагола. `OTHER` — «свой приём, прозой в note»: пункта у него НЕТ и выдумывать ближайший
  * нельзя, поэтому резолв честно отвечает `undefined`, а редактор показывает «нестандартная
  * комбинация» и обе оси контролами. Разные ответы на разные вопросы — потому и разведены.
+ *
+ * G3 (РАЗУТЮЖКА) В ЭТОЙ ТАБЛИЦЕ НЕ РЕЗОЛВИТСЯ ВОВСЕ, И ПУНКТ ПРИ ЭТОМ ЖИВ: его даёт ГЛАГОЛ
+ * `PRESS_OPEN` (см. `VERB_TO_KIND`). Член `OPEN` был вторым написанием того же факта и снят в 0327,
+ * так что номера в правой колонке идут G1, G2, G4… — это не пропуск, а отсутствие второго входа.
  */
 const PRESS_ACTION_TO_KIND: Record<common_TechCardPressAction, string> = {
   TECH_CARD_PRESS_ACTION_UNKNOWN: '',
   TECH_CARD_PRESS_ACTION_PRESS_FLAT: 'G1',
   TECH_CARD_PRESS_ACTION_TO_ONE_SIDE: 'G2',
-  TECH_CARD_PRESS_ACTION_OPEN: 'G3',
   TECH_CARD_PRESS_ACTION_STEAM: 'G4',
   TECH_CARD_PRESS_ACTION_FINAL: 'G5',
   TECH_CARD_PRESS_ACTION_EASE_IN: 'G6',
@@ -736,7 +741,6 @@ export const KIND_PROPERTY_FIELDS: readonly string[] = [
   // P — печать
   'peelMode',
   'secondPressSec',
-  'pressureScale',
   // W — сварка
   'airTemperatureC',
   'feedSpeedMMin',

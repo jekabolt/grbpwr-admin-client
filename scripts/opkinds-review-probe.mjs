@@ -123,10 +123,15 @@ const MUTATIONS = {
   // отступ переехал к `EDGE` необязательным. Каждая половина ломается отдельно: то, что список
   // короткий, ничего не говорит о том, что число у края доезжает до провода, и наоборот.
   11: {
+    // РАНЬШЕ ЭТА МУТАЦИЯ ПОДМЕНЯЛА СТРОКУ `WIDTH: null` — теперь такой строки нет вовсе: член ушёл
+    // из контракта регенерацией, и карта режимов о нём не знает. Ломать починку стало можно только
+    // ВОЗВРАТОМ пункта, поэтому мутация вставляет его рядом с краем.
     what: 'находка 6: снятый режим снова предлагается в списке',
     file: /operation-options\.ts$/,
-    from: '  TECH_CARD_TOPSTITCH_MODE_WIDTH: null,',
-    to: "  TECH_CARD_TOPSTITCH_MODE_WIDTH: { label: 'at width from the edge', need: 'optional', datum: 'the edge' },",
+    from: "  TECH_CARD_TOPSTITCH_MODE_EDGE: { label: 'at the edge', need: 'optional', datum: 'the edge' },",
+    to:
+      "  TECH_CARD_TOPSTITCH_MODE_EDGE: { label: 'at the edge', need: 'optional', datum: 'the edge' },\n" +
+      "  TECH_CARD_TOPSTITCH_MODE_WIDTH: { label: 'at width from the edge', need: 'optional', datum: 'the edge' },",
   },
   12: {
     what: 'находка 6: zod снова требует число у края — форма спорит с сервером',
@@ -151,6 +156,71 @@ const MUTATIONS = {
     file: /operation-options\.ts$/,
     from: '  return topstitchDistanceText(mode, widthMm) || spec.label;',
     to: '  return topstitchDistanceText(mode, widthMm);',
+  },
+  // ── ВОЛНА 0327/0328: ПЯТНАДЦАТЬ ЛОЖНЫХ РАСЩЕПЛЕНИЙ И ТРИ ПРАВИЛА ───────────────────────────
+  // Здесь ломать «как было» нечем: снятое УДАЛЕНО, а правил раньше не существовало. Поэтому
+  // мутации либо ВОЗВРАЩАЮТ снятый член в словарь (проба обязана увидеть его в живом списке),
+  // либо ГАСЯТ правило (проба обязана перестать получать отказ). Каждое из трёх правил гасится
+  // по отдельности: зелень одного ничего не говорит о двух других.
+  16: {
+    what: '0328: снятое написание усилителя снова предлагается пунктом',
+    file: /operation-options\.ts$/,
+    from: "  TECH_CARD_REINFORCEMENT_TAPE: 'tape behind',",
+    to: "  TECH_CARD_REINFORCEMENT_FABRIC_STAY: 'fabric stay behind',\n  TECH_CARD_REINFORCEMENT_TAPE: 'tape behind',",
+  },
+  17: {
+    what: '0327: снятая разутюжка снова предлагается пунктом рядом со своим глаголом',
+    file: /operation-options\.ts$/,
+    from: "  TECH_CARD_PRESS_ACTION_STEAM: 'steam',",
+    to: "  TECH_CARD_PRESS_ACTION_OPEN: 'press open',\n  TECH_CARD_PRESS_ACTION_STEAM: 'steam',",
+  },
+  18: {
+    what: '0328: двухигольная снова предлагается пикером — второе написание числа игл',
+    file: /equipment-options\.ts$/,
+    from: "  'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE',\n]);",
+    to: ']);',
+  },
+  19: {
+    what: '0328: канонизация усилителя снята — старая запись читается пустотой',
+    file: /operation-options\.ts$/,
+    from: '  (v && RETIRED_REINFORCEMENT[v]) || v || \'\';',
+    to: "  v || '';",
+  },
+  20: {
+    what: 'F7 снят: двухигольная машина снова уживается с одной иглой',
+    file: /schema\.ts$/,
+    from: "    if (stepIsMachine && stepMachineType === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE') {",
+    to: '    if (false) {',
+  },
+  21: {
+    what: 'F11 (первая половина) снят: класс «отстрочка» снова не требует режима',
+    file: /schema\.ts$/,
+    from: "    if (o.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' && !stepEnumSet(o.topstitchMode)) {",
+    to: '    if (false) {',
+  },
+  22: {
+    what: 'F11 (вторая половина) снят: неназванный класс снова наследует умолчание молча',
+    file: /schema\.ts$/,
+    from: '    if (stepEnumSet(o.topstitchMode) && !stepEnumSet(o.seamClass)) {',
+    to: '    if (false) {',
+  },
+  23: {
+    what: 'F22 снят в zod: исполнение бейки снова законно при любом классе шва',
+    file: /schema\.ts$/,
+    from: "    if (stepEnumSet(o.bindingStyle) && o.seamClass !== 'TECH_CARD_SEAM_CLASS_BS_BOUND') {",
+    to: '    if (false) {',
+  },
+  24: {
+    what: 'F22 на экране: контрол исполнения снова висит на машинке, а не на классе шва',
+    file: /operations-field\.tsx$/,
+    from: '            {seamClass === BOUND_SEAM_CLASS && (',
+    to: "            {machineType === 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING' && (",
+  },
+  25: {
+    what: '0327: съём носителя снова законен на шелкографии — член вместо правила',
+    file: /schema\.ts$/,
+    from: "    if (o.printMethod === 'TECH_CARD_PRINT_METHOD_SCREEN' && stepEnumSet(o.peelMode)) {",
+    to: '    if (false) {',
   },
 };
 
@@ -247,7 +317,11 @@ const T = {
   ZONE: 'TECH_CARD_GARMENT_ZONE_FRONT',
   IRON: 'TECH_CARD_PRESS_EQUIPMENT_IRON',
   ONE_SIDE: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE',
-  OPEN: 'TECH_CARD_PRESS_ACTION_OPEN',
+  // НАХОДКА 3 ПРОВЕРЯЛАСЬ ЧЛЕНОМ `press_action.open`, А ЕГО БОЛЬШЕ НЕТ (0327: разутюжка выражается
+  // ГЛАГОЛОМ `PRESS_OPEN`, и второе написание снято). Сама находка при этом жива целиком: она про
+  // то, что очистка скрытого не имеет права стирать под-глагол, прочитанный с провода, на глаголе,
+  // где контрола под-глагола нет. Любой живой член играет в ней ту же роль — берётся `steam`.
+  STEAM_ACTION: 'TECH_CARD_PRESS_ACTION_STEAM',
   ACTION_UNSET: 'TECH_CARD_PRESS_ACTION_UNKNOWN',
   TOWARD_FRONT: 'TECH_CARD_PRESS_TOWARD_FRONT',
   TOWARD_UNSET: 'TECH_CARD_PRESS_TOWARD_UNKNOWN',
@@ -494,17 +568,17 @@ async function run(bundle) {
     operationType: T.PRESS_OPEN,
     zone: T.ZONE,
     pressEquipment: T.IRON,
-    pressAction: T.OPEN,
+    pressAction: T.STEAM_ACTION,
   });
   const vOpen = await values();
   ck(
-    vOpen.pressAction === T.OPEN,
+    vOpen.pressAction === T.STEAM_ACTION,
     'смонтированный редактор ОСТАВИЛ под-глагол как есть',
     String(vOpen.pressAction),
   );
   const wOpen = await wire();
   ck(
-    wOpen?.press?.action === T.OPEN,
+    wOpen?.press?.action === T.STEAM_ACTION,
     'и он уехал на провод ИЗ ЖИВОЙ ФОРМЫ (круг «загрузил → сохранил»)',
     JSON.stringify(wOpen?.press ?? null),
   );
@@ -516,8 +590,8 @@ async function run(bundle) {
   ck(!(await has(F('pressAction'))), 'и контрол снова ИСЧЕЗ');
   const vBack = await values();
   ck(
-    vBack.pressAction === T.OPEN,
-    'под-глагол пережил оба переключения — форма не канонизирует написание',
+    vBack.pressAction === T.STEAM_ACTION,
+    'под-глагол пережил оба переключения — очистка скрытого его не трогает',
     String(vBack.pressAction),
   );
   // А ВОТ ЧУЖОЙ ГЛАГОЛ ЕГО СНИМАЕТ — иначе гейт бы вообще ничего не гейтил.
@@ -814,6 +888,310 @@ async function run(bundle) {
     /stitch rows 6 mm apart/i.test(rowNeedles?.seam ?? ''),
     'лист: «stitch rows 6 mm apart» — не голое «rows»',
     rowNeedles?.seam ?? '',
+  );
+
+
+  // ── 6. ПЯТНАДЦАТЬ ЛОЖНЫХ РАСЩЕПЛЕНИЙ СНЯТЫ, ТРИ ПРАВИЛА ВСТАЛИ НА КОНТРОЛЫ ────────────────────
+  // 0327/0328 сняли пятнадцать членов словарей: каждый оказался либо ТЕМ ЖЕ приёмом с незаданным
+  // соседним полем, либо вторым написанием, либо выразимым через соседей. Клиент до этой волны
+  // продолжал их предлагать — сохранение давало внятный отказ с именем поля, то есть было
+  // безопасно, но выглядело как поломка.
+  //
+  // КАЖДОЕ «НЕТ» СТОИТ В ПАРЕ С «ЕСТЬ» на том же смонтированном шаге: пустой или неотрисованный
+  // список одинаково правдиво отвечает «снятого пункта нет» и когда снятие работает, и когда экран
+  // не собрался вовсе. Поэтому рядом с каждым снятым членом проверяется живой сосед из того же
+  // словаря.
+  //
+  // ЧЕГО ЗДЕСЬ НЕТ: режим дублирования детали (`fusing_mode.seam_allowance`) живёт на вкладке
+  // деталей, а этот стенд монтирует редактор ОПЕРАЦИЙ. Его держат тотальная карта (tsc) и глаза.
+  head('6. снятые члены не предлагаются, а три новых правила отвергают по имени поля');
+
+  const MACHINE_STEP = { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE };
+  const HARDWARE_STEP = {
+    operationType: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    zone: T.ZONE,
+    attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET',
+  };
+  const DOUBLE_NEEDLE = 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE';
+  const BINDER = 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING';
+  const BOUND = 'TECH_CARD_SEAM_CLASS_BS_BOUND';
+  const PLAIN = 'TECH_CARD_SEAM_CLASS_SS_PLAIN';
+  const FOLD = 'TECH_CARD_BINDING_STYLE_DOUBLE_FOLD';
+
+  // Створка «differs from standard» ЗАКРЫТА по умолчанию и РАЗМОНТИРУЕТ содержимое: класс шва и
+  // натяжение нитки живут в ней, и без раскрытия «контрола нет» смешалось бы с «правило работает».
+  async function openFold() {
+    const head_ = page
+      .locator('[role="button"][aria-expanded]')
+      .filter({ hasText: 'differs from standard' });
+    if ((await head_.count()) === 0) return false;
+    if ((await head_.first().getAttribute('aria-expanded')) === 'true') return true;
+    await head_.first().scrollIntoViewIfNeeded();
+    await head_.first().click();
+    await page.waitForTimeout(150);
+    return (await head_.first().getAttribute('aria-expanded')) === 'true';
+  }
+
+  // СНЯТОГО В СПИСКЕ НЕТ, ЖИВОЕ В НЁМ ЕСТЬ — одной парой, иначе «нет» ничего не значит.
+  async function listSays(sel, where, gone, kept) {
+    const list = await optionsOf(sel);
+    ck(list !== null, `${where}: контрол на экране — список действительно спрошен`, sel);
+    for (const g of gone)
+      ck(!(list ?? []).some((x) => x === g), `${where}: «${g}» СНЯТ со списка`, JSON.stringify(list));
+    for (const k of kept)
+      ck((list ?? []).some((x) => x === k), `${where}: «${k}» на месте`, JSON.stringify(list));
+    return list;
+  }
+  const triggerText = async (sel) =>
+    ((await page.locator(`${sel} button`).first().textContent()) ?? '').trim();
+  const issuesAt = (issues, field) =>
+    issues.filter((i) => i.path.endsWith(`.${field}`)).map((i) => i.message);
+
+  // ── 6a. ШВЕЙНЫЙ ШАГ: машинка и натяжение ─────────────────────────────────────────────────────
+  await mount(MACHINE_STEP);
+  await listSays(
+    F('machineType'),
+    'машинки',
+    ['hardware attach', 'twin-needle lockstitch'],
+    ['lockstitch 301', 'binding / taping'],
+  );
+  ck(await openFold(), 'створка «differs from standard» раскрыта');
+  await listSays(
+    F('threadTension'),
+    'натяжение нитки',
+    ['other (see note)'],
+    ['tighter than normal', 'looser than normal'],
+  );
+
+  // ЗАПИСЬ С ДВУХИГОЛЬНОЙ НЕ ОНЕМЕЛА. Член живой (он единственная цель канонизации замороженного
+  // легаси-глагола), просто ушёл из пикера, — и шаг, который её уже несёт, обязан читаться словом.
+  await mount({ ...MACHINE_STEP, machineType: DOUBLE_NEEDLE, needleCount: 2 });
+  const dnTrigger = await triggerText(F('machineType'));
+  ck(
+    /twin-needle lockstitch/i.test(dnTrigger),
+    'записанная двухигольная ПОДПИСАНА своим словом, а не пустым триггером',
+    dnTrigger,
+  );
+
+  // ── 6b. ФУРНИТУРА: подготовка отверстия и усилитель ──────────────────────────────────────────
+  await mount(HARDWARE_STEP);
+  await listSays(
+    F('holePrep'),
+    'подготовка отверстия',
+    ['prong pierces the cloth'],
+    ['no hole prep', 'punched hole'],
+  );
+  await listSays(
+    F('reinforcement'),
+    'усилитель',
+    ['fusible patch behind', 'fabric stay behind'],
+    ['patch behind', 'tape behind'],
+  );
+
+  // ── 6c. ПЕЧАТЬ: съём носителя и УДАЛЁННАЯ ЦЕЛИКОМ ступень прижима ────────────────────────────
+  await mount({
+    operationType: 'TECH_CARD_OPERATION_TYPE_PRINT',
+    zone: T.ZONE,
+    printMethod: 'TECH_CARD_PRINT_METHOD_HEAT_TRANSFER',
+  });
+  await listSays(F('peelMode'), 'съём носителя', ['no carrier to peel'], ['hot peel', 'cold peel']);
+  // ПАРА ДЛЯ УДАЛЁННОГО КОНТРОЛА: «поля нет» само по себе правдиво и на пустом экране, поэтому
+  // рядом стоит соседнее поле того же блока печати — оно ЕСТЬ.
+  ck(await has(F('secondPressSec')), 'второй прижим на экране — блок печати действительно собран');
+  ck(!(await has(F('pressureScale'))), 'словесной ступени прижима на экране НЕТ — поле удалено');
+
+  // ── 6d. ЧИСТКА, КОНТРОЛЬ, МОЛНИЯ, ВТО ───────────────────────────────────────────────────────
+  await mount({ operationType: 'TECH_CARD_OPERATION_TYPE_CLEAN', zone: T.ZONE });
+  await listSays(
+    F('cleaningKind'),
+    'чистка',
+    ['chalk removal', 'adhesive removal'],
+    ['spot clean', 'dust / lint removal'],
+  );
+
+  await mount({ operationType: 'TECH_CARD_OPERATION_TYPE_INSPECT', zone: T.ZONE });
+  await listSays(
+    F('coverageMode'),
+    'охват контроля',
+    ['first output of the run'],
+    ['AQL plan', 'sample per bundle'],
+  );
+
+  await mount({ ...MACHINE_STEP, machineType: 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING' });
+  await listSays(
+    F('zipperApplication'),
+    'втачивание молнии',
+    ['separating zip, centre front', 'in-seam pocket zip'],
+    ['fly zip', 'invisible zip'],
+  );
+
+  await mount({ operationType: T.PRESS, zone: T.ZONE, pressEquipment: T.IRON });
+  await listSays(F('pressAction'), 'приём ВТО', ['press open'], ['press flat', 'steam']);
+  ck(await pick(F('pressAction'), 'press to one side'), 'приём — «press to one side»');
+  await listSays(
+    F('pressToward'),
+    'направление припуска',
+    ['toward the side seam'],
+    ['toward the front', 'toward the lining'],
+  );
+
+  // ── 6e. УСИЛИТЕЛЬ: ПЕРЕНОС, А НЕ УДАЛЕНИЕ ───────────────────────────────────────────────────
+  // Два снятых написания свернулись в ОДИН новый член. Запись, сделанная до волны, обязана
+  // читаться им — и на экране, и на бумаге. Прочитать её пустотой значило бы стереть ответ
+  // технолога, а следующим сохранением стереть его и в базе.
+  head('6e. усилитель: два написания свернулись в одно, и старая запись читается им');
+  const RF_OLD = ['TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH', 'TECH_CARD_REINFORCEMENT_FABRIC_STAY'];
+  const RF_NEW = 'TECH_CARD_REINFORCEMENT_PATCH';
+  for (const old of RF_OLD) {
+    const rtOld = await roundTrip({ ...HARDWARE_STEP, reinforcement: old });
+    ck(
+      rtOld.back?.reinforcement === RF_NEW,
+      `запись «${old}» ЧИТАЕТСЯ как patch`,
+      String(rtOld.back?.reinforcement),
+    );
+  }
+  const rtNew = await roundTrip({ ...HARDWARE_STEP, reinforcement: RF_NEW });
+  ck(
+    rtNew.wire?.hardware?.reinforcement === RF_NEW,
+    'на провод уходит patch',
+    JSON.stringify(rtNew.wire?.hardware ?? null),
+  );
+  ck(rtNew.back?.reinforcement === RF_NEW, 'и возвращается им же', String(rtNew.back?.reinforcement));
+  // И НЕ ПЕРЕПИСЫВАЕТ ЧУЖОЕ: канонизация, переписывающая всё подряд, зеленела бы здесь тоже.
+  const rtTape = await roundTrip({ ...HARDWARE_STEP, reinforcement: 'TECH_CARD_REINFORCEMENT_TAPE' });
+  ck(
+    rtTape.back?.reinforcement === 'TECH_CARD_REINFORCEMENT_TAPE',
+    'соседний член НЕ переписан в patch',
+    String(rtTape.back?.reinforcement),
+  );
+  const rowOld = await sheetRow({ ...HARDWARE_STEP, reinforcement: RF_OLD[0] });
+  ck(
+    /patch behind/i.test(rowOld?.machineMode ?? ''),
+    'ЛИСТ печатает старую запись словом «patch behind»',
+    rowOld?.machineMode ?? '',
+  );
+  ck(
+    !/fusible/i.test(rowOld?.machineMode ?? ''),
+    'и снятого написания на бумаге не оставляет',
+    rowOld?.machineMode ?? '',
+  );
+
+  // ── 6f. F7: ДВУХИГОЛЬНАЯ МАШИНА ⇒ ДВЕ ИГЛЫ ──────────────────────────────────────────────────
+  head('6f. F7: двухигольная машина и число игл — один факт, и он больше не противоречит себе');
+  const dnAt = async (op) =>
+    issuesAt(await validate({ ...MACHINE_STEP, machineType: DOUBLE_NEEDLE, ...op }), 'needleCount');
+  ck((await dnAt({ needleCount: 1 })).length === 1, 'F7: «двухигольная, игл 1» ОТВЕРГНУТА');
+  ck((await dnAt({ needleCount: 0 })).length === 1, 'F7: двухигольная без числа игл ОТВЕРГНУТА');
+  const dnTwo = await dnAt({ needleCount: 2 });
+  ck(dnTwo.length === 0, 'F7: двухигольная с двумя иглами ЗАКОННА', dnTwo.join(' | '));
+  const plainTwo = issuesAt(await validate({ ...MACHINE_STEP, needleCount: 2 }), 'needleCount');
+  ck(plainTwo.length === 0, 'F7: СОСЕДНЯЯ пара не задета — прямострочка с двумя иглами', plainTwo.join(' | '));
+  ck(
+    /two needles/i.test((await dnAt({ needleCount: 1 }))[0] ?? ''),
+    'F7: отказ говорит словами цеха',
+    (await dnAt({ needleCount: 1 }))[0] ?? '—',
+  );
+
+  // ── 6g. F11: КЛАСС ШВА ⇔ РЕЖИМ ОТСТРОЧКИ ────────────────────────────────────────────────────
+  head('6g. F11: «отстрочка» классом и блок отстрочки — одно утверждение, сказанное дважды');
+  const OS = T.TOPSTITCH;
+  const f11 = async (op, field) => issuesAt(await validate({ ...MACHINE_STEP, ...op }), field);
+  ck((await f11({ seamClass: OS }, 'topstitchMode')).length === 1, 'F11: класс «отстрочка» БЕЗ режима отвергнут');
+  ck(
+    (await f11({ seamClass: OS, topstitchMode: TS.EDGE }, 'topstitchMode')).length === 0,
+    'F11: класс «отстрочка» С режимом законен',
+  );
+  ck(
+    (await f11({ topstitchMode: TS.EDGE }, 'seamClass')).length === 1,
+    'F11: режим при НЕНАЗВАННОМ классе отвергнут — иначе он молча наследует умолчание карточки',
+  );
+  const namedPlain = await f11({ seamClass: PLAIN, topstitchMode: TS.EDGE }, 'seamClass');
+  ck(
+    namedPlain.length === 0,
+    'F11: СОСЕДНЯЯ пара не задета — НАЗВАННЫЙ стачной шов с отстрочкой законен',
+    namedPlain.join(' | '),
+  );
+  ck((await f11({ seamClass: PLAIN }, 'topstitchMode')).length === 0, 'F11: стачной шов режима не требует');
+
+  // ── 6h. F22: ВЕДУЩЕЕ ПОЛЕ ОКАНТОВКИ — КЛАСС ШВА, А НЕ МАШИНКА ───────────────────────────────
+  head('6h. F22: как сложена бейка — свойство БОУНД-шва, а не окантовочной машины');
+  const f22 = async (op) => issuesAt(await validate({ ...MACHINE_STEP, ...op }), 'bindingStyle');
+  ck(
+    (await f22({ machineType: BINDER, bindingStyle: FOLD })).length === 1,
+    'F22: окантовочная машина БЕЗ класса «bound» исполнение назвать не даёт',
+  );
+  ck(
+    (await f22({ machineType: BINDER, seamClass: BOUND, bindingStyle: FOLD })).length === 0,
+    'F22: окантовочная машина С классом «bound» — законна',
+  );
+  // ЭТО И ЕСТЬ ПОЧИНКА, А НЕ ПОБОЧНЫЙ ЭФФЕКТ: кант, притачанный на прямострочке, — обычная работа,
+  // и до F22 своё исполнение она назвать НЕ МОГЛА.
+  ck(
+    (await f22({ machineType: T.LOCKSTITCH, seamClass: BOUND, bindingStyle: FOLD })).length === 0,
+    'F22: окантовка НА ПРЯМОСТРОЧКЕ теперь может назвать исполнение',
+  );
+  ck(
+    (await f22({ machineType: BINDER, seamClass: PLAIN })).length === 0,
+    'F22: окантовочная машина БЕЗ исполнения не задета — запрещённой она не стала',
+  );
+
+  // ЖИВАЯ ПОЛОВИНА, ПАРОЙ «НЕТ → ЕСТЬ → НЕТ» НА ОДНОМ СМОНТИРОВАННОМ ШАГЕ.
+  await mount({ ...MACHINE_STEP, machineType: BINDER });
+  ck(
+    !(await has(F('bindingStyle'))),
+    'F22 на экране: на окантовочной машине БЕЗ класса «bound» контрола исполнения НЕТ',
+  );
+  ck(await openFold(), 'створка раскрыта — класс шва живёт в ней');
+  ck(await pick(F('seamClass'), 'BS — bound'), 'класс шва выставлен «BS — bound»');
+  ck(await has(F('bindingStyle')), 'F22 на экране: контрол исполнения ПОЯВИЛСЯ');
+  ck(await pick(F('seamClass'), 'SS — plain seam'), 'класс шва возвращён на стачной');
+  ck(!(await has(F('bindingStyle'))), 'F22 на экране: и контрол снова ИСЧЕЗ');
+  // И ТА ЖЕ ПАРА НА ПРЯМОСТРОЧКЕ — та самая работа, которой поле было недоступно.
+  await mount({ ...MACHINE_STEP, seamClass: BOUND });
+  ck(
+    await has(F('bindingStyle')),
+    'F22 на экране: окантовка на ПРЯМОСТРОЧКЕ видит контрол исполнения',
+  );
+  ck(
+    await listSays(F('bindingStyle'), 'исполнение бейки', [], ['double-fold binding']),
+    'и список исполнений в нём настоящий',
+  );
+
+  // ── 6i. F10: У ШЕЛКОГРАФИИ НОСИТЕЛЯ НЕТ — ПРАВИЛО ВМЕСТО ЧЛЕНА ──────────────────────────────
+  head('6i. F10: «носителя нет» стало правилом, а не значением словаря');
+  const printAt = async (op) =>
+    issuesAt(
+      await validate({ operationType: 'TECH_CARD_OPERATION_TYPE_PRINT', zone: T.ZONE, ...op }),
+      'peelMode',
+    );
+  ck(
+    (await printAt({ printMethod: 'TECH_CARD_PRINT_METHOD_SCREEN', peelMode: 'TECH_CARD_PEEL_MODE_HOT' }))
+      .length === 1,
+    'F10: съём носителя на шелкографии ОТВЕРГНУТ',
+  );
+  ck(
+    (await printAt({ printMethod: 'TECH_CARD_PRINT_METHOD_DTF', peelMode: 'TECH_CARD_PEEL_MODE_HOT' }))
+      .length === 0,
+    'F10: тот же съём на DTF ЗАКОНЕН — правило про метод, а не про поле',
+  );
+  ck(
+    (await printAt({ printMethod: 'TECH_CARD_PRINT_METHOD_SCREEN' })).length === 0,
+    'F10: шелкография без съёма не задета',
+  );
+  // И ВЕСЬ ВТО-БЛОК ПРИ ШЕЛКОГРАФИИ ОСТАЛСЯ ЗАКОННЫМ — в отличие от лазера. Правило отвергает ОДНО
+  // поле; отвергни оно блок целиком, термопресс шелкографии стал бы недоступен.
+  const screenPress = await validate({
+    operationType: 'TECH_CARD_OPERATION_TYPE_PRINT',
+    zone: T.ZONE,
+    printMethod: 'TECH_CARD_PRINT_METHOD_SCREEN',
+    pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_PRESS',
+    pressTemperatureC: 160,
+  });
+  ck(
+    issuesAt(screenPress, 'pressEquipment').length === 0 &&
+      issuesAt(screenPress, 'pressTemperatureC').length === 0,
+    'F10: прижим у шелкографии по-прежнему законен',
+    screenPress.map((i) => i.path).join(' '),
   );
 
   ck(pageErrors.length === 0, 'ни одного исключения за весь прогон', pageErrors.join(' | ').slice(0, 200));

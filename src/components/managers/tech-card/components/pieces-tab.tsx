@@ -31,7 +31,7 @@ import {
   UNSET_CUT_SYMMETRY,
   fusingHint,
   fusingModeOptionsFor,
-  fusingNeedsWidth,
+  fusingTakesWidth,
   grainlineArrow,
   grainlineOptionsFor,
   pieceCodeOptions,
@@ -1125,10 +1125,10 @@ export function PiecesTab({
                         onChange={(e) => {
                           const mode = e.target.value;
                           setValue(`pieces.${selIndex}.fusingMode`, mode, { shouldDirty: true });
-                          // Ширина живёт только у «полосой». Уходя с него, число убираем: рядом с
-                          // «по припуску» оно спорило бы с эталоном молча — на экране одно, в
-                          // расчёте другое, — и сервер отверг бы такую пару по имени поля.
-                          if (!fusingNeedsWidth(mode)) {
+                          // Число живёт только у «полосой». Уходя с него, число убираем: у «целиком»
+                          // ширине не к чему принадлежать, а сервер отверг бы такую пару по имени
+                          // поля. ВНУТРИ «полосой» пустое число законно и значит «по эталону».
+                          if (!fusingTakesWidth(mode)) {
                             setValue(`pieces.${selIndex}.fusingWidthMm`, '', { shouldDirty: true });
                           }
                         }}
@@ -1139,7 +1139,7 @@ export function PiecesTab({
                           </option>
                         ))}
                       </select>
-                      {fusingNeedsWidth(sel.fusingMode) && (
+                      {fusingTakesWidth(sel.fusingMode) && (
                         <div className='w-28'>
                           <Input
                             type='number'
@@ -1149,7 +1149,6 @@ export function PiecesTab({
                             placeholder='mm'
                             aria-label='fusing strip width, mm'
                             data-field={`pieces.${selIndex}.fusingWidthMm`}
-                            aria-invalid={!sel.fusingWidthMm?.trim()}
                             value={sel.fusingWidthMm ?? ''}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                               setValue(`pieces.${selIndex}.fusingWidthMm`, e.target.value, {
@@ -1160,9 +1159,9 @@ export function PiecesTab({
                         </div>
                       )}
                     </div>
-                    {/* Подпись говорит, ОТКУДА берётся ширина у режима без своего числа — иначе
-                        «по припуску» выглядит как ответ без величины, и первый же вопрос оператора
-                        будет «а сколько это». */}
+                    {/* Подпись говорит, ОТКУДА берётся ширина, когда ячейка пуста — иначе пустая
+                        ячейка выглядит как незаполненное поле, и первый же вопрос оператора будет
+                        «а сколько это». */}
                     <Text size='nano' variant='label' component='p'>
                       {fusingHint(sel.fusingMode)}
                     </Text>

@@ -214,7 +214,6 @@ const wireStepFacts = (o: common_TechCardOperation): StepFacts => ({
   print: o.print && {
     peelMode: o.print.peelMode,
     secondPressSec: o.print.secondPressSec,
-    pressureScale: o.print.pressureScale,
   },
   weld: o.weld && {
     airTemperatureC: o.weld.airTemperatureC,

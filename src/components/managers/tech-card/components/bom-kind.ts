@@ -228,21 +228,28 @@ export const MACHINE_TYPE_PREFERRED_KINDS: Partial<
     'TECH_CARD_BOM_KIND_TAPE',
     'TECH_CARD_BOM_KIND_PIPING',
   ],
-  TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH: [
-    'TECH_CARD_BOM_KIND_EYELET',
-    'TECH_CARD_BOM_KIND_RIVET',
-    'TECH_CARD_BOM_KIND_HOOK_AND_BAR',
-  ],
 };
 
 /**
  * The handful of hunches that still belong to the step TYPE rather than to a machine. Interlining is
  * roll goods and carries no kind at all, so fusing has nothing to prefer — the advisory that a
  * fusing step should link some fusible lives in the step editor, on the SECTION.
+ *
+ * ФУРНИТУРА ПЕРЕЕХАЛА СЮДА С МАШИНКИ (0328). Догадка висела на `machine_type = hardware_attach`, а
+ * этот член снят: «машинка, которая ставит фурнитуру» и глагол `HARDWARE_SET` говорили об одном
+ * факте. Удалить догадку вместе с ключом значило бы потерять её на той самой работе, ради которой
+ * она заводилась, — поэтому она переехала на ГЛАГОЛ, где ей и место: люверс ставят прессом, а не
+ * швейной машиной, и ось «на чём» у такого шага не заполнена вовсе.
  */
 export const OPERATION_TYPE_PREFERRED_KINDS: Partial<
   Record<common_TechCardOperationType, common_TechCardBomKind[]>
-> = {};
+> = {
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: [
+    'TECH_CARD_BOM_KIND_EYELET',
+    'TECH_CARD_BOM_KIND_RIVET',
+    'TECH_CARD_BOM_KIND_HOOK_AND_BAR',
+  ],
+};
 
 /** The kinds to float to the top for a step, from whichever axis has an opinion about it. */
 export function preferredBomKinds(operationType?: string, machineType?: string): Set<string> {
