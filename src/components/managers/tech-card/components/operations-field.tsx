@@ -2778,7 +2778,9 @@ function OperationEditor({
       field,
       path: `operations.${index}.${field}`,
       label: stepFields.find((f) => f.field === field)?.label ?? field,
-      error: errorAt(field) || 'the server refused this field',
+      // Отказ без слов — редкость (и zod, и сервер всегда присылают текст), но строка обязана
+      // остаться видимой: отказ, о котором нечего сказать, всё равно блокирует сохранение.
+      error: errorAt(field) || 'this field was refused',
     }));
 
   // [CLEAR] — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ФОРМА СТИРАЕТ ЗНАЧЕНИЕ ШАГА, и жест здесь человеческий.

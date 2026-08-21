@@ -65,11 +65,15 @@ export function StepResidueStrip({
     <div data-residue-strip className='mb-2 border border-borderColor p-2'>
       {/* ЗАГОЛОВОК НАЗЫВАЕТ ПРИЧИНУ, А НЕ СОСТОЯНИЕ. «Left over» без объяснения читается как
           «мусор, удали» — и человек удаляет чужую работу. Здесь сказано, ОТКУДА это взялось (шаг
-          отвечает за другое) и ЧТО будет (сохранение не пройдёт), потому что и то и другое —
-          решение, которое принимает он, а не форма. */}
+          показывает другое) и ЧТО с этим будет (значение уезжает на сохранение как есть).
+          И НЕ ОБЕЩАЕТ ОТКАЗА ВСЕМ СТРОКАМ. Отказ приходит на подавляющее большинство — сервер
+          отвергает поле чужого семейства по имени, — но не на все: оборудование прижима у
+          печатного шага, например, законно, а контрола у него там нет, потому что пикер стоит на
+          трёх ВТО-глаголах. Обещать отказ там, где его не будет, значит учить не читать полосу;
+          отказ, когда он есть, стоит СТРОКОЙ, а не заголовком. */}
       <Text size='micro' variant='label' className='mb-1'>
-        set here, but this step does not carry it — the save will be refused until these are cleared
-        or the step is changed back
+        set on this step, but its current kind shows no control for it — the values below are still
+        sent on save, and any refusal lands here
       </Text>
       <div className='space-y-px'>
         {rows.map((r) => (
