@@ -32,6 +32,11 @@ import {
   pressClothLabel,
   threadTensionLabel,
 } from './equipment-options';
+// ТОЛЬКО ТИП, И ЭТО УСЛОВИЕ, А НЕ СТИЛЬ: `schema.ts` импортирует ЗНАЧЕНИЯ отсюда, поэтому обратный
+// импорт значения замкнул бы цикл в рантайме. `import type` стирается при трансформации (в
+// tsconfig нет `verbatimModuleSyntax`), путь ведёт в модуль напрямую, а не через бочку с
+// re-export'ом, — ребра в графе бандла не появляется.
+import type { TechCardFormData } from './schema';
 
 // The assembly-order vocabularies, in ENGLISH with the ISO numbers the trade already uses.
 //
@@ -1099,10 +1104,32 @@ export function stepEnumOptions<T extends string>(
 // стоят в ЯДРЕ сетки рядом с типом, а не в фолде: обязательное поле за закрытым аккордеоном — это
 // сохранение, падающее на контроле, которого нет на экране (тот же довод, что у machine * и
 // equipment *).
+//
+// ИМЯ ПОЛЯ ЗДЕСЬ — КЛЮЧ СТРОКИ ФОРМЫ, А НЕ `string`, И ЭТО НЕ ПЕДАНТИЗМ. Диалог создания пишет
+// ответ технолога динамически, по имени из этой таблицы (`{ [field]: value }`), а маппер записи
+// собирает операцию поле за полем и МОЛЧА выбрасывает имена, которых не знает. Значит опечатка в
+// имени не доезжает до провода мусором — она доезжает законным `*_UNKNOWN` в требуемом поле, и
+// сервер отвергает сохранение щитом `operation_kinds_aware`, не назвав причины: в полезной
+// нагрузке всё выглядит правильно. Единственное место, где такую опечатку ещё можно поймать, —
+// компиляция, поэтому тип берётся ИЗ САМОЙ ФОРМЫ (`z.input` схемы шага), а не выписывается вторым
+// списком: список разошёлся бы со схемой ровно так же молча.
+//
+// Ключи сужены до СТРОКОВЫХ: ответ дискриминатора — токен enum'а, то есть строка, и указание на
+// `topstitchRows` (число) или `inputKeys` (массив) — такая же опечатка, как и несуществующее имя.
+type OperationFormRow = NonNullable<TechCardFormData['operations']>[number];
+export type OperationFormStringField = {
+  [K in keyof OperationFormRow]-?: NonNullable<OperationFormRow[K]> extends string ? K : never;
+}[keyof OperationFormRow];
+
 export const STEP_DISCRIMINATORS: Partial<
   Record<
     common_TechCardOperationType,
-    { field: string; label: string; labels: Record<string, string>; unset: string }
+    {
+      field: OperationFormStringField;
+      label: string;
+      labels: Record<string, string>;
+      unset: string;
+    }
   >
 > = {
   TECH_CARD_OPERATION_TYPE_HARDWARE_SET: {
