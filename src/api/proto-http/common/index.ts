@@ -2010,7 +2010,13 @@ export type TechCardHardwareAttachMethod =
   | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH"
   | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET"
   | "TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP"
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED";
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED"
+  // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
+  // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
+  // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
+  // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
+  // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER";
 // Подготовка отверстия под фурнитуру. NONE — явный ответ «фурнитура прокалывает сама».
 export type TechCardHolePrep =
   | "TECH_CARD_HOLE_PREP_UNKNOWN"
@@ -2038,7 +2044,13 @@ export type TechCardPrintMethod =
   | "TECH_CARD_PRINT_METHOD_DTF"
   | "TECH_CARD_PRINT_METHOD_HEAT_TRANSFER"
   | "TECH_CARD_PRINT_METHOD_FOIL"
-  | "TECH_CARD_PRINT_METHOD_LASER_ENGRAVE";
+  | "TECH_CARD_PRINT_METHOD_LASER_ENGRAVE"
+  // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
+  // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
+  // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
+  // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
+  // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
+  | "TECH_CARD_PRINT_METHOD_OTHER";
 // Съём носителя после прижима. NONE — явное «носителя нет вовсе» (шелкография, гравировка), а не
 // «не указано».
 export type TechCardPeelMode =
@@ -2064,7 +2076,13 @@ export type TechCardTrimAction =
   | "TECH_CARD_TRIM_ACTION_CLIP_CONCAVE"
   | "TECH_CARD_TRIM_ACTION_NOTCH_CONVEX"
   | "TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL"
-  | "TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE";
+  | "TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE"
+  // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
+  // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
+  // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
+  // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
+  // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
+  | "TECH_CARD_TRIM_ACTION_OTHER";
 // Что чистит шаг CLEAN — дискриминатор: REQUIRED, UNKNOWN отвергается. ЧЕМ чистит (вода,
 // растворитель, пар, щётка) — отложено: у цеха на это пока один ответ, и поле сегодня записывало
 // бы одно и то же.
@@ -2073,7 +2091,13 @@ export type TechCardCleaningKind =
   | "TECH_CARD_CLEANING_KIND_SPOT_CLEAN"
   | "TECH_CARD_CLEANING_KIND_DUST_LINT"
   | "TECH_CARD_CLEANING_KIND_CHALK_REMOVAL"
-  | "TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL";
+  | "TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL"
+  // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
+  // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
+  // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
+  // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
+  // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
+  | "TECH_CARD_CLEANING_KIND_OTHER";
 // Охват контроля — дискриминатор шага INSPECT: REQUIRED, UNKNOWN отвергается. Он же разводит
 // межоперационный контроль (SAMPLE_PER_BUNDLE), финальный (AQL_PLAN), сплошной (EACH_UNIT) и
 // первую единицу прогона (FIRST_OUTPUT) — четыре разных работы под одним глаголом.
@@ -2082,7 +2106,13 @@ export type TechCardInspectCoverage =
   | "TECH_CARD_INSPECT_COVERAGE_EACH_UNIT"
   | "TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE"
   | "TECH_CARD_INSPECT_COVERAGE_AQL_PLAN"
-  | "TECH_CARD_INSPECT_COVERAGE_FIRST_OUTPUT";
+  | "TECH_CARD_INSPECT_COVERAGE_FIRST_OUTPUT"
+  // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
+  // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
+  // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
+  // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
+  // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
+  | "TECH_CARD_INSPECT_COVERAGE_OTHER";
 // Вид мокрой обработки — дискриминатор шага WET_PROCESS: REQUIRED, UNKNOWN отвергается. Носитель —
 // TechCardOperation.wet_process_kind (поле 61), а не блок: семейство из одного факта не нуждается
 // в сообщении вокруг него.
@@ -2091,7 +2121,13 @@ export type TechCardWetProcessKind =
   | "TECH_CARD_WET_PROCESS_KIND_RINSE"
   | "TECH_CARD_WET_PROCESS_KIND_ENZYME"
   | "TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE"
-  | "TECH_CARD_WET_PROCESS_KIND_SOFTENER";
+  | "TECH_CARD_WET_PROCESS_KIND_SOFTENER"
+  // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
+  // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
+  // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
+  // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
+  // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
+  | "TECH_CARD_WET_PROCESS_KIND_OTHER";
 // Форма петли. Обтачной петли здесь нет и не будет: она не форма, а несколько швейных шагов.
 export type TechCardButtonholeStyle =
   | "TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN"
@@ -2145,6 +2181,49 @@ export type TechCardLabelAttachStitch =
   | "TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM"
   | "TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK"
   | "TECH_CARD_LABEL_ATTACH_STITCH_OTHER";
+// ЧТО ИМЕННО делает ВТО-шаг. Подпись глагола PRESS обещает «to one side / steam», а сказать это
+// было нечем: глагол оставался мешком из четырёх разных приёмов, и разница уезжала в прозу note,
+// которой нет ни в подписи, ни на печатном листе.
+// НЕ REQUIRED. Ни на одном глаголе: старая строка PRESS без под-глагола обязана сохраняться как
+// есть, и обязательность здесь ретроактивно перекрыла бы кислород каждой существующей карточке.
+// `OPEN` уживается с глаголом PRESS_OPEN, а не заменяет его. Глагол в проде и в подписанных
+// карточках, поэтому канонической записью разутюжки остаётся ОН: пикер пишет PRESS_OPEN и
+// press_action не пишет вовсе. Чтение принимает оба, но форма НИКОГДА не переписывает одно
+// написание в другое — два написания дают два разных кортежа в проекции дайджеста секции, и
+// авто-канонизация пометила бы подписанную карточку как «изменена после подписи» без единой
+// человеческой правки.
+export type TechCardPressAction =
+  | "TECH_CARD_PRESS_ACTION_UNKNOWN"
+  | "TECH_CARD_PRESS_ACTION_PRESS_FLAT"
+  | "TECH_CARD_PRESS_ACTION_TO_ONE_SIDE"
+  | "TECH_CARD_PRESS_ACTION_OPEN"
+  | "TECH_CARD_PRESS_ACTION_STEAM"
+  | "TECH_CARD_PRESS_ACTION_FINAL"
+  | "TECH_CARD_PRESS_ACTION_EASE_IN"
+  | "TECH_CARD_PRESS_ACTION_STRETCH"
+  | "TECH_CARD_PRESS_ACTION_MOULD"
+  | "TECH_CARD_PRESS_ACTION_OTHER";
+// КУДА лёг припуск. СОБСТВЕННЫЙ словарь, а НЕ переиспользование TechCardGarmentZone: «вверх»,
+// «вниз» и «к центру» зонами не являются, а второе поле зонного типа на шаге, у которого уже есть
+// zone, — это ровно ловушка «два ключа под одним именем».
+// Словарь называет НАЗНАЧЕНИЕ припуска, поэтому у пары «к рукаву / к пройме» ответ на каждый шов
+// ровно один. Законен ТОЛЬКО при press_action = TO_ONE_SIDE и там ОБЯЗАТЕЛЕН — обязательность,
+// которая не может стать ретроактивной: значения TO_ONE_SIDE ни одна сохранённая строка не имеет.
+export type TechCardPressToward =
+  | "TECH_CARD_PRESS_TOWARD_UNKNOWN"
+  | "TECH_CARD_PRESS_TOWARD_FRONT"
+  | "TECH_CARD_PRESS_TOWARD_BACK"
+  | "TECH_CARD_PRESS_TOWARD_UP"
+  | "TECH_CARD_PRESS_TOWARD_DOWN"
+  | "TECH_CARD_PRESS_TOWARD_TOWARD_CENTER"
+  | "TECH_CARD_PRESS_TOWARD_AWAY_FROM_CENTER"
+  | "TECH_CARD_PRESS_TOWARD_SLEEVE"
+  | "TECH_CARD_PRESS_TOWARD_BODY"
+  | "TECH_CARD_PRESS_TOWARD_FACING"
+  | "TECH_CARD_PRESS_TOWARD_SHELL"
+  | "TECH_CARD_PRESS_TOWARD_LINING"
+  | "TECH_CARD_PRESS_TOWARD_SIDE"
+  | "TECH_CARD_PRESS_TOWARD_OTHER";
 // TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
 // THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
 // path). Eleven fields left, and they left for three different reasons:
@@ -3445,6 +3524,20 @@ export type TechCardOperationInspect = {
   coverageMode: TechCardInspectCoverage | undefined;
 };
 
+// ВТО: ЧТО ИМЕННО делаем и КУДА лёг припуск. operation_type = PRESS целиком; на PRESS_OPEN
+// законно только action = OPEN (или пусто); на FUSING, PRINT и любом другом глаголе отвергается.
+// БЛОК, а не два плоских поля на проводе, — довод тот же, что у десяти блоков волны 0324:
+// отсутствующий блок значит «бандл про это молчит», и это единственный способ дать старому
+// клиенту сохранить шаг, не стерев того, чего он не показывает. Плоские поля потребовали бы
+// третьего aware-флага рядом с machine_fields_aware и operation_kinds_aware. В базе — плоские
+// колонки press_action / press_toward, ровно как у всех остальных блоков.
+// ОСТАЛЬНЫЕ ВТО-факты шага (оборудование, температура, выдержка, давление, пар, проутюжильник)
+// идут полями 39..45 самого шага и здесь НЕ дублируются: один факт живёт в одном месте.
+export type TechCardOperationPress = {
+  action: TechCardPressAction | undefined;
+  toward: TechCardPressToward | undefined;
+};
+
 // Петли, закрепки, пуговицы, молнии. Только MACHINE, и каждое поле — при своём ЯВНОМ machine_type
 // (резолв через machine_profile_key не засчитывается нигде).
 // REQUIRED тут НЕТ НИ ОДНОГО, в отличие от дискриминаторов новых глаголов: эти глаголы и машинки
@@ -3629,6 +3722,12 @@ export type TechCardOperation = {
   wetProcessKind: TechCardWetProcessKind | undefined;
   // 62 — ДЫРА: номер обещан полю `properties` фазы расширяемых свойств. `reserved` НЕ ставить.
   fastening: TechCardOperationFastening | undefined;
+  // 64 — ДЫРА: номер обещан блоку `TechCardOperationHandwork handwork`. Оба его поля
+  // (handwork_kind, handwork_thread) отложены, само сообщение не заводится, и хвост дайджеста
+  // "handwork" не рождается вовсе. `reserved` НЕ ставить.
+  // ВТО-под-глагол и направление припуска (0325). Блоком по тому же доводу, что и десять блоков
+  // выше; ВТО-факты 39..45 остаются на своих местах и здесь не дублируются.
+  press: TechCardOperationPress | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
