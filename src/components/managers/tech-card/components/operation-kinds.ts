@@ -142,6 +142,17 @@ export type OperationKind = {
    * как «что-то не загрузилось», поэтому вместо пустоты стоит фраза-состояние и указатель.
    */
   pointer?: string;
+  /**
+   * ПУНКТ-СОСТОЯНИЕ: РЕЗОЛВ ИМ ОТВЕЧАЕТ, ЧЕЛОВЕК ЕГО НЕ ВЫБИРАЕТ.
+   *
+   * Он называет то, чего в записи НЕТ, — и потому не может быть выбором: «выбрать не записанное»
+   * не значит ничего, а `kindWrites` у такого пункта не пишет ни одного факта. В списке он не
+   * предлагается (`kindIsOffered` = false) и появляется ровно одной строкой ровно тогда, когда
+   * резолв ответил ИМ, — `disabled`, потому что примитив ровно так и размечает «реальное, но не
+   * выбираемое», и потому что триггер Radix на значении без своего `Select.Item` рисуется ПУСТЫМ:
+   * честная подпись превратилась бы в пустое место, то есть в третью версию той же лжи.
+   */
+  stateOnly?: boolean;
 };
 
 const M = 'TECH_CARD_OPERATION_TYPE_MACHINE' as const;
@@ -254,6 +265,18 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // никогда. Чтение принимает оба. Форма никогда не переписывает одно в другое: два написания
   // дают два разных кортежа в проекции дайджеста секции, и авто-канонизация пометила бы
   // подписанную карточку как «изменена после подписи» без единой человеческой правки.
+  // G0 — НЕ ПУНКТ АВТОРИНГА, А ЧЕСТНЫЙ ОТВЕТ ПРО ЗАПИСЬ, В КОТОРОЙ ПРИЁМА НЕТ. До 0325 колонка
+  // `press_action` не существовала вовсе, и каждая сохранённая до неё строка ВТО молчит о приёме.
+  // Резолв отвечал на такую строку пунктом G1, и экран утверждал «Press flat» — факт, которого в
+  // записи нет ни в каком виде: ни приутюживания, ни разутюживания, ни пара. Утверждение это
+  // ничем не отличалось от записанного человеком, и снять его было нечем — «поменять на Press
+  // flat» на шаге, который уже назван Press flat, не жест.
+  //
+  // ПОЧЕМУ ПУНКТ, А НЕ `undefined`. Пустой ответ резолва означает «пара не соответствует ни
+  // одному пункту» — ручная комбинация, токен новее бандла; шаг ВТО без приёма не таков: глагол
+  // законен, пункт у него есть, не сказано ровно одно слово. Ответить `undefined` значило бы
+  // объявить нестандартной каждую доволновую строку ВТО и увести её из семейства G.
+  { id: 'G0', family: 'G', label: 'Press (action not recorded)', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', stateOnly: true, featured: ['pressSettings'] },
   { id: 'G1', family: 'G', label: 'Press flat', collapsedLabel: 'Press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT', featured: ['pressSettings'] },
   { id: 'G2', family: 'G', label: 'Press to one side', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE', featured: ['pressSettings'] },
   { id: 'G3', family: 'G', label: 'Press open', verb: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN', featured: ['pressSettings'] },
@@ -325,9 +348,15 @@ export const OPERATION_KIND_BY_ID: ReadonlyMap<string, OperationKind> = new Map(
 /** Семь ВТО-пунктов, которые различает ТОЛЬКО подглагол, — те, что схлопываются до миграции. */
 const PRESS_ACTION_ONLY = new Set(['G2', 'G4', 'G5', 'G6', 'G7', 'G8']);
 
-/** Виден ли пункт в списке СЕГОДНЯ (см. `PRESS_ACTION_IN_CONTRACT`). */
+/**
+ * Виден ли пункт в списке СЕГОДНЯ (см. `PRESS_ACTION_IN_CONTRACT`).
+ *
+ * Пункт-состояние (`stateOnly`) не предлагается НИКОГДА и ни при каком флаге: он называет
+ * отсутствие факта, а отсутствие не выбирают. В списке он появляется только строкой «вот что
+ * записано» — см. `kindPickerItems`.
+ */
 export const kindIsOffered = (k: OperationKind): boolean =>
-  PRESS_ACTION_IN_CONTRACT || !PRESS_ACTION_ONLY.has(k.id);
+  !k.stateOnly && (PRESS_ACTION_IN_CONTRACT || !PRESS_ACTION_ONLY.has(k.id));
 
 /** Имя пункта СЕГОДНЯ: у схлопнутого «Press» оно шире собственного, пока подглагола нет. */
 export const kindLabelOf = (k: OperationKind): string =>
@@ -368,7 +397,13 @@ export function kindPickerItems(
   let family = '';
   let hidden = 0;
   for (const k of OPERATION_KINDS) {
-    if (!kindIsOffered(k)) continue;
+    // ПУНКТ-СОСТОЯНИЕ ВСТАЁТ В СПИСОК РОВНО ТОГДА, КОГДА РЕЗОЛВ ОТВЕТИЛ ИМ, и встаёт `disabled`.
+    // Не ради вежливости: Radix берёт текст триггера у ТОГО `Select.Item`, чьё значение выбрано, —
+    // строки нет, и триггер пуст. Пустой триггер на заполненном шаге читается как «вид не
+    // назван», то есть та же ложь с другой стороны. Выбрать эту строку нельзя: она называет
+    // отсутствие приёма, а записать отсутствие поверх отсутствия — не жест.
+    const stateRow = !!k.stateOnly && k.id === activeId;
+    if (!kindIsOffered(k) && !stateRow) continue;
     if (k.rare && !rareOpen && k.id !== activeId) {
       hidden += 1;
       continue;
@@ -381,7 +416,7 @@ export function kindPickerItems(
         disabled: true,
       });
     }
-    out.push({ value: k.id, label: kindLabelOf(k) });
+    out.push({ value: k.id, label: kindLabelOf(k), ...(stateRow ? { disabled: true } : null) });
   }
   if (hidden > 0) out.push({ value: KIND_MORE, label: `— ${hidden} more kinds… —` });
   return out;
@@ -492,9 +527,11 @@ const VERB_TO_KIND: Record<common_TechCardOperationType, string> = {
   TECH_CARD_OPERATION_TYPE_HANDWORK: 'J1',
   TECH_CARD_OPERATION_TYPE_OTHER: 'J2',
   // MACHINE решает вторая ось, HARDWARE_SET и INSPECT — свой дискриминатор, PRESS — подглагол.
-  // Значения ниже стоят ПОСЛЕДНЕЙ ступенью: они верны, когда уточнить нечем.
+  // Значения ниже стоят ПОСЛЕДНЕЙ ступенью: они верны, когда уточнить нечем. У ВТО «уточнить
+  // нечем» — это НЕ приутюживание, а пункт-состояние G0: обратное здесь и стояло, и той же ложью,
+  // что жила в резолве, разошлось бы с ним заново, если бы кто-нибудь досюда дошёл.
   TECH_CARD_OPERATION_TYPE_MACHINE: '',
-  TECH_CARD_OPERATION_TYPE_PRESS: 'G1',
+  TECH_CARD_OPERATION_TYPE_PRESS: 'G0',
   TECH_CARD_OPERATION_TYPE_PRESS_OPEN: 'G3',
   TECH_CARD_OPERATION_TYPE_HARDWARE_SET: 'F0',
   TECH_CARD_OPERATION_TYPE_PRINT: 'H1',
@@ -513,18 +550,20 @@ const VERB_TO_KIND: Record<common_TechCardOperationType, string> = {
  * член, добавленный в прото, роняет сборку здесь, а не превращается молча в «нестандартную
  * комбинацию» на законном шаге.
  *
- * ДВА ЧЛЕНА ОТВЕЧАЮТ ПУСТОЙ СТРОКОЙ, И ЭТО ОТВЕТ, А НЕ ПРОПУСК. `UNKNOWN` — старая строка PRESS,
- * записанная до 0325: её пункт — приутюживание, потому что именно так её и читали до появления
- * под-глагола. `OTHER` — «свой приём, прозой в note»: пункта у него НЕТ и выдумывать ближайший
- * нельзя, поэтому резолв честно отвечает `undefined`, а редактор показывает «нестандартная
- * комбинация» и обе оси контролами. Разные ответы на разные вопросы — потому и разведены.
+ * ДВА ЧЛЕНА ОТВЕЧАЮТ ОСОБО, И ЭТО ОТВЕТЫ, А НЕ ПРОПУСКИ. `UNKNOWN` — строка PRESS, записанная до
+ * 0325, когда колонки приёма не было вовсе: её пункт — G0, «приём не записан». Раньше здесь
+ * стояло приутюживание — «именно так её и читали до появления под-глагола», — и это было
+ * утверждение о факте, которого в записи нет: экран называл приём, которого никто не называл.
+ * `OTHER` — «свой приём, прозой в note»: пункта у него НЕТ и выдумывать ближайший нельзя, поэтому
+ * резолв честно отвечает `undefined`, а редактор показывает «нестандартная комбинация» и обе оси
+ * контролами. Разные ответы на разные вопросы — потому и разведены.
  *
  * G3 (РАЗУТЮЖКА) В ЭТОЙ ТАБЛИЦЕ НЕ РЕЗОЛВИТСЯ ВОВСЕ, И ПУНКТ ПРИ ЭТОМ ЖИВ: его даёт ГЛАГОЛ
  * `PRESS_OPEN` (см. `VERB_TO_KIND`). Член `OPEN` был вторым написанием того же факта и снят в 0327,
- * так что номера в правой колонке идут G1, G2, G4… — это не пропуск, а отсутствие второго входа.
+ * так что номера в правой колонке идут G0, G1, G2, G4… — это не пропуск, а отсутствие второго входа.
  */
 const PRESS_ACTION_TO_KIND: Record<common_TechCardPressAction, string> = {
-  TECH_CARD_PRESS_ACTION_UNKNOWN: '',
+  TECH_CARD_PRESS_ACTION_UNKNOWN: 'G0',
   TECH_CARD_PRESS_ACTION_PRESS_FLAT: 'G1',
   TECH_CARD_PRESS_ACTION_TO_ONE_SIDE: 'G2',
   TECH_CARD_PRESS_ACTION_STEAM: 'G4',
@@ -572,10 +611,13 @@ export function kindOf(step: OperationKindStep): OperationKind | undefined {
   //    пунктом, но никогда не пишется, и форма ни одно из двух написаний в другое не переводит.
   if (verb === 'TECH_CARD_OPERATION_TYPE_PRESS') {
     const a = (step.pressAction ?? '') as PressActionToken;
-    // Не названный под-глагол — строка, записанная до 0325: её пункт приутюживание, ровно как её
-    // читали тогда. Названный, но не называющий пункта («прочее», токен новее бандла), — законная
-    // комбинация БЕЗ своего слова, и `undefined` про неё честнее любого «похожего» пункта.
-    if (!a || a === 'TECH_CARD_PRESS_ACTION_UNKNOWN') return byId('G1');
+    // ПОЛЯ В ЗАПИСИ НЕТ ВОВСЕ — тот же ответ, что и у явного `UNKNOWN` в таблице ниже: пункт G0,
+    // «приём не записан». Второй ветки с собственным пунктом здесь не стоит СОЗНАТЕЛЬНО: «пусто»
+    // и «UNKNOWN» — одно и то же незнание, записанное двумя способами (строка до 0325 и строка,
+    // где контрол оставлен на «— not stated —»), и два ответа на него разошлись бы молча.
+    // Названный, но не называющий пункта («прочее», токен новее бандла), — законная комбинация
+    // БЕЗ своего слова, и `undefined` про неё честнее любого «похожего» пункта.
+    if (!a) return byId('G0');
     const id = PRESS_ACTION_TO_KIND[a] ?? '';
     return id ? byId(id) : undefined;
   }
