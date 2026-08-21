@@ -2169,8 +2169,21 @@ function OperationEditor({
   // ДВА РАЗНЫХ ВОПРОСА, И ИХ НЕЛЬЗЯ ПУТАТЬ. `isPressStep` отвечает «шаг ЕСТЬ ВТО», из чего следует
   // ОБЯЗАТЕЛЬНОСТЬ пикера оборудования, — и печать в этот список намеренно не входит.
   // `ownsBlock('pressSettings')` отвечает «шагу МОЖНО дать настройки пресса»: термотрансфер
-  // прижимают температурой, выдержкой и силиконовой бумагой, не будучи ВТО-шагом. Ниже нужен
-  // второй, иначе очистка скрытого сотрёт ВТО-факты печатного шага при первом же открытии.
+  // прижимают температурой, выдержкой и силиконовой бумагой, не будучи ВТО-шагом. Ниже стоит
+  // второй — и стоит ВЕЗДЕ, где спрашивают про ВТО-поля: рендер блока «pressing mode», счётчик
+  // створки и очистка скрытого. Разойдись хоть один — и получится либо факт печатного шага,
+  // стёртый при первом же открытии, либо контрол, чьё значение выбрасывает маппер.
+  //
+  // ГРАВИРОВКА В ЭТОТ ГЕЙТ НЕ ДОПИСАНА, И ЭТО РЕШЕНИЕ, А НЕ ЗАБЫВЧИВОСТЬ. Схема отвергает все
+  // семь ВТО-полей при `laser_engrave` — у лазера нет ни носителя, ни плиты, — но отказ она ставит
+  // НА КАЖДОЕ ПОЛЕ ОТДЕЛЬНО и предлагает два равных выхода: «очисти настройки прижима ИЛИ выбери
+  // другой метод печати». Оба требуют, чтобы числа были на экране. Соседний `showPrint` при
+  // гравировке гаснет — но гаснет ВМЕСТЕ СО СВОЕЙ ОЧИСТКОЙ, а очистка ВТО-полей стоит на
+  // `ownsPressSettings` без метода: погасив здесь один рендер, мы получили бы живые невидимые
+  // значения и отказ на контроле, которого нет на экране. Дописать же метод и в очистку значит
+  // молча стирать 160 °C, ключ профиля и силиконовую бумагу от одного промаха в селекте метода —
+  // после чего второй выход, «верни метод», уже ничего не вернёт. Печать берёт пресс взаймы: она
+  // не обязана терять его настройки, пока идёт спор о том, чем наносят.
   const ownsBlock = (b: Parameters<typeof stepTypeOwnsBlock>[1]) => stepTypeOwnsBlock(opType, b);
   const ownsPressSettings = ownsBlock('pressSettings');
   // ЯВНЫЙ тип машины — тот, что назван НА ШАГЕ. Разрешённый через профиль не засчитывается ни
@@ -2230,12 +2243,16 @@ function OperationEditor({
     isMachineStep && needleSizeNm > 0,
     isMachineStep && threadTension !== NONE_TENSION,
     isMachineStep && stitchWidthMm.trim() !== '',
-    isPressStep && !!pressProfileKey.trim(),
-    isPressStep && pressTemperatureC > 0,
-    isPressStep && pressDwellSec > 0,
-    isPressStep && pressPressureNCm2.trim() !== '',
-    isPressStep && pressSteam !== undefined,
-    isPressStep && pressCloth !== NONE_PRESS_CLOTH,
+    // ВТО-половина — по `ownsPressSettings`, ровно как рендер блока и очистка скрытого: у
+    // печатного шага 160 °C и силиконовая бумага лежат в той же створке и прячутся тем же фолдом.
+    // Со списком трёх ВТО-глаголов редактор открывал бы печатный шаг с шестью заполненными
+    // фактами, показывая «inherits everything» над закрытой створкой, — то же самое, что потерять.
+    ownsPressSettings && !!pressProfileKey.trim(),
+    ownsPressSettings && pressTemperatureC > 0,
+    ownsPressSettings && pressDwellSec > 0,
+    ownsPressSettings && pressPressureNCm2.trim() !== '',
+    ownsPressSettings && pressSteam !== undefined,
+    ownsPressSettings && pressCloth !== NONE_PRESS_CLOTH,
   ].filter(Boolean).length;
   // ФАКТЫ НОВЫХ СЕМЕЙСТВ — СЧИТАЮТСЯ ТОЙ ЖЕ ПИЛЮЛЕЙ, И ЭТО НЕ УКРАШЕНИЕ. Створка открывается на
   // монтировании ровно тогда, когда счётчик не ноль (`useState(overrideCount > 0)`): не посчитав
@@ -2541,7 +2558,13 @@ function OperationEditor({
   const machineProfile = isMachineStep
     ? resolveMachineProfile(parkMachines, machineType, machineProfileKey)
     : undefined;
-  const pressProfile = isPressStep
+  // И ЗДЕСЬ ТОТ ЖЕ ВОПРОС, ЧТО У ПЕЧАТНОГО ЛИСТА (`ownsPress` в tech-pack-document): шаг, которому
+  // МОЖНО дать настройки пресса, наследует их по той же лестнице. Со списком трёх ВТО-глаголов
+  // печатный шаг, пришедший с ВТО (глагол переключили, оборудование и ключ остались), показывал бы
+  // выбранный профиль в пикере, «no profile» в заголовке над ним и пустые плейсхолдеры — при том
+  // что бумага печатала бы унаследованные 160 °C. Процесс профиля лестницу по-прежнему сужает:
+  // профиль, написанный для дублирования, печати не отвечает, универсальный — отвечает.
+  const pressProfile = ownsPressSettings
     ? resolvePressProfile(parkPresses, pressEquipment, pressProfileKey, opType)
     : undefined;
   const machineSource = machineProfile ? machineProfileName(machineProfile) : '';
@@ -3326,8 +3349,14 @@ function OperationEditor({
 
         {/* THE ВТО MODE — the press twin of the block above. Same rule throughout: blank inherits
             the profile, and the three-valued steam control keeps «not stated» apart from «press it
-            dry», which is an instruction somebody gave. */}
-        {isPressStep && (
+            dry», which is an instruction somebody gave.
+
+            `ownsPressSettings`, А НЕ `isPressStep`: печать берёт термопресс взаймы, и температура,
+            выдержка, давление, пар и силиконовая бумага — её законные факты, хотя ВТО и не является
+            тем, ЧТО шаг делает. Обязательности пикера оборудования это не расширяет: она живёт на
+            трёх ВТО-глаголах, пикер стоит выше, в ядре, и печати не показывается — `press_equipment`
+            у неё опционален и попадает на шаг только вместе с переключённым глаголом. */}
+        {ownsPressSettings && (
           <>
             <GroupLabel
               flush
@@ -3336,19 +3365,27 @@ function OperationEditor({
                   <Text size='micro' variant='label' component='span'>
                     {pressProfile ? `inherits ${pressSource}` : 'no profile — blanks stay unset'}
                   </Text>
-                  <AdoptPressIntoProfile
-                    index={index}
-                    step={{
-                      operationType: opType,
-                      pressEquipment,
-                      pressProfileKey,
-                      pressTemperatureC,
-                      pressDwellSec,
-                      pressPressureNCm2,
-                      pressSteam,
-                      pressCloth,
-                    }}
-                  />
+                  {/* ПРОДВИЖЕНИЕ В КАРТОЧНЫЙ ПРОФИЛЬ — только у ВТО-глаголов, и это не половинчатость.
+                      Новый профиль штампуется процессом ШАГА (`operationType: step.operationType`),
+                      а пикер процесса в парке знает ровно «any» и три ВТО-глагола: продвинутый с
+                      печати режим стал бы профилем «для печати», который парк не может ни показать,
+                      ни отредактировать. Печатному шагу остаётся выбрать готовый режим — что и есть
+                      «взять пресс взаймы». */}
+                  {isPressStep && (
+                    <AdoptPressIntoProfile
+                      index={index}
+                      step={{
+                        operationType: opType,
+                        pressEquipment,
+                        pressProfileKey,
+                        pressTemperatureC,
+                        pressDwellSec,
+                        pressPressureNCm2,
+                        pressSteam,
+                        pressCloth,
+                      }}
+                    />
+                  )}
                 </div>
               }
             >
@@ -3748,13 +3785,13 @@ function OperationEditor({
             материал сам, носителя нет и прижимать нечем — при выборе метода блок исчезает, а
             очистка выше стирает то, что успели поставить.
 
-            ТЕМПЕРАТУРЫ, ВЫДЕРЖКИ И СИЛИКОНОВОЙ БУМАГИ ЗДЕСЬ ПОКА НЕТ, и это не забывчивость.
-            Печать берёт термопресс взаймы, контракт ей ВТО-блок разрешает, но маппер записи
-            (schema.ts, `isPressStep` — три ВТО-глагола списком) выбрасывает ВТО-поля на любом
-            другом глаголе. Нарисовать их сейчас значило бы дать заполнить контрол, чьё значение
-            молча не доедет до сервера. Когда маппер спросит `stepTypeOwnsBlock(t,'pressSettings')`
-            вместо `isPressStep`, блок «pressing mode» ниже открывается печати одним предикатом —
-            очистка скрытого его уже не трогает. */}
+            ТЕМПЕРАТУРА, ВЫДЕРЖКА И СИЛИКОНОВАЯ БУМАГА ЖИВУТ НЕ ЗДЕСЬ, а в блоке «pressing mode»
+            выше: печать берёт их взаймы у термопресса, и это те же самые поля, что у ВТО-шага, а не
+            третья их копия. Здесь — только то, что бывает ТОЛЬКО у нанесения: съём носителя, второй
+            прижим и шкала манометра.
+
+            И ПОТОМУ ДВА БЛОКА ОТВЕЧАЮТ НА ГРАВИРОВКУ ПО-РАЗНОМУ: этот гаснет и стирается, ВТО-блок
+            выше остаётся стоять с отказом на каждом поле. Довод — у `ownsPressSettings`. */}
         {showPrint && (
           <>
             <GroupLabel>press &amp; peel</GroupLabel>
