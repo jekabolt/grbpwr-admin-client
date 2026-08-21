@@ -15,6 +15,7 @@ export {
   dropMove,
   dropRedoTop,
   emptyHistory,
+  insertLabel,
   isFormEntry,
   moveLabel,
   peekRedo,

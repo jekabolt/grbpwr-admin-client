@@ -197,12 +197,86 @@ ck(
   JSON.stringify(f.brokenLiveUnits),
 );
 ck(f.brokenViolations.length === 0, 'разорванный граф валиден по проходу', f.brokenViolations.join(', '));
+// ТРЕТЬЕ ПОЛОТНО — ЕДИНСТВЕННОЕ, ГДЕ ХВОСТ ВООБЩЕ ЕСТЬ. Стоит ему выродиться (появись в нём узел,
+// или окажись обработка над ОДНОЙ деталью), шаг уехал бы на плитку, хвоста не стало бы — и его
+// разметка перестала бы проверяться, оставив снимок зелёным.
+ck(
+  JSON.stringify(f.tailBlockKeys) === JSON.stringify(['']),
+  'граф хвоста: ни одного узла, только хвостовой псевдоблок',
+  JSON.stringify(f.tailBlockKeys),
+);
+ck(
+  JSON.stringify(f.tailLooseSteps) === JSON.stringify([0, 1, 2]),
+  'граф хвоста: атрибуция держит все три шага — ни один не достаёт до узла',
+  JSON.stringify(f.tailLooseSteps),
+);
+ck(
+  JSON.stringify(f.tailDrawnSteps) === JSON.stringify([1, 2]),
+  'граф хвоста: строк в хвосте две — обработка одной детали уехала на её плитку',
+  JSON.stringify(f.tailDrawnSteps),
+);
+ck(f.tailLiveUnits.length === 0, 'граф хвоста: живых узлов нет', JSON.stringify(f.tailLiveUnits));
+ck(f.tailViolations.length === 0, 'граф хвоста валиден по проходу', f.tailViolations.join(', '));
+
+/**
+ * Токены-ссылки снимка: `[{ to, text }]` в порядке появления. Ищется по СОБСТВЕННОЙ подсказке
+ * токена, а не по классу: класс — оформление и вправе меняться, адресат — контракт.
+ */
+const tokensIn = (html) =>
+  [...html.matchAll(/title="go to ▣ ([^"]*) on the canvas"[^>]*>([^<]*)</g)].map((m) => ({
+    to: m[1],
+    text: m[2],
+  }));
 
 for (const frozen of ['false', 'true']) {
   const s = shots[frozen];
   ck(s.includes('✓ garment'), `frozen=${frozen}: терминал назван словом`);
-  ck(s.includes('→ ▣ GARMENT'), `frozen=${frozen}: поглощённый узел назван словом`);
+  ck(s.includes('>▣ GARMENT</span>'), `frozen=${frozen}: поглощённый узел назван словом`);
   ck(s.includes('✕ break'), `frozen=${frozen}: разрыв назван словом`);
+
+  // ТОКЕН `▣ ИМЯ` — ССЫЛКА НА УЗЕЛ, ВЕЗДЕ И ВСЕГДА, включая выпущенную карточку: переход это
+  // способ СМОТРЕТЬ, а смотреть на RELEASED разрешено (R10). Разъедься эти два снимка по числу
+  // токенов — и половина навигации умирала бы ровно там, где карточку только и читают.
+  const tk = tokensIn(s);
+  // ЧЕТЫРЕ — И ВОТ КАКИЕ: шапки SHELL и HOOD («→ ▣ GARMENT» у обоих) плюс подвал GARMENT
+  // («← ▣ SHELL + ▣ HOOD + 2 pieces»). У разорванного графа токенов нет вовсе — оба узла живы
+  // («✕ break»), а в их подвалах только детали; у графа хвоста нет и боксов.
+  ck(tk.length === 4, `frozen=${frozen}: четыре токена-ссылки в снимке`, JSON.stringify(tk));
+  ck(
+    tk.every((t) => t.text === `▣ ${t.to}`),
+    `frozen=${frozen}: текст токена и его адресат — одно и то же имя`,
+    JSON.stringify(tk),
+  );
+  // Стрелка состояния и стрелка состава — РАЗНЫЕ строки бокса, и обе обязаны нести ссылку:
+  // «куда узел ушёл» и «из чего собран» — два вопроса, и оба ведут к соседям по графу.
+  ck(
+    s.includes('→ <span role="button"'),
+    `frozen=${frozen}: стрелка состояния ведёт токеном, а не текстом`,
+  );
+  ck(
+    s.includes('← <span role="button"'),
+    `frozen=${frozen}: стрелка состава ведёт токеном, а не текстом`,
+  );
+  // «✓ garment», «✕ break» и «N pieces» ссылками НЕ становятся: у первых двух адресата нет, у
+  // третьего его нет тоже — числу некуда вести. Орган, который иногда работает, а иногда нет, —
+  // ровно тот перегруз, ради снятия которого токен и заведён.
+  for (const dead of ['✓ garment', '✕ break', '2 pieces', '1 piece']) {
+    ck(
+      !new RegExp(`role="button"[^>]*>${dead.replace(/[+]/g, '\\$&')}<`).test(s),
+      `frozen=${frozen}: «${dead}» органом не стало`,
+    );
+  }
+
+  // ХВОСТОВОЙ БОКС ЖИВЁТ ТОЛЬКО В ТРЕТЬЕМ ПОЛОТНЕ, и до него золото не доставало вовсе.
+  ck(s.includes('◌ waiting for a unit'), `frozen=${frozen}: хвост назван ожиданием`);
+  ck(s.includes('joins a unit with its piece'), `frozen=${frozen}: хвост говорит про будущее`);
+  ck(s.includes('nothing here reaches a unit yet.'), `frozen=${frozen}: подсказка хвоста на месте`);
+  ck(
+    s.includes('border border-dashed border-borderColor bg-bgColor'),
+    `frozen=${frozen}: край хвоста 1px — рангом обычной коробки, а не узла`,
+  );
+  ck(s.includes('>2 steps<'), `frozen=${frozen}: подвал хвоста считает свои две строки`);
+  ck(s.includes('Σ 2.4'), `frozen=${frozen}: Σ хвоста на месте — подвал не пустой`);
   for (const glyph of ['·', '▣', '+▣']) {
     ck(s.includes(`>${glyph}</span>`), `frozen=${frozen}: глиф «${glyph}» на месте`);
   }
@@ -233,7 +307,18 @@ if (!views) {
   console.log('\nЮНИТ-КЕЙСЫ НЕ ПРОГНАНЫ: энтри не отдаёт `views` — модуль ещё не извлечён.');
   process.exit(1);
 }
-const { stepGlyph, stateWord, compositionOf, directInputsOf, buildWires, makeRowY, METRICS } = views;
+const {
+  stepGlyph,
+  stateWord,
+  stateParts,
+  compositionOf,
+  compositionParts,
+  partsText,
+  directInputsOf,
+  buildWires,
+  makeRowY,
+  METRICS,
+} = views;
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const step = (inputs, out = '') => ({
@@ -289,6 +374,30 @@ console.log('\nstateWord — три ветки');
   // Терминал СИЛЬНЕЕ поглощения: узел, съеденный кем-то и при этом единственный живой, — это
   // невозможное состояние, и порядок веток решает, каким словом схема о нём скажет.
   ck(stateWord(blk('S', [0], { absorbedInto: 'G' }), true) === '✓ garment', 'терминал бьёт поглощение');
+}
+
+console.log('\nstateParts — адресат ровно у одной ветки из трёх');
+{
+  // ГЛАВНОЕ СВОЙСТВО ТОКЕНА: он есть там и только там, где есть КУДА идти. «✓ garment» — конец
+  // пути, «✕ break» не ведёт никуда, и кликабельной СТРОКОЙ они не станут — органа в них нет.
+  const to = (parts) => parts.filter((p) => p.to !== undefined).map((p) => p.to);
+  ck(eq(to(stateParts(blk('G', [0]), true)), []), 'терминал адресата не имеет');
+  ck(eq(to(stateParts(blk('X', [0]), false)), []), 'разрыв адресата не имеет');
+  const absorbed = stateParts(blk('S', [0], { absorbedInto: 'G' }), false);
+  ck(eq(to(absorbed), ['G']), 'поглощение ведёт к съевшему узлу', JSON.stringify(absorbed));
+  ck(
+    absorbed.find((p) => p.to === 'G')?.text === '▣ G',
+    'текст токена — имя узла целиком, вместе с глифом',
+    JSON.stringify(absorbed),
+  );
+  // Разбиение обязано быть БЕЗ ПОТЕРЬ: видимая строка ровно та же, что печаталась до токенов.
+  for (const [b, t] of [
+    [blk('G', [0]), true],
+    [blk('S', [0], { absorbedInto: 'G' }), false],
+    [blk('X', [0]), false],
+  ]) {
+    ck(partsText(stateParts(b, t)) === stateWord(b, t), `склейка кусков = строка (${stateWord(b, t)})`);
+  }
 }
 
 console.log('\ndirectInputsOf — дедуп, свой ключ, порядок первого вхождения');
@@ -356,13 +465,31 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
   ];
   const chained = compositionOf('G', directInputsOf([blk('G', [0])], steps), new Map([['G', {}]]));
   ck(chained === '← 1 piece', 'поглощение не пишет «берёт сам себя»', chained);
+
+  // АДРЕСАТЫ СОСТАВА — только узлы. Детали приезжают ЧИСЛОМ, и числу некуда вести: ссылка на
+  // «2 pieces» либо врала бы про одну из двух, либо требовала бы выбирать за автора.
+  const to = (parts) => parts.filter((p) => p.to !== undefined).map((p) => p.to);
+  ck(
+    eq(to(compositionParts('G', di, units)), ['SHELL', 'HOOD']),
+    'ссылками стали узлы и только они',
+    JSON.stringify(compositionParts('G', di, units)),
+  );
+  ck(eq(to(compositionParts('ONE', di, units)), []), 'состав из одних деталей ссылок не даёт');
+  ck(eq(compositionParts('NONE', di, units), []), 'пустой вход — ни одного куска');
+  for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING']) {
+    ck(
+      partsText(compositionParts(k, di, units)) === compositionOf(k, di, units),
+      `склейка кусков = строка состава (${k})`,
+      partsText(compositionParts(k, di, units)),
+    );
+  }
 }
 
 console.log('\nmakeRowY — строка бокса, а не бокс');
 {
   const { HEAD_H, LINE_H } = METRICS;
   const box = { key: 'S', x: 100, y: 40, w: 180, h: 90 };
-  const layout = { byKey: new Map([['S', box]]), tail: undefined, tiles: [] };
+  const layout = { byKey: new Map([['S', box]]), tail: undefined, tiles: [], tailSteps: [] };
   const blocks = [blk('S', [3, 7, 9])];
   const rowY = makeRowY(blocks, layout);
   ck(rowY('S', 3) === 40 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2, 'первая строка', String(rowY('S', 3)));
@@ -371,12 +498,29 @@ console.log('\nmakeRowY — строка бокса, а не бокс');
   ck(rowY('NOPE', 3) === 0, 'бокса нет в раскладке — 0', String(rowY('NOPE', 3)));
 
   const tail = { key: '', x: 500, y: 16, w: 180, h: 70 };
-  const withTail = { byKey: new Map(), tail, tiles: [] };
+  const withTail = { byKey: new Map(), tail, tiles: [], tailSteps: [4] };
   const rowYTail = makeRowY([blk('', [4])], withTail);
   ck(
     rowYTail('', 4) === 16 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2,
     'хвост ищется полем tail, а не byKey',
     String(rowYTail('', 4)),
+  );
+
+  // ХВОСТ СЧИТАЕТСЯ ПО `tailSteps`, А НЕ ПО СВОЕМУ БЛОКУ. Блок хвоста по-прежнему держит ВСЕ
+  // шаги вне узлов, включая обработки, уехавшие на плитки своих деталей: атрибуция намеренно не
+  // тронута. Считай провод по блоку — и он целился бы в строку, сдвинутую на все уехавшие, то
+  // есть мимо всех оставшихся.
+  const trimmed = { byKey: new Map(), tail, tiles: [], tailSteps: [7] };
+  const rowYTrim = makeRowY([blk('', [4, 7])], trimmed);
+  ck(
+    rowYTrim('', 7) === 16 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2,
+    'уехавшая на плитку строка не сдвигает оставшуюся',
+    String(rowYTrim('', 7)),
+  );
+  ck(
+    rowYTrim('', 4) === 16 + HEAD_H / 2,
+    'шага, уехавшего на плитку, в хвосте нет — центр шапки',
+    String(rowYTrim('', 4)),
   );
 }
 
@@ -410,6 +554,7 @@ console.log('\nbuildWires — из правого края источника в
     ]),
     tail: undefined,
     tiles: [tile, free],
+    tailSteps: [],
   };
   const rowY = makeRowY(blocks, layout);
   const wires = buildWires(blocks, steps, layout, rowY);
@@ -446,12 +591,17 @@ console.log('\nbuildWires — из правого края источника в
   ck(w2[w2.length - 1].faint === true, 'съедена не здесь — бледный провод', JSON.stringify(w2[w2.length - 1]));
 
   // Бокса нет в раскладке — провод не рисуется вовсе, а не целится в нули.
-  const noBox = buildWires(blocks, steps, { byKey: new Map([['SHELL', shell]]), tail: undefined, tiles: [] }, rowY);
+  const noBox = buildWires(
+    blocks,
+    steps,
+    { byKey: new Map([['SHELL', shell]]), tail: undefined, tiles: [], tailSteps: [] },
+    rowY,
+  );
   ck(noBox.length === 0, 'нет бокса потребителя — провода нет', JSON.stringify(noBox));
   const noSource = buildWires(
     blocks,
     steps,
-    { byKey: new Map([['GARMENT', garment]]), tail: undefined, tiles: [] },
+    { byKey: new Map([['GARMENT', garment]]), tail: undefined, tiles: [], tailSteps: [] },
     rowY,
   );
   ck(noSource.length === 0, 'нет бокса источника — провода нет', JSON.stringify(noSource));
@@ -477,6 +627,57 @@ console.log('\nbuildWires — из правого края источника в
   // Хвостовой блок источником проводов не бывает: узлом он не является.
   const w5 = buildWires([blk('', [0])], selfSteps, { ...layout, tiles: [] }, rowY);
   ck(w5.length === 0, 'хвост не тянет проводов от себя', JSON.stringify(w5));
+
+  // ПРОВОД ВЫХОДИТ ИЗ СЕРЕДИНЫ ГОЛОВЫ ПЛИТКИ, А НЕ ИЗ СЕРЕДИНЫ ПЛИТКИ. Высота выросла под
+  // строки обработки, и точка выхода, посчитанная по ней, уехала бы к строкам — провод целился
+  // бы в деталь мимо детали.
+  const grown = { ...tile, h: METRICS.TILE + 2 * METRICS.PROC_ROW_H, processing: [0] };
+  const wg = buildWires(blocks, steps, { ...layout, tiles: [grown] }, rowY);
+  ck(
+    wg[wg.length - 1].d.startsWith(`M${grown.x + grown.w},${grown.y + METRICS.TILE / 2} `),
+    'провод детали выходит из середины ГОЛОВЫ, а не выросшей плитки',
+    wg[wg.length - 1].d,
+  );
+
+  // ШАГ, УЕХАВШИЙ НА ПЛИТКУ, ИЗ ХВОСТА УШЁЛ — и провода в несуществующую строку быть не должно.
+  // Блок хвоста про переезд не знает: атрибуция шагов намеренно осталась прежней.
+  const looseStep = [step([['piece', 'CUF']])];
+  const looseTile = {
+    key: 'CUF',
+    x: -60,
+    y: 0,
+    w: 52,
+    h: 60,
+    state: 'free',
+    into: '',
+    consumers: [0],
+    processing: [0],
+  };
+  const tailBox = { key: '', x: 400, y: 16, w: 180, h: 68 };
+  const wt = buildWires(
+    [blk('', [0])],
+    looseStep,
+    { byKey: new Map(), tail: tailBox, tiles: [looseTile], tailSteps: [] },
+    makeRowY([blk('', [0])], { byKey: new Map(), tail: tailBox, tiles: [], tailSteps: [] }),
+  );
+  ck(
+    wt.length === 0,
+    'провода в строку, уехавшую на плитку, нет',
+    JSON.stringify(wt.map((w) => w.key)),
+  );
+
+  // А оставшийся в хвосте шаг провод получает как прежде: правило снимает лишнее, а не всё.
+  const stays = buildWires(
+    [blk('', [0])],
+    looseStep,
+    { byKey: new Map(), tail: tailBox, tiles: [{ ...looseTile, processing: [] }], tailSteps: [0] },
+    makeRowY([blk('', [0])], { byKey: new Map(), tail: tailBox, tiles: [], tailSteps: [0] }),
+  );
+  ck(
+    stays.length === 1,
+    'оставшийся в хвосте шаг провод получает',
+    JSON.stringify(stays.map((w) => w.key)),
+  );
 }
 
 console.log(bad === 0 ? '\nвсё сошлось' : `\nрасхождений: ${bad}`);

@@ -240,7 +240,18 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
       if (edits.length === 0) return [];
       const back = inverseEdits(cur.current.pos, edits);
       const next = applyEdits(cur.current.pos, edits);
-      const cleaned = Object.keys(next).length > POS_CEILING ? prune(next, liveKeys()) : next;
+      // ЧИСТКА НЕ ИМЕЕТ ПРАВА СЪЕСТЬ ТО, ЧТО ЭТА ЖЕ ПАЧКА ТОЛЬКО ЧТО ПОСТАВИЛА. `liveKeys` считает
+      // узлы по последнему СВИПУ, а свип отстаёт на рендер: форма записана синхронно, но графа с
+      // новым ключом ещё никто не пересчитал. Переезд оверрайда при переименовании ставит ключ,
+      // которого в живом наборе поэтому ещё нет, — и на карточке, где потолок уже пробит, чистка
+      // стирала его тем же вызовом. Замерено: 201 оверрайд, переименование SHELL → CARCASS, и
+      // нода прыгала в авто-раскладку, то есть жест делал ровно то, ради устранения чего написан.
+      // Отмена этого не чинит: обратная пачка знает две правки, а чистка уносит двести.
+      // `move` от этого не меняется: он двигает ноду, которую свип уже видит.
+      const cleaned =
+        Object.keys(next).length > POS_CEILING
+          ? prune(next, liveKeys(), edits)
+          : next;
       commit({ pos: cleaned });
       setPos(cleaned);
       return back;
@@ -289,9 +300,16 @@ export function useSchematicPrefs(cardId: number | undefined, liveKeys: () => Se
   return { pos, peek, move, restore, reset, mode, setMode, axis, setAxis };
 }
 
-/** Убрать позиции нод, которых в графе больше нет. Зовётся только при переполнении потолка. */
-function prune(pos: PosOverrides, live: Set<string>): PosOverrides {
+/**
+ * Убрать позиции нод, которых в графе больше нет. Зовётся только при переполнении потолка.
+ *
+ * `just` — правки, которые ЭТОТ ЖЕ вызов только что применил: поставленный ими ключ живой по
+ * построению, даже если свип его ещё не видел (см. `restore`). Снятые правкой ключи (`at: null`)
+ * в пощаду не входят — их в записи уже нет.
+ */
+function prune(pos: PosOverrides, live: Set<string>, just: PosEdit[] = []): PosOverrides {
+  const spare = new Set(just.filter((e) => e.at).map((e) => e.key));
   const out: PosOverrides = {};
-  for (const [k, v] of Object.entries(pos)) if (live.has(k)) out[k] = v;
+  for (const [k, v] of Object.entries(pos)) if (live.has(k) || spare.has(k)) out[k] = v;
   return out;
 }

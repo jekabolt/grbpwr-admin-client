@@ -115,6 +115,7 @@ import {
   dropMove,
   dropRedoTop,
   emptyHistory,
+  insertLabel,
   moveLabel,
   peekRedo,
   peekUndo,
@@ -1133,11 +1134,15 @@ function useUnitCodeAct({
   // Через `getValues`, а не подпиской: редактор и так перерисовывается на каждую правку операций
   // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
   const plan = pending ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey) : null;
-  const dissolving = pending && (draft ?? '').trim() === '';
+  // ТОТ ЖЕ КЛЮЧ, КОТОРЫЙ ЛЯЖЕТ В ФОРМУ: вердикт нормализует набранное (подрезает), и подсказка
+  // обязана называть результат, а не черновик. Хвостовой пробел невидим — подсказка, печатающая
+  // «→ BODY⎵», читается как «→ BODY», то есть обещает не то, что произойдёт.
+  const typed = (draft ?? '').trim();
+  const dissolving = pending && typed === '';
   // ДЛИНА ГОВОРИТСЯ ПРЯМО ВО ВРЕМЯ НАБОРА, а не после Enter: тем же счётом, каким её посчитает
   // мутатор, — второй счёт разошёлся бы с первым молча. Отказ мутатора при этом остаётся: слова
   // под полем гаснут вместе с черновиком, а жест обязан отказать и мимо этого поля.
-  const tooLong = pending && !dissolving ? unitKeyLengthRefusal(draft ?? '') : null;
+  const tooLong = pending && !dissolving ? unitKeyLengthRefusal(typed) : null;
 
   // ЖИВОЙ НАБОР ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ ЭКРАНА — как драг ноды, маркиза и драг плитки с полки, и
   // слушатель по той же причине window-капчурный. Radix ловит Escape на ДОКУМЕНТЕ в фазе
@@ -1240,10 +1245,12 @@ function useUnitCodeAct({
           for the next steps
         </Text>
       )}
-      {refusal === null && tooLong === null && pending && !dissolving && (
+      {/* `typed !== outputKey` — набрали тот же код, только с пробелами: вердикт ответит `noop`,
+          и обещать «переписано в N шагах» было бы обещанием жеста, которого не будет. */}
+      {refusal === null && tooLong === null && pending && !dissolving && typed !== outputKey && (
         <>
           <Text size='micro' variant='label' className='mt-1'>
-            press Enter: ▣ {outputKey} → {draft} is rewritten in {plan?.steps ?? 0}{' '}
+            press Enter: ▣ {outputKey} → {typed} is rewritten in {plan?.steps ?? 0}{' '}
             {plan?.steps === 1 ? 'step' : 'steps'} at once — until then nothing has moved
           </Text>
           {/* НЕПЕРЕПИСЫВАЕМОЕ НАЗЫВАЕТСЯ ДО ПОДТВЕРЖДЕНИЯ, а не после. Код узла печатается на
@@ -4794,22 +4801,30 @@ export function OperationsField({
   // каждый легко обзаводится СВОЕЙ логикой мутаций, и через полгода «сшить» в списке и «сшить» на
   // схеме начинают расходиться в мелочах. Поэтому общий обработчик, а не два похожих.
 
-  /** Сшить выбранное в новый узел: добавляет шаг с этими входами и предложенным кодом. */
   /**
-   * ЕДИНСТВЕННОЕ МЕСТО, ГДЕ СХЕМА ПИШЕТ В ФОРМУ. Диалог только собирает аргументы; вся запись —
-   * здесь, в одном экземпляре, ровно как договаривались в T-23 про мутаторы.
+   * ВСТАВИТЬ ЗАПОЛНЕННЫЙ ШАГ НА ПОЗИЦИЮ `at` — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ СХЕМА ПИШЕТ В ФОРМУ. Диалог
+   * только собирает аргументы; вся запись — здесь, в одном экземпляре, ровно как договаривались в
+   * T-23 про мутаторы.
    *
    * До Ф7 эту роль делили `joinIntoUnit` и `addStepIntoUnit`, и оба создавали шаг из
    * `emptyOperation` — с типом и зоной в UNKNOWN, то есть заведомо невалидный. Технолог получал
    * строку с «!» и долг вместо результата. Теперь минимум валидности собран ДО записи.
+   *
+   * ПОЗИЦИЯ — АРГУМЕНТ, А НЕ ВТОРОЙ МУТАТОР (Т6). Дописывание в конец есть частный случай вставки
+   * (`at === fields.length`), и разводить их на две функции значило бы завести двух писателей
+   * одного рода: гейт заморозки, ремап ссылок дефектов и запись отмены пришлось бы держать
+   * синхронными в обеих, а расходятся такие пары молча. Отличается только род записи истории —
+   * там разница настоящая, см. ниже.
+   *
+   * Соседи: `insertAfter` вставляет ПУСТУЮ строку-долг (жест рельса, своя история), `addOperation`
+   * дописывает пустую в конец (кнопка вкладки). Этот — единственный, кто кладёт ЗАПОЛНЕННЫЙ шаг.
    */
-  const appendStep = (r: CreateResult) => {
+  const insertStepAt = (at: number, r: CreateResult) => {
     // ЗАМОРОЗКА ПРОВЕРЯЕТСЯ ЗДЕСЬ, а не только в разметке. Диалог рисуется порталом в body —
     // внешний `<fieldset disabled>` карточки до него не достаёт вовсе. Гонка настоящая: нажали
     // Release, пока запрос летит открыли создание, ответ перевёл карточку в RELEASED — и
     // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
     if (frozen) return;
-    const at = fields.length;
     // СТРОКА СОБИРАЕТСЯ ОТДЕЛЬНОЙ ПЕРЕМЕННОЙ, потому что её берёт себе запись истории: ⇧⌘Z
     // дописывает ЕЁ ЖЕ, а не пустой шаг. Собрать её второй раз в повторе значило бы завести второе
     // определение того, что такое «созданный этим жестом шаг».
@@ -4825,20 +4840,33 @@ export function OperationsField({
         ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
         : {}),
     };
-    // ПОЛУЗАПИСЬ ИСТОРИИ — до самого append, чтобы эффект на `[fields]` застал её уже стоящей.
+    // ССЫЛКИ ДЕФЕКТОВ ЕДУТ ВНИЗ ВМЕСТЕ СО СВОИМИ ШАГАМИ, и считается это ДО правки массива:
+    // `remapIssues` читает позиции через getValues. При вставке хвостом (`at === fields.length`)
+    // формула не двигает ничего — сдвигать нечего, — поэтому она одна на оба случая, а не две.
+    remapIssues((old) => (old >= at ? old + 1 : old));
+    // ПОЛУЗАПИСЬ ИСТОРИИ — до самой вставки, чтобы эффект на `[fields]` застал её уже стоящей.
     // Прежние записи здесь НЕ гасятся: в этом вся история — жест ложится ПОВЕРХ предыдущих.
+    //
+    // РОД ЗАПИСИ ВЫБИРАЕТ ПОЗИЦИЯ, И ЭТО НЕ УДВОЕНИЕ. Отличаются два рода ровно тем, чем
+    // отличаются два жеста для человека: «дописал в конец» и «вставил между» — разные поступки, и
+    // чип отмены обязан называть каждый своим словом. Щиты повтора у них тоже разные по числу и
+    // СОВПАДАЮТ на хвосте (`lengthAfter - 1 === index`), так что граница проходит там же, где
+    // проходит смысл, и ни один случай не остаётся без щита.
+    const tail = at === fields.length;
     pendingAppend.current = {
-      kind: 'append',
+      kind: tail ? 'append' : 'insert',
       index: at,
-      expectedLength: at + 1,
+      expectedLength: fields.length + 1,
       row,
-      label: appendLabel(at),
+      label: tail ? appendLabel(at) : insertLabel(at),
       // Жест с узлом ниже перезапишет `assemblyCleared` — снимаем значение ДО жеста, чтобы
       // инверсия вернула и его: «снял разметку → сшил → ⌘Z» без отката флага молча теряло
       // намерение снятия, и следующее сохранение не доносило его до сервера.
       ...(r.outputUnitKey ? { clearedBefore: !!getValues('assemblyCleared') } : {}),
     };
-    append(row);
+    // `insert(at, row)` при `at === fields.length` делает ровно то же, что `append`: строка
+    // ложится последней. Второй мутатор ради этого случая был бы вторым писателем одного рода.
+    insert(at, row);
     // Разметка появилась — намерение «снять разметку» отменено. Сегодняшний `joinIntoUnit` этого
     // НЕ делал (в отличие от `declare()`), и сценарий «снял → передумал → сшил заново» уходил в
     // отказ «снял и одновременно прислал узлы». Починка попутная и намеренная.
@@ -4848,6 +4876,65 @@ export function OperationsField({
     // Шаг создан — редактор обязан оказаться перед глазами, иначе жест кончается там же, где
     // начался, и результат приходится искать.
     requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  };
+
+  /**
+   * ЧТО ЛЕЖИТ НА СТОЛЕ ТАМ, КУДА МЕТИТ ОТКРЫТЫЙ ДИАЛОГ. Без позиции — конец последовательности
+   * (прежнее поведение), с позицией — фронтир ПЕРЕД целевым шагом.
+   *
+   * Адрес из намерения может оказаться числом из прошлого (последовательность изменилась, пока
+   * диалог открыт) — тогда `frontierBefore` по нему пуст, и отступать надо к конечному фронтиру, а
+   * не к пустому списку: пустой означал бы «на столе нет ничего», и диалог отказал бы даже тому
+   * составу, который жест уже назначил.
+   */
+  const frontierForCreate =
+    pendingCreate?.at === undefined
+      ? grouping.res.frontier
+      : (grouping.res.frontierBefore[pendingCreate.at] ?? grouping.res.frontier);
+
+  /**
+   * В КАКОЙ УЗЕЛ ПОПАДЁТ ШАГ С ТАКИМ СОСТАВОМ НА ЭТОЙ ПОЗИЦИИ — ОТВЕТОМ ДВИЖКА, а не пересказом.
+   *
+   * Принадлежность шага узлу нигде не хранится: `assembly-blocks.ts` выводит её транзитивно из
+   * входов и пересчитывает на каждое изменение. Значит единственный честный способ ответить на
+   * «попадёт ли это в COLLAR» — собрать последовательность С ВСТАВЛЕННЫМ кандидатом и спросить у
+   * той же проекции, которая потом и нарисует блоки. Правило «блок решает первый вход, ведущий к
+   * узлу» переписанное здесь второй раз, разошлось бы с оригиналом молча.
+   *
+   * Прогон стоит один проход по шагам и живёт ровно пока открыт диалог.
+   */
+  const unitOfPlanned = useCallback(
+    (draft: { inputKeys: string[]; outputUnitKey: string }) => {
+      const at = pendingCreate?.at;
+      if (at === undefined) return '';
+      const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+      const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+      const steps = [...grouping.schematicSteps];
+      const clamped = Math.min(Math.max(at, 0), steps.length);
+      steps.splice(clamped, 0, {
+        inputs: classifyAssemblyInputs(pieceKeys, draft.inputKeys.filter(Boolean)),
+        outputUnitKey: draft.outputUnitKey.trim(),
+        outputUnitName: '',
+      });
+      const res = assemblySweep(sweepPieces, steps);
+      return assemblyBlocks(steps, res).blockOfStep.get(clamped) ?? '';
+    },
+    [pendingCreate?.at, pieces, grouping.schematicSteps],
+  );
+
+  /**
+   * ДИАЛОГ СОЗДАНИЯ ЗАКОНЧИЛСЯ «CREATE». Позицию несёт САМО НАМЕРЕНИЕ, а не второй колбэк: жест,
+   * начавшийся точкой вставки внутри узла, и жест, начавшийся «+ new operation», приходят сюда
+   * одной дорогой и расходятся ровно одним числом. Второй путь означал бы, что однажды они
+   * разойдутся и поведением.
+   *
+   * АДРЕС КЛАМПИТСЯ: пока диалог открыт, последовательность могла измениться (соседний жест,
+   * отмена, ресет формы после save), и `at` из намерения — число из прошлого. За концом массива
+   * `insert` из RHF молча кладёт строку в конец; клампом это делается явно и одинаково для всех.
+   */
+  const appendStep = (r: CreateResult) => {
+    const at = pendingCreate?.at;
+    insertStepAt(at === undefined ? fields.length : Math.min(Math.max(at, 0), fields.length), r);
   };
 
   /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
@@ -4929,7 +5016,10 @@ export function OperationsField({
       dissolveUnit(stepIndex);
       return { ok: true };
     }
-    const { from, plan } = act;
+    // `to`, А НЕ `next`: вердикт отдаёт ключ НОРМАЛИЗОВАННЫМ (подрезанным), потому что подрезанным
+    // он и уедет на провод. Записать сюда набранное значило бы развести тождество ключа на экране
+    // и тождество ключа на сервере — см. `unitRenameAct`.
+    const { from, to, plan } = act;
     // АДРЕСА СВЕРЯЮТСЯ ДО ПЕРВОЙ ЗАПИСИ. Без `fieldId` записи истории нет, а жест без отмены
     // хуже отказа: пусть лучше не состоится ничего, чем состоится неотменяемое.
     const outputs: RenameOutputSite[] = [];
@@ -4945,13 +5035,13 @@ export function OperationsField({
       for (const at of s.at) inputs.push({ index: s.index, fieldId: id, at });
     }
 
-    rewriteUnitKeySites({ outputs, inputs }, next);
+    rewriteUnitKeySites({ outputs, inputs }, to);
     // РУЧНАЯ ПОЗИЦИЯ НОДЫ ЕДЕТ ВМЕСТЕ С КЛЮЧОМ, и едет ДО записи истории: `restore` отдаёт
     // обратную пачку по своему синхронному снимку оверрайдов, и другой возможности узнать «где
     // нода стояла до жеста» у записи нет. По тому же снимку (`peek`, а не `pos` из рендера)
     // считается и прямая пачка — иначе половины разошлись бы на кадр. Пустая пачка законна: ноду
     // могли ни разу не двигать, и выдумывать ей позицию значит приколотить её навсегда.
-    const posForward = renamePosEdits(prefs.peek(), from, next);
+    const posForward = renamePosEdits(prefs.peek(), from, to);
     const posBack = prefs.restore(posForward);
     setHistory(
       record(history.current, {
@@ -4959,22 +5049,22 @@ export function OperationsField({
         index: stepIndex,
         fieldId: fields[stepIndex]?.id ?? '',
         from,
-        to: next,
+        to,
         outputs,
         inputs,
         posBack,
         posForward,
-        label: renameLabel(from, next),
+        label: renameLabel(from, to),
       }),
     );
-    setRenamedUnit({ from, to: next });
+    setRenamedUnit({ from, to });
     // Жест подтверждён уходом фокуса — и этот же уход сейчас дёрнет восьмую точку сброса. Щит
     // ровно на один такт: иначе запись, только что легшая, умрёт до первого ⌘Z.
     settleGesture();
     // УСПЕХ ПРОИЗНОСИТСЯ, и число в нём считает ВСЕ ТРИ ВИДА МЕСТ: перенумерация шагов не молчит
     // (R9), а переименование, переписавшее полкарточки, — тем более.
     showMessage(
-      `renamed ${from} → ${next} in ${plan.steps} ${plan.steps === 1 ? 'step' : 'steps'}`,
+      `renamed ${from} → ${to} in ${plan.steps} ${plan.steps === 1 ? 'step' : 'steps'}`,
       'success',
     );
     return { ok: true };
@@ -5091,7 +5181,9 @@ export function OperationsField({
     }
     if (rec.kind === 'move') {
       prefs.restore(rec.back);
-    } else if (rec.kind === 'append') {
+    } else if (rec.kind === 'append' || rec.kind === 'insert') {
+      // ОДНА ИНВЕРСИЯ НА ОБА РОДА: удалить строку по адресу. Дописывание и вставка расходятся
+      // только в повторе — там надо знать, куда возвращать, — а обратно они идут одинаково.
       applyToForm(() => {
         // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
         removeOperation(rec.index);
@@ -5152,6 +5244,31 @@ export function OperationsField({
       };
       applyToForm(() => {
         append({ ...rec.row });
+        if (rec.clearedBefore !== undefined) {
+          setValue('assemblyCleared', false, { shouldDirty: true });
+        }
+      });
+      setSelected(rec.index);
+      return;
+    }
+    if (rec.kind === 'insert') {
+      // ТОТ ЖЕ ДВУХТАКТНЫЙ ЗАХВАТ, ЧТО У СОЗДАНИЯ, и по той же причине: RHF выдаёт вернувшейся
+      // строке НОВЫЙ id. Отличие ровно одно — позиция берётся ИЗ ЗАПИСИ: повтор обязан вернуть шаг
+      // туда, откуда его сняли, иначе ⇧⌘Z молча превращал бы вставку в дописывание.
+      setHistory(dropRedoTop(history.current));
+      pendingAppend.current = {
+        kind: 'insert',
+        index: rec.index,
+        expectedLength: fields.length + 1,
+        row: rec.row,
+        label: rec.label,
+        redone: true,
+        ...(rec.clearedBefore !== undefined ? { clearedBefore: rec.clearedBefore } : {}),
+      };
+      applyToForm(() => {
+        // Ремап ссылок дефектов — как у прямого жеста: строки ниже адреса снова едут вниз.
+        remapIssues((old) => (old >= rec.index ? old + 1 : old));
+        insert(rec.index, { ...rec.row });
         if (rec.clearedBefore !== undefined) {
           setValue('assemblyCleared', false, { shouldDirty: true });
         }
@@ -5726,10 +5843,16 @@ export function OperationsField({
         prefill={pendingCreate}
         onClose={() => setPendingCreate(null)}
         onCreate={appendStep}
-        frontier={grouping.res.frontier}
+        // ФРОНТИР ЦЕЛЕВОЙ ПОЗИЦИИ, А НЕ КОНЦА ЛИСТА. У жеста без позиции это одно и то же, у
+        // вставки — нет: `frontierBefore[at]` считает, что лежало на столе ПЕРЕД шагом `at`, а
+        // конечный фронтир предложил бы входы, которые к этой позиции ещё не произведены или уже
+        // съедены, то есть заведомо отвергаемый движком состав. Вставка ничего не меняет в
+        // префиксе `0..at-1`, поэтому фронтир СТАРОГО массива на этом адресе и есть фронтир нового.
+        frontier={frontierForCreate}
         unitKeys={new Set(grouping.res.units.keys())}
         pieceKeys={new Set(pieces.map((p) => p.lineKey))}
         labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+        unitOfPlanned={unitOfPlanned}
         onCloseAutoFocus={restoreScreenFocus}
       />
 
