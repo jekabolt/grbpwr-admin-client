@@ -1035,6 +1035,25 @@ const calloutSchema = z.object({
   parts: z.array(z.string()).optional().default([]),
 });
 
+// ИМЕНА ПОЛЕЙ ШАГА — ИЗ САМОЙ СХЕМЫ, ОДИН РАЗ НА РЕПОЗИТОРИЙ.
+//
+// У этого списка два потребителя, и они обязаны спрашивать ОДНО: проба круга «чтение → форма →
+// запись» (`scripts/step-roundtrip-probe.mjs`) и аудит присутствия после сохранения. Выписанный
+// руками второй список разошёлся бы с первым молча — ровно в день, когда волна добавит поле
+// тридцать третье, и ровно на том поле, которого ни один из двух не проверит.
+//
+// Порядок — объявления в схеме; вложенные схемы не разворачиваются: вопрос здесь про ПОЛЯ ШАГА.
+export function operationFieldNames(): string[] {
+  const node = operationSchema as unknown as {
+    _def?: { schema?: { shape?: Record<string, unknown> }; shape?: Record<string, unknown> };
+    shape?: Record<string, unknown>;
+  };
+  // `.superRefine()` оборачивает объект в ZodEffects, и форма обёртки у zod менялась между
+  // мажорами: спрашиваем обе, а не ту, что оказалась под рукой.
+  const shape = node.shape ?? node._def?.schema?.shape ?? node._def?.shape;
+  return shape ? Object.keys(shape) : [];
+}
+
 const operationSchema = z.object({
   // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
   // («Node is required») is why: a mandatory field with free input has no right answer, so the
