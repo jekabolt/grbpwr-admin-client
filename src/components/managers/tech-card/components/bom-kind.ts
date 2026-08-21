@@ -55,21 +55,16 @@ export const KIND_HOME_SECTION: Partial<Record<common_TechCardBomKind, string>> 
   // TRIM, к остальным лентам (tape, binding, piping, webbing): секция отвечает на «чем это лежит в
   // спецификации», а не «чем это ставят», и по этой мерке она соседка ленты, а не машинки.
   TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE: 'TECH_CARD_BOM_SECTION_TRIM',
-  // прокладки
-  //
-  // ЭТА СЕКЦИЯ НЕ ВЫДАЁТ ВИДОВ В ПИКЕРЕ, и запись здесь всё равно обязательна. INTERLINING —
-  // рулонный материал, он не входит в KIND_ELIGIBLE_SECTIONS ниже, поэтому строка прокладки
-  // контрола «вид» не показывает вовсе и стабилизатор из интерфейса выбрать нельзя. Но дом —
-  // зеркало серверного bomKindHomeSection, из которого выведен сам список допустимых видов
-  // (ValidTechCardBomKinds): вид без дома для валидации не существует. Поставить его в
-  // DECORATION ради того, чтобы он появился в пикере, значит предложить оператору значение,
-  // которое стор отвергнет по bom_items[i].kind, — ровно та беда, ради которой этот файл и
-  // написан. Подпись при этом работает: строка, приехавшая по проводу, читается словом и на
-  // экране, и на бумаге, а это и есть то, что чинится здесь.
-  TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER: 'TECH_CARD_BOM_SECTION_INTERLINING',
   // декор
   TECH_CARD_BOM_KIND_PRINT: 'TECH_CARD_BOM_SECTION_DECORATION',
   TECH_CARD_BOM_KIND_EMBROIDERY: 'TECH_CARD_BOM_SECTION_DECORATION',
+  // СТАБИЛИЗАТОР ЖИВЁТ В ДЕКОРЕ, А НЕ В ПРОКЛАДКАХ, и это не вкусовщина. Первая редакция этого
+  // файла поставила его в INTERLINING «по материалу» — и вид стал НЕДОСТИЖИМ: INTERLINING
+  // рулонная, в KIND_ELIGIBLE_SECTIONS её нет, контрола «вид» на такой строке не рисуется вовсе.
+  // Дом здесь — зеркало серверного bomKindHomeSection (`entity/techcard.go`), а там он
+  // DECORATION, рядом с самой вышивкой, чьим расходником он и является. Разъезд этих двух карт
+  // отвергается стором по паре «вид ↔ секция», поэтому правится ТОЛЬКО эта сторона.
+  TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER: 'TECH_CARD_BOM_SECTION_DECORATION',
   TECH_CARD_BOM_KIND_APPLIQUE: 'TECH_CARD_BOM_SECTION_DECORATION',
   TECH_CARD_BOM_KIND_PATCH: 'TECH_CARD_BOM_SECTION_DECORATION',
   TECH_CARD_BOM_KIND_HEAT_TRANSFER: 'TECH_CARD_BOM_SECTION_DECORATION',

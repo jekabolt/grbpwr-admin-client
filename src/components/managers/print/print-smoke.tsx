@@ -144,7 +144,7 @@ const techCard = {
         lineKey: 'B4',
         name: 'cut-away backing',
         kind: 'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER',
-        section: 'TECH_CARD_BOM_SECTION_INTERLINING',
+        section: 'TECH_CARD_BOM_SECTION_DECORATION',
         unit: 'm',
       },
     ],
