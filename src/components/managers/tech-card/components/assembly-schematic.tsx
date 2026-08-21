@@ -12,6 +12,7 @@ import {
   buildWires,
   directInputsOf,
   makeRowY,
+  picksMany,
   pieceAddPrefill,
   TailBoxView,
   TileView,
@@ -373,7 +374,7 @@ export function AssemblySchematic({
    * Space), а наследуемая задизейбленность до div'а не достаёт. Запреты Р9 продолжает решать
    * `frozen`, а не fieldset — явно, как и требовалось.
    */
-  const activate = (fn?: () => void, stop = false) =>
+  const activate = (fn?: (multi: boolean) => void, stop = false) =>
     fn
       ? {
           role: 'button' as const,
@@ -383,7 +384,10 @@ export function AssemblySchematic({
             // свой смысл — выделить: без этой строки один клик по токену делал бы обе вещи
             // разом, и «перейти к соседу» заодно выделяло бы того, от кого уходят.
             if (stop) e.stopPropagation();
-            fn();
+            // МОДИФИКАТОР ЕДЕТ В ОБРАБОТЧИК, А НЕ ЧИТАЕТСЯ ИМ — слово в слово то же решение, что
+            // на полотне фулскрина, и предикат тот же (`picksMany`): вьюшка бокса общая, и
+            // «⌘+клик набирает выделение» обязано быть одним ответом на обеих поверхностях.
+            fn(picksMany(e));
           },
           // Клавиатура зовёт действие НАПРЯМУЮ, минуя защиту от клик-эха: эхо бывает только у
           // указателя, и общий сторож съедал бы первый Enter после отменённого жеста.
@@ -392,7 +396,8 @@ export function AssemblySchematic({
             e.preventDefault();
             if (stop) e.stopPropagation();
             justDragged.current = false;
-            fn();
+            // ⌘/⇧/Ctrl + Enter значит то же, что ⌘/⇧/Ctrl + клик.
+            fn(picksMany(e));
           },
         }
       : // Без действия нет и роли: иначе скринридер объявляет кнопкой то, что ничего не делает и
@@ -414,13 +419,21 @@ export function AssemblySchematic({
     onPointerLeave: () => setHovered((h) => (h === key ? null : h)),
   });
 
-  const clickGuard = (fn: () => void) => () => {
-    if (justDragged.current) {
-      justDragged.current = false;
-      return;
-    }
-    fn();
-  };
+  /**
+   * Сторож клик-эха ПРОЗРАЧЕН ПО АРГУМЕНТАМ — та же причина, что на полотне фулскрина: он стоит и
+   * между `activate` и обработчиком шапки (которому нужен флаг модификатора), и на голых чипах
+   * полосы, которые по-прежнему `() => void`. Зафиксированный `(multi: boolean)` дал бы чипам
+   * лишний параметр, в который React передал бы СОБЫТИЕ — объект, истинный в любом `if`.
+   */
+  const clickGuard =
+    <A extends unknown[]>(fn: (...args: A) => void) =>
+    (...args: A) => {
+      if (justDragged.current) {
+        justDragged.current = false;
+        return;
+      }
+      fn(...args);
+    };
 
   /**
    * ПЕРЕЙТИ К УЗЛУ ПО ТОКЕНУ `▣ ИМЯ`: выделить названный и, если он за краем, довезти прокруткой.
@@ -770,7 +783,7 @@ export function AssemblySchematic({
                 // ТРЕТЬЕГО АРГУМЕНТА ЗДЕСЬ НЕТ, и это единственная разница между поверхностями:
                 // дока у инлайна нет вовсе, показывать список узла негде, и клик открывает
                 // ПЕРВУЮ операцию узла — всё ещё операцию этого узла, а не выделение.
-                headProps={activate(clickGuard(unitHeadOpen(b, onPickStep)))}
+                headProps={activate(clickGuard(unitHeadOpen(b, toggle, onPickStep)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 // СЛОВА ПОВЕРХНОСТИ. В инлайне полотна нет вовсе — есть прокручиваемая коробка,

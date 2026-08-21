@@ -473,23 +473,24 @@ console.log('\nunitHeadTarget — клик по шапке: одна опера�
       const log = [];
       return {
         log,
+        sel: (k) => log.push(`sel:${k}`),
         pick: (i) => log.push(`step:${i}`),
         open: (k) => log.push(`unit:${k}`),
       };
     };
     {
       const t = trace();
-      unitHeadOpen(blk('SLEEVES', [5]), t.pick, t.open)();
+      unitHeadOpen(blk('SLEEVES', [5]), t.sel, t.pick, t.open)();
       ck(eq(t.log, ['step:5']), 'полотно, одна операция → шаг', JSON.stringify(t.log));
     }
     {
       const t = trace();
-      unitHeadOpen(blk('GARMENT', [2, 3]), t.pick, t.open)();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, t.open)();
       ck(eq(t.log, ['unit:GARMENT']), 'полотно, две операции → режим узла', JSON.stringify(t.log));
     }
     {
       const t = trace();
-      unitHeadOpen(blk('SLEEVES', [5]), t.pick, undefined)();
+      unitHeadOpen(blk('SLEEVES', [5]), t.sel, t.pick, undefined)();
       ck(eq(t.log, ['step:5']), 'инлайн, одна операция → тот же шаг', JSON.stringify(t.log));
     }
     {
@@ -498,13 +499,45 @@ console.log('\nunitHeadTarget — клик по шапке: одна опера�
       // и жалуется. Поэтому там открывается ПЕРВАЯ операция узла: это всё ещё операция ЭТОГО
       // узла, а не выделение и не чужой шаг.
       const t = trace();
-      unitHeadOpen(blk('GARMENT', [2, 3]), t.pick, undefined)();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, undefined)();
       ck(eq(t.log, ['step:2']), 'инлайн, две операции → первая операция узла', JSON.stringify(t.log));
     }
     {
       const t = trace();
-      unitHeadOpen(blk('T', []), t.pick, undefined)();
+      unitHeadOpen(blk('T', []), t.sel, t.pick, undefined)();
       ck(eq(t.log, []), 'инлайн, узел без шагов → ничего, а не падение', JSON.stringify(t.log));
+    }
+
+    // МОДИФИКАТОР — ПЕРВАЯ ВЕТКА РЕШЕНИЯ, И ОНА ОДНА НА ОБЕ ПОВЕРХНОСТИ. Требование владельца
+    // дословно: «когда нажимаешь на ноду с контролом или с шифтом блоки должны мульти
+    // выбираться». Проверяется здесь, а не только живым гейтом, потому что это ЧИСТОЕ решение:
+    // док при модификаторе не открывается ни на полотне, ни в инлайне, и число операций узла на
+    // это не влияет — иначе «выделить» на однооперационном узле означало бы «открыть».
+    {
+      const t = trace();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, t.open)(true);
+      ck(eq(t.log, ['sel:GARMENT']), 'полотно + модификатор → ТОЛЬКО выделение', JSON.stringify(t.log));
+    }
+    {
+      const t = trace();
+      unitHeadOpen(blk('SLEEVES', [5]), t.sel, t.pick, t.open)(true);
+      ck(
+        eq(t.log, ['sel:SLEEVES']),
+        'узел с ОДНОЙ операцией под модификатором тоже только выделяется',
+        JSON.stringify(t.log),
+      );
+    }
+    {
+      const t = trace();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, undefined)(true);
+      ck(eq(t.log, ['sel:GARMENT']), 'инлайн + модификатор → тот же ответ', JSON.stringify(t.log));
+    }
+    {
+      // БЕЗ АРГУМЕНТА — ОБЫЧНЫЙ КЛИК. Дефолт `false` держит старый жест живым у любого вызывателя,
+      // который про модификатор не знает.
+      const t = trace();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, t.open)();
+      ck(eq(t.log, ['unit:GARMENT']), 'без модификатора — по-прежнему операции узла', JSON.stringify(t.log));
     }
   }
 }
@@ -525,7 +558,24 @@ console.log('\nшапка узла на обеих поверхностях — 
       /headProps=\{activate\(clickGuard\(unitHeadOpen\(/.test(t),
       `${name}: шапка ведёт общим unitHeadOpen`,
     );
-    ck(!/headProps=\{activate\(clickGuard\(\(\) => toggle\(/.test(t), `${name}: шапка больше не выделяет`);
+    ck(
+      !/headProps=\{activate\(clickGuard\(\(\) => toggle\(/.test(t),
+      `${name}: шапка не выделяет ОБЫЧНЫМ кликом`,
+    );
+    // МОДИФИКАТОР ПРОВЕДЁН ОДИНАКОВО НА ОБЕИХ ПОВЕРХНОСТЯХ. Обработчики собирает `activate`
+    // родителя, и «прочитать модификатор» решается там; сделай это каждый файл по-своему — и
+    // жест разъедется между инлайном и полотном молча, при общей вьюшке бокса. Две точки на
+    // файл — мышь и клавиатура: орган, слушающийся мыши и глухой к клавиатуре, это два разных
+    // органа под одной подписью.
+    ck(
+      (t.match(/fn\(picksMany\(e\)\)/g) ?? []).length === 2,
+      `${name}: модификатор читает общий picksMany и в клике, и в клавиатуре`,
+      String((t.match(/fn\(picksMany\(e\)\)/g) ?? []).length),
+    );
+    ck(
+      /unitHeadOpen\(b, toggle,/.test(t),
+      `${name}: набор выделения ведёт тот же unitHeadOpen, а не второй орган`,
+    );
   }
   // ЧИП `steps · N` СНЯТ: он делал ровно то, что теперь делает клик по шапке, и два органа с
   // одним смыслом — это и есть перегруз, на который владелец жалуется. Клавиша `e` остаётся:
