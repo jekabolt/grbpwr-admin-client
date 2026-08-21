@@ -358,7 +358,13 @@ export function AssemblyCreateDialog({
   const keepsPiece = !pieceJudged || pieceLands === ontoPiece;
   const pieceProblem = (() => {
     if (keepsPiece) return '';
-    const onto = `◌ this step will not appear on ▣ ${ontoPiece}`;
+    // ДЕТАЛЬ НАЗЫВАЕТСЯ ТЕМ ЖЕ ИМЕНЕМ, ЧТО И ВЕЗДЕ ВОКРУГ. `ontoPiece` — это `lineKey`, а он у
+    // детали ULID (`schema.ts`: `p.lineKey?.trim() || ulid()`), и напечатанный сырым он называет
+    // деталь строкой, которой нет ни на плитке, с которой нажали (там `pieceNameOf`), ни в чипе
+    // состава двумя строками выше (там `labelOf`). Предупреждение, называющее предмет именем, не
+    // встречающимся на экране, не выполняет своей работы: человек не может сопоставить его ни с
+    // чем. Имя берётся тем же органом, что и чип, — иначе они разошлись бы снова.
+    const onto = `◌ this step will not appear on ▣ ${labelOf(ontoPiece)}`;
     if (!distinct.includes(ontoPiece)) return `${onto} — it no longer takes it`;
     if (draft.outputUnitKey) {
       return `${onto} — it assembles ▣ ${draft.outputUnitKey}, and that is a row of the unit`;
