@@ -1,3 +1,4 @@
+import { common_TechCardOperationType } from 'api/proto-http/admin';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -8,7 +9,13 @@ import Text from 'ui/components/text';
 
 import { suggestUnitCode } from './assembly-suggest';
 import { machineTypeOptions, pressEquipmentOptions } from './equipment-options';
-import { operationTypeOptionsFor, zoneOptions } from './operation-options';
+import {
+  STEP_DISCRIMINATORS,
+  operationTypeOptionsFor,
+  stepDiscriminatorUnset,
+  stepEnumOptions,
+  zoneOptions,
+} from './operation-options';
 
 // Диалог создания операции из схемы.
 //
@@ -59,6 +66,13 @@ export type CreateResult = {
   zone: string;
   machineType?: string;
   pressEquipment?: string;
+  /**
+   * ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ПАРОЙ «ПОЛЕ + ЗНАЧЕНИЕ», а не шестью необязательными ключами.
+   * Дискриминатор у глагола ровно один, и какой именно — знает `STEP_DISCRIMINATORS`; шесть
+   * полей в этом типе означали бы шестой список, который надо держать в согласии с таблицей.
+   */
+  discriminatorField?: string;
+  discriminatorValue?: string;
   /** Пусто = обработка: шаг ничего не собирает, входы остаются на столе. */
   outputUnitKey: string;
   outputUnitName: string;
@@ -125,6 +139,9 @@ export function AssemblyCreateDialog({
   const [zone, setZone] = useState(UNKNOWN_ZONE);
   const [machineType, setMachineType] = useState(UNKNOWN_MACHINE);
   const [pressEquipment, setPressEquipment] = useState(UNKNOWN_PRESS);
+  // Ответ на обязательный вопрос глагола. Пусто — пока глагол его не задаёт: селекта на экране
+  // нет вовсе, и хранить в нём нечего.
+  const [discriminator, setDiscriminator] = useState('');
   const [produces, setProduces] = useState<'process' | 'unit' | 'absorb'>('process');
   const [unitKey, setUnitKey] = useState('');
   const [unitKeyTouched, setUnitKeyTouched] = useState(false);
@@ -141,6 +158,7 @@ export function AssemblyCreateDialog({
     setZone(UNKNOWN_ZONE);
     setMachineType(UNKNOWN_MACHINE);
     setPressEquipment(UNKNOWN_PRESS);
+    setDiscriminator('');
     setProduces(
       prefill.absorbInto
         ? 'absorb'
@@ -185,6 +203,31 @@ export function AssemblyCreateDialog({
 
   const needsMachine = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
   const needsPress = PRESS_TYPES.has(operationType);
+  /**
+   * ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ТРЕТЬЯ ОСЬ, РОВНО ТАКАЯ ЖЕ, КАК МАШИНКА И ПРЕСС ВЫШЕ.
+   *
+   * У шести глаголов волны 0324 есть поле, без которого сервер отвергает шаг БЕЗУСЛОВНО. Диалог,
+   * который его не спрашивает, обещает валидный минимум и выдаёт шаг с `*_UNKNOWN` в требуемом
+   * поле — то есть ровно тот долг, ради отмены которого он и заведён. Таблица берётся общая: свой
+   * список «у каких глаголов есть дискриминатор» разошёлся бы с редактором на седьмом глаголе.
+   */
+  const stepDiscriminator = STEP_DISCRIMINATORS[operationType as common_TechCardOperationType];
+  // Слово, которым поле названо человеку, — то же самое, каким подписан контрол в открытом
+  // редакторе, но без звёздочки: «*» там значит «обязательное», а здесь обязательно ВСЁ, что
+  // диалог спрашивает. Имя поля на проводе живёт рядом, в `stepDiscriminator.field`.
+  const discriminatorWord = stepDiscriminator ? stepDiscriminator.label.replace(/\s*\*$/, '') : '';
+
+  /**
+   * СМЕНА ГЛАГОЛА СБРАСЫВАЕТ ОТВЕТ, И ЭТО НЕ ПРИБОРКА. Словари у шести дискриминаторов разные:
+   * оставленный от предыдущего выбора токен — значение ЧУЖОГО enum, и сервер отвергает его по
+   * имени поля. Сентинел «не выбрано» ставится сразу: Radix запрещает `Select.Item` с пустым
+   * value, и пустая строка нарисовала бы пустой триггер вместо плейсхолдера.
+   */
+  const pickType = (next: string) => {
+    setOperationType(next);
+    const d = STEP_DISCRIMINATORS[next as common_TechCardOperationType];
+    setDiscriminator(d ? stepDiscriminatorUnset(d.labels) : '');
+  };
 
   const problem = (() => {
     if (distinct.length === 0) return 'a step must have at least one input';
@@ -209,6 +252,12 @@ export function AssemblyCreateDialog({
     if (!zone || zone === UNKNOWN_ZONE) return 'pick a zone — “other” is a legitimate answer';
     if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'pick a machine';
     if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS)) return 'pick the pressing equipment';
+    if (
+      stepDiscriminator &&
+      (!discriminator || discriminator === stepDiscriminatorUnset(stepDiscriminator.labels))
+    ) {
+      return `pick “${discriminatorWord}” — without it the step cannot be saved`;
+    }
     if (produces === 'unit' && !canBeUnit) {
       return 'a unit made of a single input is processing, not a unit: take at least two inputs';
     }
@@ -253,6 +302,10 @@ export function AssemblyCreateDialog({
       zone,
       machineType: needsMachine ? machineType : undefined,
       pressEquipment: needsPress ? pressEquipment : undefined,
+      // Пара едет только с тем глаголом, у которого дискриминатор есть: у остальных поле в строке
+      // остаётся тем, чем его завёл `emptyOperation`, и шаг не несёт ответа на незаданный вопрос.
+      discriminatorField: stepDiscriminator?.field,
+      discriminatorValue: stepDiscriminator ? discriminator : undefined,
     });
   };
 
@@ -387,7 +440,7 @@ export function AssemblyCreateDialog({
           <Select
             name='assemblyOperationType'
             value={operationType}
-            onValueChange={setOperationType}
+            onValueChange={pickType}
             // Плейсхолдер — это UNKNOWN-значение словаря, а НЕ пустая строка: Radix запрещает
             // `Select.Item` с пустым value (пустое значение зарезервировано за «выбор снят») и
             // роняет весь экран. ВСЕ четыре словаря несут такой пункт сами — включая тип операции:
@@ -421,6 +474,24 @@ export function AssemblyCreateDialog({
               value={pressEquipment}
               onValueChange={setPressEquipment}
               items={pressEquipmentOptions}
+              fullWidth
+            />
+          )}
+          {/* ЧЕТВЁРТЫЙ УСЛОВНЫЙ СЕЛЕКТ — той же формы, что машинка и пресс, и по тому же доводу:
+              без него шаг рождается заведомо несохраняемым. Плейсхолдер называет ПОЛЕ («— print
+              method —»), как и соседи («— machine —», «— zone —»), а не задаёт вопрос: подписи над
+              контролом здесь нет, и вопрос «— method —» повис бы без предмета. У глагола такой
+              вопрос ровно один, поэтому лишний селект в диалоге всегда не больше одного. */}
+          {stepDiscriminator && (
+            <Select
+              name='assemblyStepDiscriminator'
+              value={discriminator}
+              onValueChange={setDiscriminator}
+              items={stepEnumOptions(
+                stepDiscriminator.labels,
+                `— ${discriminatorWord} —`,
+                discriminator,
+              )}
               fullWidth
             />
           )}

@@ -1062,3 +1062,97 @@ export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField
     { field: 'zipper', text: zipperApplicationLabel(f?.zipperApplication) },
   ]);
 }
+
+
+// ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ОДНА ТАБЛИЦА НА ВЕСЬ ЭКРАН, И ЖИВЁТ ОНА ЗДЕСЬ, А НЕ В РЕДАКТОРЕ.
+// Спрашивают её ДВОЕ: `operations-field` — в сетке открытого шага, `assembly-create-dialog` — на
+// создании, где без ответа шаг рождается заведомо несохраняемым. Вторая копия таблицы означала бы,
+// что седьмой глагол с дискриминатором добавят в один список и забудут в другом, — и диалог снова
+// начнёт выпускать шаги, которые сервер отвергает. Подписи взяты из этого же файла, где их берёт
+// печатный лист.
+// ПИКЕР ИЗ ПЕЧАТНОГО СЛОВАРЯ, И ТОЛЬКО ОДНА СТРОКА ДОБАВЛЕНА СВОЯ. Карты подписей в
+// operation-options пишут UNKNOWN пустой строкой намеренно: на бумаге «не указано» печатается
+// НИЧЕМ. В селекте пустая строка — это пустая первая строка списка, поэтому шапку («— не указано —»)
+// даёт вызывающий, а все содержательные слова остаются одними на экран и на лист.
+//
+// И ТА ЖЕ ЗАЩИТА ОТ НЕЗНАКОМОГО ТОКЕНА, что у machineTypeOptionsFor: каждая из этих карт ТОТАЛЬНА
+// над контрактом, значит токен вне списка — не легаси, а значение НОВЕЕ этого бандла (обычное
+// состояние проекта между выкаткой бэка и выкаткой клиента). Radix рисует селект со значением вне
+// своих items ПУСТЫМ триггером, и технолог читает «свойства нет» там, где оно есть.
+export function stepEnumOptions<T extends string>(
+  labels: Record<T, string>,
+  unsetCaption: string,
+  current?: string,
+): Array<{ value: string; label: string }> {
+  const items = (Object.keys(labels) as T[]).map((value) => ({
+    value: value as string,
+    label: labels[value] || unsetCaption,
+  }));
+  const v = (current ?? '').trim();
+  if (!v || v in labels) return items;
+  return [...items, { value: v, label: `${v} — unknown to this app version` }];
+}
+
+// ДИСКРИМИНАТОР ГЛАГОЛА — ВТОРАЯ ОСЬ ТОЧНО ТАК ЖЕ, КАК МАШИНКА У «MACHINE». Шесть новых глаголов
+// без своего поля — заголовок, а не инструкция: «печать» не говорит, шелкография это или
+// гравировка, «контроль» — сплошной он или по выборке. Сервер требует их БЕЗУСЛОВНО, поэтому они
+// стоят в ЯДРЕ сетки рядом с типом, а не в фолде: обязательное поле за закрытым аккордеоном — это
+// сохранение, падающее на контроле, которого нет на экране (тот же довод, что у machine * и
+// equipment *).
+export const STEP_DISCRIMINATORS: Partial<
+  Record<
+    common_TechCardOperationType,
+    { field: string; label: string; labels: Record<string, string>; unset: string }
+  >
+> = {
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: {
+    field: 'attachMethod',
+    label: 'held on by *',
+    labels: HARDWARE_ATTACH_METHOD_LABELS,
+    unset: '— how —',
+  },
+  TECH_CARD_OPERATION_TYPE_PRINT: {
+    field: 'printMethod',
+    label: 'print method *',
+    labels: PRINT_METHOD_LABELS,
+    unset: '— method —',
+  },
+  TECH_CARD_OPERATION_TYPE_TRIM: {
+    field: 'trimAction',
+    label: 'cut *',
+    labels: TRIM_ACTION_LABELS,
+    unset: '— which cut —',
+  },
+  TECH_CARD_OPERATION_TYPE_CLEAN: {
+    field: 'cleaningKind',
+    label: 'clean off *',
+    labels: CLEANING_KIND_LABELS,
+    unset: '— what —',
+  },
+  TECH_CARD_OPERATION_TYPE_INSPECT: {
+    field: 'coverageMode',
+    label: 'coverage *',
+    labels: INSPECT_COVERAGE_LABELS,
+    unset: '— how much —',
+  },
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: {
+    field: 'wetProcessKind',
+    label: 'bath *',
+    labels: WET_PROCESS_KIND_LABELS,
+    unset: '— which bath —',
+  },
+};
+
+/**
+ * СЕНТИНЕЛ «НЕ ВЫБРАНО» У СЛОВАРЯ ДИСКРИМИНАТОРА — тот единственный член, чья подпись пуста; он
+ * же и есть `*_UNKNOWN` контракта. Выводится ровно тем правилом, каким `stepEnumOptions` рисует
+ * плейсхолдер, — иначе шесть токенов пришлось бы выписать третьим списком рядом с картами подписей
+ * и `emptyOperation`, и разошёлся бы он молча.
+ *
+ * Нужен ТОМУ, КТО ДЕРЖИТ ЗНАЧЕНИЕ САМ (диалог создания): Radix запрещает `Select.Item` с пустым
+ * value, поэтому «ещё не ответили» — это UNKNOWN-токен, а не пустая строка. В редакторе шага то же
+ * значение приходит из `emptyOperation`, и спрашивать его там незачем.
+ */
+export function stepDiscriminatorUnset(labels: Record<string, string>): string {
+  return Object.keys(labels).find((k) => !labels[k]) ?? '';
+}

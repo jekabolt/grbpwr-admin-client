@@ -52,11 +52,15 @@ import {
   TRIM_ACTION_LABELS,
   WET_PROCESS_KIND_LABELS,
   ZIPPER_APPLICATION_LABELS,
+  // Обязательный вопрос глагола и пикер по любому из этих словарей — оттуда же и по той же
+  // причине: их спрашивает не только сетка открытого шага, но и диалог создания.
+  STEP_DISCRIMINATORS,
   attachmentKindLabel,
   attachmentOptions,
   operationHeading,
   operationTypeOptionsFor,
   seamClassOptions,
+  stepEnumOptions,
   stitchLengthMm,
   topstitchModeHasNoWidth,
   topstitchModeHasWidth,
@@ -241,29 +245,6 @@ type StepIntField =
   | 'secondPressSec'
   | 'airTemperatureC';
 
-// ПИКЕР ИЗ ПЕЧАТНОГО СЛОВАРЯ, И ТОЛЬКО ОДНА СТРОКА ДОБАВЛЕНА СВОЯ. Карты подписей в
-// operation-options пишут UNKNOWN пустой строкой намеренно: на бумаге «не указано» печатается
-// НИЧЕМ. В селекте пустая строка — это пустая первая строка списка, поэтому шапку («— не указано —»)
-// даёт вызывающий, а все содержательные слова остаются одними на экран и на лист.
-//
-// И ТА ЖЕ ЗАЩИТА ОТ НЕЗНАКОМОГО ТОКЕНА, что у machineTypeOptionsFor: каждая из этих карт ТОТАЛЬНА
-// над контрактом, значит токен вне списка — не легаси, а значение НОВЕЕ этого бандла (обычное
-// состояние проекта между выкаткой бэка и выкаткой клиента). Radix рисует селект со значением вне
-// своих items ПУСТЫМ триггером, и технолог читает «свойства нет» там, где оно есть.
-function stepEnumOptions<T extends string>(
-  labels: Record<T, string>,
-  unsetCaption: string,
-  current?: string,
-): Array<{ value: string; label: string }> {
-  const items = (Object.keys(labels) as T[]).map((value) => ({
-    value: value as string,
-    label: labels[value] || unsetCaption,
-  }));
-  const v = (current ?? '').trim();
-  if (!v || v in labels) return items;
-  return [...items, { value: v, label: `${v} — unknown to this app version` }];
-}
-
 // FA1 / FA5 — ЕДИНСТВЕННЫЕ ДВЕ ПОДПИСИ, ЖИВУЩИЕ ЗДЕСЬ, А НЕ В ОБЩЕМ СЛОВАРЕ, и причина в форме
 // слова: на листе форма и направление петли печатаются ОДНОЙ вещью («horizontal round-end
 // buttonhole»), поэтому там они заведены прилагательными и приватны. Селекту нужен самостоятельный
@@ -281,56 +262,6 @@ const BUTTONHOLE_ORIENTATION_ITEMS: Record<common_TechCardButtonholeOrientation,
   TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL: 'horizontal',
   TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL: 'vertical',
   TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED: 'angled',
-};
-
-// ДИСКРИМИНАТОР ГЛАГОЛА — ВТОРАЯ ОСЬ ТОЧНО ТАК ЖЕ, КАК МАШИНКА У «MACHINE». Шесть новых глаголов
-// без своего поля — заголовок, а не инструкция: «печать» не говорит, шелкография это или
-// гравировка, «контроль» — сплошной он или по выборке. Сервер требует их БЕЗУСЛОВНО, поэтому они
-// стоят в ЯДРЕ сетки рядом с типом, а не в фолде: обязательное поле за закрытым аккордеоном — это
-// сохранение, падающее на контроле, которого нет на экране (тот же довод, что у machine * и
-// equipment *).
-const STEP_DISCRIMINATORS: Partial<
-  Record<
-    common_TechCardOperationType,
-    { field: string; label: string; labels: Record<string, string>; unset: string }
-  >
-> = {
-  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: {
-    field: 'attachMethod',
-    label: 'held on by *',
-    labels: HARDWARE_ATTACH_METHOD_LABELS,
-    unset: '— how —',
-  },
-  TECH_CARD_OPERATION_TYPE_PRINT: {
-    field: 'printMethod',
-    label: 'print method *',
-    labels: PRINT_METHOD_LABELS,
-    unset: '— method —',
-  },
-  TECH_CARD_OPERATION_TYPE_TRIM: {
-    field: 'trimAction',
-    label: 'cut *',
-    labels: TRIM_ACTION_LABELS,
-    unset: '— which cut —',
-  },
-  TECH_CARD_OPERATION_TYPE_CLEAN: {
-    field: 'cleaningKind',
-    label: 'clean off *',
-    labels: CLEANING_KIND_LABELS,
-    unset: '— what —',
-  },
-  TECH_CARD_OPERATION_TYPE_INSPECT: {
-    field: 'coverageMode',
-    label: 'coverage *',
-    labels: INSPECT_COVERAGE_LABELS,
-    unset: '— how much —',
-  },
-  TECH_CARD_OPERATION_TYPE_WET_PROCESS: {
-    field: 'wetProcessKind',
-    label: 'bath *',
-    labels: WET_PROCESS_KIND_LABELS,
-    unset: '— which bath —',
-  },
 };
 
 // WHICH OF THE TWO EQUIPMENT BLOCKS A STEP OWNS. One step type answers «machine», three answer
@@ -4838,6 +4769,13 @@ export function OperationsField({
       ...(r.machineType ? { machineType: r.machineType as typeof emptyOperation.machineType } : {}),
       ...(r.pressEquipment
         ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
+        : {}),
+      // ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ПАРОЙ «ПОЛЕ + ЗНАЧЕНИЕ». Какое из шести полей несёт ответ,
+      // решает `STEP_DISCRIMINATORS` в диалоге; здесь ключ подставляется по имени, потому что
+      // второй разбор «у какого глагола какое поле» разошёлся бы с таблицей молча — и шаг уехал
+      // бы в форму с `*_UNKNOWN` там, где сервер требует значение безусловно.
+      ...(r.discriminatorField && r.discriminatorValue
+        ? ({ [r.discriminatorField]: r.discriminatorValue } as Partial<typeof emptyOperation>)
         : {}),
     };
     // ССЫЛКИ ДЕФЕКТОВ ЕДУТ ВНИЗ ВМЕСТЕ СО СВОИМИ ШАГАМИ, и считается это ДО правки массива:
