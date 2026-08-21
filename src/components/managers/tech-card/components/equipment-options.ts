@@ -67,6 +67,17 @@ export const MACHINE_TYPE_LABELS: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO: 'collar / cuff automat',
   TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO: 'sleeve-setting automat',
   TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO: 'waistband automat',
+  // TWO MACHINES THAT MAKE NO STITCH — and that is why neither carries an ISO 4915 number while
+  // every other entry above either carries one or names an automat that does. They join fabric with
+  // heat instead of thread: one lays a sealing tape with hot air, the other welds the plies
+  // outright. The number is not omitted for brevity, it does not exist, and ISO4915_FIXED /
+  // ISO4915_BY_THREADS are deliberately left without an entry for them so stitchTypeNumber() answers
+  // '' rather than a guess printed on a sheet that goes to the floor.
+  //
+  // «seam-sealing tape» and not «taping»: BINDING_TAPING above is a SEWING machine with a binder on
+  // it, the two would read as the same machine, and they are set up by different people.
+  TECH_CARD_MACHINE_TYPE_SEAM_TAPING: 'seam-sealing tape (hot air)',
+  TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER: 'ultrasonic welder',
   TECH_CARD_MACHINE_TYPE_OTHER: 'other (see note)',
 };
 
@@ -135,6 +146,10 @@ export const PRESS_CLOTH_LABELS: Record<common_TechCardPressCloth, string> = {
   TECH_CARD_PRESS_CLOTH_PRESS_CLOTH: 'press cloth (dry)',
   TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH: 'press cloth (damp)',
   TECH_CARD_PRESS_CLOTH_TEFLON_SHEET: 'teflon sheet',
+  // The release sheet a heat-transfer step presses through — same slot as the teflon sheet, and the
+  // reason this member arrives with the PRINT verb: a transfer pressed bare takes the adhesive onto
+  // the platen.
+  TECH_CARD_PRESS_CLOTH_SILICONE_PAPER: 'silicone paper',
   TECH_CARD_PRESS_CLOTH_OTHER: 'other (see note)',
 };
 
@@ -178,6 +193,10 @@ export const MACHINE_TYPE_VERB: Record<common_TechCardMachineType, string> = {
   TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO: 'set collar / cuff',
   TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO: 'set sleeve',
   TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO: 'set waistband',
+  // «tape seam» and not «tape»: beside BINDING_TAPING's «bind» a bare «tape» reads as the same
+  // operation done with a different word, and these two machines are not interchangeable.
+  TECH_CARD_MACHINE_TYPE_SEAM_TAPING: 'tape seam',
+  TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER: 'weld',
   // «other» has no verb to give: the step keeps the type's own word and its note says the rest.
   TECH_CARD_MACHINE_TYPE_OTHER: '',
 };
@@ -189,6 +208,20 @@ export const bedTypeOptions = optionsFrom(BED_TYPE_LABELS);
 export const automationLevelOptions = optionsFrom(AUTOMATION_LEVEL_LABELS);
 export const threadTensionOptions = optionsFrom(THREAD_TENSION_LABELS);
 export const pressClothOptions = optionsFrom(PRESS_CLOTH_LABELS);
+
+/** The machine picker for ONE row: the whole park plus whatever that row already holds. A token
+ *  outside the list cannot be a legacy value — MACHINE_TYPE_LABELS is total over the contract — so
+ *  it is a machine NEWER than this bundle, which is the ordinary state of things between a backend
+ *  deploy and a client deploy. Radix renders a select whose value is absent from its own items as a
+ *  BLANK trigger, and a blank machine field on a step that HAS a machine is read as «nobody said
+ *  which», which is the one thing this axis exists to stop. Same shape as operationTypeOptionsFor. */
+export function machineTypeOptionsFor(
+  current?: string,
+): Array<{ value: common_TechCardMachineType; label: string }> {
+  const v = (current ?? '') as common_TechCardMachineType;
+  if (!v || v in MACHINE_TYPE_LABELS) return machineTypeOptions;
+  return [...machineTypeOptions, { value: v, label: `${v} — unknown to this app version` }];
+}
 
 // WHICH PROCESS a press profile is for, so the step form can offer the right one by default. The
 // server accepts exactly these four and refuses anything else — a press profile «for a lockstitch
@@ -308,10 +341,105 @@ export const machineTypeVerb = (v?: string): string =>
 // park and the printed sheet), so the predicate lives with the vocabulary rather than being retyped
 // in each of them: a fourth ВТО type added to the contract has one place to be added here.
 export const isMachineStepType = (t?: string) => t === 'TECH_CARD_OPERATION_TYPE_MACHINE';
+
+/** The three types that ARE pressing, and therefore the three for which the equipment picker is
+ *  REQUIRED. NOT the same question as «may this step carry press settings» — since the print verb
+ *  arrived a step can be given a temperature and a dwell without pressing being what it is. Ask
+ *  stepTypeOwnsBlock(t, 'pressSettings') for that one; this predicate stays the obligation. */
 export const isPressStepType = (t?: string) =>
   t === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
   t === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
   t === 'TECH_CARD_OPERATION_TYPE_FUSING';
+
+// WHICH FIELD FAMILIES A STEP TYPE MAY CARRY AT ALL — the same question the two predicates above
+// ask about equipment, asked once for every family the operation-kinds wave added, and answered in
+// ONE place for the same reason: the server refuses a field from the wrong family BY NAME and
+// refuses the whole card with it, so the editor (which block to render), the clearing effect (what
+// to wipe when the type changes), the save mapper (what may go on the wire) and the printed sheet
+// must all agree. Four copies of this table would be four chances to disagree.
+//
+// A TOTAL `Record`, like every dictionary in this file, and here the totality earns the most: the
+// next verb the contract gains fails the build on this map — which is the moment to decide what it
+// carries — instead of quietly owning nothing, rendering as a bare row, and having its equipment
+// wiped by the clearing effect on first open.
+//
+// IT IS THE VERB-LEVEL GATE AND ONLY THAT. Two families are narrowed further downstream and the
+// narrowing deliberately does NOT live here, because it is not a fact about the verb:
+//   · 'weld' also demands an EXPLICIT machine_type of seam_taping | ultrasonic_welder
+//     (isWeldMachineType below) — a type reached through a profile key does not count;
+//   · 'hardware' is whole only on HARDWARE_SET; on MACHINE it is the cycle trio (hole prep,
+//     reinforcement, cycle stitch count) and the attach method is refused;
+//   · 'fastening' fields each answer to their own machine_type (buttonhole, button_attach,
+//     bartack, zipper_setting);
+//   · 'pressSettings' is refused on PRINT when the print method is laser_engrave — a method with
+//     no carrier and no platen. That is a fact about the METHOD, not about the verb.
+// The bare fields print_method and wet_process_kind travel with 'print' and 'wetProcess'.
+export type StepBlock =
+  | 'stitching'
+  | 'placement'
+  | 'hardware'
+  | 'print'
+  | 'weld'
+  | 'trim'
+  | 'threadTrim'
+  | 'clean'
+  | 'inspect'
+  | 'wetProcess'
+  | 'fastening'
+  | 'pressSettings';
+
+const NO_BLOCKS: readonly StepBlock[] = [];
+
+export const STEP_TYPE_BLOCKS: Record<common_TechCardOperationType, readonly StepBlock[]> = {
+  TECH_CARD_OPERATION_TYPE_UNKNOWN: NO_BLOCKS,
+  // 1-9: legacy. They cannot arrive from a read (0306 canonicalises on write) and are not offered
+  // as a choice, but an archived release snapshot still renders through this map — and a snapshot
+  // written before the wave carries none of these families, so an empty list is the true answer,
+  // not a placeholder.
+  TECH_CARD_OPERATION_TYPE_LOCKSTITCH: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_OVERLOCK: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_COVERSTITCH: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_CHAINSTITCH: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_BLINDHEM: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_BARTACK: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_BUTTONHOLE: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_FUSING: ['pressSettings'],
+  TECH_CARD_OPERATION_TYPE_HANDWORK: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_OTHER: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_MACHINE: ['stitching', 'placement', 'hardware', 'weld', 'fastening'],
+  TECH_CARD_OPERATION_TYPE_PRESS: ['pressSettings'],
+  TECH_CARD_OPERATION_TYPE_PRESS_OPEN: ['pressSettings'],
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: ['placement', 'hardware'],
+  // PRINT BORROWS THE PRESS. A heat transfer is pressed — temperature, dwell, pressure and a
+  // silicone-paper release sheet — so the ВТО block is legal here even though pressing is not what
+  // the step IS: press_equipment stays optional for print and required for the three press verbs.
+  TECH_CARD_OPERATION_TYPE_PRINT: ['placement', 'print', 'pressSettings'],
+  TECH_CARD_OPERATION_TYPE_TRIM: ['trim'],
+  TECH_CARD_OPERATION_TYPE_THREAD_TRIM: ['threadTrim'],
+  TECH_CARD_OPERATION_TYPE_CLEAN: ['clean'],
+  TECH_CARD_OPERATION_TYPE_INSPECT: ['inspect'],
+  // Fold and pack carry NO fields at all, and that is the finding, not an omission: the wave asked
+  // what a folding step needs to be told and the answer was «where it goes in the sequence, how
+  // long it takes» — both of which every step already has.
+  TECH_CARD_OPERATION_TYPE_FOLD: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_PACK: NO_BLOCKS,
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: ['wetProcess'],
+};
+
+/** Does this step type own that family of fields. An unrecognised token owns nothing — the safe
+ *  direction, and the same one the label helpers take: a block that fails to render is fixed by
+ *  adding a line here, a block rendered for a verb the server refuses fails the whole card. */
+export const stepTypeOwnsBlock = (t: string | undefined, block: StepBlock): boolean =>
+  (STEP_TYPE_BLOCKS[t as common_TechCardOperationType] ?? NO_BLOCKS).includes(block);
+
+/** The two machines that join with heat rather than thread — the ONLY carriers of the weld block,
+ *  and the reason it is a machine question and not a verb one. They also refuse the needle- and
+ *  thread-side overrides of a sewing step (thread count, needle, tension, stitch width): there is
+ *  no needle and no thread to have an opinion about. */
+export const isWeldMachineType = (m?: string) =>
+  m === 'TECH_CARD_MACHINE_TYPE_SEAM_TAPING' || m === 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER';
 
 // --- the inheritance ladder (§3) -----------------------------------------------------------------
 //

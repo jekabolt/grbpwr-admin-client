@@ -143,6 +143,7 @@ const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 import {
   isMachineStepType,
   isPressStepType,
+  isWeldMachineType,
   machineProfileName,
   machineTypeLabel,
   machineTypeLabelWithStitch,
@@ -151,6 +152,7 @@ import {
   pressProfileName,
   resolveMachineProfile,
   resolvePressProfile,
+  stepTypeOwnsBlock,
 } from './equipment-options';
 import {
   densityText,
@@ -161,11 +163,73 @@ import {
   operationHeading,
   pressProfileSummary,
   seamClassOptions,
+  stepDiscriminatorText,
+  stepPlacementText,
+  stepSeamFactTexts,
+  stepToolFactParts,
+  topstitchModeHasWidth,
   zoneOptions,
   type EffectiveSetting,
+  type StepFacts,
 } from './operation-options';
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
+
+// THE WIRE STEP, AS THE FACT COMPOSERS READ IT — one border crossing, in one place. The composers
+// live beside machineProfileParts (so the editor and the sheet cannot word a setting differently)
+// and take decimals as STRINGS, the way the form holds them; the wire carries Decimal messages. That
+// is the whole of this function: decimalToInput on every decimal of the eleven blocks, and nothing
+// else. A second copy of it inside the table would be a second chance to forget a field, and a
+// forgotten field here does not fail to compile — it silently fails to print.
+const wireStepFacts = (o: common_TechCardOperation): StepFacts => ({
+  operationType: o.operationType,
+  printMethod: o.printMethod,
+  wetProcessKind: o.wetProcessKind,
+  stitching: o.stitching && {
+    needleCount: o.stitching.needleCount,
+    needleGaugeMm: dec(o.stitching.needleGaugeMm),
+    seamSecuring: o.stitching.seamSecuring,
+    rowSpacingMm: dec(o.stitching.rowSpacingMm),
+    fullnessRatio: dec(o.stitching.fullnessRatio),
+    bindingStyle: o.stitching.bindingStyle,
+    labelAttachStitch: o.stitching.labelAttachStitch,
+  },
+  placementLayout: o.placementLayout && {
+    count: o.placementLayout.count,
+    pitchMm: dec(o.placementLayout.pitchMm),
+  },
+  hardware: o.hardware && {
+    attachMethod: o.hardware.attachMethod,
+    holePrep: o.hardware.holePrep,
+    reinforcement: o.hardware.reinforcement,
+    foldbackMm: dec(o.hardware.foldbackMm),
+    cycleStitchCount: o.hardware.cycleStitchCount,
+  },
+  print: o.print && {
+    peelMode: o.print.peelMode,
+    secondPressSec: o.print.secondPressSec,
+    pressureScale: o.print.pressureScale,
+  },
+  weld: o.weld && {
+    airTemperatureC: o.weld.airTemperatureC,
+    feedSpeedMMin: dec(o.weld.feedSpeedMMin),
+  },
+  trim: o.trim && {
+    action: o.trim.action,
+    residualAllowanceMm: dec(o.trim.residualAllowanceMm),
+  },
+  threadTrim: o.threadTrim && { residualTailMaxMm: dec(o.threadTrim.residualTailMaxMm) },
+  clean: o.clean && { kind: o.clean.kind },
+  inspect: o.inspect && { coverageMode: o.inspect.coverageMode },
+  fastening: o.fastening && {
+    buttonholeStyle: o.fastening.buttonholeStyle,
+    cutLengthMm: dec(o.fastening.cutLengthMm),
+    buttonholeOrientation: o.fastening.buttonholeOrientation,
+    bartackLengthMm: dec(o.fastening.bartackLengthMm),
+    attachPattern: o.fastening.attachPattern,
+    zipperApplication: o.fastening.zipperApplication,
+  },
+});
 
 // БЕРЁТ ЛИ ХОТЬ КТО-ТО ПРОЦЕНТ РАСКРОЯ ЭТОЙ СТРОКИ — правило сервера, повторённое здесь для БУМАГИ.
 //
@@ -295,6 +359,28 @@ const optionLabel = <T extends string>(
 // («press (заутюжить / отпарить)»), which is right in a picker whose reader is the person who wrote
 // the card and wrong on a sheet that is read in a Polish sewing room. pressProcessShort is that same
 // label with the parenthetical cut off — the derived short form, not a second vocabulary.
+//
+// AND THE NINE VERBS OF THE OPERATION-KINDS WAVE PRINT THEIR VERB, not their picker label, for the
+// reason MACHINE does: every one of those labels carries a parenthetical enumerating exactly what
+// the step's own required field has already answered. «print (screen / transfer / foil)» over a step
+// whose print_method says `foil` offers the floor a choice that was made — the same defect as
+// «overlock 504 / 514 / 516», and the answer is the same one: name the fact, once, in the column
+// that owns it (the method heads «machine / mode»).
+//
+// A TENTH VERB falls through to its picker label until it is listed here. That is the cheap
+// direction: wordier than it should be, never wrong — and OPERATION_TYPE_LABELS is total, so the
+// label itself cannot be missing.
+const WAVE_VERBS: ReadonlySet<common_TechCardOperationType> = new Set([
+  'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+  'TECH_CARD_OPERATION_TYPE_PRINT',
+  'TECH_CARD_OPERATION_TYPE_TRIM',
+  'TECH_CARD_OPERATION_TYPE_THREAD_TRIM',
+  'TECH_CARD_OPERATION_TYPE_CLEAN',
+  'TECH_CARD_OPERATION_TYPE_INSPECT',
+  'TECH_CARD_OPERATION_TYPE_FOLD',
+  'TECH_CARD_OPERATION_TYPE_PACK',
+  'TECH_CARD_OPERATION_TYPE_WET_PROCESS',
+]);
 const operationTypeText = (o: {
   operationType?: common_TechCardOperationType;
   machineType?: common_TechCardMachineType;
@@ -304,6 +390,7 @@ const operationTypeText = (o: {
     return operationHeading({ operationType: v, machineType: o.machineType, pieceNames: [] });
   }
   if (isPressStepType(v)) return pressProcessShort(v) || '—';
+  if (v && WAVE_VERBS.has(v)) return operationHeading({ operationType: v, pieceNames: [] });
   return (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
 };
 const zoneText = (v?: common_TechCardGarmentZone): string =>
@@ -324,7 +411,12 @@ const topstitchText = (t?: common_TechCardTopstitch): string => {
   if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
   const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
   if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
-  const w = dec(t.widthMm);
+  // «FROM EDGE» IS A CLAIM ABOUT THE REFERENCE POINT, so it is printed only for a mode this bundle
+  // can classify as carrying a width (TOPSTITCH_MODE_HAS_WIDTH). An unclassified mode leaves the
+  // sheet saying «topstitch» and no more — incomplete, which the floor can see, instead of a
+  // distance measured from a reference the mode never named, which the floor cannot. Nothing is
+  // lost by the omission: print reads the wire and never writes it.
+  const w = topstitchModeHasWidth(t.mode) ? dec(t.widthMm) : '';
   return `topstitch ${rows}${w ? `${w} mm from edge` : ''}`.trim();
 };
 // A setting and the one bit that says where it came from: the marker means «the step's own value»,
@@ -991,11 +1083,20 @@ export function TechPackDocument({
   // потому что она есть у шага ЛЮБОГО типа, а не только у машинного.
   const stepEquipment = (o: common_TechCardOperation) => {
     const machineStep = isMachineStepType(o.operationType);
+    // PRESSING AND «MAY CARRY PRESS SETTINGS» ARE TWO QUESTIONS SINCE THE PRINT VERB ARRIVED, and
+    // the sheet has to ask the second one. A heat transfer is pressed — temperature, dwell, pressure
+    // and a silicone-paper release sheet — so a PRINT step legally carries the whole ВТО block while
+    // pressing is not what it IS (press_equipment stays optional there, required for the three press
+    // verbs). Asking isPressStepType here would have left every one of those numbers off the paper
+    // the platen is set up from, which is the one failure this column exists to prevent.
+    const ownsPress = stepTypeOwnsBlock(o.operationType, 'pressSettings');
     const pressStep = isPressStepType(o.operationType);
     const machineProfile = machineStep
       ? resolveMachineProfile(parkMachines, o.machineType, o.machineProfileKey)
       : undefined;
-    const pressProfile = pressStep
+    // The step's own type still narrows the ladder: a profile written for разутюжка does not answer
+    // for a print step either, and only a profile that declares no process at all is universal.
+    const pressProfile = ownsPress
       ? resolvePressProfile(parkPresses, o.pressEquipment, o.pressProfileKey, o.operationType)
       : undefined;
     const stepMachine = {
@@ -1012,32 +1113,65 @@ export function TechPackDocument({
     // ВТО-шаг не шьют, поэтому карточная плотность на него НЕ распространяется: «4 ст/см» под
     // строкой «разутюжить» — число, которому на этом шаге нечего описывать. Своё значение шага (или
     // машинного профиля, если он почему-то есть) печатается как есть.
+    //
+    // И ТО ЖЕ ВЕРНО ДЛЯ ДЕВЯТИ НОВЫХ ГЛАГОЛОВ. Карточная плотность — это ШВЕЙНЫЙ дефолт, нижняя
+    // ступень лестницы для шага, который кладёт строчку; ни упаковка, ни контроль, ни промывка
+    // строчки не кладут. Без этого гейта каждая такая строка печатала бы «4 st/cm (2.5 mm)» в
+    // колонке шва — число, взятое с потолка карточки и приписанное работе, к которой оно не
+    // относится. СВОЯ плотность шага при этом печатается по-прежнему: гасится только наследование.
+    //
+    // И ТО ЖЕ У ДВУХ СВАРОЧНЫХ МАШИН: они соединяют теплом, а не ниткой, — стежка у них нет вовсе
+    // (потому у них нет и номера по ISO 4915). «hot air 550 °C · feed 4.5 m/min» и рядом «4 st/cm»
+    // с карточки — плотность строчки, которой на этой машине нечего описывать. Это факт о МАШИНКЕ,
+    // а не о глаголе, поэтому спрашивается отдельным вопросом, а не через таблицу семейств.
+    const sews =
+      !pressStep &&
+      !WAVE_VERBS.has(o.operationType as common_TechCardOperationType) &&
+      !isWeldMachineType(o.machineType);
     const machine = effectiveMachineSettings(
       stepMachine,
       machineProfile ? machineSettingsOf(machineProfile) : undefined,
-      pressStep ? undefined : cardDensity,
+      sews ? cardDensity : undefined,
     );
     const density = machine.find((s) => s.field === 'density');
-    const settings = pressStep
-      ? [
-          ...effectivePressSettings(
-            {
-              pressTemperatureC: o.pressTemperatureC,
-              pressDwellSec: o.pressDwellSec,
-              pressPressureNCm2: dec(o.pressPressureNCm2),
-              pressSteam: o.pressSteam,
-              pressCloth: o.pressCloth,
-            },
-            pressProfile ? pressSettingsOf(pressProfile) : undefined,
-          ),
-          // Лапка/приспособление живёт на шаге любого типа (сервер её у ВТО не отбирает), а у
-          // press-профиля такого поля нет — поэтому она добирается со швейной стороны, чтобы не
-          // пропасть с бумаги молча.
-          ...machine.filter((s) => s.field === 'attachment'),
-        ]
-      : machine.filter((s) => s.field !== 'density');
+    // ФАКТЫ СЕМЕЙСТВ ВОЛНЫ — программа инструмента: иглы и их расстановка, подготовка отверстия и
+    // усилитель, съём носителя и второй прижим, горячий воздух и подача, петля с прорезью,
+    // закрепка, рисунок пуговицы, установка молнии, допустимый хвост нитки. Наследовать им не от
+    // чего (профиля такого семейства не бывает), поэтому маркера «своё» они не несут — и это не
+    // умолчание, а отсутствие второй ступени.
+    const toolFacts = stepToolFactParts(wireStepFacts(o)).map((p) => ({ ...p, overridden: false }));
+    const settings = [
+      ...(ownsPress
+        ? [
+            ...effectivePressSettings(
+              {
+                pressTemperatureC: o.pressTemperatureC,
+                pressDwellSec: o.pressDwellSec,
+                pressPressureNCm2: dec(o.pressPressureNCm2),
+                pressSteam: o.pressSteam,
+                pressCloth: o.pressCloth,
+              },
+              pressProfile ? pressSettingsOf(pressProfile) : undefined,
+            ),
+            // Лапка/приспособление живёт на шаге любого типа (сервер её у ВТО не отбирает), а у
+            // press-профиля такого поля нет — поэтому она добирается со швейной стороны, чтобы не
+            // пропасть с бумаги молча.
+            ...machine.filter((s) => s.field === 'attachment'),
+          ]
+        : machine.filter((s) => s.field !== 'density')),
+      ...toolFacts,
+    ];
     // ИМЯ МАШИНКИ — человеческое, если профиль назван («оверлок у окна»), иначе имя самой машинки
     // из словаря. Ключ не печатается никогда: ULID цеху ничего не говорит.
+    //
+    // У ДЕВЯТИ НОВЫХ ГЛАГОЛОВ ИМЯ МАШИНКИ ЗАМЕНЯЕТ ДИСКРИМИНАТОР — обязательное поле, которое и
+    // говорит, что это за работа: «press-set», «AQL plan», «enzyme wash». Оно печатается ровно там,
+    // где швейный шаг называет машинку, потому что отвечает на тот же вопрос («на чём и в каком
+    // режиме»), и берётся из ОДНОЙ функции с замороженным релизом — иначе подписанный документ и
+    // бумага той же карточки описали бы шаг по-разному.
+    //
+    // У ПЕЧАТИ ОБА: метод («heat transfer») И пресс, на котором её прижимают. Метод первым — он
+    // говорит, что делают; имя пресса вторым — на чём.
     const head = machineStep
       ? machineProfile
         ? machineProfileName(machineProfile)
@@ -1045,11 +1179,16 @@ export function TechPackDocument({
           // цеха предлагало оператору выбрать стежок самому; число ниток шага уже говорит, какой
           // из трёх, — надо было только сказать это вслух.
           machineTypeLabelWithStitch(o.machineType, o.threadCount)
-      : pressStep
-        ? pressProfile
-          ? pressProfileName(pressProfile)
-          : pressEquipmentLabel(o.pressEquipment)
-        : '';
+      : [
+          stepDiscriminatorText(o),
+          ownsPress
+            ? pressProfile
+              ? pressProfileName(pressProfile)
+              : pressEquipmentLabel(o.pressEquipment)
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
     return {
       head,
       settings,
@@ -2455,12 +2594,25 @@ export function TechPackDocument({
                       // чем выглядит «не задано». Лапка переехала в колонку машинки: это настройка
                       // машины, а не шва.
                       const equip = opEquipment[i];
+                      const facts = wireStepFacts(o);
+                      // ЭТОТ МАССИВ — ПЕРЕЧИСЛЕНИЕ ФАКТОВ РУКАМИ, и другого механизма у ячейки нет:
+                      // чего здесь не названо, того на бумаге не будет вовсе, а tsc об этом
+                      // промолчит. Поэтому семейство, попавшее на шов (закрепка, шаг между рядами,
+                      // посадка, бейка, схема пришивания этикетки, остаток припуска после подрезки),
+                      // добавляется сюда одной строкой stepSeamFactTexts — одной, чтобы следующее
+                      // семейство правило список в одном месте, а не в двух.
                       const detail = [
                         equip?.density ? settingText(equip.density) : '',
                         topstitchText(o.topstitch),
+                        ...stepSeamFactTexts(facts),
                       ]
                         .filter(Boolean)
                         .join(' · ');
+                      // СКОЛЬКО ИХ И ЧЕРЕЗ СКОЛЬКО — под словом зоны, в той же колонке: «closure»
+                      // и «× 6 · pitch 90 mm» — один ответ на вопрос «где на изделии», а не два.
+                      // Колонок на листе девять и они уже плотные; десятая, пустая у всех швейных
+                      // шагов, отняла бы ширину у состава и материалов ради одного факта.
+                      const placement = stepPlacementText(facts);
                       // ПРИПУСК ПЕЧАТАЕТСЯ ВСЕГДА. Раньше пустая клетка означала «наследует
                       // стандарт карты», но выглядела ровно как «не задано», и число приходилось
                       // помнить из строки над таблицей — стоя у машины, по листу, вынутому из
@@ -2505,7 +2657,10 @@ export function TechPackDocument({
                               ) : null}
                               {!equip?.head && !equip?.settings.length ? '—' : null}
                             </td>
-                            <td className={TD}>{zoneText(o.zone) || '—'}</td>
+                            <td className={TD}>
+                              <div>{zoneText(o.zone) || '—'}</div>
+                              {placement && <div className='text-labelColor'>{placement}</div>}
+                            </td>
                             <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
                             {/* ЧТО ШАГ ПРОИЗВОДИТ. Пустая ячейка — утверждение, а не пробел: шаг
                                 ничего не собирает, это обработка, и его входы остаются на столе

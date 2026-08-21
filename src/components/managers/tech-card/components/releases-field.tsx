@@ -40,6 +40,7 @@ import {
   operationHeading,
   pressProfileSummary,
   seamClassOptions,
+  stepDiscriminatorText,
 } from './operation-options';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
@@ -365,6 +366,13 @@ function SnapshotOperations({
         const pressProfile = (park?.presses ?? []).find(
           (pp) => !!o.pressProfileKey && pp.profileKey === o.pressProfileKey,
         );
+        // ДЕВЯТЬ НОВЫХ ГЛАГОЛОВ ГОВОРЯТ О СЕБЕ СВОИМ ДИСКРИМИНАТОРОМ — «press-set», «AQL plan»,
+        // «enzyme wash», — и берётся он ТОЙ ЖЕ функцией, что и на печатном листе. Разбор шага по
+        // типу живёт здесь отдельной копией (снапшот читается без живой карточки), и копия,
+        // разошедшаяся с печатью, означала бы, что один и тот же подписанный шаг читается на экране
+        // архива иначе, чем на бумаге, которую по нему шьют. Фолбэк на typeLabel остаётся для
+        // релизов, подписанных ДО волны: у них ни одного из этих полей нет, и подпись глагола —
+        // всё, что о шаге вообще было записано.
         const spec = isMachineStepType(o.operationType)
           ? machineProfile
             ? machineProfileName(machineProfile)
@@ -375,7 +383,7 @@ function SnapshotOperations({
             ? pressProfile
               ? pressProfileName(pressProfile)
               : [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
-            : typeLabel;
+            : stepDiscriminatorText(o) || typeLabel;
         // Фотографии шага — те же правила, что у печати: адрес есть только для картинки в
         // словаре снапшота, у остальных ничего не показываем (не заглушка).
         const stepMedia = (o.media ?? [])

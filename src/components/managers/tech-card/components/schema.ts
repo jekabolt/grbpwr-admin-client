@@ -11,6 +11,23 @@ import {
   common_TechCardAttachmentKind,
   common_TechCardAutomationLevel,
   common_TechCardBedType,
+  common_TechCardBindingStyle,
+  common_TechCardButtonAttachPattern,
+  common_TechCardButtonholeOrientation,
+  common_TechCardButtonholeStyle,
+  common_TechCardCleaningKind,
+  common_TechCardHardwareAttachMethod,
+  common_TechCardHolePrep,
+  common_TechCardInspectCoverage,
+  common_TechCardLabelAttachStitch,
+  common_TechCardPeelMode,
+  common_TechCardPressureScale,
+  common_TechCardPrintMethod,
+  common_TechCardReinforcement,
+  common_TechCardSeamSecuring,
+  common_TechCardTrimAction,
+  common_TechCardWetProcessKind,
+  common_TechCardZipperApplication,
   common_TechCardEquipmentDefaults,
   common_TechCardGarmentZone,
   common_TechCardMachineProfile,
@@ -58,6 +75,13 @@ import {
   cutSymmetryCountInvalid,
   isCutSymmetryMarked,
 } from './piece-codes';
+import { topstitchModeHasNoWidth, topstitchModeHasWidth } from './operation-options';
+import {
+  type StepBlock,
+  isMachineStepType,
+  isWeldMachineType,
+  stepTypeOwnsBlock,
+} from './equipment-options';
 import { wireInt } from './wire-int';
 import { z } from 'zod';
 import {
@@ -617,6 +641,97 @@ const PRESS_PRESSURE_BAND = {
   what: 'pressure on the material in N/cm²',
 } as const;
 
+// --- ВИДЫ ОПЕРАЦИЙ (волна 0324): банды пятнадцати числовых полей ---------------------------------
+//
+// ГРАНИЦЫ — САНИТИ, А НЕ ЦЕХОВОЙ СТАНДАРТ (довод 0306). Они ловят промах в разряде — «120» вместо
+// «12» игл, «4» вместо «400» мм шага — и не сужают вендорский паспорт: прорезь петли на спец-ноже
+// бывает и 120 мм, закрепка цикловой машины — и 40.
+//
+// `maxDecimals` У КАЖДОГО ДЕЦИМАЛА — МАСШТАБ ЕГО КОЛОНКИ, не украшение: MySQL не отказывает в
+// лишнем знаке, он молча округляет и возвращает на следующем чтении ДРУГОЕ число, уже без следа
+// того, что его правили.
+const STEP_KIND_INT_BANDS = {
+  needleCount: { min: 1, max: 12, what: 'needles in the stitch line' },
+  placementCount: { min: 1, max: 99, what: 'how many times the step repeats on the garment' },
+  cycleStitchCount: { min: 8, max: 64, what: "stitches in the automat's cycle" },
+  secondPressSec: { min: 1, max: 30, what: 'the second press in seconds' },
+  airTemperatureC: { min: 100, max: 750, what: 'hot-air temperature in °C' },
+} as const;
+
+const STEP_KIND_DECIMAL_BANDS = {
+  // Расстояние между ИГЛАМИ. Не путать с row_spacing: тот про соседние строчки.
+  needleGaugeMm: { min: 1.6, max: 25.4, maxDecimals: 1, what: 'the gauge BETWEEN needles in mm' },
+  rowSpacingMm: { min: 1, max: 30, maxDecimals: 1, what: 'the spacing between stitch ROWS in mm' },
+  // ОТНОШЕНИЕ, а не проценты: 1.0 — слои идут один в один, 2.0 — присборить вдвое.
+  fullnessRatio: {
+    min: 0.6,
+    max: 4,
+    maxDecimals: 2,
+    what: 'ease / gathering as a RATIO, not a percentage',
+  },
+  pitchMm: { min: 5, max: 500, maxDecimals: 1, what: 'the pitch between repeats in mm' },
+  foldbackMm: {
+    min: 10,
+    max: 80,
+    maxDecimals: 1,
+    what: 'the webbing foldback through the buckle in mm',
+  },
+  feedSpeedMMin: { min: 0.3, max: 10, maxDecimals: 1, what: 'feed speed in m/min' },
+  // Сколько припуска ОСТАЁТСЯ после подрезки — не то, с каким кроили (seamAllowanceMm).
+  residualAllowanceMm: {
+    min: 1,
+    max: 10,
+    maxDecimals: 1,
+    what: 'the allowance LEFT after trimming, in mm',
+  },
+  residualTailMaxMm: {
+    min: 1,
+    max: 10,
+    maxDecimals: 1,
+    what: 'the longest thread tail allowed, in mm',
+  },
+  cutLengthMm: { min: 4, max: 120, maxDecimals: 1, what: 'the buttonhole cut in mm' },
+  bartackLengthMm: { min: 1, max: 40, maxDecimals: 1, what: 'the bartack length in mm' },
+} as const;
+
+// Циклы: петля, пуговица, закрепка. Единственные три ЯВНЫХ типа машины, на которых легальна ЧАСТЬ
+// H-блока — подготовка отверстия, усилитель, стежки цикла. Способа крепления и подгиба стропы у
+// них нет вовсе, и сервер отвергает их на таком шаге по имени, отказывая всей карточкой.
+const CYCLE_MACHINE_TYPES = [
+  'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+  'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+  'TECH_CARD_MACHINE_TYPE_BARTACK',
+] as const;
+
+// «Заполнено» для трёх дисциплин пустоты волны. Разведены нарочно: у enum'а пусто это токен
+// `*_UNKNOWN` (он же «не указано»), у целого — 0, у децимала — пустая строка в форме. NONE ни в
+// одном словаре пустотой НЕ считается: «без закрепки» и «носителя нет» — это ОТВЕТЫ.
+const stepEnumSet = (v?: string) => !!v && !v.endsWith('_UNKNOWN');
+const stepTextSet = (v?: string) => !!(v ?? '').trim();
+
+// Есть ли в собранном блок-сообщении хоть один факт. Пусто ⇒ обёртка не едет вовсе — прецедент
+// `topstitch`: всегда присутствующая обёртка с UNKNOWN внутри читается как «кто-то думал об этом»
+// на КАЖДОМ шаге, у которого этого нет. Децимал сюда попадает уже объектом `{value}` или не
+// попадает совсем (`inputToDecimal('')` возвращает undefined), поэтому его присутствие и есть
+// заполненность.
+function blockHasFacts(block: Record<string, unknown>): boolean {
+  return Object.values(block).some((v) => {
+    if (v === undefined || v === null) return false;
+    if (typeof v === 'number') return v !== 0;
+    if (typeof v === 'string') return stepEnumSet(v) && v !== '';
+    return true;
+  });
+}
+
+// Блок едет ЦЕЛИКОМ ИЛИ НЕ ЕДЕТ ВОВСЕ. `owned` — гейт глагола (и, где он есть, явного типа
+// машины): на чужом глаголе блок не строится даже пустым, потому что сервер отвергает поле чужого
+// семейства ПО ИМЕНИ и отказывает вместе с ним всей карточке.
+function blockOut<T extends object>(owned: boolean, build: () => T): T | undefined {
+  if (!owned) return undefined;
+  const block = build();
+  return blockHasFacts(block as Record<string, unknown>) ? block : undefined;
+}
+
 // A thread-tension note qualifies the scale («на 0.5 туже»); on its own it describes no setting the
 // next machine can be set to, and the server refuses the pair by name.
 function refineThreadTensionNote(
@@ -980,6 +1095,87 @@ const operationSchema = z.object({
   pressSteam: z.boolean().optional(),
   pressCloth: z.string().optional().default('TECH_CARD_PRESS_CLOTH_UNKNOWN'),
 
+  // --- ВИДЫ ОПЕРАЦИЙ (0324): 32 поля девяти новых глаголов и двух новых машинок -----------------
+  //
+  // ПЛОСКО, А НЕ ВЛОЖЕННО — и это решение, а не удобство. На проводе тут десять блок-сообщений
+  // (`stitching`, `hardware`, `print`, …), и парк карточки в этом же файле МИРРОИТ свою проводную
+  // вложенность именно ради ошибок: сервер тегирует нарушение полным путём, а applyServerFieldErrors
+  // пришпиливает его camelCase-конверсией ЭТОГО пути на контрол — уплощённый park потерял бы
+  // контрол и выродился в неатрибутируемый тост. Здесь наоборот: сервер этой волны тегирует
+  // нарушения ПЛОСКО — `operations[i].attach_method`, `operations[i].cut_length_mm` (приём взят у
+  // topstitch, который форма держит плоско и который поэтому плоско и репортится). Значит плоская
+  // форма — это и есть та, чей путь совпадёт с серверным; вложенная промахнулась бы мимо контрола
+  // на каждом из 32 полей.
+  //
+  // ДИСЦИПЛИНА ПУСТОТЫ — та же, что у всей формы: enum → `*_UNKNOWN`, int32 → `0`, decimal → `''`
+  // (на проводе `inputToDecimal('')` = undefined, ключ выпадает, колонка остаётся NULL). NULL —
+  // это «не указано», а НЕ ноль и НЕ «нет»: явное «нет» везде, где оно есть, — отдельный ответ
+  // `NONE` в словаре.
+  //
+  // ВСЕ ENUM'Ы — `z.string()`, ни одного `z.enum`/`z.nativeEnum`: nativeEnum отверг бы легаси-токен
+  // из архивного релизного снапшота и уронил бы чтение целой карточки (довод — equipment-options.ts).
+  //
+  // Порядок полей — канон §1 плана: S → PL → H → P → W → T → F → C → Q → WP, затем дельта. Тот же
+  // порядок держат ALTER, INSERT/SELECT стора и структура entity; разъезд порядка между четырьмя
+  // списками и есть тот дефект шва, ради которого канон назначен.
+
+  // S — параметры строчки. Только MACHINE.
+  needleCount: z.number().optional().default(0), // 1..12; 0 = не указано
+  needleGaugeMm: z.string().optional().default(''), // мм, 1.6..25.4; осмысленно при needleCount >= 2
+  seamSecuring: z.string().optional().default('TECH_CARD_SEAM_SECURING_UNKNOWN'),
+  rowSpacingMm: z.string().optional().default(''), // мм, 1..30 — между РЯДАМИ строчек
+  fullnessRatio: z.string().optional().default(''), // отношение, 0.6..4.0; пусто = посадки нет
+
+  // PL — сколько раз и с каким шагом. MACHINE | HARDWARE_SET | PRINT.
+  placementCount: z.number().optional().default(0), // 1..99; 0 = один повтор
+  pitchMm: z.string().optional().default(''), // мм, 5..500; осмыслен при placementCount >= 2
+
+  // H — установка фурнитуры. HARDWARE_SET целиком; на MACHINE с явной цикловой машинкой живут
+  // только holePrep / reinforcement / cycleStitchCount.
+  attachMethod: z.string().optional().default('TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'),
+  holePrep: z.string().optional().default('TECH_CARD_HOLE_PREP_UNKNOWN'),
+  reinforcement: z.string().optional().default('TECH_CARD_REINFORCEMENT_UNKNOWN'),
+  foldbackMm: z.string().optional().default(''), // мм, 10..80; только attachMethod = THREADED
+  cycleStitchCount: z.number().optional().default(0), // 8..64; 0 = штатная программа машины
+
+  // P — печать и нанесение. Только PRINT. МЕТОД лежит полем шага, а не внутри блока: он REQUIRED,
+  // а обязательное поле не прячут в необязательное сообщение, которого может не быть вовсе.
+  printMethod: z.string().optional().default('TECH_CARD_PRINT_METHOD_UNKNOWN'),
+  peelMode: z.string().optional().default('TECH_CARD_PEEL_MODE_UNKNOWN'),
+  secondPressSec: z.number().optional().default(0), // сек, 1..30; 0 = второго прижима нет
+  pressureScale: z.string().optional().default('TECH_CARD_PRESSURE_SCALE_UNKNOWN'),
+
+  // W — сварка и проклейка. MACHINE + ЯВНЫЙ seam_taping | ultrasonic_welder.
+  airTemperatureC: z.number().optional().default(0), // °C, 100..750; только seam_taping
+  feedSpeedMMin: z.string().optional().default(''), // м/мин, 0.3..10.0
+
+  // T — подрезка и выправка. Только TRIM.
+  trimAction: z.string().optional().default('TECH_CARD_TRIM_ACTION_UNKNOWN'),
+  residualAllowanceMm: z.string().optional().default(''), // мм, 1..10 — сколько ОСТАЁТСЯ
+
+  // F — чистка концов ниток. Только THREAD_TRIM.
+  residualTailMaxMm: z.string().optional().default(''), // мм, 1..10; пусто = стандарт цеха
+
+  // C / Q / WP — чистка, контроль, мокрая обработка: у каждого один факт, он же дискриминатор.
+  cleaningKind: z.string().optional().default('TECH_CARD_CLEANING_KIND_UNKNOWN'),
+  coverageMode: z.string().optional().default('TECH_CARD_INSPECT_COVERAGE_UNKNOWN'),
+  wetProcessKind: z.string().optional().default('TECH_CARD_WET_PROCESS_KIND_UNKNOWN'),
+
+  // FA — петли, закрепки, пуговицы, молнии. Только MACHINE, и каждое поле — при СВОЁМ явном типе
+  // машины. REQUIRED тут нет ни одного: эти глаголы и машинки живут в проде годами, и карточка
+  // «MACHINE + buttonhole» без единого нового поля обязана сохраняться как есть.
+  buttonholeStyle: z.string().optional().default('TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'),
+  cutLengthMm: z.string().optional().default(''), // мм, 4..120 — прорезь петли
+  buttonholeOrientation: z.string().optional().default('TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'),
+  bartackLengthMm: z.string().optional().default(''), // мм, 1..40
+  attachPattern: z.string().optional().default('TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'),
+  zipperApplication: z.string().optional().default('TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'),
+
+  // S14 / S17 — дельта, живёт в блоке строчки: бейка при явном binding_taping, шов этикетки при
+  // любом MACHINE.
+  bindingStyle: z.string().optional().default('TECH_CARD_BINDING_STYLE_UNKNOWN'),
+  labelAttachStitch: z.string().optional().default('TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN'),
+
   // The only free text on a step. `description` merged into it: two boxes side by side with no rule
   // about which was which guaranteed two cards would fill them the opposite way round.
   note: z.string().optional().default(''),
@@ -1026,15 +1222,18 @@ const operationSchema = z.object({
       });
     }
     // A width beside «edge» is a shadow value the server refuses; catching it here keeps the
-    // refusal next to the control that caused it.
-    if (o.topstitchMode !== 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (o.topstitchWidthMm ?? '').trim()) {
+    // refusal next to the control that caused it. BOTH halves ask TOPSTITCH_MODE_HAS_WIDTH rather
+    // than compare against WIDTH: a refusal written as «≠ WIDTH» blocks the whole card over a mode
+    // this bundle simply has not learnt yet, and a step nobody can save is worse than a width
+    // nobody validated.
+    if (topstitchModeHasNoWidth(o.topstitchMode) && (o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
-        message: 'edge topstitching has no width — clear it, or switch the mode to width',
+        message: 'this topstitch mode has no width — clear it, or switch the mode to width',
       });
     }
-    if (o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && !(o.topstitchWidthMm ?? '').trim()) {
+    if (topstitchModeHasWidth(o.topstitchMode) && !(o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
@@ -1107,6 +1306,262 @@ const operationSchema = z.object({
     ]);
     refineRangedInt(o.pressDwellSec, EQUIPMENT_INT_BANDS.pressDwellSec, ctx, ['pressDwellSec']);
     refineRangedDecimal(o.pressPressureNCm2, PRESS_PRESSURE_BAND, ctx, ['pressPressureNCm2']);
+
+    // --- ВИДЫ ОПЕРАЦИЙ (0324): зеркало серверной валидации ---------------------------------------
+    //
+    // Зеркалится ровно то, что сервер отвергает ПО ИМЕНИ, и зеркалится ЗДЕСЬ, а не в маппере,
+    // потому что отказ обязан встать у контрола: сервер отказывает ВСЕЙ карточкой, и без этих
+    // проверок оператор узнавал бы про пустой дискриминатор после неудачного сохранения шести
+    // вкладок, из тоста, который не говорит, какой из тридцати шагов виноват.
+    const stepIsMachine = isMachineStepType(o.operationType);
+    const stepMachineType = o.machineType ?? '';
+
+    // ШЕСТЬ ДИСКРИМИНАТОРОВ, БЕЗУСЛОВНО. Никакого aware-флага у них нет и не нужно: обязательность
+    // объявляет САМ ГЛАГОЛ, а старый бандл нового глагола физически не пришлёт — токена нет в его
+    // словаре. Глагол без дискриминатора — заголовок, а не инструкция: «печать» не говорит,
+    // шелкография это или гравировка, «контроль» — сплошной он или по выборке.
+    const requireDiscriminator = (
+      type: string,
+      value: string | undefined,
+      field: string,
+      message: string,
+    ) => {
+      if (o.operationType !== type || stepEnumSet(value)) return;
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message });
+    };
+    requireDiscriminator(
+      'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+      o.attachMethod,
+      'attachMethod',
+      'say how the hardware is set — sewn, clinched, pressed, crimped and threaded are five different jobs',
+    );
+    requireDiscriminator(
+      'TECH_CARD_OPERATION_TYPE_PRINT',
+      o.printMethod,
+      'printMethod',
+      'pick the print method — screen, DTF, transfer, foil and engraving share nothing but the verb',
+    );
+    requireDiscriminator(
+      'TECH_CARD_OPERATION_TYPE_TRIM',
+      o.trimAction,
+      'trimAction',
+      'say what the trim does — grading, clipping and notching are different cuts, not one',
+    );
+    requireDiscriminator(
+      'TECH_CARD_OPERATION_TYPE_CLEAN',
+      o.cleaningKind,
+      'cleaningKind',
+      'say what is being cleaned off — a spot, lint, chalk and adhesive need different hands',
+    );
+    requireDiscriminator(
+      'TECH_CARD_OPERATION_TYPE_INSPECT',
+      o.coverageMode,
+      'coverageMode',
+      'say how much is inspected — every unit, a sample per bundle, an AQL plan or the first output',
+    );
+    requireDiscriminator(
+      'TECH_CARD_OPERATION_TYPE_WET_PROCESS',
+      o.wetProcessKind,
+      'wetProcessKind',
+      'pick the wet process — a rinse, an enzyme wash, a garment dye and a softener are four baths',
+    );
+
+    // ПРИМЕНИМОСТЬ ПО ЯВНОМУ ТИПУ МАШИНЫ. «Явный» — названный НА ШАГЕ: тип, разрешённый через
+    // `machineProfileKey`, не засчитывается ни здесь, ни на сервере, и это не придирка — профиль
+    // можно перенаправить на другую машинку, не тронув ни одного шага, и правило, стоящее на
+    // разрешённой лестнице, поменяло бы смысл сохранённых карточек задним числом.
+    //
+    // Гейт ГЛАГОЛА при этом остаётся у маппера (STEP_TYPE_BLOCKS): на чужом глаголе блок не
+    // рисуется и на провод не едет, поэтому отказ здесь встал бы у контрола, которого нет на
+    // экране, — и карточку стало бы нечем спасти.
+    const needsMachineType = (
+      filled: boolean,
+      allowed: readonly string[],
+      field: string,
+      message: string,
+    ) => {
+      if (!stepIsMachine || !filled || allowed.includes(stepMachineType)) return;
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message });
+    };
+    const BUTTONHOLE = ['TECH_CARD_MACHINE_TYPE_BUTTONHOLE'] as const;
+    needsMachineType(
+      stepEnumSet(o.buttonholeStyle),
+      BUTTONHOLE,
+      'buttonholeStyle',
+      'a buttonhole shape is a buttonhole machine setting — name that machine on the step, or clear it',
+    );
+    needsMachineType(
+      stepTextSet(o.cutLengthMm),
+      BUTTONHOLE,
+      'cutLengthMm',
+      'a buttonhole cut is a buttonhole machine setting — name that machine on the step, or clear it',
+    );
+    needsMachineType(
+      stepEnumSet(o.buttonholeOrientation),
+      BUTTONHOLE,
+      'buttonholeOrientation',
+      'a buttonhole direction is a buttonhole machine setting — name that machine on the step, or clear it',
+    );
+    needsMachineType(
+      stepTextSet(o.bartackLengthMm),
+      ['TECH_CARD_MACHINE_TYPE_BUTTONHOLE', 'TECH_CARD_MACHINE_TYPE_BARTACK'],
+      'bartackLengthMm',
+      'a bartack length belongs to a bartack or a buttonhole machine — name one on the step, or clear it',
+    );
+    needsMachineType(
+      stepEnumSet(o.attachPattern),
+      ['TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH'],
+      'attachPattern',
+      'a button pattern is a button-attach machine setting — name that machine on the step, or clear it',
+    );
+    needsMachineType(
+      stepEnumSet(o.zipperApplication),
+      ['TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING'],
+      'zipperApplication',
+      'a zipper application is a zipper-setting machine setting — name that machine on the step, or clear it',
+    );
+    needsMachineType(
+      stepEnumSet(o.bindingStyle),
+      ['TECH_CARD_MACHINE_TYPE_BINDING_TAPING'],
+      'bindingStyle',
+      'how the binding is folded is a binder setting — name the binding machine on the step, or clear it',
+    );
+    // Горячий воздух есть ТОЛЬКО у проклейки шва: ультразвук греет сам материал, воздуха у него нет.
+    needsMachineType(
+      !!o.airTemperatureC,
+      ['TECH_CARD_MACHINE_TYPE_SEAM_TAPING'],
+      'airTemperatureC',
+      'hot air belongs to seam taping — an ultrasonic welder has none; name the machine, or clear it',
+    );
+    needsMachineType(
+      stepTextSet(o.feedSpeedMMin),
+      ['TECH_CARD_MACHINE_TYPE_SEAM_TAPING', 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER'],
+      'feedSpeedMMin',
+      'a feed speed belongs to a welding machine — name seam taping or the ultrasonic welder, or clear it',
+    );
+
+    // ГРАВИРОВКА — МЕТОД БЕЗ НОСИТЕЛЯ И БЕЗ ПРИЖИМА. Лазер снимает материал сам: снимать нечего,
+    // прижимать нечем, и сервер отвергает все три поля по имени.
+    if (o.printMethod === 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE') {
+      const refuseAtLaser = (filled: boolean, field: string, message: string) => {
+        if (!filled) return;
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message });
+      };
+      refuseAtLaser(
+        stepEnumSet(o.peelMode),
+        'peelMode',
+        'engraving has no carrier to peel — clear it, or pick another print method',
+      );
+      refuseAtLaser(
+        !!o.secondPressSec,
+        'secondPressSec',
+        'engraving is not pressed — clear the second press, or pick another print method',
+      );
+      refuseAtLaser(
+        stepEnumSet(o.pressureScale),
+        'pressureScale',
+        'engraving is not pressed — clear the pressure, or pick another print method',
+      );
+      // И ВЕСЬ ВТО-БЛОК ЦЕЛИКОМ (F2-FINAL §5.4, правило 5). Термопресс печать берёт взаймы — но
+      // только та, у которой есть носитель: лазер выжигает материал сам, плиты у него нет, и семь
+      // ВТО-полей сервер на этом методе отвергает ПО ИМЕНИ, отказывая вместе с ними всей карточке.
+      // Отказ стоит на КАЖДОМ поле отдельно, а не на блоке, потому что чинить его оператор будет
+      // на контроле, где стоит число.
+      const pressAtLaser =
+        'engraving has no platen — clear the pressing settings, or pick another print method';
+      refuseAtLaser(stepEnumSet(o.pressEquipment), 'pressEquipment', pressAtLaser);
+      refuseAtLaser(stepTextSet(o.pressProfileKey), 'pressProfileKey', pressAtLaser);
+      refuseAtLaser(!!o.pressTemperatureC, 'pressTemperatureC', pressAtLaser);
+      refuseAtLaser(!!o.pressDwellSec, 'pressDwellSec', pressAtLaser);
+      refuseAtLaser(stepTextSet(o.pressPressureNCm2), 'pressPressureNCm2', pressAtLaser);
+      // Проставленный `false` — это сказанное «без пара», а не пустота: его тоже отвергают.
+      refuseAtLaser(o.pressSteam !== undefined, 'pressSteam', pressAtLaser);
+      refuseAtLaser(stepEnumSet(o.pressCloth), 'pressCloth', pressAtLaser);
+    }
+
+    // СВАРКА СОЕДИНЯЕТ ТЕПЛОМ, А НЕ НИТКОЙ. У проклейки шва и ультразвука нет ни иглы, ни нитки —
+    // ниточно-игольные overrides шага сервер на них отвергает, и печатать «игла Nm 90» рядом с
+    // «ультразвук» значило бы отправить в цех настройку несуществующего узла.
+    if (stepIsMachine && isWeldMachineType(stepMachineType)) {
+      const refuseAtWeld = (filled: boolean, field: string, what: string) => {
+        if (!filled) return;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: `a welding machine has no ${what} — clear it, or pick a sewing machine`,
+        });
+      };
+      refuseAtWeld(!!o.threadCount, 'threadCount', 'thread');
+      refuseAtWeld(stepEnumSet(o.needleType), 'needleType', 'needle');
+      refuseAtWeld(!!o.needleSizeNm, 'needleSizeNm', 'needle');
+      refuseAtWeld(stepEnumSet(o.threadTension), 'threadTension', 'thread to tension');
+      refuseAtWeld(stepTextSet(o.stitchWidthMm), 'stitchWidthMm', 'stitch');
+    }
+
+    // ЧЕТЫРЕ ДВУХ-ПОЛЕВЫХ ПРАВИЛА. В БД их нет и быть не может — двухколоночный CHECK это урок
+    // 3819, — поэтому единственные два места, где они живут, это Go и эта функция.
+    if (stepTextSet(o.needleGaugeMm) && (o.needleCount ?? 0) < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['needleGaugeMm'],
+        message: 'a gauge measures the distance BETWEEN needles — say how many there are first (2+)',
+      });
+    }
+    if (stepTextSet(o.pitchMm) && (o.placementCount ?? 0) < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['pitchMm'],
+        message: 'a pitch measures the gap BETWEEN repeats — say how many there are first (2+)',
+      });
+    }
+    if (
+      stepTextSet(o.foldbackMm) &&
+      o.attachMethod !== 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['foldbackMm'],
+        message: 'only threaded hardware has webbing folded back through it — clear it, or switch the method',
+      });
+    }
+    // Четвёртое (`airTemperatureC` ⇒ явный seam_taping) записано выше, вместе с остальными
+    // правилами явного типа машины: оно и есть одно из них, и разводить его на два места значило
+    // бы получить два ответа на один вопрос.
+
+    // БАНДЫ — как и у блоков 0306, БЕЗ ОГЛЯДКИ НА ГЛАГОЛ: маппер отбросит чужое семейство сам, а
+    // число, оставшееся в состоянии формы, обязано быть названо на СВОЁМ контроле, а не тихо
+    // выброшено, пока оператор смотрит на него.
+    refineRangedInt(o.needleCount, STEP_KIND_INT_BANDS.needleCount, ctx, ['needleCount']);
+    refineRangedInt(o.placementCount, STEP_KIND_INT_BANDS.placementCount, ctx, ['placementCount']);
+    refineRangedInt(o.cycleStitchCount, STEP_KIND_INT_BANDS.cycleStitchCount, ctx, [
+      'cycleStitchCount',
+    ]);
+    refineRangedInt(o.secondPressSec, STEP_KIND_INT_BANDS.secondPressSec, ctx, ['secondPressSec']);
+    refineRangedInt(o.airTemperatureC, STEP_KIND_INT_BANDS.airTemperatureC, ctx, [
+      'airTemperatureC',
+    ]);
+    refineRangedDecimal(o.needleGaugeMm, STEP_KIND_DECIMAL_BANDS.needleGaugeMm, ctx, [
+      'needleGaugeMm',
+    ]);
+    refineRangedDecimal(o.rowSpacingMm, STEP_KIND_DECIMAL_BANDS.rowSpacingMm, ctx, ['rowSpacingMm']);
+    refineRangedDecimal(o.fullnessRatio, STEP_KIND_DECIMAL_BANDS.fullnessRatio, ctx, [
+      'fullnessRatio',
+    ]);
+    refineRangedDecimal(o.pitchMm, STEP_KIND_DECIMAL_BANDS.pitchMm, ctx, ['pitchMm']);
+    refineRangedDecimal(o.foldbackMm, STEP_KIND_DECIMAL_BANDS.foldbackMm, ctx, ['foldbackMm']);
+    refineRangedDecimal(o.feedSpeedMMin, STEP_KIND_DECIMAL_BANDS.feedSpeedMMin, ctx, [
+      'feedSpeedMMin',
+    ]);
+    refineRangedDecimal(o.residualAllowanceMm, STEP_KIND_DECIMAL_BANDS.residualAllowanceMm, ctx, [
+      'residualAllowanceMm',
+    ]);
+    refineRangedDecimal(o.residualTailMaxMm, STEP_KIND_DECIMAL_BANDS.residualTailMaxMm, ctx, [
+      'residualTailMaxMm',
+    ]);
+    refineRangedDecimal(o.cutLengthMm, STEP_KIND_DECIMAL_BANDS.cutLengthMm, ctx, ['cutLengthMm']);
+    refineRangedDecimal(o.bartackLengthMm, STEP_KIND_DECIMAL_BANDS.bartackLengthMm, ctx, [
+      'bartackLengthMm',
+    ]);
   });
 
 const labelSchema = z.object({
@@ -1824,6 +2279,51 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       pressPressureNCm2: decimalToInput(o.pressPressureNCm2),
       pressSteam: o.pressSteam,
       pressCloth: o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN',
+      // --- ВИДЫ ОПЕРАЦИЙ (0324): вложенное с провода → плоское в форме -------------------------
+      //
+      // ЧИТАЕТСЯ ЧЕРЕЗ `?.`, И ЭТО НЕ ОСТОРОЖНОСТЬ. Незаполненное блок-сообщение приходит ЯВНЫМ
+      // `null` (EmitUnpopulated), а не отсутствующим ключом, поэтому `o.stitching.needleCount`
+      // упал бы на первом же шаге без строчки — то есть на большинстве шагов любой карточки.
+      //
+      // Дальше — обычная дисциплина чтения формы: decimal через decimalToInput (он же гасит null),
+      // enum через `|| '*_UNKNOWN'`, int через `|| 0`. Пусто читается ПУСТЫМ контролом, а не
+      // нулём: «не указано» и «ноль» — разные ответы, и форма не имеет права выдумывать второй.
+      needleCount: o.stitching?.needleCount || 0,
+      needleGaugeMm: decimalToInput(o.stitching?.needleGaugeMm),
+      seamSecuring: o.stitching?.seamSecuring || 'TECH_CARD_SEAM_SECURING_UNKNOWN',
+      rowSpacingMm: decimalToInput(o.stitching?.rowSpacingMm),
+      fullnessRatio: decimalToInput(o.stitching?.fullnessRatio),
+      // Имя поля на проводе — `placementLayout`, а не `placement`: «placement» занято reserved-именем
+      // легаси-поля свободного текста, и снять его нельзя — на JSON-ключах легаси держится разбор
+      // архивных релизных снапшотов. Колонки при этом остались placement_count / pitch_mm.
+      placementCount: o.placementLayout?.count || 0,
+      pitchMm: decimalToInput(o.placementLayout?.pitchMm),
+      attachMethod: o.hardware?.attachMethod || 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN',
+      holePrep: o.hardware?.holePrep || 'TECH_CARD_HOLE_PREP_UNKNOWN',
+      reinforcement: o.hardware?.reinforcement || 'TECH_CARD_REINFORCEMENT_UNKNOWN',
+      foldbackMm: decimalToInput(o.hardware?.foldbackMm),
+      cycleStitchCount: o.hardware?.cycleStitchCount || 0,
+      printMethod: o.printMethod || 'TECH_CARD_PRINT_METHOD_UNKNOWN',
+      peelMode: o.print?.peelMode || 'TECH_CARD_PEEL_MODE_UNKNOWN',
+      secondPressSec: o.print?.secondPressSec || 0,
+      pressureScale: o.print?.pressureScale || 'TECH_CARD_PRESSURE_SCALE_UNKNOWN',
+      airTemperatureC: o.weld?.airTemperatureC || 0,
+      feedSpeedMMin: decimalToInput(o.weld?.feedSpeedMMin),
+      trimAction: o.trim?.action || 'TECH_CARD_TRIM_ACTION_UNKNOWN',
+      residualAllowanceMm: decimalToInput(o.trim?.residualAllowanceMm),
+      residualTailMaxMm: decimalToInput(o.threadTrim?.residualTailMaxMm),
+      cleaningKind: o.clean?.kind || 'TECH_CARD_CLEANING_KIND_UNKNOWN',
+      coverageMode: o.inspect?.coverageMode || 'TECH_CARD_INSPECT_COVERAGE_UNKNOWN',
+      wetProcessKind: o.wetProcessKind || 'TECH_CARD_WET_PROCESS_KIND_UNKNOWN',
+      buttonholeStyle: o.fastening?.buttonholeStyle || 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN',
+      cutLengthMm: decimalToInput(o.fastening?.cutLengthMm),
+      buttonholeOrientation:
+        o.fastening?.buttonholeOrientation || 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN',
+      bartackLengthMm: decimalToInput(o.fastening?.bartackLengthMm),
+      attachPattern: o.fastening?.attachPattern || 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN',
+      zipperApplication: o.fastening?.zipperApplication || 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN',
+      bindingStyle: o.stitching?.bindingStyle || 'TECH_CARD_BINDING_STYLE_UNKNOWN',
+      labelAttachStitch: o.stitching?.labelAttachStitch || 'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN',
       note: o.note || '',
     })),
     labels: (insert?.labels ?? []).map((l) => ({
@@ -2453,6 +2953,21 @@ export function mapFormToTechCardInsert(
     // при этом ничего не менялось, и объявлять снятие незачем.
     mediaCleared:
       !!data.mediaCleared && (original?.operations ?? []).some((o) => (o?.media ?? []).length > 0),
+    // ЧЕТВЁРТЫЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — для полей волны видов операций (0324). Ставится ВСЕГДА, как
+    // machineFieldsAware, а не по факту заполненности: восемнадцать полей волны сидят на СТАРЫХ
+    // парах (глагол, machine_type), которые этот клиент шлёт каждый день, а расширенные словари
+    // (machineType +2, topstitchMode +2, pressCloth +1, bomItem.kind +2) живут на колонках,
+    // которым годы. Операции пишутся полной заменой, стабильного ключа у шага нет — значит
+    // отставшая вкладка стёрла бы факты молча, и сервер отвечает на запись БЕЗ флага
+    // FailedPrecondition против карточки, эти факты несущей.
+    //
+    // Парного *_cleared у него НЕТ и не будет, в отличие от узлов и снимков: «поле пусто» здесь
+    // рядовая правка (технолог стёр стиль петли, потому что он больше не нужен), и бекстоп
+    // «осведомлённая пустота против непустой карточки» сделал бы восемнадцать полей НЕСТИРАЕМЫМИ.
+    //
+    // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
+    // подпись.
+    operationKindsAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -2478,13 +2993,138 @@ export function mapFormToTechCardInsert(
       const operationType = (o.operationType ||
         'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType;
       const isMachineStep = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
-      const isPressStep =
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
-        operationType === 'TECH_CARD_OPERATION_TYPE_FUSING';
+      // ПЕЧАТЬ БЕРЁТ ТЕРМОПРЕСС ВЗАЙМЫ, и гейт ВТО-полей отвечает не на тот вопрос, что список трёх
+      // ВТО-глаголов: не «шаг ЕСТЬ ВТО», а «шагу МОЖНО дать настройки пресса». Термотрансфер
+      // прижимают температурой, выдержкой и силиконовой бумагой, не будучи ВТО-шагом, и контракт
+      // ВТО-блок при PRINT разрешает: `press_equipment` там ОПЦИОНАЛЕН, а REQUIRED-if-aware живёт
+      // у press/press_open/fusing — поэтому обязательность пикера в `superRefine` стоит на трёх
+      // глаголах и здесь ни при чём. Списком трёх глаголов температура 160 и выдержка 12 секунд
+      // печатного шага уезжали на провод нулями, и печатный лист рисовал их из ничего.
+      const ownsPressSettings = stepTypeOwnsBlock(operationType, 'pressSettings');
       // A legacy type (LOCKSTITCH…) is canonicalised into (MACHINE, machine_type) by the server, and
       // it derives the machine from the token itself — so this client neither invents one for it nor
       // sends the block: the step is not MACHINE on the wire yet.
+      //
+      // --- ВИДЫ ОПЕРАЦИЙ (0324): десять блоков и два голых поля -----------------------------------
+      //
+      // ФОРМА ПЛОСКАЯ, ПРОВОД ВЛОЖЕННЫЙ — сборка обёрток живёт здесь, и только здесь. Обёртка едет
+      // ЦЕЛИКОМ ИЛИ НЕ ЕДЕТ ВОВСЕ (blockOut): прецедент topstitch — всегда присутствующая обёртка с
+      // UNKNOWN внутри читается как «кто-то думал об этом» на КАЖДОМ шаге, у которого этого нет.
+      //
+      // ДВА ГЕЙТА, И ОНИ РАЗНЫЕ. Первый — глагол, таблицей STEP_TYPE_BLOCKS: она одна на редактор,
+      // очистку скрытого, этот маппер и печатный лист, потому что сервер отвергает поле чужого
+      // семейства ПО ИМЕНИ и отказывает вместе с ним всей карточкой. Второй — ЯВНЫЙ тип машины, и
+      // он живёт здесь, а не в таблице: это факт о машинке, а не о глаголе. Тип, разрешённый через
+      // `machineProfileKey`, не засчитывается — правило о шаге, а не о профиле.
+      //
+      // НЕОСВЕДОМЛЁННАЯ ЗАПИСЬ НЕ РЕГРЕССИРУЕТ ПО ПОСТРОЕНИЮ: у шага без единого нового факта все
+      // десять обёрток пусты (⇒ undefined), оба голых поля не его глагола (⇒ undefined), и байты
+      // такого шага на проводе те же, что были до волны.
+      const ownsBlock = (b: StepBlock) => stepTypeOwnsBlock(operationType, b);
+      const stepMachineType = isMachineStep ? o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN' : '';
+      const onMachineType = (...tokens: readonly string[]) => tokens.includes(stepMachineType);
+      const onCycleMachine = onMachineType(...CYCLE_MACHINE_TYPES);
+      const isWeldStep = isWeldMachineType(stepMachineType);
+      // Метод печати — голым полем шага, а не внутри блока `print`: он REQUIRED при PRINT, а
+      // обязательное поле не прячут в необязательное сообщение, которого может не быть вовсе.
+      // На чужом глаголе ключ не едет вовсе — сервер отвергает метод везде, кроме PRINT.
+      const printMethod =
+        operationType === 'TECH_CARD_OPERATION_TYPE_PRINT'
+          ? ((o.printMethod || 'TECH_CARD_PRINT_METHOD_UNKNOWN') as common_TechCardPrintMethod)
+          : undefined;
+      const isLaser = printMethod === 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE';
+
+      const stitching = blockOut(ownsBlock('stitching'), () => ({
+        needleCount: o.needleCount || 0,
+        needleGaugeMm: optionalDecimal(o.needleGaugeMm),
+        seamSecuring: (o.seamSecuring ||
+          'TECH_CARD_SEAM_SECURING_UNKNOWN') as common_TechCardSeamSecuring,
+        rowSpacingMm: optionalDecimal(o.rowSpacingMm),
+        fullnessRatio: optionalDecimal(o.fullnessRatio),
+        // Бейка — только при явном окантовывателе; шов этикетки — при любой машинке.
+        bindingStyle: (onMachineType('TECH_CARD_MACHINE_TYPE_BINDING_TAPING')
+          ? o.bindingStyle || 'TECH_CARD_BINDING_STYLE_UNKNOWN'
+          : 'TECH_CARD_BINDING_STYLE_UNKNOWN') as common_TechCardBindingStyle,
+        labelAttachStitch: (o.labelAttachStitch ||
+          'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN') as common_TechCardLabelAttachStitch,
+      }));
+      const placementLayout = blockOut(ownsBlock('placement'), () => ({
+        count: o.placementCount || 0,
+        pitchMm: optionalDecimal(o.pitchMm),
+      }));
+      // H-БЛОК ЖИВЁТ НА ДВУХ ГЛАГОЛАХ, И ПО-РАЗНОМУ. На HARDWARE_SET он целиком; на MACHINE с явной
+      // цикловой машинкой — только подготовка отверстия, усилитель и стежки цикла: у петли и
+      // закрепки есть отверстие и усилитель, но нет «способа крепления» и нет стропы, которую
+      // подгибают, и сервер отвергает эти два поля там по имени.
+      const isHardwareStep = operationType === 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET';
+      const hardware = blockOut(ownsBlock('hardware') && (isHardwareStep || onCycleMachine), () => ({
+        attachMethod: (isHardwareStep
+          ? o.attachMethod || 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'
+          : 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN') as common_TechCardHardwareAttachMethod,
+        holePrep: (o.holePrep || 'TECH_CARD_HOLE_PREP_UNKNOWN') as common_TechCardHolePrep,
+        reinforcement: (o.reinforcement ||
+          'TECH_CARD_REINFORCEMENT_UNKNOWN') as common_TechCardReinforcement,
+        foldbackMm: isHardwareStep ? optionalDecimal(o.foldbackMm) : undefined,
+        cycleStitchCount: o.cycleStitchCount || 0,
+      }));
+      // Гравировка снимает материал сама: носителя нет, прижима нет — все три поля отвергаются.
+      const print = blockOut(ownsBlock('print') && !isLaser, () => ({
+        peelMode: (o.peelMode || 'TECH_CARD_PEEL_MODE_UNKNOWN') as common_TechCardPeelMode,
+        secondPressSec: o.secondPressSec || 0,
+        pressureScale: (o.pressureScale ||
+          'TECH_CARD_PRESSURE_SCALE_UNKNOWN') as common_TechCardPressureScale,
+      }));
+      const weld = blockOut(ownsBlock('weld') && isWeldStep, () => ({
+        // Горячий воздух — только у проклейки шва: ультразвук греет материал сам.
+        airTemperatureC: onMachineType('TECH_CARD_MACHINE_TYPE_SEAM_TAPING')
+          ? o.airTemperatureC || 0
+          : 0,
+        feedSpeedMMin: optionalDecimal(o.feedSpeedMMin),
+      }));
+      const trim = blockOut(ownsBlock('trim'), () => ({
+        action: (o.trimAction || 'TECH_CARD_TRIM_ACTION_UNKNOWN') as common_TechCardTrimAction,
+        residualAllowanceMm: optionalDecimal(o.residualAllowanceMm),
+      }));
+      const threadTrim = blockOut(ownsBlock('threadTrim'), () => ({
+        residualTailMaxMm: optionalDecimal(o.residualTailMaxMm),
+      }));
+      const clean = blockOut(ownsBlock('clean'), () => ({
+        kind: (o.cleaningKind || 'TECH_CARD_CLEANING_KIND_UNKNOWN') as common_TechCardCleaningKind,
+      }));
+      const inspect = blockOut(ownsBlock('inspect'), () => ({
+        coverageMode: (o.coverageMode ||
+          'TECH_CARD_INSPECT_COVERAGE_UNKNOWN') as common_TechCardInspectCoverage,
+      }));
+      // Мокрая обработка — один факт, он же дискриминатор: сообщение вокруг него было бы пустой
+      // обёрткой, поэтому оно и не заведено.
+      const wetProcessKind =
+        operationType === 'TECH_CARD_OPERATION_TYPE_WET_PROCESS'
+          ? ((o.wetProcessKind ||
+              'TECH_CARD_WET_PROCESS_KIND_UNKNOWN') as common_TechCardWetProcessKind)
+          : undefined;
+      const fastening = blockOut(ownsBlock('fastening'), () => ({
+        buttonholeStyle: (onMachineType('TECH_CARD_MACHINE_TYPE_BUTTONHOLE')
+          ? o.buttonholeStyle || 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'
+          : 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN') as common_TechCardButtonholeStyle,
+        cutLengthMm: onMachineType('TECH_CARD_MACHINE_TYPE_BUTTONHOLE')
+          ? optionalDecimal(o.cutLengthMm)
+          : undefined,
+        buttonholeOrientation: (onMachineType('TECH_CARD_MACHINE_TYPE_BUTTONHOLE')
+          ? o.buttonholeOrientation || 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'
+          : 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN') as common_TechCardButtonholeOrientation,
+        bartackLengthMm: onMachineType(
+          'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+          'TECH_CARD_MACHINE_TYPE_BARTACK',
+        )
+          ? optionalDecimal(o.bartackLengthMm)
+          : undefined,
+        attachPattern: (onMachineType('TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH')
+          ? o.attachPattern || 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'
+          : 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN') as common_TechCardButtonAttachPattern,
+        zipperApplication: (onMachineType('TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING')
+          ? o.zipperApplication || 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'
+          : 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN') as common_TechCardZipperApplication,
+      }));
       return {
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
         // operator never caused.
@@ -2530,17 +3170,19 @@ export function mapFormToTechCardInsert(
         seamAllowanceMm: optionalDecimal(o.seamAllowanceMm),
         // The sub-message travels only when there IS topstitching: an always-present wrapper
         // carrying MODE_UNKNOWN reads as «somebody considered it» on every step that has none. And
-        // the width rides only with WIDTH — beside «edge» it would be a shadow value the server
-        // refuses anyway.
+        // the width is dropped only for a mode KNOWN to have none — beside «edge» it would be a
+        // shadow value the server refuses anyway. Written as «only with WIDTH» this line was the
+        // last of the three losses: even with the editor and the schema fixed, the round trip
+        // «load → open → save» would have deleted the width of a mode this bundle cannot classify,
+        // on the wire, where nothing on screen could show it going.
         topstitch:
           topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
             ? undefined
             : {
                 mode: topstitchMode,
-                widthMm:
-                  topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH'
-                    ? inputToDecimal(o.topstitchWidthMm)
-                    : undefined,
+                widthMm: topstitchModeHasNoWidth(topstitchMode)
+                  ? undefined
+                  : inputToDecimal(o.topstitchWidthMm),
                 rows: o.topstitchRows || 0,
               },
         attachmentKind: (o.attachmentKind ||
@@ -2555,36 +3197,54 @@ export function mapFormToTechCardInsert(
           ? o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN'
           : 'TECH_CARD_MACHINE_TYPE_UNKNOWN') as common_TechCardMachineType,
         machineProfileKey: isMachineStep ? o.machineProfileKey?.trim() || '' : '',
-        threadCount: isMachineStep ? o.threadCount || 0 : 0,
-        needleType: (isMachineStep
+        // СВАРОЧНЫЕ МАШИНКИ ОТВЕРГАЮТ НИТОЧНО-ИГОЛЬНЫЕ OVERRIDES (0324). Проклейка шва и ультразвук
+        // соединяют теплом: иглы и нитки у них нет вовсе, и сервер отказывает по имени. Пятёрка
+        // ниже — тот же список, что в isWeldMachineType, и другой машинки он не касается, поэтому
+        // байты шага на любой ШВЕЙНОЙ машинке этой строкой не меняются.
+        threadCount: isMachineStep && !isWeldStep ? o.threadCount || 0 : 0,
+        needleType: (isMachineStep && !isWeldStep
           ? o.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN'
           : 'TECH_CARD_NEEDLE_TYPE_UNKNOWN') as common_TechCardNeedleType,
-        needleSizeNm: isMachineStep ? o.needleSizeNm || 0 : 0,
-        threadTension: (isMachineStep
+        needleSizeNm: isMachineStep && !isWeldStep ? o.needleSizeNm || 0 : 0,
+        threadTension: (isMachineStep && !isWeldStep
           ? o.threadTension || 'TECH_CARD_THREAD_TENSION_UNKNOWN'
           : 'TECH_CARD_THREAD_TENSION_UNKNOWN') as common_TechCardThreadTension,
         // Only with the scale it explains — server parity, same pair discipline as kind/kind_note.
         threadTensionNote:
           isMachineStep &&
+          !isWeldStep &&
           o.threadTension &&
           o.threadTension !== 'TECH_CARD_THREAD_TENSION_UNKNOWN'
             ? o.threadTensionNote?.trim() || ''
             : '',
-        stitchWidthMm: isMachineStep ? optionalDecimal(o.stitchWidthMm) : undefined,
-        // --- the ВТО block: only on PRESS / PRESS_OPEN / FUSING ---------------------------------
-        pressEquipment: (isPressStep
+        stitchWidthMm: isMachineStep && !isWeldStep ? optionalDecimal(o.stitchWidthMm) : undefined,
+        // --- the ВТО block: on PRESS / PRESS_OPEN / FUSING — and on PRINT, which borrows the press
+        pressEquipment: (ownsPressSettings
           ? o.pressEquipment || 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'
           : 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') as common_TechCardPressEquipment,
-        pressProfileKey: isPressStep ? o.pressProfileKey?.trim() || '' : '',
-        pressTemperatureC: isPressStep ? o.pressTemperatureC || 0 : 0,
-        pressDwellSec: isPressStep ? o.pressDwellSec || 0 : 0,
-        pressPressureNCm2: isPressStep ? optionalDecimal(o.pressPressureNCm2) : undefined,
+        pressProfileKey: ownsPressSettings ? o.pressProfileKey?.trim() || '' : '',
+        pressTemperatureC: ownsPressSettings ? o.pressTemperatureC || 0 : 0,
+        pressDwellSec: ownsPressSettings ? o.pressDwellSec || 0 : 0,
+        pressPressureNCm2: ownsPressSettings ? optionalDecimal(o.pressPressureNCm2) : undefined,
         // undefined drops the key, which IS the wire shape of an unset optional bool — and the
         // server reads a present `false` as the stated instruction «without steam».
-        pressSteam: isPressStep ? o.pressSteam : undefined,
-        pressCloth: (isPressStep
+        pressSteam: ownsPressSettings ? o.pressSteam : undefined,
+        pressCloth: (ownsPressSettings
           ? o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN'
           : 'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
+        // --- ВИДЫ ОПЕРАЦИЙ (0324): порядок — номера полей контракта 51..63 (дыры 50/62 обещаны) --
+        printMethod,
+        stitching,
+        placementLayout,
+        hardware,
+        print,
+        weld,
+        trim,
+        threadTrim,
+        clean,
+        inspect,
+        wetProcessKind,
+        fastening,
         note: o.note?.trim() || '',
       };
     }),

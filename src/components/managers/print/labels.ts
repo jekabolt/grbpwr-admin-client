@@ -125,6 +125,8 @@ export const PRINT_KIND_LABEL: Partial<Record<common_TechCardBomKind, string>> =
   TECH_CARD_BOM_KIND_BONING: 'boning / rigilene',
   TECH_CARD_BOM_KIND_LACE: 'lace',
   TECH_CARD_BOM_KIND_RIBBING: 'rib knit trim',
+  TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE: 'seam-sealing tape (hot-air)',
+  TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER: 'embroidery stabilizer / backing',
   TECH_CARD_BOM_KIND_PRINT: 'print',
   TECH_CARD_BOM_KIND_EMBROIDERY: 'embroidery',
   TECH_CARD_BOM_KIND_APPLIQUE: 'appliqué',

@@ -1616,8 +1616,17 @@ export type TechCardBomKind =
   | "TECH_CARD_BOM_KIND_INSERT_CARD"
   // ДРУГОЕ — the ONLY value legal in EVERY eligible section (including section=other, which has no
   // kinds of its own). Its meaning lives in the separate kind_note, never in a shadow value on one
-  // of the 51 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
-  | "TECH_CARD_BOM_KIND_OTHER";
+  // of the 53 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
+  | "TECH_CARD_BOM_KIND_OTHER"
+  // ДОБАВЛЕНО ВОЛНОЙ ВИДОВ ОПЕРАЦИЙ, строго append'ом — ПОСЛЕ OTHER. Порядок членов enum'а секции
+  // не задаёт: домашнюю секцию вида держит bomKindHomeSection в entity, и вид без записи там для
+  // валидации не существует вовсе.
+  | "TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE"
+  // 54 — ДЫРА: номер обещан отложенному `wet_chemical` фазы расширяемых свойств. НЕ занимать.
+  // Стабилизатор под вышивку живёт в section=DECORATION, а НЕ в interlining: interlining — рулонная
+  // секция, а рулонные секции видов не принимают вовсе. Клиентский пикер обязан предлагать этот вид
+  // только в декоре; на паре «вид ↔ секция» стор откажет.
+  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -1783,7 +1792,14 @@ export type TechCardMachineType =
   | "TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO"
   | "TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO"
   | "TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_OTHER";
+  | "TECH_CARD_MACHINE_TYPE_OTHER"
+  // СВАРКА И ПРОКЛЕЙКА — иглы и нитки тут нет вовсе. Легаси-двойника среди 1..9
+  // TechCardOperationType у них нет, поэтому в компат-канонизацию они не входят: шаг пишется как
+  // (MACHINE, этот тип), ровно как coverlock сегодня. Ниточно-игольные overrides шага
+  // (thread_count, needle_type, needle_size_nm, thread_tension, stitch_width_mm) при этих двух
+  // типах отвергаются: у сварного шва их нет.
+  | "TECH_CARD_MACHINE_TYPE_SEAM_TAPING"
+  | "TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER";
 // TechCardPressEquipment is the «on what» of a ВТО step (PRESS / PRESS_OPEN / FUSING), the press
 // side of the same second axis TechCardMachineType covers for sewing.
 export type TechCardPressEquipment =
@@ -1842,12 +1858,19 @@ export type TechCardPressCloth =
   | "TECH_CARD_PRESS_CLOTH_PRESS_CLOTH"
   | "TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH"
   | "TECH_CARD_PRESS_CLOTH_TEFLON_SHEET"
-  | "TECH_CARD_PRESS_CLOTH_OTHER";
+  | "TECH_CARD_PRESS_CLOTH_OTHER"
+  | "TECH_CARD_PRESS_CLOTH_SILICONE_PAPER";
 // TechCardOperationType says WHAT a step does. It used to mix that with the machine class, which
 // is why 1-9 read like a machine list: a step could not say «прострочить» without also committing
 // to a stitch class in the same value, and «на чём» had no field of its own. The second axis is
 // TechCardMachineType / TechCardPressEquipment now, and the verbs left here are six: MACHINE,
 // PRESS, PRESS_OPEN, FUSING, HANDWORK, OTHER.
+// ВОЛНА ВИДОВ ОПЕРАЦИЙ добавила ещё девять глаголов (16..24). Шести не хватало: цех делает не
+// только шов и ВТО, и установка фурнитуры, печать, подрезка, чистка концов, чистка изделия,
+// контроль, складывание, упаковка и мокрая обработка записывались как OTHER плюс проза в note —
+// то есть не записывались вовсе. Каждый новый глагол несёт СВОЙ блок настроек (поля 51..63
+// TechCardOperation); FOLD и PACK не несут ни одного поля — у них нет ни машины, ни настроек,
+// только место и время.
 export type TechCardOperationType =
   | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
   // 1-9 ARE LEGACY AND LIVE FOREVER. They are still ACCEPTED on write (canonicalised into
@@ -1869,7 +1892,16 @@ export type TechCardOperationType =
   | "TECH_CARD_OPERATION_TYPE_OTHER"
   | "TECH_CARD_OPERATION_TYPE_MACHINE"
   | "TECH_CARD_OPERATION_TYPE_PRESS"
-  | "TECH_CARD_OPERATION_TYPE_PRESS_OPEN";
+  | "TECH_CARD_OPERATION_TYPE_PRESS_OPEN"
+  | "TECH_CARD_OPERATION_TYPE_HARDWARE_SET"
+  | "TECH_CARD_OPERATION_TYPE_PRINT"
+  | "TECH_CARD_OPERATION_TYPE_TRIM"
+  | "TECH_CARD_OPERATION_TYPE_THREAD_TRIM"
+  | "TECH_CARD_OPERATION_TYPE_CLEAN"
+  | "TECH_CARD_OPERATION_TYPE_INSPECT"
+  | "TECH_CARD_OPERATION_TYPE_FOLD"
+  | "TECH_CARD_OPERATION_TYPE_PACK"
+  | "TECH_CARD_OPERATION_TYPE_WET_PROCESS";
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
 // step cannot be saved without (the other is operation_type). Renamed from
 // TechCardConstructionZone, which had only the three material BANDS and therefore could not answer
@@ -1954,7 +1986,165 @@ export type TechCardAttachmentKind =
 export type TechCardTopstitchMode =
   | "TECH_CARD_TOPSTITCH_MODE_UNKNOWN"
   | "TECH_CARD_TOPSTITCH_MODE_EDGE"
-  | "TECH_CARD_TOPSTITCH_MODE_WIDTH";
+  | "TECH_CARD_TOPSTITCH_MODE_WIDTH"
+  // В ШОВ («в канавку»): строчка ложится в сам шов, ширины у неё нет — width_mm отвергается,
+  // ровно как у EDGE.
+  | "TECH_CARD_TOPSTITCH_MODE_IN_DITCH"
+  // ПАРАЛЛЕЛЬНО ШВУ: width_mm здесь REQUIRED и значит ОТСТУП ОТ ЛИНИИ ШВА. От WIDTH отличается
+  // точкой отсчёта: у WIDTH это край детали, здесь — шов. Два разных факта под одним числом
+  // разошлись бы на печати молча, поэтому это отдельный режим, а не примечание к WIDTH.
+  | "TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM";
+// Закрепка концов строчки. NONE — явное «без закрепки»: так шьётся то, что дальше поймается
+// другим швом, и это не то же самое, что «не указано».
+export type TechCardSeamSecuring =
+  | "TECH_CARD_SEAM_SECURING_UNKNOWN"
+  | "TECH_CARD_SEAM_SECURING_NONE"
+  | "TECH_CARD_SEAM_SECURING_BACKTACK"
+  | "TECH_CARD_SEAM_SECURING_CONDENSED"
+  | "TECH_CARD_SEAM_SECURING_LATCHED";
+// Способ КРЕПЛЕНИЯ фурнитуры — дискриминатор шага HARDWARE_SET: поле REQUIRED, и UNKNOWN на таком
+// шаге отвергается. Отвечает «как ставим», а не «что ставим»: что — это kind строки BOM.
+export type TechCardHardwareAttachMethod =
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_SEW"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED";
+// Подготовка отверстия под фурнитуру. NONE — явный ответ «фурнитура прокалывает сама».
+export type TechCardHolePrep =
+  | "TECH_CARD_HOLE_PREP_UNKNOWN"
+  | "TECH_CARD_HOLE_PREP_NONE"
+  | "TECH_CARD_HOLE_PREP_PRONG_PIERCE"
+  | "TECH_CARD_HOLE_PREP_AWL_PIERCE"
+  | "TECH_CARD_HOLE_PREP_PUNCH";
+// Усилитель под фурнитурой, петлёй или закрепкой. NONE — явное «без усилителя». Здесь только
+// СПОСОБ; сам материал усилителя — строкой BOM, а не тенью в этом поле.
+export type TechCardReinforcement =
+  | "TECH_CARD_REINFORCEMENT_UNKNOWN"
+  | "TECH_CARD_REINFORCEMENT_NONE"
+  | "TECH_CARD_REINFORCEMENT_FUSIBLE_PATCH"
+  | "TECH_CARD_REINFORCEMENT_FABRIC_STAY"
+  | "TECH_CARD_REINFORCEMENT_TAPE"
+  | "TECH_CARD_REINFORCEMENT_SEAM_CATCH"
+  | "TECH_CARD_REINFORCEMENT_OTHER";
+// Вторая ось шага PRINT — точный образец пары MACHINE / machine_type: глагол говорит ЧТО делаем,
+// это — ЧЕМ. Носитель — TechCardOperation.print_method (поле 51), REQUIRED при PRINT.
+// LASER_ENGRAVE — метод без краски, без носителя и без прижима: при нём отвергаются peel_mode,
+// second_press_sec, pressure_scale и весь ВТО-блок шага.
+export type TechCardPrintMethod =
+  | "TECH_CARD_PRINT_METHOD_UNKNOWN"
+  | "TECH_CARD_PRINT_METHOD_SCREEN"
+  | "TECH_CARD_PRINT_METHOD_DTF"
+  | "TECH_CARD_PRINT_METHOD_HEAT_TRANSFER"
+  | "TECH_CARD_PRINT_METHOD_FOIL"
+  | "TECH_CARD_PRINT_METHOD_LASER_ENGRAVE";
+// Съём носителя после прижима. NONE — явное «носителя нет вовсе» (шелкография, гравировка), а не
+// «не указано».
+export type TechCardPeelMode =
+  | "TECH_CARD_PEEL_MODE_UNKNOWN"
+  | "TECH_CARD_PEEL_MODE_NONE"
+  | "TECH_CARD_PEEL_MODE_HOT"
+  | "TECH_CARD_PEEL_MODE_WARM"
+  | "TECH_CARD_PEEL_MODE_COLD";
+// Прижим термопресса — УПОРЯДОЧЕННАЯ ШКАЛА, и поэтому без OTHER (прецедент
+// TechCardAutomationLevel: шкала с «другим» перестаёт быть шкалой). Вендорские «40 psi» — это
+// показание манометра цилиндра, а не давление на ткань; настоящее число, когда оно есть, живёт в
+// press_pressure_n_cm2 — тот же довод, что развёл thread_tension и thread_tension_note.
+export type TechCardPressureScale =
+  | "TECH_CARD_PRESSURE_SCALE_UNKNOWN"
+  | "TECH_CARD_PRESSURE_SCALE_LIGHT"
+  | "TECH_CARD_PRESSURE_SCALE_MEDIUM"
+  | "TECH_CARD_PRESSURE_SCALE_FIRM";
+// Что именно делает шаг TRIM — дискриминатор: поле REQUIRED, UNKNOWN на таком шаге отвергается.
+export type TechCardTrimAction =
+  | "TECH_CARD_TRIM_ACTION_UNKNOWN"
+  | "TECH_CARD_TRIM_ACTION_TRIM_EVEN"
+  | "TECH_CARD_TRIM_ACTION_GRADE_LAYERS"
+  | "TECH_CARD_TRIM_ACTION_CLIP_CONCAVE"
+  | "TECH_CARD_TRIM_ACTION_NOTCH_CONVEX"
+  | "TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL"
+  | "TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE";
+// Что чистит шаг CLEAN — дискриминатор: REQUIRED, UNKNOWN отвергается. ЧЕМ чистит (вода,
+// растворитель, пар, щётка) — отложено: у цеха на это пока один ответ, и поле сегодня записывало
+// бы одно и то же.
+export type TechCardCleaningKind =
+  | "TECH_CARD_CLEANING_KIND_UNKNOWN"
+  | "TECH_CARD_CLEANING_KIND_SPOT_CLEAN"
+  | "TECH_CARD_CLEANING_KIND_DUST_LINT"
+  | "TECH_CARD_CLEANING_KIND_CHALK_REMOVAL"
+  | "TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL";
+// Охват контроля — дискриминатор шага INSPECT: REQUIRED, UNKNOWN отвергается. Он же разводит
+// межоперационный контроль (SAMPLE_PER_BUNDLE), финальный (AQL_PLAN), сплошной (EACH_UNIT) и
+// первую единицу прогона (FIRST_OUTPUT) — четыре разных работы под одним глаголом.
+export type TechCardInspectCoverage =
+  | "TECH_CARD_INSPECT_COVERAGE_UNKNOWN"
+  | "TECH_CARD_INSPECT_COVERAGE_EACH_UNIT"
+  | "TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE"
+  | "TECH_CARD_INSPECT_COVERAGE_AQL_PLAN"
+  | "TECH_CARD_INSPECT_COVERAGE_FIRST_OUTPUT";
+// Вид мокрой обработки — дискриминатор шага WET_PROCESS: REQUIRED, UNKNOWN отвергается. Носитель —
+// TechCardOperation.wet_process_kind (поле 61), а не блок: семейство из одного факта не нуждается
+// в сообщении вокруг него.
+export type TechCardWetProcessKind =
+  | "TECH_CARD_WET_PROCESS_KIND_UNKNOWN"
+  | "TECH_CARD_WET_PROCESS_KIND_RINSE"
+  | "TECH_CARD_WET_PROCESS_KIND_ENZYME"
+  | "TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE"
+  | "TECH_CARD_WET_PROCESS_KIND_SOFTENER";
+// Форма петли. Обтачной петли здесь нет и не будет: она не форма, а несколько швейных шагов.
+export type TechCardButtonholeStyle =
+  | "TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN"
+  | "TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT"
+  | "TECH_CARD_BUTTONHOLE_STYLE_EYELET"
+  | "TECH_CARD_BUTTONHOLE_STYLE_ROUND_END"
+  | "TECH_CARD_BUTTONHOLE_STYLE_OTHER";
+// Направление петли на изделии. Точное МЕСТО петли — выноской на снимке шага, а не полем: место
+// это координата, и полем оно выражается ровно один раз — неправильно.
+export type TechCardButtonholeOrientation =
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN"
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL"
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL"
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED";
+// Рисунок пришивания пуговицы. Согласованность с числом отверстий — мягкое предупреждение формы,
+// а не отказ сохранения: число отверстий это свойство артикула из строки BOM, и оно может прийти
+// позже самого шага.
+export type TechCardButtonAttachPattern =
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER";
+// Метод втачивания молнии — закрытый список исполнений.
+export type TechCardZipperApplication =
+  | "TECH_CARD_ZIPPER_APPLICATION_UNKNOWN"
+  | "TECH_CARD_ZIPPER_APPLICATION_CENTERED"
+  | "TECH_CARD_ZIPPER_APPLICATION_LAPPED"
+  | "TECH_CARD_ZIPPER_APPLICATION_INVISIBLE"
+  | "TECH_CARD_ZIPPER_APPLICATION_EXPOSED"
+  | "TECH_CARD_ZIPPER_APPLICATION_FLY"
+  | "TECH_CARD_ZIPPER_APPLICATION_SEPARATING_CF"
+  | "TECH_CARD_ZIPPER_APPLICATION_IN_SEAM_POCKET"
+  | "TECH_CARD_ZIPPER_APPLICATION_OTHER";
+// Как сложена бейка. ISO-класс шва при этом НЕ расщепляется: BS_BOUND остаётся одним классом, а
+// это его исполнение — иначе один факт отвечал бы на два вопроса, как когда-то `seam_type`.
+export type TechCardBindingStyle =
+  | "TECH_CARD_BINDING_STYLE_UNKNOWN"
+  | "TECH_CARD_BINDING_STYLE_RAW"
+  | "TECH_CARD_BINDING_STYLE_SINGLE_FOLD"
+  | "TECH_CARD_BINDING_STYLE_DOUBLE_FOLD";
+// Схема пришивания этикетки. Сама этикетка — строкой BOM (bom_line_keys), здесь только шов; тип
+// фолда этикетки — свойство артикула, а не шага.
+export type TechCardLabelAttachStitch =
+  | "TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_OTHER";
 // TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
 // THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
 // path). Eleven fields left, and they left for three different reasons:
@@ -3163,10 +3353,114 @@ export type TechCardConstruction = {
 // TechCardTopstitch is the three answers that used to share one string.
 export type TechCardTopstitch = {
   mode: TechCardTopstitchMode | undefined;
-  // Required when mode = WIDTH, rejected otherwise — a width carried alongside «в край» would be
-  // a shadow value nothing reads.
+  // Required when mode = WIDTH or PARALLEL_TO_SEAM, rejected under EDGE and IN_DITCH — a width
+  // carried alongside «в край» would be a shadow value nothing reads. Точка отсчёта у двух
+  // требующих режимов разная: WIDTH меряется от края детали, PARALLEL_TO_SEAM — от линии шва.
   widthMm: googletype_Decimal | undefined;
   rows: number | undefined;
+};
+
+// Параметры строчки. Только operation_type = MACHINE.
+export type TechCardOperationStitching = {
+  needleCount: number | undefined;
+  // Расстояние МЕЖДУ ИГЛАМИ, мм; 1.6..25.4; unset = не указано. Осмысленно только при
+  // needle_count >= 2 — иначе отвергается (правило Go; в БД двухколоночных CHECK'ов нет).
+  needleGaugeMm: googletype_Decimal | undefined;
+  seamSecuring: TechCardSeamSecuring | undefined;
+  // Расстояние между РЯДАМИ строчек, мм; 1..30; unset = не указано. Не путать с needle_gauge_mm:
+  // тот про иглы в одной строчке, этот про соседние строчки.
+  rowSpacingMm: googletype_Decimal | undefined;
+  // Посадка / сборка / дифференциал подачи, ОТНОШЕНИЕ (не проценты); 0.6..4.0; unset = посадки и
+  // сборки нет. 1.0 — «слои идут один в один», 2.0 — «присборить вдвое».
+  fullnessRatio: googletype_Decimal | undefined;
+  bindingStyle: TechCardBindingStyle | undefined;
+  labelAttachStitch: TechCardLabelAttachStitch | undefined;
+};
+
+// Сколько раз и с каким шагом операция повторяется на изделии: кнопки, петли, закрепки, принты.
+// operation_type = MACHINE | HARDWARE_SET | PRINT.
+export type TechCardOperationPlacement = {
+  count: number | undefined;
+  // Шаг между повторами, мм; 5..500; unset = не указано. Осмыслен только при count >= 2 — иначе
+  // отвергается (правило Go).
+  pitchMm: googletype_Decimal | undefined;
+};
+
+// Установка фурнитуры. Целиком относится к HARDWARE_SET. На шаге MACHINE с ЯВНЫМ machine_type =
+// buttonhole | button_attach | bartack законны ТОЛЬКО hole_prep, reinforcement и
+// cycle_stitch_count: у петли и закрепки есть подготовка отверстия и усилитель, но нет «способа
+// крепления» и нет стропы, которую подгибают, — attach_method и foldback_mm там отвергаются.
+export type TechCardOperationHardware = {
+  attachMethod: TechCardHardwareAttachMethod | undefined;
+  holePrep: TechCardHolePrep | undefined;
+  reinforcement: TechCardReinforcement | undefined;
+  // Подгиб стропы через пряжку, мм; 10..80; unset = не указано. Только при
+  // attach_method = THREADED (правило Go).
+  foldbackMm: googletype_Decimal | undefined;
+  // Стежков в цикле автомата, шт; 8..64; 0 = не указано, то есть штатная программа машины.
+  cycleStitchCount: number | undefined;
+};
+
+// Печать и нанесение. Только operation_type = PRINT; сам МЕТОД лежит полем 51 TechCardOperation,
+// потому что он REQUIRED, а обязательное поле не прячут внутрь необязательного сообщения.
+// Все три поля отвергаются при print_method = LASER_ENGRAVE: у гравировки нет ни носителя, ни
+// прижима. ВТО-факты PRINT-шага (температура, выдержка, давление, оборудование) идут ОБЩИМ
+// ВТО-блоком 39..45 и здесь не дублируются — один факт живёт в одном месте.
+export type TechCardOperationPrint = {
+  peelMode: TechCardPeelMode | undefined;
+  secondPressSec: number | undefined;
+  pressureScale: TechCardPressureScale | undefined;
+};
+
+// Сварка и проклейка. Только MACHINE с ЯВНЫМ machine_type = seam_taping | ultrasonic_welder; тип,
+// разрешённый через machine_profile_key, здесь НЕ засчитывается — правило шага, а не профиля.
+export type TechCardOperationWeld = {
+  // Температура горячего воздуха, °C; 100..750; 0 = не указано. ТОЛЬКО seam_taping: у ультразвука
+  // горячего воздуха нет вовсе.
+  airTemperatureC: number | undefined;
+  feedSpeedMMin: googletype_Decimal | undefined;
+};
+
+// Подрезка и выправка. Только operation_type = TRIM.
+export type TechCardOperationTrim = {
+  action: TechCardTrimAction | undefined;
+  // Сколько припуска ОСТАЁТСЯ после подрезки, мм; 1..10; unset = не указано. Это НЕ
+  // seam_allowance_mm: тот говорит, с каким припуском кроили, этот — до скольких срезать.
+  residualAllowanceMm: googletype_Decimal | undefined;
+};
+
+// Чистка концов ниток. Только operation_type = THREAD_TRIM.
+export type TechCardOperationThreadTrim = {
+  // Допустимый хвост нитки, мм; 1..10 (типовой стандарт цеха <= 3); unset = стандарт цеха.
+  residualTailMaxMm: googletype_Decimal | undefined;
+};
+
+// Чистка изделия. Только operation_type = CLEAN.
+export type TechCardOperationClean = {
+  kind: TechCardCleaningKind | undefined;
+};
+
+// Контроль качества. Только operation_type = INSPECT.
+export type TechCardOperationInspect = {
+  coverageMode: TechCardInspectCoverage | undefined;
+};
+
+// Петли, закрепки, пуговицы, молнии. Только MACHINE, и каждое поле — при своём ЯВНОМ machine_type
+// (резолв через machine_profile_key не засчитывается нигде).
+// REQUIRED тут НЕТ НИ ОДНОГО, в отличие от дискриминаторов новых глаголов: эти глаголы и машинки
+// живут в проде годами, и старая карточка «MACHINE + buttonhole» без единого нового поля обязана
+// сохраняться как есть. Довод «глагол доказывает осведомлённость бандла» к ним неприменим.
+export type TechCardOperationFastening = {
+  buttonholeStyle: TechCardButtonholeStyle | undefined;
+  // Прорезь петли, мм; 4..120; unset = не указано. Границы — санити, а не стандарт: LBH даёт
+  // 6.4..31.8, спец-ножи 70 и 120.
+  cutLengthMm: googletype_Decimal | undefined;
+  buttonholeOrientation: TechCardButtonholeOrientation | undefined;
+  // Длина закрепки, мм; 1..40; unset = не указано. Диапазон — санити объединением: петельная
+  // закрепка 1..10, цикловая до 40. machine_type = buttonhole | bartack.
+  bartackLengthMm: googletype_Decimal | undefined;
+  attachPattern: TechCardButtonAttachPattern | undefined;
+  zipperApplication: TechCardZipperApplication | undefined;
 };
 
 export type TechCardAnnotation = {
@@ -3313,6 +3607,28 @@ export type TechCardOperation = {
   // Фотографии этого шага с выносками. До 10 на шаг, до 30 выносок на картинку — пределы
   // проверяет сервер. Порядок списка — порядок показа и печати.
   media: TechCardOperationMedia[] | undefined;
+  // Метод печати — REQUIRED при PRINT, отвергается при любом другом глаголе. Живёт полем шага, а
+  // не внутри блока `print`: обязательное поле не прячут в необязательное сообщение, которого
+  // может не быть вовсе.
+  printMethod: TechCardPrintMethod | undefined;
+  stitching: TechCardOperationStitching | undefined;
+  // ИМЯ ПОЛЯ — `placement_layout`, А НЕ `placement`: имя «placement» стоит в reserved-списке ИМЁН
+  // ниже (легаси-поле свободного текста), и protoc отверг бы файл. Снять имя с reserved нельзя:
+  // JSON-ключи легаси-полей держат разбор архивных релизных снапшотов. Колонки при этом
+  // остаются placement_count / pitch_mm, а сообщение — TechCardOperationPlacement.
+  placementLayout: TechCardOperationPlacement | undefined;
+  hardware: TechCardOperationHardware | undefined;
+  print: TechCardOperationPrint | undefined;
+  weld: TechCardOperationWeld | undefined;
+  trim: TechCardOperationTrim | undefined;
+  threadTrim: TechCardOperationThreadTrim | undefined;
+  clean: TechCardOperationClean | undefined;
+  inspect: TechCardOperationInspect | undefined;
+  // Вид мокрой обработки — REQUIRED при WET_PROCESS, отвергается при прочих. Полем, а не блоком:
+  // семейство состоит из одного факта, и сообщение вокруг него было бы пустой обёрткой.
+  wetProcessKind: TechCardWetProcessKind | undefined;
+  // 62 — ДЫРА: номер обещан полю `properties` фазы расширяемых свойств. `reserved` НЕ ставить.
+  fastening: TechCardOperationFastening | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -3778,6 +4094,51 @@ export type TechCardInsert = {
   // Явное намерение снять ВСЕ операционные фотографии карточки — единственный законный путь
   // прислать осведомлённую пустоту против карточки, у которой снимки есть.
   mediaCleared: boolean | undefined;
+  // ЧЕТВЁРТЫЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — для 32 колонок волны видов операций (0324), и заведён он не
+  // ради девяти новых глаголов.
+  // У девяти новых глаголов потери быть не должно: старый бандл не знает токенов 16..24 и шага
+  // с таким глаголом не построит. Но ВОСЕМНАДЦАТЬ полей волны сидят на СТАРЫХ парах (глагол,
+  // machine_type), которые живут в проде годами и которые сегодняшний бандл шлёт каждый день:
+  // - блок `stitching` (52) целиком — любой MACHINE, СЕМЬ полей: needle_count,
+  // needle_gauge_mm, seam_securing, row_spacing_mm, fullness_ratio, а также binding_style
+  // (binding_taping) и label_attach_stitch (любой MACHINE);
+  // - блок `fastening` (63) целиком — MACHINE + buttonhole | bartack | button_attach |
+  // zipper_setting: ШЕСТЬ полей петель, закрепок, пуговиц и молний;
+  // - ТРИ поля блока `hardware` (54) — hole_prep, reinforcement, cycle_stitch_count — на
+  // MACHINE с ЦИКЛОВЫМ machine_type (buttonhole | button_attach | bartack); attach_method и
+  // foldback_mm сюда не входят, они живут только на HARDWARE_SET;
+  // - блок `placement_layout` (53) целиком — ДВА поля, placement_count и pitch_mm, — на ЛЮБОМ
+  // MACHINE, без всякой проверки машинки (парсер пускает его на machine | hardware_set |
+  // print). Итого 7 + 6 + 3 + 2 = 18.
+  // И ЭТО НЕ ВЕСЬ УБЫТОК: 0324 расширяет ещё и СЛОВАРИ КОЛОНОК, ЖИВУЩИХ ГОДАМИ — machine_type
+  // шага +2 (seam_taping, ultrasonic_welder), press_cloth шага и профиля парка +1
+  // (silicone_paper), topstitch_mode +2 (in_ditch, parallel_to_seam), equipment профиля +2,
+  // bom_item.kind +2 (seam_sealing_tape, embroidery_stabilizer). Такой шаг не несёт ни одной из
+  // 32 колонок и ни одного нового глагола, а теряется так же молча: незнакомый topstitch_mode
+  // уносит с собой и ширину, и число рядов. Поэтому щит считает ТОКЕНЫ, а не заполненность поля.
+  // Операции пишутся ПОЛНОЙ ЗАМЕНОЙ, у шага нет стабильного ключа, и перенести хранимое, как
+  // переносится разметка детали, невозможно. Значит сценарий потери такой: технолог заполнил
+  // поля новым клиентом → кто-то открыл ту же карточку отставшей вкладкой → сохранил → факты
+  // стёрты молча. ПОРЯДКОМ ВЫКАТКИ ЭТО НЕ ЗАКРЫВАЕТСЯ: открытая вкладка ест данные и после
+  // деплоя клиента.
+  // Семантика — слово в слово machine_fields_aware выше:
+  // - новый клиент ставит флаг на каждом сохранении; серверные пути (клон сезона, сидер)
+  // ставят сами;
+  // - запись БЕЗ флага против карточки, несущей факты волны, — FailedPrecondition с внятной
+  // причиной;
+  // - запись без флага, которая тем не менее эхоит новые блоки или новые глаголы, — тот же
+  // отказ;
+  // - карточка без фактов волны сохраняется старым бандлом ровно как раньше.
+  // ПАРНОГО `*_cleared` У НЕГО НЕТ, и это осознанно — как у machine_fields_aware и в отличие от
+  // узлов и снимков. Там снятие разметки целиком есть отдельное намерение, выразимое кнопкой.
+  // Здесь «поле пусто» — рядовая правка: технолог стёр стиль петли, потому что он больше не
+  // нужен. Бекстоп «осведомлённая пустота против непустой карточки» объявил бы такую правку
+  // ошибкой и сделал бы поле НЕСТИРАЕМЫМ. Осведомлённая запись очищает поля волны честно.
+  // Флаг НЕ ФИЛЬТРУЕТ ПОЛЯ: разбор блоков 51..61 и 63 идёт всегда, независимо от флага.
+  // «Игнорировать при aware=false» превратило бы клон сезона (payload строит сервер) в тихого
+  // стирателя — ровно то, от чего щит защищает.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
+  operationKindsAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
