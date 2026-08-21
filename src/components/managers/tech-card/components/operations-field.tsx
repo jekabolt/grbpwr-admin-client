@@ -2260,7 +2260,7 @@ function OperationEditor({
   // Гейт — те же `show*`, что у рендера: непоказанный факт чужого семейства не имеет права
   // считаться (он и не переживёт очистку ниже).
   const kindFactCount = [
-    (isMachineStep || topstitchMode !== NONE_TOPSTITCH) && topstitchMode !== NONE_TOPSTITCH,
+    topstitchMode !== NONE_TOPSTITCH,
     topstitchWidthMm.trim() !== '',
     topstitchRows > 0,
     showStitching && needleCount > 0,
@@ -2715,30 +2715,23 @@ function OperationEditor({
 
     // «НА ЧЁМ» У ОТСТРОЧКИ. Машинку шаг MACHINE обязан нести — сервер отвергает MACHINE без неё, —
     // поэтому пункт её ставит, но не угадывает молча: стоящая на шаге и подходящая важнее всего
-    // (смена вида не переставляет шаг на другую машину), затем единственный подходящий профиль
-    // парка, затем дефолт пункта. Связь с профилем пишется КЛЮЧОМ, ЯВНО: пустой ключ сервер
-    // сохраняет как «не задано», а тип, разрешённый через профиль, полей не открывает.
+    // (смена вида не переставляет шаг на другую машину), затем единственная в парке из суженного
+    // списка, затем дефолт пункта.
     let machineForAsk = '';
-    let profileKey = '';
     if (k.askMachine) {
       const narrowed = k.askMachine as readonly string[];
-      if (narrowed.includes(machineType)) {
-        machineForAsk = machineType;
-      } else {
+      if (narrowed.includes(machineType)) machineForAsk = machineType;
+      else {
         const fits = parkMachines.filter(
           (m) => narrowed.includes(m.machineType ?? '') && (m.profileKey ?? '').trim(),
         );
-        if (fits.length === 1) {
-          machineForAsk = fits[0].machineType ?? '';
-          profileKey = (fits[0].profileKey ?? '').trim();
-        }
+        if (fits.length === 1) machineForAsk = fits[0].machineType ?? '';
       }
     }
 
     const p = `operations.${index}` as const;
-    const writes = Object.entries(kindWrites(k, machineForAsk)) as Array<
-      [OperationFormStringField, string]
-    >;
+    const written = kindWrites(k, machineForAsk);
+    const writes = Object.entries(written) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of writes) {
       // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА — И ЭТО ТОЧКА ПОДКЛЮЧЕНИЯ ВТО.
       // `press_action` / `press_toward` заводит контрактная сторона; как только они появятся в
@@ -2747,7 +2740,42 @@ function OperationEditor({
       if (!(field in emptyOperation)) continue;
       setValue(`${p}.${field}`, value, { shouldDirty: true });
     }
-    if (profileKey) setValue(`${p}.machineProfileKey`, profileKey, { shouldDirty: true });
+
+    // СВЯЗЬ С ПРОФИЛЕМ ПАРКА ПИШЕТСЯ КЛЮЧОМ, ЯВНО — единственное, что вообще подтягивается при
+    // выборе пункта, и подтягивается оно СВЯЗЬЮ, а не значениями.
+    //
+    // Почему явно: пустой ключ сервер сохраняет как «не задано» (обещанного «пустой ключ = профиль
+    // этого типа, если он единственный» на ЗАПИСИ нет), а тип, разрешённый через профиль,
+    // применимости полей не открывает — отказ придёт примерно на восемнадцати полях.
+    //
+    // Почему только в пустой ключ: уже стоящая ссылка — это решение технолога, и перебивать её
+    // выбором вида значило бы молча переставить шаг на другой станок.
+    //
+    // И ни одного ЧИСЛА в строку шага: унаследованное значение, записанное сюда, стёрло бы разницу
+    // между «технолог выбрал 4 ст/см» и «так вышло по умолчанию».
+    const targetMachine = written.machineType ?? '';
+    if (targetMachine && !machineProfileKey.trim()) {
+      const fits = parkMachines.filter(
+        (m) => m.machineType === targetMachine && (m.profileKey ?? '').trim(),
+      );
+      if (fits.length === 1) {
+        setValue(`${p}.machineProfileKey`, (fits[0].profileKey ?? '').trim(), { shouldDirty: true });
+      }
+    }
+    const targetPress = written.pressEquipment ?? '';
+    if (targetPress && !pressProfileKey.trim()) {
+      // Процесс сужает лестницу и здесь: профиль, написанный для дублирования, разутюжке не
+      // отвечает. Предикат берётся существующий — второго такого не заводится.
+      const fits = parkPresses.filter(
+        (pr) =>
+          pr.pressEquipment === targetPress &&
+          (pr.profileKey ?? '').trim() &&
+          pressProfileFitsStep(pr, k.verb),
+      );
+      if (fits.length === 1) {
+        setValue(`${p}.pressProfileKey`, (fits[0].profileKey ?? '').trim(), { shouldDirty: true });
+      }
+    }
     prefillFromLastOfKind(k);
   };
 
@@ -3317,7 +3345,10 @@ function OperationEditor({
           карточные дефолты про отступ и число рядов не говорят), значит по правилу раздела им
           место здесь. Показываются на машинном шаге — и на любом другом, где значение уже стоит:
           спрятанное число всё равно печатается на листе и всё равно двигает дайджест секции. */}
-      {(isMachineStep || topstitchMode !== NONE_TOPSTITCH || topstitchWidthMm.trim() !== '') && (
+      {(isMachineStep ||
+        topstitchMode !== NONE_TOPSTITCH ||
+        topstitchWidthMm.trim() !== '' ||
+        topstitchRows > 0) && (
         <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
         {/* Список — с оглядкой на то, что в шаге уже лежит: словарь режимов ТОТАЛЕН над
             контрактом, поэтому токен вне списка означает режим НОВЕЕ этого бандла (обычное
