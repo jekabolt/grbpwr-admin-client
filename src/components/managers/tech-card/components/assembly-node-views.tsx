@@ -1,5 +1,12 @@
 import { cn } from 'lib/utility';
-import { Fragment, type HTMLAttributes, type ReactNode } from 'react';
+import {
+  Fragment,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type ReactNode,
+} from 'react';
 import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
@@ -546,9 +553,48 @@ export function pieceAddPrefill(
  * тем же движением руки, которым было закрыто.
  */
 function NodeHoverBar({ children }: { children: ReactNode }) {
+  /**
+   * ПОЛОСА ПЕРЕВОРАЧИВАЕТСЯ ПОД НОДУ, КОГДА СВЕРХУ ЕЁ РЕЖЕТ.
+   *
+   * ЧТО БЫЛО ЗАМЕРЕНО: у плиток ВЕРХНЕГО РЯДА инлайновой схемы полоса начиналась на y=232 при
+   * крае прокручиваемой коробки 238 — шесть пикселей из девятнадцати срезаны вместе с верхней
+   * рамкой и верхом букв. Коробка `overflow-auto`, выше нуля не прокрутить, и срез был
+   * постоянным: не «неудобно», а «часть органа не существует».
+   *
+   * ПОЧЕМУ ПЕРЕВОРОТ, А НЕ ОТСТУП СЦЕНЕ. Отступ пришлось бы завести дважды — своим числом у
+   * инлайна (прокручиваемая коробка) и своим у полотна (мир под `transform`, `absolute inset-0`),
+   * — и на полотне он не помог бы вовсе: панорама увозит ноду к верхней кромке в любой момент, и
+   * срез вернулся бы вместе с ней. Переворот же живёт В САМОМ ПРИМИТИВЕ: одно решение на бокс и
+   * на плитку, на инлайн и на полотно, и на любую полосу, какая тут ещё появится.
+   *
+   * ЗАМЕР ОДИН, НА МОНТАЖЕ, и повторно не делается: полоса монтируется на наведение и живёт до
+   * его конца, а второй замер после переворота вернул бы «сверху место есть» и завёл бы качели.
+   * `useLayoutEffect`, а не `useEffect`: переворот обязан случиться до кадра, иначе человек успел
+   * бы увидеть срезанную полосу и её прыжок.
+   *
+   * РЕЖУЩИМ СЧИТАЕТСЯ ПЕРВЫЙ ПРЕДОК С НЕ-`visible` переполнением. Не нашлось ни одного — режет
+   * само окно, и сравнение идёт с нулём.
+   */
+  const ref = useRef<HTMLDivElement>(null);
+  const [below, setBelow] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let clip: HTMLElement | null = el.parentElement;
+    while (clip && getComputedStyle(clip).overflow === 'visible') clip = clip.parentElement;
+    const top = clip ? clip.getBoundingClientRect().top : 0;
+    if (el.getBoundingClientRect().top < top) setBelow(true);
+  }, []);
   return (
     <div
-      className='absolute bottom-full left-0 z-10 flex items-center gap-1 bg-bgColor pb-1'
+      ref={ref}
+      className={cn(
+        'absolute left-0 z-10 flex items-center gap-1 bg-bgColor',
+        // МОСТИК ПЕРЕЕЗЖАЕТ ВМЕСТЕ С ПОЛОСОЙ: он затыкает зазор между чипами и нодой, а зазор
+        // теперь с другой стороны. Оставь `pb-1` внизу — и курсор терял бы наведение по дороге к
+        // перевёрнутому чипу ровно так же, как терял его до появления мостика.
+        below ? 'top-full pt-1' : 'bottom-full pb-1',
+      )}
       // ЖЕСТ НОДЫ НЕ НАЧИНАЕТСЯ С ПОЛОСЫ. `dragProps` висят на коробке ноды, а полоса — её потомок,
       // и без этой строки нажатие на чип заводит ПЕРЕТАСКИВАНИЕ: замерено — сдвиг руки на 6px между
       // нажатием и отпусканием увозит ноду на 8px, а обещанное чипом действие не случается вовсе
