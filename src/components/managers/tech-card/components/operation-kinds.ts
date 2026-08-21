@@ -114,6 +114,20 @@ export type OperationKind = {
   /** Чем заполняется вопрос «на чём», когда парк карточки не отвечает однозначно. */
   defaultMachine?: common_TechCardMachineType;
   /**
+   * ПУНКТ, В КОТОРЫЙ РЕЗОЛВ ОТВЕЧАЕТ, ПОКА РАЗЛИЧАЮЩИЙ ФАКТ НЕ НАЗВАН.
+   *
+   * У четырёх пунктов запись САМА ПО СЕБЕ их не опознаёт, и это не дефект таблицы, а свойство
+   * модели: кнопку от хольнитена отличает `kind` привязанной строки BOM, а «пришить этикетку» от
+   * «стачать» — заполненный `label_attach_stitch`. Пока материал не привязан (а шов этикетки не
+   * выбран), резолв обязан отвечать общим пунктом: сказать «Snap» ему НЕОТКУДА, и выдумать было
+   * бы враньём о шаге.
+   *
+   * Отсюда — память пикера на один сеанс: только что выбранный пункт держится, пока сохранённое
+   * состояние соответствует ему ИЛИ его общему родителю. Иначе экран переигрывал бы выбор
+   * человека у него на глазах.
+   */
+  pendingResolve?: string;
+  /**
    * СУЖЕНИЕ ПИКЕРА МАТЕРИАЛОВ — виды строк BOM, которые этот пункт ставит первыми. Ни одной новой
    * колонки: «что ставим» — это `kind` строки BOM, «как ставим» — `attach_method` шага, и вторая
    * копия первого на шаге рассинхронизировалась бы с первой же правкой спецификации.
@@ -188,7 +202,7 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // есть законен на любом MACHINE, — и сегодня до него нельзя добраться, не догадавшись открыть
   // створку «differs from standard». Пункт делает существующее поле достижимым, не добавляя ни
   // колонки.
-  { id: 'B5', family: 'B', label: 'Attach label', verb: M, writes: { machineType: mt('LOCKSTITCH') }, featured: SEW },
+  { id: 'B5', family: 'B', label: 'Attach label', verb: M, writes: { machineType: mt('LOCKSTITCH') }, pendingResolve: 'A1', featured: SEW },
 
   // --- C. цикловые машины и вышивка -------------------------------------------------------------
   { id: 'C1', family: 'C', label: 'Buttonhole', verb: M, writes: { machineType: mt('BUTTONHOLE') }, bomKinds: ['TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'], featured: CYCLE },
@@ -229,9 +243,9 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // контрол «held on by *» стоит на виду, и зубцы — это F1 с переключённым методом, а не другая
   // работа.
   { id: 'F0', family: 'F', label: 'Set hardware', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', featured: ['placement', 'hardware'] },
-  { id: 'F1', family: 'F', label: 'Snap / press stud', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_SNAP'], featured: ['placement', 'hardware'] },
-  { id: 'F2', family: 'F', label: 'Rivet / burr', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_RIVET'], featured: ['placement', 'hardware'] },
-  { id: 'F3', family: 'F', label: 'Eyelet / grommet', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_EYELET'], featured: ['placement', 'hardware'] },
+  { id: 'F1', family: 'F', pendingResolve: 'F0', label: 'Snap / press stud', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_SNAP'], featured: ['placement', 'hardware'] },
+  { id: 'F2', family: 'F', pendingResolve: 'F0', label: 'Rivet / burr', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_RIVET'], featured: ['placement', 'hardware'] },
+  { id: 'F3', family: 'F', pendingResolve: 'F0', label: 'Eyelet / grommet', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_EYELET'], featured: ['placement', 'hardware'] },
   { id: 'F4', family: 'F', label: 'Buckle / slider (threaded)', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED' }, bomKinds: ['TECH_CARD_BOM_KIND_BUCKLE', 'TECH_CARD_BOM_KIND_STRAP_ADJUSTER', 'TECH_CARD_BOM_KIND_RING'], featured: ['placement', 'hardware'] },
   { id: 'F5', family: 'F', label: 'Attach hardware — sewn', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_SEW' }, featured: ['placement', 'hardware'] },
 

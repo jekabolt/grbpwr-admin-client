@@ -295,7 +295,7 @@ const isPressType = isPressStepType;
 
 // The fields of the core grid — the ones that are on screen whatever the fold is doing. Everything
 // else lives inside «differs from standard», which has to open itself when one of those fails.
-const CORE_STEP_FIELDS = new Set([
+export const CORE_STEP_FIELDS = new Set([
   'operationType',
   'machineType',
   'pressEquipment',
@@ -2672,18 +2672,20 @@ function OperationEditor({
     bomKinds: stepBomKinds,
   });
 
-  // ПАМЯТЬ О ВЫБРАННОМ ПУНКТЕ — НА ОДИН СЕАНС РЕДАКТОРА И ТОЛЬКО ВНУТРИ СЕМЕЙСТВА ФУРНИТУРЫ.
-  // Пока материал не привязан, резолв честно отвечает общим «Set hardware»: сказать «Snap» ему
-  // неоткуда. Показывать в этот момент общий пункт вместо только что выбранного значило бы
-  // переигрывать выбор человека у него на глазах, поэтому память есть; распространять её на
-  // остальные семейства незачем — там резолв однозначен, и память только разошлась бы с данными.
+  // ПАМЯТЬ О ВЫБРАННОМ ПУНКТЕ — НА ОДИН СЕАНС РЕДАКТОРА И ТОЛЬКО ДО ОБЩЕГО РОДИТЕЛЯ.
+  //
+  // У четырёх пунктов запись сама по себе их не опознаёт: кнопку от хольнитена отличает `kind`
+  // привязанной строки BOM, «пришить этикетку» от «стачать» — заполненный шов этикетки. Пока
+  // различающий факт не назван, резолв честно отвечает общим пунктом (`pendingResolve`) — сказать
+  // «Snap» ему неоткуда. Показывать в этот момент общий пункт вместо только что выбранного значило
+  // бы переигрывать выбор человека у него на глазах. Память гаснет, как только состояние перестаёт
+  // соответствовать и пункту, и его родителю: дальше правит уже не пикер, а данные.
   const [pickedKindId, setPickedKindId] = useState('');
   const pickedKind = pickedKindId ? OPERATION_KIND_BY_ID.get(pickedKindId) : undefined;
   const activeKind =
     pickedKind &&
     resolvedKind &&
-    (pickedKind.id === resolvedKind.id ||
-      (resolvedKind.id === 'F0' && pickedKind.family === 'F'))
+    (pickedKind.id === resolvedKind.id || pickedKind.pendingResolve === resolvedKind.id)
       ? pickedKind
       : resolvedKind;
 
