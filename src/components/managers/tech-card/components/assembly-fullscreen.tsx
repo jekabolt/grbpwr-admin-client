@@ -112,6 +112,9 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
   ['⌘a', 'pick every node on the canvas', 'schematic'],
   ['⌘a', 'pick everything on the table', 'list'],
   ['drag on empty ground', 'marquee — touching a node picks it (shift adds)', 'schematic'],
+  // ВТОРОЙ СПОСОБ НАБОРА, И ОН НЕ ДУБЛЁР. Рамка берёт всё, что накрыла; на собранной карточке
+  // ноды стоят вперемешку, и «две через одну» она взять не умеет — клик с модификатором умеет.
+  ['⌘/⇧-click a head', 'add the node to the selection (or drop it)', 'schematic'],
   ['drag from the shelf', 'drop on a node to join, on empty ground to place the piece', 'schematic'],
   ['drag ⠿ on a step', 'reorder the sequence', 'list'],
   ['arrows', 'nudge the picked by 8px (shift: 1px)', 'schematic'],
@@ -1156,7 +1159,7 @@ export function AssemblyFullscreen({
       showMessage(
         spent
           ? `a unit needs two nodes still on the table — ${areIn}`
-          : 'a unit needs at least two nodes picked — draw a marquee or click their heads',
+          : 'a unit needs at least two nodes picked — draw a marquee or ⌘/⇧-click their heads',
         'error',
       );
       return;
@@ -1237,7 +1240,7 @@ export function AssemblyFullscreen({
       units.length > 1
         ? `${units.length} units picked — the unit editor opens one at a time`
         : picked.length === 0
-          ? 'pick a unit first — drag a marquee around it on the canvas'
+          ? 'pick a unit first — ⌘/⇧-click its head, or drag a marquee around it'
           : 'nothing picked is a unit: pieces have no steps of their own, units do',
       'error',
     );

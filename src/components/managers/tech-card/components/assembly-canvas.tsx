@@ -22,6 +22,7 @@ import {
   directInputsOf,
   makeRowY,
   notifyWorldMoved,
+  picksMany,
   pieceAddPrefill,
   TailBoxView,
   TileView,
@@ -1334,7 +1335,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    * `<button>` под общим `<fieldset disabled>` умирает. Здесь fieldset до портала не достаёт, но
    * разводить две механики органов на два вида — верный способ развести и их поведение.
    */
-  const activate = (fn?: () => void, stop = false) =>
+  const activate = (fn?: (multi: boolean) => void, stop = false) =>
     fn
       ? {
           role: 'button' as const,
@@ -1344,7 +1345,11 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             // свой смысл — выделить: без этой строки один клик по токену делал бы обе вещи
             // разом, и «перейти к соседу» заодно выделяло бы того, от кого уходят.
             if (stop) e.stopPropagation();
-            fn();
+            // МОДИФИКАТОР ЕДЕТ В ОБРАБОТЧИК, А НЕ ЧИТАЕТСЯ ИМ. Обработчики собираются здесь и
+            // приходят во вьюшку готовым объектом — до них событие иначе не доходит вовсе, и
+            // «⌘+клик набирает выделение» пришлось бы решать двумя разными путями на двух
+            // поверхностях. Флаг считает ОДИН предикат (`picksMany`), общий с клавиатурой ниже.
+            fn(picksMany(e));
           },
           onKeyDown: (e: React.KeyboardEvent) => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -1358,7 +1363,9 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             // человек эту ноду выбирает.
             e.stopPropagation();
             justDragged.current = false;
-            fn();
+            // ⌘/⇧/Ctrl + Enter значит то же, что ⌘/⇧/Ctrl + клик: орган, слушающийся мыши и
+            // глухой к клавиатуре, — это два разных органа под одной подписью.
+            fn(picksMany(e));
           },
         }
       : {};
@@ -1371,13 +1378,22 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     onPointerLeave: () => setHovered((h) => (h === key ? null : h)),
   });
 
-  const clickGuard = (fn: () => void) => () => {
-    if (justDragged.current) {
-      justDragged.current = false;
-      return;
-    }
-    fn();
-  };
+  /**
+   * Сторож клик-эха ПРОЗРАЧЕН ПО АРГУМЕНТАМ. Обобщение не украшение: он стоит и между `activate`
+   * и обработчиком шапки (которому нужен флаг модификатора), и на голых чипах полосы, которые
+   * по-прежнему `() => void`. Зафиксируй мы здесь один-единственный `(multi: boolean)`, чипы
+   * получили бы лишний параметр — и первый же React-обработчик передал бы в него СОБЫТИЕ, то есть
+   * объект, который в `if (multi)` истинен всегда.
+   */
+  const clickGuard =
+    <A extends unknown[]>(fn: (...args: A) => void) =>
+    (...args: A) => {
+      if (justDragged.current) {
+        justDragged.current = false;
+        return;
+      }
+      fn(...args);
+    };
 
   const dragActive = drag !== null;
   useEffect(() => {
@@ -1738,7 +1754,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 // общая, и разведи мы решение — полотно с инлайном разошлись бы молча.
                 // Выделение при этом не теряется: `openUnitDock` сам переводит его на узел, а
                 // набирает выделение маркиза.
-                headProps={activate(clickGuard(unitHeadOpen(b, onPickStep, onOpenUnit)))}
+                headProps={activate(clickGuard(unitHeadOpen(b, toggle, onPickStep, onOpenUnit)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 surfaceWords='on the canvas'
