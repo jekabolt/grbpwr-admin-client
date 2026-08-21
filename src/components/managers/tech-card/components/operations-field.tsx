@@ -71,6 +71,7 @@ import {
   type AssemblyResult,
 } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
+import { drawnTailSteps } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
@@ -548,6 +549,17 @@ type RailGrouping = {
   marked: boolean;
   /** Σ SMV блока по его ключу ('' — хвостовой). Считается тем же `sumSmv`, что и в рельсе. */
   smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ХВОСТОВОГО БОКСА ПОЛОТНА — по тем шагам, которые он РИСУЕТ, и это другое множество,
+   * чем `smvOfBlock.get('')`.
+   *
+   * Два числа потому, что вопросов два, а не потому, что кто-то не убрал дубль. Рельс печатает
+   * под заголовком «◌ outside units» ВСЕ шаги вне узлов, и его Σ обязана считать их все. Бокс
+   * полотна рисует только те, которым не досталось плитки (обработка одной детали уехала к своей
+   * детали), и его Σ обязана считать ровно нарисованное. Одно число на оба вопроса — это и был
+   * дефект: коробка с надписью «1 step» печатала рядом сумму двух.
+   */
+  tailSmv: string;
 };
 
 // useRailGrouping — досье: тот же рельс, но с врезанными заголовками подсборок.
@@ -604,10 +616,19 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
         terminal: liveUnits.length === 1 && liveUnits[0] === b.key,
       });
     }
+    // Σ ХВОСТОВОГО БОКСА — ПО НАРИСОВАННЫМ СТРОКАМ, тем же `sumSmv`, что и всё остальное.
+    //
+    // РЕШЕНИЕ, СЛОВАМИ: коробка отвечает на вопрос «что здесь лежит», а обработка, уехавшая на
+    // плитку своей детали, здесь не лежит — её строка нарисована в другом месте экрана. Второй
+    // смысл («сколько работы скатывается сюда») у этой коробки быть не может: она не узел, в неё
+    // ничего не скатывается, и именно за притворство узлом её и переписывали. Множество берётся
+    // у `drawnTailSteps` — у того же правила, по которому раскладка отмеряет коробке высоту.
+    const tailSmv = sumSmv(drawnTailSteps(grouped.loose.steps, steps));
     return {
       broken,
       headerBefore,
       smvOfBlock,
+      tailSmv,
       marked: grouped.blocks.length > 0,
       schematicBlocks: [...grouped.blocks, grouped.loose],
       schematicSteps: steps,
@@ -3997,6 +4018,7 @@ export function OperationsField({
     [pendingCreate?.at, pieces, grouping.schematicSteps],
   );
 
+
   /**
    * ДИАЛОГ СОЗДАНИЯ ЗАКОНЧИЛСЯ «CREATE». Позицию несёт САМО НАМЕРЕНИЕ, а не второй колбэк: жест,
    * начавшийся точкой вставки внутри узла, и жест, начавшийся «+ new operation», приходят сюда
@@ -4712,6 +4734,7 @@ export function OperationsField({
                   pieceShapes={pieceShapes}
                   cloth={inlineCloth?.map ?? null}
                   smvOfBlock={grouping.smvOfBlock}
+                  tailSmv={grouping.tailSmv}
                   onDissolve={dissolveUnit}
                   positions={prefs.pos}
                   // ИНЛАЙНОВАЯ СХЕМА ПИШЕТ В ТУ ЖЕ ИСТОРИЮ, хотя ⌘Z в ней нет. Иначе жест,
@@ -4809,6 +4832,7 @@ export function OperationsField({
           labelOf={labelOfStep}
           pieceShapes={pieceShapes}
           smvOfBlock={grouping.smvOfBlock}
+          tailSmv={grouping.tailSmv}
           // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её
           // писатель, и они обязаны дойти до потребителя без правки этого файла.
           //

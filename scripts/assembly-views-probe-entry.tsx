@@ -31,6 +31,7 @@ import { AssemblySchematic } from '../src/components/managers/tech-card/componen
 import { assemblyBlocks } from '../src/components/managers/tech-card/components/assembly-blocks';
 import {
   assemblyLayout,
+  drawnTailSteps,
   SCHEMATIC_METRICS,
 } from '../src/components/managers/tech-card/components/assembly-layout';
 import {
@@ -227,9 +228,34 @@ const TAIL_LABELS = [
   'stitch the label to the trim',
 ];
 
-// Σ у хвоста НЕ пустая: подвал хвостового бокса спрашивает `smvOfBlock.get('')`, и без числа
-// половина его разметки в снимок не попала бы.
-const TAIL_SMV = new Map<string, string>([['', '2.4']]);
+/**
+ * SMV КАЖДОГО ШАГА ХВОСТОВОЙ ФИКСТУРЫ — данные, а не число подвала.
+ *
+ * До этого здесь стояла ЗАГЛУШКА `2.4`, взятая с потолка, и золото было слепо к дефекту ПО
+ * ПОСТРОЕНИЮ: подвал печатал то, что ему подали, каким бы множеством оно ни считалось. Теперь
+ * число выводится — и подмена множества меняет снимок.
+ *
+ * Числа подобраны так, что два ответа РАЗЛИЧИМЫ: по нарисованным строкам (шаги 20 и 30) выходит
+ * 2.4, по всему хвостовому блоку (плюс уехавший на плитку шаг 10) — 3.1. Проба держит оба и
+ * требует, чтобы в разметку попало первое, а второго в ней не было; поэтому 3.1, а не 3.2 —
+ * «Σ 3.2» в этом же снимке печатает блок SHELL первого полотна, и проверка «чужого числа нет»
+ * ловила бы его.
+ */
+const TAIL_STEP_SMV = ['0.7', '1.1', '1.3'];
+
+/** Та же арифметика, что у `useRailGrouping.sumSmv`: сумма, округлённая до сотых, пусто — «нет». */
+const sumSmv = (idx: number[]) => {
+  let total = 0;
+  let any = false;
+  for (const i of idx) {
+    const n = Number((TAIL_STEP_SMV[i] ?? '').replace(',', '.'));
+    if (Number.isFinite(n) && n > 0) {
+      total += n;
+      any = true;
+    }
+  }
+  return any ? String(Math.round(total * 100) / 100) : '';
+};
 
 // Карта ткани СУЩЕСТВУЕТ, но знает лишь про одну деталь: остальные две — «рецепт промолчал», а
 // это не то же, что «вопрос не задавался» (у разорванного графа карты нет вовсе).
@@ -244,6 +270,13 @@ const TAIL_SHAPES: PieceShapeMap = new Map<string, FoundPiece | null>([
 const converged = buildCase(CONVERGED_PIECES, CONVERGED_STEPS);
 const broken = buildCase(BROKEN_PIECES, BROKEN_STEPS);
 const tailed = buildCase(TAIL_PIECES, TAIL_STEPS);
+
+// Хвостовой блок против НАРИСОВАННЫХ строк: два множества, два числа, и в подвал коробки идёт
+// второе. Считает его та же `drawnTailSteps`, которой раскладка отмеряет коробке высоту.
+const TAIL_LOOSE_STEPS = tailed.blocks.find((b) => b.key === '')?.steps ?? [];
+const TAIL_DRAWN_STEPS = drawnTailSteps(TAIL_LOOSE_STEPS, tailed.steps);
+const TAIL_SMV = sumSmv(TAIL_DRAWN_STEPS);
+const TAIL_SMV_LOOSE = sumSmv(TAIL_LOOSE_STEPS);
 
 const nameOf = (pieces: AssemblyPiece[]) => (key: string) =>
   pieces.find((p) => p.lineKey === key)?.name ?? key;
@@ -266,6 +299,7 @@ export function renderSchematic(frozen: boolean): string {
         pieceShapes={CONVERGED_SHAPES}
         cloth={CONVERGED_CLOTH}
         smvOfBlock={CONVERGED_SMV}
+        tailSmv=''
         positions={CONVERGED_POSITIONS}
         onMove={noop}
         onResetPositions={noop}
@@ -286,6 +320,7 @@ export function renderSchematic(frozen: boolean): string {
         pieceShapes={new Map<string, FoundPiece | null>()}
         cloth={null}
         smvOfBlock={BROKEN_SMV}
+        tailSmv=''
         positions={{}}
         onMove={noop}
         onResetPositions={noop}
@@ -306,7 +341,8 @@ export function renderSchematic(frozen: boolean): string {
         onDissolve={noop}
         pieceShapes={TAIL_SHAPES}
         cloth={TAIL_CLOTH}
-        smvOfBlock={TAIL_SMV}
+        smvOfBlock={new Map<string, string>()}
+        tailSmv={TAIL_SMV}
         positions={{}}
         onMove={noop}
         onResetPositions={noop}
@@ -353,6 +389,11 @@ export const fixtureFacts = {
   tailBlockKeys: tailed.blocks.map((b) => b.key),
   tailLooseSteps: tailed.blocks.find((b) => b.key === '')?.steps ?? [],
   tailDrawnSteps: assemblyLayout(tailed.blocks, tailed.steps, tailed.res).tailSteps,
+  // ДВА ЧИСЛА, И В ПОДВАЛ ИДЁТ ПЕРВОЕ. Пока Σ бралась заглушкой, снимок был слеп к тому, каким
+  // множеством она посчитана: подвал печатал что подали. Совпади эти два — фикстура перестала бы
+  // различать множества, и проба обязана падать раньше, чем это случится молча.
+  tailDrawnSmv: TAIL_SMV,
+  tailLooseSmv: TAIL_SMV_LOOSE,
   tailLiveUnits: tailed.res.frontier.filter((k) => tailed.res.units.has(k)),
   tailViolations: tailed.res.violations.map((v) => v.detail),
 };

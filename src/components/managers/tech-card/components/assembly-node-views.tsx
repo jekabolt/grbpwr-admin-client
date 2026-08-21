@@ -888,7 +888,7 @@ export function UnitBoxView({
 export function TailBoxView({
   tail,
   tailSteps,
-  smvOfBlock,
+  tailSmv,
   labelOf,
   dragging,
   ringClassName,
@@ -904,7 +904,23 @@ export function TailBoxView({
    * поверх подвала (замерено: две строки в коробке, отмеренной на одну).
    */
   tailSteps: number[];
-  smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ТЕХ ЖЕ САМЫХ СТРОК, а не хвостового псевдоблока: считает её `useRailGrouping` по
+   * `drawnTailSteps` — по тому же списку, что стоит выше.
+   *
+   * ЧИСЛО ПРИХОДИТ ГОТОВЫМ, А НЕ КАРТОЙ ПО КЛЮЧУ, и это и есть починка. Раньше подвал спрашивал
+   * `smvOfBlock.get('')` — сумму АТРИБУЦИИ, куда входит и обработка, уехавшая на плитку своей
+   * детали; рядом стояло число строк, посчитанное по нарисованному. Коробка печатала «1 step» и
+   * «Σ 3.0», где 3.0 — сумма двух (замерено на фикстуре `proc`). Претензия владельца, ради
+   * которой коробку и переписывали, звучала как «интуитивно не понятный»; коробка, где счёт и
+   * сумма считают РАЗНОЕ, непонятна ровно этим.
+   *
+   * ВЫБРАНО МНОЖЕСТВО НАРИСОВАННЫХ СТРОК, а не «сколько работы сюда скатывается»: скатываться
+   * сюда нечему — хвост не узел, у него нет ни ключа, ни выхода, и притворство узлом с него уже
+   * снято. На вопрос «вся работа вне узлов» отвечает заголовок рельса «◌ outside units», и там
+   * своя Σ по всем шагам блока — потому что рельс их все и печатает.
+   */
+  tailSmv: string;
   labelOf: (index: number) => string;
   dragging: boolean;
   ringClassName?: string;
@@ -972,9 +988,9 @@ export function TailBoxView({
         <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
           {tailSteps.length} {tailSteps.length === 1 ? 'step' : 'steps'}
         </Text>
-        {smvOfBlock.get('') && (
+        {tailSmv && (
           <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
-            Σ {smvOfBlock.get('')}
+            Σ {tailSmv}
           </Text>
         )}
       </div>

@@ -87,6 +87,7 @@ export function AssemblySchematic({
   pieceShapes,
   cloth,
   smvOfBlock,
+  tailSmv,
   positions,
   onMove,
   onResetPositions,
@@ -125,6 +126,12 @@ export function AssemblySchematic({
   cloth?: Map<string, PieceCloth> | null;
   /** Σ SMV блока по ключу ('' — хвостовой). Считает досье, схема только показывает. */
   smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
+   * (`useRailGrouping`), полотно только показывает. Отдельно от `smvOfBlock` потому, что вопрос
+   * другой: у блока считается вся приписанная работа, у коробки — то, что в ней нарисовано.
+   */
+  tailSmv: string;
   /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
   positions: PosOverrides;
   onMove: (key: string, at: { x: number; y: number }) => void;
@@ -773,7 +780,7 @@ export function AssemblySchematic({
               // какие обработки уехали на плитки своих деталей, и высоту коробки отмерила
               // ровно по этому списку.
               tailSteps={layout.tailSteps}
-              smvOfBlock={smvOfBlock}
+              tailSmv={tailSmv}
               labelOf={labelOf}
               dragging={drag?.key === '' && drag.started}
               ringClassName={nodeRing('')}

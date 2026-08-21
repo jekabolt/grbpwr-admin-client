@@ -229,6 +229,12 @@ export type AssemblyCanvasProps = {
    */
   cloth?: Map<string, PieceCloth> | null;
   smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
+   * (`useRailGrouping`), полотно только показывает. Отдельно от `smvOfBlock` потому, что вопрос
+   * другой: у блока считается вся приписанная работа, у коробки — то, что в ней нарисовано.
+   */
+  tailSmv: string;
   positions: PosOverrides;
   /**
    * Ноды переехали. ПАЧКОЙ, А НЕ ПО ОДНОЙ, потому что жест бывает мультидроп и стрелка по
@@ -267,6 +273,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     pieceShapes,
     cloth,
     smvOfBlock,
+    tailSmv,
     positions,
     onMove,
     frozen = false,
@@ -1716,7 +1723,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               // какие обработки уехали на плитки своих деталей, и высоту коробки отмерила
               // ровно по этому списку.
               tailSteps={layout.tailSteps}
-              smvOfBlock={smvOfBlock}
+              tailSmv={tailSmv}
               labelOf={labelOf}
               dragging={!!heldNow?.has('')}
               ringClassName={nodeRing('')}

@@ -176,6 +176,12 @@ export type AssemblyFullscreenProps = {
   pieceShapes: PieceShapeMap;
   smvOfBlock: Map<string, string>;
   /**
+   * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
+   * (`useRailGrouping`), полотно только показывает. Отдельно от `smvOfBlock` потому, что вопрос
+   * другой: у блока считается вся приписанная работа, у коробки — то, что в ней нарисовано.
+   */
+  tailSmv: string;
+  /**
    * ЦЕЛИКОМ объект результата `use-schematic-prefs`, а не разложенный на `positions`/`onMove`/…
    * После Ф5б в нём появится ось группировки полки, и она обязана дойти до потребителя без правки
    * `operations-field.tsx`.
@@ -428,6 +434,7 @@ export function AssemblyFullscreen({
   labelOf,
   pieceShapes,
   smvOfBlock,
+  tailSmv,
   prefs,
   selectedIndex,
   onPickStep,
@@ -1899,6 +1906,7 @@ export function AssemblyFullscreen({
                   pieceShapes={pieceShapes}
                   cloth={cloth}
                   smvOfBlock={smvOfBlock}
+                  tailSmv={tailSmv}
                   positions={prefs.pos}
                   onMove={onMoveNodes}
                   frozen={frozen}
