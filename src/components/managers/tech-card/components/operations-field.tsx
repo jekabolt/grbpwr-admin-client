@@ -2295,6 +2295,22 @@ function OperationEditor({
     showFastening && onMachine(ZIPPER_MACHINE) && zipperApplication !== NONE_ZIPPER_APPLICATION,
   ].filter(Boolean).length;
   const overrideCount = sewingOverrideCount + equipmentOverrideCount;
+  // ЕСТЬ ЛИ У ЗОНЫ СВОЙСТВ ЧТО ПОКАЗАТЬ. Считается по ТЕМ ЖЕ предикатам, что рисуют блоки: список
+  // блоков пункта на этот вопрос не ответит — у чистки и контроля он не пуст, а единственное их
+  // поле стоит в ядре сетки рядом с пикером, и «ничего не названо» над пустым местом было бы
+  // неправдой в обе стороны сразу.
+  const kindHasControls =
+    isMachineStep ||
+    topstitchMode !== NONE_TOPSTITCH ||
+    topstitchWidthMm.trim() !== '' ||
+    topstitchRows > 0 ||
+    showStitching ||
+    showPlacement ||
+    showHardware ||
+    showPrint ||
+    showWeld ||
+    showTrim ||
+    showThreadTrim;
   const showSewingOverrides = !isPressStep || sewingOverrideCount > 0;
   const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
 
@@ -3301,11 +3317,11 @@ function OperationEditor({
         action={
           kindFactCount > 0 ? (
             <Pill tone='attention'>{kindFactCount}</Pill>
-          ) : (
+          ) : kindHasControls ? (
             <Text size='micro' variant='label' component='span'>
               nothing stated yet
             </Text>
-          )
+          ) : undefined
         }
       >
         {activeKind ? `${kindLabelOf(activeKind)} — how it is done` : 'how it is done'}
@@ -3329,10 +3345,9 @@ function OperationEditor({
           видов, и это ВЫВОД, а не упущение: волна спросила, что нужно сказать шагу складывания, и
           ответ был «где он в последовательности и сколько занимает». Пустое место читается как
           «что-то не загрузилось», поэтому вместо него стоят слова. */}
-      {activeKind && activeKind.featured.length === 0 && (
+      {activeKind && !kindHasControls && (
         <Text size='micro' variant='label' className='mb-1'>
-          this step has no settings of its own — where it goes in the sequence and how long it takes
-          is all of it
+          nothing further to set here — this step is described by the fields above
         </Text>
       )}
       {activeKind?.pointer && (
