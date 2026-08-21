@@ -82,6 +82,41 @@ const MUTATIONS = {
       refuseAtWeld(stepTextSet(o.rowSpacingMm), 'rowSpacingMm', 'row of stitching');`,
     to: '',
   },
+  // ── ОТСТУП ОТСТРОЧКИ: ПОДПИСЬ И ПЕЧАТЬ НАЗЫВАЮТ ЛИНИЮ ────────────────────────────────────────
+  // Пятая находка пришла не из диффа, а от владельца-технолога: «у нас в топстиче есть row
+  // spacing, но нет отступа от края». Отступ был — под подписью «topstitch width, mm», то есть
+  // владелец смотрел ровно на нужное поле и не узнал его. Мутации ниже ломают каждую половину
+  // починки по отдельности, потому что зелень одной ничего не говорит о другой.
+  6: {
+    what: 'находка 5: оба режима снова меряют «от края» — датум один на два разных отсчёта',
+    file: /operation-options\.ts$/,
+    from: "  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: 'the seam line',",
+    to: "  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: 'the edge',",
+  },
+  7: {
+    what: 'находка 5: подпись отступа снова константа и не зависит от режима',
+    file: /operations-field\.tsx$/,
+    from: 'label={topstitchWidthLabel(topstitchMode)}',
+    to: "label='topstitch width, mm'",
+  },
+  8: {
+    what: 'находка 5: лист снова печатает «from edge» при любом режиме',
+    file: /tech-pack-document\.tsx$/,
+    from: "  const w = topstitchModeHasWidth(t.mode) ? topstitchDistanceText(t.mode, dec(t.widthMm)) : '';",
+    to: "  const w = topstitchModeHasWidth(t.mode) ? dec(t.widthMm) + ' mm from edge' : '';",
+  },
+  9: {
+    what: 'находка 5: соседи снова не говорят, между чем меряют (калибр и шаг рядов)',
+    file: /operations-field\.tsx$/,
+    from: "label='gauge between needles, mm'",
+    to: "label='needle gauge, mm'",
+  },
+  10: {
+    what: 'находка 5: лист снова печатает «rows N apart» и «gauge N» — рядом с размером иглы',
+    file: /operation-options\.ts$/,
+    from: "    mm(s?.rowSpacingMm) ? `stitch rows ${mm(s?.rowSpacingMm)} apart` : '',",
+    to: "    mm(s?.rowSpacingMm) ? `rows ${mm(s?.rowSpacingMm)} apart` : '',",
+  },
 };
 
 function resolvePlaywright() {
@@ -275,6 +310,19 @@ async function run(bundle) {
   const messageIn = async (sel) => {
     const n = page.locator(`${sel} [id$="-form-item-message"]`);
     return (await n.count()) ? ((await n.first().textContent()) ?? '').trim() : '';
+  };
+  // ПОДПИСЬ ПОЛЯ — ЧИТАЕТСЯ С ЖИВОГО `<label>`, а не из карты слов: карту можно прочитать и правильно
+  // при подписи, прибитой константой рядом с контролом, — ровно тот дефект, который здесь чинится.
+  // Регистр берётся исходный: `uppercase` в этой форме — CSS, до textContent он не доходит.
+  const labelOf = async (sel) => {
+    const n = page.locator(`${sel} label`);
+    return (await n.count()) ? ((await n.first().textContent()) ?? '').trim() : '';
+  };
+  const typeInto = async (sel, text) => {
+    if (!(await has(sel))) return false;
+    await page.fill(`${sel} input`, text);
+    await page.waitForTimeout(120);
+    return true;
   };
 
   // ЯЧЕЙКИ СТРОКИ ЛИСТА — из НАСТОЯЩЕЙ таблицы операций напечатанного документа. Таблица ищется по
@@ -506,6 +554,87 @@ async function run(bundle) {
     issues.some((i) => /welding machine has no needle/i.test(i.message)),
     'текст отказа называет причину словами цеха',
     issues.find((i) => /welding/i.test(i.message))?.message ?? '—',
+  );
+
+  // ── 5. ОТСТУП ОТСТРОЧКИ: ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, И ТА ЖЕ ЛИНИЯ ПЕЧАТАЕТСЯ ─────────────────────
+  // Владелец-технолог смотрел прямо на это поле («topstitch width, mm») и спросил, где отступ от
+  // края. Одно и то же поле при `width` меряется ОТ КРАЯ ДЕТАЛИ, при `parallel` — ОТ ЛИНИИ ШВА,
+  // а подпись была одна на оба случая и не называла ни того, ни другого.
+  head('5. отступ отстрочки: подпись зависит от режима, и лист называет ту же линию');
+  await mount({ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE });
+  // ПАРА «НЕТ → ЕСТЬ»: без режима контрола нет ПО ПРАВИЛУ, а не потому, что экран не отрисовался.
+  ck(await has(F('topstitchMode')), 'блок отстрочки смонтирован — пикер режима на экране');
+  ck(!(await has(F('topstitchWidthMm'))), 'без режима контрола отступа НЕТ');
+
+  ck(await pick(F('topstitchMode'), 'at width from the edge'), 'режим — «at width from the edge»');
+  ck(await has(F('topstitchWidthMm')), 'контрол отступа ПОЯВИЛСЯ');
+  const lblEdge = await labelOf(F('topstitchWidthMm'));
+  ck(/from the edge/i.test(lblEdge), 'подпись называет КРАЙ', lblEdge);
+  ck(!/^topstitch width, mm$/i.test(lblEdge), 'и это уже не безымянная «topstitch width, mm»', lblEdge);
+  ck(await typeInto(F('topstitchWidthMm'), '6'), 'отступ набран числом в живой контрол');
+
+  const rEdge = await sheetRow();
+  ck(/6 mm from the edge/i.test(rEdge?.seam ?? ''), 'лист: «6 mm from the edge»', rEdge?.seam ?? '');
+
+  ck(
+    await pick(F('topstitchMode'), 'parallel — offset from the seam'),
+    'режим переключён на «parallel — offset from the seam»',
+  );
+  const lblSeam = await labelOf(F('topstitchWidthMm'));
+  ck(/from the seam line/i.test(lblSeam), 'подпись переехала на ЛИНИЮ ШВА', lblSeam);
+  ck(!/from the edge/i.test(lblSeam), 'и про край больше не говорит', lblSeam);
+  ck(lblEdge !== lblSeam, 'ПОДПИСЬ ИЗМЕНИЛАСЬ вместе с режимом', `${lblEdge} → ${lblSeam}`);
+  const vKeep = await values();
+  ck(vKeep.topstitchWidthMm === '6', 'число пережило смену режима — оба режима его несут', String(vKeep.topstitchWidthMm));
+
+  const rSeam = await sheetRow();
+  ck(/6 mm from the seam line/i.test(rSeam?.seam ?? ''), 'лист: «6 mm from the seam line»', rSeam?.seam ?? '');
+  ck(!/from the edge/i.test(rSeam?.seam ?? ''), 'лист БОЛЬШЕ НЕ зовёт край при отсчёте от шва', rSeam?.seam ?? '');
+  // ГЛАВНАЯ ПРОВЕРКА ПЕЧАТИ: до починки ОБА режима печатали «6 mm from edge» — одна строка на два
+  // разных отсчёта, и проверка «строка не пуста» этого бы не поймала.
+  ck(
+    (rEdge?.seam ?? '') !== (rSeam?.seam ?? ''),
+    'два режима дали ДВЕ РАЗНЫЕ строки листа, а не одно «from edge»',
+    `${rEdge?.seam ?? ''} | ${rSeam?.seam ?? ''}`,
+  );
+
+  // ОТКАЗ ТОЖЕ НАЗЫВАЕТ ЛИНИЮ — он стоит под тем же контролом, что и подпись, и разойтись с ней
+  // не имеет права.
+  ck(await pick(F('topstitchMode'), 'in the ditch'), 'режим переключён на «in the ditch»');
+  ck(!(await has(F('topstitchWidthMm'))), 'у режима без отступа контрола снова НЕТ');
+  ck(await pick(F('topstitchMode'), 'at width from the edge'), 'режим возвращён на «от края»');
+  ck(await has(F('topstitchWidthMm')), 'контрол отступа снова ЕСТЬ');
+  await page.evaluate(() => window.__review.trigger());
+  await page.waitForTimeout(150);
+  const msg = await messageIn(F('topstitchWidthMm'));
+  ck(/from the edge/i.test(msg), 'отказ на пустом отступе НАЗЫВАЕТ линию', msg);
+
+  // ── СОСЕДИ ПО ТОЙ ЖЕ БОЛЕЗНИ: КАЛИБР И ШАГ МЕЖДУ РЯДАМИ ──────────────────────────────────────
+  head('5b. соседи: «между иглами» и «между рядами строчек» — на экране и на листе');
+  await mount({
+    operationType: T.MACHINE,
+    machineType: T.LOCKSTITCH,
+    zone: T.ZONE,
+    needleCount: 2,
+    needleGaugeMm: '6.4',
+    rowSpacingMm: '6',
+  });
+  const lblGauge = await labelOf(F('needleGaugeMm'));
+  const lblRows = await labelOf(F('rowSpacingMm'));
+  ck(/between needles/i.test(lblGauge), 'калибр говорит «между иглами»', lblGauge);
+  ck(/between stitch rows/i.test(lblRows), 'шаг говорит «между рядами строчек»', lblRows);
+  ck(!/^needle gauge, mm$/i.test(lblGauge), 'и это уже не «needle gauge, mm»', lblGauge);
+  ck(!/^row spacing, mm$/i.test(lblRows), 'и это уже не «row spacing, mm»', lblRows);
+  const rowNeedles = await sheetRow();
+  ck(
+    /2 needles, 6\.4 mm apart/i.test(rowNeedles?.machineMode ?? ''),
+    'лист: «2 needles, 6.4 mm apart» — миллиметры сказали, что они меряют',
+    rowNeedles?.machineMode ?? '',
+  );
+  ck(
+    /stitch rows 6 mm apart/i.test(rowNeedles?.seam ?? ''),
+    'лист: «stitch rows 6 mm apart» — не голое «rows»',
+    rowNeedles?.seam ?? '',
   );
 
   ck(pageErrors.length === 0, 'ни одного исключения за весь прогон', pageErrors.join(' | ').slice(0, 200));

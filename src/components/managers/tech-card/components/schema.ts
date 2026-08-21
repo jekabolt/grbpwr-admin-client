@@ -77,7 +77,11 @@ import {
   cutSymmetryCountInvalid,
   isCutSymmetryMarked,
 } from './piece-codes';
-import { topstitchModeHasNoWidth, topstitchModeHasWidth } from './operation-options';
+import {
+  topstitchDatumOf,
+  topstitchModeHasNoWidth,
+  topstitchModeHasWidth,
+} from './operation-options';
 import {
   type StepBlock,
   isMachineStepType,
@@ -1241,14 +1245,19 @@ const operationSchema = z.object({
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
-        message: 'this topstitch mode has no width — clear it, or switch the mode to width',
+        message:
+          'this topstitch mode is measured from no line — clear the distance, or switch to a mode that has one',
       });
     }
+    // AND THE REFUSAL NAMES THE LINE, from the same map as the caption above the input. «needs the
+    // width» left the technologist to guess which of the two lines the missing number belongs to,
+    // and the caption right beside it had just been changed to say so — a refusal that words the
+    // field differently from its own label is the defect again, one layer down.
     if (topstitchModeHasWidth(o.topstitchMode) && !(o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
-        message: 'a topstitch at a stated width needs the width',
+        message: `a topstitch measured from ${topstitchDatumOf(o.topstitchMode)} needs that distance in mm`,
       });
     }
     // «NONE» counts as no attachment here for the same reason UNKNOWN does, and it is server parity

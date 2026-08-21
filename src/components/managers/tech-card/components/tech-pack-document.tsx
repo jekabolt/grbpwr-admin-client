@@ -168,6 +168,7 @@ import {
   stepPressText,
   stepSeamFactTexts,
   stepToolFactParts,
+  topstitchDistanceText,
   topstitchModeHasWidth,
   zoneOptions,
   type EffectiveSetting,
@@ -420,20 +421,25 @@ const allowanceText = (d?: googletype_Decimal): string => {
   const v = dec(d);
   return v ? `${v} mm` : '';
 };
-// «TOPSTITCH … FROM EDGE», never a bare «width»: the step carries a second width — stitch_width_mm,
-// the zigzag amplitude / overlock bite — and the two are different facts (§10). Confusing them is
-// paid for in a whole batch, so each says on paper which one it is.
+// «TOPSTITCH … FROM THE EDGE» / «… FROM THE SEAM LINE», never a bare «width»: the step carries a
+// second width — stitch_width_mm, the zigzag amplitude / overlock bite — and the two are different
+// facts (§10). Confusing them is paid for in a whole batch, so each says on paper which one it is.
 const topstitchText = (t?: common_TechCardTopstitch): string => {
   if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
   const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
   if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
-  // «FROM EDGE» IS A CLAIM ABOUT THE REFERENCE POINT, so it is printed only for a mode this bundle
-  // can classify as carrying a width (TOPSTITCH_MODE_HAS_WIDTH). An unclassified mode leaves the
-  // sheet saying «topstitch» and no more — incomplete, which the floor can see, instead of a
-  // distance measured from a reference the mode never named, which the floor cannot. Nothing is
-  // lost by the omission: print reads the wire and never writes it.
-  const w = topstitchModeHasWidth(t.mode) ? dec(t.widthMm) : '';
-  return `topstitch ${rows}${w ? `${w} mm from edge` : ''}`.trim();
+  // WHICH LINE, SAID BY THE MODE — and by the same map that captions the input the number was typed
+  // into (TOPSTITCH_WIDTH_DATUM). This sheet used to print «from edge» for BOTH numbered modes, so
+  // a `parallel_to_seam` step told the operator to set the guide bar against the finished edge when
+  // the distance was measured from the seam line — on a lapped or felled seam, a different line and
+  // a wrong garment.
+  //
+  // AN UNCLASSIFIED MODE (one newer than this bundle) has no datum, so topstitchDistanceText returns
+  // nothing and the sheet says «topstitch» and no more — incomplete, which the floor can see,
+  // instead of a distance measured from a reference the mode never named, which the floor cannot.
+  // Nothing is lost by the omission: print reads the wire and never writes it.
+  const w = topstitchModeHasWidth(t.mode) ? topstitchDistanceText(t.mode, dec(t.widthMm)) : '';
+  return `topstitch ${rows}${w}`.trim();
 };
 // A setting and the one bit that says where it came from: the marker means «the step's own value»,
 // and anything unmarked is inherited off the card's equipment park and printed all the same — see

@@ -72,6 +72,7 @@ import {
   topstitchModeHasNoWidth,
   topstitchModeHasWidth,
   topstitchModeOptionsFor,
+  topstitchWidthLabel,
   zoneOptions,
 } from './operation-options';
 // ВИД ОПЕРАЦИИ — ОДИН СПИСОК ПОВЕРХ ДВУХ ОСЕЙ (см. operation-kinds.ts). Здесь он спрашивается
@@ -3490,15 +3491,27 @@ function OperationEditor({
             input, which is the harmless half of that trade (the value keeps travelling). */}
         {topstitchModeHasWidth(topstitchMode) && (
           <>
+            {/* ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, ОТ КОТОРОЙ МЕРЯЮТ, И МЕНЯЕТСЯ ВМЕСТЕ С РЕЖИМОМ. Владелец —
+                практикующий технолог — спросил «у нас есть row spacing, но нет отступа от края»,
+                глядя ровно на это поле: подпись «topstitch width, mm» называла величину и молчала
+                о том, от чего она отсчитывается. Молчать здесь нельзя вдвойне — одно и то же поле
+                при `width` меряется ОТ КРАЯ ДЕТАЛИ, а при `parallel — offset from the seam` ОТ
+                ЛИНИИ ШВА, и на настрочном или запошивочном шве это разные линии. Слова берутся из
+                TOPSTITCH_WIDTH_DATUM, откуда их берёт и печатный лист: второй копии не заводится,
+                иначе технолог наберёт число под одной линией, а швея прочитает другую. */}
             <DecimalField
               name={`operations.${index}.topstitchWidthMm`}
-              label='topstitch width, mm'
+              label={topstitchWidthLabel(topstitchMode)}
               maxDecimals={1}
               placeholder='6'
             />
+            {/* РЯДЫ ЧЕГО. Голое «rows» — счётчик без предмета, а предмет тут спорный: рядами в
+                этой же карточке зовутся и строчки отстрочки (здесь), и соседние строчки, между
+                которыми меряется «spacing between stitch rows» в игольном блоке ниже. Это те же
+                самые ряды, но живут они в двух разных блоках, и связать их обязана подпись. */}
             <SelectField
               name={`operations.${index}.topstitchRows`}
-              label='rows'
+              label='rows of topstitching'
               items={TOPSTITCH_ROW_OPTIONS}
               valueAsNumber
               className={selectNoGrow}
@@ -3543,11 +3556,15 @@ function OperationEditor({
                   placeholder='1'
                 />
                 {/* КАЛИБР МЕРЯЕТ РАССТОЯНИЕ МЕЖДУ ИГЛАМИ, поэтому на одной игле он измеряет ничто —
-                    сервер такую пару отвергает, а очистка выше стирает число, оставшееся от двух. */}
+                    сервер такую пару отвергает, а очистка выше стирает число, оставшееся от двух.
+                    И ПОДПИСЬ ГОВОРИТ «МЕЖДУ ИГЛАМИ» ВСЛУХ: «needle gauge» в цехе означает и зазор
+                    между иглами, и ТОЛЩИНУ иглы, а толщина у шага уже есть — «needle size, Nm» в
+                    блоке машинки. Два разных измерения про иглу на одном экране под похожими
+                    словами — ровно тот случай, ради которого подпись и переписывается. */}
                 {needleCount >= 2 && (
                   <DecimalField
                     name={`operations.${index}.needleGaugeMm`}
-                    label='needle gauge, mm'
+                    label='gauge between needles, mm'
                     maxDecimals={1}
                     placeholder='6.4'
                   />
@@ -3558,10 +3575,13 @@ function OperationEditor({
                   items={stepEnumOptions(SEAM_SECURING_LABELS, '— not stated —', seamSecuring)}
                   className={selectNoGrow}
                 />
-                {/* Между РЯДАМИ строчек. Не путать с калибром выше: тот — между иглами одного ряда. */}
+                {/* Между РЯДАМИ строчек. Не путать с калибром выше: тот — между иглами одного ряда.
+                    Контракт различает их явно («не путать с needle_gauge_mm»), а подпись «row
+                    spacing, mm» этого не передавала: она называла величину, но не говорила, между
+                    чем меряется, — и владелец прочитал в ней отступ от края. */}
                 <DecimalField
                   name={`operations.${index}.rowSpacingMm`}
-                  label='row spacing, mm'
+                  label='spacing between stitch rows, mm'
                   maxDecimals={1}
                   placeholder='6'
                 />
@@ -4248,9 +4268,12 @@ function OperationEditor({
                   placeholder='0.5 tighter, dial 4'
                 />
               )}
-              {/* «stitch width» is the zigzag amplitude / the overlock bite. NOT the topstitch
-                  width, which is a distance from an edge and lives three controls down — the two
-                  print side by side on the tech pack and must not read as one setting. */}
+              {/* «stitch width» is the zigzag amplitude / the overlock bite — the width of the
+                  STITCH ITSELF, which is what the dial on the machine is called, so the caption
+                  keeps that name. NOT the topstitch distance, which is a gap between the stitch
+                  line and the edge (or the seam line) and lives in the topstitch block above; that
+                  one no longer says «width» at all, precisely so these two cannot read as one
+                  setting where they print side by side on the tech pack. */}
               <DecimalField
                 name={`operations.${index}.stitchWidthMm`}
                 label='stitch width, mm'

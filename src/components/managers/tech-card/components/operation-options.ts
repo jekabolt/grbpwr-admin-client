@@ -257,8 +257,8 @@ export const attachmentKindLabel = (v?: string): string =>
 // different line entirely. The old label «at width» was unambiguous only while it was the sole mode
 // with a number; beside «parallel» it stops being one, and the operator with a guide bar has no way
 // to tell which line to set it against. Same fact governs the input's own caption and the printed
-// sheet — see TOPSTITCH_MODE_HAS_WIDTH below, which is where the question «is there a number at
-// all» is asked.
+// sheet — both take their words from TOPSTITCH_WIDTH_DATUM below, which is where both «is there a
+// number at all» and «measured from what» are answered, once.
 export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; label: string }> = [
   { value: 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN', label: '— none —' },
   { value: 'TECH_CARD_TOPSTITCH_MODE_EDGE', label: 'edge' },
@@ -303,22 +303,44 @@ export function topstitchModeOptionsFor(
 // A total `Record`, not an array, for the reason every dictionary in this feature is one (see the
 // header of equipment-options.ts): nothing in this repo diffs the client against the contract, so
 // tsc is the diff — a member added by a proto bump fails to compile until it is classified here.
-export const TOPSTITCH_MODE_HAS_WIDTH: Record<common_TechCardTopstitchMode, boolean> = {
-  // «none» — there is no topstitch for a width to belong to.
-  TECH_CARD_TOPSTITCH_MODE_UNKNOWN: false,
+//
+// ONE MAP, NOT TWO, AND IT HOLDS THE DATUM RATHER THAN A FLAG. The question «is there a number»
+// and the question «measured from WHAT» have the same five answers and must never drift apart, so
+// they are answered once: a NON-EMPTY string means «there is a number, and here is the line it is
+// measured from», an EMPTY string means «this mode carries no number», and a token missing from the
+// map (`undefined`) is a mode NEWER than this bundle — neither answer, which is the third state the
+// predicates below exist to keep.
+//
+// WHY THE DATUM AND NOT JUST «width». The owner — a working technologist — read the caption
+// «topstitch width, mm» standing on the very field he was asking for («we have row spacing but no
+// margin from the edge») and did not recognise it. A caption that names the QUANTITY but not the
+// LINE is not a caption for this field: the same millimetres are measured from the EDGE OF THE
+// PIECE under `width` and from the SEAM LINE under `parallel_to_seam`, which on a lapped or felled
+// seam is somewhere else entirely. Three surfaces have to say it — the input's caption, the printed
+// sheet, the assembly map — and they say it from here, so none of them can name a different line.
+export const TOPSTITCH_WIDTH_DATUM: Record<common_TechCardTopstitchMode, string> = {
+  // «none» — there is no topstitch for a distance to belong to.
+  TECH_CARD_TOPSTITCH_MODE_UNKNOWN: '',
   // Run along the very edge: the distance IS the edge, so there is nothing left to state.
-  TECH_CARD_TOPSTITCH_MODE_EDGE: false,
-  // The inset from the edge is the entire instruction.
-  TECH_CARD_TOPSTITCH_MODE_WIDTH: true,
+  TECH_CARD_TOPSTITCH_MODE_EDGE: '',
+  // The inset from the edge of the piece is the entire instruction.
+  TECH_CARD_TOPSTITCH_MODE_WIDTH: 'the edge',
   // Sunk into the seam line itself. The distance is zero by definition, and a number offered here
   // would be a number about nothing — the server refuses one outright.
-  TECH_CARD_TOPSTITCH_MODE_IN_DITCH: false,
+  TECH_CARD_TOPSTITCH_MODE_IN_DITCH: '',
   // A number, and NOT the same number as `width`: this one is measured from the SEAM LINE, not from
-  // the finished edge. The classification here answers only «is there a number»; what it is
-  // measured from is said by the label (topstitchModeOptions) and has to be said again by the
-  // input's caption and by the printed sheet, or the operator sets the guide against the wrong line.
-  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: true,
+  // the finished edge. Two facts under one word would part company silently on paper, which is why
+  // the contract made it a separate mode — and why the datum travels with it everywhere.
+  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: 'the seam line',
 };
+
+/** DERIVED, so «is there a number» cannot disagree with «measured from what»: a member added by a
+ *  proto bump has to state its datum above before anything compiles, and the flag follows. Kept as
+ *  an exported map because the whole feature's argument about the third state is written against
+ *  it — see the two predicates below. */
+export const TOPSTITCH_MODE_HAS_WIDTH = Object.fromEntries(
+  Object.entries(TOPSTITCH_WIDTH_DATUM).map(([mode, datum]) => [mode, datum !== '']),
+) as Record<common_TechCardTopstitchMode, boolean>;
 
 /** The mode is KNOWN and carries a width: show the input, require the number, print it. An unknown
  *  token answers `false` — the safe direction, one control missing and nothing touched. */
@@ -330,6 +352,37 @@ export const topstitchModeHasWidth = (mode?: string): boolean =>
  *  the whole reason this pair exists rather than a single predicate. */
 export const topstitchModeHasNoWidth = (mode?: string): boolean =>
   TOPSTITCH_MODE_HAS_WIDTH[mode as common_TechCardTopstitchMode] === false;
+
+/** THE LINE THIS MODE MEASURES FROM, in the words every surface uses — «the edge», «the seam line»,
+ *  or '' when the mode carries no distance (and for a token this bundle does not know). Four
+ *  callers need it in four different sentences — an input caption, a refusal, a printed cell, the
+ *  assembly map — and a sentence is the one thing that must not be shared, so they share the noun
+ *  instead. */
+export const topstitchDatumOf = (mode?: string): string =>
+  TOPSTITCH_WIDTH_DATUM[mode as common_TechCardTopstitchMode] ?? '';
+
+/** THE CAPTION OF THE DISTANCE INPUT, worded for the mode the step is actually in — «topstitch
+ *  distance from the edge, mm» or «topstitch distance from the seam line, mm». «distance», not
+ *  «width»: the step already carries a second width (`stitch_width_mm`, the zigzag amplitude /
+ *  overlock bite), so «width» named neither which of the two this is nor what it is measured from.
+ *  The datum-less fallback is only reachable for a mode this bundle cannot classify — where the
+ *  input is not drawn at all — and stays honest rather than inventing a line. */
+export const topstitchWidthLabel = (mode?: string): string => {
+  const datum = topstitchDatumOf(mode);
+  return datum ? `topstitch distance from ${datum}, mm` : 'topstitch distance, mm';
+};
+
+/** THE SAME FACT IN INK — «6 mm from the edge» / «6 mm from the seam line» — for the printed sheet
+ *  and the assembly map. Same map as the caption, so paper cannot name a line the technologist
+ *  never typed against; before this, BOTH modes printed «from edge» and `parallel_to_seam` sent the
+ *  operator to set the guide bar against the wrong one. Empty when there is no number, and empty
+ *  when the mode has no datum: a distance with no line beside it is worse than no distance, because
+ *  the floor cannot see that anything is missing. */
+export const topstitchDistanceText = (mode?: string, widthMm?: string): string => {
+  const v = (widthMm ?? '').trim();
+  const datum = topstitchDatumOf(mode);
+  return v && datum ? `${v} mm from ${datum}` : '';
+};
 
 // THE VERB OF A STEP HEADING — total, not `Partial`, and that change is the point: as a Partial this
 // map went silently blank on every token the contract added, which is precisely what a bump is
@@ -1105,7 +1158,11 @@ export function stepSeamFactTexts(o: StepFacts): string[] {
   const residual = mm(o.trim?.residualAllowanceMm);
   return [
     seamSecuringLabel(s?.seamSecuring),
-    mm(s?.rowSpacingMm) ? `rows ${mm(s?.rowSpacingMm)} apart` : '',
+    // «STITCH ROWS», NOT A BARE «rows»: the same cell can carry «2 × 6 mm from the edge», where the
+    // rows are the topstitch passes, and this number is the gap BETWEEN those passes — not the
+    // gauge between the needles of one pass, which is a different fact in a different column. The
+    // contract keeps the two apart by name («не путать с needle_gauge_mm»); paper has to as well.
+    mm(s?.rowSpacingMm) ? `stitch rows ${mm(s?.rowSpacingMm)} apart` : '',
     // A RATIO, NOT A PERCENTAGE, and printed as one: 1.0 is «ply for ply», 2.0 is «gather it to
     // half its length». Quoted as «15%» the same number would be read as an allowance to add.
     fullness ? `fullness ${fullness} : 1` : '',
@@ -1118,7 +1175,7 @@ export function stepSeamFactTexts(o: StepFacts): string[] {
 /** THE FACTS ABOUT THE TOOL AND ITS PROGRAM, for the «machine / mode» column — everything the
  *  operator sets before the first unit. The needle count and gauge lead because they join the
  *  needle point and size already printed there off the machine profile: one needle bar, one reading
- *  («2 needles · gauge 6.4 mm · ballpoint Nm 90»). */
+ *  («2 needles, 6.4 mm apart · ballpoint Nm 90»). */
 export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField>> {
   const s = o.stitching;
   const h = o.hardware;
@@ -1127,12 +1184,17 @@ export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField
   const f = o.fastening;
   const needleCount = positive(s?.needleCount);
   const gauge = mm(s?.needleGaugeMm);
+  // «2 needles, 6.4 mm apart» — ONE phrase, and the millimetres say what they span. Printed as
+  // «gauge 6.4 mm» they stood in the same cell as the needle SIZE that comes off the machine
+  // profile («ballpoint Nm 90»), and «gauge» is the trade word for BOTH: the spacing between needle
+  // bars and the thickness of the needle itself. Joined with « · » the two even read as separate
+  // settings, so the cell offered the floor two numbers about needles and named neither.
   const needles = [
     needleCount > 0 ? `${needleCount} ${needleCount === 1 ? 'needle' : 'needles'}` : '',
-    gauge ? `gauge ${gauge}` : '',
+    gauge ? (needleCount > 0 ? `${gauge} apart` : `${gauge} between needles`) : '',
   ]
     .filter(Boolean)
-    .join(' · ');
+    .join(', ');
   // ONE BUTTONHOLE, ONE ITEM. Shape and direction are adjectives on the same hole and the cut is
   // its size, so they are joined rather than listed: three items would read as three settings.
   const bhWords = [
