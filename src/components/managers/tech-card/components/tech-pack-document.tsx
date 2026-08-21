@@ -384,10 +384,19 @@ const WAVE_VERBS: ReadonlySet<common_TechCardOperationType> = new Set([
 const operationTypeText = (o: {
   operationType?: common_TechCardOperationType;
   machineType?: common_TechCardMachineType;
+  seamClass?: common_TechCardSeamClass;
 }): string => {
   const v = o.operationType;
   if (isMachineStepType(v)) {
-    return operationHeading({ operationType: v, machineType: o.machineType, pieceNames: [] });
+    // КЛАСС ШВА ЕДЕТ В КОМПОЗИТОР, потому что у отстрочки якорь вида именно там: без него бумага
+    // напечатала бы «join» на строчке, которую экран называет «topstitch», — а бумага и есть та
+    // единственная копия карточки, что стоит у машины.
+    return operationHeading({
+      operationType: v,
+      machineType: o.machineType,
+      seamClass: o.seamClass,
+      pieceNames: [],
+    });
   }
   if (isPressStepType(v)) return pressProcessShort(v) || '—';
   if (v && WAVE_VERBS.has(v)) return operationHeading({ operationType: v, pieceNames: [] });

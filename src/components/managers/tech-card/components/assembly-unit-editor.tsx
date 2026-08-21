@@ -337,6 +337,8 @@ function UnitStepRow({
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
   const machineType = (useWatch({ control, name: `operations.${index}.machineType` }) ??
     '') as string;
+  // Тот же якорь вида, что у рельса: два способа назвать шаг — это два разных имени одного шага.
+  const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const smv = (useWatch({ control, name: `operations.${index}.smv` }) ?? '') as string;
@@ -358,6 +360,7 @@ function UnitStepRow({
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
+      seamClass,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames: linkedPieces.map((p) => p.name),
       note,

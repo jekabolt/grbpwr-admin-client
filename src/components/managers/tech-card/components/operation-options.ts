@@ -32,6 +32,10 @@ import {
   pressClothLabel,
   threadTensionLabel,
 } from './equipment-options';
+// ГЛАГОЛ ЗАГОЛОВКА СПРАШИВАЕТ ВИД. Значение, а не тип: `operationHeading` — единственное место,
+// где слово шага собирается, и вид обязан отвечать в нём же. Обратного импорта нет — граф
+// односторонний (`operation-kinds` берёт отсюда только ТИП строки формы), цикла не возникает.
+import { kindHeadingVerb } from './operation-kinds';
 // ТОЛЬКО ТИП, И ЭТО УСЛОВИЕ, А НЕ СТИЛЬ: `schema.ts` импортирует ЗНАЧЕНИЯ отсюда, поэтому обратный
 // импорт значения замкнул бы цикл в рантайме. `import type` стирается при трансформации (в
 // tsconfig нет `verbatimModuleSyntax`), путь ведёт в модуль напрямую, а не через бочку с
@@ -389,12 +393,26 @@ export function operationHeading(args: {
   zone?: common_TechCardGarmentZone;
   pieceNames: string[];
   note?: string;
+  /**
+   * КЛАСС ШВА — НЕ УКРАШЕНИЕ ЗАГОЛОВКА, А ЯКОРЬ ВИДА. Отстрочка на одноигольной несёт машинку
+   * `lockstitch`, чей глагол буквально «join», — и без этого поля заголовок называл бы её «join»,
+   * пока пикер вида называет её «topstitch». Необязательно: заголовок собирается и по архивному
+   * снапшоту, где спрашивать нечего, и там лестница ниже уже права.
+   */
+  seamClass?: string;
 }): string {
   const typeVerb = args.operationType ? (OPERATION_TYPE_VERB[args.operationType] ?? '') : '';
+  // ВИД СПРАШИВАЕТСЯ ПЕРВЫМ, и отвечает он только там, где говорит больше второй оси.
+  const kindVerb = kindHeadingVerb({
+    operationType: args.operationType,
+    machineType: args.machineType,
+    seamClass: args.seamClass,
+  });
   const verb =
-    args.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE'
+    kindVerb ||
+    (args.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE'
       ? machineTypeVerb(args.machineType) || typeVerb
-      : typeVerb;
+      : typeVerb);
   const zone = zoneLabel(args.zone);
   const parts = [verb, zone].filter(Boolean);
   if (args.pieceNames.length > 0) parts.push(args.pieceNames.join(' + '));

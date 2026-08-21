@@ -259,6 +259,7 @@ export function IssuesField() {
     (o: {
       operationType?: string;
       machineType?: string;
+      seamClass?: string;
       zone?: string;
       note?: string;
       inputKeys?: string[];
@@ -268,6 +269,9 @@ export function IssuesField() {
         // The verb of a machine step comes from its machine — an issue that points at «machine ·
         // hem» names no step on a card where nine steps are machine steps.
         machineType: o.machineType as Parameters<typeof operationHeading>[0]['machineType'],
+        // ...и вид — из класса шва: ссылка «join · подол» на карточке, где подол отстрочен, не
+        // называет шаг, а путает с соседним.
+        seamClass: o.seamClass,
         zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
         // Ключ, не совпавший ни с одной деталью, — это УЗЕЛ, и он обязан быть виден. Просто
         // отбросить его (как делал .filter(Boolean) на именах) значило бы назвать джойн

@@ -405,6 +405,10 @@ function SnapshotOperations({
                     // the machine. operationHeading reads both, so a frozen release keeps the verb
                     // it was signed with.
                     machineType: o.machineType,
+                    // Класс шва — якорь вида отстрочки, и снапшот несёт его наравне с машинкой:
+                    // выпущенная карточка обязана называть шаг тем же словом, каким его называла
+                    // живая.
+                    seamClass: o.seamClass,
                     zone: o.zone,
                     pieceNames: [],
                     note: o.note,

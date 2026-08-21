@@ -111,6 +111,9 @@ function RailStep({
   // whole rail reads «machine · …» twenty times over.
   const machineType = (useWatch({ control, name: `operations.${index}.machineType` }) ??
     '') as string;
+  // Класс шва — ЯКОРЬ ВИДА, и рельсу он нужен по той же причине, по какой нужен машинный тип:
+  // без него отстрочка на одноигольной читалась бы «join» в списке и «Topstitch» в открытом шаге.
+  const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
@@ -147,6 +150,7 @@ function RailStep({
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
+      seamClass,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames,
       note,

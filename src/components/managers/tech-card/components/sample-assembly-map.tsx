@@ -243,6 +243,9 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                       machineType: o.machineType as Parameters<
                         typeof operationHeading
                       >[0]['machineType'],
+                      // ...а вид — из класса шва: у отстрочки якорь именно там, и без него карта
+                      // называла бы её «join» рядом с редактором, который зовёт её «Topstitch».
+                      seamClass: o.seamClass,
                       zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
                       pieceNames: names,
                       note: o.note,
