@@ -10,6 +10,15 @@
 //   4. открытая зона рисовала на сварочной машине иглы, калибр, закрепку и шаг между рядами —
 //      четыре поля, которые сервер отвергает по имени.
 //
+// ОБНОВЛЕНО ПОД Ф4 (2026-08-22, ревью): фаза «перестать терять данные» РАЗВЕРНУЛА судьбу
+// заполненного-но-чужого — его больше не стирают ни эффекты (сняты), ни маппер (закон «едет, если
+// заполнено»); оно стоит строкой ПОЛОСЫ ОСТАТКОВ и уезжает на провод, где сервер отвергает его по
+// имени. Три следствия для этой пробы: клетки «значение ОЧИЩЕНО» стали «значение ЦЕЛО + строка
+// полосы»; клетки «на провод не уехало» стали «уехало — отказ за сервером»; а «контрола НЕТ»
+// спрашивается через hasCtrl/hasResidue, потому что тот же `data-field` теперь стоит и на строках
+// полосы (по нему роутер ошибок доводит отказ до строки). Сами находки 1-4 при этом живы: контрол
+// чужого поля по-прежнему не рисуется, печать по-прежнему говорит словами, zod-зеркала стоят.
+//
 // ЧЕГО НЕ ПОКРЫВАЛА ПРЕЖНЯЯ ПРОБА, И ПОЧЕМУ ЭТА УСТРОЕНА ИНАЧЕ:
 //  · пикер видов не был покрыт вовсе — здесь каждый переход делается КЛИКОМ по живому списку;
 //  · `roundTrip` редактор НЕ монтировал, только мапперы, — поэтому находка №3 сквозь неё
@@ -355,6 +364,13 @@ async function run(bundle) {
   const KIND = '[data-kind-picker="0"]';
   const F = (name) => `[data-field="operations.0.${name}"]`;
   const has = async (sel) => (await page.locator(sel).count()) > 0;
+  // Ф4: тот же `data-field` теперь стоит и на СТРОКАХ ПОЛОСЫ ОСТАТКОВ (нарочно — по нему роутер
+  // серверных ошибок доводит отказ до строки). «Контрол есть» и «строка полосы есть» — два разных
+  // вопроса, и голый F() отвечал бы на их сумму: заполненное-но-чужое поле сошло бы за контрол.
+  const RESIDUE = (name) => `[data-residue-strip] ${F(name)}`;
+  const hasCtrl = async (name) =>
+    (await page.locator(F(name)).count()) > (await page.locator(RESIDUE(name)).count());
+  const hasResidue = async (name) => has(RESIDUE(name));
   const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   async function mount(op) {
@@ -583,25 +599,31 @@ async function run(bundle) {
     JSON.stringify(wOpen?.press ?? null),
   );
   // ПАРА «НЕТ → ЕСТЬ → НЕТ»: контрола у разутюжки нет ПО ПРАВИЛУ, а не потому, что экран пуст.
-  ck(!(await has(F('pressAction'))), 'у PRESS_OPEN контрола под-глагола НЕТ');
+  // Ф4: невидимкой прочитанный токен при этом больше НЕ живёт — он стоит строкой полосы остатков.
+  ck(!(await hasCtrl('pressAction')), 'у PRESS_OPEN контрола под-глагола НЕТ');
+  ck(await hasResidue('pressAction'), 'Ф4: прочитанный под-глагол виден строкой полосы остатков');
   ck(await pick(F('operationType'), 'press (to one side / steam)'), 'глагол переключён на PRESS');
-  ck(await has(F('pressAction')), 'у PRESS контрол под-глагола ПОЯВИЛСЯ');
+  ck(await hasCtrl('pressAction'), 'у PRESS контрол под-глагола ПОЯВИЛСЯ');
+  ck(!(await hasResidue('pressAction')), 'и строка полосы при живом контроле ушла');
   ck(await pick(F('operationType'), 'press open'), 'глагол возвращён на PRESS_OPEN');
-  ck(!(await has(F('pressAction'))), 'и контрол снова ИСЧЕЗ');
+  ck(!(await hasCtrl('pressAction')), 'и контрол снова ИСЧЕЗ');
   const vBack = await values();
   ck(
     vBack.pressAction === T.STEAM_ACTION,
     'под-глагол пережил оба переключения — очистка скрытого его не трогает',
     String(vBack.pressAction),
   );
-  // А ВОТ ЧУЖОЙ ГЛАГОЛ ЕГО СНИМАЕТ — иначе гейт бы вообще ничего не гейтил.
+  // Ф4 РАЗВЕРНУЛА ЭТУ КЛЕТКУ: чужой глагол его больше НЕ снимает — стирает только человек, через
+  // [clear] полосы. Значение остаётся, едет на провод, и отвергает его СЕРВЕР по имени — отказ
+  // ложится на видимую строку остатка, а не пропадает вместе со значением.
   ck(await pick(F('operationType'), 'fusing'), 'глагол переключён на дублирование');
   const vFuse = await values();
   ck(
-    vFuse.pressAction === T.ACTION_UNSET,
-    'на не-ВТО глаголе под-глагол ОЧИЩЕН',
+    vFuse.pressAction === T.STEAM_ACTION,
+    'Ф4: на не-ВТО глаголе под-глагол НЕ стёрт',
     String(vFuse.pressAction),
   );
+  ck(await hasResidue('pressAction'), 'и стоит строкой полосы остатков с [clear]');
 
   // ── 4. СВАРОЧНАЯ МАШИНА: ИГЛЫ НЕТ, И ПОЛЕЙ ИГЛЫ ТОЖЕ ──────────────────────────────────────────
   head('4. ультразвук: игольная четвёрка не рисуется, не хранится и отвергается');
@@ -616,32 +638,34 @@ async function run(bundle) {
     fullnessRatio: '1.4',
   });
   const NEEDLE = ['needleCount', 'seamSecuring', 'rowSpacingMm'];
-  for (const f of NEEDLE) ck(!(await has(F(f))), `на сварке контрола «${f}» НЕТ`);
-  ck(!(await has(F('needleGaugeMm'))), 'на сварке контрола «needleGaugeMm» НЕТ');
-  ck(await has(F('fullnessRatio')), 'посадка на сварке ОСТАЛАСЬ — она про подачу, а не про иглу');
+  for (const f of NEEDLE) ck(!(await hasCtrl(f)), `на сварке контрола «${f}» НЕТ`);
+  ck(!(await hasCtrl('needleGaugeMm')), 'на сварке контрола «needleGaugeMm» НЕТ');
+  ck(await hasCtrl('fullnessRatio'), 'посадка на сварке ОСТАЛАСЬ — она про подачу, а не про иглу');
 
+  // Ф4 РАЗВЕРНУЛА СУДЬБУ ЗНАЧЕНИЙ: игольная четвёрка больше не стирается открытием шага — она
+  // стоит строками полосы остатков, ЕДЕТ на провод, и отвергают её zod (зеркало ниже) и сервер —
+  // ПО ИМЕНИ, на видимом месте. Стирает только человек, через [clear].
   const vWeld = await values();
-  ck(vWeld.needleCount === 0, 'число игл ОЧИЩЕНО, а не оставлено невидимым', String(vWeld.needleCount));
-  ck(
-    vWeld.seamSecuring === 'TECH_CARD_SEAM_SECURING_UNKNOWN',
-    'закрепка ОЧИЩЕНА',
-    String(vWeld.seamSecuring),
-  );
-  ck(vWeld.rowSpacingMm === '', 'шаг между рядами ОЧИЩЕН', JSON.stringify(vWeld.rowSpacingMm));
-  ck(vWeld.needleGaugeMm === '', 'калибр ОЧИЩЕН', JSON.stringify(vWeld.needleGaugeMm));
+  ck(vWeld.needleCount === 4, 'Ф4: число игл НЕ стёрто', String(vWeld.needleCount));
+  ck(vWeld.seamSecuring === T.SECURING, 'Ф4: закрепка цела', String(vWeld.seamSecuring));
+  ck(vWeld.rowSpacingMm === '3.2', 'Ф4: шаг между рядами цел', JSON.stringify(vWeld.rowSpacingMm));
+  ck(vWeld.needleGaugeMm === '6.4', 'Ф4: калибр цел', JSON.stringify(vWeld.needleGaugeMm));
+  for (const f of [...NEEDLE, 'needleGaugeMm'])
+    ck(await hasResidue(f), `«${f}» стоит строкой полосы остатков`);
   ck(vWeld.fullnessRatio === '1.4', 'посадка НЕ тронута', String(vWeld.fullnessRatio));
   const wWeld = await wire();
   ck(
-    !wWeld?.stitching?.needleCount && !wWeld?.stitching?.rowSpacingMm,
-    'и на провод игольные поля не уехали',
+    wWeld?.stitching?.needleCount === 4 && wWeld?.stitching?.rowSpacingMm?.value === '3.2',
+    'Ф4: игольные поля ЕДУТ на провод — отказывает сервер по имени, а не клиент молчанием',
     JSON.stringify(wWeld?.stitching ?? null),
   );
 
   // ПАРА «НЕТ → ЕСТЬ → НЕТ» НА ТОМ ЖЕ СМОНТИРОВАННОМ ШАГЕ.
   ck(await pick(F('machineType'), 'lockstitch 301'), 'машинка переключена на ниточную');
-  for (const f of NEEDLE) ck(await has(F(f)), `на ниточной машине контрол «${f}» ПОЯВИЛСЯ`);
+  for (const f of NEEDLE) ck(await hasCtrl(f), `на ниточной машине контрол «${f}» ПОЯВИЛСЯ`);
   ck(await pick(F('machineType'), 'ultrasonic welder'), 'машинка возвращена на ультразвук');
-  for (const f of NEEDLE) ck(!(await has(F(f))), `на сварке контрол «${f}» снова ИСЧЕЗ`);
+  for (const f of NEEDLE) ck(!(await hasCtrl(f)), `на сварке контрол «${f}» снова ИСЧЕЗ`);
+  for (const f of NEEDLE) ck(await hasResidue(f), `и «${f}» снова стоит строкой полосы`);
 
   // ОТКАЗ zod — НА КАЖДОМ ПОЛЕ ОТДЕЛЬНО: шаг, пришедший с провода мимо редактора, чинится там, где
   // стоит число, а не тостом после сохранения шести вкладок.
@@ -804,19 +828,22 @@ async function run(bundle) {
   // ── В ШОВ: ЧИСЛА НЕТ ВООБЩЕ ─────────────────────────────────────────────────────────────────
   ck(await typeInto(F('topstitchWidthMm'), '4'), 'у края снова набрано число');
   ck(await pick(F('topstitchMode'), 'in the ditch'), 'режим переключён на «in the ditch»');
-  ck(!(await has(F('topstitchWidthMm'))), 'у «in the ditch» контрола отступа НЕТ');
+  ck(!(await hasCtrl('topstitchWidthMm')), 'у «in the ditch» контрола отступа НЕТ');
+  // Ф4: смена режима больше НЕ стирает набранное — число видно строкой полосы остатков и едет на
+  // провод; «в шов» отвергают zod (см. `zod: число в шов — НЕЛЬЗЯ` ниже) и сервер, по имени.
+  ck(await hasResidue('topstitchWidthMm'), 'Ф4: число видно строкой полосы остатков');
   const vDitch = await values();
-  ck(vDitch.topstitchWidthMm === '', 'и число ОЧИЩЕНО, а не оставлено невидимым', JSON.stringify(vDitch.topstitchWidthMm));
+  ck(vDitch.topstitchWidthMm === '4', 'Ф4: число НЕ стёрто сменой режима', JSON.stringify(vDitch.topstitchWidthMm));
   const wDitch = await wire();
   ck(
-    wDitch?.topstitch?.mode === TS.DITCH && !wDitch?.topstitch?.widthMm,
-    'на провод: IN_DITCH и никакого числа',
+    wDitch?.topstitch?.mode === TS.DITCH && wDitch?.topstitch?.widthMm?.value === '4',
+    'Ф4: на провод едут ОБА — отказ по имени за сервером, не потеря за клиентом',
     JSON.stringify(wDitch?.topstitch ?? null),
   );
   const rDitch = await sheetRow();
   ck(/topstitch in the ditch/i.test(rDitch?.seam ?? ''), 'лист называет и режим БЕЗ числа', rDitch?.seam ?? '');
   ck(await pick(F('topstitchMode'), 'at the edge'), 'режим снова край');
-  ck(await has(F('topstitchWidthMm')), 'контрол отступа снова ЕСТЬ — пара «есть → нет → есть» замкнута');
+  ck(await hasCtrl('topstitchWidthMm'), 'контрол отступа снова ЕСТЬ — пара «есть → нет → есть» замкнута');
 
   // ── ТРИ ПРАВИЛА ОДНОЙ ТАБЛИЦЕЙ, мимо редактора: шаг, пришедший с провода, чинится там же ─────
   const refuses = async (op) => {
