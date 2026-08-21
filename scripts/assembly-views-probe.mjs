@@ -251,17 +251,27 @@ const tokensIn = (html) =>
 for (const frozen of ['false', 'true']) {
   const s = shots[frozen];
   ck(s.includes('✓ garment'), `frozen=${frozen}: терминал назван словом`);
-  ck(s.includes('>▣ GARMENT</span>'), `frozen=${frozen}: поглощённый узел назван словом`);
+  // СТРОКА «→ ▣ ИМЯ» ИЗ БОКСА УБРАНА. Она называла словами ровно то, что провод полотна уже
+  // рисует стрелкой, и съедала одну из четырёх строк коробки. Претензия владельца дословно:
+  // «стрелочка и джоин перед с руковами в этой ноде показывать не надо».
+  //
+  // ДВЕ ДРУГИЕ ВЕТКИ ОСТАЮТСЯ, и это не половинчатость: «✓ garment» говорит «это изделие», а
+  // «✕ break» — что сборка не сошлась, и ни ту, ни другую полотно не дублирует ничем.
+  ck(!s.includes('→ '), `frozen=${frozen}: строки «→ ▣ ИМЯ» в боксе нет вовсе`);
+  ck(
+    s.includes('· goes into ▣ GARMENT'),
+    `frozen=${frozen}: куда ушёл узел, по-прежнему сказано — в подсказке шапки`,
+  );
   ck(s.includes('✕ break'), `frozen=${frozen}: разрыв назван словом`);
 
   // ТОКЕН `▣ ИМЯ` — ССЫЛКА НА УЗЕЛ, ВЕЗДЕ И ВСЕГДА, включая выпущенную карточку: переход это
   // способ СМОТРЕТЬ, а смотреть на RELEASED разрешено (R10). Разъедься эти два снимка по числу
   // токенов — и половина навигации умирала бы ровно там, где карточку только и читают.
   const tk = tokensIn(s);
-  // ЧЕТЫРЕ — И ВОТ КАКИЕ: шапки SHELL и HOOD («→ ▣ GARMENT» у обоих) плюс подвал GARMENT
-  // («← ▣ SHELL + ▣ HOOD + 2 pieces»). У разорванного графа токенов нет вовсе — оба узла живы
-  // («✕ break»), а в их подвалах только детали; у графа хвоста нет и боксов.
-  ck(tk.length === 4, `frozen=${frozen}: четыре токена-ссылки в снимке`, JSON.stringify(tk));
+  // ДВА — И ВОТ КАКИЕ: подвал GARMENT («← ▣ SHELL + ▣ HOOD + 2 pieces»). Было четыре, пока
+  // строку состояния поглощённого узла печатали шапки SHELL и HOOD; строки не стало — не стало и
+  // её токенов. ПОДВАЛ НЕ ТРОНУТ: «из чего собран» — свой вопрос, и его ссылки остаются.
+  ck(tk.length === 2, `frozen=${frozen}: два токена-ссылки в снимке — оба из подвала`, JSON.stringify(tk));
   ck(
     tk.every((t) => t.text === `▣ ${t.to}`),
     `frozen=${frozen}: текст токена и его адресат — одно и то же имя`,
@@ -272,11 +282,11 @@ for (const frozen of ['false', 'true']) {
     `frozen=${frozen}: подсказка называет ИНЛАЙН, а не полотно — снимок снят с него`,
     JSON.stringify(tk.map((t) => t.where)),
   );
-  // Стрелка состояния и стрелка состава — РАЗНЫЕ строки бокса, и обе обязаны нести ссылку:
-  // «куда узел ушёл» и «из чего собран» — два вопроса, и оба ведут к соседям по графу.
+  // Стрелка состава ведёт токеном; стрелки состояния в боксе больше нет вовсе — вместе с ней
+  // ушёл и её токен, и это ровно то, что владелец просил убрать.
   ck(
-    s.includes('→ <span role="button"'),
-    `frozen=${frozen}: стрелка состояния ведёт токеном, а не текстом`,
+    !s.includes('→ <span role="button"'),
+    `frozen=${frozen}: токена в стрелке состояния нет — нет и самой стрелки`,
   );
   ck(
     s.includes('← <span role="button"'),
@@ -398,13 +408,15 @@ console.log('\nstepGlyph — три ветки');
   ck(stepGlyph(steps, 9) === '·', 'шага нет — «·», а не падение', stepGlyph(steps, 9));
 }
 
-console.log('\nstateWord — три ветки');
+console.log('\nstateWord — две ветки говорят, третья молчит');
 {
   ck(stateWord(blk('G', [0]), true) === '✓ garment', 'терминал');
+  // ПОГЛОЩЁННЫЙ УЗЕЛ СТРОКОЙ СОСТОЯНИЯ НЕ ГОВОРИТ НИЧЕГО. «Куда он ушёл» отвечает провод
+  // полотна, и словесный дубль занимал бы одну из четырёх строк коробки, ничего не добавляя.
   ck(
-    stateWord(blk('S', [0], { absorbedInto: 'G' }), false) === '→ ▣ G',
-    'поглощённый',
-    stateWord(blk('S', [0], { absorbedInto: 'G' }), false),
+    stateWord(blk('S', [0], { absorbedInto: 'G' }), false) === '',
+    'поглощённый молчит: провод уже сказал это стрелкой',
+    JSON.stringify(stateWord(blk('S', [0], { absorbedInto: 'G' }), false)),
   );
   ck(stateWord(blk('X', [0]), false) === '✕ break', 'разрыв');
   // Терминал СИЛЬНЕЕ поглощения: узел, съеденный кем-то и при этом единственный живой, — это
@@ -412,27 +424,254 @@ console.log('\nstateWord — три ветки');
   ck(stateWord(blk('S', [0], { absorbedInto: 'G' }), true) === '✓ garment', 'терминал бьёт поглощение');
 }
 
-console.log('\nstateParts — адресат ровно у одной ветки из трёх');
+console.log('\nstateParts — ни одного адресата: строка-дубль провода снята');
 {
-  // ГЛАВНОЕ СВОЙСТВО ТОКЕНА: он есть там и только там, где есть КУДА идти. «✓ garment» — конец
-  // пути, «✕ break» не ведёт никуда, и кликабельной СТРОКОЙ они не станут — органа в них нет.
+  // ТОКЕНА ЗДЕСЬ БОЛЬШЕ НЕТ НИ В ОДНОЙ ВЕТКЕ. Он жил ровно в той строке, которую владелец просил
+  // убрать; ссылки ПОДВАЛА («← ▣ SHELL + ▣ HOOD») это не касается — там свой вопрос.
   const to = (parts) => parts.filter((p) => p.to !== undefined).map((p) => p.to);
   ck(eq(to(stateParts(blk('G', [0]), true)), []), 'терминал адресата не имеет');
   ck(eq(to(stateParts(blk('X', [0]), false)), []), 'разрыв адресата не имеет');
   const absorbed = stateParts(blk('S', [0], { absorbedInto: 'G' }), false);
-  ck(eq(to(absorbed), ['G']), 'поглощение ведёт к съевшему узлу', JSON.stringify(absorbed));
-  ck(
-    absorbed.find((p) => p.to === 'G')?.text === '▣ G',
-    'текст токена — имя узла целиком, вместе с глифом',
-    JSON.stringify(absorbed),
-  );
-  // Разбиение обязано быть БЕЗ ПОТЕРЬ: видимая строка ровно та же, что печаталась до токенов.
+  ck(eq(absorbed, []), 'поглощение не даёт ни куска, ни адресата', JSON.stringify(absorbed));
+  // ПУСТОЙ НАБОР — ЭТО «СТРОКИ НЕТ», А НЕ «СТРОКА ПУСТАЯ»: вьюшка обязана не рисовать её вовсе,
+  // иначе в коробке остаётся пустая рамка на месте убранного. Разметку проверяет golden выше.
   for (const [b, t] of [
     [blk('G', [0]), true],
     [blk('S', [0], { absorbedInto: 'G' }), false],
     [blk('X', [0]), false],
   ]) {
-    ck(partsText(stateParts(b, t)) === stateWord(b, t), `склейка кусков = строка (${stateWord(b, t)})`);
+    ck(partsText(stateParts(b, t)) === stateWord(b, t), `склейка кусков = строка («${stateWord(b, t)}»)`);
+  }
+}
+
+console.log('\nunitHeadTarget — клик по шапке: одна операция или их список');
+{
+  const { unitHeadTarget, unitHeadOpen } = views;
+  ck(typeof unitHeadTarget === 'function', 'решение про клик по шапке вынесено функцией');
+  ck(typeof unitHeadOpen === 'function', 'обработчик клика по шапке вынесен функцией');
+  if (typeof unitHeadTarget === 'function' && typeof unitHeadOpen === 'function') {
+    // ПРАВИЛО ВЛАДЕЛЬЦА ДОСЛОВНО: «если их больше одной то показывать в нижнем баре список
+    // операций если одна то только её в нашем случае 60».
+    ck(
+      eq(unitHeadTarget(blk('SLEEVES', [5])), { kind: 'step', index: 5 }),
+      'одна операция — открывается ОНА САМА, а не список из одного пункта',
+      JSON.stringify(unitHeadTarget(blk('SLEEVES', [5]))),
+    );
+    ck(
+      eq(unitHeadTarget(blk('GARMENT', [2, 3])), { kind: 'unit' }),
+      'две и больше — список операций узла',
+      JSON.stringify(unitHeadTarget(blk('GARMENT', [2, 3]))),
+    );
+    ck(
+      eq(unitHeadTarget(blk('T', [])), { kind: 'unit' }),
+      'узел без шагов ведёт в список — в шаг вести некуда',
+      JSON.stringify(unitHeadTarget(blk('T', []))),
+    );
+
+    // ОБЕ ПОВЕРХНОСТИ ХОДЯТ ОДНОЙ ДОРОГОЙ, и разница между ними ровно одна: у инлайна дока нет.
+    const trace = () => {
+      const log = [];
+      return {
+        log,
+        pick: (i) => log.push(`step:${i}`),
+        open: (k) => log.push(`unit:${k}`),
+      };
+    };
+    {
+      const t = trace();
+      unitHeadOpen(blk('SLEEVES', [5]), t.pick, t.open)();
+      ck(eq(t.log, ['step:5']), 'полотно, одна операция → шаг', JSON.stringify(t.log));
+    }
+    {
+      const t = trace();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.pick, t.open)();
+      ck(eq(t.log, ['unit:GARMENT']), 'полотно, две операции → режим узла', JSON.stringify(t.log));
+    }
+    {
+      const t = trace();
+      unitHeadOpen(blk('SLEEVES', [5]), t.pick, undefined)();
+      ck(eq(t.log, ['step:5']), 'инлайн, одна операция → тот же шаг', JSON.stringify(t.log));
+    }
+    {
+      // У ИНЛАЙНА ДОКА НЕТ ВОВСЕ, и списку узла там негде открыться. Мёртвая шапка была бы хуже:
+      // орган, который на одном экране работает, а на другом молчит, — ровно то, на что владелец
+      // и жалуется. Поэтому там открывается ПЕРВАЯ операция узла: это всё ещё операция ЭТОГО
+      // узла, а не выделение и не чужой шаг.
+      const t = trace();
+      unitHeadOpen(blk('GARMENT', [2, 3]), t.pick, undefined)();
+      ck(eq(t.log, ['step:2']), 'инлайн, две операции → первая операция узла', JSON.stringify(t.log));
+    }
+    {
+      const t = trace();
+      unitHeadOpen(blk('T', []), t.pick, undefined)();
+      ck(eq(t.log, []), 'инлайн, узел без шагов → ничего, а не падение', JSON.stringify(t.log));
+    }
+  }
+}
+
+console.log('\nшапка узла на обеих поверхностях — один обработчик, а не выделение');
+{
+  const src = (rel) => readFileSync(resolve(root, rel), 'utf8');
+  const surfaces = [
+    ['assembly-canvas.tsx', 'src/components/managers/tech-card/components/assembly-canvas.tsx'],
+    ['assembly-schematic.tsx', 'src/components/managers/tech-card/components/assembly-schematic.tsx'],
+  ];
+  // ОБРАБОТЧИКОВ В СТАТИЧЕСКОЙ РАЗМЕТКЕ НЕТ ВОВСЕ — golden к ним слеп по построению, и слепоту
+  // эту закрывает чтение исходника: клик по шапке обязан идти через общий `unitHeadOpen` на
+  // ОБЕИХ поверхностях, а `toggle` в шапке означал бы возврат выделения.
+  for (const [name, rel] of surfaces) {
+    const t = src(rel);
+    ck(
+      /headProps=\{activate\(clickGuard\(unitHeadOpen\(/.test(t),
+      `${name}: шапка ведёт общим unitHeadOpen`,
+    );
+    ck(!/headProps=\{activate\(clickGuard\(\(\) => toggle\(/.test(t), `${name}: шапка больше не выделяет`);
+  }
+  // ЧИП `steps · N` СНЯТ: он делал ровно то, что теперь делает клик по шапке, и два органа с
+  // одним смыслом — это и есть перегруз, на который владелец жалуется. Клавиша `e` остаётся:
+  // клавиатурный путь не орган и места на экране не занимает.
+  const nv = src('src/components/managers/tech-card/components/assembly-node-views.tsx');
+  ck(!/steps · \{/.test(nv), 'assembly-node-views.tsx: чипа «steps · N» в ховер-полосе больше нет');
+}
+
+console.log('\npieceAddPrefill — обработка детали идёт ЗА ближайшим блоком, а не в конец листа');
+{
+  const { pieceAddPrefill } = views;
+  const buildCase = mod.engine?.buildCase;
+  const assemblyLayout = mod.engine?.assemblyLayout;
+  ck(typeof pieceAddPrefill === 'function', 'позиция шага на плитке вынесена функцией');
+  ck(typeof buildCase === 'function' && typeof assemblyLayout === 'function', 'энтри отдаёт конвейер и раскладку');
+  if (typeof pieceAddPrefill === 'function' && typeof buildCase === 'function' && assemblyLayout) {
+    /**
+     * КАРТОЧКА ВЛАДЕЛЬЦА: девять шагов (10…90), свободная деталь FL. Узел ▣ OUTER собирается
+     * шагами 10 и 20 — «до того как соединить аутер и фл было 10 и 20, значит всё что с фл это
+     * после 20».
+     */
+    const PIECES = [
+      { lineKey: 'FL', name: 'free piece' },
+      ...'ABCDEFGHIJ'.split('').map((k) => ({ lineKey: k, name: k.toLowerCase() })),
+    ];
+    const STEPS = [
+      { in: ['A', 'B'], out: 'OUTER', name: 'outer' }, //      10  блок OUTER
+      { in: ['OUTER', 'C'], out: 'OUTER' }, //                 20  блок OUTER
+      { in: ['D', 'E'], out: 'SLEEVE', name: 'sleeve' }, //    30
+      { in: ['SLEEVE', 'F'], out: 'SLEEVE' }, //               40
+      { in: ['G', 'H'], out: 'HOOD', name: 'hood' }, //        50
+      { in: ['HOOD', 'I'], out: 'HOOD' }, //                   60
+      { in: ['OUTER', 'SLEEVE'], out: 'BODY', name: 'body' }, //70
+      { in: ['BODY', 'HOOD'], out: 'GARMENT', name: 'garment' }, // 80
+      { in: ['GARMENT', 'J'], out: 'GARMENT' }, //             90
+    ];
+    const c = buildCase(PIECES, STEPS);
+    ck(c.steps.length === 9, 'фикстура — девять шагов, номера 10…90', String(c.steps.length));
+    const outer = c.blocks.find((b) => b.key === 'OUTER');
+    ck(
+      JSON.stringify(outer?.steps) === JSON.stringify([0, 1]),
+      'блок OUTER — шаги 10 и 20',
+      JSON.stringify(outer?.steps),
+    );
+
+    /**
+     * ПЛИТКА СТАВИТСЯ РЯДОМ С ЗАДАННЫМ БОКСОМ — ровно то, что делает рука человека, двигая ноду.
+     * Раскладка настоящая (`assemblyLayout`), подменяется одна координата: правило считает
+     * расстояние по ней, и проверять его надо на ней же.
+     */
+    const nextTo = (layout, pieceKey, unitKey) => {
+      const box = layout.byKey.get(unitKey);
+      const tiles = layout.tiles.map((t) =>
+        t.key === pieceKey ? { ...t, x: box.x + box.w + 8, y: box.y } : t,
+      );
+      return { ...layout, tiles };
+    };
+
+    const base = assemblyLayout(c.blocks, c.steps, c.res);
+    const nearOuter = pieceAddPrefill('FL', c.steps, c.res, c.blocks, nextTo(base, 'FL', 'OUTER'));
+    ck(
+      nearOuter?.at === 2,
+      'FL рядом с ▣ OUTER → позиция 2, то есть НОМЕР 30 (было 100)',
+      JSON.stringify(nearOuter),
+    );
+    ck(
+      nearOuter && (nearOuter.at + 1) * 10 === 30,
+      'диалог напечатает «position: step 30» тем же экранным номером',
+      nearOuter ? String((nearOuter.at + 1) * 10) : 'нет вставки',
+    );
+    // ПЕРЕЕЗД НОМЕРОВ — ШТАТНОЕ СЛЕДСТВИЕ, и о нём предупреждает баннер `StepNumberDrift` той же
+    // формулой (position+1)*10. Здесь считается ровно то, что он перечислит.
+    const moved = c.steps
+      .map((_, i) => ({ from: (i + 1) * 10, to: (i < 2 ? i + 1 : i + 2) * 10 }))
+      .filter((m) => m.from !== m.to);
+    ck(
+      moved.length === 7 && moved[0].from === 30 && moved[0].to === 40 && moved[6].to === 100,
+      'переезжают семь номеров: 30…90 → 40…100, шаги 10 и 20 стоят',
+      moved.map((m) => `${m.from}→${m.to}`).join(', '),
+    );
+
+    // ДОГАДКА СЛЕДУЕТ ЗА РАСКЛАДКОЙ, А НЕ ЗА ПОРЯДКОМ ШАГОВ. Та же карточка, та же деталь — но
+    // плитка стоит у ▣ HOOD: позиция обязана уехать за последний шаг HOOD (60 → номер 70).
+    const nearHood = pieceAddPrefill('FL', c.steps, c.res, c.blocks, nextTo(base, 'FL', 'HOOD'));
+    ck(
+      nearHood?.at === 6,
+      'та же FL у ▣ HOOD → позиция 6, номер 70: считается ближайший БЛОК, а не порядок',
+      JSON.stringify(nearHood),
+    );
+
+    // ГРАНИЦА 1: сборки нет вовсе. Ближайшего блока не существует, «до сборки» не значит ничего,
+    // и конец листа правилен — единственный случай, где он правилен.
+    const bare = buildCase([{ lineKey: 'FL', name: 'free' }, { lineKey: 'A', name: 'a' }], [
+      { in: ['FL', 'A'] },
+      { in: ['A'] },
+    ]);
+    const bareLayout = assemblyLayout(bare.blocks, bare.steps, bare.res);
+    ck(bareLayout.boxes.length === 0, 'фикстура границы 1 действительно без единого блока');
+    const bareAt = pieceAddPrefill('FL', bare.steps, bare.res, bare.blocks, bareLayout);
+    ck(bareAt?.at === bare.steps.length, 'блоков нет → конец листа', JSON.stringify(bareAt));
+
+    // ГРАНИЦА 2: у детали УЖЕ есть свои обработки — новая не смеет прыгнуть перед ними. Обработка
+    // FL стоит шагом 70 (индекс 6), а ближайший блок OUTER кончается на индексе 1: побеждает пол
+    // собственных обработок.
+    const withOwn = buildCase(PIECES, [...STEPS.slice(0, 6), { in: ['FL'] }, ...STEPS.slice(6)]);
+    const ownLayout = assemblyLayout(withOwn.blocks, withOwn.steps, withOwn.res);
+    const ownAt = pieceAddPrefill('FL', withOwn.steps, withOwn.res, withOwn.blocks, nextTo(ownLayout, 'FL', 'OUTER'));
+    ck(
+      ownAt?.at === 7,
+      'своя обработка на индексе 6 → позиция 7, а не 2: новая строка не прыгает перед старой',
+      JSON.stringify(ownAt),
+    );
+
+    // ГРАНИЦА 3: законность считает движок, а не правило. Для СВОБОДНОЙ детали она держится
+    // всегда (со стола её никто не снимал), и это не рассуждение, а замер: проверяется каждая
+    // деталь каждой фикстуры.
+    let checked = 0;
+    let illegal = 0;
+    for (const cs of [c, withOwn, bare]) {
+      const lay = assemblyLayout(cs.blocks, cs.steps, cs.res);
+      for (const t of lay.tiles) {
+        const pf = pieceAddPrefill(t.key, cs.steps, cs.res, cs.blocks, lay);
+        if (!pf) continue;
+        checked += 1;
+        const frontier = cs.res.frontierBefore[pf.at] ?? cs.res.frontier;
+        if (!frontier.includes(t.key)) illegal += 1;
+      }
+    }
+    ck(illegal === 0, `все выведенные позиции законны по фронтиру (проверено ${checked})`, String(illegal));
+
+    // НЕГАТИВНЫЙ: у СЪЕДЕННОЙ детали правило прежнее — прямо перед тем, кто её съел.
+    const eatenAt = pieceAddPrefill('A', c.steps, c.res, c.blocks, base);
+    ck(
+      eatenAt?.at === c.res.consumedBy.get('A') && eatenAt?.at === 0,
+      'съеденная деталь → перед поедателем, ровно как было',
+      JSON.stringify(eatenAt),
+    );
+    const eatenLate = pieceAddPrefill('J', c.steps, c.res, c.blocks, base);
+    ck(
+      eatenLate?.at === c.res.consumedBy.get('J') && eatenLate?.at === 8,
+      'съеденная поздно — перед своим поедателем, а не за ближайшим блоком',
+      JSON.stringify(eatenLate),
+    );
+
+    // ДЕТАЛИ НЕТ НА СТОЛЕ — вставки нет вовсе; щит остаётся на месте.
+    ck(pieceAddPrefill('NOPE', c.steps, c.res, c.blocks, base) === null, 'детали нет на столе — вставки нет');
   }
 }
 

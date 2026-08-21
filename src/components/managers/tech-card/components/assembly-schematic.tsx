@@ -16,6 +16,7 @@ import {
   TailBoxView,
   TileView,
   unitAddPrefill,
+  unitHeadOpen,
   UnitBoxView,
   WireLayer,
 } from './assembly-node-views';
@@ -765,21 +766,17 @@ export function AssemblySchematic({
                 // то, почему это div, а `clickGuard` — про клик-эхо после драга; и то и другое —
                 // механика ОДНОГО полотна, живущая в одном экземпляре. Вьюшка получает готовые
                 // пропы и раскладывает их.
-                // ШАПКА ВЫДЕЛЯЕТ ВСЕГДА — и съеденный узел, и на выпущенной карточке. Раньше
-                // здесь стояла развилка `!frozen && onTable ? выделить : уйти к съевшему шагу`:
-                // один орган значил две противоположные вещи по невидимому на глаз состоянию.
-                // Вопрос «куда узел делся» никуда не делся — на него отвечает ТОКЕН в стрелке,
-                // и отвечает адресно.
-                headProps={activate(clickGuard(() => toggle(box.key)))}
+                // ШАПКА ПОКАЗЫВАЕТ ОПЕРАЦИИ ЭТОГО УЗЛА — тем же `unitHeadOpen`, что на полотне.
+                // ТРЕТЬЕГО АРГУМЕНТА ЗДЕСЬ НЕТ, и это единственная разница между поверхностями:
+                // дока у инлайна нет вовсе, показывать список узла негде, и клик открывает
+                // ПЕРВУЮ операцию узла — всё ещё операцию этого узла, а не выделение.
+                headProps={activate(clickGuard(unitHeadOpen(b, onPickStep)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 // СЛОВА ПОВЕРХНОСТИ. В инлайне полотна нет вовсе — есть прокручиваемая коробка,
                 // и `revealDelta` здесь двигает прокрутку, а не трансформ; обещать «on the
                 // canvas» значило бы назвать место, которого человек на этом экране не найдёт.
                 surfaceWords='in the schematic'
-                // ПРОПА `onOpenUnit` ЗДЕСЬ НЕТ, и потому нет чипа `steps · N`: вторая роль дока
-                // живёт в фулскрине, а у инлайна дока нет вовсе. Вести чипу некуда — значит его
-                // не рисуют; то же правило, по которому на выпущенной карточке нет точек вставки.
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
                 onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
               />
@@ -816,7 +813,9 @@ export function AssemblySchematic({
               кнопки на div, а не сама <button>: см. `activate` — внешний `<fieldset disabled>`
               карточки убил бы и клик, и перетаскивание. */}
           {layout.tiles.map((t) => {
-            const addPrefill = pieceAddPrefill(t.key, steps, res);
+            // ПОЗИЦИЯ ШАГА НА ПЛИТКЕ — по раскладке, «сразу за ближайшим блоком»; раскладка та
+            // же эффективная, что рисует ноды, вместе с ручными позициями.
+            const addPrefill = pieceAddPrefill(t.key, steps, res, blocks, layout);
             return (
               <TileView
                 key={`tile:${t.key}`}
