@@ -13,8 +13,7 @@ import {
   attachmentOptions,
   operationHeading,
   seamClassOptions,
-  topstitchDistanceText,
-  topstitchModeHasWidth,
+  topstitchPhrase,
 } from './operation-options';
 
 // ---------------------------------------------------------------------------
@@ -81,16 +80,17 @@ function specLine(o: FormOperation, pieceNames: string[]): string {
     // surface said st/cm — two different quantities under one number.
     o.stitchesPerCm?.trim() ? `${o.stitchesPerCm.trim()} st/cm` : '',
     o.seamAllowanceMm?.trim() ? `SA ${o.seamAllowanceMm.trim()} mm` : '',
-    // The millimetres are shown for the modes that HAVE a width (TOPSTITCH_MODE_HAS_WIDTH), not for
-    // the one member that happens to be the only such mode today — AND THEY ARRIVE WITH THE LINE
-    // THEY ARE MEASURED FROM, by the same composer that captions the input and prints the sheet.
-    // «topstitch 6 mm» said the quantity and hid the datum, and the datum is not the same for the
-    // two numbered modes: the edge of the piece under `width`, the seam line under `parallel`.
-    o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_EDGE'
-      ? 'topstitch edge'
-      : topstitchModeHasWidth(o.topstitchMode) && o.topstitchWidthMm?.trim()
-        ? `topstitch ${topstitchDistanceText(o.topstitchMode, o.topstitchWidthMm)}`
-        : '',
+    // ОДИН СОСТАВИТЕЛЬ ФРАЗЫ НА СХЕМУ И НА ЛИСТ (topstitchPhrase), поэтому бумага и карта сборки
+    // не могут сказать про один шаг разное. Миллиметры приезжают С ЛИНИЕЙ, от которой их меряют:
+    // «topstitch 6 mm» называла величину и прятала отсчёт, а отсчёт у двух числовых режимов разный
+    // — край детали у «at the edge», линия шва у «parallel».
+    //
+    // И РЕЖИМ БЕЗ ЧИСЛА ТЕПЕРЬ ТОЖЕ НАЗЫВАЕТСЯ: «in the ditch» — инструкция целиком, а схема о ней
+    // прежде молчала вовсе (условие требовало заполненных миллиметров), так что шаг с отстрочкой в
+    // шов выглядел на карте шагом без отстрочки.
+    topstitchPhrase(o.topstitchMode, o.topstitchWidthMm)
+      ? `topstitch ${topstitchPhrase(o.topstitchMode, o.topstitchWidthMm)}`
+      : '',
     label(attachmentOptions, o.attachmentKind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
   ]
     .filter(Boolean)

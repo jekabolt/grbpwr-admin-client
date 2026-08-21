@@ -69,9 +69,10 @@ import {
   seamSecuringLabel,
   stepEnumOptions,
   stitchLengthMm,
-  topstitchModeHasNoWidth,
-  topstitchModeHasWidth,
+  topstitchBlankMeans,
   topstitchModeOptionsFor,
+  topstitchModeRefusesWidth,
+  topstitchModeTakesWidth,
   topstitchWidthLabel,
   zoneOptions,
 } from './operation-options';
@@ -2375,13 +2376,17 @@ function OperationEditor({
   // form, hides the input that holds it, and blocks the save demanding the operator clear a field
   // that is not on screen.
   //
-  // CLEARING NEEDS THE MODE TO SAY SO, not merely to differ from WIDTH. `topstitchModeHasNoWidth`
-  // answers `false` for a token this bundle does not know, so a step saved by a newer client keeps
-  // its width and its row count instead of losing both to the effect that runs on OPEN — see the
-  // argument at TOPSTITCH_MODE_HAS_WIDTH. The write below is the destructive half of that rule and
-  // is the reason it is stated positively.
+  // CLEARING NEEDS THE MODE TO SAY SO, not merely to differ from the numbered ones.
+  // `topstitchModeRefusesWidth` answers `false` for a token this bundle does not know, so a step
+  // saved by a newer client keeps its width and its row count instead of losing both to the effect
+  // that runs on OPEN — see the argument at TOPSTITCH_MODES. The write below is the destructive
+  // half of that rule and is the reason it is stated positively.
+  //
+  // «AT THE EDGE» IS NO LONGER ONE OF THE CLEARED MODES: its distance is OPTIONAL now — filled it
+  // is an inset from the edge, blank it means flush — so wiping it on the way in would delete the
+  // very number the wave exists to let the technologist type.
   useEffect(() => {
-    if (topstitchModeHasNoWidth(topstitchMode)) {
+    if (topstitchModeRefusesWidth(topstitchMode)) {
       if ((getValues(`operations.${index}.topstitchWidthMm`) ?? '') !== '') {
         setValue(`operations.${index}.topstitchWidthMm`, '', { shouldDirty: true });
       }
@@ -3485,26 +3490,41 @@ function OperationEditor({
           items={topstitchModeOptionsFor(topstitchMode)}
           className={selectNoGrow}
         />
-        {/* The width belongs to the modes that HAVE one and nowhere else — beside «edge» it is
-            a shadow value the server refuses anyway, so the control simply is not there. The
-            list is TOPSTITCH_MODE_HAS_WIDTH; a mode this bundle cannot classify shows no
-            input, which is the harmless half of that trade (the value keeps travelling). */}
-        {topstitchModeHasWidth(topstitchMode) && (
+        {/* Поле отступа стоит у режимов, которые число ПРИНИМАЮТ, и больше нигде: «in the ditch»
+            меряет расстояние ноль по определению, и сервер число там отвергает по имени. У «at the
+            edge» оно теперь есть и НЕОБЯЗАТЕЛЬНО — пустое значит «вплотную», — и это ровно то, чего
+            в списке не хватало: пункт «at width from the edge» был этим же приёмом с числом.
+            Классификация — в TOPSTITCH_MODES; режим, который бандл классифицировать не может, поля
+            не показывает — безобидная половина сделки (значение при этом продолжает ездить). */}
+        {topstitchModeTakesWidth(topstitchMode) && (
           <>
             {/* ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, ОТ КОТОРОЙ МЕРЯЮТ, И МЕНЯЕТСЯ ВМЕСТЕ С РЕЖИМОМ. Владелец —
                 практикующий технолог — спросил «у нас есть row spacing, но нет отступа от края»,
                 глядя ровно на это поле: подпись «topstitch width, mm» называла величину и молчала
                 о том, от чего она отсчитывается. Молчать здесь нельзя вдвойне — одно и то же поле
-                при `width` меряется ОТ КРАЯ ДЕТАЛИ, а при `parallel — offset from the seam` ОТ
-                ЛИНИИ ШВА, и на настрочном или запошивочном шве это разные линии. Слова берутся из
-                TOPSTITCH_WIDTH_DATUM, откуда их берёт и печатный лист: второй копии не заводится,
-                иначе технолог наберёт число под одной линией, а швея прочитает другую. */}
-            <DecimalField
-              name={`operations.${index}.topstitchWidthMm`}
-              label={topstitchWidthLabel(topstitchMode)}
-              maxDecimals={1}
-              placeholder='6'
-            />
+                при `at the edge` меряется ОТ КРАЯ ДЕТАЛИ, а при `parallel to the seam` ОТ ЛИНИИ
+                ШВА, и на настрочном или запошивочном шве это разные линии. Слова берутся из
+                TOPSTITCH_MODES, откуда их берёт и печатный лист: второй копии не заводится, иначе
+                технолог наберёт число под одной линией, а швея прочитает другую. */}
+            <div className='flex flex-col gap-0.5'>
+              <DecimalField
+                name={`operations.${index}.topstitchWidthMm`}
+                label={topstitchWidthLabel(topstitchMode)}
+                maxDecimals={1}
+                placeholder='6'
+              />
+              {/* ПУСТОЕ ПОЛЕ ЗДЕСЬ — ОТВЕТ, А НЕ ПРОПУСК, и сказать это обязано оно само. Пока «по
+                  краю» и «на столько-то от края» были ДВУМЯ пунктами списка, пустоте нечего было
+                  значить, и её никто не оставлял; теперь пункт один, и незаполненное числовое поле
+                  само по себе читается как «забыли», а не как «вплотную». Слова — из той же карты,
+                  что подпись выше: линию они называют одну. Строка снимается, как только число
+                  набрано, — при заполненном поле она сообщала бы про состояние, которого нет. */}
+              {topstitchWidthMm.trim() === '' && topstitchBlankMeans(topstitchMode) && (
+                <Text size='micro' variant='label'>
+                  {topstitchBlankMeans(topstitchMode)}
+                </Text>
+              )}
+            </div>
             {/* РЯДЫ ЧЕГО. Голое «rows» — счётчик без предмета, а предмет тут спорный: рядами в
                 этой же карточке зовутся и строчки отстрочки (здесь), и соседние строчки, между
                 которыми меряется «spacing between stitch rows» в игольном блоке ниже. Это те же

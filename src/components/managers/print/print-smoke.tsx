@@ -186,8 +186,10 @@ const techCard = {
         threadTension: 'TECH_CARD_THREAD_TENSION_TIGHTER',
         attachmentKind: 'TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE',
         attachmentSizeMm: dec('6'),
-        // Ширина ОТСТРОЧКИ — расстояние от края, не амплитуда стежка: подписи обязаны их развести.
-        topstitch: { mode: 'TECH_CARD_TOPSTITCH_MODE_WIDTH', widthMm: dec('6'), rows: 2 },
+        // Отступ ОТСТРОЧКИ — расстояние от края, не амплитуда стежка: подписи обязаны их развести.
+        // Режим — «at the edge» С ЧИСЛОМ: снятый `WIDTH` стоял здесь ровно за этот случай, и после
+        // сведения списка к трём пунктам его выражает край с заполненным отступом.
+        topstitch: { mode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', widthMm: dec('6'), rows: 2 },
         smv: dec('2.1'),
       },
       {

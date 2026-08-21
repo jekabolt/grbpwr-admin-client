@@ -168,8 +168,7 @@ import {
   stepPressText,
   stepSeamFactTexts,
   stepToolFactParts,
-  topstitchDistanceText,
-  topstitchModeHasWidth,
+  topstitchPhrase,
   zoneOptions,
   type EffectiveSetting,
   type StepFacts,
@@ -427,19 +426,22 @@ const allowanceText = (d?: googletype_Decimal): string => {
 const topstitchText = (t?: common_TechCardTopstitch): string => {
   if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
   const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
-  if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
   // WHICH LINE, SAID BY THE MODE — and by the same map that captions the input the number was typed
-  // into (TOPSTITCH_WIDTH_DATUM). This sheet used to print «from edge» for BOTH numbered modes, so
-  // a `parallel_to_seam` step told the operator to set the guide bar against the finished edge when
+  // into (TOPSTITCH_MODES). This sheet used to print «from edge» for BOTH numbered modes, so a
+  // `parallel_to_seam` step told the operator to set the guide bar against the finished edge when
   // the distance was measured from the seam line — on a lapped or felled seam, a different line and
   // a wrong garment.
   //
-  // AN UNCLASSIFIED MODE (one newer than this bundle) has no datum, so topstitchDistanceText returns
-  // nothing and the sheet says «topstitch» and no more — incomplete, which the floor can see,
-  // instead of a distance measured from a reference the mode never named, which the floor cannot.
-  // Nothing is lost by the omission: print reads the wire and never writes it.
-  const w = topstitchModeHasWidth(t.mode) ? topstitchDistanceText(t.mode, dec(t.widthMm)) : '';
-  return `topstitch ${rows}${w}`.trim();
+  // NO SPECIAL CASE FOR «AT THE EDGE» ANY MORE, and that removal is the wave: the sheet used to
+  // return «topstitch edge» before it ever looked at the number, because that mode could not have
+  // one. It can now — blank means flush, filled means an inset from the edge — and the one composer
+  // says both («at the edge» / «6 mm from the edge») from the same map the picker reads.
+  //
+  // AN UNCLASSIFIED MODE (one newer than this bundle, or the retired member) has no entry, so the
+  // phrase comes back empty and the sheet says «topstitch» and no more — incomplete, which the
+  // floor can see, instead of a distance measured from a reference the mode never named, which the
+  // floor cannot. Nothing is lost by the omission: print reads the wire and never writes it.
+  return `topstitch ${rows}${topstitchPhrase(t.mode, dec(t.widthMm))}`.trim();
 };
 // A setting and the one bit that says where it came from: the marker means «the step's own value»,
 // and anything unmarked is inherited off the card's equipment park and printed all the same — see

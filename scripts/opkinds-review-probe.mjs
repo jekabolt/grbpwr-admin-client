@@ -90,8 +90,8 @@ const MUTATIONS = {
   6: {
     what: 'находка 5: оба режима снова меряют «от края» — датум один на два разных отсчёта',
     file: /operation-options\.ts$/,
-    from: "  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: 'the seam line',",
-    to: "  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: 'the edge',",
+    from: "    datum: 'the seam line',",
+    to: "    datum: 'the edge',",
   },
   7: {
     what: 'находка 5: подпись отступа снова константа и не зависит от режима',
@@ -102,8 +102,8 @@ const MUTATIONS = {
   8: {
     what: 'находка 5: лист снова печатает «from edge» при любом режиме',
     file: /tech-pack-document\.tsx$/,
-    from: "  const w = topstitchModeHasWidth(t.mode) ? topstitchDistanceText(t.mode, dec(t.widthMm)) : '';",
-    to: "  const w = topstitchModeHasWidth(t.mode) ? dec(t.widthMm) + ' mm from edge' : '';",
+    from: '  return `topstitch ${rows}${topstitchPhrase(t.mode, dec(t.widthMm))}`.trim();',
+    to: "  return `topstitch ${rows}${dec(t.widthMm) ? dec(t.widthMm) + ' mm from edge' : ''}`.trim();",
   },
   9: {
     what: 'находка 5: соседи снова не говорят, между чем меряют (калибр и шаг рядов)',
@@ -116,6 +116,41 @@ const MUTATIONS = {
     file: /operation-options\.ts$/,
     from: "    mm(s?.rowSpacingMm) ? `stitch rows ${mm(s?.rowSpacingMm)} apart` : '',",
     to: "    mm(s?.rowSpacingMm) ? `rows ${mm(s?.rowSpacingMm)} apart` : '',",
+  },
+  // ── СВЕДЕНИЕ СПИСКА К ТРЁМ: ОДИН ПРИЁМ, ЧИСЛО НЕОБЯЗАТЕЛЬНО ─────────────────────────────────
+  // Шестая находка — тоже от владельца и тем же вопросом: чем «at the edge» отличается от «at
+  // width from the edge», если это тот же приём без числа. Ничем; `WIDTH` снят из контракта, а
+  // отступ переехал к `EDGE` необязательным. Каждая половина ломается отдельно: то, что список
+  // короткий, ничего не говорит о том, что число у края доезжает до провода, и наоборот.
+  11: {
+    what: 'находка 6: снятый режим снова предлагается в списке',
+    file: /operation-options\.ts$/,
+    from: '  TECH_CARD_TOPSTITCH_MODE_WIDTH: null,',
+    to: "  TECH_CARD_TOPSTITCH_MODE_WIDTH: { label: 'at width from the edge', need: 'optional', datum: 'the edge' },",
+  },
+  12: {
+    what: 'находка 6: zod снова требует число у края — форма спорит с сервером',
+    file: /operation-options\.ts$/,
+    from: "  topstitchSpec(mode)?.need === 'required';",
+    to: "  topstitchSpec(mode)?.need !== 'none';",
+  },
+  13: {
+    what: 'находка 6: у края снова нет отступа — контрол прячется, а число стирается',
+    file: /operation-options\.ts$/,
+    from: "  TECH_CARD_TOPSTITCH_MODE_EDGE: { label: 'at the edge', need: 'optional', datum: 'the edge' },",
+    to: "  TECH_CARD_TOPSTITCH_MODE_EDGE: { label: 'at the edge', need: 'none' },",
+  },
+  14: {
+    what: 'находка 6: маппер снова роняет отступ края по дороге на провод',
+    file: /schema\.ts$/,
+    from: '                widthMm: topstitchModeRefusesWidth(topstitchMode)',
+    to: '                widthMm: !topstitchModeNeedsWidth(topstitchMode)',
+  },
+  15: {
+    what: 'находка 6: лист и схема снова молчат про режим без числа («in the ditch»)',
+    file: /operation-options\.ts$/,
+    from: '  return topstitchDistanceText(mode, widthMm) || spec.label;',
+    to: '  return topstitchDistanceText(mode, widthMm);',
   },
 };
 
@@ -556,58 +591,202 @@ async function run(bundle) {
     issues.find((i) => /welding/i.test(i.message))?.message ?? '—',
   );
 
-  // ── 5. ОТСТУП ОТСТРОЧКИ: ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, И ТА ЖЕ ЛИНИЯ ПЕЧАТАЕТСЯ ─────────────────────
-  // Владелец-технолог смотрел прямо на это поле («topstitch width, mm») и спросил, где отступ от
-  // края. Одно и то же поле при `width` меряется ОТ КРАЯ ДЕТАЛИ, при `parallel` — ОТ ЛИНИИ ШВА,
-  // а подпись была одна на оба случая и не называла ни того, ни другого.
-  head('5. отступ отстрочки: подпись зависит от режима, и лист называет ту же линию');
-  await mount({ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE });
-  // ПАРА «НЕТ → ЕСТЬ»: без режима контрола нет ПО ПРАВИЛУ, а не потому, что экран не отрисовался.
+  // ── 5. ОТСТРОЧКА: ТРИ ПРИЁМА, ЧИСЛО У КРАЯ НЕОБЯЗАТЕЛЬНО, ЛИНИЮ НАЗЫВАЮТ ВСЕ ────────────────
+  // Владелец-технолог прочитал список и спросил, чем «at the edge» отличается от «at width from the
+  // edge», если «по краю» — тот же приём, просто без числа. Ничем: это была одна клетка сетки,
+  // записанная дважды. `WIDTH` снят из контракта, у `EDGE` отступ стал НЕОБЯЗАТЕЛЬНЫМ (пусто —
+  // вплотную, заполнено — столько-то мм от края), у `PARALLEL_TO_SEAM` — обязательным и от ЛИНИИ
+  // ШВА, у `IN_DITCH` его нет вовсе. Проба ниже держит каждое из этих четырёх утверждений
+  // отдельно: короткий список ничего не говорит о том, что число у края доезжает до провода.
+  head('5. отстрочка: три приёма, отступ у края необязателен, линия названа везде одинаково');
+  const TS = {
+    EDGE: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+    DITCH: 'TECH_CARD_TOPSTITCH_MODE_IN_DITCH',
+    PARALLEL: 'TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM',
+    RETIRED: 'TECH_CARD_TOPSTITCH_MODE_WIDTH',
+    UNSET: 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN',
+  };
+  const STEP = { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE };
+  const roundTrip = (op) => page.evaluate((o) => window.__review.roundTrip(o), op);
+  // Подсказка про пустое поле живёт РЯДОМ с контролом, а не внутри него: ищется по своим словам.
+  const hintShown = async () =>
+    (await page.locator('#root').getByText('leave empty and the stitch runs flush').count()) > 0;
+
+  await mount(STEP);
   ck(await has(F('topstitchMode')), 'блок отстрочки смонтирован — пикер режима на экране');
   ck(!(await has(F('topstitchWidthMm'))), 'без режима контрола отступа НЕТ');
 
-  ck(await pick(F('topstitchMode'), 'at width from the edge'), 'режим — «at width from the edge»');
-  ck(await has(F('topstitchWidthMm')), 'контрол отступа ПОЯВИЛСЯ');
+  // СПИСОК — РОВНО ТРИ ПРИЁМА ПЛЮС «нет». Снятый режим не предлагается: ни как пункт, ни как слово.
+  const modes = await optionsOf(F('topstitchMode'));
+  ck(
+    JSON.stringify(modes) ===
+      JSON.stringify(['— none —', 'at the edge', 'in the ditch', 'parallel to the seam']),
+    'в списке РОВНО три приёма и «нет» — не четыре приёма',
+    JSON.stringify(modes),
+  );
+  ck(
+    !(modes ?? []).some((s) => /width/i.test(s)),
+    'снятого «at width from the edge» в списке НЕТ',
+    JSON.stringify(modes),
+  );
+
+  // ── КРАЙ БЕЗ ЧИСЛА: контрол ЕСТЬ, пустым он законен, и это сказано словами ────────────────────
+  ck(await pick(F('topstitchMode'), 'at the edge'), 'режим — «at the edge»');
+  ck(
+    await has(F('topstitchWidthMm')),
+    'у КРАЯ контрол отступа ЕСТЬ — прежде он здесь прятался, и ради него держали второй пункт',
+  );
   const lblEdge = await labelOf(F('topstitchWidthMm'));
   ck(/from the edge/i.test(lblEdge), 'подпись называет КРАЙ', lblEdge);
   ck(!/^topstitch width, mm$/i.test(lblEdge), 'и это уже не безымянная «topstitch width, mm»', lblEdge);
-  ck(await typeInto(F('topstitchWidthMm'), '6'), 'отступ набран числом в живой контрол');
+  ck(await hintShown(), 'сказано, что значит ПУСТОЕ поле — иначе оно читается как «забыли»');
 
-  const rEdge = await sheetRow();
-  ck(/6 mm from the edge/i.test(rEdge?.seam ?? ''), 'лист: «6 mm from the edge»', rEdge?.seam ?? '');
-
+  await page.evaluate(() => window.__review.trigger());
+  await page.waitForTimeout(150);
   ck(
-    await pick(F('topstitchMode'), 'parallel — offset from the seam'),
-    'режим переключён на «parallel — offset from the seam»',
+    (await messageIn(F('topstitchWidthMm'))) === '',
+    'пустой отступ у края НЕ отвергается — сервер его принимает, и форма с ним не спорит',
+    await messageIn(F('topstitchWidthMm')),
   );
+  const wBare = await wire();
+  ck(
+    wBare?.topstitch?.mode === TS.EDGE && !wBare?.topstitch?.widthMm,
+    'на провод: EDGE и НИ ОДНОГО числа',
+    JSON.stringify(wBare?.topstitch ?? null),
+  );
+  const rBare = await sheetRow();
+  ck(
+    /topstitch at the edge/i.test(rBare?.seam ?? ''),
+    'лист: «topstitch at the edge» — пустое поле это ОТВЕТ, а не пропуск',
+    rBare?.seam ?? '',
+  );
+
+  // ── КРАЙ С ЧИСЛОМ: ТОТ ЖЕ ТОКЕН, но число доезжает и возвращается ────────────────────────────
+  ck(await typeInto(F('topstitchWidthMm'), '6'), 'отступ набран числом в живой контрол');
+  ck(!(await hintShown()), 'при набранном числе подсказка про пустоту снята — состояния этого нет');
+  const wNum = await wire();
+  ck(
+    wNum?.topstitch?.mode === TS.EDGE,
+    'на провод: ТОТ ЖЕ EDGE — второго написания у края нет',
+    JSON.stringify(wNum?.topstitch ?? null),
+  );
+  ck(
+    wNum?.topstitch?.widthMm?.value === '6',
+    'и число уехало ВМЕСТЕ с ним',
+    JSON.stringify(wNum?.topstitch ?? null),
+  );
+  const rNum = await sheetRow();
+  ck(/6 mm from the edge/i.test(rNum?.seam ?? ''), 'лист: «6 mm from the edge»', rNum?.seam ?? '');
+  ck(
+    (rBare?.seam ?? '') !== (rNum?.seam ?? ''),
+    'край с числом и без дали РАЗНЫЕ строки листа',
+    `${rBare?.seam ?? ''} | ${rNum?.seam ?? ''}`,
+  );
+
+  // КРУГ «ЗАГРУЗИЛ → СОХРАНИЛ»: мимо редактора число у края тоже не теряется.
+  const rt = await roundTrip({ ...STEP, topstitchMode: TS.EDGE, topstitchWidthMm: '6', topstitchRows: 2 });
+  ck(rt.wire?.topstitch?.mode === TS.EDGE, 'круг: на проводе EDGE', JSON.stringify(rt.wire?.topstitch ?? null));
+  ck(rt.wire?.topstitch?.widthMm?.value === '6', 'круг: число на проводе', JSON.stringify(rt.wire?.topstitch ?? null));
+  ck(
+    rt.back?.topstitchMode === TS.EDGE && rt.back?.topstitchWidthMm === '6',
+    'круг: и то и другое вернулось в форму',
+    `${rt.back?.topstitchMode} / ${rt.back?.topstitchWidthMm}`,
+  );
+
+  // ── ПАРАЛЛЕЛЬ: та же величина, ДРУГАЯ линия, и число ОБЯЗАТЕЛЬНО ─────────────────────────────
+  ck(await pick(F('topstitchMode'), 'parallel to the seam'), 'режим переключён на «parallel to the seam»');
   const lblSeam = await labelOf(F('topstitchWidthMm'));
   ck(/from the seam line/i.test(lblSeam), 'подпись переехала на ЛИНИЮ ШВА', lblSeam);
   ck(!/from the edge/i.test(lblSeam), 'и про край больше не говорит', lblSeam);
   ck(lblEdge !== lblSeam, 'ПОДПИСЬ ИЗМЕНИЛАСЬ вместе с режимом', `${lblEdge} → ${lblSeam}`);
+  ck(!(await hintShown()), 'у параллели пустое поле НЕ ответ — подсказки про пустоту нет');
   const vKeep = await values();
   ck(vKeep.topstitchWidthMm === '6', 'число пережило смену режима — оба режима его несут', String(vKeep.topstitchWidthMm));
-
   const rSeam = await sheetRow();
   ck(/6 mm from the seam line/i.test(rSeam?.seam ?? ''), 'лист: «6 mm from the seam line»', rSeam?.seam ?? '');
   ck(!/from the edge/i.test(rSeam?.seam ?? ''), 'лист БОЛЬШЕ НЕ зовёт край при отсчёте от шва', rSeam?.seam ?? '');
-  // ГЛАВНАЯ ПРОВЕРКА ПЕЧАТИ: до починки ОБА режима печатали «6 mm from edge» — одна строка на два
-  // разных отсчёта, и проверка «строка не пуста» этого бы не поймала.
   ck(
-    (rEdge?.seam ?? '') !== (rSeam?.seam ?? ''),
-    'два режима дали ДВЕ РАЗНЫЕ строки листа, а не одно «from edge»',
-    `${rEdge?.seam ?? ''} | ${rSeam?.seam ?? ''}`,
+    (rNum?.seam ?? '') !== (rSeam?.seam ?? ''),
+    'два числовых режима дали ДВЕ РАЗНЫЕ строки листа, а не одно «from edge»',
+    `${rNum?.seam ?? ''} | ${rSeam?.seam ?? ''}`,
   );
 
-  // ОТКАЗ ТОЖЕ НАЗЫВАЕТ ЛИНИЮ — он стоит под тем же контролом, что и подпись, и разойтись с ней
-  // не имеет права.
-  ck(await pick(F('topstitchMode'), 'in the ditch'), 'режим переключён на «in the ditch»');
-  ck(!(await has(F('topstitchWidthMm'))), 'у режима без отступа контрола снова НЕТ');
-  ck(await pick(F('topstitchMode'), 'at width from the edge'), 'режим возвращён на «от края»');
-  ck(await has(F('topstitchWidthMm')), 'контрол отступа снова ЕСТЬ');
+  // ПАРА «ОТКАЗ → НЕТ ОТКАЗА» НА ОДНОМ СМОНТИРОВАННОМ ШАГЕ: без неё «не отвергается» одинаково
+  // правдиво и когда правило работает, и когда его нет вовсе.
+  ck(await typeInto(F('topstitchWidthMm'), ''), 'отступ стёрт');
   await page.evaluate(() => window.__review.trigger());
   await page.waitForTimeout(150);
-  const msg = await messageIn(F('topstitchWidthMm'));
-  ck(/from the edge/i.test(msg), 'отказ на пустом отступе НАЗЫВАЕТ линию', msg);
+  const msgSeam = await messageIn(F('topstitchWidthMm'));
+  ck(/from the seam line/i.test(msgSeam), 'у параллели пустой отступ ОТВЕРГНУТ, и отказ называет линию', msgSeam);
+  ck(await pick(F('topstitchMode'), 'at the edge'), 'режим возвращён на край — поле по-прежнему пусто');
+  await page.evaluate(() => window.__review.trigger());
+  await page.waitForTimeout(150);
+  ck(
+    (await messageIn(F('topstitchWidthMm'))) === '',
+    'у КРАЯ то же пустое поле отказа НЕ вызывает',
+    await messageIn(F('topstitchWidthMm')),
+  );
+
+  // ── В ШОВ: ЧИСЛА НЕТ ВООБЩЕ ─────────────────────────────────────────────────────────────────
+  ck(await typeInto(F('topstitchWidthMm'), '4'), 'у края снова набрано число');
+  ck(await pick(F('topstitchMode'), 'in the ditch'), 'режим переключён на «in the ditch»');
+  ck(!(await has(F('topstitchWidthMm'))), 'у «in the ditch» контрола отступа НЕТ');
+  const vDitch = await values();
+  ck(vDitch.topstitchWidthMm === '', 'и число ОЧИЩЕНО, а не оставлено невидимым', JSON.stringify(vDitch.topstitchWidthMm));
+  const wDitch = await wire();
+  ck(
+    wDitch?.topstitch?.mode === TS.DITCH && !wDitch?.topstitch?.widthMm,
+    'на провод: IN_DITCH и никакого числа',
+    JSON.stringify(wDitch?.topstitch ?? null),
+  );
+  const rDitch = await sheetRow();
+  ck(/topstitch in the ditch/i.test(rDitch?.seam ?? ''), 'лист называет и режим БЕЗ числа', rDitch?.seam ?? '');
+  ck(await pick(F('topstitchMode'), 'at the edge'), 'режим снова край');
+  ck(await has(F('topstitchWidthMm')), 'контрол отступа снова ЕСТЬ — пара «есть → нет → есть» замкнута');
+
+  // ── ТРИ ПРАВИЛА ОДНОЙ ТАБЛИЦЕЙ, мимо редактора: шаг, пришедший с провода, чинится там же ─────
+  const refuses = async (op) => {
+    const issues = await validate({ ...STEP, ...op });
+    return issues.filter((i) => i.path.endsWith('topstitchWidthMm')).map((i) => i.message);
+  };
+  ck((await refuses({ topstitchMode: TS.EDGE, topstitchWidthMm: '' })).length === 0, 'zod: край без числа — можно');
+  ck((await refuses({ topstitchMode: TS.EDGE, topstitchWidthMm: '6' })).length === 0, 'zod: край с числом — можно');
+  const parBare = await refuses({ topstitchMode: TS.PARALLEL, topstitchWidthMm: '' });
+  ck(parBare.length === 1, 'zod: параллель без числа — НЕЛЬЗЯ', parBare.join(' | '));
+  ck(/the seam line/i.test(parBare[0] ?? ''), 'и отказ называет ту же линию, что подпись', parBare[0] ?? '—');
+  const ditchNum = await refuses({ topstitchMode: TS.DITCH, topstitchWidthMm: '6' });
+  ck(ditchNum.length === 1, 'zod: число в шов — НЕЛЬЗЯ', ditchNum.join(' | '));
+
+  // ── СНЯТЫЙ РЕЖИМ НЕ ПИШЕТСЯ И НЕ ПРЕДЛАГАЕТСЯ ───────────────────────────────────────────────
+  // Ни один из проездов выше не выдал `WIDTH` — а он и не мог: пункта нет. Обратная половина —
+  // запись, которая его уже несёт: пикер обязан не онеметь (пустой триггер читается как «отстрочки
+  // нет» на шаге, где она есть, а редактор пишет форму обратно при сохранении), и пунктом приёма
+  // снятый токен всё равно не становится. После бампа прото член исчезнет из типов и попадёт сюда
+  // же — как токен, о котором бандл не слышал; проба от этого не изменится.
+  const seen = [wBare, wNum, wDitch, rt.wire].map((w) => w?.topstitch?.mode ?? '');
+  ck(!seen.includes(TS.RETIRED), 'снятый WIDTH не уехал на провод НИ РАЗУ', seen.join(' '));
+  await mount({ ...STEP, topstitchMode: TS.RETIRED, topstitchWidthMm: '6' });
+  const trigRetired = ((await page.locator(`${F('topstitchMode')} button`).first().textContent()) ?? '').trim();
+  ck(trigRetired !== '', 'запись со снятым режимом НЕ онемела в пикере', trigRetired);
+  ck(/unknown to this app version/i.test(trigRetired), 'и подписана как неизвестная этой версии', trigRetired);
+  const retiredList = await optionsOf(F('topstitchMode'));
+  ck(
+    !(retiredList ?? []).some((s) => /^at width from the edge$/i.test(s)),
+    'ПРИЁМОМ «at width from the edge» он не предлагается даже здесь',
+    JSON.stringify(retiredList),
+  );
+  ck(
+    (retiredList ?? [])
+      .filter((s) => /width/i.test(s))
+      .every((s) => /unknown to this app version/i.test(s)),
+    'единственное упоминание снятого токена — пометка «неизвестен этой версии», а не пункт списка',
+    JSON.stringify(retiredList),
+  );
+  ck(
+    (retiredList ?? []).length === (modes ?? []).length + 1,
+    'предложенных приёмов по-прежнему три — добавилось РОВНО то, что лежит в записи',
+    `${(modes ?? []).length} → ${(retiredList ?? []).length}`,
+  );
 
   // ── СОСЕДИ ПО ТОЙ ЖЕ БОЛЕЗНИ: КАЛИБР И ШАГ МЕЖДУ РЯДАМИ ──────────────────────────────────────
   head('5b. соседи: «между иглами» и «между рядами строчек» — на экране и на листе');

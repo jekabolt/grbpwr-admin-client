@@ -79,8 +79,8 @@ import {
 } from './piece-codes';
 import {
   topstitchDatumOf,
-  topstitchModeHasNoWidth,
-  topstitchModeHasWidth,
+  topstitchModeNeedsWidth,
+  topstitchModeRefusesWidth,
 } from './operation-options';
 import {
   type StepBlock,
@@ -1236,12 +1236,12 @@ const operationSchema = z.object({
         message: 'pick where on the garment — «other» is a legitimate answer',
       });
     }
-    // A width beside «edge» is a shadow value the server refuses; catching it here keeps the
-    // refusal next to the control that caused it. BOTH halves ask TOPSTITCH_MODE_HAS_WIDTH rather
-    // than compare against WIDTH: a refusal written as «≠ WIDTH» blocks the whole card over a mode
-    // this bundle simply has not learnt yet, and a step nobody can save is worse than a width
-    // nobody validated.
-    if (topstitchModeHasNoWidth(o.topstitchMode) && (o.topstitchWidthMm ?? '').trim()) {
+    // A width beside «in the ditch» is a shadow value the server refuses; catching it here keeps
+    // the refusal next to the control that caused it. BOTH halves ask TOPSTITCH_MODES rather than
+    // compare against a member by name: a refusal written as «≠ PARALLEL» blocks the whole card
+    // over a mode this bundle simply has not learnt yet, and a step nobody can save is worse than a
+    // width nobody validated.
+    if (topstitchModeRefusesWidth(o.topstitchMode) && (o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
@@ -1253,7 +1253,11 @@ const operationSchema = z.object({
     // width» left the technologist to guess which of the two lines the missing number belongs to,
     // and the caption right beside it had just been changed to say so — a refusal that words the
     // field differently from its own label is the defect again, one layer down.
-    if (topstitchModeHasWidth(o.topstitchMode) && !(o.topstitchWidthMm ?? '').trim()) {
+    //
+    // ТРЕБУЕТ, А НЕ ПРОСТО ПРИНИМАЕТ: у «at the edge» число НЕОБЯЗАТЕЛЬНО — пустое поле значит
+    // «вплотную к краю», и сервер его как раз принимает. Форма, требующая число там, где сервер
+    // его не требует, спорит с сервером, а спорить с ним она права не имеет.
+    if (topstitchModeNeedsWidth(o.topstitchMode) && !(o.topstitchWidthMm ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchWidthMm'],
@@ -3259,17 +3263,18 @@ export function mapFormToTechCardInsert(
         seamAllowanceMm: optionalDecimal(o.seamAllowanceMm),
         // The sub-message travels only when there IS topstitching: an always-present wrapper
         // carrying MODE_UNKNOWN reads as «somebody considered it» on every step that has none. And
-        // the width is dropped only for a mode KNOWN to have none — beside «edge» it would be a
-        // shadow value the server refuses anyway. Written as «only with WIDTH» this line was the
-        // last of the three losses: even with the editor and the schema fixed, the round trip
-        // «load → open → save» would have deleted the width of a mode this bundle cannot classify,
-        // on the wire, where nothing on screen could show it going.
+        // the width is dropped only for a mode KNOWN to have none — beside «in the ditch» it would
+        // be a shadow value the server refuses anyway, while «at the edge» now carries the number
+        // whenever the technologist typed one. Written as «only with the numbered member» this line
+        // was the last of the three losses: even with the editor and the schema fixed, the round
+        // trip «load → open → save» would have deleted the width of a mode this bundle cannot
+        // classify, on the wire, where nothing on screen could show it going.
         topstitch:
           topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
             ? undefined
             : {
                 mode: topstitchMode,
-                widthMm: topstitchModeHasNoWidth(topstitchMode)
+                widthMm: topstitchModeRefusesWidth(topstitchMode)
                   ? undefined
                   : inputToDecimal(o.topstitchWidthMm),
                 rows: o.topstitchRows || 0,

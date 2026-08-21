@@ -251,29 +251,91 @@ export const attachmentKindLabel = (v?: string): string =>
     ? ''
     : (ATTACHMENT_KIND_LABELS[v as common_TechCardAttachmentKind] ?? '');
 
-// THE LABELS NAME WHAT THE DISTANCE IS MEASURED FROM, because two of these five modes carry a
-// number and they do not measure it from the same place: `width` is an inset from the EDGE, and
-// `parallel_to_seam` is an offset from the SEAM LINE, which on a lapped or felled seam is a
-// different line entirely. The old label «at width» was unambiguous only while it was the sole mode
-// with a number; beside «parallel» it stops being one, and the operator with a guide bar has no way
-// to tell which line to set it against. Same fact governs the input's own caption and the printed
-// sheet — both take their words from TOPSTITCH_WIDTH_DATUM below, which is where both «is there a
-// number at all» and «measured from what» are answered, once.
-export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; label: string }> = [
-  { value: 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN', label: '— none —' },
-  { value: 'TECH_CARD_TOPSTITCH_MODE_EDGE', label: 'edge' },
-  { value: 'TECH_CARD_TOPSTITCH_MODE_WIDTH', label: 'at width from the edge' },
-  { value: 'TECH_CARD_TOPSTITCH_MODE_IN_DITCH', label: 'in the ditch' },
-  { value: 'TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM', label: 'parallel — offset from the seam' },
-];
+// ОДНА КАРТА НА ВЕСЬ РЕЖИМ ОТСТРОЧКИ: как он называется, есть ли у него число, ОБЯЗАТЕЛЬНО ли оно и
+// ОТ КАКОЙ ЛИНИИ меряется. Четыре вопроса — один ответ на член перечисления.
+//
+// ПОЧЕМУ СПИСОК СЖАЛСЯ ДО ТРЁХ. Владелец — практикующий технолог — прочитал пикер и спросил, чем
+// «at the edge» отличается от «at width from the edge», если «по краю» — тот же приём, просто без
+// числа. Он прав: это никогда не были два приёма. Настоящая структура — ДВЕ ОСИ: от чего меряем
+// (край детали / линия шва) и названо ли число, — а `EDGE` и `WIDTH` занимали одну и ту же клетку
+// этой сетки дважды. Поэтому `WIDTH` снят из САМОГО КОНТРАКТА (переносить нечего: колонка пуста во
+// всех строках на обеих средах, ни один релиз её не подписывал), а число переехало к `EDGE`:
+//
+//   at the edge          — отступ НЕОБЯЗАТЕЛЕН. Задан — столько-то мм от края; пуст — вплотную.
+//   in the ditch         — числа нет вовсе; сервер отвергает его прямо.
+//   parallel to the seam — отступ ОБЯЗАТЕЛЕН и меряется от ЛИНИИ ШВА, а на настрочном или
+//                          запошивочном шве это не та же линия, что готовый край.
+//
+// ОДНА КАРТА, А НЕ ЧЕТЫРЕ СПИСКА. «Есть ли число», «обязательно ли», «от чего меряют» и «как это
+// называется» имеют одни и те же члены и не имеют права разойтись, поэтому отвечаются в одном
+// месте: подпись поля, печатный лист, карта сборки, отказ zod и сам пикер читают эту карту — и ни
+// один из них не может назвать линию или правило, отличные от остальных.
+//
+// НЕВЕРНОЕ СОСТОЯНИЕ ЗДЕСЬ НЕВЫРАЗИМО, а не просто не написано: у `need: 'none'` ПОЛЯ `datum` НЕТ
+// (режим без числа не может назвать линию), а два режима с числом не могут линию не назвать.
+//
+// ТОТАЛЬНЫЙ `Record`, а не массив, по той же причине, что и всякий словарь этой фичи (см. шапку
+// equipment-options.ts): диффа клиента против контракта в репозитории нет, поэтому диффом работает
+// tsc — член, добавленный бампом прото, не соберётся, пока его здесь не классифицируют, и до этого
+// момента пикер его не предложит.
+//
+// `null` ЗНАЧИТ «ЭТОТ БАНДЛ НИЧЕГО НЕ УТВЕРЖДАЕТ» — третье состояние, ради которого существуют
+// предикаты ниже. Его получает снятый член, пока сгенерированные типы всё ещё его несут, и ведёт
+// себя он ровно как токен, о котором бандл не слышал вовсе, — обычное состояние проекта между
+// выкаткой бэка и выкаткой клиента. Сказанное как «нет числа», а не как «не знаю», это ломало три
+// вещи молча: редактор стирал отступ и число рядов ПРИ ОТКРЫТИИ шага (с shouldDirty, так что
+// следующее сохранение записывало потерю), схема отвергала шаг, а с ним и всю карточку, а маппер
+// ронял число по дороге на провод.
+type TopstitchModeSpec = { readonly label: string } & (
+  | { readonly need: 'none' }
+  | { readonly need: 'optional' | 'required'; readonly datum: string }
+);
 
-/** The picker for ONE step: the whole list plus whatever that step already holds. Same defensive
- *  shape as operationTypeOptionsFor, for a sharper reason — this vocabulary has no deprecated half,
- *  so a token missing from the list is not legacy, it is a mode NEWER than this bundle, which is the
- *  normal state of the project between a backend deploy and a client deploy. Radix renders a select
- *  whose value is absent from its own items as a BLANK trigger, so without this the row would read
- *  «no topstitch» on a step that has one — and, because the editor writes the form back on save,
- *  that reading is what the next save records. */
+export const TOPSTITCH_MODES: Record<common_TechCardTopstitchMode, TopstitchModeSpec | null> = {
+  // «отстрочки нет» — числу не к чему принадлежать.
+  TECH_CARD_TOPSTITCH_MODE_UNKNOWN: { label: '— none —', need: 'none' },
+  // ОТ КРАЯ ДЕТАЛИ, и число НЕОБЯЗАТЕЛЬНО: заполнено — отступ в мм от края, пусто — строчка идёт
+  // вплотную к краю. Это и есть тот единственный приём, который прежде стоял в списке дважды.
+  TECH_CARD_TOPSTITCH_MODE_EDGE: { label: 'at the edge', need: 'optional', datum: 'the edge' },
+  // ПЕНСИОНИРОВАН ВМЕСТЕ С ЭТОЙ ВОЛНОЙ: `EDGE` с числом говорит ровно то же. Строка стоит здесь
+  // только пока сгенерированные типы несут снятый член, и уходит ОДНОЙ СТРОКОЙ при регенерации.
+  // `null`, а не «числа нет»: врать про чужую запись нельзя даже тогда, когда таких записей ноль.
+  TECH_CARD_TOPSTITCH_MODE_WIDTH: null,
+  // Утоплена в сам шов: расстояние ноль по определению, и число здесь было бы числом ни о чём —
+  // сервер отвергает его прямо.
+  TECH_CARD_TOPSTITCH_MODE_IN_DITCH: { label: 'in the ditch', need: 'none' },
+  // Число ОБЯЗАТЕЛЬНО, и это НЕ то же число, что у края: меряется оно от ЛИНИИ ШВА. «Параллельно»
+  // без расстояния — не инструкция, поэтому пустым этот режим не бывает.
+  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: {
+    label: 'parallel to the seam',
+    need: 'required',
+    datum: 'the seam line',
+  },
+};
+
+/** Что бандл ЗНАЕТ про режим — или `null`, если не знает ничего (член новее бандла либо снятый).
+ *  Единственный вход в карту: всё, что ниже, читает её только отсюда. */
+const topstitchSpec = (mode?: string): TopstitchModeSpec | null =>
+  TOPSTITCH_MODES[mode as common_TechCardTopstitchMode] ?? null;
+
+// ПРЕДЛАГАЕМЫЙ СПИСОК — ВЫВОД ИЗ КАРТЫ, а не второй её экземпляр. Снятый член (`null`) не попадает
+// в пикер никогда и ни при каких данных, а член, добавленный бампом прото, попадёт в него ровно
+// тогда, когда его классифицируют выше, — то есть на том же коммите, на котором он вообще
+// соберётся. Списка, который можно забыть обновить, здесь больше нет.
+export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; label: string }> = (
+  Object.entries(TOPSTITCH_MODES) as Array<[common_TechCardTopstitchMode, TopstitchModeSpec | null]>
+)
+  .filter((e): e is [common_TechCardTopstitchMode, TopstitchModeSpec] => e[1] !== null)
+  .map(([value, spec]) => ({ value, label: spec.label }));
+
+/** Пикер для ОДНОГО шага: весь список плюс то, что в шаге уже лежит. Та же оборонительная форма,
+ *  что у operationTypeOptionsFor, и теперь у неё два повода: токен вне списка — это либо режим
+ *  НОВЕЕ этого бандла (обычное состояние между выкаткой бэка и выкаткой клиента), либо снятый
+ *  `WIDTH` из записи, сделанной до волны. Radix рисует значение, которого нет среди его items,
+ *  ПУСТЫМ триггером — и без этой добавки строка читалась бы как «отстрочки нет» на шаге, где она
+ *  есть, а редактор пишет форму обратно при сохранении, так что именно это прочтение и записалось
+ *  бы. Пункт появляется ТОЛЬКО для записи, которая уже несёт такой токен: выбрать его из списка
+ *  нельзя — его там нет. */
 export function topstitchModeOptionsFor(
   current?: string,
 ): Array<{ value: common_TechCardTopstitchMode; label: string }> {
@@ -282,106 +344,79 @@ export function topstitchModeOptionsFor(
   return [...topstitchModeOptions, { value: v, label: `${v} — unknown to this app version` }];
 }
 
-// DOES THIS MODE CARRY A WIDTH — one answer, stated PER MODE, and deliberately not written as
-// «anything that is not WIDTH». Four surfaces asked that question separately and all four asked it
-// by negation; this map is the single place they now ask.
-//
-// WHY POSITIVE. The negative form is a sentence about a mode the bundle has never heard of, and it
-// gets that sentence wrong. An older bundle reading a card saved by a newer one is the normal state
-// of this project between a backend deploy and a client deploy, and «not WIDTH» made every consumer
-// act on it: the editor wiped the width AND the row count merely by OPENING the step (with
-// shouldDirty, so the next save wrote the loss), the schema refused the step and the whole card
-// with it, and the mapper dropped the number on the way out. Three silent losses, all of them about
-// a mode that may well have a width.
-//
-// Stated positively the same token matches no key, the lookup is `undefined` — neither «has a
-// width» nor «has none» — and every consumer leaves it alone. The positive form has its own failure
-// and it is the cheap one: a new mode that DOES carry a width, not yet classified here, hides its
-// input until somebody adds the line. A control that is missing gets fixed by editing this map; a
-// number that was erased is not fixed at all.
-//
-// A total `Record`, not an array, for the reason every dictionary in this feature is one (see the
-// header of equipment-options.ts): nothing in this repo diffs the client against the contract, so
-// tsc is the diff — a member added by a proto bump fails to compile until it is classified here.
-//
-// ONE MAP, NOT TWO, AND IT HOLDS THE DATUM RATHER THAN A FLAG. The question «is there a number»
-// and the question «measured from WHAT» have the same five answers and must never drift apart, so
-// they are answered once: a NON-EMPTY string means «there is a number, and here is the line it is
-// measured from», an EMPTY string means «this mode carries no number», and a token missing from the
-// map (`undefined`) is a mode NEWER than this bundle — neither answer, which is the third state the
-// predicates below exist to keep.
-//
-// WHY THE DATUM AND NOT JUST «width». The owner — a working technologist — read the caption
-// «topstitch width, mm» standing on the very field he was asking for («we have row spacing but no
-// margin from the edge») and did not recognise it. A caption that names the QUANTITY but not the
-// LINE is not a caption for this field: the same millimetres are measured from the EDGE OF THE
-// PIECE under `width` and from the SEAM LINE under `parallel_to_seam`, which on a lapped or felled
-// seam is somewhere else entirely. Three surfaces have to say it — the input's caption, the printed
-// sheet, the assembly map — and they say it from here, so none of them can name a different line.
-export const TOPSTITCH_WIDTH_DATUM: Record<common_TechCardTopstitchMode, string> = {
-  // «none» — there is no topstitch for a distance to belong to.
-  TECH_CARD_TOPSTITCH_MODE_UNKNOWN: '',
-  // Run along the very edge: the distance IS the edge, so there is nothing left to state.
-  TECH_CARD_TOPSTITCH_MODE_EDGE: '',
-  // The inset from the edge of the piece is the entire instruction.
-  TECH_CARD_TOPSTITCH_MODE_WIDTH: 'the edge',
-  // Sunk into the seam line itself. The distance is zero by definition, and a number offered here
-  // would be a number about nothing — the server refuses one outright.
-  TECH_CARD_TOPSTITCH_MODE_IN_DITCH: '',
-  // A number, and NOT the same number as `width`: this one is measured from the SEAM LINE, not from
-  // the finished edge. Two facts under one word would part company silently on paper, which is why
-  // the contract made it a separate mode — and why the datum travels with it everywhere.
-  TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM: 'the seam line',
+/** РЕЖИМ ПРИНИМАЕТ ЧИСЛО: рисовать поле отступа, печатать его, пропускать через схему. Про режим,
+ *  о котором бандл ничего не утверждает, ответ `false` — безопасная сторона: одного контрола нет,
+ *  и ничего не тронуто. */
+export const topstitchModeTakesWidth = (mode?: string): boolean => {
+  const spec = topstitchSpec(mode);
+  return spec !== null && spec.need !== 'none';
 };
 
-/** DERIVED, so «is there a number» cannot disagree with «measured from what»: a member added by a
- *  proto bump has to state its datum above before anything compiles, and the flag follows. Kept as
- *  an exported map because the whole feature's argument about the third state is written against
- *  it — see the two predicates below. */
-export const TOPSTITCH_MODE_HAS_WIDTH = Object.fromEntries(
-  Object.entries(TOPSTITCH_WIDTH_DATUM).map(([mode, datum]) => [mode, datum !== '']),
-) as Record<common_TechCardTopstitchMode, boolean>;
+/** РЕЖИМ ОТВЕРГАЕТ ЧИСЛО — единственная лицензия ОЧИСТИТЬ, ОТКАЗАТЬ или УРОНИТЬ отступ. Не
+ *  `!topstitchModeTakesWidth`: неизвестный токен отвечает `false` ОБОИМ, и это третье состояние —
+ *  весь смысл того, что предикатов два, а не один. */
+export const topstitchModeRefusesWidth = (mode?: string): boolean =>
+  topstitchSpec(mode)?.need === 'none';
 
-/** The mode is KNOWN and carries a width: show the input, require the number, print it. An unknown
- *  token answers `false` — the safe direction, one control missing and nothing touched. */
-export const topstitchModeHasWidth = (mode?: string): boolean =>
-  TOPSTITCH_MODE_HAS_WIDTH[mode as common_TechCardTopstitchMode] === true;
+/** РЕЖИМ ТРЕБУЕТ ЧИСЛО. Отдельный вопрос от «принимает»: у края число необязательно (пусто значит
+ *  «вплотную»), у параллели — обязательно, и требовать его у края было бы формой, спорящей с
+ *  сервером, который его как раз принимает. */
+export const topstitchModeNeedsWidth = (mode?: string): boolean =>
+  topstitchSpec(mode)?.need === 'required';
 
-/** The mode is KNOWN and carries NO width — the only licence to CLEAR, to REFUSE or to DROP one.
- *  Not `!topstitchModeHasWidth`: an unknown token answers `false` to BOTH, and that third state is
- *  the whole reason this pair exists rather than a single predicate. */
-export const topstitchModeHasNoWidth = (mode?: string): boolean =>
-  TOPSTITCH_MODE_HAS_WIDTH[mode as common_TechCardTopstitchMode] === false;
+/** ЛИНИЯ, ОТ КОТОРОЙ МЕРЯЕТ ЭТОТ РЕЖИМ, в словах, которыми её зовут все поверхности — «the edge»,
+ *  «the seam line», — и '' у режима без расстояния (и у токена, которого бандл не знает). Четырём
+ *  вызывающим она нужна в четырёх разных предложениях — подпись поля, отказ, ячейка листа, карта
+ *  сборки, — а предложение как раз и нельзя делить, поэтому делится существительное. */
+export const topstitchDatumOf = (mode?: string): string => {
+  const spec = topstitchSpec(mode);
+  return spec && spec.need !== 'none' ? spec.datum : '';
+};
 
-/** THE LINE THIS MODE MEASURES FROM, in the words every surface uses — «the edge», «the seam line»,
- *  or '' when the mode carries no distance (and for a token this bundle does not know). Four
- *  callers need it in four different sentences — an input caption, a refusal, a printed cell, the
- *  assembly map — and a sentence is the one thing that must not be shared, so they share the noun
- *  instead. */
-export const topstitchDatumOf = (mode?: string): string =>
-  TOPSTITCH_WIDTH_DATUM[mode as common_TechCardTopstitchMode] ?? '';
-
-/** THE CAPTION OF THE DISTANCE INPUT, worded for the mode the step is actually in — «topstitch
- *  distance from the edge, mm» or «topstitch distance from the seam line, mm». «distance», not
- *  «width»: the step already carries a second width (`stitch_width_mm`, the zigzag amplitude /
- *  overlock bite), so «width» named neither which of the two this is nor what it is measured from.
- *  The datum-less fallback is only reachable for a mode this bundle cannot classify — where the
- *  input is not drawn at all — and stays honest rather than inventing a line. */
+/** ПОДПИСЬ ПОЛЯ ОТСТУПА, сказанная под тот режим, в котором шаг сейчас стоит, — «topstitch distance
+ *  from the edge, mm» или «… from the seam line, mm». «distance», а не «width»: у шага уже есть
+ *  вторая ширина (`stitch_width_mm`, амплитуда зигзага / захват оверлока), и «width» не называла ни
+ *  которая из двух это, ни от чего она меряется. Фолбэк без линии достижим только для режима,
+ *  который бандл классифицировать не может, — там поле и не рисуется, — и остаётся честным вместо
+ *  того, чтобы выдумать линию. */
 export const topstitchWidthLabel = (mode?: string): string => {
   const datum = topstitchDatumOf(mode);
   return datum ? `topstitch distance from ${datum}, mm` : 'topstitch distance, mm';
 };
 
-/** THE SAME FACT IN INK — «6 mm from the edge» / «6 mm from the seam line» — for the printed sheet
- *  and the assembly map. Same map as the caption, so paper cannot name a line the technologist
- *  never typed against; before this, BOTH modes printed «from edge» and `parallel_to_seam` sent the
- *  operator to set the guide bar against the wrong one. Empty when there is no number, and empty
- *  when the mode has no datum: a distance with no line beside it is worse than no distance, because
- *  the floor cannot see that anything is missing. */
+/** ЧТО ЗНАЧИТ ПУСТОЕ ПОЛЕ — и только там, где пустым его оставить МОЖНО. Ровно этот вопрос владелец
+ *  и задал списку: «по краю» и «на столько-то от края» были двумя пунктами, потому что пустоте
+ *  негде было значить «вплотную». Теперь ей есть где, и это надо сказать вслух: незаполненное
+ *  числовое поле само по себе читается как «забыли», а не как ответ. Слова — из той же карты. */
+export const topstitchBlankMeans = (mode?: string): string => {
+  const spec = topstitchSpec(mode);
+  return spec && spec.need === 'optional'
+    ? `leave empty and the stitch runs flush along ${spec.datum}`
+    : '';
+};
+
+/** РАССТОЯНИЕ В ЧЕРНИЛАХ — «6 mm from the edge» / «6 mm from the seam line», а без числа, там где
+ *  число необязательно, — «at the edge»: строчка идёт по самому краю, и это ПОЛНАЯ инструкция, а не
+ *  пропуск. Пусто у режима без расстояния и у режима, требующего число, но его не получившего:
+ *  расстояние без линии рядом хуже, чем никакого, — цех не видит, что чего-то не хватает. */
 export const topstitchDistanceText = (mode?: string, widthMm?: string): string => {
+  const spec = topstitchSpec(mode);
+  if (!spec || spec.need === 'none') return '';
   const v = (widthMm ?? '').trim();
-  const datum = topstitchDatumOf(mode);
-  return v && datum ? `${v} mm from ${datum}` : '';
+  if (v) return `${v} mm from ${spec.datum}`;
+  return spec.need === 'optional' ? `at ${spec.datum}` : '';
+};
+
+/** ВСЯ ОТСТРОЧКА ОДНОЙ ФРАЗОЙ — для печатного листа и карты сборки, чтобы бумага и схема не могли
+ *  сказать про один шаг разное. Расстояние, если оно есть, иначе имя режима: «in the ditch» несёт
+ *  инструкцию целиком и без всяких миллиметров, а прежде обе поверхности молчали о нём — лист
+ *  печатал голое «topstitch», схема не печатала ничего. Пусто для «отстрочки нет» и для токена, о
+ *  котором бандл ничего не утверждает: назвать чужой режим своими словами хуже, чем промолчать. */
+export const topstitchPhrase = (mode?: string, widthMm?: string): string => {
+  if (!mode || mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
+  const spec = topstitchSpec(mode);
+  if (!spec) return '';
+  return topstitchDistanceText(mode, widthMm) || spec.label;
 };
 
 // THE VERB OF A STEP HEADING — total, not `Partial`, and that change is the point: as a Partial this
