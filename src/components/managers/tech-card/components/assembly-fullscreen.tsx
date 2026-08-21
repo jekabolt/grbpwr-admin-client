@@ -165,6 +165,19 @@ const SHELF_PIECE_SOURCE = {
  */
 type DockView = { role: 'step'; index: number } | { role: 'unit'; unitKey: string };
 
+/**
+ * ПЕРЕНЕСТИ ЗАПИСЬ ДОКА НА НОВЫЙ КЛЮЧ УЗЛА — один переписыватель на ВСЕ места, где эта запись
+ * лежит. Их три (живое состояние и две памяти), и правило то же, что у выделения и у ручных
+ * позиций: узел никуда не делся, у него другое имя, и переименование обязано доехать до каждой
+ * записи ключа, а не только до видимой.
+ *
+ * ТА ЖЕ ССЫЛКА, ЕСЛИ ПЕРЕИМЕНОВАНИЕ НЕ ПРО ЭТУ ЗАПИСЬ, — ровно как `renamePicked` отдаёт прежний
+ * массив: `setDock` тогда не считает состояние изменившимся и лишнего рендера не случается.
+ */
+function renameDock(v: DockView | null, from: string, to: string): DockView | null {
+  return v?.role === 'unit' && v.unitKey === from ? { role: 'unit', unitKey: to } : v;
+}
+
 export type AssemblyFullscreenProps = {
   blocks: AssemblyBlock[];
   steps: AssemblyStep[];
@@ -175,6 +188,12 @@ export type AssemblyFullscreenProps = {
   labelOf: (index: number) => string;
   pieceShapes: PieceShapeMap;
   smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
+   * (`useRailGrouping`), полотно только показывает. Отдельно от `smvOfBlock` потому, что вопрос
+   * другой: у блока считается вся приписанная работа, у коробки — то, что в ней нарисовано.
+   */
+  tailSmv: string;
   /**
    * ЦЕЛИКОМ объект результата `use-schematic-prefs`, а не разложенный на `positions`/`onMove`/…
    * После Ф5б в нём появится ось группировки полки, и она обязана дойти до потребителя без правки
@@ -428,6 +447,7 @@ export function AssemblyFullscreen({
   labelOf,
   pieceShapes,
   smvOfBlock,
+  tailSmv,
   prefs,
   selectedIndex,
   onPickStep,
@@ -479,6 +499,16 @@ export function AssemblyFullscreen({
   // узла в нём не живёт вовсе. Поэтому «что именно открыто» — явное состояние: пока «док открыт»
   // значило «открыт шаг», выводить было можно; с двумя ролями любая производная стала бы догадкой.
   const [dock, setDock] = useState<DockView | null>(null);
+
+  // ДВЕ ПАМЯТИ ДОКА ОБЪЯВЛЕНЫ ЗДЕСЬ, РЯДОМ С САМИМ ДОКОМ, а не у своих потребителей, — и это не
+  // вкус. Ключ узла записан в ТРЁХ местах: живое состояние выше и эти два снимка; переименование
+  // обязано доехать до всех трёх, а перенос живёт в рендере ВЫШЕ них (иначе он опоздал бы к
+  // дочернему полотну). Стой объявления по местам использования — переносу было бы не дотянуться,
+  // и стало бы ровно то, что и было: свёрнутый док разворачивался под мёртвым ключом.
+  //
+  // Зачем каждая память заведена и как ею пользуются — при её потребителе, ниже.
+  const dockBeforeCollapse = useRef<DockView | null>(null);
+  const dockBeforeList = useRef<DockView | null>(null);
 
   // --- вид: схема или список ----------------------------------------------------------------------
   //
@@ -548,16 +578,27 @@ export function AssemblyFullscreen({
   const [seenRename, setSeenRename] = useState(renamedUnit);
   if (renamedUnit !== seenRename) {
     setSeenRename(renamedUnit);
-    if (renamedUnit) setPicked((cur) => renamePicked(cur, renamedUnit.from, renamedUnit.to));
-    // ОТКРЫТЫЙ РЕЖИМ УЗЛА ПЕРЕЖИВАЕТ ПЕРЕИМЕНОВАНИЕ ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО И ВЫДЕЛЕНИЕ: узел
-    // никуда не делся, у него другое имя. Без переноса док сказал бы «▣ SHELL больше не узел» про
-    // узел, который переименовали прямо в нём.
     if (renamedUnit) {
-      setDock((cur) =>
-        cur?.role === 'unit' && cur.unitKey === renamedUnit.from
-          ? { role: 'unit', unitKey: renamedUnit.to }
-          : cur,
-      );
+      const { from, to } = renamedUnit;
+      setPicked((cur) => renamePicked(cur, from, to));
+      // ДОК ПЕРЕЖИВАЕТ ПЕРЕИМЕНОВАНИЕ ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО И ВЫДЕЛЕНИЕ: узел никуда не делся, у
+      // него другое имя. Без переноса док сказал бы «▣ SHELL больше не узел» про узел, который
+      // переименовали прямо в нём.
+      //
+      // И ПЕРЕНОСИТСЯ ОН ВО ВСЕХ ТРЁХ МЕСТАХ, А НЕ ТОЛЬКО В ВИДИМОМ. Живое состояние — только одно
+      // из них, и пока док СВЁРНУТ, его нет вовсе (`null`): ключ в это время лежит в памяти
+      // сворачивания, и правка одного живого состояния не задевала её ничем. Замерено: открыть док
+      // узла SHELL → «]» свернуть → ⌘L в список → переименовать в CARCASS → ⌘L обратно → «]»
+      // развернуть — док вставал под мёртвым ключом и отвечал «▣ SHELL is not a unit any more» про
+      // узел, живой и стоящий тут же на полотне. Ровно то же и у памяти списка: док, открытый на
+      // узле и уступивший место списку, возвращался из него со старым ключом.
+      //
+      // ТРЕТЬЕГО МЕХАНИЗМА ЗДЕСЬ НЕТ И БЫТЬ НЕ ДОЛЖНО: выделение переносит `renamePicked`, ручные
+      // позиции — `renamePosEdits`, док — `renameDock`, и все трое зовутся из одного места, по
+      // одной вести, одним тактом.
+      setDock((cur) => renameDock(cur, from, to));
+      dockBeforeCollapse.current = renameDock(dockBeforeCollapse.current, from, to);
+      dockBeforeList.current = renameDock(dockBeforeList.current, from, to);
     }
   }
   const [hint, setHint] = useState<CanvasHint>(null);
@@ -647,8 +688,33 @@ export function AssemblyFullscreen({
 
   const closeDock = useCallback(() => setDock(null), []);
 
+  /**
+   * ЧЕМ ДОК БЫЛ, КОГДА ЕГО СВЕРНУЛИ. Ровно та же память, что у `dockBeforeList` ниже, и заведена по
+   * той же причине: «свернуть» и «развернуть» — один орган, и между ними экран обязан остаться тем
+   * же. Без неё `]` на открытом режиме узла молча подменял содержимое редактором ПОСТОРОННЕГО шага
+   * вместе с потерей всех точек вставки — то есть отвечал не на тот вопрос, который задали.
+   *
+   * Пишется в рендере, а не эффектом: это «последнее виденное», и выброшенный рендер запишет то же
+   * самое. Роль `step` не запоминается вовсе — её адрес всё равно берётся свежим из `selectedIndex`,
+   * и хранить второе мнение о том же было бы ловушкой каталога наоборот.
+   *
+   * ОБЪЯВЛЕНА ВЫШЕ, РЯДОМ С САМИМ ДОКОМ, потому что перенос переименования обязан её достать — см.
+   * там же. Здесь остаётся то, ради чего она заведена: запись «последнего виденного».
+   *
+   * Живой док она перезаписывает ЦЕЛИКОМ, и переносу это не мешает: пока док открыт, ключ в нём уже
+   * переименован, а пока свёрнут (`dock === null`) — этой строки просто нет.
+   */
+  if (dock) dockBeforeCollapse.current = dock;
+
   const toggleDock = useCallback(() => {
-    setDock((cur) => (cur === null ? { role: 'step', index: Math.max(0, selectedIndex) } : null));
+    setDock((cur) => {
+      if (cur !== null) return null;
+      const was = dockBeforeCollapse.current;
+      // УЗЕЛ, ИСЧЕЗНУВШИЙ ПОКА ДОК БЫЛ СВЁРНУТ, вернётся сюда же и скажет о себе словами («…is not
+      // a unit any more») — ровно как если бы его растворили при открытом доке. Молчаливой подмены
+      // экрана нет ни в одном из двух случаев, и второго объяснения для этого заводить не надо.
+      return was?.role === 'unit' ? was : { role: 'step', index: Math.max(0, selectedIndex) };
+    });
   }, [selectedIndex]);
 
   /**
@@ -710,8 +776,11 @@ export function AssemblyFullscreen({
    * ПЕРЕХОД ЛОВИТСЯ ПО ФАКТУ, А НЕ В ОБРАБОТЧИКЕ ЧИПА: вид может смениться и без жеста — карточка
    * без сохранённого режима переезжает в схему, как только в ней появляется первый узел. Дока,
    * забытого открытым в этом случае, не увидел бы ни один обработчик.
+   *
+   * ОБЪЯВЛЕНА ВЫШЕ, РЯДОМ С САМИМ ДОКОМ, и по той же причине, что память сворачивания: пока док
+   * уступил место списку, ключ узла лежит ТОЛЬКО здесь — а переименовать его в списке как раз и
+   * можно, для того список и открывают.
    */
-  const dockBeforeList = useRef<DockView | null>(null);
   const wasList = useRef(listMode);
   useLayoutEffect(() => {
     if (listMode === wasList.current) return;
@@ -1871,10 +1940,15 @@ export function AssemblyFullscreen({
                   pieceNameOf={pieceNameOf}
                   onPickStep={pickStep}
                   onCreate={setPendingCreate}
+                  // Чип `steps · N` в ховер-полосе бокса — ВТОРОЙ ВХОД в режим узла, тот же, в
+                  // который ведёт клавиша `e`: одна функция на оба, иначе орган и клавиша
+                  // однажды разойдутся в том, что именно они открывают.
+                  onOpenUnit={openUnitDock}
                   onDissolve={dissolveUnit}
                   pieceShapes={pieceShapes}
                   cloth={cloth}
                   smvOfBlock={smvOfBlock}
+                  tailSmv={tailSmv}
                   positions={prefs.pos}
                   onMove={onMoveNodes}
                   frozen={frozen}

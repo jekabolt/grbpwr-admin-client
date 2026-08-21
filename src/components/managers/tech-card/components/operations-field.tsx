@@ -99,6 +99,7 @@ import {
   type AssemblyResult,
 } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
+import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
@@ -773,6 +774,17 @@ type RailGrouping = {
   marked: boolean;
   /** Σ SMV блока по его ключу ('' — хвостовой). Считается тем же `sumSmv`, что и в рельсе. */
   smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ХВОСТОВОГО БОКСА ПОЛОТНА — по тем шагам, которые он РИСУЕТ, и это другое множество,
+   * чем `smvOfBlock.get('')`.
+   *
+   * Два числа потому, что вопросов два, а не потому, что кто-то не убрал дубль. Рельс печатает
+   * под заголовком «◌ outside units» ВСЕ шаги вне узлов, и его Σ обязана считать их все. Бокс
+   * полотна рисует только те, которым не досталось плитки (обработка одной детали уехала к своей
+   * детали), и его Σ обязана считать ровно нарисованное. Одно число на оба вопроса — это и был
+   * дефект: коробка с надписью «1 step» печатала рядом сумму двух.
+   */
+  tailSmv: string;
 };
 
 // useRailGrouping — досье: тот же рельс, но с врезанными заголовками подсборок.
@@ -829,10 +841,19 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
         terminal: liveUnits.length === 1 && liveUnits[0] === b.key,
       });
     }
+    // Σ ХВОСТОВОГО БОКСА — ПО НАРИСОВАННЫМ СТРОКАМ, тем же `sumSmv`, что и всё остальное.
+    //
+    // РЕШЕНИЕ, СЛОВАМИ: коробка отвечает на вопрос «что здесь лежит», а обработка, уехавшая на
+    // плитку своей детали, здесь не лежит — её строка нарисована в другом месте экрана. Второй
+    // смысл («сколько работы скатывается сюда») у этой коробки быть не может: она не узел, в неё
+    // ничего не скатывается, и именно за притворство узлом её и переписывали. Множество берётся
+    // у `drawnTailSteps` — у того же правила, по которому раскладка отмеряет коробке высоту.
+    const tailSmv = sumSmv(drawnTailSteps(grouped.loose.steps, steps));
     return {
       broken,
       headerBefore,
       smvOfBlock,
+      tailSmv,
       marked: grouped.blocks.length > 0,
       schematicBlocks: [...grouped.blocks, grouped.loose],
       schematicSteps: steps,
@@ -4148,7 +4169,7 @@ export function OperationsField({
    */
   sketchNote?: ReactNode;
 } = {}) {
-  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
   const { fields, append, remove, replace, insert, move } = useFieldArray({
     control,
     name: 'operations',
@@ -4283,7 +4304,7 @@ export function OperationsField({
   }, []);
 
   /**
-   * ВСЕ ДЕСЯТЬ ТОЧЕК СБРОСА — ЭТО ОНА. Формовые записи умирают, раскладочные живут: ни перестановка
+   * ВСЕ ОДИННАДЦАТЬ ТОЧЕК СБРОСА — ЭТО ОНА. Формовые записи умирают, раскладочные живут: ни перестановка
    * строк, ни правка полей, ни выпуск карточки, ни закрытие фулскрина раскладку не трогают, и
    * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
    */
@@ -4292,6 +4313,37 @@ export function OperationsField({
     pendingAppend.current = null;
     setHistory(dropForm(history.current));
   }, [setHistory]);
+
+  /**
+   * (11/11) РЕСЕТ ФОРМЫ — ОДИННАДЦАТАЯ ТОЧКА, И ЕДИНСТВЕННАЯ, КОТОРУЮ НИКТО НЕ ЗВАЛ.
+   *
+   * Т5 постановила прямо: «после успешного save форма ресетится с новыми id строк, и формовые
+   * записи ОБЯЗАНЫ умереть». Половина этого держалась щитом по `fieldId` — отмена после save
+   * отказывала, потому что строки по адресу больше не те. ПОВТОРУ ЭТОТ ЩИТ НЕДОСТУПЕН ПО
+   * ПОСТРОЕНИЮ: отменённой строки в форме нет, тождества спрашивать не у чего, и судить остаётся
+   * по длине — а она после сохранения совпадает ровно. Отсюда «создал → ⌘Z → Save → ⇧⌘Z»:
+   * шаг молча возвращался в ТОЛЬКО ЧТО СОХРАНЁННУЮ карточку и взводил isDirty, без единого слова.
+   * Замерено стендом на ОБОИХ формовых родах — и у дописывания, и у вставки; дыра наследная и
+   * симметричная, потому и закрывается одна на все рода сразу, а не в `canRedo` каждого.
+   *
+   * Второго щита ради этого не заводится: сброс формовых записей в системе один — `dropForm`, —
+   * и здесь к нему просто подводится провод от события, которое до сих пор никто не слушал.
+   *
+   * СИГНАЛ — ПУСТОЕ `name` В ПОДПИСКЕ RHF. Именованное изменение это правка поля или мутация
+   * массива (`useFieldArray` шлёт имя массива); безымянное бывает только у `reset()`. Чтение то
+   * же, что у соседа по вкладке (`construction-tab.tsx`, отпечаток ткани), и это не совпадение:
+   * другого способа увидеть ресет у потребителя формы нет.
+   *
+   * `watch(cb)` НЕ РЕНДЕРИТ — в отличие от `useWatch`. Подписка на всю форму через `useWatch`
+   * означала бы ре-рендер корня поля на каждый символ в любом поле карточки.
+   */
+  useEffect(() => {
+    const sub = watch((_, { name }) => {
+      if (name) return;
+      clearFormHistory();
+    });
+    return () => sub.unsubscribe();
+  }, [watch, clearFormHistory]);
 
   // ВТОРОЙ ТАКТ ЗАПИСИ append. `append()` из RHF ничего не возвращает, а `fields` в замыкании
   // мутатора — снимок ДО вставки: `fields[at]?.id` там всегда `undefined`, и записанный синхронно
@@ -4316,7 +4368,7 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
-    clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
+    clearFormHistory(); // (1/11) массив поехал — формовые записи протухли
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
     // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
@@ -4328,7 +4380,7 @@ export function OperationsField({
 
   const insertAfter = (index: number) => {
     if (frozen) return;
-    clearFormHistory(); // (2/10)
+    clearFormHistory(); // (2/11)
     remapIssues((old) => (old > index ? old + 1 : old));
     insert(index + 1, { ...emptyOperation });
     setSelected(index + 1);
@@ -4344,7 +4396,7 @@ export function OperationsField({
       return;
     }
     if (from === to) return;
-    // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
+    // (3/11) САМАЯ ДОРОГАЯ ИЗ ОДИННАДЦАТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
     // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
     clearFormHistory();
     remapIssues((old) => {
@@ -4366,7 +4418,7 @@ export function OperationsField({
   // pre-fill (`node`, `placement`) were the same piece name written twice.
   useEffect(() => {
     if (!addRequest) return;
-    clearFormHistory(); // (4/10) шаг дописала ПАНЕЛЬ, а не жест полотна
+    clearFormHistory(); // (4/11) шаг дописала ПАНЕЛЬ, а не жест полотна
     append({ ...emptyOperation });
     setSelected(fields.length);
     onAdded?.();
@@ -4392,7 +4444,7 @@ export function OperationsField({
       showMessage(FROZEN_REFUSAL, 'error');
       return;
     }
-    // (5/10) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни
+    // (5/11) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни
     // другое жестовым ⌘Z не отменяется, а адрес записи после `replace` указывает на другой шаг.
     clearFormHistory();
     const mapped = generated.map(mapGeneratedOperationToForm);
@@ -4570,7 +4622,7 @@ export function OperationsField({
   useEffect(() => {
     if (!frozen) return;
     setPendingCreate(null);
-    // (9/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
+    // (9/11) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
     // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
     // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
     //
@@ -4675,7 +4727,7 @@ export function OperationsField({
       );
       return;
     }
-    // (7/10) НЕ СТРУКТУРНАЯ, НО ШАГ ИЗМЕНЁН — и сброс стоит здесь, ПОСЛЕ отказа фронтира: жест,
+    // (7/11) НЕ СТРУКТУРНАЯ, НО ШАГ ИЗМЕНЁН — и сброс стоит здесь, ПОСЛЕ отказа фронтира: жест,
     // который движок отклонил, ничего не менял и гасить чужую отмену не вправе. Массив при
     // добавлении входа тот же, `fieldId` на месте — guard пропустил бы, — а устаревший ⌘Z снёс бы
     // шаг ВМЕСТЕ с только что добавленной деталью.
@@ -4718,7 +4770,7 @@ export function OperationsField({
     // мутатор про заморозку не знает, а вызыватель ВНЕ формы дописал бы шаг в выпущенную
     // карточку. Гейт стоит у мутатора, а не у каждой кнопки.
     if (frozen) return;
-    // (6/10) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
+    // (6/11) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
     // указывала бы на шаг, стоящий уже не там.
     clearFormHistory();
     setSelected(fields.length);
@@ -4858,6 +4910,32 @@ export function OperationsField({
       return assemblyBlocks(steps, res).blockOfStep.get(clamped) ?? '';
     },
     [pendingCreate?.at, pieces, grouping.schematicSteps],
+  );
+
+  /**
+   * НА ЧЬЕЙ ПЛИТКЕ ПОЯВИТСЯ ШАГ С ТАКИМ СОСТАВОМ — ТЕМ ЖЕ ПРАВИЛОМ, ПО КОТОРОМУ СТРОКА РИСУЕТСЯ.
+   *
+   * Щит диалога до сих пор спрашивал вопрос СЛАБЕЕ дела: «остался ли этот вход в составе». Строка
+   * же появляется на плитке только у шага, у которого вход ОДИН РАЗЛИЧНЫЙ и это та самая деталь, и
+   * который ничего не собирает. Добавь человек второй вход или переключи результат на новый узел —
+   * строка не появится, а щит молчал: обещание жеста «строка будет НА ЭТОЙ плитке» переставало
+   * держаться, и диалог об этом не говорил.
+   *
+   * Правило не переписано здесь второй раз, а взято `processedPieceOf` — оттуда, где оно живёт и
+   * откуда его читает раскладка. Позиция не спрашивается вовсе: принадлежность плитке от места в
+   * последовательности не зависит (в отличие от принадлежности узлу), и вводить сюда `at` значило
+   * бы завести зависимость, которой у правила нет.
+   */
+  const pieceOfPlanned = useCallback(
+    (draft: { inputKeys: string[]; outputUnitKey: string }) => {
+      const pieceKeys = new Set(pieces.map((p) => p.lineKey));
+      return processedPieceOf({
+        inputs: classifyAssemblyInputs(pieceKeys, draft.inputKeys.filter(Boolean)),
+        outputUnitKey: draft.outputUnitKey.trim(),
+        outputUnitName: '',
+      });
+    },
+    [pieces],
   );
 
   /**
@@ -5096,7 +5174,7 @@ export function OperationsField({
    * ГЕЙТ ЗАМОРОЗКИ — ПО-РОДОВОЙ. На выпущенной карточке (R10) раскладывать можно, править нельзя:
    * значит отмена перестановки обязана РАБОТАТЬ, а формовая — отказать словами. Прежний общий гейт
    * резал оба рода скопом, и подвинутый на выпущенной карточке блок нельзя было вернуть вовсе.
-   * Формовых записей на замороженной карточке к этому моменту и так нет — эффект заморозки (9/10)
+   * Формовых записей на замороженной карточке к этому моменту и так нет — эффект заморозки (9/11)
    * их гасит, — но щит стоит поясом и подтяжками: гонка Release живёт в этом файле не первый раз.
    *
    * ПУСТАЯ ИСТОРИЯ — ТИХИЙ `return`, ни звука. Прямое требование владельца, и оно отменяет решение
@@ -5575,6 +5653,7 @@ export function OperationsField({
                   pieceShapes={pieceShapes}
                   cloth={inlineCloth?.map ?? null}
                   smvOfBlock={grouping.smvOfBlock}
+                  tailSmv={grouping.tailSmv}
                   onDissolve={dissolveUnit}
                   positions={prefs.pos}
                   // ИНЛАЙНОВАЯ СХЕМА ПИШЕТ В ТУ ЖЕ ИСТОРИЮ, хотя ⌘Z в ней нет. Иначе жест,
@@ -5604,7 +5683,7 @@ export function OperationsField({
                   onHoverPin={(n) => onActivePinChange?.(n)}
                   onDropPiece={addInputToOperation}
                   // Перестановка остаётся МУТАТОРОМ ЭТОГО ФАЙЛА: гейт `frozen`, ремап
-                  // issues[].operationNumber и сброс формовой истории (3/10) стоят у него.
+                  // issues[].operationNumber и сброс формовой истории (3/11) стоят у него.
                   onMoveOperation={moveOperation}
                   readPieceDrag={readPieceDrag}
                 />
@@ -5672,6 +5751,7 @@ export function OperationsField({
           labelOf={labelOfStep}
           pieceShapes={pieceShapes}
           smvOfBlock={grouping.smvOfBlock}
+          tailSmv={grouping.tailSmv}
           // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её
           // писатель, и они обязаны дойти до потребителя без правки этого файла.
           //
@@ -5711,7 +5791,7 @@ export function OperationsField({
           onRedo={redoGesture}
           redoTitle={redoTitle(peekRedo(histView))}
           canRedo={peekRedo(histView) !== null}
-          // ВОСЬМАЯ ИЗ ДЕСЯТИ ТОЧЕК СБРОСА, и listener у неё ОДИН — на контейнере дока (вешает
+          // ВОСЬМАЯ ИЗ ОДИННАДЦАТИ ТОЧЕК СБРОСА, и listener у неё ОДИН — на контейнере дока (вешает
           // его фулскрин, потому что док — его орган). Правки ПОЛЕЙ после create жестовым ⌘Z не
           // отменяются: возражение «undo возвращает больше, чем жест» живёт внутри выбранного
           // варианта, и снять его можно только так — перестав обещать отмену, как только начали
@@ -5791,6 +5871,7 @@ export function OperationsField({
         pieceKeys={new Set(pieces.map((p) => p.lineKey))}
         labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
         unitOfPlanned={unitOfPlanned}
+        pieceOfPlanned={pieceOfPlanned}
         onCloseAutoFocus={restoreScreenFocus}
       />
 

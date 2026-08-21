@@ -218,14 +218,34 @@ ck(
 ck(f.tailLiveUnits.length === 0, 'граф хвоста: живых узлов нет', JSON.stringify(f.tailLiveUnits));
 ck(f.tailViolations.length === 0, 'граф хвоста валиден по проходу', f.tailViolations.join(', '));
 
+// Σ ХВОСТА СЧИТАЕТСЯ ПО ТОМУ ЖЕ МНОЖЕСТВУ, ЧТО РИСУЕТСЯ. Пока число подавалось заглушкой, снимок
+// был слеп к этому ПО ПОСТРОЕНИЮ: подвал печатал что дали, каким бы множеством оно ни считалось,
+// и коробка с надписью «1 step» рядом печатала сумму двух. Числа фикстуры подобраны так, чтобы
+// два ответа различались, — совпади они, проба падает здесь, а не молча зеленеет ниже.
+ck(
+  f.tailDrawnSmv !== f.tailLooseSmv,
+  'фикстура хвоста РАЗЛИЧАЕТ множества: Σ нарисованного не равна Σ блока',
+  `${f.tailDrawnSmv} против ${f.tailLooseSmv}`,
+);
+ck(
+  f.tailDrawnSmv === '2.4' && f.tailLooseSmv === '3.1',
+  'Σ хвоста выведена из SMV шагов, а не задана числом',
+  `${f.tailDrawnSmv} / ${f.tailLooseSmv}`,
+);
+
 /**
  * Токены-ссылки снимка: `[{ to, text }]` в порядке появления. Ищется по СОБСТВЕННОЙ подсказке
  * токена, а не по классу: класс — оформление и вправе меняться, адресат — контракт.
  */
+// ПОДСКАЗКА ТОКЕНА НАЗЫВАЕТ МЕСТО СЛОВАМИ СВОЕЙ ПОВЕРХНОСТИ, и потому фраза здесь не зашита, а
+// ВЫНИМАЕТСЯ: снимок снят с ИНЛАЙНОВОЙ схемы, где полотна нет вовсе (есть прокручиваемая коробка),
+// и «on the canvas» тут обещало бы место, которого на этом экране не найти. Зашитая фраза сделала
+// бы пробу слепой к обратному переезду слов, а не строгой к нему.
 const tokensIn = (html) =>
-  [...html.matchAll(/title="go to ▣ ([^"]*) on the canvas"[^>]*>([^<]*)</g)].map((m) => ({
+  [...html.matchAll(/title="go to ▣ ([^"]*?) ([^"]*)"[^>]*>([^<]*)</g)].map((m) => ({
     to: m[1],
-    text: m[2],
+    where: m[2],
+    text: m[3],
   }));
 
 for (const frozen of ['false', 'true']) {
@@ -246,6 +266,11 @@ for (const frozen of ['false', 'true']) {
     tk.every((t) => t.text === `▣ ${t.to}`),
     `frozen=${frozen}: текст токена и его адресат — одно и то же имя`,
     JSON.stringify(tk),
+  );
+  ck(
+    tk.every((t) => t.where === 'in the schematic'),
+    `frozen=${frozen}: подсказка называет ИНЛАЙН, а не полотно — снимок снят с него`,
+    JSON.stringify(tk.map((t) => t.where)),
   );
   // Стрелка состояния и стрелка состава — РАЗНЫЕ строки бокса, и обе обязаны нести ссылку:
   // «куда узел ушёл» и «из чего собран» — два вопроса, и оба ведут к соседям по графу.
@@ -276,7 +301,11 @@ for (const frozen of ['false', 'true']) {
     `frozen=${frozen}: край хвоста 1px — рангом обычной коробки, а не узла`,
   );
   ck(s.includes('>2 steps<'), `frozen=${frozen}: подвал хвоста считает свои две строки`);
-  ck(s.includes('Σ 2.4'), `frozen=${frozen}: Σ хвоста на месте — подвал не пустой`);
+  ck(
+    s.includes(`Σ ${f.tailDrawnSmv}`) && !s.includes(`Σ ${f.tailLooseSmv}`),
+    `frozen=${frozen}: подвал печатает Σ НАРИСОВАННЫХ строк, а не Σ хвостового блока`,
+    `искали «Σ ${f.tailDrawnSmv}», чужое «Σ ${f.tailLooseSmv}»`,
+  );
   for (const glyph of ['·', '▣', '+▣']) {
     ck(s.includes(`>${glyph}</span>`), `frozen=${frozen}: глиф «${glyph}» на месте`);
   }
@@ -285,13 +314,20 @@ for (const frozen of ['false', 'true']) {
   ck(/<pattern /.test(s), `frozen=${frozen}: паттерны штриховки ткани в разметке`);
   ck(s.includes("role=\"button\""), `frozen=${frozen}: органы полотна — div с ролью кнопки`);
 }
-// Роль под заморозкой обязана ИСЧЕЗАТЬ там, где действие запрещено: одинаковые снимки означали бы,
-// что frozen ничего не решает и вторая половина гейта холостая.
-ck(shots.false !== shots.true, 'frozen меняет разметку');
+// ПОКОЙНАЯ РАЗМЕТКА ПОД ЗАМОРОЗКОЙ ТЕПЕРЬ ТА ЖЕ, И ЭТО ПРОВЕРЯЕТСЯ, А НЕ ДОПУСКАЕТСЯ.
+//
+// Раньше здесь стояло обратное — «frozen меняет разметку» и «кликабельных органов меньше», — и
+// стояло справедливо: голова плитки под заморозкой роли не получала вовсе, а у свободной детали
+// пропадала и на драфте, стоило её съесть. Обе развилки сняты (Т10 и Т9в): в ПОКОЕ по ноде можно
+// делать ровно одно — выделить её, а выделение это ПРЕЗЕНТАЦИЯ, и смотреть на RELEASED разрешено
+// (R10). Всё, что заморозка отнимает, живёт в ховер-полосе и в этот снимок не попадает ни байтом.
+//
+// Проверка от этого не стала холостой, она сменила знак: любое расхождение покойной разметки по
+// `frozen` означает, что на выпущенной карточке снова что-то не рисуется, — и падает тут же.
 ck(
-  (shots.false.match(/role="button"/g) ?? []).length >
-    (shots.true.match(/role="button"/g) ?? []).length,
-  'под заморозкой кликабельных органов меньше',
+  shots.false === shots.true,
+  'в покое frozen разметку НЕ меняет: смотреть и выделять разрешено везде',
+  `длины ${shots.false.length} и ${shots.true.length}`,
 );
 // `<button>` под внешним `<fieldset disabled>` карточки мёртв (R4): шапки, строки шагов и плитки
 // обязаны остаться div-ами. Проверка накрывает ИСХОДНЫЙ рендер — полоса действий узла живёт под
@@ -422,7 +458,14 @@ console.log('\ndirectInputsOf — дедуп, свой ключ, порядок 
   ];
   const blocks = [blk('SHELL', [0, 1, 2])];
   const got = directInputsOf(blocks, steps).get('SHELL');
-  ck(eq(got, ['FR', 'BK', 'SL', 'HOOD']), 'порядок первого вхождения, свой ключ выброшен, дублей нет', JSON.stringify(got));
+  ck(eq(got.map((i) => i.key), ['FR', 'BK', 'SL', 'HOOD']), 'порядок первого вхождения, свой ключ выброшен, дублей нет', JSON.stringify(got));
+  // РОД ВХОДА ДОЕЗЖАЕТ ЦЕЛЫМ. Выброси его здесь — и `compositionParts` начнёт угадывать род
+  // заново «есть ли ключ среди состоявшихся узлов», а на битой ссылке угадает деталью.
+  ck(
+    eq(got.map((i) => i.kind), ['piece', 'piece', 'piece', 'unit']),
+    'род входа, каким его назвал движок, едет вместе с ключом',
+    JSON.stringify(got),
+  );
 
   const empty = directInputsOf([blk('T', [])], steps).get('T');
   ck(eq(empty, []), 'блок без шагов — пустой список', JSON.stringify(empty));
@@ -438,11 +481,15 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
     ['SHELL', {}],
     ['HOOD', {}],
   ]);
+  const inp = (...pairs) => pairs.map(([kind, key]) => ({ kind, key }));
   const di = new Map([
-    ['G', ['SHELL', 'HOOD', 'FR', 'BK']],
-    ['ONE', ['FR']],
-    ['UNITS', ['SHELL']],
+    ['G', inp(['unit', 'SHELL'], ['unit', 'HOOD'], ['piece', 'FR'], ['piece', 'BK'])],
+    ['ONE', inp(['piece', 'FR'])],
+    ['UNITS', inp(['unit', 'SHELL'])],
     ['NONE', []],
+    // БИТАЯ ССЫЛКА: шаг взял ключ узла, которого не производит никто. Движок зовёт его узлом
+    // (правило 1 ругается), в карте состоявшихся его нет — и деталью он не становится.
+    ['BROKEN', inp(['piece', 'FR'], ['unit', 'LOST'], ['piece', 'BK'])],
   ]);
   ck(
     compositionOf('G', di, units) === '← ▣ SHELL + ▣ HOOD + 2 pieces',
@@ -453,6 +500,11 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
   ck(compositionOf('UNITS', di, units) === '← ▣ SHELL', 'без деталей — без счётчика', compositionOf('UNITS', di, units));
   ck(compositionOf('NONE', di, units) === '', 'пустой вход — пустая строка', compositionOf('NONE', di, units));
   ck(compositionOf('MISSING', di, units) === '', 'ключа нет в карте — пустая строка');
+  ck(
+    compositionOf('BROKEN', di, units) === '← ▣ LOST + 2 pieces',
+    'битая ссылка на узел названа именем и в детали НЕ записана',
+    compositionOf('BROKEN', di, units),
+  );
   // Свой ключ выбрасывает directInputsOf, и связка обязана оставаться сквозной.
   const steps = [
     step(
@@ -475,8 +527,12 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
     JSON.stringify(compositionParts('G', di, units)),
   );
   ck(eq(to(compositionParts('ONE', di, units)), []), 'состав из одних деталей ссылок не даёт');
+  // Орган, который иногда работает, а иногда нет, — тот самый перегруз, ради снятия которого
+  // токен и заведён: бокса с ключом `LOST` на полотне нет, вести некуда, ссылкой не становится.
+  ck(eq(to(compositionParts('BROKEN', di, units)), []), 'битая ссылка ОРГАНОМ не стала — вести некуда',
+     JSON.stringify(compositionParts('BROKEN', di, units)));
   ck(eq(compositionParts('NONE', di, units), []), 'пустой вход — ни одного куска');
-  for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING']) {
+  for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING', 'BROKEN']) {
     ck(
       partsText(compositionParts(k, di, units)) === compositionOf(k, di, units),
       `склейка кусков = строка состава (${k})`,

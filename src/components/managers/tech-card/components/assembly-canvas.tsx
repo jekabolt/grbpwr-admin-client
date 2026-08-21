@@ -21,8 +21,11 @@ import {
   buildWires,
   directInputsOf,
   makeRowY,
+  notifyWorldMoved,
+  pieceAddPrefill,
   TailBoxView,
   TileView,
+  unitAddPrefill,
   UnitBoxView,
   WireLayer,
 } from './assembly-node-views';
@@ -212,6 +215,11 @@ export type AssemblyCanvasProps = {
    * подставляет тип, зону и машину — всё кончается диалогом (R1).
    */
   onCreate: (prefill: CreatePrefill) => void;
+  /**
+   * Открыть УЗЕЛ в доке — вторая роль дока, та же, в которую ведёт клавиша `e`. Необязателен, и
+   * это не небрежность: дока нет у инлайна, а чип, которому некуда вести, не рисуется вовсе.
+   */
+  onOpenUnit?: (unitKey: string) => void;
   /** Растворить узел — по индексу его производящего шага. */
   onDissolve: (stepIndex: number) => void;
   pieceShapes: PieceShapeMap;
@@ -222,6 +230,12 @@ export type AssemblyCanvasProps = {
    */
   cloth?: Map<string, PieceCloth> | null;
   smvOfBlock: Map<string, string>;
+  /**
+   * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
+   * (`useRailGrouping`), полотно только показывает. Отдельно от `smvOfBlock` потому, что вопрос
+   * другой: у блока считается вся приписанная работа, у коробки — то, что в ней нарисовано.
+   */
+  tailSmv: string;
   positions: PosOverrides;
   /**
    * Ноды переехали. ПАЧКОЙ, А НЕ ПО ОДНОЙ, потому что жест бывает мультидроп и стрелка по
@@ -255,10 +269,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     pieceNameOf,
     onPickStep,
     onCreate,
+    onOpenUnit,
     onDissolve,
     pieceShapes,
     cloth,
     smvOfBlock,
+    tailSmv,
     positions,
     onMove,
     frozen = false,
@@ -367,6 +383,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     // видно, пока не приблизишь.
     world.style.setProperty('--hk', String(hatchK(zoom)));
     setZoomPct(Math.round(zoom * 100));
+    // МИР ПОЕХАЛ — И ОБ ЭТОМ НАДО СКАЗАТЬ ВСЛУХ. Всё, что решается по ЭКРАННОМУ положению ноды
+    // (сегодня — в какую сторону встаёт ховер-полоса), рендера на зуме и панораме не получает
+    // вовсе: трансформ пишется сюда, в стиль, мимо React. Весть стоит РОВНО ЗДЕСЬ, у
+    // единственного писателя трансформа, — второе место означало бы, что однажды мир поедет
+    // молча. Цикл `notifyWorldMoved` пуст, пока никто ни на что не наведён.
+    notifyWorldMoved();
   }, []);
 
   // --- маркиза: состояние и живопись -------------------------------------------------------------
@@ -511,6 +533,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     world.style.transition = 'transform .22s cubic-bezier(.22,1,.36,1)';
     window.setTimeout(() => {
       if (worldRef.current) worldRef.current.style.transition = '';
+      // ВТОРАЯ ВЕСТЬ — КОГДА МИР ВСТАЛ. `applyView` кричит в момент ЗАПИСИ трансформа, а под
+      // переходом запись — это только начало движения: замер, снятый тогда, читает ещё СТАРУЮ
+      // геометрию, и вписывание клавишей «f» оставило бы полосу с решением от прошлого кадра.
+      notifyWorldMoved();
     }, 240);
   }, []);
 
@@ -941,6 +967,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    * ВЫДЕЛЕНИЕ ЗАМЕЩАЕТСЯ, а не пополняется: это навигация, и после неё человек смотрит на ОДИН
    * узел — тот, который назвал. Пополняй она выбор, второй клик по тому же токену снимал бы
    * выделение, то есть переход отменял бы сам себя.
+   *
+   * SHIFT ЗДЕСЬ НЕ ЗНАЧИТ НИЧЕГО, И ЭТО РЕШЕНО, А НЕ ЗАБЫТО. На маркизе shift пополняет выбор, и
+   * соблазн отдать ему то же значение на токене велик — «перейти и добавить к выбранным». Но
+   * тогда один орган снова получил бы два смысла, различаемых невидимым состоянием клавиши:
+   * ровно тот перегруз, который Т10 с этого бокса и сняла. Токен — орган НАВИГАЦИИ; модификаторы
+   * выбора принадлежат органам выбора (шапка, маркиза), и там shift работает как работал.
    */
   const goToNode = (key: string) => {
     onPicked([key]);
@@ -1116,7 +1148,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // Точка автопана и компенсации вида — с первого касания: колесо может прийти раньше
       // первого pointermove.
       lastClient.current = { x: e.clientX, y: e.clientY };
-      justDragged.current = false;
+      // Клик-эхо прошлого жеста снимает перехват на вьюпорте — ОДИН на все нажатия полотна.
+      // Здесь эта строка стояла, пока нажатие доходило до ноды всегда; после того как полоса
+      // начала гасить `pointerdown`, она перестала быть правдой и осталась бы ложным свидетелем
+      // того, что вопрос закрыт.
       // МУЛЬТИДРАГ ТОЛЬКО ИЗ ВЫДЕЛЕНИЯ. Взяли ноду, которая в выделении, — едет всё выделение;
       // взяли постороннюю — едет она одна, и выделение НЕ ТРОГАЕТСЯ. Прототип на захвате
       // невыделенной ноды делал её единственной выбранной, но там клик = выбрать; здесь клик по
@@ -1604,6 +1639,24 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // Полотно не отдаёт палец прокрутке: жест здесь свой, и страница под оверлеем ехать не
       // должна ни при каких обстоятельствах.
       style={{ touchAction: 'none' }}
+      // НОВЫЙ НАЖИМ ГАСИТ СТАРОЕ ЭХО — В ФАЗЕ ПЕРЕХВАТА, И ТОЛЬКО ЗДЕСЬ.
+      //
+      // `justDragged` взводится концом перетаскивания и живёт до следующего нажатия: драг,
+      // кончившийся не на кликабельном, обязан проглотить своё клик-эхо и не проглотить ничего
+      // после. Снимался флаг в `onPointerDown` САМОЙ НОДЫ — и это перестало работать, как только
+      // ховер-полоса начала гасить `pointerdown` (иначе нажатие на чип заводило перетаскивание):
+      // до обработчика ноды событие больше не доходит, флаг остаётся взведённым, и `clickGuard`
+      // чипа съедает ПЕРВЫЙ законный клик. Замерено: утащить ноду за подвал в пустое место,
+      // навести другую, нажать «steps · N» — выделение пусто, срабатывает только второй клик.
+      //
+      // ФАЗА ПЕРЕХВАТА РАЗВОДИТ ЭТИ ДВА СВОЙСТВА, не жертвуя ни одним: перехват идёт от корня К
+      // ЦЕЛИ и завершается ЦЕЛИКОМ до всплытия, поэтому полоса гасит жест ровно как гасила, а
+      // весть «рука нажала заново» приходит сюда всё равно. И приходит она от ЛЮБОГО нажатия
+      // внутри полотна — по ноде, по чипу, по пустой земле, — то есть следующий орган, которому
+      // понадобится погасить всплытие, ничего здесь не сломает.
+      onPointerDownCapture={() => {
+        justDragged.current = false;
+      }}
       onPointerDown={onCanvasPointerDown}
       // Средняя кнопка на полотне — ПАН, а не браузерный автоскролл. Обычный путь гасит его сам:
       // `startPan` зовёт preventDefault на pointerdown, и совместимостный mousedown умирает вместе
@@ -1655,6 +1708,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             const b = blocks.find((x) => x.key === box.key);
             if (!b) return null;
             const terminal = liveUnits.length === 1 && liveUnits[0] === box.key;
+            const addPrefill = unitAddPrefill(b, res);
             return (
               <UnitBoxView
                 key={box.key}
@@ -1683,9 +1737,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 headProps={activate(clickGuard(() => toggle(box.key)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
-                onAddOperation={clickGuard(() =>
-                  onCreate({ inputKeys: [box.key], intent: 'process' }),
-                )}
+                surfaceWords='on the canvas'
+                onOpenUnit={onOpenUnit && clickGuard(() => onOpenUnit(box.key))}
+                // ЧИП КЛАДЁТ ШАГ ВНУТРЬ БЛОКА, а не в низ листа: позицию и обещание попадания в
+                // узел считает `unitAddPrefill` — та же арифметика, что у хвостовой точки вставки
+                // мини-рельса. Вернула `null` — вставлять некуда, и чипа не будет вовсе.
+                onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
                 onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
               />
             );
@@ -1698,7 +1755,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               // какие обработки уехали на плитки своих деталей, и высоту коробки отмерила
               // ровно по этому списку.
               tailSteps={layout.tailSteps}
-              smvOfBlock={smvOfBlock}
+              tailSmv={tailSmv}
               labelOf={labelOf}
               dragging={!!heldNow?.has('')}
               ringClassName={nodeRing('')}
@@ -1708,34 +1765,42 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             />
           )}
 
-          {layout.tiles.map((t) => (
-            <TileView
-              key={`tile:${t.key}`}
-              tile={t}
-              name={pieceNameOf(t.key)}
-              pieceShapes={pieceShapes}
-              cloth={cloth}
-              labelOf={labelOf}
-              picked={picked.includes(t.key)}
-              dragging={!!heldNow?.has(t.key)}
-              ringClassName={nodeRing(t.key)}
-              organProps={activate(
-                t.state === 'free'
-                  ? !frozen
-                    ? clickGuard(() => toggle(t.key))
-                    : undefined
-                  : (() => {
-                      const eater = res.consumedBy.get(t.key);
-                      return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
-                    })(),
-              )}
-              dragProps={dragHandlers(t.key, t.x, t.y)}
-              hoverProps={hoverHandlers(t.key)}
-              // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
-              // способа открыть шаг в системе заводить нельзя.
-              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
-            />
-          ))}
+          {layout.tiles.map((t) => {
+            const addPrefill = pieceAddPrefill(t.key, steps, res);
+            return (
+              <TileView
+                key={`tile:${t.key}`}
+                tile={t}
+                name={pieceNameOf(t.key)}
+                pieceShapes={pieceShapes}
+                cloth={cloth}
+                labelOf={labelOf}
+                picked={picked.includes(t.key)}
+                frozen={frozen}
+                hovered={hovered === t.key}
+                dragging={!!heldNow?.has(t.key)}
+                ringClassName={nodeRing(t.key)}
+                surfaceWords='on the canvas'
+                // ГОЛОВА ПЛИТКИ ВЫДЕЛЯЕТ ВСЕГДА — свободная, съеденная, на выпущенной карточке.
+                // Раньше здесь стояла та же развилка, что снята с шапки бокса: свободная
+                // выделяет, съеденная уводит к съевшему шагу, под `frozen` свободная мертва.
+                // Один орган, три смысла, и смысл зависел от невидимого на глаз состояния;
+                // «уйти к съевшему» переехало на чип полосы, где у него своё место.
+                organProps={activate(clickGuard(() => toggle(t.key)))}
+                dragProps={dragHandlers(t.key, t.x, t.y)}
+                hoverProps={hoverHandlers(t.key)}
+                // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
+                // способа открыть шаг в системе заводить нельзя.
+                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
+                // ТОТ ЖЕ `goToNode`, ЧТО У ТОКЕНА: «перейти к узлу» — одно действие, и второго
+                // его исполнителя в системе быть не должно.
+                onGoToUnit={
+                  t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
+                }
+              />
+            );
+          })}
         </div>
       )}
 

@@ -52,6 +52,14 @@ export type CreatePrefill = {
    */
   at?: number;
   /**
+   * ДЕТАЛЬ, НА КОТОРОЙ ЖЕСТ ОБЕЩАЛ ПОКАЗАТЬ ШАГ. Пусто — жест ничего про деталь не обещал.
+   *
+   * Отдельное поле, а не вывод из `inputKeys`: обещание даёт ОРГАН («＋ operation» на плитке
+   * детали), и после того как состав в диалоге переиграли, состав уже не помнит, с чего жест
+   * начинался. Ровно та же причина, по которой рядом живёт `intoUnit`.
+   */
+  ontoPiece?: string;
+  /**
    * УЗЕЛ, В КОТОРЫЙ ЖЕСТ ОБЕЩАЛ ПОПАСТЬ. Принадлежность шага узлу — ВЫЧИСЛЯЕМАЯ ПРОЕКЦИЯ (её
    * выводит `assembly-blocks.ts` из входов), в данных её нет, и «вставить операцию в узел» прямым
    * действием невыразимо. Значит обещание жеста обязано ехать сюда отдельным полем: только так
@@ -98,6 +106,7 @@ export function AssemblyCreateDialog({
   pieceKeys,
   labelOf,
   unitOfPlanned,
+  pieceOfPlanned,
   onCloseAutoFocus,
 }: {
   prefill: CreatePrefill | null;
@@ -125,6 +134,15 @@ export function AssemblyCreateDialog({
    * человек читает «попадёт в COLLAR» и получает шаг в хвосте «вне узлов».
    */
   unitOfPlanned?: (draft: { inputKeys: string[]; outputUnitKey: string }) => string;
+  /**
+   * НА ЧЬЕЙ ПЛИТКЕ ПОЯВИТСЯ ШАГ С ТАКИМ СОСТАВОМ. Пусто — ни на чьей.
+   *
+   * Считает это ТО ЖЕ ПРАВИЛО, по которому строка на плитке рисуется (`processedPieceOf` в
+   * `assembly-layout.ts`), а не пересказ правила: раньше диалог спрашивал вопрос СЛАБЕЕ дела —
+   * «остался ли этот вход в составе», — и молчал в двух случаях из трёх, когда обещание жеста
+   * уже не держалось.
+   */
+  pieceOfPlanned?: (draft: { inputKeys: string[]; outputUnitKey: string }) => string;
   /**
    * Куда вернуть фокус, когда диалог закрылся. Нужен ФУЛСКРИНУ: его роутер клавиш — обработчик на
    * контенте оверлея, и фокус, упавший в `body`, гасит ⌘Z, ⌘F, ⌘A и все глаголы до первого клика
@@ -173,11 +191,37 @@ export function AssemblyCreateDialog({
     setUnitName('');
   }, [prefill]);
 
+  /**
+   * ЗАНЯТОСТЬ КОДА СПРАШИВАЕТСЯ ТОЖДЕСТВОМ ПРОВОДА, А НЕ БАЙТАМИ ФОРМЫ. Тот же род, что чинился
+   * в `assembly-rename.ts` (коммит `16524469`), и тот же довод: подрезка — не вежливость к набору,
+   * а то, чем ключ СТАНЕТ. На провод уезжают подрезанными обе стороны — ключ детали
+   * (`p.lineKey?.trim() || ulid()`) и код узла (`outputUnitKey.trim()`), `schema.ts`, — а
+   * пространство имён у них общее (правило 6).
+   *
+   * Поле хранит НАБРАННОЕ как есть, и восстановленный черновик несёт его же, поэтому деталь
+   * « BODY » живёт в форме сколько угодно. Сырое сравнение её не узнавало: диалог разрешал узел
+   * «BODY», клиентский граф соглашался (он тоже считает по сырым ключам), а сервер отвергал
+   * сохранение — и невидимые пробелы в ключе чужой детали человек не нашёл бы никогда.
+   *
+   * РЕГИСТР НЕ НОРМАЛИЗУЕТСЯ: колонка объявлена `COLLATE utf8mb4_bin`, «SHELL» и «Shell» — два
+   * разных узла, и подрезка их ничем не сближает.
+   */
+  const wireKeys = (keys: Iterable<string>) => {
+    const out = new Set<string>();
+    for (const k of keys) {
+      const t = k.trim();
+      if (t) out.add(t);
+    }
+    return out;
+  };
+  const piecesOnWire = useMemo(() => wireKeys(pieceKeys), [pieceKeys]);
+  const unitsOnWire = useMemo(() => wireKeys(unitKeys), [unitKeys]);
+
   const taken = useMemo(() => {
-    const s = new Set<string>(pieceKeys);
-    for (const k of unitKeys) s.add(k);
+    const s = new Set<string>(piecesOnWire);
+    for (const k of unitsOnWire) s.add(k);
     return s;
-  }, [pieceKeys, unitKeys]);
+  }, [piecesOnWire, unitsOnWire]);
 
   // Код предлагается от ЗОНЫ и переигрывается, пока автор его не тронул руками: зона выбирается
   // раньше, и код, застывший на «UNIT» после выбора зоны, был бы предложением мимо.
@@ -195,8 +239,8 @@ export function AssemblyCreateDialog({
     if (produces !== 'unit') return '';
     const code = unitKey.trim();
     if (!code) return 'a unit needs a code — that is what every other step calls it by';
-    if (pieceKeys.has(code)) return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
-    if (unitKeys.has(code)) return `unit “${code}” already exists — a second producer of the same unit is impossible`;
+    if (piecesOnWire.has(code)) return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
+    if (unitsOnWire.has(code)) return `unit “${code}” already exists — a second producer of the same unit is impossible`;
     if (new TextEncoder().encode(code).length > 64) return "the code is longer than 64 bytes — that won't fit the column";
     return '';
   })();
@@ -288,6 +332,40 @@ export function AssemblyCreateDialog({
   const judged = !!prefill?.intoUnit && !!unitOfPlanned;
   const lands = judged ? unitOfPlanned!(draft) : '';
   const holds = judged ? lands === prefill!.intoUnit : true;
+  /**
+   * ОБЕЩАНИЕ ПРО ДЕТАЛЬ — СВОИМ ВОПРОСОМ, А НЕ ЧЕРЕЗ ОРГАН УЗЛА. `unitOfPlanned` отвечает КЛЮЧОМ
+   * УЗЛА: у детали его нет вовсе (свободная деталь ни в каком узле не лежит), и спроси мы про неё
+   * тем же органом — предупреждение горело бы ВСЕГДА, то есть перестало бы что-либо значить.
+   *
+   * ВОПРОС ЗАДАЁТСЯ РОВНО ТОТ, ПО КОТОРОМУ СТРОКА РИСУЕТСЯ, и берётся он оттуда, где живёт, —
+   * `pieceOfPlanned` зовёт `processedPieceOf` из `assembly-layout.ts`, ту же функцию, которой
+   * раскладка решает, какие строки растит плитка.
+   *
+   * ЧТО БЫЛО НЕ ТАК. Здесь стояло `distinct.includes(ontoPiece)` — «остался ли этот вход в
+   * составе», условие СЛАБЕЕ дела. Строка появляется на плитке только у шага, у которого вход
+   * один различный и это та самая деталь, и который ничего не собирает. Значит щит молчал в двух
+   * случаях из трёх (замерено): добавили второй вход — шаг уезжает в хвост, на плитке его нет;
+   * переключили результат на новый узел — деталь съедена, строка уходит в блок узла. Обещание
+   * жеста («строка появится на ЭТОЙ плитке») переставало держаться молча.
+   *
+   * ПРИЧИНА НАЗЫВАЕТСЯ, А НЕ ТОЛЬКО ФАКТ: три разных дела читаются одинаково плохо под одной
+   * фразой «it no longer takes it», а последняя из них была бы вдобавок неправдой — деталь шаг
+   * по-прежнему берёт.
+   */
+  const ontoPiece = prefill?.ontoPiece ?? '';
+  const pieceJudged = !!ontoPiece && !!pieceOfPlanned;
+  const pieceLands = pieceJudged ? pieceOfPlanned!(draft) : '';
+  const keepsPiece = !pieceJudged || pieceLands === ontoPiece;
+  const pieceProblem = (() => {
+    if (keepsPiece) return '';
+    const onto = `◌ this step will not appear on ▣ ${ontoPiece}`;
+    if (!distinct.includes(ontoPiece)) return `${onto} — it no longer takes it`;
+    if (draft.outputUnitKey) {
+      return `${onto} — it assembles ▣ ${draft.outputUnitKey}, and that is a row of the unit`;
+    }
+    return `${onto} — a step on more than one piece belongs to none of them`;
+  })();
+
   const belongProblem = holds
     ? ''
     : lands
@@ -382,6 +460,16 @@ export function AssemblyCreateDialog({
                 </Chip>
               ))}
             </ChipRow>
+          )}
+          {/* ПОД САМИМ СОСТАВОМ, А НЕ В «POSITION»: жест по детали позиции не несёт вовсе, и
+              предупреждение обязано стоять там, где сделано действие, его вызвавшее. Чернилами и
+              тем же глифом «◌», что у предупреждения про узел, — это одна новость двух родов, и
+              читаться она обязана одинаково. Не запрет: убрать деталь из состава — законное
+              намерение, ошибкой это не является. */}
+          {pieceProblem && (
+            <Text size='micro' className='mt-1'>
+              {pieceProblem}
+            </Text>
           )}
         </div>
 
