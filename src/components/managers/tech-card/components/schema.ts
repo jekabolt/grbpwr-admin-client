@@ -21,6 +21,8 @@ import {
   common_TechCardInspectCoverage,
   common_TechCardLabelAttachStitch,
   common_TechCardPeelMode,
+  common_TechCardPressAction,
+  common_TechCardPressToward,
   common_TechCardPressureScale,
   common_TechCardPrintMethod,
   common_TechCardReinforcement,
@@ -1156,6 +1158,15 @@ const operationSchema = z.object({
   // F — чистка концов ниток. Только THREAD_TRIM.
   residualTailMaxMm: z.string().optional().default(''), // мм, 1..10; пусто = стандарт цеха
 
+  // G — ВТО (0325): под-глагол и направление припуска. НЕ дискриминаторы — не required ни на
+  // одном глаголе: строка PRESS, записанная до этой волны, обязана читаться и сохраняться как
+  // есть, и обязательность здесь перекрыла бы кислород каждой существующей карточке задним
+  // числом. Направление законно ТОЛЬКО при `to_one_side` и там обязательно — обязательность,
+  // которая ретроактивной стать не может: значения `to_one_side` ни одна сохранённая строка не
+  // имеет. Оба правила зеркалятся ниже, в superRefine.
+  pressAction: z.string().optional().default('TECH_CARD_PRESS_ACTION_UNKNOWN'),
+  pressToward: z.string().optional().default('TECH_CARD_PRESS_TOWARD_UNKNOWN'),
+
   // C / Q / WP — чистка, контроль, мокрая обработка: у каждого один факт, он же дискриминатор.
   cleaningKind: z.string().optional().default('TECH_CARD_CLEANING_KIND_UNKNOWN'),
   coverageMode: z.string().optional().default('TECH_CARD_INSPECT_COVERAGE_UNKNOWN'),
@@ -1365,6 +1376,30 @@ const operationSchema = z.object({
       'wetProcessKind',
       'pick the wet process — a rinse, an enzyme wash, a garment dye and a softener are four baths',
     );
+
+    // НАПРАВЛЕНИЕ ПРИПУСКА — ТОЛЬКО У «ЗАУТЮЖИТЬ», И ТАМ ОБЯЗАТЕЛЬНО (0325). Сервер проверяет обе
+    // половины, и клиент обязан согласиться с обеими: без первой отказ пришёл бы ТОСТОМ после
+    // сохранения шести вкладок, вместо того чтобы встать на контроле, который его чинит, — а без
+    // второй форма отправила бы направление на приёме, где сервер отвергает его по имени, и
+    // отказала бы вся карточка. Ровно та дыра, ради которой волна и заводилась: подпись обещала
+    // «press to one side», а сказать, на какую сторону, было нечем.
+    const pressToOneSide = o.pressAction === 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE';
+    if (pressToOneSide && !stepEnumSet(o.pressToward)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['pressToward'],
+        message:
+          'say which way the allowance goes — «to one side» without the side is not an instruction',
+      });
+    }
+    if (!pressToOneSide && stepEnumSet(o.pressToward)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['pressToward'],
+        message:
+          'only «press to one side» lays the allowance anywhere — clear the direction, or switch the action',
+      });
+    }
 
     // ПРИМЕНИМОСТЬ ПО ЯВНОМУ ТИПУ МАШИНЫ. «Явный» — названный НА ШАГЕ: тип, разрешённый через
     // `machineProfileKey`, не засчитывается ни здесь, ни на сервере, и это не придирка — профиль
@@ -2312,6 +2347,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       trimAction: o.trim?.action || 'TECH_CARD_TRIM_ACTION_UNKNOWN',
       residualAllowanceMm: decimalToInput(o.trim?.residualAllowanceMm),
       residualTailMaxMm: decimalToInput(o.threadTrim?.residualTailMaxMm),
+      pressAction: o.press?.action || 'TECH_CARD_PRESS_ACTION_UNKNOWN',
+      pressToward: o.press?.toward || 'TECH_CARD_PRESS_TOWARD_UNKNOWN',
       cleaningKind: o.clean?.kind || 'TECH_CARD_CLEANING_KIND_UNKNOWN',
       coverageMode: o.inspect?.coverageMode || 'TECH_CARD_INSPECT_COVERAGE_UNKNOWN',
       wetProcessKind: o.wetProcessKind || 'TECH_CARD_WET_PROCESS_KIND_UNKNOWN',
@@ -3088,6 +3125,28 @@ export function mapFormToTechCardInsert(
       const threadTrim = blockOut(ownsBlock('threadTrim'), () => ({
         residualTailMaxMm: optionalDecimal(o.residualTailMaxMm),
       }));
+      // ВТО-БЛОК ЖИВЁТ НА ДВУХ ГЛАГОЛАХ, И ГЕЙТ У НЕГО СВОЙ, А НЕ `ownsBlock('pressSettings')`.
+      // Тот отвечает «шагу можно дать НАСТРОЙКИ пресса» и включает FUSING и PRINT — а под-глагол
+      // ВТО сервер на них отвергает по имени. Здесь вопрос другой: «шаг ЕСТЬ ВТО».
+      //
+      // PRESS_OPEN В ГЕЙТЕ, ХОТЯ КОНТРОЛА У НЕГО НЕТ. Пикер туда не пишет ничего (каноническая
+      // запись разутюжки — сам глагол), но прочитанное с провода значение обязано уехать обратно
+      // ТЕМ ЖЕ ТОКЕНОМ: выбросить его на записи значило бы стереть чужой факт молча, кругом
+      // «загрузил → сохранил», на проводе, где потерю нечем увидеть.
+      const isPressAction =
+        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
+        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN';
+      const pressAction = (o.pressAction ||
+        'TECH_CARD_PRESS_ACTION_UNKNOWN') as common_TechCardPressAction;
+      const press = blockOut(isPressAction, () => ({
+        action: pressAction,
+        // Направление законно ТОЛЬКО при «заутюжить»: при остальных приёмах припуск никуда не
+        // укладывается, и сервер отвергает поле по имени. Тот же приём, что у бейки и петли —
+        // гасится ЗДЕСЬ, а не только очисткой на экране: два гейта на одно поле разошлись бы.
+        toward: (pressAction === 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE'
+          ? o.pressToward || 'TECH_CARD_PRESS_TOWARD_UNKNOWN'
+          : 'TECH_CARD_PRESS_TOWARD_UNKNOWN') as common_TechCardPressToward,
+      }));
       const clean = blockOut(ownsBlock('clean'), () => ({
         kind: (o.cleaningKind || 'TECH_CARD_CLEANING_KIND_UNKNOWN') as common_TechCardCleaningKind,
       }));
@@ -3245,6 +3304,8 @@ export function mapFormToTechCardInsert(
         inspect,
         wetProcessKind,
         fastening,
+        // 65 — ВТО (0325). Стоит последним по номеру поля, как и все остальные блоки волны.
+        press,
         note: o.note?.trim() || '',
       };
     }),

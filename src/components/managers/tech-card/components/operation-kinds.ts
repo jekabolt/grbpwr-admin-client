@@ -1,6 +1,7 @@
 import {
   common_TechCardMachineType,
   common_TechCardOperationType,
+  common_TechCardPressAction,
 } from 'api/proto-http/admin';
 import { STEP_TYPE_BLOCKS, type StepBlock } from './equipment-options';
 // ТОЛЬКО ТИП — и это условие, а не стиль. `operation-options` импортирует ЗНАЧЕНИЕ отсюда
@@ -49,31 +50,28 @@ export const KIND_FAMILY_LABEL: Record<KindFamily, string> = {
 };
 
 /**
- * ВТО-ПОДГЛАГОЛ ЕЩЁ НЕ В КОНТРАКТЕ — ЭТО ЕДИНСТВЕННЫЙ ПЕРЕКЛЮЧАТЕЛЬ ФАЗЫ 3.
+ * ВТО-ПОДГЛАГОЛ В КОНТРАКТЕ (0325) — ПЕРЕКЛЮЧАТЕЛЬ ФАЗЫ 3 ПОДНЯТ.
  *
- * `press_action` / `press_toward` заводятся отдельной миграцией (блок 65 у `TechCardOperation`).
- * Пока их нет, семь пунктов ВТО, которые различаются ТОЛЬКО подглаголом (G1, G2, G4…G8),
- * схлопываются в один пункт «Press»: показывать семь пунктов, пишущих одно и то же состояние,
- * значит обещать различие, которого сохранение не переживёт.
+ * `TechCardOperationPress { action, toward }` — блок 65 у `TechCardOperation`; поля заведены в
+ * строке формы (`schema.ts`, `emptyOperation`), пишутся через общий `kindWrites` и читаются
+ * `kindOf`. Пока флаг стоял `false`, семь пунктов ВТО, различимых ТОЛЬКО подглаголом (G1, G2,
+ * G4…G8), схлопывались в один «Press»: показывать семь пунктов, пишущих одно и то же состояние,
+ * значит обещать различие, которого сохранение не переживёт. Теперь оно переживает.
  *
- * КАК ВКЛЮЧИТЬ — ОДНОЙ ПРАВКОЙ ЗДЕСЬ, когда поля появятся в строке формы (`schema.ts`,
- * `emptyOperation`, маппер записи — их заводит контрактная сторона): поставить `true`. Запись
- * `press_action` идёт через общий `kindWrites`, а писатель молча пропускает ключи, которых в
- * строке формы нет, — поэтому ранний `true` ничего не ломает, он просто ничего не пишет.
- * Читающая сторона (`kindOf`) поле уже спрашивает и сегодня получает `undefined`.
+ * ФЛАГ ОСТАЁТСЯ, А НЕ ВЫРЕЗАН, ровно по одной причине: он же гейтит `collapsedLabel` — запасное
+ * имя схлопнутого пункта. Снять флаг значит снять и его, а вместе с ним ту единственную строчку,
+ * которая объясняет, чем «Press» отличается от «Press flat», если разутюжку когда-нибудь придётся
+ * схлопнуть обратно.
  */
-export const PRESS_ACTION_IN_CONTRACT: boolean = false;
+export const PRESS_ACTION_IN_CONTRACT: boolean = true;
 
-/** Токены `TechCardPressAction` — свои, пока енума в контракте нет (§4.1 карты пикера). */
-export type PressActionToken =
-  | 'press_flat'
-  | 'to_one_side'
-  | 'open'
-  | 'steam'
-  | 'final'
-  | 'ease_in'
-  | 'stretch'
-  | 'mould';
+/**
+ * Под-глагол ВТО — ТОКЕН КОНТРАКТА, а не собственный словарь: до 0325 здесь стоял свой союз из
+ * восьми коротких имён (енума не было вовсе), и он был ВРЕМЕННЫМ по построению. Оставить его
+ * рядом с появившимся `TechCardPressAction` значило бы завести второй источник правды о том же
+ * факте — и первым же расхождением стал бы `OTHER`, которого в коротком союзе нет.
+ */
+export type PressActionToken = common_TechCardPressAction;
 
 export type OperationKind = {
   id: string;
@@ -256,14 +254,14 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // никогда. Чтение принимает оба. Форма никогда не переписывает одно в другое: два написания
   // дают два разных кортежа в проекции дайджеста секции, и авто-канонизация пометила бы
   // подписанную карточку как «изменена после подписи» без единой человеческой правки.
-  { id: 'G1', family: 'G', label: 'Press flat', collapsedLabel: 'Press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'press_flat', featured: ['pressSettings'] },
-  { id: 'G2', family: 'G', label: 'Press to one side', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'to_one_side', featured: ['pressSettings'] },
+  { id: 'G1', family: 'G', label: 'Press flat', collapsedLabel: 'Press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT', featured: ['pressSettings'] },
+  { id: 'G2', family: 'G', label: 'Press to one side', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE', featured: ['pressSettings'] },
   { id: 'G3', family: 'G', label: 'Press open', verb: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN', featured: ['pressSettings'] },
-  { id: 'G4', family: 'G', label: 'Steam', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'steam', writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAMER' }, featured: ['pressSettings'] },
-  { id: 'G5', family: 'G', label: 'Final press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'final', featured: ['pressSettings'] },
-  { id: 'G6', family: 'G', label: 'Ease in', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'ease_in', featured: ['pressSettings'] },
-  { id: 'G7', family: 'G', label: 'Stretch', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'stretch', featured: ['pressSettings'] },
-  { id: 'G8', family: 'G', label: 'Mould', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'mould', writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY' }, featured: ['pressSettings'] },
+  { id: 'G4', family: 'G', label: 'Steam', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_STEAM', writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAMER' }, featured: ['pressSettings'] },
+  { id: 'G5', family: 'G', label: 'Final press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_FINAL', featured: ['pressSettings'] },
+  { id: 'G6', family: 'G', label: 'Ease in', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_EASE_IN', featured: ['pressSettings'] },
+  { id: 'G7', family: 'G', label: 'Stretch', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_STRETCH', featured: ['pressSettings'] },
+  { id: 'G8', family: 'G', label: 'Mould', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_MOULD', writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY' }, featured: ['pressSettings'] },
   {
     id: 'G9',
     family: 'G',
@@ -418,7 +416,7 @@ export type OperationKindStep = {
   attachMethod?: string;
   coverageMode?: string;
   labelAttachStitch?: string;
-  /** ВТО-подглагол. Сегодня всегда `undefined` — поля в контракте ещё нет (§4.1). */
+  /** ВТО-подглагол — токен `TechCardPressAction` (0325). Пусто = строка записана до него. */
   pressAction?: string;
   /** Виды строк BOM, привязанных к шагу, — ТОЛЬКО для уточнения F1 / F2 / F3. */
   bomKinds?: readonly string[];
@@ -508,15 +506,28 @@ const VERB_TO_KIND: Record<common_TechCardOperationType, string> = {
 };
 
 /** ВТО-подглагол → пункт. Читается и `PRESS + open` (пикер такого не пишет — см. G3). */
-const PRESS_ACTION_TO_KIND: Record<PressActionToken, string> = {
-  press_flat: 'G1',
-  to_one_side: 'G2',
-  open: 'G3',
-  steam: 'G4',
-  final: 'G5',
-  ease_in: 'G6',
-  stretch: 'G7',
-  mould: 'G8',
+/**
+ * ПОД-ГЛАГОЛ → ПУНКТ. Тотальная карта над контрактом, по тому же доводу, что и `MACHINE_TO_KIND`:
+ * член, добавленный в прото, роняет сборку здесь, а не превращается молча в «нестандартную
+ * комбинацию» на законном шаге.
+ *
+ * ДВА ЧЛЕНА ОТВЕЧАЮТ ПУСТОЙ СТРОКОЙ, И ЭТО ОТВЕТ, А НЕ ПРОПУСК. `UNKNOWN` — старая строка PRESS,
+ * записанная до 0325: её пункт — приутюживание, потому что именно так её и читали до появления
+ * под-глагола. `OTHER` — «свой приём, прозой в note»: пункта у него НЕТ и выдумывать ближайший
+ * нельзя, поэтому резолв честно отвечает `undefined`, а редактор показывает «нестандартная
+ * комбинация» и обе оси контролами. Разные ответы на разные вопросы — потому и разведены.
+ */
+const PRESS_ACTION_TO_KIND: Record<common_TechCardPressAction, string> = {
+  TECH_CARD_PRESS_ACTION_UNKNOWN: '',
+  TECH_CARD_PRESS_ACTION_PRESS_FLAT: 'G1',
+  TECH_CARD_PRESS_ACTION_TO_ONE_SIDE: 'G2',
+  TECH_CARD_PRESS_ACTION_OPEN: 'G3',
+  TECH_CARD_PRESS_ACTION_STEAM: 'G4',
+  TECH_CARD_PRESS_ACTION_FINAL: 'G5',
+  TECH_CARD_PRESS_ACTION_EASE_IN: 'G6',
+  TECH_CARD_PRESS_ACTION_STRETCH: 'G7',
+  TECH_CARD_PRESS_ACTION_MOULD: 'G8',
+  TECH_CARD_PRESS_ACTION_OTHER: '',
 };
 
 const byId = (id: string): OperationKind | undefined => OPERATION_KIND_BY_ID.get(id);
@@ -556,8 +567,12 @@ export function kindOf(step: OperationKindStep): OperationKind | undefined {
   //    пунктом, но никогда не пишется, и форма ни одно из двух написаний в другое не переводит.
   if (verb === 'TECH_CARD_OPERATION_TYPE_PRESS') {
     const a = (step.pressAction ?? '') as PressActionToken;
-    if (a && a in PRESS_ACTION_TO_KIND) return byId(PRESS_ACTION_TO_KIND[a]);
-    return byId('G1');
+    // Не названный под-глагол — строка, записанная до 0325: её пункт приутюживание, ровно как её
+    // читали тогда. Названный, но не называющий пункта («прочее», токен новее бандла), — законная
+    // комбинация БЕЗ своего слова, и `undefined` про неё честнее любого «похожего» пункта.
+    if (!a || a === 'TECH_CARD_PRESS_ACTION_UNKNOWN') return byId('G1');
+    const id = PRESS_ACTION_TO_KIND[a] ?? '';
+    return id ? byId(id) : undefined;
   }
 
   // 3. MACHINE — вторая ось, с тремя уточнениями перед ней.
@@ -598,9 +613,9 @@ export function kindHeadingVerb(step: OperationKindStep): string {
 /**
  * НАБОР ЗНАЧЕНИЙ, КОТОРЫЙ ПУНКТ ЗАПИСЫВАЕТ В СТРОКУ ШАГА, — плоской картой «имя поля → значение».
  *
- * Плоская карта, а не типизированная структура, ровно по одной причине: `pressAction` /
- * `pressToward` в строке формы ЕЩЁ НЕТ, и писатель обязан уметь молча пропустить имя, которого
- * форма не знает (см. `PRESS_ACTION_IN_CONTRACT`). Всё остальное типизировано в самой таблице.
+ * Плоская карта, а не типизированная структура: писатель обязан уметь молча пропустить имя,
+ * которого строка формы не знает, — так `pressAction` и ждал своего контракта, ничего не ломая.
+ * Всё остальное типизировано в самой таблице.
  *
  * МАШИНКА У ОТСТРОЧКИ — ОТДЕЛЬНЫМ АРГУМЕНТОМ: пункт её не угадывает, её приносит парк карточки
  * (единственный подходящий профиль) или дефолт пункта, и решает это вызыватель, который парк видит.
@@ -669,7 +684,7 @@ export const KIND_PROPERTY_FIELDS: readonly string[] = [
   'bartackLengthMm',
   'attachPattern',
   'zipperApplication',
-  // ВТО-подглагол (§4.1) — полей ещё нет в контракте, имена стоят заранее
+  // ВТО (0325) — под-глагол и направление припуска
   'pressAction',
   'pressToward',
 ];

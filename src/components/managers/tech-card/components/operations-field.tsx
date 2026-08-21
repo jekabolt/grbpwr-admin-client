@@ -45,6 +45,8 @@ import {
   INSPECT_COVERAGE_LABELS,
   LABEL_ATTACH_STITCH_LABELS,
   PEEL_MODE_LABELS,
+  PRESS_ACTION_LABELS,
+  PRESS_TOWARD_LABELS,
   PRESSURE_SCALE_LABELS,
   PRINT_METHOD_LABELS,
   REINFORCEMENT_LABELS,
@@ -206,6 +208,11 @@ const NONE_BUTTONHOLE_STYLE = 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN';
 const NONE_BUTTONHOLE_ORIENTATION = 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN';
 const NONE_ATTACH_PATTERN = 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN';
 const NONE_ZIPPER_APPLICATION = 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN';
+// ВТО (0325). `UNKNOWN` у под-глагола — законный ответ на ЛЮБОМ ВТО-шаге, а не недозаполненность:
+// строка PRESS, записанная до этой волны, его и несёт.
+const NONE_PRESS_ACTION = 'TECH_CARD_PRESS_ACTION_UNKNOWN';
+const NONE_PRESS_TOWARD = 'TECH_CARD_PRESS_TOWARD_UNKNOWN';
+const PRESS_TO_ONE_SIDE = 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE';
 
 // The machine types that make a WELD rather than a stitch — the same pair isWeldMachineType names,
 // split apart here because only one of them blows hot air: an ultrasonic horn heats the material
@@ -247,7 +254,9 @@ type StepEnumField =
   | 'buttonholeStyle'
   | 'buttonholeOrientation'
   | 'attachPattern'
-  | 'zipperApplication';
+  | 'zipperApplication'
+  | 'pressAction'
+  | 'pressToward';
 type StepTextField =
   | 'needleGaugeMm'
   | 'rowSpacingMm'
@@ -499,6 +508,8 @@ export const emptyOperation = {
   trimAction: NONE_TRIM_ACTION,
   residualAllowanceMm: '',
   residualTailMaxMm: '',
+  pressAction: NONE_PRESS_ACTION,
+  pressToward: NONE_PRESS_TOWARD,
   cleaningKind: NONE_CLEANING_KIND,
   coverageMode: NONE_COVERAGE_MODE,
   wetProcessKind: NONE_WET_PROCESS,
@@ -616,6 +627,8 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     trimAction: o.trim?.action || NONE_TRIM_ACTION,
     residualAllowanceMm: decimalToInput(o.trim?.residualAllowanceMm),
     residualTailMaxMm: decimalToInput(o.threadTrim?.residualTailMaxMm),
+    pressAction: o.press?.action || NONE_PRESS_ACTION,
+    pressToward: o.press?.toward || NONE_PRESS_TOWARD,
     cleaningKind: o.clean?.kind || NONE_CLEANING_KIND,
     coverageMode: o.inspect?.coverageMode || NONE_COVERAGE_MODE,
     wetProcessKind: o.wetProcessKind || NONE_WET_PROCESS,
@@ -2129,6 +2142,10 @@ function OperationEditor({
     control,
     name: `operations.${index}.residualTailMaxMm`,
   }) ?? '') as string;
+  const pressAction = (useWatch({ control, name: `operations.${index}.pressAction` }) ??
+    NONE_PRESS_ACTION) as string;
+  const pressToward = (useWatch({ control, name: `operations.${index}.pressToward` }) ??
+    NONE_PRESS_TOWARD) as string;
   const cleaningKind = (useWatch({ control, name: `operations.${index}.cleaningKind` }) ??
     NONE_CLEANING_KIND) as string;
   const coverageMode = (useWatch({ control, name: `operations.${index}.coverageMode` }) ??
@@ -2199,6 +2216,15 @@ function OperationEditor({
   const showWeld = ownsBlock('weld') && isWeldStep;
   const showTrim = ownsBlock('trim');
   const showThreadTrim = ownsBlock('threadTrim');
+  // G — ПОД-ГЛАГОЛ ВТО. Гейт СВОЙ, а не `ownsPressSettings`: тот отвечает «шагу можно дать
+  // настройки пресса» и включает дублирование и печать, а под-глагол сервер на них отвергает по
+  // имени. И НЕ `isPressStep`: разутюжка — глагол `PRESS_OPEN`, который сам и есть ответ, а
+  // второй его записью (`PRESS_OPEN` + `open`) форма родила бы два написания одного факта — два
+  // разных кортежа в проекции дайджеста секции. Дублирование сюда не входит по контракту.
+  const showPressAction = opType === 'TECH_CARD_OPERATION_TYPE_PRESS';
+  // НАПРАВЛЕНИЕ — ТОЛЬКО У «ЗАУТЮЖИТЬ». При остальных приёмах припуск никуда не укладывается:
+  // контрол там не «необязателен», он бессмыслен, и сервер отвергает поле по имени.
+  const showPressToward = showPressAction && pressAction === PRESS_TO_ONE_SIDE;
   const showFastening =
     ownsBlock('fastening') &&
     onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE);
@@ -2283,6 +2309,8 @@ function OperationEditor({
     showWeld && feedSpeedMMin.trim() !== '',
     showTrim && residualAllowanceMm.trim() !== '',
     showThreadTrim && residualTailMaxMm.trim() !== '',
+    showPressAction && pressAction !== NONE_PRESS_ACTION,
+    showPressToward && pressToward !== NONE_PRESS_TOWARD,
     showFastening && onMachine(BUTTONHOLE_MACHINE) && buttonholeStyle !== NONE_BUTTONHOLE_STYLE,
     showFastening && onMachine(BUTTONHOLE_MACHINE) && cutLengthMm.trim() !== '',
     showFastening &&
@@ -2310,7 +2338,8 @@ function OperationEditor({
     showPrint ||
     showWeld ||
     showTrim ||
-    showThreadTrim;
+    showThreadTrim ||
+    showPressAction;
   const showSewingOverrides = !isPressStep || sewingOverrideCount > 0;
   const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
 
@@ -2484,6 +2513,15 @@ function OperationEditor({
       dropText('residualAllowanceMm');
     }
     if (!showThreadTrim) dropText('residualTailMaxMm');
+
+    // G — ВТО. Под-глагол гаснет на всяком глаголе, кроме PRESS (на PRESS_OPEN ответом служит сам
+    // глагол); направление — ещё и на всяком приёме, кроме «заутюжить». Гейты те же, что у
+    // рендера и у маппера записи: разойдись хоть один, и получилось бы либо поле, которое видно и
+    // заполняется, но выбрасывается на проводе, либо значение, стёртое на экране, но уехавшее из
+    // состояния формы.
+    if (opType !== 'TECH_CARD_OPERATION_TYPE_PRESS') dropEnum('pressAction', NONE_PRESS_ACTION);
+    if (opType !== 'TECH_CARD_OPERATION_TYPE_PRESS' || pressAction !== PRESS_TO_ONE_SIDE)
+      dropEnum('pressToward', NONE_PRESS_TOWARD);
     if (!ownsBlock('clean')) dropEnum('cleaningKind', NONE_CLEANING_KIND);
     if (!ownsBlock('inspect')) dropEnum('coverageMode', NONE_COVERAGE_MODE);
     if (opType !== 'TECH_CARD_OPERATION_TYPE_WET_PROCESS')
@@ -2506,6 +2544,7 @@ function OperationEditor({
     isMachineStep,
     isHardwareStep,
     attachMethod,
+    pressAction,
     needleCount,
     placementCount,
     showStitching,
@@ -2685,6 +2724,9 @@ function OperationEditor({
     attachMethod,
     coverageMode,
     labelAttachStitch,
+    // ПОД-ГЛАГОЛ ВТО — ЧАСТЬ ЗАПИСИ, ПО КОТОРОЙ ОПОЗНАЁТСЯ ПУНКТ (0325). Без него семь ВТО-пунктов
+    // читались бы одним «Press flat»: выбрал «Steam» — заголовок сказал бы «приутюжить».
+    pressAction,
     bomKinds: stepBomKinds,
   });
 
@@ -2749,10 +2791,10 @@ function OperationEditor({
     const written = kindWrites(k, machineForAsk);
     const writes = Object.entries(written) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of writes) {
-      // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА — И ЭТО ТОЧКА ПОДКЛЮЧЕНИЯ ВТО.
-      // `press_action` / `press_toward` заводит контрактная сторона; как только они появятся в
-      // `emptyOperation` и схеме, а флаг в `operation-kinds` поднимут, значение поедет отсюда без
-      // единой правки здесь.
+      // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА. Так `press_action` и дождался
+      // своего контракта (0325) — не написав ни разу и не сломав ни одного шага; теперь имя в
+      // `emptyOperation` есть, и под-глагол ВТО едет отсюда, без единой правки в этом цикле.
+      // Щит остаётся: следующее поле пикера войдёт тем же путём.
       if (!(field in emptyOperation)) continue;
       setValue(`${p}.${field}`, value, { shouldDirty: true });
     }
@@ -2825,6 +2867,7 @@ function OperationEditor({
         attachMethod: r.attachMethod as string,
         coverageMode: r.coverageMode as string,
         labelAttachStitch: r.labelAttachStitch as string,
+        pressAction: r.pressAction as string,
         bomKinds: bomKeys
           .map((key) => bomLines.find((b) => b.lineKey === key)?.kind ?? '')
           .filter(Boolean),
@@ -2837,7 +2880,7 @@ function OperationEditor({
     if (!source) return;
     const p = `operations.${index}` as const;
     for (const field of KIND_PROPERTY_FIELDS) {
-      if (!(field in empty)) continue; // ВТО-поля, которых в контракте ещё нет
+      if (!(field in empty)) continue; // имя, которого строка формы ещё не знает
       const from = source[field];
       const blank = empty[field];
       if (from === undefined || from === blank) continue;
@@ -3708,6 +3751,43 @@ function OperationEditor({
               maxDecimals={1}
               placeholder='3'
             />
+          </div>
+        </>
+      )}
+
+      {/* G — ЧТО ИМЕННО ДЕЛАЕТ УТЮГ, И КУДА ЛЁГ ПРИПУСК (0325). До этой волны глагол PRESS был
+          мешком из семи приёмов: подпись обещала «to one side / steam», а сказать это было нечем —
+          разница уезжала в прозу note, которой нет ни в подписи карточки, ни на печатном листе.
+
+          ЗДЕСЬ, А НЕ В СТВОРКЕ: у обоих полей пустое значит «никто не сказал», а не «наследуй», —
+          ступени выше у них нет ни в профиле пресса, ни в карточных дефолтах.
+
+          НАПРАВЛЕНИЕ ПОЯВЛЯЕТСЯ ТОЛЬКО ПРИ «ЗАУТЮЖИТЬ» И ТАМ ОБЯЗАТЕЛЬНО. При остальных приёмах
+          припуск никуда не укладывается: контрол не «необязателен», он бессмыслен, и сервер
+          отвергает поле по имени. Отказ за него ставит zod — на самом контроле, а не тостом после
+          сохранения шести вкладок. */}
+      {showPressAction && (
+        <>
+          <GroupLabel>press detail</GroupLabel>
+          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+            {/* Список — с оглядкой на то, что в шаге уже лежит: словарь ТОТАЛЕН над контрактом,
+                поэтому токен вне списка означает приём НОВЕЕ этого бандла, а Radix нарисовал бы
+                такое значение ПУСТЫМ триггером — и технолог прочитал бы «не указано» там, где
+                указано. */}
+            <SelectField
+              name={`operations.${index}.pressAction`}
+              label='press action'
+              items={stepEnumOptions(PRESS_ACTION_LABELS, '— not stated —', pressAction)}
+              className={selectNoGrow}
+            />
+            {showPressToward && (
+              <SelectField
+                name={`operations.${index}.pressToward`}
+                label='allowance goes *'
+                items={stepEnumOptions(PRESS_TOWARD_LABELS, '— which way —', pressToward)}
+                className={selectNoGrow}
+              />
+            )}
           </div>
         </>
       )}
@@ -5300,10 +5380,10 @@ export function OperationsField({
       ...(r.discriminatorField && r.discriminatorValue
         ? ({ [r.discriminatorField]: r.discriminatorValue } as Partial<typeof emptyOperation>)
         : {}),
-      // ОСТАЛЬНОЕ, ЧТО ПРОСТАВИЛ ПУНКТ ПИКЕРА (класс шва у отстрочки; завтра — ВТО-подглагол).
+      // ОСТАЛЬНОЕ, ЧТО ПРОСТАВИЛ ПУНКТ ПИКЕРА: класс шва у отстрочки, под-глагол у ВТО (0325).
       // Имена, которых в `emptyOperation` нет, отбрасываются ЗДЕСЬ, а не молча ниже: строка
       // расстилается прямо в массив полей, и ключ, которого RHF не регистрировал, поехал бы в
-      // форму мусором. Это же и точка подключения ВТО: заведут поле — и оно начнёт проходить.
+      // форму мусором. Щит остаётся и после 0325 — следующее поле пикера войдёт тем же путём.
       ...(Object.fromEntries(
         Object.entries(r.kindWrites ?? {}).filter(([k]) => k in emptyOperation),
       ) as Partial<typeof emptyOperation>),

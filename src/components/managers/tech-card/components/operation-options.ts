@@ -13,6 +13,8 @@ import {
   common_TechCardMachineType,
   common_TechCardOperationType,
   common_TechCardPeelMode,
+  common_TechCardPressAction,
+  common_TechCardPressToward,
   common_TechCardPressureScale,
   common_TechCardPrintMethod,
   common_TechCardReinforcement,
@@ -744,6 +746,7 @@ export const HARDWARE_ATTACH_METHOD_LABELS: Record<common_TechCardHardwareAttach
   TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET: 'press-set',
   TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP: 'crimped',
   TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED: 'threaded through',
+  TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER: 'held on some other way (see note)',
 };
 
 /** H2 — how the hole under the hardware is made. */
@@ -775,6 +778,7 @@ export const PRINT_METHOD_LABELS: Record<common_TechCardPrintMethod, string> = {
   TECH_CARD_PRINT_METHOD_HEAT_TRANSFER: 'heat transfer',
   TECH_CARD_PRINT_METHOD_FOIL: 'foil',
   TECH_CARD_PRINT_METHOD_LASER_ENGRAVE: 'laser engrave',
+  TECH_CARD_PRINT_METHOD_OTHER: 'another method (see note)',
 };
 
 /** P2 — when the carrier film comes off, and the temperature word is the whole instruction: a hot
@@ -807,6 +811,7 @@ export const TRIM_ACTION_LABELS: Record<common_TechCardTrimAction, string> = {
   TECH_CARD_TRIM_ACTION_NOTCH_CONVEX: 'notch the convex curve',
   TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL: 'trim the corner diagonally',
   TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE: 'turn and shape',
+  TECH_CARD_TRIM_ACTION_OTHER: 'another cut (see note)',
 };
 
 /** C1 — the discriminator of a CLEAN step. */
@@ -816,6 +821,7 @@ export const CLEANING_KIND_LABELS: Record<common_TechCardCleaningKind, string> =
   TECH_CARD_CLEANING_KIND_DUST_LINT: 'dust / lint removal',
   TECH_CARD_CLEANING_KIND_CHALK_REMOVAL: 'chalk removal',
   TECH_CARD_CLEANING_KIND_ADHESIVE_REMOVAL: 'adhesive removal',
+  TECH_CARD_CLEANING_KIND_OTHER: 'something else (see note)',
 };
 
 /** Q1 — the discriminator of an INSPECT step, and the one fact that says how much work it is:
@@ -826,6 +832,7 @@ export const INSPECT_COVERAGE_LABELS: Record<common_TechCardInspectCoverage, str
   TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE: 'sample per bundle',
   TECH_CARD_INSPECT_COVERAGE_AQL_PLAN: 'AQL plan',
   TECH_CARD_INSPECT_COVERAGE_FIRST_OUTPUT: 'first output of the run',
+  TECH_CARD_INSPECT_COVERAGE_OTHER: 'another coverage (see note)',
 };
 
 /** WP1 — the discriminator of a WET_PROCESS step. */
@@ -835,6 +842,56 @@ export const WET_PROCESS_KIND_LABELS: Record<common_TechCardWetProcessKind, stri
   TECH_CARD_WET_PROCESS_KIND_ENZYME: 'enzyme wash',
   TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE: 'garment dye',
   TECH_CARD_WET_PROCESS_KIND_SOFTENER: 'softener',
+  TECH_CARD_WET_PROCESS_KIND_OTHER: 'another bath (see note)',
+};
+
+// ВТО — ДВА СЛОВАРЯ 0325, И ОНИ РАЗНЫЕ ПО ЖАНРУ. Первый называет РАБОТУ («что именно делает
+// утюг»), второй — НАЗНАЧЕНИЕ ПРИПУСКА («куда он лёг»), и второй законен только при «заутюжить».
+//
+// ПОДПИСИ — ТЕРМИНЫ ЦЕХА, А НЕ ПЕРЕВОД ТОКЕНОВ. `BODY` в токене — «изделие», но технолог про
+// втачной рукав говорит «на изделие, в сторону проймы», и без второй половины подпись читалась бы
+// как «куда угодно, лишь бы не в рукав». Ровно так же `SHELL` — не «верх», а «на верх, от
+// обтачки»: пара «facing / shell» описывает ОДИН шов с двух сторон, и различает их именно то, от
+// чего припуск уводят.
+//
+// «Прочее» у обоих — ОТВЕТ, а не пустота: пустая подпись в этом файле значит ровно одно — сентинел
+// `*_UNKNOWN`, и он тут ровно один (см. `stepDiscriminatorUnset`).
+
+/** G1 — ЧТО ИМЕННО делает ВТО-шаг. Не required ни на одном глаголе: старая строка PRESS без
+ *  под-глагола обязана читаться и сохраняться как есть. */
+export const PRESS_ACTION_LABELS: Record<common_TechCardPressAction, string> = {
+  TECH_CARD_PRESS_ACTION_UNKNOWN: '',
+  TECH_CARD_PRESS_ACTION_PRESS_FLAT: 'press flat',
+  TECH_CARD_PRESS_ACTION_TO_ONE_SIDE: 'press to one side',
+  // Уживается с ГЛАГОЛОМ `PRESS_OPEN` и не заменяет его: канонической записью разутюжки остаётся
+  // глагол, а этот член существует, чтобы прочитать шаг, записанный вторым написанием.
+  TECH_CARD_PRESS_ACTION_OPEN: 'press open',
+  TECH_CARD_PRESS_ACTION_STEAM: 'steam',
+  TECH_CARD_PRESS_ACTION_FINAL: 'final press',
+  TECH_CARD_PRESS_ACTION_EASE_IN: 'ease in the fullness',
+  TECH_CARD_PRESS_ACTION_STRETCH: 'stretch the edge',
+  TECH_CARD_PRESS_ACTION_MOULD: 'mould on a form',
+  TECH_CARD_PRESS_ACTION_OTHER: 'another press action (see note)',
+};
+
+/** G2 — КУДА лёг припуск. Собственный словарь, а НЕ `TechCardGarmentZone`: «вверх», «вниз» и «к
+ *  центру» зонами не являются, а второе поле зонного типа на шаге, у которого уже есть zone, —
+ *  ловушка «два ключа под одним именем». */
+export const PRESS_TOWARD_LABELS: Record<common_TechCardPressToward, string> = {
+  TECH_CARD_PRESS_TOWARD_UNKNOWN: '',
+  TECH_CARD_PRESS_TOWARD_FRONT: 'toward the front',
+  TECH_CARD_PRESS_TOWARD_BACK: 'toward the back',
+  TECH_CARD_PRESS_TOWARD_UP: 'upward',
+  TECH_CARD_PRESS_TOWARD_DOWN: 'downward',
+  TECH_CARD_PRESS_TOWARD_TOWARD_CENTER: 'toward the centre',
+  TECH_CARD_PRESS_TOWARD_AWAY_FROM_CENTER: 'away from the centre',
+  TECH_CARD_PRESS_TOWARD_SLEEVE: 'into the sleeve',
+  TECH_CARD_PRESS_TOWARD_BODY: 'onto the body, toward the armhole',
+  TECH_CARD_PRESS_TOWARD_FACING: 'onto the facing',
+  TECH_CARD_PRESS_TOWARD_SHELL: 'onto the shell, away from the facing',
+  TECH_CARD_PRESS_TOWARD_LINING: 'toward the lining',
+  TECH_CARD_PRESS_TOWARD_SIDE: 'toward the side seam',
+  TECH_CARD_PRESS_TOWARD_OTHER: 'somewhere else (see note)',
 };
 
 // FA1 and FA5 are ADJECTIVES, not phrases, because they describe the same buttonhole and are
