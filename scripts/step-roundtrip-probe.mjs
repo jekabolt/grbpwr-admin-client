@@ -31,10 +31,18 @@
 //                                                          покраснеть
 //
 // РЕЗУЛЬТАТ ПРОГОНА МУТАЦИЙ (2026-08-22, ветка feat/operation-kinds-ui):
-//   --mutate        → 3 провала: «bindingStyle едет на любом классе шва» (А) и обе половины круга
-//                     Б по bindingStyle. Откатано.
+//   --mutate        → 2 провала: «bindingStyle едет на любом классе шва» (А) и потеря круга Б по
+//                     bindingStyle; байтовая идемпотентность второго оборота при этом остаётся
+//                     зелёной — мутированный маппер согласен сам с собой. Откатано.
 //   --mutate-effect → 1 провал: «в эффектах нет разрушающих setValue» назвал внедрённое поле.
 //                     Откатано.
+//
+// РЕВЬЮ Ф4 (2026-08-22), адверсарные мутации сверх авторских — до ужесточения цитаты В:
+//   зануление toward / гейт machineType в маппере → по 2 провала (А + круг Б): защита не точечная;
+//   стирающий эффект БЕЗ shouldDirty (и/или без массива зависимостей) → ОБЕ пробы зелёные.
+//   Дыра закрыта здесь же: цитата В больше не фильтрует по слову shouldDirty (setValue без опций
+//   стирает так же, а форму даже не пачкает — прячась и от поведенческой проверки) и спрашивает
+//   обе арности useEffect. Тот же стиратель после ужесточения — 1 провал. Откатано.
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -521,16 +529,40 @@ head('цитата В — разметка: ни один useEffect не сти�
 const EFFECT_WRITE_WHITELIST = new Set(['outputUnitName']);
 
 function destructiveEffectWrites(file) {
-  const raw = execFileSync(
-    'ast-grep',
-    ['run', '-p', 'useEffect(() => { $$$BODY }, $DEPS)', '-l', 'tsx', '--json=compact', file],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  // ДВЕ АРНОСТИ И НИКАКОГО ФИЛЬТРА ПО shouldDirty — обе дыры найдены адверсарной мутацией ревью:
+  // эффект без массива зависимостей не матчился паттерном вовсе, а setValue без опций стирает
+  // значение точно так же, но форму НЕ пачкает — то есть прятался и от этой проверки, и от
+  // поведенческой «открытие не пачкает форму» в step-residue-probe. Теперь любой setValue по пути
+  // шага внутри любого useEffect обязан быть в поимённом вайтлисте.
+  const matches = ['useEffect(() => { $$$BODY }, $DEPS)', 'useEffect(() => { $$$BODY })'].flatMap(
+    (pattern) => {
+      let raw;
+      try {
+        raw = execFileSync('ast-grep', ['run', '-p', pattern, '-l', 'tsx', '--json=compact', file], {
+          encoding: 'utf8',
+          maxBuffer: 64 * 1024 * 1024,
+        });
+      } catch (e) {
+        // ast-grep, как grep, выходит с кодом 1 при НУЛЕ совпадений — это ответ, а не отказ.
+        // Ответом считается только распарсиваемый JSON-массив в stdout: настоящий сбой (нет
+        // бинаря, битый паттерн) пробрасывается, иначе «инструмент сломан» читалось бы как
+        // «эффектов нет» — ложная зелень ровно той пробы, что от неё защищает.
+        raw = typeof e?.stdout === 'string' ? e.stdout : '';
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          throw e;
+        }
+        if (!Array.isArray(parsed)) throw e;
+      }
+      return JSON.parse(raw || '[]');
+    },
   );
-  const matches = JSON.parse(raw || '[]');
   const writes = [];
   for (const m of matches) {
     const text = m.text ?? '';
-    if (!text.includes('shouldDirty')) continue;
+    if (!text.includes('setValue')) continue;
     const re = /setValue\(\s*`?(?:\$\{p\}|operations\.\$\{index\})\.([A-Za-z0-9_]+)`?/g;
     let hit;
     let found = false;

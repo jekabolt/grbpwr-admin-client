@@ -18,9 +18,15 @@
 //                                                  (`!f.shown` → `f.shown`) — проба обязана
 //                                                  покраснеть
 //
-// РЕЗУЛЬТАТ ПРОГОНА МУТАЦИИ (2026-08-22, ветка feat/operation-kinds-ui): 12 провалов — ни одной
+// РЕЗУЛЬТАТ ПРОГОНА МУТАЦИИ (2026-08-22, ветка feat/operation-kinds-ui): 14 провалов — ни одной
 // строки остатка ни на одном шаге, [clear] нечего нажимать, и вдобавок «оборудование ВТО остатком
-// не считается» переворачивается вместе с предикатом. Откатано.
+// не считается» переворачивается вместе с предикатом. Откатано. (12 до секций 6-7; +2 — строка
+// 6-тер, которой под мутацией не в чем стоять.)
+//
+// СЕКЦИИ 6-7 ДОБАВЛЕНЫ РЕВЬЮ Ф4: убийство catch-строк (`.filter(() => false)` на
+// residueErrorRows) оставляло обе пробы зелёными — второй род строк, ради которого полоса
+// расширялась против плана (§3.3), не держался ничем. Прогнано: та мутация теперь даёт 3 провала.
+// Откатано.
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден:
 // гейт, который нельзя выполнить, не красит сборку в красный.
@@ -282,6 +288,67 @@ await mount({ operationType: T.MACHINE, zone: T.ZONE, machineType: T.LOCKSTITCH,
 ck(!(await has('[data-residue-strip]')), 'у машинного шага с машинными фактами полосы нет');
 ck(await has(CTRL('threadCount')), 'число ниток стоит своим контролом');
 ck((await dirty()).isDirty === false, 'и здесь открытие не пачкает форму');
+
+// ── 6. ВТОРОЙ РОД СТРОК: ОТКАЗ НА ПУТИ БЕЗ КОНТРОЛА ───────────────────────────────────────────
+// Добавлено ревью Ф4: убийство catch-строк (`.filter(() => false)` на residueErrorRows) оставляло
+// ОБЕ пробы зелёными — то есть непроверенным был ровно тот механизм, ради которого полоса
+// расширялась против плана (§3.3: строка 4 матрицы §6.1, отказ Ф3 на ПУСТОМ невидимом поле).
+// Отказ кладётся тем же жестом, что у applyServerFieldErrors: setError(path, {type:'server'}).
+head('6. catch-строка: отказ сервера на несмонтированном пути');
+await mount({ operationType: T.PACK, zone: T.ZONE });
+ck(!(await has('[data-residue-strip]')), 'до отказа полосы нет');
+await page.evaluate(() =>
+  window.__residue.setError('operations.0.pressToward', 'needs press action «to one side»'),
+);
+await page.waitForTimeout(150);
+ck(
+  await has(RES('pressToward')),
+  'отказ на ПУСТОМ поле без контрола стоит catch-строкой полосы',
+);
+ck(
+  (await textOf(RES('pressToward'))).includes('needs press action'),
+  'строка цитирует серверный текст',
+  await textOf(RES('pressToward')),
+);
+ck(
+  (await textOf(RES('pressToward'))).includes('allowance goes'),
+  'строка называет поле словами его контрола',
+  await textOf(RES('pressToward')),
+);
+
+head('6-бис. отказ на видимом контроле в полосу не попадает');
+await mount({ operationType: T.MACHINE, zone: T.ZONE, machineType: T.LOCKSTITCH });
+await page.evaluate(() => window.__residue.setError('operations.0.machineType', 'pick the machine'));
+await page.waitForTimeout(150);
+ck(
+  !(await has('[data-residue-strip]')),
+  'отказ поля, чей контрол на экране, живёт на контроле, а не строкой полосы',
+);
+
+head('6-тер. отказ на ОСТАТКЕ встаёт в ту же строку, что и значение');
+await mount({ operationType: T.PRESS, zone: T.ZONE, pressEquipment: T.IRON, threadCount: 3 });
+await page.evaluate(() =>
+  window.__residue.setError('operations.0.threadCount', 'not applicable on a press step'),
+);
+await page.waitForTimeout(150);
+ck(
+  (await page.locator(RES('threadCount')).count()) === 1,
+  'строка одна: остаток и его отказ не раздваиваются',
+);
+ck(
+  (await textOf(RES('threadCount'))).includes('not applicable'),
+  'отказ дописан в строку остатка',
+  await textOf(RES('threadCount')),
+);
+
+// ── 7. СТРОКА 4 МАТРИЦЫ §6.1 НА ЧУЖОМ ГЛАГОЛЕ ─────────────────────────────────────────────────
+// План считал, что при «режим пуст + ширина есть» контрола режима нет и отказ Ф3 может лечь
+// только в catch-строку. На деле селект режима рендерится на ЛЮБОМ глаголе, пока у шага есть
+// хоть один факт отстрочки (showTopstitch), — проверено здесь на немашинном шаге, а не выведено.
+head('7. ширина без режима на чужом глаголе: контролу режима есть куда встать');
+await mount({ operationType: T.PACK, zone: T.ZONE, topstitchWidthMm: '4' });
+ck(await has(CTRL('topstitchMode')), 'селект режима отстрочки есть и на PACK-шаге');
+ck(await has(RES('topstitchWidthMm')), 'сама ширина при этом стоит строкой остатка');
 
 await browser.close();
 console.log(`\n${bad === 0 ? 'проба зелёная' : `провалов: ${bad}`}`);

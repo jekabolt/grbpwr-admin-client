@@ -33,6 +33,10 @@ type ResidueProbe = {
   values: () => Record<string, unknown>;
   dirty: () => { isDirty: boolean; fields: string[] };
   trigger: () => Promise<void>;
+  // Кладёт отказ на путь ТЕМ ЖЕ методом, каким его кладёт applyServerFieldErrors на карточке
+  // (`setError(path, { type: 'server', message })`). Нужна второму роду строк полосы: отказ на
+  // пути, чей контрол не смонтирован, — включая отказ на пустом поле.
+  setError: (path: string, message: string) => void;
 };
 declare global {
   interface Window {
@@ -61,6 +65,9 @@ function Harness({ op }: { op: Record<string, unknown> }) {
   });
   probe.trigger = async () => {
     await methods.trigger('operations');
+  };
+  probe.setError = (path, message) => {
+    methods.setError(path as never, { type: 'server', message });
   };
   return (
     <QueryClientProvider client={qc}>
