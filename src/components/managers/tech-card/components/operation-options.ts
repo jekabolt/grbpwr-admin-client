@@ -957,6 +957,8 @@ export const buttonAttachPatternLabel = (v?: string): string =>
   enumText(BUTTON_ATTACH_PATTERN_LABELS, v);
 export const zipperApplicationLabel = (v?: string): string =>
   enumText(ZIPPER_APPLICATION_LABELS, v);
+export const pressActionLabel = (v?: string): string => enumText(PRESS_ACTION_LABELS, v);
+export const pressTowardLabel = (v?: string): string => enumText(PRESS_TOWARD_LABELS, v);
 
 // --- the blocks, as the sheet reads them ---------------------------------------------------------
 
@@ -1014,6 +1016,8 @@ export type StepFacts = {
   threadTrim?: { residualTailMaxMm?: string };
   clean?: { kind?: string };
   inspect?: { coverageMode?: string };
+  /** ВТО (0325) — под-глагол и, при «на сторону», направление припуска. */
+  press?: { action?: string; toward?: string };
   fastening?: {
     buttonholeStyle?: string;
     cutLengthMm?: string;
@@ -1052,6 +1056,32 @@ export function stepDiscriminatorText(o: StepDiscriminators): string {
   ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/** ЧТО ИМЕННО ДЕЛАЕТ УТЮГ — и, при «на сторону», КУДА ЛЁГ ПРИПУСК (0325).
+ *
+ *  ПЕЧАТАЕТСЯ В КОЛОНКЕ «MACHINE / MODE», ПЕРВЫМ, ровно там же и по тому же доводу, по которому
+ *  девять новых глаголов печатают там свой дискриминатор: колонка отвечает «на чём и в каком
+ *  режиме», а под-глагол и есть режим. Без него в цех уезжало слово «press» одинаково для
+ *  приутюживания, заутюживания, отпаривания, окончательной ВТО, посадки, оттяжки и формования —
+ *  то есть ровно та дыра, ради которой волна и заводилась.
+ *
+ *  ОДНИМ ЭЛЕМЕНТОМ, А НЕ ДВУМЯ ЧЕРЕЗ «·»: направление не второй факт о шаге, а вторая половина
+ *  одной фразы («press to one side, toward the front»), и разнесённое точкой оно читалось бы как
+ *  ещё одна настройка пресса. Тот же приём, что у петли, где форма и направление — прилагательные
+ *  к одной прорези.
+ *
+ *  ПОДПИСИ — ТЕ ЖЕ САМЫЕ КАРТЫ, что рисуют оба пикера в форме: второй копии слов не заводится,
+ *  иначе технолог выбрал бы одно слово, а швея прочитала другое.
+ *
+ *  ПРО `PRESS_OPEN` СПЕЦИАЛЬНОГО ПРАВИЛА НЕТ. Пикер туда под-глагол не пишет (каноническая запись
+ *  разутюжки — сам глагол), и у такого шага здесь пусто; а прочитанный с чужой записи `open`
+ *  печатается как есть — молчать о том, что в записи стоит, композитору фактов не положено. */
+export function stepPressText(o: StepFacts): string {
+  const action = pressActionLabel(o.press?.action);
+  if (!action) return '';
+  const toward = pressTowardLabel(o.press?.toward);
+  return toward ? `${action}, ${toward}` : action;
 }
 
 /** HOW MANY OF THEM AND HOW FAR APART — printed in the ZONE column, under the zone word, because

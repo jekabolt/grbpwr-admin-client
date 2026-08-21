@@ -165,6 +165,7 @@ import {
   seamClassOptions,
   stepDiscriminatorText,
   stepPlacementText,
+  stepPressText,
   stepSeamFactTexts,
   stepToolFactParts,
   topstitchModeHasWidth,
@@ -178,9 +179,14 @@ const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 // THE WIRE STEP, AS THE FACT COMPOSERS READ IT — one border crossing, in one place. The composers
 // live beside machineProfileParts (so the editor and the sheet cannot word a setting differently)
 // and take decimals as STRINGS, the way the form holds them; the wire carries Decimal messages. That
-// is the whole of this function: decimalToInput on every decimal of the eleven blocks, and nothing
+// is the whole of this function: decimalToInput on every decimal of the twelve blocks, and nothing
 // else. A second copy of it inside the table would be a second chance to forget a field, and a
 // forgotten field here does not fail to compile — it silently fails to print.
+//
+// И ЭТО УЖЕ ОДИН РАЗ СЛУЧИЛОСЬ, ровно так, как обещано абзацем выше: блок `press` волны 0325 сюда
+// не попал, члена `press` не было и в `StepFacts`, компилятор промолчал — и семь ВТО-приёмов
+// (приутюжить, заутюжить, отпарить, окончательная ВТО, посадить, оттянуть, сформовать) уезжали в
+// цех ОДНИМ словом «press». Добавляя семейство в контракт, добавляй его ЗДЕСЬ первым делом.
 const wireStepFacts = (o: common_TechCardOperation): StepFacts => ({
   operationType: o.operationType,
   printMethod: o.printMethod,
@@ -221,6 +227,7 @@ const wireStepFacts = (o: common_TechCardOperation): StepFacts => ({
   threadTrim: o.threadTrim && { residualTailMaxMm: dec(o.threadTrim.residualTailMaxMm) },
   clean: o.clean && { kind: o.clean.kind },
   inspect: o.inspect && { coverageMode: o.inspect.coverageMode },
+  press: o.press && { action: o.press.action, toward: o.press.toward },
   fastening: o.fastening && {
     buttonholeStyle: o.fastening.buttonholeStyle,
     cutLengthMm: dec(o.fastening.cutLengthMm),
@@ -1148,7 +1155,8 @@ export function TechPackDocument({
     // закрепка, рисунок пуговицы, установка молнии, допустимый хвост нитки. Наследовать им не от
     // чего (профиля такого семейства не бывает), поэтому маркера «своё» они не несут — и это не
     // умолчание, а отсутствие второй ступени.
-    const toolFacts = stepToolFactParts(wireStepFacts(o)).map((p) => ({ ...p, overridden: false }));
+    const facts = wireStepFacts(o);
+    const toolFacts = stepToolFactParts(facts).map((p) => ({ ...p, overridden: false }));
     const settings = [
       ...(ownsPress
         ? [
@@ -1181,6 +1189,11 @@ export function TechPackDocument({
     //
     // У ПЕЧАТИ ОБА: метод («heat transfer») И пресс, на котором её прижимают. Метод первым — он
     // говорит, что делают; имя пресса вторым — на чём.
+    //
+    // И У ВТО ОБА, ПО ТОМУ ЖЕ ПРАВИЛУ (0325): под-глагол с направлением говорит, ЧТО делают
+    // утюгом («press to one side, toward the front»), имя пресса — на чём. До этой волны у
+    // ВТО-шага здесь стояло одно имя оборудования, а колонка «operation» называла все семь
+    // приёмов словом «press»: разница между заутюживанием и оттяжкой на лист не попадала вовсе.
     const head = machineStep
       ? machineProfile
         ? machineProfileName(machineProfile)
@@ -1190,6 +1203,7 @@ export function TechPackDocument({
           machineTypeLabelWithStitch(o.machineType, o.threadCount)
       : [
           stepDiscriminatorText(o),
+          stepPressText(facts),
           ownsPress
             ? pressProfile
               ? pressProfileName(pressProfile)

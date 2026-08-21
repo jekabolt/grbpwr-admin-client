@@ -1531,6 +1531,21 @@ const operationSchema = z.object({
       refuseAtWeld(!!o.needleSizeNm, 'needleSizeNm', 'needle');
       refuseAtWeld(stepEnumSet(o.threadTension), 'threadTension', 'thread to tension');
       refuseAtWeld(stepTextSet(o.stitchWidthMm), 'stitchWidthMm', 'stitch');
+      // И ЧЕТВЁРКА S-БЛОКА — ПО ТОМУ ЖЕ ПРАВИЛУ И ТЕМ ЖЕ СПИСКОМ, ЧТО У СЕРВЕРА. Собственный гейт
+      // семейства — «это машинный шаг», а сварочная машина машинная: без этих четырёх строк на
+      // безыгольном шаге сохранялись бы «4 иглы с шагом 3.2 мм и закрепка», и отказ приходил бы
+      // ТОСТОМ с сервера после сохранения шести вкладок вместо контрола, который его чинит.
+      //
+      // КАЛИБР ПЕРЕД ЧИСЛОМ ИГЛ — порядок сервера, повторённый нарочно: одиночный калибр до этого
+      // правила не доходит вовсе (его раньше отвергает правило «сначала скажи, сколько игл»), и при
+      // обратном порядке отказ на законной паре «2 иглы + калибр» калибр бы никогда не назвал.
+      //
+      // `fullnessRatio` СЮДА НЕ ВХОДИТ: сервер разрешает посадку на сварке сознательно — это
+      // соотношение длин слоёв при подаче, свойство подачи, а не иглы.
+      refuseAtWeld(stepTextSet(o.needleGaugeMm), 'needleGaugeMm', 'needle');
+      refuseAtWeld(!!o.needleCount, 'needleCount', 'needle');
+      refuseAtWeld(stepEnumSet(o.seamSecuring), 'seamSecuring', 'stitch to secure');
+      refuseAtWeld(stepTextSet(o.rowSpacingMm), 'rowSpacingMm', 'row of stitching');
     }
 
     // ЧЕТЫРЕ ДВУХ-ПОЛЕВЫХ ПРАВИЛА. В БД их нет и быть не может — двухколоночный CHECK это урок

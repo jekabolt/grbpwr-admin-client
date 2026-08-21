@@ -82,11 +82,13 @@ import {
   KIND_UNSET,
   OPERATION_KIND_BY_ID,
   isKindSentinel,
+  kindClears,
   kindLabelOf,
   kindOf,
   kindPickerItems,
   kindWrites,
   type OperationKind,
+  type OperationKindStep,
 } from './operation-kinds';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
@@ -2210,6 +2212,17 @@ function OperationEditor({
   // разных ответа на «несёт ли шаг это поле» и есть тот дефект, от которого карточка отказывается
   // сохраняться, показывая ошибку на контроле, которого нет на экране.
   const showStitching = ownsBlock('stitching');
+  // ИГЛА И РЯДЫ СТРОЧКИ — НЕ У СВАРОЧНОЙ МАШИНЫ. Собственный гейт S-блока — «это машинный шаг», а
+  // сварочная машина машинная; без этой строки открытая зона рисовала на ультразвуке число игл,
+  // калибр, закрепку и шаг между рядами — четыре контрола, значения которых уезжают на провод, а
+  // сервер отвергает их ПО ИМЕНИ («у сварочной машины нет ни иглы, ни нитки»), отказывая вместе с
+  // ними ВСЕЙ карточкой. Дефект был и до пикера, но пикер довёл до него в один клик.
+  //
+  // ПОСАДКА (`fullnessRatio`) ОСТАЁТСЯ, И ЭТО НЕ НЕДОСМОТР: сервер разрешает её на сварке
+  // СОЗНАТЕЛЬНО — посадка есть соотношение длин слоёв при ПОДАЧЕ, свойство подачи, а не иглы, и
+  // сварочная машина слои подаёт (у неё на то и `feed_speed_m_min`). Шов этикетки тоже остаётся:
+  // машинного гейта у него нет вовсе.
+  const showNeedleFacts = showStitching && !isWeldStep;
   const showPlacement = ownsBlock('placement');
   const showHardware = ownsBlock('hardware') && (isHardwareStep || onCycleMachine);
   const showPrint = ownsBlock('print') && !isLaserPrint;
@@ -2289,10 +2302,10 @@ function OperationEditor({
     topstitchMode !== NONE_TOPSTITCH,
     topstitchWidthMm.trim() !== '',
     topstitchRows > 0,
-    showStitching && needleCount > 0,
-    showStitching && needleGaugeMm.trim() !== '',
-    showStitching && seamSecuring !== NONE_SEAM_SECURING,
-    showStitching && rowSpacingMm.trim() !== '',
+    showNeedleFacts && needleCount > 0,
+    showNeedleFacts && needleGaugeMm.trim() !== '',
+    showNeedleFacts && seamSecuring !== NONE_SEAM_SECURING,
+    showNeedleFacts && rowSpacingMm.trim() !== '',
     showStitching && fullnessRatio.trim() !== '',
     showStitching && onMachine(BINDER_MACHINE) && bindingStyle !== NONE_BINDING_STYLE,
     showStitching && labelAttachStitch !== NONE_LABEL_ATTACH,
@@ -2471,14 +2484,18 @@ function OperationEditor({
     };
 
     // S — параметры строчки. Бейка живёт при явном окантовывателе, шов этикетки — при любой машинке.
+    // Игольная четвёрка гаснет ещё и на сварочной машине (см. `showNeedleFacts`), посадка — нет:
+    // сервер разрешает её там сознательно.
     if (!showStitching) {
-      dropInt('needleCount');
-      dropEnum('seamSecuring', NONE_SEAM_SECURING);
-      dropText('rowSpacingMm');
       dropText('fullnessRatio');
       dropEnum('labelAttachStitch', NONE_LABEL_ATTACH);
     }
-    if (!showStitching || needleCount < 2) dropText('needleGaugeMm');
+    if (!showNeedleFacts) {
+      dropInt('needleCount');
+      dropEnum('seamSecuring', NONE_SEAM_SECURING);
+      dropText('rowSpacingMm');
+    }
+    if (!showNeedleFacts || needleCount < 2) dropText('needleGaugeMm');
     if (!showStitching || mt !== BINDER_MACHINE) dropEnum('bindingStyle', NONE_BINDING_STYLE);
 
     // PL — сколько раз и с каким шагом.
@@ -2514,13 +2531,28 @@ function OperationEditor({
     }
     if (!showThreadTrim) dropText('residualTailMaxMm');
 
-    // G — ВТО. Под-глагол гаснет на всяком глаголе, кроме PRESS (на PRESS_OPEN ответом служит сам
-    // глагол); направление — ещё и на всяком приёме, кроме «заутюжить». Гейты те же, что у
-    // рендера и у маппера записи: разойдись хоть один, и получилось бы либо поле, которое видно и
-    // заполняется, но выбрасывается на проводе, либо значение, стёртое на экране, но уехавшее из
-    // состояния формы.
-    if (opType !== 'TECH_CARD_OPERATION_TYPE_PRESS') dropEnum('pressAction', NONE_PRESS_ACTION);
-    if (opType !== 'TECH_CARD_OPERATION_TYPE_PRESS' || pressAction !== PRESS_TO_ONE_SIDE)
+    // G — ВТО. Под-глагол гаснет на всяком глаголе, кроме ДВУХ ВТО-глаголов, направление — ещё и
+    // на всяком приёме, кроме «заутюжить».
+    //
+    // ГЕЙТ ОЧИСТКИ РАВЕН ГЕЙТУ МАППЕРА ЗАПИСИ, А НЕ ГЕЙТУ РЕНДЕРА, И ЭТО НЕ ОПЕЧАТКА. Очистка
+    // решает, что уедет на провод, — значит согласовываться она обязана с тем, кто на провод
+    // пишет. Маппер держит `PRESS_OPEN` в гейте нарочно: пикер туда под-глагол не пишет
+    // (каноническая запись разутюжки — сам глагол), но прочитанный с провода токен обязан уехать
+    // обратно ТЕМ ЖЕ токеном. Пока здесь стояло `!== PRESS`, круг «загрузил → сохранил» терял
+    // чужой факт МОЛЧА — и терял его ровно в тот момент, когда шаг ОТКРЫВАЛИ: эффект стирал
+    // токен на монтировании редактора, форма становилась грязной без единой человеческой правки,
+    // а тот же шаг мимо редактора уезжал на провод целым. Замерено на живом редакторе.
+    //
+    // РЕНДЕР ПРИ ЭТОМ УЖЕ, И ТОЖЕ НАРОЧНО: контрола под-глагола у `PRESS_OPEN` нет, потому что
+    // вторым написанием одного факта форма родила бы два разных кортежа в проекции дайджеста
+    // секции. Значит у разутюжки, прочитанной с чужой записи, ЕСТЬ невидимое значение — и это
+    // единственное место во всей очистке, где так можно: невидимое здесь не «забытое от прошлого
+    // глагола», а сказанное сервером, которое нам не поручено переписывать.
+    const carriesPressAction =
+      opType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
+      opType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN';
+    if (!carriesPressAction) dropEnum('pressAction', NONE_PRESS_ACTION);
+    if (!carriesPressAction || pressAction !== PRESS_TO_ONE_SIDE)
       dropEnum('pressToward', NONE_PRESS_TOWARD);
     if (!ownsBlock('clean')) dropEnum('cleaningKind', NONE_CLEANING_KIND);
     if (!ownsBlock('inspect')) dropEnum('coverageMode', NONE_COVERAGE_MODE);
@@ -2765,6 +2797,11 @@ function OperationEditor({
    * СМЕНА ВИДА НИЧЕГО НЕ СТИРАЕТ — то же правило, что у смены глагола. Промах мышью по списку не
    * должен стоить заполненного шага; лишнее уберёт та же очистка скрытого, что и раньше, и уберёт
    * ровно по гейту сервера, а не по короткому списку пункта.
+   *
+   * ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — ЯКОРЬ, КОТОРЫЙ ПИКЕР САМ И ПОСТАВИЛ (`kindClears`, ниже по телу).
+   * Без него правило оборачивалось против себя: оставшийся `seam_class` перехватывал резолв, и
+   * пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля, которое
+   * человек не заполнял.
    */
   const applyKind = (id: string) => {
     const k = OPERATION_KIND_BY_ID.get(id);
@@ -2795,6 +2832,35 @@ function OperationEditor({
       // своего контракта (0325) — не написав ни разу и не сломав ни одного шага; теперь имя в
       // `emptyOperation` есть, и под-глагол ВТО едет отсюда, без единой правки в этом цикле.
       // Щит остаётся: следующее поле пикера войдёт тем же путём.
+      if (!(field in emptyOperation)) continue;
+      setValue(`${p}.${field}`, value, { shouldDirty: true });
+    }
+
+    // ЯКОРЬ ЧУЖОГО ПУНКТА, ОСТАВШИЙСЯ В ЗАПИСИ, ПЕРЕИГРЫВАЛ ВЫБОР ЧЕЛОВЕКА. Замерено: на шаге
+    // `{MACHINE, LOCKSTITCH, seam_class = OS_TOPSTITCH}` пункты «Join — lockstitch», «Coverstitch»,
+    // «Chainstitch», «AMF» и «Attach label» не брались вовсе — запись писалась, но резолв снова
+    // отвечал «Topstitch» по классу шва, и пикер откатывался. Вид нигде не хранится, поэтому
+    // откатывался не только пикер: `kindHeadingVerb` продолжал звать шаг отстрочкой в заголовке,
+    // на карте примерки, в подписанном релизе и на печатном листе.
+    //
+    // Что именно снять, решает `kindClears` — она СПРАШИВАЕТ резолв, а не повторяет его правила, и
+    // снимает ровно тот якорь, который пикер сам и пишет как личность другого пункта. Порядок:
+    // ПОСЛЕ записи (снятие считается по уже применённому набору) и ДО пресета, который в пустое
+    // пишет.
+    const after: OperationKindStep = {
+      operationType: written.operationType ?? opType,
+      machineType: written.machineType ?? machineType,
+      seamClass: written.seamClass ?? seamClass,
+      attachMethod: written.attachMethod ?? attachMethod,
+      coverageMode: written.coverageMode ?? coverageMode,
+      labelAttachStitch: written.labelAttachStitch ?? labelAttachStitch,
+      pressAction: written.pressAction ?? pressAction,
+      bomKinds: stepBomKinds,
+    };
+    const cleared = Object.entries(kindClears(k, after)) as Array<
+      [OperationFormStringField, string]
+    >;
+    for (const [field, value] of cleared) {
       if (!(field in emptyOperation)) continue;
       setValue(`${p}.${field}`, value, { shouldDirty: true });
     }
@@ -3464,35 +3530,43 @@ function OperationEditor({
         <>
           <GroupLabel>stitch detail</GroupLabel>
           <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            <InheritableNumberField
-              name={`operations.${index}.needleCount`}
-              label='needles'
-              value={needleCount}
-              placeholder='1'
-            />
-            {/* КАЛИБР МЕРЯЕТ РАССТОЯНИЕ МЕЖДУ ИГЛАМИ, поэтому на одной игле он измеряет ничто —
-                сервер такую пару отвергает, а очистка выше стирает число, оставшееся от двух. */}
-            {needleCount >= 2 && (
-              <DecimalField
-                name={`operations.${index}.needleGaugeMm`}
-                label='needle gauge, mm'
-                maxDecimals={1}
-                placeholder='6.4'
-              />
+            {/* ЧЕТЫРЕ ИГОЛЬНЫХ КОНТРОЛА — НЕ НА СВАРОЧНОЙ МАШИНЕ. Ни иглы, ни нитки у неё нет, и
+                сервер отвергает всю четвёрку по имени, отказывая вместе с ней всей карточкой:
+                нарисовать их значило бы предложить заполнить поле, которое сохранение не
+                переживёт. Посадка и шов этикетки ниже остаются — они не про иглу. */}
+            {showNeedleFacts && (
+              <>
+                <InheritableNumberField
+                  name={`operations.${index}.needleCount`}
+                  label='needles'
+                  value={needleCount}
+                  placeholder='1'
+                />
+                {/* КАЛИБР МЕРЯЕТ РАССТОЯНИЕ МЕЖДУ ИГЛАМИ, поэтому на одной игле он измеряет ничто —
+                    сервер такую пару отвергает, а очистка выше стирает число, оставшееся от двух. */}
+                {needleCount >= 2 && (
+                  <DecimalField
+                    name={`operations.${index}.needleGaugeMm`}
+                    label='needle gauge, mm'
+                    maxDecimals={1}
+                    placeholder='6.4'
+                  />
+                )}
+                <SelectField
+                  name={`operations.${index}.seamSecuring`}
+                  label='securing'
+                  items={stepEnumOptions(SEAM_SECURING_LABELS, '— not stated —', seamSecuring)}
+                  className={selectNoGrow}
+                />
+                {/* Между РЯДАМИ строчек. Не путать с калибром выше: тот — между иглами одного ряда. */}
+                <DecimalField
+                  name={`operations.${index}.rowSpacingMm`}
+                  label='row spacing, mm'
+                  maxDecimals={1}
+                  placeholder='6'
+                />
+              </>
             )}
-            <SelectField
-              name={`operations.${index}.seamSecuring`}
-              label='securing'
-              items={stepEnumOptions(SEAM_SECURING_LABELS, '— not stated —', seamSecuring)}
-              className={selectNoGrow}
-            />
-            {/* Между РЯДАМИ строчек. Не путать с калибром выше: тот — между иглами одного ряда. */}
-            <DecimalField
-              name={`operations.${index}.rowSpacingMm`}
-              label='row spacing, mm'
-              maxDecimals={1}
-              placeholder='6'
-            />
             {/* ОТНОШЕНИЕ, а не проценты: 1.0 — слои идут один в один, 2.0 — присборить вдвое. */}
             <DecimalField
               name={`operations.${index}.fullnessRatio`}
