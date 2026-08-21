@@ -155,11 +155,37 @@ export function AssemblyCreateDialog({
     setUnitName('');
   }, [prefill]);
 
+  /**
+   * ЗАНЯТОСТЬ КОДА СПРАШИВАЕТСЯ ТОЖДЕСТВОМ ПРОВОДА, А НЕ БАЙТАМИ ФОРМЫ. Тот же род, что чинился
+   * в `assembly-rename.ts` (коммит `16524469`), и тот же довод: подрезка — не вежливость к набору,
+   * а то, чем ключ СТАНЕТ. На провод уезжают подрезанными обе стороны — ключ детали
+   * (`p.lineKey?.trim() || ulid()`) и код узла (`outputUnitKey.trim()`), `schema.ts`, — а
+   * пространство имён у них общее (правило 6).
+   *
+   * Поле хранит НАБРАННОЕ как есть, и восстановленный черновик несёт его же, поэтому деталь
+   * « BODY » живёт в форме сколько угодно. Сырое сравнение её не узнавало: диалог разрешал узел
+   * «BODY», клиентский граф соглашался (он тоже считает по сырым ключам), а сервер отвергал
+   * сохранение — и невидимые пробелы в ключе чужой детали человек не нашёл бы никогда.
+   *
+   * РЕГИСТР НЕ НОРМАЛИЗУЕТСЯ: колонка объявлена `COLLATE utf8mb4_bin`, «SHELL» и «Shell» — два
+   * разных узла, и подрезка их ничем не сближает.
+   */
+  const wireKeys = (keys: Iterable<string>) => {
+    const out = new Set<string>();
+    for (const k of keys) {
+      const t = k.trim();
+      if (t) out.add(t);
+    }
+    return out;
+  };
+  const piecesOnWire = useMemo(() => wireKeys(pieceKeys), [pieceKeys]);
+  const unitsOnWire = useMemo(() => wireKeys(unitKeys), [unitKeys]);
+
   const taken = useMemo(() => {
-    const s = new Set<string>(pieceKeys);
-    for (const k of unitKeys) s.add(k);
+    const s = new Set<string>(piecesOnWire);
+    for (const k of unitsOnWire) s.add(k);
     return s;
-  }, [pieceKeys, unitKeys]);
+  }, [piecesOnWire, unitsOnWire]);
 
   // Код предлагается от ЗОНЫ и переигрывается, пока автор его не тронул руками: зона выбирается
   // раньше, и код, застывший на «UNIT» после выбора зоны, был бы предложением мимо.
@@ -177,8 +203,8 @@ export function AssemblyCreateDialog({
     if (produces !== 'unit') return '';
     const code = unitKey.trim();
     if (!code) return 'a unit needs a code — that is what every other step calls it by';
-    if (pieceKeys.has(code)) return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
-    if (unitKeys.has(code)) return `unit “${code}” already exists — a second producer of the same unit is impossible`;
+    if (piecesOnWire.has(code)) return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
+    if (unitsOnWire.has(code)) return `unit “${code}” already exists — a second producer of the same unit is impossible`;
     if (new TextEncoder().encode(code).length > 64) return "the code is longer than 64 bytes — that won't fit the column";
     return '';
   })();
