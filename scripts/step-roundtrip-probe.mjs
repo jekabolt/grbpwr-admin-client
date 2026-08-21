@@ -49,7 +49,10 @@ const MUTATE_EFFECT = process.argv.includes('--mutate-effect');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
-const FIELD_FILE = resolve(REPO, 'src/components/managers/tech-card/components/operations-field.tsx');
+const FIELD_FILE = resolve(
+  REPO,
+  'src/components/managers/tech-card/components/operations-field.tsx',
+);
 
 let bad = 0;
 const ck = (ok, what, detail = '') => {
@@ -132,7 +135,11 @@ head('цитата А — форма → провод: заполненное з
 
 {
   const w = wireOne({ operationType: T.PRESS_OPEN, pressAction: T.TO_ONE_SIDE });
-  ck(w.press?.action === T.TO_ONE_SIDE, 'разутюжка везёт прочитанный под-глагол (Р-1)', String(w.press?.action));
+  ck(
+    w.press?.action === T.TO_ONE_SIDE,
+    'разутюжка везёт прочитанный под-глагол (Р-1)',
+    String(w.press?.action),
+  );
 }
 {
   const w = wireOne({
@@ -141,7 +148,11 @@ head('цитата А — форма → провод: заполненное з
     needleCount: 1,
     needleGaugeMm: '3.2',
   });
-  ck(dec(w.stitching?.needleGaugeMm) === '3.2', 'калибр при одной игле едет числом', String(dec(w.stitching?.needleGaugeMm)));
+  ck(
+    dec(w.stitching?.needleGaugeMm) === '3.2',
+    'калибр при одной игле едет числом',
+    String(dec(w.stitching?.needleGaugeMm)),
+  );
 }
 {
   const w = wireOne({
@@ -151,7 +162,11 @@ head('цитата А — форма → провод: заполненное з
     topstitchWidthMm: '4',
   });
   ck(w.topstitch?.mode === T.IN_DITCH, 'режим отстрочки «в шов» едет');
-  ck(dec(w.topstitch?.widthMm) === '4', 'отступ при «в шов» едет (отказывает СЕРВЕР, по имени)', String(dec(w.topstitch?.widthMm)));
+  ck(
+    dec(w.topstitch?.widthMm) === '4',
+    'отступ при «в шов» едет (отказывает СЕРВЕР, по имени)',
+    String(dec(w.topstitch?.widthMm)),
+  );
 }
 {
   const w = wireOne({
@@ -162,8 +177,15 @@ head('цитата А — форма → провод: заполненное з
     topstitchRows: 2,
   });
   ck(!!w.topstitch, 'обёртка отстрочки едет при пустом режиме и заполненном отступе');
-  ck(w.topstitch?.mode === T.MODE_UNSET, 'режим при этом остаётся незаданным (Ф3 отказывает по имени)');
-  ck(dec(w.topstitch?.widthMm) === '4', 'отступ без режима едет', String(dec(w.topstitch?.widthMm)));
+  ck(
+    w.topstitch?.mode === T.MODE_UNSET,
+    'режим при этом остаётся незаданным (Ф3 отказывает по имени)',
+  );
+  ck(
+    dec(w.topstitch?.widthMm) === '4',
+    'отступ без режима едет',
+    String(dec(w.topstitch?.widthMm)),
+  );
   ck(w.topstitch?.rows === 2, 'ряды без режима едут', String(w.topstitch?.rows));
 }
 {
@@ -172,7 +194,11 @@ head('цитата А — форма → провод: заполненное з
 }
 {
   const w = wireOne({ operationType: T.PRESS, pressAction: T.STEAM, pressToward: T.TOWARD_FRONT });
-  ck(w.press?.toward === T.TOWARD_FRONT, 'направление при чужом приёме едет', String(w.press?.toward));
+  ck(
+    w.press?.toward === T.TOWARD_FRONT,
+    'направление при чужом приёме едет',
+    String(w.press?.toward),
+  );
 }
 {
   const w = wireOne({
@@ -181,7 +207,11 @@ head('цитата А — форма → провод: заполненное з
     seamClass: T.SS_PLAIN,
     bindingStyle: T.DOUBLE_FOLD,
   });
-  ck(w.stitching?.bindingStyle === T.DOUBLE_FOLD, 'бейка при неокантовочном классе шва едет', String(w.stitching?.bindingStyle));
+  ck(
+    w.stitching?.bindingStyle === T.DOUBLE_FOLD,
+    'бейка при неокантовочном классе шва едет',
+    String(w.stitching?.bindingStyle),
+  );
 }
 {
   const w = wireOne({
@@ -193,7 +223,11 @@ head('цитата А — форма → провод: заполненное з
   });
   ck(w.threadCount === 4, 'ниточные overrides на сварочной машине едут', String(w.threadCount));
   ck(w.needleType === T.JEANS, 'тип иглы на сварочной машине едет', String(w.needleType));
-  ck(w.weld?.airTemperatureC === 450, 'горячий воздух на ультразвуке едет', String(w.weld?.airTemperatureC));
+  ck(
+    w.weld?.airTemperatureC === 450,
+    'горячий воздух на ультразвуке едет',
+    String(w.weld?.airTemperatureC),
+  );
 }
 {
   const w = wireOne({ operationType: T.INSPECT, printMethod: T.SCREEN });
@@ -201,13 +235,25 @@ head('цитата А — форма → провод: заполненное з
 }
 {
   const w = wireOne({ operationType: T.FOLD, wetProcessKind: T.RINSE, pressSteam: false });
-  ck(w.wetProcessKind === T.RINSE, 'вид мокрой обработки на чужом глаголе едет', String(w.wetProcessKind));
-  ck(w.pressSteam === false, '«без пара» на чужом глаголе едет ответом, а не пустотой', String(w.pressSteam));
+  ck(
+    w.wetProcessKind === T.RINSE,
+    'вид мокрой обработки на чужом глаголе едет',
+    String(w.wetProcessKind),
+  );
+  ck(
+    w.pressSteam === false,
+    '«без пара» на чужом глаголе едет ответом, а не пустотой',
+    String(w.pressSteam),
+  );
 }
 {
   const w = wireOne({ operationType: T.PACK, machineType: T.OVERLOCK, machineProfileKey: 'K1' });
   ck(w.machineType === T.OVERLOCK, 'тип машины на немашинном шаге едет', String(w.machineType));
-  ck(w.machineProfileKey === 'K1', 'ключ профиля машины на немашинном шаге едет', String(w.machineProfileKey));
+  ck(
+    w.machineProfileKey === 'K1',
+    'ключ профиля машины на немашинном шаге едет',
+    String(w.machineProfileKey),
+  );
 }
 {
   const w = wireOne({ operationType: T.CLEAN, pressCloth: T.SILICONE, pressTemperatureC: 160 });
@@ -222,8 +268,16 @@ head('цитата А — форма → провод: заполненное з
     foldbackMm: '40',
     holePrep: 'TECH_CARD_HOLE_PREP_PUNCH',
   });
-  ck(w.hardware?.attachMethod === T.PRESS_SET, 'способ крепления на швейном шаге едет', String(w.hardware?.attachMethod));
-  ck(dec(w.hardware?.foldbackMm) === '40', 'подгиб стропы без продевания едет', String(dec(w.hardware?.foldbackMm)));
+  ck(
+    w.hardware?.attachMethod === T.PRESS_SET,
+    'способ крепления на швейном шаге едет',
+    String(w.hardware?.attachMethod),
+  );
+  ck(
+    dec(w.hardware?.foldbackMm) === '40',
+    'подгиб стропы без продевания едет',
+    String(dec(w.hardware?.foldbackMm)),
+  );
 }
 {
   const w = wireOne({
@@ -232,12 +286,24 @@ head('цитата А — форма → провод: заполненное з
     buttonholeStyle: T.EYELET,
     cutLengthMm: '19',
   });
-  ck(w.fastening?.buttonholeStyle === T.EYELET, 'стиль петли на прямострочке едет', String(w.fastening?.buttonholeStyle));
-  ck(dec(w.fastening?.cutLengthMm) === '19', 'длина прорези на прямострочке едет', String(dec(w.fastening?.cutLengthMm)));
+  ck(
+    w.fastening?.buttonholeStyle === T.EYELET,
+    'стиль петли на прямострочке едет',
+    String(w.fastening?.buttonholeStyle),
+  );
+  ck(
+    dec(w.fastening?.cutLengthMm) === '19',
+    'длина прорези на прямострочке едет',
+    String(dec(w.fastening?.cutLengthMm)),
+  );
 }
 {
   const w = wireOne({ operationType: T.PRINT, printMethod: T.LASER, peelMode: T.HOT_PEEL });
-  ck(w.print?.peelMode === T.HOT_PEEL, 'режим отслойки при гравировке едет', String(w.print?.peelMode));
+  ck(
+    w.print?.peelMode === T.HOT_PEEL,
+    'режим отслойки при гравировке едет',
+    String(w.print?.peelMode),
+  );
 }
 
 // ─── МАТРИЦА ЧЕТЫРЁХ СОСТОЯНИЙ ОТСТРОЧКИ — ШОВ Ф3↔Ф4 ─────────────────────────────────────────
@@ -252,8 +318,15 @@ head('матрица отстрочки (§6.1) — клиентская пол�
   ck(a.topstitch === undefined, '1) режим пуст + отступ пуст → обёртка не едет');
   // 2. «по краю», отступ пуст → едет один режим; сервер принимает (0326: отступ у края опционален)
   const b = wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE' });
-  ck(b.topstitch?.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE', '2) «по краю» без отступа → едет режим');
-  ck(dec(b.topstitch?.widthMm) === undefined, '2) ключ отступа при этом отсутствует', String(dec(b.topstitch?.widthMm)));
+  ck(
+    b.topstitch?.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+    '2) «по краю» без отступа → едет режим',
+  );
+  ck(
+    dec(b.topstitch?.widthMm) === undefined,
+    '2) ключ отступа при этом отсутствует',
+    String(dec(b.topstitch?.widthMm)),
+  );
   // 3. «в шов» + отступ → едут ОБА; отказ по имени ставят zod (на контроле) и сервер
   const c = wireOne({ ...base, topstitchMode: T.IN_DITCH, topstitchWidthMm: '4' });
   ck(dec(c.topstitch?.widthMm) === '4', '3) «в шов» + отступ → едут оба, отказывает сервер');
@@ -279,8 +352,14 @@ head('матрица отстрочки (§6.1) — клиентская пол�
   // строка обязана ПРОПАСТЬ С ПРОВОДА КЛЮЧОМ, а не приехать как `{value: ""}`: сервер меряет
   // присланность децимала содержимым, и пустое значение с непустым указателем он прочитал бы как
   // «отступ прислан» — то есть [clear] по отступу упёрся бы в отказ «назови режим».
-  const cleared = JSON.stringify(wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', topstitchWidthMm: '' }));
-  ck(!cleared.includes('widthMm'), 'после [clear] ключа отступа в JSON нет вовсе', cleared.slice(0, 160));
+  const cleared = JSON.stringify(
+    wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', topstitchWidthMm: '' }),
+  );
+  ck(
+    !cleared.includes('widthMm'),
+    'после [clear] ключа отступа в JSON нет вовсе',
+    cleared.slice(0, 160),
+  );
   const clearedAll = JSON.stringify(wireOne({ ...base, topstitchWidthMm: '', topstitchRows: 0 }));
   ck(!clearedAll.includes('topstitch'), 'очищены оба поля и режим пуст → обёртки в JSON нет');
 }
@@ -289,12 +368,36 @@ head('матрица отстрочки (§6.1) — клиентская пол�
 head('регресс — неосведомлённая запись не растолстела');
 {
   const w = wireOne({ operationType: T.PACK });
-  const wrappers = ['stitching', 'placementLayout', 'hardware', 'print', 'weld', 'trim', 'threadTrim', 'clean', 'inspect', 'fastening', 'press'];
+  const wrappers = [
+    'stitching',
+    'placementLayout',
+    'hardware',
+    'print',
+    'weld',
+    'trim',
+    'threadTrim',
+    'clean',
+    'inspect',
+    'fastening',
+    'press',
+  ];
   const present = wrappers.filter((k) => w[k] !== undefined);
   ck(present.length === 0, 'пустой шаг не везёт ни одной обёртки', present.join(', '));
-  ck(w.printMethod === undefined, 'метод печати у пустого шага не едет вовсе', String(w.printMethod));
-  ck(w.wetProcessKind === undefined, 'вид мокрой обработки у пустого шага не едет вовсе', String(w.wetProcessKind));
-  ck(w.topstitch === undefined, 'обёртка отстрочки у пустого шага не едет вовсе', String(w.topstitch));
+  ck(
+    w.printMethod === undefined,
+    'метод печати у пустого шага не едет вовсе',
+    String(w.printMethod),
+  );
+  ck(
+    w.wetProcessKind === undefined,
+    'вид мокрой обработки у пустого шага не едет вовсе',
+    String(w.wetProcessKind),
+  );
+  ck(
+    w.topstitch === undefined,
+    'обёртка отстрочки у пустого шага не едет вовсе',
+    String(w.topstitch),
+  );
   ck(w.pressSteam === undefined, 'пар у пустого шага не едет вовсе', String(w.pressSteam));
 }
 
@@ -396,7 +499,11 @@ const NOT_A_STEP_FACT = new Set([
     const b = JSON.stringify(form2[n]);
     if (a !== b) lost.push(`${n}: ${a} → ${b}`);
   }
-  ck(lost.length === 0, 'круг «форма → провод → форма» не потерял ни одного поля', lost.join(' | '));
+  ck(
+    lost.length === 0,
+    'круг «форма → провод → форма» не потерял ни одного поля',
+    lost.join(' | '),
+  );
 
   // ВТОРОЙ ОБОРОТ — идемпотентность: провод, прочитанный и записанный снова, БАЙТОВО тот же.
   const wire2 = toWire([form2]);
@@ -446,7 +553,11 @@ function destructiveEffectWrites(file) {
     offenders.map((o) => `${o.field} (строка ${o.line})`).join(', '),
   );
   const whitelisted = writes.filter((w) => EFFECT_WRITE_WHITELIST.has(w.field));
-  ck(whitelisted.length === 1, 'вайтлист не разросся: ровно одна разрешённая запись', `их ${whitelisted.length}`);
+  ck(
+    whitelisted.length === 1,
+    'вайтлист не разросся: ровно одна разрешённая запись',
+    `их ${whitelisted.length}`,
+  );
   if (MUTATE_EFFECT) rmSync(dirname(target), { recursive: true, force: true });
 }
 

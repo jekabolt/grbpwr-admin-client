@@ -175,7 +175,11 @@ await mount({
 ck(pageErrors.length === 0, 'редактор смонтировался без исключений', pageErrors[0] ?? '');
 ck(await has('[data-residue-strip]'), 'полоса остатков нарисована');
 ck(await has(RES('threadCount')), 'число ниток стоит строкой остатка');
-ck((await textOf(RES('threadCount'))).includes('3'), 'строка называет значение', await textOf(RES('threadCount')));
+ck(
+  (await textOf(RES('threadCount'))).includes('3'),
+  'строка называет значение',
+  await textOf(RES('threadCount')),
+);
 ck(
   (await textOf(RES('threadCount'))).toLowerCase().includes('threads'),
   'строка называет ПОЛЕ теми же словами, что контрол',
@@ -208,7 +212,10 @@ head('3. [clear] снимает значение и убирает строку'
   const clearable = await has(`${RES('threadCount')} button`);
   ck(clearable, 'у строки остатка есть [clear]');
   if (clearable) {
-    await page.locator(`${RES('threadCount')} button`).first().click();
+    await page
+      .locator(`${RES('threadCount')} button`)
+      .first()
+      .click();
     await page.waitForTimeout(150);
     const v = await values();
     ck(v.threadCount === 0, 'после [clear] число ниток пусто', String(v.threadCount));
@@ -255,11 +262,18 @@ ck(
 if (await has(`${RES('topstitchRows')} button`)) {
   // [CLEAR] ПО РЯДАМ ДОЛЖЕН ЗАКРЫВАТЬ ОТКАЗ ЦЕЛИКОМ: после него у шага не остаётся ни одного
   // факта отстрочки, обёртка не едет вовсе, и серверу не на что отвечать «назови режим».
-  await page.locator(`${RES('topstitchRows')} button`).first().click();
+  await page
+    .locator(`${RES('topstitchRows')} button`)
+    .first()
+    .click();
   await page.waitForTimeout(150);
   const v = await values();
   ck(v.topstitchRows === 0, 'после [clear] рядов не осталось', String(v.topstitchRows));
-  ck(v.topstitchWidthMm === '', 'отступ так и остался пустой строкой, а не «пустым значением»', JSON.stringify(v.topstitchWidthMm));
+  ck(
+    v.topstitchWidthMm === '',
+    'отступ так и остался пустой строкой, а не «пустым значением»',
+    JSON.stringify(v.topstitchWidthMm),
+  );
 }
 
 // ── 5. ШАГ БЕЗ ОСТАТКОВ ПОЛОСЫ НЕ ПОКАЗЫВАЕТ ──────────────────────────────────────────────────

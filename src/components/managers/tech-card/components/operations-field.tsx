@@ -39,19 +39,13 @@ import {
   // и того же токена, — а расходятся они молча и обнаруживаются в цеху.
   BUTTON_ATTACH_PATTERN_LABELS,
   BINDING_STYLE_LABELS,
-  CLEANING_KIND_LABELS,
-  HARDWARE_ATTACH_METHOD_LABELS,
   HOLE_PREP_LABELS,
-  INSPECT_COVERAGE_LABELS,
   LABEL_ATTACH_STITCH_LABELS,
   PEEL_MODE_LABELS,
   PRESS_ACTION_LABELS,
   PRESS_TOWARD_LABELS,
-  PRINT_METHOD_LABELS,
   REINFORCEMENT_LABELS,
   SEAM_SECURING_LABELS,
-  TRIM_ACTION_LABELS,
-  WET_PROCESS_KIND_LABELS,
   ZIPPER_APPLICATION_LABELS,
   // Обязательный вопрос глагола и пикер по любому из этих словарей — оттуда же и по той же
   // причине: их спрашивает не только сетка открытого шага, но и диалог создания.
@@ -60,6 +54,23 @@ import {
   type OperationFormStringField,
   attachmentKindLabel,
   attachmentOptions,
+  // ПОДПИСИ ДЛЯ ПОЛОСЫ ОСТАТКОВ — ТЕ ЖЕ, ЧТО У ПЕЧАТНОГО ЛИСТА. Второй набор слов означал бы,
+  // что строка остатка и бумага могут разойтись в названии одного токена.
+  bindingStyleLabel,
+  buttonAttachPatternLabel,
+  cleaningKindLabel,
+  hardwareAttachMethodLabel,
+  holePrepLabel,
+  inspectCoverageLabel,
+  labelAttachStitchLabel,
+  peelModeLabel,
+  pressActionLabel,
+  pressTowardLabel,
+  printMethodLabel,
+  reinforcementLabel,
+  trimActionLabel,
+  wetProcessKindLabel,
+  zipperApplicationLabel,
   canonicalReinforcement,
   effectiveMachineSettings,
   effectivePressSettings,
@@ -307,9 +318,11 @@ type StepIntField =
 // таких состояний выводятся ОБА потребителя — пилюля «сколько названо» и полоса остатков, — потому
 // что два списка полей разъехались бы молча ровно на новом поле следующей волны.
 //
-// `kind` — входит ли поле в ЗОНУ СВОЙСТВ ВИДА (её пилюля). Оборудование и шесть дискриминаторов
-// глагола стоят в других местах экрана и в пилюлю не входят — но остатками бывают ровно так же,
-// поэтому в списке они есть.
+// `kind` — входит ли поле в ЗОНУ СВОЙСТВ ВИДА (её пилюля). НЕ ПИШЕТСЯ РУКОЙ: членство выводится
+// из `KIND_PROPERTY_FIELDS` — того же списка, которым `CORE_STEP_FIELDS` решает, раскрывать ли
+// створку. Полсотни рукописных флажков были бы полусотней мест, где он молча разойдётся со
+// списком. Оборудование и шесть дискриминаторов глагола в пилюлю не входят — они стоят в других
+// местах экрана, — но остатками бывают ровно так же, поэтому в таблице они есть.
 type StepFieldState = {
   label: string;
   shown: boolean;
@@ -323,38 +336,40 @@ type StepFieldState = {
   | { discipline: 'bool'; field: 'pressSteam' }
 );
 
+// ПОДПИСЬ ПЕРЕДАЁТСЯ ФУНКЦИЕЙ, А НЕ ГОТОВЫМ ТЕКСТОМ, и это не экономия символов. Готовым текстом
+// значение и его словарь были бы ДВУМЯ независимыми аргументами — то есть строку `needleType`
+// можно было бы подписать словарём натяжения нити, и ничто бы не возразило. Здесь словарь
+// применяется К ТОМУ ЖЕ значению внутри, и такая пара невыразима.
 const enumState = (
   field: StepEnumField,
   label: string,
   value: string,
   none: string,
-  text: string,
+  labelOf: (v: string) => string,
   shown: boolean,
-  kind = true,
 ): StepFieldState => ({
   discipline: 'enum',
   field,
   none,
   label,
   shown,
-  kind,
+  kind: KIND_PROPERTY_FIELDS.includes(field),
   filled: !!value && value !== none,
   // Токен новее этого бандла подписи не имеет — тогда показывается он сам. Пустая строка вместо
   // значения читалась бы как «поле пустое», то есть как ровно обратное тому, что происходит.
-  text: text || value,
+  text: labelOf(value) || value,
 });
 const textState = (
   field: StepTextField,
   label: string,
   value: string,
   shown: boolean,
-  kind = true,
 ): StepFieldState => ({
   discipline: 'text',
   field,
   label,
   shown,
-  kind,
+  kind: KIND_PROPERTY_FIELDS.includes(field),
   filled: value.trim() !== '',
   text: value.trim(),
 });
@@ -363,13 +378,12 @@ const intState = (
   label: string,
   value: number,
   shown: boolean,
-  kind = true,
 ): StepFieldState => ({
   discipline: 'int',
   field,
   label,
   shown,
-  kind,
+  kind: KIND_PROPERTY_FIELDS.includes(field),
   filled: value > 0,
   text: String(value),
 });
@@ -385,7 +399,7 @@ const keyState = (
   field,
   label,
   shown,
-  kind: false,
+  kind: KIND_PROPERTY_FIELDS.includes(field),
   filled: value.trim() !== '',
   text: value.trim() ? `#${value.trim().slice(-6)}` : '',
 });
@@ -396,10 +410,17 @@ const steamState = (value: boolean | undefined, shown: boolean): StepFieldState 
   field: 'pressSteam',
   label: 'steam',
   shown,
-  kind: false,
+  kind: KIND_PROPERTY_FIELDS.includes('pressSteam'),
   filled: value !== undefined,
   text: value ? 'with steam' : 'no steam — press dry',
 });
+// ДВЕ ПРИВАТНЫЕ КАРТЫ ПЕТЛИ читаются так же, как остальные пятнадцать словарей — с фолбэком на
+// сам токен: подпись есть у всех, кроме члена НОВЕЕ этого бандла, и он обязан назваться собой.
+const itemLabel =
+  (labels: Record<string, string>) =>
+  (value: string): string =>
+    labels[value] || value;
+
 // Подпись режима отстрочки берётся у ТОГО ЖЕ списка, что рисует селект: словарь тотален над
 // контрактом, и режим новее бандла обязан назваться токеном, а не пустотой.
 const topstitchModeText = (mode: string): string =>
@@ -2465,71 +2486,216 @@ function OperationEditor({
   // рядом с пикером вида, — но в таблице ЕСТЬ: на чужом глаголе они такие же остатки, как всё
   // прочее, и полоса обязана их показывать.
   const stepFields: StepFieldState[] = [
-    enumState('machineType', 'machine', machineType, NONE_MACHINE, machineTypeLabel(machineType), isMachineStep, false),
+    enumState('machineType', 'machine', machineType, NONE_MACHINE, machineTypeLabel, isMachineStep),
     keyState('machineProfileKey', 'machine profile', machineProfileKey, isMachineStep),
-    intState('threadCount', 'threads', threadCount, isMachineStep, false),
-    enumState('needleType', 'needle point', needleType, NONE_NEEDLE, needleTypeLabel(needleType), isMachineStep, false),
-    intState('needleSizeNm', 'needle size, Nm', needleSizeNm, isMachineStep, false),
-    enumState('threadTension', 'thread tension', threadTension, NONE_TENSION, threadTensionLabel(threadTension), isMachineStep, false),
-    textState('threadTensionNote', 'tension note', threadTensionNote, isMachineStep, false),
-    textState('stitchWidthMm', 'stitch width, mm', stitchWidthMm, isMachineStep, false),
+    intState('threadCount', 'threads', threadCount, isMachineStep),
+    enumState('needleType', 'needle point', needleType, NONE_NEEDLE, needleTypeLabel, isMachineStep),
+    intState('needleSizeNm', 'needle size, Nm', needleSizeNm, isMachineStep),
+    enumState(
+      'threadTension',
+      'thread tension',
+      threadTension,
+      NONE_TENSION,
+      threadTensionLabel,
+      isMachineStep,
+    ),
+    textState('threadTensionNote', 'tension note', threadTensionNote, isMachineStep),
+    textState('stitchWidthMm', 'stitch width, mm', stitchWidthMm, isMachineStep),
     // ПИКЕР ОБОРУДОВАНИЯ СТОИТ НА `isPressStep`, А БЛОК НАСТРОЕК — НА `ownsPressSettings`: у
     // печати настройки пресса есть, а пикера нет (она берёт термопресс взаймы). Здесь стоят оба
     // предиката, каждый на своём поле, — сложить их значило бы либо спрятать чужое, либо
     // объявить остатком то, что человек прямо сейчас редактирует.
-    enumState('pressEquipment', 'equipment', pressEquipment, NONE_PRESS_EQUIPMENT, pressEquipmentLabel(pressEquipment), isPressStep, false),
+    enumState(
+      'pressEquipment',
+      'equipment',
+      pressEquipment,
+      NONE_PRESS_EQUIPMENT,
+      pressEquipmentLabel,
+      isPressStep,
+    ),
     keyState('pressProfileKey', 'press profile', pressProfileKey, ownsPressSettings),
-    intState('pressTemperatureC', 'temperature, °C', pressTemperatureC, ownsPressSettings, false),
-    intState('pressDwellSec', 'dwell, sec', pressDwellSec, ownsPressSettings, false),
-    textState('pressPressureNCm2', 'pressure, N/cm²', pressPressureNCm2, ownsPressSettings, false),
+    intState('pressTemperatureC', 'temperature, °C', pressTemperatureC, ownsPressSettings),
+    intState('pressDwellSec', 'dwell, sec', pressDwellSec, ownsPressSettings),
+    textState('pressPressureNCm2', 'pressure, N/cm²', pressPressureNCm2, ownsPressSettings),
     steamState(pressSteam, ownsPressSettings),
-    enumState('pressCloth', 'press cloth', pressCloth, NONE_PRESS_CLOTH, pressClothLabel(pressCloth), ownsPressSettings, false),
-    textState('attachmentSizeMm', 'attachment size, mm', attachmentSizeMm, showAttachmentSize, false),
+    enumState(
+      'pressCloth',
+      'press cloth',
+      pressCloth,
+      NONE_PRESS_CLOTH,
+      pressClothLabel,
+      ownsPressSettings,
+    ),
+    textState('attachmentSizeMm', 'attachment size, mm', attachmentSizeMm, showAttachmentSize),
     // отстрочка
-    enumState('topstitchMode', 'topstitch', topstitchMode, NONE_TOPSTITCH, topstitchModeText(topstitchMode), showTopstitch),
-    textState('topstitchWidthMm', topstitchWidthLabel(topstitchMode), topstitchWidthMm, showTopstitchWidth),
+    enumState(
+      'topstitchMode',
+      'topstitch',
+      topstitchMode,
+      NONE_TOPSTITCH,
+      topstitchModeText,
+      showTopstitch,
+    ),
+    textState(
+      'topstitchWidthMm',
+      topstitchWidthLabel(topstitchMode),
+      topstitchWidthMm,
+      showTopstitchWidth,
+    ),
     intState('topstitchRows', 'rows of topstitching', topstitchRows, showTopstitchWidth),
     // S — строчка
     intState('needleCount', 'needles', needleCount, showNeedleFacts),
     textState('needleGaugeMm', 'gauge between needles, mm', needleGaugeMm, showNeedleGauge),
-    enumState('seamSecuring', 'securing', seamSecuring, NONE_SEAM_SECURING, seamSecuringLabel(seamSecuring), showNeedleFacts),
+    enumState(
+      'seamSecuring',
+      'securing',
+      seamSecuring,
+      NONE_SEAM_SECURING,
+      seamSecuringLabel,
+      showNeedleFacts,
+    ),
     textState('rowSpacingMm', 'spacing between stitch rows, mm', rowSpacingMm, showNeedleFacts),
     textState('fullnessRatio', 'ease / gathering, ratio', fullnessRatio, showStitching),
-    enumState('bindingStyle', 'binding fold', bindingStyle, NONE_BINDING_STYLE, BINDING_STYLE_LABELS[bindingStyle as keyof typeof BINDING_STYLE_LABELS], showBindingStyle),
-    enumState('labelAttachStitch', 'label stitched', labelAttachStitch, NONE_LABEL_ATTACH, LABEL_ATTACH_STITCH_LABELS[labelAttachStitch as keyof typeof LABEL_ATTACH_STITCH_LABELS], showStitching),
+    enumState(
+      'bindingStyle',
+      'binding fold',
+      bindingStyle,
+      NONE_BINDING_STYLE,
+      bindingStyleLabel,
+      showBindingStyle,
+    ),
+    enumState(
+      'labelAttachStitch',
+      'label stitched',
+      labelAttachStitch,
+      NONE_LABEL_ATTACH,
+      labelAttachStitchLabel,
+      showStitching,
+    ),
     // PL — повторы
     intState('placementCount', 'repeats', placementCount, showPlacement),
-    textState('pitchMm', 'pitch, mm', pitchMm, showPlacement && placementCount >= 2),
+    textState('pitchMm', 'pitch, mm', pitchMm, showPitch),
     // H — фурнитура
-    enumState('attachMethod', 'held on by', attachMethod, NONE_ATTACH_METHOD, HARDWARE_ATTACH_METHOD_LABELS[attachMethod as keyof typeof HARDWARE_ATTACH_METHOD_LABELS], showsDiscriminator('attachMethod'), false),
-    enumState('holePrep', 'hole prep', holePrep, NONE_HOLE_PREP, HOLE_PREP_LABELS[holePrep as keyof typeof HOLE_PREP_LABELS], showHardware),
-    enumState('reinforcement', 'reinforcement', reinforcement, NONE_REINFORCEMENT, REINFORCEMENT_LABELS[reinforcement as keyof typeof REINFORCEMENT_LABELS], showHardware),
+    enumState(
+      'attachMethod',
+      'held on by',
+      attachMethod,
+      NONE_ATTACH_METHOD,
+      hardwareAttachMethodLabel,
+      showsDiscriminator('attachMethod'),
+    ),
+    enumState('holePrep', 'hole prep', holePrep, NONE_HOLE_PREP, holePrepLabel, showHardware),
+    enumState(
+      'reinforcement',
+      'reinforcement',
+      reinforcement,
+      NONE_REINFORCEMENT,
+      reinforcementLabel,
+      showHardware,
+    ),
     intState('cycleStitchCount', 'cycle stitches', cycleStitchCount, showHardware),
     textState('foldbackMm', 'webbing foldback, mm', foldbackMm, showFoldback),
     // P — печать
-    enumState('printMethod', 'print method', printMethod, NONE_PRINT_METHOD, PRINT_METHOD_LABELS[printMethod as keyof typeof PRINT_METHOD_LABELS], showsDiscriminator('printMethod'), false),
-    enumState('peelMode', 'peel', peelMode, NONE_PEEL_MODE, PEEL_MODE_LABELS[peelMode as keyof typeof PEEL_MODE_LABELS], showPrint),
+    enumState(
+      'printMethod',
+      'print method',
+      printMethod,
+      NONE_PRINT_METHOD,
+      printMethodLabel,
+      showsDiscriminator('printMethod'),
+    ),
+    enumState('peelMode', 'peel', peelMode, NONE_PEEL_MODE, peelModeLabel, showPrint),
     intState('secondPressSec', 'second press, sec', secondPressSec, showPrint),
     // W — сварка
     intState('airTemperatureC', 'hot air, °C', airTemperatureC, showAirTemperature),
     textState('feedSpeedMMin', 'feed speed, m/min', feedSpeedMMin, showWeld),
     // T / F / C / Q / WP
-    enumState('trimAction', 'cut', trimAction, NONE_TRIM_ACTION, TRIM_ACTION_LABELS[trimAction as keyof typeof TRIM_ACTION_LABELS], showsDiscriminator('trimAction'), false),
+    enumState(
+      'trimAction',
+      'cut',
+      trimAction,
+      NONE_TRIM_ACTION,
+      trimActionLabel,
+      showsDiscriminator('trimAction'),
+    ),
     textState('residualAllowanceMm', 'allowance left, mm', residualAllowanceMm, showTrim),
     textState('residualTailMaxMm', 'longest tail, mm', residualTailMaxMm, showThreadTrim),
-    enumState('cleaningKind', 'clean off', cleaningKind, NONE_CLEANING_KIND, CLEANING_KIND_LABELS[cleaningKind as keyof typeof CLEANING_KIND_LABELS], showsDiscriminator('cleaningKind'), false),
-    enumState('coverageMode', 'coverage', coverageMode, NONE_COVERAGE_MODE, INSPECT_COVERAGE_LABELS[coverageMode as keyof typeof INSPECT_COVERAGE_LABELS], showsDiscriminator('coverageMode'), false),
-    enumState('wetProcessKind', 'bath', wetProcessKind, NONE_WET_PROCESS, WET_PROCESS_KIND_LABELS[wetProcessKind as keyof typeof WET_PROCESS_KIND_LABELS], showsDiscriminator('wetProcessKind'), false),
+    enumState(
+      'cleaningKind',
+      'clean off',
+      cleaningKind,
+      NONE_CLEANING_KIND,
+      cleaningKindLabel,
+      showsDiscriminator('cleaningKind'),
+    ),
+    enumState(
+      'coverageMode',
+      'coverage',
+      coverageMode,
+      NONE_COVERAGE_MODE,
+      inspectCoverageLabel,
+      showsDiscriminator('coverageMode'),
+    ),
+    enumState(
+      'wetProcessKind',
+      'bath',
+      wetProcessKind,
+      NONE_WET_PROCESS,
+      wetProcessKindLabel,
+      showsDiscriminator('wetProcessKind'),
+    ),
     // FA — петли, закрепки, пуговицы, молнии
-    enumState('buttonholeStyle', 'buttonhole shape', buttonholeStyle, NONE_BUTTONHOLE_STYLE, BUTTONHOLE_STYLE_ITEMS[buttonholeStyle as keyof typeof BUTTONHOLE_STYLE_ITEMS], showButtonhole),
+    enumState(
+      'buttonholeStyle',
+      'buttonhole shape',
+      buttonholeStyle,
+      NONE_BUTTONHOLE_STYLE,
+      itemLabel(BUTTONHOLE_STYLE_ITEMS),
+      showButtonhole,
+    ),
     textState('cutLengthMm', 'buttonhole cut, mm', cutLengthMm, showButtonhole),
-    enumState('buttonholeOrientation', 'buttonhole direction', buttonholeOrientation, NONE_BUTTONHOLE_ORIENTATION, BUTTONHOLE_ORIENTATION_ITEMS[buttonholeOrientation as keyof typeof BUTTONHOLE_ORIENTATION_ITEMS], showButtonhole),
+    enumState(
+      'buttonholeOrientation',
+      'buttonhole direction',
+      buttonholeOrientation,
+      NONE_BUTTONHOLE_ORIENTATION,
+      itemLabel(BUTTONHOLE_ORIENTATION_ITEMS),
+      showButtonhole,
+    ),
     textState('bartackLengthMm', 'bartack length, mm', bartackLengthMm, showBartack),
-    enumState('attachPattern', 'button pattern', attachPattern, NONE_ATTACH_PATTERN, BUTTON_ATTACH_PATTERN_LABELS[attachPattern as keyof typeof BUTTON_ATTACH_PATTERN_LABELS], showAttachPattern),
-    enumState('zipperApplication', 'zip application', zipperApplication, NONE_ZIPPER_APPLICATION, ZIPPER_APPLICATION_LABELS[zipperApplication as keyof typeof ZIPPER_APPLICATION_LABELS], showZipper),
+    enumState(
+      'attachPattern',
+      'button pattern',
+      attachPattern,
+      NONE_ATTACH_PATTERN,
+      buttonAttachPatternLabel,
+      showAttachPattern,
+    ),
+    enumState(
+      'zipperApplication',
+      'zip application',
+      zipperApplication,
+      NONE_ZIPPER_APPLICATION,
+      zipperApplicationLabel,
+      showZipper,
+    ),
     // G — ВТО
-    enumState('pressAction', 'press action', pressAction, NONE_PRESS_ACTION, PRESS_ACTION_LABELS[pressAction as keyof typeof PRESS_ACTION_LABELS], showPressAction),
-    enumState('pressToward', 'allowance goes', pressToward, NONE_PRESS_TOWARD, PRESS_TOWARD_LABELS[pressToward as keyof typeof PRESS_TOWARD_LABELS], showPressToward),
+    enumState(
+      'pressAction',
+      'press action',
+      pressAction,
+      NONE_PRESS_ACTION,
+      pressActionLabel,
+      showPressAction,
+    ),
+    enumState(
+      'pressToward',
+      'allowance goes',
+      pressToward,
+      NONE_PRESS_TOWARD,
+      pressTowardLabel,
+      showPressToward,
+    ),
   ];
   // СКОЛЬКО СВОЙСТВ ВИДА УЖЕ НАЗВАНО — пилюля ЗОНЫ СВОЙСТВ, а не створки. До пикера эти факты
   // лежали в створке и накручивали её счётчик; теперь они стоят на виду, и складывать их с
@@ -2549,10 +2715,7 @@ function OperationEditor({
   // поле стоит в ядре сетки рядом с пикером, и «ничего не названо» над пустым местом было бы
   // неправдой в обе стороны сразу.
   const kindHasControls =
-    isMachineStep ||
-    topstitchMode !== NONE_TOPSTITCH ||
-    topstitchWidthMm.trim() !== '' ||
-    topstitchRows > 0 ||
+    showTopstitch ||
     showStitching ||
     showPlacement ||
     showHardware ||
