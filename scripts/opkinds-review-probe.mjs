@@ -535,7 +535,12 @@ async function run(bundle) {
   ck((await kindLabel()) === 'Topstitch', 'исходный шаг резолвится в «Topstitch»', await kindLabel());
 
   const MOVES = [
-    { label: 'Join — lockstitch', machine: T.LOCKSTITCH },
+    // «Join / seam» И «Join — lockstitch» НИЖЕ — ОДНА РАБОТА ДВУМЯ ИМЕНАМИ, И ЭТО НЕ ОПЕЧАТКА.
+    // 0331 переименовала ЯРЛЫК КАТАЛОГА (токен `join_lockstitch` не менялся): выбранная работа
+    // зовётся своим каталожным именем. Шаг, у которого работы НЕТ вовсе, по-прежнему зовётся
+    // деривацией из пары (глагол, машинка) — то есть пунктом бандла, — и там имя своё. Двоекодье
+    // переходного периода видно ровно здесь, в одном экране.
+    { label: 'Join / seam', machine: T.LOCKSTITCH },
     { label: 'Coverstitch', machine: T.COVERSTITCH },
     { label: 'Chainstitch', machine: 'TECH_CARD_MACHINE_TYPE_CHAINSTITCH' },
     { label: 'AMF hand-stitch imitation', machine: 'TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION' },
@@ -571,6 +576,7 @@ async function run(bundle) {
 
   // ОБРАТНАЯ ПОЛОВИНА: пункт, который якорь ЗАЯВЛЯЕТ, его не снимает, а ставит.
   await mount({ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE });
+  // Работы на шаге нет — имя ВЫВЕДЕНО из записи, и потому это имя ПУНКТА, а не каталога.
   ck((await kindLabel()) === 'Join — lockstitch', 'шаг без якоря — «Join — lockstitch»', await kindLabel());
   ck(await pickKind('Topstitch'), 'пункт «Topstitch» выбран');
   const vTop = await values();

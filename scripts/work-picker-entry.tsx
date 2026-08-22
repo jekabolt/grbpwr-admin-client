@@ -41,7 +41,14 @@ type WorkPickerProbe = {
   /** Круг «провод → форма»: токен, которого бандл не знает, обязан доехать до формы целым. */
   readBack: (op: Record<string, unknown>) => Record<string, unknown> | undefined;
   /** Инвентарь снимка бандла — тот самый фолбэк, которым живёт пикер без каталога. */
-  bundle: () => { items: number; offered: number; tokens: number; uniq: number };
+  bundle: () => {
+    items: number;
+    offered: number;
+    tokens: number;
+    uniq: number;
+    derived: number;
+    list: Array<Record<string, unknown>>;
+  };
   /** Щит осведомлённости: пятый aware-флаг, который КАЖДАЯ запись обязана объявлять. */
   aware: () => boolean | undefined;
 };
@@ -79,11 +86,23 @@ probe.aware = () => {
 
 probe.bundle = () => {
   const tokens = Object.values(KIND_WORK_TOKEN);
+  // СПИСОК ЦЕЛИКОМ, А НЕ ТОЛЬКО СЧЁТЧИКИ: по нему сторож сверяет снимок с САМИМИ МИГРАЦИЯМИ —
+  // токен за токеном, ярлык за ярлыком. Счётчик поймал бы только пропажу строки, а расхождение
+  // 0331 было в ярлыке и в снятии, то есть внутри строки.
+  const list = BUNDLED_WORK_CATALOG.items.map((w) => ({
+    ...w,
+    machines: [...w.machines],
+    syn: [...w.syn],
+  }));
   return {
-    items: BUNDLED_WORK_CATALOG.items.length,
+    items: list.length,
     offered: offeredKinds().length,
     tokens: tokens.length,
     uniq: new Set(tokens).size,
+    // ПУНКТ ЕСТЬ НЕ У ВСЕГО СНИМКА: работы 0331 приходят каталогом и пункта в этом файле не имеют
+    // вовсе. Полноту сшивки поэтому проверяет именно ЭТО число, а не длина списка.
+    derived: list.filter((w) => tokens.includes(w.token)).length,
+    list,
   };
 };
 

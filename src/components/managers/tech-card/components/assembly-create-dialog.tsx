@@ -314,7 +314,9 @@ export function AssemblyCreateDialog({
     // Машинка здесь ставится ДЕФОЛТОМ РАБОТЫ, а не парком: парк живёт в форме карточки, а диалог
     // формы не видит вовсе. Единственный подходящий профиль подставит редактор шага, куда диалог
     // и приводит сразу после создания.
-    const w = workWrites(item, k, '', '', kindWrites);
+    // Шаг ЕЩЁ НЕ СУЩЕСТВУЕТ: ни машинки, ни пресса на нём стоять не может, и «бережно держать»
+    // здесь нечего — обе оси приходят из самой работы.
+    const w = workWrites(item, k, '', '', '', kindWrites);
     const verb = w.operationType ?? UNKNOWN_TYPE;
     setOperationType(verb);
     setMachineType(w.machineType ?? UNKNOWN_MACHINE);
