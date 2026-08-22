@@ -126,6 +126,18 @@ import {
   threadTensionOptions,
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
+// ВЫВОДИМОСТЬ — ЧИСТЫЕ ФУНКЦИИ ЖИВУТ ОТДЕЛЬНО, И ЭТО НЕ СТИЛЬ. Правило «ровно один кандидат или
+// молчим» проверяется пробой на фикстурах, а не глазами по редактору на семь тысяч строк;
+// подстановка же — жест интерфейса, и она вся здесь: значение в поле + видимая метка.
+import {
+  inferStep,
+  zoneIsUnset,
+  type InferenceAlias,
+  type InferenceCard,
+  type InferencePress,
+  type InferenceStep,
+  type StepInference,
+} from './operation-inference';
 import {
   StepResidueStrip,
   type ResidueErrorRow,
@@ -2108,6 +2120,120 @@ const TRAY_PIECE_SOURCE = {
   emptyNote: 'not linked to any piece — click one in the tray above, or drag it here',
 };
 
+// ── ВЫВОДИМОСТЬ: ЧТО КАРТОЧКА ЗНАЕТ ПРО ШАГ САМА ───────────────────────────────────────────────
+//
+// ТРИ ПРАВИЛА ПОДСТАНОВКИ, И ОНИ ЖЕ — ГРАНИЦА ЭТОГО КУСКА:
+//
+//  1. ТОЛЬКО В ПУСТОЕ. Заполненное не трогается никогда — ни своё, ни чужое. Ответ человека
+//     старше любого вывода.
+//  2. ТОЛЬКО ВИДИМО И ТОЛЬКО С МЕТКОЙ. Значение стоит в том же контроле, что и ответ человека, и
+//     рядом с ним — метка «suggested». Жёсткой записи (в обход экрана, на сохранении, на сервер)
+//     нет ни одной: зона входит в подпись карточки, и написать её за человека нельзя.
+//  3. ПОДСТАВЛЕННОЕ СНИМАЕТСЯ И ОТЗЫВАЕТСЯ. Касание метки убирает значение и гасит подсказку
+//     навсегда для этого шага; правка контрола гасит метку, а значение оставляет человеку. И
+//     наоборот: пока метка стоит, значение — наше, поэтому исчезнувшее основание (добавили вторую
+//     деталь, кандидатов стало два) ОТЗЫВАЕТ подстановку. Оставить её значило бы, что карточка
+//     утверждает то, чего уже не выводит.
+//
+// ФОРМА НЕ ПАЧКАЕТСЯ ПОДСТАНОВКОЙ (`shouldDirty: false`). Открыть карточку и закрыть — не правка,
+// и синий значок «есть несохранённое» от простого просмотра приучил бы не смотреть на него вовсе.
+// Дальше значение живёт как всякое другое: сохранится вместе с первой настоящей правкой шага,
+// на глазах и с меткой.
+
+/** Поля, у которых бывает метка «подставлено». Ключи локального состояния редактора. */
+type SuggestedField = 'zone' | 'press' | 'thread';
+
+/**
+ * Снимок карточки для вывода. Собирается из ТЕХ ЖЕ подписок, что уже держит редактор: список
+ * операций он читает через `useAssemblyView`, парк прессов и строки BOM — своими, и вторая
+ * подписка на то же имя стоит здесь только новой памяткой, а не новой перерисовкой.
+ */
+function useStepInference(
+  index: number,
+  pieces: PieceRef[],
+  bomLines: BomLine[],
+  parkPresses: InferencePress[],
+  // Что на этом шаге написали МЫ. Вычитается из снимка перед выводом — см. довод у вызова: вывод,
+  // читающий собственную догадку как факт, замыкается сам на себя.
+  own: { zone: boolean; thread?: string; press: boolean },
+): StepInference {
+  const ops = useWatch({ name: 'operations' }) as InferenceStep[] | undefined;
+  const aliases = (useWatch({ name: 'pieceDxfAliases' }) ?? []) as InferenceAlias[];
+  const { zone: ownZone, thread: ownThread, press: ownPress } = own;
+  return useMemo(() => {
+    const steps = (ops ?? []).map((o, i) => {
+      if (i !== index) return o;
+      const stripped: InferenceStep = { ...o };
+      if (ownZone) stripped.zone = '';
+      if (ownThread) {
+        stripped.bomLineKeys = (stripped.bomLineKeys ?? []).filter((k) => k !== ownThread);
+      }
+      if (ownPress) {
+        stripped.pressEquipment = '';
+        stripped.pressProfileKey = '';
+      }
+      return stripped;
+    });
+    const card: InferenceCard = {
+      pieces: pieces.map((p) => ({ lineKey: p.lineKey, name: p.name })),
+      bomLines,
+      aliases,
+      presses: parkPresses,
+      steps,
+    };
+    // ТОЛЬКО ОТКРЫТЫЙ ШАГ, а не вся карточка: редактор смонтирован в единственном экземпляре, а
+    // сто двадцать шесть выводов на каждое нажатие клавиши — это не подсказка, а тормоз.
+    return inferStep(card, index);
+  }, [ops, aliases, pieces, bomLines, parkPresses, index, ownZone, ownThread, ownPress]);
+}
+
+/**
+ * ОТКУДА ВЗЯЛАСЬ ПОДСКАЗКА — СЛОВАМИ, а не «система решила». Источник называется в подсказке
+ * метки, потому что проверять вывод человек будет ровно там, откуда он взялся: назначение строки
+ * BOM правится на вкладке материалов, имя детали — в чертеже, вид — пикером двумя контролами выше.
+ */
+const INFERENCE_SOURCE_WORDS: Record<'fabric' | 'piece-name' | 'work', string> = {
+  fabric: 'the purpose of the cloth these pieces are cut from',
+  'piece-name': 'the names of the pieces this step takes',
+  work: 'the kind of work this step is',
+};
+
+function zoneSuggestedWhy(sources: { id: 'fabric' | 'piece-name' | 'work' }[]): string {
+  const words = sources.map((s) => INFERENCE_SOURCE_WORDS[s.id]);
+  return words.length === 0 ? 'inferred from the card' : `inferred from ${words.join(' and ')}`;
+}
+
+/**
+ * МЕТКА «ПОДСТАВЛЕНО» — КНОПКА, А НЕ НАДПИСЬ, и это часть контракта: подставленное обязано
+ * сниматься одним касанием там же, где оно показано. Надпись оставила бы человеку только путь
+ * «выбрать в селекте другое значение», то есть заменить наш ответ своим — а он мог хотеть
+ * пустоты.
+ */
+function SuggestedMark({
+  field,
+  what,
+  why,
+  onDismiss,
+}: {
+  field: SuggestedField;
+  what: string;
+  why: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      data-suggested={field}
+      onClick={onDismiss}
+      title={`${why} — click to drop it and answer yourself`}
+      className='mt-px inline-flex max-w-full items-center gap-1 border border-warning px-[7px] py-px text-micro uppercase tracking-pill text-warning'
+    >
+      <span className='truncate'>suggested · {what}</span>
+      <span aria-hidden>✕</span>
+    </button>
+  );
+}
+
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
 // The whole sewing spec for ONE step. Remounted (keyed on the field id) whenever the selection
 // moves, so the "skip the first run" guards below start clean and selecting a step never dirties
@@ -3230,6 +3356,191 @@ function OperationEditor({
     setValue(`operations.${index}.inputKeys`, next, { shouldDirty: true });
   };
 
+  // ── ВЫВОДИМОСТЬ ЭТОГО ШАГА ─────────────────────────────────────────────────────────────────────
+  //
+  // ВЫВОД СЧИТАЕТСЯ ПО ДАННЫМ ЧЕЛОВЕКА, А НЕ ПО СВОИМ СОБСТВЕННЫМ. Подставленное вычитается из
+  // снимка ПЕРЕД выводом, и без этого вышла бы петля с обратной связью: привязали нитку — источник
+  // видит «нитка уже привязана» — подсказка гаснет — подстановка отзывается — источник снова видит
+  // пустое. Экран мигал бы, а причина сидела бы в том, что система читает как факт собственную
+  // догадку.
+  const [applied, setApplied] = useState<{
+    zone?: string;
+    thread?: string;
+    press?: { equipment: string; profileKey: string };
+  }>({});
+  const [dismissed, setDismissed] = useState<Set<SuggestedField>>(() => new Set());
+
+  // ЧТО НАПИСАЛИ МЫ — В РЕФЕ, ЗАПИСЫВАЕТСЯ СИНХРОННО С `setValue`. Состояние `applied` рисует
+  // метку и приезжает следующим рендером, а решение «это наша запись или ответ человека»
+  // принимается в тот же миг, когда подписка приносит новое значение поля. Разница в один рендер
+  // тут не мелочь: между записью и её отражением в состоянии наша же подстановка выглядела бы
+  // ответом человека — и метка не появилась бы никогда.
+  const wroteRef = useRef<{
+    zone?: string;
+    thread?: string;
+    press?: { equipment: string; profileKey: string };
+  }>({});
+
+  const inference = useStepInference(index, pieces, bomLines, parkPresses, {
+    zone: wroteRef.current.zone !== undefined,
+    thread: wroteRef.current.thread,
+    press: !!wroteRef.current.press,
+  });
+
+  const zoneSuggested = inference.zone.value;
+  const threadSuggested = inference.thread.lineKey;
+  const pressSuggested = inference.press.pressEquipment;
+  const pressProfileSuggested = inference.press.profileKey;
+
+  /** Человек ответил сам — поле его. Больше не предлагаем на этом шаге. */
+  const dismiss = useCallback((field: SuggestedField) => {
+    delete wroteRef.current[field];
+    setDismissed((prev) => (prev.has(field) ? prev : new Set(prev).add(field)));
+    setApplied((prev) => {
+      if (prev[field] === undefined) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }, []);
+
+  // ЗОНА. Подставляется только в незаполненное; исчезло основание — подстановка ОТЗЫВАЕТСЯ, потому
+  // что пока метка стоит, значение наше, а не человека. Зона входит в подпись карточки, и оставить
+  // на ней утверждение, которого система уже не выводит, — это ровно тот тихий дефект, ради
+  // которого весь этот кусок сделан видимым.
+  //
+  // СОСТОЯНИЕ ПОЛЯ БЕРЁТСЯ ИЗ ПОДПИСКИ, А НЕ ИЗ `getValues`, И ЭТО НЕ СТИЛЬ. Эффекты ребёнка
+  // выполняются РАНЬШЕ эффекта монтирования формы, а до него `getValues` отвечает из
+  // `_defaultValues`: подстановка читала «пусто» там, где значение уже стояло, и не видела, что
+  // её собственная запись не доехала. Подписка отвечает одинаково в любой момент жизни формы.
+  //
+  // «ЧЕЛОВЕК ТРОНУЛ КОНТРОЛ» ОПРЕДЕЛЯЕТСЯ ЗДЕСЬ, А НЕ КОЛБЭКОМ СЕЛЕКТА, И ЭТО ПОЧИНКА, А НЕ ВКУС.
+  // `onValueChange` у Radix срабатывает и на ВНЕШНЕЕ изменение управляемого значения — то есть на
+  // нашу же подстановку. Повешенное на него снятие метки гасило подсказку в тот же кадр, в
+  // котором она появлялась, и выглядело это как «вывод не работает».
+  useEffect(() => {
+    if (frozen || dismissed.has('zone')) return;
+    const path = `operations.${index}.zone` as const;
+    const ours = wroteRef.current.zone;
+    if (ours !== undefined && !zoneIsUnset(zoneValue) && zoneValue !== ours) {
+      dismiss('zone'); // человек выбрал своё поверх подставленного — значение остаётся ему
+      return;
+    }
+    if (ours === undefined && !zoneIsUnset(zoneValue)) return; // чужой ответ не трогаем никогда
+    if (zoneSuggested) {
+      wroteRef.current.zone = zoneSuggested;
+      if (zoneValue !== zoneSuggested) setValue(path, zoneSuggested, { shouldDirty: false });
+      if (applied.zone !== zoneSuggested) setApplied((prev) => ({ ...prev, zone: zoneSuggested }));
+      return;
+    }
+    if (ours === undefined) return;
+    delete wroteRef.current.zone;
+    if (!zoneIsUnset(zoneValue)) setValue(path, NONE_ZONE, { shouldDirty: false });
+    setApplied((prev) => {
+      const { zone: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, [zoneSuggested, zoneValue, applied.zone, frozen, dismissed, index, setValue, dismiss]);
+
+  // НИТКА. Привязка — это добавление ключа в тот же список, куда его кладёт человек, поэтому
+  // отзыв обязан снимать РОВНО наш ключ и не трогать соседние.
+  useEffect(() => {
+    if (frozen || dismissed.has('thread')) return;
+    const path = `operations.${index}.bomLineKeys` as const;
+    const ours = wroteRef.current.thread;
+    if (threadSuggested) {
+      if (ours === threadSuggested && selectedBomKeys.includes(threadSuggested)) return;
+      wroteRef.current.thread = threadSuggested;
+      const others = selectedBomKeys.filter((k) => k !== ours && k !== threadSuggested);
+      setValue(path, [...others, threadSuggested], { shouldDirty: false });
+      if (applied.thread !== threadSuggested) {
+        setApplied((prev) => ({ ...prev, thread: threadSuggested }));
+      }
+      return;
+    }
+    if (ours === undefined) return;
+    delete wroteRef.current.thread;
+    if (selectedBomKeys.includes(ours)) {
+      setValue(
+        path,
+        selectedBomKeys.filter((k) => k !== ours),
+        { shouldDirty: false },
+      );
+    }
+    setApplied((prev) => {
+      const { thread: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, [threadSuggested, selectedBomKeys, applied.thread, frozen, dismissed, index, setValue]);
+
+  // УТЮГ. Оборудование и ключ профиля едут ПАРОЙ: ключ без оборудования сервер отвергает, а
+  // оборудование без ключа на карточке с одним профилем — половина ответа, которую человеку
+  // пришлось бы дописывать вторым жестом.
+  useEffect(() => {
+    if (frozen || dismissed.has('press')) return;
+    const eqPath = `operations.${index}.pressEquipment` as const;
+    const keyPath = `operations.${index}.pressProfileKey` as const;
+    const ours = wroteRef.current.press;
+    const eqSet = !!pressEquipment && pressEquipment !== NONE_PRESS_EQUIPMENT;
+    if (ours && eqSet && pressEquipment !== ours.equipment) {
+      dismiss('press');
+      return;
+    }
+    if (!ours && eqSet) return;
+    if (pressSuggested) {
+      wroteRef.current.press = { equipment: pressSuggested, profileKey: pressProfileSuggested };
+      if (pressEquipment !== pressSuggested) setValue(eqPath, pressSuggested, { shouldDirty: false });
+      if (pressProfileSuggested && pressProfileKey !== pressProfileSuggested) {
+        setValue(keyPath, pressProfileSuggested, { shouldDirty: false });
+      }
+      if (applied.press?.equipment !== pressSuggested) {
+        setApplied((prev) => ({
+          ...prev,
+          press: { equipment: pressSuggested, profileKey: pressProfileSuggested },
+        }));
+      }
+      return;
+    }
+    if (!ours) return;
+    delete wroteRef.current.press;
+    if (eqSet) setValue(eqPath, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
+    if (ours.profileKey && pressProfileKey) setValue(keyPath, '', { shouldDirty: false });
+    setApplied((prev) => {
+      const { press: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, [
+    pressSuggested,
+    pressProfileSuggested,
+    pressEquipment,
+    pressProfileKey,
+    applied.press?.equipment,
+    frozen,
+    dismissed,
+    index,
+    setValue,
+    dismiss,
+  ]);
+
+  /** Снять подставленное касанием: значение уходит, подсказка на этом шаге гаснет. */
+  const dropSuggested = (field: SuggestedField) => {
+    const wrote = wroteRef.current;
+    if (field === 'zone') setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
+    if (field === 'thread') {
+      setValue(
+        `operations.${index}.bomLineKeys`,
+        selectedBomKeys.filter((k) => k !== wrote.thread),
+        { shouldDirty: false },
+      );
+    }
+    if (field === 'press') {
+      setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
+      if (wrote.press?.profileKey)
+        setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+    }
+    dismiss(field);
+  };
+
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
   // asked the same question with room for one answer, and an operation genuinely takes several.
   const linkedMaterials = selectedBomKeys
@@ -3595,12 +3906,22 @@ function OperationEditor({
           />
         )}
         {isPressStep && (
-          <SelectField
-            name={`operations.${index}.pressEquipment`}
-            label='equipment *'
-            items={pressEquipmentOptions}
-            className={selectNoGrow}
-          />
+          <div className='space-y-px'>
+            <SelectField
+              name={`operations.${index}.pressEquipment`}
+              label='equipment *'
+              items={pressEquipmentOptions}
+              className={selectNoGrow}
+            />
+            {applied.press && (
+              <SuggestedMark
+                field='press'
+                what={pressEquipmentLabel(applied.press.equipment)}
+                why='the card park holds exactly one press profile for this process'
+                onDismiss={() => dropSuggested('press')}
+              />
+            )}
+          </div>
         )}
         {/* ДИСКРИМИНАТОР ГЛАГОЛА — та же вторая ось, что машинка у «machine» и оборудование у ВТО,
             и стоит она здесь по тому же доводу: сервер требует её БЕЗУСЛОВНО, а обязательное поле
@@ -3619,16 +3940,37 @@ function OperationEditor({
             className={selectNoGrow}
           />
         )}
-        <SelectField
-          name={`operations.${index}.zone`}
-          label='zone *'
-          items={zoneOptions}
-          className={selectNoGrow}
-        />
+        {/* ЗОНА — ЕДИНСТВЕННОЕ ПОДСТАВЛЯЕМОЕ ПОЛЕ, ВХОДЯЩЕЕ В ПОДПИСЬ КАРТОЧКИ, и поэтому метка
+            рядом с ней обязательна, а не желательна: подписывают то, что видят. */}
+        <div className='space-y-px'>
+          <SelectField
+            name={`operations.${index}.zone`}
+            label='zone *'
+            items={zoneOptions}
+            className={selectNoGrow}
+          />
+          {applied.zone && (
+            <SuggestedMark
+              field='zone'
+              what={zoneOptions.find((o) => o.value === applied.zone)?.label ?? applied.zone}
+              why={zoneSuggestedWhy(inference.zone.sources)}
+              onDismiss={() => dropSuggested('zone')}
+            />
+          )}
+        </div>
         <DecimalField
           name={`operations.${index}.smv`}
           label='time, min'
-          placeholder='1.8'
+          // ГОУСТ, А НЕ ЗНАЧЕНИЕ. Норма времени зависит от изделия, поэтому её не подставляют ни
+          // при каком совпадении — её ПОКАЗЫВАЮТ в пустом поле и убирают, как только человек
+          // набрал своё. Место занято тем же плейсхолдером, что и раньше, когда сказать нечего.
+          placeholder={inference.smv.smv ? `last: ${inference.smv.smv}` : '1.8'}
+          title={
+            inference.smv.smv
+              ? `the same kind of step took ${inference.smv.smv} min at step ${inference.smv.fromStep} of this card — a hint, not a value`
+              : undefined
+          }
+          data-smv-hint={inference.smv.smv || undefined}
           min={0}
         />
         <SelectField
@@ -4320,7 +4662,12 @@ function OperationEditor({
                 // The kind when the line carries one — «молния» says more than «фурнитура» — and the
                 // section as the fallback for every line not classified yet.
                 title={kindLabel(b.kind) ?? LINKABLE_SECTION_LABEL[b.section ?? ''] ?? undefined}
-                onRemove={() => toggleBom(b.lineKey ?? '')}
+                onRemove={() => {
+                  // Снятая руками привязка — ответ человека: подставлять её обратно нельзя, иначе
+                  // чип возвращался бы под курсором.
+                  if (b.lineKey && b.lineKey === applied.thread) dismiss('thread');
+                  toggleBom(b.lineKey ?? '');
+                }}
                 onMouseEnter={() => onActiveBomChange?.(b.lineKey ?? null)}
                 onMouseLeave={() => onActiveBomChange?.(null)}
               >
@@ -4338,6 +4685,19 @@ function OperationEditor({
               </Chip>
             )}
           </ChipRow>
+          {/* НИТКА ПОДСТАВЛЕНА — И СКАЗАНО, ЧТО ЭТО ПОДСТАНОВКА. Чип выше выглядит ровно как
+              привязанный руками, поэтому метка стоит отдельной строкой: без неё «оно само» было бы
+              неотличимо от «я это выбрал», и первая же ошибка вывода списалась бы на человека. */}
+          {applied.thread && (
+            <SuggestedMark
+              field='thread'
+              what={
+                bomLines.find((b) => b.lineKey === applied.thread)?.name?.trim() || 'thread'
+              }
+              why='it is the only thread line in this BOM that fits the step'
+              onDismiss={() => dropSuggested('thread')}
+            />
+          )}
           {/* The article each colourway resolves the slot to. Printed under the chips rather than
               inside them: the chip is the ROLE (the durable thing the step links), and folding a
               per-colourway article into it would claim the operation itself is colourway-specific. */}
