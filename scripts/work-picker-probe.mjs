@@ -23,7 +23,13 @@
 //       обоим сразу»;
 //   Ж — суженный список «на чём» и гоуст нормы времени тоже приходят из каталога: у работы, пункта
 //       под которую в бандле нет, сузить список нечем, и без каталога человек получил бы двадцать
-//       шесть машинок словаря вместо двух законных.
+//       шесть машинок словаря вместо двух законных;
+//   З (ревью R6) — клавиатура не выбирает вслепую: Enter при пустом запросе БЕЗ подсветки молчит
+//       (первой строкой стоит «— no kind —», и рефлекторный Enter снимал бы вид, не меняя
+//       триггера), а «набрал слово + Enter» остаётся одним жестом;
+//   И (ревью R6) — метка «prefilled» ГАСНЕТ, когда человек тронул значение (и значение остаётся
+//       его); щит осведомлённости operation_work_aware объявлен на КАЖДОЙ записи. Обе половины
+//       найдены мутациями ревью: без них подмена условия метки и aware=false оставались зелёными.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ (приём взят у press-action-probe): правка
 // исходника ради проверки — это правка, которую однажды забудут откатить.
@@ -547,6 +553,31 @@ head('Г. выбор пишет РАБОТУ и ЛИЧНОСТЬ');
   );
 }
 
+// ── З. КЛАВИАТУРА НЕ ВЫБИРАЕТ ВСЛЕПУЮ ───────────────────────────────────────────────────────────
+head('З. Enter без слова и без подсветки не делает ничего; «слово + Enter» выбирает');
+{
+  await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
+  ck(await pickWork('topstitch'), 'работа стоит на шаге');
+  // Слепой Enter: открыл и сразу нажал. Первой строкой стоит «— no kind —», и выбор её вслепую
+  // снял бы вид, НЕ ПОМЕНЯВ триггера: у A2 выведенное имя совпадает с каталожным «Topstitch».
+  await openList();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const v = await values();
+  ck(v.work === 'topstitch', 'слепой Enter НЕ снял вид', String(v.work));
+  ck((await page.locator(INPUT).count()) === 1, 'и список остался открытым — молчание не жест');
+  await closeList();
+  // «Набрал слово + Enter» — один жест, и он обязан работать: запрос подсвечивает первое
+  // совпадение.
+  await openList();
+  await page.fill(INPUT, 'моско');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  const v2 = await values();
+  ck(v2.work === 'moscow_hem', '«моско» + Enter выбирает московский шов', String(v2.work));
+}
+
 // ── Ж. «НА ЧЁМ» И ГОУСТ ВРЕМЕНИ — ТОЖЕ ОТ КАТАЛОГА ──────────────────────────────────────────────
 head('Ж. суженный список «на чём» и гоуст нормы времени приходят из каталога');
 {
@@ -625,6 +656,11 @@ await mount([
     }),
   );
   ck(back?.work === 'unknown_work_x', 'круг «форма → провод → форма» его не теряет', String(back?.work));
+  // ЩИТ ОСВЕДОМЛЁННОСТИ ОБЪЯВЛЕН НА КАЖДОЙ ЗАПИСИ. Найдено мутацией ревью: aware=false не красил
+  // ни одной пробы — а именно этот флаг отличает «снял вид» от «сохраняет старый бандл», и без
+  // него сервер отверг бы каждое сохранение карточки с работой.
+  const aware = await page.evaluate(() => window.__workPicker.aware());
+  ck(aware === true, 'operation_work_aware = true на записи', String(aware));
 }
 
 // ── Д. ПРИОРИТЕТ ДЕФОЛТОВ ───────────────────────────────────────────────────────────────────────
@@ -687,6 +723,33 @@ head('Д. дефолты: карточный последний шаг > гло�
   await pickWork('topstitch');
   const v2 = await values();
   ck(v2.topstitchWidthMm === '2', 'ответ человека старше любого дефолта', String(v2.topstitchWidthMm));
+}
+{
+  // МЕТКА ГАСНЕТ, КОГДА ЧЕЛОВЕК ТРОНУЛ ЗНАЧЕНИЕ, — И ЗНАЧЕНИЕ ОСТАЁТСЯ ЕГО. Найдено мутацией
+  // ревью: условие «значение разошлось с нашим» можно было выкинуть, и все цитаты оставались
+  // зелёными — метка жила бы вечно, выдавая правку человека за подстановку.
+  // Режим отстрочки задан на монтировании, чтобы контрол ширины был НА ЭКРАНЕ и правился органом.
+  await mount([
+    {
+      operationType: T.MACHINE,
+      machineType: T.LOCKSTITCH,
+      zone: T.ZONE,
+      topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+    },
+  ]);
+  ck(await pickWork('topstitch'), 'работа выбрана, дефолт подставлен');
+  const before = await page.$$eval('[data-prefill-field]', (ns) =>
+    ns.map((n) => n.getAttribute('data-prefill-field')),
+  );
+  ck(before.includes('topstitchWidthMm'), 'метка ширины стоит', before.join(' | ') || 'меток нет');
+  await page.fill('[data-field="operations.0.topstitchWidthMm"] input', '7');
+  await page.waitForTimeout(200);
+  const after = await page.$$eval('[data-prefill-field]', (ns) =>
+    ns.map((n) => n.getAttribute('data-prefill-field')),
+  );
+  ck(!after.includes('topstitchWidthMm'), 'человек тронул поле — метка погасла', after.join(' | ') || 'пусто');
+  const v3 = await values();
+  ck(v3.topstitchWidthMm === '7', 'а значение осталось ЕГО, не отозвано', String(v3.topstitchWidthMm));
 }
 
 // ── Е. ЖЕСТ «ЗАПОМНИТЬ» — ПО СЕРВЕРНОМУ РЕЕСТРУ ─────────────────────────────────────────────────

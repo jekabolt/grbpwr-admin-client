@@ -57,7 +57,13 @@ export function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
+  // ПОДСВЕТКИ ПРИ ПУСТОМ ЗАПРОСЕ НЕТ (-1), И ЭТО ЗАЩИТА, А НЕ СТИЛЬ. Первая строка открытого
+  // списка — не выбор человека: он ещё ничего не сказал. Enter, выбиравший её вслепую, был бы
+  // способом ПОТЕРЯТЬ: у пикера работ первой строкой стоит «— no kind —», и рефлекторный Enter
+  // сразу после открытия снимал бы вид — молча, потому что у пункта с тем же именем триггер не
+  // меняется. Подсветка появляется от СЛОВА (набранный запрос подсвечивает первое совпадение —
+  // «моско» + Enter работает), от СТРЕЛОК и от НАВЕДЕНИЯ; без них Enter не делает ничего.
+  const [active, setActive] = useState(-1);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -70,7 +76,7 @@ export function Combobox({
   const close = useCallback(() => {
     setOpen(false);
     setQuery('');
-    setActive(0);
+    setActive(-1);
   }, []);
 
   // Клик мимо закрывает. Слушатель вешается ТОЛЬКО пока поповер открыт: постоянный слушатель на
@@ -119,17 +125,22 @@ export function Combobox({
       e.preventDefault();
       if (flat.length === 0) return;
       const step = e.key === 'ArrowDown' ? 1 : -1;
-      setActive((i) => (i + step + flat.length) % flat.length);
+      setActive((i) => {
+        if (i < 0) return step === 1 ? 0 : flat.length - 1;
+        return (i + step + flat.length) % flat.length;
+      });
       return;
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      const pick = flat[active];
+      // Без подсветки Enter молчит и список ОСТАЁТСЯ открытым: человек ещё не назвал строку, и
+      // закрыться значило бы истолковать «ничего» как «передумал».
+      const pick = active >= 0 ? flat[active] : undefined;
       if (pick) choose(pick.value);
     }
   };
 
-  const activeValue = flat[active]?.value;
+  const activeValue = active >= 0 ? flat[active]?.value : undefined;
 
   return (
     <div ref={rootRef} className={cn('relative', className)} data-combobox={name}>
@@ -173,7 +184,9 @@ export function Combobox({
             placeholder={searchPlaceholder}
             onChange={(e) => {
               setQuery(e.target.value);
-              setActive(0);
+              // Слово подсвечивает первое совпадение — «набрал и Enter» остаётся одним жестом.
+              // Стёртый запрос гасит подсветку: пустота — не слово.
+              setActive(e.target.value.trim() ? 0 : -1);
             }}
             onKeyDown={onKeyDown}
             className='block min-h-[22px] w-full appearance-none rounded-none border-0 border-b border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-textInactiveColor focus:outline-none'
