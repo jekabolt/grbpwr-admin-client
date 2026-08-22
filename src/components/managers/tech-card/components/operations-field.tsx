@@ -3470,19 +3470,23 @@ function OperationEditor({
   // третьим флажком: «человек ответил своё» это значение, разошедшееся с нашим, а «сохранено» —
   // значение, совпавшее с БАЗОЙ формы (после успешной записи база = сервер). Флажок рядом с этими
   // двумя фактами был бы третьим мнением о них и разошёлся бы с обоими молча.
-  const prefilledPaths = prefilled.length
-    ? prefilled.map((f) => `operations.${index}.${f.field}`)
-    : [`operations.${index}.work`];
-  const prefilledNow = useWatch({
-    control,
-    name: prefilledPaths as unknown as `operations.${number}.note`[],
-  }) as unknown[];
+  // ПОДПИСКА — НА СТРОКУ ЦЕЛИКОМ, А НЕ НА СПИСОК ИМЁН, И ЭТО ПОЧИНКА, А НЕ СТИЛЬ. `useWatch` с
+  // МАССИВОМ имён берёт начальное значение ОДИН РАЗ, на монтировании, и дальше обновляет его
+  // только по подписке; список же имён рождается вместе с подстановкой — то есть ПОСЛЕ последней
+  // записи. Значение оставалось от прежнего имени, метка не появлялась ни разу, и выглядело это
+  // как «дефолты не работают», хотя поле было заполнено. Имя строки не меняется никогда.
+  const stepNow = (useWatch({ control, name: `operations.${index}` }) ?? {}) as Record<
+    string,
+    unknown
+  >;
   const prefillBase = (form.formState.defaultValues?.operations?.[index] ?? {}) as Record<
     string,
     unknown
   >;
-  const prefillNotice = prefilled.filter((f, i) => {
-    if (prefilledNow[i] !== f.value) return false;
+  const prefillNotice = prefilled.filter((f) => {
+    // Человек поправил поле — значение разошлось с нашим, и оно теперь его.
+    if (stepNow[f.field] !== f.value) return false;
+    // Карточка сохранилась — база формы стала сервером, и подстановка стала утверждением.
     return prefillBase[f.field] !== f.value;
   });
   /** Снять подставленное: значение уходит в пустоту, метка гаснет. Жест человеческий — и грязный. */
