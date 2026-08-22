@@ -20,7 +20,10 @@
 //   Е — жест «запомнить как дефолт» рисуется ПО СЕРВЕРНОМУ РЕЕСТРУ: поле, выкинутое из
 //       `default_fields`, кнопки не получает, а поле, которого нет в клиентском списке свойств, —
 //       получает. Обе половины нужны: одна ловит «рисуем по своему списку», вторая — «рисуем по
-//       обоим сразу».
+//       обоим сразу»;
+//   Ж — суженный список «на чём» и гоуст нормы времени тоже приходят из каталога: у работы, пункта
+//       под которую в бандле нет, сузить список нечем, и без каталога человек получил бы двадцать
+//       шесть машинок словаря вместо двух законных.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ (приём взят у press-action-probe): правка
 // исходника ради проверки — это правка, которую однажды забудут откатить.
@@ -30,6 +33,7 @@
 //   node scripts/work-picker-probe.mjs --mutate-priority глобальный дефолт бьёт карточный → Д красная
 //   node scripts/work-picker-probe.mjs --mutate-nowrite     выбор пишет ЛИЧНОСТЬ, но не работу → Г красная
 //   node scripts/work-picker-probe.mjs --mutate-clientlist  жест рисуется по КЛИЕНТСКОМУ списку → Е красная
+//   node scripts/work-picker-probe.mjs --mutate-narrow      «на чём» сужается пунктом бандла → Ж красная
 //
 // РЕЗУЛЬТАТ ПРОГОНА МУТАЦИЙ (2026-08-22, ветка feat/operation-kinds-ui) — все откатаны:
 //   --mutate-syn        → 4 провала: «моско», «МОСКОВСКИЙ», «оверлок» не находят ничего, и сужение
@@ -40,13 +44,16 @@
 //                         дыра именно в деградации;
 //   --mutate-priority   → 2 провала: карточный отступ 6 подменён глобальным 9, и метка называет
 //                         «your default» там, где источник карточный;
-//   --mutate-nowrite    → 5 провалов (адверсарная): личность пишется, работа — нет; жест «снять вид»
+//   --mutate-nowrite    → 9 провалов (адверсарная): личность пишется, работа — нет; жест «снять вид»
 //                         исчезает из списка (снимать нечего), имя работы откатывается к выведенному.
 //                         Это ровно то состояние, в котором фаза оказалась бы, забудь исполнитель
 //                         одну строку записи;
 //   --mutate-clientlist → 2 провала (адверсарная): жест рисуется по клиентскому KIND_PROPERTY_FIELDS,
 //                         и обе половины цитаты Е красные — кнопка появилась над выкинутым сервером
-//                         полем и исчезла над полем, которого нет в клиентском списке.
+//                         полем и исчезла над полем, которого нет в клиентском списке;
+//   --mutate-narrow     → 2 провала (адверсарная): суженный список «на чём» снова берётся у пункта
+//                         бандла, и у работы без пункта он раскрывается в ПОЛНЫЙ словарь — 26 строк
+//                         вместо двух, а подпись возвращается к «machine» вместо «on what».
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -63,6 +70,7 @@ const MUTATE_FALLBACK = process.argv.includes('--mutate-fallback');
 const MUTATE_PRIORITY = process.argv.includes('--mutate-priority');
 const MUTATE_NOWRITE = process.argv.includes('--mutate-nowrite');
 const MUTATE_CLIENTLIST = process.argv.includes('--mutate-clientlist');
+const MUTATE_NARROW = process.argv.includes('--mutate-narrow');
 
 // PLAYWRIGHT БЕРЁТСЯ ОТТУДА ЖЕ, ОТКУДА ЕГО БЕРУТ СОСЕДНИЕ ЖИВЫЕ ПРОБЫ: локальные зависимости, а
 // если их нет — кэш npx (память «headless chromium для прототипов»). Не нашёлся — проба
@@ -143,6 +151,19 @@ const CLIENTLIST_FIX = `    for (const column of workCatalog.defaultFields) {`;
 const CLIENTLIST_BROKEN = `    for (const column of KIND_PROPERTY_FIELDS.map((f) =>
       f.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()),
     )) {`;
+// Третья адверсарная: суженный список «на чём» снова берётся у пункта бандла. У работы, пункта под
+// которую в бандле нет, сужать становится нечем — и человек получает полный словарь машинок там,
+// где законных ровно две.
+const NARROW_FIX = `  const askedMachines: string[] | undefined = activeWork
+    ? activeWork.machineMode === 'ask'
+      ? activeWork.machines.map(machineTokenToEnum)
+      : undefined
+    : activeKind?.askMachine
+      ? (activeKind.askMachine as readonly string[]).slice()
+      : undefined;`;
+const NARROW_BROKEN = `  const askedMachines: string[] | undefined = activeKind?.askMachine
+    ? (activeKind.askMachine as readonly string[]).slice()
+    : undefined;`;
 
 const patcher = (filter, pairs, loader) => ({
   name: 'work-picker-mutation',
@@ -168,6 +189,8 @@ if (MUTATE_NOWRITE)
   plugins.push(patcher(/operations-field\.tsx$/, [[NOWRITE_FIX, NOWRITE_BROKEN]], 'tsx'));
 if (MUTATE_CLIENTLIST)
   plugins.push(patcher(/operations-field\.tsx$/, [[CLIENTLIST_FIX, CLIENTLIST_BROKEN]], 'tsx'));
+if (MUTATE_NARROW)
+  plugins.push(patcher(/operations-field\.tsx$/, [[NARROW_FIX, NARROW_BROKEN]], 'tsx'));
 
 await esbuild({
   entryPoints: [resolve(HERE, 'work-picker-entry.tsx')],
@@ -277,6 +300,20 @@ const CATALOG = {
       retired: true,
     },
     {
+      token: 'slit_overcast',
+      verb: 'machine',
+      stage: 'closures',
+      label: 'Slit — overcast',
+      // РАБОТА БЕЗ ПУНКТА В БАНДЛЕ, КОТОРАЯ СПРАШИВАЕТ МАШИНКУ (0331). Суженного списка «на чём»
+      // в бандле для неё нет вовсе — он обязан прийти из каталога.
+      machineMode: 'ask',
+      defaultMachine: 'zigzag',
+      machines: ['zigzag', 'buttonhole'],
+      syn: ['прорезь', 'обмётанная прорезь', 'slit', 'overcast slit'],
+      sort: 165,
+      retired: false,
+    },
+    {
       token: 'press_flat',
       verb: 'press',
       stage: 'pressing',
@@ -293,7 +330,9 @@ const CATALOG = {
     { workToken: 'topstitch', field: 'topstitch_width_mm', value: '9' },
     { workToken: 'topstitch', field: 'topstitch_rows', value: '3' },
   ],
-  smvHints: [],
+  smvHints: [
+    { workToken: 'moscow_hem', lastSmv: { value: '2.4' }, cardName: 'SS26 SHIRT' },
+  ],
   defaultFields: [
     'topstitch_mode',
     'topstitch_width_mm',
@@ -506,6 +545,54 @@ head('Г. выбор пишет РАБОТУ и ЛИЧНОСТЬ');
     (await page.locator(`[data-work-derived="0"]`).count()) === 1,
     'и экран говорит, что имя теперь ВЫВЕДЕНО, а не сохранено',
   );
+}
+
+// ── Ж. «НА ЧЁМ» И ГОУСТ ВРЕМЕНИ — ТОЖЕ ОТ КАТАЛОГА ──────────────────────────────────────────────
+head('Ж. суженный список «на чём» и гоуст нормы времени приходят из каталога');
+{
+  // РАБОТА БЕЗ ПУНКТА, СПРАШИВАЮЩАЯ МАШИНКУ: суженного списка в бандле нет вовсе, и без каталога
+  // человек получил бы полный список из двадцати с лишним машинок вместо двух законных.
+  await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
+  ck(await pickWork('slit_overcast'), 'работа без пункта, спрашивающая машинку, выбирается');
+  const v = await values();
+  ck(v.work === 'slit_overcast', 'её токен записан', String(v.work));
+  ck(
+    v.machineType === 'TECH_CARD_MACHINE_TYPE_ZIGZAG',
+    'машинка взята дефолтом каталога, а не оставлена прежней',
+    String(v.machineType),
+  );
+  const label = await page.locator('[data-field="operations.0.machineType"] label').first().textContent();
+  ck(/on what/i.test(label ?? ''), 'подпись контрола говорит «на чём», а не «машинка»', String(label));
+  // И СПИСОК ДЕЙСТВИТЕЛЬНО СУЖЕН — двумя машинками каталога, а не двадцатью с лишним словаря.
+  await page.locator('[data-field="operations.0.machineType"] button').first().click();
+  await page.waitForSelector('[role="option"]', { timeout: 5000 });
+  const machines = await page.$$eval('[role="option"]', (ns) =>
+    ns.map((n) => (n.textContent ?? '').trim()).filter(Boolean),
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('[role="option"]', { state: 'detached', timeout: 5000 }).catch(() => {});
+  ck(
+    machines.length <= 3,
+    'список «на чём» сужен каталогом, а не показан целиком',
+    `${machines.length}: ${machines.join(' | ')}`,
+  );
+  ck(
+    machines.some((m) => /zigzag/i.test(m)) && machines.some((m) => /buttonhole/i.test(m)),
+    'и в нём ровно те машинки, что назвал каталог',
+    machines.join(' | '),
+  );
+}
+{
+  // ГОУСТ КАТАЛОГА — только у строки с НАЗВАННОЙ работой и только когда карточка молчит.
+  await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
+  ck(await pickWork('moscow_hem'), 'работа с подсказкой времени выбрана');
+  const hint = await page
+    .locator('[data-field="operations.0.smv"] input')
+    .first()
+    .getAttribute('placeholder');
+  ck(hint === 'last: 2.4', 'в пустом поле нормы стоит гоуст из каталога', String(hint));
+  const v = await values();
+  ck(v.smv === '', 'и это ГОУСТ, а не значение — поле осталось пустым', `«${v.smv}»`);
 }
 
 // ── В. НЕЗНАКОМЫЙ ТОКЕН ─────────────────────────────────────────────────────────────────────────

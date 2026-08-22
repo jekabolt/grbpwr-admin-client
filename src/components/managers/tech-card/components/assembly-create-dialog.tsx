@@ -598,7 +598,7 @@ export function AssemblyCreateDialog({
           <Combobox
             name='assemblyOperationWork'
             placeholder='what kind of step'
-            searchPlaceholder='type the work — «моско», topstitch…'
+            searchPlaceholder='type the work — Russian or English'
             valueLabel={work?.label ?? ''}
             filter={filterWorks}
             onSelect={pickWork}

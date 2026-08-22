@@ -107,6 +107,7 @@ import {
   columnToFormField,
   formValueToWorkDefault,
   groupWorks,
+  machineTokenToEnum,
   resolveStepDefaults,
   searchWorks,
   workDefaultsForForm,
@@ -3192,10 +3193,27 @@ function OperationEditor({
    *     выведено, а не сохранено.
    */
   const workLabel = workValue
-    ? (activeWork?.label ?? `${workValue} — unknown to this app version`)
+    ? (activeWork?.label ??
+      (catalogLive ? `${workValue} — unknown to this app version` : `${workValue} — not named yet`))
     : derivedKind
       ? kindLabelOf(derivedKind)
       : '';
+
+  /**
+   * СУЖЕННЫЙ СПИСОК «НА ЧЁМ» — ИЗ КАТАЛОГА, КОГДА РАБОТА НАЗВАНА, и из пункта бандла, когда нет.
+   *
+   * Порядок именно такой: у работы, которой этот бандл не знает (0331 завела `slit_overcast` на
+   * зигзаге ИЛИ петельном), суженного списка в бандле нет вовсе, а вопрос «на чём» она задаёт.
+   * Пустой ответ каталога — не «список не сужен», а «сужать нечем»: тогда показывается полный
+   * список, и это шире, а не у́же, — потерять ответ человека такое сужение не может.
+   */
+  const askedMachines: string[] | undefined = activeWork
+    ? activeWork.machineMode === 'ask'
+      ? activeWork.machines.map(machineTokenToEnum)
+      : undefined
+    : activeKind?.askMachine
+      ? (activeKind.askMachine as readonly string[]).slice()
+      : undefined;
 
   /**
    * СТРОКИ ПИКЕРА — ОТ КАТАЛОГА, ГРУППАМИ, С ПОИСКОМ ПО СИНОНИМАМ.
@@ -3271,7 +3289,7 @@ function OperationEditor({
     // ИЗ КАТАЛОГА: у работы, которой этот бандл не знает, суженного списка в бандле и нет.
     let machineFromPark = '';
     if (item.machineMode === 'ask') {
-      const narrowed = item.machines.map((m) => `TECH_CARD_MACHINE_TYPE_${m.toUpperCase()}`);
+      const narrowed = item.machines.map(machineTokenToEnum);
       const fits = parkMachines.filter(
         (m) => narrowed.includes(m.machineType ?? '') && (m.profileKey ?? '').trim(),
       );
@@ -3891,6 +3909,30 @@ function OperationEditor({
     dismiss(field);
   };
 
+  /**
+   * ПОДСКАЗКА НОРМЫ ВРЕМЕНИ — ГОУСТ, НИКОГДА НЕ ЗНАЧЕНИЕ. Считается здесь, потому что у неё две
+   * ступени из РАЗНЫХ источников: карточная (модуль выводимости, R5) и каталожная (`smv_hints`,
+   * R3). Карточная сильнее; каталожная работает только у строки с названной работой.
+   *
+   * Норма времени в дефолты НЕ входит и входить не будет: она зависит от изделия, а не только от
+   * работы, — поэтому серверный реестр `default_fields` её и не содержит.
+   */
+  const cardSmv = inference.smv.smv;
+  const catalogSmv = activeWork ? workCatalog.smvHints.get(activeWork.token) : undefined;
+  const smvHint: { text: string; why: string } | undefined = cardSmv
+    ? {
+        text: cardSmv,
+        why: `the same kind of step took ${cardSmv} min at step ${inference.smv.fromStep} of this card — a hint, not a value`,
+      }
+    : catalogSmv
+      ? {
+          text: catalogSmv.smv,
+          why: `the last “${activeWork?.label}” step took ${catalogSmv.smv} min${
+            catalogSmv.cardName ? ` on ${catalogSmv.cardName}` : ''
+          } — a hint, not a value`,
+        }
+      : undefined;
+
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
   // asked the same question with room for one answer, and an operation genuinely takes several.
   const linkedMaterials = selectedBomKeys
@@ -4215,7 +4257,7 @@ function OperationEditor({
           <Combobox
             name={`operationWork-${index}`}
             placeholder='kind of operation'
-            searchPlaceholder='type the work — «моско», topstitch…'
+            searchPlaceholder='type the work — Russian or English'
             valueLabel={workLabel}
             filter={filterWorks}
             onSelect={applyWork}
@@ -4240,11 +4282,21 @@ function OperationEditor({
               derived from what is recorded — no kind stored on this step yet
             </Text>
           )}
-          {workValue && !activeWork && (
-            <Text size='micro' variant='label' component='p' data-work-unknown={workValue}>
-              this kind came from a newer version of the app — it is kept exactly as it is
-            </Text>
-          )}
+          {/* ДВА РАЗНЫХ НЕЗНАНИЯ, И ПУТАТЬ ИХ НЕЛЬЗЯ. «Каталог приехал, а токена в нём нет» это
+              работа НОВЕЕ бандла. «Каталог не приехал» это ничего не говорит о самой работе — и
+              сказать «новее бандла» в этом случае значило бы соврать про запись из-за сбоя сети.
+              Обе ветки одинаковы в главном: токен цел и уедет обратно тем же. */}
+          {workValue &&
+            !activeWork &&
+            (catalogLive ? (
+              <Text size='micro' variant='label' component='p' data-work-unknown={workValue}>
+                this kind came from a newer version of the app — it is kept exactly as it is
+              </Text>
+            ) : (
+              <Text size='micro' variant='label' component='p' data-work-unnamed={workValue}>
+                the catalogue did not load, so this kind cannot be named — it is kept as it is
+              </Text>
+            ))}
         </div>
         <SelectField
           name={`operations.${index}.operationType`}
@@ -4260,13 +4312,11 @@ function OperationEditor({
         {isMachineStep && (
           <SelectField
             name={`operations.${index}.machineType`}
-            label={activeKind?.askMachine ? 'on what *' : 'machine *'}
+            label={askedMachines ? 'on what *' : 'machine *'}
             items={
-              activeKind?.askMachine
+              askedMachines
                 ? machineTypeOptionsFor(machineType).filter(
-                    (o) =>
-                      (activeKind.askMachine as readonly string[]).includes(o.value) ||
-                      o.value === machineType,
+                    (o) => askedMachines.includes(o.value) || o.value === machineType,
                   )
                 : machineTypeOptionsFor(machineType)
             }
@@ -4345,13 +4395,15 @@ function OperationEditor({
           // ГОУСТ, А НЕ ЗНАЧЕНИЕ. Норма времени зависит от изделия, поэтому её не подставляют ни
           // при каком совпадении — её ПОКАЗЫВАЮТ в пустом поле и убирают, как только человек
           // набрал своё. Место занято тем же плейсхолдером, что и раньше, когда сказать нечего.
-          placeholder={inference.smv.smv ? `last: ${inference.smv.smv}` : '1.8'}
-          title={
-            inference.smv.smv
-              ? `the same kind of step took ${inference.smv.smv} min at step ${inference.smv.fromStep} of this card — a hint, not a value`
-              : undefined
-          }
-          data-smv-hint={inference.smv.smv || undefined}
+          //
+          // ДВЕ СТУПЕНИ ПОДСКАЗКИ, И БЛИЖНЯЯ СИЛЬНЕЕ: сначала такой же шаг ЭТОЙ карточки (его
+          // считает модуль выводимости), и только если такого нет — «в прошлый раз было
+          // столько-то» с ЧУЖОЙ карточки, из каталога работ. Порядок тот же, что у дефолтов, и по
+          // тому же доводу: контекст ближе весомее. Каталожная ступень существует только у строки
+          // с НАЗВАННОЙ работой — по паре осей такую подсказку не собрать, и это честно.
+          placeholder={smvHint ? `last: ${smvHint.text}` : '1.8'}
+          title={smvHint?.why}
+          data-smv-hint={smvHint?.text || undefined}
           min={0}
         />
         <SelectField
