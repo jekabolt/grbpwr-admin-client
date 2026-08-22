@@ -7586,6 +7586,30 @@ export type common_TechCardInsert = {
   // стирателя — ровно то, от чего щит защищает.
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
   operationKindsAware: boolean | undefined;
+  // ПЯТЫЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — про ось «работа» (TechCardOperation.work, 0330). Устройство и
+  // семантика — слово в слово machine_fields_aware (110) и operation_kinds_aware (115).
+  // ФЛАГ ЯВНЫЙ, А НЕ ВЫВЕДЕННЫЙ ИЗ ПРИСУТСТВИЯ ПОЛЯ, И ЭТО РЕШЕНИЕ, КОТОРОЕ НЕЛЬЗЯ ПЕРЕИГРАТЬ.
+  // Presence-детекция (как у payloadSpeaksOperationKinds) здесь непригодна ПРИНЦИПИАЛЬНО: пустая
+  // строка `work` на записи означает у неё ровно то же, что и отсутствие поля, поэтому
+  // «владелец СНЯЛ вид с единственной размеченной строки» было бы неотличимо от «сохраняет старый
+  // бандл». Одно из двух пришлось бы запретить — и запрещённым оказался бы человеческий жест.
+  // Явный флаг разводит их навсегда: снятие вида это aware = true и пустая строка.
+  // - новый клиент ставит флаг на КАЖДОМ сохранении; серверные пути (клон сезона, сидер) — сами;
+  // - запись БЕЗ флага против карточки, хоть один шаг которой несёт work, — FailedPrecondition
+  // с предложением обновить админку: сохранение операций устроено ПОЛНОЙ ЗАМЕНОЙ без стабильного
+  // ключа строки, поэтому «донести хранимое» физически невозможно, и честны ровно два исхода —
+  // значение доезжает целиком либо сохранение отказывает целиком;
+  // - запись без флага, которая тем не менее ВЕЗЁТ непустой work, — тот же отказ: старый бандл
+  // такого поля не знает, значит это эхо;
+  // - карточка, где ни один шаг work не несёт (сегодня — все до единой), сохраняется старым
+  // бандлом ровно как раньше. Щит молчит.
+  // ПАРНОГО `*_cleared` У НЕГО НЕТ — как у 110 и 115. «Вид снят» это рядовая правка одной строки,
+  // а не жест «снять разметку целиком»; бекстоп «осведомлённая пустота против непустой карточки»
+  // объявил бы такую правку аварией и сделал бы вид НЕСНИМАЕМЫМ.
+  // ФЛАГ НЕ ФИЛЬТРУЕТ ПОЛЯ: разбор `work` идёт всегда, независимо от флага. «Игнорировать при
+  // aware=false» превратило бы клон сезона (payload строит сервер) в тихого стирателя вида.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
+  operationWorkAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -8403,6 +8427,30 @@ export type common_TechCardOperation = {
   // ВТО-под-глагол и направление припуска (0325). Блоком по тому же доводу, что и десять блоков
   // выше; ВТО-факты 39..45 остаются на своих местах и здесь не дублируются.
   press: common_TechCardOperationPress | undefined;
+  // КАКАЯ ЭТО РАБОТА — третья ось шага рядом с глаголом (14) и машинкой (31), и с 0330 она
+  // ХРАНИМАЯ. До неё вид операции выводился экраном заново из пары (глагол, машинка), из-за чего
+  // сто прод-строк из ста двадцати шести неразличимы между собой, а сервер не мог ни проверить
+  // «такая работа существует», ни повесить на работу правило поля.
+  // СТРОКА-ТОКЕН, А НЕ ЧЛЕН ENUM, И ЭТО НЕСУЩЕЕ РЕШЕНИЕ ФАЗЫ, А НЕ ЛЕНЬ. Незнакомый член enum
+  // protojson выбрасывает МОЛЧА (инцидент Ж7) — то есть каждая новая работа делала бы все
+  // не-обновлённые бандлы тихими стирателями вида; строку не теряет ни один маршалер, и она
+  // доезжает до экрана текстом даже там, где приложение про неё не слышало. Поэтому словарь работ
+  // — ДАННЫЕ (таблица operation_work, 0329, FK на неё стоит на колонке), а не контракт, и растёт
+  // INSERT-миграцией без единой перегенерации клиента.
+  // ПУСТАЯ СТРОКА = «ВИД НЕ НАЗНАЧЕН» (колонка NULL), и это ЗАКОННОЕ состояние надолго: сто
+  // lockstitch-строк свалки размечает человек, автоматическое переписывание запрещено. На
+  // ОСВЕДОМЛЁННОЙ записи (operation_work_aware) пустая строка есть человеческий жест «снять вид» и
+  // исполняется буквально; неосведомлённую запись против карточки с хранимым видом сервер
+  // отвергает целиком — см. operation_work_aware на TechCardInsert.
+  // ПРАВИЛА ЗАПИСИ (все — именованный FieldViolation на `operations[N].work`): токена нет в
+  // каталоге — отказ; глагол шага не совпал с глаголом работы — отказ; работа живёт на нескольких
+  // машинках (machine_mode = ask), а прислана не из её списка — отказ. Для строки БЕЗ работы не
+  // меняется ничего.
+  // В ДАЙДЖЕСТ СЕКЦИИ ВХОДИТ ТОЛЬКО ТОКЕН — условным парным хвостом "work". Ярлык, глагол,
+  // синонимы, стадия и версия каталога не хешируются НИКОГДА (прецедент: цвет выноски не
+  // хешируется): они представление, и правка ярлыка не смеет объявлять подписанную карточку
+  // изменённой.
+  work: string | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -10035,6 +10083,70 @@ export type GenerateTechCardOperationsResponse = {
   operations: common_TechCardOperation[] | undefined;
   model: string | undefined;
   notes: string | undefined;
+};
+
+// OperationWorkCatalogItem — одна работа каталога.
+// ВСЁ СТРОКАМИ-ТОКЕНАМИ, НИ ОДНОГО ENUM. Словарь работ — данные, а не контракт: он растёт
+// INSERT-миграцией, и клиент, не знающий нового токена, обязан довезти его до экрана текстом, а не
+// потерять. То же и у verb / stage / machine_mode / machines: они сверяются с серверными словарями
+// (entity.OperationTypeTokens, стадии, fixed|ask|none, entity.MachineTypeTokens) на записи каталога,
+// то есть на миграции, и повторять их членами enum значило бы завести второй словарь того же.
+export type OperationWorkCatalogItem = {
+  token: string | undefined;
+  verb: string | undefined;
+  stage: string | undefined;
+  label: string | undefined;
+  machineMode: string | undefined;
+  defaultMachine: string | undefined;
+  machines: string[] | undefined;
+  syn: string[] | undefined;
+  sort: number | undefined;
+  // retired — пункт СНЯТ: в пикере не предлагается, но отдаётся всегда, потому что строка шага,
+  // уже несущая этот токен, обязана открываться и печататься своим именем, а не сырым токеном.
+  retired: boolean | undefined;
+};
+
+// OperationWorkDefaultItem — один глобальный дефолт свойства работы.
+export type OperationWorkDefaultItem = {
+  workToken: string | undefined;
+  field: string | undefined;
+  value: string | undefined;
+};
+
+// OperationWorkSmvHint — «в прошлый раз было столько-то»: ГОУСТ в пустом поле нормы времени, не
+// значение и не дефолт. SMV зависит от изделия, а не только от работы, поэтому запоминать её как
+// дефолт нельзя — реестр default_fields её и не содержит.
+export type OperationWorkSmvHint = {
+  workToken: string | undefined;
+  lastSmv: googletype_Decimal | undefined;
+  cardName: string | undefined;
+};
+
+export type GetOperationWorkCatalogRequest = {
+};
+
+export type GetOperationWorkCatalogResponse = {
+  works: OperationWorkCatalogItem[] | undefined;
+  defaults: OperationWorkDefaultItem[] | undefined;
+  smvHints: OperationWorkSmvHint[] | undefined;
+  // default_fields — ЗАКРЫТЫЙ реестр полей, у которых бывает глобальный дефолт: имена колонок шага
+  // в порядке семейств свойств. Отдаётся сервером затем, чтобы жест «запомнить как дефолт»
+  // рисовался по одному списку с тем, который его принимает: второй, клиентский, разошёлся бы
+  // молча, и человек нажимал бы кнопку, которая всегда отвечает отказом.
+  defaultFields: string[] | undefined;
+};
+
+// RememberOperationWorkDefaultRequest записывает ИЛИ снимает один дефолт.
+export type RememberOperationWorkDefaultRequest = {
+  workToken: string | undefined;
+  field: string | undefined;
+  value: string | undefined;
+  // clear снимает сохранённый дефолт. Отдельный флаг, а не «пустое значение»: пустая строка на
+  // проводе неотличима от «поле не заполнили», и снятие дефолта стало бы возможным по случайности.
+  clear: boolean | undefined;
+};
+
+export type RememberOperationWorkDefaultResponse = {
 };
 
 export type DeleteTechCardRequest = {
@@ -14416,6 +14528,23 @@ export interface AdminService {
   // draft for a technologist to review, edit and save through UpdateTechCard — it persists nothing.
   // Requires OPENROUTER_API_KEY; unconfigured it returns FailedPrecondition (degrades gracefully).
   GenerateTechCardOperations(request: GenerateTechCardOperationsRequest): Promise<GenerateTechCardOperationsResponse>;
+  // КАТАЛОГ РАБОТ (видов операций) — СЕРВЕРНЫЕ ДАННЫЕ, ОТДАВАЕМЫЕ ОДНИМ ЗАПРОСОМ.
+  // Пункты, их синонимы поиска (RU/EN), допустимые машинки, глобальные дефолты свойств и подсказки
+  // нормы времени приезжают вместе, потому что порознь они бесполезны: пикер работ рисуется целиком
+  // или не рисуется вовсе. Каталог живёт в таблицах operation_work* (миграция 0329) и растёт
+  // INSERT-миграцией — ни один пункт НЕ является членом enum, и добавление работы не требует
+  // перегенерации клиента (инцидент Ж7: незнакомый член enum protojson выбрасывает молча).
+  // Путь — два сегмента после /tech-card/, поэтому /tech-card/{id} его не проглатывает; порядок
+  // всё равно закреплён TestTechCardListRouteNotShadowed, а не формой пути.
+  GetOperationWorkCatalog(request: GetOperationWorkCatalogRequest): Promise<GetOperationWorkCatalogResponse>;
+  // RememberOperationWorkDefault — жест «у меня эта работа всегда такая»: пара (работа, поле) →
+  // значение, глобально, на все карточки. Единственная рантайм-запись во весь каталог; идентичность
+  // работ (токен, глагол) правится только миграциями.
+  // ⚠️ МАШИННЫЕ И ВТО-НАСТРОЙКИ ЗАПРЕЩЕНЫ ПО ИМЕНИ и отвергаются InvalidArgument: у них уже есть
+  // лестница наследования (шаг → профиль оборудования карточки → не задано, миграция 0306), и
+  // второй механизм поверх неё отвечал бы на один вопрос дважды. Реестр разрешённых полей отдаётся
+  // в default_fields каталога, чтобы жест рисовался по ОДНОМУ списку, а не по второму, своему.
+  RememberOperationWorkDefault(request: RememberOperationWorkDefaultRequest): Promise<RememberOperationWorkDefaultResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -19216,6 +19345,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GenerateTechCardOperations",
       }) as Promise<GenerateTechCardOperationsResponse>;
+    },
+    GetOperationWorkCatalog(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/operation-work/catalog`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOperationWorkCatalog",
+      }) as Promise<GetOperationWorkCatalogResponse>;
+    },
+    RememberOperationWorkDefault(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/operation-work/default`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RememberOperationWorkDefault",
+      }) as Promise<RememberOperationWorkDefaultResponse>;
     },
     CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
