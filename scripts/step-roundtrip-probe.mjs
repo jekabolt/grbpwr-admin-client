@@ -29,12 +29,18 @@
 //   node scripts/step-roundtrip-probe.mjs --mutate-effect   возвращает ОДИН стирающий эффект в
 //                                                          КОПИЮ исходника — цитата В обязана
 //                                                          покраснеть
+//   node scripts/step-roundtrip-probe.mjs --mutate-dirty    подстановка выводимости начинает
+//                                                          пачкать форму (`shouldDirty: true`) —
+//                                                          узкая половина цитаты В обязана
+//                                                          покраснеть
 //
 // РЕЗУЛЬТАТ ПРОГОНА МУТАЦИЙ (2026-08-22, ветка feat/operation-kinds-ui):
 //   --mutate        → 2 провала: «bindingStyle едет на любом классе шва» (А) и потеря круга Б по
 //                     bindingStyle; байтовая идемпотентность второго оборота при этом остаётся
 //                     зелёной — мутированный маппер согласен сам с собой. Откатано.
 //   --mutate-effect → 1 провал: «в эффектах нет разрушающих setValue» назвал внедрённое поле.
+//   --mutate-dirty  → 1 провал (2026-08-22, R5): подстановка зоны начинает пачкать форму, и узкая
+//                     половина цитаты В её называет поимённо. Откатано.
 //                     Откатано.
 //
 // РЕВЬЮ Ф4 (2026-08-22), адверсарные мутации сверх авторских — до ужесточения цитаты В:
@@ -54,6 +60,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MUTATE_MAPPER = process.argv.includes('--mutate');
 const MUTATE_EFFECT = process.argv.includes('--mutate-effect');
+const MUTATE_DIRTY = process.argv.includes('--mutate-dirty');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -523,10 +530,31 @@ const NOT_A_STEP_FACT = new Set([
 // ─── ЦИТАТА В: в эффектах редактора не осталось разрушающих записей ───────────────────────────
 head('цитата В — разметка: ни один useEffect не стирает поле шага');
 
-// ВАЙТЛИСТ ИМЕНОВАННЫЙ, А НЕ ПОСТРОЧНЫЙ. Диапазон строк устаревает первой же правкой выше по
-// файлу; имя поля — нет. Сегодня в списке ровно одно имя, и оно не про операционные факты:
-// `outputUnitName` гасится вместе со СВОИМ ключом в блоке «produces» (сборка, вне Ф4).
-const EFFECT_WRITE_WHITELIST = new Set(['outputUnitName']);
+// ВАЙТЛИСТ ИМЕНОВАННЫЙ, А НЕ ПОСТРОЧНЫЙ, И У КАЖДОЙ СТРОКИ ЕСТЬ ПРИЧИНА. Диапазон строк устаревает
+// первой же правкой выше по файлу; имя поля — нет. Причина рядом с именем, чтобы следующий автор
+// не дописал сюда шестое имя «по аналогии»: аналогия здесь не довод.
+//
+// ЧЕТЫРЕ ИМЕНИ ПРИШЛИ С ВЫВОДИМОСТЬЮ (R5), И ЭТО НЕ ОСЛАБЛЕНИЕ ПРАВИЛА Ф4. Ф4 запретила эффекту
+// СТИРАТЬ: он писал ПУСТОТУ в поля чужого семейства на монтировании, до всякого человеческого
+// жеста, и технолог терял тридцать шесть возможных фактов, не увидев ни одного. Подстановка
+// делает обратное — кладёт ЗНАЧЕНИЕ в ПУСТОЕ поле, видимо, с меткой «suggested», и снимает только
+// то, что написала сама. Заполненное она не трогает: это доказано в
+// `operation-inference-probe.mjs` («заполненная зона не переписана», живой DOM).
+//
+// Тупое правило Ф4 при этом остаётся тупым для всех остальных полей — имени нет в списке, значит
+// это нарушение, и никакой `shouldDirty: false` его не спасёт. А на четырёх выведенных полях
+// добавлена ВТОРАЯ, более узкая проверка: подстановка обязана писать `shouldDirty: false`,
+// потому что открыть карточку — не правка.
+const EFFECT_WRITE_WHITELIST = new Map([
+  ['outputUnitName', 'гасится вместе со СВОИМ ключом в блоке «produces» — сборка, вне Ф4'],
+  ['zone', 'R5: подсказанная зона — только в пустое, видимо, с меткой'],
+  ['bomLineKeys', 'R5: подсказанная нитка — единственная подходящая строка BOM'],
+  ['pressEquipment', 'R5: подсказанный утюг — единственный профиль процесса в парке'],
+  ['pressProfileKey', 'R5: ключ профиля едет ПАРОЙ с оборудованием, иначе сервер отвергнет'],
+]);
+
+/** Поля, которым подстановка разрешена — и только с `shouldDirty: false`. */
+const INFERENCE_WRITES = new Set(['zone', 'bomLineKeys', 'pressEquipment', 'pressProfileKey']);
 
 function destructiveEffectWrites(file) {
   // ДВЕ АРНОСТИ И НИКАКОГО ФИЛЬТРА ПО shouldDirty — обе дыры найдены адверсарной мутацией ревью:
@@ -566,17 +594,21 @@ function destructiveEffectWrites(file) {
     const re = /setValue\(\s*`?(?:\$\{p\}|operations\.\$\{index\})\.([A-Za-z0-9_]+)`?/g;
     let hit;
     let found = false;
+    // `shouldDirty` читается ПО ТЕЛУ ЭФФЕКТА, а не по одному вызову: разобрать вызов до его
+    // закрывающей скобки регуляркой нельзя честно, а эффект, в котором есть хоть одна грязная
+    // запись, и есть тот, о котором стоит спросить.
+    const dirtyBody = /shouldDirty:\s*true/.test(text);
     while ((hit = re.exec(text)) !== null) {
       found = true;
-      writes.push({ line: m.range.start.line + 1, field: hit[1] });
+      writes.push({ line: m.range.start.line + 1, field: hit[1], dirtyBody });
     }
-    if (!found) writes.push({ line: m.range.start.line + 1, field: '<не разобрано>' });
+    if (!found) writes.push({ line: m.range.start.line + 1, field: '<не разобрано>', dirtyBody });
   }
   return writes;
 }
 
 {
-  const target = MUTATE_EFFECT ? mutatedFieldFile() : FIELD_FILE;
+  const target = MUTATE_EFFECT ? mutatedFieldFile() : MUTATE_DIRTY ? dirtyFieldFile() : FIELD_FILE;
   const writes = destructiveEffectWrites(target);
   const offenders = writes.filter((w) => !EFFECT_WRITE_WHITELIST.has(w.field));
   ck(
@@ -584,13 +616,26 @@ function destructiveEffectWrites(file) {
     'в эффектах нет разрушающих setValue, кроме вайтлиста',
     offenders.map((o) => `${o.field} (строка ${o.line})`).join(', '),
   );
-  const whitelisted = writes.filter((w) => EFFECT_WRITE_WHITELIST.has(w.field));
+  // ВАЙТЛИСТ НЕ РАЗРОССЯ И НЕ ЗАРОС МЁРТВЫМИ ИМЕНАМИ. Считаются РАЗЛИЧНЫЕ поля, а не вызовы:
+  // счётчик вызовов ломался бы от безобидного переноса строки, а имя, оставшееся в списке после
+  // ухода своей записи, — это разрешение, выданное неизвестно кому.
+  const seen = new Set(writes.filter((w) => EFFECT_WRITE_WHITELIST.has(w.field)).map((w) => w.field));
+  const listed = [...EFFECT_WRITE_WHITELIST.keys()].sort().join(', ');
   ck(
-    whitelisted.length === 1,
-    'вайтлист не разросся: ровно одна разрешённая запись',
-    `их ${whitelisted.length}`,
+    [...seen].sort().join(', ') === listed,
+    'вайтлист совпадает с тем, что и правда пишется',
+    `в файле: ${[...seen].sort().join(', ') || '(ничего)'} · в списке: ${listed}`,
   );
-  if (MUTATE_EFFECT) rmSync(dirname(target), { recursive: true, force: true });
+  // ПОДСТАНОВКА НЕ ПАЧКАЕТ ФОРМУ. Узкая проверка поверх тупого правила: открыть карточку и
+  // закрыть — не правка, и синий значок «есть несохранённое» от простого просмотра приучил бы не
+  // смотреть на него вовсе.
+  const dirtySuggestions = writes.filter((w) => INFERENCE_WRITES.has(w.field) && w.dirtyBody);
+  ck(
+    dirtySuggestions.length === 0,
+    'подстановка пишет с shouldDirty: false — просмотр карточки не правка',
+    dirtySuggestions.map((o) => `${o.field} (строка ${o.line})`).join(', '),
+  );
+  if (MUTATE_EFFECT || MUTATE_DIRTY) rmSync(dirname(target), { recursive: true, force: true });
 }
 
 // СТИРАНИЕ НЕ ИСЧЕЗЛО, А ПЕРЕЕХАЛО К ЧЕЛОВЕКУ. Без этой проверки «ноль записей в эффектах»
@@ -603,6 +648,21 @@ function destructiveEffectWrites(file) {
     body.slice(0, 600).includes('shouldDirty: true'),
     '[clear] пишет с shouldDirty — стирание осталось человеческим жестом',
   );
+}
+
+/**
+ * Мутация «подстановка пачкает форму»: `shouldDirty: false` подсказки становится `true` в КОПИИ
+ * исходника. Проверяет узкую половину цитаты В — без неё разрешение, выданное четырём выведенным
+ * полям, ничем не ограничено, и первая же правка превратила бы просмотр карточки в правку.
+ */
+function dirtyFieldFile() {
+  const dir = mkdtempSync(resolve(tmpdir(), 'step-roundtrip-dirty-'));
+  const copy = resolve(dir, 'operations-field.tsx');
+  const src = readFileSync(FIELD_FILE, 'utf8');
+  const anchor = 'setValue(`operations.${index}.zone`, zoneSuggested, { shouldDirty: false });';
+  if (!src.includes(anchor)) throw new Error('мутация грязной подстановки не нашла свою строку');
+  writeFileSync(copy, src.replace(anchor, anchor.replace('shouldDirty: false', 'shouldDirty: true')));
+  return copy;
 }
 
 function mutatedFieldFile() {

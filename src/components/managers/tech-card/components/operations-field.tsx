@@ -3420,7 +3420,6 @@ function OperationEditor({
   // котором она появлялась, и выглядело это как «вывод не работает».
   useEffect(() => {
     if (frozen || dismissed.has('zone')) return;
-    const path = `operations.${index}.zone` as const;
     const ours = wroteRef.current.zone;
     if (ours !== undefined && !zoneIsUnset(zoneValue) && zoneValue !== ours) {
       dismiss('zone'); // человек выбрал своё поверх подставленного — значение остаётся ему
@@ -3429,13 +3428,17 @@ function OperationEditor({
     if (ours === undefined && !zoneIsUnset(zoneValue)) return; // чужой ответ не трогаем никогда
     if (zoneSuggested) {
       wroteRef.current.zone = zoneSuggested;
-      if (zoneValue !== zoneSuggested) setValue(path, zoneSuggested, { shouldDirty: false });
+      if (zoneValue !== zoneSuggested) {
+        setValue(`operations.${index}.zone`, zoneSuggested, { shouldDirty: false });
+      }
       if (applied.zone !== zoneSuggested) setApplied((prev) => ({ ...prev, zone: zoneSuggested }));
       return;
     }
     if (ours === undefined) return;
     delete wroteRef.current.zone;
-    if (!zoneIsUnset(zoneValue)) setValue(path, NONE_ZONE, { shouldDirty: false });
+    if (!zoneIsUnset(zoneValue)) {
+      setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
+    }
     setApplied((prev) => {
       const { zone: _dropped, ...rest } = prev;
       return rest;
@@ -3446,13 +3449,14 @@ function OperationEditor({
   // отзыв обязан снимать РОВНО наш ключ и не трогать соседние.
   useEffect(() => {
     if (frozen || dismissed.has('thread')) return;
-    const path = `operations.${index}.bomLineKeys` as const;
     const ours = wroteRef.current.thread;
     if (threadSuggested) {
       if (ours === threadSuggested && selectedBomKeys.includes(threadSuggested)) return;
       wroteRef.current.thread = threadSuggested;
       const others = selectedBomKeys.filter((k) => k !== ours && k !== threadSuggested);
-      setValue(path, [...others, threadSuggested], { shouldDirty: false });
+      setValue(`operations.${index}.bomLineKeys`, [...others, threadSuggested], {
+        shouldDirty: false,
+      });
       if (applied.thread !== threadSuggested) {
         setApplied((prev) => ({ ...prev, thread: threadSuggested }));
       }
@@ -3462,7 +3466,7 @@ function OperationEditor({
     delete wroteRef.current.thread;
     if (selectedBomKeys.includes(ours)) {
       setValue(
-        path,
+        `operations.${index}.bomLineKeys`,
         selectedBomKeys.filter((k) => k !== ours),
         { shouldDirty: false },
       );
@@ -3478,8 +3482,6 @@ function OperationEditor({
   // пришлось бы дописывать вторым жестом.
   useEffect(() => {
     if (frozen || dismissed.has('press')) return;
-    const eqPath = `operations.${index}.pressEquipment` as const;
-    const keyPath = `operations.${index}.pressProfileKey` as const;
     const ours = wroteRef.current.press;
     const eqSet = !!pressEquipment && pressEquipment !== NONE_PRESS_EQUIPMENT;
     if (ours && eqSet && pressEquipment !== ours.equipment) {
@@ -3489,9 +3491,13 @@ function OperationEditor({
     if (!ours && eqSet) return;
     if (pressSuggested) {
       wroteRef.current.press = { equipment: pressSuggested, profileKey: pressProfileSuggested };
-      if (pressEquipment !== pressSuggested) setValue(eqPath, pressSuggested, { shouldDirty: false });
+      if (pressEquipment !== pressSuggested) {
+        setValue(`operations.${index}.pressEquipment`, pressSuggested, { shouldDirty: false });
+      }
       if (pressProfileSuggested && pressProfileKey !== pressProfileSuggested) {
-        setValue(keyPath, pressProfileSuggested, { shouldDirty: false });
+        setValue(`operations.${index}.pressProfileKey`, pressProfileSuggested, {
+          shouldDirty: false,
+        });
       }
       if (applied.press?.equipment !== pressSuggested) {
         setApplied((prev) => ({
@@ -3503,8 +3509,12 @@ function OperationEditor({
     }
     if (!ours) return;
     delete wroteRef.current.press;
-    if (eqSet) setValue(eqPath, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
-    if (ours.profileKey && pressProfileKey) setValue(keyPath, '', { shouldDirty: false });
+    if (eqSet) {
+      setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
+    }
+    if (ours.profileKey && pressProfileKey) {
+      setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+    }
     setApplied((prev) => {
       const { press: _dropped, ...rest } = prev;
       return rest;
