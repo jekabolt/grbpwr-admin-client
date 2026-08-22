@@ -154,11 +154,7 @@ import {
   type InferenceStep,
   type StepInference,
 } from './operation-inference';
-import {
-  StepResidueStrip,
-  type ResidueErrorRow,
-  type ResidueRow,
-} from './operations-residue';
+import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
@@ -4567,9 +4563,10 @@ function OperationEditor({
       {/* ПОЛОСА ОСТАТКОВ — НАД БЛОКАМИ СЕМЕЙСТВ. Здесь, а не в конце: заполненное, которого шаг
           не несёт, — это первое, что надо прочитать, открыв зону свойств, потому что именно оно не
           даст карточке сохраниться. Слово об этом — в самой полосе. */}
-      <StepResidueStrip
+      <ResidueStrip
         rows={residueRows}
         errorRows={residueErrorRows}
+        caption='set on this step, but its current kind shows no control for it — the values below are still sent on save, and any refusal lands here'
         onClear={clearResidueField}
       />
 
