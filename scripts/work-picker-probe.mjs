@@ -259,7 +259,10 @@ const SLITGATE_BROKEN = `  const showFastening =
     onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE);`;
 const SLITCUT_FIX = `  const showCutLength = showFastening && (isSlitOvercast || onMachine(BUTTONHOLE_MACHINE));`;
 const SLITCUT_BROKEN = `  const showCutLength = showFastening && onMachine(BUTTONHOLE_MACHINE);`;
-const SLITLABEL_FIX = `  const cutLengthLabel = isSlitOvercast ? 'slit cut, mm' : 'buttonhole cut, mm';`;
+// Ярлык с R8 считается ОБЩЕЙ лестницей (`cutLengthNoun`), одной на экран и на печатный лист, —
+// поэтому мутация подменяет теперь вызов, а не тернарник литералов. Ломает она ровно то же самое:
+// поле на месте, а слово на нём снова про петлю.
+const SLITLABEL_FIX = `  const cutLengthLabel = \`\${cutLengthNoun(workCatalog, workValue)} cut, mm\`;`;
 const SLITLABEL_BROKEN = `  const cutLengthLabel = 'buttonhole cut, mm';`;
 
 if (MUTATE_SLITGATE)

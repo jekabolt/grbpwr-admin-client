@@ -106,6 +106,7 @@ import {
 import {
   SLIT_OVERCAST_WORK,
   columnToFormField,
+  cutLengthNoun,
   formValueToWorkDefault,
   groupWorks,
   machineTokenToEnum,
@@ -2488,6 +2489,13 @@ function OperationEditor({
   // прячет поле, которое сервер ТРЕБУЕТ, — и владелец получает отказ на контроле, которого нет на
   // экране. Второго чтения нет и быть не может: `const` ниже по телу компилятор бы и не отдал.
   const workValue = ((useWatch({ control, name: `operations.${index}.work` }) ?? '') as string).trim();
+  // КАТАЛОГ ЧИТАЕТСЯ ТУТ ЖЕ, И РОВНО ПО ТОМУ ЖЕ ДОВОДУ, ЧТО СТРОКОЙ ВЫШЕ. До R8 он жил у пикера
+  // (ниже по телу), но ЯРЛЫК длины прорези спрашивает не только сам токен, а и то, знаком ли он
+  // каталогу: работа новее бандла — это не петля, и назвать её петлёй значит соврать. Пикер берёт
+  // ту же переменную там, где стоял его собственный вызов, — второго обращения к сети нет, ключ
+  // запроса один на приложение.
+  const { catalog: workCatalog, live: catalogLive, refresh: refreshCatalog } =
+    useOperationWorkCatalog();
 
   const isMachineStep = isMachineType(opType);
   const isPressStep = isPressType(opType);
@@ -2592,7 +2600,14 @@ function OperationEditor({
   // нашлось: «cut length» не говорит НИ ЧЕГО о том, что режут, а поле именно об этом. Подпись
   // читается ещё и полосой остатков — там она обязана быть той же самой, иначе человек ищет на
   // экране слово, которого на нём нет.
-  const cutLengthLabel = isSlitOvercast ? 'slit cut, mm' : 'buttonhole cut, mm';
+  //
+  // САМО СЛОВО СЧИТАЕТ `cutLengthNoun`, И СЧИТАЕТ ЕГО ОДИН РАЗ НА КЛИЕНТ. Тернарник, стоявший
+  // здесь литералами, был ПЕРВОЙ из двух копий: вторая жила в составителе фраз печатного листа и
+  // говорила «buttonhole» всегда, — экран после 0331 звал поле «slit cut», а в цех продолжала
+  // уезжать бумага со словом «петля». Общая лестница ещё и добавляет ступень, которой у тернарника
+  // быть не могло: работу, КАТАЛОГУ НЕЗНАКОМУЮ (токен новее бандла — обычное состояние между
+  // выкаткой бэка и клиента), она называет токеном вместо того, чтобы выдать за петлю.
+  const cutLengthLabel = `${cutLengthNoun(workCatalog, workValue)} cut, mm`;
   const showBartack = showFastening && onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE);
   const showAttachPattern = showFastening && onMachine(BUTTON_ATTACH_MACHINE);
   const showZipper = showFastening && onMachine(ZIPPER_MACHINE);
@@ -3201,10 +3216,9 @@ function OperationEditor({
   // прод-строк свалки размечает человек, автоматического переписывания нет ни на одной стороне,
   // поэтому оба пути обязаны работать одновременно — и будут, пока владелец не доразметит.
   //
-  // САМО ЗНАЧЕНИЕ (`workValue`) ПРОЧИТАНО ВЫШЕ, в кластере `useWatch`: с 0331 его спрашивает не
-  // только пикер, но и гейты полей, а они стоят раньше по телу компонента.
-  const { catalog: workCatalog, live: catalogLive, refresh: refreshCatalog } =
-    useOperationWorkCatalog();
+  // САМО ЗНАЧЕНИЕ (`workValue`) И КАТАЛОГ (`workCatalog`) ПРОЧИТАНЫ ВЫШЕ, в кластере `useWatch`:
+  // с 0331 токен спрашивают гейты полей, а с R8 каталог спрашивает ещё и ЯРЛЫК длины прорези, —
+  // и то и другое стоит раньше по телу компонента. Здесь остаётся только то, что нужно ПИКЕРУ.
   const activeWork = workValue ? workCatalog.byToken.get(workValue) : undefined;
   // ПУНКТ, ОТВЕЧАЮЩИЙ ЭТОЙ РАБОТЕ, — только для ПРЕДСТАВЛЕНИЯ: суженный список «на чём», порядок
   // материалов, указатель «где факты живут на самом деле». У четырёх работ 0331 пункта нет вовсе
