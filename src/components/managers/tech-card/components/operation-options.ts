@@ -40,7 +40,7 @@ import { kindHeadingVerb } from './operation-kinds';
 // ИМЯ РАБОТЫ — ЗНАЧЕНИЕ, И ЦИКЛА ЭТО НЕ ДАЁТ: `operation-work` берёт значения только у
 // `operation-kinds`, а обратно к `operation-options` ходит лишь ЗА ТИПОМ. Граф остаётся
 // односторонним ровно по той же причине, по которой им был импорт `kindHeadingVerb` строкой выше.
-import { workHeadingWord, type WorkCatalog } from './operation-work';
+import { cutLengthNoun, workHeadingWord, type WorkCatalog } from './operation-work';
 // ТОЛЬКО ТИП, И ЭТО УСЛОВИЕ, А НЕ СТИЛЬ: `schema.ts` импортирует ЗНАЧЕНИЯ отсюда, поэтому обратный
 // импорт значения замкнул бы цикл в рантайме. `import type` стирается при трансформации (в
 // tsconfig нет `verbatimModuleSyntax`), путь ведёт в модуль напрямую, а не через бочку с
@@ -1125,6 +1125,18 @@ export type StepFactField =
  *  shape (decimals as messages, passed through decimalToInput) and the form's row shape both
  *  satisfy it, the same trick the ladder resolvers use. */
 export type StepFacts = {
+  /**
+   * ТОКЕН РАБОТЫ ШАГА (`TechCardOperation.work`). Пусто или `undefined` — работы нет.
+   *
+   * ОБЯЗАТЕЛЬНЫЙ ЧЛЕН, ХОТЬ И ПУСТОЙ, — по той же причине, по которой обязателен `work` у
+   * `operationHeading`. Заголовок эту правку получил в R8, а составители ФАКТОВ — нет, и фраза
+   * длины продолжала звать разрез петлёй, потому что про работу не спрашивала: необязательный
+   * член позволяет промолчать, а компилятор молчит вместе с ним. Здесь этот отказ уже случался
+   * дословно — блок `press` волны 0325 не доехал до `wireStepFacts`, компилятор промолчал, и семь
+   * приёмов ВТО уехали в цех одним словом. Член, который обязан быть НАПИСАН, превращает
+   * забывчивость в ошибку сборки.
+   */
+  work: string | undefined;
   operationType?: string;
   printMethod?: string;
   wetProcessKind?: string;
@@ -1258,7 +1270,15 @@ export function stepSeamFactTexts(o: StepFacts): string[] {
  *  operator sets before the first unit. The needle count and gauge lead because they join the
  *  needle point and size already printed there off the machine profile: one needle bar, one reading
  *  («2 needles, 6.4 mm apart · ballpoint Nm 90»). */
-export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField>> {
+export function stepToolFactParts(
+  o: StepFacts,
+  /**
+   * Каталог работ, если он доехал до этого экрана. Обязательный, хоть и пустой, ровно по доводу
+   * одноимённого параметра `operationHeading`: имя без каталога — РЕШЕНИЕ, а не умолчание, и
+   * экран, который называет шаг по-старому, обязан сказать это вслух, написав `undefined`.
+   */
+  workCatalog: WorkCatalog | undefined,
+): Array<SettingPart<StepFactField>> {
   const s = o.stitching;
   const h = o.hardware;
   const p = o.print;
@@ -1286,7 +1306,15 @@ export function stepToolFactParts(o: StepFacts): Array<SettingPart<StepFactField
     .filter(Boolean)
     .join(' ');
   const cut = mm(f?.cutLengthMm);
-  const buttonhole = [bhWords || cut ? `${bhWords ? `${bhWords} ` : ''}buttonhole` : '', cut ? `cut ${cut}` : '']
+  // СУЩЕСТВИТЕЛЬНОЕ СПРАШИВАЕТ РАБОТУ, А НЕ ОДНУ МАШИНКУ (R8 / 0331). Слово здесь стояло
+  // ЛИТЕРАЛОМ — «buttonhole» на любом шаге с длиной, — и на прорези под пояс (работа
+  // `slit_overcast`) в цех уезжала бумага со словом «петля»: экран после 0331 звал поле «slit
+  // cut», а печать спорила с ним ровно в ту сторону, где ошибку исправляет не разработчик, а
+  // раскройщик. Лестница из четырёх ступеней живёт ОДНИМ местом (`cutLengthNoun`) и читается
+  // отсюда же, откуда её читает ярлык контрола в редакторе: два написания одного слова — это тот
+  // самый разъезд, который уже случился.
+  const cutNoun = cutLengthNoun(workCatalog, o.work);
+  const buttonhole = [bhWords || cut ? `${bhWords ? `${bhWords} ` : ''}${cutNoun}` : '', cut ? `cut ${cut}` : '']
     .filter(Boolean)
     .join(', ');
   const secondPress = positive(p?.secondPressSec);

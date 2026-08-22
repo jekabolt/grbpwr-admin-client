@@ -21,6 +21,7 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
 
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
+import { EMPTY_QUERY, buildPrintScope } from 'components/managers/print/scope';
 import {
   OperationsField,
   emptyOperation,
@@ -47,6 +48,19 @@ type StepNameProbe = {
   mount: (ops: Op[]) => void;
   /** Напечатать лист ИЗ ЖИВОЙ ФОРМЫ настоящим маппером записи — без промежуточной копии значений. */
   sheet: () => void;
+  /**
+   * Напечатать лист ИЗ РЕЛИЗНОГО СНАПШОТА — той же формой, но БЕЗ поля `work` ни на одном шаге.
+   *
+   * ПОЧЕМУ ИМЕННО ВЫЧЁРКИВАНИЕМ ПОЛЯ, А НЕ ФЛАГОМ «ЭТО РЕЛИЗ». Замороженный релиз — protojson-блоб,
+   * записанный ДО появления оси работ: поля `work` в нём нет физически, и появиться ему неоткуда.
+   * Фикстура обязана воспроизводить ИСТОЧНИК, а не режим отрисовки, — иначе она проверяла бы ветку
+   * по флагу, которой в продуктовом коде нет и быть не должно (`print-page` подставляет снапшот на
+   * место карты одной строкой `snapshot ?? techCard`, и дальше документ читает ОДИН источник).
+   *
+   * Ревизия объявляется релизной ещё и в скоупе — так лист печатает шапку «Rev.N · snapshot», и
+   * видно, что это тот самый документ, а не живая карта под чужим заголовком.
+   */
+  release: () => void;
   /** Значения шага, как их держит форма. */
   values: (i: number) => Op;
   /**
@@ -80,8 +94,23 @@ probe.derived = (op) =>
     note: op.note as string,
   });
 
-function renderSheet(data: TechCardFormData) {
-  const insert = mapFormToTechCardInsert(data, undefined, true);
+/**
+ * ВЫЧЕРКНУТЬ ОСЬ РАБОТ ИЗ ЗАПИСИ — так выглядит релиз, подписанный ДО 0330. Поле удаляется, а не
+ * ставится пустым: в protojson-блобе того времени ключа `work` нет вовсе, и «пустая строка» была
+ * бы другой фикстурой — той, где работу СНЯЛИ, а не той, где её негде было назвать.
+ */
+const freeze = (insert: Record<string, unknown>): Record<string, unknown> => ({
+  ...insert,
+  operations: ((insert.operations ?? []) as Array<Record<string, unknown>>).map((o) => {
+    const { work: _dropped, ...rest } = o;
+    return rest;
+  }),
+});
+
+function renderSheet(data: TechCardFormData, frozen = false) {
+  const live = mapFormToTechCardInsert(data, undefined, true) as unknown as Record<string, unknown>;
+  const insert = frozen ? freeze(live) : live;
+  const techCard = { id: 1, techCard: insert } as never;
   let host = document.getElementById('sheet');
   if (!host) {
     host = document.createElement('div');
@@ -93,7 +122,22 @@ function renderSheet(data: TechCardFormData) {
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
         <DictionaryProvider>
-          <TechPackDocument techCard={{ id: 1, techCard: insert } as never} />
+          <TechPackDocument
+            techCard={techCard}
+            // СКОУП ОБЪЯВЛЯЕТ РЕВИЗИЮ ЗАМОРОЖЕННОЙ — ровно тем же вызовом, каким её объявляет
+            // `print-page`, когда снапшот прочитан. Документу он про имена шагов ничего не
+            // сообщает (и не должен), но без него лист печатал бы «live card» над бумагой,
+            // которую мы выдаём за подписанную ревизию, — фикстура врала бы о самой себе.
+            scope={
+              frozen
+                ? buildPrintScope({
+                    techCard,
+                    query: EMPTY_QUERY,
+                    revision: { source: 'release', number: 3 },
+                  })
+                : undefined
+            }
+          />
         </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -111,6 +155,7 @@ function Harness({ ops }: { ops: Op[] }) {
   });
   probe.values = (i) => (methods.getValues('operations') ?? [])[i] as Op;
   probe.sheet = () => renderSheet(methods.getValues() as TechCardFormData);
+  probe.release = () => renderSheet(methods.getValues() as TechCardFormData, true);
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
