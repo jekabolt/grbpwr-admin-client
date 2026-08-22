@@ -21,14 +21,11 @@ import { Arrow } from 'ui/icons/arrow';
 // Enter и Escape — они одинаковы на любой раскладке. Сравнение с БУКВОЙ здесь было бы мёртвым на
 // русской раскладке (память «кириллица убивает e.key»), поэтому его нет ни одного.
 
-export type ComboboxOption = {
-  value: string;
-  label: string;
-  /** Правая приписка строки: чем работа отличается, откуда пришла. Не участвует в поиске. */
-  hint?: string;
-  /** Реальная, но не выбираемая строка (снятый пункт, состояние записи). */
-  disabled?: boolean;
-};
+// СТРОКА НЕСЁТ ТОЛЬКО ИМЯ И ЗНАЧЕНИЕ. Ни приписки справа, ни погашенного состояния здесь нет — и
+// это решение, а не пробел: обе штуки стояли в первой версии и не понадобились ни одному из двух
+// вызывающих мест, то есть остались бы непроверенным кодом. Понадобятся — войдут вместе со своей
+// цитатой в пробе.
+export type ComboboxOption = { value: string; label: string };
 
 export type ComboboxGroup = { key: string; label: string; options: ComboboxOption[] };
 
@@ -66,12 +63,9 @@ export function Combobox({
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const groups = useMemo(() => (open ? filter(query) : []), [open, query, filter]);
-  // Плоский список ВЫБИРАЕМЫХ строк — по нему ходят стрелки. Шапки групп и погашенные строки в
-  // него не входят: клавиша, останавливающаяся на невыбираемом, читается как сломанная.
-  const flat = useMemo(
-    () => groups.flatMap((g) => g.options.filter((o) => !o.disabled)),
-    [groups],
-  );
+  // Плоский список строк — по нему ходят стрелки. Шапки групп в него не входят: клавиша,
+  // остановившаяся на невыбираемой строке, читается как сломанная.
+  const flat = useMemo(() => groups.flatMap((g) => g.options), [groups]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -90,8 +84,16 @@ export function Combobox({
     return () => document.removeEventListener('mousedown', onDown);
   }, [open, close]);
 
+  const popRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
-    if (open) inputRef.current?.focus();
+    if (!open) return;
+    inputRef.current?.focus();
+    // ПОПОВЕР ЗАЕЗЖАЕТ В ВИД САМ, И ЭТО НЕ УКРАШЕНИЕ. Он позиционируется абсолютно ВНУТРИ потока,
+    // а не порталом, — значит прокручиваемый предок (тело модалки создания шага — `overflow-y-auto`)
+    // его обрезает. Без этой строки список открывался бы за нижним краем: «строки нет» и «до
+    // строки не докрутили» стали бы неразличимы для человека ровно так же, как они неразличимы
+    // для пробы.
+    popRef.current?.scrollIntoView({ block: 'nearest' });
   }, [open]);
 
   // Активная строка держится в виду при ходьбе стрелками — иначе выбор «уезжает» за край списка и
@@ -159,7 +161,10 @@ export function Combobox({
       </button>
 
       {open && (
-        <div className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-textInactiveColor bg-bgColor'>
+        <div
+          ref={popRef}
+          className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-textInactiveColor bg-bgColor'
+        >
           <input
             ref={inputRef}
             type='text'
@@ -198,31 +203,19 @@ export function Combobox({
                     aria-selected={o.value === activeValue}
                     data-combobox-option={o.value}
                     data-combobox-active={o.value === activeValue ? 'true' : undefined}
-                    disabled={o.disabled}
                     onMouseEnter={() => {
                       const at = flat.findIndex((f) => f.value === o.value);
                       if (at >= 0) setActive(at);
                     }}
-                    onClick={() => !o.disabled && choose(o.value)}
+                    onClick={() => choose(o.value)}
                     className={cn(
                       'flex w-full items-center justify-between gap-2 px-2.5 py-px text-left leading-tight',
-                      o.disabled && 'pointer-events-none opacity-30',
                       o.value === activeValue && 'bg-[rgba(0,0,0,0.08)]',
                     )}
                   >
                     <Text variant='uppercase' component='span' className='min-w-0 truncate'>
                       {o.label}
                     </Text>
-                    {o.hint && (
-                      <Text
-                        size='micro'
-                        variant='label'
-                        component='span'
-                        className='shrink-0 uppercase'
-                      >
-                        {o.hint}
-                      </Text>
-                    )}
                   </button>
                 ))}
               </div>
