@@ -1,3 +1,4 @@
+import { useMutation } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
   common_TechCardButtonholeOrientation,
@@ -15,6 +16,7 @@ import { Accordion } from 'ui/components/accordion';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
@@ -89,19 +91,30 @@ import {
 // ВИД ОПЕРАЦИИ — ОДИН СПИСОК ПОВЕРХ ДВУХ ОСЕЙ (см. operation-kinds.ts). Здесь он спрашивается
 // дважды: пикером в открытом шаге и — через диалог создания — на рождении шага.
 import {
-  KIND_MORE,
+  KIND_BY_WORK_TOKEN,
   KIND_PROPERTY_FIELDS,
-  KIND_UNSET,
   OPERATION_KIND_BY_ID,
-  isKindSentinel,
   kindClears,
   kindLabelOf,
   kindOf,
-  kindPickerItems,
   kindWrites,
   type OperationKind,
   type OperationKindStep,
 } from './operation-kinds';
+// КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ (0329). Пикер работ, синонимный поиск и дефолты берутся отсюда;
+// в бандле остаётся только снимок-фолбэк, чтобы список никогда не был пустым.
+import {
+  columnToFormField,
+  formValueToWorkDefault,
+  groupWorks,
+  resolveStepDefaults,
+  searchWorks,
+  workDefaultsForForm,
+  workWrites,
+  type StepDefaultFill,
+  type WorkItem,
+} from './operation-work';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
   isMachineStepType,
@@ -3137,21 +3150,82 @@ function OperationEditor({
   // бы переигрывать выбор человека у него на глазах. Память гаснет, как только состояние перестаёт
   // соответствовать и пункту, и его родителю: дальше правит уже не пикер, а данные.
   const [pickedKindId, setPickedKindId] = useState('');
+  // ЧТО ПОДСТАВИЛ ВЫБОР РАБОТЫ — СПИСКОМ, ДЛЯ МЕТКИ ПОД ПИКЕРОМ. Держится на один сеанс редактора:
+  // значения записаны человеческим жестом и живут дальше сами, метка лишь объясняет их
+  // происхождение и даёт снять. Этим она и отличается от подстановки выводимости ниже, которая
+  // ВЛАДЕЕТ значением и отзывает его на размонтировании.
+  const [prefilled, setPrefilled] = useState<
+    Array<StepDefaultFill & { fromStep: number; workLabel: string }>
+  >([]);
   const pickedKind = pickedKindId ? OPERATION_KIND_BY_ID.get(pickedKindId) : undefined;
-  const activeKind =
+  const derivedKind =
     pickedKind &&
     resolvedKind &&
     (pickedKind.id === resolvedKind.id || pickedKind.pendingResolve === resolvedKind.id)
       ? pickedKind
       : resolvedKind;
 
-  // ЯРУС «ЕЩЁ» — пятнадцать законных, но редких видов (автоматы, сварка, мокрая обработка). Они
-  // не спрятаны, они отложены: список из пятидесяти строк выбор не сокращает, а расширяет, и
-  // ровно этим сегодняшний экран и плох.
-  const [rareKindsOpen, setRareKindsOpen] = useState(false);
-  const kindItems = useMemo(
-    () => kindPickerItems(activeKind?.id, rareKindsOpen),
-    [rareKindsOpen, activeKind],
+  // --- ОСЬ «РАБОТА»: ХРАНИМАЯ, СТРОКОЙ-ТОКЕНОМ (0330) ------------------------------------------
+  //
+  // ДВОЕКОДЬЕ ПЕРЕХОДНОГО ПЕРИОДА, И ОНО ЗДЕСЬ ЯВНОЕ. Строка, у которой работа НАЗВАНА, живёт по
+  // ней; строка без работы — по прежней деривации из пары (глагол, машинка), как жила годы. Сто
+  // прод-строк свалки размечает человек, автоматического переписывания нет ни на одной стороне,
+  // поэтому оба пути обязаны работать одновременно — и будут, пока владелец не доразметит.
+  const workValue = ((useWatch({ control, name: `operations.${index}.work` }) ?? '') as string).trim();
+  const { catalog: workCatalog, live: catalogLive, refresh: refreshCatalog } =
+    useOperationWorkCatalog();
+  const activeWork = workValue ? workCatalog.byToken.get(workValue) : undefined;
+  // ПУНКТ, ОТВЕЧАЮЩИЙ ЭТОЙ РАБОТЕ, — только для ПРЕДСТАВЛЕНИЯ: суженный список «на чём», порядок
+  // материалов, указатель «где факты живут на самом деле». У четырёх работ 0331 пункта нет вовсе
+  // (их личность — глагол с машинкой, и она уже записана), и тогда представление берётся у старой
+  // деривации: она отвечает по той же записи и потому не может противоречить ей.
+  const workKind = workValue ? KIND_BY_WORK_TOKEN.get(workValue) : undefined;
+  const activeKind = workKind ?? derivedKind;
+
+  /**
+   * ЧТО СТОИТ В ПИКЕРЕ. Три состояния, и все три — правда о записи:
+   *   * работа названа и каталог её знает — ЕЁ ярлык (каталог авторитетен, не бандл);
+   *   * работа названа, а каталога с ней нет (токен новее бандла, отказ сети) — САМ ТОКЕН, с
+   *     припиской. Пустой триггер читался бы как «вид не назван», то есть как враньё о записи, —
+   *     та же защитная форма, что у машинки и глагола;
+   *   * работы нет — имя, выведенное из записи по-старому, и подпись под пикером говорит, что оно
+   *     выведено, а не сохранено.
+   */
+  const workLabel = workValue
+    ? (activeWork?.label ?? `${workValue} — unknown to this app version`)
+    : derivedKind
+      ? kindLabelOf(derivedKind)
+      : '';
+
+  /**
+   * СТРОКИ ПИКЕРА — ОТ КАТАЛОГА, ГРУППАМИ, С ПОИСКОМ ПО СИНОНИМАМ.
+   *
+   * Промах поиска ≠ пустота: фильтр отдаёт группы, примитив рисует строку «nothing matches …».
+   * Снятая (retired) работа не предлагается — но если она СТОИТ на шаге, её ярлык всё равно виден
+   * в триггере: строка, уже размеченная этим токеном, обязана открываться своим именем.
+   */
+  const filterWorks = useCallback(
+    (query: string): ComboboxGroup[] => {
+      const groups = groupWorks(searchWorks(workCatalog, query)).map((g) => ({
+        key: g.key,
+        label: g.label,
+        // СТРОКА НЕСЁТ ТОЛЬКО ИМЯ РАБОТЫ. Приписка «спросит машинку» стояла здесь и была снята:
+        // ответ на «на чём» и так стоит соседним контролом раскрытым, а лишнее слово в строке
+        // делает имя работы неточным к поиску глазами и к сравнению текстом.
+        options: g.items.map((w) => ({ value: w.token, label: w.label })),
+      }));
+      // «Снять вид» стоит ПЕРВОЙ строкой и только тогда, когда снимать есть что. На осведомлённой
+      // записи пустая работа — человеческий жест, исполняемый буквально; поэтому жест обязан
+      // существовать на экране, а не только в контракте.
+      if (workValue && !query.trim()) {
+        return [
+          { key: '__unset__', label: 'this step', options: [{ value: '', label: '— no kind —' }] },
+          ...groups,
+        ];
+      }
+      return groups;
+    },
+    [workCatalog, workValue],
   );
 
   /**
@@ -3169,29 +3243,42 @@ function OperationEditor({
    * пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля, которое
    * человек не заполнял.
    */
-  const applyKind = (id: string) => {
-    const k = OPERATION_KIND_BY_ID.get(id);
-    if (!k) return;
-    setPickedKindId(id);
+  const applyWork = (token: string) => {
+    const p = `operations.${index}` as const;
+    // «СНЯТЬ ВИД» — ОДНА ЗАПИСЬ И БОЛЬШЕ НИЧЕГО. Ни глагол, ни машинка, ни одно свойство не
+    // трогаются: человек сказал «эта работа названа неправильно», а не «этот шаг стал другим».
+    // Строка немедленно возвращается на прежнюю деривацию — то самое двоекодье.
+    if (!token) {
+      setPickedKindId('');
+      setPrefilled([]);
+      setValue(`${p}.work`, '', { shouldDirty: true });
+      return;
+    }
+    const item = workCatalog.byToken.get(token);
+    if (!item) return;
+    const k = KIND_BY_WORK_TOKEN.get(token);
+    setPickedKindId(k?.id ?? '');
 
-    // «НА ЧЁМ» У ОТСТРОЧКИ. Машинку шаг MACHINE обязан нести — сервер отвергает MACHINE без неё, —
-    // поэтому пункт её ставит, но не угадывает молча: стоящая на шаге и подходящая важнее всего
-    // (смена вида не переставляет шаг на другую машину), затем единственная в парке из суженного
-    // списка, затем дефолт пункта.
-    let machineForAsk = '';
-    if (k.askMachine) {
-      const narrowed = k.askMachine as readonly string[];
-      if (narrowed.includes(machineType)) machineForAsk = machineType;
-      else {
-        const fits = parkMachines.filter(
-          (m) => narrowed.includes(m.machineType ?? '') && (m.profileKey ?? '').trim(),
-        );
-        if (fits.length === 1) machineForAsk = fits[0].machineType ?? '';
-      }
+    // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
+    // шага, ради которой фаза и заведена: без неё сто lockstitch-строк снова становятся
+    // неотличимыми, а сервер снова не может повесить на работу ни одного правила.
+    setValue(`${p}.work`, token, { shouldDirty: true });
+
+    // «НА ЧЁМ», КОГДА РАБОТА ЖИВЁТ НА НЕСКОЛЬКИХ МАШИНКАХ. Машинку шаг MACHINE обязан нести —
+    // сервер отвергает MACHINE без неё, — поэтому работа её ставит, но не угадывает молча:
+    // стоящая на шаге и подходящая важнее всего (смена вида не переставляет шаг на другую
+    // машину), затем единственная подходящая в парке, затем дефолт работы. Список допустимых —
+    // ИЗ КАТАЛОГА: у работы, которой этот бандл не знает, суженного списка в бандле и нет.
+    let machineFromPark = '';
+    if (item.machineMode === 'ask') {
+      const narrowed = item.machines.map((m) => `TECH_CARD_MACHINE_TYPE_${m.toUpperCase()}`);
+      const fits = parkMachines.filter(
+        (m) => narrowed.includes(m.machineType ?? '') && (m.profileKey ?? '').trim(),
+      );
+      if (fits.length === 1) machineFromPark = fits[0].machineType ?? '';
     }
 
-    const p = `operations.${index}` as const;
-    const written = kindWrites(k, machineForAsk);
+    const written = workWrites(item, k, machineType, machineFromPark, kindWrites);
     const writes = Object.entries(written) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of writes) {
       // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА. Так `press_action` и дождался
@@ -3223,9 +3310,13 @@ function OperationEditor({
       pressAction: written.pressAction ?? pressAction,
       bomKinds: stepBomKinds,
     };
-    const cleared = Object.entries(kindClears(k, after)) as Array<
-      [OperationFormStringField, string]
-    >;
+    // У РАБОТЫ БЕЗ ПУНКТА СНИМАТЬ НЕЧЕГО — И ЭТО НЕ ПРОБЕЛ. `kindClears` снимает ровно тот якорь,
+    // который САМ ПИКЕР пишет как личность ДРУГОГО пункта; работа, у которой пункта в этом бандле
+    // нет, ни одного якоря не писала, и снимать чужой факт «на всякий случай» было бы ровно тем
+    // стиранием, которого фаза «перестать терять» не допускает.
+    const cleared = k
+      ? (Object.entries(kindClears(k, after)) as Array<[OperationFormStringField, string]>)
+      : [];
     for (const [field, value] of cleared) {
       if (!(field in emptyOperation)) continue;
       setValue(`${p}.${field}`, value, { shouldDirty: true });
@@ -3256,41 +3347,65 @@ function OperationEditor({
     if (targetPress && !pressProfileKey.trim()) {
       // Процесс сужает лестницу и здесь: профиль, написанный для дублирования, разутюжке не
       // отвечает. Предикат берётся существующий — второго такого не заводится.
+      const stepVerb = (written.operationType ?? opType) as common_TechCardOperationType;
       const fits = parkPresses.filter(
         (pr) =>
           pr.pressEquipment === targetPress &&
           (pr.profileKey ?? '').trim() &&
-          pressProfileFitsStep(pr, k.verb),
+          pressProfileFitsStep(pr, stepVerb),
       );
       if (fits.length === 1) {
         setValue(`${p}.pressProfileKey`, (fits[0].profileKey ?? '').trim(), { shouldDirty: true });
       }
     }
-    prefillFromLastOfKind(k);
+    prefillForWork(item, k);
   };
 
   /**
-   * ПРЕДЗАПОЛНЕНИЕ С ПОСЛЕДНЕГО ШАГА ТОГО ЖЕ ВИДА НА ЭТОЙ ЖЕ КАРТОЧКЕ — обещание владельца без
-   * единой миграции. Поставил первый топстич 6 мм — следующий приходит с ним же.
+   * ПОДСТАНОВКА ПРИ ВЫБОРЕ РАБОТЫ — ДВЕ СТУПЕНИ И ОДИН ПОРЯДОК.
    *
-   * ПЕРЕНОСЯТСЯ ТОЛЬКО СВОЙСТВА ВИДА (`KIND_PROPERTY_FIELDS`) и НИЧЕГО ИЗ СТВОРКИ: у полей створки
-   * есть ступень выше (профиль парка, карточные дефолты), они НАСЛЕДУЮТСЯ, а наследование не
-   * пишет никогда.
+   * ПРИОРИТЕТ: последний такой же шаг НА ЭТОЙ КАРТОЧКЕ > глобальный дефолт работы > пусто.
+   * Карточка — контекст ближе: поставил на ЭТОМ изделии отстрочку 4 мм, хотя «вообще» у тебя 6, —
+   * следующая отстрочка этого изделия обязана прийти четвёркой. Обратный порядок молча переписывал
+   * бы решение, принятое пять минут назад, решением, принятым полгода назад.
    *
-   * ПИШЕТСЯ ТОЛЬКО В ПУСТОЕ. Пресет — запись, и записью он обязан быть ровно один раз, по явному
-   * выбору пункта; затирать уже набранное он права не имеет (то же правило, по которому смена
-   * вида ничего не стирает).
+   * САМ ПОРЯДОК ЖИВЁТ В ЧИСТОЙ ФУНКЦИИ (`resolveStepDefaults`), а не здесь, ровно затем, чтобы
+   * проба могла его ПЕРЕВЕРНУТЬ и потребовать красноты. Правило, размазанное по телу компонента,
+   * мутации не поддаётся, а значит и не проверено.
    *
-   * «ПУСТО» СПРАШИВАЕТСЯ У `emptyOperation`, а не третьим списком дисциплин: у enum'а это токен
-   * `*_UNKNOWN`, у целого 0, у децимала пустая строка — и все три уже записаны там, полем в поле.
+   * ПЕРЕНОСЯТСЯ ТОЛЬКО СВОЙСТВА ВИДА и НИЧЕГО ИЗ СТВОРКИ: у полей створки есть ступень выше
+   * (профиль парка, карточные дефолты), они НАСЛЕДУЮТСЯ, а наследование не пишет никогда. Список
+   * глобальных дефолтов приходит СЕРВЕРНЫМ реестром (`catalog.defaultFields`) — тем же, который
+   * их и принимает; карточная ступень идёт по `KIND_PROPERTY_FIELDS`, потому что она ничего
+   * серверу не шлёт и живёт целиком в форме.
+   *
+   * ЧТО ПОДСТАВЛЕНО — ВИДНО. Записанное складывается в `prefilled`, и под пикером встаёт строка,
+   * называющая каждое значение и его источник («from step 12», «default for topstitch»). Это
+   * ЗАПИСЬ по человеческому жесту (`shouldDirty: true`), а не догадка системы: метка объясняет
+   * происхождение и даёт снять значение, но не владеет им — в отличие от подстановки выводимости
+   * (зона, нитка, утюг), которая живёт ровно пока стоит её метка.
    */
-  function prefillFromLastOfKind(k: OperationKind) {
+  function prefillForWork(item: WorkItem, k: OperationKind | undefined) {
     const rows = (getValues('operations') ?? []) as OperationFormValue[];
     const empty = emptyOperation as Record<string, unknown>;
+
+    // СТУПЕНЬ 1 — ПОСЛЕДНИЙ ТАКОЙ ЖЕ ШАГ ЭТОЙ КАРТОЧКИ. «Такой же» читается ДВОЕКОДЬЕМ: строка с
+    // работой сравнивается по токену, строка без работы — по старой деривации. Иначе первая же
+    // размеченная строка перестала бы видеть своих неразмеченных предшественниц, и обещание
+    // «поставил шесть — следующий приходит с шестью» сломалось бы ровно в день выкатки.
     let source: Record<string, unknown> | undefined;
     for (let i = rows.length - 1; i >= 0; i--) {
       if (i === index) continue;
       const r = rows[i] as unknown as Record<string, unknown>;
+      const rowWork = ((r.work ?? '') as string).trim();
+      if (rowWork) {
+        if (rowWork === item.token) {
+          source = r;
+          break;
+        }
+        continue;
+      }
+      if (!k) continue;
       const bomKeys = (r.bomLineKeys ?? []) as string[];
       const rk = kindOf({
         operationType: r.operationType as string,
@@ -3309,22 +3424,142 @@ function OperationEditor({
         break;
       }
     }
-    if (!source) return;
+    const sourceIndex = source ? rows.indexOf(source as unknown as OperationFormValue) : -1;
+    const fromCard: Record<string, string | number> = {};
+    if (source) {
+      for (const field of KIND_PROPERTY_FIELDS) {
+        const from = source[field];
+        if (typeof from === 'string' || typeof from === 'number') fromCard[field] = from;
+      }
+    }
+
+    // СТУПЕНЬ 2 — ГЛОБАЛЬНЫЙ ДЕФОЛТ РАБОТЫ, по серверному реестру полей.
+    const fromGlobal: Record<string, string | number> = {};
+    for (const d of workDefaultsForForm(workCatalog, item.token, empty)) {
+      fromGlobal[d.field] = d.value;
+    }
+
+    // ТЕКУЩЕЕ СОСТОЯНИЕ ШАГА ЧИТАЕТСЯ ПОСЛЕ ЗАПИСИ ЛИЧНОСТИ, и это не мелочь порядка: личность
+    // (класс шва, под-глагол ВТО, метод крепления) уже в форме, и поле, которое она только что
+    // заполнила, дефолт перебивать не имеет права — иначе выбор работы спорил бы сам с собой.
     const p = `operations.${index}` as const;
-    for (const field of KIND_PROPERTY_FIELDS) {
-      if (!(field in empty)) continue; // имя, которого строка формы ещё не знает
-      const from = source[field];
-      const blank = empty[field];
-      if (from === undefined || from === blank) continue;
-      if (typeof from === 'string' && from.trim() === '') continue;
-      const here = getValues(`${p}.${field}` as `operations.${number}.note`) as unknown;
-      if (here !== undefined && here !== blank && !(typeof here === 'string' && here.trim() === ''))
-        continue;
-      setValue(`${p}.${field}` as `operations.${number}.note`, from as never, {
+    const current: Record<string, unknown> = {};
+    const fields = [...new Set([...Object.keys(fromCard), ...Object.keys(fromGlobal)])];
+    for (const field of fields) {
+      current[field] = getValues(`${p}.${field}` as `operations.${number}.note`) as unknown;
+    }
+    const fills = resolveStepDefaults(fields, empty, current, fromCard, fromGlobal);
+    for (const f of fills) {
+      setValue(`${p}.${f.field}` as `operations.${number}.note`, f.value as never, {
         shouldDirty: true,
       });
     }
+    setPrefilled(
+      fills.map((f) => ({
+        ...f,
+        // Номер шага-источника — то, что человек ищет глазами, когда проверяет подстановку.
+        fromStep: f.source === 'card' && sourceIndex >= 0 ? (sourceIndex + 1) * 10 : 0,
+        workLabel: item.label,
+      })),
+    );
   }
+
+  // --- МЕТКА «ПОДСТАВЛЕНО» И ЖЕСТ «ЗАПОМНИТЬ КАК ДЕФОЛТ» --------------------------------------
+  //
+  // МЕТКА ЖИВЁТ ДО КАСАНИЯ ПОЛЯ ИЛИ ДО СОХРАНЕНИЯ, и оба условия ВЫЧИСЛЯЮТСЯ, а не хранятся
+  // третьим флажком: «человек ответил своё» это значение, разошедшееся с нашим, а «сохранено» —
+  // значение, совпавшее с БАЗОЙ формы (после успешной записи база = сервер). Флажок рядом с этими
+  // двумя фактами был бы третьим мнением о них и разошёлся бы с обоими молча.
+  const prefilledPaths = prefilled.length
+    ? prefilled.map((f) => `operations.${index}.${f.field}`)
+    : [`operations.${index}.work`];
+  const prefilledNow = useWatch({
+    control,
+    name: prefilledPaths as unknown as `operations.${number}.note`[],
+  }) as unknown[];
+  const prefillBase = (form.formState.defaultValues?.operations?.[index] ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const prefillNotice = prefilled.filter((f, i) => {
+    if (prefilledNow[i] !== f.value) return false;
+    return prefillBase[f.field] !== f.value;
+  });
+  /** Снять подставленное: значение уходит в пустоту, метка гаснет. Жест человеческий — и грязный. */
+  const dropPrefilled = (field: string) => {
+    const blank = (emptyOperation as Record<string, unknown>)[field];
+    setValue(`operations.${index}.${field}` as `operations.${number}.note`, blank as never, {
+      shouldDirty: true,
+    });
+    setPrefilled((prev) => prev.filter((f) => f.field !== field));
+  };
+
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const rememberDefault = useMutation({
+    mutationFn: (v: { workToken: string; field: string; value: string }) =>
+      adminService.RememberOperationWorkDefault({
+        workToken: v.workToken,
+        field: v.field,
+        value: v.value,
+        clear: false,
+      }),
+    onSuccess: () => {
+      // Каталог перечитывается: дефолт, только что записанный, обязан подставиться на следующем
+      // же шаге, а не через перезагрузку страницы.
+      refreshCatalog();
+      showMessage('remembered as your default for this kind of work', 'success');
+    },
+    onError: (e: unknown) => {
+      // ОТКАЗ ПОКАЗЫВАЕТСЯ ДОСЛОВНО. Сервер отвечает ИМЕНЕМ поля («у этой настройки своя лестница
+      // наследования»), и переписывать это своими словами значило бы прятать единственное
+      // объяснение, которое у человека есть.
+      showMessage(e instanceof Error ? e.message : 'could not remember that default', 'error');
+    },
+  });
+
+  /**
+   * ЧТО МОЖНО ЗАПОМНИТЬ КАК ДЕФОЛТ — ПО СЕРВЕРНОМУ РЕЕСТРУ, И ТОЛЬКО ПО НЕМУ.
+   *
+   * Список полей приходит в ответе каталога (`default_fields`) — тем же срезом, которым RPC
+   * проверяет присланное имя. Клиентский `KIND_PROPERTY_FIELDS` для этого негоден: он отвечает на
+   * ДРУГИЕ вопросы (что переносится с прошлого шага, что обязано стоять в `CORE_STEP_FIELDS`),
+   * живёт своей жизнью и уже носил колонку, снятую миграцией. Кнопка, нарисованная по нему,
+   * стояла бы на поле, которое сервер отвергает по имени, — то есть обещала бы жест, всегда
+   * отвечающий отказом.
+   *
+   * Предлагается только ЗАПОЛНЕННОЕ и только ПОКАЗАННОЕ: запоминать пустоту нечего, а «запомни то,
+   * чего не видно» — жест вслепую. Состояние поля берётся из той же таблицы `stepFields`, из
+   * которой считается пилюля и строится полоса остатков; второй такой таблицы здесь нет.
+   */
+  const rememberableDefaults = (() => {
+    if (!activeWork || workCatalog.defaultFields.length === 0) return [];
+    const byField = new Map(stepFields.map((f) => [f.field as string, f]));
+    const stored = workCatalog.defaults.get(activeWork.token);
+    const out: Array<{
+      column: string;
+      label: string;
+      text: string;
+      value: string;
+      already: boolean;
+    }> = [];
+    for (const column of workCatalog.defaultFields) {
+      const field = columnToFormField(column);
+      if (!(field in emptyOperation)) continue;
+      const state = byField.get(field);
+      if (!state || !state.filled || !state.shown) continue;
+      const raw = getValues(`operations.${index}.${field}` as `operations.${number}.note`);
+      const value = formValueToWorkDefault((emptyOperation as Record<string, unknown>)[field], raw);
+      if (!value) continue;
+      out.push({
+        column,
+        label: state.label,
+        text: state.text,
+        value,
+        already: stored?.get(column) === value,
+      });
+    }
+    return out;
+  })();
 
   const selectedPieceKeys = (useWatch({
     control,
@@ -3959,35 +4194,53 @@ function OperationEditor({
           in the fold: a required field behind a closed accordion is a save that fails at a control
           nobody can see. */}
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-        {/* ПИКЕР ВИДА — ПЕРВЫЙ КОНТРОЛ ШАГА, И ЭТО ОДИН СПИСОК ВМЕСТО ДВУХ. Технолог называет вид
-            ОДНИМ СЛОВОМ у машины («топстич»), а форма спрашивала глагол и машинку по отдельности —
-            слова «топстич» не было ни в одном из двух списков. Выбор пункта проставляет пару
-            (глагол, машинка / метод) и, где нужно, класс шва или дискриминатор.
-            ОН НЕ ПОЛЕ ФОРМЫ И НИГДЕ НЕ ХРАНИТСЯ: значение вычисляется из тех же сохранённых полей
-            (`kindOf`) — поэтому обе оси ниже остаются на экране и остаются редактируемыми, и шаг,
-            собранный руками мимо всех пунктов, продолжает открываться и сохраняться. */}
-        <div className='space-y-px' data-kind-picker={index}>
+        {/* ПИКЕР РАБОТЫ — ПЕРВЫЙ КОНТРОЛ ШАГА, И ВЫБИРАЮТ В НЁМ ПОИСКОМ, А НЕ ГЛАЗАМИ.
+            Технолог называет работу ОДНИМ СВОИМ СЛОВОМ («московский», «моско»), а форма
+            спрашивала глагол и машинку по отдельности — этого слова не было ни в одном из двух
+            списков, а с 0329 их полсотни с лишним и сканировать список стало дороже, чем печатать.
+            Список и синонимы приходят С СЕРВЕРА; в бандле остаётся снимок, чтобы пикер никогда не
+            был пустым, — и подпись под ним честно говорит, на чём он сейчас живёт.
+            ВЫБОР ПИШЕТ РАБОТУ (`work`, хранимую) И ЛИЧНОСТЬ: глагол с машинкой из каталога, класс
+            шва / метод крепления / под-глагол — из пункта, если он у работы есть. Обе оси ниже
+            остаются на экране и редактируемыми: шаг, собранный руками мимо всех работ, продолжает
+            открываться и сохраняться, а работа у него просто не названа. */}
+        <div className='space-y-px' data-kind-picker={index} data-step-work={workValue || undefined}>
           <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
             kind of operation
           </Text>
-          <Select
-            name={`operationKind-${index}`}
+          <Combobox
+            name={`operationWork-${index}`}
             placeholder='kind of operation'
-            value={activeKind?.id ?? KIND_UNSET}
-            onValueChange={(v: string) => {
-              // «ещё» РАСКРЫВАЕТ СПИСОК, а не выбирает вид: значение пикера вычисляемое, поэтому
-              // триггер тут же перерисуется прежним видом, и промах ничего не стоит.
-              if (v === KIND_MORE) {
-                setRareKindsOpen(true);
-                return;
-              }
-              if (isKindSentinel(v)) return;
-              applyKind(v);
-            }}
-            items={kindItems}
-            className={selectNoGrow}
-            fullWidth
+            searchPlaceholder='type the work — «моско», topstitch…'
+            valueLabel={workLabel}
+            filter={filterWorks}
+            onSelect={applyWork}
+            readOnly={frozen}
+            footer={
+              catalogLive ? undefined : (
+                // ДЕГРАДАЦИЯ НАЗЫВАЕТСЯ ВСЛУХ. Молчаливый фолбэк здесь худший из возможных:
+                // человек печатает русское слово, ничего не находит и решает, что такой работы
+                // нет вовсе.
+                <Text size='micro' variant='label' component='span' data-work-fallback='1'>
+                  offline list — the catalogue did not load, so search is English-only
+                </Text>
+              )
+            }
           />
+          {/* ВЫВЕДЕНО, А НЕ СОХРАНЕНО — И ЭТО СКАЗАНО. Строка без работы живёт по старой
+              деривации из пары (глагол, машинка): имя в триггере настоящее, но в базе его нет, и
+              сервер про эту строку по-прежнему ничего не знает. Молчать об этом значило бы выдать
+              двоекодье за разметку. */}
+          {!workValue && derivedKind && (
+            <Text size='micro' variant='label' component='p' data-work-derived={index}>
+              derived from what is recorded — no kind stored on this step yet
+            </Text>
+          )}
+          {workValue && !activeWork && (
+            <Text size='micro' variant='label' component='p' data-work-unknown={workValue}>
+              this kind came from a newer version of the app — it is kept exactly as it is
+            </Text>
+          )}
         </div>
         <SelectField
           name={`operations.${index}.operationType`}
@@ -4127,8 +4380,83 @@ function OperationEditor({
           ) : undefined
         }
       >
-        {activeKind ? `${kindLabelOf(activeKind)} — how it is done` : 'how it is done'}
+        {/* ИМЯ РАБОТЫ БЕРЁТСЯ ИЗ КАТАЛОГА, когда работа названа: он авторитетен, а не бандл. */}
+        {workLabel ? `${workLabel} — how it is done` : 'how it is done'}
       </GroupLabel>
+
+      {/* ЧТО ПОДСТАВИЛ ВЫБОР РАБОТЫ — НАЗВАНО ПОИМЁННО И СНИМАЕТСЯ КАСАНИЕМ.
+          Подстановка это ЗАПИСЬ по человеческому жесту (выбрал работу), поэтому значение живёт
+          дальше само; метка не владеет им, а объясняет происхождение — «с шага 120 этой карточки»
+          или «твой дефолт для этой работы» — и даёт стереть, если оно не к месту. Метка гаснет
+          сама: человек поправил поле (значение разошлось с нашим) или карточка сохранилась
+          (значение стало базой формы). Обоих условий здесь не хранится флажком — они считаются. */}
+      {prefillNotice.length > 0 && (
+        <div className='mb-1 flex flex-wrap items-center gap-1' data-work-prefill={index}>
+          <Text size='micro' variant='label' component='span'>
+            prefilled ·
+          </Text>
+          {prefillNotice.map((f) => (
+            <button
+              key={f.field}
+              type='button'
+              data-prefill-field={f.field}
+              data-prefill-source={f.source}
+              onClick={() => dropPrefilled(f.field)}
+              title={
+                f.source === 'card'
+                  ? `carried from step ${f.fromStep} of this card — click to clear it`
+                  : `your saved default for “${f.workLabel}” — click to clear it`
+              }
+              className='inline-flex max-w-full items-center gap-1 border border-warning px-[7px] py-px text-micro uppercase tracking-pill text-warning'
+            >
+              <span className='truncate'>
+                {stepFields.find((sf) => (sf.field as string) === f.field)?.label ?? f.field} ·{' '}
+                {f.source === 'card' ? `from step ${f.fromStep}` : 'your default'}
+              </span>
+              <span aria-hidden>✕</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* «У МЕНЯ ЭТА РАБОТА ВСЕГДА ТАКАЯ» — ЖЕСТ, НАРИСОВАННЫЙ ПО СЕРВЕРНОМУ РЕЕСТРУ.
+          Список полей приходит в ответе каталога и есть тот же срез, которым RPC проверяет
+          присланное имя: машинные и ВТО-настройки в него не входят вовсе (у них своя лестница
+          наследования 0306), и кнопки над ними не появится. Свой, клиентский список здесь
+          разошёлся бы с принимающим молча — и человек жал бы кнопку, всегда отвечающую отказом. */}
+      {activeWork && rememberableDefaults.length > 0 && (
+        <div className='mb-1 flex flex-wrap items-center gap-1' data-work-defaults={activeWork.token}>
+          <Text size='micro' variant='label' component='span'>
+            remember for “{activeWork.label}” ·
+          </Text>
+          {rememberableDefaults.map((r) => (
+            <button
+              key={r.column}
+              type='button'
+              data-remember-field={r.column}
+              disabled={r.already || rememberDefault.isPending || frozen}
+              onClick={() =>
+                rememberDefault.mutate({
+                  workToken: activeWork.token,
+                  field: r.column,
+                  value: r.value,
+                })
+              }
+              title={
+                r.already
+                  ? `${r.label} = ${r.text} is already your default for this work`
+                  : `save ${r.label} = ${r.text} as the default for every “${activeWork.label}” step`
+              }
+              className='inline-flex max-w-full items-center gap-1 border border-borderColor px-[7px] py-px text-micro uppercase tracking-pill disabled:opacity-40'
+            >
+              <span className='truncate'>
+                {r.label} = {r.text}
+                {r.already ? ' ✓' : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* НЕСТАНДАРТНАЯ КОМБИНАЦИЯ — НАЗЫВАЕТСЯ СЛОВАМИ, А НЕ ПОДМЕНЯЕТСЯ БЛИЖАЙШИМ ПУНКТОМ.
           Пара, не соответствующая ни одному виду, законна: ручная комбинация, токен новее этого

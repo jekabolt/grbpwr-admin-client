@@ -218,17 +218,20 @@ ck(pressItems.length === 7, 'семь ВТО-пунктов предлагают
 ck(new Set(pressLabels).size === 7, 'все семь названы РАЗНЫМИ словами', pressLabels.join(' | '));
 ck(!pressLabels.includes('Press'), 'схлопнутого «Press» в списке больше нет', pressLabels.join(' | '));
 
-// ЯРУС 2 РАСКРЫВАЕТСЯ ЖИВОЙ СТРОКОЙ «ЕЩЁ», а её подпись несёт ЧИСЛО скрытых пунктов — выписать
-// его константой значит сломать пробу на первом же добавленном редком виде.
-const closedList = await optionsOf(KIND);
-const moreRow = (closedList ?? []).find((s) => /more kinds/.test(s));
-ck(!!moreRow, 'ярус «ещё» предлагается', moreRow ?? 'строки нет');
-if (moreRow) await pick(KIND, moreRow);
+// ЯРУСА «ЕЩЁ» БОЛЬШЕ НЕТ, И ЭТО ПРОВЕРЯЕТСЯ, А НЕ ПОДРАЗУМЕВАЕТСЯ (R6). Отложенный ярус имел смысл
+// при списке-селекте, где полсотни строк надо было сканировать глазами; с поиском по слову он стал
+// вредным: редкий вид не «отложен», он ПРОПАДАЛ из ответа на запрос, пока человек не догадается
+// раскрыть лишнюю строку. Теперь список отдаётся целиком, а сокращает его печать.
 const kindList = await optionsOf(KIND);
 ck(
-  (kindList ?? []).length > (closedList ?? []).length,
-  'пикер вида раскрыт целиком',
-  `${(closedList ?? []).length} → ${(kindList ?? []).length} строк`,
+  !(kindList ?? []).some((s) => /more kinds/.test(s)),
+  'яруса «ещё» в списке нет — он умер вместе со сканированием списка глазами',
+  (kindList ?? []).filter((s) => /more/.test(s)).join(' | '),
+);
+ck(
+  (kindList ?? []).length >= 53,
+  'пикер сразу предлагает ВСЕ работы, редкие вместе с обычными',
+  `${(kindList ?? []).length} строк`,
 );
 const seen = new Map();
 for (const k of pressItems) {

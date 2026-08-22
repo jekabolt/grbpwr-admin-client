@@ -1,6 +1,7 @@
 import { common_TechCardOperationType } from 'api/proto-http/admin';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
@@ -19,14 +20,9 @@ import {
 // нашёл там топстич — пикер только на создании жалобу не закрывает. Модуль один, вызывающих мест
 // два, список строк собирает один `kindPickerItems`: свой список здесь разошёлся бы с редактором
 // на первом же добавленном виде, и разошёлся бы молча.
-import {
-  KIND_MORE,
-  KIND_UNSET,
-  OPERATION_KIND_BY_ID,
-  isKindSentinel,
-  kindPickerItems,
-  kindWrites,
-} from './operation-kinds';
+import { KIND_BY_WORK_TOKEN, kindWrites } from './operation-kinds';
+import { groupWorks, machineTokenToEnum, searchWorks, workWrites } from './operation-work';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 
 // Диалог создания операции из схемы.
 //
@@ -181,8 +177,7 @@ export function AssemblyCreateDialog({
   // ВИД — ТО, ЧТО ВЫБИРАЕТ ЧЕЛОВЕК; глагол, машинка и дискриминатор ниже — то, что из него следует.
   // Состояния три, а не одно, потому что диалог по-прежнему обязан уметь ДОСПРОСИТЬ то, чего вид
   // не назвал (пресс у «press flat», метод у печати), и валидируется именно набранный минимум.
-  const [kindId, setKindId] = useState('');
-  const [rareKindsOpen, setRareKindsOpen] = useState(false);
+  const [workToken, setWorkToken] = useState('');
   const [kindExtraWrites, setKindExtraWrites] = useState<Record<string, string>>({});
   const [produces, setProduces] = useState<'process' | 'unit' | 'absorb'>('process');
   const [unitKey, setUnitKey] = useState('');
@@ -201,8 +196,7 @@ export function AssemblyCreateDialog({
     setMachineType(UNKNOWN_MACHINE);
     setPressEquipment(UNKNOWN_PRESS);
     setDiscriminator('');
-    setKindId('');
-    setRareKindsOpen(false);
+    setWorkToken('');
     setKindExtraWrites({});
     setProduces(
       prefill.absorbInto
@@ -290,33 +284,46 @@ export function AssemblyCreateDialog({
   // диалог спрашивает. Имя поля на проводе живёт рядом, в `stepDiscriminator.field`.
   const discriminatorWord = stepDiscriminator ? stepDiscriminator.label.replace(/\s*\*$/, '') : '';
 
-  const kind = kindId ? OPERATION_KIND_BY_ID.get(kindId) : undefined;
-  const kindItems = kindPickerItems(kindId || undefined, rareKindsOpen, '— what kind of step —');
+  const { catalog: workCatalog, live: catalogLive } = useOperationWorkCatalog();
+  const work = workToken ? workCatalog.byToken.get(workToken) : undefined;
+  const filterWorks = useCallback(
+    (query: string): ComboboxGroup[] =>
+      groupWorks(searchWorks(workCatalog, query)).map((g) => ({
+        key: g.key,
+        label: g.label,
+        options: g.items.map((w) => ({ value: w.token, label: w.label })),
+      })),
+    [workCatalog],
+  );
 
   /**
-   * ВЫБОР ВИДА ПРОСТАВЛЯЕТ ОБЕ ОСИ И ДИСКРИМИНАТОР, где вид на него отвечает.
+   * ВЫБОР РАБОТЫ ПРОСТАВЛЯЕТ ОБЕ ОСИ И ДИСКРИМИНАТОР, где работа на него отвечает, — И САМУ
+   * РАБОТУ: токен уезжает в строку шага вместе с остальным, через `kindWrites` результата.
+   * Отдельного поля в результате диалога у него нет НАМЕРЕННО: `insertFilledStep` уже отбрасывает
+   * имена, которых нет в `emptyOperation`, и второй путь записи прошёл бы мимо этого щита.
    *
-   * СМЕНА ВИДА СБРАСЫВАЕТ ОТВЕТ ДИСКРИМИНАТОРА, И ЭТО НЕ ПРИБОРКА. Словари у шести дискриминаторов
-   * разные: оставленный от предыдущего выбора токен — значение ЧУЖОГО enum, и сервер отвергает его
-   * по имени поля. Сентинел «не выбрано» ставится сразу: Radix запрещает `Select.Item` с пустым
-   * value, и пустая строка нарисовала бы пустой триггер вместо плейсхолдера.
+   * СМЕНА РАБОТЫ СБРАСЫВАЕТ ОТВЕТ ДИСКРИМИНАТОРА, И ЭТО НЕ ПРИБОРКА. Словари у шести
+   * дискриминаторов разные: оставленный от предыдущего выбора токен — значение ЧУЖОГО enum, и
+   * сервер отвергает его по имени поля.
    */
-  const pickKind = (id: string) => {
-    const k = OPERATION_KIND_BY_ID.get(id);
-    if (!k) return;
-    setKindId(id);
-    // Машинка «на чём» здесь ставится ДЕФОЛТОМ ПУНКТА, а не парком: парк живёт в форме карточки, а
-    // диалог формы не видит вовсе. Единственный подходящий профиль подставит редактор шага, куда
-    // диалог и приводит сразу после создания.
-    const w = kindWrites(k, '');
+  const pickWork = (token: string) => {
+    const item = workCatalog.byToken.get(token);
+    if (!item) return;
+    setWorkToken(token);
+    const k = KIND_BY_WORK_TOKEN.get(token);
+    // Машинка здесь ставится ДЕФОЛТОМ РАБОТЫ, а не парком: парк живёт в форме карточки, а диалог
+    // формы не видит вовсе. Единственный подходящий профиль подставит редактор шага, куда диалог
+    // и приводит сразу после создания.
+    const w = workWrites(item, k, '', '', kindWrites);
     const verb = w.operationType ?? UNKNOWN_TYPE;
     setOperationType(verb);
     setMachineType(w.machineType ?? UNKNOWN_MACHINE);
     setPressEquipment(w.pressEquipment ?? UNKNOWN_PRESS);
     const d = STEP_DISCRIMINATORS[verb as common_TechCardOperationType];
     setDiscriminator(d ? (w[d.field] ?? stepDiscriminatorUnset(d.labels)) : '');
-    // Всё, о чём диалог не спрашивает отдельным контролом, едет в результат как есть.
-    const rest: Record<string, string> = { ...w };
+    // Всё, о чём диалог не спрашивает отдельным контролом, едет в результат как есть — вместе с
+    // самой работой.
+    const rest: Record<string, string> = { ...w, work: token };
     delete rest.operationType;
     delete rest.machineType;
     delete rest.pressEquipment;
@@ -343,7 +350,7 @@ export function AssemblyCreateDialog({
         return `there is nothing to add to ${absorbInto} with — take at least one more input into the step`;
       }
     }
-    if (!kind) return 'pick what kind of step this is';
+    if (!work) return 'pick what kind of step this is';
     if (!zone || zone === UNKNOWN_ZONE) return 'pick a zone — “other” is a legitimate answer';
     if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'pick a machine';
     if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS)) return 'pick the pressing equipment';
@@ -588,20 +595,20 @@ export function AssemblyCreateDialog({
               спрашивается ОДНО слово, а обе оси проставляются из него; доспрашивается только то,
               на что вид не отвечает. Сентинелы («ещё», шапка семейства) выбором не являются —
               значение остаётся прежним, и промах ничего не стоит. */}
-          <Select
-            name='assemblyOperationKind'
+          <Combobox
+            name='assemblyOperationWork'
             placeholder='what kind of step'
-            value={kindId || KIND_UNSET}
-            onValueChange={(v: string) => {
-              if (v === KIND_MORE) {
-                setRareKindsOpen(true);
-                return;
-              }
-              if (isKindSentinel(v)) return;
-              pickKind(v);
-            }}
-            items={kindItems}
-            fullWidth
+            searchPlaceholder='type the work — «моско», topstitch…'
+            valueLabel={work?.label ?? ''}
+            filter={filterWorks}
+            onSelect={pickWork}
+            footer={
+              catalogLive ? undefined : (
+                <Text size='micro' variant='label' component='span' data-work-fallback='1'>
+                  offline list — the catalogue did not load, so search is English-only
+                </Text>
+              )
+            }
           />
           <Select
             name='assemblyZone'
@@ -613,17 +620,18 @@ export function AssemblyCreateDialog({
           {/* «НА ЧЁМ» — только у вида, чей якорь не машинка, и списком, суженным этим видом.
               У остальных машинных видов машинка и ЕСТЬ вид: спрашивать её второй раз значило бы
               разрешить ответ, противоречащий уже сделанному выбору. */}
-          {needsMachine && kind?.askMachine && (
+          {needsMachine && work?.machineMode === 'ask' && (
             <Select
               name='assemblyMachineType'
               placeholder='on what'
               value={machineType}
               onValueChange={setMachineType}
-              items={machineTypeOptionsFor(machineType).filter(
-                (o) =>
-                  (kind.askMachine as readonly string[]).includes(o.value) ||
-                  o.value === machineType,
-              )}
+              items={machineTypeOptionsFor(machineType).filter((o) => {
+                // Список допустимых — ИЗ КАТАЛОГА, а не из пункта бандла: у работы, которой этот
+                // бандл не знает, суженного списка в бандле нет вовсе, а вопрос всё равно задан.
+                const allowed = work.machines.map(machineTokenToEnum);
+                return allowed.includes(o.value) || o.value === machineType;
+              })}
               fullWidth
             />
           )}

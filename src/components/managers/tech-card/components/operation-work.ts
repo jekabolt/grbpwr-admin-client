@@ -390,3 +390,138 @@ export function workDefaultsForForm(
   }
   return out;
 }
+
+// --- ЧТО ПИШЕТ ВЫБОР РАБОТЫ ----------------------------------------------------------------------
+
+/**
+ * НАБОР ЗНАЧЕНИЙ, КОТОРЫЙ ВЫБОР РАБОТЫ ЗАПИСЫВАЕТ В СТРОКУ ШАГА, — плоской картой «имя поля →
+ * значение», ровно как у `kindWrites`. Само поле `work` сюда НЕ входит: его пишет вызыватель,
+ * потому что оно едет и тогда, когда пункта у работы нет вовсе.
+ *
+ * ДВА ИСТОЧНИКА, И ГРАНИЦА МЕЖДУ НИМИ ЖЁСТКАЯ:
+ *   * ОСЬ «ЧТО» И ОСЬ «НА ЧЁМ» — ИЗ КАТАЛОГА. Глагол и машинка следуют из работы, и авторитетен
+ *     здесь сервер: он же их и проверит («глагол шага не совпал с глаголом работы» — именованный
+ *     отказ на `operations[N].work`). Бандл может быть старше каталога на сколько угодно;
+ *   * ОСТАЛЬНАЯ ЛИЧНОСТЬ — ИЗ ПУНКТА, если он есть: класс шва у отстрочки, метод крепления у
+ *     фурнитуры, режим покрытия у контроля, под-глагол ВТО. Каталог этих полей не несёт вовсе, и
+ *     заводить их там значило бы построить вторую таблицу «что пункт штампует» — ровно ту, от
+ *     которой фаза отказалась решением 7.
+ *
+ * РАБОТА БЕЗ ПУНКТА (0331: московский шов, сборка, посадка, обмётанная прорезь) законна и
+ * записывается ОДНИМ глаголом с машинкой — этого достаточно: её личность и есть эта пара.
+ */
+export function workWrites(
+  item: WorkItem,
+  kind: OperationKind | undefined,
+  /** Машинка, стоящая на шаге сейчас (имя enum'а) — её выбор работы не переставляет без нужды. */
+  machineOnStep: string,
+  /** Единственный подходящий профиль парка, если он есть (имя enum'а). */
+  machineFromPark: string,
+  kindWrites: (k: OperationKind, machineForAsk?: string) => Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = kind
+    ? { ...kindWrites(kind, machineOnStep || machineFromPark) }
+    : { operationType: verbTokenToEnum(item.verb) };
+  // Глагол — из каталога, всегда: пункт бандла мог назвать другой, и правым тогда будет сервер.
+  out.operationType = verbTokenToEnum(item.verb) || out.operationType;
+
+  if (item.machineMode === 'none') {
+    // Ось «на чём» у этого глагола не машинная. Пункт бандла, назвавший машинку, здесь молчит —
+    // но СТИРАТЬ уже стоящую на шаге машинку никто не имеет права: это не жест выбора работы.
+    delete out.machineType;
+    return out;
+  }
+  const allowed = item.machines.length
+    ? item.machines
+    : item.defaultMachine
+      ? [item.defaultMachine]
+      : [];
+  const fallback = machineTokenToEnum(item.defaultMachine || allowed[0] || '');
+  const fits = (name: string) => !!name && allowed.includes(enumToMachineToken(name));
+  if (item.machineMode === 'fixed') {
+    // Машинка СЛЕДУЕТ ИЗ РАБОТЫ: выбрал оверлок — шаг едет на оверлоке. Уже стоящая машинка
+    // сохраняется только если работа её допускает (у fixed допустимая ровно одна).
+    out.machineType = fits(machineOnStep) ? machineOnStep : fallback || out.machineType || '';
+  } else {
+    // `ask`: стоящая на шаге и подходящая важнее всего (смена вида не переставляет шаг на другую
+    // машину), затем единственный подходящий профиль парка, затем дефолт работы.
+    out.machineType = fits(machineOnStep)
+      ? machineOnStep
+      : fits(machineFromPark)
+        ? machineFromPark
+        : fallback || out.machineType || '';
+  }
+  if (!out.machineType) delete out.machineType;
+  return out;
+}
+
+// --- ПРИОРИТЕТ ДЕФОЛТОВ --------------------------------------------------------------------------
+
+export type StepDefaultSource = 'card' | 'global';
+export type StepDefaultFill = {
+  field: string;
+  value: string | number;
+  source: StepDefaultSource;
+};
+
+/**
+ * ЧТО ПОДСТАВИТЬ В ПУСТЫЕ ПОЛЯ ПРИ ВЫБОРЕ РАБОТЫ — И В КАКОМ ПОРЯДКЕ.
+ *
+ * ПРИОРИТЕТ: последний такой же шаг НА ЭТОЙ КАРТОЧКЕ > глобальный дефолт работы > пусто.
+ * Порядок именно такой, и он не переспаривается: карточка — контекст ближе. Поставил на этом
+ * изделии отстрочку 4 мм, хотя «вообще» у тебя 6, — следующая отстрочка ЭТОГО изделия обязана
+ * прийти четвёркой. Обратный порядок молча переписывал бы решение, принятое пять минут назад,
+ * решением, принятым полгода назад, — и человек не увидел бы даже, что его переписали.
+ *
+ * ТОЛЬКО В ПУСТОЕ. Заполненное не трогается никогда — ни своё, ни чужое: ответ человека старше
+ * любого дефолта. «Пусто» спрашивается у `blanks` (`emptyOperation`), а не третьим списком
+ * дисциплин: у enum'а это токен `*_UNKNOWN`, у целого 0, у десятичного пустая строка.
+ */
+export function resolveStepDefaults(
+  fields: readonly string[],
+  blanks: Readonly<Record<string, unknown>>,
+  current: Readonly<Record<string, unknown>>,
+  fromCard: Readonly<Record<string, string | number>>,
+  fromGlobal: Readonly<Record<string, string | number>>,
+): StepDefaultFill[] {
+  const isBlank = (field: string, v: unknown): boolean => {
+    if (v === undefined) return true;
+    const blank = blanks[field];
+    if (v === blank) return true;
+    return typeof v === 'string' && v.trim() === '';
+  };
+  const out: StepDefaultFill[] = [];
+  for (const field of fields) {
+    if (!(field in blanks)) continue; // имя, которого строка формы не знает
+    if (!isBlank(field, current[field])) continue;
+    const card = fromCard[field];
+    if (card !== undefined && !isBlank(field, card)) {
+      out.push({ field, value: card, source: 'card' });
+      continue;
+    }
+    const global = fromGlobal[field];
+    if (global !== undefined && !isBlank(field, global)) {
+      out.push({ field, value: global, source: 'global' });
+    }
+  }
+  return out;
+}
+
+/**
+ * ЗНАЧЕНИЕ ФОРМЫ → ЗНАЧЕНИЕ ДЕФОЛТА, обратно `workDefaultToFormValue`: жест «запомнить» шлёт
+ * серверу то же написание, каким сервер его и проверяет (короткий токен, число строкой).
+ * Пустая строка значит «запоминать нечего» — вызыватель обязан жест не предлагать.
+ */
+export function formValueToWorkDefault(blank: unknown, value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'number') return Number.isFinite(value) && value !== 0 ? String(value) : '';
+  if (typeof value !== 'string') return '';
+  const v = value.trim();
+  if (!v) return '';
+  if (typeof blank === 'string' && blank.endsWith('_UNKNOWN')) {
+    if (v === blank) return '';
+    const prefix = blank.slice(0, -'UNKNOWN'.length);
+    return v.startsWith(prefix) ? v.slice(prefix.length).toLowerCase() : v.toLowerCase();
+  }
+  return v;
+}
