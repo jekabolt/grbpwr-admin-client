@@ -96,12 +96,9 @@ import {
   KIND_BY_WORK_TOKEN,
   KIND_PROPERTY_FIELDS,
   OPERATION_KIND_BY_ID,
-  kindClears,
   kindLabelOf,
   kindOf,
-  kindWrites,
   type OperationKind,
-  type OperationKindStep,
 } from './operation-kinds';
 // КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ (0329). Пикер работ, синонимный поиск и дефолты берутся отсюда;
 // в бандле остаётся только снимок-фолбэк, чтобы список никогда не был пустым.
@@ -114,9 +111,9 @@ import {
   machineTokenToEnum,
   resolveStepDefaults,
   searchWorks,
+  workApplication,
   workDefaultsForForm,
   workNaming,
-  workWrites,
   type StepDefaultFill,
   type WorkCatalog,
   type WorkItem,
@@ -3358,10 +3355,10 @@ function OperationEditor({
    * должен стоить заполненного шага; лишнее уберёт та же очистка скрытого, что и раньше, и уберёт
    * ровно по гейту сервера, а не по короткому списку пункта.
    *
-   * ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — ЯКОРЬ, КОТОРЫЙ ПИКЕР САМ И ПОСТАВИЛ (`kindClears`, ниже по телу).
-   * Без него правило оборачивалось против себя: оставшийся `seam_class` перехватывал резолв, и
-   * пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля, которое
-   * человек не заполнял.
+   * ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — ЯКОРЬ, КОТОРЫЙ ПИКЕР САМ И ПОСТАВИЛ (`kindClears`, спрошенный
+   * писателем). Без него правило оборачивалось против себя: оставшийся `seam_class` перехватывал
+   * резолв, и пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля,
+   * которое человек не заполнял.
    */
   const applyWork = (token: string) => {
     const p = `operations.${index}` as const;
@@ -3384,21 +3381,32 @@ function OperationEditor({
     // неотличимыми, а сервер снова не может повесить на работу ни одного правила.
     setValue(`${p}.work`, token, { shouldDirty: true });
 
-    // «НА ЧЁМ», КОГДА РАБОТА ЖИВЁТ НА НЕСКОЛЬКИХ МАШИНКАХ. Машинку шаг MACHINE обязан нести —
-    // сервер отвергает MACHINE без неё, — поэтому работа её ставит, но не угадывает молча:
-    // стоящая на шаге и подходящая важнее всего (смена вида не переставляет шаг на другую
-    // машину), затем единственная подходящая в парке, затем дефолт работы. Список допустимых —
-    // ИЗ КАТАЛОГА: у работы, которой этот бандл не знает, суженного списка в бандле и нет.
-    let machineFromPark = '';
-    if (item.machineMode === 'ask') {
-      const narrowed = item.machines.map(machineTokenToEnum);
-      const fits = parkMachines.filter(
-        (m) => narrowed.includes(m.machineType ?? '') && (m.profileKey ?? '').trim(),
-      );
-      if (fits.length === 1) machineFromPark = fits[0].machineType ?? '';
-    }
-
-    const written = workWrites(item, k, machineType, machineFromPark, pressEquipment, kindWrites);
+    // ЧТО ИМЕННО ЗАПИСАТЬ, РЕШАЕТ ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ (`workApplication`), И ЭТА СТРОКА — ЛИШЬ
+    // ОДИН ИЗ ДВУХ ЕГО ВЫЗЫВАТЕЛЕЙ. Раньше правила жили ОРКЕСТРОВКОЙ ПРЯМО ЗДЕСЬ — замкнутой на
+    // семь `useWatch` открытой строки, — и экран ратификации (R7), пишущий ту же работу в ту же
+    // форму, позвать её не мог вовсе: ему пришлось бы завести ВТОРУЮ редакцию тех же правил, и
+    // разошлись бы они молча. Ни одно правило при выносе не переписано; здесь остались ровно
+    // жесты формы — что положить и в каком порядке.
+    const { writes: written, clears, links } = workApplication({
+      item,
+      kind: k,
+      // СНИМОК ЧИТАЕТСЯ У ФОРМЫ ДО ПЕРВОЙ ЗАПИСИ: и машинка, и ВТО-оборудование, и обе ссылки на
+      // профили — это ОТВЕТЫ ЧЕЛОВЕКА, которые применение обязано увидеть нетронутыми.
+      current: {
+        operationType: opType,
+        machineType,
+        pressEquipment,
+        seamClass,
+        attachMethod,
+        coverageMode,
+        labelAttachStitch,
+        pressAction,
+        bomKinds: stepBomKinds,
+        machineProfileKey,
+        pressProfileKey,
+      },
+      park: { machines: parkMachines, presses: parkPresses },
+    });
     const writes = Object.entries(written) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of writes) {
       // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА. Так `press_action` и дождался
@@ -3409,74 +3417,22 @@ function OperationEditor({
       setValue(`${p}.${field}`, value, { shouldDirty: true });
     }
 
-    // ЯКОРЬ ЧУЖОГО ПУНКТА, ОСТАВШИЙСЯ В ЗАПИСИ, ПЕРЕИГРЫВАЛ ВЫБОР ЧЕЛОВЕКА. Замерено: на шаге
-    // `{MACHINE, LOCKSTITCH, seam_class = OS_TOPSTITCH}` пункты «Join — lockstitch», «Coverstitch»,
-    // «Chainstitch», «AMF» и «Attach label» не брались вовсе — запись писалась, но резолв снова
-    // отвечал «Topstitch» по классу шва, и пикер откатывался. Вид нигде не хранится, поэтому
-    // откатывался не только пикер: `kindHeadingVerb` продолжал звать шаг отстрочкой в заголовке,
-    // на карте примерки, в подписанном релизе и на печатном листе.
-    //
-    // Что именно снять, решает `kindClears` — она СПРАШИВАЕТ резолв, а не повторяет его правила, и
-    // снимает ровно тот якорь, который пикер сам и пишет как личность другого пункта. Порядок:
-    // ПОСЛЕ записи (снятие считается по уже применённому набору) и ДО пресета, который в пустое
-    // пишет.
-    const after: OperationKindStep = {
-      operationType: written.operationType ?? opType,
-      machineType: written.machineType ?? machineType,
-      seamClass: written.seamClass ?? seamClass,
-      attachMethod: written.attachMethod ?? attachMethod,
-      coverageMode: written.coverageMode ?? coverageMode,
-      labelAttachStitch: written.labelAttachStitch ?? labelAttachStitch,
-      pressAction: written.pressAction ?? pressAction,
-      bomKinds: stepBomKinds,
-    };
-    // У РАБОТЫ БЕЗ ПУНКТА СНИМАТЬ НЕЧЕГО — И ЭТО НЕ ПРОБЕЛ. `kindClears` снимает ровно тот якорь,
-    // который САМ ПИКЕР пишет как личность ДРУГОГО пункта; работа, у которой пункта в этом бандле
-    // нет, ни одного якоря не писала, и снимать чужой факт «на всякий случай» было бы ровно тем
-    // стиранием, которого фаза «перестать терять» не допускает.
-    const cleared = k
-      ? (Object.entries(kindClears(k, after)) as Array<[OperationFormStringField, string]>)
-      : [];
+    // СНЯТИЕ ЯКОРЯ — ПОСЛЕ ЗАПИСИ И ДО ПОДСТАНОВКИ, и порядок этот несущий: снятие считается по
+    // УЖЕ ПРИМЕНЁННОМУ набору, а подстановка пишет в пустое и обязана видеть снятое пустым.
+    const cleared = Object.entries(clears) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of cleared) {
       if (!(field in emptyOperation)) continue;
       setValue(`${p}.${field}`, value, { shouldDirty: true });
     }
 
-    // СВЯЗЬ С ПРОФИЛЕМ ПАРКА ПИШЕТСЯ КЛЮЧОМ, ЯВНО — единственное, что вообще подтягивается при
-    // выборе пункта, и подтягивается оно СВЯЗЬЮ, а не значениями.
-    //
-    // Почему явно: пустой ключ сервер сохраняет как «не задано» (обещанного «пустой ключ = профиль
-    // этого типа, если он единственный» на ЗАПИСИ нет), а тип, разрешённый через профиль,
-    // применимости полей не открывает — отказ придёт примерно на восемнадцати полях.
-    //
-    // Почему только в пустой ключ: уже стоящая ссылка — это решение технолога, и перебивать её
-    // выбором вида значило бы молча переставить шаг на другой станок.
-    //
-    // И ни одного ЧИСЛА в строку шага: унаследованное значение, записанное сюда, стёрло бы разницу
-    // между «технолог выбрал 4 ст/см» и «так вышло по умолчанию».
-    const targetMachine = written.machineType ?? '';
-    if (targetMachine && !machineProfileKey.trim()) {
-      const fits = parkMachines.filter(
-        (m) => m.machineType === targetMachine && (m.profileKey ?? '').trim(),
-      );
-      if (fits.length === 1) {
-        setValue(`${p}.machineProfileKey`, (fits[0].profileKey ?? '').trim(), { shouldDirty: true });
-      }
+    // И НИ ОДНОГО ЧИСЛА ИЗ ПАРКА В СТРОКУ ШАГА: подтягивается СВЯЗЬ, а не значения. Отсутствие
+    // ключа в ответе значит «связывать нечем» — профиля нет, их несколько, или человек уже ответил
+    // сам; писать в этом месте пустую строку значило бы стереть его ответ.
+    if (links.machineProfileKey !== undefined) {
+      setValue(`${p}.machineProfileKey`, links.machineProfileKey, { shouldDirty: true });
     }
-    const targetPress = written.pressEquipment ?? '';
-    if (targetPress && !pressProfileKey.trim()) {
-      // Процесс сужает лестницу и здесь: профиль, написанный для дублирования, разутюжке не
-      // отвечает. Предикат берётся существующий — второго такого не заводится.
-      const stepVerb = (written.operationType ?? opType) as common_TechCardOperationType;
-      const fits = parkPresses.filter(
-        (pr) =>
-          pr.pressEquipment === targetPress &&
-          (pr.profileKey ?? '').trim() &&
-          pressProfileFitsStep(pr, stepVerb),
-      );
-      if (fits.length === 1) {
-        setValue(`${p}.pressProfileKey`, (fits[0].profileKey ?? '').trim(), { shouldDirty: true });
-      }
+    if (links.pressProfileKey !== undefined) {
+      setValue(`${p}.pressProfileKey`, links.pressProfileKey, { shouldDirty: true });
     }
     prefillForWork(item, k);
   };
