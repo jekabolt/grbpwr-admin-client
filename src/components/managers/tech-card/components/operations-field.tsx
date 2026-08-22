@@ -104,6 +104,7 @@ import {
 // КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ (0329). Пикер работ, синонимный поиск и дефолты берутся отсюда;
 // в бандле остаётся только снимок-фолбэк, чтобы список никогда не был пустым.
 import {
+  SLIT_OVERCAST_WORK,
   columnToFormField,
   formValueToWorkDefault,
   groupWorks,
@@ -2479,6 +2480,15 @@ function OperationEditor({
   const labelAttachStitch = (useWatch({ control, name: `operations.${index}.labelAttachStitch` }) ??
     NONE_LABEL_ATTACH) as string;
 
+  // --- ОСЬ «РАБОТА» ШАГА, ПРОЧИТАННАЯ ДО ГЕЙТОВ ------------------------------------------------
+  //
+  // ЧИТАЕТСЯ ЗДЕСЬ, А НЕ У ПИКЕРА (он ниже, и до 0331 значение жило там), ПОТОМУ ЧТО ЕЁ СПРАШИВАЮТ
+  // ГЕЙТЫ ПОЛЕЙ. Работа отвечает на вопрос «несёт ли шаг это поле» наравне с машинкой: длина
+  // прорези законна на зигзаге ровно потому, что работа названа. Гейт, который работы не видит,
+  // прячет поле, которое сервер ТРЕБУЕТ, — и владелец получает отказ на контроле, которого нет на
+  // экране. Второго чтения нет и быть не может: `const` ниже по телу компилятор бы и не отдал.
+  const workValue = ((useWatch({ control, name: `operations.${index}.work` }) ?? '') as string).trim();
+
   const isMachineStep = isMachineType(opType);
   const isPressStep = isPressType(opType);
 
@@ -2544,9 +2554,17 @@ function OperationEditor({
   // НАПРАВЛЕНИЕ — ТОЛЬКО У «ЗАУТЮЖИТЬ». При остальных приёмах припуск никуда не укладывается:
   // контрол там не «необязателен», он бессмыслен, и сервер отвергает поле по имени.
   const showPressToward = showPressAction && pressAction === PRESS_TO_ONE_SIDE;
+  // ПРОРЕЗЬ ОБМЁТЫВАЕТ НЕ ТОЛЬКО ПЕТЕЛЬНЫЙ АВТОМАТ (0331), И СПРАШИВАТЬ ОБ ЭТОМ ОБЯЗАНЫ ОБА ЭТАЖА
+  // ГЕЙТА. Владелец просил «прорезь под пояс, обмётанную зигзагом»; 0331 завела такую работу, и на
+  // зигзаге ЛОЖЕН был внешний гейт тоже — блока не было вовсе, так что чинить один внутренний
+  // `showCutLength` значило бы чинить половину. Список четырёх машинок при этом не тронут: у
+  // закрепки, пуговицы и молнии второго входа нет, и расширить их заодно значило бы показать
+  // контрол, который сервер отвергает по имени.
+  const isSlitOvercast = workValue === SLIT_OVERCAST_WORK;
   const showFastening =
     ownsBlock('fastening') &&
-    onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE);
+    (isSlitOvercast ||
+      onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE));
   // ВТОРОЙ ЭТАЖ ТЕХ ЖЕ ГЕЙТОВ — правила ВНУТРИ семейства, у которых свой контрол. До Ф4 они
   // стояли переписанными в трёх местах (рендер, очистка скрытого, счётчик), и разъезд любых двух
   // давал либо невидимое значение, либо стёртое. Теперь они названы ОДИН раз и читаются всеми:
@@ -2563,6 +2581,18 @@ function OperationEditor({
   const showFoldback = showHardware && isHardwareStep && attachMethod === THREADED_HARDWARE;
   const showAirTemperature = showWeld && onMachine(SEAM_TAPING);
   const showButtonhole = showFastening && onMachine(BUTTONHOLE_MACHINE);
+  // ДЛИНА ПРОРЕЗИ — ЕДИНСТВЕННОЕ ПОЛЕ СЕМЕЙСТВА С ДВУМЯ ВХОДАМИ, и потому у неё СВОЙ гейт, а не
+  // общий `showButtonhole`. Дословное зеркало сервера (`workAcceptsCutLength` рядом с
+  // `machineIsOneOf(machineButtonhole)`): стиль петли и её направление остаются фактами ПЕТЕЛЬНОЙ
+  // МАШИНЫ — сервер отвергает их по имени на любой другой, — а длина описывает саму РАБОТУ, и
+  // работа называет её на зигзаге тоже.
+  const showCutLength = showFastening && (isSlitOvercast || onMachine(BUTTONHOLE_MACHINE));
+  // ЯРЛЫК НАЗЫВАЕТ ТО, ЧТО РЕЖУТ, И ПОЭТОМУ ОН НЕ ОДИН. На шаге прорези «buttonhole cut» — ложь:
+  // петли там нет, есть разрез под пояс. У каждого входа своё имя, и общего слова у них не
+  // нашлось: «cut length» не говорит НИ ЧЕГО о том, что режут, а поле именно об этом. Подпись
+  // читается ещё и полосой остатков — там она обязана быть той же самой, иначе человек ищет на
+  // экране слово, которого на нём нет.
+  const cutLengthLabel = isSlitOvercast ? 'slit cut, mm' : 'buttonhole cut, mm';
   const showBartack = showFastening && onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE);
   const showAttachPattern = showFastening && onMachine(BUTTON_ATTACH_MACHINE);
   const showZipper = showFastening && onMachine(ZIPPER_MACHINE);
@@ -2830,7 +2860,7 @@ function OperationEditor({
       itemLabel(BUTTONHOLE_STYLE_ITEMS),
       showButtonhole,
     ),
-    textState('cutLengthMm', 'buttonhole cut, mm', cutLengthMm, showButtonhole),
+    textState('cutLengthMm', cutLengthLabel, cutLengthMm, showCutLength),
     enumState(
       'buttonholeOrientation',
       'buttonhole direction',
@@ -3170,7 +3200,9 @@ function OperationEditor({
   // ней; строка без работы — по прежней деривации из пары (глагол, машинка), как жила годы. Сто
   // прод-строк свалки размечает человек, автоматического переписывания нет ни на одной стороне,
   // поэтому оба пути обязаны работать одновременно — и будут, пока владелец не доразметит.
-  const workValue = ((useWatch({ control, name: `operations.${index}.work` }) ?? '') as string).trim();
+  //
+  // САМО ЗНАЧЕНИЕ (`workValue`) ПРОЧИТАНО ВЫШЕ, в кластере `useWatch`: с 0331 его спрашивает не
+  // только пикер, но и гейты полей, а они стоят раньше по телу компонента.
   const { catalog: workCatalog, live: catalogLive, refresh: refreshCatalog } =
     useOperationWorkCatalog();
   const activeWork = workValue ? workCatalog.byToken.get(workValue) : undefined;
@@ -4739,35 +4771,37 @@ function OperationEditor({
         <>
           <GroupLabel>fastening detail</GroupLabel>
           <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+            {/* ТРИ УСЛОВИЯ ВМЕСТО ОДНОГО ФРАГМЕНТА: у длины прорези свой гейт (два входа), а
+                форма и направление петли остаются при петельной машине. Порядок сохранён именно
+                разбивкой — на петельном автомате человек по-прежнему читает «форма → длина →
+                направление», а на зигзаге видит ровно одно поле, которое там законно. */}
             {showButtonhole && (
-              <>
-                <SelectField
-                  name={`operations.${index}.buttonholeStyle`}
-                  label='buttonhole shape'
-                  items={stepEnumOptions(
-                    BUTTONHOLE_STYLE_ITEMS,
-                    '— not stated —',
-                    buttonholeStyle,
-                  )}
-                  className={selectNoGrow}
-                />
-                <DecimalField
-                  name={`operations.${index}.cutLengthMm`}
-                  label='buttonhole cut, mm'
-                  maxDecimals={1}
-                  placeholder='19'
-                />
-                <SelectField
-                  name={`operations.${index}.buttonholeOrientation`}
-                  label='buttonhole direction'
-                  items={stepEnumOptions(
-                    BUTTONHOLE_ORIENTATION_ITEMS,
-                    '— not stated —',
-                    buttonholeOrientation,
-                  )}
-                  className={selectNoGrow}
-                />
-              </>
+              <SelectField
+                name={`operations.${index}.buttonholeStyle`}
+                label='buttonhole shape'
+                items={stepEnumOptions(BUTTONHOLE_STYLE_ITEMS, '— not stated —', buttonholeStyle)}
+                className={selectNoGrow}
+              />
+            )}
+            {showCutLength && (
+              <DecimalField
+                name={`operations.${index}.cutLengthMm`}
+                label={cutLengthLabel}
+                maxDecimals={1}
+                placeholder='19'
+              />
+            )}
+            {showButtonhole && (
+              <SelectField
+                name={`operations.${index}.buttonholeOrientation`}
+                label='buttonhole direction'
+                items={stepEnumOptions(
+                  BUTTONHOLE_ORIENTATION_ITEMS,
+                  '— not stated —',
+                  buttonholeOrientation,
+                )}
+                className={selectNoGrow}
+              />
             )}
             {/* Закрепка есть и у петлевой машины — ею закрепляют концы прорези. */}
             {showBartack && (

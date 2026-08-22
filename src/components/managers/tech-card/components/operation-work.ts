@@ -392,6 +392,19 @@ const bundleItem = (k: OperationKind, sort: number): WorkItem | undefined => {
  * list groups the way the bundle groups. Which family is not a guess — it is the family of the
  * neighbours the SERVER sorted each work among.
  */
+/**
+ * ПРОРЕЗЬ, ОБМЁТАННАЯ ЗИГЗАГОМ — ЕДИНСТВЕННЫЙ ТОКЕН РАБОТЫ, КОТОРЫЙ ЧИТАЮТ ПРАВИЛА ПОЛЕЙ (0331).
+ *
+ * Он назван ЗДЕСЬ и один раз, потому что спрашивают его в двух разных местах — гейт показа поля в
+ * редакторе шага и зодовское зеркало серверного отказа в схеме, — а два написания одной строки
+ * разъезжаются молча: половина, забывшая переименование, просто перестаёт узнавать работу, и
+ * поле снова исчезает с экрана, оставаясь обязательным на сервере.
+ *
+ * Сервер держит ту же пару правил под теми же словами (`workAcceptsCutLength` /
+ * `workRequiresCutLength` в internal/dto/techcard_operation_work.go) — и тоже одной константой.
+ */
+export const SLIT_OVERCAST_WORK = 'slit_overcast';
+
 const CATALOG_ONLY_WORKS: readonly WorkItem[] = [
   {
     token: 'moscow_hem',

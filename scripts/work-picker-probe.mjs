@@ -36,6 +36,13 @@
 //       читает САМИ миграции и сравнивает с ними снимок построчно (см. `readSeededWorks`);
 //   Л (Д5) — ВТО-ось держит выбор человека так же, как машинная: выбранный утюг переживает смену
 //       вида на Steam, а пустое оборудование вид всё-таки заполняет.
+//   М (0331) — ДЛИНА ПРОРЕЗИ ЖИВЁТ ПО ДВУМ ВХОДАМ, И РОВНО В ОДНОМ МЕСТЕ ЗА РАЗ. Работа
+//       «прорезь, обмётанная зигзагом» показывает поле на ЗИГЗАГЕ (то, ради чего фаза начиналась)
+//       и на петельном автомате; шаг БЕЗ работы на петельном показывает его как показывал; ярлык
+//       называет то, что режут, а не петлю; заполненная длина на шаге прорези НЕ уезжает в полосу
+//       остатков, а на прямострочке без работы поля нет вовсе — и там длина как раз остаток.
+//       Отдельной половиной проверяется ОБЯЗАТЕЛЬНОСТЬ: пустая длина на прорези отвечает отказом
+//       НА САМОМ КОНТРОЛЕ — том самом, которого до этой правки на экране не было.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ (приём взят у press-action-probe): правка
 // исходника ради проверки — это правка, которую однажды забудут откатить.
@@ -48,6 +55,8 @@
 //   node scripts/work-picker-probe.mjs --mutate-narrow      «на чём» сужается пунктом бандла → Ж красная
 //   node scripts/work-picker-probe.mjs --mutate-snapshot    дельта 0331 из снимка убрана → К красная
 //   node scripts/work-picker-probe.mjs --mutate-presskeep   ВТО-оборудование пишется безусловно → Л красная
+//   node scripts/work-picker-probe.mjs --mutate-slitgate    гейт длины снова спрашивает ОДНУ машинку → М красная
+//   node scripts/work-picker-probe.mjs --mutate-slitlabel   ярлык длины снова «buttonhole cut, mm» → М красная
 //
 // РЕЗУЛЬТАТ ПРОГОНА МУТАЦИЙ (2026-08-22, ветка feat/operation-kinds-ui) — все откатаны:
 //   --mutate-syn        → 4 провала: «моско», «МОСКОВСКИЙ», «оверлок» не находят ничего, и сужение
@@ -67,7 +76,13 @@
 //                         полем и исчезла над полем, которого нет в клиентском списке;
 //   --mutate-narrow     → 2 провала (адверсарная): суженный список «на чём» снова берётся у пункта
 //                         бандла, и у работы без пункта он раскрывается в ПОЛНЫЙ словарь — 26 строк
-//                         вместо двух, а подпись возвращается к «machine» вместо «on what».
+//                         вместо двух, а подпись возвращается к «machine» вместо «on what»;
+//   --mutate-slitgate   → 5 провалов: на зигзаге поля длины нет вовсе (проверять обязательность не
+//                         на чем), а ЗАПОЛНЕННАЯ длина шага прорези уезжает СТРОКОЙ ОСТАТКА — то
+//                         есть ровно тот экран, на котором сервер отвечает `required` на поле,
+//                         которого человек не видит;
+//   --mutate-slitlabel  → 2 провала: гейт цел, поле на месте — и на обеих машинках работы «прорезь»
+//                         оно снова называется петельным, то есть врёт о том, что на нём режут.
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -87,6 +102,8 @@ const MUTATE_CLIENTLIST = process.argv.includes('--mutate-clientlist');
 const MUTATE_NARROW = process.argv.includes('--mutate-narrow');
 const MUTATE_SNAPSHOT = process.argv.includes('--mutate-snapshot');
 const MUTATE_PRESSKEEP = process.argv.includes('--mutate-presskeep');
+const MUTATE_SLITGATE = process.argv.includes('--mutate-slitgate');
+const MUTATE_SLITLABEL = process.argv.includes('--mutate-slitlabel');
 
 // PLAYWRIGHT БЕРЁТСЯ ОТТУДА ЖЕ, ОТКУДА ЕГО БЕРУТ СОСЕДНИЕ ЖИВЫЕ ПРОБЫ: локальные зависимости, а
 // если их нет — кэш npx (память «headless chromium для прототипов»). Не нашёлся — проба
@@ -227,6 +244,37 @@ const SNAPSHOT_BROKEN = `    items.push(item);
 const PRESSKEEP_FIX = `  if (out.pressEquipment && pressAnswered(pressOnStep)) out.pressEquipment = pressOnStep;`;
 const PRESSKEEP_BROKEN = `  void pressOnStep;
   void pressAnswered;`;
+
+// М (0331) — ДВЕ МУТАЦИИ ОДНОГО ПОЛЯ, И ОНИ ПАДАЮТ ВРОЗЬ. Первая возвращает гейт к ОДНОЙ машинке
+// (оба этажа сразу — ровно то состояние, в котором клиент был до этой правки): владелец выбирает
+// прорезь на зигзаге и не видит поля, которое сервер у него ТРЕБУЕТ. Вторая гейт не трогает —
+// поле на месте, — но возвращает ему ярлык про петлю: экран показывает нужный контрол и врёт о
+// том, что на нём режут. Одна проверка обе не поймает, поэтому мутации две.
+const SLITGATE_FIX = `  const showFastening =
+    ownsBlock('fastening') &&
+    (isSlitOvercast ||
+      onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE));`;
+const SLITGATE_BROKEN = `  const showFastening =
+    ownsBlock('fastening') &&
+    onMachine(BUTTONHOLE_MACHINE, BARTACK_MACHINE, BUTTON_ATTACH_MACHINE, ZIPPER_MACHINE);`;
+const SLITCUT_FIX = `  const showCutLength = showFastening && (isSlitOvercast || onMachine(BUTTONHOLE_MACHINE));`;
+const SLITCUT_BROKEN = `  const showCutLength = showFastening && onMachine(BUTTONHOLE_MACHINE);`;
+const SLITLABEL_FIX = `  const cutLengthLabel = isSlitOvercast ? 'slit cut, mm' : 'buttonhole cut, mm';`;
+const SLITLABEL_BROKEN = `  const cutLengthLabel = 'buttonhole cut, mm';`;
+
+if (MUTATE_SLITGATE)
+  plugins.push(
+    patcher(
+      /operations-field\.tsx$/,
+      [
+        [SLITGATE_FIX, SLITGATE_BROKEN],
+        [SLITCUT_FIX, SLITCUT_BROKEN],
+      ],
+      'tsx',
+    ),
+  );
+if (MUTATE_SLITLABEL)
+  plugins.push(patcher(/operations-field\.tsx$/, [[SLITLABEL_FIX, SLITLABEL_BROKEN]], 'tsx'));
 
 if (MUTATE_SNAPSHOT)
   plugins.push(patcher(/operation-work\.ts$/, [[SNAPSHOT_FIX, SNAPSHOT_BROKEN]], 'ts'));
@@ -391,6 +439,8 @@ const T = {
   STEAMER: 'TECH_CARD_PRESS_EQUIPMENT_STEAMER',
   STEAM: 'TECH_CARD_PRESS_ACTION_STEAM',
   LOCKSTITCH: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+  ZIGZAG: 'TECH_CARD_MACHINE_TYPE_ZIGZAG',
+  BUTTONHOLE: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
   OVERLOCK: 'TECH_CARD_MACHINE_TYPE_OVERLOCK',
   ZONE: 'TECH_CARD_GARMENT_ZONE_FRONT',
   TOPSTITCH_SEAM: 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH',
@@ -1101,6 +1151,135 @@ head('Л. выбранный профиль пресса переживает с
     'в пустое оборудование вид подставил своё — «сохраняет» не превратилось в «не пишет»',
     String(v.pressEquipment),
   );
+}
+
+// ── М (0331). ДЛИНА ПРОРЕЗИ: ДВА ВХОДА, И РОВНО ОДНО МЕСТО ЗА РАЗ ──────────────────────────────
+//
+// ЖАЛОБА, С КОТОРОЙ НАЧАЛАСЬ ФАЗА, ЕЮ ЖЕ И ПРОВЕРЯЕТСЯ. Владелец просил «прорезь под пояс,
+// обмётанную зигзагом». Работа заведена (0331), сервер длину такой прорези ПРИНИМАЕТ и ТРЕБУЕТ —
+// а клиент гейтил поле ОДНОЙ машинкой, петельным автоматом. На зигзаге контрола не было, значит
+// сохранение отвечало `cut_length_mm: required` на поле, которого нет на экране: ровно тот
+// инцидент, ради которого волна и затевалась, внесённый заново нашей же миграцией.
+//
+// КАТАЛОГ ЗДЕСЬ ВСЁ ЕЩЁ ОТКАЗЫВАЕТ (`catalogMode = 'fail'` стоит с цитаты Б), И ЭТО НЕ ПОМЕХА, А
+// УТВЕРЖДЕНИЕ: гейт читает РАБОТУ ИЗ ФОРМЫ — то, что записано на шаге, — а не каталог. Поле,
+// зависящее от сетевого ответа, гасло бы у человека с медленным соединением.
+//
+// И ПРОВЕРЯЕТСЯ НЕ ТОЛЬКО «ПОКАЗАНО». Полоса остатков рисует ЗАПОЛНЕННОЕ, ЧЕГО НЕТ НА ЭКРАНЕ, и
+// живёт она ИНВЕРСИЕЙ того же предиката: расширив гейт, мы меняем и её. Поэтому каждая клетка
+// читается с двух сторон сразу — контрол И остаток, — и утверждение всюду одно: РОВНО ОДНО из
+// двух. Ни «в обоих» (значение, которое чинят в двух местах), ни «ни в одном» (потеря).
+head('М. длина прорези: работа — второй вход, ярлык честен, поле живёт ровно в одном месте');
+const CUT = 'operations.0.cutLengthMm';
+// ОДНО ЧТЕНИЕ НА ОБЕ СТОРОНЫ. `data-field` стоит и на контроле, и на строке остатка (роутер
+// серверных ошибок ищет поле по нему), поэтому различаются они ПРИЗНАКОМ, а не селектором: у
+// контрола внутри input, строка остатка лежит внутри полосы.
+const cutState = () =>
+  page.evaluate((f) => {
+    const nodes = [...document.querySelectorAll(`[data-field="${f}"]`)];
+    const control = nodes.find((n) => n.querySelector('input'));
+    const residue = nodes.find((n) => n.closest('[data-residue-strip]'));
+    const message = control?.querySelector('[id$="form-item-message"]');
+    return {
+      control: !!control,
+      label: (control?.querySelector('label')?.textContent ?? '').trim(),
+      value: control?.querySelector('input')?.value ?? '',
+      residue: !!residue,
+      residueLabel: (residue?.querySelector('span')?.textContent ?? '').trim(),
+      error: (message?.textContent ?? '').trim(),
+    };
+  }, CUT);
+
+{
+  // ТА САМАЯ КЛЕТКА: ЗИГЗАГ + РАБОТА «ПРОРЕЗЬ».
+  await mount([
+    { operationType: T.MACHINE, machineType: T.ZIGZAG, zone: T.ZONE, work: 'slit_overcast' },
+  ]);
+  const st = await cutState();
+  ck(st.control, 'на ЗИГЗАГЕ с работой «прорезь» поле длины ЕСТЬ на экране', JSON.stringify(st));
+  ck(
+    /slit/i.test(st.label) && !/buttonhole/i.test(st.label),
+    'и ярлык называет то, что режут, а не петлю',
+    `«${st.label}»`,
+  );
+  ck(!st.residue, 'показанное поле не задваивается строкой остатка');
+}
+{
+  // ОБЯЗАТЕЛЬНОСТЬ ЛОЖИТСЯ НА ТОТ ЖЕ КОНТРОЛ, и жест человеческий: вписал длину и стёр.
+  //
+  // ОТСУТСТВИЕ КОНТРОЛА — КРАСНАЯ СТРОКА, А НЕ ИСКЛЮЧЕНИЕ. Мутация гейта убирает поле с экрана, и
+  // без этой проверки проба падала бы таймаутом playwright, не досказав остальных цитат: упавшая
+  // проба сообщает «сломалась проба», а не «сломался экран».
+  const input = page.locator(`[data-field="${CUT}"] input`).first();
+  if ((await input.count()) === 0) {
+    ck(false, 'контрол длины на экране есть — иначе обязательность проверять не на чем', 'поля нет');
+  } else {
+  await input.fill('18');
+  await page.waitForTimeout(200);
+  const filled = await cutState();
+  ck(filled.value === '18' && filled.error === '', 'названная длина принимается без отказа', filled.error);
+  await input.fill('');
+  await page.waitForTimeout(300);
+  const empty = await cutState();
+  ck(
+    empty.control && empty.error !== '',
+    'а ПУСТАЯ длина на прорези отвечает отказом НА САМОМ КОНТРОЛЕ — не тостом после сохранения',
+    `«${empty.error}»`,
+  );
+  }
+}
+{
+  // ВТОРАЯ МАШИНКА ТОЙ ЖЕ РАБОТЫ: петельный автомат режет прорезь в один проход.
+  await mount([
+    { operationType: T.MACHINE, machineType: T.BUTTONHOLE, zone: T.ZONE, work: 'slit_overcast' },
+  ]);
+  const st = await cutState();
+  ck(st.control, 'на ПЕТЕЛЬНОМ АВТОМАТЕ с той же работой поле тоже есть', JSON.stringify(st));
+  ck(/slit/i.test(st.label), 'и работа называет поле своим словом даже там', `«${st.label}»`);
+}
+{
+  // СЕГОДНЯШНЕЕ ПОВЕДЕНИЕ НЕ СЛОМАНО, И ЭТО ПОЛОВИНА ЦИТАТЫ, А НЕ ФОРМАЛЬНОСТЬ: у всех 126 строк
+  // прода работа пуста, и расширение обязано быть ВТОРЫМ входом, а не подменой первого.
+  await mount([{ operationType: T.MACHINE, machineType: T.BUTTONHOLE, zone: T.ZONE }]);
+  const st = await cutState();
+  ck(st.control, 'шаг БЕЗ работы на петельном автомате показывает длину как показывал', JSON.stringify(st));
+  ck(st.label === 'buttonhole cut, mm', 'и зовётся она там по-прежнему петельной', `«${st.label}»`);
+}
+{
+  // ЗАПОЛНЕННАЯ ДЛИНА НА ШАГЕ ПРОРЕЗИ — В КОНТРОЛЕ, А НЕ В ОСТАТКЕ.
+  await mount([
+    {
+      operationType: T.MACHINE,
+      machineType: T.ZIGZAG,
+      zone: T.ZONE,
+      work: 'slit_overcast',
+      cutLengthMm: '18',
+    },
+  ]);
+  const st = await cutState();
+  ck(st.control && st.value === '18', 'сохранённая длина стоит в своём контроле', JSON.stringify(st));
+  ck(!st.residue, 'и НЕ уезжает в полосу остатков — поле показано, значит это не остаток');
+}
+{
+  // И ОБРАТНАЯ СТОРОНА ТОГО ЖЕ ПРЕДИКАТА. Прямострочка без работы длины не несёт — там она
+  // остаток, и полоса обязана её показать: иначе гейт, сужаясь, стал бы потерей.
+  await mount([
+    { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE, cutLengthMm: '18' },
+  ]);
+  const st = await cutState();
+  ck(!st.control, 'на прямострочке без работы контрола длины нет', JSON.stringify(st));
+  ck(st.residue, 'но заполненная длина видна СТРОКОЙ ОСТАТКА, а не пропадает');
+  ck(
+    st.residueLabel === 'buttonhole cut, mm',
+    'и подпись в полосе — та же, что у контрола этого поля',
+    `«${st.residueLabel}»`,
+  );
+}
+{
+  // ПУСТОЕ ПОЛЕ ЧУЖОГО ШАГА НЕ ЖИВЁТ НИГДЕ, и это правильный третий ответ: показывать нечего.
+  await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
+  const st = await cutState();
+  ck(!st.control && !st.residue, 'на прямострочке без работы и без значения поля нет вовсе', JSON.stringify(st));
 }
 
 ck(pageErrors.length === 0, 'ни одного исключения за весь прогон', pageErrors[0] ?? '');
