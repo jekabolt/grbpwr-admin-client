@@ -37,6 +37,10 @@ import {
 // где слово шага собирается, и вид обязан отвечать в нём же. Обратного импорта нет — граф
 // односторонний (`operation-kinds` берёт отсюда только ТИП строки формы), цикла не возникает.
 import { kindHeadingVerb } from './operation-kinds';
+// ИМЯ РАБОТЫ — ЗНАЧЕНИЕ, И ЦИКЛА ЭТО НЕ ДАЁТ: `operation-work` берёт значения только у
+// `operation-kinds`, а обратно к `operation-options` ходит лишь ЗА ТИПОМ. Граф остаётся
+// односторонним ровно по той же причине, по которой им был импорт `kindHeadingVerb` строкой выше.
+import { workHeadingWord, type WorkCatalog } from './operation-work';
 // ТОЛЬКО ТИП, И ЭТО УСЛОВИЕ, А НЕ СТИЛЬ: `schema.ts` импортирует ЗНАЧЕНИЯ отсюда, поэтому обратный
 // импорт значения замкнул бы цикл в рантайме. `import type` стирается при трансформации (в
 // tsconfig нет `verbatimModuleSyntax`), путь ведёт в модуль напрямую, а не через бочку с
@@ -472,6 +476,14 @@ export function zoneLabel(zone?: common_TechCardGarmentZone): string {
 // THE VERB OF A MACHINE STEP COMES FROM THE MACHINE (0306). `machineType` is optional because a
 // heading is also built from archived release snapshots, where a step still carries a legacy type
 // that names its own machine — those keep the verb they always had.
+//
+// РАБОТА (0330) СПРАШИВАЕТСЯ РАНЬШЕ ВСЕХ — И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ШАГ ПОЛУЧАЕТ ИМЯ. Строка,
+// у которой работа названа, зовётся подписью каталога везде разом: рельс, редактор, печатный лист,
+// карта примерки, схема сборки, ссылки жалоб, архив релизов. Строка без работы зовётся сегодняшней
+// деривацией — двоекодье переходного периода живёт ровно здесь, лестницей ниже, а не восемью
+// копиями по экранам. Восьми копий и боимся: остаток, названный в R6, был именно таким — шаг с
+// классом шва отстрочки, которому назначили работу без пункта, продолжал зваться отстрочкой во
+// всех заголовках, потому что заголовок про работу не спрашивал.
 export function operationHeading(args: {
   operationType?: common_TechCardOperationType;
   machineType?: common_TechCardMachineType;
@@ -485,6 +497,14 @@ export function operationHeading(args: {
    * снапшоту, где спрашивать нечего, и там лестница ниже уже права.
    */
   seamClass?: string;
+  /** Токен работы из строки шага (`TechCardOperation.work`). Пусто — работы нет. */
+  work?: string;
+  /**
+   * Каталог работ, если он доехал до этого экрана. Не задан или не приехал с сервера — имя
+   * деградирует до СЕГОДНЯШНЕГО поведения (снимок бандла знает 49 работ из 53), а незнакомая
+   * работа доезжает до глаз ТОКЕНОМ. Пустоты не бывает ни в одном из трёх случаев.
+   */
+  workCatalog?: WorkCatalog;
 }): string {
   const typeVerb = args.operationType ? (OPERATION_TYPE_VERB[args.operationType] ?? '') : '';
   // ВИД СПРАШИВАЕТСЯ ПЕРВЫМ, и отвечает он только там, где говорит больше второй оси.
@@ -493,7 +513,12 @@ export function operationHeading(args: {
     machineType: args.machineType,
     seamClass: args.seamClass,
   });
+  // РАБОТА БЬЁТ ОБЕ ВЫВЕДЕННЫЕ ЛЕСТНИЦЫ. Она НАЗВАНА человеком и хранится, а они выведены из
+  // соседних полей; давать выведенному перебить записанное значило бы называть шаг словом, которое
+  // технолог не выбирал, — ровно тот дефект, что R8 закрывает.
+  const workWord = workHeadingWord(args.workCatalog, args.work);
   const verb =
+    workWord ||
     kindVerb ||
     (args.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE'
       ? machineTypeVerb(args.machineType) || typeVerb

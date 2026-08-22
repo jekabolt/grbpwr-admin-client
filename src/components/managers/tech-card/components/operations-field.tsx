@@ -111,8 +111,10 @@ import {
   resolveStepDefaults,
   searchWorks,
   workDefaultsForForm,
+  workNaming,
   workWrites,
   type StepDefaultFill,
+  type WorkCatalog,
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
@@ -3191,13 +3193,21 @@ function OperationEditor({
    *     та же защитная форма, что у машинки и глагола;
    *   * работы нет — имя, выведенное из записи по-старому, и подпись под пикером говорит, что оно
    *     выведено, а не сохранено.
+   *
+   * РЕШЕНИЕ БЕРЁТСЯ У `workNaming`, А НЕ ПОВТОРЯЕТСЯ ЗДЕСЬ (R8): ту же лестницу спрашивает
+   * `operationHeading`, и разойтись им нечем. Своё у триггера ровно одно — ПРИПИСКА к незнакомому
+   * токену: заголовок печатает голый токен (в цеху приписке не место), а пикер обязан назвать
+   * причину. Разное оформление одного решения, а не второе решение.
    */
-  const workLabel = workValue
-    ? (activeWork?.label ??
-      (catalogLive ? `${workValue} — unknown to this app version` : `${workValue} — not named yet`))
-    : derivedKind
-      ? kindLabelOf(derivedKind)
-      : '';
+  const workNamed = workNaming(workCatalog, workValue);
+  const workLabel =
+    workNamed.kind === 'catalog'
+      ? workNamed.text
+      : workNamed.kind === 'token'
+        ? `${workNamed.text} — ${workNamed.live ? 'unknown to this app version' : 'not named yet'}`
+        : derivedKind
+          ? kindLabelOf(derivedKind)
+          : '';
 
   /**
    * СУЖЕННЫЙ СПИСОК «НА ЧЁМ» — ИЗ КАТАЛОГА, КОГДА РАБОТА НАЗВАНА, и из пункта бандла, когда нет.
@@ -3607,6 +3617,11 @@ function OperationEditor({
       // ЯКОРЬ ВИДА едет в композитор: без него отстрочка на одноигольной называлась бы «join»
       // здесь и «Topstitch» в пикере на два сантиметра выше.
       seamClass,
+      // ...А НАЗВАННАЯ РАБОТА БЬЁТ И ЕГО (R8). Именно здесь оставался остаток R6: шаг с классом шва
+      // отстрочки, которому назначили работу без пункта, звался отстрочкой во всех заголовках,
+      // пока пикер на два сантиметра выше называл его выбранной работой.
+      work: workValue,
+      workCatalog,
       zone: zoneValue as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames: selectedPieceKeys.map((k) => byKey.get(k)?.name ?? `▣ ${k}`),
       note: noteValue,
@@ -4215,7 +4230,13 @@ function OperationEditor({
         <Text size='default' component='h4' className='font-bold tabular-nums'>
           {opNumber}
         </Text>
-        <Text size='control' variant='uppercase' tracking='label' component='span'>
+        <Text
+          size='control'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          data-editor-heading={index}
+        >
           {editorHeading}
         </Text>
         <div className='ml-auto flex shrink-0 items-center gap-1.5'>
@@ -5598,9 +5619,17 @@ function GenerateOperationsPanel({
   readReplaceImpact,
   onAccept,
   frozen = false,
+  workCatalog,
 }: {
   techCardId?: number;
   hasExistingOperations: boolean;
+  /**
+   * Каталог работ — ПРОПОМ, а не своим хуком: предпросмотр обязан называть шаг ровно тем же
+   * словом, каким назовёт его список после вставки, и брать это слово из того же каталога.
+   * Сегодня генератор поля `work` не заполняет, и все строки черновика идут выведенным именем;
+   * начнёт заполнять — предпросмотр не соврёт задним числом.
+   */
+  workCatalog?: WorkCatalog;
   // Counted at the moment the button is pressed rather than watched continuously — this panel does
   // not need to re-render on every keystroke in the 14 operations above it.
   readReplaceImpact: () => ReplaceImpact;
@@ -5755,6 +5784,9 @@ function GenerateOperationsPanel({
                           // ...и класс шва: у отстрочки якорь вида там, и предпросмотр обязан
                           // называть шаг тем же словом, каким назовёт его список после вставки.
                           seamClass: o.seamClass,
+                          // ...и работа, если черновик её несёт: тем же счётом, что рельс (R8).
+                          work: o.work,
+                          workCatalog,
                           zone: o.zone,
                           pieceNames: [],
                           note: o.note,
@@ -5938,6 +5970,12 @@ export function OperationsField({
   const { id: routeId } = useParams<{ id: string }>();
   const techCardId = routeId ? parseInt(routeId, 10) : undefined;
   const [params, setParams] = useSearchParams();
+  // КАТАЛОГ РАБОТ НА ВЕСЬ РЕЛЬС — ОДНОЙ ПОДПИСКОЙ (R8). Имя шага теперь спрашивает работу, а
+  // спрашивают его здесь три места сразу: строка рельса, схема сборки и предпросмотр черновика.
+  // Ключ у запроса один на приложение, поэтому второго обращения к сети хук не делает; но
+  // подписка на строку рельса означала бы сто двадцать шесть подписок на карточке свалки, и
+  // каталог обязан приехать сюда, а не в каждую строку.
+  const { catalog: workCatalog } = useOperationWorkCatalog();
 
   // Which step the editor is showing. Clamped rather than reset, so deleting the last step keeps
   // the editor on a real row instead of blanking.
@@ -7084,6 +7122,9 @@ export function OperationsField({
       >[0]['operationType'],
       machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
       seamClass: getValues(`operations.${i}.seamClass`) as string,
+      // Схема сборки называет шаг тем же словом, что рельс: работа названа — её подпись (R8).
+      work: getValues(`operations.${i}.work`) as string,
+      workCatalog,
       zone: getValues(`operations.${i}.zone`) as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames: [],
     }) ||
@@ -7450,6 +7491,8 @@ export function OperationsField({
                   // issues[].operationNumber и сброс формовой истории (3/11) стоят у него.
                   onMoveOperation={moveOperation}
                   readPieceDrag={readPieceDrag}
+                  // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
+                  workCatalog={workCatalog}
                 />
               </div>
               )}
@@ -7645,6 +7688,7 @@ export function OperationsField({
         readReplaceImpact={readReplaceImpact}
         onAccept={acceptGeneratedOperations}
         frozen={frozen}
+        workCatalog={workCatalog}
       />
     </div>
   );

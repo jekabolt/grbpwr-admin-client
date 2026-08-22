@@ -56,6 +56,7 @@ import {
   wireInt,
   type AnnotationForm,
 } from './schema';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 
 const bomSectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '—';
@@ -311,6 +312,14 @@ function SnapshotOperations({
   /** Адреса операционных снимков — из resolvedOperationMedia ЭТОГО ЖЕ СНАПШОТА, не живой карточки. */
   mediaUrlById: Map<number, string>;
 }) {
+  // КАТАЛОГ РАБОТ — ЖИВОЙ, А СНАПШОТ ЗАМОРОЖЕН, И ЭТО НЕ ПРОТИВОРЕЧИЕ: замораживается ТОКЕН
+  // работы, а каталог — словарь его написания, ровно как словарь машинок и зон, по которым архив
+  // подписывается уже сегодня. Релизы, подписанные ДО 0330, поля `work` не несут вовсе — они
+  // называются сегодняшней деривацией, как назывались всегда.
+  //
+  // ХУК СТОИТ ДО РАННЕГО `return null`: порядок хуков обязан быть один и тот же на пустом и
+  // непустом списке шагов.
+  const { catalog: workCatalog } = useOperationWorkCatalog();
   if (ops.length === 0) return null;
   // Вход шага — деталь ИЛИ узел, и читать надо union: релиз, подписанный до Ф1, поля 46 не несёт
   // и говорит о деталях старой проекцией. Ключ, не совпавший ни с одной деталью снапшота, есть
@@ -426,6 +435,10 @@ function SnapshotOperations({
                     // выпущенная карточка обязана называть шаг тем же словом, каким его называла
                     // живая.
                     seamClass: o.seamClass,
+                    // Работа снапшота, если она в нём есть: подписанный шаг обязан называться на
+                    // экране архива тем же словом, что на бумаге того же релиза (R8).
+                    work: o.work,
+                    workCatalog,
                     zone: o.zone,
                     pieceNames: [],
                     note: o.note,

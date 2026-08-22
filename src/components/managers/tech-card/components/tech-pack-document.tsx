@@ -49,7 +49,11 @@ import {
   type BookletId,
   type PrintScope,
 } from 'components/managers/print/scope';
-import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
+import {
+  depStatus,
+  type PrintDep,
+  type PrintDepStatus,
+} from 'components/managers/print/use-print-ready';
 import { KV, Sheet, TD, TH } from 'components/managers/print/sheet';
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import {
@@ -173,6 +177,8 @@ import {
   type EffectiveSetting,
   type StepFacts,
 } from './operation-options';
+import type { WorkCatalog } from './operation-work';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 
@@ -387,12 +393,35 @@ const WAVE_VERBS: ReadonlySet<common_TechCardOperationType> = new Set([
   'TECH_CARD_OPERATION_TYPE_PACK',
   'TECH_CARD_OPERATION_TYPE_WET_PROCESS',
 ]);
-const operationTypeText = (o: {
-  operationType?: common_TechCardOperationType;
-  machineType?: common_TechCardMachineType;
-  seamClass?: common_TechCardSeamClass;
-}): string => {
+//
+// РАБОТА (0330) ОТВЕЧАЕТ РАНЬШЕ ВСЕХ ТРЁХ ВЕТОК НИЖЕ — И ЭТО НЕ ЧЕТВЁРТАЯ ВЕТКА, А ПЕРВАЯ. Шаг, у
+// которого работа НАЗВАНА, зовётся её подписью независимо от того, каким глаголом он записан:
+// разутюжка с работой `press_open` печатается «Press open», а не подглаголом, выведенным из полей.
+// Иначе бумага звала бы шаг иначе, чем экран, — а бумага и есть та единственная копия карточки,
+// что стоит у машины, и швея с технологом говорили бы разными словами об одной строке.
+//
+// СЧЁТ ТОТ ЖЕ, ЧТО НА ЭКРАНЕ: `operationHeading`. Своей лестницы имени здесь нет и быть не может —
+// вторая копия подписи разошлась бы с первой на первой же правке, молча и только на бумаге.
+const operationTypeText = (
+  o: {
+    operationType?: common_TechCardOperationType;
+    machineType?: common_TechCardMachineType;
+    seamClass?: common_TechCardSeamClass;
+    work?: string;
+  },
+  workCatalog?: WorkCatalog,
+): string => {
   const v = o.operationType;
+  if ((o.work ?? '').trim()) {
+    return operationHeading({
+      operationType: v,
+      machineType: o.machineType,
+      seamClass: o.seamClass,
+      work: o.work,
+      workCatalog,
+      pieceNames: [],
+    });
+  }
   if (isMachineStepType(v)) {
     // КЛАСС ШВА ЕДЕТ В КОМПОЗИТОР, потому что у отстрочки якорь вида именно там: без него бумага
     // напечатала бы «join» на строчке, которую экран называет «topstitch», — а бумага и есть та
@@ -514,6 +543,10 @@ export function TechPackDocument({
     [scope, techCard],
   );
   const { dictionary } = useDictionary();
+  // КАТАЛОГ РАБОТ — ИМЕНА ШАГОВ НА БУМАГЕ (R8). Один ключ на приложение: тот же справочник уже
+  // прочитан редактором, и второго обращения к сети здесь не будет.
+  const { catalog: workCatalog, live: workCatalogLive, loading: workCatalogLoading } =
+    useOperationWorkCatalog();
 
   // ВСЕ ХУКИ ОБЪЯВЛЕНЫ ДО раннего `if (!tc) return null` ниже. Иначе карта, приехавшая сначала
   // обёрткой без вложенного insert, а потом целиком (кэш → рефетч), меняла бы число вызовов
@@ -780,9 +813,20 @@ export function TechPackDocument({
 
   // Статусы запросов, которые документ делает сам, — наверх, в гейт печати. Ключ-строка не даёт
   // эффекту срабатывать на каждый рендер (массив пересоздаётся всегда, статусы — нет).
+  // ЛИСТ, КОТОРЫЙ МОЖЕТ НАЗВАТЬ ШАГ НЕ ТЕМ СЛОВОМ, ЧТО ЭКРАН, — ЭТО ДЕГРАДАЦИЯ, И ОНА ОБЯЗАНА БЫТЬ
+  // НАЗВАНА НА БУМАГЕ. Но только там, где ей есть что испортить: на карточке, где НИ ОДИН шаг
+  // работы не несёт (сегодня — все до единой), снимок бандла даёт ровно сегодняшние имена, и
+  // плашка «work catalog» была бы ложной тревогой на каждой печати.
+  const cardHasWork = (tc?.operations ?? []).some((o) => (o.work ?? '').trim() !== '');
+  const workCatalogStatus: PrintDepStatus = workCatalogLoading
+    ? 'pending'
+    : cardHasWork && !workCatalogLive
+      ? 'error'
+      : 'ok';
   const depsKey = [
     modelsLoading,
     modelsError,
+    workCatalogStatus,
     releasesLoading,
     releasesError,
     chartLoading,
@@ -799,6 +843,7 @@ export function TechPackDocument({
       { label: 'size chart', status: depStatus(chartLoading, chartError) },
       { label: 'material catalog', status: depStatus(materialsLoading, materialsError) },
       { label: 'media library', status: depStatus(mediaLoading, mediaError) },
+      { label: 'work catalog', status: workCatalogStatus },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey]);
@@ -2670,7 +2715,7 @@ export function TechPackDocument({
                               {o.operationNumber || (i + 1) * 10}
                             </td>
                             <td className={TD}>
-                              <div>{operationTypeText(o)}</div>
+                              <div data-sheet-step={i}>{operationTypeText(o, workCatalog)}</div>
                               {o.note && <div className='italic text-labelColor'>{o.note}</div>}
                             </td>
                             {/* НА ЧЁМ И В КАКОМ РЕЖИМЕ. Со стороны машинки — короткое имя машинки

@@ -11,6 +11,7 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { TechCardFormData } from './schema';
 import { operationHeading } from './operation-options';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useFormPieces } from './piece-picker';
 
 const OPEN = 'TECH_CARD_ISSUE_STATUS_OPEN';
@@ -250,16 +251,26 @@ export function IssuesField() {
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<{
     operationType?: string;
     machineType?: string;
+    // Оба поля ЕЗДИЛИ здесь и раньше — объект передаётся в `headingOf` целиком, — но в приведении
+    // названы не были, и читатель не видел, чем шаг называется. Класс шва (якорь вида) и работа
+    // (названное имя) обязаны стоять в типе рядом с машинкой, иначе следующая правка выкинет их,
+    // не заметив.
+    seamClass?: string;
+    work?: string;
     zone?: string;
     note?: string;
     inputKeys?: string[];
   }>;
   const formPieces = useFormPieces();
+  // Каталог работ — одной подпиской на весь список жалоб: ссылка «join · подол» обязана называть
+  // шаг тем же словом, каким его зовёт рельс, иначе жалоба указывает на соседний шаг.
+  const { catalog: workCatalog } = useOperationWorkCatalog();
   const headingOf = useCallback(
     (o: {
       operationType?: string;
       machineType?: string;
       seamClass?: string;
+      work?: string;
       zone?: string;
       note?: string;
       inputKeys?: string[];
@@ -272,6 +283,9 @@ export function IssuesField() {
         // ...и вид — из класса шва: ссылка «join · подол» на карточке, где подол отстрочен, не
         // называет шаг, а путает с соседним.
         seamClass: o.seamClass,
+        // ...и названная работа бьёт обе выведенные лестницы (R8).
+        work: o.work,
+        workCatalog,
         zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
         // Ключ, не совпавший ни с одной деталью, — это УЗЕЛ, и он обязан быть виден. Просто
         // отбросить его (как делал .filter(Boolean) на именах) значило бы назвать джойн
@@ -281,7 +295,7 @@ export function IssuesField() {
         ),
         note: o.note,
       }),
-    [formPieces],
+    [formPieces, workCatalog],
   );
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
     number?: number;
