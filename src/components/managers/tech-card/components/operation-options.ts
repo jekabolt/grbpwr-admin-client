@@ -644,7 +644,29 @@ export function densityText(density?: string): string {
 // mm» у собственного значения и «allowance 12 (card)» у карточного: миллиметры терялись ровно на
 // той ступени, где число НЕ выбирал человек, читающий строку. Это то же правило, что волна фактов
 // вывела для бумаги дословно («UNITS ARE IN THE TEXT, always»).
-export function seamAllowanceText(o: {
+// ЧТЕНИЕ ОТДЕЛЕНО ОТ ФРАЗЫ, потому что ЧИТАТЕЛЕЙ СТАЛО ТРИ, а фраза нужна не всем троим одинаково.
+//
+// Экраны зовут `seamAllowanceText` и печатают её ответ как есть. ПЕЧАТНЫЙ ЛИСТ — третий читатель, и
+// у него есть то, чего нет у бегущей строки: КЛЕТКА, которая рисуется ВСЕГДА. Пустая клетка на
+// бумаге — это утверждение «припуска нет», и лист обязан отличать «ни одна ступень числа не
+// назвала» (сказать вслух) от «лестница к этому шагу неприменима вовсе» (промолчать, как экраны).
+//
+// РАЗЛИЧАТЬ ЭТО САМОСТОЯТЕЛЬНО ЛИСТ НЕ ИМЕЕТ ПРАВА: гейт «есть ли у шага шов» — половина лестницы,
+// и его копия у третьей поверхности и есть ровно тот дефект, ради которого всё это сведено в один
+// экземпляр. Поэтому лестница ОТВЕЧАЕТ ОБЕИМИ ПОЛОВИНАМИ РАЗОМ — фразой и своим вердиктом о гейте, —
+// а спросить их порознь и с разными аргументами нельзя: вызов один.
+export type SeamAllowanceReading = {
+  /** Фраза для глаз, та же на всех поверхностях. Пусто — числа не назвала ни одна ступень. */
+  text: string;
+  /**
+   * Осмысленны ли ступени НАД шагом (у шага есть шов). `text === '' && inherits` читается как
+   * «шов есть, а припуска не назвал никто» — единственное состояние, о котором бумаге стоит
+   * сказать словами, а экрану — промолчать: в форме пустое поле и так видимо не заполнено.
+   */
+  inherits: boolean;
+};
+
+export function seamAllowanceReading(o: {
   /** Собственное значение шага (мм, строкой — так его держит форма). */
   own?: string;
   /** Стандарт карточки — `requiredSeamAllowanceMm`. Ступень под собственной. */
@@ -664,19 +686,24 @@ export function seamAllowanceText(o: {
   operationType?: string;
   /** Второй вход того же гейта: у шага с НАЗВАННЫМ классом шва шов есть по определению. */
   seamClass?: string;
-}): string {
+}): SeamAllowanceReading {
+  const cls = (o.seamClass ?? '').trim();
+  const inherits = isMachineStepType(o.operationType) || (cls !== '' && !cls.endsWith('_UNKNOWN'));
   // `.trim() !== ''`, А НЕ TRUTHY: «0» — ЗАКОННЫЙ припуск («кроить по линии»), и по truthy он
   // провалился бы на ступень ниже, подменив назначенный ноль карточным стандартом. Печатный лист
   // отличает отсутствие поля от нуля по этой же причине и теми же словами.
   const own = (o.own ?? '').trim();
-  if (own !== '') return `allowance ${own} mm`;
-  const cls = (o.seamClass ?? '').trim();
-  const hasSeam = isMachineStepType(o.operationType) || (cls !== '' && !cls.endsWith('_UNKNOWN'));
-  if (!hasSeam) return '';
+  if (own !== '') return { text: `allowance ${own} mm`, inherits };
+  if (!inherits) return { text: '', inherits };
   const card = (o.card ?? '').trim();
-  if (card !== '') return `allowance ${card} mm (card)`;
+  if (card !== '') return { text: `allowance ${card} mm (card)`, inherits };
   const workshop = (o.workshop ?? '').trim();
-  return workshop !== '' ? `allowance ${workshop} mm (workshop)` : '';
+  return { text: workshop !== '' ? `allowance ${workshop} mm (workshop)` : '', inherits };
+}
+
+/** Та же лестница, только фразой: то, что печатают ЭКРАНЫ, где клетки нет и молчание допустимо. */
+export function seamAllowanceText(o: Parameters<typeof seamAllowanceReading>[0]): string {
+  return seamAllowanceReading(o).text;
 }
 
 // WHAT A PARK PROFILE IS SET TO — the tile's second line on CARD DEFAULTS and the settings column of
