@@ -77,13 +77,26 @@ const list = (v: unknown): string[] => (Array.isArray(v) ? (v as unknown[]).map(
 const opNumber = (index: number): number => (index + 1) * 10;
 
 /**
- * ЧТО ПАНЕЛЬ ЧИТАЕТ У СТРОКИ ФОРМЫ ДЛЯ КЛАССИФИКАТОРА.
+ * ВИДЫ СТРОК BOM ЭТОГО ШАГА — ОДНО ВЫРАЖЕНИЕ НА ОБА СНИМКА ПАНЕЛИ.
  *
- * Виды BOM приходят КЛЮЧАМИ строк, а резолву нужны их РОДЫ: четыре пункта опознаются именно ими
- * (кнопку от хольнитена отличает `kind` привязанной строки BOM). Собирается тем же выражением, что
- * и в открытом шаге, — и по той же карте, потому что второй способ спросить у BOM его род развёл
- * бы панель с редактором на первой же кнопке.
+ * Виды BOM приходят КЛЮЧАМИ строк, а и резолву, и писателю нужны их РОДЫ: четыре пункта опознаются
+ * именно ими (кнопку от хольнитена отличает `kind` привязанной строки BOM, `operation-kinds.ts`).
+ * Собирается тем же выражением, что и в открытом шаге (`stepBomKinds`), — и по той же карте, потому
+ * что второй способ спросить у BOM его род развёл бы панель с редактором на первой же кнопке.
+ *
+ * ФУНКЦИЯ ОДНА НА ДВА СНИМКА ИМЕННО ПОТОМУ, ЧТО ОДИН ИЗ НИХ УЖЕ РАЗОШЁЛСЯ С ДРУГИМ: снимок для
+ * классификатора виды считал, а снимок для писателя отдавал пустой список — то есть панель
+ * спрашивала «что это за шаг» об одном шаге, а писала работу в другой. Сегодня расхождение инертно
+ * (единственный якорь снятия — класс шва, и на ветке фурнитуры оба снимка дают пустое снятие), но
+ * инертность эта — свойство ДРУГОГО модуля, и просыпается она молча от второго члена в
+ * `KIND_ANCHOR_FIELDS` или от дискриминатора по BOM на другом глаголе.
  */
+const bomKindsOf = (o: OperationRow, bomKindByKey: ReadonlyMap<string, string>): string[] =>
+  list(o.bomLineKeys)
+    .map((k) => bomKindByKey.get(k) ?? '')
+    .filter(Boolean);
+
+/** ЧТО ПАНЕЛЬ ЧИТАЕТ У СТРОКИ ФОРМЫ ДЛЯ КЛАССИФИКАТОРА. */
 const toRatifyStep = (o: OperationRow, bomKindByKey: ReadonlyMap<string, string>): RatifyStep => ({
   operationType: str(o.operationType),
   machineType: str(o.machineType),
@@ -92,18 +105,15 @@ const toRatifyStep = (o: OperationRow, bomKindByKey: ReadonlyMap<string, string>
   coverageMode: str(o.coverageMode),
   labelAttachStitch: str(o.labelAttachStitch),
   pressAction: str(o.pressAction),
-  bomKinds: list(o.bomLineKeys)
-    .map((k) => bomKindByKey.get(k) ?? '')
-    .filter(Boolean),
+  bomKinds: bomKindsOf(o, bomKindByKey),
   work: str(o.work),
   inputKeys: list(o.inputKeys),
   outputUnitKey: str(o.outputUnitKey),
   zone: str(o.zone),
-  note: str(o.note),
 });
 
 /** Снимок шага для писателя — закрытым списком имён и в его написании. */
-const toSnapshot = (o: OperationRow): StepSnapshot => ({
+const toSnapshot = (o: OperationRow, bomKindByKey: ReadonlyMap<string, string>): StepSnapshot => ({
   operationType: str(o.operationType),
   machineType: str(o.machineType),
   pressEquipment: str(o.pressEquipment),
@@ -112,7 +122,7 @@ const toSnapshot = (o: OperationRow): StepSnapshot => ({
   coverageMode: str(o.coverageMode),
   labelAttachStitch: str(o.labelAttachStitch),
   pressAction: str(o.pressAction),
-  bomKinds: [],
+  bomKinds: bomKindsOf(o, bomKindByKey),
   machineProfileKey: str(o.machineProfileKey),
   pressProfileKey: str(o.pressProfileKey),
 });
@@ -130,6 +140,12 @@ const TIER_WORD: Readonly<Record<RatifyRow['tier'], string>> = {
   'ratify-derived': '',
   named: '',
   'catalog-gap': 'the record says more than the catalogue has a job for — nothing to suggest',
+  // ДВА МОЛЧАНИЯ, У КОТОРЫХ ФРАЗА ОБРАТНАЯ ФРАЗЕ КАТАЛОГА, И ОНИ АДРЕСУЮТ, КАК ПРИЁМ ВТО. Шаг без
+  // глагола и машинный шаг без машинки говорят НЕ БОЛЬШЕ, а МЕНЬШЕ, чем каталог умеет назвать, — и
+  // фраза каталожной дыры утверждала бы на них ровно обратное истине. Экран, чей единственный смысл
+  // «не врать на цеховой бумаге», не имеет права начинать со лжи о самом себе.
+  'verb-missing': 'what the step does is not recorded — open the step',
+  'machine-missing': 'the machine is not recorded — open the step',
   contradiction: 'the printed name says «join», the record says one input — open the step',
   'press-action-missing': 'the press action is not recorded — open the step',
   'no-inputs': 'nothing is recorded on the step to go by',
@@ -137,6 +153,18 @@ const TIER_WORD: Readonly<Record<RatifyRow['tier'], string>> = {
 
 export type RatifyPanelProps = {
   open: boolean;
+  /**
+   * ВЫПУЩЕНА ЛИ КАРТОЧКА — ПРОПОМ, А НЕ РАСЧЁТОМ НА `<fieldset disabled>`.
+   *
+   * ЗАМЕРЕННЫЙ ДЕФЕКТ. Панель была ЕДИНСТВЕННЫМ мутатором своего файла без этого гейта: кнопка,
+   * которая её открывает, на выпущенной карточке исчезает — но карточку можно выпустить, когда
+   * панель УЖЕ открыта, и тогда и нажатие предложения, и `Enter` писали в форму. Внешний
+   * `<fieldset disabled>` карточки до панели НЕ ДОСТАЁТ вовсе: `Dialog.Portal container={document.body}`
+   * выносит содержимое наружу фиелдсета. Да и достань он — фиелдсет глушит только клик и фокус, а
+   * заморозка ПИСАТЕЛЯ обязана быть контрактом, а не разметкой (то же решение, что у
+   * `addInputToOperation` и `moveOperation` в `operations-field.tsx`).
+   */
+  frozen?: boolean;
   onClose: () => void;
   /** Каталог работ. Подписан КОРНЕМ поля — второй подписки на тот же ключ панель не заводит. */
   catalog: WorkCatalog;
@@ -152,11 +180,18 @@ export type RatifyPanelProps = {
 export function OperationsRatifyPanel(props: RatifyPanelProps) {
   // ТЕЛО МОНТИРУЕТСЯ ТОЛЬКО ОТКРЫТЫМ. Панель подписана на ВЕСЬ массив операций; висеть этой
   // подпиской над закрытым экраном значило бы перерисовывать её на каждое нажатие клавиши в шаге.
-  if (!props.open) return null;
+  //
+  // И ТОЛЬКО НА НЕВЫПУЩЕННОЙ КАРТОЧКЕ. Панель — экран ОДНОГО ЖЕСТА, и жест этот ЗАПИСЬ; на
+  // выпущенной карточке кнопка, которая её открывает, не рисуется вовсе (`RailUnnamedWord`), то
+  // есть входа в это состояние нет — попасть в него можно ровно одним способом: карточку выпустили,
+  // пока панель открыта. Тогда панель уходит вслед за своей кнопкой, а не остаётся мёртвым органом
+  // с живыми на вид кнопками. ЧИТАТЬ КАРТОЧКУ ЭТО НЕ МЕШАЕТ: имя каждого шага стоит на рельсе и в
+  // редакторе, которые выпущенную карточку показывают как показывали.
+  if (!props.open || props.frozen) return null;
   return <RatifyPanelBody {...props} />;
 }
 
-function RatifyPanelBody({ onClose, catalog, blanks, onOpenStep }: RatifyPanelProps) {
+function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: RatifyPanelProps) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationRow[];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
@@ -267,6 +302,11 @@ function RatifyPanelBody({ onClose, catalog, blanks, onOpenStep }: RatifyPanelPr
    */
   const apply = useCallback(
     (row: RatifyRow, p: RatifyProposal) => {
+      // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, КАК У ВСЕХ МУТАТОРОВ КАРТОЧКИ (`removeOperation`,
+      // `moveOperation`, `addInputToOperation`, `dissolveUnit`, `renameUnit`). Тело панели на
+      // выпущенной карточке не монтируется вовсе — но ПРИКРЫТИЕ РАЗМЕТКОЙ НЕ КОНТРАКТ: этот гейт
+      // держится сам, без всякого предположения о том, что нарисовано выше по дереву.
+      if (frozen) return;
       const index = row.index;
       const path = `operations.${index}` as const;
 
@@ -288,6 +328,7 @@ function RatifyPanelBody({ onClose, catalog, blanks, onOpenStep }: RatifyPanelPr
       if (!item) return;
       const current = toSnapshot(
         ((getValues('operations') ?? [])[index] ?? {}) as unknown as OperationRow,
+        bomKindByKey,
       );
 
       setValue(`${path}.work`, p.token, { shouldDirty: true });
@@ -333,7 +374,7 @@ function RatifyPanelBody({ onClose, catalog, blanks, onOpenStep }: RatifyPanelPr
         return next;
       });
     },
-    [blanks, catalog, getValues, parkMachines, parkPresses, setValue],
+    [blanks, bomKindByKey, catalog, frozen, getValues, parkMachines, parkPresses, setValue],
   );
 
   /**

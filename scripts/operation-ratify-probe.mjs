@@ -37,7 +37,15 @@
 //   ЦК — КАТАЛОГ НЕ ПРИЕХАЛ: на снимке бандла ярусы те же и предложений столько же. Это ответ на
 //        вопрос §11 плана — заполняет ли `bundleItem` поле `machines` у работ режима `fixed`.
 //        Заполняет: без этого выборка по машинке вернула бы пусто и панель показала бы пустые
-//        кнопки вместо честного «каталог не приехал».
+//        кнопки вместо честного «каталог не приехал»;
+//   ЦМЕНЬШЕ — ЗАПИСЬ СКАЗАЛА МЕНЬШЕ, А НЕ БОЛЬШЕ (дефект 1 ревью шва R7). Шаг без глагола и
+//        машинный шаг без машинки получали ЯРУС КАТАЛОГА — тот самый, чья фраза утверждает «запись
+//        говорит больше, чем каталог умеет назвать», то есть на этих двух формах ОБРАТНОЕ ИСТИНЕ.
+//        Теперь у каждого молчания свой ярус, а `catalog-gap` остался за случаями, где человек
+//        ОТВЕТИЛ (подгибка вдвое, снятая работа);
+//   ЦЗАМЕТКА — ЗАМЕТКА ШАГА В ФАКТАХ ЗАПИСИ НЕ СТОИТ ВОВСЕ. Панель рисует её своим узлом, и стоя
+//        ещё и здесь она печаталась на строке ДВАЖДЫ. Цитата полнострочная: факты F6 названы
+//        целиком, а не проверены на «содержит».
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ (приём взят у step-name-probe): правка исходника
 // ради проверки — это правка, которую однажды забудут откатить.
@@ -49,6 +57,10 @@
 //   node scripts/operation-ratify-probe.mjs --mutate-press-picker  у панели СВОЙ пикер приёма ВТО
 //   node scripts/operation-ratify-probe.mjs --mutate-printed-own   имя собирается заново, а не
 //                                                                 спрашивается у двоекодья
+//   node scripts/operation-ratify-probe.mjs --mutate-gap-dump      оба молчания записи снова валятся
+//                                                                 в ярус каталога
+//   node scripts/operation-ratify-probe.mjs --mutate-note-twice    заметка шага вернулась в факты
+//                                                                 записи (и печатается дважды)
 //
 // ИМЯ ФЛАГА ПРОВЕРЯЕТСЯ, А НЕ УГАДЫВАЕТСЯ: любое `--mutate…` вне списка роняет прогон с кодом 2 и
 // словами «проба НЕ ЗАПУСКАЛАСЬ». Зелёный прогон с несуществующим флагом — худший из возможных
@@ -123,6 +135,8 @@ const MUTATE_PIECE_PREFIX = process.argv.includes('--mutate-piece-prefix');
 const MUTATE_SLIT_WARN = process.argv.includes('--mutate-slit-warn');
 const MUTATE_PRESS_PICKER = process.argv.includes('--mutate-press-picker');
 const MUTATE_PRINTED_OWN = process.argv.includes('--mutate-printed-own');
+const MUTATE_GAP_DUMP = process.argv.includes('--mutate-gap-dump');
+const MUTATE_NOTE_TWICE = process.argv.includes('--mutate-note-twice');
 
 const KNOWN_MUTATIONS = new Set([
   '--mutate-tier-a-arity',
@@ -130,6 +144,8 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-slit-warn',
   '--mutate-press-picker',
   '--mutate-printed-own',
+  '--mutate-gap-dump',
+  '--mutate-note-twice',
 ]);
 const stray = process.argv
   .slice(2)
@@ -185,26 +201,49 @@ const PRINTED_BROKEN = `  const verb = (step.operationType ?? '').replace('TECH_
   const machine = (step.machineType ?? '').replace('TECH_CARD_MACHINE_TYPE_', '');
   return [verb, machine].filter((s) => s && !s.endsWith('UNKNOWN')).join(' / ').toLowerCase();`;
 
+// СВАЛКА ВЕРНУЛАСЬ: оба МОЛЧАНИЯ ЗАПИСИ снова получают ярус КАТАЛОГА — и вместе с ним фразу,
+// которая на них утверждает обратное истине. Мутация правит ДВЕ строки одной правкой: разведены эти
+// два молчания были одним решением, и сторожить их порознь значило бы пропустить возврат половины.
+const GAP_VERB_FIX = `  if (unset(verb)) return silent('verb-missing');`;
+const GAP_VERB_BROKEN = `  if (unset(verb)) return silent('catalog-gap');`;
+const GAP_MACHINE_FIX = `  if (unset(step.machineType)) return silent('machine-missing');`;
+const GAP_MACHINE_BROKEN = `  if (unset(step.machineType)) return silent('catalog-gap');`;
+
+// ЗАМЕТКА ВЕРНУЛАСЬ В ФАКТЫ ЗАПИСИ. Панель рисует её своим узлом из формы, поэтому на строке она
+// оказывается напечатанной ДВАЖДЫ. Здесь, в чистой половине, ловится первая из двух копий.
+const NOTE_FIX = `  const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
+  if (zone) out.push(\`zone: \${zone}\`);`;
+const NOTE_BROKEN = `  const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
+  if (zone) out.push(\`zone: \${zone}\`);
+  const note = ((step as { note?: string }).note ?? '').trim().split('\\n')[0] ?? '';
+  if (note.trim()) out.push(\`note: \${note.trim()}\`);`;
+
 // Мутация, не нашедшая своей строки, РОНЯЕТ СБОРКУ — то есть даёт код 2 «не запускалась», а не
 // зелёный прогон без мутации. Это тот же сторож, что и проверка имени флага, только на второй
 // половине пути: флаг может быть правильным, а исходник — уехать под ним.
-const patcher = (find, replaceWith) => ({
+const patcher = (...pairs) => ({
   name: 'ratify-mutation',
   setup(b) {
     b.onLoad({ filter: /operation-ratify\.ts$/ }, async (args) => {
-      const src = await readFile(args.path, 'utf8');
-      if (!src.includes(find)) throw new Error(`мутация не нашла свою строку в ${args.path}`);
-      return { contents: src.replace(find, replaceWith), loader: 'ts' };
+      let src = await readFile(args.path, 'utf8');
+      for (const [find, replaceWith] of pairs) {
+        if (!src.includes(find)) throw new Error(`мутация не нашла свою строку в ${args.path}`);
+        src = src.replace(find, replaceWith);
+      }
+      return { contents: src, loader: 'ts' };
     });
   },
 });
 
 const plugins = [];
-if (MUTATE_TIER_A_ARITY) plugins.push(patcher(ARITY_FIX, ARITY_BROKEN));
-if (MUTATE_PIECE_PREFIX) plugins.push(patcher(PREFIX_FIX, PREFIX_BROKEN));
-if (MUTATE_SLIT_WARN) plugins.push(patcher(WARN_FIX, WARN_BROKEN));
-if (MUTATE_PRESS_PICKER) plugins.push(patcher(PRESS_FIX, PRESS_BROKEN));
-if (MUTATE_PRINTED_OWN) plugins.push(patcher(PRINTED_FIX, PRINTED_BROKEN));
+if (MUTATE_TIER_A_ARITY) plugins.push(patcher([ARITY_FIX, ARITY_BROKEN]));
+if (MUTATE_PIECE_PREFIX) plugins.push(patcher([PREFIX_FIX, PREFIX_BROKEN]));
+if (MUTATE_SLIT_WARN) plugins.push(patcher([WARN_FIX, WARN_BROKEN]));
+if (MUTATE_PRESS_PICKER) plugins.push(patcher([PRESS_FIX, PRESS_BROKEN]));
+if (MUTATE_PRINTED_OWN) plugins.push(patcher([PRINTED_FIX, PRINTED_BROKEN]));
+if (MUTATE_GAP_DUMP)
+  plugins.push(patcher([GAP_VERB_FIX, GAP_VERB_BROKEN], [GAP_MACHINE_FIX, GAP_MACHINE_BROKEN]));
+if (MUTATE_NOTE_TWICE) plugins.push(patcher([NOTE_FIX, NOTE_BROKEN]));
 
 const outfile = resolve(REPO, `scripts/.operation-ratify-${process.pid}.mjs`);
 await esbuild({
@@ -345,6 +384,22 @@ const CATALOG = parseWorkCatalog({
       machines: ['zigzag', 'buttonhole'],
       syn: ['прорезь', 'разрез'],
       sort: 165,
+      retired: false,
+    },
+    {
+      // РАБОТА ФУРНИТУРЫ — ради ВИДОВ СТРОК BOM: пункт `F1` опознаётся родом привязанной строки
+      // BOM, и это единственное место контракта, где `bomKinds` читаются вовсе. Здесь она стоит
+      // ради того же, ради чего стоит там: ДВЕ ПРОБЫ ОБЯЗАНЫ ДЕРЖАТЬ ОДИН КАТАЛОГ. Разошедшись
+      // фикстурой, они спорили бы друг с другом.
+      token: 'snap_press_stud',
+      verb: 'hardware_set',
+      stage: 'closures',
+      label: 'Snap / press stud',
+      machineMode: 'none',
+      defaultMachine: '',
+      machines: [],
+      syn: ['кнопка'],
+      sort: 200,
       retired: false,
     },
     {
@@ -533,8 +588,35 @@ head('Ц7 · оверлок → единственная работа этой �
   ck(r.proposals.length === 1, 'F6: предложение одно', String(r.proposals.length));
   ck(r.proposals[0]?.token === 'overlock_serge', 'F6: токен', String(r.proposals[0]?.token));
   ck(r.printedNow === 'Overlock / serge', 'F6: карточка печатает то же', r.printedNow);
-  ck(r.evidence.includes('note: join pockets'), 'F6: заметка стоит в фактах', r.evidence.join(' | '));
-  ck(r.evidence.includes('zone: pocket'), 'F6: и зона тоже', r.evidence.join(' | '));
+  ck(r.evidence.includes('zone: pocket'), 'F6: зона стоит в фактах', r.evidence.join(' | '));
+}
+
+// ─── ЦЗАМЕТКА: ЗАМЕТКА ШАГА В ФАКТАХ ЗАПИСИ НЕ СТОИТ ВОВСЕ ────────────────────────────────────
+//
+// ЦИТАТА ПОЛНОСТРОЧНАЯ, А НЕ «НЕ СОДЕРЖИТ». `includes`-проверка отсутствия зеленела бы и от
+// опечатки в ожидаемом тексте; здесь названы ВСЕ факты обеих строк с заметкой, и лишний элемент
+// покраснеет, каким бы словом он ни был.
+head('ЦЗАМЕТКА · заметку печатает панель своим узлом — в фактах записи её нет');
+{
+  ck(
+    at('F6').evidence.join(' | ') === '1 input | zone: pocket',
+    'F6 (note: join pockets): факты целиком',
+    at('F6').evidence.join(' | '),
+  );
+  ck(
+    at('F8').evidence.join(' | ') ===
+      '2 inputs · produces unit "LEft front panel with pockets" | zone: pocket',
+    'F8 (та же заметка, другой ярус): факты целиком',
+    at('F8').evidence.join(' | '),
+  );
+  // ЖИВОСТЬ ЦИТАТЫ: у обеих строк заметка в фикстуре ЕСТЬ. Без этого «заметки в фактах нет» было бы
+  // зеленью над пустой популяцией — сторожем у строки, которой нечего было бы напечатать.
+  const withNote = STEPS.filter((s) => (s.note ?? '').trim()).map((s) => s.name.split(' ·')[0]);
+  ck(
+    withNote.join(',') === 'F6,F8',
+    'и заметка у этих двух строк в фикстуре записана — сторожить есть что',
+    withNote.join(','),
+  );
 }
 
 // ─── Ц8: РАБОТА УЖЕ ЗАПИСАНА ───────────────────────────────────────────────────────────────────
@@ -553,6 +635,46 @@ for (const name of ['F1', 'F12']) {
   ck(r.tier === 'no-inputs', `${name}: ярус`, r.tier);
   ck(r.proposals.length === 0, `${name}: предложений НОЛЬ`, String(r.proposals.length));
   ck(r.evidence[0] === 'no inputs recorded', `${name}: факт назван словом`, r.evidence[0]);
+}
+
+// ─── ЦМЕНЬШЕ: МОЛЧАНИЕ ЗАПИСИ ≠ ДЫРА КАТАЛОГА ────────────────────────────────────────────────
+//
+// Ярус `catalog-gap` собирал ПЯТЬ разных молчаний, а панель давала ему ОДНУ фразу — «the record says
+// more than the catalogue has a job for». На двух достижимых формах эта фраза утверждает ОБРАТНОЕ
+// истине: запись сказала не больше, а МЕНЬШЕ. Достижимость обычная: новый шаг рождается с
+// `operationType = NONE_OP_TYPE`, деталь кладётся броском по рельсу — «добавил операцию → бросил
+// деталь → открыл панель».
+head('ЦМЕНЬШЕ · глагол не назван и машинка не названа — это МОЛЧАНИЕ ЗАПИСИ, а не дыра каталога');
+{
+  const noVerb = at('F15');
+  ck(noVerb.tier === 'verb-missing', 'F15: глагол не назван → свой ярус', noVerb.tier);
+  ck(noVerb.proposals.length === 0, 'F15: предложений НОЛЬ', String(noVerb.proposals.length));
+  ck(noVerb.evidence.join(' | ') === '1 input', 'F15: факты целиком', noVerb.evidence.join(' | '));
+  ck(noVerb.printedNow === '', 'F15: и печатать нечего — резолв тоже молчит', `«${noVerb.printedNow}»`);
+
+  const noMachine = at('F16');
+  ck(noMachine.tier === 'machine-missing', 'F16: MACHINE без машинки → свой ярус', noMachine.tier);
+  ck(noMachine.proposals.length === 0, 'F16: предложений НОЛЬ', String(noMachine.proposals.length));
+  ck(
+    noMachine.evidence.join(' | ') === '2 inputs | zone: front',
+    'F16: факты целиком — и арности двух входов НЕ хватило, чтобы предложить «join»',
+    noMachine.evidence.join(' | '),
+  );
+
+  // ЯРУС КАТАЛОГА ОСТАЛСЯ ЗА КАТАЛОГОМ — и это вторая половина цитаты: разведение не имело бы
+  // смысла, если бы `catalog-gap` опустел. На обеих оставшихся формах человек ОТВЕТИЛ (класс шва
+  // «подгиб вдвое»; машинка, единственная работа которой снята), и добавить ему нечего.
+  ck(at('F5').tier === 'catalog-gap', 'F5: подгибка вдвое — по-прежнему дыра каталога', at('F5').tier);
+  ck(at('F13').tier === 'catalog-gap', 'F13: снятая работа — тоже', at('F13').tier);
+  const gaps = rows
+    .map((r, i) => [r.tier, STEPS[i].name.split(' ·')[0]])
+    .filter(([t]) => t === 'catalog-gap')
+    .map(([, n]) => n);
+  ck(
+    gaps.join(',') === 'F5,F13',
+    'и БОЛЬШЕ НИ ОДНА строка фикстуры в этот ярус не попадает',
+    gaps.join(','),
+  );
 }
 
 // ─── ЦД: ДВОЕКОДЬЕ — ИМЯ СПРОШЕНО, А НЕ СОБРАНО ───────────────────────────────────────────────

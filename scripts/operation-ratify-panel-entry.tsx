@@ -12,6 +12,7 @@
 // `construction.equipmentDefaults`, и стенд, кладущий их мимо формы, проверял бы не их.
 import { zodResolver } from '@hookform/resolvers/zod';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
@@ -27,6 +28,7 @@ import {
 } from 'components/managers/tech-card/components/schema';
 
 type Ops = NonNullable<TechCardFormData['operations']>;
+type Bom = NonNullable<TechCardFormData['bomItems']>;
 type Park = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
 
 type PanelProbe = {
@@ -34,11 +36,25 @@ type PanelProbe = {
     ops: Record<string, unknown>[],
     park: Record<string, unknown>,
     frozen: boolean,
+    /**
+     * СТРОКИ BOM КАРТОЧКИ. Приезжают в форму, а не мимо неё: РОД строки BOM — единственный
+     * различитель четырёх пунктов фурнитуры, и обе поверхности (пикер шага и панель) читают его
+     * ровно из `bomItems` формы. Стенд, кладущий их мимо, проверял бы не их.
+     */
+    bom?: Record<string, unknown>[],
   ) => void;
   /** Значения строки шага — как их держит ФОРМА, целиком. */
   values: (index: number) => Record<string, unknown>;
   /** Имена полей строки шага: снимок сравнивается по ЗАКРЫТОМУ списку, а не по тому, что нашлось. */
   fields: () => string[];
+  /**
+   * ВЫПУСТИТЬ КАРТОЧКУ ПОСРЕДИ СЕАНСА, НЕ ПЕРЕМОНТИРУЯ ДЕРЕВО.
+   *
+   * Дефект панели был именно в ПЕРЕХОДЕ: открытая на черновике, она переживала выпуск карточки под
+   * собой и продолжала писать. Перемонтирование стенда с `frozen: true` этого не проверяет вовсе —
+   * оно закрыло бы панель само, вместе со всем деревом.
+   */
+  freeze: () => void;
 };
 declare global {
   interface Window {
@@ -55,11 +71,16 @@ function Harness({
   ops,
   park,
   frozen,
+  bom,
 }: {
   ops: Record<string, unknown>[];
   park: Record<string, unknown>;
   frozen: boolean;
+  bom: Record<string, unknown>[];
 }) {
+  // ВЫПУСК — СОСТОЯНИЕ СТЕНДА, А НЕ ПРОП МОНТИРОВАНИЯ: см. `PanelProbe.freeze`.
+  const [released, setReleased] = useState(frozen);
+  probe.freeze = () => setReleased(true);
   const methods = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema) as never,
     mode: 'onChange',
@@ -69,6 +90,7 @@ function Harness({
         ...techCardDefaultData.construction,
         equipmentDefaults: park as unknown as Park,
       },
+      bomItems: bom as unknown as Bom,
       operations: ops.map((o) => ({ ...emptyOperation, ...o })) as unknown as Ops,
     },
   });
@@ -85,9 +107,9 @@ function Harness({
         <FormProvider {...methods}>
           {/* ВЫПУЩЕННАЯ КАРТОЧКА ЖИВЁТ ПОД ВНЕШНИМ `<fieldset disabled>` — тем же, что и на самом
               экране. Без него «кнопки нет» и «кнопка мертва» были бы неразличимы. */}
-          <fieldset disabled={frozen}>
+          <fieldset disabled={released}>
             <form>
-              <OperationsField frozen={frozen} />
+              <OperationsField frozen={released} />
             </form>
           </fieldset>
         </FormProvider>
@@ -96,7 +118,7 @@ function Harness({
   );
 }
 
-probe.mount = (ops, park, frozen) => {
+probe.mount = (ops, park, frozen, bom) => {
   // РЕЖИМ РЕЛЬСА ЖИВЁТ В `localStorage` — и без сброса протекал бы из случая в случай, делая
   // «панель открылась в схеме» неотличимым от «панель открылась в списке».
   try {
@@ -106,5 +128,5 @@ probe.mount = (ops, park, frozen) => {
   }
   const host = document.getElementById('root')!;
   host.innerHTML = '';
-  createRoot(host).render(<Harness ops={ops} park={park} frozen={frozen} />);
+  createRoot(host).render(<Harness ops={ops} park={park} frozen={frozen} bom={bom ?? []} />);
 };

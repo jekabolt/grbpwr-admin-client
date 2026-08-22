@@ -1,7 +1,7 @@
 {
   "_measured": "2026-08-22, прод `grbpwr`, только SELECT",
   "_source": "R7-PLAN.md §2.2 — таблица «истинная структура 111 строк по арности ВХОДОВ», снятая по tech_card_operation × tech_card_operation_input (0307). Легаси-проекция tech_card_operation_piece (0199) НЕ читалась: она дала первому замеру ложный вывод «46 немых строк».",
-  "_note": "ФОРМЫ, А НЕ СТРОКИ. Сто одиннадцать прод-строк без работы раскладываются на десять различимых форм; здесь по одной фикстуре на форму плюс контраст «работа уже названа» (15 строк бэкфилла 0331) и адверсарная пустая строка. Имена входов и узлов взяты из замера буквально, включая две детали с битой кодировкой (шаг 601, карточка 9, № 90) и смешанный регистр («LEft front panel with pockets»).",
+  "_note": "ФОРМЫ, А НЕ СТРОКИ. Сто одиннадцать прод-строк без работы раскладываются на десять различимых форм; здесь по одной фикстуре на форму плюс контраст «работа уже названа» (15 строк бэкфилла 0331) и адверсарная пустая строка. Имена входов и узлов взяты из замера буквально, включая две детали с битой кодировкой (шаг 601, карточка 9, № 90) и смешанный регистр («LEft front panel with pockets»). АДВЕРСАРНЫЕ ФОРМЫ (F12-F16) НА ПРОДЕ НЕ ЗАМЕРЕНЫ и в 111 строк не входят: они называют состояния, которые карточка умеет произвести на экране — пустой шаг, снятая работа, дискриминатор сверх двух осей и два МОЛЧАНИЯ ЗАПИСИ (глагол не назван, машинка не названа), где ярус обязан отличаться от дыры каталога.",
   "_prodRows": "F1 1 · F2 8 · F3 8 · F4 7 · F5 4 · F6 2 · F7 1 · F8 65 · F9 13 · F10 2 = 111; F11 — одна из 15 размеченных; F12 на проде не встречается",
   "steps": [
     {
@@ -201,6 +201,35 @@
       "inputKeys": [
         "p-BP_OS",
         "p-label"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F15 · адверсарная: глагол не назван, деталь уже брошена",
+      "operationType": "TECH_CARD_OPERATION_TYPE_UNKNOWN",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_UNKNOWN",
+      "inputKeys": [
+        "p-BP_OS"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F16 · адверсарная: MACHINE без машинки, два входа",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_FRONT",
+      "inputKeys": [
+        "p-BP_OS",
+        "p-P_L"
       ],
       "outputUnitKey": "",
       "note": "",

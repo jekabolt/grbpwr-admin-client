@@ -38,7 +38,26 @@
 //          целиком (счётчик стоит НАД обоими режимами, и панель обязана пережить переключение);
 //   ЦСОХР — ЦИТАТА СОХРАНЯЕМОСТИ (требование ревью R7-Б §14): применение предложения к КАЖДОЙ из
 //          форм 111 прод-строк оставляет строку СОХРАНЯЕМОЙ — у шага MACHINE машинка непуста.
-//          Панель ничего не решает; она лишь не имеет права молча произвести несохраняемую строку.
+//          Панель ничего не решает; она лишь не имеет права молча произвести несохраняемую строку;
+//   ЦМОРОЗ — ВЫПУСК КАРТОЧКИ ПОД ОТКРЫТОЙ ПАНЕЛЬЮ (дефект 1 ревью шва R7). Панель была
+//          ЕДИНСТВЕННЫМ мутатором своего файла без гейта заморозки: кнопка, которая её открывает, на
+//          выпущенной карточке не рисуется, но карточку можно выпустить, когда панель УЖЕ открыта, —
+//          и тогда нажатие предложения И `Enter` писали в форму. Внешний `<fieldset disabled>` до
+//          панели не достаёт вовсе: `Dialog.Portal container={document.body}`;
+//   ЦПИСАТЕЛЬ — ВХОД И ОТВЕТ ЕДИНСТВЕННОГО ПИСАТЕЛЯ У ДВУХ ЕГО ВЫЗЫВАТЕЛЕЙ СОВПАДАЮТ (дефект 2).
+//          ЦПОЛН выше озаглавлена «тем же писателем», но сверяет только результирующее `work` — то
+//          есть обещает больше, чем удостоверяет. Здесь сверяется САМ ВЫЗОВ: снимок шага, отданный
+//          `workApplication`, и её ответ, снятые СПАЕМ с живого писателя, у строки шага и у панели —
+//          побайтно, на батарее. Ловится ровно то, чем панель расходилась: снимок для писателя
+//          отдавал `bomKinds: []`, хотя рядом, для классификатора, те же виды считались правильно;
+//   ЦМЕНЬШЕ — У КАЖДОГО МОЛЧАНИЯ ЗАПИСИ СВОЯ ФРАЗА (дефект 3). Шаг без глагола и машинный шаг без
+//          машинки получали фразу дыры каталога — на них она утверждает ОБРАТНОЕ истине;
+//   ЦСКРОЛЛ — «open the step» ЗОВЁТ РЕДАКТОР К ГЛАЗАМ (дефект 4). Панель — полноэкранная модалка,
+//          редактор стоит НИЖЕ рельса, и без скролла единственный ответ панели на четыре молчащих
+//          яруса открывал шаг за пределами экрана. Удостоверяется ЖЕСТ, а не пиксель: у стенда нет
+//          таблицы стилей — см. оговорку у самой цитаты;
+//   ЦЗАМЕТКА — ЗАМЕТКА ШАГА ПЕЧАТАЕТСЯ НА СТРОКЕ РОВНО ОДИН РАЗ (дефект 5). Она стояла и в фактах
+//          записи (`evidence`), и своим узлом — замерено на строке с `note: join pockets`.
 //
 // ── МУТАЦИИ (мутируют БАНДЛ, а не репозиторий) ──────────────────────────────────────────────────
 //   node scripts/operation-ratify-panel-probe.mjs                       прогон
@@ -51,6 +70,28 @@
 //   node scripts/operation-ratify-panel-probe.mjs --mutate-quiet-rename смена подписи замалчивается
 //   node scripts/operation-ratify-panel-probe.mjs --mutate-esc-dead     панель глотает Escape
 //   node scripts/operation-ratify-panel-probe.mjs --mutate-enter-nofocus Enter не переводит фокус
+//   node scripts/operation-ratify-panel-probe.mjs --mutate-frozen-blind  панель не знает про выпуск
+//                                                                      карточки ВОВСЕ (дефект как он
+//                                                                      был найден)
+//   node scripts/operation-ratify-panel-probe.mjs --mutate-frozen-render-only
+//                                                                      тело монтируется и на
+//                                                                      выпущенной карточке, гейт
+//                                                                      писателя цел
+//   node scripts/operation-ratify-panel-probe.mjs --mutate-panel-bom-blind снимок для писателя снова
+//                                                                      отдаёт пустые виды BOM
+//   node scripts/operation-ratify-panel-probe.mjs --mutate-gap-dump      оба молчания записи снова
+//                                                                      валятся в ярус каталога
+//   node scripts/operation-ratify-panel-probe.mjs --mutate-note-twice    заметка вернулась в факты
+//                                                                      записи — и печатается дважды
+//   node scripts/operation-ratify-panel-probe.mjs --mutate-open-no-scroll «open the step» выбирает
+//                                                                      шаг, но не доскролливает
+//
+// ДВЕ МУТАЦИИ ЗАМОРОЗКИ, А НЕ ОДНА, И ЭТО НЕ ИЗБЫТОК. Починка состоит из ДВУХ независимых половин —
+// тело не монтируется на выпущенной карточке И `apply` держит гейт первой строкой, — а одна мутация
+// на две половины оставила бы вторую сторожем у мёртвого кода: с целым гейтом рендера до `apply`
+// никакой жест не доходит вовсе. `--mutate-frozen-render-only` возвращает панель на экран, оставляя
+// гейт писателя, — и цитаты «форма не изменилась» остаются ЗЕЛЁНЫМИ именно потому, что этот гейт
+// живой; `--mutate-frozen-blind` снимает обе половины и роняет обе группы цитат.
 //
 // ИМЯ ФЛАГА ПРОВЕРЯЕТСЯ, А НЕ УГАДЫВАЕТСЯ: любое `--mutate…` вне списка роняет прогон с кодом 2.
 // Зелёный прогон с несуществующим флагом — худший из возможных исходов: он ВЫГЛЯДИТ
@@ -88,6 +129,12 @@ const MUTATE_DROP_EXTRA = process.argv.includes('--mutate-drop-extra');
 const MUTATE_QUIET_RENAME = process.argv.includes('--mutate-quiet-rename');
 const MUTATE_ESC_DEAD = process.argv.includes('--mutate-esc-dead');
 const MUTATE_ENTER_NOFOCUS = process.argv.includes('--mutate-enter-nofocus');
+const MUTATE_FROZEN_BLIND = process.argv.includes('--mutate-frozen-blind');
+const MUTATE_FROZEN_RENDER_ONLY = process.argv.includes('--mutate-frozen-render-only');
+const MUTATE_PANEL_BOM_BLIND = process.argv.includes('--mutate-panel-bom-blind');
+const MUTATE_GAP_DUMP = process.argv.includes('--mutate-gap-dump');
+const MUTATE_NOTE_TWICE = process.argv.includes('--mutate-note-twice');
+const MUTATE_OPEN_NO_SCROLL = process.argv.includes('--mutate-open-no-scroll');
 
 const KNOWN_MUTATIONS = new Set([
   '--mutate-prefill',
@@ -96,6 +143,12 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-quiet-rename',
   '--mutate-esc-dead',
   '--mutate-enter-nofocus',
+  '--mutate-frozen-blind',
+  '--mutate-frozen-render-only',
+  '--mutate-panel-bom-blind',
+  '--mutate-gap-dump',
+  '--mutate-note-twice',
+  '--mutate-open-no-scroll',
 ]);
 const stray = process.argv
   .slice(2)
@@ -172,6 +225,64 @@ const ESC_BROKEN = `          onEscapeKeyDown={(escEvent) => {
 const ENTER_FIX = `    if (row.index + 1 < rows.length) focusRow(row.index + 1);`;
 const ENTER_BROKEN = `    void rows;`;
 
+// ЗАМОРОЗКА — ДВЕ НЕЗАВИСИМЫЕ ПОЛОВИНЫ, И МУТИРУЮТСЯ ОНИ ПОРОЗНЬ (см. шапку).
+const FROZEN_RENDER_FIX = `  if (!props.open || props.frozen) return null;`;
+const FROZEN_RENDER_BROKEN = `  if (!props.open) return null;`;
+const FROZEN_APPLY_FIX = `      if (frozen) return;
+      const index = row.index;`;
+const FROZEN_APPLY_BROKEN = `      const index = row.index;`;
+
+// СНИМОК ДЛЯ ПИСАТЕЛЯ СНОВА ОТДАЁТ ПУСТЫЕ ВИДЫ BOM — ровно тот дефект, каким он был найден: рядом,
+// для классификатора, те же виды считаются правильно, и панель спрашивает «что это за шаг» об одном
+// шаге, а пишет работу в другой.
+const BOM_FIX = `  bomKinds: bomKindsOf(o, bomKindByKey),
+  machineProfileKey: str(o.machineProfileKey),`;
+const BOM_BROKEN = `  bomKinds: [],
+  machineProfileKey: str(o.machineProfileKey),`;
+
+// СВАЛКА ВЕРНУЛАСЬ: оба МОЛЧАНИЯ ЗАПИСИ снова получают ярус каталога — и его фразу.
+const GAP_VERB_FIX = `  if (unset(verb)) return silent('verb-missing');`;
+const GAP_VERB_BROKEN = `  if (unset(verb)) return silent('catalog-gap');`;
+const GAP_MACHINE_FIX = `  if (unset(step.machineType)) return silent('machine-missing');`;
+const GAP_MACHINE_BROKEN = `  if (unset(step.machineType)) return silent('catalog-gap');`;
+
+// ЗАМЕТКА ВЕРНУЛАСЬ В ФАКТЫ ЗАПИСИ. Мутация правит ДВА файла, потому что дефект жил в двух: факты
+// её печатали (классификатор), а панель отдавала ей заметку строки формы.
+const NOTE_EV_FIX = `  const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
+  if (zone) out.push(\`zone: \${zone}\`);`;
+const NOTE_EV_BROKEN = `  const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
+  if (zone) out.push(\`zone: \${zone}\`);
+  const note = ((step as { note?: string }).note ?? '').trim().split('\\n')[0] ?? '';
+  if (note.trim()) out.push(\`note: \${note.trim()}\`);`;
+const NOTE_STEP_FIX = `  outputUnitKey: str(o.outputUnitKey),
+  zone: str(o.zone),
+});`;
+const NOTE_STEP_BROKEN = `  outputUnitKey: str(o.outputUnitKey),
+  zone: str(o.zone),
+  note: str(o.note),
+});`;
+
+// «OPEN THE STEP» ВЫБИРАЕТ ШАГ, НО НЕ ДОСКРОЛЛИВАЕТ — то есть открывает его за пределами экрана.
+const SCROLL_FIX = `        onOpenStep={(index) => {
+          pickStepInline(index);`;
+const SCROLL_BROKEN = `        onOpenStep={(index) => {
+          setSelected(index);`;
+
+// ─── СПАЙ ПИСАТЕЛЯ: НЕ МУТАЦИЯ, А ЕДИНСТВЕННЫЙ ЧЕСТНЫЙ СПОСОБ УВИДЕТЬ ЕГО ВХОД ─────────────────
+//
+// Стоит В КАЖДОМ прогоне, включая мутированные, и поведения не меняет ни на байт: дописывает в
+// массив на `globalThis` вход и выход `workApplication` и возвращает тот же объект. Без него
+// «панель и строка шага зовут писателя одинаково» проверялось бы по СЛЕДСТВИЯМ в форме — а
+// сегодняшнее следствие у обоих снимков одно и то же (единственный якорь снятия — класс шва, и на
+// ветке фурнитуры оба снимка дают пустое снятие). Цитата по следствиям была бы сторожем у мёртвого
+// кода; цитата по ВЫЗОВУ удостоверяет ровно то, что чинилось.
+//
+// `?.push` — потому что вне пробы массива нет вовсе, и спай обязан быть инертным даже там, куда
+// этот бандл не собирается никогда.
+const SPY_FIX = `  return { writes, clears, links };`;
+const SPY_BROKEN = `  globalThis.__workApply?.push(JSON.stringify({ current, out: { writes, clears, links } }));
+  return { writes, clears, links };`;
+
 const patcher = (name, filter, pairs, loader, prepend) => ({
   name,
   setup(b) {
@@ -187,8 +298,49 @@ const patcher = (name, filter, pairs, loader, prepend) => ({
 });
 
 const PANEL = /operations-ratify-panel\.tsx$/;
+const CLASSIFIER = /operation-ratify\.ts$/;
+const FIELD = /operations-field\.tsx$/;
+const WRITER = /operation-work\.ts$/;
 const mutations = () => {
-  const out = [];
+  // СПАЙ ПЕРВЫМ И ВСЕГДА: `onLoad` первого плагина, вернувшего результат, забирает файл себе, и
+  // спай обязан жить в том же плагине, что и мутация писателя, если бы та когда-нибудь завелась.
+  const out = [patcher('spy', WRITER, [[SPY_FIX, SPY_BROKEN]], 'ts')];
+  if (MUTATE_FROZEN_BLIND)
+    out.push(
+      patcher(
+        'frozen-blind',
+        PANEL,
+        [
+          [FROZEN_RENDER_FIX, FROZEN_RENDER_BROKEN],
+          [FROZEN_APPLY_FIX, FROZEN_APPLY_BROKEN],
+        ],
+        'tsx',
+      ),
+    );
+  if (MUTATE_FROZEN_RENDER_ONLY)
+    out.push(
+      patcher('frozen-render-only', PANEL, [[FROZEN_RENDER_FIX, FROZEN_RENDER_BROKEN]], 'tsx'),
+    );
+  if (MUTATE_PANEL_BOM_BLIND)
+    out.push(patcher('panel-bom-blind', PANEL, [[BOM_FIX, BOM_BROKEN]], 'tsx'));
+  if (MUTATE_GAP_DUMP)
+    out.push(
+      patcher(
+        'gap-dump',
+        CLASSIFIER,
+        [
+          [GAP_VERB_FIX, GAP_VERB_BROKEN],
+          [GAP_MACHINE_FIX, GAP_MACHINE_BROKEN],
+        ],
+        'ts',
+      ),
+    );
+  if (MUTATE_NOTE_TWICE) {
+    out.push(patcher('note-twice-evidence', CLASSIFIER, [[NOTE_EV_FIX, NOTE_EV_BROKEN]], 'ts'));
+    out.push(patcher('note-twice-step', PANEL, [[NOTE_STEP_FIX, NOTE_STEP_BROKEN]], 'tsx'));
+  }
+  if (MUTATE_OPEN_NO_SCROLL)
+    out.push(patcher('open-no-scroll', FIELD, [[SCROLL_FIX, SCROLL_BROKEN]], 'tsx'));
   if (MUTATE_PREFILL)
     out.push(patcher('prefill', PANEL, [[PREFILL_FIX, PREFILL_BROKEN]], 'tsx', PREFILL_IMPORT));
   if (MUTATE_PRESS_PICKER)
@@ -303,6 +455,22 @@ const WORKS = [
     machines: ['zigzag', 'buttonhole'],
     syn: ['прорезь'],
     sort: 165,
+    retired: false,
+  },
+  {
+    // ЕДИНСТВЕННАЯ РАБОТА ФУРНИТУРЫ В ФИКСТУРЕ, И СТОИТ ОНА ЗДЕСЬ РАДИ ВИДОВ BOM. Пункт `F1`
+    // опознаётся не глаголом и не машинкой, а РОДОМ привязанной строки BOM (`operation-kinds.ts`,
+    // ветка `PRESS_SET`) — это ЕДИНСТВЕННОЕ место контракта, где `bomKinds` вообще читаются. Без
+    // такой работы батарея ЦПИСАТЕЛЬ ни разу не дошла бы до кода, который эти виды спрашивает.
+    token: 'snap_press_stud',
+    verb: 'hardware_set',
+    stage: 'closures',
+    label: 'Snap / press stud',
+    machineMode: 'none',
+    defaultMachine: '',
+    machines: [],
+    syn: ['кнопка'],
+    sort: 200,
     retired: false,
   },
   {
@@ -431,6 +599,43 @@ const TWELVE_ALL_NAMED = TWELVE.map((o) => ({ ...o, work: o.work || 'join_lockst
  * одной детали карточки (деталей у карточки стенда нет вовсе) — тогда заголовок вырождается ровно
  * в слово работы, и равенство «рельс = панель» становится равенством строк, а не догадкой.
  */
+/**
+ * СТРОКИ BOM КАРТОЧКИ И ШАГ ФУРНИТУРЫ — ДЛЯ ЦИТАТЫ ЦПИСАТЕЛЬ.
+ *
+ * РОД строки BOM — единственный различитель четырёх пунктов фурнитуры (`operation-kinds.ts`, ветка
+ * `PRESS_SET`: кнопка / хольнитен / люверс), и единственное место всего контракта, где `bomKinds`
+ * читаются вообще. Шаг ниже привязан к строке рода «кнопка» — значит обе поверхности обязаны отдать
+ * писателю НЕПУСТОЙ список видов, и именно этим панель расходилась со строкой шага.
+ */
+const BOM = [
+  {
+    lineKey: 'bom-snap',
+    name: 'snap 15 mm',
+    section: 'TECH_CARD_BOM_SECTION_HARDWARE',
+    kind: 'TECH_CARD_BOM_KIND_SNAP',
+  },
+  {
+    lineKey: 'bom-thread',
+    name: 'thread 40/2',
+    section: 'TECH_CARD_BOM_SECTION_THREAD',
+    kind: 'TECH_CARD_BOM_KIND_MAIN_THREAD',
+  },
+];
+
+const HW_SNAP = {
+  operationType: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+  machineType: 'TECH_CARD_MACHINE_TYPE_UNKNOWN',
+  attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET',
+  seamClass: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+  pressAction: 'TECH_CARD_PRESS_ACTION_UNKNOWN',
+  zone: 'TECH_CARD_GARMENT_ZONE_CLOSURE',
+  inputKeys: ['p-plank_1'],
+  bomLineKeys: ['bom-snap', 'bom-thread'],
+  outputUnitKey: '',
+  note: '',
+  work: '',
+};
+
 const NAMELESS_ZONE = {
   operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
   machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
@@ -526,12 +731,18 @@ await page.route('http://stub.invalid/**', (route) => {
   return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
 });
 
-async function mount(ops, { frozen = false, mode = 'list' } = {}) {
+async function mount(ops, { frozen = false, mode = 'list', bom = [] } = {}) {
   await page.goto('http://probe.local/');
   await page.addScriptTag({ content: bundle });
   await page.evaluate(
-    ([o, park, fr]) => window.__ratifyPanel.mount(o, park, fr),
-    [ops, PARK, frozen],
+    ([o, park, fr, b]) => {
+      // МАССИВ СПАЯ ЗАВОДИТСЯ ДО МОНТИРОВАНИЯ: писатель дописывает в него `?.push`, то есть без
+      // массива молчит. Заводится на КАЖДОЕ монтирование заново — записи прошлого случая батареи,
+      // дожившие до следующего, сделали бы «последний вызов» вызовом не того жеста.
+      window.__workApply = [];
+      window.__ratifyPanel.mount(o, park, fr, b);
+    },
+    [ops, PARK, frozen, bom],
   );
   await page.waitForSelector('[data-rail-step], [role="radiogroup"]', { timeout: 20000 });
   // Каталог — сетевой запрос, приезжает ПОСЛЕ первого кадра. Без ожидания «работы нет в списке»
@@ -587,6 +798,32 @@ const railTitle = (index) =>
     const n = document.querySelector(`[data-rail-step="${i}"]`);
     return n ? n.getAttribute('title') : null;
   }, index);
+
+/**
+ * ПОСЛЕДНИЙ ВЫЗОВ ЕДИНСТВЕННОГО ПИСАТЕЛЯ — СНЯТЫЙ СПАЕМ С ЖИВОГО КОДА.
+ *
+ * Возвращает ДВЕ строки: снимок шага, отданный `workApplication` на вход, и её ответ. Ключи
+ * сортируются здесь, а не в спае: сравнивать надо ЗНАЧЕНИЯ, а не порядок, которым их сложил
+ * вызыватель, — иначе перестановка полей в одном из двух снимков красила бы цитату без единого
+ * изменения поведения.
+ */
+const stable = (v) => {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stable(v[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(v === undefined ? null : v);
+};
+
+const lastWriterCall = async () => {
+  const calls = await page.evaluate(() => (window.__workApply ?? []).slice());
+  if (calls.length !== 1) return { current: `<вызовов: ${calls.length}>`, out: '<нет>' };
+  const parsed = JSON.parse(calls[0]);
+  return { current: stable(parsed.current), out: stable(parsed.out) };
+};
 
 /** ИНВЕНТАРЬ ОРГАНОВ СТРОКИ — всё, чем в ней можно щёлкнуть или что можно заполнить. */
 const organs = (index) =>
@@ -817,7 +1054,11 @@ const withProposal = await page.evaluate(() =>
     .filter((r) => r.querySelectorAll('[data-ratify-proposal]').length > 0)
     .map((r) => Number(r.getAttribute('data-ratify-row'))),
 );
-ck(withProposal.length === 7, 'предложения есть у семи форм из четырнадцати', String(withProposal.length));
+ck(
+  withProposal.length === 7,
+  `предложения есть у семи форм из ${PROD_OPS.length}`,
+  String(withProposal.length),
+);
 const before15 = {};
 for (const i of withProposal) before15[i] = await snapshot(i);
 for (const i of withProposal) {
@@ -1125,6 +1366,268 @@ await mount(TWELVE, { mode: 'schematic' });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
   ck((await page.locator('[data-ratify-panel]').count()) === 0, 'Escape закрывает панель и в схеме');
+}
+
+// ─── ЦМОРОЗ: КАРТОЧКУ ВЫПУСТИЛИ ПОД ОТКРЫТОЙ ПАНЕЛЬЮ ───────────────────────────────────────────
+//
+// ПЕРЕХОД, А НЕ СОСТОЯНИЕ. Ц13 выше проверяет карточку, ВЫПУЩЕННУЮ ДО монтирования: там кнопки нет
+// и панель открыть нечем. Здесь панель открыта на ЧЕРНОВИКЕ и выпуск случается под ней — стенд
+// переключает `frozen` на живом дереве (`window.__ratifyPanel.freeze()`), не перемонтируя ничего:
+// перемонтирование закрыло бы панель само и доказывало бы не то.
+head('ЦМОРОЗ · панель, открытая на черновике, переживает выпуск карточки — и не пишет ни байта');
+await mount(TWELVE);
+await openPanel();
+{
+  // Строка 8 карточки TWELVE — форма F8, ярус A: у неё ДВА предложения, и Enter на ней пишет
+  // первое. Фокус ставится именно туда, где жест был бы не пустым; сверяется при этом ВСЯ карточка.
+  const target = 8;
+  const cardBefore = [];
+  for (let i = 0; i < TWELVE.length; i++) cardBefore.push(await snapshot(i));
+  ck((await page.locator('[data-ratify-panel]').count()) === 1, 'панель открыта на ЧЕРНОВИКЕ');
+  ck(
+    (await page.locator('[data-ratify-proposal]').count()) > 0,
+    'и предложения на ней есть — жать было бы что',
+    String(await page.locator('[data-ratify-proposal]').count()),
+  );
+
+  await page.evaluate(() => window.__ratifyPanel.freeze());
+  await page.waitForTimeout(300);
+
+  ck(
+    (await page.locator('[data-ratify-open-panel]').count()) === 0,
+    'карточка выпущена: кнопки открытия панели больше нет',
+  );
+  ck(
+    (await page.locator('[data-ratify-panel]').count()) === 0,
+    'и САМА ПАНЕЛЬ ушла вслед за своей кнопкой — мёртвого органа на экране не осталось',
+    String(await page.locator('[data-ratify-panel]').count()),
+  );
+  ck(
+    (await page.locator('[data-ratify-proposal]').count()) === 0,
+    'ни одного предложения на экране не осталось',
+    String(await page.locator('[data-ratify-proposal]').count()),
+  );
+
+  // ЖЕСТЫ ДЕЛАЮТСЯ ВСЁ РАВНО, И ДЕЛАЮТСЯ НАСТОЯЩИЕ. Со снятым гейтом рендера кнопки на экране
+  // ЕСТЬ — и тогда эти два жеста проверяют ВТОРУЮ половину починки, гейт самого писателя. С целым
+  // гейтом рендера жать нечего, и цикл честно делает ноль нажатий; вес цитаты в этом случае несут
+  // три проверки выше.
+  for (const b of await page.locator('[data-ratify-proposal]').all()) {
+    await b.click({ force: true, timeout: 2000 }).catch(() => {});
+  }
+  const row = page.locator(`[data-ratify-row="${target}"]`);
+  if ((await row.count()) > 0) await row.first().focus();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+
+  const cardAfter = [];
+  for (let i = 0; i < TWELVE.length; i++) cardAfter.push(await snapshot(i));
+  const moved = cardAfter.map((s, i) => (s === cardBefore[i] ? '' : String(i))).filter(Boolean);
+  ck(
+    moved.length === 0,
+    'ФОРМА КАРТОЧКИ НЕ ИЗМЕНИЛАСЬ НИ НА БАЙТ — ни от нажатия, ни от настоящего Enter',
+    moved.join(','),
+  );
+}
+
+// ─── ЦПИСАТЕЛЬ: ОДИН ПИСАТЕЛЬ — ОДИН ВЫЗОВ, С ЛЮБОЙ ИЗ ДВУХ ПОВЕРХНОСТЕЙ ───────────────────────
+//
+// ЦПОЛН выше озаглавлена «тем же писателем», а сверяет только результирующее `work`: заголовок
+// обещает больше, чем цитата удостоверяет. Здесь сверяется САМ ВЫЗОВ — вход и ответ, снятые спаем с
+// живого `workApplication`, на одном и том же шаге, применённом сперва ПИКЕРОМ СТРОКИ ШАГА, потом
+// КОМБОБОКСОМ ПАНЕЛИ.
+head('ЦПИСАТЕЛЬ · вход и ответ единственного писателя у строки шага и у панели совпадают побайтно');
+{
+  const applyViaStepRow = async (ops, index, token) => {
+    await mount(ops, { bom: BOM });
+    if (index > 0) {
+      await page.locator(`[data-rail-step="${index}"]`).click();
+      await page.waitForTimeout(200);
+    }
+    await page.evaluate(() => {
+      window.__workApply = [];
+    });
+    await page.locator(`[data-kind-picker="${index}"] button[data-combobox-trigger]`).click();
+    await page.waitForSelector(`[data-kind-picker="${index}"] input[data-combobox-input]`, {
+      timeout: 10000,
+    });
+    await page.locator(`[data-combobox-option="${token}"]`).first().click();
+    await page.waitForTimeout(300);
+    return lastWriterCall();
+  };
+  const applyViaPanel = async (ops, index, token) => {
+    await mount(ops, { bom: BOM });
+    await openPanel();
+    await page.evaluate(() => {
+      window.__workApply = [];
+    });
+    await page.locator(`[data-combobox-trigger="ratifyWork-${index}"]`).click();
+    await page.waitForSelector(`[data-combobox-input="ratifyWork-${index}"]`, { timeout: 10000 });
+    await page.locator(`[data-combobox-option="${token}"]`).first().click();
+    await page.waitForTimeout(300);
+    return lastWriterCall();
+  };
+
+  // БАТАРЕЯ. Четыре формы × работа, которую на них законно выбрать рукой. Две последние стоят на
+  // ЕДИНСТВЕННОЙ ветке контракта, читающей виды строк BOM: шаг фурнитуры с привязанной «кнопкой»,
+  // на нём — своя работа (пункт `F1`, снятие спрашивает виды) и ЧУЖАЯ (личность уезжает на
+  // машинную ось, а снимок обязан совпасть всё равно).
+  const HW = [HW_SNAP];
+  const BATTERY = [
+    { what: 'F8 · два входа на прямострочке', ops: PROD_OPS, index: idxOf('F8'), token: 'join_lockstitch' },
+    { what: 'F4 · класс шва отстрочки', ops: PROD_OPS, index: idxOf('F4'), token: 'topstitch' },
+    { what: 'F2 · ВТО с названным утюгом', ops: PROD_OPS, index: idxOf('F2'), token: 'press_flat' },
+    { what: 'HW · фурнитура, своя работа', ops: HW, index: 0, token: 'snap_press_stud' },
+    { what: 'HW · фурнитура, чужая работа', ops: HW, index: 0, token: 'join_lockstitch' },
+  ];
+  let hwSnapshot = '';
+  for (const c of BATTERY) {
+    const viaRow = await applyViaStepRow(c.ops, c.index, c.token);
+    const viaPanel = await applyViaPanel(c.ops, c.index, c.token);
+    ck(
+      viaRow.current === viaPanel.current,
+      `${c.what} → ${c.token}: СНИМОК, отданный писателю`,
+      viaRow.current === viaPanel.current
+        ? viaRow.current
+        : `строка: ${viaRow.current}\n         панель: ${viaPanel.current}`,
+    );
+    ck(
+      viaRow.out === viaPanel.out,
+      `${c.what} → ${c.token}: ОТВЕТ писателя`,
+      viaRow.out === viaPanel.out ? viaRow.out : `строка: ${viaRow.out}\n         панель: ${viaPanel.out}`,
+    );
+    if (c.ops === HW) hwSnapshot = viaRow.current;
+  }
+
+  // ЖИВОСТЬ ЦИТАТЫ. Совпадение двух ПУСТЫХ списков видов ничего не удостоверяет: расхождение,
+  // которое чинилось, состояло ровно в том, что панель отдавала `bomKinds: []`. Поэтому цитата
+  // обязана назвать, что на форме HW видов ДВА и что они доехали до писателя.
+  ck(
+    hwSnapshot.includes('"bomKinds":["TECH_CARD_BOM_KIND_SNAP","TECH_CARD_BOM_KIND_MAIN_THREAD"]'),
+    'и виды строк BOM у формы HW НЕПУСТЫ — сверять было что',
+    hwSnapshot,
+  );
+}
+
+// ─── ЦМЕНЬШЕ: У КАЖДОГО МОЛЧАНИЯ ЗАПИСИ СВОЯ ФРАЗА ────────────────────────────────────────────
+head('ЦМЕНЬШЕ · «запись сказала МЕНЬШЕ» не выдаётся за «каталогу нечего предложить»');
+await mount([PROD_OPS[idxOf('F15')], PROD_OPS[idxOf('F16')], PROD_OPS[idxOf('F5')]]);
+await openPanel();
+{
+  const tiers = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-ratify-row]')]
+      .map((r) => r.getAttribute('data-ratify-tier'))
+      .join(','),
+  );
+  ck(tiers === 'verb-missing,machine-missing,catalog-gap', 'три строки — три РАЗНЫХ яруса', tiers);
+  const w0 = await text('[data-ratify-word="0"]');
+  const w1 = await text('[data-ratify-word="1"]');
+  const w2 = await text('[data-ratify-word="2"]');
+  ck(
+    w0 === 'what the step does is not recorded — open the step',
+    'F15 (глагол не назван): своя фраза, и она АДРЕСУЕТ к контролу шага',
+    String(w0),
+  );
+  ck(
+    w1 === 'the machine is not recorded — open the step',
+    'F16 (машинка не названа): своя фраза, и она тоже адресует',
+    String(w1),
+  );
+  ck(
+    w2 === 'the record says more than the catalogue has a job for — nothing to suggest',
+    'F5 (подгибка вдвое): фраза каталога осталась ровно там, где человек ОТВЕТИЛ',
+    String(w2),
+  );
+  ck(new Set([w0, w1, w2]).size === 3, 'и все три фразы РАЗНЫЕ', [w0, w1, w2].join(' | '));
+  // Ни одна из двух не смеет говорить про каталог: на этих формах это обратное истине.
+  ck(
+    !String(w0).includes('catalogue') && !String(w1).includes('catalogue'),
+    'ни одно из двух молчаний записи не валит на каталог',
+    `${w0} | ${w1}`,
+  );
+}
+
+// ─── ЦСКРОЛЛ: «OPEN THE STEP» ПОДВОДИТ РЕДАКТОР К ГЛАЗАМ ──────────────────────────────────────
+//
+// ЧТО ЗДЕСЬ МОЖНО ДОКАЗАТЬ, А ЧТО НЕЛЬЗЯ — НАЗВАНО ВСЛУХ. У стенда НЕТ ТАБЛИЦЫ СТИЛЕЙ: в страницу
+// вкладывается только бандл, и ни один класс Tailwind не действует — панель не `fixed`, не
+// `max-h-[90vh]`, её список не скроллится внутри себя. Значит ПИКСЕЛЬНАЯ цитата («редактор был ниже
+// окна, стал внутри») мерила бы раскладку, которой на экране не существует; хуже того, она уже
+// соврала однажды: `locator.click()` сам доводит элемент до окна перед нажатием, и с мутацией
+// `--mutate-open-no-scroll` страница уезжала на 2053 px без единой строки приложения — цитата
+// оставалась ЗЕЛЁНОЙ, сторожа скролл САМОЙ ПРОБЫ.
+//
+// ПОЭТОМУ ЦИТАТА СТОИТ НА ЖЕСТЕ, А НЕ НА ПИКСЕЛЯХ: настоящее нажатие «open the step» обязано
+// ПОПРОСИТЬ редактор приехать к глазам — то есть позвать `scrollIntoView` на КОРОБКЕ редактора
+// (`data-step-editor`). Спай на `Element.prototype.scrollIntoView` видит ровно вызовы приложения:
+// Playwright скроллит через CDP, мимо этого метода. Куда именно доедет пиксель, решает CSS, которого
+// на стенде нет; ЧТО ЖЕСТ ЗОВЁТ РЕДАКТОРА — решает код, и это здесь и удостоверяется.
+head('ЦСКРОЛЛ · «open the step» зовёт редактор к глазам, а не только переключает выбор');
+await mount(TWELVE);
+await openPanel();
+{
+  await page.evaluate(() => {
+    window.__scrollCalls = [];
+    const real = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (...args) {
+      window.__scrollCalls.push(
+        (this.getAttribute?.('data-step-editor') ? 'step-editor' : this.tagName) +
+          ':' +
+          JSON.stringify(args[0] ?? null),
+      );
+      return real.apply(this, args);
+    };
+  });
+  const target = 11;
+  await page.locator(`[data-ratify-open="${target}"]`).click();
+  await page.waitForTimeout(600);
+  ck((await page.locator('[data-ratify-panel]').count()) === 0, 'панель закрылась');
+  ck(
+    (await page.evaluate(() => document.querySelector('[data-editor-heading]')?.getAttribute('data-editor-heading'))) ===
+      String(target),
+    'открыт ИМЕННО тот шаг, к которому вела строка',
+  );
+  const calls = await page.evaluate(() => (window.__scrollCalls ?? []).join(' | '));
+  ck(
+    calls === 'step-editor:{"block":"nearest","behavior":"smooth"}',
+    'жест позвал редактор к глазам — тем же приёмом, что схема и создание шага',
+    calls || '<ни одного вызова>',
+  );
+}
+
+// ─── ЦЗАМЕТКА: ЗАМЕТКА ПЕЧАТАЕТСЯ НА СТРОКЕ РОВНО ОДИН РАЗ ────────────────────────────────────
+head('ЦЗАМЕТКА · заметку шага печатает ОДИН узел строки, а не два');
+await mount([PROD_OPS[idxOf('F6')], PROD_OPS[idxOf('F8')]]);
+await openPanel();
+{
+  for (const i of [0, 1]) {
+    ck(
+      (await text(`[data-ratify-note="${i}"]`)) === 'note: join pockets',
+      `строка ${i}: узел заметки на месте и говорит её словами`,
+      String(await text(`[data-ratify-note="${i}"]`)),
+    );
+    // СЧЁТ ВХОЖДЕНИЙ, А НЕ «СОДЕРЖИТ». `textContent` строки склеивает соседние узлы, и проверка на
+    // вхождение зеленела бы при ЛЮБОМ числе копий — включая две.
+    const times = await page.evaluate(
+      (n) =>
+        ((document.querySelector(`[data-ratify-row="${n}"]`)?.textContent ?? '').match(
+          /join pockets/g,
+        ) ?? []).length,
+      i,
+    );
+    ck(times === 1, `строка ${i}: и во всей строке заметка встречается РОВНО ОДИН раз`, String(times));
+  }
+  ck(
+    (await text('[data-ratify-evidence="0"]')) === '1 input · zone: pocket',
+    'факты записи строки 0 названы целиком — заметки среди них нет',
+    String(await text('[data-ratify-evidence="0"]')),
+  );
+  ck(
+    (await text('[data-ratify-evidence="1"]')) ===
+      '2 inputs · produces unit "LEft front panel with pockets" · zone: pocket',
+    'и строки 1 — тоже целиком',
+    String(await text('[data-ratify-evidence="1"]')),
+  );
 }
 
 ck(pageErrors.length === 0, 'страница не бросала исключений', pageErrors.slice(0, 2).join(' | '));

@@ -977,6 +977,12 @@ function RailTotal() {
 // мёртвая кнопка, которая выглядит нажимаемой, это ровно тот дефект, который в этом файле уже
 // чинили на строке рельса. Поэтому её здесь просто нет.
 //
+// НО СПРЯТАННАЯ КНОПКА — ЭТО НЕ ГЕЙТ, И УТВЕРЖДЕНИЕ ВЫШЕ ЖИВЁТ НЕ ЗДЕСЬ. Карточку можно выпустить,
+// когда панель УЖЕ открыта, — тогда кнопка исчезает, а панель остаётся, и до неё внешний фиелдсет
+// не достаёт вовсе (она живёт порталом в `body`). Поэтому у панели свой проп `frozen`: тело на
+// выпущенной карточке не монтируется, а `apply` внутри держит гейт первой строкой, как все прочие
+// мутаторы этого файла.
+//
 // МОЛЧИТ, КОГДА СЧИТАТЬ НЕЧЕГО. Ноль неназванных — строки НЕТ ВОВСЕ, а не «0 steps not named yet»:
 // счётчик нуля это шум над экраном, у которого всё в порядке, и он же учит глаз пролистывать то
 // место, где однажды появится настоящее число. Тот же приём, что у строки-слова про ткань.
@@ -7629,39 +7635,42 @@ export function OperationsField({
             </div>
 
             {selectedIndex >= 0 && (
-              <div ref={editorRef}>
-              <OperationEditor
-                // Keyed on the row's identity AND its position: both of the editor's "skip the first
-                // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
-                // the open step changes the index without remounting, which would fire the
-                // operation-type preset and the thread-from-BOM fill as if the user had just picked
-                // them — quietly writing into blank machine / stitch / thread fields on a drag.
-                key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
-                index={selectedIndex}
-                bomLines={bomItems}
-                pieces={pieces}
-                pieceShapes={pieceShapes}
-                cloth={inlineCloth?.map ?? null}
-                tiled={tiled}
-                pinOptions={pinOptions}
-                colorwayArticles={colorwayArticles}
-                onInsertAfter={() => insertAfter(selectedIndex)}
-                onRemove={() => removeOperation(selectedIndex)}
-                onFlashPieces={flashPieces}
-                // Слова про источник деталей — ИНЛАЙНОВЫЕ: лоток стоит прямо над списком, и
-                // «click a piece in the tray» здесь правда.
-                pieceSource={TRAY_PIECE_SOURCE}
-                onActiveBomChange={onActiveBomChange}
-                onEdit={clearFormHistory}
-                onDropPiece={addInputToOperation}
-                // ОДИН МУТАТОР НА ОБЕ ПОВЕРХНОСТИ: тот же экземпляр, что уезжает в док фулскрина
-                // ниже. Второй «переименовать», написанный для второго экрана, разошёлся бы с
-                // первым молча — ровно то, от чего стережёт R3.
-                onRenameUnit={renameUnit}
-                onDissolveUnit={dissolveUnit}
-                mediaUrls={operationMediaUrls}
-                frozen={frozen}
-              />
+              // ТОЧНАЯ РУЧКА ДЛЯ ПРОБЫ, как `data-rail-step` у строки рельса: «редактор перед
+              // глазами» — это про КОРОБКУ редактора, а она выше заголовка и выше любого его
+              // контрола. Меряя заголовок, проба меряла бы не то, что скроллится.
+              <div ref={editorRef} data-step-editor='1'>
+                <OperationEditor
+                  // Keyed on the row's identity AND its position: both of the editor's "skip the first
+                  // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
+                  // the open step changes the index without remounting, which would fire the
+                  // operation-type preset and the thread-from-BOM fill as if the user had just picked
+                  // them — quietly writing into blank machine / stitch / thread fields on a drag.
+                  key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
+                  index={selectedIndex}
+                  bomLines={bomItems}
+                  pieces={pieces}
+                  pieceShapes={pieceShapes}
+                  cloth={inlineCloth?.map ?? null}
+                  tiled={tiled}
+                  pinOptions={pinOptions}
+                  colorwayArticles={colorwayArticles}
+                  onInsertAfter={() => insertAfter(selectedIndex)}
+                  onRemove={() => removeOperation(selectedIndex)}
+                  onFlashPieces={flashPieces}
+                  // Слова про источник деталей — ИНЛАЙНОВЫЕ: лоток стоит прямо над списком, и
+                  // «click a piece in the tray» здесь правда.
+                  pieceSource={TRAY_PIECE_SOURCE}
+                  onActiveBomChange={onActiveBomChange}
+                  onEdit={clearFormHistory}
+                  onDropPiece={addInputToOperation}
+                  // ОДИН МУТАТОР НА ОБЕ ПОВЕРХНОСТИ: тот же экземпляр, что уезжает в док фулскрина
+                  // ниже. Второй «переименовать», написанный для второго экрана, разошёлся бы с
+                  // первым молча — ровно то, от чего стережёт R3.
+                  onRenameUnit={renameUnit}
+                  onDissolveUnit={dissolveUnit}
+                  mediaUrls={operationMediaUrls}
+                  frozen={frozen}
+                />
               </div>
             )}
           </div>
@@ -7790,6 +7799,11 @@ export function OperationsField({
           про то, каким из двух способов эти шаги сейчас нарисованы. */}
       <OperationsRatifyPanel
         open={ratifyOpen}
+        // ЗАМОРОЗКА — ПРОПОМ, И ЭТО НЕ ПОВТОР ВНЕШНЕГО `<fieldset disabled>`. До панели фиелдсет не
+        // достаёт вовсе (`Dialog.Portal container={document.body}` выносит её наружу), а кнопка,
+        // которая панель открывает, на выпущенной карточке не рисуется — то есть без этого пропа
+        // панель, открытая на черновике и пережившая выпуск карточки, продолжала бы писать.
+        frozen={frozen}
         onClose={() => setRatifyOpen(false)}
         catalog={workCatalog}
         // ПУСТЫЕ ЗНАЧЕНИЯ СТРОКИ ШАГА — ПРОПОМ. Это тот же щит, что и у строки шага: имя, которого
@@ -7797,8 +7811,14 @@ export function OperationsField({
         blanks={emptyOperation}
         // АДРЕСАЦИЯ, А НЕ КОПИЯ: панель ведёт к контролам открытого шага — своего пикера входов и
         // своего пикера приёма ВТО у неё нет и не будет.
+        //
+        // ТЕМ ЖЕ ПРИЁМОМ, ЧТО У СХЕМЫ И У СОЗДАНИЯ ШАГА (`pickStepInline`): выбрать И ДОСКРОЛЛИТЬ.
+        // Панель — полноэкранная модалка, редактор стоит НИЖЕ рельса, а «open the step» — её
+        // единственный ответ на четыре молчащих яруса, то есть самый частый её жест; без скролла он
+        // открывал бы шаг за пределами экрана, и человек оставался бы на том же месте, с закрытой
+        // панелью и без видимого результата. Второй копии скролла здесь не заводится.
         onOpenStep={(index) => {
-          setSelected(index);
+          pickStepInline(index);
           setRatifyOpen(false);
         }}
       />
