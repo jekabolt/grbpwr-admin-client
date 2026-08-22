@@ -30,6 +30,9 @@
 //
 // РЕВЬЮ ШВА Ф4+Ф5+Ф7 (2026-08-22), мутация сверх авторских: catch-строки перевёрнуты на
 // СМОНТИРОВАННЫЕ поля (`mountedByTable.get(field) === false` → `=== true`) — 4 провала. Откатано.
+// Секция 8 добавлена тем же ревью: четвёрка «seam & stitch» была вне таблицы состояний, и отказ
+// `seam_class required` (пара Ф3) на ВТО-шаге не имел ни контрола, ни catch-строки. Мутация
+// «убрать четвёрку из таблицы» — 2 провала в секции 8. Откатано.
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден:
 // гейт, который нельзя выполнить, не красит сборку в красный.
@@ -352,6 +355,34 @@ head('7. ширина без режима на чужом глаголе: кон
 await mount({ operationType: T.PACK, zone: T.ZONE, topstitchWidthMm: '4' });
 ck(await has(CTRL('topstitchMode')), 'селект режима отстрочки есть и на PACK-шаге');
 ck(await has(RES('topstitchWidthMm')), 'сама ширина при этом стоит строкой остатка');
+
+// ── 8. ВТОРАЯ ПОЛОВИНА ПАРЫ Ф3: `seam_class required` НА ВТО-ШАГЕ (ревью шва Ф4+Ф5+Ф7) ────────
+// Пара «режим отстрочки ↔ класс шва» отвечает и в обратную сторону: режим остался (после смены
+// глагола на ВТО), класс не назван. Секция «seam & stitch» на ВТО-шаге без переопределений не
+// рендерится вовсе, значит без строки таблицы состояний отказ на ПУСТОМ seamClass был невидим:
+// не контрол, не остаток, не catch-строка. Здесь режим стоит контролом (showTopstitch), а отказ
+// класса обязан встать catch-строкой.
+head('8. отказ «seam_class required» на ВТО-шаге виден catch-строкой');
+await mount({
+  operationType: T.PRESS,
+  zone: T.ZONE,
+  pressEquipment: T.IRON,
+  topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+});
+ck(!(await has(CTRL('seamClass'))), 'секции «seam & stitch» на чистом ВТО-шаге нет');
+await page.evaluate(() =>
+  window.__residue.setError(
+    'operations.0.seamClass',
+    'required — name the class it makes, or set «os_topstitch»',
+  ),
+);
+await page.waitForTimeout(150);
+ck(await has(RES('seamClass')), 'отказ класса шва стоит catch-строкой полосы');
+ck(
+  (await textOf(RES('seamClass'))).includes('seam class'),
+  'строка называет поле словами его контрола',
+  await textOf(RES('seamClass')),
+);
 
 await browser.close();
 console.log(`\n${bad === 0 ? 'проба зелёная' : `провалов: ${bad}`}`);

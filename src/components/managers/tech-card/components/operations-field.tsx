@@ -266,6 +266,8 @@ type StepEnumField =
   | 'pressEquipment'
   | 'pressCloth'
   | 'topstitchMode'
+  | 'seamClass'
+  | 'attachmentKind'
   | 'seamSecuring'
   | 'bindingStyle'
   | 'labelAttachStitch'
@@ -292,6 +294,8 @@ type StepTextField =
   | 'pressPressureNCm2'
   | 'topstitchWidthMm'
   | 'attachmentSizeMm'
+  | 'stitchesPerCm'
+  | 'seamAllowanceMm'
   | 'needleGaugeMm'
   | 'rowSpacingMm'
   | 'fullnessRatio'
@@ -425,6 +429,11 @@ const itemLabel =
 // контрактом, и режим новее бандла обязан назваться токеном, а не пустотой.
 const topstitchModeText = (mode: string): string =>
   topstitchModeOptionsFor(mode).find((o) => o.value === mode)?.label ?? mode;
+
+// Подпись класса шва — у ТОГО ЖЕ списка, что рисует селект «seam class»; класс новее бандла
+// называется собственным токеном, а не пустотой.
+const seamClassText = (v: string): string =>
+  seamClassOptions.find((o) => o.value === v)?.label ?? v;
 
 // FA1 / FA5 — ЕДИНСТВЕННЫЕ ДВЕ ПОДПИСИ, ЖИВУЩИЕ ЗДЕСЬ, А НЕ В ОБЩЕМ СЛОВАРЕ, и причина в форме
 // слова: на листе форма и направление петли печатаются ОДНОЙ вещью («horizontal round-end
@@ -2527,6 +2536,24 @@ function OperationEditor({
       ownsPressSettings,
     ),
     textState('attachmentSizeMm', 'attachment size, mm', attachmentSizeMm, showAttachmentSize),
+    // ШОВ И ПЛОТНОСТЬ (ревью шва Ф4+Ф5+Ф7). Четвёрка «seam & stitch» прячется у ВТО-шага, пока он
+    // её не несёт, — но отказ сервера бывает и на ПУСТОМ её поле: пара Ф3 «режим отстрочки ↔ класс
+    // шва» отвечает `seam_class: required` на шаг, где режим остался, а класс не назван. Вне этой
+    // таблицы такой отказ был невидим: контрола нет, остатка нет (поле пустое), а створке его
+    // чинить нечем. Строкой ОСТАТКА четвёрка не бывает по построению — любое её заполненное
+    // значение само открывает секцию (`showSewingOverrides`), — поэтому здесь она даёт только
+    // catch-строки.
+    enumState('seamClass', 'seam class', seamClass, NONE_SEAM_CLASS, seamClassText, showSewingOverrides),
+    textState('seamAllowanceMm', 'seam allowance, mm', seamAllowanceMm, showSewingOverrides),
+    textState('stitchesPerCm', 'stitches / cm', stitchesPerCm, showSewingOverrides),
+    enumState(
+      'attachmentKind',
+      'attachment',
+      attachmentKind,
+      NONE_ATTACHMENT,
+      attachmentKindLabel,
+      showSewingOverrides,
+    ),
     // отстрочка
     enumState(
       'topstitchMode',
