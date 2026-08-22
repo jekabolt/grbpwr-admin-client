@@ -1,0 +1,386 @@
+import { common_TechCardGarmentZone } from 'api/proto-http/admin';
+import {
+  KIND_WORK_TOKEN,
+  kindLabelOf,
+  kindOf,
+  type OperationKind,
+  type OperationKindStep,
+} from './operation-kinds';
+import { seamClassLabel, zoneLabel } from './operation-options';
+import {
+  SLIT_OVERCAST_WORK,
+  enumToMachineToken,
+  workNaming,
+  type WorkCatalog,
+  type WorkItem,
+} from './operation-work';
+
+// РАТИФИКАЦИЯ, А НЕ НАЗНАЧЕНИЕ: ЭКРАН НЕ СПРАШИВАЕТ «ЧТО ЭТО», ОН СПРАШИВАЕТ «ПРАВДА ЛИ ТО, ЧТО МЫ
+// УЖЕ ПЕЧАТАЕМ».
+//
+// ЧТО ЭТОТ МОДУЛЬ ЕСТЬ. Чистый классификатор: карточка (строки формы) и каталог работ на входе,
+// ярус и предложения на выходе. Ни JSX, ни формы, ни `setValue`, ни единого побочного эффекта —
+// вся поверхность проверяется пробой `scripts/operation-ratify-probe.mjs` в node.
+//
+// ЗАЧЕМ ОН НУЖЕН. На проде 126 операций, работа названа у 15; сто одиннадцать строк неотличимы
+// друг от друга ТОЛЬКО потому, что вид у них выводится из пары (глагол, машинка) и нигде не
+// хранится. Но НЕМЫХ СТРОК СРЕДИ НИХ НЕТ: `kindOf` называет каждую уже сегодня — «Join —
+// lockstitch» ста, «Topstitch» семи, «Overlock / serge» двум, «Zigzag» одной, «Press (action not
+// recorded)» восьми. Значит вопрос не «какая это работа», а «подтверждает ли ЗАПИСЬ то имя, которое
+// карточка печатает на цеховой бумаге», — и ярус это ответ на него, а не догадка о шаге.
+//
+// НИ ОДНОГО НОВОГО СЛОВАРЯ. Всё, что здесь читается, читается существующими органами:
+//   * как шаг зовётся СЕЙЧАС — двоекодье R8 (`workNaming` + `kindOf`, см. `printedName`);
+//   * какие работы допускает машинка — каталог сервера (`WorkItem.machines`);
+//   * подпись класса шва и зоны — словари клиента (`seamClassLabel`, `zoneLabel`);
+//   * что запись отвечает СВЕРХ двух осей — САМ РЕЗОЛВ, спрошенный дважды (см. `classify`).
+// Новая функция ровно одна — `worksForMachine`, и это выборка по `catalog.items`, а не таблица.
+//
+// ЧЕГО ЗДЕСЬ НЕТ И НЕ БУДЕТ:
+//   * НИ ОДНОГО ПРАВИЛА «ПО ИМЕНИ ДЕТАЛИ». Различать «соединить» и «притачать» по префиксу имени
+//     («PCK_OUT_R_S лежит на P_R, значит внакрой») — это ровно тот ложный словарь, против которого
+//     написана вся волна: имена деталей карточку не описывают, они её ИМЕНУЮТ. Кнопок две, жмёт
+//     человек, и порядок кнопок — представление, а не вывод;
+//   * НИ ОДНОЙ ЗАПИСИ. Что выбор предложения пишет в строку шага, решает ЕДИНСТВЕННЫЙ писатель
+//     (`workWrites` + `kindClears`, экстракция R7-Б). Второй писатель здесь был бы пятой копией
+//     правил, которую фаза запрещает;
+//   * НИ ОДНОГО СВОЕГО ПИКЕРА. Панель предлагает и записывает РАБОТУ; недостающий вход и
+//     недостающий приём ВТО она показывает и адресует к их собственным контролам. Правила «что шаг
+//     имеет право взять» живут в общем с сервером порте `assembly-frontier.ts`, и второй их
+//     читатель разошёлся бы молча.
+
+/**
+ * ЯРУС — ЧТО ГОВОРИТ ЗАПИСЬ, а не сколько у шага деталей.
+ *
+ *  `join`                 — два и более входа на прямострочке, класс шва пуст: карточка печатает
+ *                           «join», и граф сборки независимо говорит «съел несколько». Два чтения
+ *                           записи согласны — предложений ДВА (см. `joinTier`);
+ *  `ratify-derived`       — запись отвечает однозначно, и ответ есть в каталоге: остаётся записать
+ *                           уже напечатанное. Самая честная половина экрана: нажатие не добавляет
+ *                           ни одного факта;
+ *  `catalog-gap`          — запись говорит, а работы для сказанного в каталоге НЕТ (подгибка вдвое
+ *                           `ef_hem_turned`: `moscow_hem` узкая рубильником, `blindhem` на потайной
+ *                           машине). Экран показывает класс шва и МОЛЧИТ;
+ *  `contradiction`        — карточка печатает «join», а вход один: соединять не с чем. Это вытачка,
+ *                           подгиб, закрепка или отделочная строчка, и запись их не различает;
+ *  `press-action-missing` — ВТО без записанного приёма. Недостающий факт не деталь и не вход, а
+ *                           `press_action`, и живёт он на своём контроле;
+ *  `no-inputs`            — машинный шаг без входов вовсе. Показывается, не предлагается ничего;
+ *  `named`                — работа уже записана. Строка стоит в списке приглушённой, чтобы человек
+ *                           видел, как названы соседи, а не дырявую карточку.
+ */
+export type RatifyTier =
+  | 'join'
+  | 'ratify-derived'
+  | 'catalog-gap'
+  | 'contradiction'
+  | 'press-action-missing'
+  | 'no-inputs'
+  | 'named';
+
+/**
+ * ОДНО ПРЕДЛОЖЕНИЕ — ОДНА КНОПКА, и всё в ней ЦИТАТА, а не сочинение клиента: `token` и `label`
+ * приходят из каталога, `extra.label` — из словаря классов шва.
+ *
+ * `extra` — ВТОРОЙ ФАКТ, который пишется вместе с работой, и сегодня он ровно один: класс шва
+ * `LS_LAPPED` у притачивания. Различие «стачать» / «притачать» это НЕ различие работы, а различие
+ * КЛАССА ШВА (ISO 4916: одна деталь ЛЕЖИТ НА другой), у которого в записи уже есть своя колонка,
+ * свой словарь и свой контрол на экране. Заводить под это второй токен работы значило бы завести
+ * ТРЕТИЙ механизм ответа на вопрос, на который уже отвечают два.
+ *
+ * `warn` — то, что кнопка обязана сказать СЛОВОМ ДО нажатия. Сегодня он тоже один: обмётанная
+ * прорезь требует длины (`cut_length_mm`, серверное `workRequiresCutLength`), и её выбор делает
+ * строку НЕСОХРАНЯЕМОЙ, пока длина не вписана.
+ */
+export type RatifyProposal = {
+  token: string;
+  label: string;
+  extra?: { field: 'seamClass'; value: string; label: string };
+  warn?: string;
+};
+
+/**
+ * СТРОКА ПАНЕЛИ.
+ *
+ * `index` — ПОЗИЦИЯ В `operations` ФОРМЫ, С НУЛЯ: тот самый индекс, которым панель пишет
+ * (`operations.${index}.work`). Номер операции, который видит человек, — представление, и считает
+ * его тот, кто рисует.
+ *
+ * `printedNow` — имя, которое карточка печатает СЕГОДНЯ, СПРОШЕННОЕ у двоекодья, а не собранное
+ * заново (см. `printedName`).
+ *
+ * `evidence` — короткие факты записи, каждый со своим источником. Это не украшение: панель
+ * предлагает ратифицировать имя, и человек обязан видеть, ЧЕМ это имя подтверждается, — иначе
+ * жест вырождается в «нажми, чтобы согласиться».
+ */
+export type RatifyRow = {
+  index: number;
+  tier: RatifyTier;
+  printedNow: string;
+  evidence: string[];
+  proposals: RatifyProposal[];
+};
+
+/**
+ * ЧТО КЛАССИФИКАТОР ЧИТАЕТ У ШАГА — строка формы, суженная до читаемого.
+ *
+ * Стоит НАД `OperationKindStep`, а не рядом: резолву нужны его поля буква в букву, и второе
+ * описание тех же семи имён разошлось бы с первым на первой же правке контракта. Сверху — ровно то,
+ * чего резолв не спрашивает: работа, входы, произведённый узел, зона и заметка.
+ */
+export type RatifyStep = OperationKindStep & {
+  work?: string;
+  inputKeys?: readonly string[];
+  outputUnitKey?: string;
+  zone?: string;
+  note?: string;
+};
+
+// Имена членов контракта, а не словарь: каждое читается ровно одним правилом ниже.
+const MACHINE_VERB = 'TECH_CARD_OPERATION_TYPE_MACHINE';
+const LAPPED_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_LS_LAPPED';
+/**
+ * ПУНКТ-СВАЛКА. Сто прод-строк из ста двадцати шести резолвятся ИМ, и обе половины этого модуля —
+ * ярус `join` и `contradiction` — это ответ на вопрос «а подтверждает ли запись то, что он
+ * печатает». Идентичность пункта — его `id`, а работы — её токен (`KIND_WORK_TOKEN`), и сшиты они
+ * там же, где сшиты все прочие.
+ */
+const DUMP_KIND_ID = 'A1';
+
+/**
+ * ФРАЗА ПРЕДУПРЕЖДЕНИЯ У ПРОРЕЗИ. Сервер отвергнет шаг без длины именованным отказом, и узнать об
+ * этом ПОСЛЕ нажатия — значит узнать об этом на «Save», через три экрана от кнопки.
+ */
+const SLIT_WARN = 'requires the slit length before the card can be saved';
+
+/**
+ * «Не сказано» — по суффиксу `_UNKNOWN` и пустоте, тем же чтением, каким его читают `kindOf`
+ * (`NONE`), `pressAnswered` и `workDefaultToFormValue`. Свой третий список дисциплин здесь был бы
+ * ровно тем вторым словарём, которого модуль не заводит.
+ */
+const unset = (v?: string): boolean => {
+  const s = (v ?? '').trim();
+  return !s || s.endsWith('_UNKNOWN');
+};
+
+const inputCount = (step: RatifyStep): number =>
+  (step.inputKeys ?? []).filter((k) => !!(k ?? '').trim()).length;
+
+/**
+ * КАКИЕ РАБОТЫ КАТАЛОГ ДОПУСКАЕТ НА ЭТОЙ МАШИНКЕ — ЕДИНСТВЕННАЯ НОВАЯ ФУНКЦИЯ МОДУЛЯ, и это
+ * ВЫБОРКА, а не таблица: пара «работа × машинка» живёт в `operation_work_machine` на сервере, её же
+ * проверяет сервер при сохранении, и ответ здесь обязан быть тем же самым.
+ *
+ * СНЯТЫЕ РАБОТЫ НЕ ПРЕДЛАГАЮТСЯ НИКОГДА. `retired` значит «сервер больше не предлагает это никому»
+ * (0331 сняла `gather_ease` как ложное слияние сборки с посадкой); шаг, который её уже несёт,
+ * по-прежнему открывается и по-прежнему зовётся своим ярлыком — но это ЧТЕНИЕ, а кнопка ЗАПИСЬ.
+ *
+ * МАШИНКА ПРИХОДИТ ИМЕНЕМ ЧЛЕНА (`TECH_CARD_MACHINE_TYPE_ZIGZAG`), каталог говорит короткими
+ * токенами (`zigzag`) — перевод один и тот же на весь клиент (`enumToMachineToken`).
+ */
+export function worksForMachine(catalog: WorkCatalog, machineEnum: string): WorkItem[] {
+  const token = enumToMachineToken(machineEnum);
+  if (!token) return [];
+  return catalog.items.filter((w) => !w.retired && w.machines.includes(token));
+}
+
+/**
+ * ИМЯ, КОТОРОЕ КАРТОЧКА ПЕЧАТАЕТ СЕГОДНЯ, — СПРОШЕННОЕ, А НЕ СОБРАННОЕ.
+ *
+ * Двоекодье переходного периода живёт в двух органах и больше нигде: работа названа — зовём
+ * подписью каталога (`workNaming`), не названа — сегодняшней деривацией (`kindOf` + `kindLabelOf`).
+ * Собрать это имя здесь заново значило бы завести ВТОРУЮ редакцию правила, которая разойдётся с
+ * печатным листом молча, — то есть воспроизвести ровно тот дефект, ради устранения которого
+ * заводилась R8 (шаг звался «Hem — rolled (Moscow)» в пикере и «topstitch · front» на бумаге).
+ *
+ * ПУСТАЯ СТРОКА — ЗАКОННЫЙ ОТВЕТ, И ОН ЗНАЧИТ РОВНО ОДНО: работы нет, и резолв тоже промолчал
+ * (нестандартная комбинация, токен новее бандла, недозаполненный шаг). Это НЕ «не загрузилось».
+ * Ни одна из 111 прод-строк сюда не попадает — резолв называет их все, — а панель на такой строке
+ * обязана сказать то же, что говорит редактор шага сегодня («non-standard combination — <тип>»,
+ * `operations-field.tsx`), и сказать это СВОИМ словарём: третья копия фразы жила бы здесь.
+ */
+export function printedName(catalog: WorkCatalog, step: RatifyStep): string {
+  const naming = workNaming(catalog, step.work);
+  if (naming.kind !== 'derived') return naming.text;
+  const kind = kindOf(step);
+  return kind ? kindLabelOf(kind) : '';
+}
+
+/** Пункт каталога → предложение. Предупреждение прорези привешивается здесь, где бы она ни встала. */
+const proposalFrom = (item: WorkItem): RatifyProposal => {
+  const out: RatifyProposal = { token: item.token, label: item.label };
+  if (item.token === SLIT_OVERCAST_WORK) out.warn = SLIT_WARN;
+  return out;
+};
+
+/**
+ * РАБОТА ЭТОГО ПУНКТА, если каталог её знает и предлагает. `undefined` — законный ответ: у пункта
+ * может не быть токена вовсе (`G0` называет ОТСУТСТВИЕ приёма, и в каталоге работ его нет и не
+ * будет), а каталог может быть старее бандла.
+ */
+const ownProposal = (
+  catalog: WorkCatalog,
+  kind: OperationKind | undefined,
+): RatifyProposal | undefined => {
+  const token = kind ? KIND_WORK_TOKEN[kind.id] : '';
+  const item = token ? catalog.byToken.get(token) : undefined;
+  return item && !item.retired ? proposalFrom(item) : undefined;
+};
+
+type Verdict = { tier: RatifyTier; proposals: RatifyProposal[] };
+
+const silent = (tier: RatifyTier): Verdict => ({ tier, proposals: [] });
+
+/** Одно предложение — или честная дыра каталога, если работы в нём нет. */
+const oneOrGap = (p: RatifyProposal | undefined): Verdict =>
+  p ? { tier: 'ratify-derived', proposals: [p] } : silent('catalog-gap');
+
+/**
+ * ЯРУС A: ДВА ПРЕДЛОЖЕНИЯ, И ОБА — ЧЛЕНЫ СУЩЕСТВУЮЩИХ СЛОВАРЕЙ.
+ *
+ * Первое — ратификация: `kindOf` уже отвечает свалочным пунктом, каталожный ярлык его токена и есть
+ * то, что кнопка запишет. Второе — тот же токен ПЛЮС класс шва `LS_LAPPED`; подпись собирается из
+ * ДВУХ существующих подписей (ярлык работы из каталога + подпись класса шва), клиент не сочиняет ни
+ * слова.
+ *
+ * ПОРЯДОК КНОПОК — ПРЕДСТАВЛЕНИЕ. Замерено: из 44 прочитанных пар входов 39 — симметричная или
+ * дополняющая родня одного семейства, пять — «маленькая деталь на большую». Но вывести из этого
+ * ПРАВИЛО значило бы различать работу по префиксу имени детали, а имена деталей — не описание
+ * карточки. Кнопок две, жмёт человек.
+ */
+const joinTier = (catalog: WorkCatalog): Verdict => {
+  const item = catalog.byToken.get(KIND_WORK_TOKEN[DUMP_KIND_ID]);
+  if (!item || item.retired) return silent('catalog-gap');
+  const lappedLabel = seamClassLabel(LAPPED_SEAM_CLASS);
+  return {
+    tier: 'join',
+    proposals: [
+      proposalFrom(item),
+      {
+        ...proposalFrom(item),
+        label: `${item.label} · ${lappedLabel}`,
+        extra: { field: 'seamClass', value: LAPPED_SEAM_CLASS, label: lappedLabel },
+      },
+    ],
+  };
+};
+
+/**
+ * ПОРЯДОК ПРАВИЛ ФИКСИРОВАН, И КАЖДОЕ ОТВЕЧАЕТ НА СВОЙ ВОПРОС.
+ *
+ * 1. Работа записана — ратифицировать нечего.
+ * 2. Резолв ответил ПУНКТОМ-СОСТОЯНИЕМ (`stateOnly`, сегодня это ровно `G0`). Такой пункт называет
+ *    ОТСУТСТВИЕ факта, а отсутствие не выбирают: предложений ноль, и панель ведёт к контролу приёма.
+ * 3. Машинный шаг (или шаг без глагола) без входов вовсе — показывается, не предлагается ничего.
+ * 4. Шаг не машинный — отвечает его собственный пункт, если каталог знает его работу.
+ * 5. КЛАСС ШВА ЗАПИСАН. Он старше вывода: это ответ человека, лежащий в своей колонке.
+ *    · пункт пишет ИМЕННО ЭТОТ класс как свою личность (отстрочка, `A2` → `OS_TOPSTITCH`) — запись
+ *      однозначна, предложение одно;
+ *    · класс — `LS_LAPPED` на свалочном пункте с двумя входами: это ровно та пара, которую
+ *      предлагает ярус A, и предложить её ещё раз законно;
+ *    · иначе — ДЫРА КАТАЛОГА. `ef_hem_turned` говорит «подгиб, сложенный вдвое», а работы «подгиб
+ *      на прямострочке» в каталоге нет вовсе, и `kindOf` печатает такой строке «Join — lockstitch»,
+ *      что почти наверняка ложь. Экран показывает класс шва и молчит.
+ * 6. ЗАПИСЬ ОТВЕЧАЕТ СВЕРХ ДВУХ ОСЕЙ — спрашиваем РЕЗОЛВ ДВАЖДЫ: на шаге как есть и на шаге,
+ *    оставленном при глаголе и машинке. Разные ответы значат, что сработал дискриминатор (шов
+ *    этикетки → «пришить этикетку»), то есть запись САМА назвала работу. Второй список
+ *    дискриминаторов здесь разошёлся бы с первым молча — тем же приёмом спрашивает себя `kindClears`.
+ * 7. СВАЛОЧНЫЙ ПУНКТ. Два и более входа — ярус A; иначе РАСХОЖДЕНИЕ: карточка печатает «join», а
+ *    граф сборки говорит «один вход».
+ * 8. Прочие машинки — всё, что каталог допускает на этой машинке. Оверлок даёт одну работу, зигзаг
+ *    две; прямострочка сюда не доходит НИКОГДА (её забрало правило 7), и это не случайность: на ней
+ *    каталог допускает четыре работы, и четыре кнопки на восьмидесяти строках были бы не
+ *    предложением, а шумом.
+ */
+const classify = (catalog: WorkCatalog, step: RatifyStep): Verdict => {
+  if ((step.work ?? '').trim()) return silent('named');
+
+  const kind = kindOf(step);
+  if (kind?.stateOnly) return silent('press-action-missing');
+
+  const verb = (step.operationType ?? '').trim();
+  const isMachine = verb === MACHINE_VERB;
+  const inputs = inputCount(step);
+
+  // ВХОДЫ СПРАШИВАЮТСЯ ТАМ, ГДЕ ОНИ ОТВЕЧАЮТ НА ВОПРОС ОБ ИМЕНИ: у машинного шва (соединять не с
+  // чем — значит имя «join» под вопросом) и у строки, которой не назвали даже глагола. Упаковка,
+  // контроль, обрезка ниток законно не несут входов вовсе, и молчать на них значило бы объявить
+  // исправную запись неполной.
+  if (inputs === 0 && (isMachine || unset(verb))) return silent('no-inputs');
+
+  if (!isMachine) return oneOrGap(ownProposal(catalog, kind));
+
+  // ГРАНИЦА ЯРУСА A — АРНОСТЬ ВХОДОВ, и она несущая. Дополнительность замерена: 80 строк несут два и
+  // более входа, 79 из них ПРОИЗВОДЯТ УЗЕЛ, и ни одна строка с одним входом не производит ничего.
+  // Снять эту границу значит предложить «join» строке, которой не с чем соединяться, — то есть
+  // ратифицировать напечатанное там, где именно оно и вызывает сомнение.
+  const joinable = inputs >= 2;
+
+  const seamClass = (step.seamClass ?? '').trim();
+  if (!unset(seamClass)) {
+    if (kind?.writes?.seamClass === seamClass) return oneOrGap(ownProposal(catalog, kind));
+    if (seamClass === LAPPED_SEAM_CLASS && kind?.id === DUMP_KIND_ID && joinable) {
+      return joinTier(catalog);
+    }
+    return silent('catalog-gap');
+  }
+
+  const bare = kindOf({ operationType: step.operationType, machineType: step.machineType });
+  if (kind && kind.id !== bare?.id) return oneOrGap(ownProposal(catalog, kind));
+
+  if (kind?.id === DUMP_KIND_ID) return joinable ? joinTier(catalog) : silent('contradiction');
+
+  const works = worksForMachine(catalog, step.machineType ?? '');
+  if (works.length === 0) return silent('catalog-gap');
+  return { tier: 'ratify-derived', proposals: works.map(proposalFrom) };
+};
+
+/**
+ * ФАКТЫ ЗАПИСИ — КОРОТКО И КАЖДЫЙ СО СВОИМ ИСТОЧНИКОМ.
+ *
+ * НАПЕЧАТАННОЕ ИМЯ ВСТАЁТ В ФАКТЫ РОВНО НА РАСХОЖДЕНИИ, и это не дублирование `printedNow`: на всех
+ * прочих ярусах имя — то, что панель предлагает подтвердить, а здесь оно — ОДНА ИЗ ДВУХ ПОЛОВИН
+ * противоречия, и рядом со второй половиной («один вход») его надо видеть глазом.
+ *
+ * ИМЁН ДЕТАЛЕЙ ЗДЕСЬ НЕТ. До деталей шаг дотягивается спуском по графу сборки (R5), спуск умеет
+ * оборваться и честно сказать «неполон», и печатать «узел SHELL» вместо списка деталей — решение
+ * панели, а не классификатора. Арность входов, на которой стоят ярусы, спуска не требует.
+ */
+const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): string[] => {
+  const out: string[] = [];
+  if (tier === 'contradiction' && printedNow) out.push(`printed as "${printedNow}"`);
+
+  const n = inputCount(step);
+  const unit = (step.outputUnitKey ?? '').trim();
+  const inputs = n === 0 ? 'no inputs recorded' : n === 1 ? '1 input' : `${n} inputs`;
+  out.push(unit ? `${inputs} · produces unit "${unit}"` : inputs);
+
+  const cls = seamClassLabel(step.seamClass);
+  if (cls) out.push(`seam class: ${cls}`);
+
+  const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
+  if (zone) out.push(`zone: ${zone}`);
+
+  const note = ((step.note ?? '').trim().split('\n')[0] ?? '').trim();
+  if (note) out.push(`note: ${note}`);
+
+  return out;
+};
+
+/** Одна строка панели. `index` — позиция шага в `operations` формы, с нуля. */
+export function ratifyStep(step: RatifyStep, index: number, catalog: WorkCatalog): RatifyRow {
+  const printedNow = printedName(catalog, step);
+  const { tier, proposals } = classify(catalog, step);
+  return { index, tier, printedNow, evidence: evidenceOf(step, tier, printedNow), proposals };
+}
+
+/**
+ * ВСЯ КАРТОЧКА, В ПОРЯДКЕ ОПЕРАЦИЙ И ЦЕЛИКОМ — включая строки с уже записанной работой.
+ *
+ * Панель, показывающая только неназванные, показывала бы дырявую карточку и лишала бы человека
+ * контекста «а как названы соседи»; ярус `named` для того и заведён, чтобы такую строку было чем
+ * приглушить.
+ */
+export function ratifyCard(steps: readonly RatifyStep[], catalog: WorkCatalog): RatifyRow[] {
+  return steps.map((step, i) => ratifyStep(step, i, catalog));
+}
