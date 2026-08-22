@@ -42,6 +42,8 @@ type WorkPickerProbe = {
   readBack: (op: Record<string, unknown>) => Record<string, unknown> | undefined;
   /** Инвентарь снимка бандла — тот самый фолбэк, которым живёт пикер без каталога. */
   bundle: () => { items: number; offered: number; tokens: number; uniq: number };
+  /** Щит осведомлённости: пятый aware-флаг, который КАЖДАЯ запись обязана объявлять. */
+  aware: () => boolean | undefined;
 };
 declare global {
   interface Window {
@@ -65,6 +67,14 @@ probe.readBack = (op) => {
   const wire = probe.wire(op);
   const form = mapTechCardToForm({ techCard: { operations: [wire] } } as never);
   return (form.operations ?? [])[0] as unknown as Record<string, unknown>;
+};
+
+probe.aware = () => {
+  const data = {
+    ...techCardDefaultData,
+    operations: [{ ...emptyOperation }],
+  } as unknown as TechCardFormData;
+  return mapFormToTechCardInsert(data, undefined, true).operationWorkAware;
 };
 
 probe.bundle = () => {

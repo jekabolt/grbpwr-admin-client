@@ -315,11 +315,6 @@ export const BUNDLED_WORK_CATALOG: WorkCatalog = (() => {
   };
 })();
 
-// Группы снимка подписываются семействами бандла — тем же словарём, каким они подписаны в пикере
-// до этой фазы. Регистрируется здесь, чтобы `groupWorks` не знала про два источника.
-for (const [family, label] of Object.entries(KIND_FAMILY_LABEL)) {
-  (STAGE_LABEL as Record<string, string>)[`fam_${family}`] = label;
-}
 
 // --- ДЕФОЛТЫ: ИМЕНА И ЗНАЧЕНИЯ -------------------------------------------------------------------
 
