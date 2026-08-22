@@ -11,6 +11,7 @@ import { mediaAspect } from './sample-cut-views';
 import { TechCardFormData } from './schema';
 import {
   attachmentOptions,
+  densityText,
   operationHeading,
   seamClassOptions,
   topstitchPhrase,
@@ -81,9 +82,17 @@ function specLine(o: FormOperation, pieceNames: string[]): string {
   return [
     pieceNames.join(' + '),
     label(seamClassOptions, o.seamClass, 'TECH_CARD_SEAM_CLASS_UNKNOWN'),
-    // STITCHES PER CENTIMETRE. It was labelled «SPI» (stitches per inch) here while every other
-    // surface said st/cm — two different quantities under one number.
-    o.stitchesPerCm?.trim() ? `${o.stitchesPerCm.trim()} st/cm` : '',
+    // ПЛОТНОСТЬ И ДЛИНА — ОДНИМ СОСТАВИТЕЛЕМ (`densityText`), ровно по той же причине, что и фраза
+    // отстрочки двумя строками ниже. Здесь стояла ручная сборка, и она теряла ВТОРУЮ ПОЛОВИНУ
+    // чтения: длина стежка в мм не хранится нигде — она считается как `10 / плотность`, и формула
+    // живёт в одном экземпляре (`stitchLengthMm`) затем, чтобы бумага не начала округлять иначе,
+    // чем экран. Карта примерки и была той самой третьей копией, только урезанной до половины: у
+    // оператора, у которого на машинке диал ДЛИНЫ СТЕЖКА, «4 st/cm» без «(2.5 мм)» превращается в
+    // деление в уме, у станка.
+    //
+    // (Ярлык здесь когда-то говорил «SPI» — стежки на ДЮЙМ — пока все прочие поверхности говорили
+    // st/cm: две разные величины под одним числом. Общий составитель закрывает и это навсегда.)
+    densityText(o.stitchesPerCm),
     o.seamAllowanceMm?.trim() ? `SA ${o.seamAllowanceMm.trim()} mm` : '',
     // ОДИН СОСТАВИТЕЛЬ ФРАЗЫ НА СХЕМУ И НА ЛИСТ (topstitchPhrase), поэтому бумага и карта сборки
     // не могут сказать про один шаг разное. Миллиметры приезжают С ЛИНИЕЙ, от которой их меряют:
