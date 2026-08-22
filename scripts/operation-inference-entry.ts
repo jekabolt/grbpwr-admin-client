@@ -20,6 +20,10 @@ export {
   PURPOSE_ZONE_DRAFT,
 } from 'components/managers/tech-card/components/operation-inference';
 
+// Селект зоны — та граница, о которую разбилась бы правка словаря: зона, которой нет в пикере,
+// подставилась бы значением, которое человек не может ни увидеть подписью, ни выбрать сам.
+export { zoneOptions } from 'components/managers/tech-card/components/operation-options';
+
 import type { InferenceCard } from 'components/managers/tech-card/components/operation-inference';
 
 export const emptyCard: InferenceCard = {

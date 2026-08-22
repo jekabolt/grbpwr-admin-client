@@ -35,8 +35,14 @@
 import { UNSET_PURPOSE, scopeKeyOfBinding } from './bom-purpose';
 // СКОУПЫ ТКАНЕЙ — ТОЙ ЖЕ СБОРКОЙ, ЧТО У ВКЛАДКИ ДЕТАЛЕЙ И РЕЦЕПТА. Фильтр «роллгудс и со
 // стабильным ключом» — часть контракта, а не подробность: пропусти его один читатель, и привязка
-// зарезолвится у него в скоуп, которого у соседа нет.
-import { rollGoodsScopes } from './piece-block-refs';
+// зарезолвится у него в скоуп, которого у соседа нет. `pieceRefKey` — вторая половина того же
+// контракта: ключ детали в СВЯЗКЕ фолдится (trim + нижний регистр — так пишут диалог
+// сопоставления и сервер), и читатель, ищущий сырым ключом, промахнётся мимо живой связи — а
+// промах здесь не «нет подсказки», промах открывает резервный ход по имени, то есть ЛОЖНУЮ
+// подсказку слабым источником там, где сильный знал ответ (найдено ревью R5 мутацией).
+// Внутри графа сборки при этом ключи ПОБАЙТНЫЕ, как у прохода правил (`assembly-frontier.ts:109`):
+// фолдится только шов «деталь ↔ связка», потому что только через него пишут чужие руки.
+import { pieceRefKey, rollGoodsScopes } from './piece-block-refs';
 import { kindOf } from './operation-kinds';
 import { isMachineStepType, isPressStepType, pressProfileFitsStep } from './equipment-options';
 
@@ -419,9 +425,12 @@ function indexCard(card: InferenceCard): CardIndex {
 
   const scopes = rollGoodsScopes(card.bomLines);
 
+  // Ключ — pieceRefKey, ПО КОНТРАКТУ СВЯЗОК: связка хранит ключ детали свёрнутым (trim + нижний
+  // регистр), и сырое сравнение промахивалось мимо живого назначения — а промах открывал резервный
+  // ход по имени, то есть ложную подсказку там, где данные знали другой ответ.
   const purposeOfPiece = new Map<string, string>();
   for (const a of card.aliases) {
-    const piece = (a.pieceLineKey ?? '').trim();
+    const piece = pieceRefKey(a.pieceLineKey ?? '');
     if (!piece || !(a.blockName ?? '').trim()) continue;
     const key = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes);
     if (!key || !key.startsWith('TECH_CARD_BOM_PURPOSE_') || key === UNSET_PURPOSE) continue;
@@ -468,12 +477,17 @@ function fabricOpinion(leaves: string[], idx: CardIndex): SourceOpinion {
   if (leaves.length === 0) return { id: 'fabric', zones: [] };
   const purposes = new Set<string>();
   for (const key of leaves) {
-    const direct = idx.purposeOfPiece.get(key);
+    const direct = idx.purposeOfPiece.get(pieceRefKey(key));
+    // МЕТКА '' — НЕ «НЕТ СВЯЗИ», А «СВЯЗИ ДВЕ И ОНИ СПОРЯТ»: деталь нарисована блоками из разных
+    // полос, и сильный источник ответил «неоднозначно». Резервный ход по имени здесь ЗАПРЕЩЁН:
+    // слабый источник, перекрикивающий сильный, — это ложная подсказка с полной уверенностью
+    // (деталь из верха и карманки, названная `LIN_INS`, предлагала «подклад» — найдено ревью R5).
+    if (direct === '') return { id: 'fabric', zones: [] };
     if (direct) {
       purposes.add(direct);
       continue;
     }
-    // Резерв: связи с блоком нет (или блоков два из разных полос) — читаем ось ткани из имени.
+    // Резерв ТОЛЬКО для детали, у которой связи с блоком нет вовсе: читаем ось ткани из имени.
     // Тот же ответ на тот же вопрос, только слабее источником.
     const fromName = zonesFromPieceName(idx.pieceName.get(key) ?? '').fabric;
     if (fromName.length === 1 && fromName[0] === 'TECH_CARD_GARMENT_ZONE_LINING') {

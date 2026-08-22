@@ -24,7 +24,12 @@
 //   К. ЦИКЛ НЕ ВЕШАЕТ: взаимные ссылки узлов заканчиваются признанием «спуск неполон»;
 //   Л. НОРМА ВРЕМЕНИ — гоуст «в прошлый раз», и только от шага ТОГО ЖЕ вида РАНЬШЕ по карточке;
 //   М. ЖИВОЙ DOM: метка «suggested» видна, значение стоит в поле, касание метки снимает и то и
-//      другое, подстановка НЕ помечает форму грязной, а на конфликте метки нет вовсе.
+//      другое, подстановка НЕ помечает форму грязной, а на конфликте метки нет вовсе. Сверх того
+//      (ревью R5): очистка пикером поверх подставленного НЕ возвращает значение под курсором;
+//      смена выбранного шага ОТЗЫВАЕТ неснятую подстановку (значение не живёт дольше метки);
+//      заполненные утюг и нитка не переписываются ЖИВЫМ редактором (гвоздь в шов Ф4 — стирание
+//      через вайтлист имён с `shouldDirty: false` разметочные проверки роундтрипа не поймали бы);
+//      и ни одно монтирование не упало — «метки нет» над крушением не считается молчанием.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ:
 //   node scripts/operation-inference-probe.mjs                    прогон
@@ -45,6 +50,18 @@
 //   --mutate-case       → 16 провалов: заглавные имена прода (`FP_OS`, `SL_OUT_L`) перестают
 //                         разбираться вовсе, потому что заглавная буква становится разделителем.
 //                         Откатано.
+//
+// МУТАЦИИ РЕВЬЮ R5 (2026-08-22), сверх авторских. До усиления пробы все четыре проходили ЗЕЛЁНЫМИ:
+//   · битое имя скипается вместо гашения источника → фикстура держала битую деталь только в
+//     одиночку, и сосед FP_OS дарил шагу «front»;
+//   · спуск берёт только ПОСЛЕДНЕГО производителя узла → вилка (узел произведён дважды) теряла
+//     половину листьев и подсказывала «back» по оставшейся;
+//   · метка '' детали из двух полос открывала резерв по имени → «lining» на детали из верха и
+//     карманки, reason: ok (живой дефект кода, починен этим же ревью);
+//   · сырой ключ связки (без свёртки `pieceRefKey`) → промах мимо живого назначения и снова
+//     «lining» по имени (живой дефект кода, починен этим же ревью).
+// Первые две были вакуумом пробы, последние две — дефектами кода. Все четыре теперь красные:
+// 2/2/2/1 провалов соответственно, каждая — своей именной цитатой.
 //
 // Половина «живой DOM» требует playwright: он не в зависимостях, ищется в кэше npx и МОЛЧА
 // пропускается. Функциональные цитаты считаются в node и красят пробу всегда.
@@ -124,6 +141,9 @@ const {
   zonesFromPieceName,
   emptyCard,
   PIECE_NAME_ZONE_DRAFT,
+  PURPOSE_ZONE_DRAFT,
+  KIND_ZONE_DRAFT,
+  zoneOptions,
 } = await import(pathToFileURL(outfile).href);
 rmSync(outfile, { force: true });
 
@@ -244,6 +264,44 @@ head('цитата А — вход-узел раскрывается до дет
   ck(d.unitsExpanded === 2, 'раскрыты оба узла', `раскрыто ${d.unitsExpanded}`);
 }
 
+{
+  // ПОГЛОЩЕНИЕ: `BODY + рукав → BODY` дописывает узел ВТОРЫМ шагом, и листья несут ОБА
+  // производителя (правило спуска, названное в шапке модуля словами — теперь и цитатой).
+  const absorb = card({
+    steps: [
+      sew(['p-fp', 'p-bp'], { outputUnitKey: 'BODY' }),
+      sew(['BODY', 'p-sl-l'], { outputUnitKey: 'BODY' }),
+      sew(['BODY']),
+    ],
+  });
+  const da = stepPieceLeaves(absorb, 2);
+  ck(
+    da.complete && da.pieces.join(',') === 'p-fp,p-bp,p-sl-l',
+    'поглощение: спуск собрал листья обоих производителей',
+    da.pieces.join(', ') || '(пусто)',
+  );
+
+  // ВИЛКА: узел произведён дважды НЕЗАВИСИМО. Проход правил такой черновик отвергнет, но
+  // подсказка живёт именно на черновиках — и спуск обязан взять ОБОИХ производителей: «последний
+  // побеждает» терял бы половину листьев и рождал ложную подсказку по оставшейся половине
+  // (мутация ревью R5: `producers.slice(-1)` проходила пробу зелёной).
+  const fork = card({
+    steps: [
+      sew(['p-fp'], { outputUnitKey: 'K' }),
+      sew(['p-bp'], { outputUnitKey: 'K' }),
+      sew(['K']),
+    ],
+  });
+  const df = stepPieceLeaves(fork, 2);
+  ck(
+    df.pieces.join(',') === 'p-fp,p-bp',
+    'вилка: листья обоих производителей, а не «последнего»',
+    df.pieces.join(', ') || '(пусто)',
+  );
+  const zf = inferZone(fork, 2);
+  ck(zf.value === '', 'и по вилке молчим: полочка против спинки', zf.value || '(молчит)');
+}
+
 // ─── ЦИТАТА Б: один кандидат — подсказка ────────────────────────────────────────────────────────
 head('цитата Б — кандидат один: подсказка есть');
 
@@ -320,6 +378,18 @@ head('цитата Г — по бессистемным и битым имена
     zonesFromPieceName('?_8').area.length === 0 && zonesFromPieceName('?_8').fabric.length === 0,
     'битое имя не даёт ни одной оси',
   );
+
+  // Битое имя СРЕДИ здоровых гасит источник имён ЦЕЛИКОМ: «в имени нет наших токенов» — не то же
+  // самое, что «имя говорит о другой области». Скип битой детали оставлял бы FRONT от соседки —
+  // подсказка по недосмотренному множеству (мутация ревью R5: `continue` вместо гашения
+  // проходила пробу зелёной, потому что битое имя жило в фикстуре только в одиночку).
+  const mixed = inferZone(card({ steps: [sew(['p-broken', 'p-fp'])] }), 0);
+  ck(mixed.value === '', 'битое имя среди здоровых — молчание, а не FRONT', mixed.value || '(молчит)');
+  ck(
+    !mixed.sources.some((s) => s.id === 'piece-name'),
+    'мнение имён не образуется вовсе',
+    mixed.sources.map((s) => s.id).join(', ') || '(пусто)',
+  );
 }
 
 // ─── ЦИТАТА Д: цепочка ткани ────────────────────────────────────────────────────────────────────
@@ -343,6 +413,51 @@ head('цитата Д — ткань читается по цепочке «де
     !halfKnown.sources.some((s) => s.id === 'fabric'),
     'деталь без назначения гасит источник ткани',
     halfKnown.sources.map((s) => s.id).join(', '),
+  );
+
+  // ДЕТАЛЬ ИЗ ДВУХ ПОЛОС: её же связки говорят «верх» и «карманка», то есть сильный источник
+  // ответил «неоднозначно». Резервный ход по имени тут ЗАПРЕЩЁН: имя `LIN_INS` кричит «подклад»,
+  // и слабый источник, перекрикивающий сильный, — это ложная подсказка с полной уверенностью
+  // (найдено ревью R5: до починки этот вход отвечал «lining», reason: ok).
+  const twoCloths = inferZone(
+    card({
+      pieces: [...PIECES, { lineKey: 'p-two', name: 'LIN_INS' }],
+      aliases: [
+        ...ALIASES,
+        { pieceLineKey: 'p-two', blockName: 'LIN_INS_A', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN' },
+        {
+          pieceLineKey: 'p-two',
+          blockName: 'LIN_INS_B',
+          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_POCKETING',
+        },
+      ],
+      steps: [sew(['p-two'])],
+    }),
+    0,
+  );
+  ck(twoCloths.value === '', 'деталь из двух полос: имя не перекрикивает связки', twoCloths.value || '(молчит)');
+  ck(
+    !twoCloths.sources.some((s) => s.id === 'fabric'),
+    'источник ткани погашен, а не подменён именем',
+    twoCloths.sources.map((s) => s.id).join(', ') || '(пусто)',
+  );
+
+  // КЛЮЧ ДЕТАЛИ В СВЯЗКЕ ХРАНИТСЯ СВЁРНУТЫМ (trim + нижний регистр — контракт `pieceRefKey`, так
+  // пишут диалог сопоставления и сервер). Сырое сравнение промахивалось мимо живого назначения и
+  // открывало резервный ход по имени: `LIN_2` с связкой на карманку отвечал «lining»
+  // (найдено ревью R5). Внутри графа сборки ключи при этом остаются побайтными, как у прохода.
+  const folded = inferZone(
+    card({
+      pieces: [...PIECES, { lineKey: 'P-CASE', name: 'LIN_2' }],
+      aliases: [...ALIASES, { pieceLineKey: 'p-case', blockName: 'LIN_2', bomLineKey: 'b-pocketing' }],
+      steps: [sew(['P-CASE'])],
+    }),
+    0,
+  );
+  ck(
+    folded.value === Z('POCKET'),
+    'связка со свёрнутым ключом найдена: отвечает ткань, а не имя',
+    folded.value || '(молчит)',
   );
 }
 
@@ -510,6 +625,21 @@ head('цитата И — регистр имени ничего не решае
   ck(
     PIECE_NAME_ZONE_DRAFT.every((r) => r.token === r.token.toLowerCase()),
     'сам словарь написан в нижнем регистре — иначе половина строк недостижима',
+  );
+
+  // Правка словаря — одна строка одной таблицы, и эта цитата держит её границу: зона, которой нет
+  // в пикере, подставилась бы значением, которое человек не может ни прочитать подписью, ни
+  // выбрать сам (ровно поэтому в словаре нет cuff/hood/yoke).
+  const legal = new Set(zoneOptions.map((o) => o.value));
+  const drafted = [
+    ...PIECE_NAME_ZONE_DRAFT.map((r) => r.zone),
+    ...Object.values(PURPOSE_ZONE_DRAFT),
+    ...Object.values(KIND_ZONE_DRAFT),
+  ];
+  ck(
+    drafted.every((z) => legal.has(z)),
+    'каждая зона всех трёх словарей — значение, которое примет селект',
+    drafted.filter((z) => !legal.has(z)).join(', ') || '(все легальны)',
   );
 }
 
@@ -715,6 +845,129 @@ if (!chromium) {
   await page.waitForTimeout(400);
   ck((await zoneOf()) === Z('HEM'), 'заполненная зона не переписана', String(await zoneOf()));
   ck(!(await has('[data-suggested="zone"]')), 'и метки над чужим ответом нет');
+
+  // (5) Человек ОЧИСТИЛ поле пикером («— zone —») поверх подставленного. Пустота — тоже его
+  // ответ: подстановка не возвращается под курсором, метка уходит. До починки ревью R5 значение
+  // вставало обратно тем же кадром, селект выглядел сломанным, и единственным работающим жестом
+  // снятия оставалась метка.
+  await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-sl-l', 'p-sl-r'])]));
+  await settle('[data-suggested="zone"]');
+  if (await has('[data-suggested="zone"]')) {
+    await page.getByRole('combobox').filter({ hasText: 'sleeve' }).first().click();
+    await page.getByRole('option', { name: '— zone —' }).click();
+    await page.waitForTimeout(500);
+  }
+  ck(
+    unset(await zoneOf()),
+    'очищенная пикером зона осталась пустой — подстановка не вернулась',
+    String(await zoneOf()),
+  );
+  ck(!(await has('[data-suggested="zone"]')), 'и метка ушла вместе со значением');
+
+  // (6) ПОДСТАВЛЕННОЕ НЕ ЖИВЁТ ДОЛЬШЕ СВОЕЙ МЕТКИ. Смена выбранного шага размонтирует редактор
+  // вместе с меткой — и обязана отозвать неснятую подстановку: иначе значение оставалось бы в
+  // форме БЕЗ метки, при следующем открытии шага сходило бы за ответ человека («чужой ответ не
+  // трогаем») и уезжало с сохранением немаркированным фактом (найдено ревью R5).
+  await page.evaluate(
+    (c) => window.__inference.mount(c),
+    formCard([sew(['p-sl-l', 'p-sl-r']), sew(['p-fp'])]),
+  );
+  await settle('[data-suggested="zone"]');
+  ck((await zoneOf()) === Z('SLEEVE'), 'перед сменой шага подсказка стоит', String(await zoneOf()));
+  await page.locator('[role="button"][aria-current="false"]').first().click();
+  try {
+    await page.waitForFunction(
+      () => {
+        const z = window.__inference.values()[0]?.zone;
+        return !z || z === 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
+      },
+      undefined,
+      { timeout: 12000 },
+    );
+  } catch {
+    /* не отозвано — это провал цитаты ниже, а не крушение пробы */
+  }
+  ck(
+    unset((await page.evaluate(() => window.__inference.values()))[0]?.zone),
+    'смена шага отозвала неснятую подстановку — значение не живёт дольше метки',
+    String((await page.evaluate(() => window.__inference.values()))[0]?.zone),
+  );
+
+  // (7) ШОВ С Ф4, ГВОЗДЁМ ПО ИМЕНИ ИЗ ВАЙТЛИСТА: `pressEquipment` на ЗАПОЛНЕННОМ шаге не
+  // переписывается. Исключение выдано подстановке в пустое, а не праву писать по имени: стирание
+  // через вайтлист с `shouldDirty: false` прошло бы обе разметочные проверки роундтрипа — держит
+  // его только живой редактор.
+  const PARK_ONE_IRON = {
+    equipmentDefaults: {
+      machines: [],
+      presses: [
+        { profileKey: 'PR1', pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_IRON', label: 'iron by the window' },
+      ],
+    },
+  };
+  await page.evaluate((c) => window.__inference.mount(c), {
+    ...formCard([
+      {
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+        inputKeys: ['p-fp'],
+        pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAMER',
+      },
+    ]),
+    construction: PARK_ONE_IRON,
+  });
+  await settle('[data-kind-picker]');
+  await page.waitForTimeout(400);
+  {
+    const op = (await page.evaluate(() => window.__inference.values()))[0];
+    ck(
+      op?.pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_STEAMER',
+      'заполненный утюг не переписан единственным профилем парка',
+      String(op?.pressEquipment),
+    );
+    ck(!(await has('[data-suggested="press"]')), 'и метки над ним нет');
+  }
+
+  // (8) А пустому ВТО-шагу единственный профиль парка предложен ПАРОЙ (оборудование + ключ) и с
+  // меткой — половина ответа заставляла бы человека дописывать вторую вторым жестом.
+  await page.evaluate((c) => window.__inference.mount(c), {
+    ...formCard([{ operationType: 'TECH_CARD_OPERATION_TYPE_PRESS', inputKeys: ['p-fp'] }]),
+    construction: PARK_ONE_IRON,
+  });
+  await settle('[data-suggested="press"]');
+  ck(await has('[data-suggested="press"]'), 'пустому ВТО-шагу предложен единственный профиль парка');
+  {
+    const op = (await page.evaluate(() => window.__inference.values()))[0];
+    ck(
+      op?.pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_IRON' && op?.pressProfileKey === 'PR1',
+      'оборудование и ключ профиля встали парой',
+      `${String(op?.pressEquipment)} / ${String(op?.pressProfileKey)}`,
+    );
+  }
+
+  // (9) Нитка тем же гвоздём: привязанная РУКАМИ не тронута и не задвоена, метки над ней нет;
+  // пустому шагу единственная нитка BOM предложена — и названа подстановкой.
+  await page.evaluate(
+    (c) => window.__inference.mount(c),
+    formCard([sew(['p-fp'], { bomLineKeys: ['b-thread'] })]),
+  );
+  await settle('[data-kind-picker]');
+  await page.waitForTimeout(400);
+  {
+    const op = (await page.evaluate(() => window.__inference.values()))[0];
+    ck(
+      JSON.stringify(op?.bomLineKeys) === '["b-thread"]',
+      'привязанная руками нитка не тронута и не задвоена',
+      JSON.stringify(op?.bomLineKeys),
+    );
+    ck(!(await has('[data-suggested="thread"]')), 'и метки над ней нет');
+  }
+  await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-fp'])]));
+  await settle('[data-suggested="thread"]');
+  ck(await has('[data-suggested="thread"]'), 'единственная нитка BOM предложена — и названа подстановкой');
+
+  // (10) Ни одно монтирование не уронило редактор. Без этой строки «метки нет» над крушением
+  // читалось бы молчанием вывода — ложная зелень той же породы, что textContent-склейка.
+  ck(pageErrors.length === 0, 'все монтирования прожиты без исключений', pageErrors[0] ?? '');
 
   await browser.close();
 }

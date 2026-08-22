@@ -2306,7 +2306,8 @@ function OperationEditor({
   /** Карточка выпущена: снимки и выноски читаются, но не правятся. */
   frozen?: boolean;
 }) {
-  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const form = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = form;
   const opNumber = (index + 1) * 10;
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
@@ -3381,6 +3382,18 @@ function OperationEditor({
     press?: { equipment: string; profileKey: string };
   }>({});
 
+  // «ЧЕЛОВЕК ОЧИСТИЛ ПОЛЕ» РАСПОЗНАЁТСЯ ФОКУСОМ, А НЕ ЗНАЧЕНИЕМ, и это не вкус, а замер. Пустота
+  // в поле при живой подстановке случается ДВАЖДЫ: регистрация контрола после монтирования формы
+  // сбрасывает поле к дефолту (та самая ловушка «значение до монтирования» — видна на живом
+  // бандле), и человек выбирает «—…—» пикером. По значению они неразличимы: маппер чтения кладёт
+  // в пустую зону ЯВНЫЙ `UNKNOWN` (`schema.ts`, `o.zone || UNKNOWN`), то есть сброс и жест пишут
+  // одну и ту же строку. Различает их фокус: сброс регистрации не фокусирует ничего, человек —
+  // всегда. До касания контрола пустота лечится ПОВТОРНОЙ подстановкой (как и было), после —
+  // принимается ответом: пустота тоже ответ, и подставлять обратно под курсором нельзя, иначе
+  // селект выглядит сломанным, а единственным работающим жестом снятия остаётся метка.
+  const zoneTouchedRef = useRef(false);
+  const pressTouchedRef = useRef(false);
+
   const inference = useStepInference(index, pieces, bomLines, parkPresses, {
     zone: wroteRef.current.zone !== undefined,
     thread: wroteRef.current.thread,
@@ -3423,6 +3436,13 @@ function OperationEditor({
     const ours = wroteRef.current.zone;
     if (ours !== undefined && !zoneIsUnset(zoneValue) && zoneValue !== ours) {
       dismiss('zone'); // человек выбрал своё поверх подставленного — значение остаётся ему
+      return;
+    }
+    // ЧЕЛОВЕК ОЧИСТИЛ ПОЛЕ ПИКЕРОМ («— zone —») ПОВЕРХ ПОДСТАВЛЕННОГО. Пустота — тоже его ответ.
+    // Жест распознаётся фокусом (см. довод у `zoneTouchedRef`): сброс регистрации контрола пишет
+    // ту же пустоту, но без фокуса, — и лечится повторной подстановкой ветками ниже.
+    if (ours !== undefined && zoneIsUnset(zoneValue) && zoneTouchedRef.current) {
+      dismiss('zone');
       return;
     }
     if (ours === undefined && !zoneIsUnset(zoneValue)) return; // чужой ответ не трогаем никогда
@@ -3488,6 +3508,13 @@ function OperationEditor({
       dismiss('press');
       return;
     }
+    // Человек очистил оборудование пикером («— equipment —») поверх подставленного — тот же жест,
+    // что у зоны: пустота — его ответ, обратно не подставляем. Фокус отличает жест от сброса
+    // регистрации контрола (см. `pressTouchedRef`).
+    if (ours && !eqSet && pressTouchedRef.current) {
+      dismiss('press');
+      return;
+    }
     if (!ours && eqSet) return;
     if (pressSuggested) {
       wroteRef.current.press = { equipment: pressSuggested, profileKey: pressProfileSuggested };
@@ -3531,6 +3558,69 @@ function OperationEditor({
     setValue,
     dismiss,
   ]);
+
+  // ПОДСТАВЛЕННОЕ НЕ ЖИВЁТ ДОЛЬШЕ СВОЕЙ МЕТКИ. Редактор размонтируется при смене выбранного шага,
+  // и `wroteRef`/`applied` умирают вместе с ним — а значение, написанное нами, оставалось в форме
+  // БЕЗ метки, при следующем открытии шага сходило за ответ человека («чужой ответ не трогаем») и
+  // уезжало с сохранением немаркированным фактом. Хуже всего это нитке: её чип неотличим от
+  // привязанного руками. Поэтому при размонтировании неснятая подстановка ОТЗЫВАЕТСЯ; заново
+  // открытый шаг предложит её снова — уже с меткой. Сохранение при ОТКРЫТОМ шаге значение увозит —
+  // но там метка стоит на экране, это и есть контракт «на глазах и с меткой».
+  //
+  // ДВЕ ЗАЩИТЫ ВНУТРИ: (а) отзывается только значение, всё ещё РАВНОЕ нашему, — ответ человека
+  // поверх и сдвиг индексов при удалении шага не трогаются; (б) значение, совпадающее с БАЗОЙ
+  // формы (defaultValues), не трогается вовсе: после сохранения база = сервер, и «отозвать» его —
+  // значит молча разъехаться с сохранённым, то есть подготовить стирание следующим сохранением.
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  useEffect(() => {
+    return () => {
+      const wrote = wroteRef.current;
+      // Локальный `index` НАРОЧНО затеняет проп значением на момент размонтирования: сдвиг
+      // индексов при удалении шага не должен отзывать значение чужого шага, а путь записи обязан
+      // читаться разметочной проверкой роундтрипа тем же паттерном, что у остальных эффектов.
+      const index = indexRef.current;
+      const base = (form.formState.defaultValues?.operations?.[index] ?? {}) as {
+        zone?: string;
+        bomLineKeys?: string[];
+        pressEquipment?: string;
+        pressProfileKey?: string;
+      };
+      if (wrote.zone !== undefined) {
+        const cur = getValues(`operations.${index}.zone`);
+        if (cur === wrote.zone && base.zone !== wrote.zone) {
+          setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
+        }
+      }
+      if (wrote.thread) {
+        const keys = (getValues(`operations.${index}.bomLineKeys`) ?? []) as string[];
+        if (keys.includes(wrote.thread) && !(base.bomLineKeys ?? []).includes(wrote.thread)) {
+          setValue(
+            `operations.${index}.bomLineKeys`,
+            keys.filter((k) => k !== wrote.thread),
+            { shouldDirty: false },
+          );
+        }
+      }
+      if (wrote.press) {
+        const eq = getValues(`operations.${index}.pressEquipment`);
+        if (eq === wrote.press.equipment && base.pressEquipment !== wrote.press.equipment) {
+          setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
+          if (
+            wrote.press.profileKey &&
+            getValues(`operations.${index}.pressProfileKey`) === wrote.press.profileKey &&
+            base.pressProfileKey !== wrote.press.profileKey
+          ) {
+            setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+          }
+        }
+      }
+      wroteRef.current = {};
+    };
+    // Пустые зависимости НАРОЧНО: отзыв — только на настоящем размонтировании. Пересборка эффекта
+    // на смене index отзывала бы по СТАРОМУ индексу значение уже другого шага.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Снять подставленное касанием: значение уходит, подсказка на этом шаге гаснет. */
   const dropSuggested = (field: SuggestedField) => {
@@ -3916,7 +4006,14 @@ function OperationEditor({
           />
         )}
         {isPressStep && (
-          <div className='space-y-px'>
+          // Фокус-капчер — датчик «человек коснулся контрола» для распознавания очистки пикером;
+          // сброс регистрации формы фокуса не имеет (довод у `pressTouchedRef`).
+          <div
+            className='space-y-px'
+            onFocusCapture={() => {
+              pressTouchedRef.current = true;
+            }}
+          >
             <SelectField
               name={`operations.${index}.pressEquipment`}
               label='equipment *'
@@ -3951,8 +4048,14 @@ function OperationEditor({
           />
         )}
         {/* ЗОНА — ЕДИНСТВЕННОЕ ПОДСТАВЛЯЕМОЕ ПОЛЕ, ВХОДЯЩЕЕ В ПОДПИСЬ КАРТОЧКИ, и поэтому метка
-            рядом с ней обязательна, а не желательна: подписывают то, что видят. */}
-        <div className='space-y-px'>
+            рядом с ней обязательна, а не желательна: подписывают то, что видят. Фокус-капчер —
+            датчик «человек коснулся контрола» (довод у `zoneTouchedRef`). */}
+        <div
+          className='space-y-px'
+          onFocusCapture={() => {
+            zoneTouchedRef.current = true;
+          }}
+        >
           <SelectField
             name={`operations.${index}.zone`}
             label='zone *'

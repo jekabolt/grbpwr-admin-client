@@ -36,10 +36,22 @@ const probe: InferenceDomProbe = {} as InferenceDomProbe;
 window.__inference = probe;
 
 function Harness({ card }: { card: Record<string, unknown> }) {
+  // `construction` сливается ПОВЕРХ дефолта, а не вместо него: фикстуре парка прессов нужен один
+  // ключ внутри construction, а замена целиком снесла бы остальные дефолты ветки — и стенд
+  // проверял бы редактор на форме, которой в приложении не бывает.
+  const dv = techCardDefaultData as unknown as Record<string, unknown>;
+  const merged = {
+    ...dv,
+    ...card,
+    construction: {
+      ...(dv.construction as Record<string, unknown>),
+      ...((card.construction as Record<string, unknown>) ?? {}),
+    },
+  };
   const methods = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema) as never,
     mode: 'onChange',
-    defaultValues: { ...techCardDefaultData, ...card } as TechCardFormData,
+    defaultValues: merged as unknown as TechCardFormData,
   });
   probe.values = () =>
     (methods.getValues('operations') ?? []) as unknown as Record<string, unknown>[];
