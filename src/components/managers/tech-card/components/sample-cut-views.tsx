@@ -16,6 +16,7 @@ import {
   cutSymmetryUnanswered,
   fusingPrintCaption,
   grainlineArrow,
+  grainlineText,
 } from './piece-codes';
 import { derivePieceLayerRole, isMainLayerRole } from './piece-layer-role';
 import { TechCardFormData } from './schema';
@@ -484,7 +485,7 @@ export function SampleCutTicket({
                         <Text size='nano' variant='label' component='span' className='uppercase'>
                           {' '}
                           {[
-                            p.grainline ? `${grainlineArrow(p.grainline)} ${p.grainline}` : '',
+                            grainlineText(p.grainline),
                             p.fused ? `fused${p.fusingCaption ? `, ${p.fusingCaption}` : ''}` : '',
                           ]
                             .filter(Boolean)

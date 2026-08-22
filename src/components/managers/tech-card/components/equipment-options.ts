@@ -473,6 +473,78 @@ export const stepTypeOwnsBlock = (t: string | undefined, block: StepBlock): bool
 export const isWeldMachineType = (m?: string) =>
   m === 'TECH_CARD_MACHINE_TYPE_SEAM_TAPING' || m === 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER';
 
+// КЛАДЁТ ЛИ ЭТОТ ГЛАГОЛ СТРОЧКУ — вопрос о том, ОСМЫСЛЕННА ЛИ ДЛЯ ШАГА ПЛОТНОСТЬ СТЕЖКА, и потому
+// о том, наследовать ли ему карточную плотность. Правило жило ровно в одном экземпляре — приватным
+// предикатом `sews` внутри печатного листа, — и второй потребитель того же составителя
+// (`effectiveMachineSettings` в редакторе) передавал карточную плотность БЕЗУСЛОВНО. Отсюда
+// расхождение: на шаге ультразвуковой сварки сводка редактора показывала унаследованные
+// «4 st/cm (2.5 mm)», а бумага — ничего. Права была бумага; беда в том, что права она была ОДНА.
+//
+// ТОТАЛЬНЫЙ `Record`, а не отрицание через два множества, и это здесь дороже обычного. Прежняя
+// формулировка звучала «не ВТО И не один из девяти новых глаголов И не сварка» — то есть отвечала
+// ПО УМОЛЧАНИЮ «да» всякому глаголу, которого в её списках нет. Девять ЛЕГАСИ-членов попадали в
+// это умолчание и получали «да» молча; здесь у них написано `true` ВСЛУХ, потому что ответ и
+// правда такой (это швейные глаголы дооосевой записи, и релизный снапшот их ещё печатает), — но
+// написан он решением, а не промахом списка. Следующий член контракта теперь ломает сборку и
+// спрашивает: этот шьёт?
+//
+// СВАРКИ ЗДЕСЬ НЕТ, И ЭТО НАМЕРЕННО: две сварочные машины соединяют теплом, а не ниткой, но это
+// факт о МАШИНКЕ, а не о глаголе (обе живут под MACHINE). Его добавляет `stepLaysStitches` ниже —
+// ровно там же, где это делал печатный лист.
+export const STEP_LAYS_STITCHES: Record<common_TechCardOperationType, boolean> = {
+  // Тип не назван — плотность ещё может оказаться осмысленной, и молчать о карточной рано.
+  TECH_CARD_OPERATION_TYPE_UNKNOWN: true,
+  // 1-9: легаси. С чтения не приходят (0306 канонизирует на записи), но релизный снапшот
+  // печатается через эту же карту, и каждый из девяти — швейный глагол своего времени.
+  TECH_CARD_OPERATION_TYPE_LOCKSTITCH: true,
+  TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE: true,
+  TECH_CARD_OPERATION_TYPE_OVERLOCK: true,
+  TECH_CARD_OPERATION_TYPE_COVERSTITCH: true,
+  TECH_CARD_OPERATION_TYPE_CHAINSTITCH: true,
+  TECH_CARD_OPERATION_TYPE_BLINDHEM: true,
+  TECH_CARD_OPERATION_TYPE_BARTACK: true,
+  TECH_CARD_OPERATION_TYPE_BUTTONHOLE: true,
+  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: true,
+  TECH_CARD_OPERATION_TYPE_FUSING: false,
+  // Ручная работа СТРОЧКУ КЛАДЁТ — потайной подшивкой, копирными стежками, — и плотность у неё
+  // осмысленна ровно так же, как у машинной.
+  TECH_CARD_OPERATION_TYPE_HANDWORK: true,
+  TECH_CARD_OPERATION_TYPE_OTHER: true,
+  TECH_CARD_OPERATION_TYPE_MACHINE: true,
+  TECH_CARD_OPERATION_TYPE_PRESS: false,
+  TECH_CARD_OPERATION_TYPE_PRESS_OPEN: false,
+  // Девять глаголов волны: ни один не кладёт строчку — они ставят фурнитуру, наносят, режут,
+  // чистят, проверяют, складывают, пакуют и купают.
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: false,
+  TECH_CARD_OPERATION_TYPE_PRINT: false,
+  TECH_CARD_OPERATION_TYPE_TRIM: false,
+  TECH_CARD_OPERATION_TYPE_THREAD_TRIM: false,
+  TECH_CARD_OPERATION_TYPE_CLEAN: false,
+  TECH_CARD_OPERATION_TYPE_INSPECT: false,
+  TECH_CARD_OPERATION_TYPE_FOLD: false,
+  TECH_CARD_OPERATION_TYPE_PACK: false,
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: false,
+};
+
+/**
+ * ОСМЫСЛЕННА ЛИ ПЛОТНОСТЬ СТЕЖКА НА ЭТОМ ШАГЕ — глагол И машинка, одним вопросом.
+ *
+ * Зовут оба потребителя `effectiveMachineSettings`: печатный лист (у которого правило и жило) и
+ * сводка открытого шага в редакторе (у которого его не было). Ответ решает ровно одно — передавать
+ * ли КАРТОЧНУЮ плотность последней ступенью; собственная плотность шага и плотность профиля
+ * машинки этого вопроса не спрашивают, они уже стоят на своём шаге лестницы.
+ *
+ * СВАРКА — ВТОРАЯ ПОЛОВИНА, И ОНА ПРО МАШИНКУ. Термолента и ультразвук соединяют теплом: стежка у
+ * них нет вовсе (потому у них нет и номера по ISO 4915), и «hot air 550 °C · feed 4.5 m/min» рядом
+ * с «4 st/cm» с карточки описывало бы строчку, которой на этой машине не бывает. Тип машинки
+ * спрашивается ЯВНЫЙ — разрешённый через профиль не считается, как и везде в этой паре правил.
+ */
+export const stepLaysStitches = (operationType?: string, machineType?: string): boolean =>
+  (operationType
+    ? (STEP_LAYS_STITCHES[operationType as common_TechCardOperationType] ?? true)
+    : true) && !isWeldMachineType(machineType);
+
+
 // --- the inheritance ladder (§3) -----------------------------------------------------------------
 //
 // WHICH PROFILE A STEP INHERITS FROM. The server never materialises an inherited value — a NULL

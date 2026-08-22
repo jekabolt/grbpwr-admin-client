@@ -70,6 +70,7 @@ import {
   kindLabel,
   kindOptionsForSection,
 } from './bom-kind';
+import { slotNormRows, type SlotNormRow } from './bom-norm';
 import {
   UNSET_PURPOSE,
   bomPurposeLabel,
@@ -448,48 +449,17 @@ export function SlotIdentityFields({ index }: { index: number }) {
 // Мерная нерулонная секция, у которой процент остаётся ручным (резинка, тесьма, стропа, велкро).
 const TRIM_SECTION = 'TECH_CARD_BOM_SECTION_TRIM';
 
-/** Строка рецепта, несущая НОРМУ этого слота (не привязку материала к детали), с её провенансом. */
-type SlotNormRow = { sku: string; marker: boolean; measured: boolean };
-
-// КТО СЕГОДНЯ КРОИТ ЭТОТ СЛОТ И КАК ПОЛУЧЕНА ЕГО НОРМА. Читается из ЧТЕНИЯ карточки
-// (techCard.colorways[].usages), а не из формы: рецепт колорвея живёт своим RPC и в состоянии этой
-// формы не лежит вовсе. Сохранение рецепта инвалидирует чтение карточки (useUpdateColorwayRecipe),
-// поэтому только что снятая раскладка комплекта здесь уже видна.
+// НОРМА СЛОТА — ОБЩИМ МОДУЛЕМ (`bom-norm.ts`), И ЭТО САМОЕ ДОРОГОЕ СВЕДЕНИЕ ЭТОЙ ВОЛНЫ. Здесь
+// стояла своя копия лестницы, вторая жила в печатном листе, и расходились они НЕ В СЛОВЕ, как все
+// прочие копии, а В ЧИСЛЕ, ПО КОТОРОМУ ЗАКУПАЮТ: лист считал строки рецепта, привязанные к ДЕТАЛИ,
+// и печатал «+15 %» на слотах, где эта панель никакой надбавки не показывала. Права была панель —
+// сервер исключает такие строки из ВСЕХ норм-роллапов, включая план материалов прогона (T8), — и
+// правило переехало в модуль целиком, вместе с доводом, который его объясняет.
 //
 // ЗАЧЕМ ЭТО ЛЕСТНИЦЕ. «У слота есть раскладка» и «норма слота измерена» — РАЗНЫЕ утверждения, и
 // путать их дорого: процент не начисляется не тогда, когда раскладка снята, а тогда, когда строка
 // рецепта несёт consumption_source='marker' (серверный wastageApplies). Раскладка, с которой норму
 // ещё не сняли, ничего не отменяет — процент всё ещё умножает закупку.
-//
-// СОПОСТАВЛЕНИЕ ПО bom_item_id: чтение не эмитит bom_line_key на строке рецепта вовсе
-// (ConvertRecipeUsagesToPb), ключ оставлен запасным на случай, когда однажды начнёт. Строка,
-// привязанная к ДЕТАЛИ, отбрасывается — это назначение материала, а не норма (T8): расхода у неё
-// нет, и гросс-апу нечего умножать.
-function slotNormRows(
-  colorways: common_AdminColorwayRef[] | undefined,
-  bomItemId: number,
-  lineKey: string,
-): SlotNormRow[] {
-  const rows: SlotNormRow[] = [];
-  for (const c of colorways ?? []) {
-    for (const u of c.usages ?? []) {
-      const mine =
-        (bomItemId > 0 && wireInt(u.bomItemId) === bomItemId) ||
-        (!!lineKey && !!u.bomLineKey && u.bomLineKey === lineKey);
-      if (!mine) continue;
-      if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;
-      rows.push({
-        sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
-        marker: (u.consumptionSource ?? '').trim() === 'marker',
-        // МЕРНАЯ строка рецепта — та, у которой есть расход (а не количество штук). Именно по
-        // этому признаку сервер решает, начислять ли гросс-ап вообще: счётную строку отсекает
-        // ранний возврат LineTotal («4 пуговицы остаются 4 пуговицами»).
-        measured: !!u.consumption?.value?.trim() || (u.sizeConsumptions?.length ?? 0) > 0,
-      });
-    }
-  }
-  return rows;
-}
 
 /** Список SKU колорвеев коротко: три и «N more» — строка рецепта не должна распирать колонку. */
 const skuList = (rows: SlotNormRow[]): string => {
