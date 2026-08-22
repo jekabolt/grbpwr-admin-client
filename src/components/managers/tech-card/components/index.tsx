@@ -29,6 +29,7 @@ import {
   errorRootKey,
   flattenFieldErrors,
   revealField,
+  transportRefusal,
 } from 'utils/field-errors';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -105,6 +106,17 @@ import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
 import { TechCardFittings } from './tech-card-fittings';
 import { useTechCardDraft } from './useTechCardDraft';
+import {
+  auditOperationPresence,
+  contradictsScreen,
+  hasPresenceLoss,
+  type PresenceAudit,
+} from './operations-presence';
+import {
+  PresenceLossBanner,
+  VersionSkewBanner,
+  type VersionSkew,
+} from './save-audit-banners';
 import { StagedChangesChip } from './staged-changes-chip';
 import { useTechCardStagingRequired } from './useTechCardStaging';
 
@@ -286,6 +298,12 @@ export function TechCardForm({
   // A partial failure is a fact about a save that already half-happened, so it stays on screen
   // until the next save rather than passing through a toast.
   const [stagingError, setStagingError] = useState<string | null>(null);
+  // РАСХОЖДЕНИЕ ВЕРСИЙ (Ф5): сервер не узнал того, что видно на экране. Это не ошибка поля и не
+  // ошибка человека, поэтому живёт баннером, а не краснотой у контрола.
+  const [versionSkew, setVersionSkew] = useState<VersionSkew | null>(null);
+  // АУДИТ ПРИСУТСТВИЯ (Ф7): сохранение прошло, а часть отправленных фактов не вернулась. Держится
+  // на странице как `stagingError` — это факт о записи, и он требует решения, а не уведомления.
+  const [presenceLoss, setPresenceLoss] = useState<PresenceAudit | null>(null);
 
   const numId = id ? parseInt(id, 10) : undefined;
 
@@ -739,7 +757,15 @@ export function TechCardForm({
   // reset would revert them to the server's pre-commit values — losing exactly the edits the staged
   // queue is about to write. Only the three server-assigned lists are taken. Cut pieces have nothing
   // to re-seed: their identity is the client-minted lineKey, not a server id.
-  async function withServerAssignedValues(sent: TechCardFormData): Promise<TechCardFormData> {
+  //
+  // ЗДЕСЬ ЖЕ СТОИТ АУДИТ ПРИСУТСТВИЯ (Ф7), и стоит он именно здесь потому, что повторное чтение
+  // УЖЕ СДЕЛАНО — своё второе `GetTechCard` заводить не пришлось. Сверяется отправленное с
+  // прочитанным в координатах формы, ПРИСУТСТВИЕ против присутствия. `audit === null` означает
+  // «чтения не было» (новая карточка, сбой рефетча) — сравнивать не с чем, и молчание здесь
+  // честнее ложной тревоги.
+  async function withServerAssignedValues(
+    sent: TechCardFormData,
+  ): Promise<{ values: TechCardFormData; audit: PresenceAudit | null }> {
     // Намерение «снял разметку» гасится НА ВСЕХ ветках возврата, включая ранние. PUT к этому
     // моменту уже прошёл — намерение исполнено, и оставить флаг взведённым из-за транзиентного
     // сбоя рефетча значило бы отправить следующее сохранение в отказ «cleared против карточки без
@@ -748,10 +774,19 @@ export function TechCardForm({
     // тупик: маппер увидит взведённый mediaCleared против карточки, у которой снимки уже есть,
     // и пришлёт «снял» вместе с фотографиями — серверный гейт отвергнет это как противоречие, а
     // жеста, снимающего флаг, в интерфейсе нет.
-    const done = (v: TechCardFormData): TechCardFormData => ({
-      ...v,
-      assemblyCleared: false,
-      mediaCleared: false,
+    // Аудит по умолчанию — null: ранние ветки возврата не читали карточку, и сравнивать им не с
+    // чем. Ветка catch рефетча (:«Not fatal») тоже молчит НАМЕРЕННО: чтения не было, а «поле не
+    // вернулось» про непрочитанную карточку — ложная тревога, которая учит не читать баннер.
+    const done = (
+      v: TechCardFormData,
+      audit: PresenceAudit | null = null,
+    ): { values: TechCardFormData; audit: PresenceAudit | null } => ({
+      values: {
+        ...v,
+        assemblyCleared: false,
+        mediaCleared: false,
+      },
+      audit,
     });
     if (!numId) return done(sent);
     let fresh: common_TechCard | undefined;
@@ -818,7 +853,18 @@ export function TechCardForm({
     // отвергнет: осведомлённая запись с cleared против карточки, у которой разметки уже нет, это
     // теневое намерение, и гейт на него отвечает отказом. Кнопка «снять разметку» взводит флаг
     // ровно один раз, здесь он снимается.
-    return done({ ...sent, signoffs, patterns, bomItems, construction: server.construction });
+    // АУДИТ ПРИСУТСТВИЯ. Сверяется то, что ушло из формы, с тем, что вернулось с сервера, —
+    // ПРИСУТСТВИЕ против присутствия, по списку полей из самой zod-схемы шага. Утверждение
+    // баннера «ваши значения всё ещё в форме» истинно по построению: строки операций берутся из
+    // `sent` (сброс — МЕРДЖ в отправленное, серверные значения идут только в три списка выше).
+    const audit = auditOperationPresence(
+      (sent.operations ?? []) as unknown as Record<string, unknown>[],
+      (server.operations ?? []) as unknown as Record<string, unknown>[],
+    );
+    return done(
+      { ...sent, signoffs, patterns, bomItems, construction: server.construction },
+      audit,
+    );
   }
 
   // The actual write: card body first (it carries the lock version), then the staged sub-panels.
@@ -833,6 +879,10 @@ export function TechCardForm({
   ): Promise<{ bodySaved: boolean; ok: boolean }> {
     setConflict(false);
     setStagingError(null);
+    // Оба баннера — факты о ПРЕДЫДУЩЕЙ попытке. Новая попытка начинается с чистого экрана,
+    // иначе «карточка не сохранена» продолжало бы стоять над уже сохранённой карточкой.
+    setVersionSkew(null);
+    setPresenceLoss(null);
     const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
     let bodySaved = false;
     try {
@@ -862,7 +912,11 @@ export function TechCardForm({
           // Reset to what the SERVER now holds, not to what we sent — above all so a sign-off that
           // was just approved carries its stamped digest instead of the blank that MEANS "approve
           // now" (see withServerAssignedValues).
-          form.reset(await withServerAssignedValues(data));
+          const settled = await withServerAssignedValues(data);
+          form.reset(settled.values);
+          // Ф7: сохранение прошло, но часть отправленных фактов не вернулась — молчать об этом
+          // значит отдать человеку карточку, которая узнает о потере через неделю пустым полем.
+          if (settled.audit && hasPresenceLoss(settled.audit)) setPresenceLoss(settled.audit);
           // ИСТОРИЯ ОТКАТА ЗАБЫВАЕТСЯ ВМЕСТЕ С СОХРАНЕНИЕМ. Она помнит массивы ДО отправки, а форма
           // теперь несёт то, что вернул сервер: ⌘Z воскресил бы пред-сейвовое состояние поверх
           // серверных значений — правку, которой никто не делал, поверх той, что уже уехала.
@@ -923,16 +977,42 @@ export function TechCardForm({
       // оверлеем. Фулскрин уходит раньше, чем что-либо из этого показывается.
       leaveFullscreen();
       if ((error as { status?: number })?.status === 409) setConflict(true);
+      // ОТКАЗ ТРАНСПОРТА РАСПОЗНАЁТСЯ ПЕРВЫМ. Строгий маршалер (Ф2) отвечает на незнакомое поле
+      // или незнакомое имя члена словаря 400 без единого поимённого нарушения: RPC не звали,
+      // карточка не тронута. Показывать это «голым сообщением» значит показать человеку
+      // `proto: (line 1:145)` и оставить его с ним наедине.
+      const transport = transportRefusal(error);
       // Pin server field-violations (google.rpc.BadRequest) onto the exact inputs, then surface the
       // owning tab so the error dot + focus land where the user can act (Q1/S24).
-      const { applied, unmapped } = applyServerFieldErrors(error, form.setError, {
+      const { applied, unmapped, contradictions } = applyServerFieldErrors(error, form.setError, {
         stripPrefixes: ['tech_card'],
+        // ОТКАЗ, ПРОТИВОРЕЧАЩИЙ ЭКРАНУ. `required` / `unknown_value` про поле, которое форма
+        // держит ЗАПОЛНЕННЫМ, означает не «человек не заполнил», а «сервер не узнал значения» —
+        // бэкенд старше приложения и выбросил незнакомый член словаря по дороге. Предикат тот же
+        // самый, что проверяет проба: он объявлен ОДИН раз рядом с `isPresent`, потому что
+        // отвечает на тот же вопрос, что аудит присутствия.
+        contradicts: contradictsScreen((path) => form.getValues(path as never)),
       });
       if (applied.length > 0) {
         const root = applied[0].split('.')[0];
         setActiveTab(errorTabFor(root));
       }
-      const base = techCardErrorMessage(error, 'Failed to submit tech card');
+      if (transport || contradictions.length > 0) {
+        setVersionSkew({
+          quote: transport ?? undefined,
+          fields: contradictions.map((c) => ({
+            path: c.path,
+            description: c.violation.description,
+          })),
+        });
+      }
+      // Непришпиленное нарушение дописывается к тосту В ЛЮБОЙ ветке, включая баннерную:
+      // отказ, который никуда не встал — ни на контрол, ни в баннер, ни в тост, — и есть та
+      // самая невидимая потеря, ради которой затевалась фаза.
+      const base =
+        transport || contradictions.length > 0
+          ? 'the backend did not recognise part of this card — see the banner on the card'
+          : techCardErrorMessage(error, 'Failed to submit tech card');
       showMessage(
         unmapped.length ? `${base} — ${unmapped.map((u) => u.description).join('; ')}` : base,
         'error',
@@ -1515,6 +1595,19 @@ export function TechCardForm({
             </Button>
           </div>
         </CalloutBox>
+      )}
+
+      {/* Расхождение версий — не ошибка поля: ни один контрол не краснеет, зато сказано, ЧТО
+          сервер не узнал и что карточка не сохранена. Стоит рядом с «сохранено 2 из 4» — оба
+          про то, чем кончилась запись. */}
+      {versionSkew && (
+        <VersionSkewBanner skew={versionSkew} onDismiss={() => setVersionSkew(null)} />
+      )}
+
+      {/* Сохранение прошло, а факты не вернулись. Единственная сеть под двумя окнами, где
+          гейтвей ещё глотает молча: прод до ручного деплоя и откат DO на старый бинарь. */}
+      {presenceLoss && (
+        <PresenceLossBanner audit={presenceLoss} onDismiss={() => setPresenceLoss(null)} />
       )}
 
       {/* Draft and frozen stay inline — they are context, not decisions. */}

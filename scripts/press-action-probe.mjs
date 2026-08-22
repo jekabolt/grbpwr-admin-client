@@ -288,13 +288,24 @@ await page.evaluate(() => window.__press.trigger());
 await page.waitForTimeout(200);
 ck(!/which way/i.test(await messageIn(F('pressToward'))), 'ответ снимает отказ');
 
-// И обратно: контрол исчезает, а значение за ним не остаётся жить невидимым.
+// И обратно: контрол исчезает — но значение за ним больше НЕ живёт невидимым и НЕ стирается.
+// Ф4 («перестать терять данные») сняла очистку: набранное направление стоит строкой ПОЛОСЫ
+// ОСТАТКОВ с [clear], и стирает его только человек. Тот же `data-field` теперь есть и у строки
+// полосы, поэтому «контрола нет» спрашивается за вычетом строк полосы.
 await pick(F('pressAction'), 'steam');
-ck(!(await has(F('pressToward'))), 'при «steam» направление снова ИСЧЕЗЛО');
+ck(
+  (await page.locator(F('pressToward')).count()) ===
+    (await page.locator(`[data-residue-strip] ${F('pressToward')}`).count()),
+  'при «steam» КОНТРОЛ направления снова исчез',
+);
+ck(
+  await has(`[data-residue-strip] ${F('pressToward')}`),
+  'Ф4: набранное направление видно строкой полосы остатков',
+);
 const afterSteam = await values();
 ck(
-  afterSteam.pressToward === T.TOWARD_UNSET,
-  'скрытое направление ОЧИЩЕНО, а не оставлено невидимым',
+  afterSteam.pressToward === 'TECH_CARD_PRESS_TOWARD_BACK',
+  'Ф4: скрытое направление НЕ стёрто — стирает только человек через [clear]',
   String(afterSteam.pressToward),
 );
 
@@ -330,9 +341,12 @@ const rtSteam = await trip({
   pressAction: 'TECH_CARD_PRESS_ACTION_STEAM',
   pressToward: 'TECH_CARD_PRESS_TOWARD_BACK',
 });
+// Ф4 РАЗВЕРНУЛА ЭТУ КЛЕТКУ: тернарь маппера снят, заполненное направление ЕДЕТ и при чужом
+// приёме — отвергает его СЕРВЕР по имени (`press_toward needs_press_action`), на видимой строке
+// полосы. Не послать значило бы NULL в базе: операции пишутся полной заменой.
 ck(
-  rtSteam.wire?.press?.toward === T.TOWARD_UNSET,
-  'при «steam» направление на провод НЕ уезжает (гейт стоит и в маппере)',
+  rtSteam.wire?.press?.toward === 'TECH_CARD_PRESS_TOWARD_BACK',
+  'Ф4: при «steam» заполненное направление едет — отказ за сервером, не потеря за клиентом',
   String(rtSteam.wire?.press?.toward),
 );
 const rtSilent = await trip({ operationType: T.PRESS, zone: T.ZONE, pressEquipment: T.IRON });
@@ -347,9 +361,11 @@ const rtFuse = await trip({
   pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS',
   pressAction: 'TECH_CARD_PRESS_ACTION_STEAM',
 });
+// Ф4: и здесь заполненный под-глагол ЕДЕТ (блок несёт факт) — FUSING его не несёт по контракту,
+// и отвергает его сервер ПО ИМЕНИ; клиентское «не взять на провод» было бы тихим NULL в базе.
 ck(
-  !rtFuse.wire?.press,
-  'дублирование под-глагол ВТО на провод не берёт',
+  rtFuse.wire?.press?.action === 'TECH_CARD_PRESS_ACTION_STEAM',
+  'Ф4: дублирование ВЕЗЁТ записанный под-глагол — отказ за сервером, по имени',
   JSON.stringify(rtFuse.wire?.press ?? null),
 );
 

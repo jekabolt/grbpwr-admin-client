@@ -59,6 +59,53 @@ function toFormPath(field: string, stripPrefixes: string[]): string {
     .join('.');
 }
 
+// ПРИЧИНА ОТКАЗА — МАШИННЫЙ КОД, А НЕ ПОДСТРОКА В ПРЕДЛОЖЕНИИ.
+//
+// Проводная форма описания зафиксирована сервером (`internal/apisrv/apierr/apierr.go`,
+// `fieldViolation`): `reason[ (used by …)][; howToFix]`. То есть код причины — ПРЕФИКС описания
+// до первой `;` или `(`, а всё остальное — человеческий хвост. Искать в описании подстроку
+// «required» значило бы поймать и «…; set a required value» из чужого howToFix.
+//
+// Когда `reason` пуст, сервер кладёт в описание свободный текст `ve.Message` — тогда префикс не
+// совпадёт ни с одним кодом, и классификатор промолчит. Это правильный исход: неизвестная форма
+// не классифицируется.
+export function violationReason(description: string): string {
+  return (description.split(/[;(]/)[0] ?? '').trim();
+}
+
+// ─── отказ ТРАНСПОРТА против отказа бизнес-правила ───────────────────────────────────────────────
+
+// Строгий protojson admin-гейтвея (Ф2) отвечает на незнакомое поле и незнакомое имя члена enum
+// телом `{"code":3,"message":"proto: (line 1:145): unknown field \"pressAction2\"","details":[]}`.
+// Такой отказ означает ровно одно: приложение и бэкенд разной версии. Карточка НЕ сохранена,
+// ничего не потеряно — RPC не звали вовсе, разбор тела кончился раньше.
+//
+// РАСПОЗНАЁТСЯ ПРЕФИКС ПРОТОКОЛА, А НЕ ФРАЗА «unknown field». Фразу умеет выдать и обычная
+// бизнес-валидация: предикат сегмента email-рассылки заворачивает `segment: unknown field: "…"`
+// в `InvalidArgument` БЕЗ BadRequest-details (`internal/apisrv/admin/email_campaign.go`), то есть
+// даёт тот же код, ту же фразу и те же пустые details. Отличает их только префикс protojson: он
+// есть у маршалера и не бывает у `status.Errorf`. Матчинг по фразе нарисовал бы баннер
+// «расхождение версий» на обычной опечатке в поле сегмента.
+//
+// Контракт держит серверный тест `internal/api/http/marshaler_test.go` — он и красится первым,
+// если бамп grpc-gateway изменит форму тела. Тогда пересобирается ЭТОТ распознаватель, а не тест.
+const PROTOJSON_PREFIX = 'proto: (line ';
+const PROTOJSON_PHRASES = ['unknown field', 'invalid value for enum field'];
+
+// Возвращает серверное сообщение целиком (в нём имя виновника) — или null, если это не отказ
+// транспорта.
+export function transportRefusal(error: unknown): string | null {
+  const e = error as ErrorWithDetails | undefined;
+  if (!e || e.status !== 400) return null;
+  // Отказ транспорта приходит БЕЗ поимённых нарушений: тело не разобралось, и полей, на которые
+  // ругаться, у сервера ещё нет. Непустой BadRequest — это бизнес-валидация, её место у поля.
+  if (extractFieldViolations(error).length > 0) return null;
+  const raw = (error instanceof Error ? error.message : (e.message ?? '')) || '';
+  if (!raw.includes(PROTOJSON_PREFIX)) return null;
+  if (!PROTOJSON_PHRASES.some((p) => raw.includes(p))) return null;
+  return raw;
+}
+
 export type ApplyFieldErrorsOptions = {
   // Explicit proto-field → form-field-path overrides (wins over the automatic conversion). Use for
   // fields whose form name diverges from the wire name.
@@ -68,13 +115,25 @@ export type ApplyFieldErrorsOptions = {
   // Only these form paths may receive a server error; violations outside the set are returned
   // unmapped (so a stray/unknown field never silently pins onto the wrong input).
   allow?: (formPath: string) => boolean;
+  // ОТКАЗ, ПРОТИВОРЕЧАЩИЙ ЭКРАНУ, НЕ ПРИШПИЛИВАЕТСЯ К ПОЛЮ.
+  //
+  // «required» про поле, которое форма держит заполненным, — не ошибка человека и не ошибка поля:
+  // сервер не узнал значения, потому что приложение и бэкенд разной версии. Покрасить поле
+  // красным здесь значило бы соврать про человека («ты не заполнил») ровно в том случае, когда
+  // он заполнил. Такое нарушение уходит в `contradictions` — и показывается баннером.
+  contradicts?: (formPath: string, violation: FieldViolation) => boolean;
 };
+
+export type ContradictingViolation = { path: string; violation: FieldViolation };
 
 export type AppliedFieldErrors = {
   // Form paths that received a server error (in order), e.g. ['styleNumber', 'bomItems.2.name'].
   applied: string[];
   // Violations that could NOT be pinned to a field (unknown/global) — toast these.
   unmapped: FieldViolation[];
+  // Violations the caller's `contradicts` predicate disowned: the field is filled on screen and the
+  // server says it is not. Nothing was pinned for these — they belong in a version-skew banner.
+  contradictions: ContradictingViolation[];
 };
 
 // Applies server field violations onto a react-hook-form via setError. Focuses the first pinned
@@ -87,11 +146,18 @@ export function applyServerFieldErrors<T extends FieldValues>(
   const violations = extractFieldViolations(error);
   const applied: string[] = [];
   const unmapped: FieldViolation[] = [];
-  const { map = {}, stripPrefixes = [], allow } = options;
+  const contradictions: ContradictingViolation[] = [];
+  const { map = {}, stripPrefixes = [], allow, contradicts } = options;
   for (const v of violations) {
     const path = map[v.field] ?? toFormPath(v.field, stripPrefixes);
     if (!path || (allow && !allow(path))) {
       unmapped.push(v);
+      continue;
+    }
+    // Проверка стоит ПЕРЕД setError, а не после: пришпилить и потом снять значило бы мигнуть
+    // красным на поле, которое ни в чём не виновато, и увести на него фокус.
+    if (contradicts?.(path, v)) {
+      contradictions.push({ path, violation: v });
       continue;
     }
     setError(
@@ -101,7 +167,7 @@ export function applyServerFieldErrors<T extends FieldValues>(
     );
     applied.push(path);
   }
-  return { applied, unmapped };
+  return { applied, unmapped, contradictions };
 }
 
 // ─── the other direction: RHF's own errors → a flat, addressable list ────────────────────────────

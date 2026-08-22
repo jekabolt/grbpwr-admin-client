@@ -83,10 +83,8 @@ import {
   topstitchModeRefusesWidth,
 } from './operation-options';
 import {
-  type StepBlock,
   isMachineStepType,
   isWeldMachineType,
-  stepTypeOwnsBlock,
 } from './equipment-options';
 import { wireInt } from './wire-int';
 import { z } from 'zod';
@@ -700,15 +698,6 @@ const STEP_KIND_DECIMAL_BANDS = {
   bartackLengthMm: { min: 1, max: 40, maxDecimals: 1, what: 'the bartack length in mm' },
 } as const;
 
-// Циклы: петля, пуговица, закрепка. Единственные три ЯВНЫХ типа машины, на которых легальна ЧАСТЬ
-// H-блока — подготовка отверстия, усилитель, стежки цикла. Способа крепления и подгиба стропы у
-// них нет вовсе, и сервер отвергает их на таком шаге по имени, отказывая всей карточкой.
-const CYCLE_MACHINE_TYPES = [
-  'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
-  'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
-  'TECH_CARD_MACHINE_TYPE_BARTACK',
-] as const;
-
 // «Заполнено» для трёх дисциплин пустоты волны. Разведены нарочно: у enum'а пусто это токен
 // `*_UNKNOWN` (он же «не указано»), у целого — 0, у децимала — пустая строка в форме. NONE ни в
 // одном словаре пустотой НЕ считается: «без закрепки» и «носителя нет» — это ОТВЕТЫ.
@@ -729,11 +718,20 @@ function blockHasFacts(block: Record<string, unknown>): boolean {
   });
 }
 
-// Блок едет ЦЕЛИКОМ ИЛИ НЕ ЕДЕТ ВОВСЕ. `owned` — гейт глагола (и, где он есть, явного типа
-// машины): на чужом глаголе блок не строится даже пустым, потому что сервер отвергает поле чужого
-// семейства ПО ИМЕНИ и отказывает вместе с ним всей карточке.
-function blockOut<T extends object>(owned: boolean, build: () => T): T | undefined {
-  if (!owned) return undefined;
+// Блок едет ЦЕЛИКОМ ИЛИ НЕ ЕДЕТ ВОВСЕ, и единственный вопрос к нему — ЕСТЬ ЛИ В НЁМ ФАКТ.
+//
+// ГЕЙТА ГЛАГОЛА ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО РАЗВОРОТ. Он стоял тут ради того, что сервер отвергает
+// поле чужого семейства ПО ИМЕНИ, — но операции пишутся ПОЛНОЙ ЗАМЕНОЙ и стабильного ключа у
+// строки шага нет, поэтому «не послать» значит НЕ «сервер не заметит», а «в базе станет NULL».
+// Гейт менял громкий отказ на тихую потерю: значение было на экране, уезжало в никуда и не
+// возвращалось. Теперь наоборот — заполненное чужое ЕДЕТ, сервер отвергает его по имени, и отказ
+// ложится на строку полосы остатков, где у человека есть [clear]. «Сломаться можно, исчезнуть
+// нельзя»: при отказе значение целó и на экране, и в базе.
+//
+// НЕОСВЕДОМЛЁННАЯ ЗАПИСЬ НЕ РЕГРЕССИРУЕТ ПО ПОСТРОЕНИЮ: пустой блок не ехал и раньше
+// (`blockHasFacts` уже отделял пусто от заполненного, включая децималы-объекты), а шаг без чужих
+// фактов даёт РОВНО ПРЕЖНИЕ БАЙТЫ — это держит проба `step-roundtrip-probe.mjs`.
+function blockOut<T extends object>(build: () => T): T | undefined {
   const block = build();
   return blockHasFacts(block as Record<string, unknown>) ? block : undefined;
 }
@@ -1034,6 +1032,25 @@ const calloutSchema = z.object({
   // половины одной связи. `part` — эхо первого элемента.
   parts: z.array(z.string()).optional().default([]),
 });
+
+// ИМЕНА ПОЛЕЙ ШАГА — ИЗ САМОЙ СХЕМЫ, ОДИН РАЗ НА РЕПОЗИТОРИЙ.
+//
+// У этого списка два потребителя, и они обязаны спрашивать ОДНО: проба круга «чтение → форма →
+// запись» (`scripts/step-roundtrip-probe.mjs`) и аудит присутствия после сохранения. Выписанный
+// руками второй список разошёлся бы с первым молча — ровно в день, когда волна добавит поле
+// тридцать третье, и ровно на том поле, которого ни один из двух не проверит.
+//
+// Порядок — объявления в схеме; вложенные схемы не разворачиваются: вопрос здесь про ПОЛЯ ШАГА.
+export function operationFieldNames(): string[] {
+  const node = operationSchema as unknown as {
+    _def?: { schema?: { shape?: Record<string, unknown> }; shape?: Record<string, unknown> };
+    shape?: Record<string, unknown>;
+  };
+  // `.superRefine()` оборачивает объект в ZodEffects, и форма обёртки у zod менялась между
+  // мажорами: спрашиваем обе, а не ту, что оказалась под рукой.
+  const shape = node.shape ?? node._def?.schema?.shape ?? node._def?.shape;
+  return shape ? Object.keys(shape) : [];
+}
 
 const operationSchema = z.object({
   // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
@@ -3118,168 +3135,138 @@ export function mapFormToTechCardInsert(
       };
       const topstitchMode = (o.topstitchMode ||
         'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') as common_TechCardTopstitchMode;
-      // WHICH OF THE TWO EQUIPMENT BLOCKS THIS STEP OWNS (0306). The server refuses a machine
-      // setting on a non-machine step and a ВТО setting on a non-ВТО step BY NAME, and it refuses
-      // the whole card with it. The editor clears the hidden block when the type changes; this gate
-      // is the belt behind that, because form state outlives a control — a draft restored from
-      // localStorage, or a step whose type was switched by another surface, would otherwise carry
-      // values nobody can see to a save nobody can fix.
+      // КАКОЕ ПОЛЕ ЕДЕТ НА ПРОВОД — ОДИН ЗАКОН НА ВЕСЬ МАППЕР.
+      //
+      //     ПОЛЕ ЕДЕТ, ЕСЛИ СЕМЕЙСТВО ЗАКОННО ДЛЯ ШАГА ИЛИ ЗНАЧЕНИЕ ЗАПОЛНЕНО.
+      //
+      // До этой волны закон был сформулирован ровно для ОДНОГО поля — под-глагола ВТО на
+      // разутюжке: «прочитанный с провода токен обязан уехать обратно ТЕМ ЖЕ токеном». Остальные
+      // сорок с лишним полей жили по обратному правилу — и терялись молча: операции пишутся
+      // ПОЛНОЙ ЗАМЕНОЙ, стабильного ключа у строки шага нет, значит непосланное поле становится
+      // NULL в базе. Круг «загрузил → сохранил» стирал чужой факт на проводе, где потерю нечем
+      // увидеть вовсе.
+      //
+      // ПОЧЕМУ ВОЗИТЬ БЕЗОПАСНО: сервер отвергает поле чужого семейства ПО ИМЕНИ и отказывает
+      // вместе с ним всей карточкой. Это не цена решения, это его основание: громкий отказ ложится
+      // на строку полосы остатков, где у человека есть [clear]. Карточка с остатками НЕ
+      // СОХРАНИТСЯ, пока их не разобрал человек, — и это ДОГОВОРНОЕ поведение:
+      // «сломаться можно, исчезнуть нельзя». При отказе значение цело́ и на экране, и в базе.
+      //
+      // ГЕЙТЫ СЕМЕЙСТВ НЕ ИСЧЕЗЛИ, ОНИ ПЕРЕЕХАЛИ: те же предикаты (`show*` в
+      // operations-field) теперь решают, что ПОКАЗАТЬ контролом, а что — строкой остатка. Второй
+      // копии правил здесь больше нет вовсе.
       const operationType = (o.operationType ||
         'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType;
-      const isMachineStep = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
-      // ПЕЧАТЬ БЕРЁТ ТЕРМОПРЕСС ВЗАЙМЫ, и гейт ВТО-полей отвечает не на тот вопрос, что список трёх
-      // ВТО-глаголов: не «шаг ЕСТЬ ВТО», а «шагу МОЖНО дать настройки пресса». Термотрансфер
-      // прижимают температурой, выдержкой и силиконовой бумагой, не будучи ВТО-шагом, и контракт
-      // ВТО-блок при PRINT разрешает: `press_equipment` там ОПЦИОНАЛЕН, а REQUIRED-if-aware живёт
-      // у press/press_open/fusing — поэтому обязательность пикера в `superRefine` стоит на трёх
-      // глаголах и здесь ни при чём. Списком трёх глаголов температура 160 и выдержка 12 секунд
-      // печатного шага уезжали на провод нулями, и печатный лист рисовал их из ничего.
-      const ownsPressSettings = stepTypeOwnsBlock(operationType, 'pressSettings');
-      // A legacy type (LOCKSTITCH…) is canonicalised into (MACHINE, machine_type) by the server, and
-      // it derives the machine from the token itself — so this client neither invents one for it nor
-      // sends the block: the step is not MACHINE on the wire yet.
-      //
       // --- ВИДЫ ОПЕРАЦИЙ (0324): десять блоков и два голых поля -----------------------------------
       //
       // ФОРМА ПЛОСКАЯ, ПРОВОД ВЛОЖЕННЫЙ — сборка обёрток живёт здесь, и только здесь. Обёртка едет
-      // ЦЕЛИКОМ ИЛИ НЕ ЕДЕТ ВОВСЕ (blockOut): прецедент topstitch — всегда присутствующая обёртка с
-      // UNKNOWN внутри читается как «кто-то думал об этом» на КАЖДОМ шаге, у которого этого нет.
+      // ЦЕЛИКОМ ИЛИ НЕ ЕДЕТ ВОВСЕ (blockOut), и единственный вопрос к ней — есть ли в ней факт:
+      // прецедент topstitch — всегда присутствующая обёртка с UNKNOWN внутри читается как «кто-то
+      // думал об этом» на КАЖДОМ шаге, у которого этого нет.
       //
-      // ДВА ГЕЙТА, И ОНИ РАЗНЫЕ. Первый — глагол, таблицей STEP_TYPE_BLOCKS: она одна на редактор,
-      // очистку скрытого, этот маппер и печатный лист, потому что сервер отвергает поле чужого
-      // семейства ПО ИМЕНИ и отказывает вместе с ним всей карточкой. Второй — ЯВНЫЙ тип машины, и
-      // он живёт здесь, а не в таблице: это факт о машинке, а не о глаголе. Тип, разрешённый через
-      // `machineProfileKey`, не засчитывается — правило о шаге, а не о профиле.
-      //
-      // НЕОСВЕДОМЛЁННАЯ ЗАПИСЬ НЕ РЕГРЕССИРУЕТ ПО ПОСТРОЕНИЮ: у шага без единого нового факта все
-      // десять обёрток пусты (⇒ undefined), оба голых поля не его глагола (⇒ undefined), и байты
-      // такого шага на проводе те же, что были до волны.
-      const ownsBlock = (b: StepBlock) => stepTypeOwnsBlock(operationType, b);
-      const stepMachineType = isMachineStep ? o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN' : '';
-      const onMachineType = (...tokens: readonly string[]) => tokens.includes(stepMachineType);
-      const onCycleMachine = onMachineType(...CYCLE_MACHINE_TYPES);
-      const isWeldStep = isWeldMachineType(stepMachineType);
       // Метод печати — голым полем шага, а не внутри блока `print`: он REQUIRED при PRINT, а
-      // обязательное поле не прячут в необязательное сообщение, которого может не быть вовсе.
-      // На чужом глаголе ключ не едет вовсе — сервер отвергает метод везде, кроме PRINT.
+      // обязательное поле не прячут в необязательное сообщение, которого может не быть вовсе. На PRINT он
+      // едет ВСЕГДА, даже незаполненным — чтобы отказ «required» пришёл ИМЕНЕМ поля на видимый
+      // контрол, а не тостом; на чужом глаголе — только если ЗАПОЛНЕН.
       const printMethod =
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRINT'
+        operationType === 'TECH_CARD_OPERATION_TYPE_PRINT' || stepEnumSet(o.printMethod)
           ? ((o.printMethod || 'TECH_CARD_PRINT_METHOD_UNKNOWN') as common_TechCardPrintMethod)
           : undefined;
-      const isLaser = printMethod === 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE';
 
-      const stitching = blockOut(ownsBlock('stitching'), () => ({
+      const stitching = blockOut(() => ({
         needleCount: o.needleCount || 0,
         needleGaugeMm: optionalDecimal(o.needleGaugeMm),
         seamSecuring: (o.seamSecuring ||
           'TECH_CARD_SEAM_SECURING_UNKNOWN') as common_TechCardSeamSecuring,
         rowSpacingMm: optionalDecimal(o.rowSpacingMm),
         fullnessRatio: optionalDecimal(o.fullnessRatio),
-        // Бейка — только при КЛАССЕ ШВА «окантовочный» (0328), а не при окантовочной машинке: кант
-        // притачивают и на прямострочке, и до F22 такая окантовка своё исполнение назвать не могла.
-        // Шов этикетки — при любой машинке, как и был.
-        bindingStyle: (o.seamClass === 'TECH_CARD_SEAM_CLASS_BS_BOUND'
-          ? o.bindingStyle || 'TECH_CARD_BINDING_STYLE_UNKNOWN'
-          : 'TECH_CARD_BINDING_STYLE_UNKNOWN') as common_TechCardBindingStyle,
+        // Бейка законна только при КЛАССЕ ШВА «окантовочный» (0328) — и правило это ПРОВЕРЯЕТ
+        // СЕРВЕР, по имени поля. Здесь оно больше не гасится: погашенная бейка исчезала из базы
+        // молча при первом же сохранении шага, у которого класс шва поменяли.
+        bindingStyle: (o.bindingStyle ||
+          'TECH_CARD_BINDING_STYLE_UNKNOWN') as common_TechCardBindingStyle,
         labelAttachStitch: (o.labelAttachStitch ||
           'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN') as common_TechCardLabelAttachStitch,
       }));
-      const placementLayout = blockOut(ownsBlock('placement'), () => ({
+      const placementLayout = blockOut(() => ({
         count: o.placementCount || 0,
         pitchMm: optionalDecimal(o.pitchMm),
       }));
-      // H-БЛОК ЖИВЁТ НА ДВУХ ГЛАГОЛАХ, И ПО-РАЗНОМУ. На HARDWARE_SET он целиком; на MACHINE с явной
-      // цикловой машинкой — только подготовка отверстия, усилитель и стежки цикла: у петли и
-      // закрепки есть отверстие и усилитель, но нет «способа крепления» и нет стропы, которую
-      // подгибают, и сервер отвергает эти два поля там по имени.
-      const isHardwareStep = operationType === 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET';
-      const hardware = blockOut(ownsBlock('hardware') && (isHardwareStep || onCycleMachine), () => ({
-        attachMethod: (isHardwareStep
-          ? o.attachMethod || 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'
-          : 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN') as common_TechCardHardwareAttachMethod,
+      // H-БЛОК ЖИВЁТ НА ДВУХ ГЛАГОЛАХ, И ПО-РАЗНОМУ: на HARDWARE_SET он целиком; на MACHINE с
+      // явной цикловой машинкой — только подготовка отверстия, усилитель и стежки цикла (у петли и
+      // закрепки нет ни «способа крепления», ни стропы, которую подгибают). Обе половины правила
+      // проверяет СЕРВЕР — по имени поля; маппер их больше не гасит.
+      const hardware = blockOut(() => ({
+        attachMethod: (o.attachMethod ||
+          'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN') as common_TechCardHardwareAttachMethod,
         holePrep: (o.holePrep || 'TECH_CARD_HOLE_PREP_UNKNOWN') as common_TechCardHolePrep,
         reinforcement: (o.reinforcement ||
           'TECH_CARD_REINFORCEMENT_UNKNOWN') as common_TechCardReinforcement,
-        foldbackMm: isHardwareStep ? optionalDecimal(o.foldbackMm) : undefined,
+        foldbackMm: optionalDecimal(o.foldbackMm),
         cycleStitchCount: o.cycleStitchCount || 0,
       }));
-      // Гравировка снимает материал сама: носителя нет, прижима нет — все три поля отвергаются.
-      const print = blockOut(ownsBlock('print') && !isLaser, () => ({
+      // Гравировка снимает материал сама: носителя нет, прижима нет — и все три поля сервер там
+      // отвергает по имени. Заполненное едет и туда: иначе режим отслойки, набранный до промаха в
+      // селекте метода, исчезал бы вместе с промахом.
+      const print = blockOut(() => ({
         peelMode: (o.peelMode || 'TECH_CARD_PEEL_MODE_UNKNOWN') as common_TechCardPeelMode,
         secondPressSec: o.secondPressSec || 0,
       }));
-      const weld = blockOut(ownsBlock('weld') && isWeldStep, () => ({
-        // Горячий воздух — только у проклейки шва: ультразвук греет материал сам.
-        airTemperatureC: onMachineType('TECH_CARD_MACHINE_TYPE_SEAM_TAPING')
-          ? o.airTemperatureC || 0
-          : 0,
+      const weld = blockOut(() => ({
+        // Горячий воздух — только у проклейки шва: ультразвук греет материал сам, и сервер
+        // отвергает число по имени. Гасить его здесь значило бы стирать 450 °C сменой машинки.
+        airTemperatureC: o.airTemperatureC || 0,
         feedSpeedMMin: optionalDecimal(o.feedSpeedMMin),
       }));
-      const trim = blockOut(ownsBlock('trim'), () => ({
+      const trim = blockOut(() => ({
         action: (o.trimAction || 'TECH_CARD_TRIM_ACTION_UNKNOWN') as common_TechCardTrimAction,
         residualAllowanceMm: optionalDecimal(o.residualAllowanceMm),
       }));
-      const threadTrim = blockOut(ownsBlock('threadTrim'), () => ({
+      const threadTrim = blockOut(() => ({
         residualTailMaxMm: optionalDecimal(o.residualTailMaxMm),
       }));
-      // ВТО-БЛОК ЖИВЁТ НА ДВУХ ГЛАГОЛАХ, И ГЕЙТ У НЕГО СВОЙ, А НЕ `ownsBlock('pressSettings')`.
-      // Тот отвечает «шагу можно дать НАСТРОЙКИ пресса» и включает FUSING и PRINT — а под-глагол
-      // ВТО сервер на них отвергает по имени. Здесь вопрос другой: «шаг ЕСТЬ ВТО».
-      //
-      // PRESS_OPEN В ГЕЙТЕ, ХОТЯ КОНТРОЛА У НЕГО НЕТ. Пикер туда не пишет ничего (каноническая
-      // запись разутюжки — сам глагол), но прочитанное с провода значение обязано уехать обратно
-      // ТЕМ ЖЕ ТОКЕНОМ: выбросить его на записи значило бы стереть чужой факт молча, кругом
-      // «загрузил → сохранил», на проводе, где потерю нечем увидеть.
-      const isPressAction =
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
-        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN';
+      // ВТО-БЛОК — И ЕГО ПРЕЦЕДЕНТ. Именно здесь закон «прочитанное с провода уезжает обратно тем
+      // же токеном» был впервые записан — для под-глагола разутюжки, у которого контрола нет
+      // вовсе. Теперь по нему живёт весь маппер, и отдельного гейта блоку не нужно.
       const pressAction = (o.pressAction ||
         'TECH_CARD_PRESS_ACTION_UNKNOWN') as common_TechCardPressAction;
-      const press = blockOut(isPressAction, () => ({
+      const press = blockOut(() => ({
         action: pressAction,
         // Направление законно ТОЛЬКО при «заутюжить»: при остальных приёмах припуск никуда не
-        // укладывается, и сервер отвергает поле по имени. Тот же приём, что у бейки и петли —
-        // гасится ЗДЕСЬ, а не только очисткой на экране: два гейта на одно поле разошлись бы.
-        toward: (pressAction === 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE'
-          ? o.pressToward || 'TECH_CARD_PRESS_TOWARD_UNKNOWN'
-          : 'TECH_CARD_PRESS_TOWARD_UNKNOWN') as common_TechCardPressToward,
+        // укладывается. Правило целиком серверное и зодовское (`superRefine` ставит отказ НА
+        // КОНТРОЛ) — маппер тут не третье мнение, он транспорт.
+        toward: (o.pressToward || 'TECH_CARD_PRESS_TOWARD_UNKNOWN') as common_TechCardPressToward,
       }));
-      const clean = blockOut(ownsBlock('clean'), () => ({
+      const clean = blockOut(() => ({
         kind: (o.cleaningKind || 'TECH_CARD_CLEANING_KIND_UNKNOWN') as common_TechCardCleaningKind,
       }));
-      const inspect = blockOut(ownsBlock('inspect'), () => ({
+      const inspect = blockOut(() => ({
         coverageMode: (o.coverageMode ||
           'TECH_CARD_INSPECT_COVERAGE_UNKNOWN') as common_TechCardInspectCoverage,
       }));
       // Мокрая обработка — один факт, он же дискриминатор: сообщение вокруг него было бы пустой
-      // обёрткой, поэтому оно и не заведено.
+      // обёрткой, поэтому оно и не заведено. Тот же закон, что у метода печати: на своём глаголе
+      // едет всегда (REQUIRED — отказ обязан прийти именем поля), на чужом — если заполнен.
       const wetProcessKind =
-        operationType === 'TECH_CARD_OPERATION_TYPE_WET_PROCESS'
+        operationType === 'TECH_CARD_OPERATION_TYPE_WET_PROCESS' || stepEnumSet(o.wetProcessKind)
           ? ((o.wetProcessKind ||
               'TECH_CARD_WET_PROCESS_KIND_UNKNOWN') as common_TechCardWetProcessKind)
           : undefined;
-      const fastening = blockOut(ownsBlock('fastening'), () => ({
-        buttonholeStyle: (onMachineType('TECH_CARD_MACHINE_TYPE_BUTTONHOLE')
-          ? o.buttonholeStyle || 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'
-          : 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN') as common_TechCardButtonholeStyle,
-        cutLengthMm: onMachineType('TECH_CARD_MACHINE_TYPE_BUTTONHOLE')
-          ? optionalDecimal(o.cutLengthMm)
-          : undefined,
-        buttonholeOrientation: (onMachineType('TECH_CARD_MACHINE_TYPE_BUTTONHOLE')
-          ? o.buttonholeOrientation || 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'
-          : 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN') as common_TechCardButtonholeOrientation,
-        bartackLengthMm: onMachineType(
-          'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
-          'TECH_CARD_MACHINE_TYPE_BARTACK',
-        )
-          ? optionalDecimal(o.bartackLengthMm)
-          : undefined,
-        attachPattern: (onMachineType('TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH')
-          ? o.attachPattern || 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'
-          : 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN') as common_TechCardButtonAttachPattern,
-        zipperApplication: (onMachineType('TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING')
-          ? o.zipperApplication || 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'
-          : 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN') as common_TechCardZipperApplication,
+      // FA — каждое поле законно при СВОЁМ явном типе машины, и все шесть правил проверяет сервер
+      // по имени поля. Шесть тернарей, стоявших здесь, были шестью тихими потерями: сменил машинку
+      // на шаге — и стиль петли, длина прорези, ориентация, длина закрепки, рисунок пришива и
+      // способ втачивания молнии уезжали в NULL, не показавшись на экране ни разу.
+      const fastening = blockOut(() => ({
+        buttonholeStyle: (o.buttonholeStyle ||
+          'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN') as common_TechCardButtonholeStyle,
+        cutLengthMm: optionalDecimal(o.cutLengthMm),
+        buttonholeOrientation: (o.buttonholeOrientation ||
+          'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN') as common_TechCardButtonholeOrientation,
+        bartackLengthMm: optionalDecimal(o.bartackLengthMm),
+        attachPattern: (o.attachPattern ||
+          'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN') as common_TechCardButtonAttachPattern,
+        zipperApplication: (o.zipperApplication ||
+          'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN') as common_TechCardZipperApplication,
       }));
       return {
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
@@ -3324,71 +3311,65 @@ export function mapFormToTechCardInsert(
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,
         stitchesPerCm: inputToDecimal(o.stitchesPerCm),
         seamAllowanceMm: optionalDecimal(o.seamAllowanceMm),
-        // The sub-message travels only when there IS topstitching: an always-present wrapper
-        // carrying MODE_UNKNOWN reads as «somebody considered it» on every step that has none. And
-        // the width is dropped only for a mode KNOWN to have none — beside «in the ditch» it would
-        // be a shadow value the server refuses anyway, while «at the edge» now carries the number
-        // whenever the technologist typed one. Written as «only with the numbered member» this line
-        // was the last of the three losses: even with the editor and the schema fixed, the round
-        // trip «load → open → save» would have deleted the width of a mode this bundle cannot
-        // classify, on the wire, where nothing on screen could show it going.
+        // ОБЁРТКА ЕДЕТ, ЕСЛИ У ШАГА ЕСТЬ ХОТЬ ОДИН ФАКТ ОТСТРОЧКИ — режим ИЛИ отступ ИЛИ ряды.
+        // Всегда присутствующая обёртка с MODE_UNKNOWN внутри читалась бы как «кто-то думал об
+        // этом» на КАЖДОМ шаге, у которого отстрочки нет; но обёртка, которой нет при заполненном
+        // отступе, — это отступ, стёртый на проводе. Отсюда третье состояние: {UNKNOWN, 4} едет,
+        // и сервер (Ф3) отвечает на него ИМЕНЕМ поля — «скажи, от какой линии меряется, или очисти
+        // отступ и ряды».
+        //
+        // ШИРИНА БОЛЬШЕ НЕ ГАСИТСЯ ПО РЕЖИМУ. «В шов» меряет расстояние ноль по определению, и
+        // число там незаконно — но отказывает СЕРВЕР по имени, а zod ставит тот же отказ на сам
+        // контрол. Тернарь здесь был третьим мнением и единственным, которое стирало молча.
         topstitch:
-          topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
-            ? undefined
-            : {
+          stepEnumSet(topstitchMode) ||
+          stepTextSet(o.topstitchWidthMm) ||
+          (o.topstitchRows || 0) > 0
+            ? {
                 mode: topstitchMode,
-                widthMm: topstitchModeRefusesWidth(topstitchMode)
-                  ? undefined
-                  : inputToDecimal(o.topstitchWidthMm),
+                widthMm: inputToDecimal(o.topstitchWidthMm),
                 rows: o.topstitchRows || 0,
-              },
+              }
+            : undefined,
         attachmentKind: (o.attachmentKind ||
           'TECH_CARD_ATTACHMENT_KIND_UNKNOWN') as common_TechCardAttachmentKind,
         attachmentSizeMm: optionalDecimal(o.attachmentSizeMm),
-        // --- the machine block: only on a MACHINE step, and unset stays unset -------------------
+        // --- ОБОРУДОВАНИЕ: две шестёрки, которые ехали ТОЛЬКО СО СВОИМ ГЛАГОЛОМ ---------------
         // `0` and `_UNKNOWN` ARE the unset wire values here (there is no presence on a bare int32
         // and every range starts above zero), so they are sent as they are rather than omitted.
         // The decimal is the exception: `''` must leave as an ABSENT key, because `{ value: "0" }`
         // is a real setting — a zero stitch width is a legal straight stitch.
-        machineType: (isMachineStep
-          ? o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN'
-          : 'TECH_CARD_MACHINE_TYPE_UNKNOWN') as common_TechCardMachineType,
-        machineProfileKey: isMachineStep ? o.machineProfileKey?.trim() || '' : '',
-        // СВАРОЧНЫЕ МАШИНКИ ОТВЕРГАЮТ НИТОЧНО-ИГОЛЬНЫЕ OVERRIDES (0324). Проклейка шва и ультразвук
-        // соединяют теплом: иглы и нитки у них нет вовсе, и сервер отказывает по имени. Пятёрка
-        // ниже — тот же список, что в isWeldMachineType, и другой машинки он не касается, поэтому
-        // байты шага на любой ШВЕЙНОЙ машинке этой строкой не меняются.
-        threadCount: isMachineStep && !isWeldStep ? o.threadCount || 0 : 0,
-        needleType: (isMachineStep && !isWeldStep
-          ? o.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN'
-          : 'TECH_CARD_NEEDLE_TYPE_UNKNOWN') as common_TechCardNeedleType,
-        needleSizeNm: isMachineStep && !isWeldStep ? o.needleSizeNm || 0 : 0,
-        threadTension: (isMachineStep && !isWeldStep
-          ? o.threadTension || 'TECH_CARD_THREAD_TENSION_UNKNOWN'
-          : 'TECH_CARD_THREAD_TENSION_UNKNOWN') as common_TechCardThreadTension,
-        // Only with the scale it explains — server parity, same pair discipline as kind/kind_note.
-        threadTensionNote:
-          isMachineStep &&
-          !isWeldStep &&
-          o.threadTension &&
-          o.threadTension !== 'TECH_CARD_THREAD_TENSION_UNKNOWN'
-            ? o.threadTensionNote?.trim() || ''
-            : '',
-        stitchWidthMm: isMachineStep && !isWeldStep ? optionalDecimal(o.stitchWidthMm) : undefined,
-        // --- the ВТО block: on PRESS / PRESS_OPEN / FUSING — and on PRINT, which borrows the press
-        pressEquipment: (ownsPressSettings
-          ? o.pressEquipment || 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'
-          : 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') as common_TechCardPressEquipment,
-        pressProfileKey: ownsPressSettings ? o.pressProfileKey?.trim() || '' : '',
-        pressTemperatureC: ownsPressSettings ? o.pressTemperatureC || 0 : 0,
-        pressDwellSec: ownsPressSettings ? o.pressDwellSec || 0 : 0,
-        pressPressureNCm2: ownsPressSettings ? optionalDecimal(o.pressPressureNCm2) : undefined,
+        //
+        // ГЕЙТОВ ГЛАГОЛА И МАШИНКИ ЗДЕСЬ БОЛЬШЕ НЕТ. Они выглядели поясом безопасности («сервер
+        // отвергает машинную настройку на ВТО-шаге по имени»), а работали ножницами: переключил
+        // шаг с машинного на ВТО — и число ниток, тип и размер иглы, натяжение и ширина стежка
+        // уехали в NULL молча, потому что операции пишутся полной заменой. Сварочная пара —
+        // тот же случай: `!isWeldStep` стирал ниточно-игольные overrides сменой машинки.
+        // Теперь заполненное едет, сервер отвечает ИМЕНЕМ поля, а на экране это строка полосы
+        // остатков с [clear].
+        machineType: (o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN') as common_TechCardMachineType,
+        machineProfileKey: o.machineProfileKey?.trim() || '',
+        threadCount: o.threadCount || 0,
+        needleType: (o.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN') as common_TechCardNeedleType,
+        needleSizeNm: o.needleSizeNm || 0,
+        threadTension: (o.threadTension ||
+          'TECH_CARD_THREAD_TENSION_UNKNOWN') as common_TechCardThreadTension,
+        // Пара «шкала + примечание» проверяется сервером и зодом (`refineThreadTensionNote`), и
+        // отказ встаёт НА КОНТРОЛ примечания — который рендерится, пока в нём есть текст. Гасить
+        // примечание здесь значило бы стирать чужие слова возвратом шкалы в «наследуй».
+        threadTensionNote: o.threadTensionNote?.trim() || '',
+        stitchWidthMm: optionalDecimal(o.stitchWidthMm),
+        pressEquipment: (o.pressEquipment ||
+          'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') as common_TechCardPressEquipment,
+        pressProfileKey: o.pressProfileKey?.trim() || '',
+        pressTemperatureC: o.pressTemperatureC || 0,
+        pressDwellSec: o.pressDwellSec || 0,
+        pressPressureNCm2: optionalDecimal(o.pressPressureNCm2),
         // undefined drops the key, which IS the wire shape of an unset optional bool — and the
         // server reads a present `false` as the stated instruction «without steam».
-        pressSteam: ownsPressSettings ? o.pressSteam : undefined,
-        pressCloth: (ownsPressSettings
-          ? o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN'
-          : 'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
+        pressSteam: o.pressSteam,
+        pressCloth: (o.pressCloth ||
+          'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
         // --- ВИДЫ ОПЕРАЦИЙ (0324): порядок — номера полей контракта 51..63 (дыры 50/62 обещаны) --
         printMethod,
         stitching,
