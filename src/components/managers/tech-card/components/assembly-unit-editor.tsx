@@ -10,6 +10,8 @@ import type { AssemblyResult } from './assembly-frontier';
 import { stateWord } from './assembly-node-views';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { operationHeading } from './operation-options';
+import type { WorkCatalog } from './operation-work';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
@@ -108,6 +110,9 @@ export function AssemblyUnitEditor({
   /** Точка вставки нажата: открыть создание шага на позиции `at` с ключом узла в составе. */
   onInsert: (at: number) => void;
 }) {
+  // Каталог работ — ОДНОЙ подпиской на весь док: имя шага в мини-рельсе спрашивает работу тем же
+  // счётом, что рельс. Ключ у запроса общий на приложение, второго обращения к сети нет.
+  const { catalog: workCatalog } = useOperationWorkCatalog();
   // Индекс шага → ключ его блока. Нужен РАЗРЫВУ: сказать «2 steps of other units between» можно
   // только зная, что стоящие между шаги действительно в узлах, а не в хвосте «вне узлов».
   const blockOfIndex = new Map<number, string>();
@@ -169,6 +174,7 @@ export function AssemblyUnitEditor({
               selected={index === selectedIndex}
               pieceShapes={pieceShapes}
               onSelect={() => onPickStep(index)}
+              workCatalog={workCatalog}
             />
             {(offered || gap || sayNotYet) && next !== undefined && (
               <InsertSlot
@@ -327,11 +333,15 @@ function UnitStepRow({
   selected,
   pieceShapes,
   onSelect,
+  workCatalog,
 }: {
   index: number;
   selected: boolean;
   pieceShapes: PieceShapeMap;
   onSelect: () => void;
+  /** Каталог работ — пропом от дока: одна подписка на мини-рельс, как в большом рельсе.
+   * Обязателен тем же приёмом, что аргументы композитора: `undefined` пишется вслух. */
+  workCatalog: WorkCatalog | undefined;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -339,6 +349,8 @@ function UnitStepRow({
     '') as string;
   // Тот же якорь вида, что у рельса: два способа назвать шаг — это два разных имени одного шага.
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
+  // ...и та же названная работа: два способа назвать шаг — это два разных имени одного шага.
+  const work = (useWatch({ control, name: `operations.${index}.work` }) ?? '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const smv = (useWatch({ control, name: `operations.${index}.smv` }) ?? '') as string;
@@ -361,6 +373,8 @@ function UnitStepRow({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
       seamClass,
+      work,
+      workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames: linkedPieces.map((p) => p.name),
       note,

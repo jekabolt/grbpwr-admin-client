@@ -15,6 +15,7 @@ import {
   seamClassOptions,
   topstitchPhrase,
 } from './operation-options';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 
 // ---------------------------------------------------------------------------
 // ASSEMBLY MAP — the sketch and the operation list, joined.
@@ -39,6 +40,10 @@ type FormOperation = {
   machineType?: string;
   zone?: string;
   seamClass?: string;
+  // РАБОТА (0330) — НАЗВАННОЕ имя шага. Карта примерки читает те же строки формы, что рельс, и
+  // обязана звать шаг тем же словом: технолог, приколовший булавку, и швея у машины должны
+  // говорить об одном шаге одинаково.
+  work?: string;
   stitchesPerCm?: string;
   seamAllowanceMm?: string;
   topstitchMode?: string;
@@ -99,6 +104,9 @@ function specLine(o: FormOperation, pieceNames: string[]): string {
 
 export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) {
   const { control } = useFormContext<TechCardFormData>();
+  // Каталог работ — одной подпиской на всю карту: ключ у запроса общий на приложение, второго
+  // обращения к сети нет. Не приехал — имена деградируют до сегодняшних, а не до пустоты.
+  const { catalog: workCatalog } = useOperationWorkCatalog();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as FormOperation[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
@@ -237,7 +245,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                   {o.calloutNumber ? o.calloutNumber : i + 1}
                 </span>
                 <span className='min-w-0'>
-                  <Text size='micro' component='span'>
+                  <Text size='micro' component='span' data-map-step={i}>
                     {operationHeading({
                       operationType: o.operationType as Parameters<
                         typeof operationHeading
@@ -250,6 +258,11 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                       // ...а вид — из класса шва: у отстрочки якорь именно там, и без него карта
                       // называла бы её «join» рядом с редактором, который зовёт её «Topstitch».
                       seamClass: o.seamClass,
+                      // ...а названная работа бьёт обе выведенные лестницы (R8): шаг, которому
+                      // назначили работу, зовётся здесь её подписью — той же, что в рельсе и на
+                      // печатном листе.
+                      work: o.work,
+                      workCatalog,
                       zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
                       pieceNames: names,
                       note: o.note,

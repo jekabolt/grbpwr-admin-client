@@ -23,6 +23,7 @@ import { SortableEntity } from '../../hero/components/sortable-entity';
 import type { AssemblyBlock } from './assembly-blocks';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { operationHeading } from './operation-options';
+import type { WorkCatalog } from './operation-work';
 import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
@@ -82,6 +83,7 @@ function RailStep({
   onHoverPin,
   onDropPiece,
   readPieceDrag,
+  workCatalog,
 }: {
   uid: string;
   index: number;
@@ -104,6 +106,16 @@ function RailStep({
    * между двумя модулями, которого в этом дереве сегодня нет ни одного.
    */
   readPieceDrag: (dt: DataTransfer) => string;
+  /**
+   * Каталог работ — ПРОПОМ, одной подпиской на весь рельс (R8). Хук в строке означал бы сто
+   * двадцать шесть подписок на карточке свалки ради одного и того же справочника; не приехал —
+   * имя деградирует до сегодняшней деривации, а не до пустоты.
+   *
+   * ОБЯЗАТЕЛЬНЫЙ ТЕМ ЖЕ ПРИЁМОМ, что аргументы композитора: необязательный проп позволил бы
+   * будущему вызывателю молча забыть каталог — и работы, знакомые каталогу, поехали бы токенами
+   * на одном экране из семи. `undefined` пишется вслух.
+   */
+  workCatalog: WorkCatalog | undefined;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -114,6 +126,10 @@ function RailStep({
   // Класс шва — ЯКОРЬ ВИДА, и рельсу он нужен по той же причине, по какой нужен машинный тип:
   // без него отстрочка на одноигольной читалась бы «join» в списке и «Topstitch» в открытом шаге.
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
+  // РАБОТА — НАЗВАННОЕ ИМЯ ШАГА, и оно бьёт обе выведенные лестницы выше. Без этой подписки шаг,
+  // которому назначили работу, продолжал бы зваться в рельсе выведенным словом, пока пикер в
+  // открытом редакторе называет его выбранным, — тот самый остаток, ради которого R8 и заведена.
+  const work = (useWatch({ control, name: `operations.${index}.work` }) ?? '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
@@ -151,6 +167,8 @@ function RailStep({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
       seamClass,
+      work,
+      workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames,
       note,
@@ -221,6 +239,11 @@ function RailStep({
             }}
             aria-current={selected}
             title={label}
+            // ТОЧНАЯ РУЧКА ДЛЯ ПРОБЫ ИМЕНИ. `title` уже несёт заголовок ЦЕЛИКОМ и отдельно от
+            // номера, силуэтов и нормы времени, которые лежат в этом же узле; проба читает именно
+            // его, потому что textContent строки склеил бы четыре разных факта в одну строку и
+            // «имя не то» стало бы неотличимо от «номер не тот».
+            data-rail-step={index}
             className='flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
@@ -307,6 +330,7 @@ export function SequenceRail({
   onDropPiece,
   onMoveOperation,
   readPieceDrag,
+  workCatalog,
 }: {
   /**
    * Мета массива строк из `useFieldArray` владельца — СВОЕГО экземпляра здесь нет и быть не может.
@@ -328,6 +352,9 @@ export function SequenceRail({
   onDropPiece: (index: number, lineKey: string) => void;
   onMoveOperation: (from: number, to: number) => void;
   readPieceDrag: (dt: DataTransfer) => string;
+  /** Каталог работ на весь рельс — одна подписка у владельца, отсюда в каждую строку. Обязателен,
+   * как аргументы композитора: «рельс без каталога» — решение вызывателя, а не забытый проп. */
+  workCatalog: WorkCatalog | undefined;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -373,6 +400,7 @@ export function SequenceRail({
                 onHoverPin={onHoverPin}
                 onDropPiece={onDropPiece}
                 readPieceDrag={readPieceDrag}
+                workCatalog={workCatalog}
               />
             </Fragment>
           ))}
