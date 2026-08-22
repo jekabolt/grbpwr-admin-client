@@ -35,6 +35,7 @@ import {
 } from './equipment-options';
 import {
   densityText,
+  legacyMachineFact,
   machineProfileSummary,
   OPERATION_TYPE_LABELS,
   operationHeading,
@@ -420,7 +421,19 @@ function SnapshotOperations({
               ]
                 .filter(Boolean)
                 .join(' · ') || typeLabel
-            : stepDiscriminatorText(o) || typeLabel;
+            : // ЛЕГАСИ-ФАКТ СТУПЕНЬЮ ПЕРЕД ПОДПИСЬЮ — ТЕМ ЖЕ СОСТАВИТЕЛЕМ, ЧТО У ЛИСТА. Подпись типа
+              // начинается с ГЛАГОЛА («join — lockstitch 301»), а заголовок строкой выше уже зовёт
+              // композитор и говорит «join»: печатая подпись целиком, эта строка пересказывала имя
+              // шага, стоящее прямо над ней. Лист от этого вылечен хвостом, и панель обязана
+              // сказать то же слово — иначе подписанный документ читается на экране архива иначе,
+              // чем на бумаге, которую по нему шьют.
+              //
+              // СТУПЕНЬЮ, А НЕ ЗАМЕНОЙ `typeLabel`: у не-легаси `legacyMachineFact` пуст, и подпись
+              // по-прежнему обслуживает дореволюционные `handwork`/`other`, у которых она —
+              // единственное, что о шаге записано. Только в ЭТОЙ ветке: в две верхние легаси-член
+              // не попадает по построению (`isMachineStepType` — ровно `MACHINE`, `isPressStepType`
+              // — ровно `PRESS | PRESS_OPEN | FUSING`), и ступень там была бы мертворождённой.
+              stepDiscriminatorText(o) || legacyMachineFact(o.operationType) || typeLabel;
         // Фотографии шага — те же правила, что у печати: адрес есть только для картинки в
         // словаре снапшота, у остальных ничего не показываем (не заглушка).
         const stepMedia = (o.media ?? [])

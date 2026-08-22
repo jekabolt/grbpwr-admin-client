@@ -156,26 +156,87 @@ const OPERATION_TYPE_PICKER: common_TechCardOperationType[] = [
   'TECH_CARD_OPERATION_TYPE_OTHER',
 ];
 
-// ДЕВЯТЬ ЛЕГАСИ-ЧЛЕНОВ, НАЗВАННЫЕ ГРУППОЙ. Их перечисление уже стояло комментарием над картой выше
-// («1-9: legacy»), а решения о них принимались поштучно и по месту — по совпадению имени или по
-// тому, что член не попал ни в один предикат. Набор делает группу СПРАШИВАЕМОЙ.
+// ЭПОХА ЧЛЕНА — ТОТАЛЬНОЙ КАРТОЙ, А НЕ НАБОРОМ, И ЭТО ПРАВИЛО ЭТОГО ФАЙЛА, а не вкус: «каждый
+// словарь здесь — `Record<Enum, …>`, а не массив, потому что tsc и есть тот диффчек контракта,
+// которого у репозитория нет скриптом» (шапка карты подписей выше). Рукописный `Set` был здесь
+// единственным словарём, который своему же правилу не следовал, — и молчал бы ровно так же, как
+// молчит любой массив: выпади из него член, никто бы не заметил.
 //
-// ЗАЧЕМ СПРАШИВАТЬ. Шаг такой записи несёт машинку В САМОМ ТИПЕ (`lockstitch`, `overlock`), а поля
-// `machine_type` у него нет — с 0306 оно появилось у канонической записи и осталось пустым у
-// архивной. Значит колонка «на чём» отвечает на него не машинкой, а подписью типа: только там и
-// живёт номер по ISO 4915, ради которого оператор эту клетку и читает. Панель релизов это правило
-// уже знает (фолбэк на `typeLabel`), печатный лист — теперь тоже.
-export const LEGACY_OPERATION_TYPES: ReadonlySet<common_TechCardOperationType> = new Set([
-  'TECH_CARD_OPERATION_TYPE_LOCKSTITCH',
-  'TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE',
-  'TECH_CARD_OPERATION_TYPE_OVERLOCK',
-  'TECH_CARD_OPERATION_TYPE_COVERSTITCH',
-  'TECH_CARD_OPERATION_TYPE_CHAINSTITCH',
-  'TECH_CARD_OPERATION_TYPE_BLINDHEM',
-  'TECH_CARD_OPERATION_TYPE_BARTACK',
-  'TECH_CARD_OPERATION_TYPE_BUTTONHOLE',
-  'TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH',
-]);
+// НАБОР И КАРТА ЛОВЯТ РАЗНОЕ, И ПОТОМУ КАРТА. Набор умеет сказать только «этот здесь есть»; сказать
+// «а про ЭТОГО я решил, что он не легаси» он не умеет вовсе. Тотальная карта обязана назвать
+// каждого члена контракта поимённо, поэтому новый член ломает СБОРКУ — до пробы дело не доходит.
+// Чего она НЕ ловит — перевёрнутого значения: `false` вместо `true` компилируется молча, и это
+// сторожит поимённая цитата в пробе. Два механизма, два разных отказа, ни один не лишний.
+const OPERATION_TYPE_IS_LEGACY: Record<common_TechCardOperationType, boolean> = {
+  TECH_CARD_OPERATION_TYPE_UNKNOWN: false,
+  // Девятеро до 0306: машинка сидит В САМОМ ТИПЕ, поля `machine_type` у такой записи нет.
+  TECH_CARD_OPERATION_TYPE_LOCKSTITCH: true,
+  TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE: true,
+  TECH_CARD_OPERATION_TYPE_OVERLOCK: true,
+  TECH_CARD_OPERATION_TYPE_COVERSTITCH: true,
+  TECH_CARD_OPERATION_TYPE_CHAINSTITCH: true,
+  TECH_CARD_OPERATION_TYPE_BLINDHEM: true,
+  TECH_CARD_OPERATION_TYPE_BARTACK: true,
+  TECH_CARD_OPERATION_TYPE_BUTTONHOLE: true,
+  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: true,
+  // Все прочие несут машинку своим полем и в подписи типа её не держат.
+  TECH_CARD_OPERATION_TYPE_FUSING: false,
+  TECH_CARD_OPERATION_TYPE_HANDWORK: false,
+  TECH_CARD_OPERATION_TYPE_OTHER: false,
+  TECH_CARD_OPERATION_TYPE_MACHINE: false,
+  TECH_CARD_OPERATION_TYPE_PRESS: false,
+  TECH_CARD_OPERATION_TYPE_PRESS_OPEN: false,
+  TECH_CARD_OPERATION_TYPE_HARDWARE_SET: false,
+  TECH_CARD_OPERATION_TYPE_PRINT: false,
+  TECH_CARD_OPERATION_TYPE_TRIM: false,
+  TECH_CARD_OPERATION_TYPE_THREAD_TRIM: false,
+  TECH_CARD_OPERATION_TYPE_CLEAN: false,
+  TECH_CARD_OPERATION_TYPE_INSPECT: false,
+  TECH_CARD_OPERATION_TYPE_FOLD: false,
+  TECH_CARD_OPERATION_TYPE_PACK: false,
+  TECH_CARD_OPERATION_TYPE_WET_PROCESS: false,
+};
+
+/** Разделитель подписи типа: слева ГЛАГОЛ, справа — факт о машине. Пробел, длинное тире, пробел. */
+const TYPE_LABEL_SEPARATOR = ' — ';
+
+/** ЧТО ПОДПИСЬ ТИПА ГОВОРИТ О МАШИНЕ СВЕРХ ГЛАГОЛА — «lockstitch 301», «twin needle», иначе пусто.
+ *
+ *  ЗАЧЕМ ХВОСТ, А НЕ ПОДПИСЬ ЦЕЛИКОМ. Клетка «machine / mode» отвечает на вопрос «на чём это шло»,
+ *  а подпись типа начинается с ГЛАГОЛА («join — lockstitch 301»). Печатая её целиком, клетка
+ *  пересказывала имя шага, которое стоит рядом своей колонкой: у семи членов повтор был не виден,
+ *  потому что к нему приклеен настоящий факт, а у `buttonhole` и `button attach` подпись РАВНА
+ *  глаголу байт в байт — и бумага печатала одно слово в двух соседних полях. Хвост убирает повтор
+ *  у всех девяти разом и делает легаси-клетку той же формы, что современная: у современного шага
+ *  там стоит «zigzag 304», у легаси теперь «lockstitch 301», а не «join — lockstitch 301».
+ *
+ *  ПЕРЕЧИСЛЕНИЕ У ОВЕРЛОКА (`504 / 514 / 516`) ОСТАВЛЕНО НАРОЧНО, и это не та же ошибка, против
+ *  которой заведён `machineTypeLabelWithStitch`. Там довод был «номер стежка конкретный, а не
+ *  перечисление: три номера предлагали оператору выбрать стежок самому» — но там машинка НАЗВАНА
+ *  полем, и число ниток шага говорит, который из трёх; перечисление было отказом этим
+ *  воспользоваться. У записи до 0306 машинка не названа НИГДЕ: `stitchTypeNumber` ключуется на
+ *  `machineType`, которого у такой записи не существует. Три номера здесь — честный отчёт о
+ *  недосказанной записи, а не лень. Сузить до одного можно только через карту «легаси-тип → тип
+ *  машинки», то есть нашу копию серверной канонизации 0306, которой мы не видим, — а такая копия
+ *  хуже трёх номеров: она разошлась бы с сервером молча.
+ *
+ *  ДВА ЧЛЕНА ОТВАЛИВАЮТСЯ САМИ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ: у петли и пришивания пуговицы подпись не
+ *  говорит о машине НИЧЕГО сверх глагола, поэтому хвоста у них нет, и клетка честно пуста — ровно
+ *  как была до переезда. Отдельным списком исключений это записывать не надо: список исключений
+ *  разошёлся бы с подписями, а хвост выводится из них. */
+export function legacyMachineFact(operationType?: string): string {
+  const t = operationType as common_TechCardOperationType | undefined;
+  if (!t || !OPERATION_TYPE_IS_LEGACY[t]) return '';
+  const label = OPERATION_TYPE_LABELS[t] ?? '';
+  const at = label.indexOf(TYPE_LABEL_SEPARATOR);
+  return at < 0 ? '' : label.slice(at + TYPE_LABEL_SEPARATOR.length).trim();
+}
+
+/** Легаси-члены поимённо — только для ФИКСТУРЫ ПРОБЫ, чтобы цитата перечисляла их не своей копией
+ *  списка, а тем же источником, из которого читает экран. */
+export const LEGACY_OPERATION_TYPES: ReadonlyArray<common_TechCardOperationType> = (
+  Object.keys(OPERATION_TYPE_IS_LEGACY) as common_TechCardOperationType[]
+).filter((t) => OPERATION_TYPE_IS_LEGACY[t]);
 
 export const operationTypeOptions: Array<{ value: common_TechCardOperationType; label: string }> =
   OPERATION_TYPE_PICKER.map((value) => ({ value, label: OPERATION_TYPE_LABELS[value] }));
