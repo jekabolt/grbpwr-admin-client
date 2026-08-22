@@ -298,6 +298,15 @@ function descendToPieces(
   let complete = true;
   let budget = steps.length * steps.length + steps.length + 8;
 
+  // Производители — картой, а не перебором на каждый узел: спуск зовут на каждое нажатие клавиши,
+  // а перебор внутри обхода даёт квадрат по числу шагов на карточке из ста двадцати шести.
+  const producersByKey = new Map<string, number[]>();
+  steps.forEach((s, j) => {
+    const out = (s?.outputUnitKey ?? '').trim();
+    if (!out) return;
+    producersByKey.set(out, [...(producersByKey.get(out) ?? []), j]);
+  });
+
   const walk = (keys: string[], limit: number, depth: number) => {
     if (depth > steps.length + 1) {
       complete = false;
@@ -319,10 +328,7 @@ function descendToPieces(
       visited.add(seen);
       // ПРОИЗВОДИТЕЛИ — ТОЛЬКО РАНЬШЕ. Тот же порядок, что у прохода правил: шаг, ссылающийся на
       // собственный выход или на узел из будущего, не «спускается» — он нарушает правило.
-      const producers: number[] = [];
-      for (let j = 0; j < limit && j < steps.length; j++) {
-        if (((steps[j]?.outputUnitKey ?? '').trim() || '') === key) producers.push(j);
-      }
+      const producers = (producersByKey.get(key) ?? []).filter((j) => j < limit);
       if (producers.length === 0) {
         dangling.add(key);
         complete = false;
