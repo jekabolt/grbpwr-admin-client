@@ -67,10 +67,12 @@ import {
   KIND_HOME_SECTION,
   UNSET_KIND,
   isKindEligibleSection,
+  kindLabel,
   kindOptionsForSection,
 } from './bom-kind';
 import {
   UNSET_PURPOSE,
+  bomPurposeLabel,
   defaultRoleForPurpose,
   groupBomLines,
   isOtherPurpose,
@@ -79,6 +81,7 @@ import {
   techCardBomPurposeOptions,
 } from './bom-purpose';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
+import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import {
   defaultRoleFor,
   looksLikeArticleName,
@@ -183,56 +186,169 @@ const weightLabel = (v?: string) => (v?.trim() ? `${v.trim()} g/m²` : '');
 const classShort = (c?: string) =>
   c && c !== 'MATERIAL_CLASS_UNKNOWN' ? c.replace('MATERIAL_CLASS_', '').toLowerCase() : '';
 
+// ЧЕТЫРЕ ПОЛЯ ЛИЧНОСТИ СТРОКИ — ОДНА ТАБЛИЦА СОСТОЯНИЙ, ДВА ЧИТАТЕЛЯ.
+//
+// Строка таблицы отвечает сразу на два вопроса: рисовать ли контрол и стоять ли значению в полосе
+// остатков. Второй ответ — ИНВЕРСИЯ первого, а не вторая таблица рядом с первой: две таблицы
+// разъезжаются молча, и разъехавшись, дают ровно ту дыру, ради которой полоса и строится —
+// заполненное, которого не видно нигде.
+type BomIdentityField = {
+  field: 'purpose' | 'purposeNote' | 'kind' | 'kindNote';
+  // Подпись — ТА ЖЕ, что у контрола этого поля в его собственном блоке ниже.
+  label: string;
+  shown: boolean;
+  filled: boolean;
+  // Значение как его читает человек: токен уже разложен подписью своего словаря.
+  text: string;
+  // Чем стирает [clear]: у словарной оси — её собственный UNSET, у примечания — пустая строка.
+  none: string;
+};
+
 // The slot's identity — its ROLE in the garment and its section — editable on EVERY line, linked
 // or not. The role is the one field a linked line used to render nowhere, which made a wrong or
 // article-borrowed role permanently uncorrectable. Section is editable on a linked line too: the
 // article keeps its own catalog section on the plate, and a deliberate divergence (a jersey
 // article serving a LINING slot) must be expressible.
-function SlotIdentityFields({ index }: { index: number }) {
+export function SlotIdentityFields({ index }: { index: number }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const rowPurpose = useWatch({ control, name: `bomItems.${index}.purpose` }) as string | undefined;
   const rowKind = useWatch({ control, name: `bomItems.${index}.kind` }) as string | undefined;
+  const rowPurposeNote = useWatch({ control, name: `bomItems.${index}.purposeNote` }) as
+    | string
+    | undefined;
+  const rowKindNote = useWatch({ control, name: `bomItems.${index}.kindNote` }) as
+    | string
+    | undefined;
   const rollGoods = isRollGoodsSection(rowSection);
   const kindEligible = isKindEligibleSection(rowSection);
   const kindItems = useMemo(() => kindOptionsForSection(rowSection), [rowSection]);
 
-  // Moving a line off roll goods takes its purpose with it — a назначение on a thread or a button
-  // is data no screen renders and the server refuses outright. This fires only on an actual section
-  // change (both branches are no-ops once the line is already consistent), so it cannot dirty a card
-  // merely by being opened. Same for the note when the purpose leaves «другое»: it explains a
-  // purpose that is no longer there.
-  useEffect(() => {
-    if (!rollGoods && rowPurpose && rowPurpose !== UNSET_PURPOSE) {
-      setValue(`bomItems.${index}.purpose`, UNSET_PURPOSE, { shouldDirty: true });
-    }
-  }, [rollGoods, rowPurpose, index, setValue]);
-  useEffect(() => {
-    if (!isOtherPurpose(rowPurpose)) {
-      setValue(`bomItems.${index}.purposeNote`, '', { shouldDirty: false });
-    }
-    // Deliberately keyed on the purpose alone: re-running on every keystroke in the note would
-    // fight the operator for the field.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowPurpose, index]);
+  // ЗДЕСЬ СТОЯЛИ ЧЕТЫРЕ ЭФФЕКТА ОЧИСТКИ, И ИХ БОЛЬШЕ НЕТ.
+  //
+  // Два писали UNSET в назначение и в вид с `shouldDirty: true`, ещё два — пустую строку в их
+  // примечания с `shouldDirty: false`. Все четыре срабатывали на МОНТИРОВАНИИ: строка, ставшая
+  // неконсистентной ПОСЛЕ сохранения (правила ужесточились, дом вида переехал новой волной, писал
+  // чужой или старый бандл), теряла значение от одного открытия карточки — раньше, чем кто-нибудь
+  // успевал его прочитать. Довод у них был верный («сервер отвергает такое напрямую»), а лечение
+  // обратное: вместо того чтобы ПОКАЗАТЬ значение, они его СТИРАЛИ.
+  //
+  // ПАРА С `shouldDirty: false` БЫЛА ХУЖЕ ОСТАЛЬНЫХ ДВУХ. Форма не пачкалась, «unsaved changes» не
+  // загоралось, предупреждения об уходе со страницы не было — а пустота уезжала со СЛЕДУЮЩИМ
+  // сохранением по любому другому поводу. BOM пишется upsert'ом по `line_key`, то есть это был
+  // UPDATE поверх сохранённого примечания, а не пропущенная вставка.
+  //
+  // ЧЕМ ЗАМЕНЕНО: предикаты остались (они и рисуют контролы), стирание переехало к человеку в
+  // полосу остатков, а несовместимую пару называет по имени zod (`bomItemSchema.superRefine`) —
+  // теми же словами, что и сервер, и ДО отправки. Тот же приём, которым фаза «перестать терять»
+  // сняла четыре mount-эффекта на шаге операции.
+  const purposeSet = !!rowPurpose && rowPurpose !== UNSET_PURPOSE;
+  const kindSet = !!rowKind && rowKind !== UNSET_KIND;
+  const purposeOwnsNote = isOtherPurpose(rowPurpose);
+  const kindOwnsNote = rowKind === 'TECH_CARD_BOM_KIND_OTHER';
+  const kindHome = kindSet ? KIND_HOME_SECTION[rowKind as common_TechCardBomKind] : undefined;
 
-  // The same two rules for the kind axis, and the first one is STRICTER than purpose's: a kind is
-  // not merely section-family-scoped, it is homed on ONE section. Moving a line from hardware to
-  // trim leaves `zipper` on a trim line — legal-looking, refused by the store, and reported against
-  // a field the operator did not touch. Both branches are no-ops on an already-consistent line.
-  useEffect(() => {
-    if (!rowKind || rowKind === UNSET_KIND) return;
-    const home = KIND_HOME_SECTION[rowKind as common_TechCardBomKind];
-    if (!kindEligible || (home && home !== rowSection)) {
-      setValue(`bomItems.${index}.kind`, UNSET_KIND, { shouldDirty: true });
-    }
-  }, [kindEligible, rowKind, rowSection, index, setValue]);
-  useEffect(() => {
-    if (rowKind !== 'TECH_CARD_BOM_KIND_OTHER') {
-      setValue(`bomItems.${index}.kindNote`, '', { shouldDirty: false });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowKind, index]);
+  const identityFields: BomIdentityField[] = [
+    {
+      field: 'purpose',
+      label: 'purpose',
+      shown: rollGoods,
+      filled: purposeSet,
+      text: bomPurposeLabel(rowPurpose),
+      none: UNSET_PURPOSE,
+    },
+    {
+      field: 'purposeNote',
+      label: 'what purpose is this',
+      shown: rollGoods && purposeOwnsNote,
+      filled: !!rowPurposeNote?.trim(),
+      text: rowPurposeNote?.trim() ?? '',
+      none: '',
+    },
+    {
+      field: 'kind',
+      label: 'kind',
+      shown: kindEligible,
+      filled: kindSet,
+      text: kindLabel(rowKind) ?? '',
+      none: UNSET_KIND,
+    },
+    {
+      field: 'kindNote',
+      label: 'what kind is this',
+      shown: kindEligible && kindOwnsNote,
+      filled: !!rowKindNote?.trim(),
+      text: rowKindNote?.trim() ?? '',
+      none: '',
+    },
+  ];
+
+  const { errors } = useFormState({ control, name: `bomItems.${index}` });
+  const rowErrors = (errors.bomItems as FieldErrors[] | undefined)?.[index] as
+    | Record<string, { message?: unknown }>
+    | undefined;
+  const errorAt = (field: string): string | undefined => {
+    const message = rowErrors?.[field]?.message;
+    return typeof message === 'string' ? message : rowErrors?.[field] ? '' : undefined;
+  };
+
+  const residueRows: ResidueRow[] = identityFields
+    .filter((f) => f.filled && !f.shown)
+    .map((f) => ({
+      field: f.field,
+      path: `bomItems.${index}.${f.field}`,
+      label: f.label,
+      value: f.text,
+      error: errorAt(f.field),
+    }));
+
+  // ВТОРОЙ РОД СТРОК — ОТКАЗ БЕЗ ЗНАЧЕНИЯ И БЕЗ КОНТРОЛА. Сегодня ни одно из четырёх правил не
+  // стреляет по пустому полю, так что строк этого рода на строке BOM пока не бывает. Они стоят
+  // здесь не про запас, а потому что дыра, которую они закрывают, ОДНА И ТА ЖЕ: отказ на пути,
+  // чей контрол не смонтирован, невидим — и карточка перестаёт сохраняться молча. Первое же
+  // серверное правило, которое потребует ответа на пустом поле (как потребовал режим отстрочки на
+  // шаге), окажется видимым без правки этого файла.
+  const residueErrorRows: ResidueErrorRow[] = identityFields
+    .filter((f) => !f.shown && errorAt(f.field) !== undefined)
+    .filter((f) => !residueRows.some((r) => r.field === f.field))
+    .map((f) => ({
+      field: f.field,
+      path: `bomItems.${index}.${f.field}`,
+      label: f.label,
+      error: errorAt(f.field) || 'this field was refused',
+    }));
+
+  // [CLEAR] — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ФОРМА СТИРАЕТ ЛИЧНОСТЬ СТРОКИ, и жест здесь человеческий.
+  // Одна правка на нажатие: [clear] по назначению НЕ уносит с собой примечание — оно стоит
+  // соседней строкой полосы и снимается своим собственным нажатием.
+  const clearIdentityField = (field: string) => {
+    const row = identityFields.find((f) => f.field === field);
+    if (!row) return;
+    setValue(`bomItems.${index}.${row.field}`, row.none, { shouldDirty: true });
+  };
+
+  // ЧУЖОЙ ВИД НА ЗАКОННОЙ СЕКЦИИ — случай, которого полоса НЕ ловит: контрол на экране есть,
+  // а значения в его списке нет (вид живёт в одной домашней секции, список секции — только её
+  // виды). Radix рисует над непустым значением ПУСТОЙ триггер: экран говорит «не задано» там, где
+  // форма держит `zipper`, и первый же выбор молча затирает его. Значение дописывается в список
+  // ОТКЛЮЧЁННЫМ пунктом: триггер называет его вслух, выбрать заново нельзя, а отказ zod ложится
+  // тут же под селектом. В полосу такая строка не попадает — иначе значение стояло бы в двух
+  // местах, и одно из них врало бы.
+  const foreignKind = kindSet && kindEligible && !kindItems.some((i) => i.value === rowKind);
+  // Пункт чужого вида говорит ПРАВДУ О ПРИЧИНЕ, и причин две, а не одна. Дом известен → «belongs
+  // to …» (строку перевезли через секции). Дом НЕизвестен → токен новее этой сборки (писал более
+  // новый бандл), и «belongs to another section» здесь было бы враньём: вид, возможно, живёт ровно
+  // в ЭТОЙ секции, просто словарь бандла его ещё не знает. Разные причины — разные действия
+  // человека (вернуть секцию vs обновить вкладку), поэтому подпись обязана их различать.
+  const foreignKindReason = kindHome
+    ? `belongs to ${sectionShort(kindHome) || 'another section'}`
+    : 'unknown to this app version';
+  // ТА ЖЕ ЛОЖЬ ЭКРАНА НА ОСИ НАЗНАЧЕНИЯ. У назначения нет домашней секции (любое законно на любой
+  // рулонной), поэтому «чужим» оно бывает единственным способом — токеном новее этой сборки. Без
+  // этого пункта Radix рисует над непустым значением пустой триггер, и первый же выбор молча
+  // затирает то, что записал более новый бандл.
+  const foreignPurpose =
+    purposeSet && rollGoods && !purposeEditorOptions.some((o) => o.value === rowPurpose);
 
   return (
     <div className='space-y-2'>
@@ -249,6 +365,15 @@ function SlotIdentityFields({ index }: { index: number }) {
           items={techCardBomSectionOptions}
         />
       </div>
+      {/* ПОЛОСА ОСТАТКОВ — СРАЗУ ПОД СЕКЦИЕЙ. Именно она делает значение чужим, и следствие должно
+          читаться там же, где причина: «эта строка теперь thread» → «а назначение у неё осталось
+          и вот оно». */}
+      <ResidueStrip
+        rows={residueRows}
+        errorRows={residueErrorRows}
+        caption='set on this line, but its section and purpose show no control for them — the values below are still sent on save, and any refusal lands here'
+        onClear={clearIdentityField}
+      />
       {/* Roll goods only — назначение exists where cloth does. Not shown at all elsewhere rather
           than shown-and-disabled: a control that can never be used is a question the operator has
           to re-answer on every line. */}
@@ -257,12 +382,23 @@ function SlotIdentityFields({ index }: { index: number }) {
           <SelectField
             name={`bomItems.${index}.purpose`}
             label='purpose'
-            items={purposeEditorOptions}
+            items={[
+              ...purposeEditorOptions,
+              ...(foreignPurpose
+                ? [
+                    {
+                      value: rowPurpose as string,
+                      label: `${bomPurposeLabel(rowPurpose)} — unknown to this app version`,
+                      disabled: true,
+                    },
+                  ]
+                : []),
+            ]}
           />
           <div className='flex items-end pb-1'>
             <CheckboxField name={`bomItems.${index}.isSample`} label='sample fabric' />
           </div>
-          {isOtherPurpose(rowPurpose) && (
+          {purposeOwnsNote && (
             <div className='sm:col-span-2'>
               <InputField
                 name={`bomItems.${index}.purposeNote`}
@@ -282,9 +418,21 @@ function SlotIdentityFields({ index }: { index: number }) {
           <SelectField
             name={`bomItems.${index}.kind`}
             label='kind'
-            items={[{ value: UNSET_KIND, label: '— unset —' }, ...kindItems]}
+            items={[
+              { value: UNSET_KIND, label: '— unset —' },
+              ...kindItems,
+              ...(foreignKind
+                ? [
+                    {
+                      value: rowKind as string,
+                      label: `${kindLabel(rowKind) ?? rowKind} — ${foreignKindReason}`,
+                      disabled: true,
+                    },
+                  ]
+                : []),
+            ]}
           />
-          {rowKind === 'TECH_CARD_BOM_KIND_OTHER' && (
+          {kindOwnsNote && (
             <InputField
               name={`bomItems.${index}.kindNote`}
               label='what kind is this'

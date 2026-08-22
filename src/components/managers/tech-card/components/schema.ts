@@ -460,10 +460,17 @@ const bomItemSchema = z
         path: ['name'],
       });
     }
-    // Server parity (parseTechCardBomItems + upsertTechCardBom). Neither of these can be reached by
-    // clicking around — the editor hides the purpose control off roll goods and clears the note off
-    // OTHER — so they exist to turn a state that slipped through into a named field error on the
-    // tile, instead of a 400 naming a line_key the operator has never seen.
+    // Server parity (parseTechCardBomItems + upsertTechCardBom) — и с отменой mount-эффектов
+    // редактора это уже НЕ страховка от невозможного, а ОСНОВНОЙ голос правила.
+    //
+    // Раньше здесь стояло «neither of these can be reached by clicking around»: редактор прятал
+    // контрол назначения вне рулонных секций и стирал примечание, ушедшее от «другого», — то есть
+    // правило выполнялось молчаливым стиранием, и zod ловил только то, что просочилось мимо.
+    // Стирание снято (см. SlotIdentityFields в bom-field.tsx): строка, переехавшая в чужую
+    // секцию, ДОЕЗЖАЕТ до сюда со своим значением, и эти четыре issue — то, что человек прочитает
+    // вместо исчезнувшего значения. Каждое обязано ложиться на путь, который на экране ВИДЕН:
+    // либо свой контрол, либо строка полосы остатков (у неё тот же `data-field`), либо плитка BOM,
+    // которая печатает путь и текст отказа на закрытом редакторе.
     const purpose = item.purpose && item.purpose !== UNSET_PURPOSE ? item.purpose : '';
     if (purpose && !isRollGoodsSection(item.section)) {
       ctx.addIssue({
@@ -3023,17 +3030,24 @@ export function mapFormToTechCardInsert(
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
       purpose: (b.purpose || UNSET_PURPOSE) as common_TechCardBomPurpose,
-      // Sent only where it is legal, so a note left behind by switching «другое» → «карманка» cannot
-      // ride out and be refused by chk_bom_item_purpose_note. Dropping it is safe in a way clearing
-      // the PURPOSE would not be: the note only ever explains a purpose that is no longer there.
-      purposeNote: isOtherPurpose(b.purpose) ? b.purposeNote?.trim() ?? '' : '',
-      // Same pair, other axis (0278). The kind is sent as-is; the note is dropped unless the kind is
-      // OTHER, or a note left behind by a kind the operator has since changed would ride out and be
-      // refused by chk_bom_item_kind_note. Both fields are ALWAYS sent: kind and kind_note share one
-      // presence decision server-side, so omitting one while sending the other is the exact write
-      // MySQL has to reject.
+      // ЗАПОЛНЕННОЕ ПРИМЕЧАНИЕ ЕДЕТ КАК ЕСТЬ — И ЭТО ПОСЛЕДНЕЕ ИЗ ШЕСТИ СТИРАНИЙ ЛИЧНОСТИ СТРОКИ.
+      //
+      // Здесь стояло `isOtherPurpose(b.purpose) ? note : ''` — «шлём только там, где законно».
+      // Довод («иначе chk_bom_item_purpose_note отвергнет») верный, лечение обратное: это тихое
+      // стирание НА ПРОВОДЕ, ровно та порода, которую фаза «перестать терять» сняла в операциях
+      // законом «поле едет, если семейство законно ИЛИ значение заполнено». Цена молчания здесь
+      // выше, чем на шаге: BOM пишется upsert'ом по `line_key`, то есть пустая строка уходила в
+      // UPDATE и ЗАТИРАЛА сохранённое примечание, а не просто не доезжала.
+      //
+      // Кто теперь называет несовместимую пару: `bomItemSchema.superRefine` — по имени поля и до
+      // отправки, а на экране значение стоит строкой полосы остатков со своим [clear]. Сервер и
+      // MySQL остаются последним рубежом, а не первым и единственным.
+      purposeNote: b.purposeNote?.trim() ?? '',
+      // Same pair, other axis (0278), and the same law. Both fields are ALWAYS sent: kind and
+      // kind_note share one presence decision server-side, so omitting one while sending the other
+      // is the exact write MySQL has to reject.
       kind: (b.kind || UNSET_KIND) as common_TechCardBomKind,
-      kindNote: b.kind === 'TECH_CARD_BOM_KIND_OTHER' ? b.kindNote?.trim() ?? '' : '',
+      kindNote: b.kindNote?.trim() ?? '',
       isSample: !!b.isSample,
       name: b.name?.trim() || '',
       supplier: b.supplier?.trim() || '',
