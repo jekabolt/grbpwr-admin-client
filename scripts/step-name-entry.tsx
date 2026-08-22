@@ -26,6 +26,7 @@ import {
   OperationsField,
   emptyOperation,
 } from 'components/managers/tech-card/components/operations-field';
+import { ReleasesField } from 'components/managers/tech-card/components/releases-field';
 import { SampleAssemblyMap } from 'components/managers/tech-card/components/sample-assembly-map';
 import { TechPackDocument } from 'components/managers/tech-card/components/tech-pack-document';
 import {
@@ -45,7 +46,14 @@ type Ops = NonNullable<TechCardFormData['operations']>;
 type Op = Record<string, unknown>;
 
 type StepNameProbe = {
-  mount: (ops: Op[]) => void;
+  /**
+   * `card` — ПОЛЯ САМОЙ КАРТОЧКИ, а не шага. Нужны ровно одному семейству цитат: припуск шва
+   * хранится только там, где шаг его ПЕРЕОПРЕДЕЛЯЕТ, и «что показывает поверхность, когда шаг его
+   * не переопределяет» нельзя спросить, не задав ступень НАД шагом (`requiredSeamAllowanceMm`).
+   * Подставляется в `defaultValues` формы поверх умолчаний — то есть той же дорогой, какой поле
+   * приезжает с сервера, а не отдельным путём «для пробы».
+   */
+  mount: (ops: Op[], card?: Op) => void;
   /** Напечатать лист ИЗ ЖИВОЙ ФОРМЫ настоящим маппером записи — без промежуточной копии значений. */
   sheet: () => void;
   /**
@@ -61,6 +69,20 @@ type StepNameProbe = {
    * видно, что это тот самый документ, а не живая карта под чужим заголовком.
    */
   release: () => void;
+  /**
+   * Смонтировать ЭКРАН АРХИВА РЕЛИЗОВ — НАСТОЯЩИЙ `ReleasesField`, а не выдержку из него.
+   *
+   * ПОЧЕМУ ЦЕЛЫЙ ЭКРАН, А НЕ ЭКСПОРТ ВНУТРЕННЕГО БЛОКА. У архива СВОЙ фолбэк подписи класса шва —
+   * незнакомый токен печатается токеном, — и это решение о ПОДПИСАННОМ документе, а не деталь
+   * оформления. Вытащив `SnapshotConstruction` наружу ради пробы, мы завели бы в продуктовом коде
+   * экспорт, которого экрану не нужно, и проверяли бы блок в отрыве от двух сетевых запросов, из
+   * которых он на самом деле собирается. Снимок приезжает ПО СЕТИ и перехватывается снаружи — той
+   * же дорогой, что каталог работ.
+   *
+   * `techCardId` РАЗНЫЙ У КАЖДОЙ ФИКСТУРЫ, и это не украшение: ключ запроса складывается из него,
+   * так что два снимка не могут достаться друг другу из кэша react-query.
+   */
+  releases: (techCardId: number) => void;
   /** Значения шага, как их держит форма. */
   values: (i: number) => Op;
   /**
@@ -144,12 +166,31 @@ function renderSheet(data: TechCardFormData, frozen = false) {
   );
 }
 
-function Harness({ ops }: { ops: Op[] }) {
+probe.releases = (techCardId) => {
+  // ХОСТ СОЗДАЁТСЯ ЗАНОВО, А НЕ ОЧИЩАЕТСЯ: второй `createRoot` на том же узле — это второй корень
+  // на один контейнер, и React честно ругается об этом в консоль. Узел дешевле пересоздать.
+  document.getElementById('releases')?.remove();
+  const host = document.createElement('div');
+  host.id = 'releases';
+  document.body.appendChild(host);
+  createRoot(host).render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[`/tech-cards/${techCardId}?tab=releases`]}>
+        <DictionaryProvider>
+          <ReleasesField techCardId={techCardId} />
+        </DictionaryProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+};
+
+function Harness({ ops, card }: { ops: Op[]; card?: Op }) {
   const methods = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema) as never,
     mode: 'onChange',
     defaultValues: {
       ...techCardDefaultData,
+      ...card,
       operations: ops.map((o) => ({ ...emptyOperation, ...o })) as unknown as Ops,
     },
   });
@@ -175,11 +216,11 @@ function Harness({ ops }: { ops: Op[] }) {
   );
 }
 
-probe.mount = (ops) => {
+probe.mount = (ops, card) => {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } } });
   const sheetHost = document.getElementById('sheet');
   if (sheetHost) sheetHost.innerHTML = '';
   const host = document.getElementById('root')!;
   host.innerHTML = '';
-  createRoot(host).render(<Harness ops={ops} />);
+  createRoot(host).render(<Harness ops={ops} card={card} />);
 };

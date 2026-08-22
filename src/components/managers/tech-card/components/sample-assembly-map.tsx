@@ -10,13 +10,16 @@ import Text from 'ui/components/text';
 import { mediaAspect } from './sample-cut-views';
 import { TechCardFormData } from './schema';
 import {
-  attachmentOptions,
+  attachmentKindLabel,
   densityText,
   operationHeading,
-  seamClassOptions,
+  seamAllowanceText,
+  seamClassLabel,
   topstitchPhrase,
 } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
+import { decimalToInput } from 'utils/decimal';
 
 // ---------------------------------------------------------------------------
 // ASSEMBLY MAP — the sketch and the operation list, joined.
@@ -72,16 +75,30 @@ const decimalNum = (v?: string): number => {
   return Number.isFinite(n) ? n : NaN;
 };
 
-/** The spec line under an operation: only what was actually filled in, joined with · */
-function specLine(o: FormOperation, pieceNames: string[]): string {
-  const label = <T extends string>(
-    opts: ReadonlyArray<{ value: T; label: string }>,
-    v?: string,
-    none?: string,
-  ) => (!v || v === none ? '' : (opts.find((o) => o.value === v)?.label ?? ''));
+/**
+ * The spec line under an operation: what was actually filled in — plus the ONE fact that is filled
+ * in ABOVE the step, joined with ·
+ *
+ * «ПЛЮС ОДИН» — ЭТО ПРИПУСК, И ОГОВОРКА ЗДЕСЬ ГЛАВНОЕ СЛОВО. Строка годами читала ТОЛЬКО
+ * собственные значения шага, и для класса шва, отстрочки и лапки это по-прежнему верно: пусто —
+ * значит не назначено. Припуск же ХРАНИТСЯ только там, где шаг его переопределяет, и «пусто»
+ * означает у него «действует стандарт карточки или цеха». Читая его тем же правилом, что соседей,
+ * карта печатала пустоту на шаге, который припуск исправно наследует, — а редактор в ту же секунду
+ * печатал число. Лестницу знает `seamAllowanceText`, и обе поверхности зовут теперь её.
+ *
+ * ЯРЛЫКИ — ОБЩИЕ СОСТАВИТЕЛИ, А НЕ ЗДЕШНИЙ ПОИСК ПО МАССИВУ. `label(...)`, стоявший тут, был
+ * второй редакцией правила «UNKNOWN значит наследовать, чужой токен значит промолчать», уже
+ * записанного в `seamClassLabel` и `attachmentKindLabel`.
+ */
+function specLine(
+  o: FormOperation,
+  pieceNames: string[],
+  /** Ступени припуска НАД шагом — стандарт карточки и стандарт цеха. */
+  standards: { card?: string; workshop?: string },
+): string {
   return [
     pieceNames.join(' + '),
-    label(seamClassOptions, o.seamClass, 'TECH_CARD_SEAM_CLASS_UNKNOWN'),
+    seamClassLabel(o.seamClass),
     // ПЛОТНОСТЬ И ДЛИНА — ОДНИМ СОСТАВИТЕЛЕМ (`densityText`), ровно по той же причине, что и фраза
     // отстрочки двумя строками ниже. Здесь стояла ручная сборка, и она теряла ВТОРУЮ ПОЛОВИНУ
     // чтения: длина стежка в мм не хранится нигде — она считается как `10 / плотность`, и формула
@@ -93,7 +110,19 @@ function specLine(o: FormOperation, pieceNames: string[]): string {
     // (Ярлык здесь когда-то говорил «SPI» — стежки на ДЮЙМ — пока все прочие поверхности говорили
     // st/cm: две разные величины под одним числом. Общий составитель закрывает и это навсегда.)
     densityText(o.stitchesPerCm),
-    o.seamAllowanceMm?.trim() ? `SA ${o.seamAllowanceMm.trim()} mm` : '',
+    // ПРИПУСК — ОБЩИМ СОСТАВИТЕЛЕМ, С ЛЕСТНИЦЕЙ. Здесь стояла ручная сборка «SA 10 mm», и она
+    // теряла ДВЕ вещи разом. Слово: «SA» — двухбуквенный токен в верхнем регистре, стоящий в том
+    // же списке ·, что коды ISO 4916 (SS, LS, EF, BS, FS, OS), с которыми он не имеет ничего
+    // общего; редактор в ту же секунду печатал «allowance». И факт: собственное значение шага —
+    // единственное, что она умела назвать, — так что шаг, ИСПРАВНО наследующий припуск карточки,
+    // выглядел здесь шагом без припуска вовсе.
+    seamAllowanceText({
+      own: o.seamAllowanceMm,
+      card: standards.card,
+      workshop: standards.workshop,
+      operationType: o.operationType,
+      seamClass: o.seamClass,
+    }),
     // ОДИН СОСТАВИТЕЛЬ ФРАЗЫ НА СХЕМУ И НА ЛИСТ (topstitchPhrase), поэтому бумага и карта сборки
     // не могут сказать про один шаг разное. Миллиметры приезжают С ЛИНИЕЙ, от которой их меряют:
     // «topstitch 6 mm» называла величину и прятала отсчёт, а отсчёт у двух числовых режимов разный
@@ -105,7 +134,7 @@ function specLine(o: FormOperation, pieceNames: string[]): string {
     topstitchPhrase(o.topstitchMode, o.topstitchWidthMm)
       ? `topstitch ${topstitchPhrase(o.topstitchMode, o.topstitchWidthMm)}`
       : '',
-    label(attachmentOptions, o.attachmentKind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
+    attachmentKindLabel(o.attachmentKind),
   ]
     .filter(Boolean)
     .join(' · ');
@@ -116,6 +145,13 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
   // Каталог работ — одной подпиской на всю карту: ключ у запроса общий на приложение, второго
   // обращения к сети нет. Не приехал — имена деградируют до сегодняшних, а не до пустоты.
   const { catalog: workCatalog } = useOperationWorkCatalog();
+  // СТУПЕНИ ПРИПУСКА НАД ШАГОМ — те же две, по которым ходит редактор: стандарт карточки (её
+  // собственное поле, читается той же формой) и стандарт цеха. Настройки цеха — одна строка на всё
+  // приложение и один ключ запроса, тот же, что уже прочитал редактор рядом: второго обращения к
+  // сети здесь нет, а не приехал ответ — ступень просто молчит, как молчала бы пустая.
+  const cardAllowanceMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;
+  const { data: workshop } = useWorkshopSettings();
+  const shopAllowanceMm = decimalToInput(workshop?.settings?.defaultSeamAllowanceMm).trim();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as FormOperation[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
@@ -243,7 +279,10 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
             // Неизвестный ключ — узел: показываем его меткой, а не выбрасываем. Иначе шаг,
             // собирающий два узла, отрисовался бы вовсе без состава.
             const names = (o.inputKeys ?? []).map((k) => pieceNameByKey.get(k) ?? `▣ ${k}`);
-            const spec = specLine(o, names);
+            const spec = specLine(o, names, {
+              card: cardAllowanceMm,
+              workshop: shopAllowanceMm,
+            });
             const t = Number(o.smv ?? '');
             return (
               <div
