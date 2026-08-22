@@ -55,7 +55,13 @@ type StepNameProbe = {
    */
   mount: (ops: Op[], card?: Op) => void;
   /** Напечатать лист ИЗ ЖИВОЙ ФОРМЫ настоящим маппером записи — без промежуточной копии значений. */
-  sheet: () => void;
+  /**
+   * `colorways` — РЕЦЕПТ КОЛОРВЕЯ, и он живёт НЕ В ФОРМЕ. Строки рецепта приезжают своим RPC и
+   * лежат на обёртке ответа (`GetTechCardResponse.colorways`), а не в `TechCardInsert`; норма слота
+   * читается именно оттуда. Без них лист не может ответить, берёт ли слот процент раскроя, — и
+   * цитата про это была бы цитатой про пустой список.
+   */
+  sheet: (colorways?: unknown[]) => void;
   /**
    * Напечатать лист ИЗ РЕЛИЗНОГО СНАПШОТА — той же формой, но БЕЗ поля `work` ни на одном шаге.
    *
@@ -145,10 +151,12 @@ const freeze = (insert: Record<string, unknown>): Record<string, unknown> => ({
   }),
 });
 
-function renderSheet(data: TechCardFormData, frozen = false) {
+function renderSheet(data: TechCardFormData, frozen = false, colorways?: unknown[]) {
   const live = mapFormToTechCardInsert(data, undefined, true) as unknown as Record<string, unknown>;
   const insert = frozen ? freeze(live) : live;
-  const techCard = { id: 1, techCard: insert } as never;
+  // Колорвеи — СОСЕДИ вставки на обёртке ответа, а не её поле: так их отдаёт сервер и так их читает
+  // документ (`scope.techCard.colorways`).
+  const techCard = { id: 1, techCard: insert, colorways } as never;
   let host = document.getElementById('sheet');
   if (!host) {
     host = document.createElement('div');
@@ -214,11 +222,19 @@ function Harness({ ops, card }: { ops: Op[]; card?: Op }) {
     defaultValues: {
       ...techCardDefaultData,
       ...card,
+      // `construction` СЛИВАЕТСЯ, А НЕ ЗАМЕЩАЕТСЯ. Это вложенный объект с десятком полей, и стенд
+      // задаёт из него ровно одно (карточную плотность); подстановка целиком стёрла бы остальные
+      // умолчания и проверяла бы форму, которой в приложении не бывает.
+      construction: {
+        ...techCardDefaultData.construction,
+        ...((card?.construction as object) ?? {}),
+      },
       operations: ops.map((o) => ({ ...emptyOperation, ...o })) as unknown as Ops,
     },
   });
   probe.values = (i) => (methods.getValues('operations') ?? [])[i] as Op;
-  probe.sheet = () => renderSheet(methods.getValues() as TechCardFormData);
+  probe.sheet = (colorways) =>
+    renderSheet(methods.getValues() as TechCardFormData, false, colorways);
   probe.release = () => renderSheet(methods.getValues() as TechCardFormData, true);
   return (
     <QueryClientProvider client={qc}>

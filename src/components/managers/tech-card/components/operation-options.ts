@@ -471,6 +471,30 @@ export const topstitchPhrase = (mode?: string, widthMm?: string): string => {
   return topstitchDistanceText(mode, widthMm) || spec.label;
 };
 
+/** ВСЯ СТРОЧКА ЦЕЛИКОМ — СУЩЕСТВИТЕЛЬНОЕ, СКОЛЬКО РЯДОВ И ГДЕ: «topstitch 2 × 6 mm from the edge».
+ *
+ *  ПОЧЕМУ НЕ ХВАТИЛО `topstitchPhrase`. Та отвечает на вопрос «где строчить» и ровно на него; слово
+ *  «topstitch» и множитель рядов собирались ПОСЛЕ неё, руками, и собирались ДВАЖДЫ — на печатном
+ *  листе и на карте примерки. Совпасть они не могли по построению: `topstitch.rows` знал только
+ *  лист. Технолог, глядя на карту примерки, видел одну строчку там, где швея по листу прокладывала
+ *  две, — а число рядов это поле, которое человек заполняет руками (контрол «rows of topstitching»
+ *  стоит в зоне свойств вида) и которое поэтому обязано быть видно везде, где строчка называется.
+ *
+ *  РЯД ОДИН — НЕ ПЕЧАТАЕТСЯ. Контракт считает незаполненное число одним рядом, значит «1 ×» и
+ *  пустота — один факт, и чернил заслуживает только один из них. Тот же довод, что у `× N` в
+ *  `stepPlacementText`.
+ *
+ *  РЕЖИМ БЕЗ ФРАЗЫ ВСЁ РАВНО НАЗЫВАЕТСЯ СЛОВОМ. Режим новее бандла (или снятый) фразы не даёт, и
+ *  здесь остаётся голое «topstitch»: НЕПОЛНО — и это видно, — вместо молчания, которое читается как
+ *  «строчки нет». Правило пришло с печатного листа, где было записано дословно; карта примерки
+ *  молчала, то есть теряла факт целиком, и общий составитель переносит на неё лучшую половину. */
+export const topstitchLine = (mode?: string, widthMm?: string, rows?: number): string => {
+  if (!mode || mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
+  const n = rows ?? 0;
+  const multiplier = n > 1 ? `${n} × ` : '';
+  return `topstitch ${multiplier}${topstitchPhrase(mode, widthMm)}`.trim();
+};
+
 // THE VERB OF A STEP HEADING — total, not `Partial`, and that change is the point: as a Partial this
 // map went silently blank on every token the contract added, which is precisely what a bump is
 // supposed to surface. UNKNOWN maps to '' because a step with no type has no verb to speak.

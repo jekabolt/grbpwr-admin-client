@@ -141,6 +141,7 @@ import {
   pressProfileName,
   resolveMachineProfile,
   resolvePressProfile,
+  stepLaysStitches,
   stepTypeOwnsBlock,
   threadTensionLabel,
   threadTensionOptions,
@@ -4254,7 +4255,12 @@ function OperationEditor({
           stitchWidthMm,
         },
         machineProfile,
-        cardStitchDensity,
+        // КАРТОЧНАЯ ПЛОТНОСТЬ — ТОЛЬКО ТАМ, ГДЕ СТРОЧКА ЕСТЬ, и вопрос этот теперь общий с бумагой.
+        // Здесь она передавалась БЕЗУСЛОВНО, а печатный лист держал свой предикат, — и на шаге
+        // термоленты или ультразвука сводка показывала унаследованные «4 st/cm (2.5 mm)» там, где
+        // бумага молчала. Молчала она по делу: эти две машины соединяют теплом, стежка у них нет
+        // вовсе (оттого нет и номера по ISO 4915). Расходились не числа, а право числа тут быть.
+        stepLaysStitches(opType, machineType) ? cardStitchDensity : undefined,
       )
         .map((x) => x.text)
         .join(' · ')

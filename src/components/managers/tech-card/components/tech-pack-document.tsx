@@ -120,7 +120,8 @@ import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
-import { cutSymmetryUnanswered, fusingPrintCaption } from './piece-codes';
+import { slotNormRows, slotTakesWastage } from './bom-norm';
+import { cutSymmetryUnanswered, fusingPrintCaption, grainlineText } from './piece-codes';
 import { derivePieceLayerRole, isMainLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { useTechCardReleases } from './useSamples';
 
@@ -157,6 +158,7 @@ import {
   pressProfileName,
   resolveMachineProfile,
   resolvePressProfile,
+  stepLaysStitches,
   stepTypeOwnsBlock,
 } from './equipment-options';
 import {
@@ -168,13 +170,14 @@ import {
   operationHeading,
   pressProfileSummary,
   seamAllowanceReading,
-  seamClassOptions,
+  seamClassLabel,
   stepDiscriminatorText,
   stepPlacementText,
   stepPressText,
   stepSeamFactTexts,
   stepToolFactParts,
-  topstitchPhrase,
+  topstitchLine,
+  zoneLabel,
   zoneOptions,
   type EffectiveSetting,
   type StepFacts,
@@ -351,32 +354,10 @@ function calloutKindLabel(kind?: string): string {
   return k === 'pin' ? '' : kindDef(k).label;
 }
 
-function bomTakesWastage(
-  colorways: ReadonlyArray<{ usages?: common_TechCardColorwayUsage[] }> | undefined,
-  b: { id?: number; lineKey?: string },
-): boolean {
-  const id = b.id ?? 0;
-  const key = (b.lineKey ?? '').trim();
-  for (const c of colorways ?? []) {
-    for (const u of c.usages ?? []) {
-      const sameLine =
-        (id > 0 && u.bomItemId === id) || (key !== '' && (u.bomLineKey ?? '').trim() === key);
-      if (!sameLine) continue;
-      if ((u.consumptionSource ?? '').trim() === 'marker') continue;
-      if (dec(u.consumption) || has(u.sizeConsumptions)) return true;
-    }
-  }
-  return false;
-}
 
 // The printed sheet renders dictionary TOKENS, so it needs the same labels the editor shows. They
 // come from the one options module rather than a second table here — the tech pack and the screen
 // disagreeing about what a token means is exactly the failure a shared vocabulary prevents.
-const optionLabel = <T extends string>(
-  opts: ReadonlyArray<{ value: T; label: string }>,
-  v?: T,
-  noneValue?: T,
-): string => (!v || v === noneValue ? '' : opts.find((o) => o.value === v)?.label ?? '');
 
 // The TOTAL label map, not the picker list: the picker offers only the types a step may be GIVEN,
 // while paper has to render every type that can arrive — including the nine legacy tokens frozen
@@ -429,6 +410,8 @@ const operationTypeText = (
     machineType?: common_TechCardMachineType;
     seamClass?: common_TechCardSeamClass;
     work?: string;
+    /** Заметка — ПОСЛЕДНЯЯ ступень имени, и только у двух глаголов она до неё доходит. См. ниже. */
+    note?: string;
   },
   workCatalog?: WorkCatalog,
 ): string => {
@@ -459,20 +442,64 @@ const operationTypeText = (
       pieceNames: [],
     });
   }
-  if (isPressStepType(v)) return pressProcessShort(v) || '—';
-  if (v && WAVE_VERBS.has(v))
+  // ВТО И ДЕВЯТЬ ГЛАГОЛОВ ВОЛНЫ — ОДНА ВЕТКА, И ОБЕ ЗОВУТ КОМПОЗИТОР. Здесь стояло
+  // `pressProcessShort(v)`, и это была не сокращённая подпись, а ЧУЖОЙ ВОПРОС: та функция отвечает
+  // «для какого процесса написан ПРОФИЛЬ ПРЕССА» и живёт на пилюле пикера профилей (её собственный
+  // комментарий так и говорит — «for a tile that has room for a pill»). Заголовок шага спрашивает
+  // другое: «что этот шаг делает».
+  //
+  // ЦЕНА ПОДМЕНЫ БЫЛА РОВНО В ОДНО СЛОВО, И ИМЕННО ПОЭТОМУ ЕЁ НЕ ЗАМЕЧАЛИ. `isPressStepType`
+  // включает ДУБЛИРОВАНИЕ, а два словаря зовут его по-разному: список процессов пресса — «fusing»,
+  // глагол шага (`OPERATION_TYPE_VERB`) — «fuse». Так шаг дублирования БЕЗ назначенной работы
+  // печатался на бумаге «fusing», а в рельсе, в шапке, на карте примерки и на схеме сборки звался
+  // «fuse». Прочие два ВТО-глагола совпадали дословно («press», «press open»), и совпадение это
+  // держало ветку живой: расхождение выглядело опечаткой в одной клетке, а не второй лестницей.
+  if (isPressStepType(v) || (v && WAVE_VERBS.has(v)))
     return operationHeading({
       operationType: v,
       work: undefined,
       workCatalog: undefined,
       pieceNames: [],
     });
+  // РУЧНАЯ РАБОТА И «ПРОЧЕЕ» — ЕДИНСТВЕННЫЕ ДВА ГЛАГОЛА БЕЗ ВНЯТНОГО СЛОВА, и ровно им композитор
+  // отвечает ЗАМЕТКОЙ. Мимо него они уходили в подпись пикера: бумага печатала «hand work» и
+  // «other» там, где рельс, шапка, карта примерки и схема сборки звали шаг первой строкой заметки
+  // («hand-tack the lining before the fitting»). Это тот же дефект, что `fusing`/`fuse` строкой
+  // выше, только цена больше: там расходилось одно слово, здесь бумага теряла ЕДИНСТВЕННОЕ
+  // осмысленное имя, какое у шага было, и печатала вместо него имя категории.
+  //
+  // ЗАМЕТКА ПЕРЕДАЁТСЯ ТОЛЬКО ЗДЕСЬ, И ЭТО НЕ ЭКОНОМИЯ. У прочих веток глагол есть всегда, и
+  // `operationHeading` до ступени заметки не доходит — передать её туда значило бы предложить
+  // композитору выбор, которого у него нет. А ниже по клетке лист печатает `o.note` своей строкой:
+  // когда имя ПРИШЛО из заметки, эта строка глушится (см. место вывода), иначе одна и та же фраза
+  // стояла бы в клетке дважды.
+  if (
+    v === 'TECH_CARD_OPERATION_TYPE_HANDWORK' ||
+    v === 'TECH_CARD_OPERATION_TYPE_OTHER'
+  )
+    return operationHeading({
+      operationType: v,
+      work: undefined,
+      workCatalog: undefined,
+      pieceNames: [],
+      note: o.note,
+    });
+  // ДЕВЯТЬ ЛЕГАСИ-ЧЛЕНОВ ОСТАЮТСЯ НА ПОЛНОЙ ПОДПИСИ, И ЭТО РЕШЕНИЕ, А НЕ НЕДОДЕЛКА. Композитор дал
+  // бы им голый глагол («join»), а подпись несёт номер по ISO 4915 («join — lockstitch 301»),
+  // которого в глаголе нет вовсе. С чтения эти члены не приходят (0306 канонизирует на записи) —
+  // их печатает только АРХИВНЫЙ РЕЛИЗ, то есть подписанный документ, и там номер стежка дороже
+  // совпадения с экраном. Менять текст подписанной бумаги — отдельное решение с отдельной ценой.
   return (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
 };
-const zoneText = (v?: common_TechCardGarmentZone): string =>
-  optionLabel(zoneOptions, v, 'TECH_CARD_GARMENT_ZONE_UNKNOWN');
-const seamClassText = (v?: common_TechCardSeamClass): string =>
-  optionLabel(seamClassOptions, v, 'TECH_CARD_SEAM_CLASS_UNKNOWN');
+// ЗОНА И КЛАСС ШВА — ОБЩИМИ ЯРЛЫКАМИ (`zoneLabel`, `seamClassLabel`). Здесь стояли две local'ные
+// копии через `optionLabel`, и они были копиями БУКВАЛЬНО: `!v || v === none ? '' : find(...)?.label
+// ?? ''` — то же правило слово в слово, что в обоих общих составителях. Ни фолбэка на токен, ни
+// иного вопроса — то есть развилки, которую стоило бы сохранить, между ними не было вовсе (в
+// отличие от панели релизов, где фолбэк на токен НАМЕРЕН и потому её ярлык живёт отдельно).
+//
+// ЧЕМ ЭТО ПЛАТИЛОСЬ: первая же ступень, дописанная в общий ярлык, попадала бы в заголовок шага и в
+// карту примерки — и НЕ попадала в колонку того же самого листа. Расхождение бумаги с экраном,
+// возникающее не от правки бумаги, а от правки чего-то другого.
 
 // MILLIMETRES throughout, and ABSENT stays absent: an unset allowance inherits the card standard,
 // and printing «0 mm» for it would tell the floor to cut on the line as drawn.
@@ -483,26 +510,18 @@ const allowanceText = (d?: googletype_Decimal): string => {
 // «TOPSTITCH … FROM THE EDGE» / «… FROM THE SEAM LINE», never a bare «width»: the step carries a
 // second width — stitch_width_mm, the zigzag amplitude / overlock bite — and the two are different
 // facts (§10). Confusing them is paid for in a whole batch, so each says on paper which one it is.
-const topstitchText = (t?: common_TechCardTopstitch): string => {
-  if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
-  const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
-  // WHICH LINE, SAID BY THE MODE — and by the same map that captions the input the number was typed
-  // into (TOPSTITCH_MODES). This sheet used to print «from edge» for BOTH numbered modes, so a
-  // `parallel_to_seam` step told the operator to set the guide bar against the finished edge when
-  // the distance was measured from the seam line — on a lapped or felled seam, a different line and
-  // a wrong garment.
-  //
-  // NO SPECIAL CASE FOR «AT THE EDGE» ANY MORE, and that removal is the wave: the sheet used to
-  // return «topstitch edge» before it ever looked at the number, because that mode could not have
-  // one. It can now — blank means flush, filled means an inset from the edge — and the one composer
-  // says both («at the edge» / «6 mm from the edge») from the same map the picker reads.
-  //
-  // AN UNCLASSIFIED MODE (one newer than this bundle, or the retired member) has no entry, so the
-  // phrase comes back empty and the sheet says «topstitch» and no more — incomplete, which the
-  // floor can see, instead of a distance measured from a reference the mode never named, which the
-  // floor cannot. Nothing is lost by the omission: print reads the wire and never writes it.
-  return `topstitch ${rows}${topstitchPhrase(t.mode, dec(t.widthMm))}`.trim();
-};
+// ВСЯ СТРОЧКА — ОБЩИМ СОСТАВИТЕЛЕМ (`topstitchLine`), а здесь остаётся только граница провода:
+// десятичные приходят сообщением и проходят через `dec`. Слово «topstitch» и множитель рядов
+// собирались тут руками — и это была ВТОРАЯ ручная сборка той же строки: карта примерки собирала
+// свою, БЕЗ рядов, потому что `topstitch.rows` знал только лист. Технолог видел на карте один ряд
+// там, где швея по этой бумаге прокладывала два.
+//
+// ВСЁ, ЧТО ЭТОТ ХЕЛПЕР ГОВОРИЛ КОММЕНТАРИЯМИ — какую линию называет режим, почему «at the edge»
+// больше не особый случай, почему неклассифицированный режим печатается голым словом, — переехало
+// К СОСТАВИТЕЛЮ вместе с правилами. Здесь этих доводов больше нет не потому, что они отменены, а
+// потому, что они теперь в одном месте с кодом, который их исполняет.
+const topstitchText = (t?: common_TechCardTopstitch): string =>
+  topstitchLine(t?.mode, dec(t?.widthMm), t?.rows);
 // A setting and the one bit that says where it came from: the marker means «the step's own value»,
 // and anything unmarked is inherited off the card's equipment park and printed all the same — see
 // stepEquipment.
@@ -658,7 +677,7 @@ export function TechPackDocument({
       const operations = indexed.filter((x) => (x.op.zone ?? '') === z);
       if (operations.length === 0) continue;
       operations.forEach((x) => rest.delete(x.index));
-      groups.push({ zone: z, label: zoneText(z as common_TechCardGarmentZone) || z, operations });
+      groups.push({ zone: z, label: zoneLabel(z as common_TechCardGarmentZone) || z, operations });
     }
     // Всё, что не разошлось по узлам (UNKNOWN, пустая зона, значение вне словаря клиента),
     // печатается последней группой. Порядок внутри групп — исходный порядок шагов.
@@ -1249,10 +1268,11 @@ export function TechPackDocument({
     // (потому у них нет и номера по ISO 4915). «hot air 550 °C · feed 4.5 m/min» и рядом «4 st/cm»
     // с карточки — плотность строчки, которой на этой машине нечего описывать. Это факт о МАШИНКЕ,
     // а не о глаголе, поэтому спрашивается отдельным вопросом, а не через таблицу семейств.
-    const sews =
-      !pressStep &&
-      !WAVE_VERBS.has(o.operationType as common_TechCardOperationType) &&
-      !isWeldMachineType(o.machineType);
+    // ОДИН ВОПРОС НА ДВА ЭКРАНА (`stepLaysStitches`). Здесь стоял приватный предикат листа, и
+    // второй потребитель того же составителя — сводка открытого шага в редакторе — карточную
+    // плотность передавал БЕЗУСЛОВНО: на шаге ультразвука экран показывал унаследованные
+    // «4 st/cm (2.5 mm)», бумага не показывала ничего. Правило было верным и было ОДНО.
+    const sews = stepLaysStitches(o.operationType, o.machineType);
     const machine = effectiveMachineSettings(
       stepMachine,
       machineProfile ? machineSettingsOf(machineProfile) : undefined,
@@ -2262,9 +2282,18 @@ export function TechPackDocument({
                   // `bomUnitKind(b.unit)` и была ХУЖЕ отсутствия гейта: форма предлагает «пог.м»,
                   // «м²» и «г», которых тот словарь не знает, — и строка, которую сервер гроссит,
                   // молча теряла бы надбавку на бумаге. Спрятанный живой множитель занижает
-                  // закупку; лишний мёртвый — всего лишь шум. Поэтому правило то же, что у сервера:
-                  // печатаем, если ХОТЬ ОДНА строка рецепта этого слота мерная и не марочная.
-                  bomTakesWastage(colorways, b) && dec(b.wastagePercent)
+                  // закупку; лишний мёртвый — всего лишь шум.
+                  //
+                  // ЛЕСТНИЦА ЖЕ ТЕПЕРЬ ОБЩАЯ С ПАНЕЛЬЮ РЕДАКТОРА (`bom-norm.ts`), и здесь стояла
+                  // ЕЁ НЕПРАВАЯ РЕДАКЦИЯ. Своя копия не отбрасывала строки рецепта, привязанные к
+                  // ДЕТАЛИ, — а сервер исключает их из всех норм-роллапов, включая план материалов
+                  // прогона: строка, привязанная к детали, это назначение материала, а не норма, и
+                  // гросс-апу нечего умножать (T8). Так бумага печатала «+15 %» на слотах, где
+                  // редактор не показывал надбавки вовсе, — то есть рекламировала процент от нормы,
+                  // которой по серверу нет. Обоснование, стоявшее тут, описывало сервер ДО T8 и
+                  // снято как устаревшее.
+                  slotTakesWastage(slotNormRows(colorways, b.id ?? 0, b.lineKey ?? '')) &&
+                  dec(b.wastagePercent)
                     ? `+${dec(b.wastagePercent)}%`
                     : '',
                 ]
@@ -2406,7 +2435,11 @@ export function TechPackDocument({
                         );
                       })()}
                     </td>
-                    <td className={TD}>{p.grainline || '—'}</td>
+                    {/* ДОЛЕВАЯ — СТРЕЛКОЙ И СЛОВОМ, тем же составителем, что на вкладке деталей
+                        и в видах кроя. Здесь печаталось голое слово, и это раскройный лист:
+                        `lengthwise` и `crosswise` в столбик различаются одной буквой В СЕРЕДИНЕ,
+                        а ошибка в долевой — это перекошенная деталь, замеченная после раскроя. */}
+                    <td className={TD}>{grainlineText(p.grainline) || '—'}</td>
                     <td className={`${TD} text-center`}>
                       {p.fused ? (
                         <>
@@ -2606,7 +2639,7 @@ export function TechPackDocument({
           {tc.construction && (
             <div className='mb-3 grid grid-cols-2 gap-x-8'>
               <div>
-                <KV k='default seam class' v={seamClassText(tc.construction.defaultSeamClass)} />
+                <KV k='default seam class' v={seamClassLabel(tc.construction.defaultSeamClass)} />
                 <KV k='default density' v={densityText(cardDensity)} />
                 {/* NO `overlock` / `pressing` ROWS. Both left the contract with the equipment park
                     (0306), and printing them «for the archives» never worked: this document renders
@@ -2726,6 +2759,9 @@ export function TechPackDocument({
                       // the same string printed twice — once as the step's thread, once in its
                       // material list. There is one answer now, and it is the material list.
                       const materials = resolveOpMaterials(o);
+                      // ИМЯ ШАГА СЧИТАЕТСЯ ОДИН РАЗ: его читает и сама строка, и условие ниже,
+                      // решающее, не станет ли заметка вторым экземпляром самой себя.
+                      const stepName = operationTypeText(o, workCatalog);
                       // ПЛОТНОСТЬ — ЭФФЕКТИВНАЯ И ПАРОЙ: «4 st/cm (2.5 mm)». Раньше печаталось
                       // только собственное значение шага, то есть корректно унаследованная от
                       // машинки или карточки плотность уходила в цех пустой клеткой — ровно тем же,
@@ -2806,8 +2842,16 @@ export function TechPackDocument({
                               {o.operationNumber || (i + 1) * 10}
                             </td>
                             <td className={TD}>
-                              <div data-sheet-step={i}>{operationTypeText(o, workCatalog)}</div>
-                              {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                              <div data-sheet-step={i}>{stepName}</div>
+                              {/* ЗАМЕТКА — НО НЕ ВТОРЫМ РАЗОМ. У ручной работы и «прочего» именем
+                                  становится первая строка заметки (композитор доходит до неё,
+                                  потому что глагола у этих двух нет), и та же фраза стояла бы в
+                                  клетке дважды подряд. Сравнение точное и потому безопасное:
+                                  многострочная заметка имени не равна — её печатают целиком, и
+                                  строки со второй по последнюю не теряются. */}
+                              {o.note && o.note.trim() !== stepName && (
+                                <div className='italic text-labelColor'>{o.note}</div>
+                              )}
                             </td>
                             {/* НА ЧЁМ И В КАКОМ РЕЖИМЕ. Со стороны машинки — короткое имя машинки
                                 (человеческое, если профиль назван) и её эффективные настройки; со
@@ -2829,7 +2873,7 @@ export function TechPackDocument({
                               {!equip?.head && !equip?.settings.length ? '—' : null}
                             </td>
                             <td className={TD}>
-                              <div>{zoneText(o.zone) || '—'}</div>
+                              <div>{zoneLabel(o.zone) || '—'}</div>
                               {placement && <div className='text-labelColor'>{placement}</div>}
                             </td>
                             <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
@@ -2838,7 +2882,7 @@ export function TechPackDocument({
                                 следующим шагам. */}
                             <td className={TD}>{opOutput(o) || '—'}</td>
                             <td className={TD}>
-                              <div>{seamClassText(o.seamClass) || '—'}</div>
+                              <div>{seamClassLabel(o.seamClass) || '—'}</div>
                               <div className='font-medium'>{allowanceCell}</div>
                               {detail && <div className='text-labelColor'>{detail}</div>}
                             </td>

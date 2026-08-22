@@ -15,7 +15,7 @@ import {
   operationHeading,
   seamAllowanceText,
   seamClassLabel,
-  topstitchPhrase,
+  topstitchLine,
 } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
@@ -52,6 +52,8 @@ type FormOperation = {
   seamAllowanceMm?: string;
   topstitchMode?: string;
   topstitchWidthMm?: string;
+  // РЯДЫ СТРОЧКИ — поле формы, которого этот тип не объявлял, и потому карта о нём молчала.
+  topstitchRows?: number;
   attachmentKind?: string;
   smv?: string;
   note?: string;
@@ -123,17 +125,16 @@ function specLine(
       operationType: o.operationType,
       seamClass: o.seamClass,
     }),
-    // ОДИН СОСТАВИТЕЛЬ ФРАЗЫ НА СХЕМУ И НА ЛИСТ (topstitchPhrase), поэтому бумага и карта сборки
-    // не могут сказать про один шаг разное. Миллиметры приезжают С ЛИНИЕЙ, от которой их меряют:
-    // «topstitch 6 mm» называла величину и прятала отсчёт, а отсчёт у двух числовых режимов разный
-    // — край детали у «at the edge», линия шва у «parallel».
+    // ВСЯ СТРОЧКА ОДНИМ СОСТАВИТЕЛЕМ (`topstitchLine`) — включая СУЩЕСТВИТЕЛЬНОЕ И РЯДЫ. Фразу
+    // «где строчить» карта звала общей и раньше, а слово «topstitch» приклеивала сама — и вместе с
+    // ним теряла `topstitch.rows`, которого в её сборке не было вовсе. Число рядов человек пишет
+    // руками (контрол «rows of topstitching»), печатный лист его печатал, карта примерки молчала:
+    // технолог видел один ряд там, где швея по листу прокладывала два.
     //
-    // И РЕЖИМ БЕЗ ЧИСЛА ТЕПЕРЬ ТОЖЕ НАЗЫВАЕТСЯ: «in the ditch» — инструкция целиком, а схема о ней
-    // прежде молчала вовсе (условие требовало заполненных миллиметров), так что шаг с отстрочкой в
-    // шов выглядел на карте шагом без отстрочки.
-    topstitchPhrase(o.topstitchMode, o.topstitchWidthMm)
-      ? `topstitch ${topstitchPhrase(o.topstitchMode, o.topstitchWidthMm)}`
-      : '',
+    // Миллиметры приезжают С ЛИНИЕЙ, от которой их меряют: «topstitch 6 mm» называла величину и
+    // прятала отсчёт, а отсчёт у двух числовых режимов разный — край детали у «at the edge», линия
+    // шва у «parallel». И режим без числа тоже называется: «in the ditch» — инструкция целиком.
+    topstitchLine(o.topstitchMode, o.topstitchWidthMm, o.topstitchRows),
     attachmentKindLabel(o.attachmentKind),
   ]
     .filter(Boolean)
