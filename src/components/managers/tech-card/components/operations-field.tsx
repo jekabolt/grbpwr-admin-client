@@ -3302,7 +3302,7 @@ function OperationEditor({
       if (fits.length === 1) machineFromPark = fits[0].machineType ?? '';
     }
 
-    const written = workWrites(item, k, machineType, machineFromPark, kindWrites);
+    const written = workWrites(item, k, machineType, machineFromPark, pressEquipment, kindWrites);
     const writes = Object.entries(written) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of writes) {
       // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА. Так `press_action` и дождался
@@ -4285,7 +4285,8 @@ function OperationEditor({
                 // человек печатает русское слово, ничего не находит и решает, что такой работы
                 // нет вовсе.
                 <Text size='micro' variant='label' component='span' data-work-fallback='1'>
-                  offline list — the catalogue did not load, so search is English-only
+                  offline list — the catalogue did not load, so most jobs search by English name
+                  only
                 </Text>
               )
             }

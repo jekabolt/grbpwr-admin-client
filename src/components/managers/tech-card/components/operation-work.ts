@@ -33,8 +33,14 @@ import {
 // ФОЛБЭК-СНАПШОТ. Пикер НИКОГДА не бывает пустым: не приехал каталог — список собирается из
 // `OPERATION_KINDS` и токенов `KIND_WORK_TOKEN`. Снимок ВЫВОДИТСЯ из таблицы пунктов, а не набран
 // второй раз руками: `machine_mode`, машинки и глагол считаются из тех же полей, из которых их
-// пишет `kindWrites`. Расходиться нечему по построению. Цена деградации названа честно: в снимке
-// нет синонимов, значит нет и поиска по русскому слову — только по английскому имени пункта.
+// пишет `kindWrites`. Расходиться нечему по построению. Цена деградации названа честно: у
+// выведенных работ синонимов нет, значит нет и поиска по русскому слову — только по английскому
+// имени пункта.
+//
+// ВЫВЕСТИ УДАЁТСЯ НЕ ВСЁ, И НЕВЫВОДИМОЕ ВЫПИСАНО ОТДЕЛЬНО (`CATALOG_ONLY_WORKS` и две карты рядом
+// с ним): работа, у которой пункта в этом файле нет вовсе, выводиться не из чего, а `retired` и
+// `label` — колонки каталога, а не факты бандла. Дельта ровно одна, стережёт её проба, читающая
+// сами миграции; всё выводимое по-прежнему выводится.
 
 /** Как работа отвечает на вопрос «на чём»: машинка следует из неё, спрашивается, либо не машинная. */
 export type WorkMachineMode = 'fixed' | 'ask' | 'none';
@@ -340,6 +346,147 @@ const bundleItem = (k: OperationKind, sort: number): WorkItem | undefined => {
   };
 };
 
+// --- WHAT THE CATALOG SAYS AND THE KINDS TABLE CANNOT (0331) -------------------------------------
+//
+// THE SNAPSHOT IS DERIVED FROM THE KINDS TABLE, AND FOR THREE OF THE CATALOG'S FACTS THERE IS
+// NOTHING TO DERIVE FROM. Migration 0331 did three things no `OperationKind` can express: it minted FOUR
+// works that have no picker item in this bundle at all, it RETIRED `gather_ease` (a false merge of
+// two different jobs — gathering and easing a sleeve head), and it renamed the label of the dump
+// `join_lockstitch` without touching the token. Derivation cannot reach any of them: a work with no
+// item has no row to derive from, and `retired` / `label` are catalog columns, not bundle facts.
+//
+// SO THE DELTA IS WRITTEN OUT, AND ONLY THE DELTA. Everything derivable stays derived — one more
+// hand-typed copy of the fifty-three existing works is exactly the second dictionary this phase is
+// removing. Three named lists, each answering one question the kinds table cannot be asked.
+//
+// PRICE OF LEAVING IT UNDONE, MEASURED IN THE OWNER'S OWN WORDS: `moscow_hem` and `slit_overcast`
+// are the two jobs he asked for BY NAME. With the catalog request refused they would not be in the
+// picker at all — and the picker is the one place a job can be named at all.
+//
+// THE GUARD IS NOT A PROMISE, IT IS A PROBE. `work-picker-probe` parses the migrations themselves
+// (0329 + 0331 + whatever comes next) and compares them with this snapshot token by token, label by
+// label, sort by sort. A work seeded server-side and forgotten here turns it red; so does a label
+// changed on one side only. It skips — never fails — when the backend tree is not next to this one,
+// the same way the probes skip a missing playwright: an absent guard is not a statement about code.
+
+/**
+ * WORKS THAT LIVE ONLY IN THE CATALOG — no `OperationKind`, no `KIND_WORK_TOKEN` row, nothing to
+ * derive. Their identity IS the pair (verb, machine), which is why they need no picker item: see
+ * `workWrites`, which writes exactly that pair for a work with no kind.
+ *
+ * THE SYNONYMS ARE HERE, AND THAT BENDS THE RULE STATED ABOVE ON PURPOSE. The snapshot carries no
+ * Russian for the fifty-three derived works: they have English labels a person can find them by,
+ * and copying the server's synonym table would be a second search dictionary. For these four the
+ * calculation is different — the label is the ONLY string that reaches the bundle, and the
+ * technologist searching for the rolled hem types «моско», not «rolled». Without these words the
+ * degraded picker holds the job he asked for and refuses to show it to him. The copy is bounded
+ * (four works, one migration) and the guard compares it with the migration word for word.
+ *
+ * SORT NUMBERS ARE THE SERVER'S OWN. 0329 stepped by tens precisely so a later work could stand
+ * next to its kin: 75 right after the blindhem (70), 141/142 right after the retired ancestor
+ * (140), 165 between the buttonhole (160) and the button (170). The derived rows step by tens in
+ * the same order, so the merged list comes out in catalog order without a second ordering rule.
+ *
+ * GROUP IS THE BUNDLE'S FAMILY, NOT THE CATALOG'S STAGE — the same deliberate imprecision the
+ * derived rows carry (see `bundleItem`), and for the same reason: while the catalog is down the
+ * list groups the way the bundle groups. Which family is not a guess — it is the family of the
+ * neighbours the SERVER sorted each work among.
+ */
+const CATALOG_ONLY_WORKS: readonly WorkItem[] = [
+  {
+    token: 'moscow_hem',
+    verb: 'machine',
+    stage: 'fam_A',
+    label: 'Hem — rolled (Moscow)',
+    machineMode: 'fixed',
+    defaultMachine: 'lockstitch',
+    machines: ['lockstitch'],
+    syn: [
+      'московский',
+      'московский шов',
+      'узкая подгибка',
+      'рубильник',
+      'moscow',
+      'moscow hem',
+      'rolled hem',
+      'narrow hem',
+    ],
+    sort: 75,
+    retired: false,
+  },
+  {
+    token: 'gather',
+    verb: 'machine',
+    stage: 'fam_B',
+    label: 'Gather',
+    machineMode: 'fixed',
+    defaultMachine: 'gathering',
+    machines: ['gathering'],
+    syn: ['сборка', 'сборить', 'присборить', 'оборка', 'gather', 'gathering', 'ruffle'],
+    sort: 141,
+    retired: false,
+  },
+  {
+    token: 'ease_in',
+    verb: 'machine',
+    stage: 'fam_B',
+    label: 'Ease in — machine',
+    machineMode: 'fixed',
+    defaultMachine: 'gathering',
+    machines: ['gathering'],
+    syn: ['посадка', 'посадить', 'посадка оката', 'припосадить', 'ease', 'ease in', 'sleeve ease'],
+    sort: 142,
+    retired: false,
+  },
+  {
+    // ASK, AND THE TWO MACHINES ARE TWO WAYS OF DOING ONE JOB: the zigzag overcasts the raw edge of
+    // the slit, the buttonhole automat cuts and overcasts in one pass. Without this row the
+    // degraded picker cannot even ask the question.
+    token: 'slit_overcast',
+    verb: 'machine',
+    stage: 'fam_C',
+    label: 'Slit — overcast',
+    machineMode: 'ask',
+    defaultMachine: 'zigzag',
+    machines: ['zigzag', 'buttonhole'],
+    syn: [
+      'прорезь',
+      'обметать прорезь',
+      'обмётанная прорезь',
+      'разрез',
+      'slit',
+      'slit overcast',
+      'overcast slit',
+    ],
+    sort: 165,
+    retired: false,
+  },
+];
+
+/**
+ * RETIRED SERVER-SIDE — offered to nobody, readable by everybody. A retired work is dropped from
+ * the picker by `searchWorks` and kept in `byToken`, because a step that already carries the token
+ * must still open and still be named by its own label. Deleting the row instead would take from a
+ * person the right to save a card he once marked up.
+ */
+const RETIRED_WORKS: ReadonlySet<string> = new Set(['gather_ease']);
+
+/**
+ * LABEL CHANGED WITHOUT THE TOKEN CHANGING, and that asymmetry is the whole point. «Join —
+ * lockstitch» fails the substitution test — move the job to an overlock and the name becomes a lie
+ * — so 0331 renamed it to «Join / seam», which names the JOB. The token never moves: it travels
+ * into the digest projection of every step row, and a token edited after the fact splits the
+ * signature in two. So the bundle overrides the derived label and leaves `KIND_WORK_TOKEN` alone.
+ *
+ * THE KIND'S OWN LABEL IS NOT TOUCHED HERE. `OPERATION_KINDS[A1].label` names a picker ITEM anchored
+ * on the lockstitch, and it is read by the picker trigger of every step that has no work at all —
+ * the hundred production rows this phase is untangling. Renaming that string would rename those
+ * rows on nine screens in the same commit that only meant to catch the snapshot up.
+ */
+const RELABELLED_WORKS: Readonly<Record<string, string>> = {
+  join_lockstitch: 'Join / seam',
+};
+
 /**
  * Снимок бандла — на один релиз, пока хоть один клиент может не получить каталог. Стоит в
  * `WorkCatalog` тем же типом, что и серверный ответ: у пикера ровно один путь отрисовки.
@@ -349,10 +496,23 @@ export const BUNDLED_WORK_CATALOG: WorkCatalog = (() => {
   let sort = 0;
   for (const k of OPERATION_KINDS) {
     if (!kindIsOffered(k)) continue;
+    // The step of ten is the SERVER'S step (0329), not a bundle habit — it is what lets a work
+    // minted later stand between two derived ones instead of at the end of the list.
     sort += 10;
     const item = bundleItem(k, sort);
-    if (item) items.push(item);
+    if (!item) continue;
+    const relabelled = RELABELLED_WORKS[item.token];
+    items.push({
+      ...item,
+      ...(relabelled ? { label: relabelled } : null),
+      retired: RETIRED_WORKS.has(item.token),
+    });
   }
+  items.push(...CATALOG_ONLY_WORKS);
+  // ONE ORDER FOR BOTH SOURCES — the same comparator `parseWorkCatalog` sorts the server answer by.
+  // A merged list ordered any other way would put the same two works in a different order depending
+  // on whether the catalog answered, and the person would read that as the list being broken.
+  items.sort((a, b) => a.sort - b.sort || a.token.localeCompare(b.token));
   return {
     source: 'bundle',
     items,
@@ -440,6 +600,25 @@ export function workDefaultsForForm(
 // --- ЧТО ПИШЕТ ВЫБОР РАБОТЫ ----------------------------------------------------------------------
 
 /**
+ * DOES THE STEP ALREADY ANSWER «ON WHAT» ON THE PRESS AXIS — the predicate the press side of
+ * `workWrites` narrows by, and the widest honest one there is today.
+ *
+ * THE MACHINE AXIS NARROWS BY AN AUTHORITY: `item.machines` comes from the catalog, the server
+ * checks the pair and names the refusal on `operations[N].work`. The press axis has no such
+ * authority ANYWHERE — `operation_work` carries no press column at all, and the server's equipment
+ * gate requires `press_equipment` on press / press_open / fusing without ever comparing it with
+ * `press_action`. «Which equipment can steam» is a question nothing answers, so answering it here
+ * would be both a claim the bundle has no right to make and the second dictionary this phase is
+ * busy removing.
+ *
+ * WHAT IS LEFT IS THE ONE FACT THAT IS NOT A GUESS: the step names a press, i.e. a person answered.
+ * Blankness is read off the `_UNKNOWN` suffix, the same way `workDefaultToFormValue` reads it — a
+ * private copy of `TECH_CARD_PRESS_EQUIPMENT_UNKNOWN` here would be the third spelling of one
+ * string.
+ */
+const pressAnswered = (name: string): boolean => !!name.trim() && !name.endsWith('_UNKNOWN');
+
+/**
  * НАБОР ЗНАЧЕНИЙ, КОТОРЫЙ ВЫБОР РАБОТЫ ЗАПИСЫВАЕТ В СТРОКУ ШАГА, — плоской картой «имя поля →
  * значение», ровно как у `kindWrites`. Само поле `work` сюда НЕ входит: его пишет вызыватель,
  * потому что оно едет и тогда, когда пункта у работы нет вовсе.
@@ -463,6 +642,8 @@ export function workWrites(
   machineOnStep: string,
   /** Единственный подходящий профиль парка, если он есть (имя enum'а). */
   machineFromPark: string,
+  /** ВТО-оборудование, стоящее на шаге сейчас (имя enum'а) — оно тоже ответ человека, не осадок. */
+  pressOnStep: string,
   kindWrites: (k: OperationKind, machineForAsk?: string) => Record<string, string>,
 ): Record<string, string> {
   const out: Record<string, string> = kind
@@ -470,6 +651,23 @@ export function workWrites(
     : { operationType: verbTokenToEnum(item.verb) };
   // Глагол — из каталога, всегда: пункт бандла мог назвать другой, и правым тогда будет сервер.
   out.operationType = verbTokenToEnum(item.verb) || out.operationType;
+
+  // THE PRESS AXIS KEEPS WHAT THE PERSON CHOSE, exactly as the machine axis does. G4 «Steam» and
+  // G8 «Mould» (and G9 «Fuse») NAME a piece of equipment, and writing it unconditionally moved a
+  // step the owner had put on his iron onto a steamer — on screen, with no label over it and no
+  // question asked. That is the same silent substitution the machine axis was taught not to make,
+  // and the axis it happens on is the one where nothing downstream would have caught it: the
+  // equipment is required on a press step, so a wrong answer saves as cleanly as a right one.
+  //
+  // IT STANDS BEFORE THE MACHINE BRANCH BECAUSE EVERY PRESS WORK LEAVES THROUGH IT: pressing
+  // answers «none» to the question «on what machine», and that branch returns.
+  //
+  // WHAT THIS DELIBERATELY DOES NOT DO: equipment named for a DIFFERENT job (a fusing press on a
+  // step just turned into steaming) also survives. Narrowing that needs a list of which equipment
+  // performs which action, and no such list exists on either side of the wire — see
+  // `pressAnswered`. Meanwhile the fact stays visible on its own control, which is the side of
+  // «сломаться можно, исчезнуть нельзя» this phase keeps choosing.
+  if (out.pressEquipment && pressAnswered(pressOnStep)) out.pressEquipment = pressOnStep;
 
   if (item.machineMode === 'none') {
     // Ось «на чём» у этого глагола не машинная. Пункт бандла, назвавший машинку, здесь молчит —
