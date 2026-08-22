@@ -478,6 +478,10 @@ const isPressType = isPressStepType;
 // else lives inside «differs from standard», which has to open itself when one of those fails.
 export const CORE_STEP_FIELDS = new Set([
   'operationType',
+  // РАБОТА СТОИТ В ЯДРЕ СЕТКИ — пикер работ первый контрол шага. Серверный отказ по имени
+  // `work` («такой работы нет», «глагол не совпал», «не та машинка») обязан лечь на него, а не
+  // раскрывать створку переопределений, в которой этого контрола нет.
+  'work',
   'machineType',
   'pressEquipment',
   'zone',
@@ -617,6 +621,9 @@ const LINKABLE_SECTION_LABEL: Record<string, string> = {
 export const emptyOperation = {
   operationNumber: 0,
   operationType: NONE_OP_TYPE,
+  // РАБОТА (0330) — пустая строка, и это ЗАКОННОЕ состояние, а не заготовка. Новый шаг вида не
+  // несёт, пока человек его не назвал; до тех пор шаг живёт по старой деривации (`kindOf`).
+  work: '',
   zone: NONE_ZONE,
   calloutNumber: 0, // 0 = no sketch pin linked
   smv: '',
@@ -726,6 +733,10 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
   return {
     operationNumber: 0,
     operationType: o.operationType || NONE_OP_TYPE,
+    // Работа едет и в черновике — тем же сырым токеном. Генератор её сегодня не заполняет вовсе;
+    // ключ стоит здесь заранее по тому же доводу, что и узловые входы ниже: научившийся работам
+    // генератор иначе молча ронял бы её, а RHF не зарегистрировал бы поля вовсе.
+    work: (o.work ?? '').trim(),
     zone: o.zone || NONE_ZONE,
     bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
     // TODO(T-26): генератор узлов пока не существует — aiOperationToPb на бэке не заполняет ни

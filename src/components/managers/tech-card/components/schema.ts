@@ -1059,6 +1059,19 @@ const operationSchema = z.object({
   operationType: z.string().min(1).default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
   zone: z.string().min(1).default('TECH_CARD_GARMENT_ZONE_UNKNOWN'),
 
+  // КАКАЯ ЭТО РАБОТА — третья ось шага (0330), СТРОКОЙ-ТОКЕНОМ, а не членом словаря.
+  //
+  // ПОЧЕМУ `z.string()` БЕЗ СПИСКА ДОПУСТИМЫХ ЗНАЧЕНИЙ, И ЭТО НЕ ЛЕНЬ. Словарь работ — ДАННЫЕ на
+  // сервере (`operation_work`, 0329), а не контракт: он растёт INSERT-миграцией, без единой
+  // перегенерации клиента. Закрытый список здесь превратил бы каждую новую работу в невалидную
+  // строку формы — то есть в карточку, которую этот бандл отказывается открывать, — а токен
+  // новее бандла обязан ДОЕХАТЬ ДО ЭКРАНА ТЕКСТОМ и уехать обратно тем же токеном.
+  //
+  // ПУСТО = «ВИД НЕ НАЗНАЧЕН», и это законное состояние надолго: сто прод-строк свалки размечает
+  // человек, автоматического переписывания нет ни на одной стороне. Такая строка продолжает жить
+  // по старой деривации (`kindOf`) — двоекодье переходного периода.
+  work: z.string().optional().default(''),
+
   // operationNumber is server-assigned ((position+1)*10) — carried read-only, not edited.
   operationNumber: z.number().optional().default(0),
   // Standard minute value, the ONLY time field. The legacy SAM (`timeNorm`) that used to sit beside
@@ -2394,6 +2407,11 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       operationNumber: o.operationNumber || 0,
       operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
       zone: o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN',
+      // РАБОТА (0330) — СЫРОЙ ТОКЕН, БЕЗ СВЕРКИ СО СЛОВАРЁМ. Токена нет в каталоге этого бандла —
+      // он всё равно кладётся в форму как есть: экран покажет его текстом («unknown to this app
+      // version»), а сохранение вернёт нетронутым. Погасить незнакомое здесь значило бы стереть
+      // разметку владельца обновлением бандла.
+      work: (o.work ?? '').trim(),
       smv: decimalToInput(o.smv),
       calloutNumber: o.calloutNumber || 0,
       // Overrides. An ABSENT allowance means «inherit the card standard» and must read back as an
@@ -3119,6 +3137,20 @@ export function mapFormToTechCardInsert(
     // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
     // подпись.
     operationKindsAware: true,
+    // ПЯТЫЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — про ось «работа» (0330). Ставится ВСЕГДА, как четыре выше.
+    //
+    // Почему ЯВНЫЙ ФЛАГ, а не «в payload есть непустой work»: пустая строка `work` на записи
+    // означает ровно то же, что и отсутствие поля, — и без флага «владелец СНЯЛ вид с
+    // единственной размеченной строки» было бы неотличимо от «сохраняет бандл, который про work
+    // не слышал». Одно из двух пришлось бы запретить, и запрещённым оказался бы человеческий
+    // жест. Флаг разводит их навсегда: снятие вида — это aware = true и пустая строка.
+    //
+    // Парного `*_cleared` у него НЕТ и не будет — как у 110 и 115: «вид снят» это рядовая правка
+    // одной строки, а не жест «снять разметку целиком».
+    //
+    // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
+    // подпись.
+    operationWorkAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3305,6 +3337,13 @@ export function mapFormToTechCardInsert(
         // freshly-created card reads back sensibly before the server recomputes.
         operationNumber: (i + 1) * 10,
         operationType,
+        // РАБОТА ЕДЕТ ВСЕГДА И ТЕМ ЖЕ ТОКЕНОМ, каким приехала, — включая пустую строку.
+        //
+        // Пустая строка НЕ равна «поле не послали»: на осведомлённой записи (щит
+        // `operationWorkAware` ниже) она есть человеческий жест «снять вид» и исполняется
+        // буквально. Именно поэтому щит явный, а не выведенный из присутствия поля: иначе «снял
+        // вид с единственной размеченной строки» было бы неотличимо от «сохраняет старый бандл».
+        work: (o.work ?? '').trim(),
         zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
         smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,

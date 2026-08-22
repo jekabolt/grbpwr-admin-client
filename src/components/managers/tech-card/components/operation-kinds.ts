@@ -346,6 +346,90 @@ export const OPERATION_KIND_BY_ID: ReadonlyMap<string, OperationKind> = new Map(
   OPERATION_KINDS.map((k) => [k.id, k]),
 );
 
+// --- СШИВКА С СЕРВЕРНЫМ КАТАЛОГОМ РАБОТ (0329) ---------------------------------------------------
+//
+// ДВЕ ИДЕНТИЧНОСТИ, ОДНА ТАБЛИЦА ПЕРЕВОДА. У пункта этого файла своя идентичность — `id` («A2»),
+// по нему живут `kindOf`, `kindClears` и память пикера. У работы серверного каталога своя —
+// `token` («topstitch»), и ровно он уезжает в строку шага и в проекцию отпечатка. Сшивать их
+// приходится ЗДЕСЬ, потому что каталог про клиентские буквы не знает и знать не должен: он —
+// данные, а `id` — внутреннее имя одного файла.
+//
+// ПОЧЕМУ ОДНА КАРТА, А НЕ ПОЛЕ У КАЖДОГО ПУНКТА: карта читается целиком одним взглядом, и её
+// полнота проверяется пробой одним сравнением с фикстурой ответа сервера. Поле, рассыпанное по
+// пятидесяти четырём строкам таблицы, пришлось бы вычитывать глазами — а пропущенный токен значит
+// «выбор этого пункта не запишет работу», то есть тихую половину жеста.
+//
+// G0 ЗДЕСЬ НЕТ И НЕ БУДЕТ. «Press (action not recorded)» — пункт-состояние: он называет ОТСУТСТВИЕ
+// записанного приёма, а отсутствие не кладут в каталог работ и не выбирают. Сид 0329 его тоже не
+// сеет — там 53 строки на 54 пункта, и разница ровно в нём.
+//
+// ЧЕТЫРЁХ РАБОТ 0331 (`moscow_hem`, `gather`, `ease_in`, `slit_overcast`) в этой карте НЕТ, и это
+// не пробел: у них НЕТ пункта в этом файле вовсе. Они приходят каталогом, выбираются в пикере и
+// пишут свою личность из самого каталога (глагол + машинка) — см. `applyWorkItem`. Заводить им
+// пункты здесь значило бы вернуть словарь работ в бандл, из которого фаза его и вынимает.
+export const KIND_WORK_TOKEN: Readonly<Record<string, string>> = {
+  A1: 'join_lockstitch',
+  A2: 'topstitch',
+  A3: 'overlock_serge',
+  A4: 'coverstitch',
+  A5: 'coverlock',
+  A6: 'chainstitch',
+  A7: 'blindhem',
+  A8: 'zigzag',
+  A9: 'amf_handstitch_imitation',
+  A10: 'machine_other',
+  B1: 'bind_tape_edge',
+  B2: 'attach_elastic',
+  B3: 'set_zip',
+  B4: 'gather_ease',
+  B5: 'attach_label',
+  C1: 'buttonhole',
+  C2: 'button_attach',
+  C3: 'bartack',
+  C4: 'embroidery',
+  D1: 'patch_pocket_automat',
+  D2: 'welt_pocket_automat',
+  D3: 'template_automat',
+  D4: 'collar_cuff_automat',
+  D5: 'sleeve_setting_automat',
+  D6: 'waistband_automat',
+  E1: 'tape_seam_hot_air',
+  E2: 'ultrasonic_weld',
+  F0: 'set_hardware',
+  F1: 'snap_press_stud',
+  F2: 'rivet_burr',
+  F3: 'eyelet_grommet',
+  F4: 'buckle_slider',
+  F5: 'hardware_sewn',
+  G1: 'press_flat',
+  G2: 'press_to_one_side',
+  G3: 'press_open',
+  G4: 'press_steam',
+  G5: 'press_final',
+  G6: 'press_ease_in',
+  G7: 'press_stretch',
+  G8: 'press_mould',
+  G9: 'fuse',
+  H1: 'print_transfer',
+  I1: 'trim_allowance',
+  I2: 'thread_trim',
+  I3: 'clean',
+  I4: 'inspect_inline',
+  I5: 'quality_control_final',
+  I6: 'fold',
+  I7: 'pack',
+  I8: 'wet_process',
+  J1: 'hand_work',
+  J2: 'other',
+};
+
+/** Пункт, отвечающий этой работе каталога, — или `undefined` у работы без пункта (0331). */
+export const KIND_BY_WORK_TOKEN: ReadonlyMap<string, OperationKind> = new Map(
+  Object.entries(KIND_WORK_TOKEN)
+    .map(([id, token]) => [token, OPERATION_KIND_BY_ID.get(id)] as const)
+    .filter((pair): pair is readonly [string, OperationKind] => !!pair[1]),
+);
+
 /** Семь ВТО-пунктов, которые различает ТОЛЬКО подглагол, — те, что схлопываются до миграции. */
 const PRESS_ACTION_ONLY = new Set(['G2', 'G4', 'G5', 'G6', 'G7', 'G8']);
 
