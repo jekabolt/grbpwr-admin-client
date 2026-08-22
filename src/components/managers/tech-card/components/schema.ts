@@ -87,6 +87,10 @@ import {
   isWeldMachineType,
 } from './equipment-options';
 import { wireInt } from './wire-int';
+// ТОКЕН РАБОТЫ «ПРОРЕЗЬ» — ИЗ ОБЩЕГО МОДУЛЯ ОСИ, а не строкой здесь: то же правило проверяет
+// редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
+// остался бы на поле, которого нет на экране.
+import { SLIT_OVERCAST_WORK } from './operation-work';
 import { z } from 'zod';
 import {
   ANNOTATION_COLOR_KEYS,
@@ -1375,6 +1379,9 @@ const operationSchema = z.object({
     // вкладок, из тоста, который не говорит, какой из тридцати шагов виноват.
     const stepIsMachine = isMachineStepType(o.operationType);
     const stepMachineType = o.machineType ?? '';
+    // РАБОТА ШАГА — ТРЕТЬЯ ОСЬ, И С 0331 ОНА ОТВЕЧАЕТ НА ВОПРОС ПРИМЕНИМОСТИ НАРАВНЕ С МАШИНКОЙ.
+    // Пока вход был один, здесь хватало типа машинки; «прорезь, обмётанная зигзагом» завела второй.
+    const stepSlitOvercast = (o.work ?? '').trim() === SLIT_OVERCAST_WORK;
 
     // ШЕСТЬ ДИСКРИМИНАТОРОВ, БЕЗУСЛОВНО. Никакого aware-флага у них нет и не нужно: обязательность
     // объявляет САМ ГЛАГОЛ, а старый бандл нового глагола физически не пришлёт — токена нет в его
@@ -1450,6 +1457,24 @@ const operationSchema = z.object({
       });
     }
 
+    // ПРОРЕЗЬ БЕЗ ДЛИНЫ — ПОЖЕЛАНИЕ, А НЕ ИНСТРУКЦИЯ (0331). Единственный REQUIRED этого семейства,
+    // и зеркалится он здесь по той же причине, что и пара «заутюжить + сторона»: сервер отвечает
+    // `cut_length_mm: required` и отказывает ВСЕЙ карточкой, а без этой строки владелец узнавал бы
+    // об этом из тоста после сохранения шести вкладок. Отказ обязан встать на контроле — и встаёт:
+    // работа «прорезь» показывает поле длины на обеих своих машинках (см. `showCutLength`).
+    //
+    // РЕТРОАКТИВНЫМ ЭТО ПРАВИЛО НЕ БЫВАЕТ: оно висит на НЕПУСТОЙ работе, а работу не несёт ни одна
+    // сохранённая строка обеих баз — колонка родилась NULL. Достижимая клетка ровно одна: человек
+    // ВЫБРАЛ прорезь и не сказал, какой она длины.
+    if (stepIsMachine && stepSlitOvercast && !stepTextSet(o.cutLengthMm)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cutLengthMm'],
+        message:
+          'say how long the slit is — a slit with no length has neither a marker nor a check',
+      });
+    }
+
     // ПРИМЕНИМОСТЬ ПО ЯВНОМУ ТИПУ МАШИНЫ. «Явный» — названный НА ШАГЕ: тип, разрешённый через
     // `machineProfileKey`, не засчитывается ни здесь, ни на сервере, и это не придирка — профиль
     // можно перенаправить на другую машинку, не тронув ни одного шага, и правило, стоящее на
@@ -1474,11 +1499,15 @@ const operationSchema = z.object({
       'buttonholeStyle',
       'a buttonhole shape is a buttonhole machine setting — name that machine on the step, or clear it',
     );
+    // ДЛИНА ПРОРЕЗИ — ЕДИНСТВЕННОЕ ПОЛЕ СЕМЕЙСТВА С ДВУМЯ ВХОДАМИ (0331). Второй вход снимает
+    // проверку целиком, а не расширяет список машинок: на работе «прорезь» длина законна на ЛЮБОЙ
+    // её машинке, и сервер спрашивает ровно так же — `machineIsOneOf(...) || workAcceptsCutLength`.
+    // Без этой половины поле было бы показано контролом и тут же отвергнуто зодом на нём же.
     needsMachineType(
-      stepTextSet(o.cutLengthMm),
+      stepTextSet(o.cutLengthMm) && !stepSlitOvercast,
       BUTTONHOLE,
       'cutLengthMm',
-      'a buttonhole cut is a buttonhole machine setting — name that machine on the step, or clear it',
+      'a cut length belongs to a buttonhole machine or to the slit-overcast work — name one on the step, or clear it',
     );
     needsMachineType(
       stepEnumSet(o.buttonholeOrientation),
