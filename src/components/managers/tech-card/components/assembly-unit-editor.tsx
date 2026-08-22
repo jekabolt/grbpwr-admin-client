@@ -339,8 +339,9 @@ function UnitStepRow({
   selected: boolean;
   pieceShapes: PieceShapeMap;
   onSelect: () => void;
-  /** Каталог работ — пропом от дока: одна подписка на мини-рельс, как в большом рельсе. */
-  workCatalog?: WorkCatalog;
+  /** Каталог работ — пропом от дока: одна подписка на мини-рельс, как в большом рельсе.
+   * Обязателен тем же приёмом, что аргументы композитора: `undefined` пишется вслух. */
+  workCatalog: WorkCatalog | undefined;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;

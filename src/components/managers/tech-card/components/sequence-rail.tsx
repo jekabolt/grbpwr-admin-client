@@ -110,8 +110,12 @@ function RailStep({
    * Каталог работ — ПРОПОМ, одной подпиской на весь рельс (R8). Хук в строке означал бы сто
    * двадцать шесть подписок на карточке свалки ради одного и того же справочника; не приехал —
    * имя деградирует до сегодняшней деривации, а не до пустоты.
+   *
+   * ОБЯЗАТЕЛЬНЫЙ ТЕМ ЖЕ ПРИЁМОМ, что аргументы композитора: необязательный проп позволил бы
+   * будущему вызывателю молча забыть каталог — и работы, знакомые каталогу, поехали бы токенами
+   * на одном экране из семи. `undefined` пишется вслух.
    */
-  workCatalog?: WorkCatalog;
+  workCatalog: WorkCatalog | undefined;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -348,8 +352,9 @@ export function SequenceRail({
   onDropPiece: (index: number, lineKey: string) => void;
   onMoveOperation: (from: number, to: number) => void;
   readPieceDrag: (dt: DataTransfer) => string;
-  /** Каталог работ на весь рельс — одна подписка у владельца, отсюда в каждую строку. */
-  workCatalog?: WorkCatalog;
+  /** Каталог работ на весь рельс — одна подписка у владельца, отсюда в каждую строку. Обязателен,
+   * как аргументы композитора: «рельс без каталога» — решение вызывателя, а не забытый проп. */
+  workCatalog: WorkCatalog | undefined;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),

@@ -34,6 +34,7 @@ import { AssemblyUnitEditor, unitDockTitle } from './assembly-unit-editor';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
 import { SequenceRail } from './sequence-rail';
+import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import {
   DOCK_DEFAULT,
   DOCK_MAX,
@@ -487,6 +488,11 @@ export function AssemblyFullscreen({
   onExit,
 }: AssemblyFullscreenProps) {
   const showMessage = useSnackBarStore((st) => st.showMessage);
+  // КАТАЛОГ РАБОТ ДЛЯ РЕЛЬСА СПИСКА (R8). Тот же модуль рельса, что у инлайна, обязан звать шаг
+  // тем же словом — а до обязательного пропа фулскрин каталога НЕ передавал, и работа, знакомая
+  // каталогу, ехала здесь токеном, расходясь с рельсом на странице. Ключ у запроса один на
+  // приложение: подписка та же, второго обращения к сети нет.
+  const { catalog: workCatalog } = useOperationWorkCatalog();
   const canvasRef = useRef<CanvasHandle>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   /** Сцена — и система координат стикера эскиза, и его кламп. */
@@ -1881,6 +1887,8 @@ export function AssemblyFullscreen({
                       onDropPiece={addInputToOperation}
                       onMoveOperation={moveOperation}
                       readPieceDrag={readPieceDrag}
+                      // Каталог работ — имя строки рельса спрашивает работу и в фулскрине (R8).
+                      workCatalog={workCatalog}
                     />
                     {/* «＋ NEW OPERATION» ОБЯЗАТЕЛЬНА ИМЕННО ЗДЕСЬ. В схеме она стоит в шапке
                         дока, а в списке док закрыт — и без этой кнопки карточка с нулём шагов (а

@@ -5628,8 +5628,11 @@ function GenerateOperationsPanel({
    * словом, каким назовёт его список после вставки, и брать это слово из того же каталога.
    * Сегодня генератор поля `work` не заполняет, и все строки черновика идут выведенным именем;
    * начнёт заполнять — предпросмотр не соврёт задним числом.
+   *
+   * Обязателен тем же приёмом, что аргументы композитора: «предпросмотр без каталога» — решение
+   * вызывателя, написанное `undefined` вслух, а не забытый проп.
    */
-  workCatalog?: WorkCatalog;
+  workCatalog: WorkCatalog | undefined;
   // Counted at the moment the button is pressed rather than watched continuously — this panel does
   // not need to re-render on every keystroke in the 14 operations above it.
   readReplaceImpact: () => ReplaceImpact;
