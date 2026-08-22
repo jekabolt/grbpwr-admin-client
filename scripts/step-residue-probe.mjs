@@ -186,6 +186,15 @@ await mount({
 });
 ck(pageErrors.length === 0, 'редактор смонтировался без исключений', pageErrors[0] ?? '');
 ck(await has('[data-residue-strip]'), 'полоса остатков нарисована');
+// ПОДПИСЬ — СЛОВО СВОЕГО ЭКРАНА (ревью Д2). Полоса стала общим примитивом двух экранов, и
+// подпись — единственное, что у них разное: у шага причина остатка — ВИД операции. Каптион —
+// первый ребёнок полосы, строки лежат в соседнем диве, склейки нет.
+{
+  const cap = ((await page.locator('[data-residue-strip] > p').first().textContent()) ?? '').trim();
+  ck(cap.includes('on this step'), 'подпись говорит про ШАГ', cap);
+  ck(cap.includes('its current kind'), 'и называет причину этого экрана: вид операции', cap);
+  ck(!cap.includes('section and purpose'), 'и не произносит причину чужого экрана', cap);
+}
 ck(await has(RES('threadCount')), 'число ниток стоит строкой остатка');
 ck(
   (await textOf(RES('threadCount'))).includes('3'),

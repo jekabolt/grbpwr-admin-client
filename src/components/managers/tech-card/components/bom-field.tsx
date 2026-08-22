@@ -335,6 +335,20 @@ export function SlotIdentityFields({ index }: { index: number }) {
   // тут же под селектом. В полосу такая строка не попадает — иначе значение стояло бы в двух
   // местах, и одно из них врало бы.
   const foreignKind = kindSet && kindEligible && !kindItems.some((i) => i.value === rowKind);
+  // Пункт чужого вида говорит ПРАВДУ О ПРИЧИНЕ, и причин две, а не одна. Дом известен → «belongs
+  // to …» (строку перевезли через секции). Дом НЕизвестен → токен новее этой сборки (писал более
+  // новый бандл), и «belongs to another section» здесь было бы враньём: вид, возможно, живёт ровно
+  // в ЭТОЙ секции, просто словарь бандла его ещё не знает. Разные причины — разные действия
+  // человека (вернуть секцию vs обновить вкладку), поэтому подпись обязана их различать.
+  const foreignKindReason = kindHome
+    ? `belongs to ${sectionShort(kindHome) || 'another section'}`
+    : 'unknown to this app version';
+  // ТА ЖЕ ЛОЖЬ ЭКРАНА НА ОСИ НАЗНАЧЕНИЯ. У назначения нет домашней секции (любое законно на любой
+  // рулонной), поэтому «чужим» оно бывает единственным способом — токеном новее этой сборки. Без
+  // этого пункта Radix рисует над непустым значением пустой триггер, и первый же выбор молча
+  // затирает то, что записал более новый бандл.
+  const foreignPurpose =
+    purposeSet && rollGoods && !purposeEditorOptions.some((o) => o.value === rowPurpose);
 
   return (
     <div className='space-y-2'>
@@ -368,7 +382,18 @@ export function SlotIdentityFields({ index }: { index: number }) {
           <SelectField
             name={`bomItems.${index}.purpose`}
             label='purpose'
-            items={purposeEditorOptions}
+            items={[
+              ...purposeEditorOptions,
+              ...(foreignPurpose
+                ? [
+                    {
+                      value: rowPurpose as string,
+                      label: `${bomPurposeLabel(rowPurpose)} — unknown to this app version`,
+                      disabled: true,
+                    },
+                  ]
+                : []),
+            ]}
           />
           <div className='flex items-end pb-1'>
             <CheckboxField name={`bomItems.${index}.isSample`} label='sample fabric' />
@@ -400,9 +425,7 @@ export function SlotIdentityFields({ index }: { index: number }) {
                 ? [
                     {
                       value: rowKind as string,
-                      label: `${kindLabel(rowKind) ?? rowKind} — belongs to ${
-                        sectionShort(kindHome) || 'another section'
-                      }`,
+                      label: `${kindLabel(rowKind) ?? rowKind} — ${foreignKindReason}`,
                       disabled: true,
                     },
                   ]

@@ -273,6 +273,16 @@ await mount({
 });
 ck(pageErrors.length === 0, 'блок личности смонтировался без исключений', pageErrors[0] ?? '');
 ck(await has('[data-residue-strip]'), 'полоса остатков нарисована');
+// ПОДПИСЬ — СЛОВО СВОЕГО ЭКРАНА (ревью Д2). Примитив общий с шагом операции, и подпись — ровно
+// то, что у экранов разное: `caption` обязательный проп именно затем, чтобы человек не читал на
+// строке BOM причину чужого экрана. Каптион — первый ребёнок полосы, строки лежат в соседнем
+// диве: селектор не склеивает его с ними.
+{
+  const cap = ((await page.locator('[data-residue-strip] > p').first().textContent()) ?? '').trim();
+  ck(cap.includes('on this line'), 'подпись говорит про СТРОКУ спецификации', cap);
+  ck(cap.includes('section and purpose'), 'и называет причину этого экрана: секцию и назначение', cap);
+  ck(!cap.includes('step'), 'и не произносит слова чужого экрана («step»)', cap);
+}
 ck(await has(RES('purpose')), 'назначение стоит строкой остатка');
 ck(
   (await textOf(RES('purpose'))).toLowerCase().includes('purpose'),
@@ -390,6 +400,118 @@ head('4-бис. чужой пункт нельзя выбрать заново')
   }
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
+}
+
+// РАЗМЕТКА — НЕ ЖЕСТ (ревью Д2): data-disabled на пункте ещё не доказывает, что пункт нельзя
+// ВЫБРАТЬ. Здесь пробуются сами жесты: форс-клик (мимо pointer-events), стрелки, набор текста.
+// Значение обязано остаться прежним после каждого.
+head('4-жесты. отключённый пункт не выбирается ни кликом, ни клавиатурой, ни набором');
+{
+  const kindOf = async () => (await values()).kind;
+  await page.locator('[data-field="bomItems.0.kind"] button[role="combobox"]').first().click();
+  await page.waitForTimeout(200);
+  const opt = page.locator('[role="option"]').filter({ hasText: 'belongs to hardware' });
+  await opt
+    .first()
+    .click({ force: true, timeout: 2000 })
+    .catch(() => {});
+  await page.waitForTimeout(150);
+  ck((await kindOf()) === K.ZIPPER, 'форс-клик не меняет значение', String(await kindOf()));
+  if ((await page.locator('[role="option"]').count()) === 0) {
+    await page.locator('[data-field="bomItems.0.kind"] button[role="combobox"]').first().click();
+    await page.waitForTimeout(200);
+  }
+  for (let i = 0; i < 25; i++) await page.keyboard.press('ArrowDown');
+  const hl = await page.evaluate(
+    () => document.querySelector('[role="option"][data-highlighted]')?.textContent ?? null,
+  );
+  ck(
+    !(hl ?? '').includes('belongs to hardware'),
+    'стрелки не доводят подсветку до отключённого пункта',
+    String(hl),
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  // Набор текста: подпись пункта начинается на «zipper», и typeahead обязан его пропустить.
+  await page.locator('[data-field="bomItems.0.kind"] button[role="combobox"]').first().click();
+  await page.waitForTimeout(200);
+  await page.keyboard.type('zip');
+  await page.waitForTimeout(100);
+  const hl2 = await page.evaluate(
+    () => document.querySelector('[role="option"][data-highlighted]')?.textContent ?? null,
+  );
+  ck(
+    !(hl2 ?? '').includes('belongs to hardware'),
+    'набор «zip» не подсвечивает отключённый пункт',
+    String(hl2),
+  );
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  ck((await kindOf()) === K.ZIPPER, 'и Enter после набора не подменил значение', String(await kindOf()));
+}
+
+// НЕИЗВЕСТНЫЙ ЭТОЙ СБОРКЕ ТОКЕН — ВТОРАЯ ПРИЧИНА ЧУЖОГО ПУНКТА (ревью Д2). Дом токена карте
+// неизвестен, и «belongs to another section» было бы враньём: вид, возможно, живёт ровно в этой
+// секции, просто её словарь моложе записи. Подпись обязана различать причины.
+head('4-кватер. вид новее сборки: пункт назван «unknown to this app version», а не чужим домом');
+await mount({ name: 'future trim', section: S.TRIM, kind: 'TECH_CARD_BOM_KIND_FROM_THE_FUTURE' });
+{
+  const t = await triggerText('kind');
+  ck(t.includes('unknown to this app version'), 'триггер называет настоящую причину', t);
+  ck(!t.includes('belongs to'), 'и не приписывает токену чужой дом', t);
+  ck(
+    (await values()).kind === 'TECH_CARD_BOM_KIND_FROM_THE_FUTURE',
+    'значение цело',
+    String((await values()).kind),
+  );
+  const out = await page.evaluate(() =>
+    window.__bom.mapOut({
+      name: 'future trim',
+      section: 'TECH_CARD_BOM_SECTION_TRIM',
+      kind: 'TECH_CARD_BOM_KIND_FROM_THE_FUTURE',
+    }),
+  );
+  ck(
+    out.kind === 'TECH_CARD_BOM_KIND_FROM_THE_FUTURE',
+    'и едет на провод тем же токеном — судит его сервер, не клиент',
+    String(out.kind),
+  );
+}
+
+// ТА ЖЕ ЛОЖЬ ЭКРАНА НА ОСИ НАЗНАЧЕНИЯ (ревью Д2). У назначения дома нет — «чужим» оно бывает
+// только токеном новее сборки; без пункта Radix рисовал бы пустой триггер над непустым значением,
+// и первый же выбор молча затирал бы запись более нового бандла.
+head('4-квинт. назначение новее сборки: триггер называет его, пункт отключён');
+await mount({
+  name: 'future shell',
+  section: S.FABRIC,
+  purpose: 'TECH_CARD_BOM_PURPOSE_FROM_THE_FUTURE',
+});
+{
+  const t = await triggerText('purpose');
+  ck(t.includes('unknown to this app version'), 'триггер называет причину', t);
+  ck(t.toLowerCase().includes('from_the_future'), 'и само значение', t);
+  await page.locator('[data-field="bomItems.0.purpose"] button[role="combobox"]').first().click();
+  await page.waitForTimeout(200);
+  const opt = page.locator('[role="option"]').filter({ hasText: 'unknown to this app version' });
+  ck((await opt.count()) === 1, 'пункт стоит в списке ровно один раз', String(await opt.count()));
+  if ((await opt.count()) > 0) {
+    ck((await opt.first().getAttribute('data-disabled')) !== null, 'и он отключён');
+  }
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  const out = await page.evaluate(() =>
+    window.__bom.mapOut({
+      name: 'future shell',
+      section: 'TECH_CARD_BOM_SECTION_FABRIC',
+      purpose: 'TECH_CARD_BOM_PURPOSE_FROM_THE_FUTURE',
+    }),
+  );
+  ck(
+    out.purpose === 'TECH_CARD_BOM_PURPOSE_FROM_THE_FUTURE',
+    'значение едет на провод тем же токеном',
+    String(out.purpose),
+  );
 }
 
 head('4-тер. вид, живущий в СВОЕЙ секции, никакой пометки не получает');
