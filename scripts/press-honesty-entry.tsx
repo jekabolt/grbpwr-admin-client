@@ -74,6 +74,10 @@ probe.heading = (op) =>
   operationHeading({
     operationType: op.operationType as common_TechCardOperationType,
     zone: op.zone as common_TechCardGarmentZone,
+    // Эта проба — про имя, выведенное ИЗ ЗАПИСИ, и работы у неё нет по замыслу (R8 требует
+    // сказать это вслух, а не промолчать необязательным полем).
+    work: undefined,
+    workCatalog: undefined,
     pieceNames: [],
   });
 probe.wire = (op) => {

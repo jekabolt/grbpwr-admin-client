@@ -430,11 +430,22 @@ const operationTypeText = (
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      // РАБОТЫ ЗДЕСЬ ЗАВЕДОМО НЕТ — ветка выше её перехватила, — и `undefined` написан вслух,
+      // потому что композитор требует ответа: «называю по-старому» обязано быть решением, а не
+      // забытым аргументом.
+      work: undefined,
+      workCatalog: undefined,
       pieceNames: [],
     });
   }
   if (isPressStepType(v)) return pressProcessShort(v) || '—';
-  if (v && WAVE_VERBS.has(v)) return operationHeading({ operationType: v, pieceNames: [] });
+  if (v && WAVE_VERBS.has(v))
+    return operationHeading({
+      operationType: v,
+      work: undefined,
+      workCatalog: undefined,
+      pieceNames: [],
+    });
   return (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
 };
 const zoneText = (v?: common_TechCardGarmentZone): string =>
