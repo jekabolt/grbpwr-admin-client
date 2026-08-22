@@ -35,7 +35,11 @@ import {
   techCardSchema,
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
-import { operationHeading } from 'components/managers/tech-card/components/operation-options';
+import {
+  LEGACY_OPERATION_TYPES,
+  legacyMachineFact,
+  operationHeading,
+} from 'components/managers/tech-card/components/operation-options';
 import type {
   common_TechCardGarmentZone,
   common_TechCardMachineType,
@@ -101,6 +105,8 @@ type StepNameProbe = {
    * здесь, превращает стабильную ложь в плавающую, и это единственный способ её увидеть.
    */
   sheetDeps: () => Array<{ label: string; status: string }>;
+  /** Пары «легаси-член → факт о машине из его подписи», по ВСЕМ членам группы. */
+  legacyFacts: () => Array<[string, string]>;
   /**
    * СЕГОДНЯШНЕЕ ИМЯ той же записи — тот же композитор, но БЕЗ работы. Нужен ровно для одного:
    * отличить «шаг без работы зовётся по-старому» от «работа перебила всех», не пересказывая
@@ -124,6 +130,18 @@ let qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0,
 // же, что прочитал бы он, — иначе она проверяла бы свою копию гейта.
 let sheetDeps: Array<{ label: string; status: string }> = [];
 probe.sheetDeps = () => sheetDeps;
+
+// ЧТО ПОДПИСЬ ТИПА ГОВОРИТ О МАШИНЕ — ПОИМЁННО ПО ВСЕМ ЛЕГАСИ-ЧЛЕНАМ, для цитаты, которой одного
+// отрендеренного шага мало. Рендер доказывает ПРОВОДКУ (клетка листа зовёт составитель), а таблица
+// доказывает СОДЕРЖИМОЕ карты — что легаси-членов ровно девять и что каждому назначен тот факт,
+// который у него и должен быть. Одним рендером второе не берётся: фикстура несёт один легаси-шаг,
+// и восьмерых остальных на бумаге просто нет.
+//
+// СПИСОК ЧЛЕНОВ БЕРЁТСЯ ИЗ САМОГО МОДУЛЯ, А НЕ ПЕРЕЧИСЛЯЕТСЯ ЗДЕСЬ: копия списка в фикстуре — это
+// ещё один рукописный набор, то есть ровно тот дефект, ради снятия которого карта и заводилась.
+// Проба перечисляет ОЖИДАНИЯ (какой факт у кого), а кто входит в группу — отвечает модуль.
+probe.legacyFacts = () =>
+  LEGACY_OPERATION_TYPES.map((t) => [t, legacyMachineFact(t)] as [string, string]);
 
 probe.derived = (op) =>
   operationHeading({

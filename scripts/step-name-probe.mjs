@@ -135,6 +135,8 @@
 //   node scripts/step-name-probe.mjs --mutate-piece-index    из той же клаузы снят ТРЕТИЙ признак
 //   node scripts/step-name-probe.mjs --mutate-legacy-name    легаси-шаг снова зовётся подписью типа
 //   node scripts/step-name-probe.mjs --mutate-legacy-iso     номер по ISO 4915 исчез с бумаги
+//   node scripts/step-name-probe.mjs --mutate-legacy-table   член перевёрнут в тотальной карте
+//   node scripts/step-name-probe.mjs --mutate-legacy-panel   панель релизов снова зовёт подписью
 //   node scripts/step-name-probe.mjs --mutate-liveclass   живой ярлык печатает СЫРОЙ ТОКЕН
 //   node scripts/step-name-probe.mjs --mutate-releaseclass архив теряет подписанную строку
 //
@@ -347,6 +349,36 @@
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден:
 // гейт, который нельзя выполнить, не красит сборку в красный.
 
+// ── ТРИ КОДА ВОЗВРАТА, И ТРЕТИЙ — НЕ ОТТЕНОК КРАСНОГО ───────────────────────────────────────────
+//
+//   0 — ЗЕЛЁНАЯ
+//   1 — КРАСНАЯ: N        поймано ПОВЕДЕНИЕ, вердикт напечатан
+//   2 — НЕ ЗАПУСКАЛАСЬ    неизвестный флаг ЛИБО прогон умер до вердикта
+//
+// ЗАЧЕМ ТРЕТИЙ. «Мутация сломала СБОРКУ, а не поведение» — отдельный отказ, и до этого сторожа он
+// был неотличим от пойманного дефекта: прогон падал стеком и давал `exit 1` при НУЛЕ строк FAIL.
+// Замерено на себе: мутация подставляла в лист ссылку на импорт, снятый как осиротевший, лист падал
+// на рендере, playwright ждал узел тридцать секунд — и матрица засчитывала это как «мутация
+// кусает». Отличить можно было только вниманием, а его на двадцатом прогоне не остаётся.
+//
+// СТОРОЖЕМ, А НЕ ВЕРХНИМ `try`: тело файла — две тысячи строк с top-level await, и оборачивать их
+// значило бы переотступить весь файл ради шести строк смысла. Замерено (node v25.6.1), что бросок
+// после top-level await приходит именно в `uncaughtException`; `unhandledRejection` подписан тем же
+// обработчиком не «на всякий случай», а потому что маршрут отказа TLA переезжал между мажорами, и
+// контракт кодов не должен зависеть от того, на какой ноде запустили.
+let browserForRescue = null;
+const dieNotRun = (why) => {
+  console.log(`\nпроба НЕ ЗАПУСКАЛАСЬ: ${why}`);
+  console.log('зелёный ИЛИ красный прогон в этом состоянии не доказывал бы ничего.');
+  // Закрытие тоже под защитой: если бросило именно оно, второй вызов бросил бы уже ВНУТРИ
+  // обработчика, и процесс умер бы, не напечатав того, ради чего обработчик стоит.
+  Promise.resolve(browserForRescue?.close())
+    .catch(() => {})
+    .finally(() => process.exit(2));
+};
+process.on('uncaughtException', (e) => dieNotRun(e?.message ?? String(e)));
+process.on('unhandledRejection', (e) => dieNotRun(e?.message ?? String(e)));
+
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -384,6 +416,8 @@ const MUTATE_GRAIN = process.argv.includes('--mutate-grain');
 const MUTATE_WASTAGE = process.argv.includes('--mutate-wastage');
 const MUTATE_LEGACY_NAME = process.argv.includes('--mutate-legacy-name');
 const MUTATE_LEGACY_ISO = process.argv.includes('--mutate-legacy-iso');
+const MUTATE_LEGACY_TABLE = process.argv.includes('--mutate-legacy-table');
+const MUTATE_LEGACY_PANEL = process.argv.includes('--mutate-legacy-panel');
 const MUTATE_PIECE_INDEX = process.argv.includes('--mutate-piece-index');
 const MUTATE_LIVECLASS = process.argv.includes('--mutate-liveclass');
 const MUTATE_RELEASECLASS = process.argv.includes('--mutate-releaseclass');
@@ -425,6 +459,8 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-wastage',
   '--mutate-legacy-name',
   '--mutate-legacy-iso',
+  '--mutate-legacy-table',
+  '--mutate-legacy-panel',
   '--mutate-piece-index',
 ]);
 const strayMutation = process.argv
@@ -685,13 +721,38 @@ const LEGACY_NAME_FIX = `  return operationHeading({
     pieceNames: [],
     note: o.note,
   });`;
-const LEGACY_NAME_BROKEN = `  return OPERATION_TYPE_LABELS[v];`;
+// ЛИТЕРАЛ, А НЕ `OPERATION_TYPE_LABELS[v]`, И ЭТО ВЫНУЖДЕННО. Мутация подменяет ИСХОДНИК, и раньше
+// она опиралась на импорт, который лист держал ради этой самой ветки. Ветка ушла на композитор,
+// импорт осиротел и снят — а мутация, оставшись прежней, стала подставлять ССЫЛКУ НА НЕСУЩЕСТВУЮЩИЙ
+// СИМВОЛ: бандл собирался, лист падал на рендере, проба валилась по таймауту, и прогон честно давал
+// `exit 1` при НОЛЕ провалов. То есть мутация проверяла уже не то, ловят ли цитаты дефект, а то, что
+// сломанная сборка ломается. Ложная краснота — родная сестра ложной зелени, и ловится тем же
+// вопросом: что именно доказывает этот прогон.
+//
+// Вернуть импорт в лист ради мутации было бы хуже: мёртвый символ в ПРОДУКТЕ, чтобы проба осталась
+// честной, — обмен не в ту сторону. Литерал воспроизводит ровно ту потерю, которую сторожит цитата
+// Ч: шаг зовётся полной подписью типа, а не глаголом. Текст взят из `OPERATION_TYPE_LABELS`
+// (:78) — если подпись там переименуют, поимённая цитата ниже упадёт и приведёт сюда.
+const LEGACY_NAME_BROKEN = `  return v === 'TECH_CARD_OPERATION_TYPE_LOCKSTITCH' ? 'join \u2014 lockstitch 301' : '\u2014';`;
 // Фолбэк колонки «на чём» снят: имя совпало с экраном, а номер по ISO 4915 исчез с бумаги вовсе —
 // ровно та потеря, из-за которой подпись типа и держали в имени.
-const LEGACY_ISO_FIX = `          (o.operationType && LEGACY_OPERATION_TYPES.has(o.operationType)
-            ? OPERATION_TYPE_LABELS[o.operationType]
-            : '');`;
-const LEGACY_ISO_BROKEN = `          '';`;
+const LEGACY_ISO_FIX = `.join(' · ') || legacyMachineFact(o.operationType);`;
+const LEGACY_ISO_BROKEN = `.join(' · ');`;
+
+// ПЕРЕВЁРНУТОЕ ЗНАЧЕНИЕ В ТОТАЛЬНОЙ КАРТЕ — то единственное, чего сама карта поймать НЕ МОЖЕТ.
+// Забытый член ломает сборку, потому что `Record<Enum, boolean>` обязан назвать всех; а `false`
+// вместо `true` компилируется молча, и у члена просто пропадает клетка «на чём». Мутация ставит
+// `false` одному — оверлоку, у которого в подписи три номера по ISO 4915, — и цитата обязана это
+// увидеть: и в его строке таблицы, и в счёте членов группы.
+// ПАНЕЛЬ РЕЛИЗОВ ТЕРЯЕТ СВОЮ СТУПЕНЬ и падает обратно на подпись типа — то есть строка «на чём»
+// снова начинается ГЛАГОЛОМ и пересказывает заголовок над собой, а бумага того же релиза говорит
+// иначе. Это второй из двух экранов, где легаси-шаг вообще виден, и единственный, у которого
+// лестница СВОЯ: расхождение здесь листом не ловится по построению.
+const LEGACY_PANEL_FIX = `stepDiscriminatorText(o) || legacyMachineFact(o.operationType) || typeLabel;`;
+const LEGACY_PANEL_BROKEN = `stepDiscriminatorText(o) || typeLabel;`;
+
+const LEGACY_TABLE_FIX = `  TECH_CARD_OPERATION_TYPE_OVERLOCK: true,`;
+const LEGACY_TABLE_BROKEN = `  TECH_CARD_OPERATION_TYPE_OVERLOCK: false,`;
 
 const patcher = (filter, pairs, loader) => ({
   name: 'step-name-mutation',
@@ -760,6 +821,10 @@ if (MUTATE_LEGACY_NAME)
   );
 if (MUTATE_LEGACY_ISO)
   plugins.push(patcher(/tech-pack-document\.tsx$/, [[LEGACY_ISO_FIX, LEGACY_ISO_BROKEN]], 'tsx'));
+if (MUTATE_LEGACY_TABLE)
+  plugins.push(patcher(/operation-options\.ts$/, [[LEGACY_TABLE_FIX, LEGACY_TABLE_BROKEN]], 'ts'));
+if (MUTATE_LEGACY_PANEL)
+  plugins.push(patcher(/releases-field\.tsx$/, [[LEGACY_PANEL_FIX, LEGACY_PANEL_BROKEN]], 'tsx'));
 if (MUTATE_PIECE_INDEX)
   plugins.push(patcher(/bom-norm\.ts$/, [[PIECE_INDEX_FIX, PIECE_INDEX_BROKEN]], 'ts'));
 if (MUTATE_LIVECLASS)
@@ -1302,6 +1367,8 @@ const ck = (ok, what, d = '') => {
 const head = (s) => console.log(`\n${s}`);
 
 const browser = await chromium.launch();
+// Сторожу «не запускалась» — чтобы он мог закрыть браузер, если прогон умрёт до вердикта.
+browserForRescue = browser;
 // ВЫСОКОЕ ОКНО — НЕ КОСМЕТИКА: на одной странице живут рельс, открытый шаг, карта примерки и
 // печатный лист, и в обычном окне нижние органы оказались бы за кадром.
 const page = await browser.newPage({ viewport: { width: 1500, height: 5200 } });
@@ -1364,6 +1431,15 @@ await page.route('http://stub.invalid/**', async (route) => {
             styleNumber: 'P-1',
             name: 'probe card',
             construction: { defaultSeamClass: id === 12 ? UNKNOWN_CLASS : GONE_CLASS },
+            // КАРТОЧКА 13 — ЛЕГАСИ-ШАГ В ПАНЕЛИ РЕЛИЗОВ, и заведена она отдельным номером нарочно:
+            // 12 и её соседка держат цитаты про класс шва, и подмешать операции туда значило бы
+            // менять стенд под работающими цитатами. Панель — ОТДЕЛЬНАЯ реализация лестницы «на
+            // чём» (снимок читается без живой карточки), поэтому проверять её листом нельзя: ровно
+            // здесь копия и разошлась бы, а на бумаге всё было бы хорошо.
+            operations:
+              id === 13
+                ? [{ operationNumber: 10, operationType: T.LEGACY_LOCKSTITCH }]
+                : undefined,
           },
         },
       }),
@@ -2221,14 +2297,79 @@ ck(
   `${shSheet[4]} / ${shRail[4]}`,
 );
 const legacyMode = await sheetCell(4, 'machine / mode');
+// РАВЕНСТВО, А НЕ ВХОЖДЕНИЕ, И ЭТО ПОПРАВКА ПО СУЩЕСТВУ. `includes` здесь однажды уже пропустил
+// то, ради чего цитата написана: клетка печатала «join — lockstitch 301», то есть НАЧИНАЛАСЬ
+// глаголом, повторяя имя шага из соседней колонки, — а обещание цитаты («как у современного шага»)
+// было неправдой, потому что у современного там стоит «zigzag 304» без всякого глагола. Подстрока
+// на такое не жалуется по построению: приклеенное спереди слово ей не мешает. Равенство жалуется.
 ck(
-  String(legacyMode).includes('lockstitch 301'),
-  'НОМЕР СТЕЖКА не потерян — он в колонке «на чём», как у современного шага',
+  String(legacyMode).trim() === 'lockstitch 301',
+  'НОМЕР СТЕЖКА не потерян и стоит ОДИН — клетка той же формы, что у современного шага',
   String(legacyMode),
 );
 // Прочерка тут быть не может: до правки клетка была ПУСТА, и «—» означало бы, что переезд не
 // состоялся, а номер просто исчез с бумаги.
 ck(legacyMode !== '—' && !!legacyMode, 'и клетка не пуста — до переезда она была именно пустой', String(legacyMode));
+
+// СВОЕЙ ЦИТАТЫ У РЕЛИЗНОЙ ПЕЧАТИ ЗДЕСЬ НЕТ, И ЭТО РЕШЕНИЕ, А НЕ ДЫРА. Путь до клетки «на чём» у
+// живой и у замороженной бумаги буквально один: `freeze()` снимает со строк только `work`, а `head`
+// его не читает вовсе. Легаси-шаг при этом живёт в стенде листа, а не в стенде релиза, так что
+// вторая цитата проверяла бы, что `renderSheet(frozen)` зовёт ту же функцию, — то есть стенд, а не
+// продукт. Расхождение экрана архива с бумагой сторожит своя пара цитат (`--mutate-releaselive`,
+// `--mutate-releaseclass`), и легаси-ступень панели релизов лежит в той же ветке, что они читают.
+
+// ── ТАБЛИЦА ЛЕГАСИ-ФАКТОВ ───────────────────────────────────────────────────────────────────────
+//
+// ЦИТАТА ВЫШЕ ДОКАЗЫВАЕТ ПРОВОДКУ, ЭТА — СОДЕРЖИМОЕ. На бумаге фикстуры легаси-шаг ОДИН, поэтому
+// отрендеренная клетка отвечает за одного члена из девяти: восьмерых остальных на листе нет вовсе,
+// и любая ошибка в их строках прошла бы мимо. Спрашиваем модуль напрямую.
+//
+// ОЖИДАНИЯ ПОИМЁННЫЕ, И ИНАЧЕ НЕЛЬЗЯ. «Факт непуст» проходит у семи и НЕ ПРОХОДИТ у двух, а «факт
+// содержит число» ложно упало бы на трёх: номер по ISO 4915 несут шестеро, `twin needle` — факт об
+// оборудовании без числа, а у петли и пришивания пуговицы подпись РАВНА глаголу, и говорить о
+// машине им нечего. Один инвариант на всех девятерых был бы либо пустым, либо ложным.
+//
+// ДВЕ ПУСТЫЕ СТРОКИ ЗДЕСЬ — РЕШЕНИЕ, А НЕ ПРОПУСК, и написаны они вслух именно поэтому: у этих
+// двух клетка «на чём» честно пуста, ровно как была до переезда, и следующий читатель не должен
+// счесть их забытыми.
+const LEGACY_FACT_EXPECTED = {
+  TECH_CARD_OPERATION_TYPE_LOCKSTITCH: 'lockstitch 301',
+  TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE: 'twin needle',
+  TECH_CARD_OPERATION_TYPE_OVERLOCK: '504 / 514 / 516',
+  TECH_CARD_OPERATION_TYPE_COVERSTITCH: '602 / 605',
+  TECH_CARD_OPERATION_TYPE_CHAINSTITCH: '401',
+  TECH_CARD_OPERATION_TYPE_BLINDHEM: '103',
+  TECH_CARD_OPERATION_TYPE_BARTACK: '304',
+  TECH_CARD_OPERATION_TYPE_BUTTONHOLE: '',
+  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: '',
+};
+const legacyFacts = await page.evaluate(() => window.__stepName.legacyFacts());
+const legacyFactMap = Object.fromEntries(legacyFacts);
+ck(
+  legacyFacts.length === Object.keys(LEGACY_FACT_EXPECTED).length,
+  'группа легаси — та же девятка, что и была: карта не потеряла и не приобрела члена',
+  `в карте ${legacyFacts.length}, ожидалось ${Object.keys(LEGACY_FACT_EXPECTED).length}: ${legacyFacts
+    .map(([t]) => t.replace('TECH_CARD_OPERATION_TYPE_', ''))
+    .join(', ')}`,
+);
+// `undefined` ЗДЕСЬ — НЕСУЩАЯ ДЕТАЛЬ, А НЕ ШУМ, И `?? ''` ЗАПРЕЩЁН. Таблица идёт по ВЫВОДИМОМУ
+// массиву, поэтому два отказа выглядят по-разному: `''` значит «член в группе, факта у него нет»
+// (законно, ожидается у петли и пуговицы), а `undefined` — «член выпал из группы» (дефект).
+// Припиши кто-нибудь `?? ''`, чтобы «не сравнивать с undefined», — и выпадение ровно тех двух
+// членов, у которых ожидание и есть `''`, станет неотличимо от их законной пустоты: ожидалось
+// пусто, получено пусто, зелено. Счёт выше упал бы, а поимённая строка соврала бы — то есть два
+// разных отказа схлопнулись бы в один.
+for (const [type, want] of Object.entries(LEGACY_FACT_EXPECTED)) {
+  const got = legacyFactMap[type];
+  const short = type.replace('TECH_CARD_OPERATION_TYPE_', '');
+  ck(
+    got === want,
+    want === ''
+      ? `${short}: клетка «на чём» пуста — его подпись не говорит о машине ничего сверх глагола`
+      : `${short}: клетка «на чём» говорит «${want}» — факт из подписи, без глагола`,
+    `получено ${JSON.stringify(got)}`,
+  );
+}
 
 // ── ПРОЦЕНТ РАСКРОЯ ─────────────────────────────────────────────────────────────────────────────
 //
@@ -2335,6 +2476,57 @@ for (let i = 0; i < SCHEMATIC_STEPS.length; i++) {
   );
 }
 
-await browser.close();
+// ── ПАНЕЛЬ РЕЛИЗОВ: ЗАПИСЬ ДО 0306 ──────────────────────────────────────────────────────────────
+//
+// ВТОРОЙ И ПОСЛЕДНИЙ ЭКРАН, ГДЕ ЛЕГАСИ-ШАГ ВООБЩЕ ВИДЕН, И У НЕГО СВОЯ ЛЕСТНИЦА. Панель читает
+// снимок БЕЗ живой карточки, поэтому разбор шага по типу живёт здесь отдельной реализацией — и
+// расхождение с бумагой ловится только тут: цитаты листа на неё не смотрят по построению.
+//
+// ФОРМА СТРОКИ: заголовок, затем ` — `, затем ответ на «на чём». До переезда ответом была ПОЛНАЯ
+// подпись типа, а она сама начинается с глагола, — и строка читалась «join — join — lockstitch
+// 301», то есть глагол стоял в ней дважды, а бумага того же релиза говорила уже иначе.
+//
+// ЦИТАТА НА ПОЛНУЮ СТРОКУ, А НЕ НА ВХОЖДЕНИЕ ХВОСТА: подстрока `lockstitch 301` проходит и у
+// сдвоенного глагола — ровно так цитата Ч однажды и пропустила приклеенное спереди слово.
+head('Ш. панель релизов: запись до 0306 названа тем же словом, что на бумаге');
+await mountReleases(13);
+const panelStep = await page.evaluate(() => {
+  const hit = [...document.querySelectorAll('#releases span')].find((n) =>
+    (n.textContent ?? '').trim().startsWith('#10 '),
+  );
+  return hit ? (hit.textContent ?? '').replace(/\s+/g, ' ').trim() : '(строки нет)';
+});
+ck(
+  panelStep === '#10 join \u2014 lockstitch 301',
+  'строка панели — заголовок глаголом, ответ «на чём» хвостом подписи',
+  String(panelStep),
+);
+ck(
+  (String(panelStep).match(/join/g) ?? []).length === 1,
+  'и ГЛАГОЛ В НЕЙ ОДИН: подпись типа больше не пересказывает заголовок над собой',
+  String(panelStep),
+);
+
+// ВЕРДИКТ ПЕЧАТАЕТСЯ ПЕРВЫМ, А ЗАКРЫТИЕ ГЛУШИТСЯ, И ПОРЯДОК ЗДЕСЬ НЕСУЩИЙ. Раньше `browser.close()`
+// стоял ДО печати: бросок на закрытии — самое вероятное место броска во всём файле — поднимал бы
+// сторож «не запускалась» ПОВЕРХ прогона, отработавшего все проверки, и настоящая КРАСНАЯ уходила
+// бы под инфраструктурный код. Это хуже той беды, ради которой сторож заведён: та теряла вердикт у
+// сломанной сборки, эта теряла бы у исправной.
+//
+// `.catch` ВАЖНЕЕ ПЕРЕСТАНОВКИ: без него сторож всё равно перебил бы код возврата, и вышла бы
+// НАПЕЧАТАННАЯ «ЗЕЛЁНАЯ» при коде 2 — то есть код и текст сказали бы разное, ровно та болезнь, от
+// которой лечимся.
 console.log(`\n${bad === 0 ? 'ЗЕЛЁНАЯ' : `КРАСНАЯ: ${bad}`}`);
+// `try/catch`, А НЕ `.catch()`, И РАЗНИЦА НЕ КОСМЕТИЧЕСКАЯ. `.catch` ловит ОТКАЗ промиса, но не
+// синхронный бросок из вычисления самого выражения: бросило бы там — и до `.catch` дело бы не
+// дошло, сторож перебил бы код возврата, а на stdout осталась бы НАПЕЧАТАННАЯ «ЗЕЛЁНАЯ» при коде 2.
+// То есть код и текст сказали бы разное — та самая болезнь, от которой всё это лечится. У Playwright
+// `close()` асинхронный, так что практически здесь отказ, а не бросок; но `try` закрывает оба за ту
+// же цену, а разбираться в разнице через полгода будет некому.
+try {
+  await browser.close();
+} catch {
+  // Закрытие браузера — уборка ПОСЛЕ вердикта. Её отказ не является показанием о продукте и не
+  // имеет права ни изменить код возврата, ни оставить висеть строку, которой не было.
+}
 process.exit(bad === 0 ? 0 : 1);
