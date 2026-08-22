@@ -31,7 +31,15 @@ import {
 // names carry a number (301, 504, 602) that belongs to no language at all, the sewing happens in
 // Poland, and the printed tech pack has been English on every column since the break.
 
-function optionsFrom<T extends string>(labels: Record<T, string>): Array<{ value: T; label: string }> {
+// ЭКСПОРТИРОВАН РАДИ operation-options.ts, а не «на всякий случай»: там жили ДВА словаря,
+// выписанных руками парами `{value,label}`, и вывод списка из тотальной карты — единственное, что
+// делает их полноту предметом проверки tsc. Второй такой же helper рядом был бы третьей копией
+// одного правила.
+//
+// ПОРЯДОК ПУНКТОВ ПИКЕРА = ПОРЯДОК КЛЮЧЕЙ КАРТЫ. `Object.keys` над строковыми (не числоподобными)
+// ключами отдаёт порядок вставки — значит карту пишут в том порядке, в каком список должен
+// читаться на экране, и «причесать» её по алфавиту или по перечислению = молча переставить пикер.
+export function optionsFrom<T extends string>(labels: Record<T, string>): Array<{ value: T; label: string }> {
   return (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
 }
 

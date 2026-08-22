@@ -30,6 +30,7 @@ import {
   bedTypeLabel,
   machineTypeVerb,
   needleTypeLabel,
+  optionsFrom,
   pressClothLabel,
   threadTensionLabel,
 } from './equipment-options';
@@ -177,45 +178,78 @@ export function operationTypeOptionsFor(
 // bands stay at the top because a step genuinely can be about the lining AS A LAYER; the garment
 // areas follow. Same eighteen tokens the fitting change-request zone uses, from one server-side
 // vocabulary.
-export const zoneOptions: Array<{ value: common_TechCardGarmentZone; label: string }> = [
-  { value: 'TECH_CARD_GARMENT_ZONE_UNKNOWN', label: '— zone —' },
-  { value: 'TECH_CARD_GARMENT_ZONE_OUTER', label: 'outer shell' },
-  { value: 'TECH_CARD_GARMENT_ZONE_LINING', label: 'lining' },
-  { value: 'TECH_CARD_GARMENT_ZONE_INTERLINING', label: 'interlining' },
-  { value: 'TECH_CARD_GARMENT_ZONE_FRONT', label: 'front' },
-  { value: 'TECH_CARD_GARMENT_ZONE_BACK', label: 'back' },
-  { value: 'TECH_CARD_GARMENT_ZONE_SHOULDER', label: 'shoulder' },
-  { value: 'TECH_CARD_GARMENT_ZONE_CHEST', label: 'chest' },
-  { value: 'TECH_CARD_GARMENT_ZONE_WAIST', label: 'waist' },
-  { value: 'TECH_CARD_GARMENT_ZONE_HIP', label: 'hip' },
-  { value: 'TECH_CARD_GARMENT_ZONE_SLEEVE', label: 'sleeve' },
-  { value: 'TECH_CARD_GARMENT_ZONE_ARMHOLE', label: 'armhole' },
-  { value: 'TECH_CARD_GARMENT_ZONE_COLLAR', label: 'collar' },
-  { value: 'TECH_CARD_GARMENT_ZONE_NECKLINE', label: 'neckline' },
-  { value: 'TECH_CARD_GARMENT_ZONE_HEM', label: 'hem' },
-  { value: 'TECH_CARD_GARMENT_ZONE_POCKET', label: 'pocket' },
-  { value: 'TECH_CARD_GARMENT_ZONE_CLOSURE', label: 'closure' },
-  { value: 'TECH_CARD_GARMENT_ZONE_OTHER', label: 'other' },
-];
+//
+// ТОТАЛЬНАЯ КАРТА, А НЕ МАССИВ ПАР, И ЭТО СТОРОЖ, А НЕ СТИЛЬ. Пока здесь лежал
+// `Array<{value,label}>`, ПОЛНОТУ НЕ ПРОВЕРЯЛ НИКТО: член зоны, приехавший бампом прото,
+// собирался бы молча и просто не появлялся в пикере — а технолог, не найдя глазами зону,
+// которая в контракте есть, читает это как сломанный экран, а не как отставший клиент. Диффа
+// клиента против контракта в репозитории нет (см. шапку equipment-options.ts), поэтому диффом
+// работает tsc — и работать он может только над `Record<Enum, …>`.
+//
+// ПОРЯДОК ПУНКТОВ ВЫБРАН ГЛАЗАМИ И ЖИВЁТ В ПОРЯДКЕ КЛЮЧЕЙ: три материальных слоя, затем корпус
+// сверху вниз (перёд, спинка, плечо, грудь, талия, бедро), рукав с проймой, горловина с
+// воротником, низ, застёжка, «прочее» последним. В САМОМ ПЕРЕЧИСЛЕНИИ порядок другой — там OTHER
+// объявлен четвёртым, а FRONT последним, — так что «причесать» карту по контракту значит молча
+// перетасовать пикер и печатный лист (tech-pack-document обходит зоны в этом же порядке).
+export const GARMENT_ZONE_LABELS: Record<common_TechCardGarmentZone, string> = {
+  TECH_CARD_GARMENT_ZONE_UNKNOWN: '— zone —',
+  // материальные слои: шаг бывает про подклад КАК СЛОЙ, а не про место на изделии
+  TECH_CARD_GARMENT_ZONE_OUTER: 'outer shell',
+  TECH_CARD_GARMENT_ZONE_LINING: 'lining',
+  TECH_CARD_GARMENT_ZONE_INTERLINING: 'interlining',
+  // корпус сверху вниз
+  TECH_CARD_GARMENT_ZONE_FRONT: 'front',
+  TECH_CARD_GARMENT_ZONE_BACK: 'back',
+  TECH_CARD_GARMENT_ZONE_SHOULDER: 'shoulder',
+  TECH_CARD_GARMENT_ZONE_CHEST: 'chest',
+  TECH_CARD_GARMENT_ZONE_WAIST: 'waist',
+  TECH_CARD_GARMENT_ZONE_HIP: 'hip',
+  // рукав, горловина, низ, застёжка
+  TECH_CARD_GARMENT_ZONE_SLEEVE: 'sleeve',
+  TECH_CARD_GARMENT_ZONE_ARMHOLE: 'armhole',
+  TECH_CARD_GARMENT_ZONE_COLLAR: 'collar',
+  TECH_CARD_GARMENT_ZONE_NECKLINE: 'neckline',
+  TECH_CARD_GARMENT_ZONE_HEM: 'hem',
+  TECH_CARD_GARMENT_ZONE_POCKET: 'pocket',
+  TECH_CARD_GARMENT_ZONE_CLOSURE: 'closure',
+  // запасной выход — последним, чтобы его не брали первым
+  TECH_CARD_GARMENT_ZONE_OTHER: 'other',
+};
+
+export const zoneOptions: Array<{ value: common_TechCardGarmentZone; label: string }> =
+  optionsFrom(GARMENT_ZONE_LABELS);
 
 // ISO 4916, grouped by its six families. The old Russian list held «стачной взаутюжку» and «стачной
 // вразутюжку» as two entries — one class pressed two ways — so the field answered two questions with
 // one value. The pressing DIRECTION is a step of its own since 0306 — PRESS (заутюжить) and
 // PRESS_OPEN (разутюжить) — not a seam class, and no longer prose on the card's defaults either.
-export const seamClassOptions: Array<{ value: common_TechCardSeamClass; label: string }> = [
-  { value: 'TECH_CARD_SEAM_CLASS_UNKNOWN', label: '— inherit —' },
-  { value: 'TECH_CARD_SEAM_CLASS_SS_PLAIN', label: 'SS — plain seam' },
-  { value: 'TECH_CARD_SEAM_CLASS_SS_FRENCH', label: 'SS — French seam' },
-  { value: 'TECH_CARD_SEAM_CLASS_LS_LAPPED', label: 'LS — lapped / topstitched' },
-  { value: 'TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED', label: 'LS — flat-felled' },
-  { value: 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW', label: 'EF — hem, raw edge' },
-  { value: 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED', label: 'EF — hem, turned twice' },
-  { value: 'TECH_CARD_SEAM_CLASS_EF_FACED', label: 'EF — faced' },
-  { value: 'TECH_CARD_SEAM_CLASS_BS_BOUND', label: 'BS — bound' },
-  { value: 'TECH_CARD_SEAM_CLASS_FS_FLAT', label: 'FS — flat / butted' },
-  { value: 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH', label: 'OS — ornamental topstitch' },
-  { value: 'TECH_CARD_SEAM_CLASS_OTHER', label: 'other' },
-];
+//
+// ТОТАЛЬНАЯ КАРТА ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО И ЗОНА, и здесь цена промаха выше: класс шва уходит НА
+// БУМАГУ ДЛЯ ФАБРИКИ. Новый член ISO, доехавший бампом прото, при массиве пар не появился бы в
+// пикере вовсе — шаг получил бы соседний класс или «other», и это прочли бы как решение технолога,
+// а не как отставший бандл.
+//
+// ПОРЯДОК — ПО СЕМЕЙСТВАМ ISO 4916 (SS → LS → EF → BS → FS → OS, «прочее» последним), а не по
+// алфавиту. Сегодня он совпадает с порядком членов в контракте, и это совпадение, а не правило:
+// порядок обязан оставаться семейным, даже если следующий бамп объявит члены иначе.
+export const SEAM_CLASS_LABELS: Record<common_TechCardSeamClass, string> = {
+  TECH_CARD_SEAM_CLASS_UNKNOWN: '— inherit —',
+  TECH_CARD_SEAM_CLASS_SS_PLAIN: 'SS — plain seam',
+  TECH_CARD_SEAM_CLASS_SS_FRENCH: 'SS — French seam',
+  TECH_CARD_SEAM_CLASS_LS_LAPPED: 'LS — lapped / topstitched',
+  TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED: 'LS — flat-felled',
+  TECH_CARD_SEAM_CLASS_EF_HEM_RAW: 'EF — hem, raw edge',
+  TECH_CARD_SEAM_CLASS_EF_HEM_TURNED: 'EF — hem, turned twice',
+  TECH_CARD_SEAM_CLASS_EF_FACED: 'EF — faced',
+  TECH_CARD_SEAM_CLASS_BS_BOUND: 'BS — bound',
+  TECH_CARD_SEAM_CLASS_FS_FLAT: 'FS — flat / butted',
+  // «соединительного шва нет вовсе» — требует непустого topstitch.mode, см. контракт
+  TECH_CARD_SEAM_CLASS_OS_TOPSTITCH: 'OS — ornamental topstitch',
+  TECH_CARD_SEAM_CLASS_OTHER: 'other',
+};
+
+export const seamClassOptions: Array<{ value: common_TechCardSeamClass; label: string }> =
+  optionsFrom(SEAM_CLASS_LABELS);
 
 // THERE IS A «NONE» NOW, AND IT IS NOT A SPELLING OF UNKNOWN. The old comment here said the
 // opposite — «none» and «not specified» are one fact — and it was true for exactly as long as
@@ -241,9 +275,8 @@ export const ATTACHMENT_KIND_LABELS: Record<common_TechCardAttachmentKind, strin
   TECH_CARD_ATTACHMENT_KIND_OTHER: 'other',
 };
 
-export const attachmentOptions: Array<{ value: common_TechCardAttachmentKind; label: string }> = (
-  Object.keys(ATTACHMENT_KIND_LABELS) as common_TechCardAttachmentKind[]
-).map((value) => ({ value, label: ATTACHMENT_KIND_LABELS[value] }));
+export const attachmentOptions: Array<{ value: common_TechCardAttachmentKind; label: string }> =
+  optionsFrom(ATTACHMENT_KIND_LABELS);
 
 // '' for UNKNOWN («inherit»), the real label for NONE («runs bare») — the two are different facts
 // since the card grew machine profiles, and a helper that folded them together would put the word

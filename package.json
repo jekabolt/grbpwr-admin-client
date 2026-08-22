@@ -39,6 +39,7 @@
     "undo:record": "node scripts/last-mutation-probe.mjs",
     "prefs:schematic": "node scripts/schematic-prefs-probe.mjs",
     "step:inference": "node scripts/operation-inference-probe.mjs",
+    "picker:coverage": "node scripts/picker-coverage-probe.mjs",
     "fix": "yarn lint && yarn format",
     "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
     "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",
