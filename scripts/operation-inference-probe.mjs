@@ -442,6 +442,28 @@ head('цитата Д — ткань читается по цепочке «де
     twoCloths.sources.map((s) => s.id).join(', ') || '(пусто)',
   );
 
+  // И конфликт, единожды увиденный, НЕ РАССАСЫВАЕТСЯ следующей строкой: сама метка '' falsy, и
+  // сравнение по truthiness давало третьей связке затереть её своим назначением —
+  // main+lining+lining отвечала «lining», reason: ok (найдено ревью R5).
+  const threeAliases = inferZone(
+    card({
+      pieces: [...PIECES, { lineKey: 'p-three', name: 'BAG_INS' }],
+      aliases: [
+        ...ALIASES,
+        { pieceLineKey: 'p-three', blockName: 'A', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN' },
+        { pieceLineKey: 'p-three', blockName: 'B', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_LINING' },
+        { pieceLineKey: 'p-three', blockName: 'C', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_LINING' },
+      ],
+      steps: [sew(['p-three'])],
+    }),
+    0,
+  );
+  ck(
+    threeAliases.value === '',
+    'третья связка не рассасывает конфликт двух полос',
+    threeAliases.value || '(молчит)',
+  );
+
   // КЛЮЧ ДЕТАЛИ В СВЯЗКЕ ХРАНИТСЯ СВЁРНУТЫМ (trim + нижний регистр — контракт `pieceRefKey`, так
   // пишут диалог сопоставления и сервер). Сырое сравнение промахивалось мимо живого назначения и
   // открывало резервный ход по имени: `LIN_2` с связкой на карманку отвечал «lining»

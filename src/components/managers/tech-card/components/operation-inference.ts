@@ -437,7 +437,10 @@ function indexCard(card: InferenceCard): CardIndex {
     const already = purposeOfPiece.get(piece);
     // Деталь, нарисованная блоками из ДВУХ полос (верх и подклад одним именем), назначения не
     // имеет: две разные ткани — это не одна ткань. Метка '' гасит источник по этой детали.
-    purposeOfPiece.set(piece, already && already !== key ? '' : key);
+    // Сравнение с `undefined`, а не truthiness: сама метка '' falsy, и третья связка затирала бы
+    // зафиксированный конфликт своим назначением — main+lining+lining отвечала «lining», reason:
+    // ok (найдено ревью R5). Конфликт, единожды увиденный, не рассасывается следующей строкой.
+    purposeOfPiece.set(piece, already !== undefined && already !== key ? '' : key);
   }
 
   return { pieceOrder, pieceName, purposeOfPiece, bomByKey };
