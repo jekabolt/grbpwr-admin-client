@@ -2,14 +2,19 @@ import type {
   GetOperationWorkCatalogResponse,
   OperationWorkCatalogItem,
 } from 'api/proto-http/admin';
+import { pressProfileFitsStep } from './equipment-options';
 import {
   KIND_FAMILY_LABEL,
   KIND_WORK_TOKEN,
   OPERATION_KINDS,
+  kindClears,
   kindIsOffered,
   kindLabelOf,
+  kindWrites,
   type OperationKind,
+  type OperationKindStep,
 } from './operation-kinds';
+import type { OperationFormStringField } from './operation-options';
 
 // КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ, А НЕ СПИСОК В БАНДЛЕ.
 //
@@ -755,6 +760,159 @@ export function workWrites(
   }
   if (!out.machineType) delete out.machineType;
   return out;
+}
+
+// --- ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ РАБОТЫ ----------------------------------------------------------------
+//
+// ЗАЧЕМ ЭТА ФУНКЦИЯ ЕСТЬ. Всё, что выбор работы пишет в строку шага, до сих пор жило ОРКЕСТРОВКОЙ
+// ВНУТРИ РЕДАКТОРА ШАГА: `applyWork` замкнут на семь `useWatch` открытой строки и на два её
+// локальных состояния, и позвать его снаружи нельзя вовсе. Экран ратификации (R7) — второй
+// вызыватель того же жеста: он предлагает работу и записывает её в ту же форму. Скопировать
+// оркестровку туда значило бы завести ВТОРОГО ПИСАТЕЛЯ тех же правил — и разошлись бы они молча,
+// ровно так же, как расходились два списка дискриминаторов и два словаря поиска.
+//
+// ПОЭТОМУ ВЫНЕСЕНА ЧИСТАЯ СЕРЕДИНА, А НЕ НАПИСАНА ВТОРАЯ. Внутри — те же `workWrites`, тот же
+// `kindClears` и те же две ветки подбора профиля парка, перенесённые СЛОВО В СЛОВО; ни одного
+// правила здесь не переписано, и поведение строки не изменилось ни на байт (это ИЗМЕРЕНО, а не
+// заявлено: `scripts/operation-work-apply-probe.mjs` гоняет батарею через живой редактор дважды —
+// на блобах коммита до правки и на рабочем дереве — и требует побайтного совпадения ответов).
+//
+// ЧЕГО ЗДЕСЬ НЕТ И НЕ БУДЕТ:
+//   * НИ ОДНОГО ДЕФОЛТА. Подстановка (`resolveStepDefaults`: последний такой же шаг карточки >
+//     глобальный дефолт работы) — ОТДЕЛЬНЫЙ жест с отдельной меткой «подставлено», и живёт он у
+//     строки шага, потому что читает СОСЕДНИЕ строки карточки. Панель ратификации не подставляет
+//     ничего вовсе: она подтверждает ИМЯ, а не заполняет шаг. Втащить дефолты сюда можно только
+//     расширив вход — и это ровно та граница, которую стережёт мутация `--mutate-prefill`;
+//   * НИ ОДНОГО ЧИСЛА ИЗ ПАРКА. Связь с профилем пишется КЛЮЧОМ (`links`), значения профиля не
+//     копируются никогда: унаследованное число, записанное в шаг, стёрло бы разницу между
+//     «технолог выбрал 4 ст/см» и «так вышло по умолчанию»;
+//   * НИ ОДНОЙ ЗАПИСИ В ФОРМУ. Функция возвращает НАМЕРЕНИЕ; кто и в каком порядке кладёт его в
+//     форму — дело вызывателя. Порядок при этом несущий, и вызыватели обязаны его держать: сперва
+//     `writes`, затем `clears` (снятие считается по УЖЕ применённому набору), затем `links`.
+
+/** Строка парка «машинки»: столько, сколько спрашивает подбор, и ни полем больше. */
+export type ParkMachineRow = { machineType?: string; profileKey?: string };
+/** Строка парка «ВТО»: сверх оборудования и ключа — процесс, которым сужается лестница. */
+export type ParkPressRow = { pressEquipment?: string; profileKey?: string; operationType?: string };
+
+/**
+ * ЧТО СТОИТ НА ШАГЕ СЕЙЧАС — ровно те поля, по которым применение принимает решения.
+ *
+ * Стоит НАД `OperationKindStep`, а не рядом: снятие якоря спрашивает резолв, и резолву нужны его
+ * поля буква в букву. Сверху — то, чего резолв не спрашивает, а применение читает: обе ссылки на
+ * профили парка (уже стоящая ссылка — решение технолога, и перебивать её выбором работы значило бы
+ * молча переставить шаг на другой станок).
+ */
+export type StepSnapshot = OperationKindStep & {
+  machineProfileKey?: string;
+  pressProfileKey?: string;
+};
+
+/**
+ * НАМЕРЕНИЕ ЗАПИСИ, РАЗДЕЛЁННОЕ ПО ПРИРОДЕ ФАКТОВ, а не сваленное в одну карту:
+ *
+ * `writes` — ЛИЧНОСТЬ РАБОТЫ: глагол и машинка из каталога, класс шва отстрочки, метод крепления,
+ *            под-глагол ВТО. Само поле `work` сюда НЕ входит — его пишет вызыватель, потому что
+ *            оно едет и тогда, когда пункта у работы нет вовсе;
+ * `clears` — ЯКОРЬ ЧУЖОГО ПУНКТА, который пикер сам же когда-то и написал. Пусто в подавляющем
+ *            большинстве случаев, и пустота эта содержательная: «смена работы ничего не стирает»
+ *            остаётся правилом, у которого ровно одна названная граница;
+ * `links`  — ССЫЛКА НА ПРОФИЛЬ ПАРКА, и только в ПУСТОЙ ключ. Ключ отсутствует в объекте =
+ *            «связывать нечем» (профиля нет, их несколько, или человек уже ответил сам).
+ */
+export type WorkApplication = {
+  writes: Record<string, string>;
+  clears: Partial<Record<OperationFormStringField, string>>;
+  links: { machineProfileKey?: string; pressProfileKey?: string };
+};
+
+export function workApplication(input: {
+  item: WorkItem;
+  kind: OperationKind | undefined;
+  current: StepSnapshot;
+  park: { machines: readonly ParkMachineRow[]; presses: readonly ParkPressRow[] };
+}): WorkApplication {
+  const { item, kind: k, current, park } = input;
+
+  // «НА ЧЁМ», КОГДА РАБОТА ЖИВЁТ НА НЕСКОЛЬКИХ МАШИНКАХ. Машинку шаг MACHINE обязан нести —
+  // сервер отвергает MACHINE без неё, — поэтому работа её ставит, но не угадывает молча: стоящая
+  // на шаге и подходящая важнее всего (смена работы не переставляет шаг на другую машину), затем
+  // единственная подходящая в парке, затем дефолт работы. Список допустимых — ИЗ КАТАЛОГА: у
+  // работы, которой этот бандл не знает, суженного списка в бандле и нет.
+  let machineFromPark = '';
+  if (item.machineMode === 'ask') {
+    const narrowed = item.machines.map(machineTokenToEnum);
+    const fits = park.machines.filter(
+      (m) => narrowed.includes(m.machineType ?? '') && (m.profileKey ?? '').trim(),
+    );
+    if (fits.length === 1) machineFromPark = fits[0].machineType ?? '';
+  }
+
+  const writes = workWrites(
+    item,
+    k,
+    current.machineType ?? '',
+    machineFromPark,
+    current.pressEquipment ?? '',
+    kindWrites,
+  );
+
+  // ЯКОРЬ ЧУЖОГО ПУНКТА, ОСТАВШИЙСЯ В ЗАПИСИ, ПЕРЕИГРЫВАЛ ВЫБОР ЧЕЛОВЕКА. Замерено: на шаге
+  // `{MACHINE, LOCKSTITCH, seam_class = OS_TOPSTITCH}` пункты «Join — lockstitch», «Coverstitch»,
+  // «Chainstitch», «AMF» и «Attach label» не брались вовсе — запись писалась, но резолв снова
+  // отвечал «Topstitch» по классу шва, и пикер откатывался.
+  //
+  // Что именно снять, решает `kindClears` — она СПРАШИВАЕТ резолв, а не повторяет его правила, и
+  // снимает ровно тот якорь, который пикер сам и пишет как личность другого пункта. Считается
+  // снятие по УЖЕ ПРИМЕНЁННОМУ набору, поэтому шаг собирается здесь заново.
+  const after: OperationKindStep = {
+    operationType: writes.operationType ?? current.operationType,
+    machineType: writes.machineType ?? current.machineType,
+    seamClass: writes.seamClass ?? current.seamClass,
+    attachMethod: writes.attachMethod ?? current.attachMethod,
+    coverageMode: writes.coverageMode ?? current.coverageMode,
+    labelAttachStitch: writes.labelAttachStitch ?? current.labelAttachStitch,
+    pressAction: writes.pressAction ?? current.pressAction,
+    bomKinds: current.bomKinds,
+  };
+  // У РАБОТЫ БЕЗ ПУНКТА СНИМАТЬ НЕЧЕГО — И ЭТО НЕ ПРОБЕЛ. `kindClears` снимает ровно тот якорь,
+  // который САМ ПИКЕР пишет как личность ДРУГОГО пункта; работа, у которой пункта в этом бандле
+  // нет, ни одного якоря не писала, и снимать чужой факт «на всякий случай» было бы ровно тем
+  // стиранием, которого фаза «перестать терять» не допускает.
+  const clears = k ? kindClears(k, after) : {};
+
+  // СВЯЗЬ С ПРОФИЛЕМ ПАРКА ПИШЕТСЯ КЛЮЧОМ, ЯВНО — единственное, что вообще подтягивается при
+  // выборе работы, и подтягивается оно СВЯЗЬЮ, а не значениями.
+  //
+  // Почему явно: пустой ключ сервер сохраняет как «не задано» (обещанного «пустой ключ = профиль
+  // этого типа, если он единственный» на ЗАПИСИ нет), а тип, разрешённый через профиль,
+  // применимости полей не открывает — отказ придёт примерно на восемнадцати полях.
+  //
+  // Почему только в пустой ключ: уже стоящая ссылка — это решение технолога, и перебивать её
+  // выбором работы значило бы молча переставить шаг на другой станок.
+  const links: WorkApplication['links'] = {};
+  const targetMachine = writes.machineType ?? '';
+  if (targetMachine && !(current.machineProfileKey ?? '').trim()) {
+    const fits = park.machines.filter(
+      (m) => m.machineType === targetMachine && (m.profileKey ?? '').trim(),
+    );
+    if (fits.length === 1) links.machineProfileKey = (fits[0].profileKey ?? '').trim();
+  }
+  const targetPress = writes.pressEquipment ?? '';
+  if (targetPress && !(current.pressProfileKey ?? '').trim()) {
+    // Процесс сужает лестницу и здесь: профиль, написанный для дублирования, разутюжке не
+    // отвечает. Предикат берётся существующий — второго такого не заводится.
+    const stepVerb = writes.operationType ?? current.operationType;
+    const fits = park.presses.filter(
+      (pr) =>
+        pr.pressEquipment === targetPress &&
+        (pr.profileKey ?? '').trim() &&
+        pressProfileFitsStep(pr, stepVerb),
+    );
+    if (fits.length === 1) links.pressProfileKey = (fits[0].profileKey ?? '').trim();
+  }
+
+  return { writes, clears, links };
 }
 
 // --- ПРИОРИТЕТ ДЕФОЛТОВ --------------------------------------------------------------------------

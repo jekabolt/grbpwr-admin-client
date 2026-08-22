@@ -1,0 +1,239 @@
+{
+  "_measured": "2026-08-22, прод `grbpwr`, только SELECT",
+  "_source": "R7-PLAN.md §2.2 — таблица «истинная структура 111 строк по арности ВХОДОВ», снятая по tech_card_operation × tech_card_operation_input (0307). Легаси-проекция tech_card_operation_piece (0199) НЕ читалась: она дала первому замеру ложный вывод «46 немых строк».",
+  "_note": "ФОРМЫ, А НЕ СТРОКИ. Сто одиннадцать прод-строк без работы раскладываются на десять различимых форм; здесь по одной фикстуре на форму плюс контраст «работа уже названа» (15 строк бэкфилла 0331) и адверсарная пустая строка. Имена входов и узлов взяты из замера буквально, включая две детали с битой кодировкой (шаг 601, карточка 9, № 90) и смешанный регистр («LEft front panel with pockets»). АДВЕРСАРНЫЕ ФОРМЫ (F12-F16) НА ПРОДЕ НЕ ЗАМЕРЕНЫ и в 111 строк не входят: они называют состояния, которые карточка умеет произвести на экране — пустой шаг, снятая работа, дискриминатор сверх двух осей и два МОЛЧАНИЯ ЗАПИСИ (глагол не назван, машинка не названа), где ярус обязан отличаться от дыры каталога.",
+  "_prodRows": "F1 1 · F2 8 · F3 8 · F4 7 · F5 4 · F6 2 · F7 1 · F8 65 · F9 13 · F10 2 = 111; F11 — одна из 15 размеченных; F12 на проде не встречается",
+  "steps": [
+    {
+      "name": "F1 · без входов вовсе · machine/lockstitch",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_OUTER",
+      "inputKeys": [],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F2 · ВТО, приём не записан · один вход",
+      "operationType": "TECH_CARD_OPERATION_TYPE_PRESS",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "pressEquipment": "TECH_CARD_PRESS_EQUIPMENT_IRON",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_FRONT",
+      "inputKeys": [
+        "u-Left front panel with pockets"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F3 · один вход · machine/lockstitch · класс шва пуст",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_HEM",
+      "inputKeys": [
+        "p-BP_OS"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F4 · один вход · machine/lockstitch · os_topstitch",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_OS_TOPSTITCH",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_POCKET",
+      "inputKeys": [
+        "p-PCK_OUT_R_S"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F5 · один вход · machine/lockstitch · ef_hem_turned",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_EF_HEM_TURNED",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_HEM",
+      "inputKeys": [
+        "p-SL_OUT_L"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F6 · один вход · machine/overlock",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_OVERLOCK",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_POCKET",
+      "inputKeys": [
+        "p-P_R"
+      ],
+      "outputUnitKey": "",
+      "note": "join pockets",
+      "work": ""
+    },
+    {
+      "name": "F7 · один вход · machine/zigzag",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_ZIGZAG",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_CLOSURE",
+      "inputKeys": [
+        "p-plank_1"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F8 · два входа · производит узел",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_POCKET",
+      "inputKeys": [
+        "p-PCK_OUT_L_S",
+        "p-P_L"
+      ],
+      "outputUnitKey": "LEft front panel with pockets",
+      "note": "join pockets",
+      "work": ""
+    },
+    {
+      "name": "F9 · три входа · производит узел · две детали с битым именем (шаг 601)",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_BACK",
+      "inputKeys": [
+        "p-?_8",
+        "p-?_9",
+        "u-Back panel with sides"
+      ],
+      "outputUnitKey": "Back panel with sides and yoke",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F10 · четыре входа · производит узел",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_OUTER",
+      "inputKeys": [
+        "u-Right front panel with pockets",
+        "u-LEft front panel with pockets",
+        "p-BP_OS",
+        "p-triangle_9_os_M"
+      ],
+      "outputUnitKey": "SHELL",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F11 · работа уже записана (бэкфилл 0331)",
+      "operationType": "TECH_CARD_OPERATION_TYPE_PRESS_OPEN",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "pressEquipment": "TECH_CARD_PRESS_EQUIPMENT_IRON",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_BACK",
+      "inputKeys": [
+        "u-Back panel with sides"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": "press_open"
+    },
+    {
+      "name": "F12 · адверсарная: не записано НИЧЕГО",
+      "operationType": "TECH_CARD_OPERATION_TYPE_UNKNOWN",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_UNKNOWN",
+      "inputKeys": [],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F13 · адверсарная: снятая работа единственная на машинке (gathering)",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_GATHERING",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_SLEEVE",
+      "inputKeys": [
+        "p-SL_OUT_L"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F14 · адверсарная: шов этикетки назван — запись отвечает СВЕРХ машинки",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH",
+      "labelAttachStitch": "TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_NECKLINE",
+      "inputKeys": [
+        "p-BP_OS",
+        "p-label"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F15 · адверсарная: глагол не назван, деталь уже брошена",
+      "operationType": "TECH_CARD_OPERATION_TYPE_UNKNOWN",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_UNKNOWN",
+      "inputKeys": [
+        "p-BP_OS"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    },
+    {
+      "name": "F16 · адверсарная: MACHINE без машинки, два входа",
+      "operationType": "TECH_CARD_OPERATION_TYPE_MACHINE",
+      "machineType": "TECH_CARD_MACHINE_TYPE_UNKNOWN",
+      "seamClass": "TECH_CARD_SEAM_CLASS_UNKNOWN",
+      "pressAction": "TECH_CARD_PRESS_ACTION_UNKNOWN",
+      "zone": "TECH_CARD_GARMENT_ZONE_FRONT",
+      "inputKeys": [
+        "p-BP_OS",
+        "p-P_L"
+      ],
+      "outputUnitKey": "",
+      "note": "",
+      "work": ""
+    }
+  ]
+}
