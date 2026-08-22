@@ -133,6 +133,13 @@ function SnapshotBom({ items }: { items: common_TechCardBomItem[] }) {
 // of the blob. The labels are the same ones the live editor and the printed sheet use, and an
 // unrecognised token (a class that left the contract) falls back to the token itself rather than to
 // a blank row: a frozen release must never lose a line somebody signed.
+//
+// ОБЩИЙ `seamClassLabel` В `operation-options` — ЭТО НЕ ЭТА ФУНКЦИЯ, И СВОДИТЬ ИХ НЕЛЬЗЯ. Он
+// заведён для ЖИВЫХ поверхностей (карта примерки, редактор), и незнакомый токен у него становится
+// ПУСТОТОЙ — по правилу «сырой TECH_CARD_… на глазах хуже пустоты, потому что пустота видимо
+// неполна, а токен выглядит ответом». Здесь правило обратное и сильнее: строка подписана, и
+// потерять её нельзя даже ценой некрасивого токена. Одна карта подписей (`SEAM_CLASS_LABELS`) на
+// обе, два разных фолбэка — расходиться в ТЕКСТЕ они не могут, а в фолбэке обязаны.
 const seamClassLabel = (v?: string) =>
   !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
     ? ''

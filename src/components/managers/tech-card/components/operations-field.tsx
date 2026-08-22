@@ -78,6 +78,8 @@ import {
   effectivePressSettings,
   operationHeading,
   operationTypeOptionsFor,
+  seamAllowanceText,
+  seamClassLabel,
   seamClassOptions,
   seamSecuringLabel,
   stepEnumOptions,
@@ -4267,14 +4269,27 @@ function OperationEditor({
     : '';
   // ШОВ — три факта, и припуск читается ПО ЛЕСТНИЦЕ: собственный, иначе карточный / цеховой. Иначе
   // строка сказала бы «припуск не указан» на шаге, который его исправно наследует.
+  //
+  // ЛЕСТНИЦУ И СЛОВА ДЕРЖИТ ОБЩИЙ СОСТАВИТЕЛЬ, А НЕ ЭТА СТРОКА. Здесь стояла ручная сборка, и её
+  // не было на второй поверхности: карта примерки печатала «SA 10 mm» и умела назвать ТОЛЬКО
+  // собственное значение, так что исправно унаследованный припуск был виден в редакторе и не был
+  // виден на карте. Ступени по-прежнему собирает редактор (`inherited` ниже читает те же два
+  // источника для плейсхолдера поля), а ПОРЯДОК ступеней и слова их источников — общие.
+  //
+  // ЗАОДНО ВЕРНУЛИСЬ МИЛЛИМЕТРЫ: ручная сборка писала «allowance 10 mm» у собственного значения и
+  // «allowance 10 (card)» у унаследованного, потому что источник склеивался со ступенью раньше,
+  // чем к числу успевала пристать единица. Плейсхолдер поля так и печатает — и правильно, единицу
+  // там называет подпись поля, — а в бегущей строке рядом с «6 mm from the edge» голое число
+  // читается в тех единицах, в которых читатель работает.
   const seamSummaryText = [
-    seamClassOptions.find((o) => o.value === seamClass && seamClass !== NONE_SEAM_CLASS)?.label ??
-      '',
-    seamAllowanceMm.trim()
-      ? `allowance ${seamAllowanceMm.trim()} mm`
-      : inherited.seamAllowance !== NOT_SET
-        ? `allowance ${inherited.seamAllowance}`
-        : '',
+    seamClassLabel(seamClass),
+    seamAllowanceText({
+      own: seamAllowanceMm,
+      card: cardAllowanceMm,
+      workshop: shopAllowanceMm,
+      operationType: opType,
+      seamClass,
+    }),
     seamSecuringLabel(seamSecuring),
   ]
     .filter(Boolean)
