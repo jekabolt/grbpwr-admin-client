@@ -132,6 +132,9 @@
 //   node scripts/step-name-probe.mjs --mutate-density-gate   редактор снова наследует плотность всем
 //   node scripts/step-name-probe.mjs --mutate-grain          лист снова печатает долевую голым словом
 //   node scripts/step-name-probe.mjs --mutate-wastage        у лестницы нормы снята клауза T8
+//   node scripts/step-name-probe.mjs --mutate-piece-index    из той же клаузы снят ТРЕТИЙ признак
+//   node scripts/step-name-probe.mjs --mutate-legacy-name    легаси-шаг снова зовётся подписью типа
+//   node scripts/step-name-probe.mjs --mutate-legacy-iso     номер по ISO 4915 исчез с бумаги
 //   node scripts/step-name-probe.mjs --mutate-liveclass   живой ярлык печатает СЫРОЙ ТОКЕН
 //   node scripts/step-name-probe.mjs --mutate-releaseclass архив теряет подписанную строку
 //
@@ -316,6 +319,31 @@
 //                     листом — и обязана краснеть от поломки ЛЮБОЙ из двух поверхностей. Ровно
 //                     та же механика, по которой Р.2 подняла счёт трёх мутаций до переписи.
 //
+// ЗАПИСЬ ДО 0306 И ТРЕТИЙ ПРИЗНАК ПРИВЯЗКИ (2026-08-22, та же ветка) — все откатаны.
+//   --mutate-legacy-name → 5 провалов: легаси-шаг снова зовётся подписью типа, и бумага расходится
+//                     с панелью релизов — единственным вторым местом, где такой шаг виден. Пять, а
+//                     не два, потому что хвост у трёх семейств ОБЩИЙ: ломая его, мутация уносит и
+//                     ручную работу с «прочим». Это не размазанность цитаты, а показание, что хвост
+//                     и правда один;
+//   --mutate-legacy-iso  → 2 провала: имя осталось глаголом, а номер по ISO 4915 исчез с бумаги
+//                     вовсе — клетка «на чём» у такой записи пуста, машинки отдельным полем нет.
+//                     ДВЕ мутации на один переезд именно потому, что половины теряются порознь:
+//                     имя без номера — молча потерянный стежок, номер без имени — то расхождение,
+//                     ради которого перепись заводилась;
+//   --mutate-piece-index → 1 провал: из клаузы T8 снят ТРЕТИЙ признак (позиционный индекс детали),
+//                     два прочих на месте. Отдельным флагом, а не вместе с `--mutate-wastage`,
+//                     потому что зазор был ровно здесь: копия держала ДВЕ ТРЕТИ серверного правила
+//                     и выглядела целой. Индекс в стенде равен НУЛЮ — настоящей первой детали
+//                     карточки, — так что цитата заодно стережёт проверку на ПРИСУТСТВИЕ: `> 0`
+//                     пропустила бы такую строку молча.
+//
+// СЧЁТ ПОСЛЕ ЭТОГО ЗАХОДА: `--mutate-wastage` вырос 1 → 2 (клаузу сносит целиком, значит бьёт по
+// обеим формам привязки — по ключу и по индексу), `--mutate-sheet-handname` ПЕРЕНАВЕДЁН. Второе
+// стоит прочесть: после переезда легаси на композитор отдельная ветка `HANDWORK || OTHER` стала
+// повторять хвост слово в слово, и мутация, её отключавшая, ПОЗЕЛЕНЕЛА. Зелёная мутация — это не
+// «стало лучше», это «сторожу больше нечего сторожить»: ветка убрана как мёртвая, флаг наведён на
+// настоящую ступень (заметку в хвосте), счёт вернулся к 3.
+//
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден:
 // гейт, который нельзя выполнить, не красит сборку в красный.
 
@@ -354,6 +382,9 @@ const MUTATE_ROWS = process.argv.includes('--mutate-rows');
 const MUTATE_DENSITY_GATE = process.argv.includes('--mutate-density-gate');
 const MUTATE_GRAIN = process.argv.includes('--mutate-grain');
 const MUTATE_WASTAGE = process.argv.includes('--mutate-wastage');
+const MUTATE_LEGACY_NAME = process.argv.includes('--mutate-legacy-name');
+const MUTATE_LEGACY_ISO = process.argv.includes('--mutate-legacy-iso');
+const MUTATE_PIECE_INDEX = process.argv.includes('--mutate-piece-index');
 const MUTATE_LIVECLASS = process.argv.includes('--mutate-liveclass');
 const MUTATE_RELEASECLASS = process.argv.includes('--mutate-releaseclass');
 
@@ -392,6 +423,9 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-density-gate',
   '--mutate-grain',
   '--mutate-wastage',
+  '--mutate-legacy-name',
+  '--mutate-legacy-iso',
+  '--mutate-piece-index',
 ]);
 const strayMutation = process.argv
   .slice(2)
@@ -602,11 +636,21 @@ const SHEET_CLASS_BROKEN = `<div>{(seamClassLabel(o.seamClass) || '—').toUpper
 const SHEET_FUSING_FIX = `  if (isPressStepType(v) || (v && WAVE_VERBS.has(v)))`;
 const SHEET_FUSING_BROKEN =
   `  if (isPressStepType(v)) return pressProcessShort(v) || '—';\n  if (v && WAVE_VERBS.has(v))`;
-// Ручная работа и «прочее» снова проваливаются мимо композитора в подпись пикера: имя категории
-// вместо единственного осмысленного имени, какое у шага было.
-const SHEET_HANDNAME_FIX =
-  `  if (\n    v === 'TECH_CARD_OPERATION_TYPE_HANDWORK' ||\n    v === 'TECH_CARD_OPERATION_TYPE_OTHER'\n  )`;
-const SHEET_HANDNAME_BROKEN = `  if (false)`;
+// У ХВОСТА ОТНЯТА СТУПЕНЬ ЗАМЕТКИ: ручная работа снова зовётся глаголом «hand» — именем категории
+// вместо единственного осмысленного имени, какое у шага было, — там, где все экраны зовут её первой
+// строкой заметки.
+//
+// МУТАЦИЯ ПЕРЕНАВЕДЕНА, И ЭТО ПОКАЗАНИЕ САМО ПО СЕБЕ. Прежде она отключала отдельную ветку
+// `HANDWORK || OTHER`; после переезда легаси на композитор та ветка стала повторять хвост слово в
+// слово, мутация ПОЗЕЛЕНЕЛА — и тем сообщила, что сторожит уже не поведение, а мёртвый код. Ветка
+// убрана, флаг наведён на настоящую ступень.
+const SHEET_HANDNAME_FIX = `    pieceNames: [],
+    note: o.note,
+  });
+};`;
+const SHEET_HANDNAME_BROKEN = `    pieceNames: [],
+  });
+};`;
 // Множитель рядов снят У САМОГО СОСТАВИТЕЛЯ — то есть с ОБЕИХ поверхностей разом. Это доказывает,
 // что ряды приезжают на карту примерки не своей дорогой, а той же, что на бумагу.
 const ROWS_FIX = "  const multiplier = n > 1 ? `${n} \u00d7 ` : '';";
@@ -622,8 +666,32 @@ const GRAIN_BROKEN = `<td className={TD}>{p.grainline || '—'}</td>`;
 // Клауза T8 снята У САМОЙ ЛЕСТНИЦЫ: строки, привязанные к детали, снова считаются нормой. Мутация
 // бьёт по ОБЩЕМУ модулю нарочно — так она доказывает не только «лист покраснел», но и что лист
 // читает норму именно им, а не собственной копией, отросшей заново.
-const WASTAGE_FIX = `      if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;`;
+const WASTAGE_FIX =
+  `      if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0 || u.pieceIndex != null) continue;`;
 const WASTAGE_BROKEN = `      void 0;`;
+// ТРЕТЬЕ УСЛОВИЕ ПРЕДИКАТА СНЯТО — и снято ИМЕННО ОНО, а два прочих на месте: строка, привязанная к
+// детали ПОЗИЦИОННЫМ ИНДЕКСОМ, снова считается нормой. Отдельной мутацией, а не вместе с двумя
+// другими, потому что зазор был ровно в ней: копия держала две трети серверного правила и выглядела
+// целой. Индекс в стенде НОЛЬ — первая деталь карточки, — так что мутация заодно доказывает, что
+// проверка стоит на ПРИСУТСТВИИ, а не на положительности.
+const PIECE_INDEX_FIX = ` || u.pieceIndex != null) continue;`;
+const PIECE_INDEX_BROKEN = `) continue;`;
+// Легаси-шаг снова зовётся подписью типа: имя расходится с панелью релизов, ради совпадения с
+// которой переезд и делался.
+const LEGACY_NAME_FIX = `  return operationHeading({
+    operationType: v,
+    work: undefined,
+    workCatalog: undefined,
+    pieceNames: [],
+    note: o.note,
+  });`;
+const LEGACY_NAME_BROKEN = `  return OPERATION_TYPE_LABELS[v];`;
+// Фолбэк колонки «на чём» снят: имя совпало с экраном, а номер по ISO 4915 исчез с бумаги вовсе —
+// ровно та потеря, из-за которой подпись типа и держали в имени.
+const LEGACY_ISO_FIX = `          (o.operationType && LEGACY_OPERATION_TYPES.has(o.operationType)
+            ? OPERATION_TYPE_LABELS[o.operationType]
+            : '');`;
+const LEGACY_ISO_BROKEN = `          '';`;
 
 const patcher = (filter, pairs, loader) => ({
   name: 'step-name-mutation',
@@ -686,6 +754,14 @@ if (MUTATE_GRAIN)
   plugins.push(patcher(/tech-pack-document\.tsx$/, [[GRAIN_FIX, GRAIN_BROKEN]], 'tsx'));
 if (MUTATE_WASTAGE)
   plugins.push(patcher(/bom-norm\.ts$/, [[WASTAGE_FIX, WASTAGE_BROKEN]], 'ts'));
+if (MUTATE_LEGACY_NAME)
+  plugins.push(
+    patcher(/tech-pack-document\.tsx$/, [[LEGACY_NAME_FIX, LEGACY_NAME_BROKEN]], 'tsx'),
+  );
+if (MUTATE_LEGACY_ISO)
+  plugins.push(patcher(/tech-pack-document\.tsx$/, [[LEGACY_ISO_FIX, LEGACY_ISO_BROKEN]], 'tsx'));
+if (MUTATE_PIECE_INDEX)
+  plugins.push(patcher(/bom-norm\.ts$/, [[PIECE_INDEX_FIX, PIECE_INDEX_BROKEN]], 'ts'));
 if (MUTATE_LIVECLASS)
   plugins.push(patcher(/operation-options\.ts$/, [[LIVECLASS_FIX, LIVECLASS_BROKEN]], 'ts'));
 if (MUTATE_RELEASECLASS)
@@ -810,6 +886,8 @@ const T = {
   HANDWORK: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
   ULTRASONIC: 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER',
   TS_EDGE: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+  // ЗАПИСЬ ДО 0306: машинка сидит В САМОМ ТИПЕ, поля `machine_type` у такого шага нет.
+  LEGACY_LOCKSTITCH: 'TECH_CARD_OPERATION_TYPE_LOCKSTITCH',
 };
 
 // ── КАРТОЧКА ПРОБЫ ───────────────────────────────────────────────────────────────────────────────
@@ -1055,6 +1133,10 @@ const SHEET_STEPS = [
   // 3 — УЛЬТРАЗВУКОВАЯ СВАРКА. Соединяет теплом: стежка нет, и карточная плотность здесь
   //     бессмысленна. Лист это знал, редактор — нет.
   { operationType: T.MACHINE, machineType: T.ULTRASONIC, zone: T.ZONE },
+  // 4 — ЗАПИСЬ ДО 0306. Машинки отдельным полем нет — она в типе, и номер по ISO 4915 держится
+  //     только в подписи типа. Такой шаг виден РОВНО В ДВУХ местах: на архивной бумаге и в панели
+  //     релизов, — и звались они по-разному, пока лист печатал подпись, а панель звала композитор.
+  { operationType: T.LEGACY_LOCKSTITCH, zone: T.ZONE },
 ];
 
 // ── ПЯТАЯ КАРТОЧКА: ПРОЦЕНТ РАСКРОЯ ─────────────────────────────────────────────────────────────
@@ -1084,6 +1166,15 @@ const BOM_CARD = {
       wastagePercent: '15',
     },
     {
+      id: 3,
+      lineKey: 'bom-piece-index',
+      materialId: 0,
+      name: 'pocket bag',
+      section: 'TECH_CARD_BOM_SECTION_FABRIC',
+      unit: 'm',
+      wastagePercent: '15',
+    },
+    {
       id: 2,
       lineKey: 'bom-piece-bound',
       materialId: 0,
@@ -1104,6 +1195,10 @@ const BOM_COLORWAYS = [
       // НАЗНАЧЕНИЕ МАТЕРИАЛА: единственная мерная строка слота привязана к ДЕТАЛИ. Нормы у слота
       // нет вовсе, и процент от неё — реклама числа, которого сервер не считает.
       { bomItemId: 2, consumption: { value: '0.9' }, pieceLineKey: 'pc1' },
+      // ТО ЖЕ САМОЕ, НО ПОЗИЦИОННЫМ ИНДЕКСОМ, И ИНДЕКС ЭТОТ — НОЛЬ. Ноль здесь настоящая первая
+      // деталь карточки, а не «не задано» (поле подписано на проводе как explicit presence), и
+      // проверка на положительность пропустила бы такую строку молча.
+      { bomItemId: 3, consumption: { value: '0.7' }, pieceIndex: 0 },
     ],
   },
 ];
@@ -2110,6 +2205,31 @@ ck(
   JSON.stringify(grainCells),
 );
 
+// ── ЗАПИСЬ ДО 0306 ──────────────────────────────────────────────────────────────────────────────
+//
+// ДВЕ ПОЛОВИНЫ ОДНОГО ПЕРЕЕЗДА, И ОБЕ ОБЯЗАТЕЛЬНЫ. Имя такого шага теперь собирает композитор — то
+// есть бумага зовёт его так же, как панель релизов, единственный второй экран, где он вообще виден.
+// А номер по ISO 4915, который держался в подписи типа, переехал в колонку «на чём»: там же, где он
+// стоит у современного шага, и там же, где его печатает панель релизов своей строкой рядом с
+// заголовком. Проверять надо ОБЕ: имя без номера — это молча потерянный стежок, номер без имени —
+// расхождение, ради которого перепись и заводилась.
+head('Ч. запись до 0306: имя — композитором, номер стежка — в своей колонке');
+ck(shSheet[4] === 'join', 'лист зовёт легаси-шаг ГЛАГОЛОМ, как и все экраны', String(shSheet[4]));
+ck(
+  shSheet[4] === shRail[4].split(' · ')[0],
+  'и это то же слово, что в рельсе',
+  `${shSheet[4]} / ${shRail[4]}`,
+);
+const legacyMode = await sheetCell(4, 'machine / mode');
+ck(
+  String(legacyMode).includes('lockstitch 301'),
+  'НОМЕР СТЕЖКА не потерян — он в колонке «на чём», как у современного шага',
+  String(legacyMode),
+);
+// Прочерка тут быть не может: до правки клетка была ПУСТА, и «—» означало бы, что переезд не
+// состоялся, а номер просто исчез с бумаги.
+ck(legacyMode !== '—' && !!legacyMode, 'и клетка не пуста — до переезда она была именно пустой', String(legacyMode));
+
 // ── ПРОЦЕНТ РАСКРОЯ ─────────────────────────────────────────────────────────────────────────────
 //
 // ЕДИНСТВЕННАЯ ИЗ СЕМИ КОПИЙ, РАСХОДИВШАЯСЯ В ЧИСЛЕ, А НЕ В СЛОВЕ, — и потому единственная, чья
@@ -2144,6 +2264,17 @@ ck(
   !String(rowPiece).includes('+15%'),
   'а слот, чья единственная мерная строка привязана к ДЕТАЛИ, — НЕ получает',
   String(rowPiece),
+);
+// ТРЕТЬЯ ФОРМА ТОЙ ЖЕ ПРИВЯЗКИ — ПОЗИЦИОННЫМ ИНДЕКСОМ, И ИНДЕКС РАВЕН НУЛЮ. Серверный предикат
+// исключает строку по трём признакам, копия держала два; зазор латентный (в обеих базах колонка
+// пуста), но именно того рода, ради которого модуль и заводился. Ноль выбран нарочно: он —
+// НАСТОЯЩАЯ первая деталь карточки, и проверка на положительность пропустила бы такую строку молча,
+// оставаясь с виду правильной.
+const rowIndex = await bomRow('pocket bag');
+ck(
+  !String(rowIndex).includes('+15%'),
+  'и слот, привязанный к детали ПОЗИЦИОННЫМ ИНДЕКСОМ 0, — тоже не получает',
+  String(rowIndex),
 );
 
 // ── СХЕМА СБОРКИ ────────────────────────────────────────────────────────────────────────────────

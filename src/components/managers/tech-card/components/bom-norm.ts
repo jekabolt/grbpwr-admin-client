@@ -73,8 +73,18 @@ export function slotNormRows(
         (bomItemId > 0 && wireInt(u.bomItemId) === bomItemId) ||
         (key !== '' && !!u.bomLineKey && u.bomLineKey.trim() === key);
       if (!mine) continue;
-      // НАЗНАЧЕНИЕ МАТЕРИАЛА, А НЕ НОРМА (T8) — см. шапку модуля.
-      if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;
+      // НАЗНАЧЕНИЕ МАТЕРИАЛА, А НЕ НОРМА (T8) — см. шапку модуля. ТРИ УСЛОВИЯ, А НЕ ДВА: серверный
+      // предикат исключает строку по ключу детали, по её id И ПО ПОЗИЦИОННОМУ ИНДЕКСУ, и третье
+      // здесь не «на всякий случай» — `pieceIndex` живёт на проводе и эмитится чтением.
+      //
+      // ИНДЕКС ПРОВЕРЯЕТСЯ НА ПРИСУТСТВИЕ, А НЕ НА ПОЛОЖИТЕЛЬНОСТЬ, и это не придирка: он
+      // 0-БАЗОВЫЙ, то есть НОЛЬ — это первая деталь карточки, а не «не задано». Тип на проводе
+      // так и подписан — «explicit presence». Проверка `> 0` молча пропустила бы каждую строку,
+      // привязанную к ПЕРВОЙ детали, — а первая деталь у карточки есть всегда.
+      //
+      // `!= null` ловит и `undefined`, и явный `null`: сервер сериализует с EmitUnpopulated, и
+      // незаполненное поле приезжает не отсутствующим, а `null`.
+      if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0 || u.pieceIndex != null) continue;
       rows.push({
         sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
         marker: (u.consumptionSource ?? '').trim() === 'marker',

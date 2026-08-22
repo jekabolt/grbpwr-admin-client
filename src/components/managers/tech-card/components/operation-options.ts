@@ -156,6 +156,27 @@ const OPERATION_TYPE_PICKER: common_TechCardOperationType[] = [
   'TECH_CARD_OPERATION_TYPE_OTHER',
 ];
 
+// ДЕВЯТЬ ЛЕГАСИ-ЧЛЕНОВ, НАЗВАННЫЕ ГРУППОЙ. Их перечисление уже стояло комментарием над картой выше
+// («1-9: legacy»), а решения о них принимались поштучно и по месту — по совпадению имени или по
+// тому, что член не попал ни в один предикат. Набор делает группу СПРАШИВАЕМОЙ.
+//
+// ЗАЧЕМ СПРАШИВАТЬ. Шаг такой записи несёт машинку В САМОМ ТИПЕ (`lockstitch`, `overlock`), а поля
+// `machine_type` у него нет — с 0306 оно появилось у канонической записи и осталось пустым у
+// архивной. Значит колонка «на чём» отвечает на него не машинкой, а подписью типа: только там и
+// живёт номер по ISO 4915, ради которого оператор эту клетку и читает. Панель релизов это правило
+// уже знает (фолбэк на `typeLabel`), печатный лист — теперь тоже.
+export const LEGACY_OPERATION_TYPES: ReadonlySet<common_TechCardOperationType> = new Set([
+  'TECH_CARD_OPERATION_TYPE_LOCKSTITCH',
+  'TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE',
+  'TECH_CARD_OPERATION_TYPE_OVERLOCK',
+  'TECH_CARD_OPERATION_TYPE_COVERSTITCH',
+  'TECH_CARD_OPERATION_TYPE_CHAINSTITCH',
+  'TECH_CARD_OPERATION_TYPE_BLINDHEM',
+  'TECH_CARD_OPERATION_TYPE_BARTACK',
+  'TECH_CARD_OPERATION_TYPE_BUTTONHOLE',
+  'TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH',
+]);
+
 export const operationTypeOptions: Array<{ value: common_TechCardOperationType; label: string }> =
   OPERATION_TYPE_PICKER.map((value) => ({ value, label: OPERATION_TYPE_LABELS[value] }));
 
