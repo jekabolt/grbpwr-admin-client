@@ -101,6 +101,21 @@ export function FileRefsProvider({ ids, children }: { ids: number[]; children: R
   return <FileRefsContext.Provider value={map}>{children}</FileRefsContext.Provider>;
 }
 
+/** Разобранные файлы всего документа — тем, кто собирает из них ряд снимков, а не рисует один. */
+export function useFileRefs(): ReadonlyMap<number, FileRefState> {
+  return useContext(FileRefsContext);
+}
+
+/**
+ * Чем показать этот файл на СЦЕНЕ просмотрщика: первый кандидат или ничего.
+ *
+ * Тот же список, что и в тексте, и это не совпадение: снимок, который в тексте не показался,
+ * нечем показать и в увеличенном виде — а место в ряду он бы занял.
+ */
+export function fileRefImageSrc(state: FileRefState | undefined): string {
+  return state?.kind === 'ok' ? (imageCandidates(state.file)[0] ?? '') : '';
+}
+
 function useFileRef(id: number): FileRefState {
   const state = useContext(FileRefsContext).get(id);
   // Номера собраны по тому же документу, который сейчас рисуется, поэтому «нет в карте» бывает
@@ -164,7 +179,16 @@ export function InlinePlate({
  * на карточку. Битый значок `<img>` не годится ни в одном: он одинаково выглядит и когда файл
  * удалён, и когда подпись протухла, и когда браузер не умеет этот формат.
  */
-export function FileRefImage({ id, label }: { id: number; label: string }) {
+export function FileRefImage({
+  id,
+  label,
+  onZoom,
+}: {
+  id: number;
+  label: string;
+  /** Открыть увеличенный вид. Нет — снимок по-прежнему ведёт на карточку файла. */
+  onZoom?: () => void;
+}) {
   const state = useFileRef(id);
   const file = state.kind === 'ok' ? state.file : undefined;
   const name = label || file?.fileName || `file ${id}`;
@@ -213,18 +237,33 @@ export function FileRefImage({ id, label }: { id: number; label: string }) {
     );
   }
 
+  const picture = (
+    <img
+      src={src}
+      alt={name}
+      loading='lazy'
+      // Следующий адрес из списка, а если их больше нет — плашка. Сюда попадают и протухшая
+      // подпись, и формат, который браузер не декодирует (tiff, heic): и то и другое иначе
+      // осталось бы битым значком.
+      onError={() => setTried((t) => t + 1)}
+      className={`my-1 block max-h-[70vh] max-w-full${onZoom ? ' cursor-zoom-in' : ''}`}
+    />
+  );
+
+  // НАЖАТИЕ ОТКРЫВАЕТ УВЕЛИЧЕННЫЙ ВИД, а дорога на карточку файла переехала в кнопку внутри
+  // него: разглядывать снимок — то, ради чего на него нажимают, а уход со страницы посреди
+  // чтения заметки был для этого жеста слишком крупным ответом.
+  if (onZoom) {
+    return (
+      <button type='button' onClick={onZoom} title={`${name} — enlarge`} className='block'>
+        {picture}
+      </button>
+    );
+  }
+
   return (
     <Link to={fileCardPath(id)} title={`${name} — open the file card`}>
-      <img
-        src={src}
-        alt={name}
-        loading='lazy'
-        // Следующий адрес из списка, а если их больше нет — плашка. Сюда попадают и протухшая
-        // подпись, и формат, который браузер не декодирует (tiff, heic): и то и другое иначе
-        // осталось бы битым значком.
-        onError={() => setTried((t) => t + 1)}
-        className='my-1 block max-h-[70vh] max-w-full'
-      />
+      {picture}
     </Link>
   );
 }
