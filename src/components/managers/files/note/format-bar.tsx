@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
-import { NoteFilePicker } from './file-picker';
+import { NoteFilePicker, type NoteFileInsert } from './file-picker';
 import { fileCardPath } from './file-refs';
 
 /**
@@ -298,16 +298,35 @@ function linkLabel(raw: string): string {
   return raw.replace(/[[\]]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function fileEdit(text: string, start: number, end: number, f: LibraryFile): Edit {
+/**
+ * ДВЕ КНОПКИ, ПОТОМУ ЧТО ЭТО ДВА РАЗНЫХ НАМЕРЕНИЯ.
+ *
+ * `file` вставляет ССЫЛКУ (картинке при этом ставит `!` сам — иначе снимок в заметке пришлось бы
+ * объявлять руками, а он там нужен в девяти случаях из десяти). `preview` вставляет ПРЕВЬЮ чему
+ * угодно: у pdf, эскиза, чертежа есть отрисованная миниатюра, и до сих пор добраться до неё из
+ * текста было нечем — договор ложился синей строчкой, неотличимой от соседних сорока.
+ *
+ * Разница видна ДО клика: у кнопок разные подписи и разные окна, а не одно окно с галкой. Файл,
+ * которому показать нечего, помечен в самом пикере («no preview») — тогда `!` даёт плашку со
+ * ссылкой, и это честный исход, а не поломка.
+ */
+function fileEdit(
+  text: string,
+  start: number,
+  end: number,
+  f: LibraryFile,
+  insert: NoteFileInsert,
+): Edit {
   const [s, e] = trimEdges(text, start, end);
   const selected = linkLabel(text.slice(s, e));
   const id = Number(f.id);
   const label = selected || linkLabel(f.fileName ?? '') || `file ${id}`;
+  const asPicture = insert === 'preview' || insertsAsImage(f);
   // Файл без номера — это выдача, из которой ссылку собрать не из чего. `/files/NaN` выглядел
   // бы ссылкой и вёл бы в никуда, поэтому в текст уезжает одно имя.
   const next =
     Number.isSafeInteger(id) && id > 0
-      ? `${insertsAsImage(f) ? '!' : ''}[${label}](${fileCardPath(id)})`
+      ? `${asPicture ? '!' : ''}[${label}](${fileCardPath(id)})`
       : label;
   const at = s + next.length;
   return { start: s, end: e, text: next, sel: [at, at] };
@@ -322,7 +341,8 @@ export function FormatBar({
   value: string;
   onChange: (next: string) => void;
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Какое окно открыто и, значит, чем станет выбранный файл. `null` — закрыто.
+  const [picker, setPicker] = useState<NoteFileInsert | null>(null);
   const pending = useRef<{ value: string; sel: [number, number] } | null>(null);
 
   useLayoutEffect(() => {
@@ -459,16 +479,28 @@ export function FormatBar({
           variant='secondary'
           title='insert a link to a library file; a picture will stand shown inside the text'
           onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-          onClick={() => setPickerOpen(true)}
+          onClick={() => setPicker('link')}
         >
           file
         </Button>
+
+        <Button
+          type='button'
+          size='xs'
+          variant='secondary'
+          title='insert a library file as a preview: a picture as itself, a pdf and a drawing as their rendered thumbnail'
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={() => setPicker('preview')}
+        >
+          preview
+        </Button>
       </div>
 
-      {pickerOpen && (
+      {picker && (
         <NoteFilePicker
-          onPick={(f) => apply((t, s, e) => fileEdit(t, s, e, f))}
-          onClose={() => setPickerOpen(false)}
+          insert={picker}
+          onPick={(f) => apply((t, s, e) => fileEdit(t, s, e, f, picker))}
+          onClose={() => setPicker(null)}
         />
       )}
     </>
