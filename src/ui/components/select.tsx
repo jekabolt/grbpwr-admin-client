@@ -14,6 +14,7 @@ export default function SelectComponent({
   renderValue,
   readOnly,
   invalid,
+  onValueChange,
   ...props
 }: {
   name: string;
@@ -27,6 +28,7 @@ export default function SelectComponent({
   // Set by SelectField from the field's RHF error. A Radix select has no <input> for FormControl's
   // Slot to land aria-invalid on, so the flag is threaded down to the trigger explicitly.
   invalid?: boolean;
+  onValueChange?: (value: string) => void;
   renderValue?: (
     selectedValue: string | number,
     selectedItem: { label: string; value: string | number } | undefined,
@@ -35,8 +37,42 @@ export default function SelectComponent({
 }) {
   const [open, setOpen] = useState(false);
 
+  // ПУСТОТА, КОТОРОЙ НИКТО НЕ ПРЕДЛАГАЛ, — НЕ ОТВЕТ ЧЕЛОВЕКА, А СБРОС КОНТРОЛА.
+  //
+  // ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО (стенд `scripts/operation-work-apply-probe.mjs`, состояния S5/S6).
+  // Radix держит рядом со списком СКРЫТЫЙ НАТИВНЫЙ <select> для интеграции с формами и
+  // синхронизирует его эффектом ПОСЛЕ рендера. Если в этот момент текущего значения нет среди
+  // отрисованных <option> — а список сужается соседним полем и успевает сузиться раньше, чем
+  // доезжает новое значение, — нативный принять его не может, остаётся при пустой строке, и его
+  // событие приходит сюда как `onValueChange('')`. Форма получает пустоту, которую никто не
+  // выбирал, и записывает её поверх правильного значения.
+  //
+  // Как это выглядело на операциях: выбор работы, переставляющей шаг с прямострочки на оверлок,
+  // писал машинку ПРАВИЛЬНО (трасса: `setValue` звался дважды и оба раза с `OVERLOCK`), а форма
+  // кончала пустой строкой. Шаг MACHINE без машинки сервер отвергает — строка становилась
+  // несохраняемой от одного нажатия. Тем же путём терялась ссылка на профиль парка.
+  //
+  // ПОЧЕМУ ГРАНИЦА ИМЕННО ТАКАЯ. Пустая строка — законный ВЫБОР там, где её предлагают пунктом
+  // («— zone —», «— no kind —»): такой пункт стоит в `items`, и жест проходит как прежде. Пустая
+  // строка, которой в списке НЕТ, прийти от человека не может по построению — выбирать нечего.
+  // Различие берётся у самого списка, поэтому правило не знает ни одного имени поля и не заводит
+  // второго словаря «что можно очищать».
+  //
+  // ЗДЕСЬ, А НЕ В SelectField: `EncodedSelectField` на карточке тех-карты обращается к этому
+  // примитиву НАПРЯМУЮ, минуя поле формы, и теряла ссылку на профиль парка именно она. Правило
+  // принадлежит контракту списка, а не одной из двух его обёрток.
+  const offersEmptyOption = items.some((item) => String(item.value) === '');
+
   return (
-    <Select.Root {...props} open={open} onOpenChange={(open) => !readOnly && setOpen(open)}>
+    <Select.Root
+      {...props}
+      onValueChange={(value: string) => {
+        if (value === '' && !offersEmptyOption) return;
+        onValueChange?.(value);
+      }}
+      open={open}
+      onOpenChange={(open) => !readOnly && setOpen(open)}
+    >
       <SelectTrigger
         placeholder={props.placeholder}
         className={className}
