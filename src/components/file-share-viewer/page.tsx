@@ -50,9 +50,10 @@ export function FileShareViewerPage() {
   const [state, setState] = useState<ShareState>({ phase: 'loading' });
   // Бамп перезапускает fetch после «нет связи» — единственный отказ, где повтор имеет смысл.
   const [attempt, setAttempt] = useState(0);
-  // Превью — украшение поверх кнопок. Не нарисовалось (подпись протухла, пока страница висела
-  // открытой; формат, который движок не тянет) — блок просто исчезает, и это состояние, а не
-  // правка DOM руками: удалённый в обход React узел вернётся на первом же ре-рендере.
+  // Показ стоит НАД именем и кнопками: человек, открывший ссылку, должен увидеть документ, а не
+  // его имя файлом. Не нарисовалось (подпись протухла, пока страница висела открытой; формат,
+  // который движок не тянет) — блок просто исчезает, и это состояние, а не правка DOM руками:
+  // удалённый в обход React узел вернётся на первом же ре-рендере.
   const [previewFailed, setPreviewFailed] = useState(false);
 
   useEffect(() => {
@@ -79,6 +80,23 @@ export function FileShareViewerPage() {
     // имя закрытого файла значило бы отдавать наружу ровно то, что скрывает 404.
     document.title = name || 'file';
   }, [name]);
+
+  // ДВЕНАДЦАТЬ ПИКСЕЛЕЙ НА ЧУЖОМ ТЕЛЕФОНЕ — ТОЛЬКО ВМЕСТЕ С ПРАВОМ УВЕЛИЧИТЬ.
+  //
+  // `index.html` просит `user-scalable=no` ради ОДНОГО: iOS Safari сам наезжает на поле ввода
+  // мельче 16px, а админка — плотный 12px инструмент. Полей ввода на этой странице нет ни
+  // одного, значит и запрет здесь ничего не защищает — он только отнимает щипок у человека,
+  // который читает присланную ссылку с телефона. Снимаем на время жизни страницы и возвращаем
+  // как было: тег один на всё приложение, и уйти отсюда можно только в саму админку.
+  useEffect(() => {
+    const tag = document.querySelector('meta[name="viewport"]');
+    if (!tag) return;
+    const before = tag.getAttribute('content') ?? '';
+    tag.setAttribute('content', 'width=device-width, initial-scale=1');
+    return () => {
+      tag.setAttribute('content', before);
+    };
+  }, []);
 
   if (state.phase === 'loading') {
     return (
@@ -158,18 +176,46 @@ export function FileShareViewerPage() {
   // Свой список тут был бы вторым набором правил, расходящимся с dto.IsInlineSafeContentType.
   const inline = meta.download === false;
   const isImage = inline && (meta.content_type ?? '').toLowerCase().startsWith('image/');
-  const showPreview = isImage && isSafeObjectUrl(meta.url) && !previewFailed;
+  // ЧТО ИМЕННО ПОКАЗЫВАТЬ. Картинка показывает саму себя — по подписанному адресу из ответа, в
+  // полном качестве и без второго похода. Всему остальному — договору, эскизу, чертежу — бэк
+  // кладёт отдельным полем ОТРИСОВАННУЮ ПЕРВУЮ СТРАНИЦУ; её нет у zip и у файла, чей рендер не
+  // удался, и тогда поля просто нет, а страница выглядит как до этой правки.
+  const previewSrc = isImage ? meta.url : meta.preview_url;
+  const showPreview = isSafeObjectUrl(previewSrc) && !previewFailed;
 
   return (
     <Shell>
       <SectionStack>
+        {showPreview && (
+          <Section>
+            {/* Картинка — по подписанному адресу из ответа, а не по токену: подпись здесь уже
+                готова, а лишний поход по токену стоил бы второй подписи. Живёт она минуты, и это
+                ровно тот случай, где это неважно: страницу смотрят сейчас. Не загрузилась — блок
+                исчезает, а обе кнопки остаются рабочими, потому что ведут на токен. */}
+            <div className='space-y-1.5'>
+              <img
+                src={previewSrc}
+                alt={name}
+                className='mx-auto max-h-[70vh] w-auto max-w-full'
+                onError={() => setPreviewFailed(true)}
+              />
+              {!isImage && (
+                // МИНИАТЮРА — НЕ ФАЙЛ. У pdf это первая страница, и человек, увидевший одну
+                // страницу договора, иначе решит, что документ он уже посмотрел целиком.
+                <Text size='micro' variant='label' component='p'>
+                  a preview of the first page — the whole file is under “download” below
+                </Text>
+              )}
+            </div>
+          </Section>
+        )}
         <Section>
           <div className='space-y-2.5'>
             <div className='space-y-1'>
               {/* `break-all`, потому что имена здесь машинные и без пробелов
                   («birka_sostav_RU_v2_final.pdf») — на телефоне такое имя иначе уезжает за край
                   экрана вместе с обеими кнопками. */}
-              <Text size='large' component='h1' className='break-all'>
+              <Text component='h1' className='break-all font-bold'>
                 {name || 'file'}
               </Text>
               <Text variant='label' component='p'>
@@ -208,21 +254,6 @@ export function FileShareViewerPage() {
           </div>
         </Section>
 
-        {showPreview && (
-          <Section>
-            {/* Картинка — по подписанному адресу из ответа, а не по токену: подпись здесь уже
-                готова, а лишний поход по токену стоил бы второй подписи. Живёт она минуты, и это
-                ровно тот случай, где это неважно: страницу смотрят сейчас. Не загрузилась — блок
-                исчезает, а обе кнопки остаются рабочими, потому что ведут на токен. */}
-            <img
-              src={meta.url}
-              alt={name}
-              className='mx-auto max-h-[70vh] w-auto max-w-full'
-              onError={() => setPreviewFailed(true)}
-            />
-          </Section>
-        )}
-
         <Section>
           <Text size='micro' variant='label' component='p'>
             a file from the grbpwr library, opened by link. the link can be closed or rotated at any
@@ -236,30 +267,20 @@ export function FileShareViewerPage() {
 
 // Одна колонка на всю ширину телефона; на десктопе — узкий столбец по центру серого ground.
 //
-// 16PX, А НЕ 12PX АДМИНА — по той же причине, что у двух публичных вьюеров QR (см. DESIGN.md,
-// «The Twelve-Pixel Ceiling Rule»): страницу читают с телефона, а увеличить её пальцами нельзя —
-// `user-scalable=no` в index.html стоит ради iOS. Двенадцать пикселей — размер плотного
-// инструмента для того, кто сидит за столом; здесь читатель не наш и не за столом.
+// КЕГЛЬ ТУТ ТАКОЙ ЖЕ, КАК ВЕЗДЕ В АДМИНКЕ (12px), ПО РЕШЕНИЮ ВЛАДЕЛЬЦА. Страница объявляла себя
+// исключением из «Twelve-Pixel Ceiling» (DESIGN.md) и переопределяла токены `--text-*` на 16px;
+// обоснованием было, что читатель смотрит с телефона и УВЕЛИЧИТЬ НЕ МОЖЕТ — `index.html` просит
+// `user-scalable=no`. Из этой пары снята вторая половина, а не первая: щипок странице возвращён
+// эффектом выше, и крупный кегль перестал быть единственным способом её прочесть.
 //
-// И ЭТО СДЕЛАНО ТОКЕНАМИ, А НЕ `text-base` НА ОБЁРТКЕ. Один `text-base` тут был чистым
-// украшением и не менял ни одной строки: `ui/components/text.tsx` вешает СВОЙ класс кегля на
-// каждый элемент (`text-textBaseSize`, `text-micro`, `text-nano`), а собственный кегль всегда
-// сильнее унаследованного. Измеренная страница выходила админской: h1 18px, «картинка · 200 кб»
-// 12px, подписи 10px — то есть ровно тот плотный инструмент, исключением из которого она себя
-// объявляла. Переопределение переменных `--text-*` на обёртке действует НА ВСЁ поддерево разом,
-// включая Section, CalloutBox и Button, и не требует трогать ни примитив, ни каждый элемент.
+// ЕСЛИ ПОНАДОБИТСЯ ВЕРНУТЬ КРУПНЫЙ КЕГЛЬ — ВОЗВРАЩАЙ ТОКЕНАМИ, А НЕ `text-base` НА ОБЁРТКЕ.
+// `ui/components/text.tsx` вешает СВОЙ класс кегля на каждый элемент, а собственный кегль всегда
+// сильнее унаследованного: стоявший здесь `text-base` не менял ни одной строки и был чистым
+// украшением. Работали только переопределения `--text-*` — они действуют на всё поддерево разом,
+// включая Section, CalloutBox и Button.
 //
-// Мелкого кегля здесь нет вовсе: рунги ниже тела подняты ДО тела. Мелкий кегль — способ
-// уместить плотность на экране того, кто сидит за столом; на телефоне подрядчика вся эта
-// страница — три фразы и две кнопки, и уплотнять тут нечего. Разницу несут цвет и вес.
-//
-// ТО ЖЕ САМОЕ ВЕРНО ДЛЯ /r/:token И /p/:token — двух исключений, НАЗВАННЫХ в DESIGN.md: их
-// `text-base` так же инертен, и их бумага так же выходит двенадцатипиксельной. Здесь это не
-// чинится: те экраны выкачены, живут в другом разделе и в диффе этой волны их нет.
+// /r/:token и /p/:token остаются 16-пиксельными исключениями, названными в DESIGN.md: про них
+// не просили, и в этой правке их нет.
 function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className='mx-auto w-full max-w-3xl px-2.5 py-4 text-base [--text-control:16px] [--text-lg:22px] [--text-micro:16px] [--text-nano:14px] [--text-small:16px] [--text-textBaseSize:16px] lg:px-4 lg:py-6'>
-      {children}
-    </div>
-  );
+  return <div className='mx-auto w-full max-w-3xl px-2.5 py-4 lg:px-4 lg:py-6'>{children}</div>;
 }
