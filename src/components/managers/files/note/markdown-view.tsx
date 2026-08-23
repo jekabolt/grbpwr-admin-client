@@ -2,6 +2,12 @@ import { Fragment, useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import { FileRefImage, FileRefsProvider, fileRefId, InlinePlate } from './file-refs';
+import {
+  NoteImage,
+  NotePicturesProvider,
+  useNotePictures,
+  type NotePicture,
+} from './note-pictures';
 
 /**
  * Разметчик заметки — ровно те конструкции, которые в заметках действительно пишут.
@@ -166,6 +172,85 @@ function collectFileRefIds(blocks: Block[]): number[] {
   return ids;
 }
 
+/**
+ * АДРЕС, КОТОРЫЙ САМ ГОВОРИТ, ЧТО ОН КАРТИНКА.
+ *
+ * Заметки в библиотеке пишут не только здешней панелью: их приносят готовыми, и в принесённом
+ * тексте снимок сплошь и рядом стоит обычной ссылкой — `[фото](https://…/ткань.jpg)`, без
+ * восклицательного знака. Такая ссылка рисовалась синей строчкой, и заметка со списком тканей
+ * читалась как список адресов вместо галереи.
+ *
+ * Признак берётся у самого адреса — расширение файла, — и это ЕДИНСТВЕННОЕ, что о чужом хосте
+ * известно, не сходив к нему. Ошибиться такой признак может только в одну сторону («похоже на
+ * картинку, а отдаёт не её»), и эта сторона застрахована: `NoteImage` при неудаче загрузки
+ * возвращает на место ровно ту ссылку, которая стояла бы там без правила.
+ *
+ * SVG НАМЕРЕННО ВНЕ СПИСКА. Это единственный растр-не-растр, который несёт скрипт, и здешний
+ * сервер по той же причине не отдаёт свои svg на просмотр вовсе (`imageCandidates`). Чужой svg
+ * в `<img>` скрипт не исполняет, но заводить исключение из решения, принятого рядом, ради
+ * формата, которым фотографии не снимают, — плохой обмен.
+ *
+ * ССЫЛКА НА ФАЙЛ БИБЛИОТЕКИ БЕЗ `!` КАРТИНКОЙ НЕ СТАНОВИТСЯ, и это не забывчивость: у неё в
+ * адресе нет ничего, кроме номера, так что «картинка ли это» можно только СПРОСИТЬ у сервера —
+ * по запросу на каждую ссылку документа. Заметка со списком из сорока файлов задавала бы сорок
+ * вопросов ради подписи, которую и так видно (та же причина, по которой текстовые ссылки не
+ * попадают в `collectFileRefIds`). Для файла библиотеки картинку по-прежнему объявляет автор,
+ * поставив `!`, — и панель форматирования ставит его сама.
+ */
+const PICTURE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i;
+
+function isPictureHref(href: string): boolean {
+  if (!/^https?:\/\//i.test(href)) return false;
+  try {
+    return PICTURE_EXT.test(new URL(href).pathname);
+  } catch {
+    // Адрес, который не разбирается, картинкой не объявляем: `src` — не то место, где стоит
+    // угадывать.
+    return false;
+  }
+}
+
+/** Ключ места в ряду снимков — он же адрес этой картинки для просмотрщика. */
+function pictureKeyOf(href: string): string {
+  const refId = fileRefId(href);
+  return refId !== null ? `f:${refId}` : `u:${href}`;
+}
+
+/**
+ * Снимки документа в порядке чтения, по одному разу каждый. Блок кода пропускается целиком —
+ * внутри ограды `![x](…)` это текст, и места в ряду ему не положено.
+ */
+function collectPictures(blocks: Block[]): NotePicture[] {
+  const re = new RegExp(INLINE.source, 'g');
+  const seen = new Set<string>();
+  const out: NotePicture[] = [];
+  for (const b of blocks) {
+    if (b.kind === 'code') continue;
+    for (const line of b.lines) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line)) !== null) {
+        const token = m[0];
+        if (!token.includes('](')) continue;
+        const bang = token.startsWith('!');
+        const href = tokenHref(token);
+        const refId = fileRefId(href);
+        const isPicture = refId !== null ? bang : bang ? /^https?:\/\//i.test(href) : isPictureHref(href);
+        if (!isPicture) continue;
+        const key = pictureKeyOf(href);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          key,
+          label: token.slice(bang ? 2 : 1, token.indexOf('](')),
+          ...(refId !== null ? { fileId: refId } : { href }),
+        });
+      }
+    }
+  }
+  return out;
+}
+
 function inline(text: string, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -203,6 +288,7 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
 }
 
 function InlineLink({ image, label, href }: { image: boolean; label: string; href: string }) {
+  const { openAt } = useNotePictures();
   const external = /^https?:\/\//i.test(href);
   // ВНУТРЕННИЙ — ЭТО ОДНА КОСАЯ, И ЗА НЕЙ НЕ КОСАЯ И НЕ ОБРАТНАЯ.
   //
@@ -223,26 +309,44 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
   // сегментом, и уехать с него они не могут.
   const internal = /^\/(?![/\\])/.test(href);
 
-  if (image) {
-    // Файл библиотеки — единственный внутренний адрес, который умеет стать картинкой: у него
-    // есть чем её показать (свежая подпись из `GetLibraryFile`). Всё остальное внутреннее —
-    // плашка: `<img src="/files/12/note">` дал бы битый значок, то есть соврал бы, что файла нет.
-    const refId = fileRefId(href);
-    if (refId !== null) return <FileRefImage id={refId} label={label} />;
+  const asLink = internal ? (
+    <Link to={href} className='text-highlightColor underline'>
+      {label || href}
+    </Link>
+  ) : external ? (
+    <a
+      href={href}
+      target='_blank'
+      rel='noreferrer noopener'
+      className='text-highlightColor underline'
+    >
+      {label || href}
+    </a>
+  ) : null;
 
-    if (external) {
-      return (
-        <img
-          src={href}
-          alt={label}
-          loading='lazy'
-          // Картинка с чужого хоста — это ещё и маячок: без этого в Referer уезжает адрес
-          // страницы админки, а в лог чужого сервера — ip каждого, кто открыл заметку.
-          referrerPolicy='no-referrer'
-          className='my-1 block max-w-full'
-        />
-      );
-    }
+  // Файл библиотеки — единственный внутренний адрес, который умеет стать картинкой: у него есть
+  // чем её показать (свежая подпись из `GetLibraryFile`). Всё остальное внутреннее — плашка:
+  // `<img src="/files/12/note">` дал бы битый значок, то есть соврал бы, что файла нет.
+  const refId = fileRefId(href);
+  if (image && refId !== null) {
+    return <FileRefImage id={refId} label={label} onZoom={() => openAt(pictureKeyOf(href))} />;
+  }
+
+  // Картинкой показывается и то, что автор объявил восклицательным знаком, и то, что объявляет
+  // о себе сам адрес (`isPictureHref`). Второе и есть починка синих ссылок в принесённых
+  // заметках; страховка — в `NoteImage`: не открылось, значит на месте снимка снова ссылка.
+  if (external && (image || isPictureHref(href))) {
+    return (
+      <NoteImage
+        src={href}
+        label={label}
+        pictureKey={pictureKeyOf(href)}
+        fallback={asLink}
+      />
+    );
+  }
+
+  if (image) {
     return (
       <InlinePlate>
         picture
@@ -257,25 +361,7 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
     );
   }
 
-  if (internal) {
-    return (
-      <Link to={href} className='text-highlightColor underline'>
-        {label || href}
-      </Link>
-    );
-  }
-  if (external) {
-    return (
-      <a
-        href={href}
-        target='_blank'
-        rel='noreferrer noopener'
-        className='text-highlightColor underline'
-      >
-        {label || href}
-      </a>
-    );
-  }
+  if (asLink) return asLink;
   // Ни внешний адрес, ни путь — писать `<a href>` наугад нельзя: `javascript:` в чужой заметке
   // это исполняемая ссылка. Остаётся текстом.
   return <span>{label || href}</span>;
@@ -301,6 +387,7 @@ export function MarkdownView({ source, className }: { source: string; className?
   // Список номеров держится за разобранный документ, а не за строку: пока текст не изменился,
   // набор запросов тот же самый, и перерисовка баннера не заводит новых.
   const refIds = useMemo(() => collectFileRefIds(blocks), [blocks]);
+  const pictures = useMemo(() => collectPictures(blocks), [blocks]);
 
   const doc = (
     <div className={cn('leading-relaxed break-words', className)}>
@@ -386,6 +473,11 @@ export function MarkdownView({ source, className }: { source: string; className?
   );
 
   // Провайдер снаружи готового документа, а не внутри разметки: он и есть то «одно место»,
-  // которое спрашивает файлы за весь документ сразу.
-  return <FileRefsProvider ids={refIds}>{doc}</FileRefsProvider>;
+  // которое спрашивает файлы за весь документ сразу. Ряд снимков — ВНУТРИ него: адреса файлов
+  // библиотеки он берёт из уже разобранного, своих запросов не делает.
+  return (
+    <FileRefsProvider ids={refIds}>
+      <NotePicturesProvider pictures={pictures}>{doc}</NotePicturesProvider>
+    </FileRefsProvider>
+  );
 }
