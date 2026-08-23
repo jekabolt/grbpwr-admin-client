@@ -1,4 +1,5 @@
 import { common_Material, googletype_Decimal } from 'api/proto-http/admin';
+import { composition as compositionDict } from 'constants/garment-composition';
 import { decimalToInput } from 'utils/decimal';
 
 // A decimal as a clean string, treating undefined / 0 as absent (so "0 g/m²" never shows).
@@ -197,6 +198,52 @@ export function parseCompositionCode(value?: string): CompositionShare[] {
   return [...v.matchAll(/(\d+(?:\.\d+)?)\s*%\s*([\p{L}][\p{L} .\-/]*)/gu)]
     .map((t) => ({ code: t[2].trim(), percent: Number(t[1]) }))
     .filter((s) => s.code && Number.isFinite(s.percent));
+}
+
+// Обратная таблица КОД → имя по всем категориям словаря составов. Слот кода держит разное в
+// зависимости от того, кто написал строку: CompositionPicker кладёт КОД словаря ('COT'), а
+// привязанный артикул каталога — уже РАЗРЕШЁННОЕ ИМЯ волокна ('Polyester'). Поэтому правило одно:
+// что таблица знает — разрешить, остальное печатать как есть.
+export const FIBRE_NAME_BY_CODE: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const cat of Object.values(compositionDict.garment_composition)) {
+    for (const [name, code] of Object.entries(cat as Record<string, string>)) m[code] = name;
+  }
+  return m;
+})();
+
+/**
+ * ЯЧЕЙКА СОСТАВА ГЛАЗАМИ ЧЕЛОВЕКА — ВТОРАЯ ПОЛОВИНА `parseCompositionCode`, И ЖИТЬ ОНА ОБЯЗАНА
+ * РЯДОМ С ПЕРВОЙ.
+ *
+ * На КАЖДОЙ строке, привязанной к артикулу каталога, это поле — JSON
+ * (`{"fibre":[{"code":"Polyester","percent":100}]}`), и никакой не «легаси-текст». Кто печатал его
+ * напрямую, печатал фигурные скобки: так на цеховую бумагу в разделе BILL OF MATERIALS уехал сырой
+ * JSON вместо «100% Polyester», и то же самое стояло в таблице релиза.
+ *
+ * Формат ответа тот же, что у стилевой строки состава (`formatCompositionEntries`): «NN% Имя»,
+ * через « · », — чтобы одна и та же бумага не называла состав двумя разными способами.
+ *
+ * ПУСТАЯ СТРОКА В ОТВЕТ НА НЕРАЗБОРНЫЙ JSON — НАМЕРЕННО. Вызыватели рисуют строку состава только
+ * когда ответ непуст, поэтому «ничего» здесь значит «нечего показать», а вернуть исходник значило
+ * бы вернуть ровно тот дефект, ради которого функция и написана. Настоящий свободный текст
+ * («хлопок с эластаном») JSON-ом не притворяется и уходит в ответ как есть.
+ */
+export function formatCompositionCell(value?: string): string {
+  const v = value?.trim();
+  if (!v) return '';
+  const shares = parseCompositionCode(v);
+  if (shares.length === 0) return v.startsWith('{') || v.startsWith('[') ? '' : v;
+  return shares
+    .map((s) => {
+      const name = (FIBRE_NAME_BY_CODE[s.code] ?? s.code).trim();
+      // НЕ ОКРУГЛЯТЬ: смесь бывает дробной (33.3 % вискозы), и «33 %» на цеховой бумаге — это
+      // другое число. `String` уже даёт «100» для целых и «33.3» для дробных.
+      const pct = Number.isFinite(s.percent) && s.percent > 0 ? String(s.percent) : '';
+      return pct ? `${pct}% ${name}` : name;
+    })
+    .filter(Boolean)
+    .join(' · ');
 }
 
 const CLASS_PREFIX: Record<string, string> = {

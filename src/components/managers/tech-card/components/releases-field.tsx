@@ -12,6 +12,7 @@ import {
   common_TechCardReleaseMeta,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardBomSectionOptions, techCardStageOptions } from 'constants/filter';
@@ -112,7 +113,7 @@ function SnapshotBom({ items }: { items: common_TechCardBomItem[] }) {
                 {b.name || <EmptyCell />}
                 {b.color ? ` · ${b.color}` : ''}
               </td>
-              <td>{b.composition || <EmptyCell />}</td>
+              <td>{formatCompositionCell(b.composition) || <EmptyCell />}</td>
               <td>
                 {b.spec || <EmptyCell />}
                 {b.unit ? ` (${b.unit})` : ''}
