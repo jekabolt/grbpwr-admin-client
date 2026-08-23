@@ -113,7 +113,7 @@ export function useFileRefs(): ReadonlyMap<number, FileRefState> {
  * нечем показать и в увеличенном виде — а место в ряду он бы занял.
  */
 export function fileRefImageSrc(state: FileRefState | undefined): string {
-  return state?.kind === 'ok' ? (imageCandidates(state.file)[0] ?? '') : '';
+  return state?.kind === 'ok' ? imageCandidates(state.file)[0] ?? '' : '';
 }
 
 function useFileRef(id: number): FileRefState {
@@ -151,6 +151,32 @@ function imageCandidates(f: LibraryFile | undefined): string[] {
   if (preview && !out.includes(preview)) out.push(preview);
   return out;
 }
+
+/**
+ * Есть ли чем показать этот файл ПРЯМО В ТЕКСТЕ. Тот же список кандидатов, что и у самой
+ * картинки, — и это не удобство, а условие: пикер, помечающий файл «превью нет», обязан судить
+ * ровно тем же правилом, каким потом решает разметчик, иначе метка врёт в одну из сторон.
+ */
+export function canShowInText(f: LibraryFile | undefined): boolean {
+  return imageCandidates(f).length > 0;
+}
+
+/**
+ * КАДР ПРЕВЬЮ В ТЕКСТЕ — ФИКСИРОВАННОЙ ВЫСОТЫ.
+ *
+ * Раньше снимок был ограничен только сверху (`max-h-[70vh]`), то есть высоту абзацам задавали
+ * сами файлы: вертикальный кадр забирал пол-экрана, следующий за ним горизонтальный — полосу в
+ * пять строк, и текст между ними скакал. В заметке снимок — иллюстрация абзаца, а не страница;
+ * разглядывают его в увеличенном виде, где ему отдан весь экран. Одна высота у всех превью
+ * возвращает документу ровный ход сверху вниз.
+ *
+ * ВЫСОТА У КОРОБКИ, А НЕ У КАРТИНКИ. `h-…` на самом `<img>` РАСТЯНУЛ БЫ мелкий снимок — значок
+ * 40×40 стал бы мыльным на 240 px. Поэтому высоту держит коробка, а картинка в неё вписывается
+ * (`max-h-full` + `object-contain`): крупная уменьшается, мелкая остаётся собой. Ширина коробки
+ * идёт по картинке (`w-fit`), чтобы нажатие попадало в снимок, а не в пустое поле рядом с ним.
+ */
+export const NOTE_PICTURE_FRAME = 'my-1 flex h-[240px] w-fit max-w-full items-center';
+export const NOTE_PICTURE_IMAGE = 'max-h-full max-w-full object-contain';
 
 /** Плашка на месте картинки. `span`, а не `div`: она стоит внутри абзаца. */
 export function InlinePlate({
@@ -246,7 +272,7 @@ export function FileRefImage({
       // подпись, и формат, который браузер не декодирует (tiff, heic): и то и другое иначе
       // осталось бы битым значком.
       onError={() => setTried((t) => t + 1)}
-      className={`my-1 block max-h-[70vh] max-w-full${onZoom ? ' cursor-zoom-in' : ''}`}
+      className={NOTE_PICTURE_IMAGE}
     />
   );
 
@@ -255,14 +281,23 @@ export function FileRefImage({
   // чтения заметки был для этого жеста слишком крупным ответом.
   if (onZoom) {
     return (
-      <button type='button' onClick={onZoom} title={`${name} — enlarge`} className='block'>
+      <button
+        type='button'
+        onClick={onZoom}
+        title={`${name} — enlarge`}
+        className={`${NOTE_PICTURE_FRAME} cursor-zoom-in`}
+      >
         {picture}
       </button>
     );
   }
 
   return (
-    <Link to={fileCardPath(id)} title={`${name} — open the file card`}>
+    <Link
+      to={fileCardPath(id)}
+      title={`${name} — open the file card`}
+      className={NOTE_PICTURE_FRAME}
+    >
       {picture}
     </Link>
   );

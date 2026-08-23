@@ -8,6 +8,15 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { useFileTopics, useLibraryFiles } from '../hooks/useFiles';
 import { extensionOf, formatBytes } from '../utils/format';
+import { canShowInText } from './file-refs';
+
+/**
+ * Чем станет выбранный файл в тексте: ССЫЛКОЙ (картинке `!` ставится сам) или ПРЕВЬЮ чему
+ * угодно — у pdf и чертежа есть отрисованная миниатюра, и это единственный способ вытащить её
+ * в заметку. Решение принято ДО открытия окна, кнопкой в полосе форматирования: окно с галкой
+ * «показать картинкой» означало бы, что о разнице узнают уже внутри.
+ */
+export type NoteFileInsert = 'link' | 'preview';
 
 /**
  * Выбор файла библиотеки для вставки в текст заметки.
@@ -28,12 +37,15 @@ import { extensionOf, formatBytes } from '../utils/format';
  * `onPick(file)` — надмножество `onPick(id)`.
  */
 export function NoteFilePicker({
+  insert = 'link',
   onPick,
   onClose,
 }: {
+  insert?: NoteFileInsert;
   onPick: (file: LibraryFile) => void;
   onClose: () => void;
 }) {
+  const preview = insert === 'preview';
   const [search, setSearch] = useState('');
   // Запрос уезжает НЕ на каждую букву: ключ react-query собран из строки поиска, и без задержки
   // «договор» — это семь запросов и семь копий выдачи в кэше.
@@ -65,7 +77,7 @@ export function NoteFilePicker({
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title='insert a file into the text'
+      title={preview ? 'insert a file preview' : 'insert a file into the text'}
       width='lg'
       hideActions
     >
@@ -73,9 +85,11 @@ export function NoteFilePicker({
         {/* Правило вставки названо ДО клика: иначе разница между картинкой и ссылкой
             обнаруживалась бы уже в тексте, и выглядела бы как случайность. */}
         <Text size='micro' variant='label'>
-          a picture will stand shown right inside the text, everything else — as a link to the file
-          card. what goes into the note is the file NUMBER, not a signed address: a signature lives
-          hours, a note — years.
+          {preview
+            ? 'the file will stand shown right inside the text — a picture as itself, a pdf or a drawing as its rendered thumbnail. a file marked “no preview” has nothing to show and will stand as a link.'
+            : 'a picture will stand shown right inside the text, everything else — as a link to the file card.'}{' '}
+          what goes into the note is the file NUMBER, not a signed address: a signature lives hours,
+          a note — years.
         </Text>
 
         <Input
@@ -129,7 +143,19 @@ export function NoteFilePicker({
                   key={f.id}
                   title={f.fileName ?? ''}
                   name={f.fileName ?? ''}
-                  sub={formatBytes(Number(f.sizeBytes ?? 0))}
+                  // «no preview» — это ответ сервера про ЭТОТ файл (нет ни просмотра, ни
+                  // миниатюры), и судит он тем же правилом, каким потом решает разметчик. В
+                  // режиме ссылки метка не нужна: там показывать в тексте ничего и не обещали.
+                  //
+                  // МЕТКА ВМЕСТО РАЗМЕРА, А НЕ РЯДОМ С НИМ: строчка под именем — одна и с
+                  // `truncate`, и «999 b · no preview» на плитке в 120 px обрезалось бы ровно
+                  // по метке, то есть предупреждение пропадало бы молча. Размер у файла без
+                  // превью здесь ничего не решает, а метка решает всё.
+                  sub={
+                    preview && !canShowInText(f)
+                      ? 'no preview'
+                      : formatBytes(Number(f.sizeBytes ?? 0))
+                  }
                   onClick={() => {
                     onPick(f);
                     onClose();

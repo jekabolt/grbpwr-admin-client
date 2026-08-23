@@ -6,7 +6,13 @@ import {
   useMediaViewer,
   type MediaViewerItem,
 } from 'ui/components/media-viewer';
-import { fileCardPath, fileRefImageSrc, useFileRefs } from './file-refs';
+import {
+  fileCardPath,
+  fileRefImageSrc,
+  NOTE_PICTURE_FRAME,
+  NOTE_PICTURE_IMAGE,
+  useFileRefs,
+} from './file-refs';
 
 /**
  * КАРТИНКИ ЗАМЕТКИ КАК ОДИН РЯД, А НЕ КАК РОССЫПЬ ОДИНОЧЕК.
@@ -99,10 +105,7 @@ export function NotePicturesProvider({
     [shown, viewer],
   );
 
-  const has = useCallback(
-    (key: string) => shown.some((r) => r.picture.key === key),
-    [shown],
-  );
+  const has = useCallback((key: string) => shown.some((r) => r.picture.key === key), [shown]);
 
   const ctx = useMemo<Ctx>(() => ({ openAt, has, reportBroken }), [openAt, has, reportBroken]);
 
@@ -156,7 +159,7 @@ export function NoteImage({
   const { openAt, has, reportBroken } = useNotePictures();
   if (failed) return <>{fallback}</>;
   const zoomable = has(pictureKey);
-  return (
+  const picture = (
     <img
       src={src}
       alt={label}
@@ -170,8 +173,27 @@ export function NoteImage({
         // которого нет, и «следующий» ведёт в никуда.
         reportBroken(pictureKey);
       }}
-      onClick={zoomable ? () => openAt(pictureKey) : undefined}
-      className={`my-1 block max-h-[70vh] max-w-full${zoomable ? ' cursor-zoom-in' : ''}`}
+      className={NOTE_PICTURE_IMAGE}
     />
+  );
+
+  // Кадр той же фиксированной высоты, что и у снимка библиотеки (`NOTE_PICTURE_FRAME`): чужой
+  // адрес в заметке — такое же превью, и заводить ему вторую меру высоты значило бы, что ровный
+  // ход документа зависит от того, откуда картинка приехала.
+  //
+  // НАЖАТИЕ — У КАДРА, А НЕ У КАРТИНКИ, и кадр — настоящая кнопка. Широкий снимок вписан по
+  // ширине, и сверху-снизу от него остаётся поле кадра: на нём курсор обещал бы увеличение,
+  // которого нажатие там не давало бы. Кнопка заодно возвращает клавиатуру — до неё увеличить
+  // снимок с клавиш было нельзя вовсе.
+  if (!zoomable) return <span className={NOTE_PICTURE_FRAME}>{picture}</span>;
+  return (
+    <button
+      type='button'
+      onClick={() => openAt(pictureKey)}
+      title={label ? `${label} — enlarge` : 'enlarge'}
+      className={`${NOTE_PICTURE_FRAME} cursor-zoom-in`}
+    >
+      {picture}
+    </button>
   );
 }
