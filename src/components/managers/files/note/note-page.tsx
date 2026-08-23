@@ -725,7 +725,7 @@ export function NotePage() {
             {/* Имя берётся из ПОЛЯ, а не из файла: переименовали, вышли по Esc — в шапке
                 обязано стоять то, что сохранится, иначе pill «not saved» относился бы к
                 чему-то невидимому. */}
-            <Text component='h1' size='large'>
+            <Text component='h1' className='font-bold'>
               {name || file?.fileName || 'note'}
             </Text>
             <Text size='micro' variant='label' component='span'>
