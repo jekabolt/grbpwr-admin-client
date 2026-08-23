@@ -28,7 +28,7 @@ import {
  */
 
 interface Block {
-  kind: 'h1' | 'h2' | 'h3' | 'p' | 'quote' | 'ul' | 'ol' | 'code' | 'rule' | 'gap';
+  kind: 'h1' | 'h2' | 'h3' | 'p' | 'gallery' | 'quote' | 'ul' | 'ol' | 'code' | 'rule' | 'gap';
   lines: string[];
 }
 
@@ -124,7 +124,9 @@ function parse(src: string): Block[] {
       body.push(lines[i]);
       i += 1;
     }
-    push('p', body);
+    // Абзац, в котором нет ничего, кроме снимков, — это ГАЛЕРЕЯ, а не текст: он рисуется
+    // рядом с переносом, а не столбцом (см. `galleryLines`).
+    push(galleryLines(body) ? 'gallery' : 'p', body);
   }
 
   return out;
@@ -210,6 +212,50 @@ function isPictureHref(href: string): boolean {
   }
 }
 
+/**
+ * Токен разметки — это снимок? Тот же вопрос решают три места (ряд просмотрщика, галерея,
+ * сам разметчик), и ответ у них обязан быть один.
+ */
+function isPictureToken(token: string): boolean {
+  if (!token.includes('](')) return false;
+  const bang = token.startsWith('!');
+  const href = tokenHref(token);
+  const refId = fileRefId(href);
+  return refId !== null ? bang : bang ? /^https?:\/\//i.test(href) : isPictureHref(href);
+}
+
+/**
+ * АБЗАЦ ИЗ ОДНИХ СНИМКОВ — ЭТО РЯД, А НЕ СТОЛБЕЦ.
+ *
+ * Кнопка `preview` оставляет каретку сразу за вставленным токеном, поэтому «вставил три файла
+ * подряд» — это три токена в ОДНОЙ строке; писавшие руками так же часто кладут по снимку на
+ * строку. И то и другое до сих пор выкладывалось столбцом: кадр снимка был блочным, и каждый
+ * занимал всю ширину заметки. Пять фотографий ткани превращались в пять экранов прокрутки там,
+ * где нужен один взгляд.
+ *
+ * ГАЛЕРЕЕЙ СЧИТАЕТСЯ ТОЛЬКО АБЗАЦ БЕЗ ЕДИНОГО СЛОВА и не меньше чем с двумя снимками. Подпись,
+ * оброненная между картинками, — это уже текст с иллюстрациями, и класть его в ряд значило бы
+ * решать за автора; одиночный снимок ряда не образует, и трогать его нечем.
+ */
+function galleryLines(lines: string[]): boolean {
+  const re = new RegExp(INLINE.source, 'g');
+  let pictures = 0;
+  for (const line of lines) {
+    re.lastIndex = 0;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      // Между снимками разрешены только пробелы: любое слово — и это уже не галерея.
+      if (line.slice(last, m.index).trim()) return false;
+      if (!isPictureToken(m[0])) return false;
+      pictures += 1;
+      last = m.index + m[0].length;
+    }
+    if (line.slice(last).trim()) return false;
+  }
+  return pictures >= 2;
+}
+
 /** Ключ места в ряду снимков — он же адрес этой картинки для просмотрщика. */
 function pictureKeyOf(href: string): string {
   const refId = fileRefId(href);
@@ -231,12 +277,10 @@ function collectPictures(blocks: Block[]): NotePicture[] {
       let m: RegExpExecArray | null;
       while ((m = re.exec(line)) !== null) {
         const token = m[0];
-        if (!token.includes('](')) continue;
+        if (!isPictureToken(token)) continue;
         const bang = token.startsWith('!');
         const href = tokenHref(token);
         const refId = fileRefId(href);
-        const isPicture = refId !== null ? bang : bang ? /^https?:\/\//i.test(href) : isPictureHref(href);
-        if (!isPicture) continue;
         const key = pictureKeyOf(href);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -336,14 +380,7 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
   // о себе сам адрес (`isPictureHref`). Второе и есть починка синих ссылок в принесённых
   // заметках; страховка — в `NoteImage`: не открылось, значит на месте снимка снова ссылка.
   if (external && (image || isPictureHref(href))) {
-    return (
-      <NoteImage
-        src={href}
-        label={label}
-        pictureKey={pictureKeyOf(href)}
-        fallback={asLink}
-      />
-    );
+    return <NoteImage src={href} label={label} pictureKey={pictureKeyOf(href)} fallback={asLink} />;
   }
 
   if (image) {
@@ -424,6 +461,16 @@ export function MarkdownView({ source, className }: { source: string; className?
               <h3 key={key} className='mt-2 font-bold'>
                 {inline(b.lines[0], key)}
               </h3>
+            );
+          case 'gallery':
+            // Ряд с переносом, а не сетка равных клеток: у кадров одна высота и своя ширина,
+            // и клетка равной ширины либо резала бы снимок, либо оставляла бы поля вокруг него.
+            return (
+              <div key={key} className='my-1 flex flex-wrap items-start gap-2'>
+                {b.lines.map((l, j) => (
+                  <Fragment key={`${key}-g${j}`}>{inline(l, `${key}-${j}`)}</Fragment>
+                ))}
+              </div>
             );
           case 'quote':
             // ЛИНЕЙКА, А НЕ КОРОБКА. Рамка вокруг цитаты — это вторая коробка внутри блока

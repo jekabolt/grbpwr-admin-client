@@ -1,4 +1,4 @@
-import { useCallback, useImperativeHandle, useRef, type RefObject } from 'react';
+import { useCallback, useDeferredValue, useImperativeHandle, useRef, type RefObject } from 'react';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
@@ -7,6 +7,7 @@ import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { AiPanel, useNoteAssistant, type AiRequest, type AiSuggestion } from './ai-panel';
 import { FormatBar } from './format-bar';
+import { MarkdownView } from './markdown-view';
 
 /**
  * Правка заметки: полоса действий, поле во всю ширину и блок помощника.
@@ -212,6 +213,11 @@ export function NoteEditor({
 
   const working = assistant.state.kind === 'working';
 
+  // Показ отстаёт от набора НА ОДИН КАДР ЗАНЯТОСТИ, а не на таймер: `useDeferredValue` отдаёт
+  // старое значение, пока идёт ввод, и пересобирает разметку в свободную минуту. Потолок заметки
+  // — 512 КиБ, и разбирать её на каждую букву значило бы платить набором за показ.
+  const previewSource = useDeferredValue(value);
+
   return (
     <>
       <Toolbar>
@@ -252,8 +258,9 @@ export function NoteEditor({
 
         <div className='w-full'>
           <Text size='micro' variant='label'>
-            esc — leave editing, ⌘s — save. a note is the same kind of library file: topics, owners,
-            access and the discussion live in its card.
+            esc — leave editing, ⌘s — save. the pane beside the text shows the note as it will read
+            — pictures included. a note is the same kind of library file: topics, owners, access and
+            the discussion live in its card.
             {sizeHint ? ` ${sizeHint}` : ''}
           </Text>
         </div>
@@ -282,14 +289,39 @@ export function NoteEditor({
           вариант md=v3 выбран целиком. */}
       <div className='border border-borderColor bg-bgColor focus-within:border-textColor'>
         <FormatBar areaRef={areaRef} value={value} onChange={onChange} />
-        <textarea
-          ref={areaRef}
-          name='noteContent'
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          spellCheck
-          className='block min-h-[60vh] w-full resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-textBaseSize leading-relaxed focus:outline-none'
-        />
+        {/* ТЕКСТ И ТО, ВО ЧТО ОН ПРЕВРАЩАЕТСЯ, — РЯДОМ, А НЕ ПО ОЧЕРЕДИ.
+            Разметка заметки существует ради картинок: снимок ткани, страница договора, чертёж.
+            Пока они видны только в чтении, правка идёт вслепую — вставил `![…](/files/12)` и
+            узнал, тот ли это файл, только выйдя из редактора и вернувшись обратно.
+
+            ДВЕ КОЛОНКИ ТОЛЬКО НА ШИРОКОМ ЭКРАНЕ: на узком показ встаёт ПОД полем, потому что
+            половина от узкой ширины — это уже не поле для письма. Колонки разделяет волосяная
+            линейка — внутренняя линейка блока, а не вторая коробка внутри первой. */}
+        <div className='grid lg:grid-cols-2'>
+          <textarea
+            ref={areaRef}
+            name='noteContent'
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            spellCheck
+            className='block min-h-[60vh] w-full min-w-0 resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-textBaseSize leading-relaxed focus:outline-none lg:border-r lg:border-hairline'
+          />
+          {/* ВЫСОТА ПОКАЗА — ОТ ПОЛЯ, А НЕ ОТ СОДЕРЖИМОГО. Поле тянется мышью (`resize-y`), и
+              показ, растущий вместе с длиной заметки, растянул бы общий блок на десять экранов.
+              На широком экране он абсолютом занимает ровно высоту строки сетки и прокручивается
+              сам; на узком у него свой потолок. */}
+          <div className='relative min-w-0 border-t border-hairline lg:border-t-0'>
+            <div className='max-h-[50vh] overflow-y-auto px-3 py-2.5 lg:absolute lg:inset-0 lg:max-h-none'>
+              {previewSource.trim() ? (
+                <MarkdownView source={previewSource} />
+              ) : (
+                <Text size='micro' variant='label'>
+                  what you write will show up here
+                </Text>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </>
   );
