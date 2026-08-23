@@ -174,8 +174,13 @@ export function canShowInText(f: LibraryFile | undefined): boolean {
  * 40×40 стал бы мыльным на 240 px. Поэтому высоту держит коробка, а картинка в неё вписывается
  * (`max-h-full` + `object-contain`): крупная уменьшается, мелкая остаётся собой. Ширина коробки
  * идёт по картинке (`w-fit`), чтобы нажатие попадало в снимок, а не в пустое поле рядом с ним.
+ *
+ * КАДР СТРОЧНЫЙ (`inline-flex`), А НЕ БЛОЧНЫЙ. Блочный занимал всю ширину заметки, и два снимка
+ * рядом в тексте всё равно вставали друг под другом — столбцом. Строчный кадр стоит там, где его
+ * поставили, а абзац из одних снимков разметчик кладёт рядом с переносом (`galleryLines`).
  */
-export const NOTE_PICTURE_FRAME = 'my-1 flex h-[240px] w-fit max-w-full items-center';
+export const NOTE_PICTURE_FRAME =
+  'my-1 inline-flex h-[240px] w-fit max-w-full items-center align-top';
 export const NOTE_PICTURE_IMAGE = 'max-h-full max-w-full object-contain';
 
 /** Плашка на месте картинки. `span`, а не `div`: она стоит внутри абзаца. */
