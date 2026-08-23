@@ -17,6 +17,7 @@ import {
   composeArticleFromMaterial,
   materialCompositionCode,
   materialSpec,
+  FIBRE_NAME_BY_CODE,
   parseCompositionCode,
 } from 'components/managers/materials/components/material-code';
 import {
@@ -28,7 +29,6 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardLabDipStatusOptions } from 'constants/filter';
-import { composition as compositionDict } from 'constants/garment-composition';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -780,13 +780,7 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
 // wrote the line: the CompositionPicker stores garment-composition CODES ('COT'), a catalog-linked
 // material stores its resolved fibre NAME ('хлопок органический'). Resolve what the table knows,
 // print the rest as-is — the same `codeToName ?? code` rule the care-label generator uses.
-const FIBRE_NAME_BY_CODE: Record<string, string> = (() => {
-  const m: Record<string, string> = {};
-  for (const cat of Object.values(compositionDict.garment_composition)) {
-    for (const [name, code] of Object.entries(cat as Record<string, string>)) m[code] = name;
-  }
-  return m;
-})();
+// Таблица КОД → имя живёт рядом с читателем ячейки, в material-code.ts (FIBRE_NAME_BY_CODE).
 
 // #29 — best-effort DERIVED fibre composition for a colourway, computed from its recipe's BOM lines.
 // A line's `composition` is the structured { part: [{ code, percent }] } JSON on every catalog-linked

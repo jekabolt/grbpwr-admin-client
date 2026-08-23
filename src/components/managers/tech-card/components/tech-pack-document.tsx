@@ -104,6 +104,7 @@ import {
   techCardSignoffStateOptions,
 } from 'constants/filter';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
+import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -2337,7 +2338,14 @@ export function TechPackDocument({
                     <td className={TD}>{bomSectionL[b.section ?? ''] ?? '—'}</td>
                     <td className={TD}>
                       <div className='font-medium'>{b.name || '—'}</div>
-                      {b.composition && <div className='text-labelColor'>{b.composition}</div>}
+                      {/* ЧЕРЕЗ ФОРМАТТЕР, А НЕ НАПРЯМУЮ: на строке, привязанной к артикулу
+                          каталога, это поле — JSON, и цеховая бумага печатала фигурные скобки
+                          вместо «100% Polyester». */}
+                      {formatCompositionCell(b.composition) && (
+                        <div className='text-labelColor'>
+                          {formatCompositionCell(b.composition)}
+                        </div>
+                      )}
                     </td>
                     {moneyAllowed(printScope) && (
                       <td className={TD}>
