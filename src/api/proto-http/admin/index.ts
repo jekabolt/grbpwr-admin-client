@@ -10151,6 +10151,69 @@ export type GetTechCardConstructionAuditResponse = {
   aiEnabled: boolean | undefined;
 };
 
+// AnalyzeTechCardConstructionRequest — which saved card to run the model over. As with the audit,
+// there is nothing to configure: two runs of a report you can tune are two reports.
+export type AnalyzeTechCardConstructionRequest = {
+  techCardId: number | undefined;
+};
+
+// AnalyzeTechCardConstructionResponse is one LLM run. It is ALWAYS a 200: read ai_status first, and
+// only then the findings.
+export type AnalyzeTechCardConstructionResponse = {
+  // findings — model findings only (source="model"), already past the verifier. Empty whenever
+  // ai_status is not "ok", and legitimately empty when it is: a card the model found nothing wrong
+  // with is a correct and complete answer.
+  findings: TechCardAnalysisFinding[] | undefined;
+  // ai_status — ok | not_configured | model_unavailable | failed | invalid_output | skipped.
+  // ok               — the model answered and the answer survived verification.
+  // not_configured   — this deployment has no OPENROUTER_API_KEY. Nothing was called or spent.
+  // model_unavailable— the provider does not serve `model`. A CONFIGURATION fault, not weather:
+  // say the slug out loud, do not offer "try again later".
+  // failed           — timeout or transport. This one IS weather; retry is honest.
+  // invalid_output   — the model answered something unusable (cut off by the token ceiling, not
+  // JSON, or so many findings failed verification that the run is not
+  // trustworthy). There is no auto-retry: paying twice for the same fault
+  // without a diagnosis is the same fault twice.
+  // skipped          — the card carries no assembly fact to analyse, so no call was made.
+  aiStatus: string | undefined;
+  // model — the slug that was actually sent (OPENROUTER_MODEL_ANALYSIS when set, otherwise the
+  // shared one). It is on the wire so a "model_unavailable" verdict names the knob to turn.
+  model: string | undefined;
+  // dropped_bad_ref — findings discarded because not one of their anchors resolved on this card.
+  droppedBadRef: number | undefined;
+  // dropped_contradiction — findings discarded for contradicting the recomputed facts, or for
+  // repeating a machine finding already on the screen.
+  droppedContradiction: number | undefined;
+  // not_checked — what the MODEL says it did not check. The machine layer's own list travels with
+  // the audit; this one is the model's.
+  notChecked: string[] | undefined;
+  // summary — the model's one-paragraph verdict.
+  summary: string | undefined;
+  // operation_fingerprints — operation_number -> fp8 AT THE MOMENT OF THIS RUN. The client keeps
+  // them with the findings and compares them against a later audit to grey out a finding whose
+  // operation has changed since the model looked at it.
+  operationFingerprints: { [key: string]: string } | undefined;
+};
+
+// AddTechCardIssueRequest files one issue. It carries no status and no callout: a newly filed issue
+// is open by definition, and the callout link belongs to the sketch editor, not to this gesture.
+export type AddTechCardIssueRequest = {
+  techCardId: number | undefined;
+  // operation_number — the human step number this is about (оп. 460). 0 = an issue about the card
+  // as a whole, stored as no link at all rather than as step zero.
+  operationNumber: number | undefined;
+  // severity — HIGH | MEDIUM | LOW.
+  severity: string | undefined;
+  // description — what is hard or impossible. Required.
+  description: string | undefined;
+};
+
+// AddTechCardIssueResponse returns the new row's id so the client can address it without re-reading
+// the whole card.
+export type AddTechCardIssueResponse = {
+  issueId: number | undefined;
+};
+
 // OperationWorkCatalogItem — одна работа каталога.
 // ВСЁ СТРОКАМИ-ТОКЕНАМИ, НИ ОДНОГО ENUM. Словарь работ — данные, а не контракт: он растёт
 // INSERT-миграцией, и клиент, не знающий нового токена, обязан довезти его до экрана текстом, а не
@@ -14608,6 +14671,29 @@ export interface AdminService {
   // Classified rd(tech_cards): it derives nothing a reader of the card could not derive by reading
   // it, and it spends nothing. Its LLM sibling is a WRITE grant, because that one does spend.
   GetTechCardConstructionAudit(request: GetTechCardConstructionAuditRequest): Promise<GetTechCardConstructionAuditResponse>;
+  // AnalyzeTechCardConstruction — THE LLM LAYER of the same review, behind the Analyze button. It
+  // reads the SAVED card, sends it to the model with the machine layer's verified facts attached,
+  // and returns ONLY what the model said (source="model") past a verifier that drops every finding
+  // whose anchors do not resolve on this card. The machine findings are already on the screen and
+  // are deliberately not repeated here.
+  // AN AI FAILURE IS NOT AN RPC FAILURE. Every way this can go wrong — no key, a retired model
+  // slug, a timeout, output that is not usable — arrives as `ai_status` with HTTP 200 and an empty
+  // findings list. That is the deliberate INVERSE of GenerateTechCardOperations, which answers
+  // FailedPrecondition without a key because without the model it has nothing at all to return.
+  // Here the deterministic half of the review is already rendered, so a status the panel can name
+  // beats an error that blanks the tab.
+  // IT SPENDS MONEY ON EVERY PRESS, which is why it is classified wr(tech_cards) while its machine
+  // sibling is rd, and why three limits stand in front of the call: one run per admin per card at a
+  // time, a minimum interval between runs of the same card, and a per-admin hourly ceiling.
+  AnalyzeTechCardConstruction(request: AnalyzeTechCardConstructionRequest): Promise<AnalyzeTechCardConstructionResponse>;
+  // AddTechCardIssue files ONE issue against a tech card — the gesture that turns a finding of the
+  // review into a tracked row someone answers for.
+  // IT IS NARROW ON PURPOSE, AND IT WORKS ON A FROZEN CARD. Filing through UpdateTechCard would be
+  // impossible exactly when it matters most: a released card refuses the full write, and «the
+  // construction cannot be sewn as specified» is precisely the sort of thing discovered after
+  // release. Issues sit OUTSIDE the CONSTRUCTION digest, so this call cannot disturb a signature —
+  // that is what makes the narrow path safe rather than merely convenient.
+  AddTechCardIssue(request: AddTechCardIssueRequest): Promise<AddTechCardIssueResponse>;
   // КАТАЛОГ РАБОТ (видов операций) — СЕРВЕРНЫЕ ДАННЫЕ, ОТДАВАЕМЫЕ ОДНИМ ЗАПРОСОМ.
   // Пункты, их синонимы поиска (RU/EN), допустимые машинки, глобальные дефолты свойств и подсказки
   // нормы времени приезжают вместе, потому что порознь они бесполезны: пикер работ рисуется целиком
@@ -19442,6 +19528,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetTechCardConstructionAudit",
       }) as Promise<GetTechCardConstructionAuditResponse>;
+    },
+    AnalyzeTechCardConstruction(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/construction/analyze`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AnalyzeTechCardConstruction",
+      }) as Promise<AnalyzeTechCardConstructionResponse>;
+    },
+    AddTechCardIssue(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/issue`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTechCardIssue",
+      }) as Promise<AddTechCardIssueResponse>;
     },
     GetOperationWorkCatalog(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/operation-work/catalog`; // eslint-disable-line quotes
