@@ -10085,6 +10085,72 @@ export type GenerateTechCardOperationsResponse = {
   notes: string | undefined;
 };
 
+// GetTechCardConstructionAuditRequest — which saved card to audit. Nothing else: the machine layer
+// has no options, and a report you can configure is a report whose two runs cannot be compared.
+export type GetTechCardConstructionAuditRequest = {
+  techCardId: number | undefined;
+};
+
+// TechCardAnalysisFinding is ONE finding of the CONSTRUCTION review — machine or model, one shape.
+// The two RPCs never mix sources in one response, but the client draws both in a single list and
+// has to badge them apart, hence `source` on the finding itself.
+// CATEGORY AND SEVERITY TRAVEL AS STRINGS, NOT ENUMS, AND THAT IS DELIBERATE. The taxonomy grows;
+// an enum member a generated client does not know is dropped SILENTLY by protojson (incident Ж7,
+// the same argument that made `work` a string). A finding that arrives with an unfamiliar category
+// must reach the screen as text, not vanish.
+export type TechCardAnalysisFinding = {
+  // source: "machine" (deterministic code) | "model" (LLM, past the verifier).
+  source: string | undefined;
+  // category. Eight are shared with the model: missing_step | coarse_step | method | sequence |
+  // naming | bom_mismatch | parameter | question. THREE more are produced by the machine alone —
+  // readiness (data nobody has filled in yet), integrity (a soft link pointing nowhere) and
+  // assembly (a predicted refusal of the release rule). A client must render an unknown value as
+  // text rather than assume this list is final.
+  category: string | undefined;
+  // severity: "blocker" | "error" | "warning". `question` is NOT a severity — it is a category.
+  severity: string | undefined;
+  // title, <= 90 chars, English. The one line shown collapsed.
+  title: string | undefined;
+  // detail — the explanation: what was read, what it says, why that is a problem.
+  detail: string | undefined;
+  // evidence — display only. The verifier does NOT check these and drops nothing over them.
+  evidence: string[] | undefined;
+  // refs — anchors the client turns into deep links: "op:460" | "unit:base" | "piece:SL_INS_L" |
+  // "bom:подкладка" | "card". Never empty: a MODEL finding whose anchors all fail to resolve is
+  // dropped by the verifier, and a machine finding without one would be a bug in the check.
+  refs: string[] | undefined;
+  // insert_after — only on category=missing_step: "op:120" | "start" | "".
+  insertAfter: string | undefined;
+  // suggestion — what to do about it.
+  suggestion: string | undefined;
+  // confidence — model: "certain" | "likely" | "needs_owner". Machine: "" for a deterministic fact,
+  // "heuristic" for a guess that is allowed to be wrong and carries a badge saying so.
+  confidence: string | undefined;
+};
+
+// GetTechCardConstructionAuditResponse is one machine-layer run. Everything in it is recomputed
+// from the stored card; nothing is remembered between runs, which is why there are no dismissals
+// here — a machine finding disappears when its cause disappears.
+export type GetTechCardConstructionAuditResponse = {
+  // findings — machine findings only (source="machine"). On a card in `draft` the whole readiness
+  // class arrives ALREADY COLLAPSED into a single "Not yet ready for release: …" finding: on a
+  // draft those are not defects, they are work not yet done.
+  findings: TechCardAnalysisFinding[] | undefined;
+  // operation_fingerprints — operation_number -> fp8. The client stores them with an AI run and
+  // compares them on the next audit to tell "this operation changed since the run" from "the
+  // number moved". The payload is the step's ASSEMBLY SHAPE (output unit + inputs in display
+  // order) and nothing else, so two steps of the same shape share a fingerprint by design.
+  operationFingerprints: { [key: string]: string } | undefined;
+  // not_checked — what this run did NOT verify, and why. Silence that is indistinguishable from
+  // "checked and clean" is the most expensive lie an audit can tell, so it is said out loud.
+  notChecked: string[] | undefined;
+  // ai_enabled — whether this deployment has the LLM layer configured at all (OPENROUTER_API_KEY).
+  // It rides on the audit because the audit is the one call the CONSTRUCTION tab always makes:
+  // without it the client could only learn that AI is unavailable by pressing Analyze and being
+  // refused. False = show the Analyze button disabled with a quiet reason, do not call it.
+  aiEnabled: boolean | undefined;
+};
+
 // OperationWorkCatalogItem — одна работа каталога.
 // ВСЁ СТРОКАМИ-ТОКЕНАМИ, НИ ОДНОГО ENUM. Словарь работ — данные, а не контракт: он растёт
 // INSERT-миграцией, и клиент, не знающий нового токена, обязан довезти его до экрана текстом, а не
@@ -14528,6 +14594,20 @@ export interface AdminService {
   // draft for a technologist to review, edit and save through UpdateTechCard — it persists nothing.
   // Requires OPENROUTER_API_KEY; unconfigured it returns FailedPrecondition (degrades gracefully).
   GenerateTechCardOperations(request: GenerateTechCardOperationsRequest): Promise<GenerateTechCardOperationsResponse>;
+  // GetTechCardConstructionAudit — THE MACHINE LAYER of the CONSTRUCTION review: a deterministic
+  // audit of the SAVED card (route dictionaries, BOM chains, prices, release readiness) plus the
+  // recomputed ground truth of its assembly graph. No AI, no key, no rate limit, no money — the
+  // client calls it when the CONSTRUCTION tab opens and again after every successful save.
+  // IT READS THE CARD AS STORED. An unsaved form is not analysed; running a form draft through the
+  // wire would be a separate contract and it was deliberately rejected.
+  // Read-only POST — same shape and same reason as CheckProductionRunReadiness: the answer is a
+  // report and the request will grow (a future «review as draft | for release» switch belongs in it),
+  // so the route should not have to move when it does. The two literal segments also keep the path
+  // out of reach of /tech-card/{id}; the ordering that actually decides that is pinned by
+  // TestTechCardListRouteNotShadowed, not by the shape of the path.
+  // Classified rd(tech_cards): it derives nothing a reader of the card could not derive by reading
+  // it, and it spends nothing. Its LLM sibling is a WRITE grant, because that one does spend.
+  GetTechCardConstructionAudit(request: GetTechCardConstructionAuditRequest): Promise<GetTechCardConstructionAuditResponse>;
   // КАТАЛОГ РАБОТ (видов операций) — СЕРВЕРНЫЕ ДАННЫЕ, ОТДАВАЕМЫЕ ОДНИМ ЗАПРОСОМ.
   // Пункты, их синонимы поиска (RU/EN), допустимые машинки, глобальные дефолты свойств и подсказки
   // нормы времени приезжают вместе, потому что порознь они бесполезны: пикер работ рисуется целиком
@@ -19345,6 +19425,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GenerateTechCardOperations",
       }) as Promise<GenerateTechCardOperationsResponse>;
+    },
+    GetTechCardConstructionAudit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/construction/audit`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardConstructionAudit",
+      }) as Promise<GetTechCardConstructionAuditResponse>;
     },
     GetOperationWorkCatalog(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/operation-work/catalog`; // eslint-disable-line quotes
