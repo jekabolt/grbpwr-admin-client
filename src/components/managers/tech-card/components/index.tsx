@@ -2060,6 +2060,10 @@ export function TechCardForm({
                 // всё время, пока летит переворот.
                 saving={form.formState.isSubmitting || converting}
                 draftPending={Boolean(draft.pending)}
+                // Якоря находок аудита («op:460», «piece:SL_INS_L») ведут по карточке. Прокладка
+                // та же, что у ленты жизненного цикла: имя вкладки приходит строкой, а `TabId`,
+                // свёрнутые псевдонимы и видимость вкладок остаются знанием этой страницы.
+                onGoTab={(t, extra) => navTo(t as TabId, extra)}
               />
             </SectionStack>
 

@@ -7262,6 +7262,59 @@ export function OperationsField({
     );
   };
 
+  // АДРЕС ЗОВЁТ К ШАГУ: `?op=460` (номер операции) или `?unit=base` (ключ выпускаемого узла). Это
+  // посадочная полоса якорей аудита сборки — «op:460» из находки приезжает сюда через `navTo`.
+  //
+  // ЖЕСТ ТОТ ЖЕ, ЧТО У СХЕМЫ СБОРКИ, и намеренно тот же: `setSelected` + прокрутка редактора в
+  // кадр — второй способ «показать шаг» разошёлся бы с первым ровно в тех случаях, где это дороже
+  // всего (открытый фулскрин, редактор на другом шаге).
+  //
+  // ПАРАМЕТР СНИМАЕТСЯ СРАЗУ И ВСЕГДА, тем же идиомом, что `fs` (функциональный апдейтер, чтобы
+  // не затереть соседей; `replace`, чтобы прыжок не засорял Back). Иначе F5 через полчаса снова
+  // утаскивал бы человека к шагу, о котором он давно забыл, — и снимать его надо и в случае
+  // ПРОМАХА тоже, иначе адрес остаётся заряженным навсегда.
+  //
+  // ПРОМАХ МОЛЧИТ. Номера операций позиционные и перештамповываются на сохранении, так что ссылка
+  // из старого отчёта может указывать в никуда; выбор «ближайшего» шага показал бы не тот, о
+  // котором находка, а прокрутка наверх выглядела бы как поломка. Ничего не происходит — это
+  // честнее обоих.
+  const opParam = params.get('op');
+  const unitParam = params.get('unit');
+  useEffect(() => {
+    if (opParam == null && unitParam == null) return;
+    const ops = (getValues('operations') ?? []) as Array<{
+      operationNumber?: number;
+      outputUnitKey?: string;
+    }>;
+    let idx = -1;
+    if (opParam != null) {
+      const n = parseInt(opParam, 10);
+      // Сверка по СОХРАНЁННОМУ номеру, без «а вдруг это кратное десяти» — та же граница, что у
+      // `remapIssues`: подставленный номер увёл бы к чужому шагу молча.
+      if (Number.isFinite(n) && n > 0) {
+        idx = ops.findIndex((o) => (o?.operationNumber ?? 0) === n);
+      }
+    }
+    if (idx < 0 && unitParam != null) {
+      const key = unitParam.trim();
+      if (key) idx = ops.findIndex((o) => (o?.outputUnitKey ?? '').trim() === key);
+    }
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('op');
+        p.delete('unit');
+        return p;
+      },
+      { replace: true },
+    );
+    if (idx < 0) return;
+    setSelected(idx);
+    requestAnimationFrame(() =>
+      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    );
+  }, [opParam, unitParam, getValues, setParams]);
+
   // --- фулскрин: ТРЕТИЙ ВИД ---------------------------------------------------------------------
   //
   // Открытость живёт в URL: F5 возвращает туда же, ссылкой можно поделиться, Back работает. Правил

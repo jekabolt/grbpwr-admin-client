@@ -14,6 +14,7 @@ import Text from 'ui/components/text';
 import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
+import { ConstructionAudit } from './construction-audit';
 import { ConstructionField } from './construction-field';
 import { zoneOptions } from './operation-options';
 import {
@@ -495,6 +496,7 @@ export function ConstructionTab({
   onSave,
   saving = false,
   draftPending = false,
+  onGoTab,
 }: {
   techCard?: common_TechCard;
   /** Вкладка открыта. Вкладки смонтированы все сразу — без этого разбор заказывался бы всегда. */
@@ -508,6 +510,13 @@ export function ConstructionTab({
   saving?: boolean;
   /** У карточки есть невосстановленный черновик: подавляет автооткрытие фулскрина по `?fs=1`. */
   draftPending?: boolean;
+  /**
+   * Переход по якорю находки аудита. ПРОКЛАДКА ДО `navTo`, ровно как `onSave` — прокладка до
+   * сохранения: об идентичности вкладок (`TabId`, свёрнутые псевдонимы, какие из них вообще есть
+   * на этой карточке) знает только `index.tsx`, и второй список вкладок здесь разъехался бы с ним
+   * первой же сверткой.
+   */
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   // Deliberately NOT watching `operations` here. The summary and the sketch each hold their own
   // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
@@ -752,6 +761,10 @@ export function ConstructionTab({
         </div>
 
         <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
+          {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
+              рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
+              его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
+          <ConstructionAudit techCardId={techCard?.id} active={active} onGoTab={onGoTab} />
           <CardStandards />
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader

@@ -134,6 +134,34 @@ export function useTechCardPrint(id: number | undefined) {
   });
 }
 
+// CONSTRUCTION AUDIT (GetTechCardConstructionAudit) — the machine layer's report on the SAVED
+// card: deterministic checks over the stored assembly, plus the list of what the run did NOT
+// verify. Read-only and advisory, like useTechCardReadiness: nothing here disables a control or
+// refuses a save.
+//
+// Nested UNDER detail(id), for the same reason `readiness` is, and it is the whole wiring: the
+// audit is scored against the card's own saved facts, so «the card changed» is exactly when it
+// must be re-run. Every mutation that already invalidates the card detail (UpdateTechCard, the
+// colourway recipes, the reprice…) therefore re-audits for free — there is no separate
+// invalidation to remember to add to the save handler, and no way for one to be forgotten.
+// `active` is NOT a convenience flag — without it this fires on EVERY tech-card open. The card
+// page mounts all of its tabs at once, so a component that queries on mount queries for readers who
+// never go near CONSTRUCTION. The audit is not free on the server: it loads the whole card and runs
+// every check over it. `usePieceShapes(active)` in construction-tab.tsx is gated for exactly this
+// reason and is the precedent followed here.
+//
+// Nested UNDER detail(id) deliberately: every mutation that already invalidates the card detail
+// invalidates this too, which is how "re-audit after each successful save" happens with no wiring
+// into the save handler at all.
+export function useTechCardConstructionAudit(techCardId: number | undefined, active: boolean) {
+  return useQuery({
+    queryKey: [...techCardKeys.detail(techCardId!), 'construction-audit'],
+    queryFn: () => adminService.GetTechCardConstructionAudit({ techCardId: techCardId! }),
+    enabled: !!techCardId && active,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // The SAME card read again, netted at another country's VAT rate — a pricing scenario, not the
 // card. Deliberately its own query key rather than a parameter on useTechCard: that read is what
 // seeds the whole editing form (mapTechCardToForm), and re-keying it on a dropdown would remount

@@ -196,8 +196,12 @@ const patternSchema = z.object({
   fabricPurpose: z.string().optional().default(''),
 });
 
-const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
-const DEFAULT_ISSUE_STATUS: common_TechCardIssueStatus = 'TECH_CARD_ISSUE_STATUS_OPEN';
+// Exported: an issue is now also minted OUTSIDE the issues editor — the CONSTRUCTION audit files
+// one from a finding. A second copy of these literals over there is exactly how the default drifts
+// in one of two places, so the constants travel instead of the strings.
+export const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity =
+  'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
+export const DEFAULT_ISSUE_STATUS: common_TechCardIssueStatus = 'TECH_CARD_ISSUE_STATUS_OPEN';
 const DEFAULT_SIGNOFF_SECTION: common_TechCardSignoffSection = 'TECH_CARD_SIGNOFF_SECTION_DESIGN';
 const DEFAULT_SIGNOFF_STATE: common_TechCardSignoffState = 'TECH_CARD_SIGNOFF_STATE_PENDING';
 
