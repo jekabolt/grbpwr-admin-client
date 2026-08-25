@@ -45,6 +45,8 @@ export function useAuxTechCards() {
     queryFn: () =>
       adminService.ListTechCards({
         purpose: 'auxiliary',
+        // aux-карты берутся все, коллекцией не сужаются
+        collection: undefined,
         limit: 200,
         offset: 0,
         orderFactor: 'ORDER_FACTOR_DESC',

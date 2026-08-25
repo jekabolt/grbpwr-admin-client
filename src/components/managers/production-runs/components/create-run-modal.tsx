@@ -115,6 +115,8 @@ export function CreateRunModal({
       adminService.ListTechCards({
         limit: 200,
         offset: 0,
+        // коллекцией этот список не сужается
+        collection: undefined,
         orderFactor: undefined,
         stage: undefined,
         gender: undefined,
