@@ -89,7 +89,9 @@ export function TechCardTile({
   // the provider already loaded at startup (no request, no prop, so the swimlane tile is untouched).
   // DEEPEST level that is actually set (type → sub → top): half the catalogue is classified only
   // down to the top category, and reading `subCategoryId` literally would print nothing on cards
-  // that are in fact categorised.
+  // that are in fact categorised. `categoryId` is the LAST fallback rather than a fourth level: it
+  // is the leaf the card actually stores, and on a row whose top/sub/type projections are all
+  // empty it is the only id left that names anything.
   const { dictionary } = useDictionary();
   const categoryName = useMemo(() => {
     const catId = card.typeId || card.subCategoryId || card.topCategoryId || card.categoryId || 0;
