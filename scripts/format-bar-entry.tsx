@@ -13,8 +13,30 @@ import { FormatBar } from 'components/managers/files/note/format-bar';
 import { mediaEdit } from 'components/managers/files/note/format-edits';
 import { MarkdownView } from 'components/managers/files/note/markdown-view';
 
+type MountOpts = {
+  /**
+   * Высота поля. Редактор заметки даёт сырой `<textarea class='min-h-[60vh] resize-y'>` — то есть
+   * поле ВЫШЕ вьюпорта бывает и там, безо всякого автогроу: его тянут мышью, а 60vh — только пол.
+   */
+  heightPx?: number;
+  /** Сколько страницы стоит НАД редактором: без прокручиваемой страницы ронять нечего. */
+  spacerPx?: number;
+  /**
+   * Липкая полоса. В редакторе заметки полоса стоит В ПОТОКЕ прямо над полем — значит кнопка
+   * достижима только пока верх поля на экране. Липкая полоса снимает это ограничение: кнопка
+   * жмётся и тогда, когда поле ушло верхом выше вьюпорта. Это конфигурация соседней ветки.
+   */
+  stickyBar?: boolean;
+};
+
 type BarProbe = {
-  mount: () => void;
+  mount: (opts?: MountOpts) => void;
+  /** Прокрутка страницы — то, что и мерится. Каретка тут ни при чём. */
+  scrollTo: (y: number) => void;
+  scrollY: () => number;
+  /** Стоит ли фокус в поле: у настоящей кнопки он оттуда не уходит (`onMouseDown` гасит уход). */
+  focused: () => boolean;
+  blur: () => void;
   /** Что лежит в поле — читается С ЖИВОГО УЗЛА, а не из состояния react. */
   text: () => string;
   /** Что думает страница: проп `value` обязан совпасть с полем, иначе правка «не случилась». */
@@ -47,7 +69,10 @@ probe.insertMedia = (text, at, items) => {
   return text.slice(0, edit.start) + edit.text + text.slice(edit.end);
 };
 
-function Harness() {
+probe.scrollTo = (y) => window.scrollTo(0, y);
+probe.scrollY = () => Math.round(window.scrollY);
+
+function Harness({ opts }: { opts: MountOpts }) {
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const [value, setValue] = useState('');
   const [note, setNote] = useState('');
@@ -55,6 +80,8 @@ function Harness() {
 
   probe.value = () => value;
   probe.text = () => areaRef.current?.value ?? '';
+  probe.focused = () => document.activeElement === areaRef.current;
+  probe.blur = () => areaRef.current?.blur();
   probe.caret = () => [areaRef.current?.selectionStart ?? 0, areaRef.current?.selectionEnd ?? 0];
   probe.select = (start, end) => {
     areaRef.current?.focus();
@@ -71,29 +98,37 @@ function Harness() {
 
   return (
     <div>
-      <FormatBar areaRef={areaRef} value={value} onChange={setValue} />
+      {/* Страница НАД редактором: дефект в том, что прокрутка страницы падает в ноль, и без
+          страницы, которую можно прокрутить, мерить нечего. */}
+      <div style={{ height: opts.spacerPx ?? 1200, background: 'repeating-linear-gradient(#fff 0 20px,#eee 20px 40px)' }}>
+        page above the editor
+      </div>
+      <div style={opts.stickyBar ? { position: 'sticky', top: 0, zIndex: 5, background: '#fff' } : undefined}>
+        <FormatBar areaRef={areaRef} value={value} onChange={setValue} />
+      </div>
       <textarea
         data-area
         ref={areaRef}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         rows={8}
-        style={{ width: 600 }}
+        style={{ width: 600, height: opts.heightPx ?? 300 }}
       />
       <div data-note style={{ width: 600 }}>
         <MarkdownView source={note} />
       </div>
+      <div style={{ height: 1200 }}>page below the editor</div>
     </div>
   );
 }
 
-probe.mount = () => {
+probe.mount = (opts = {}) => {
   const host = document.getElementById('root')!;
   host.innerHTML = '';
   createRoot(host).render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/notes/1']}>
-        <Harness />
+        <Harness opts={opts} />
       </MemoryRouter>
     </QueryClientProvider>,
   );

@@ -47,7 +47,14 @@ const outfile = resolve(tmpdir(), `format-bar-${process.pid}.js`);
 //   code — дефект Д2: без среза хвостовых переводов тройной клик даёт ограду вместо бэктиков.
 //   pad  — отбивка одним переводом строки вместо пустой строки (F3): снимки перестают быть
 //          галереей и ложатся столбцом внутри текста.
+//   focus — вернуть ГОЛЫЙ `area.focus()` в `apply`: прокрутка страницы обязана снова прыгнуть.
 const MUTATIONS = {
+  focus: {
+    file: /format-bar\.tsx$/,
+    loader: 'tsx',
+    from: '      area.focus({ preventScroll: true });\n      let done = false;',
+    to: '      area.focus();\n      let done = false;',
+  },
   code: {
     from: "  let e = end;\n  while (e > start && text[e - 1] === '\\n') e -= 1;",
     to: '  const e = end;',
@@ -66,11 +73,11 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
 const mutation = {
   name: 'format-bar-mutation',
   setup(b) {
-    b.onLoad({ filter: /format-edits\.ts$/ }, async (args) => {
+    const m = MUTATIONS[MUTATE] ?? {};
+    b.onLoad({ filter: m.file ?? /format-edits\.ts$/ }, async (args) => {
       const src = await readFile(args.path, 'utf8');
-      const m = MUTATIONS[MUTATE];
       if (!src.includes(m.from)) throw new Error('мутация не нашла свою строку');
-      return { contents: src.replace(m.from, m.to), loader: 'ts' };
+      return { contents: src.replace(m.from, m.to), loader: m.loader ?? 'ts' };
     });
   },
 };
@@ -122,7 +129,7 @@ await page.route('http://stub.invalid/**', (route) =>
 
 await page.goto('http://probe.local/');
 await page.addScriptTag({ content: bundle });
-await page.evaluate(() => window.__formatBar.mount());
+await page.evaluate(() => window.__formatBar.mount({ heightPx: 300 }));
 await page.waitForSelector('[data-area]', { timeout: 15000 });
 
 const setText = (t, s, e) => page.evaluate(([t, s, e]) => window.__formatBar.set(t, s, e), [t, s, e]);
@@ -188,6 +195,11 @@ await page.waitForTimeout(600);
 ck((await page.locator('[role="dialog"]').count()) === 1, 'клик открывает пикер медиатеки');
 const dlg = ((await page.locator('[role="dialog"]').first().innerText()) ?? '').toLowerCase();
 ck(/add all/.test(dlg), 'и это МУЛЬТИВЫБОР — в подвале «add all»', dlg.slice(0, 120).replace(/\n/g, ' | '));
+// Диалог обязан закрыться: Radix держит на странице `pointer-events: none`, пока он открыт, и
+// оставленный открытым он ломает ВСЕ последующие секции — а выглядело бы это как их дефект.
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
+ck((await page.locator('[role="dialog"]').count()) === 0, 'пикер закрылся по Esc');
 
 head('4. галерея: отбивка проверяется ОТРИСОВКОЙ, а не строкой');
 // ДВА КАДРА ДАННЫМИ, А НЕ ССЫЛКОЙ: внешний адрес в стенде не загрузится, и `NoteImage` честно
@@ -224,6 +236,219 @@ const oldWay = `${base}![media 1](${PIX})\n![media 2](${PIX})`;
 const column = await layout(oldWay);
 ck(column.imgs === 2, 'в контроле тоже два снимка', `их ${column.imgs}`);
 ck(column.sameRow === false, 'с одним переводом строки они ложатся СТОЛБЦОМ — прибор различает', JSON.stringify(column));
+
+// ── 5. ПРОКРУТКА СТРАНИЦЫ ПРИ НАЖАТИИ КНОПКИ ──────────────────────────────────────────────────
+//
+// `apply()` зовёт `area.focus()`, а `focus()` ПО УМОЛЧАНИЮ подтягивает элемент в зону видимости и
+// утаскивает за собой скроллер страницы. Мерится САМА ПРОКРУТКА, а не каретка: каретку ставит
+// `useLayoutEffect`, и по ней дефект не виден вовсе.
+//
+// ДВЕ ГЕОМЕТРИИ, и разница между ними — весь ответ:
+//   A. полоса В ПОТОКЕ прямо над полем — так собран редактор заметки (`note-editor.tsx:291-293`:
+//      один блок, `<FormatBar>` и `<textarea>` подряд). Кнопка достижима, только пока верх поля
+//      на экране, — а `focus()` не прокручивает к тому, чей верхний край уже виден.
+//   B. полоса ЛИПКАЯ — кнопка достижима и тогда, когда поле ушло верхом выше вьюпорта.
+//
+// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ ОБЯЗАТЕЛЕН: «прокрутка не изменилась» одинаково верно и когда починка
+// работает, и когда кнопка вообще не нажалась. Поэтому у каждого замера проверяется, что текст
+// РЕАЛЬНО изменился, и отдельно — что кнопка была достижима мышью.
+head('5. прокрутка страницы при нажатии кнопки');
+
+const LONG = Array.from({ length: 120 }, (_, i) => `line ${i + 1} of the note text`).join('\n');
+
+async function stand({ heightPx, spacerPx = 1200, stickyBar = false }) {
+  await page.evaluate(
+    ([h, sp, st]) => window.__formatBar.mount({ heightPx: h, spacerPx: sp, stickyBar: st }),
+    [heightPx, spacerPx, stickyBar],
+  );
+  await page.waitForSelector('[data-area]', { timeout: 15000 });
+  const pos = Math.floor(LONG.length / 2);
+  await page.evaluate(([t, p]) => window.__formatBar.set(t, p, p + 4), [LONG, pos]);
+}
+
+/**
+ * НАСТОЯЩЕЕ НАЖАТИЕ МЫШЬЮ по координатам вьюпорта.
+ *
+ * Не локатором Playwright: тот перед кликом сам «scrolling into view if needed» — прибор двигал бы
+ * ровно ту величину, которую мерит. Но и не `el.click()`: у всех кнопок панели стоит
+ * `onMouseDown={e => e.preventDefault()}` (`format-bar.tsx:219,231,242,266`), то есть НАСТОЯЩЕЕ
+ * нажатие фокус из поля не уводит, а синтетический `click()` вообще не трогает фокус — разницу
+ * между «фокус остался» и «фокус не двигался» на нём не увидеть, а весь дефект именно про неё:
+ * `focus()` на УЖЕ сфокусированном элементе не прокручивает ничего.
+ */
+async function pressMouse({ keepFocus }) {
+  if (!keepFocus) await page.evaluate(() => window.__formatBar.blur());
+  await page.waitForTimeout(80);
+  const box = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').trim() === 'bold');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    const a = document.querySelector('[data-area]').getBoundingClientRect();
+    return {
+      x: r.left + r.width / 2,
+      y: r.top + r.height / 2,
+      reachable: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0,
+      top: Math.round(a.top),
+      height: Math.round(a.height),
+      vh: window.innerHeight,
+    };
+  });
+  const before = await page.evaluate(() => window.__formatBar.scrollY());
+  const wasFocused = await page.evaluate(() => window.__formatBar.focused());
+  const textBefore = await text();
+  if (!box || !box.reachable) return { ...box, before, after: before, changed: false, wasFocused };
+  await page.mouse.click(box.x, box.y);
+  await page.waitForTimeout(250);
+  const after = await page.evaluate(() => window.__formatBar.scrollY());
+  return { ...box, before, after, changed: (await text()) !== textBefore, wasFocused };
+}
+
+const parkAtButtonTop = () =>
+  page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').trim() === 'bold');
+    window.scrollTo(0, Math.round(b.getBoundingClientRect().top + window.scrollY));
+  });
+
+const parkPastFieldTop = (px) =>
+  page.evaluate((over) => {
+    const a = document.querySelector('[data-area]');
+    window.scrollTo(0, Math.round(a.getBoundingClientRect().top + window.scrollY + over));
+  }, px);
+
+// ── 5.A ГЕОМЕТРИЯ РЕДАКТОРА ЗАМЕТКИ. Полоса в потоке; прокрутка уведена в САМОЕ НИЖНЕЕ положение,
+//      при котором кнопку ещё можно нажать. Высоты: 300 — узкая заметка; 540 — те самые `60vh`
+//      при вьюпорте 900; 1800 и 3600 — поле, растянутое мышью (`resize-y`) вдвое и вчетверо выше
+//      экрана. Если дефект живёт в заметке, он обязан быть виден хоть на одной из этих высот.
+for (const h of [300, 540, 1800, 3600]) {
+  await stand({ heightPx: h });
+  await parkAtButtonTop();
+  await page.waitForTimeout(120);
+  const hot = await pressMouse({ keepFocus: true });
+  ck(hot.reachable && hot.changed,
+    `ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ h=${h}: кнопка достижима мышью и текст изменился`,
+    `достижима=${hot.reachable} изменился=${hot.changed}`);
+  ck(hot.top >= 0,
+    `h=${h}: когда кнопка достижима, верх поля НА ЭКРАНЕ — прокручивать focus() не к чему`,
+    `верх поля ${hot.top}, высота ${hot.height}, вьюпорт ${hot.vh}`);
+  ck(hot.after === hot.before,
+    `h=${h}, фокус в поле: прокрутка не сдвинулась`,
+    `${hot.before} → ${hot.after}`);
+
+  await parkAtButtonTop();
+  await page.waitForTimeout(120);
+  const cold = await pressMouse({ keepFocus: false });
+  ck(cold.reachable && cold.changed,
+    `ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ h=${h} (фокус снаружи): кнопка сработала`,
+    `достижима=${cold.reachable} изменился=${cold.changed}`);
+  ck(!cold.wasFocused, `h=${h}: фокус действительно был СНАРУЖИ поля перед нажатием`);
+  ck(cold.after === cold.before,
+    `h=${h}, фокус снаружи: прокрутка не сдвинулась`,
+    `${cold.before} → ${cold.after}`);
+}
+
+// ── 5.Б ЛИПКАЯ ПОЛОСА — конфигурация соседней ветки. Кнопка достижима, а верх поля уведён ВЫШЕ
+//      кромки вьюпорта: ровно то положение, из которого `focus()` обязан тянуть поле в вид.
+//      ФОКУС СНАРУЖИ: `focus()` на уже сфокусированном элементе не делает ничего по устройству,
+//      поэтому дефект живёт только там, где фокус ушёл (закрылась модалка, кликнули в показ).
+for (const over of [200, 800]) {
+  await stand({ heightPx: 2400, stickyBar: true });
+  await parkPastFieldTop(over);
+  await page.waitForTimeout(120);
+  const cold = await pressMouse({ keepFocus: false });
+  ck(cold.reachable && cold.changed,
+    `ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ липкая/${over}: кнопка сработала`,
+    `достижима=${cold.reachable} изменился=${cold.changed}`);
+  ck(cold.top < 0, `липкая/${over}: верх поля выше кромки вьюпорта`, `верх поля ${cold.top}`);
+  ck(cold.after === cold.before,
+    `ЛИПКАЯ ПОЛОСА, верх поля на ${over} выше кромки, фокус снаружи: прокрутка не сдвинулась`,
+    `${cold.before} → ${cold.after} (сдвиг ${cold.after - cold.before})`);
+}
+
+// ── 5.В ТА ЖЕ ЛИПКАЯ ПОЛОСА, НО ФОКУС В ПОЛЕ. Так выглядит обычный жест: текст выделен мышью,
+//      значит фокус в поле, и `onMouseDown` кнопки его оттуда не отпускает.
+await stand({ heightPx: 2400, stickyBar: true });
+await parkPastFieldTop(800);
+await page.waitForTimeout(120);
+const stickyHot = await pressMouse({ keepFocus: true });
+ck(stickyHot.reachable && stickyHot.changed,
+  'ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ липкая/фокус в поле: кнопка сработала');
+ck(stickyHot.wasFocused, 'липкая/фокус в поле: фокус действительно стоял в поле');
+ck(stickyHot.after === stickyHot.before,
+  'ЛИПКАЯ ПОЛОСА, фокус В ПОЛЕ: прокрутка не сдвинулась',
+  `${stickyHot.before} → ${stickyHot.after} (сдвиг ${stickyHot.after - stickyHot.before})`);
+
+// ── 5.Г КТО ИМЕННО ДВИГАЕТ ПРОКРУТКУ И С КАКОЙ ВЫСОТЫ ПОЛЯ ───────────────────────────────────
+//
+// `apply()` делает подряд две вещи, и обе умеют прокручивать: `area.focus()` тянет элемент в вид,
+// `setSelectionRange()` тянет в вид КАРЕТКУ. Починка `preventScroll` лечит только первую, поэтому
+// разделить их обязательно — иначе «починил» окажется словом, а не фактом.
+//
+// Заодно — с какой высоты поля это начинается. Геометрия редактора заметки, вьюпорт 900.
+const sweep = [];
+for (const h of [300, 540, 900, 1200, 1400, 1600, 1700, 1750, 1800, 1900, 2400, 3600]) {
+  await stand({ heightPx: h });
+  await parkAtButtonTop();
+  await page.waitForTimeout(80);
+  const pos = Math.floor(LONG.length / 2);
+  const r = await page.evaluate(async ([caret]) => {
+    const settle = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+    const a = document.querySelector('[data-area]');
+    const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').trim() === 'bold');
+    const park = async () => {
+      a.blur();
+      window.scrollTo(0, Math.round(b.getBoundingClientRect().top + window.scrollY));
+      await settle();
+    };
+    const shot = async (act) => {
+      await park();
+      const before = Math.round(window.scrollY);
+      act(a);
+      await settle();
+      return Math.round(window.scrollY) - before;
+    };
+    return {
+      bare: await shot((el) => el.focus()),
+      guard: await shot((el) => el.focus({ preventScroll: true })),
+      guardSel: await shot((el) => { el.focus({ preventScroll: true }); el.setSelectionRange(caret, caret + 4); }),
+      // может ли поле прокрутиться ВНУТРИ СЕБЯ: пока может — каретку показывает оно само и
+      // страницу трогать незачем; как только текст помещается целиком, показывать каретку
+      // приходится странице
+      inner: a.scrollHeight - a.clientHeight,
+      vh: window.innerHeight,
+    };
+  }, [pos]);
+  sweep.push({ h, ...r });
+}
+console.log(`  ··· сдвиг прокрутки, вьюпорт ${sweep[0].vh}: ` +
+  sweep.map((r) => `h=${String(r.h).padStart(4)}: голый ${String(r.bare).padStart(4)} / защищённый ${r.guard} / +каретка ${r.guardSel} / запас прокрутки внутри поля ${r.inner}`).join('\n      '));
+
+const jumps = sweep.filter((r) => r.bare !== 0);
+ck(jumps.length > 0,
+  'КОНТРОЛЬ МЕХАНИЗМА: голый focus() хотя бы на одной высоте ДВИГАЕТ прокрутку — ломаться есть чему',
+  jumps.length ? `начиная с h=${jumps[0].h} (сдвиг ${jumps[0].bare})` : 'ни на одной');
+ck(sweep.every((r) => r.guard === 0),
+  'ПРИЧИНА — ИМЕННО focus(): с preventScroll прокрутка стоит на ВСЕХ высотах',
+  sweep.map((r) => `${r.h}:${r.guard}`).join(' '));
+ck(sweep.every((r) => r.guardSel === 0),
+  'setSelectionRange страницу НЕ двигает — второго источника нет, одного слова хватает',
+  sweep.map((r) => `${r.h}:${r.guardSel}`).join(' '));
+ck(sweep.filter((r) => r.h <= sweep[0].vh).every((r) => r.bare === 0),
+  'на поле НЕ ВЫШЕ вьюпорта дефекта нет ни при каком фокусе',
+  sweep.filter((r) => r.h <= sweep[0].vh).map((r) => `${r.h}:${r.bare}`).join(' '));
+
+// ── 5.6 КОНТРОЛЬ ПРИБОРА: прокрутка вообще подвижна в этой конфигурации. Без него все три
+//      зелёные строки выше были бы одинаково зелёными на странице, которая не прокручивается.
+const movable = await page.evaluate(() => {
+  window.__formatBar.scrollTo(0);
+  const zero = window.__formatBar.scrollY();
+  window.__formatBar.scrollTo(900);
+  const nine = window.__formatBar.scrollY();
+  window.__formatBar.scrollTo(0);
+  return { zero, nine };
+});
+ck(movable.zero === 0 && movable.nine === 900,
+  'КОНТРОЛЬ ПРИБОРА: страница в этой конфигурации прокручивается на 900',
+  JSON.stringify(movable));
 
 ck(errors.length === 0, 'ни одного исключения на странице', errors[0] ?? '');
 await browser.close();

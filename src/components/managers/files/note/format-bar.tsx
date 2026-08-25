@@ -85,7 +85,8 @@ export function FormatBar({
     if (area.selectionStart !== p.sel[0] || area.selectionEnd !== p.sel[1]) {
       area.setSelectionRange(p.sel[0], p.sel[1]);
     }
-    area.focus();
+    // `preventScroll` — см. ниже в `apply`: голый `focus()` уносит прокрутку СТРАНИЦЫ.
+    area.focus({ preventScroll: true });
   }, [areaRef, value]);
 
   const apply = useCallback(
@@ -99,7 +100,12 @@ export function FormatBar({
 
       const expected = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
 
-      area.focus();
+      // ФОКУС БЕЗ ПРОКРУТКИ. Голый `focus()` по умолчанию тянет элемент в зону видимости и уводит
+      // за собой скроллер СТРАНИЦЫ. Пока поле прокручивается внутри себя, каретку показывает оно
+      // само и странице двигаться незачем; как только текст помещается в поле целиком, показать
+      // каретку может только страница — и заметка прыгает под руками (замерено: поле 1800px,
+      // вьюпорт 900, сдвиг 478px). Каретки это не касается: её ставит `setSelectionRange` ниже.
+      area.focus({ preventScroll: true });
       let done = false;
       if (edit.text !== '') {
         area.setSelectionRange(edit.start, edit.end);
