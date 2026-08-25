@@ -6,8 +6,10 @@ import { AnnotationEditor } from 'ui/components/annotation/editor';
 import { type EditHistory } from 'ui/components/annotation/history';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
+import { moveItem } from 'components/managers/media/components/gallery-order';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { GroupLabel } from 'ui/components/group-label';
+import { ViewSwitch } from 'ui/components/view-switch';
 import { SectionHeader } from 'ui/components/section-header';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -46,6 +48,52 @@ const MOODBOARD_KINDS: common_TechCardMediaKind[] = [
 ];
 
 type MediaListName = 'moodboardMedia' | 'technicalMedia';
+
+// ── КАК Я СМОТРЮ НА ЛИСТ ────────────────────────────────────────────────────────────────────────
+//
+// Лента или сетка — свойство РУК И ЭКРАНА, а не карточки: у мудборда пятнадцать референсов и грид
+// это рабочий режим, у эскиза три вида и лента — ежедневный, и человек с 27" хочет одного, а с 13"
+// другого. Поэтому предпочтение, а не поле формы: переключить вид не имеет права сделать карточку
+// «изменённой» — иначе beforeunload и заряженный Save появляются от того, что на лист посмотрели
+// иначе. Тот же довод, что у `use-panel-prefs.ts`.
+
+type RailMode = 'strip' | 'grid';
+type RailPrefs = { sketch?: RailMode; moodboard?: RailMode };
+
+const RAIL_PREF_KEY = 'plm.techcard.gallery.rail';
+
+function readRailPrefs(): RailPrefs {
+  try {
+    const raw = localStorage.getItem(RAIL_PREF_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Partial<Record<keyof RailPrefs, unknown>>;
+    // Хранилище правит кто угодно: чужая вкладка, ручная чистка, версия клиента постарше. Поэтому
+    // не «доверять и упасть», а взять только то, что похоже на правду.
+    const one = (v: unknown): RailMode | undefined =>
+      v === 'strip' || v === 'grid' ? v : undefined;
+    return { sketch: one(parsed?.sketch), moodboard: one(parsed?.moodboard) };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Режим показа ленты для ОДНОГО листа. Запись — ПАТЧЕМ поверх свежего чтения: эскиз и мудборд
+ * смонтированы одновременно и пишут один ключ, и запись состояния целиком у одного стирала бы то,
+ * что после его монтирования записал другой.
+ */
+function useRailMode(sheet: keyof RailPrefs) {
+  const [mode, setMode] = useState<RailMode>(() => readRailPrefs()[sheet] ?? 'strip');
+  const set = (next: RailMode) => {
+    setMode(next);
+    try {
+      localStorage.setItem(RAIL_PREF_KEY, JSON.stringify({ ...readRailPrefs(), [sheet]: next }));
+    } catch {
+      // Квота или запрещённое хранилище: режим не переживёт перезагрузку, работать не мешает.
+    }
+  };
+  return [mode, set] as const;
+}
 
 type FormCallout = {
   number?: number;
@@ -120,6 +168,9 @@ function TechCardGallery({
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const mediaFA = useFieldArray({ control, name: listName });
+  const [railMode, setRailMode] = useRailMode(
+    listName === 'moodboardMedia' ? 'moodboard' : 'sketch',
+  );
   const calloutFA = useFieldArray({ control, name: 'callouts' });
   const calloutValues = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
 
@@ -449,10 +500,15 @@ function TechCardGallery({
         const i = keyToIndex.get(key);
         const c = i != null ? calloutValues[i] : undefined;
         if (i == null || !c) return null;
+        // ГДЕ СТОИТ ТО, ЧТО ПРАВИШЬ. Редактор один на лист и живёт над рядом кадров: без этой
+        // строки правишь текст, не видя, к какой из пяти картинок он приколот. Номер кадра — тот
+        // же, которым его называют деталь, операция и «pinned to».
+        const at = mediaFA.fields.findIndex((f) => f.mediaId === c.mediaId);
         return (
           <AnnotationEditor
             kind={c.kind ?? 'pin'}
             number={c.number}
+            heading={at >= 0 ? `picture ${at + 1}` : undefined}
             text={c.description ?? ''}
             color={c.color ?? ''}
             dashed={!!c.dashed}
@@ -554,10 +610,34 @@ function TechCardGallery({
       pickerAspectRatio={['Custom']}
       emptyLabel={emptyLabel}
       fallbackAspect='3/4'
-      // Both surfaces are a fixed-height filmstrip — every image the same height, natural width
-      // (landscapes wider), horizontal-only scroll. Images aren't cropped, so callout pins still
-      // map 1:1.
-      gridRowHeight={480}
+      // ЛЕНТА ИЛИ СЕТКА — ПО ПРЕДПОЧТЕНИЮ. Лента: фиксированная высота, натуральная ширина
+      // (альбомные шире), прокрутка только вбок; снимки не обрезаются, поэтому пины по-прежнему
+      // ложатся 1:1. Сетка: та же лента с переносом строк — «все кадры разом».
+      gridRowHeight={railMode === 'strip' ? 480 : undefined}
+      railWrap={railMode === 'grid'}
+      viewControls={
+        <ViewSwitch
+          label='gallery layout'
+          value={railMode}
+          onChange={setRailMode}
+          options={[
+            { value: 'strip', label: 'strip', hint: 'one row, fixed height, scrolls sideways' },
+            { value: 'grid', label: 'grid', hint: 'every view at once, wrapped into rows' },
+          ]}
+        />
+      }
+      // ПОРЯДОК КАДРОВ — КОРНЕВОЙ ЗАПИСЬЮ, А НЕ `mediaFA.move`. Тот же класс риска, что уже пойман
+      // на `callouts` выше: в react-hook-form 7.62 мутаторы поля-массива не эмитят `_subjects.array`,
+      // и соседние читатели пути (здесь — `SelectField name={listName}.${index}.kind` в подвале
+      // плитки) о перестановке не узнают, то есть показывают вид ПЕРЕЕХАВШЕГО кадра под чужим.
+      onReorderMedia={
+        frozen
+          ? undefined
+          : (from, to) =>
+              setValue(listName, moveItem(getValues(listName) ?? [], from, to), {
+                shouldDirty: true,
+              })
+      }
       previewFirst
       mediaLabel={mediaLabel}
       carouselLabel={`${isMoodboard ? 'moodboard' : 'sketch'} images`}
@@ -571,22 +651,16 @@ function TechCardGallery({
             <div className='min-w-[92px] flex-1'>
               <SelectField name={`${listName}.${index}.kind`} label='kind' items={kindOptions} />
             </div>
-            <div className='shrink-0'>
-              {index === 0 ? (
+            {/* ПЕРВЫЙ КАДР = ОБЛОЖКА КАРТОЧКИ, и бейдж остаётся: он называет инвариант, который
+                иначе живёт только в голове у того, кто складывал лист.
+                Кнопки «set as preview» больше нет. Она выражала РОВНО ОДНУ перестановку из всех
+                («сделай этот первым») и стояла под каждым кадром; ручка ⠿ и стрелки в подвале
+                плитки выражают любую и не занимают места под каждым. */}
+            {index === 0 && (
+              <div className='shrink-0'>
                 <Pill tone='mut'>preview</Pill>
-              ) : (
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  // first item = the card's preview / thumbnail (proto: idea preview_url)
-                  onClick={() => mediaFA.move(index, 0)}
-                  className='cursor-pointer'
-                >
-                  set as preview
-                </Button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         );
       }}
