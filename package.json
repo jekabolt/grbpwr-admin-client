@@ -52,7 +52,8 @@
     "annotation:frame": "node scripts/annotation-frame-probe.mjs",
     "reader:find": "node scripts/reader-find-probe.mjs",
     "upload:queue": "node scripts/upload-queue-probe.mjs",
-    "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs"
+    "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs",
+    "note:format-edits": "node scripts/format-edits-probe.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",
