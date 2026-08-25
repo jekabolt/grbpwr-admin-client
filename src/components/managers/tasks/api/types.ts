@@ -71,6 +71,24 @@ export interface TaskChecklistItem {
 export interface TaskInsert {
   title: string;
   description: string;
+  /**
+   * ИСПОЛНИТЕЛИ — СПИСОК, И ОН ИСТОЧНИК ИСТИНЫ. Порядок = порядок отображения (первый лишь
+   * витринный, «главного» исполнителя нет). Пустой список = никто не взял.
+   *
+   * Пока на проводе одиночное поле, список читается из него (`mapInsert`) и в него же СВОДИТСЯ
+   * на записи (`taskInsertToWire`). Форма поэтому физически не даёт выбрать двоих — терять
+   * второго молча нечем.
+   */
+  assignees: string[];
+  /**
+   * @deprecated — ВЫВОДИТСЯ из `assignees[0]`, удалить после волны.
+   *
+   * Живёт только ради двух читателей ВНЕ домена задач (`tech-card/tech-card-tasks-panel.tsx`,
+   * `files/components/file-tasks-section.tsx`): они печатают одно имя и переживают переход на
+   * список без единой правки. На ПУТИ ЗАПИСИ поле игнорируется — адаптер выводит его заново,
+   * поэтому рассинхрон двух полей невыразим (урок «ложное расщепление словарей»: два члена =
+   * один смысл, и второй обязан быть выводимым).
+   */
   assignee: string; // AdminAccount.username; '' = unassigned
   priority: TaskPriority;
   dueDate: string | undefined; // RFC3339; undefined = no deadline (key always present, mirrors common_TaskInsert)
@@ -178,6 +196,7 @@ export function emptyTaskInsert(): TaskInsert {
   return {
     title: '',
     description: '',
+    assignees: [],
     assignee: '',
     priority: 'TASK_PRIORITY_UNKNOWN',
     dueDate: undefined,

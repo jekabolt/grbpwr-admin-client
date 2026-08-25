@@ -140,9 +140,17 @@ function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
  * снятом с карточки, нельзя ни увидеть, ни убрать), и отправлять его значило бы врать себе о том,
  * что сохранилось. Отсев делается по ТОМУ ЖЕ списку вложений, который уезжает в этом же запросе.
  */
-function taskInsertToWire(t: TaskInsert): common_TaskInsert {
+export function taskInsertToWire(t: TaskInsert): common_TaskInsert {
+  // СПИСОК ИСПОЛНИТЕЛЕЙ СВОДИТСЯ В ОДИНОЧНОЕ ПОЛЕ ПРОВОДА — и `assignees` из объекта УХОДИТ:
+  // на проводе такого поля ещё нет, и отправлять его значило бы врать себе о том, что сохранится.
+  //
+  // Одиночное поле здесь ВЫВОДИТСЯ, а не проносится: `t.assignee` мог остаться от прошлого
+  // чтения (форма правит только список), и пронесённое значение записывало бы старого
+  // исполнителя поверх нового. Ровно поэтому оно и не читается.
+  const { assignees, assignee: _derived, ...rest } = t;
   return {
-    ...t,
+    ...rest,
+    assignee: assignees[0] ?? '',
     mediaAnnotations: (t.mediaAnnotations ?? [])
       .filter((m) => m.mediaId > 0 && t.mediaIds.includes(m.mediaId))
       .map((m) => ({
@@ -152,10 +160,13 @@ function taskInsertToWire(t: TaskInsert): common_TaskInsert {
   };
 }
 
-function mapInsert(i: common_Task['task']): TaskInsert {
+export function mapInsert(i: common_Task['task']): TaskInsert {
   return {
     title: i?.title ?? '',
     description: i?.description ?? '',
+    // Провод пока одиночный: список — это ноль или один человек. Оба поля берутся из ОДНОГО
+    // источника, поэтому разойтись на чтении им нечем.
+    assignees: i?.assignee ? [i.assignee] : [],
     assignee: i?.assignee ?? '',
     priority: i?.priority ?? 'TASK_PRIORITY_UNKNOWN',
     dueDate: i?.dueDate || undefined,

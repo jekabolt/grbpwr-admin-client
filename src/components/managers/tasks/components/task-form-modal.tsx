@@ -293,12 +293,20 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 />
               </Field>
             </div>
+            {/* ПОЛЕ ФОРМЫ — СПИСОК, КОНТРОЛ ПОКА ОДИНОЧНЫЙ. Мостом, а не двумя источниками:
+                форма правит только `assignees`, а совместимое одиночное поле выводится на
+                записи. Выбрать двоих здесь ещё нельзя — и это НАМЕРЕННО: провод одиночный,
+                и второй исполнитель терялся бы молча при первом же сохранении. Мультиселект
+                встаёт сюда одной заменой контрола, когда приедет `assignees` на проводе. */}
             <Field label='assignee'>
               <Controller
                 control={control}
-                name='assignee'
+                name='assignees'
                 render={({ field }) => (
-                  <AssigneeSelect value={field.value} onChange={field.onChange} />
+                  <AssigneeSelect
+                    value={field.value[0] ?? ''}
+                    onChange={(username) => field.onChange(username ? [username] : [])}
+                  />
                 )}
               />
             </Field>
