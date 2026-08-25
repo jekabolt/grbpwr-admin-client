@@ -281,8 +281,12 @@ export function MediaIntakeDialog({
   const cropIndex = croppingId ? previews.findIndex((item) => item.id === croppingId) : -1;
   const cropping = cropIndex >= 0 ? previews[cropIndex] : undefined;
   useEffect(() => {
-    if (croppingId && cropIndex < 0) setCroppingId(null);
-  }, [croppingId, cropIndex]);
+    if (!croppingId) return;
+    // Панель закрывается и когда строка УЕХАЛА: держать открытым кроп над тем, что уже в пути,
+    // значит предлагать жест, который движок обязан отказать. Отказ он теперь отказывает молча
+    // и честно (`usePendingFiles`), но предлагать нечего — вторая половина той же починки.
+    if (cropIndex < 0 || !canCrop(previews[cropIndex])) setCroppingId(null);
+  }, [croppingId, cropIndex, previews]);
 
   // ОДИНОЧНЫЙ КАДР В СЛОТ С ЖЁСТКОЙ ПРОПОРЦИЕЙ ОТКРЫВАЕТ КРОП СРАЗУ: там кадрирование не
   // «возможность», а условие — слот другого соотношения не покажет.

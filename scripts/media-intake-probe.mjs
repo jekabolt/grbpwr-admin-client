@@ -99,6 +99,14 @@ const MUTATIONS = {
     from: "    const status = await engine.setCroppedUrl(index, url);\n    setCroppingId(null);\n    if (guided && status === 'wait') beginUpload();",
     to: '    void engine.setCroppedUrl(index, url);\n    setCroppingId(null);\n    if (guided) beginUpload();',
   },
+  // Снять сторожа НАГРУЗКИ: кроп снова записывается в строку, которая уже уехала, и плитка
+  // говорит «cropped · N KB» про кадр, которого в бакете нет.
+  payload: {
+    file: /usePendingFiles\.ts$/,
+    loader: 'ts',
+    from: "    if (!RECHECKABLE.includes(item.status)) return Promise.resolve(item.status);",
+    to: '    // МУТАЦИЯ: сторож нагрузки снят',
+  },
   // Снять СТОРОЖА поздней записи: обмер снова пишет статус, не глядя, что со строкой стало.
   noguard: {
     file: /usePendingFiles\.ts$/,
@@ -550,6 +558,66 @@ await tryClick(page.locator('button', { hasText: /^retry failed \(2\)$/i }).firs
 await page.waitForFunction(() => window.__intake.delivered().length >= 2, null, { timeout: 20000 });
 await page.waitForTimeout(400);
 ck((await delivered()).length === 2, 'повтор довёз обе', `их ${(await delivered()).length}`);
+
+// ── 8. КРОП НА СТРОКЕ, КОТОРАЯ УЖЕ УЕХАЛА ─────────────────────────────────────────────────────
+//
+// `setCroppedUrl` клал `croppedUrl` и `size` БЕЗУСЛОВНО — сторож поздней записи накрывает только
+// СТАТУС. Панель кропа, открытая на строке, полосу загрузки библиотеки не закрывает, и пока пачку
+// держит живой сосед, строка успевает стать `done`. Итог: плитка пишет «cropped · N KB», а в бакет
+// уехал оригинал — данные целы, но человеку показывают неправду о том, что сохранилось.
+//
+// Мерится ДВИЖОК: строка — ровно то, из чего рисуется плитка.
+head('8. кроп применён к уже отправленной строке');
+uploadN = 0; uploadFails = false; uploadDelayMs = 1200;
+await page.goto('http://probe.local/');
+if (CSS) await page.addStyleTag({ content: CSS });
+await page.addScriptTag({ content: bundle });
+await page.evaluate(() => window.__intake.engineMount());
+await page.waitForSelector('[data-engine]', { timeout: 15000 });
+
+// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ ИДЁТ ПЕРВЫМ. Без него «кроп не записался» неотличимо от «кроп не
+// записывается никогда»: сторож, накрывший всё подряд, выглядел бы такой же зелёной строкой.
+const CROP_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFElEQVR4nGNkYPjPgAUwYRMcXhIAcxgBFimGkjIAAAAASUVORK5CYII=';
+await page.evaluate(() => window.__intake.engineAdd(2));
+await page.waitForTimeout(500);
+const sizeBefore = (await page.evaluate(() => window.__intake.engineRows()))[0].size;
+await page.evaluate((u) => window.__intake.engineCrop(0, u), CROP_URL);
+await page.waitForTimeout(500);
+const waitRow = (await page.evaluate(() => window.__intake.engineRows()))[0];
+ck(waitRow.cropped === true, 'на ЖДУЩЕЙ строке кроп записывается — сторож не глушит всё подряд',
+  `status ${waitRow.status}`);
+
+// А теперь то самое: строка уехала и уже легла в библиотеку, а панель кропа осталась открытой.
+await page.evaluate(() => window.__intake.engineAdd(2));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.__intake.engineUpload());
+// Ждём, пока ПЕРВАЯ из свежих строк станет `done`, а вторая ещё будет в пути: окно тянется всю
+// длину отправки соседа по пачке.
+await page
+  .waitForFunction(
+    () => {
+      const r = window.__intake.engineRows();
+      return r[2] && r[2].status === 'done' && r[3] && r[3].status !== 'done';
+    },
+    null,
+    { timeout: 25000 },
+  )
+  .catch(() => {});
+const before = await page.evaluate(() => window.__intake.engineRows());
+ck(before[2]?.status === 'done', 'строка уже в библиотеке', `status ${before[2]?.status}`);
+ck(before[3] && before[3].status !== 'done', 'а сосед по пачке ещё держит отправку живой',
+  `status ${before[3]?.status}`);
+const doneSize = before[2]?.size;
+const said2 = await page.evaluate((u) => window.__intake.engineCrop(2, u), CROP_URL);
+await page.waitForTimeout(600);
+const after = (await page.evaluate(() => window.__intake.engineRows()))[2];
+ck(after.cropped === false,
+  'кроп НЕ записан в уехавшую строку — плитка не скажет «cropped» про то, чего в бакете нет',
+  `cropped=${after.cropped}, ответ движка «${said2}»`);
+ck(after.size === doneSize, 'и вес остался тем, что реально уехал', `${doneSize} → ${after.size}`);
+ck(after.status === 'done', 'статус тоже не поехал', after.status);
+uploadDelayMs = 0;
 
 ck(pageErrors.length === 0, 'за весь прогон ни одного исключения на странице', pageErrors[0] ?? '');
 

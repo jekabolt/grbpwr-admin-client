@@ -407,6 +407,13 @@ export function usePendingFiles() {
     if (!id) return Promise.resolve(null);
     const item = itemsRef.current.find((entry) => entry.id === id);
     if (!item) return Promise.resolve(null);
+    // СТОРОЖ НАКРЫВАЕТ И НАГРУЗКУ, А НЕ ТОЛЬКО СТАТУС. Панель кропа не закрывается оттого, что
+    // строка уехала: `canCrop` гейтит ПОЯВЛЕНИЕ кнопки, а открытая панель живёт дальше — и пока
+    // пачку держит живой сосед, строка успевает стать `done`. Запись `croppedUrl` и `size` в
+    // такую строку не теряет данных, но плитка после неё говорит «cropped · N KB» про кадр,
+    // которого в бакете нет: туда уехал оригинал. Кадрировать уже отправленное нечем — для этого
+    // есть рекроп готового медиа, а не эта очередь.
+    if (!RECHECKABLE.includes(item.status)) return Promise.resolve(item.status);
 
     const size = dataUrlBytes(croppedUrl);
     patch(id, { croppedUrl, size });

@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client';
 
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
+import { usePendingFiles } from 'components/managers/media/utils/usePendingFiles';
 import { useSnackBarStore } from 'lib/stores/store';
 import type { PasteAccept } from 'components/managers/media/utils/usePasteFiles';
 
@@ -47,6 +48,23 @@ type IntakeProbe = {
   busy: () => boolean;
   /** Последнее сказанное вслух: отброшенное по потолку обязано быть названо. */
   said: () => string;
+
+  // ── ДВИЖОК ОЧЕРЕДИ БЕЗ ЭКРАНА ──────────────────────────────────────────────────────────────
+  //
+  // Кроп на строке, КОТОРАЯ УЖЕ УЕХАЛА, через приёмку недостижим: она закрывает панель кропа при
+  // отправке. А через полосу загрузки библиотеки — достижим: там «send all» панель не закрывает,
+  // и пока пачку держит живой сосед, соседняя строка успевает стать `done`. Движок у них ОДИН,
+  // поэтому проверяется он сам: строка — это ровно то, из чего рисуется плитка («cropped · N KB»).
+  engineMount: () => void;
+  engineAdd: (count: number) => void;
+  engineUpload: () => void;
+  engineCrop: (index: number, dataUrl: string) => Promise<string | null>;
+  engineRows: () => {
+    status: string;
+    cropped: boolean;
+    size: number;
+    mediaId?: number;
+  }[];
 };
 
 declare global {
@@ -122,6 +140,43 @@ function Harness({ opts }: { opts: MountOpts }) {
     </DialogPrimitive.Root>
   );
 }
+
+function EngineHarness() {
+  const engine = usePendingFiles();
+  probe.engineAdd = (count) => {
+    const bin = Uint8Array.from(
+      atob(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8DAwMDAwMDEAAMADgIBAWiJ8fMAAAAASUVORK5CYII=',
+      ),
+      (c) => c.charCodeAt(0),
+    );
+    const files = Array.from(
+      { length: count },
+      (_, i) => new File([bin], `row-${i}.png`, { type: 'image/png' }),
+    );
+    engine.addFiles(files);
+  };
+  probe.engineUpload = () => engine.handleUploadAll();
+  probe.engineCrop = (index, dataUrl) => engine.setCroppedUrl(index, dataUrl);
+  probe.engineRows = () =>
+    engine.previews.map((item) => ({
+      status: item.status,
+      cropped: !!item.croppedUrl,
+      size: item.size,
+      mediaId: item.mediaId,
+    }));
+  return <div data-engine>{engine.previews.length} rows</div>;
+}
+
+probe.engineMount = () => {
+  const host = document.getElementById('root')!;
+  host.innerHTML = '';
+  createRoot(host).render(
+    <QueryClientProvider client={qc}>
+      <EngineHarness />
+    </QueryClientProvider>,
+  );
+};
 
 probe.mount = (opts) => {
   const host = document.getElementById('root')!;
