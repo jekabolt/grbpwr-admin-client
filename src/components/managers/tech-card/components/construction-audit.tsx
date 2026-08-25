@@ -1,13 +1,23 @@
-import { TechCardAnalysisFinding } from 'api/proto-http/admin';
-import { useTechCardConstructionAudit } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { AnalyzeTechCardConstructionResponse, TechCardAnalysisFinding } from 'api/proto-http/admin';
+import {
+  ANALYZE_ABORTED_BY_CLIENT,
+  ANALYZE_CLIENT_BUDGET_MS,
+  useAddTechCardIssue,
+  useAnalyzeTechCardConstruction,
+  useTechCardConstructionAudit,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { GroupLabel } from 'ui/components/group-label';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import { ViewSwitch } from 'ui/components/view-switch';
+import { assignUids, loadAnalysis, saveAnalysis, StoredAnalysis } from './analysis-identity';
 import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from './schema';
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
@@ -22,11 +32,28 @@ import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from '
 // hidden «and here is what I never looked at» reads as «checked and clean», which is the one lie an
 // audit must not tell. It renders always, expanded, under the findings — including when there are no
 // findings at all, where it is the ONLY honest content on the panel.
+//
+// THE AI REVIEW BLOCK IS A SEPARATE BLOCK BELOW, NOT A SECOND HALF OF THE LIST. The two layers fail
+// independently: a suppressed model half (`invalid_output`) must never read as an all-clear over the
+// machine section, and a machine section full of findings must not be quieted by a model that
+// answered nothing. Same finding ROW on both sides — one renderer, so the chips, the expansion and
+// «file as issue» cannot drift apart — but two headers, two statuses, two stories.
 
 // Severities in the order they are shown, and the only ones this bundle knows a tone for. An
 // unknown severity is counted and drawn like the rest, just at the default tone and after these.
 const SEVERITY_ORDER = ['blocker', 'error', 'warning'];
 const SEVERITY_IS_LOUD = new Set(['blocker', 'error']);
+
+// THE MODEL HALF COUNTS AND GROUPS ON ONE AXIS, AND `question` IS ON IT. `question` is a CATEGORY,
+// not a severity — but the pill header the gold-standard review is written to has four buckets, the
+// fourth being «спорное». Counting it on the category axis while GROUPING it by its severity is how
+// a header reading «0 warnings» ends up sitting above a group headed «1 warning»: two true numbers
+// that contradict each other on one screen. So both use this, and neither can drift.
+const MODEL_BUCKETS = [...SEVERITY_ORDER, 'question'];
+function modelBucket(f: TechCardAnalysisFinding): string {
+  if ((f.category ?? '').trim() === 'question') return 'question';
+  return (f.severity ?? '').trim() || 'finding';
+}
 
 // A ref is an anchor string the server mints: "op:460" | "unit:base" | "piece:SL_INS_L" |
 // "bom:подкладка" | "card". WHERE each one is fixed is this admin's navigation and can never come
@@ -71,15 +98,79 @@ function firstOpNumber(refs: string[]): number {
   return 0;
 }
 
+/** The step number an `op:` anchor names, or null for anything else. */
+function opNumber(ref: string): number | null {
+  if (!ref.startsWith('op:')) return null;
+  const n = parseInt(ref.slice(3).trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// WHERE A FINDING SITS ON THE ROUTE. The technologist works either in batches of one kind of edit
+// (that is `category`) or top-to-bottom through the sequence — this key is the second one, and the
+// gold-standard review is ordered by it.
+//
+// `missing_step` is keyed by its INSERT POINT, not by its refs: the step it talks about does not
+// exist yet, so its anchors point at the neighbours, and sorting by those would file «add a step
+// after 120» next to whatever op:460 it happened to cite. `start` sorts before every real step;
+// «no op anchor at all» sorts last rather than first — a finding about the card as a whole is not
+// step zero.
+const ROUTE_LAST = Number.MAX_SAFE_INTEGER;
+function routeKey(f: TechCardAnalysisFinding): number {
+  const refs = (f.refs ?? []).filter((r): r is string => !!r?.trim());
+  if ((f.category ?? '').trim() === 'missing_step') {
+    const ins = (f.insertAfter ?? '').trim();
+    if (ins === 'start') return -1;
+    const n = opNumber(ins);
+    if (n !== null) return n;
+  }
+  const nums = refs.map(opNumber).filter((n): n is number => n !== null);
+  return nums.length ? Math.min(...nums) : ROUTE_LAST;
+}
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+// TWO VOCABULARIES FOR ONE WORD, and the boundary between them runs exactly through this panel.
+// The FORM speaks the proto enum (`TECH_CARD_ISSUE_SEVERITY_MEDIUM`) because that is what the card
+// message carries. `AddTechCardIssueRequest.severity` is a plain STRING, and the handler accepts
+// only HIGH | MEDIUM | LOW — anything else is InvalidArgument, by design (the column's own CHECK
+// is `^(low|medium|high)$`, and the handler maps the wire token onto it rather than passing the
+// spelling through). Sending the enum name would have failed EVERY direct filing, and no amount of
+// stubbed-network testing could have shown it: the stub accepts whatever it is handed.
+const ISSUE_SEVERITY_WIRE: Record<string, string> = {
+  TECH_CARD_ISSUE_SEVERITY_HIGH: 'HIGH',
+  TECH_CARD_ISSUE_SEVERITY_MEDIUM: 'MEDIUM',
+  TECH_CARD_ISSUE_SEVERITY_LOW: 'LOW',
+};
+function wireSeverity(formSeverity: string): string {
+  return ISSUE_SEVERITY_WIRE[formSeverity] ?? 'MEDIUM';
+}
+
+// THE DESCRIPTION A FILED ISSUE CARRIES — one mapping for both sources and both paths (the live
+// card's form write and the released card's direct call), so the frozen path cannot drift from the
+// live one and the model tail cannot be forgotten on one of them.
+//
+// A MODEL FINDING NAMES ITS MODEL. The issue outlives the run that produced it by months; without
+// the slug, a claim the reader is about to act on has no provenance at all, and «the AI said so» is
+// unfalsifiable in a way «gpt-x said so on the 24th» is not. A machine finding gets no such tail —
+// it was produced by code in this repo, and a version tail there would be noise.
+export function issueDescription(f: TechCardAnalysisFinding, modelSlug?: string): string {
+  const title = (f.title ?? '').trim();
+  const detail = (f.detail ?? '').trim();
+  const suggestion = (f.suggestion ?? '').trim();
+  if ((f.source ?? '').trim() === 'model') {
+    const slug = (modelSlug ?? '').trim();
+    const head = '[AI review] ' + [title, detail].filter(Boolean).join(' — ');
+    return slug ? `${head} (model ${slug})` : head;
+  }
+  return [title, detail, suggestion].filter(Boolean).join('\n\n') || 'construction audit finding';
 }
 
 // One anchor. `Chip nonForm` and not a `<Button>`, and that is load-bearing rather than styling:
 // the construction tab lives inside `<fieldset disabled={frozen}>`, which kills every native
 // control under it on a RELEASED card — the exact case where somebody reads the audit and cannot
-// change a thing, so the read-only jump has to survive. The «file as issue» control below is a real
-// button for the mirror-image reason: it writes, so the fieldset is right to stop it.
+// change a thing, so the read-only jump has to survive.
 function RefChip({ refString, onGo }: { refString: string; onGo?: (r: string) => void }) {
   const target = refTarget(refString);
   if (!target || !onGo) {
@@ -96,14 +187,72 @@ function RefChip({ refString, onGo }: { refString: string; onGo?: (r: string) =>
   );
 }
 
+// «FILE AS ISSUE», IN TWO SHAPES, BY THE ONE THING THAT ACTUALLY DIFFERS: where the write lands.
+//
+// On a LIVE card the gesture writes into the form and is persisted by the ordinary save — a real
+// `<button>`, so the surrounding `<fieldset disabled>` can stop it. That fieldset is never disabled
+// on a live card, so nothing is lost; what is gained is that the control cannot outlive the rule.
+//
+// On a RELEASED card there is no save to ride on, and this is precisely where acceptance happens:
+// the finding goes to the server directly (`AddTechCardIssue`). A native control there would be
+// dead — `disabled` is inherited from the disabled fieldset and no prop of its own undoes it — so
+// the frozen shape is a `Chip nonForm` span whose gate is THIS COMPONENT'S OWN `frozen` prop, not
+// the fieldset. Freezing writers by prop rather than by fieldset is the established rule here; the
+// fieldset stays the guard for form organs, and this one stopped being a form organ.
+function FileControl({
+  frozen,
+  busy,
+  onFile,
+}: {
+  frozen: boolean;
+  busy: boolean;
+  onFile: () => void;
+}) {
+  if (frozen) {
+    return (
+      <Chip
+        nonForm
+        dashed
+        className='shrink-0'
+        disabled={busy}
+        onClick={onFile}
+        title='file this on the issues tab of the released card'
+      >
+        {busy ? 'filing…' : 'file as issue'}
+      </Chip>
+    );
+  }
+  return (
+    <Button type='button' variant='underline' size='xs' className='shrink-0' onClick={() => onFile()}>
+      file as issue
+    </Button>
+  );
+}
+
 function Finding({
   finding,
   onGo,
   onFile,
+  frozen = false,
+  filing = false,
+  delta,
+  dismissed = false,
+  onDismiss,
+  onRestore,
 }: {
   finding: TechCardAnalysisFinding;
   onGo?: (r: string) => void;
   onFile: (f: TechCardAnalysisFinding) => void;
+  /** RELEASED card: filing goes straight to the server instead of into the form. */
+  frozen?: boolean;
+  /** A direct filing call is in flight — the control says so and refuses a second press. */
+  filing?: boolean;
+  /** Only ever set on a RE-RUN, and only on the model side. */
+  delta?: 'new' | 'still open';
+  dismissed?: boolean;
+  /** Offered on MODEL findings only: a machine finding disappears when its cause does. */
+  onDismiss?: () => void;
+  onRestore?: () => void;
 }) {
   const severity = (finding.severity ?? '').trim();
   const category = (finding.category ?? '').trim();
@@ -117,6 +266,32 @@ function Finding({
   // that category rather than on being non-empty.
   const insertAfter = category === 'missing_step' ? (finding.insertAfter ?? '').trim() : '';
 
+  // A DISMISSED FINDING IS COLLAPSED, NOT REMOVED. Removing it would make the next re-run's «N
+  // dismissed» a claim about something invisible, and the reader could never check what they once
+  // waved through. One line, greyed, with the way back on it.
+  if (dismissed) {
+    return (
+      <div className='flex flex-wrap items-center gap-1 border-b border-hairline py-1 last:border-b-0 opacity-60'>
+        <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
+          dismissed
+        </Text>
+        {severity && (
+          <Text size='micro' variant='label' component='span'>
+            {severity} ·
+          </Text>
+        )}
+        <Text size='micro' variant='label' component='span'>
+          {title || category || 'finding'}
+        </Text>
+        {onRestore && (
+          <Chip nonForm dashed className='ml-auto shrink-0' onClick={onRestore}>
+            restore
+          </Chip>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className='border-b border-hairline py-2 last:border-b-0'>
       <ChipRow>
@@ -128,6 +303,7 @@ function Finding({
         {confidence && (
           <Chip dashed>{confidence === 'heuristic' ? 'heuristic — may be wrong' : confidence}</Chip>
         )}
+        {delta && <Chip dashed>{delta}</Chip>}
       </ChipRow>
 
       {title && <Text className='mt-1'>{title}</Text>}
@@ -165,24 +341,134 @@ function Finding({
         {refs.map((r) => (
           <RefChip key={r} refString={r} onGo={onGo} />
         ))}
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className='ml-auto shrink-0'
-          onClick={() => onFile(finding)}
-        >
-          file as issue
-        </Button>
+        {/* THE TWO ACTIONS ARE ONE GROUP, pushed right together. `ml-auto` on each of them
+            separately put «dismiss» in the middle of the row, reading as a third anchor rather than
+            as the other half of the pair it belongs to. */}
+        <div className='ml-auto flex shrink-0 items-center gap-2'>
+          {onDismiss && (
+            <Chip
+              nonForm
+              dashed
+              onClick={onDismiss}
+              title='hide this finding from later runs of this session'
+            >
+              dismiss
+            </Chip>
+          )}
+          <FileControl frozen={frozen} busy={filing} onFile={() => onFile(finding)} />
+        </div>
       </div>
     </div>
   );
+}
+
+// ─── THE MODEL HALF ────────────────────────────────────────────────────────────────────────────
+
+type Grouping = 'severity' | 'route' | 'category';
+
+const GROUPINGS: readonly { value: Grouping; label: string; hint: string }[] = [
+  { value: 'severity', label: 'severity', hint: 'blockers first, then errors, then warnings' },
+  { value: 'route', label: 'route', hint: 'in the order the garment is assembled' },
+  { value: 'category', label: 'category', hint: 'batched by the kind of edit each one needs' },
+];
+
+/** One rendered group: a heading (empty for the flat route view) and the findings under it. */
+type Group = { key: string; heading: string; items: number[] };
+
+// GROUPING IS A CLIENT-SIDE VIEW OF ONE RUN, never a second ranking of it. Every branch is a
+// permutation of the same array — nothing is filtered out by the toggle, so a finding cannot hide
+// in a view the reader does not happen to be in.
+function groupFindings(findings: TechCardAnalysisFinding[], grouping: Grouping): Group[] {
+  const index = findings.map((_, i) => i);
+  if (grouping === 'route') {
+    // A FLAT, SORTED LIST — not groups of one step. `sort` is stable in every engine this ships
+    // to, so two findings on the same step keep the order the server ranked them in.
+    const ordered = [...index].sort((a, b) => routeKey(findings[a]) - routeKey(findings[b]));
+    return [{ key: 'route', heading: '', items: ordered }];
+  }
+  const buckets = new Map<string, number[]>();
+  for (const i of index) {
+    const f = findings[i];
+    const key =
+      grouping === 'severity'
+        ? modelBucket(f)
+        : (f.category ?? '').trim() || 'uncategorised';
+    const at = buckets.get(key);
+    if (at) at.push(i);
+    else buckets.set(key, [i]);
+  }
+  const keys =
+    grouping === 'severity'
+      ? [
+          // The known order first, then whatever else arrived — an unfamiliar severity gets a group
+          // of its own rather than being folded into a known one.
+          ...MODEL_BUCKETS.filter((s) => buckets.has(s)),
+          ...[...buckets.keys()].filter((s) => !MODEL_BUCKETS.includes(s)),
+        ]
+      : // Category has no canonical order and inventing one would be a second ranking; first
+        // appearance in the server's own order is the honest tie-break.
+        [...buckets.keys()];
+  return keys.map((k) => ({
+    key: k,
+    heading: grouping === 'severity' ? plural(buckets.get(k)!.length, k) : k.replace(/_/g, ' '),
+    items: buckets.get(k)!,
+  }));
+}
+
+// THE STATUS LINE, WORDED PER §12. Three rules are load-bearing and are the reason this is a table
+// of sentences rather than a `status.replace('_', ' ')`:
+//   · `model_unavailable` NAMES THE SLUG and never says «try again later» — it is a configuration
+//     fault, and «later» is a lie that costs a week of nobody looking at the config.
+//   · `failed` is the ONLY status that offers a retry: it is genuinely weather.
+//   · `invalid_output` must not read as an all-clear — the model was paid and answered nothing
+//     usable, which is the opposite of «nothing is wrong with this card».
+function statusLine(status: string, model: string): { tone: 'error' | 'warning' | 'note'; text: string } | null {
+  const slug = model.trim() || '(no slug on the wire)';
+  switch (status) {
+    case 'ok':
+      return null;
+    case 'not_configured':
+      return { tone: 'note', text: 'AI review is not available on this deployment.' };
+    case 'model_unavailable':
+      return {
+        tone: 'error',
+        text:
+          `the provider does not serve «${slug}». This is a configuration fault, not a busy ` +
+          `moment — waiting changes nothing. Point OPENROUTER_MODEL_ANALYSIS at a slug this key ` +
+          `can reach.`,
+      };
+    case 'failed':
+      return {
+        tone: 'warning',
+        text: 'the run did not complete — a timeout or a transport fault. This one is weather: retry.',
+      };
+    case 'invalid_output':
+      return {
+        tone: 'error',
+        text:
+          `«${slug}» answered something unusable — cut off by the token ceiling, not JSON, or too ` +
+          `much of it failed verification to trust the rest. THIS IS NOT AN ALL-CLEAR: the model ` +
+          `did not report a clean card, it failed to report at all. There is no auto-retry; ` +
+          `paying twice for the same fault without a diagnosis is the same fault twice.`,
+      };
+    case 'skipped':
+      return {
+        tone: 'note',
+        text: 'this card carries no assembly to analyse — nothing was sent and nothing was spent.',
+      };
+    default:
+      // An ai_status this bundle has never heard of still reaches the screen, verbatim. Silence
+      // would be indistinguishable from «ok», which is the one thing it is certainly not.
+      return { tone: 'warning', text: `the run came back with an unfamiliar status: «${status}».` };
+  }
 }
 
 export function ConstructionAudit({
   techCardId,
   active,
   onGoTab,
+  frozen = false,
+  operationCount,
 }: {
   techCardId?: number;
   /**
@@ -197,10 +483,37 @@ export function ConstructionAudit({
    * `index.tsx`; здесь живёт лишь правило «какой якорь куда ведёт», которое из API прийти не может.
    */
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
+  /**
+   * RELEASED card. The one thing it changes here is WHERE a filed finding is written: straight to
+   * the server instead of into the form. The predicate is the caller's, and it is the same one that
+   * disables the tab's fieldset — a card that is frozen for editing but not here would file issues
+   * into a form that can never be saved, and the operator would never learn they vanished.
+   */
+  frozen?: boolean;
+  /** Steps on the SAVED card — for the in-flight line. Missing = say it without a number. */
+  operationCount?: number;
 }) {
-  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
+  const analyze = useAnalyzeTechCardConstruction();
+  const addIssue = useAddTechCardIssue();
+
+  const [grouping, setGrouping] = useState<Grouping>('severity');
+  // THE LAST RUN LIVES IN sessionStorage, and the component is only its reader. F5 must not burn a
+  // run that cost money and forty seconds; nothing here may outlive the session.
+  const [stored, setStored] = useState<StoredAnalysis>(() => loadAnalysis(techCardId));
+  const loadedFor = useRef(techCardId);
+  useEffect(() => {
+    if (loadedFor.current === techCardId) return;
+    loadedFor.current = techCardId;
+    setStored(loadAnalysis(techCardId));
+  }, [techCardId]);
+
+  const persist = (next: StoredAnalysis) => {
+    setStored(next);
+    saveAnalysis(techCardId, next);
+  };
 
   const findings = data?.findings ?? [];
   const notChecked = (data?.notChecked ?? []).filter((n) => !!n?.trim());
@@ -224,14 +537,35 @@ export function ConstructionAudit({
     onGoTab(target.tab, target.extra);
   };
 
-  const fileAsIssue = (f: TechCardAnalysisFinding) => {
-    const description =
-      [f.title, f.detail, f.suggestion]
-        .map((s) => (s ?? '').trim())
-        .filter(Boolean)
-        .join('\n\n') || 'construction audit finding';
+  // FILING, BOTH PATHS. `modelSlug` is passed by the AI block and by nothing else — that is what
+  // puts the `(model …)` tail on a model finding and keeps it off a machine one.
+  const fileAsIssue = (f: TechCardAnalysisFinding, modelSlug?: string) => {
+    const description = issueDescription(f, modelSlug);
+    const operationNumber = firstOpNumber((f.refs ?? []).filter((r) => !!r?.trim()));
+    if (frozen) {
+      // A RELEASED CARD HAS NO SAVE TO RIDE ON. Straight to the server, and the card query is
+      // invalidated on success so the row appears on the issues tab without a reload.
+      if (!techCardId) return;
+      addIssue.mutate(
+        {
+          techCardId,
+          operationNumber,
+          severity: wireSeverity(DEFAULT_ISSUE_SEVERITY),
+          description,
+        },
+        {
+          onSuccess: () => showMessage('filed on the issues tab', 'success'),
+          onError: (e: unknown) =>
+            showMessage(
+              `could not file the issue: ${e instanceof Error ? e.message : 'unknown error'}`,
+              'error',
+            ),
+        },
+      );
+      return;
+    }
     const issue = {
-      operationNumber: firstOpNumber((f.refs ?? []).filter((r) => !!r?.trim())),
+      operationNumber,
       calloutNumber: 0,
       // Пусто намеренно: заявитель — человек, а не отчёт, и подставленное сюда «audit» сделало бы
       // машинную находку неотличимой от снятой кем-то претензии.
@@ -251,10 +585,139 @@ export function ConstructionAudit({
     showMessage('filed on the issues tab — save the card to keep it', 'success');
   };
 
+  // ─── the Analyze control ─────────────────────────────────────────────────────────────────────
+  const aiUnavailable = data?.aiEnabled === false;
+  const inFlight = analyze.isPending;
+  const dirty = formState.isDirty;
+  const canAnalyze = !!techCardId && !aiUnavailable && !inFlight && !isError;
+
+  const runAnalysis = () => {
+    if (!canAnalyze || !techCardId) return;
+    analyze.mutate(techCardId, {
+      onSuccess: (res: AnalyzeTechCardConstructionResponse) => {
+        const got = res.findings ?? [];
+        persist({
+          v: 1,
+          run: {
+            findings: got,
+            uids: assignUids(got),
+            model: (res.model ?? '').trim(),
+            aiStatus: (res.aiStatus ?? '').trim(),
+            droppedBadRef: res.droppedBadRef ?? 0,
+            droppedContradiction: res.droppedContradiction ?? 0,
+            notChecked: (res.notChecked ?? []).filter((n): n is string => !!n?.trim()),
+            summary: (res.summary ?? '').trim(),
+            fingerprints: res.operationFingerprints ?? {},
+            at: Date.now(),
+          },
+          // The uids of the run being replaced — the material the delta is computed from. Read
+          // BEFORE the write, or every re-run would compare a run against itself.
+          previousUids: stored.run?.uids ?? [],
+          dismissed: stored.dismissed,
+        });
+      },
+    });
+  };
+
+  const run = stored.run;
+  const dismissed = useMemo(() => new Set(stored.dismissed), [stored.dismissed]);
+  const previous = useMemo(() => new Set(stored.previousUids), [stored.previousUids]);
+  const modelFindings = run?.findings ?? [];
+  const groups = useMemo(
+    () => (run ? groupFindings(modelFindings, grouping) : []),
+    [run, modelFindings, grouping],
+  );
+
+  // The pill header — the same four buckets the grouping toggle uses (see `modelBucket`), so the
+  // header and the group headings can never disagree. Unknown severities get their own pills after
+  // these, same rule as the machine headline: a value this bundle never heard of must still be
+  // counted somewhere the reader can see.
+  const modelCounts = useMemo(() => {
+    const byBucket = new Map<string, number>();
+    for (const f of modelFindings) {
+      const b = modelBucket(f);
+      byBucket.set(b, (byBucket.get(b) ?? 0) + 1);
+    }
+    const extras = [...byBucket.keys()].filter((s) => !MODEL_BUCKETS.includes(s));
+    const pills = [
+      // All four ALWAYS, zeros included: «0 blockers» is a result, and a header that shows only
+      // what is non-empty cannot be told from a header that forgot a bucket.
+      ...MODEL_BUCKETS.map((s) => plural(byBucket.get(s) ?? 0, s)),
+      ...extras.map((s) => plural(byBucket.get(s) ?? 0, s)),
+    ];
+    return pills.join(' · ');
+  }, [modelFindings]);
+
+  // The re-run delta. Only ever drawn when there IS a previous run: on a first run every finding is
+  // trivially «new», and a wall of «new» badges would say nothing while looking like it did.
+  const uids = run?.uids ?? [];
+  const delta = useMemo(() => {
+    if (!run || previous.size === 0) return null;
+    let fresh = 0;
+    let still = 0;
+    for (const u of uids) {
+      if (dismissed.has(u)) continue;
+      if (previous.has(u)) still++;
+      else fresh++;
+    }
+    const gone = uids.filter((u) => dismissed.has(u)).length;
+    return { fresh, still, gone };
+  }, [run, uids, previous, dismissed]);
+
+  const status = run ? statusLine(run.aiStatus, run.model) : null;
+  const dropped = (run?.droppedBadRef ?? 0) + (run?.droppedContradiction ?? 0);
+
+  // The model's own «not checked» list, MINUS anything the machine section already said above. The
+  // two lists are shown merged in the sense that matters — the reader sees each caveat once — but
+  // the machine's stays where its own report is, and only the model's remainder lands here.
+  const modelNotChecked = (run?.notChecked ?? []).filter(
+    (n) => !notChecked.some((m) => m.trim().toLowerCase() === n.trim().toLowerCase()),
+  );
+
+  const analyzeCaption = aiUnavailable
+    ? 'AI review is not available on this deployment'
+    : dirty
+      ? 'unsaved changes are not analyzed — save first'
+      : '';
+
+  const analyzeControl = techCardId ? (
+    <div className='flex items-center gap-2'>
+      {analyzeCaption && (
+        <Text size='micro' variant='label' component='span' className='normal-case'>
+          {analyzeCaption}
+        </Text>
+      )}
+      {/* A `Chip nonForm`, like the anchors and for the same reason: acceptance happens on a
+          RELEASED card, whose fieldset would kill a native button — and this control writes nothing
+          to the card. It spends money, which the server's own RBAC and rate limits govern; the
+          fieldset is not, and never was, the organ that guards spending. */}
+      {/* `onClick` IS PASSED EVEN WHEN DISABLED, and that is not redundancy. `Chip` decides it is
+          interactive by whether a handler arrived; hand it `undefined` and it renders an inert
+          <span> with no role, no `aria-disabled` and a plain cursor — a control that LOOKS like
+          prose rather than like a disabled button, on the one screen whose job is to explain why
+          it cannot run. The gate is `disabled`, which Chip honours by dropping the handler itself
+          (measured: without this the probe read cursor:auto and no aria-disabled). */}
+      <Chip
+        nonForm
+        dashed
+        disabled={!canAnalyze}
+        onClick={runAnalysis}
+        title={
+          aiUnavailable
+            ? 'this deployment has no model configured'
+            : `runs the model over the SAVED card — about 30–60 s, client budget ${Math.round(ANALYZE_CLIENT_BUDGET_MS / 1000)} s`
+        }
+      >
+        {inFlight ? 'analyzing…' : run ? 're-run (ai)' : 'analyze (ai)'}
+      </Chip>
+    </div>
+  ) : null;
+
   return (
     <Section
       title='construction audit'
       question='— what the machine checked on the saved card, and what it did not'
+      action={analyzeControl}
     >
       {/* НЕСОХРАНЁННАЯ КАРТОЧКА — ОТДЕЛЬНАЯ ВЕТКА, А НЕ ЗАГРУЗКА. Вкладка сборки открыта и на
           `/add-tech-card` (`isTabVisible` не гейтит её на `isEditMode`), а отключённый запрос
@@ -290,7 +753,14 @@ export function ConstructionAudit({
           {findings.length > 0 && (
             <div className='border-t border-hairline'>
               {findings.map((f, i) => (
-                <Finding key={i} finding={f} onGo={goRef} onFile={fileAsIssue} />
+                <Finding
+                  key={i}
+                  finding={f}
+                  onGo={goRef}
+                  onFile={fileAsIssue}
+                  frozen={frozen}
+                  filing={addIssue.isPending}
+                />
               ))}
             </div>
           )}
@@ -305,6 +775,181 @@ export function ConstructionAudit({
                   · {n}
                 </Text>
               ))}
+            </div>
+          )}
+
+          {/* ═══ AI REVIEW — its own block, with its own header, status and footer ═══ */}
+          {(inFlight || run || analyze.isError) && (
+            <div data-ai-review>
+              <GroupLabel
+                lead={
+                  run && modelFindings.length > 0 ? (
+                    <ViewSwitch
+                      value={grouping}
+                      options={GROUPINGS}
+                      onChange={setGrouping}
+                      label='group the model findings by'
+                    />
+                  ) : undefined
+                }
+              >
+                ai review
+              </GroupLabel>
+
+              {inFlight && (
+                <Placeholder
+                  label={
+                    operationCount
+                      ? `reviewing ${plural(operationCount, 'operation')}… ~30–60 s`
+                      : 'reviewing the saved assembly… ~30–60 s'
+                  }
+                  className='h-8'
+                />
+              )}
+
+              {/* THE CLIENT'S OWN ABORT IS SAID IN THE FIRST PERSON. Attributing it to the server
+                  would be a guess, and the wrong one: at 55 s the server is still working. */}
+              {!inFlight && analyze.isError && (
+                <CalloutBox tone='error'>
+                  <Text size='micro'>
+                    {analyze.error instanceof Error &&
+                    analyze.error.message === ANALYZE_ABORTED_BY_CLIENT
+                      ? `the client stopped waiting after ${Math.round(ANALYZE_CLIENT_BUDGET_MS / 1000)} s. That is THIS SCREEN giving up, not the model failing — the server's own budget is longer, so the run may well have finished after we stopped listening. Press re-run to ask again.`
+                      : // NOT «did not reach the server»: the commonest failure here is a REFUSAL
+                        // that reached it perfectly — the run is already in flight for this card,
+                        // or the hourly ceiling is spent (both arrive as ResourceExhausted with a
+                        // sentence worth reading). Naming the transport would send the reader to
+                        // debug a network that is fine.
+                        `the analyze run did not complete: ${analyze.error instanceof Error ? analyze.error.message : 'unknown error'}`}
+                  </Text>
+                </CalloutBox>
+              )}
+
+              {!inFlight && run && (
+                <div className='flex flex-col gap-2'>
+                  <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                    {modelCounts}
+                  </Text>
+
+                  <Text size='micro' variant='label'>
+                    {(run.model || 'model not named').trim()} ·{' '}
+                    {new Date(run.at).toLocaleString('en-GB')}
+                  </Text>
+
+                  {status && (
+                    <CalloutBox tone={status.tone}>
+                      <Text size='micro'>{status.text}</Text>
+                    </CalloutBox>
+                  )}
+
+                  {/* THE DROP COUNTERS ARE NOT AN ASIDE. A run that discarded half its findings
+                      looks, without this line, exactly like a run that found half as many. */}
+                  {dropped > 0 && (
+                    <Text size='micro' variant='label'>
+                      {plural(dropped, 'finding')} dropped before this list:{' '}
+                      {run.droppedBadRef} whose anchors resolved nowhere on this card,{' '}
+                      {run.droppedContradiction} contradicting the recomputed facts or repeating a
+                      machine finding above.
+                    </Text>
+                  )}
+
+                  {delta && (
+                    <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                      re-run: {delta.fresh} new · {delta.still} still open · {delta.gone} dismissed
+                    </Text>
+                  )}
+
+                  {modelFindings.length === 0 ? (
+                    <Text size='micro' variant='label'>
+                      {run.aiStatus === 'ok'
+                        ? 'the model found nothing to report on this card.'
+                        : 'no model findings arrived — read the status above before reading this as clean.'}
+                    </Text>
+                  ) : (
+                    groups.map((g) => (
+                      <div key={g.key}>
+                        {g.heading && (
+                          <Text
+                            size='micro'
+                            variant='label'
+                            tracking='label'
+                            className='uppercase'
+                          >
+                            {g.heading}
+                          </Text>
+                        )}
+                        <div className='border-t border-hairline'>
+                          {g.items.map((i) => {
+                            const uid = uids[i] ?? String(i);
+                            const isDismissed = dismissed.has(uid);
+                            return (
+                              <Finding
+                                key={uid}
+                                finding={modelFindings[i]}
+                                onGo={goRef}
+                                onFile={(f) => fileAsIssue(f, run.model)}
+                                frozen={frozen}
+                                filing={addIssue.isPending}
+                                delta={
+                                  previous.size === 0 || isDismissed
+                                    ? undefined
+                                    : previous.has(uid)
+                                      ? 'still open'
+                                      : 'new'
+                                }
+                                dismissed={isDismissed}
+                                onDismiss={
+                                  isDismissed
+                                    ? undefined
+                                    : () =>
+                                        persist({
+                                          ...stored,
+                                          dismissed: [...new Set([...stored.dismissed, uid])],
+                                        })
+                                }
+                                onRestore={
+                                  isDismissed
+                                    ? () =>
+                                        persist({
+                                          ...stored,
+                                          dismissed: stored.dismissed.filter((d) => d !== uid),
+                                        })
+                                    : undefined
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {/* A QUIET FOOTER, per §11 — what the model says it did not check, and its own
+                      one-paragraph verdict. Quiet because neither is a finding; present because a
+                      report that hides what it skipped is the lie this whole panel exists against. */}
+                  {(modelNotChecked.length > 0 || run.summary) && (
+                    <div className='space-y-px border-t border-hairline pt-1'>
+                      {modelNotChecked.length > 0 && (
+                        <>
+                          <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                            the model did not check
+                          </Text>
+                          {modelNotChecked.map((n, i) => (
+                            <Text key={i} size='micro' variant='label'>
+                              · {n}
+                            </Text>
+                          ))}
+                        </>
+                      )}
+                      {run.summary && (
+                        <Text size='micro' variant='label' className='pt-1'>
+                          {run.summary}
+                        </Text>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

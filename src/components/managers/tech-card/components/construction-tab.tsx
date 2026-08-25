@@ -764,7 +764,22 @@ export function ConstructionTab({
           {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
               рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
               его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
-          <ConstructionAudit techCardId={techCard?.id} active={active} onGoTab={onGoTab} />
+          <ConstructionAudit
+            techCardId={techCard?.id}
+            active={active}
+            onGoTab={onGoTab}
+            // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
+            // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
+            // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
+            // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
+            // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
+            // и исчезали бы молча.
+            frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+            // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
+            // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
+            // несохранённых правок.
+            operationCount={(techCard?.techCard?.operations ?? []).length}
+          />
           <CardStandards />
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader

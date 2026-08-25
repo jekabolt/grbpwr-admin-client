@@ -162,6 +162,103 @@ export function useTechCardConstructionAudit(techCardId: number | undefined, act
   });
 }
 
+// ─── THE MODEL LAYER (AnalyzeTechCardConstruction) ─────────────────────────────────────────────
+//
+// A MUTATION, NOT A QUERY, and that is the whole shape of the feature. It is never fired on mount,
+// never refetched, never cached and never retried: one press, one call, one paid run. React Query's
+// `useQuery` would do the opposite of every one of those on its own.
+
+/**
+ * THE CLIENT'S BUDGET FOR ONE RUN — 55 s, and the number is derived, not chosen for looking round.
+ *
+ * The server holds its OpenRouter HTTP client at `defaultTimeout = 60 * time.Second`
+ * (`internal/openrouter/openrouter.go`), and beta's DO spec sets neither `OPENROUTER_HTTP_TIMEOUT`
+ * nor any other override — so 60 s is the real server ceiling, verified 2026-08-24, not assumed.
+ *
+ * THE CLIENT MUST GIVE UP FIRST. If this number ever exceeded the server's, the server would be the
+ * one to break the run and the screen would still say «the client stopped waiting» — and «who gave
+ * up» is exactly the distinction the AI-status wording is built on: `failed` is weather and offers
+ * a retry, everything else is a fault and does not. Attribution that lies here turns a broken
+ * deployment into «try again», forever. Five seconds is the margin for the answer's trip back.
+ *
+ * SO: RE-DERIVE THIS IF THE SERVER BUDGET MOVES. Should the server ceiling ever drop below ~70 s,
+ * 55 s stops being «below it» in any meaningful margin and this constant has to come down with it.
+ */
+export const ANALYZE_CLIENT_BUDGET_MS = 55_000;
+
+/**
+ * The message a client-budget abort rejects with. A distinct string rather than an `AbortError`
+ * check: the transport below never sees the signal (see the note in the hook), so this is the only
+ * honest marker of «WE stopped waiting», and the panel words that case differently from a server
+ * fault it is not entitled to blame.
+ */
+export const ANALYZE_ABORTED_BY_CLIENT = 'analysis-aborted-by-client-budget';
+
+export function useAnalyzeTechCardConstruction() {
+  return useMutation({
+    mutationFn: async (techCardId: number) => {
+      // AN `AbortController`, WHOSE SIGNAL THE TRANSPORT DOES NOT RECEIVE — said out loud because
+      // the difference matters. The generated client calls `requestHandler({path, method, body})`
+      // and there is no channel on that signature to hand a signal down to `fetch`, so the socket
+      // is NOT torn down at 55 s: the in-flight request runs to the server's own ceiling and the
+      // money for that run is spent either way (it was spent the moment the model was called).
+      // What the budget does buy is the only thing worth buying here — the screen stops waiting at
+      // a moment WE chose, and can say so truthfully instead of attributing the silence to the
+      // server. Teaching the transport about signals is a change to the shared api layer for every
+      // call in this admin; it belongs to that decision, not to this button.
+      const control = new AbortController();
+      const timer = setTimeout(() => control.abort(), ANALYZE_CLIENT_BUDGET_MS);
+      try {
+        return await Promise.race([
+          adminService.AnalyzeTechCardConstruction({ techCardId }),
+          new Promise<never>((_resolve, reject) => {
+            control.signal.addEventListener(
+              'abort',
+              () => reject(new Error(ANALYZE_ABORTED_BY_CLIENT)),
+              { once: true },
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    // NO `retry`. An automatic second attempt is a second charge for the same fault, and the two
+    // faults worth retrying at all (timeout, transport) are the ones a human is told to retry by
+    // hand — which is also the only way the operator learns the deployment is unhealthy.
+    retry: false,
+  });
+}
+
+// AddTechCardIssue — filing ONE issue straight into the card, bypassing the form.
+//
+// The live-card path does NOT use this: there, a filed finding is written into the RHF `issues`
+// array and persisted by the ordinary save, so that one save carries both the fix and the issue it
+// answers. This exists for the RELEASED card, where there is no save to ride on and where
+// acceptance actually happens — see `construction-audit.tsx`.
+export function useAddTechCardIssue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      techCardId,
+      operationNumber,
+      severity,
+      description,
+    }: {
+      techCardId: number;
+      operationNumber: number;
+      severity: string;
+      description: string;
+    }) => adminService.AddTechCardIssue({ techCardId, operationNumber, severity, description }),
+    onSuccess: (_data, variables) => {
+      // The card detail carries the issues tab's rows, so without this the row just filed is
+      // invisible on the tab it was filed to until the page is reloaded. Nested under detail(id),
+      // the construction audit re-runs with it — which is correct: an issue is a card fact.
+      queryClient.invalidateQueries({ queryKey: techCardKeys.detail(variables.techCardId) });
+    },
+  });
+}
+
 // The SAME card read again, netted at another country's VAT rate — a pricing scenario, not the
 // card. Deliberately its own query key rather than a parameter on useTechCard: that read is what
 // seeds the whole editing form (mapTechCardToForm), and re-keying it on a dropdown would remount
