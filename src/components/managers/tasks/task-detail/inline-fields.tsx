@@ -60,18 +60,33 @@ export function InlineTitle({
   value: string;
   canWrite: boolean;
   saving: boolean;
-  /** Возвращает `true`, если запись прошла: только тогда поле закрывается. */
-  onSave: (next: string) => Promise<boolean>;
+  /**
+   * `seen` — заголовок, каким человек его видел, НАЧИНАЯ править. Второй аргумент, а не
+   * подразумеваемый: значение, взятое на момент сохранения, конфликт по этому же полю
+   * пропускает (см. довод у `baseRef` ниже).
+   *
+   * Возвращает `true`, если запись прошла: только тогда поле закрывается.
+   */
+  onSave: (next: string, seen: string) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
+  /**
+   * ЧТО ЧЕЛОВЕК ВИДЕЛ, ОТКРЫВАЯ ПОЛЕ. Не то же самое, что `value` на момент нажатия «save»:
+   * `value` живой, и `refetchOnWindowFocus` намеренно делает его освежение частым. Пока
+   * открыт этот input, чужое переименование доезжает в кэш НЕЗАМЕТНО — на экране стоит моя
+   * правка, а не серверный заголовок. Сверять с живым значением означало бы сверять чужую
+   * правку саму с собой: конфликт не находится, и запись молча затирает её.
+   */
+  const baseRef = useRef(value);
 
   // Заново засеивается ТОЛЬКО при открытии: иначе фоновое перечитывание карточки затирало бы
   // набранное прямо под руками — ровно тот дефект, из-за которого правку когда-то унесли в модалку.
   useEffect(() => {
     if (editing) {
       setDraft(value);
+      baseRef.current = value;
       // Фокус — в эффекте, а не autoFocus: поле появляется в уже смонтированном дереве.
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -101,7 +116,7 @@ export function InlineTitle({
     }
     // Отказ (чужая правка того же заголовка) ОСТАВЛЯЕТ поле открытым с набранным: закрыть его
     // значило бы наказать человека за чужую гонку потерей своего текста.
-    if (await onSave(next)) setEditing(false);
+    if (await onSave(next, baseRef.current)) setEditing(false);
   };
 
   return (
@@ -157,10 +172,25 @@ export function InlineDescription({
   value: string;
   media: TaskMedia[];
   saving: boolean;
-  onSave: (next: string) => Promise<void> | void;
+  /** `seen` — описание, каким человек его видел, ОТКРЫВАЯ редактор (довод — у `baseRef`). */
+  onSave: (next: string, seen: string) => Promise<void> | void;
   onCancel: () => void;
 }) {
+  /**
+   * ЧЕРНОВИК ЗАСЕИВАЕТСЯ ОДИН РАЗ — ПРИ МОНТИРОВАНИИ, то есть при открытии редактора, и
+   * НИКОГДА не пересаживается на новое серверное значение.
+   *
+   * Здесь стоял `key={t.description}` на месте вызова, и комментарий при нём утверждал, что
+   * ключ меняется «только при повторном открытии». По семантике React это неправда: ключ
+   * меняется тогда, когда меняется описание, — в том числе пока редактор ОТКРЫТ. Замерено:
+   * человек печатает, коллега правит описание, возврат в окно приносит чужой текст по
+   * `refetchOnWindowFocus`, ключ становится новым, редактор размонтируется — и набранное
+   * молча замещается чужим, без снекбара и без конфликта. Ключа больше нет; расхождение с
+   * сервером разрешает конфликт-проверка при сохранении, а не выдёргивание поля из-под рук.
+   */
   const [draft, setDraft] = useState(value);
+  /** То же, что у заголовка: «увиденное» фиксируется в начале правки, а не в момент записи. */
+  const baseRef = useRef(value);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
@@ -180,7 +210,7 @@ export function InlineDescription({
           // по назначению. Сохраняет то же сочетание, что и в модалке.
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            onSave(draft);
+            onSave(draft, baseRef.current);
           }
           if (e.key === 'Escape') {
             e.preventDefault();
@@ -195,7 +225,7 @@ export function InlineDescription({
           variant='secondary'
           size='sm'
           loading={saving}
-          onClick={() => onSave(draft)}
+          onClick={() => onSave(draft, baseRef.current)}
         >
           save
         </Button>

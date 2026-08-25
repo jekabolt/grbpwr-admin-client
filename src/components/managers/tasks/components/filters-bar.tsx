@@ -82,7 +82,16 @@ export function applyFilters(tasks: Task[], f: TaskFilters, currentUser?: string
  * Кучка `''` («никто не взял») стоит ПОСЛЕДНЕЙ, а не по величине: это не человек, и место
  * среди людей по счёту читалось бы как ещё один сотрудник.
  */
-export function assigneePiles(tasks: Task[]): { name: string; count: number }[] {
+export function assigneePiles(
+  tasks: Task[],
+  /**
+   * Зажжённое лицо, которое обязано остаться в ряду, даже если на этой доске у него ноль
+   * карточек. Фильтр один на все доски, а кучки считаются по открытой: без этого при
+   * переключении доски лицо ИСЧЕЗАЛО из ряда, сужение оставалось, и снять его щелчком было
+   * нечем — только «clear». У чипа «my tasks» такой ловушки нет, он на месте всегда.
+   */
+  keep?: string,
+): { name: string; count: number }[] {
   const piles = new Map<string, number>();
   let unassigned = 0;
   for (const t of tasks) {
@@ -97,7 +106,9 @@ export function assigneePiles(tasks: Task[]): { name: string; count: number }[] 
   const people = [...piles.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  return unassigned > 0 ? [...people, { name: '', count: unassigned }] : people;
+  const withUnassigned = unassigned > 0 ? [...people, { name: '', count: unassigned }] : people;
+  if (keep === undefined || withUnassigned.some((p) => p.name === keep)) return withUnassigned;
+  return [...withUnassigned, { name: keep, count: 0 }];
 }
 
 export function FiltersBar({

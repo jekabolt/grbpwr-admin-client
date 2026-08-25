@@ -144,7 +144,7 @@ export function Tasks() {
    * обнулил бы соседние числа и ряд отвечал бы на вопрос о самом себе. Архивные входят в счёт
    * ровно тогда, когда зажжён чип archived, — потому что именно тогда они и лежат в `tasks`.
    */
-  const people = useMemo(() => assigneePiles(tasks), [tasks]);
+  const people = useMemo(() => assigneePiles(tasks, filters.assignee), [tasks, filters.assignee]);
 
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);

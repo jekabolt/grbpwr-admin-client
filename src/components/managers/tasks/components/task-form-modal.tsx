@@ -81,11 +81,20 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     formState: { errors },
   } = useForm<TaskFormValues>({ defaultValues: initial });
 
-  // Reseed when the modal opens for a different task / column.
+  /**
+   * ПЕРЕСЕВ ЧЕРНОВИКА — ТОЛЬКО НА ОТКРЫТИЕ. Раньше эффект висел ещё и на `initial`, а тот
+   * пересобирается от содержимого карточки: значит любое перечитывание с изменившимся полем
+   * делало `reset` ПОД ОТКРЫТОЙ МОДАЛКОЙ и стирало всё набранное, молча и без отмены по ⌘Z.
+   *
+   * Люк был и раньше, но редко срабатывал — карточка почти не перечитывалась сама. Теперь у
+   * чтения есть `refetchOnWindowFocus` (инлайн-правка без него жила бы с часовой несвежестью),
+   * и «отошёл, вернулся» стало обычным поводом для перечитывания. Цена люка выросла, поэтому
+   * зависимость снята: модалку открывают закрытой, и каждое открытие засеивает её заново.
+   */
   useEffect(() => {
     if (open) reset(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initial]);
+  }, [open]);
 
   // The combined type-first link picker edits all eight FKs at once, so it reads them
   // via useWatch and writes them back through setValue rather than one Controller each.

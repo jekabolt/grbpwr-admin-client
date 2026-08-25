@@ -106,15 +106,22 @@ export function TaskDetail() {
   const navigate = useNavigate();
 
   /**
-   * ОДНА ФУНКЦИЯ НА ВСЕ ИНЛАЙН-ПОЛЯ. `base` — то, что человек видел на экране в момент правки;
-   * дальше решает хук: сверить, слить со свежим чтением и записать (или отказать словами).
+   * ОДНА ФУНКЦИЯ НА ВСЕ ИНЛАЙН-ПОЛЯ. `seen` — значения ПРАВЛЕНЫХ полей, какими человек их
+   * видел, НАЧИНАЯ править; дальше решает хук: сверить, слить со свежим чтением и записать
+   * (или отказать словами). Второй аргумент обязателен у всех вызовов — каждое место обязано
+   * сказать, от чего оно отталкивалось, а не молча взять последнее, что приехало с сервера.
    * Отказ уже показан снекбаром внутри хука — здесь он только глушится, чтобы не всплыть
    * необработанным промисом.
    */
-  async function patchInline(patch: InlinePatch): Promise<boolean> {
+  async function patchInline(patch: InlinePatch, seen: InlinePatch): Promise<boolean> {
     if (!task) return false;
     try {
-      await inlinePatch.mutateAsync({ patch, base: task.task });
+      // `seen` НАКЛАДЫВАЕТСЯ НА ЖИВУЮ КАРТОЧКУ, а не берётся из неё: конфликт-проверка читает
+      // только ключи `patch`, и для них истина — то, что человек видел, начиная править.
+      // Живой `task.task` подходит для мгновенных контролов рейки (там увиденное = нарисованное),
+      // но НЕ для заголовка и описания: пока их правят, чужое значение доезжает в кэш незаметно,
+      // и сверка с живым сравнивала бы чужую правку саму с собой.
+      await inlinePatch.mutateAsync({ patch, base: { ...task.task, ...seen } });
       return true;
     } catch {
       // Снекбар показан мутацией. ВОЗВРАЩАЕМ ОТКАЗ, а не глотаем его: редактор обязан остаться
@@ -261,7 +268,7 @@ export function TaskDetail() {
               value={t.title}
               canWrite={canWrite}
               saving={inlinePatch.isPending}
-              onSave={(title) => patchInline({ title })}
+              onSave={(title, seenTitle) => patchInline({ title }, { title: seenTitle })}
             />
           </div>
           {canWrite && (
@@ -328,6 +335,10 @@ export function TaskDetail() {
                   type='button'
                   variant='underline'
                   size='xs'
+                  /* Имя РАЗЛИЧИМОЕ: на этой странице есть вторая кнопка «edit» — заголовочная,
+                     открывающая модалку. Два одинаковых имени на одном экране — это загадка
+                     для читалки с экрана и ловушка для стенда. */
+                  aria-label='edit description'
                   onClick={() => setEditingDescription(true)}
                 >
                   {t.description ? 'edit' : '+ add'}
@@ -336,16 +347,16 @@ export function TaskDetail() {
             }
           >
             {editingDescription ? (
+              /* БЕЗ `key` ПО СЕРВЕРНОМУ ЗНАЧЕНИЮ. Он здесь стоял и размонтировал редактор на
+                 каждом фоновом перечитывании описания — то есть молча заменял набранное чужим
+                 текстом. Черновик редактор засеивает сам, один раз при открытии. */
               <InlineDescription
-                /* `key` пересаживает черновик на новое серверное значение ТОЛЬКО при повторном
-                   открытии: пока правка открыта, фоновое перечитывание карточки не имеет права
-                   стереть набранное из-под рук. */
-                key={t.description}
                 value={t.description}
                 media={media}
                 saving={inlinePatch.isPending}
-                onSave={async (description) => {
-                  if (await patchInline({ description })) setEditingDescription(false);
+                onSave={async (description, seenDescription) => {
+                  if (await patchInline({ description }, { description: seenDescription }))
+                    setEditingDescription(false);
                 }}
                 onCancel={() => setEditingDescription(false)}
               />
@@ -451,7 +462,7 @@ export function TaskDetail() {
                       items={priorityOptions}
                       value={t.priority}
                       onValueChange={(v: string) =>
-                        v !== t.priority && patchInline({ priority: v as TaskPriority })
+                        v !== t.priority && patchInline({ priority: v as TaskPriority }, { priority: t.priority })
                       }
                       disabled={inlinePatch.isPending}
                       fullWidth
@@ -462,8 +473,11 @@ export function TaskDetail() {
                         одного. Мультиселект встаёт сюда заменой контрола, не правилом. */}
                     <AssigneeSelect
                       value={t.assignees[0] ?? ''}
+                      disabled={inlinePatch.isPending}
                       onChange={(username) =>
-                        patchInline({ assignees: username ? [username] : [] })
+                        patchInline({ assignees: username ? [username] : [] }, {
+                          assignees: t.assignees,
+                        })
                       }
                     />
                   </InlineField>
@@ -471,13 +485,13 @@ export function TaskDetail() {
                     label='planned start'
                     value={t.startDate}
                     disabled={inlinePatch.isPending}
-                    onChange={(startDate) => patchInline({ startDate })}
+                    onChange={(startDate) => patchInline({ startDate }, { startDate: t.startDate })}
                   />
                   <InlineDate
                     label='due'
                     value={t.dueDate}
                     disabled={inlinePatch.isPending}
-                    onChange={(dueDate) => patchInline({ dueDate })}
+                    onChange={(dueDate) => patchInline({ dueDate }, { dueDate: t.dueDate })}
                   />
                 </div>
               ) : (
