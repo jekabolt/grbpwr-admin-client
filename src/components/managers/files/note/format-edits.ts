@@ -93,10 +93,44 @@ export function emphasisEdit(text: string, start: number, end: number, want: Emp
   return { start: s, end: e, text: next, sel: [s + want.length, s + want.length + body.length] };
 }
 
+/**
+ * ГОЛАЯ ПАРА ``` `` ``` РЯДОМ С КАРЕТКОЙ — или `null`.
+ *
+ * Пустое выделение даёт пару с кареткой МЕЖДУ кавычками, и снять её умел только тот случай, когда
+ * каретка там и осталась. А она законно оказывается ПОСЛЕ пары: восстановление каретки выходит
+ * досрочно при любой чужой перерисовке (`format-bar.tsx`, `useLayoutEffect`), да и стрелка вправо
+ * — обычное движение. Следующее нажатие оборачивало пару ещё раз, и в тексте появлялись четыре
+ * кавычки, которых разметчик не показывает никогда. Отсюда три положения каретки вместо одного:
+ * внутри пары, сразу после неё, сразу перед ней.
+ *
+ * «ГОЛАЯ» — ЭТО РОВНО ДВА БЭКТИКА: соседние символы бэктиками быть не должны. Без этой проверки
+ * каретка у края ограды ``` ``` ``` отгрызала бы от неё два символа — то есть кнопка ломала бы
+ * разметку, которую сама же и поставила.
+ */
+function barePairAt(text: string, c: number): [number, number] | null {
+  const spots: [number, number][] = [
+    [c - 1, c + 1], // вокруг каретки
+    [c - 2, c], // сразу перед кареткой
+    [c, c + 2], // сразу после каретки
+  ];
+  for (const [a, b] of spots) {
+    if (a < 0 || b > text.length) continue;
+    if (text[a] !== '`' || text[b - 1] !== '`') continue;
+    if (text[a - 1] === '`' || text[b] === '`') continue;
+    return [a, b];
+  }
+  return null;
+}
+
 /** Тот же приём для `code`, но своей осью: код с жирным не конфликтует. */
 export function inlineCodeEdit(text: string, start: number, end: number): Edit {
   const [s, e] = trimEdges(text, start, end);
   const inner = text.slice(s, e);
+  if (s === e) {
+    // Пустое выделение: сначала попытка СНЯТЬ пару, и только потом — поставить новую.
+    const pair = barePairAt(text, s);
+    if (pair) return { start: pair[0], end: pair[1], text: '', sel: [pair[0], pair[0]] };
+  }
   if (inner.length >= 2 && inner.startsWith('`') && inner.endsWith('`')) {
     const body = inner.slice(1, -1);
     return { start: s, end: e, text: body, sel: [s, s + body.length] };
@@ -225,14 +259,51 @@ export function headingEdit(text: string, start: number, end: number): Edit {
   });
 }
 
+const FENCE_LINE = /^\s*```/;
+
+/**
+ * ВЫДЕЛЕНО ТЕЛО ОГРАДЫ, А НЕ ОНА САМА — снять ограду вокруг, или `null`.
+ *
+ * После `fenceEdit` выделенным остаётся ТОЛЬКО ТЕЛО (`sel: [ls + 4, …]`), а ограда — снаружи
+ * выделения. Повторное нажатие поэтому не находило ничего, что можно развернуть, и заворачивало
+ * тело во ВТОРУЮ ограду: `код` превращался в ограду в ограде. Здесь тот же разворот, но по
+ * СОСЕДЯМ span'а: строка над ним и строка под ним.
+ *
+ * ЧЁТНОСТЬ — ЕДИНСТВЕННОЕ, ЧТО ОТЛИЧАЕТ ТЕЛО ОТ ЗАЗОРА. У строки, стоящей МЕЖДУ двумя соседними
+ * блоками кода, сверху и снизу тоже по ограде — и «разворот» склеил бы два разных блока в один,
+ * молча. Строк-оград строго выше span'а нечётное число ровно тогда, когда последняя из них
+ * ОТКРЫТА, то есть span действительно внутри неё.
+ */
+function fenceAround(text: string, start: number, end: number): Edit | null {
+  const [ls, le] = lineSpan(text, start, end);
+  if (ls === 0 || le >= text.length) return null;
+  const aboveLines = text.slice(0, ls - 1).split('\n');
+  const openLine = aboveLines[aboveLines.length - 1];
+  const closeLine = text.slice(le + 1).split('\n')[0];
+  if (!FENCE_LINE.test(openLine) || !FENCE_LINE.test(closeLine)) return null;
+  if (aboveLines.filter((l) => FENCE_LINE.test(l)).length % 2 === 0) return null;
+
+  const at = ls - 1 - openLine.length;
+  const body = text.slice(ls, le);
+  return {
+    start: at,
+    end: le + 1 + closeLine.length,
+    text: body,
+    sel: [at, at + body.length],
+  };
+}
+
 /** Многострочный код — огорода на своих строках; она же снимается повторным нажатием. */
 export function fenceEdit(text: string, start: number, end: number): Edit {
   const [ls, le] = lineSpan(text, start, end);
   const lines = text.slice(ls, le).split('\n');
-  if (lines.length >= 2 && /^\s*```/.test(lines[0]) && /^\s*```/.test(lines[lines.length - 1])) {
+  if (lines.length >= 2 && FENCE_LINE.test(lines[0]) && FENCE_LINE.test(lines[lines.length - 1])) {
     const body = lines.slice(1, -1).join('\n');
     return { start: ls, end: le, text: body, sel: [ls, ls + body.length] };
   }
+  // Выделено тело уже поставленной ограды — разворот, а не вторая ограда поверх первой.
+  const around = fenceAround(text, start, end);
+  if (around) return around;
   const body = lines.join('\n');
   const next = `\`\`\`\n${body}\n\`\`\``;
   return { start: ls, end: le, text: next, sel: [ls + 4, ls + 4 + body.length] };
@@ -242,13 +313,26 @@ export function fenceEdit(text: string, start: number, end: number): Edit {
  * Кнопка `code` целиком: одна чистая функция вместо развилки, написанной прямо в обработчике.
  *
  * Развилка стояла в `actions` (`t.slice(s,e).includes('\n') ? fenceEdit : inlineCodeEdit`) — то
- * есть в единственном месте панели, куда таблица входа-выхода не дотягивается. Вынос ничего не
- * меняет в поведении: те же две ветки, тот же порядок.
+ * есть в единственном месте панели, куда таблица входа-выхода не дотягивается.
+ *
+ * ── ПОРЯДОК ЗДЕСЬ ЗНАЧИМ ────────────────────────────────────────────────────────────────────
+ *
+ * 1. ТЕЛО УЖЕ ПОСТАВЛЕННОЙ ОГРАДЫ проверяется ПЕРВЫМ — до всякого ветвления по переводу строки.
+ *    Однострочное тело (`code` из одной строки) до ветвления не дожило бы: в нём нет `\n`, и оно
+ *    уехало бы в `inlineCodeEdit`, то есть получило бы бэктики ВНУТРИ ограды.
+ * 2. ХВОСТОВЫЕ ПЕРЕВОДЫ СТРОК СРЕЗАЮТСЯ до проверки на многострочность. Тройной клик по строке —
+ *    обычный способ выделить её целиком, и браузер кладёт в такое выделение хвостовой `\n`:
+ *    строка считалась многострочным куском и получала ограду вместо бэктиков. Срез правит именно
+ *    выделение, а не текст: за границей `end` ничего не меняется.
  */
 export function codeEdit(text: string, start: number, end: number): Edit {
-  return text.slice(start, end).includes('\n')
-    ? fenceEdit(text, start, end)
-    : inlineCodeEdit(text, start, end);
+  const around = fenceAround(text, start, end);
+  if (around) return around;
+  let e = end;
+  while (e > start && text[e - 1] === '\n') e -= 1;
+  return text.slice(start, e).includes('\n')
+    ? fenceEdit(text, start, e)
+    : inlineCodeEdit(text, start, e);
 }
 
 const LINK_LABEL = 'text';
