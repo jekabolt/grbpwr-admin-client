@@ -143,6 +143,12 @@ function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
 function taskInsertToWire(t: TaskInsert): common_TaskInsert {
   return {
     ...t,
+    // ПУСТОЙ СПИСОК ЗНАЧИТ «ВЫВЕДИ ИЗ ОДИНОЧНОГО assignee», А НЕ «ИСПОЛНИТЕЛЕЙ НЕТ». Проверено по
+    // серверу: `taskAssigneesFromPb` (internal/dto/task.go:227) при len(assignees)==0 и непустом
+    // алиасе поля 3 берёт алиас. Отличить отсутствующий repeated от пустого протокол не даёт, и
+    // сервер на этом и построен — так что стереть исполнителя отсюда нельзя, пока форма шлёт
+    // `assignee`. Настоящий список наполнит очередь Б вместе с пикером.
+    assignees: undefined,
     mediaAnnotations: (t.mediaAnnotations ?? [])
       .filter((m) => m.mediaId > 0 && t.mediaIds.includes(m.mediaId))
       .map((m) => ({
@@ -237,6 +243,8 @@ export const tasksService: TasksService = {
         board: filter.board,
         status: filter.status,
         assignee: filter.assignee,
+        // сужение по родителю подключит очередь Б (сабтаски); здесь только проводка типа
+        parentTaskId: undefined,
         limit: TASKS_PAGE_LIMIT,
         offset: undefined,
         orderFactor: undefined,
@@ -267,7 +275,13 @@ export const tasksService: TasksService = {
 
   addTask: (content, board, status) =>
     adminService
-      .AddTask({ task: taskInsertToWire(content), board, status })
+      .AddTask({
+        task: taskInsertToWire(content),
+        board,
+        status,
+        // «создать сабтаску» — один вызов, а не AddTask + SetTaskParent: подключит очередь Б
+        parentTaskId: undefined,
+      })
       .then((r) => ({ id: r.id ?? 0 })),
 
   updateTask: (id, content) =>
