@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { simplifyPath, simplifyToLimit, type ShapePoint } from './geometry';
+import { simplifyPath, simplifyToLimit, splitInkStrokes, type ShapePoint } from './geometry';
 import { kindDef, labelKindForPoints } from './kinds';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
@@ -193,6 +193,46 @@ const HIT_WIDTH = 12;
 /** Прореживание следа: расстояние в экранных пикселях, ниже которого точку не видно. */
 const INK_EPSILON = 1.5;
 
+/**
+ * Склейка штрихов сессии фрихенда в ОДНУ фигуру. Между штрихами вставляется дубль последней точки
+ * предыдущего — так кодируется поднятое перо (см. `splitInkStrokes` в geometry.ts).
+ *
+ * ПРОРЕЖИВАНИЕ — ПО-ШТРИХОВО И НИКОГДА ЧЕРЕЗ РАЗРЫВ. Прогнать RDP по готовой склейке нельзя: две
+ * совпавшие точки лежат на любой прямой, поэтому первый же проход выкинул бы САМ разделитель, и
+ * штрихи слиплись бы мостом — ровно то, ради чего разделитель и заводился. Бюджет считается с
+ * учётом разделителей: их ровно n−1, и место в серверном пределе они занимают наравне с точками.
+ *
+ * Пиксели/доли: порог прореживания ЭКРАННЫЙ (см. `unpx`), поэтому штрих переводится в пиксели
+ * кадра, прореживается и возвращается в доли — тот же путь, что у первичного прореживания на
+ * отпускании.
+ */
+export function joinInkStrokes(
+  strokes: ShapePoint[][],
+  limit: number,
+  toPx: (p: ShapePoint) => ShapePoint,
+  toFrac: (p: ShapePoint) => ShapePoint,
+  eps: number,
+): ShapePoint[] {
+  const live = strokes.filter((s) => s.length >= 2);
+  if (live.length === 0) return [];
+  const budget = Math.max(2, Math.floor((limit - (live.length - 1)) / live.length));
+  const out: ShapePoint[] = [];
+  for (const s of live) {
+    const thin = s.length <= budget ? s : simplifyToLimit(s.map(toPx), budget, eps).map(toFrac);
+    if (out.length > 0) out.push(out[out.length - 1]);
+    out.push(...thin);
+  }
+  return out;
+}
+
+/**
+ * Сколько штрихов помещается в одну выноску. ВЫВОДИТСЯ ИЗ ПРЕДЕЛА, а не назначается: у штриха
+ * минимум две точки, между штрихами по разделителю, то есть n штрихов стоят 3n−1 точек. Дойдя до
+ * потолка, сессия КОММИТИТСЯ САМА и начинается следующая — иначе штрихи пришлось бы либо молча
+ * терять, либо отказывать в рисовании посреди жеста.
+ */
+const inkSessionMaxStrokes = (limit: number) => Math.max(1, Math.floor((limit + 1) / 3));
+
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -307,6 +347,27 @@ export function AnnotationSurface({
   // здесь: они принадлежат ЭТОМУ снимку, и общий счётчик достраивал бы мерку, начатую на первом
   // кадре, вторым кликом по третьему.
   const [points, setPoints] = useState<ShapePoint[]>([]);
+  /**
+   * СЕССИЯ ФРИХЕНДА — законченные штрихи, которые ещё не стали выноской.
+   *
+   * Раньше каждое отпускание кнопки рождало отдельную фигуру, и «обвести горловину, потом кокетку,
+   * потом стрелку к ним» давало три выноски с тремя номерами, которые никто по отдельности не имел
+   * в виду. Теперь пока инструмент взведён, все штрихи копятся здесь и уезжают ОДНОЙ фигурой; при
+   * этом ⌘Z снимает её целиком, потому что запись в историю одна.
+   *
+   * БУФЕР ПЕР-ПОВЕРХНОСТНЫЙ, инструмент — общий на лист. Рисование на кадре A, потом на кадре B
+   * даёт две независимые сессии: штрих, растянутый между передом и спинкой, — не штрих. Смена
+   * инструмента коммитит обе (эффект по `tool` живёт в каждом экземпляре).
+   *
+   * Зеркало в ref — потому что коммит зовут и слушатель клавиш, и cleanup размонтирования, а им
+   * нужно СВЕЖЕЕ значение, а не то, что было в замыкании на момент подписки.
+   */
+  const [inkSession, setInkSessionState] = useState<ShapePoint[][]>([]);
+  const inkSessionRef = useRef<ShapePoint[][]>([]);
+  const setInkSession = useCallback((next: ShapePoint[][]) => {
+    inkSessionRef.current = next;
+    setInkSessionState(next);
+  }, []);
   const [cursor, setCursor] = useState<ShapePoint | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   /** Последний отказ постановки — печатается под кадром, пока не начнут новый жест. */
@@ -448,9 +509,12 @@ export function AnnotationSurface({
     if (cursor) setCursor(null);
   }
 
+  // У СЛЕДА СЧИТАЮТСЯ ШТРИХИ, А НЕ ТОЧКИ. Панель рисует подсказку по этому числу, а «поставлено
+  // 137 точек» ничего не говорит тому, кто ведёт линию рукой: он думает штрихами.
+  const placedCount = def.grammar === 'ink' ? inkSession.length : points.length;
   useEffect(() => {
-    onPlacedCountChange?.(points.length);
-  }, [points.length, onPlacedCountChange]);
+    onPlacedCountChange?.(placedCount);
+  }, [placedCount, onPlacedCountChange]);
 
   const count = callouts.length;
   const prevCount = useRef(count);
@@ -548,6 +612,40 @@ export function AnnotationSurface({
     setCursor(null);
     onToolDone?.();
   }, [onToolDone]);
+
+  /**
+   * КОНЕЦ СЕССИИ ФРИХЕНДА — ОДНА ФИГУРА, ОДНА ЗАПИСЬ ИСТОРИИ.
+   *
+   * Зовётся из пяти мест: Enter, чип «done», Esc, смена/снятие инструмента и размонтирование
+   * поверхности (закрытие увеличенного вида). Все пять — «я закончил», и все пять КОММИТЯТ.
+   * Выбросить сессию можно ровно одним жестом — чипом «cancel»: законченные штрихи это уже
+   * сделанная работа, и стирать восемь штрихов клавишей, которая обычно значит «отмени последнее
+   * незаконченное», — потеря данных, а не отмена.
+   */
+  const commitInkSession = useCallback(() => {
+    const strokes = inkSessionRef.current;
+    if (strokes.length === 0) return;
+    setInkSession([]);
+    const d = kindDef('ink');
+    const joined = joinInkStrokes(strokes, d.points[1], px, unpx, Math.max(INK_EPSILON / shown, 1e-3));
+    if (joined.length >= d.points[0]) finishPlacing('ink', joined);
+  }, [setInkSession, finishPlacing, px, unpx, shown]);
+
+  /** Свежий коммит для слушателей, переживающих рендер, и для cleanup размонтирования. */
+  const commitInkRef = useRef(commitInkSession);
+  commitInkRef.current = commitInkSession;
+
+  // ПОВЕРХНОСТЬ УШЛА С ЭКРАНА — СЕССИЯ КОММИТИТСЯ. Закрытие увеличенного вида это «я дорисовал», а
+  // не «выброси»: молча потерять штрихи, сделанные в зуме, — худший из возможных ответов.
+  useEffect(() => () => commitInkRef.current(), []);
+
+  // СМЕНА ИЛИ СНЯТИЕ ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ФИГУРУ. Синхронный сброс `points` выше буфер НЕ
+  // трогает намеренно: писать в форму из тела рендера нельзя, поэтому коммит делает эффект. На
+  // монтировании и на любом переключении с пустой сессией это ноль работы.
+  useEffect(() => {
+    commitInkRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
 
   /** Курсор в радиусе замыкания у первой вершины зоны — и вершин уже хватает, чтобы замкнуть. */
   // Радиус захвата — ЭКРАННЫЙ: в долях кадра он растягивался бы вместе с картинкой, и на узком
@@ -671,6 +769,10 @@ export function AnnotationSurface({
     // просил: он менял масштаб, а не рисовал.
     if (zoom && pointers.current.size === 2) {
       inking.current = null;
+      // Точки оборванного штриха убираются вместе с ним: без этого они оставались висеть
+      // призрачной линией до следующего нажатия. СЕССИЯ ПРИ ЭТОМ ЖИВА — щипок отменяет ТЕКУЩИЙ
+      // штрих, а не фигуру: человек менял масштаб, чтобы дорисовать её точнее.
+      if (points.length) setPoints([]);
       pan.current = null;
       const [a, b] = Array.from(pointers.current.values());
       if (a && b) pinch.current = { prev: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -801,7 +903,13 @@ export function AnnotationSurface({
         eps,
       ).map(unpx);
       setPoints([]);
-      if (thinned.length >= 2) finishPlacing('ink', thinned);
+      // ОТПУСКАНИЕ КНОПКИ БОЛЬШЕ НЕ РОЖДАЕТ ФИГУРУ — оно кладёт штрих в сессию. Фигура рождается
+      // только явным концом сессии (см. `commitInkSession`).
+      if (thinned.length >= 2) {
+        const next = [...inkSessionRef.current, thinned];
+        setInkSession(next);
+        if (next.length >= inkSessionMaxStrokes(kindDef('ink').points[1])) commitInkSession();
+      }
       return;
     }
 
@@ -955,6 +1063,12 @@ export function AnnotationSurface({
         let stepped = true;
         if (armed) setArmed(null);
         else if (selected !== null) select(null);
+        // ESC КОММИТИТ СЕССИЮ ФРИХЕНДА, А НЕ ОТМЕНЯЕТ ЕЁ, и это единственная ступень лестницы, где
+        // Esc что-то СОХРАНЯЕТ. У прочих видов «незавершённый жест» — это набранные, но ещё ничем
+        // не ставшие точки, и выбросить их не жалко. У следа незавершённый жест — это штрих под
+        // зажатой кнопкой, и обрывает его pointercancel; всё, что лежит в сессии, уже нарисовано
+        // рукой. Выброс есть, он явный — чип «cancel».
+        else if (inkSession.length > 0) commitInkSession();
         else if (points.length > 0) setPoints([]);
         else if (tool) cancelPlacing();
         else stepped = false;
@@ -979,6 +1093,13 @@ export function AnnotationSurface({
         // содержать — редактор тогда открылся бы на пустоте.
         select(null);
         onUndo();
+        return;
+      }
+      // ENTER ЗАКАНЧИВАЕТ ФИГУРУ-СЛЕД. Стоит ПЕРЕД остальными ветками Enter: живой жест старше
+      // выбора, а незавершённой постановки у следа не бывает — штрих кончается вместе с кнопкой.
+      if (e.key === 'Enter' && !typing && inkSession.length > 0) {
+        e.preventDefault();
+        commitInkSession();
         return;
       }
       if (e.key === 'Enter' && !typing && placing && points.length >= def.points[0]) {
@@ -1042,6 +1163,8 @@ export function AnnotationSurface({
     select,
     cancelPlacing,
     finishPlacing,
+    inkSession,
+    commitInkSession,
     mutate,
     onUndo,
     canUndo,
@@ -1436,6 +1559,18 @@ export function AnnotationSurface({
                       />
                     );
                   })}
+                {/* ЗАКОНЧЕННЫЕ ШТРИХИ СЕССИИ — уже на кадре, но ещё не выноска.
+                    НЕ ГЕЙТИТСЯ НА `placing`: между сменой инструмента и коммитом (он делается
+                    эффектом, а не синхронно) есть кадр, в котором вид уже другой, — и без этого
+                    штрихи на нём моргали бы. */}
+                {inkSession.map((s, i) => (
+                  <PlacingShape
+                    key={`ink-session:${i}`}
+                    kind='ink'
+                    pts={s.map(px)}
+                    color={pen.color || undefined}
+                  />
+                ))}
                 {placing && points.length > 0 && (
                   <PlacingShape
                     kind={def.key}
@@ -1597,12 +1732,35 @@ export function AnnotationSurface({
           Закрывает три дыры разом: мультилидер (от 2 до 8 якорей) заканчивать было нечем, кроме
           достижения восьми; зону нельзя было замкнуть без клавиатуры (снап считается по движению
           курсора, а после тапа на планшете курсор не двигается); упёршийся предел молчал. */}
-      {editable && (refused || (placing && points.length > 0)) && (
+      {editable && (refused || inkSession.length > 0 || (placing && points.length > 0)) && (
         <ChipRow>
           {refused ? (
             <Text size='micro' variant='label' component='span'>
               {refused}
             </Text>
+          ) : inkSession.length > 0 ? (
+            // ФРИХЕНД ЗАКАНЧИВАЮТ ЗДЕСЬ ЖЕ, ГДЕ РИСУЮТ. Строка «сколько штрихов уже в этой фигуре»
+            // — единственное место, где видно, что сессия открыта; без неё «почему на листе нет
+            // новой выноски» разгадывается только опытом.
+            <>
+              <Chip
+                nonForm
+                onClick={commitInkSession}
+                title='finish this freehand callout at these strokes'
+              >
+                done · {inkSession.length} {inkSession.length === 1 ? 'stroke' : 'strokes'}
+              </Chip>
+              {/* ЕДИНСТВЕННЫЙ ПУТЬ ВЫБРОСА. Инструмент при этом остаётся взведён: «не то
+                  нарисовал» значит «нарисую заново», а не «уберите маркер». */}
+              <Chip
+                nonForm
+                dashed
+                onClick={() => setInkSession([])}
+                title='throw away the strokes drawn so far'
+              >
+                cancel
+              </Chip>
+            </>
           ) : (
             <>
               {points.length >= def.points[0] && def.points[0] !== def.points[1] && (
@@ -1677,10 +1835,16 @@ function hitPath(kind: string, pts: ShapePoint[], label: ShapePoint): string | n
       return pts.map((p) => `M${label.x},${label.y} L${p.x},${p.y}`).join(' ');
     case 'dim':
       return pts.length >= 2 ? `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}` : null;
+    case 'ink': {
+      // ХИТ-ПУТЬ СЛЕДА ТОЖЕ РВЁТСЯ НА ПОДНЯТОМ ПЕРЕ. Иначе по фигуре из двух штрихов можно было бы
+      // попасть мышью в ПУСТОТУ между ними — там, где линии нет и никогда не было.
+      const runs = splitInkStrokes(pts).filter((r) => r.length >= 2);
+      if (runs.length === 0) return null;
+      return runs.map((r) => `M${r.map((p) => `${p.x},${p.y}`).join(' L')}`).join(' ');
+    }
     case 'bracket':
     case 'arc':
-    case 'polygon':
-    case 'ink': {
+    case 'polygon': {
       if (pts.length < 2) return null;
       const line = `M${pts.map((p) => `${p.x},${p.y}`).join(' L')}`;
       return d.key === 'polygon' ? `${line} Z` : line;
