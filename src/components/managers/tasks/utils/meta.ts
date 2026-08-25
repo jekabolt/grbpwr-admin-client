@@ -69,11 +69,29 @@ export function toOptions<T extends string>(values: T[], labels: Record<T, strin
 
 export type DueState = 'none' | 'today' | 'overdue' | 'soon' | 'later';
 
-// Human due-date summary + a semantic state for colour. "soon" = within 2 days.
-export function dueMeta(dueDate?: string): { label: string; state: DueState } {
+/**
+ * Human due-date summary + a semantic state for colour. "soon" = within 2 days.
+ *
+ * ВТОРОЙ АРГУМЕНТ ОБЯЗАТЕЛЕН, И ЭТО НЕ ПЕДАНТИЗМ. Решённая карточка (done или архив) не бывает
+ * просроченной: работа сделана, и красное «3d overdue» на ней — не предупреждение, а ложь,
+ * которую видно на каждой done-колонке. Необязательный параметр позволил бы новому месту вызова
+ * молча воспроизвести этот же дефект; обязательный делает неправильное состояние невыразимым —
+ * забытый аргумент не компилируется, и все места вызова находит компилятор, а не глаз.
+ *
+ * ЗЕЛЁНОГО «сделано вовремя» здесь НЕТ и быть не может: `completed_at` в модели нет, сравнить
+ * срок не с чем. Поэтому решённая дата ровно нейтральна — серая `MMM d`, то есть исчезает ложное
+ * красное, а не появляется новое утверждение.
+ */
+export function dueMeta(
+  dueDate: string | undefined,
+  /** done или архив — карточка решена: `status === 'TASK_STATUS_DONE' || !!archivedAt`. */
+  settled: boolean,
+): { label: string; state: DueState } {
   if (!dueDate) return { label: '', state: 'none' };
   const date = new Date(dueDate);
   if (Number.isNaN(date.getTime())) return { label: '', state: 'none' };
+  // Ранний возврат ДО «today»/«overdue»/«soon»: у решённой карточки срок — просто дата.
+  if (settled) return { label: format(date, 'MMM d'), state: 'later' };
   const days = differenceInCalendarDays(date, new Date());
   if (isToday(date)) return { label: 'today', state: 'today' };
   if (days < 0) return { label: `${Math.abs(days)}d overdue`, state: 'overdue' };

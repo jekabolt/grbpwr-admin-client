@@ -38,7 +38,8 @@ const STATUS_STYLE: Record<TaskStatus, string> = {
 
 function TaskTile({ task }: { task: Task }) {
   const t = task.task;
-  const due = dueMeta(t.dueDate);
+  // Тот же дефект жил и здесь: плитка сделанной задачи краснела «Nd overdue».
+  const due = dueMeta(t.dueDate, task.status === 'TASK_STATUS_DONE' || !!task.archivedAt);
   const checkTotal = task.checklist.length;
   const checkDone = task.checklist.filter((c) => c.isDone).length;
 

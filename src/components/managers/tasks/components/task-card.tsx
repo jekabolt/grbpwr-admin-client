@@ -1,13 +1,13 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from 'lib/utility';
-import { Avatar } from 'ui/components/avatar';
 import { Chip } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Task, TaskPriority } from '../api/types';
 import { taskLinkCount } from '../utils/links';
 import { dueMeta, PRIORITY_LABEL } from '../utils/meta';
+import { AvatarStack } from './avatar-stack';
 
 /**
  * tskCard v3 — a card leads with its PICTURE. The first attached media (resolved by
@@ -16,7 +16,7 @@ import { dueMeta, PRIORITY_LABEL } from '../utils/meta';
  *
  * Priority stops being a bespoke hue map: urgent fills ink (Chip), high is an ink
  * outline, everything lower is a quiet grey Pill — weight carries urgency, no health
- * colours borrowed. The assignee is the shared `Avatar`; labels are read-only Pills.
+ * colours borrowed. Assignees are an overlapping `AvatarStack`; labels are read-only Pills.
  */
 
 // tskPriority — weight over hue. Urgent is the only filled tag; nothing here spends a
@@ -32,7 +32,8 @@ export function PriorityTag({ priority }: { priority: TaskPriority }) {
 // Presentational card body — reused by the sortable card and the drag overlay.
 export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolean }) {
   const t = task.task;
-  const due = dueMeta(t.dueDate);
+  // Решённая карточка не краснеет: done и архив показывают срок нейтральной датой.
+  const due = dueMeta(t.dueDate, task.status === 'TASK_STATUS_DONE' || !!task.archivedAt);
   const cover = task.media[0];
   const coverUrl = cover?.thumbnail || cover?.fullSize;
   const linkCount = taskLinkCount(t);
@@ -97,7 +98,7 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
               </Text>
             )}
           </div>
-          <Avatar name={t.assignee} />
+          <AvatarStack names={t.assignees} />
         </div>
 
         {meta.length > 0 && (
