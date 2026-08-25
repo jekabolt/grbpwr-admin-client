@@ -91,6 +91,9 @@ export function TechCardList() {
     ? (purposeParam as string)
     : DEFAULT_PURPOSE;
 
+  const purposeLabel =
+    techCardPurposeFilterOptions.find((o) => o.value === purpose)?.label ?? purpose;
+
   const season = useMemo(() => parseSeason(searchParams.get('season')), [searchParams]);
 
   // ?category=<id>, validated as a positive integer only — NOT against the dictionary. On a shared
@@ -223,7 +226,9 @@ export function TechCardList() {
         <ChipRow>
           <PickerChip
             title='purpose'
-            label={purpose}
+            // Название ОПЦИИ, а не голое значение URL: чип показывал «all», не называя, ЧЕМУ это
+            // «all» — и владелец не увидел фильтра aux/не-aux, который тут всё это время был.
+            label={purposeLabel}
             selected
             options={techCardPurposeFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
             // The default stays OUT of the URL (a clean ?-less link is the full list); sellable and
