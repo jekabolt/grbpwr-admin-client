@@ -1,3 +1,6 @@
+import type { common_MediaFull } from 'api/proto-http/admin';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Button } from 'ui/components/button';
 import { NoteFilePicker, type NoteFileInsert } from './file-picker';
@@ -8,7 +11,9 @@ import {
   headingEdit,
   lineMarkEdit,
   linkEdit,
+  mediaEdit,
   type Edit,
+  type MediaInsert,
 } from './format-edits';
 
 /**
@@ -61,8 +66,13 @@ export function FormatBar({
   onChange: (next: string) => void;
 }) {
   // Какое окно открыто и, значит, чем станет выбранный файл. `null` — закрыто.
+  //
+  // У медиатеки своего состояния здесь НЕТ: `MediaSelector` держит своё окно сам и получает
+  // кнопку через Radix `asChild`. Заводить рядом второй `picker`-флаг значило бы дублировать
+  // состояние, которым уже владеет чужой компонент.
   const [picker, setPicker] = useState<NoteFileInsert | null>(null);
   const pending = useRef<{ value: string; sel: [number, number] } | null>(null);
+  const { showMessage } = useSnackBarStore();
 
   useLayoutEffect(() => {
     const p = pending.current;
@@ -125,6 +135,30 @@ export function FormatBar({
     },
     [areaRef, onChange],
   );
+
+  /**
+   * Выбранные кадры — в текст.
+   *
+   * Кадр без единого адреса вставить нечем: `![…]()` показался бы битой картинкой, а молчаливый
+   * пропуск означал бы «нажал add all на трёх, в тексте два». Поэтому отброшенное называется
+   * вслух, а не исчезает.
+   */
+  const insertMedia = (media: common_MediaFull[]) => {
+    const items: MediaInsert[] = [];
+    let lost = 0;
+    for (const m of media) {
+      const id = Number(m.id);
+      const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
+      if (!url || !Number.isSafeInteger(id) || id <= 0) {
+        lost += 1;
+        continue;
+      }
+      items.push({ id, url });
+    }
+    if (lost) showMessage(`${lost} of ${media.length} have no address and stayed out`, 'error');
+    if (!items.length) return;
+    apply((t, s, e) => mediaEdit(t, s, e, items));
+  };
 
   const actions: { label: string; title: string; run: () => void }[] = [
     {
@@ -210,6 +244,31 @@ export function FormatBar({
         >
           preview
         </Button>
+
+        {/* СНИМКИ ИЗ МЕДИАТЕКИ, С МУЛЬТИВЫБОРОМ. Библиотека файлов и медиатека — два разных
+            хранилища, и до сих пор из текста заметки был достижим только первый.
+
+            Видео здесь скрыто (`showVideos={false}`) намеренно: разметчик заметки умеет только
+            `<img>`, и вставленный ролик показался бы битой картинкой — то есть кнопка предлагала
+            бы то, что тут же ломается. */}
+        <MediaSelector
+          label='media'
+          purpose='a picture in the text'
+          allowMultiple
+          showVideos={false}
+          saveSelectedMedia={insertMedia}
+          trigger={
+            <Button
+              type='button'
+              size='xs'
+              variant='secondary'
+              title='insert pictures from the media library: pick several, they will stand as a gallery'
+              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+            >
+              media
+            </Button>
+          }
+        />
       </div>
 
       {picker && (
