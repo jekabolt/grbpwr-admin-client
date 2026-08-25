@@ -4,7 +4,6 @@ import { format } from 'date-fns';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Avatar } from 'ui/components/avatar';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -13,7 +12,8 @@ import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import { TaskBoard, TaskFormValues, TaskMediaAnnotations, TaskStatus } from '../api/types';
+import { TaskBoard, TaskFormValues, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
+import { AvatarStack } from '../components/avatar-stack';
 import { LinkChip } from '../components/link-chip';
 import { PriorityTag } from '../components/task-card';
 import { TaskChecklist } from '../components/task-checklist';
@@ -25,14 +25,27 @@ import { TaskText } from '../components/task-text';
 import {
   useArchiveTask,
   useDeleteTask,
+  useInlineTaskPatch,
   useMoveTask,
   useTask,
   useUnarchiveTask,
   useUpdateTask,
+  type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
+import { InlineDate, InlineDescription, InlineField, InlineTitle } from './inline-fields';
+import { AssigneeSelect } from '../components/assignee-select';
 import { taskLinks } from '../utils/links';
-import { BOARD_LABEL, BOARDS, dueMeta, STATUS_LABEL, STATUSES, toOptions } from '../utils/meta';
+import {
+  BOARD_LABEL,
+  BOARDS,
+  dueMeta,
+  PRIORITIES,
+  PRIORITY_LABEL,
+  STATUS_LABEL,
+  STATUSES,
+  toOptions,
+} from '../utils/meta';
 
 /**
  * tskDetail v2 — two columns. The LEFT reads the task (description / checklist /
@@ -43,6 +56,10 @@ import { BOARD_LABEL, BOARDS, dueMeta, STATUS_LABEL, STATUSES, toOptions } from 
 
 const boardOptions = toOptions(BOARDS, BOARD_LABEL);
 const statusOptions = toOptions(STATUSES, STATUS_LABEL);
+const priorityOptions = [
+  { value: 'TASK_PRIORITY_UNKNOWN', label: 'no priority' },
+  ...toOptions(PRIORITIES, PRIORITY_LABEL),
+];
 
 // Пока карточка грузится, вложений нет — но хук вызывается до всякого раннего возврата, и новый
 // литерал на каждый рендер пересобирал бы его мемоизацию впустую.
@@ -77,6 +94,7 @@ export function TaskDetail() {
   const { data: task, isLoading, isError } = useTask(numId ?? null);
 
   const updateTask = useUpdateTask();
+  const inlinePatch = useInlineTaskPatch(numId ?? 0);
   const deleteTask = useDeleteTask();
   const archiveTask = useArchiveTask();
   const unarchiveTask = useUnarchiveTask();
@@ -84,26 +102,45 @@ export function TaskDetail() {
 
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
   const navigate = useNavigate();
 
   /**
-   * НА СТРАНИЦЕ КАРТОЧКИ УКАЗАНИЯ ТОЛЬКО ЧИТАЮТСЯ. Рисуют в модалке правки, где есть явная кнопка
-   * сохранения, — то же правило, что у описания, ссылок и состава вложений.
+   * ОДНА ФУНКЦИЯ НА ВСЕ ИНЛАЙН-ПОЛЯ. `base` — то, что человек видел на экране в момент правки;
+   * дальше решает хук: сверить, слить со свежим чтением и записать (или отказать словами).
+   * Отказ уже показан снекбаром внутри хука — здесь он только глушится, чтобы не всплыть
+   * необработанным промисом.
+   */
+  async function patchInline(patch: InlinePatch): Promise<boolean> {
+    if (!task) return false;
+    try {
+      await inlinePatch.mutateAsync({ patch, base: task.task });
+      return true;
+    } catch {
+      // Снекбар показан мутацией. ВОЗВРАЩАЕМ ОТКАЗ, а не глотаем его: редактор обязан остаться
+      // открытым с набранным текстом — иначе конфликт стоил бы человеку его собственной правки
+      // вдобавок к чужой.
+      return false;
+    }
+  }
+
+  /**
+   * ИНЛАЙН-ЗАПИСЬ С ЭТОЙ СТРАНИЦЫ РАЗРЕШЕНА РОВНО ЧЕРЕЗ `useInlineTaskPatch` — И БОЛЬШЕ НИКАК.
    *
-   * Правка отсюда стоила бы записи ВСЕЙ карточки содержимым последнего чтения: `UpdateTask`
-   * заменяет заголовок, описание, метки и ссылки целиком, а перечитывать карточку по своей воле
-   * страница не станет — `staleTime` у чтения 30 секунд (`hooks/useTasks.ts`), но протухшее
-   * чтение перезапрашивается только на новом монтировании, а не по фокусу окна: открытая
-   * карточка висит с тем содержимым, с которым её открыли, хоть час. То есть «посмотрел картинку
-   * и закрыл» молча откатывало бы чужую правку описания, сделанную после открытия страницы.
-   * Инлайновые селекты доски и колонки на этой же
-   * странице такого не делают и сравнением не годятся: они идут через `MoveTask`, которая
-   * содержимого не касается вовсе.
+   * Прежний довод («страница не перечитывает карточку по своей воле, поэтому писать отсюда
+   * нельзя») перестал быть правдой в двух местах сразу: чтение получило `refetchOnWindowFocus`,
+   * а каждая инлайн-запись делает СВОЁ свежее чтение перед записью и сверяет правленое поле с
+   * тем значением, которое человек видел, начиная правку. Прямой вызов `updateTask` с
+   * `{...task.task, поле}` из пропсов остаётся ЗАПРЕЩЁННЫМ: `UpdateTask` заменяет содержимое
+   * целиком, и такая запись молча откатила бы чужую правку описания, сделанную после того, как
+   * эту страницу открыли. Ошибка не падает и ничем себя не выдаёт — поэтому дверь одна.
    *
-   * Вместе с этим путём ушли и три его следствия: потеря нарисованного при уходе со страницы
-   * «назад», невозможность повторить запись после отказа сервера и затирание набранного в
-   * открытой модалке фоновым `reset(initial)` после инвалидации, которую порождал обычный
-   * просмотр картинки.
+   * ЧТО ОСТАЁТСЯ ТОЛЬКО В МОДАЛКЕ: вложения, ссылки, метки и УКАЗАНИЯ, нарисованные на снимках.
+   * Указания — по-прежнему по явному решению: их правят жестом по холсту, у которого нет
+   * «одного изменённого поля», и явная кнопка сохранения — часть этого жеста.
+   *
+   * Инлайновые селекты доски и колонки сравнением не годятся и здесь: они идут через `MoveTask`,
+   * которая содержимого не касается вовсе.
    */
   const annotations = task?.task.mediaAnnotations ?? NO_ANNOTATIONS;
 
@@ -198,9 +235,10 @@ export function TaskDetail() {
   }
 
   const t = task.task;
-  const due = dueMeta(t.dueDate);
+  const due = dueMeta(t.dueDate, task.status === 'TASK_STATUS_DONE' || !!task.archivedAt);
   const links = taskLinks(t);
-  const isMine = !!account?.username && t.assignee === account.username;
+  // «Моя» — если я В СПИСКЕ, а не первый: витрина не решает, чья это работа.
+  const isMine = !!account?.username && t.assignees.includes(account.username);
   const isArchived = !!task.archivedAt;
   const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
 
@@ -219,7 +257,12 @@ export function TaskDetail() {
             <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
               {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
             </Text>
-            <h1 className='text-lg leading-tight'>{t.title}</h1>
+            <InlineTitle
+              value={t.title}
+              canWrite={canWrite}
+              saving={inlinePatch.isPending}
+              onSave={(title) => patchInline({ title })}
+            />
           </div>
           {canWrite && (
             <div className='flex shrink-0 flex-wrap justify-end gap-2'>
@@ -276,8 +319,37 @@ export function TaskDetail() {
       <div className='grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]'>
         {/* Left — reading the task */}
         <SectionStack className='min-w-0'>
-          <Section title='description'>
-            {t.description ? (
+          <Section
+            title='description'
+            action={
+              canWrite &&
+              !editingDescription && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => setEditingDescription(true)}
+                >
+                  {t.description ? 'edit' : '+ add'}
+                </Button>
+              )
+            }
+          >
+            {editingDescription ? (
+              <InlineDescription
+                /* `key` пересаживает черновик на новое серверное значение ТОЛЬКО при повторном
+                   открытии: пока правка открыта, фоновое перечитывание карточки не имеет права
+                   стереть набранное из-под рук. */
+                key={t.description}
+                value={t.description}
+                media={media}
+                saving={inlinePatch.isPending}
+                onSave={async (description) => {
+                  if (await patchInline({ description })) setEditingDescription(false);
+                }}
+                onCancel={() => setEditingDescription(false)}
+              />
+            ) : t.description ? (
               <TaskText text={t.description} media={media} onOpen={attachments.openMedia} />
             ) : (
               <Text size='micro' variant='label' component='span'>
@@ -367,46 +439,96 @@ export function TaskDetail() {
                 </label>
               </div>
 
+              {/* ЧЕТЫРЕ ПРАВИМЫХ ФАКТА СТАЛИ КОНТРОЛАМИ — тем же узором «подпись сверху,
+                  контрол снизу», что доска и колонка прямо над ними: рейка говорит на одном
+                  языке, а не на двух. Читателю без права записи по-прежнему показываются
+                  строки-факты: контрол, который нельзя тронуть, — обещание, которого нет. */}
+              {canWrite ? (
+                <div className='flex flex-col gap-3 border-t border-hairline pt-3'>
+                  <InlineField label='priority'>
+                    <SelectComponent
+                      name='detail-priority'
+                      items={priorityOptions}
+                      value={t.priority}
+                      onValueChange={(v: string) =>
+                        v !== t.priority && patchInline({ priority: v as TaskPriority })
+                      }
+                      disabled={inlinePatch.isPending}
+                      fullWidth
+                    />
+                  </InlineField>
+                  <InlineField label='assignee'>
+                    {/* Пока провод одиночный — тот же мост, что в модалке: список из нуля или
+                        одного. Мультиселект встаёт сюда заменой контрола, не правилом. */}
+                    <AssigneeSelect
+                      value={t.assignees[0] ?? ''}
+                      onChange={(username) =>
+                        patchInline({ assignees: username ? [username] : [] })
+                      }
+                    />
+                  </InlineField>
+                  <InlineDate
+                    label='planned start'
+                    value={t.startDate}
+                    disabled={inlinePatch.isPending}
+                    onChange={(startDate) => patchInline({ startDate })}
+                  />
+                  <InlineDate
+                    label='due'
+                    value={t.dueDate}
+                    disabled={inlinePatch.isPending}
+                    onChange={(dueDate) => patchInline({ dueDate })}
+                  />
+                </div>
+              ) : (
+                <div className='flex flex-col border-t border-hairline'>
+                  <Row
+                    label={<FactLabel>priority</FactLabel>}
+                    value={
+                      t.priority !== 'TASK_PRIORITY_UNKNOWN' ? (
+                        <PriorityTag priority={t.priority} />
+                      ) : (
+                        <Text size='micro' variant='label' component='span'>
+                          none
+                        </Text>
+                      )
+                    }
+                  />
+                  <Row
+                    label={<FactLabel>assignee</FactLabel>}
+                    value={
+                      <span className='flex items-center justify-end gap-1.5'>
+                        <AvatarStack names={t.assignees} />
+                        <Text
+                          size='micro'
+                          component='span'
+                          className={cn(!t.assignees.length && 'text-labelColor', isMine && 'font-bold')}
+                        >
+                          {t.assignees.join(', ') || 'unassigned'}
+                        </Text>
+                      </span>
+                    }
+                  />
+                  <Row
+                    label={<FactLabel>planned start</FactLabel>}
+                    value={
+                      <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
+                        {t.startDate ? format(new Date(t.startDate), 'PP') : '—'}
+                      </Text>
+                    }
+                  />
+                  <Row
+                    label={<FactLabel>due</FactLabel>}
+                    value={
+                      <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
+                        {t.dueDate ? format(new Date(t.dueDate), 'PP') : '—'}
+                      </Text>
+                    }
+                  />
+                </div>
+              )}
+
               <div className='flex flex-col border-t border-hairline'>
-                <Row
-                  label={<FactLabel>priority</FactLabel>}
-                  value={
-                    t.priority !== 'TASK_PRIORITY_UNKNOWN' ? (
-                      <PriorityTag priority={t.priority} />
-                    ) : (
-                      <Text size='micro' variant='label' component='span'>
-                        none
-                      </Text>
-                    )
-                  }
-                />
-                <Row
-                  label={<FactLabel>assignee</FactLabel>}
-                  value={
-                    <span className='flex items-center justify-end gap-1.5'>
-                      <Avatar name={t.assignee} />
-                      <Text size='micro' component='span' className={cn(!t.assignee && 'text-labelColor', isMine && 'font-bold')}>
-                        {t.assignee || 'unassigned'}
-                      </Text>
-                    </span>
-                  }
-                />
-                <Row
-                  label={<FactLabel>planned start</FactLabel>}
-                  value={
-                    <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
-                      {t.startDate ? format(new Date(t.startDate), 'PP') : '—'}
-                    </Text>
-                  }
-                />
-                <Row
-                  label={<FactLabel>due</FactLabel>}
-                  value={
-                    <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
-                      {t.dueDate ? format(new Date(t.dueDate), 'PP') : '—'}
-                    </Text>
-                  }
-                />
                 <Row
                   label={<FactLabel>started</FactLabel>}
                   value={
