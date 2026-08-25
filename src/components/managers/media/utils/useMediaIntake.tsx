@@ -1,6 +1,8 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { useCallback, useMemo, useState } from 'react';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { MediaIntakeDialog } from '../components/media-intake-dialog';
+import { mergeQueue } from './intake-queue';
 import { filesOfKind, usePasteFiles, type PasteAccept } from './usePasteFiles';
 
 // ПРИЁМ МЕДИА ИЗВНЕ — ОДИН ХУК НА ВСЕ ТРИ ЖЕСТА.
@@ -22,7 +24,13 @@ export type MediaIntakeOptions = {
   enabled?: boolean;
   /** Видео тоже или только картинки. Должно совпадать с тем, что слот согласен ПОКАЗАТЬ. */
   accept?: PasteAccept;
-  /** Сколько файлов взять за раз. Слот на одну картинку ставит 1. */
+  /**
+   * Потолок очереди приёмки. Слот на одну картинку ставит 1.
+   *
+   * Раньше это было «сколько взять ЗА ОДНУ вставку», и разница видна только при второй: очередь
+   * теперь копится до потолка, а не обнуляется каждым жестом. Для вызывающих инвариант тот же —
+   * суммарно в приёмку не набрать больше, чем у слота осталось мест.
+   */
   limit?: number;
   /** Соотношение, с которым откроется кроп. */
   aspect?: number;
@@ -50,14 +58,31 @@ export function useMediaIntake({
   const [queue, setQueue] = useState<File[]>([]);
 
   const busy = queue.length > 0;
+  // Живой снимок очереди: `openFiles` живёт в замыкании слушателя буфера дольше рендера, и
+  // читать очередь оттуда из пропа значило бы складывать вторую вставку с ПОЗАПРОШЛЫМ состоянием.
+  const queueRef = useRef<File[]>(queue);
+  queueRef.current = queue;
+  const { showMessage } = useSnackBarStore();
 
   const openFiles = useCallback(
     (files: File[]) => {
       const accepted = filesOfKind(files, accept);
       if (!accepted.length) return;
-      setQueue(limit != null ? accepted.slice(0, Math.max(0, limit)) : accepted);
+      const merged = mergeQueue(queueRef.current, accepted, limit);
+      // МОЛЧАТЬ ПРО ОТБРОШЕННОЕ НЕЛЬЗЯ: до сих пор лишнее срезал `slice`, и человек узнавал об
+      // этом по недостающему кадру. Считает `mergeQueue`, говорит — здесь.
+      if (merged.dropped > 0) {
+        const taken = accepted.length - merged.dropped;
+        showMessage(
+          taken > 0
+            ? `took ${taken} of ${accepted.length} — that is all the room left`
+            : `no room left — ${merged.dropped} did not fit`,
+          'error',
+        );
+      }
+      setQueue(merged.queue);
     },
-    [accept, limit],
+    [accept, limit, showMessage],
   );
 
   usePasteFiles(
@@ -66,7 +91,10 @@ export function useMediaIntake({
       // это время значило бы уронить второй ⌘V в слот ПОД модалкой — он остался «горячим», потому
       // что появление окна само по себе не шлёт `pointerleave`.
       claims: enabled && (hovered || focused || busy),
-      accepts: enabled && !busy,
+      // ВТОРОЙ ⌘V БОЛЬШЕ НЕ ГЛОТАЕТСЯ. Он и раньше доходил сюда (очередь держится, пока открыта
+      // приёмка), но выбрасывался: принимать вставку в открытое окно было нечем — оно листало
+      // очередь по индексу. Теперь окно копит, и вторая вставка добавляет кадр к первому.
+      accepts: enabled,
       accept,
       limit,
     },
@@ -119,13 +147,11 @@ export function useMediaIntake({
     [dropHandlers],
   );
 
-  const finish = useCallback(
-    (media: common_MediaFull[]) => {
-      setQueue([]);
-      onMedia(media);
-    },
-    [onMedia],
-  );
+  // ДОСТАВКА И ОЧЕРЕДЬ — ДВА РАЗНЫХ СОБЫТИЯ, И РАЗНИМАТЬ ИХ ПРИШЛОСЬ. Пока отправка шла внутри
+  // окна, «пачка доехала» и «очередь кончилась» совпадали. Теперь пачка может доехать НАПОЛОВИНУ:
+  // доставленное уходит в форму сразу, а отказавшееся остаётся в очереди с причиной и кнопкой
+  // повтора. Очередью правит окно (`onQueueChange`), доставкой — владелец слота.
+  const finish = useCallback((media: common_MediaFull[]) => onMedia(media), [onMedia]);
 
   const dialog = (
     <MediaIntakeDialog
@@ -134,6 +160,7 @@ export function useMediaIntake({
       lockAspect={lockAspect}
       purpose={purpose}
       onDone={finish}
+      onQueueChange={setQueue}
       onCancel={() => setQueue([])}
     />
   );
@@ -145,7 +172,10 @@ export function useMediaIntake({
     regionHandlers,
     /** Файл тащат над слотом — повод подсветить рамку. */
     dragging,
-    /** Идёт приёмка: слот показывает это словом, а не пустотой. */
+    /**
+     * Идёт приёмка: слот показывает это словом, а не пустотой. Теперь честно горит и во время
+     * СВЁРНУТОЙ отправки — очередь жива, пока пачка не доехала.
+     */
     busy,
     /** Открыть приёмку вручную — например из `<input type="file">`. */
     openFiles,

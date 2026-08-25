@@ -1,3 +1,4 @@
+import type { common_MediaFull } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { dataUrlToFile } from './dataUrlToFile';
 import {
@@ -68,6 +69,15 @@ export type PreviewItem = {
   attempts: number;
   /** id, который бакет вернул на успехе. */
   mediaId?: number;
+  /**
+   * Готовое медиа целиком — то же, что отдаёт выбор из библиотеки.
+   *
+   * Полосе библиотеки хватает `mediaId`: она доставляет файлы В БИБЛИОТЕКУ, и адрес там больше
+   * никому не нужен. Приёмке слота нужен весь объект: её колбэк — тот же самый, что у выбора
+   * мышью, и собирать его заново по id значило бы спрашивать бакет о том, что он только что
+   * сам и ответил. Поле аддитивное: полоса его не читает, её поведение не меняется.
+   */
+  media?: common_MediaFull;
   /** Кадрированный вариант (data-url), если кадрировали. */
   croppedUrl?: string;
 };
@@ -314,6 +324,7 @@ export function usePendingFiles() {
           patch(id, {
             status: 'done',
             mediaId: media.id,
+            media,
             attempts: item.attempts + 1,
             error: undefined,
           });

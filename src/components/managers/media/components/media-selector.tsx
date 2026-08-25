@@ -9,6 +9,7 @@ import { RatioGlyph } from 'ui/components/ratio-glyph';
 import Text from 'ui/components/text';
 import { MediaManager } from '..';
 import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
+import { mergeQueue } from '../utils/intake-queue';
 import { filesOfKind, usePasteFiles } from '../utils/usePasteFiles';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
@@ -56,6 +57,10 @@ export function MediaSelector({
   const [isUploading, setIsUploading] = useState(false);
   /** Файлы, вставленные ⌘V прямо в диалоге. Непусто — открыта приёмная модалка. */
   const [pasted, setPasted] = useState<File[]>([]);
+  // Живой снимок для замыкания слушателя буфера: вторая вставка обязана складываться с текущей
+  // очередью, а не с той, что была на рендере подписки.
+  const pastedRef = useRef<File[]>(pasted);
+  pastedRef.current = pasted;
 
   const uploadMedia = useUploadMedia();
   const { showMessage } = useSnackBarStore();
@@ -203,7 +208,20 @@ export function MediaSelector({
         return;
       }
       const limit = oneAtATime || !allowMultiple ? 1 : undefined;
-      setPasted(limit != null ? usable.slice(0, limit) : usable);
+      // ВСТАВКА ДОБАВЛЯЕТ, А НЕ ЗАМЕЩАЕТ — та же развилка, что и у приёмки слота, и живёт она в
+      // одном месте на обе дороги. Слот на одну картинку по-прежнему замещает кадр: «вставил не
+      // тот скриншот, вставил правильный» — это то, ради чего там жмут ⌘V второй раз.
+      const merged = mergeQueue(pastedRef.current, usable, limit);
+      if (merged.dropped > 0) {
+        const taken = usable.length - merged.dropped;
+        showMessage(
+          taken > 0
+            ? `took ${taken} of ${usable.length} — that is all the room left`
+            : `no room left — ${merged.dropped} did not fit`,
+          'error',
+        );
+      }
+      setPasted(merged.queue);
     },
     [oneAtATime, allowMultiple, showVideos, showMessage],
   );
@@ -215,7 +233,9 @@ export function MediaSelector({
       // осталась «горячей» (появление модалки само по себе не шлёт `pointerleave`), и картинка
       // прикрепилась бы туда мимо кропа, ради которого диалог и открыт.
       claims: open,
-      accepts: open && !cropMedia && pasted.length === 0,
+      // Приёмка БОЛЬШЕ НЕ ГЛУШИТ ВСТАВКУ: она копит. Гасится только кроп — там ⌘V означал бы
+      // вставку поверх кадрируемого снимка, а этого никто не просил.
+      accepts: open && !cropMedia,
       accept: showVideos ? 'media' : 'image',
     },
     takeFiles,
@@ -442,10 +462,11 @@ export function MediaSelector({
             aspect={cropAspect}
             lockAspect={ratioConstrained}
             purpose={purpose}
-            onDone={(media) => {
-              setPasted([]);
-              commitMedia(media);
-            }}
+            // Очередью правит сама приёмка: пачка может доехать наполовину, и отказавшееся
+            // остаётся в ней с причиной. Гасить очередь здесь значило бы выбрасывать то, что
+            // человек ещё может повторить.
+            onQueueChange={setPasted}
+            onDone={commitMedia}
             onCancel={() => setPasted([])}
           />
         </DialogPrimitive.Content>
