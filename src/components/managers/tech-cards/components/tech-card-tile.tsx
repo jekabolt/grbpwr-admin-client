@@ -1,4 +1,6 @@
 import { common_SkuSeason, common_TechCardListItem } from 'api/proto-http/admin';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
@@ -83,7 +85,28 @@ export function TechCardTile({
   // Only an auxiliary card carries a subtype (UNKNOWN/unset → empty), so no purpose check.
   const subtype = auxSubtypeLabel(card.auxSubtype);
   const updated = formatTechCardDate(card.updatedAt);
-  const meta = [subtype, season, updated === '—' ? '' : updated].filter(Boolean).join(' · ');
+  // The list row carries category ids only — no names — so the name is resolved off the dictionary
+  // the provider already loaded at startup (no request, no prop, so the swimlane tile is untouched).
+  // DEEPEST level that is actually set (type → sub → top): half the catalogue is classified only
+  // down to the top category, and reading `subCategoryId` literally would print nothing on cards
+  // that are in fact categorised.
+  const { dictionary } = useDictionary();
+  const categoryName = useMemo(() => {
+    const catId = card.typeId || card.subCategoryId || card.topCategoryId || card.categoryId || 0;
+    if (!catId) return '';
+    return (dictionary?.categories ?? []).find((c) => c.id === catId)?.name ?? '';
+  }, [
+    dictionary?.categories,
+    card.typeId,
+    card.subCategoryId,
+    card.topCategoryId,
+    card.categoryId,
+  ]);
+  // Classification first, date last: a narrow track truncates from the right, so what dies is the
+  // least valuable fact. An aux card already states its subtype, and category is what it lacks.
+  const meta = [subtype || categoryName, season, updated === '—' ? '' : updated]
+    .filter(Boolean)
+    .join(' · ');
 
   // previewUrl is resolved server-side on the list item (moodboard image for an idea, PREVIEW
   // sketch otherwise) — no per-card request. Empty for a card with no media at all.
@@ -92,7 +115,10 @@ export function TechCardTile({
       src={card.previewUrl}
       alt=''
       loading='lazy'
-      className={`w-full border border-borderColor object-cover ${
+      // object-CONTAIN, не cover: превью тех-карты — это эскиз или мудборд, и обрезанный
+      // эскиз врёт о вещи. Кадр фиксированной пропорции остаётся (он держит ряды сетки ровными,
+      // а координат по нему никто не берёт), поля letterbox заливаются фоном плитки.
+      className={`w-full border border-borderColor bg-bgColor object-contain ${
         compact ? 'aspect-square' : 'aspect-[3/4]'
       }`}
     />
@@ -105,6 +131,8 @@ export function TechCardTile({
       <Tile
         media={media}
         name={title}
+        // Имя однострочно и режется дорожкой сетки — hover обязан дочитывать его целиком.
+        title={title}
         onClick={() => navigate(`/tech-cards/${id}`)}
         className='h-full w-full'
       >
@@ -118,7 +146,7 @@ export function TechCardTile({
               <AuxBadge purpose={card.purpose} />
             </div>
             {meta && (
-              <Text size='nano' variant='label' className='mt-1 truncate uppercase'>
+              <Text size='nano' variant='label' className='mt-1 truncate uppercase' title={meta}>
                 {meta}
               </Text>
             )}
