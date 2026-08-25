@@ -4,6 +4,7 @@
 export {
   taskInsertToWire,
   mapInsert,
+  mapTask,
 } from '../src/components/managers/tasks/api/tasksService';
 export {
   emptyTaskInsert,
@@ -21,3 +22,17 @@ export {
 export {
   mergeInlinePatch,
 } from '../src/components/managers/tasks/hooks/useTasks';
+// ── ОЧЕРЕДЬ Б ──────────────────────────────────────────────────────────────────────────────
+export {
+  openBlockers,
+  isBlocked,
+  relationsOfKind,
+  RELATION_KINDS,
+} from '../src/components/managers/tasks/utils/relations';
+export {
+  splitDescription,
+} from '../src/components/managers/tasks/components/task-description';
+export {
+  canDeleteComment,
+} from '../src/components/managers/tasks/components/task-comments';
+

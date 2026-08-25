@@ -21,7 +21,7 @@ import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
 import { orderedMedia } from '../api/tasksService';
 import { useTaskMediaViewer } from '../components/task-media-viewer';
-import { TaskText } from '../components/task-text';
+
 import {
   useArchiveTask,
   useDeleteTask,
@@ -33,8 +33,11 @@ import {
   type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
-import { InlineDate, InlineDescription, InlineField, InlineTitle } from './inline-fields';
-import { AssigneeSelect } from '../components/assignee-select';
+import { FieldLabel, InlineDate, InlineDescription, InlineField, InlineTitle } from './inline-fields';
+import { AssigneesPicker } from '../components/assignees-picker';
+import { TaskDescriptionView } from '../components/task-description';
+import { TaskRelations } from '../components/task-relations';
+import { openBlockers } from '../utils/relations';
 import { taskLinks } from '../utils/links';
 import {
   BOARD_LABEL,
@@ -247,6 +250,9 @@ export function TaskDetail() {
   // «Моя» — если я В СПИСКЕ, а не первый: витрина не решает, чья это работа.
   const isMine = !!account?.username && t.assignees.includes(account.username);
   const isArchived = !!task.archivedAt;
+  // Заархивированный блокер считается ОТКРЫТЫМ, пока не done: архив прячет карточку с доски, но
+  // не отменяет «сначала то, потом это» (довод — в `utils/relations.ts`).
+  const blockers = openBlockers(task.relations);
   const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
 
   return (
@@ -261,9 +267,26 @@ export function TaskDetail() {
         </Link>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
-            <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-              {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
-            </Text>
+            <div className='flex flex-wrap items-center gap-2'>
+              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
+              </Text>
+              {/* `warn` — В СИСТЕМЕ ЭТО «сломано / мешает / блокирует», а не акцент: тон назван
+                  так прямо в шапке примитива, и заблокированная карточка — ровно этот случай. */}
+              {blockers.length > 0 && (
+                <Pill tone='warn' title={blockers.map((b) => b.title || `#${b.taskId}`).join(', ')}>
+                  blocked · {blockers.length}
+                </Pill>
+              )}
+              {task.parentTaskId > 0 && (
+                <Link
+                  to={`/tasks/${task.parentTaskId}`}
+                  className='text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+                >
+                  ↑ parent #{task.parentTaskId}
+                </Link>
+              )}
+            </div>
             <InlineTitle
               value={t.title}
               canWrite={canWrite}
@@ -361,7 +384,14 @@ export function TaskDetail() {
                 onCancel={() => setEditingDescription(false)}
               />
             ) : t.description ? (
-              <TaskText text={t.description} media={media} onOpen={attachments.openMedia} />
+              /* МАРКДАУН, А НЕ СЫРОЙ ТЕКСТ (п.6 волны) — тем же разметчиком, что у заметок
+                 библиотеки. Ссылки на вложения карточки при этом остаются чипами: шов между
+                 двумя языками одной строки описан в `task-description.tsx`. */
+              <TaskDescriptionView
+                text={t.description}
+                media={media}
+                onOpen={attachments.openMedia}
+              />
             ) : (
               <Text size='micro' variant='label' component='span'>
                 No description.
@@ -370,6 +400,11 @@ export function TaskDetail() {
           </Section>
 
           <TaskChecklist taskId={task.id} items={task.checklist} canWrite={canWrite} />
+
+          {/* САБТАСКИ, БЛОКЕРЫ И СВЯЗИ (п.7 волны). Блок стоит СЛЕВА, вместе с чтением задачи, а
+              не в рейке фактов: «что мешает начать» и «что из этого уже сделано» — это
+              содержание работы, а не её метка. */}
+          <TaskRelations task={task} canWrite={canWrite} />
 
           {links.length > 0 && (
             <Section title='links'>
@@ -468,19 +503,21 @@ export function TaskDetail() {
                       fullWidth
                     />
                   </InlineField>
-                  <InlineField label='assignee'>
-                    {/* Пока провод одиночный — тот же мост, что в модалке: список из нуля или
-                        одного. Мультиселект встаёт сюда заменой контрола, не правилом. */}
-                    <AssigneeSelect
-                      value={t.assignees[0] ?? ''}
+                  {/* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). Не `InlineField`: тот оборачивает
+                      контрол в `<label>`, а внутри пикера живут кнопка-триггер и поле поиска —
+                      клик по слову «assignees» стал бы вторым нажатием триггера.
+
+                      `seen` приходит ОТ ПИКЕРА, а не берётся из живого `t.assignees`: пока
+                      пикер открыт, чужая правка доезжает в кэш незаметно, и сверка с живым
+                      сравнивала бы чужую правку саму с собой. */}
+                  <div className='flex flex-col gap-1'>
+                    <FieldLabel>assignees</FieldLabel>
+                    <AssigneesPicker
+                      value={t.assignees}
                       disabled={inlinePatch.isPending}
-                      onChange={(username) =>
-                        patchInline({ assignees: username ? [username] : [] }, {
-                          assignees: t.assignees,
-                        })
-                      }
+                      onChange={(next, seen) => patchInline({ assignees: next }, { assignees: seen })}
                     />
-                  </InlineField>
+                  </div>
                   <InlineDate
                     label='planned start'
                     value={t.startDate}

@@ -3,8 +3,7 @@ import { Button } from 'ui/components/button';
 import { DatePicker } from 'ui/components/date-picker';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
-import { MediaRefRow } from '../components/media-ref-row';
+import { DescriptionEditor } from '../components/description-editor';
 import type { TaskMedia } from '../api/types';
 
 /**
@@ -158,9 +157,9 @@ export function InlineTitle({
 }
 
 /**
- * ОПИСАНИЕ: та же textarea и тот же ряд ссылок на вложения, что в модалке правки, — иначе
- * «правка описания» значила бы разное в двух местах одного экрана. Панель форматирования и
- * переключатель write/preview встают сюда пунктом 6 волны, на объединённой ветке.
+ * ОПИСАНИЕ: тот же `DescriptionEditor`, что в модалке правки, — иначе «правка описания» значила
+ * бы разное в двух местах одного экрана. Он же приносит панель форматирования заметок и
+ * переключатель «пишу ↔ смотрю» (п.6 волны).
  */
 export function InlineDescription({
   value,
@@ -191,20 +190,15 @@ export function InlineDescription({
   const [draft, setDraft] = useState(value);
   /** То же, что у заголовка: «увиденное» фиксируется в начале правки, а не в момент записи. */
   const baseRef = useRef(value);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <div className='flex flex-col gap-2'>
-      <Textarea
-        ref={areaRef}
-        name='inline-description'
-        aria-label='task description'
-        variant='secondary'
-        placeholder='add details or acceptance criteria…'
-        className='mb-0 min-h-32 border border-borderColor'
+      <DescriptionEditor
+        ariaLabel='task description'
+        media={media}
         value={draft}
         disabled={saving}
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
+        onChange={setDraft}
         onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
           // Голый Enter здесь — НОВАЯ СТРОКА, и отправителем быть не может: поле многострочное
           // по назначению. Сохраняет то же сочетание, что и в модалке.
@@ -218,7 +212,6 @@ export function InlineDescription({
           }
         }}
       />
-      <MediaRefRow media={media} targetRef={areaRef} value={draft} onChange={setDraft} />
       <div className='flex items-center gap-2'>
         <Button
           type='button'

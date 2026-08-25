@@ -10,6 +10,8 @@
 //   Ц4 — пока летит одна инлайн-запись, исполнитель НЕ ПРИНИМАЕТ вторую: иначе её свежее
 //        чтение вернуло бы карточку без первой правки, и та молча откатилась бы;
 //   Ц5 — набранное в ОТКРЫТОЙ модалке правки переживает фоновое перечитывание карточки;
+//   Ц6 — то же, что Ц2, но на ОПИСАНИИ: захват «увиденного» там структурно такой же, и без
+//        своего случая он держался на сходстве с заголовком, а не на замере;
 //   ЦЖ — жесты настоящие: клик открывает редактор, Enter сохраняет.
 //
 //   node scripts/task-detail-inline-probe.mjs
@@ -17,6 +19,7 @@
 //   node scripts/task-detail-inline-probe.mjs --mutate-base-from-live      base — живое значение на момент save
 //   node scripts/task-detail-inline-probe.mjs --mutate-no-assignee-lock    исполнитель не глохнет на время записи
 //   node scripts/task-detail-inline-probe.mjs --mutate-modal-reseed        модалка пересеивается на каждое перечитывание
+//   node scripts/task-detail-inline-probe.mjs --mutate-desc-base-from-live  ОПИСАНИЕ: base — живое значение на момент save
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -166,10 +169,19 @@ if (process.argv.includes('--mutate-modal-reseed'))
     'if (open) reset(initial);\n    }, [open, initial]);',
   );
 if (process.argv.includes('--mutate-no-assignee-lock'))
+  // ЯКОРЬ ПЕРЕЕХАЛ ВМЕСТЕ С КОНТРОЛОМ. В рейке стоял одиночный `AssigneeSelect` (Radix Select);
+  // теперь там пикер НЕСКОЛЬКИХ исполнителей со своим триггером. Свойство проверяется то же —
+  // «на время летящей записи контрол не принимает жеста», — и мутация снимает ровно его.
   mutate(
     'исполнитель не глохнет на время летящей записи',
-    'placeholder: "unassigned",\n        items,\n        disabled,\n        fullWidth: true',
-    'placeholder: "unassigned",\n        items,\n        disabled: false,\n        fullWidth: true',
+    '"data-assignees-trigger": true,\n          disabled,',
+    '"data-assignees-trigger": true,\n          disabled: false,',
+  );
+if (process.argv.includes('--mutate-desc-base-from-live'))
+  mutate(
+    'ОПИСАНИЕ: base берётся живым на момент сохранения',
+    'onClick: () => onSave(draft, baseRef.current),',
+    'onClick: () => onSave(draft, value),',
   );
 
 let bad = 0;
@@ -183,6 +195,7 @@ const CARD = {
   title: 'вшить бирку',
   description: MY_DESC,
   assignee: 'nina',
+  assignees: ['nina'],
   priority: 'TASK_PRIORITY_LOW',
   labels: ['fw26'],
   mediaIds: [],
@@ -284,13 +297,16 @@ await page.locator('input[aria-label="task title"]').fill('НОВЫЙ загол
 await page.locator('input[aria-label="task title"]').press('Enter');
 await page.waitForTimeout(250); // запись пошла и висит
 
-const assignee = page.locator('button[role="combobox"]').filter({ hasText: 'nina' }).first();
+// Контрол сменился (пикер НЕСКОЛЬКИХ исполнителей вместо одиночного селекта), свойство — нет.
+const assignee = page.locator('[data-assignees-trigger]').first();
 const lockedAttr = await assignee.getAttribute('disabled');
 const lockedAria = await assignee.getAttribute('data-disabled');
 let interacted = false;
 try {
   await assignee.click({ timeout: 1200 });
-  await page.locator('[role="option"]', { hasText: 'oleg' }).first().click({ timeout: 1200 });
+  await page.locator('[data-assignee-option="oleg"]').first().click({ timeout: 1200 });
+  // Пикер пишет НА ЗАКРЫТИИ — без него жест не закончен и записи бы не было даже без замка.
+  await assignee.click({ timeout: 1200 });
   interacted = true;
 } catch {
   /* контрол не принял жеста — это и есть починка */
@@ -328,6 +344,37 @@ ck(
   modalDraft === 'НАБРАНО В МОДАЛКЕ И НЕ СОХРАНЕНО',
   'Ц5 набранное в модалке пережило перечитывание карточки',
   JSON.stringify(modalDraft),
+);
+
+// ═══ Ц6 · ТО ЖЕ, ЧТО Ц2, НО НА ОПИСАНИИ ══════════════════════════════════════════════════════
+// Захват «увиденного» у описания (`baseRef` в `InlineDescription`) устроен так же, как у
+// заголовка, — но «так же устроен» это не замер. Пока своего случая не было, мутация,
+// возвращающая описанию живое значение на момент сохранения, оставляла пробу ЗЕЛЁНОЙ.
+console.log('\nЦ6 · правку описания начал ДО чужой, кэш успел освежиться чужим текстом');
+await mount();
+await page.click('[aria-label="edit description"]');
+await page.waitForSelector('textarea[aria-label="task description"]', { timeout: 8000 });
+const descArea = page.locator('textarea[aria-label="task description"]');
+await descArea.fill('МОЁ новое описание');
+await foreignEdit({ description: 'ЧУЖОЕ новое описание' });
+await refetchLikeFocus();
+await page.getByRole('button', { name: 'save', exact: true }).first().click();
+await page.waitForTimeout(500);
+const descClash = await server();
+ck(
+  descClash.updates.length === 0,
+  'Ц6 записи НЕ БЫЛО — конфликт по описанию пойман так же, как по заголовку',
+  `updates=${descClash.updates.length}${descClash.updates.length ? `, ушло ${JSON.stringify(descClash.updates[0].description)}` : ''}`,
+);
+ck(
+  descClash.task.description === 'ЧУЖОЕ новое описание',
+  'Ц6.1 на сервере осталось чужое описание',
+  JSON.stringify(descClash.task.description),
+);
+ck(
+  (await page.locator('textarea[aria-label="task description"]').count()) === 1 &&
+    (await descArea.inputValue()) === 'МОЁ новое описание',
+  'Ц6.2 после отказа редактор открыт и набранное на месте — чужая гонка не стоила мне моего текста',
 );
 
 // ═══ ЦЖ · ЧТО ЖЕСТЫ ВООБЩЕ РАБОТАЮТ ══════════════════════════════════════════════════════════

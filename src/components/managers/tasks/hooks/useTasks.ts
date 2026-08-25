@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
-import { ListTasksFilter, Task, TaskBoard, TaskInsert, TaskStatus } from '../api/types';
+import {
+  ListTasksFilter,
+  Task,
+  TaskBoard,
+  TaskComment,
+  TaskInsert,
+  TaskRelationKind,
+  TaskStatus,
+} from '../api/types';
 import { tasksService } from '../api/tasksService';
 import { applyMove } from '../utils/order';
 
@@ -17,11 +25,17 @@ type ListResult = { tasks: Task[]; total: number };
 
 // ---- Reads ----
 
-export function useTasks(filter: ListTasksFilter) {
+/**
+ * `enabled` — для мест, которые рисуют пикер задач, но открывают его редко (тот же приём, что у
+ * `useAdmins`). Хук нельзя позвать условно, а список задач — это чтение всей доски: на детальной
+ * странице оно уходило бы при каждом открытии карточки ради поповера, которого никто не трогал.
+ */
+export function useTasks(filter: ListTasksFilter, enabled = true) {
   return useQuery({
     queryKey: tasksKeys.list(filter),
     queryFn: () => tasksService.listTasks(filter),
     staleTime: 30_000,
+    enabled,
   });
 }
 
@@ -60,11 +74,20 @@ export function useCreateTask() {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   return useMutation({
-    mutationFn: (vars: { content: TaskInsert; board: TaskBoard; status: TaskStatus }) =>
-      tasksService.addTask(vars.content, vars.board, vars.status),
-    onSuccess: () => {
+    mutationFn: (vars: {
+      content: TaskInsert;
+      board: TaskBoard;
+      status: TaskStatus;
+      /**
+       * Родитель СОЗДАВАЕМОЙ карточки; 0/undefined = верхний уровень. Едет тем же вызовом, а не
+       * вторым `SetTaskParent`: отказ на втором оставил бы карточку на верхнем уровне, и о ней
+       * никто бы не узнал — искать её пошли бы в детях.
+       */
+      parentTaskId?: number;
+    }) => tasksService.addTask(vars.content, vars.board, vars.status, vars.parentTaskId),
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Task created', 'success');
+      showMessage(vars.parentTaskId ? 'Subtask created' : 'Task created', 'success');
     },
     onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to create task', 'error'),
   });
@@ -312,5 +335,87 @@ export function useAddComment(taskId: number) {
     mutationFn: (body: string) => tasksService.addComment(taskId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.comments(taskId) }),
     onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to add comment', 'error'),
+  });
+}
+
+
+// ---- Сабтаски и связи ----
+//
+// ПИШУТСЯ ТОЛЬКО ОТДЕЛЬНЫМИ RPC, НИКОГДА ЧЕРЕЗ `TaskInsert`. Связь принадлежит ДВУМ карточкам
+// сразу: полная замена «связей карточки A» при сохранении её формы снесла бы связь, добавленную
+// с карточки B, пока форма A была открыта. То же про родителя — он есть в ответе на чтение, но в
+// содержимом его нет намеренно.
+//
+// Все три идемпотентны на сервере, поэтому повторное нажатие — no-op, а не отказ: кнопки здесь
+// описывают ЖЕЛАЕМОЕ состояние, а не приращение.
+
+export function useSetTaskParent() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number; parentTaskId: number }) =>
+      tasksService.setTaskParent(vars.id, vars.parentTaskId),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: tasksKeys.all });
+      showMessage(vars.parentTaskId ? 'Parent set' : 'Moved to top level', 'success');
+    },
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to set parent', 'error'),
+  });
+}
+
+export function useAddTaskRelation() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { taskId: number; otherTaskId: number; kind: TaskRelationKind }) =>
+      tasksService.addRelation(vars.taskId, vars.otherTaskId, vars.kind),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: tasksKeys.all });
+      showMessage('Linked', 'success');
+    },
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to link tasks', 'error'),
+  });
+}
+
+export function useDeleteTaskRelation() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { taskId: number; otherTaskId: number; kind: TaskRelationKind }) =>
+      tasksService.deleteRelation(vars.taskId, vars.otherTaskId, vars.kind),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: tasksKeys.all });
+      showMessage('Link removed', 'success');
+    },
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to remove link', 'error'),
+  });
+}
+
+/**
+ * УДАЛЕНИЕ СВОЕЙ РЕПЛИКИ.
+ *
+ * Оптимистично снимает строку из ленты — но `onError` ВОЗВРАЩАЕТ ЕЁ НА МЕСТО. Отказ здесь не
+ * теоретический: право проверяет СЕРВЕР (совпадение имени при живой ссылке), и клиентская
+ * проверка, решающая, рисовать ли кнопку, защитой не является — она лишь не предлагает заведомо
+ * невозможного. Исчезнувшая после отказа реплика была бы худшим из исходов: человек решил бы,
+ * что слова стёрты, а они на месте.
+ */
+export function useDeleteComment(taskId: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  const key = tasksKeys.comments(taskId);
+  return useMutation({
+    mutationFn: (id: number) => tasksService.deleteComment(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<TaskComment[]>(key);
+      if (previous) qc.setQueryData<TaskComment[]>(key, previous.filter((c) => c.id !== id));
+      return { previous };
+    },
+    onError: (e, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(key, ctx.previous);
+      showMessage(e instanceof Error ? e.message : 'Failed to delete comment', 'error');
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
 }

@@ -26,6 +26,7 @@ import {
   emptyFilters,
   filtersActive,
   FiltersBar,
+  setFilter,
   TaskFilters,
 } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
@@ -122,10 +123,19 @@ export function Tasks() {
   }, [countsData]);
 
   // Persist filters across navigation (opening a task detail unmounts the board).
+  //
+  // ВОССТАНОВЛЕНИЕ ИДЁТ ЧЕРЕЗ ТО ЖЕ `setFilter`, ЧТО И ЩЕЛЧОК ПО ЧИПУ. Раньше сохранённый JSON
+  // раскладывался в состояние напрямую — то есть МИНУЯ правило взаимного исключения «мои ↔
+  // конкретный человек». Из сегодняшнего кода такой набор недостижим (оба поля родились одной
+  // волной, и записывает их только `setFilter`), но недостижимость держалась на том, что осей у
+  // фильтра ровно две; с третьей это перестанет быть очевидным, а хранилище — вход, который
+  // переживает выкаты и правится руками из консоли. Правило обязано стоять на КАЖДОМ входе в
+  // состояние, а не на одном из двух.
   const [filters, setFilters] = useState<TaskFilters>(() => {
     try {
       const raw = sessionStorage.getItem(FILTERS_KEY);
-      return raw ? { ...emptyFilters, ...(JSON.parse(raw) as Partial<TaskFilters>) } : emptyFilters;
+      if (!raw) return emptyFilters;
+      return setFilter(emptyFilters, JSON.parse(raw) as Partial<TaskFilters>);
     } catch {
       return emptyFilters;
     }

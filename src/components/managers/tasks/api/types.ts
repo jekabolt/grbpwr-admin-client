@@ -131,6 +131,36 @@ export interface TaskInsert {
  * (`GetTaskResponse.files` — это `LibraryFile`), а вид приводится к чему нужно на месте.
  */
 
+/**
+ * ВИД СВЯЗИ ДВУХ КАРТОЧЕК — С ТОЧКИ ЗРЕНИЯ ТОЙ, ЧЕЙ ЭТО СПИСОК, а не строки в хранилище.
+ * `BLOCKED_BY` — это `BLOCKS`, прочитанный с другого конца; в хранилище на один факт приходится
+ * одна строка, поэтому пара не может полусуществовать.
+ *
+ * ИМЯ `TaskRelation`, А НЕ `TaskLink`: `utils/links.ts` уже занял `TaskLink` под ГЛУБОКИЕ ССЫЛКИ
+ * карточки на чужие сущности (тех-карта, заказ, съёмка). Это разные вещи — там «про что задача»,
+ * здесь «в каком порядке две работы», — и одно имя на двоих стоило бы первой же путаницы на
+ * экране, где обе живут рядом.
+ */
+export type TaskRelationKind =
+  | 'TASK_LINK_KIND_UNKNOWN'
+  | 'TASK_LINK_KIND_BLOCKS'
+  | 'TASK_LINK_KIND_BLOCKED_BY'
+  | 'TASK_LINK_KIND_RELATES';
+
+/**
+ * СТРОКА СВЯЗИ, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён сервером в заголовок, статус,
+ * доску и признак архива. За ним не ходят вторым запросом — ни бейдж «заблокирована», ни список
+ * связей не имеют права стоить N+1.
+ */
+export interface TaskRelation {
+  taskId: number; // ВТОРОЙ конец, не эта карточка
+  kind: TaskRelationKind;
+  title: string;
+  status: TaskStatus;
+  board: TaskBoard;
+  archived: boolean;
+}
+
 // Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
   id: number;
@@ -154,12 +184,42 @@ export interface Task {
   // Soft-archive stamp. '' = active; set (RFC3339) = archived (hidden from the
   // board's default view, restorable via UnarchiveTask). Orthogonal to placement.
   archivedAt: string;
+  /**
+   * РОДИТЕЛЬ-САБТАСКА; 0 = верхний уровень.
+   *
+   * ЧИТАЕТСЯ ЗДЕСЬ, НО В `TaskInsert` ЕГО НЕТ НАМЕРЕННО. Содержимое сохраняется полной заменой,
+   * и поле, попавшее в `TaskInsert`, стиралось бы каждым сохранением формы, которая о нём не
+   * знает. Меняется только `SetTaskParent`; единственное исключение — `AddTask(parentTaskId)`,
+   * чтобы «создать сабтаску» было ОДНИМ вызовом, а не создать-и-потом-привязать.
+   */
+  parentTaskId: number;
+  /**
+   * ВСЕ СВЯЗИ КАРТОЧКИ — и `blocks`/`blocked_by` в обе стороны, и `relates`.
+   *
+   * ТОЛЬКО ЧТЕНИЕ. Пишутся связи отдельными идемпотентными RPC, а НЕ полной заменой внутри
+   * `TaskInsert`: связь принадлежит ДВУМ карточкам сразу, и полная замена «связей карточки A»
+   * при сохранении формы A снесла бы связь, добавленную с карточки B, пока форма A была открыта.
+   */
+  relations: TaskRelation[];
+  /** Свёртка сабтасок для карточки на доске: сколько АКТИВНЫХ детей и сколько из них в DONE. */
+  subtaskTotal: number;
+  subtaskDone: number;
 }
 
 export interface TaskComment {
   id: number;
   taskId: number;
   author: string; // AdminAccount.username
+  /**
+   * ЖИВАЯ ССЫЛКА НА АККАУНТ АВТОРА; 0 = аккаунта больше нет (строка `author` при этом остаётся).
+   *
+   * ПАРА, А НЕ ОДНО ИМЯ — и это то же условие, которое проверяет сервер: совпадение имени ПРИ
+   * живой ссылке. `UNIQUE` на `admins.username` освобождает имя при удалении аккаунта, поэтому
+   * новый однофамилец совпал бы по строке со всей перепиской прежнего, и кнопка удаления
+   * появилась бы у него на чужих словах. Ноль здесь значит «спросить некого» — реплика
+   * неудаляемая, и это правильный исход, а не пробел.
+   */
+  authorId: number;
   body: string;
   createdAt: string;
 }
@@ -183,6 +243,12 @@ export interface ListTasksFilter {
   // список тот же, просто суженный, и ходит он под тем же rd(tasks), что и доска.
   // Несуществующий проект отдаёт пустой список, а не отличимый отказ.
   projectTopicId?: number;
+  /**
+   * САБТАСКИ ЭТОЙ ЗАДАЧИ — фильтр ТОГО ЖЕ списка, а не отдельный RPC (та же доктрина, что у семи
+   * обратных фильтров выше): дети обязаны ходить под тем же `rd(tasks)`, что и доска.
+   * 0/undefined = не сужать.
+   */
+  parentTaskId?: number;
   includeArchived?: boolean; // false/undefined = active only; true = include archived
 }
 
