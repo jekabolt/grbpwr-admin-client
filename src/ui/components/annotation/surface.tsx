@@ -348,19 +348,23 @@ export function AnnotationSurface({
   // кадре, вторым кликом по третьему.
   const [points, setPoints] = useState<ShapePoint[]>([]);
   /**
-   * СЕССИЯ ФРИХЕНДА — законченные штрихи, которые ещё не стали выноской.
+   * СЕССИЯ ФРИХЕНДА — штрихи, УЖЕ УЕХАВШИЕ В ФОРМУ одной выноской.
    *
    * Раньше каждое отпускание кнопки рождало отдельную фигуру, и «обвести горловину, потом кокетку,
    * потом стрелку к ним» давало три выноски с тремя номерами, которые никто по отдельности не имел
-   * в виду. Теперь пока инструмент взведён, все штрихи копятся здесь и уезжают ОДНОЙ фигурой; при
-   * этом ⌘Z снимает её целиком, потому что запись в историю одна.
+   * в виду. Теперь пока инструмент взведён, штрихи наполняют ОДНУ выноску.
+   *
+   * ЗДЕСЬ НЕ ЧЕРНОВИК. Список нужен, чтобы пересобрать склейку при каждом новом штрихе (бюджет
+   * точек делится между штрихами) и чтобы показать счётчик; сама выноска живёт в форме с первого
+   * же отпускания. Промежуточная редакция копила штрихи здесь и записывала их в конце — и Save
+   * карточки, не будучи ни одним из концов сессии, отправлял карточку без нарисованного.
    *
    * БУФЕР ПЕР-ПОВЕРХНОСТНЫЙ, инструмент — общий на лист. Рисование на кадре A, потом на кадре B
    * даёт две независимые сессии: штрих, растянутый между передом и спинкой, — не штрих. Смена
-   * инструмента коммитит обе (эффект по `tool` живёт в каждом экземпляре).
+   * инструмента заканчивает обе (эффект по `tool` живёт в каждом экземпляре).
    *
-   * Зеркало в ref — потому что коммит зовут и слушатель клавиш, и cleanup размонтирования, а им
-   * нужно СВЕЖЕЕ значение, а не то, что было в замыкании на момент подписки.
+   * Зеркало в ref — потому что сессию закрывают и слушатель клавиш, и колбэки, переживающие
+   * рендер, а им нужно СВЕЖЕЕ значение, а не то, что было в замыкании на момент подписки.
    */
   const [inkSession, setInkSessionState] = useState<ShapePoint[][]>([]);
   const inkSessionRef = useRef<ShapePoint[][]>([]);
@@ -368,6 +372,20 @@ export function AnnotationSurface({
     inkSessionRef.current = next;
     setInkSessionState(next);
   }, []);
+  /**
+   * ВЫНОСКА, КОТОРУЮ ДОПИСЫВАЕТ СЕССИЯ. Пока её нет, следующий штрих создаёт выноску; когда есть —
+   * дописывает её же. Ключ приходит не от `onAdd` (он ничего не возвращает: владелец кладёт
+   * выноску в свой список сам), а УЗНАЁТСЯ по появлению нового ключа в `callouts` — см. усыновление
+   * ниже.
+   */
+  const [inkKey, setInkKeyState] = useState<string | null>(null);
+  const inkKeyRef = useRef<string | null>(null);
+  const setInkKey = useCallback((next: string | null) => {
+    inkKeyRef.current = next;
+    setInkKeyState(next);
+  }, []);
+  /** Снимок ключей ДО добавления: по нему усыновляется только что созданная выноска. */
+  const adoptRef = useRef<Set<string> | null>(null);
   const [cursor, setCursor] = useState<ShapePoint | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   /** Последний отказ постановки — печатается под кадром, пока не начнут новый жест. */
@@ -614,36 +632,80 @@ export function AnnotationSurface({
   }, [onToolDone]);
 
   /**
-   * КОНЕЦ СЕССИИ ФРИХЕНДА — ОДНА ФИГУРА, ОДНА ЗАПИСЬ ИСТОРИИ.
+   * КОНЕЦ СЕССИИ ФРИХЕНДА. Ничего не записывает и не может ничего потерять: выноска УЖЕ в форме —
+   * её создал первый штрих, а каждый следующий её дописал (см. `pushInkStroke`).
    *
-   * Зовётся из пяти мест: Enter, чип «done», Esc, смена/снятие инструмента и размонтирование
-   * поверхности (закрытие увеличенного вида). Все пять — «я закончил», и все пять КОММИТЯТ.
-   * Выбросить сессию можно ровно одним жестом — чипом «cancel»: законченные штрихи это уже
-   * сделанная работа, и стирать восемь штрихов клавишей, которая обычно значит «отмени последнее
-   * незаконченное», — потеря данных, а не отмена.
+   * Так было не сразу, и цена первой редакции важнее её самой. Сессия копилась в состоянии
+   * поверхности и уезжала в форму одной фигурой в конце — Enter, чип «done», Esc, смена
+   * инструмента, размонтирование. Пять выходов, и ни один из них не Save: человек рисовал, видел
+   * штрихи НА КАДРЕ, жал Save карточки — и на сервер уходила карточка без них. Форма при этом даже
+   * не считалась изменённой, поэтому уход со страницы не спрашивал ничего. «Вижу на экране, а на
+   * сервере нет» — расхождение, которого не бывает, когда хранить нечего.
+   *
+   * Поэтому сессия больше не хранит невыписанного. Она помнит РОВНО ДВЕ вещи: какие штрихи в ней
+   * уже есть (чтобы пересобрать склейку и показать счётчик) и какую выноску они наполняют.
    */
-  const commitInkSession = useCallback(() => {
-    const strokes = inkSessionRef.current;
-    if (strokes.length === 0) return;
+  const endInkSession = useCallback(() => {
+    if (inkSessionRef.current.length === 0 && inkKeyRef.current === null) return;
+    adoptRef.current = null;
     setInkSession([]);
-    const d = kindDef('ink');
-    const joined = joinInkStrokes(strokes, d.points[1], px, unpx, Math.max(INK_EPSILON / shown, 1e-3));
-    if (joined.length >= d.points[0]) finishPlacing('ink', joined);
-  }, [setInkSession, finishPlacing, px, unpx, shown]);
+    setInkKey(null);
+  }, [setInkSession, setInkKey]);
 
-  /** Свежий коммит для слушателей, переживающих рендер, и для cleanup размонтирования. */
-  const commitInkRef = useRef(commitInkSession);
-  commitInkRef.current = commitInkSession;
+  /**
+   * ШТРИХ ЗАКОНЧЕН — ФОРМА ОБНОВЛЕНА ТУТ ЖЕ. Первый штрих создаёт выноску, каждый следующий
+   * переписывает ей точки целиком: склейка пересобирается из ВСЕХ штрихов сессии, потому что
+   * бюджет точек делится между ними и добавление шестого меняет прореживание первых пяти.
+   *
+   * ⌘Z теперь снимает ОДИН ШТРИХ, а не всю серию: запись в историю у каждого своя. Это ближе к
+   * тому, чего ждут от отмены во время рисования, чем прежнее «снять всё сделанное разом».
+   */
+  const pushInkStroke = useCallback(
+    (strokes: ShapePoint[][]) => {
+      const d = kindDef('ink');
+      const joined = joinInkStrokes(strokes, d.points[1], px, unpx, Math.max(INK_EPSILON / shown, 1e-3));
+      if (joined.length < d.points[0]) return;
+      // ВЛАДЕЛЕЦ ЧИТАЕТСЯ НА МОМЕНТ ЗАПИСИ. Выноску сессии могли унести ⌘Z или чужая правка, пока
+      // рука была на кадре: дописывать в исчезнувший ключ значило бы молча терять штрих.
+      const known = live.current.callouts.some((c) => c.key === inkKeyRef.current);
+      const key = known ? inkKeyRef.current : null;
+      if (key === null) {
+        // Дописывать умеет не всякий владелец: без `onEditPoints` сессии не выйдет, и каждый штрих
+        // остаётся собственной выноской — прежнее поведение, а не молчаливая потеря.
+        adoptRef.current = live.current.onEditPoints
+          ? new Set(live.current.callouts.map((c) => c.key))
+          : null;
+        finishPlacing('ink', joined);
+      } else {
+        mutate(() => live.current.onEditPoints?.(key, joined));
+      }
+      if (strokes.length >= inkSessionMaxStrokes(d.points[1])) endInkSession();
+    },
+    [px, unpx, shown, finishPlacing, mutate, endInkSession],
+  );
 
-  // ПОВЕРХНОСТЬ УШЛА С ЭКРАНА — СЕССИЯ КОММИТИТСЯ. Закрытие увеличенного вида это «я дорисовал», а
-  // не «выброси»: молча потерять штрихи, сделанные в зуме, — худший из возможных ответов.
-  useEffect(() => () => commitInkRef.current(), []);
-
-  // СМЕНА ИЛИ СНЯТИЕ ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ФИГУРУ. Синхронный сброс `points` выше буфер НЕ
-  // трогает намеренно: писать в форму из тела рендера нельзя, поэтому коммит делает эффект. На
-  // монтировании и на любом переключении с пустой сессией это ноль работы.
+  /**
+   * УСЫНОВЛЕНИЕ. `onAdd` ключа не возвращает — выноску заводит владелец, и как она называется,
+   * знает только его список. Поэтому ключ узнаётся по разнице: снимок ключей снят перед
+   * добавлением, а новый — тот, которого в снимке не было.
+   */
   useEffect(() => {
-    commitInkRef.current();
+    const before = adoptRef.current;
+    if (!before) return;
+    const fresh = callouts.find((c) => !before.has(c.key));
+    if (!fresh) return;
+    adoptRef.current = null;
+    setInkKey(fresh.key);
+  }, [callouts, setInkKey]);
+
+  /** Свежий конец сессии для слушателей, переживающих рендер. */
+  const endInkRef = useRef(endInkSession);
+  endInkRef.current = endInkSession;
+
+  // СМЕНА ИЛИ СНЯТИЕ ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ФИГУРУ: следующая серия штрихов начнёт новую выноску.
+  // Размонтирование поверхности отдельного эффекта больше не требует — терять нечего.
+  useEffect(() => {
+    endInkRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool]);
 
@@ -903,12 +965,12 @@ export function AnnotationSurface({
         eps,
       ).map(unpx);
       setPoints([]);
-      // ОТПУСКАНИЕ КНОПКИ БОЛЬШЕ НЕ РОЖДАЕТ ФИГУРУ — оно кладёт штрих в сессию. Фигура рождается
-      // только явным концом сессии (см. `commitInkSession`).
+      // ОТПУСКАНИЕ КНОПКИ НЕ РОЖДАЕТ НОВУЮ ФИГУРУ — оно дописывает ту, что сессия уже наполняет
+      // (первый штрих её и создаёт). Форма обновляется здесь же: см. `pushInkStroke`.
       if (thinned.length >= 2) {
         const next = [...inkSessionRef.current, thinned];
         setInkSession(next);
-        if (next.length >= inkSessionMaxStrokes(kindDef('ink').points[1])) commitInkSession();
+        pushInkStroke(next);
       }
       return;
     }
@@ -1068,7 +1130,7 @@ export function AnnotationSurface({
         // не ставшие точки, и выбросить их не жалко. У следа незавершённый жест — это штрих под
         // зажатой кнопкой, и обрывает его pointercancel; всё, что лежит в сессии, уже нарисовано
         // рукой. Выброс есть, он явный — чип «cancel».
-        else if (inkSession.length > 0) commitInkSession();
+        else if (inkSession.length > 0) endInkSession();
         else if (points.length > 0) setPoints([]);
         else if (tool) cancelPlacing();
         else stepped = false;
@@ -1099,7 +1161,7 @@ export function AnnotationSurface({
       // выбора, а незавершённой постановки у следа не бывает — штрих кончается вместе с кнопкой.
       if (e.key === 'Enter' && !typing && inkSession.length > 0) {
         e.preventDefault();
-        commitInkSession();
+        endInkSession();
         return;
       }
       if (e.key === 'Enter' && !typing && placing && points.length >= def.points[0]) {
@@ -1152,6 +1214,14 @@ export function AnnotationSurface({
       // получает чужая поверхность и уносит с собой при размонтировании, и у любого владельца, где
       // соседние поверхности пишут в РАЗНЫЕ списки. Проверка стоит одного сравнения по Map и
       // убирает зависимость от порядка подписки целиком.
+      //
+      // ПОЧЕМУ ЭТУ СТРОКУ НЕ ЛОВИТ НИ ОДНА ПРОБА, и почему это не повод её снять. Соседняя галерея
+      // на той же странице сюда не доходит: выбор пер-аннотаторный (см. `controlled`/`selected`
+      // выше), у чужой галереи он `null`, и `if (selected === null) return` строкой выше отсекает
+      // её раньше. А внутри ОДНОГО листа все кадры делят один `onRemove` — «не та» поверхность
+      // зовёт тот же обработчик с тем же ключом, и результат неотличим. То есть сегодня строка
+      // страхует не наблюдаемое поведение, а два конкретных будущих: разные списки у соседних
+      // поверхностей и владение откатом.
       if (!byKey.has(selected)) return;
       e.preventDefault();
       mutate(() => live.current.onRemove?.(selected));
@@ -1174,7 +1244,7 @@ export function AnnotationSurface({
     cancelPlacing,
     finishPlacing,
     inkSession,
-    commitInkSession,
+    endInkSession,
     mutate,
     onUndo,
     canUndo,
@@ -1569,18 +1639,19 @@ export function AnnotationSurface({
                       />
                     );
                   })}
-                {/* ЗАКОНЧЕННЫЕ ШТРИХИ СЕССИИ — уже на кадре, но ещё не выноска.
-                    НЕ ГЕЙТИТСЯ НА `placing`: между сменой инструмента и коммитом (он делается
-                    эффектом, а не синхронно) есть кадр, в котором вид уже другой, — и без этого
-                    штрихи на нём моргали бы. */}
-                {inkSession.map((s, i) => (
-                  <PlacingShape
-                    key={`ink-session:${i}`}
-                    kind='ink'
-                    pts={s.map(px)}
-                    color={pen.color || undefined}
-                  />
-                ))}
+                {/* ШТРИХИ СЕССИИ — ТОЛЬКО ПОКА ВЫНОСКА НЕ УСЫНОВЛЕНА. Как только ключ известен,
+                    те же штрихи приезжают сверху обычной выноской из `callouts`, и рисовать их
+                    вторым слоем значило бы удваивать полупрозрачные концы. Окно между добавлением
+                    и усыновлением — один рендер, и без этого следа в нём штрих моргал бы. */}
+                {inkKey === null &&
+                  inkSession.map((s, i) => (
+                    <PlacingShape
+                      key={`ink-session:${i}`}
+                      kind='ink'
+                      pts={s.map(px)}
+                      color={pen.color || undefined}
+                    />
+                  ))}
                 {placing && points.length > 0 && (
                   <PlacingShape
                     kind={def.key}
@@ -1755,18 +1826,24 @@ export function AnnotationSurface({
             <>
               <Chip
                 nonForm
-                onClick={commitInkSession}
+                onClick={endInkSession}
                 title='finish this freehand callout at these strokes'
               >
                 done · {inkSession.length} {inkSession.length === 1 ? 'stroke' : 'strokes'}
               </Chip>
-              {/* ЕДИНСТВЕННЫЙ ПУТЬ ВЫБРОСА. Инструмент при этом остаётся взведён: «не то
-                  нарисовал» значит «нарисую заново», а не «уберите маркер». */}
+              {/* ЕДИНСТВЕННЫЙ ПУТЬ ВЫБРОСА, и теперь он УДАЛЯЕТ выноску, а не забывает буфер:
+                  штрихи уже в форме с первого же отпускания, и «забыть» их больше негде.
+                  Инструмент при этом остаётся взведён: «не то нарисовал» значит «нарисую заново»,
+                  а не «уберите маркер». */}
               <Chip
                 nonForm
                 dashed
-                onClick={() => setInkSession([])}
-                title='throw away the strokes drawn so far'
+                onClick={() => {
+                  const key = inkKeyRef.current;
+                  if (key !== null) mutate(() => live.current.onRemove?.(key));
+                  endInkSession();
+                }}
+                title='delete this freehand callout'
               >
                 cancel
               </Chip>
