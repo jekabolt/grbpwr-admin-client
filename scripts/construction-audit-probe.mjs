@@ -1048,10 +1048,13 @@ await inject();
   ck(after.length === before.length + 1, 'exactly one issue was appended', `${before.length} → ${after.length}`);
   ck(added?.operationNumber === 460, 'operationNumber came from the first op: anchor', String(added?.operationNumber));
   ck(added?.raisedBy === '', 'raisedBy is left empty — the reporter is a human, not a report');
+  // §11: blocker/error → HIGH, warning → MEDIUM, question → LOW. FINDINGS[0] is a BLOCKER, so
+  // filing it MEDIUM — which is what the shared default used to do to every finding alike — would
+  // put the loudest thing the audit found on the issues tab looking like a note about a typo.
   ck(
-    added?.severity === 'TECH_CARD_ISSUE_SEVERITY_MEDIUM' &&
+    added?.severity === 'TECH_CARD_ISSUE_SEVERITY_HIGH' &&
       added?.status === 'TECH_CARD_ISSUE_STATUS_OPEN',
-    'severity/status come from the shared defaults',
+    'a BLOCKER files at HIGH, and the status is OPEN',
     `${added?.severity} / ${added?.status}`,
   );
   const d = norm(String(added?.description ?? ''));
@@ -1061,6 +1064,45 @@ await inject();
       d.includes(norm(FINDINGS[0].suggestion)),
     'the description carries title + detail + suggestion',
   );
+
+  // THE OTHER TWO ARMS OF THE §11 MAP. One arm on its own passes against a function that returns
+  // HIGH for everything — which is the same failure as the constant it replaced, only louder. So
+  // every visible machine filer is pressed and each appended row is matched back to the finding it
+  // came from BY ITS TITLE, not by position: the list is grouped, and an index would be measuring
+  // the fixture's order rather than the mapping.
+  {
+    const expect = { blocker: 'HIGH', error: 'HIGH', warning: 'MEDIUM', question: 'LOW' };
+    const filers = await anchor('file as issue');
+    const beforeAll = await issues();
+    for (let i = 0; i < filers.n; i++) {
+      await pick('file as issue', i);
+      await clickHit();
+    }
+    const afterAll = await issues();
+    const fresh = afterAll.slice(beforeAll.length);
+    let matched = 0;
+    let wrong = [];
+    for (const row of fresh) {
+      const text = norm(String(row?.description ?? ''));
+      const f = FINDINGS.find((x) => text.includes(norm(x.title)));
+      if (!f) continue;
+      const bucket = (f.category ?? '').trim() === 'question' ? 'question' : (f.severity ?? '').trim();
+      const want = expect[bucket];
+      // An unfamiliar severity has no arm and legitimately falls back — skip it rather than
+      // asserting a value the map was never asked to produce.
+      if (!want) continue;
+      matched++;
+      if (row?.severity !== `TECH_CARD_ISSUE_SEVERITY_${want}`) {
+        wrong.push(`${f.severity}/${f.category} → ${row?.severity}, want ${want}`);
+      }
+    }
+    ck(matched >= 3, 'at least three findings of different severities were filed', `matched ${matched}`);
+    ck(wrong.length === 0, 'every filed issue took the severity §11 gives its finding', wrong.join('; '));
+    const gotMedium = fresh.some((r) => r?.severity === 'TECH_CARD_ISSUE_SEVERITY_MEDIUM');
+    const gotHigh = fresh.some((r) => r?.severity === 'TECH_CARD_ISSUE_SEVERITY_HIGH');
+    ck(gotHigh && gotMedium, 'the map produced MORE THAN ONE level — a constant would produce one',
+      `high=${gotHigh} medium=${gotMedium}`);
+  }
   ck(
     !d.includes('(model'),
     'a MACHINE finding carries no «(model …)» tail — it was produced by code in this repo',
@@ -1511,6 +1553,45 @@ await inject();
     'AND IT ENDS WITH THE MODEL SLUG — an issue outlives the run, and a claim without provenance cannot be checked',
     d.slice(-60),
   );
+
+  // THE «question → LOW» ARM, AND IT IS THE ONE THAT DISCRIMINATES. M_QUESTION carries
+  // category=question WITH severity=warning: a mapping that read `severity` would file it MEDIUM
+  // and look right on every other finding in the fixture. `question` is not a severity — it is
+  // read off the category axis, by the same bucket function the pills and the grouping use.
+  //
+  // EVERY MODEL FILER IS PRESSED AND THE ROWS ARE MATCHED BACK BY TITLE. Not by index: the AI
+  // block GROUPS its findings, so a positional pick measures the fixture's order, not the map —
+  // which is how the first version of this check filed the wrong finding and said so.
+  {
+    const expectM = { blocker: 'HIGH', error: 'HIGH', warning: 'MEDIUM', question: 'LOW' };
+    const beforeQ = (await issues()).length;
+    const allFilers = await page.evaluate(() => window.findLeaf('file as issue').length);
+    for (let i = FINDINGS.length; i < allFilers; i++) {
+      await pick('file as issue', i);
+      await clickHit();
+    }
+    const rows = (await issues()).slice(beforeQ);
+    const wrongM = [];
+    let sawQuestion = false;
+    for (const row of rows) {
+      const text = norm(String(row?.description ?? ''));
+      const f = MODEL_FINDINGS.find((x) => text.includes(norm(x.title)));
+      if (!f) continue;
+      const bucket = (f.category ?? '').trim() === 'question' ? 'question' : (f.severity ?? '').trim();
+      const want = expectM[bucket];
+      if (!want) continue;
+      if (bucket === 'question') sawQuestion = true;
+      if (row?.severity !== `TECH_CARD_ISSUE_SEVERITY_${want}`) {
+        wrongM.push(`${f.severity}/${f.category} → ${row?.severity}, want ${want}`);
+      }
+    }
+    ck(sawQuestion, 'the question finding is among the filed rows', `${rows.length} rows`);
+    ck(
+      wrongM.length === 0,
+      'a QUESTION files at LOW even though its severity says warning — the map reads the category axis',
+      wrongM.join('; '),
+    );
+  }
 }
 
 // ═══ 16. identity, dismiss, delta, and F5 ══════════════════════════════════════════════════════

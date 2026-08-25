@@ -1,4 +1,8 @@
-import { AnalyzeTechCardConstructionResponse, TechCardAnalysisFinding } from 'api/proto-http/admin';
+import {
+  AnalyzeTechCardConstructionResponse,
+  common_TechCardIssueSeverity,
+  TechCardAnalysisFinding,
+} from 'api/proto-http/admin';
 import {
   ANALYZE_ABORTED_BY_CLIENT,
   ANALYZE_CLIENT_BUDGET_MS,
@@ -145,6 +149,29 @@ const ISSUE_SEVERITY_WIRE: Record<string, string> = {
 };
 function wireSeverity(formSeverity: string): string {
   return ISSUE_SEVERITY_WIRE[formSeverity] ?? 'MEDIUM';
+}
+
+// THE FINDING'S SEVERITY DECIDES THE ISSUE'S — design §11: blocker/error → HIGH, warning → MEDIUM,
+// question → LOW.
+//
+// FILING EVERYTHING AT ONE LEVEL IS THE FAILURE THIS REPLACES. A blocker filed as MEDIUM arrives on
+// the issues tab indistinguishable from a note about a typo, and the whole reason the panel sorts
+// findings by severity is that the difference is what someone acts on first. The constant default
+// stays as the fallback for a severity this bundle has never heard of — the taxonomy grows without a
+// client regeneration (see the header), and an unknown word must file SOMETHING rather than nothing.
+//
+// `question` IS READ OFF THE CATEGORY AXIS, through the same modelBucket the pills and the grouping
+// use. It is not a severity, and asking `f.severity` for it would file «спорное» at whatever
+// severity the model happened to attach — that is exactly the two-numbers-that-disagree failure the
+// bucket function exists to prevent, only landing in a row someone answers for.
+const ISSUE_SEVERITY_BY_BUCKET: Record<string, common_TechCardIssueSeverity> = {
+  blocker: 'TECH_CARD_ISSUE_SEVERITY_HIGH',
+  error: 'TECH_CARD_ISSUE_SEVERITY_HIGH',
+  warning: 'TECH_CARD_ISSUE_SEVERITY_MEDIUM',
+  question: 'TECH_CARD_ISSUE_SEVERITY_LOW',
+};
+function issueSeverityOf(f: TechCardAnalysisFinding): common_TechCardIssueSeverity {
+  return ISSUE_SEVERITY_BY_BUCKET[modelBucket(f)] ?? DEFAULT_ISSUE_SEVERITY;
 }
 
 // THE DESCRIPTION A FILED ISSUE CARRIES — one mapping for both sources and both paths (the live
@@ -550,7 +577,7 @@ export function ConstructionAudit({
         {
           techCardId,
           operationNumber,
-          severity: wireSeverity(DEFAULT_ISSUE_SEVERITY),
+          severity: wireSeverity(issueSeverityOf(f)),
           description,
         },
         {
@@ -570,7 +597,7 @@ export function ConstructionAudit({
       // Пусто намеренно: заявитель — человек, а не отчёт, и подставленное сюда «audit» сделало бы
       // машинную находку неотличимой от снятой кем-то претензии.
       raisedBy: '',
-      severity: DEFAULT_ISSUE_SEVERITY,
+      severity: issueSeverityOf(f),
       status: DEFAULT_ISSUE_STATUS,
       description,
       resolutionNote: '',
