@@ -1850,7 +1850,7 @@ export function AnnotationSurface({
                 }}
                 title='delete this freehand callout'
               >
-                cancel
+                delete
               </Chip>
             </>
           ) : (
