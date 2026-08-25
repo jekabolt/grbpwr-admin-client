@@ -10,6 +10,8 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
 import { FormatBar } from 'components/managers/files/note/format-bar';
+import { mediaEdit } from 'components/managers/files/note/format-edits';
+import { MarkdownView } from 'components/managers/files/note/markdown-view';
 
 type BarProbe = {
   mount: () => void;
@@ -20,6 +22,14 @@ type BarProbe = {
   select: (start: number, end: number) => void;
   set: (text: string, start: number, end: number) => void;
   caret: () => [number, number];
+  /**
+   * Что НАСТОЯЩАЯ `mediaEdit` кладёт в текст. Нужна не сама по себе: ниже этот текст уходит в
+   * НАСТОЯЩИЙ разметчик, потому что разница между рядом и столбцом видна только в отрисовке —
+   * таблица строк её не ловит по устройству.
+   */
+  insertMedia: (text: string, at: number, items: { id: number; url: string }[]) => string;
+  /** Показать произвольный текст живым разметчиком. */
+  render: (source: string) => void;
 };
 
 declare global {
@@ -32,9 +42,16 @@ const probe = {} as BarProbe;
 window.__formatBar = probe;
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
+probe.insertMedia = (text, at, items) => {
+  const edit = mediaEdit(text, at, at, items);
+  return text.slice(0, edit.start) + edit.text + text.slice(edit.end);
+};
+
 function Harness() {
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const [value, setValue] = useState('');
+  const [note, setNote] = useState('');
+  probe.render = (source) => setNote(source);
 
   probe.value = () => value;
   probe.text = () => areaRef.current?.value ?? '';
@@ -63,6 +80,9 @@ function Harness() {
         rows={8}
         style={{ width: 600 }}
       />
+      <div data-note style={{ width: 600 }}>
+        <MarkdownView source={note} />
+      </div>
     </div>
   );
 }

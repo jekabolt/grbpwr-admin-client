@@ -7,6 +7,7 @@
 //
 // «Соседнее поле» рядом со слотом — не украшение: «форма кликабельна во время отправки» иначе
 // доказывать нечем, а именно это владелец и просил («не убираемая модалка… так быть не должно»).
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -22,10 +23,20 @@ type MountOpts = {
   lockAspect?: boolean;
   aspect?: number;
   purpose?: string;
+  /**
+   * СЛОТ ВНУТРИ ЧУЖОГО МОДАЛЬНОГО ОКНА — рабочая конфигурация, а не экзотика: ровно так приёмка
+   * живёт внутри диалога выбора медиа (`media-selector.tsx`) и внутри вложений задачи. Пока
+   * открыт ЛЮБОЙ модальный слой Radix, `document.body` стоит в `pointer-events: none`
+   * (`react-dismissable-layer`: `ownerDocument.body.style.pointerEvents = 'none'`), и «auto»
+   * возвращается только самим слоям. Свёрнутая пилюля порталится в body — то есть НЕ слой.
+   */
+  insideModal?: boolean;
 };
 
 type IntakeProbe = {
   mount: (opts: MountOpts) => void;
+  /** Открыто ли ещё чужое модальное окно, внутри которого живёт слот. */
+  hostOpen: () => boolean;
   /** Сколько РАЗ позвали владельца слота: пачка обязана прийти одним вызовом, а не тремя. */
   calls: () => number;
   /** id всего доставленного, по порядку. Число, а не наличие. */
@@ -57,6 +68,8 @@ probe.said = () => {
 function Harness({ opts }: { opts: MountOpts }) {
   const [got, setGot] = useState<common_MediaFull[][]>([]);
   const [clicks, setClicks] = useState(0);
+  const [hostOpen, setHostOpen] = useState(true);
+  probe.hostOpen = () => hostOpen;
 
   const intake = useMediaIntake({
     enabled: true,
@@ -73,9 +86,13 @@ function Harness({ opts }: { opts: MountOpts }) {
   probe.clicks = () => clicks;
   probe.busy = () => intake.busy;
 
-  return (
-    <div>
-      <div data-slot {...intake.regionHandlers} style={{ width: 240, height: 160, border: '1px solid' }}>
+  const body = (
+    <>
+      <div
+        data-slot
+        {...intake.regionHandlers}
+        style={{ width: 240, height: 160, border: '1px solid' }}
+      >
         slot
       </div>
       <button type='button' data-neighbour onClick={() => setClicks((c) => c + 1)}>
@@ -83,7 +100,26 @@ function Harness({ opts }: { opts: MountOpts }) {
       </button>
       <input data-text-field defaultValue='' />
       {intake.dialog}
-    </div>
+    </>
+  );
+
+  if (!opts.insideModal) return <div>{body}</div>;
+
+  // Тот же каркас, что у диалога выбора медиа: модальный Radix-диалог, а приёмка смонтирована
+  // ВНУТРИ его содержимого.
+  return (
+    <DialogPrimitive.Root open={hostOpen} onOpenChange={setHostOpen}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay data-host-overlay style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,.4)' }} />
+        <DialogPrimitive.Content
+          data-host-content
+          style={{ position: 'fixed', left: 40, top: 40, zIndex: 50, width: 700, height: 500, background: '#fff' }}
+        >
+          <DialogPrimitive.Title>host picker</DialogPrimitive.Title>
+          {body}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 

@@ -23,7 +23,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { build as esbuild } from 'esbuild';
 
+// Мутации перечисляются через запятую: гонку видно только когда сняты ОБА звена — ожидание
+// обещания и сторож поздней записи.
 const MUTATE = (process.argv.find((a) => a.startsWith('--mutate=')) ?? '').split('=')[1] ?? '';
+const MUTATE_LIST = MUTATE ? MUTATE.split(',').filter(Boolean) : [];
 
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -68,20 +71,61 @@ const MUTATIONS = {
     from: '    setCollapsed(true);\n    engine.handleUploadAll();',
     to: '    engine.handleUploadAll();',
   },
+  // F1: пилюля снова наследует `pointer-events: none` от body, который держит чужой модальный слой.
+  pointer: {
+    file: /media-intake-dialog\.tsx$/,
+    loader: 'tsx',
+    from: "        className='pointer-events-auto fixed left-1/2 z-[var(--z-toast)] -translate-x-1/2'",
+    to: "        className='fixed left-1/2 z-[var(--z-toast)] -translate-x-1/2'",
+  },
+  // F2: «cancel» снова доступен во время отправки и уносит уже загруженное.
+  cancel: {
+    file: /media-intake-dialog\.tsx$/,
+    loader: 'tsx',
+    from: '                disabled={live}\n                title={',
+    to: '                title={',
+  },
+  // Возврат второго клика: после кропа отправка больше не начинается сама.
+  oneclick: {
+    file: /media-intake-dialog\.tsx$/,
+    loader: 'tsx',
+    from: "    if (guided && status === 'wait') beginUpload();",
+    to: '    void status;',
+  },
+  // Снять ОЖИДАНИЕ обещания: отправка снова стартует, не дожидаясь обмера кадрированного кадра.
+  nowait: {
+    file: /media-intake-dialog\.tsx$/,
+    loader: 'tsx',
+    from: "    const status = await engine.setCroppedUrl(index, url);\n    setCroppingId(null);\n    if (guided && status === 'wait') beginUpload();",
+    to: '    void engine.setCroppedUrl(index, url);\n    setCroppingId(null);\n    if (guided) beginUpload();',
+  },
+  // Снять СТОРОЖА поздней записи: обмер снова пишет статус, не глядя, что со строкой стало.
+  noguard: {
+    file: /usePendingFiles\.ts$/,
+    loader: 'ts',
+    from: '      if (!RECHECKABLE.includes(live.status)) return live.status;',
+    to: '      // МУТАЦИЯ: сторож поздней записи снят',
+  },
 };
-if (MUTATE && !MUTATIONS[MUTATE]) {
-  console.log(`неизвестная мутация «${MUTATE}»; есть: ${Object.keys(MUTATIONS).join(', ')}`);
-  process.exit(2);
+for (const name of MUTATE_LIST) {
+  if (!MUTATIONS[name]) {
+    console.log(`неизвестная мутация «${name}»; есть: ${Object.keys(MUTATIONS).join(', ')}`);
+    process.exit(2);
+  }
 }
-const mutation = MUTATE && {
-  name: `intake-mutation-${MUTATE}`,
+const mutation = MUTATE_LIST.length && {
+  name: `intake-mutation-${MUTATE_LIST.join('+')}`,
   setup(b) {
-    const m = MUTATIONS[MUTATE];
-    b.onLoad({ filter: m.file }, async (args) => {
-      const src = await readFile(args.path, 'utf8');
-      if (!src.includes(m.from)) throw new Error(`мутация не нашла свою строку в ${args.path}`);
-      return { contents: src.replace(m.from, m.to), loader: m.loader };
-    });
+    for (const name of MUTATE_LIST) {
+      const m = MUTATIONS[name];
+      b.onLoad({ filter: m.file }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(m.from)) {
+          throw new Error(`мутация «${name}» не нашла свою строку в ${args.path}`);
+        }
+        return { contents: src.replace(m.from, m.to), loader: m.loader };
+      });
+    }
   },
 };
 
@@ -170,6 +214,29 @@ async function paste({ count = 1, kind = 'image', into = null } = {}) {
         let file;
         if (kind === 'text') {
           file = new File(['hello'], `note-${Date.now()}-${i}.txt`, { type: 'text/plain' });
+        } else if (kind === 'big') {
+          // КРУПНЫЙ КАДР — настоящий по весу скриншот, а не 2×2: кроп даёт data-url в сотни
+          // килобайт, и обмер кадрированного варианта проходит по тому же пути, что в проде.
+          //
+          // ЧЕСТНАЯ ОГОВОРКА: воспроизвести гонку поздней записи этим стендом НЕ удалось —
+          // декодирование кадра стабильно успевает раньше, чем отвечает подменённый бакет, и
+          // мутация «снять сторожа» остаётся зелёной по причине «не успело», а не «нечему
+          // ломаться». Сторож поэтому держится цитатой и построением (отправка ждёт обещания
+          // движка), а не этой строкой.
+          const c = document.createElement('canvas');
+          c.width = 1600;
+          c.height = 1600;
+          const g = c.getContext('2d');
+          const img = g.createImageData(1600, 1600);
+          for (let k = 0; k < img.data.length; k += 4) {
+            img.data[k] = (k * 7) % 255;
+            img.data[k + 1] = (k * 13) % 255;
+            img.data[k + 2] = (k * 29) % 255;
+            img.data[k + 3] = 255;
+          }
+          g.putImageData(img, 0, 0);
+          const bin = Uint8Array.from(atob(c.toDataURL('image/png').split(',')[1]), (ch) => ch.charCodeAt(0));
+          file = new File([bin], `big-${Date.now()}-${i}.png`, { type: 'image/png' });
         } else if (kind === 'video') {
           file = new File([new Uint8Array([0, 1, 2, 3])], `clip-${Date.now()}-${i}.mp4`, { type: 'video/mp4' });
         } else {
@@ -187,6 +254,25 @@ async function paste({ count = 1, kind = 'image', into = null } = {}) {
   await page.waitForTimeout(350);
 }
 
+/** Клик, который не роняет прогон: недостижимая кнопка — это провал СТРОКИ, а не конец пробы. */
+async function tryClick(locator, timeout = 4000) {
+  try {
+    await locator.click({ timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Состояние кнопки без обрыва прогона: пропавшая кнопка — тоже ответ, а не конец пробы. */
+async function safeDisabled(locator) {
+  try {
+    return await locator.isDisabled({ timeout: 3000 });
+  } catch {
+    return null;
+  }
+}
+
 const tiles = () => page.locator('[role="listitem"]').count();
 const dialogOpen = () => page.locator('[role="dialog"]').count();
 const pillText = async () => {
@@ -200,6 +286,25 @@ const calls = () => page.evaluate(() => window.__intake.calls());
 const delivered = () => page.evaluate(() => window.__intake.delivered());
 const clicks = () => page.evaluate(() => window.__intake.clicks());
 const busy = () => page.evaluate(() => window.__intake.busy());
+const hostOpen = () => page.evaluate(() => window.__intake.hostOpen());
+/** Что реально лежит в точке пилюли и какими указателями она обладает. */
+const pillHit = () =>
+  page.evaluate(() => {
+    const btn = [...document.querySelectorAll('body > div > button')].find((b) =>
+      /upload/i.test(b.textContent ?? ''),
+    );
+    if (!btn) return { found: false };
+    const r = btn.getBoundingClientRect();
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      found: true,
+      topIsPill: top === btn || btn.contains(top) || btn.parentElement?.contains(top),
+      topTag: top ? `${top.tagName.toLowerCase()}[${top.getAttribute('data-host-overlay') !== null ? 'host-overlay' : top.className}]`.slice(0, 70) : 'none',
+      pointerEvents: getComputedStyle(btn).pointerEvents,
+      bodyPointerEvents: getComputedStyle(document.body).pointerEvents,
+      ariaHidden: btn.closest('[aria-hidden="true"]') !== null,
+    };
+  });
 
 // ── 1. ВТОРОЙ ⌘V КОПИТ ─────────────────────────────────────────────────────────────────────────
 head('1. второй ⌘V добавляет кадр, а не проглатывается');
@@ -270,7 +375,8 @@ uploadN = 0; uploadFails = false; uploadDelayMs = 700;
 await mount({});
 await paste({ count: 3 });
 ck((await tiles()) === 3, 'в очереди три кадра', `их ${await tiles()}`);
-await page.locator('button', { hasText: /^upload all \(3\)$/i }).first().click();
+ck(await tryClick(page.locator('button', { hasText: /^upload all \(3\)$/i }).first()),
+  'кнопка отправки нажалась');
 await page.waitForTimeout(400);
 ck((await dialogOpen()) === 0, 'модалка ушла с экрана сразу после нажатия');
 const pill = await pillText();
@@ -312,12 +418,42 @@ ck((await pillText()) === '', 'пилюля погасла: очередь пу�
 ck(!(await busy()), 'слот больше не занят');
 ck(uploadN === 3, 'бакет получил РОВНО три запроса', `их ${uploadN}`);
 
+// ── 4б. ТА ЖЕ ПИЛЮЛЯ, НО СЛОТ ВНУТРИ ЧУЖОГО МОДАЛЬНОГО ОКНА ────────────────────────────────────
+//
+// РАБОЧАЯ КОНФИГУРАЦИЯ, А НЕ ЭКЗОТИКА: так приёмка живёт внутри диалога выбора медиа и внутри
+// вложений задачи. Пока открыт любой модальный слой Radix, `document.body` стоит в
+// `pointer-events: none`, и «auto» возвращается только самим слоям — свёрнутая пилюля порталится
+// в body и слоем не является. Проверка на ГОЛОМ слоте этого не видит вовсе.
+head('4б. пилюля внутри чужого модального окна');
+uploadN = 0; uploadFails = true; uploadDelayMs = 300;
+await mount({ insideModal: true });
+ck(await hostOpen(), 'чужое модальное окно открыто — конфигурация та самая');
+await paste({ count: 2 });
+ck((await tiles()) === 2, 'два кадра в очереди внутри чужого окна', `их ${await tiles()}`);
+await tryClick(page.locator('button', { hasText: /^upload all \(2\)$/i }).first());
+await page.waitForTimeout(1400);
+const hit = await pillHit();
+ck(hit.found, 'пилюля на экране');
+ck(hit.bodyPointerEvents === 'none', 'body действительно в pointer-events:none — механизм тот самый', hit.bodyPointerEvents);
+ck(hit.pointerEvents !== 'none', 'у пилюли СВОИ указатели, а не унаследованный none', hit.pointerEvents);
+ck(hit.topIsPill, 'в точке пилюли лежит ОНА, а не оверлей чужого окна', hit.topTag);
+ck(!hit.ariaHidden, 'пилюля не спрятана от чтения с экрана');
+// ГЛАВНОЕ ПОСЛЕДСТВИЕ: клик обязан РАЗВЕРНУТЬ приёмку, а не закрыть чужое окно.
+const reached = await tryClick(
+  page.locator('body > div > button').filter({ hasText: /upload/i }).first(),
+);
+ck(reached, 'до пилюли вообще можно дотянуться указателем');
+await page.waitForTimeout(400);
+ck((await dialogOpen()) >= 1, 'клик по пилюле развернул приёмку');
+ck(await hostOpen(), 'и НЕ закрыл чужое окно вместе с недоставленной очередью');
+uploadFails = false;
+
 // ── 5. ESC ВО ВРЕМЯ ОТПРАВКИ СВОРАЧИВАЕТ, А НЕ ТЕРЯЕТ ──────────────────────────────────────────
 head('5. Esc во время отправки');
 uploadN = 0; uploadDelayMs = 700;
 await mount({});
 await paste({ count: 2 });
-await page.locator('button', { hasText: /^upload all \(2\)$/i }).first().click();
+await tryClick(page.locator('button', { hasText: /^upload all \(2\)$/i }).first());
 await page.waitForTimeout(200);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
@@ -327,12 +463,67 @@ await page.waitForTimeout(400);
 ck((await delivered()).length === 2, 'пачка доехала целиком, Esc её не отменил', `их ${(await delivered()).length}`);
 ck((await calls()) === 1, 'и одним вызовом', `вызовов ${await calls()}`);
 
+// ── 5б. «CANCEL» В СЕРЕДИНЕ ПАЧКИ НЕ ВЫБРАСЫВАЕТ ЗАГРУЖЕННОЕ ──────────────────────────────────
+//
+// `onCancel` чистит очередь, а вместе с ней и строки движка — включая `done`, ещё не отданные
+// форме. Нажатие, пока летит второй кадр, означало бы: первый уже в библиотеке, но в слот не
+// встал и никем не назван, а летящий доедет туда же сиротой.
+head('5б. отмена во время отправки');
+uploadN = 0; uploadFails = false; uploadDelayMs = 700;
+await mount({});
+await paste({ count: 3 });
+await tryClick(page.locator('button', { hasText: /^upload all \(3\)$/i }).first());
+await page.waitForTimeout(300);
+await tryClick(page.locator('body > div > button').filter({ hasText: /upload/i }).first());
+await page.waitForTimeout(300);
+ck((await dialogOpen()) === 1, 'пилюля развернулась обратно в окно, пачка ещё летит');
+const cancelBtn = page.locator('[role="dialog"] button', { hasText: /^cancel$/i }).first();
+const cancelOff = await safeDisabled(cancelBtn);
+ck(cancelOff === true, 'во время отправки «cancel» недоступен — летящую пачку не отозвать',
+  cancelOff === null ? 'кнопки не нашлось' : String(cancelOff));
+// Если он всё-таки доступен (мутация), жмём: проверять надо ПОСЛЕДСТВИЕ, а не только вид кнопки.
+if (cancelOff === false) await tryClick(cancelBtn);
+await page.waitForTimeout(2600);
+ck((await delivered()).length === 3, 'вся пачка доехала до формы', `их ${(await delivered()).length}`);
+ck((await calls()) === 1, 'одним вызовом', `вызовов ${await calls()}`);
+
+// ── 5в. ОДИН КЛИК В ВЕДОМОМ СЦЕНАРИИ ──────────────────────────────────────────────────────────
+//
+// Один кадр в слот с жёсткой пропорцией — самый частый жест этого органа. Кроп открывается сам,
+// и «crop & add» / «add without crop» обязаны отправлять ОДНИМ нажатием: второго клика владелец
+// не заказывал.
+head('5в. один кадр в слот с жёсткой пропорцией: одно нажатие');
+uploadN = 0; uploadDelayMs = 0;
+await mount({ lockAspect: true, aspect: 1, purpose: 'thumbnail' });
+await paste({ count: 1, kind: 'big' });
+await page.waitForTimeout(700);
+const saveBtn = page.locator('[role="dialog"] button', { hasText: /^crop & add$/i });
+const asIsBtn = page.locator('[role="dialog"] button', { hasText: /^add without crop$/i });
+ck((await saveBtn.count()) === 1, 'кроп открылся сам и его кнопка называется «crop & add»');
+ck((await asIsBtn.count()) === 1, 'рядом — «add without crop»');
+const clicked = await tryClick(saveBtn.first());
+ck(clicked, 'кнопка доступна');
+await page.waitForFunction(() => window.__intake.calls() > 0, null, { timeout: 20000 }).catch(() => {});
+await page.waitForTimeout(300);
+ck((await calls()) === 1, 'ОДНО нажатие довело кадр до формы', `вызовов ${await calls()}`);
+ck((await delivered()).length === 1, 'ровно один кадр', `их ${(await delivered()).length}`);
+ck((await dialogOpen()) === 0, 'и окно ушло с экрана само');
+
+uploadN = 0;
+await mount({ lockAspect: true, aspect: 1 });
+await paste({ count: 1 });
+await page.waitForTimeout(700);
+await tryClick(page.locator('[role="dialog"] button', { hasText: /^add without crop$/i }).first());
+await page.waitForFunction(() => window.__intake.calls() > 0, null, { timeout: 20000 }).catch(() => {});
+await page.waitForTimeout(300);
+ck((await calls()) === 1, '«add without crop» — тоже ОДНО нажатие', `вызовов ${await calls()}`);
+
 // ── 6. ОТМЕНА ДО ОТПРАВКИ НЕ ДОСТАВЛЯЕТ НИЧЕГО ─────────────────────────────────────────────────
 head('6. отмена до отправки');
 uploadN = 0; uploadDelayMs = 0;
 await mount({});
 await paste({ count: 2 });
-await page.locator('button', { hasText: /^cancel$/i }).first().click();
+await tryClick(page.locator('button', { hasText: /^cancel$/i }).first());
 await page.waitForTimeout(300);
 ck((await dialogOpen()) === 0, 'окно закрылось');
 ck((await calls()) === 0, 'владельцу слота не досталось ничего', `вызовов ${await calls()}`);
@@ -343,19 +534,19 @@ head('7. отказ бакета');
 uploadN = 0; uploadFails = true; uploadDelayMs = 0;
 await mount({});
 await paste({ count: 2 });
-await page.locator('button', { hasText: /^upload all \(2\)$/i }).first().click();
+await tryClick(page.locator('button', { hasText: /^upload all \(2\)$/i }).first());
 await page.waitForFunction(() => !/uploading/i.test(document.body.innerText), null, { timeout: 20000 }).catch(() => {});
 await page.waitForTimeout(600);
 const failPill = await pillText();
 ck(/failed/i.test(failPill), 'пилюля говорит про отказ словом', `«${failPill}»`);
 ck((await calls()) === 0, 'ничего не доставлено — отказ не выдан за успех', `вызовов ${await calls()}`);
-if (failPill) await page.locator('body > div > button').filter({ hasText: /failed/i }).first().click();
+if (failPill) await tryClick(page.locator('body > div > button').filter({ hasText: /failed/i }).first());
 await page.waitForTimeout(300);
 ck((await dialogOpen()) === 1, 'разворот возвращает окно');
 ck((await page.locator('button', { hasText: /^retry failed \(2\)$/i }).count()) === 1,
   'и в нём стоит повтор на две строки');
 uploadFails = false;
-await page.locator('button', { hasText: /^retry failed \(2\)$/i }).first().click();
+await tryClick(page.locator('button', { hasText: /^retry failed \(2\)$/i }).first());
 await page.waitForFunction(() => window.__intake.delivered().length >= 2, null, { timeout: 20000 });
 await page.waitForTimeout(400);
 ck((await delivered()).length === 2, 'повтор довёз обе', `их ${(await delivered()).length}`);

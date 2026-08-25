@@ -17,7 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { build as esbuild } from 'esbuild';
 
-const MUTATE = process.argv.includes('--mutate');
+const MUTATE = process.argv.includes('--mutate')
+  ? 'code'
+  : ((process.argv.find((a) => a.startsWith('--mutate=')) ?? '').split('=')[1] ?? '');
 
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -41,16 +43,34 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const outfile = resolve(tmpdir(), `format-bar-${process.pid}.js`);
 
-// МУТАЦИЯ ВОЗВРАЩАЕТ ДЕФЕКТ Д2: срез хвостовых переводов строки, из-за которого тройной клик по
-// строке давал ограду вместо бэктиков. Она живёт в памяти сборщика.
+// МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА и возвращают РОВНО те строки, которыми была починка.
+//   code — дефект Д2: без среза хвостовых переводов тройной клик даёт ограду вместо бэктиков.
+//   pad  — отбивка одним переводом строки вместо пустой строки (F3): снимки перестают быть
+//          галереей и ложатся столбцом внутри текста.
+const MUTATIONS = {
+  code: {
+    from: "  let e = end;\n  while (e > start && text[e - 1] === '\\n') e -= 1;",
+    to: '  const e = end;',
+  },
+  pad: {
+    from: "  const next = `${leadPad(text.slice(0, s))}${body}${tailPad(text.slice(e))}`;",
+    to:
+      "  const next = `${s > 0 && text[s - 1] !== '\\n' ? '\\n' : ''}${body}" +
+      "${e < text.length && text[e] !== '\\n' ? '\\n' : ''}`;",
+  },
+};
+if (MUTATE && !MUTATIONS[MUTATE]) {
+  console.log(`неизвестная мутация «${MUTATE}»; есть: ${Object.keys(MUTATIONS).join(', ')}`);
+  process.exit(2);
+}
 const mutation = {
   name: 'format-bar-mutation',
   setup(b) {
     b.onLoad({ filter: /format-edits\.ts$/ }, async (args) => {
       const src = await readFile(args.path, 'utf8');
-      const from = "  let e = end;\n  while (e > start && text[e - 1] === '\\n') e -= 1;";
-      if (!src.includes(from)) throw new Error('мутация не нашла свою строку');
-      return { contents: src.replace(from, '  const e = end;'), loader: 'ts' };
+      const m = MUTATIONS[MUTATE];
+      if (!src.includes(m.from)) throw new Error('мутация не нашла свою строку');
+      return { contents: src.replace(m.from, m.to), loader: 'ts' };
     });
   },
 };
@@ -86,6 +106,13 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.route('http://probe.local/**', (route) =>
   route.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }),
+);
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8DAwMDAwMDEAAMADgIBAWiJ8fMAAAAASUVORK5CYII=',
+  'base64',
+);
+await page.route('http://probe.local/pix*.png', (route) =>
+  route.fulfill({ status: 200, contentType: 'image/png', body: PNG }),
 );
 // Библиотека медиа за пикером ОТВЕЧАЕТ ПУСТО, а не молчит: неотвеченный запрос дал бы окно в
 // вечной загрузке, и «пикер открылся» смешалось бы с «пикер завис».
@@ -161,6 +188,42 @@ await page.waitForTimeout(600);
 ck((await page.locator('[role="dialog"]').count()) === 1, 'клик открывает пикер медиатеки');
 const dlg = ((await page.locator('[role="dialog"]').first().innerText()) ?? '').toLowerCase();
 ck(/add all/.test(dlg), 'и это МУЛЬТИВЫБОР — в подвале «add all»', dlg.slice(0, 120).replace(/\n/g, ' | '));
+
+head('4. галерея: отбивка проверяется ОТРИСОВКОЙ, а не строкой');
+// ДВА КАДРА ДАННЫМИ, А НЕ ССЫЛКОЙ: внешний адрес в стенде не загрузится, и `NoteImage` честно
+// покажет вместо снимка ссылку — тогда «ряд или столбец» мерить было бы не на чем.
+// Адрес именно http: разметчик показывает картинкой ВНЕШНИЙ адрес (`/^https?:\/\//`), а не
+// data-url — тот законно уходит в плашку. Снимок отдаётся стендом настоящими байтами: не
+// загрузившийся кадр `NoteImage` заменит ссылкой, и мерить «ряд или столбец» стало бы нечем.
+const PIX = 'http://probe.local/pix.png';
+const layout = async (source) => {
+  await page.evaluate((src) => window.__formatBar.render(src), source);
+  await page.waitForTimeout(400);
+  return page.evaluate(() => {
+    const imgs = [...document.querySelectorAll('[data-note] img')];
+    if (imgs.length < 2) return { imgs: imgs.length };
+    const a = imgs[0].getBoundingClientRect();
+    const b = imgs[1].getBoundingClientRect();
+    return { imgs: imgs.length, sameRow: Math.abs(a.top - b.top) < 2, apart: b.left - a.left };
+  });
+};
+
+// Каретка на пустой строке СРАЗУ ПОД текстом — тот самый случай F3.
+const base = 'a photo of the sleeve\n';
+const withMedia = await page.evaluate(
+  ([t, pix]) => window.__formatBar.insertMedia(t, t.length, [{ id: 1, url: pix }, { id: 2, url: pix }]),
+  [base, PIX],
+);
+const good = await layout(withMedia);
+ck(good.imgs === 2, 'разметчик показал оба снимка картинками', `их ${good.imgs}`);
+ck(good.sameRow === true && good.apart > 0, 'и положил их В РЯД — это галерея', JSON.stringify(good));
+
+// НЕГАТИВНЫЙ КОНТРОЛЬ — старая отбивка одним переводом строки. Без него зелень выше не отличима
+// от «разметчик кладёт в ряд что угодно».
+const oldWay = `${base}![media 1](${PIX})\n![media 2](${PIX})`;
+const column = await layout(oldWay);
+ck(column.imgs === 2, 'в контроле тоже два снимка', `их ${column.imgs}`);
+ck(column.sameRow === false, 'с одним переводом строки они ложатся СТОЛБЦОМ — прибор различает', JSON.stringify(column));
 
 ck(errors.length === 0, 'ни одного исключения на странице', errors[0] ?? '');
 await browser.close();

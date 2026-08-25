@@ -393,6 +393,38 @@ function mediaHref(url: string): string {
 }
 
 /**
+ * ОТБИВКА ДО ПУСТОЙ СТРОКИ, А НЕ ДО ПЕРЕВОДА СТРОКИ.
+ *
+ * Абзац у разметчика — это ПРОБЕГ СМЕЖНЫХ НЕПУСТЫХ СТРОК (`markdown-view.tsx`), а галереей
+ * становится только абзац, в котором нет ни одного слова. Один `\n` кладёт снимки на свою
+ * строку, но НЕ отделяет их от текста выше: строки остаются смежными, абзац получается со
+ * словами — и снимки выкладываются столбцом внутри текста вместо ряда. Разница видна только в
+ * отрисовке, поэтому таблица строк её и не ловила.
+ *
+ * Считается по строкам, а не по символам: «перед кареткой уже есть перевод» ничего не значит,
+ * если строка над ней непустая.
+ */
+function leadPad(before: string): string {
+  if (!before) return '';
+  const nl = before.lastIndexOf('\n');
+  // Строка, в которой стоит каретка. Непустая — значит снимки обязаны уйти через пустую строку.
+  if (before.slice(nl + 1).trim()) return '\n\n';
+  if (nl < 0) return '';
+  const rest = before.slice(0, nl);
+  return rest.slice(rest.lastIndexOf('\n') + 1).trim() ? '\n' : '';
+}
+
+function tailPad(after: string): string {
+  if (!after) return '';
+  const nl = after.indexOf('\n');
+  if ((nl < 0 ? after : after.slice(0, nl)).trim()) return '\n\n';
+  if (nl < 0) return '';
+  const rest = after.slice(nl + 1);
+  const nl2 = rest.indexOf('\n');
+  return (nl2 < 0 ? rest : rest.slice(0, nl2)).trim() ? '\n' : '';
+}
+
+/**
  * КАДРЫ ИЗ МЕДИАТЕКИ — СНИМКОМ, А НЕ СИНЕЙ СТРОЧКОЙ.
  *
  * ── ПОЧЕМУ ПРЯМАЯ ССЫЛКА, А НЕ АДРЕС КАРТОЧКИ ───────────────────────────────────────────────
@@ -417,8 +449,9 @@ function mediaHref(url: string): string {
  * ── НЕСКОЛЬКО КАДРОВ — ОТДЕЛЬНЫЙ АБЗАЦ ──────────────────────────────────────────────────────
  *
  * Абзац, в котором нет ничего, кроме снимков, разметчик рисует ГАЛЕРЕЕЙ — рядом, а не столбцом
- * (`markdown-view.tsx`, `galleryLines`). Отсюда добивка переводами строк по краям: без неё
- * снимки прилипли бы к соседнему слову и абзац перестал бы быть «только снимки».
+ * (`markdown-view.tsx`, `galleryLines`). Отсюда отбивка ДО ПУСТОЙ СТРОКИ по краям (`leadPad` /
+ * `tailPad`): одного перевода мало — смежные непустые строки остаются ОДНИМ абзацем, и снимки
+ * легли бы столбцом внутри текста.
  */
 export function mediaEdit(text: string, start: number, end: number, items: MediaInsert[]): Edit {
   const [s, e] = trimEdges(text, start, end);
@@ -436,9 +469,7 @@ export function mediaEdit(text: string, start: number, end: number, items: Media
   }
 
   const body = items.map((m) => token(m, `media ${m.id}`)).join('\n');
-  const lead = s > 0 && text[s - 1] !== '\n' ? '\n' : '';
-  const tail = e < text.length && text[e] !== '\n' ? '\n' : '';
-  const next = `${lead}${body}${tail}`;
+  const next = `${leadPad(text.slice(0, s))}${body}${tailPad(text.slice(e))}`;
   const at = s + next.length;
   return { start: s, end: e, text: next, sel: [at, at] };
 }

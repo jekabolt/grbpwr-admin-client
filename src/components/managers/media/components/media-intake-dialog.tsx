@@ -252,6 +252,9 @@ export function MediaIntakeDialog({
   }, [previews]);
 
   const live = tally.queued + tally.sending > 0;
+  const single = previews.length === 1;
+  /** Что вообще может уехать по нажатию: нетронутые строки и отказавшие. Не пролезшие — нет. */
+  const sendable = tally.wait + tally.error;
 
   // РАСЧЁТ С ВЛАДЕЛЬЦЕМ — ОДНИМ ВЫЗОВОМ НА ПАЧКУ. Владелец слота на каждый вызов делает
   // `append`/`setValue`, и три отдельных вызова из одной вставки прошли бы тремя правками формы —
@@ -296,11 +299,42 @@ export function MediaIntakeDialog({
     onQueueChange?.(files.filter((f) => f !== file));
   }
 
-  function startUpload() {
+  function beginUpload() {
     startedRef.current = true;
     setCroppingId(null);
     setCollapsed(true);
     engine.handleUploadAll();
+  }
+
+  function startUpload() {
+    // Сворачиваться не во что, если отправлять нечего: пилюля с нулём в пути читалась бы как
+    // «идёт», а не идёт ничего.
+    if (!sendable) return;
+    beginUpload();
+  }
+
+  /**
+   * ВЕДОМЫЙ СЦЕНАРИЙ ОДИНОЧНОГО КАДРА: «crop & add» и «add without crop» — ОДНО нажатие.
+   *
+   * Один кадр в слот с жёсткой пропорцией — самый частый жест этого органа, и второе нажатие
+   * здесь никто не заказывал. Отправка после кропа ждёт ОБЕЩАНИЯ движка: оно резолвится ровно
+   * тогда, когда обмер кадрированного варианта осел и статус записан. Гонки нет по построению —
+   * не «окно короче», а порядок задан. `blocked` отправку не начинает: причина уже стоит в
+   * строке, и отправлять заведомо отвергаемое значило бы врать про попытку.
+   */
+  const guided = single && lockAspect;
+
+  async function applyCrop(index: number, url: string) {
+    const status = await engine.setCroppedUrl(index, url);
+    setCroppingId(null);
+    if (guided && status === 'wait') beginUpload();
+  }
+
+  function keepOriginal() {
+    setCroppingId(null);
+    if (guided && cropping && (cropping.status === 'wait' || cropping.status === 'error')) {
+      beginUpload();
+    }
   }
 
   // ЗАКРЫТИЕ ВО ВРЕМЯ ОТПРАВКИ СВОРАЧИВАЕТ, А НЕ ОТМЕНЯЕТ. Отменить отправку этому API нечем:
@@ -340,7 +374,15 @@ export function MediaIntakeDialog({
       // доковом слое пилюля ушла бы под его оверлей. Отступ снизу поднимает её НАД файловым
       // доком, если тот сейчас на экране.
       <div
-        className='fixed left-1/2 z-[var(--z-toast)] -translate-x-1/2'
+        // `pointer-events-auto` — НЕ КОСМЕТИКА. Пока на экране есть хоть один модальный слой
+        // Radix, он держит `document.body.style.pointerEvents = 'none'` и возвращает «auto»
+        // только САМИМ СЛОЯМ (react-dismissable-layer). Приёмка живёт внутри чужого модального
+        // окна (диалог выбора медиа, вложения задачи), и когда её собственный слой сворачивается,
+        // родительский остаётся — а пилюля порталится в body и слоем не является. Без этой
+        // строки клик проходил СКВОЗЬ пилюлю в оверлей родителя, считался кликом мимо и закрывал
+        // всё окно вместе с недоставленной очередью: повтор становился недостижим, а уже
+        // загруженное уехало бы в бакет вторым экземпляром.
+        className='pointer-events-auto fixed left-1/2 z-[var(--z-toast)] -translate-x-1/2'
         style={{ bottom: 'calc(var(--dock-bottom-h, 0px) + 10px)' }}
       >
         <Button size='sm' variant='main' onClick={() => setCollapsed(false)}>
@@ -368,10 +410,6 @@ export function MediaIntakeDialog({
       ))}
     </div>
   );
-
-  const single = previews.length === 1;
-  /** Что вообще может уехать по нажатию: нетронутые строки и отказавшие. Не пролезшие — нет. */
-  const sendable = tally.wait + tally.error;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
@@ -418,13 +456,10 @@ export function MediaIntakeDialog({
                     initialAspect={aspect}
                     lockAspect={lockAspect}
                     outputFormat={cropping.mime || undefined}
-                    saveLabel='apply crop'
-                    originalLabel='keep the original'
-                    saveCroppedImage={(url: string) => {
-                      engine.setCroppedUrl(cropIndex, url);
-                      setCroppingId(null);
-                    }}
-                    onUseOriginal={() => setCroppingId(null)}
+                    saveLabel={guided ? 'crop & add' : 'apply crop'}
+                    originalLabel={guided ? 'add without crop' : 'keep the original'}
+                    saveCroppedImage={(url: string) => void applyCrop(cropIndex, url)}
+                    onUseOriginal={keepOriginal}
                     onCancel={() => setCroppingId(null)}
                   />
                 </div>
@@ -442,7 +477,24 @@ export function MediaIntakeDialog({
                 : 'sent one by one — this bucket reports no progress along the way'}
             </Text>
             <div className='ml-auto flex flex-wrap items-center gap-2'>
-              <Button size='lg' variant='simpleReverse' className='uppercase' onClick={onCancel}>
+              {/* ОТМЕНА НЕ ОТМЕНЯЕТ ТО, ЧТО УЖЕ ЛЕТИТ. `onCancel` очищает очередь, а вместе с
+                  ней и строки движка — включая `done`, ещё не отданные форме, и `sending`,
+                  которую этому API не отозвать. Нажатие в середине пачки означало бы: первый
+                  кадр уже в библиотеке, но в слот не встал и никем не назван, а второй долетит
+                  туда же сиротой. Крестик и Esc в это время честно СВОРАЧИВАЮТ (см.
+                  `handleOpenChange`); после расчёта отмена снова безопасна. */}
+              <Button
+                size='lg'
+                variant='simpleReverse'
+                className='uppercase'
+                disabled={live}
+                title={
+                  live
+                    ? 'the batch is already in flight — it cannot be called back; [x] hides this window'
+                    : undefined
+                }
+                onClick={onCancel}
+              >
                 cancel
               </Button>
               {/* ОДНА КНОПКА НА ОТПРАВКУ И НА ПОВТОР, потому что это одно действие: движок берёт
