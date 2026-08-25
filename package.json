@@ -54,7 +54,8 @@
     "upload:queue": "node scripts/upload-queue-probe.mjs",
     "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs",
     "note:format-edits": "node scripts/format-edits-probe.mjs",
-    "intake:queue": "node scripts/intake-queue-probe.mjs"
+    "intake:queue": "node scripts/intake-queue-probe.mjs",
+    "intake:paste": "node scripts/media-intake-probe.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",

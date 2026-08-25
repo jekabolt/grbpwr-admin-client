@@ -198,6 +198,19 @@ export function MediaIntakeDialog({
   // СВЕРКА, А НЕ СБРОС. Раньше на смену массива очередь начиналась сначала — со второй вставкой
   // это стирало бы кропы первой. Отдаётся движку только то, чего он ещё не видел.
   useEffect(() => {
+    // ПРОП — ИСТОЧНИК ПРАВДЫ В ОБЕ СТОРОНЫ. Родитель не только добавляет: слот на одну картинку
+    // ЗАМЕЩАЕТ кадр вторым ⌘V, и старая строка обязана уйти вместе с ним. Пока сверка умела
+    // только добавлять, замещение давало ДВЕ миниатюры на слоте, который держит одну.
+    const want = new Set(files);
+    const gone = previews.reduce<number[]>((acc, _, index) => {
+      if (!want.has(pendingFiles[index])) acc.push(index);
+      return acc;
+    }, []);
+    if (gone.length) {
+      gone.forEach((index) => seenRef.current.delete(pendingFiles[index]));
+      engine.removeFile(gone);
+    }
+
     const fresh = files.filter((f) => !seenRef.current.has(f));
     if (fresh.length) {
       fresh.forEach((f) => seenRef.current.add(f));
