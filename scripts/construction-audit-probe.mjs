@@ -2013,6 +2013,33 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
   );
   const a = await anchor('op:200');
   ck(a.n === 1 && a.role === 'button', 'an unsaved edit does not take the jump away either', JSON.stringify(a));
+
+  // AND THE GATE ITSELF. The same swapped step on a PRISTINE form must say nothing, or the note
+  // stops meaning «you have unsaved edits» and starts meaning «the form and the server disagree» —
+  // which on an untouched card is a hydration bug, not an edit, and would render as a permanent
+  // false warning on cards nobody has opened twice. Without this half the `dirty` gate is dead code
+  // wearing a comment: removing it entirely leaves every other check in this case green.
+  await mount({
+    stub: AI_FORM,
+    keepSession: true,
+    dirty: false,
+    operations: [{ ...STEP_200, inputKeys: [...STEP_200.inputKeys].reverse() }],
+  });
+  const pristinePlant = await page.evaluate(() => ({
+    ops: window.__audit.ops(),
+    dirty: window.__audit.isDirty(),
+  }));
+  ck(
+    pristinePlant.ops.length === 1 && pristinePlant.ops[0]?.operationNumber === 200 && !pristinePlant.dirty,
+    'THE STAND: the diverging step is in the form and the form is NOT dirty',
+    JSON.stringify(pristinePlant).slice(0, 200),
+  );
+  const pristine = await staleNotes();
+  ck(
+    pristine.length === 0,
+    'a PRISTINE form says nothing even when its hash diverges — the gate, not the hash, decides here',
+    JSON.stringify(pristine),
+  );
 }
 
 // ═══ 21. THE FINGERPRINT PORT ══════════════════════════════════════════════════════════════════
