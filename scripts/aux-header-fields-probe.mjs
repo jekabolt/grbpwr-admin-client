@@ -226,6 +226,30 @@ const staged = () =>
 const hasText = (t) =>
   page.evaluate((needle) => (document.body.innerText || '').toLowerCase().includes(needle), t);
 
+head('ЦИТАТА 0 — ЯКОРЬ: карточка монтирует панель ИМЕННО ТАК, как это делает стенд');
+{
+  // ЗАЧЕМ ЯКОРЬ. Ветка монтажа воспроизведена в стенде, и стенд же её мутирует. Ничто, кроме
+  // этой проверки, не привязывает пробу к тому, что `tech-card/components/index.tsx` смонтирован
+  // так же: коммит, «упростивший» карточку до `{!isAux && …}`, оставил бы ВСЕ пробы зелёными и
+  // вернул бы молчаливую потерю brand/collection/season/targetGender при зелёном гейте.
+  const card = readFileSync(
+    resolve(REPO, 'src/components/managers/tech-card/components/index.tsx'),
+    'utf8',
+  );
+  ck(
+    /\{isAux \? \(\s*<StyleFactsField[\s\S]{0,400}?hideFitCare/.test(card),
+    'панель монтируется ВСЕГДА и прячется пропом hideFitCare',
+  );
+  ck(
+    !/\{!isAux &&[\s\S]{0,200}?<StyleFactsField/.test(card),
+    'ветки `{!isAux && <StyleFactsField…>}` (снятие с монтажа) в карточке нет',
+  );
+  ck(
+    card.includes('<HeaderMetaFields hideCategory={isAux} />'),
+    'браузер категорий гейтится тем же живым isAux',
+  );
+}
+
 head('ЦИТАТА А — SELLABLE: категория и fit на месте (контроль «есть что прятать»)');
 {
   await mount(false);
