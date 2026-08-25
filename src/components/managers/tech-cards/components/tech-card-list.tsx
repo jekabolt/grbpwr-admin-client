@@ -16,7 +16,7 @@ import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { getCategoriesByParentId } from 'lib/utility';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -36,6 +36,9 @@ import { useDeleteTechCard, useInfiniteTechCards, useTechCard } from './useTechC
 const LIMIT = 30;
 const ALL_STAGES = 'TECH_CARD_STAGE_UNKNOWN';
 const DEFAULT_PURPOSE = TECH_CARD_PURPOSE_ALL;
+// Потолок добора пула коллекций: 40 страниц по LIMIT. Не производительность, а ПРЕДОХРАНИТЕЛЬ —
+// провалившийся fetchNextPage оставляет hasNextPage=true, и без счётчика цикл добора стал бы вечным.
+const MAX_POOL_PAGES = 40;
 
 // ?season=FW-2026. Parsed strictly — a mangled value is dropped rather than filtering to nothing.
 function parseSeason(raw: string | null): common_SkuSeason | undefined {
@@ -96,6 +99,15 @@ export function TechCardList() {
 
   const season = useMemo(() => parseSeason(searchParams.get('season')), [searchParams]);
 
+  // ?collection=<ИМЯ>. Не enum и не id — свободный текст: колонки-ссылки `tech_card.collection_id`
+  // у тех-карты нет (0240 дропнула её как мёртвую схему), хранится строка. Поэтому валидировать
+  // нечем и НЕЛЬЗЯ: любое имя, которое сервер вернул в строке листа, — законное значение фильтра,
+  // включая рукописные и архивные, которых в словаре коллекций нет. Пустое значение (?collection=)
+  // = фильтра нет, ровно как на сервере, где falsy не уходит на провод.
+  // НИКАКОЙ СВОЕЙ НОРМАЛИЗАЦИИ: сервер TrimSpace снял намеренно, чтобы фильтр совпадал с пулом,
+  // собранным из его же ответов. « SS25» и «SS25» — разные коллекции, потому что так они и лежат.
+  const collection = searchParams.get('collection') || undefined;
+
   // ?category=<id>, validated as a positive integer only — NOT against the dictionary. On a shared
   // link the dictionary is often still in flight, and rejecting a well-formed id because its name
   // has not arrived yet would silently widen the list instead of narrowing it.
@@ -111,6 +123,7 @@ export function TechCardList() {
         stage: stage === ALL_STAGES ? undefined : stage,
         purpose: purpose === TECH_CARD_PURPOSE_ALL ? undefined : purpose,
         skuSeason: season,
+        collection,
         // One id whatever level it came from: the server matches category_id OR top/sub/type.
         categoryIds: categoryId ? [categoryId] : undefined,
       },
@@ -157,6 +170,59 @@ export function TechCardList() {
     });
   }, [techCards]);
 
+  // Пул коллекций — та же идиома, что и у сезонов, и по той же причине: RPC «перечисли коллекции
+  // тех-карт» не существует, а словарь коллекций НЕ ГОДИТСЯ в источник — карты с рукописными и
+  // архивными именами в нём отсутствуют намеренно, и фасет из словаря сделал бы их нефильтруемыми.
+  // Единственный источник — строки, которые уже пришли. Копится ПОПЕРЁК смены фильтров: как только
+  // коллекция выбрана, страницы несут только её, и пул, пересобранный из них, схлопнулся бы до
+  // одного уже выбранного пункта.
+  // Ключ — СЫРАЯ строка: ни trim, ни приведения регистра. Два имени, различающиеся только краевым
+  // пробелом, — две разные коллекции в базе, и слить их здесь значило бы отправить на сервер то,
+  // чего он не найдёт.
+  const [collectionPool, setCollectionPool] = useState<string[]>([]);
+  useEffect(() => {
+    const found = techCards.map((tc) => tc.collection).filter((c): c is string => !!c);
+    if (found.length === 0) return;
+    setCollectionPool((prev) => {
+      const seen = new Set(prev);
+      let changed = false;
+      for (const c of found) {
+        if (!seen.has(c)) {
+          seen.add(c);
+          changed = true;
+        }
+      }
+      if (!changed) return prev;
+      return [...seen].sort((a, b) => a.localeCompare(b));
+    });
+  }, [techCards]);
+
+  const collectionOptions = useMemo(
+    () => collectionPool.map((c) => ({ value: c, label: collectionLabel(c) })),
+    [collectionPool],
+  );
+
+  // ПУЛ НЕПОЛОН, ПОКА НЕ ДОКРУЧЕНЫ ВСЕ СТРАНИЦЫ, и молчаливый неполный список хуже отсутствующего:
+  // человек увидел бы пять коллекций и решил, что других нет. Поэтому две вещи разом — сноска под
+  // пунктами ЧЕСТНО называет, из чего список собран и чего в нём ещё нет, а кнопка рядом даёт
+  // ДОБРАТЬ остаток одним кликом. Добор — явное действие оператора, а не фон: страницы тянутся
+  // тем же бесконечным запросом, что и лист, так что заодно рисуются и плитки.
+  const [completingPool, setCompletingPool] = useState(false);
+  // Предохранитель от вечного цикла: провалившийся fetchNextPage оставляет hasNextPage=true, и
+  // эффект бился бы в него бесконечно. Считаем ПОПЫТКИ, а не страницы.
+  const poolAttempts = useRef(0);
+  useEffect(() => {
+    if (!completingPool) return;
+    if (!hasNextPage || poolAttempts.current >= MAX_POOL_PAGES) {
+      setCompletingPool(false);
+      return;
+    }
+    if (!isFetchingNextPage) {
+      poolAttempts.current += 1;
+      fetchNextPage();
+    }
+  }, [completingPool, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const seasonOptions = useMemo(() => {
     const pool = [...seasonPool];
     if (season && !pool.some((s) => seasonParam(s) === seasonParam(season))) pool.unshift(season);
@@ -193,6 +259,7 @@ export function TechCardList() {
     !!categoryId ||
     stage !== ALL_STAGES ||
     !!name.trim() ||
+    !!collection ||
     purpose !== TECH_CARD_PURPOSE_ALL;
 
   // One request, on an explicitly destructive action: the cascade counts come off the full card.
@@ -261,6 +328,48 @@ export function TechCardList() {
               {seasonLabel(season)}
             </Chip>
           )}
+          {!collection ? (
+            collectionOptions.length > 0 && (
+              <PickerChip
+                title='collection'
+                label='+ collection'
+                options={collectionOptions}
+                onSelect={(v) => setParam('collection', v)}
+                footer={
+                  hasNextPage ? (
+                    <>
+                      <Text size='micro' variant='label'>
+                        {`names come from the ${techCards.length} of ${total} rows loaded — a collection that appears only further down the list is not offered yet`}
+                      </Text>
+                      <button
+                        type='button'
+                        disabled={completingPool}
+                        onClick={() => {
+                          poolAttempts.current = 0;
+                          setCompletingPool(true);
+                        }}
+                        className='mt-1 w-full border border-textColor py-0.5 disabled:opacity-50'
+                      >
+                        <Text size='control' component='span' className='uppercase'>
+                          {completingPool
+                            ? 'loading…'
+                            : `load the remaining ${Math.max(total - techCards.length, 0)}`}
+                        </Text>
+                      </button>
+                    </>
+                  ) : (
+                    <Text size='micro' variant='label'>
+                      {`all ${total} matching rows are loaded — these are every collection named in them`}
+                    </Text>
+                  )
+                }
+              />
+            )
+          ) : (
+            <Chip selected onRemove={() => setParam('collection', undefined)}>
+              {collectionLabel(collection)}
+            </Chip>
+          )}
           {!categoryId ? (
             categoryOptions.length > 0 && (
               <PickerChip
@@ -302,7 +411,12 @@ export function TechCardList() {
               empty AND here is the filter that is deciding what counts. */}
           <Text variant='label' className='uppercase'>
             {narrowed
-              ? `nothing matches these filters — purpose is «${purpose}»`
+              ? `nothing matches these filters — purpose is «${purpose}»${
+                  // Коллекция названа В КАВЫЧКАХ и целиком: краевой пробел в имени HTML при
+                  // отрисовке схлопнул бы, и « SS25» стало бы неотличимо от «SS25» — ровно та
+                  // пара, на которой пустой лист и выглядит необъяснимым.
+                  collection ? `, collection is «${collection}»` : ''
+                }`
               : 'no tech cards'}
           </Text>
         </div>
@@ -426,6 +540,16 @@ function ColorwayBadge({ card }: { card: common_TechCardListItem }) {
   );
 }
 
+/**
+ * Подпись имени коллекции. Имя кладётся на провод СЫРЫМ, но показывать его сырым нельзя: HTML при
+ * отрисовке схлопывает краевые пробелы, и « SS25» на экране выглядело бы как «SS25» — два разных
+ * фильтра, неотличимых глазом. Поэтому имя с краевым пробелом берётся в кавычки, внутри которых
+ * пробел становится внутренним и виден. Подпись НИЧЕГО не меняет в значении — оно уходит сырым.
+ */
+function collectionLabel(name: string): string {
+  return name === name.trim() ? name : `«${name}»`;
+}
+
 /** `depth` indents a tree level in the popover (category); flat facets leave it unset. */
 type PickerOption = { value: string; label: string; depth?: number };
 
@@ -442,12 +566,20 @@ function PickerChip({
   selected,
   options,
   onSelect,
+  footer,
 }: {
   title: string;
   label: string;
   selected?: boolean;
   options: PickerOption[];
   onSelect: (value: string) => void;
+  /**
+   * Сноска под пунктами — для фасета, чей список значений НЕПОЛОН по устройству (коллекция
+   * собирается из загруженных строк листа). Здесь же живёт кнопка добора: сноска называет, чего в
+   * списке ещё нет, кнопка это чинит. Пункта фасета из неё не делается — она вне цикла options и
+   * поповер не закрывает.
+   */
+  footer?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -480,6 +612,7 @@ function PickerChip({
             </Text>
           </button>
         ))}
+        {footer && <div className='mt-1.5 border-t border-hairline pt-1.5'>{footer}</div>}
       </div>
     </GenericPopover>
   );
