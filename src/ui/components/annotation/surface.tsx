@@ -403,6 +403,20 @@ export function AnnotationSurface({
     return v;
   }, []);
 
+  /**
+   * ВЫБОР И ПРАВКА ТЕКСТА — РАЗНЫЕ ТАКТЫ, и `focus` — единственная разница между ними.
+   *
+   * Клик по указанию НЕ просит фокуса. Он его просил, и ровно из-за этого Backspace не удалял
+   * выноску: курсор уезжал в textarea редактора, а там та же клавиша законно стирает букву —
+   * сторож `typing` ниже её и не пропускал. Перехватить Backspace «умно» (удалять выноску, когда
+   * поле пусто) нельзя: человек, стирающий последнюю букву подписи, потерял бы вместе с ней всю
+   * выноску.
+   *
+   * Поэтому грамматика теперь такая же, как в любом инструменте прямого манипулирования: клик =
+   * выбрать, Backspace = удалить, Enter = править текст, Esc = снять выбор. `focus: true` остаётся
+   * ровно у двух путей — у третьего такта «клик-клик-ввод» (сразу после ПОСТАНОВКИ новой фигуры)
+   * и у Enter, который для того и нужен.
+   */
   const select = useCallback(
     (key: string | null, opts?: { focus?: boolean }) => {
       if (key !== null) claimEditing(claimRef.current);
@@ -950,7 +964,12 @@ export function AnnotationSurface({
       // ⌘Z / Ctrl+Z — ОТКАТ ЖЕСТА. Не когда курсор в поле ввода: там та же комбинация принадлежит
       // браузеру и отменяет напечатанную букву. Перехватить её значило бы стирать целое указание
       // вместо буквы — «умный» откат, который хуже никакого.
-      if ((e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я') && (e.metaKey || e.ctrlKey)) {
+      //
+      // СРАВНЕНИЕ ПО `e.code`, А НЕ ПО `e.key`. `key` — это НАПЕЧАТАННАЯ буква, то есть она зависит
+      // от раскладки: на русской ⌘Z даёт «я», на греческой «ω», на иврите «ז». Здесь стоял список
+      // из двух алфавитов, и третий пришлось бы дописывать при каждой новой раскладке в команде.
+      // `code` называет ФИЗИЧЕСКУЮ клавишу и одинаков во всех раскладках.
+      if (e.code === 'KeyZ' && (e.metaKey || e.ctrlKey)) {
         if (typing || e.shiftKey || !onUndo || !canUndo?.()) return;
         // Откатывает ТА поверхность, которая последней что-то меняла, — см. `undoOwner`.
         if (undoOwner !== claimRef.current) return;
@@ -965,6 +984,17 @@ export function AnnotationSurface({
       if (e.key === 'Enter' && !typing && placing && points.length >= def.points[0]) {
         e.preventDefault();
         finishPlacing(def.key, points);
+        return;
+      }
+      // ENTER ОТКРЫВАЕТ ТЕКСТ ВЫБРАННОГО. Клик больше не уводит курсор в поле (см. `select`), и без
+      // этой ветки клавиатурного пути к подписи не осталось бы вовсе — а «Keyboard-first speed»
+      // это правило продукта, а не пожелание. Запрос фокуса доставляется тем же
+      // `takeFocusRequest`/`focusToken`, что и у третьего такта постановки.
+      //
+      // СТОРОЖ ВЛАДЕНИЯ ЗДЕСЬ ОБЯЗАТЕЛЕН РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО И У УДАЛЕНИЯ НИЖЕ.
+      if (e.key === 'Enter' && !typing && !placing && selected !== null && byKey.has(selected)) {
+        e.preventDefault();
+        select(selected, { focus: true });
         return;
       }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -983,6 +1013,15 @@ export function AnnotationSurface({
         return;
       }
       if (selected === null) return;
+      // УДАЛЯЕТ ТОЛЬКО ТА ПОВЕРХНОСТЬ, КОТОРОЙ ВЫНОСКА ПРИНАДЛЕЖИТ.
+      //
+      // Слушатель клавиш висит на window У КАЖДОЙ поверхности (эффект пер-инстансный), а выбор на
+      // листе эскиза — ОДИН НА ВЕСЬ ЛИСТ и приходит пропом. Без этой проверки одно нажатие
+      // Backspace вызывало бы `onRemove(selected)` у каждого видимого кадра: лист из пяти снимков
+      // удалил бы пять выносок, причём `writeCallouts` фильтрует по УЖЕ протухшему индексу — то
+      // есть уносил бы соседей. Спало это только потому, что клик уводил фокус в textarea и
+      // сторож `typing` глушил всю ветку; после починки фокуса оно бы проснулось.
+      if (!byKey.has(selected)) return;
       e.preventDefault();
       mutate(() => live.current.onRemove?.(selected));
       select(null);
@@ -1075,6 +1114,38 @@ export function AnnotationSurface({
   const selectedCallout = selected !== null ? byKey.get(selected) : undefined;
   const handlesVisible =
     editable && !placing && !hideCallouts && selectedCallout && kindDef(selectedCallout.kind).handles;
+
+  /**
+   * МАРКИЗА ВЫБРАННОЙ ФИГУРЫ — штриховая рамка по её габаритам.
+   *
+   * У фигуры на холсте не было состояния «выбрана»: 2 пикселя штриха против 1.5 — это не
+   * состояние, а у следа с `handles: false` не было и ручек, то есть выбранный штрих не отличался
+   * от соседнего НИЧЕМ. Подсветить цветом нельзя (система монохромная, и цвет здесь уже занят —
+   * им красят саму линию), утолщить нельзя (штрих в 4 пикселя перекрывает чертёж, ради которого
+   * его и рисовали). Остаётся геометрия: рамка вокруг того, что выбрано, — тот же приём, каким
+   * выбор показывает любой векторный редактор.
+   *
+   * ПОЛЕ И ОБВОДКА — ЭКРАННЫЕ, А НЕ КАДРОВЫЕ: `inv` компенсирует зум, `non-scaling-stroke` держит
+   * толщину. Иначе на ×6 рамка отступала бы от фигуры на треть кадра и была бы толщиной в палец.
+   */
+  const marquee = (() => {
+    if (hideCallouts || !selectedCallout || dim(selectedCallout.key)) return null;
+    const pts = pointsOf(selectedCallout).map(px);
+    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки) —
+    // рамка вокруг одной точки была бы рамкой вокруг ничего.
+    if (pts.length < 2) return null;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const pad = 6 * inv;
+    const x0 = Math.min(...xs) - pad;
+    const y0 = Math.min(...ys) - pad;
+    return {
+      x: x0,
+      y: y0,
+      width: Math.max(...xs) - Math.min(...xs) + pad * 2,
+      height: Math.max(...ys) - Math.min(...ys) + pad * 2,
+    };
+  })();
 
   const cursorClass = placing
     ? 'cursor-crosshair'
@@ -1296,6 +1367,28 @@ export function AnnotationSurface({
                     />
                   ),
                 )}
+                {/* МАРКИЗА — ДВА ПРЯМОУГОЛЬНИКА, А НЕ ОДИН. Белый сплошной снизу, чернильный
+                    штриховой поверх: на тёмном снимке чернильная рамка невидима ровно так же, как
+                    чернильная линия, и лечится тем же, чем лечится она, — подложкой. */}
+                {marquee && (
+                  <g data-marquee='true' pointerEvents='none'>
+                    <rect
+                      {...marquee}
+                      fill='none'
+                      stroke='var(--color-bgColor)'
+                      strokeWidth={3}
+                      vectorEffect='non-scaling-stroke'
+                    />
+                    <rect
+                      {...marquee}
+                      fill='none'
+                      stroke='var(--color-textColor)'
+                      strokeWidth={1}
+                      strokeDasharray='3 3'
+                      vectorEffect='non-scaling-stroke'
+                    />
+                  </g>
+                )}
                 {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
                     нельзя, а выбирать фигуру надо именно по ней. Живут ТОЛЬКО когда правка
                     возможна и инструмент выключен: во время постановки слой обязан быть прозрачным
@@ -1333,7 +1426,12 @@ export function AnnotationSurface({
                             justDragged.current = false;
                             return;
                           }
-                          select(selected === c.key ? null : c.key, { focus: true });
+                          // КЛИК ВЫБИРАЕТ И НЕ ЗАБИРАЕТ ФОКУС — см. довод у `select`. Печатать
+                          // подпись — Enter или клик в поле.
+                          // И НЕ ПЕРЕКЛЮЧАЕТ: повторный клик по выбранной фигуре раньше снимал
+                          // выбор, то есть хлопал редактором на каждое второе попадание. Снимают
+                          // выбор клик по фону и Esc — два жеста, которые ничего больше не значат.
+                          select(c.key);
                         }}
                       />
                     );
@@ -1399,7 +1497,8 @@ export function AnnotationSurface({
                           justDragged.current = false;
                           return;
                         }
-                        if (editable) select(selected === c.key ? null : c.key, { focus: true });
+                        // Выбор без фокуса и без переключения — см. хит-путь выше.
+                        if (editable) select(c.key);
                       }}
                     />
                   );
@@ -1426,7 +1525,8 @@ export function AnnotationSurface({
                         justDragged.current = false;
                         return;
                       }
-                      if (editable) select(selected === c.key ? null : c.key, { focus: true });
+                      // Выбор без фокуса и без переключения — см. хит-путь выше.
+                      if (editable) select(c.key);
                     }}
                   />
                 );
@@ -1678,6 +1778,7 @@ function PinMarker({
       role='button'
       tabIndex={0}
       title={title}
+      data-callout-selected={selected ? 'true' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
       // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы, а его отпускание —
@@ -1699,6 +1800,14 @@ function PinMarker({
         'absolute flex items-center justify-center rounded-full border text-nano tabular-nums',
         filled ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
         onDragStart ? 'cursor-move' : 'cursor-pointer',
+        // ВЫБОР ПОКАЗАН КОЛЬЦОМ, А НЕ ИНВЕРСИЕЙ ЗАЛИВКИ, и это не смягчение правила «selected
+        // fills solid with ink», а следствие того, что заливка у пина УЖЕ занята: залитый кружок
+        // означает «текст есть», полый — «текста ещё нет», и на листе из пятнадцати пинов это
+        // единственное состояние, которое видно, не открывая выноску. Инвертировав выбранный, мы
+        // сделали бы пустой пин неотличимым от подписанного — то есть починили бы одно состояние,
+        // сломав другое. Кольцо со сдвигом — тот же приём, которым в этом файле уже показана
+        // активная миниатюра ленты, и работает он при любой заливке.
+        selected && 'outline outline-1 outline-offset-1 outline-textColor',
         selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
@@ -1761,6 +1870,7 @@ function Plate({
       role='button'
       tabIndex={0}
       title={[text, ...names].filter(Boolean).join(' · ') || 'callout'}
+      data-callout-selected={selected ? 'true' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
       onPointerDown={onPointerDown}
@@ -1775,7 +1885,11 @@ function Plate({
       }}
       className={cn(
         'absolute block max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
-        selected ? 'border-textColor' : 'border-borderColor',
+        // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
+        // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
+        selected
+          ? 'border-textColor outline outline-1 outline-offset-1 outline-textColor'
+          : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
       )}
