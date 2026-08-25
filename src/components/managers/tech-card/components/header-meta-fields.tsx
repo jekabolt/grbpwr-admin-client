@@ -282,7 +282,7 @@ function CategoryBrowser() {
 
 // Header classification FKs (category leaf / base model / base sample size).
 // base_sample_size_id is restricted to the card's size range (cross-validated server-side).
-export function HeaderMetaFields() {
+export function HeaderMetaFields({ hideCategory = false }: { hideCategory?: boolean }) {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const { data: models, isLoading: modelsLoading } = useAllModels();
@@ -313,7 +313,9 @@ export function HeaderMetaFields() {
 
   return (
     <div className='space-y-2.5'>
-      <CategoryBrowser />
+      {/* Браузер категорий прячется у aux-карты: там классификацию задаёт AUXILIARY TYPE.
+          Скрывается ТОЛЬКО орган — значение categoryId остаётся в форме и раунд-трипится. */}
+      {!hideCategory && <CategoryBrowser />}
       {/* base model / base sample size are optional provenance FKs — both still print to the spec,
           so they stay mounted (values round-trip) but sit behind a disclosure to keep the header
           leading with category. Expand to set them. */}

@@ -19,7 +19,6 @@ import {
   techCardApprovalStateOptions,
   techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
-  techCardMeasurementUnitOptions,
   techCardPurposeFormOptions,
   techCardStageOptions,
 } from 'constants/filter';
@@ -1808,11 +1807,13 @@ export function TechCardForm({
                     label='target gender'
                     items={techCardGenderOptions}
                   />
-                  <SelectField
-                    name='measurementUnit'
-                    label='measurement unit'
-                    items={techCardMeasurementUnitOptions}
-                  />
+                  {/* measurement unit больше не рисуется: мы всегда меряем в миллиметрах, а орган
+                    в хедере только приглашал ошибиться. Поле НЕ удалено ни из схемы, ни из
+                    маппера — как легаси-`status` выше, оно продолжает круговой рейс
+                    GET → defaultValues → full-replace UPSERT нетронутым. Карты, сохранённые
+                    когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
+                    (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
+                    бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
                 </Section>
               </SectionStack>
 
@@ -1830,17 +1831,38 @@ export function TechCardForm({
                 </Section>
               )}
 
-              <Section title='category & base model'>
-                <HeaderMetaFields />
+              {/* У aux-карты категорию задаёт AUXILIARY TYPE, а гарментный браузер категорий
+                дублировал бы её другим словарём. Заголовок секции условный: иначе он обещает
+                орган, которого нет. «base model & sample size» остаётся ВСЕГДА — себестоимость
+                считается по норме базового размера без фолбэка, и aux-карта (кофр кроится и
+                шьётся как изделие) обязана иметь путь к костингу. Сохранённый categoryId не
+                стирается: он живёт в форме и уезжает в full-replace нетронутым. */}
+              <Section title={isAux ? 'base model & sample size' : 'category & base model'}>
+                <HeaderMetaFields hideCategory={isAux} />
               </Section>
 
-              <Section title='style facts — fit / care (shared by all colourways)'>
+              {/* fit — свойство посадки изделия, care принадлежит вещи, а не самому ярлыку,
+                storefront-превью — товару, которым aux не бывает. Поэтому у aux трио спрятано.
+                Но панель НЕ снимается с монтажа (hideFitCare, а не `!isAux &&`): она единственный
+                писатель brand/collection/season/targetGender — их редактируют в хедере, а
+                UpdateTechCard их намеренно не пишет. Care при этом достижим на вкладке LABELS —
+                это буквально то же поле. */}
+              {isAux ? (
                 <StyleFactsField
                   styleId={numId}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                   careEntries={techCard?.careEntries}
+                  hideFitCare
                 />
-              </Section>
+              ) : (
+                <Section title='style facts — fit / care (shared by all colourways)'>
+                  <StyleFactsField
+                    styleId={numId}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                    careEntries={techCard?.careEntries}
+                  />
+                </Section>
+              )}
 
               <Section title='concept & construction description'>
                 {/* concept → details → notes is the order the tech pack's description sheet prints
