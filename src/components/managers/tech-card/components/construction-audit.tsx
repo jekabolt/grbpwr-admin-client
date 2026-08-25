@@ -13,12 +13,13 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { Accordion } from 'ui/components/accordion';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
-import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { FingerprintableOperation, formOperationFingerprints } from './analysis-fp';
@@ -670,6 +671,20 @@ function statusLine(
         tone: 'warning',
         text: 'the run did not complete — a timeout or a transport fault. This one is weather: retry.',
       };
+    // СОСЕД ПО СМЫСЛУ — model_unavailable, А НЕ failed. Рассуждающая модель списывает размышление
+    // в тот же бюджет ответа, поэтому потолок, посчитанный под нерассуждающую, кончается ДО
+    // первого символа ответа. Следующее нажатие кончится так же и стоит столько же: именно это
+    // уехало на прод под словами «this one is weather: retry».
+    case 'budget_exhausted':
+      return {
+        tone: 'error',
+        text:
+          `«${slug}» spent its entire token budget and returned nothing at all. This is a ` +
+          `configuration fault, not a busy moment: retrying costs the same money and ends the ` +
+          `same way. A reasoning model bills its thinking to the answer's budget — either the ` +
+          `analysis pass must switch thinking off, or the token ceiling must be raised to hold ` +
+          `both. Tell an engineer; there is nothing to do on this card.`,
+      };
     case 'invalid_output':
       return {
         tone: 'error',
@@ -728,14 +743,11 @@ export function ConstructionAudit({
   const addIssue = useAddTechCardIssue();
 
   const [grouping, setGrouping] = useState<Grouping>('severity');
-  // СПИСОК МОДЕЛЬНЫХ НАХОДОК ЗАКРЫТ ПРИ ОТКРЫТИИ ВКЛАДКИ. Прогон живёт в сессии и переживает F5, а
-  // вкладка CONSTRUCTION — это ещё и сто двадцать шагов маршрута под аудитом: развёрнутый список
-  // отчёта, который человек прочитал час назад, отодвигает вниз всё, ради чего вкладку открыли.
-  //
-  // ЗАКРЫТО ТОЛЬКО ТЕЛО. Пилюли со счётом, штамп модели, строка статуса, счётчик выброшенных и
-  // дельта re-run остаются на экране всегда — свёрнутый блок, который прячет «1 blocker», читался
-  // бы как «всё чисто», а это ровно та тишина, против которой построена вся панель.
-  const [aiOpen, setAiOpen] = useState(false);
+  // РАСКРЫТИЕ УПРАВЛЯЕМОЕ РАДИ ОДНОГО: ШАПКА СЧИТАЕТ ТОЛЬКО ПОКА ЗАКРЫТО. Счёт в шапке существует
+  // против одной ошибки — свёрнутый блок, прячущий «1 blocker», читается как чистая карточка. Над
+  // РАСКРЫТЫМ блоком тот же счёт — просто вторая копия строки, которая и так стоит первой строкой
+  // отчёта; две копии одного числа умеют разойтись, одна не умеет.
+  const [auditOpen, setAuditOpen] = useState(false);
   // THE LAST RUN LIVES IN sessionStorage, and the component is only its reader. F5 must not burn a
   // run that cost money and forty seconds; nothing here may outlive the session.
   const [stored, setStored] = useState<StoredAnalysis>(() => loadAnalysis(techCardId));
@@ -831,10 +843,6 @@ export function ConstructionAudit({
     if (!canAnalyze || !techCardId) return;
     analyze.mutate(techCardId, {
       onSuccess: (res: AnalyzeTechCardConstructionResponse) => {
-        // ПРОГОН, ЗАКАЗАННЫЙ ПРЯМО СЕЙЧАС, ОТКРЫВАЕТСЯ САМ. Начальное «закрыто» — про отчёт,
-        // застигнутый в сессии, а не про ответ на нажатие: кнопка, после которой сорок секунд
-        // ждали и ничего не появилось, читается как сломанная.
-        setAiOpen(true);
         const got = res.findings ?? [];
         persist({
           v: 1,
@@ -965,12 +973,82 @@ export function ConstructionAudit({
     </div>
   ) : null;
 
+  // ШАПКА СВЁРНУТОГО БЛОКА. Всё, что человек обязан увидеть НЕ ОТКРЫВАЯ: сколько нашла машина,
+  // сколько модель, идёт ли прогон прямо сейчас и не отвалился ли отчёт вовсе. Порядок ветвлений
+  // тот же, что и у тела, потому что расхождение между шапкой и телом — это два разных отчёта об
+  // одном прогоне.
+  const headerMeta = !techCardId ? (
+    <Text size='micro' variant='label' component='span'>
+      not saved
+    </Text>
+  ) : isError ? (
+    // НЕ «0 находок». Упавший запрос и чистая карточка обязаны выглядеть по-разному и в шапке —
+    // иначе свёрнутый блок над несостоявшимся отчётом читается как «проверено, всё хорошо».
+    <Pill tone='warn'>report did not arrive</Pill>
+  ) : isPending ? (
+    <Text size='micro' variant='label' component='span'>
+      auditing…
+    </Text>
+  ) : (
+    <>
+      {findings.length === 0 ? (
+        <Text size='micro' variant='label' component='span'>
+          machine: clean
+        </Text>
+      ) : (
+        <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>
+      )}
+      {inFlight ? (
+        <Pill tone='attention'>analyzing…</Pill>
+      ) : run ? (
+        // ПУСТОЙ ПРОГОН И ПРОВАЛИВШИЙСЯ — ДВЕ РАЗНЫЕ НОВОСТИ, и в шапке тоже. «ai: none» под
+        // отказом читается как «модель проверила и ничего не нашла» — ровно та тишина, ради
+        // которой счёт в шапке и стоит; тело эту границу уже держит («not an all-clear»), и шапка
+        // не имеет права снимать её строкой выше. Любой статус, кроме ok, — не отчёт.
+        run.aiStatus !== 'ok' ? (
+          <Pill tone='warn'>ai: no report</Pill>
+        ) : modelFindings.length === 0 ? (
+          <Text size='micro' variant='label' component='span'>
+            ai: none
+          </Text>
+        ) : (
+          <Pill tone='warn'>{`ai: ${modelFindings.length}`}</Pill>
+        )
+      ) : null}
+    </>
+  );
+
   return (
-    <Section
-      title='construction audit'
-      question='— what the machine checked on the saved card, and what it did not'
-      action={analyzeControl}
+    <Accordion
+      title={
+        <Text size='control' variant='uppercase' tracking='label' component='span'>
+          construction audit
+        </Text>
+      }
+      meta={auditOpen ? undefined : headerMeta}
+      open={auditOpen}
+      onOpenChange={setAuditOpen}
+      // ЗАКРЫТ ПРИ ОТКРЫТИИ ВКЛАДКИ — тем же органом и с тем же видом, что и соседний «generate
+      // operations from description (ai)». Вкладка CONSTRUCTION несёт под аудитом ещё и сто
+      // двадцать шагов маршрута; развёрнутый отчёт, прочитанный час назад, отодвигает вниз всё,
+      // ради чего вкладку открыли.
+      //
+      // РАСКРЫТИЕ НЕУПРАВЛЯЕМОЕ, И ЭТО РЕШЕНИЕ. Кнопка разбора живёт в теле, поэтому свёрнутым
+      // блок во время прогона может быть только если человек СВЕРНУЛ ЕГО САМ — а раскрывать его
+      // обратно под руками значит спорить с тем, кто только что нажал. Новости он не теряет:
+      // шапка показывает «analyzing…», а потом счёт.
     >
+      {/* ПОДПИСЬ И ОРГАН ЗАПУСКА ЖИВУТ В ТЕЛЕ, А НЕ В ШАПКЕ. Шапка аккордеона — ОДНА кликабельная
+          область: чип, положенный в неё, сворачивал бы блок тем же нажатием, которым тратит
+          деньги, и человек видел бы схлопнувшуюся панель вместо начавшегося прогона. Цена решения
+          честная и небольшая: чтобы заказать разбор, блок нужно раскрыть. */}
+      <div className='mb-2 flex items-start justify-between gap-2'>
+        <Text size='micro' variant='label'>
+          what the machine checked on the saved card, and what it did not
+        </Text>
+        {analyzeControl}
+      </div>
+
       {/* НЕСОХРАНЁННАЯ КАРТОЧКА — ОТДЕЛЬНАЯ ВЕТКА, А НЕ ЗАГРУЗКА. Вкладка сборки открыта и на
           `/add-tech-card` (`isTabVisible` не гейтит её на `isEditMode`), а отключённый запрос
           React Query отдаёт `isPending: true` вечно — то есть плашка «идёт разбор» висела бы над
@@ -1038,30 +1116,18 @@ export function ConstructionAudit({
           {/* ═══ AI REVIEW — its own block, with its own header, status and footer ═══ */}
           {(inFlight || run || analyze.isError) && (
             <div data-ai-review>
+              {/* СКЛАДКА ОДНА, И ОНА СНАРУЖИ. Здесь стоял свой чип «show N findings», пока весь
+                  блок был развёрнут по умолчанию; с аккордеоном он стал второй складкой внутри
+                  первой — два раскрытия подряд ради одного списка. Осталась группировка. */}
               <GroupLabel
                 lead={
-                  run && aiOpen && modelFindings.length > 0 ? (
+                  run && modelFindings.length > 0 ? (
                     <ViewSwitch
                       value={grouping}
                       options={GROUPINGS}
                       onChange={setGrouping}
                       label='group the model findings by'
                     />
-                  ) : undefined
-                }
-                // ОРГАН РАСКРЫТИЯ — `Chip nonForm`, А НЕ `<button>`, по той же причине, что и сама
-                // кнопка разбора: на выпущенной карточке вкладка заглушена филдсетом, а читать
-                // отчёт там нужно ровно так же.
-                action={
-                  run && !inFlight ? (
-                    <Chip
-                      nonForm
-                      onClick={() => setAiOpen((v) => !v)}
-                      aria-expanded={aiOpen}
-                      title={aiOpen ? 'hide the model findings' : 'show the model findings'}
-                    >
-                      {aiOpen ? 'hide' : `show ${plural(modelFindings.length, 'finding')}`}
-                    </Chip>
                   ) : undefined
                 }
               >
@@ -1130,82 +1196,73 @@ export function ConstructionAudit({
                     </Text>
                   )}
 
-                  {/* ТЕЛО ОТЧЁТА — ЗА РАСКРЫТИЕМ. Всё, что выше, видно всегда: счёт, штамп,
-                      статус, выброшенные, дельта. Ниже — сам список и подвал, то есть ровно то,
-                      что занимает экран. */}
-                  {aiOpen &&
-                    (modelFindings.length === 0 ? (
-                      <Text size='micro' variant='label'>
-                        {run.aiStatus === 'ok'
-                          ? 'the model found nothing to report on this card.'
-                          : 'no model findings arrived — read the status above before reading this as clean.'}
-                      </Text>
-                    ) : (
-                      groups.map((g) => (
-                        <div key={g.key}>
-                          {g.heading && (
-                            <Text
-                              size='micro'
-                              variant='label'
-                              tracking='label'
-                              className='uppercase'
-                            >
-                              {g.heading}
-                            </Text>
-                          )}
-                          <div className='border-t border-hairline'>
-                            {g.items.map((i) => {
-                              const uid = uids[i] ?? String(i);
-                              const isDismissed = dismissed.has(uid);
-                              return (
-                                <Finding
-                                  key={uid}
-                                  finding={modelFindings[i]}
-                                  onGo={goRef}
-                                  onFile={(f) => fileAsIssue(f, run.model)}
-                                  frozen={frozen}
-                                  filing={addIssue.isPending}
-                                  resolveOp={resolveOp}
-                                  runFingerprints={run.fingerprints}
-                                  dirty={dirty}
-                                  delta={
-                                    previous.size === 0 || isDismissed
-                                      ? undefined
-                                      : previous.has(uid)
-                                        ? 'still open'
-                                        : 'new'
-                                  }
-                                  dismissed={isDismissed}
-                                  onDismiss={
-                                    isDismissed
-                                      ? undefined
-                                      : () =>
-                                          persist({
-                                            ...stored,
-                                            dismissed: [...new Set([...stored.dismissed, uid])],
-                                          })
-                                  }
-                                  onRestore={
-                                    isDismissed
-                                      ? () =>
-                                          persist({
-                                            ...stored,
-                                            dismissed: stored.dismissed.filter((d) => d !== uid),
-                                          })
-                                      : undefined
-                                  }
-                                />
-                              );
-                            })}
-                          </div>
+                  {modelFindings.length === 0 ? (
+                    <Text size='micro' variant='label'>
+                      {run.aiStatus === 'ok'
+                        ? 'the model found nothing to report on this card.'
+                        : 'no model findings arrived — read the status above before reading this as clean.'}
+                    </Text>
+                  ) : (
+                    groups.map((g) => (
+                      <div key={g.key}>
+                        {g.heading && (
+                          <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                            {g.heading}
+                          </Text>
+                        )}
+                        <div className='border-t border-hairline'>
+                          {g.items.map((i) => {
+                            const uid = uids[i] ?? String(i);
+                            const isDismissed = dismissed.has(uid);
+                            return (
+                              <Finding
+                                key={uid}
+                                finding={modelFindings[i]}
+                                onGo={goRef}
+                                onFile={(f) => fileAsIssue(f, run.model)}
+                                frozen={frozen}
+                                filing={addIssue.isPending}
+                                resolveOp={resolveOp}
+                                runFingerprints={run.fingerprints}
+                                dirty={dirty}
+                                delta={
+                                  previous.size === 0 || isDismissed
+                                    ? undefined
+                                    : previous.has(uid)
+                                      ? 'still open'
+                                      : 'new'
+                                }
+                                dismissed={isDismissed}
+                                onDismiss={
+                                  isDismissed
+                                    ? undefined
+                                    : () =>
+                                        persist({
+                                          ...stored,
+                                          dismissed: [...new Set([...stored.dismissed, uid])],
+                                        })
+                                }
+                                onRestore={
+                                  isDismissed
+                                    ? () =>
+                                        persist({
+                                          ...stored,
+                                          dismissed: stored.dismissed.filter((d) => d !== uid),
+                                        })
+                                    : undefined
+                                }
+                              />
+                            );
+                          })}
                         </div>
-                      ))
-                    ))}
+                      </div>
+                    ))
+                  )}
 
                   {/* A QUIET FOOTER, per §11 — what the model says it did not check, and its own
                       one-paragraph verdict. Quiet because neither is a finding; present because a
                       report that hides what it skipped is the lie this whole panel exists against. */}
-                  {aiOpen && (modelNotChecked.length > 0 || run.summary) && (
+                  {(modelNotChecked.length > 0 || run.summary) && (
                     <div className='space-y-px border-t border-hairline pt-1'>
                       {modelNotChecked.length > 0 && (
                         <>
@@ -1232,6 +1289,6 @@ export function ConstructionAudit({
           )}
         </div>
       )}
-    </Section>
+    </Accordion>
   );
 }

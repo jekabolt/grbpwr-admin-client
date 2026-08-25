@@ -106,8 +106,9 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-absent-map-is-empty', // 19
   // ── wave 4: the ai block opens closed ──
   '--mutate-ai-opens-expanded', // 22
-  '--mutate-ai-no-auto-open', // 22
   '--mutate-ai-hides-the-count', // 22
+  '--mutate-budget-as-weather', // 13
+  '--mutate-head-failed-as-none', // 22
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN_MUTATIONS.has(a));
 if (stray) {
@@ -407,8 +408,11 @@ const STALE_NOTE_OFF = `      {resolveOp && anchoredOps.length > 0 && false && <
 // Якорь берётся ПОСЛЕ гейта раскрытия (`{aiOpen &&`) намеренно: баннер, вставленный ВНУТРЬ
 // свёрнутого блока, на закрытом отчёте не отрисуется вовсе, и мутация прошла бы зелёной — сторож у
 // кода, которого на экране нет.
-const GROUPS_FIX = `                  {aiOpen &&
-                    (modelFindings.length === 0 ? (`;
+// ЯКОРЬ СТОИТ РОВНО НА НАЧАЛЕ СПИСКА МОДЕЛЬНЫХ НАХОДОК. Он уже дважды переезжал: сначала под гейт
+// `{aiOpen &&`, когда внутри блока была своя складка, теперь обратно — складку сняли, весь блок стал
+// аккордеоном. Смысл прежний: баннер вставляется ВНУТРЬ отчёта, а не над ним, иначе мутация,
+// обязанная показать баннер на каждой находке, показала бы его один раз и позеленела.
+const GROUPS_FIX = `                  {modelFindings.length === 0 ? (`;
 const GROUPS_WITH_BANNER = `                  <div data-stale-note>
                     <CalloutBox tone='warning'>
                       <Text size='micro'>
@@ -417,8 +421,7 @@ const GROUPS_WITH_BANNER = `                  <div data-stale-note>
                       </Text>
                     </CalloutBox>
                   </div>
-                  {aiOpen &&
-                    (modelFindings.length === 0 ? (`;
+                  {modelFindings.length === 0 ? (`;
 
 // THE FORM HALF, DECIDED BY THE DIRTY FLAG INSTEAD OF BY THE HASH. This is the plausible bug: it
 // looks right on a card somebody edited and is a lie on every step they did not touch.
@@ -431,22 +434,44 @@ const UNSAVED_HASH_MUTE = `        return false && !!then && !!inForm && then !=
 
 // AN ABSENT MAP READ AS AN EMPTY ONE — the false grey that would hit a lagging backend, where every
 // anchor of every finding reads «not found» and nothing whatsoever is wrong.
-// ── 22. THE AI BLOCK OPENS CLOSED ──
-// Закрыт при монтировании, открывается сам только у прогона, заказанного в этом же взаимодействии,
-// и НИКОГДА не прячет счёт: свёрнутый блок, скрывший «1 blocker», читается как чистая карточка.
-const AI_OPEN_FIX = `  const [aiOpen, setAiOpen] = useState(false);`;
-const AI_OPEN_EXPANDED = `  const [aiOpen, setAiOpen] = useState(true);`;
-const AI_AUTO_FIX = `        setAiOpen(true);
-        const got = res.findings ?? [];`;
-const AI_AUTO_OFF = `        const got = res.findings ?? [];`;
-const AI_COUNT_FIX = `                  <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                    {modelCounts}
-                  </Text>`;
-const AI_COUNT_HIDDEN = `                  {aiOpen && (
-                    <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                      {modelCounts}
-                    </Text>
-                  )}`;
+// ── 22. ВЕСЬ БЛОК — АККОРДЕОН, ЗАКРЫТЫЙ ПРИ МОНТИРОВАНИИ ──
+// …но закрытый блок НИКОГДА не читается как чистая карточка: счёт находок живёт в шапке.
+const AI_OPEN_FIX = `  const [auditOpen, setAuditOpen] = useState(false);`;
+const AI_OPEN_EXPANDED = `  const [auditOpen, setAuditOpen] = useState(true);`;
+// Шапка перестаёт считать и всегда говорит «machine: clean» — ровно та тишина, ради которой
+// счётчик в шапке и стоит: свёрнутый блок над карточкой с блокером выглядел бы законченным.
+const AI_COUNT_FIX = `      {findings.length === 0 ? (
+        <Text size='micro' variant='label' component='span'>
+          machine: clean
+        </Text>
+      ) : (
+        <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>
+      )}`;
+const AI_COUNT_HIDDEN = `      {
+        <Text size='micro' variant='label' component='span'>
+          machine: clean
+        </Text>
+      }`;
+
+// budget_exhausted СНОВА ЧИТАЕТСЯ КАК ПОГОДА — дословно тот текст, который уехал на прод и
+// приглашал жать ещё раз на детерминированную неисправность.
+const BUDGET_STATUS_FIX = `    case 'budget_exhausted':
+      return {
+        tone: 'error',`;
+const BUDGET_STATUS_AS_WEATHER = `    case 'budget_exhausted':
+      return {
+        tone: 'warning',
+        text: 'the run did not complete — a timeout or a transport fault. This one is weather: retry.',
+      };
+    case '__never__':
+      return {
+        tone: 'error',`;
+
+// Шапка перестаёт отличать отказ модели от пустого ответа — «ai: none» под провалившимся прогоном.
+const HEAD_FAILED_FIX = `        run.aiStatus !== 'ok' ? (
+          <Pill tone='warn'>ai: no report</Pill>
+        ) : modelFindings.length === 0 ? (`;
+const HEAD_FAILED_BLIND = `        modelFindings.length === 0 ? (`;
 
 const ABSENT_MAP_FIX = `  if (!now || Object.keys(now).length === 0) return 'unknown';
   const current = now[String(n)];`;
@@ -530,8 +555,9 @@ const mutations = () => {
   add('--mutate-unsaved-note-off', auditPairs, [UNSAVED_HASH_FIX, UNSAVED_HASH_MUTE]);
   add('--mutate-absent-map-is-empty', auditPairs, [ABSENT_MAP_FIX, ABSENT_MAP_TRUSTED]);
   add('--mutate-ai-opens-expanded', auditPairs, [AI_OPEN_FIX, AI_OPEN_EXPANDED]);
-  add('--mutate-ai-no-auto-open', auditPairs, [AI_AUTO_FIX, AI_AUTO_OFF]);
   add('--mutate-ai-hides-the-count', auditPairs, [AI_COUNT_FIX, AI_COUNT_HIDDEN]);
+  add('--mutate-budget-as-weather', auditPairs, [BUDGET_STATUS_FIX, BUDGET_STATUS_AS_WEATHER]);
+  add('--mutate-head-failed-as-none', auditPairs, [HEAD_FAILED_FIX, HEAD_FAILED_BLIND]);
 
   add('--mutate-uid-includes-title', identPairs, [UID_PLAIN_FIX, UID_PLAIN_TITLED]);
   add('--mutate-session-write-off', identPairs, [SESSION_WRITE_FIX, SESSION_WRITE_OFF]);
@@ -687,7 +713,16 @@ const bundleFast = await bundleWith([...mutations(), fastBudget], 'fast');
 
 // THE BUILT ADMIN CSS. Without it no tailwind class exists and every measurement below is a
 // measurement of bare html.
-const cssName = readdirSync(resolve(REPO, 'dist/assets')).find((f) => /^index-.*\.css$/.test(f));
+// ЧИТАЕМ КАТАЛОГ ЧЕРЕЗ try, А НЕ НАПРЯМУЮ. Внятное сообщение ниже было НЕДОСТИЖИМО, когда самого
+// каталога нет: `readdirSync` падает сырым ENOENT раньше проверки, и стенд, снесённый вместе с
+// `dist`, выглядел как сгнивший якорь. Диагностика пробы — тоже проба.
+let cssDir = [];
+try {
+  cssDir = readdirSync(resolve(REPO, 'dist/assets'));
+} catch {
+  dieNotRun('dist/assets is missing — this probe measures the REAL admin css; run `yarn build` first');
+}
+const cssName = cssDir.find((f) => /^index-.*\.css$/.test(f));
 if (!cssName) dieNotRun('dist/assets/index-*.css is missing — run `yarn build` first');
 const CSS = readFileSync(resolve(REPO, 'dist/assets', cssName), 'utf8');
 
@@ -899,6 +934,7 @@ async function mount({
   keepSession = false,
   fast = false,
   operations = undefined,
+  closed = false,
 }) {
   await page.goto('http://probe.local/');
   // sessionStorage OUTLIVES `goto` — that is the mechanism the F5 case measures, and the leak
@@ -918,6 +954,14 @@ async function mount({
   await page.waitForSelector('[data-probe-panel]', { timeout: 15000 });
   await page.waitForTimeout(350);
   await inject();
+  // БЛОК ТЕПЕРЬ ЗАКРЫТ ПРИ МОНТИРОВАНИИ, и это состояние проверяет ОДИН случай (22). Всем
+  // остальным нужен отчёт на экране, а не складка: раскрытие здесь — часть постановки стенда, а не
+  // проверяемое поведение. `closed: true` оставляет блок как есть — ровно для случая 22.
+  if (!closed) await openAuditBlock();
+  // РАСКРЫТИЕ БЛОКА — ЧАСТЬ ПОСТАНОВКИ, А НЕ НАЖАТИЕ ЧЕЛОВЕКА. Счётчик кликов сторожит утверждения
+  // вида «это видно, ничего не нажимая», и они по-прежнему верны: речь о том, что внутри отчёта
+  // нет ВТОРОЙ складки. Не обнулив его здесь, стенд краснел бы сам на себя.
+  clicks = 0;
 }
 
 const panelText = () =>
@@ -991,31 +1035,48 @@ const clickHit = async () => {
  * reporting «the finding is not on screen» about a component that is working — the same shape as
  * the in-flight mutation that first passed green because its label had changed underneath.
  */
-const ensureAiOpen = async () => {
-  const picked = await page.evaluate(() => {
+/**
+ * Раскрывает блок аудита его собственным органом — шапкой аккордеона.
+ *
+ * ЭТО ЕДИНСТВЕННЫЙ `aria-expanded` НА ПАНЕЛИ, поэтому селектор не может случайно поймать чип:
+ * чипы-переключатели носят `aria-pressed`, а не `aria-expanded`. Возвращает, что именно случилось,
+ * чтобы вызывающий мог отличить «нажал» от «органа нет вовсе» — молчаливый no-op оставил бы
+ * каждый следующий случай измерять пустоту и рапортовать «находки нет на экране» про работающий
+ * компонент.
+ */
+const auditHeadState = () =>
+  page.evaluate(() => {
+    const root = document.querySelector('[data-probe-panel]');
+    const head = root && root.querySelector('span[role="button"][aria-expanded]');
+    return head ? head.getAttribute('aria-expanded') : null;
+  });
+
+const openAuditBlock = async () => {
+  const what = await page.evaluate(() => {
     document.querySelectorAll('[data-probe-hit]').forEach((n) => n.removeAttribute('data-probe-hit'));
     const root = document.querySelector('[data-probe-panel]');
-    if (!root) return false;
-    const el = window.leaves(root).find((n) => /^show \d+ finding/.test(window.norm2(n.textContent)));
-    if (!el) return false;
-    el.setAttribute('data-probe-hit', '');
-    return true;
+    if (!root) return 'no panel';
+    const head = root.querySelector('span[role="button"][aria-expanded]');
+    if (!head) return 'no header';
+    if (head.getAttribute('aria-expanded') === 'true') return 'already open';
+    head.setAttribute('data-probe-hit', '');
+    return 'clicked';
   });
-  if (picked) await clickHit();
+  if (what === 'clicked') await clickHit();
+  return what;
 };
 
-const openAiReview = async () => {
-  const picked = await page.evaluate(() => {
+const toggleAuditBlock = async () => {
+  const ok = await page.evaluate(() => {
     document.querySelectorAll('[data-probe-hit]').forEach((n) => n.removeAttribute('data-probe-hit'));
     const root = document.querySelector('[data-probe-panel]');
-    if (!root) return false;
-    const el = window.leaves(root).find((n) => /^show \d+ finding/.test(window.norm2(n.textContent)));
-    if (!el) return false;
-    el.setAttribute('data-probe-hit', '');
+    const head = root && root.querySelector('span[role="button"][aria-expanded]');
+    if (!head) return false;
+    head.setAttribute('data-probe-hit', '');
     return true;
   });
-  ck(picked, 'THE STAND: the ai block offered its «show N findings» control');
-  if (picked) await clickHit();
+  if (ok) await clickHit();
+  return ok;
 };
 
 const gone = () => page.evaluate(() => window.__audit.gone());
@@ -1097,8 +1158,11 @@ ck(
 );
 
 // ═══ 2. not checked, visible, without a click ══════════════════════════════════════════════════
-head('2. «not checked this run» is visible WITHOUT any click');
-ck(clicks === 0, 'nothing has been clicked yet on this mount', `clicks=${clicks}`);
+// СЧЁТЧИК ОБНУЛЁН ПОСЛЕ ПОСТАНОВКИ, и утверждение сузилось ровно на это: раскрыть сам блок теперь
+// нужно (он аккордеон, как соседний «generate operations»), а ВНУТРИ отчёта второй складки нет.
+// «Не проверено» — не находка, и именно поэтому его прячут первым; здесь оно не спрятано.
+head('2. «not checked this run» is visible without a click INSIDE the report');
+ck(clicks === 0, 'nothing has been clicked inside the report on this mount', `clicks=${clicks}`);
 const nc = await page.evaluate((lines) => {
   const root = document.querySelector('[data-probe-panel]');
   return lines.map((ln) => {
@@ -1482,7 +1546,6 @@ await mount({ stub: AI_ON({ mode: 'hang' }) });
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const t = await panelText();
   ck(
     t.includes('reviewing 48 operations') && t.includes('~30–60 s'),
@@ -1523,7 +1586,6 @@ await inject();
 {
   // The same code with the constant cut to 250 ms — the real AbortController, the real race.
   await pressAnalyze();
-  await ensureAiOpen();
   await page.waitForTimeout(700);
   await inject();
   const t = await panelText();
@@ -1546,7 +1608,6 @@ await mount({ stub: AI_ON({ mode: 'error' }) });
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const t = await panelText();
   ck(t.includes('refused'), 'a refused run carries the SERVER’s own words to the screen', t.slice(-200));
   ck(
@@ -1588,7 +1649,6 @@ await mount({ stub: AI_ON({ mode: 'ok', response: analyzeRun({ droppedBadRef: 3,
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const ai = await aiText();
   ck(
     ai.includes('5 findings dropped') && ai.includes('3 whose anchors') && ai.includes('2 contradicting'),
@@ -1608,7 +1668,6 @@ await mount({
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const ai = await aiText();
   ck(ai.includes(norm(MODEL_SLUG)), 'model_unavailable NAMES THE SLUG', ai.slice(0, 260));
   ck(
@@ -1636,7 +1695,6 @@ await mount({
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const ai = await aiText();
   ck(
     ai.includes('not an all-clear'),
@@ -1655,11 +1713,42 @@ await mount({ stub: AI_ON({ mode: 'ok', response: analyzeRun({ findings: [], aiS
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const ai = await aiText();
   ck(ai.includes('retry'), 'failed IS weather, and offers a retry', ai.slice(0, 240));
   const rerun = await anchor('re-run (ai)');
   ck(rerun.n === 1 && rerun.ariaDisabled !== 'true', 'and the control is live to press again', JSON.stringify(rerun));
+}
+
+// budget_exhausted — THE ONE THAT REACHED PRODUCTION WEARING THE WRONG COAT. The first live run on
+// prod spent the whole 2500-token cap on reasoning, returned nothing, and the panel said «this one
+// is weather: retry» — an invitation to spend the same money again on a fault that is perfectly
+// deterministic. It has to read like model_unavailable (a setting is wrong) and NOT like failed.
+await mount({
+  stub: AI_ON({ mode: 'ok', response: analyzeRun({ findings: [], aiStatus: 'budget_exhausted' }) }),
+});
+await inject();
+{
+  await pressAnalyze();
+  const ai = await aiText();
+  ck(ai.includes(norm(MODEL_SLUG)), 'budget_exhausted NAMES THE SLUG', ai.slice(0, 300));
+  ck(
+    ai.includes('configuration fault'),
+    'and calls it a configuration fault, in the same words as a dead slug',
+    ai.slice(0, 300),
+  );
+  // `\bretry\b`, НЕ подстрока: собственное честное предложение говорит «retrying costs the same
+  // money», и наивная проверка `': retry'` ловила ровно его — «moment: retry|ing». Запрещено
+  // ПРЕДЛОЖЕНИЕ повторить, а не слово с этим корнем.
+  ck(
+    !ai.includes('this one is weather') && !/\bretry\b/.test(ai) && !ai.includes('try again later'),
+    'AND NEVER OFFERS A RETRY — the next press ends the same way, at the same price',
+    ai.slice(0, 300),
+  );
+  ck(
+    !ai.includes('the model found nothing to report'),
+    'nor does it read as a clean card — the model did not report nothing, it reported nothing at all',
+    ai.slice(0, 300),
+  );
 }
 
 // ═══ 14. grouping ══════════════════════════════════════════════════════════════════════════════
@@ -1668,7 +1757,6 @@ await mount({ stub: AI_ON() });
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const titlesIn = async () =>
     page.evaluate(
       (wanted) => {
@@ -1742,7 +1830,6 @@ await mount({ stub: AI_ON() });
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   const before = (await issues()).length;
   // The AI block's filers come after the machine section's four.
   const total = await page.evaluate(() => window.findLeaf('file as issue').length);
@@ -1839,7 +1926,6 @@ await mount({ stub: AI_ON() });
 await inject();
 {
   await pressAnalyze();
-  await ensureAiOpen();
   ck(!(await aiText()).includes('re-run:'), 'a FIRST run shows no delta — everything is trivially new');
 
   // Re-run: the same two defects REPHRASED, plus one new one.
@@ -1847,7 +1933,6 @@ await inject();
     window.__auditStub.analyze = { mode: 'ok', response: r };
   }, analyzeRun({ findings: MODEL_FINDINGS_RERUN }));
   await pressAnalyze();
-  await ensureAiOpen();
   const ai = await aiText();
   ck(
     ai.includes('re-run: 1 new · 2 still open · 0 dismissed'),
@@ -1873,7 +1958,6 @@ await inject();
 
   // F5. Same tab, same session — the run must come back WITHOUT a second call.
   await mount({ stub: AI_ON(), keepSession: true });
-  await openAiReview();
   await inject();
   const afterReload = await aiText();
   const analyzeCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
@@ -1915,7 +1999,6 @@ const AI_MOVED = {
 await mount({ stub: AI_ON() });
 {
   await pressAnalyze();
-  await ensureAiOpen();
   ck(
     (await staleNotes()).length === 0,
     'a run whose fingerprints all match says NOTHING about staleness',
@@ -1940,7 +2023,6 @@ await mount({ stub: AI_ON() });
 
 // The same session, the card moved underneath it.
 await mount({ stub: AI_MOVED, keepSession: true });
-await openAiReview();
 {
   const notes = await staleNotes();
   ck(notes.length === 1, 'EXACTLY ONE finding is marked stale — not the block, not the run', JSON.stringify(notes));
@@ -2029,7 +2111,6 @@ await mount({
   },
   keepSession: true,
 });
-await openAiReview();
 {
   ck(
     (await page.evaluate(() => window.findLeaf('op #300 — not found; re-run the analysis').length)) === 0,
@@ -2060,7 +2141,6 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
 
   await mount({ stub: AI_FORM });
   await pressAnalyze();
-  await ensureAiOpen();
 
   // `dirty: true` IS A STAND ARTEFACT AND IS SPELLED OUT AS ONE. In the product an operation field
   // is a registered input, so typing in it dirties the form by itself; a `setValue` into an array
@@ -2068,7 +2148,6 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
   // edit to an unrelated field. That is also the sharper test: the note must follow the HASH, and
   // here the dirty flag is true for a reason that has nothing to do with the step.
   await mount({ stub: AI_FORM, keepSession: true, dirty: true, operations: [STEP_200] });
-  await openAiReview();
   // THE STAND FIRST. Both halves of this case read «no note» when the plant silently did not take,
   // and would then pass as a pair while measuring nothing at all.
   const planted = await page.evaluate(() => ({
@@ -2094,7 +2173,6 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
     dirty: true,
     operations: [{ ...STEP_200, inputKeys: [...STEP_200.inputKeys].reverse() }],
   });
-  await openAiReview();
   const swapped = await staleNotes();
   ck(
     swapped.length === 1 && (swapped[0] ?? '').includes('op #200 has unsaved edits since the run'),
@@ -2115,7 +2193,6 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
     dirty: false,
     operations: [{ ...STEP_200, inputKeys: [...STEP_200.inputKeys].reverse() }],
   });
-  await openAiReview();
   const pristinePlant = await page.evaluate(() => ({
     ops: window.__audit.ops(),
     dirty: window.__audit.isDirty(),
@@ -2201,83 +2278,107 @@ head('21. the fingerprint port — the nine canonical vectors of fingerprint_tes
   );
 }
 
-// ═══ 22. THE AI BLOCK OPENS CLOSED ════════════════════════════════════════════════════════════
-head('22. the ai block opens closed — but a closed block never reads as a clean card');
+// ═══ 22. THE WHOLE BLOCK IS AN ACCORDION, CLOSED ON ARRIVAL ═══════════════════════════════════
+head('22. the audit block arrives closed — and closed never reads as a clean card');
 {
-  // A run that finished in THIS interaction opens itself: a button you waited forty seconds for
-  // and then saw nothing appear reads as broken.
+  // Prime a real run into the session with the block open, then come back to the tab: THAT is the
+  // state this case is about. Every other case mounts with the block already opened by the stand,
+  // because they are about the report, not about the fold.
   await mount({ stub: AI_ON() });
   await pressAnalyze();
-  const afterRun = await page.evaluate(() => window.aiText());
+  const whileOpen = await panelText();
   ck(
-    afterRun.includes(norm(M_MISSING.title)),
-    'a run finished right now shows its findings without being asked',
-    afterRun.slice(0, 120),
-  );
-  ck(
-    (await page.evaluate(() => window.findLeaf('hide').length)) === 1,
-    'and the control offers to hide them',
+    whileOpen.includes(norm(M_MISSING.title)),
+    'THE STAND: with the block open the report is on screen at all',
+    whileOpen.slice(0, 120),
   );
 
-  // F5 — the same run, restored from the session. THIS is the state that opens closed.
-  await mount({ stub: AI_ON(), keepSession: true });
-  const restored = await page.evaluate(() => window.aiText());
+  await mount({ stub: AI_ON(), keepSession: true, closed: true });
+  ck((await auditHeadState()) === 'false', 'the block arrives CLOSED, and says so to assistive tech');
+
+  const closed = await panelText();
   ck(
-    !restored.includes(norm(M_MISSING.title)) && !restored.includes(norm(M_METHOD.title)),
-    'a run restored from the session renders CLOSED — no finding body on screen',
-    restored.slice(0, 160),
+    !closed.includes(norm(M_MISSING.title)) && !closed.includes(norm(M_METHOD.title)),
+    'no finding body on screen while closed',
+    closed.slice(0, 160),
   );
-  // THE HALF THAT MATTERS MORE. A collapsed block that hid «1 blocker» would read exactly like a
-  // card with nothing wrong on it — the silence this whole panel exists to refuse. The count, the
-  // model stamp and any degraded status stay on screen at all times.
+  // THE HALF THAT MATTERS MORE. A fold that hid «2 findings» would make a card with a blocker on it
+  // look finished — the silence this whole panel exists to refuse. The header counts BOTH halves.
   ck(
-    restored.includes('1 blocker') && restored.includes('1 error'),
-    'THE COUNT STAYS VISIBLE WHILE CLOSED — «closed» must never be readable as «clean»',
-    restored.slice(0, 160),
-  );
-  ck(
-    restored.includes(norm(MODEL_SLUG)),
-    'and so does the model stamp — a closed report still says who wrote it',
-    restored.slice(0, 160),
+    /\d+ findings?/.test(closed),
+    'THE HEADER COUNTS THE MACHINE FINDINGS WHILE CLOSED — «closed» must never read as «clean»',
+    closed.slice(0, 160),
   );
   ck(
-    (await page.evaluate(() => window.findLeaf('show 3 findings').length)) === 1,
-    'the control names how many are behind it, not just «show»',
+    closed.includes('ai: '),
+    'and it counts the model findings too — a run that happened is not a run that is hidden',
+    closed.slice(0, 160),
+  );
+  ck(
+    !closed.includes('machine: clean'),
+    'a card WITH findings must not carry the clean wording',
+    closed.slice(0, 160),
   );
 
-  // ЧЕСТНАЯ ГРАНИЦА СТЕНДА. Всё, что ниже, — про СВОРАЧИВАНИЕ восстановленного прогона, и оно
-  // проверяемо только если прогон действительно пережил перезагрузку. Когда сессия не пишется
-  // (это ровно то, что делает --mutate-session-write-off), восстанавливать нечего: `pick('hide')`
-  // не найдёт органа, а `clickHit()` провисит тридцать секунд и оборвёт ВЕСЬ прогон — то есть
-  // мутация, обязанная дать чистый красный, дала бы «не запускалось», а это НЕ вердикт. Поэтому
-  // отсутствие восстановленного прогона здесь — один честный FAIL стенда, а не зависание; сама
-  // потеря сессии краснеет в своём случае, где она и живёт.
-  const sessionHeld = restored.includes(norm(MODEL_SLUG));
+  ck((await openAuditBlock()) === 'clicked', 'THE STAND: the header itself is the control');
+  const reopened = await panelText();
+  ck(reopened.includes(norm(M_MISSING.title)), 'pressing it opens the report', reopened.slice(0, 120));
+  ck((await auditHeadState()) === 'true', 'and the expanded state is announced');
+
+  await toggleAuditBlock();
+  const closedAgain = await panelText();
   ck(
-    sessionHeld,
-    'THE STAND: the run survived the reload — without it the fold below tests nothing',
-    restored.slice(0, 160),
+    !closedAgain.includes(norm(M_MISSING.title)),
+    'pressing it again closes the report',
+    closedAgain.slice(0, 120),
   );
-  if (sessionHeld) {
-    // Opening and closing again, by the control.
-    await openAiReview();
-    const opened = await page.evaluate(() => window.aiText());
-    ck(opened.includes(norm(M_MISSING.title)), 'pressing it opens the body', opened.slice(0, 120));
-    await pick('hide', 0);
-    await clickHit();
-    const closedAgain = await page.evaluate(() => window.aiText());
-    ck(
-      !closedAgain.includes(norm(M_MISSING.title)),
-      'and pressing it again closes the body',
-      closedAgain.slice(0, 120),
-    );
-    const foldCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
-    ck(
-      foldCalls === 0,
-      'OPENING AND CLOSING SPENDS NOTHING — it is a fold, not a re-run',
-      `analyze calls on this mount = ${foldCalls}`,
-    );
-  }
+
+  const foldCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
+  ck(
+    foldCalls === 0,
+    'OPENING AND CLOSING SPENDS NOTHING — it is a fold, not a re-run',
+    `analyze calls on this mount = ${foldCalls}`,
+  );
+
+  // ПРОВАЛИВШИЙСЯ ПРОГОН МОДЕЛИ — НЕ ПУСТОЙ. Тело эту границу держит («not an all-clear»), и
+  // шапка не имеет права снимать её строкой выше: «ai: none» под отказом читается как «модель
+  // проверила и ничего не нашла». Это тот же дефект, что и «closed = clean», только этажом выше.
+  await mount({
+    stub: AI_ON({ mode: 'ok', response: analyzeRun({ findings: [], aiStatus: 'budget_exhausted' }) }),
+  });
+  await pressAnalyze();
+  await mount({
+    stub: AI_ON({ mode: 'ok', response: analyzeRun({ findings: [], aiStatus: 'budget_exhausted' }) }),
+    keepSession: true,
+    closed: true,
+  });
+  const failedHead = await panelText();
+  ck(
+    failedHead.includes('ai: no report'),
+    'a FAILED model run says «no report» in the header',
+    failedHead.slice(0, 160),
+  );
+  ck(
+    !failedHead.includes('ai: none'),
+    'and never «ai: none» — that is the sentence for a model that answered and found nothing',
+    failedHead.slice(0, 160),
+  );
+
+  // AND THE FAILED AUDIT IS NOT A CLEAN ONE, IN THE HEADER EITHER. This is the same distinction the
+  // body already draws (case: «the error state does NOT read as clean») — a header that answered
+  // «machine: clean» over a report that never arrived would undo it one line higher.
+  await mount({ stub: BROKEN, closed: true });
+  const brokenHead = await panelText();
+  ck(
+    brokenHead.includes('report did not arrive'),
+    'a failed audit says so in the header',
+    brokenHead.slice(0, 160),
+  );
+  ck(
+    !brokenHead.includes('clean') && !/\d+ findings?/.test(brokenHead),
+    'and never as «clean» or as a count',
+    brokenHead.slice(0, 160),
+  );
 }
 
 // ─── VERDICT ───────────────────────────────────────────────────────────────────────────────────
