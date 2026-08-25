@@ -52,6 +52,8 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         limit,
         offset: pageParam,
         orderFactor: 'ORDER_FACTOR_DESC',
+        // фасет коллекции подключит ветка листа тех-карт; здесь только проводка типа
+        collection: undefined,
         stage: filter.stage ?? 'TECH_CARD_STAGE_UNKNOWN',
         gender: filter.gender ?? 'GENDER_ENUM_UNKNOWN',
         brand: filter.brand ?? '',

@@ -141,15 +141,21 @@ function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
  * что сохранилось. Отсев делается по ТОМУ ЖЕ списку вложений, который уезжает в этом же запросе.
  */
 export function taskInsertToWire(t: TaskInsert): common_TaskInsert {
-  // СПИСОК ИСПОЛНИТЕЛЕЙ СВОДИТСЯ В ОДИНОЧНОЕ ПОЛЕ ПРОВОДА — и `assignees` из объекта УХОДИТ:
-  // на проводе такого поля ещё нет, и отправлять его значило бы врать себе о том, что сохранится.
+  // СПИСОК ИСПОЛНИТЕЛЕЙ УХОДИТ НА ПРОВОД КАК СПИСОК, а одиночное поле едет рядом алиасом.
   //
-  // Одиночное поле здесь ВЫВОДИТСЯ, а не проносится: `t.assignee` мог остаться от прошлого
+  // Одиночное поле ВЫВОДИТСЯ из списка, а не проносится: `t.assignee` мог остаться от прошлого
   // чтения (форма правит только список), и пронесённое значение записывало бы старого
-  // исполнителя поверх нового. Ровно поэтому оно и не читается.
+  // исполнителя поверх нового. Ровно поэтому оно и не читается — деструктуризация ниже
+  // выбрасывает его под именем `_derived`.
   const { assignees, assignee: _derived, ...rest } = t;
   return {
     ...rest,
+    // ПОЛЕ ПРОВОДА ПОЯВИЛОСЬ (зеркало de1767f), и список уходит НАСТОЯЩИМ.
+    assignees,
+    // Одиночное поле уезжает РЯДОМ, а не вместо: у сервера оно deprecated-алиас, который
+    // читает СТАРАЯ вкладка админки, пока она открыта. Сервер предпочитает непустой список
+    // и алиас тогда игнорирует (`taskAssigneesFromPb`, internal/dto/task.go:227), так что
+    // расхождения между двумя полями быть не может — второе выведено из первого.
     assignee: assignees[0] ?? '',
     mediaAnnotations: (t.mediaAnnotations ?? [])
       .filter((m) => m.mediaId > 0 && t.mediaIds.includes(m.mediaId))
@@ -248,6 +254,8 @@ export const tasksService: TasksService = {
         board: filter.board,
         status: filter.status,
         assignee: filter.assignee,
+        // сужение по родителю подключит очередь Б (сабтаски); здесь только проводка типа
+        parentTaskId: undefined,
         limit: TASKS_PAGE_LIMIT,
         offset: undefined,
         orderFactor: undefined,
@@ -278,7 +286,13 @@ export const tasksService: TasksService = {
 
   addTask: (content, board, status) =>
     adminService
-      .AddTask({ task: taskInsertToWire(content), board, status })
+      .AddTask({
+        task: taskInsertToWire(content),
+        board,
+        status,
+        // «создать сабтаску» — один вызов, а не AddTask + SetTaskParent: подключит очередь Б
+        parentTaskId: undefined,
+      })
       .then((r) => ({ id: r.id ?? 0 })),
 
   updateTask: (id, content) =>
