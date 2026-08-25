@@ -22,6 +22,7 @@ import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
   applyFilters,
+  assigneePiles,
   emptyFilters,
   filtersActive,
   FiltersBar,
@@ -138,6 +139,13 @@ export function Tasks() {
     [tasks, filters, account?.username],
   );
 
+  /**
+   * ЛЮДИ РЯДА СЧИТАЮТСЯ ПО НЕСУЖЕННЫМ ЗАДАЧАМ ЭТОЙ ДОСКИ. Не по `visible`: иначе клик по лицу
+   * обнулил бы соседние числа и ряд отвечал бы на вопрос о самом себе. Архивные входят в счёт
+   * ровно тогда, когда зажжён чип archived, — потому что именно тогда они и лежат в `tasks`.
+   */
+  const people = useMemo(() => assigneePiles(tasks), [tasks]);
+
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);
   const createTask = useCreateTask();
@@ -216,6 +224,7 @@ export function Tasks() {
               filters={filters}
               onChange={setFilters}
               showMine={!!account?.username}
+              people={people}
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived((v) => !v)}
               onClear={clearFilters}
