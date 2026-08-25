@@ -420,12 +420,7 @@ function mediaHref(url: string): string {
  * (`markdown-view.tsx`, `galleryLines`). Отсюда добивка переводами строк по краям: без неё
  * снимки прилипли бы к соседнему слову и абзац перестал бы быть «только снимки».
  */
-export function mediaEdit(
-  text: string,
-  start: number,
-  end: number,
-  items: MediaInsert[],
-): Edit {
+export function mediaEdit(text: string, start: number, end: number, items: MediaInsert[]): Edit {
   const [s, e] = trimEdges(text, start, end);
   // Пустой список — не правка. Возвращать что-то «на всякий случай» значило бы тронуть текст
   // в ответ на жест, которого не было.

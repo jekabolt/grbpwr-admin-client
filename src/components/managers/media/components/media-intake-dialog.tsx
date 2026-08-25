@@ -116,7 +116,9 @@ function Tile({
       >
         <Media src={thumbSrc} alt={item.name} type={item.type} aspectRatio='auto' fit='cover' />
 
-        {pill && <div className='absolute inset-x-0 bottom-0 flex justify-center pb-0.5'>{pill}</div>}
+        {pill && (
+          <div className='absolute inset-x-0 bottom-0 flex justify-center pb-0.5'>{pill}</div>
+        )}
 
         {/* КНОПКИ ПОЯВЛЯЮТСЯ ПО НАВЕДЕНИЮ — но не ТОЛЬКО по нему. Чисто-ховерная кнопка
             недостижима с клавиатуры и на тачпаде без мыши: там наведения не бывает вовсе.
@@ -146,9 +148,7 @@ function Tile({
             variant='secondary'
             className='border border-textColor'
             aria-label={`remove ${item.name} from the queue`}
-            title={
-              item.status === 'sending' ? 'already uploading, no way to cancel' : 'remove'
-            }
+            title={item.status === 'sending' ? 'already uploading, no way to cancel' : 'remove'}
             disabled={item.status === 'sending'}
             onClick={onDrop}
           >
@@ -157,7 +157,12 @@ function Tile({
         </div>
       </div>
 
-      <Text size='micro' variant='label' component='p' className='mt-0.5 w-24 truncate leading-tight'>
+      <Text
+        size='micro'
+        variant='label'
+        component='p'
+        className='mt-0.5 w-24 truncate leading-tight'
+      >
         {item.croppedUrl ? 'cropped · ' : ''}
         {formatBytes(item.size)}
       </Text>
@@ -258,9 +263,7 @@ export function MediaIntakeDialog({
       .filter(({ item }) => item.status === 'done');
     if (!done.length) return;
 
-    const media = done
-      .map(({ item }) => item.media)
-      .filter((m): m is common_MediaFull => !!m);
+    const media = done.map(({ item }) => item.media).filter((m): m is common_MediaFull => !!m);
     const doneFiles = new Set(done.map(({ index }) => pendingFiles[index]));
 
     engine.removeFile(done.map(({ index }) => index));
