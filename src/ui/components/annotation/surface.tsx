@@ -671,17 +671,22 @@ export function AnnotationSurface({
       const key = known ? inkKeyRef.current : null;
       if (key === null) {
         // Дописывать умеет не всякий владелец: без `onEditPoints` сессии не выйдет, и каждый штрих
-        // остаётся собственной выноской — прежнее поведение, а не молчаливая потеря.
-        adoptRef.current = live.current.onEditPoints
-          ? new Set(live.current.callouts.map((c) => c.key))
-          : null;
+        // остаётся собственной выноской — прежнее поведение, а не молчаливая потеря. Буфер при
+        // этом сбрасывается сразу: иначе призрачный след рисовался бы поверх уже поставленной
+        // выноски, а строка «done · N strokes» обещала бы сессию, которой не будет.
+        if (!live.current.onEditPoints) {
+          finishPlacing('ink', strokes[strokes.length - 1] ?? joined);
+          setInkSession([]);
+          return;
+        }
+        adoptRef.current = new Set(live.current.callouts.map((c) => c.key));
         finishPlacing('ink', joined);
       } else {
         mutate(() => live.current.onEditPoints?.(key, joined));
       }
       if (strokes.length >= inkSessionMaxStrokes(d.points[1])) endInkSession();
     },
-    [px, unpx, shown, finishPlacing, mutate, endInkSession],
+    [px, unpx, shown, finishPlacing, mutate, endInkSession, setInkSession],
   );
 
   /**
