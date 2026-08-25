@@ -35,18 +35,24 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     // валидации. Потерять прокинутый ref = молча сломать «перейти к ошибке» во всех формах
     // админки, и ни одна проверка типов этого не увидит.
     //
-    // Держим прокинутый ref в ЯЩИКЕ, а наружу отдаём НЕИЗМЕННЫЙ колбэк: RHF пересоздаёт свой
-    // `field.ref` каждый рендер, и колбэк с зависимостью от `ref` заставлял бы React на каждом
-    // рендере звать старый ref с null и новый с элементом — то есть дёргать регистрацию поля
-    // впустую. DOM-узел при этом один и тот же, поэтому одного вызова на монтаже достаточно.
-    const forwardedRef = useRef(ref);
-    forwardedRef.current = ref;
-    const setRef = useCallback((el: HTMLTextAreaElement | null) => {
-      innerRef.current = el;
-      const outer = forwardedRef.current;
-      if (typeof outer === 'function') outer(el);
-      else if (outer) (outer as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
-    }, []);
+    // ЗАВИСИМОСТЬ ОТ `ref` ЗДЕСЬ НЕСУЩАЯ, а не забытая уборка. У RHF 7.62 `field.ref` — это
+    // useCallback с зависимостью [control._fields, name]: между ресетами он СТАБИЛЕН, поэтому
+    // «оптимизация» в виде неизменного колбэка ничего не экономила, а ломала единственный момент,
+    // когда пере-прикрепление ОБЯЗАНО случиться. `form.reset()` обнуляет `control._fields`
+    // (react-hook-form/dist/index.esm.mjs), поле пере-регистрируется рефом-ЗАГЛУШКОЙ `{ name }`
+    // без `.focus`, и вернуть живой реф может только новый `field.ref`, прикреплённый к элементу
+    // заново. `_focusInput` молча пропускает заглушку — то есть штатный shouldFocusError у
+    // textarea умирал бы после ПЕРВОГО удачного сейва (карточка делает form.reset(settled.values))
+    // и во всех остальных формах админки до перемонтирования экрана.
+    // Замерено пробой: цитата Л («после reset фокус пришёл») краснеет ровно на неизменном колбэке.
+    const setRef = useCallback(
+      (el: HTMLTextAreaElement | null) => {
+        innerRef.current = el;
+        if (typeof ref === 'function') ref(el);
+        else if (ref) (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+      },
+      [ref],
+    );
 
     const resize = useCallback(() => {
       const el = innerRef.current;
@@ -73,12 +79,30 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
       // есть пустое поле мерялось бы «в два с половиной ряда», и запас в 3 строки уезжал бы вверх
       // ровно на высоту пола. Замерено: пустое поле выходило 98px вместо 80, а с min-h-24 — 150.
       // На КОНЕЧНУЮ высоту пол по-прежнему действует: он остаётся полом, каким и задуман.
+      //
+      // ПРОКРУТКА СОХРАНЯЕТСЯ ВОКРУГ ЗАМЕРА. Схлопывание в ноль укорачивает документ на высоту
+      // поля (до 480px), и если скроллер стоит в пределах этой высоты от низа, браузер ПОДРЕЗАЕТ
+      // его scrollTop прямо на форс-лейауте — а возврат высоты подрезку не отменяет. Итог был бы
+      // «страница дёргается вверх на каждом нажатии» у любого длинного экрана. Записываем только
+      // тех предков, у кого прокрутка ненулевая: подрезать нечего там, где scrollTop и так 0, и
+      // это дешевле любого getComputedStyle на каждый символ.
+      const scrollers: Array<[Element, number]> = [];
+      for (let n: Element | null = el.parentElement; n; n = n.parentElement) {
+        if (n.scrollTop > 0) scrollers.push([n, n.scrollTop]);
+      }
+      const docScroller = document.scrollingElement;
+      if (docScroller && docScroller.scrollTop > 0 && !scrollers.some(([n]) => n === docScroller)) {
+        scrollers.push([docScroller, docScroller.scrollTop]);
+      }
       const prevMinHeight = el.style.minHeight;
       el.style.minHeight = '0px';
       el.style.height = '0px';
       const content = el.scrollHeight + borders;
       el.style.height = `${Math.min(content + SPARE_LINES * lh, MAX_AUTO_HEIGHT)}px`;
       el.style.minHeight = prevMinHeight;
+      for (const [n, top] of scrollers) {
+        if (n.scrollTop !== top) n.scrollTop = top;
+      }
     }, [autoGrow]);
 
     // Контролируемое значение (RHF, form.reset, восстановление черновика) меняется мимо жестов

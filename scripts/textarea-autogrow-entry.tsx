@@ -35,6 +35,13 @@ type Probe = {
   mount: (concept: string, hiddenText: string) => void;
   reveal: () => void;
   submit: () => void;
+  /**
+   * Ровно то, что делает карточка после УДАЧНОГО сейва: `form.reset(settled.values)`
+   * (`tech-card/components/index.tsx`). Это единственный момент, когда RHF пересоздаёт `field.ref`:
+   * reset обнуляет `control._fields`, и поле пере-регистрируется рефом-заглушкой `{ name }` без
+   * `.focus`. Живой реф возвращается ТОЛЬКО повторным прикреплением нового `field.ref` к элементу.
+   */
+  reset: (value: string) => void;
   /** Кто в фокусе — id элемента. */
   focused: () => string;
 };
@@ -61,9 +68,13 @@ function Harness({ concept, hiddenText }: { concept: string; hiddenText: string 
       () => {},
     )();
   };
+  probe.reset = (value) => form.reset({ concept: value, minh: '', hidden: hiddenText });
   return (
     <FormProvider {...form}>
       <form className='w-[600px] p-4'>
+        {/* Длинная страница: без прокрутки документа проверять «дёргается ли она при наборе»
+            не на чем — подрезать браузеру нечего. */}
+        <div data-probe='spacer' style={{ height: 2000 }} />
         <TextareaField name='concept' label='concept' rows={3} maxLength={2000} />
         {/* Голое поле, как его ставят в details-editor / sketch-tab: без RHF, неконтролируемое. */}
         <Textarea name='bare' rows={2} defaultValue='' />
@@ -71,6 +82,14 @@ function Harness({ concept, hiddenText }: { concept: string; hiddenText: string 
         <TextareaField name='minh' label='minh' rows={2} className='min-h-24' />
         <div hidden={hidden} data-probe='hidden-box'>
           <TextareaField name='hidden' label='hidden' rows={2} />
+        </div>
+        {/* Поле ВНУТРИ СВОЕГО СКРОЛЛЕРА, у нижнего края. Ровно та конфигурация, в которой замерено,
+            что Chromium подрезает scrollTop на схлопывании и НЕ возвращает его сам: у документа
+            подрезку обычно чинит scroll anchoring, у вложенного скроллера — нет. */}
+        <div data-probe='scroll-box' style={{ height: 300, overflowY: 'auto' }}>
+          <div style={{ height: 1200 }} />
+          <Textarea name='inbox' rows={2} defaultValue={'l1\nl2\nl3\nl4\nl5'} />
+          <div style={{ height: 40 }} />
         </div>
       </form>
     </FormProvider>

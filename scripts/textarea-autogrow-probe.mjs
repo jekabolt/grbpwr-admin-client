@@ -17,8 +17,11 @@
 //     невидимым, обязано получить высоту в момент показа.
 //
 // Запуск:  node scripts/textarea-autogrow-probe.mjs [--mutate-…]
-// Мутации: --mutate-oninput --mutate-ref --mutate-measure --mutate-cap --mutate-spare
-//          --mutate-observer
+// Мутации: --mutate-oninput --mutate-ref --mutate-stableref --mutate-measure --mutate-cap
+//          --mutate-spare --mutate-observer --mutate-scroll
+// ВНИМАНИЕ: --mutate-scroll НЕ КРАСНЕЕТ — см. цитату М, там замер и объяснение. Единственная
+// мутация набора, про которую известно, что она ничего не доказывает; оставлена намеренно, чтобы
+// следующий читатель не открыл это заново.
 //
 // playwright берётся из кэша npx (его нет в зависимостях проекта); не нашёлся — проба
 // ПРОПУСКАЕТСЯ, а не падает: отсутствие пробы не является утверждением о коде.
@@ -35,6 +38,8 @@ import { fileURLToPath } from 'node:url';
 const MUT = {
   oninput: process.argv.includes('--mutate-oninput'),
   ref: process.argv.includes('--mutate-ref'),
+  stableref: process.argv.includes('--mutate-stableref'),
+  scroll: process.argv.includes('--mutate-scroll'),
   measure: process.argv.includes('--mutate-measure'),
   cap: process.argv.includes('--mutate-cap'),
   spare: process.argv.includes('--mutate-spare'),
@@ -88,10 +93,33 @@ const dieNotRun = (why) => {
 const ONINPUT_FIX = `          resize();
           onInput?.(e);`;
 const ONINPUT_BROKEN = `          onInput?.(e);`;
-const REF_FIX = `      const outer = forwardedRef.current;
+const REF_FIX = `        if (typeof ref === 'function') ref(el);
+        else if (ref) (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;`;
+const REF_BROKEN = `        void ref;`;
+// РЕГРЕССИЯ, КОТОРУЮ ЭТА МУТАЦИЯ СТЕРЕЖЁТ НАВСЕГДА: «оптимизация» реф-мержа до неизменного
+// колбэка. На свежей форме она незаметна (field.ref у RHF стабилен между ресетами), и цитата К
+// остаётся зелёной — краснеет только цитата Л, ради которой она и написана.
+const STABLEREF_FIX = `    const setRef = useCallback(
+      (el: HTMLTextAreaElement | null) => {
+        innerRef.current = el;
+        if (typeof ref === 'function') ref(el);
+        else if (ref) (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+      },
+      [ref],
+    );`;
+const STABLEREF_BROKEN = `    const forwardedRef = useRef(ref);
+    forwardedRef.current = ref;
+    const setRef = useCallback((el: HTMLTextAreaElement | null) => {
+      innerRef.current = el;
+      const outer = forwardedRef.current;
       if (typeof outer === 'function') outer(el);
-      else if (outer) (outer as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;`;
-const REF_BROKEN = `      void forwardedRef;`;
+      else if (outer) (outer as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+    }, []);`;
+// Снятие сохранения прокрутки вокруг замера.
+const SCROLL_FIX = `      for (const [n, top] of scrollers) {
+        if (n.scrollTop !== top) n.scrollTop = top;
+      }`;
+const SCROLL_BROKEN = `      void scrollers;`;
 const MEASURE_FIX = `      el.style.height = '0px';`;
 const MEASURE_BROKEN = `      el.style.height = 'auto';`;
 const CAP_FIX = `      el.style.height = \`\${Math.min(content + SPARE_LINES * lh, MAX_AUTO_HEIGHT)}px\`;`;
@@ -120,6 +148,8 @@ const patcher = (filter, pairs, loader) => ({
 const pairs = [];
 if (MUT.oninput) pairs.push([ONINPUT_FIX, ONINPUT_BROKEN]);
 if (MUT.ref) pairs.push([REF_FIX, REF_BROKEN]);
+if (MUT.stableref) pairs.push([STABLEREF_FIX, STABLEREF_BROKEN]);
+if (MUT.scroll) pairs.push([SCROLL_FIX, SCROLL_BROKEN]);
 if (MUT.measure) pairs.push([MEASURE_FIX, MEASURE_BROKEN]);
 if (MUT.cap) pairs.push([CAP_FIX, CAP_BROKEN]);
 if (MUT.spare) pairs.push([SPARE_FIX, SPARE_BROKEN]);
@@ -361,7 +391,74 @@ head('ЦИТАТА К — слияние рефов: RHF ведёт фокус �
   await page.evaluate(() => window.__ta.submit());
   await page.waitForTimeout(300);
   const focused = await page.evaluate(() => window.__ta.focused());
-  ck(focused === 'concept', 'фокус на пустом обязательном textarea', `активен «${focused}»`);
+  ck(focused === 'concept', 'на свежесмонтированной форме фокус приходит', `активен «${focused}»`);
+}
+
+head('ЦИТАТА Л — тот же фокус ПОСЛЕ form.reset() (жизнь формы после первого удачного сейва)');
+{
+  // ПОЧЕМУ ЦИТАТЫ К МАЛО. `field.ref` у RHF 7.62 — это useCallback с зависимостью
+  // [control._fields, name]: между ресетами он СТАБИЛЕН, и на свежей форме сработает даже
+  // реф-мерж, который прикрепляет прокинутый ref один раз на монтаже. Идентичность меняется
+  // РОВНО ОДИН раз — когда reset() делает `_fields = {}` и поле пере-регистрируется заглушкой
+  // `{ name }` без `.focus`. Проверка «фокус пришёл на свежей форме» этот класс потери не видит
+  // вовсе, а карточка живёт в нём с первого же удачного сейва (form.reset(settled.values)).
+  await page.click('body');
+  await page.evaluate(() => window.__ta.reset('saved value'));
+  await page.waitForTimeout(200);
+  await page.fill('#concept', '');
+  await page.click('body');
+  await page.evaluate(() => window.__ta.submit());
+  await page.waitForTimeout(300);
+  const focused = await page.evaluate(() => window.__ta.focused());
+  ck(focused === 'concept', 'после reset фокус на ошибке всё ещё приходит', `активен «${focused || 'никто'}»`);
+}
+
+head('ЦИТАТА М — СТОРОЖ (не доказательство): прокрутка после пересчёта высоты');
+{
+  // ЧЕСТНО О СИЛЕ ЭТОЙ ПРОВЕРКИ: --mutate-scroll её НЕ КРАСНИТ, и это факт о браузере, а не о
+  // починке. Замерено здесь же, вручную, на этом самом поле внутри его скроллера:
+  //     scrollTop 1081 → (height:0, форс-лейаут) 946 → (высота возвращена) 1081
+  // то есть подрезка НАСТОЯЩАЯ, но Chromium возвращает её сам — scroll anchoring, пока смена
+  // высоты уложилась в одну задачу. На голом стенде (без React, схлопывание 400px во вложенном
+  // скроллере) возврата НЕ БЫЛО: 1620 → 1226 и так и осталось, включая следующий кадр.
+  // Поэтому сохранение прокрутки в примитиве остаётся страховкой — на движки и раскладки, где
+  // anchoring не сработает (`overflow-anchor: none`, Safari/Firefox), — а эта проверка стоит
+  // сторожем: она поймает регресс, при котором пересчёт начнёт двигать прокрутку ВИДИМО.
+  //
+  // Два жеста, которые тут не годятся, и оба были попробованы: набор в само поле (Chromium
+  // подкручивает к каретке и маскирует всё) и form.reset() с ДРУГИМИ значениями (двигает
+  // прокрутку законно — документ правда стал короче). Остаётся `input` без правки значения.
+  const box = '[data-probe="scroll-box"]';
+  await page.evaluate((sel) => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const b = document.querySelector(sel);
+    b.scrollTop = b.scrollHeight;
+  }, box);
+  await page.waitForTimeout(120);
+  const before = await page.evaluate((sel) => document.querySelector(sel).scrollTop, box);
+  ck(before > 400, 'скроллер действительно прокручен (есть что подрезать)', String(before));
+  // Высота сбивается РУКАМИ до события: иначе «высота та же» не отличает «пересчёт вернул её»
+  // от «пересчёта не было вовсе» — ровно та ложная зелень, которой эта проба избегает.
+  const hWanted = await page.evaluate(() => {
+    const el = document.getElementById('inbox');
+    const h = el.getBoundingClientRect().height;
+    el.style.height = '500px';
+    return h;
+  });
+  await page.evaluate(() =>
+    document.getElementById('inbox').dispatchEvent(new Event('input', { bubbles: true })),
+  );
+  await page.waitForTimeout(150);
+  const hAfter = await page.evaluate(
+    () => document.getElementById('inbox').getBoundingClientRect().height,
+  );
+  const after = await page.evaluate((sel) => document.querySelector(sel).scrollTop, box);
+  ck(
+    Math.abs(hAfter - hWanted) < 1,
+    'пересчёт ДЕЙСТВИТЕЛЬНО отработал (сбитая руками высота вернулась)',
+    `${hWanted.toFixed(1)} → 500 → ${hAfter.toFixed(1)}`,
+  );
+  ck(Math.abs(after - before) <= 1, 'прокрутка на месте', `${before} → ${after}`);
 }
 
 ck(pageErrors.length === 0, 'страница без исключений', pageErrors.join(' | '));
