@@ -164,7 +164,7 @@ const DEFS: KindDef[] = [
     // (см. дублированную точку в `geometry.ts`), и прежних 64 на серию не хватало.
     points: [2, 200],
     label: 'freehand',
-    hint: 'press and drag; strokes gather into one callout — Enter or “done” finishes it',
+    hint: 'press and drag; strokes keep filling the same callout — Enter or “done” starts a new one',
     grammar: 'ink',
     inPalette: true,
     dashable: true,
@@ -262,8 +262,8 @@ export function placingHint(kind: string, placed: number): string {
     // Счётчик здесь — ЧИСЛО ЗАКОНЧЕННЫХ ШТРИХОВ сессии, а не якорей: у следа якоря считает рука,
     // и «поставлено 137 точек» ничего не сообщает тому, кто рисует.
     return placed > 0
-      ? `${placed} ${placed === 1 ? 'stroke' : 'strokes'} in this callout — Enter or “done” finishes it`
-      : 'press and drag — strokes gather into one callout until you finish it';
+      ? `${placed} ${placed === 1 ? 'stroke' : 'strokes'} in this callout — Enter or “done” starts a new one`
+      : 'press and drag — strokes keep filling the same callout';
   }
   if (d.grammar === 'arc') {
     return (
