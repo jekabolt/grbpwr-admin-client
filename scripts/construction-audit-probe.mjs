@@ -104,6 +104,10 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-unsaved-ignores-hash', // 20
   '--mutate-unsaved-note-off', // 20
   '--mutate-absent-map-is-empty', // 19
+  // ── wave 4: the ai block opens closed ──
+  '--mutate-ai-opens-expanded', // 22
+  '--mutate-ai-no-auto-open', // 22
+  '--mutate-ai-hides-the-count', // 22
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN_MUTATIONS.has(a));
 if (stray) {
@@ -394,7 +398,11 @@ const STALE_NOTE_OFF = `      {resolveOp && anchoredOps.length > 0 && false && <
           runFingerprints={runFingerprints ?? {}}
           dirty={dirty}
         />}`;
-const GROUPS_FIX = `                  {modelFindings.length === 0 ? (`;
+// Якорь берётся ПОСЛЕ гейта раскрытия (`{aiOpen &&`) намеренно: баннер, вставленный ВНУТРЬ
+// свёрнутого блока, на закрытом отчёте не отрисуется вовсе, и мутация прошла бы зелёной — сторож у
+// кода, которого на экране нет.
+const GROUPS_FIX = `                  {aiOpen &&
+                    (modelFindings.length === 0 ? (`;
 const GROUPS_WITH_BANNER = `                  <div data-stale-note>
                     <CalloutBox tone='warning'>
                       <Text size='micro'>
@@ -403,7 +411,8 @@ const GROUPS_WITH_BANNER = `                  <div data-stale-note>
                       </Text>
                     </CalloutBox>
                   </div>
-                  {modelFindings.length === 0 ? (`;
+                  {aiOpen &&
+                    (modelFindings.length === 0 ? (`;
 
 // THE FORM HALF, DECIDED BY THE DIRTY FLAG INSTEAD OF BY THE HASH. This is the plausible bug: it
 // looks right on a card somebody edited and is a lie on every step they did not touch.
@@ -416,6 +425,23 @@ const UNSAVED_HASH_MUTE = `        return false && !!then && !!inForm && then !=
 
 // AN ABSENT MAP READ AS AN EMPTY ONE — the false grey that would hit a lagging backend, where every
 // anchor of every finding reads «not found» and nothing whatsoever is wrong.
+// ── 22. THE AI BLOCK OPENS CLOSED ──
+// Закрыт при монтировании, открывается сам только у прогона, заказанного в этом же взаимодействии,
+// и НИКОГДА не прячет счёт: свёрнутый блок, скрывший «1 blocker», читается как чистая карточка.
+const AI_OPEN_FIX = `  const [aiOpen, setAiOpen] = useState(false);`;
+const AI_OPEN_EXPANDED = `  const [aiOpen, setAiOpen] = useState(true);`;
+const AI_AUTO_FIX = `        setAiOpen(true);
+        const got = res.findings ?? [];`;
+const AI_AUTO_OFF = `        const got = res.findings ?? [];`;
+const AI_COUNT_FIX = `                  <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                    {modelCounts}
+                  </Text>`;
+const AI_COUNT_HIDDEN = `                  {aiOpen && (
+                    <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                      {modelCounts}
+                    </Text>
+                  )}`;
+
 const ABSENT_MAP_FIX = `  if (!now || Object.keys(now).length === 0) return 'unknown';
   const current = now[String(n)];`;
 const ABSENT_MAP_TRUSTED = `  const current = (now ?? {})[String(n)];`;
@@ -497,6 +523,9 @@ const mutations = () => {
   add('--mutate-unsaved-ignores-hash', auditPairs, [UNSAVED_HASH_FIX, UNSAVED_HASH_BLIND]);
   add('--mutate-unsaved-note-off', auditPairs, [UNSAVED_HASH_FIX, UNSAVED_HASH_MUTE]);
   add('--mutate-absent-map-is-empty', auditPairs, [ABSENT_MAP_FIX, ABSENT_MAP_TRUSTED]);
+  add('--mutate-ai-opens-expanded', auditPairs, [AI_OPEN_FIX, AI_OPEN_EXPANDED]);
+  add('--mutate-ai-no-auto-open', auditPairs, [AI_AUTO_FIX, AI_AUTO_OFF]);
+  add('--mutate-ai-hides-the-count', auditPairs, [AI_COUNT_FIX, AI_COUNT_HIDDEN]);
 
   add('--mutate-uid-includes-title', identPairs, [UID_PLAIN_FIX, UID_PLAIN_TITLED]);
   add('--mutate-session-write-off', identPairs, [SESSION_WRITE_FIX, SESSION_WRITE_OFF]);
@@ -944,6 +973,43 @@ const clickHit = async () => {
   clicks++;
   await page.locator('[data-probe-hit]').click({ force: true });
   await page.waitForTimeout(150);
+};
+
+/**
+ * OPEN THE AI BLOCK. Its body renders CLOSED on mount — a run restored from the session must not
+ * shove a hundred-and-twenty-step route off the screen — so every case that reads the body has to
+ * open it first. A run finished in THIS interaction opens itself, which is why the analyze cases
+ * need no call here.
+ *
+ * IT ASSERTS THE PRESS TOOK. A silent no-op would leave every caller measuring an empty block and
+ * reporting «the finding is not on screen» about a component that is working — the same shape as
+ * the in-flight mutation that first passed green because its label had changed underneath.
+ */
+const ensureAiOpen = async () => {
+  const picked = await page.evaluate(() => {
+    document.querySelectorAll('[data-probe-hit]').forEach((n) => n.removeAttribute('data-probe-hit'));
+    const root = document.querySelector('[data-probe-panel]');
+    if (!root) return false;
+    const el = window.leaves(root).find((n) => /^show \d+ finding/.test(window.norm2(n.textContent)));
+    if (!el) return false;
+    el.setAttribute('data-probe-hit', '');
+    return true;
+  });
+  if (picked) await clickHit();
+};
+
+const openAiReview = async () => {
+  const picked = await page.evaluate(() => {
+    document.querySelectorAll('[data-probe-hit]').forEach((n) => n.removeAttribute('data-probe-hit'));
+    const root = document.querySelector('[data-probe-panel]');
+    if (!root) return false;
+    const el = window.leaves(root).find((n) => /^show \d+ finding/.test(window.norm2(n.textContent)));
+    if (!el) return false;
+    el.setAttribute('data-probe-hit', '');
+    return true;
+  });
+  ck(picked, 'THE STAND: the ai block offered its «show N findings» control');
+  if (picked) await clickHit();
 };
 
 const gone = () => page.evaluate(() => window.__audit.gone());
@@ -1410,6 +1476,7 @@ await mount({ stub: AI_ON({ mode: 'hang' }) });
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const t = await panelText();
   ck(
     t.includes('reviewing 48 operations') && t.includes('~30–60 s'),
@@ -1450,6 +1517,7 @@ await inject();
 {
   // The same code with the constant cut to 250 ms — the real AbortController, the real race.
   await pressAnalyze();
+  await ensureAiOpen();
   await page.waitForTimeout(700);
   await inject();
   const t = await panelText();
@@ -1472,6 +1540,7 @@ await mount({ stub: AI_ON({ mode: 'error' }) });
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const t = await panelText();
   ck(t.includes('refused'), 'a refused run carries the SERVER’s own words to the screen', t.slice(-200));
   ck(
@@ -1513,6 +1582,7 @@ await mount({ stub: AI_ON({ mode: 'ok', response: analyzeRun({ droppedBadRef: 3,
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const ai = await aiText();
   ck(
     ai.includes('5 findings dropped') && ai.includes('3 whose anchors') && ai.includes('2 contradicting'),
@@ -1532,6 +1602,7 @@ await mount({
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const ai = await aiText();
   ck(ai.includes(norm(MODEL_SLUG)), 'model_unavailable NAMES THE SLUG', ai.slice(0, 260));
   ck(
@@ -1559,6 +1630,7 @@ await mount({
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const ai = await aiText();
   ck(
     ai.includes('not an all-clear'),
@@ -1577,6 +1649,7 @@ await mount({ stub: AI_ON({ mode: 'ok', response: analyzeRun({ findings: [], aiS
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const ai = await aiText();
   ck(ai.includes('retry'), 'failed IS weather, and offers a retry', ai.slice(0, 240));
   const rerun = await anchor('re-run (ai)');
@@ -1589,6 +1662,7 @@ await mount({ stub: AI_ON() });
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const titlesIn = async () =>
     page.evaluate(
       (wanted) => {
@@ -1662,6 +1736,7 @@ await mount({ stub: AI_ON() });
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   const before = (await issues()).length;
   // The AI block's filers come after the machine section's four.
   const total = await page.evaluate(() => window.findLeaf('file as issue').length);
@@ -1758,6 +1833,7 @@ await mount({ stub: AI_ON() });
 await inject();
 {
   await pressAnalyze();
+  await ensureAiOpen();
   ck(!(await aiText()).includes('re-run:'), 'a FIRST run shows no delta — everything is trivially new');
 
   // Re-run: the same two defects REPHRASED, plus one new one.
@@ -1765,6 +1841,7 @@ await inject();
     window.__auditStub.analyze = { mode: 'ok', response: r };
   }, analyzeRun({ findings: MODEL_FINDINGS_RERUN }));
   await pressAnalyze();
+  await ensureAiOpen();
   const ai = await aiText();
   ck(
     ai.includes('re-run: 1 new · 2 still open · 0 dismissed'),
@@ -1790,6 +1867,7 @@ await inject();
 
   // F5. Same tab, same session — the run must come back WITHOUT a second call.
   await mount({ stub: AI_ON(), keepSession: true });
+  await openAiReview();
   await inject();
   const afterReload = await aiText();
   const analyzeCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
@@ -1831,6 +1909,7 @@ const AI_MOVED = {
 await mount({ stub: AI_ON() });
 {
   await pressAnalyze();
+  await ensureAiOpen();
   ck(
     (await staleNotes()).length === 0,
     'a run whose fingerprints all match says NOTHING about staleness',
@@ -1855,6 +1934,7 @@ await mount({ stub: AI_ON() });
 
 // The same session, the card moved underneath it.
 await mount({ stub: AI_MOVED, keepSession: true });
+await openAiReview();
 {
   const notes = await staleNotes();
   ck(notes.length === 1, 'EXACTLY ONE finding is marked stale — not the block, not the run', JSON.stringify(notes));
@@ -1943,6 +2023,7 @@ await mount({
   },
   keepSession: true,
 });
+await openAiReview();
 {
   ck(
     (await page.evaluate(() => window.findLeaf('op #300 — not found; re-run the analysis').length)) === 0,
@@ -1973,6 +2054,7 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
 
   await mount({ stub: AI_FORM });
   await pressAnalyze();
+  await ensureAiOpen();
 
   // `dirty: true` IS A STAND ARTEFACT AND IS SPELLED OUT AS ONE. In the product an operation field
   // is a registered input, so typing in it dirties the form by itself; a `setValue` into an array
@@ -1980,6 +2062,7 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
   // edit to an unrelated field. That is also the sharper test: the note must follow the HASH, and
   // here the dirty flag is true for a reason that has nothing to do with the step.
   await mount({ stub: AI_FORM, keepSession: true, dirty: true, operations: [STEP_200] });
+  await openAiReview();
   // THE STAND FIRST. Both halves of this case read «no note» when the plant silently did not take,
   // and would then pass as a pair while measuring nothing at all.
   const planted = await page.evaluate(() => ({
@@ -2005,6 +2088,7 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
     dirty: true,
     operations: [{ ...STEP_200, inputKeys: [...STEP_200.inputKeys].reverse() }],
   });
+  await openAiReview();
   const swapped = await staleNotes();
   ck(
     swapped.length === 1 && (swapped[0] ?? '').includes('op #200 has unsaved edits since the run'),
@@ -2025,6 +2109,7 @@ head('20. «unsaved edits since the run» — decided by the hash, not by the di
     dirty: false,
     operations: [{ ...STEP_200, inputKeys: [...STEP_200.inputKeys].reverse() }],
   });
+  await openAiReview();
   const pristinePlant = await page.evaluate(() => ({
     ops: window.__audit.ops(),
     dirty: window.__audit.isDirty(),
@@ -2107,6 +2192,70 @@ head('21. the fingerprint port — the nine canonical vectors of fingerprint_tes
     Object.keys(mapped).length === 2,
     'and a step with no number is skipped: it has no anchor anyone could ask about',
     JSON.stringify(Object.keys(mapped)),
+  );
+}
+
+// ═══ 22. THE AI BLOCK OPENS CLOSED ════════════════════════════════════════════════════════════
+head('22. the ai block opens closed — but a closed block never reads as a clean card');
+{
+  // A run that finished in THIS interaction opens itself: a button you waited forty seconds for
+  // and then saw nothing appear reads as broken.
+  await mount({ stub: AI_ON() });
+  await pressAnalyze();
+  const afterRun = await page.evaluate(() => window.aiText());
+  ck(
+    afterRun.includes(norm(M_MISSING.title)),
+    'a run finished right now shows its findings without being asked',
+    afterRun.slice(0, 120),
+  );
+  ck(
+    (await page.evaluate(() => window.findLeaf('hide').length)) === 1,
+    'and the control offers to hide them',
+  );
+
+  // F5 — the same run, restored from the session. THIS is the state that opens closed.
+  await mount({ stub: AI_ON(), keepSession: true });
+  const restored = await page.evaluate(() => window.aiText());
+  ck(
+    !restored.includes(norm(M_MISSING.title)) && !restored.includes(norm(M_METHOD.title)),
+    'a run restored from the session renders CLOSED — no finding body on screen',
+    restored.slice(0, 160),
+  );
+  // THE HALF THAT MATTERS MORE. A collapsed block that hid «1 blocker» would read exactly like a
+  // card with nothing wrong on it — the silence this whole panel exists to refuse. The count, the
+  // model stamp and any degraded status stay on screen at all times.
+  ck(
+    restored.includes('1 blocker') && restored.includes('1 error'),
+    'THE COUNT STAYS VISIBLE WHILE CLOSED — «closed» must never be readable as «clean»',
+    restored.slice(0, 160),
+  );
+  ck(
+    restored.includes(norm(MODEL_SLUG)),
+    'and so does the model stamp — a closed report still says who wrote it',
+    restored.slice(0, 160),
+  );
+  ck(
+    (await page.evaluate(() => window.findLeaf('show 3 findings').length)) === 1,
+    'the control names how many are behind it, not just «show»',
+  );
+
+  // Opening and closing again, by the control.
+  await openAiReview();
+  const opened = await page.evaluate(() => window.aiText());
+  ck(opened.includes(norm(M_MISSING.title)), 'pressing it opens the body', opened.slice(0, 120));
+  await pick('hide', 0);
+  await clickHit();
+  const closedAgain = await page.evaluate(() => window.aiText());
+  ck(
+    !closedAgain.includes(norm(M_MISSING.title)),
+    'and pressing it again closes the body',
+    closedAgain.slice(0, 120),
+  );
+  const foldCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
+  ck(
+    foldCalls === 0,
+    'OPENING AND CLOSING SPENDS NOTHING — it is a fold, not a re-run',
+    `analyze calls on this mount = ${foldCalls}`,
   );
 }
 
