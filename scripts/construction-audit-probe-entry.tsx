@@ -26,6 +26,10 @@ import { FormProvider, useForm } from 'react-hook-form';
 
 import { ConstructionAudit } from 'components/managers/tech-card/components/construction-audit';
 import {
+  formOperationFingerprints,
+  operationFingerprint,
+} from 'components/managers/tech-card/components/analysis-fp';
+import {
   assignUids,
   findingUid,
   loadAnalysis,
@@ -52,6 +56,14 @@ type MountOpts = {
   dirty?: boolean;
   /** Steps on the saved card, for the in-flight line. */
   operationCount?: number;
+  /**
+   * Operations written INTO THE FORM, for the «unsaved edits since the run» half of the amber note.
+   * Written with `shouldDirty`, because that note is gated on `isDirty` in the shipped component —
+   * a stand that planted them without dirtying the form would measure a branch the product never
+   * reaches. Only the three fields the fingerprint reads are given; the rest of a 60-field step row
+   * is irrelevant to it BY CONSTRUCTION, and giving it here would suggest otherwise.
+   */
+  operations?: { operationNumber: number; outputUnitKey: string; inputKeys: string[] }[];
 };
 
 type GoCall = [string, Record<string, string> | undefined];
@@ -62,10 +74,21 @@ type AuditProbe = {
   gone: () => GoCall[];
   /** `issues` AS THE FORM HOLDS IT — the array the issues tab reads. */
   issues: () => Record<string, unknown>[];
+  /**
+   * `operations` and `isDirty` AS THE FORM HOLDS THEM. Not a measurement of the component — a
+   * measurement of the STAND: the «unsaved edits» case is a comparison against the form, so a plant
+   * that silently did not take would make both halves of it read «no note» and pass as a pair.
+   */
+  ops: () => Record<string, unknown>[];
+  isDirty: () => boolean;
   /** Snackbar messages, so «filed» can be told from «silently did nothing». */
   alerts: () => string[];
   /** The identity module, so the probe can check the digest against node's own. */
   sha256: (s: string) => string;
+  /** The fingerprint port, checked against the nine canonical vectors of the Go test. */
+  fp: (outputUnitKey: string, inputKeys: string[]) => string;
+  /** The same port over a list of form steps — `operation_number → fp8`. */
+  formFps: (ops: unknown[]) => Record<string, string>;
   uid: (category: string, refs: string[], titleSalt?: string) => string;
   uidsOf: (findings: unknown[]) => string[];
   /** What the session mirror holds for a card right now. */
@@ -100,6 +123,8 @@ window.__audit = probe;
 probe.gone = () => gone;
 probe.alerts = () => useSnackBarStore.getState().alerts.map((a) => a.message);
 probe.sha256 = sha256Hex;
+probe.fp = operationFingerprint;
+probe.formFps = (ops) => formOperationFingerprints(ops as never);
 probe.uid = findingUid;
 probe.uidsOf = (findings) => assignUids(findings as never);
 probe.session = (cardId) => loadAnalysis(cardId);
@@ -112,6 +137,7 @@ function Harness({
   noGoTab,
   dirty,
   operationCount,
+  operations,
 }: {
   techCardId?: number;
   active: boolean;
@@ -119,6 +145,7 @@ function Harness({
   noGoTab: boolean;
   dirty: boolean;
   operationCount?: number;
+  operations?: MountOpts['operations'];
 }) {
   const methods = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema) as never,
@@ -126,11 +153,24 @@ function Harness({
     defaultValues: { ...techCardDefaultData },
   });
   probe.issues = () => (methods.getValues('issues') ?? []) as unknown as Record<string, unknown>[];
+  probe.ops = () => (methods.getValues('operations') ?? []) as unknown as Record<string, unknown>[];
+  probe.isDirty = () => methods.formState.isDirty;
   // A DIRTY FORM IS MADE THE WAY A HUMAN MAKES ONE — a real `setValue` with `shouldDirty`, on a
   // field that has nothing to do with this panel. Setting `formState.isDirty` by hand would test
   // the probe's own lie instead of the panel's reading of RHF.
-  if (dirty && !methods.formState.isDirty) {
+  // READ UNCONDITIONALLY, so `isDirty` is a TRACKED field of this `useForm` in every case. RHF's
+  // formState is a proxy that subscribes whoever touches it; if only the panel below read it, the
+  // subscription would still land on this instance, but the dependency would be invisible here —
+  // and the one case that plants steps without asking for `dirty` would be relying on it silently.
+  const isDirty = methods.formState.isDirty;
+  if (dirty && !isDirty) {
     methods.setValue('notes', 'edited by the operator, not yet saved', { shouldDirty: true });
+  }
+  // The steps the operator has in front of them, unsaved. `shouldDirty` for the same reason as
+  // above: the form half of the amber note is gated on `isDirty`, and planting rows without it
+  // would exercise a state the product cannot be in.
+  if (operations && (methods.getValues('operations') ?? []).length !== operations.length) {
+    methods.setValue('operations', operations as never, { shouldDirty: true });
   }
   // A fresh client per mount: the audit is cached for five minutes, and a shared one would carry
   // the first case's answer into every case after it.
@@ -180,6 +220,7 @@ probe.mount = (opts) => {
       noGoTab={!!opts.noGoTab}
       dirty={!!opts.dirty}
       operationCount={opts.operationCount}
+      operations={opts.operations}
     />,
   );
 };

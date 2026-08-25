@@ -12,7 +12,7 @@ import {
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -21,6 +21,7 @@ import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
+import { FingerprintableOperation, formOperationFingerprints } from './analysis-fp';
 import { assignUids, loadAnalysis, saveAnalysis, StoredAnalysis } from './analysis-identity';
 import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from './schema';
 
@@ -107,6 +108,132 @@ function opNumber(ref: string): number | null {
   if (!ref.startsWith('op:')) return null;
   const n = parseInt(ref.slice(3).trim(), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// ─── ANCHOR RESOLUTION, THE THREE BRANCHES OF §9 ───────────────────────────────────────────────
+//
+// `operation_number` is the anchor currency of the whole system, and its ONE weakness is that the
+// server re-stamps numbers positionally on every save: while somebody reads a run, another save can
+// move #460 onto a different step. The fingerprint closes exactly that hole, and the resolution has
+// three outcomes, no more:
+//
+//   ok      — the number is on the card and its fingerprint is the one the run read → jump, silently.
+//   changed — the number is on the card and its fingerprint is NOT → STILL JUMP, plus a per-finding
+//             note. Refusing the jump would be worse than useless: the reader wants to look.
+//   missing — the number is not on the card at all → a grey label, no jump. The one case where
+//             navigating would land somewhere arbitrary.
+//
+// NOTHING IS HASHED TO DECIDE THIS. Both halves arrive as maps: the run's snapshot is mirrored into
+// the session at the moment of the run, and the CURRENT map comes back on every audit refetch — and
+// the audit query is keyed under the card detail, so a save invalidates it and the amber appears by
+// itself. Hashing enters only for the FORM (see `AnchorStaleNote`), which no server map can know.
+//
+// THERE IS NO GLOBAL STALE BANNER, deliberately (§10). Findings are answered by editing the card,
+// and a banner that greys out the whole run the moment one step is touched would punish exactly the
+// person who acted on it. Staleness is per finding because the fingerprint machinery already knows
+// it per finding.
+type AnchorState = 'ok' | 'changed' | 'missing' | 'unknown';
+
+/**
+ * `unknown` IS THE SAFE FALLBACK AND IS RENDERED EXACTLY LIKE `ok`. Two ways to reach it, both of
+ * them «this bundle cannot tell», never «nothing is wrong»:
+ *
+ *  · THE CURRENT MAP IS ABSENT OR EMPTY — an older server that does not send
+ *    `operation_fingerprints` yet. Reading that as «no number is on the card» would paint EVERY
+ *    anchor of every finding grey «not found», on a deployment where nothing at all is wrong.
+ *  · THE RUN CARRIES NO SNAPSHOT for this number — a run mirrored by an older bundle, or a step
+ *    that did not exist when the run happened. There is nothing to compare against, and inventing
+ *    a verdict from one side of a comparison is how false amber gets shipped.
+ */
+function anchorState(
+  n: number,
+  atRun: Record<string, string>,
+  now: Record<string, string> | undefined,
+): AnchorState {
+  if (!now || Object.keys(now).length === 0) return 'unknown';
+  const current = now[String(n)];
+  // Decided by the CURRENT map alone: whether the run knew this step or not, a number that is no
+  // longer on the card is a jump to nowhere.
+  if (current === undefined) return 'missing';
+  const then = atRun[String(n)];
+  if (!then) return 'unknown';
+  return then === current ? 'ok' : 'changed';
+}
+
+/** «op #200» / «op #200, #300» — the numbers a note is about, named rather than counted. */
+function opList(numbers: number[]): string {
+  return numbers.length === 0 ? '' : `op #${numbers.join(', #')}`;
+}
+
+/**
+ * THE PER-FINDING AMBER, and the one organ in this panel that hashes anything.
+ *
+ * «AMBER» IS THE SEMANTIC, `warning` IS THE TOKEN. This system has no amber: `warning` is BLUE here
+ * and means «mid-flight, needs a human» (see `CalloutBox`), which is precisely this state. Inventing
+ * a literal amber would be a colour outside the palette, and `error` red would say «broken», which a
+ * step someone legitimately edited is not.
+ *
+ * TWO REASONS, ONE SLOT, AND THE SAVED ONE WINS. If the SAVED card already moved under the run, the
+ * form having moved too adds nothing — one line per finding, naming the reason that is furthest
+ * along.
+ *
+ * THE FORM HALF IS GATED ON `dirty`. A pristine form must hash to exactly what the server stored, so
+ * any disagreement there would be a bug in the hydration, not an edit — and it would render as a
+ * permanent «unsaved edits» on a card nobody touched. Gating on `isDirty` removes that entire class:
+ * the note can only appear where there genuinely are unsaved changes.
+ *
+ * THE WATCH LIVES IN THIS LEAF AND NOWHERE ELSE — the `StepNumberDrift` precedent in
+ * operations-field.tsx. `useWatch({ name: 'operations' })` re-renders its component on every
+ * keystroke in any step; in the panel body that would redraw every finding of every group on every
+ * letter typed into a 48-step card. Here it redraws one line.
+ */
+function AnchorStaleNote({
+  opNumbers,
+  resolveOp,
+  runFingerprints,
+  dirty,
+}: {
+  opNumbers: number[];
+  resolveOp: (n: number) => AnchorState;
+  runFingerprints: Record<string, string>;
+  dirty: boolean;
+}) {
+  const ops = useWatch({ name: 'operations' }) as FingerprintableOperation[] | undefined;
+
+  const changed = opNumbers.filter((n) => resolveOp(n) === 'changed');
+  // ONLY THE STEPS THIS NOTE IS ABOUT ARE HASHED. There is one of these per finding and the watch
+  // fires on every keystroke in any step; hashing all 48 rows in each of fifteen notes would be
+  // seven hundred digests per letter typed, to answer a question about one or two of them.
+  const formFingerprints = dirty
+    ? formOperationFingerprints(
+        (ops ?? []).filter((o) => opNumbers.includes(o?.operationNumber ?? 0)),
+      )
+    : null;
+  const edited = formFingerprints
+    ? opNumbers.filter((n) => {
+        if (changed.includes(n)) return false;
+        const then = runFingerprints[String(n)];
+        const inForm = formFingerprints[String(n)];
+        // Both halves must be present: a step the run never fingerprinted, or one the form has no
+        // number for yet, is «cannot tell», and «cannot tell» is not «changed».
+        return !!then && !!inForm && then !== inForm;
+      })
+    : [];
+
+  if (changed.length === 0 && edited.length === 0) return null;
+  // The marker is for the probe, which has to prove this note is INSIDE its finding and not a
+  // banner over the run — the same job `data-ai-review` does one block up.
+  return (
+    <div data-stale-note className='mt-1'>
+      <CalloutBox tone='warning'>
+        <Text size='micro'>
+          {changed.length > 0
+            ? `${opList(changed)} changed since the run — the anchor still goes there, but that step is no longer the one the model read. Re-run to have it read again.`
+            : `${opList(edited)} has unsaved edits since the run — the run read the SAVED step. Save the card, then re-run.`}
+        </Text>
+      </CalloutBox>
+    </div>
+  );
 }
 
 // WHERE A FINDING SITS ON THE ROUTE. The technologist works either in batches of one kind of edit
@@ -198,8 +325,31 @@ export function issueDescription(f: TechCardAnalysisFinding, modelSlug?: string)
 // the construction tab lives inside `<fieldset disabled={frozen}>`, which kills every native
 // control under it on a RELEASED card — the exact case where somebody reads the audit and cannot
 // change a thing, so the read-only jump has to survive.
-function RefChip({ refString, onGo }: { refString: string; onGo?: (r: string) => void }) {
+function RefChip({
+  refString,
+  onGo,
+  state = 'unknown',
+}: {
+  refString: string;
+  onGo?: (r: string) => void;
+  /** §9's resolution for this anchor. `unknown` renders exactly like `ok` — see `anchorState`. */
+  state?: AnchorState;
+}) {
   const target = refTarget(refString);
+  // A NUMBER THAT IS NO LONGER ON THE CARD IS A LABEL, NOT A LINK, and it says so in full. The
+  // established spelling on the issues tab is «#N — not found (removed?)»; here the reader has
+  // something to do about it, so the sentence ends with it. Checked FIRST: a missing anchor must
+  // stop navigating whether or not a handler was passed.
+  if (state === 'missing') {
+    // Only an `op:` anchor can reach `missing` (see `refState`), but the fallback costs one
+    // expression and keeps a future caller from rendering «op #null» at a reader.
+    const n = opNumber(refString);
+    return (
+      <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
+        {n === null ? refString : `op #${n}`} — not found; re-run the analysis
+      </Text>
+    );
+  }
   if (!target || !onGo) {
     return (
       <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
@@ -266,6 +416,9 @@ function Finding({
   dismissed = false,
   onDismiss,
   onRestore,
+  resolveOp,
+  runFingerprints,
+  dirty = false,
 }: {
   finding: TechCardAnalysisFinding;
   onGo?: (r: string) => void;
@@ -280,6 +433,21 @@ function Finding({
   /** Offered on MODEL findings only: a machine finding disappears when its cause does. */
   onDismiss?: () => void;
   onRestore?: () => void;
+  /**
+   * §9's anchor resolution — PASSED ON MODEL FINDINGS ONLY, and its absence is what keeps the
+   * machine section untouched.
+   *
+   * A MACHINE FINDING CANNOT BE STALE AGAINST THESE FINGERPRINTS. It is recomputed by the very
+   * request that produced the current map — the same `GetTechCardConstructionAudit` response
+   * carries both — so its anchors and the map are the same instant by construction. Resolving
+   * them would burn cycles to prove `ok` on every row, and the first time the two ever disagreed
+   * it would mean the server contradicted itself, which is not a thing to report as amber.
+   */
+  resolveOp?: (n: number) => AnchorState;
+  /** The run's fingerprint snapshot, for the FORM half of the note. Model findings only. */
+  runFingerprints?: Record<string, string>;
+  /** The form has unsaved changes — gates the form half of the note. */
+  dirty?: boolean;
 }) {
   const severity = (finding.severity ?? '').trim();
   const category = (finding.category ?? '').trim();
@@ -292,6 +460,17 @@ function Finding({
   // `insert_after` is meaningful on ONE category and reads as noise anywhere else, so it is gated on
   // that category rather than on being non-empty.
   const insertAfter = category === 'missing_step' ? (finding.insertAfter ?? '').trim() : '';
+
+  // Every step this finding points at, the insert point included — it is an `op:` anchor like any
+  // other, and a `missing_step` whose neighbour has been deleted is exactly as unmoored as one
+  // whose subject has.
+  const refState = (r: string): AnchorState => {
+    const n = opNumber(r);
+    return n !== null && resolveOp ? resolveOp(n) : 'unknown';
+  };
+  const anchoredOps = resolveOp
+    ? [...new Set([...refs, insertAfter].map(opNumber).filter((n): n is number => n !== null))]
+    : [];
 
   // A DISMISSED FINDING IS COLLAPSED, NOT REMOVED. Removing it would make the next re-run's «N
   // dismissed» a claim about something invisible, and the reader could never check what they once
@@ -360,13 +539,26 @@ function Finding({
           <Text size='micro' variant='label' component='span'>
             {insertAfter === 'start' ? 'insert at the start of the sequence' : 'insert after'}
           </Text>
-          {insertAfter !== 'start' && <RefChip refString={insertAfter} onGo={onGo} />}
+          {insertAfter !== 'start' && (
+            <RefChip refString={insertAfter} onGo={onGo} state={refState(insertAfter)} />
+          )}
         </div>
+      )}
+
+      {/* THE NOTE SITS INSIDE ITS FINDING, above the anchors it is about. Not over the block and
+          not over the run: staleness here is a property of one finding (§10). */}
+      {resolveOp && anchoredOps.length > 0 && (
+        <AnchorStaleNote
+          opNumbers={anchoredOps}
+          resolveOp={resolveOp}
+          runFingerprints={runFingerprints ?? {}}
+          dirty={dirty}
+        />
       )}
 
       <div className='mt-1.5 flex flex-wrap items-center gap-1'>
         {refs.map((r) => (
-          <RefChip key={r} refString={r} onGo={onGo} />
+          <RefChip key={r} refString={r} onGo={onGo} state={refState(r)} />
         ))}
         {/* THE TWO ACTIONS ARE ONE GROUP, pushed right together. `ml-auto` on each of them
             separately put «dismiss» in the middle of the row, reading as a third anchor rather than
@@ -691,6 +883,18 @@ export function ConstructionAudit({
     return { fresh, still, gone };
   }, [run, uids, previous, dismissed]);
 
+  // §9'S ANCHOR RESOLUTION, BUILT FROM THE TWO SERVER MAPS AND NOTHING ELSE. The run's snapshot was
+  // mirrored into the session when it landed; the CURRENT map arrives with every audit response, and
+  // the audit query is keyed under the card detail — so a save invalidates it, the refetch brings a
+  // new map, and the amber appears on its own the moment someone changes a step. No polling, no
+  // banner, no second source of truth.
+  const currentFingerprints = data?.operationFingerprints;
+  const runFingerprints = run?.fingerprints;
+  const resolveOp = useMemo(() => {
+    const atRun = runFingerprints ?? {};
+    return (n: number) => anchorState(n, atRun, currentFingerprints);
+  }, [runFingerprints, currentFingerprints]);
+
   const status = run ? statusLine(run.aiStatus, run.model) : null;
   const dropped = (run?.droppedBadRef ?? 0) + (run?.droppedContradiction ?? 0);
 
@@ -777,6 +981,11 @@ export function ConstructionAudit({
 
           {/* Порядок сервера — как пришёл. Он ранжирован там, и пересортировка на клиенте развела
               бы два отчёта об одном прогоне. */}
+          {/* NO `resolveOp` HERE, AND THAT IS THE POINT. A machine finding is recomputed by the very
+              request that produced the current fingerprint map — one response carries both — so it
+              cannot be stale against them: its anchors and the map are the same instant. Amber and
+              the grey «not found» belong to the MODEL half, whose findings were minted seconds or
+              minutes ago against a card that may since have moved. */}
           {findings.length > 0 && (
             <div className='border-t border-hairline'>
               {findings.map((f, i) => (
@@ -917,6 +1126,9 @@ export function ConstructionAudit({
                                 onFile={(f) => fileAsIssue(f, run.model)}
                                 frozen={frozen}
                                 filing={addIssue.isPending}
+                                resolveOp={resolveOp}
+                                runFingerprints={run.fingerprints}
+                                dirty={dirty}
                                 delta={
                                   previous.size === 0 || isDismissed
                                     ? undefined

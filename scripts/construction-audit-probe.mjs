@@ -93,6 +93,17 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-uid-includes-title', // 17
   '--mutate-session-write-off', // 18
   '--mutate-dismiss-on-machine', // 18
+  // ── wave 3: the amber anchor state and the fingerprint port ──
+  '--mutate-anchor-ignores-fingerprints', // 19
+  '--mutate-missing-anchor-navigates', // 19
+  '--mutate-stale-blocks-navigation', // 19
+  '--mutate-stale-banner-global', // 19
+  '--mutate-fp-sorts-inputs', // 19 + 21
+  '--mutate-fp-trims-keys', // 21
+  '--mutate-fp-lowercases', // 21
+  '--mutate-unsaved-ignores-hash', // 20
+  '--mutate-unsaved-note-off', // 20
+  '--mutate-absent-map-is-empty', // 19
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN_MUTATIONS.has(a));
 if (stray) {
@@ -123,6 +134,7 @@ const head = (s) => console.log(`\n${s}`);
 const AUDIT = /construction-audit\.tsx$/;
 const QUERY = /useTechCardQuery\.ts$/;
 const IDENT = /analysis-identity\.ts$/;
+const FPMOD = /analysis-fp\.ts$/;
 
 const DETAIL_FIX = `      {detail && (
         <Text size='micro' variant='label' className='mt-0.5'>
@@ -348,6 +360,79 @@ const SESSION_WRITE_FIX = `    s.setItem(KEY(cardId), JSON.stringify(value));`;
 const SESSION_WRITE_OFF = `    void s;
     void value;`;
 
+// ── wave 3 ─────────────────────────────────────────────────────────────────────────────────────
+
+// A RESOLVER THAT NEVER RESOLVES. Everything below the patched line becomes unreachable, which is
+// the point: `unknown` is the safe fallback, so this is what a bundle looks like when the
+// fingerprint comparison is quietly not happening. It must NOT redden the green checks — a blind
+// resolver still navigates — and that asymmetry is what proves the green checks alone are blind
+// to it and the amber/grey ones are not.
+const ANCHOR_STATE_FIX = `  if (!now || Object.keys(now).length === 0) return 'unknown';`;
+const ANCHOR_STATE_BLIND = `  return 'unknown';`;
+
+// The grey branch, switched off two different ways: gone entirely (a deleted step navigates again),
+// and applied to `changed` as well (the amber anchor stops navigating — the exact over-reaction §9
+// rejects, because the reader still wants to look).
+const MISSING_BRANCH_FIX = `  if (state === 'missing') {`;
+const MISSING_BRANCH_OFF = `  if (state === 'missing' && false) {`;
+const MISSING_BRANCH_GREEDY = `  if (state === 'missing' || state === 'changed') {`;
+
+// THE BANNER §10 FORBIDS. The per-finding note is silenced and one sentence is hoisted over the
+// whole run instead — same words, same count, one box. Only the CONTAINMENT check can tell the two
+// apart, which is why that check exists in the shape it does.
+const STALE_NOTE_FIX = `      {resolveOp && anchoredOps.length > 0 && (
+        <AnchorStaleNote
+          opNumbers={anchoredOps}
+          resolveOp={resolveOp}
+          runFingerprints={runFingerprints ?? {}}
+          dirty={dirty}
+        />
+      )}`;
+const STALE_NOTE_OFF = `      {resolveOp && anchoredOps.length > 0 && false && <AnchorStaleNote
+          opNumbers={anchoredOps}
+          resolveOp={resolveOp}
+          runFingerprints={runFingerprints ?? {}}
+          dirty={dirty}
+        />}`;
+const GROUPS_FIX = `                  {modelFindings.length === 0 ? (`;
+const GROUPS_WITH_BANNER = `                  <div data-stale-note>
+                    <CalloutBox tone='warning'>
+                      <Text size='micro'>
+                        op #200 changed since the run — the anchor still goes there, but that step
+                        is no longer the one the model read. Re-run to have it read again.
+                      </Text>
+                    </CalloutBox>
+                  </div>
+                  {modelFindings.length === 0 ? (`;
+
+// THE FORM HALF, DECIDED BY THE DIRTY FLAG INSTEAD OF BY THE HASH. This is the plausible bug: it
+// looks right on a card somebody edited and is a lie on every step they did not touch.
+const UNSAVED_HASH_FIX = `        return !!then && !!inForm && then !== inForm;`;
+const UNSAVED_HASH_BLIND = `        return !!then && !!inForm;`;
+// The other direction: the form half never fires at all. Without this, «swapping two inputs is an
+// edit» is only ever reddened by mutations aimed at something else — a check nobody has watched
+// fail for its OWN reason is a check nobody has watched fail.
+const UNSAVED_HASH_MUTE = `        return false && !!then && !!inForm && then !== inForm;`;
+
+// AN ABSENT MAP READ AS AN EMPTY ONE — the false grey that would hit a lagging backend, where every
+// anchor of every finding reads «not found» and nothing whatsoever is wrong.
+const ABSENT_MAP_FIX = `  if (!now || Object.keys(now).length === 0) return 'unknown';
+  const current = now[String(n)];`;
+const ABSENT_MAP_TRUSTED = `  const current = (now ?? {})[String(n)];`;
+
+// ── THE THREE «TIDINESS» NORMALISATIONS §9 NAMES AS FORBIDDEN ──────────────────────────────────
+// Each one is a change somebody would make in good faith, each one diverges from Go silently, and
+// each one paints false amber on every card of beta. They patch the same line, so they cannot be
+// combined — a second patch would not find its anchor and the run would abort rather than lie.
+const FP_PAYLOAD_FIX = `  return sha256Hex([FP_PREFIX, outputUnitKey, ...inputKeys].join(SEP)).slice(0, FP_LEN);`;
+const FP_PAYLOAD_SORTED = `  return sha256Hex([FP_PREFIX, outputUnitKey, ...[...inputKeys].sort()].join(SEP)).slice(0, FP_LEN);`;
+const FP_PAYLOAD_TRIMMED = `  return sha256Hex(
+    [FP_PREFIX, outputUnitKey.trim(), ...inputKeys.map((k) => k.trim())].join(SEP),
+  ).slice(0, FP_LEN);`;
+const FP_PAYLOAD_LOWERED = `  return sha256Hex(
+    [FP_PREFIX, outputUnitKey.toLowerCase(), ...inputKeys.map((k) => k.toLowerCase())].join(SEP),
+  ).slice(0, FP_LEN);`;
+
 const patcher = (name, filter, pairs, loader) => ({
   name,
   setup(b) {
@@ -368,6 +453,7 @@ const mutations = () => {
   const auditPairs = [];
   const queryPairs = [];
   const identPairs = [];
+  const fpPairs = [];
   const add = (flag, bucket, pair) => {
     if (on(flag)) bucket.push(pair);
   };
@@ -403,12 +489,26 @@ const mutations = () => {
   add('--mutate-gate-off', queryPairs, [GATE_FIX, GATE_BROKEN]);
   add('--mutate-budget-over-server', queryPairs, [BUDGET_FIX, BUDGET_OVER_SERVER]);
 
+  add('--mutate-anchor-ignores-fingerprints', auditPairs, [ANCHOR_STATE_FIX, ANCHOR_STATE_BLIND]);
+  add('--mutate-missing-anchor-navigates', auditPairs, [MISSING_BRANCH_FIX, MISSING_BRANCH_OFF]);
+  add('--mutate-stale-blocks-navigation', auditPairs, [MISSING_BRANCH_FIX, MISSING_BRANCH_GREEDY]);
+  add('--mutate-stale-banner-global', auditPairs, [STALE_NOTE_FIX, STALE_NOTE_OFF]);
+  add('--mutate-stale-banner-global', auditPairs, [GROUPS_FIX, GROUPS_WITH_BANNER]);
+  add('--mutate-unsaved-ignores-hash', auditPairs, [UNSAVED_HASH_FIX, UNSAVED_HASH_BLIND]);
+  add('--mutate-unsaved-note-off', auditPairs, [UNSAVED_HASH_FIX, UNSAVED_HASH_MUTE]);
+  add('--mutate-absent-map-is-empty', auditPairs, [ABSENT_MAP_FIX, ABSENT_MAP_TRUSTED]);
+
   add('--mutate-uid-includes-title', identPairs, [UID_PLAIN_FIX, UID_PLAIN_TITLED]);
   add('--mutate-session-write-off', identPairs, [SESSION_WRITE_FIX, SESSION_WRITE_OFF]);
+
+  add('--mutate-fp-sorts-inputs', fpPairs, [FP_PAYLOAD_FIX, FP_PAYLOAD_SORTED]);
+  add('--mutate-fp-trims-keys', fpPairs, [FP_PAYLOAD_FIX, FP_PAYLOAD_TRIMMED]);
+  add('--mutate-fp-lowercases', fpPairs, [FP_PAYLOAD_FIX, FP_PAYLOAD_LOWERED]);
 
   if (auditPairs.length) out.push(patcher('audit', AUDIT, auditPairs, 'tsx'));
   if (queryPairs.length) out.push(patcher('query', QUERY, queryPairs, 'ts'));
   if (identPairs.length) out.push(patcher('ident', IDENT, identPairs, 'ts'));
+  if (fpPairs.length) out.push(patcher('fp', FPMOD, fpPairs, 'ts'));
   return out;
 };
 
@@ -682,6 +782,20 @@ const MODEL_FINDINGS_RERUN = [
   },
 ];
 
+// ─── THE TWO FINGERPRINT MAPS §9 RESOLVES ANCHORS WITH ─────────────────────────────────────────
+//
+// Every anchor of the model run: op:100 (question), op:200 (method), op:300 (missing_step, whose
+// insert point is op:120). Keys are given unquoted on purpose — a JS object literal turns them into
+// the same STRING keys protojson puts on the wire for a `map<int32, string>`, which is the shape the
+// component has to cope with.
+//
+// THE DEFAULT PAIR AGREES ON EVERY NUMBER. That is not laziness: it means every case that is not
+// about staleness renders exactly as it did before this wave, and the ordinary mount IS the
+// «a matching fingerprint stays green» measurement rather than a separate fixture that could drift.
+const FP_AT_RUN = { 100: 'aaaa1111', 120: 'eeee0000', 200: 'bbbb2222', 300: 'cccc3333' };
+// The same card AFTER somebody saved: 100 and 120 untouched, 200 edited, 300 deleted outright.
+const FP_NOW_MOVED = { 100: 'aaaa1111', 120: 'eeee0000', 200: 'dddd9999' };
+
 const analyzeRun = (over = {}) => ({
   findings: MODEL_FINDINGS,
   aiStatus: 'ok',
@@ -690,13 +804,19 @@ const analyzeRun = (over = {}) => ({
   droppedContradiction: 0,
   notChecked: [],
   summary: '',
-  operationFingerprints: { 300: 'aaaaaaaa', 200: 'bbbbbbbb' },
+  operationFingerprints: FP_AT_RUN,
   ...over,
 });
 
 const auditOk = (over = {}) => ({
   mode: 'ok',
-  response: { findings: FINDINGS, notChecked: NOT_CHECKED, aiEnabled: false, ...over },
+  response: {
+    findings: FINDINGS,
+    notChecked: NOT_CHECKED,
+    aiEnabled: false,
+    operationFingerprints: FP_AT_RUN,
+    ...over,
+  },
 });
 
 const OK = { audit: auditOk() };
@@ -743,6 +863,7 @@ async function mount({
   operationCount = 48,
   keepSession = false,
   fast = false,
+  operations = undefined,
 }) {
   await page.goto('http://probe.local/');
   // sessionStorage OUTLIVES `goto` — that is the mechanism the F5 case measures, and the leak
@@ -754,7 +875,10 @@ async function mount({
       window.__auditStub = st;
       window.__audit.mount(o);
     },
-    [s, { techCardId: techCardId ?? undefined, active, frozen, noGoTab, dirty, operationCount }],
+    [
+      s,
+      { techCardId: techCardId ?? undefined, active, frozen, noGoTab, dirty, operationCount, operations },
+    ],
   );
   await page.waitForSelector('[data-probe-panel]', { timeout: 15000 });
   await page.waitForTimeout(350);
@@ -1686,6 +1810,278 @@ ck(
   (await page.evaluate(() => window.findLeaf('dismiss').length)) === 0,
   'the machine section offers no dismiss at all',
 );
+
+// ═══ 19. §9 ANCHOR RESOLUTION ══════════════════════════════════════════════════════════════════
+head('19. anchors: matching → green, differing → amber AND still navigating, absent → grey');
+
+/** The text of every per-finding staleness note on screen, in document order. */
+const staleNotes = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('[data-stale-note]')].map((n) => window.norm2(n.textContent || '')),
+  );
+
+// The card AFTER somebody saved: op:200 edited, op:300 deleted. The run in the session mirror still
+// carries FP_AT_RUN, which is exactly the production sequence — run, save, audit refetch, amber.
+const AI_MOVED = {
+  audit: auditOk({ aiEnabled: true, operationFingerprints: FP_NOW_MOVED }),
+  analyze: { mode: 'ok', response: analyzeRun() },
+  addIssue: { mode: 'ok' },
+};
+
+await mount({ stub: AI_ON() });
+{
+  await pressAnalyze();
+  ck(
+    (await staleNotes()).length === 0,
+    'a run whose fingerprints all match says NOTHING about staleness',
+    JSON.stringify(await staleNotes()),
+  );
+  for (const label of ['op:100', 'op:200', 'op:300']) {
+    const a = await anchor(label);
+    if (a.n !== 1) {
+      ck(false, `«${label}» is exactly one live anchor`, `found ${a.n}`);
+      continue;
+    }
+    const before = (await gone()).length;
+    await clickHit();
+    const after = await gone();
+    ck(
+      a.role === 'button' && after.length === before + 1 && after[after.length - 1][0] === 'construction',
+      `«${label}» matches the run and navigates, unremarked`,
+      JSON.stringify(after[after.length - 1] ?? null),
+    );
+  }
+}
+
+// The same session, the card moved underneath it.
+await mount({ stub: AI_MOVED, keepSession: true });
+{
+  const notes = await staleNotes();
+  ck(notes.length === 1, 'EXACTLY ONE finding is marked stale — not the block, not the run', JSON.stringify(notes));
+  ck(
+    (notes[0] ?? '').includes('op #200 changed since the run'),
+    'and the note names the step that moved',
+    notes[0] ?? '(none)',
+  );
+
+  const a200 = await anchor('op:200');
+  ck(a200.n === 1 && a200.role === 'button', 'the amber anchor is still a live control', JSON.stringify(a200));
+  const before = (await gone()).length;
+  if (a200.n === 1) await clickHit();
+  const after = await gone();
+  const last = after[after.length - 1];
+  ck(
+    after.length === before + 1 && last?.[0] === 'construction' && last?.[1]?.op === '200',
+    'AMBER STILL NAVIGATES — §9 refuses to withhold the jump from someone who wants to look',
+    JSON.stringify(last ?? null),
+  );
+
+  const grey = await anchor('op #300 — not found; re-run the analysis');
+  ck(grey.n === 1, 'a number that is no longer on the card renders the §9 grey label', `found ${grey.n}`);
+  ck(
+    grey.n === 1 && grey.tag === 'span' && grey.role !== 'button' && grey.tabindex === null,
+    'and it is a LABEL — no role, no tab stop, nothing to press',
+    JSON.stringify(grey),
+  );
+  const beforeGrey = (await gone()).length;
+  if (grey.n === 1) await clickHit();
+  ck((await gone()).length === beforeGrey, 'clicking the grey label navigates nowhere');
+  ck(
+    (await page.evaluate(() => window.findLeaf('op:300').length)) === 0,
+    'and the live «op:300» chip is gone with it — a jump to a deleted step is not offered twice',
+  );
+
+  const a100 = await anchor('op:100');
+  ck(
+    a100.n === 1 && a100.role === 'button',
+    'the finding on the step nobody touched is untouched on screen too',
+    JSON.stringify(a100),
+  );
+
+  // NO GLOBAL STALE BANNER (§10). A banner would also produce exactly one box with exactly these
+  // words — the COUNT cannot tell them apart, and containment is the only thing that can: the
+  // smallest box holding both the note and its own finding's title must hold no OTHER finding.
+  const containment = await page.evaluate(
+    ([mt, qt]) => {
+      const note = document.querySelector('[data-stale-note]');
+      if (!note) return { found: false };
+      let node = note.parentElement;
+      while (node) {
+        const t = window.norm2(node.textContent || '');
+        if (t.includes(mt)) return { found: true, alsoOther: t.includes(qt) };
+        node = node.parentElement;
+      }
+      return { found: false };
+    },
+    [norm(M_METHOD.title), norm(M_QUESTION.title)],
+  );
+  ck(
+    containment.found && !containment.alsoOther,
+    'THE NOTE IS INSIDE ITS FINDING — no global stale banner, because reacting to findings must not be punished',
+    JSON.stringify(containment),
+  );
+  const outsideAi = await page.evaluate(() => {
+    const root = document.querySelector('[data-probe-panel]');
+    if (!root) return '';
+    const clone = root.cloneNode(true);
+    clone.querySelector('[data-ai-review]')?.remove();
+    return window.norm2(clone.textContent || '');
+  });
+  ck(
+    !outsideAi.includes('changed since the run') && !outsideAi.includes('not found; re-run'),
+    'the MACHINE section carries no staleness at all — it cannot be stale against a map its own response produced',
+  );
+}
+
+// A DEPLOYMENT THAT SENDS NO MAP AT ALL. «Cannot tell» must not render as «not found»: reading an
+// absent map as an empty one would grey EVERY anchor of every finding on a lagging backend.
+await mount({
+  stub: {
+    audit: auditOk({ aiEnabled: true, operationFingerprints: undefined }),
+    analyze: { mode: 'ok', response: analyzeRun() },
+    addIssue: { mode: 'ok' },
+  },
+  keepSession: true,
+});
+{
+  ck(
+    (await page.evaluate(() => window.findLeaf('op #300 — not found; re-run the analysis').length)) === 0,
+    'a server that sends NO fingerprint map greys nothing',
+  );
+  ck((await staleNotes()).length === 0, 'and marks nothing amber either', JSON.stringify(await staleNotes()));
+  const a = await anchor('op:300');
+  ck(a.n === 1 && a.role === 'button', 'every anchor stays live where the question cannot be answered', JSON.stringify(a));
+}
+
+// ═══ 20. THE FORM HALF ═════════════════════════════════════════════════════════════════════════
+head('20. «unsaved edits since the run» — decided by the hash, not by the dirty flag');
+{
+  // 200's stored fingerprint is the REAL fp8 of the step planted into the form below (canonical
+  // vector 1), so «the form agrees with the run» is a hash agreement rather than two fixtures that
+  // happen to carry the same string.
+  const FP_FORM = { ...FP_AT_RUN, 200: '1bd85c4d' };
+  const AI_FORM = {
+    audit: auditOk({ aiEnabled: true, operationFingerprints: FP_FORM }),
+    analyze: { mode: 'ok', response: analyzeRun({ operationFingerprints: FP_FORM }) },
+    addIssue: { mode: 'ok' },
+  };
+  const STEP_200 = {
+    operationNumber: 200,
+    outputUnitKey: 'Back',
+    inputKeys: ['Back panels bottom', 'Back Panels Upper'],
+  };
+
+  await mount({ stub: AI_FORM });
+  await pressAnalyze();
+
+  // `dirty: true` IS A STAND ARTEFACT AND IS SPELLED OUT AS ONE. In the product an operation field
+  // is a registered input, so typing in it dirties the form by itself; a `setValue` into an array
+  // no input is bound to does not, so the stand makes the form dirty the way case 10 does — a real
+  // edit to an unrelated field. That is also the sharper test: the note must follow the HASH, and
+  // here the dirty flag is true for a reason that has nothing to do with the step.
+  await mount({ stub: AI_FORM, keepSession: true, dirty: true, operations: [STEP_200] });
+  // THE STAND FIRST. Both halves of this case read «no note» when the plant silently did not take,
+  // and would then pass as a pair while measuring nothing at all.
+  const planted = await page.evaluate(() => ({
+    ops: window.__audit.ops(),
+    dirty: window.__audit.isDirty(),
+  }));
+  ck(
+    planted.ops.length === 1 && planted.ops[0]?.operationNumber === 200 && planted.dirty,
+    'THE STAND: the step really is in the form, and the form really is dirty',
+    JSON.stringify(planted).slice(0, 200),
+  );
+  const dirtyMatch = await staleNotes();
+  ck(
+    dirtyMatch.length === 0,
+    'a DIRTY form whose step hashes to exactly what the run read says nothing',
+    JSON.stringify(dirtyMatch),
+  );
+
+  // The same two inputs, in the other order. Nothing else about the step is different.
+  await mount({
+    stub: AI_FORM,
+    keepSession: true,
+    dirty: true,
+    operations: [{ ...STEP_200, inputKeys: [...STEP_200.inputKeys].reverse() }],
+  });
+  const swapped = await staleNotes();
+  ck(
+    swapped.length === 1 && (swapped[0] ?? '').includes('op #200 has unsaved edits since the run'),
+    'SWAPPING TWO INPUTS IS AN EDIT — and the hash noticed it, not the dirty flag',
+    JSON.stringify(swapped),
+  );
+  const a = await anchor('op:200');
+  ck(a.n === 1 && a.role === 'button', 'an unsaved edit does not take the jump away either', JSON.stringify(a));
+}
+
+// ═══ 21. THE FINGERPRINT PORT ══════════════════════════════════════════════════════════════════
+head('21. the fingerprint port — the nine canonical vectors of fingerprint_test.go are the oracle');
+{
+  // NUL BY CODE POINT. A raw 0x00 in this file would make grep call it binary and quietly return
+  // nothing on every future search — the same trap the module's own comment names.
+  const NUL = String.fromCharCode(0);
+  // Copied from internal/techcardanalysis/fingerprint_test.go. THESE ARE A CONTRACT, NEVER A
+  // SNAPSHOT: a disagreement means the port is wrong, and the value is not updated to match it.
+  const VECTORS = [
+    ['Back', ['Back panels bottom', 'Back Panels Upper'], '1bd85c4d', 'a join with two unit inputs'],
+    ['', ['blazer'], '5c14ea94', 'a processing step: the empty output serializes as an EMPTY STRING'],
+    ['pocket base', ['01ARZ3NDEKTSV4RRFFQ69G5FAV', 'pocket base'], '9bd4f24a', 'an absorbing step: the piece ULID goes in raw, with no kind prefix'],
+    ['', [], '2b1f7919', 'no output and no inputs — the payload is still «tcfp1» and one separator'],
+    ['Плечевая', ['плечевая'], '46e2eab4', 'utf-8 leaves as bytes and case is preserved'],
+    ['Base', [' x'], '4e795fdf', 'a leading space is PART OF THE KEY'],
+    ['Base', ['x'], 'dc4d7be7', '…and the same step without it is a different fingerprint'],
+    ['base', [' x'], 'e31589b1', 'the OUTPUT key’s case distinguishes two units'],
+    ['Back', ['Back Panels Upper', 'Back panels bottom'], '75569dd3', 'input ORDER is a fact of the step and is never sorted away'],
+  ];
+  const got = await page.evaluate(
+    (vs) => vs.map(([o, i]) => window.__audit.fp(o, i)),
+    VECTORS.map((v) => [v[0], v[1]]),
+  );
+  for (let i = 0; i < VECTORS.length; i++) {
+    const [o, ins, want, why] = VECTORS[i];
+    ck(
+      got[i] === want,
+      `fp(${JSON.stringify(o)}, ${JSON.stringify(ins)}) = ${want} — ${why}`,
+      got[i] === want ? '' : `got ${got[i]}`,
+    );
+  }
+  // The table's own guard, mirroring TestFingerprintVectorsAreDistinct: a table where two rows
+  // shared an expectation would pass while proving nothing about the pair it exists to separate.
+  ck(
+    new Set(VECTORS.map((v) => v[2])).size === VECTORS.length,
+    'the nine expectations are nine DIFFERENT values',
+  );
+  // A second, independent oracle for the payload itself. It cannot vouch for the table — that came
+  // from Go — but it does catch a port that agrees with a mistyped table.
+  const byNode = VECTORS.map(([o, ins]) =>
+    createHash('sha256').update(['tcfp1', o, ...ins].join(NUL), 'utf8').digest('hex').slice(0, 8),
+  );
+  ck(
+    JSON.stringify(byNode) === JSON.stringify(VECTORS.map((v) => v[2])),
+    'and node’s own sha256 over the §9 payload agrees with all nine',
+    JSON.stringify(byNode),
+  );
+
+  const mapped = await page.evaluate(() =>
+    window.__audit.formFps([
+      { operationNumber: 30, outputUnitKey: 'Back', inputKeys: ['Back panels bottom', 'Back Panels Upper'] },
+      { operationNumber: 0, outputUnitKey: 'Back', inputKeys: ['Back panels bottom'] },
+      { outputUnitKey: 'X', inputKeys: [] },
+      { operationNumber: 470, outputUnitKey: '', inputKeys: ['blazer'] },
+    ]),
+  );
+  ck(
+    mapped['30'] === '1bd85c4d' && mapped['470'] === '5c14ea94',
+    'the map builder keys by the STRING number — the shape protojson sends a map<int32,string> in',
+    JSON.stringify(mapped),
+  );
+  ck(
+    Object.keys(mapped).length === 2,
+    'and a step with no number is skipped: it has no anchor anyone could ask about',
+    JSON.stringify(Object.keys(mapped)),
+  );
+}
 
 // ─── VERDICT ───────────────────────────────────────────────────────────────────────────────────
 ck(pageErrors.length === 0, 'no page errors over the whole run', pageErrors.join(' | '));
