@@ -83,10 +83,13 @@ function Harness({ concept, hiddenText }: { concept: string; hiddenText: string 
         <div hidden={hidden} data-probe='hidden-box'>
           <TextareaField name='hidden' label='hidden' rows={2} />
         </div>
-        {/* Поле ВНУТРИ СВОЕГО СКРОЛЛЕРА, у нижнего края. Ровно та конфигурация, в которой замерено,
-            что Chromium подрезает scrollTop на схлопывании и НЕ возвращает его сам: у документа
-            подрезку обычно чинит scroll anchoring, у вложенного скроллера — нет. */}
-        <div data-probe='scroll-box' style={{ height: 300, overflowY: 'auto' }}>
+        {/* Поле ВНУТРИ СВОЕГО СКРОЛЛЕРА, у нижнего края. `overflow-anchor: none` здесь несущий
+            (правка ревьюера): с обычным скроллером scroll anchoring Chromium возвращал подрезку
+            сам, и снятие страховки (--mutate-scroll) оставалось зелёным. Без anchoring'а — Safari,
+            любой контейнер с overflow-anchor: none — подрезка остаётся навсегда; это ровно та
+            раскладка, ради которой страховка в примитиве написана, и единственная, в которой её
+            снятие видно замеру (1092 → 948). */}
+        <div data-probe='scroll-box' style={{ height: 300, overflowY: 'auto', overflowAnchor: 'none' }}>
           <div style={{ height: 1200 }} />
           <Textarea name='inbox' rows={2} defaultValue={'l1\nl2\nl3\nl4\nl5'} />
           <div style={{ height: 40 }} />
