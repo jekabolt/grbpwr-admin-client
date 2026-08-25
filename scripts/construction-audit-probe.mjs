@@ -224,7 +224,13 @@ const CHIP_BROKEN = `  return (
 // into a span, which on a live card changes nothing a user could feel and everything about whether
 // the rule survives to the next release.
 const FILER_FIX = `  return (
-    <Button type='button' variant='underline' size='xs' className='shrink-0' onClick={() => onFile()}>
+    <Button
+      type='button'
+      variant='underline'
+      size='xs'
+      className='shrink-0'
+      onClick={() => onFile()}
+    >
       file as issue
     </Button>
   );`;
@@ -2239,24 +2245,39 @@ head('22. the ai block opens closed — but a closed block never reads as a clea
     'the control names how many are behind it, not just «show»',
   );
 
-  // Opening and closing again, by the control.
-  await openAiReview();
-  const opened = await page.evaluate(() => window.aiText());
-  ck(opened.includes(norm(M_MISSING.title)), 'pressing it opens the body', opened.slice(0, 120));
-  await pick('hide', 0);
-  await clickHit();
-  const closedAgain = await page.evaluate(() => window.aiText());
+  // ЧЕСТНАЯ ГРАНИЦА СТЕНДА. Всё, что ниже, — про СВОРАЧИВАНИЕ восстановленного прогона, и оно
+  // проверяемо только если прогон действительно пережил перезагрузку. Когда сессия не пишется
+  // (это ровно то, что делает --mutate-session-write-off), восстанавливать нечего: `pick('hide')`
+  // не найдёт органа, а `clickHit()` провисит тридцать секунд и оборвёт ВЕСЬ прогон — то есть
+  // мутация, обязанная дать чистый красный, дала бы «не запускалось», а это НЕ вердикт. Поэтому
+  // отсутствие восстановленного прогона здесь — один честный FAIL стенда, а не зависание; сама
+  // потеря сессии краснеет в своём случае, где она и живёт.
+  const sessionHeld = restored.includes(norm(MODEL_SLUG));
   ck(
-    !closedAgain.includes(norm(M_MISSING.title)),
-    'and pressing it again closes the body',
-    closedAgain.slice(0, 120),
+    sessionHeld,
+    'THE STAND: the run survived the reload — without it the fold below tests nothing',
+    restored.slice(0, 160),
   );
-  const foldCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
-  ck(
-    foldCalls === 0,
-    'OPENING AND CLOSING SPENDS NOTHING — it is a fold, not a re-run',
-    `analyze calls on this mount = ${foldCalls}`,
-  );
+  if (sessionHeld) {
+    // Opening and closing again, by the control.
+    await openAiReview();
+    const opened = await page.evaluate(() => window.aiText());
+    ck(opened.includes(norm(M_MISSING.title)), 'pressing it opens the body', opened.slice(0, 120));
+    await pick('hide', 0);
+    await clickHit();
+    const closedAgain = await page.evaluate(() => window.aiText());
+    ck(
+      !closedAgain.includes(norm(M_MISSING.title)),
+      'and pressing it again closes the body',
+      closedAgain.slice(0, 120),
+    );
+    const foldCalls = (await netCalls()).filter((c) => c === 'AnalyzeTechCardConstruction').length;
+    ck(
+      foldCalls === 0,
+      'OPENING AND CLOSING SPENDS NOTHING — it is a fold, not a re-run',
+      `analyze calls on this mount = ${foldCalls}`,
+    );
+  }
 }
 
 // ─── VERDICT ───────────────────────────────────────────────────────────────────────────────────
