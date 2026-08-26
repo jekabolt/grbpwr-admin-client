@@ -436,6 +436,57 @@ ck(sweep.filter((r) => r.h <= sweep[0].vh).every((r) => r.bare === 0),
   'на поле НЕ ВЫШЕ вьюпорта дефекта нет ни при каком фокусе',
   sweep.filter((r) => r.h <= sweep[0].vh).map((r) => `${r.h}:${r.bare}`).join(' '));
 
+// ── 5.Д ПОЛЕ НИЖЕ ФОЛЬДА ПРИ ОБЫЧНОЙ ВЫСОТ�Е. Все замеры выше ставили кнопку к ВЕРХНЕЙ кромке —
+//      это лучший случай для НИЗА поля: 60vh целиком помещается на экране. В жизни страница стоит
+//      как угодно: кнопка у нижней кромки — и поле уходит низом за фольд, а каретка вместе с ним.
+//      Если дефект ловится и здесь, дергать `resize-y` не нужно вовсе, и он куда ближе к обычному
+//      дню, чем «поле, растянутое вдвое выше экрана».
+//
+//      Заметка КОРОТКАЯ и помещается в поле целиком: именно тогда у поля нет запаса прокрутки
+//      внутри себя и показать каретку может только страница (см. 5.Г).
+const SHORT = Array.from({ length: 14 }, (_, i) => `short note line ${i + 1}`).join('\n');
+for (const h of [540, 300]) {
+  await stand({ heightPx: h });
+  await page.evaluate(([t]) => window.__formatBar.set(t, t.length, t.length), [SHORT]);
+  const parked = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').trim() === 'bold');
+    const abs = b.getBoundingClientRect().top + window.scrollY;
+    // кнопка у НИЖНЕЙ кромки вьюпорта — самое низкое положение страницы, при котором её ещё жмут
+    window.scrollTo(0, Math.round(abs - (window.innerHeight - 60)));
+    const a = document.querySelector('[data-area]').getBoundingClientRect();
+    return { areaBottom: Math.round(a.bottom), vh: window.innerHeight,
+             inner: (() => { const el = document.querySelector('[data-area]'); return el.scrollHeight - el.clientHeight; })() };
+  });
+  await page.waitForTimeout(120);
+  const cold = await pressMouse({ keepFocus: false });
+  ck(cold.reachable && cold.changed,
+    `ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ низ/h=${h}: кнопка достижима и текст изменился`,
+    `достижима=${cold.reachable} изменился=${cold.changed}`);
+  ck(parked.areaBottom > parked.vh,
+    `низ/h=${h}: низ поля действительно ЗА ФОЛЬДОМ`,
+    `низ поля ${parked.areaBottom}, вьюпорт ${parked.vh}, запас прокрутки внутри поля ${parked.inner}`);
+  ck(cold.after === cold.before,
+    `НИЗ ПОЛЯ ЗА ФОЛЬДОМ, h=${h}, короткая заметка, фокус снаружи: прокрутка не сдвинулась`,
+    `${cold.before} → ${cold.after} (сдвиг ${cold.after - cold.before})`);
+
+  // ТОТ ЖЕ ЖЕСТ, НО ФОКУС В ПОЛЕ. Так выглядит обычное форматирование: текст выделили мышью,
+  // значит фокус в поле, а `onMouseDown` кнопки его оттуда не отпускает. `focus()` на УЖЕ
+  // сфокусированном элементе не делает ничего — граница дефекта проходит ровно здесь.
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').trim() === 'bold');
+    const abs = b.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo(0, Math.round(abs - (window.innerHeight - 60)));
+  });
+  await page.waitForTimeout(120);
+  const hot = await pressMouse({ keepFocus: true });
+  ck(hot.reachable && hot.changed && hot.wasFocused,
+    `ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ низ/h=${h}/фокус в поле: кнопка сработала при фокусе в поле`,
+    `достижима=${hot.reachable} изменился=${hot.changed} фокус=${hot.wasFocused}`);
+  ck(hot.after === hot.before,
+    `НИЗ ПОЛЯ ЗА ФОЛЬДОМ, h=${h}, ФОКУС В ПОЛЕ: прокрутка не сдвинулась`,
+    `${hot.before} → ${hot.after} (сдвиг ${hot.after - hot.before})`);
+}
+
 // ── 5.6 КОНТРОЛЬ ПРИБОРА: прокрутка вообще подвижна в этой конфигурации. Без него все три
 //      зелёные строки выше были бы одинаково зелёными на странице, которая не прокручивается.
 const movable = await page.evaluate(() => {
