@@ -108,30 +108,47 @@ export function ImportReportCounters({ counters }: { counters: TechCardImportCou
 
 /**
  * ЧТО СЧИТАЕТСЯ «ЦВЕТОМ, КОТОРОГО НА КАРТОЧКЕ ЕЩЁ НЕТ». Не всякая пропущенная строка колорвея —
- * работа для этой кнопки, и обе лишние формы стоили бы вечно висящего органа:
+ * работа для этой кнопки, и посчитать лишнюю значит повесить орган на экран НАВСЕГДА: нажатие
+ * такую строку не меняет, значит следующий отчёт снова её принесёт, и так до бесконечности.
  *
- *   - строка о ДЕТАЛИ КРОЯ (`ref: piece_line_key=…`): деталь назвала ткань ПОКОЛОРВЕЙНО, а
- *     нажатие на этот вопрос не отвечает. Сервер её сознательно не трогает (`supersedes` в
- *     `techcard_archive_colorways.go`, FORMAT.md §5.3), поэтому она переживает ЛЮБОЕ нажатие —
- *     гейт по ней держал бы кнопку на экране навсегда, в том числе после полностью удачного
- *     применения.
- *   - строка о РЯДЕ РЕЦЕПТА (`color_code=X bom_line_key=…`): цвет-то завёлся, не приехал один
- *     ряд, и повтор его не чинит.
+ * ГЕЙТ СТОИТ НА КОДЕ ПРИЧИНЫ, А НЕ НА ФОРМЕ REF, и это не вкусовщина. Раньше он читал «статус
+ * skipped + ref начинается с `color_code=` + в ref нет ` bom_line_key=` / ` piece_line_key=`», то
+ * есть пытался угадать смысл строки по её адресу. Форма ref — не контракт: сервер волен назвать
+ * строку ряда рецепта как угодно (и называет — `color_code=X recipe_row=N` у ряда, который не
+ * назвал НИ ОДНОГО ключа), а код причины — единственная закрытая ось отчёта
+ * (`internal/techcardarchive/reasons.go`). Угадывание стоило двух ложных «pending»:
  *
- * Обе отличаются от строки самого цвета ФОРМОЙ ref: `tcacRef` даёт ровно `color_code=<код>`, а
- * `tcacRowRef` дописывает к нему ` bom_line_key=…` / ` piece_line_key=…`. Отсюда две проверки, а
- * не «нет пробела»: код цвета берётся из payload вербатимом, и запрет пробела в нём был бы нашим
- * изобретением, а не контрактом.
+ *   - РЯД РЕЦЕПТА БЕЗ КЛЮЧЕЙ (`color_code=X recipe_row=N`): цвет завёлся, не приехал один ряд,
+ *     повтор его не чинит — а старый гейт проходил по всем четырём условиям;
+ *   - КОЛОРВЕЙ С ПУСТЫМ КОДОМ ЦВЕТА (`color_code=` / `archive_row_invalid`): сломан сам архив, и
+ *     на ЭТОЙ стороне такую дыру не закрывает ничто (см. комментарий к `ReasonArchiveRowInvalid`).
+ *     Кнопка вылечить её не может в принципе.
+ *
+ * ЛЕЧАТСЯ НАЖАТИЕМ РОВНО ДВА КОДА, и множество закрыто:
+ *
+ *   - `colorways_not_applied` — фиксация написала по строке на каждый цвет payload'а, ни один не
+ *     создан; это и есть работа кнопки;
+ *   - `colorway_not_created` — предыдущее нажатие БЫЛО и цвет не завёлся (нет цвета в словаре,
+ *     цвет занят архивным колорвеем, дедлок). Все три инструкции сервера кончаются словами «press
+ *     the button again».
+ *
+ * `entity === 'colorway'` ОБЯЗАТЕЛЕН отдельно: `colorways_not_applied` пишется ещё и на РАСКЛАДКУ
+ * (`EntityMarker`, degraded — раскладка мерилась на одном колорвее), и это не работа для кнопки.
+ * Проверка формы ref остаётся ровно одна и ровно за одним: `colorways_not_applied` приезжает и на
+ * ДЕТАЛЬ КРОЯ (`ref: piece_line_key=…` — деталь назвала ткань поколорвейно), а такую строку сервер
+ * сознательно НЕ трогает (`supersedes` в `techcard_archive_colorways.go`, FORMAT.md §5.3): она
+ * переживает любое нажатие, в том числе полностью удачное.
  */
 const COLOUR_REF = /^color_code=/;
-const ROW_REF = / (?:bom|piece)_line_key=/;
+const CURED_BY_PRESSING = new Set(['colorways_not_applied', 'colorway_not_created']);
 
 function pendingColours(lines: TechCardImportReportLine[]): number {
   const refs = new Set<string>();
   for (const l of lines) {
-    if (l.entity !== 'colorway' || l.status !== 'skipped') continue;
+    if (l.entity !== 'colorway') continue;
+    if (!CURED_BY_PRESSING.has(l.reason ?? '')) continue;
     const ref = l.ref ?? '';
-    if (!COLOUR_REF.test(ref) || ROW_REF.test(ref)) continue;
+    if (!COLOUR_REF.test(ref)) continue;
     refs.add(ref);
   }
   return refs.size;
