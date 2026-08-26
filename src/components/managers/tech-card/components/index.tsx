@@ -19,7 +19,6 @@ import {
   techCardApprovalStateOptions,
   techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
-  techCardMeasurementUnitOptions,
   techCardPurposeFormOptions,
   techCardStageOptions,
 } from 'constants/filter';
@@ -45,6 +44,7 @@ import { Row } from 'ui/components/row';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Drawer } from 'ui/components/drawer';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { TechCardImportBanner } from '../import/import-banner';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
@@ -421,6 +421,9 @@ export function TechCardForm({
   const lockOverride = useRef<number | null>(null);
   const [blockersOpen, setBlockersOpen] = useState(false);
   const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
+  // Экспорт архива: держим только «идёт запрос», чтобы не выпустить второй по двойному клику.
+  // Ссылку НЕ храним — она presigned и живёт 10 минут, а хранимая ссылка молча протухает в руках.
+  const [exportingArchive, setExportingArchive] = useState(false);
   // Drawer state lives in the URL so it survives a refresh and can be linked to.
   const tasksOpen = params.get('tasks') === '1';
   // The field a failed save should walk the user to. `nonce` re-arms the effect when the SAME field
@@ -1256,6 +1259,59 @@ export function TechCardForm({
 
   const saving = form.formState.isSubmitting;
 
+  /**
+   * ЭКСПОРТ АРХИВА КАРТОЧКИ. Сервер кладёт zip в бакет и отдаёт presigned-ссылку; скачивает её
+   * БРАУЗЕР, а не мы — не fetch с blob'ом: файл может весить сотни мегабайт, и тянуть его в
+   * память вкладки, чтобы тут же отдать на диск, незачем.
+   *
+   * НО НЕ `window.open`. Ссылку выдаёт сервер, то есть открытие происходит ПОСЛЕ `await`, а
+   * пользовательская активация вкладки к тому моменту может уже погаснуть — замерено, что
+   * `navigator.userActivation.isActive` гаснет где-то между 4.9 и 5.2 секундами после клика, а
+   * упаковка карты с медиа и выкройками эту секунду переживает не всегда. Погасший клик — это
+   * блокировщик попапов, то есть экспорт, который «ничего не сделал».
+   *
+   * Клик по созданному `<a>` под блокировщик не попадает вовсе — тот же приём, что в
+   * `accounting/reports/components/xml-export-button.tsx`. Атрибут `download` здесь только
+   * заявление о намерении: ссылка ведёт на чужой origin (бакет), и там браузер его игнорирует —
+   * и имя файла, и само «скачать, а не открыть» приезжают из `response-content-disposition`,
+   * который presign проставляет всегда (`bucket/archive.go`, `download=true`).
+   *
+   * Ссылка живёт 10 минут и нигде не запоминается: протухшую повторяют новым экспортом.
+   */
+  async function handleExportArchive() {
+    if (!numId || exportingArchive) return;
+    setExportingArchive(true);
+    try {
+      const res = await adminService.ExportTechCardArchive({ techCardId: numId });
+      // url приезжает с провода как `string | undefined`, но при EmitUnpopulated незаполненное
+      // поле — ЯВНЫЙ null. Проверка на falsy покрывает оба, `=== undefined` не покрыло бы.
+      if (!res.url) {
+        showMessage('export produced no link — try again', 'error');
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = res.url;
+      link.download = '';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Дыры архива (пропавшее медиа, нечитаемая выкройка) экспорт НЕ роняют — сервер перечисляет
+      // их в манифесте. Молчать о них здесь значило бы отдать неполный архив как полный.
+      const holes = res.manifest?.holes?.length ?? 0;
+      showMessage(
+        holes > 0
+          ? `archive exported — ${holes} item(s) could not be included`
+          : 'archive exported',
+        holes > 0 ? 'error' : 'success',
+      );
+    } catch (error) {
+      showMessage(techCardErrorMessage(error, 'export failed'), 'error');
+    } finally {
+      setExportingArchive(false);
+    }
+  }
+
   return (
     <Form {...form}>
       {/* TWO-TIER CHROME (-mx-2.5 cancels the Layout content px-2.5 so the bar spans full width).
@@ -1321,6 +1377,21 @@ export function TechCardForm({
                     появился, блок под шапкой берёт это действие на себя, и кнопка исчезает —
                     см. шапку style-projects.tsx. */}
                 <StyleProjectsAction techCardId={numId} />
+                {/* Гейт — ПРАВО ЗАПИСИ, тот же `canWrite(SECTION.techCards)`, что у соседних
+                    пишущих действий шапки, а не право чтения карточки: архив уносит приватные
+                    выкройки и паспорта материалов за пределы панели одним файлом, и сервер
+                    классифицировал вызов как wr(tech_cards). Читатель карточки его не увидит. */}
+                {canWrite(SECTION.techCards) && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='sm'
+                    loading={exportingArchive}
+                    onClick={handleExportArchive}
+                  >
+                    export archive
+                  </Button>
+                )}
               </>
             )}
             {canWrite(SECTION.techCards) && !frozen && isEditMode && (
@@ -1417,6 +1488,11 @@ export function TechCardForm({
           </div>
         )}
       </div>
+
+      {/* ОТКУДА ЭТА КАРТОЧКА ВЗЯЛАСЬ. Стоит В ШАПКЕ и ВНЕ `fieldset disabled={frozen}`: отчёт
+          импорта читают и на замороженной, выпущенной карте — заморозка гасит редактирование, а
+          не право узнать, что при импорте потерялось. Карточка без импорта не рисует ничего. */}
+      {isEditMode && numId ? <TechCardImportBanner techCardId={numId} /> : null}
 
       {isEditMode && numId ? (
         <LifecycleStrip
@@ -1808,11 +1884,13 @@ export function TechCardForm({
                     label='target gender'
                     items={techCardGenderOptions}
                   />
-                  <SelectField
-                    name='measurementUnit'
-                    label='measurement unit'
-                    items={techCardMeasurementUnitOptions}
-                  />
+                  {/* measurement unit больше не рисуется: мы всегда меряем в миллиметрах, а орган
+                    в хедере только приглашал ошибиться. Поле НЕ удалено ни из схемы, ни из
+                    маппера — как легаси-`status` выше, оно продолжает круговой рейс
+                    GET → defaultValues → full-replace UPSERT нетронутым. Карты, сохранённые
+                    когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
+                    (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
+                    бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
                 </Section>
               </SectionStack>
 
@@ -1830,17 +1908,38 @@ export function TechCardForm({
                 </Section>
               )}
 
-              <Section title='category & base model'>
-                <HeaderMetaFields />
+              {/* У aux-карты категорию задаёт AUXILIARY TYPE, а гарментный браузер категорий
+                дублировал бы её другим словарём. Заголовок секции условный: иначе он обещает
+                орган, которого нет. «base model & sample size» остаётся ВСЕГДА — себестоимость
+                считается по норме базового размера без фолбэка, и aux-карта (кофр кроится и
+                шьётся как изделие) обязана иметь путь к костингу. Сохранённый categoryId не
+                стирается: он живёт в форме и уезжает в full-replace нетронутым. */}
+              <Section title={isAux ? 'base model & sample size' : 'category & base model'}>
+                <HeaderMetaFields hideCategory={isAux} />
               </Section>
 
-              <Section title='style facts — fit / care (shared by all colourways)'>
+              {/* fit — свойство посадки изделия, care принадлежит вещи, а не самому ярлыку,
+                storefront-превью — товару, которым aux не бывает. Поэтому у aux трио спрятано.
+                Но панель НЕ снимается с монтажа (hideFitCare, а не `!isAux &&`): она единственный
+                писатель brand/collection/season/targetGender — их редактируют в хедере, а
+                UpdateTechCard их намеренно не пишет. Care при этом достижим на вкладке LABELS —
+                это буквально то же поле. */}
+              {isAux ? (
                 <StyleFactsField
                   styleId={numId}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                   careEntries={techCard?.careEntries}
+                  hideFitCare
                 />
-              </Section>
+              ) : (
+                <Section title='style facts — fit / care (shared by all colourways)'>
+                  <StyleFactsField
+                    styleId={numId}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                    careEntries={techCard?.careEntries}
+                  />
+                </Section>
+              )}
 
               <Section title='concept & construction description'>
                 {/* concept → details → notes is the order the tech pack's description sheet prints

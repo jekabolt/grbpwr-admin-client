@@ -22,9 +22,11 @@ import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
   applyFilters,
+  assigneePiles,
   emptyFilters,
   filtersActive,
   FiltersBar,
+  setFilter,
   TaskFilters,
 } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
@@ -121,10 +123,19 @@ export function Tasks() {
   }, [countsData]);
 
   // Persist filters across navigation (opening a task detail unmounts the board).
+  //
+  // ВОССТАНОВЛЕНИЕ ИДЁТ ЧЕРЕЗ ТО ЖЕ `setFilter`, ЧТО И ЩЕЛЧОК ПО ЧИПУ. Раньше сохранённый JSON
+  // раскладывался в состояние напрямую — то есть МИНУЯ правило взаимного исключения «мои ↔
+  // конкретный человек». Из сегодняшнего кода такой набор недостижим (оба поля родились одной
+  // волной, и записывает их только `setFilter`), но недостижимость держалась на том, что осей у
+  // фильтра ровно две; с третьей это перестанет быть очевидным, а хранилище — вход, который
+  // переживает выкаты и правится руками из консоли. Правило обязано стоять на КАЖДОМ входе в
+  // состояние, а не на одном из двух.
   const [filters, setFilters] = useState<TaskFilters>(() => {
     try {
       const raw = sessionStorage.getItem(FILTERS_KEY);
-      return raw ? { ...emptyFilters, ...(JSON.parse(raw) as Partial<TaskFilters>) } : emptyFilters;
+      if (!raw) return emptyFilters;
+      return setFilter(emptyFilters, JSON.parse(raw) as Partial<TaskFilters>);
     } catch {
       return emptyFilters;
     }
@@ -137,6 +148,13 @@ export function Tasks() {
     () => applyFilters(tasks, filters, account?.username),
     [tasks, filters, account?.username],
   );
+
+  /**
+   * ЛЮДИ РЯДА СЧИТАЮТСЯ ПО НЕСУЖЕННЫМ ЗАДАЧАМ ЭТОЙ ДОСКИ. Не по `visible`: иначе клик по лицу
+   * обнулил бы соседние числа и ряд отвечал бы на вопрос о самом себе. Архивные входят в счёт
+   * ровно тогда, когда зажжён чип archived, — потому что именно тогда они и лежат в `tasks`.
+   */
+  const people = useMemo(() => assigneePiles(tasks, filters.assignee), [tasks, filters.assignee]);
 
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);
@@ -216,6 +234,7 @@ export function Tasks() {
               filters={filters}
               onChange={setFilters}
               showMine={!!account?.username}
+              people={people}
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived((v) => !v)}
               onClear={clearFilters}

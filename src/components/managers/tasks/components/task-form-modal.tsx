@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DatePicker } from 'ui/components/date-picker';
 import Input from 'ui/components/input';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
 import { orderedMedia } from '../api/tasksService';
 import { TaskFormValues } from '../api/types';
 import {
@@ -17,11 +16,11 @@ import {
   STATUSES,
   toOptions,
 } from '../utils/meta';
-import { AssigneeSelect } from './assignee-select';
+import { AssigneesPicker } from './assignees-picker';
+import { DescriptionEditor } from './description-editor';
 import { LinkEditor } from './link-editor';
 import { FileAttachments } from './file-attachments';
 import { MediaAttachments } from './media-attachments';
-import { MediaRefRow } from './media-ref-row';
 
 /**
  * tskForm v2 — a real two-column editor inside the app's one modal shell
@@ -61,12 +60,23 @@ const SAVE_HOTKEY = /Mac|iPhone|iPad/.test(
   ? '⌘ + enter'
   : 'ctrl + enter';
 
+/**
+ * Подпись поля БЕЗ `<label>`. Нужна там, где под подписью стоит не одиночный контрол, а узел с
+ * СОБСТВЕННЫМИ кнопками (пикер исполнителей, редактор описания): `<label>` делает клик по слову
+ * вторым нажатием на первую кнопку внутри — то есть открывает пикер от щелчка по заголовку.
+ */
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+      {children}
+    </Text>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className='flex flex-col gap-1'>
-      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-        {label}
-      </Text>
+      <FieldLabel>{label}</FieldLabel>
       {children}
     </label>
   );
@@ -81,11 +91,20 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     formState: { errors },
   } = useForm<TaskFormValues>({ defaultValues: initial });
 
-  // Reseed when the modal opens for a different task / column.
+  /**
+   * ПЕРЕСЕВ ЧЕРНОВИКА — ТОЛЬКО НА ОТКРЫТИЕ. Раньше эффект висел ещё и на `initial`, а тот
+   * пересобирается от содержимого карточки: значит любое перечитывание с изменившимся полем
+   * делало `reset` ПОД ОТКРЫТОЙ МОДАЛКОЙ и стирало всё набранное, молча и без отмены по ⌘Z.
+   *
+   * Люк был и раньше, но редко срабатывал — карточка почти не перечитывалась сама. Теперь у
+   * чтения есть `refetchOnWindowFocus` (инлайн-правка без него жила бы с часовой несвежестью),
+   * и «отошёл, вернулся» стало обычным поводом для перечитывания. Цена люка выросла, поэтому
+   * зависимость снята: модалку открывают закрытой, и каждое открытие засеивает её заново.
+   */
   useEffect(() => {
     if (open) reset(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initial]);
+  }, [open]);
 
   // The combined type-first link picker edits all eight FKs at once, so it reads them
   // via useWatch and writes them back through setValue rather than one Controller each.
@@ -100,12 +119,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     projectTopicId: useWatch({ control, name: 'projectTopicId' }),
   };
 
-  // Вставка ссылки правит поле СНАРУЖИ Controller'а: она меняет строку целиком и возвращает
-  // каретку, поэтому значение читается через useWatch, а пишется через setValue — с
-  // `shouldDirty`, иначе форма посчитала бы себя нетронутой и правку было бы не сохранить.
-  const description = useWatch({ control, name: 'description' });
   const mediaIds = useWatch({ control, name: 'mediaIds' });
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const attachments = useMemo(() => orderedMedia(mediaIds ?? []), [mediaIds]);
   const mediaAnnotations = useWatch({ control, name: 'mediaAnnotations' }) ?? [];
 
@@ -184,33 +198,22 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
           {/* Left — the writing */}
           <div className='flex min-w-0 flex-col gap-3'>
             <div className='flex flex-col gap-1'>
-              <Field label='description'>
-                <Controller
-                  control={control}
-                  name='description'
-                  render={({ field }) => (
-                    <Textarea
-                      ref={descriptionRef}
-                      variant='secondary'
-                      placeholder='add details or acceptance criteria…'
-                      className='mb-0 min-h-32 border border-borderColor'
-                      value={field.value}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        field.onChange(e.target.value)
-                      }
-                      onBlur={field.onBlur}
-                    />
-                  )}
-                />
-              </Field>
-              {/* Ряд стоит ПОД полем, а не рядом с вложениями в правой колонке: вставляют его в
-                  текст, и рука не должна уходить через весь модал к списку вложений. Снаружи
-                  `<label>`: кнопка внутри подписи к полю — это второй адресат одного клика. */}
-              <MediaRefRow
-                media={attachments}
-                targetRef={descriptionRef}
-                value={description ?? ''}
-                onChange={(next) => setValue('description', next, { shouldDirty: true })}
+              {/* ПОДПИСЬ, А НЕ `<label>`: внутри редактора живут кнопки (панель форматирования,
+                  «preview», ряд `▣`), а кнопка внутри подписи к полю — это второй адресат одного
+                  клика. Ряд `▣` и панель переехали ВНУТРЬ редактора: они нужны и здесь, и на
+                  инлайн-правке детальной, и две копии разошлись бы на первой правке. */}
+              <FieldLabel>description</FieldLabel>
+              <Controller
+                control={control}
+                name='description'
+                render={({ field }) => (
+                  <DescriptionEditor
+                    ariaLabel='task description'
+                    media={attachments}
+                    value={field.value}
+                    onChange={(next) => field.onChange(next)}
+                  />
+                )}
               />
             </div>
             <Field label='priority'>
@@ -293,15 +296,28 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 />
               </Field>
             </div>
-            <Field label='assignee'>
+            {/* ИСПОЛНИТЕЛЕЙ МОЖЕТ БЫТЬ НЕСКОЛЬКО, и поле формы — настоящий список. «Главного»
+                в модели нет: порядок — это порядок показа аватарок, не старшинство.
+
+                ОДИН `Controller`, А НЕ ДВА `useFieldArray`. Мутаторы field array не вещают друг
+                другу, и два массива на одно имя расходятся молча — для списка исполнителей это
+                прямая ловушка.
+
+                ПОДПИСЬ, А НЕ `<label>`: внутри пикера живут кнопка-триггер и поле поиска, и
+                обёртка-подпись сделала бы клик по слову «assignees» вторым нажатием триггера. */}
+            <div className='flex flex-col gap-1'>
+              <FieldLabel>assignees</FieldLabel>
               <Controller
                 control={control}
-                name='assignee'
+                name='assignees'
                 render={({ field }) => (
-                  <AssigneeSelect value={field.value} onChange={field.onChange} />
+                  <AssigneesPicker
+                    value={field.value}
+                    onChange={(next) => field.onChange(next)}
+                  />
                 )}
               />
-            </Field>
+            </div>
             <Field label='labels (comma separated)'>
               <Controller
                 control={control}

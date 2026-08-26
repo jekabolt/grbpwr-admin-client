@@ -1,3 +1,4 @@
+import type { common_MediaFull } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { dataUrlToFile } from './dataUrlToFile';
 import {
@@ -68,6 +69,15 @@ export type PreviewItem = {
   attempts: number;
   /** id, который бакет вернул на успехе. */
   mediaId?: number;
+  /**
+   * Готовое медиа целиком — то же, что отдаёт выбор из библиотеки.
+   *
+   * Полосе библиотеки хватает `mediaId`: она доставляет файлы В БИБЛИОТЕКУ, и адрес там больше
+   * никому не нужен. Приёмке слота нужен весь объект: её колбэк — тот же самый, что у выбора
+   * мышью, и собирать его заново по id значило бы спрашивать бакет о том, что он только что
+   * сам и ответил. Поле аддитивное: полоса его не читает, её поведение не меняется.
+   */
+  media?: common_MediaFull;
   /** Кадрированный вариант (data-url), если кадрировали. */
   croppedUrl?: string;
 };
@@ -78,6 +88,15 @@ export type SkippedFile = { name: string; why: string };
 type PendingFileItem = PreviewItem & { file: File };
 
 const SENDABLE: PendingStatus[] = ['wait', 'error'];
+
+/**
+ * Статусы, по которым обмер ещё вправе высказаться.
+ *
+ * Обмер приходит асинхронно и может опоздать: к его резолву строка могла уехать (`queued`,
+ * `sending`) или уже лечь в библиотеку (`done`). Писать в такую строку заново — значит менять
+ * вывод о том, чего уже не изменить.
+ */
+const RECHECKABLE: PendingStatus[] = ['wait', 'error', 'blocked'];
 
 /** «1 файл» / «2 файла» / «5 файлов». */
 export function pluralRu(n: number, one: string, few: string, many: string): string {
@@ -257,7 +276,13 @@ export function usePendingFiles() {
     // как человек нажал «отправить».
     fresh.forEach(async (item) => {
       const size = await measure(item.url, item.type === 'video');
-      const merged = { ...item, ...(size ?? {}) };
+      // ПОЗДНИЙ ОБМЕР НЕ ПЕРЕПИСЫВАЕТ ЖИВУЮ СТРОКУ. Чтение кадра — это загрузка картинки, и
+      // резолв приходит когда придёт: строку к этому времени могли отправить. Запись `blocked`
+      // поверх `sending`/`done` пометила бы «не пролезет» то, что уже улетело или уже лежит в
+      // библиотеке, — и расчёт с владельцем такой строки не увидел бы вовсе.
+      const live = itemsRef.current.find((entry) => entry.id === item.id);
+      if (!live || !RECHECKABLE.includes(live.status)) return;
+      const merged = { ...live, ...(size ?? {}) };
       const blockers = limitBreaches(merged);
       patch(item.id, {
         ...(size ?? {}),
@@ -314,6 +339,7 @@ export function usePendingFiles() {
           patch(id, {
             status: 'done',
             mediaId: media.id,
+            media,
             attempts: item.attempts + 1,
             error: undefined,
           });
@@ -363,24 +389,48 @@ export function usePendingFiles() {
   /**
    * Кадрированный вариант заменяет оригинал в отправке — и пересчитывает пределы: то, что не
    * пролезало по пикселям, после кропа законно пролезает, и наоборот.
+   *
+   * ── ДВЕ ПРАВКИ, И ОБЕ ПРО ОДНО: ПОЗДНИЙ РЕЗОЛВ ──────────────────────────────────────────
+   *
+   * 1. Запись статуса стояла БЕЗУСЛОВНОЙ. Синхронно сюда кладётся `croppedUrl`, а обмер
+   *    кадрированного варианта приходит позже — и если между этим успели нажать «отправить»,
+   *    поздний резолв клал `wait` ПОВЕРХ `done`. Строка переставала быть готовой, расчёт с
+   *    владельцем её не видел, а кадр уже лежал в библиотеке: сирота, о которой никто не узнает.
+   *    Теперь высказаться можно только про строку, которая ещё ждёт.
+   * 2. ВОЗВРАЩАЕТСЯ ОСЕВШИЙ СТАТУС. Без него «кадрировать и отправить одним нажатием» пришлось
+   *    бы городить на флагах и угадывании момента: отправка обязана начаться СТРОГО ПОСЛЕ
+   *    патча обмера, иначе гонка та же самая, только окно у неё короче. С обещанием порядок
+   *    задан по построению, а пред-проверка «не пролезет» остаётся на месте.
    */
-  const setCroppedUrl = (index: number, croppedUrl: string) => {
+  const setCroppedUrl = (index: number, croppedUrl: string): Promise<PendingStatus | null> => {
     const id = idsAt(index)[0];
-    if (!id) return;
+    if (!id) return Promise.resolve(null);
     const item = itemsRef.current.find((entry) => entry.id === id);
-    if (!item) return;
+    if (!item) return Promise.resolve(null);
+    // СТОРОЖ НАКРЫВАЕТ И НАГРУЗКУ, А НЕ ТОЛЬКО СТАТУС. Панель кропа не закрывается оттого, что
+    // строка уехала: `canCrop` гейтит ПОЯВЛЕНИЕ кнопки, а открытая панель живёт дальше — и пока
+    // пачку держит живой сосед, строка успевает стать `done`. Запись `croppedUrl` и `size` в
+    // такую строку не теряет данных, но плитка после неё говорит «cropped · N KB» про кадр,
+    // которого в бакете нет: туда уехал оригинал. Кадрировать уже отправленное нечем — для этого
+    // есть рекроп готового медиа, а не эта очередь.
+    if (!RECHECKABLE.includes(item.status)) return Promise.resolve(item.status);
 
     const size = dataUrlBytes(croppedUrl);
     patch(id, { croppedUrl, size });
 
-    measure(croppedUrl, false).then((dims) => {
-      const merged = { ...item, size, ...(dims ?? {}) };
+    return measure(croppedUrl, false).then((dims) => {
+      const live = itemsRef.current.find((entry) => entry.id === id);
+      if (!live) return null;
+      if (!RECHECKABLE.includes(live.status)) return live.status;
+      const merged = { ...live, size, ...(dims ?? {}) };
       const blockers = limitBreaches(merged);
+      const next: PendingStatus = blockers.length ? 'blocked' : 'wait';
       patch(id, {
         ...(dims ?? {}),
         blockers: blockers.length ? blockers : undefined,
-        status: blockers.length ? 'blocked' : 'wait',
+        status: next,
       });
+      return next;
     });
   };
 

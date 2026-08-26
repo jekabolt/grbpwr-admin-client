@@ -4869,6 +4869,11 @@ export type AddTaskRequest = {
   task: common_TaskInsert | undefined;
   board: common_TaskBoard | undefined;
   status: common_TaskStatus | undefined;
+  // Родитель СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где родитель едет не
+  // отдельным SetTaskParent: «создать сабтаску» обязано быть одним вызовом, а стирать здесь нечего —
+  // карточки ещё нет. Несуществующий id отвечает тем же InvalidArgument, что остальные глубокие
+  // ссылки.
+  parentTaskId: number | undefined;
 };
 
 // TaskInsert is the writable CONTENT of a task (create/update). Placement on the
@@ -4879,6 +4884,12 @@ export type AddTaskRequest = {
 export type common_TaskInsert = {
   title: string | undefined;
   description: string | undefined;
+  // DEPRECATED АЛИАС ОДНОГО РЕЛИЗА, а не «главный исполнитель». Настоящий список — assignees ниже.
+  // На ВХОДЕ читается только когда assignees пуст (тогда трактуется как список из одного); на
+  // ВЫХОДЕ равен assignees[0] или "". Снять reserved'ом СЛЕДУЮЩЕЙ волной по процедуре инвентаря
+  // retired-полей (комментарий к newAdminJSONMarshaler, internal/api/http/http.go).
+  // ПОЧЕМУ НЕ СНЯТО СРАЗУ: admin-гейтвей разбирает JSON с DiscardUnknown: false, поэтому reserved на
+  // живом поле превратил бы каждое сохранение карточки из ОТКРЫТОЙ старой вкладки в 400.
   assignee: string | undefined;
   priority: common_TaskPriority | undefined;
   dueDate: wellKnownTimestamp | undefined;
@@ -4931,6 +4942,17 @@ export type common_TaskInsert = {
   // НАБОР БЕЗ СВОЕЙ КАРТИНКИ СБРАСЫВАЕТСЯ СЕРВЕРОМ: указание на снимке, снятом с карточки,
   // нельзя ни увидеть, ни убрать, а хранить его значило бы копить невидимое.
   mediaAnnotations: common_TaskMediaAnnotations[] | undefined;
+  // ИСПОЛНИТЕЛИ КАРТОЧКИ — СПИСОК БЕЗ «ГЛАВНОГО». AdminAccount.username каждый; пусто = задачу
+  // никто не взял. Порядок = порядок показа аватарок.
+  // ПОЛНАЯ ЗАМЕНА ПРИ СОХРАНЕНИИ, как labels/media_ids: обе стороны пишет одна форма карточки, и
+  // присланный пустой список означает «исполнителей больше нет». Клиент обязан слать то, что
+  // прочитал.
+  // «Главного» в модели НЕТ намеренно: ни фильтр «мои», ни строка карточки файла, ни доска не
+  // различают первого и остальных, а различие без потребителя — это поле, которое заполняют
+  // наугад. Появись потребитель — им станет первый элемент, и контракт менять не придётся.
+  // Существование аккаунта сервером НЕ проверяется — паритет с прежним поведением одиночного
+  // assignee: пикер клиента наполняется из ListAccounts.
+  assignees: string[] | undefined;
 };
 
 export type common_TaskPriority =
@@ -5057,6 +5079,27 @@ export type common_Task = {
   // their expiring presigned urls, ride on admin.GetTaskResponse.files, because
   // this message is reused in contexts that get persisted.
   fileIds: number[] | undefined;
+  // РОДИТЕЛЬ-САБТАСКА. 0 = верхний уровень.
+  // ЧИТАЕТСЯ ЗДЕСЬ, НО МЕНЯЕТСЯ ТОЛЬКО ЧЕРЕЗ SetTaskParent, и в TaskInsert его НЕТ намеренно:
+  // содержимое карточки сохраняется полной заменой, и клиент, не знающий поля, стирал бы родителя
+  // каждым сохранением (ровно ловушка «отсутствующее поле = дефолт»). Единственное исключение —
+  // AddTaskRequest.parent_task_id, чтобы «создать сабтаску» было одним вызовом.
+  // КОЛОНКА, А НЕ ВИД СВЯЗИ: у карточки РОВНО ОДИН родитель, и в колонке два родителя невозможны
+  // физически, тогда как таблица связей потребовала бы условного UNIQUE, которого у MySQL нет.
+  // Глубина не ограничена; циклы запрещает стор.
+  parentTaskId: number | undefined;
+  // ВСЕ связи карточки: и blocks/blocked_by в обе стороны, и relates. Вид назван с точки зрения
+  // ЭТОЙ карточки (см. TaskLinkKind).
+  // ЗДЕСЬ ТОЛЬКО ЧТЕНИЕ. Пишутся связи отдельными идемпотентными AddTaskLink/DeleteTaskLink, а не
+  // полной заменой внутри TaskInsert: связь принадлежит ДВУМ карточкам сразу, и полная замена
+  // «связей карточки A» при сохранении её формы снесла бы связь, добавленную с карточки B, пока
+  // форма A была открыта.
+  links: common_TaskLink[] | undefined;
+  // Свёртка сабтасок для карточки на доске: сколько АКТИВНЫХ (незаархивированных) детей и сколько
+  // из них в DONE. Заголовки детей здесь не резолвятся — доска рисует счётчик, детальная страница
+  // берёт их фильтром ListTasks(parent_task_id).
+  subtaskTotal: number | undefined;
+  subtaskDone: number | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
@@ -5072,6 +5115,34 @@ export type common_TaskChecklistItem = {
   createdAt: wellKnownTimestamp | undefined;
 };
 
+// TaskLink — строка связи, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён в заголовок, статус и
+// доску (та же доктрина проекции, что у admin.LibraryFileTask), чтобы бейдж «заблокирована» и
+// список связей не требовали ни второго RPC, ни N+1.
+// БЛОКЕР — СОВЕТ, А НЕ ЗАМОК: сервер НЕ запрещает перевести в DONE задачу с открытыми блокерами.
+// Доска — drag-and-drop, и отказ посреди жеста хуже бейджа; заархивированный недоделанный блокер
+// замуровал бы карточку навсегда. Заблокированность считает клиент: есть BLOCKED_BY со status !=
+// DONE. Заархивированный блокер считается ОТКРЫТЫМ, пока не done, — архив прячет с доски, но не
+// отменяет «сначала то, потом это».
+export type common_TaskLink = {
+  taskId: number | undefined;
+  kind: common_TaskLinkKind | undefined;
+  title: string | undefined;
+  status: common_TaskStatus | undefined;
+  board: common_TaskBoard | undefined;
+  archived: boolean | undefined;
+};
+
+// TaskLinkKind — ВИД СВЯЗИ С ТОЧКИ ЗРЕНИЯ ВЛАДЕЛЬЦА СПИСКА, а не вид строки в хранилище.
+// В хранилище видов ДВА (blocks|relates) и на один факт приходится ОДНА строка: BLOCKED_BY — это
+// blocks, прочитанный с другого конца. Две строки на один факт позволили бы паре полусуществовать —
+// A знает, что блокирует B, а B не знает, что заблокирована.
+// RELATES симметрична и нормализуется при записи (меньший id первым), поэтому дубль (A,B)+(B,A)
+// невыразим схемой, а не только кодом.
+export type common_TaskLinkKind =
+  | "TASK_LINK_KIND_UNKNOWN"
+  | "TASK_LINK_KIND_BLOCKS"
+  | "TASK_LINK_KIND_BLOCKED_BY"
+  | "TASK_LINK_KIND_RELATES";
 // LibraryFile is one file in the shared library.
 // The three url fields are minted per response and expire — they are never
 // persisted, which is why this message lives in admin.proto rather than common.*
@@ -5716,13 +5787,17 @@ export type LibraryFileTask = {
   taskId: number | undefined;
   title: string | undefined;
   status: common_TaskStatus | undefined;
-  // assignee is an AdminAccount.username; "" = nobody is on it.
+  // DEPRECATED АЛИАС ОДНОГО РЕЛИЗА = assignees[0] или "". Настоящий список — assignees ниже; снять
+  // reserved'ом следующей волной (см. TaskInsert.assignee — там же довод про DiscardUnknown).
   assignee: string | undefined;
   // due_date unset = no deadline (the row then simply has no date, not "today").
   dueDate: wellKnownTimestamp | undefined;
   // board is the department lane, so the row can say WHERE the work lives — the
   // same file is attached from several lanes at once.
   board: common_TaskBoard | undefined;
+  // Все, кто на задаче; пусто = её никто не взял. Порядок — порядок показа аватарок, «главного»
+  // среди них нет (см. common.TaskInsert.assignees).
+  assignees: string[] | undefined;
 };
 
 export type ListLibraryFileTasksRequest = {
@@ -6056,6 +6131,10 @@ export type ListTasksRequest = {
   // Несуществующий проект отдаёт пустой список, а не отличимый отказ: у семи соседних фильтров так
   // же, и различимость сделала бы чтение оракулом по темам.
   projectTopicId: number | undefined;
+  // САБТАСКИ ЭТОЙ ЗАДАЧИ — фильтр того же списка, а не новый RPC (та же доктрина, что у
+  // project_topic_id выше): это тот же список задач, просто суженный, и он обязан идти под тем же
+  // rd(tasks). 0 = no filter.
+  parentTaskId: number | undefined;
 };
 
 export type ListTasksResponse = {
@@ -6092,6 +6171,12 @@ export type common_TaskComment = {
   author: string | undefined;
   body: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // ЖИВАЯ ссылка на аккаунт автора; 0 = аккаунта больше нет (строка author при этом остаётся).
+  // Клиент по ней решает, рисовать ли кнопку удаления; ПРОВЕРЯЕТ сервер, и проверяет он ровно эту
+  // пару — совпадение имени ПРИ живой ссылке. Одного имени мало: UNIQUE на admins.username
+  // освобождает имя при удалении аккаунта, и новый однофамилец совпал бы по строке со всей
+  // перепиской прежнего (тот же гейт и тот же довод, что у LibraryFileComment, 0316).
+  authorId: number | undefined;
 };
 
 export type ArchiveTaskRequest = {
@@ -6130,6 +6215,39 @@ export type DeleteTaskChecklistItemRequest = {
 };
 
 export type DeleteTaskChecklistItemResponse = {
+};
+
+export type SetTaskParentRequest = {
+  id: number | undefined;
+  parentTaskId: number | undefined;
+};
+
+export type SetTaskParentResponse = {
+};
+
+export type AddTaskLinkRequest = {
+  taskId: number | undefined;
+  otherTaskId: number | undefined;
+  kind: common_TaskLinkKind | undefined;
+};
+
+export type AddTaskLinkResponse = {
+};
+
+export type DeleteTaskLinkRequest = {
+  taskId: number | undefined;
+  otherTaskId: number | undefined;
+  kind: common_TaskLinkKind | undefined;
+};
+
+export type DeleteTaskLinkResponse = {
+};
+
+export type DeleteTaskCommentRequest = {
+  id: number | undefined;
+};
+
+export type DeleteTaskCommentResponse = {
 };
 
 export type GetFulfillmentBoardRequest = {
@@ -7610,6 +7728,30 @@ export type common_TechCardInsert = {
   // aware=false» превратило бы клон сезона (payload строит сервер) в тихого стирателя вида.
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
   operationWorkAware: boolean | undefined;
+  // ШЕСТОЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — про количества на связях шага (TechCardOperation.bom_quantities,
+  // 0334). Устройство и семантика — слово в слово machine_fields_aware (110),
+  // operation_kinds_aware (115) и operation_work_aware (116).
+  // ЩИТ ОБЯЗАН БЫТЬ ИМЕННО ОТКАЗОМ. Операции пишутся ПОЛНОЙ ЗАМЕНОЙ (delete+reinsert), стабильного
+  // ключа у шага нет, поэтому «донести хранимое» физически невозможно: восстановление по паре
+  // (display_order, bom_item_id) перепутало бы количества между шагами при первой же перестановке
+  // шагов в том же сохранении. Честны ровно два исхода — значение доезжает целиком либо сохранение
+  // отказывает целиком.
+  // - новый клиент ставит флаг на КАЖДОМ сохранении; серверные пути (клон сезона, сидер) — сами;
+  // - запись БЕЗ флага против карточки, где хоть на одной связи есть количество, —
+  // FailedPrecondition с предложением обновить вкладку;
+  // - запись без флага, которая тем не менее ВЕЗЁТ bom_quantities, — тот же отказ: старый бандл
+  // такого поля не знает, значит это эхо;
+  // - карточка, где количеств нет ни на одной связи, сохраняется старым бандлом ровно как
+  // раньше. Щит молчит.
+  // ПАРНОГО `*_cleared` У НЕГО НЕТ — как у 110, 115 и 116. «Количество стёрли» это рядовая правка
+  // одной связи, а не жест «снять разметку целиком»; бекстоп объявил бы такую правку аварией и
+  // сделал бы количество НЕСТИРАЕМЫМ.
+  // ФЛАГ НЕ ФИЛЬТРУЕТ ПОЛЯ: разбор bom_quantities идёт всегда, независимо от флага. «Игнорировать
+  // при aware=false» превратило бы клон сезона (payload строит сервер и транспортных флагов не
+  // эмитит) в тихого стирателя количеств.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции — которым бандлом сохранили
+  // карточку, не то, от чего может зависеть подпись.
+  bomQtyAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -7852,6 +7994,26 @@ export type common_TechCardBomItem = {
   // «Нет коэффициента» и «не знаем коэффициента» поэтому НИКОГДА не одно и то же значение: на этой
   // разнице и стоит отказ выше, и свести их к одному null значило бы вернуть тихое занижение.
   cuttingCoefficient: googletype_Decimal | undefined;
+  // СЧЁТНАЯ НОРМА СЛОТА (0333): сколько штук этого артикула ПРИШИВАЕТСЯ на изделие (qty_per_garment)
+  // и сколько закупается СВЕРХ пришитых — запасная пуговица в пакетик, которую покупают, но не
+  // пришивают (spare_qty).
+  // ПОЧЕМУ НА СЛОТЕ. Число не меняется ни по размеру, ни по колорвею, а единственное место, где его
+  // можно было записать до 0333, — quantity строки рецепта, то есть строка, зависящая от ОБОИХ.
+  // Инвариантность выражалась копированием по колорвеям, а копия — это то, что расходится. Строка
+  // рецепта по-прежнему может ПЕРЕОПРЕДЕЛИТЬ количество своим quantity, и унаследованное значение
+  // никогда не записывается обратно в неё (дисциплина пина 0221 и блока машинки на шаге).
+  // ЕДИНИЦА СЧЁТА — ПАРА (КОЛОРВЕЙ × СЛОТ), А НЕ СТРОКА. Слот законно повторяется в одном колорвее
+  // несколькими размещениями («пуговицы — планка» / «пуговицы — манжета», 0295), поэтому итог слота
+  // и запас применяются ОДИН РАЗ на пару; если хоть одна строка пары несёт явное quantity, итог =
+  // Σ явных, а значение слота не читается вовсе. Правило целиком — entity/countable.go.
+  // ПРИСУТСТВИЕ ОДНО НА ДВОИХ, И ЭТО НЕСУЩЕЕ. Пара живёт как одно целое (тот же довод, что у
+  // kind/kind_note): присланная ЛЮБАЯ из двух половин означает «пиши обе», отсутствие ОБЕИХ —
+  // «не трогай». Ловушка, ради которой это сказано здесь: у google.type.Decimal нет `optional`, и
+  // пустое значение с провода приходит либо nil'ом, либо Decimal{value:""} — сервер считает пустым
+  // и то, и другое. Значит ОЧИСТИТЬ поле можно ТОЛЬКО явным Decimal{value:""}: клиент, который
+  // опустит поле целиком, скажет «не трогай», и число останется на слоте навсегда.
+  qtyPerGarment: googletype_Decimal | undefined;
+  spareQty: googletype_Decimal | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -8014,7 +8176,7 @@ export type common_TechCardBomKind =
   | "TECH_CARD_BOM_KIND_INSERT_CARD"
   // ДРУГОЕ — the ONLY value legal in EVERY eligible section (including section=other, which has no
   // kinds of its own). Its meaning lives in the separate kind_note, never in a shadow value on one
-  // of the 53 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
+  // of the 55 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
   | "TECH_CARD_BOM_KIND_OTHER"
   // ДОБАВЛЕНО ВОЛНОЙ ВИДОВ ОПЕРАЦИЙ, строго append'ом — ПОСЛЕ OTHER. Порядок членов enum'а секции
   // не задаёт: домашнюю секцию вида держит bomKindHomeSection в entity, и вид без записи там для
@@ -8024,7 +8186,21 @@ export type common_TechCardBomKind =
   // Стабилизатор под вышивку живёт в section=DECORATION, а НЕ в interlining: interlining — рулонная
   // секция, а рулонные секции видов не принимают вовсе. Клиентский пикер обязан предлагать этот вид
   // только в декоре; на паре «вид ↔ секция» стор откажет.
-  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER";
+  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER"
+  // ДОБАВЛЕНО ВОЛНОЙ СЧЁТНЫХ НОРМ (0335), тем же append'ом в хвост. Оба — section=packaging.
+  // SPARE_KIT_BAG — пакетик, в котором запасная фурнитура едет с изделием. Не оттенок POLYBAG: у
+  // него есть собственное поведение, которого нет ни у одного соседа — его наличие связано с
+  // запасом (spare_qty) ДРУГОЙ строки той же карточки, и проверки готовности ищут именно его.
+  // Парный ему TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG не дубль, а другой субъект: этот говорит, что
+  // строка ПОКУПАЕТ, тот — что вспомогательная карточка ПРОИЗВОДИТ (пара DUST_BAG с 0173).
+  // ОБА ЧЛЕНА ПАРЫ ПИШУТСЯ ОДНИМ СЛОВОМ — правило блока выше: расходятся только те пары, у которых
+  // предметы разные (HANGTAG_STRING — шнурок, а не ярлык; INSERT_CARD — карточка, а не вкладыш;
+  // CARTON — транспортный короб, а не коробка покупателю). Здесь предмет один — тот самый пакетик.
+  | "TECH_CARD_BOM_KIND_SPARE_KIT_BAG"
+  // TOTE_BAG закрывает асимметрию, жившую с 0255: TECH_CARD_AUX_SUBTYPE_TOTE_BAG = 12 был, а
+  // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
+  // единственное место, где вспомогательный компонент вообще стоит денег.
+  | "TECH_CARD_BOM_KIND_TOTE_BAG";
 // TechCardConstruction holds the card's DEFAULTS — the values an operation inherits when it does
 // not override them. Until the operations break it was a block of free-text notes that nothing
 // inherited (the editor said so out loud: «общие параметры по умолчанию, конкретные задавайте в
@@ -8451,6 +8627,18 @@ export type common_TechCardOperation = {
   // хешируется): они представление, и правка ярлыка не смеет объявлять подписанную карточку
   // изменённой.
   work: string | undefined;
+  // КОЛИЧЕСТВА НА СВЯЗЯХ ШАГА (0334). Разрежённый список: связь без числа сюда не попадает вовсе,
+  // а членство в связи по-прежнему определяет bom_line_keys (23) — единственный владелец.
+  // БЕЗ ОБЁРТКИ РАДИ PRESENCE, И ЭТО СОЗНАТЕЛЬНОЕ ОТСТУПЛЕНИЕ ОТ ПЛАНА. Обёртка нужна была бы,
+  // чтобы отличить «бандл не знает про количества» от «количеств нет», но этот бит уже несёт
+  // КАРТОЧНЫЙ флаг bom_qty_aware (117), и несёт его лучше: он отвечает за весь бандл разом, тогда
+  // как обёртка отвечала бы за каждый шаг по отдельности и на карточке из двадцати шагов дала бы
+  // двадцать частных ответов на один общий вопрос. Два механизма на один бит — это ровно то, как
+  // заводятся ложные расщепления: пара «обёртка есть / флага нет» не значит ничего, но выразима, и
+  // однажды кто-то напишет для неё правило. При наличии флага отсутствие bom_quantities у шага
+  // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
+  // жест, а не потеря.
+  bomQuantities: common_TechCardOperationBomQty[] | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -8883,6 +9071,24 @@ export type common_TechCardPressToward =
   | "TECH_CARD_PRESS_TOWARD_SHELL"
   | "TECH_CARD_PRESS_TOWARD_LINING"
   | "TECH_CARD_PRESS_TOWARD_OTHER";
+// СКОЛЬКО ЕДИНИЦ АРТИКУЛА ТРАТИТ ЭТОТ ШАГ — число, навешенное на связь шага со строкой BOM
+// (tech_card_operation_bom.qty_per_garment, 0334). «Этот шаг ставит 6 пуговиц на изделие».
+// РАЗРЕЖЁННЫЙ КЛЮЧЕВОЙ СПИСОК, А НЕ ПАРАЛЛЕЛЬНЫЙ `repeated Decimal` РЯДОМ С bom_line_keys (23).
+// Два позиционно связанных списка расходятся МОЛЧА: клиент, который вставил ключ в середину и не
+// вставил число, переносит все числа на соседние материалы, и ни одна проверка этого не видит.
+// Ключ внутри записи связывает число с материалом навсегда.
+export type common_TechCardOperationBomQty = {
+  // Ключ строки BOM. ОБЯЗАН присутствовать в bom_line_keys ТОГО ЖЕ шага: членство в связи
+  // определяет только список 23, единственный владелец, а этот список лишь навешивает числа.
+  // Ключ вне списка — не молчаливый пропуск, а FieldViolation: это ссылка на связь, которой у
+  // шага нет.
+  lineKey: string | undefined;
+  // Сколько единиц артикула шаг тратит на изделие. Пустой децимал — не «ноль» и не «не сказано»:
+  // запись без числа отвергается, потому что связь без числа просто НЕ ПОПАДАЕТ в этот список.
+  // Ноль — реальное утверждение («шаг этого артикула не тратит»).
+  qtyPerGarment: googletype_Decimal | undefined;
+};
+
 // TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
 // TechCardLabel is the garment's label/tag SPEC — one of the three historically-unconnected "label"
 // concepts (S21): (a) THIS spec, (b) the shipment label (common/shipment.proto — a shipping document,
@@ -9301,7 +9507,12 @@ export type common_TechCardAuxSubtype =
   // шоппер — the carrier the customer takes the purchase away in and keeps using. Its own sub-type
   // rather than a dust bag: it is cut, sewn and costed as its own item, and an assembly bill names
   // which carrier ships.
-  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG";
+  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG"
+  // пакетик с запасной фурнитурой, сшитый своими силами (0335). Пакетик и покупают готовым, и шьют
+  // сами, и ветвления это не создаёт: в обеих ветках он остаётся ОДНОЙ строкой спецификации с
+  // kind=SPARE_KIT_BAG, а этот подтип отвечает на другой вопрос — что производит вспомогательная
+  // карточка. Без него свой пакетик уезжает в ..._OTHER, где перестаёт отличаться от чего угодно.
+  | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
 // TechCardPieceDxfAliasSet is a presence wrapper: proto3 cannot distinguish an EMPTY repeated field
 // from an ABSENT one, and these aliases follow the pattern-binding precedent — a stale client that
 // predates the feature must not wipe mappings it never saw. Message ABSENT → the server carries the
@@ -10164,11 +10375,17 @@ export type AnalyzeTechCardConstructionResponse = {
   // ai_status is not "ok", and legitimately empty when it is: a card the model found nothing wrong
   // with is a correct and complete answer.
   findings: TechCardAnalysisFinding[] | undefined;
-  // ai_status — ok | not_configured | model_unavailable | failed | invalid_output | skipped.
+  // ai_status — ok | not_configured | model_unavailable | budget_exhausted | failed |
+  // invalid_output | skipped.
   // ok               — the model answered and the answer survived verification.
   // not_configured   — this deployment has no OPENROUTER_API_KEY. Nothing was called or spent.
   // model_unavailable— the provider does not serve `model`. A CONFIGURATION fault, not weather:
   // say the slug out loud, do not offer "try again later".
+  // budget_exhausted — the model spent the whole completion budget and returned NOTHING
+  // (finish_reason=length, empty message). The second CONFIGURATION fault:
+  // a reasoning model charges its thinking to the completion budget, so a cap
+  // sized for a non-reasoning slug is gone before the answer starts. Costs
+  // full price and repeats identically — never offer a retry.
   // failed           — timeout or transport. This one IS weather; retry is honest.
   // invalid_output   — the model answered something unusable (cut off by the token ceiling, not
   // JSON, or so many findings failed verification that the run is not
@@ -10278,6 +10495,139 @@ export type RememberOperationWorkDefaultRequest = {
 export type RememberOperationWorkDefaultResponse = {
 };
 
+export type ExportTechCardArchiveRequest = {
+  techCardId: number | undefined;
+};
+
+export type ExportTechCardArchiveResponse = {
+  // url — presigned-ссылка на объект архива в бакете. Живёт до expires_at, после чего
+  // экспорт повторяют: ссылка не хранится ни на карточке, ни в отчёте.
+  url: string | undefined;
+  expiresAt: wellKnownTimestamp | undefined;
+  manifest: TechCardArchiveManifest | undefined;
+};
+
+// TechCardArchiveManifest — ЧИТАЕМАЯ ЧЕЛОВЕКОМ проекция manifest.json архива, ровно та его часть,
+// которую рисует панель: откуда архив, сколько чего в нём и чего в нём НЕ хватает. Полный манифест
+// (id_maps размеров/категорий/колорвеев) сюда сознательно не тащится — он машинный, нужен только
+// импортёру и читается из самого архива.
+export type TechCardArchiveManifest = {
+  format: string | undefined;
+  // format_version — "MAJOR.MINOR". Чужой MAJOR импорт отвергает; MINOR аддитивен.
+  formatVersion: string | undefined;
+  // money_policy — обязательный штамп «деньги вырезаны» (v1: "stripped-v1"). Архив без него
+  // импорт отвергает: молчание тут неотличимо от «цены забыли вырезать».
+  moneyPolicy: string | undefined;
+  exportedAt: wellKnownTimestamp | undefined;
+  exportedBy: string | undefined;
+  source: TechCardArchiveSource | undefined;
+  // counters — сколько объектов каждого рода легло в архив (media, patterns, markers, materials).
+  counters: TechCardArchiveCounter[] | undefined;
+  // holes — чего в архиве НЕТ и почему. Пустой список — единственное доказательство полноты.
+  holes: TechCardArchiveHole[] | undefined;
+};
+
+// TechCardArchiveSource — паспорт источника: откуда, что и в каком состоянии уехало.
+export type TechCardArchiveSource = {
+  host: string | undefined;
+  techCardId: number | undefined;
+  styleNumber: string | undefined;
+  lockVersion: number | undefined;
+  approvalStateAtExport: string | undefined;
+  appVersion: string | undefined;
+};
+
+export type TechCardArchiveCounter = {
+  entity: string | undefined;
+  count: number | undefined;
+};
+
+export type TechCardArchiveHole = {
+  entity: string | undefined;
+  // ref — чем дыра опознаётся на карточке-источнике (id медиа, line_key выкройки, код материала).
+  ref: string | undefined;
+  // reason — код словаря причин; строка, а не enum: словарь аддитивен и живёт на сервере.
+  reason: string | undefined;
+  detail: string | undefined;
+};
+
+export type CommitTechCardImportRequest = {
+  // import_id — ULID загруженного архива, выданный multipart-маршрутом загрузки.
+  importId: string | undefined;
+};
+
+export type CommitTechCardImportResponse = {
+  techCardId: number | undefined;
+  report: TechCardImportReport | undefined;
+};
+
+// TechCardImportReport — что произошло при импорте. Он остаётся НА КАРТОЧКЕ после коммита:
+// импортированная карточка неотличима от заведённой руками, и единственное, что помнит о её
+// происхождении и о потерях — этот отчёт.
+export type TechCardImportReport = {
+  lines: TechCardImportReportLine[] | undefined;
+  counters: TechCardImportCounter[] | undefined;
+  // style_number и stage — ИТОГОВЫЕ, как карточка легла в эту базу. Номер из архива мог быть занят,
+  // и тогда он здесь другой (со строкой отчёта style_number_taken) или пустой при stage=idea.
+  styleNumber: string | undefined;
+  stage: string | undefined;
+  importId: string | undefined;
+};
+
+export type TechCardImportReportLine = {
+  entity: string | undefined;
+  // ref — чем строка опознаётся в архиве (line_key BOM, код материала, имя файла выкройки).
+  ref: string | undefined;
+  // status — imported | skipped | degraded. Строка, а не enum: см. комментарий над блоком.
+  status: string | undefined;
+  // reason — код словаря причин сервера; клиент показывает его человеческий перевод, а незнакомый
+  // код — как есть, но НЕ прячет.
+  reason: string | undefined;
+  detail: string | undefined;
+  // action — что человеку сделать руками, чтобы дыру закрыть. Пусто, если делать нечего.
+  action: string | undefined;
+};
+
+export type TechCardImportCounter = {
+  entity: string | undefined;
+  imported: number | undefined;
+  skipped: number | undefined;
+  degraded: number | undefined;
+};
+
+export type GetTechCardImportReportRequest = {
+  techCardId: number | undefined;
+};
+
+export type GetTechCardImportReportResponse = {
+  report: TechCardImportReport | undefined;
+  // acknowledged_at не задан — отчёт ещё не закрыт человеком, баннер на карточке висит.
+  acknowledgedAt: wellKnownTimestamp | undefined;
+};
+
+export type AcknowledgeTechCardImportReportRequest = {
+  techCardId: number | undefined;
+};
+
+export type AcknowledgeTechCardImportReportResponse = {
+};
+
+export type ApplyTechCardImportColorwaysRequest = {
+  techCardId: number | undefined;
+};
+
+export type ApplyTechCardImportColorwaysResponse = {
+  // created_colorway_ids — колорвеи, заведённые ЭТИМ нажатием, в порядке colorways.json. Пусто на
+  // повторном клике: всё, что архив нёс, уже стоит на карточке, и это успех, а не отказ. Ids, а не
+  // коды цвета: клиенту нужно чем-то открыть только что созданный драфт, а color_code — ключ
+  // архива, не ссылка на строку этой базы.
+  createdColorwayIds: number[] | undefined;
+  // report — ХРАНИМЫЙ отчёт карточки, переписанный этим применением: строки колорвеев перешли из
+  // skipped в imported/degraded, счётчики сдвинулись за ними. Клиент подменяет им то, что показывал
+  // до нажатия, а не дописывает — иначе на экране окажутся обе версии одной новости.
+  report: TechCardImportReport | undefined;
+};
+
 export type DeleteTechCardRequest = {
   id: number | undefined;
 };
@@ -10302,6 +10652,12 @@ export type ListTechCardsRequest = {
   // category browser can pass whichever node the operator picked — "outerwear" (a top category) or
   // "parka" (a type) — without the client having to expand the tree itself. Empty = no filter.
   categoryIds: number[] | undefined;
+  // ФИЛЬТР ПО КОЛЛЕКЦИИ — ТОЧНОЕ СОВПАДЕНИЕ ХРАНИМОГО ИМЕНИ ("" = нет фильтра).
+  // ИМЕНЕМ, А НЕ ID, И ЭТО НЕ НЕДОСМОТР: колонки-ссылки у тех-карты НЕТ — `tech_card.collection_id`
+  // и её FK дропнула 0240_drop_tech_card_collection_id.sql как мёртвую схему («an unread orphan —
+  // the tech-card form writes the collection NAME string»). Живая колонка ровно одна,
+  // `tech_card.collection`, свободный текст, и клиент пишет в неё ИМЯ.
+  collection: string | undefined;
 };
 
 export type ListTechCardsResponse = {
@@ -10360,6 +10716,12 @@ export type common_TechCardListItem = {
   // colorway_count. The COUNT only — a "latest consumption" here would be a lie without naming
   // the size and the BOM slot it was measured for.
   markerCount: number | undefined;
+  // Коллекция строки листа — хранимое ИМЯ из tech_card.collection ("" = не задана).
+  // НУЖНА НЕ ТОЛЬКО ДЛЯ ПОКАЗА: из неё клиент собирает пул значений фасета, и благодаря этому
+  // фильтруемыми становятся карты с рукописными и архивными именами, которых в словаре коллекций
+  // нет (такие существуют намеренно). Колонки-ссылки collection_id у тех-карты не существует —
+  // её дропнула 0240 как мёртвую схему, поэтому фильтровать можно ТОЛЬКО по этой строке.
+  collection: string | undefined;
 };
 
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
@@ -10392,6 +10754,24 @@ export type TechCardReadinessRequirement = {
 // ADVISORY, NOT A GATE. Stage and approval_state remain free-standing fields on UpdateTechCard: this
 // RPC reports, it does not authorise, and nothing here blocks a save. The only stage rule the server
 // ENFORCES is still the backward one (a style with samples/releases/colourways cannot regress).
+// TechCardReadinessAdvice — ЗАМЕЧАНИЕ, А НЕ УСЛОВИЕ, и оно живёт в собственном списке именно
+// поэтому. Невыполненная TechCardReadinessRequirement по построению БЛОКИРУЕТ: она входит в
+// next_stage_ready / release_ready, и любая строка, положенная туда «просто чтобы сказать», молча
+// становится запретом. `unknown` тоже не подходит — он означает «сервер не смог ответить», а здесь
+// сервер отвечает уверенно: он видит и слот, и рецепт, и сборочную ведомость, и говорит о том, что
+// видит.
+export type TechCardReadinessAdvice = {
+  // key — стабильное машинное имя, по которому клиент ветвится:
+  // spare_kit_missing | spare_kit_empty | assembly_component_not_in_bom | countable_slot_unused |
+  // countable_slot_sized | countable_spare_without_quantity
+  // Список обязан совпадать с константами Advice* в internal/dto/techcard_advisories.go: клиент
+  // ветвится по нему, а ключ, до перечисления не доехавший, выглядит как «замечание не поднялось».
+  // Совпадение проверяется тестом TestAdviceKeysAreAllListedInTheProtoContract — перечисление здесь
+  // не документация, а часть контракта.
+  key: string | undefined;
+  text: string | undefined;
+};
+
 export type GetTechCardReadinessRequest = {
   techCardId: number | undefined;
 };
@@ -10407,6 +10787,12 @@ export type GetTechCardReadinessResponse = {
   // stage checklist: a card can be sampling-complete and still un-releasable.
   releaseRequirements: TechCardReadinessRequirement[] | undefined;
   releaseReady: boolean | undefined;
+  // Замечания — то, что стоит поправить, но что НИ ВО ЧТО не упирается: отдельное поле, а не строки
+  // двух списков выше, потому что там любая невыполненная строка блокирует (allReadinessMet), а
+  // замечание блокировать не должно. Оно не участвует ни в next_stage_ready, ни в release_ready —
+  // карточка с полным набором замечаний остаётся релизуемой, и клиент, пересчитывающий готовность
+  // из строк, обязан считать так же. Пустой список = сказать нечего.
+  advisories: TechCardReadinessAdvice[] | undefined;
 };
 
 // GetStylePipeline is the development board: one column per lifecycle stage
@@ -14392,6 +14778,25 @@ export interface AdminService {
   SetTaskChecklistItemDone(request: SetTaskChecklistItemDoneRequest): Promise<SetTaskChecklistItemDoneResponse>;
   // DeleteTaskChecklistItem removes a checklist item.
   DeleteTaskChecklistItem(request: DeleteTaskChecklistItemRequest): Promise<DeleteTaskChecklistItemResponse>;
+  // SetTaskParent делает задачу сабтаской другой (или возвращает её на верхний уровень).
+  // ОТДЕЛЬНЫЙ RPC, А НЕ ПОЛЕ TaskInsert: содержимое карточки сохраняется полной заменой, и клиент,
+  // не знающий поля, стирал бы родителя каждым сохранением. Ровно та же причина, по которой
+  // placement меняется отдельным MoveTask.
+  // Циклы запрещены: подъём по цепочке родителей идёт внутри пишущей SERIALIZABLE-транзакции.
+  SetTaskParent(request: SetTaskParentRequest): Promise<SetTaskParentResponse>;
+  // AddTaskLink связывает две задачи. ИДЕМПОТЕНТНО: существующая связь — no-op, а не 1062.
+  // kind задаётся С ТОЧКИ ЗРЕНИЯ task_id; BLOCKED_BY хранится перевёрнутым blocks, поэтому пара
+  // никогда не может полусуществовать. Прямая пара A⇄B по blocks отвергается (она ошибка всегда);
+  // длинные циклы терпятся — блокер здесь совет, а не замок.
+  AddTaskLink(request: AddTaskLinkRequest): Promise<AddTaskLinkResponse>;
+  // DeleteTaskLink снимает связь, с любой из двух сторон. Идемпотентно: снять несуществующую связь —
+  // no-op, потому что обе кнопки описывают ЖЕЛАЕМОЕ состояние.
+  DeleteTaskLink(request: DeleteTaskLinkRequest): Promise<DeleteTaskLinkResponse>;
+  // DeleteTaskComment removes one's own remark (a super admin — any): ТОТ ЖЕ ВТОРОЙ ГЕЙТ, что у
+  // DeleteLibraryFileComment. Права на секцию tasks недостаточно — стирать чужие слова по одному
+  // лишь tasks:write значило бы превратить журнал обсуждения в поле формы.
+  // Литеральный сегмент comment отводит маршрут от DELETE /api/admin/task/{id}.
+  DeleteTaskComment(request: DeleteTaskCommentRequest): Promise<DeleteTaskCommentResponse>;
   // GetLibraryFile returns one file with its topics and freshly minted urls.
   GetLibraryFile(request: GetLibraryFileRequest): Promise<GetLibraryFileResponse>;
   // ListLibraryFiles is the grid: a page of files filtered by topic, by "no topic
@@ -14711,6 +15116,51 @@ export interface AdminService {
   // второй механизм поверх неё отвечал бы на один вопрос дважды. Реестр разрешённых полей отдаётся
   // в default_fields каталога, чтобы жест рисовался по ОДНОМУ списку, а не по второму, своему.
   RememberOperationWorkDefault(request: RememberOperationWorkDefaultRequest): Promise<RememberOperationWorkDefaultResponse>;
+  // ЭКСПОРТ ТЕХ-КАРТЫ ZIP-АРХИВОМ — карточка целиком одним файлом: card.json, размерная сетка,
+  // сборка, колорвеи, паспорта материалов, медиа, выкройки и раскладки. Деньги из архива вырезаны
+  // (money_policy манифеста), подписи и релизы вычищены: архив — исходник для чужой панели, а не
+  // копия состояния этой.
+  // Ответ несёт presigned-ссылку с явным сроком жизни И ПАСПОРТ архива (manifest), чтобы человек
+  // увидел, ЧТО именно уехало и чего в архиве НЕТ, до того как отдаст файл наружу. Дыры экспорта
+  // (пропавший объект медиа, нечитаемая выкройка) НЕ роняют вызов — они перечисляются в
+  // manifest.holes, потому что отказ целиком превратил бы одну потерянную картинку в «экспорт
+  // сломан».
+  // Классифицирован wr(tech_cards), а не rd, и это не описка рядом с GetTechCard: архив уносит
+  // приватные выкройки и паспорта материалов ЗА ПРЕДЕЛЫ панели одним файлом. Это осознанная
+  // выдача, а не чтение карточки, и право на неё — право автора карточки, а не её читателя.
+  ExportTechCardArchive(request: ExportTechCardArchiveRequest): Promise<ExportTechCardArchiveResponse>;
+  // ФИКСАЦИЯ ИМПОРТА — вторая половина двухшагового импорта.
+  // ПЕРВОЙ ПОЛОВИНЫ В ЭТОМ КОНТРАКТЕ НЕТ И НЕ БУДЕТ: заливка архива с сухим прогоном —
+  // multipart/form-data (POST /api/techcard-archive/upload), а multipart не выражается в protobuf.
+  // Оттуда приезжает import_id и предварительный отчёт; сюда возвращается только import_id.
+  // Отчёт СТРОИТСЯ ЗАНОВО на коммите, а не берётся из сухого прогона: между загрузкой и нажатием
+  // база могла уехать (материал переименован, размер снят), и показать старый отчёт значило бы
+  // соврать о том, что произошло на самом деле.
+  CommitTechCardImport(request: CommitTechCardImportRequest): Promise<CommitTechCardImportResponse>;
+  // ОТЧЁТ ИМПОРТА ПО КАРТОЧКЕ — что именно приехало, что пропущено и что приехало обеднённым.
+  // Карточка без импорта — норма, а не ошибка: у неё просто нет строки отчёта.
+  GetTechCardImportReport(request: GetTechCardImportReportRequest): Promise<GetTechCardImportReportResponse>;
+  // ЗАКРЫТИЕ БАННЕРА «карточка импортирована»: человек прочитал отчёт и берёт дыры на себя.
+  // Идемпотентно — повторный ack не ошибка. wr(tech_cards): жест снимает предупреждение с
+  // карточки у ВСЕХ, кто её откроет, и это решение владельца карточки, а не её читателя.
+  AcknowledgeTechCardImportReport(request: AcknowledgeTechCardImportReportRequest): Promise<AcknowledgeTechCardImportReportResponse>;
+  // КОЛОРВЕИ ИЗ АРХИВА — ОТДЕЛЬНОЙ КНОПКОЙ ИЗ ОТЧЁТА, а не самим импортом (решение владельца).
+  // Колорвей — это ПРОДУКТ, и импорт продуктов не создаёт: colorways.json едет справкой, а импорт
+  // отчитывается строкой colorways_not_applied по каждому цвету. Этот вызов — второй, ЯВНЫЙ шаг:
+  // из сохранённого тела colorways.json он заводит на импортированной карточке ДРАФТ-колорвеи и
+  // раскладывает их рецепты и маппинг деталей. Ни SKU, ни публикации, ни цен — драфт это ровно
+  // столько, сколько архив удостоверяет, а денег в архиве нет по построению (money_policy).
+  // ИДЕМПОТЕНТЕН ПО ЦВЕТУ, а не по факту нажатия: колорвей с таким color_code на карточке уже
+  // есть — строка отчёта «exists» и пропуск. Поэтому повторное нажатие безопасно и не плодит
+  // дублей, и поэтому же ответ на второй клик — обычный отчёт, а не ошибка.
+  // ОТЧЁТ ВОЗВРАЩАЕТСЯ ОБНОВЛЁННЫЙ И ПЕРЕЗАПИСЫВАЕТ ХРАНИМЫЙ: строки колорвеев уходят из skipped
+  // в imported/degraded. Иначе карточка навсегда осталась бы с отчётом, который утверждает, что
+  // колорвеи не приехали, — ровно после того, как их завели.
+  // Классифицирован wr(products), и это НЕ описка рядом с соседними четырьмя: жест СОЗДАЁТ
+  // ПРОДУКТЫ, той же внутренней дорогой, что CreateColorway, и право на это — право того, кто
+  // ведёт каталог. Технолог с tech_cards:write, но без products:write, импортирует карточку и не
+  // может завести из неё колорвеи; это следствие того, чем колорвей является, а не пробел.
+  ApplyTechCardImportColorways(request: ApplyTechCardImportColorwaysRequest): Promise<ApplyTechCardImportColorwaysResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -18200,6 +18650,9 @@ export function createAdminServiceClient(
       if (request.projectTopicId) {
         queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
       }
+      if (request.parentTaskId) {
+        queryParams.push(`parentTaskId=${encodeURIComponent(request.parentTaskId.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -18300,6 +18753,77 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTaskChecklistItem",
       }) as Promise<DeleteTaskChecklistItemResponse>;
+    },
+    SetTaskParent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/parent`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTaskParent",
+      }) as Promise<SetTaskParentResponse>;
+    },
+    AddTaskLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/link/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskLink",
+      }) as Promise<AddTaskLinkResponse>;
+    },
+    DeleteTaskLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/link/remove`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskLink",
+      }) as Promise<DeleteTaskLinkResponse>;
+    },
+    DeleteTaskComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/task/comment/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskComment",
+      }) as Promise<DeleteTaskCommentResponse>;
     },
     GetLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
@@ -19442,6 +19966,9 @@ export function createAdminServiceClient(
           queryParams.push(`categoryIds=${encodeURIComponent(x.toString())}`)
         })
       }
+      if (request.collection) {
+        queryParams.push(`collection=${encodeURIComponent(request.collection.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -19596,6 +20123,94 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "RememberOperationWorkDefault",
       }) as Promise<RememberOperationWorkDefaultResponse>;
+    },
+    ExportTechCardArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/archive/export`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportTechCardArchive",
+      }) as Promise<ExportTechCardArchiveResponse>;
+    },
+    CommitTechCardImport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/import/commit`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CommitTechCardImport",
+      }) as Promise<CommitTechCardImportResponse>;
+    },
+    GetTechCardImportReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/import/report/${request.techCardId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardImportReport",
+      }) as Promise<GetTechCardImportReportResponse>;
+    },
+    AcknowledgeTechCardImportReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/import/report/acknowledge`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AcknowledgeTechCardImportReport",
+      }) as Promise<AcknowledgeTechCardImportReportResponse>;
+    },
+    ApplyTechCardImportColorways(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/import/colorways/apply`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ApplyTechCardImportColorways",
+      }) as Promise<ApplyTechCardImportColorwaysResponse>;
     },
     CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
