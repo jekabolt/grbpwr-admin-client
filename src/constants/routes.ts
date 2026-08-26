@@ -94,6 +94,10 @@ export enum ROUTES {
   techCards = '/tech-cards',
   addTechCard = '/add-tech-card',
   singleTechCard = '/tech-cards/:id',
+  // ИМПОРТ КАРТЫ ИЗ АРХИВА. Статический сегмент рядом с `/tech-cards/:id` — и это безопасно:
+  // react-router ранжирует статический сегмент ВЫШЕ динамического, поэтому `/tech-cards/import`
+  // не съедается карточкой с id «import» (такого id и не бывает — id числовой).
+  techCardImport = '/tech-cards/import',
   techCardPrint = '/tech-cards/:id/print',
   // PUBLIC pattern viewer — the page a printed tech-pack QR opens (no JWT, no dictionary).
   // Registered in src/index.tsx OUTSIDE ProtectedRoute/DictionaryProvider on purpose.

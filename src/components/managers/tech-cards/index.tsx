@@ -81,6 +81,9 @@ export function TechCards() {
             <Button size='sm' variant='secondary' asChild>
               <Link to={`${ROUTES.addTechCard}?stage=TECH_CARD_STAGE_IDEA`}>new idea</Link>
             </Button>
+            <Button size='sm' variant='secondary' asChild>
+              <Link to={ROUTES.techCardImport}>import</Link>
+            </Button>
             <Button size='sm' variant='main' asChild>
               <Link to={ROUTES.addTechCard}>create new</Link>
             </Button>

@@ -45,6 +45,7 @@ import { Row } from 'ui/components/row';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Drawer } from 'ui/components/drawer';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { TechCardImportBanner } from '../import/import-banner';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
@@ -421,6 +422,9 @@ export function TechCardForm({
   const lockOverride = useRef<number | null>(null);
   const [blockersOpen, setBlockersOpen] = useState(false);
   const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
+  // Экспорт архива: держим только «идёт запрос», чтобы не выпустить второй по двойному клику.
+  // Ссылку НЕ храним — она presigned и живёт 10 минут, а хранимая ссылка молча протухает в руках.
+  const [exportingArchive, setExportingArchive] = useState(false);
   // Drawer state lives in the URL so it survives a refresh and can be linked to.
   const tasksOpen = params.get('tasks') === '1';
   // The field a failed save should walk the user to. `nonce` re-arms the effect when the SAME field
@@ -1256,6 +1260,41 @@ export function TechCardForm({
 
   const saving = form.formState.isSubmitting;
 
+  /**
+   * ЭКСПОРТ АРХИВА КАРТОЧКИ. Сервер кладёт zip в бакет и отдаёт presigned-ссылку; скачивает её
+   * БРАУЗЕР, а не мы — поэтому `window.open`, а не fetch с blob'ом: файл может весить сотни
+   * мегабайт, и тянуть его в память вкладки, чтобы тут же отдать на диск, незачем.
+   *
+   * Ссылка живёт 10 минут и нигде не запоминается: протухшую повторяют новым экспортом.
+   */
+  async function handleExportArchive() {
+    if (!numId || exportingArchive) return;
+    setExportingArchive(true);
+    try {
+      const res = await adminService.ExportTechCardArchive({ techCardId: numId });
+      // url приезжает с провода как `string | undefined`, но при EmitUnpopulated незаполненное
+      // поле — ЯВНЫЙ null. Проверка на falsy покрывает оба, `=== undefined` не покрыло бы.
+      if (!res.url) {
+        showMessage('export produced no link — try again', 'error');
+        return;
+      }
+      window.open(res.url, '_blank', 'noopener,noreferrer');
+      // Дыры архива (пропавшее медиа, нечитаемая выкройка) экспорт НЕ роняют — сервер перечисляет
+      // их в манифесте. Молчать о них здесь значило бы отдать неполный архив как полный.
+      const holes = res.manifest?.holes?.length ?? 0;
+      showMessage(
+        holes > 0
+          ? `archive exported — ${holes} item(s) could not be included`
+          : 'archive exported',
+        holes > 0 ? 'error' : 'success',
+      );
+    } catch (error) {
+      showMessage(techCardErrorMessage(error, 'export failed'), 'error');
+    } finally {
+      setExportingArchive(false);
+    }
+  }
+
   return (
     <Form {...form}>
       {/* TWO-TIER CHROME (-mx-2.5 cancels the Layout content px-2.5 so the bar spans full width).
@@ -1321,6 +1360,21 @@ export function TechCardForm({
                     появился, блок под шапкой берёт это действие на себя, и кнопка исчезает —
                     см. шапку style-projects.tsx. */}
                 <StyleProjectsAction techCardId={numId} />
+                {/* Гейт — ПРАВО ЗАПИСИ, тот же `canWrite(SECTION.techCards)`, что у соседних
+                    пишущих действий шапки, а не право чтения карточки: архив уносит приватные
+                    выкройки и паспорта материалов за пределы панели одним файлом, и сервер
+                    классифицировал вызов как wr(tech_cards). Читатель карточки его не увидит. */}
+                {canWrite(SECTION.techCards) && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='sm'
+                    loading={exportingArchive}
+                    onClick={handleExportArchive}
+                  >
+                    export archive
+                  </Button>
+                )}
               </>
             )}
             {canWrite(SECTION.techCards) && !frozen && isEditMode && (
@@ -1417,6 +1471,11 @@ export function TechCardForm({
           </div>
         )}
       </div>
+
+      {/* ОТКУДА ЭТА КАРТОЧКА ВЗЯЛАСЬ. Стоит В ШАПКЕ и ВНЕ `fieldset disabled={frozen}`: отчёт
+          импорта читают и на замороженной, выпущенной карте — заморозка гасит редактирование, а
+          не право узнать, что при импорте потерялось. Карточка без импорта не рисует ничего. */}
+      {isEditMode && numId ? <TechCardImportBanner techCardId={numId} /> : null}
 
       {isEditMode && numId ? (
         <LifecycleStrip

@@ -153,6 +153,9 @@ const TechCards = lazyRoute(() =>
 const TechCard = lazyRoute(() =>
   import('components/managers/tech-card/page').then((m) => ({ default: m.TechCard })),
 );
+const TechCardImport = lazyRoute(() =>
+  import('components/managers/tech-card/import/page').then((m) => ({ default: m.TechCardImport })),
+);
 const TechCardPrint = lazyRoute(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
@@ -414,6 +417,9 @@ root.render(
                   <Route path={ROUTES.singleFitting} element={<Fitting />} />
                   <Route path={ROUTES.techCards} element={<TechCards />} />
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
+                  {/* Перед `singleTechCard` для читаемости; побеждает он не порядком, а
+                      рангом статического сегмента (react-router сортирует маршруты сам). */}
+                  <Route path={ROUTES.techCardImport} element={<TechCardImport />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
                   <Route path={ROUTES.materials} element={<Materials />} />
                   <Route path={ROUTES.workshop} element={<WorkshopSettingsPage />} />
