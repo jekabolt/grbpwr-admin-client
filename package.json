@@ -50,6 +50,8 @@
     "annotation:kinds": "node scripts/annotation-kinds-probe.mjs",
     "annotation:hit": "node scripts/annotation-hit-probe.mjs",
     "annotation:frame": "node scripts/annotation-frame-probe.mjs",
+    "annotation:canvas": "node scripts/annotation-canvas-probe.mjs",
+    "annotation:ink": "node scripts/annotation-ink-probe.mjs",
     "reader:find": "node scripts/reader-find-probe.mjs",
     "upload:queue": "node scripts/upload-queue-probe.mjs",
     "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs",
