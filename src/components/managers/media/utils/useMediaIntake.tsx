@@ -1,6 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { isFileDrag } from '../components/gallery-order';
 import { MediaIntakeDialog } from '../components/media-intake-dialog';
 import { mergeQueue } from './intake-queue';
 import { filesOfKind, usePasteFiles, type PasteAccept } from './usePasteFiles';
@@ -103,17 +104,27 @@ export function useMediaIntake({
 
   const dropHandlers = useMemo(
     () => ({
+      // ПРИЁМНИК ЖДЁТ ФАЙЛА РОВНО ТОГДА, КОГДА В ЖЕСТЕ ФАЙЛ (`isFileDrag` — по `types`, они
+      // читаются на любом шаге перетаскивания, в отличие от `files`, пустых до `drop`).
+      //
+      // Сторож стоит В ХУКЕ, а не только у галереи эскиза: с появлением перестановки плиток
+      // (ручка ⠿ в `gallery-order`) плитку тащат МИМО добавочного слота, и слот без сторожа
+      // зажигал «drop to add» жесту, в котором файла нет, — замерено на объединённом дереве
+      // (проба шва №2). Для приёмника это чистое сужение: жест без файлов ничего и не приносил —
+      // `e.dataTransfer.files` у него пуст, и `openFiles([])` выходил по первой строке.
       onDragEnter: (e: React.DragEvent) => {
-        if (!enabled) return;
+        if (!enabled || !isFileDrag(e)) return;
         e.preventDefault();
         e.stopPropagation();
         setDragging(true);
       },
       onDragOver: (e: React.DragEvent) => {
-        if (!enabled) return;
+        if (!enabled || !isFileDrag(e)) return;
         e.preventDefault();
         e.stopPropagation();
       },
+      // Уход НЕ сужается до файлового жеста: он только гасит подсветку, и лишний вызов дешевле
+      // подсветки, застрявшей из-за съеденного ухода.
       onDragLeave: (e: React.DragEvent) => {
         if (!enabled) return;
         e.preventDefault();
@@ -125,7 +136,7 @@ export function useMediaIntake({
         setDragging(false);
       },
       onDrop: (e: React.DragEvent) => {
-        if (!enabled) return;
+        if (!enabled || !isFileDrag(e)) return;
         e.preventDefault();
         e.stopPropagation();
         setDragging(false);
