@@ -24,6 +24,8 @@
 //   node scripts/task-model-probe.mjs --mutate-blocks-blocks     Б7: «я блокирую» ошибочно считается блокировкой меня
 //   node scripts/task-model-probe.mjs --mutate-keep-dangling     Б7: связь без второго конца доезжает до экрана
 //   node scripts/task-model-probe.mjs --mutate-name-only         Б8: удаление реплики решается ОДНИМ именем
+//   node scripts/task-model-probe.mjs --mutate-super-blind       Б8: ветка супера снята (клиент — подмножество права)
+//   node scripts/task-model-probe.mjs --mutate-super-everyone    Б8: полный доступ у всех подряд
 //   node scripts/task-model-probe.mjs --mutate-md-no-split       Б6: описание не режется — токен вложения уедет разметчику
 
 import { build as esbuild } from 'esbuild';
@@ -164,6 +166,18 @@ if (flag('--mutate-name-only'))
     'Б8 удаление реплики решается одним именем',
     'return !!currentUser && c.authorId > 0 && c.author === currentUser;',
     'return !!currentUser && c.author === currentUser;',
+  );
+if (flag('--mutate-super-blind'))
+  mutate(
+    'Б8 ветка супер-администратора снята — клиент снова строгое подмножество права',
+    'return isSuper || isOwnComment(c, currentUser);',
+    'return isOwnComment(c, currentUser);',
+  );
+if (flag('--mutate-super-everyone'))
+  mutate(
+    'Б8 полный доступ у всех — узкая политика обычного аккаунта потеряна',
+    'return isSuper || isOwnComment(c, currentUser);',
+    'return true;',
   );
 if (flag('--mutate-md-no-split'))
   mutate(
@@ -465,17 +479,52 @@ ck(
 console.log('\nБ8 · у кого показывается кнопка удаления реплики');
 
 const cm = (author, authorId) => ({ id: 1, taskId: 1, author, authorId, body: 'b', createdAt: '' });
-ck(M.canDeleteComment(cm('me', 5), 'me') === true, 'Ц8.1 своя реплика — можно');
-ck(M.canDeleteComment(cm('other', 6), 'me') === false, 'Ц8.2 чужая — нельзя');
+
+// ── ОБЫЧНЫЙ АККАУНТ: узкая политика, и она НЕ ослабла ───────────────────────────────────────
+ck(M.canDeleteComment(cm('me', 5), 'me', false) === true, 'Ц8.1 своя реплика — можно');
+ck(M.canDeleteComment(cm('other', 6), 'me', false) === false, 'Ц8.2 чужая — нельзя');
 // ГЛАВНЫЙ СЛУЧАЙ — ОДНОФАМИЛЕЦ. `UNIQUE` на admins.username освобождает имя при удалении
 // аккаунта. Реплики прежнего «me» остаются со строкой «me», но их `author_id` обнулён. Решай
 // клиент по одному имени — новый «me» получил бы кнопку удаления на ВСЕЙ переписке прежнего.
 ck(
-  M.canDeleteComment(cm('me', 0), 'me') === false,
+  M.canDeleteComment(cm('me', 0), 'me', false) === false,
   'Ц8.3 моё имя при МЁРТВОЙ ссылке на аккаунт — НЕЛЬЗЯ (ловушка однофамильца)',
 );
-ck(M.canDeleteComment(cm('me', 5), undefined) === false, 'Ц8.4 неизвестный читатель — нельзя');
-ck(M.canDeleteComment(cm('me', 5), '') === false, 'Ц8.5 пустое имя читателя ничему не равно');
+ck(M.canDeleteComment(cm('me', 5), undefined, false) === false, 'Ц8.4 неизвестный читатель — нельзя');
+ck(M.canDeleteComment(cm('me', 5), '', false) === false, 'Ц8.5 пустое имя читателя ничему не равно');
+
+// ── СУПЕР-АДМИНИСТРАТОР: сервер разрешает ему ЛЮБУЮ реплику ─────────────────────────────────
+//
+// `mayEditTaskComment` (internal/apisrv/admin/task.go) начинает с `az.FullAccess() → true` и до
+// сравнения имён в этом случае не доходит. Клиент, не знавший этой ветки, реализовывал СТРОГОЕ
+// ПОДМНОЖЕСТВО права — и единственным, кому интерфейс молча отказывал в разрешённом, был
+// владелец панели: он же и есть тот самый супер.
+ck(
+  M.canDeleteComment(cm('other', 6), 'me', true) === true,
+  'Ц8.6 СУПЕРУ чужая реплика — можно (сервер начинает с FullAccess)',
+);
+// Порядок веток важен: у супера полный доступ решает РАНЬШЕ пары «имя при живой ссылке»,
+// поэтому реплика удалённого аккаунта ему тоже доступна. Проверка ловит реализацию, где
+// ветку супера приделали ПОСЛЕ проверки `authorId`.
+ck(
+  M.canDeleteComment(cm('ghost', 0), 'me', true) === true,
+  'Ц8.7 СУПЕРУ доступна и реплика с МЁРТВОЙ ссылкой — полный доступ решает раньше пары',
+);
+ck(
+  M.canDeleteComment(cm('me', 5), undefined, true) === true,
+  'Ц8.8 суперу не нужно имя читателя — право не выводится из авторства',
+);
+
+// ── «СВОЯ ЛИ» — ОТДЕЛЬНЫЙ ВОПРОС, И У СУПЕРА ОТВЕТ НЕ МЕНЯЕТСЯ ──────────────────────────────
+//
+// Иначе подтверждение сказало бы супер-администратору «удалить ВАШУ реплику» над чужими
+// словами — то есть право стёрло бы РАЗЛИЧИЕ между поступками, хотя расширяло только доступ.
+ck(M.isOwnComment(cm('me', 5), 'me') === true, 'Ц8.9 своя — своя');
+ck(M.isOwnComment(cm('other', 6), 'me') === false, 'Ц8.10 чужая остаётся чужой (о правах речи нет)');
+ck(
+  M.isOwnComment(cm('me', 0), 'me') === false,
+  'Ц8.11 однофамилец «своим» не становится — та же пара, что и в узкой политике',
+);
 
 // ═══ Б6 · ШОВ МАРКДАУНА И ССЫЛОК НА ВЛОЖЕНИЯ ════════════════════════════════════════════════
 console.log('\nБ6 · где проходит шов между разметчиком и чипами вложений');

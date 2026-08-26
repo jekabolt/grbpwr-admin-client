@@ -34,5 +34,6 @@ export {
 } from '../src/components/managers/tasks/components/task-description';
 export {
   canDeleteComment,
+  isOwnComment,
 } from '../src/components/managers/tasks/components/task-comments';
 

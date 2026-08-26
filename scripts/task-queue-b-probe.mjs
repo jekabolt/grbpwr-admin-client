@@ -14,8 +14,10 @@
 //     Ц7 — снятие связи зовёт DeleteTaskLink с видом, названным С ТОЧКИ ЗРЕНИЯ ЭТОЙ карточки;
 //     Ц8 — сохранение содержимого НЕ НЕСЁТ ни связей, ни родителя: их пишут только свои RPC.
 //
-//   Б8 · УДАЛЕНИЕ СВОЕЙ РЕПЛИКИ
-//     Ц9 — орган удаления есть у своей реплики и НЕТ у чужой и у своей с мёртвой ссылкой;
+//   Б8 · УДАЛЕНИЕ РЕПЛИКИ
+//     Ц9 — СУПЕРУ орган показан на любой реплике (так решает сервер), обычному аккаунту —
+//          только на своей и только при живой ссылке на автора;
+//     Ц9.8 — подтверждение РАЗЛИЧАЕТ свою реплику и чужую: над чужой оно называет автора;
 //     Ц10 — подтверждение зовёт DeleteTaskComment ровно с тем id и убирает строку;
 //     Ц10.3 — отказ сервера ВОЗВРАЩАЕТ строку откатом (перечитывание при этом заморожено).
 //
@@ -36,6 +38,8 @@
 //   node scripts/task-queue-b-probe.mjs --mutate-seen-at-close      Б2: «увиденное» берётся при закрытии
 //   node scripts/task-queue-b-probe.mjs --mutate-subtask-two-calls  Б7: сабтаска создаётся двумя вызовами
 //   node scripts/task-queue-b-probe.mjs --mutate-parent-in-insert   Б7: родитель уезжает внутри содержимого
+//   node scripts/task-queue-b-probe.mjs --mutate-super-blind-ui     Б8: ветка супера снята
+//   node scripts/task-queue-b-probe.mjs --mutate-confirm-from-permission  Б8: текст модала из права, не из авторства
 //   node scripts/task-queue-b-probe.mjs --mutate-plain-description  Б6: описание снова печатается сырым
 //   node scripts/task-queue-b-probe.mjs --mutate-no-caret-restore   Б6: панель не возвращает каретку
 //   node scripts/task-queue-b-probe.mjs --mutate-no-comment-rollback   Б8: отказ не возвращает реплику
@@ -157,7 +161,21 @@ const table = {
   ListTaskComments: () => (state.blockComments ? new Promise(() => {}) : { comments: state.comments || [] }),
   ListTasks: (r) => { log('ListTasks', r); return { tasks: r && r.parentTaskId ? (state.children || []) : (state.allTasks || []), total: 0 }; },
   ListAdmins: () => ({ admins: [{ id: 1, username: 'nina' }, { id: 2, username: 'oleg' }, { id: 3, username: 'kir' }] }),
-  GetCurrentAccount: () => ({ account: { username: 'me', isSuper: true, permissions: [] } }),
+  GetCurrentAccount: () => ({
+    account: {
+      username: 'me',
+      // СУПЕРНОСТЬ — СИД, А НЕ КОНСТАНТА. «Обычному аккаунту чужая реплика недоступна» и
+      // «суперу доступна любая» — два РАЗНЫХ утверждения, и стенд, у которого супер зашит,
+      // умеет проверить только одно из них, молча выдавая второе за первое.
+      isSuper: state.isSuper !== false,
+      // Обычному аккаунту право на раздел выдаётся ЯВНО: без него canWrite ложен, страница не
+      // рисует ни кнопки «edit», ни рейки, и mount() ждал бы её до таймаута.
+      // ОБРАТНЫХ КАВЫЧЕК ЗДЕСЬ БЫТЬ НЕ МОЖЕТ: весь стаб — это шаблонная строка, и первая же
+      // такая кавычка обрывает её посреди комментария.
+      permissions:
+        state.isSuper === false ? [{ section: 'tasks', access: 'ACCESS_LEVEL_WRITE' }] : [],
+    },
+  }),
   ListAccountSections: () => ({ sections: [] }),
 };
 const service = new Proxy({}, {
@@ -255,6 +273,21 @@ if (flag('--mutate-no-caret-restore')) {
     ';',
   );
 }
+if (flag('--mutate-super-blind-ui'))
+  mutate(
+    'Б8 ветка супера снята — интерфейс снова уже серверного права',
+    'return isSuper || isOwnComment(c2, currentUser);',
+    'return isOwnComment(c2, currentUser);',
+  );
+if (flag('--mutate-confirm-from-permission'))
+  // САМЫЙ ПРАВДОПОДОБНЫЙ СПОСОБ ПОТЕРЯТЬ РАЗЛИЧИЕ: вывести формулировку подтверждения из того
+  // же предиката, который решает про ДОСТУП. У супера он истинен всегда — и над чужими словами
+  // модал скажет «удалить ВАШУ реплику», не назвав никого.
+  mutate(
+    'Б8 подтверждение выводится из права, а не из авторства',
+    'pendingIsMine = !!pendingDelete && isOwnComment(pendingDelete, account?.username);',
+    'pendingIsMine = !!pendingDelete && canDeleteComment(pendingDelete, account?.username, isSuper);',
+  );
 if (flag('--mutate-plain-description'))
   mutate(
     'Б6 описание снова печатается сырым текстом',
@@ -556,30 +589,106 @@ ck(
   saved ? Object.keys(saved).filter((k) => /link|parent/i.test(k)).join(',') || '(ни одного)' : '—',
 );
 
-// ═══ Ц9/Ц10 · УДАЛЕНИЕ СВОЕЙ РЕПЛИКИ ═════════════════════════════════════════════════════════
-console.log('\nЦ9 · у кого есть орган удаления реплики');
-await mount({
-  comments: [
-    { id: 11, taskId: 1, author: 'me', authorId: 7, body: 'моя реплика', createdAt: '2026-08-01T00:00:00Z' },
-    { id: 12, taskId: 1, author: 'nina', authorId: 8, body: 'чужая реплика', createdAt: '2026-08-01T00:00:00Z' },
-    { id: 13, taskId: 1, author: 'me', authorId: 0, body: 'моё имя, мёртвая ссылка', createdAt: '2026-08-01T00:00:00Z' },
-  ],
-});
+// ═══ Ц9 · КОМУ ПОКАЗАН ОРГАН УДАЛЕНИЯ ════════════════════════════════════════════════════════
+//
+// ДВЕ ПОЛИТИКИ — ДВА СТЕНДА, и это исправление прежней пробы, а не прибавка.
+//
+// Раньше здесь стоял ОДИН стенд, у которого стаб отдавал `isSuper: true`, и на нём же
+// утверждалось «у чужой реплики органа удаления НЕТ». То есть узкая политика пинилась под
+// аккаунтом, которому сервер (`mayEditTaskComment`: `FullAccess() → true`) разрешает как раз
+// ЛЮБУЮ реплику. Проверка была зелёной и при этом описывала право неверно.
+//
+// Ц9.2 ниже ПЕРЕВЁРНУТА СОЗНАТЕЛЬНО. Узкая политика не отменена — она переехала на аккаунт, к
+// которому относится (Ц9.5–Ц9.7), и там проверяется по-прежнему.
+const FEED = [
+  { id: 11, taskId: 1, author: 'me', authorId: 7, body: 'моя реплика', createdAt: '2026-08-01T00:00:00Z' },
+  { id: 12, taskId: 1, author: 'nina', authorId: 8, body: 'чужая реплика', createdAt: '2026-08-01T00:00:00Z' },
+  { id: 13, taskId: 1, author: 'me', authorId: 0, body: 'моё имя, мёртвая ссылка', createdAt: '2026-08-01T00:00:00Z' },
+];
+const deleteBtn = (id) => page.locator(`[aria-label="delete comment ${id}"]`).count();
+
+console.log('\nЦ9 · СУПЕР-АДМИНИСТРАТОР: сервер разрешает ему любую реплику');
+await mount({ comments: FEED, isSuper: true });
 await page.waitForSelector('text=моя реплика', { timeout: 8000 });
+ck((await deleteBtn(11)) === 1, 'Ц9.1 у СВОЕЙ реплики орган удаления есть');
 ck(
-  (await page.locator('[aria-label="delete comment 11"]').count()) === 1,
-  'Ц9.1 у СВОЕЙ реплики орган удаления есть',
+  (await deleteBtn(12)) === 1,
+  'Ц9.2 у ЧУЖОЙ — ТОЖЕ ЕСТЬ: интерфейс перестал отказывать в том, что сервер разрешает',
 );
 ck(
-  (await page.locator('[aria-label="delete comment 12"]').count()) === 0,
-  'Ц9.2 у ЧУЖОЙ — нет',
+  (await deleteBtn(13)) === 1,
+  'Ц9.3 и у реплики удалённого аккаунта — полный доступ решает раньше пары «имя при живой ссылке»',
+);
+
+console.log('\nЦ9 · ОБЫЧНЫЙ АККАУНТ: узкая политика на месте');
+await mount({ comments: FEED, isSuper: false });
+await page.waitForSelector('text=моя реплика', { timeout: 8000 });
+ck((await deleteBtn(11)) === 1, 'Ц9.4 своя реплика — орган есть');
+ck((await deleteBtn(12)) === 0, 'Ц9.5 ЧУЖАЯ — органа НЕТ');
+ck(
+  (await deleteBtn(13)) === 0,
+  'Ц9.6 своя с МЁРТВОЙ ссылкой — органа НЕТ (ловушка однофамильца)',
+);
+// Положительный контроль на сам стенд: если бы `isSuper: false` не доезжал до страницы, оба
+// стенда были бы одним и тем же, а Ц9.5/Ц9.6 «проходили» бы по совпадению.
+ck(
+  (await page.locator('[aria-label="edit title"]').count()) === 1,
+  'Ц9.7 обычный аккаунт всё равно пишет в раздел — стенды различаются суперностью, а не правом',
+);
+
+// ═══ Ц9.8 · ПОДТВЕРЖДЕНИЕ НАЗЫВАЕТ АВТОРА ════════════════════════════════════════════════════
+//
+// УДАЛИТЬ СВОЮ РЕПЛИКУ И СТЕРЕТЬ ЧУЖИЕ СЛОВА — РАЗНЫЕ ПОСТУПКИ. Кнопка у них одна и та же, и
+// значит различать обязано подтверждение. Право расширили — различие поступков расширение не
+// отменяет, и именно его легче всего потерять: достаточно вывести формулировку из того же
+// предиката, который решает про доступ.
+console.log('\nЦ9.8 · подтверждение различает свою реплику и чужую');
+await mount({ comments: FEED, isSuper: true });
+await page.waitForSelector('text=моя реплика', { timeout: 8000 });
+
+/**
+ * ОТСУТСТВУЮЩАЯ КНОПКА ОБЯЗАНА ДАТЬ FAIL, А НЕ ОБОРВАТЬ ПРОГОН.
+ *
+ * Прямой `.click()` по несуществующему органу — это исключение, а исключение здесь роняет
+ * бинарь: все проверки НИЖЕ не выполняются вовсе. Замерено на мутации `--mutate-super-blind-ui`:
+ * 29 исходов вместо 59, то есть «провалов 2» значило не «мутация поймана дважды», а «дальше
+ * просто не считали». Сравнивать такие прогоны с чистым нельзя — числа несопоставимы.
+ */
+async function dialogFor(id) {
+  if ((await deleteBtn(id)) === 0) return null; // органа нет — открывать нечего
+  await page.locator(`[aria-label="delete comment ${id}"]`).click();
+  await page.waitForSelector('[role="dialog"]', { timeout: 8000 });
+  const text = await page.locator('[role="dialog"]').innerText();
+  await page.getByRole('button', { name: 'cancel', exact: true }).click();
+  await page.waitForTimeout(200);
+  return text;
+}
+const mineDialog = await dialogFor(11);
+const otherDialog = await dialogFor(12);
+const shortly = (t) => (t === null ? '(органа удаления нет)' : JSON.stringify(t.replace(/\s+/g, ' ').trim().slice(0, 110)));
+
+ck(
+  mineDialog !== null && /your comment/i.test(mineDialog) && !/nina/i.test(mineDialog),
+  'Ц9.8 над СВОЕЙ репликой подтверждение говорит «your comment» и никого не называет',
+  shortly(mineDialog),
 );
 ck(
-  (await page.locator('[aria-label="delete comment 13"]').count()) === 0,
-  'Ц9.3 у своей с МЁРТВОЙ ссылкой на аккаунт — нет (ловушка однофамильца)',
+  otherDialog !== null && /nina/i.test(otherDialog),
+  'Ц9.9 над ЧУЖОЙ — НАЗЫВАЕТ АВТОРА',
+  shortly(otherDialog),
+);
+ck(
+  otherDialog !== null && /someone else/i.test(otherDialog) && !/your comment/i.test(otherDialog),
+  'Ц9.10 и говорит, что слова чужие, а не «ваши»',
+);
+ck(
+  mineDialog !== null && otherDialog !== null && mineDialog !== otherDialog,
+  'Ц9.11 два жеста не выглядят одним — тексты подтверждения различны',
 );
 
 console.log('\nЦ10 · подтверждение действительно стирает');
+await mount({ comments: FEED, isSuper: true });
+await page.waitForSelector('text=моя реплика', { timeout: 8000 });
 await page.locator('[aria-label="delete comment 11"]').click();
 await page.getByRole('button', { name: 'delete', exact: true }).last().click();
 await page.waitForTimeout(600);

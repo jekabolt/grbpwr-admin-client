@@ -19,21 +19,53 @@ import { TaskText, type MediaRef } from './task-text';
 // нужно и в описании, и в обсуждении, а сырые `[[media:…]]` в ленте выглядели бы поломкой.
 
 /**
- * МОЖНО ЛИ ПОКАЗАТЬ КНОПКУ УДАЛЕНИЯ — ЧИСТАЯ ФУНКЦИЯ, потому что это ровно то условие, которое
- * проверяет СЕРВЕР, и проверить его надо уметь без браузера.
+ * СВОЯ ЛИ ЭТО РЕПЛИКА — ПАРА, А НЕ ОДНО ИМЯ.
  *
- * ПАРА, А НЕ ОДНО ИМЯ. `UNIQUE` на `admins.username` освобождает имя при удалении аккаунта:
- * новый однофамилец совпал бы по строке со ВСЕЙ перепиской прежнего, и кнопка удаления
- * появилась бы у него на чужих словах. Поэтому нужна ещё и ЖИВАЯ ссылка на аккаунт —
- * `authorId > 0`. Ноль значит «спросить некого»: реплика остаётся, удалить её нельзя, и это
- * правильный исход, а не пробел.
+ * `UNIQUE` на `admins.username` освобождает имя при удалении аккаунта: новый однофамилец совпал
+ * бы по строке со ВСЕЙ перепиской прежнего. Поэтому нужна ещё и ЖИВАЯ ссылка на аккаунт —
+ * `authorId > 0`. Ноль значит «спросить некого»: автора этих слов больше нет, и владельцем их
+ * не становится никто.
  *
- * ЭТО НЕ ЗАЩИТА. Право проверяет сервер тем же вторым гейтом, что у комментариев к файлам:
- * `tasks:write` мало, иначе журнал обсуждения превратился бы в поле формы. Здесь решается
- * только одно — не предлагать человеку заведомо невозможного.
+ * Отдельно от `canDeleteComment` потому, что у неё ДВА читателя с разными вопросами: кому
+ * показать кнопку и КАК НАЗВАТЬ то, что человек собирается сделать. Супер-администратор кнопку
+ * видит везде — но «удалить свою реплику» и «стереть чужие слова» это разные поступки, и
+ * подтверждение обязано их различать.
  */
-export function canDeleteComment(c: TaskComment, currentUser: string | undefined): boolean {
+export function isOwnComment(c: TaskComment, currentUser: string | undefined): boolean {
   return !!currentUser && c.authorId > 0 && c.author === currentUser;
+}
+
+/**
+ * МОЖНО ЛИ ПОКАЗАТЬ КНОПКУ УДАЛЕНИЯ — ЧИСТАЯ ФУНКЦИЯ, чтобы правило проверялось без браузера.
+ *
+ * ЗЕРКАЛИТ `mayEditTaskComment` (`internal/apisrv/admin/task.go`) ПОРЯДКОМ ВЕТОК: сперва полный
+ * доступ, и только потом пара «имя ПРИ живой ссылке».
+ *
+ *     FullAccess()  →  true
+ *     иначе         →  author == caller && author_id IS NOT NULL
+ *
+ * ЗДЕСЬ БЫЛО НАПИСАНО «это ровно то условие, которое проверяет сервер», И ЭТО БЫЛО НЕПРАВДОЙ:
+ * ветки супер-администратора не было вовсе, то есть клиент реализовывал СТРОГОЕ ПОДМНОЖЕСТВО
+ * серверного права. Стоило это ровно того, чего такие расхождения стоят всегда: единственным
+ * человеком, которому интерфейс молча отказывал в разрешённом, оказался владелец панели — он же
+ * единственный супер. Комментарий переписан по факту, а не по замыслу.
+ *
+ * ЭТО НЕ ЗАЩИТА, и расширение ветки её не ослабляет: право проверяет сервер тем же вторым
+ * гейтом, что у комментариев к файлам (`tasks:write` мало — иначе журнал обсуждения стал бы
+ * полем формы). Клиент решает ровно одно — не предлагать заведомо невозможного; ошибись он в
+ * щедрую сторону, ответом будет отказ сервера, а строка вернётся откатом (`useDeleteComment`).
+ */
+export function canDeleteComment(
+  c: TaskComment,
+  currentUser: string | undefined,
+  /**
+   * Обязательный, а не «по умолчанию false»: у предиката два места вызова, и умолчание значило
+   * бы, что забытый аргумент молча возвращает УЗКУЮ политику. Пусть места вызова перечисляет
+   * компилятор, а не глаз.
+   */
+  isSuper: boolean,
+): boolean {
+  return isSuper || isOwnComment(c, currentUser);
 }
 
 export function TaskComments({
@@ -46,7 +78,7 @@ export function TaskComments({
   media?: TaskMedia[];
   onOpenMedia?: (ref: MediaRef) => void;
 }) {
-  const { account } = usePermissions();
+  const { account, isSuper } = usePermissions();
   const { data: comments = [], isLoading } = useTaskComments(taskId);
   const add = useAddComment(taskId);
   const del = useDeleteComment(taskId);
@@ -54,6 +86,12 @@ export function TaskComments({
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   /** Какую реплику собираются стереть; `null` — никакую. Слова стирают с подтверждением. */
   const [pendingDelete, setPendingDelete] = useState<TaskComment | null>(null);
+  /**
+   * СВОЮ И ЧУЖУЮ РЕПЛИКУ НЕЛЬЗЯ СТИРАТЬ ОДНИМ И ТЕМ ЖЕ ЖЕСТОМ. Кнопка выглядит одинаково —
+   * значит различать обязано подтверждение, и различать СЛОВАМИ, а не оттенком: «удалить свою»
+   * и «стереть слова nina» — разные поступки, и второй нельзя совершить, не заметив.
+   */
+  const pendingIsMine = !!pendingDelete && isOwnComment(pendingDelete, account?.username);
 
   async function submit() {
     const text = body.trim();
@@ -94,7 +132,7 @@ export function TaskComments({
                     <Text size='nano' variant='label' component='span'>
                       {formatDistanceToNow(new Date(c.createdAt), { addSuffix: true })}
                     </Text>
-                    {canDeleteComment(c, account?.username) && (
+                    {canDeleteComment(c, account?.username, isSuper) && (
                       <button
                         type='button'
                         /* Имя РАЗЛИЧИМОЕ: в ленте таких кнопок столько же, сколько реплик, и
@@ -149,12 +187,14 @@ export function TaskComments({
           if (pendingDelete) del.mutate(pendingDelete.id);
           setPendingDelete(null);
         }}
-        title='delete comment'
+        title={pendingIsMine ? 'delete comment' : 'delete someone else’s comment'}
         confirmLabel='delete'
         width='sm'
       >
         <Text size='micro' component='span'>
-          Delete this comment? This can’t be undone.
+          {pendingIsMine
+            ? 'Delete your comment? This can’t be undone.'
+            : `Delete ${pendingDelete?.author || 'this'}’s comment? You are removing someone else’s words. This can’t be undone.`}
         </Text>
       </ConfirmationModal>
     </Section>
