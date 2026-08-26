@@ -1,9 +1,15 @@
 import { common_MediaFull } from 'api/proto-http/admin';
+import {
+  isFileDrag,
+  TileFooter,
+  useReorder,
+} from 'components/managers/media/components/gallery-order';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ANNOTATION_EDITOR_H } from './annotation/editor';
 import {
   AnnotationSurface,
   type PenStyle,
@@ -104,12 +110,25 @@ function useRailScroll(itemCount: number) {
     const by = (card || RAIL_CARD) + RAIL_GAP;
     const max = el.scrollWidth - el.clientWidth;
     const next = el.scrollLeft + dir * by;
-    // Clamp to the end first, and only wrap once already there — otherwise a rail that overflows
-    // by less than one card would jump from the start straight back to the start.
-    const atEnd = el.scrollLeft >= max - 1;
+    // ЗАВОРОТ С ПЕРВОГО НАЖАТИЯ, А НЕ СО ВТОРОГО.
+    //
+    // Порогом был `max - 1`, то есть «завернуть, только уже упёршись в самый конец». Из-за
+    // снап-остановок позиции покоя кратны шагу карты, и последний хвост до `max` почти всегда
+    // меньше карты: нажатие ‹›› проезжало этот сливер — движение на десяток пикселей, которое
+    // читается как «не сработало», — и заворачивало только СЛЕДУЮЩЕЕ. Ровно это и называют
+    // «карусель не бесконечная».
+    //
+    // Полкарты — граница, где нажатие перестаёт быть видимым шагом: меньше половины осталось —
+    // заворачиваем сразу, больше — честно доезжаем до конца, и это уже не холостое нажатие.
+    const atEnd = el.scrollLeft >= max - by / 2;
     const atStart = el.scrollLeft <= 1;
     const left = dir === 1 ? (atEnd ? 0 : Math.min(next, max)) : atStart ? max : Math.max(next, 0);
-    el.scrollTo({ left, behavior: 'smooth' });
+    // Длинный обратный пролёт по ленте честно показывает, ГДЕ ты оказался, — но тому, кто просил
+    // систему не двигать картинку, он не показывает ничего, кроме тошноты.
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollTo({ left, behavior: reduced ? 'auto' : 'smooth' });
   };
 
   return { ref, overflowing, step };
@@ -216,6 +235,32 @@ export type FocusedAnnotatorProps = {
    *  scrolls. The image is never cropped, so callout pins still map 1:1. Unset = the default
    *  300px-wide, width-driven tiles. */
   gridRowHeight?: number;
+  /**
+   * ПОРЯДОК КАДРОВ МЕНЯЕТСЯ ЗДЕСЬ. Не задан — плитки не переставляются вовсе (ручки и стрелок нет).
+   *
+   * Порядок несёт смысл: позиция 0 и есть обложка карточки, а на позицию в ряду ссылаются деталь
+   * кроя, операция и «pinned to». До сих пор поменять его можно было только кнопкой «set as
+   * preview» — то есть выразить получалось РОВНО ОДНУ перестановку из всех возможных, «сделай этот
+   * первым», и то ценой кнопки под каждым кадром.
+   *
+   * Ручка ⠿ и стрелки ← → приходят из канонного модуля галерей (`gallery-order.tsx`), а не
+   * изобретаются здесь: перетаскивание с клавиатуры недоступно, и без стрелок порядок стал бы
+   * мышиной привилегией.
+   */
+  onReorderMedia?: (from: number, to: number) => void;
+  /**
+   * Grid only: рельса переносит кадры по строкам вместо горизонтальной прокрутки.
+   *
+   * `gridRowHeight` при этом игнорируется: «все кадры разом» и «все кадры одной высоты в ряд» —
+   * два разных ответа на вопрос «как я смотрю на лист», и совмещать их значит показывать одну
+   * длинную строку, обрезанную по правому краю.
+   */
+  railWrap?: boolean;
+  /**
+   * Читательские органы в панель листа (переключатель вида). НЕ гейтятся `readOnly`: «как я смотрю
+   * на этот лист» остаётся вопросом и на выпущенной карточке, которую именно читают.
+   */
+  viewControls?: ReactNode;
 };
 
 export function FocusedAnnotator({
@@ -246,6 +291,9 @@ export function FocusedAnnotator({
   pieceLabel,
   halo = false,
   readOnly = false,
+  onReorderMedia,
+  railWrap = false,
+  viewControls,
 }: FocusedAnnotatorProps) {
   /**
    * Инструмент постановки. ОДНО состояние вместо трёх (`addMode` + `shapeKind` + набранные точки):
@@ -271,8 +319,13 @@ export function FocusedAnnotator({
   const rail = useRailScroll(views.length + 1);
 
   const isGrid = layout === 'grid';
+  // Перенос по строкам — режим ЧТЕНИЯ листа целиком; он старше филмстрипа, поэтому гасит его.
+  const wrap = isGrid && railWrap;
   // Filmstrip mode: fixed-height, natural-width tiles, horizontal-only scroll (the moodboard).
-  const rowMode = isGrid && gridRowHeight != null;
+  const rowMode = isGrid && gridRowHeight != null && !wrap;
+  /** Порядок правится только там, где вообще правят, и только когда есть что переставлять. */
+  const canOrder = isGrid && !readOnly && !!onReorderMedia && views.length > 1;
+  const reorder = useReorder((from, to) => onReorderMedia?.(from, to));
   const hasMedia = views.length > 0;
   const focused = views.find((v) => v.mediaId === focusedId) ?? views[0];
   const focusedPosition = focused ? views.findIndex((v) => v.mediaId === focused.mediaId) : -1;
@@ -303,6 +356,34 @@ export function FocusedAnnotator({
     onMedia: handlePick,
   });
 
+  /**
+   * ПРИЁМНИК ЖДЁТ ФАЙЛА РОВНО ТОГДА, КОГДА В ЖЕСТЕ ФАЙЛ.
+   *
+   * Плитки рельсы гасят свои события перестановки (`stopPropagation` в `tileProps`), но ЗАЗОР
+   * между ними и сама рельса — нет: перетаскивая кадр мимо соседа, человек зажигал приёмную рамку
+   * «drop the file — the crop will open», то есть один жест обещал две разные вещи. `types`
+   * читаются на любом шаге перетаскивания (в отличие от `dataTransfer.files`, которые до `drop`
+   * пусты), поэтому «это файл?» решается по самому жесту.
+   *
+   * СТОРОЖ СТОИТ ЗДЕСЬ, А НЕ В `useMediaIntake`: хук общий на десяток слотов и принадлежит другому
+   * потоку. Для приёмника это чистое сужение — жест без файлов файлового приёма и не обещает.
+   */
+  const regionHandlers = useMemo(() => {
+    const { onDragEnter, onDragOver, onDrop, ...rest } = intake.regionHandlers;
+    const fileOnly =
+      (h: (e: React.DragEvent) => void) =>
+      (e: React.DragEvent) => {
+        if (!isFileDrag(e)) return;
+        h(e);
+      };
+    return {
+      ...rest,
+      onDragEnter: fileOnly(onDragEnter),
+      onDragOver: fileOnly(onDragOver),
+      onDrop: fileOnly(onDrop),
+    };
+  }, [intake.regionHandlers]);
+
   // Removing the focused image falls focus back to the new first image.
   function handleRemoveMedia(view: FocusedView) {
     if (view.mediaId === focusedId) setFocusedId(null);
@@ -331,20 +412,50 @@ export function FocusedAnnotator({
     </ChipRow>
   );
 
-  const editorPanel =
-    selected != null ? (
-      <EditorPanel focusToken={focusEditor}>
-        {renderEditor(selected, { close: () => setSelected(null) })}
-      </EditorPanel>
+  /**
+   * ПОЛОСА РЕДАКТОРА ЗАРЕЗЕРВИРОВАНА, А НЕ ПОЯВЛЯЕТСЯ.
+   *
+   * Она стоит в потоке НАД рядом кадров, и раньше её просто не было, пока ничего не выбрано:
+   * каждый клик по выноске вдвигал сюда сто пятьдесят пикселей и опускал все картинки, а Esc
+   * поднимал их обратно. Это и есть «экран дёргается постоянно, когда нажимаешь на колаут».
+   * Появление слота ТОЛЬКО ПРИ ВЫБОРЕ, но фиксированной высоты, лечило бы всё, кроме первого и
+   * последнего клика, — а сказано было «постоянно», и «никогда» даёт только резерв.
+   *
+   * Пустой она не пустует: место, где грамматикой пользуются, — единственное место, где её стоит
+   * называть. Цена — полтораста пикселей вертикали на РЕДАКТИРУЕМОМ листе; на выпущенной карточке
+   * слота нет вовсе, и чтение получает их назад.
+   *
+   * ПРИ ОТКРЫТОМ УВЕЛИЧЕННОМ ВИДЕ ЗДЕСЬ РЕДАКТОРА НЕТ: он там, где сейчас работают. Два textarea
+   * на одно поле означали бы драку за фокус и правку, которую не видно.
+   */
+  const editorSlot =
+    !readOnly && hasMedia ? (
+      <div className='shrink-0 overflow-hidden' style={{ height: ANNOTATION_EDITOR_H }}>
+        {selected != null && zoomIndex == null ? (
+          <EditorPanel focusToken={focusEditor}>
+            {renderEditor(selected, { close: () => setSelected(null) })}
+          </EditorPanel>
+        ) : (
+          <div className='flex h-full items-center border border-dashed border-borderColor px-1.5'>
+            <Text size='micro' variant='label' component='span'>
+              {zoomIndex != null
+                ? 'the callout is being edited in the zoomed view'
+                : 'no callout selected — click a pin or a line on a frame · Backspace deletes it · Enter opens this editor'}
+            </Text>
+          </div>
+        )}
+      </div>
     ) : null;
 
+  // ОДНО ЗНАНИЕ — ОДНО МЕСТО. Грамматика выбора живёт в пустом состоянии полосы редактора (она
+  // ровно там, где ею пользуются), поэтому здесь остаётся только то, чего там нет.
   const hint = intake.busy
     ? 'taking the picture from the clipboard…'
     : intake.dragging
       ? 'drop the file — the crop will open'
       : tool
         ? placingHint(tool, placed)
-        : 'click a pin or a line to edit it · the text is read in the legend under the frame · ⌘V pastes a picture';
+        : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -369,7 +480,7 @@ export function FocusedAnnotator({
   );
 
   return (
-    <div className='space-y-2.5' {...intake.regionHandlers}>
+    <div className='space-y-2.5' {...regionHandlers}>
       {hasMedia &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
@@ -379,6 +490,9 @@ export function FocusedAnnotator({
               {hint}
             </Text>
             <ToolbarSpacer />
+            {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДА — ЧИТАТЕЛЬСКИЙ ОРГАН, поэтому стоит до режимов постановки и живёт
+                на выпущенной карточке тоже. */}
+            {viewControls}
             {/* Only once the rail actually runs off the edge — arrows that can't move anything are
                 noise. They live in the bar rather than floating over the pictures, where they would
                 sit on top of the pins they exist to help you reach. */}
@@ -416,7 +530,7 @@ export function FocusedAnnotator({
         ))}
 
       {/* ПРАВКА ВЫБРАННОГО УКАЗАНИЯ — ЗДЕСЬ, а не под кадром: см. довод у `selected`. */}
-      {editorPanel}
+      {editorSlot}
 
       {isGrid ? (
         <>
@@ -428,8 +542,14 @@ export function FocusedAnnotator({
             // looping past either end. Trade-off: `overflow-x` makes the vertical axis scroll too,
             // so in show-all-notes mode a note pinned near the top or bottom edge can be clipped —
             // the hover notes are portalled and unaffected. `py-1` buys back the common case.
+            //
+            // …КРОМЕ РЕЖИМА «ГРИДОМ». Там та же лента переносится по строкам: пятнадцать
+            // референсов мудборда сравнивают между собой, а не листают. Отдельного компонента для
+            // этого не заводится — это один класс на той же рельсе, и стрелки ‹ › исчезают сами,
+            // потому что `rail.overflowing` при переносе становится false.
             className={cn(
-              'flex snap-x snap-mandatory items-start gap-2 overflow-x-auto py-1',
+              'flex items-start gap-2 py-1',
+              wrap ? 'flex-wrap' : 'snap-x snap-mandatory overflow-x-auto',
               // Filmstrip: only the horizontal axis scrolls. Hover notes are portalled, so nothing
               // useful is clipped vertically.
               rowMode && 'overflow-y-hidden',
@@ -437,12 +557,21 @@ export function FocusedAnnotator({
           >
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
+              const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
               return (
                 <div
                   key={v.key}
+                  ref={canOrder ? reorder.registerTile(i) : undefined}
+                  {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(
-                    'relative shrink-0 snap-start space-y-1',
+                    'relative shrink-0 space-y-1',
+                    !wrap && 'snap-start',
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
+                    // ЦЕЛЬ БРОСКА — ОБВОДКОЙ, А НЕ РАМКОЙ. Канон соседней галереи красит рамку, но
+                    // там она у плитки уже есть; здесь рамку несёт сам кадр, и заведённая ради
+                    // подсветки прозрачная рамка съедала бы два пикселя ширины у КАЖДОЙ плитки
+                    // всегда — ради состояния, живущего секунду. Обводка на раскладку не влияет.
+                    reorder.overIndex === i && 'outline outline-2 -outline-offset-2 outline-textColor',
                   )}
                 >
                   <AnnotationSurface
@@ -502,6 +631,23 @@ export function FocusedAnnotator({
                   <span className='pointer-events-none absolute left-0 top-0 z-[4] bg-textColor px-1 py-px text-nano leading-none tabular-nums text-bgColor'>
                     {i + 1}
                   </span>
+                  {/* ПОДВАЛ ПЛИТКИ — КАНОННЫЙ, тот же, что во всех галереях формы: ручка ⠿ мышью,
+                      стрелки ← → с клавиатуры, номер позиции и форма кадра. Ховер-иконка поверх
+                      картинки была бы недостижима с клавиатуры и с планшета и дралась бы за
+                      пиксели с пинами, ради которых этот экран и существует.
+                      БЕЗ ✕: снятие кадра уже живёт в углу самого кадра, и второй крестик в двух
+                      сантиметрах от первого — это два способа сделать одно. */}
+                  {canOrder && (
+                    <TileFooter
+                      index={i}
+                      count={views.length}
+                      width={dim?.width}
+                      height={dim?.height}
+                      reorder={reorder}
+                      onMove={onReorderMedia}
+                      unit='view'
+                    />
+                  )}
                   {renderFocusedFooter?.(v, i)}
                 </div>
               );
@@ -684,6 +830,11 @@ export function FocusedAnnotator({
           onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
           onRemove={onRemoveCallout}
           legend
+          // РЕДАКТОР ЕДЕТ В УВЕЛИЧЕННЫЙ ВИД. Его здесь не было вовсе: выбрав указание в зуме,
+          // человек правил его в редакторе, который рисовался на СТРАНИЦЕ ПОЗАДИ модалки — то есть
+          // нигде. А ставят указание по миллиметровой детали именно в зуме. Диалог прокидывает
+          // проп в поверхность спредом, `EditorSlot` и тёмная подложка под кадром уже готовы.
+          renderEditor={renderEditor}
         />
       )}
 

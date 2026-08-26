@@ -5,6 +5,7 @@ import type {
   common_TaskChecklistItem,
   common_TaskComment,
   common_TaskInsert,
+  common_TaskLink,
   common_TaskMediaAnnotations,
   common_TechCardAnnotation,
 } from 'api/proto-http/admin';
@@ -27,6 +28,8 @@ import {
   TaskInsert,
   TaskMedia,
   TaskMediaAnnotations,
+  TaskRelation,
+  TaskRelationKind,
   TaskStatus,
 } from './types';
 
@@ -38,7 +41,17 @@ import {
 export interface TasksService {
   listTasks(filter: ListTasksFilter): Promise<{ tasks: Task[]; total: number }>;
   getTask(id: number): Promise<Task | undefined>;
-  addTask(content: TaskInsert, board: TaskBoard, status: TaskStatus): Promise<{ id: number }>;
+  /**
+   * `parentTaskId` — РОДИТЕЛЬ СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где
+   * родитель едет не отдельным `SetTaskParent`: «создать сабтаску» обязано быть ОДНИМ вызовом,
+   * иначе отказ на втором оставил бы висеть карточку-сироту, которую никто не искал.
+   */
+  addTask(
+    content: TaskInsert,
+    board: TaskBoard,
+    status: TaskStatus,
+    parentTaskId?: number,
+  ): Promise<{ id: number }>;
   updateTask(id: number, content: TaskInsert): Promise<void>;
   moveTask(id: number, board: TaskBoard, status: TaskStatus, position: number): Promise<void>;
   deleteTask(id: number): Promise<void>;
@@ -46,6 +59,14 @@ export interface TasksService {
   unarchiveTask(id: number): Promise<void>;
   addComment(taskId: number, body: string): Promise<{ id: number }>;
   listComments(taskId: number): Promise<TaskComment[]>;
+  /** Удаление СВОЕЙ реплики. Право проверяет сервер; клиент лишь не рисует органа там, где заведомо нельзя. */
+  deleteComment(id: number): Promise<void>;
+  /** Родитель карточки; 0 = вернуть на верхний уровень. Идемпотентно. */
+  setTaskParent(id: number, parentTaskId: number): Promise<void>;
+  /** Связать две карточки. ИДЕМПОТЕНТНО: существующая связь — no-op, а не 1062. */
+  addRelation(taskId: number, otherTaskId: number, kind: TaskRelationKind): Promise<void>;
+  /** Снять связь — с любой из двух сторон. Идемпотентно: снять несуществующую = no-op. */
+  deleteRelation(taskId: number, otherTaskId: number, kind: TaskRelationKind): Promise<void>;
   addChecklistItem(taskId: number, content: string): Promise<{ id: number }>;
   setChecklistItemDone(id: number, isDone: boolean): Promise<void>;
   deleteChecklistItem(id: number): Promise<void>;
@@ -140,27 +161,43 @@ function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
  * снятом с карточки, нельзя ни увидеть, ни убрать), и отправлять его значило бы врать себе о том,
  * что сохранилось. Отсев делается по ТОМУ ЖЕ списку вложений, который уезжает в этом же запросе.
  */
-function taskInsertToWire(t: TaskInsert): common_TaskInsert {
+export function taskInsertToWire(t: TaskInsert): common_TaskInsert {
+  // СПИСОК ИСПОЛНИТЕЛЕЙ УХОДИТ НА ПРОВОД КАК СПИСОК, а одиночное поле едет рядом алиасом.
+  //
+  // Одиночное поле ВЫВОДИТСЯ из списка, а не проносится: `t.assignee` мог остаться от прошлого
+  // чтения (форма правит только список), и пронесённое значение записывало бы старого
+  // исполнителя поверх нового. Ровно поэтому оно и не читается — деструктуризация ниже
+  // выбрасывает его под именем `_derived`.
+  const { assignees, assignee: _derived, ...rest } = t;
   return {
-    ...t,
+    ...rest,
+    // ПОЛЕ ПРОВОДА ПОЯВИЛОСЬ (зеркало de1767f), и список уходит НАСТОЯЩИМ.
+    assignees,
+    // Одиночное поле уезжает РЯДОМ, а не вместо: у сервера оно deprecated-алиас, который
+    // читает СТАРАЯ вкладка админки, пока она открыта. Сервер предпочитает непустой список
+    // и алиас тогда игнорирует (`taskAssigneesFromPb`, internal/dto/task.go:227), так что
+    // расхождения между двумя полями быть не может — второе выведено из первого.
+    assignee: assignees[0] ?? '',
     mediaAnnotations: (t.mediaAnnotations ?? [])
       .filter((m) => m.mediaId > 0 && t.mediaIds.includes(m.mediaId))
       .map((m) => ({
         mediaId: m.mediaId,
         annotations: (m.annotations ?? []).map(annotationToWire),
       })),
-    // Мультиасайн приехал с зеркалом прото раньше, чем форма научилась его заполнять. Пока
-    // список не задан, сервер читает DEPRECATED-алиас `assignee` (см. common.TaskInsert) —
-    // то есть поведение ровно то же, что и до регенерации. Заполнит его волна мультиасайна.
-    assignees: undefined,
   };
 }
 
-function mapInsert(i: common_Task['task']): TaskInsert {
+export function mapInsert(i: common_Task['task']): TaskInsert {
   return {
     title: i?.title ?? '',
     description: i?.description ?? '',
-    assignee: i?.assignee ?? '',
+    // СПИСОК ЧИТАЕТСЯ СПИСКОМ, а одиночное поле — ТОЛЬКО ФОЛБЭК для ответа, который его ещё не
+    // несёт (карточка, прочитанная через прод-бэкенд до выката волны). Порядок обязателен именно
+    // такой: сервер отдаёт `assignee = assignees[0]`, и «сначала алиас» выбросило бы всех, кроме
+    // первого, — молча, потому что типы у обоих полей есть и оба непустые.
+    assignees: i?.assignees?.length ? i.assignees : i?.assignee ? [i.assignee] : [],
+    // Выводится из того же источника — разойтись на чтении двум полям нечем.
+    assignee: (i?.assignees?.length ? i.assignees[0] : i?.assignee) ?? '',
     priority: i?.priority ?? 'TASK_PRIORITY_UNKNOWN',
     dueDate: i?.dueDate || undefined,
     startDate: i?.startDate || undefined,
@@ -179,6 +216,21 @@ function mapInsert(i: common_Task['task']): TaskInsert {
   };
 }
 
+/**
+ * СТРОКА СВЯЗИ. Второй конец приезжает УЖЕ разрешённым — заголовком, статусом и доской, — поэтому
+ * здесь только защита от пропусков, а не второй запрос.
+ */
+function mapRelation(l: common_TaskLink): TaskRelation {
+  return {
+    taskId: l.taskId ?? 0,
+    kind: (l.kind ?? 'TASK_LINK_KIND_UNKNOWN') as TaskRelationKind,
+    title: l.title ?? '',
+    status: l.status ?? 'TASK_STATUS_UNKNOWN',
+    board: l.board ?? 'TASK_BOARD_UNKNOWN',
+    archived: !!l.archived,
+  };
+}
+
 function mapChecklistItem(c: common_TaskChecklistItem): TaskChecklistItem {
   return {
     id: c.id ?? 0,
@@ -188,7 +240,12 @@ function mapChecklistItem(c: common_TaskChecklistItem): TaskChecklistItem {
   };
 }
 
-function mapTask(t: common_Task): Task {
+/**
+ * Экспортируется вместе с `mapInsert` по одной причине: это ЕДИНСТВЕННОЕ место, где ответ
+ * сервера превращается в карточку, и правила «связь без второго конца — мусор», «нет поля =
+ * ноль» проверяемы без браузера только отсюда.
+ */
+export function mapTask(t: common_Task): Task {
   const media = (t.media ?? []).map(mapMedia);
   rememberMedia(media);
   return {
@@ -206,6 +263,12 @@ function mapTask(t: common_Task): Task {
     updatedAt: t.updatedAt ?? '',
     startedAt: t.startedAt ?? '',
     archivedAt: t.archivedAt ?? '',
+    parentTaskId: t.parentTaskId ?? 0,
+    // Связь без второго конца (`taskId = 0`) не строка, а мусор: нарисовать её нечем и открыть
+    // нечего. Отсев здесь, а не на экране, — иначе каждый читатель списка заводил бы свой.
+    relations: (t.links ?? []).map(mapRelation).filter((l) => l.taskId > 0),
+    subtaskTotal: t.subtaskTotal ?? 0,
+    subtaskDone: t.subtaskDone ?? 0,
   };
 }
 
@@ -214,6 +277,7 @@ function mapComment(c: common_TaskComment): TaskComment {
     id: c.id ?? 0,
     taskId: c.taskId ?? 0,
     author: c.author ?? '',
+    authorId: c.authorId ?? 0,
     body: c.body ?? '',
     createdAt: c.createdAt ?? '',
   };
@@ -241,6 +305,8 @@ export const tasksService: TasksService = {
         board: filter.board,
         status: filter.status,
         assignee: filter.assignee,
+        // Дети берутся ФИЛЬТРОМ ЭТОГО ЖЕ СПИСКА, а не отдельным RPC: тот же ответ, просто суженный.
+        parentTaskId: filter.parentTaskId ?? 0,
         limit: TASKS_PAGE_LIMIT,
         offset: undefined,
         orderFactor: undefined,
@@ -253,9 +319,6 @@ export const tasksService: TasksService = {
         sampleId: filter.sampleId ?? 0,
         projectTopicId: filter.projectTopicId ?? 0,
         includeArchived: filter.includeArchived,
-        // Связи задач приехали с зеркалом прото; фильтра по родителю в UI ещё нет —
-        // не задан, значит запрос уходит без него, как и до регенерации.
-        parentTaskId: undefined,
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 
@@ -272,9 +335,16 @@ export const tasksService: TasksService = {
         : undefined,
     ),
 
-  addTask: (content, board, status) =>
+  addTask: (content, board, status, parentTaskId) =>
     adminService
-      .AddTask({ task: taskInsertToWire(content), board, status, parentTaskId: undefined })
+      .AddTask({
+        task: taskInsertToWire(content),
+        board,
+        status,
+        // «Создать сабтаску» — ОДИН вызов, а не AddTask + SetTaskParent: провал второго оставил бы
+        // карточку на верхнем уровне, и о ней никто бы не узнал, потому что искали её в детях.
+        parentTaskId: parentTaskId ?? 0,
+      })
       .then((r) => ({ id: r.id ?? 0 })),
 
   updateTask: (id, content) =>
@@ -302,4 +372,15 @@ export const tasksService: TasksService = {
     adminService.SetTaskChecklistItemDone({ id, isDone }).then(() => undefined),
 
   deleteChecklistItem: (id) => adminService.DeleteTaskChecklistItem({ id }).then(() => undefined),
+
+  deleteComment: (id) => adminService.DeleteTaskComment({ id }).then(() => undefined),
+
+  setTaskParent: (id, parentTaskId) =>
+    adminService.SetTaskParent({ id, parentTaskId }).then(() => undefined),
+
+  addRelation: (taskId, otherTaskId, kind) =>
+    adminService.AddTaskLink({ taskId, otherTaskId, kind }).then(() => undefined),
+
+  deleteRelation: (taskId, otherTaskId, kind) =>
+    adminService.DeleteTaskLink({ taskId, otherTaskId, kind }).then(() => undefined),
 };

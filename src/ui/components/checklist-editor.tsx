@@ -110,7 +110,12 @@ export function ChecklistEditor({
                   type='button'
                   aria-label={`remove "${item.content}"`}
                   onClick={() => onDelete(item.id)}
-                  className='shrink-0 px-1 text-labelColor opacity-0 transition-opacity hover:text-textColor focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor group-hover:opacity-100'
+                  /* ✕ ВИДЕН ВСЕГДА, НО ТИХИЙ. Он прятался за `opacity-0 group-hover:opacity-100`,
+                     то есть за НАВЕДЕНИЕ МЫШИ: на планшете и телефоне такого жеста нет вовсе, и
+                     удаление пункта было там недостижимо — функция существовала end-to-end и
+                     читалась как отсутствующая. Тишина теперь весом (серый → чёрный на ховере),
+                     а не отсутствием: цвет прячет кнопку от взгляда, но не от пальца. */
+                  className='shrink-0 px-1 text-labelColor transition-colors hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                 >
                   ✕
                 </button>

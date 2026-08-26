@@ -1,8 +1,20 @@
+import type { common_MediaFull } from 'api/proto-http/admin';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { LibraryFile } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
 import { NoteFilePicker, type NoteFileInsert } from './file-picker';
-import { fileCardPath } from './file-refs';
+import {
+  codeEdit,
+  emphasisEdit,
+  fileEdit,
+  headingEdit,
+  lineMarkEdit,
+  linkEdit,
+  mediaEdit,
+  type Edit,
+  type MediaInsert,
+} from './format-edits';
 
 /**
  * ПОЛОСА ФОРМАТИРОВАНИЯ НАД ТЕКСТОМ.
@@ -36,301 +48,13 @@ import { fileCardPath } from './file-refs';
  * не понимает вовсе (у него жирный — это `**` без звёздочек внутри), и «нажал «bold» на
  * курсиве» дало бы строку, показанную со звёздочками наружу. Кнопка обязана оставлять текст,
  * который её же разметчик покажет.
- */
-
-/** Одна замена в поле: что, на что и где оказаться после. Координаты — в тексте ПОЛЯ. */
-interface Edit {
-  start: number;
-  end: number;
-  text: string;
-  sel: [number, number];
-}
-
-type Emphasis = '**' | '*';
-
-/**
- * Пробелы по краям выделения остаются СНАРУЖИ разметки.
  *
- * Человек выделяет мышкой и почти всегда прихватывает пробел. `* текст *` наш разметчик курсивом
- * не считает (после звёздочки обязан идти непробел) — то есть кнопка выдавала бы разметку,
- * которая ею не является, и виновата была бы «панель», а не промах на полсимвола.
- */
-function trimEdges(text: string, start: number, end: number): [number, number] {
-  let s = start;
-  let e = end;
-  while (s < e && /\s/.test(text[s])) s += 1;
-  while (e > s && /\s/.test(text[e - 1])) e -= 1;
-  return [s, e];
-}
-
-/**
- * Уже размеченный кусок вокруг выделения — или `null`.
+ * ── ГДЕ ЛЕЖИТ САМА ПРАВКА ───────────────────────────────────────────────────────────────────
  *
- * Две формы одного и того же: выделено вместе со звёздочками (`**жирно**`) и выделено внутри них
- * (`жирно`). Обе обязаны сниматься повторным нажатием, иначе кнопка умеет только наматывать.
- *
- * `**` проверяется ПЕРВЫМ: у `**жирно**` края подходят и под одиночную звёздочку, и порядок
- * здесь — единственное, что не даёт «курсиву» отгрызть по звёздочке от жирного.
+ * Всё, что считает НОВЫЙ ТЕКСТ, вынесено в `format-edits.ts`: там чистые `(text,start,end) => Edit`
+ * без DOM и без состояния, и там же они проверяются таблицей входа-выхода. Здесь остаётся ровно
+ * то, что без браузера не проверить: каретка, стопка отмены и кнопки.
  */
-function emphasisAt(
-  text: string,
-  s: number,
-  e: number,
-): { marker: Emphasis; outer: [number, number]; inner: [number, number] } | null {
-  for (const marker of ['**', '*'] as Emphasis[]) {
-    const m = marker.length;
-    const inner = text.slice(s, e);
-    if (inner.length >= 2 * m && inner.startsWith(marker) && inner.endsWith(marker)) {
-      return { marker, outer: [s, e], inner: [s + m, e - m] };
-    }
-    if (s >= m && text.slice(s - m, s) === marker && text.slice(e, e + m) === marker) {
-      return { marker, outer: [s - m, e + m], inner: [s, e] };
-    }
-  }
-  return null;
-}
-
-function emphasisEdit(text: string, start: number, end: number, want: Emphasis): Edit {
-  const [s, e] = trimEdges(text, start, end);
-  const found = emphasisAt(text, s, e);
-
-  if (found) {
-    const body = text.slice(found.inner[0], found.inner[1]);
-    const at = found.outer[0];
-    if (found.marker === want) {
-      // Снять: то самое «нажал «bold» на жирном».
-      return { start: at, end: found.outer[1], text: body, sel: [at, at + body.length] };
-    }
-    // Заменить, а не вложить — см. шапку файла.
-    const next = `${want}${body}${want}`;
-    return {
-      start: at,
-      end: found.outer[1],
-      text: next,
-      sel: [at + want.length, at + want.length + body.length],
-    };
-  }
-
-  const body = text.slice(s, e);
-  const next = `${want}${body}${want}`;
-  // Пустое выделение — каретка встаёт МЕЖДУ звёздочками: дальше человек просто печатает.
-  return { start: s, end: e, text: next, sel: [s + want.length, s + want.length + body.length] };
-}
-
-/** Тот же приём для `code`, но своей осью: код с жирным не конфликтует. */
-function inlineCodeEdit(text: string, start: number, end: number): Edit {
-  const [s, e] = trimEdges(text, start, end);
-  const inner = text.slice(s, e);
-  if (inner.length >= 2 && inner.startsWith('`') && inner.endsWith('`')) {
-    const body = inner.slice(1, -1);
-    return { start: s, end: e, text: body, sel: [s, s + body.length] };
-  }
-  if (s >= 1 && text[s - 1] === '`' && text[e] === '`') {
-    return { start: s - 1, end: e + 1, text: inner, sel: [s - 1, s - 1 + inner.length] };
-  }
-  const next = `\`${inner}\``;
-  return { start: s, end: e, text: next, sel: [s + 1, s + 1 + inner.length] };
-}
-
-/**
- * Строки, которых касается выделение, целиком.
- *
- * Выделение, кончающееся ровно на переводе строки, следующую строку НЕ захватывает: иначе
- * протяжка мышью до начала следующего абзаца превращала бы в список и его.
- */
-function lineSpan(text: string, start: number, end: number): [number, number] {
-  // `lastIndexOf('\n', -1)` в js ищет от НУЛЯ, а не «нигде»: у текста, начинающегося с пустой
-  // строки, каретка в самом начале уезжала бы на вторую строку, и разметку получала бы она.
-  const ls = start === 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
-  const e = end > start && text[end - 1] === '\n' ? end - 1 : end;
-  let le = text.indexOf('\n', e);
-  if (le === -1) le = text.length;
-  return [ls, le];
-}
-
-/**
- * Построчная правка с сохранением места каретки.
- *
- * Пустое выделение (одна каретка) остаётся В СВОЕЙ СТРОКЕ и на своём месте относительно текста:
- * добавили «- » — каретка сдвинулась на два, а не уехала в конец абзаца. Непустое — выделяет
- * получившийся кусок целиком, чтобы было видно, что именно изменилось.
- */
-function replaceLines(
-  text: string,
-  start: number,
-  end: number,
-  mapLines: (lines: string[]) => string[],
-): Edit {
-  const [ls, le] = lineSpan(text, start, end);
-  const lines = text.slice(ls, le).split('\n');
-  const out = mapLines(lines);
-  const next = out.join('\n');
-
-  if (start !== end) return { start: ls, end: le, text: next, sel: [ls, ls + next.length] };
-
-  let li = 0;
-  let acc = ls;
-  while (li < lines.length - 1 && acc + lines[li].length < start) {
-    acc += lines[li].length + 1;
-    li += 1;
-  }
-  const col = start - acc;
-  let lineStart = ls;
-  for (let k = 0; k < li; k += 1) lineStart += out[k].length + 1;
-  const shifted = col + (out[li].length - lines[li].length);
-  const caret = lineStart + Math.max(0, Math.min(out[li].length, shifted));
-  return { start: ls, end: le, text: next, sel: [caret, caret] };
-}
-
-/**
- * Разметка НАЧАЛА строки — одна на строку: список, нумерация, цитата и заголовок сменяют друг
- * друга, а не наслаиваются («- 1. > текст» не значит ничего).
- *
- * У решётки требуется пробел (`\s+`, а не `\s*`) ровно затем, чтобы `#хештег` остался словом:
- * заголовком его не считает и разметчик, и съедать у него решётку при постановке пункта списка
- * было бы правкой текста, о которой никто не просил.
- */
-const LINE_MARK = /^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s?|#{1,6}\s+)/;
-
-const LIST_RE = {
-  ul: /^\s*[-*+]\s+/,
-  ol: /^\s*\d+[.)]\s+/,
-  quote: /^\s*>\s?/,
-} as const;
-
-function lineMarkEdit(text: string, start: number, end: number, kind: 'ul' | 'ol' | 'quote'): Edit {
-  return replaceLines(text, start, end, (lines) => {
-    const meaningful = lines.filter((l) => l.trim());
-    // Снимаем только если размечено ВСЁ выделенное: наполовину размеченный кусок кнопка
-    // дописывает до конца, а не раздевает — это ближе к тому, зачем её нажали.
-    const on = meaningful.length > 0 && meaningful.every((l) => LIST_RE[kind].test(l));
-    // Пустая строка — это НАЧАЛО списка: человек встал на пустое место и нажал кнопку, чтобы
-    // писать пункты. А вот пустая строка ВНУТРИ выделенного куска пунктом не становится: там
-    // она разделитель, и «- » в ней было бы пустым пунктом, которого никто не просил.
-    const blankOnly = meaningful.length === 0;
-    let n = 0;
-    return lines.map((l) => {
-      if (on) return l.replace(LIST_RE[kind], '');
-      if (!l.trim() && !blankOnly) return l;
-      const bare = l.replace(LINE_MARK, '');
-      n += 1;
-      if (kind === 'ul') return `- ${bare}`;
-      if (kind === 'ol') return `${n}. ${bare}`;
-      return `> ${bare}`;
-    });
-  });
-}
-
-/**
- * Заголовок ходит по кругу: обычный → `#` → `##` → `###` → обычный.
- *
- * Одна кнопка вместо трёх, потому что уровней ровно три (больше разметчик не понимает) и в
- * заметке они выбираются на глаз, а не по номеру. Уровень читается по ПЕРВОЙ строке выделения и
- * применяется ко всем: разнобой внутри одного нажатия был бы непредсказуем.
- */
-function headingEdit(text: string, start: number, end: number): Edit {
-  return replaceLines(text, start, end, (lines) => {
-    const first = /^\s*(#{1,3})\s/.exec(lines[0]);
-    const level = first ? first[1].length : 0;
-    const next = level >= 3 ? 0 : level + 1;
-    // Та же оговорка, что у списков: пустая строка получает решётку, если она и есть всё
-    // выделение (человек начинает заголовок), и не получает — если она разделитель внутри.
-    const blankOnly = lines.every((l) => !l.trim());
-    return lines.map((l) => {
-      if (!l.trim() && !blankOnly) return l;
-      const bare = l.replace(LINE_MARK, '');
-      return next === 0 ? bare : `${'#'.repeat(next)} ${bare}`;
-    });
-  });
-}
-
-/** Многострочный код — огорода на своих строках; она же снимается повторным нажатием. */
-function fenceEdit(text: string, start: number, end: number): Edit {
-  const [ls, le] = lineSpan(text, start, end);
-  const lines = text.slice(ls, le).split('\n');
-  if (lines.length >= 2 && /^\s*```/.test(lines[0]) && /^\s*```/.test(lines[lines.length - 1])) {
-    const body = lines.slice(1, -1).join('\n');
-    return { start: ls, end: le, text: body, sel: [ls, ls + body.length] };
-  }
-  const body = lines.join('\n');
-  const next = `\`\`\`\n${body}\n\`\`\``;
-  return { start: ls, end: le, text: next, sel: [ls + 4, ls + 4 + body.length] };
-}
-
-const LINK_LABEL = 'text';
-const LINK_HREF = 'url';
-
-/**
- * Ссылка. Выделили текст — он становится подписью, а выделенным оказывается ПЛЕЙСХОЛДЕР адреса:
- * набранное (или вставленное ⌘V) заменяет его сразу, без второго прицеливания мышью.
- */
-function linkEdit(text: string, start: number, end: number): Edit {
-  const [s, e] = trimEdges(text, start, end);
-  const label = text.slice(s, e) || LINK_LABEL;
-  const next = `[${label}](${LINK_HREF})`;
-  const hrefAt = s + label.length + 3;
-  return {
-    start: s,
-    end: e,
-    text: next,
-    // Без выделения прицеливаться не во что — тогда выделяется подпись.
-    sel: s === e ? [s + 1, s + 1 + label.length] : [hrefAt, hrefAt + LINK_HREF.length],
-  };
-}
-
-/**
- * Показывать ли выбранный файл прямо в тексте.
- *
- * Тип решает сервер, а не список расширений в клиенте: пустой `url` при заполненном
- * `download_url` — это его ответ «в месте это не показывают» (svg и html исполнились бы на
- * origin бакета). Оба пустых — это выдача, которая ссылок не несёт вовсе, и делать из неё вывод
- * про файл нельзя: тогда решает только тип содержимого.
- */
-function insertsAsImage(f: LibraryFile): boolean {
-  if (!(f.contentType ?? '').startsWith('image/')) return false;
-  if (!f.url && f.downloadUrl) return false;
-  return true;
-}
-
-/** Подпись ссылки: скобки в имени файла порвали бы саму ссылку, а экранирования у разметчика
- * нет. Разрушать нечего — имя чинится в подписи, файл остаётся собой. */
-function linkLabel(raw: string): string {
-  return raw.replace(/[[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * ДВЕ КНОПКИ, ПОТОМУ ЧТО ЭТО ДВА РАЗНЫХ НАМЕРЕНИЯ.
- *
- * `file` вставляет ССЫЛКУ (картинке при этом ставит `!` сам — иначе снимок в заметке пришлось бы
- * объявлять руками, а он там нужен в девяти случаях из десяти). `preview` вставляет ПРЕВЬЮ чему
- * угодно: у pdf, эскиза, чертежа есть отрисованная миниатюра, и до сих пор добраться до неё из
- * текста было нечем — договор ложился синей строчкой, неотличимой от соседних сорока.
- *
- * Разница видна ДО клика: у кнопок разные подписи и разные окна, а не одно окно с галкой. Файл,
- * которому показать нечего, помечен в самом пикере («no preview») — тогда `!` даёт плашку со
- * ссылкой, и это честный исход, а не поломка.
- */
-function fileEdit(
-  text: string,
-  start: number,
-  end: number,
-  f: LibraryFile,
-  insert: NoteFileInsert,
-): Edit {
-  const [s, e] = trimEdges(text, start, end);
-  const selected = linkLabel(text.slice(s, e));
-  const id = Number(f.id);
-  const label = selected || linkLabel(f.fileName ?? '') || `file ${id}`;
-  const asPicture = insert === 'preview' || insertsAsImage(f);
-  // Файл без номера — это выдача, из которой ссылку собрать не из чего. `/files/NaN` выглядел
-  // бы ссылкой и вёл бы в никуда, поэтому в текст уезжает одно имя.
-  const next =
-    Number.isSafeInteger(id) && id > 0
-      ? `${asPicture ? '!' : ''}[${label}](${fileCardPath(id)})`
-      : label;
-  const at = s + next.length;
-  return { start: s, end: e, text: next, sel: [at, at] };
-}
 
 export function FormatBar({
   areaRef,
@@ -342,8 +66,13 @@ export function FormatBar({
   onChange: (next: string) => void;
 }) {
   // Какое окно открыто и, значит, чем станет выбранный файл. `null` — закрыто.
+  //
+  // У медиатеки своего состояния здесь НЕТ: `MediaSelector` держит своё окно сам и получает
+  // кнопку через Radix `asChild`. Заводить рядом второй `picker`-флаг значило бы дублировать
+  // состояние, которым уже владеет чужой компонент.
   const [picker, setPicker] = useState<NoteFileInsert | null>(null);
   const pending = useRef<{ value: string; sel: [number, number] } | null>(null);
+  const { showMessage } = useSnackBarStore();
 
   useLayoutEffect(() => {
     const p = pending.current;
@@ -356,7 +85,8 @@ export function FormatBar({
     if (area.selectionStart !== p.sel[0] || area.selectionEnd !== p.sel[1]) {
       area.setSelectionRange(p.sel[0], p.sel[1]);
     }
-    area.focus();
+    // `preventScroll` — см. ниже в `apply`: голый `focus()` уносит прокрутку СТРАНИЦЫ.
+    area.focus({ preventScroll: true });
   }, [areaRef, value]);
 
   const apply = useCallback(
@@ -370,7 +100,12 @@ export function FormatBar({
 
       const expected = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
 
-      area.focus();
+      // ФОКУС БЕЗ ПРОКРУТКИ. Голый `focus()` по умолчанию тянет элемент в зону видимости и уводит
+      // за собой скроллер СТРАНИЦЫ. Пока поле прокручивается внутри себя, каретку показывает оно
+      // само и странице двигаться незачем; как только текст помещается в поле целиком, показать
+      // каретку может только страница — и заметка прыгает под руками (замерено: поле 1800px,
+      // вьюпорт 900, сдвиг 478px). Каретки это не касается: её ставит `setSelectionRange` ниже.
+      area.focus({ preventScroll: true });
       let done = false;
       if (edit.text !== '') {
         area.setSelectionRange(edit.start, edit.end);
@@ -407,6 +142,30 @@ export function FormatBar({
     [areaRef, onChange],
   );
 
+  /**
+   * Выбранные кадры — в текст.
+   *
+   * Кадр без единого адреса вставить нечем: `![…]()` показался бы битой картинкой, а молчаливый
+   * пропуск означал бы «нажал add all на трёх, в тексте два». Поэтому отброшенное называется
+   * вслух, а не исчезает.
+   */
+  const insertMedia = (media: common_MediaFull[]) => {
+    const items: MediaInsert[] = [];
+    let lost = 0;
+    for (const m of media) {
+      const id = Number(m.id);
+      const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
+      if (!url || !Number.isSafeInteger(id) || id <= 0) {
+        lost += 1;
+        continue;
+      }
+      items.push({ id, url });
+    }
+    if (lost) showMessage(`${lost} of ${media.length} have no address and stayed out`, 'error');
+    if (!items.length) return;
+    apply((t, s, e) => mediaEdit(t, s, e, items));
+  };
+
   const actions: { label: string; title: string; run: () => void }[] = [
     {
       label: 'bold',
@@ -441,10 +200,7 @@ export function FormatBar({
     {
       label: 'code',
       title: 'code: a selection on one line — `like this`, on several — a ``` fence',
-      run: () =>
-        apply((t, s, e) =>
-          t.slice(s, e).includes('\n') ? fenceEdit(t, s, e) : inlineCodeEdit(t, s, e),
-        ),
+      run: () => apply(codeEdit),
     },
     {
       label: 'link',
@@ -494,6 +250,31 @@ export function FormatBar({
         >
           preview
         </Button>
+
+        {/* СНИМКИ ИЗ МЕДИАТЕКИ, С МУЛЬТИВЫБОРОМ. Библиотека файлов и медиатека — два разных
+            хранилища, и до сих пор из текста заметки был достижим только первый.
+
+            Видео здесь скрыто (`showVideos={false}`) намеренно: разметчик заметки умеет только
+            `<img>`, и вставленный ролик показался бы битой картинкой — то есть кнопка предлагала
+            бы то, что тут же ломается. */}
+        <MediaSelector
+          label='media'
+          purpose='a picture in the text'
+          allowMultiple
+          showVideos={false}
+          saveSelectedMedia={insertMedia}
+          trigger={
+            <Button
+              type='button'
+              size='xs'
+              variant='secondary'
+              title='insert pictures from the media library: pick several, they will stand as a gallery'
+              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+            >
+              media
+            </Button>
+          }
+        />
       </div>
 
       {picker && (

@@ -16,6 +16,12 @@ export type TechCardFilter = {
   name?: string;
   productId?: number;
   purpose?: string;
+  // Коллекция — ТОЧНОЕ хранимое ИМЯ, а не ссылка: колонки `tech_card.collection_id` не существует,
+  // её дропнула 0240 как мёртвую схему, живая колонка одна — `tech_card.collection`, свободный
+  // текст. Строка кладётся ровно такой, какой пришла с сервера: TrimSpace на сервере снят
+  // намеренно, чтобы фильтр был самосогласован с пулом, который клиент строит из ответов этого же
+  // сервера. Значит « SS25» и «SS25» — РАЗНЫЕ коллекции, и своей нормализации здесь быть не должно.
+  collection?: string;
   // One id is enough at whatever level of the tree the operator picked: the server matches a card
   // whose category_id OR top/sub/type equals any of these, so the client never expands the tree.
   categoryIds?: number[];
@@ -52,6 +58,9 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         limit,
         offset: pageParam,
         orderFactor: 'ORDER_FACTOR_DESC',
+        // Фасет коллекции листа. `undefined` (и "") = нет фильтра — генератор роняет falsy-значение
+        // и параметр вовсе не уходит на провод.
+        collection: filter.collection,
         stage: filter.stage ?? 'TECH_CARD_STAGE_UNKNOWN',
         gender: filter.gender ?? 'GENDER_ENUM_UNKNOWN',
         brand: filter.brand ?? '',
@@ -60,7 +69,6 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         skuSeason: filter.skuSeason,
         productId: filter.productId ?? 0,
         categoryIds: filter.categoryIds,
-        collection: undefined,
       });
       const techCards = response.techCards || [];
       const total = response.total ?? 0;

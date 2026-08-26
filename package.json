@@ -50,9 +50,15 @@
     "annotation:kinds": "node scripts/annotation-kinds-probe.mjs",
     "annotation:hit": "node scripts/annotation-hit-probe.mjs",
     "annotation:frame": "node scripts/annotation-frame-probe.mjs",
+    "annotation:canvas": "node scripts/annotation-canvas-probe.mjs",
+    "annotation:ink": "node scripts/annotation-ink-probe.mjs",
     "reader:find": "node scripts/reader-find-probe.mjs",
     "upload:queue": "node scripts/upload-queue-probe.mjs",
-    "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs"
+    "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs",
+    "note:format-edits": "node scripts/format-edits-probe.mjs",
+    "intake:queue": "node scripts/intake-queue-probe.mjs",
+    "intake:paste": "node scripts/media-intake-probe.mjs",
+    "note:format-bar": "node scripts/format-bar-probe.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",

@@ -28,6 +28,8 @@ export function StylePicker({ name = 'styleId', disabled }: { name?: string; dis
       adminService.ListTechCards({
         limit: 200,
         offset: 0,
+        // коллекцией этот список не сужается
+        collection: undefined,
         orderFactor: 'ORDER_FACTOR_DESC',
         stage: 'TECH_CARD_STAGE_UNKNOWN',
         gender: 'GENDER_ENUM_UNKNOWN',
@@ -37,7 +39,6 @@ export function StylePicker({ name = 'styleId', disabled }: { name?: string; dis
         purpose: undefined,
         skuSeason: undefined,
         categoryIds: undefined,
-        collection: undefined,
       }),
     staleTime: 5 * 60 * 1000,
   });

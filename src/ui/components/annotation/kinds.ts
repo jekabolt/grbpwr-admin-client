@@ -154,9 +154,17 @@ const DEFS: KindDef[] = [
   },
   {
     key: 'ink',
-    points: [2, 64],
+    // ДВЕСТИ — ЭТО ЗЕРКАЛО СЕРВЕРНОГО ПРЕДЕЛА, А НЕ ВКУС.
+    //
+    // `internal/entity/techcard.go`, `PointsAllowed()`: `case AnnotationKindInk: return 2, 200`.
+    // Выйти за него значит получить `FieldViolation(".points", "wrong_count")` и отказ сохранения
+    // ВСЕЙ карточки — не «след обрежется», а «карточка не сохранилась». `tsc` этого не ловит:
+    // число живёт здесь, а проверка на сервере. Поднимать выше 200 нельзя, не подняв сперва
+    // серверный предел; понижать можно, но незачем — теперь одна выноска несёт всю серию штрихов
+    // (см. дублированную точку в `geometry.ts`), и прежних 64 на серию не хватало.
+    points: [2, 200],
     label: 'freehand',
-    hint: 'press and drag; every stroke is a separate callout',
+    hint: 'press and drag; strokes keep filling the same callout — Enter or “done” starts a new one',
     grammar: 'ink',
     inPalette: true,
     dashable: true,
@@ -250,7 +258,13 @@ export const COLOR_LABEL: Record<string, string> = {
 export function placingHint(kind: string, placed: number): string {
   const d = kindDef(kind);
   const [min, max] = d.points;
-  if (d.grammar === 'ink') return 'press and drag — every stroke is a separate callout';
+  if (d.grammar === 'ink') {
+    // Счётчик здесь — ЧИСЛО ЗАКОНЧЕННЫХ ШТРИХОВ сессии, а не якорей: у следа якоря считает рука,
+    // и «поставлено 137 точек» ничего не сообщает тому, кто рисует.
+    return placed > 0
+      ? `${placed} ${placed === 1 ? 'stroke' : 'strokes'} in this callout — Enter or “done” starts a new one`
+      : 'press and drag — strokes keep filling the same callout';
+  }
   if (d.grammar === 'arc') {
     return (
       ['click the start of the arc', 'click the end of the arc', 'drag the bend and click'][

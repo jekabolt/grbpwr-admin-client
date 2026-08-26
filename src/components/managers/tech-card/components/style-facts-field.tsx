@@ -266,11 +266,21 @@ export function StyleFactsField({
   styleId,
   canEdit,
   careEntries,
+  hideFitCare = false,
 }: {
   styleId?: number;
   canEdit: boolean;
   /** Server-resolved care symbols off the card read — display only, never written from here. */
   careEntries?: common_CareEntry[];
+  /**
+   * Прячет ВИДИМОЕ трио (fit / care picker / storefront preview) у auxiliary-карты, но оставляет
+   * компонент СМОНТИРОВАННЫМ. Размонтировать его нельзя: это единственный писатель
+   * brand / collection / season / targetGender — их редактируют в хедере, а UpdateTechCard их
+   * намеренно не пишет (R4/§14.7, «ни один факт не пишется двумя путями»). Сняв панель с монтажа,
+   * мы бы вернули ровно тот дефект, который описан в комментарии к dirtyFields выше: оператор
+   * меняет бренд у aux-карты, видит «saved», перезагружает — и получает старое значение.
+   */
+  hideFitCare?: boolean;
 }) {
   const { getValues, control, resetField, setValue } = useFormContext<TechCardFormData>();
   const [saving, setSaving] = useState(false);
@@ -457,6 +467,10 @@ export function StyleFactsField({
     dirtyFields.season,
     dirtyFields.targetGender,
   ]);
+
+  // Ниже — только разметка. Все хуки (зеркало care, staging brand/collection/season/gender) уже
+  // отработали выше, поэтому невидимая панель продолжает ПИСАТЬ ровно то же, что и видимая.
+  if (hideFitCare) return null;
 
   if (!styleId) {
     return (

@@ -42,6 +42,8 @@ export const techCardConfig: EntityConfig = {
       offset: undefined,
       orderFactor: undefined,
       stage: undefined,
+      // фильтра коллекции у пикера сущностей нет — он ищет по имени
+      collection: undefined,
       gender: undefined,
       brand: undefined,
       name: q || undefined,
@@ -49,7 +51,6 @@ export const techCardConfig: EntityConfig = {
       skuSeason: undefined,
       productId: undefined,
       categoryIds: undefined,
-      collection: undefined,
     });
     return (r.techCards ?? []).map(techCardOption);
   },
