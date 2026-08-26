@@ -18,12 +18,21 @@ const NONE = '__none__';
 // "unassigned" in this select — a lie about a task that has an owner, and one keystroke away from
 // being made true by the next save. The task's own captions (card and detail) print `assignee`
 // straight off the record and never consult this list.
+/**
+ * `disabled` — НЕ КОСМЕТИКА, А ЗАЩИТА ОТ НАЛОЖЕНИЯ ЗАПИСЕЙ. Там, где выбор пишется сразу
+ * (инлайн-рейка карточки), вторая запись, начатая пока летит первая, делает своё свежее
+ * чтение ДО того, как первая доехала, — и уносит на сервер устаревшее значение соседнего
+ * поля. Конфликт-проверка этого не ловит: она смотрит только на правленое поле. Поэтому
+ * контрол глохнет на время полёта — как соседние селект и датапикеры, которые это уже умеют.
+ */
 export function AssigneeSelect({
   value,
   onChange,
+  disabled,
 }: {
   value: string;
   onChange: (username: string) => void;
+  disabled?: boolean;
 }) {
   const { data, isError } = useAdmins();
   const admins = (data?.admins ?? []).filter(
@@ -39,6 +48,7 @@ export function AssigneeSelect({
         name='assignee'
         placeholder='username (unassigned if empty)'
         value={value}
+        disabled={disabled}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       />
     );
@@ -58,6 +68,7 @@ export function AssigneeSelect({
       onValueChange={(v: string) => onChange(v === NONE ? '' : v)}
       placeholder='unassigned'
       items={items}
+      disabled={disabled}
       fullWidth
     />
   );

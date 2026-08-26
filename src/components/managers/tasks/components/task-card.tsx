@@ -1,13 +1,14 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from 'lib/utility';
-import { Avatar } from 'ui/components/avatar';
 import { Chip } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Task, TaskPriority } from '../api/types';
 import { taskLinkCount } from '../utils/links';
 import { dueMeta, PRIORITY_LABEL } from '../utils/meta';
+import { openBlockers } from '../utils/relations';
+import { AvatarStack } from './avatar-stack';
 
 /**
  * tskCard v3 — a card leads with its PICTURE. The first attached media (resolved by
@@ -16,7 +17,7 @@ import { dueMeta, PRIORITY_LABEL } from '../utils/meta';
  *
  * Priority stops being a bespoke hue map: urgent fills ink (Chip), high is an ink
  * outline, everything lower is a quiet grey Pill — weight carries urgency, no health
- * colours borrowed. The assignee is the shared `Avatar`; labels are read-only Pills.
+ * colours borrowed. Assignees are an overlapping `AvatarStack`; labels are read-only Pills.
  */
 
 // tskPriority — weight over hue. Urgent is the only filled tag; nothing here spends a
@@ -32,16 +33,22 @@ export function PriorityTag({ priority }: { priority: TaskPriority }) {
 // Presentational card body — reused by the sortable card and the drag overlay.
 export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolean }) {
   const t = task.task;
-  const due = dueMeta(t.dueDate);
+  // Решённая карточка не краснеет: done и архив показывают срок нейтральной датой.
+  const due = dueMeta(t.dueDate, task.status === 'TASK_STATUS_DONE' || !!task.archivedAt);
   const cover = task.media[0];
   const coverUrl = cover?.thumbnail || cover?.fullSize;
   const linkCount = taskLinkCount(t);
   const checkTotal = task.checklist.length;
   const checkDone = task.checklist.filter((c) => c.isDone).length;
   const isArchived = !!task.archivedAt;
+  // Заархивированный блокер считается ОТКРЫТЫМ, пока не done (довод — в `utils/relations.ts`).
+  const blockers = openBlockers(task.relations);
 
   const meta: string[] = [];
   if (checkTotal) meta.push(`✓ ${checkDone}/${checkTotal}`);
+  // Свёртку сабтасок считает СЕРВЕР (`subtask_total`/`subtask_done`): доска не читает детей и
+  // не имеет права их пересчитывать — на списке их просто нет.
+  if (task.subtaskTotal) meta.push(`⊞ ${task.subtaskDone}/${task.subtaskTotal}`);
   if (linkCount) meta.push(`${linkCount} link${linkCount > 1 ? 's' : ''}`);
   if (t.mediaIds.length) meta.push(`${t.mediaIds.length} file${t.mediaIds.length > 1 ? 's' : ''}`);
 
@@ -64,9 +71,16 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
       )}
 
       <div className='flex flex-col gap-1.5 p-2'>
-        {(isArchived || t.labels.length > 0) && (
+        {(isArchived || blockers.length > 0 || t.labels.length > 0) && (
           <div className='flex flex-wrap gap-1'>
             {isArchived && <Pill tone='ink'>archived</Pill>}
+            {/* `warn` = «сломано / мешает / блокирует» по словарю тонов самого примитива.
+                Число, а не голое слово: «blocked · 2» говорит, сколько ещё ждать. */}
+            {blockers.length > 0 && (
+              <Pill tone='warn' title={blockers.map((b) => b.title || `#${b.taskId}`).join(', ')}>
+                blocked · {blockers.length}
+              </Pill>
+            )}
             {t.labels.map((l) => (
               <Pill key={l} tone='mut'>
                 {l}
@@ -97,7 +111,7 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
               </Text>
             )}
           </div>
-          <Avatar name={t.assignee} />
+          <AvatarStack names={t.assignees} />
         </div>
 
         {meta.length > 0 && (
