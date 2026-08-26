@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { simplifyPath, simplifyToLimit, type ShapePoint } from './geometry';
+import { simplifyPath, simplifyToLimit, splitInkStrokes, type ShapePoint } from './geometry';
 import { kindDef, labelKindForPoints } from './kinds';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
@@ -193,6 +193,46 @@ const HIT_WIDTH = 12;
 /** Прореживание следа: расстояние в экранных пикселях, ниже которого точку не видно. */
 const INK_EPSILON = 1.5;
 
+/**
+ * Склейка штрихов сессии фрихенда в ОДНУ фигуру. Между штрихами вставляется дубль последней точки
+ * предыдущего — так кодируется поднятое перо (см. `splitInkStrokes` в geometry.ts).
+ *
+ * ПРОРЕЖИВАНИЕ — ПО-ШТРИХОВО И НИКОГДА ЧЕРЕЗ РАЗРЫВ. Прогнать RDP по готовой склейке нельзя: две
+ * совпавшие точки лежат на любой прямой, поэтому первый же проход выкинул бы САМ разделитель, и
+ * штрихи слиплись бы мостом — ровно то, ради чего разделитель и заводился. Бюджет считается с
+ * учётом разделителей: их ровно n−1, и место в серверном пределе они занимают наравне с точками.
+ *
+ * Пиксели/доли: порог прореживания ЭКРАННЫЙ (см. `unpx`), поэтому штрих переводится в пиксели
+ * кадра, прореживается и возвращается в доли — тот же путь, что у первичного прореживания на
+ * отпускании.
+ */
+export function joinInkStrokes(
+  strokes: ShapePoint[][],
+  limit: number,
+  toPx: (p: ShapePoint) => ShapePoint,
+  toFrac: (p: ShapePoint) => ShapePoint,
+  eps: number,
+): ShapePoint[] {
+  const live = strokes.filter((s) => s.length >= 2);
+  if (live.length === 0) return [];
+  const budget = Math.max(2, Math.floor((limit - (live.length - 1)) / live.length));
+  const out: ShapePoint[] = [];
+  for (const s of live) {
+    const thin = s.length <= budget ? s : simplifyToLimit(s.map(toPx), budget, eps).map(toFrac);
+    if (out.length > 0) out.push(out[out.length - 1]);
+    out.push(...thin);
+  }
+  return out;
+}
+
+/**
+ * Сколько штрихов помещается в одну выноску. ВЫВОДИТСЯ ИЗ ПРЕДЕЛА, а не назначается: у штриха
+ * минимум две точки, между штрихами по разделителю, то есть n штрихов стоят 3n−1 точек. Дойдя до
+ * потолка, сессия КОММИТИТСЯ САМА и начинается следующая — иначе штрихи пришлось бы либо молча
+ * терять, либо отказывать в рисовании посреди жеста.
+ */
+const inkSessionMaxStrokes = (limit: number) => Math.max(1, Math.floor((limit + 1) / 3));
+
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -307,6 +347,45 @@ export function AnnotationSurface({
   // здесь: они принадлежат ЭТОМУ снимку, и общий счётчик достраивал бы мерку, начатую на первом
   // кадре, вторым кликом по третьему.
   const [points, setPoints] = useState<ShapePoint[]>([]);
+  /**
+   * СЕССИЯ ФРИХЕНДА — штрихи, УЖЕ УЕХАВШИЕ В ФОРМУ одной выноской.
+   *
+   * Раньше каждое отпускание кнопки рождало отдельную фигуру, и «обвести горловину, потом кокетку,
+   * потом стрелку к ним» давало три выноски с тремя номерами, которые никто по отдельности не имел
+   * в виду. Теперь пока инструмент взведён, штрихи наполняют ОДНУ выноску.
+   *
+   * ЗДЕСЬ НЕ ЧЕРНОВИК. Список нужен, чтобы пересобрать склейку при каждом новом штрихе (бюджет
+   * точек делится между штрихами) и чтобы показать счётчик; сама выноска живёт в форме с первого
+   * же отпускания. Промежуточная редакция копила штрихи здесь и записывала их в конце — и Save
+   * карточки, не будучи ни одним из концов сессии, отправлял карточку без нарисованного.
+   *
+   * БУФЕР ПЕР-ПОВЕРХНОСТНЫЙ, инструмент — общий на лист. Рисование на кадре A, потом на кадре B
+   * даёт две независимые сессии: штрих, растянутый между передом и спинкой, — не штрих. Смена
+   * инструмента заканчивает обе (эффект по `tool` живёт в каждом экземпляре).
+   *
+   * Зеркало в ref — потому что сессию закрывают и слушатель клавиш, и колбэки, переживающие
+   * рендер, а им нужно СВЕЖЕЕ значение, а не то, что было в замыкании на момент подписки.
+   */
+  const [inkSession, setInkSessionState] = useState<ShapePoint[][]>([]);
+  const inkSessionRef = useRef<ShapePoint[][]>([]);
+  const setInkSession = useCallback((next: ShapePoint[][]) => {
+    inkSessionRef.current = next;
+    setInkSessionState(next);
+  }, []);
+  /**
+   * ВЫНОСКА, КОТОРУЮ ДОПИСЫВАЕТ СЕССИЯ. Пока её нет, следующий штрих создаёт выноску; когда есть —
+   * дописывает её же. Ключ приходит не от `onAdd` (он ничего не возвращает: владелец кладёт
+   * выноску в свой список сам), а УЗНАЁТСЯ по появлению нового ключа в `callouts` — см. усыновление
+   * ниже.
+   */
+  const [inkKey, setInkKeyState] = useState<string | null>(null);
+  const inkKeyRef = useRef<string | null>(null);
+  const setInkKey = useCallback((next: string | null) => {
+    inkKeyRef.current = next;
+    setInkKeyState(next);
+  }, []);
+  /** Снимок ключей ДО добавления: по нему усыновляется только что созданная выноска. */
+  const adoptRef = useRef<Set<string> | null>(null);
   const [cursor, setCursor] = useState<ShapePoint | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   /** Последний отказ постановки — печатается под кадром, пока не начнут новый жест. */
@@ -403,6 +482,20 @@ export function AnnotationSurface({
     return v;
   }, []);
 
+  /**
+   * ВЫБОР И ПРАВКА ТЕКСТА — РАЗНЫЕ ТАКТЫ, и `focus` — единственная разница между ними.
+   *
+   * Клик по указанию НЕ просит фокуса. Он его просил, и ровно из-за этого Backspace не удалял
+   * выноску: курсор уезжал в textarea редактора, а там та же клавиша законно стирает букву —
+   * сторож `typing` ниже её и не пропускал. Перехватить Backspace «умно» (удалять выноску, когда
+   * поле пусто) нельзя: человек, стирающий последнюю букву подписи, потерял бы вместе с ней всю
+   * выноску.
+   *
+   * Поэтому грамматика теперь такая же, как в любом инструменте прямого манипулирования: клик =
+   * выбрать, Backspace = удалить, Enter = править текст, Esc = снять выбор. `focus: true` остаётся
+   * ровно у двух путей — у третьего такта «клик-клик-ввод» (сразу после ПОСТАНОВКИ новой фигуры)
+   * и у Enter, который для того и нужен.
+   */
   const select = useCallback(
     (key: string | null, opts?: { focus?: boolean }) => {
       if (key !== null) claimEditing(claimRef.current);
@@ -434,9 +527,12 @@ export function AnnotationSurface({
     if (cursor) setCursor(null);
   }
 
+  // У СЛЕДА СЧИТАЮТСЯ ШТРИХИ, А НЕ ТОЧКИ. Панель рисует подсказку по этому числу, а «поставлено
+  // 137 точек» ничего не говорит тому, кто ведёт линию рукой: он думает штрихами.
+  const placedCount = def.grammar === 'ink' ? inkSession.length : points.length;
   useEffect(() => {
-    onPlacedCountChange?.(points.length);
-  }, [points.length, onPlacedCountChange]);
+    onPlacedCountChange?.(placedCount);
+  }, [placedCount, onPlacedCountChange]);
 
   const count = callouts.length;
   const prevCount = useRef(count);
@@ -534,6 +630,89 @@ export function AnnotationSurface({
     setCursor(null);
     onToolDone?.();
   }, [onToolDone]);
+
+  /**
+   * КОНЕЦ СЕССИИ ФРИХЕНДА. Ничего не записывает и не может ничего потерять: выноска УЖЕ в форме —
+   * её создал первый штрих, а каждый следующий её дописал (см. `pushInkStroke`).
+   *
+   * Так было не сразу, и цена первой редакции важнее её самой. Сессия копилась в состоянии
+   * поверхности и уезжала в форму одной фигурой в конце — Enter, чип «done», Esc, смена
+   * инструмента, размонтирование. Пять выходов, и ни один из них не Save: человек рисовал, видел
+   * штрихи НА КАДРЕ, жал Save карточки — и на сервер уходила карточка без них. Форма при этом даже
+   * не считалась изменённой, поэтому уход со страницы не спрашивал ничего. «Вижу на экране, а на
+   * сервере нет» — расхождение, которого не бывает, когда хранить нечего.
+   *
+   * Поэтому сессия больше не хранит невыписанного. Она помнит РОВНО ДВЕ вещи: какие штрихи в ней
+   * уже есть (чтобы пересобрать склейку и показать счётчик) и какую выноску они наполняют.
+   */
+  const endInkSession = useCallback(() => {
+    if (inkSessionRef.current.length === 0 && inkKeyRef.current === null) return;
+    adoptRef.current = null;
+    setInkSession([]);
+    setInkKey(null);
+  }, [setInkSession, setInkKey]);
+
+  /**
+   * ШТРИХ ЗАКОНЧЕН — ФОРМА ОБНОВЛЕНА ТУТ ЖЕ. Первый штрих создаёт выноску, каждый следующий
+   * переписывает ей точки целиком: склейка пересобирается из ВСЕХ штрихов сессии, потому что
+   * бюджет точек делится между ними и добавление шестого меняет прореживание первых пяти.
+   *
+   * ⌘Z теперь снимает ОДИН ШТРИХ, а не всю серию: запись в историю у каждого своя. Это ближе к
+   * тому, чего ждут от отмены во время рисования, чем прежнее «снять всё сделанное разом».
+   */
+  const pushInkStroke = useCallback(
+    (strokes: ShapePoint[][]) => {
+      const d = kindDef('ink');
+      const joined = joinInkStrokes(strokes, d.points[1], px, unpx, Math.max(INK_EPSILON / shown, 1e-3));
+      if (joined.length < d.points[0]) return;
+      // ВЛАДЕЛЕЦ ЧИТАЕТСЯ НА МОМЕНТ ЗАПИСИ. Выноску сессии могли унести ⌘Z или чужая правка, пока
+      // рука была на кадре: дописывать в исчезнувший ключ значило бы молча терять штрих.
+      const known = live.current.callouts.some((c) => c.key === inkKeyRef.current);
+      const key = known ? inkKeyRef.current : null;
+      if (key === null) {
+        // Дописывать умеет не всякий владелец: без `onEditPoints` сессии не выйдет, и каждый штрих
+        // остаётся собственной выноской — прежнее поведение, а не молчаливая потеря. Буфер при
+        // этом сбрасывается сразу: иначе призрачный след рисовался бы поверх уже поставленной
+        // выноски, а строка «done · N strokes» обещала бы сессию, которой не будет.
+        if (!live.current.onEditPoints) {
+          finishPlacing('ink', strokes[strokes.length - 1] ?? joined);
+          setInkSession([]);
+          return;
+        }
+        adoptRef.current = new Set(live.current.callouts.map((c) => c.key));
+        finishPlacing('ink', joined);
+      } else {
+        mutate(() => live.current.onEditPoints?.(key, joined));
+      }
+      if (strokes.length >= inkSessionMaxStrokes(d.points[1])) endInkSession();
+    },
+    [px, unpx, shown, finishPlacing, mutate, endInkSession, setInkSession],
+  );
+
+  /**
+   * УСЫНОВЛЕНИЕ. `onAdd` ключа не возвращает — выноску заводит владелец, и как она называется,
+   * знает только его список. Поэтому ключ узнаётся по разнице: снимок ключей снят перед
+   * добавлением, а новый — тот, которого в снимке не было.
+   */
+  useEffect(() => {
+    const before = adoptRef.current;
+    if (!before) return;
+    const fresh = callouts.find((c) => !before.has(c.key));
+    if (!fresh) return;
+    adoptRef.current = null;
+    setInkKey(fresh.key);
+  }, [callouts, setInkKey]);
+
+  /** Свежий конец сессии для слушателей, переживающих рендер. */
+  const endInkRef = useRef(endInkSession);
+  endInkRef.current = endInkSession;
+
+  // СМЕНА ИЛИ СНЯТИЕ ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ФИГУРУ: следующая серия штрихов начнёт новую выноску.
+  // Размонтирование поверхности отдельного эффекта больше не требует — терять нечего.
+  useEffect(() => {
+    endInkRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
 
   /** Курсор в радиусе замыкания у первой вершины зоны — и вершин уже хватает, чтобы замкнуть. */
   // Радиус захвата — ЭКРАННЫЙ: в долях кадра он растягивался бы вместе с картинкой, и на узком
@@ -657,6 +836,10 @@ export function AnnotationSurface({
     // просил: он менял масштаб, а не рисовал.
     if (zoom && pointers.current.size === 2) {
       inking.current = null;
+      // Точки оборванного штриха убираются вместе с ним: без этого они оставались висеть
+      // призрачной линией до следующего нажатия. СЕССИЯ ПРИ ЭТОМ ЖИВА — щипок отменяет ТЕКУЩИЙ
+      // штрих, а не фигуру: человек менял масштаб, чтобы дорисовать её точнее.
+      if (points.length) setPoints([]);
       pan.current = null;
       const [a, b] = Array.from(pointers.current.values());
       if (a && b) pinch.current = { prev: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -787,7 +970,13 @@ export function AnnotationSurface({
         eps,
       ).map(unpx);
       setPoints([]);
-      if (thinned.length >= 2) finishPlacing('ink', thinned);
+      // ОТПУСКАНИЕ КНОПКИ НЕ РОЖДАЕТ НОВУЮ ФИГУРУ — оно дописывает ту, что сессия уже наполняет
+      // (первый штрих её и создаёт). Форма обновляется здесь же: см. `pushInkStroke`.
+      if (thinned.length >= 2) {
+        const next = [...inkSessionRef.current, thinned];
+        setInkSession(next);
+        pushInkStroke(next);
+      }
       return;
     }
 
@@ -941,6 +1130,12 @@ export function AnnotationSurface({
         let stepped = true;
         if (armed) setArmed(null);
         else if (selected !== null) select(null);
+        // ESC КОММИТИТ СЕССИЮ ФРИХЕНДА, А НЕ ОТМЕНЯЕТ ЕЁ, и это единственная ступень лестницы, где
+        // Esc что-то СОХРАНЯЕТ. У прочих видов «незавершённый жест» — это набранные, но ещё ничем
+        // не ставшие точки, и выбросить их не жалко. У следа незавершённый жест — это штрих под
+        // зажатой кнопкой, и обрывает его pointercancel; всё, что лежит в сессии, уже нарисовано
+        // рукой. Выброс есть, он явный — чип «cancel».
+        else if (inkSession.length > 0) endInkSession();
         else if (points.length > 0) setPoints([]);
         else if (tool) cancelPlacing();
         else stepped = false;
@@ -950,7 +1145,12 @@ export function AnnotationSurface({
       // ⌘Z / Ctrl+Z — ОТКАТ ЖЕСТА. Не когда курсор в поле ввода: там та же комбинация принадлежит
       // браузеру и отменяет напечатанную букву. Перехватить её значило бы стирать целое указание
       // вместо буквы — «умный» откат, который хуже никакого.
-      if ((e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я') && (e.metaKey || e.ctrlKey)) {
+      //
+      // СРАВНЕНИЕ ПО `e.code`, А НЕ ПО `e.key`. `key` — это НАПЕЧАТАННАЯ буква, то есть она зависит
+      // от раскладки: на русской ⌘Z даёт «я», на греческой «ω», на иврите «ז». Здесь стоял список
+      // из двух алфавитов, и третий пришлось бы дописывать при каждой новой раскладке в команде.
+      // `code` называет ФИЗИЧЕСКУЮ клавишу и одинаков во всех раскладках.
+      if (e.code === 'KeyZ' && (e.metaKey || e.ctrlKey)) {
         if (typing || e.shiftKey || !onUndo || !canUndo?.()) return;
         // Откатывает ТА поверхность, которая последней что-то меняла, — см. `undoOwner`.
         if (undoOwner !== claimRef.current) return;
@@ -962,9 +1162,27 @@ export function AnnotationSurface({
         onUndo();
         return;
       }
+      // ENTER ЗАКАНЧИВАЕТ ФИГУРУ-СЛЕД. Стоит ПЕРЕД остальными ветками Enter: живой жест старше
+      // выбора, а незавершённой постановки у следа не бывает — штрих кончается вместе с кнопкой.
+      if (e.key === 'Enter' && !typing && inkSession.length > 0) {
+        e.preventDefault();
+        endInkSession();
+        return;
+      }
       if (e.key === 'Enter' && !typing && placing && points.length >= def.points[0]) {
         e.preventDefault();
         finishPlacing(def.key, points);
+        return;
+      }
+      // ENTER ОТКРЫВАЕТ ТЕКСТ ВЫБРАННОГО. Клик больше не уводит курсор в поле (см. `select`), и без
+      // этой ветки клавиатурного пути к подписи не осталось бы вовсе — а «Keyboard-first speed»
+      // это правило продукта, а не пожелание. Запрос фокуса доставляется тем же
+      // `takeFocusRequest`/`focusToken`, что и у третьего такта постановки.
+      //
+      // СТОРОЖ ВЛАДЕНИЯ ЗДЕСЬ ОБЯЗАТЕЛЕН РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО И У УДАЛЕНИЯ НИЖЕ.
+      if (e.key === 'Enter' && !typing && !placing && selected !== null && byKey.has(selected)) {
+        e.preventDefault();
+        select(selected, { focus: true });
         return;
       }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -983,6 +1201,33 @@ export function AnnotationSurface({
         return;
       }
       if (selected === null) return;
+      // УДАЛЯЕТ ТОЛЬКО ТА ПОВЕРХНОСТЬ, КОТОРОЙ ВЫНОСКА ПРИНАДЛЕЖИТ.
+      //
+      // Слушатель клавиш висит на window У КАЖДОЙ поверхности (эффект пер-инстансный), а выбор на
+      // листе эскиза — ОДИН НА ВЕСЬ ЛИСТ и приходит пропом: на Backspace ветку проходят ВСЕ кадры
+      // листа, а не только тот, где выноска стоит.
+      //
+      // ЧЕСТНАЯ ЦЕНА ПРОВЕРКИ ЗАМЕРЕНА, и она не та, что ожидалась. Каскада «пять кадров — пять
+      // удалений» не происходит и без неё: браузер делает микрозадачный чекпойнт МЕЖДУ
+      // слушателями одного события, React успевает перерисоваться на `select(null)`, эффект
+      // переподписывается — и ещё не вызванные слушатели по спецификации DOM выбывают из этой
+      // рассылки. Замер на стенде: три кадра, до ветки доходит РОВНО ОДИН слушатель.
+      //
+      // Но вот КАКОЙ именно — без проверки дело случая: он идёт в порядке подписки, и при выборе
+      // на втором кадре удаление выполняет поверхность ПЕРВОГО (замерено: `owns=false`). Пока
+      // `onRemove` у листа один, итог тот же; расходится он в двух местах — у `undoOwner`, который
+      // получает чужая поверхность и уносит с собой при размонтировании, и у любого владельца, где
+      // соседние поверхности пишут в РАЗНЫЕ списки. Проверка стоит одного сравнения по Map и
+      // убирает зависимость от порядка подписки целиком.
+      //
+      // ПОЧЕМУ ЭТУ СТРОКУ НЕ ЛОВИТ НИ ОДНА ПРОБА, и почему это не повод её снять. Соседняя галерея
+      // на той же странице сюда не доходит: выбор пер-аннотаторный (см. `controlled`/`selected`
+      // выше), у чужой галереи он `null`, и `if (selected === null) return` строкой выше отсекает
+      // её раньше. А внутри ОДНОГО листа все кадры делят один `onRemove` — «не та» поверхность
+      // зовёт тот же обработчик с тем же ключом, и результат неотличим. То есть сегодня строка
+      // страхует не наблюдаемое поведение, а два конкретных будущих: разные списки у соседних
+      // поверхностей и владение откатом.
+      if (!byKey.has(selected)) return;
       e.preventDefault();
       mutate(() => live.current.onRemove?.(selected));
       select(null);
@@ -1003,6 +1248,8 @@ export function AnnotationSurface({
     select,
     cancelPlacing,
     finishPlacing,
+    inkSession,
+    endInkSession,
     mutate,
     onUndo,
     canUndo,
@@ -1075,6 +1322,38 @@ export function AnnotationSurface({
   const selectedCallout = selected !== null ? byKey.get(selected) : undefined;
   const handlesVisible =
     editable && !placing && !hideCallouts && selectedCallout && kindDef(selectedCallout.kind).handles;
+
+  /**
+   * МАРКИЗА ВЫБРАННОЙ ФИГУРЫ — штриховая рамка по её габаритам.
+   *
+   * У фигуры на холсте не было состояния «выбрана»: 2 пикселя штриха против 1.5 — это не
+   * состояние, а у следа с `handles: false` не было и ручек, то есть выбранный штрих не отличался
+   * от соседнего НИЧЕМ. Подсветить цветом нельзя (система монохромная, и цвет здесь уже занят —
+   * им красят саму линию), утолщить нельзя (штрих в 4 пикселя перекрывает чертёж, ради которого
+   * его и рисовали). Остаётся геометрия: рамка вокруг того, что выбрано, — тот же приём, каким
+   * выбор показывает любой векторный редактор.
+   *
+   * ПОЛЕ И ОБВОДКА — ЭКРАННЫЕ, А НЕ КАДРОВЫЕ: `inv` компенсирует зум, `non-scaling-stroke` держит
+   * толщину. Иначе на ×6 рамка отступала бы от фигуры на треть кадра и была бы толщиной в палец.
+   */
+  const marquee = (() => {
+    if (hideCallouts || !selectedCallout || dim(selectedCallout.key)) return null;
+    const pts = pointsOf(selectedCallout).map(px);
+    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки) —
+    // рамка вокруг одной точки была бы рамкой вокруг ничего.
+    if (pts.length < 2) return null;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const pad = 6 * inv;
+    const x0 = Math.min(...xs) - pad;
+    const y0 = Math.min(...ys) - pad;
+    return {
+      x: x0,
+      y: y0,
+      width: Math.max(...xs) - Math.min(...xs) + pad * 2,
+      height: Math.max(...ys) - Math.min(...ys) + pad * 2,
+    };
+  })();
 
   const cursorClass = placing
     ? 'cursor-crosshair'
@@ -1296,6 +1575,28 @@ export function AnnotationSurface({
                     />
                   ),
                 )}
+                {/* МАРКИЗА — ДВА ПРЯМОУГОЛЬНИКА, А НЕ ОДИН. Белый сплошной снизу, чернильный
+                    штриховой поверх: на тёмном снимке чернильная рамка невидима ровно так же, как
+                    чернильная линия, и лечится тем же, чем лечится она, — подложкой. */}
+                {marquee && (
+                  <g data-marquee='true' pointerEvents='none'>
+                    <rect
+                      {...marquee}
+                      fill='none'
+                      stroke='var(--color-bgColor)'
+                      strokeWidth={3}
+                      vectorEffect='non-scaling-stroke'
+                    />
+                    <rect
+                      {...marquee}
+                      fill='none'
+                      stroke='var(--color-textColor)'
+                      strokeWidth={1}
+                      strokeDasharray='3 3'
+                      vectorEffect='non-scaling-stroke'
+                    />
+                  </g>
+                )}
                 {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
                     нельзя, а выбирать фигуру надо именно по ней. Живут ТОЛЬКО когда правка
                     возможна и инструмент выключен: во время постановки слой обязан быть прозрачным
@@ -1333,11 +1634,29 @@ export function AnnotationSurface({
                             justDragged.current = false;
                             return;
                           }
-                          select(selected === c.key ? null : c.key, { focus: true });
+                          // КЛИК ВЫБИРАЕТ И НЕ ЗАБИРАЕТ ФОКУС — см. довод у `select`. Печатать
+                          // подпись — Enter или клик в поле.
+                          // И НЕ ПЕРЕКЛЮЧАЕТ: повторный клик по выбранной фигуре раньше снимал
+                          // выбор, то есть хлопал редактором на каждое второе попадание. Снимают
+                          // выбор клик по фону и Esc — два жеста, которые ничего больше не значат.
+                          select(c.key);
                         }}
                       />
                     );
                   })}
+                {/* ШТРИХИ СЕССИИ — ТОЛЬКО ПОКА ВЫНОСКА НЕ УСЫНОВЛЕНА. Как только ключ известен,
+                    те же штрихи приезжают сверху обычной выноской из `callouts`, и рисовать их
+                    вторым слоем значило бы удваивать полупрозрачные концы. Окно между добавлением
+                    и усыновлением — один рендер, и без этого следа в нём штрих моргал бы. */}
+                {inkKey === null &&
+                  inkSession.map((s, i) => (
+                    <PlacingShape
+                      key={`ink-session:${i}`}
+                      kind='ink'
+                      pts={s.map(px)}
+                      color={pen.color || undefined}
+                    />
+                  ))}
                 {placing && points.length > 0 && (
                   <PlacingShape
                     kind={def.key}
@@ -1399,7 +1718,8 @@ export function AnnotationSurface({
                           justDragged.current = false;
                           return;
                         }
-                        if (editable) select(selected === c.key ? null : c.key, { focus: true });
+                        // Выбор без фокуса и без переключения — см. хит-путь выше.
+                        if (editable) select(c.key);
                       }}
                     />
                   );
@@ -1426,7 +1746,8 @@ export function AnnotationSurface({
                         justDragged.current = false;
                         return;
                       }
-                      if (editable) select(selected === c.key ? null : c.key, { focus: true });
+                      // Выбор без фокуса и без переключения — см. хит-путь выше.
+                      if (editable) select(c.key);
                     }}
                   />
                 );
@@ -1497,12 +1818,41 @@ export function AnnotationSurface({
           Закрывает три дыры разом: мультилидер (от 2 до 8 якорей) заканчивать было нечем, кроме
           достижения восьми; зону нельзя было замкнуть без клавиатуры (снап считается по движению
           курсора, а после тапа на планшете курсор не двигается); упёршийся предел молчал. */}
-      {editable && (refused || (placing && points.length > 0)) && (
+      {editable && (refused || inkSession.length > 0 || (placing && points.length > 0)) && (
         <ChipRow>
           {refused ? (
             <Text size='micro' variant='label' component='span'>
               {refused}
             </Text>
+          ) : inkSession.length > 0 ? (
+            // ФРИХЕНД ЗАКАНЧИВАЮТ ЗДЕСЬ ЖЕ, ГДЕ РИСУЮТ. Строка «сколько штрихов уже в этой фигуре»
+            // — единственное место, где видно, что сессия открыта; без неё «почему на листе нет
+            // новой выноски» разгадывается только опытом.
+            <>
+              <Chip
+                nonForm
+                onClick={endInkSession}
+                title='finish this freehand callout at these strokes'
+              >
+                done · {inkSession.length} {inkSession.length === 1 ? 'stroke' : 'strokes'}
+              </Chip>
+              {/* ЕДИНСТВЕННЫЙ ПУТЬ ВЫБРОСА, и теперь он УДАЛЯЕТ выноску, а не забывает буфер:
+                  штрихи уже в форме с первого же отпускания, и «забыть» их больше негде.
+                  Инструмент при этом остаётся взведён: «не то нарисовал» значит «нарисую заново»,
+                  а не «уберите маркер». */}
+              <Chip
+                nonForm
+                dashed
+                onClick={() => {
+                  const key = inkKeyRef.current;
+                  if (key !== null) mutate(() => live.current.onRemove?.(key));
+                  endInkSession();
+                }}
+                title='delete this freehand callout'
+              >
+                delete
+              </Chip>
+            </>
           ) : (
             <>
               {points.length >= def.points[0] && def.points[0] !== def.points[1] && (
@@ -1577,10 +1927,16 @@ function hitPath(kind: string, pts: ShapePoint[], label: ShapePoint): string | n
       return pts.map((p) => `M${label.x},${label.y} L${p.x},${p.y}`).join(' ');
     case 'dim':
       return pts.length >= 2 ? `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}` : null;
+    case 'ink': {
+      // ХИТ-ПУТЬ СЛЕДА ТОЖЕ РВЁТСЯ НА ПОДНЯТОМ ПЕРЕ. Иначе по фигуре из двух штрихов можно было бы
+      // попасть мышью в ПУСТОТУ между ними — там, где линии нет и никогда не было.
+      const runs = splitInkStrokes(pts).filter((r) => r.length >= 2);
+      if (runs.length === 0) return null;
+      return runs.map((r) => `M${r.map((p) => `${p.x},${p.y}`).join(' L')}`).join(' ');
+    }
     case 'bracket':
     case 'arc':
-    case 'polygon':
-    case 'ink': {
+    case 'polygon': {
       if (pts.length < 2) return null;
       const line = `M${pts.map((p) => `${p.x},${p.y}`).join(' L')}`;
       return d.key === 'polygon' ? `${line} Z` : line;
@@ -1678,6 +2034,7 @@ function PinMarker({
       role='button'
       tabIndex={0}
       title={title}
+      data-callout-selected={selected ? 'true' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
       // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы, а его отпускание —
@@ -1699,6 +2056,14 @@ function PinMarker({
         'absolute flex items-center justify-center rounded-full border text-nano tabular-nums',
         filled ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
         onDragStart ? 'cursor-move' : 'cursor-pointer',
+        // ВЫБОР ПОКАЗАН КОЛЬЦОМ, А НЕ ИНВЕРСИЕЙ ЗАЛИВКИ, и это не смягчение правила «selected
+        // fills solid with ink», а следствие того, что заливка у пина УЖЕ занята: залитый кружок
+        // означает «текст есть», полый — «текста ещё нет», и на листе из пятнадцати пинов это
+        // единственное состояние, которое видно, не открывая выноску. Инвертировав выбранный, мы
+        // сделали бы пустой пин неотличимым от подписанного — то есть починили бы одно состояние,
+        // сломав другое. Кольцо со сдвигом — тот же приём, которым в этом файле уже показана
+        // активная миниатюра ленты, и работает он при любой заливке.
+        selected && 'outline outline-1 outline-offset-1 outline-textColor',
         selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
@@ -1761,6 +2126,7 @@ function Plate({
       role='button'
       tabIndex={0}
       title={[text, ...names].filter(Boolean).join(' · ') || 'callout'}
+      data-callout-selected={selected ? 'true' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
       onPointerDown={onPointerDown}
@@ -1775,7 +2141,11 @@ function Plate({
       }}
       className={cn(
         'absolute block max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
-        selected ? 'border-textColor' : 'border-borderColor',
+        // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
+        // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
+        selected
+          ? 'border-textColor outline outline-1 outline-offset-1 outline-textColor'
+          : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
       )}

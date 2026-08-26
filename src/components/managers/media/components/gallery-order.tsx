@@ -109,12 +109,31 @@ export function useReorder(onMove: (from: number, to: number) => void): ReorderA
     if (from === null) return;
     const done = () => cancel();
     document.addEventListener('dragend', done, true);
-    document.addEventListener('drop', done, true);
+    // `drop` СНИМАЕТСЯ ВО ВСПЛЫТИИ, а не в перехвате, и это не стилистика.
+    //
+    // Замерено: в перехвате этот слушатель отрабатывал РАНЬШЕ реактового `onDrop` на плитке —
+    // React вешает свои обработчики на корень приложения и слушает всплытие, а `document` в фазе
+    // перехвата получает событие до всякого потомка. То есть `cancel()` обнулял `from` до того, как
+    // его читал `tileProps.onDrop`, и тот выходил по первой же строке `if (from === null) return`:
+    // `onMove` не звался НИКОГДА. Перестановка плиток мышью не применялась ни в одной галерее
+    // репозитория — ни здесь, ни в `media-gallery-selector`; работали только стрелки в подвале.
+    //
+    // Проверено на двух стендах: на изолированном (только `useReorder`/`moveItem`/`TileFooter`)
+    // бросок при перехвате даёт `A,B,C`, при всплытии — `C,A,B`; на полном бандле галереи эскиза
+    // две пробы броска переходят из красного в зелёное от этой одной строки.
+    //
+    // Сторож залипшего жеста не страдает, и вот его замеренная раскладка. При ЖИВОМ исходном узле
+    // состояние снимает он сам — реактовым `onDragEnd` на ручке (`dragend` приходит ПОСЛЕ `drop`
+    // отдельным событием), а `dragend`-слушатель строкой выше там лишь дублирует его. В СВОЁМ же
+    // случае сторожа — исходный узел размонтировался посреди жеста — `dragend` не приходит НИКОМУ,
+    // включая и тот слушатель: замерено, через 120 мс после отпускания подсветка цели ещё висит.
+    // Спасает ВТОРОЙ рубеж, `mousemove` через 400 мс, и проба стоит именно на нём.
+    document.addEventListener('drop', done);
     const arm = window.setTimeout(() => window.addEventListener('mousemove', done, true), 400);
     return () => {
       window.clearTimeout(arm);
       document.removeEventListener('dragend', done, true);
-      document.removeEventListener('drop', done, true);
+      document.removeEventListener('drop', done);
       window.removeEventListener('mousemove', done, true);
     };
   }, [from, cancel]);
