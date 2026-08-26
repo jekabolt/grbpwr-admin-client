@@ -10612,6 +10612,22 @@ export type AcknowledgeTechCardImportReportRequest = {
 export type AcknowledgeTechCardImportReportResponse = {
 };
 
+export type ApplyTechCardImportColorwaysRequest = {
+  techCardId: number | undefined;
+};
+
+export type ApplyTechCardImportColorwaysResponse = {
+  // created_colorway_ids — колорвеи, заведённые ЭТИМ нажатием, в порядке colorways.json. Пусто на
+  // повторном клике: всё, что архив нёс, уже стоит на карточке, и это успех, а не отказ. Ids, а не
+  // коды цвета: клиенту нужно чем-то открыть только что созданный драфт, а color_code — ключ
+  // архива, не ссылка на строку этой базы.
+  createdColorwayIds: number[] | undefined;
+  // report — ХРАНИМЫЙ отчёт карточки, переписанный этим применением: строки колорвеев перешли из
+  // skipped в imported/degraded, счётчики сдвинулись за ними. Клиент подменяет им то, что показывал
+  // до нажатия, а не дописывает — иначе на экране окажутся обе версии одной новости.
+  report: TechCardImportReport | undefined;
+};
+
 export type DeleteTechCardRequest = {
   id: number | undefined;
 };
@@ -15128,6 +15144,23 @@ export interface AdminService {
   // Идемпотентно — повторный ack не ошибка. wr(tech_cards): жест снимает предупреждение с
   // карточки у ВСЕХ, кто её откроет, и это решение владельца карточки, а не её читателя.
   AcknowledgeTechCardImportReport(request: AcknowledgeTechCardImportReportRequest): Promise<AcknowledgeTechCardImportReportResponse>;
+  // КОЛОРВЕИ ИЗ АРХИВА — ОТДЕЛЬНОЙ КНОПКОЙ ИЗ ОТЧЁТА, а не самим импортом (решение владельца).
+  // Колорвей — это ПРОДУКТ, и импорт продуктов не создаёт: colorways.json едет справкой, а импорт
+  // отчитывается строкой colorways_not_applied по каждому цвету. Этот вызов — второй, ЯВНЫЙ шаг:
+  // из сохранённого тела colorways.json он заводит на импортированной карточке ДРАФТ-колорвеи и
+  // раскладывает их рецепты и маппинг деталей. Ни SKU, ни публикации, ни цен — драфт это ровно
+  // столько, сколько архив удостоверяет, а денег в архиве нет по построению (money_policy).
+  // ИДЕМПОТЕНТЕН ПО ЦВЕТУ, а не по факту нажатия: колорвей с таким color_code на карточке уже
+  // есть — строка отчёта «exists» и пропуск. Поэтому повторное нажатие безопасно и не плодит
+  // дублей, и поэтому же ответ на второй клик — обычный отчёт, а не ошибка.
+  // ОТЧЁТ ВОЗВРАЩАЕТСЯ ОБНОВЛЁННЫЙ И ПЕРЕЗАПИСЫВАЕТ ХРАНИМЫЙ: строки колорвеев уходят из skipped
+  // в imported/degraded. Иначе карточка навсегда осталась бы с отчётом, который утверждает, что
+  // колорвеи не приехали, — ровно после того, как их завели.
+  // Классифицирован wr(products), и это НЕ описка рядом с соседними четырьмя: жест СОЗДАЁТ
+  // ПРОДУКТЫ, той же внутренней дорогой, что CreateColorway, и право на это — право того, кто
+  // ведёт каталог. Технолог с tech_cards:write, но без products:write, импортирует карточку и не
+  // может завести из неё колорвеи; это следствие того, чем колорвей является, а не пробел.
+  ApplyTechCardImportColorways(request: ApplyTechCardImportColorwaysRequest): Promise<ApplyTechCardImportColorwaysResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -20161,6 +20194,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AcknowledgeTechCardImportReport",
       }) as Promise<AcknowledgeTechCardImportReportResponse>;
+    },
+    ApplyTechCardImportColorways(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/import/colorways/apply`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ApplyTechCardImportColorways",
+      }) as Promise<ApplyTechCardImportColorwaysResponse>;
     },
     CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes

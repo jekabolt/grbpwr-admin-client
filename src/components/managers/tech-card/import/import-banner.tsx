@@ -11,6 +11,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { GetTechCardImportReportResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { productionRunKeys } from 'components/managers/production-runs/components/useProductionRuns';
+import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
@@ -18,7 +21,11 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { ImportReportCounters, ImportReportTable } from './import-report-table';
+import {
+  ApplyColorwaysAction,
+  ImportReportCounters,
+  ImportReportTable,
+} from './import-report-table';
 
 const importReportKey = (techCardId: number) => ['techCardImportReport', techCardId] as const;
 
@@ -83,9 +90,17 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
   const mayDismiss = canWrite(SECTION.techCards);
 
   const report = data?.report;
+  if (!report) return null;
   // `acknowledgedAt` незадан — с провода приезжает ЯВНЫМ null (EmitUnpopulated), а не пропущенным
   // ключом. Проверка на falsy покрывает и null, и undefined; `=== undefined` не покрыла бы.
-  if (!report || data?.acknowledgedAt) return null;
+  //
+  // ЗАКРЫТЫЙ ОТЧЁТ ПРЯЧЕТ ПОЛОСУ ВНИМАНИЯ, НО НЕ САМ ОТЧЁТ. Раньше здесь стоял `return null`, и
+  // это давало тупик на две стороны. Первая: отчёт — ЕДИНСТВЕННАЯ память карточки о том, чего
+  // импорт не довёз, а сервер хранит его вечно; спрятать его насовсем значит стереть эту память
+  // из интерфейса, оставив в базе. Вторая: в отчёте живёт кнопка создания колорвеев, и её
+  // собственный текст велит «нажать кнопку ещё раз» — человек, закрывший баннер до нажатия,
+  // читал инструкцию к органу, до которого больше не мог дойти.
+  const acknowledged = Boolean(data?.acknowledgedAt);
 
   const lines = report.lines ?? [];
   const counters = report.counters ?? [];
@@ -95,12 +110,12 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
 
   return (
     <>
-      <CalloutBox tone='warning'>
+      {acknowledged ? (
+        // Закрытый отчёт — приглушённая строка, а не полоса внимания: человек уже сказал, что
+        // взял дыры на себя, и звать его второй раз незачем. Но дорога обратно остаётся.
         <div className='flex flex-wrap items-center gap-2.5'>
-          <Text size='control'>
-            {needsAttention > 0
-              ? `Imported from archive — ${needsAttention} item(s) need attention`
-              : 'Imported from archive — nothing needs attention'}
+          <Text size='micro' variant='label'>
+            imported from archive
           </Text>
           <Button
             type='button'
@@ -112,7 +127,26 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
             view report
           </Button>
         </div>
-      </CalloutBox>
+      ) : (
+        <CalloutBox tone='warning'>
+          <div className='flex flex-wrap items-center gap-2.5'>
+            <Text size='control'>
+              {needsAttention > 0
+                ? `Imported from archive — ${needsAttention} item(s) need attention`
+                : 'Imported from archive — nothing needs attention'}
+            </Text>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              className='ml-auto'
+              onClick={() => setOpen(true)}
+            >
+              view report
+            </Button>
+          </div>
+        </CalloutBox>
+      )}
 
       <ConfirmationModal
         open={open}
@@ -124,7 +158,9 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
         // «главную» кнопку всегда и выдал бы чёрный прямоугольник без подписи. Тот же приём, что
         // у `sample-delete.tsx` и `colorway-delete.tsx`: нет пишущего действия — нет подвала.
         // Читателю остаются ✕ в шапке, Esc и клик по подложке.
-        hideActions={!mayDismiss}
+        // ...а также когда отчёт УЖЕ закрыт: закрыть его второй раз нечем, и кнопка предлагала бы
+        // действие без последствий.
+        hideActions={!mayDismiss || acknowledged}
         confirmLabel='dismiss'
         // Закрывает модалку onSuccess мутации: авто-закрытие спрятало бы отказ сервера,
         // и баннер остался бы висеть без объяснения, почему «dismiss» ничего не сделал.
@@ -140,10 +176,45 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
             {report.importId ?? ''}
           </Text>
           <ImportReportCounters counters={counters} />
+          {/* Кнопка стоит МЕЖДУ счётчиками и таблицей: счётчик называет число непривезённых
+              цветов, кнопка отвечает на него, таблица под ней объясняет построчно. Сама она
+              решает, показываться ли, — см. `ApplyColorwaysAction`. */}
+          <ApplyColorwaysAction
+            techCardId={techCardId}
+            lines={lines}
+            onApplied={(fresh) => {
+              // ОТВЕТ ЗАМЕЩАЕТ ОТЧЁТ, и именно в кэше: `useImportReport` держит `staleTime:
+              // Infinity`, поэтому инвалидация здесь ничего бы не перечитала, а показанный отчёт
+              // остался бы утверждать, что колорвеи не приехали — рядом с только что заведёнными.
+              queryClient.setQueryData(
+                importReportKey(techCardId),
+                (prev: GetTechCardImportReportResponse | null | undefined) =>
+                  prev ? { ...prev, report: fresh } : prev,
+              );
+              // КОЛОРВЕИ ПРИХОДЯТ В `GetTechCard` — карточка обязана перечитаться, иначе вкладка
+              // «colorways» будет пуста ровно после того, как их создали.
+              queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+              // Строка списка и пайплайн несут сведения о колорвеях стиля (то же, что чистит
+              // удаление колорвея в `useColorwayRecipe.ts`).
+              queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
+              queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
+              // Матрица костинга — проекция ПО КОЛОРВЕЯМ: у неё появляются целые колонки.
+              // Префикс, а не один ключ: цветов создаётся сразу несколько.
+              queryClient.invalidateQueries({
+                queryKey: styleReadViewKeys.costEstimates(techCardId),
+              });
+              // Планы материалов и факты прогонов адресуют продукты и лежат под общим корнем.
+              queryClient.invalidateQueries({ queryKey: productionRunKeys.all });
+              // Образцы, задачи, склад, история остатков и лист ожидания НЕ трогаются
+              // сознательно: у только что заведённого драфта их не может быть. Их чистит
+              // УДАЛЕНИЕ колорвея, где они остаются сиротами, — а это обратная задача.
+            }}
+          />
           <ImportReportTable lines={lines} />
-          {mayDismiss ? (
+          {mayDismiss && !acknowledged ? (
             <Text size='micro' variant='label'>
-              «dismiss» takes these holes on yourself — the banner will not come back.
+              «dismiss» takes these holes on yourself — the notice goes quiet, but this report stays
+              reachable from the card.
             </Text>
           ) : null}
         </div>
