@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // УТВЕРЖДАЕТ: на НАСТОЯЩЕЙ странице задачи работают три пожелания очереди Б и маркдаун описания.
-// КРАСНЕЕТ ОТ: шести флагов --mutate-… ниже.
+// КРАСНЕЕТ ОТ: девяти флагов --mutate-… ниже.
 //
 //   Б2 · НЕСКОЛЬКО ИСПОЛНИТЕЛЕЙ
 //     Ц1 — выбор ДВОИХ уходит ОДНОЙ записью, списком, с выведенным алиасом;
@@ -16,7 +16,8 @@
 //
 //   Б8 · УДАЛЕНИЕ СВОЕЙ РЕПЛИКИ
 //     Ц9 — орган удаления есть у своей реплики и НЕТ у чужой и у своей с мёртвой ссылкой;
-//     Ц10 — подтверждение зовёт DeleteTaskComment ровно с тем id и убирает строку.
+//     Ц10 — подтверждение зовёт DeleteTaskComment ровно с тем id и убирает строку;
+//     Ц10.3 — отказ сервера ВОЗВРАЩАЕТ строку откатом (перечитывание при этом заморожено).
 //
 //   Б6 · МАРКДАУН В ОПИСАНИИ
 //     Ц11 — `## …` становится настоящим <h2>, а не строкой с решётками;
@@ -37,6 +38,8 @@
 //   node scripts/task-queue-b-probe.mjs --mutate-parent-in-insert   Б7: родитель уезжает внутри содержимого
 //   node scripts/task-queue-b-probe.mjs --mutate-plain-description  Б6: описание снова печатается сырым
 //   node scripts/task-queue-b-probe.mjs --mutate-no-caret-restore   Б6: панель не возвращает каретку
+//   node scripts/task-queue-b-probe.mjs --mutate-no-comment-rollback   Б8: отказ не возвращает реплику
+//   node scripts/task-queue-b-probe.mjs --mutate-autogrow-scrolls-to-field Ц14: автогроу уводит прокрутку к полю
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -149,7 +152,9 @@ const table = {
     state.comments = (state.comments || []).filter((c) => c.id !== r.id);
     return {};
   },
-  ListTaskComments: () => ({ comments: state.comments || [] }),
+  // blockComments — заморозка перечитывания ленты: вечный pending. Нужна пробе отката (Ц10.3):
+  // без неё строку вернул бы рефетч onSettled, и отсутствие отката было бы невидимо.
+  ListTaskComments: () => (state.blockComments ? new Promise(() => {}) : { comments: state.comments || [] }),
   ListTasks: (r) => { log('ListTasks', r); return { tasks: r && r.parentTaskId ? (state.children || []) : (state.allTasks || []), total: 0 }; },
   ListAdmins: () => ({ admins: [{ id: 1, username: 'nina' }, { id: 2, username: 'oleg' }, { id: 3, username: 'kir' }] }),
   GetCurrentAccount: () => ({ account: { username: 'me', isSuper: true, permissions: [] } }),
@@ -223,12 +228,6 @@ if (flag('--mutate-commit-unchanged'))
     'if (!sameList(next, seen)) onChange(next, seen);',
     'onChange(next, seen);',
   );
-if (flag('--mutate-seen-at-close'))
-  mutate(
-    'Б2 «увиденное» берётся в момент ЗАКРЫТИЯ, а не открытия',
-    'const seen = seenRef.current;',
-    'const seen = valueRef.current;',
-  );
 if (flag('--mutate-subtask-two-calls'))
   mutate(
     'Б7 сабтаска создаётся двумя вызовами вместо одного',
@@ -261,6 +260,32 @@ if (flag('--mutate-plain-description'))
     'Б6 описание снова печатается сырым текстом',
     'if (!MEDIA_REF_LINE.test(text)) return [{ kind: "md", text }];',
     'return [{ kind: "refs", text }];',
+  );
+// ПРАВКА РЕВЬЮЕРА: откат оптимистичного снятия реплики. Якорь — по соседней строке снекбара,
+// потому что сам вызов setQueryData(key, ctx.previous) в сборке встречается у каждого
+// оптимистичного хука.
+if (flag('--mutate-no-comment-rollback'))
+  mutate(
+    'Б8 отказ сервера НЕ возвращает снятую реплику',
+    'if (ctx?.previous) qc2.setQueryData(key, ctx.previous);\n        showMessage(e2 instanceof Error ? e2.message : "Failed to delete comment", "error");',
+    'showMessage(e2 instanceof Error ? e2.message : "Failed to delete comment", "error");',
+  );
+// ПРАВКА РЕВЬЮЕРА: мутация детектора Ц14.6 правит ПОДСТАВНОЙ автогроу (стендовый код, не
+// сборку): будущий автогроу, забывший вернуть прокрутку вокруг замера высоты.
+if (flag('--mutate-autogrow-scrolls-to-field'))
+  console.log('  МУТАЦИЯ: Ц14 подставной автогроу уводит прокрутку к верху поля');
+// ПРАВКА РЕВЬЮЕРА: мутация «увиденное при закрытии» раньше подставляла НЕСУЩЕСТВУЮЩИЙ
+// `valueRef` — close() падал ReferenceError, запись не уходила вовсе, и краснели Ц1.0-Ц1.1
+// (по обрыву), а Ц3 — единственная проба, ради которой мутация существует, — оставалась
+// ЗЕЛЁНОЙ (updates=0 от краха неотличимо от updates=0 от пойманного конфликта). Это ровно
+// «ложная краснота: мутация ломает исполнение». Теперь дефект настоящий: `seenRef` каждый
+// рендер пересаживается на живое значение, то есть к закрытию в нём лежит последнее
+// отрисованное — и чужая правка сверяется сама с собой. Замерено: красна Ц3/Ц3.1, Ц1-Ц2 целы.
+if (flag('--mutate-seen-at-close'))
+  mutate(
+    'Б2 «увиденное» въезжает живым на каждом рендере — к закрытию оно чужое',
+    'draftRef.current = draft;',
+    'draftRef.current = draft;\n    seenRef.current = value;',
   );
 
 let bad = 0;
@@ -566,6 +591,44 @@ ck(
 );
 ck((await bodyText()).includes('чужая реплика'), 'Ц10.2 соседние реплики на месте');
 
+// ═══ Ц10.3 · ОТКАЗ СЕРВЕРА ВОЗВРАЩАЕТ СТРОКУ (правка ревью) ══════════════════════════════════
+// Право решает СЕРВЕР (имя ПРИ живой ссылке — mayEditTaskComment), и клиентская кнопка — не
+// защита. Оптимистичное снятие без отката оставило бы человека уверенным, что слова стёрты,
+// а они на месте. Это ЕДИНСТВЕННАЯ ветка Б8, которую не покрывал ни один стенд.
+//
+// Перечитывание ленты ЗАМОРАЖИВАЕТСЯ (blockComments) ПОСЛЕ первого чтения: иначе строку вернул
+// бы рефетч из onSettled, и мутация «откат снят» была бы неотличима от починки — сторож у
+// мёртвого кода, ровно тот же класс, что был у `updates.length === 1`.
+console.log('\nЦ10.3 · сервер отказал в удалении — реплика обязана ВЕРНУТЬСЯ');
+await mount({
+  comments: [
+    { id: 21, taskId: 1, author: 'me', authorId: 7, body: 'реплика, которую не отдадут', createdAt: '2026-08-01T00:00:00Z' },
+    { id: 22, taskId: 1, author: 'nina', authorId: 8, body: 'соседняя реплика', createdAt: '2026-08-01T00:00:00Z' },
+  ],
+  refuseDelete: true,
+});
+await page.waitForSelector('text=реплика, которую не отдадут', { timeout: 8000 });
+await page.evaluate(() => {
+  globalThis.__server.blockComments = true;
+});
+await page.locator('[aria-label="delete comment 21"]').click();
+await page.getByRole('button', { name: 'delete', exact: true }).last().click();
+await page.waitForTimeout(600);
+const refused = await callsOf('DeleteTaskComment');
+ck(
+  refused.length === 1 && refused[0].req.id === 21,
+  'Ц10.3 попытка ушла на сервер — решал он, а не клиентская кнопка',
+  JSON.stringify(refused.map((c) => c.req)),
+);
+ck(
+  (await bodyText()).includes('реплика, которую не отдадут'),
+  'Ц10.4 после отказа строка ВЕРНУЛАСЬ — вернул её откат, перечитывание заморожено',
+);
+ck(
+  /forbidden: not your comment/i.test(await bodyText()),
+  'Ц10.5 отказ назван человеку словами сервера, а не проглочен',
+);
+
 // ═══ Ц11-Ц13 · МАРКДАУН ══════════════════════════════════════════════════════════════════════
 console.log('\nЦ11 · описание рисуется разметчиком заметок');
 await mount();
@@ -622,7 +685,13 @@ async function formatInTheMiddle({ autogrow }) {
   if (autogrow) {
     // ПОДСТАВНОЙ АВТОГРОУ — не копия чужого кода, а его ОПИСАННЫЙ механизм: схлопнуть высоту,
     // прочитать `scrollHeight`, поставить обратно, сохранив прокрутку предков вокруг замера.
-    await page.evaluate((s) => {
+    //
+    // `scrollsToField` — мутация детектора Ц14.6: автогроу, доводящий прокрутку к верху поля
+    // (класс scroll-into-view/фокус — тот самый, в котором прежняя Ц14.6 обвиняла панель).
+    // Просто ЗАБЫТЫЙ возврат прокрутки замерить нельзя: в хроме зажим прокрутки при схлопнутой
+    // высоте не происходит в синхронном layout, и «забывчивый» grow следа не оставляет
+    // (замерено: без restore прокрутка не меняется).
+    await page.evaluate(([s, scrollsToField]) => {
       const el = document.querySelector(s);
       const grow = () => {
         const keep = window.scrollY;
@@ -630,6 +699,7 @@ async function formatInTheMiddle({ autogrow }) {
         const h = el.scrollHeight;
         el.style.height = `${h}px`;
         window.scrollTo(0, keep);
+        if (scrollsToField) el.scrollIntoView();
       };
       globalThis.__trace = [];
       const T = (tag) => globalThis.__trace.push(`${tag}:${Math.round(window.scrollY)}`);
@@ -638,7 +708,7 @@ async function formatInTheMiddle({ autogrow }) {
       el.addEventListener('focus', () => T('focus'));
       globalThis.__grow = grow;
       grow();
-    }, sel);
+    }, [sel, flag('--mutate-autogrow-scrolls-to-field')]);
   }
   // Каретка ставится в СЕРЕДИНУ — на слово-якорь, а не в конец: правка в конце не различает
   // «каретка сохранена» и «каретка уехала в конец».
@@ -656,12 +726,28 @@ async function formatInTheMiddle({ autogrow }) {
   // страницу ДО `focus()` — и фокус на поле тут же прокручивал её обратно к полю, так что в
   // репетиции (поле высотой во весь текст стоит у верха страницы) `scrollY` возвращался в 0.
   // Проверка «прокрутка не уехала» становилась слепой: 0 до, 0 после.
-  await page.evaluate(() => window.scrollTo(0, 240));
+  //
+  // КРУТИТСЯ К ПАНЕЛИ, А НЕ НА ФИКСИРОВАННЫЕ 240, — ЭТО ПРАВКА РЕВЬЮ, И У НЕЁ ЕСТЬ ИСТОРИЯ.
+  // Прежняя версия ставила scrollY=240 — у высокого поля кнопка «bold» оказывалась ВЫШЕ экрана
+  // (top −81.5, замерено), и стенд, прежде чем нажать, сам докручивал её в вид. Полученные
+  // «240 → 0» были жестом СТЕНДА, а не продукта: человек не может нажать кнопку, которой не
+  // видит. Жест «нажал bold» существует только при видимой панели — с неё и меряем.
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent === 'bold');
+    window.scrollTo(0, Math.max(0, btn.getBoundingClientRect().top + window.scrollY - 40));
+  });
   await page.waitForTimeout(80);
   const before = await page.evaluate(
     ([s, i]) => {
       const el = document.querySelector(s);
-      return { at: i, height: el.getBoundingClientRect().height, pageScroll: window.scrollY, boxTop: el.getBoundingClientRect().top };
+      const btn = [...document.querySelectorAll('button')].find((b) => b.textContent === 'bold');
+      return {
+        at: i,
+        height: el.getBoundingClientRect().height,
+        pageScroll: window.scrollY,
+        boxTop: el.getBoundingClientRect().top,
+        btnTop: btn.getBoundingClientRect().top,
+      };
     },
     [sel, at],
   );
@@ -698,6 +784,13 @@ ck(
   'Ц14.-1 страница ДЕЙСТВИТЕЛЬНО прокручена — иначе проверки (б) слепые',
   `scrollY=${plain.before.pageScroll}`,
 );
+// Второй сторож замера: кнопка ВИДИМА до клика. Невидимую кнопку стенд докручивает в вид сам,
+// и любое «прокрутка уехала» после этого — жест стенда, а не продукта.
+ck(
+  plain.before.btnTop >= 0 && plain.before.btnTop < 1000,
+  'Ц14.-1.1 кнопка «bold» на экране ДО клика — жест человеческий, стенд не докручивал',
+  `btnTop=${plain.before.btnTop}`,
+);
 ck(
   plain.after.value.includes(`**${MARK}**`),
   'Ц14.0 панель действительно правит текст в середине',
@@ -733,34 +826,39 @@ ck(
   `scrollY=${grown.before.pageScroll}`,
 );
 ck(
+  grown.before.btnTop >= 0 && grown.before.btnTop < 1000,
+  'Ц14.4.2 и в репетиции кнопка «bold» на экране ДО клика',
+  `btnTop=${grown.before.btnTop}`,
+);
+ck(
   grown.after.selected === MARK && grown.after.around === `**${MARK}**`,
   'Ц14.5 РЕПЕТИЦИЯ: с подставным автогроу каретка ТОЖЕ остаётся на слове',
   `выделено ${JSON.stringify(grown.after.selected)}, вокруг ${JSON.stringify(grown.after.around)}`,
 );
 /*
- * ═══ НАЙДЕННЫЙ ДЕФЕКТ, ЗАФИКСИРОВАННЫЙ ЗАМЕРОМ ══════════════════════════════════════════════
+ * ═══ ИСТОРИЯ ОДНОГО ЛОЖНОГО ДЕФЕКТА (правка ревью) ══════════════════════════════════════════
  *
- * У ВЫСОКОГО ПОЛЯ ПАНЕЛЬ УНОСИТ ПРОКРУТКУ СТРАНИЦЫ. Замерено: 240 → 0.
+ * Прежняя Ц14.6 УТВЕРЖДАЛА дефект: «у высокого поля панель уносит прокрутку 240 → 0, причина —
+ * `area.focus()` в format-bar». Ревью замерило иначе, и все три опоры того вывода рухнули:
  *
- * ВИНОВАТ НЕ АВТОГРОУ. След прокрутки (`--diagnose`) однозначен:
- *     ["focus:0", "input-before-grow:0", "input-after-grow:0"]
- * — к моменту, когда автогроу впервые что-то померил, прокрутка УЖЕ была нулём. Обнуляет её
- * `area.focus()` — первое, что делает `apply` в `files/note/format-bar.tsx`: браузер
- * сопровождает фокус прокруткой к элементу, и у поля во весь текст «к элементу» значит «к его
- * верху». У сегодняшнего поля в 128px этого не видно — оно и так целиком в виду.
+ *   1. При scrollY=240 кнопка «bold» стояла ВЫШЕ экрана (top −81.5, замерено) — и «240 → 0»
+ *      делал сам стенд, докручивая невидимую кнопку перед кликом. Человек этого жеста не имеет:
+ *      невидимую кнопку не нажать.
+ *   2. `area.focus()` в этом жесте — no-op: кнопки панели глушат mousedown (`preventDefault`),
+ *      поле фокуса НЕ ТЕРЯЕТ, и фокусировать сфокусированное браузеру незачем. «focus:0» в
+ *      старом следе — это фокус САМОГО СТЕНДА при постановке каретки, до scrollTo.
+ *   3. Репетиция починки — `focus({ preventScroll: true })` на оба вызова — не меняла в следе
+ *      НИ БАЙТА. Проба была зелёной и «до починки», и «после» — то есть не была пробой.
  *
- * ЧИНИТСЯ ОДНИМ СЛОВОМ — `focus({ preventScroll: true })` — но НЕ ЗДЕСЬ: и панель, и будущий
- * автогроу примитива лежат в чужих файлах этой волны. Потолок высоты, который я поставил в
- * `description-editor.tsx`, ограничивает РАЗМЕР поля (замерено: 1464 → 600), но прокрутку не
- * спасает: фокус уводит к верху поля независимо от того, насколько оно высокое.
- *
- * ПРОВЕРКА УТВЕРЖДАЕТ ЗАМЕРЕННОЕ, А НЕ ЖЕЛАЕМОЕ. Красная навсегда проба перестаёт быть пробой
- * (ровно так в этой ветке год стояла Ц1.2). Если эта строка ПОКРАСНЕЛА — значит кто-то починил
- * фокус: это хорошая новость, и ожидание надо перевернуть.
+ * Поэтому теперь утверждается СВОЙСТВО, а не миф: при ВИДИМОЙ панели (единственный случай, когда
+ * жест существует) клик по «bold» прокрутку страницы не трогает — даже у высокого поля с
+ * автогроу. Красный исход снова возможен: его даёт автогроу, забывший вернуть прокрутку вокруг
+ * замера высоты (`--mutate-autogrow-scrolls-to-field`), — ровно тот будущий сосед, ради которого
+ * репетиция и существует.
  */
 ck(
-  grown.after.pageScroll === 0 && grown.before.pageScroll > 0,
-  'Ц14.6 ЗАФИКСИРОВАНО: у высокого поля панель уводит прокрутку к его верху (причина — focus(), не автогроу)',
+  Math.abs(grown.after.pageScroll - grown.before.pageScroll) < 2,
+  'Ц14.6 у ВЫСОКОГО поля видимая панель прокрутку тоже не трогает',
   `${grown.before.pageScroll} → ${grown.after.pageScroll}`,
 );
 // Потолок высоты — то единственное в этом шве, что лежит в МОИХ файлах. Он обязан работать
