@@ -10,6 +10,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { GetTechCardImportReportResponse } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -52,6 +54,7 @@ function useImportReport(techCardId: number | undefined) {
 
 export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
   const { data } = useImportReport(techCardId);
+  const { canWrite } = usePermissions();
   const { showMessage } = useSnackBarStore();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -71,6 +74,13 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
     onError: (error: unknown) =>
       showMessage(error instanceof Error ? error.message : 'could not dismiss the report', 'error'),
   });
+
+  // ЧИТАТЕЛЬ ВИДИТ ОТЧЁТ, НО НЕ ЗАКРЫВАЕТ ЕГО. Права у двух вызовов РАЗНЫЕ (см.
+  // `internal/rbac/rbac.go`): `GetTechCardImportReport` — rd(tech_cards), а
+  // `AcknowledgeTechCardImportReport` — wr(tech_cards). Показать баннер читателю правильно:
+  // потери на карточке касаются и его. Показать ему «dismiss» — значит предложить кнопку,
+  // которая ответит 403 и оставит человека гадать, почему баннер не ушёл.
+  const mayDismiss = canWrite(SECTION.techCards);
 
   const report = data?.report;
   // `acknowledgedAt` незадан — с провода приезжает ЯВНЫМ null (EmitUnpopulated), а не пропущенным
@@ -110,11 +120,19 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
         width='lg'
         title='import report'
         cancelLabel='close'
+        // Подвал целиком, а не одна кнопка: пустой `confirmLabel` шелл НЕ понимает — он рисует
+        // «главную» кнопку всегда и выдал бы чёрный прямоугольник без подписи. Тот же приём, что
+        // у `sample-delete.tsx` и `colorway-delete.tsx`: нет пишущего действия — нет подвала.
+        // Читателю остаются ✕ в шапке, Esc и клик по подложке.
+        hideActions={!mayDismiss}
         confirmLabel='dismiss'
         // Закрывает модалку onSuccess мутации: авто-закрытие спрятало бы отказ сервера,
         // и баннер остался бы висеть без объяснения, почему «dismiss» ничего не сделал.
         closeOnConfirm={false}
-        onConfirm={() => acknowledge.mutate()}
+        onConfirm={() => {
+          if (!mayDismiss) return;
+          acknowledge.mutate();
+        }}
       >
         <div className='flex flex-col gap-2.5'>
           <Text size='micro' variant='label'>
@@ -123,9 +141,11 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
           </Text>
           <ImportReportCounters counters={counters} />
           <ImportReportTable lines={lines} />
-          <Text size='micro' variant='label'>
-            «dismiss» takes these holes on yourself — the banner will not come back.
-          </Text>
+          {mayDismiss ? (
+            <Text size='micro' variant='label'>
+              «dismiss» takes these holes on yourself — the banner will not come back.
+            </Text>
+          ) : null}
         </div>
       </ConfirmationModal>
     </>

@@ -73,9 +73,12 @@ export function ImportReportCounters({ counters }: { counters: TechCardImportCou
   if (counters.length === 0) return null;
   return (
     <StatGrid min={130}>
-      {counters.map((c) => (
+      {counters.map((c, i) => (
         <Stat
-          key={c.entity ?? ''}
+          // Индекс в ключе — потому что `entity` НЕ гарантирован: два счётчика с пустым именем
+          // дали бы один ключ на двоих. Список не переупорядочивается и не фильтруется, он
+          // рисуется один раз из готового отчёта, поэтому индекс здесь ничего не ломает.
+          key={`${c.entity ?? ''}-${i}`}
           label={c.entity ?? '—'}
           value={c.imported ?? 0}
           sub={`${c.skipped ?? 0} skipped · ${c.degraded ?? 0} degraded`}
@@ -126,7 +129,16 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                   <td className='px-2 py-1.5'>
                     {reason ? (
                       <>
-                        <Text size='control'>{REASON_TEXT[reason] ?? reason}</Text>
+                        {/* `Object.hasOwn`, а не `REASON_TEXT[reason] ?? reason`: индекс
+                            обычного объекта достаёт и ПРОТОТИПНЫЕ ключи, и причина с именем
+                            `__proto__` или `constructor` вернула бы не строку, а объект или
+                            функцию — React бросил бы на попытке их отрисовать. Словарь причин
+                            закрыт и весь в snake_case, так что сегодня это недостижимо; стоит
+                            это одного вызова, а держится на том, что никто никогда не назовёт
+                            причину так. */}
+                        <Text size='control'>
+                          {Object.hasOwn(REASON_TEXT, reason) ? REASON_TEXT[reason] : reason}
+                        </Text>
                         {/* Код показывается рядом с переводом, а не вместо него: по коду
                             ищут в поддержке и в FORMAT.md. */}
                         <Text size='micro' variant='label' className='font-mono'>

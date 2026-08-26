@@ -39,7 +39,7 @@ function endpoint(): string {
 // report допускает отсутствие СОЗНАТЕЛЬНО: с EmitUnpopulated незаполненное сообщение приезжает
 // ЯВНЫМ null, а не пропущенным ключом, и `?? {}` тут не спасает — пустой объект не удовлетворяет
 // типу, у которого все поля объявлены (пусть и как `| undefined`).
-type UploadResult = { importId: string; report?: TechCardImportReport };
+type UploadResult = { importId: string; dryRun: boolean; report?: TechCardImportReport };
 
 /**
  * Отказ заливки словами. Сервер отвечает `{"error": "..."}` и для 413 присылает ГОТОВУЮ фразу
@@ -106,16 +106,39 @@ export function TechCardImport() {
         body: form,
       });
       if (!res.ok) throw new Error(await uploadFailure(res));
-      const body = (await res.json()) as { import_id?: string; report?: TechCardImportReport };
+      const body = (await res.json()) as {
+        import_id?: string;
+        dry_run?: boolean;
+        report?: TechCardImportReport;
+      };
       if (!body.import_id) throw new Error('the server accepted the archive but named no import');
-      return { importId: body.import_id, report: body.report ?? undefined };
+      // `dry_run` — НЕ УКРАШЕНИЕ (так и сказано в `techcard_archive_upload.go`): тело заливки
+      // повторяет тело фиксации минус id карты, и отличить «что БЫЛО БЫ» от «что СТАЛО» клиент
+      // обязан по этому полю, а не по отсутствующему ключу. Обещание экрана «ничего не записано»
+      // — ровно то, что оно удостоверяет, поэтому обещание берётся отсюда, а не из веры.
+      return {
+        importId: body.import_id,
+        dryRun: body.dry_run === true,
+        report: body.report ?? undefined,
+      };
     },
+    // ПОВТОР ЗДЕСЬ РАЗРУШИТЕЛЕН. Глобальный `mutations.retry: 1` (см. `src/index.tsx`) шлёт
+    // второй запрос на любой отказ — а отказы этой заливки ДЕТЕРМИНИРОВАНЫ: 413 (архив больше
+    // потолка), 403, битый zip. Повтор не меняет ни один из них, зато отправляет по проводу
+    // ВТОРЫЕ 256 мегабайт и вдвое оттягивает момент, когда человек прочтёт отказ.
+    retry: false,
     onSuccess: (r) => setResult(r),
     onError: (e: unknown) =>
       showMessage(e instanceof Error ? e.message : 'upload failed', 'error'),
   });
 
   const commit = useMutation({
+    // ПОВТОР ЗДЕСЬ РАЗРУШИТЕЛЕН ВДВОЙНЕ. Фиксация ПЕРЕНОСИТ ВСЕ медиа и выкройки архива в бакет
+    // ЕЩЁ ДО транзакции, поэтому второй заход за одно нажатие — это второй перенос всех байтов,
+    // и запускает его не человек, а react-query (глобальный `mutations.retry: 1`, `src/index.tsx`).
+    // Единственный отказ, у которого повтор осмыслен, — «уже импортировано», и он разобран ниже
+    // руками: там нужно открыть готовую карту, а не звать сервер снова.
+    retry: false,
     mutationFn: (importId: string) => adminService.CommitTechCardImport({ importId }),
     onSuccess: (res) => {
       const id = res.techCardId ?? 0;
@@ -140,6 +163,14 @@ export function TechCardImport() {
   });
 
   function accept(files: FileList | null) {
+    // ВТОРОЙ АРХИВ ВО ВРЕМЯ ЗАЛИВКИ НЕ ПРИНИМАЕТСЯ. Дропзона — не кнопка, её нельзя погасить
+    // `disabled`, а `upload.mutate` на летящей мутации не встаёт в очередь, а начинает вторую
+    // заливку. От брошенной первой остаются строка `tech_card_import` и объект в бакете, на
+    // которые уже никто не смотрит: их некому ни зафиксировать, ни убрать.
+    if (upload.isPending) {
+      showMessage('an archive is already being read — wait for it to finish', 'error');
+      return;
+    }
     const file = files?.[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.zip')) {
@@ -242,7 +273,10 @@ export function TechCardImport() {
                 дала бы коробку в коробке — самый заметный способ промахнуться мимо системы. */}
             <div className='flex flex-col gap-2.5'>
               <Text size='micro' variant='label'>
-                a dry run — nothing is written until «import». {fileName}
+                {result.dryRun
+                  ? 'a dry run — nothing is written until «import».'
+                  : 'the server did not call this a dry run — read the report before importing.'}{' '}
+                {fileName}
                 {result.report?.styleNumber ? ` · ${result.report.styleNumber}` : ''}
               </Text>
               <ImportReportCounters counters={counters} />
@@ -258,13 +292,28 @@ export function TechCardImport() {
                   size='lg'
                   className='uppercase'
                   loading={commit.isPending}
+                  // `loading` в этом примитиве — ТОЛЬКО содержимое кнопки: ни `disabled`, ни
+                  // `pointer-events-none` он не ставит (см. `ui/components/button.tsx`), и второй
+                  // клик проходит насквозь. Фиксация тяжёлая — перенос всех медиа и выкроек, —
+                  // поэтому гасим явно; данные при этом целы, гонку закрывает сервер.
+                  disabled={commit.isPending}
                   onClick={() => commit.mutate(result.importId)}
                 >
                   import
                 </Button>
               }
             >
-              <ImportReportTable lines={lines} />
+              {/* ОТЧЁТА НЕТ и ОТЧЁТ ПУСТ — РАЗНЫЕ ВЕЩИ, а таблица различить их не может: она
+                  видит только строки. Пустой отчёт означает «импорт чистый» и говорит это
+                  словами; отсутствующий отчёт не означает ничего, и сказать за него «nothing
+                  needs attention» значило бы поручиться за проверку, которой не было. */}
+              {result.report ? (
+                <ImportReportTable lines={lines} />
+              ) : (
+                <Text variant='uppercase'>
+                  the server sent no report — nothing here says this import is clean
+                </Text>
+              )}
             </Section>
           </>
         )}
