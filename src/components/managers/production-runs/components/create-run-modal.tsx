@@ -124,6 +124,7 @@ export function CreateRunModal({
         skuSeason: undefined,
         productId: undefined,
         categoryIds: undefined,
+        collection: undefined,
       }),
     enabled: open,
     staleTime: 5 * 60 * 1000,

@@ -149,6 +149,10 @@ function taskInsertToWire(t: TaskInsert): common_TaskInsert {
         mediaId: m.mediaId,
         annotations: (m.annotations ?? []).map(annotationToWire),
       })),
+    // Мультиасайн приехал с зеркалом прото раньше, чем форма научилась его заполнять. Пока
+    // список не задан, сервер читает DEPRECATED-алиас `assignee` (см. common.TaskInsert) —
+    // то есть поведение ровно то же, что и до регенерации. Заполнит его волна мультиасайна.
+    assignees: undefined,
   };
 }
 
@@ -249,6 +253,9 @@ export const tasksService: TasksService = {
         sampleId: filter.sampleId ?? 0,
         projectTopicId: filter.projectTopicId ?? 0,
         includeArchived: filter.includeArchived,
+        // Связи задач приехали с зеркалом прото; фильтра по родителю в UI ещё нет —
+        // не задан, значит запрос уходит без него, как и до регенерации.
+        parentTaskId: undefined,
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 
@@ -267,7 +274,7 @@ export const tasksService: TasksService = {
 
   addTask: (content, board, status) =>
     adminService
-      .AddTask({ task: taskInsertToWire(content), board, status })
+      .AddTask({ task: taskInsertToWire(content), board, status, parentTaskId: undefined })
       .then((r) => ({ id: r.id ?? 0 })),
 
   updateTask: (id, content) =>

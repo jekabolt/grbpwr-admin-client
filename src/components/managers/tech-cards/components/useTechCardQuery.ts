@@ -60,6 +60,7 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         skuSeason: filter.skuSeason,
         productId: filter.productId ?? 0,
         categoryIds: filter.categoryIds,
+        collection: undefined,
       });
       const techCards = response.techCards || [];
       const total = response.total ?? 0;

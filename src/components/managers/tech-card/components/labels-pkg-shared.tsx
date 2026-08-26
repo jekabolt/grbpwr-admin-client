@@ -55,6 +55,7 @@ export function useAuxTechCards() {
         productId: 0,
         skuSeason: undefined,
         categoryIds: undefined,
+        collection: undefined,
       }),
     staleTime: 5 * 60 * 1000,
   });

@@ -49,6 +49,7 @@ export const techCardConfig: EntityConfig = {
       skuSeason: undefined,
       productId: undefined,
       categoryIds: undefined,
+      collection: undefined,
     });
     return (r.techCards ?? []).map(techCardOption);
   },

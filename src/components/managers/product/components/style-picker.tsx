@@ -37,6 +37,7 @@ export function StylePicker({ name = 'styleId', disabled }: { name?: string; dis
         purpose: undefined,
         skuSeason: undefined,
         categoryIds: undefined,
+        collection: undefined,
       }),
     staleTime: 5 * 60 * 1000,
   });

@@ -1618,7 +1618,7 @@ export type TechCardBomKind =
   | "TECH_CARD_BOM_KIND_INSERT_CARD"
   // ДРУГОЕ — the ONLY value legal in EVERY eligible section (including section=other, which has no
   // kinds of its own). Its meaning lives in the separate kind_note, never in a shadow value on one
-  // of the 53 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
+  // of the 55 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
   | "TECH_CARD_BOM_KIND_OTHER"
   // ДОБАВЛЕНО ВОЛНОЙ ВИДОВ ОПЕРАЦИЙ, строго append'ом — ПОСЛЕ OTHER. Порядок членов enum'а секции
   // не задаёт: домашнюю секцию вида держит bomKindHomeSection в entity, и вид без записи там для
@@ -1628,7 +1628,21 @@ export type TechCardBomKind =
   // Стабилизатор под вышивку живёт в section=DECORATION, а НЕ в interlining: interlining — рулонная
   // секция, а рулонные секции видов не принимают вовсе. Клиентский пикер обязан предлагать этот вид
   // только в декоре; на паре «вид ↔ секция» стор откажет.
-  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER";
+  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER"
+  // ДОБАВЛЕНО ВОЛНОЙ СЧЁТНЫХ НОРМ (0335), тем же append'ом в хвост. Оба — section=packaging.
+  // SPARE_KIT_BAG — пакетик, в котором запасная фурнитура едет с изделием. Не оттенок POLYBAG: у
+  // него есть собственное поведение, которого нет ни у одного соседа — его наличие связано с
+  // запасом (spare_qty) ДРУГОЙ строки той же карточки, и проверки готовности ищут именно его.
+  // Парный ему TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG не дубль, а другой субъект: этот говорит, что
+  // строка ПОКУПАЕТ, тот — что вспомогательная карточка ПРОИЗВОДИТ (пара DUST_BAG с 0173).
+  // ОБА ЧЛЕНА ПАРЫ ПИШУТСЯ ОДНИМ СЛОВОМ — правило блока выше: расходятся только те пары, у которых
+  // предметы разные (HANGTAG_STRING — шнурок, а не ярлык; INSERT_CARD — карточка, а не вкладыш;
+  // CARTON — транспортный короб, а не коробка покупателю). Здесь предмет один — тот самый пакетик.
+  | "TECH_CARD_BOM_KIND_SPARE_KIT_BAG"
+  // TOTE_BAG закрывает асимметрию, жившую с 0255: TECH_CARD_AUX_SUBTYPE_TOTE_BAG = 12 был, а
+  // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
+  // единственное место, где вспомогательный компонент вообще стоит денег.
+  | "TECH_CARD_BOM_KIND_TOTE_BAG";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -1663,7 +1677,12 @@ export type TechCardAuxSubtype =
   // шоппер — the carrier the customer takes the purchase away in and keeps using. Its own sub-type
   // rather than a dust bag: it is cut, sewn and costed as its own item, and an assembly bill names
   // which carrier ships.
-  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG";
+  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG"
+  // пакетик с запасной фурнитурой, сшитый своими силами (0335). Пакетик и покупают готовым, и шьют
+  // сами, и ветвления это не создаёт: в обеих ветках он остаётся ОДНОЙ строкой спецификации с
+  // kind=SPARE_KIT_BAG, а этот подтип отвечает на другой вопрос — что производит вспомогательная
+  // карточка. Без него свой пакетик уезжает в ..._OTHER, где перестаёт отличаться от чего угодно.
+  | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
 // Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
 // to. Descriptive fields only; price lives in the append-only MaterialPrice history.
 // MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
@@ -3018,6 +3037,26 @@ export type TechCardBomItem = {
   // «Нет коэффициента» и «не знаем коэффициента» поэтому НИКОГДА не одно и то же значение: на этой
   // разнице и стоит отказ выше, и свести их к одному null значило бы вернуть тихое занижение.
   cuttingCoefficient: googletype_Decimal | undefined;
+  // СЧЁТНАЯ НОРМА СЛОТА (0333): сколько штук этого артикула ПРИШИВАЕТСЯ на изделие (qty_per_garment)
+  // и сколько закупается СВЕРХ пришитых — запасная пуговица в пакетик, которую покупают, но не
+  // пришивают (spare_qty).
+  // ПОЧЕМУ НА СЛОТЕ. Число не меняется ни по размеру, ни по колорвею, а единственное место, где его
+  // можно было записать до 0333, — quantity строки рецепта, то есть строка, зависящая от ОБОИХ.
+  // Инвариантность выражалась копированием по колорвеям, а копия — это то, что расходится. Строка
+  // рецепта по-прежнему может ПЕРЕОПРЕДЕЛИТЬ количество своим quantity, и унаследованное значение
+  // никогда не записывается обратно в неё (дисциплина пина 0221 и блока машинки на шаге).
+  // ЕДИНИЦА СЧЁТА — ПАРА (КОЛОРВЕЙ × СЛОТ), А НЕ СТРОКА. Слот законно повторяется в одном колорвее
+  // несколькими размещениями («пуговицы — планка» / «пуговицы — манжета», 0295), поэтому итог слота
+  // и запас применяются ОДИН РАЗ на пару; если хоть одна строка пары несёт явное quantity, итог =
+  // Σ явных, а значение слота не читается вовсе. Правило целиком — entity/countable.go.
+  // ПРИСУТСТВИЕ ОДНО НА ДВОИХ, И ЭТО НЕСУЩЕЕ. Пара живёт как одно целое (тот же довод, что у
+  // kind/kind_note): присланная ЛЮБАЯ из двух половин означает «пиши обе», отсутствие ОБЕИХ —
+  // «не трогай». Ловушка, ради которой это сказано здесь: у google.type.Decimal нет `optional`, и
+  // пустое значение с провода приходит либо nil'ом, либо Decimal{value:""} — сервер считает пустым
+  // и то, и другое. Значит ОЧИСТИТЬ поле можно ТОЛЬКО явным Decimal{value:""}: клиент, который
+  // опустит поле целиком, скажет «не трогай», и число останется на слоте навсегда.
+  qtyPerGarment: googletype_Decimal | undefined;
+  spareQty: googletype_Decimal | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -3640,6 +3679,24 @@ export type TechCardOperationMedia = {
   annotations: TechCardAnnotation[] | undefined;
 };
 
+// СКОЛЬКО ЕДИНИЦ АРТИКУЛА ТРАТИТ ЭТОТ ШАГ — число, навешенное на связь шага со строкой BOM
+// (tech_card_operation_bom.qty_per_garment, 0334). «Этот шаг ставит 6 пуговиц на изделие».
+// РАЗРЕЖЁННЫЙ КЛЮЧЕВОЙ СПИСОК, А НЕ ПАРАЛЛЕЛЬНЫЙ `repeated Decimal` РЯДОМ С bom_line_keys (23).
+// Два позиционно связанных списка расходятся МОЛЧА: клиент, который вставил ключ в середину и не
+// вставил число, переносит все числа на соседние материалы, и ни одна проверка этого не видит.
+// Ключ внутри записи связывает число с материалом навсегда.
+export type TechCardOperationBomQty = {
+  // Ключ строки BOM. ОБЯЗАН присутствовать в bom_line_keys ТОГО ЖЕ шага: членство в связи
+  // определяет только список 23, единственный владелец, а этот список лишь навешивает числа.
+  // Ключ вне списка — не молчаливый пропуск, а FieldViolation: это ссылка на связь, которой у
+  // шага нет.
+  lineKey: string | undefined;
+  // Сколько единиц артикула шаг тратит на изделие. Пустой децимал — не «ноль» и не «не сказано»:
+  // запись без числа отвергается, потому что связь без числа просто НЕ ПОПАДАЕТ в этот список.
+  // Ноль — реальное утверждение («шаг этого артикула не тратит»).
+  qtyPerGarment: googletype_Decimal | undefined;
+};
+
 export type TechCardOperation = {
   // --- core: what, where, with what, how long -------------------------------------------------
   operationNumber: number | undefined;
@@ -3784,6 +3841,18 @@ export type TechCardOperation = {
   // хешируется): они представление, и правка ярлыка не смеет объявлять подписанную карточку
   // изменённой.
   work: string | undefined;
+  // КОЛИЧЕСТВА НА СВЯЗЯХ ШАГА (0334). Разрежённый список: связь без числа сюда не попадает вовсе,
+  // а членство в связи по-прежнему определяет bom_line_keys (23) — единственный владелец.
+  // БЕЗ ОБЁРТКИ РАДИ PRESENCE, И ЭТО СОЗНАТЕЛЬНОЕ ОТСТУПЛЕНИЕ ОТ ПЛАНА. Обёртка нужна была бы,
+  // чтобы отличить «бандл не знает про количества» от «количеств нет», но этот бит уже несёт
+  // КАРТОЧНЫЙ флаг bom_qty_aware (117), и несёт его лучше: он отвечает за весь бандл разом, тогда
+  // как обёртка отвечала бы за каждый шаг по отдельности и на карточке из двадцати шагов дала бы
+  // двадцать частных ответов на один общий вопрос. Два механизма на один бит — это ровно то, как
+  // заводятся ложные расщепления: пара «обёртка есть / флага нет» не значит ничего, но выразима, и
+  // однажды кто-то напишет для неё правило. При наличии флага отсутствие bom_quantities у шага
+  // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
+  // жест, а не потеря.
+  bomQuantities: TechCardOperationBomQty[] | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -4318,6 +4387,30 @@ export type TechCardInsert = {
   // aware=false» превратило бы клон сезона (payload строит сервер) в тихого стирателя вида.
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
   operationWorkAware: boolean | undefined;
+  // ШЕСТОЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — про количества на связях шага (TechCardOperation.bom_quantities,
+  // 0334). Устройство и семантика — слово в слово machine_fields_aware (110),
+  // operation_kinds_aware (115) и operation_work_aware (116).
+  // ЩИТ ОБЯЗАН БЫТЬ ИМЕННО ОТКАЗОМ. Операции пишутся ПОЛНОЙ ЗАМЕНОЙ (delete+reinsert), стабильного
+  // ключа у шага нет, поэтому «донести хранимое» физически невозможно: восстановление по паре
+  // (display_order, bom_item_id) перепутало бы количества между шагами при первой же перестановке
+  // шагов в том же сохранении. Честны ровно два исхода — значение доезжает целиком либо сохранение
+  // отказывает целиком.
+  // - новый клиент ставит флаг на КАЖДОМ сохранении; серверные пути (клон сезона, сидер) — сами;
+  // - запись БЕЗ флага против карточки, где хоть на одной связи есть количество, —
+  // FailedPrecondition с предложением обновить вкладку;
+  // - запись без флага, которая тем не менее ВЕЗЁТ bom_quantities, — тот же отказ: старый бандл
+  // такого поля не знает, значит это эхо;
+  // - карточка, где количеств нет ни на одной связи, сохраняется старым бандлом ровно как
+  // раньше. Щит молчит.
+  // ПАРНОГО `*_cleared` У НЕГО НЕТ — как у 110, 115 и 116. «Количество стёрли» это рядовая правка
+  // одной связи, а не жест «снять разметку целиком»; бекстоп объявил бы такую правку аварией и
+  // сделал бы количество НЕСТИРАЕМЫМ.
+  // ФЛАГ НЕ ФИЛЬТРУЕТ ПОЛЯ: разбор bom_quantities идёт всегда, независимо от флага. «Игнорировать
+  // при aware=false» превратило бы клон сезона (payload строит сервер и транспортных флагов не
+  // эмитит) в тихого стирателя количеств.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции — которым бандлом сохранили
+  // карточку, не то, от чего может зависеть подпись.
+  bomQtyAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -4952,6 +5045,12 @@ export type TechCardListItem = {
   // colorway_count. The COUNT only — a "latest consumption" here would be a lie without naming
   // the size and the BOM slot it was measured for.
   markerCount: number | undefined;
+  // Коллекция строки листа — хранимое ИМЯ из tech_card.collection ("" = не задана).
+  // НУЖНА НЕ ТОЛЬКО ДЛЯ ПОКАЗА: из неё клиент собирает пул значений фасета, и благодаря этому
+  // фильтруемыми становятся карты с рукописными и архивными именами, которых в словаре коллекций
+  // нет (такие существуют намеренно). Колонки-ссылки collection_id у тех-карты не существует —
+  // её дропнула 0240 как мёртвую схему, поэтому фильтровать можно ТОЛЬКО по этой строке.
+  collection: string | undefined;
 };
 
 // FittingStatus is the lifecycle state of a fitting session.
@@ -6491,6 +6590,17 @@ export type TaskPriority =
   | "TASK_PRIORITY_MEDIUM"
   | "TASK_PRIORITY_HIGH"
   | "TASK_PRIORITY_URGENT";
+// TaskLinkKind — ВИД СВЯЗИ С ТОЧКИ ЗРЕНИЯ ВЛАДЕЛЬЦА СПИСКА, а не вид строки в хранилище.
+// В хранилище видов ДВА (blocks|relates) и на один факт приходится ОДНА строка: BLOCKED_BY — это
+// blocks, прочитанный с другого конца. Две строки на один факт позволили бы паре полусуществовать —
+// A знает, что блокирует B, а B не знает, что заблокирована.
+// RELATES симметрична и нормализуется при записи (меньший id первым), поэтому дубль (A,B)+(B,A)
+// невыразим схемой, а не только кодом.
+export type TaskLinkKind =
+  | "TASK_LINK_KIND_UNKNOWN"
+  | "TASK_LINK_KIND_BLOCKS"
+  | "TASK_LINK_KIND_BLOCKED_BY"
+  | "TASK_LINK_KIND_RELATES";
 // TaskInsert is the writable CONTENT of a task (create/update). Placement on the
 // board — board, status, position — is deliberately NOT here: it is set at
 // AddTask and changed only via MoveTask, so a content edit can never silently
@@ -6499,6 +6609,12 @@ export type TaskPriority =
 export type TaskInsert = {
   title: string | undefined;
   description: string | undefined;
+  // DEPRECATED АЛИАС ОДНОГО РЕЛИЗА, а не «главный исполнитель». Настоящий список — assignees ниже.
+  // На ВХОДЕ читается только когда assignees пуст (тогда трактуется как список из одного); на
+  // ВЫХОДЕ равен assignees[0] или "". Снять reserved'ом СЛЕДУЮЩЕЙ волной по процедуре инвентаря
+  // retired-полей (комментарий к newAdminJSONMarshaler, internal/api/http/http.go).
+  // ПОЧЕМУ НЕ СНЯТО СРАЗУ: admin-гейтвей разбирает JSON с DiscardUnknown: false, поэтому reserved на
+  // живом поле превратил бы каждое сохранение карточки из ОТКРЫТОЙ старой вкладки в 400.
   assignee: string | undefined;
   priority: TaskPriority | undefined;
   dueDate: wellKnownTimestamp | undefined;
@@ -6551,6 +6667,17 @@ export type TaskInsert = {
   // НАБОР БЕЗ СВОЕЙ КАРТИНКИ СБРАСЫВАЕТСЯ СЕРВЕРОМ: указание на снимке, снятом с карточки,
   // нельзя ни увидеть, ни убрать, а хранить его значило бы копить невидимое.
   mediaAnnotations: TaskMediaAnnotations[] | undefined;
+  // ИСПОЛНИТЕЛИ КАРТОЧКИ — СПИСОК БЕЗ «ГЛАВНОГО». AdminAccount.username каждый; пусто = задачу
+  // никто не взял. Порядок = порядок показа аватарок.
+  // ПОЛНАЯ ЗАМЕНА ПРИ СОХРАНЕНИИ, как labels/media_ids: обе стороны пишет одна форма карточки, и
+  // присланный пустой список означает «исполнителей больше нет». Клиент обязан слать то, что
+  // прочитал.
+  // «Главного» в модели НЕТ намеренно: ни фильтр «мои», ни строка карточки файла, ни доска не
+  // различают первого и остальных, а различие без потребителя — это поле, которое заполняют
+  // наугад. Появись потребитель — им станет первый элемент, и контракт менять не придётся.
+  // Существование аккаунта сервером НЕ проверяется — паритет с прежним поведением одиночного
+  // assignee: пикер клиента наполняется из ListAccounts.
+  assignees: string[] | undefined;
 };
 
 // TaskMediaAnnotations — указания одной прикреплённой картинки.
@@ -6565,6 +6692,23 @@ export type TaskInsert = {
 export type TaskMediaAnnotations = {
   mediaId: number | undefined;
   annotations: TechCardAnnotation[] | undefined;
+};
+
+// TaskLink — строка связи, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён в заголовок, статус и
+// доску (та же доктрина проекции, что у admin.LibraryFileTask), чтобы бейдж «заблокирована» и
+// список связей не требовали ни второго RPC, ни N+1.
+// БЛОКЕР — СОВЕТ, А НЕ ЗАМОК: сервер НЕ запрещает перевести в DONE задачу с открытыми блокерами.
+// Доска — drag-and-drop, и отказ посреди жеста хуже бейджа; заархивированный недоделанный блокер
+// замуровал бы карточку навсегда. Заблокированность считает клиент: есть BLOCKED_BY со status !=
+// DONE. Заархивированный блокер считается ОТКРЫТЫМ, пока не done, — архив прячет с доски, но не
+// отменяет «сначала то, потом это».
+export type TaskLink = {
+  taskId: number | undefined;
+  kind: TaskLinkKind | undefined;
+  title: string | undefined;
+  status: TaskStatus | undefined;
+  board: TaskBoard | undefined;
+  archived: boolean | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
@@ -6606,6 +6750,27 @@ export type Task = {
   // their expiring presigned urls, ride on admin.GetTaskResponse.files, because
   // this message is reused in contexts that get persisted.
   fileIds: number[] | undefined;
+  // РОДИТЕЛЬ-САБТАСКА. 0 = верхний уровень.
+  // ЧИТАЕТСЯ ЗДЕСЬ, НО МЕНЯЕТСЯ ТОЛЬКО ЧЕРЕЗ SetTaskParent, и в TaskInsert его НЕТ намеренно:
+  // содержимое карточки сохраняется полной заменой, и клиент, не знающий поля, стирал бы родителя
+  // каждым сохранением (ровно ловушка «отсутствующее поле = дефолт»). Единственное исключение —
+  // AddTaskRequest.parent_task_id, чтобы «создать сабтаску» было одним вызовом.
+  // КОЛОНКА, А НЕ ВИД СВЯЗИ: у карточки РОВНО ОДИН родитель, и в колонке два родителя невозможны
+  // физически, тогда как таблица связей потребовала бы условного UNIQUE, которого у MySQL нет.
+  // Глубина не ограничена; циклы запрещает стор.
+  parentTaskId: number | undefined;
+  // ВСЕ связи карточки: и blocks/blocked_by в обе стороны, и relates. Вид назван с точки зрения
+  // ЭТОЙ карточки (см. TaskLinkKind).
+  // ЗДЕСЬ ТОЛЬКО ЧТЕНИЕ. Пишутся связи отдельными идемпотентными AddTaskLink/DeleteTaskLink, а не
+  // полной заменой внутри TaskInsert: связь принадлежит ДВУМ карточкам сразу, и полная замена
+  // «связей карточки A» при сохранении её формы снесла бы связь, добавленную с карточки B, пока
+  // форма A была открыта.
+  links: TaskLink[] | undefined;
+  // Свёртка сабтасок для карточки на доске: сколько АКТИВНЫХ (незаархивированных) детей и сколько
+  // из них в DONE. Заголовки детей здесь не резолвятся — доска рисует счётчик, детальная страница
+  // берёт их фильтром ListTasks(parent_task_id).
+  subtaskTotal: number | undefined;
+  subtaskDone: number | undefined;
 };
 
 // TaskCommentInsert is the writable payload for a comment. author is set
@@ -6621,6 +6786,12 @@ export type TaskComment = {
   author: string | undefined;
   body: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // ЖИВАЯ ссылка на аккаунт автора; 0 = аккаунта больше нет (строка author при этом остаётся).
+  // Клиент по ней решает, рисовать ли кнопку удаления; ПРОВЕРЯЕТ сервер, и проверяет он ровно эту
+  // пару — совпадение имени ПРИ живой ссылке. Одного имени мало: UNIQUE на admins.username
+  // освобождает имя при удалении аккаунта, и новый однофамилец совпал бы по строке со всей
+  // перепиской прежнего (тот же гейт и тот же довод, что у LibraryFileComment, 0316).
+  authorId: number | undefined;
 };
 
 
