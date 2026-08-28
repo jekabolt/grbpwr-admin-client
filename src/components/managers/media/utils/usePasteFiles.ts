@@ -57,8 +57,16 @@ export function filesOfKind(files: File[], accept: PasteAccept): File[] {
   return files.filter(takes(accept));
 }
 
-/** Файлы из буфера. Пусто — вставляли не файл (текст, кусок разметки). */
-function mediaFromClipboard(data: DataTransfer | null, accept: PasteAccept): File[] {
+/**
+ * Файлы из буфера. Пусто — вставляли не файл (текст, кусок разметки).
+ *
+ * ЭКСПОРТИРОВАНА РАДИ ОДНОГО ИСКЛЮЧЕНИЯ — вставки картинки прямо в поле разметки заметки
+ * (`format-bar.tsx`). Правило «текстовые поля неприкосновенны» этот хук не отменяет и отменить
+ * не может: там вставка перехватывается НА САМОМ ПОЛЕ и только когда в буфере нет текста. Но
+ * ответ на вопрос «что в буфере» обязан быть один на оба места, иначе они разойдутся в том, что
+ * считать картинкой.
+ */
+export function mediaFromClipboard(data: DataTransfer | null, accept: PasteAccept): File[] {
   if (!data) return [];
   const out: File[] = [];
   const suits = takes(accept);

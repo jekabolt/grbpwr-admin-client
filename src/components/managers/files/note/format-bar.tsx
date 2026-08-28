@@ -1,5 +1,7 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
+import { mediaFromClipboard } from 'components/managers/media/utils/usePasteFiles';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Button } from 'ui/components/button';
@@ -154,7 +156,31 @@ export function FormatBar({
       // вьюпорт 900, сдвиг 478px). Каретки это не касается: её ставит `setSelectionRange` ниже.
       area.focus({ preventScroll: true });
       let done = false;
-      if (edit.text !== '') {
+      /**
+       * `execCommand` ПИШЕТ ТУДА, ГДЕ ВЫДЕЛЕНИЕ, А НЕ ТУДА, КОМУ АДРЕСОВАНО.
+       *
+       * Претензия владельца дословно: «в тасках, когда таску создаёшь и хочешь сделать аттач
+       * медиа, оно ссылку может не в то поле закинуть». Воспроизведено на стенде
+       * (`media-tray-probe`, раздел 3) и прослежено до знака: в момент вставки в фокусе стоит
+       * КНОПКА, `insertText` возвращает `true`, а разметка появляется В ПОЛЕ ЗАГОЛОВКА — там,
+       * где осталось выделение документа с момента, когда модалка открылась и сама поставила
+       * туда каретку.
+       *
+       * ПОЧЕМУ ФОКУС НЕ ДОЕХАЛ. Правка приходит из диалога выбора медиа, и в этот момент диалог
+       * ЕЩЁ ОТКРЫТ: у Radix свой захват фокуса, и `focus()` на поле снаружи он отменяет
+       * немедленно, синхронно в том же событии. Ждать закрытия нельзя — правка обязана лечь в
+       * текст сразу, — а `preventScroll` тут ни при чём: не доезжает сам фокус.
+       *
+       * ЧЕМ ЭТО ХУЖЕ ПРОСТО НЕСРАБОТАВШЕЙ КНОПКИ. Запасной путь (`setRangeText` ниже) всё равно
+       * кладёт текст куда надо, поэтому со стороны панель выглядит исправной — а в чужом поле
+       * молча остаётся ВТОРАЯ копия ссылки. Её замечают, только сохранив карточку.
+       *
+       * Поэтому команда зовётся ТОЛЬКО когда фокус действительно стоит в нашем поле. Иначе —
+       * сразу запасной путь: он адресует правку узлу (`area.setRangeText`), а не выделению, и
+       * промахнуться мимо поля не может по построению. Цена — потеря нативной истории отмены
+       * для этой вставки, и она платится только в диалоговом случае.
+       */
+      if (edit.text !== '' && document.activeElement === area) {
         area.setSelectionRange(edit.start, edit.end);
         try {
           done = document.execCommand('insertText', false, edit.text);
@@ -212,6 +238,57 @@ export function FormatBar({
     if (!items.length) return;
     apply((t, s, e) => mediaEdit(t, s, e, items));
   };
+
+  /* ── ⌘V КАРТИНКОЙ ПРЯМО В ТЕКСТ ─────────────────────────────────────────────────────────────
+   *
+   * Просьба владельца: «если ты прямо в маркдауне во время редактирования жмёшь ⌘V картинкой, она
+   * сразу в модалку аплоуда и сразу инлайн — без того, чтобы нажимать кнопку медиа».
+   *
+   * Дорога та же, что у кнопки: приёмная модалка (превью → кроп → подтверждение) и та же
+   * `insertMedia`, что и у выбора из библиотеки. Значит и разметка получается та же — второго
+   * способа вставить снимок в заметку не заводится.
+   *
+   * ПОЧЕМУ СЛУШАТЕЛЬ СВОЙ, А НЕ `usePasteFiles`. Тот хук намеренно НЕ ТРОГАЕТ текстовые поля:
+   * человек, копирующий формулировку из соседней карточки, обязан получить текст, а не картинку.
+   * Это правило остаётся; здесь описано ровно одно исключение из него, и описано оно двумя
+   * условиями сразу:
+   *
+   *   1. вставка пришла ИМЕННО В ЭТО ПОЛЕ (`e.target === area`), а не в соседнее;
+   *   2. в буфере НЕТ ТЕКСТА — только файлы.
+   *
+   * Второе важнее первого. Копирование из ворда, фигмы и половины редакторов кладёт в буфер и
+   * текст, и картинку одновременно; проверять «есть ли картинка» значило бы отнимать обычную
+   * вставку текста у всех, кто копирует из таких мест. Скриншот же (⌘⇧4, вырезка из окна) текста
+   * с собой не несёт — это и есть тот случай, ради которого просили.
+   */
+  const intake = useMediaIntake({
+    accept: 'image',
+    purpose: 'picture in the note',
+    // Видео сюда не берётся по той же причине, по какой его нет у кнопки: разметчик заметки
+    // умеет только `<img>`, и вставленный ролик показался бы битой картинкой.
+    onMedia: insertMedia,
+  });
+  const openIntake = intake.openFiles;
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const area = areaRef.current;
+      if (!area || e.target !== area) return;
+      const data = e.clipboardData;
+      if (!data) return;
+      // Текст в буфере — вставка остаётся вставкой текста, и мы даже не смотрим, что там ещё.
+      if (data.getData('text/plain') !== '') return;
+      const files = mediaFromClipboard(data, 'image');
+      if (!files.length) return;
+      // Гасим родную вставку: без этого браузер положил бы в текст имя файла или пустоту.
+      e.preventDefault();
+      openIntake(files);
+    };
+    // Слушатель на документе, а не на узле: поле пересоздаётся переключателем «пишу ↔ смотрю»
+    // (правка задачи), и подписка на узел пережила бы не каждое такое переключение.
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [areaRef, openIntake]);
 
   /**
    * Операция режима таблицы. ОТКАЗ ПРОИЗНОСИТСЯ СЛОВАМИ: `tableOpEdit` возвращает `null` там, где
@@ -316,7 +393,9 @@ export function FormatBar({
           preview
         </Button>
 
-        <TableSizePicker onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))} />
+        <TableSizePicker
+          onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))}
+        />
 
         {/* СНИМКИ ИЗ МЕДИАТЕКИ, С МУЛЬТИВЫБОРОМ. Библиотека файлов и медиатека — два разных
             хранилища, и до сих пор из текста заметки был достижим только первый.
@@ -399,13 +478,20 @@ export function FormatBar({
           onClose={() => setPicker(null)}
         />
       )}
+
+      {/* Приёмка вставленного в поле: рисуется всегда, показывается только с непустой очередью. */}
+      {intake.dialog}
     </>
   );
 }
 
 /** Кнопки строения таблицы. Порядок — как читают: сначала строки, потом столбцы. */
 const TABLE_ACTIONS: { op: TableOp; label: string; title: string }[] = [
-  { op: 'row+', label: '+ row', title: 'a row under the one the caret is in (from the header — the first body row)' },
+  {
+    op: 'row+',
+    label: '+ row',
+    title: 'a row under the one the caret is in (from the header — the first body row)',
+  },
   { op: 'row-', label: '− row', title: 'remove the row the caret is in' },
   { op: 'col+', label: '+ col', title: 'a column to the right of the one the caret is in' },
   { op: 'col-', label: '− col', title: 'remove the column the caret is in' },
@@ -423,9 +509,11 @@ const TABLE_ALIGNS: { op: TableOp; label: string; title: string }[] = [
  */
 const TABLE_REFUSALS: Record<TableOp, string> = {
   'row+': 'there is nowhere to add a row here',
-  'row-': 'the header row stays: a table without it is not a table — select it and delete it as text',
+  'row-':
+    'the header row stays: a table without it is not a table — select it and delete it as text',
   'col+': 'there is nowhere to add a column here',
-  'col-': 'the last column stays: removing it would remove the table — select it and delete it as text',
+  'col-':
+    'the last column stays: removing it would remove the table — select it and delete it as text',
   left: 'this column is already aligned that way',
   center: 'this column is already aligned that way',
   right: 'this column is already aligned that way',

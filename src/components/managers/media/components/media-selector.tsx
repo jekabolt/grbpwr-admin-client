@@ -72,10 +72,7 @@ export function MediaSelector({
   const aspectKey = (aspectRatio ?? []).join('|');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const slot = useMemo(() => readSlotAspect(aspectRatio), [aspectKey]);
-  const targetRatios = useMemo(
-    () => (slot.ratios.length ? slot.ratios : undefined),
-    [slot],
-  );
+  const targetRatios = useMemo(() => (slot.ratios.length ? slot.ratios : undefined), [slot]);
   const ratioConstrained = slot.constrained;
   const cropAspect = slot.primary;
   // Add one item per click (so each can be ratio-checked) when the slot is ratio-constrained.
@@ -114,9 +111,39 @@ export function MediaSelector({
     exitCrop();
   }, [exitCrop]);
 
-  // Add resolved media; keep the dialog open for galleries so more can be added.
+  /**
+   * Разрешённое медиа — по назначению режима.
+   *
+   * В РЕЖИМЕ ЛОТКА ЗАГРУЖЕННОЕ ПОПАДАЕТ В ЛОТОК, А НЕ ВЛАДЕЛЬЦУ. Претензия владельца дословно:
+   * «когда в файлах делаешь аплоуд медиа, оно его аттачит два раза: один раз когда залил и
+   * находишься в модалке, второй раз когда его селектнул и нажал эдд». Так и было: приёмка
+   * звала `saveSelectedMedia` сразу после загрузки, а потом свежий снимок появлялся в сетке,
+   * человек нажимал его и «add all» — и вставка случалась второй раз.
+   *
+   * Дверь в этом режиме ОДНА, и она названа на самом экране («a click fills the tray — an upload
+   * lands there too; “add all” places them in one go»). Загрузка — это способ ПОПОЛНИТЬ
+   * библиотеку, а не способ обойти кнопку: снимок кладётся в лоток уже выбранным и уходит
+   * владельцу тем же нажатием, что и всё остальное.
+   *
+   * В прочих режимах поведение прежнее: слот с фиксированным соотношением и одиночный слот
+   * ставят кадр сразу (там кнопки «add» нет вовсе), а галерея принимает по одному и сама об
+   * этом говорит («every addition goes straight to the gallery»).
+   */
   const commitMedia = useCallback(
     (media: common_MediaFull[]) => {
+      if (trayMode) {
+        setSelectedMedia((prev) => {
+          // Тот же снимок дважды в лоток не кладётся: приёмка может доехать пачкой, где один
+          // файл уже выбран мышью, и «add all» вставил бы его тогда двумя строками.
+          const add = media.filter((m) => !prev.some((p) => p.id === m.id));
+          return add.length ? [...prev, ...add] : prev;
+        });
+        exitCrop();
+        // Сетку пересобираем: свежезагруженное обязано появиться в ней — и появиться ВЫБРАННЫМ,
+        // потому что набор лотка сетке и передаётся (`selected`).
+        setDialogKey((prev) => prev + 1);
+        return;
+      }
       saveSelectedMedia(media);
       exitCrop();
       if (allowMultiple) {
@@ -126,7 +153,7 @@ export function MediaSelector({
         closeAndReset();
       }
     },
-    [allowMultiple, saveSelectedMedia, exitCrop, closeAndReset],
+    [trayMode, allowMultiple, saveSelectedMedia, exitCrop, closeAndReset],
   );
 
   const enterCrop = useCallback((m: common_MediaFull) => {
@@ -300,7 +327,12 @@ export function MediaSelector({
                 {purpose ? purpose : 'media'}
               </Text>
             </DialogPrimitive.Title>
-            <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='uppercase tracking-label'
+            >
               <span className={cropMedia ? '' : 'font-bold text-textColor'}>select</span>
               {' › '}
               <span className={cropMedia ? 'font-bold text-textColor' : ''}>crop</span>
@@ -363,7 +395,10 @@ export function MediaSelector({
                     : oneAtATime
                       ? 'a click places the frame at once · a frame of the wrong ratio opens cropping'
                       : allowMultiple
-                        ? 'a click fills the tray, “add all” places them in one go'
+                        ? // Загрузка теперь тоже кладёт в лоток, и сказать об этом обязано то
+                          // же предложение: иначе «я же только что загрузил» и «ничего не
+                          // прикрепилось» встречаются молча.
+                          'a click fills the tray — an upload lands there too; “add all” places them in one go'
                         : 'a click places the frame and closes the dialog'}
                 </Text>
               </DialogPrimitive.Description>
@@ -393,7 +428,12 @@ export function MediaSelector({
                   именно набрано, приходилось помнить, а убрать лишнее — искать плитку в сетке. */}
               {trayMode && selectedMedia.length > 0 && (
                 <div className='mt-2.5 flex flex-shrink-0 flex-wrap items-center gap-1.5 border-t border-hairline pt-2'>
-                  <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='uppercase tracking-label'
+                  >
                     in the tray {selectedMedia.length}
                   </Text>
                   {selectedMedia.map((m) => (
