@@ -1,4 +1,11 @@
 import type { LibraryFile } from 'api/proto-http/admin';
+import {
+  emptyTable,
+  isTableRow,
+  parseTable,
+  serializeTable,
+  type TableModel,
+} from 'ui/markdown/table';
 import type { NoteFileInsert } from './file-picker';
 import { fileCardPath } from './file-refs';
 
@@ -91,55 +98,6 @@ export function emphasisEdit(text: string, start: number, end: number, want: Emp
   const next = `${want}${body}${want}`;
   // Пустое выделение — каретка встаёт МЕЖДУ звёздочками: дальше человек просто печатает.
   return { start: s, end: e, text: next, sel: [s + want.length, s + want.length + body.length] };
-}
-
-/**
- * ГОЛАЯ ПАРА ``` `` ``` РЯДОМ С КАРЕТКОЙ — или `null`.
- *
- * Пустое выделение даёт пару с кареткой МЕЖДУ кавычками, и снять её умел только тот случай, когда
- * каретка там и осталась. А она законно оказывается ПОСЛЕ пары: восстановление каретки выходит
- * досрочно при любой чужой перерисовке (`format-bar.tsx`, `useLayoutEffect`), да и стрелка вправо
- * — обычное движение. Следующее нажатие оборачивало пару ещё раз, и в тексте появлялись четыре
- * кавычки, которых разметчик не показывает никогда. Отсюда три положения каретки вместо одного:
- * внутри пары, сразу после неё, сразу перед ней.
- *
- * «ГОЛАЯ» — ЭТО РОВНО ДВА БЭКТИКА: соседние символы бэктиками быть не должны. Без этой проверки
- * каретка у края ограды ``` ``` ``` отгрызала бы от неё два символа — то есть кнопка ломала бы
- * разметку, которую сама же и поставила.
- */
-function barePairAt(text: string, c: number): [number, number] | null {
-  const spots: [number, number][] = [
-    [c - 1, c + 1], // вокруг каретки
-    [c - 2, c], // сразу перед кареткой
-    [c, c + 2], // сразу после каретки
-  ];
-  for (const [a, b] of spots) {
-    if (a < 0 || b > text.length) continue;
-    if (text[a] !== '`' || text[b - 1] !== '`') continue;
-    if (text[a - 1] === '`' || text[b] === '`') continue;
-    return [a, b];
-  }
-  return null;
-}
-
-/** Тот же приём для `code`, но своей осью: код с жирным не конфликтует. */
-export function inlineCodeEdit(text: string, start: number, end: number): Edit {
-  const [s, e] = trimEdges(text, start, end);
-  const inner = text.slice(s, e);
-  if (s === e) {
-    // Пустое выделение: сначала попытка СНЯТЬ пару, и только потом — поставить новую.
-    const pair = barePairAt(text, s);
-    if (pair) return { start: pair[0], end: pair[1], text: '', sel: [pair[0], pair[0]] };
-  }
-  if (inner.length >= 2 && inner.startsWith('`') && inner.endsWith('`')) {
-    const body = inner.slice(1, -1);
-    return { start: s, end: e, text: body, sel: [s, s + body.length] };
-  }
-  if (s >= 1 && text[s - 1] === '`' && text[e] === '`') {
-    return { start: s - 1, end: e + 1, text: inner, sel: [s - 1, s - 1 + inner.length] };
-  }
-  const next = `\`${inner}\``;
-  return { start: s, end: e, text: next, sel: [s + 1, s + 1 + inner.length] };
 }
 
 /**
@@ -310,29 +268,269 @@ export function fenceEdit(text: string, start: number, end: number): Edit {
 }
 
 /**
- * Кнопка `code` целиком: одна чистая функция вместо развилки, написанной прямо в обработчике.
+ * Кнопка `code` целиком: ВСЕГДА ОГРАДА, инлайновых бэктиков она больше не ставит.
  *
- * Развилка стояла в `actions` (`t.slice(s,e).includes('\n') ? fenceEdit : inlineCodeEdit`) — то
- * есть в единственном месте панели, куда таблица входа-выхода не дотягивается.
+ * Претензия владельца дословно: «кнопка CODE добавляет одинарные кавычки, но код хайлайтится
+ * тройными». Разбирается она не как ошибка в развилке, а как отказ от самой развилки: у кнопки
+ * один смысл — «это код блоком», — и он не должен зависеть от того, попал ли перевод строки в
+ * выделение. Инлайновые бэктики остаются языку, а не панели: их набирают руками, и разметчик
+ * их по-прежнему показывает.
  *
- * ── ПОРЯДОК ЗДЕСЬ ЗНАЧИМ ────────────────────────────────────────────────────────────────────
+ * ── ЧЕТЫРЕ СЛУЧАЯ, И ПОРЯДОК МЕЖДУ НИМИ ЗНАЧИМ ──────────────────────────────────────────────
  *
- * 1. ТЕЛО УЖЕ ПОСТАВЛЕННОЙ ОГРАДЫ проверяется ПЕРВЫМ — до всякого ветвления по переводу строки.
- *    Однострочное тело (`code` из одной строки) до ветвления не дожило бы: в нём нет `\n`, и оно
- *    уехало бы в `inlineCodeEdit`, то есть получило бы бэктики ВНУТРИ ограды.
- * 2. ХВОСТОВЫЕ ПЕРЕВОДЫ СТРОК СРЕЗАЮТСЯ до проверки на многострочность. Тройной клик по строке —
- *    обычный способ выделить её целиком, и браузер кладёт в такое выделение хвостовой `\n`:
- *    строка считалась многострочным куском и получала ограду вместо бэктиков. Срез правит именно
- *    выделение, а не текст: за границей `end` ничего не меняется.
+ * 1. ТЕЛО УЖЕ ПОСТАВЛЕННОЙ ОГРАДЫ — разворот, и он проверяется ПЕРВЫМ. Иначе повторное нажатие
+ *    заворачивало бы тело во ВТОРУЮ ограду: ограда в ограде.
+ * 2. ХВОСТОВЫЕ ПЕРЕВОДЫ СТРОК СРЕЗАЮТСЯ. Тройной клик по строке — обычный способ выделить её
+ *    целиком, и браузер кладёт в такое выделение хвостовой `\n`; без среза внутри ограды
+ *    оставалась бы лишняя пустая строка.
+ * 3. ПУСТОЕ ВЫДЕЛЕНИЕ — СТРОКА ЦЕЛИКОМ, а не разрез по каретке. Каретка стоит посреди слова
+ *    чаще, чем на его краю, и разрез дал бы `wo` + ограда + `rd`, то есть порчу слова там, где
+ *    просили «сделай эту строку кодом». Пустая строка даёт пустую ограду с кареткой внутри.
+ * 4. НЕПУСТОЕ ВЫДЕЛЕНИЕ ОГОРАЖИВАЕТСЯ КАК ЕСТЬ, разрезая строку, если взято посередине:
+ *    выделили `foo` в `bar foo baz` — получаете `bar`, ограду с `foo` и `baz`. Ограда обязана
+ *    начинаться со своей строки (иначе разметчик её не увидит), поэтому переводы дописываются
+ *    ровно с тех сторон, где строка продолжается.
  */
 export function codeEdit(text: string, start: number, end: number): Edit {
   const around = fenceAround(text, start, end);
   if (around) return around;
   let e = end;
   while (e > start && text[e - 1] === '\n') e -= 1;
-  return text.slice(start, e).includes('\n')
-    ? fenceEdit(text, start, e)
-    : inlineCodeEdit(text, start, e);
+  // Выделение, уже совпадающее с целыми строками, идёт общей дорогой: там же живёт разворот
+  // ограды, выделенной вместе с её строками (`fenceEdit`).
+  const atLineStart = start === 0 || text[start - 1] === '\n';
+  const atLineEnd = e === text.length || text[e] === '\n';
+  if (start === e || (atLineStart && atLineEnd)) return fenceEdit(text, start, e);
+  return fenceSelection(text, start, e);
+}
+
+/**
+ * ОГРАДА ВОКРУГ КУСКА СТРОКИ — с разрезом самой строки.
+ *
+ * ПРОБЕЛЫ ПО КРАЯМ ВЫДЕЛЕНИЯ СЪЕДАЮТСЯ. Мышью выделяют «примерно», и без этого `bar ` осталось
+ * бы с хвостовым пробелом, а ` baz` — с ведущим: в разметке этого не видно, а в тексте заметки
+ * остаётся мусор, который потом кто-то вычищает руками.
+ */
+function fenceSelection(text: string, start: number, end: number): Edit {
+  let s = start;
+  let e = end;
+  while (s > 0 && (text[s - 1] === ' ' || text[s - 1] === '\t')) s -= 1;
+  while (e < text.length && (text[e] === ' ' || text[e] === '\t')) e += 1;
+  const body = text.slice(start, end);
+  const lead = s > 0 && text[s - 1] !== '\n' ? '\n' : '';
+  const tail = e < text.length && text[e] !== '\n' ? '\n' : '';
+  const next = `${lead}\`\`\`\n${body}\n\`\`\`${tail}`;
+  const at = s + lead.length + 4;
+  return { start: s, end: e, text: next, sel: [at, at + body.length] };
+}
+
+/* ── ТАБЛИЦА ─────────────────────────────────────────────────────────────────────────────────
+ *
+ * Просьба владельца: «нужен режим создания таблицы в эдите маркдауна». Режим, а не одна кнопка:
+ * каркас поставить мало — таблицу потом наращивают строкой и столбцом, и делать это в тексте,
+ * считая вертикальные черты глазами, невозможно.
+ *
+ * ВСЁ ЗДЕСЬ — ЧИСТЫЕ ПРАВКИ ТЕКСТА, как и остальное в этом файле: панель узнаёт, где стоит
+ * каретка, а решение «что станет с текстом» принимается тут и проверяется таблицей
+ * входа-выхода. Синтаксис — общий с разметчиком (`ui/markdown/table.ts`), второй грамматики нет.
+ */
+
+/** Что делает кнопка режима таблицы. Выравнивание — часть того же набора: оно живёт в
+ * разделителе, то есть тоже правка текста, а не состояние экрана. */
+export type TableOp = 'row+' | 'row-' | 'col+' | 'col-' | 'left' | 'center' | 'right';
+
+/**
+ * ТАБЛИЦА, В КОТОРОЙ СТОИТ КАРЕТКА, и её место в этой таблице.
+ *
+ * `row` — индекс В МОДЕЛИ: 0 это шапка, дальше строки тела. Каретка в строке-разделителе
+ * считается стоящей в ШАПКЕ: разделитель — не строка данных, а место, где записано
+ * выравнивание, и «столбец под кареткой» у него ровно тот же.
+ */
+export type TableSpot = {
+  /** Границы блока таблицы в тексте. */
+  start: number;
+  end: number;
+  model: TableModel;
+  row: number;
+  col: number;
+};
+
+/** Начало и конец строки с позицией `pos`. */
+function lineAt(text: string, pos: number): [number, number] {
+  const ls = pos === 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
+  let le = text.indexOf('\n', pos);
+  if (le === -1) le = text.length;
+  return [ls, le];
+}
+
+/**
+ * Столбец под кареткой — по числу НЕЭКРАНИРОВАННЫХ черт слева от неё.
+ *
+ * Считается по строке, а не по разобранной модели: модель уже потеряла, где именно в строке
+ * стояла каретка, а без этого «добавить столбец справа» некуда прицелить.
+ */
+function cellIndexAt(line: string, offset: number): number {
+  let col = 0;
+  for (let i = 0; i < offset && i < line.length; i += 1) {
+    if (line[i] === '\\' && line[i + 1] === '|') {
+      i += 1;
+      continue;
+    }
+    if (line[i] === '|') col += 1;
+  }
+  // Ведущая черта — не граница столбца, а край таблицы: без этой поправки каретка в первой
+  // ячейке считалась бы стоящей во второй.
+  return line.trimStart().startsWith('|') ? Math.max(0, col - 1) : col;
+}
+
+export function tableAt(text: string, pos: number): TableSpot | null {
+  const lines = text.split('\n');
+  // Номер строки и смещение её начала — одним проходом: второй раз резать текст незачем.
+  let li = 0;
+  let acc = 0;
+  while (li < lines.length && acc + lines[li].length < pos) {
+    acc += lines[li].length + 1;
+    li += 1;
+  }
+  if (li >= lines.length) return null;
+  const isRun = (k: number) => k >= 0 && k < lines.length && !!lines[k].trim() && isTableRow(lines[k]);
+  if (!isRun(li)) return null;
+  let from = li;
+  while (isRun(from - 1)) from -= 1;
+  let to = li;
+  while (isRun(to + 1)) to += 1;
+  const body = lines.slice(from, to + 1);
+  const model = parseTable(body);
+  if (!model) return null;
+
+  let start = 0;
+  for (let k = 0; k < from; k += 1) start += lines[k].length + 1;
+  let end = start;
+  for (let k = from; k <= to; k += 1) end += lines[k].length + (k < to ? 1 : 0);
+
+  const within = li - from;
+  // Разделитель (строка 1) считается шапкой — см. тип.
+  const row = within <= 1 ? 0 : within - 1;
+  const [ls] = lineAt(text, pos);
+  const col = Math.min(model.header.length - 1, cellIndexAt(lines[li], pos - ls));
+  return { start, end, model, row, col };
+}
+
+/**
+ * Модель обратно в текст с кареткой в заданной ячейке.
+ *
+ * `select` ВЫДЕЛЯЕТ СОДЕРЖИМОЕ ячейки, а не ставит каретку перед ним. Нужен ровно там, где ячейка
+ * приходит с заготовкой (`header` у нового столбца): набранное обязано заменять её сразу, иначе
+ * человек получает «headerназвание» и правит это руками — то же самое прицеливание мышью, от
+ * которого избавляет вся эта панель.
+ */
+function tableEditAt(
+  spot: TableSpot,
+  model: TableModel,
+  row: number,
+  col: number,
+  select = false,
+): Edit {
+  const { lines, offsets } = serializeTable(model);
+  const r = Math.max(0, Math.min(model.rows.length, row));
+  const c = Math.max(0, Math.min(model.header.length - 1, col));
+  // Строка модели → строка текста: шапка это 0, разделитель занимает 1, тело идёт с 2.
+  const at = r === 0 ? 0 : r + 1;
+  let off = spot.start;
+  for (let k = 0; k < at; k += 1) off += lines[k].length + 1;
+  const caret = off + (offsets[at]?.[c] ?? 0);
+  const body = (r === 0 ? model.header[c] : model.rows[r - 1]?.[c]) ?? '';
+  return {
+    start: spot.start,
+    end: spot.end,
+    text: lines.join('\n'),
+    sel: select ? [caret, caret + body.length] : [caret, caret],
+  };
+}
+
+/**
+ * ОДНА ОПЕРАЦИЯ РЕЖИМА ТАБЛИЦЫ. `null` — операция здесь невыразима, и панель обязана сказать это
+ * словами, а не сделать вид, что нажатия не было.
+ *
+ * ЧЕГО ЗДЕСЬ НЕТ: удаления ШАПКИ и последнего столбца. Таблица без шапки не таблица (разделитель
+ * определяет её саму), а «удалить последний столбец» — это удалить таблицу; и то и другое делается
+ * выделением и Delete, то есть обратимо ⌘Z, а кнопкой — нет.
+ */
+export function tableOpEdit(text: string, pos: number, op: TableOp): Edit | null {
+  const spot = tableAt(text, pos);
+  if (!spot) return null;
+  const m = spot.model;
+  const width = m.header.length;
+  const next: TableModel = {
+    header: [...m.header],
+    align: [...m.align],
+    rows: m.rows.map((r) => [...r]),
+  };
+
+  switch (op) {
+    case 'col+': {
+      const at = spot.col + 1;
+      next.header.splice(at, 0, 'header');
+      next.align.splice(at, 0, next.align[spot.col] ?? 'left');
+      next.rows.forEach((r) => r.splice(at, 0, ''));
+      // Каретка уезжает В ШАПКУ нового столбца и выделяет заготовку: первое, что делают со
+      // столбцом, — называют его, а из тела название не набрать.
+      return tableEditAt(spot, next, 0, at, true);
+    }
+    case 'col-': {
+      if (width <= 1) return null;
+      next.header.splice(spot.col, 1);
+      next.align.splice(spot.col, 1);
+      next.rows.forEach((r) => r.splice(spot.col, 1));
+      return tableEditAt(spot, next, spot.row, Math.min(spot.col, next.header.length - 1));
+    }
+    case 'row+': {
+      // Из шапки строка добавляется ПЕРВОЙ строкой тела, из тела — под текущей.
+      const at = spot.row === 0 ? 0 : spot.row;
+      next.rows.splice(at, 0, Array.from({ length: width }, () => ''));
+      return tableEditAt(spot, next, at + 1, spot.col);
+    }
+    case 'row-': {
+      if (spot.row === 0 || !next.rows.length) return null;
+      next.rows.splice(spot.row - 1, 1);
+      return tableEditAt(spot, next, Math.min(spot.row - 1, next.rows.length), spot.col);
+    }
+    default: {
+      if (next.align[spot.col] === op) return null;
+      next.align[spot.col] = op;
+      return tableEditAt(spot, next, spot.row, spot.col);
+    }
+  }
+}
+
+/**
+ * КАРКАС ТАБЛИЦЫ В КАРЕТКУ.
+ *
+ * Отбивается пустой строкой от текста ТОЙ ЖЕ функцией, что и галерея снимков (`leadPad`/
+ * `tailPad`): таблица, приклеенная к абзацу сверху, у разметчика в таблицу не превращается —
+ * её первая строка уедет в тот абзац.
+ *
+ * Каретка встаёт в ПЕРВУЮ ЯЧЕЙКУ ШАПКИ и выделяет слово `header`: первое, что делают с новой
+ * таблицей, — называют столбцы, и набранное заменяет заготовку без второго прицеливания мышью.
+ */
+export function tableInsertEdit(
+  text: string,
+  start: number,
+  end: number,
+  rows: number,
+  cols: number,
+): Edit {
+  const [s, e] = trimEdges(text, start, end);
+  const { lines, offsets } = serializeTable(emptyTable(rows, cols));
+  const lead = leadPad(text.slice(0, s));
+  const body = lines.join('\n');
+  const at = s + lead.length + (offsets[0]?.[0] ?? 0);
+  return {
+    start: s,
+    end: e,
+    text: `${lead}${body}${tailPad(text.slice(e))}`,
+    sel: [at, at + 'header'.length],
+  };
 }
 
 const LINK_LABEL = 'text';

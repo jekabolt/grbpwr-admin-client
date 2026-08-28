@@ -80,6 +80,12 @@ await esbuild({
   loader: { '.svg': 'text', '.png': 'dataurl', '.woff2': 'dataurl' },
   define: {
     'import.meta.env.VITE_SERVER_URL': '"http://stub.invalid"',
+    // `import.meta.env` ЦЕЛИКОМ, а не только одно поле: в iife-бандле `import.meta` пуст, и
+    // модуль, читающий из него ЛЮБОЕ другое имя на верхнем уровне (`getCropped.ts` —
+    // VITE_MEDIA_PROXY_URL), падает при загрузке бандла. Падает молча для пробы: страница
+    // остаётся без `window.__mount`, и проба сообщает «__mount is not a function» — то есть
+    // выглядит как сломанный стенд, а не как отсутствующее определение.
+    'import.meta.env': '{"VITE_SERVER_URL":"http://stub.invalid","MODE":"production"}',
     'process.env.NODE_ENV': '"production"',
   },
   alias: {

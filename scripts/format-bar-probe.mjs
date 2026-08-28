@@ -2,8 +2,8 @@
 // КНОПКА «CODE» НА ЖИВОМ ПОЛЕ — И КНОПКА «MEDIA», КОТОРОЙ НЕ БЫЛО.
 //
 //   node scripts/format-bar-probe.mjs           прогон
-//   node scripts/format-bar-probe.mjs --mutate  вернуть В БАНДЛЕ старую развилку кнопки code
-//                                               (репозиторий не трогается) — проба обязана
+//   node scripts/format-bar-probe.mjs --mutate  снять В БАНДЛЕ срез хвостовых переводов у кнопки
+//                                               code (репозиторий не трогается) — проба обязана
 //                                               покраснеть
 //
 // Зачем проба, когда есть таблица: таблица знает только про чистые функции. Что кнопка зовёт
@@ -44,7 +44,8 @@ const REPO = resolve(HERE, '..');
 const outfile = resolve(tmpdir(), `format-bar-${process.pid}.js`);
 
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА и возвращают РОВНО те строки, которыми была починка.
-//   code — дефект Д2: без среза хвостовых переводов тройной клик даёт ограду вместо бэктиков.
+//   code — без среза хвостовых переводов тройной клик по строке посреди текста кладёт в ограду
+//          лишнюю пустую строку (выделение перестаёт совпадать с целой строкой).
 //   pad  — отбивка одним переводом строки вместо пустой строки (F3): снимки перестают быть
 //          галереей и ложатся столбцом внутри текста.
 //   focus — вернуть ГОЛЫЙ `area.focus()` в `apply`: прокрутка страницы обязана снова прыгнуть.
@@ -140,23 +141,31 @@ const press = async (label) => {
   await page.waitForTimeout(120);
 };
 
-head('1. кнопка code на живом поле');
-await setText('alpha\n', 0, 6);
+head('1. кнопка code на живом поле — ВСЕГДА ОГРАДА');
+// Контракт кнопки сменился по претензии владельца («кнопка CODE добавляет одинарные кавычки, но
+// код хайлайтится тройными»): инлайновых бэктиков она не ставит вовсе, любой случай даёт ограду.
+// Строк ДВЕ намеренно: на однострочном тексте хвостовой перевод от тройного клика срезает уже
+// `lineSpan`, и мутация «убрать срез» осталась бы незамеченной.
+await setText('alpha\nbeta', 0, 6);
 await press('code');
 const triple = await text();
-ck(triple === '`alpha`\n', 'тройной клик по строке даёт бэктики, а не ограду', show(triple));
+ck(triple === '```\nalpha\n```\nbeta', 'тройной клик по строке даёт ограду без пустой строки внутри', show(triple));
 ck((await value()) === triple, 'страница узнала о правке — проп совпал с полем', show(await value()));
+
+await setText('bar foo baz', 4, 7);
+await press('code');
+const cut = await text();
+ck(cut === 'bar\n```\nfoo\n```\nbaz', 'выделение посреди строки разрезает строку оградой', show(cut));
 
 await setText('', 0, 0);
 await press('code');
 const one = await text();
-ck(one === '``', 'пустая каретка даёт ПАРУ', show(one));
-// Каретка уводится ЗА пару — ровно то, что делает и стрелка вправо, и досрочный выход
-// восстановления каретки. Это и есть тот случай, в котором пара учетверялась.
-await page.evaluate(() => window.__formatBar.select(2, 2));
+ck(one === '```\n\n```', 'пустая каретка даёт ПУСТУЮ ОГРАДУ, а не пару бэктиков', show(one));
+// Каретка после вставки стоит ВНУТРИ пустой ограды — второе нажатие обязано снять её, а не
+// завернуть пустую строку во вторую ограду. Это тот же случай, в котором пара учетверялась.
 await press('code');
 const two = await text();
-ck(two === '', 'второе нажатие рядом с парой её СНИМАЕТ, а не учетверяет', show(two));
+ck(two === '', 'повтор внутри пустой ограды её СНИМАЕТ, а не вкладывает вторую', show(two));
 
 await setText('a\nb', 0, 3);
 await press('code');
@@ -167,7 +176,88 @@ await press('code');
 const unfenced = await text();
 ck(unfenced === 'a\nb', 'повтор на теле свежей ограды её снимает', show(unfenced));
 
-head('2. соседние кнопки не поехали (вынос был пустым)');
+head('2. режим таблицы: каркас и правка сеткой');
+const rowBtn = () => page.locator('button', { hasText: /^\+ row$/ }).count();
+const toast = async () =>
+  ((await page.locator('[aria-label="Notifications"]').innerText()) ?? '').replace(/\n/g, ' ');
+const alignClasses = () =>
+  page.evaluate(() =>
+    ['left', 'center', 'right'].map(
+      (l) =>
+        Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === l)
+          ?.className ?? '',
+    ),
+  );
+
+await setText('plain paragraph', 0, 0);
+await page.waitForTimeout(150);
+ck((await rowBtn()) === 0, 'полоса режима не показывается, пока каретка НЕ в таблице');
+
+await page.locator('button', { hasText: /^table$/ }).first().click();
+await page.waitForTimeout(400);
+const cells = await page.locator('span[role="button"][aria-label*="×"]').count();
+ck(cells === 36, 'кнопка table открывает сетку размеров 6×6', `клеток ${cells}`);
+// КЛЕТКА ЖМЁТСЯ СОБЫТИЕМ, А НЕ МЫШЬЮ. У этого стенда нет стилей админки (они ему не нужны:
+// он про правки текста), поэтому `size-4` — просто буквы в атрибуте, клетка имеет нулевой
+// размер, и playwright отказывается кликать невидимое. Обработчик при этом настоящий.
+await page.evaluate(() =>
+  document
+    .querySelector('span[aria-label="3 × 3"]')
+    ?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+);
+await page.waitForTimeout(300);
+const skeleton = await text();
+// Каркас сверяется ДОСЛОВНО: столбцы выровнены пробелами, шапка — «header», тело пустое, и под
+// таблицей остаётся прежний текст, отбитый пустой строкой. Пробелы тут не косметика — таблицу
+// правят глазами в поле, см. `serializeTable`.
+ck(
+  skeleton ===
+    '| header | header | header |\n| ------ | ------ | ------ |\n|        |        |        |\n|        |        |        |\n\nplain paragraph',
+  'выбранный размер 3×3 кладёт в поле каркас: шапка и две строки тела',
+  show(skeleton),
+);
+ck((await rowBtn()) === 1, 'каретка внутри вставленной таблицы — полоса режима появилась');
+const a0 = await alignClasses();
+ck(
+  a0[0] !== a0[1] && a0[1] === a0[2],
+  'нажатой показана та кнопка выравнивания, которая стоит сейчас (left)',
+  `left≠center: ${a0[0] !== a0[1]}, center=right: ${a0[1] === a0[2]}`,
+);
+
+await press('\\+ col');
+const wider = await text();
+ck(
+  wider ===
+    '| header | header | header | header |\n| ------ | ------ | ------ | ------ |\n|        |        |        |        |\n|        |        |        |        |\n\nplain paragraph',
+  '«+ col» добавляет столбец во ВСЕ строки, а не только в шапку',
+  show(wider),
+);
+await press('right');
+const aligned = await text();
+// Выравнивание живёт в разделителе — и правится оно там же, а не отдельным состоянием экрана.
+ck(
+  aligned.split('\n')[1] === '| ------ | -----: | ------ | ------ |',
+  '«right» ставит двоеточие в разделителе СВОЕГО столбца',
+  show(aligned.split('\n')[1]),
+);
+const a1 = await alignClasses();
+ck(a1[2] !== a1[0] && a1[0] === a1[1], 'после «right» нажатой показана она', `${a1[2] !== a1[0]}`);
+await press('right');
+ck(/already aligned/.test(await toast()), 'повторное «right» ОТКАЗЫВАЕТ словами', await toast());
+
+await setText('| h |\n| --- |\n|  |\n', 3, 3);
+await page.waitForTimeout(200);
+ck((await rowBtn()) === 1, 'полоса режима видит и таблицу, набранную руками');
+await press('− col');
+const kept = await text();
+ck(kept === '| h |\n| --- |\n|  |\n', 'последний столбец не удаляется — текст цел', show(kept));
+ck(/last column stays/.test(await toast()), 'и отказ назван словами', await toast());
+
+await setText('outside\n\n| h |\n| --- |\n', 0, 0);
+await page.waitForTimeout(200);
+ck((await rowBtn()) === 0, 'каретка вне таблицы — полоса режима ушла');
+
+head('3. соседние кнопки не поехали (вынос был пустым)');
 await setText('word', 0, 4);
 await press('bold');
 ck((await text()) === '**word**', 'bold', show(await text()));
@@ -187,7 +277,7 @@ await setText('word', 0, 4);
 await press('link');
 ck((await text()) === '[word](url)', 'link', show(await text()));
 
-head('3. кнопка media');
+head('4. кнопка media');
 const mediaBtn = page.locator('button', { hasText: /^media$/ });
 ck((await mediaBtn.count()) === 1, 'кнопка media стоит в панели', `их ${await mediaBtn.count()}`);
 await mediaBtn.first().click();
@@ -201,7 +291,7 @@ await page.keyboard.press('Escape');
 await page.waitForTimeout(400);
 ck((await page.locator('[role="dialog"]').count()) === 0, 'пикер закрылся по Esc');
 
-head('4. галерея: отбивка проверяется ОТРИСОВКОЙ, а не строкой');
+head('5. галерея: отбивка проверяется ОТРИСОВКОЙ, а не строкой');
 // ДВА КАДРА ДАННЫМИ, А НЕ ССЫЛКОЙ: внешний адрес в стенде не загрузится, и `NoteImage` честно
 // покажет вместо снимка ссылку — тогда «ряд или столбец» мерить было бы не на чем.
 // Адрес именно http: разметчик показывает картинкой ВНЕШНИЙ адрес (`/^https?:\/\//`), а не
@@ -252,7 +342,7 @@ ck(column.sameRow === false, 'с одним переводом строки он
 // ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ ОБЯЗАТЕЛЕН: «прокрутка не изменилась» одинаково верно и когда починка
 // работает, и когда кнопка вообще не нажалась. Поэтому у каждого замера проверяется, что текст
 // РЕАЛЬНО изменился, и отдельно — что кнопка была достижима мышью.
-head('5. прокрутка страницы при нажатии кнопки');
+head('6. прокрутка страницы при нажатии кнопки');
 
 const LONG = Array.from({ length: 120 }, (_, i) => `line ${i + 1} of the note text`).join('\n');
 

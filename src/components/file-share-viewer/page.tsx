@@ -10,6 +10,14 @@
 // одного импорта из components/managers/**, кроме ЧИСТЫХ форматтеров (utils/format.ts не
 // импортирует ничего вовсе).
 //
+// РАЗМЕТЧИК ЗАМЕТКИ ЗДЕСЬ ТОТ ЖЕ, ЧТО В АДМИНКЕ, и это не нарушение запрета выше, а причина, по
+// которой он переехал: `ui/markdown/**` не импортирует ни `api/api.ts`, ни один хук данных —
+// только react и чистые функции. Три места, где разметке нужен доступ к библиотеке (картинка
+// файла, внутренняя ссылка, ряд снимков), вынесены в контекст, и ЗНАЧЕНИЕ ПО УМОЛЧАНИЮ у него —
+// `PLAIN_REFS`: ничего не запрашивает, на админские маршруты не ссылается. Публичная страница
+// получает безопасное поведение не потому, что здесь не забыли передать проп, а потому что
+// передавать нечего.
+//
 // ДИСЦИПЛИНА ПРО ПРОВОД, А НЕ ПРО ЧАНК. Здесь стояло обоснование «иначе api/api.ts втянется в
 // чанк публичной страницы», и оно ЛОЖНО: index.html грузит общий чанк на любом маршруте, и в
 // собранном виде в нём уже лежат и строка `Grpc-Metadata-Authorization`, и `authToken`. Код
@@ -33,6 +41,7 @@ import { useParams } from 'react-router-dom';
 // не приезжает ничего, что умеет ходить в сеть. Если однажды туда попадёт импорт adminService —
 // этот импорт нужно будет разорвать копией, а не оставлять.
 import { formatBytes, kindWord } from 'components/managers/files/utils/format';
+import { MarkdownDoc, parse as parseMarkdown } from 'ui/markdown/doc';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Section, SectionStack } from 'ui/components/section';
@@ -175,17 +184,80 @@ export function FileShareViewerPage() {
   // `download` от сервера — единственный источник правды о том, открывается ли тип в браузере.
   // Свой список тут был бы вторым набором правил, расходящимся с dto.IsInlineSafeContentType.
   const inline = meta.download === false;
-  const isImage = inline && (meta.content_type ?? '').toLowerCase().startsWith('image/');
-  // ЧТО ИМЕННО ПОКАЗЫВАТЬ. Картинка показывает саму себя — по подписанному адресу из ответа, в
-  // полном качестве и без второго похода. Всему остальному — договору, эскизу, чертежу — бэк
-  // кладёт отдельным полем ОТРИСОВАННУЮ ПЕРВУЮ СТРАНИЦУ; её нет у zip и у файла, чей рендер не
-  // удался, и тогда поля просто нет, а страница выглядит как до этой правки.
-  const previewSrc = isImage ? meta.url : meta.preview_url;
+  const kind = (meta.content_type ?? '').toLowerCase();
+  const isImage = inline && kind.startsWith('image/');
+  const isVideo = inline && kind.startsWith('video/');
+  const isPdf = inline && kind.startsWith('application/pdf');
+  /**
+   * ЧТО ИМЕННО ПОКАЗЫВАТЬ — И ПОЧЕМУ ДОКУМЕНТ ЦЕЛИКОМ, А НЕ ЕГО ПЕРВУЮ СТРАНИЦУ.
+   *
+   * Претензия владельца дословно: «должна быть ссылка, где сразу можно посмотреть весь документ,
+   * а не только скачать, т.е. вью-мод дока — так же для всех файлов, где есть предпросмотр».
+   *
+   * Порядок разбора — от «показать значит прочитать» к «показать значит открыть»:
+   *
+   *  1. ТЕКСТ (.md, .txt) приезжает полем `text` и рисуется тем же разметчиком, что в админке.
+   *     Подписанным адресом его не показать: тип не inline-безопасный, и подпись у него всегда
+   *     вложение.
+   *  2. КАРТИНКА показывает саму себя по подписанному адресу — в полном качестве и без второго
+   *     похода.
+   *  3. PDF и ВИДЕО — сам файл, а не миниатюра: у первого встроенный просмотрщик браузера со
+   *     всеми страницами, у второго — плеер. До этой правки договор из десяти страниц выглядел
+   *     как одна картинка первой страницы, и «посмотреть весь документ» означало «скачать».
+   *  4. МИНИАТЮРА остаётся для всего прочего, у чего она есть (чертёж, эскиз, файл, который
+   *     браузер не открывает): лучше одна страница лицом, чем одно имя файла.
+   */
+  const text = typeof meta.text === 'string' ? meta.text : '';
+  const inlineSrc = isSafeObjectUrl(meta.url) ? meta.url : '';
+  const embedSrc = (isPdf || isVideo) && !previewFailed ? inlineSrc : '';
+  const previewSrc = isImage ? meta.url : embedSrc ? '' : meta.preview_url;
   const showPreview = isSafeObjectUrl(previewSrc) && !previewFailed;
 
   return (
     <Shell>
       <SectionStack>
+        {text ? (
+          <Section>
+            {/* ДОКУМЕНТ, А НЕ ЕГО ОПИСАНИЕ. Разметчик тот же, что на экране заметки, — иначе один
+                и тот же текст читался бы по-разному по обе стороны ссылки. Картинки библиотеки
+                внутри такого текста показываются ПЛАШКОЙ: они не входят в эту ссылку, и
+                подставлять их сюда значило бы отдать наружу файлы, которых никто не открывал. */}
+            <MarkdownDoc blocks={parseMarkdown(text)} />
+          </Section>
+        ) : null}
+        {embedSrc && (
+          <Section>
+            <div className='space-y-1.5'>
+              {isVideo ? (
+                <video
+                  src={embedSrc}
+                  controls
+                  playsInline
+                  className='mx-auto max-h-[70vh] w-full'
+                  onError={() => setPreviewFailed(true)}
+                />
+              ) : (
+                // PDF — ВСТРОЕННЫМ ПРОСМОТРЩИКОМ БРАУЗЕРА, а не картинкой первой страницы.
+                // Высота фиксированная: документ прокручивается ВНУТРИ рамки, и страница вокруг
+                // него не превращается в один бесконечный кадр.
+                <iframe
+                  src={embedSrc}
+                  title={name || 'document'}
+                  className='h-[75vh] w-full border-0'
+                />
+              )}
+              {/* Честная оговорка про телефон: iOS показывает в рамке ТОЛЬКО ПЕРВУЮ страницу
+                  pdf — это её давнее свойство, и спорить с ним нечем. Кнопка «open» ниже
+                  открывает файл целиком отдельной вкладкой, и там ограничения нет. */}
+              {isPdf && (
+                <Text size='micro' variant='label' component='p'>
+                  the whole document — on a phone it may show the first page only, then use “open”
+                  below
+                </Text>
+              )}
+            </div>
+          </Section>
+        )}
         {showPreview && (
           <Section>
             {/* Картинка — по подписанному адресу из ответа, а не по токену: подпись здесь уже
@@ -242,15 +314,23 @@ export function FileShareViewerPage() {
               )}
             </div>
 
-            {!inline && (
-              // Почему нет «открыть». Без этой строки кнопка выглядела бы забытой, а причина у
-              // неё честная: подписанный адрес смотрит в origin бакета, и svg или html,
-              // отрисованные на месте, исполнили бы скрипты в его контексте.
-              <Text size='micro' variant='label' component='p'>
-                a file like this is served by download only — it can't be opened right in the
-                browser
-              </Text>
-            )}
+            {!inline &&
+              (text ? (
+                // У текстового документа «открыть» тоже нет — и по той же причине, — но говорить
+                // «его нельзя посмотреть в браузере» здесь было бы прямой неправдой: он показан
+                // выше целиком. Строка объясняет, что даёт скачивание, а не чего не даёт ссылка.
+                <Text size='micro' variant='label' component='p'>
+                  the document is shown above in full — “download” gives you the source file
+                </Text>
+              ) : (
+                // Почему нет «открыть». Без этой строки кнопка выглядела бы забытой, а причина у
+                // неё честная: подписанный адрес смотрит в origin бакета, и svg или html,
+                // отрисованные на месте, исполнили бы скрипты в его контексте.
+                <Text size='micro' variant='label' component='p'>
+                  a file like this is served by download only — it can't be opened right in the
+                  browser
+                </Text>
+              ))}
           </div>
         </Section>
 

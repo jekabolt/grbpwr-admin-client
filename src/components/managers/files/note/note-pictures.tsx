@@ -6,6 +6,7 @@ import {
   useMediaViewer,
   type MediaViewerItem,
 } from 'ui/components/media-viewer';
+import type { MarkdownPicture } from 'ui/markdown/doc';
 import {
   fileCardPath,
   fileRefImageSrc,
@@ -33,14 +34,9 @@ import {
  * вычисляется из самого токена, поэтому одна и та же картинка, встреченная дважды, ведёт в одно
  * место ряда — что и значит «это тот же снимок».
  */
-export type NotePicture = {
-  key: string;
-  label: string;
-  /** Файл библиотеки: адрес приезжает резолвом, здесь его ещё нет. */
-  fileId?: number;
-  /** Внешний адрес: он и есть источник. */
-  href?: string;
-};
+/** Место снимка в документе. Тип НЕ свой: его строит разбор разметки, и второе описание той же
+ * записи разошлось бы с ним молча. Имя оставлено прежним — им пользуется весь экран заметки. */
+export type NotePicture = MarkdownPicture;
 
 type Ctx = {
   openAt: (key: string) => void;

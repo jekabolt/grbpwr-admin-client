@@ -2,7 +2,13 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
 import type { LibraryFile } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
+import {
+  fileCardPath,
+  fileRefId,
+  InlinePlate,
+  NOTE_PICTURE_FRAME,
+  NOTE_PICTURE_IMAGE,
+} from 'ui/markdown/refs';
 import { filesService } from '../api/filesService';
 import { errorStatus } from '../api/rpc-error';
 import { filesKeys } from '../hooks/useFiles';
@@ -31,35 +37,15 @@ import { filesKeys } from '../hooks/useFiles';
  */
 
 /**
- * Адрес карточки файла. Собирается ИЗ `ROUTES.file`, а не из второй такой же строки — по той же
- * причине, по которой `notePath` живёт в `constants/routes`.
+ * АДРЕС ФАЙЛА, РАЗБОР ССЫЛКИ И ПЛАШКА ПЕРЕЕХАЛИ В `ui/markdown/refs.tsx`, здесь — РЕЭКСПОРТ.
  *
- * Оговорка, которой у `notePath` нет: этот адрес ещё и ЗАПИСЫВАЕТСЯ В ТЕКСТ заметки. Значит
- * шаблон `/files/:id` — часть формата хранения, и менять его придётся вместе с уже написанными
- * заметками, а не одной правкой маршрута.
+ * Причина переезда: тем же разбором адреса и той же плашкой пользуется публичная страница
+ * присланной ссылки (`/f/:token`), а ей из `managers/**` нельзя импортировать ничего — оттуда
+ * тянется `api/api.ts`, который прикладывает админский JWT, ничего не спрашивая. Реэкспорт
+ * оставлен, чтобы здешние потребители не переписывали импорты ради переезда: у обеих площадок
+ * это ОДНА функция, а не две одинаковые.
  */
-export function fileCardPath(id: number): string {
-  return ROUTES.file.replace(':id', String(id));
-}
-
-const REF_PREFIX = ROUTES.file.replace(':id', '');
-const REF_RE = new RegExp(`^${REF_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d{1,9})$`);
-
-/**
- * Номер файла из адреса — или `null`, если это не ссылка на файл.
- *
- * СТРОГО: только цифры и ничего после них. Ни `?`, ни `#`, ни хвоста — а значит `/files/1?x=…`
- * и `/files/1/note` сюда не попадают и остаются обычной внутренней ссылкой. Это не педантизм:
- * распознанный адрес получает право стать `<img src>` со СВЕЖЕЙ ПОДПИСЬЮ, и калитка, в которую
- * пролезает произвольный хвост, — это калитка в тот самый `src`. Ограничение длины (девять
- * цифр) закрывает `/files/999…9`, где `Number` теряет точность и запрос уходит не за тем файлом.
- */
-export function fileRefId(href: string): number | null {
-  const m = REF_RE.exec(href);
-  if (!m) return null;
-  const id = Number(m[1]);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
+export { fileCardPath, fileRefId, InlinePlate, NOTE_PICTURE_FRAME, NOTE_PICTURE_IMAGE };
 
 export type FileRefState =
   | { kind: 'loading' }
@@ -159,47 +145,6 @@ function imageCandidates(f: LibraryFile | undefined): string[] {
  */
 export function canShowInText(f: LibraryFile | undefined): boolean {
   return imageCandidates(f).length > 0;
-}
-
-/**
- * КАДР ПРЕВЬЮ В ТЕКСТЕ — ФИКСИРОВАННОЙ ВЫСОТЫ.
- *
- * Раньше снимок был ограничен только сверху (`max-h-[70vh]`), то есть высоту абзацам задавали
- * сами файлы: вертикальный кадр забирал пол-экрана, следующий за ним горизонтальный — полосу в
- * пять строк, и текст между ними скакал. В заметке снимок — иллюстрация абзаца, а не страница;
- * разглядывают его в увеличенном виде, где ему отдан весь экран. Одна высота у всех превью
- * возвращает документу ровный ход сверху вниз.
- *
- * ВЫСОТА У КОРОБКИ, А НЕ У КАРТИНКИ. `h-…` на самом `<img>` РАСТЯНУЛ БЫ мелкий снимок — значок
- * 40×40 стал бы мыльным на 240 px. Поэтому высоту держит коробка, а картинка в неё вписывается
- * (`max-h-full` + `object-contain`): крупная уменьшается, мелкая остаётся собой. Ширина коробки
- * идёт по картинке (`w-fit`), чтобы нажатие попадало в снимок, а не в пустое поле рядом с ним.
- *
- * КАДР СТРОЧНЫЙ (`inline-flex`), А НЕ БЛОЧНЫЙ. Блочный занимал всю ширину заметки, и два снимка
- * рядом в тексте всё равно вставали друг под другом — столбцом. Строчный кадр стоит там, где его
- * поставили, а абзац из одних снимков разметчик кладёт рядом с переносом (`galleryLines`).
- */
-export const NOTE_PICTURE_FRAME =
-  'my-1 inline-flex h-[240px] w-fit max-w-full items-center align-top';
-export const NOTE_PICTURE_IMAGE = 'max-h-full max-w-full object-contain';
-
-/** Плашка на месте картинки. `span`, а не `div`: она стоит внутри абзаца. */
-export function InlinePlate({
-  children,
-  tone,
-}: {
-  children: ReactNode;
-  tone?: 'default' | 'error';
-}) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 border px-1.5 py-px text-micro uppercase tracking-label ${
-        tone === 'error' ? 'border-error text-error' : 'border-borderColor text-labelColor'
-      }`}
-    >
-      {children}
-    </span>
-  );
 }
 
 /**

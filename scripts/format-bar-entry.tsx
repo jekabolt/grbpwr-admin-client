@@ -9,6 +9,8 @@ import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
+import { SnackBar } from 'ui/components/snackbar';
+
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { mediaEdit } from 'components/managers/files/note/format-edits';
 import { MarkdownView } from 'components/managers/files/note/markdown-view';
@@ -118,6 +120,11 @@ function Harness({ opts }: { opts: MountOpts }) {
         <MarkdownView source={note} />
       </div>
       <div style={{ height: 1200 }}>page below the editor</div>
+      {/* Всплывающие сообщения — НЕ УКРАШЕНИЕ СТЕНДА: отказ кнопки режима таблицы («последний
+          столбец остаётся») только словами и существует, и без этого узла проверять было бы
+          нечего, кроме «текст не изменился» — то есть неотличимо от кнопки, которая ничего не
+          делает. */}
+      <SnackBar />
     </div>
   );
 }

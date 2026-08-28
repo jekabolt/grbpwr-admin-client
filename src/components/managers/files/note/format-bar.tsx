@@ -1,8 +1,10 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Button } from 'ui/components/button';
+import GenericPopover from 'ui/components/popover';
+import Text from 'ui/components/text';
 import { NoteFilePicker, type NoteFileInsert } from './file-picker';
 import {
   codeEdit,
@@ -12,9 +14,14 @@ import {
   lineMarkEdit,
   linkEdit,
   mediaEdit,
+  tableAt,
+  tableInsertEdit,
+  tableOpEdit,
   type Edit,
   type MediaInsert,
+  type TableOp,
 } from './format-edits';
+import type { TableAlign } from 'ui/markdown/table';
 
 /**
  * ПОЛОСА ФОРМАТИРОВАНИЯ НАД ТЕКСТОМ.
@@ -74,6 +81,42 @@ export function FormatBar({
   const pending = useRef<{ value: string; sel: [number, number] } | null>(null);
   const { showMessage } = useSnackBarStore();
 
+  /**
+   * РЕЖИМ ТАБЛИЦЫ: каретка стоит в таблице — значит стоит и полоса её правки.
+   *
+   * ХРАНИТСЯ ТОЛЬКО ВЫВЕДЕННОЕ (есть ли таблица и как выровнен её столбец), а не сама позиция
+   * каретки. `selectionchange` приходит на каждое движение стрелкой и на каждую букву; заведи мы
+   * тут позицию состоянием — панель перерисовывалась бы на каждый символ. Выведенное же меняется
+   * редко: вошли в таблицу, вышли, перешли в другой столбец.
+   *
+   * ПОДПИСКА СВОЯ, А НЕ ПРОП СВЕРХУ, и это осознанно. Каретку слушает ещё и редактор — для
+   * синхронной прокрутки показа, — но прокрутка работает БЕЗ состояния, ссылкой на узел; отдай
+   * мы позицию пропом, каждое движение каретки перерисовывало бы вместе с панелью и показ
+   * заметки, то есть самый дорогой узел экрана.
+   */
+  const [tableSpot, setTableSpot] = useState<{ align: TableAlign; inHeader: boolean } | null>(null);
+  useEffect(() => {
+    const read = () => {
+      const area = areaRef.current;
+      if (!area || document.activeElement !== area) {
+        setTableSpot((cur) => (cur === null ? cur : null));
+        return;
+      }
+      const spot = tableAt(area.value, area.selectionStart ?? 0);
+      const next = spot
+        ? { align: spot.model.align[spot.col] ?? 'left', inHeader: spot.row === 0 }
+        : null;
+      setTableSpot((cur) =>
+        cur?.align === next?.align && cur?.inHeader === next?.inHeader ? cur : next,
+      );
+    };
+    read();
+    document.addEventListener('selectionchange', read);
+    return () => document.removeEventListener('selectionchange', read);
+    // `value` в зависимостях НЕ СЛУЧАЙНО: правка текста меняет таблицу под кареткой, а
+    // `selectionchange` на неё не приходит — вставили столбец, а полоса осталась бы вчерашней.
+  }, [areaRef, value]);
+
   useLayoutEffect(() => {
     const p = pending.current;
     const area = areaRef.current;
@@ -90,13 +133,17 @@ export function FormatBar({
   }, [areaRef, value]);
 
   const apply = useCallback(
-    (make: (text: string, start: number, end: number) => Edit) => {
+    (make: (text: string, start: number, end: number) => Edit | null) => {
       const area = areaRef.current;
       if (!area) return;
       // Текст берётся ИЗ ПОЛЯ, а не из пропа: координаты выделения — это координаты в узле, и
       // считать их по чужой копии строки значит однажды промахнуться на длину расхождения.
       const text = area.value;
       const edit = make(text, area.selectionStart ?? 0, area.selectionEnd ?? 0);
+      // `null` — ОТКАЗ ПРАВКИ, а не её отсутствие. Операция режима таблицы бывает невыразима
+      // (шапку не удалить, последний столбец не удалить), и молчаливый выход здесь читался бы
+      // как сломанная кнопка; словами отказывается вызывающий, у него есть причина.
+      if (!edit) return;
 
       const expected = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
 
@@ -165,6 +212,24 @@ export function FormatBar({
     if (!items.length) return;
     apply((t, s, e) => mediaEdit(t, s, e, items));
   };
+
+  /**
+   * Операция режима таблицы. ОТКАЗ ПРОИЗНОСИТСЯ СЛОВАМИ: `tableOpEdit` возвращает `null` там, где
+   * операция невыразима, и молчаливое бездействие кнопки читалось бы как поломка.
+   */
+  const runTableOp = useCallback(
+    (op: TableOp) => {
+      const area = areaRef.current;
+      if (!area) return;
+      const at = area.selectionStart ?? 0;
+      if (!tableOpEdit(area.value, at, op)) {
+        showMessage(TABLE_REFUSALS[op], 'error');
+        return;
+      }
+      apply((t, s2) => tableOpEdit(t, s2, op));
+    },
+    [apply, areaRef, showMessage],
+  );
 
   const actions: { label: string; title: string; run: () => void }[] = [
     {
@@ -251,6 +316,8 @@ export function FormatBar({
           preview
         </Button>
 
+        <TableSizePicker onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))} />
+
         {/* СНИМКИ ИЗ МЕДИАТЕКИ, С МУЛЬТИВЫБОРОМ. Библиотека файлов и медиатека — два разных
             хранилища, и до сих пор из текста заметки был достижим только первый.
 
@@ -277,6 +344,54 @@ export function FormatBar({
         />
       </div>
 
+      {/* ── ПОЛОСА РЕЖИМА ТАБЛИЦЫ ──────────────────────────────────────────────────────────
+          Стоит ОТДЕЛЬНОЙ строкой и только пока каретка в таблице. Постоянно висящие «+ row» и
+          «align» на панели заметки, где таблиц обычно нет вовсе, — это шесть кнопок, которые
+          девять раз из десяти означают «неприменимо»; кнопка, которая почти всегда отказывает,
+          хуже отсутствующей.
+
+          Полоса — вторая строка ОДНОГО блока, а не своя коробка: коробка внутри коробки в этой
+          системе запрещена, и волосяная линейка сверху выражает ту же вложенность. */}
+      {tableSpot && (
+        <div className='flex flex-wrap items-center gap-1 border-b border-hairline px-1.5 py-1.5'>
+          <Text size='micro' variant='label' component='span' className='mr-1 uppercase'>
+            table
+          </Text>
+          {TABLE_ACTIONS.map((a) => (
+            <Button
+              key={a.op}
+              type='button'
+              size='xs'
+              variant='secondary'
+              title={a.title}
+              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+              onClick={() => runTableOp(a.op)}
+            >
+              {a.label}
+            </Button>
+          ))}
+          <Text size='micro' variant='label' component='span' className='mx-1 uppercase'>
+            align
+          </Text>
+          {TABLE_ALIGNS.map((a) => (
+            <Button
+              key={a.op}
+              type='button'
+              size='xs'
+              // Выравнивание столбца — СОСТОЯНИЕ, а не действие: нажатая кнопка показывает, как
+              // столбец выровнен сейчас. Иначе три кнопки подряд выглядят как три одинаковых
+              // действия, и «а как сейчас» приходится читать в тексте разделителя.
+              variant={tableSpot.align === a.op ? 'main' : 'secondary'}
+              title={a.title}
+              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+              onClick={() => runTableOp(a.op)}
+            >
+              {a.label}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {picker && (
         <NoteFilePicker
           insert={picker}
@@ -285,5 +400,108 @@ export function FormatBar({
         />
       )}
     </>
+  );
+}
+
+/** Кнопки строения таблицы. Порядок — как читают: сначала строки, потом столбцы. */
+const TABLE_ACTIONS: { op: TableOp; label: string; title: string }[] = [
+  { op: 'row+', label: '+ row', title: 'a row under the one the caret is in (from the header — the first body row)' },
+  { op: 'row-', label: '− row', title: 'remove the row the caret is in' },
+  { op: 'col+', label: '+ col', title: 'a column to the right of the one the caret is in' },
+  { op: 'col-', label: '− col', title: 'remove the column the caret is in' },
+];
+
+const TABLE_ALIGNS: { op: TableOp; label: string; title: string }[] = [
+  { op: 'left', label: 'left', title: 'align this column left' },
+  { op: 'center', label: 'center', title: 'align this column centre' },
+  { op: 'right', label: 'right', title: 'align this column right — for digits' },
+];
+
+/**
+ * ПОЧЕМУ ОПЕРАЦИЯ ОТКАЗАЛА — словами и по делу. Общая фраза «нельзя» здесь не годится: у каждого
+ * отказа своя причина, и человек, услышавший её, знает, что делать дальше (выделить и удалить).
+ */
+const TABLE_REFUSALS: Record<TableOp, string> = {
+  'row+': 'there is nowhere to add a row here',
+  'row-': 'the header row stays: a table without it is not a table — select it and delete it as text',
+  'col+': 'there is nowhere to add a column here',
+  'col-': 'the last column stays: removing it would remove the table — select it and delete it as text',
+  left: 'this column is already aligned that way',
+  center: 'this column is already aligned that way',
+  right: 'this column is already aligned that way',
+};
+
+const PICK_MAX = 6;
+
+/**
+ * ВЫБОР РАЗМЕРА ТАБЛИЦЫ СЕТКОЙ, а не двумя полями с числами.
+ *
+ * Сетка отвечает на вопрос в тех же единицах, в которых он задан («вот такая»), и не требует
+ * набирать цифры там, где рука уже на мыши. Потолок 6×6 — не ограничение таблицы, а граница
+ * УДОБНОГО жеста: дальше строки и столбцы добираются полосой режима, которая для того и есть.
+ */
+function TableSizePicker({ onPick }: { onPick: (rows: number, cols: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState<{ r: number; c: number } | null>(null);
+  const rows = hover?.r ?? 0;
+  const cols = hover?.c ?? 0;
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setHover(null);
+      }}
+      title='table'
+      triggerProps={{ onMouseDown: (e: React.MouseEvent) => e.preventDefault() }}
+      openElement={
+        <Button
+          type='button'
+          size='xs'
+          variant='secondary'
+          title='insert a table: pick the size, then rows and columns are added by the strip that appears when the caret is inside it'
+          asChild
+        >
+          <span>table</span>
+        </Button>
+      }
+    >
+      <div className='space-y-1.5'>
+        {/* Клетка — не `<button>`: весь выбор делает ОДИН клик, а полсотни кнопок в сетке
+            означали бы полсотни остановок табуляции ради жеста, который целиком мышиный.
+            Клавиатурный путь у таблицы свой — размер по умолчанию нажатием Enter на подписи ниже. */}
+        <div
+          className='grid w-fit grid-cols-6 gap-px bg-hairline p-px'
+          onMouseLeave={() => setHover(null)}
+        >
+          {Array.from({ length: PICK_MAX * PICK_MAX }, (_, i) => {
+            const r = Math.floor(i / PICK_MAX) + 1;
+            const c = (i % PICK_MAX) + 1;
+            const on = r <= rows && c <= cols;
+            return (
+              <span
+                key={i}
+                role='button'
+                tabIndex={-1}
+                aria-label={`${c} × ${r}`}
+                className={`size-4 cursor-pointer ${on ? 'bg-textColor' : 'bg-bgColor'}`}
+                onMouseEnter={() => setHover({ r, c })}
+                onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                onClick={() => {
+                  setOpen(false);
+                  setHover(null);
+                  // СТРОК В ТЕЛЕ — на одну меньше выбранного: верхний ряд сетки это ШАПКА,
+                  // и таблица «2×3» из шапки и двух строк — то, что человек видит в сетке.
+                  onPick(Math.max(0, r - 1), c);
+                }}
+              />
+            );
+          })}
+        </div>
+        <Text size='micro' variant='label' component='p'>
+          {hover ? `${cols} × ${rows} — the top row is the header` : 'pick the size'}
+        </Text>
+      </div>
+    </GenericPopover>
   );
 }
