@@ -213,6 +213,15 @@ export type AssemblyCanvasProps = {
   pieceNameOf: (lineKey: string) => string;
   onPickStep: (index: number) => void;
   /**
+   * ШАГ, ОТКРЫТЫЙ В ДОКЕ, — его строка на полотне инвертируется, где бы она ни была нарисована
+   * (в узле, в хвосте или обработкой на плитке детали). Считает ФУЛСКРИН: только он знает, что
+   * сейчас в нижнем баре, — полотно про док не знает вовсе и знать не должно.
+   *
+   * `null` — внизу не открыт ни один шаг (док свёрнут или показывает узел списком). Инлайн этот
+   * проп не передаёт: редактора под схемой у него нет.
+   */
+  openStep?: number | null;
+  /**
    * Открыть создание операции по собранному жесту. Полотно НЕ пишет в форму: ни один жест не
    * подставляет тип, зону и машину — всё кончается диалогом (R1).
    */
@@ -271,6 +280,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     labelOf,
     pieceNameOf,
     onPickStep,
+    openStep = null,
     onCreate,
     onOpenUnit,
     onDissolve,
@@ -1743,6 +1753,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 unitClothLine={unitClothLine}
                 terminal={terminal}
                 isPicked={picked.includes(box.key)}
+                openStep={openStep}
                 frozen={frozen}
                 hovered={hovered === box.key}
                 dragging={!!heldNow?.has(box.key)}
@@ -1776,6 +1787,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
               tailSteps={layout.tailSteps}
               tailSmv={tailSmv}
               labelOf={labelOf}
+              openStep={openStep}
               dragging={!!heldNow?.has('')}
               ringClassName={nodeRing('')}
               dragProps={dragHandlers('', layout.tail.x, layout.tail.y)}
@@ -1797,6 +1809,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 pieceShapes={pieceShapes}
                 cloth={cloth}
                 labelOf={labelOf}
+                openStep={openStep}
                 picked={picked.includes(t.key)}
                 frozen={frozen}
                 hovered={hovered === t.key}

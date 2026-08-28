@@ -27,6 +27,7 @@
 // === 0`), которой в золоте тоже не было.
 import { renderToStaticMarkup } from 'react-dom/server';
 
+import { AssemblyCanvas } from '../src/components/managers/tech-card/components/assembly-canvas';
 import { AssemblySchematic } from '../src/components/managers/tech-card/components/assembly-schematic';
 import { assemblyBlocks } from '../src/components/managers/tech-card/components/assembly-blocks';
 import {
@@ -357,6 +358,76 @@ export function renderSchematic(frozen: boolean): string {
     </>,
   );
 }
+
+/**
+ * ПОЛОТНО ФУЛСКРИНА С ОТКРЫТЫМ ШАГОМ.
+ *
+ * Golden выше снят с ИНЛАЙНА, а у инлайна редактора под схемой нет и `openStep` он не передаёт:
+ * подсветка открытого шага в том снимке не исполняется НИ ОДНОЙ веткой. Гейт, оставленный на
+ * одном golden, был бы сторожем у мёртвого кода — зелёным и при `stepRowSkin`, вернувшем обычную
+ * строку всегда.
+ *
+ * ПОЛОТНО ЦЕЛИКОМ, А НЕ ВЬЮШКА ПОИМЁННО: проверяется не то, что функция вернула класс, а то, что
+ * индекс доехал от пропа полотна до строки нужной коробки. Ровно этот участок правка и заводит.
+ */
+export function renderCanvas(fixture: 'converged' | 'tail', openStep: number | null): string {
+  const c = fixture === 'tail' ? tailed : converged;
+  return renderToStaticMarkup(
+    <AssemblyCanvas
+      blocks={c.blocks}
+      steps={c.steps}
+      res={c.res}
+      labelOf={labelFrom(fixture === 'tail' ? TAIL_LABELS : CONVERGED_LABELS)}
+      pieceNameOf={nameOf(fixture === 'tail' ? TAIL_PIECES : CONVERGED_PIECES)}
+      onPickStep={noop}
+      openStep={openStep}
+      onCreate={noop}
+      onDissolve={noop}
+      pieceShapes={fixture === 'tail' ? TAIL_SHAPES : CONVERGED_SHAPES}
+      cloth={fixture === 'tail' ? TAIL_CLOTH : CONVERGED_CLOTH}
+      smvOfBlock={fixture === 'tail' ? new Map<string, string>() : CONVERGED_SMV}
+      tailSmv={fixture === 'tail' ? TAIL_SMV : ''}
+      positions={{}}
+      onMove={noop}
+      frozen={false}
+      picked={[]}
+      onPicked={noop}
+      onHint={noop}
+    />,
+  );
+}
+
+/**
+ * ГДЕ ШАГ НАРИСОВАН — СЧИТАЕТ РАСКЛАДКА, А НЕ ПРОБА. Один и тот же шаг законно стоит и строкой
+ * узла, и строкой обработки на плитке своей детали (`TileView`: «тот же шаг законно виден в обоих
+ * местах»), поэтому «ровно одна подсвеченная строка» было бы неверным ожиданием. Проба сверяет
+ * число подсветок с числом МЕСТ, где раскладка этот шаг рисует.
+ */
+export function drawnPlaces(fixture: 'converged' | 'tail', index: number) {
+  const c = fixture === 'tail' ? tailed : converged;
+  const l = assemblyLayout(c.blocks, c.steps, c.res);
+  const inBoxes = l.boxes.filter((b) =>
+    (c.blocks.find((x) => x.key === b.key)?.steps ?? []).includes(index),
+  ).length;
+  const inTiles = l.tiles.filter((t) => t.processing.includes(index)).length;
+  const inTail = l.tailSteps.includes(index) ? 1 : 0;
+  return { inBoxes, inTiles, inTail, total: inBoxes + inTiles + inTail };
+}
+
+/** Адреса для замера: шаг в коробке узла, обработка на плитке, шаг в хвостовой коробке. */
+export const canvasFacts = (() => {
+  const cl = assemblyLayout(converged.blocks, converged.steps, converged.res);
+  const tl = assemblyLayout(tailed.blocks, tailed.steps, tailed.res);
+  const unitBlock = converged.blocks.find((b) => b.key !== '' && b.steps.length > 1);
+  return {
+    /** Шаг, нарисованный строкой узла. */
+    unitStep: unitBlock?.steps[1] ?? -1,
+    /** Обработка, нарисованная строкой на плитке детали. */
+    tileStep: cl.tiles.find((t) => t.processing.length > 0)?.processing[0] ?? -1,
+    /** Шаг, нарисованный строкой хвостовой коробки. */
+    tailStep: tl.tailSteps[0] ?? -1,
+  };
+})();
 
 /**
  * Чистые функции извлечённого модуля — вторая половина пробы.

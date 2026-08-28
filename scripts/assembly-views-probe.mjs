@@ -1025,5 +1025,89 @@ console.log('\nbuildWires — из правого края источника в
   );
 }
 
+// --- N. подсветка шага, открытого в доке -------------------------------------------------------
+//
+// GOLDEN ВЫШЕ ЭТУ ВЕТКУ НЕ ИСПОЛНЯЕТ ВОВСЕ: он снят с ИНЛАЙНА, а инлайн живёт без редактора под
+// схемой и `openStep` не передаёт. Проверка, оставленная на одном golden, зеленела бы и у
+// `stepRowSkin`, вернувшего обычную строку всегда, — то есть сторожила бы мёртвый код.
+//
+// МЕРЯЕТСЯ РАЗМЕТКА ПОЛОТНА, А НЕ ВОЗВРАТ ФУНКЦИИ: вопрос ставится «доехал ли индекс от пропа до
+// строки нужной коробки», и ответить на него может только рендер полотна целиком.
+//
+// ЧЕГО ЭТА ПРОБА НЕ ЛОВИТ, как и весь этот файл: сам ДОК. Правило «что именно открыто в нижнем
+// баре» живёт в `assembly-fullscreen.tsx` (`openStep`), фулскрин здесь не монтируется ни разу, и
+// разойдись оно с доком — снимок останется зелёным.
+console.log('\nподсветка шага, открытого в доке');
+{
+  const cf = mod.canvasFacts;
+  ck(cf.unitStep >= 0, 'фикстура: есть шаг, нарисованный строкой узла', `index=${cf.unitStep}`);
+  ck(cf.tileStep >= 0, 'фикстура: есть обработка, нарисованная строкой на плитке', `index=${cf.tileStep}`);
+  ck(cf.tailStep >= 0, 'фикстура: есть шаг, нарисованный строкой хвоста', `index=${cf.tailStep}`);
+
+  /** Подсвеченные строки целиком: сам `div` и его содержимое (вложенных div в строке нет). */
+  const litRows = (html) => [
+    ...html.matchAll(/<div[^>]*aria-current="true"[^>]*>([\s\S]*?)<\/div>/g),
+  ];
+  const count = (html, needle) => html.split(needle).length - 1;
+
+  for (const [fixture, index, where] of [
+    ['converged', cf.unitStep, 'строка узла'],
+    ['converged', cf.tileStep, 'строка обработки на плитке'],
+    ['tail', cf.tailStep, 'строка хвостовой коробки'],
+  ]) {
+    const dark = mod.renderCanvas(fixture, null);
+    const lit = mod.renderCanvas(fixture, index);
+    const places = mod.drawnPlaces(fixture, index);
+    const rows = litRows(lit);
+
+    ck(
+      litRows(dark).length === 0,
+      `${where}: без открытого шага не подсвечено ничего`,
+      `подсвеченных строк: ${litRows(dark).length}`,
+    );
+    // ЧИСЛО ПОДСВЕТОК = ЧИСЛУ МЕСТ, ГДЕ РАСКЛАДКА РИСУЕТ ЭТОТ ШАГ, а не единица: обработка
+    // законно стоит и строкой узла, и строкой на плитке своей детали.
+    ck(
+      rows.length === places.total && places.total > 0,
+      `${where}: подсвечены все места этого шага и только они`,
+      `мест ${JSON.stringify(places)}, подсвечено ${rows.length}`,
+    );
+    for (const [whole, inner] of rows) {
+      ck(whole.includes('bg-textColor'), `${where}: подсвеченная строка инвертирована`, whole.slice(0, 160));
+      // ХВОСТ КЛАССА, А НЕ КЛАСС ЦЕЛИКОМ: в разметке `&` уезжает как `&amp;`, и напиши мы здесь
+      // готовую строку `[&amp;_*]:…` — сканер tailwind нашёл бы её в ЭТОМ файле и завёл в
+      // production-CSS мёртвое правило под несуществующий класс. Хвост кандидатом не является.
+      ck(
+        whole.includes('_*]:text-bgColor'),
+        `${where}: подписи строки перекрашены потомковым правилом`,
+        whole.slice(0, 160),
+      );
+      ck(
+        !whole.includes('hover:bg-bgZebra'),
+        `${where}: наведение у открытой строки снято — иначе она белела бы под мышью`,
+        whole.slice(0, 160),
+      );
+      ck(
+        whole.includes('open in the editor below'),
+        `${where}: подсказка говорит, где поля этого шага`,
+        whole.slice(0, 200),
+      );
+      // НОМЕР ТОТ ЖЕ, ЧТО В ДОКЕ: подсветилась именно та строка, которую открыли, а не соседняя.
+      ck(
+        inner.includes(String((index + 1) * 10)),
+        `${where}: подсвечен шаг ${(index + 1) * 10}, а не соседний`,
+        inner.slice(0, 200),
+      );
+    }
+    // ОСТАЛЬНЫЕ СТРОКИ НЕ ТРОНУТЫ: ровно `places.total` строк потеряли наведение, и ни одной
+    // больше — иначе «подсветилась одна» уживалось бы с «остальные погасли».
+    ck(
+      count(dark, 'hover:bg-bgZebra') - count(lit, 'hover:bg-bgZebra') === places.total,
+      `${where}: наведение снято ровно у подсвеченных`,
+      `было ${count(dark, 'hover:bg-bgZebra')}, стало ${count(lit, 'hover:bg-bgZebra')}, мест ${places.total}`,
+    );
+  }
+}
+
 console.log(bad === 0 ? '\nвсё сошлось' : `\nрасхождений: ${bad}`);
 process.exit(bad === 0 ? 0 : 1);

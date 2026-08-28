@@ -80,6 +80,61 @@ export const stepGlyph = (steps: AssemblyStep[], i: number): string => {
   return st.inputs.some((inp) => inp.key === st.outputUnitKey) ? '+▣' : '▣';
 };
 
+/** Обводка фокуса строки шага — общая на все три коробки; цвет дописывает `stepRowSkin`. */
+const STEP_ROW_FOCUS =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2';
+
+/**
+ * ШКУРА СТРОКИ ШАГА: открытый в редакторе внизу — ИНВЕРСИЕЙ, остальные — как были.
+ *
+ * ЗАЧЕМ. Один и тот же шаг живёт на полотне в трёх разных коробках (строка узла, строка хвоста,
+ * строка обработки на плитке детали), и «какой из них сейчас в доке» приходилось держать в голове:
+ * внизу правились поля шага 20, а на схеме все строки выглядели одинаково. Претензия владельца
+ * дословно: «когда у нас в фокусе в нижнем баре какая-то операция, то нужно на ui её тоже
+ * отображать как 20 операция».
+ *
+ * ИНВЕРСИЯ, А НЕ ЗЕБРА. `bg-bgZebra` в этой коробке уже занята дважды — наведением строки и
+ * выделенной шапкой, — и третий смысл на том же оттенке читался бы как «мышь стоит здесь».
+ * Инверсия — язык активного пункта этого приложения (`segmented-field`, мобильное меню), она
+ * различима на полотне издалека и не отнимает у коробки ни пикселя разметки.
+ *
+ * `[&_*]:text-bgColor` — НЕ ЛИШНЕЕ. Подписи строк рисует `Text`, а он задаёт цвет КЛАССОМ
+ * (`text-text` у обычной, `text-labelColor` у глифа): без потомкового правила номер и подпись
+ * остались бы чёрными на чёрном. Правило `& *` НЕ СПЕЦИФИЧНЕЕ класса (обе (0,1,0)) — оно
+ * выигрывает ПОРЯДКОМ: tailwind ставит утилиты с вариантом после голых, тем же механизмом, на
+ * котором держатся `hover:` и `md:`. Замерено в браузере на СОБРАННОМ CSS, а не выведено из
+ * чтения: строка чёрная (rgb(0,0,0)), обе подписи белые (rgb(255,255,255)), включая ту, что
+ * вариантом `label` красится в #666.
+ *
+ * НАВЕДЕНИЕ У ОТКРЫТОЙ СТРОКИ СНЯТО СОВСЕМ: `hover:bg-bgZebra` — псевдокласс, он перебил бы
+ * инверсию, и открытая строка белела бы ровно под мышью, то есть в тот момент, когда на неё и
+ * смотрят.
+ *
+ * ЗАКРЫТАЯ ВЕТКА ОТДАЁТ ПРЕЖНЮЮ СТРОКУ КЛАССОВ ДОСЛОВНО, включая порядок: разметка схемы
+ * сравнивается с golden-снимком байт-в-байт (`scripts/assembly-views-probe.mjs`), и поверхность
+ * без редактора внизу (инлайн) обязана остаться неотличимой от себя вчерашней — иначе гейт
+ * краснеет на шуме и перестаёт ловить настоящее.
+ *
+ * И ПОТОМУ ЖЕ СКЛЕЙКА ЗДЕСЬ ШАБЛОНОМ, А НЕ `cn`. `cn` — это `twMerge`, а он в паре
+ * tailwind v4 / tailwind-merge v3 считает голый `outline` и `outline-2` одной группой и ВЫБРАСЫВАЕТ
+ * первый (замерено: `twMerge('focus-visible:outline focus-visible:outline-2 …')` возвращает строку
+ * без `focus-visible:outline`). На вид ничего не меняется — в v4 ширина сама включает стиль
+ * обводки, — но снимок расходится молча, и разошёлся бы у ВСЕХ строк, включая те, которых правка
+ * не касается. Ценой этого решения фон открытой строки обязан быть ЕДИНСТВЕННЫМ в наборе: у
+ * плитки, где в наборе уже стоит `bg-bgColor`, он снимается веткой на месте (см. `TileView`), а не
+ * перекрывается порядком утилит в собранном CSS — порядок этот нам не принадлежит.
+ */
+export const stepRowSkin = (open: boolean): string =>
+  open
+    ? `bg-textColor [&_*]:text-bgColor ${STEP_ROW_FOCUS} focus-visible:outline-bgColor`
+    : `hover:bg-bgZebra ${STEP_ROW_FOCUS} focus-visible:outline-textColor`;
+
+/**
+ * ПОДПИСЬ СТРОКИ ШАГА. Открытая строка не зовёт открыть себя ещё раз — она говорит, где её поля.
+ */
+const stepRowTitle = (open: boolean, base: string): string =>
+  open ? 'this step is open in the editor below' : base;
+
 /**
  * КУСОК СТРОКИ БОКСА: либо просто текст, либо ССЫЛКА НА УЗЕЛ (`to` — его ключ).
  *
@@ -937,6 +992,7 @@ export function UnitBoxView({
   unitClothLine,
   terminal,
   isPicked,
+  openStep,
   frozen,
   hovered,
   dragging,
@@ -966,6 +1022,18 @@ export function UnitBoxView({
   /** Единственный живой узел карточки — то есть готовое изделие. */
   terminal: boolean;
   isPicked: boolean;
+  /**
+   * ШАГ, ОТКРЫТЫЙ В РЕДАКТОРЕ ВНИЗУ: его строка инвертируется, и «шаг 20» на схеме и «шаг 20» в
+   * доке становятся видимо одним шагом.
+   *
+   * ИНДЕКС ГЛОБАЛЬНЫЙ — тот же, которым шаг адресуется везде (рельс, док, плитка). Второй системы
+   * нумерации у шага нет и заводить её нельзя: порядковый номер внутри узла совпал бы с глобальным
+   * ровно на первом узле и разошёлся бы на втором, молча.
+   *
+   * `null`/отсутствие — внизу не открыт НИ ОДИН шаг: док свёрнут, показывает узел списком, либо
+   * поверхность живёт вовсе без редактора (инлайн ничего сюда не передаёт, и подсветки там нет).
+   */
+  openStep?: number | null;
   frozen: boolean;
   hovered: boolean;
   /** Ноду тащат прямо сейчас. */
@@ -1140,9 +1208,13 @@ export function UnitBoxView({
           <div
             key={i}
             {...stepProps(i)}
-            className='flex w-full items-center gap-1 px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            // `aria-current` СТАВИТСЯ ТОЛЬКО У ОТКРЫТОЙ: `aria-current={false}` печатается в
+            // разметку строкой «false» на КАЖДОЙ строке схемы — на поверхности без редактора это
+            // шум в снимке и лишнее слово для чтеца экрана.
+            aria-current={i === openStep ? true : undefined}
+            className={`flex w-full items-center gap-1 px-1 text-left ${stepRowSkin(i === openStep)}`}
             style={{ height: LINE_H }}
-            title='open the step in the list'
+            title={stepRowTitle(i === openStep, 'open the step in the list')}
           >
             <Text size='nano' component='span' className='min-w-0 truncate'>
               {(i + 1) * 10} · {labelOf(i)}
@@ -1222,6 +1294,7 @@ export function TailBoxView({
   tailSteps,
   tailSmv,
   labelOf,
+  openStep,
   dragging,
   ringClassName,
   dragProps,
@@ -1254,6 +1327,8 @@ export function TailBoxView({
    */
   tailSmv: string;
   labelOf: (index: number) => string;
+  /** Шаг, открытый в редакторе внизу, — тот же глобальный индекс, что у бокса узла. */
+  openStep?: number | null;
   dragging: boolean;
   ringClassName?: string;
   dragProps: OrganProps;
@@ -1304,9 +1379,10 @@ export function TailBoxView({
         <div
           key={i}
           {...stepProps(i)}
-          className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+          aria-current={i === openStep ? true : undefined}
+          className={`flex w-full items-center px-1 text-left ${stepRowSkin(i === openStep)}`}
           style={{ height: LINE_H }}
-          title='open the step in the list'
+          title={stepRowTitle(i === openStep, 'open the step in the list')}
         >
           <Text size='nano' component='span' className='min-w-0 truncate'>
             {(i + 1) * 10} · {labelOf(i)}
@@ -1350,6 +1426,7 @@ export function TileView({
   pieceShapes,
   cloth,
   labelOf,
+  openStep,
   picked,
   frozen,
   hovered,
@@ -1371,6 +1448,12 @@ export function TileView({
   cloth?: Map<string, PieceCloth> | null;
   /** Короткая подпись шага — та же, что в строке блока. */
   labelOf: (index: number) => string;
+  /**
+   * Шаг, открытый в редакторе внизу. ОБРАБОТКА ТОЖЕ ШАГ, и подсветка ей нужна ровно так же:
+   * шаг 20 бывает нарисован не в узле, а на плитке своей детали, и найти его на схеме глазами
+   * там ещё труднее — строка короче и стоит не в списке.
+   */
+  openStep?: number | null;
   picked: boolean;
   frozen: boolean;
   /** Плитка под курсором — от этого зависит только полоса действий. */
@@ -1487,9 +1570,20 @@ export function TileView({
           <div
             key={i}
             {...stepProps(i)}
-            className='flex shrink-0 items-center gap-1 overflow-hidden border-t border-hairline bg-bgColor px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            aria-current={i === openStep ? true : undefined}
+            // `bg-bgColor` СНИМАЕТСЯ У ОТКРЫТОЙ, а не перекрывается: строка плитки обязана быть
+            // непрозрачной поверх силуэта, и оба фона в одном наборе решались бы порядком утилит
+            // в собранном CSS — а он нам не принадлежит. Пустая ветка склеивается с `px-1`
+            // намеренно: закрытая строка обязана отдать прежний набор классов дословно.
+            className={`flex shrink-0 items-center gap-1 overflow-hidden border-t border-hairline ${
+              i === openStep ? '' : 'bg-bgColor '
+            }px-1 text-left ${stepRowSkin(i === openStep)}`}
             style={{ height: PROC_ROW_H }}
-            title={`${labelOf(i)} — processing on this piece; click to open the step in the list`}
+            title={
+              i === openStep
+                ? `${labelOf(i)} — processing on this piece; it is open in the editor below`
+                : `${labelOf(i)} — processing on this piece; click to open the step in the list`
+            }
           >
             <Text
               size='nano'
