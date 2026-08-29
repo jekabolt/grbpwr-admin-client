@@ -97,6 +97,25 @@ export type common_MediaFull = {
   createdAt: wellKnownTimestamp | undefined;
   // media
   media: common_MediaItem | undefined;
+  // SHA-256 of the ORIGINAL uploaded bytes, hex, lower case. Puts the existing media.content_hash
+  // column (0336) on the wire; it is not a new fact and not a second store.
+  // Its readers compare: a frozen sheet plate says which bytes it pinned, and a run's input
+  // snapshot says which bytes the model was fed — comparing either against this field is how a
+  // «stale» badge is earned rather than guessed.
+  // EMPTY IS HONEST AND MEANS «this media predates 0336», not «no hash». A consumer must withhold
+  // the comparison in that case, never treat it as a mismatch.
+  // THAT PROMISE IS AN OBLIGATION ON EVERY PRODUCER OF THIS MESSAGE, NOT A HOPE. A path that builds
+  // a MediaFull without filling this field turns «empty» into a lie, and the lie is SILENT: a
+  // staleness badge that should have fired simply does not, and nothing anywhere reports a
+  // mismatch. There are FOUR construction sites in this repository and each one must fill it:
+  // * internal/dto/media.go — ConvertEntityToCommonMedia, the ordinary read path. It reads the
+  // entity, so the column must ride along in the entity, not be re-queried.
+  // * internal/bucket/image.go, the standard upload return — the hash is already in hand there as
+  // `fullSizeSHA`, one line above the row insert.
+  // * internal/bucket/image.go, the verbatim upload return — likewise, as `rawSHA`.
+  // * internal/bucket/video.go — videos are not content-hashed, so empty here is the honest
+  // answer and the only site where it is.
+  contentHash: string | undefined;
 };
 
 // Encoded using RFC 3339, where generated output will always be Z-normalized

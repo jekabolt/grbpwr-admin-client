@@ -43,6 +43,10 @@ function toMediaFull(id?: number, url?: string | null): common_MediaFull | undef
   return {
     id: id || undefined,
     createdAt: undefined,
+    // Приехало с контрактом полосы DESIGN: `MediaFull.content_hash` (существующая колонка 0336
+    // вынесена на провод). Здесь строится ПОДДЕЛКА MediaFull из формы, у которой байтов нет вовсе,
+    // поэтому честное значение — отсутствие.
+    contentHash: undefined,
     media: { fullSize: info, thumbnail: info, compressed: info, blurhash: undefined },
   };
 }

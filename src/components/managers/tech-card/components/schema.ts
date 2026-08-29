@@ -1046,6 +1046,21 @@ const calloutSchema = z.object({
   // (`piece.calloutNumber` сверяется по имени), и второй способ адресовать деталь развёл бы две
   // половины одной связи. `part` — эхо первого элемента.
   parts: z.array(z.string()).optional().default([]),
+  // КЛЮЧ СТРОКИ, МИНТИМЫЙ КЛИЕНТОМ ПРИ РОЖДЕНИИ ВЫНОСКИ (полоса DESIGN, контракт §4.2).
+  // Хранимый и круглорейсовый: после сейва форма обязана понять, какой её строке достался какой
+  // серверный номер, — иначе фокус, подсветка и «отказ ведёт в место» показывают чужую выноску.
+  // Он же гейт минта на сервере: `number == 0 && client_ref != ''` ⇒ сминти; `number == 0 &&
+  // client_ref == ''` ⇒ легаси-ноль, не трогать никогда.
+  //
+  // `.nullish()`, а НЕ `.optional()`, и БЕЗ `.default('')`, и обе половины намеренны.
+  //   * nullish — потому что гейтвей маршалит с EmitUnpopulated: незаполненное поле приходит
+  //     ЯВНЫМ `null`, а генерённый TS объявляет `| undefined`. Реальны ОБА написания, и схема,
+  //     принимающая одно, отвергает живой ответ (тот же урок, что у `wastageAppliedAt` выше).
+  //   * без default — потому что zod-дефолт уезжает на сервер командой «очисти». Черновик,
+  //     восстановленный из снимка старого бандла, поля не несёт; выдуманное здесь `''` означало бы
+  //     «у этой выноски ключа нет» и на полном перезаписывающем сейве стёрло бы хранимый.
+  //     Отсутствие обязано оставаться отсутствием до самого провода.
+  clientRef: z.string().nullish(),
 });
 
 // ИМЕНА ПОЛЕЙ ШАГА — ИЗ САМОЙ СХЕМЫ, ОДИН РАЗ НА РЕПОЗИТОРИЙ.
@@ -1889,6 +1904,16 @@ const techCardObject = z.object({
   // the head of the tech pack's description sheet, above the details and the notes.
   concept: z.string().optional().default(''),
   notes: z.string().optional().default(''),
+  // ОБЩАЯ ЗАПИСЬ МУДБОРДА (полоса DESIGN, контракт §4.1) — слова, которые читает `draft the idea`
+  // вместе с текстами мудбордных выносок. Не `concept`: концепт это принятое утверждение о стиле,
+  // печатаемое в шапке тех-пака, а это черновая записка к доске.
+  //
+  // `.nullish()` и БЕЗ `.default('')` — по тем же двум причинам, что у `clientRef` выше, и вторая
+  // здесь дороже: у поля серверный протокол «absent = сохранить» (дословно по образцу
+  // `cutting_coefficient`). Пустая строка это КОМАНДА «очисти», а не «я про это поле не знаю».
+  // Вкладка со старым бандлом или восстановленный черновик обязаны молчать, а не стирать записку,
+  // которой они никогда не видели.
+  moodNote: z.string().nullish(),
   // children
   sizeIds: z.array(z.number()).default([]),
   // NO sizeQuantities. Типовой калькуляционный тираж («size run») удалён из формы целиком:
@@ -2281,6 +2306,13 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     requiredSeamAllowanceMm: decimalToInput(insert?.requiredSeamAllowanceMm),
     concept: insert?.concept || '',
     notes: insert?.notes || '',
+    // Полоса DESIGN, контракт §4.1. Три состояния поля объявлены в самом контракте: ОТСУТСТВИЕ =
+    // «оставь как есть», присутствие с `''` = «сотри», присутствие со значением = «поставь».
+    //
+    // Отсюда `?? undefined`, а НЕ `|| ''`: с провода приходит либо строка, либо ЯВНЫЙ null
+    // (EmitUnpopulated), и оба обязаны стать ОТСУТСТВИЕМ. Пустая строка здесь была бы КОМАНДОЙ
+    // «очисти», и первый же сейв карточки, прочитанной без записки, стёр бы её.
+    moodNote: insert?.moodNote ?? undefined,
     sizeIds: insert?.sizeIds ?? [],
     // size_quantities НЕ читается в форму — типовой тираж больше не существует как понятие в UI.
     patterns: (insert?.patterns ?? []).map((p) => ({
@@ -2338,6 +2370,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         : c.part
           ? [c.part]
           : [],
+      // Полоса DESIGN, контракт §4.2 — та же дисциплина отсутствия, что у `moodNote` выше: строка,
+      // записанная до контракта, ключа не несёт, и придуманное здесь `''` означало бы «ключа нет»
+      // вместо «я про ключ ничего не знаю».
+      clientRef: c.clientRef ?? undefined,
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
@@ -2870,6 +2906,12 @@ export function mapFormToTechCardInsert(
     requiredSeamAllowanceMm: inputToDecimal(data.requiredSeamAllowanceMm),
     concept: data.concept?.trim() || '',
     notes: data.notes?.trim() || '',
+    // ПОЛЯ ПОЛОСЫ DESIGN (`moodNote`, `callouts[].clientRef`) ЗДЕСЬ НЕ ПИШУТСЯ, И ЭТО НАМЕРЕННО.
+    // Схема их объявила и читатель их читает, но провод ими молчит, пока не подключён гейт
+    // возможностей (`design/payload-gate.ts`): гейтвей собран с `DiscardUnknown: false`, поэтому
+    // незнакомое поле — это 400 на ВЕСЬ документ, а не тишина, и бандл, начавший их слать раньше
+    // выката бинаря, останавливает сохранение всех тех-карт разом. Молчание = «absent», а absent
+    // на этих двух полях означает «сохрани хранимое», что и есть верное поведение до гейта.
     // children edited here — override the echoed `original` values
     sizeIds: data.sizeIds ?? [],
     // Типовой тираж больше не отправляется. `undefined` здесь ОБЯЗАТЕЛЕН и не равен «просто не

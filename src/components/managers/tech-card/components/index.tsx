@@ -122,6 +122,16 @@ import { useTechCardStagingRequired } from './useTechCardStaging';
 
 const TABS = [
   { id: 'header', label: 'header' },
+  { id: 'studio', label: 'studio' },
+  { id: 'artifacts', label: 'artifacts' },
+  // RETIRED FROM THE RAIL, STILL IN THIS LIST — and the difference is deliberate.
+  //
+  // The rail is drawn from TAB_GROUPS, and neither of these appears there any more: STUDIO absorbed
+  // both, and FOLDED_TABS sends `?tab=sketch` and `?tab=moodboard` to it, so neither is reachable
+  // by rail, by deep link or by bookmark. What keeps them here is the panel below (search
+  // `activeTab !== 'sketch'`): SketchTab is still MOUNTED, because it is the writer of the callouts
+  // field array and the last piece of this wave is what unmounts it — after the owner has walked
+  // the new screens, not before. Removing the ids now would only mean deleting the panel with them.
   { id: 'sketch', label: 'sketch' },
   { id: 'moodboard', label: 'moodboard' },
   { id: 'patterns', label: 'patterns' },
@@ -141,9 +151,11 @@ type TabId = (typeof TABS)[number]['id'];
 // Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  // Moodboard before sketch: the reference comes first and the technical drawing is derived from
-  // it, so the rail follows the order the work actually happens in.
-  { band: 'design', tabs: ['header', 'moodboard', 'sketch'] },
+  // STUDIO is where the style is looked at — moodboard, references, flats, the bench — and
+  // ARTIFACTS is what that work has been frozen into. Both replace the old moodboard/sketch pair,
+  // which split ONE surface across two rail entries; the order is still the order the work happens
+  // in: you look before you freeze.
+  { band: 'design', tabs: ['header', 'studio', 'artifacts'] },
   // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
   // The size range, the measurement chart, the DXF sheets and the раскладки are the first artefacts
   // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
@@ -174,13 +186,27 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
 // bookmark still lands on the right place, and the address bar is rewritten to match what is
 // rendered. Both targets exist on every card, auxiliary included — which is why no alias needs
 // re-resolving per card any more.
-const FOLDED_TABS: Record<string, TabId> = { dev: 'costing', pieces: 'patterns' };
+//
+// TWO tabs fold into STUDIO, not one. `sketch` and `moodboard` were two independent entries here
+// and in the rail — they rendered the SAME component in two modes, but a link, a bookmark and a
+// toast could each name either one. Folding only `sketch` would leave every `?tab=moodboard` link
+// landing on the header with no explanation.
+const FOLDED_TABS: Record<string, TabId> = {
+  dev: 'costing',
+  pieces: 'patterns',
+  sketch: 'studio',
+  moodboard: 'studio',
+};
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
-  moodboardMedia: 'moodboard',
-  technicalMedia: 'sketch',
-  callouts: 'sketch',
+  // All three moved with the surface that renders them: the moodboard grid, the technical sketch
+  // grid and every callout on either of them now live on STUDIO. A row left pointing at a retired
+  // tab does not fall back quietly — it routes the failed save to a tab the rail no longer draws,
+  // and the toast then names a field nobody can see.
+  moodboardMedia: 'studio',
+  technicalMedia: 'studio',
+  callouts: 'studio',
   patterns: 'patterns',
   sizeIds: 'patterns',
   bomItems: 'bom',
@@ -208,6 +234,10 @@ const ERROR_TAB: Record<string, TabId> = {
 // judges the condition; which tab clears it is this admin's navigation and cannot come over the
 // wire. An unmapped key falls back to the header tab — a requirement added server-side later is
 // still shown and still leads somewhere, rather than being silently dropped from the gate.
+//
+// Walked key by key when STUDIO/ARTIFACTS replaced moodboard/sketch: not one row here pointed at
+// either of them, so the map is unchanged. Recorded rather than left implicit — the next tab move
+// has to walk this map too, and «nothing to do» is only worth knowing if someone checked.
 const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   style_number: 'header',
   size_range: 'patterns',
@@ -622,8 +652,11 @@ export function TechCardForm({
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
     header: !!name?.trim() && (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()),
-    sketch: len(technicalMedia) > 0,
-    moodboard: len(moodboardMedia) > 0,
+    // STUDIO holds both grids now, so it is ticked by either: a card with a moodboard and no flat
+    // has started the work this tab is for. ARTIFACTS is deliberately left UNSET rather than
+    // `false` — nothing is minted yet in this wave, and claiming an outstanding section that
+    // cannot be filled would peg every card below done for no reason a human could act on.
+    studio: len(technicalMedia) > 0 || len(moodboardMedia) > 0,
     // A size range alone stopped answering for this tab. The выкройки panel below it files DXF
     // sheets BY MATERIAL and names every fabric line with no sheet as a hole, so a card carrying a
     // full size range and not one pattern was ticked done while the tab itself said otherwise.
@@ -672,7 +705,7 @@ export function TechCardForm({
   // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
   // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
   // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
-  const IDEA_TABS: TabId[] = ['header', 'sketch', 'moodboard', 'samples', 'history'];
+  const IDEA_TABS: TabId[] = ['header', 'studio', 'artifacts', 'samples', 'history'];
   // Costing is field-shaped: hidden entirely without costing:read (server nulls the cost block; an
   // empty tab would read as "zero cost"). R&D dev-expenses now live as a section inside it. Samples
   // need a saved card (id).
@@ -2018,7 +2051,37 @@ export function TechCardForm({
               )}
             </SectionStack>
 
-            {/* SKETCH */}
+            {/* STUDIO — mount point for the DESIGN band, empty on purpose.
+                The rail entry ships FIRST and empty rather than last and full: without it the
+                organs of this wave have nowhere to mount, nothing is reachable on beta, and the
+                whole client gets verified in one detonation at the end.
+                It carries NO writers yet. That is not an omission — SketchTab below still owns the
+                `callouts` field array and writes into it past append/remove, and a second writer of
+                the same array does not synchronise with the first, it loses rows silently. Whatever
+                lands here inherits that array; it does not open a second door onto it. */}
+            <SectionStack hidden={activeTab !== 'studio'}>
+              <Section title='studio' question='— what this style looks like, before it is frozen'>
+                <Text variant='inactive' size='small'>
+                  Empty on purpose. The moodboard, the references and the flats move in here piece
+                  by piece; until they do, this tab is a placeholder and holds nothing of yours.
+                </Text>
+              </Section>
+            </SectionStack>
+
+            {/* ARTIFACTS — same, for what the studio has been frozen into. */}
+            <SectionStack hidden={activeTab !== 'artifacts'}>
+              <Section
+                title='artifacts'
+                question='— the sheet the factory prints, and every version of it'
+              >
+                <Text variant='inactive' size='small'>
+                  Empty on purpose. Nothing is minted yet — the sheet, its versions and its issue
+                  journal move in here piece by piece.
+                </Text>
+              </Section>
+            </SectionStack>
+
+            {/* SKETCH — off the rail, still mounted: see TABS. */}
             <div hidden={activeTab !== 'sketch'}>
               <SketchTab
                 techCard={techCard}

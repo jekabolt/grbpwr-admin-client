@@ -459,6 +459,14 @@ export type common_CareSymbolTranslation = {
 
 export type UploadContentImageRequest = {
   rawB64Image: string | undefined;
+  // STORE THE ORIGINAL BYTES VERBATIM instead of re-encoding. What it buys: a flat sketch prints
+  // 1:1 with the bytes that were uploaded, and its content_hash stays the hash of the file the
+  // human actually has.
+  // THE PROMISE IS EXACT, NOT GENERAL: JPEG, PNG, WebP and GIF are stored byte-for-byte. HEIC has
+  // no verbatim path and is REFUSED outright rather than silently re-encoded — «1:1 for
+  // everything» would be the dishonest wording.
+  // Absent/false = the ordinary path (re-encode + derive thumbnail/compressed), unchanged.
+  preserveOriginal: boolean | undefined;
 };
 
 export type UploadContentImageResponse = {
@@ -472,6 +480,25 @@ export type common_MediaFull = {
   createdAt: wellKnownTimestamp | undefined;
   // media
   media: common_MediaItem | undefined;
+  // SHA-256 of the ORIGINAL uploaded bytes, hex, lower case. Puts the existing media.content_hash
+  // column (0336) on the wire; it is not a new fact and not a second store.
+  // Its readers compare: a frozen sheet plate says which bytes it pinned, and a run's input
+  // snapshot says which bytes the model was fed — comparing either against this field is how a
+  // «stale» badge is earned rather than guessed.
+  // EMPTY IS HONEST AND MEANS «this media predates 0336», not «no hash». A consumer must withhold
+  // the comparison in that case, never treat it as a mismatch.
+  // THAT PROMISE IS AN OBLIGATION ON EVERY PRODUCER OF THIS MESSAGE, NOT A HOPE. A path that builds
+  // a MediaFull without filling this field turns «empty» into a lie, and the lie is SILENT: a
+  // staleness badge that should have fired simply does not, and nothing anywhere reports a
+  // mismatch. There are FOUR construction sites in this repository and each one must fill it:
+  // * internal/dto/media.go — ConvertEntityToCommonMedia, the ordinary read path. It reads the
+  // entity, so the column must ride along in the entity, not be re-queried.
+  // * internal/bucket/image.go, the standard upload return — the hash is already in hand there as
+  // `fullSizeSHA`, one line above the row insert.
+  // * internal/bucket/image.go, the verbatim upload return — likewise, as `rawSHA`.
+  // * internal/bucket/video.go — videos are not content-hashed, so empty here is the honest
+  // answer and the only site where it is.
+  contentHash: string | undefined;
 };
 
 export type common_MediaItem = {
@@ -554,6 +581,11 @@ export type MediaUsage = {
 // entity when it uses the file in more than one slot (a photo that is both the product
 // thumbnail and a gallery frame yields two refs with the same kind and entity_id).
 export type MediaUsageRef = {
+  // product | archive | model | material | task | tech_card | fitting | sample |
+  // design_picture | design_sheet_version | design_edit_layer.
+  // The last two are the DESIGN band: a picture holds its media, and a MINTED SHEET VERSION holds
+  // it with RESTRICT — that is why the library must name it, or somebody deletes the bytes a
+  // printed Rev.N depends on.
   kind: string | undefined;
   entityId: number | undefined;
   label: string | undefined;
@@ -7547,6 +7579,17 @@ export type common_TechCardInsert = {
   moodboardMedia: common_TechCardMediaItem[] | undefined;
   technicalMedia: common_TechCardMediaItem[] | undefined;
   callouts: common_TechCardCallout[] | undefined;
+  // THE MOODBOARD'S SHARED NOTE — the words the whole board is about, as opposed to a caption on
+  // one image. It is what the DESIGN band's `draft the idea` reads, together with the callouts
+  // pinned on moodboard images.
+  // OPTIONAL for the same load-bearing reason as `cutting_coefficient` and purpose/kind above: the
+  // admin is an SPA, tabs survive deploys, and the card is saved WHOLE. A bare proto3 string from a
+  // bundle that predates this field arrives as "" and would ERASE the note — silently, from a tab
+  // that never opened the moodboard. Three states, verbatim the same as its neighbours:
+  // * field ABSENT (null)        → LEAVE AS IS.
+  // * field PRESENT, value ""    → CLEAR it (store NULL).
+  // * field PRESENT with a value → set it.
+  moodNote?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
@@ -7805,7 +7848,16 @@ export type common_TechCardMediaKind =
   | "TECH_CARD_MEDIA_KIND_PREVIEW"
   | "TECH_CARD_MEDIA_KIND_MOODBOARD"
   | "TECH_CARD_MEDIA_KIND_REFERENCE"
-  | "TECH_CARD_MEDIA_KIND_SWATCH";
+  | "TECH_CARD_MEDIA_KIND_SWATCH"
+  // Side views. The DESIGN band's view matrix has four silhouette sides, and without these two a
+  // side flat has nowhere to be filed — it would have to masquerade as DETAIL and stop being a
+  // side. This EXTENDS the existing vocabulary; it is not a second axis.
+  | "TECH_CARD_MEDIA_KIND_SIDE_L"
+  | "TECH_CARD_MEDIA_KIND_SIDE_R"
+  // An ACCEPTED render — a rendered image promoted into category='technical', i.e. one that leaves
+  // the studio and goes out with the card. The pair (category='technical', kind=RENDER) is what
+  // says «this is a render and it is official»; there is no separate artifact_role column.
+  | "TECH_CARD_MEDIA_KIND_RENDER";
 // TechCardCallout is a numbered detail note pointing at the technical sketch.
 // ГЕОМЕТРИЯ (kind/points/color) ДОПИСАНА, А НЕ ЗАВЕДЕНА РЯДОМ. Указания на карточном эскизе и
 // указания на снимке шага — одно и то же ремесло: мерка между двумя точками, скобка над участком,
@@ -7851,6 +7903,31 @@ export type common_TechCardCallout = {
   // СОВМЕСТИМОСТЬ БЕЗ ФЛАГА: пустой список читается как [part], непустой вытесняет `part`
   // целиком, и сервер отдаёт `part` = первым элементом.
   parts: string[] | undefined;
+  // THE CLIENT'S OWN KEY FOR THIS ROW — minted by the client (UUID) when the callout is born,
+  // STORED, and round-tripped. Today a callout's only identity is its number, and the number is
+  // assigned by the server: after a save the form cannot tell which of its rows got which number,
+  // so focus, highlighting and «the refusal leads to the place» all point at SOMEBODY ELSE'S
+  // callout.
+  // THREE PROPERTIES, EACH LOAD-BEARING:
+  // 1. IT IS NOT IN THE DIGEST. This is an ADDRESS, not content — exactly like the callout's
+  // colour, which the DESIGN projection leaves out for the same reason.
+  // 2. IT DRIVES NUMBER MINTING. `number == 0 && client_ref != ""` ⇒ «mint a number».
+  // `number == 0 && client_ref == ""` ⇒ a LEGACY ZERO, leave it alone: tech_card_callout holds
+  // callout_number NOT NULL DEFAULT 0 with no UNIQUE, duplicate zeros there are legal, and a
+  // rule «number<=0 means mint» would renumber them on the first save from ANY client — i.e.
+  // move the DESIGN signature of every such card, across the whole of production, at rollout.
+  // 3. IT IS NOT REQUIRED, AND AN OLD BUNDLE MUST NOT ERASE IT. «An old client loses nothing» is
+  // true of the old client and FALSE of the new one: a stale tab resends the callouts without
+  // this field, a full-replace write would blank the column, and the addresses the new client
+  // is holding would vanish out from under it — silently, since client_ref is outside the
+  // digest and nothing would restate.
+  // SO THE SERVER CARRIES IT: an incoming callout with `number != 0` and an EMPTY client_ref
+  // inherits the stored client_ref OF THAT NUMBER, exactly the way CarryOmittedCalloutGeometry
+  // already carries geometry by number, and in the same place in the pipeline. An explicitly
+  // DIFFERENT non-empty value replaces it — that is a real re-address, not an omission.
+  // The carry cannot collide with minting: minting is `number == 0`, carrying is
+  // `number != 0`, and a legacy zero has neither a number to carry by nor a ref to mint for.
+  clientRef: string | undefined;
 };
 
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
@@ -14387,6 +14464,844 @@ export type AccrueCorporationTaxResponse = {
   alreadyPosted: boolean | undefined;
 };
 
+// DesignBenchSlotRef addresses ONE bench slot in EITHER of the two ways a slot can be named: by its
+// view for the four silhouette sides, or by its minted id for a detail. Exactly one must be set.
+// A DETAIL IS NEVER ADDRESSED BY NAME. «Detail 1 / detail 2» as a key would move a plate on rename
+// and would collide between two details a human called the same thing.
+export type DesignBenchSlotRef = {
+  // front | back | side_l | side_r — the four silhouette sides, each of which is its own slot.
+  // ALSO `detail`, AND THAT VALUE MEANS «MINT A NEW DETAIL SLOT»: it addresses no existing row,
+  // so a name is REQUIRED alongside it (SetDesignBenchSlotRequest.new_detail_name,
+  // RegisterDesignUploadRequest.target) and expected_slot_rev must be 0. Creating a detail has no
+  // other spelling — a oneof cannot carry a view AND an id at once, so «view_key=detail with
+  // slot_id 0» was never expressible and would have been guessed two different ways on the two
+  // sides of the wire.
+  viewKey?: string;
+  // FK design_bench_slot(id) — an EXISTING slot, silhouette or detail alike, addressed by its
+  // minted id. This is how every detail is addressed after its birth.
+  slotId?: number;
+};
+
+export type GetDesignBandRequest = {
+  techCardId: number | undefined;
+};
+
+// GetDesignBandResponse is the whole band in one read. Bounded on purpose: the journal is capped
+// and the runs come back one page at a time, because a card with 40 runs × 3 outputs would
+// otherwise ship 120 MediaFull on every open of the tab.
+export type GetDesignBandResponse = {
+  // The bench: the four silhouette slots that have been touched, plus every detail slot. Slots that
+  // have never been touched are simply absent — they are born lazily by SetDesignBenchSlot.
+  bench: common_DesignBenchSlot[] | undefined;
+  // Every minted version number of this card, ascending. Numbers only: the older versions are read
+  // whole through GetDesignSheetVersion, on demand, when somebody actually prints one.
+  versionNumbers: number[] | undefined;
+  // The LATEST version in full — the composition ARTIFACTS compares the live document against to
+  // draw «differs from v3». Unset when the card has never minted one, which is honestly «no sheet
+  // yet», not «version 0».
+  latestVersion: common_DesignSheetVersion | undefined;
+  // The sheet journal, newest first, at most 50 lines. A card that issues more than that has a
+  // history worth paging, and it will get its own read before it does.
+  journal: common_DesignSheetIssue[] | undefined;
+  budget: common_DesignBudget | undefined;
+  // The roles stated for this card's reference images, in prompt order. Only images that HAVE a
+  // role appear; a reference without one is still a reference, and the document is what lists them.
+  references: common_DesignReference[] | undefined;
+  // The card's vector layers WITHOUT their strokes — id, base_media_id, rev, updated_by, updated_at
+  // only. Enough to list them and to know which rev to compare-and-set against; not enough to draw
+  // one, and deliberately so. The editor calls GetDesignEditLayer for the single layer it opens.
+  layers: common_DesignEditLayer[] | undefined;
+  // AGGREGATES OVER THE WHOLE BAND, not over the page. Counting the page would make the header lie
+  // by exactly the amount that is not on screen.
+  totalRuns: number | undefined;
+  archivedRuns: number | undefined;
+  maxRrev: number | undefined;
+  // Every colour recipe this card's render runs have used, newest first — the chips of the colour
+  // history. Derived from the runs, so a chip restores a RECIPE and never a picture.
+  colourRecipes: common_DesignColourRecipe[] | undefined;
+  // run_id → how many of that run's pictures are hidden. Feeds «· 2 hidden» on a collapsed row
+  // without making the client count the pictures it was given. Counts over the WHOLE run, not over
+  // the page, which is the point: a collapsed row must state its own total.
+  // IT COVERS RUNS ONLY. Batch pictures have run_id 0 and are counted by hidden_by_batch below —
+  // not folded into key 0 here, which would make «run 0» a magic value meaning «everything
+  // uploaded, ever».
+  hiddenByRun: { [key: string]: number } | undefined;
+  // batch_id → how many of that batch's pictures are hidden. The upload shelf's half of the pair.
+  hiddenByBatch: { [key: string]: number } | undefined;
+  // The first page of history, newest first, with each row's pictures already under it.
+  runs: common_DesignRun[] | undefined;
+  // The upload shelf rows of THAT SAME PAGE, newest first, with their pictures under them.
+  // THE BAND'S FEED IS RUNS AND BATCHES MERGED BY TIME, and `limit` counts rows across both. A
+  // manual upload has no run — design_picture.run_id is NULL for it, and design_run.kind has no
+  // member for it on purpose — so if batches did not ride the feed, an uploaded picture would hang
+  // under nothing and the shelf would be empty on every reload. That is the whole of what this wave
+  // actually ships, so it is not an edge.
+  batches: common_DesignBatch[] | undefined;
+  // Cursor for the next page of the merged feed; empty when the history ends here. Pass it to
+  // ListDesignRuns.page_token.
+  // CONTINUE IT WITH include_archived = true. This first page is unfiltered by design (see above),
+  // so a continuation that filtered would change the row set mid-pagination and silently drop or
+  // duplicate rows around the seam.
+  nextPageToken: string | undefined;
+};
+
+// DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
+// silhouette sides (front/back/side_l/side_r) are born lazily on first touch; detail slots are
+// created by naming one.
+export type common_DesignBenchSlot = {
+  // The slot's OWN minted id. «Detail 1 / detail 2» as a key is forbidden: renaming a detail must
+  // not move a plate, and two details named the same must still be two slots.
+  id: number | undefined;
+  viewKey: string | undefined;
+  detailName: string | undefined;
+  pictureId: number | undefined;
+  // CAS TOKEN. Every write to this slot echoes the rev it believed it was overwriting; a mismatch
+  // is Aborted:slot_rev_mismatch with the slot's current state attached. 0 = the slot does not
+  // exist yet, which is the value a lazy first placement sends.
+  slotRev: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+  // THE RESOLVED PLATE, not just its id. Unset when the slot is empty.
+  // A bare picture_id is unreadable on its own: the plate a slot holds is routinely older than the
+  // first page of runs, so the client would have nothing to draw the thumbnail from and no
+  // source_class to compute the mixed-provenance warning with. It is also what makes the CAS
+  // refusal usable — Aborted:slot_rev_mismatch hands back the slot's CURRENT state, and a bare id
+  // there would force the loser of the race into another round trip before it could redraw.
+  picture: common_DesignPicture | undefined;
+};
+
+// DesignPicture is one image in the band. It hangs under EITHER a run (generated) or a batch
+// (uploaded by hand) — exactly one of run_id / batch_id is set, never both and never neither.
+// Pictures are never deleted through this contract: invisibility (hidden_at) and erasing bytes are
+// different floors of the building.
+// THE CONTENT HASH IS ON `media.content_hash` and nowhere else. A picture has nothing to freeze —
+// it IS the live file — so a second copy here could only ever disagree with the first.
+export type common_DesignPicture = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  media: common_MediaFull | undefined;
+  runId: number | undefined;
+  batchId: number | undefined;
+  ordinal: number | undefined;
+  kind: string | undefined;
+  // The GHOST label: a hypothesis about which view this is, not a fact. Front-and-back guesses are
+  // routinely wrong, so the label is shown as a guess and a human confirms it by putting the plate
+  // into a slot. Empty = no hypothesis. On a crop this carries the frame's declared view.
+  ghostView: string | undefined;
+  // Non-empty ONLY on a composite: the views glued into one image. A composite has no single view,
+  // is not clickable into a slot, and must be split first (SplitDesignPicture).
+  compositeViews: string[] | undefined;
+  // The picture this one was derived from — a crop or a flattened edit. A derivative is a SIBLING
+  // OF ITS PARENT: it inherits the parent's run_id or batch_id, and never gets a row of its own,
+  // because no money was spent on it. A crop of an uploaded composite therefore sits under the same
+  // BATCH the composite arrived in.
+  derivedFrom: number | undefined;
+  // PROVENANCE, an open vocabulary: ai | uploaded | ai_edits | imported_svg | drawn.
+  // It has already grown once (`drawn`, for a vector base drawn from nothing), which is why it is
+  // a string and not an enum.
+  sourceClass: string | undefined;
+  // This picture is the output of a fix whose INPUT slots were of mixed provenance. The flag does
+  // not forbid anything — it refuses to let the mixture be laundered by one more generation.
+  mixedInput: boolean | undefined;
+  layerRev: number | undefined;
+  // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
+  // HideDesignPicture: a plate in a slot, in a minted version, feeding a live run, or parenting a
+  // live crop cannot be hidden.
+  hiddenAt: wellKnownTimestamp | undefined;
+  hiddenBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignSheetVersion is a MINTED, FROZEN sheet: Rev.N as it was printed. Its plates and callouts
+// are rows of their own, not a JSON blob — a version must still print a year from now, so its
+// bytes must not be erasable, and that is expressed by a foreign key the media library can see.
+export type common_DesignSheetVersion = {
+  id: number | undefined;
+  versionNumber: number | undefined;
+  clientRequestId: string | undefined;
+  // The minter explicitly consented to a composition of mixed provenance. Without consent such a
+  // mint is refused (FailedPrecondition: mixed_needs_consent) rather than silently blessed.
+  mixedConsent: boolean | undefined;
+  // WHICH ACT gave birth to this version: callout | print | release | share. There is no «accept»
+  // button anywhere — a version is a by-product of an act, never a ceremony of its own.
+  mintedVia: string | undefined;
+  mintedBy: string | undefined;
+  mintedAt: wellKnownTimestamp | undefined;
+  plates: common_DesignSheetPlate[] | undefined;
+  // The frozen callouts of this version, at most 200 — the same readability ceiling the card's
+  // annotations already carry.
+  callouts: common_DesignSheetCallout[] | undefined;
+};
+
+// DesignSheetPlate is one frozen image of a version, with everything needed to explain a year later
+// what was printed and where it came from.
+export type common_DesignSheetPlate = {
+  viewKey: string | undefined;
+  // The bench slot this plate came from, or 0 if that slot has since been deleted. The version
+  // survives the slot's death, which is why detail_name below is a COPY and not a lookup.
+  slotId: number | undefined;
+  detailName: string | undefined;
+  media: common_MediaFull | undefined;
+  // THE HASH AT MINT — what this version actually froze. Empty = the media predates 0336.
+  // IT LIVES HERE, unlike on DesignPicture, and the asymmetry is the point rather than an
+  // oversight: a plate of a minted version is a FROZEN fact («these are the bytes the sheet was
+  // signed over»), and it must survive even a future recomputation of media.content_hash. A live
+  // picture has nothing to freeze — it is the current file — so for it a second copy could only
+  // disagree with the first.
+  contentHash: string | undefined;
+  layerRev: number | undefined;
+  sourceClass: string | undefined;
+  runId: number | undefined;
+  fitStamp: string | undefined;
+  mixedInput: boolean | undefined;
+  ordinal: number | undefined;
+};
+
+// DesignSheetCallout is one frozen callout of a version. Geometry is a TechCardAnnotation — the
+// system's single annotation primitive, at the same coordinate precision the card's annotations
+// already enforce.
+export type common_DesignSheetCallout = {
+  number: number | undefined;
+  media: common_MediaFull | undefined;
+  // The frozen shape: kind, points, colour, dashes. Its own `text` field is left EMPTY — the note
+  // that gets printed lives in `text` below, because a card callout's note is composed of
+  // part / description / dimensions and it is the COMPOSED line that goes on paper.
+  annotation: common_TechCardAnnotation | undefined;
+  text: string | undefined;
+};
+
+// DesignSheetIssue is one APPEND-ONLY journal line of a version: minted | printed | shared.
+// Reprinting a sheet does NOT mint a new version — it writes a line here. That distinction is the
+// whole reason the journal exists.
+export type common_DesignSheetIssue = {
+  id: number | undefined;
+  versionNumber: number | undefined;
+  action: string | undefined;
+  actor: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignBudget is the band's money bar: `today $0.41 of $2.00`.
+// costing-shaped: EVERY money field below is stripped when the account lacks costing:read. A band
+// read by an account without it shows no bar at all — a bar with blanks in it would read as «the
+// budget is zero», which is a different and false statement.
+export type common_DesignBudget = {
+  day: string | undefined;
+  // ACTUALLY CHARGED today: the sum of attempt prices, paid failures included.
+  spent: googletype_Decimal | undefined;
+  // RESERVED today: the estimates of runs that are still in flight and have not been billed yet.
+  // TWO FIELDS, NOT ONE SUM, even though the ceiling check adds them. The gate MUST compare
+  // `spent + reserved` against `cap` — counting only the charged half would let two simultaneous
+  // starts both pass a ceiling only one of them fits under. But a single field called «spent»
+  // holding that sum would LIE to the reader about what was actually paid. One fact, one field;
+  // the bar draws `spent` solid and `reserved` as a pale tail, and the sum is derived where it is
+  // needed.
+  reserved: googletype_Decimal | undefined;
+  cap: googletype_Decimal | undefined;
+  currency: string | undefined;
+  // WHOSE «today» resets the bar. On the wire because that is an organisational decision, not a
+  // property of the database session that happened to answer.
+  timezone: string | undefined;
+};
+
+// DesignReference is the ROLE of one reference image inside the band's prompt: which side of the
+// garment this reference is about, and in what order it is fed.
+// IT LIVES IN THE BAND, NOT IN THE DOCUMENT, and that is forced rather than chosen. A reference in
+// the document is TechCardMediaItem{media_id, kind, caption}, where `kind` is ALREADY spent on what
+// the image IS (MOODBOARD | REFERENCE | SWATCH). For a bench plate the argument «the view axis is
+// the existing kind» holds; for a reference it does not — kind is occupied, so this is a genuine
+// second axis. And it cannot become a column on tech_card_media either: that table has no row key
+// at all, it is rewritten whole by every card save, and there would be nothing to carry the
+// attribute onto the resent row.
+// IT IS NOT PART OF THE DOCUMENT'S SIGNATURE. A role is a hint to the model and an order in the
+// prompt, not a fact about the garment, so it enters no section digest and stales no sign-off.
+export type common_DesignReference = {
+  techCardId: number | undefined;
+  mediaId: number | undefined;
+  // front | back | side_l | side_r | detail. NEVER EMPTY on the wire: clearing a role deletes the
+  // row, so «no role stated» is expressed by the ABSENCE of a DesignReference for that media, not
+  // by a present row carrying "". See SetDesignReferenceRole, which takes "" as the clear verb.
+  role: string | undefined;
+  ordinal: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+};
+
+// DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
+// ADDRESSED BY ITS OWN id, never by base_media_id. The `draw it` door opens a layer with NO base
+// (base_media_id = 0), and a card may hold several such layers; the model «a layer is tracing
+// paper over a picture» cannot express that at all.
+export type common_DesignEditLayer = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  baseMediaId: number | undefined;
+  // CAS TOKEN. SaveDesignEditLayer and FlattenDesignEditLayer both echo the rev they believed they
+  // were acting on; a mismatch is Aborted:layer_rev_mismatch carrying the current rev.
+  rev: number | undefined;
+  // The layer's strokes, JSON-encoded. Capped at 512 KB — one vector edit; beyond that the answer
+  // is «too many strokes, split it», not a slower save. There is deliberately no revision history:
+  // a minted version pins the content_hash of the already-rasterised file.
+  // SERVED ONLY BY GetDesignEditLayer, AND LEFT EMPTY EVERYWHERE ELSE. GetDesignBand lists the
+  // layers without their strokes on purpose: 512 KB is the cap per LAYER, a card may hold several,
+  // and shipping them all would make every open of the tab cost megabytes to draw a list of
+  // thumbnails. The editor fetches the one layer it is about to open.
+  strokes: string | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
+// RESTORE. fabric_media_id is not optional decoration: without it a photo-sourced recipe cannot be
+// rebuilt from the chip at all.
+export type common_DesignColourRecipe = {
+  source: string | undefined;
+  code: string | undefined;
+  hex: string | undefined;
+  words: string | undefined;
+  fabricMediaId: number | undefined;
+};
+
+// DesignRun is one row of the band's history: a generation job, its money, its inputs and its
+// output pictures. A run is NEVER deleted — archiving hides it presentationally (see archived_at).
+export type common_DesignRun = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  // Which state of the studio produced this row: flat | render | threed | draft_idea.
+  // Written by the client at start; immutable afterwards.
+  kind: string | undefined;
+  // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
+  // running renders differently from a finished one, so this is the field the band polls.
+  status: string | undefined;
+  // IDEMPOTENCY KEY minted by the client (UUID). A double click on GENERATE is ONE payment: a
+  // second StartDesignRun with the same value returns THIS row with OK instead of starting a
+  // second paid job. Unique across the whole table.
+  clientRequestId: string | undefined;
+  // OUTPUT-ONLY provenance of the server-side prompt profile that ran, pinned at launch:
+  // «flat-3view @ v4» under the history row. Profiles are server config, not a client-writable
+  // object — a client that could name the prompt could bill the org for anything.
+  profileName: string | undefined;
+  profileVersion: string | undefined;
+  // The delta phrase the human typed («wider collar»); the caption of the history row. Empty on a
+  // first generation, which asked for nothing in particular.
+  // A MANUAL UPLOAD IS NOT A RUN AND HAS NO ROW HERE — it is a DesignBatch. The band's feed is the
+  // two of them merged by time; see GetDesignBandResponse.
+  ask: string | undefined;
+  // What was asked for. Written by the client at start, echoed back verbatim; the run panel is
+  // unreadable without it. Capped at 8 KB — a params blob larger than that is not a request, it is
+  // a payload.
+  params: common_DesignRunParams | undefined;
+  // OUTPUT-ONLY SNAPSHOT of what the inputs WERE at launch. The SERVER assembles it — a
+  // client-supplied provenance is not provenance, it is a claim. Capped at 64 KB.
+  inputs: common_DesignInputSnapshot | undefined;
+  // OUTPUT-ONLY copy of the card's fit at launch, so the badge «fit slim ≠ card oversized» can be
+  // drawn on an old picture. Empty = the fit was not stated; the mint asks then. Uploaded plates
+  // never state one at all, which is why MintDesignSheetVersion has uploaded_fit_confirmed.
+  fitAtLaunch: string | undefined;
+  // OUTPUT-ONLY render revision — the «r4» caption in the colour history. MAX+1 per card, assigned
+  // only for kind=render; 0 on every other kind.
+  rrev: number | undefined;
+  // OUTPUT-ONLY: how many pictures were asked for. `done · 2 of 3` needs the denominator; without
+  // it a partial provider answer is indistinguishable from a complete one.
+  requestedOutputs: number | undefined;
+  // OUTPUT-ONLY, and the reason the money register can be honest: «failed · attempt 2 of 3 · $0.04
+  // was still charged». Without per-attempt rows price_actual shows the price of the LAST attempt
+  // and the budget bar undercounts every retry.
+  attempts: common_DesignRunAttempt[] | undefined;
+  // OUTPUT-ONLY money. price_estimate is what was reserved against the day BEFORE dispatch;
+  // price_actual is the SUM of attempts[].price, paid failures included. Unset (null) means «not
+  // known yet», which is not zero.
+  // costing-shaped: stripped when the account lacks costing:read
+  priceEstimate: googletype_Decimal | undefined;
+  // costing-shaped: stripped when the account lacks costing:read
+  priceActual: googletype_Decimal | undefined;
+  // ISO 4217. On the wire so the budget bar never hard-codes «$».
+  currency: string | undefined;
+  // OUTPUT-ONLY stamp of the admin who started the run. Without it a race between two authors is
+  // invisible on the history row.
+  author: string | undefined;
+  // OUTPUT-ONLY: set when a running row was asked to stop; drives the `cancelling…` pill. A result
+  // that arrives after this stamp is STILL paid and STILL recorded — the row says so rather than
+  // pretending the money was not spent.
+  cancelRequestedAt: wellKnownTimestamp | undefined;
+  // OUTPUT-ONLY, PRESENTATIONAL AND REVERSIBLE: a collapsed row (`· K archived`) and who collapsed
+  // it. Archiving hides the ROW, never its pictures — picture invisibility has exactly one
+  // persistent verb, and it is HideDesignPicture.
+  archivedAt: wellKnownTimestamp | undefined;
+  archivedBy: string | undefined;
+  // OUTPUT-ONLY failure facts, so a dead row reads `failed · provider timeout` instead of being a
+  // silent hole. error_code is the stable machine token; last_error is the human tail.
+  errorCode: string | undefined;
+  lastError: string | undefined;
+  // OUTPUT-ONLY result of a TEXT run (kind=draft_idea). Empty on every picture-producing kind.
+  outputText: string | undefined;
+  // OUTPUT-ONLY timing: `0:14 / ~25 s` and the sort order of the history.
+  createdAt: wellKnownTimestamp | undefined;
+  startedAt: wellKnownTimestamp | undefined;
+  completedAt: wellKnownTimestamp | undefined;
+  // The pictures this run produced, UNDER their own row rather than in a flat list beside it. A
+  // card with 40 runs × 3 outputs would otherwise ship 120 MediaFull on every read of the band.
+  // Hidden pictures are included WITH their flag — the client filters, the server never lies about
+  // what exists.
+  pictures: common_DesignPicture[] | undefined;
+};
+
+// DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
+// the run panel. Total encoded size is capped at 8 KB.
+export type common_DesignRunParams = {
+  // Which views were requested: front | back | side_l | side_r | detail. Drives the placeholder
+  // tiles that stand in for outputs that have not arrived yet.
+  views: string[] | undefined;
+  // one | per_view — a single composite sheet against one picture per view. A composite has no
+  // single view and therefore cannot be clicked into a bench slot; it is split first.
+  layout: string | undefined;
+  // The colour recipe of a render submission. The chips in the colour history restore THIS, not
+  // the picture — the recipe migrates, the pixels do not.
+  colour: common_DesignColourRecipe | undefined;
+  threed: common_DesignThreedParams | undefined;
+  // `fix: back` — which view of the bench this run was asked to fix. Empty = not a fix. Feeds the
+  // history column «input = slots (back)».
+  // SILHOUETTE SIDES ONLY: front | back | side_l | side_r. A detail slot is deliberately NOT
+  // targetable, because a bare view key cannot name one of several details and this field is frozen
+  // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
+  // a detail is ever wanted, it arrives as a slot_id field beside this one, not as a `detail`
+  // string inside it.
+  fixTarget: string | undefined;
+  // Extra media fed to a render besides the bench slots — e.g. an unmarked flat the human dropped
+  // in. FK media(id).
+  extraInputMediaIds: number[] | undefined;
+};
+
+// DesignThreedParams are the parameters of a turntable run.
+export type common_DesignThreedParams = {
+  frames: number | undefined;
+  presentation: string | undefined;
+  modelId: number | undefined;
+  garmentSizeId: number | undefined;
+  // Overrides the card's fit for THIS submission only. Empty = the card's fit was used. A fit is a
+  // property of the garment; presentation cannot change it, so an override is a stated deviation
+  // and is stamped as one.
+  fitOverride: string | undefined;
+  // The four render plates of ONE rrev that this turntable was built from. Without them the run
+  // panel cannot show what the rotation was assembled out of, and a turntable stitched from
+  // different rrevs (i.e. from different colours) would be indistinguishable from a coherent one.
+  sourcePictureIds: number[] | undefined;
+};
+
+// DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
+// IDS ARE STORED, MediaFull IS SERVED. The stored snapshot freezes media_id — freezing a URL is
+// wrong because objects move — and the read joins media and hands back a ready picture. Nothing
+// else could draw the run panel: AdminService has no RPC that reads media by id.
+// Total encoded size capped at 64 KB; refs ≤ 24; slots ≤ 8. A snapshot must fit in a row and in an
+// eye.
+export type common_DesignInputSnapshot = {
+  garmentNote: string | undefined;
+  mood: common_DesignMoodSnapshot | undefined;
+  refs: common_DesignInputRef[] | undefined;
+  slots: common_DesignInputSlot[] | undefined;
+  fit: string | undefined;
+  // The requested views and layout, frozen: the fingerprint that draws the `current / earlier`
+  // divider in the history.
+  views: string[] | undefined;
+  layout: string | undefined;
+};
+
+// DesignMoodSnapshot is the moodboard as the model read it — the note plus the callouts pinned on
+// moodboard images. Moodboard callouts are ordinary TechCardCallout rows on the card; this is a
+// frozen copy of what they said at launch, not a second home for them.
+export type common_DesignMoodSnapshot = {
+  note: string | undefined;
+  callouts: common_DesignMoodCallout[] | undefined;
+};
+
+// DesignMoodCallout is one frozen moodboard callout inside a run snapshot: which image, what it
+// said. Geometry is deliberately absent — the snapshot answers «what did the model read», and a
+// marker position is not something a model reads.
+export type common_DesignMoodCallout = {
+  mediaId: number | undefined;
+  text: string | undefined;
+};
+
+// DesignInputRef is one reference image fed to the run.
+export type common_DesignInputRef = {
+  // WHAT THE SNAPSHOT FROZE. This is the stored fact and it is always populated, including when
+  // the media row has since been deleted — «which input disappeared» must be answerable from the
+  // snapshot itself, not from an object the server is obliged to leave empty.
+  mediaId: number | undefined;
+  // The resolved picture, joined from media_id at read time. UNSET when deleted is true.
+  media: common_MediaFull | undefined;
+  role: string | undefined;
+  note: string | undefined;
+  deleted: boolean | undefined;
+};
+
+// DesignInputSlot is one bench plate fed to a render or a fix.
+export type common_DesignInputSlot = {
+  viewKey: string | undefined;
+  // WHICH SLOT, when view_key is `detail`. A view key alone cannot tell two details apart, and the
+  // comparison «is this input stale» has no join key without it — so the badge would be
+  // uncomputable for every card with more than one detail slot, FOREVER: a snapshot is frozen at
+  // launch and is never repaired later. DesignSheetPlate solved the same problem the same way.
+  // 0 for the four silhouette sides, which view_key already identifies.
+  slotId: number | undefined;
+  // COPY of the detail's name at launch, so a snapshot still reads «detail: cuff» after the slot
+  // has been renamed or deleted. Empty for the silhouette sides.
+  detailName: string | undefined;
+  mediaId: number | undefined;
+  // Resolved at read time from media_id. UNSET when deleted is true (see DesignInputRef).
+  media: common_MediaFull | undefined;
+  // The plate's content hash AT LAUNCH. Comparing it against the CURRENT media.content_hash of the
+  // slot is exactly what earns the `stale` badge — the plate was re-flattened or replaced since.
+  // Empty = the media predates content hashing (0336) and no comparison is possible; say so rather
+  // than guess.
+  contentHash: string | undefined;
+  layerRev: number | undefined;
+  deleted: boolean | undefined;
+};
+
+// DesignRunAttempt is ONE paid provider call. It exists because the history row must be able to
+// say «the first attempt was paid for and the answer never arrived»: without it price_actual is
+// the price of the last attempt, the budget bar undercounts retries, and the answer to «where did
+// the money go» is untrue.
+export type common_DesignRunAttempt = {
+  attemptNo: number | undefined;
+  provider: string | undefined;
+  providerRequestId: string | undefined;
+  // The idempotency key sent TO the provider. Minted once per RUN and STABLE across its attempts —
+  // that is the whole point: a retry must not buy a second picture.
+  // IT IS THE RUN'S KEY, REPEATED IN EVERY ATTEMPT, AND IT IS STORED ONCE — on design_run, not per
+  // attempt. It appears here so a reader holding one attempt can reconcile against the provider's
+  // billing without loading the run. Do NOT give the attempt table a column of its own: two homes
+  // for one key is how a retry ends up buying a second picture.
+  providerIdempotencyKey: string | undefined;
+  // dispatching | accepted | delivered | failed | unknown.
+  // `unknown` is load-bearing: it means the money was POSSIBLY taken and the outcome is not
+  // knowable from our side. Collapsing it into `failed` would be a lie about the ledger.
+  state: string | undefined;
+  // The price of THIS attempt. Unset = not billed (or not known yet); 0 = billed nothing.
+  // costing-shaped: stripped when the account lacks costing:read
+  price: googletype_Decimal | undefined;
+  startedAt: wellKnownTimestamp | undefined;
+  finishedAt: wellKnownTimestamp | undefined;
+  errorCode: string | undefined;
+};
+
+// DesignBatch is one upload gesture: the shelf stamp «uploaded · Т. · 14:41 · 12.4 MB» and the
+// carrier of the batch's coherence — plates that arrived together are one hand's work, and the
+// mixed-provenance warning reads that.
+export type common_DesignBatch = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  // IDEMPOTENCY KEY minted by the client (UUID). Without it a retry after a network timeout files
+  // a SECOND batch and a second set of pictures. Unique across the table.
+  clientRequestId: string | undefined;
+  author: string | undefined;
+  filesCount: number | undefined;
+  sizeBytes: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // The pictures of this batch, UNDER their own shelf row — the same arrangement runs use, and for
+  // the same reason. Without it an uploaded picture hangs under nothing readable: it has no run,
+  // so no history row could carry it, and the upload shelf would be empty on every reload of the
+  // tab. Hidden pictures are included WITH their flag; the client filters.
+  pictures: common_DesignPicture[] | undefined;
+};
+
+export type ListDesignRunsRequest = {
+  techCardId: number | undefined;
+  // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
+  // a page, and a larger one is a picture flood, not a page. Above 24 → InvalidArgument.
+  // IT COUNTS ROWS ACROSS BOTH runs AND batches: the feed is the two merged by time, so a page of
+  // 12 may be 9 runs and 3 uploads. Counting only runs would let a card full of uploads return a
+  // page with almost nothing generated on it.
+  limit: number | undefined;
+  // Cursor from a previous response; empty starts at the newest row. A CURSOR, NOT AN OFFSET: rows
+  // are born at the head of this list, and an offset page would duplicate and skip rows exactly
+  // while somebody is generating.
+  // THIS IS THE FIRST CURSOR-PAGINATED RPC IN THIS SERVICE — everything around it pages by
+  // limit/offset. That is not an oversight here and should not be «fixed» into an offset: no other
+  // paged list in the admin grows at its head while the reader is looking at it.
+  // The cursor addresses the MERGED feed (runs + batches by time), not either table's ids, so it
+  // stays valid whichever kind of row happens to sit on the seam.
+  pageToken: string | undefined;
+  // Include archived rows. Archiving is presentational, so this is a filter and not a state.
+  // MUST BE TRUE WHEN CONTINUING A CURSOR FROM GetDesignBand, whose first page is deliberately
+  // unfiltered. Flipping the filter mid-pagination changes the row set the cursor was cut from, and
+  // rows around the seam are then dropped or repeated with nothing to notice it. Only batches are
+  // unaffected — a batch is never archived.
+  includeArchived: boolean | undefined;
+};
+
+export type ListDesignRunsResponse = {
+  runs: common_DesignRun[] | undefined;
+  // The upload shelf rows of the same page. The feed is runs and batches merged by time — see
+  // GetDesignBandResponse.batches for why a batch is a first-class row and not an afterthought.
+  batches: common_DesignBatch[] | undefined;
+  nextPageToken: string | undefined;
+};
+
+export type GetDesignSheetVersionRequest = {
+  techCardId: number | undefined;
+  versionNumber: number | undefined;
+};
+
+export type GetDesignSheetVersionResponse = {
+  version: common_DesignSheetVersion | undefined;
+  // This version's journal, oldest first: minted, then every print and share of it.
+  issues: common_DesignSheetIssue[] | undefined;
+};
+
+export type StartDesignRunRequest = {
+  techCardId: number | undefined;
+  // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
+  // one payment.
+  clientRequestId: string | undefined;
+  // flat | render | threed. `draft_idea` is REFUSED here with InvalidArgument: a text run executes
+  // inline and returns its answer, so it has its own verb (DraftDesignIdea) rather than a shared
+  // one that would return a pending row nobody ever polls.
+  kind: string | undefined;
+  ask: string | undefined;
+  // What is being asked for; at most 8 KB encoded. The INPUTS are not here and cannot be: the
+  // server snapshots them itself, because provenance a caller supplies is a claim, not provenance.
+  params: common_DesignRunParams | undefined;
+};
+
+export type StartDesignRunResponse = {
+  // The run as stored — pending, priced, with its input snapshot already taken. On an idempotent
+  // repeat this is the row that already existed, in whatever state it has reached.
+  run: common_DesignRun | undefined;
+  // The budget AFTER the reservation, so the bar moves with the click instead of on the next poll.
+  budget: common_DesignBudget | undefined;
+};
+
+export type CancelDesignRunRequest = {
+  runId: number | undefined;
+};
+
+export type CancelDesignRunResponse = {
+  // The row after the cancel: `cancelled` outright if it had not started, otherwise still running
+  // with cancel_requested_at stamped.
+  run: common_DesignRun | undefined;
+};
+
+export type ArchiveDesignRunRequest = {
+  runId: number | undefined;
+  archived: boolean | undefined;
+};
+
+export type ArchiveDesignRunResponse = {
+  run: common_DesignRun | undefined;
+};
+
+export type HideDesignPictureRequest = {
+  pictureId: number | undefined;
+  hidden: boolean | undefined;
+};
+
+export type HideDesignPictureResponse = {
+  picture: common_DesignPicture | undefined;
+};
+
+// DesignUploadItem is one already-uploaded file being filed into the band. The bytes went up
+// through UploadContentImage; this only says what the file IS.
+export type DesignUploadItem = {
+  mediaId: number | undefined;
+  // The view this file is GUESSED to be: front | back | side_l | side_r | detail. Empty = no guess.
+  // A guess, never a fact — a human confirms it by putting the plate into a slot.
+  ghostView: string | undefined;
+};
+
+export type RegisterDesignUploadRequest = {
+  techCardId: number | undefined;
+  clientRequestId: string | undefined;
+  items: DesignUploadItem[] | undefined;
+  // OPTIONAL: also place the FIRST item into this slot, in the same transaction. Unset = file the
+  // batch and touch no slot. `view_key = detail` mints a new detail slot and REQUIRES
+  // new_detail_name, exactly as in SetDesignBenchSlot.
+  target: DesignBenchSlotRef | undefined;
+  // The slot rev the caller believed `target` was at; 0 means «the slot does not exist yet», which
+  // is also the only legal value when target mints a detail. Read ONLY when target is set, and
+  // enforced exactly as in SetDesignBenchSlot.
+  expectedSlotRev: number | undefined;
+  // The name for a detail slot minted by `target`. Required in that case and ignored otherwise —
+  // same rule as SetDesignBenchSlotRequest.new_detail_name.
+  newDetailName: string | undefined;
+};
+
+export type RegisterDesignUploadResponse = {
+  batch: common_DesignBatch | undefined;
+  pictures: common_DesignPicture[] | undefined;
+  slot: common_DesignBenchSlot | undefined;
+};
+
+// DesignSplitFrame is one crop rectangle over a composite, in NORMALISED coordinates (0..1) of the
+// source image — the same coordinate system, and the same precision guard, as the card's
+// annotation points. Decimal rather than float: a lossless round trip, and one numeric type for
+// every normalised coordinate on the card.
+export type DesignSplitFrame = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+  w: googletype_Decimal | undefined;
+  h: googletype_Decimal | undefined;
+  // The view this frame claims to be — it becomes the crop's ghost_view. Empty is allowed: an
+  // unnamed crop is still a crop, and naming it wrong is worse than not naming it.
+  viewKey: string | undefined;
+};
+
+export type SplitDesignPictureRequest = {
+  pictureId: number | undefined;
+  clientRequestId: string | undefined;
+  frames: DesignSplitFrame[] | undefined;
+};
+
+export type SplitDesignPictureResponse = {
+  // The crops, siblings under the SAME run row as their source, in frame order.
+  pictures: common_DesignPicture[] | undefined;
+};
+
+export type SetDesignBenchSlotRequest = {
+  techCardId: number | undefined;
+  slot: DesignBenchSlotRef | undefined;
+  // The plate to place. 0 = UNMARK — empty the slot without deleting it, which is a different act
+  // from deleting a detail slot and must stay different.
+  pictureId: number | undefined;
+  // CAS. Echo the slot_rev the client last read; 0 when the slot has never existed. A mismatch is
+  // Aborted:slot_rev_mismatch with the current slot attached.
+  expectedSlotRev: number | undefined;
+  // Names a detail slot. REQUIRED when slot.view_key = `detail`, which mints a new one — the name
+  // is what distinguishes it from every other detail, so a nameless mint is refused with
+  // FailedPrecondition:detail_name_required. On an existing detail addressed by slot.slot_id a
+  // non-empty value is a RENAME; empty leaves the name alone. Ignored for the four silhouette
+  // sides, which have no name of their own.
+  newDetailName: string | undefined;
+};
+
+export type SetDesignBenchSlotResponse = {
+  slot: common_DesignBenchSlot | undefined;
+};
+
+export type DeleteDesignDetailSlotRequest = {
+  slotId: number | undefined;
+};
+
+export type DeleteDesignDetailSlotResponse = {
+};
+
+// DesignExpectedPlate is one line of the mint's optimistic lock over the BENCH: «I am minting the
+// bench in which this slot stood at this rev». The card's own document is locked separately by
+// expected_lock_version — the two locks guard two different things, and a mint that checked only
+// the document could freeze a composition somebody rearranged a second earlier.
+export type DesignExpectedPlate = {
+  slot: DesignBenchSlotRef | undefined;
+  slotRev: number | undefined;
+};
+
+export type MintDesignSheetVersionRequest = {
+  techCardId: number | undefined;
+  clientRequestId: string | undefined;
+  // The card document, written by this SAME transaction with the same code path as UpdateTechCard.
+  // It is here rather than in a preceding call because the version freezes callouts, and callouts
+  // are part of the document: two calls could leave «re-pinned, but no version» on the floor.
+  techCard: common_TechCardInsert | undefined;
+  expectedLockVersion: number | undefined;
+  // The bench as the minter saw it. Empty means «do not check the bench», which is only honest for
+  // a server-side caller; the UI always sends the full set.
+  expectedPlates: DesignExpectedPlate[] | undefined;
+  // The minter has seen and accepted that the composition mixes provenances. Without it such a mint
+  // is refused (mixed_needs_consent) rather than quietly blessed.
+  mixedConsent: boolean | undefined;
+  // The minter has confirmed the fit claimed for UPLOADED plates, which carry no fit of their own.
+  // Without it: uploaded_fit_unconfirmed.
+  uploadedFitConfirmed: boolean | undefined;
+  mintedVia: string | undefined;
+};
+
+export type MintDesignSheetVersionResponse = {
+  // The version as frozen. The card document is NOT echoed: like UpdateTechCard, the client
+  // re-reads the card and merges server-assigned values by key — here, callout numbers by
+  // client_ref.
+  version: common_DesignSheetVersion | undefined;
+};
+
+export type RecordDesignSheetIssueRequest = {
+  techCardId: number | undefined;
+  versionNumber: number | undefined;
+  // printed | shared. `minted` is InvalidArgument, and so is any value outside the pair: the mint's
+  // own journal line must be reachable ONLY by minting, or the journal stops being evidence of what
+  // happened and becomes a list of what somebody typed.
+  action: string | undefined;
+  clientRequestId: string | undefined;
+};
+
+export type RecordDesignSheetIssueResponse = {
+  issue: common_DesignSheetIssue | undefined;
+};
+
+export type GetDesignEditLayerRequest = {
+  techCardId: number | undefined;
+  layerId: number | undefined;
+};
+
+export type GetDesignEditLayerResponse = {
+  layer: common_DesignEditLayer | undefined;
+};
+
+export type SaveDesignEditLayerRequest = {
+  techCardId: number | undefined;
+  layerId: number | undefined;
+  baseMediaId: number | undefined;
+  expectedRev: number | undefined;
+  strokes: string | undefined;
+};
+
+export type SaveDesignEditLayerResponse = {
+  layer: common_DesignEditLayer | undefined;
+};
+
+export type FlattenDesignEditLayerRequest = {
+  techCardId: number | undefined;
+  layerId: number | undefined;
+  // REQUIRED, and not a convenience: it names the revision the person actually looked at. Without
+  // it a colleague's newer save gets materialised under somebody else's intention.
+  expectedRev: number | undefined;
+  // FK media(id): the raster the CLIENT produced from base + layer and uploaded through
+  // UploadContentImage. The server does not rasterise — see the RPC comment. It must belong to this
+  // installation and not already be filed as another picture of this card.
+  mediaId: number | undefined;
+};
+
+export type FlattenDesignEditLayerResponse = {
+  // The rasterised result, carrying derived_from (the base), source_class and layer_rev. It is a
+  // SIBLING of its base — inheriting the base's run_id or batch_id. A layer drawn from NOTHING
+  // (base_media_id = 0) has no parent to inherit from, so its flatten is filed into a
+  // single-picture BATCH, which is what puts it on the upload shelf and keeps it readable after a
+  // reload.
+  picture: common_DesignPicture | undefined;
+};
+
+export type SetDesignReferenceRoleRequest = {
+  techCardId: number | undefined;
+  mediaId: number | undefined;
+  // front | back | side_l | side_r | detail. EMPTY CLEARS the role — «no side stated» is a real
+  // answer and must not require a second verb.
+  role: string | undefined;
+  ordinal: number | undefined;
+};
+
+export type SetDesignReferenceRoleResponse = {
+  reference: common_DesignReference | undefined;
+};
+
+export type DraftDesignIdeaRequest = {
+  techCardId: number | undefined;
+  clientRequestId: string | undefined;
+};
+
+export type DraftDesignIdeaResponse = {
+  // Already finished: status=done and output_text filled, because this run executes inline. It is
+  // still a row in the money register — that is the whole reason it goes through this machine.
+  run: common_DesignRun | undefined;
+  budget: common_DesignBudget | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -15441,6 +16356,125 @@ export interface AdminService {
   // exact go/no-go, which is NOT «total_lines == 0» on a default call.
   // Read-only. Requires tech-cards read: it is the BOM tab's own data, seen across cards.
   ListTechCardFabricDirectionGaps(request: ListTechCardFabricDirectionGapsRequest): Promise<ListTechCardFabricDirectionGapsResponse>;
+  // GetDesignBand is ONE read of the whole band: bench slots, the version numbers plus the latest
+  // version's composition, the issue journal, the day's budget, the edit layers, the aggregates the
+  // header needs, and the FIRST PAGE of runs with their pictures already under them.
+  // HIDDEN AND ARCHIVED ROWS COME BACK, WITH THEIR FLAGS. The client filters. A server that omitted
+  // them would make «· 3 hidden» unprintable and would turn every count into a second, disagreeing
+  // truth.
+  GetDesignBand(request: GetDesignBandRequest): Promise<GetDesignBandResponse>;
+  // ListDesignRuns is one page of the history, WITH the pictures of that page. A flat picture list
+  // beside the rows would ship the same MediaFull twice and leave the client to re-pair them.
+  // InvalidArgument when limit > 24.
+  ListDesignRuns(request: ListDesignRunsRequest): Promise<ListDesignRunsResponse>;
+  // GetDesignSheetVersion reads ONE frozen version whole: its plates, its callouts and its journal.
+  // Without it, printing an older Rev.N, a QR that points at a specific issue, and checking the
+  // paper on the factory floor against what was actually minted are all impossible — a QR on Rev.3
+  // must lead to Rev.3, not to «latest».
+  GetDesignSheetVersion(request: GetDesignSheetVersionRequest): Promise<GetDesignSheetVersionResponse>;
+  // StartDesignRun opens a paid job. ONE SERIALIZABLE transaction does all of it: the gate belts,
+  // the reservation against the day's budget, the server-assembled input snapshot, and the row.
+  // IDEMPOTENT BY client_request_id: a repeat returns the EXISTING row with OK, and buys nothing.
+  // FailedPrecondition: budget_exceeded | profile_requirements_unmet | composite_input |
+  // run_in_flight | hourly_limit | kind_not_available. InvalidArgument for a malformed or oversized
+  // params.
+  // kind_not_available: a generation KIND with no provider configured for it refuses EXPLICITLY, so
+  // the client can draw an honest lock with a reason on it. Silence, or a run that sits pending
+  // forever, would be the same fact told as a bug.
+  StartDesignRun(request: StartDesignRunRequest): Promise<StartDesignRunResponse>;
+  // CancelDesignRun stops a run. `pending` → `cancelled` and the day's reservation is released;
+  // `running` → cancel_requested_at is stamped and the worker honours it before dispatch and after
+  // the answer.
+  // A RESULT THAT ARRIVES AFTER A CANCEL IS STILL PAID AND STILL RECORDED, and the row says so.
+  // Throwing it away would mean «we paid and erased it», which no ledger can explain.
+  // FailedPrecondition: already_terminal.
+  CancelDesignRun(request: CancelDesignRunRequest): Promise<CancelDesignRunResponse>;
+  // ArchiveDesignRun flips a PRESENTATIONAL, REVERSIBLE flag on a history row. It does NOT hide the
+  // row's pictures — that would be a second registry of invisibility, and there is exactly one.
+  ArchiveDesignRun(request: ArchiveDesignRunRequest): Promise<ArchiveDesignRunResponse>;
+  // HideDesignPicture is the ONLY persistent verb for picture invisibility, and it is reversible.
+  // Guards, each of which would otherwise leave a live reference pointing at something the band
+  // refuses to draw — FailedPrecondition: in_slot | in_version | live_run_input | live_crop_parent.
+  HideDesignPicture(request: HideDesignPictureRequest): Promise<HideDesignPictureResponse>;
+  // RegisterDesignUpload files ONE GESTURE as one batch plus its pictures; the bytes themselves
+  // went up through UploadContentImage first. Optionally the same call puts the FIRST picture into
+  // a bench slot, under the SAME compare-and-set as an ordinary placement — otherwise a drop onto
+  // an empty slot would be two calls and could half-succeed.
+  // FORMAT IS NOT GATED: whatever the upload accepted, this accepts. «~1200px — the print will be
+  // mush» is a label on the client, not a refusal here.
+  // InvalidArgument: an empty item list, an unknown ghost_view. Aborted: slot_rev_mismatch.
+  RegisterDesignUpload(request: RegisterDesignUploadRequest): Promise<RegisterDesignUploadResponse>;
+  // SplitDesignPicture cuts a composite into per-view pictures SERVER-SIDE and LOSSLESSLY, from the
+  // original bytes. The crops are SIBLINGS OF THEIR SOURCE — they inherit its run_id or its
+  // batch_id, whichever it has, and never get a history row of their own: no money was spent on
+  // them. A crop of an uploaded composite therefore lands on the same upload shelf row.
+  // Idempotent by client_request_id. FailedPrecondition: not_composite. InvalidArgument for frames
+  // outside 0..1 or of zero area.
+  SplitDesignPicture(request: SplitDesignPictureRequest): Promise<SplitDesignPictureResponse>;
+  // SetDesignBenchSlot places, displaces or unmarks a plate. COMPARE-AND-SET on slot_rev; a slot
+  // that does not exist yet is born by this same act (expected_slot_rev = 0), through an upsert
+  // rather than a read-then-insert — two people placing `front` at once would both see «no row».
+  // UNMARKING IS `picture_id = 0`: the slot is emptied and KEPT. That is a different act from
+  // DeleteDesignDetailSlot, which removes the slot itself, and the two must not be reachable
+  // through one verb — a human emptying a slot has not asked to lose its name or its address.
+  // Aborted: slot_rev_mismatch, carrying the slot's CURRENT state so the client can redraw instead
+  // of re-reading. FailedPrecondition: composite_plate | hidden_plate | wrong_kind |
+  // foreign_card_plate | picture_already_in_slot | detail_name_required.
+  SetDesignBenchSlot(request: SetDesignBenchSlotRequest): Promise<SetDesignBenchSlotResponse>;
+  // SetDesignReferenceRole states WHICH SIDE of the garment a reference image is about, and in what
+  // order it is fed to the model. Upsert by (tech_card_id, media_id); an empty role clears it.
+  // The role lives in the BAND and not on the card's media row — see common.DesignReference for
+  // why that is forced. It enters no section digest: a prompt hint is not a fact about the garment,
+  // and saving one must not stale a sign-off.
+  // InvalidArgument: an unknown role, or a media_id the card does not hold.
+  SetDesignReferenceRole(request: SetDesignReferenceRoleRequest): Promise<SetDesignReferenceRoleResponse>;
+  // DeleteDesignDetailSlot removes an EMPTY detail slot that NO version quotes. A slot quoted by a
+  // minted version keeps its address alive so the paper can still be explained.
+  // FailedPrecondition: slot_filled | slot_in_version, the latter naming the versions.
+  DeleteDesignDetailSlot(request: DeleteDesignDetailSlotRequest): Promise<DeleteDesignDetailSlotResponse>;
+  // MintDesignSheetVersion is an ATOMIC MINT: in ONE SERIALIZABLE transaction it performs the
+  // ordinary document write (the same code path as UpdateTechCard) AND gives birth to the version.
+  // The frozen callouts are taken from the document THIS transaction just wrote, so the state
+  // «re-pinned, but no version» does not exist.
+  // Idempotent by client_request_id: a lost response must not mint a phantom vN+1.
+  // Aborted: lock_version_mismatch | bench_moved (naming which slot moved). FailedPrecondition:
+  // mixed_needs_consent | fit_mismatch {view, fit, card_fit} | uploaded_fit_unconfirmed |
+  // sheet_min_unmet {missing views}.
+  MintDesignSheetVersion(request: MintDesignSheetVersionRequest): Promise<MintDesignSheetVersionResponse>;
+  // RecordDesignSheetIssue writes a printed/shared line into a version's append-only journal. It
+  // MINTS NOTHING: reprinting the same paper is not a new revision, and a system that made it one
+  // would grow a revision per print.
+  RecordDesignSheetIssue(request: RecordDesignSheetIssueRequest): Promise<RecordDesignSheetIssueResponse>;
+  // GetDesignEditLayer reads ONE layer WITH its strokes. It exists because GetDesignBand
+  // deliberately lists the layers WITHOUT them: 512 KB is the cap per LAYER, a card may hold
+  // several, and shipping them all would make every open of the tab cost megabytes in order to draw
+  // a list. The editor fetches the one layer it is about to open, and only then.
+  GetDesignEditLayer(request: GetDesignEditLayerRequest): Promise<GetDesignEditLayerResponse>;
+  // SaveDesignEditLayer stores a vector layer under compare-and-set on its rev. `layer_id = 0` with
+  // `base_media_id = 0` gives birth to a CLEAN VECTOR BASE — the `draw it` door out of an empty
+  // studio, which has no picture underneath it at all.
+  // Aborted: layer_rev_mismatch {current_rev}. InvalidArgument: strokes_too_large (> 512 KB).
+  SaveDesignEditLayer(request: SaveDesignEditLayerRequest): Promise<SaveDesignEditLayerResponse>;
+  // FlattenDesignEditLayer records a flattened layer: it files an ALREADY-RASTERISED image as a
+  // DesignPicture carrying derived_from, source_class and layer_rev.
+  // THE CLIENT RASTERISES, THE SERVER RECORDS THE PROVENANCE. There is no rasteriser in this
+  // repository — no vector renderer of any kind — and the strokes are the client's own canvas
+  // format, so the only place that can turn them into pixels honestly is the canvas that drew them.
+  // The client uploads the raster through UploadContentImage (preserve_original) and passes its
+  // media_id here.
+  // expected_rev IS STILL REQUIRED, and for exactly the reason it always was: it names the revision
+  // the person actually looked at. Without it a colleague saves r4 while somebody who last saw r3
+  // presses flatten, and r4 is materialised under an intention that never saw it. The compare-and-
+  // set does not weaken by moving the pixels to the client — it guards the INTENTION, not the
+  // rendering.
+  // Aborted: layer_rev_mismatch. FailedPrecondition: empty_layer. InvalidArgument: an unknown or
+  // foreign media_id.
+  FlattenDesignEditLayer(request: FlattenDesignEditLayerRequest): Promise<FlattenDesignEditLayerResponse>;
+  // DraftDesignIdea is a TEXT run through the same money and idempotency machine as every picture
+  // run — a paid call with no row in the register would be a hole in the ledger. It runs INLINE:
+  // the response already carries a finished DesignRun with status=done and output_text set.
+  // FailedPrecondition: budget_exceeded | no_moodboard.
+  DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
   // table length, which the nesting modal used to make the operator retype on every раскладка.
@@ -21329,6 +22363,387 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListTechCardFabricDirectionGaps",
       }) as Promise<ListTechCardFabricDirectionGapsResponse>;
+    },
+    GetDesignBand(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignBand",
+      }) as Promise<GetDesignBandResponse>;
+    },
+    ListDesignRuns(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/runs`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.pageToken) {
+        queryParams.push(`pageToken=${encodeURIComponent(request.pageToken.toString())}`)
+      }
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListDesignRuns",
+      }) as Promise<ListDesignRunsResponse>;
+    },
+    GetDesignSheetVersion(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.versionNumber) {
+        throw new Error("missing required field request.version_number");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/sheet/${request.versionNumber}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignSheetVersion",
+      }) as Promise<GetDesignSheetVersionResponse>;
+    },
+    StartDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/runs`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "StartDesignRun",
+      }) as Promise<StartDesignRunResponse>;
+    },
+    CancelDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/design/run/${request.runId}/cancel`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CancelDesignRun",
+      }) as Promise<CancelDesignRunResponse>;
+    },
+    ArchiveDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/design/run/${request.runId}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveDesignRun",
+      }) as Promise<ArchiveDesignRunResponse>;
+    },
+    HideDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/hide`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "HideDesignPicture",
+      }) as Promise<HideDesignPictureResponse>;
+    },
+    RegisterDesignUpload(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/upload`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RegisterDesignUpload",
+      }) as Promise<RegisterDesignUploadResponse>;
+    },
+    SplitDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/split`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SplitDesignPicture",
+      }) as Promise<SplitDesignPictureResponse>;
+    },
+    SetDesignBenchSlot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/bench`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignBenchSlot",
+      }) as Promise<SetDesignBenchSlotResponse>;
+    },
+    SetDesignReferenceRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/reference-role`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignReferenceRole",
+      }) as Promise<SetDesignReferenceRoleResponse>;
+    },
+    DeleteDesignDetailSlot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.slotId) {
+        throw new Error("missing required field request.slot_id");
+      }
+      const path = `api/admin/design/bench/${request.slotId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteDesignDetailSlot",
+      }) as Promise<DeleteDesignDetailSlotResponse>;
+    },
+    MintDesignSheetVersion(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/sheet`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MintDesignSheetVersion",
+      }) as Promise<MintDesignSheetVersionResponse>;
+    },
+    RecordDesignSheetIssue(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.versionNumber) {
+        throw new Error("missing required field request.version_number");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/sheet/${request.versionNumber}/issue`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RecordDesignSheetIssue",
+      }) as Promise<RecordDesignSheetIssueResponse>;
+    },
+    GetDesignEditLayer(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.layerId) {
+        throw new Error("missing required field request.layer_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/layer/${request.layerId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignEditLayer",
+      }) as Promise<GetDesignEditLayerResponse>;
+    },
+    SaveDesignEditLayer(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/layer`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveDesignEditLayer",
+      }) as Promise<SaveDesignEditLayerResponse>;
+    },
+    FlattenDesignEditLayer(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.layerId) {
+        throw new Error("missing required field request.layer_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/layer/${request.layerId}/flatten`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "FlattenDesignEditLayer",
+      }) as Promise<FlattenDesignEditLayerResponse>;
+    },
+    DraftDesignIdea(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/draft-idea`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DraftDesignIdea",
+      }) as Promise<DraftDesignIdeaResponse>;
     },
     GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes

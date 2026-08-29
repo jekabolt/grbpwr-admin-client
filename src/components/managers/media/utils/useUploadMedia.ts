@@ -128,6 +128,11 @@ export function useUploadMedia(options?: {
         try {
           response = await adminService.UploadContentImage({
             rawB64Image: base64,
+            // Приехало с контрактом полосы DESIGN. `false` — это ПРЕЖНЕЕ поведение медиатеки:
+            // сервер жмёт и приводит формат. Verbatim-путь (побайтовое сохранение оригинала) нужен
+            // плитам полосы, а не общей загрузке, и включать его здесь означало бы молча поменять
+            // вес и формат всего, что грузят через медиа-менеджер.
+            preserveOriginal: false,
           });
         } catch (e) {
           throw uploadError(e, false);

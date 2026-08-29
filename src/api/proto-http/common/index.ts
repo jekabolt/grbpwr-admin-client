@@ -84,6 +84,25 @@ export type MediaFull = {
   createdAt: wellKnownTimestamp | undefined;
   // media
   media: MediaItem | undefined;
+  // SHA-256 of the ORIGINAL uploaded bytes, hex, lower case. Puts the existing media.content_hash
+  // column (0336) on the wire; it is not a new fact and not a second store.
+  // Its readers compare: a frozen sheet plate says which bytes it pinned, and a run's input
+  // snapshot says which bytes the model was fed — comparing either against this field is how a
+  // «stale» badge is earned rather than guessed.
+  // EMPTY IS HONEST AND MEANS «this media predates 0336», not «no hash». A consumer must withhold
+  // the comparison in that case, never treat it as a mismatch.
+  // THAT PROMISE IS AN OBLIGATION ON EVERY PRODUCER OF THIS MESSAGE, NOT A HOPE. A path that builds
+  // a MediaFull without filling this field turns «empty» into a lie, and the lie is SILENT: a
+  // staleness badge that should have fired simply does not, and nothing anywhere reports a
+  // mismatch. There are FOUR construction sites in this repository and each one must fill it:
+  // * internal/dto/media.go — ConvertEntityToCommonMedia, the ordinary read path. It reads the
+  // entity, so the column must ride along in the entity, not be re-queried.
+  // * internal/bucket/image.go, the standard upload return — the hash is already in hand there as
+  // `fullSizeSHA`, one line above the row insert.
+  // * internal/bucket/image.go, the verbatim upload return — likewise, as `rawSHA`.
+  // * internal/bucket/video.go — videos are not content-hashed, so empty here is the honest
+  // answer and the only site where it is.
+  contentHash: string | undefined;
 };
 
 // Encoded using RFC 3339, where generated output will always be Z-normalized
@@ -647,798 +666,6 @@ export type BuyerInsert = {
   receivePromoEmails: boolean | undefined;
 };
 
-export type OrderFactor =
-  | "ORDER_FACTOR_UNKNOWN"
-  | "ORDER_FACTOR_ASC"
-  | "ORDER_FACTOR_DESC";
-export type SortFactor =
-  | "SORT_FACTOR_UNKNOWN"
-  | "SORT_FACTOR_CREATED_AT"
-  | "SORT_FACTOR_UPDATED_AT"
-  | "SORT_FACTOR_NAME"
-  | "SORT_FACTOR_PRICE";
-export type FilterConditions = {
-  from: string | undefined;
-  to: string | undefined;
-  currency: string | undefined;
-  onSale: boolean | undefined;
-  gender: GenderEnum[] | undefined;
-  topCategoryIds: number[] | undefined;
-  subCategoryIds: number[] | undefined;
-  typeIds: number[] | undefined;
-  sizesIds: number[] | undefined;
-  preorder: boolean | undefined;
-  byTag: string | undefined;
-  collections: string[] | undefined;
-  seasons: SeasonEnum[] | undefined;
-  excludeTopCategoryIds: number[] | undefined;
-  colorCodes: string[] | undefined;
-  exclusive: boolean | undefined;
-};
-
-export type PaymentMethodNameEnum =
-  | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
-  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
-  | "PAYMENT_METHOD_NAME_ENUM_CASH";
-// Payment represents the payment table
-export type Payment = {
-  createdAt: wellKnownTimestamp | undefined;
-  modifiedAt: wellKnownTimestamp | undefined;
-  paymentInsert: PaymentInsert | undefined;
-};
-
-export type PaymentInsert = {
-  paymentMethod: PaymentMethodNameEnum | undefined;
-  transactionId: string | undefined;
-  transactionAmount: googletype_Decimal | undefined;
-  transactionAmountPaymentCurrency: googletype_Decimal | undefined;
-  clientSecret: string | undefined;
-  isTransactionDone: boolean | undefined;
-  expiredAt: wellKnownTimestamp | undefined;
-  // payment_method_type is the most specific label for how the customer paid:
-  // the card wallet (apple_pay, google_pay, link) when tokenised through a wallet,
-  // otherwise the payment-method type (card, klarna, ...). Empty when uncaptured.
-  paymentMethodType: string | undefined;
-  // receipt_url is Stripe's hosted receipt for the charge (customer-facing). Empty
-  // for non-Stripe methods or when no receipt was produced.
-  receiptUrl: string | undefined;
-};
-
-// OrderStripeDetails carries admin-only financial and Stripe metadata for an order.
-// It is NOT part of the customer-facing order (kept off common.Order/common.Payment,
-// which the storefront shares) and is attached only to admin responses. All amounts
-// are in the base currency (EUR); fields are empty when not captured.
-export type OrderStripeDetails = {
-  // total_settled_base is the actual amount Stripe settled in the base currency (EUR)
-  // at Stripe's FX rate — the authoritative "how much we received" figure.
-  totalSettledBase: googletype_Decimal | undefined;
-  // payment_fee is the Stripe processing fee (EUR) from the same balance transaction.
-  paymentFee: googletype_Decimal | undefined;
-  // net_settled_base = total_settled_base - payment_fee (EUR), what actually reached us.
-  netSettledBase: googletype_Decimal | undefined;
-  // stripe_exchange_rate is the presentment->settlement FX rate Stripe applied at the sale.
-  stripeExchangeRate: googletype_Decimal | undefined;
-  cardBrand: string | undefined;
-  cardLast4: string | undefined;
-  riskLevel: string | undefined;
-  // stripe_dashboard_url deep-links to the payment in the Stripe dashboard (test vs live
-  // resolved from the order's payment method). Empty when the PaymentIntent id is unknown.
-  stripeDashboardUrl: string | undefined;
-};
-
-// PaymentMethod represents the payment_method table
-export type PaymentMethod = {
-  id: number | undefined;
-  name: PaymentMethodNameEnum | undefined;
-  allowed: boolean | undefined;
-};
-
-// PromoCodeInsert represents the nested structure within PromoCode
-export type PromoCodeInsert = {
-  code: string | undefined;
-  freeShipping: boolean | undefined;
-  discount: googletype_Decimal | undefined;
-  expiration: wellKnownTimestamp | undefined;
-  start: wellKnownTimestamp | undefined;
-  allowed: boolean | undefined;
-  voucher: boolean | undefined;
-};
-
-// PromoCode represents the promo_code table
-export type PromoCode = {
-  promoCodeInsert: PromoCodeInsert | undefined;
-};
-
-export type ShippingRegion =
-  | "SHIPPING_REGION_UNKNOWN"
-  | "SHIPPING_REGION_AFRICA"
-  | "SHIPPING_REGION_AMERICAS"
-  | "SHIPPING_REGION_ASIA_PACIFIC"
-  | "SHIPPING_REGION_EUROPE"
-  | "SHIPPING_REGION_MIDDLE_EAST";
-export type ShipmentCarrierPrice = {
-  currency: string | undefined;
-  price: googletype_Decimal | undefined;
-};
-
-export type ShipmentCarrierInsert = {
-  carrier: string | undefined;
-  allowed: boolean | undefined;
-  description: string | undefined;
-  trackingUrl: string | undefined;
-  expectedDeliveryTime: string | undefined;
-  // aftership_slug is the AfterShip courier slug used to auto-track this carrier's shipments.
-  // Empty = the carrier has no tracking API, so its orders are auto-delivered only by the timer.
-  aftershipSlug: string | undefined;
-  // auto_deliver_after_hours is the timer safety-net window: hours after shipment to silently mark
-  // an order delivered when no real delivery signal arrived. 0 = use the server default (14 days).
-  autoDeliverAfterHours: number | undefined;
-};
-
-export type ShipmentCarrier = {
-  id: number | undefined;
-  shipmentCarrier: ShipmentCarrierInsert | undefined;
-  prices: ShipmentCarrierPrice[] | undefined;
-  allowedRegions: ShippingRegion[] | undefined;
-};
-
-// Shipment represents the shipment table
-export type Shipment = {
-  cost: googletype_Decimal | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  carrierId: number | undefined;
-  trackingCode: string | undefined;
-  shippingDate: wellKnownTimestamp | undefined;
-  estimatedArrivalDate: wellKnownTimestamp | undefined;
-  freeShipping: boolean | undefined;
-  // actual_cost is the real carrier invoice for this shipment (EUR), distinct from cost
-  // (the price charged to the customer). NULL until an operator enters it.
-  actualCost: googletype_Decimal | undefined;
-  // return_shipping_cost is the reverse-logistics cost of a return (EUR), NULL when the
-  // order was not returned.
-  returnShippingCost: googletype_Decimal | undefined;
-};
-
-export type OrderItemAdjustmentReasonEnum =
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_UNKNOWN"
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_OUT_OF_STOCK"
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_REDUCED"
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_CAPPED";
-export type OrderStatusEnum =
-  | "ORDER_STATUS_ENUM_UNKNOWN"
-  | "ORDER_STATUS_ENUM_PLACED"
-  | "ORDER_STATUS_ENUM_AWAITING_PAYMENT"
-  | "ORDER_STATUS_ENUM_CONFIRMED"
-  | "ORDER_STATUS_ENUM_SHIPPED"
-  | "ORDER_STATUS_ENUM_DELIVERED"
-  | "ORDER_STATUS_ENUM_CANCELLED"
-  | "ORDER_STATUS_ENUM_PENDING_RETURN"
-  | "ORDER_STATUS_ENUM_REFUND_IN_PROGRESS"
-  | "ORDER_STATUS_ENUM_REFUNDED"
-  | "ORDER_STATUS_ENUM_PARTIALLY_REFUNDED";
-export type ProductRatingEnum =
-  | "PRODUCT_RATING_ENUM_UNKNOWN"
-  | "PRODUCT_RATING_ENUM_POOR"
-  | "PRODUCT_RATING_ENUM_FAIR"
-  | "PRODUCT_RATING_ENUM_GOOD"
-  | "PRODUCT_RATING_ENUM_VERY_GOOD"
-  | "PRODUCT_RATING_ENUM_EXCELLENT";
-export type FitScaleEnum =
-  | "FIT_SCALE_ENUM_UNKNOWN"
-  | "FIT_SCALE_ENUM_RUNS_SMALL"
-  | "FIT_SCALE_ENUM_SLIGHTLY_SMALL"
-  | "FIT_SCALE_ENUM_TRUE_TO_SIZE"
-  | "FIT_SCALE_ENUM_SLIGHTLY_LARGE"
-  | "FIT_SCALE_ENUM_RUNS_LARGE";
-export type DeliverySpeedEnum =
-  | "DELIVERY_SPEED_ENUM_UNKNOWN"
-  | "DELIVERY_SPEED_ENUM_MUCH_FASTER_THAN_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_FASTER_THAN_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_AS_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_SLOWER_THAN_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_MUCH_SLOWER_THAN_EXPECTED";
-export type PackagingConditionEnum =
-  | "PACKAGING_CONDITION_ENUM_UNKNOWN"
-  | "PACKAGING_CONDITION_ENUM_DAMAGED"
-  | "PACKAGING_CONDITION_ENUM_ACCEPTABLE"
-  | "PACKAGING_CONDITION_ENUM_GOOD"
-  | "PACKAGING_CONDITION_ENUM_EXCELLENT";
-export type OrderNew = {
-  items: OrderItemInsert[] | undefined;
-  shippingAddress: AddressInsert | undefined;
-  billingAddress: AddressInsert | undefined;
-  buyer: BuyerInsert | undefined;
-  paymentMethod: PaymentMethodNameEnum | undefined;
-  shipmentCarrierId: number | undefined;
-  promoCode: string | undefined;
-  currency: string | undefined;
-  // locale is the storefront site locale at purchase time (ISO-639-1: en/fr/de/it/ja/zh/ko).
-  // Used to localize the order's transactional emails when the buyer has no explicit account
-  // language. Empty on the admin custom-order path.
-  locale: string | undefined;
-};
-
-export type OrderItemInsert = {
-  quantity: number | undefined;
-  variantSku: string | undefined;
-};
-
-export type OrderFull = {
-  order: Order | undefined;
-  orderItems: OrderItem[] | undefined;
-  refundedOrderItems: OrderItem[] | undefined;
-  payment: Payment | undefined;
-  shipment: Shipment | undefined;
-  promoCode: PromoCode | undefined;
-  buyer: Buyer | undefined;
-  billing: Address | undefined;
-  shipping: Address | undefined;
-  statusHistory: OrderStatusHistory[] | undefined;
-  orderReview?: OrderReviewFull;
-};
-
-export type Order = {
-  id: number | undefined;
-  uuid: string | undefined;
-  placed: wellKnownTimestamp | undefined;
-  modified: wellKnownTimestamp | undefined;
-  totalPrice: googletype_Decimal | undefined;
-  currency: string | undefined;
-  orderStatusId: number | undefined;
-  promoId: number | undefined;
-  refundReason: string | undefined;
-  orderComment: string | undefined;
-  refundedAmount: googletype_Decimal | undefined;
-  // Buyer identity for the order-list projection: populated by the paged ListOrders query (which
-  // already joins buyer), so the admin orders list shows who placed the order instead of a raw UUID.
-  // Empty on read paths that don't project the buyer — OrderFull carries a full Buyer message instead.
-  buyerEmail: string | undefined;
-  buyerFirstName: string | undefined;
-  buyerLastName: string | undefined;
-  // vat_regime is the VAT treatment snapshotted onto the order at accounting-posting time
-  // (customer_order.vat_regime): oss / pl_domestic / export / wdt / uk_stock_domestic / none. Empty
-  // until the order's sale event is posted. Surfaced so the invoice can print the legally-required
-  // note for zero-VAT regimes — notably wdt (intra-community B2B supply → reverse charge).
-  vatRegime: string | undefined;
-  // buyer_vat_id is the B2B buyer's EU VAT identifier (2-letter country prefix + digits), set on
-  // custom orders only; empty for B2C/storefront orders. Surfaced so a reverse-charge invoice can
-  // print the buyer's VAT number, which substantiates the zero-rated intra-community supply.
-  buyerVatId: string | undefined;
-  // locale is the storefront site locale captured at purchase (ISO-639-1). Surfaced for the
-  // admin order view. Empty on pre-feature orders and admin custom orders.
-  locale: string | undefined;
-};
-
-export type OrderItem = {
-  id: number | undefined;
-  orderId: number | undefined;
-  thumbnail: string | undefined;
-  blurhash: string | undefined;
-  productPrice: string | undefined;
-  productPriceWithSale: string | undefined;
-  productSalePercentage: string | undefined;
-  productBrand: string | undefined;
-  slug: string | undefined;
-  color: string | undefined;
-  topCategoryId: number | undefined;
-  subCategoryId: number | undefined;
-  typeId: number | undefined;
-  // R2/p021: the frozen variant SKU of the sold line (immutable snapshot; no live fallback). Renamed
-  // from `sku`.
-  variantSkuSnapshot: string | undefined;
-  preorder: wellKnownTimestamp | undefined;
-  orderItem: OrderItemInsert | undefined;
-  translations: ColorwayInsertTranslation[] | undefined;
-  baseSkuSnapshot: string | undefined;
-  sizeNameSnapshot: string | undefined;
-};
-
-export type OrderStatusHistory = {
-  id: number | undefined;
-  orderId: number | undefined;
-  status: OrderStatusEnum | undefined;
-  changedAt: wellKnownTimestamp | undefined;
-  changedBy: string | undefined;
-  notes: string | undefined;
-};
-
-// Combined review for an order (order-level + item-level)
-export type OrderReviewFull = {
-  orderReview: OrderReview | undefined;
-  itemReviews: OrderItemReview[] | undefined;
-};
-
-// Order-level review (delivery & packaging)
-export type OrderReview = {
-  id: number | undefined;
-  orderId: number | undefined;
-  deliveryRating: DeliverySpeedEnum | undefined;
-  packagingRating: PackagingConditionEnum | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  reviewText: string | undefined;
-  sophisticationRating: ProductRatingEnum | undefined;
-};
-
-// Item-level review (product rating, fit, recommendation)
-export type OrderItemReview = {
-  id: number | undefined;
-  orderItemId: number | undefined;
-  rating: ProductRatingEnum | undefined;
-  fitRating: FitScaleEnum | undefined;
-  recommend: boolean | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-};
-
-// CustomOrderItemInsert allows custom pricing per item (admin-only). Admin addresses the variant by its
-// internal id (R2).
-export type CustomOrderItemInsert = {
-  quantity: number | undefined;
-  customPrice: googletype_Decimal | undefined;
-  variantId: number | undefined;
-};
-
-// OrderItemAdjustment describes a change made during order item validation.
-export type OrderItemAdjustment = {
-  requestedQuantity: googletype_Decimal | undefined;
-  adjustedQuantity: googletype_Decimal | undefined;
-  reason: OrderItemAdjustmentReasonEnum | undefined;
-  variantSkuSnapshot: string | undefined;
-};
-
-export type OrderStatus = {
-  id: number | undefined;
-  name: OrderStatusEnum | undefined;
-};
-
-export type OrderReviewInsert = {
-  deliveryRating: DeliverySpeedEnum | undefined;
-  packagingRating: PackagingConditionEnum | undefined;
-  reviewText: string | undefined;
-  sophisticationRating: ProductRatingEnum | undefined;
-};
-
-export type OrderItemReviewInsert = {
-  orderItemId: number | undefined;
-  rating: ProductRatingEnum | undefined;
-  fitRating: FitScaleEnum | undefined;
-  recommend: boolean | undefined;
-};
-
-export type Dictionary = {
-  categories: Category[] | undefined;
-  measurements: MeasurementName[] | undefined;
-  orderStatuses: OrderStatus[] | undefined;
-  paymentMethods: PaymentMethod[] | undefined;
-  shipmentCarriers: ShipmentCarrier[] | undefined;
-  sizes: Size[] | undefined;
-  collections: Collection[] | undefined;
-  languages: Language[] | undefined;
-  siteEnabled: boolean | undefined;
-  maxOrderItems: number | undefined;
-  baseCurrency: string | undefined;
-  bigMenu: boolean | undefined;
-  announce: Announce | undefined;
-  orderExpirationSeconds: number | undefined;
-  complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
-  isProd: boolean | undefined;
-  // Hero section background color for the storefront (CSS). Empty if unset.
-  backgroundHeroColor: string | undefined;
-  productTags: string[] | undefined;
-  colors: Color[] | undefined;
-  countries: Country[] | undefined;
-  fibers: Fiber[] | undefined;
-  tags: Tag[] | undefined;
-  skuContractVersion: string | undefined;
-  revisions: DictionaryRevision[] | undefined;
-  categorySizeSystems: CategorySizeSystem[] | undefined;
-  careSymbols: CareSymbol[] | undefined;
-};
-
-export type Collection = {
-  name: string | undefined;
-  countMen: number | undefined;
-  countWomen: number | undefined;
-  code: string | undefined;
-  archived: boolean | undefined;
-  id: number | undefined;
-};
-
-// Country is an ISO 3166-1 alpha-2 controlled dictionary (R9). Arbitrary creation is forbidden — the
-// full ISO list is seeded and only activation toggles.
-export type Country = {
-  code: string | undefined;
-  name: string | undefined;
-  active: boolean | undefined;
-};
-
-// Fiber is one entry of the controlled fibre vocabulary (COT/POL/WOL/…): a material's structural
-// composition references these codes, and a style's composition is derived from its shell-fabric
-// materials' fibres. Authored via the dictionary (CreateFiber/ArchiveFiber).
-export type Fiber = {
-  code: string | undefined;
-  name: string | undefined;
-  archived: boolean | undefined;
-};
-
-// Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
-// admin-only.
-export type Tag = {
-  code: string | undefined;
-  name: string | undefined;
-  archived: boolean | undefined;
-  id: number | undefined;
-};
-
-// DictionaryRevision is a per-namespace revision snapshot used for cross-instance cache invalidation (R9).
-export type DictionaryRevision = {
-  namespace: string | undefined;
-  revision: number | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-};
-
-// CareSymbol is one entry of the controlled ISO 3758 care vocabulary — the dictionary a style's
-// stored care code string resolves against, exactly as Fiber backs the composition model.
-// The CODE is what is stored on the style, what the label generator consumes and what prints on the
-// sewn tag; everything else here is display data. name is the admin picker's label; short_prose is
-// the customer-facing wording ("machine wash 30°"). Both arrive in the caller's language when a
-// translation exists, falling back to English otherwise.
-// Symbol ARTWORK is deliberately not here: it is a client asset keyed by code, so a renderer picks
-// its own drawing. These are not the trademarked GINETEX glyphs.
-export type CareSymbol = {
-  code: string | undefined;
-  category: string | undefined;
-  subCategory: string | undefined;
-  name: string | undefined;
-  shortProse: string | undefined;
-  sortOrder: number | undefined;
-  archived: boolean | undefined;
-  // Customer wording per language, for the storefront to render care in the buyer's language. The
-  // full set travels with the dictionary and the client picks, exactly as ColorwayInsertTranslation
-  // does -- rather than the server resolving one language per read.
-  translations: CareSymbolTranslation[] | undefined;
-};
-
-// CareSymbolTranslation is one language's customer-facing wording for a care symbol. name is
-// optional: the admin picker is English-only, so most rows carry prose alone and fall back to
-// CareSymbol.name.
-export type CareSymbolTranslation = {
-  languageId: number | undefined;
-  name: string | undefined;
-  shortProse: string | undefined;
-};
-
-export type Genders = {
-  id: GenderEnum | undefined;
-  name: string | undefined;
-};
-
-export type OrderFactors = {
-  id: OrderFactor | undefined;
-  name: string | undefined;
-};
-
-export type SortFactors = {
-  id: SortFactor | undefined;
-  name: string | undefined;
-};
-
-// EmailBlockType identifies the payload carried by an EmailBlock.
-export type EmailBlockType =
-  | "EMAIL_BLOCK_TYPE_UNKNOWN"
-  | "EMAIL_BLOCK_TYPE_HEADER"
-  | "EMAIL_BLOCK_TYPE_IMAGE_LINK"
-  | "EMAIL_BLOCK_TYPE_RICH_TEXT"
-  | "EMAIL_BLOCK_TYPE_PRODUCT_CARD"
-  | "EMAIL_BLOCK_TYPE_PRODUCT_GRID"
-  | "EMAIL_BLOCK_TYPE_CTA_BUTTON"
-  | "EMAIL_BLOCK_TYPE_DIVIDER"
-  | "EMAIL_BLOCK_TYPE_SPACER"
-  | "EMAIL_BLOCK_TYPE_TWO_COLUMN"
-  | "EMAIL_BLOCK_TYPE_SOCIAL_LINKS"
-  | "EMAIL_BLOCK_TYPE_COUNTDOWN"
-  | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
-export type EmailCampaignTopic =
-  | "EMAIL_CAMPAIGN_TOPIC_UNKNOWN"
-  | "EMAIL_CAMPAIGN_TOPIC_NEWSLETTER"
-  | "EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS"
-  | "EMAIL_CAMPAIGN_TOPIC_EVENTS";
-export type EmailCampaignStatus =
-  | "EMAIL_CAMPAIGN_STATUS_UNKNOWN"
-  | "EMAIL_CAMPAIGN_STATUS_DRAFT"
-  | "EMAIL_CAMPAIGN_STATUS_SCHEDULED"
-  | "EMAIL_CAMPAIGN_STATUS_SENDING"
-  | "EMAIL_CAMPAIGN_STATUS_PAUSED"
-  | "EMAIL_CAMPAIGN_STATUS_SENT"
-  | "EMAIL_CAMPAIGN_STATUS_CANCELLED";
-export type ABDimension =
-  | "AB_DIMENSION_UNKNOWN"
-  | "AB_DIMENSION_SUBJECT"
-  | "AB_DIMENSION_CONTENT";
-export type EmailCampaignRecipientStatus =
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
-export type EmailCampaignCohort =
-  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
-  | "EMAIL_CAMPAIGN_COHORT_AB"
-  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
-export type SegmentOp =
-  | "SEGMENT_OP_UNKNOWN"
-  | "SEGMENT_OP_AND"
-  | "SEGMENT_OP_OR";
-// EmailLink is localized link copy used by header-style blocks.
-export type EmailLink = {
-  label: string | undefined;
-  url: string | undefined;
-};
-
-// EmailBlockTranslation is the shared translation superset for every block.
-// Each block type consumes only the fields it needs.
-export type EmailBlockTranslation = {
-  languageId: number | undefined;
-  heading: string | undefined;
-  subheading: string | undefined;
-  body: string | undefined;
-  caption: string | undefined;
-  ctaLabel: string | undefined;
-  ctaUrl: string | undefined;
-  altText: string | undefined;
-  preheader: string | undefined;
-  links: EmailLink[] | undefined;
-};
-
-export type EmailHeaderBlock = {
-  logoMediaId: number | undefined;
-  // logo_position controls the brand logo alignment: left | center | right (default center).
-  logoPosition: string | undefined;
-};
-
-export type EmailImageLinkBlock = {
-  mediaId: number | undefined;
-  url: string | undefined;
-  // aspect is the display aspect ratio: 16:9 | 1:1 | 4:5 (default 16:9).
-  aspect: string | undefined;
-};
-
-export type EmailRichTextBlock = {
-};
-
-export type EmailProductCardBlock = {
-  productId: number | undefined;
-};
-
-export type EmailProductGridBlock = {
-  productIds: number[] | undefined;
-  columns: number | undefined;
-};
-
-export type EmailCTAButtonBlock = {
-  style: string | undefined;
-  alignment: string | undefined;
-};
-
-export type EmailDividerBlock = {
-  color: string | undefined;
-  height: number | undefined;
-};
-
-export type EmailSpacerBlock = {
-  height: number | undefined;
-};
-
-export type EmailTwoColumnBlock = {
-  left: EmailBlock[] | undefined;
-  right: EmailBlock[] | undefined;
-};
-
-// EmailBlock is an ordered, typed campaign-body block. Exactly the payload that
-// corresponds to type should be populated.
-export type EmailBlock = {
-  type: EmailBlockType | undefined;
-  header: EmailHeaderBlock | undefined;
-  imageLink: EmailImageLinkBlock | undefined;
-  richText: EmailRichTextBlock | undefined;
-  productCard: EmailProductCardBlock | undefined;
-  productGrid: EmailProductGridBlock | undefined;
-  ctaButton: EmailCTAButtonBlock | undefined;
-  divider: EmailDividerBlock | undefined;
-  spacer: EmailSpacerBlock | undefined;
-  twoColumn: EmailTwoColumnBlock | undefined;
-  socialLinks: EmailSocialLinksBlock | undefined;
-  countdown: EmailCountdownBlock | undefined;
-  videoThumb: EmailVideoThumbBlock | undefined;
-  backgroundColor: string | undefined;
-  translations: EmailBlockTranslation[] | undefined;
-};
-
-export type EmailSocialLinksBlock = {
-  links: EmailSocialLink[] | undefined;
-};
-
-export type EmailSocialLink = {
-  network: string | undefined;
-  url: string | undefined;
-};
-
-export type EmailCountdownBlock = {
-  endsAt: number | undefined;
-};
-
-export type EmailVideoThumbBlock = {
-  mediaId: number | undefined;
-  videoUrl: string | undefined;
-};
-
-export type ABConfig = {
-  enabled: boolean | undefined;
-  dimension: ABDimension | undefined;
-  testPct: number | undefined;
-  decisionAfterMinutes: number | undefined;
-  winnerVariantId: number | undefined;
-};
-
-export type SubjectTranslation = {
-  languageId: number | undefined;
-  subject: string | undefined;
-};
-
-export type EmailCampaignVariant = {
-  id: number | undefined;
-  label: string | undefined;
-  subjectI18n: SubjectTranslation[] | undefined;
-  // Empty means inherit the campaign-level body.
-  body: EmailBlock[] | undefined;
-  isWinner: boolean | undefined;
-};
-
-export type EmailCampaignInsert = {
-  name: string | undefined;
-  topic: EmailCampaignTopic | undefined;
-  body: EmailBlock[] | undefined;
-  backgroundColor: string | undefined;
-  fromName: string | undefined;
-  fromEmail: string | undefined;
-  replyTo: string | undefined;
-  scheduleAt: number | undefined;
-  abConfig: ABConfig | undefined;
-  variants: EmailCampaignVariant[] | undefined;
-  status: EmailCampaignStatus | undefined;
-  segmentId: number | undefined;
-};
-
-export type EmailCampaignFull = {
-  id: number | undefined;
-  name: string | undefined;
-  topic: EmailCampaignTopic | undefined;
-  body: EmailBlock[] | undefined;
-  backgroundColor: string | undefined;
-  fromName: string | undefined;
-  fromEmail: string | undefined;
-  replyTo: string | undefined;
-  scheduleAt: number | undefined;
-  abConfig: ABConfig | undefined;
-  variants: EmailCampaignVariant[] | undefined;
-  status: EmailCampaignStatus | undefined;
-  segmentId: number | undefined;
-  createdBy: string | undefined;
-  createdAt: number | undefined;
-  updatedAt: number | undefined;
-  sendingStartedAt: number | undefined;
-  sentAt: number | undefined;
-  audienceSnapshotAt: number | undefined;
-  fanoutMaxAccountId: number | undefined;
-  fanoutCursorAccountId: number | undefined;
-  audienceMaterializedAt: number | undefined;
-  recipientCount: number | undefined;
-  dispatchError: string | undefined;
-};
-
-export type EmailCampaignDispatchStatus = {
-  campaignId: number | undefined;
-  status: EmailCampaignStatus | undefined;
-  audienceMaterializedAt: number | undefined;
-  dispatchError: string | undefined;
-  recipientCount: number | undefined;
-  pending: number | undefined;
-  accepted: number | undefined;
-  failed: number | undefined;
-  skipped: number | undefined;
-};
-
-export type CampaignMetricCounts = {
-  total: number | undefined;
-  pending: number | undefined;
-  sent: number | undefined;
-  failed: number | undefined;
-  skipped: number | undefined;
-  delivered: number | undefined;
-  uniqueOpened: number | undefined;
-  totalOpens: number | undefined;
-  uniqueClicked: number | undefined;
-  totalClicks: number | undefined;
-  bounced: number | undefined;
-  complained: number | undefined;
-  unsubscribed: number | undefined;
-};
-
-export type CampaignMetricRates = {
-  deliveryRate: number | undefined;
-  openRate: number | undefined;
-  clickRate: number | undefined;
-  clickToOpenRate: number | undefined;
-  bounceRate: number | undefined;
-  complaintRate: number | undefined;
-};
-
-export type CampaignVariantMetrics = {
-  variantId: number | undefined;
-  label: string | undefined;
-  counts: CampaignMetricCounts | undefined;
-  rates: CampaignMetricRates | undefined;
-};
-
-// Read-only compute-on-read aggregates over email_campaign_recipient.
-export type CampaignMetrics = {
-  campaignId: number | undefined;
-  counts: CampaignMetricCounts | undefined;
-  rates: CampaignMetricRates | undefined;
-  variants: CampaignVariantMetrics[] | undefined;
-};
-
-// Public admin ledger projection. Provider idempotency/claim/hash/render
-// internals are deliberately absent.
-export type EmailCampaignRecipient = {
-  id: number | undefined;
-  campaignId: number | undefined;
-  accountId: number | undefined;
-  email: string | undefined;
-  languageId: number | undefined;
-  variantId: number | undefined;
-  cohort: EmailCampaignCohort | undefined;
-  status: EmailCampaignRecipientStatus | undefined;
-  attemptCount: number | undefined;
-  resendEmailId: string | undefined;
-  errorCode: string | undefined;
-  lastError: string | undefined;
-  nextAttemptAt: number | undefined;
-  sentAt: number | undefined;
-  completedAt: number | undefined;
-  createdAt: number | undefined;
-  updatedAt: number | undefined;
-};
-
-// SegmentNode is either a branch (op + children) or a leaf (field/operator/values).
-export type SegmentNode = {
-  op: SegmentOp | undefined;
-  children: SegmentNode[] | undefined;
-  field: string | undefined;
-  operator: string | undefined;
-  values: string[] | undefined;
-};
-
-export type SegmentPredicate = {
-  root: SegmentNode | undefined;
-};
-
-export type EmailSegment = {
-  id: number | undefined;
-  name: string | undefined;
-  description: string | undefined;
-  predicate: SegmentPredicate | undefined;
-  lastCount: number | undefined;
-  lastCountAt: number | undefined;
-};
-
-export type RenderWarning = {
-  blockIndex: number | undefined;
-  reason: string | undefined;
-};
-
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type TechCardStage =
@@ -1475,7 +702,16 @@ export type TechCardMediaKind =
   | "TECH_CARD_MEDIA_KIND_PREVIEW"
   | "TECH_CARD_MEDIA_KIND_MOODBOARD"
   | "TECH_CARD_MEDIA_KIND_REFERENCE"
-  | "TECH_CARD_MEDIA_KIND_SWATCH";
+  | "TECH_CARD_MEDIA_KIND_SWATCH"
+  // Side views. The DESIGN band's view matrix has four silhouette sides, and without these two a
+  // side flat has nowhere to be filed — it would have to masquerade as DETAIL and stop being a
+  // side. This EXTENDS the existing vocabulary; it is not a second axis.
+  | "TECH_CARD_MEDIA_KIND_SIDE_L"
+  | "TECH_CARD_MEDIA_KIND_SIDE_R"
+  // An ACCEPTED render — a rendered image promoted into category='technical', i.e. one that leaves
+  // the studio and goes out with the card. The pair (category='technical', kind=RENDER) is what
+  // says «this is a render and it is official»; there is no separate artifact_role column.
+  | "TECH_CARD_MEDIA_KIND_RENDER";
 // TechCardRole is a responsible-account role on a tech card (PLM-rework Q5). Replaces the free-text
 // designer/constructor/technologist/approved_by strings; approval is the APPROVER role plus a
 // server-stamped journal event, not a free-text name.
@@ -2487,6 +1723,31 @@ export type TechCardCallout = {
   // СОВМЕСТИМОСТЬ БЕЗ ФЛАГА: пустой список читается как [part], непустой вытесняет `part`
   // целиком, и сервер отдаёт `part` = первым элементом.
   parts: string[] | undefined;
+  // THE CLIENT'S OWN KEY FOR THIS ROW — minted by the client (UUID) when the callout is born,
+  // STORED, and round-tripped. Today a callout's only identity is its number, and the number is
+  // assigned by the server: after a save the form cannot tell which of its rows got which number,
+  // so focus, highlighting and «the refusal leads to the place» all point at SOMEBODY ELSE'S
+  // callout.
+  // THREE PROPERTIES, EACH LOAD-BEARING:
+  // 1. IT IS NOT IN THE DIGEST. This is an ADDRESS, not content — exactly like the callout's
+  // colour, which the DESIGN projection leaves out for the same reason.
+  // 2. IT DRIVES NUMBER MINTING. `number == 0 && client_ref != ""` ⇒ «mint a number».
+  // `number == 0 && client_ref == ""` ⇒ a LEGACY ZERO, leave it alone: tech_card_callout holds
+  // callout_number NOT NULL DEFAULT 0 with no UNIQUE, duplicate zeros there are legal, and a
+  // rule «number<=0 means mint» would renumber them on the first save from ANY client — i.e.
+  // move the DESIGN signature of every such card, across the whole of production, at rollout.
+  // 3. IT IS NOT REQUIRED, AND AN OLD BUNDLE MUST NOT ERASE IT. «An old client loses nothing» is
+  // true of the old client and FALSE of the new one: a stale tab resends the callouts without
+  // this field, a full-replace write would blank the column, and the addresses the new client
+  // is holding would vanish out from under it — silently, since client_ref is outside the
+  // digest and nothing would restate.
+  // SO THE SERVER CARRIES IT: an incoming callout with `number != 0` and an EMPTY client_ref
+  // inherits the stored client_ref OF THAT NUMBER, exactly the way CarryOmittedCalloutGeometry
+  // already carries geometry by number, and in the same place in the pipeline. An explicitly
+  // DIFFERENT non-empty value replaces it — that is a real re-address, not an omission.
+  // The carry cannot collide with minting: minting is `number == 0`, carrying is
+  // `number != 0`, and a legacy zero has neither a number to carry by nor a ref to mint for.
+  clientRef: string | undefined;
 };
 
 // Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
@@ -4206,6 +3467,17 @@ export type TechCardInsert = {
   moodboardMedia: TechCardMediaItem[] | undefined;
   technicalMedia: TechCardMediaItem[] | undefined;
   callouts: TechCardCallout[] | undefined;
+  // THE MOODBOARD'S SHARED NOTE — the words the whole board is about, as opposed to a caption on
+  // one image. It is what the DESIGN band's `draft the idea` reads, together with the callouts
+  // pinned on moodboard images.
+  // OPTIONAL for the same load-bearing reason as `cutting_coefficient` and purpose/kind above: the
+  // admin is an SPA, tabs survive deploys, and the card is saved WHOLE. A bare proto3 string from a
+  // bundle that predates this field arrives as "" and would ERASE the note — silently, from a tab
+  // that never opened the moodboard. Three states, verbatim the same as its neighbours:
+  // * field ABSENT (null)        → LEAVE AS IS.
+  // * field PRESENT, value ""    → CLEAR it (store NULL).
+  // * field PRESENT with a value → set it.
+  moodNote?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
@@ -5051,6 +4323,1258 @@ export type TechCardListItem = {
   // нет (такие существуют намеренно). Колонки-ссылки collection_id у тех-карты не существует —
   // её дропнула 0240 как мёртвую схему, поэтому фильтровать можно ТОЛЬКО по этой строке.
   collection: string | undefined;
+};
+
+// DesignRun is one row of the band's history: a generation job, its money, its inputs and its
+// output pictures. A run is NEVER deleted — archiving hides it presentationally (see archived_at).
+export type DesignRun = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  // Which state of the studio produced this row: flat | render | threed | draft_idea.
+  // Written by the client at start; immutable afterwards.
+  kind: string | undefined;
+  // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
+  // running renders differently from a finished one, so this is the field the band polls.
+  status: string | undefined;
+  // IDEMPOTENCY KEY minted by the client (UUID). A double click on GENERATE is ONE payment: a
+  // second StartDesignRun with the same value returns THIS row with OK instead of starting a
+  // second paid job. Unique across the whole table.
+  clientRequestId: string | undefined;
+  // OUTPUT-ONLY provenance of the server-side prompt profile that ran, pinned at launch:
+  // «flat-3view @ v4» under the history row. Profiles are server config, not a client-writable
+  // object — a client that could name the prompt could bill the org for anything.
+  profileName: string | undefined;
+  profileVersion: string | undefined;
+  // The delta phrase the human typed («wider collar»); the caption of the history row. Empty on a
+  // first generation, which asked for nothing in particular.
+  // A MANUAL UPLOAD IS NOT A RUN AND HAS NO ROW HERE — it is a DesignBatch. The band's feed is the
+  // two of them merged by time; see GetDesignBandResponse.
+  ask: string | undefined;
+  // What was asked for. Written by the client at start, echoed back verbatim; the run panel is
+  // unreadable without it. Capped at 8 KB — a params blob larger than that is not a request, it is
+  // a payload.
+  params: DesignRunParams | undefined;
+  // OUTPUT-ONLY SNAPSHOT of what the inputs WERE at launch. The SERVER assembles it — a
+  // client-supplied provenance is not provenance, it is a claim. Capped at 64 KB.
+  inputs: DesignInputSnapshot | undefined;
+  // OUTPUT-ONLY copy of the card's fit at launch, so the badge «fit slim ≠ card oversized» can be
+  // drawn on an old picture. Empty = the fit was not stated; the mint asks then. Uploaded plates
+  // never state one at all, which is why MintDesignSheetVersion has uploaded_fit_confirmed.
+  fitAtLaunch: string | undefined;
+  // OUTPUT-ONLY render revision — the «r4» caption in the colour history. MAX+1 per card, assigned
+  // only for kind=render; 0 on every other kind.
+  rrev: number | undefined;
+  // OUTPUT-ONLY: how many pictures were asked for. `done · 2 of 3` needs the denominator; without
+  // it a partial provider answer is indistinguishable from a complete one.
+  requestedOutputs: number | undefined;
+  // OUTPUT-ONLY, and the reason the money register can be honest: «failed · attempt 2 of 3 · $0.04
+  // was still charged». Without per-attempt rows price_actual shows the price of the LAST attempt
+  // and the budget bar undercounts every retry.
+  attempts: DesignRunAttempt[] | undefined;
+  // OUTPUT-ONLY money. price_estimate is what was reserved against the day BEFORE dispatch;
+  // price_actual is the SUM of attempts[].price, paid failures included. Unset (null) means «not
+  // known yet», which is not zero.
+  // costing-shaped: stripped when the account lacks costing:read
+  priceEstimate: googletype_Decimal | undefined;
+  // costing-shaped: stripped when the account lacks costing:read
+  priceActual: googletype_Decimal | undefined;
+  // ISO 4217. On the wire so the budget bar never hard-codes «$».
+  currency: string | undefined;
+  // OUTPUT-ONLY stamp of the admin who started the run. Without it a race between two authors is
+  // invisible on the history row.
+  author: string | undefined;
+  // OUTPUT-ONLY: set when a running row was asked to stop; drives the `cancelling…` pill. A result
+  // that arrives after this stamp is STILL paid and STILL recorded — the row says so rather than
+  // pretending the money was not spent.
+  cancelRequestedAt: wellKnownTimestamp | undefined;
+  // OUTPUT-ONLY, PRESENTATIONAL AND REVERSIBLE: a collapsed row (`· K archived`) and who collapsed
+  // it. Archiving hides the ROW, never its pictures — picture invisibility has exactly one
+  // persistent verb, and it is HideDesignPicture.
+  archivedAt: wellKnownTimestamp | undefined;
+  archivedBy: string | undefined;
+  // OUTPUT-ONLY failure facts, so a dead row reads `failed · provider timeout` instead of being a
+  // silent hole. error_code is the stable machine token; last_error is the human tail.
+  errorCode: string | undefined;
+  lastError: string | undefined;
+  // OUTPUT-ONLY result of a TEXT run (kind=draft_idea). Empty on every picture-producing kind.
+  outputText: string | undefined;
+  // OUTPUT-ONLY timing: `0:14 / ~25 s` and the sort order of the history.
+  createdAt: wellKnownTimestamp | undefined;
+  startedAt: wellKnownTimestamp | undefined;
+  completedAt: wellKnownTimestamp | undefined;
+  // The pictures this run produced, UNDER their own row rather than in a flat list beside it. A
+  // card with 40 runs × 3 outputs would otherwise ship 120 MediaFull on every read of the band.
+  // Hidden pictures are included WITH their flag — the client filters, the server never lies about
+  // what exists.
+  pictures: DesignPicture[] | undefined;
+};
+
+// DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
+// the run panel. Total encoded size is capped at 8 KB.
+export type DesignRunParams = {
+  // Which views were requested: front | back | side_l | side_r | detail. Drives the placeholder
+  // tiles that stand in for outputs that have not arrived yet.
+  views: string[] | undefined;
+  // one | per_view — a single composite sheet against one picture per view. A composite has no
+  // single view and therefore cannot be clicked into a bench slot; it is split first.
+  layout: string | undefined;
+  // The colour recipe of a render submission. The chips in the colour history restore THIS, not
+  // the picture — the recipe migrates, the pixels do not.
+  colour: DesignColourRecipe | undefined;
+  threed: DesignThreedParams | undefined;
+  // `fix: back` — which view of the bench this run was asked to fix. Empty = not a fix. Feeds the
+  // history column «input = slots (back)».
+  // SILHOUETTE SIDES ONLY: front | back | side_l | side_r. A detail slot is deliberately NOT
+  // targetable, because a bare view key cannot name one of several details and this field is frozen
+  // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
+  // a detail is ever wanted, it arrives as a slot_id field beside this one, not as a `detail`
+  // string inside it.
+  fixTarget: string | undefined;
+  // Extra media fed to a render besides the bench slots — e.g. an unmarked flat the human dropped
+  // in. FK media(id).
+  extraInputMediaIds: number[] | undefined;
+};
+
+// DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
+// RESTORE. fabric_media_id is not optional decoration: without it a photo-sourced recipe cannot be
+// rebuilt from the chip at all.
+export type DesignColourRecipe = {
+  source: string | undefined;
+  code: string | undefined;
+  hex: string | undefined;
+  words: string | undefined;
+  fabricMediaId: number | undefined;
+};
+
+// DesignThreedParams are the parameters of a turntable run.
+export type DesignThreedParams = {
+  frames: number | undefined;
+  presentation: string | undefined;
+  modelId: number | undefined;
+  garmentSizeId: number | undefined;
+  // Overrides the card's fit for THIS submission only. Empty = the card's fit was used. A fit is a
+  // property of the garment; presentation cannot change it, so an override is a stated deviation
+  // and is stamped as one.
+  fitOverride: string | undefined;
+  // The four render plates of ONE rrev that this turntable was built from. Without them the run
+  // panel cannot show what the rotation was assembled out of, and a turntable stitched from
+  // different rrevs (i.e. from different colours) would be indistinguishable from a coherent one.
+  sourcePictureIds: number[] | undefined;
+};
+
+// DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
+// IDS ARE STORED, MediaFull IS SERVED. The stored snapshot freezes media_id — freezing a URL is
+// wrong because objects move — and the read joins media and hands back a ready picture. Nothing
+// else could draw the run panel: AdminService has no RPC that reads media by id.
+// Total encoded size capped at 64 KB; refs ≤ 24; slots ≤ 8. A snapshot must fit in a row and in an
+// eye.
+export type DesignInputSnapshot = {
+  garmentNote: string | undefined;
+  mood: DesignMoodSnapshot | undefined;
+  refs: DesignInputRef[] | undefined;
+  slots: DesignInputSlot[] | undefined;
+  fit: string | undefined;
+  // The requested views and layout, frozen: the fingerprint that draws the `current / earlier`
+  // divider in the history.
+  views: string[] | undefined;
+  layout: string | undefined;
+};
+
+// DesignMoodSnapshot is the moodboard as the model read it — the note plus the callouts pinned on
+// moodboard images. Moodboard callouts are ordinary TechCardCallout rows on the card; this is a
+// frozen copy of what they said at launch, not a second home for them.
+export type DesignMoodSnapshot = {
+  note: string | undefined;
+  callouts: DesignMoodCallout[] | undefined;
+};
+
+// DesignMoodCallout is one frozen moodboard callout inside a run snapshot: which image, what it
+// said. Geometry is deliberately absent — the snapshot answers «what did the model read», and a
+// marker position is not something a model reads.
+export type DesignMoodCallout = {
+  mediaId: number | undefined;
+  text: string | undefined;
+};
+
+// DesignInputRef is one reference image fed to the run.
+export type DesignInputRef = {
+  // WHAT THE SNAPSHOT FROZE. This is the stored fact and it is always populated, including when
+  // the media row has since been deleted — «which input disappeared» must be answerable from the
+  // snapshot itself, not from an object the server is obliged to leave empty.
+  mediaId: number | undefined;
+  // The resolved picture, joined from media_id at read time. UNSET when deleted is true.
+  media: MediaFull | undefined;
+  role: string | undefined;
+  note: string | undefined;
+  deleted: boolean | undefined;
+};
+
+// DesignInputSlot is one bench plate fed to a render or a fix.
+export type DesignInputSlot = {
+  viewKey: string | undefined;
+  // WHICH SLOT, when view_key is `detail`. A view key alone cannot tell two details apart, and the
+  // comparison «is this input stale» has no join key without it — so the badge would be
+  // uncomputable for every card with more than one detail slot, FOREVER: a snapshot is frozen at
+  // launch and is never repaired later. DesignSheetPlate solved the same problem the same way.
+  // 0 for the four silhouette sides, which view_key already identifies.
+  slotId: number | undefined;
+  // COPY of the detail's name at launch, so a snapshot still reads «detail: cuff» after the slot
+  // has been renamed or deleted. Empty for the silhouette sides.
+  detailName: string | undefined;
+  mediaId: number | undefined;
+  // Resolved at read time from media_id. UNSET when deleted is true (see DesignInputRef).
+  media: MediaFull | undefined;
+  // The plate's content hash AT LAUNCH. Comparing it against the CURRENT media.content_hash of the
+  // slot is exactly what earns the `stale` badge — the plate was re-flattened or replaced since.
+  // Empty = the media predates content hashing (0336) and no comparison is possible; say so rather
+  // than guess.
+  contentHash: string | undefined;
+  layerRev: number | undefined;
+  deleted: boolean | undefined;
+};
+
+// DesignRunAttempt is ONE paid provider call. It exists because the history row must be able to
+// say «the first attempt was paid for and the answer never arrived»: without it price_actual is
+// the price of the last attempt, the budget bar undercounts retries, and the answer to «where did
+// the money go» is untrue.
+export type DesignRunAttempt = {
+  attemptNo: number | undefined;
+  provider: string | undefined;
+  providerRequestId: string | undefined;
+  // The idempotency key sent TO the provider. Minted once per RUN and STABLE across its attempts —
+  // that is the whole point: a retry must not buy a second picture.
+  // IT IS THE RUN'S KEY, REPEATED IN EVERY ATTEMPT, AND IT IS STORED ONCE — on design_run, not per
+  // attempt. It appears here so a reader holding one attempt can reconcile against the provider's
+  // billing without loading the run. Do NOT give the attempt table a column of its own: two homes
+  // for one key is how a retry ends up buying a second picture.
+  providerIdempotencyKey: string | undefined;
+  // dispatching | accepted | delivered | failed | unknown.
+  // `unknown` is load-bearing: it means the money was POSSIBLY taken and the outcome is not
+  // knowable from our side. Collapsing it into `failed` would be a lie about the ledger.
+  state: string | undefined;
+  // The price of THIS attempt. Unset = not billed (or not known yet); 0 = billed nothing.
+  // costing-shaped: stripped when the account lacks costing:read
+  price: googletype_Decimal | undefined;
+  startedAt: wellKnownTimestamp | undefined;
+  finishedAt: wellKnownTimestamp | undefined;
+  errorCode: string | undefined;
+};
+
+// DesignPicture is one image in the band. It hangs under EITHER a run (generated) or a batch
+// (uploaded by hand) — exactly one of run_id / batch_id is set, never both and never neither.
+// Pictures are never deleted through this contract: invisibility (hidden_at) and erasing bytes are
+// different floors of the building.
+// THE CONTENT HASH IS ON `media.content_hash` and nowhere else. A picture has nothing to freeze —
+// it IS the live file — so a second copy here could only ever disagree with the first.
+export type DesignPicture = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  media: MediaFull | undefined;
+  runId: number | undefined;
+  batchId: number | undefined;
+  ordinal: number | undefined;
+  kind: string | undefined;
+  // The GHOST label: a hypothesis about which view this is, not a fact. Front-and-back guesses are
+  // routinely wrong, so the label is shown as a guess and a human confirms it by putting the plate
+  // into a slot. Empty = no hypothesis. On a crop this carries the frame's declared view.
+  ghostView: string | undefined;
+  // Non-empty ONLY on a composite: the views glued into one image. A composite has no single view,
+  // is not clickable into a slot, and must be split first (SplitDesignPicture).
+  compositeViews: string[] | undefined;
+  // The picture this one was derived from — a crop or a flattened edit. A derivative is a SIBLING
+  // OF ITS PARENT: it inherits the parent's run_id or batch_id, and never gets a row of its own,
+  // because no money was spent on it. A crop of an uploaded composite therefore sits under the same
+  // BATCH the composite arrived in.
+  derivedFrom: number | undefined;
+  // PROVENANCE, an open vocabulary: ai | uploaded | ai_edits | imported_svg | drawn.
+  // It has already grown once (`drawn`, for a vector base drawn from nothing), which is why it is
+  // a string and not an enum.
+  sourceClass: string | undefined;
+  // This picture is the output of a fix whose INPUT slots were of mixed provenance. The flag does
+  // not forbid anything — it refuses to let the mixture be laundered by one more generation.
+  mixedInput: boolean | undefined;
+  layerRev: number | undefined;
+  // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
+  // HideDesignPicture: a plate in a slot, in a minted version, feeding a live run, or parenting a
+  // live crop cannot be hidden.
+  hiddenAt: wellKnownTimestamp | undefined;
+  hiddenBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignBatch is one upload gesture: the shelf stamp «uploaded · Т. · 14:41 · 12.4 MB» and the
+// carrier of the batch's coherence — plates that arrived together are one hand's work, and the
+// mixed-provenance warning reads that.
+export type DesignBatch = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  // IDEMPOTENCY KEY minted by the client (UUID). Without it a retry after a network timeout files
+  // a SECOND batch and a second set of pictures. Unique across the table.
+  clientRequestId: string | undefined;
+  author: string | undefined;
+  filesCount: number | undefined;
+  sizeBytes: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // The pictures of this batch, UNDER their own shelf row — the same arrangement runs use, and for
+  // the same reason. Without it an uploaded picture hangs under nothing readable: it has no run,
+  // so no history row could carry it, and the upload shelf would be empty on every reload of the
+  // tab. Hidden pictures are included WITH their flag; the client filters.
+  pictures: DesignPicture[] | undefined;
+};
+
+// DesignReference is the ROLE of one reference image inside the band's prompt: which side of the
+// garment this reference is about, and in what order it is fed.
+// IT LIVES IN THE BAND, NOT IN THE DOCUMENT, and that is forced rather than chosen. A reference in
+// the document is TechCardMediaItem{media_id, kind, caption}, where `kind` is ALREADY spent on what
+// the image IS (MOODBOARD | REFERENCE | SWATCH). For a bench plate the argument «the view axis is
+// the existing kind» holds; for a reference it does not — kind is occupied, so this is a genuine
+// second axis. And it cannot become a column on tech_card_media either: that table has no row key
+// at all, it is rewritten whole by every card save, and there would be nothing to carry the
+// attribute onto the resent row.
+// IT IS NOT PART OF THE DOCUMENT'S SIGNATURE. A role is a hint to the model and an order in the
+// prompt, not a fact about the garment, so it enters no section digest and stales no sign-off.
+export type DesignReference = {
+  techCardId: number | undefined;
+  mediaId: number | undefined;
+  // front | back | side_l | side_r | detail. NEVER EMPTY on the wire: clearing a role deletes the
+  // row, so «no role stated» is expressed by the ABSENCE of a DesignReference for that media, not
+  // by a present row carrying "". See SetDesignReferenceRole, which takes "" as the clear verb.
+  role: string | undefined;
+  ordinal: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+};
+
+// DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
+// silhouette sides (front/back/side_l/side_r) are born lazily on first touch; detail slots are
+// created by naming one.
+export type DesignBenchSlot = {
+  // The slot's OWN minted id. «Detail 1 / detail 2» as a key is forbidden: renaming a detail must
+  // not move a plate, and two details named the same must still be two slots.
+  id: number | undefined;
+  viewKey: string | undefined;
+  detailName: string | undefined;
+  pictureId: number | undefined;
+  // CAS TOKEN. Every write to this slot echoes the rev it believed it was overwriting; a mismatch
+  // is Aborted:slot_rev_mismatch with the slot's current state attached. 0 = the slot does not
+  // exist yet, which is the value a lazy first placement sends.
+  slotRev: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+  // THE RESOLVED PLATE, not just its id. Unset when the slot is empty.
+  // A bare picture_id is unreadable on its own: the plate a slot holds is routinely older than the
+  // first page of runs, so the client would have nothing to draw the thumbnail from and no
+  // source_class to compute the mixed-provenance warning with. It is also what makes the CAS
+  // refusal usable — Aborted:slot_rev_mismatch hands back the slot's CURRENT state, and a bare id
+  // there would force the loser of the race into another round trip before it could redraw.
+  picture: DesignPicture | undefined;
+};
+
+// DesignSheetVersion is a MINTED, FROZEN sheet: Rev.N as it was printed. Its plates and callouts
+// are rows of their own, not a JSON blob — a version must still print a year from now, so its
+// bytes must not be erasable, and that is expressed by a foreign key the media library can see.
+export type DesignSheetVersion = {
+  id: number | undefined;
+  versionNumber: number | undefined;
+  clientRequestId: string | undefined;
+  // The minter explicitly consented to a composition of mixed provenance. Without consent such a
+  // mint is refused (FailedPrecondition: mixed_needs_consent) rather than silently blessed.
+  mixedConsent: boolean | undefined;
+  // WHICH ACT gave birth to this version: callout | print | release | share. There is no «accept»
+  // button anywhere — a version is a by-product of an act, never a ceremony of its own.
+  mintedVia: string | undefined;
+  mintedBy: string | undefined;
+  mintedAt: wellKnownTimestamp | undefined;
+  plates: DesignSheetPlate[] | undefined;
+  // The frozen callouts of this version, at most 200 — the same readability ceiling the card's
+  // annotations already carry.
+  callouts: DesignSheetCallout[] | undefined;
+};
+
+// DesignSheetPlate is one frozen image of a version, with everything needed to explain a year later
+// what was printed and where it came from.
+export type DesignSheetPlate = {
+  viewKey: string | undefined;
+  // The bench slot this plate came from, or 0 if that slot has since been deleted. The version
+  // survives the slot's death, which is why detail_name below is a COPY and not a lookup.
+  slotId: number | undefined;
+  detailName: string | undefined;
+  media: MediaFull | undefined;
+  // THE HASH AT MINT — what this version actually froze. Empty = the media predates 0336.
+  // IT LIVES HERE, unlike on DesignPicture, and the asymmetry is the point rather than an
+  // oversight: a plate of a minted version is a FROZEN fact («these are the bytes the sheet was
+  // signed over»), and it must survive even a future recomputation of media.content_hash. A live
+  // picture has nothing to freeze — it is the current file — so for it a second copy could only
+  // disagree with the first.
+  contentHash: string | undefined;
+  layerRev: number | undefined;
+  sourceClass: string | undefined;
+  runId: number | undefined;
+  fitStamp: string | undefined;
+  mixedInput: boolean | undefined;
+  ordinal: number | undefined;
+};
+
+// DesignSheetCallout is one frozen callout of a version. Geometry is a TechCardAnnotation — the
+// system's single annotation primitive, at the same coordinate precision the card's annotations
+// already enforce.
+export type DesignSheetCallout = {
+  number: number | undefined;
+  media: MediaFull | undefined;
+  // The frozen shape: kind, points, colour, dashes. Its own `text` field is left EMPTY — the note
+  // that gets printed lives in `text` below, because a card callout's note is composed of
+  // part / description / dimensions and it is the COMPOSED line that goes on paper.
+  annotation: TechCardAnnotation | undefined;
+  text: string | undefined;
+};
+
+// DesignSheetIssue is one APPEND-ONLY journal line of a version: minted | printed | shared.
+// Reprinting a sheet does NOT mint a new version — it writes a line here. That distinction is the
+// whole reason the journal exists.
+export type DesignSheetIssue = {
+  id: number | undefined;
+  versionNumber: number | undefined;
+  action: string | undefined;
+  actor: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
+// ADDRESSED BY ITS OWN id, never by base_media_id. The `draw it` door opens a layer with NO base
+// (base_media_id = 0), and a card may hold several such layers; the model «a layer is tracing
+// paper over a picture» cannot express that at all.
+export type DesignEditLayer = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  baseMediaId: number | undefined;
+  // CAS TOKEN. SaveDesignEditLayer and FlattenDesignEditLayer both echo the rev they believed they
+  // were acting on; a mismatch is Aborted:layer_rev_mismatch carrying the current rev.
+  rev: number | undefined;
+  // The layer's strokes, JSON-encoded. Capped at 512 KB — one vector edit; beyond that the answer
+  // is «too many strokes, split it», not a slower save. There is deliberately no revision history:
+  // a minted version pins the content_hash of the already-rasterised file.
+  // SERVED ONLY BY GetDesignEditLayer, AND LEFT EMPTY EVERYWHERE ELSE. GetDesignBand lists the
+  // layers without their strokes on purpose: 512 KB is the cap per LAYER, a card may hold several,
+  // and shipping them all would make every open of the tab cost megabytes to draw a list of
+  // thumbnails. The editor fetches the one layer it is about to open.
+  strokes: string | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// DesignBudget is the band's money bar: `today $0.41 of $2.00`.
+// costing-shaped: EVERY money field below is stripped when the account lacks costing:read. A band
+// read by an account without it shows no bar at all — a bar with blanks in it would read as «the
+// budget is zero», which is a different and false statement.
+export type DesignBudget = {
+  day: string | undefined;
+  // ACTUALLY CHARGED today: the sum of attempt prices, paid failures included.
+  spent: googletype_Decimal | undefined;
+  // RESERVED today: the estimates of runs that are still in flight and have not been billed yet.
+  // TWO FIELDS, NOT ONE SUM, even though the ceiling check adds them. The gate MUST compare
+  // `spent + reserved` against `cap` — counting only the charged half would let two simultaneous
+  // starts both pass a ceiling only one of them fits under. But a single field called «spent»
+  // holding that sum would LIE to the reader about what was actually paid. One fact, one field;
+  // the bar draws `spent` solid and `reserved` as a pale tail, and the sum is derived where it is
+  // needed.
+  reserved: googletype_Decimal | undefined;
+  cap: googletype_Decimal | undefined;
+  currency: string | undefined;
+  // WHOSE «today» resets the bar. On the wire because that is an organisational decision, not a
+  // property of the database session that happened to answer.
+  timezone: string | undefined;
+};
+
+export type OrderFactor =
+  | "ORDER_FACTOR_UNKNOWN"
+  | "ORDER_FACTOR_ASC"
+  | "ORDER_FACTOR_DESC";
+export type SortFactor =
+  | "SORT_FACTOR_UNKNOWN"
+  | "SORT_FACTOR_CREATED_AT"
+  | "SORT_FACTOR_UPDATED_AT"
+  | "SORT_FACTOR_NAME"
+  | "SORT_FACTOR_PRICE";
+export type FilterConditions = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  onSale: boolean | undefined;
+  gender: GenderEnum[] | undefined;
+  topCategoryIds: number[] | undefined;
+  subCategoryIds: number[] | undefined;
+  typeIds: number[] | undefined;
+  sizesIds: number[] | undefined;
+  preorder: boolean | undefined;
+  byTag: string | undefined;
+  collections: string[] | undefined;
+  seasons: SeasonEnum[] | undefined;
+  excludeTopCategoryIds: number[] | undefined;
+  colorCodes: string[] | undefined;
+  exclusive: boolean | undefined;
+};
+
+export type PaymentMethodNameEnum =
+  | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
+  | "PAYMENT_METHOD_NAME_ENUM_CARD"
+  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
+  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
+  | "PAYMENT_METHOD_NAME_ENUM_CASH";
+// Payment represents the payment table
+export type Payment = {
+  createdAt: wellKnownTimestamp | undefined;
+  modifiedAt: wellKnownTimestamp | undefined;
+  paymentInsert: PaymentInsert | undefined;
+};
+
+export type PaymentInsert = {
+  paymentMethod: PaymentMethodNameEnum | undefined;
+  transactionId: string | undefined;
+  transactionAmount: googletype_Decimal | undefined;
+  transactionAmountPaymentCurrency: googletype_Decimal | undefined;
+  clientSecret: string | undefined;
+  isTransactionDone: boolean | undefined;
+  expiredAt: wellKnownTimestamp | undefined;
+  // payment_method_type is the most specific label for how the customer paid:
+  // the card wallet (apple_pay, google_pay, link) when tokenised through a wallet,
+  // otherwise the payment-method type (card, klarna, ...). Empty when uncaptured.
+  paymentMethodType: string | undefined;
+  // receipt_url is Stripe's hosted receipt for the charge (customer-facing). Empty
+  // for non-Stripe methods or when no receipt was produced.
+  receiptUrl: string | undefined;
+};
+
+// OrderStripeDetails carries admin-only financial and Stripe metadata for an order.
+// It is NOT part of the customer-facing order (kept off common.Order/common.Payment,
+// which the storefront shares) and is attached only to admin responses. All amounts
+// are in the base currency (EUR); fields are empty when not captured.
+export type OrderStripeDetails = {
+  // total_settled_base is the actual amount Stripe settled in the base currency (EUR)
+  // at Stripe's FX rate — the authoritative "how much we received" figure.
+  totalSettledBase: googletype_Decimal | undefined;
+  // payment_fee is the Stripe processing fee (EUR) from the same balance transaction.
+  paymentFee: googletype_Decimal | undefined;
+  // net_settled_base = total_settled_base - payment_fee (EUR), what actually reached us.
+  netSettledBase: googletype_Decimal | undefined;
+  // stripe_exchange_rate is the presentment->settlement FX rate Stripe applied at the sale.
+  stripeExchangeRate: googletype_Decimal | undefined;
+  cardBrand: string | undefined;
+  cardLast4: string | undefined;
+  riskLevel: string | undefined;
+  // stripe_dashboard_url deep-links to the payment in the Stripe dashboard (test vs live
+  // resolved from the order's payment method). Empty when the PaymentIntent id is unknown.
+  stripeDashboardUrl: string | undefined;
+};
+
+// PaymentMethod represents the payment_method table
+export type PaymentMethod = {
+  id: number | undefined;
+  name: PaymentMethodNameEnum | undefined;
+  allowed: boolean | undefined;
+};
+
+// PromoCodeInsert represents the nested structure within PromoCode
+export type PromoCodeInsert = {
+  code: string | undefined;
+  freeShipping: boolean | undefined;
+  discount: googletype_Decimal | undefined;
+  expiration: wellKnownTimestamp | undefined;
+  start: wellKnownTimestamp | undefined;
+  allowed: boolean | undefined;
+  voucher: boolean | undefined;
+};
+
+// PromoCode represents the promo_code table
+export type PromoCode = {
+  promoCodeInsert: PromoCodeInsert | undefined;
+};
+
+export type ShippingRegion =
+  | "SHIPPING_REGION_UNKNOWN"
+  | "SHIPPING_REGION_AFRICA"
+  | "SHIPPING_REGION_AMERICAS"
+  | "SHIPPING_REGION_ASIA_PACIFIC"
+  | "SHIPPING_REGION_EUROPE"
+  | "SHIPPING_REGION_MIDDLE_EAST";
+export type ShipmentCarrierPrice = {
+  currency: string | undefined;
+  price: googletype_Decimal | undefined;
+};
+
+export type ShipmentCarrierInsert = {
+  carrier: string | undefined;
+  allowed: boolean | undefined;
+  description: string | undefined;
+  trackingUrl: string | undefined;
+  expectedDeliveryTime: string | undefined;
+  // aftership_slug is the AfterShip courier slug used to auto-track this carrier's shipments.
+  // Empty = the carrier has no tracking API, so its orders are auto-delivered only by the timer.
+  aftershipSlug: string | undefined;
+  // auto_deliver_after_hours is the timer safety-net window: hours after shipment to silently mark
+  // an order delivered when no real delivery signal arrived. 0 = use the server default (14 days).
+  autoDeliverAfterHours: number | undefined;
+};
+
+export type ShipmentCarrier = {
+  id: number | undefined;
+  shipmentCarrier: ShipmentCarrierInsert | undefined;
+  prices: ShipmentCarrierPrice[] | undefined;
+  allowedRegions: ShippingRegion[] | undefined;
+};
+
+// Shipment represents the shipment table
+export type Shipment = {
+  cost: googletype_Decimal | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  carrierId: number | undefined;
+  trackingCode: string | undefined;
+  shippingDate: wellKnownTimestamp | undefined;
+  estimatedArrivalDate: wellKnownTimestamp | undefined;
+  freeShipping: boolean | undefined;
+  // actual_cost is the real carrier invoice for this shipment (EUR), distinct from cost
+  // (the price charged to the customer). NULL until an operator enters it.
+  actualCost: googletype_Decimal | undefined;
+  // return_shipping_cost is the reverse-logistics cost of a return (EUR), NULL when the
+  // order was not returned.
+  returnShippingCost: googletype_Decimal | undefined;
+};
+
+export type OrderItemAdjustmentReasonEnum =
+  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_UNKNOWN"
+  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_OUT_OF_STOCK"
+  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_REDUCED"
+  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_CAPPED";
+export type OrderStatusEnum =
+  | "ORDER_STATUS_ENUM_UNKNOWN"
+  | "ORDER_STATUS_ENUM_PLACED"
+  | "ORDER_STATUS_ENUM_AWAITING_PAYMENT"
+  | "ORDER_STATUS_ENUM_CONFIRMED"
+  | "ORDER_STATUS_ENUM_SHIPPED"
+  | "ORDER_STATUS_ENUM_DELIVERED"
+  | "ORDER_STATUS_ENUM_CANCELLED"
+  | "ORDER_STATUS_ENUM_PENDING_RETURN"
+  | "ORDER_STATUS_ENUM_REFUND_IN_PROGRESS"
+  | "ORDER_STATUS_ENUM_REFUNDED"
+  | "ORDER_STATUS_ENUM_PARTIALLY_REFUNDED";
+export type ProductRatingEnum =
+  | "PRODUCT_RATING_ENUM_UNKNOWN"
+  | "PRODUCT_RATING_ENUM_POOR"
+  | "PRODUCT_RATING_ENUM_FAIR"
+  | "PRODUCT_RATING_ENUM_GOOD"
+  | "PRODUCT_RATING_ENUM_VERY_GOOD"
+  | "PRODUCT_RATING_ENUM_EXCELLENT";
+export type FitScaleEnum =
+  | "FIT_SCALE_ENUM_UNKNOWN"
+  | "FIT_SCALE_ENUM_RUNS_SMALL"
+  | "FIT_SCALE_ENUM_SLIGHTLY_SMALL"
+  | "FIT_SCALE_ENUM_TRUE_TO_SIZE"
+  | "FIT_SCALE_ENUM_SLIGHTLY_LARGE"
+  | "FIT_SCALE_ENUM_RUNS_LARGE";
+export type DeliverySpeedEnum =
+  | "DELIVERY_SPEED_ENUM_UNKNOWN"
+  | "DELIVERY_SPEED_ENUM_MUCH_FASTER_THAN_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_FASTER_THAN_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_AS_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_SLOWER_THAN_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_MUCH_SLOWER_THAN_EXPECTED";
+export type PackagingConditionEnum =
+  | "PACKAGING_CONDITION_ENUM_UNKNOWN"
+  | "PACKAGING_CONDITION_ENUM_DAMAGED"
+  | "PACKAGING_CONDITION_ENUM_ACCEPTABLE"
+  | "PACKAGING_CONDITION_ENUM_GOOD"
+  | "PACKAGING_CONDITION_ENUM_EXCELLENT";
+export type OrderNew = {
+  items: OrderItemInsert[] | undefined;
+  shippingAddress: AddressInsert | undefined;
+  billingAddress: AddressInsert | undefined;
+  buyer: BuyerInsert | undefined;
+  paymentMethod: PaymentMethodNameEnum | undefined;
+  shipmentCarrierId: number | undefined;
+  promoCode: string | undefined;
+  currency: string | undefined;
+  // locale is the storefront site locale at purchase time (ISO-639-1: en/fr/de/it/ja/zh/ko).
+  // Used to localize the order's transactional emails when the buyer has no explicit account
+  // language. Empty on the admin custom-order path.
+  locale: string | undefined;
+};
+
+export type OrderItemInsert = {
+  quantity: number | undefined;
+  variantSku: string | undefined;
+};
+
+export type OrderFull = {
+  order: Order | undefined;
+  orderItems: OrderItem[] | undefined;
+  refundedOrderItems: OrderItem[] | undefined;
+  payment: Payment | undefined;
+  shipment: Shipment | undefined;
+  promoCode: PromoCode | undefined;
+  buyer: Buyer | undefined;
+  billing: Address | undefined;
+  shipping: Address | undefined;
+  statusHistory: OrderStatusHistory[] | undefined;
+  orderReview?: OrderReviewFull;
+};
+
+export type Order = {
+  id: number | undefined;
+  uuid: string | undefined;
+  placed: wellKnownTimestamp | undefined;
+  modified: wellKnownTimestamp | undefined;
+  totalPrice: googletype_Decimal | undefined;
+  currency: string | undefined;
+  orderStatusId: number | undefined;
+  promoId: number | undefined;
+  refundReason: string | undefined;
+  orderComment: string | undefined;
+  refundedAmount: googletype_Decimal | undefined;
+  // Buyer identity for the order-list projection: populated by the paged ListOrders query (which
+  // already joins buyer), so the admin orders list shows who placed the order instead of a raw UUID.
+  // Empty on read paths that don't project the buyer — OrderFull carries a full Buyer message instead.
+  buyerEmail: string | undefined;
+  buyerFirstName: string | undefined;
+  buyerLastName: string | undefined;
+  // vat_regime is the VAT treatment snapshotted onto the order at accounting-posting time
+  // (customer_order.vat_regime): oss / pl_domestic / export / wdt / uk_stock_domestic / none. Empty
+  // until the order's sale event is posted. Surfaced so the invoice can print the legally-required
+  // note for zero-VAT regimes — notably wdt (intra-community B2B supply → reverse charge).
+  vatRegime: string | undefined;
+  // buyer_vat_id is the B2B buyer's EU VAT identifier (2-letter country prefix + digits), set on
+  // custom orders only; empty for B2C/storefront orders. Surfaced so a reverse-charge invoice can
+  // print the buyer's VAT number, which substantiates the zero-rated intra-community supply.
+  buyerVatId: string | undefined;
+  // locale is the storefront site locale captured at purchase (ISO-639-1). Surfaced for the
+  // admin order view. Empty on pre-feature orders and admin custom orders.
+  locale: string | undefined;
+};
+
+export type OrderItem = {
+  id: number | undefined;
+  orderId: number | undefined;
+  thumbnail: string | undefined;
+  blurhash: string | undefined;
+  productPrice: string | undefined;
+  productPriceWithSale: string | undefined;
+  productSalePercentage: string | undefined;
+  productBrand: string | undefined;
+  slug: string | undefined;
+  color: string | undefined;
+  topCategoryId: number | undefined;
+  subCategoryId: number | undefined;
+  typeId: number | undefined;
+  // R2/p021: the frozen variant SKU of the sold line (immutable snapshot; no live fallback). Renamed
+  // from `sku`.
+  variantSkuSnapshot: string | undefined;
+  preorder: wellKnownTimestamp | undefined;
+  orderItem: OrderItemInsert | undefined;
+  translations: ColorwayInsertTranslation[] | undefined;
+  baseSkuSnapshot: string | undefined;
+  sizeNameSnapshot: string | undefined;
+};
+
+export type OrderStatusHistory = {
+  id: number | undefined;
+  orderId: number | undefined;
+  status: OrderStatusEnum | undefined;
+  changedAt: wellKnownTimestamp | undefined;
+  changedBy: string | undefined;
+  notes: string | undefined;
+};
+
+// Combined review for an order (order-level + item-level)
+export type OrderReviewFull = {
+  orderReview: OrderReview | undefined;
+  itemReviews: OrderItemReview[] | undefined;
+};
+
+// Order-level review (delivery & packaging)
+export type OrderReview = {
+  id: number | undefined;
+  orderId: number | undefined;
+  deliveryRating: DeliverySpeedEnum | undefined;
+  packagingRating: PackagingConditionEnum | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  reviewText: string | undefined;
+  sophisticationRating: ProductRatingEnum | undefined;
+};
+
+// Item-level review (product rating, fit, recommendation)
+export type OrderItemReview = {
+  id: number | undefined;
+  orderItemId: number | undefined;
+  rating: ProductRatingEnum | undefined;
+  fitRating: FitScaleEnum | undefined;
+  recommend: boolean | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// CustomOrderItemInsert allows custom pricing per item (admin-only). Admin addresses the variant by its
+// internal id (R2).
+export type CustomOrderItemInsert = {
+  quantity: number | undefined;
+  customPrice: googletype_Decimal | undefined;
+  variantId: number | undefined;
+};
+
+// OrderItemAdjustment describes a change made during order item validation.
+export type OrderItemAdjustment = {
+  requestedQuantity: googletype_Decimal | undefined;
+  adjustedQuantity: googletype_Decimal | undefined;
+  reason: OrderItemAdjustmentReasonEnum | undefined;
+  variantSkuSnapshot: string | undefined;
+};
+
+export type OrderStatus = {
+  id: number | undefined;
+  name: OrderStatusEnum | undefined;
+};
+
+export type OrderReviewInsert = {
+  deliveryRating: DeliverySpeedEnum | undefined;
+  packagingRating: PackagingConditionEnum | undefined;
+  reviewText: string | undefined;
+  sophisticationRating: ProductRatingEnum | undefined;
+};
+
+export type OrderItemReviewInsert = {
+  orderItemId: number | undefined;
+  rating: ProductRatingEnum | undefined;
+  fitRating: FitScaleEnum | undefined;
+  recommend: boolean | undefined;
+};
+
+export type Dictionary = {
+  categories: Category[] | undefined;
+  measurements: MeasurementName[] | undefined;
+  orderStatuses: OrderStatus[] | undefined;
+  paymentMethods: PaymentMethod[] | undefined;
+  shipmentCarriers: ShipmentCarrier[] | undefined;
+  sizes: Size[] | undefined;
+  collections: Collection[] | undefined;
+  languages: Language[] | undefined;
+  siteEnabled: boolean | undefined;
+  maxOrderItems: number | undefined;
+  baseCurrency: string | undefined;
+  bigMenu: boolean | undefined;
+  announce: Announce | undefined;
+  orderExpirationSeconds: number | undefined;
+  complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
+  isProd: boolean | undefined;
+  // Hero section background color for the storefront (CSS). Empty if unset.
+  backgroundHeroColor: string | undefined;
+  productTags: string[] | undefined;
+  colors: Color[] | undefined;
+  countries: Country[] | undefined;
+  fibers: Fiber[] | undefined;
+  tags: Tag[] | undefined;
+  skuContractVersion: string | undefined;
+  revisions: DictionaryRevision[] | undefined;
+  categorySizeSystems: CategorySizeSystem[] | undefined;
+  careSymbols: CareSymbol[] | undefined;
+};
+
+export type Collection = {
+  name: string | undefined;
+  countMen: number | undefined;
+  countWomen: number | undefined;
+  code: string | undefined;
+  archived: boolean | undefined;
+  id: number | undefined;
+};
+
+// Country is an ISO 3166-1 alpha-2 controlled dictionary (R9). Arbitrary creation is forbidden — the
+// full ISO list is seeded and only activation toggles.
+export type Country = {
+  code: string | undefined;
+  name: string | undefined;
+  active: boolean | undefined;
+};
+
+// Fiber is one entry of the controlled fibre vocabulary (COT/POL/WOL/…): a material's structural
+// composition references these codes, and a style's composition is derived from its shell-fabric
+// materials' fibres. Authored via the dictionary (CreateFiber/ArchiveFiber).
+export type Fiber = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
+};
+
+// Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
+// admin-only.
+export type Tag = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
+  id: number | undefined;
+};
+
+// DictionaryRevision is a per-namespace revision snapshot used for cross-instance cache invalidation (R9).
+export type DictionaryRevision = {
+  namespace: string | undefined;
+  revision: number | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// CareSymbol is one entry of the controlled ISO 3758 care vocabulary — the dictionary a style's
+// stored care code string resolves against, exactly as Fiber backs the composition model.
+// The CODE is what is stored on the style, what the label generator consumes and what prints on the
+// sewn tag; everything else here is display data. name is the admin picker's label; short_prose is
+// the customer-facing wording ("machine wash 30°"). Both arrive in the caller's language when a
+// translation exists, falling back to English otherwise.
+// Symbol ARTWORK is deliberately not here: it is a client asset keyed by code, so a renderer picks
+// its own drawing. These are not the trademarked GINETEX glyphs.
+export type CareSymbol = {
+  code: string | undefined;
+  category: string | undefined;
+  subCategory: string | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
+  sortOrder: number | undefined;
+  archived: boolean | undefined;
+  // Customer wording per language, for the storefront to render care in the buyer's language. The
+  // full set travels with the dictionary and the client picks, exactly as ColorwayInsertTranslation
+  // does -- rather than the server resolving one language per read.
+  translations: CareSymbolTranslation[] | undefined;
+};
+
+// CareSymbolTranslation is one language's customer-facing wording for a care symbol. name is
+// optional: the admin picker is English-only, so most rows carry prose alone and fall back to
+// CareSymbol.name.
+export type CareSymbolTranslation = {
+  languageId: number | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
+};
+
+export type Genders = {
+  id: GenderEnum | undefined;
+  name: string | undefined;
+};
+
+export type OrderFactors = {
+  id: OrderFactor | undefined;
+  name: string | undefined;
+};
+
+export type SortFactors = {
+  id: SortFactor | undefined;
+  name: string | undefined;
+};
+
+// EmailBlockType identifies the payload carried by an EmailBlock.
+export type EmailBlockType =
+  | "EMAIL_BLOCK_TYPE_UNKNOWN"
+  | "EMAIL_BLOCK_TYPE_HEADER"
+  | "EMAIL_BLOCK_TYPE_IMAGE_LINK"
+  | "EMAIL_BLOCK_TYPE_RICH_TEXT"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_CARD"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_GRID"
+  | "EMAIL_BLOCK_TYPE_CTA_BUTTON"
+  | "EMAIL_BLOCK_TYPE_DIVIDER"
+  | "EMAIL_BLOCK_TYPE_SPACER"
+  | "EMAIL_BLOCK_TYPE_TWO_COLUMN"
+  | "EMAIL_BLOCK_TYPE_SOCIAL_LINKS"
+  | "EMAIL_BLOCK_TYPE_COUNTDOWN"
+  | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
+export type EmailCampaignTopic =
+  | "EMAIL_CAMPAIGN_TOPIC_UNKNOWN"
+  | "EMAIL_CAMPAIGN_TOPIC_NEWSLETTER"
+  | "EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS"
+  | "EMAIL_CAMPAIGN_TOPIC_EVENTS";
+export type EmailCampaignStatus =
+  | "EMAIL_CAMPAIGN_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_STATUS_DRAFT"
+  | "EMAIL_CAMPAIGN_STATUS_SCHEDULED"
+  | "EMAIL_CAMPAIGN_STATUS_SENDING"
+  | "EMAIL_CAMPAIGN_STATUS_PAUSED"
+  | "EMAIL_CAMPAIGN_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_STATUS_CANCELLED";
+export type ABDimension =
+  | "AB_DIMENSION_UNKNOWN"
+  | "AB_DIMENSION_SUBJECT"
+  | "AB_DIMENSION_CONTENT";
+export type EmailCampaignRecipientStatus =
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
+export type EmailCampaignCohort =
+  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
+  | "EMAIL_CAMPAIGN_COHORT_AB"
+  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
+export type SegmentOp =
+  | "SEGMENT_OP_UNKNOWN"
+  | "SEGMENT_OP_AND"
+  | "SEGMENT_OP_OR";
+// EmailLink is localized link copy used by header-style blocks.
+export type EmailLink = {
+  label: string | undefined;
+  url: string | undefined;
+};
+
+// EmailBlockTranslation is the shared translation superset for every block.
+// Each block type consumes only the fields it needs.
+export type EmailBlockTranslation = {
+  languageId: number | undefined;
+  heading: string | undefined;
+  subheading: string | undefined;
+  body: string | undefined;
+  caption: string | undefined;
+  ctaLabel: string | undefined;
+  ctaUrl: string | undefined;
+  altText: string | undefined;
+  preheader: string | undefined;
+  links: EmailLink[] | undefined;
+};
+
+export type EmailHeaderBlock = {
+  logoMediaId: number | undefined;
+  // logo_position controls the brand logo alignment: left | center | right (default center).
+  logoPosition: string | undefined;
+};
+
+export type EmailImageLinkBlock = {
+  mediaId: number | undefined;
+  url: string | undefined;
+  // aspect is the display aspect ratio: 16:9 | 1:1 | 4:5 (default 16:9).
+  aspect: string | undefined;
+};
+
+export type EmailRichTextBlock = {
+};
+
+export type EmailProductCardBlock = {
+  productId: number | undefined;
+};
+
+export type EmailProductGridBlock = {
+  productIds: number[] | undefined;
+  columns: number | undefined;
+};
+
+export type EmailCTAButtonBlock = {
+  style: string | undefined;
+  alignment: string | undefined;
+};
+
+export type EmailDividerBlock = {
+  color: string | undefined;
+  height: number | undefined;
+};
+
+export type EmailSpacerBlock = {
+  height: number | undefined;
+};
+
+export type EmailTwoColumnBlock = {
+  left: EmailBlock[] | undefined;
+  right: EmailBlock[] | undefined;
+};
+
+// EmailBlock is an ordered, typed campaign-body block. Exactly the payload that
+// corresponds to type should be populated.
+export type EmailBlock = {
+  type: EmailBlockType | undefined;
+  header: EmailHeaderBlock | undefined;
+  imageLink: EmailImageLinkBlock | undefined;
+  richText: EmailRichTextBlock | undefined;
+  productCard: EmailProductCardBlock | undefined;
+  productGrid: EmailProductGridBlock | undefined;
+  ctaButton: EmailCTAButtonBlock | undefined;
+  divider: EmailDividerBlock | undefined;
+  spacer: EmailSpacerBlock | undefined;
+  twoColumn: EmailTwoColumnBlock | undefined;
+  socialLinks: EmailSocialLinksBlock | undefined;
+  countdown: EmailCountdownBlock | undefined;
+  videoThumb: EmailVideoThumbBlock | undefined;
+  backgroundColor: string | undefined;
+  translations: EmailBlockTranslation[] | undefined;
+};
+
+export type EmailSocialLinksBlock = {
+  links: EmailSocialLink[] | undefined;
+};
+
+export type EmailSocialLink = {
+  network: string | undefined;
+  url: string | undefined;
+};
+
+export type EmailCountdownBlock = {
+  endsAt: number | undefined;
+};
+
+export type EmailVideoThumbBlock = {
+  mediaId: number | undefined;
+  videoUrl: string | undefined;
+};
+
+export type ABConfig = {
+  enabled: boolean | undefined;
+  dimension: ABDimension | undefined;
+  testPct: number | undefined;
+  decisionAfterMinutes: number | undefined;
+  winnerVariantId: number | undefined;
+};
+
+export type SubjectTranslation = {
+  languageId: number | undefined;
+  subject: string | undefined;
+};
+
+export type EmailCampaignVariant = {
+  id: number | undefined;
+  label: string | undefined;
+  subjectI18n: SubjectTranslation[] | undefined;
+  // Empty means inherit the campaign-level body.
+  body: EmailBlock[] | undefined;
+  isWinner: boolean | undefined;
+};
+
+export type EmailCampaignInsert = {
+  name: string | undefined;
+  topic: EmailCampaignTopic | undefined;
+  body: EmailBlock[] | undefined;
+  backgroundColor: string | undefined;
+  fromName: string | undefined;
+  fromEmail: string | undefined;
+  replyTo: string | undefined;
+  scheduleAt: number | undefined;
+  abConfig: ABConfig | undefined;
+  variants: EmailCampaignVariant[] | undefined;
+  status: EmailCampaignStatus | undefined;
+  segmentId: number | undefined;
+};
+
+export type EmailCampaignFull = {
+  id: number | undefined;
+  name: string | undefined;
+  topic: EmailCampaignTopic | undefined;
+  body: EmailBlock[] | undefined;
+  backgroundColor: string | undefined;
+  fromName: string | undefined;
+  fromEmail: string | undefined;
+  replyTo: string | undefined;
+  scheduleAt: number | undefined;
+  abConfig: ABConfig | undefined;
+  variants: EmailCampaignVariant[] | undefined;
+  status: EmailCampaignStatus | undefined;
+  segmentId: number | undefined;
+  createdBy: string | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
+  sendingStartedAt: number | undefined;
+  sentAt: number | undefined;
+  audienceSnapshotAt: number | undefined;
+  fanoutMaxAccountId: number | undefined;
+  fanoutCursorAccountId: number | undefined;
+  audienceMaterializedAt: number | undefined;
+  recipientCount: number | undefined;
+  dispatchError: string | undefined;
+};
+
+export type EmailCampaignDispatchStatus = {
+  campaignId: number | undefined;
+  status: EmailCampaignStatus | undefined;
+  audienceMaterializedAt: number | undefined;
+  dispatchError: string | undefined;
+  recipientCount: number | undefined;
+  pending: number | undefined;
+  accepted: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+};
+
+export type CampaignMetricCounts = {
+  total: number | undefined;
+  pending: number | undefined;
+  sent: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+  delivered: number | undefined;
+  uniqueOpened: number | undefined;
+  totalOpens: number | undefined;
+  uniqueClicked: number | undefined;
+  totalClicks: number | undefined;
+  bounced: number | undefined;
+  complained: number | undefined;
+  unsubscribed: number | undefined;
+};
+
+export type CampaignMetricRates = {
+  deliveryRate: number | undefined;
+  openRate: number | undefined;
+  clickRate: number | undefined;
+  clickToOpenRate: number | undefined;
+  bounceRate: number | undefined;
+  complaintRate: number | undefined;
+};
+
+export type CampaignVariantMetrics = {
+  variantId: number | undefined;
+  label: string | undefined;
+  counts: CampaignMetricCounts | undefined;
+  rates: CampaignMetricRates | undefined;
+};
+
+// Read-only compute-on-read aggregates over email_campaign_recipient.
+export type CampaignMetrics = {
+  campaignId: number | undefined;
+  counts: CampaignMetricCounts | undefined;
+  rates: CampaignMetricRates | undefined;
+  variants: CampaignVariantMetrics[] | undefined;
+};
+
+// Public admin ledger projection. Provider idempotency/claim/hash/render
+// internals are deliberately absent.
+export type EmailCampaignRecipient = {
+  id: number | undefined;
+  campaignId: number | undefined;
+  accountId: number | undefined;
+  email: string | undefined;
+  languageId: number | undefined;
+  variantId: number | undefined;
+  cohort: EmailCampaignCohort | undefined;
+  status: EmailCampaignRecipientStatus | undefined;
+  attemptCount: number | undefined;
+  resendEmailId: string | undefined;
+  errorCode: string | undefined;
+  lastError: string | undefined;
+  nextAttemptAt: number | undefined;
+  sentAt: number | undefined;
+  completedAt: number | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
+};
+
+// SegmentNode is either a branch (op + children) or a leaf (field/operator/values).
+export type SegmentNode = {
+  op: SegmentOp | undefined;
+  children: SegmentNode[] | undefined;
+  field: string | undefined;
+  operator: string | undefined;
+  values: string[] | undefined;
+};
+
+export type SegmentPredicate = {
+  root: SegmentNode | undefined;
+};
+
+export type EmailSegment = {
+  id: number | undefined;
+  name: string | undefined;
+  description: string | undefined;
+  predicate: SegmentPredicate | undefined;
+  lastCount: number | undefined;
+  lastCountAt: number | undefined;
+};
+
+export type RenderWarning = {
+  blockIndex: number | undefined;
+  reason: string | undefined;
 };
 
 // FittingStatus is the lifecycle state of a fitting session.
