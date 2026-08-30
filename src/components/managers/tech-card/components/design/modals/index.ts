@@ -25,7 +25,8 @@
  *                    procedure. In a build that performs the procedure it explains nothing.
  */
 
-export { CompareModal } from './compare-modal';
+// `CompareModal` жила здесь и умерла вместе с циклом починки (S-15): её единственная дверь —
+// «compare ▸» на полосе «fix is in» — снята, а модалка без двери — это экспорт в никуда.
 export { DiffModal } from './diff-modal';
 export { NewDetailModal } from './new-detail-modal';
 export { PreconditionsModal } from './preconditions-modal';

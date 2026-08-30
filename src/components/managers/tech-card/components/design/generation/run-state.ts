@@ -94,9 +94,26 @@ export function runOutcomeNote(run: common_DesignRun): string {
     const why = (run.errorCode ?? '').trim() || (run.lastError ?? '').trim();
     return why ? `failed · ${why}` : 'failed';
   }
-  if (status === 'cancelled') return 'cancelled';
+  /* ОТКАЗ ВИДЕН НЕ ТОЛЬКО У МЁРТВОГО ПРОГОНА, И ЭТО НЕ УКРАШЕНИЕ (S-12).
+   *
+   * Владелец: «оно 3 раза попробывало и я отключил никаких ошибок я не поулчил». Он смотрел на
+   * ЖИВОЙ прогон. Сервер честно писал `error_code` на строку после каждой неудачной попытки и
+   * честно слал его сюда — а эта функция отдавала код ТОЛЬКО при статусе `failed`. Живой прогон
+   * рисовался голым «pending», отменённый — голым «cancelled», и три HTTP-400 подряд не оставили
+   * на экране ни следа.
+   *
+   * Поэтому код показывается везде, где он есть:
+   *   · живой прогон с кодом — это ПОВТОР после неудачи, и слово «retrying» честнее, чем «pending»:
+   *     оно говорит, что попытка уже была и чем она кончилась;
+   *   · отменённый прогон с кодом — человек оборвал не тишину, а что-то конкретное, и после отмены
+   *     он вправе узнать, что именно.
+   *
+   * Причина берётся тем же порядком, что и у `failed`: машинный код, а если его нет — текст
+   * последней ошибки. */
+  const why = (run.errorCode ?? '').trim() || (run.lastError ?? '').trim();
+  if (status === 'cancelled') return why ? `cancelled · ${why}` : 'cancelled';
   if (isCancelling(run)) return 'cancelling…';
-  return status;
+  return why ? `retrying · ${why}` : status;
 }
 
 /**

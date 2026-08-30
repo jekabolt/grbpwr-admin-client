@@ -1148,9 +1148,12 @@ export function importSvg(text: string): SvgImportResult {
   );
   // SAID ON EVERY IMPORT, because the alternative is somebody assuming the file they brought is the
   // file that comes back out. The layer stores the editable PROJECTION; the bytes on disk stay on
-  // disk. `ImportDesignVector` is the verb that will keep the original alongside the projection —
-  // it exists in the contract and is not yet answered by a deployed server, and wiring a door to a
-  // verb that returns Unimplemented is exactly the half-working door this task was told to avoid.
+  // disk. `ImportDesignVector` — the verb that keeps an original alongside its projection — is
+  // deployed now and used by the machine-vectorisation acceptance (use-trace-vector.ts), but it
+  // FILES A NEW LAYER, and this door pours strokes into a drawing whose layer may already exist:
+  // wiring it here would put a second layer on one base, and the band's readers
+  // (findLayerForMedia) would keep answering with the first. Keeping the original for a
+  // hand-imported file therefore waits for a verb that can attach a file to an EXISTING layer.
   notes.push(
     'the file itself is not kept — what lands on the layer is the editable drawing, so «download SVG» writes a fresh file rather than handing your original back.',
   );

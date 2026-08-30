@@ -223,7 +223,11 @@ export function SplitCornerButton({
       aria-label={ariaLabel}
       aria-busy={pending || undefined}
       className={cn(
-        'border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label text-labelColor hover:text-textColor disabled:text-textInactiveColor',
+        // Тот же видимый фокус, что у примитива `Button`: у клавиатуры наведения не бывает, а
+        // тихий угловой орган без обводки было бы не найти. Проверено замером computed-стиля на
+        // стенде — cn/twMerge пару outline/outline-2 не съедает.
+        'border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
         className,
         pending && 'opacity-100',
       )}

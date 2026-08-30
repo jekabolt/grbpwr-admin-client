@@ -6,7 +6,7 @@ import { Section, SectionStack } from 'ui/components/section';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
 import { ConceptSection } from './concept-section';
-import { GenerationStudio, FixContextProvider, FixContext } from './generation';
+import { GenerationStudio } from './generation';
 import { KindsStrip, type DesignKind } from './kinds-strip';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
@@ -118,9 +118,10 @@ export function StudioTab({
   return (
     <DesignCapabilityProvider value={!bandless}>
       <PickModeProvider>
-        {/* Починка живёт РЯДОМ с режимом выбора, а не внутри генерации: полосу починки зажигает
-            дверь на слоте верстака, а гасит запуск прогона — два разных органа, одно состояние. */}
-        <FixContextProvider>
+        {/* `FixContextProvider` здесь БОЛЬШЕ НЕ МОНТИРУЕТСЯ: цикл починки снят (S-15), взводить
+            контекст стало некому. Сам `fix-context.tsx` жив — `generation-form` читает
+            `useFixContext` и получает инертный дефолт («no fix armed»), что и задумано его же
+            шапкой как отказоустойчивая поза вне провайдера. */}
         <PickBanner />
         <SectionStack>
           {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ (`proto.html:3875-3893`), А НЕ С ПАМЯТЬЮ:
@@ -164,12 +165,9 @@ export function StudioTab({
                   <div id='design-input'>
                     <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
                   </div>
-                  {/* ОДИН ЧИП НА ЭКРАН, и он здесь — НАД формой, как в прототипе. Заявка на
-                      правку, сделанная нажатием `fix ▸` в слоте, обязана быть видна и тогда,
-                      когда форма свёрнута и до неё ещё не долистали. Второй такой же чип стоял
-                      внутри самой формы; пока она развёрнута, оба рисовали одну заявку, и это
-                      читалось как две разные. Снят там, оставлен здесь. */}
-                  <FixContext band={band} techCardId={techCardId} disabled={readOnly} />
+                  {/* Чип `fix: …` стоял здесь, над формой. Ушёл вместе с циклом починки (S-15):
+                      взводить заявку больше нечем, а чип без писателя — орган, который не может
+                      загореться никогда. */}
                   <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
               )}
@@ -208,7 +206,6 @@ export function StudioTab({
           <ConceptSection disabled={readOnly} />
           {constructionAspects}
         </SectionStack>
-        </FixContextProvider>
       </PickModeProvider>
     </DesignCapabilityProvider>
   );

@@ -1,4 +1,8 @@
-import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignRun,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo } from 'react';
@@ -11,6 +15,8 @@ import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
+import { isRunLive } from '../generation/run-state';
+import { clockStamp, runHandle } from '../handles';
 import { openDoor, type CalloutLike } from '../mint-dialog';
 import type { BoardItem } from '../mood-board';
 import { viewLabel } from '../views';
@@ -40,6 +46,18 @@ import { viewLabel } from '../views';
  * THE PROMPT NUMBERS ARE DENSE AND DERIVED, exactly as the references block computes them: a scan
  * in board order, skipping the roleless. A stored number would need N writes every time a role is
  * cleared and would disagree with the block next to it after the first race.
+ *
+ * AND THE SENT TEXT ITSELF — `run.prompt` of the latest flat run — CLOSES THE OWNER'S CLAIM «if
+ * there are comments/example prompts I wrote, why weren't they added». His paragraphs WERE in every
+ * dispatch; nothing on any screen showed the words, so the inventory above read as the whole story.
+ * The worker stores the composed base instruction at dispatch (never rebuilt on read), and this
+ * panel now shows that text verbatim. The inventory stays: it answers «which pictures travelled»,
+ * the text answers «in what words».
+ *
+ * ⚠ AN EMPTY `prompt` MEANS TWO DIFFERENT THINGS and the contract forbids collapsing them: either
+ * no worker has picked the run up yet (a live row), or the run predates the column (migration 0352
+ * — historical rows are empty FOREVER, the text was never kept). «Not dispatched yet» over an old
+ * finished run would be a lie about history, so the two are told apart by the run's state below.
  */
 
 const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
@@ -130,6 +148,31 @@ export function WhatModelGetsModal({
   }, [items, roleOf, noteOf]);
 
   const moodCount = items.filter((i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId)).length;
+
+  /**
+   * THE LATEST FLAT RUN — the newest row of THIS door's kind. This modal is the flat form's panel
+   * («what the model gets — flat»); a render's or a vector's text under its title would answer a
+   * question nobody asked here. Newest by id, not by array position: the band's page order is a
+   * server detail this panel has no business trusting.
+   */
+  const lastRun = useMemo(() => {
+    let best: common_DesignRun | null = null;
+    for (const run of band.runs ?? []) {
+      if ((run.kind ?? '').trim().toLowerCase() !== 'flat') continue;
+      if ((run.id ?? 0) > (best?.id ?? 0)) best = run;
+    }
+    return best;
+  }, [band.runs]);
+  const sentText = (lastRun?.prompt ?? '').trim();
+  /**
+   * The contract's own deviation notes, spoken beside the text so nobody reads «base» as
+   * «transcript»: on `per_view` each paid call got «view: …» appended, and only the single-call
+   * flat route is byte-for-byte what the provider received.
+   */
+  const sentCaveat =
+    (lastRun?.params?.layout ?? '').trim() === 'per_view'
+      ? 'the base instruction — each view’s paid call also received its own «view: …» line appended'
+      : 'stored at dispatch — this is the text the provider received';
 
   const words = useMemo(
     () =>
@@ -310,6 +353,52 @@ export function WhatModelGetsModal({
               edit the fit ▸
             </Button>
           </div>
+        </div>
+
+        <div>
+          <GroupLabel
+            action={
+              lastRun ? (
+                <Text size='micro' variant='label' component='span'>
+                  {runHandle(lastRun.id)} · {clockStamp(lastRun.createdAt)}
+                </Text>
+              ) : undefined
+            }
+          >
+            words as sent
+          </GroupLabel>
+          {!lastRun ? (
+            <Text size='micro' variant='label' component='p'>
+              no flat run yet — the worker composes the sent text at dispatch, and this panel shows
+              the latest run’s copy.
+            </Text>
+          ) : sentText ? (
+            <>
+              {/* The same panel fill as «words», for the same reason — a tint, never a box in a
+                  box. The text is paragraphs long, so it scrolls INSIDE its own frame: wrapped and
+                  broken, never widening the page — a horizontal page scroll under a modal is the
+                  one defect this block could add. */}
+              <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+                {sentText}
+              </pre>
+              <Text size='nano' variant='label' component='p' className='mt-1'>
+                {sentCaveat}
+              </Text>
+            </>
+          ) : isRunLive(lastRun) ? (
+            <Text size='micro' variant='label' component='p'>
+              {runHandle(lastRun.id)} has not been dispatched yet — the worker writes the sent text
+              the moment it picks the run up.
+            </Text>
+          ) : (
+            /* A FINISHED run with no text is HISTORY, not a pending dispatch: rows older than the
+               prompt column never kept their text (and a run refused before dispatch never had
+               one). «Not sent yet» here would lie about the past — so it is never said. */
+            <Text size='micro' variant='label' component='p'>
+              no sent text on record for {runHandle(lastRun.id)} — the run predates the prompt
+              record or never reached dispatch; older runs never kept their text.
+            </Text>
+          )}
         </div>
       </div>
     </ConfirmationModal>

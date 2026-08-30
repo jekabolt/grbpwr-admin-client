@@ -420,6 +420,7 @@ function RunRow({
   cardFit,
   guard,
   disabled,
+  closedByDivider,
   onZoom,
   onHide,
   onSplit,
@@ -431,6 +432,13 @@ function RunRow({
   cardFit: string;
   guard: HideGuard;
   disabled?: boolean;
+  /**
+   * TRUE ON THE ROW THE `earlier` DIVIDER STANDS UNDER. That row yields its own list-row rule:
+   * the divider draws the closing-total line (1px ink) right below it, and a row that kept its
+   * hairline would put TWO drawn rules on one seam, 12px apart (S-8, measured) — the ladder in
+   * DESIGN.md gives every separation exactly one weight.
+   */
+  closedByDivider?: boolean;
   onZoom: (pictures: common_DesignPicture[], picture: common_DesignPicture) => void;
   onHide: (pictureId: number, hidden: boolean) => void;
   onSplit: (picture: common_DesignPicture) => void;
@@ -456,12 +464,21 @@ function RunRow({
    * the caption counts the selection rather than showing its first member and quietly dropping the
    * rest — «fix: front» on a row that repaired three slots is the kind of caption that gets
    * believed.
+   *
+   * ⚠ THE SAME WIRE FIELDS NO LONGER MEAN «FIX» ON EVERY KIND. The owner removed the fix cycle
+   * whole (S-15), and `fix_targets`/`fix_slot_ids` were INHERITED by the vector path: a machine
+   * redraw narrows itself to the plate its editor was opened from (`use-trace-vector.ts`), or the
+   * worker would redraw FRONT whatever the person was looking at. So on a `vector` row the
+   * selection is an ADDRESS, not a repair — and the word the owner ordered out must not sign every
+   * redraw. The pill below reads the kind: `redraw of front` on a vector row, and `fix: …` only on
+   * the flat rows already frozen with it — history is a record, and those rows WERE fixes.
    */
   const fix = fixSelectionOf(run);
   const fixNames = [
     ...fix.views.map((view) => viewLabel(view)),
     ...fix.slotIds.map(() => 'a detail'),
   ].filter(Boolean);
+  const isVector = (run.kind ?? '').trim().toLowerCase() === 'vector';
   const status = runOutcomeNote(run);
 
   /**
@@ -473,9 +490,13 @@ function RunRow({
   const isRecalled = recallable && (recalled?.id ?? 0) === runId && runId > 0;
   const rerunOf = run.rerunOf ?? 0;
 
+  const handle = runHandle(runId);
+  const caption = runCaption(run, firstRunId);
   const meta = [
-    runHandle(runId),
-    runCaption(run, firstRunId),
+    handle,
+    // An ask-less row that is not the first one is captioned by its number — which IS the handle,
+    // and printing «run 7 · run 7» says one thing twice.
+    caption === handle ? '' : caption,
     (run.author ?? '').trim(),
     clockStamp(run.createdAt),
     price,
@@ -484,14 +505,20 @@ function RunRow({
     .join(' · ');
 
   return (
-    <div className='space-y-1 border-b border-hairline pb-2 last:border-b-0'>
+    <div
+      className={cn(
+        'space-y-1 pb-2',
+        // See `closedByDivider` above: the seam under this row is drawn by exactly one rule.
+        !closedByDivider && 'border-b border-hairline last:border-b-0',
+      )}
+    >
       <div className='flex flex-wrap items-baseline gap-2'>
         <button
           type='button'
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           className='min-w-0 cursor-pointer text-left'
-          title='what was asked, and what the model was given'
+          title='what this run was given and what it cost — launch-time copies'
         >
           <Text
             size='micro'
@@ -503,11 +530,14 @@ function RunRow({
           </Text>
         </button>
 
-        {fixNames.length > 0 && (
-          <Pill tone='mut'>
-            fix: {fixNames.join(', ')} · from the slots
-          </Pill>
-        )}
+        {fixNames.length > 0 &&
+          (isVector ? (
+            <Pill tone='mut' title='which plate the machine was asked to redraw as vector curves'>
+              redraw of {fixNames.join(', ')}
+            </Pill>
+          ) : (
+            <Pill tone='mut'>fix: {fixNames.join(', ')} · from the slots</Pill>
+          ))}
         {/* THE LINEAGE OF A RERUN, READ FROM THE ROW ITSELF. `rerun_of` is the server's own edge —
             it says whose frozen snapshot this run was assembled from — so «why do these two rows
             have the same inputs and different pictures» is answerable from the history alone,
@@ -564,8 +594,8 @@ function RunRow({
               unarchive
             </button>
           ) : archiveWhy ? (
-            // The row states nothing here and the PANEL says why — a greyed-out «archive» beside a
-            // row whose pictures are all in a sheet reads as a broken control, not as a refusal.
+            // The reason lives in THIS line's own title — a greyed-out «archive» beside a row
+            // whose pictures are all in a sheet reads as a broken control, not as a refusal.
             <Text size='nano' variant='label' component='span' title={HIDE_BLOCK_LONG[archiveWhy]}>
               archive is off
             </Text>
@@ -585,7 +615,7 @@ function RunRow({
         </span>
       </div>
 
-      {open && <RunPanel band={band} techCardId={techCardId} run={run} disabled={disabled} />}
+      {open && <RunPanel techCardId={techCardId} run={run} disabled={disabled} />}
 
       {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE. Its pictures are NOT hidden — the ✕ is the only verb
           for that — they simply stop taking up the screen until the row is opened again. */}
@@ -632,14 +662,18 @@ function RunRow({
         </Tiles>
       )}
 
+      {/* A FAILED OR CANCELLED ROW WITH NOTHING UNDER IT SAYS NOTHING MORE (S-10): its own pill
+          already states the outcome, and the price on the line already keeps the cost. */}
       {!archived && !live && shown.length === 0 && (
-        <Text size='micro' variant='label'>
-          {pictures.length
-            ? 'every picture of this run is hidden — the link above brings them back'
-            : status.startsWith('failed') || status === 'cancelled'
-              ? 'no pictures — the row keeps what it cost anyway'
-              : 'no pictures under this row'}
-        </Text>
+        pictures.length ? (
+          <Text size='micro' variant='label'>
+            every picture of this run is hidden — the link above brings them back
+          </Text>
+        ) : status.startsWith('failed') || status === 'cancelled' ? null : (
+          <Text size='micro' variant='label'>
+            no pictures under this row
+          </Text>
+        )
       )}
     </div>
   );
@@ -858,6 +892,7 @@ export function GenerationHistory({
               firstRunId={firstRunId}
               cardFit={cardFit}
               guard={guard}
+              closedByDivider={i === pastAt - 1}
               disabled={disabled || !speaks}
               onZoom={openZoom}
               onHide={onHide}
@@ -906,13 +941,6 @@ export function GenerationHistory({
           host={false}
         />
       )}
-
-      <Text size='nano' variant='label' component='p'>
-        Click a run's line to unfold what was asked and what the model was given — launch-time
-        copies. `recall` puts that same frozen prompt in INPUT — REFERENCES, so a rerun can be asked
-        for from it. The picker on a tile names the slot it goes to; ✕ hides, reversibly, and it is
-        missing on a picture a slot reads.
-      </Text>
 
       {viewer && (
         <MediaViewer

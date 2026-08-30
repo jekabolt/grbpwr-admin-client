@@ -1,48 +1,37 @@
-import type {
-  GetDesignBandResponse,
-  common_DesignPicture,
-  common_MediaFull,
-} from 'api/proto-http/admin';
-import { cn } from 'lib/utility';
-import { useMemo } from 'react';
+import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
 
-import {
-  CompositeBadge,
-  CompositeMarks,
-  compositeTail,
-  readComposite,
-} from './generation/composite';
-import { pictureHandle, shelfBatchOrdinals } from './handles';
 import { usePickMode } from './pick-mode';
-import { mixedInputNote, provenanceLabel, readProvenance } from './provenance';
 import { isComposite } from './split-modal';
-import {
-  isPictureHidden,
-  selectVisiblePictures,
-  type HideGuard,
-} from './visibility';
-import { viewLabel } from './views';
+import { isPictureHidden, type HideGuard } from './visibility';
 
 /**
- * ЧТО ОСТАЛОСЬ ОТ ЛЕНТЫ. Колонка UPLOADS снесена решением владельца (R-18: «нам в принципе не
- * нужна колонка UPLOADS»), и снос стал возможен только потому, что результат сплита больше не
- * НУЖДАЕТСЯ в полке: кадры уезжают прямо во вход референсов с ролью вида (R-17/R-11 — роли пишет
- * СЕРВЕР в транзакции разреза), а принесённое руками живёт строками входа. Пять функций полки
- * разъехались по своим местам:
- *   1. дверь ручной загрузки → слот «+ reference» блока INPUT — REFERENCES и слоты «+ add …»
- *      пустых мест верстака;
- *   2. витрина принесённого → те же строки входа (и плиты верстака);
- *   3. ОТВЕЧАЮЩАЯ СТОРОНА РЕЖИМА ВЫБОРА → `PickTray` ниже, и это единственный орган, который
- *      здесь ещё рисует плитки;
- *   4. дверь сплита → угловая кнопка split на ячейке входа и на плите верстака
- *      (`split-to-input.tsx`);
- *   5. hide/зум/провенанс пачек → зум остался у входа, верстака и истории; ✕/unhide — у плиток
- *      истории прогонов; учёт пачек (автор·часы·счёт файлов) снесён вместе с полкой — он
- *      бухгалтерил гезту загрузки, а жест теперь оставляет след строкой входа.
+ * ЧТО ОСТАЛОСЬ ОТ ЛЕНТЫ: читающие хелперы и одна сноска отказа. Два сноса, оба — решением
+ * владельца, и второй доел то, что оставил первый.
+ *
+ * ПЕРВЫЙ (R-18): «нам в принципе не нужна колонка UPLOADS». Пять функций полки разошлись: дверь
+ * ручной загрузки → слот «+ reference» входа и «+ add …» пустых слотов верстака; витрина
+ * принесённого → строки входа и плиты верстака; дверь сплита → угловые кнопки split; учёт пачек
+ * снесён. Пятая — отвечать режиму выбора за пачечные картинки — переехала в лоток «brought by
+ * hand», который рисовался только при взведённом выборе.
+ *
+ * ВТОРОЙ (S-13): «BROUGHT BY HAND вкладка не нужна в принципе в ней нет смысла» — лоток снесён
+ * целиком. ЧТО ОН УНОСИТ С СОБОЙ, ПОИМЁННО: лоток был единственной поверхностью, где ПАЧЕЧНУЮ
+ * картинку (ручную загрузку или кроп сплита) можно было пометить в слот кликом из полосы. Теперь
+ * режиму выбора отвечают ТОЛЬКО плитки истории прогонов; принесённое руками и кропы входят в слот
+ * через его собственную медиа-дверь («+ add» — библиотека / ⌘V / бросок; файл, уже живущий на
+ * карточке, встаёт без перезагрузки), а занятый слот сначала освобождают unmark'ом. Жест R-11
+ * «кроп → В ЗАНЯТЫЙ слот одним кликом» умер вместе с лотком — это цена решения, и она названа
+ * здесь, а не съедена молча.
+ *
+ * ПОЧЕМУ СНОСКА ОСТАЛАСЬ И ВЫРОСЛА. Дверь «or mark a picture from the band» живёт в чужом
+ * `bench-slot.tsx`, и её список кандидатов (`pickableFlats`) по-прежнему считает прогоны И пачки.
+ * Значит дверь может взвести выбор над экраном, где отвечать некому — пачечным кандидатам
+ * поверхности больше нет. Молчащий экран при взведённом режиме неотличим от сломанного (Г12),
+ * поэтому сноска говорит всегда, когда истории нечем ответить, и называет живую дверь словами.
+ *
+ * ПОЧЕМУ ЭКСПОРТ ВСЁ ЕЩЁ ЗОВЁТСЯ `PickTray`: его монтирует `studio-tab.tsx` (чужой файл), и
+ * переименовать экспорт можно только вместе с ним. Имя — след снесённого органа, не сам орган.
  *
  * Читающие хелперы (`bandPictures`, `isPickablePicture`, `buildHideGuard`) остаются здесь: их
  * читают история прогонов и панель прогона, и перевозить их значило бы дёргать чужие файлы ради
@@ -142,226 +131,44 @@ export function buildHideGuard(band: GetDesignBandResponse): HideGuard {
   };
 }
 
-/** Which bench slot this picture stands in, spoken the way the slot is spoken. */
-function slotNameOfPicture(band: GetDesignBandResponse, pictureId: number): string {
-  const slot = (band.bench ?? []).find((s) => (s.pictureId ?? 0) === pictureId);
-  if (!slot) return '';
-  return (slot.detailName ?? '').trim() || viewLabel(slot.viewKey) || 'a slot';
-}
-
-function thumbOf(media?: common_MediaFull): string {
-  const m = media?.media;
-  return m?.thumbnail?.mediaUrl || m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || '';
-}
-
-/* ────────────────────────────── the answering tray ────────────────────────────── */
+/* ────────────────────────────── the refusal, in words ────────────────────────────── */
 
 /**
- * ПЛИТКА ТОЛЬКО ДЛЯ ВЗВЕДЁННОГО ВЫБОРА. У неё нет подвала глаголов (zoom/split/✕): пока слот
- * взведён, плитка отвечает ровно на один жест — «поставить эту», и любая вторая кнопка внутри
- * кликабельной плитки была бы кнопкой в кнопке. Непригодная плитка не прячется, а стоит
- * притушенной со СЛОВАМИ причины: пропавшая из виду картинка неотличима от сломанного режима.
+ * ОТКАЗ РЕЖИМА ВЫБОРА, СЛОВАМИ — всё, что осталось от лотка (S-13, см. шапку файла).
+ *
+ * Молчит ровно тогда, когда истории прогонов есть чем ответить: её плитки — единственная
+ * отвечающая поверхность взведённого выбора. Во всех остальных случаях взведённый режим смотрит
+ * на экран, где нечего нажать, и обязан объяснить это словами — иначе он неотличим от сломанного.
+ * Дверь, взводящая режим, считает кандидатами и пачечные картинки (чужой `pickableFlats`), но
+ * пачечным кандидатам после сноса лотка отвечать нечем — их путь в слот назван в тексте.
  */
-function TrayTile({
-  band,
-  picture,
-  shelfOrdinal,
-  onResolve,
-  targetLabel,
-}: {
-  band: GetDesignBandResponse;
-  picture: common_DesignPicture;
-  shelfOrdinal?: number | null;
-  onResolve: (pictureId: number) => void;
-  targetLabel: string;
-}) {
-  const facts = readComposite(band, picture);
-  const composite = facts.declared;
-  const provenance = readProvenance(picture);
-  const handle = pictureHandle(picture, { shelfOrdinal });
-  const pictureId = picture.id ?? 0;
-  const inSlot = slotNameOfPicture(band, pictureId);
-  const pickable = isPickablePicture(picture);
-  const mixed = mixedInputNote(provenance);
-
-  const thumb = thumbOf(picture.media);
-  const media = (
-    <div
-      // МАТ БЕЛЫЙ (bg-bgColor), НЕ СЕРЫЙ (R-12). Кадр навязан 4:5 c object-contain, и всё, что не
-      // покрыто снимком, — мат; серый bg-bgSecondary делал «белый фон стал серым» на каждом кропе
-      // не-4:5, а у PNG с честной прозрачностью просвечивал СКВОЗЬ картинку.
-      className='relative w-full bg-bgColor'
-      style={{ aspectRatio: '4 / 5' }}
-    >
-      {thumb ? (
-        <img
-          src={thumb}
-          alt={handle}
-          loading='lazy'
-          className='absolute inset-0 block h-full w-full'
-          style={{ objectFit: 'contain' }}
-        />
-      ) : (
-        <span className='absolute inset-0 flex items-center justify-center'>
-          <Text size='nano' variant='label' component='span'>
-            no image
-          </Text>
-        </span>
-      )}
-      {/* Одна метка на каждый склеенный вид у композита; иначе — слот или догадка о виде.
-          Взаимоисключимо по построению: композит не может стоять в слоте. */}
-      {composite ? (
-        <CompositeMarks facts={facts} />
-      ) : inSlot ? (
-        <span className='absolute left-0 top-0 bg-textColor px-1 text-nano uppercase text-bgColor'>
-          {inSlot}
-        </span>
-      ) : picture.ghostView ? (
-        <span className='absolute left-0 top-0 bg-bgColor px-1 text-nano uppercase text-labelColor'>
-          probably {viewLabel(picture.ghostView)}
-        </span>
-      ) : null}
-      <CompositeBadge facts={facts} />
-    </div>
-  );
-
-  const sub = (
-    <>
-      {provenanceLabel(provenance)}
-      {compositeTail(facts)}
-      {mixed ? ` · ${mixed}` : ''}
-    </>
-  );
-
-  return (
-    <Tile
-      media={media}
-      name={handle}
-      sub={sub}
-      selected={pickable}
-      onClick={pickable ? () => onResolve(pictureId) : undefined}
-      title={
-        pickable
-          ? `put ${handle} into ${targetLabel}`
-          : 'a composite holds several views — split it first'
-      }
-      className={cn(!pickable && 'opacity-40')}
-    >
-      {!pickable && (
-        <Text size='nano' variant='label' component='span' className='mt-1 truncate'>
-          split it first
-        </Text>
-      )}
-    </Tile>
-  );
-}
-
-/**
- * ОТКАЗ РЕЖИМА ВЫБОРА, СЛОВАМИ — и только отказ. Пока кандидаты есть, орган молчит: баннер «choosing
- * for …» уже висит у композитора. Говорит он ровно тогда, когда взведённый слот смотрит на полосу,
- * которой нечего предложить, — иначе это неотличимо от сломанного режима. С дверей верстака сюда
- * почти не попасть (пустая полоса делает дверь инертной с причиной), но полоса живая: последний
- * кандидат может спрятаться или уйти под разрез, пока выбор взведён.
- */
-function PickModeNote({ band }: { band: GetDesignBandResponse }) {
+export function PickTray({ band }: { band: GetDesignBandResponse }): JSX.Element | null {
   const pick = usePickMode();
   if (!pick.target) return null;
 
   const pictures = bandPictures(band);
-  if (pictures.some(isPickablePicture)) return null;
+  const runPictures = (band.runs ?? []).flatMap((run) => run.pictures ?? []);
+  if (runPictures.some(isPickablePicture)) return null;
 
-  const hidden = pictures.filter(isPictureHidden).length;
-  const composites = pictures.filter(isComposite).length;
-  // Дверь «+ add files» умерла вместе с полкой (R-18) — учим живые двери, а не снесённую.
+  // Всё, что осталось в истории, — скрытое или композиты: имена причин, по одной на счёт.
+  const composites = runPictures.filter(isComposite).length;
+  const hidden = runPictures.filter(isPictureHidden).length;
+  const blocked = [
+    composites ? `${composites} composite${composites === 1 ? '' : 's'}` : '',
+    hidden ? `${hidden} hidden` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   const why = !pictures.length
     ? 'there is not a single picture on this card yet — bring files in with «+ reference» in the input block, or straight onto an empty slot.'
-    : [
-        composites
-          ? `${composites} composite${composites === 1 ? '' : 's'} must be split first`
-          : '',
-        hidden ? `${hidden} hidden` : '',
-      ]
-        .filter(Boolean)
-        .join(' · ');
+    : `only run outputs are marked from the band, in the history above${
+        blocked ? ` — and this card's are ${blocked}` : ', and this card has none'
+      }. a picture added by hand — and any crop of a split — goes into a slot through the slot's own «+ add» door: the library, ⌘V or a dropped file; unmark frees a filled slot first.`;
 
   return (
     <CalloutBox tone='error'>
       <b>nothing here can go into {pick.target.label}.</b> {why} Esc cancels.
     </CalloutBox>
-  );
-}
-
-/**
- * ЛОТОК ВЫБОРА — отвечающая сторона режима выбора для принесённого руками, и НАСЛЕДНИК ПОЛКИ
- * (R-18) в единственной её роли, которую больше некому играть.
- *
- * ПОЧЕМУ ОН НУЖЕН, ХОТЯ КОЛОНКИ НЕТ. Кандидатов выбора собирает `pickableFlats` — прогоны И пачки.
- * Прогоны отвечают плитками истории; пачечные картинки (кропы сплита, старые ручные загрузки)
- * после сноса полки не рисует НИКТО. Без лотка дверь «or mark a picture from the band» взводила бы
- * режим над экраном, где нечего нажать, — живая дверь в никуда, ровно Г12. Проверять «есть ли
- * поверхность» внутри чужого `pickEmptyReason` нельзя (файл верстака не наш), значит поверхность
- * обязана быть.
- *
- * ПОЧЕМУ ОН ВИДЕН ТОЛЬКО ПРИ ВЗВЕДЁННОМ ВЫБОРЕ. Владелец снёс ПОСТОЯННУЮ колонку: вне выбора эти
- * картинки живут строками входа и плитами верстака, и вторая постоянная витрина вернула бы снесённое
- * под другим именем. Лоток — орган РЕЖИМА, как баннер: появился со взводом, ушёл с Esc.
- *
- * ТОЛЬКО ПАЧКИ. Прогоны здесь не рисуются — их плитки в истории уже отвечают выбору, и одна
- * картинка на двух поверхностях резолвила бы один клик двумя местами.
- */
-export function PickTray({ band }: { band: GetDesignBandResponse }): JSX.Element | null {
-  const pick = usePickMode();
-
-  const ordinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
-  const rows = useMemo(
-    () =>
-      (band.batches ?? [])
-        .map((batch) => ({
-          ordinal: ordinals.get(batch.id ?? 0),
-          // Спрятанное не предлагается ни из одного пикера — правило visibility, без люка.
-          pictures: selectVisiblePictures(batch.pictures ?? []),
-        }))
-        .filter((row) => row.pictures.length > 0)
-        // Свежее — первым: часовой порядок уже тотален в ординале (fallback на id).
-        .sort((a, b) => (b.ordinal ?? 0) - (a.ordinal ?? 0)),
-    [band.batches, ordinals],
-  );
-
-  if (!pick.target) return null;
-
-  const count = rows.reduce((n, row) => n + row.pictures.length, 0);
-  const label = pick.target.label;
-
-  return (
-    <>
-      <PickModeNote band={band} />
-      {count > 0 && (
-        <Section
-          id='design-pick-tray'
-          title='brought by hand'
-          question={`— click a picture to put it into ${label}; run outputs answer in the history above`}
-          action={
-            <Text size='micro' variant='label' component='span'>
-              {count} picture{count === 1 ? '' : 's'}
-            </Text>
-          }
-        >
-          <Tiles min={140}>
-            {rows.flatMap((row) =>
-              row.pictures.map((picture) => (
-                <TrayTile
-                  key={picture.id}
-                  band={band}
-                  picture={picture}
-                  shelfOrdinal={row.ordinal}
-                  targetLabel={label}
-                  onResolve={(pictureId) => pick.resolve(pictureId)}
-                />
-              )),
-            )}
-          </Tiles>
-        </Section>
-      )}
-    </>
   );
 }

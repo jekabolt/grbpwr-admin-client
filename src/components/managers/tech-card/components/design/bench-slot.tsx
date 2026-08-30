@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
 import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
 import Input from 'ui/components/input';
 import MediaComponent from 'ui/components/media';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
@@ -179,7 +178,10 @@ export function pictureUrl(picture?: common_DesignPicture | null): string {
 /**
  * The footer line of a filled slot: WHERE THE PLATE IS FROM, in the band's own address vocabulary.
  * Provenance label first (`uploaded`, `AI · run 5`, `provenance unknown`), then the handle
- * (`upload 3 · b`), then the batch's own stamp — author and clock — when the plate came by hand.
+ * (`upload 3 · b`), then the batch's own stamp — author, weight, count — when the plate came by
+ * hand. БЕЗ ВРЕМЕНИ ЗАГРУЗКИ (S-15, владелец: «оно не несет особо смысла»): часы остаются на
+ * самой полке пачек (`batchCaption` не трогается — у него другие читатели), здесь сегмент-время
+ * вырезается из готовой подписи.
  */
 export function slotFootnote(
   band: GetDesignBandResponse,
@@ -196,8 +198,14 @@ export function slotFootnote(
   parts.push(provenance.runId === null ? handle : handle.replace(/^run \d+(\s·\s)?/, ''));
   const batch = (band.batches ?? []).find((b) => b.id === picture.batchId);
   if (batch) {
-    // `batchCaption` opens with the word «uploaded», which `provenanceLabel` has already said.
-    const caption = batchCaption(batch).replace(/^uploaded(\s·\s)?/, '');
+    // `batchCaption` opens with the word «uploaded», which `provenanceLabel` has already said —
+    // and carries the clock (`14:41`), which this footnote deliberately does not (S-15). The clock
+    // segment is recognised by its own shape, `HH:MM`, — the same spelling `clockStamp` mints —
+    // so a future segment that merely CONTAINS digits is not eaten by mistake.
+    const caption = batchCaption(batch)
+      .split(' · ')
+      .filter((segment) => segment !== 'uploaded' && !/^\d{2}:\d{2}$/.test(segment))
+      .join(' · ');
     if (caption) parts.push(caption);
   }
   return parts.filter(Boolean).join(' · ');
@@ -229,17 +237,15 @@ export function InertDoor({
 }
 
 /**
- * THE FIX FLOW IS BUILT AND IT DOES NOT LIVE HERE.
+ * ЦИКЛ ПОЧИНКИ СНЯТ РЕШЕНИЕМ ВЛАДЕЛЬЦА (S-15: «FIX функциональность выпиливаем полностью»).
  *
- * This slot draws the DOOR (`fix ▸`) and hosts the two state strips, but owns neither: `fix-flow.tsx`
- * holds the reading of the band, the strips and the compare-and-set, and `bench.tsx` wires the two
- * together. The slot stays presentational on purpose — it is drawn four times for the sides and once
- * per detail, and a slot that reached into the fix context itself would be five subscribers to a
- * state only one of them can be armed for.
- *
- * The prototype's own defect (Г4) is honoured by the WIRING, not by this file: the strips address the
- * SLOT and not the plate, so `bars` is rendered by the empty slot too. Unmarking a plate while a fix
- * is in flight must not make the promised «fix is in · put it in» evaporate into the history.
+ * Что именно ушло: дверь `fix ▸`, галки-шортлист (S-14 — они были ЕЁ органом, R-20), полосы
+ * «fix is running / fix is in», сравнение и «put it in». Что осталось ЖИВЫМ, и это не остаток:
+ * поля провода `fix_targets` / `fix_slot_ids` теперь принадлежат ВЕКТОРНОМУ прогону
+ * (`modals/use-trace-vector.ts` сужает им перерисовку до своей плиты), а `fix-markup.tsx` и
+ * `generation/fix-context.tsx` стоят на диске ради импортов формы генерации. Снести их — сломать
+ * работающий векторный путь; см. `history-fingerprint.ts` про то, как замороженные fix-прогоны
+ * читаются историей и дальше.
  */
 
 export type BenchSlotProps = {
@@ -278,26 +284,9 @@ export type BenchSlotProps = {
    * работать в FLAT SLOTS»). Механизм живёт в `split-to-input.tsx` и подаётся сверху (`bench.tsx`
    * → `openForPicture`): плита — УЖЕ картинка полосы, поэтому шаг регистрации, который нужен
    * референсу, здесь пропущен. Absent = дверь не рисуется (read-only или пустой слот).
+   * Стоит В ЛЕВОМ НИЖНЕМ УГЛУ плиты (S-4/S-15).
    */
   onSplit?: () => void;
-  /**
-   * Arm a fix for this slot. Absent on a slot a fix cannot legally address, in which case
-   * `fixBlocked` carries the reason and the door is drawn dead rather than missing.
-   */
-  onFix?: () => void;
-  /** Why `fix ▸` is dead here, or null when it is live. */
-  fixBlocked?: string | null;
-  /**
-   * The fix shortlist's tick. Drawn only when `onToggleSelect` is given — and the bench gives it
-   * only while the tick MODE is open (R-20, владелец: в обычном виде на плитах галок нет; они
-   * появляются, когда человек нажал «fix several ▸» и выбирает, какие стороны переделать). The
-   * slot itself stays mode-blind on purpose: it is presentational, and the one honest signal it
-   * gets is whether a toggle handler exists.
-   */
-  selected?: boolean;
-  onToggleSelect?: () => void;
-  /** The fix state strips (`fix is running`, `fix is in`), built by `fix-flow.tsx`. */
-  bars?: React.ReactNode;
   /** Details only. */
   onRename?: (name: string) => void;
   onDelete?: () => void;
@@ -307,14 +296,25 @@ export type BenchSlotProps = {
 
 /**
  * Формула появления тихих органов плиты: наведение ИЛИ фокус внутри плитки, всегда — на
- * устройстве без наведения. Та же, что у ячейки референсов (`hoverOnly`), и НЕ та, что у подвала
- * действий ниже: подвал слушает `focus-within` на себе самом, а угловой кнопке нужен
- * `group-focus-within` — иначе у клавиатуры, у которой ховера не бывает, орган существовал бы
- * только в тот единственный момент, когда фокус стоит на нём самом, и найти его было бы нечем.
+ * устройстве без наведения. Та же, что у ячейки референсов (`hoverOnly`). Слушается
+ * `group-focus-within`, а не собственный `focus-within` органа: у клавиатуры ховера не бывает,
+ * и орган, видимый только пока фокус стоит на нём самом, было бы нечем найти.
  */
 const QUIET_ORGAN =
   'opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 ' +
   'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none';
+
+/**
+ * Кожа углового органа плиты — та же, что у `SplitCornerButton` (рамка, белая подложка,
+ * нано-капс), с видимым `focus-visible`: те же классы, что у примитива `Button`. Семь состояний:
+ * покой (тихий — QUIET_ORGAN хозяина), наведение (чернеет), фокус (outline 2px), нажатие
+ * (родное), выключен (`disabled:` — серый и некликабелен), занят (слот пишет — «saving…» в шапке
+ * и мёртвый крестик), ошибка (отказ записи говорит снекбар шва `useDesignWrites`).
+ */
+const CORNER_ORGAN =
+  'pointer-events-auto border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label ' +
+  'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor ' +
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
 export function BenchSlot(props: BenchSlotProps) {
   const [vectorOpen, setVectorOpen] = useState(false);
@@ -339,11 +339,6 @@ export function BenchSlot(props: BenchSlotProps) {
     onUnmark,
     onOpenViewer,
     onSplit,
-    onFix,
-    fixBlocked,
-    selected,
-    onToggleSelect,
-    bars,
     onRename,
     onDelete,
     deleteBlocked,
@@ -360,11 +355,10 @@ export function BenchSlot(props: BenchSlotProps) {
    *   the plate IS a flattening (`layerRev > 0`) and the layer has moved past it → it has gone
    *     STALE: the picture is an older rasterisation of a drawing that has since changed.
    *   the plate was never flattened (`layerRev === 0`) → nothing is stale; the marks are data, not
-   *     ink, and consumers split in two (W-10). A PLAIN run, the fabric render, the printed sheet
-   *     and a minted version read the PICTURE — for them the marks do not exist until `edit ▸ →
-   *     save as picture` runs them through the canvas. A FIX of this slot is the exception: at
-   *     GENERATE the client rasterises «plate + layer» and sends the copy beside the plate
-   *     (`fix-markup.tsx`), so the sentence below must claim exactly that much and no more.
+   *     ink. A run, the fabric render, the printed sheet and a minted version read the PICTURE —
+   *     for them the marks do not exist until `edit → save as picture` runs them through the
+   *     canvas. (The fix cycle, which used to ship a marked copy at GENERATE, is removed — S-15 —
+   *     so the sentence below claims the plain half alone.)
    *
    * Only `layer_advanced` can fire on a LIVE plate at all: `content_hash` lives on a version's
    * frozen plate, never on a live picture (which IS the current file, so a second copy could only
@@ -380,7 +374,7 @@ export function BenchSlot(props: BenchSlotProps) {
 
   const unflattened =
     layerOverPlate && provenance.layerRev === 0
-      ? 'edit ▸ marks sit on a layer over this plate — a plain run reads the plate alone; a fix of this slot sends a marked copy too'
+      ? 'edit marks sit on a layer over this plate — a run reads the plate alone until «save as picture» presses them in'
       : null;
 
   const mixedNote = provenance ? mixedInputNote(provenance) : null;
@@ -391,18 +385,10 @@ export function BenchSlot(props: BenchSlotProps) {
     // display — the footer keeps its box either way, so nothing on this grid reflows under the
     // pointer.
     <div className='group flex min-w-0 flex-col gap-1'>
+      {/* ГАЛКИ НАД ПЛИТАМИ СНЯТЫ НАСОВСЕМ (S-14, владелец: «мы уже выбрали в флет сайтс — значит
+          всё ок уже»). Они были шортлистом починки (R-20) и умерли вместе с ней; лист читает сам
+          факт «плита стоит в слоте», и никакой другой писатель за галкой не стоял. */}
       <div className='flex items-baseline gap-1'>
-        {onToggleSelect && (
-          <span className='self-center'>
-            <CheckboxCommon
-              name={`fix-tick-${label}`}
-              aria-label={`tick ${label} for a fix`}
-              checked={!!selected}
-              disabled={disabled}
-              onChange={onToggleSelect}
-            />
-          </span>
-        )}
         <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           {label}
         </Text>
@@ -429,24 +415,56 @@ export function BenchSlot(props: BenchSlotProps) {
           {/* `contain`, not `cover`: a flat is a DRAWING and a crop of it loses the garment's
               outline, which is the one thing the sheet is printed for. */}
           <MediaComponent src={url} alt={label} aspectRatio='auto' fit='contain' />
-          {/* ЛЕВЫЙ ВЕРХНИЙ УГОЛ — колонкой: ярлык слота, под ним «split» (R-17: та же угловая
-              кнопка, что на ячейке референсов). Колонка выше просмотрщика (z-20 против его
-              inset-0 z-10), иначе клик по кнопке уходил бы в зум; сама колонка прозрачна для
-              указателя, кликается только кнопка — ярлык не смеет съедать клик по плите. */}
-          <div className='pointer-events-none absolute left-1 top-1 z-20 flex flex-col items-start gap-1'>
-            <span className='bg-textColor px-1.5 py-0.5'>
-              <Text size='nano' variant='uppercase' component='span' className='!text-bgColor'>
+          {/* ЧЕТЫРЕ УГЛА ПЛИТЫ (S-4/S-15, владелец дословно: «сплит слева снизу и эдит справа
+              снизу на тамбнейле», «unmark заменить на крестик в правом верхнем углу»):
+                левый верхний  — ярлык слота (не кнопка);
+                правый верхний — ✕, бывший «unmark»: очистить слот, двери пустого слота откроются;
+                левый нижний   — split (R-17);
+                правый нижний  — edit, векторный редактор штрихов (бывший `edit ▸` подвала).
+              Все углы выше просмотрщика (z-20 против его inset-0 z-10), иначе клик уходил бы в
+              зум. Ярлык прозрачен для указателя и ограничен шириной ДО крестика — углы не смеют
+              наезжать ни друг на друга, ни на нижнюю строку органов. Тихие органы живут по
+              QUIET_ORGAN: наведение ИЛИ фокус внутри плитки, всегда — без наведения. */}
+          <div className='pointer-events-none absolute left-1 top-1 z-20 max-w-[calc(100%-32px)]'>
+            <span className='inline-block bg-textColor px-1.5 py-0.5'>
+              <Text size='nano' variant='uppercase' component='span' className='!text-bgColor break-words'>
                 {label}
               </Text>
             </span>
-            {!disabled && onSplit && (
-              <SplitCornerButton
-                onClick={onSplit}
-                ariaLabel={`split ${label} into views`}
-                className={cn('pointer-events-auto', QUIET_ORGAN)}
-              />
-            )}
           </div>
+          {!disabled && picture && (
+            <button
+              type='button'
+              aria-label={`unmark ${label}`}
+              title='unmark — empty this slot'
+              disabled={saving}
+              onClick={onUnmark}
+              className={cn('absolute right-1 top-1 z-20 py-0.5 leading-none', CORNER_ORGAN, QUIET_ORGAN)}
+            >
+              ✕
+            </button>
+          )}
+          {!disabled && onSplit && (
+            <SplitCornerButton
+              onClick={onSplit}
+              ariaLabel={`split ${label} into views`}
+              className={cn('absolute bottom-1 left-1 z-20 pointer-events-auto', QUIET_ORGAN)}
+            />
+          )}
+          {/* `edit` — ВЕКТОРНЫЙ РЕДАКТОР ШТРИХОВ (`vectorModal` прототипа): рисование по самому
+              чертежу, своим слоем, с растром-калькой снизу. Слой пишется настоящими
+              `GetDesignEditLayer` / `SaveDesignEditLayer` / `FlattenDesignEditLayer`. Не путать с
+              редактором УКАЗАНИЙ: тот живёт на ARTIFACTS, над плитами документа. */}
+          {!disabled && picture && (
+            <button
+              type='button'
+              aria-label={`edit ${label} — draw over the plate`}
+              onClick={() => setVectorOpen(true)}
+              className={cn('absolute bottom-1 right-1 z-20', CORNER_ORGAN, QUIET_ORGAN)}
+            >
+              edit
+            </button>
+          )}
           {onOpenViewer && (
             <button
               type='button'
@@ -473,23 +491,30 @@ export function BenchSlot(props: BenchSlotProps) {
         />
       )}
 
-      {/* THE SECOND DOOR, and it is equal in weight to the first: mark something the band already
-          holds. At zero candidates it becomes an inert note with the reason (Г12) instead of a live
-          control that sends the human to click on pictures that are not there.
+      {/* THE SECOND DOOR of an EMPTY slot, equal in weight to the first: mark something the band
+          already holds. At zero candidates it becomes an inert note with the reason (Г12) instead
+          of a live control that sends the human to click on pictures that are not there.
 
-          ЗАНЯТЫЙ СЛОТ ТОЖЕ ДЕРЖИТ ЭТУ ДВЕРЬ (R-11, остаток): кропы сплита лежат в полосе, и
-          человек обязан уметь выбрать их В ЗАНЯТЫЙ слот — без двери путь был бы «сначала unmark,
-          потом ищи», то есть слот, честно занятый источником-склейкой, нельзя было бы заменить
-          кропом одним жестом. Это НЕ возврат снятой «change»: та была второй кнопкой на тот же
-          исход, что unmark+библиотека; здесь исход другой — пометить картинку, которая УЖЕ в
-          полосе. Отличия занятого слота от пустого — ровно три, и каждое вынуждено:
-            · слова «another picture» — дверь заменяет, а не заполняет;
-            · в покое дверь тиха (QUIET_ORGAN — наведение ИЛИ фокус, как подвал действий): под
-              каждой заполненной плитой всегда-видимая строка была бы шумом на сетке 5×N;
-              взведённое же «choosing…» видно БЕЗУСЛОВНО — это состояние, а не приглашение;
-            · пустая полоса (`pickEmpty`) под заполненной плитой не рисуется вовсе: «нечего
-              выбрать» — ответ на вопрос, который у занятого слота никто не задал. */}
-      {!disabled && !(picture && pickEmpty) && (
+          У ЗАНЯТОГО СЛОТА ЭТОЙ СТРОКИ БОЛЬШЕ НЕТ (S-15, владелец: «убрать текст на ховер or mark
+          another picture from the band»). Сам жест «картинка полосы → занятый слот» при этом ЖИВ,
+          двумя объявленными дорогами: пикер «— slot —» на плитке полосы (`slot-picker.tsx`,
+          обратное направление того же глагола, один жест) и ✕ в правом верхнем углу → двери
+          опустевшего слота (два жеста). Взведённый выбор (`picking`) рисуется и у занятого слота:
+          состояние обязано быть видно там, где его взвели, — например, с пикера плитки. */}
+      {!disabled && picking && (
+        <div>
+          <button
+            type='button'
+            onClick={onCancelPick}
+            className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          >
+            <Text size='nano' variant='label' component='span'>
+              choosing — click a picture in the band · cancel
+            </Text>
+          </button>
+        </div>
+      )}
+      {!disabled && !picking && !picture && (
         <div>
           {pickEmpty ? (
             <span data-inert={pickEmpty} title={pickEmpty}>
@@ -497,27 +522,14 @@ export function BenchSlot(props: BenchSlotProps) {
                 {pickEmpty}
               </Text>
             </span>
-          ) : picking ? (
-            <button
-              type='button'
-              onClick={onCancelPick}
-              className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-            >
-              <Text size='nano' variant='label' component='span'>
-                choosing — click a picture in the band · cancel
-              </Text>
-            </button>
           ) : (
             <button
               type='button'
               onClick={onPick}
-              className={cn(
-                'cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                picture && QUIET_ORGAN,
-              )}
+              className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
             >
               <Text size='nano' variant='label' component='span'>
-                {picture ? 'or mark another picture from the band' : 'or mark a picture from the band'}
+                or mark a picture from the band
               </Text>
             </button>
           )}
@@ -544,89 +556,55 @@ export function BenchSlot(props: BenchSlotProps) {
           </Text>
         )}
 
-        {/* `shrink-0` ЗДЕСЬ ПЕРЕПОЛНЯЛО КОЛОНКУ, и это было видно только замером: три контрола
-            занимают 211px, а колонка слота при четырёх сторонах — 196px, поэтому подвал FRONT
-            наезжал на подвал BACK. Ни `tsc`, ни утверждение по тексту этого не видят — `innerText`
-            одинаков при любой ширине. Группа теперь переносится внутри себя и умеет сжиматься. */}
-        {/* ДЕЙСТВИЯ ПОЯВЛЯЮТСЯ ПО НАВЕДЕНИЮ — как в макете (`.slotc .tfoot .act{opacity:0}` +
-            `.slotc:hover .tfoot .act`). Прозрачность, а не `display`: коробка остаётся на месте,
-            поэтому сетка слотов не дёргается под курсором и замер ширины подвала не зависит от
-            того, где стоит мышь. `focus-within` возвращает их клавиатуре, `hover:none` — тачу:
-            без этих двух строк меню слота на планшете просто нет. */}
-        <span
-          className={cn(
-            'ml-auto flex flex-wrap items-center gap-1.5',
-            'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
-            '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
-          )}
-        >
-          {/* `fix ▸` — ДВЕРЬ ПОЧИНКИ: она не правит картинку, она заказывает эту сторону заново, с
-              верстака вместо референсов. Механика и полосы состояния — в `fix-flow.tsx`; сюда
-              приходит либо обработчик, либо причина, по которой двери здесь быть не может. */}
-          {!disabled &&
-            picture &&
-            (fixBlocked ? (
-              <InertDoor label='fix ▸' reason={fixBlocked} />
-            ) : (
-              onFix && (
-                <Button variant='secondary' size='xs' onClick={onFix}>
-                  fix ▸
-                </Button>
-              )
-            ))}
-          {/* `edit ▸` — ВЕКТОРНЫЙ РЕДАКТОР ШТРИХОВ (`vectorModal` прототипа, `vector-open` на
-              плитке слота): рисование по самому чертежу, своим слоем, с растром-калькой снизу.
-              Дверь была инертной со словами «придёт следующей волной» — теперь волна пришла, и
-              слой пишется настоящими `GetDesignEditLayer` / `SaveDesignEditLayer` /
-              `FlattenDesignEditLayer`. Не путать с редактором УКАЗАНИЙ: тот живёт на ARTIFACTS,
-              над плитами документа. */}
-          {!disabled && picture && (
-            <>
-              <Button variant='secondary' size='xs' onClick={() => setVectorOpen(true)}>
-                edit ▸
-              </Button>
-              <VectorModal
-                open={vectorOpen}
-                onOpenChange={setVectorOpen}
-                techCardId={techCardId}
-                band={band}
-                base={picture}
-                slot={{ ref: slotRef, label, slotRev }}
-                disabled={disabled}
-              />
-            </>
-          )}
-          {/* `change` СНЯТА. У макета её нет, а её работу делают две живые двери: `unmark` очищает
-              слот, и пустой слот открывает ту же библиотеку через `MediaSlot`. Две кнопки на один
-              исход — это две записи в меню, которые расходятся при первой же правке одной из них. */}
-          {!disabled && picture && (
-            <Button variant='secondary' size='xs' onClick={onUnmark}>
-              unmark
-            </Button>
-          )}
-          {!disabled &&
-            detail &&
-            onDelete &&
-            // A DISABLED BUTTON DOES NOT SHOW ITS OWN `title`: pointer events are suppressed on it,
-            // so the reason has to hang on a wrapper that still receives the hover.
-            (deleteBlocked ? (
+        {/* ПОДВАЛ ДЕЙСТВИЙ ПОЧТИ ПУСТ, и это снос, а не забывчивость (S-15): `fix ▸` выпилен со
+            всем циклом, `edit` и `unmark` (теперь ✕) переехали в углы самой плиты. Осталось одно
+            действие, у которого угла нет, — удаление слота ДЕТАЛИ: это другой глагол, чем ✕
+            (крестик очищает слот, эта кнопка сносит сам слот), и рядом с плитой их путать нельзя.
+            Появление — той же формулой прозрачности, что и раньше: коробка остаётся на месте,
+            сетка не дёргается под курсором; `focus-within` возвращает её клавиатуре,
+            `hover:none` — тачу. */}
+        {!disabled && detail && onDelete && (
+          <span
+            className={cn(
+              'ml-auto flex flex-wrap items-center gap-1.5',
+              'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
+              '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
+            )}
+          >
+            {/* A DISABLED BUTTON DOES NOT SHOW ITS OWN `title`: pointer events are suppressed on
+                it, so the reason has to hang on a wrapper that still receives the hover. */}
+            {deleteBlocked ? (
               <span data-inert={deleteBlocked} title={deleteBlocked} className='inline-flex'>
                 <Button variant='secondary' size='xs' disabled>
-                  ✕
+                  remove slot
                 </Button>
               </span>
             ) : (
               <Button
                 variant='secondary'
                 size='xs'
-                title='remove this detail slot'
+                title='remove this detail slot — not just its picture'
                 onClick={onDelete}
               >
-                ✕
+                remove slot
               </Button>
-            ))}
-        </span>
+            )}
+          </span>
+        )}
       </div>
+
+      {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. */}
+      {!disabled && picture && (
+        <VectorModal
+          open={vectorOpen}
+          onOpenChange={setVectorOpen}
+          techCardId={techCardId}
+          band={band}
+          base={picture}
+          slot={{ ref: slotRef, label, slotRev }}
+          disabled={disabled}
+        />
+      )}
 
       {mixedNote && (
         <Text size='nano' variant='label' component='span'>
@@ -644,9 +622,6 @@ export function BenchSlot(props: BenchSlotProps) {
         </Text>
       )}
 
-      {/* ПОЛОСЫ СОСТОЯНИЯ ПОЧИНКИ. Рисуются и у заполненного слота, и у пустого — снятие плиты во
-          время починки не должно топить обещанный «fix is in · put it in» в истории (Г4/R10). */}
-      {bars}
     </div>
   );
 }

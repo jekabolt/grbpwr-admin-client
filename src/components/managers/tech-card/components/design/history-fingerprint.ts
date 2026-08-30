@@ -163,7 +163,14 @@ export function fingerprint(question: DesignQuestion): string {
  */
 export function questionOfRun(run: common_DesignRun): DesignQuestion | null {
   if ((run.kind ?? '').trim().toLowerCase() !== 'flat') return null;
+  // ОБА НАПИСАНИЯ СЕЛЕКЦИИ, как велит контракт читателю (`fixSelectionOf`): старые прогоны несут
+  // скаляр `fix_target`, прогоны снятого UI починки — массивы `fix_targets`/`fix_slot_ids`.
+  // Проверять один скаляр значило бы ронять каждый замороженный многослотовый фикс под черту
+  // «inputs have changed» по причине, не имеющей к входам никакого отношения. Сам цикл починки
+  // снят (S-15), но его строки в истории заморожены навсегда — читатель обязан их узнавать.
   if ((run.params?.fixTarget ?? '').trim()) return null;
+  if ((run.params?.fixTargets ?? []).length > 0) return null;
+  if ((run.params?.fixSlotIds ?? []).length > 0) return null;
   const inputs = run.inputs;
   if (!inputs) return null;
   return {

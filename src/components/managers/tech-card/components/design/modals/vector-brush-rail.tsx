@@ -146,6 +146,11 @@ export type RailProps = {
   /* Туда и обратно. */
   canDownload: boolean;
   onDownload: () => void;
+  /**
+   * Чем «download SVG» является для ЭТОГО слоя. Слой-файл отдаёт оригинал производителя, а не
+   * пересериализацию, и слова обязаны сказать это; без пропа остаётся правда рисованного слоя.
+   */
+  outNote?: string;
   frameRatio: number;
   strokes: VectorStroke[];
   onImport: (strokes: VectorStroke[], mode: 'add' | 'replace') => void;
@@ -275,9 +280,8 @@ export function VectorBrushRail(p: RailProps) {
       <div>
         <GroupLabel flush>out and back</GroupLabel>
         <Text size='nano' variant='label' component='p' className='mb-1'>
-          the SVG is written by the same renderer that draws this screen; the raster is LINKED
-          underneath, not embedded. Fix it outside, upload it back — what a stroke cannot hold is
-          refused by name, never dropped quietly.
+          {p.outNote ??
+            'the SVG is written by the same renderer that draws this screen; the raster is LINKED underneath, not embedded. Fix it outside, upload it back — what a stroke cannot hold is refused by name, never dropped quietly.'}
         </Text>
         <div className='flex flex-wrap items-center gap-1.5'>
           <Button variant='secondary' size='xs' disabled={!p.canDownload} onClick={p.onDownload}>

@@ -2,8 +2,10 @@ import * as Dialog from '@radix-ui/react-dialog';
 import type {
   DesignBenchSlotRef,
   GetDesignBandResponse,
+  common_DesignEditLayer,
   common_DesignPicture,
 } from 'api/proto-http/admin';
+import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -21,6 +23,8 @@ import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
 import { useDesignWrites } from '../use-design-band';
 import { RASTER_FALLBACK_W, rasteriseStrokesOverBase } from './rasterise-layer';
+import { TraceVectorPanel } from './trace-vector-panel';
+import { findMediaUrlInBand, useTraceVector } from './use-trace-vector';
 import {
   findLayerForMedia,
   layerRefusalText,
@@ -87,13 +91,16 @@ import {
  * АВТОМАТИЧЕСКОЕ пред-заполнение, и потому кисть при входе — `plain`, машина не названа, пока
  * человек сам не взял её в руку. Явный выбор человека этим доводом не гейтуется.
  *
- * ВОПРОС ПРИ ВХОДЕ. Плата без единого штриха встречает развилкой: рисовать поверх растра (то, что
- * работает) или перевести растр в вектор. Вторая ветка СЕГОДНЯ НЕДОСТИЖИМА — у провода нет рода
- * прогона `vector`, а бакет принимает только JPEG/PNG/WebP/GIF, то есть SVG некуда положить, — и
- * дверь стоит ЗАПЕРТОЙ С ПРИЧИНОЙ, а не молча мёртвой. Точка подключения — проп `onTraceToVector`:
- * когда контракт дорастёт, вызывающий передаёт обработчик, и дверь открывается без правки этого
- * файла. Слой, в котором вектор уже есть, развилку не показывает: «если зашли ещё раз — оно уже
- * имеет вектор».
+ * ВОПРОС ПРИ ВХОДЕ. Плата без вектора встречает развилкой: рисовать поверх растра или перевести
+ * растр в вектор машиной. Вторая ветка ЖИВАЯ: контракт дорос (род прогона `vector` +
+ * `UploadContentVector`/`ImportDesignVector`), и весь её ход — платный прогон, ожидание, ПРИЁМКА
+ * ЧЕЛОВЕКОМ рядом с исходником, подшивка слоя — живёт на этом же экране, в
+ * `trace-vector-panel.tsx` (UI) и `use-trace-vector.ts` (данные и деньги). Прежняя точка
+ * подключения `onTraceToVector` снята: она существовала, пока контракта не было, а флоу целиком
+ * принадлежит редактору — у него есть всё (band, base, slot), и второй модалки поверх экрана
+ * правило «сперва исчерпай встроенное» не разрешает. Слой, в котором вектор уже есть — штрихами
+ * ИЛИ файлом (`source_media_id`), — развилку не показывает: «если зашли ещё раз — оно уже имеет
+ * вектор».
  */
 
 type Tool = 'line' | 'freehand' | 'curve' | 'select' | 'erase' | 'pan';
@@ -237,7 +244,6 @@ export function VectorModal({
   slot,
   disabled,
   onFlattened,
-  onTraceToVector,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -253,12 +259,6 @@ export function VectorModal({
   disabled?: boolean;
   /** The new picture, for a caller that wants to walk to it. */
   onFlattened?: (picture: common_DesignPicture) => void;
-  /**
-   * ТОЧКА ПОДКЛЮЧЕНИЯ ветки «да, перевести растр в вектор» из развилки при входе. Пока контракт
-   * не умеет ни рода прогона `vector`, ни хранения SVG, ни один вызывающий её не передаёт — и
-   * дверь стоит запертой с причиной. Появится обработчик — дверь оживёт без правки этого файла.
-   */
-  onTraceToVector?: () => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -304,6 +304,14 @@ export function VectorModal({
   const [unreadable, setUnreadable] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /**
+   * ФАЙЛ СЛОЯ — авторитетный SVG (`source_media_id`), когда слой им рождён (машинная перерисовка
+   * или импорт). Медиа-ид и, когда полоса его ещё несёт, URL: у контракта нет чтения медиа по id
+   * намеренно, поэтому файл, чей прогон уехал со первой страницы истории, остаётся без картинки
+   * и об этом говорится словами, а не битым `<img>`.
+   */
+  const [fileMediaId, setFileMediaId] = useState(0);
+  const [fileUrl, setFileUrl] = useState('');
   /** Развилка входа пройдена (или не нужна) — редактор на экране. */
   const [entered, setEntered] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
@@ -363,6 +371,19 @@ export function VectorModal({
   const history = useEditHistory<VectorStroke>(strokes, setStrokes);
   const { record, undo, reset: resetHistory } = history;
 
+  /**
+   * ВЕТКА «ДА» РАЗВИЛКИ — машинная перерисовка растра в вектор. Данные и деньги — в
+   * `use-trace-vector.ts`; хук живёт здесь безусловно (правило хуков), но просыпается только
+   * пока развилка на экране.
+   */
+  const traceVector = useTraceVector({
+    techCardId,
+    band,
+    base,
+    slot: slot ? { ref: slot.ref, label: slot.label } : null,
+    active: open && !entered && !disabled,
+  });
+
   const plateH = PLATE_W / (ratio || DEFAULT_RATIO);
   const zoomK = zoomPct / 100 || 1;
 
@@ -384,6 +405,11 @@ export function VectorModal({
     const doc = readLayer(loaded?.strokes, wireRatio);
     setLayer({ id: loaded?.id ?? knownId, rev: loaded?.rev ?? knownRev });
     setStrokes(doc.strokes);
+    // Файл слоя — из прочитанного слоя или из списка полосы; URL — лучшая попытка по картинкам
+    // первой страницы (см. findMediaUrlInBand).
+    const storedFileId = loaded?.sourceMediaId ?? known?.sourceMediaId ?? 0;
+    setFileMediaId(storedFileId);
+    setFileUrl(findMediaUrlInBand(band, storedFileId));
     // WITH A BASE, THE BASE'S SHAPE WINS. The stored ratio is only the memory of a drawing that has
     // no picture under it; letting it override a real picture would put every stroke in the wrong
     // place the moment the two disagree.
@@ -404,14 +430,29 @@ export function VectorModal({
     seededJson.current = JSON.stringify(doc.strokes);
     userMoved.current = false;
     /**
-     * РАЗВИЛКА — ТОЛЬКО ПЕРЕД ПУСТОЙ ПЛАТОЙ С РАСТРОМ. Слой со штрихами уже «имеет вектор» и
-     * вопрос был бы задан о сделанном выборе; рисование с нуля растра не имеет и спрашивать не о
-     * чем; нечитаемый слой обязан показать своё предупреждение, а не прятать его за вопросом;
-     * read-only визит не рисует вовсе.
+     * РАЗВИЛКА — ТОЛЬКО ПЕРЕД ПЛАТОЙ БЕЗ ВЕКТОРА. Слой со штрихами уже «имеет вектор»; слой с
+     * ФАЙЛОМ (source_media_id) имеет его тоже, даже когда редактируемой проекции ещё нет — задать
+     * вопрос над ним значило бы предложить купить то, что уже куплено. Рисование с нуля растра не
+     * имеет и спрашивать не о чем; нечитаемый слой обязан показать своё предупреждение, а не
+     * прятать его за вопросом; read-only визит не рисует вовсе.
      */
-    setEntered(!baseSrc || !!disabled || doc.unreadable || doc.strokes.length > 0);
+    setEntered(
+      !baseSrc || !!disabled || doc.unreadable || doc.strokes.length > 0 || storedFileId > 0,
+    );
     resetHistory();
-  }, [open, knownId, knownRev, baseMediaId, baseSrc, disabled, loaded, wireRatio, resetHistory]);
+  }, [
+    open,
+    knownId,
+    knownRev,
+    known,
+    band,
+    baseMediaId,
+    baseSrc,
+    disabled,
+    loaded,
+    wireRatio,
+    resetHistory,
+  ]);
 
   /**
    * THE EDITOR IS FROZEN UNTIL IT KNOWS WHAT IS ALREADY THERE — a correctness gate, not a spinner:
@@ -775,6 +816,31 @@ export function VectorModal({
     return next.id;
   }, [saveLayer, baseMediaId, payload, strokesJson]);
 
+  /**
+   * ПРИЁМКА МАШИННОГО ВЕКТОРА. Слой уже подшит сервером (`ImportDesignVector`, rev = 1) — редактор
+   * его УСЫНОВЛЯЕТ, не пере-читая: ответ и есть слой, а второй GET купил бы запрос и ноль фактов.
+   * Проекция может быть пустой — тогда на плате рисуется сам ФАЙЛ, и об этом сказано словами.
+   */
+  const adoptImported = useCallback(
+    (result: { layer: common_DesignEditLayer; strokes: VectorStroke[]; fileUrl: string }) => {
+      const next: LayerHandle = { id: result.layer.id ?? 0, rev: result.layer.rev ?? 1 };
+      layerRef.current = next;
+      setLayer(next);
+      setStrokes(result.strokes);
+      seededJson.current = JSON.stringify(result.strokes);
+      setFileMediaId(result.layer.sourceMediaId ?? 0);
+      setFileUrl(result.fileUrl);
+      setSelected(null);
+      setEntered(true);
+      resetHistory();
+      showMessage(
+        'the vector is filed as this plate’s layer — it will already be here on the next visit',
+        'success',
+      );
+    },
+    [resetHistory, showMessage],
+  );
+
   const saveDrawingOnly = async () => {
     if (frozen || tooLarge || !strokes.length || busy) return;
     setBusy('saving the drawing…');
@@ -850,11 +916,8 @@ export function VectorModal({
     }
   };
 
-  const download = () => {
-    const w = RASTER_FALLBACK_W;
-    const h = Math.round(w / (ratio || DEFAULT_RATIO));
-    const svg = layerSvg(strokes, { width: w, height: h, baseHref: baseSrc || undefined });
-    const href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  const saveBlob = (blob: Blob) => {
+    const href = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = href;
     a.download = `${base ? pictureHandle(base) : 'drawing'}-vector.svg`.replace(/[^\w.-]+/g, '-');
@@ -862,6 +925,33 @@ export function VectorModal({
     a.click();
     a.remove();
     URL.revokeObjectURL(href);
+  };
+
+  /**
+   * СКАЧАТЬ SVG. Слой, рождённый файлом, отдаёт ФАЙЛ — контракт говорит это дословно: «download
+   * SVG hands back THIS media, never a re-serialisation of the strokes». Круг через собственный
+   * формат холста — не тот файл, который производитель вернул, а тихая подмена одного другим —
+   * ровно то, как поставщику уезжает не тот чертёж, который принимали. Слой без файла (рисованный)
+   * сериализуется, как и раньше: там штрихи и ЕСТЬ оригинал.
+   */
+  const download = () => {
+    if (fileMediaId > 0 && fileUrl) {
+      void (async () => {
+        try {
+          saveBlob(await fetchMediaBlob(fileUrl));
+        } catch {
+          showMessage(
+            'the vector file could not be fetched from the bucket — nothing was downloaded. Try again.',
+            'error',
+          );
+        }
+      })();
+      return;
+    }
+    const w = RASTER_FALLBACK_W;
+    const h = Math.round(w / (ratio || DEFAULT_RATIO));
+    const svg = layerSvg(strokes, { width: w, height: h, baseHref: baseSrc || undefined });
+    saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
   };
 
   // ── выход ──────────────────────────────────────────────────────────────────────────────────
@@ -958,7 +1048,10 @@ export function VectorModal({
 
   const selectedStroke = selected === null ? null : strokes[selected] ?? null;
   const ready = !frozen && strokes.length > 0 && !tooLarge && !busy;
-  const anyCallout = unreadable || readPending || readFailed || !!refusal || tooLarge;
+  /** Слой-файл без редактируемой проекции: файл цел, штрихов нет — экран обязан сказать это. */
+  const fileOnly = entered && fileMediaId > 0 && strokes.length === 0 && !readPending;
+  const anyCallout =
+    unreadable || readPending || readFailed || !!refusal || tooLarge || fileOnly;
 
   const saveNote = base
     ? `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
@@ -1101,26 +1194,31 @@ export function VectorModal({
                 {frozen ? (
                   <Pill tone='mut'>read-only</Pill>
                 ) : (
-                  <>
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      disabled={!ready}
-                      onClick={saveDrawingOnly}
-                      title='store the strokes without producing a picture — comes back tomorrow'
-                    >
-                      save the drawing only
-                    </Button>
-                    <Button
-                      type='button'
-                      variant='main'
-                      size='sm'
-                      disabled={!ready}
-                      onClick={saveAsPicture}
-                    >
-                      {busy ?? 'save as a new picture'}
-                    </Button>
-                  </>
+                  /* Писатели — только вместе с холстом: на развилке и на суде им нечего писать,
+                     и пара призрачных кнопок там — шум, а не состояние. Тот же довод, что у
+                     органов вида строкой выше. */
+                  entered && (
+                    <>
+                      <Button
+                        variant='secondary'
+                        size='sm'
+                        disabled={!ready}
+                        onClick={saveDrawingOnly}
+                        title='store the strokes without producing a picture — comes back tomorrow'
+                      >
+                        save the drawing only
+                      </Button>
+                      <Button
+                        type='button'
+                        variant='main'
+                        size='sm'
+                        disabled={!ready}
+                        onClick={saveAsPicture}
+                      >
+                        {busy ?? 'save as a new picture'}
+                      </Button>
+                    </>
+                  )
                 )}
                 <Chip nonForm onClick={requestClose} title='leave the editor (esc)'>
                   exit
@@ -1168,6 +1266,17 @@ export function VectorModal({
                     </Text>
                   </CalloutBox>
                 )}
+                {fileOnly && (
+                  <CalloutBox tone='note'>
+                    <Text size='micro' component='p'>
+                      <b>this layer holds the vector as a FILE, without editable strokes yet</b>{' '}
+                      (media {fileMediaId}).{' '}
+                      {fileUrl
+                        ? 'The file is drawn on the plate; «download SVG» hands back exactly it. Strokes you draw here are stored beside it — the file itself never changes.'
+                        : 'Its run has left the first page of the history, so this screen cannot draw it — the file itself is intact, and «download SVG» is closed until it can hand the real one back.'}
+                    </Text>
+                  </CalloutBox>
+                )}
                 {tooLarge && (
                   <CalloutBox tone='warning'>
                     <Text size='micro' component='p'>
@@ -1182,57 +1291,18 @@ export function VectorModal({
             )}
 
             {!entered ? (
-              /* ── развилка входа ──────────────────────────────────────────────────────── */
-              <div className='flex min-h-0 flex-1 items-start justify-center pt-[12vh]'>
-                <div className='w-[440px] max-w-full space-y-2.5 border border-borderColor bg-bgColor p-4'>
-                  <Text
-                    size='micro'
-                    variant='uppercase'
-                    tracking='label'
-                    component='p'
-                    className='font-bold'
-                  >
-                    this flat has no vector yet
-                  </Text>
-                  <Text size='micro' variant='label' component='p'>
-                    Two ways from here. Draw over the raster: your strokes live on their own layer,
-                    the picture underneath is never touched, and next time this screen opens the
-                    vector is already here. Or convert the raster itself into a vector — not wired
-                    yet, see below.
-                  </Text>
-                  <div className='flex flex-wrap items-center gap-1.5'>
-                    <Button
-                      type='button'
-                      variant='main'
-                      size='sm'
-                      autoFocus
-                      onClick={() => setEntered(true)}
-                    >
-                      draw over the raster
-                    </Button>
-                    {onTraceToVector ? (
-                      <Button type='button' variant='secondary' size='sm' onClick={onTraceToVector}>
-                        convert the raster to vector
-                      </Button>
-                    ) : (
-                      /* ДВЕРЬ ЗАПЕРТА С ПРИЧИНОЙ, а не молча мёртвой: кнопка, которая ничего не
-                         делает, хуже отсутствующей. Причина стоит ВИДИМЫМ текстом — title на
-                         задизейбленной кнопке не показывается (pointer-events там нет). */
-                      <Button type='button' variant='secondary' size='sm' disabled>
-                        convert the raster to vector
-                      </Button>
-                    )}
-                  </div>
-                  {!onTraceToVector && (
-                    <Text size='nano' variant='label' component='p'>
-                      conversion is not wired yet: the wire has no «vector» run kind and the media
-                      bucket accepts only JPEG/PNG/WebP/GIF, so an SVG has nowhere to live. The
-                      door opens when the contract grows both — nothing on this screen will need to
-                      change except handing it the handler.
-                    </Text>
-                  )}
-                </div>
-              </div>
+              /* ── развилка входа и вся ветка «да» за ней ─────────────────────────────────
+                 Вопрос, платный прогон, ожидание, приёмка рядом с исходником — четыре фазы
+                 одной панели на этом же экране; довод и слова — в trace-vector-panel.tsx. */
+              <TraceVectorPanel
+                trace={traceVector}
+                baseSrc={baseSrc}
+                baseLabel={base ? pictureHandle(base) : 'this plate'}
+                baseMediaId={baseMediaId}
+                ratio={ratio || DEFAULT_RATIO}
+                onDraw={() => setEntered(true)}
+                onAccepted={adoptImported}
+              />
             ) : (
               /* ── рейка + холст ───────────────────────────────────────────────────────── */
               <div className='flex min-h-0 min-w-0 flex-1 gap-2'>
@@ -1254,8 +1324,15 @@ export function VectorModal({
                   onRasterOn={() => setRasterOn((v) => !v)}
                   strokesCount={strokes.length}
                   baseLabel={base ? pictureHandle(base) : null}
-                  canDownload={strokes.length > 0}
+                  // Слой-файл отдаёт ФАЙЛ (и только когда URL известен); рисованный слой —
+                  // сериализацию своих штрихов. Довод — у `download`.
+                  canDownload={fileMediaId > 0 ? !!fileUrl : strokes.length > 0}
                   onDownload={download}
+                  outNote={
+                    fileMediaId > 0
+                      ? '«download SVG» hands back the layer’s ORIGINAL file — the one the vectoriser produced — never a re-serialisation. Strokes drawn here live on the layer and in saved pictures, not inside the file.'
+                      : undefined
+                  }
                   frameRatio={ratio || DEFAULT_RATIO}
                   strokes={strokes}
                   onImport={(incoming, mode) => {
@@ -1345,6 +1422,19 @@ export function VectorModal({
                               setRatio(img.naturalWidth / img.naturalHeight);
                             }
                           }}
+                          className='pointer-events-none absolute inset-0 block h-full w-full'
+                          style={{ objectFit: 'fill' }}
+                        />
+                      )}
+                      {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый
+                          вектор выглядел бы как пустой холст. Штрихи, когда они появятся, рисуются
+                          ПОВЕРХ и живут отдельно от файла; предупреждение над холстом говорит это
+                          словами. `fill», как и у растра: доли кадра растягиваются в плату. */}
+                      {vecOn && strokes.length === 0 && fileMediaId > 0 && fileUrl && (
+                        <img
+                          src={fileUrl}
+                          alt=''
+                          draggable={false}
                           className='pointer-events-none absolute inset-0 block h-full w-full'
                           style={{ objectFit: 'fill' }}
                         />

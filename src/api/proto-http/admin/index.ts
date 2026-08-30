@@ -541,6 +541,17 @@ export type UploadPatternResponse = {
   sizeBytes: number | undefined;
 };
 
+export type UploadContentVectorRequest = {
+  // Raw SVG bytes as exported by the editor. The content type is fixed by the verb — this door
+  // stores image/svg+xml and nothing else (GLB models are minted by the design worker, not
+  // uploaded by hand); the bytes are checked against that claim, never trusted.
+  raw: string | undefined;
+};
+
+export type UploadContentVectorResponse = {
+  media: common_MediaFull | undefined;
+};
+
 export type ListObjectsPagedRequest = {
   limit: number | undefined;
   offset: number | undefined;
@@ -14949,6 +14960,26 @@ export type common_DesignRun = {
   // NO FOREIGN KEY, deliberately: a run is never deleted, so nothing needs enforcing, and a FK
   // would make the row's lineage a reason a card cannot be cleaned up later.
   rerunOf: number | undefined;
+  // OUTPUT-ONLY: the COMPOSED BASE INSTRUCTION the worker built for this run — the ask, the
+  // garment, the fit, the colour, the numbered reference captions («image 1: front — …», counting
+  // through the pictures in the order they were attached) and, on flats, the owner's craft
+  // paragraphs.
+  // ⚠ «BASE», AND THE WORD IS LOAD-BEARING. On the single-call flat route this IS the text the
+  // provider received, byte for byte. On `per_view` each paid call gets «view:\n<view>» appended,
+  // and on 3D the text is cut to the provider's texture ceiling — so on those two routes what
+  // went out is NOT what is stored, and a reader who takes this field for a transcript will be
+  // wrong. It was called «what the worker sent» here until a review pointed out that the sentence
+  // is false on two of four routes.
+  // STORED AT DISPATCH, NEVER RECONSTRUCTED ON READ. This is a deliberate fork: a preview verb
+  // would compose the text a second time, and what the modal shows could drift from what the
+  // model was told. Instead the worker writes the very string it is about to send, before the
+  // first paid attempt, and this field echoes that record — the history carries the sent text by
+  // construction — for the base text, with the two deviations named above.
+  // EMPTY MEANS TWO DIFFERENT THINGS, and a reader must not collapse them: either no worker has
+  // picked this run up yet, or the run PREDATES the column (migration 0352). Every historical row
+  // is empty forever — the text was never kept — so a screen that says «not dispatched yet» over
+  // an old finished run is lying about history.
+  prompt: string | undefined;
 };
 
 // DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
@@ -15477,7 +15508,7 @@ export type ImportDesignVectorRequest = {
   techCardId: number | undefined;
   // Idempotency: a retry after a lost response must not file the same SVG as a second layer.
   clientRequestId: string | undefined;
-  // FK media(id): the SVG itself, uploaded through UploadContentImage. It is the AUTHORITATIVE file
+  // FK media(id): the SVG itself, uploaded through UploadContentVector. It is the AUTHORITATIVE file
   // — `download SVG` hands back this, never a re-serialisation of the strokes below.
   sourceMediaId: number | undefined;
   // FK design_picture(id): the raster this vector was traced FROM, when it was. 0 = the file came
@@ -15554,6 +15585,26 @@ export interface AdminService {
   // per-size patterns and fitting iteration patterns. The file is stored raw (no image
   // processing) and is NOT added to the media library.
   UploadPattern(request: UploadPatternRequest): Promise<UploadPatternResponse>;
+  // UploadContentVector uploads a vector file (SVG) into the MEDIA LIBRARY — the same shelf, and
+  // the same MediaFull answer, as UploadContentImage and UploadContentVideo (owner decision
+  // 2026-08-30: «векторный файл надо будет записывать в медиа хранилище там где все картинки и
+  // видео», replacing the earlier files-library destination). The object is stored the way a
+  // video is: ONE verbatim object, all three media slots pointing at it, one media row that every
+  // existing reader — the media library, GetMediaUsage, ImportDesignVector's source_media_id —
+  // sees as a first-class member.
+  // THE BYTES ARE INSPECTED BEFORE THEY ARE STORED, and the check is a security boundary, not
+  // pedantry: the object is served from our own public host, where an SVG is a DOCUMENT —
+  // <script>, on* handlers, javascript: urls, <foreignObject> and declared XML entities run or
+  // expand in the viewer's browser. The storage path (bucket.UploadContentNonRaster →
+  // recraft.InspectSVG) refuses active content, declared entities, not-XML, and a raster wearing a
+  // vector's name; the ceiling is recraft.MaxSVGBytes (8 MiB). A refusal is InvalidArgument, and
+  // it has a named price: an SVG wrapping text in <foreignObject>, or an old export carrying
+  // benign DTD entities, will not upload through this door.
+  // THERE IS DELIBERATELY NO «list this card's vectors» VERB NEXT TO THIS ONE. Re-entry («при
+  // повторном заходе вектор уже был») is served by the band itself: ImportDesignVector files the
+  // layer with source_media_id, and GetDesignBand reads the layers back. A second list would be a
+  // second source of the same truth — this verb only puts bytes on the shelf.
+  UploadContentVector(request: UploadContentVectorRequest): Promise<UploadContentVectorResponse>;
   // DeleteFromBucket deletes objects specified by their keys.
   DeleteFromBucket(request: DeleteFromBucketRequest): Promise<DeleteFromBucketResponse>;
   // ListObjectsPaged lists all objects in the base folder.
@@ -17108,6 +17159,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UploadPattern",
       }) as Promise<UploadPatternResponse>;
+    },
+    UploadContentVector(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/content/vector`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UploadContentVector",
+      }) as Promise<UploadContentVectorResponse>;
     },
     DeleteFromBucket(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content`; // eslint-disable-line quotes

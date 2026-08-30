@@ -22,15 +22,6 @@ import {
   slotRefKey,
   viewLabel,
 } from './bench-slot';
-import {
-  FixBars,
-  FixSelectionBar,
-  runningFix,
-  useFixSelection,
-  useRetireArmedFix,
-  type FixTargetSlot,
-} from './fix-flow';
-import { useFixContext } from './generation/fix-context';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
@@ -67,9 +58,10 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
  * three statements of equal weight, when two of them are statements ABOUT the third. Both organs
  * are still their own files and read the band themselves — only the mounting moved.
  *
- * THE FIX FLOW IS WIRED HERE AND OWNED IN `fix-flow.tsx`. This file is the only place that has both
- * halves in hand: the slot that asks (`fix ▸`, the tick) and the write that answers (`placePicture`,
- * with its optimism and its CAS). See `fix-flow.tsx` for what a fix is and what the wire can carry.
+ * ЦИКЛА ПОЧИНКИ ЗДЕСЬ БОЛЬШЕ НЕТ (S-14/S-15): дверь `fix ▸`, галки-шортлист и полосы состояния
+ * сняты решением владельца вместе с `fix-flow.tsx`. Поля провода `fix_targets`/`fix_slot_ids`
+ * живут дальше у векторного прогона (`modals/use-trace-vector.ts`) и в замороженной истории —
+ * их не трогать; см. шапку `bench-slot.tsx`.
  */
 
 /**
@@ -115,11 +107,6 @@ export function Bench({
   const writes = useDesignWrites(techCardId);
   const pick = usePickMode();
   const viewer = useMediaViewer();
-  const fix = useFixContext();
-  const fixSelection = useFixSelection();
-  // Mounted ONCE, above the slots: it is a statement about the WHOLE armed selection, and a single
-  // slot cannot see the selection it belongs to. See `useRetireArmedFix` for what that cost.
-  useRetireArmedFix(band);
 
   const [optimistic, setOptimistic] = useState<Record<string, Optimistic>>({});
   /** A detail being minted has no slot to key on yet — it is born by this very write. */
@@ -330,84 +317,6 @@ export function Bench({
     ({ view, slot }) => !!shownPicture(sideRef(view), slot?.picture),
   ).length;
 
-  /**
-   * WHAT A FIX MAY ADDRESS — ANY FILLED SLOT, side or detail.
-   *
-   * Sides travel as view keys and details as `design_bench_slot(id)`, which is the contract's own
-   * split (`fix_targets` / `fix_slot_ids`) and not a distinction this screen invented: a bare view
-   * key cannot tell two details apart, and the list is frozen into the run's history where an
-   * ambiguous target could never be repaired afterwards.
-   *
-   * EMPTY SLOTS ARE OUT, for a simpler reason: «fix» means «ask for this drawing again», and with
-   * nothing standing there the verb is GENERATE.
-   */
-  const filledSlots: FixTargetSlot[] = [];
-  for (const { view, slot } of bench.sides) {
-    const picture = shownPicture(sideRef(view), slot?.picture);
-    if (!picture) continue;
-    filledSlots.push({
-      key: slotRefKey(sideRef(view)),
-      viewKey: view,
-      slotId: 0,
-      label: viewLabel(view),
-      picture,
-    });
-  }
-  for (const slot of bench.details) {
-    const picture = shownPicture(detailRef(slot.id), slot.picture);
-    if (!picture || !slot.id) continue;
-    filledSlots.push({
-      key: slotRefKey(detailRef(slot.id)),
-      viewKey: '',
-      slotId: slot.id,
-      label: displayDetailName(bench.details, slot),
-      picture,
-    });
-  }
-
-  /**
-   * A SLOT WITH A FIX ALREADY IN FLIGHT IS NOT ON THE SHORTLIST. One slot cannot have two fixes
-   * running — the second would be paid for and would answer a question the first is already
-   * answering — so it is neither tickable nor swept up by `select all`. Its own strip already says
-   * `fix is running`, which is the more useful sentence than a tick that leads to a refusal.
-   */
-  const fixable = filledSlots.filter((t) => !runningFix(band, t.viewKey, t.slotId));
-
-  /**
-   * Arming a fix does not send anything: it changes what the GENERATION FORM is asking for. So the
-   * gesture ends by walking to that form. When the form is folded there is no anchor to walk to —
-   * and nothing is lost, because the slot itself now carries the `fix armed` strip that says where
-   * to press.
-   */
-  const startFix = (target: FixTargetSlot) => {
-    fix.start({
-      viewKeys: target.viewKey ? [target.viewKey] : [],
-      slotIds: target.slotId ? [target.slotId] : [],
-      labels: [target.label],
-    });
-    // The shortlist and the armed fix must not both claim to hold a pending intention — and the
-    // tick MODE goes down with the ticks (R-20): arming is the shortlist's natural exit.
-    fixSelection.close();
-    document
-      .getElementById('design-generation')
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
-  /**
-   * WHY `fix ▸` IS SOMETIMES DEAD. One slot cannot have two fixes in flight — the second would be
-   * paid for and would answer a question the first is already answering — so while a run addressing
-   * this slot is live the door is drawn with its reason instead of quietly re-arming a chip that the
-   * running strip immediately retires.
-   */
-  const fixDoorFor = (key: string) => {
-    const target = filledSlots.find((t) => t.key === key);
-    if (!target) return { onFix: undefined, blocked: null as string | null, tickable: false };
-    if (!fixable.some((t) => t.key === key)) {
-      return { onFix: undefined, blocked: 'a fix for this slot is already running', tickable: false };
-    }
-    return { onFix: () => startFix(target), blocked: null, tickable: true };
-  };
-
   /** Everything the viewer can page through, in the order the bench draws it. */
   const viewerPictures: common_DesignPicture[] = [];
   for (const { view, slot } of bench.sides) {
@@ -438,18 +347,12 @@ export function Bench({
           What the bench adds instead is WHICH slot is armed — a thing said positionally, on the slot
           itself, which a page-level banner cannot do. */}
 
-      {/* ШАПКА БЛОКА — три строки о композиции целиком, до того как речь пойдёт об отдельном слоте:
-          что скажет лист, чем нельзя поручиться за смесь происхождений, и какие стороны человек
-          отобрал в починку. В прототипе ровно так: `slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml`
-          в своей шапке. */}
+      {/* ШАПКА БЛОКА — две строки о композиции целиком, до того как речь пойдёт об отдельном
+          слоте: что скажет лист и чем нельзя поручиться за смесь происхождений. В прототипе ровно
+          так: `slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml` в своей шапке. Полосы починки
+          («fix several ▸») здесь больше нет — цикл снят (S-15). */}
       <SheetBar band={band} />
       <MixWarn band={band} />
-      <FixSelectionBar
-        band={band}
-        targets={fixable}
-        selection={fixSelection}
-        disabled={disabled}
-      />
 
       <GroupLabel
         flush
@@ -468,7 +371,6 @@ export function Bench({
           const rev = slot?.slotRev ?? 0;
           const picture = shownPicture(ref, slot?.picture);
           const key = slotRefKey(ref);
-          const door = fixDoorFor(key);
           return (
             <BenchSlot
               key={view}
@@ -493,31 +395,6 @@ export function Bench({
               onUnmark={() => unmark(ref, rev)}
               // Ручкой сплиту служит имя слота: человек режет «плиту FRONT», а не «upload 3 · b».
               onSplit={picture ? () => split.openForPicture(picture, viewLabel(view)) : undefined}
-              onFix={door.onFix}
-              fixBlocked={door.blocked}
-              // Ticks belong to the slots that can carry a fix; a shortlist offering an empty slot
-              // would put a row in it that the door then refuses. AND they exist only inside the
-              // tick mode (R-20): in the ordinary view a standing plate carries no checkbox —
-              // whatever stands in a slot is there because it is needed, and the sheet reads the
-              // fact of the placement, not a tick.
-              selected={fixSelection.active && fixSelection.has(key)}
-              onToggleSelect={
-                door.tickable && fixSelection.active ? () => fixSelection.toggle(key) : undefined
-              }
-              bars={
-                <FixBars
-                  band={band}
-                  techCardId={techCardId}
-                  viewKey={view}
-                  label={viewLabel(view)}
-                  slotRef={ref}
-                  slotRev={rev}
-                  current={picture}
-                  emptySlot={!picture}
-                  disabled={disabled}
-                  onPutIn={(pictureId) => placePicture(ref, rev, pictureId)}
-                />
-              }
               onOpenViewer={
                 picture?.media
                   ? () => viewer.openAt(viewerPictures.findIndex((p) => p.id === picture.id))
@@ -546,7 +423,6 @@ export function Bench({
           const picture = shownPicture(ref, slot.picture);
           const cited = slot.id ? detailsCitedByLatest.has(slot.id) : false;
           const key = slotRefKey(ref);
-          const door = fixDoorFor(key);
           return (
             <BenchSlot
               key={slot.id}
@@ -568,30 +444,6 @@ export function Bench({
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
               onSplit={picture ? () => split.openForPicture(picture, name) : undefined}
-              // A DETAIL IS FIXABLE NOW, and by its own address: `fix_slot_ids` names it as
-              // `design_bench_slot(id)`, which is the only key that can tell two details apart.
-              onFix={door.onFix}
-              fixBlocked={door.blocked}
-              // Той же дверью, что у сторон: галка живёт только в режиме правки (R-20).
-              selected={fixSelection.active && fixSelection.has(key)}
-              onToggleSelect={
-                door.tickable && fixSelection.active ? () => fixSelection.toggle(key) : undefined
-              }
-              bars={
-                <FixBars
-                  band={band}
-                  techCardId={techCardId}
-                  viewKey=''
-                  slotId={slot.id ?? 0}
-                  label={name}
-                  slotRef={ref}
-                  slotRev={rev}
-                  current={picture}
-                  emptySlot={!picture}
-                  disabled={disabled}
-                  onPutIn={(pictureId) => placePicture(ref, rev, pictureId)}
-                />
-              }
               onRename={(next) =>
                 writes.setBenchSlot.mutate({
                   slot: ref,

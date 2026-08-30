@@ -9,7 +9,6 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { MediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -54,6 +53,13 @@ import { useDesignWrites } from './use-design-band';
  * Членство — ОБЪЕДИНЕНИЕ: картинка с ролью показывается здесь, даже если её строка потерялась
  * (дрейф данных, карточка из клона). Роль — более сильное утверждение, и прятать носителя роли
  * значило бы завести запись, которую не видно ни на одном экране и которую нечем снять.
+ *
+ * НОСИТЕЛЬ РОЛИ БЕЗ СТРОКИ — НЕ ОБВИНЯЕМЫЙ (S-6). Плашка «off the card» и запертая на том же
+ * признаке записка сняты прямым словом владельца: референсы — «буквально то, что идёт в промпт,
+ * это не флэты, они не должны быть в карточке». Правило «медиа принадлежит карточке» — про флэты
+ * изделия; к входу модели оно не применяется вовсе, и состояние «роль есть, строки нет» — не
+ * нарушение, а законная форма референса. На экране такой референс ничем не отличается от
+ * остальных: роль меняется, записка пишется, ✕ снимает его целиком.
  *
  * ✕ УНОСИТ СУЩНОСТЬ ЦЕЛИКОМ — картинку входа, её роль и её записку — и спрашивает перед этим,
  * называя, в скольких прогонах эта картинка участвовала. Доски он не касается: там своя строка со
@@ -149,13 +155,12 @@ export function ReferencesSection({
 
   // ЧЛЕНСТВО И ПОРЯДОК. Порядок — это порядок добавления во вход, то есть позиция строки входа в
   // `moodboardMedia`; картинка, несущая роль, но потерявшая строку (дрейф), встаёт в хвост, чтобы
-  // её было чем снять.
+  // её было чем снять. Ничем, кроме места в хвосте, она не отличается (S-6): различие «строка ли
+  // на карточке» здесь больше не рисуется и ничего не запирает.
   const members = useMemo(() => {
-    const onCard = rows.map((i) => ({ mediaId: i.mediaId, onCard: true }));
-    const seen = new Set(onCard.map((m) => m.mediaId));
-    const strays = [...refOf.keys()]
-      .filter((id) => !seen.has(id))
-      .map((mediaId) => ({ mediaId, onCard: false }));
+    const onCard = rows.map((i) => i.mediaId);
+    const seen = new Set(onCard);
+    const strays = [...refOf.keys()].filter((id) => !seen.has(id));
     return [...onCard, ...strays];
   }, [rows, refOf]);
 
@@ -168,8 +173,8 @@ export function ReferencesSection({
   const promptNumber = useMemo(() => {
     const m = new Map<number, number>();
     let n = 0;
-    for (const member of members) {
-      if (refOf.has(member.mediaId)) m.set(member.mediaId, ++n);
+    for (const mediaId of members) {
+      if (refOf.has(mediaId)) m.set(mediaId, ++n);
     }
     return m;
   }, [members, refOf]);
@@ -336,14 +341,14 @@ export function ReferencesSection({
 
   // ── зум: смотреть референс целиком ──────────────────────────────────────────────────────────
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
-  const viewerItems: MediaViewerItem[] = members.map((m) => {
-    const full = mediaById.get(m.mediaId);
+  const viewerItems: MediaViewerItem[] = members.map((mediaId) => {
+    const full = mediaById.get(mediaId);
     return {
       src: fullUrl(full),
       thumbnail: thumbUrl(full),
       type: 'image',
-      alt: `reference ${promptNumber.get(m.mediaId) ?? m.mediaId}`,
-      meta: { id: m.mediaId },
+      alt: `reference ${promptNumber.get(mediaId) ?? mediaId}`,
+      meta: { id: mediaId },
     };
   });
 
@@ -437,25 +442,24 @@ export function ReferencesSection({
             честно схлопывается в одну на узком окне. Между колонками — зазор, между строками —
             волосяная линия на самих ячейках. */}
         <div className='grid gap-x-gutter [grid-template-columns:repeat(auto-fit,minmax(470px,1fr))]'>
-          {members.map((member, i) => (
+          {members.map((mediaId, i) => (
             <ReferenceCell
-              key={member.mediaId}
-              mediaId={member.mediaId}
-              full={mediaById.get(member.mediaId)}
-              role={refOf.get(member.mediaId)?.role ?? ''}
-              number={promptNumber.get(member.mediaId)}
-              note={refOf.get(member.mediaId)?.note ?? ''}
-              onCard={member.onCard}
+              key={mediaId}
+              mediaId={mediaId}
+              full={mediaById.get(mediaId)}
+              role={refOf.get(mediaId)?.role ?? ''}
+              number={promptNumber.get(mediaId)}
+              note={refOf.get(mediaId)?.note ?? ''}
               readOnly={readOnly}
-              onRole={(role) => setRole(member.mediaId, role)}
-              onNote={(note) => commitNote(member.mediaId, note)}
-              onRemove={() => setPendingRemove(member.mediaId)}
+              onRole={(role) => setRole(mediaId, role)}
+              onNote={(note) => commitNote(mediaId, note)}
+              onRemove={() => setPendingRemove(mediaId)}
               onZoom={() => setZoomIndex(i)}
               onSplit={() => {
-                const full = mediaById.get(member.mediaId);
-                if (full) split.openForMedia(full, `reference ${promptNumber.get(member.mediaId) ?? member.mediaId}`);
+                const full = mediaById.get(mediaId);
+                if (full) split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
               }}
-              splitPending={split.registering === member.mediaId}
+              splitPending={split.registering === mediaId}
             />
           ))}
 
@@ -593,7 +597,6 @@ function ReferenceCell({
   role,
   number,
   note,
-  onCard,
   readOnly,
   onRole,
   onNote,
@@ -607,7 +610,6 @@ function ReferenceCell({
   role: string;
   number?: number;
   note: string;
-  onCard: boolean;
   readOnly: boolean;
   onRole: (role: string) => void;
   onNote: (note: string) => void;
@@ -720,11 +722,6 @@ function ReferenceCell({
             onValueChange={onRole}
             className='w-[172px]'
           />
-          {!onCard && (
-            <Pill tone='warn' title='this picture carries a role but has no row on the card'>
-              off the card
-            </Pill>
-          )}
           <button
             type='button'
             disabled={readOnly}
@@ -752,7 +749,10 @@ function ReferenceCell({
           // ЯКОРЬ ДЛЯ ПРОБЫ, а не украшение: примитив `Textarea` кладёт `name` в `id`, поэтому
           // адресовать записку по имени поля невозможно, а `useId` от прогона к прогону разный.
           data-ref-note={mediaId}
-          disabled={readOnly || !onCard || off}
+          // ЗАМОК ОДИН — «нет роли» (S-6): записка живёт на строке роли, и у носителя роли она
+          // пишется всегда, держит ли карточка строку или нет. Второй замок `!onCard` был тихой
+          // половиной снятой плашки «off the card» — отказом без слов при живом плейсхолдере.
+          disabled={readOnly || off}
           value={draft}
           maxLength={500}
           autoGrow={false}
