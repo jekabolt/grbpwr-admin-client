@@ -171,7 +171,7 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // ARTIFACTS is what that work has been frozen into. Both replace the old moodboard/sketch pair,
   // which split ONE surface across two rail entries; the order is still the order the work happens
   // in: you look before you freeze.
-  { band: 'design', tabs: ['header', 'studio', 'artifacts'] },
+  { band: 'design', tabs: ['header', 'studio', 'artifacts', 'sketch'] },
   // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
   // The size range, the measurement chart, the DXF sheets and the раскладки are the first artefacts
   // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
@@ -210,7 +210,16 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
 const FOLDED_TABS: Record<string, TabId> = {
   dev: 'costing',
   pieces: 'patterns',
-  sketch: 'studio',
+  // `moodboard` СВЁРНУТ, `sketch` — ПОКА НЕТ, и разница измерена, а не выбрана из вкуса.
+  //
+  // Студия действительно заменила мудборд: её доска пишет `moodboardMedia` и указания на них, то
+  // есть всё, что умела старая вкладка в этом режиме.
+  //
+  // Технический эскиз она НЕ заменила. Верстак пишет слоты ПОЛОСЫ (`design_bench_slot`), а в
+  // `technicalMedia` документа плиты вкладывает атомарный минт, которого на контуре ещё нет;
+  // ARTIFACTS этот список только ЧИТАЕТ. Свернув `sketch` сейчас, мы отняли бы у человека
+  // единственный способ добавить карточке технический эскиз — то есть выдали бы за переезд
+  // потерю. Вкладка вернётся в свёртку тем же коммитом, которым приедет минт.
   moodboard: 'studio',
 };
 
@@ -221,7 +230,11 @@ const ERROR_TAB: Record<string, TabId> = {
   // tab does not fall back quietly — it routes the failed save to a tab the rail no longer draws,
   // and the toast then names a field nobody can see.
   moodboardMedia: 'studio',
-  technicalMedia: 'studio',
+  // `technicalMedia` ВЕДЁТ В `sketch`, А НЕ В `studio` — потому что отказ обязан приводить туда,
+  // где его можно ИСПРАВИТЬ. Студия этот список не пишет: верстак работает со слотами полосы, а
+  // ARTIFACTS документ только читает. Строка переедет в `studio` тем же коммитом, которым приедет
+  // атомарный минт и начнёт вкладывать плиты в документ.
+  technicalMedia: 'sketch',
   callouts: 'studio',
   patterns: 'patterns',
   sizeIds: 'patterns',
