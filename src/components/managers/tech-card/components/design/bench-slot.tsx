@@ -439,9 +439,21 @@ export function BenchSlot(props: BenchSlotProps) {
               (F-7, migration 0343) — the wave's rule is that a cut door carries `data-inert` with a
               reason rather than vanishing, so a human learns it is «not yet» and not «never». The
               fix bars were cut outright instead, because they report on a flow that cannot occur at
-              all while generation is gone. */}
+              all while generation is gone.
+
+              WHAT THIS DOOR IS, AND WHAT IT IS NOT. It opens the VECTOR EDITOR — strokes over the
+              flat itself, on their own layer, with the raster underneath as a tracing sheet
+              (`vector-open` in the prototype). That is genuinely a later wave, and the reason still
+              says so. It is NOT the callout editor: placing, moving and shaping the numbered
+              callouts is live, on ARTIFACTS, over the plates the DOCUMENT lists — which is where
+              the reason now points, because «the editor arrives later» read as «there is nowhere to
+              draw», and there is. A bench picture joins those plates at the mint, which injects the
+              bench into `technicalMedia` server-side. */}
           {!disabled && picture && (
-            <InertDoor label='edit ▸' reason='the vector editor arrives in the next wave' />
+            <InertDoor
+              label='edit ▸'
+              reason='editing the drawing itself — strokes over this flat — is a later wave. Callouts are drawn on ARTIFACTS, over the plates the document lists; a bench picture joins them at the mint'
+            />
           )}
           {!disabled && picture && (
             <MediaSelector

@@ -1,6 +1,7 @@
 import type {
   GetDesignBandResponse,
   common_MediaFull,
+  common_TechCard,
   common_TechCardMediaKind,
 } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -8,9 +9,11 @@ import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import type { EditHistory } from 'ui/components/annotation/history';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
@@ -20,6 +23,8 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { TechCardFormData } from '../schema';
+import { SketchTab } from '../sketch-tab';
+import { InertDoor } from './bench-slot';
 import { clockStamp } from './handles';
 import {
   DiffRows,
@@ -90,6 +95,28 @@ export type DocumentPlate = {
   door?: string;
   note?: string;
 };
+
+/**
+ * One row of the form's `callouts` array as the FORM holds it (`z.input` — every field optional).
+ *
+ * Declared here and exported because two doors upstream have to name it: `ArtifactsTab` passes the
+ * page's undo history down, and the history's element type is what says WHAT is being undone.
+ */
+export type SheetCallout = NonNullable<TechCardFormData['callouts']>[number];
+
+/**
+ * WHY A BENCH PLATE HAS NO LIVE DOOR, said once and read by both of them.
+ *
+ * The drawing editor draws on `technicalMedia` — the card's OWN media list, which is what a
+ * callout's `media_id` points at. A bench slot is not in that list: the mint is what puts it there
+ * (`injectBenchPlatesAsTechnicalMedia`, server-side, inside the mint transaction). So before a mint
+ * this picture cannot carry a callout, and taking it «off the sheet» here would remove nothing —
+ * the slot still holds it and the next mint would bring it straight back.
+ */
+const BENCH_PLATE_NOT_ON_DOCUMENT =
+  'this picture stands on the bench, not in the card’s own media — the mint puts it there, and callouts are drawn on the document’s own plates';
+const BENCH_PLATE_DETACH =
+  'a bench plate is taken off by clearing its slot in STUDIO — dropped here it would come back with the next mint';
 
 const CARD_PLATE_KINDS: Partial<Record<common_TechCardMediaKind, string>> = {
   TECH_CARD_MEDIA_KIND_FRONT: 'FRONT',
@@ -163,10 +190,26 @@ export function ArtifactsPanel({
   techCardId,
   band,
   disabled,
+  techCard,
+  calloutHistory,
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
   disabled?: boolean;
+  /**
+   * The loaded card, for the drawing editor: it resolves a `media_id` to a picture through
+   * `resolvedTechnicalMedia`. Optional because a harness may mount this panel with a form and no
+   * card — and then the door says so instead of opening onto blank frames.
+   */
+  techCard?: common_TechCard;
+  /**
+   * The form's ONE undo history over `callouts`, handed down from the page.
+   *
+   * NOT made here. The page resets it whenever the form is re-seeded from the server
+   * (`calloutHistory.reset()` after a save), and a history minted inside this panel would survive
+   * that reset — ⌘Z would then restore callouts the card no longer holds, silently.
+   */
+  calloutHistory?: EditHistory<SheetCallout>;
 }): JSX.Element {
   const form = useFormContext<TechCardFormData>();
   const host = useDesignSaveHost();
@@ -199,6 +242,10 @@ export function ArtifactsPanel({
   const [mintOrigin, setMintOrigin] = useState<MintOrigin | null>(null);
   /** Which frozen composition is on screen. 0 = the document, which is the default and the point. */
   const [inspecting, setInspecting] = useState(0);
+  /** The drawing editor, as a modal over this tab. */
+  const [drawing, setDrawing] = useState(false);
+  /** The plate whose detach is waiting on a human, because callouts stand on it. */
+  const [detaching, setDetaching] = useState<DocumentPlate | null>(null);
 
   const versionNumbers = useMemo(
     () => [...(band.versionNumbers ?? [])].sort((a, b) => b - a),
@@ -237,6 +284,86 @@ export function ArtifactsPanel({
 
   const onScreen = inspecting === 0 ? plates : frozenPlates;
 
+  /**
+   * ═══ THE DRAWING EDITOR, AND WHY IT IS MOUNTED HERE AND NOT IN THE STUDIO ════════════════════
+   *
+   * Placing a callout, moving it and drawing its shape (arrow, arc, dashed, filled) live in ONE
+   * component — `SketchTab` — and it is mounted here, over the ARTIFACTS document, as a modal.
+   *
+   * NOT IN THE STUDIO, and the reason is mechanical rather than a matter of taste. `useMoodCallouts`
+   * (`design/mood-callouts.tsx`) holds the single `useFieldArray` over `callouts` in the whole
+   * studio tree, and `SketchTab` holds one of its own. In react-hook-form 7.62 the array mutators do
+   * not emit `_subjects.array`, so two instances over one name do not synchronise — the second loses
+   * the first's rows silently. This tab has NO field array over `callouts` at all (the panel writes
+   * leaf paths by index), so mounting the editor here creates no second instance of anything.
+   *
+   * The tabs are mounted CONDITIONALLY on `activeTab` in the page, so the studio's array and this
+   * editor's array are never alive at the same time either.
+   */
+  const editorCard = techCard ?? card;
+  const canDraw = !!calloutHistory && !!editorCard;
+  const drawInert =
+    inspecting > 0
+      ? `v${inspecting} is a record of what was minted — switch to “the document” to draw`
+      : 'the drawing editor was not handed to this screen: it needs the loaded card and the form’s undo history';
+
+  /** How many callouts stand on a plate — the number the confirmation has to say out loud. */
+  const calloutsOn = (mediaId: number) =>
+    callouts.filter((c) => (c.mediaId ?? 0) === mediaId).length;
+
+  /**
+   * TAKE A PLATE OFF THE DOCUMENT — the rule carried over WORD FOR WORD from `removeMedia` in
+   * `sketch-tab.tsx`, which was the only place that could do this while the sketch tab existed.
+   *
+   * THE TEXT OF A CALLOUT SURVIVES THE PICTURE: a person wrote it, and it is what the server takes a
+   * cut piece's name from. THE ANCHOR DOES NOT. `pos_x/pos_y` and `points` are fractions of a FRAME,
+   * and a fraction only means something on its own picture — carried onto another plate the shape
+   * would land somewhere else entirely and look perfectly normal doing it.
+   *
+   * THE ARRAY IS WRITTEN AT ITS ROOT, never through a field-array mutator. That is the convention of
+   * these files and it exists because the mutators do not broadcast; a root `setValue` does, so
+   * every other reader of the path re-syncs. The callout fields below are LEAF writes on a dotted
+   * path, which touch no array identity at all.
+   */
+  function detachPlate(plate: DocumentPlate) {
+    const media = form.getValues('technicalMedia') ?? [];
+    form.setValue(
+      'technicalMedia',
+      media.filter((m) => (m.mediaId ?? 0) !== plate.mediaId),
+      { shouldDirty: true },
+    );
+    const cs = form.getValues('callouts') ?? [];
+    cs.forEach((c, index) => {
+      if ((c.mediaId ?? 0) !== plate.mediaId) return;
+      form.setValue(`callouts.${index}.mediaId`, 0, { shouldDirty: true });
+      form.setValue(`callouts.${index}.posX`, '', { shouldDirty: true });
+      form.setValue(`callouts.${index}.posY`, '', { shouldDirty: true });
+      form.setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
+      form.setValue(`callouts.${index}.points`, [], { shouldDirty: true });
+    });
+  }
+
+  /** Silent when nothing is pinned; a question naming the COUNT when something is. */
+  function askDetach(plate: DocumentPlate) {
+    if (calloutsOn(plate.mediaId) === 0) {
+      detachPlate(plate);
+      return;
+    }
+    setDetaching(plate);
+  }
+
+  const detachInert =
+    inspecting > 0
+      ? `v${inspecting} is a record of what was minted — nothing on this tab edits it`
+      : 'the card is released: its sheet is frozen';
+
+  /** Приколотая выноска стоит на картинке; у откреплённой `media_id` равен нулю. */
+  const pinnedCount = callouts.filter((c) => (c.mediaId ?? 0) > 0).length;
+  const strayCount = callouts.length - pinnedCount;
+
+  /** Read once, so the question and the act cannot disagree about how many are at stake. */
+  const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
+
   return (
     <SectionStack>
       {/* ─── STOREY (a): THE DOCUMENT ─────────────────────────────────────────────────────── */}
@@ -274,7 +401,12 @@ export function ArtifactsPanel({
           className='min-w-0 flex-1'
         >
           {onScreen.length === 0 ? (
-            <EmptyDocument bench={bench} disabled={disabled} />
+            <EmptyDocument
+              bench={bench}
+              disabled={disabled}
+              onDraw={inspecting === 0 && canDraw ? () => setDrawing(true) : undefined}
+              drawInert={drawInert}
+            />
           ) : (
             <PlateGrid
               plates={onScreen}
@@ -282,6 +414,10 @@ export function ArtifactsPanel({
               selected={inspecting === 0 ? selected : null}
               onSelect={setSelected}
               disabled={disabled}
+              onDraw={inspecting === 0 && canDraw ? () => setDrawing(true) : undefined}
+              drawInert={drawInert}
+              onDetach={inspecting === 0 && !disabled ? askDetach : undefined}
+              detachInert={detachInert}
             />
           )}
 
@@ -305,7 +441,16 @@ export function ArtifactsPanel({
         <Section
           title='callouts'
           question='— a number is minted once and never reused'
-          action={<Pill tone='mut'>{callouts.length} on the sheet</Pill>}
+          action={
+            /* СЧИТАЮТСЯ ПРИКОЛОТЫЕ, А НЕ ВСЕ. `callouts.length` под подписью «on the sheet» врал:
+               выноска с `media_id = 0` ни на каком листе не стоит, и соседняя строка тут же метит
+               её `unpinned`. Раньше такие приезжали только из старых карточек, теперь их создаёт
+               открепление плиты — то есть ложь стала частой. Открепившиеся названы отдельно. */
+            <ChipRow>
+              <Pill tone='mut'>{pinnedCount} on the sheet</Pill>
+              {strayCount > 0 && <Pill tone='warn'>{strayCount} unpinned</Pill>}
+            </ChipRow>
+          }
           className='lg:w-[340px] lg:shrink-0'
         >
           <CalloutPanel
@@ -314,6 +459,8 @@ export function ArtifactsPanel({
             selected={selected}
             onSelect={setSelected}
             disabled={disabled || inspecting > 0}
+            onDraw={inspecting === 0 && canDraw ? () => setDrawing(true) : undefined}
+            drawInert={drawInert}
           />
         </Section>
       </SectionStack>
@@ -440,6 +587,60 @@ export function ArtifactsPanel({
           onMinted={() => setInspecting(0)}
         />
       )}
+
+      {/* THE DRAWING EDITOR. A modal is its own surface, so it is not wrapped in a `Section` — but
+          `SketchTab` IS a block, and a block belongs on the grey ground rather than on the modal's
+          white stock, which is what the bleeding wrapper is for. Same arrangement as the page it
+          used to live on: ground behind, one white block on it. */}
+      {drawing && calloutHistory && editorCard && (
+        <ConfirmationModal
+          open
+          onOpenChange={(open) => !open && setDrawing(false)}
+          onConfirm={() => setDrawing(false)}
+          hideActions
+          width='lg'
+          title='draw on the technical sheet'
+        >
+          <div className='-m-2.5 bg-pageBg p-2.5'>
+            <SketchTab
+              techCard={editorCard}
+              view='sketch'
+              active
+              frozen={!!disabled}
+              calloutHistory={calloutHistory}
+            />
+          </div>
+        </ConfirmationModal>
+      )}
+
+      {detaching && (
+        <ConfirmationModal
+          open
+          onOpenChange={(open) => !open && setDetaching(null)}
+          onConfirm={() => detachPlate(detaching)}
+          title={`take ${detaching.name} off the sheet`}
+          confirmLabel='take it off'
+          width='sm'
+        >
+          <div className='space-y-stack'>
+            <Text size='micro' component='p'>
+              <b>
+                {detachCount} callout{detachCount === 1 ? '' : 's'} stand
+                {detachCount === 1 ? 's' : ''} on this plate.
+              </b>{' '}
+              Their TEXT is kept — a person wrote it and it outlives the picture, and the server
+              takes a cut piece’s name from it. What goes is the anchor: the marker, its position
+              and any shape drawn on it, because a fraction of a frame only means something on its
+              own picture.
+            </Text>
+            <Text size='micro' component='p'>
+              They stay in the callout list beside the sheet, marked <b>unpinned</b>, and the
+              drawing editor lists them under “callouts without an image” — where each can be put
+              back on another plate KEEPING ITS NUMBER, or deleted.
+            </Text>
+          </div>
+        </ConfirmationModal>
+      )}
     </SectionStack>
   );
 }
@@ -458,6 +659,11 @@ export function ArtifactsPanel({
  *
  * A picture whose dimensions the server did not state gets no markers rather than markers in the
  * wrong place — an absent mark is a gap, a misplaced one is a lie.
+ *
+ * EVERY PLATE CARRIES ITS TWO DOORS, and a door that cannot act is DRAWN INERT WITH ITS REASON
+ * rather than omitted. Absence teaches that the flow does not exist; a dead control with a reason
+ * teaches which of the four true things is in the way — a frozen version, a released card, a bench
+ * plate that is not on the document yet, or a screen mounted without the editor.
  */
 function PlateGrid({
   plates,
@@ -465,12 +671,22 @@ function PlateGrid({
   selected,
   onSelect,
   disabled,
+  onDraw,
+  drawInert,
+  onDetach,
+  detachInert,
 }: {
   plates: DocumentPlate[];
   callouts: CalloutLike[];
   selected: number | null;
   onSelect: (index: number | null) => void;
   disabled?: boolean;
+  /** Open the drawing editor, or `undefined` — and then `drawInert` says why not. */
+  onDraw?: () => void;
+  drawInert: string;
+  /** Take a plate off the document, or `undefined` — and then `detachInert` says why not. */
+  onDetach?: (plate: DocumentPlate) => void;
+  detachInert: string;
 }) {
   return (
     <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
@@ -483,6 +699,18 @@ function PlateGrid({
         const mine = callouts
           .map((c, index) => ({ c, index }))
           .filter(({ c }) => (c.mediaId ?? 0) === plate.mediaId);
+
+        // A bench plate is not in `technicalMedia`, so neither door can honestly act on it.
+        const drawReason = !onDraw
+          ? drawInert
+          : plate.origin === 'bench'
+            ? BENCH_PLATE_NOT_ON_DOCUMENT
+            : null;
+        const detachReason = !onDetach
+          ? detachInert
+          : plate.origin === 'bench'
+            ? BENCH_PLATE_DETACH
+            : null;
 
         return (
           <div
@@ -550,6 +778,33 @@ function PlateGrid({
             <Text size='nano' variant='label' component='p' className='mt-1 truncate'>
               {plate.note ?? (ratioKnown ? `${w}×${h}` : 'dimensions unknown — markers not drawn')}
             </Text>
+
+            <div className='mt-1 flex flex-wrap items-center gap-1'>
+              {drawReason ? (
+                <InertDoor label='draw ▸' reason={drawReason} />
+              ) : (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  onClick={onDraw}
+                  title='place, move and shape callouts on the pictures the document lists'
+                >
+                  draw ▸
+                </Button>
+              )}
+              {detachReason ? (
+                <InertDoor label='detach' reason={detachReason} />
+              ) : (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => onDetach?.(plate)}
+                  title='take this picture off the sheet — the callouts on it keep their text'
+                >
+                  detach
+                </Button>
+              )}
+            </div>
           </div>
         );
       })}
@@ -566,11 +821,12 @@ function PlateGrid({
  *
  * WHAT IS WRITTEN HERE AND WHAT IS NOT.
  * Writes are LEAF writes on a dotted path — `callouts.3.description` — which is the same mechanism
- * the sketch editor uses for the same fields. They touch no array identity, so they cannot
+ * the drawing editor uses for the same fields. They touch no array identity, so they cannot
  * desynchronise the `useFieldArray` instances that other organs hold over `callouts`; the ROOT
  * write (`setValue('callouts', next)`) is the one that re-syncs them, and this panel never needs it
  * because it never adds, removes or reorders. Drawing geometry, minting a new callout and deleting
- * one stay with the annotator, and each row carries a door to it.
+ * one stay with the annotator — which now opens as a modal over this very tab, so the door on each
+ * row leads somewhere instead of naming a place.
  */
 function CalloutPanel({
   callouts,
@@ -578,15 +834,19 @@ function CalloutPanel({
   selected,
   onSelect,
   disabled,
+  onDraw,
+  drawInert,
 }: {
   callouts: CalloutLike[];
   plates: DocumentPlate[];
   selected: number | null;
   onSelect: (index: number | null) => void;
   disabled?: boolean;
+  /** Open the drawing editor, or `undefined` — and then `drawInert` says why not. */
+  onDraw?: () => void;
+  drawInert: string;
 }) {
   const form = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const plateName = useMemo(() => {
     const map = new Map<number, string>();
     for (const p of plates) map.set(p.mediaId, p.name);
@@ -596,8 +856,8 @@ function CalloutPanel({
   if (callouts.length === 0) {
     return (
       <Text size='micro' variant='label' component='p'>
-        none yet. A callout is placed on the sheet itself — arm a kind and click the picture in the
-        technical sketch editor; it appears here the moment it exists.
+        none yet. A callout is placed on the picture itself — press <b>draw ▸</b> on a plate above,
+        arm a kind and click the picture; it appears here the moment it exists.
       </Text>
     );
   }
@@ -641,8 +901,9 @@ function CalloutPanel({
               <div
                 className='mt-1 space-y-1'
                 // The canonical anchor for this callout, so a server refusal naming the field walks
-                // here. The same path the sketch editor stamps: whichever of the two is on screen,
-                // the person lands on the right callout.
+                // here. THE ONLY ONE: the annotation editor stamps no `data-field` of its own, so
+                // this row is where `revealField('callouts.N.description')` lands, and it is on the
+                // tab the editor now opens over.
                 data-field={`callouts.${index}.description`}
               >
                 {/* CONTROLLED, NOT DEFAULT-VALUED, and the difference is a bug that would only
@@ -681,21 +942,18 @@ function CalloutPanel({
                   />
                 </div>
                 <div className='flex flex-wrap items-center gap-1.5'>
-                  <Button
-                    variant='secondary'
-                    size='xs'
-                    onClick={() =>
-                      openDoor(
-                        `callouts.${index}.description`,
-                        `callout ${c.number || index + 1} is on the technical sketch`,
-                        showMessage,
-                      )
-                    }
-                  >
-                    draw / move / delete
-                  </Button>
+                  {/* THE SAME MODAL THE PLATES OPEN. It used to be `openDoor`, which is a DOM walk
+                      to `[data-field]` — and on this tab the nearest such anchor is the row the
+                      person is already looking at, so the door pulsed itself and led nowhere. */}
+                  {onDraw ? (
+                    <Button variant='secondary' size='xs' onClick={onDraw}>
+                      draw / move / delete
+                    </Button>
+                  ) : (
+                    <InertDoor label='draw / move / delete' reason={drawInert} />
+                  )}
                   <Text size='nano' variant='label' component='span'>
-                    shape and position live in the sketch editor
+                    shape and position are drawn on the picture — this opens it
                   </Text>
                 </div>
               </div>
@@ -715,15 +973,33 @@ function CalloutPanel({
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Nothing is drawn at all. Say what would make a sheet, and open the door to each thing. */
-function EmptyDocument({ bench, disabled }: { bench: BenchSlots; disabled?: boolean }) {
+function EmptyDocument({
+  bench,
+  disabled,
+  onDraw,
+  drawInert,
+}: {
+  bench: BenchSlots;
+  disabled?: boolean;
+  onDraw?: () => void;
+  drawInert: string;
+}) {
   const { showMessage } = useSnackBarStore();
   return (
     <>
       <Text size='micro' variant='label' component='p'>
-        Nothing is drawn on this card yet. A sheet is made of flats — add a technical drawing on the
-        sketch tab, or put a picture into a bench slot.
+        Nothing is drawn on this card yet. A sheet is made of flats — open the drawing editor and
+        add a technical drawing to it, or put a picture into a bench slot in <b>STUDIO</b>, which
+        the mint carries into the card’s own media.
       </Text>
       <div className='flex flex-wrap gap-1.5'>
+        {onDraw ? (
+          <Button variant='secondary' size='sm' onClick={onDraw}>
+            add a drawing ▸
+          </Button>
+        ) : (
+          <InertDoor label='add a drawing ▸' reason={drawInert} />
+        )}
         {SHEET_MINIMUM.map((view) => (
           <Button
             key={view}

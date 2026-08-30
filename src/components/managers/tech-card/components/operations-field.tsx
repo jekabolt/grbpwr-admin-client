@@ -4133,7 +4133,7 @@ function OperationEditor({
         };
       });
 
-  // A pin that no longer resolves (its callout was deleted on the sketch tab) keeps a visible,
+  // A pin that no longer resolves (its callout was deleted from the drawing) keeps a visible,
   // re-selectable option instead of reading as «— пин —» — the same defensive fallback the issues
   // list uses for a removed operation.
   const rowPinOptions = useMemo(() => {

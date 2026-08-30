@@ -143,10 +143,10 @@ function PieceDiagram({
         </Canvas>
         {/* Инструкция обязана называть ТО МЕСТО, где действие есть. Прежняя звала «проставить
             callout # у детали» — контрол, которого в этом блоке нет с 30.07; связь ставится
-            выбором детали в самой выноске на вкладке sketch. */}
+            выбором детали в самой выноске — редактор открывается с ARTIFACTS. */}
         <Text size='micro' variant='label'>
-          place a callout on the sketch (the sketch tab) and pick this piece in its “part” field —
-          the pin shows up here
+          place a callout on a flat — open the drawing from ARTIFACTS — and pick this piece in its
+          “part” field; the pin shows up here
         </Text>
       </div>
     );
@@ -453,7 +453,7 @@ export function PiecesTab({
   // переписывает имя детали оттуда (calloutSync.apply, S8). Написать новое имя только в поле
   // панели значит показать оператору переименование, которое сохранение молча откатит: поле
   // выглядит принятым, карточка после перезагрузки снова со старым именем, и объяснения нет
-  // нигде. Номер выноски отсюда НЕ правится — его ставит выбор детали на вкладке sketch.
+  // нигде. Номер выноски отсюда НЕ правится — его ставит выбор детали в самой выноске (ARTIFACTS).
   const renamePiece = (pi: number, value: string) => {
     setValue(`pieces.${pi}.name`, value, { shouldDirty: true });
     const n = (getValues(`pieces.${pi}.calloutNumber`) as number) || 0;
@@ -1037,7 +1037,7 @@ export function PiecesTab({
                   {detachedKeys.has(selKey) && (
                     <Pill
                       tone='attention'
-                      title='the callout the piece referenced has been deleted from the sketch (or stopped being a technical sketch) — pick this piece in the right callout on the sketch tab'
+                      title='the callout the piece referenced has been deleted from the drawing (or the picture stopped being a technical flat) — open the drawing from ARTIFACTS and pick this piece in the right callout'
                     >
                       detached from the callout
                     </Pill>

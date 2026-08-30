@@ -344,7 +344,8 @@ function ConstructionSketch({
         {/* Без «рядом с операциями»: этот же эскиз показывается и стикером над полотном
             фулскрина, где рядом с ним никаких операций нет. */}
         <Text size='micro' variant='label'>
-          add a technical sketch on the sketch tab and place pins on it — it will show up here
+          put a flat into a bench slot on STUDIO, then draw pins on it from ARTIFACTS — they show up
+          here
         </Text>
       </div>
     );

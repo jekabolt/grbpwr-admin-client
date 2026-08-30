@@ -103,7 +103,6 @@ import { DesignSaveHostProvider } from './design/mint-dialog';
 import { gateTechCardPayload, isDesignOnlyMediaKind } from './design/payload-gate';
 import { useDesignBand } from './design/use-design-band';
 import { ArtifactsTab, StudioTab } from './design/studio-tab';
-import { SketchTab } from './sketch-tab';
 import {
   TechCardFormData,
   mapFormToTechCardInsert,
@@ -140,16 +139,12 @@ const TABS = [
   { id: 'header', label: 'header' },
   { id: 'studio', label: 'studio' },
   { id: 'artifacts', label: 'artifacts' },
-  // RETIRED FROM THE RAIL, STILL IN THIS LIST — and the difference is deliberate.
+  // `sketch` И `moodboard` УДАЛЕНЫ ОТСЮДА ЦЕЛИКОМ, а не оставлены «на всякий случай».
   //
-  // The rail is drawn from TAB_GROUPS, and neither of these appears there any more: STUDIO absorbed
-  // both, and FOLDED_TABS sends `?tab=sketch` and `?tab=moodboard` to it, so neither is reachable
-  // by rail, by deep link or by bookmark. What keeps them here is the panel below (search
-  // `activeTab !== 'sketch'`): SketchTab is still MOUNTED, because it is the writer of the callouts
-  // field array and the last piece of this wave is what unmounts it — after the owner has walked
-  // the new screens, not before. Removing the ids now would only mean deleting the panel with them.
-  { id: 'sketch', label: 'sketch' },
-  { id: 'moodboard', label: 'moodboard' },
+  // Обе свёрнуты в STUDIO (FOLDED_TABS), то есть `?tab=sketch` и `?tab=moodboard` резолвятся ДО
+  // сверки с этим списком и никогда не становятся activeTab. Пока их id стояли здесь, под ними
+  // жили две панели, которых не мог открыть ни рейл, ни ссылка, ни закладка, — мёртвый код с
+  // комментарием, утверждавшим обратное. Ссылки при этом не сломаны: свёртка их и обслуживает.
   { id: 'patterns', label: 'patterns' },
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
@@ -167,11 +162,19 @@ type TabId = (typeof TABS)[number]['id'];
 // Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  // STUDIO is where the style is looked at — moodboard, references, flats, the bench — and
-  // ARTIFACTS is what that work has been frozen into. Both replace the old moodboard/sketch pair,
-  // which split ONE surface across two rail entries; the order is still the order the work happens
-  // in: you look before you freeze.
-  { band: 'design', tabs: ['header', 'studio', 'artifacts', 'sketch'] },
+  // HEADER СТОИТ ВНЕ ПОЛОС, как HISTORY на другом конце рейла. Он не фаза работы — он то, ЧЕМ
+  // карточка является (номер стиля, имя, посадка, стадия), и это верно на каждой фазе. Прототип не
+  // даёт ему вкладки вовсе: он рисует эту личность хромом над рейлом (`40-organs.js`, строка `r1`
+  // в `frameHtml`). Здесь он остаётся вкладкой, потому что несёт много больше, чем показывает
+  // хром, — но внутри полосы жизненного цикла он читался как ПЕРВЫЙ ШАГ дизайна, которым не
+  // является.
+  { band: '', tabs: ['header'] },
+  // В DESIGN РОВНО ДВЕ ВКЛАДКИ, и это рейл самого прототипа (`40-organs.js`, константа `RAIL`:
+  // `{ band: 'design', tabs: [['studio', 1], ['artifacts', 1]] }`). STUDIO — где на стиль смотрят:
+  // доска настроения, референсы, эскизы, верстак. ARTIFACTS — во что эта работа заморожена. Вдвоём
+  // они заменили пару moodboard/sketch, которая делила ОДНУ поверхность на два входа рейла; порядок
+  // остался порядком работы: сначала смотрят, потом морозят.
+  { band: 'design', tabs: ['studio', 'artifacts'] },
   // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
   // The size range, the measurement chart, the DXF sheets and the раскладки are the first artefacts
   // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
@@ -210,17 +213,27 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
 const FOLDED_TABS: Record<string, TabId> = {
   dev: 'costing',
   pieces: 'patterns',
-  // `moodboard` СВЁРНУТ, `sketch` — ПОКА НЕТ, и разница измерена, а не выбрана из вкуса.
+  // ОБЕ СТАРЫЕ ВКЛАДКИ СВЁРНУТЫ, и свёрнуты только теперь, когда за каждую отнятую способность
+  // отвечает названное место. Мудборд студия заменила сразу: её доска пишет `moodboardMedia` и
+  // указания на них. С техническим эскизом было три долга, и вот чем каждый закрыт.
   //
-  // Студия действительно заменила мудборд: её доска пишет `moodboardMedia` и указания на них, то
-  // есть всё, что умела старая вкладка в этом режиме.
+  // ЗАВЕСТИ ЭСКИЗ. Плиты верстака вкладывает в `technicalMedia` документа СЕРВЕР, в транзакции
+  // минта — `injectBenchPlatesAsTechnicalMedia` (apisrv/admin/design_sheet_mint.go), и это уже на
+  // бете. Путь целиком: полка загрузок → слот верстака → минт. Пока этой вкладки не было, довод
+  // «свернём потом» был верен, и он держал `sketch` на рейле честно.
   //
-  // Технический эскиз она НЕ заменила. Верстак пишет слоты ПОЛОСЫ (`design_bench_slot`), а в
-  // `technicalMedia` документа плиты вкладывает атомарный минт, которого на контуре ещё нет;
-  // ARTIFACTS этот список только ЧИТАЕТ. Свернув `sketch` сейчас, мы отняли бы у человека
-  // единственный способ добавить карточке технический эскиз — то есть выдали бы за переезд
-  // потерю. Вкладка вернётся в свёртку тем же коммитом, которым приедет минт.
+  // СНЯТЬ ЭСКИЗ. Раньше умел только `removeMedia` свёрнутой вкладки; теперь плиту откалывает от
+  // документа ARTIFACTS, тем же правилом — выноски откалываются, их ТЕКСТ остаётся.
+  //
+  // НАРИСОВАТЬ УКАЗАНИЕ. Редактор не переписан и не потерян: он ТОТ ЖЕ САМЫЙ компонент, только
+  // открывается модалкой над ARTIFACTS — над плитами, которые перечисляет документ, — а не
+  // отдельной вкладкой. Не путать с векторным редактором из `proto-15-modal-vector.png`: тот
+  // рисует ШТРИХИ по самому чертежу, слоями, с растром-калькой снизу, и он действительно
+  // следующей волной; дверь `edit ▸` в верстаке ведёт именно к нему и остаётся инертной честно.
+  //
+  // Свернуть раньше, чем закрыт хоть один из трёх, значило бы выдать потерю за переезд.
   moodboard: 'studio',
+  sketch: 'studio',
 };
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
@@ -230,11 +243,11 @@ const ERROR_TAB: Record<string, TabId> = {
   // tab does not fall back quietly — it routes the failed save to a tab the rail no longer draws,
   // and the toast then names a field nobody can see.
   moodboardMedia: 'studio',
-  // `technicalMedia` ВЕДЁТ В `sketch`, А НЕ В `studio` — потому что отказ обязан приводить туда,
-  // где его можно ИСПРАВИТЬ. Студия этот список не пишет: верстак работает со слотами полосы, а
-  // ARTIFACTS документ только читает. Строка переедет в `studio` тем же коммитом, которым приедет
-  // атомарный минт и начнёт вкладывать плиты в документ.
-  technicalMedia: 'sketch',
+  // `technicalMedia` ВЕДЁТ В `artifacts`, А НЕ В `studio` — потому что отказ обязан приводить туда,
+  // где его можно ИСПРАВИТЬ. Список плит перечислен и правится на ARTIFACTS: там его открепляют,
+  // там же открывается редактор указаний. Студия этот список не пишет вовсе — её верстак работает
+  // со слотами полосы, а в документ они попадают минтом.
+  technicalMedia: 'artifacts',
   callouts: 'studio',
   patterns: 'patterns',
   sizeIds: 'patterns',
@@ -2120,25 +2133,19 @@ export function TechCardForm({
               )}
             </SectionStack>
 
-            {/* STUDIO — mount point for the DESIGN band, empty on purpose.
-                The rail entry ships FIRST and empty rather than last and full: without it the
-                organs of this wave have nowhere to mount, nothing is reachable on beta, and the
-                whole client gets verified in one detonation at the end.
-                It carries NO writers yet. That is not an omission — SketchTab below still owns the
-                `callouts` field array and writes into it past append/remove, and a second writer of
-                the same array does not synchronise with the first, it loses rows silently. Whatever
-                lands here inherits that array; it does not open a second door onto it. */}
-            {/* STUDIO — the DESIGN band.
+            {/* STUDIO — полоса DESIGN, где на стиль смотрят.
 
-                MOUNTED CONDITIONALLY, and that is the whole safety argument of this wave. The old
-                SketchTab writes into the root of the `callouts` array past append/remove, and two
-                writers of one field array do not synchronise — the second loses the first's rows
-                silently. `hidden` does not unmount, so the sibling tabs below would have been
-                co-mounted writers for the entire session. Mounting on the active tab makes «never
-                two writers» true by construction instead of by discipline.
+                МОНТИРУЕТСЯ УСЛОВНО, и это по-прежнему весь довод о безопасности. `callouts` — один
+                массив на форму, и `useFieldArray` над ним в дереве студии ровно один
+                (`design/mood-callouts.tsx`). Редактор геометрии держит свой; в RHF 7.62 два
+                экземпляра над одним именем не синхронизируются мутаторами, и второй молча теряет
+                строки первого. Поэтому редактор открывается модалкой над ARTIFACTS, где
+                `useFieldArray` над `callouts` нет вовсе, а сами вкладки монтируются по активной:
+                «никогда не два писателя» верно по построению, а не по дисциплине. `hidden` не
+                размонтирует и такой гарантии не даёт.
 
-                Unmounting costs nothing here: this form does not set `shouldUnregister`, so leaving
-                a tab keeps its values in the form. */}
+                Размонтирование ничего не стоит: форма не ставит `shouldUnregister`, и уход со
+                вкладки сохраняет её значения. */}
             {activeTab === 'studio' && (
               <DesignSaveHostProvider
                 settle={withServerAssignedValues}
@@ -2167,34 +2174,17 @@ export function TechCardForm({
                 expectedLockVersion={lockOverride.current ?? techCard?.lockVersion ?? 0}
                 canWriteCosting={canWriteCosting}
               >
-                <ArtifactsTab techCardId={numId} disabled={frozen} />
+                {/* КАРТОЧКА И ИСТОРИЯ ОТКАТА ИДУТ ВНИЗ ОТСЮДА, потому что редактор указаний
+                    открывается модалкой над этой вкладкой, а история отката — ОДНА НА ФОРМУ.
+                    Своя история у редактора означала бы, что откат в модалке возвращает снимок,
+                    снятый до правок доски настроения, и они исчезают молча. */}
+                <ArtifactsTab
+                  techCardId={numId}
+                  disabled={frozen}
+                  techCard={techCard}
+                  calloutHistory={calloutHistory}
+                />
               </DesignSaveHostProvider>
-            )}
-
-            {/* SKETCH and MOODBOARD — off the rail (FOLDED_TABS sends both to STUDIO) and now
-                mounted only when their own tab is somehow active, e.g. a bookmarked ?tab= that
-                predates the fold. Conditional, not `hidden`: co-mounting either of these with
-                STUDIO would put two writers on the `callouts` array, which is the one failure this
-                wave must not ship. They are kept, not deleted, so that a card whose sketch the
-                studio does not yet cover is still reachable by URL rather than lost. */}
-            {activeTab === 'sketch' && (
-              <SketchTab
-                techCard={techCard}
-                view='sketch'
-                active={true}
-                frozen={frozen}
-                calloutHistory={calloutHistory}
-              />
-            )}
-
-            {activeTab === 'moodboard' && (
-              <SketchTab
-                techCard={techCard}
-                view='moodboard'
-                active={true}
-                frozen={frozen}
-                calloutHistory={calloutHistory}
-              />
             )}
 
             {/* PATTERNS (size range + DXF выкройки по материалам) */}

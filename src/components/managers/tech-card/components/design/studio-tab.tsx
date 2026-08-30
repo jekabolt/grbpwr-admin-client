@@ -1,6 +1,8 @@
+import type { common_TechCard } from 'api/proto-http/admin';
+import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
-import { ArtifactsPanel } from './artifacts-panel';
+import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { BandFeed } from './band-feed';
 import { Bench } from './bench';
 import { ConceptSection } from './concept-section';
@@ -109,9 +111,14 @@ export function StudioTab({
       <PickModeProvider>
         <PickBanner />
         <SectionStack>
-          {/* The order is the prototype's own (`50-brief.js:724`): the idea, then what the card is
-              being turned into, then the material, then the bench, then the pool it draws from, and
-              the description last — because the description is written from what is above it. */}
+          {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ, А НЕ С ПАМЯТЬЮ О НЁМ. `proto.html:3893`
+              собирает студию так: `moodboard → kinds → references → history → uploads → SLOTS →
+              concept`, то есть ВЕРСТАК СТОИТ ПОСЛЕДНИМ — сначала материал, из которого собирают,
+              потом сборка. Здесь он полгода стоял сразу после референсов, потому что порядок был
+              выписан из головы, а не из строки, которая его задаёт.
+              Полоса листа и предупреждение о смеси — часть блока слотов, а не самостоятельные
+              этажи: в прототипе они строки в шапке `FLAT SLOTS`, поэтому стоят вплотную над ним.
+              Описание — последнее: оно пишется по тому, что выше. */}
           <MoodBoard techCardId={techCardId} disabled={readOnly} />
           <KindsStrip band={band} />
           {bandless ? (
@@ -127,11 +134,11 @@ export function StudioTab({
           ) : (
             <>
               <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
-              <Bench techCardId={techCardId} band={band} disabled={readOnly} />
-              <MixWarn band={band} />
-              <SheetBar band={band} />
-              <UploadsShelf techCardId={techCardId} band={band} disabled={readOnly} />
               <BandFeed techCardId={techCardId} band={band} disabled={readOnly} />
+              <UploadsShelf techCardId={techCardId} band={band} disabled={readOnly} />
+              <SheetBar band={band} />
+              <MixWarn band={band} />
+              <Bench techCardId={techCardId} band={band} disabled={readOnly} />
             </>
           )}
           <ConceptSection disabled={readOnly} />
@@ -146,8 +153,29 @@ export function StudioTab({
  * ARTIFACTS is a second root over the SAME band read, not a second band. It is kept in this file so
  * that the two tabs cannot drift into calling different reads — the failure that would produce is a
  * sheet that disagrees with the bench it was minted from, under one signature.
+ *
+ * IT ALSO CARRIES THE DRAWING EDITOR, and the two props below are the whole of what that needs. The
+ * editor is mounted over ARTIFACTS rather than in the studio because `mood-callouts.tsx` holds the
+ * studio's single `useFieldArray` over `callouts` and the editor holds one of its own — and in
+ * react-hook-form 7.62 two instances over one name do not synchronise. This tab holds none.
  */
-export function ArtifactsTab({ techCardId, disabled }: { techCardId?: number; disabled?: boolean }) {
+export function ArtifactsTab({
+  techCardId,
+  disabled,
+  techCard,
+  calloutHistory,
+}: {
+  techCardId?: number;
+  disabled?: boolean;
+  /** The loaded card: the editor resolves a `media_id` to a picture through it. */
+  techCard?: common_TechCard;
+  /**
+   * The form's ONE undo history over `callouts`. It belongs to the page because the page is what
+   * resets it when the form is re-seeded from the server; a history minted down here would outlive
+   * that reset and hand back callouts the card no longer holds.
+   */
+  calloutHistory?: EditHistory<SheetCallout>;
+}) {
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
 
   if (!techCardId) {
@@ -180,7 +208,13 @@ export function ArtifactsTab({ techCardId, disabled }: { techCardId?: number; di
   // would take the callout editor away from every card on a contour without the band.
   return (
     <DesignCapabilityProvider value={serverSpeaks}>
-      <ArtifactsPanel techCardId={techCardId} band={band} disabled={!!disabled} />
+      <ArtifactsPanel
+        techCardId={techCardId}
+        band={band}
+        disabled={!!disabled}
+        techCard={techCard}
+        calloutHistory={calloutHistory}
+      />
     </DesignCapabilityProvider>
   );
 }
