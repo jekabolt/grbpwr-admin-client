@@ -86,9 +86,14 @@ export function calloutLine(c: CalloutForm): string {
   const head = parts.join(', ');
   const description = (c.description ?? '').trim();
   const dimensions = (c.dimensions ?? '').trim();
-  const tail = [description, dimensions ? `(${dimensions})` : ''].filter(Boolean).join(' ');
-  if (head && tail) return `${head}: ${tail}`;
-  return tail || head;
+  // THE COLON BELONGS TO THE DESCRIPTION, NOT TO THE MEASUREMENT. A callout that names a piece and
+  // a measurement but no description — `part` set, `description` empty, `dimensions` «6 mm», the
+  // commonest shape on a drawing — used to read «front panel: (6 mm)». The server composes the
+  // frozen line for paper with the same rule (`entity.TechCardCalloutPrintedLine`), and screen and
+  // paper under one signature have to read identically, so the two are kept in step deliberately.
+  const body = head && description ? `${head}: ${description}` : head || description;
+  if (dimensions) return body ? `${body} (${dimensions})` : dimensions;
+  return body;
 }
 
 /** A callout's identity for the receipt book, in order of how much it survives: minted ref, minted
