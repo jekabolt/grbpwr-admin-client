@@ -282,6 +282,40 @@ export type FocusedAnnotatorProps = {
    */
   wrapRows?: boolean;
   /**
+   * Стрелки ‹ › над рельсой. По умолчанию есть (лист эскиза листает ими полосу в 480px); мудборд
+   * их снимает: его лента и так короче экрана чаще всего, а прокрутка остаётся жестом и
+   * скроллбаром. ОТДЕЛЬНЫЙ проп, а не «нет стрелок в rowMode»: rowMode — это и полоса эскиза, и
+   * примерка, и снять стрелки условием по раскладке значило бы снять их там, где ими живут.
+   */
+  railArrows?: boolean;
+  /**
+   * Высота полосы редактора, px — И резерва, И самого редактора, одно число на оба. Умолчание —
+   * общая `ANNOTATION_EDITOR_H`. Мудборд передаёт компактную: у его выноски меньше рядов, и
+   * полная полоса стояла бы наполовину пустой. Владелец, задавший её здесь, ОБЯЗАН отдать то же
+   * число своему `AnnotationEditor` (`heightPx`) — разъехавшись, резерв и содержимое возвращают
+   * сдвиг кадров.
+   */
+  editorHeight?: number;
+  /**
+   * ГДЕ ЧИТАЕТСЯ ТЕКСТ ПИНА. `legend` (умолчание) — печатной легендой под кадром, как у эскиза
+   * и примерки. `hover` — плашкой у пина по наведению ИЛИ фокусу (мудборд): постоянный текст
+   * уходит с доски, но орган остаётся достижим с клавиатуры, а не только мышью.
+   */
+  pinText?: 'legend' | 'hover';
+  /**
+   * Кадр берёт пропорции у ЗАГРУЖЕННОЙ картинки, а не у фолбэка (см. довод у поверхности):
+   * в полосе фиксированной высоты фолбэк на медиа без записанных размеров даёт коробку чужих
+   * пропорций, и `object-cover` РЕЖЕТ снимок. Мудборду владелец запретил кроп словами.
+   */
+  preferNaturalAspect?: boolean;
+  /**
+   * Резерв под редактор В УВЕЛИЧЕННОМ ВИДЕ — та же высота, что `editorHeight`. Без него выбор
+   * пина вдвигает редактор под кадр `flex-1`, и картинка дёргается на каждом выборе (см.
+   * `editorReserveHeight` у поверхности). По умолчанию выключен: эскизу и примерке этот резерв
+   * не заказывали, и цена в полтораста пикселей кадра назначается владельцем, а не молча.
+   */
+  zoomEditorReserve?: boolean;
+  /**
    * РЕЖИМ ВЫБОРА ПЛИТКИ: пока он взведён, клик по кадру НЕ ставит указание, а возвращает вид
    * вызывающему.
    *
@@ -337,6 +371,11 @@ export function FocusedAnnotator({
   viewControls,
   kindsFirst = false,
   wrapRows = false,
+  railArrows = true,
+  editorHeight = ANNOTATION_EDITOR_H,
+  pinText = 'legend',
+  preferNaturalAspect = false,
+  zoomEditorReserve = false,
   tilePick,
 }: FocusedAnnotatorProps) {
   /**
@@ -482,7 +521,7 @@ export function FocusedAnnotator({
    */
   const editorSlot =
     !readOnly && hasMedia ? (
-      <div className='shrink-0 overflow-hidden' style={{ height: ANNOTATION_EDITOR_H }}>
+      <div className='shrink-0 overflow-hidden' style={{ height: editorHeight }}>
         {selected != null && zoomIndex == null ? (
           <EditorPanel focusToken={focusEditor}>
             {renderEditor(selected, { close: () => setSelected(null) })}
@@ -507,7 +546,10 @@ export function FocusedAnnotator({
       ? 'drop the file — the crop will open'
       : tool
         ? placingHint(tool, placed)
-        : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
+        : pinText === 'hover'
+          ? // Легенды нет — обещать её значило бы отправить человека искать несуществующий список.
+            'the pin text shows on hover or focus of its marker · ⌘V pastes a picture'
+          : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -551,7 +593,7 @@ export function FocusedAnnotator({
             {/* Only once the rail actually runs off the edge — arrows that can't move anything are
                 noise. They live in the bar rather than floating over the pictures, where they would
                 sit on top of the pins they exist to help you reach. */}
-            {rail.overflowing && (
+            {railArrows && rail.overflowing && (
               <div className='flex items-center gap-1'>
                 <Button
                   type='button'
@@ -595,8 +637,10 @@ export function FocusedAnnotator({
             // A ONE-ROW rail, not a wrapping grid: 300px cells (a callout pin has to land on a seam
             // you can actually see) that stay one row and scroll sideways, with the arrows above
             // looping past either end. Trade-off: `overflow-x` makes the vertical axis scroll too,
-            // so in show-all-notes mode a note pinned near the top or bottom edge can be clipped —
-            // the hover notes are portalled and unaffected. `py-1` buys back the common case.
+            // so anything poking past the tile's top or bottom edge can be clipped. Порталов тут
+            // НЕТ (прежний комментарий врал): ховер-плашка пина живёт в слое маркеров внутри
+            // кадра и сама перекидывается выше/ниже пина, чтобы не выходить за кадр — поэтому
+            // обрезка её не касается. `py-1` buys back the common case.
             //
             // …КРОМЕ РЕЖИМА «ГРИДОМ». Там та же лента переносится по строкам: пятнадцать
             // референсов мудборда сравнивают между собой, а не листают. Отдельного компонента для
@@ -605,8 +649,9 @@ export function FocusedAnnotator({
             className={cn(
               'flex items-start gap-2 py-1',
               wrap || rowsWrap ? 'flex-wrap' : 'snap-x snap-mandatory overflow-x-auto',
-              // Filmstrip: only the horizontal axis scrolls. Hover notes are portalled, so nothing
-              // useful is clipped vertically.
+              // Filmstrip: only the horizontal axis scrolls. Ничего полезного вертикальная
+              // обрезка не режет: ховер-плашка пина НЕ в портале (прежний комментарий врал), но
+              // держится внутри кадра сама — см. слой маркеров в surface.tsx.
               rowMode && !rowsWrap && 'overflow-y-hidden',
             )}
           >
@@ -635,6 +680,7 @@ export function FocusedAnnotator({
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
                     media={isVideo(url) ? 'video' : 'image'}
                     aspectRatio={mediaAspect(v.full, fallbackAspect)}
+                    preferNaturalAspect={preferNaturalAspect}
                     className={rowMode ? 'w-fit' : undefined}
                     frameClassName={rowMode ? 'w-auto' : 'w-full'}
                     frameStyle={rowMode ? { height: gridRowHeight } : undefined}
@@ -659,7 +705,8 @@ export function FocusedAnnotator({
                     pieceLabel={pieceLabel}
                     onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                     onRemove={onRemoveCallout}
-                    legend
+                    legend={pinText === 'legend'}
+                    hoverNotes={pinText === 'hover'}
                     halo={halo}
                     cornerSlot={
                       <div className='flex items-center gap-1'>
@@ -791,6 +838,7 @@ export function FocusedAnnotator({
                 alt={focusedAlt}
                 media={isVideo(focusedUrl) ? 'video' : 'image'}
                 aspectRatio={mediaAspect(focused.full, fallbackAspect)}
+                preferNaturalAspect={preferNaturalAspect}
                 callouts={calloutsFor(focused.mediaId)}
                 frozen={readOnly}
                 tool={tool}
@@ -809,7 +857,8 @@ export function FocusedAnnotator({
                 pieceLabel={pieceLabel}
                 onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                 onRemove={onRemoveCallout}
-                legend
+                legend={pinText === 'legend'}
+                hoverNotes={pinText === 'hover'}
                 halo={halo}
                 cornerSlot={
                   <FrameButton
@@ -923,7 +972,11 @@ export function FocusedAnnotator({
           pieceLabel={pieceLabel}
           onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
           onRemove={onRemoveCallout}
-          legend
+          legend={pinText === 'legend'}
+          hoverNotes={pinText === 'hover'}
+          // Резерв под редактор — чтобы выбор пина не дёргал кадр `flex-1`; высота та же, что у
+          // самого редактора, одно число на оба (см. довод у пропа).
+          editorReserveHeight={zoomEditorReserve ? editorHeight : undefined}
           // РЕДАКТОР ЕДЕТ В УВЕЛИЧЕННЫЙ ВИД. Его здесь не было вовсе: выбрав указание в зуме,
           // человек правил его в редакторе, который рисовался на СТРАНИЦЕ ПОЗАДИ модалки — то есть
           // нигде. А ставят указание по миллиметровой детали именно в зуме. Диалог прокидывает

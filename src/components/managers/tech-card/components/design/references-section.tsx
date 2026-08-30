@@ -5,6 +5,7 @@ import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { MediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
@@ -20,10 +21,10 @@ import {
   REFERENCE_KIND,
   appendBoardPictures,
   isInputRow,
-  useInputPick,
   type BoardItem,
 } from './mood-board';
 import { RecalledRunPrompt } from './history-recall';
+import { SplitCornerButton, useSplitToInput } from './split-to-input';
 import { useDesignWrites } from './use-design-band';
 
 /**
@@ -33,10 +34,10 @@ import { useDesignWrites } from './use-design-band';
  * КАРТИНОК МУДБОРДА ЗДЕСЬ НЕ БЫВАЕТ (U-5). Блок рисует РОВНО строки входа — `moodboardMedia` со
  * `kind = REFERENCE`; плитки доски в него не попадают ни поштучно, ни полосой. Полоса
  * «from the moodboard» с миниатюрами доски, стоявшая здесь, снята прямым требованием владельца:
- * она рисовала одну и ту же картинку в двух блоках и превращала вход в витрину доски. Жест
- * остался, но переехал НА ДОСКУ: ссылка `or from the moodboard` в последней ячейке взводит выбор
- * (`useInputPick`), плитки мудборда становятся выбираемыми, и клик заводит ЗДЕСЬ НОВУЮ ЗАПИСЬ с
- * тем же `media_id`. Плитка при этом остаётся на доске — вместе со своими указаниями.
+ * она рисовала одну и ту же картинку в двух блоках и превращала вход в витрину доски. Ссылка
+ * `or from the moodboard`, взводившая выбор плитки на доске (`useInputPick`), снята вторым
+ * требованием владельца (R-16) — вместе с объясняющей подписью ячейки. Вход пополняется своим
+ * слотом: клик в библиотеку, ⌘V, бросок файла.
  *
  * РОЛЬ ЖИВЁТ В ПОЛОСЕ, А НЕ В ДОКУМЕНТЕ, И ЭТО ВЫНУЖДЕНО (Р-1). В документе референс — это
  * `TechCardMediaItem{media_id, kind, caption}`, где `kind` УЖЕ занят тем, чем картинка ЯВЛЯЕТСЯ
@@ -107,9 +108,21 @@ export function ReferencesSection({
   const libraryMap = useMediaMap();
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>(libraryMap);
+    // МЕДИА КАРТИНОК ПОЛОСЫ — вторым слоем: кропы сплита (и вообще всё, что родилось в полосе)
+    // появляются в библиотечной карте только после её перечтения, а строка входа на них уже
+    // стоит. Без этого слоя свежий кроп рисовался бы как «media #N not resolved» — данные целы,
+    // не хватает лишь разрешения id в файл, и полоса его уже привезла.
+    for (const batch of band.batches ?? [])
+      for (const p of batch.pictures ?? []) {
+        if (p.media?.id != null && !m.has(p.media.id)) m.set(p.media.id, p.media);
+      }
+    for (const run of band.runs ?? [])
+      for (const p of run.pictures ?? []) {
+        if (p.media?.id != null && !m.has(p.media.id)) m.set(p.media.id, p.media);
+      }
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
-  }, [libraryMap, picked]);
+  }, [libraryMap, picked, band.batches, band.runs]);
 
   // Запись состава карточки — ПО КОРНЮ массива, как и на доске: два экземпляра поля-массива на одно
   // имя не синхронизируются, а мудборд смонтирован рядом и правит вторую половину того же списка.
@@ -264,6 +277,63 @@ export function ReferencesSection({
     );
   }
 
+  // ── clear: весь вход одним движением (R-15) ─────────────────────────────────────────────────
+  const [clearAsk, setClearAsk] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  /**
+   * СНОС ВХОДА — картинки, роли, записки, описание изделия. Три вещи, которые обязаны быть
+   * сказаны, потому что их диктует провод, а не наш вкус:
+   *
+   * 1. РОЛИ СНИМАЮТСЯ ПО ОДНОЙ. Bulk-глагола на проводе нет — это N вызовов
+   *    `SetDesignReferenceRole(role='')`, и они НЕ атомарны. Поэтому (а) перед сносом стоит
+   *    вопрос с числами (разрушение без вопроса запрещено правилами продукта), (б) частичный
+   *    провал НЕ съедается: роль, которую снять не удалось, ОСТАЁТСЯ на экране вместе со своей
+   *    строкой входа, и итог говорит «cleared K of N», а не «готово».
+   * 2. ПОРЯДОК: сначала роли, потом строки — тот же, что у одиночного ✕: снятая строка при живой
+   *    роли рождала бы носителя роли без строки на карточке (стрея) на ровном месте.
+   * 3. ОПИСАНИЕ ИЗДЕЛИЯ чистится ТОЛЬКО В ФОРМЕ — у поля нет своего RPC, оно едет с документом.
+   *    `''` здесь — не «пусто по незнанию», а КОМАНДА «сотри» трёхсостоянийного протокола
+   *    (absent = сохрани, '' = сотри): следующий сейв карточки унесёт описание и с сервера.
+   *    До сейва — и при закрытой без сейва вкладке — сервер держит старый текст. Вопрос ниже
+   *    называет это словами, чтобы «clear» не обещал больше, чем делает.
+   */
+  async function runClear() {
+    setClearAsk(false);
+    setClearing(true);
+    const roleIds = [...refOf.keys()];
+    const failed = new Set<number>();
+    // Последовательно, а не залпом: залп из N мутаций делает порядок отказов случайным, а «кто
+    // не очистился» должно совпадать с тем, что осталось на экране, детерминированно.
+    for (const mediaId of roleIds) {
+      try {
+        await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0, note: '' });
+      } catch {
+        failed.add(mediaId);
+      }
+    }
+    // Строки входа: уходят все, КРОМЕ носителей неснявшейся роли — их референс переживает снос
+    // ЦЕЛИКОМ (картинка+роль+записка), чтобы на экране осталась ровно та сущность, которую есть
+    // чем снять повторно. Доски фильтр не касается.
+    writeItems(
+      ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(
+        (i) => !isInputRow(i) || failed.has(i.mediaId),
+      ),
+    );
+    setValue('garmentDescription', '', { shouldDirty: true });
+    setClearing(false);
+    if (failed.size) {
+      // Каждый отказ уже прокричал своей сноской из шва записи; эта строка — ИТОГ, по которому
+      // видно, что снос был частичным, даже если сноски отказа промелькнули.
+      showMessage(
+        `cleared ${roleIds.length - failed.size} of ${roleIds.length} prompt roles — ${failed.size} reference${failed.size === 1 ? '' : 's'} stayed`,
+        'error',
+      );
+    } else {
+      showMessage('the input is clear', 'success');
+    }
+  }
+
   // ── зум: смотреть референс целиком ──────────────────────────────────────────────────────────
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const viewerItems: MediaViewerItem[] = members.map((m) => {
@@ -281,16 +351,41 @@ export function ReferencesSection({
   const garment = useController({ control, name: 'garmentDescription' });
   const garmentId = useId();
 
-  const pick = useInputPick();
+  // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
+  const split = useSplitToInput({
+    techCardId,
+    band,
+    onAccepted: (media) => setPicked((prev) => [...prev, ...media]),
+  });
+
+  /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
+  const nothingToClear =
+    members.length === 0 && refOf.size === 0 && !(garment.field.value ?? '').trim();
 
   return (
     <Section
       title='input — references'
       question='— what the model is shown when it draws a flat'
       action={
-        <Text size='micro' variant='label' component='span'>
-          {members.length} picture{members.length === 1 ? '' : 's'} · {inPrompt} in the prompt
-        </Text>
+        <span className='flex items-center gap-3'>
+          <Text size='micro' variant='label' component='span'>
+            {members.length} picture{members.length === 1 ? '' : 's'} · {inPrompt} in the prompt
+          </Text>
+          {/* CLEAR СНОСИТ ВЕСЬ ВХОД (R-15) и потому спрашивает: под ним N сетевых снятий ролей
+              вместе с записками. Кнопка стоит у заголовка блока — она про блок целиком, а не про
+              одну ячейку. */}
+          {!readOnly && (
+            <Button
+              size='xs'
+              variant='secondary'
+              loading={clearing}
+              disabled={clearing || nothingToClear}
+              onClick={() => setClearAsk(true)}
+            >
+              clear
+            </Button>
+          )}
+        </span>
       }
     >
       {/* ОПИСАНИЕ ИЗДЕЛИЯ — ОДНО НА ВСЁ, и оно уходит в КАЖДЫЙ прогон. Стоит НАД картинками,
@@ -356,13 +451,22 @@ export function ReferencesSection({
               onNote={(note) => commitNote(member.mediaId, note)}
               onRemove={() => setPendingRemove(member.mediaId)}
               onZoom={() => setZoomIndex(i)}
+              onSplit={() => {
+                const full = mediaById.get(member.mediaId);
+                if (full) split.openForMedia(full, `reference ${promptNumber.get(member.mediaId) ?? member.mediaId}`);
+              }}
+              splitPending={split.registering === member.mediaId}
             />
           ))}
 
           {/* ПОСЛЕДНЯЯ ЯЧЕЙКА — ВСЕГДА ПЛЕЙСХОЛДЕР, и это не логика, а порядок разметки: она
               стоит литералом ПОСЛЕ обхода списка и потому не может пропасть при пустом входе,
               полном входе или отказе сервера. Волосяной линии у неё нет — под последней строкой
-              рулёной сетки линии не рисуют. */}
+              рулёной сетки линии не рисуют.
+              ПОДПИСИ РЯДОМ НЕТ (R-16): владелец снял объясняющий текст и ссылку на мудборд.
+              Дверь при этом ОСТАЛАСЬ дверью — сам слот держит все три жеста (клик/⌘V/бросок) и
+              видимое состояние перетаскивания (рамка чернеет, подпись меняется на «drop the
+              image») — без этого немая зона была бы невидимой дверью. */}
           <div className={CELL}>
             {readOnly ? (
               <div className='h-[200px] w-[160px] border border-dashed border-borderColor' />
@@ -372,34 +476,11 @@ export function ReferencesSection({
                 heightPx={200}
                 label='+ reference'
                 purpose='design reference'
-                hint={null}
                 allowMultiple
                 showVideos={false}
                 onSelect={addReferences}
               />
             )}
-            <div className='flex min-w-0 flex-col items-start gap-1'>
-              <Text size='micro' variant='label'>
-                drop a file, paste with ⌘V, or click to browse. a reference is one thing: a picture,
-                a role and a note — the ✕ takes all three, and it asks first.
-              </Text>
-              {!readOnly && (
-                <button
-                  type='button'
-                  onClick={() => pick.arm()}
-                  className='cursor-pointer underline underline-offset-2 hover:no-underline'
-                >
-                  <Text size='micro' variant='label' component='span'>
-                    or from the moodboard ▸
-                  </Text>
-                </button>
-              )}
-              {pick.armed && (
-                <Text size='micro' variant='label'>
-                  now click a tile up on the moodboard — it becomes a reference too, the tile stays.
-                </Text>
-              )}
-            </div>
           </div>
         </div>
       </div>
@@ -415,6 +496,35 @@ export function ReferencesSection({
           строке истории; слушаем владельца, а не макет. Это `GroupLabel` + строки, не `Section`:
           блок внутри блока запрещён. */}
       <RecalledRunPrompt techCardId={techCardId} band={band} disabled={disabled} />
+
+      {/* Модалка сплита (R-17) — монтируется хуком, когда для картинки получена картинка полосы. */}
+      {split.modal}
+
+      {/* ВОПРОС ПЕРЕД СНОСОМ ВХОДА (R-15) — с числами и с границей честности: роли и записки
+          уходят с сервера СЕЙЧАС, строки и описание — с карточки при её сохранении. */}
+      <ConfirmationModal
+        open={clearAsk}
+        onOpenChange={(open) => !open && setClearAsk(false)}
+        onConfirm={runClear}
+        onCancel={() => setClearAsk(false)}
+        title='clear the input'
+        confirmLabel='clear it all'
+        width='sm'
+      >
+        <div className='space-y-2'>
+          <Text size='control'>
+            This takes out all {members.length} picture{members.length === 1 ? '' : 's'}
+            {inPrompt > 0
+              ? ` — ${inPrompt} of them in the prompt, with their notes —`
+              : ''}{' '}
+            and clears the garment description.
+          </Text>
+          <Text size='control'>
+            Roles and notes are removed from the server now, one by one. The picture rows and the
+            description leave the card when you next save it. The moodboard is not touched.
+          </Text>
+        </div>
+      </ConfirmationModal>
 
       <MediaViewer
         items={viewerItems}
@@ -489,6 +599,8 @@ function ReferenceCell({
   onNote,
   onRemove,
   onZoom,
+  onSplit,
+  splitPending,
 }: {
   mediaId: number;
   full?: common_MediaFull;
@@ -501,6 +613,8 @@ function ReferenceCell({
   onNote: (note: string) => void;
   onRemove: () => void;
   onZoom: () => void;
+  onSplit: () => void;
+  splitPending: boolean;
 }) {
   const noteId = useId();
   const url = thumbUrl(full);
@@ -553,11 +667,24 @@ function ReferenceCell({
             </Text>
           </div>
         )}
-        {number != null && (
-          <span className='absolute left-0 top-0 bg-textColor px-1 text-nano tabular-nums text-bgColor'>
-            {number}
-          </span>
-        )}
+        {/* ЛЕВЫЙ ВЕРХНИЙ УГОЛ — колонкой: номер промпта, под ним «split» (R-17: с противоположной
+            от зума стороны). Колонка, а не два absolute-органа на одну точку: у картинки с ролью
+            номер и кнопка иначе легли бы друг на друга. Видимость кнопки — та же формула, что у
+            зума и ✕: наведение ИЛИ фокус внутри ячейки; у клавиатуры ховера не бывает, и орган,
+            живущий только под курсором, для неё не существовал бы вовсе. */}
+        <div className='absolute left-0 top-0 flex flex-col items-start'>
+          {number != null && (
+            <span className='bg-textColor px-1 text-nano tabular-nums text-bgColor'>{number}</span>
+          )}
+          {!readOnly && url && (
+            <SplitCornerButton
+              onClick={onSplit}
+              pending={splitPending}
+              ariaLabel={`split reference ${number ?? mediaId} into views`}
+              className={hoverOnly}
+            />
+          )}
+        </div>
         <button
           type='button'
           onClick={onZoom}

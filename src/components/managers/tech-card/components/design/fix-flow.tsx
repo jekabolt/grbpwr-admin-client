@@ -338,11 +338,27 @@ export function FixBars({
 /* ─────────────────────────────── the multiple selection ─────────────────────────────── */
 
 export type FixSelection = {
+  /**
+   * R-20: РЕЖИМ ПРАВКИ. Галки на плитах рисуются ТОЛЬКО пока он включён — владелец: «FLAT SLOTS
+   * не должно быть чекбоксов: если мы туда уже что-то поместили, значит оно там нужно», решение
+   * (спрошено и получено): «показывать только в режиме правки». Галка никогда не значила «выбрано
+   * для листа» — лист читает сам факт «плита стоит в слоте», — но постоянная галка ЧИТАЛАСЬ так,
+   * и это чтение честнее убрать, чем объяснять.
+   */
+  active: boolean;
   keys: readonly string[];
   has: (key: string) => boolean;
   toggle: (key: string) => void;
   replace: (keys: readonly string[]) => void;
+  /** Снять галки, ОСТАВШИСЬ в режиме — дверь «clear» внутри полосы. */
   clear: () => void;
+  /** Вход в режим: галки появляются у каждого слота, куда починку можно добавить. */
+  open: () => void;
+  /**
+   * Выход: галки снимаются И прячутся. Одной операцией нарочно — режим без галок, из которого
+   * забыли выйти, оставил бы на плитах пустые чекбоксы, про которые уже никто не помнит зачем.
+   */
+  close: () => void;
 };
 
 /**
@@ -353,8 +369,14 @@ export type FixSelection = {
  * generation form; this one is the human's shortlist and is read by nothing outside this block. The
  * two are separate because they retire at different moments — the shortlist survives an armed fix
  * being cancelled, and a fix already sent survives the ticks being cleared.
+ *
+ * THE MODE DIES WITH ITS OWN GESTURES, never by timeout: it closes when the fix is armed (the
+ * shortlist's whole purpose is fulfilled), by its own `close` door, and when there is nothing left
+ * to choose between (see the bar). A mode that is easy to enter and impossible to leave is worse
+ * than the checkboxes were.
  */
 export function useFixSelection(): FixSelection {
+  const [active, setActive] = useState(false);
   const [keys, setKeys] = useState<readonly string[]>([]);
   const has = useCallback((key: string) => keys.includes(key), [keys]);
   const toggle = useCallback(
@@ -364,7 +386,15 @@ export function useFixSelection(): FixSelection {
   );
   const replace = useCallback((next: readonly string[]) => setKeys([...next]), []);
   const clear = useCallback(() => setKeys([]), []);
-  return useMemo(() => ({ keys, has, toggle, replace, clear }), [keys, has, toggle, replace]);
+  const open = useCallback(() => setActive(true), []);
+  const close = useCallback(() => {
+    setActive(false);
+    setKeys([]);
+  }, []);
+  return useMemo(
+    () => ({ active, keys, has, toggle, replace, clear, open, close }),
+    [active, keys, has, toggle, replace, clear, open, close],
+  );
 }
 
 /**
@@ -415,9 +445,40 @@ export function FixSelectionBar({
   const ticked = targets.filter((t) => selection.has(t.key));
   const marked = ticked.filter((t) => unflattenedMarks(band, t.picture));
 
+  /**
+   * РЕЖИМ ГАСНЕТ, КОГДА ВЫБИРАТЬ БОЛЬШЕ НЕ ИЗ ЧЕГО. Пока режим открыт, состав `targets` живёт
+   * своей жизнью: вооружённая на соседнем слоте починка уходит в прогон, и слот выпадает из
+   * списка. Ниже двух целей полоса не рисуется вовсе — оставить режим включённым значило бы
+   * держать на плитах галки, у которых больше нет ни полосы с выходом, ни смысла: осиротевший
+   * режим и есть «легко войти, невозможно выйти».
+   */
+  const orphaned = selection.active && targets.length < 2;
+  useEffect(() => {
+    if (orphaned) selection.close();
+  }, [orphaned, selection]);
+
   // One filled slot needs no shortlist — its own `fix ▸` is the shorter road. The bar appears when
   // there is actually something to choose between.
   if (targets.length < 2) return null;
+
+  /**
+   * R-20 · ВХОД В РЕЖИМ ПРАВКИ. В обычном виде галок на плитах нет — только эта дверь. Она
+   * настоящая <Button>, то есть достижима табом; галки Radix-чекбоксы, то есть тоже. Дверь
+   * НАЗЫВАЕТ, что случится («tick…»), чтобы появление галок после нажатия читалось как ответ на
+   * жест, а не как поломка.
+   */
+  if (!selection.active) {
+    return (
+      <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1'>
+        <Button variant='secondary' size='xs' onClick={selection.open} disabled={disabled}>
+          fix several ▸
+        </Button>
+        <Text size='nano' variant='label' component='span' className='min-w-0'>
+          one run can correct several slots at once — this opens ticks on the slots
+        </Text>
+      </div>
+    );
+  }
 
   const armTicked = () => {
     if (!ticked.length || disabled) return;
@@ -426,7 +487,9 @@ export function FixSelectionBar({
       slotIds: ticked.filter((t) => t.slotId > 0).map((t) => t.slotId),
       labels: ticked.map((t) => t.label),
     });
-    selection.clear();
+    // Вооружение — ЕСТЕСТВЕННЫЙ выход: список отдал своё содержимое чипу формы. Закрыть, а не
+    // только очистить: галки без намерения — это снова постоянные чекбоксы, которые владелец снял.
+    selection.close();
   };
 
   return (
@@ -464,6 +527,12 @@ export function FixSelectionBar({
             disabled={!!disabled || ticked.length === 0}
           >
             fix {ticked.length > 1 ? `${ticked.length} slots` : ticked[0]?.label ?? ''} ▸
+          </Button>
+          {/* R-20 · ВЫХОД. Дверь стоит в той же полосе, что и вход, и живёт всё время режима:
+              режим, из которого нельзя выйти, хуже чекбоксов. Галки при выходе снимаются — они
+              часть режима, а не карточки. */}
+          <Button variant='secondary' size='xs' onClick={selection.close}>
+            close
           </Button>
         </span>
       </div>

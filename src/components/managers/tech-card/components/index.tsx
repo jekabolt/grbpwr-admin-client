@@ -1912,7 +1912,15 @@ export function TechCardForm({
                 СТУДИИ (скриншот `proto-02-worked-brief.png`). Разметка уже стояла здесь — выше
                 монтирования студии, — поэтому переезд это смена условия видимости, а не перенос
                 двухсот строк: порядок в DOM и так совпадает с `topRowHtml() + moodboardHtml() + …`. */}
-            <SectionStack hidden={activeTab !== 'studio'}>
+            {/* R-1 · `mb-gutter` — разделитель между шапкой и мудбордом. Шапка и `StudioTab` —
+                сиблинги в fieldset без единого spacing-класса, то есть между последним блоком шапки
+                и первым блоком студии земли не было ВОВСЕ: два белых блока впритык = разделитель
+                исчез (DESIGN.md: зазор 24px и есть разделитель, линии не рисуются). Владелец просил
+                «чуть больше гэп между мудбордом» — больше, чем ноль, это ровно один токен
+                `--spacing-gutter`, а не локальное число: второй величины зазора в этом админе нет.
+                Маржа, а не обёртка: при `hidden` (display:none) она исчезает вместе со стеком и на
+                другие вкладки не протекает. */}
+            <SectionStack hidden={activeTab !== 'studio'} className='mb-gutter'>
               <SectionStack row>
                 <Section title='identification' className='w-full min-w-0 lg:flex-1'>
                   <StyleNumberField isIdea={isIdea} />
@@ -2046,37 +2054,41 @@ export function TechCardForm({
                   <HeaderMetaFields hideCategory={isAux} />
                 </Section>
 
-                {/* U-1 · ТРЕТЬЯ УЗКАЯ КОЛОНКА. Прототип задаёт верхний ряд как
-                  `grid-template-columns:1fr 1fr 300px` и кладёт в третью колонку вертикальный стек
-                  из RESPONSIBLE ROLES и LINKED PRODUCTS (`topRowHtml`, proto.html:3172). Здесь это
-                  `SectionStack`, а не div с gap: 24px земли между блоками И ЕСТЬ разделитель, и он
-                  обязан оставаться одним значением на весь админ, а не локальным числом.
-                  Колонка условная. У несохранённой aux-карты в ней не было бы ни ролей (нужен
-                  сохранённый id), ни связанных продуктов, и пустые 300px читались бы как блок,
-                  который не загрузился. */}
-                {((isEditMode && !!numId) || !isAux) && (
-                  <SectionStack className='w-full min-w-0 lg:w-[300px] lg:shrink-0'>
-                    {isEditMode && numId && (
-                      <Section title='responsible roles'>
-                        <Text variant='inactive' size='small'>
-                          who is on this card (Q5) — admin accounts, saved immediately, not part of
-                          the card’s draft.
-                        </Text>
-                        <RolesField
-                          techCardId={numId}
-                          canEdit={canWrite(SECTION.techCards) && !frozen}
-                          initialAssignments={techCard?.roleAssignments}
-                        />
-                      </Section>
-                    )}
-                    {!isAux && (
-                      <Section title='linked products'>
-                        <ProductIdsField />
-                      </Section>
-                    )}
-                  </SectionStack>
-                )}
               </SectionStack>
+
+              {/* R-1 · ВТОРОЙ РЯД ШАПКИ, а не третья колонка. U-1 ставил сюда узкую колонку
+                  `lg:w-[300px]` по прототипу (`1fr 1fr 300px`, `topRowHtml`, proto.html:3172) —
+                  владелец увидел результат и ОТМЕНИЛ это решение: «RESPONSIBLE ROLES и LINKED
+                  PRODUCTS расположи под IDENTIFICATION и CLASSIFICATION». Его слово новее макета.
+                  Роли встают под identification, продукты — под classification, тем же
+                  `SectionStack row`: 24px земли между блоками И ЕСТЬ разделитель, и он обязан
+                  оставаться одним значением на весь админ, а не локальным числом.
+                  Ряд условный. У несохранённой aux-карты в нём не было бы ни ролей (нужен
+                  сохранённый id), ни связанных продуктов — пустой ряд читался бы как блок,
+                  который не загрузился. Когда жив только один из двух, он честно занимает всю
+                  ширину: `lg:flex-1` без соседа растягивается сам, лишней пустой колонки нет. */}
+              {((isEditMode && !!numId) || !isAux) && (
+                <SectionStack row>
+                  {isEditMode && numId && (
+                    <Section title='responsible roles' className='w-full min-w-0 lg:flex-1'>
+                      <Text variant='inactive' size='small'>
+                        who is on this card (Q5) — admin accounts, saved immediately, not part of
+                        the card’s draft.
+                      </Text>
+                      <RolesField
+                        techCardId={numId}
+                        canEdit={canWrite(SECTION.techCards) && !frozen}
+                        initialAssignments={techCard?.roleAssignments}
+                      />
+                    </Section>
+                  )}
+                  {!isAux && (
+                    <Section title='linked products' className='w-full min-w-0 lg:flex-1'>
+                      <ProductIdsField />
+                    </Section>
+                  )}
+                </SectionStack>
+              )}
 
               {/* U-2 · CARE SYMBOLS И CARE GUIDE УБРАНЫ ИЗ ПОЛОСЫ — прямое указание владельца.
                 Убран ТОЛЬКО экран: care хранится один раз, на care-ярлыке, и редактируется на

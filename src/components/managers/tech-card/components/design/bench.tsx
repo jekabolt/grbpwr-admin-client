@@ -375,8 +375,9 @@ export function Bench({
       slotIds: target.slotId ? [target.slotId] : [],
       labels: [target.label],
     });
-    // The shortlist and the armed fix must not both claim to hold a pending intention.
-    fixSelection.clear();
+    // The shortlist and the armed fix must not both claim to hold a pending intention — and the
+    // tick MODE goes down with the ticks (R-20): arming is the shortlist's natural exit.
+    fixSelection.close();
     document
       .getElementById('design-generation')
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -483,9 +484,14 @@ export function Bench({
               onFix={door.onFix}
               fixBlocked={door.blocked}
               // Ticks belong to the slots that can carry a fix; a shortlist offering an empty slot
-              // would put a row in it that the door then refuses.
-              selected={fixSelection.has(key)}
-              onToggleSelect={door.tickable ? () => fixSelection.toggle(key) : undefined}
+              // would put a row in it that the door then refuses. AND they exist only inside the
+              // tick mode (R-20): in the ordinary view a standing plate carries no checkbox —
+              // whatever stands in a slot is there because it is needed, and the sheet reads the
+              // fact of the placement, not a tick.
+              selected={fixSelection.active && fixSelection.has(key)}
+              onToggleSelect={
+                door.tickable && fixSelection.active ? () => fixSelection.toggle(key) : undefined
+              }
               bars={
                 <FixBars
                   band={band}
@@ -553,8 +559,11 @@ export function Bench({
               // `design_bench_slot(id)`, which is the only key that can tell two details apart.
               onFix={door.onFix}
               fixBlocked={door.blocked}
-              selected={fixSelection.has(key)}
-              onToggleSelect={door.tickable ? () => fixSelection.toggle(key) : undefined}
+              // Той же дверью, что у сторон: галка живёт только в режиме правки (R-20).
+              selected={fixSelection.active && fixSelection.has(key)}
+              onToggleSelect={
+                door.tickable && fixSelection.active ? () => fixSelection.toggle(key) : undefined
+              }
               bars={
                 <FixBars
                   band={band}

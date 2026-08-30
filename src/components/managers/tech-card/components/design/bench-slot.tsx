@@ -279,7 +279,13 @@ export type BenchSlotProps = {
   onFix?: () => void;
   /** Why `fix ▸` is dead here, or null when it is live. */
   fixBlocked?: string | null;
-  /** The fix shortlist's tick. Drawn only when `onToggleSelect` is given. */
+  /**
+   * The fix shortlist's tick. Drawn only when `onToggleSelect` is given — and the bench gives it
+   * only while the tick MODE is open (R-20, владелец: в обычном виде на плитах галок нет; они
+   * появляются, когда человек нажал «fix several ▸» и выбирает, какие стороны переделать). The
+   * slot itself stays mode-blind on purpose: it is presentational, and the one honest signal it
+   * gets is whether a toggle handler exists.
+   */
   selected?: boolean;
   onToggleSelect?: () => void;
   /** The fix state strips (`fix is running`, `fix is in`), built by `fix-flow.tsx`. */

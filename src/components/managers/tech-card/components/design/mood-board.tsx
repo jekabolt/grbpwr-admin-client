@@ -1,9 +1,9 @@
-import { common_MediaFull, common_TechCardMediaKind } from 'api/proto-http/admin';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { AnnotationEditor } from 'ui/components/annotation/editor';
+import { AnnotationEditor, ANNOTATION_EDITOR_H_COMPACT } from 'ui/components/annotation/editor';
 import { rememberPen } from 'ui/components/annotation/surface';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -11,7 +11,6 @@ import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annota
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { create } from 'zustand';
@@ -48,19 +47,14 @@ import { useMoodCallouts } from './mood-callouts';
 
 export const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
 
-const BOARD_KINDS: common_TechCardMediaKind[] = [
-  'TECH_CARD_MEDIA_KIND_MOODBOARD',
-  'TECH_CARD_MEDIA_KIND_SWATCH',
-];
-
 /**
- * Виды плитки ДОСКИ. `reference` из списка убран намеренно: вход — это не ярлык на плитке, а своя
- * строка, и селект, уносящий картинку с доски, был бы дверью без обратного хода в одном нажатии.
+ * ПИКЕРА mood/swatch НА ПЛИТКЕ БОЛЬШЕ НЕТ (слова владельца: «пикер mood & swatch не нужны в
+ * мудборде») — вместе с ним умерли `BOARD_KINDS`/`KIND_ITEMS`/`kindOf`/`setKind`. Новые плитки
+ * рождаются `MOODBOARD`; ярлык ничего не делил и ничего не гейтил, он только просил выбора.
+ * СТАРЫЕ swatch-строки ПРИ ЭТОМ ЖИВЫ: `isBoardRow` ниже определён отрицанием входа, а не списком
+ * видов, поэтому строка с любым не-REFERENCE видом рисуется на доске как рисовалась — снятие
+ * пикера не имеет права терять чужие данные с экрана.
  */
-const KIND_ITEMS = [
-  { value: 'TECH_CARD_MEDIA_KIND_MOODBOARD', label: 'mood' },
-  { value: 'TECH_CARD_MEDIA_KIND_SWATCH', label: 'swatch' },
-];
 
 /**
  * Потолок доски. Счётчик «N / 12» обещает рост, поэтому дверь добавления существует ВСЕГДА и при
@@ -233,29 +227,18 @@ export function MoodBoard({
     full: mediaById.get(i.mediaId),
   }));
 
-  const kindOf = (mediaId: number) =>
-    items.find((i) => i.mediaId === mediaId)?.kind ?? 'TECH_CARD_MEDIA_KIND_MOODBOARD';
-
-  const setKind = (mediaId: number, kind: string) => {
-    if (!BOARD_KINDS.includes(kind as common_TechCardMediaKind)) return;
-    if (kindOf(mediaId) === kind) return;
-    writeItems(
-      ((getValues('moodboardMedia') ?? []) as BoardItem[]).map((i) =>
-        // Правится строка ДОСКИ: строка входа на тот же `media_id` — отдельная запись со своим
-        // видом, и трогать её сменой ярлыка на плитке значило бы менять вход, не спросив.
-        i.mediaId === mediaId && isBoardRow(i) ? { ...i, kind } : i,
-      ),
-    );
-  };
-
   // ── как я смотрю на доску: strip | grid ─────────────────────────────────────────────────────
   //
   // ВЫСОТА КАДРА ФИКСИРОВАНА В ОБОИХ РЕЖИМАХ, ШИРИНА ГУЛЯЕТ (U-4). Это инверсия прежнего
   // поведения: доска стояла шириной в 300px на кадр, и высота считалась от пропорций снимка —
   // портрет рядом с панорамой давал ряд, в котором ничего не сравнивается. Кадр НЕ обрезается ни в
   // одном из режимов, поэтому пины по-прежнему ложатся на снимок один в один.
-  const [mode, setMode] = useState<'strip' | 'grid'>('grid');
-  const rowHeight = mode === 'strip' ? 340 : 280;
+  // Стрип — умолчание (владелец: «стрип мод по дефолту в мудборде»): доску чаще читают лентой.
+  const [mode, setMode] = useState<'strip' | 'grid'>('strip');
+  // 380 в стрипе — «высоту картинок сделать чуть больше» (R-7). Ровно на эти же 40px ужата
+  // полоса редактора (148 → ANNOTATION_EDITOR_H_COMPACT = 108): рост отдан КАРТИНКЕ, а суммарная
+  // высота блока не выросла. Двигая одно из двух чисел, двигай оба — иначе блок снова растёт.
+  const rowHeight = mode === 'strip' ? 380 : 280;
 
   // ── дверь добавления ────────────────────────────────────────────────────────────────────────
   function handleAddMedia(added: common_MediaFull[]): number[] {
@@ -386,6 +369,18 @@ export function MoodBoard({
           wrapRows={mode === 'grid'}
           // U-3: виды указаний — слева, переключатель strip/grid — справа, на одном уровне.
           kindsFirst
+          // Стрелки ‹ › в стрипе сняты по слову владельца; прокрутка остаётся жестом и
+          // скроллбаром. У эскиза рельса живёт со стрелками — потому это проп, а не правка рельсы.
+          railArrows={false}
+          // Кроп запрещён словами владельца: у медиа без записанных размеров кадр берёт пропорции
+          // самой картинки после загрузки, а не фолбэка, — иначе `object-cover` резал бы снимок.
+          preferNaturalAspect
+          // Текст пина — по наведению или фокусу на маркер, не постоянной легендой (R-9).
+          pinText='hover'
+          // Узкая полоса редактора (R-2) и тот же резерв в зуме (R-6): одно число на резерв и
+          // корпус, см. `heightPx` у AnnotationEditor ниже — разъехавшись, они возвращают дёрганье.
+          editorHeight={ANNOTATION_EDITOR_H_COMPACT}
+          zoomEditorReserve
           viewControls={
             <ChipRow>
               {(['strip', 'grid'] as const).map((m) => (
@@ -425,26 +420,22 @@ export function MoodBoard({
           carouselLabel='moodboard'
           emptyLabel='nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
           mediaLabel={(view, i) => `moodboard picture ${i + 1}`}
-          renderFocusedFooter={(view) => (
-            <div className='flex items-center gap-2'>
-              <Select
-                name={`mood-kind-${view.mediaId}`}
-                items={KIND_ITEMS}
-                value={kindOf(view.mediaId)}
-                placeholder='mood'
-                readOnly={readOnly}
-                onValueChange={(v) => setKind(view.mediaId, v)}
-                className='w-[120px]'
-              />
-              {inputIds.has(view.mediaId) && <Pill tone='ink'>in the input</Pill>}
-            </div>
-          )}
+          // Подвал плитки БЕЗ пикера mood/swatch (R-5): ярлык ничего не решал и только просил
+          // выбора. Остаётся единственный факт, который человеку нужен у плитки, — «эта картинка
+          // уже и во входе»; у остальных подвала нет вовсе, чтобы не резервировать пустую строку.
+          renderFocusedFooter={(view) =>
+            inputIds.has(view.mediaId) ? <Pill tone='ink'>in the input</Pill> : null
+          }
           renderEditor={(key, { close }) => {
             const row = callouts.at(key);
             if (!row) return null;
             const { index, value } = row;
             return (
               <AnnotationEditor
+                // Узкий корпус (R-2): у мудбордной выноски нет ни номера, ни деталей, ни размера —
+                // полная полоса стояла бы наполовину пустой. То же число уходит в `editorHeight`
+                // выше: резерв и корпус обязаны совпадать, иначе возвращается сдвиг кадров.
+                heightPx={ANNOTATION_EDITOR_H_COMPACT}
                 kind={value.kind ?? 'pin'}
                 // НОМЕРА НЕТ И В РЕДАКТОРЕ: мудбордную пометку не адресует ни деталь, ни операция,
                 // ни дефект, и нарисованный номер обещал бы адрес, которого не существует.

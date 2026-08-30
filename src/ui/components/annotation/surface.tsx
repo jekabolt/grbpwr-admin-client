@@ -174,6 +174,33 @@ export type AnnotationSurfaceProps = {
    */
   halo?: boolean;
   cornerSlot?: ReactNode;
+  /**
+   * КОРОБКА КАДРА БЕРЁТ ПРОПОРЦИИ У ЗАГРУЖЕННОЙ КАРТИНКИ, как только они известны, — поверх
+   * `aspectRatio`-пропа. Нужен полосе фиксированной высоты (мудборд): у медиа без записанных
+   * размеров проп несёт ФОЛБЭК, и `object-cover` на коробке чужих пропорций РЕЖЕТ снимок — а
+   * владелец обещал «никогда не кропать». С собственными пропорциями cover не отрезает ничего,
+   * и высота ряда остаётся фиксированной: ширину считает `aspect-ratio` от той же высоты.
+   * По умолчанию выключен: у сетки эскиза плитки меряются шириной, и смена пропорций после
+   * загрузки дёргала бы раскладку, о которой там никто не просил.
+   */
+  preferNaturalAspect?: boolean;
+  /**
+   * РЕЗЕРВ ПОД РЕДАКТОР, px. Задан — полоса редактора существует ВСЕГДА (пустая — с подсказкой),
+   * и выбор выноски не меняет высоту хрома, а значит и кадра: в увеличенном виде кадр — `flex-1`,
+   * и появившиеся под ним полторы сотни пикселей пересчитывали flex и дёргали картинку на каждом
+   * выборе. Ровно тот же резерв, который у листа держит `FocusedAnnotator` (см. довод там);
+   * лечится структурой, а не анимацией — анимированный сдвиг остаётся сдвигом.
+   * Не задан — прежнее поведение: редактор появляется только с выбором.
+   */
+  editorReserveHeight?: number;
+  /**
+   * ТЕКСТ ПИНА — ПО НАВЕДЕНИЮ ИЛИ ФОКУСУ, плашкой у самого пина, вместо печатной легенды.
+   * Мудборд: пометки там читают у картинки, а постоянная легенда съедала высоту доски текстом,
+   * который уже виден по жесту. «Наведение ИЛИ фокус», не только наведение: у клавиатуры ховера
+   * не бывает, и орган только для мыши — это орган не для всех (PRODUCT.md, WCAG AA).
+   * По умолчанию выключен: эскиз и примерка печатают легенду, как печатали.
+   */
+  hoverNotes?: boolean;
   /** Плоский клик по пустому кадру в режиме чтения (инлайн-плитка открывает увеличенный вид). */
   onBackgroundView?: () => void;
   /** Предел числа указаний на кадре — зеркало серверного. */
@@ -318,6 +345,9 @@ export function AnnotationSurface({
   legend = false,
   chromeClassName,
   fit = false,
+  preferNaturalAspect = false,
+  editorReserveHeight,
+  hoverNotes = false,
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -1440,7 +1470,13 @@ export function AnnotationSurface({
           style={{
             // Вписанный кадр держит СОБСТВЕННЫЕ пропорции картинки: тогда `object-cover` ничего не
             // обрезает, и кадр совпадает с картинкой пиксель в пиксель.
-            aspectRatio: fitting ? String(naturalRatio) : aspectRatio,
+            // `preferNaturalAspect`: как только картинка загрузилась, коробка переходит на ЕЁ
+            // пропорции — фолбэк из пропа честен только до загрузки, а дальше он режет снимок.
+            aspectRatio: fitting
+              ? String(naturalRatio)
+              : preferNaturalAspect && naturalRatio != null
+                ? String(naturalRatio)
+                : aspectRatio,
             // ШИРИНА — МЕНЬШЕЕ ИЗ ДВУХ УПОРОВ: вся ширина места или та, при которой в него ещё
             // влезает высота. Высоту дальше считает `aspect-ratio`, поэтому коробка выходит
             // вписанной и ТОЧНО пропорциональной снимку с обеих сторон.
@@ -1500,7 +1536,7 @@ export function AnnotationSurface({
                 // вписанный кадр с роликом остался бы без пропорций навсегда.
                 onLoadedMetadata={(e) => {
                   const el = e.currentTarget;
-                  if (fit && el.videoWidth > 0 && el.videoHeight > 0) {
+                  if ((fit || preferNaturalAspect) && el.videoWidth > 0 && el.videoHeight > 0) {
                     setNaturalRatio(el.videoWidth / el.videoHeight);
                   }
                 }}
@@ -1524,7 +1560,7 @@ export function AnnotationSurface({
                 draggable={false}
                 onLoad={(e) => {
                   const el = e.currentTarget;
-                  if (fit && el.naturalWidth > 0 && el.naturalHeight > 0) {
+                  if ((fit || preferNaturalAspect) && el.naturalWidth > 0 && el.naturalHeight > 0) {
                     setNaturalRatio(el.naturalWidth / el.naturalHeight);
                   }
                 }}
@@ -1706,6 +1742,7 @@ export function AnnotationSurface({
                       filled={!!(c.hasText ?? (c.text ?? '').trim())}
                       color={c.color || undefined}
                       title={[text, ...names].filter(Boolean).join(' · ') || `callout ${c.number ?? ''}`}
+                      hoverNotes={hoverNotes}
                       dimmed={dim(c.key)}
                       selected={selected === c.key}
                       interactive={!placing}
@@ -1752,6 +1789,51 @@ export function AnnotationSurface({
                   />
                 );
               })}
+
+            {/* ПЛАШКА ТЕКСТА ПИНА ПО НАВЕДЕНИЮ ИЛИ ФОКУСУ — только в режиме `hoverNotes`.
+                НЕ ПОРТАЛ, и это принципиально: портал рендерится в `document.body`, вне
+                `<fieldset disabled>` и вне трансформа зума — записка переставала бы ездить с
+                картинкой. Плашка живёт в том же слое, что маркеры: координата в пикселях кадра,
+                `scale(inv)` держит экранный размер при зуме.
+                `pointer-events-none` — иначе плашка, вставшая под курсор, крала бы `pointerleave`
+                у своего же пина и мигала. `aria-hidden`: тот же текст уже объявлен на самом пине
+                (`aria-label`), второй раз читалке он не нужен. */}
+            {size.w > 0 &&
+              !hideCallouts &&
+              hoverNotes &&
+              hovered !== null &&
+              (() => {
+                const c = byKey.get(hovered);
+                if (!c || kindDef(c.kind).key !== 'pin') return null;
+                const names = (c.pieceLineKeys ?? [])
+                  .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'piece deleted' : undefined))
+                  .filter(Boolean) as string[];
+                const text = (c.text ?? '').trim();
+                // Полый пин честно молчит: «текста ещё нет» уже сказано его заливкой.
+                if (!text && names.length === 0) return null;
+                const at = px(c.points.length > 0 ? c.points[0] : labelOf(c));
+                // Ниже пина в верхней части кадра, выше — в нижней: так плашка не выходит за
+                // высоту кадра, а полоса мудборда режет всё, что вышло (`overflow-y-hidden`).
+                const below = at.y <= size.h * 0.6;
+                return (
+                  <span
+                    aria-hidden
+                    className='pointer-events-none absolute z-[5] block w-max max-w-[min(240px,90%)] whitespace-pre-wrap border border-borderColor bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor'
+                    style={{
+                      left: clamp(at.x, 12, Math.max(12, size.w - 12)),
+                      top: below ? at.y + (R_PIN + 4) * inv : at.y - (R_PIN + 4) * inv,
+                      transform: `translate(-50%, ${below ? '0%' : '-100%'}) scale(${inv})`,
+                    }}
+                  >
+                    {text}
+                    {names.length > 0 && (
+                      <span className='block uppercase tracking-label text-labelColor'>
+                        {names.join(', ')}
+                      </span>
+                    )}
+                  </span>
+                );
+              })()}
 
             {/* РУЧКИ — HTML-слоем и последними: они обязаны лежать поверх подписей, иначе якорь под
                 плашкой не схватить. Экранно-постоянные: ручка, растущая с зумом, перекрыла бы саму
@@ -1872,11 +1954,34 @@ export function AnnotationSurface({
         </ChipRow>
       )}
 
-      {renderEditor && selected !== null && byKey.has(selected) && (
-        <EditorSlot focusRequested={takeFocusRequest}>
-          {renderEditor(selected, { close: () => select(null) })}
-        </EditorSlot>
-      )}
+      {/* РЕЗЕРВ ПОД РЕДАКТОР (`editorReserveHeight`): полоса стоит всегда, выбранная выноска её
+          НАПОЛНЯЕТ, а не создаёт — поэтому кадр над ней не пересчитывается ни на выбор, ни на
+          Esc. Пустая полоса называет грамматику — ровно как резерв листа в `FocusedAnnotator`.
+          Без пропа — прежнее поведение: редактор существует только с выбором. */}
+      {renderEditor &&
+        (editorReserveHeight != null
+          ? editable && (
+              <div className='shrink-0 overflow-hidden' style={{ height: editorReserveHeight }}>
+                {selected !== null && byKey.has(selected) ? (
+                  <EditorSlot focusRequested={takeFocusRequest} className='h-full'>
+                    {renderEditor(selected, { close: () => select(null) })}
+                  </EditorSlot>
+                ) : (
+                  <div className='flex h-full items-center border border-dashed border-borderColor px-1.5'>
+                    <Text size='micro' variant='label' component='span'>
+                      no callout selected — click a pin or a line on the frame · Backspace deletes
+                      it · Enter opens this editor
+                    </Text>
+                  </div>
+                )}
+              </div>
+            )
+          : selected !== null &&
+            byKey.has(selected) && (
+              <EditorSlot focusRequested={takeFocusRequest}>
+                {renderEditor(selected, { close: () => select(null) })}
+              </EditorSlot>
+            ))}
       </div>
     </div>
   );
@@ -2000,6 +2105,7 @@ function PinMarker({
   filled,
   color,
   title,
+  hoverNotes = false,
   dimmed,
   selected,
   interactive,
@@ -2020,6 +2126,13 @@ function PinMarker({
    */
   color?: string;
   title: string;
+  /**
+   * Режим плашки по наведению/фокусу (см. `hoverNotes` у поверхности). Здесь он меняет два
+   * факта: нативный `title` снимается (двойной тултип — рядом с плашкой он читался бы как эхо;
+   * имя органа остаётся читалке через `aria-label`), а фокус с клавиатуры начинает считаться
+   * наведением — у клавиатуры ховера не бывает, и без этого плашка была бы мышиной привилегией.
+   */
+  hoverNotes?: boolean;
   dimmed: boolean;
   selected: boolean;
   interactive: boolean;
@@ -2033,10 +2146,22 @@ function PinMarker({
     <span
       role='button'
       tabIndex={0}
-      title={title}
+      title={hoverNotes ? undefined : title}
+      aria-label={title}
       data-callout-selected={selected ? 'true' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
+      // ФОКУС = НАВЕДЕНИЕ, но только ВИДИМЫЙ (`:focus-visible`): фокус от клика мыши держится и
+      // после выбора, и плашка залипала бы поверх снимка на всё время правки — а жест мыши свою
+      // плашку уже показал наведением.
+      onFocus={
+        hoverNotes
+          ? (e) => {
+              if (e.currentTarget.matches(':focus-visible')) onHover(true);
+            }
+          : undefined
+      }
+      onBlur={hoverNotes ? () => onHover(false) : undefined}
       // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы, а его отпускание —
       // снятие выбора, которое тут же отменяло бы выбор, сделанный кликом по этому же маркеру.
       onPointerDown={(e) => {

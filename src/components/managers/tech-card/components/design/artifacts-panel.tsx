@@ -7,9 +7,14 @@ import type {
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
+// ФИГУРЫ НА ПРЕВЬЮ РИСУЕТ ТОТ ЖЕ РЕНДЕРЕР, ЧТО НА ЭКРАНЕ РЕДАКТОРА И НА БУМАГЕ (sheet-svg,
+// tech-pack-document). Третья own-отрисовка «для плитки» — это третий словарь видов, который
+// отстанет первым же новым видом: дуга или мерка рисовались бы в редакторе и молча пропадали
+// на плитке, а человек читал бы это как «выноска не сохранилась».
+import { AnnotationDefs, CalloutShape } from 'ui/components/annotation/shapes';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -118,6 +123,13 @@ export type DocumentPlate = {
   pictureId?: number;
   /** Only for a bench plate: the address of its slot, for the door. */
   door?: string;
+  /**
+   * Only for a bench plate: the slot's view key (`front` / `back` / `side_l` / `side_r`, anything
+   * else is a detail). It is what `takeIntoCard` derives the media KIND from — the same derivation
+   * the server's mint performs (`entity.DesignPlateMediaKind`), so a plate taken in by hand and a
+   * plate injected by the mint are filed under the same name.
+   */
+  viewKey?: string;
   note?: string;
 };
 
@@ -227,25 +239,37 @@ export function bandPlates(
 export type SheetCallout = NonNullable<TechCardFormData['callouts']>[number];
 
 /**
- * WHY A BENCH PLATE HAS NO LIVE DOOR, said once and read by both of them.
+ * WHY A BENCH OR RUN PLATE CANNOT BE DRAWN ON *AS IT STANDS* — and what the door does about it.
  *
  * The drawing editor draws on `technicalMedia` — the card's OWN media list, which is what a
- * callout's `media_id` points at. A bench slot is not in that list: the mint is what puts it there
- * (`injectBenchPlatesAsTechnicalMedia`, server-side, inside the mint transaction). So before a mint
- * this picture cannot carry a callout, and taking it «off the sheet» here would remove nothing —
- * the slot still holds it and the next mint would bring it straight back.
+ * callout's `media_id` points at. A bench slot and a run's output are not in that list. So the
+ * draw door on such a plate is a COMPOUND act, and says so on its face («take in + draw ▸»): it
+ * first lists the picture in the card's media, then opens the editor. R-13 is the reason the door
+ * exists at all — «к любому артефакту можно делать все виды колаутов» — and the compound form is
+ * what keeps it honest: the price (an edit of the card) is named on the button, not hidden in it.
+ *
+ * FOR A BENCH PLATE THIS IS SANCTIONED BY THE SERVER, NOT GUESSED AT. The mint's
+ * `injectBenchPlatesAsTechnicalMedia` (design_sheet_mint.go) skips media the document already
+ * lists — «УЖЕ ПЕРЕЧИСЛЕННОЕ НЕ ТРОГАЕТСЯ. Клиент вправе прислать плиту сам (и со временем
+ * будет)» — so a plate taken in here is NOT doubled by the next mint. Detaching it here is still
+ * refused: the slot keeps holding the picture and the next mint would bring it straight back —
+ * the way OFF the bench is clearing the slot in STUDIO.
  */
-const BENCH_PLATE_NOT_ON_DOCUMENT =
-  'this picture stands on the bench, not in the card’s own media — the mint puts it there, and callouts are drawn on the document’s own plates';
 const BENCH_PLATE_DETACH =
   'a bench plate is taken off by clearing its slot in STUDIO — dropped here it would come back with the next mint';
+
 /**
- * A run's output lives in the band and not in the card's media, and a callout's `media_id` points
- * at the card's media. So the picture has to be taken onto the card before anything can be drawn on
- * it — and that door is right beside this one, on the same plate.
+ * The view key of a bench slot → the card's media kind. THE SAME DERIVATION THE MINT PERFORMS
+ * (`entity.DesignPlateMediaKind`, backend): front/back/sides by name, everything else a detail.
+ * A second, different mapping here would mean a plate taken in by hand and the same plate injected
+ * by the mint disagree about what view they are — visibly, in the plate's own caption.
  */
-const RUN_PLATE_NOT_ON_CARD =
-  'this picture came out of a run and is not in the card’s own media yet — a callout addresses the card’s media, so take it in first with the door beside this one';
+const BENCH_VIEW_MEDIA_KIND: Record<string, common_TechCardMediaKind> = {
+  front: 'TECH_CARD_MEDIA_KIND_FRONT',
+  back: 'TECH_CARD_MEDIA_KIND_BACK',
+  side_l: 'TECH_CARD_MEDIA_KIND_SIDE_L',
+  side_r: 'TECH_CARD_MEDIA_KIND_SIDE_R',
+};
 
 const CARD_PLATE_KINDS: Partial<Record<common_TechCardMediaKind, string>> = {
   TECH_CARD_MEDIA_KIND_FRONT: 'FRONT',
@@ -308,6 +332,7 @@ export function documentPlates(
       media,
       origin: 'bench',
       door: benchDoor({ viewKey: slot!.viewKey, id: slot!.id }),
+      viewKey: view,
       note: provenanceLabel(readProvenance(slot!.picture ?? {})),
     });
   }
@@ -350,7 +375,10 @@ export function ArtifactsPanel({
   // what W-14 asks for: the choice is consumed here, so it can be amended here.
   const { setPictureSelected } = useDesignWrites(techCardId);
 
-  const callouts = (useWatch({ control: form.control, name: 'callouts' }) ?? []) as CalloutLike[];
+  // `SheetCallout` (z.input строки формы), а НЕ узкий CalloutLike: плиты теперь РИСУЮТ фигуру
+  // выноски (kind/points/dashed/filled/color), и тип обязан нести её, иначе каст компилируется, а
+  // превью молча теряет дуги и мерки — ровно та ловушка, о которой предупреждает downloadSheet.
+  const callouts = (useWatch({ control: form.control, name: 'callouts' }) ?? []) as SheetCallout[];
   const technicalMedia = (useWatch({ control: form.control, name: 'technicalMedia' }) ?? []) as {
     mediaId?: number;
     kind?: string;
@@ -525,18 +553,24 @@ export function ArtifactsPanel({
     callouts.filter((c) => (c.mediaId ?? 0) === mediaId).length;
 
   /**
-   * TAKE A PLATE OFF THE DOCUMENT — the rule carried over WORD FOR WORD from `removeMedia` in
-   * `sketch-tab.tsx`, which was the only place that could do this while the sketch tab existed.
+   * TAKE A PLATE OFF THE DOCUMENT — AND ITS CALLOUTS DIE WITH IT (R-14, слова владельца: «если
+   * медиа удаляются, то колауты к нему тоже»).
    *
-   * THE TEXT OF A CALLOUT SURVIVES THE PICTURE: a person wrote it, and it is what the server takes a
-   * cut piece's name from. THE ANCHOR DOES NOT. `pos_x/pos_y` and `points` are fractions of a FRAME,
-   * and a fraction only means something on its own picture — carried onto another plate the shape
-   * would land somewhere else entirely and look perfectly normal doing it.
+   * ЭТО СМЕНА ПРАВИЛА, И ВОТ ПОЧЕМУ СТАРОЕ БЫЛО ХУЖЕ. Раньше выноски «откручивались»
+   * (`media_id = 0`) в расчёте на «повесь обратно в редакторе» — и каждый снос плиты плодил ровно
+   * те строки, которые владелец запретил показывать: якорь — доля СВОЕГО кадра, на другой плите он
+   * бессмыслен, и открученная выноска жила в списке вечным «unpinned». Мудборд ведёт себя так с
+   * самого начала (`mood-board.tsx` → `confirmRemove`: «УКАЗАНИЯ УМИРАЮТ ВМЕСТЕ С ПЛИТКОЙ, а не
+   * открепляются») — это тот же акт с той же ценой, и цену называет подтверждение с числом
+   * (`askDetach`), а не тихий побочный эффект.
+   *
+   * СТАРЫЕ открученные строки из базы этот код НЕ трогает: они фильтруются НА ПОКАЗЕ (`sheetRows`),
+   * а не стираются при загрузке — молча удалять чужие данные нельзя, и в редакторе («callouts
+   * without an image») они по-прежнему доступны для ре-пина или явного удаления.
    *
    * THE ARRAY IS WRITTEN AT ITS ROOT, never through a field-array mutator. That is the convention of
    * these files and it exists because the mutators do not broadcast; a root `setValue` does, so
-   * every other reader of the path re-syncs. The callout fields below are LEAF writes on a dotted
-   * path, which touch no array identity at all.
+   * every other reader of the path re-syncs.
    */
   function detachPlate(plate: DocumentPlate) {
     const media = form.getValues('technicalMedia') ?? [];
@@ -546,14 +580,13 @@ export function ArtifactsPanel({
       { shouldDirty: true },
     );
     const cs = form.getValues('callouts') ?? [];
-    cs.forEach((c, index) => {
-      if ((c.mediaId ?? 0) !== plate.mediaId) return;
-      form.setValue(`callouts.${index}.mediaId`, 0, { shouldDirty: true });
-      form.setValue(`callouts.${index}.posX`, '', { shouldDirty: true });
-      form.setValue(`callouts.${index}.posY`, '', { shouldDirty: true });
-      form.setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
-      form.setValue(`callouts.${index}.points`, [], { shouldDirty: true });
-    });
+    if (cs.some((c) => (c.mediaId ?? 0) === plate.mediaId)) {
+      form.setValue(
+        'callouts',
+        cs.filter((c) => (c.mediaId ?? 0) !== plate.mediaId),
+        { shouldDirty: true },
+      );
+    }
   }
 
   /** Silent when nothing is pinned; a question naming the COUNT when something is. */
@@ -590,13 +623,21 @@ export function ArtifactsPanel({
   function takeIntoCard(plate: DocumentPlate) {
     const media = form.getValues('technicalMedia') ?? [];
     if (media.some((m) => (m.mediaId ?? 0) === plate.mediaId)) return;
-    form.setValue(
-      'technicalMedia',
-      [...media, { mediaId: plate.mediaId, kind: 'TECH_CARD_MEDIA_KIND_RENDER', caption: '' }],
-      { shouldDirty: true },
-    );
+    // Вид — по происхождению плиты. У верстачной он выводится из слота ТЕМ ЖЕ правилом, что у
+    // серверного минта (см. BENCH_VIEW_MEDIA_KIND); у плиты прогона это RENDER, потому что в
+    // словаре карточки нет члена для 3D-кадра, а RENDER по контракту и значит «принятая картинка
+    // прогона, уходящая с карточкой».
+    const kind: common_TechCardMediaKind =
+      plate.origin === 'bench'
+        ? (BENCH_VIEW_MEDIA_KIND[(plate.viewKey ?? '').trim()] ?? 'TECH_CARD_MEDIA_KIND_DETAIL')
+        : 'TECH_CARD_MEDIA_KIND_RENDER';
+    form.setValue('technicalMedia', [...media, { mediaId: plate.mediaId, kind, caption: '' }], {
+      shouldDirty: true,
+    });
     showMessage(
-      'taken into the card’s media — it is not on the technical sheet, and callouts drawn on it are not either',
+      plate.origin === 'bench'
+        ? 'taken into the card’s media as its bench view — the next mint lists it once, not twice'
+        : 'taken into the card’s media — it is not on the technical sheet, and callouts drawn on it are not either',
       'success',
     );
   }
@@ -667,9 +708,34 @@ export function ArtifactsPanel({
     }
   };
 
-  /** Приколотая выноска стоит на картинке; у откреплённой `media_id` равен нулю. */
-  const pinnedCount = callouts.filter((c) => (c.mediaId ?? 0) > 0).length;
-  const strayCount = callouts.length - pinnedCount;
+  /**
+   * ЧТО ПОКАЗЫВАЕТ ПАНЕЛЬ CALLOUTS: только выноски, стоящие на плитах ДОКУМЕНТА (R-14).
+   *
+   * Массив `callouts` шире того, что этому экрану принадлежит, двумя сортами строк:
+   *   — открученные (`media_id = 0`) со старых карточек: раздела «unpinned» быть не должно, и
+   *     detachPlate таких больше не создаёт. Они НЕ стираются — фильтр стоит на показе, строки
+   *     живут в payload и в редакторе («callouts without an image»), где их можно ре-пиннуть или
+   *     удалить явно; тихо выбросить чужие данные при загрузке — значит потерять текст, который
+   *     писал человек;
+   *   — мудбордные: их `media_id` принадлежит мудборду, не листу (`mood-callouts.tsx` — «второго
+   *     дома у них нет»), и раньше они показывались тут как «off the sheet». Членство в плитах
+   *     документа отсекает их без отдельного списка мудбордных id; если одно медиа стоит И на
+   *     мудборде И в технических — членство в документе побеждает, потому что спрятать листовую
+   *     выноску хуже, чем показать мудбордную на снимке, который на листе стоит.
+   *
+   * ИНДЕКС — МЕСТО СТРОКИ В ПОЛНОМ МАССИВЕ, и фильтр обязан его пережить: и маркеры плит, и
+   * leaf-записи полей (`callouts.N.description`), и `selected` адресуют строку по этому индексу.
+   * Отфильтрованный список с переиндексацией писал бы текст в ЧУЖУЮ выноску.
+   *
+   * Счётчик в шапке секции берётся от ЭТОГО списка — то, что названо числом, и то, что видно,
+   * обязаны совпадать, иначе «7 callouts» при пяти строках на экране.
+   */
+  const sheetRows = useMemo(() => {
+    const onDocument = new Set(plates.map((p) => p.mediaId));
+    return callouts
+      .map((c, index) => ({ c, index }))
+      .filter(({ c }) => onDocument.has(c.mediaId ?? 0));
+  }, [callouts, plates]);
 
   /** Read once, so the question and the act cannot disagree about how many are at stake. */
   const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
@@ -842,19 +908,17 @@ export function ArtifactsPanel({
           title='callouts'
           question='— a number is minted once and never reused'
           action={
-            /* СЧИТАЮТСЯ ПРИКОЛОТЫЕ, А НЕ ВСЕ. `callouts.length` под подписью «on the sheet» врал:
-               выноска с `media_id = 0` ни на каком листе не стоит, и соседняя строка тут же метит
-               её `unpinned`. Раньше такие приезжали только из старых карточек, теперь их создаёт
-               открепление плиты — то есть ложь стала частой. Открепившиеся названы отдельно. */
-            <ChipRow>
-              <Pill tone='mut'>{pinnedCount} on the sheet</Pill>
-              {strayCount > 0 && <Pill tone='warn'>{strayCount} unpinned</Pill>}
-            </ChipRow>
+            /* ЧИСЛО = СПИСОК. Считается ровно то, что панель ниже рисует (`sheetRows`): выноски на
+               плитах документа. Открученные и мудбордные не показываются — значит и не считаются;
+               пилюли «unpinned» больше нет по слову владельца (R-14), а не по забывчивости. */
+            <Pill tone='mut'>
+              {sheetRows.length} on the plate{sheetRows.length === 1 ? '' : 's'}
+            </Pill>
           }
           className='lg:w-[340px] lg:shrink-0'
         >
           <CalloutPanel
-            callouts={callouts}
+            rows={sheetRows}
             plates={plates}
             selected={selected}
             onSelect={setSelected}
@@ -1169,15 +1233,26 @@ function SheetMembershipWarning({
 /**
  * The plates, with their numbered markers on them.
  *
- * THE FRAME IS CUT TO THE PICTURE'S OWN PROPORTIONS, and that is not a nicety. A callout stores
- * `pos_x` / `pos_y` as fractions of the picture. Put that picture in a frame of a different ratio —
- * letterboxed by `object-contain`, or cropped by `object-cover` — and the same fraction lands in a
- * different place on the garment: the marker drifts off the seam it was pinned to, and nothing on
- * screen admits it. So the box takes its aspect ratio from the media's own width and height, and
- * the image fills it exactly.
+ * ДВЕ КОРОБКИ, НЕ ОДНА: ЯЧЕЙКА РАВНОЙ ВЫСОТЫ, А В НЕЙ — КАДР В ПРОПОРЦИЯХ СНИМКА (R-13).
+ *
+ * Владелец просил одинаковую высоту плит. Но выноска хранит `pos_x`/`pos_y` и `points` ДОЛЯМИ
+ * КАДРА, и доля осмысленна только в коробке с пропорциями СВОЕГО снимка: выровнять высоты «в лоб»,
+ * отдав картинке ячейку чужого ратио, значит молча сдвинуть каждый маркер с его шва — letterbox от
+ * `object-contain` и срез от `object-cover` врут одинаково, только по разным осям. Поэтому высоту
+ * равняет ВНЕШНЯЯ ячейка (у всех плит одно ратио 4/5 при равной ширине колонок грида), а картинка,
+ * маркеры и фигуры живут во ВНУТРЕННЕМ кадре, чьё ратио — собственное ратио медиа; доля считается
+ * от кадра и остаётся на месте.
+ *
+ * ВПИСЫВАНИЕ КАДРА — ПО ЗАМЕРУ, НЕ ПО ИНТУИЦИИ. Обе «очевидные» CSS-схемы вписывания врут, каждая
+ * на своей оси (`w-full`+`max-height` — при упоре по высоте; `h-full`+`max-width` — при упоре по
+ * ширине: Chromium не пересчитывает определённую высоту, когда max-width зажимает выведенную
+ * ширину). Работает схема с container-query единицами: ячейка — `container-type: size`, кадру —
+ * `width: min(100%, calc(100cqh * R))` плюс `aspect-ratio: R`. Замерено в этом репозитории
+ * (2026-08-17, 3 пропорции × 2 ширины окна), не менять на «более простое» без того же замера.
  *
  * A picture whose dimensions the server did not state gets no markers rather than markers in the
- * wrong place — an absent mark is a gap, a misplaced one is a lie.
+ * wrong place — an absent mark is a gap, a misplaced one is a lie. Такая картинка вписывается
+ * `object-contain` внутри полной ячейки: исказить её нельзя, а лгать координатами на ней нечем.
  *
  * EVERY PLATE CARRIES ITS TWO DOORS, and a door that cannot act is DRAWN INERT WITH ITS REASON
  * rather than omitted. Absence teaches that the flow does not exist; a dead control with a reason
@@ -1201,7 +1276,7 @@ function PlateGrid({
   offSheet,
 }: {
   plates: DocumentPlate[];
-  callouts: CalloutLike[];
+  callouts: SheetCallout[];
   selected: number | null;
   onSelect: (index: number | null) => void;
   disabled?: boolean;
@@ -1211,7 +1286,10 @@ function PlateGrid({
   /** Take a plate off the document, or `undefined` — and then `detachInert` says why not. */
   onDetach?: (plate: DocumentPlate) => void;
   detachInert: string;
-  /** Put a run's output into the card's own media, so a callout can address it at all. */
+  /**
+   * Put a bench slot's or a run's picture into the card's own media, so a callout can address it
+   * at all. С ним же живёт составная дверь «take in + draw ▸» на этих плитах (R-13).
+   */
   onTakeIn?: (plate: DocumentPlate) => void;
   /**
    * Flip the mark «chosen» on the picture behind a plate (W-12), or `undefined` — and then
@@ -1238,16 +1316,16 @@ function PlateGrid({
           .map((c, index) => ({ c, index }))
           .filter(({ c }) => (c.mediaId ?? 0) === plate.mediaId);
 
-        // Neither a bench plate nor a run's output is in `technicalMedia`, so neither door can
-        // honestly act on them — but for DIFFERENT reasons, and only one of the two has a way out
-        // that lives on this tab, which is why the reasons are separate strings.
+        // Ни верстачная плита, ни выход прогона не стоят в `technicalMedia` — поэтому их дверь
+        // рисования СОСТАВНАЯ («take in + draw ▸»): сперва взять в медиа карточки, потом открыть
+        // редактор. Составная дверь мертва ровно тогда, когда мертво взятие (read-only карточка);
+        // замороженная версия глушит обе двери раньше, через отсутствие `onDraw`.
+        const compound = plate.origin === 'bench' || plate.origin === 'run';
         const drawReason = !onDraw
           ? drawInert
-          : plate.origin === 'bench'
-            ? BENCH_PLATE_NOT_ON_DOCUMENT
-            : plate.origin === 'run'
-              ? RUN_PLATE_NOT_ON_CARD
-              : null;
+          : compound && !onTakeIn
+            ? 'drawing on this picture first takes it into the card’s media — and that is an edit of the card, which is read-only for you'
+            : null;
         const detachReason = !onDetach
           ? detachInert
           : plate.origin === 'bench'
@@ -1284,12 +1362,65 @@ function PlateGrid({
               </Text>
             </div>
 
+            {/* ЯЧЕЙКА РАВНОЙ ВЫСОТЫ. Ратио 4/5 у ВСЕХ плит при равной ширине колонок грида — это и
+                есть «одинаковая высота» (R-13); серый фон ячейки — паспарту, а не кадр. Кадр — ниже,
+                в пропорциях самого снимка: доли выносок считаются ОТ НЕГО и потому не едут. */}
             <div
-              className='relative mt-1 w-full bg-bgSecondary'
-              style={{ aspectRatio: ratioKnown ? `${w} / ${h}` : '4 / 5' }}
+              className='relative mt-1 flex w-full items-center justify-center bg-bgSecondary'
+              style={{ containerType: 'size', aspectRatio: '4 / 5' }}
             >
-              {url ? (
-                <img src={url} alt={plate.name} className='block h-full w-full' loading='lazy' />
+              {url && ratioKnown ? (
+                /* Вписывание по замеренной схеме (см. комментарий над PlateGrid): 100cqh — высота
+                   ячейки-контейнера, min(...) выбирает ось упора. НЕ «упрощать» до max-w/max-h. */
+                <div
+                  className='relative'
+                  style={{
+                    aspectRatio: `${w} / ${h}`,
+                    width: `min(100%, calc(100cqh * ${w / h}))`,
+                  }}
+                >
+                  <img src={url} alt={plate.name} className='block h-full w-full' loading='lazy' />
+
+                  {/* Фигуры выносок — дуги, мерки, скобки, зоны — тем же рендерером, что в
+                      редакторе и на бумаге. Раньше превью рисовало ТОЛЬКО точки, и поставленная
+                      дуга читалась как пропавшая. viewBox в пикселях кадра: толщина штриха и
+                      засечки мерки не пляшут от размера снимка. */}
+                  <PlateShapes rows={mine} />
+
+                  {mine.map(({ c, index }) => {
+                    const x = Number(c.posX ?? '');
+                    const y = Number(c.posY ?? '');
+                    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+                    const active = selected === index;
+                    return (
+                      <button
+                        key={index}
+                        type='button'
+                        disabled={disabled}
+                        onClick={() => onSelect(active ? null : index)}
+                        title={(c.description ?? '').trim() || 'no text'}
+                        style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                        className={cn(
+                          'absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center border text-nano',
+                          active
+                            ? 'border-textColor bg-textColor text-bgColor'
+                            : 'border-textColor bg-bgColor text-textColor',
+                        )}
+                      >
+                        {c.number || '·'}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : url ? (
+                /* Пропорции сервер не назвал: маркеры не рисуются (см. комментарий выше), а снимок
+                   вписывается contain'ом — исказить нечего и лгать координатами не на чем. */
+                <img
+                  src={url}
+                  alt={plate.name}
+                  className='block max-h-full max-w-full object-contain'
+                  loading='lazy'
+                />
               ) : (
                 <div className='flex h-full w-full items-center justify-center'>
                   <Text size='nano' variant='label' component='span' className='uppercase'>
@@ -1297,32 +1428,6 @@ function PlateGrid({
                   </Text>
                 </div>
               )}
-
-              {ratioKnown &&
-                mine.map(({ c, index }) => {
-                  const x = Number(c.posX ?? '');
-                  const y = Number(c.posY ?? '');
-                  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-                  const active = selected === index;
-                  return (
-                    <button
-                      key={index}
-                      type='button'
-                      disabled={disabled}
-                      onClick={() => onSelect(active ? null : index)}
-                      title={(c.description ?? '').trim() || 'no text'}
-                      style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
-                      className={cn(
-                        'absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center border text-nano',
-                        active
-                          ? 'border-textColor bg-textColor text-bgColor'
-                          : 'border-textColor bg-bgColor text-textColor',
-                      )}
-                    >
-                      {c.number || '·'}
-                    </button>
-                  );
-                })}
             </div>
 
             <Text size='nano' variant='label' component='p' className='mt-1 truncate'>
@@ -1347,7 +1452,22 @@ function PlateGrid({
                   />
                 ))}
               {drawReason ? (
-                <InertDoor label='draw ▸' reason={drawReason} />
+                <InertDoor label={compound ? 'take in + draw ▸' : 'draw ▸'} reason={drawReason} />
+              ) : compound ? (
+                /* СОСТАВНАЯ ДВЕРЬ (R-13): выноска адресует медиа КАРТОЧКИ, поэтому рисованию на
+                   верстачной плите или выходе прогона предшествует взятие в карточку — и кнопка
+                   называет обе половины акта, а не прячет первую в побочный эффект второй. */
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => {
+                    onTakeIn?.(plate);
+                    onDraw?.();
+                  }}
+                  title='first lists this picture in the card’s own media, then opens the drawing editor — all callout kinds work there'
+                >
+                  take in + draw ▸
+                </Button>
               ) : (
                 <Button
                   variant='secondary'
@@ -1406,6 +1526,73 @@ function PlateGrid({
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Фигуры выносок одной плиты, во вписанном кадре. ТОТ ЖЕ ПАТТЕРН, ЧТО SketchGeometryLayer в
+ * tech-pack-document.tsx: коробка МЕРЯЕТСЯ, фигуры кладутся в viewBox тех же пикселей. В процентах
+ * засечки мерки на альбомном снимке стали бы косыми, а дуга — эллипсом; с viewBox холст
+ * масштабируется вместе с кадром, чьи пропорции равны пропорциям снимка, и фигура остаётся на
+ * своём узле.
+ *
+ * `pointer-events: none` на слое ОБЯЗАТЕЛЕН: над ним живут HTML-маркеры с номерами, и слой,
+ * ловящий клики, съел бы выбор выноски. Пин фигурой не рисуется — его кружок и есть маркер.
+ */
+function PlateShapes({ rows }: { rows: { c: SheetCallout; index: number }[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current?.parentElement;
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const drawn = rows.filter(({ c }) => (c.points?.length ?? 0) > 0);
+  if (drawn.length === 0) return null;
+  return (
+    // `text-textColor`: дефолтные чернила CalloutShape — currentColor, и слой обязан назвать их
+    // сам, а не наследовать случайного родителя (та же оговорка, что в sheet-svg).
+    <div ref={ref} className='pointer-events-none absolute inset-0 text-textColor'>
+      {box.w > 0 && (
+        <svg
+          className='h-full w-full'
+          viewBox={`0 0 ${box.w} ${box.h}`}
+          preserveAspectRatio='none'
+          aria-hidden
+        >
+          <defs>
+            <AnnotationDefs />
+          </defs>
+          {drawn.map(({ c, index }) => {
+            const px = Number(c.posX ?? '');
+            const py = Number(c.posY ?? '');
+            return (
+              <CalloutShape
+                key={index}
+                kind={c.kind ?? 'pin'}
+                pts={(c.points ?? []).map((p) => ({
+                  x: (Number(p.x ?? '') || 0) * box.w,
+                  y: (Number(p.y ?? '') || 0) * box.h,
+                }))}
+                label={{
+                  x: (Number.isFinite(px) ? px : 0.5) * box.w,
+                  y: (Number.isFinite(py) ? py : 0.5) * box.h,
+                }}
+                color={(c.color ?? '') || undefined}
+                dashed={!!c.dashed}
+                filled={!!c.filled}
+              />
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
  * The callout panel — and ONE EDIT ON SCREEN AT A TIME, which is the invariant this component
  * exists to hold. Every row is a line; the selected one, and only it, opens its fields. Two open
  * editors on one sheet is how a person types into the wrong callout.
@@ -1418,9 +1605,14 @@ function PlateGrid({
  * because it never adds, removes or reorders. Drawing geometry, minting a new callout and deleting
  * one stay with the annotator — which now opens as a modal over this very tab, so the door on each
  * row leads somewhere instead of naming a place.
+ *
+ * СПИСОК ПРИХОДИТ УЖЕ ОТФИЛЬТРОВАННЫМ (`sheetRows`, R-14): только выноски на плитах документа —
+ * без открученных («unpinned») и без мудбордных. Каждая строка несёт СВОЙ индекс в полном массиве
+ * `callouts`: leaf-запись `callouts.N.description` и `selected` адресуют по нему, и панель,
+ * пересчитавшая индексы от видимого списка, писала бы текст в чужую выноску.
  */
 function CalloutPanel({
-  callouts,
+  rows,
   plates,
   selected,
   onSelect,
@@ -1428,7 +1620,7 @@ function CalloutPanel({
   onDraw,
   drawInert,
 }: {
-  callouts: CalloutLike[];
+  rows: { c: SheetCallout; index: number }[];
   plates: DocumentPlate[];
   selected: number | null;
   onSelect: (index: number | null) => void;
@@ -1444,7 +1636,10 @@ function CalloutPanel({
     return map;
   }, [plates]);
 
-  if (callouts.length === 0) {
+  // rows — ПАРЫ «выноска + её индекс В ФОРМЕ», а не отфильтрованный массив. Разница несущая:
+  // запись идёт по `callouts.${index}`, и если бы сюда приехал просто отфильтрованный список,
+  // индекс сместился бы на каждой скрытой строке — правка уехала бы в ЧУЖУЮ выноску молча.
+  if (rows.length === 0) {
     return (
       <Text size='micro' variant='label' component='p'>
         none yet. A callout is placed on the picture itself — press <b>draw ▸</b> on a plate above,
@@ -1459,7 +1654,7 @@ function CalloutPanel({
 
   return (
     <div>
-      {callouts.map((c, index) => {
+      {rows.map(({ c, index }) => {
         const open = selected === index;
         const anchored = (c.mediaId ?? 0) > 0;
         const where = anchored ? plateName.get(c.mediaId ?? 0) : null;

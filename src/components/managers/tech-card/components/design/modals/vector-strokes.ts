@@ -481,19 +481,213 @@ const WEIGHT_FRACTION: Record<StrokeWeight, number> = {
   bold: 0.01,
 };
 
-/** Per-stitch dash rhythm, in box-width fractions: [ink, gap]. Empty = solid. */
+/**
+ * Per-stitch dash rhythm, in scaleRef fractions: [ink, gap]. Empty = solid.
+ *
+ * ЗДЕСЬ ОСТАЛИСЬ ТОЛЬКО ШВЫ, ЧЬЯ ФОРМА — ДЕЙСТВИТЕЛЬНО РИТМ. Зигзаг, оверлок и потайной раньше
+ * тоже жили в этой таблице, и это была подмена: зигзаг рисовался мелким пунктиром, а не волной,
+ * и на экране был неотличим от потрёпанной прямой. Теперь их вид строится геометрией ниже
+ * (`wavePath` и родня), а пунктир несут челночная строчка и каверстич — у них верх шва и есть
+ * череда стежков-чёрточек вдоль прямой.
+ */
 const STITCH_DASH: Record<string, [number, number]> = {
   lock: [0.015, 0.008],
-  zigzag: [0.007, 0.007],
-  blind: [0.03, 0.012],
-  overlock: [0.012, 0.005],
+  cover: [0.015, 0.008],
 };
 
 /** A construction line's own rhythm — it outranks the stitch's, because it means «not sewn». */
 const CONSTRUCTION_DASH: [number, number] = [0.02, 0.015];
 
-const TWO_ROW: readonly string[] = ['double', 'cover', 'flatlock'];
-const ROW_GAP = 0.011;
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// ФОРМА ШВА — ГЕОМЕТРИЯ ВДОЛЬ ЛИНИИ, а не только ритм штриховки.
+//
+// До этой волны девять видов различались dasharray и второй копией пути со сдвигом по Y
+// (`translate(0, dy)`). Сдвиг по Y — не «параллельная строчка», а её проекция для строго
+// горизонтальной линии: на вертикальном шве обе копии ложились ДРУГ НА ДРУГА (вертикальная линия
+// коллинеарна своему вертикальному сдвигу), и двухигольный шов был неотличим от одинарного.
+// Поэтому вторые ряды, волна зигзага и гребёнка оверлока строятся здесь — вдоль самой линии, через
+// нормаль к касательной — и уезжают в ОДНУ строку `d` с M-разрывами. Контракт `StrokeGeometry` не
+// менялся: потребители по-прежнему рисуют `offsets` (теперь всегда `[0]`), и все четыре
+// поверхности обновились, не узнав об этом.
+//
+// Все размеры — доли scaleRef, как и веса: образец в пикере, сцена, экспорт и растр обязаны
+// показывать ОДНУ И ТУ ЖЕ волну, отличающуюся только масштабом.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Зигзаг 304: настоящая треугольная волна. */
+const ZIG = { wl: 0.03, amp: 0.011 };
+/** Закрепка: та же волна, но плотная и тяжёлая — брусок плотных стежков, а не линия. */
+const BART = { wl: 0.0055, amp: 0.007, widthK: 1.6 };
+/** Зазор между параллельными рядами двухигольного, каверстича и флэтлока. */
+const RAIL_GAP = 0.012;
+/** Внутренний зигзаг флэтлока — петлители между двумя рядами; амплитуда упирается в сами ряды. */
+const FLAT_ZIG_WL = 0.014;
+/** Оверлок 504: наклонная гребёнка через край — шаг зубца и его длина. */
+const OVER = { spacing: 0.016, tick: 0.02 };
+/** Потайной 103: длинный пропуск и короткий «укол» — почти прямая с редкими зубчиками. */
+const BLIND = { period: 0.055, dip: 0.014, amp: 0.009 };
+
+/** Та же квантизация, что и в strokeGeometry, — см. довод там про экспоненты в `d`. */
+const q2 = (n: number) => Math.round(n * 100) / 100;
+
+type WalkPoint = { x: number; y: number; tx: number; ty: number };
+
+/**
+ * Ломаная, параметризованная длиной дуги. `at(s)` отдаёт точку и ЕДИНИЧНУЮ касательную — нормаль
+ * к ней и есть направление, в котором волна и ряды отступают от линии.
+ *
+ * Курсор монотонный: генераторы семплят s по возрастанию, и повторный линейный скан с нуля на
+ * каждой пробе превращал бы штрих после флэттена кривых (до ~4k точек) в квадратичный проход.
+ * Пошедший назад s честно сбрасывает курсор, а не отдаёт мусор.
+ */
+function walkPolyline(poly: ShapePoint[]): { len: number; at: (s: number) => WalkPoint } {
+  const cum: number[] = [0];
+  for (let i = 1; i < poly.length; i++) {
+    cum.push(cum[i - 1] + Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y));
+  }
+  const len = cum[cum.length - 1] ?? 0;
+  let cursor = 1;
+  const at = (s: number): WalkPoint => {
+    const t = Math.min(len, Math.max(0, s));
+    if (cursor > 1 && t < cum[cursor - 1]) cursor = 1;
+    while (cursor < cum.length - 1 && cum[cursor] < t) cursor++;
+    const a = poly[cursor - 1];
+    const b = poly[cursor] ?? a;
+    const seg = (cum[cursor] ?? 0) - cum[cursor - 1];
+    const k = seg > 0 ? (t - cum[cursor - 1]) / seg : 0;
+    const tx = seg > 0 ? (b.x - a.x) / seg : 1;
+    const ty = seg > 0 ? (b.y - a.y) / seg : 0;
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, tx, ty };
+  };
+  return { len, at };
+}
+
+/**
+ * Треугольная волна вдоль ломаной. Полуволна ПОДГОНЯЕТСЯ под длину (целое число полуволн), чтобы
+ * волна кончалась НА конце линии, а не обрывалась на полпике, — так же машина доводит зигзаг до
+ * края детали. Короче полутора волн — пусто: вызывающий рисует обычную линию, потому что волна из
+ * одного пика читается как случайный излом, а не как шов.
+ */
+function wavePath(poly: ShapePoint[], wavelength: number, amp: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < wavelength * 1.5) return '';
+  const halves = Math.max(2, Math.round(w.len / (wavelength / 2)));
+  const step = w.len / halves;
+  const p0 = w.at(0);
+  let d = `M${q2(p0.x)},${q2(p0.y)}`;
+  for (let i = 1; i < halves; i++) {
+    const p = w.at(i * step);
+    const side = i % 2 === 1 ? 1 : -1;
+    d += ` L${q2(p.x - p.ty * amp * side)},${q2(p.y + p.tx * amp * side)}`;
+  }
+  const pn = w.at(w.len);
+  d += ` L${q2(pn.x)},${q2(pn.y)}`;
+  return d;
+}
+
+/**
+ * Ломаная, отнесённая на `off` по нормали. Нормаль вершины — среднее нормалей смежных отрезков:
+ * на прямой это точная параллель, на изломе — биссектриса без митр-взрыва (длина не компенсируется
+ * нарочно: ряды шва в остром углу чуть сходятся, как сходится и настоящая строчка).
+ */
+function offsetPoly(poly: ShapePoint[], off: number): ShapePoint[] {
+  const n = poly.length;
+  const out: ShapePoint[] = [];
+  for (let i = 0; i < n; i++) {
+    let nx = 0;
+    let ny = 0;
+    for (const [a, b] of [
+      [poly[i - 1], poly[i]],
+      [poly[i], poly[i + 1]],
+    ] as const) {
+      if (!a || !b) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const l = Math.hypot(dx, dy);
+      if (l === 0) continue;
+      nx += -dy / l;
+      ny += dx / l;
+    }
+    const l = Math.hypot(nx, ny) || 1;
+    out.push({ x: poly[i].x + (nx / l) * off, y: poly[i].y + (ny / l) * off });
+  }
+  return out;
+}
+
+function polyD(poly: ShapePoint[]): string {
+  if (poly.length < 2) return '';
+  return `M${poly.map((p) => `${q2(p.x)},${q2(p.y)}`).join(' L')}`;
+}
+
+/** Два параллельных ряда — двухигольный, каверстич, основа флэтлока. */
+function railsPath(poly: ShapePoint[], gap: number): string {
+  const a = polyD(offsetPoly(poly, gap / 2));
+  const b = polyD(offsetPoly(poly, -gap / 2));
+  return a && b ? `${a} ${b}` : '';
+}
+
+/** Наклонная гребёнка оверлока: зубцы под 60° к касательной, через край линии. */
+function tickPath(poly: ShapePoint[], spacing: number, tickLen: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < spacing * 2) return '';
+  const n = Math.max(2, Math.floor(w.len / spacing));
+  const step = w.len / n;
+  const half = tickLen / 2;
+  const c = Math.cos(Math.PI / 3);
+  const s = Math.sin(Math.PI / 3);
+  let d = '';
+  for (let i = 0; i <= n; i++) {
+    const p = w.at(Math.min(w.len, i * step));
+    const dx = p.tx * c - p.ty * s;
+    const dy = p.tx * s + p.ty * c;
+    d += `${d ? ' ' : ''}M${q2(p.x - dx * half)},${q2(p.y - dy * half)} L${q2(p.x + dx * half)},${q2(p.y + dy * half)}`;
+  }
+  return d;
+}
+
+/** Потайной: длинные пролёты по самой линии с коротким треугольным «уколом» в конце периода. */
+function blindPath(poly: ShapePoint[], period: number, dip: number, amp: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < period * 1.2) return '';
+  const n = Math.max(1, Math.round(w.len / period));
+  const step = w.len / n;
+  const p0 = w.at(0);
+  let d = `M${q2(p0.x)},${q2(p0.y)}`;
+  for (let i = 0; i < n; i++) {
+    const sEnd = (i + 1) * step;
+    const flat = w.at(sEnd - dip);
+    const mid = w.at(sEnd - dip / 2);
+    const end = w.at(Math.min(w.len, sEnd));
+    d += ` L${q2(flat.x)},${q2(flat.y)}`;
+    d += ` L${q2(mid.x - mid.ty * amp)},${q2(mid.y + mid.tx * amp)}`;
+    d += ` L${q2(end.x)},${q2(end.y)}`;
+  }
+  return d;
+}
+
+/**
+ * Ломаная штриха в единицах бокса, с флэттеном кубических сегментов, — вход фигурных швов.
+ * Тот же приём и тот же шаг, что у `strokePolyline` (см. довод у `FLATTEN_STEPS`): хорда
+ * шестнадцатой доли кубика уходит от кривой меньше чем на пиксель любого бокса, который здесь
+ * рисуется, так что волна, посаженная на флэттен, не отходит от видимой кривой.
+ */
+function flatPoly(pts: ShapePoint[], segs: (CubicSeg | null)[] | null): ShapePoint[] {
+  if (!segs) return pts;
+  const out: ShapePoint[] = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const seg = segs[i] ?? null;
+    if (!seg) {
+      out.push(b);
+      continue;
+    }
+    const c1 = { x: seg[0], y: seg[1] };
+    const c2 = { x: seg[2], y: seg[3] };
+    for (let k = 1; k <= FLATTEN_STEPS; k++) out.push(cubicAt(a, c1, c2, b, k / FLATTEN_STEPS));
+  }
+  return out;
+}
 
 export function strokeGeometry(
   stroke: VectorStroke,
@@ -502,11 +696,10 @@ export function strokeGeometry(
   /**
    * The width the WEIGHT is a fraction of, when that is not the box's own.
    *
-   * It differs in exactly one place and for a real reason: the stitch SAMPLE in the picker is a
-   * 44-unit strip, and a weight stated as 0.6 % of 44 units is a quarter of a pixel — i.e. the
-   * whole point of showing a sample disappears. The sample therefore asks for the weights of a
-   * normal 200-unit drawing inside its own small box. Everywhere else this is `w` and the line
-   * scales with the picture, which is what makes the editor, the download and the raster agree.
+   * Исторически это был костыль под образец 44 юнита шириной; сам пикер теперь рисует образцы в
+   * честном 200-юнитовом боксе и параметр не передаёт. Он оставлен, потому что контракт публичный
+   * и потому что довод не исчез: вес и ритм — свойство ЧЕРТЕЖА, а не коробки, в которую его
+   * вписали, и поверхность, рисующая штрих в чужом масштабе, обязана уметь об этом сказать.
    */
   scaleRef = w,
 ): StrokeGeometry {
@@ -516,27 +709,71 @@ export function strokeGeometry(
   // downloaded SVG with a few hundred points that is a threefold file for no drawn difference, and
   // it is the same species of waste the annotation layer was bitten by with exponent-bearing
   // coordinates. Two decimals of a box unit is a hundredth of a pixel on any box this draws into.
-  const q = (n: number) => Math.round(n * 100) / 100;
+  const q = q2;
   const pts: ShapePoint[] = stroke.pts.map(([x, y]) => ({ x: q(x * w), y: q(y * h) }));
   // ONE PATH, TWO GRAMMARS, AND THE STITCH DOES NOT KNOW WHICH. Everything below this line —
-  // weights, dash rhythms, the second row of a two-needle machine — is stated about the PATH and
-  // not about its segments, so all nine machine kinds behave on a cubic exactly as they do on a
-  // polyline. That is why the curve arrived here rather than being flattened before this point.
+  // weights, dash rhythms, the wave of a zigzag, the second row of a two-needle machine — is
+  // stated about the PATH and not about its segments, so all nine machine kinds behave on a cubic
+  // exactly as they do on a polyline. That is why the curve arrived here rather than being
+  // flattened before this point.
   const segs = hasSegments(stroke)
     ? stroke.segs.map((c) =>
         c ? ([q(c[0] * w), q(c[1] * h), q(c[2] * w), q(c[3] * h)] as CubicSeg) : null,
       )
     : null;
   const base = WEIGHT_FRACTION[stroke.weight] ?? WEIGHT_FRACTION.thin;
-  // A BARTACK IS A BAR, NOT A LINE. The machine lays a dense block of stitches over a few
-  // millimetres, so it is drawn as one short heavy segment rather than as a rhythm.
-  const strokeWidth = (stroke.brush === 'bartack' ? base * 2.4 : base) * scaleRef;
+  const plainD = () => (segs ? curvePath(pts, segs) : inkPath(pts));
+
+  // Фигурные швы строятся по флэттену; гладкие (plain, lock) держат точный `C`-путь. Пустая
+  // строка от генератора означает «линия короче одной внятной фигуры» — тогда шов честно
+  // рисуется прямой, а не половиной пика, которую глаз прочтёт как дрогнувшую руку.
+  let d = '';
+  let widthK = 1;
+  switch (stroke.brush) {
+    case 'zigzag':
+      d = wavePath(flatPoly(pts, segs), ZIG.wl * scaleRef, ZIG.amp * scaleRef);
+      break;
+    case 'bartack': {
+      // Закрепка — брусок плотных стежков. Плотная волна даёт ему фактуру; отрезок короче
+      // полутора волн остаётся прежним жирным штрихом (старый вид, прежний коэффициент).
+      d = wavePath(flatPoly(pts, segs), BART.wl * scaleRef, BART.amp * scaleRef);
+      widthK = d ? BART.widthK : 2.4;
+      break;
+    }
+    case 'double':
+    case 'cover':
+      d = railsPath(flatPoly(pts, segs), RAIL_GAP * scaleRef);
+      break;
+    case 'flatlock': {
+      const flat = flatPoly(pts, segs);
+      const rails = railsPath(flat, RAIL_GAP * scaleRef);
+      const inner = wavePath(flat, FLAT_ZIG_WL * scaleRef, (RAIL_GAP / 2) * scaleRef);
+      d = rails && inner ? `${rails} ${inner}` : rails;
+      break;
+    }
+    case 'overlock': {
+      const ticks = tickPath(flatPoly(pts, segs), OVER.spacing * scaleRef, OVER.tick * scaleRef);
+      const rail = plainD();
+      d = ticks && rail ? `${rail} ${ticks}` : rail;
+      break;
+    }
+    case 'blind':
+      d = blindPath(flatPoly(pts, segs), BLIND.period * scaleRef, BLIND.dip * scaleRef, BLIND.amp * scaleRef);
+      break;
+    default:
+      break;
+  }
+  if (!d) d = plainD();
+
   const rhythm = stroke.dashed ? CONSTRUCTION_DASH : STITCH_DASH[stroke.brush];
   return {
-    d: segs ? curvePath(pts, segs) : inkPath(pts),
-    strokeWidth,
+    d,
+    strokeWidth: base * widthK * scaleRef,
     dash: rhythm ? `${(rhythm[0] * scaleRef).toFixed(2)} ${(rhythm[1] * scaleRef).toFixed(2)}` : '',
-    offsets: TWO_ROW.includes(stroke.brush) ? [0, ROW_GAP * scaleRef] : [0],
+    // ВСЕГДА [0]: вторые ряды теперь лежат в самом `d`, вдоль линии, а не копией со сдвигом по Y.
+    // Поле живёт, чтобы ни одному из четырёх потребителей не пришлось меняться вместе с этим
+    // модулем, — их цикл по offsets исполняется ровно один раз.
+    offsets: [0],
   };
 }
 

@@ -150,6 +150,7 @@ export function SplitModal({
   handle,
   open,
   onOpenChange,
+  onSplit,
 }: {
   techCardId: number;
   picture: common_DesignPicture;
@@ -157,6 +158,13 @@ export function SplitModal({
   handle?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Кропы удавшегося разреза — вызывающему. Полоса и так перечитается (`invalidate` в шве
+   * записи), но вызывающему сплита «во вход» нужны САМИ кропы с их `ghost_view`, чтобы завести
+   * строки входа и роли: из перечитанной полосы их не выделить — там не написано, который разрез
+   * их родил. Не задан — поведение прежнее: модалка закрылась, полоса перечиталась.
+   */
+  onSplit?: (pictures: common_DesignPicture[]) => void;
 }) {
   const { splitPicture } = useDesignWrites(techCardId);
   const compositeViews = useMemo(
@@ -290,9 +298,12 @@ export function SplitModal({
         frames: frames.map(toWireFrame),
       },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
           requestIdRef.current = '';
           onOpenChange(false);
+          // ПОСЛЕ закрытия, не до: колбэк заводит строки и роли, его снекбар и возможные отказы
+          // ролей должны падать на экран, а не под ещё открытую модалку.
+          onSplit?.(data.pictures ?? []);
         },
       },
     );

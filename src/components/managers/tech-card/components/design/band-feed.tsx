@@ -42,7 +42,7 @@ import {
   type HideBlockReason,
   type HideGuard,
 } from './visibility';
-import { viewLabel } from './views';
+import { normaliseViewKey, viewLabel } from './views';
 
 /**
  * THE FEED — rows of pictures, and the one place the band is looked at rather than assembled.
@@ -199,6 +199,7 @@ export function PictureTile({
   onZoom,
   onHide,
   onSplit,
+  onToPrompt,
 }: {
   band: GetDesignBandResponse;
   picture: common_DesignPicture;
@@ -208,6 +209,7 @@ export function PictureTile({
   onZoom: () => void;
   onHide: (pictureId: number, hidden: boolean) => void;
   onSplit: (picture: common_DesignPicture) => void;
+  onToPrompt?: (mediaId: number, role: string) => void;
 }) {
   const pick = usePickMode();
   const hidden = isPictureHidden(picture);
@@ -233,10 +235,34 @@ export function PictureTile({
   const mayHide = !disabled && canOfferHide(picture, guard);
   const mixed = mixedInputNote(provenance);
 
+  /**
+   * КРОП → В ПРОМПТ (R-11). Членство читается по band.references — той же строке, которой промпт
+   * и собирается на сервере; вторая, своя запись о «в промпте» разошлась бы с первой на первом же
+   * снятии роли в референсах.
+   *
+   * Глагол предлагается ТОЛЬКО кропу (derived_from > 0) с объявленным видом: роль — это и есть
+   * вид кадра (словарь один, IsDesignGhostView на сервере проверяет оба), а кроп БЕЗ вида роли не
+   * получает — выдумать её здесь значило бы соврать модели о стороне изделия. Снятие роли живёт в
+   * референсах (кроп встаёт там строкой), поэтому у плитки один глагол, а не пара.
+   */
+  const mediaId = picture.media?.id ?? 0;
+  const promptRole = (
+    (band.references ?? []).find((r) => (r.mediaId ?? 0) === mediaId && (r.role ?? '').trim())
+      ?.role ?? ''
+  ).trim();
+  const cropView = (picture.derivedFrom ?? 0) > 0 ? normaliseViewKey(picture.ghostView) : '';
+  const mayPrompt =
+    !disabled && !hidden && !promptRole && !!onToPrompt && mediaId > 0 && !!cropView;
+
   const thumb = thumbOf(picture.media);
   const media = (
     <div
-      className={cn('relative w-full bg-bgSecondary', hidden && 'opacity-40')}
+      // МАТ БЕЛЫЙ (bg-bgColor), НЕ СЕРЫЙ (R-12). Кадр плитки навязан 4:5 c object-contain, и всё,
+      // что не покрыто снимком, — это мат; серый bg-bgSecondary делал «белый фон стал серым» на
+      // каждом кропе не-4:5, а у PNG с честной прозрачностью просвечивал СКВОЗЬ картинку. Байты
+      // кропа попиксельно верны (сервер режет SubImage и не композитит) — чинится только экран,
+      // тем же белым, на котором кроп стоял в сплит-модалке и стоит у референсов.
+      className={cn('relative w-full bg-bgColor', hidden && 'opacity-40')}
       style={{ aspectRatio: '4 / 5' }}
     >
       {thumb ? (
@@ -318,6 +344,28 @@ export function PictureTile({
             {composite ? splitVerb(facts) : 'split ▸'}
           </TileAction>
         )}
+        {/* Прямой глагол кропа (R-11): без него результат сплита некуда было выбрать вовсе.
+            Уже стоящий в промпте кроп называет своё членство СЛОВАМИ, а не прячет кнопку молча —
+            иначе пропавший глагол неотличим от сломанного. */}
+        {mayPrompt && (
+          <TileAction
+            onClick={() => onToPrompt?.(mediaId, cropView)}
+            label={`add this crop to the prompt as ${viewLabel(cropView)}`}
+          >
+            → prompt
+          </TileAction>
+        )}
+        {promptRole && (
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            title='this picture already feeds the prompt — its role is managed in the references block'
+            className='truncate'
+          >
+            in prompt · {viewLabel(promptRole)}
+          </Text>
+        )}
         {hidden ? (
           !disabled && <TileAction onClick={() => onHide(pictureId, false)}>unhide</TileAction>
         ) : mayHide ? (
@@ -396,7 +444,7 @@ export function FeedRows({
   disabled?: boolean;
 }) {
   const speaks = serverSpeaksDesign();
-  const { hidePicture } = useDesignWrites(techCardId);
+  const { hidePicture, setReferenceRole } = useDesignWrites(techCardId);
   const guard = useMemo(() => buildHideGuard(band), [band]);
 
   /** Transient, one row at a time, and never consulted by a picker. */
@@ -415,6 +463,22 @@ export function FeedRows({
       hidePicture.mutate({ pictureId, hidden });
     },
     [hidePicture, writesOff],
+  );
+
+  /**
+   * КРОП → В ПРОМПТ: тот же upsert SetDesignReferenceRole, которым роль ставят референсы, — второй
+   * глагол для той же строки был бы вторым писателем. `ordinal` — хвост за максимальным из уже
+   * стоящих: промпт читается ORDER BY ordinal, и кроп с ordinal 0 пролез бы ВПЕРЁД референсов,
+   * чей порядок назначил человек. `note: ''` — строка новорождённая (глагол не предлагается
+   * стоящим в промпте), стирать на ней нечего.
+   */
+  const onToPrompt = useCallback(
+    (mediaId: number, role: string) => {
+      if (writesOff) return;
+      const ordinal = (band.references ?? []).reduce((n, r) => Math.max(n, r.ordinal ?? 0), 0) + 1;
+      setReferenceRole.mutate({ mediaId, role, ordinal, note: '' });
+    },
+    [band.references, setReferenceRole, writesOff],
   );
 
   const openZoom = useCallback(
@@ -468,6 +532,7 @@ export function FeedRows({
                     disabled={writesOff}
                     onZoom={() => openZoom(shown, picture)}
                     onHide={onHide}
+                    onToPrompt={onToPrompt}
                     onSplit={(p) =>
                       setSplitting({
                         picture: p,
