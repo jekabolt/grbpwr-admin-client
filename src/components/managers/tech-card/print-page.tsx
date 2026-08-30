@@ -42,6 +42,12 @@ export function TechCardPrint() {
   // внутренний тех-пак обо всём сразу остаётся валидным документом.
   const [searchParams] = useSearchParams();
   const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
+  // `?sheet=N` приходит от кнопки печати версии в ARTIFACTS (`design/sheet-journal.tsx`). Здесь он
+  // пока только ЧИТАЕТСЯ — чтобы бумага могла сказать, что версией она не является.
+  const sheetVersion = ((): number | null => {
+    const raw = parseInt(searchParams.get('sheet') ?? '', 10);
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  })();
   // useTechCardPrint, not useTechCard: печать also needs the response-level pattern_viewer_token
   // (the per-scope QR codes of the patterns section), which the editor's hook deliberately drops.
   const { data: printData, isLoading, isError } = useTechCardPrint(numId);
@@ -195,6 +201,21 @@ export function TechCardPrint() {
           <div className='px-8 pt-6'>
             <PrintDegradedNotice items={degraded} />
           </div>
+          {/* ПЕЧАТЬ ПОЗВАЛИ ЗА ВЕРСИЮ, А ЛИСТ ЕЁ ПОКА НЕ УМЕЕТ — и бумага обязана сказать это сама.
+              `?sheet=N` означает «разложи состав плит версии N»; вёрстка по замороженному составу
+              ещё не написана, поэтому здесь печатается ТЕКУЩИЙ документ карточки. Промолчать было
+              бы худшим из доступных отказов: в цех уходит лист, на котором написан номер версии, а
+              нарисовано что-то другое, и разойтись они могут спустя недели. Плашка снимется тем же
+              коммитом, которым лист научится читать замороженный состав. */}
+          {sheetVersion ? (
+            <div className='px-8'>
+              <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
+                asked for sheet v{sheetVersion} — printed from the card as it stands now, not from
+                the frozen composition of v{sheetVersion}. check the studio before this goes to the
+                floor.
+              </p>
+            </div>
+          ) : null}
           {scope?.colorwayMissing || scope?.runMissing ? (
             <div className='px-8'>
               <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
