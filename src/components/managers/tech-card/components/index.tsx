@@ -1,7 +1,19 @@
+              {/* «concept & construction description» ПЕРЕЕХАЛ В STUDIO ЦЕЛИКОМ.
+                  Он ушёл туда не ради симметрии с прототипом, а потому что там из выносок карточки
+                  выводятся строки описания — то есть там единственное место, где пометка на эскизе
+                  превращается в текст для фабрики. Держать здесь второй набор тех же полей значило
+                  бы два `register` на одно имя формы: значение одно, а на экране два поля, из
+                  которых одно молча отстаёт. Редактор аспектов уехал вместе с ними и передаётся
+                  в студию узлом — печатный порядок concept → aspects → notes сохранён. */}
+
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_AdminColorwayRef, common_TechCard } from 'api/proto-http/admin';
+import {
+  common_AdminColorwayRef,
+  common_TechCard,
+  common_TechCardInsert,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   techCardKeys,
@@ -87,6 +99,10 @@ import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
 import { RolesField } from './roles-field';
 import { useEditHistory } from 'ui/components/annotation/history';
+import { DesignSaveHostProvider } from './design/mint-dialog';
+import { gateTechCardPayload, isDesignOnlyMediaKind } from './design/payload-gate';
+import { useDesignBand } from './design/use-design-band';
+import { ArtifactsTab, StudioTab } from './design/studio-tab';
 import { SketchTab } from './sketch-tab';
 import {
   TechCardFormData,
@@ -321,6 +337,34 @@ export function TechCardForm({
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  // Одно чтение полосы на страницу: студия и артефакты читают тот же ключ React Query, поэтому
+  // лишнего запроса здесь не появляется — только ответ на вопрос «можно ли слать поля полосы».
+  const { serverSpeaks: bandAnswered } = useDesignBand(
+    id ? parseInt(id, 10) || undefined : undefined,
+  );
+  // И ЕЩЁ ОДИН СВИДЕТЕЛЬ, БЕЗ КОТОРОГО ГЕЙТ ТЕРЯЕТ ДАННЫЕ В ОКНЕ ЗАГРУЗКИ.
+  //
+  // `serverSpeaks` ложен, пока чтение полосы ещё идёт. Сохранение в это окно прошло бы через ветку
+  // «сервер не знает полосу», а она не только снимает `mood_note` — она СВОРАЧИВАЕТ новые виды
+  // медиа к старым. То есть живая карточка на бете, сохранённая через две секунды после открытия,
+  // потеряла бы вид своих картинок молча.
+  //
+  // Ответ берётся не из тайминга, а из самой карточки: если сервер уже отдал нам поле полосы, этот
+  // сервер про полосу знает — свидетельство, а не догадка. Карточке без единого такого факта
+  // терять нечего, и для неё окно загрузки безвредно.
+  const cardCarriesDesignFacts = useMemo(() => {
+    // Читается через ту же форму записи, что и `mapTechCardToForm`: на проводе оба списка живут
+    // на `TechCardInsert`, а прочитанная карточка отдаётся той же формой. Каст здесь — тот же
+    // приём, которым `splitSketchMedia` достаёт легаси-список.
+    const tc = techCard?.techCard as
+      | (common_TechCardInsert & { moodNote?: string })
+      | undefined;
+    if (!tc) return false;
+    if ((tc.moodNote ?? '').trim()) return true;
+    const media = [...(tc.moodboardMedia ?? []), ...(tc.technicalMedia ?? [])];
+    return media.some((m) => isDesignOnlyMediaKind(m?.kind));
+  }, [techCard]);
+  const designBandSpeaks = bandAnswered || cardCarriesDesignFacts;
   const queryClient = useQueryClient();
   // Sub-panels stage their mutation here instead of firing it; the header's one save commits the
   // card body and then this queue (phase 19).
@@ -919,7 +963,19 @@ export function TechCardForm({
     // иначе «карточка не сохранена» продолжало бы стоять над уже сохранённой карточкой.
     setVersionSkew(null);
     setPresenceLoss(null);
-    const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
+    // ГЕЙТ ВОЗМОЖНОСТЕЙ СТОИТ МЕЖДУ СБОРЩИКОМ И ПРОВОДОМ, и он здесь не ради полосы DESIGN, а ради
+    // ВСЕХ тех-карт. Гейтвей собран с `DiscardUnknown: false` (`internal/api/http/http.go`), поэтому
+    // незнакомое поле от нового бандла — это 400 на ВЕСЬ документ, а не деградация одной вкладки:
+    // админы перестали бы сохранять любые карточки разом. Гейт снимает поля полосы ровно тогда,
+    // когда сервер про неё не знает, и «отсутствие» на этих полях означает «сохрани хранимое».
+    //
+    // Ответ берётся из чтения полосы этой же карточки: `serverSpeaks` ложен и пока чтение идёт, и
+    // если оно провалилось. Направление отказа выбрано в эту сторону сознательно — цена ошибки
+    // «не сохранили записку мудборда» несравнима с ценой «не сохранили ни одной карточки».
+    const { payload: techCardInsert } = gateTechCardPayload(
+      mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting),
+      { serverSpeaksDesign: designBandSpeaks },
+    );
     let bodySaved = false;
     try {
       if (isEditMode) {
@@ -2059,48 +2115,74 @@ export function TechCardForm({
                 `callouts` field array and writes into it past append/remove, and a second writer of
                 the same array does not synchronise with the first, it loses rows silently. Whatever
                 lands here inherits that array; it does not open a second door onto it. */}
-            <SectionStack hidden={activeTab !== 'studio'}>
-              <Section title='studio' question='— what this style looks like, before it is frozen'>
-                <Text variant='inactive' size='small'>
-                  Empty on purpose. The moodboard, the references and the flats move in here piece
-                  by piece; until they do, this tab is a placeholder and holds nothing of yours.
-                </Text>
-              </Section>
-            </SectionStack>
+            {/* STUDIO — the DESIGN band.
 
-            {/* ARTIFACTS — same, for what the studio has been frozen into. */}
-            <SectionStack hidden={activeTab !== 'artifacts'}>
-              <Section
-                title='artifacts'
-                question='— the sheet the factory prints, and every version of it'
+                MOUNTED CONDITIONALLY, and that is the whole safety argument of this wave. The old
+                SketchTab writes into the root of the `callouts` array past append/remove, and two
+                writers of one field array do not synchronise — the second loses the first's rows
+                silently. `hidden` does not unmount, so the sibling tabs below would have been
+                co-mounted writers for the entire session. Mounting on the active tab makes «never
+                two writers» true by construction instead of by discipline.
+
+                Unmounting costs nothing here: this form does not set `shouldUnregister`, so leaving
+                a tab keeps its values in the form. */}
+            {activeTab === 'studio' && (
+              <DesignSaveHostProvider
+                settle={withServerAssignedValues}
+                expectedLockVersion={lockOverride.current ?? techCard?.lockVersion ?? 0}
+                canWriteCosting={canWriteCosting}
               >
-                <Text variant='inactive' size='small'>
-                  Empty on purpose. Nothing is minted yet — the sheet, its versions and its issue
-                  journal move in here piece by piece.
-                </Text>
-              </Section>
-            </SectionStack>
+                <StudioTab
+                  techCardId={numId}
+                  disabled={frozen}
+                  constructionAspects={<DetailsEditor techCard={techCard} />}
+                />
+              </DesignSaveHostProvider>
+            )}
 
-            {/* SKETCH — off the rail, still mounted: see TABS. */}
-            <div hidden={activeTab !== 'sketch'}>
+            {/* ARTIFACTS — what the studio has been frozen into. Same conditional mount, same
+                reason: it edits the sheet's callouts, which are the same array. */}
+            {/* THE SAVE HOST IS NOT OPTIONAL HERE. Minting a sheet version writes the DOCUMENT in the
+                same transaction, so it must settle through this page's own `withServerAssignedValues`
+                — the closure over this form and its staging queue, which cannot be imported. Without
+                it the mint refuses in words rather than minting unsettled: a blank `signedDigest`
+                left in form state MEANS «approve now», so an unsettled mint would silently
+                re-approve every sign-off on the next save. */}
+            {activeTab === 'artifacts' && (
+              <DesignSaveHostProvider
+                settle={withServerAssignedValues}
+                expectedLockVersion={lockOverride.current ?? techCard?.lockVersion ?? 0}
+                canWriteCosting={canWriteCosting}
+              >
+                <ArtifactsTab techCardId={numId} disabled={frozen} />
+              </DesignSaveHostProvider>
+            )}
+
+            {/* SKETCH and MOODBOARD — off the rail (FOLDED_TABS sends both to STUDIO) and now
+                mounted only when their own tab is somehow active, e.g. a bookmarked ?tab= that
+                predates the fold. Conditional, not `hidden`: co-mounting either of these with
+                STUDIO would put two writers on the `callouts` array, which is the one failure this
+                wave must not ship. They are kept, not deleted, so that a card whose sketch the
+                studio does not yet cover is still reachable by URL rather than lost. */}
+            {activeTab === 'sketch' && (
               <SketchTab
                 techCard={techCard}
                 view='sketch'
-                active={activeTab === 'sketch'}
+                active={true}
                 frozen={frozen}
                 calloutHistory={calloutHistory}
               />
-            </div>
+            )}
 
-            <div hidden={activeTab !== 'moodboard'}>
+            {activeTab === 'moodboard' && (
               <SketchTab
                 techCard={techCard}
                 view='moodboard'
-                active={activeTab === 'moodboard'}
+                active={true}
                 frozen={frozen}
                 calloutHistory={calloutHistory}
               />
-            </div>
+            )}
 
             {/* PATTERNS (size range + DXF выкройки по материалам) */}
             <SectionStack hidden={activeTab !== 'patterns'}>

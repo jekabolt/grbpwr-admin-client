@@ -63,12 +63,26 @@ export default function SelectComponent({
   // принадлежит контракту списка, а не одной из двух его обёрток.
   const offersEmptyOption = items.some((item) => String(item.value) === '');
 
+  // ПУСТОЕ ЗНАЧЕНИЕ ПУНКТА РОНЯЛО ВСЮ СТРАНИЦУ, а не только список.
+  //
+  // Radix кидает исключение на `<Select.Item value="">` (пустая строка зарезервирована за «снять
+  // выбор»), а поверх вкладки нет границы ошибок — поэтому один такой пункт уносил весь экран в
+  // белое, и `tsc` при этом был зелёный. За одну ночь это случилось дважды в новом коде, поэтому
+  // правило живёт ЗДЕСЬ: примитив уже разрешал пустой пункт (`offersEmptyOption` выше), а
+  // отрисовать его не умел — то есть контракт списка сам себе противоречил.
+  //
+  // Пустое значение едет вниз подстановкой и переводится обратно на выходе. Наружу примитив
+  // по-прежнему говорит `''` — вызывающая сторона о подстановке не знает и знать не должна.
+  const EMPTY_SENTINEL = '\u0000none';
+  const outward = (value: string) => (value === EMPTY_SENTINEL ? '' : value);
+
   return (
     <Select.Root
       {...props}
       onValueChange={(value: string) => {
-        if (value === '' && !offersEmptyOption) return;
-        onValueChange?.(value);
+        const v = outward(value);
+        if (v === '' && !offersEmptyOption) return;
+        onValueChange?.(v);
       }}
       open={open}
       onOpenChange={(open) => !readOnly && setOpen(open)}
@@ -87,7 +101,11 @@ export default function SelectComponent({
       </SelectTrigger>
       <SelectContent fullWidth={fullWidth} customWidth={customWidth}>
         {items.map((item) => (
-          <SelectItem key={item.value} value={String(item.value)} disabled={item.disabled}>
+          <SelectItem
+            key={item.value}
+            value={String(item.value) === '' ? EMPTY_SENTINEL : String(item.value)}
+            disabled={item.disabled}
+          >
             {item.label}
           </SelectItem>
         ))}
