@@ -17,6 +17,7 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { TechCardFormData } from '../schema';
+import { MoodDraft } from './head/mood-draft';
 import { useMoodCallouts } from './mood-callouts';
 import { useDesignWrites } from './use-design-band';
 
@@ -101,20 +102,6 @@ export function appendBoardPictures(input: {
         : null,
   };
 }
-
-/** Слепок доски, по которому черновик понимает, что он протух. */
-type MoodDraft = {
-  lines: string[];
-  readPictures: number;
-  readCallouts: number;
-  time: string;
-  fingerprint: string;
-};
-
-const hhmm = () =>
-  new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
-    new Date(),
-  );
 
 export function MoodBoard({
   techCardId,
@@ -231,43 +218,6 @@ export function MoodBoard({
   }
 
   // ── черновик идеи ───────────────────────────────────────────────────────────────────────────
-  //
-  // ЧИТАТЕЛЬ ЧИТАЕТ ТО, ЧТО ЧЕЛОВЕК ПИСАЛ РУКАМИ (Г1). До этой правки черновик собирался из имён
-  // плиток и общей записки, а тексты указаний — самое ценное, что есть на доске, — не читал никто:
-  // дизайнер размечал мудборд и получал черновик, в котором его слов нет.
-  const fingerprint = JSON.stringify([
-    items.map((i) => i.mediaId),
-    (moodNote.field.value ?? '').trim(),
-    callouts.texts(),
-  ]);
-  const [draft, setDraft] = useState<MoodDraft | null>(null);
-  const [taken, setTaken] = useState<string[]>([]);
-  const stale = !!draft && draft.fingerprint !== fingerprint;
-
-  function readTheBoard() {
-    const texts = callouts.texts();
-    const note = (moodNote.field.value ?? '').trim();
-    const lines = [
-      `The mood is set by ${items.length} picture${items.length === 1 ? '' : 's'}.`,
-      ...(note ? [note] : []),
-      ...texts,
-    ];
-    setDraft({
-      lines,
-      readPictures: items.length,
-      readCallouts: texts.length,
-      time: hhmm(),
-      fingerprint,
-    });
-    setTaken([]);
-  }
-
-  function addLineToConcept(line: string) {
-    const current = (getValues('concept') ?? '').trim();
-    setValue('concept', current ? `${current}\n${line}` : line, { shouldDirty: true });
-    setTaken((prev) => [...prev, line]);
-  }
-
   const readOnly = !!disabled;
 
   return (
@@ -383,66 +333,12 @@ export function MoodBoard({
         </Text>
       </div>
 
-      {/* ЧЕРНОВИК ИДЕИ. Собирается ЗДЕСЬ, из того, что лежит на доске, — и подпись это говорит:
-          прозу пишет модель, а генеративная машина в эту волну отрезана, и обещать её словами
-          кнопки значило бы обещать то, чего нет. Ценность и без модели настоящая: тексты указаний
-          иначе не собраны нигде, а именно из-за них черновик и заводился. */}
-      <div>
-        <GroupLabel>draft of the idea</GroupLabel>
-        <div className='flex flex-wrap items-baseline gap-2'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='sm'
-            disabled={readOnly || items.length === 0}
-            onClick={readTheBoard}
-          >
-            read the board ▸
-          </Button>
-          <Text size='micro' variant='label' component='span'>
-            reads the pictures, the shared note and every note pinned on them. Nothing is written
-            until you add a line.
-          </Text>
-        </div>
-
-        {draft && (
-          <div className='mt-2 space-y-1'>
-            <div className='flex flex-wrap items-baseline gap-2'>
-              <Text size='micro' variant='label' component='span'>
-                read {draft.readPictures} picture{draft.readPictures === 1 ? '' : 's'} ·{' '}
-                {draft.readCallouts} note{draft.readCallouts === 1 ? '' : 's'} · {draft.time}
-              </Text>
-              {/* СТЕЙЛ СРАВНИВАЕТ И УКАЗАНИЯ. Слепок из «числа плиток + общей записки» молчал ровно
-                  тогда, когда человек работал руками: дописал пометку — черновик по-прежнему
-                  «свежий», хотя читал он другую доску. */}
-              {stale && <Pill tone='attention'>the moodboard has changed since</Pill>}
-            </div>
-            {draft.lines.map((line, i) => (
-              <div
-                key={`${i}:${line}`}
-                className='flex items-start gap-2 border-b border-hairline py-1'
-              >
-                <Text size='micro' component='span' className='min-w-0 flex-1'>
-                  {line}
-                </Text>
-                <ChipRow>
-                  {taken.includes(line) ? (
-                    <Pill tone='ok'>added</Pill>
-                  ) : (
-                    <Chip
-                      disabled={readOnly}
-                      onClick={() => addLineToConcept(line)}
-                      title='append this line to the card’s concept'
-                    >
-                      add to concept
-                    </Chip>
-                  )}
-                </ChipRow>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* ЧЕРНОВИК ИДЕИ — `moodDraftHtml` прототипа, который зовёт его ПОСЛЕДНИМ внутри доски
+          (`proto.html:3271`), поэтому и здесь он стоит внизу этой же секции.
+          Здесь стоял черновик, собиравшийся В БРАУЗЕРЕ: он склеивал общую записку с текстами
+          указаний и называл это «read the board». Слова были честные, но органом прототипа это не
+          было — тот просит прозу у модели. Бэкенд отдаёт `DraftDesignIdea`, и теперь зовётся он. */}
+      <MoodDraft techCardId={techCardId} disabled={readOnly} />
 
       <ConfirmationModal
         open={pendingRemove != null}

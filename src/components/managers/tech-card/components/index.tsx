@@ -136,7 +136,6 @@ import { StagedChangesChip } from './staged-changes-chip';
 import { useTechCardStagingRequired } from './useTechCardStaging';
 
 const TABS = [
-  { id: 'header', label: 'header' },
   { id: 'studio', label: 'studio' },
   { id: 'artifacts', label: 'artifacts' },
   // `sketch` И `moodboard` УДАЛЕНЫ ОТСЮДА ЦЕЛИКОМ, а не оставлены «на всякий случай».
@@ -162,13 +161,6 @@ type TabId = (typeof TABS)[number]['id'];
 // Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  // HEADER СТОИТ ВНЕ ПОЛОС, как HISTORY на другом конце рейла. Он не фаза работы — он то, ЧЕМ
-  // карточка является (номер стиля, имя, посадка, стадия), и это верно на каждой фазе. Прототип не
-  // даёт ему вкладки вовсе: он рисует эту личность хромом над рейлом (`40-organs.js`, строка `r1`
-  // в `frameHtml`). Здесь он остаётся вкладкой, потому что несёт много больше, чем показывает
-  // хром, — но внутри полосы жизненного цикла он читался как ПЕРВЫЙ ШАГ дизайна, которым не
-  // является.
-  { band: '', tabs: ['header'] },
   // В DESIGN РОВНО ДВЕ ВКЛАДКИ, и это рейл самого прототипа (`40-organs.js`, константа `RAIL`:
   // `{ band: 'design', tabs: [['studio', 1], ['artifacts', 1]] }`). STUDIO — где на стиль смотрят:
   // доска настроения, референсы, эскизы, верстак. ARTIFACTS — во что эта работа заморожена. Вдвоём
@@ -234,6 +226,8 @@ const FOLDED_TABS: Record<string, TabId> = {
   // Свернуть раньше, чем закрыт хоть один из трёх, значило бы выдать потерю за переезд.
   moodboard: 'studio',
   sketch: 'studio',
+  // `header` тоже свёрнут: его блоки стали шапкой студии, как в прототипе.
+  header: 'studio',
 };
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
@@ -256,7 +250,7 @@ const ERROR_TAB: Record<string, TabId> = {
   // anywhere else raises a toast naming a field nobody can see.
   pieces: 'patterns',
   pieceDxfAliases: 'patterns',
-  details: 'header',
+  details: 'studio',
   construction: 'construction',
   // A CARD-level field (it deliberately does not live inside `construction` — see schema.ts), but it
   // RENDERS on the construction tab next to the free-text seam-allowance note it disambiguates.
@@ -281,7 +275,7 @@ const ERROR_TAB: Record<string, TabId> = {
 // either of them, so the map is unchanged. Recorded rather than left implicit — the next tab move
 // has to walk this map too, and «nothing to do» is only worth knowing if someone checked.
 const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
-  style_number: 'header',
+  style_number: 'studio',
   size_range: 'patterns',
   bom_fabric: 'bom',
   bom_linked: 'bom',
@@ -443,7 +437,7 @@ export function TechCardForm({
   // colorways, which an aux card does not have, and that needed a per-card rewrite here. Since the
   // cut-piece table moved to PATTERNS the alias is unconditional.
   const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
-  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
+  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'studio';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
       (prev) => {
@@ -612,14 +606,14 @@ export function TechCardForm({
     .map((r) => ({
       label: r.label ?? 'a release requirement is unmet',
       detail: r.detail,
-      tab: RELEASE_BLOCKER_TAB[r.key ?? ''] ?? 'header',
+      tab: RELEASE_BLOCKER_TAB[r.key ?? ''] ?? 'studio',
     }));
   // The two facts no readiness row answers: the stage is a live form value the server has not been
   // handed yet, and issues are not part of the readiness facts at all.
   if (isIdea)
     releaseBlockers.push({
       label: 'advance the stage (an IDEA draft can’t be released)',
-      tab: 'header',
+      tab: 'studio',
     });
   if (openIssues > 0)
     releaseBlockers.push({
@@ -721,12 +715,18 @@ export function TechCardForm({
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
-    header: !!name?.trim() && (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()),
+
     // STUDIO holds both grids now, so it is ticked by either: a card with a moodboard and no flat
     // has started the work this tab is for. ARTIFACTS is deliberately left UNSET rather than
     // `false` — nothing is minted yet in this wave, and claiming an outstanding section that
     // cannot be filled would peg every card below done for no reason a human could act on.
-    studio: len(technicalMedia) > 0 || len(moodboardMedia) > 0,
+    // ЛИЧНОСТЬ КАРТОЧКИ И ЕЁ КАРТИНКИ — ОДНА ГАЛОЧКА, потому что теперь это одна вкладка.
+    // Прежде их было две: `header` тикался по имени и номеру стиля, `studio` — по любой картинке.
+    // Слить их через ИЛИ значило бы объявить вкладку заполненной по половине её содержимого.
+    studio:
+      !!name?.trim() &&
+      (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()) &&
+      (len(technicalMedia) > 0 || len(moodboardMedia) > 0),
     // A size range alone stopped answering for this tab. The выкройки panel below it files DXF
     // sheets BY MATERIAL and names every fabric line with no sheet as a hole, so a card carrying a
     // full size range and not one pattern was ticked done while the tab itself said otherwise.
@@ -760,7 +760,7 @@ export function TechCardForm({
   // which has no colourways), and that special case died with the move of the cut-piece table onto
   // PATTERNS — a tab every card has. Nothing in ERROR_TAB points at `colorways` any more, which is
   // what lets isTabVisible hide it for an aux card with no error escape.
-  const errorTabFor = (rootKey: string): TabId => ERROR_TAB[rootKey] ?? 'header';
+  const errorTabFor = (rootKey: string): TabId => ERROR_TAB[rootKey] ?? 'studio';
 
   // Full dotted paths, not root keys: `bomItems.3.name` used to collapse to `bomItems`, so the rail
   // could only ever say "something on the BOM tab is wrong" and the count was always 1 per tab.
@@ -775,7 +775,7 @@ export function TechCardForm({
   // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
   // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
   // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
-  const IDEA_TABS: TabId[] = ['header', 'studio', 'artifacts', 'samples', 'history'];
+  const IDEA_TABS: TabId[] = ['studio', 'artifacts', 'samples', 'history'];
   // Costing is field-shaped: hidden entirely without costing:read (server nulls the cost block; an
   // empty tab would read as "zero cost"). R&D dev-expenses now live as a section inside it. Samples
   // need a saved card (id).
@@ -808,12 +808,12 @@ export function TechCardForm({
   // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
   // resolving and taking the costing tab away), fall back to header so the body isn't blank.
   useEffect(() => {
-    if (!isTabVisible(activeTab)) navTo('header');
+    if (!isTabVisible(activeTab)) navTo('studio');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isIdea, canReadCosting, isEditMode, isAux]);
   // Фулскрин сборки (`?fs=1`) — вид вкладки CONSTRUCTION. Там, где эта вкладка невидима (IDEA
   // без поданных на неё ошибок), параметр снимается ЗДЕСЬ и первым: иначе энфорсер
-  // `tab=construction` в OperationsField и фолбэк `navTo('header')` выше зациклились бы,
+  // `tab=construction` в OperationsField и фолбэк `navTo('studio')` выше зациклились бы,
   // бесконечно переписывая адрес друг за другом — каждый прав в своём правиле, и уступить некому.
   useEffect(() => {
     if (params.get('fs') === '1' && !isTabVisible('construction')) leaveFullscreen();
@@ -1900,8 +1900,13 @@ export function TechCardForm({
 
         <form className='min-w-0 pb-24' onSubmit={form.handleSubmit(doSubmit, onInvalid)}>
           <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
-            {/* HEADER */}
-            <SectionStack hidden={activeTab !== 'header'}>
+            {/* ШАПКА СТУДИИ — `topRowHtml` прототипа (`proto.html:3172`).
+                Прототип не даёт карточной шапке вкладки вовсе: identification, classification,
+                responsible roles, базовая модель и связанные продукты стоят ПЕРВЫМ блочным рядом
+                СТУДИИ (скриншот `proto-02-worked-brief.png`). Разметка уже стояла здесь — выше
+                монтирования студии, — поэтому переезд это смена условия видимости, а не перенос
+                двухсот строк: порядок в DOM и так совпадает с `topRowHtml() + moodboardHtml() + …`. */}
+            <SectionStack hidden={activeTab !== 'studio'}>
               <SectionStack row>
                 <Section title='identification' className='w-full lg:w-1/2'>
                   <StyleNumberField isIdea={isIdea} />

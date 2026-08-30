@@ -1,6 +1,10 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
+
+/** Три представления, между которыми переключается студия. `state.kind` прототипа. */
+export type DesignKind = 'flat' | 'render' | 'threed';
 import { cn } from 'lib/utility';
 import { useState, type JSX } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
@@ -33,12 +37,6 @@ import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
 /** What a dead representation says when it is asked. Sentence case: this is prose, not a label. */
 const INERT_REASON = {
-  render:
-    'Fabric renders are not made on this card. Nothing here can colour a flat drawing into a fabric ' +
-    'render — make the render outside and bring the file in through the slot it belongs to.',
-  threed:
-    'No 3D is made on this card. There is nothing here that can turn the renders into a spinning ' +
-    'garment — frames made elsewhere can be brought in as files and pinned to a slot like any picture.',
   onModel:
     'On-model pictures are not made on this card. Shoot the garment or take the picture from the ' +
     'shoot, and bring the file in through the slot it belongs to.',
@@ -74,6 +72,7 @@ function RepCell({
   active,
   inert,
   onInert,
+  onSelect,
   className,
 }: {
   name: string;
@@ -81,6 +80,8 @@ function RepCell({
   active?: boolean;
   inert?: string;
   onInert?: () => void;
+  /** Представление, которое МОЖНО открыть. Активное его не получает: там уже находятся. */
+  onSelect?: () => void;
   className?: string;
 }) {
   const body = (
@@ -107,13 +108,26 @@ function RepCell({
   // The live, current representation is NOT a control: it is where you already are. A button that
   // does nothing when pressed is the very thing this strip exists to avoid.
   if (!inert) {
+    // ТЕКУЩЕЕ представление — не контрол: здесь уже находятся, и кнопка, ничего не делающая по
+    // нажатию, — ровно то, ради чего эта полоса и написана.
+    if (active || !onSelect) {
+      return (
+        <div
+          aria-current={active ? 'true' : undefined}
+          className={cn(CELL, active && 'bg-textColor', className)}
+        >
+          {body}
+        </div>
+      );
+    }
     return (
-      <div
-        aria-current={active ? 'true' : undefined}
-        className={cn(CELL, active && 'bg-textColor', className)}
+      <button
+        type='button'
+        onClick={onSelect}
+        className={cn(CELL, 'hover:bg-bgSecondary', className)}
       >
         {body}
-      </div>
+      </button>
     );
   }
 
@@ -153,7 +167,17 @@ function RepCell({
   );
 }
 
-export function KindsStrip({ band }: { band: GetDesignBandResponse }): JSX.Element {
+export function KindsStrip({
+  band,
+  kind = 'flat',
+  onKindChange,
+}: {
+  band: GetDesignBandResponse;
+  /** Какое представление на экране. Прототип держит это в `state.kind`. */
+  kind?: DesignKind;
+  onKindChange?: (kind: DesignKind) => void;
+}): JSX.Element {
+  const form = useFormContext();
   // The reason last asked for, kept until it is dismissed. A toast would take the answer away
   // again while the eye was still on the control that raised the question.
   const [asked, setAsked] = useState<InertKey | null>(null);
@@ -162,7 +186,20 @@ export function KindsStrip({ band }: { band: GetDesignBandResponse }): JSX.Eleme
   // — the wire says so in as many words — so the two states are worded, not numbered.
   const version = band.latestVersion;
   const rev = version?.versionNumber ?? 0;
-  const calloutCount = version?.callouts?.length ?? 0;
+  // ЧИСЛО УКАЗАНИЙ — ЖИВОЕ, А НЕ ЗАМОРОЖЕННОЕ. Стояло `version.callouts.length`, то есть копия,
+  // снятая в момент минта. Это расходится и с прототипом (`repsStripHtml` считает
+  // `state.callouts.length`), и с доктриной самой вкладки ARTIFACTS: версия морозит СОСТАВ ПЛИТ,
+  // а указания не морозятся — бумага печатает те, что карточка держит сейчас. Со старым чтением
+  // полоса называла бы прежнее число ещё долго после того, как технолог добавил выноску.
+  const calloutCount = ((useWatch({ control: form.control, name: 'callouts' }) as unknown[]) ?? [])
+    .length;
+  // Прототип (`repsStripHtml`) подписывает представление ЧИСЛОМ его картинок, а не словами
+  // «не делается здесь»: полоса отвечает на вопрос «сколько их уже есть».
+  const pictures = (band.runs ?? []).flatMap((r) => r.pictures ?? []);
+  const renders = pictures.filter((p) => p.kind === 'render' && !p.hiddenAt).length;
+  const turns = pictures.filter((p) => p.kind === 'threed' && !p.hiddenAt).length;
+  const renderSub = renders ? `${renders} render${renders === 1 ? '' : 's'}` : 'none yet';
+  const threedSub = turns ? `${turns} turntable${turns === 1 ? '' : 's'}` : 'none yet';
   const sheetSub =
     rev > 0
       ? `v${rev} · ${calloutCount} callout${calloutCount === 1 ? '' : 's'}`
@@ -172,19 +209,29 @@ export function KindsStrip({ band }: { band: GetDesignBandResponse }): JSX.Eleme
     <div>
       <TooltipProvider>
         <div className='flex items-stretch border border-borderColor bg-bgColor'>
-          <RepCell name='flat — sheet' sub={sheetSub} active className={SHARE} />
+          {/* ТРИ ПРЕДСТАВЛЕНИЯ ТЕПЕРЬ ПЕРЕКЛЮЧАЮТСЯ, и это не косметика: за «fabric render» и «3d»
+              появились настоящие экраны, а до них полоса честно говорила «не делается здесь». Та
+              причина протухла в тот момент, когда экраны приехали, и оставить её значило бы врать
+              ровно тем текстом, который был написан, чтобы не врать. */}
+          <RepCell
+            name='flat — sheet'
+            sub={sheetSub}
+            active={kind === 'flat'}
+            onSelect={onKindChange && (() => onKindChange('flat'))}
+            className={SHARE}
+          />
           <RepCell
             name='fabric render'
-            sub='not made here'
-            inert={INERT_REASON.render}
-            onInert={() => setAsked('render')}
+            sub={renderSub}
+            active={kind === 'render'}
+            onSelect={onKindChange && (() => onKindChange('render'))}
             className={cn(SHARE, 'border-l border-hairline')}
           />
           <RepCell
             name='3d'
-            sub='not made here'
-            inert={INERT_REASON.threed}
-            onInert={() => setAsked('threed')}
+            sub={threedSub}
+            active={kind === 'threed'}
+            onSelect={onKindChange && (() => onKindChange('threed'))}
             className={cn(SHARE, 'border-l border-hairline')}
           />
           <RepCell

@@ -1,12 +1,15 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import { useState } from 'react';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
-import { BandFeed } from './band-feed';
 import { Bench } from './bench';
 import { ConceptSection } from './concept-section';
-import { KindsStrip } from './kinds-strip';
+import { GenerationStudio, FixContextProvider, FixContext } from './generation';
+import { KindsStrip, type DesignKind } from './kinds-strip';
+import { RenderStudio, ThreedStudio } from './render';
+import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MixWarn } from './mixwarn';
 import { MoodBoard } from './mood-board';
@@ -66,6 +69,14 @@ export function StudioTab({
    */
   constructionAspects?: React.ReactNode;
 }) {
+  // ВИД — состояние студии, как `state.kind` в прототипе. Живёт здесь, у композитора: полоса
+  // представлений его показывает, а экраны читают, и третьего владельца у него быть не должно.
+  //
+  // СТОИТ ВЫШЕ ЛЮБОГО РАННЕГО ВОЗВРАТА, и это не стиль. Ниже них он простоял ровно один прогон, и
+  // этого хватило: пока полоса грузится, компонент выходит раньше и хук не исполняется, а после
+  // загрузки исполняется — хуков становится БОЛЬШЕ, чем в прошлый раз. React отвечает ошибкой 310
+  // и сносит ВСЁ дерево: вкладка уходит в белое целиком, потому что границы ошибок над ней нет.
+  const [kind, setKind] = useState<DesignKind>('flat');
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
 
   // A card that has not been created yet has no band and cannot have one: every write below is
@@ -109,18 +120,26 @@ export function StudioTab({
   return (
     <DesignCapabilityProvider value={!bandless}>
       <PickModeProvider>
+        {/* Починка живёт РЯДОМ с режимом выбора, а не внутри генерации: полосу починки зажигает
+            дверь на слоте верстака, а гасит запуск прогона — два разных органа, одно состояние. */}
+        <FixContextProvider>
         <PickBanner />
         <SectionStack>
-          {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ, А НЕ С ПАМЯТЬЮ О НЁМ. `proto.html:3893`
-              собирает студию так: `moodboard → kinds → references → history → uploads → SLOTS →
-              concept`, то есть ВЕРСТАК СТОИТ ПОСЛЕДНИМ — сначала материал, из которого собирают,
-              потом сборка. Здесь он полгода стоял сразу после референсов, потому что порядок был
-              выписан из головы, а не из строки, которая его задаёт.
-              Полоса листа и предупреждение о смеси — часть блока слотов, а не самостоятельные
-              этажи: в прототипе они строки в шапке `FLAT SLOTS`, поэтому стоят вплотную над ним.
-              Описание — последнее: оно пишется по тому, что выше. */}
+          {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ (`proto.html:3875-3893`), А НЕ С ПАМЯТЬЮ:
+                topRow → moodboard → kinds → references → ГЕНЕРАЦИЯ → uploads → SLOTS → concept.
+              Шапка карточки (`topRowHtml`) стоит выше, в `index.tsx`: она первый ряд СТУДИИ.
+              Генерация — это форма запуска, история прогонов и пустое состояние, и собирает их
+              `GenerationStudio` по правилу самого прототипа (`briefContent`).
+              Полоса листа и предупреждение о смеси — части блока слотов (`slotsHtml` зовёт
+              `sheetbarHtml` и `mixwarnHtml` в своей шапке), поэтому стоят вплотную над верстаком.
+              Верстак ПОСЛЕДНИЙ: сначала материал, потом сборка. Описание — после всего, оно
+              пишется по тому, что выше.
+              ЛЕНТЫ `BandFeed` ЗДЕСЬ БОЛЬШЕ НЕТ: она рисовала блок «generation history», слепляя
+              прогоны и пачки, — заглушка тех времён, когда генерации в клиенте не было. У
+              прототипа это два разных блока: история = прогоны, полка = пачки. Модуль остаётся:
+              полка загрузок берёт из него строки. */}
           <MoodBoard techCardId={techCardId} disabled={readOnly} />
-          <KindsStrip band={band} />
+          <KindsStrip band={band} kind={kind} onKindChange={setKind} />
           {bandless ? (
             <Section title='bench' question='— the flats this style is drawn from'>
               <Text variant='inactive' size='control'>
@@ -133,9 +152,37 @@ export function StudioTab({
             </Section>
           ) : (
             <>
-              <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
-              <BandFeed techCardId={techCardId} band={band} disabled={readOnly} />
-              <UploadsShelf techCardId={techCardId} band={band} disabled={readOnly} />
+              {/* ВХОДНАЯ СЕКЦИЯ ПЕРЕКЛЮЧАЕТСЯ ВМЕСТЕ С ВИДОМ — это правило самого прототипа
+                  (`proto.html:3891`, «референсы рисуются только у FLAT; в render и 3D они в одном
+                  клике, не на экране»): у рендера вход — слоты верстака, у 3D — рендеры. */}
+              {kind === 'flat' && (
+                <>
+                  <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
+                  <FixContext band={band} techCardId={techCardId} disabled={readOnly} />
+                  <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                  <UploadsShelf techCardId={techCardId} band={band} disabled={readOnly} />
+                </>
+              )}
+              {/* У РЕНДЕРА И 3D СВОЙ ЭКРАН И ТА ЖЕ ИСТОРИЯ ПРОГОНОВ: прототип собирает их как
+                  `studioRenderHtml() + generationHistoryHtml() + slotsHtml()`. Полки загрузок в
+                  этих видах нет — принесённый руками файл кладут во флэт. */}
+              {kind === 'render' && (
+                <>
+                  <RenderStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                </>
+              )}
+              {kind === 'threed' && (
+                <>
+                  <ThreedStudio
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    onGoToKind={setKind}
+                  />
+                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                </>
+              )}
               <SheetBar band={band} />
               <MixWarn band={band} />
               <Bench techCardId={techCardId} band={band} disabled={readOnly} />
@@ -144,6 +191,7 @@ export function StudioTab({
           <ConceptSection disabled={readOnly} />
           {constructionAspects}
         </SectionStack>
+        </FixContextProvider>
       </PickModeProvider>
     </DesignCapabilityProvider>
   );

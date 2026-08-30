@@ -321,6 +321,7 @@ export function Bench({
             <BenchSlot
               key={view}
               band={band}
+              techCardId={techCardId}
               slotRef={ref}
               slot={slot}
               label={viewLabel(view)}
@@ -369,6 +370,7 @@ export function Bench({
             <BenchSlot
               key={slot.id}
               band={band}
+              techCardId={techCardId}
               slotRef={ref}
               slot={slot}
               label={name}

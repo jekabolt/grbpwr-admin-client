@@ -10,6 +10,8 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
+
+import { VectorModal } from './modals';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import MediaComponent from 'ui/components/media';
@@ -186,7 +188,11 @@ export function slotFootnote(
   const provenance = readProvenance(picture);
   const parts = [provenanceLabel(provenance)];
   const ordinal = picture.batchId ? shelfOrdinals.get(picture.batchId) : undefined;
-  parts.push(pictureHandle(picture, { shelfOrdinal: ordinal }));
+  // НОМЕР ПРОГОНА ПЕЧАТАЛСЯ ДВАЖДЫ. `provenanceLabel` уже сказал «AI · run 5», а `pictureHandle`
+  // возвращает «run 5 · a» — вместе выходило `AI · run 5 · run 5 · a`, и это видно на верстаке.
+  // Тот же приём, что строкой ниже для `batchCaption`: второй раз одно и то же не говорится.
+  const handle = pictureHandle(picture, { shelfOrdinal: ordinal });
+  parts.push(provenance.runId === null ? handle : handle.replace(/^run \d+(\s·\s)?/, ''));
   const batch = (band.batches ?? []).find((b) => b.id === picture.batchId);
   if (batch) {
     // `batchCaption` opens with the word «uploaded», which `provenanceLabel` has already said.
@@ -238,6 +244,8 @@ export function InertDoor({
 
 export type BenchSlotProps = {
   band: GetDesignBandResponse;
+  /** Нужен векторному редактору: слой пишется на карточку, а не на слот. */
+  techCardId: number;
   /** The wire address of this slot — a view key for a side, a minted id for a detail. */
   slotRef: DesignBenchSlotRef;
   /** The stored row, or null for a side that has never been touched. */
@@ -273,12 +281,15 @@ export type BenchSlotProps = {
 };
 
 export function BenchSlot(props: BenchSlotProps) {
+  const [vectorOpen, setVectorOpen] = useState(false);
   const {
     band,
+    techCardId,
     slotRef,
     slot,
     label,
     picture,
+    slotRev,
     detail,
     required,
     saving,
@@ -435,25 +446,27 @@ export function BenchSlot(props: BenchSlotProps) {
             наезжал на подвал BACK. Ни `tsc`, ни утверждение по тексту этого не видят — `innerText`
             одинаков при любой ширине. Группа теперь переносится внутри себя и умеет сжиматься. */}
         <span className='ml-auto flex flex-wrap items-center gap-1.5'>
-          {/* `edit ▸` is a door onto a feature that EXISTS as a plan and ships inert this wave
-              (F-7, migration 0343) — the wave's rule is that a cut door carries `data-inert` with a
-              reason rather than vanishing, so a human learns it is «not yet» and not «never». The
-              fix bars were cut outright instead, because they report on a flow that cannot occur at
-              all while generation is gone.
-
-              WHAT THIS DOOR IS, AND WHAT IT IS NOT. It opens the VECTOR EDITOR — strokes over the
-              flat itself, on their own layer, with the raster underneath as a tracing sheet
-              (`vector-open` in the prototype). That is genuinely a later wave, and the reason still
-              says so. It is NOT the callout editor: placing, moving and shaping the numbered
-              callouts is live, on ARTIFACTS, over the plates the DOCUMENT lists — which is where
-              the reason now points, because «the editor arrives later» read as «there is nowhere to
-              draw», and there is. A bench picture joins those plates at the mint, which injects the
-              bench into `technicalMedia` server-side. */}
+          {/* `edit ▸` — ВЕКТОРНЫЙ РЕДАКТОР ШТРИХОВ (`vectorModal` прототипа, `vector-open` на
+              плитке слота): рисование по самому чертежу, своим слоем, с растром-калькой снизу.
+              Дверь была инертной со словами «придёт следующей волной» — теперь волна пришла, и
+              слой пишется настоящими `GetDesignEditLayer` / `SaveDesignEditLayer` /
+              `FlattenDesignEditLayer`. Не путать с редактором УКАЗАНИЙ: тот живёт на ARTIFACTS,
+              над плитами документа. */}
           {!disabled && picture && (
-            <InertDoor
-              label='edit ▸'
-              reason='editing the drawing itself — strokes over this flat — is a later wave. Callouts are drawn on ARTIFACTS, over the plates the document lists; a bench picture joins them at the mint'
-            />
+            <>
+              <Button variant='secondary' size='xs' onClick={() => setVectorOpen(true)}>
+                edit ▸
+              </Button>
+              <VectorModal
+                open={vectorOpen}
+                onOpenChange={setVectorOpen}
+                techCardId={techCardId}
+                band={band}
+                base={picture}
+                slot={{ ref: slotRef, label, slotRev }}
+                disabled={disabled}
+              />
+            </>
           )}
           {!disabled && picture && (
             <MediaSelector

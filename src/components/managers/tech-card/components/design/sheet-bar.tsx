@@ -1,4 +1,6 @@
 import type { GetDesignBandResponse, common_DesignSheetPlate } from 'api/proto-http/admin';
+import { useState, type JSX } from 'react';
+import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import {
@@ -39,6 +41,8 @@ function plateMediaId(plate: common_DesignSheetPlate | undefined): number {
  * a real defect: a card whose only change is a detail plate reported «matches the bench» and minted
  * a version nobody meant to mint.
  */
+import { DiffModal } from './modals';
+
 export function benchDiffRows(band: GetDesignBandResponse): DiffRow[] | null {
   const version = band.latestVersion;
   if (!version) return null;
@@ -120,6 +124,7 @@ function stalePlates(band: GetDesignBandResponse): { name: string; reason: strin
 }
 
 export function SheetBar({ band }: { band: GetDesignBandResponse }): JSX.Element {
+  const [diffOpen, setDiffOpen] = useState(false);
   const bench = readBench(band);
   const rev = band.latestVersion?.versionNumber ?? 0;
   const stale = stalePlates(band);
@@ -197,8 +202,16 @@ export function SheetBar({ band }: { band: GetDesignBandResponse }): JSX.Element
           the bench has moved on: <b>{diff.join(', ').toUpperCase()}</b> · print and cut pieces stay
           on v{rev} until a new one is issued
         </Text>
+        {/* СЛОВА НАЗЫВАЛИ РАСХОЖДЕНИЕ, НО НЕ ПОКАЗЫВАЛИ ЕГО. У прототипа на это есть отдельная
+            модалка (`diffModal`): она кладёт рядом плиту версии и плиту верстака — картинками, а не
+            именами сторон. Пока двери не было, «BACK» в этой строке нечем было проверить, и человек
+            шёл смотреть в два разных места. Считает расхождение ТА ЖЕ функция, что и бар. */}
+        <Button variant='secondary' size='xs' onClick={() => setDiffOpen(true)}>
+          see the difference ▸
+        </Button>
       </div>
       {staleLine}
+      <DiffModal open={diffOpen} onOpenChange={setDiffOpen} band={band} />
     </CalloutBox>
   );
 }

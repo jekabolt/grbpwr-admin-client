@@ -52,7 +52,10 @@ const REQ_ACTION: Record<string, ActionKey> = {
 };
 
 const REQ_TAB: Record<string, string> = {
-  style_number: 'header',
+  // Номер стиля живёт в шапке СТУДИИ: карточной шапки как отдельной вкладки больше нет —
+  // её блоки стоят первым рядом студии, как в прототипе. Строка `'header'` увела бы
+  // человека на вкладку, которой рейл не рисует.
+  style_number: 'studio',
   bom_fabric: 'bom',
   bom_linked: 'bom',
   colorway_linked: 'colorways',

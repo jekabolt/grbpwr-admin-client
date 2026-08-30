@@ -1,0 +1,40 @@
+/**
+ * THE TWO GENERATIVE SCREENS OF THE DESIGN BAND — `FABRIC RENDER` and `3D`.
+ *
+ * `RenderStudio` and `ThreedStudio` are the whole of a view: hand one of them the band and it draws
+ * its inputs, its menu and its GENERATE. The three organs underneath are exported because they are
+ * the prototype's own vocabulary and a composer may want them apart — the input strip alone above a
+ * different menu, the palette alone in a dialog — not because they are meant to be reassembled by
+ * hand into a screen the studios already assemble correctly.
+ *
+ * WHAT THEY READ AND WRITE. One read (`GetDesignBand`, through the band's own `useDesignBand`, whose
+ * result is passed in as a prop — never a second call) and one write (`StartDesignRun`). The bench
+ * writes of the input strip go through the band's frozen seam, `useDesignWrites`. Two dictionaries
+ * are consulted for pickers that are windows into existing admin entities rather than lists invented
+ * here: the colour dictionary (through `DictionaryProvider`, already loaded once at startup) and the
+ * fit models (`ListModels`, through the models manager's own `useAllModels`).
+ */
+export { ColourHistory } from './colour-history';
+export { Palette } from './palette';
+export { RenderInputStrip } from './render-input-strip';
+export { RenderStudio } from './render-studio';
+export { ThreedStudio } from './threed-studio';
+
+export { useCardFit, useColourDraft, useThreedDraft } from './drafts';
+export type { ColourDraft, ThreedDraft, ThreedDraftState } from './drafts';
+export { useStartDesignRun } from './use-design-run';
+export type { StartRunInput, StartRunState } from './use-design-run';
+export {
+  benchSides,
+  budgetLine,
+  colourChips,
+  colourLabel,
+  colourSourceOf,
+  latestRenderByView,
+  renderGate,
+  renderRevisions,
+  threedGate,
+  turntableSourceIds,
+  unmarkedFlats,
+} from './model';
+export type { BenchSide, ColourChip, ColourSource, Gate, RenderByView, RenderPlate } from './model';
