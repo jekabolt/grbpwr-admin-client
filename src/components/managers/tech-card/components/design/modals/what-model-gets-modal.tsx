@@ -327,11 +327,18 @@ function ReferenceLine({ line, media }: { line: Line; media?: common_MediaFull }
   const url = thumbOf(media);
   return (
     <div className='flex items-center gap-2 border-b border-hairline py-1'>
-      {/* мат под снимком белый (R-12) */}
-      <span className='block h-10 w-8 shrink-0 border border-borderColor bg-bgColor'>
+      {/* мат под снимком белый (R-12); пустоту называет СЛОВО — сосед-текст говорит о роли,
+          а не о снимке, так что молчащая белая рамка читалась бы как «белая картинка» */}
+      <span className='relative block h-10 w-8 shrink-0 border border-borderColor bg-bgColor'>
         {url ? (
           <img src={url} alt='' loading='lazy' className='h-full w-full object-cover' />
-        ) : null}
+        ) : (
+          <span className='absolute inset-0 flex items-center justify-center px-0.5 text-center'>
+            <Text size='nano' variant='label' component='span'>
+              no image
+            </Text>
+          </span>
+        )}
       </span>
       <span
         className={

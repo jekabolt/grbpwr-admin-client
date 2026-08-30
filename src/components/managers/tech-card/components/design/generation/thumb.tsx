@@ -46,7 +46,14 @@ export function Thumb({
         //
         // Пустоту называет СЛОВО («no image» / «deleted») — ровно как в band-feed. Цвет за
         // «пусто» не отвечает, иначе он же начинает врать про «белое».
-        'relative flex shrink-0 items-center justify-center overflow-hidden bg-bgColor',
+        //
+        // ГРАНИЦУ ЯЧЕЙКИ ДЕРЖИТ РАМКА, И ОНА ЖИВЁТ ЗДЕСЬ, В ПРИМИТИВЕ. Пока мат был серым, серое
+        // и было ячейкой; на белой строке белый мат без рамки — невидимая коробка, и слово
+        // пустоты повисает в воздухе. Вызывающие передают только размеры (h-14 w-11 и им
+        // подобные) — рамки от них не дождаться, а близнецы этой формы в той же волне
+        // (diff-modal Thumb, what-model-gets, new-detail-modal) и вторая ветка
+        // FrozenInputPicture (AnnotationSurface) все несут border-borderColor.
+        'relative flex shrink-0 items-center justify-center overflow-hidden border border-borderColor bg-bgColor',
         className,
       )}
     >

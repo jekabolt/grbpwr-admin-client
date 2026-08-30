@@ -676,15 +676,22 @@ export function MintDialog({
                     >
                       {plate.name}
                     </Text>
-                    {/* мат под снимком белый (R-12) */}
+                    {/* мат под снимком белый (R-12); пустоту называет СЛОВО, как в band-feed —
+                        белая ячейка без него читалась бы как «белая картинка» */}
                     <div className='mt-1 aspect-[4/5] w-full bg-bgColor'>
-                      {url && (
+                      {url ? (
                         <img
                           src={url}
                           alt={plate.name}
                           className='h-full w-full object-contain'
                           loading='lazy'
                         />
+                      ) : (
+                        <span className='flex h-full w-full items-center justify-center'>
+                          <Text size='nano' variant='label' component='span'>
+                            no image
+                          </Text>
+                        </span>
                       )}
                     </div>
                     <Text

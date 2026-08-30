@@ -149,12 +149,19 @@ export function NewDetailModal({
               className='block w-20 shrink-0 self-start border border-borderColor bg-bgColor'
               style={{ aspectRatio: w > 0 && h > 0 ? `${w}/${h}` : '4/5' }}
             >
-              {url && (
+              {url ? (
                 <img
                   src={url}
                   alt={pictureHandle(picture)}
                   className='h-full w-full object-contain'
                 />
+              ) : (
+                /* пустоту называет СЛОВО (R-12): белая рамка без него — «белая картинка» */
+                <span className='flex h-full w-full items-center justify-center px-0.5 text-center'>
+                  <Text size='nano' variant='label' component='span'>
+                    no image
+                  </Text>
+                </span>
               )}
             </span>
             <Text size='micro' variant='label' component='p' className='min-w-0 flex-1'>
