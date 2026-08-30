@@ -17,7 +17,8 @@ import { InertDoor, readBench } from '../bench-slot';
 import { VectorModal, WhatModelGetsModal } from '../modals';
 import { serverSpeaksDesign } from '../capability';
 import { DESIGN_VIEW_KEYS, SHEET_MIN_VIEWS, viewLabel } from '../views';
-import { FixContext, useFixContext } from './fix-context';
+import { useAnnounceDesignQuestion } from '../history-question';
+import { useFixContext } from './fix-context';
 import { readBudget } from './money';
 import { useStartRun } from './use-generation';
 
@@ -118,6 +119,12 @@ export function GenerationForm({
   const budget = useMemo(() => readBudget(band.budget), [band.budget]);
 
   const ticked = DESIGN_VIEW_KEYS.filter((v) => views[v]);
+  // Половина сравнения для дивайдера «current / earlier» в истории живёт ТОЛЬКО здесь: только эта
+  // форма знает, какой вопрос задан прямо сейчас. Хук стоит ВЫШЕ раннего возврата `if (!isOpen)`
+  // намеренно — под ним число хуков менялось бы между рендерами, и React снял бы всё дерево
+  // (ошибка #310, которой этот экран уже стоил одного вечера). При размонтировании вопрос
+  // отзывается сам, поэтому свёрнутая форма не оставляет устаревшего.
+  useAnnounceDesignQuestion(techCardId, ticked, layout);
   const fixing = !!fix;
 
   const writesOff = !!disabled || !speaks;
@@ -134,8 +141,22 @@ export function GenerationForm({
           ? `daily budget reached — ${budget?.line ?? ''}`
           : null;
 
+  /**
+   * The three variants of W-4, spoken. Null while nothing is ticked — there is no shape to name
+   * yet, and the gate below already says why the button is off.
+   */
+  const askShape = fixing
+    ? null
+    : ticked.length === 0
+      ? null
+      : ticked.length === 1
+        ? `one view · ${viewLabel(ticked[0])}`
+        : layout === 'one'
+          ? `${ticked.length} views · one picture`
+          : `${ticked.length} views · a picture each`;
+
   const outputsLine = fixing
-    ? '1 picture — the side being fixed'
+    ? `${fix.labels.length} picture${fix.labels.length === 1 ? '' : 's'} — ${fix.labels.join(', ')}`
     : layout === 'one' && ticked.length >= 2
       ? `1 picture · ${ticked.length} views inside · it comes back needing a cut, and no slot reads a composite until it is split`
       : `${ticked.length} picture${ticked.length === 1 ? '' : 's'}`;
@@ -148,13 +169,29 @@ export function GenerationForm({
   const submit = () => {
     if (gateReason) return;
     const params: common_DesignRunParams = {
-      // A fix asks for exactly one picture of exactly one side; the matrix took no part in it, and
-      // the snapshot must say so rather than freezing ticks the run did not use.
-      views: fixing ? [fix.viewKey] : [...ticked],
+      // A fix asks for the SIDES ALREADY ON THE BENCH; the matrix took no part in it, and the
+      // snapshot must say so rather than freezing ticks the run did not use.
+      views: fixing ? [...fix.viewKeys] : [...ticked],
       layout: fixing ? 'per_view' : layout,
       colour: undefined,
       threed: undefined,
-      fixTarget: fixing ? fix.viewKey : '',
+      // THE SCALAR IS DELIBERATELY LEFT EMPTY BY EVERY NEW RUN. `fix_target` is what rows frozen
+      // before the array say; the contract's rule is that a reader takes `fix_targets` when it is
+      // non-empty and falls back to the scalar otherwise. Writing both would put the same claim in
+      // two places, and the day they disagree there is no way to tell which one the human meant.
+      fixTarget: '',
+      fixTargets: fixing ? [...fix.viewKeys] : [],
+      // Details travel by ADDRESS, because a bare view key cannot tell two details apart and this
+      // list is frozen into the run's history. Sides and details are ONE selection, not two modes.
+      fixSlotIds: fixing ? [...fix.slotIds] : [],
+      // ASK FOR THE PROPOSED CUT WHENEVER A COMPOSITE IS BEING ASKED FOR — derived, not a fourth
+      // control. `auto_split` is only meaningful with `layout = one`, and it CUTS NOTHING: it
+      // records that the server was asked to GUESS the frames, so the split modal opens on a
+      // proposal instead of two blind rectangles the human drags into place from nothing. The
+      // prototype's composite always arrives with its boxes; this is the field that makes that
+      // true here, and refusing it by default would leave the guess permanently unasked-for while
+      // the modal below is written to consume it.
+      autoSplit: !fixing && layout === 'one' && ticked.length >= 2,
       extraInputMediaIds: [],
     };
     startRun.start({ kind: 'flat', ask: ask.trim(), params }, () => setAsk(''));
@@ -207,7 +244,8 @@ export function GenerationForm({
         </button>
       }
     >
-      <FixContext band={band} techCardId={techCardId} disabled={writesOff} />
+      {/* Чип заявки рисует STUDIO, над этой формой. Здесь он был вторым и дублировал ту же
+          заявку. Чтение контекста (`useFixContext` выше) остаётся — оно и отправляет параметры. */}
 
       {!speaks && (
         <CalloutBox tone='note'>
@@ -290,7 +328,25 @@ export function GenerationForm({
             rule the server does not enforce, checked at the mint and not on these ticks.
           </Text>
 
-          <GroupLabel>how it comes back</GroupLabel>
+          {/* THE SHAPE OF THE ASK, NAMED — and named by DERIVING it, never by a third control.
+              The owner's three variants (W-4) are ① one view on its own, ② several views as
+              separate pictures, ③ several views glued into one and cut afterwards. They are the
+              product of TWO independent organs — how many ticks, and which layout — and that is
+              deliberate: a single three-way switch would have to invent a rule for «one view,
+              glued», which is not a third thing but the same picture under another name. So the
+              two organs stay free and this pill reads them back, which is also what makes «only one
+              view is asked — both layouts return one picture» true rather than a caveat. */}
+          <GroupLabel
+            action={
+              askShape ? (
+                <Pill tone='mut' title='what the two controls above add up to'>
+                  {askShape}
+                </Pill>
+              ) : undefined
+            }
+          >
+            how it comes back
+          </GroupLabel>
           <ViewSwitch
             label='layout'
             value={layout}
@@ -300,9 +356,9 @@ export function GenerationForm({
           />
           <Text size='nano' variant='label' component='p'>
             {ticked.length <= 1
-              ? 'only one view is asked — both layouts return one picture'
+              ? 'only one view is asked — both layouts return one picture, so this switch changes nothing here.'
               : layout === 'one'
-                ? 'one file with all the ticked views drawn to one another. It comes back NEEDING A CUT: no slot reads a composite until «split ▸» has run.'
+                ? 'one file with all the ticked views drawn to one another. It arrives carrying a «probably …» mark per glued view and NEEDING A CUT: it has no single view, so no slot takes it and no picker is offered on it until «split into views ▸» has run.'
                 : 'each ticked view comes back as its own picture with a guessed view; you mark the ones that go into a slot.'}
           </Text>
         </>

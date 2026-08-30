@@ -1914,6 +1914,17 @@ const techCardObject = z.object({
   // Вкладка со старым бандлом или восстановленный черновик обязаны молчать, а не стирать записку,
   // которой они никогда не видели.
   moodNote: z.string().nullish(),
+  // ОПИСАНИЕ ИЗДЕЛИЯ (полоса DESIGN, W-3) — один общий комментарий, который читается ВМЕСТЕ с
+  // каждой картинкой входа и уходит в КАЖДЫЙ прогон (сервер замораживает его в снимке прогона как
+  // `DesignInputSnapshot.garment_note`). Это НЕ `moodNote` (та не покидает доски, её читает только
+  // «draft the idea») и НЕ `concept` (тот — принятое утверждение о стиле, печатаемое в тех-паке).
+  // Одно поле на все три означало бы, что правка промпта правит объявленный замысел документа.
+  //
+  // `.nullish()` и без `.default('')` — та же дисциплина отсутствия, что у `moodNote` выше:
+  // `common_TechCardInsert.garment_description` объявлено OPTIONAL, то есть трёхсостоянийным
+  // (отсутствует = сохрани хранимое, `''` = сотри, значение = поставь), и пустая строка отсюда
+  // была бы КОМАНДОЙ, а не молчанием.
+  garmentDescription: z.string().nullish(),
   // children
   sizeIds: z.array(z.number()).default([]),
   // NO sizeQuantities. Типовой калькуляционный тираж («size run») удалён из формы целиком:
@@ -2313,6 +2324,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     // (EmitUnpopulated), и оба обязаны стать ОТСУТСТВИЕМ. Пустая строка здесь была бы КОМАНДОЙ
     // «очисти», и первый же сейв карточки, прочитанной без записки, стёр бы её.
     moodNote: insert?.moodNote ?? undefined,
+    // Полоса DESIGN, W-3 — тот же трёхсостоянийный протокол и по той же причине, что у `moodNote`
+    // строкой выше: `?? undefined`, а не `|| ''`, иначе первый же сейв карточки, прочитанной без
+    // описания, стёр бы описание.
+    garmentDescription: insert?.garmentDescription ?? undefined,
     sizeIds: insert?.sizeIds ?? [],
     // size_quantities НЕ читается в форму — типовой тираж больше не существует как понятие в UI.
     patterns: (insert?.patterns ?? []).map((p) => ({
@@ -2928,6 +2943,15 @@ export function mapFormToTechCardInsert(
     moodNote: data.moodNote === undefined || data.moodNote === null
       ? undefined
       : data.moodNote.trim(),
+    // ОПИСАНИЕ ИЗДЕЛИЯ — по той же дисциплине ключа, что и записка выше, и по тем же двум доводам:
+    // человек его печатает и ждёт, что оно сохранится, а от откаченного бинаря его защищает не
+    // молчание здесь, а ГЕЙТ ВОЗМОЖНОСТЕЙ на выходе (`design/payload-gate.ts`), который снимает
+    // поле, когда сервер про полосу не знает. Отсутствие ключа = «сохрани хранимое», явная пустая
+    // строка = «сотри», и различить их можно только ключом, а не значением.
+    garmentDescription:
+      data.garmentDescription === undefined || data.garmentDescription === null
+        ? undefined
+        : data.garmentDescription.trim(),
     // Схема их объявила и читатель их читает, но провод ими молчит, пока не подключён гейт
     // возможностей (`design/payload-gate.ts`): гейтвей собран с `DiscardUnknown: false`, поэтому
     // незнакомое поле — это 400 на ВЕСЬ документ, а не тишина, и бандл, начавший их слать раньше

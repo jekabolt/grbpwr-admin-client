@@ -1742,9 +1742,16 @@ export type TechCardCallout = {
   // is holding would vanish out from under it — silently, since client_ref is outside the
   // digest and nothing would restate.
   // SO THE SERVER CARRIES IT: an incoming callout with `number != 0` and an EMPTY client_ref
-  // inherits the stored client_ref OF THAT NUMBER, exactly the way CarryOmittedCalloutGeometry
-  // already carries geometry by number, and in the same place in the pipeline. An explicitly
-  // DIFFERENT non-empty value replaces it — that is a real re-address, not an omission.
+  // inherits the stored client_ref OF THAT CALLOUT, and «that callout» means the identity
+  // (sketch + number), never the bare number. CarryOmittedCalloutGeometry carries geometry by
+  // the same identity, in the same place in the pipeline. An explicitly DIFFERENT non-empty
+  // value replaces it — that is a real re-address, not an omission.
+  // MATCHING BY THE BARE NUMBER WOULD BE A DEFECT, NOT A SIMPLIFICATION. A callout number is
+  // NOT unique per card: the sketch and the moodboard number independently, on purpose, and
+  // the schema forbids no duplicate. Carrying by number alone would hand a moodboard note the
+  // address of a technical callout that happens to share its number. That exact rule was once
+  // written twice in this repository and drifted in OPPOSITE directions; it now lives once, in
+  // entity.TechCardCalloutsByKey, and every consumer asks it rather than re-deriving it.
   // The carry cannot collide with minting: minting is `number == 0`, carrying is
   // `number != 0`, and a legacy zero has neither a number to carry by nor a ref to mint for.
   clientRef: string | undefined;
@@ -3478,6 +3485,20 @@ export type TechCardInsert = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   moodNote?: string;
+  // THE GARMENT'S OWN DESCRIPTION — what the thing IS, in the designer's words: «oversized boxy
+  // shirt, dropped shoulder, no placket» (W-3). It rides into EVERY design run's prompt beside the
+  // references, and it is frozen into each run's snapshot as DesignInputSnapshot.garment_note.
+  // IT IS NOT `concept` AND NOT `mood_note`, and the three must not be merged. `concept` is the
+  // intent behind the style and belongs to the document; `mood_note` is what the BOARD is about,
+  // read only by `draft the idea`; this is what the GARMENT is, read by every generation. Spending
+  // one field on all three would make editing the prompt edit the document's stated intent.
+  // OPTIONAL for the same load-bearing reason as `mood_note` above — the admin is an SPA, tabs
+  // survive deploys, and the card is saved WHOLE, so a bare proto3 string from an older bundle
+  // would arrive as "" and ERASE the description from a tab that never opened the DESIGN band:
+  // * field ABSENT (null)        → LEAVE AS IS.
+  // * field PRESENT, value ""    → CLEAR it (store NULL).
+  // * field PRESENT with a value → set it.
+  garmentDescription?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
@@ -4330,8 +4351,15 @@ export type TechCardListItem = {
 export type DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
-  // Which state of the studio produced this row: flat | render | threed | draft_idea.
+  // Which state of the studio produced this row: flat | render | threed | vector | draft_idea.
   // Written by the client at start; immutable afterwards.
+  // `vector` IS A MEMBER OF THIS VOCABULARY AND NOT AN RPC OF ITS OWN. Machine vectorisation is a
+  // paid provider call exactly like a flat or a render, so it walks through StartDesignRun — the
+  // ONE door the money goes through. A verb of its own would be a second budget check, a second
+  // reservation and a second place to forget the ledger, for no gain: the thing being asked for is
+  // still «spend the key's money and give me a picture back».
+  // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
+  // already exists and spends nothing.
   kind: string | undefined;
   // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
   // running renders differently from a finished one, so this is the field the band polls.
@@ -4407,6 +4435,15 @@ export type DesignRun = {
   // Hidden pictures are included WITH their flag — the client filters, the server never lies about
   // what exists.
   pictures: DesignPicture[] | undefined;
+  // OUTPUT-ONLY: the run this one repeats — design_run(id), 0 when it repeats nothing. Set by the
+  // SERVER from StartDesignRunRequest.rerun_of_run_id; the client never writes it.
+  // IT IS THE ONLY HONEST SPELLING OF «run it again». The alternative — the client re-posting the
+  // old run's inputs — lets a caller post inputs that never existed, and the history stops being a
+  // record of what was sent and becomes a record of what somebody typed. Here the server re-reads
+  // run N's own frozen snapshot, and this field is the edge that says which one it read.
+  // NO FOREIGN KEY, deliberately: a run is never deleted, so nothing needs enforcing, and a FK
+  // would make the row's lineage a reason a card cannot be cleaned up later.
+  rerunOf: number | undefined;
 };
 
 // DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
@@ -4429,10 +4466,34 @@ export type DesignRunParams = {
   // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
   // a detail is ever wanted, it arrives as a slot_id field beside this one, not as a `detail`
   // string inside it.
+  // SUPERSEDED BY fix_targets, AND LEFT EXACTLY AS IT WAS. Runs already frozen in the history state
+  // their target here; re-typing this number as `repeated` would silently rewrite what those rows
+  // say on the wire, and a snapshot whose meaning changes after the fact is not a snapshot. A NEW
+  // run states its selection in fix_targets / fix_slot_ids and leaves this empty. A READER takes
+  // fix_targets when it is non-empty and falls back to this scalar otherwise — the old meaning
+  // stays readable forever, which is the whole reason the field was not reused.
   fixTarget: string | undefined;
   // Extra media fed to a render besides the bench slots — e.g. an unmarked flat the human dropped
   // in. FK media(id).
   extraInputMediaIds: number[] | undefined;
+  // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
+  // which a single string could not express at all: the studio marks up three plates and asks for
+  // one correction across them, and a scalar target would make that three paid runs.
+  // SILHOUETTE SIDES ONLY, exactly as the scalar above: front | back | side_l | side_r. A detail is
+  // named in fix_slot_ids instead, because a bare view key cannot tell two details apart and this
+  // list is frozen into the run's history, where an ambiguous target could never be repaired.
+  fixTargets: string[] | undefined;
+  // The DETAIL slots this run was asked to fix, by design_bench_slot(id). Together with fix_targets
+  // this is the whole selection: sides by their view key, details by their address. The two lists
+  // are one selection and not two modes — a fix may name three sides and a cuff in one run.
+  fixSlotIds: number[] | undefined;
+  // Only meaningful with layout = one: the composite this run produces should come back WITH A
+  // PROPOSED CUT, so the human confirms frames instead of drawing four rectangles from nothing.
+  // IT CUTS NOTHING BY ITSELF. The frames stay a human's and the cut stays SplitDesignPicture's: a
+  // wrong rectangle is paid for twice — once in the ruined plate, once in the regeneration that
+  // replaces it — so the server may GUESS and only a person may act. The flag records that the
+  // guess was asked for, which is why it belongs in the frozen params and not in a UI preference.
+  autoSplit: boolean | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -4469,6 +4530,9 @@ export type DesignThreedParams = {
 // Total encoded size capped at 64 KB; refs ≤ 24; slots ≤ 8. A snapshot must fit in a row and in an
 // eye.
 export type DesignInputSnapshot = {
+  // The words that went to the model about the GARMENT — a frozen copy of the card's
+  // garment_description (W-3) as it read at launch. Frozen rather than joined: editing the
+  // description later must not rewrite what an old run was told.
   garmentNote: string | undefined;
   mood: DesignMoodSnapshot | undefined;
   refs: DesignInputRef[] | undefined;
@@ -4488,12 +4552,27 @@ export type DesignMoodSnapshot = {
   callouts: DesignMoodCallout[] | undefined;
 };
 
-// DesignMoodCallout is one frozen moodboard callout inside a run snapshot: which image, what it
-// said. Geometry is deliberately absent — the snapshot answers «what did the model read», and a
-// marker position is not something a model reads.
+// DesignMoodCallout is one frozen callout inside a run snapshot: which image, what it said, and
+// WHERE IT POINTED.
+// IT IS THE BAND'S SINGLE FROZEN-CALLOUT SHAPE and it is reused verbatim for reference images
+// (DesignInputRef.callouts). The name says where it was born, not that there are two kinds of
+// callout: a second message of the same shape would be two homes for one fact, and the two would
+// disagree the first time one of them grew a field.
+// GEOMETRY USED TO BE ABSENT HERE, on the argument that a marker position is not something a model
+// reads. The argument outlived its reason. The snapshot is also what a RERUN replays and what the
+// run panel draws, and both need the shape: freezing the words and dropping the markup produces a
+// record that cannot reproduce the run it claims to describe, and a rerun that quietly sends LESS
+// than the first run did.
 export type DesignMoodCallout = {
   mediaId: number | undefined;
   text: string | undefined;
+  // The frozen shape — the SAME TechCardAnnotation the sheet freezes and the card draws, at the
+  // same coordinate precision. Its own `text` is left empty: the words that were read live in
+  // `text` above, composed, exactly as DesignSheetCallout arranges the same pair.
+  // Unset = this callout carried no shape, or predates the field. That is a readable state and is
+  // NOT the same as a zero-area rectangle at the top-left corner, which is what a non-optional
+  // geometry would have made it indistinguishable from.
+  annotation: TechCardAnnotation | undefined;
 };
 
 // DesignInputRef is one reference image fed to the run.
@@ -4507,6 +4586,13 @@ export type DesignInputRef = {
   role: string | undefined;
   note: string | undefined;
   deleted: boolean | undefined;
+  // THE MARKUP FROZEN ON THIS REFERENCE — the callouts pinned on it at launch, geometry included.
+  // W-7 asks the run panel to show «our prompt: the pictures, the descriptions and the markup», and
+  // a reference stripped of its markup answers two thirds of that. Same shape as the moodboard's
+  // because it IS the same thing pinned on a different image; see DesignMoodCallout.
+  // Frozen like everything else in the snapshot: re-pinning the live callout later does not move
+  // what an old run was told.
+  callouts: DesignMoodCallout[] | undefined;
 };
 
 // DesignInputSlot is one bench plate fed to a render or a fix.
@@ -4600,6 +4686,16 @@ export type DesignPicture = {
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // MARKED AS CHOSEN (W-12) — the plate the studio settled on among a run's outputs. Reversible and
+  // presentational; it forbids nothing and gates nothing.
+  // IT IS NOT hidden_at WITH THE SIGN FLIPPED, and the two must never be collapsed. Hiding says «do
+  // not show me this», choosing says «this is the one»; a card can have four visible turntables and
+  // one chosen among them, and it can have a chosen plate that somebody later hid. Spending
+  // hidden_at on both would make un-hiding a rejected frame silently re-elect it.
+  // The bench is where a FLAT becomes canonical — a slot holds at most one plate, and that IS the
+  // choice. A 3D frame has no slot to be put into (the bench refuses kind=threed), so without this
+  // flag «this is the render we go with» had nowhere at all to be written down.
+  selected: boolean | undefined;
 };
 
 // DesignBatch is one upload gesture: the shelf stamp «uploaded · Т. · 14:41 · 12.4 MB» and the
@@ -4643,6 +4739,15 @@ export type DesignReference = {
   ordinal: number | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
+  // WHAT THE HUMAN SAID ABOUT THIS REFERENCE — «only the collar», «the fabric, not the cut» (W-3).
+  // It goes to the model beside the image; without it a board of eight references states eight
+  // roles and no intent, and the intent is the half that changes the answer.
+  // It is a hint to the model, exactly like `role`, so it enters NO section digest and stales no
+  // sign-off: saving a note is not a change to the garment.
+  // Clearing the note is an empty string on a row that still has a role; clearing the ROLE deletes
+  // the row and takes the note with it, because the row is the role's existence — see the comment
+  // on `role` above and SetDesignReferenceRole.
+  note: string | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
@@ -4668,6 +4773,14 @@ export type DesignBenchSlot = {
   // refusal usable — Aborted:slot_rev_mismatch hands back the slot's CURRENT state, and a bare id
   // there would force the loser of the race into another round trip before it could redraw.
   picture: DesignPicture | undefined;
+  // WHICH BENCH this slot stands on: flat | render | threed. THE BENCH HAS TWO AXES, view × kind,
+  // and this is the second one. Empty is read as `flat` — every slot that existed before this field
+  // is a flat slot, and every caller written before it keeps meaning the bench it meant.
+  // ONE AXIS WAS A DEFECT, not a simplification. With view alone, a fabric render of the front and
+  // the technical flat of the front are the same key: placing the render DISPLACES the flat, and
+  // the next mint lays a colour render onto a technical line-drawing sheet. Uniqueness is
+  // (tech_card_id, kind, exclusive_key).
+  kind: string | undefined;
 };
 
 // DesignSheetVersion is a MINTED, FROZEN sheet: Rev.N as it was printed. Its plates and callouts
@@ -4760,6 +4873,28 @@ export type DesignEditLayer = {
   strokes: string | undefined;
   updatedBy: string | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // WHERE THE STROKES CAME FROM, an open vocabulary like every other in this file:
+  // drawn | imported | vectorised. Empty reads as `drawn`, which is what every layer that predates
+  // this field is.
+  // It is provenance, and it is the layer's half of the one DesignPicture.source_class already
+  // states for pixels. A layer that cannot say whether a human drew it or a machine traced it makes
+  // the mixed-provenance warning uncomputable for everything vector.
+  origin: string | undefined;
+  // FK media(id) RESTRICT: the AUTHORITATIVE vector file this layer is a projection of — the SVG
+  // that was imported, or the one the vectoriser returned. 0 = there is no file; the strokes are
+  // the original.
+  // MEDIA HOLDS THE FILE, `strokes` HOLDS THE EDITABLE PROJECTION, and this is the edge between
+  // them. `download SVG` hands back THIS media and never a re-serialisation of the strokes: a round
+  // trip through the canvas's own format is not the file the vectoriser produced, and quietly
+  // substituting one for the other is how a supplier receives a different drawing than the one that
+  // was approved. RESTRICT because the file may not be deleted out from under the layer.
+  sourceMediaId: number | undefined;
+  // FK design_picture(id): the RASTER this vector was traced from, when it was traced from one.
+  // 0 = the file came from outside the band, or the layer was drawn from nothing.
+  // It is what lets the studio ask «which flat is this the vector of» after the fact, and what a
+  // fix run needs in order to feed the raster and the vector as one input rather than two
+  // unrelated ones.
+  sourcePictureId: number | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.

@@ -74,14 +74,30 @@ export function WhatModelGetsModal({
   // react-hook-form 7.62 — a defect this band has already paid for once.
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
-  const concept = (useWatch({ control, name: 'concept' }) ?? '') as string;
-  const notes = (useWatch({ control, name: 'notes' }) ?? '') as string;
+  // `garment_description` (W-3), NOT `concept`. This line used to read `concept`, and the two are
+  // different documents: `concept` is prose printed for the factory, `garment_description` is the
+  // sentence the operator writes FOR THE MODEL and which goes into every run. Showing one under
+  // the other's name made this panel state, next to a price, that the model receives words it does
+  // not receive — and hides the words it does.
+  const garment = (useWatch({ control, name: 'garmentDescription' }) ?? '') as string;
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
 
   const roleOf = useMemo(() => {
     const map = new Map<number, string>();
     for (const r of band.references ?? []) {
       if (r.mediaId != null && (r.role ?? '').trim()) map.set(r.mediaId, (r.role as string).trim());
+    }
+    return map;
+  }, [band.references]);
+
+  // The reference's note. It used to be read off the board row's `caption`; it now lives on
+  // `DesignReference.note`, beside the role, because it is a statement about the INPUT and not
+  // about the picture. Reading the old place would have shown every note as blank — the quietest
+  // possible way for this panel to under-report what the model is given.
+  const noteOf = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const r of band.references ?? []) {
+      if (r.mediaId != null && (r.note ?? '').trim()) map.set(r.mediaId, (r.note as string).trim());
     }
     return map;
   }, [band.references]);
@@ -100,7 +116,7 @@ export function WhatModelGetsModal({
       const role = roleOf.get(item.mediaId) ?? '';
       if (item.kind !== REFERENCE_KIND && !role) continue;
       seen.add(item.mediaId);
-      const line: Line = { mediaId: item.mediaId, role, note: (item.caption ?? '').trim() };
+      const line: Line = { mediaId: item.mediaId, role, note: noteOf.get(item.mediaId) ?? '' };
       if (role) inPrompt.push({ ...line, number: ++n });
       else onCardOnly.push(line);
     }
@@ -108,22 +124,21 @@ export function WhatModelGetsModal({
     // row is what the model would be fed — and it is listed last so it can be found and cleared.
     for (const [mediaId, role] of roleOf) {
       if (seen.has(mediaId)) continue;
-      inPrompt.push({ mediaId, role, note: '', number: ++n });
+      inPrompt.push({ mediaId, role, note: noteOf.get(mediaId) ?? '', number: ++n });
     }
     return { inPrompt, onCardOnly };
-  }, [items, roleOf]);
+  }, [items, roleOf, noteOf]);
 
   const moodCount = items.filter((i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId)).length;
 
   const words = useMemo(
     () =>
       [
-        `garment: ${concept.trim() || '—'}`,
+        `garment: ${garment.trim() || '—'}`,
         `fit: ${fit.trim() || '—'} (from the card)`,
-        `notes: ${notes.trim() || '—'}`,
         `references in the prompt: ${lines.inPrompt.length} of ${lines.inPrompt.length + lines.onCardOnly.length}`,
       ].join('\n'),
-    [concept, fit, notes, lines],
+    [garment, fit, lines],
   );
 
   const copy = async () => {
@@ -245,13 +260,11 @@ export function WhatModelGetsModal({
             >
               callouts · {callouts.length}
             </Chip>
-            <Chip
-              onClick={() =>
-                openDoor('notes', 'notes are in the description block on STUDIO', showMessage)
-              }
-            >
-              notes
-            </Chip>
+            {/* The `notes` chip is gone with its field: U-9 removed the notes editor from the band,
+                so this door led to a block that no longer exists — a chip that opens nothing is
+                worse than no chip, because it teaches the reader that the panel's other doors
+                might be decorative too. The field itself still round-trips; it is simply not
+                authored here and never was sent to the model. */}
             <Chip title='the bill of materials lives on its own tab'>BOM</Chip>
             <Chip title='colourways live on their own tab'>colourways</Chip>
           </ChipRow>

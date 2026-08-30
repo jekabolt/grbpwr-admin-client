@@ -2,8 +2,8 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
 import { Link, useParams } from 'react-router-dom';
-import Media from 'ui/components/media';
 import Text from 'ui/components/text';
+import { Row } from 'ui/components/row';
 
 function productName(product?: common_Colorway): string {
   return product?.display?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`;
@@ -40,7 +40,7 @@ export function ProductIdsField() {
 
   return (
     <div className='space-y-3'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
+      <div className='flex flex-wrap items-center justify-between gap-x-3 gap-y-1'>
         <Text variant='inactive' size='small'>
           every colourway of this style is a product — this list is read-only. Add, remove or
           archive colourways from the colourways tab.
@@ -58,25 +58,29 @@ export function ProductIdsField() {
           no colourways yet
         </Text>
       ) : (
-        <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4'>
+        <div>
           {colorwayIds.map((cwId) => {
             const product = productMap.get(cwId);
             const name = product ? productName(product) : `#${cwId}`;
             return (
-              <div key={cwId} className='min-w-0 border border-textInactiveColor p-2'>
-                <Media
-                  src={product?.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
-                  alt='thumbnail'
-                  aspectRatio='1/1'
-                  fit='contain'
-                />
-                <Text className='mt-1 truncate' title={name}>
-                  {name}
-                </Text>
-                <Text variant='inactive' size='small'>
-                  #{cwId}
-                </Text>
-              </div>
+              <Row
+                key={cwId}
+                label={
+                  <Text size='small' component='span' variant='inactive'>
+                    SKU
+                  </Text>
+                }
+                value={
+                  <span className='flex min-w-0 items-center gap-2'>
+                    <span className='truncate' title={name}>
+                      {name}
+                    </span>
+                    <Text variant='inactive' size='small' component='span'>
+                      #{cwId}
+                    </Text>
+                  </span>
+                }
+              />
             );
           })}
         </div>

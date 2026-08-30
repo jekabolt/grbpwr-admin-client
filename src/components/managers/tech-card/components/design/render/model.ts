@@ -206,6 +206,87 @@ export function latestRenderByView(band: GetDesignBandResponse): RenderByView {
   return out;
 }
 
+/**
+ * EVERY OUTPUT OF ONE KIND THIS PAGE OF THE BAND HOLDS — the renders, or the turntable frames.
+ *
+ * READ OFF THE RUN, like everything else here (`runKindOf`): `picture.kind` is an open string whose
+ * production vocabulary this bundle has never seen, and a list filtered against a dictionary you
+ * have not seen empties silently. Hidden pictures are dropped — `hidden_at` is the one persistent
+ * verb for invisibility and a screen that ignores it shows a plate its owner has already withdrawn.
+ *
+ * PAGE-BOUND, AND EVERY CALLER SAYS SO. The band ships one page of the merged feed; this is what
+ * that page carries, newest run first, and never a claim about the whole card.
+ */
+export function outputsOfKind(
+  band: GetDesignBandResponse,
+  kind: 'render' | 'threed',
+): { picture: common_DesignPicture; run: common_DesignRun }[] {
+  const out: { picture: common_DesignPicture; run: common_DesignRun }[] = [];
+  for (const run of band.runs ?? []) {
+    if ((run.kind ?? '').trim().toLowerCase() !== kind) continue;
+    for (const picture of run.pictures ?? []) {
+      if (isPictureHidden(picture)) continue;
+      if ((picture.id ?? 0) <= 0) continue;
+      out.push({ picture, run });
+    }
+  }
+  return out;
+}
+
+/* ─────────────────────────── «selected», W-12 ─────────────────────────── */
+
+/**
+ * ═══ THE MARK «SELECTED» ON A RUN'S PICTURE — W-12 ════════════════════════════════════════════
+ *
+ * THE FIELD IS ON THE WIRE. `common_DesignPicture.selected` is a boolean of its own, and the
+ * contract states in as many words why it is not `hidden_at` with the sign flipped: hiding says «do
+ * not show me this», choosing says «this is the one», a card can hold four visible turntables with
+ * one chosen among them, and spending `hidden_at` on both would make un-hiding a rejected frame
+ * silently re-elect it. Every reader in this bundle goes through this one function so the two
+ * notions cannot be confused at a call site.
+ *
+ * A FLAT NEEDS NO SUCH FLAG AND DOES NOT GET ONE: the bench slot IS the choice, because a slot
+ * holds at most one plate. The flag exists for 3D precisely because the bench refuses `kind=threed`
+ * and a turntable frame therefore had nowhere at all to be elected.
+ */
+export function pictureIsSelected(picture?: common_DesignPicture | null): boolean {
+  return picture?.selected === true;
+}
+
+/**
+ * DOES THE SERVER THAT ANSWERED STATE THE FLAG AT ALL?
+ *
+ * NOT the same question as «does the contract have the field» — this bundle's contract does, since
+ * it was regenerated. The question is about the BINARY on the other end: a rolled-back one answers
+ * the band's routes with a message that has no `selected` in it, and `EmitUnpopulated` means a
+ * server that HAS the field always sends it (as `false` when unset). So `undefined` is a truthful
+ * «this server does not know about the mark» and `false` is a truthful «not chosen» — reading both
+ * as «not chosen» would make a screen filtered on the mark look convincingly empty against an old
+ * binary. This band already treats rolled-back binaries as a live case; see `use-design-band.ts`.
+ */
+export function serverStatesSelected(picture?: common_DesignPicture | null): boolean {
+  return typeof picture?.selected === 'boolean';
+}
+
+/**
+ * THE VERB THAT WOULD WRITE THE MARK, AND IT DOES NOT EXIST YET.
+ *
+ * The field arrived with the contract wave; the RPC did not. `HideDesignPicture` is still the only
+ * picture-level verb on `AdminService`, and it writes the OTHER statement — smuggling a `selected`
+ * flag onto it would be exactly the collapse the contract's own comment forbids, and would put two
+ * unrelated permissions behind one RBAC row.
+ *
+ * So the mark is READ-ONLY on this client: the badge is drawn from whatever the server states, and
+ * the control that would set it is an inert door carrying this sentence. A local `useState`
+ * standing in for the verb would be worse than an inert door — it would look like it worked and
+ * lose the choice on the next refetch, with nothing saying so.
+ */
+export const SELECT_VERB_MISSING =
+  'the field `DesignPicture.selected` is on this contract and this screen reads it, but nothing can ' +
+  'yet WRITE it: `HideDesignPicture` is still the only picture-level verb on the service, and it ' +
+  'carries the other statement — reversible invisibility, not an editorial choice. Setting the mark ' +
+  'needs an RPC of its own, which arrives with the handlers wave';
+
 /** The revisions the four sides currently come from, ascending and deduplicated. */
 export function renderRevisions(byView: RenderByView): number[] {
   const revs = new Set<number>();
@@ -338,7 +419,38 @@ export function renderGate(band: GetDesignBandResponse): Gate {
   return { ok: true };
 }
 
+/**
+ * THE SERVER'S OWN ANSWER TO «MAY 3D BE ASKED FOR AT ALL» — W-13, read and never recomputed.
+ *
+ * `has_fabric_render` is on the band response precisely so the interface does not have to derive
+ * it: `StartDesignRun` refuses `kind=threed` without an unhidden fabric render, and a client
+ * counting renders off the page it was handed would be wrong by exactly the renders that are NOT on
+ * that page — the usual case on a card with any history. So a screen that computed its own answer
+ * would draw the door open and collect a refusal, or draw it shut over a card that is ready.
+ *
+ * `undefined` IS NOT `false`. A rolled-back binary answers without the field; reading its silence
+ * as «no render» would lock 3D on every card that server serves. Absence means «this server does
+ * not state it», and the honest reaction is to say nothing and let the server refuse if it must.
+ */
+export function fabricRenderGate(band: GetDesignBandResponse): Gate {
+  if (band.hasFabricRender === false) {
+    return {
+      ok: false,
+      reason:
+        '3D turns a fabric render, and this card owns none that is visible — draw the flats, ' +
+        'render them, then come back. The refusal is the server’s: a run of kind 3D is rejected ' +
+        'without one',
+    };
+  }
+  return { ok: true };
+}
+
 export function threedGate(band: GetDesignBandResponse): Gate {
+  // THE SERVER'S REFUSAL COMES FIRST, so the client's first sentence about 3D is the same sentence
+  // the server would answer with. The finer conditions below are about assembling ONE turntable out
+  // of four sides and are the client's own; they can only narrow this, never widen it.
+  const fabric = fabricRenderGate(band);
+  if (!fabric.ok) return fabric;
   const budget = budgetLine(band);
   if (budget?.exhausted) {
     return {

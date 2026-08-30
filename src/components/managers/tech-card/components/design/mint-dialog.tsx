@@ -567,8 +567,15 @@ export function MintDialog({
       // the two payload paths cannot diverge on a rolled-back binary.
       const { payload } = gateTechCardPayload(insert, { serverSpeaksDesign: speaks });
 
+      // `kind` names WHICH BENCH the address belongs to; the bench became two-axis (view × kind)
+      // in 0349, so a bare view no longer identifies one slot. The sheet is a FLAT sheet by
+      // definition — the server's composeMintPlates filters to flats — so naming anything else
+      // here would ask to freeze a plate the mint will refuse.
       const expectedPlates: DesignExpectedPlate[] = bench.all.map((slot) => ({
-        slot: (slot.id ?? 0) > 0 ? { slotId: slot.id } : { viewKey: slot.viewKey },
+        slot:
+          (slot.id ?? 0) > 0
+            ? { slotId: slot.id, kind: 'flat' }
+            : { viewKey: slot.viewKey, kind: 'flat' },
         slotRev: slot.slotRev ?? 0,
       }));
 

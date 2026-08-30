@@ -18,22 +18,32 @@ import { viewLabel } from '../views';
  * IT IS NOT PART OF THE CARD. A fix context that survived a reload would be a screen that looks
  * broken for reasons no field explains, so it dies on Esc and on unmount and is never persisted.
  *
- * WHAT A FIX ACTUALLY CHANGES, and why the form cannot simply add a checkbox: `params.fix_target`
+ * WHAT A FIX ACTUALLY CHANGES, and why the form cannot simply add a checkbox: `params.fix_targets`
  * replaces the whole question. The views matrix and the layout switch are NOT drawn while a fix is
- * armed, because a fix asks for exactly one picture of exactly one side — leaving them on screen
- * would make three organs lie at once (the ticks, the count and the price line), each of them about
- * a request the server is not being sent. The prototype notes the same rule as П4.
+ * armed, because a fix asks for the SIDES ALREADY ON THE BENCH — leaving them on screen would make
+ * three organs lie at once (the ticks, the count and the price line), each of them about a request
+ * the server is not being sent. The prototype notes the same rule as П4.
  *
- * SILHOUETTE SIDES ONLY. The contract refuses a detail here on purpose: a bare view key cannot name
- * one of several details, and the target is frozen into the run's history where an ambiguity could
- * never be repaired afterwards.
+ * IT IS A SELECTION, NOT ONE SIDE — and that is the shape of the wire rather than a convenience.
+ * `DesignRunParams` carries `fix_targets` (silhouette view keys) and `fix_slot_ids` (details, by
+ * address) as ONE selection: «select everything in FLAT SLOTS» is W-10, and it was unexpressible
+ * while the field was a scalar — three marked-up plates and one correction across them would have
+ * been three paid runs.
+ *
+ * WHY THE DETAILS TRAVEL AS IDS. A bare view key cannot tell two details apart, and this list is
+ * frozen into the run's history where an ambiguous target could never be repaired afterwards. The
+ * scalar `fix_target` still exists on the wire and is deliberately NOT written by anything here: it
+ * is what already-frozen rows say, and a reader takes the array when it is non-empty and falls back
+ * to the scalar otherwise.
  */
 
 export type FixTarget = {
-  /** front | back | side_l | side_r — normalised, as the wire spells it. */
-  viewKey: string;
-  /** What to say out loud: FRONT, SIDE L. */
-  label: string;
+  /** front | back | side_l | side_r — normalised, as the wire spells them. May be empty. */
+  viewKeys: string[];
+  /** `design_bench_slot(id)` of every detail in the selection. May be empty. */
+  slotIds: number[];
+  /** What to say out loud, in the order the bench draws them: FRONT, SIDE L, cuff. */
+  labels: string[];
 };
 
 type FixContextValue = {
@@ -45,8 +55,8 @@ type FixContextValue = {
 /**
  * DEFAULT IS INERT, and that is deliberate. An organ rendered outside the provider reports «no fix
  * armed» and draws nothing, rather than throwing — the same failure posture `capability.tsx` takes.
- * Nothing in the band currently OPENS a fix (the `fix ▸` door under a slot is not built yet), so
- * outside a provider this is silence, not a dead button.
+ * A bench mounted without the provider therefore has a `fix ▸` that quietly does nothing, which is
+ * the mount error showing itself as silence rather than as a crash.
  */
 const FixCtx = createContext<FixContextValue>({
   target: null,
@@ -105,14 +115,16 @@ export function FixContext({
 
   const bench = readBench(band);
   const others = bench.sides
-    .filter((s) => s.view !== target.viewKey && (s.slot?.pictureId ?? 0) > 0)
+    .filter((s) => !target.viewKeys.includes(s.view) && (s.slot?.pictureId ?? 0) > 0)
     .map((s) => viewLabel(s.view));
 
   return (
     <CalloutBox tone='note' className='bg-bgColor'>
       <div className='flex flex-wrap items-baseline gap-2'>
         <Text size='micro' component='span' className='uppercase tracking-label'>
-          <b>fix: {target.label}</b>
+          {/* Каждая выбранная сторона названа. «fix: 3 slots» звучит короче и не даёт проверить
+              состав ровно там, где за него сейчас заплатят. */}
+          <b>fix: {target.labels.join(', ')}</b>
         </Text>
         <Text size='micro' variant='label' component='span' className='min-w-0'>
           inputs: the slots ({others.length ? others.join(', ') : 'none filled'}) — the same

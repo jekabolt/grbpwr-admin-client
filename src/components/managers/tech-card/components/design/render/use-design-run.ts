@@ -30,6 +30,16 @@ export type StartRunInput = {
   /** The delta phrase the human typed; the caption of the history row. May be empty. */
   ask: string;
   params: common_DesignRunParams;
+  /**
+   * THE RUN THIS ONE REPEATS, or 0 for an ordinary run.
+   *
+   * A RERUN IS THE SERVER'S JOB, NOT A CLIENT SNAPSHOT. The contract carries `rerun_of_run_id` so
+   * that «ask for that again» means «take THAT run's frozen inputs», resolved on the side that
+   * holds them. A client that rebuilt the old parameters out of what is on screen would silently
+   * substitute today's references and today's bench for the ones the run actually used — and the
+   * history would then show two runs claiming the same inputs and holding different pictures.
+   */
+  rerunOfRunId?: number;
 };
 
 export type StartRunState = {
@@ -62,6 +72,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
         kind: input.kind,
         ask: input.ask,
         params: input.params,
+        rerunOfRunId: input.rerunOfRunId ?? 0,
       }),
     onSuccess: () => {
       ledger.current = null;
@@ -84,7 +95,15 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   const start = useCallback(
     (input: StartRunInput) => {
       if (!techCardId || techCardId <= 0) return;
-      const fingerprint = JSON.stringify([input.kind, input.ask, input.params]);
+      // THE FINGERPRINT COVERS EVERY FIELD THAT REACHES THE WIRE. `rerun_of_run_id` is part of the
+      // intent — «run 7 again» is not the same request as «run this» — so leaving it out would
+      // replay one idempotency key across two different jobs and hand back the wrong run.
+      const fingerprint = JSON.stringify([
+        input.kind,
+        input.ask,
+        input.params,
+        input.rerunOfRunId ?? 0,
+      ]);
       if (ledger.current?.fingerprint !== fingerprint) {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }

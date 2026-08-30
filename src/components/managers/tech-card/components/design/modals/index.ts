@@ -38,17 +38,33 @@ export {
 } from './use-edit-layer';
 
 export {
+  CONTROL_REACH,
   DEFAULT_RATIO,
+  FORMAT_VERSION,
   MAX_STROKES_BYTES,
   STITCHES,
+  cubicAt,
+  hasSegments,
   layerSvg,
   readLayer,
   settleTrace,
   stitchName,
   strokeGeometry,
+  strokePolyline,
   writeLayer,
+  type CubicSeg,
   type LayerDoc,
   type StitchKey,
   type StrokeWeight,
   type VectorStroke,
 } from './vector-strokes';
+
+export { SvgImportDoor } from './svg-import-door';
+export {
+  arcToCubics,
+  importSvg,
+  parsePathData,
+  type SvgImportReading,
+  type SvgImportRefusal,
+  type SvgImportResult,
+} from './svg-import';

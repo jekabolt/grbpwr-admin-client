@@ -105,7 +105,9 @@ export function NewDetailModal({
     setBenchSlot.mutate(
       {
         // `view_key: 'detail'` MINTS. `expected_slot_rev` must be 0 — the row does not exist yet.
-        slot: { viewKey: 'detail' },
+        // `kind` names WHICH BENCH and is left empty, which the contract fixes as the flat one —
+        // this modal is reached from a flat tile's picker and knows of no second bench.
+        slot: { viewKey: 'detail', kind: undefined },
         pictureId: picture?.id ?? 0,
         expectedSlotRev: 0,
         newDetailName: named,

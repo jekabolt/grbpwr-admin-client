@@ -58,7 +58,8 @@
     "note:format-edits": "node scripts/format-edits-probe.mjs",
     "intake:queue": "node scripts/intake-queue-probe.mjs",
     "intake:paste": "node scripts/media-intake-probe.mjs",
-    "note:format-bar": "node scripts/format-bar-probe.mjs"
+    "note:format-bar": "node scripts/format-bar-probe.mjs",
+    "vector:svg": "node scripts/svg-import-probe.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",

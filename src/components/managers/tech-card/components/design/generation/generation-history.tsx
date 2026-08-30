@@ -6,9 +6,10 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
+import { Chip } from 'ui/components/chip';
 import {
   MediaViewer,
   mediaFullListToViewerItems,
@@ -25,9 +26,17 @@ import { buildHideGuard, isPickablePicture } from '../band-feed';
 import { displayDetailName, readBench } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { clockStamp, pictureHandle, runHandle } from '../handles';
+import {
+  DIVIDER_SCOPE,
+  fingerprint,
+  firstEarlierIndex,
+  refsOfCard,
+} from '../history-fingerprint';
+import { useDesignQuestion } from '../history-question';
+import { RecalledRunPrompt, recallDesignRun, useRecallHostMounted, useRecalledRun } from '../history-recall';
 import { usePickMode } from '../pick-mode';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
-import { SplitModal, isComposite } from '../split-modal';
+import { SplitModal } from '../split-modal';
 import { useDesignWrites } from '../use-design-band';
 import {
   canOfferHide,
@@ -41,12 +50,13 @@ import {
   type HideGuard,
 } from '../visibility';
 import { viewLabel } from '../views';
+import { CompositeBadge, CompositeMarks, compositeTail, readComposite, splitVerb } from './composite';
 import { formatMoney } from './money';
 import { RunPanel } from './run-panel';
 import {
   archiveBlockReason,
   expectedTileCount,
-  fixTargetOf,
+  fixSelectionOf,
   isCancelling,
   isRunLive,
   runCaption,
@@ -71,14 +81,20 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * aggregates over the WHOLE band; counting the rows on screen would make the header lie by exactly
  * the amount that is not on screen, and it would lie MORE the more history a card has.
  *
- * WHAT IS NOT DRAWN, AND WHY: the prototype's `earlier — inputs have changed since` divider. It
- * separates runs whose inputs match the CURRENT ones, and the fingerprint it compares includes the
- * garment description and the reference notes. Neither has a current value this client can read:
- * `garment_note` exists ONLY inside a run's frozen snapshot, because the SERVER composes what the
- * model is given. A divider computed from views and layout alone would place a run made from a
- * completely different description above the line and call it «current» — a false green, and the
- * one kind of lie a provenance organ may not tell. What each run actually asked for is on its own
- * panel instead, where it is a fact rather than a comparison.
+ * THE `earlier — inputs have changed` DIVIDER SEPARATES ANSWERS TO THE CURRENT QUESTION FROM
+ * ANSWERS TO AN OLDER ONE. It is computed over the WHOLE list and not over the page, so a long
+ * history does not lose it at the page seam — the pager carries its words instead when the line
+ * falls past the edge. The arithmetic and, more importantly, the exact width of what it claims live
+ * in `history-fingerprint.ts`; the line states its own scope on screen so it can never be read as
+ * comparing more than it compares. WITH NO GENERATION FORM ON THE SCREEN THERE IS NO CURRENT
+ * QUESTION AND NO DIVIDER — an absent line says nothing, which is the only honest thing to say when
+ * half of a comparison is missing.
+ *
+ * RECALLING A RUN (W-7) SELECTS IT AND SHOWS ITS PROMPT — the pictures, the descriptions and the
+ * markup it was given — where the owner asked for it: in INPUT — REFERENCES. That panel is
+ * `RecalledRunPrompt` and it is mounted THERE; this block draws it only as long as nothing else
+ * has, so the gesture always has a visible answer. Recalling changes nothing on the card, and the
+ * rerun itself is the server's verb (`rerun_of_run_id`), not a client-side rebuild of the inputs.
  */
 
 const PAGE = 4;
@@ -94,7 +110,9 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
   for (const side of bench.sides) {
     if ((side.slot?.pictureId ?? 0) === pictureId) {
       return {
-        ref: { viewKey: side.view },
+        // `kind` names WHICH BENCH; empty is flat by the contract, which is the bench this history
+        // unmarks from. Left empty rather than spelled — see the same note in `slot-picker.tsx`.
+        ref: { viewKey: side.view, kind: undefined },
         label: viewLabel(side.view),
         rev: side.slot?.slotRev ?? 0,
       };
@@ -103,7 +121,8 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
   for (const detail of bench.details) {
     if ((detail.pictureId ?? 0) === pictureId) {
       return {
-        ref: { slotId: detail.id },
+        // A minted id already names its bench; `kind` is ignored beside a slot_id.
+        ref: { slotId: detail.id, kind: undefined },
         label: displayDetailName(bench.details, detail),
         rev: detail.slotRev ?? 0,
       };
@@ -192,7 +211,11 @@ function RunTile({
 
   const pictureId = picture.id ?? 0;
   const hidden = isPictureHidden(picture);
-  const composite = isComposite(picture);
+  // WHAT THIS FILE DECLARES ABOUT ITSELF — see `composite.tsx`. `declared` is false on every row
+  // until the server writes `composite_views`, and every branch below then reads as an ordinary
+  // picture. Nothing here infers compositeness from what the run ASKED for.
+  const facts = readComposite(band, picture);
+  const composite = facts.declared;
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture);
   const inSlot = slotOfPicture(band, pictureId);
@@ -229,7 +252,12 @@ function RunTile({
           </Text>
         </span>
       )}
-      {inSlot ? (
+      {/* A COMPOSITE HAS NO SINGLE VIEW, so it never carries the single-guess badge: it carries one
+          mark per view it declares. A slot badge is impossible on it by the rule below, so the
+          three cases are exclusive and the top-left corner is never written twice. */}
+      {composite ? (
+        <CompositeMarks facts={facts} />
+      ) : inSlot ? (
         <span className='absolute left-0 top-0 bg-textColor px-1 text-nano uppercase text-bgColor'>
           {inSlot.label}
         </span>
@@ -238,11 +266,7 @@ function RunTile({
           probably {viewLabel(picture.ghostView)}
         </span>
       ) : null}
-      {composite && (
-        <span className='absolute bottom-0 left-0 bg-bgColor px-1 text-nano uppercase text-labelColor'>
-          {(picture.compositeViews ?? []).length} views
-        </span>
-      )}
+      <CompositeBadge facts={facts} />
       {fitMismatch && (
         <span className='absolute bottom-0 right-0 bg-bgColor px-1 text-nano uppercase text-error'>
           fit {runFit} ≠ card {cardFit}
@@ -251,9 +275,12 @@ function RunTile({
     </div>
   );
 
+  // `AI · run 7 · 3 views · split into 3` — the prototype's caption for a composite, and the
+  // ordinary provenance line for everything else. The tail is empty unless the file declares views.
   const sub = (
     <>
       {provenanceLabel(provenance)}
+      {compositeTail(facts)}
       {mixed ? ` · ${mixed}` : ''}
     </>
   );
@@ -294,10 +321,11 @@ function RunTile({
   } else if (composite) {
     footer = (
       <>
+        {/* NO SLOT PICKER IN THIS BRANCH, AND THAT IS THE RULE, NOT AN OMISSION: a slot holds one
+            view and this file holds several, so the only door it gets is the one that turns it into
+            pictures a slot can read. The same refusal answers pick mode above. */}
         {!disabled && (
-          <TileAction onClick={() => onSplit(picture)}>
-            {(picture.derivedFrom ?? 0) > 0 ? 'split again ▸' : 'split into views ▸'}
-          </TileAction>
+          <TileAction onClick={() => onSplit(picture)}>{splitVerb(facts)}</TileAction>
         )}
         {mayHide && (
           <TileAction
@@ -409,6 +437,7 @@ function RunRow({
   const { archiveRun } = useGenerationWrites(techCardId);
   const [open, setOpen] = useState(false);
   const [revealHidden, setRevealHidden] = useState(false);
+  const recalled = useRecalledRun(techCardId);
 
   const runId = run.id ?? 0;
   const archived = isRunArchived(run);
@@ -421,8 +450,27 @@ function RunRow({
   const hiddenCount = hiddenCountOfRun(band, runId) || countHiddenPictures(pictures);
   const archiveWhy = archiveBlockReason(run, guard);
   const price = formatMoney(run.priceActual ?? run.priceEstimate, run.currency);
-  const fix = fixTargetOf(run);
+  /**
+   * WHAT THIS ROW WAS ASKED TO FIX, WHOLE. A fix may name several sides and a detail in one run, so
+   * the caption counts the selection rather than showing its first member and quietly dropping the
+   * rest — «fix: front» on a row that repaired three slots is the kind of caption that gets
+   * believed.
+   */
+  const fix = fixSelectionOf(run);
+  const fixNames = [
+    ...fix.views.map((view) => viewLabel(view)),
+    ...fix.slotIds.map(() => 'a detail'),
+  ].filter(Boolean);
   const status = runOutcomeNote(run);
+
+  /**
+   * RECALL IS OFFERED ONLY WHERE THERE IS A SNAPSHOT TO SHOW. A row served without `inputs` — an
+   * older row, a server that has not filed one yet — would select into an empty panel, and a
+   * gesture whose whole promise is «see what was fed» must not be offered when nothing was frozen.
+   */
+  const recallable = !!run.inputs;
+  const isRecalled = recallable && (recalled?.id ?? 0) === runId && runId > 0;
+  const rerunOf = run.rerunOf ?? 0;
 
   const meta = [
     runHandle(runId),
@@ -454,7 +502,16 @@ function RunRow({
           </Text>
         </button>
 
-        {fix && <Pill tone='mut'>fix: {viewLabel(fix)} · from the slots</Pill>}
+        {fixNames.length > 0 && (
+          <Pill tone='mut'>
+            fix: {fixNames.join(', ')} · from the slots
+          </Pill>
+        )}
+        {/* THE LINEAGE OF A RERUN, READ FROM THE ROW ITSELF. `rerun_of` is the server's own edge —
+            it says whose frozen snapshot this run was assembled from — so «why do these two rows
+            have the same inputs and different pictures» is answerable from the history alone,
+            without opening either panel. */}
+        {rerunOf > 0 && <Pill tone='mut'>repeat of {runHandle(rerunOf)}</Pill>}
         {live && (
           <Pill tone='attention'>
             {isCancelling(run) ? 'cancelling…' : `${status} ${elapsed}`}
@@ -474,6 +531,25 @@ function RunRow({
           >
             · {hiddenCount} hidden {revealHidden ? '▾' : '▸'}
           </button>
+        )}
+
+        {/* THE SELECTION GESTURE (W-7). A Chip and not a link, because selection is exactly what a
+            chip is for in this system, and `selected` is the one affordance that fills with ink —
+            so which run is recalled is legible at a glance down the list. It reads the card, never
+            writes it: recalling shows the frozen prompt somewhere else and changes nothing here. */}
+        {recallable && (
+          <Chip
+            selected={isRecalled}
+            pressed={isRecalled}
+            onClick={() => recallDesignRun(techCardId, isRecalled ? null : run)}
+            title={
+              isRecalled
+                ? 'stop showing this run’s prompt'
+                : 'show what this run was given — its pictures, notes and markup — for a rerun'
+            }
+          >
+            {isRecalled ? 'recalled' : 'recall ▸'}
+          </Chip>
         )}
 
         <span className='ml-auto'>
@@ -568,6 +644,33 @@ function RunRow({
   );
 }
 
+/* ────────────────────────────── the divider ────────────────────────────── */
+
+/**
+ * `earlier — inputs have changed`, drawn at the weight of a CLOSING TOTAL: 1px ink with the caption
+ * sitting on the line. It is the fourth rung of the ladder in DESIGN.md and the right one — the
+ * line closes the runs that still answer today's question, it does not open a new group.
+ *
+ * IT STATES ITS OWN SCOPE. A divider is a claim about a comparison, and a reader cannot check a
+ * comparison whose terms are invisible; `DIVIDER_SCOPE` names them, so «inputs» never reads as
+ * «everything about the inputs».
+ */
+function EarlierDivider({ runs, pictures }: { runs: number; pictures: number }) {
+  return (
+    <div className='mt-3 flex flex-wrap items-baseline gap-2 border-t border-textColor pt-1.5'>
+      <Text size='micro' component='span' className='uppercase' tracking='group'>
+        earlier — inputs have changed
+      </Text>
+      <Text size='nano' variant='label' component='span'>
+        {runs} run{runs === 1 ? '' : 's'} · {pictures} picture{pictures === 1 ? '' : 's'} below
+      </Text>
+      <Text size='nano' variant='label' component='span' className='ml-auto'>
+        compared on {DIVIDER_SCOPE}
+      </Text>
+    </div>
+  );
+}
+
 /* ────────────────────────────── the section ────────────────────────────── */
 
 export function GenerationHistory({
@@ -594,8 +697,36 @@ export function GenerationHistory({
 
   const form = useFormContext<TechCardFormData>();
   const cardFit = (form?.watch('fit') ?? '').trim();
+  /**
+   * The card's CURRENT garment description — the live half of the pair a run freezes as
+   * `inputs.garment_note`. Read from the form and not from the band, because the description is a
+   * field of the tech card and the form is where its unsaved edits live: comparing against a saved
+   * copy would leave the divider a save behind the human typing.
+   */
+  const cardGarment = (form?.watch('garmentDescription') ?? '').trim();
 
   const guard = useMemo(() => buildHideGuard(band), [band]);
+
+  /**
+   * THE CURRENT QUESTION — the form's half announced through `history-question.ts`, the card's half
+   * read from the band and the card. `null` when no generation form is on this screen, and a null
+   * question draws no divider at all.
+   */
+  const question = useDesignQuestion(techCardId);
+  const currentPrint = useMemo(
+    () =>
+      question
+        ? fingerprint({
+            views: question.views,
+            layout: question.layout,
+            refs: refsOfCard(band.references),
+            garmentNote: cardGarment,
+          })
+        : null,
+    [question, band.references, cardGarment],
+  );
+  /** Is the recalled prompt already being shown by its real home (INPUT — REFERENCES)? */
+  const recallHosted = useRecallHostMounted(techCardId);
 
   /**
    * The band's first page plus whatever continuations have been asked for, deduped by id: the
@@ -628,6 +759,18 @@ export function GenerationHistory({
   const shown = visible.slice(0, (page + 1) * PAGE);
   const localLeft = visible.length - shown.length;
   const canPage = localLeft > 0 || more.hasMore;
+
+  /**
+   * THE DIVIDER IS PLACED OVER THE WHOLE LIST, NOT OVER THE PAGE. Computed on `shown` it would
+   * appear and disappear as pages are read, i.e. be missing exactly on the long histories that need
+   * it; when it falls past the edge of the page the PAGER carries its words instead.
+   */
+  const pastAt = firstEarlierIndex(visible, currentPrint);
+  const earlierRuns = pastAt >= 0 ? visible.length - pastAt : 0;
+  const earlierPictures =
+    pastAt >= 0
+      ? visible.slice(pastAt).reduce((n, run) => n + (run.pictures ?? []).length, 0)
+      : 0;
 
   const onHide = useCallback(
     (pictureId: number, hidden: boolean) => {
@@ -704,22 +847,24 @@ export function GenerationHistory({
       )}
 
       <div className='space-y-2'>
-        {shown.map((run) => (
-          <RunRow
-            key={run.id}
-            band={band}
-            techCardId={techCardId}
-            run={run}
-            firstRunId={firstRunId}
-            cardFit={cardFit}
-            guard={guard}
-            disabled={disabled || !speaks}
-            onZoom={openZoom}
-            onHide={onHide}
-            onSplit={(picture) =>
-              setSplitting({ picture, handle: pictureHandle(picture) })
-            }
-          />
+        {shown.map((run, i) => (
+          <Fragment key={run.id}>
+            {i === pastAt && <EarlierDivider runs={earlierRuns} pictures={earlierPictures} />}
+            <RunRow
+              band={band}
+              techCardId={techCardId}
+              run={run}
+              firstRunId={firstRunId}
+              cardFit={cardFit}
+              guard={guard}
+              disabled={disabled || !speaks}
+              onZoom={openZoom}
+              onHide={onHide}
+              onSplit={(picture) =>
+                setSplitting({ picture, handle: pictureHandle(picture) })
+              }
+            />
+          </Fragment>
         ))}
       </div>
 
@@ -728,22 +873,43 @@ export function GenerationHistory({
           type='button'
           disabled={more.loading}
           onClick={() => {
-            if (localLeft > 0) setPage((p) => p + 1);
-            else more.fetchMore();
+            // READING A SERVER PAGE ALSO REVEALS ONE. Fetching without advancing the local window
+            // spent a click on nothing visible: the rows arrived, the button changed its wording,
+            // and the human had to press it a second time to actually see them.
+            setPage((p) => p + 1);
+            if (localLeft <= 0) more.fetchMore();
           }}
           className='cursor-pointer border-t border-textColor pt-1 text-left text-micro uppercase tracking-label text-labelColor hover:text-textColor disabled:cursor-not-allowed'
         >
           {more.loading
             ? 'reading earlier runs…'
-            : localLeft > 0
-              ? `earlier runs · ${localLeft} more ▸`
-              : 'earlier runs · read the next page ▸'}
+            : /* The divider's own words when the line itself is past the edge of the page — the
+                 prototype's rule, and the reason the divider is computed over the whole list. */
+              pastAt >= 0 && pastAt >= shown.length
+              ? `earlier — inputs have changed · ${localLeft > 0 ? `${localLeft} more` : 'read the next page'} ▸`
+              : localLeft > 0
+                ? `earlier runs · ${localLeft} more ▸`
+                : 'earlier runs · read the next page ▸'}
         </button>
+      )}
+
+      {/* THE RECALLED PROMPT'S HOME IS INPUT — REFERENCES, and this is the stand-in for as long as
+          nothing has claimed that home. `RecalledRunPrompt` announces itself when mounted, so this
+          copy vanishes the moment the real one exists — and until then the selection gesture on a
+          row still has a visible answer instead of pointing at an empty screen. */}
+      {!recallHosted && (
+        <RecalledRunPrompt
+          techCardId={techCardId}
+          band={band}
+          disabled={disabled || !speaks}
+          host={false}
+        />
       )}
 
       <Text size='nano' variant='label' component='p'>
         Click a run's line to unfold what was asked and what the model was given — launch-time
-        copies. The picker on a tile names the slot it goes to; ✕ hides, reversibly, and it is
+        copies. `recall` puts that same frozen prompt in INPUT — REFERENCES, so a rerun can be asked
+        for from it. The picker on a tile names the slot it goes to; ✕ hides, reversibly, and it is
         missing on a picture a slot reads.
       </Text>
 

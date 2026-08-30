@@ -32,6 +32,11 @@ export function GenerateRow({
   pending,
   disabled,
   onGenerate,
+  /**
+   * Open the prompt inventory for THIS screen. Supplied by both generative studios; when a composer
+   * does not hand it in, the door stays inert WITH ITS REASON rather than vanishing.
+   */
+  onInspect,
 }: {
   band: GetDesignBandResponse;
   gate: Gate;
@@ -39,6 +44,7 @@ export function GenerateRow({
   pending?: boolean;
   disabled?: boolean;
   onGenerate: () => void;
+  onInspect?: () => void;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
   const budget = budgetLine(band);
@@ -61,14 +67,24 @@ export function GenerateRow({
         <InertDoor label='generate' reason={gate.reason} />
       )}
 
-      {/* The prompt inventory door. Cut rather than guessed: what the model is actually shown is
-          assembled server-side from a prompt PROFILE, and a profile is server configuration whose
-          name reaches this client only as an OUTPUT of a run that has already happened. There is
-          nothing on the wire to open a truthful «what the model gets» panel over. */}
-      <InertDoor
-        label='what the model gets ▸'
-        reason='what the model is shown is assembled server-side from a prompt profile, and a profile reaches this screen only as the stamp on a run that has already happened — there is nothing here to open before one has'
-      />
+      {/* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.
+          It used to be inert, on the ground that the prompt is assembled server-side from a PROFILE
+          this client cannot read. That sentence is true and it is still printed — at the head of
+          the panel itself. What it never justified was hiding the payload: the profile is the
+          wrapper, and everything it wraps around (which plates go in, which colour rides with them,
+          which renders a turntable turns, and what is NOT sent at all) is on this card and is
+          knowable exactly. A person about to spend money on two screens out of three was being
+          asked to do it blind. */}
+      {onInspect ? (
+        <Button variant='secondary' size='xs' onClick={onInspect}>
+          what the model gets ▸
+        </Button>
+      ) : (
+        <InertDoor
+          label='what the model gets ▸'
+          reason='this screen was mounted without the inventory panel — it lists what the card contributes to the run, and the composer did not hand it in'
+        />
+      )}
 
       <Text size='micro' variant='label' component='span' className='min-w-0'>
         {shape} · priced by the server when the run starts

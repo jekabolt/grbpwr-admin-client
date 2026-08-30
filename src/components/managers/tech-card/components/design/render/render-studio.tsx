@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useMemo, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
@@ -12,6 +12,7 @@ import { benchSides, recipeIsStated, renderGate, type Gate } from './model';
 import { Palette } from './palette';
 import { RenderInputStrip } from './render-input-strip';
 import { useStartDesignRun } from './use-design-run';
+import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
  * THE FABRIC RENDER STUDIO — the whole of the `render` view of the DESIGN band.
@@ -44,6 +45,8 @@ export function RenderStudio({
   const draft = useColourDraft(band);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
+  /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
+  const [inspecting, setInspecting] = useState(false);
 
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
@@ -74,6 +77,14 @@ export function RenderStudio({
         threed: undefined,
         fixTarget: '',
         extraInputMediaIds: [],
+        // NOT A FIX, AND SAID EXPLICITLY IN BOTH SPELLINGS. `fix_target` is the frozen scalar the
+        // history already states; `fix_targets`/`fix_slot_ids` are the selection a new run uses.
+        // Empty in all three is «this run corrects nothing», which is what these two screens do.
+        fixTargets: [],
+        fixSlotIds: [],
+        // `auto_split` is only meaningful with layout = one, and neither of these screens produces
+        // a composite: a render comes back one picture per filled slot, a turntable frame by frame.
+        autoSplit: false,
       },
     });
   };
@@ -113,8 +124,18 @@ export function RenderStudio({
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
+          onInspect={() => setInspecting(true)}
         />
       </Section>
+
+      <WhatModelGetsRenderModal
+        open={inspecting}
+        onOpenChange={setInspecting}
+        band={band}
+        kind='render'
+        recipe={draft.recipe}
+        cardFit={cardFit}
+      />
     </>
   );
 }

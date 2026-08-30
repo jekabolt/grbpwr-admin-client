@@ -88,7 +88,11 @@ export function UploadsShelf({
       if (writesOff) return;
       const items: DesignUploadItem[] = media
         .filter((m) => (m.id ?? 0) > 0)
-        .map((m) => ({ mediaId: m.id, ghostView: '' }));
+        // `kind` is stated, not left empty: RegisterDesignUpload used to hardcode 'flat' on the
+        // server, which is exactly why renders and 3D could not be uploaded by hand at all. Now
+        // that the kind travels on the wire, THIS shelf is still the flat shelf — the render and
+        // 3D screens have intakes of their own and name their own kind.
+        .map((m) => ({ mediaId: m.id, ghostView: '', kind: 'flat' }));
       if (!items.length) return;
       fileIntent({ clientRequestId: newClientRequestId(), items });
     },

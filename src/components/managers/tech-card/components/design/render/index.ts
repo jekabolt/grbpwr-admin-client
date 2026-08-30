@@ -19,20 +19,28 @@ export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
 export { RenderStudio } from './render-studio';
 export { ThreedStudio } from './threed-studio';
+export { WhatModelGetsRenderModal } from './what-model-gets';
+export type { WhatModelGetsKind } from './what-model-gets';
 
 export { useCardFit, useColourDraft, useThreedDraft } from './drafts';
 export type { ColourDraft, ThreedDraft, ThreedDraftState } from './drafts';
 export { useStartDesignRun } from './use-design-run';
 export type { StartRunInput, StartRunState } from './use-design-run';
 export {
+  SELECT_VERB_MISSING,
   benchSides,
   budgetLine,
   colourChips,
   colourLabel,
   colourSourceOf,
+  fabricRenderGate,
   latestRenderByView,
+  outputsOfKind,
+  pictureIsSelected,
   renderGate,
   renderRevisions,
+  runKindOf,
+  serverStatesSelected,
   threedGate,
   turntableSourceIds,
   unmarkedFlats,

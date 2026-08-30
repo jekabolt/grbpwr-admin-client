@@ -164,6 +164,26 @@ export function SplitModal({
     [picture.compositeViews],
   );
 
+  /**
+   * WHAT THE FILE SAYS IT HOLDS, printed rather than silently consumed.
+   *
+   * `compositeViews` above is already funnelled through `guessedViewKey`, which blanks anything
+   * outside this bundle's dictionary — right for SEEDING a picker, wrong for TELLING a person what
+   * the file declares. So the sentence is built from the raw column through `viewLabel`, which
+   * echoes an unknown key back. Otherwise a composite glued from a view a newer server knows about
+   * would read as «declares nothing» on the one screen that exists to cut it apart.
+   */
+  const declaredLine = useMemo(
+    () =>
+      (picture.compositeViews ?? [])
+        .map((view) => viewLabel(view))
+        .filter(Boolean)
+        .join(', '),
+    [picture.compositeViews],
+  );
+
+  const declaredCount = (picture.compositeViews ?? []).length;
+
   const initial = useMemo(
     () => acrossPreset(Math.max(2, compositeViews.length || 2), compositeViews),
     [compositeViews],
@@ -293,8 +313,15 @@ export function SplitModal({
       width='lg'
       footerHint={
         <Text size='micro' variant='label' component='span'>
+          {/* THE LEDGER SENTENCE — the prototype's `1 generation → K pictures`, and it is here
+              because this is the one screen where a person multiplies pictures without spending
+              anything. A cut adds no run row and no charge: the crops are siblings under the
+              picture's own producer, so the money register still reads one generation. Without the
+              sentence the natural reading of «split into 3» is «three more of whatever that cost». */}
           the cut happens on the server, from the original bytes — the source picture stays where it
-          is
+          is.
+          {frames.length > 0 &&
+            ` No run row is added and nothing is charged again: the register reads 1 generation → ${frames.length} picture${frames.length === 1 ? '' : 's'}.`}
         </Text>
       }
     >
@@ -302,15 +329,35 @@ export function SplitModal({
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' variant='label' component='span'>
             {handle ? `${handle} · ` : ''}
-            {compositeViews.length
-              ? `${compositeViews.length} views glued into one image`
+            {declaredCount
+              ? `${declaredCount} view${declaredCount === 1 ? '' : 's'} glued into one image`
               : 'one picture in, several out — the original stays'}
           </Text>
         </div>
 
+        {/* WHERE THE PRESETS GET THEIR GUESSES, said out loud. The chips below pre-name each frame
+            from `composite_views` in its declared order, and a pre-filled picker whose source is
+            invisible is exactly the kind of label a tired person confirms. When the column is empty
+            — every picture on beta today, and every sheet brought by hand — the presets still lay
+            frames out, they just name none, and the line says so rather than staying silent. */}
+        <Text size='micro' variant='label' component='p'>
+          {declaredLine
+            ? `the file declares ${declaredLine}, in that order — the presets below name the frames from it, left to right, and you move them.`
+            : 'this picture declares no views, so the presets lay frames out without naming them — every frame is named here by hand.'}
+        </Text>
+
         <ChipRow>
           <Chip onClick={() => editFrames(() => acrossPreset(2, compositeViews))}>2 across</Chip>
           <Chip onClick={() => editFrames(() => acrossPreset(3, compositeViews))}>3 across</Chip>
+          {/* A FOURTH CHIP ONLY WHEN THE FILE ASKS FOR ONE. Four ticks is an ordinary request on
+              this card — an asymmetric garment needs both sides — and its composite would otherwise
+              have to be reached by pressing «3 across» and then «+ frame», renaming as it goes. The
+              chip is absent when the declared count is one the two fixed chips already cover. */}
+          {declaredCount > 3 && (
+            <Chip onClick={() => editFrames(() => acrossPreset(declaredCount, compositeViews))}>
+              {declaredCount} across
+            </Chip>
+          )}
           <Chip
             dashed
             onClick={() =>

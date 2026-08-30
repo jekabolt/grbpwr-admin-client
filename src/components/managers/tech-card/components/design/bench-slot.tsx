@@ -6,13 +6,13 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
 import { Button } from 'ui/components/button';
+import CheckboxCommon from 'ui/components/checkbox';
 import Input from 'ui/components/input';
 import MediaComponent from 'ui/components/media';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
@@ -228,18 +228,17 @@ export function InertDoor({
 }
 
 /**
- * THE FIX FLOW IS NOT BUILT, AND ITS ABSENCE IS THE DECISION.
+ * THE FIX FLOW IS BUILT AND IT DOES NOT LIVE HERE.
  *
- * The prototype draws two bars under a slot — «fix is running» and «fix is in · put it in» — and a
- * known defect of it (Г4) is that both were drawn inside a FILLED slot only, so taking the plate
- * off while a fix ran made the whole promised flow evaporate. That fix would have been to call them
- * from the empty slot too.
+ * This slot draws the DOOR (`fix ▸`) and hosts the two state strips, but owns neither: `fix-flow.tsx`
+ * holds the reading of the band, the strips and the compare-and-set, and `bench.tsx` wires the two
+ * together. The slot stays presentational on purpose — it is drawn four times for the sides and once
+ * per detail, and a slot that reached into the fix context itself would be five subscribers to a
+ * state only one of them can be armed for.
  *
- * Neither is here, because a fix takes its picture from a GENERATION RUN and the generative machine
- * is cut from this wave: `params.fix_target` is never set, `band.runs` is empty on every live card,
- * and a bar that can never light is not groundwork — it is a dead organ that reads as broken. When
- * generation returns, the bars come back WITH the Г4 amendment: they address the SLOT, not the
- * plate, so the empty slot draws them too.
+ * The prototype's own defect (Г4) is honoured by the WIRING, not by this file: the strips address the
+ * SLOT and not the plate, so `bars` is rendered by the empty slot too. Unmarking a plate while a fix
+ * is in flight must not make the promised «fix is in · put it in» evaporate into the history.
  */
 
 export type BenchSlotProps = {
@@ -273,6 +272,18 @@ export type BenchSlotProps = {
   onCancelPick: () => void;
   onUnmark: () => void;
   onOpenViewer?: () => void;
+  /**
+   * Arm a fix for this slot. Absent on a slot a fix cannot legally address, in which case
+   * `fixBlocked` carries the reason and the door is drawn dead rather than missing.
+   */
+  onFix?: () => void;
+  /** Why `fix ▸` is dead here, or null when it is live. */
+  fixBlocked?: string | null;
+  /** The fix shortlist's tick. Drawn only when `onToggleSelect` is given. */
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  /** The fix state strips (`fix is running`, `fix is in`), built by `fix-flow.tsx`. */
+  bars?: React.ReactNode;
   /** Details only. */
   onRename?: (name: string) => void;
   onDelete?: () => void;
@@ -302,6 +313,11 @@ export function BenchSlot(props: BenchSlotProps) {
     onCancelPick,
     onUnmark,
     onOpenViewer,
+    onFix,
+    fixBlocked,
+    selected,
+    onToggleSelect,
+    bars,
     onRename,
     onDelete,
     deleteBlocked,
@@ -311,24 +327,55 @@ export function BenchSlot(props: BenchSlotProps) {
   const url = pictureUrl(picture);
 
   /**
-   * STALENESS OF A LIVE PLATE READS EXACTLY ONE WAY, and that asymmetry is the contract's, not an
-   * omission: `content_hash` lives on a version's frozen PLATE, never on a live picture (which IS
-   * the current file, so a second copy could only disagree with the first). So the only cause that
-   * can fire here is `layer_advanced` — somebody saved newer strokes over the drawing this picture
-   * was flattened from.
+   * A DRAWING SITS OVER THIS PLATE — and the sentence it deserves depends on where the plate came
+   * from. Both branches read the same fact (there is an edit layer whose base is this media, at a
+   * revision the plate does not contain) and they are mutually exclusive by construction:
+   *
+   *   the plate IS a flattening (`layerRev > 0`) and the layer has moved past it → it has gone
+   *     STALE: the picture is an older rasterisation of a drawing that has since changed.
+   *   the plate was never flattened (`layerRev === 0`) → nothing is stale; the marks have simply
+   *     never been made into pixels, and every consumer downstream — a fix run, the fabric render,
+   *     the printed sheet — reads the PICTURE. This is the honest half of «pass it in already
+   *     marked up» (W-10): the marks are data, not ink, until `edit ▸ → save as picture` runs them
+   *     through the canvas.
+   *
+   * Only `layer_advanced` can fire on a LIVE plate at all: `content_hash` lives on a version's
+   * frozen plate, never on a live picture (which IS the current file, so a second copy could only
+   * disagree with the first).
    */
+  const layerRev = liveLayerRev(band.layers, picture?.media?.id);
+  const layerOverPlate = provenance && typeof layerRev === 'number';
+
   const stale =
-    provenance &&
-    typeof liveLayerRev(band.layers, picture?.media?.id) === 'number' &&
-    liveLayerRev(band.layers, picture?.media?.id)! > provenance.layerRev
+    layerOverPlate && provenance.layerRev > 0 && layerRev! > provenance.layerRev
       ? 'the edit layer has moved on — this picture is an older flattening'
+      : null;
+
+  const unflattened =
+    layerOverPlate && provenance.layerRev === 0
+      ? 'edit ▸ marks sit on a layer over this plate, not in it — a run reads the plate'
       : null;
 
   const mixedNote = provenance ? mixedInputNote(provenance) : null;
 
   return (
-    <div className='flex min-w-0 flex-col gap-1'>
+    // `group` is load-bearing: the prototype reveals the slot's actions on hover (`.slotc:hover
+    // .tfoot .act`), and the group is what a child's `group-hover:` reaches for. Opacity, never
+    // display — the footer keeps its box either way, so nothing on this grid reflows under the
+    // pointer.
+    <div className='group flex min-w-0 flex-col gap-1'>
       <div className='flex items-baseline gap-1'>
+        {onToggleSelect && (
+          <span className='self-center'>
+            <CheckboxCommon
+              name={`fix-tick-${label}`}
+              aria-label={`tick ${label} for a fix`}
+              checked={!!selected}
+              disabled={disabled}
+              onChange={onToggleSelect}
+            />
+          </span>
+        )}
         <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           {label}
         </Text>
@@ -445,7 +492,32 @@ export function BenchSlot(props: BenchSlotProps) {
             занимают 211px, а колонка слота при четырёх сторонах — 196px, поэтому подвал FRONT
             наезжал на подвал BACK. Ни `tsc`, ни утверждение по тексту этого не видят — `innerText`
             одинаков при любой ширине. Группа теперь переносится внутри себя и умеет сжиматься. */}
-        <span className='ml-auto flex flex-wrap items-center gap-1.5'>
+        {/* ДЕЙСТВИЯ ПОЯВЛЯЮТСЯ ПО НАВЕДЕНИЮ — как в макете (`.slotc .tfoot .act{opacity:0}` +
+            `.slotc:hover .tfoot .act`). Прозрачность, а не `display`: коробка остаётся на месте,
+            поэтому сетка слотов не дёргается под курсором и замер ширины подвала не зависит от
+            того, где стоит мышь. `focus-within` возвращает их клавиатуре, `hover:none` — тачу:
+            без этих двух строк меню слота на планшете просто нет. */}
+        <span
+          className={cn(
+            'ml-auto flex flex-wrap items-center gap-1.5',
+            'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
+            '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
+          )}
+        >
+          {/* `fix ▸` — ДВЕРЬ ПОЧИНКИ: она не правит картинку, она заказывает эту сторону заново, с
+              верстака вместо референсов. Механика и полосы состояния — в `fix-flow.tsx`; сюда
+              приходит либо обработчик, либо причина, по которой двери здесь быть не может. */}
+          {!disabled &&
+            picture &&
+            (fixBlocked ? (
+              <InertDoor label='fix ▸' reason={fixBlocked} />
+            ) : (
+              onFix && (
+                <Button variant='secondary' size='xs' onClick={onFix}>
+                  fix ▸
+                </Button>
+              )
+            ))}
           {/* `edit ▸` — ВЕКТОРНЫЙ РЕДАКТОР ШТРИХОВ (`vectorModal` прототипа, `vector-open` на
               плитке слота): рисование по самому чертежу, своим слоем, с растром-калькой снизу.
               Дверь была инертной со словами «придёт следующей волной» — теперь волна пришла, и
@@ -468,20 +540,9 @@ export function BenchSlot(props: BenchSlotProps) {
               />
             </>
           )}
-          {!disabled && picture && (
-            <MediaSelector
-              label='change'
-              purpose={`design bench · ${label}`}
-              aspectRatio={['Custom']}
-              allowMultiple={false}
-              showVideos={false}
-              triggerClassName='px-1.5 py-px text-micro uppercase tracking-label cursor-pointer border border-textInactiveColor hover:bg-textColor hover:text-bgColor'
-              saveSelectedMedia={(media) => {
-                const first = media[0];
-                if (first?.id) onPlaceMedia(first);
-              }}
-            />
-          )}
+          {/* `change` СНЯТА. У макета её нет, а её работу делают две живые двери: `unmark` очищает
+              слот, и пустой слот открывает ту же библиотеку через `MediaSlot`. Две кнопки на один
+              исход — это две записи в меню, которые расходятся при первой же правке одной из них. */}
           {!disabled && picture && (
             <Button variant='secondary' size='xs' onClick={onUnmark}>
               unmark
@@ -521,6 +582,15 @@ export function BenchSlot(props: BenchSlotProps) {
           {stale}
         </Text>
       )}
+      {unflattened && (
+        <Text size='nano' variant='label' component='span'>
+          {unflattened}
+        </Text>
+      )}
+
+      {/* ПОЛОСЫ СОСТОЯНИЯ ПОЧИНКИ. Рисуются и у заполненного слота, и у пустого — снятие плиты во
+          время починки не должно топить обещанный «fix is in · put it in» в истории (Г4/R10). */}
+      {bars}
     </div>
   );
 }

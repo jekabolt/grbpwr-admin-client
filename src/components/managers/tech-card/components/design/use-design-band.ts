@@ -61,6 +61,13 @@ const EMPTY_BAND: GetDesignBandResponse = {
   runs: [],
   batches: [],
   nextPageToken: '',
+  // `undefined`, AND EXPLICITLY NOT `false`. This is the band handed to a card whose server does
+  // not speak the routes at all, or one that has not answered yet — and `has_fabric_render` is the
+  // mirror of the SERVER's own 3D gate (W-13). `false` here would be a claim we are not entitled
+  // to make: it would grey out 3D on the strip of every card on a rolled-back contour and on every
+  // card for the duration of its first read, worded as «this card owns no fabric render» when the
+  // truth is «nobody has been asked». Absence is read as «not stated» by every consumer of it.
+  hasFabricRender: undefined,
 };
 
 export type DesignBandState = {
@@ -204,13 +211,24 @@ export function useDesignWrites(techCardId?: number) {
     onError,
   });
 
+  /**
+   * РОЛЬ И ЗАПИСКА — ОДИН UPSERT, потому что они одна строка. Записка живёт на строке роли
+   * (`design_reference.note`), и второй глагол для неё был бы вторым запросом, который умеет
+   * наполовину не дойти: роль встала, записка нет — и на экране пара, которой в базе не бывает.
+   *
+   * АСИММЕТРИЯ ОЧИСТКИ ПРИХОДИТ С КОНТРАКТА, и вызывающий обязан её знать: пустая РОЛЬ УДАЛЯЕТ
+   * строку и уносит записку с собой (строка и есть существование роли), а пустая ЗАПИСКА на
+   * строке, сохраняющей роль, стирает только записку. Поэтому `note` передаётся ВСЕГДА — забыть
+   * его при смене роли значит стереть чужие слова молча.
+   */
   const setReferenceRole = useMutation({
-    mutationFn: (input: { mediaId: number; role: string; ordinal: number }) =>
+    mutationFn: (input: { mediaId: number; role: string; ordinal: number; note: string }) =>
       adminService.SetDesignReferenceRole({
         techCardId: techCardId ?? 0,
         mediaId: input.mediaId,
         role: input.role,
         ordinal: input.ordinal,
+        note: input.note,
       }),
     onSuccess: invalidate,
     onError,

@@ -88,7 +88,12 @@ export function SlotPicker({
       const view = value.slice(2);
       const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
       setBenchSlot.mutate({
-        slot: { viewKey: view },
+        // `kind` NAMES THE BENCH, and this picker addresses the FLAT one. It is left empty rather
+        // than spelled, because the contract fixes empty = flat («every caller written before the
+        // second axis existed keeps addressing the bench it meant») and this organ has no way to
+        // know a second bench is on screen. Spelling a kind here would be this picker choosing an
+        // axis it cannot see.
+        slot: { viewKey: view, kind: undefined },
         pictureId,
         // 0 is the honest value for a side nobody has ever touched: the slot is born by this write.
         expectedSlotRev: slot?.slotRev ?? 0,
@@ -100,7 +105,9 @@ export function SlotPicker({
       const slot = bench.details.find((d) => d.id === slotId) ?? null;
       if (!slot) return;
       setBenchSlot.mutate({
-        slot: { slotId },
+        // A minted id already names its bench, and the contract says `kind` is IGNORED beside a
+        // slot_id — so sending one could only ever be a contradiction nobody could adjudicate.
+        slot: { slotId, kind: undefined },
         pictureId,
         expectedSlotRev: slot.slotRev ?? 0,
       });

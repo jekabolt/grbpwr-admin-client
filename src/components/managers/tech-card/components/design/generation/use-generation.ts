@@ -53,6 +53,11 @@ export function useGenerationWrites(techCardId?: number) {
    * THE INPUTS ARE NOT SENT AND CANNOT BE. The server snapshots the references, the moodboard, the
    * garment description and the bench itself; provenance a caller supplies is a claim, not
    * provenance. Only what is being ASKED FOR travels — views, layout, fix target.
+   *
+   * A RERUN IS A RUN NUMBER, FOR EXACTLY THAT REASON. `rerun_of_run_id` names the row to repeat and
+   * the SERVER re-reads that row's own frozen snapshot; `ask` and `params` still apply on top, so a
+   * rerun with a new delta phrase is the ordinary case. A client that posted the old inputs back
+   * could post inputs that never existed, and the history would stop being evidence.
    */
   const startRun = useMutation({
     mutationFn: (input: {
@@ -60,6 +65,7 @@ export function useGenerationWrites(techCardId?: number) {
       kind: string;
       ask: string;
       params: common_DesignRunParams;
+      rerunOfRunId?: number;
     }) =>
       adminService.StartDesignRun({
         techCardId: techCardId ?? 0,
@@ -67,6 +73,9 @@ export function useGenerationWrites(techCardId?: number) {
         kind: input.kind,
         ask: input.ask,
         params: input.params,
+        // 0 is «an ordinary run» in the contract's own words, so an absent value is spelled as 0
+        // rather than left unset — one spelling for one meaning.
+        rerunOfRunId: input.rerunOfRunId ?? 0,
       }),
     onSuccess: invalidate,
     onError,
@@ -115,6 +124,11 @@ export type StartRunInput = {
   /** The delta phrase the human typed; the caption of the history row. May be empty. */
   ask: string;
   params: common_DesignRunParams;
+  /**
+   * REPEAT RUN N WITH THE INPUTS THAT RUN ACTUALLY HAD. Omitted (or 0) for an ordinary run. The
+   * server re-reads run N's frozen snapshot; nothing about those inputs is composed here.
+   */
+  rerunOfRunId?: number;
 };
 
 export type StartRunState = {
@@ -146,7 +160,16 @@ export function useStartRun(techCardId?: number): StartRunState {
   const start = useCallback(
     (input: StartRunInput, onStarted?: () => void) => {
       if (!techCardId || techCardId <= 0) return;
-      const fingerprint = JSON.stringify([input.kind, input.ask, input.params]);
+      // THE RERUN TARGET IS PART OF THE INTENT, so it is part of the fingerprint. Left out, «rerun
+      // run 3» and «rerun run 7» typed with the same delta phrase would replay ONE request id, and
+      // the second press would come back OK holding the first run — a success reported for a
+      // request nobody made.
+      const fingerprint = JSON.stringify([
+        input.kind,
+        input.ask,
+        input.params,
+        input.rerunOfRunId ?? 0,
+      ]);
       if (ledger.current?.fingerprint !== fingerprint) {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }

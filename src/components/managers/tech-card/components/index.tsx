@@ -62,7 +62,6 @@ import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
 import { CollectionField } from './collection-field';
@@ -134,6 +133,13 @@ import {
 } from './save-audit-banners';
 import { StagedChangesChip } from './staged-changes-chip';
 import { useTechCardStagingRequired } from './useTechCardStaging';
+import { FIT_OPTIONS } from './design/render/model';
+
+// U-2: словарь посадки для селекта в CLASSIFICATION. ТРЕТЬЕЙ КОПИИ СПИСКА ЗДЕСЬ НЕТ — он
+// импортирован из `design/render/model.ts`, где такая же копия уже лежит экспортом. Первоисточник
+// — приватный `FIT_OPTIONS` в `style-facts-field.tsx`, который этой волне править нельзя; когда
+// его экспортируют, обе копии обязаны исчезнуть (см. «TO FIX» в model.ts).
+const fitFormOptions = FIT_OPTIONS.map((f) => ({ label: f, value: f }));
 
 const TABS = [
   { id: 'studio', label: 'studio' },
@@ -1908,7 +1914,7 @@ export function TechCardForm({
                 двухсот строк: порядок в DOM и так совпадает с `topRowHtml() + moodboardHtml() + …`. */}
             <SectionStack hidden={activeTab !== 'studio'}>
               <SectionStack row>
-                <Section title='identification' className='w-full lg:w-1/2'>
+                <Section title='identification' className='w-full min-w-0 lg:flex-1'>
                   <StyleNumberField isIdea={isIdea} />
                   {isIdea && (
                     <Text variant='inactive' size='small'>
@@ -1935,7 +1941,7 @@ export function TechCardForm({
                   <InputField name='brand' label='brand' />
                 </Section>
 
-                <Section title='classification' className='w-full lg:w-1/2'>
+                <Section title='classification' className='w-full min-w-0 lg:flex-1'>
                   <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
                   {/* NF-07: the server refuses a purpose flip once the card is referenced — runs,
                     LIVE colourways, sold colourways, assembly usage. Live colourways are the one arm
@@ -2011,72 +2017,100 @@ export function TechCardForm({
                     когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
                     (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
                     бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
+                  {/* U-2 · FIT ЖИВЁТ ЗДЕСЬ. Владелец: «поля FIT и CATEGORY уходят в верхние
+                    блоки»; прототип держит fit четвёртым полем classification и подписывает его
+                    «a style fact — the ONLY place fit is edited» (`topRowHtml`, proto.html:3172).
+                    ЭТО НЕ ВТОРОЙ ПИСАТЕЛЬ. Контрол пишет ПОЛЕ ФОРМЫ `fit`; в бэкенд его уносит
+                    staged `UpdateStyle` из `StyleFactsField` — он смонтирован ниже невидимым и
+                    остаётся единственным писателем. Ровно так же здесь, в шапке, уже
+                    редактируются brand / collection / season / target gender, а уезжают они его
+                    командой: `UpdateTechCard` их намеренно не пишет.
+                    У aux-карты посадки нет — довод тот же, что у скрытого трио ниже. */}
+                  {!isAux && (
+                    <SelectField
+                      name='fit'
+                      label='fit'
+                      items={fitFormOptions}
+                      readOnly={!canWrite(SECTION.techCards) || frozen}
+                    />
+                  )}
+                  {/* U-2 · CATEGORY ПЕРЕЕХАЛ СЮДА вместе со своим носителем. `HeaderMetaFields` —
+                    это браузер категорий ПЛЮС раскрывашка «base model & sample size — optional»,
+                    один неделимый компонент; прототип заканчивает колонку classification той же
+                    раскрывашкой, так что порядок совпал. Блок в блок не вложен: HeaderMetaFields
+                    рисует обычный div, а не Section (DESIGN.md §5).
+                    У aux-карты классификацию задаёт AUXILIARY TYPE, поэтому браузер категорий там
+                    спрятан, а раскрывашка остаётся: себестоимость считается по норме базового
+                    размера без фолбэка, и aux-карта обязана иметь путь к костингу. Сохранённый
+                    categoryId не стирается — он живёт в форме и уезжает в full-replace. */}
+                  <HeaderMetaFields hideCategory={isAux} />
                 </Section>
+
+                {/* U-1 · ТРЕТЬЯ УЗКАЯ КОЛОНКА. Прототип задаёт верхний ряд как
+                  `grid-template-columns:1fr 1fr 300px` и кладёт в третью колонку вертикальный стек
+                  из RESPONSIBLE ROLES и LINKED PRODUCTS (`topRowHtml`, proto.html:3172). Здесь это
+                  `SectionStack`, а не div с gap: 24px земли между блоками И ЕСТЬ разделитель, и он
+                  обязан оставаться одним значением на весь админ, а не локальным числом.
+                  Колонка условная. У несохранённой aux-карты в ней не было бы ни ролей (нужен
+                  сохранённый id), ни связанных продуктов, и пустые 300px читались бы как блок,
+                  который не загрузился. */}
+                {((isEditMode && !!numId) || !isAux) && (
+                  <SectionStack className='w-full min-w-0 lg:w-[300px] lg:shrink-0'>
+                    {isEditMode && numId && (
+                      <Section title='responsible roles'>
+                        <Text variant='inactive' size='small'>
+                          who is on this card (Q5) — admin accounts, saved immediately, not part of
+                          the card’s draft.
+                        </Text>
+                        <RolesField
+                          techCardId={numId}
+                          canEdit={canWrite(SECTION.techCards) && !frozen}
+                          initialAssignments={techCard?.roleAssignments}
+                        />
+                      </Section>
+                    )}
+                    {!isAux && (
+                      <Section title='linked products'>
+                        <ProductIdsField />
+                      </Section>
+                    )}
+                  </SectionStack>
+                )}
               </SectionStack>
 
-              {isEditMode && numId && (
-                <Section title='responsible roles'>
-                  <Text variant='inactive' size='small'>
-                    who is on this card (Q5) — admin accounts, saved immediately, not part of the
-                    card’s draft.
-                  </Text>
-                  <RolesField
-                    techCardId={numId}
-                    canEdit={canWrite(SECTION.techCards) && !frozen}
-                    initialAssignments={techCard?.roleAssignments}
-                  />
-                </Section>
-              )}
+              {/* U-2 · CARE SYMBOLS И CARE GUIDE УБРАНЫ ИЗ ПОЛОСЫ — прямое указание владельца.
+                Убран ТОЛЬКО экран: care хранится один раз, на care-ярлыке, и редактируется на
+                вкладке LABELS — это буквально то же поле, поэтому способность не потеряна.
+                ПАНЕЛЬ ПРИ ЭТОМ ОСТАЁТСЯ СМОНТИРОВАННОЙ, и это условие корректности, а не
+                осторожность: `StyleFactsField` — единственный писатель
+                brand / collection / season / targetGender / fit. Их редактируют выше, в шапке, а
+                `UpdateTechCard` их намеренно не пишет (R4/§14.7, «ни один факт не пишется двумя
+                путями»). Сняв её с монтажа, мы получили бы «saved» и молчаливый откат значения
+                после перезагрузки. `hideFitCare` возвращает null ПОСЛЕ всех хуков
+                (style-facts-field.tsx:473) — невидимая панель пишет ровно то же, что видимая. */}
+              <StyleFactsField
+                styleId={numId}
+                canEdit={canWrite(SECTION.techCards) && !frozen}
+                careEntries={techCard?.careEntries}
+                hideFitCare
+              />
 
-              {/* У aux-карты категорию задаёт AUXILIARY TYPE, а гарментный браузер категорий
-                дублировал бы её другим словарём. Заголовок секции условный: иначе он обещает
-                орган, которого нет. «base model & sample size» остаётся ВСЕГДА — себестоимость
-                считается по норме базового размера без фолбэка, и aux-карта (кофр кроится и
-                шьётся как изделие) обязана иметь путь к костингу. Сохранённый categoryId не
-                стирается: он живёт в форме и уезжает в full-replace нетронутым. */}
-              <Section title={isAux ? 'base model & sample size' : 'category & base model'}>
-                <HeaderMetaFields hideCategory={isAux} />
-              </Section>
+              {/* U-9 · ВТОРОГО РЕДАКТОРА `concept` ЗДЕСЬ БОЛЬШЕ НЕТ. Тут стоял второй блок
+                «concept & construction description» со своим `TextareaField name='concept'`, и он
+                был смонтирован ВСЕГДА — этот `SectionStack` прячется атрибутом `hidden`, то есть
+                display:none, а не размонтированием. Над одним полем формы жили два редактора: этот
+                и `design/concept-section.tsx`, который открывается в студии; тот же дубль был и у
+                `DetailsEditor` (два экземпляра со своими локальными наборами показанных аспектов).
+                Вместе с блоком ушёл подблок `notes` («internal · not sent to the factory · outside
+                the DESIGN signature») — прямое указание владельца.
+                ПОЛЕ `notes` ИЗ СХЕМЫ НЕ УДАЛЕНО: уже написанные заметки продолжают круговой рейс
+                GET → defaultValues → full-replace UPSERT и сохранением не стираются.
+                `DetailsEditor` не потерялся — он уезжает в `StudioTab` пропом `constructionAspects`
+                и рисуется под `ConceptSection`, где теперь ровно один.
+                U-8 (блок «TECH PACK · DESCRIPTION SHEET») в этом файле не рождался и не вернулся —
+                его носителем был `design/concept-section.tsx`, где он снят. */}
 
-              {/* fit — свойство посадки изделия, care принадлежит вещи, а не самому ярлыку,
-                storefront-превью — товару, которым aux не бывает. Поэтому у aux трио спрятано.
-                Но панель НЕ снимается с монтажа (hideFitCare, а не `!isAux &&`): она единственный
-                писатель brand/collection/season/targetGender — их редактируют в хедере, а
-                UpdateTechCard их намеренно не пишет. Care при этом достижим на вкладке LABELS —
-                это буквально то же поле. */}
-              {isAux ? (
-                <StyleFactsField
-                  styleId={numId}
-                  canEdit={canWrite(SECTION.techCards) && !frozen}
-                  careEntries={techCard?.careEntries}
-                  hideFitCare
-                />
-              ) : (
-                <Section title='style facts — fit / care (shared by all colourways)'>
-                  <StyleFactsField
-                    styleId={numId}
-                    canEdit={canWrite(SECTION.techCards) && !frozen}
-                    careEntries={techCard?.careEntries}
-                  />
-                </Section>
-              )}
-
-              <Section title='concept & construction description'>
-                {/* concept → details → notes is the order the tech pack's description sheet prints
-                  them in, so the editor reads the same way. Concept is the one prose field an IDEA
-                  card is really about, and until now nothing in this admin could write it. */}
-                <TextareaField
-                  name='concept'
-                  label='concept (design intent)'
-                  rows={3}
-                  maxLength={2000}
-                  placeholder='what this thing is — the idea, the reference, the purpose'
-                />
-                <DetailsEditor techCard={techCard} />
-                <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
-              </Section>
-
-              {isAux ? (
+              {isAux && (
                 <Section title='output material'>
                   {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
                       the single picker below stops being the answer — showing both would offer two
@@ -2130,10 +2164,6 @@ export function TechCardForm({
                       ) : null}
                     </>
                   )}
-                </Section>
-              ) : (
-                <Section title='linked products'>
-                  <ProductIdsField />
                 </Section>
               )}
             </SectionStack>

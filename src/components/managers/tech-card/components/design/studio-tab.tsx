@@ -11,11 +11,9 @@ import { KindsStrip, type DesignKind } from './kinds-strip';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
-import { MixWarn } from './mixwarn';
 import { MoodBoard } from './mood-board';
 import { PickModeProvider, usePickMode } from './pick-mode';
 import { ReferencesSection } from './references-section';
-import { SheetBar } from './sheet-bar';
 import { UploadsShelf } from './uploads-shelf';
 import { useDesignBand } from './use-design-band';
 
@@ -158,6 +156,11 @@ export function StudioTab({
               {kind === 'flat' && (
                 <>
                   <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
+                  {/* ОДИН ЧИП НА ЭКРАН, и он здесь — НАД формой, как в прототипе. Заявка на
+                      правку, сделанная нажатием `fix ▸` в слоте, обязана быть видна и тогда,
+                      когда форма свёрнута и до неё ещё не долистали. Второй такой же чип стоял
+                      внутри самой формы; пока она развёрнута, оба рисовали одну заявку, и это
+                      читалось как две разные. Снят там, оставлен здесь. */}
                   <FixContext band={band} techCardId={techCardId} disabled={readOnly} />
                   <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
                   <UploadsShelf techCardId={techCardId} band={band} disabled={readOnly} />
@@ -183,8 +186,10 @@ export function StudioTab({
                   <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
               )}
-              <SheetBar band={band} />
-              <MixWarn band={band} />
+              {/* ПОЛОСА ЛИСТА И ПРЕДУПРЕЖДЕНИЕ О СМЕСИ БОЛЬШЕ НЕ СТОЯТ ЗДЕСЬ. Это строки ШАПКИ
+                  блока слотов (`slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml` внутри себя), и
+                  тремя отдельными блоками они читались как три равновесных заявления, хотя два из
+                  них — про третье. Монтирует их теперь `Bench`. */}
               <Bench techCardId={techCardId} band={band} disabled={readOnly} />
             </>
           )}

@@ -74,6 +74,7 @@ export type GateableCallout = { clientRef?: string | null };
 
 export type GateableTechCardPayload = {
   moodNote?: string | null;
+  garmentDescription?: string | null;
   moodboardMedia?: GateableMediaItem[];
   technicalMedia?: GateableMediaItem[];
   callouts?: GateableCallout[];
@@ -95,6 +96,13 @@ export type DesignPayloadGateReport = {
   /** True when a non-empty mood note was withheld — an empty one costs nothing to withhold. */
   moodNoteWithheld: boolean;
   /**
+   * True when a non-empty garment description was withheld. Its own flag rather than a share of
+   * `moodNoteWithheld`: the two are different sentences to the operator — one says «the board note
+   * is not going to be saved», the other says «what goes into every run is not going to be saved»
+   * — and one flag for both would name whichever was written second.
+   */
+  garmentDescriptionWithheld: boolean;
+  /**
    * How many callout refs were withheld. NOT «how many will be lost»: a callout that already has a
    * number keeps its stored ref by the server's carry rule. The count matters for the rows that
    * have no number yet — those are the ones that will not mint one this save.
@@ -104,12 +112,20 @@ export type DesignPayloadGateReport = {
 };
 
 export function emptyGateReport(): DesignPayloadGateReport {
-  return { moodNoteWithheld: false, clientRefsDropped: 0, mediaKindsFolded: [] };
+  return {
+    moodNoteWithheld: false,
+    garmentDescriptionWithheld: false,
+    clientRefsDropped: 0,
+    mediaKindsFolded: [],
+  };
 }
 
 export function gateChangedSomething(report: DesignPayloadGateReport): boolean {
   return (
-    report.moodNoteWithheld || report.clientRefsDropped > 0 || report.mediaKindsFolded.length > 0
+    report.moodNoteWithheld ||
+    report.garmentDescriptionWithheld ||
+    report.clientRefsDropped > 0 ||
+    report.mediaKindsFolded.length > 0
   );
 }
 
@@ -137,6 +153,14 @@ export function gateTechCardPayload<T extends GateableTechCardPayload>(
   if ('moodNote' in narrowed) {
     report.moodNoteWithheld = !!(narrowed.moodNote ?? '').trim();
     delete narrowed.moodNote;
+  }
+
+  // ОПИСАНИЕ ИЗДЕЛИЯ (W-3) снимается по тому же правилу и по той же причине: ключ УДАЛЯЕТСЯ, а не
+  // обнуляется, потому что удалённый ключ — единственное написание фразы «этот бандл про поле
+  // ничего не сказал», а `null` гейтвей всё равно обязан был бы распознать.
+  if ('garmentDescription' in narrowed) {
+    report.garmentDescriptionWithheld = !!(narrowed.garmentDescription ?? '').trim();
+    delete narrowed.garmentDescription;
   }
 
   if (Array.isArray(narrowed.callouts)) {

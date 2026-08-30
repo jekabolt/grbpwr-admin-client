@@ -583,9 +583,13 @@ export type MediaUsage = {
 export type MediaUsageRef = {
   // product | archive | model | material | task | tech_card | fitting | sample |
   // design_picture | design_sheet_version | design_edit_layer.
-  // The last two are the DESIGN band: a picture holds its media, and a MINTED SHEET VERSION holds
-  // it with RESTRICT — that is why the library must name it, or somebody deletes the bytes a
-  // printed Rev.N depends on.
+  // The last three are the DESIGN band, and all three are OWNING references: a picture holds its
+  // media, a MINTED SHEET VERSION holds the bytes of its plates and its frozen callouts, and an
+  // EDIT LAYER holds the image its strokes were drawn over — without it the saved layer cannot be
+  // opened or flattened at all. All three hold with RESTRICT, which is why the library must name
+  // them: otherwise somebody deletes the bytes a printed Rev.N, or an unfinished edit, depends on.
+  // The band's reference roles are deliberately NOT here — a role is a hint to the model, and a
+  // lock on deleting a moodboard picture would be harm, so that column carries no FK at all.
   kind: string | undefined;
   entityId: number | undefined;
   label: string | undefined;
@@ -7590,6 +7594,20 @@ export type common_TechCardInsert = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   moodNote?: string;
+  // THE GARMENT'S OWN DESCRIPTION — what the thing IS, in the designer's words: «oversized boxy
+  // shirt, dropped shoulder, no placket» (W-3). It rides into EVERY design run's prompt beside the
+  // references, and it is frozen into each run's snapshot as DesignInputSnapshot.garment_note.
+  // IT IS NOT `concept` AND NOT `mood_note`, and the three must not be merged. `concept` is the
+  // intent behind the style and belongs to the document; `mood_note` is what the BOARD is about,
+  // read only by `draft the idea`; this is what the GARMENT is, read by every generation. Spending
+  // one field on all three would make editing the prompt edit the document's stated intent.
+  // OPTIONAL for the same load-bearing reason as `mood_note` above — the admin is an SPA, tabs
+  // survive deploys, and the card is saved WHOLE, so a bare proto3 string from an older bundle
+  // would arrive as "" and ERASE the description from a tab that never opened the DESIGN band:
+  // * field ABSENT (null)        → LEAVE AS IS.
+  // * field PRESENT, value ""    → CLEAR it (store NULL).
+  // * field PRESENT with a value → set it.
+  garmentDescription?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
@@ -7922,9 +7940,16 @@ export type common_TechCardCallout = {
   // is holding would vanish out from under it — silently, since client_ref is outside the
   // digest and nothing would restate.
   // SO THE SERVER CARRIES IT: an incoming callout with `number != 0` and an EMPTY client_ref
-  // inherits the stored client_ref OF THAT NUMBER, exactly the way CarryOmittedCalloutGeometry
-  // already carries geometry by number, and in the same place in the pipeline. An explicitly
-  // DIFFERENT non-empty value replaces it — that is a real re-address, not an omission.
+  // inherits the stored client_ref OF THAT CALLOUT, and «that callout» means the identity
+  // (sketch + number), never the bare number. CarryOmittedCalloutGeometry carries geometry by
+  // the same identity, in the same place in the pipeline. An explicitly DIFFERENT non-empty
+  // value replaces it — that is a real re-address, not an omission.
+  // MATCHING BY THE BARE NUMBER WOULD BE A DEFECT, NOT A SIMPLIFICATION. A callout number is
+  // NOT unique per card: the sketch and the moodboard number independently, on purpose, and
+  // the schema forbids no duplicate. Carrying by number alone would hand a moodboard note the
+  // address of a technical callout that happens to share its number. That exact rule was once
+  // written twice in this repository and drifted in OPPOSITE directions; it now lives once, in
+  // entity.TechCardCalloutsByKey, and every consumer asks it rather than re-deriving it.
   // The carry cannot collide with minting: minting is `number == 0`, carrying is
   // `number != 0`, and a legacy zero has neither a number to carry by nor a ref to mint for.
   clientRef: string | undefined;
@@ -14480,6 +14505,15 @@ export type DesignBenchSlotRef = {
   // FK design_bench_slot(id) — an EXISTING slot, silhouette or detail alike, addressed by its
   // minted id. This is how every detail is addressed after its birth.
   slotId?: number;
+  // WHICH BENCH the ref addresses: flat | render | threed. Empty = flat, so every caller written
+  // before the second axis existed keeps addressing the bench it meant.
+  // IT IS DELIBERATELY OUTSIDE THE ONEOF. The oneof answers «which slot», this answers «on which
+  // bench», and the two are independent: a render front and a flat front are two different slots
+  // and BOTH are addressed by view_key `front`. Folding kind into the oneof would make them
+  // alternatives to each other, which they are not.
+  // IGNORED when the ref addresses an existing slot by slot_id — a minted id already names its
+  // bench, and a kind disagreeing with it would be a contradiction nobody could adjudicate.
+  kind: string | undefined;
 };
 
 export type GetDesignBandRequest = {
@@ -14543,6 +14577,13 @@ export type GetDesignBandResponse = {
   // so a continuation that filtered would change the row set mid-pagination and silently drop or
   // duplicate rows around the seam.
   nextPageToken: string | undefined;
+  // W-13 MIRRORED FOR THE INTERFACE: this card owns at least one fabric render that is not hidden,
+  // so the 3D door may be drawn open.
+  // THE GATE ITSELF IS ON THE SERVER — StartDesignRun refuses kind = threed without one — and this
+  // flag exists only so the band can draw the door closed instead of letting somebody click into a
+  // refusal. A client computing the same rule from what it was handed would be wrong by exactly the
+  // renders that are not on this page, which is the usual case for a card with any history.
+  hasFabricRender: boolean | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
@@ -14568,6 +14609,14 @@ export type common_DesignBenchSlot = {
   // refusal usable — Aborted:slot_rev_mismatch hands back the slot's CURRENT state, and a bare id
   // there would force the loser of the race into another round trip before it could redraw.
   picture: common_DesignPicture | undefined;
+  // WHICH BENCH this slot stands on: flat | render | threed. THE BENCH HAS TWO AXES, view × kind,
+  // and this is the second one. Empty is read as `flat` — every slot that existed before this field
+  // is a flat slot, and every caller written before it keeps meaning the bench it meant.
+  // ONE AXIS WAS A DEFECT, not a simplification. With view alone, a fabric render of the front and
+  // the technical flat of the front are the same key: placing the render DISPLACES the flat, and
+  // the next mint lays a colour render onto a technical line-drawing sheet. Uniqueness is
+  // (tech_card_id, kind, exclusive_key).
+  kind: string | undefined;
 };
 
 // DesignPicture is one image in the band. It hangs under EITHER a run (generated) or a batch
@@ -14610,6 +14659,16 @@ export type common_DesignPicture = {
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // MARKED AS CHOSEN (W-12) — the plate the studio settled on among a run's outputs. Reversible and
+  // presentational; it forbids nothing and gates nothing.
+  // IT IS NOT hidden_at WITH THE SIGN FLIPPED, and the two must never be collapsed. Hiding says «do
+  // not show me this», choosing says «this is the one»; a card can have four visible turntables and
+  // one chosen among them, and it can have a chosen plate that somebody later hid. Spending
+  // hidden_at on both would make un-hiding a rejected frame silently re-elect it.
+  // The bench is where a FLAT becomes canonical — a slot holds at most one plate, and that IS the
+  // choice. A 3D frame has no slot to be put into (the bench refuses kind=threed), so without this
+  // flag «this is the render we go with» had nowhere at all to be written down.
+  selected: boolean | undefined;
 };
 
 // DesignSheetVersion is a MINTED, FROZEN sheet: Rev.N as it was printed. Its plates and callouts
@@ -14725,6 +14784,15 @@ export type common_DesignReference = {
   ordinal: number | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
+  // WHAT THE HUMAN SAID ABOUT THIS REFERENCE — «only the collar», «the fabric, not the cut» (W-3).
+  // It goes to the model beside the image; without it a board of eight references states eight
+  // roles and no intent, and the intent is the half that changes the answer.
+  // It is a hint to the model, exactly like `role`, so it enters NO section digest and stales no
+  // sign-off: saving a note is not a change to the garment.
+  // Clearing the note is an empty string on a row that still has a role; clearing the ROLE deletes
+  // the row and takes the note with it, because the row is the role's existence — see the comment
+  // on `role` above and SetDesignReferenceRole.
+  note: string | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
@@ -14748,6 +14816,28 @@ export type common_DesignEditLayer = {
   strokes: string | undefined;
   updatedBy: string | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // WHERE THE STROKES CAME FROM, an open vocabulary like every other in this file:
+  // drawn | imported | vectorised. Empty reads as `drawn`, which is what every layer that predates
+  // this field is.
+  // It is provenance, and it is the layer's half of the one DesignPicture.source_class already
+  // states for pixels. A layer that cannot say whether a human drew it or a machine traced it makes
+  // the mixed-provenance warning uncomputable for everything vector.
+  origin: string | undefined;
+  // FK media(id) RESTRICT: the AUTHORITATIVE vector file this layer is a projection of — the SVG
+  // that was imported, or the one the vectoriser returned. 0 = there is no file; the strokes are
+  // the original.
+  // MEDIA HOLDS THE FILE, `strokes` HOLDS THE EDITABLE PROJECTION, and this is the edge between
+  // them. `download SVG` hands back THIS media and never a re-serialisation of the strokes: a round
+  // trip through the canvas's own format is not the file the vectoriser produced, and quietly
+  // substituting one for the other is how a supplier receives a different drawing than the one that
+  // was approved. RESTRICT because the file may not be deleted out from under the layer.
+  sourceMediaId: number | undefined;
+  // FK design_picture(id): the RASTER this vector was traced from, when it was traced from one.
+  // 0 = the file came from outside the band, or the layer was drawn from nothing.
+  // It is what lets the studio ask «which flat is this the vector of» after the fact, and what a
+  // fix run needs in order to feed the raster and the vector as one input rather than two
+  // unrelated ones.
+  sourcePictureId: number | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -14766,8 +14856,15 @@ export type common_DesignColourRecipe = {
 export type common_DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
-  // Which state of the studio produced this row: flat | render | threed | draft_idea.
+  // Which state of the studio produced this row: flat | render | threed | vector | draft_idea.
   // Written by the client at start; immutable afterwards.
+  // `vector` IS A MEMBER OF THIS VOCABULARY AND NOT AN RPC OF ITS OWN. Machine vectorisation is a
+  // paid provider call exactly like a flat or a render, so it walks through StartDesignRun — the
+  // ONE door the money goes through. A verb of its own would be a second budget check, a second
+  // reservation and a second place to forget the ledger, for no gain: the thing being asked for is
+  // still «spend the key's money and give me a picture back».
+  // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
+  // already exists and spends nothing.
   kind: string | undefined;
   // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
   // running renders differently from a finished one, so this is the field the band polls.
@@ -14843,6 +14940,15 @@ export type common_DesignRun = {
   // Hidden pictures are included WITH their flag — the client filters, the server never lies about
   // what exists.
   pictures: common_DesignPicture[] | undefined;
+  // OUTPUT-ONLY: the run this one repeats — design_run(id), 0 when it repeats nothing. Set by the
+  // SERVER from StartDesignRunRequest.rerun_of_run_id; the client never writes it.
+  // IT IS THE ONLY HONEST SPELLING OF «run it again». The alternative — the client re-posting the
+  // old run's inputs — lets a caller post inputs that never existed, and the history stops being a
+  // record of what was sent and becomes a record of what somebody typed. Here the server re-reads
+  // run N's own frozen snapshot, and this field is the edge that says which one it read.
+  // NO FOREIGN KEY, deliberately: a run is never deleted, so nothing needs enforcing, and a FK
+  // would make the row's lineage a reason a card cannot be cleaned up later.
+  rerunOf: number | undefined;
 };
 
 // DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
@@ -14865,10 +14971,34 @@ export type common_DesignRunParams = {
   // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
   // a detail is ever wanted, it arrives as a slot_id field beside this one, not as a `detail`
   // string inside it.
+  // SUPERSEDED BY fix_targets, AND LEFT EXACTLY AS IT WAS. Runs already frozen in the history state
+  // their target here; re-typing this number as `repeated` would silently rewrite what those rows
+  // say on the wire, and a snapshot whose meaning changes after the fact is not a snapshot. A NEW
+  // run states its selection in fix_targets / fix_slot_ids and leaves this empty. A READER takes
+  // fix_targets when it is non-empty and falls back to this scalar otherwise — the old meaning
+  // stays readable forever, which is the whole reason the field was not reused.
   fixTarget: string | undefined;
   // Extra media fed to a render besides the bench slots — e.g. an unmarked flat the human dropped
   // in. FK media(id).
   extraInputMediaIds: number[] | undefined;
+  // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
+  // which a single string could not express at all: the studio marks up three plates and asks for
+  // one correction across them, and a scalar target would make that three paid runs.
+  // SILHOUETTE SIDES ONLY, exactly as the scalar above: front | back | side_l | side_r. A detail is
+  // named in fix_slot_ids instead, because a bare view key cannot tell two details apart and this
+  // list is frozen into the run's history, where an ambiguous target could never be repaired.
+  fixTargets: string[] | undefined;
+  // The DETAIL slots this run was asked to fix, by design_bench_slot(id). Together with fix_targets
+  // this is the whole selection: sides by their view key, details by their address. The two lists
+  // are one selection and not two modes — a fix may name three sides and a cuff in one run.
+  fixSlotIds: number[] | undefined;
+  // Only meaningful with layout = one: the composite this run produces should come back WITH A
+  // PROPOSED CUT, so the human confirms frames instead of drawing four rectangles from nothing.
+  // IT CUTS NOTHING BY ITSELF. The frames stay a human's and the cut stays SplitDesignPicture's: a
+  // wrong rectangle is paid for twice — once in the ruined plate, once in the regeneration that
+  // replaces it — so the server may GUESS and only a person may act. The flag records that the
+  // guess was asked for, which is why it belongs in the frozen params and not in a UI preference.
+  autoSplit: boolean | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -14894,6 +15024,9 @@ export type common_DesignThreedParams = {
 // Total encoded size capped at 64 KB; refs ≤ 24; slots ≤ 8. A snapshot must fit in a row and in an
 // eye.
 export type common_DesignInputSnapshot = {
+  // The words that went to the model about the GARMENT — a frozen copy of the card's
+  // garment_description (W-3) as it read at launch. Frozen rather than joined: editing the
+  // description later must not rewrite what an old run was told.
   garmentNote: string | undefined;
   mood: common_DesignMoodSnapshot | undefined;
   refs: common_DesignInputRef[] | undefined;
@@ -14913,12 +15046,27 @@ export type common_DesignMoodSnapshot = {
   callouts: common_DesignMoodCallout[] | undefined;
 };
 
-// DesignMoodCallout is one frozen moodboard callout inside a run snapshot: which image, what it
-// said. Geometry is deliberately absent — the snapshot answers «what did the model read», and a
-// marker position is not something a model reads.
+// DesignMoodCallout is one frozen callout inside a run snapshot: which image, what it said, and
+// WHERE IT POINTED.
+// IT IS THE BAND'S SINGLE FROZEN-CALLOUT SHAPE and it is reused verbatim for reference images
+// (DesignInputRef.callouts). The name says where it was born, not that there are two kinds of
+// callout: a second message of the same shape would be two homes for one fact, and the two would
+// disagree the first time one of them grew a field.
+// GEOMETRY USED TO BE ABSENT HERE, on the argument that a marker position is not something a model
+// reads. The argument outlived its reason. The snapshot is also what a RERUN replays and what the
+// run panel draws, and both need the shape: freezing the words and dropping the markup produces a
+// record that cannot reproduce the run it claims to describe, and a rerun that quietly sends LESS
+// than the first run did.
 export type common_DesignMoodCallout = {
   mediaId: number | undefined;
   text: string | undefined;
+  // The frozen shape — the SAME TechCardAnnotation the sheet freezes and the card draws, at the
+  // same coordinate precision. Its own `text` is left empty: the words that were read live in
+  // `text` above, composed, exactly as DesignSheetCallout arranges the same pair.
+  // Unset = this callout carried no shape, or predates the field. That is a readable state and is
+  // NOT the same as a zero-area rectangle at the top-left corner, which is what a non-optional
+  // geometry would have made it indistinguishable from.
+  annotation: common_TechCardAnnotation | undefined;
 };
 
 // DesignInputRef is one reference image fed to the run.
@@ -14932,6 +15080,13 @@ export type common_DesignInputRef = {
   role: string | undefined;
   note: string | undefined;
   deleted: boolean | undefined;
+  // THE MARKUP FROZEN ON THIS REFERENCE — the callouts pinned on it at launch, geometry included.
+  // W-7 asks the run panel to show «our prompt: the pictures, the descriptions and the markup», and
+  // a reference stripped of its markup answers two thirds of that. Same shape as the moodboard's
+  // because it IS the same thing pinned on a different image; see DesignMoodCallout.
+  // Frozen like everything else in the snapshot: re-pinning the live callout later does not move
+  // what an old run was told.
+  callouts: common_DesignMoodCallout[] | undefined;
 };
 
 // DesignInputSlot is one bench plate fed to a render or a fix.
@@ -15038,6 +15193,17 @@ export type ListDesignRunsResponse = {
   nextPageToken: string | undefined;
 };
 
+export type GetDesignRunRequest = {
+  runId: number | undefined;
+};
+
+export type GetDesignRunResponse = {
+  // The run WITH its pictures, its attempts and its input snapshot resolved — the same shape a
+  // history page carries, so the answer drops straight into the row the client already drew instead
+  // of forcing it to merge two different shapes of the same row.
+  run: common_DesignRun | undefined;
+};
+
 export type GetDesignSheetVersionRequest = {
   techCardId: number | undefined;
   versionNumber: number | undefined;
@@ -15054,14 +15220,28 @@ export type StartDesignRunRequest = {
   // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
   // one payment.
   clientRequestId: string | undefined;
-  // flat | render | threed. `draft_idea` is REFUSED here with InvalidArgument: a text run executes
-  // inline and returns its answer, so it has its own verb (DraftDesignIdea) rather than a shared
-  // one that would return a pending row nobody ever polls.
+  // flat | render | threed | vector. `draft_idea` is REFUSED here with InvalidArgument: a text run
+  // executes inline and returns its answer, so it has its own verb (DraftDesignIdea) rather than a
+  // shared one that would return a pending row nobody ever polls.
+  // `vector` IS ACCEPTED HERE and has no verb of its own on purpose: machine vectorisation spends
+  // the key's money like every other kind, and money has exactly one door. Filing an SVG that
+  // already exists is the other thing entirely and is ImportDesignVector.
   kind: string | undefined;
   ask: string | undefined;
   // What is being asked for; at most 8 KB encoded. The INPUTS are not here and cannot be: the
   // server snapshots them itself, because provenance a caller supplies is a claim, not provenance.
   params: common_DesignRunParams | undefined;
+  // RERUN RUN N: repeat an earlier run with the inputs THAT RUN actually had. 0 = an ordinary run.
+  // A RUN NUMBER, NEVER A SNAPSHOT, and that is the entire design. The server re-reads run N's own
+  // frozen DesignInputSnapshot and assembles this run's inputs from it. A client that could post
+  // the inputs of a rerun could post inputs that never existed, and the history — the one place
+  // that answers «what did we actually send» — would degrade from evidence into a list of claims.
+  // `ask` and `params` still apply ON TOP: a rerun with a new delta phrase is the ordinary case,
+  // and it is what makes this a rerun rather than a replay. The resulting row carries
+  // DesignRun.rerun_of so the lineage is readable from the history alone.
+  // NotFound when the run does not exist or belongs to another card. InvalidArgument when the
+  // named run is a draft_idea — a text run has no picture inputs to repeat.
+  rerunOfRunId: number | undefined;
 };
 
 export type StartDesignRunResponse = {
@@ -15100,6 +15280,15 @@ export type HideDesignPictureResponse = {
   picture: common_DesignPicture | undefined;
 };
 
+export type SetDesignPictureSelectedRequest = {
+  pictureId: number | undefined;
+  selected: boolean | undefined;
+};
+
+export type SetDesignPictureSelectedResponse = {
+  picture: common_DesignPicture | undefined;
+};
+
 // DesignUploadItem is one already-uploaded file being filed into the band. The bytes went up
 // through UploadContentImage; this only says what the file IS.
 export type DesignUploadItem = {
@@ -15107,6 +15296,13 @@ export type DesignUploadItem = {
   // The view this file is GUESSED to be: front | back | side_l | side_r | detail. Empty = no guess.
   // A guess, never a fact — a human confirms it by putting the plate into a slot.
   ghostView: string | undefined;
+  // WHAT THE FILE IS: flat | render | threed. Empty = flat. Unlike ghost_view this is a STATEMENT,
+  // not a guess — the uploader knows whether the file they are dragging in is a line drawing or a
+  // colour render, and nothing downstream can recover it from the pixels.
+  // IT EXISTS BECAUSE THE UPLOAD USED TO HARD-CODE `flat`. Manual upload is the one path in the
+  // band that works end to end, and it could file only one of the three kinds it is supposed to
+  // carry: a fabric render or a turntable frame could not be brought in by hand at all.
+  kind: string | undefined;
 };
 
 export type RegisterDesignUploadRequest = {
@@ -15277,6 +15473,34 @@ export type FlattenDesignEditLayerResponse = {
   picture: common_DesignPicture | undefined;
 };
 
+export type ImportDesignVectorRequest = {
+  techCardId: number | undefined;
+  // Idempotency: a retry after a lost response must not file the same SVG as a second layer.
+  clientRequestId: string | undefined;
+  // FK media(id): the SVG itself, uploaded through UploadContentImage. It is the AUTHORITATIVE file
+  // — `download SVG` hands back this, never a re-serialisation of the strokes below.
+  sourceMediaId: number | undefined;
+  // FK design_picture(id): the raster this vector was traced FROM, when it was. 0 = the file came
+  // from outside the band and traces nothing here.
+  sourcePictureId: number | undefined;
+  // imported | vectorised — where the file came from. `drawn` is NOT importable: a layer drawn from
+  // nothing is born by SaveDesignEditLayer with no base and has no file to import.
+  origin: string | undefined;
+  // FK media(id): the raster to draw the strokes over; 0 = none. Same meaning, and the same
+  // optionality, as SaveDesignEditLayerRequest.base_media_id.
+  baseMediaId: number | undefined;
+  // The EDITABLE PROJECTION of the SVG, in the canvas's own stroke format, at most 512 KB — the
+  // same cap and the same encoding as SaveDesignEditLayer. Empty is legal and means «file the
+  // file»: the layer then holds the vector without an editable form of it yet.
+  strokes: string | undefined;
+};
+
+export type ImportDesignVectorResponse = {
+  // The layer as stored: origin and source_media_id set, rev = 1, strokes echoed. Its rev is what
+  // the next SaveDesignEditLayer must compare-and-set against.
+  layer: common_DesignEditLayer | undefined;
+};
+
 export type SetDesignReferenceRoleRequest = {
   techCardId: number | undefined;
   mediaId: number | undefined;
@@ -15284,6 +15508,14 @@ export type SetDesignReferenceRoleRequest = {
   // answer and must not require a second verb.
   role: string | undefined;
   ordinal: number | undefined;
+  // The human's words about THIS reference — «only the collar», «the fabric, not the cut» (W-3).
+  // Written by the same upsert as the role, because it lives on the same row and a second verb for
+  // it would be a second write that could half-succeed.
+  // AN EMPTY NOTE ON A ROW THAT KEEPS ITS ROLE CLEARS THE NOTE — a note is text, and empty text is
+  // a real answer for it. That is NOT the rule `role` follows: an empty role deletes the row, and
+  // takes the note with it, because the row IS the role's existence. The asymmetry is deliberate;
+  // see common.DesignReference.
+  note: string | undefined;
 };
 
 export type SetDesignReferenceRoleResponse = {
@@ -16367,6 +16599,17 @@ export interface AdminService {
   // beside the rows would ship the same MediaFull twice and leave the client to re-pair them.
   // InvalidArgument when limit > 24.
   ListDesignRuns(request: ListDesignRunsRequest): Promise<ListDesignRunsResponse>;
+  // GetDesignRun reads ONE run whole: its params, the server-assembled input snapshot, its attempts
+  // and its pictures. Neither read beside it can do this — GetDesignBand and ListDesignRuns page the
+  // feed, so a specific older row is reachable only by walking pages to it, and each page ships
+  // MediaFull for every row it crosses on the way.
+  // IT IS ALSO HOW A LIVE RUN IS WATCHED. A run in flight is one row changing; polling it through
+  // the band read costs the whole band — bench, versions, journal, budget, layers, a page of
+  // pictures — per tick, to observe one status string.
+  // AND IT IS WHAT A RERUN SHOWS BEFORE IT SPENDS ANYTHING: selecting an old run must draw its
+  // prompt, its pictures, its descriptions and its markup (W-7), which is exactly this row's
+  // snapshot and nothing else.
+  GetDesignRun(request: GetDesignRunRequest): Promise<GetDesignRunResponse>;
   // GetDesignSheetVersion reads ONE frozen version whole: its plates, its callouts and its journal.
   // Without it, printing an older Rev.N, a QR that points at a specific issue, and checking the
   // paper on the factory floor against what was actually minted are all impossible — a QR on Rev.3
@@ -16396,6 +16639,16 @@ export interface AdminService {
   // Guards, each of which would otherwise leave a live reference pointing at something the band
   // refuses to draw — FailedPrecondition: in_slot | in_version | live_run_input | live_crop_parent.
   HideDesignPicture(request: HideDesignPictureRequest): Promise<HideDesignPictureResponse>;
+  // SetDesignPictureSelected marks a picture as CHOSEN (owner requirement W-12: «мы так же можем
+  // маркать 3д рендеры как выбранные»). It is a verb of its own and deliberately NOT a flag on
+  // HideDesignPicture: hidden says "do not show me this", selected says "this is the one" — the
+  // two are independent (a chosen picture can later be hidden), and folding them would make one
+  // gesture silently undo the other.
+  // Nothing is exclusive: the owner speaks in the plural, so many pictures of a kind may be chosen.
+  // ARTIFACTS reads the mark to decide what it offers for markup, which is why the field existed
+  // on the wire before this verb did — and why, until it landed, the mark was readable everywhere
+  // and settable nowhere.
+  SetDesignPictureSelected(request: SetDesignPictureSelectedRequest): Promise<SetDesignPictureSelectedResponse>;
   // RegisterDesignUpload files ONE GESTURE as one batch plus its pictures; the bytes themselves
   // went up through UploadContentImage first. Optionally the same call puts the FIRST picture into
   // a bench slot, under the SAME compare-and-set as an ordinary placement — otherwise a drop onto
@@ -16470,6 +16723,22 @@ export interface AdminService {
   // Aborted: layer_rev_mismatch. FailedPrecondition: empty_layer. InvalidArgument: an unknown or
   // foreign media_id.
   FlattenDesignEditLayer(request: FlattenDesignEditLayerRequest): Promise<FlattenDesignEditLayerResponse>;
+  // ImportDesignVector files an ALREADY-UPLOADED vector file into the band as an edit layer: the
+  // media row keeps the authoritative SVG, the layer keeps the editable projection of it, and
+  // DesignEditLayer.source_media_id is the edge between them.
+  // WITHOUT IT A FOREIGN SVG HAS NOWHERE TO LAND. `source_class = imported_svg` has been declared
+  // since Ф0 and written by nobody, because the band could hold rasters and strokes and no file in
+  // between.
+  // THE CLIENT PARSES, THE SERVER RECORDS THE PROVENANCE — the same division of labour
+  // FlattenDesignEditLayer already draws, and for the same reason: there is no SVG parser and no
+  // vector renderer anywhere in this repository, so the only honest producer of strokes is the
+  // canvas that is about to draw them.
+  // IT SPENDS NOTHING, AND THAT IS THE LINE BETWEEN IT AND GENERATION. Vectorising by machine is a
+  // paid provider call and goes through StartDesignRun with kind = vector; this verb only files a
+  // file that already exists. Two doors for the money would be two budget checks.
+  // Idempotent by client_request_id. InvalidArgument: an unknown or foreign media_id, an unknown
+  // origin, strokes_too_large (> 512 KB).
+  ImportDesignVector(request: ImportDesignVectorRequest): Promise<ImportDesignVectorResponse>;
   // DraftDesignIdea is a TEXT run through the same money and idempotency machine as every picture
   // run — a paid call with no row in the register would be a hole in the ledger. It runs INLINE:
   // the response already carries a finished DesignRun with status=done and output_text set.
@@ -22413,6 +22682,26 @@ export function createAdminServiceClient(
         method: "ListDesignRuns",
       }) as Promise<ListDesignRunsResponse>;
     },
+    GetDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/design/run/${request.runId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignRun",
+      }) as Promise<GetDesignRunResponse>;
+    },
     GetDesignSheetVersion(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
         throw new Error("missing required field request.tech_card_id");
@@ -22515,6 +22804,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "HideDesignPicture",
       }) as Promise<HideDesignPictureResponse>;
+    },
+    SetDesignPictureSelected(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/selected`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignPictureSelected",
+      }) as Promise<SetDesignPictureSelectedResponse>;
     },
     RegisterDesignUpload(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
@@ -22724,6 +23033,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "FlattenDesignEditLayer",
       }) as Promise<FlattenDesignEditLayerResponse>;
+    },
+    ImportDesignVector(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/vector`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ImportDesignVector",
+      }) as Promise<ImportDesignVectorResponse>;
     },
     DraftDesignIdea(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

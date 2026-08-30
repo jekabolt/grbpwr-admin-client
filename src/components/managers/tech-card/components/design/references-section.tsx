@@ -1,9 +1,13 @@
 import { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { cn } from 'lib/utility';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import { MediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
@@ -11,12 +15,28 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { TechCardFormData } from '../schema';
-import { MOOD_MAX, appendBoardPictures, type BoardItem } from './mood-board';
+import {
+  INPUT_MAX,
+  REFERENCE_KIND,
+  appendBoardPictures,
+  isInputRow,
+  useInputPick,
+  type BoardItem,
+} from './mood-board';
+import { RecalledRunPrompt } from './history-recall';
 import { useDesignWrites } from './use-design-band';
 
 /**
  * РЕФЕРЕНСЫ — ВХОД, а не доска. Мудборд собирает настроение для человека; здесь лежит то, что
  * увидит модель, когда будет рисовать флэт, и в каком порядке.
+ *
+ * КАРТИНОК МУДБОРДА ЗДЕСЬ НЕ БЫВАЕТ (U-5). Блок рисует РОВНО строки входа — `moodboardMedia` со
+ * `kind = REFERENCE`; плитки доски в него не попадают ни поштучно, ни полосой. Полоса
+ * «from the moodboard» с миниатюрами доски, стоявшая здесь, снята прямым требованием владельца:
+ * она рисовала одну и ту же картинку в двух блоках и превращала вход в витрину доски. Жест
+ * остался, но переехал НА ДОСКУ: ссылка `or from the moodboard` в последней ячейке взводит выбор
+ * (`useInputPick`), плитки мудборда становятся выбираемыми, и клик заводит ЗДЕСЬ НОВУЮ ЗАПИСЬ с
+ * тем же `media_id`. Плитка при этом остаётся на доске — вместе со своими указаниями.
  *
  * РОЛЬ ЖИВЁТ В ПОЛОСЕ, А НЕ В ДОКУМЕНТЕ, И ЭТО ВЫНУЖДЕНО (Р-1). В документе референс — это
  * `TechCardMediaItem{media_id, kind, caption}`, где `kind` УЖЕ занят тем, чем картинка ЯВЛЯЕТСЯ
@@ -30,19 +50,13 @@ import { useDesignWrites } from './use-design-band';
  *     до того, как человек назвал роль: иначе «добавил картинку во вход» было бы действием без
  *     следа до второго действия.
  *   • ПОЛОСНАЯ — роль в `band.references`. Она и есть «в промпте».
- * Членство — ОБЪЕДИНЕНИЕ: картинка с ролью показывается здесь, даже если её `kind` разошёлся
+ * Членство — ОБЪЕДИНЕНИЕ: картинка с ролью показывается здесь, даже если её строка потерялась
  * (дрейф данных, карточка из клона). Роль — более сильное утверждение, и прятать носителя роли
  * значило бы завести запись, которую не видно ни на одном экране и которую нечем снять.
  *
- * ОДНА КАРТИНКА, ДВА ОКНА, БЕЗ ДУБЛЕЙ. Мудбордная картинка становится референсом сменой `kind` —
- * строка остаётся ОДНА и остаётся на доске (мудборд рисует весь `moodboardMedia`), поэтому плитка
- * никуда не девается. Вторая строка на тот же `media_id` была бы вторым домом для одной картинки.
- *
- * ✕ ЗДЕСЬ НИЧЕГО НЕ УНИЧТОЖАЕТ, и это отличие от прототипа названо вслух: он выводит картинку из
- * входа (роль снимается, `kind` возвращается в `mood`), а сама картинка остаётся на доске. Одна
- * невозвратная дверь на полосу — ✕ плитки мудборда, и она называет цену. Второй такой двери здесь
- * не заводится: сторож прототипа, сверявший «участвовала ли картинка в прогонах», всё равно
- * сравнивал ярлык вместо предмета (Г3), а прогонов в этой волне нет вовсе.
+ * ✕ УНОСИТ СУЩНОСТЬ ЦЕЛИКОМ — картинку входа, её роль и её записку — и спрашивает перед этим,
+ * называя, в скольких прогонах эта картинка участвовала. Доски он не касается: там своя строка со
+ * своим ✕, который называет свою цену.
  */
 
 /**
@@ -60,18 +74,18 @@ const ROLE_ITEMS = [
   { value: 'detail', label: 'detail' },
 ];
 
-const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
-const MOODBOARD_KIND = 'TECH_CARD_MEDIA_KIND_MOODBOARD';
-
-const roleLabel = (role: string) => ROLE_ITEMS.find((r) => r.value === role)?.label ?? role;
-
-const mediaAspect = (full?: common_MediaFull): string => {
-  const dim = full?.media?.fullSize ?? full?.media?.thumbnail;
-  return dim?.width && dim?.height ? `${dim.width}/${dim.height}` : '4/5';
-};
-
 const thumbUrl = (full?: common_MediaFull): string =>
   full?.media?.thumbnail?.mediaUrl || full?.media?.fullSize?.mediaUrl || '';
+
+const fullUrl = (full?: common_MediaFull): string =>
+  full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
+
+/**
+ * ЯЧЕЙКА ГРИДА — две колонки: кадр 160px и всё остальное. Ни рамки вокруг ячейки, ни заголовка
+ * группы: блок один, внутри — рулёная сетка, строки разделены волосяной линией (внутренний вес),
+ * колонки — зазором в 24px. Рамка ячейки была бы блоком в блоке.
+ */
+const CELL = 'grid min-w-0 grid-cols-[160px_1fr] items-start gap-3 py-3';
 
 export function ReferencesSection({
   techCardId,
@@ -84,9 +98,11 @@ export function ReferencesSection({
 }): JSX.Element {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { setReferenceRole } = useDesignWrites(techCardId);
+  const { showMessage } = useSnackBarStore();
   const readOnly = !!disabled;
 
-  const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
+  const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
+  const rows = useMemo(() => all.filter(isInputRow), [all]);
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
   const libraryMap = useMediaMap();
   const mediaById = useMemo(() => {
@@ -96,31 +112,39 @@ export function ReferencesSection({
   }, [libraryMap, picked]);
 
   // Запись состава карточки — ПО КОРНЮ массива, как и на доске: два экземпляра поля-массива на одно
-  // имя не синхронизируются, а мудборд смонтирован рядом и читает те же строки.
+  // имя не синхронизируются, а мудборд смонтирован рядом и правит вторую половину того же списка.
   const writeItems = (next: BoardItem[]) =>
     setValue('moodboardMedia', next as TechCardFormData['moodboardMedia'], { shouldDirty: true });
 
-  const roleOf = useMemo(() => {
-    const m = new Map<number, string>();
+  /**
+   * РОЛЬ И ЗАПИСКА ПРИХОДЯТ ОДНОЙ СТРОКОЙ ПОЛОСЫ, и читаются они тоже вместе: записка живёт на
+   * строке роли (`DesignReference.note`), а не на строке документа. Второй дом у неё был бы
+   * `tech_card_media.caption`, и две записки на одну картинку разошлись бы в первый же день.
+   *
+   * Фильтр по непустой роли оставлен сторожем: контракт обещает, что роли на проводе не бывает
+   * пустой (пустая — это удаление строки), и строка, нарушившая обещание, здесь просто не
+   * считается ролью, а не превращается в невидимого носителя записки.
+   */
+  const refOf = useMemo(() => {
+    const m = new Map<number, { role: string; note: string }>();
     for (const r of band.references ?? []) {
-      if (r.mediaId != null && (r.role ?? '').trim()) m.set(r.mediaId, (r.role as string).trim());
+      const role = (r.role ?? '').trim();
+      if (r.mediaId != null && role) m.set(r.mediaId, { role, note: r.note ?? '' });
     }
     return m;
   }, [band.references]);
 
-  // ЧЛЕНСТВО И ПОРЯДОК. Порядок — это порядок добавления на карточку, то есть позиция в
-  // `moodboardMedia`; картинка, несущая роль, но выпавшая из списка (дрейф), встаёт в хвост, чтобы
+  // ЧЛЕНСТВО И ПОРЯДОК. Порядок — это порядок добавления во вход, то есть позиция строки входа в
+  // `moodboardMedia`; картинка, несущая роль, но потерявшая строку (дрейф), встаёт в хвост, чтобы
   // её было чем снять.
   const members = useMemo(() => {
-    const onCard = items
-      .filter((i) => i.kind === REFERENCE_KIND || roleOf.has(i.mediaId))
-      .map((i) => ({ mediaId: i.mediaId, onBoard: true }));
+    const onCard = rows.map((i) => ({ mediaId: i.mediaId, onCard: true }));
     const seen = new Set(onCard.map((m) => m.mediaId));
-    const strays = [...roleOf.keys()]
+    const strays = [...refOf.keys()]
       .filter((id) => !seen.has(id))
-      .map((mediaId) => ({ mediaId, onBoard: false }));
+      .map((mediaId) => ({ mediaId, onCard: false }));
     return [...onCard, ...strays];
-  }, [items, roleOf]);
+  }, [rows, refOf]);
 
   /**
    * НОМЕРА ПРОМПТА ПЛОТНЫЕ И НЕ ХРАНЯТСЯ (И-3). Они присваиваются сканом по порядку с пропуском
@@ -132,62 +156,132 @@ export function ReferencesSection({
     const m = new Map<number, number>();
     let n = 0;
     for (const member of members) {
-      if (roleOf.has(member.mediaId)) m.set(member.mediaId, ++n);
+      if (refOf.has(member.mediaId)) m.set(member.mediaId, ++n);
     }
     return m;
-  }, [members, roleOf]);
+  }, [members, refOf]);
 
   const inPrompt = promptNumber.size;
 
-  const boardCandidates = items.filter((i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId));
+  /**
+   * СКОЛЬКО ПРОГОНОВ ЧИТАЛИ ЭТУ КАРТИНКУ. Считается по снимкам входа, которые собирает СЕРВЕР
+   * (`run.inputs.refs[].media_id`), а не по нынешнему составу входа: вопрос про прошлое, и
+   * отвечать на него сегодняшним списком значило бы отвечать не на него.
+   *
+   * ЦЕНА НАЗВАНА: полоса отдаёт ПЕРВУЮ страницу истории, поэтому счёт может быть неполным, и
+   * вопрос говорит «at least». Дочитывать всю историю ради предупреждения — это N запросов на
+   * каждое открытие карточки ради строки, которая всё равно ничего не уничтожает: снимок прогона
+   * заморожен на сервере и удалением референса не портится.
+   */
+  const runsByMedia = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const run of band.runs ?? []) {
+      const seen = new Set<number>();
+      for (const ref of run.inputs?.refs ?? []) {
+        if (ref.mediaId == null || seen.has(ref.mediaId)) continue;
+        seen.add(ref.mediaId);
+        m.set(ref.mediaId, (m.get(ref.mediaId) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [band.runs]);
 
-  function setRole(mediaId: number, role: string) {
-    // ORDINAL — ЭТО ПОЗИЦИЯ НА ДОСКЕ, а не номер промпта. Номер промпта выводится сканом (см.
+  const historyComplete = !(band.nextPageToken ?? '').trim();
+
+  /** Позиция во входе — она же `ordinal` на проводе. */
+  const ordinalOf = (mediaId: number) =>
+    Math.max(1, rows.findIndex((i) => i.mediaId === mediaId) + 1);
+
+  function writeRef(mediaId: number, role: string, note: string) {
+    // ORDINAL — ЭТО ПОЗИЦИЯ ВО ВХОДЕ, а не номер промпта. Номер промпта выводится сканом (см.
     // выше), и класть его в хранимое поле значило бы завести второй источник одной величины,
     // который расходится с первым при каждом снятии роли.
-    const ordinal = Math.max(1, items.findIndex((i) => i.mediaId === mediaId) + 1);
-    setReferenceRole.mutate({ mediaId, role, ordinal });
+    setReferenceRole.mutate({ mediaId, role, ordinal: role ? ordinalOf(mediaId) : 0, note });
   }
 
-  /** Мудбордная картинка входит во вход. Строка ОДНА и остаётся на доске — меняется только `kind`. */
-  function promote(mediaId: number) {
-    writeItems(
-      ((getValues('moodboardMedia') ?? []) as BoardItem[]).map((i) =>
-        i.mediaId === mediaId ? { ...i, kind: REFERENCE_KIND } : i,
-      ),
-    );
+  function setRole(mediaId: number, role: string) {
+    const note = refOf.get(mediaId)?.note ?? '';
+    // СНЯТИЕ РОЛИ УНОСИТ ЗАПИСКУ, и это не наш выбор, а форма хранения: строка полосы И ЕСТЬ
+    // существование роли, записка — её колонка. Раз цена не наша, тем более она обязана быть
+    // названа ДО, а не обнаружена после: молчащий селект стёр бы набранные руками слова.
+    if (!role && note.trim()) {
+      setPendingRoleClear(mediaId);
+      return;
+    }
+    // Записка переносится на новую роль ЯВНО. Не передать её — значит стереть: у поля семантика
+    // «пустая строка на живой строке очищает».
+    writeRef(mediaId, role, note);
   }
 
-  /** Вывести из входа: роль снимается, картинка возвращается в мудбордные плитки. */
-  function withdraw(mediaId: number) {
-    if (roleOf.has(mediaId)) setReferenceRole.mutate({ mediaId, role: '', ordinal: 0 });
-    writeItems(
-      ((getValues('moodboardMedia') ?? []) as BoardItem[]).map((i) =>
-        i.mediaId === mediaId ? { ...i, kind: MOODBOARD_KIND } : i,
-      ),
-    );
-  }
-
-  function setNote(mediaId: number, note: string) {
-    writeItems(
-      ((getValues('moodboardMedia') ?? []) as BoardItem[]).map((i) =>
-        i.mediaId === mediaId ? { ...i, caption: note } : i,
-      ),
-    );
+  /**
+   * Записка коммитится по УХОДУ ФОКУСА, а не по нажатию клавиши: это сетевой upsert, и запрос на
+   * каждый символ — это и деньги, и гонка, в которой побеждает самый медленный ответ.
+   */
+  function commitNote(mediaId: number, note: string) {
+    const current = refOf.get(mediaId);
+    // Без роли записку хранить негде — строки полосы не существует. Поле в этом состоянии и не
+    // редактируется (см. ячейку), но сторож стоит и здесь: путь записи один, и он обязан отвечать
+    // за себя сам.
+    if (!current) return;
+    if ((current.note ?? '') === note) return;
+    writeRef(mediaId, current.role, note);
   }
 
   function addReferences(added: common_MediaFull[]) {
     const result = appendBoardPictures({
       live: (getValues('moodboardMedia') ?? []) as BoardItem[],
+      inScope: isInputRow,
       otherListIds: ((getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
       added,
       kind: REFERENCE_KIND,
+      max: INPUT_MAX,
+      scopeLabel: 'input',
     });
+    if (result.refusal) showMessage(result.refusal, 'error');
     if (!result.accepted.length) return [];
     setPicked((prev) => [...prev, ...result.accepted]);
     writeItems(result.next);
     return result.accepted.map((it) => it.id as number);
   }
+
+  // ── ✕ референса: цитата перед уничтожением ──────────────────────────────────────────────────
+  const [pendingRemove, setPendingRemove] = useState<number | null>(null);
+  const pendingRuns = pendingRemove == null ? 0 : runsByMedia.get(pendingRemove) ?? 0;
+  /** Снятие роли, которое уносит с собой набранную записку, — спрашивается отдельно. */
+  const [pendingRoleClear, setPendingRoleClear] = useState<number | null>(null);
+
+  function confirmRemove() {
+    const mediaId = pendingRemove;
+    setPendingRemove(null);
+    if (mediaId == null) return;
+    // Порядок важен: сначала снимается роль (сервер отвергнет роль на медиа, которого карточка
+    // больше не держит), потом уходит строка входа вместе с запиской.
+    if (refOf.has(mediaId)) setReferenceRole.mutate({ mediaId, role: '', ordinal: 0, note: '' });
+    writeItems(
+      ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(
+        (i) => !(i.mediaId === mediaId && isInputRow(i)),
+      ),
+    );
+  }
+
+  // ── зум: смотреть референс целиком ──────────────────────────────────────────────────────────
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
+  const viewerItems: MediaViewerItem[] = members.map((m) => {
+    const full = mediaById.get(m.mediaId);
+    return {
+      src: fullUrl(full),
+      thumbnail: thumbUrl(full),
+      type: 'image',
+      alt: `reference ${promptNumber.get(m.mediaId) ?? m.mediaId}`,
+      meta: { id: m.mediaId },
+    };
+  });
+
+  // ── описание изделия (W-3) ──────────────────────────────────────────────────────────────────
+  const garment = useController({ control, name: 'garmentDescription' });
+  const garmentId = useId();
+
+  const pick = useInputPick();
 
   return (
     <Section
@@ -199,93 +293,189 @@ export function ReferencesSection({
         </Text>
       }
     >
-      <GroupLabel flush>the pictures</GroupLabel>
-      {members.length === 0 && (
-        <Text size='micro' variant='label'>
-          nothing in the input yet. add a picture below, or take one off the moodboard — a reference
-          is one thing: a picture, a role and a note.
+      {/* ОПИСАНИЕ ИЗДЕЛИЯ — ОДНО НА ВСЁ, и оно уходит в КАЖДЫЙ прогон. Стоит НАД картинками,
+          потому что читается вместе с каждой из них: каждая ячейка ниже добавляет строку про
+          СЕБЯ, а общее про изделие сказано здесь один раз.
+          ⚠ Провода у поля пока нет — см. TODO(`garment_description`) в `schema.ts`. */}
+      <div>
+        <GroupLabel
+          flush
+          action={
+            <Text size='micro' variant='label' component='span'>
+              read with all {members.length} picture{members.length === 1 ? '' : 's'} · goes into
+              every run
+            </Text>
+          }
+        >
+          garment description
+        </GroupLabel>
+        <label htmlFor={garmentId} className='sr-only'>
+          garment description
+        </label>
+        <Textarea
+          {...garment.field}
+          id={garmentId}
+          disabled={readOnly}
+          value={garment.field.value ?? ''}
+          rows={3}
+          maxLength={2000}
+          placeholder='what the garment is — read together with every picture below'
+          className='resize-none'
+        />
+        <Text size='micro' variant='label' className='mt-px'>
+          one description for the whole garment. each picture below adds a line about itself.
         </Text>
-      )}
-
-      <div className='flex flex-wrap items-start gap-2.5'>
-        {members.map((member) => (
-          <ReferenceCell
-            key={member.mediaId}
-            mediaId={member.mediaId}
-            full={mediaById.get(member.mediaId)}
-            role={roleOf.get(member.mediaId) ?? ''}
-            number={promptNumber.get(member.mediaId)}
-            note={items.find((i) => i.mediaId === member.mediaId)?.caption ?? ''}
-            onBoard={member.onBoard}
-            readOnly={readOnly}
-            onRole={(role) => setRole(member.mediaId, role)}
-            onNote={(note) => setNote(member.mediaId, note)}
-            onWithdraw={() => withdraw(member.mediaId)}
-          />
-        ))}
-
-        {!readOnly && (
-          <MediaSlot
-            frameAspect='4/5'
-            sizeClassName='w-[160px]'
-            label='+ reference'
-            purpose='design reference'
-            allowMultiple
-            showVideos={false}
-            onSelect={addReferences}
-          />
-        )}
       </div>
 
-      {/* ПИКЕР ЖИВЁТ ЗДЕСЬ, А НЕ РЕЖИМОМ ПОДСВЕТКИ НА ДОСКЕ, и это осознанное расхождение с
-          прототипом. У прототипа плитка мудборда — просто картинка, а у нас это ПОВЕРХНОСТЬ
-          РАЗМЕТКИ: клик по ней ставит указание. Взведённый пик-мод поверх взведённого вида выноски
-          означал бы один клик — два факта, ровно ту неоднозначность, которую прототип сам записал
-          себе в дефекты (Г13). Полоса ниже даёт тот же жест в одно нажатие и ни с чем не спорит. */}
-      {!readOnly && boardCandidates.length > 0 && (
-        <div>
-          <GroupLabel>from the moodboard</GroupLabel>
-          <Text size='micro' variant='label' className='mb-1'>
-            one picture, two windows: it stays a moodboard tile and gains a role in the input.
-          </Text>
-          <div className='flex flex-wrap gap-1.5'>
-            {boardCandidates.map((i) => {
-              const full = mediaById.get(i.mediaId);
-              const url = thumbUrl(full);
-              return (
+      <div>
+        <GroupLabel
+          action={
+            <Text size='micro' variant='label' component='span'>
+              each one is read together with the description above
+            </Text>
+          }
+        >
+          the pictures
+        </GroupLabel>
+
+        {/* ГРИД 2×N: `auto-fit` с минимумом 470px даёт при ширине админки ровно две колонки и
+            честно схлопывается в одну на узком окне. Между колонками — зазор, между строками —
+            волосяная линия на самих ячейках. */}
+        <div className='grid gap-x-gutter [grid-template-columns:repeat(auto-fit,minmax(470px,1fr))]'>
+          {members.map((member, i) => (
+            <ReferenceCell
+              key={member.mediaId}
+              mediaId={member.mediaId}
+              full={mediaById.get(member.mediaId)}
+              role={refOf.get(member.mediaId)?.role ?? ''}
+              number={promptNumber.get(member.mediaId)}
+              note={refOf.get(member.mediaId)?.note ?? ''}
+              onCard={member.onCard}
+              readOnly={readOnly}
+              onRole={(role) => setRole(member.mediaId, role)}
+              onNote={(note) => commitNote(member.mediaId, note)}
+              onRemove={() => setPendingRemove(member.mediaId)}
+              onZoom={() => setZoomIndex(i)}
+            />
+          ))}
+
+          {/* ПОСЛЕДНЯЯ ЯЧЕЙКА — ВСЕГДА ПЛЕЙСХОЛДЕР, и это не логика, а порядок разметки: она
+              стоит литералом ПОСЛЕ обхода списка и потому не может пропасть при пустом входе,
+              полном входе или отказе сервера. Волосяной линии у неё нет — под последней строкой
+              рулёной сетки линии не рисуют. */}
+          <div className={CELL}>
+            {readOnly ? (
+              <div className='h-[200px] w-[160px] border border-dashed border-borderColor' />
+            ) : (
+              <MediaSlot
+                frameAspect='4/5'
+                heightPx={200}
+                label='+ reference'
+                purpose='design reference'
+                hint={null}
+                allowMultiple
+                showVideos={false}
+                onSelect={addReferences}
+              />
+            )}
+            <div className='flex min-w-0 flex-col items-start gap-1'>
+              <Text size='micro' variant='label'>
+                drop a file, paste with ⌘V, or click to browse. a reference is one thing: a picture,
+                a role and a note — the ✕ takes all three, and it asks first.
+              </Text>
+              {!readOnly && (
                 <button
-                  key={i.mediaId}
                   type='button'
-                  onClick={() => promote(i.mediaId)}
-                  title='take this moodboard picture into the input'
-                  className='block h-[72px] w-[56px] shrink-0 border border-borderColor bg-bgColor hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  onClick={() => pick.arm()}
+                  className='cursor-pointer underline underline-offset-2 hover:no-underline'
                 >
-                  {url ? (
-                    <img src={url} alt='' className='h-full w-full object-cover' />
-                  ) : (
-                    <Text size='nano' variant='inactive' component='span'>
-                      #{i.mediaId}
-                    </Text>
-                  )}
+                  <Text size='micro' variant='label' component='span'>
+                    or from the moodboard ▸
+                  </Text>
                 </button>
-              );
-            })}
+              )}
+              {pick.armed && (
+                <Text size='micro' variant='label'>
+                  now click a tile up on the moodboard — it becomes a reference too, the tile stays.
+                </Text>
+              )}
+            </div>
           </div>
         </div>
-      )}
+      </div>
 
-      {members.length >= MOOD_MAX && (
+      {members.length >= INPUT_MAX && (
         <Text size='micro' variant='label'>
-          the board holds {MOOD_MAX} pictures in total — references included.
+          the input holds {INPUT_MAX} pictures — the moodboard counts separately.
         </Text>
       )}
+
+      {/* ПРОМТ ВЫБРАННОГО ПРОГОНА ПОКАЗЫВАЕТСЯ ЗДЕСЬ — так сказал владелец (W-7): «нам должен при
+          выборе в INPUT — REFERENCES отображаться наш промт». Макет показывает его в раскрытой
+          строке истории; слушаем владельца, а не макет. Это `GroupLabel` + строки, не `Section`:
+          блок внутри блока запрещён. */}
+      <RecalledRunPrompt techCardId={techCardId} band={band} disabled={disabled} />
+
+      <MediaViewer
+        items={viewerItems}
+        index={zoomIndex ?? 0}
+        open={zoomIndex != null}
+        onOpenChange={(open) => !open && setZoomIndex(null)}
+        onIndexChange={setZoomIndex}
+      />
+
+      <ConfirmationModal
+        open={pendingRoleClear != null}
+        onOpenChange={(open) => !open && setPendingRoleClear(null)}
+        onConfirm={() => {
+          const mediaId = pendingRoleClear;
+          setPendingRoleClear(null);
+          if (mediaId != null) writeRef(mediaId, '', '');
+        }}
+        onCancel={() => setPendingRoleClear(null)}
+        title='take it out of the prompt'
+        confirmLabel='take it out'
+        width='sm'
+      >
+        <Text size='control'>
+          The note on this picture goes with the role — the two are one row, and there is nowhere to
+          keep a note for a picture the prompt never sees. Copy it first if you want to keep it.
+        </Text>
+      </ConfirmationModal>
+
+      <ConfirmationModal
+        open={pendingRemove != null}
+        onOpenChange={(open) => !open && setPendingRemove(null)}
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingRemove(null)}
+        title='remove the reference'
+        confirmLabel='remove it'
+        width='sm'
+      >
+        <div className='space-y-2'>
+          <Text size='control'>
+            The picture, its role and its note go together — a reference is one thing.
+          </Text>
+          {pendingRuns > 0 && (
+            <Text size='control'>
+              {historyComplete ? '' : 'At least '}
+              {pendingRuns} run{pendingRuns === 1 ? '' : 's'} already read this picture. Those runs
+              keep their own frozen copy of what they were shown; this only takes it out of the next
+              one.
+            </Text>
+          )}
+          <Text size='control'>
+            If the same picture also stands on the moodboard, that tile stays where it is.
+          </Text>
+        </div>
+      </ConfirmationModal>
     </Section>
   );
 }
 
 /**
- * Одна ячейка: картинка, номер промпта, роль, записка. Без своей рамки-блока — ячейка это ПЛИТКА
- * внутри блока, а блок в блоке в этой системе запрещён; разделяет ячейки промежуток.
+ * Одна ячейка: слева кадр с номером промпта и зумом, справа сверху роль и ✕, справа снизу записка.
+ * Без своей рамки-блока — ячейка это СТРОКА внутри блока, а блок в блоке в этой системе запрещён.
  */
 function ReferenceCell({
   mediaId,
@@ -293,44 +483,71 @@ function ReferenceCell({
   role,
   number,
   note,
-  onBoard,
+  onCard,
   readOnly,
   onRole,
   onNote,
-  onWithdraw,
+  onRemove,
+  onZoom,
 }: {
   mediaId: number;
   full?: common_MediaFull;
   role: string;
   number?: number;
   note: string;
-  onBoard: boolean;
+  onCard: boolean;
   readOnly: boolean;
   onRole: (role: string) => void;
   onNote: (note: string) => void;
-  onWithdraw: () => void;
+  onRemove: () => void;
+  onZoom: () => void;
 }) {
   const noteId = useId();
   const url = thumbUrl(full);
   const off = !role;
 
+  /**
+   * ЧЕРНОВИК ЗАПИСКИ ЖИВЁТ В ЯЧЕЙКЕ, а уходит на сервер по потере фокуса.
+   *
+   * Записка — это `design_reference.note`, то есть СЕТЕВОЙ upsert, а не поле формы: запрос на
+   * каждое нажатие клавиши стоил бы и денег, и гонки, в которой выигрывает самый медленный ответ.
+   * Черновик пере-синхронизируется по `note` из полосы (ключ ниже), поэтому пришедший ответ
+   * сервера — и чужая правка из соседней вкладки — видны сразу, а не после перезагрузки.
+   */
+  const [draft, setDraft] = useState(note);
+  const [seen, setSeen] = useState(note);
+  // Синхронизация по ИЗМЕНЕНИЮ ПРИШЕДШЕГО, а не по расхождению с ним. Разница видна ровно на
+  // отказе: сравнивая с `note`, черновик откатывался бы к старому тексту сразу после потери
+  // фокуса — то есть набранное исчезало бы с экрана раньше, чем сервер вообще ответил, и
+  // навсегда, если ответ был ошибкой. Сравнение с ПРЕДЫДУЩИМ значением полосы этого не делает:
+  // не изменилось на проводе — не трогаем набранное.
+  if (seen !== note) {
+    setSeen(note);
+    setDraft(note);
+  }
+
+  // ✕ и zoom приходят по наведению и по фокусу внутри ячейки. На устройстве без наведения они
+  // видны всегда: иначе на планшете к ним нет пути вовсе.
+  const hoverOnly =
+    'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ' +
+    'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ' +
+    'motion-reduce:transition-none';
+
   return (
-    <div className='w-[160px] shrink-0 space-y-1'>
-      {/* КАДР В ПРОПОРЦИЯХ САМОГО СНИМКА. Навязанное соотношение обрезало бы картинку под её же
-          подписью; `aspectRatio` без `self-start` — рамка, схлопнутая в 0×0, читается как
-          «фотографии не показываются», хотя данные на месте. */}
-      <div
-        className='relative w-full border border-borderColor bg-bgColor'
-        style={{ aspectRatio: mediaAspect(full) }}
-      >
+    <div className={cn(CELL, 'group border-b border-hairline')}>
+      {/* КАДР ФИКСИРОВАН 160×200, КАРТИНКА ВПИСЫВАЕТСЯ ЦЕЛИКОМ (`object-contain`).
+          Навязанное соотношение законно ровно потому, что на референсе НЕТ выносок: доля кадра
+          здесь ничего не адресует, и обрезать нечего. На мудборде и на флэте кадр обязан быть в
+          пропорциях снимка — там по кадру ставят указания. */}
+      <div className='relative h-[200px] w-[160px] border border-borderColor bg-bgColor'>
         {url ? (
           <img
             src={url}
             alt={`reference ${number ?? mediaId}`}
-            className='h-full w-full object-cover'
+            className='h-full w-full object-contain'
           />
         ) : (
-          <div className='flex h-full w-full items-center justify-center'>
+          <div className='flex h-full w-full items-center justify-center px-1 text-center'>
             <Text size='nano' variant='inactive' component='span'>
               media #{mediaId} not resolved
             </Text>
@@ -341,9 +558,20 @@ function ReferenceCell({
             {number}
           </span>
         )}
+        <button
+          type='button'
+          onClick={onZoom}
+          aria-label={`zoom reference ${number ?? mediaId}`}
+          className={cn(
+            'absolute right-0 top-0 border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label text-labelColor hover:text-textColor',
+            hoverOnly,
+          )}
+        >
+          zoom
+        </button>
         {/* ПРИЗРАК «НЕ В ПРОМПТЕ» — СЛОВАМИ, А НЕ ПРИГЛУШЕНИЕМ. Приглушённый кадр читается как
             «картинка сломана»; строка говорит, чего именно не хватает. Плашка непрозрачная: в этой
-            системе прозрачности нет вовсе, а полупрозрачная подложка на пёстром снимке даёт серый
+            системе прозрачностей нет вовсе, а полупрозрачная подложка на пёстром снимке даёт серый
             текст на сером — то есть не читается ровно там, где нужна. */}
         {off && (
           <span className='absolute bottom-0 left-0 right-0 border-t border-borderColor bg-bgColor px-1 text-center text-nano uppercase tracking-label text-labelColor'>
@@ -352,53 +580,65 @@ function ReferenceCell({
         )}
       </div>
 
-      <div className='flex items-center gap-1'>
-        <Select
-          name={`ref-role-${mediaId}`}
-          items={ROLE_ITEMS}
-          value={role}
-          placeholder='— not in prompt —'
-          readOnly={readOnly}
-          onValueChange={onRole}
-          className='w-[118px]'
+      {/* ПРАВАЯ КОЛОНКА РОСТОМ В КАДР: строка роли фиксированной высоты, записка занимает
+          остаток. Иначе поле записки росло бы по тексту и рвало ряд грида. */}
+      <div className='grid h-[200px] min-w-0 grid-rows-[26px_1fr] gap-1.5'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <Select
+            name={`ref-role-${mediaId}`}
+            items={ROLE_ITEMS}
+            value={role}
+            placeholder='— not in prompt —'
+            readOnly={readOnly}
+            onValueChange={onRole}
+            className='w-[172px]'
+          />
+          {!onCard && (
+            <Pill tone='warn' title='this picture carries a role but has no row on the card'>
+              off the card
+            </Pill>
+          )}
+          <button
+            type='button'
+            disabled={readOnly}
+            onClick={onRemove}
+            aria-label='remove this reference — picture, role and note together'
+            title='remove this reference — picture, role and note together'
+            className={cn(
+              'ml-auto px-1 text-labelColor hover:text-textColor disabled:text-textInactiveColor',
+              hoverOnly,
+            )}
+          >
+            ✕
+          </button>
+        </div>
+
+        <label htmlFor={noteId} className='sr-only'>
+          what this picture adds
+        </label>
+        {/* ЗАПИСКА ЖИВЁТ НА СТРОКЕ РОЛИ, поэтому без роли её негде хранить — и поле говорит это
+            словами вместо того, чтобы принять текст и потерять его. Это не наш выбор интерфейса:
+            строка полосы И ЕСТЬ существование роли (см. `DesignReference`). */}
+        <Textarea
+          name={`ref-note-${mediaId}`}
+          id={noteId}
+          // ЯКОРЬ ДЛЯ ПРОБЫ, а не украшение: примитив `Textarea` кладёт `name` в `id`, поэтому
+          // адресовать записку по имени поля невозможно, а `useId` от прогона к прогону разный.
+          data-ref-note={mediaId}
+          disabled={readOnly || !onCard || off}
+          value={draft}
+          maxLength={500}
+          autoGrow={false}
+          placeholder={
+            off ? 'give it a role first — the note rides with it' : '+ what this picture adds'
+          }
+          className='h-full resize-none'
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft !== note) onNote(draft);
+          }}
         />
-        <button
-          type='button'
-          disabled={readOnly}
-          onClick={onWithdraw}
-          title='take it out of the input — the picture stays on the moodboard'
-          className='px-1 text-labelColor hover:text-textColor disabled:text-textInactiveColor'
-        >
-          ✕
-        </button>
       </div>
-
-      {!onBoard && (
-        <Pill tone='warn' title='this picture carries a role but is not on the card any more'>
-          off the card
-        </Pill>
-      )}
-      {role && (
-        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-          {roleLabel(role)}
-        </Text>
-      )}
-
-      <label htmlFor={noteId} className='sr-only'>
-        what this picture adds
-      </label>
-      <Textarea
-        name={`ref-note-${mediaId}`}
-        id={noteId}
-        disabled={readOnly || !onBoard}
-        value={note}
-        rows={2}
-        maxLength={500}
-        autoGrow={false}
-        placeholder='+ what this picture adds'
-        className='resize-none'
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onNote(e.target.value)}
-      />
     </div>
   );
 }

@@ -21,6 +21,7 @@ import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../schema';
 import { SketchTab } from '../sketch-tab';
@@ -46,6 +47,8 @@ import {
   type MintOrigin,
 } from './mint-dialog';
 import { provenanceLabel, readProvenance } from './provenance';
+import { outputsOfKind, pictureIsSelected, serverStatesSelected } from './render';
+import { buildSheetSvg, downloadSvg, type SheetSvgPlate } from './sheet-svg';
 import { PrintSheetButton, SheetJournal, versionShortHash } from './sheet-journal';
 import { useDesignSheetVersion } from './use-design-band';
 
@@ -89,12 +92,115 @@ export type DocumentPlate = {
   name: string;
   mediaId: number;
   media?: common_MediaFull;
-  /** Where this plate is listed — the card's own media, or a slot on the design bench. */
-  origin: 'card' | 'bench';
+  /**
+   * Where this plate is listed.
+   *   `card`  — the card's own technical media. This is the DOCUMENT: what a callout's `media_id`
+   *             points at, what prints, and what the mint freezes.
+   *   `bench` — a design bench slot. The mint carries it into the card's media; until then it is
+   *             visible here and cannot be drawn on.
+   *   `run`   — an output of a generation run that nobody has taken onto the card yet. It exists in
+   *             the band and nowhere else, which is why it gets a verb of its own.
+   */
+  origin: 'card' | 'bench' | 'run';
+  /** The server states this picture is the one the studio settled on — `DesignPicture.selected`. */
+  chosen?: boolean;
   /** Only for a bench plate: the address of its slot, for the door. */
   door?: string;
   note?: string;
 };
+
+/**
+ * ═══ WHICH REPRESENTATION A PICTURE IS — the axis ARTIFACTS switches along (W-14) ══════════════
+ *
+ * READ OFF THE RUN THE PICTURE CAME OUT OF, and only then off the card's own `kind`. `DesignRun.
+ * kind` is spelled out in the contract and frozen at launch; `TechCardMediaKind` has one member for
+ * an accepted render and NONE for a turntable frame, so a card-side reading alone would file every
+ * 3D frame under «flat» and the switcher would have an empty segment that is not honestly empty.
+ *
+ * The fallback is still needed and is still right: a render accepted onto the card months ago, on a
+ * page of the feed the band no longer ships, is not in `band.runs` at all — and `kind=RENDER` on
+ * the card media is exactly the statement «this is a render and it is official».
+ */
+export type ArtifactKind = 'flat' | 'render' | 'threed';
+
+export const ARTIFACT_KINDS: { value: ArtifactKind; label: string; hint: string }[] = [
+  { value: 'flat', label: 'flats', hint: 'the drawings — and the only thing the sheet is made of' },
+  { value: 'render', label: 'renders', hint: 'coloured over the flats; not part of the sheet' },
+  { value: 'threed', label: '3D', hint: 'turntable frames; not part of the sheet' },
+];
+
+export function artifactKindOf(
+  mediaId: number,
+  runKindByMedia: Map<number, string>,
+  cardKind?: string,
+): ArtifactKind {
+  const fromRun = runKindByMedia.get(mediaId);
+  if (fromRun === 'render') return 'render';
+  if (fromRun === 'threed') return 'threed';
+  if (cardKind === 'TECH_CARD_MEDIA_KIND_RENDER') return 'render';
+  return 'flat';
+}
+
+/** media id → the kind of the run that produced it, for every picture on the loaded page. */
+export function runKindByMediaId(band: GetDesignBandResponse): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const run of band.runs ?? []) {
+    const kind = (run.kind ?? '').trim().toLowerCase();
+    if (kind !== 'render' && kind !== 'threed' && kind !== 'flat') continue;
+    for (const picture of run.pictures ?? []) {
+      const mediaId = picture.media?.id ?? 0;
+      if (mediaId > 0) map.set(mediaId, kind);
+    }
+  }
+  return map;
+}
+
+/**
+ * ═══ THE PICTURES ARTIFACTS OFFERS TO MARK UP, BEYOND THE DOCUMENT ITSELF ═════════════════════
+ *
+ * The owner's sentence is «we can put callouts on the CHOSEN generated / annotated media (or ones
+ * uploaded by hand), and switch between flats, renders and 3D». So the carrier of the switch is the
+ * chosen pictures — not only the plates that reached the technical sheet — and «chosen» is the very
+ * mark W-12 asks for on a turntable. One notion, two requirements; a second one would drift.
+ *
+ * THE LIST NARROWS TO THE CHOSEN ONES ONLY WHEN A CHOICE HAS BEEN MADE, and that condition is the
+ * whole of the honesty here. `DesignPicture.selected` is on the contract and is read — but nothing
+ * can WRITE it yet (`render/model.ts` → `SELECT_VERB_MISSING`), so on most cards nothing is marked.
+ * Filtering unconditionally would leave both segments permanently and inexplicably empty on a card
+ * full of renders. So: if anything of this kind is marked, the segment IS the marked ones; if
+ * nothing is, it lists every unhidden picture of that kind on the loaded page — and the panel says
+ * WHICH of the two lists is on screen, rather than letting «renders · 3» read as «three chosen
+ * renders» when nothing has been chosen at all.
+ */
+export function bandPlates(
+  band: GetDesignBandResponse,
+  kind: 'render' | 'threed',
+  already: Set<number>,
+): { plates: DocumentPlate[]; filteredToSelected: boolean; serverStates: boolean } {
+  const outputs = outputsOfKind(band, kind);
+  const serverStates = outputs.some((o) => serverStatesSelected(o.picture));
+  const filteredToSelected = outputs.some((o) => pictureIsSelected(o.picture));
+  const plates: DocumentPlate[] = [];
+  for (const { picture, run } of outputs) {
+    if (filteredToSelected && !pictureIsSelected(picture)) continue;
+    const mediaId = picture.media?.id ?? 0;
+    if (mediaId <= 0 || already.has(mediaId)) continue;
+    already.add(mediaId);
+    const view = (picture.ghostView ?? '').trim();
+    plates.push({
+      key: `run-${picture.id}`,
+      name:
+        (VIEW_LABELS[view] || view.toUpperCase() || '') ||
+        `frame ${picture.ordinal ?? plates.length + 1}`,
+      mediaId,
+      media: picture.media,
+      origin: 'run',
+      chosen: pictureIsSelected(picture),
+      note: `run ${run.id ?? '—'}${run.rrev ? ` · r${run.rrev}` : ''}`,
+    });
+  }
+  return { plates, filteredToSelected, serverStates };
+}
 
 /**
  * One row of the form's `callouts` array as the FORM holds it (`z.input` — every field optional).
@@ -117,6 +223,13 @@ const BENCH_PLATE_NOT_ON_DOCUMENT =
   'this picture stands on the bench, not in the card’s own media — the mint puts it there, and callouts are drawn on the document’s own plates';
 const BENCH_PLATE_DETACH =
   'a bench plate is taken off by clearing its slot in STUDIO — dropped here it would come back with the next mint';
+/**
+ * A run's output lives in the band and not in the card's media, and a callout's `media_id` points
+ * at the card's media. So the picture has to be taken onto the card before anything can be drawn on
+ * it — and that door is right beside this one, on the same plate.
+ */
+const RUN_PLATE_NOT_ON_CARD =
+  'this picture came out of a run and is not in the card’s own media yet — a callout addresses the card’s media, so take it in first with the door beside this one';
 
 const CARD_PLATE_KINDS: Partial<Record<common_TechCardMediaKind, string>> = {
   TECH_CARD_MEDIA_KIND_FRONT: 'FRONT',
@@ -238,8 +351,69 @@ export function ArtifactsPanel({
   );
   const diverged = useMemo(() => benchDiverged(band.latestVersion, bench), [band, bench]);
 
+  /**
+   * ═══ THE THREE REPRESENTATIONS OF THIS CARD, AS ONE LIST PER SEGMENT (W-14) ═════════════════
+   *
+   * Each segment is the DOCUMENT's plates of that kind FIRST — those are the ones a callout can be
+   * drawn on today — and then the chosen pictures of that kind that nobody has taken onto the card
+   * yet. The order is the argument: what is already part of the card outranks what is offered to
+   * become part of it, and the door between the two states is one button on the offered plate.
+   */
+  const runKinds = useMemo(() => runKindByMediaId(band), [band]);
+  const cardKindOf = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const item of technicalMedia) {
+      if ((item.mediaId ?? 0) > 0) map.set(item.mediaId as number, item.kind ?? '');
+    }
+    return map;
+  }, [technicalMedia]);
+
+  /**
+   * The media ids the server states are CHOSEN — read once, applied to every plate whatever list it
+   * came from. Without this the mark would vanish at the exact moment it starts to matter: taking a
+   * chosen turntable onto the card turns it into a `card` plate, built by `documentPlates`, which
+   * knows nothing about runs — and the badge would silently disappear as a REWARD for accepting it.
+   */
+  const chosenMedia = useMemo(() => {
+    const ids = new Set<number>();
+    for (const run of band.runs ?? []) {
+      for (const picture of run.pictures ?? []) {
+        const mediaId = picture.media?.id ?? 0;
+        if (mediaId > 0 && pictureIsSelected(picture)) ids.add(mediaId);
+      }
+    }
+    return ids;
+  }, [band.runs]);
+
+  const segments = useMemo(() => {
+    const of = (p: DocumentPlate) => artifactKindOf(p.mediaId, runKinds, cardKindOf.get(p.mediaId));
+    const mark = (list: DocumentPlate[]) =>
+      list.map((p) => (p.chosen || !chosenMedia.has(p.mediaId) ? p : { ...p, chosen: true }));
+    const flat = plates.filter((p) => of(p) === 'flat');
+    const onCard = new Set(plates.map((p) => p.mediaId));
+    const renderBand = bandPlates(band, 'render', new Set(onCard));
+    const threedBand = bandPlates(band, 'threed', new Set(onCard));
+    return {
+      flat: { plates: mark(flat), filteredToSelected: false, serverStates: true },
+      render: {
+        plates: mark([...plates.filter((p) => of(p) === 'render'), ...renderBand.plates]),
+        filteredToSelected: renderBand.filteredToSelected,
+        serverStates: renderBand.serverStates,
+      },
+      threed: {
+        plates: mark([...plates.filter((p) => of(p) === 'threed'), ...threedBand.plates]),
+        filteredToSelected: threedBand.filteredToSelected,
+        serverStates: threedBand.serverStates,
+      },
+    };
+  }, [plates, band, runKinds, cardKindOf, chosenMedia]);
+
   const [selected, setSelected] = useState<number | null>(null);
   const [mintOrigin, setMintOrigin] = useState<MintOrigin | null>(null);
+  /** Which representation is on screen. `flat` is the default because the SHEET is made of flats. */
+  const [kind, setKind] = useState<ArtifactKind>('flat');
+  /** The «replace the sheet with a file» explanation — a procedure, not a button. */
+  const [replacing, setReplacing] = useState(false);
   /** Which frozen composition is on screen. 0 = the document, which is the default and the point. */
   const [inspecting, setInspecting] = useState(0);
   /** The drawing editor, as a modal over this tab. */
@@ -282,7 +456,13 @@ export function ArtifactsPanel({
     }));
   }, [shownVersion]);
 
-  const onScreen = inspecting === 0 ? plates : frozenPlates;
+  /**
+   * A FROZEN VERSION HAS NO REPRESENTATIONS TO SWITCH BETWEEN. It froze a composition of flats and
+   * that is all it is; offering «renders» over it would draw a segment that could only ever be
+   * empty and would read as a defect. So inspecting a version drops back to the frozen list whole.
+   */
+  const segment = segments[kind];
+  const onScreen = inspecting === 0 ? segment.plates : frozenPlates;
 
   /**
    * ═══ THE DRAWING EDITOR, AND WHY IT IS MOUNTED HERE AND NOT IN THE STUDIO ════════════════════
@@ -357,6 +537,103 @@ export function ArtifactsPanel({
       ? `v${inspecting} is a record of what was minted — nothing on this tab edits it`
       : 'the card is released: its sheet is frozen';
 
+  /**
+   * ═══ TAKE A GENERATED PICTURE ONTO THE CARD — the verb the switcher needs (W-14) ════════════
+   *
+   * A callout's `media_id` addresses the card's OWN media, and the drawing editor resolves it
+   * through `resolvedTechnicalMedia`. So a render that lives only in the band cannot carry a
+   * callout: it has to become part of the card first, and that is a decision a person makes, not a
+   * side effect of looking at it.
+   *
+   * `kind=RENDER` IS THE CARD'S OWN WORD FOR IT, and it means what the contract says it means: «an
+   * ACCEPTED render — one that leaves the studio and goes out with the card». A turntable frame
+   * accepted here is filed under the same kind because the card's vocabulary HAS NO 3D MEMBER; the
+   * segment it appears in afterwards is still right, because the segment is read off the RUN that
+   * produced the picture and not off the card's label. Said plainly on the button's own row.
+   *
+   * WRITTEN AT THE ROOT OF THE ARRAY, never through a field-array mutator — the convention of these
+   * files, and the reason is that the mutators do not broadcast while a root `setValue` does.
+   */
+  function takeIntoCard(plate: DocumentPlate) {
+    const media = form.getValues('technicalMedia') ?? [];
+    if (media.some((m) => (m.mediaId ?? 0) === plate.mediaId)) return;
+    form.setValue(
+      'technicalMedia',
+      [...media, { mediaId: plate.mediaId, kind: 'TECH_CARD_MEDIA_KIND_RENDER', caption: '' }],
+      { shouldDirty: true },
+    );
+    showMessage(
+      'taken into the card’s media — it is not on the technical sheet, and callouts drawn on it are not either',
+      'success',
+    );
+  }
+
+  /**
+   * ═══ `download SVG` — THE SHEET AS ONE FILE ═════════════════════════════════════════════════
+   *
+   * EXPORTS THE FLATS AND THEIR CALLOUTS, whatever segment is on screen, and that is deliberate.
+   * The sheet IS the flats — the mint composes it from them and nothing else — so an export that
+   * followed the switcher would produce a file called «sheet» containing three turntable frames.
+   * The button says which composition it took.
+   */
+  const exportPlates: DocumentPlate[] =
+    inspecting === 0 ? segments.flat.plates : frozenPlates;
+
+  const downloadSheet = async () => {
+    // READ THROUGH `getValues`, NOT THROUGH THE WATCHED LIST. `callouts` above is narrowed to
+    // `CalloutLike`, which carries only the fields the rest of this tab writes — the SHAPE
+    // (`kind`, `points`, `dashed`, `filled`, `color`) is on the form row and is exactly what the
+    // export must not lose. A cast would have compiled and shipped pins where arrows were drawn.
+    const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
+    const svgPlates: SheetSvgPlate[] = exportPlates.map((plate) => ({
+      name: plate.name,
+      url:
+        plate.media?.media?.fullSize?.mediaUrl ||
+        plate.media?.media?.compressed?.mediaUrl ||
+        plate.media?.media?.thumbnail?.mediaUrl ||
+        '',
+      callouts: rows
+        .map((c, index) => ({ c, index }))
+        .filter(({ c }) => (c.mediaId ?? 0) === plate.mediaId)
+        .map(({ c, index }) => {
+          const px = Number(c.posX ?? '');
+          const py = Number(c.posY ?? '');
+          return {
+            number: c.number || index + 1,
+            kind: c.kind ?? 'pin',
+            points: (c.points ?? []).map((p) => ({
+              x: Number(p.x ?? '') || 0,
+              y: Number(p.y ?? '') || 0,
+            })),
+            label: {
+              x: Number.isFinite(px) ? px : 0.5,
+              y: Number.isFinite(py) ? py : 0.5,
+            },
+            hasText: !!(c.description ?? '').trim(),
+            color: c.color ?? '',
+            dashed: !!c.dashed,
+            filled: !!c.filled,
+          };
+        }),
+    }));
+
+    const style = (card?.techCard?.styleNumber ?? '').trim() || `card-${techCardId}`;
+    const version = inspecting === 0 ? (latest ? `v${latest}` : 'draft') : `v${inspecting}`;
+    const pinned = svgPlates.reduce((n, p) => n + p.callouts.length, 0);
+    try {
+      const markup = await buildSheetSvg({
+        title: `${style} · sheet ${version} · ${pinned} callout${pinned === 1 ? '' : 's'}`,
+        plates: svgPlates,
+      });
+      downloadSvg(`${style}-sheet-${version}.svg`, markup);
+    } catch (error) {
+      showMessage(
+        `the sheet could not be written: ${(error as Error)?.message || 'unknown failure'}`,
+        'error',
+      );
+    }
+  };
+
   /** Приколотая выноска стоит на картинке; у откреплённой `media_id` равен нулю. */
   const pinnedCount = callouts.filter((c) => (c.mediaId ?? 0) > 0).length;
   const strayCount = callouts.length - pinnedCount;
@@ -400,13 +677,59 @@ export function ArtifactsPanel({
           }
           className='min-w-0 flex-1'
         >
+          {inspecting === 0 && (
+            <>
+              {/* THE SWITCH IS A `lead`, NOT AN `action`. It belongs to the label it sits beside, so
+                  its position must not depend on how wide the block happens to be in the current
+                  layout — the version chips already own the right edge of the header above. */}
+              <GroupLabel
+                flush
+                lead={
+                  <ViewSwitch<ArtifactKind>
+                    label='representation'
+                    value={kind}
+                    options={ARTIFACT_KINDS}
+                    onChange={setKind}
+                  />
+                }
+                action={
+                  <Text size='micro' variant='label' component='span'>
+                    {segment.plates.length} picture{segment.plates.length === 1 ? '' : 's'}
+                    {kind !== 'flat' &&
+                      (segment.filteredToSelected
+                        ? ' · the chosen ones'
+                        : ' · everything on this page')}
+                  </Text>
+                }
+              >
+                what you are marking up
+              </GroupLabel>
+
+              <SheetMembershipWarning
+                kind={kind}
+                filteredToSelected={segment.filteredToSelected}
+                serverStates={segment.serverStates}
+                hasPictures={segment.plates.length > 0}
+              />
+            </>
+          )}
+
           {onScreen.length === 0 ? (
-            <EmptyDocument
-              bench={bench}
-              disabled={disabled}
-              onDraw={inspecting === 0 && canDraw ? () => setDrawing(true) : undefined}
-              drawInert={drawInert}
-            />
+            kind === 'flat' || inspecting > 0 ? (
+              <EmptyDocument
+                bench={bench}
+                disabled={disabled}
+                onDraw={inspecting === 0 && canDraw ? () => setDrawing(true) : undefined}
+                drawInert={drawInert}
+              />
+            ) : (
+              <Text size='micro' variant='label' component='p'>
+                nothing of this kind on the loaded page of the band.{' '}
+                {kind === 'render'
+                  ? 'A fabric render is made on STUDIO, from the flats standing in the bench slots.'
+                  : 'A turntable is made on STUDIO, and it turns the renders — so the renders come first.'}
+              </Text>
+            )
           ) : (
             <PlateGrid
               plates={onScreen}
@@ -418,8 +741,32 @@ export function ArtifactsPanel({
               drawInert={drawInert}
               onDetach={inspecting === 0 && !disabled ? askDetach : undefined}
               detachInert={detachInert}
+              onTakeIn={inspecting === 0 && !disabled ? takeIntoCard : undefined}
+              offSheet={kind !== 'flat'}
             />
           )}
+
+          {/* ─── THE TWO DOORS OF THE DOCUMENT ITSELF ─────────────────────────────────────── */}
+          <div className='flex flex-wrap items-center gap-1.5 pt-1'>
+            {exportPlates.length ? (
+              <Button variant='secondary' size='sm' onClick={downloadSheet}>
+                download SVG
+              </Button>
+            ) : (
+              <InertDoor
+                label='download SVG'
+                reason='there is nothing on the sheet to write: no flat plate stands on this card yet'
+              />
+            )}
+            <Button variant='secondary' size='sm' onClick={() => setReplacing(true)}>
+              replace the sheet with a file ▸
+            </Button>
+            <Text size='nano' variant='label' component='span' className='min-w-0 normal-case'>
+              the file carries the <b>flats</b> and the callouts standing on them — {exportPlates.length}{' '}
+              plate{exportPlates.length === 1 ? '' : 's'} — whichever representation is on screen,
+              because the sheet is made of flats. Pictures are LINKED by address, not embedded.
+            </Text>
+          </div>
 
           {inspecting > 0 && (
             <CalloutBox tone='note'>
@@ -613,6 +960,58 @@ export function ArtifactsPanel({
         </ConfirmationModal>
       )}
 
+      {/* ═══ «REPLACE THE SHEET WITH A FILE» — A PROCEDURE, EXPLAINED, NOT A BUTTON THAT DOES IT ══
+          The prototype's own modal of this name explains rather than acts, and this build keeps the
+          division for a reason it can state exactly: replacing the picture under a sheet means every
+          callout on it has to be WALKED to a new address by hand. `pos_x/pos_y` and `points` are
+          fractions of a FRAME; carried onto a different drawing they land somewhere else entirely
+          and look perfectly normal doing it. A one-press «replace» would therefore either lose the
+          markup or silently misplace it, and the second is worse. What this admin already has is
+          the honest version of the same walk, spread over controls that each do one thing. */}
+      {replacing && (
+        <ConfirmationModal
+          open
+          onOpenChange={(open) => !open && setReplacing(false)}
+          onConfirm={() => setReplacing(false)}
+          title='replace the sheet with a file'
+          confirmLabel='close'
+          cancelLabel='close'
+          width='md'
+        >
+          <div className='space-y-stack'>
+            <Text size='micro' component='p'>
+              There is no single «replace» here, and that is deliberate. A callout stores its
+              position as a <b>fraction of its own picture</b>. Swap the picture underneath it and
+              the marker keeps the fraction: it lands somewhere else on the garment and looks
+              entirely normal doing it. So the exchange is done as three visible acts instead of one
+              invisible one.
+            </Text>
+            <div>
+              <GroupLabel>the walk</GroupLabel>
+              <Row
+                label={<Text size='micro' component='span'>1 · bring the file in</Text>}
+                value={<Text size='micro' component='span'>uploads shelf on STUDIO</Text>}
+              />
+              <Row
+                label={<Text size='micro' component='span'>2 · put it in the slot it replaces</Text>}
+                value={<Text size='micro' component='span'>the bench, same view</Text>}
+              />
+              <Row
+                label={<Text size='micro' component='span'>3 · move the callouts across</Text>}
+                value={<Text size='micro' component='span'>detach here, re-pin in the editor</Text>}
+              />
+            </div>
+            <Text size='micro' component='p'>
+              <b>Detaching keeps the text and the number</b> and drops only the anchor — the
+              callouts reappear in the list beside the sheet marked <b>unpinned</b>, and the drawing
+              editor lists them under «callouts without an image», where each is put back on the new
+              plate <b>keeping its number</b>. Nothing is renumbered and nothing is lost; what it
+              costs is one deliberate click per callout, which is the price of not misplacing them.
+            </Text>
+          </div>
+        </ConfirmationModal>
+      )}
+
       {detaching && (
         <ConfirmationModal
           open
@@ -648,6 +1047,63 @@ export function ArtifactsPanel({
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * ═══ SAID BEFORE THE PENCIL IS PICKED UP, NOT AFTER ═══════════════════════════════════════════
+ *
+ * THE DEFECT THIS EXISTS TO PREVENT. The technical sheet is composed of FLATS ONLY: the mint takes
+ * the bench's flat plates and nothing else, and the server's `freezeCallouts` then keeps the
+ * callouts that stand ON THOSE PLATES — SILENTLY DROPPING every other one. So a person who opens
+ * ARTIFACTS, switches to «renders», carefully annotates a fabric render and mints a version gets a
+ * sheet with none of that work on it, no error, no warning, and no line in the journal saying
+ * anything went missing. The annotation is not corrupted; it simply is not there.
+ *
+ * WHY IT IS A BLUE BOX AND NOT A GREY FOOTNOTE. This is the mid-flight, needs-a-human tone of the
+ * system, and it is the correct one: nothing is broken, and the person is not doing anything wrong
+ * — annotating a render is a perfectly good thing to do, it just does not reach paper. Red would
+ * claim a fault; a grey hint at the bottom of the block would be read after the drawing, which is
+ * exactly too late. It sits ABOVE the pictures, tied to the representation that is on screen.
+ *
+ * IT IS NOT SHOWN ON `flat`, and that is the point of tying it to the kind: a warning that is
+ * always on screen is furniture, and furniture is not read.
+ */
+function SheetMembershipWarning({
+  kind,
+  filteredToSelected,
+  serverStates,
+  hasPictures,
+}: {
+  kind: ArtifactKind;
+  filteredToSelected: boolean;
+  serverStates: boolean;
+  hasPictures: boolean;
+}): JSX.Element | null {
+  if (kind === 'flat') return null;
+  const what = kind === 'render' ? 'a fabric render' : 'a turntable frame';
+  return (
+    <CalloutBox tone='warning'>
+      <Text size='micro' component='p'>
+        <b>callouts drawn here do not reach the technical sheet.</b> The sheet is composed of{' '}
+        <b>flats</b> and nothing else — the mint takes the bench’s flat plates, and the freeze then
+        keeps only the callouts standing on them. A callout you place on {what} stays on the card
+        and stays in the list beside this block, but it is <b>silently left out</b> of every version
+        minted from now on, and no message says so at the time. Mark up {what} for the studio and
+        for yourself; mark up the <b>flats</b> for the factory.
+      </Text>
+      {/* THE PROVENANCE OF THE LIST IS ONLY WORTH A SENTENCE WHEN THERE IS A LIST. With nothing of
+          this kind on the page, «nothing is marked as chosen» and «this server does not state the
+          mark» are both true and both useless — and the second one names a server defect that may
+          not exist, because an empty page gives nothing to sample the flag from. */}
+      {hasPictures && !filteredToSelected && (
+        <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
+          {serverStates
+            ? 'Nothing of this kind is marked as chosen on this card, so the segment lists every one on the loaded page. The mark is read here and set elsewhere — no verb writes it yet.'
+            : 'This server does not state the mark at all — a binary older than the field — so the segment lists every picture of this kind on the loaded page.'}
+        </Text>
+      )}
+    </CalloutBox>
+  );
+}
+
+/**
  * The plates, with their numbered markers on them.
  *
  * THE FRAME IS CUT TO THE PICTURE'S OWN PROPORTIONS, and that is not a nicety. A callout stores
@@ -675,6 +1131,8 @@ function PlateGrid({
   drawInert,
   onDetach,
   detachInert,
+  onTakeIn,
+  offSheet,
 }: {
   plates: DocumentPlate[];
   callouts: CalloutLike[];
@@ -687,6 +1145,10 @@ function PlateGrid({
   /** Take a plate off the document, or `undefined` — and then `detachInert` says why not. */
   onDetach?: (plate: DocumentPlate) => void;
   detachInert: string;
+  /** Put a run's output into the card's own media, so a callout can address it at all. */
+  onTakeIn?: (plate: DocumentPlate) => void;
+  /** This segment is not what the sheet is made of — every plate says so on its own face. */
+  offSheet?: boolean;
 }) {
   return (
     <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
@@ -700,17 +1162,23 @@ function PlateGrid({
           .map((c, index) => ({ c, index }))
           .filter(({ c }) => (c.mediaId ?? 0) === plate.mediaId);
 
-        // A bench plate is not in `technicalMedia`, so neither door can honestly act on it.
+        // Neither a bench plate nor a run's output is in `technicalMedia`, so neither door can
+        // honestly act on them — but for DIFFERENT reasons, and only one of the two has a way out
+        // that lives on this tab, which is why the reasons are separate strings.
         const drawReason = !onDraw
           ? drawInert
           : plate.origin === 'bench'
             ? BENCH_PLATE_NOT_ON_DOCUMENT
-            : null;
+            : plate.origin === 'run'
+              ? RUN_PLATE_NOT_ON_CARD
+              : null;
         const detachReason = !onDetach
           ? detachInert
           : plate.origin === 'bench'
             ? BENCH_PLATE_DETACH
-            : null;
+            : plate.origin === 'run'
+              ? 'this picture is not in the card’s media, so there is nothing here to take off'
+              : null;
 
         return (
           <div
@@ -729,6 +1197,12 @@ function PlateGrid({
                 {plate.name}
               </Text>
               {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
+              {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
+              {plate.chosen && <Pill tone='ok'>chosen</Pill>}
+              {/* THE PLATE SAYS IT ITSELF, not only the box above the grid. The warning is read
+                  once, on arrival; the badge is on screen for as long as the picture is, and it is
+                  what a person sees when they come back to this tab an hour later. */}
+              {offSheet && <Pill tone='attention'>not on the sheet</Pill>}
               <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
                 {mine.length || ''}
               </Text>
@@ -780,6 +1254,22 @@ function PlateGrid({
             </Text>
 
             <div className='mt-1 flex flex-wrap items-center gap-1'>
+              {plate.origin === 'run' &&
+                (onTakeIn ? (
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    onClick={() => onTakeIn(plate)}
+                    title='put this picture into the card’s own media, so a callout can address it'
+                  >
+                    take into the card’s media ▸
+                  </Button>
+                ) : (
+                  <InertDoor
+                    label='take into the card’s media ▸'
+                    reason='this card is read-only for you, or a frozen version is on screen — taking a picture onto the card is an edit of the card'
+                  />
+                ))}
               {drawReason ? (
                 <InertDoor label='draw ▸' reason={drawReason} />
               ) : (

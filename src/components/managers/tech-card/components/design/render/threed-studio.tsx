@@ -1,7 +1,8 @@
 import type { GetDesignBandResponse, common_Model } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
@@ -18,11 +19,16 @@ import { GenerateRow, LockBar } from './generate-row';
 import {
   FRAME_CHOICES,
   PRESENTATIONS,
+  SELECT_VERB_MISSING,
   colourLabel,
   fitChoices,
   latestRenderByView,
+  outputsOfKind,
+  pictureIsSelected,
   pictureThumb,
   renderRevisions,
+  serverStatesSelected,
+  stripProvenance,
   threedGate,
   turntableSourceIds,
   type Gate,
@@ -30,6 +36,7 @@ import {
 } from './model';
 import { Strip, StripCell } from './strip-cell';
 import { useStartDesignRun } from './use-design-run';
+import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
  * THE 3D STUDIO — the turntable, and the four sides it is turned from.
@@ -99,8 +106,12 @@ export function ThreedStudio({
   const { dictionary } = useDictionary();
   const { data: models } = useAllModels();
   const run = useStartDesignRun(techCardId);
+  /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
+  const [inspecting, setInspecting] = useState(false);
 
   const byView = useMemo(() => latestRenderByView(band), [band]);
+  /** The turntables this page of the band holds — the outputs, where the mark «selected» lives. */
+  const turntables = useMemo(() => outputsOfKind(band, 'threed'), [band]);
   const present = SILHOUETTE_VIEWS.filter((view) => !!byView[view]);
   const revisions = renderRevisions(byView);
 
@@ -159,6 +170,14 @@ export function ThreedStudio({
         },
         fixTarget: '',
         extraInputMediaIds: [],
+        // NOT A FIX, AND SAID EXPLICITLY IN BOTH SPELLINGS. `fix_target` is the frozen scalar the
+        // history already states; `fix_targets`/`fix_slot_ids` are the selection a new run uses.
+        // Empty in all three is «this run corrects nothing», which is what these two screens do.
+        fixTargets: [],
+        fixSlotIds: [],
+        // `auto_split` is only meaningful with layout = one, and neither of these screens produces
+        // a composite: a render comes back one picture per filled slot, a turntable frame by frame.
+        autoSplit: false,
       },
     });
   };
@@ -404,8 +423,122 @@ export function ThreedStudio({
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
+          onInspect={() => setInspecting(true)}
         />
       </Section>
+
+      <TurntableOutputs turntables={turntables} band={band} />
+
+      <WhatModelGetsRenderModal
+        open={inspecting}
+        onOpenChange={setInspecting}
+        band={band}
+        kind='threed'
+        threed={draft}
+        cardFit={cardFit}
+        models={models}
+        sizeName={sizeName}
+      />
     </>
+  );
+}
+
+/**
+ * ═══ THE TURNTABLES OF THIS CARD, AND THE MARK «SELECTED» — W-12 ══════════════════════════════
+ *
+ * WHY THE OUTPUTS ARE ON THIS SCREEN AT ALL. A turntable comes back as a dozen or two dozen
+ * pictures of ONE rotation, and the owner's requirement is to be able to say which of them is THE
+ * one. The run history lists every run of the card, of every kind, folded — it answers «what has
+ * this card cost» and not «which turntable did we settle on». So the verdict lives beside the menu
+ * that produces the thing it is a verdict about.
+ *
+ * ═══ THE MARK IS SHOWN AND CANNOT YET BE SET, AND THAT IS THE HONEST HALF ═════════════════════
+ *
+ * The contract carries `hidden` on a picture and nothing else. `selected` is a SECOND, unrelated
+ * statement (see `SELECT_VERB_MISSING` in `./model`), and folding it into `hidden` would make
+ * un-hiding a rejected frame silently promote it. So this screen READS the mark through
+ * `pictureIsSelected` — one function, so that the day the regenerated client lands there is exactly
+ * one line to change — and draws the control that would set it as an inert door carrying the
+ * reason. A local `useState` standing in for the verb would look like it worked and lose the choice
+ * on the next refetch, which is the worse of the two failures by a wide margin.
+ */
+function TurntableOutputs({
+  turntables,
+  band,
+}: {
+  turntables: ReturnType<typeof outputsOfKind>;
+  band: GetDesignBandResponse;
+}): JSX.Element | null {
+  if (!turntables.length) return null;
+
+  // Does the binary that answered state the mark at all? With `EmitUnpopulated` a server that knows
+  // the field sends it on EVERY picture (as `false` when unset), so one picture is a truthful
+  // sample for all of them — and `undefined` means «rolled-back binary», not «nothing chosen».
+  const carries = serverStatesSelected(turntables[0].picture);
+  const marked = turntables.filter((t) => pictureIsSelected(t.picture)).length;
+
+  return (
+    <Section
+      title='turntables of this card'
+      question='— the frames that came back, and which of them is the chosen one'
+      action={
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          {turntables.length} frame{turntables.length === 1 ? '' : 's'}
+          {carries ? ` · ${marked} selected` : ''}
+        </Text>
+      }
+    >
+      <CalloutBox tone='note'>
+        <Text size='micro' component='p'>
+          {carries ? (
+            <>
+              <b>the mark is read here and cannot be set here.</b> {SELECT_VERB_MISSING}.
+            </>
+          ) : (
+            <>
+              <b>this server does not state the mark at all.</b> `DesignPicture.selected` is on this
+              contract, and a server that knows it sends it on every picture — this one sent
+              nothing, which means a binary older than the field. Nothing is broken; the card simply
+              has no record of which turntable was chosen.
+            </>
+          )}
+        </Text>
+      </CalloutBox>
+
+      <Strip>
+        {turntables.map(({ picture, run }) => {
+          const chosen = pictureIsSelected(picture);
+          return (
+            <StripCell
+              key={picture.id}
+              emphasis={chosen}
+              src={pictureThumb(picture)}
+              alt={`turntable frame ${picture.ordinal ?? ''}`}
+              badge={chosen ? 'selected' : undefined}
+              lines={[
+                `run ${run.id ?? '—'} · frame ${picture.ordinal ?? '—'}`,
+                stripProvenance(band, picture),
+              ]}
+              action={
+                /* THE DOOR THAT WOULD SET THE MARK. Inert with its reason rather than absent: an
+                   absent control teaches «this admin has no notion of a chosen turntable», which is
+                   a different and more damaging falsehood than «not on this server yet». */
+                <InertDoor
+                  label={chosen ? 'un-select' : 'select'}
+                  reason={SELECT_VERB_MISSING}
+                />
+              }
+            />
+          );
+        })}
+      </Strip>
+
+      <Text size='nano' variant='label' component='p' className='normal-case'>
+        This is the page of the feed the band shipped, newest run first — not every turntable this
+        card has ever produced. The mark is a verdict about a picture and is <b>not</b> the same
+        thing as hiding one: a hidden frame is out of sight and can come back, a selected frame is
+        the one the card is going with.
+      </Text>
+    </Section>
   );
 }

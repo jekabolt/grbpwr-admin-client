@@ -261,6 +261,47 @@ export type FocusedAnnotatorProps = {
    * на этот лист» остаётся вопросом и на выпущенной карточке, которую именно читают.
    */
   viewControls?: ReactNode;
+  /**
+   * ПАНЕЛЬ ВИДОВ УКАЗАНИЙ уезжает в ЛЕВЫЙ край полосы, а `viewControls` остаются в правом.
+   *
+   * По умолчанию порядок обратный — так стоит лист эскиза, где переключатель вида читательский и
+   * жмётся редко, а виды указаний — рабочий инструмент под правой рукой. Мудборд требует
+   * обратного (U-3): strip/grid справа сверху блока, виды указаний слева на том же уровне.
+   * Проп, а не второй компонент полосы: две полосы разошлись бы по подсказке и по стрелкам.
+   */
+  kindsFirst?: boolean;
+  /**
+   * Только вместе с `gridRowHeight` и только без `railWrap`: филмстрип ПЕРЕНОСИТСЯ ПО СТРОКАМ
+   * вместо горизонтальной прокрутки.
+   *
+   * Это третья раскладка, а не оттенок второй, и она отвечает на вопрос, которого у листа эскиза
+   * не было: «покажи все кадры разом, но одной высоты». `railWrap` даёт «все разом» ценой РАЗНОЙ
+   * высоты (плитка меряется шириной), `gridRowHeight` даёт равную высоту ценой одной строки. На
+   * мудборде владелец требует и того и другого (U-4: высоты всегда равны, ширины могут гулять),
+   * поэтому режимы совмещены явным пропом, а не молчаливым изменением смысла `railWrap`.
+   */
+  wrapRows?: boolean;
+  /**
+   * РЕЖИМ ВЫБОРА ПЛИТКИ: пока он взведён, клик по кадру НЕ ставит указание, а возвращает вид
+   * вызывающему.
+   *
+   * Двусмысленности «один клик — два факта» здесь нет ПО ПОСТРОЕНИЮ: накладка перекрывает кадр
+   * целиком, поэтому взведённый инструмент постановки в это время физически недостижим. Именно
+   * это и делает режим законным — не обещание не нажимать, а невозможность нажать.
+   */
+  tilePick?: TilePick;
+};
+
+/** Взведённый выбор плитки — см. `tilePick`. */
+export type TilePick = {
+  active: boolean;
+  onPick: (view: FocusedView, index: number) => void;
+  /** Плитка уже взята: она называет это словами и второй раз не берётся. */
+  taken?: (mediaId: number) => boolean;
+  /** Что сделает клик — доступное имя накладки. */
+  label?: (view: FocusedView, index: number) => string;
+  /** Что стоит на уже взятой плитке. */
+  takenLabel?: string;
 };
 
 export function FocusedAnnotator({
@@ -294,6 +335,9 @@ export function FocusedAnnotator({
   onReorderMedia,
   railWrap = false,
   viewControls,
+  kindsFirst = false,
+  wrapRows = false,
+  tilePick,
 }: FocusedAnnotatorProps) {
   /**
    * Инструмент постановки. ОДНО состояние вместо трёх (`addMode` + `shapeKind` + набранные точки):
@@ -323,6 +367,16 @@ export function FocusedAnnotator({
   const wrap = isGrid && railWrap;
   // Filmstrip mode: fixed-height, natural-width tiles, horizontal-only scroll (the moodboard).
   const rowMode = isGrid && gridRowHeight != null && !wrap;
+  // …и тот же филмстрип, разложенный по строкам: высота у кадров общая, ширина своя, прокрутки нет.
+  const rowsWrap = rowMode && wrapRows;
+  /** Плитки взяты в режим выбора: накладка перекрывает кадр, и указание поставить нельзя. */
+  const picking = isGrid && !!tilePick?.active;
+  // Взведённый инструмент постановки гасится вместе со взводом выбора. Накладка и так не дала бы
+  // ему сработать, но подсказка «click on the picture you need» продолжала бы обещать жест,
+  // которого в этом режиме нет, — а обещание, которое нельзя исполнить, читается как поломка.
+  useEffect(() => {
+    if (picking) setTool(null);
+  }, [picking]);
   /** Порядок правится только там, где вообще правят, и только когда есть что переставлять. */
   const canOrder = isGrid && !readOnly && !!onReorderMedia && views.length > 1;
   const reorder = useReorder((from, to) => onReorderMedia?.(from, to));
@@ -370,12 +424,10 @@ export function FocusedAnnotator({
    */
   const regionHandlers = useMemo(() => {
     const { onDragEnter, onDragOver, onDrop, ...rest } = intake.regionHandlers;
-    const fileOnly =
-      (h: (e: React.DragEvent) => void) =>
-      (e: React.DragEvent) => {
-        if (!isFileDrag(e)) return;
-        h(e);
-      };
+    const fileOnly = (h: (e: React.DragEvent) => void) => (e: React.DragEvent) => {
+      if (!isFileDrag(e)) return;
+      h(e);
+    };
     return {
       ...rest,
       onDragEnter: fileOnly(onDragEnter),
@@ -486,6 +538,9 @@ export function FocusedAnnotator({
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
           // in a bar above the grid and apply to every cell at once.
           <Toolbar>
+            {/* `kindsFirst`: виды указаний уходят в левый край, переключатель вида — в правый.
+                Полоса одна и та же; переставлены ровно два узла, подсказка остаётся между ними. */}
+            {kindsFirst && modeToggles}
             <Text size='micro' variant='label' component='span'>
               {hint}
             </Text>
@@ -518,7 +573,7 @@ export function FocusedAnnotator({
                 </Button>
               </div>
             )}
-            {modeToggles}
+            {!kindsFirst && modeToggles}
           </Toolbar>
         ) : (
           <div className='flex flex-wrap items-center justify-between gap-2.5'>
@@ -549,10 +604,10 @@ export function FocusedAnnotator({
             // потому что `rail.overflowing` при переносе становится false.
             className={cn(
               'flex items-start gap-2 py-1',
-              wrap ? 'flex-wrap' : 'snap-x snap-mandatory overflow-x-auto',
+              wrap || rowsWrap ? 'flex-wrap' : 'snap-x snap-mandatory overflow-x-auto',
               // Filmstrip: only the horizontal axis scrolls. Hover notes are portalled, so nothing
               // useful is clipped vertically.
-              rowMode && 'overflow-y-hidden',
+              rowMode && !rowsWrap && 'overflow-y-hidden',
             )}
           >
             {views.map((v, i) => {
@@ -565,13 +620,14 @@ export function FocusedAnnotator({
                   {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(
                     'relative shrink-0 space-y-1',
-                    !wrap && 'snap-start',
+                    !wrap && !rowsWrap && 'snap-start',
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
                     // ЦЕЛЬ БРОСКА — ОБВОДКОЙ, А НЕ РАМКОЙ. Канон соседней галереи красит рамку, но
                     // там она у плитки уже есть; здесь рамку несёт сам кадр, и заведённая ради
                     // подсветки прозрачная рамка съедала бы два пикселя ширины у КАЖДОЙ плитки
                     // всегда — ради состояния, живущего секунду. Обводка на раскладку не влияет.
-                    reorder.overIndex === i && 'outline outline-2 -outline-offset-2 outline-textColor',
+                    reorder.overIndex === i &&
+                      'outline outline-2 -outline-offset-2 outline-textColor',
                   )}
                 >
                   <AnnotationSurface
@@ -649,6 +705,44 @@ export function FocusedAnnotator({
                     />
                   )}
                   {renderFocusedFooter?.(v, i)}
+                  {/* НАКЛАДКА ВЫБОРА. Перекрывает плитку ЦЕЛИКОМ, и в этом весь довод: пока режим
+                      взведён, ни пин, ни ✕, ни ручка перестановки под ней не достижимы, поэтому
+                      «один клик — два факта» не выражается вовсе. Рисуется только во взведённом
+                      режиме — при выключенном `tilePick` DOM плитки не меняется ни на узел. */}
+                  {picking &&
+                    (() => {
+                      const taken = !!tilePick?.taken?.(v.mediaId);
+                      return (
+                        <button
+                          type='button'
+                          disabled={taken}
+                          aria-label={
+                            taken
+                              ? tilePick?.takenLabel ?? 'already taken'
+                              : tilePick?.label?.(v, i) ?? `pick picture ${i + 1}`
+                          }
+                          title={
+                            taken
+                              ? tilePick?.takenLabel ?? 'already taken'
+                              : tilePick?.label?.(v, i) ?? undefined
+                          }
+                          onClick={() => tilePick?.onPick(v, i)}
+                          className={cn(
+                            'absolute inset-0 z-[7] flex items-end justify-center pb-2',
+                            // Стиль обводки задан ЯВНО (`outline-dashed` / `outline-solid`), а не
+                            // голым `outline`: twMerge выбрасывает голый класс рядом с
+                            // `outline-2` — они одной группы, — и рамка молча исчезает.
+                            taken
+                              ? 'cursor-not-allowed outline-solid outline-1 -outline-offset-2 outline-borderColor'
+                              : 'cursor-pointer outline-dashed outline-2 -outline-offset-2 outline-textColor hover:outline-4',
+                          )}
+                        >
+                          <span className='border border-textColor bg-bgColor px-[7px] py-px text-micro uppercase tracking-pill text-textColor'>
+                            {taken ? tilePick?.takenLabel ?? 'already taken' : 'pick'}
+                          </span>
+                        </button>
+                      );
+                    })()}
                 </div>
               );
             })}

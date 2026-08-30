@@ -17,10 +17,10 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import { InertDoor } from '../bench-slot';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
 import { useDesignWrites } from '../use-design-band';
+import { SvgImportDoor } from './svg-import-door';
 import {
   findLayerForMedia,
   layerRefusalText,
@@ -38,6 +38,7 @@ import {
   settleTrace,
   stitchName,
   strokeGeometry,
+  strokePolyline,
   writeLayer,
   type StitchKey,
   type StrokeWeight,
@@ -65,12 +66,14 @@ import {
  * with nothing, and there is no revision history to recover it from (the contract says so in as
  * many words: «there is deliberately no revision history»).
  *
- * THE ROUND TRIP IS HALF-BUILT ON PURPOSE. `download SVG` is complete and exact — the same
- * renderer that draws the screen writes the file. `upload SVG` is an inert door with its reason:
- * reading an arbitrary Illustrator artboard back into this stroke format means transforms, groups,
- * clip paths and cubic segments, and an importer that silently drops what it cannot parse loses
- * work while reporting success. `source_class = imported_svg` is in the wire's vocabulary and
- * waiting for it.
+ * THE ROUND TRIP IS WHOLE. `download SVG` is exact — the same renderer that draws the screen writes
+ * the file — and `upload SVG` reads one back, through `svg-import.ts`. The door was inert until the
+ * stroke format could hold a cubic segment, because the two halves are one thing: an importer over a
+ * polyline-only model has to chop every curve it meets, which is the «heap of polygons» the
+ * requirement forbids in as many words. Both arrived together. What the importer cannot read it
+ * REFUSES BY NAME — the failure it exists to prevent is «loaded fine» over a drawing with a line
+ * missing. `source_class = imported_svg` is in the wire's vocabulary and waiting for the origin
+ * column that records which of the two ways a layer was born.
  */
 
 type Tool = 'line' | 'freehand' | 'stitch' | 'erase';
@@ -785,11 +788,20 @@ export function VectorModal({
                 3 · upload back
               </Text>
               <Text size='micro' variant='label' component='p'>
-                not built yet — see the door.
+                paths, shapes, groups and transforms come back as strokes with their curves intact.
+                Anything the file states that a stroke cannot hold — text, a placed instance, a
+                colour — is named and refused rather than dropped quietly. Nothing changes until you
+                have read what came out.
               </Text>
-              <InertDoor
-                label='upload SVG'
-                reason='reading an Illustrator artboard back into strokes means transforms, groups, clip paths and cubic segments, and an importer that silently drops what it cannot parse loses work while reporting success. Until it is built, bring the edited file in as an ordinary picture through the uploads shelf'
+              <SvgImportDoor
+                disabled={frozen}
+                frameRatio={ratio || DEFAULT_RATIO}
+                existing={strokes}
+                onApply={(incoming, mode) => {
+                  record();
+                  setStrokes((prev) => (mode === 'replace' ? incoming : [...prev, ...incoming]));
+                  setSelected(null);
+                }}
               />
             </div>
           </div>
@@ -807,6 +819,12 @@ export function VectorModal({
  * in one axis than the other on every plate that is not square. Distance is measured against the
  * POLYLINE while a freehand stroke draws as a smoothed curve through the same points; the two
  * differ by well under the thinning epsilon, which is itself about two pixels.
+ *
+ * THE POLYLINE IS ASKED FOR RATHER THAN ASSUMED, and on a curve that is the whole difference. A
+ * cubic leaves the chord between its anchors by design — that is what makes it a curve — so a click
+ * on the visible bulge of an imported stroke measured against the anchors alone would find nothing
+ * under a pointer that is plainly on the line. `strokePolyline` hands back the anchors themselves
+ * for a stroke with no segments, so nothing about the legacy behaviour moved.
  */
 function hitStroke(strokes: VectorStroke[], at: [number, number], rect: DOMRect): number | null {
   const w = rect.width || 1;
@@ -815,10 +833,7 @@ function hitStroke(strokes: VectorStroke[], at: [number, number], rect: DOMRect)
   let index = -1;
   let best = Number.POSITIVE_INFINITY;
   for (let i = 0; i < strokes.length; i++) {
-    const near = nearestOnPolyline(
-      p,
-      strokes[i].pts.map(([x, y]) => ({ x: x * w, y: y * h })),
-    );
+    const near = nearestOnPolyline(p, strokePolyline(strokes[i], w, h));
     if (!near || near.dist >= best) continue;
     best = near.dist;
     index = i;

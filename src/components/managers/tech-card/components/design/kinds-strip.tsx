@@ -9,6 +9,8 @@ import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
+import { fabricRenderGate } from './render';
+
 /**
  * THE STRIP OF REPRESENTATIONS — the four ways this card's design can exist as a picture, plus the
  * prompt profile that would drive the ones that are drawn rather than photographed.
@@ -73,6 +75,7 @@ function RepCell({
   inert,
   onInert,
   onSelect,
+  dimmed,
   className,
 }: {
   name: string;
@@ -82,6 +85,16 @@ function RepCell({
   onInert?: () => void;
   /** Представление, которое МОЖНО открыть. Активное его не получает: там уже находятся. */
   onSelect?: () => void;
+  /**
+   * ПРЕДСТАВЛЕНИЕ, ДО КОТОРОГО КАРТОЧКА ЕЩЁ НЕ ДОШЛА — причина, а не булево.
+   *
+   * Отличается от `inert` ровно тем, чем «рано» отличается от «здесь не делается»: приглушённая
+   * ячейка ОТКРЫВАЕТСЯ (там стоит собственная полоса «чего не хватает» с выходами), но перестаёт
+   * читаться как равноправная соседка. Настоящий запрет живёт на сервере — `StartDesignRun`
+   * отказывает `threed` без непрятанного fabric render, — и подменять его клиентской блокировкой
+   * нельзя: обходится перезагрузкой вкладки, а платит владелец.
+   */
+  dimmed?: string;
   className?: string;
 }) {
   const body = (
@@ -91,7 +104,10 @@ function RepCell({
         variant='uppercase'
         tracking='label'
         component='span'
-        className={cn('font-bold', active ? 'text-bgColor' : 'text-textColor')}
+        className={cn(
+          'font-bold',
+          active ? 'text-bgColor' : dimmed ? 'text-labelColor' : 'text-textColor',
+        )}
       >
         {name}
       </Text>
@@ -118,6 +134,30 @@ function RepCell({
         >
           {body}
         </div>
+      );
+    }
+    if (dimmed) {
+      // ПРИЧИНА — ЗНАЧЕНИЕ, А НЕ ОФОРМЛЕНИЕ. Она читается человеком через подсказку и пробой через
+      // атрибут: приглушённый цвет сам по себе ничего не доказывает и на монохромной печати
+      // исчезает вовсе, поэтому рядом с ним всегда стоит слово (`sub` несёт «locked»).
+      return (
+        <Tooltip
+          side='bottom'
+          align='start'
+          className='max-w-[320px] normal-case'
+          trigger={
+            <button
+              type='button'
+              data-locked={dimmed}
+              onClick={onSelect}
+              className={cn(CELL, 'hover:bg-bgSecondary', className)}
+            >
+              {body}
+            </button>
+          }
+        >
+          {dimmed}
+        </Tooltip>
       );
     }
     return (
@@ -199,7 +239,32 @@ export function KindsStrip({
   const renders = pictures.filter((p) => p.kind === 'render' && !p.hiddenAt).length;
   const turns = pictures.filter((p) => p.kind === 'threed' && !p.hiddenAt).length;
   const renderSub = renders ? `${renders} render${renders === 1 ? '' : 's'}` : 'none yet';
-  const threedSub = turns ? `${turns} turntable${turns === 1 ? '' : 's'}` : 'none yet';
+  /**
+   * ═══ ПОСЛЕДОВАТЕЛЬНОСТЬ ФЛЭТЫ → РЕНДЕР → 3D, ВИДНАЯ НА ПОЛОСЕ (W-13) ════════════════════════
+   *
+   * Ворота работали и раньше — дословно, в самой студии 3D: пустая сторона рисует ячейку «required
+   * · blocks 3D», под полосой стоит бар «чего не хватает» с двумя выходами, а GENERATE — мёртвая
+   * дверь с причиной. Чего не было — СИГНАЛА В ПОЛОСЕ: три представления читались как три
+   * равноправные вкладки, и «3d · none yet» ничем не отличалось от «fabric render · none yet»,
+   * хотя одно из них означает «ещё не просили», а второе — «нельзя просить».
+   *
+   * ПРИЧИНА БЕРЁТСЯ ИЗ ОТВЕТА ПОЛОСЫ, А НЕ ВЫЧИСЛЯЕТСЯ ЗАНОВО. `has_fabric_render` — зеркало ровно
+   * того гейта, которым отказывает `StartDesignRun`; клиент, пересчитавший правило по выданной ему
+   * СТРАНИЦЕ ленты, ошибся бы ровно на те рендеры, которых на странице нет, — а это обычный случай
+   * для карточки с историей. Тогда дверь нарисовалась бы открытой, а прогон получил бы отказ.
+   *
+   * ЭТО ПОДСКАЗКА, А НЕ ЗАЩИТА, и путать их нельзя. Ячейка остаётся ОТКРЫВАЕМОЙ: за ней стоит
+   * экран, который подробно объясняет, чего не хватает, и предлагает выходы, — закрыть его значило
+   * бы спрятать единственное место, где это написано. Настоящий отказ живёт и будет жить на
+   * сервере. Клиентская блокировка обходится перезагрузкой вкладки, а платит за прогон владелец.
+   */
+  const gate = fabricRenderGate(band);
+  const threedLocked = gate.ok ? null : gate.reason;
+  const threedSub = turns
+    ? `${turns} turntable${turns === 1 ? '' : 's'}`
+    : threedLocked
+      ? 'locked — renders first'
+      : 'none yet';
   const sheetSub =
     rev > 0
       ? `v${rev} · ${calloutCount} callout${calloutCount === 1 ? '' : 's'}`
@@ -231,6 +296,7 @@ export function KindsStrip({
             name='3d'
             sub={threedSub}
             active={kind === 'threed'}
+            dimmed={threedLocked ?? undefined}
             onSelect={onKindChange && (() => onKindChange('threed'))}
             className={cn(SHARE, 'border-l border-hairline')}
           />

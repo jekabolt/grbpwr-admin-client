@@ -71,7 +71,11 @@ export function RenderInputStrip({
     if (!side || pictureId <= 0) return;
     setBusy(`p${pictureId}`);
     writes.setBenchSlot.mutate(
-      { slot: { viewKey: side.view }, pictureId, expectedSlotRev: side.slotRev },
+      // `kind: 'flat'` — WHICH BENCH, not which slot. The bench grew a second axis (view × kind),
+      // and a render front and a flat front are now two different slots BOTH addressed by
+      // `view_key: 'front'`. This strip marks DRAWINGS into the flat bench; leaving the field empty
+      // would still mean flat today, and would silently mean whatever the default becomes later.
+      { slot: { viewKey: side.view, kind: 'flat' }, pictureId, expectedSlotRev: side.slotRev },
       { onSettled: () => setBusy(null) },
     );
   };
@@ -81,7 +85,7 @@ export function RenderInputStrip({
     writes.setBenchSlot.mutate(
       // `picture_id = 0` is UNMARK — empty the slot without deleting it. A different act from
       // deleting a slot, and it has to stay different.
-      { slot: { viewKey: view }, pictureId: 0, expectedSlotRev: slotRev },
+      { slot: { viewKey: view, kind: 'flat' }, pictureId: 0, expectedSlotRev: slotRev },
       { onSettled: () => setBusy(null) },
     );
   };
@@ -159,7 +163,10 @@ export function RenderInputStrip({
                 const items = media
                   .map((m) => m.id ?? 0)
                   .filter((id) => id > 0)
-                  .map((mediaId) => ({ mediaId, ghostView: '' }));
+                  // `kind: 'flat'` is a STATEMENT, not a guess (unlike `ghostView`): this door
+                  // sits under «input — flats of this card», so what comes through it is a drawing.
+                  // Nothing downstream could recover that from the pixels.
+                  .map((mediaId) => ({ mediaId, ghostView: '', kind: 'flat' }));
                 if (!items.length) return;
                 writes.registerUpload.mutate({
                   // Minted once per human intent and NOT inside the mutation: a retry carrying a

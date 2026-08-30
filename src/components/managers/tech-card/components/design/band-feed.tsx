@@ -20,6 +20,13 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
 import { serverSpeaksDesign } from './capability';
+import {
+  CompositeBadge,
+  CompositeMarks,
+  compositeTail,
+  readComposite,
+  splitVerb,
+} from './generation/composite';
 import { batchCaption, clockStamp, pictureHandle, runHandle, shelfBatchOrdinals } from './handles';
 import { usePickMode } from './pick-mode';
 import { mixedInputNote, provenanceLabel, readProvenance } from './provenance';
@@ -204,7 +211,10 @@ export function PictureTile({
 }) {
   const pick = usePickMode();
   const hidden = isPictureHidden(picture);
-  const composite = isComposite(picture);
+  // The same reading the history's tile uses — one module, so a composite says the same thing
+  // whichever row it arrived on. `declared` is false while nothing writes `composite_views`.
+  const facts = readComposite(band, picture);
+  const composite = facts.declared;
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture, { shelfOrdinal });
   const pictureId = picture.id ?? 0;
@@ -244,7 +254,11 @@ export function PictureTile({
           </Text>
         </span>
       )}
-      {inSlot ? (
+      {/* One mark per glued view on a composite; the single guess otherwise. Exclusive by
+          construction — a composite can never stand in a slot. */}
+      {composite ? (
+        <CompositeMarks facts={facts} />
+      ) : inSlot ? (
         <span className='absolute left-0 top-0 bg-textColor px-1 text-nano uppercase text-bgColor'>
           {inSlot}
         </span>
@@ -253,17 +267,14 @@ export function PictureTile({
           probably {viewLabel(picture.ghostView)}
         </span>
       ) : null}
-      {composite && (
-        <span className='absolute bottom-0 left-0 bg-bgColor px-1 text-nano uppercase text-labelColor'>
-          {(picture.compositeViews ?? []).length} views
-        </span>
-      )}
+      <CompositeBadge facts={facts} />
     </div>
   );
 
   const sub = (
     <>
       {provenanceLabel(provenance)}
+      {compositeTail(facts)}
       {mixed ? ` · ${mixed}` : ''}
     </>
   );
@@ -302,7 +313,11 @@ export function PictureTile({
             column has no writer while generation is cut, so a gate on it would hide the door on
             precisely the pictures this wave is made of — a sheet of three flats brought by hand.
             What each piece IS gets declared in the modal, one view per frame. */}
-        {!disabled && !hidden && <TileAction onClick={() => onSplit(picture)}>split ▸</TileAction>}
+        {!disabled && !hidden && (
+          <TileAction onClick={() => onSplit(picture)}>
+            {composite ? splitVerb(facts) : 'split ▸'}
+          </TileAction>
+        )}
         {hidden ? (
           !disabled && <TileAction onClick={() => onHide(pictureId, false)}>unhide</TileAction>
         ) : mayHide ? (

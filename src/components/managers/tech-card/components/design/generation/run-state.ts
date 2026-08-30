@@ -5,7 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 
 import { hideBlockReason, stampIsSet, type HideBlockReason, type HideGuard } from '../visibility';
-import { viewLabel } from '../views';
+import { normaliseViewKey, viewLabel } from '../views';
 
 /**
  * WHAT A RUN IS DOING RIGHT NOW — pure readers over `common_DesignRun`, no React, no queries.
@@ -62,7 +62,12 @@ export function expectedTileCount(run: common_DesignRun): number {
   const views = run.params?.views ?? [];
   const kind = (run.kind ?? '').trim().toLowerCase();
   if (kind === 'flat') {
-    if ((run.params?.fixTarget ?? '').trim()) return 1;
+    // A FIX ASKS FOR ONE PICTURE PER SLOT IT NAMED, not one picture. Reading only the old scalar
+    // here returned 1 for every multi-slot fix, so the row reserved one tile and the `2 of 3`
+    // denominator under a partial answer was wrong in the direction that hides the loss.
+    const fix = fixSelectionOf(run);
+    const fixing = fix.views.length + fix.slotIds.length;
+    if (fixing) return fixing;
     if ((run.params?.layout ?? '').trim() === 'one' && views.length >= 2) return 1;
     return Math.max(1, views.length);
   }
@@ -139,10 +144,34 @@ export function viewsLine(params?: common_DesignRunParams | null): string {
 }
 
 /**
- * `fix: back` — the silhouette side this run was asked to repair, or empty when it is an ordinary
- * run. Detail slots are deliberately not targetable by the contract, so there is no second spelling
- * to accept here.
+ * WHAT A RUN SAYS IT IS FIXING — the arrays when they carry anything, the older scalar otherwise.
+ *
+ * ONE SELECTION, TWO ADDRESSES: `fix_targets` names silhouette sides by view key and `fix_slot_ids`
+ * names details by their minted slot id, and the contract is explicit that the two are one
+ * selection rather than two modes — a fix may name three sides and a cuff in one run.
+ *
+ * THE ARRAY-THEN-SCALAR ORDER IS THE CONTRACT'S OWN READING RULE, and it is why the scalar was not
+ * re-typed as repeated: rows frozen before the arrays state their target in `fix_target`, and
+ * re-typing the field would have silently rewritten what those rows say on the wire. Nothing in
+ * this client ever WRITES the scalar.
+ *
+ * IT LIVES HERE, IN THE PURE RUN-READER, and `fix-flow.tsx` imports it rather than keeping a second
+ * copy: two places answering «what is this run fixing» in two ways drift the first time one of them
+ * learns about a field, and the drift is silent — a fix row that simply stops looking like a fix.
+ */
+export function fixSelectionOf(run: common_DesignRun): { views: string[]; slotIds: number[] } {
+  const views = (run.params?.fixTargets ?? []).map(normaliseViewKey).filter(Boolean);
+  const slotIds = (run.params?.fixSlotIds ?? []).filter((id) => (id ?? 0) > 0);
+  if (views.length || slotIds.length) return { views, slotIds };
+  const scalar = normaliseViewKey(run.params?.fixTarget ?? '');
+  return { views: scalar ? [scalar] : [], slotIds: [] };
+}
+
+/**
+ * `fix: back` — the FIRST silhouette side a run was asked to repair, or empty when it is not a fix.
+ * A one-line reader for the callers that have room for one name; anything that has to state the
+ * whole of what a run is fixing reads `fixSelectionOf` and says «and 2 more».
  */
 export function fixTargetOf(run: common_DesignRun): string {
-  return (run.params?.fixTarget ?? '').trim();
+  return fixSelectionOf(run).views[0] ?? '';
 }

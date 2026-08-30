@@ -4,14 +4,12 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Tooltip from 'ui/components/tooltip';
 import TextareaField from 'ui/form/fields/textarea-field';
 
 import type { CalloutForm, TechCardFormData } from '../schema';
-import { detailKeyLabel } from '../tech-card-options';
 
 /**
  * CONCEPT & CONSTRUCTION DESCRIPTION — the one place in the whole DESIGN band where a callout
@@ -121,7 +119,6 @@ export function ConceptSection({ disabled }: { disabled?: boolean }): JSX.Elemen
     key?: string;
     text?: string;
   }>;
-  const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
 
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [readAt, setReadAt] = useState<string | null>(null);
@@ -403,45 +400,15 @@ export function ConceptSection({ disabled }: { disabled?: boolean }): JSX.Elemen
           </div>
         )}
 
-        <div>
-          <TextareaField name='notes' label='notes' rows={2} maxLength={2000} disabled={disabled} />
-          <Text size='micro' variant='label' component='p' className='mt-1'>
-            internal · not sent to the factory · outside the DESIGN signature
-          </Text>
-        </div>
+        {/* U-9: подблок `notes` убран по прямому указанию владельца. Поле `notes` в схеме
+            остаётся и продолжает сохраняться — убрана только его форма на этом экране, поэтому
+            уже написанные заметки не теряются и не стираются сохранением. */}
       </Section>
 
-      {/*
-        THE PAPER, BESIDE THE PEN. Not a preview panel and not a second editor — the same block
-        grammar showing what the description sheet will carry, in the order it carries it. It is
-        deliberately the ONLY place the aspects appear in this block: `details` has one editor
-        already and a second one would be a second writer of the same list.
-      */}
-      <Section
-        title='tech pack · description sheet'
-        question='— how it prints'
-        className='min-w-0 lg:w-[380px] lg:shrink-0'
-      >
-        <GroupLabel flush>{`${styleNumber.trim() || 'no style number'} · description`}</GroupLabel>
-        <Text size='default' component='p' className='whitespace-pre-wrap break-words'>
-          {concept.trim() || '—'}
-        </Text>
-        {details
-          .filter((d) => (d.text ?? '').trim())
-          .map((d, i) => (
-            <Row
-              key={`${d.key ?? 'aspect'}-${i}`}
-              label={detailKeyLabel(d.key)}
-              value={(d.text ?? '').trim()}
-            />
-          ))}
-        <Text size='micro' variant='label' component='p'>
-          Print order — concept → details. <b className='text-textColor'>notes never reach it.</b>
-        </Text>
-        <div>
-          <Pill tone='warn'>an edit changes the DESIGN signature</Pill>
-        </div>
-      </Section>
+      {/* U-8: блок «TECH PACK · DESCRIPTION SHEET» убран по прямому указанию владельца.
+          Он был превью бумаги рядом с пером — полезным, но не тем, ради чего открывают студию.
+          Порядок печати (concept → details) от этого не изменился: его задаёт печатная страница
+          (`print-page.tsx`), а не это превью, и второго дома у этого правила не было. */}
     </SectionStack>
   );
 }
