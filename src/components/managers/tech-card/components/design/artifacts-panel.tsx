@@ -1119,11 +1119,11 @@ export function ArtifactsPanel({
               />
             </div>
             <Text size='micro' component='p'>
-              <b>Detaching keeps the text and the number</b> and drops only the anchor — the
-              callouts reappear in the list beside the sheet marked <b>unpinned</b>, and the drawing
-              editor lists them under «callouts without an image», where each is put back on the new
-              plate <b>keeping its number</b>. Nothing is renumbered and nothing is lost; what it
-              costs is one deliberate click per callout, which is the price of not misplacing them.
+              <b>The callouts go with the plate.</b> Their text, their number and their marker are
+              removed together with it — a callout is a fraction of THIS frame, and a fraction
+              outlives its picture only as a number nobody can place. This is what the owner asked
+              for; the previous wording promised they would survive as «unpinned», and that promise
+              is no longer true.
             </Text>
           </div>
         </ConfirmationModal>
@@ -1150,9 +1150,9 @@ export function ArtifactsPanel({
               own picture.
             </Text>
             <Text size='micro' component='p'>
-              They stay in the callout list beside the sheet, marked <b>unpinned</b>, and the
-              drawing editor lists them under “callouts without an image” — where each can be put
-              back on another plate KEEPING ITS NUMBER, or deleted.
+              They are removed with it. Nothing is kept as an «unpinned» line beside the sheet:
+              a number without a picture cannot be read back onto a garment, and a list of such
+              numbers grows until nobody trusts any of it.
             </Text>
           </div>
         </ConfirmationModal>
@@ -1674,13 +1674,12 @@ function CalloutPanel({
                   {(c.description ?? '').trim() || (c.part ?? '').trim() || 'no text'}
                 </Text>
               </button>
-              {anchored && where ? (
-                <Pill tone='mut'>{where}</Pill>
-              ) : anchored ? (
-                <Pill tone='warn'>off the sheet</Pill>
-              ) : (
-                <Pill tone='mut'>unpinned</Pill>
-              )}
+              {/* ОДНА ВЕТКА, И ЭТО НЕ УПРОЩЕНИЕ, А СЛЕДСТВИЕ. Сюда приезжает только `sheetRows` —
+                  выноски, стоящие на плитах ДОКУМЕНТА, — поэтому «off the sheet» (мудбордные) и
+                  «unpinned» (открученные) недостижимы по построению. Оставить их значило бы
+                  держать на экране две ветки, которые никогда не исполнятся, и обещать людям
+                  состояния, которых больше нет: владелец снял раздел «unpinned» прямым словом. */}
+              {where ? <Pill tone='mut'>{where}</Pill> : null}
             </div>
 
             {open && (
