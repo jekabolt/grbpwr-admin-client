@@ -35,6 +35,7 @@ import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
 import { SheetBar } from './sheet-bar';
+import { useSplitToInput } from './split-to-input';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 
 /**
@@ -128,6 +129,15 @@ export function Bench({
   const candidates = useMemo(() => pickableFlats(band), [band]);
   const pickEmpty = useMemo(() => pickEmptyReason(band), [band]);
   const shelfOrdinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
+
+  /**
+   * СПЛИТ ПЛИТЫ → ВХОД (R-17, владелец: «тоже самое должно работать в FLAT SLOTS»). ТОТ ЖЕ хук,
+   * что у блока референсов, — второй механизм разъехался бы с первым в значении роли. Дверь для
+   * плит — `openForPicture`: плита УЖЕ картинка полосы, шаг регистрации референса здесь пропущен.
+   * Роли кадрам ставит СЕРВЕР в транзакции разреза (см. шапку `split-to-input.tsx`); отсюда кропы
+   * получают только строки входа, а помеченными приезжают со следующим чтением полосы.
+   */
+  const split = useSplitToInput({ techCardId, band });
 
   /**
    * THE OPTIMISTIC PAINT IS RELEASED BY THE SERVER'S OWN ANSWER, not by a timer and not by the
@@ -481,6 +491,8 @@ export function Bench({
               }
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
+              // Ручкой сплиту служит имя слота: человек режет «плиту FRONT», а не «upload 3 · b».
+              onSplit={picture ? () => split.openForPicture(picture, viewLabel(view)) : undefined}
               onFix={door.onFix}
               fixBlocked={door.blocked}
               // Ticks belong to the slots that can carry a fix; a shortlist offering an empty slot
@@ -555,6 +567,7 @@ export function Bench({
               onPick={() => pick.start({ slot: ref, label: name, expectedSlotRev: rev })}
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
+              onSplit={picture ? () => split.openForPicture(picture, name) : undefined}
               // A DETAIL IS FIXABLE NOW, and by its own address: `fix_slot_ids` names it as
               // `design_bench_slot(id)`, which is the only key that can tell two details apart.
               onFix={door.onFix}
@@ -621,6 +634,9 @@ export function Bench({
         this card goes straight in — no re-upload), ⌘V or drop a file, or mark a picture the band
         already holds.
       </Text>
+
+      {/* Модалка сплита (R-17) — одна на верстак, открывается кнопкой «split» любой плиты. */}
+      {split.modal}
 
       <MediaViewer items={viewerItems} {...viewer} />
     </Section>

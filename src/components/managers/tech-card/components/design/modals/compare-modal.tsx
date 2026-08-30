@@ -59,7 +59,8 @@ function Frame({
           inside it then resolves its width against a height that is already fixed — the frame
           collapses and the screen reads as «the pictures do not load» while the data is fine. */}
       <div
-        className='relative w-full border border-borderColor bg-bgSecondary'
+        // мат под снимком белый (R-12)
+        className='relative w-full border border-borderColor bg-bgColor'
         style={{ aspectRatio: w > 0 && h > 0 ? `${w}/${h}` : '4/5' }}
       >
         {url ? (

@@ -1107,7 +1107,7 @@ export function ArtifactsPanel({
               <GroupLabel>the walk</GroupLabel>
               <Row
                 label={<Text size='micro' component='span'>1 · bring the file in</Text>}
-                value={<Text size='micro' component='span'>uploads shelf on STUDIO</Text>}
+                value={<Text size='micro' component='span'>the + reference slot in INPUT</Text>}
               />
               <Row
                 label={<Text size='micro' component='span'>2 · put it in the slot it replaces</Text>}
@@ -1363,10 +1363,16 @@ function PlateGrid({
             </div>
 
             {/* ЯЧЕЙКА РАВНОЙ ВЫСОТЫ. Ратио 4/5 у ВСЕХ плит при равной ширине колонок грида — это и
-                есть «одинаковая высота» (R-13); серый фон ячейки — паспарту, а не кадр. Кадр — ниже,
-                в пропорциях самого снимка: доли выносок считаются ОТ НЕГО и потому не едут. */}
+                есть «одинаковая высота» (R-13). Кадр — ниже, в пропорциях самого снимка: доли
+                выносок считаются ОТ НЕГО и потому не едут.
+
+                МАТ ПОД КАДРОМ — БЕЛЫЙ (`bg-bgColor`), И ЭТО НЕ ВКУС, А ЖАЛОБА ВЛАДЕЛЬЦА: серое
+                паспарту под кропом уже читалось как «картинка с белым фоном стала с серым».
+                Плиты листа — flats на белой земле; letterbox от вписывания обязан быть неотличим
+                от земли снимка, иначе выравнивание высот приезжает как перекраска фона. Границу
+                плиты держит рамка самой плитки, мату её держать не нужно. */}
             <div
-              className='relative mt-1 flex w-full items-center justify-center bg-bgSecondary'
+              className='relative mt-1 flex w-full items-center justify-center bg-bgColor'
               style={{ containerType: 'size', aspectRatio: '4 / 5' }}
             >
               {url && ratioKnown ? (

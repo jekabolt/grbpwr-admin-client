@@ -247,10 +247,14 @@ export function GenerationForm({
     startRun.start({ kind: 'flat', ask: ask.trim(), params }, () => setAsk(''));
   };
 
+  // Дверь ведёт в INPUT — REFERENCES: полка загрузок снесена владельцем (R-18), файлы теперь
+  // приносят слотом «+ reference» входа (и сплитом — склейки видов). Якорь #design-input держит
+  // studio-tab.tsx; прежний #design-uploads больше не существует, и кнопка на него была бы живой
+  // дверью в пустоту.
   const gotoUploads = () => {
-    const el = document.getElementById('design-uploads');
+    const el = document.getElementById('design-input');
     if (!el) {
-      showMessage('the uploads shelf is not on this screen', 'error');
+      showMessage('the input block is not on this screen', 'error');
       return;
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });

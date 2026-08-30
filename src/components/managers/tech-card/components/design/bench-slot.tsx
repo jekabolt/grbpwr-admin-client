@@ -19,6 +19,7 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
+import { SplitCornerButton } from './split-to-input';
 import { selectPickablePictures } from './visibility';
 
 /**
@@ -273,6 +274,13 @@ export type BenchSlotProps = {
   onUnmark: () => void;
   onOpenViewer?: () => void;
   /**
+   * Разрезать плиту этого слота на кадры видов → строки входа (R-17, владелец: «тоже самое должно
+   * работать в FLAT SLOTS»). Механизм живёт в `split-to-input.tsx` и подаётся сверху (`bench.tsx`
+   * → `openForPicture`): плита — УЖЕ картинка полосы, поэтому шаг регистрации, который нужен
+   * референсу, здесь пропущен. Absent = дверь не рисуется (read-only или пустой слот).
+   */
+  onSplit?: () => void;
+  /**
    * Arm a fix for this slot. Absent on a slot a fix cannot legally address, in which case
    * `fixBlocked` carries the reason and the door is drawn dead rather than missing.
    */
@@ -297,6 +305,17 @@ export type BenchSlotProps = {
   deleteBlocked?: string | null;
 };
 
+/**
+ * Формула появления тихих органов плиты: наведение ИЛИ фокус внутри плитки, всегда — на
+ * устройстве без наведения. Та же, что у ячейки референсов (`hoverOnly`), и НЕ та, что у подвала
+ * действий ниже: подвал слушает `focus-within` на себе самом, а угловой кнопке нужен
+ * `group-focus-within` — иначе у клавиатуры, у которой ховера не бывает, орган существовал бы
+ * только в тот единственный момент, когда фокус стоит на нём самом, и найти его было бы нечем.
+ */
+const QUIET_ORGAN =
+  'opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 ' +
+  'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none';
+
 export function BenchSlot(props: BenchSlotProps) {
   const [vectorOpen, setVectorOpen] = useState(false);
   const {
@@ -319,6 +338,7 @@ export function BenchSlot(props: BenchSlotProps) {
     onCancelPick,
     onUnmark,
     onOpenViewer,
+    onSplit,
     onFix,
     fixBlocked,
     selected,
@@ -409,11 +429,24 @@ export function BenchSlot(props: BenchSlotProps) {
           {/* `contain`, not `cover`: a flat is a DRAWING and a crop of it loses the garment's
               outline, which is the one thing the sheet is printed for. */}
           <MediaComponent src={url} alt={label} aspectRatio='auto' fit='contain' />
-          <span className='pointer-events-none absolute left-1 top-1 z-10 bg-textColor px-1.5 py-0.5'>
-            <Text size='nano' variant='uppercase' component='span' className='!text-bgColor'>
-              {label}
-            </Text>
-          </span>
+          {/* ЛЕВЫЙ ВЕРХНИЙ УГОЛ — колонкой: ярлык слота, под ним «split» (R-17: та же угловая
+              кнопка, что на ячейке референсов). Колонка выше просмотрщика (z-20 против его
+              inset-0 z-10), иначе клик по кнопке уходил бы в зум; сама колонка прозрачна для
+              указателя, кликается только кнопка — ярлык не смеет съедать клик по плите. */}
+          <div className='pointer-events-none absolute left-1 top-1 z-20 flex flex-col items-start gap-1'>
+            <span className='bg-textColor px-1.5 py-0.5'>
+              <Text size='nano' variant='uppercase' component='span' className='!text-bgColor'>
+                {label}
+              </Text>
+            </span>
+            {!disabled && onSplit && (
+              <SplitCornerButton
+                onClick={onSplit}
+                ariaLabel={`split ${label} into views`}
+                className={cn('pointer-events-auto', QUIET_ORGAN)}
+              />
+            )}
+          </div>
           {onOpenViewer && (
             <button
               type='button'
@@ -442,8 +475,21 @@ export function BenchSlot(props: BenchSlotProps) {
 
       {/* THE SECOND DOOR, and it is equal in weight to the first: mark something the band already
           holds. At zero candidates it becomes an inert note with the reason (Г12) instead of a live
-          control that sends the human to click on pictures that are not there. */}
-      {!disabled && !picture && (
+          control that sends the human to click on pictures that are not there.
+
+          ЗАНЯТЫЙ СЛОТ ТОЖЕ ДЕРЖИТ ЭТУ ДВЕРЬ (R-11, остаток): кропы сплита лежат в полосе, и
+          человек обязан уметь выбрать их В ЗАНЯТЫЙ слот — без двери путь был бы «сначала unmark,
+          потом ищи», то есть слот, честно занятый источником-склейкой, нельзя было бы заменить
+          кропом одним жестом. Это НЕ возврат снятой «change»: та была второй кнопкой на тот же
+          исход, что unmark+библиотека; здесь исход другой — пометить картинку, которая УЖЕ в
+          полосе. Отличия занятого слота от пустого — ровно три, и каждое вынуждено:
+            · слова «another picture» — дверь заменяет, а не заполняет;
+            · в покое дверь тиха (QUIET_ORGAN — наведение ИЛИ фокус, как подвал действий): под
+              каждой заполненной плитой всегда-видимая строка была бы шумом на сетке 5×N;
+              взведённое же «choosing…» видно БЕЗУСЛОВНО — это состояние, а не приглашение;
+            · пустая полоса (`pickEmpty`) под заполненной плитой не рисуется вовсе: «нечего
+              выбрать» — ответ на вопрос, который у занятого слота никто не задал. */}
+      {!disabled && !(picture && pickEmpty) && (
         <div>
           {pickEmpty ? (
             <span data-inert={pickEmpty} title={pickEmpty}>
@@ -465,10 +511,13 @@ export function BenchSlot(props: BenchSlotProps) {
             <button
               type='button'
               onClick={onPick}
-              className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              className={cn(
+                'cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                picture && QUIET_ORGAN,
+              )}
             >
               <Text size='nano' variant='label' component='span'>
-                or mark a picture from the band
+                {picture ? 'or mark another picture from the band' : 'or mark a picture from the band'}
               </Text>
             </button>
           )}

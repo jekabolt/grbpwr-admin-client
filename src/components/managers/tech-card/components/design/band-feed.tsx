@@ -1,67 +1,52 @@
 import type {
   GetDesignBandResponse,
-  common_DesignBatch,
   common_DesignPicture,
-  common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
-import {
-  MediaViewer,
-  mediaFullListToViewerItems,
-  mediaFullViewerSrc,
-  type MediaViewerItem,
-} from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
-import { serverSpeaksDesign } from './capability';
 import {
   CompositeBadge,
   CompositeMarks,
   compositeTail,
   readComposite,
-  splitVerb,
 } from './generation/composite';
-import { batchCaption, clockStamp, pictureHandle, runHandle, shelfBatchOrdinals } from './handles';
+import { pictureHandle, shelfBatchOrdinals } from './handles';
 import { usePickMode } from './pick-mode';
 import { mixedInputNote, provenanceLabel, readProvenance } from './provenance';
-import { SplitModal, isComposite } from './split-modal';
-import { useDesignWrites } from './use-design-band';
+import { isComposite } from './split-modal';
 import {
-  canOfferHide,
-  hiddenCountOfBatch,
-  hiddenCountOfRun,
-  hideBlockReason,
   isPictureHidden,
   selectVisiblePictures,
-  type HideBlockReason,
   type HideGuard,
 } from './visibility';
-import { normaliseViewKey, viewLabel } from './views';
+import { viewLabel } from './views';
 
 /**
- * THE FEED — rows of pictures, and the one place the band is looked at rather than assembled.
+ * ЧТО ОСТАЛОСЬ ОТ ЛЕНТЫ. Колонка UPLOADS снесена решением владельца (R-18: «нам в принципе не
+ * нужна колонка UPLOADS»), и снос стал возможен только потому, что результат сплита больше не
+ * НУЖДАЕТСЯ в полке: кадры уезжают прямо во вход референсов с ролью вида (R-17/R-11 — роли пишет
+ * СЕРВЕР в транзакции разреза), а принесённое руками живёт строками входа. Пять функций полки
+ * разъехались по своим местам:
+ *   1. дверь ручной загрузки → слот «+ reference» блока INPUT — REFERENCES и слоты «+ add …»
+ *      пустых мест верстака;
+ *   2. витрина принесённого → те же строки входа (и плиты верстака);
+ *   3. ОТВЕЧАЮЩАЯ СТОРОНА РЕЖИМА ВЫБОРА → `PickTray` ниже, и это единственный орган, который
+ *      здесь ещё рисует плитки;
+ *   4. дверь сплита → угловая кнопка split на ячейке входа и на плите верстака
+ *      (`split-to-input.tsx`);
+ *   5. hide/зум/провенанс пачек → зум остался у входа, верстака и истории; ✕/unhide — у плиток
+ *      истории прогонов; учёт пачек (автор·часы·счёт файлов) снесён вместе с полкой — он
+ *      бухгалтерил гезту загрузки, а жест теперь оставляет след строкой входа.
  *
- * A ROW IS A PRODUCER, and there are exactly two kinds: a RUN (money was spent) and a BATCH (a
- * person brought files). They are drawn identically on purpose — the same gutter line, the same
- * `· k hidden ▸` link, the same tiles — because the difference between them is provenance, and
- * provenance is printed on the tile where it belongs, not encoded in a second row shape.
- *
- * THE FEED IS ALSO THE ANSWERING SIDE OF PICK MODE. When the bench arms a slot, every tile that
- * MAY go into a slot becomes clickable and every tile that may not stays inert — and if NOT ONE
- * tile qualifies, the feed says so in words rather than presenting a page of dead pictures and
- * letting the operator conclude the mode is broken.
- *
- * WHAT THIS WAVE ACTUALLY SHOWS. The generative half is cut (`17-GAPS` Р-4): there is no GENERATE
- * button, no run machine, and beta holds zero runs. `BandFeed` therefore renders NOTHING at all
- * when `band.runs` is empty — the section is ABSENT, not an empty header — and the whole live path
- * runs through `UploadsShelf`, which draws its batch rows with the very same organs exported here.
- * Both doors, one set of rows: when runs do arrive, the merged feed is already written.
+ * Читающие хелперы (`bandPictures`, `isPickablePicture`, `buildHideGuard`) остаются здесь: их
+ * читают история прогонов и панель прогона, и перевозить их значило бы дёргать чужие файлы ради
+ * переезда без смысла.
  */
 
 /* ────────────────────────────── reading the band ────────────────────────────── */
@@ -78,11 +63,10 @@ export function bandPictures(band: GetDesignBandResponse): common_DesignPicture[
  * May this picture be dropped into a bench slot?
  *
  * TWO rules, and only one of them belongs to `visibility.ts`. A hidden picture is unreachable from
- * every picker — that is the frozen module's rule and it is read through `selectPickablePictures`
- * semantics here. A COMPOSITE is a second, unrelated refusal: it holds several views at once, a
- * slot holds one, and the contract says in as many words that it «is not clickable into a slot and
- * must be split first». Folding compositeness into the visibility module would put a second,
- * non-visibility register into the one file that exists to keep invisibility singular.
+ * every picker — that is the frozen module's rule. A COMPOSITE is a second, unrelated refusal: it
+ * holds several views at once, a slot holds one, and the contract says it «is not clickable into a
+ * slot and must be split first». Folding compositeness into the visibility module would put a
+ * second, non-visibility register into the one file that exists to keep invisibility singular.
  */
 export function isPickablePicture(picture: common_DesignPicture): boolean {
   return !isPictureHidden(picture) && !isComposite(picture);
@@ -165,104 +149,48 @@ function slotNameOfPicture(band: GetDesignBandResponse, pictureId: number): stri
   return (slot.detailName ?? '').trim() || viewLabel(slot.viewKey) || 'a slot';
 }
 
-/**
- * The refusal, in the operator's words. The machine token stays the server's (`visibility.ts`); this
- * is only its translation, and there is one string per token so a refusal cannot be half-named.
- */
-const HIDE_BLOCK_SHORT: Record<HideBlockReason, string> = {
-  in_slot: 'kept · in a slot',
-  in_version: 'kept · in a version',
-  live_run_input: 'kept · a run reads it',
-  live_crop_parent: 'kept · a crop needs it',
-};
-
-const HIDE_BLOCK_LONG: Record<HideBlockReason, string> = {
-  in_slot: 'this picture stands in a bench slot — unmark it there first',
-  in_version: 'this picture is frozen into a minted sheet version and must stay printable',
-  live_run_input: 'a run that has not finished is reading this picture',
-  live_crop_parent: 'a crop cut from this picture still exists',
-};
-
-/* ────────────────────────────── the tile ────────────────────────────── */
-
 function thumbOf(media?: common_MediaFull): string {
   const m = media?.media;
   return m?.thumbnail?.mediaUrl || m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || '';
 }
 
-export function PictureTile({
+/* ────────────────────────────── the answering tray ────────────────────────────── */
+
+/**
+ * ПЛИТКА ТОЛЬКО ДЛЯ ВЗВЕДЁННОГО ВЫБОРА. У неё нет подвала глаголов (zoom/split/✕): пока слот
+ * взведён, плитка отвечает ровно на один жест — «поставить эту», и любая вторая кнопка внутри
+ * кликабельной плитки была бы кнопкой в кнопке. Непригодная плитка не прячется, а стоит
+ * притушенной со СЛОВАМИ причины: пропавшая из виду картинка неотличима от сломанного режима.
+ */
+function TrayTile({
   band,
   picture,
   shelfOrdinal,
-  guard,
-  disabled,
-  onZoom,
-  onHide,
-  onSplit,
-  onToPrompt,
+  onResolve,
+  targetLabel,
 }: {
   band: GetDesignBandResponse;
   picture: common_DesignPicture;
   shelfOrdinal?: number | null;
-  guard: HideGuard;
-  disabled?: boolean;
-  onZoom: () => void;
-  onHide: (pictureId: number, hidden: boolean) => void;
-  onSplit: (picture: common_DesignPicture) => void;
-  onToPrompt?: (mediaId: number, role: string) => void;
+  onResolve: (pictureId: number) => void;
+  targetLabel: string;
 }) {
-  const pick = usePickMode();
-  const hidden = isPictureHidden(picture);
-  // The same reading the history's tile uses — one module, so a composite says the same thing
-  // whichever row it arrived on. `declared` is false while nothing writes `composite_views`.
   const facts = readComposite(band, picture);
   const composite = facts.declared;
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture, { shelfOrdinal });
   const pictureId = picture.id ?? 0;
   const inSlot = slotNameOfPicture(band, pictureId);
-
-  /**
-   * PICK MODE TAKES THE TILE OVER, and it takes the footer with it. A clickable tile is a real
-   * `<button>` (see `ui/components/tiles`), and a button may not contain buttons — so while a slot
-   * is armed the tile answers exactly one gesture, «put this one in», and its own controls step
-   * aside. That is also the honest reading of the mode: nothing else is being asked for.
-   */
-  const armed = !!pick.target;
-  const pickable = armed && isPickablePicture(picture);
-
-  const blockReason = hidden ? null : hideBlockReason(pictureId, guard);
-  const mayHide = !disabled && canOfferHide(picture, guard);
+  const pickable = isPickablePicture(picture);
   const mixed = mixedInputNote(provenance);
-
-  /**
-   * КРОП → В ПРОМПТ (R-11). Членство читается по band.references — той же строке, которой промпт
-   * и собирается на сервере; вторая, своя запись о «в промпте» разошлась бы с первой на первом же
-   * снятии роли в референсах.
-   *
-   * Глагол предлагается ТОЛЬКО кропу (derived_from > 0) с объявленным видом: роль — это и есть
-   * вид кадра (словарь один, IsDesignGhostView на сервере проверяет оба), а кроп БЕЗ вида роли не
-   * получает — выдумать её здесь значило бы соврать модели о стороне изделия. Снятие роли живёт в
-   * референсах (кроп встаёт там строкой), поэтому у плитки один глагол, а не пара.
-   */
-  const mediaId = picture.media?.id ?? 0;
-  const promptRole = (
-    (band.references ?? []).find((r) => (r.mediaId ?? 0) === mediaId && (r.role ?? '').trim())
-      ?.role ?? ''
-  ).trim();
-  const cropView = (picture.derivedFrom ?? 0) > 0 ? normaliseViewKey(picture.ghostView) : '';
-  const mayPrompt =
-    !disabled && !hidden && !promptRole && !!onToPrompt && mediaId > 0 && !!cropView;
 
   const thumb = thumbOf(picture.media);
   const media = (
     <div
-      // МАТ БЕЛЫЙ (bg-bgColor), НЕ СЕРЫЙ (R-12). Кадр плитки навязан 4:5 c object-contain, и всё,
-      // что не покрыто снимком, — это мат; серый bg-bgSecondary делал «белый фон стал серым» на
-      // каждом кропе не-4:5, а у PNG с честной прозрачностью просвечивал СКВОЗЬ картинку. Байты
-      // кропа попиксельно верны (сервер режет SubImage и не композитит) — чинится только экран,
-      // тем же белым, на котором кроп стоял в сплит-модалке и стоит у референсов.
-      className={cn('relative w-full bg-bgColor', hidden && 'opacity-40')}
+      // МАТ БЕЛЫЙ (bg-bgColor), НЕ СЕРЫЙ (R-12). Кадр навязан 4:5 c object-contain, и всё, что не
+      // покрыто снимком, — мат; серый bg-bgSecondary делал «белый фон стал серым» на каждом кропе
+      // не-4:5, а у PNG с честной прозрачностью просвечивал СКВОЗЬ картинку.
+      className='relative w-full bg-bgColor'
       style={{ aspectRatio: '4 / 5' }}
     >
       {thumb ? (
@@ -280,8 +208,8 @@ export function PictureTile({
           </Text>
         </span>
       )}
-      {/* One mark per glued view on a composite; the single guess otherwise. Exclusive by
-          construction — a composite can never stand in a slot. */}
+      {/* Одна метка на каждый склеенный вид у композита; иначе — слот или догадка о виде.
+          Взаимоисключимо по построению: композит не может стоять в слоте. */}
       {composite ? (
         <CompositeMarks facts={facts} />
       ) : inSlot ? (
@@ -305,291 +233,37 @@ export function PictureTile({
     </>
   );
 
-  if (armed) {
-    return (
-      <Tile
-        media={media}
-        name={handle}
-        sub={sub}
-        selected={pickable}
-        onClick={pickable ? () => pick.resolve(pictureId) : undefined}
-        title={
-          pickable
-            ? `put ${handle} into ${pick.target?.label ?? 'the slot'}`
-            : composite
-              ? 'a composite holds several views — split it first'
-              : 'hidden pictures are not offered'
-        }
-        className={pickable ? '' : 'opacity-40'}
-      >
-        {!pickable && (
-          <Text size='nano' variant='label' component='span' className='mt-1 truncate'>
-            {composite ? 'split it first' : 'hidden'}
-          </Text>
-        )}
-      </Tile>
-    );
-  }
-
   return (
-    <Tile media={media} name={handle} sub={sub} className={hidden ? 'border-dashed' : ''}>
-      <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>
-        <TileAction onClick={onZoom}>zoom</TileAction>
-        {/* OFFERED ON EVERY VISIBLE PICTURE, and deliberately not gated on `composite_views`. That
-            column has no writer while generation is cut, so a gate on it would hide the door on
-            precisely the pictures this wave is made of — a sheet of three flats brought by hand.
-            What each piece IS gets declared in the modal, one view per frame. */}
-        {!disabled && !hidden && (
-          <TileAction onClick={() => onSplit(picture)}>
-            {composite ? splitVerb(facts) : 'split ▸'}
-          </TileAction>
-        )}
-        {/* Прямой глагол кропа (R-11): без него результат сплита некуда было выбрать вовсе.
-            Уже стоящий в промпте кроп называет своё членство СЛОВАМИ, а не прячет кнопку молча —
-            иначе пропавший глагол неотличим от сломанного. */}
-        {mayPrompt && (
-          <TileAction
-            onClick={() => onToPrompt?.(mediaId, cropView)}
-            label={`add this crop to the prompt as ${viewLabel(cropView)}`}
-          >
-            → prompt
-          </TileAction>
-        )}
-        {promptRole && (
-          <Text
-            size='nano'
-            variant='label'
-            component='span'
-            title='this picture already feeds the prompt — its role is managed in the references block'
-            className='truncate'
-          >
-            in prompt · {viewLabel(promptRole)}
-          </Text>
-        )}
-        {hidden ? (
-          !disabled && <TileAction onClick={() => onHide(pictureId, false)}>unhide</TileAction>
-        ) : mayHide ? (
-          <TileAction
-            onClick={() => onHide(pictureId, true)}
-            label='hide this picture — reversible'
-          >
-            ✕ hide
-          </TileAction>
-        ) : blockReason ? (
-          <Text
-            size='nano'
-            variant='label'
-            component='span'
-            title={HIDE_BLOCK_LONG[blockReason]}
-            className='truncate'
-          >
-            {HIDE_BLOCK_SHORT[blockReason]}
-          </Text>
-        ) : null}
-      </div>
+    <Tile
+      media={media}
+      name={handle}
+      sub={sub}
+      selected={pickable}
+      onClick={pickable ? () => onResolve(pictureId) : undefined}
+      title={
+        pickable
+          ? `put ${handle} into ${targetLabel}`
+          : 'a composite holds several views — split it first'
+      }
+      className={cn(!pickable && 'opacity-40')}
+    >
+      {!pickable && (
+        <Text size='nano' variant='label' component='span' className='mt-1 truncate'>
+          split it first
+        </Text>
+      )}
     </Tile>
   );
 }
 
-function TileAction({
-  onClick,
-  label,
-  children,
-}: {
-  onClick: () => void;
-  label?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type='button'
-      onClick={onClick}
-      title={label}
-      className='cursor-pointer text-nano uppercase tracking-label text-labelColor underline hover:text-textColor'
-    >
-      {children}
-    </button>
-  );
-}
-
-/* ────────────────────────────── the rows ────────────────────────────── */
-
-export type FeedRowModel = {
-  key: string;
-  /** Sort key of the merged feed. Empty sorts last, which is where an undated row belongs. */
-  createdAt: string;
-  /** The gutter line: who produced this row, when, and what it cost or weighed. */
-  meta: React.ReactNode;
-  pictures: common_DesignPicture[];
-  /** Hidden count over the WHOLE producer, read from the band aggregates — never counted here. */
-  hiddenCount: number;
-  /** 1-based position of a batch on this card's shelf; absent on a run row. */
-  shelfOrdinal?: number;
-};
-
 /**
- * THE ROWS ORGAN. Owns the writes, the split door, the zoom viewer and the per-row `k hidden`
- * toggle, so that the two sections above it (the merged feed and the uploads shelf) differ only in
- * which rows they hand it.
+ * ОТКАЗ РЕЖИМА ВЫБОРА, СЛОВАМИ — и только отказ. Пока кандидаты есть, орган молчит: баннер «choosing
+ * for …» уже висит у композитора. Говорит он ровно тогда, когда взведённый слот смотрит на полосу,
+ * которой нечего предложить, — иначе это неотличимо от сломанного режима. С дверей верстака сюда
+ * почти не попасть (пустая полоса делает дверь инертной с причиной), но полоса живая: последний
+ * кандидат может спрятаться или уйти под разрез, пока выбор взведён.
  */
-export function FeedRows({
-  techCardId,
-  band,
-  rows,
-  disabled,
-}: {
-  techCardId: number;
-  band: GetDesignBandResponse;
-  rows: FeedRowModel[];
-  disabled?: boolean;
-}) {
-  const speaks = serverSpeaksDesign();
-  const { hidePicture, setReferenceRole } = useDesignWrites(techCardId);
-  const guard = useMemo(() => buildHideGuard(band), [band]);
-
-  /** Transient, one row at a time, and never consulted by a picker. */
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-  const [splitting, setSplitting] = useState<{
-    picture: common_DesignPicture;
-    handle: string;
-  } | null>(null);
-  const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
-
-  const writesOff = !!disabled || !speaks;
-
-  const onHide = useCallback(
-    (pictureId: number, hidden: boolean) => {
-      if (writesOff) return;
-      hidePicture.mutate({ pictureId, hidden });
-    },
-    [hidePicture, writesOff],
-  );
-
-  /**
-   * КРОП → В ПРОМПТ: тот же upsert SetDesignReferenceRole, которым роль ставят референсы, — второй
-   * глагол для той же строки был бы вторым писателем. `ordinal` — хвост за максимальным из уже
-   * стоящих: промпт читается ORDER BY ordinal, и кроп с ordinal 0 пролез бы ВПЕРЁД референсов,
-   * чей порядок назначил человек. `note: ''` — строка новорождённая (глагол не предлагается
-   * стоящим в промпте), стирать на ней нечего.
-   */
-  const onToPrompt = useCallback(
-    (mediaId: number, role: string) => {
-      if (writesOff) return;
-      const ordinal = (band.references ?? []).reduce((n, r) => Math.max(n, r.ordinal ?? 0), 0) + 1;
-      setReferenceRole.mutate({ mediaId, role, ordinal, note: '' });
-    },
-    [band.references, setReferenceRole, writesOff],
-  );
-
-  const openZoom = useCallback(
-    (pictures: common_DesignPicture[], picture: common_DesignPicture) => {
-      // The viewer drops frames without an address, so the INDEX has to be computed on the already
-      // filtered row — otherwise one address-less picture shifts everything behind it and the meta
-      // panel describes the wrong file.
-      const withSrc = pictures
-        .map((p) => p.media)
-        .filter((m): m is common_MediaFull => !!m && !!mediaFullViewerSrc(m));
-      // An empty stage is not a viewer, it is a black rectangle with no exit worth the name.
-      if (!withSrc.length) return;
-      const index = Math.max(
-        0,
-        withSrc.findIndex((m) => m.id === picture.media?.id),
-      );
-      setViewer({ items: mediaFullListToViewerItems(withSrc), index });
-    },
-    [],
-  );
-
-  return (
-    <div className='space-y-stack'>
-      {rows.map((row) => {
-        const reveal = !!revealed[row.key];
-        const shown = selectVisiblePictures(row.pictures, { revealHidden: reveal });
-        return (
-          <div key={row.key} className='space-y-1'>
-            <div className='flex flex-wrap items-baseline gap-2 border-b border-rule pb-0.5'>
-              {row.meta}
-              {row.hiddenCount > 0 && (
-                <button
-                  type='button'
-                  onClick={() => setRevealed((prev) => ({ ...prev, [row.key]: !prev[row.key] }))}
-                  aria-expanded={reveal}
-                  className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
-                >
-                  · {row.hiddenCount} hidden {reveal ? '▾' : '▸'}
-                </button>
-              )}
-            </div>
-            {shown.length ? (
-              <Tiles min={140}>
-                {shown.map((picture) => (
-                  <PictureTile
-                    key={picture.id}
-                    band={band}
-                    picture={picture}
-                    shelfOrdinal={row.shelfOrdinal}
-                    guard={guard}
-                    disabled={writesOff}
-                    onZoom={() => openZoom(shown, picture)}
-                    onHide={onHide}
-                    onToPrompt={onToPrompt}
-                    onSplit={(p) =>
-                      setSplitting({
-                        picture: p,
-                        handle: pictureHandle(p, { shelfOrdinal: row.shelfOrdinal }),
-                      })
-                    }
-                  />
-                ))}
-              </Tiles>
-            ) : (
-              <Text size='micro' variant='label'>
-                every picture of this row is hidden — the link above brings them back
-              </Text>
-            )}
-          </div>
-        );
-      })}
-
-      {viewer && (
-        <MediaViewer
-          items={viewer.items}
-          index={viewer.index}
-          open
-          onOpenChange={(open) => !open && setViewer(null)}
-          onIndexChange={(index) => setViewer((prev) => (prev ? { ...prev, index } : prev))}
-        />
-      )}
-
-      {splitting && (
-        <SplitModal
-          techCardId={techCardId}
-          picture={splitting.picture}
-          handle={splitting.handle}
-          open
-          onOpenChange={(open) => !open && setSplitting(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ────────────────────────────── pick mode ────────────────────────────── */
-
-/**
- * THE REFUSAL OF PICK MODE, IN WORDS — and ONLY the refusal.
- *
- * The «choosing for FRONT» banner belongs to the tab that owns the mode, and it is already drawn
- * there; a second copy of it inside every section would say the same sentence three times. What the
- * banner CANNOT say is whether this particular pool has anything to offer, because the two rules
- * that decide it live down here. So this organ is silent while candidates exist and speaks only
- * when there are none — an armed slot over a page of inert tiles is otherwise indistinguishable
- * from a mode that is simply broken.
- *
- * The two rules are the ones that produced the zero: hidden pictures are not offered from any
- * picker, and a composite has to be split before it can mean one view.
- */
-export function PickModeNote({ band }: { band: GetDesignBandResponse }) {
+function PickModeNote({ band }: { band: GetDesignBandResponse }) {
   const pick = usePickMode();
   if (!pick.target) return null;
 
@@ -598,8 +272,9 @@ export function PickModeNote({ band }: { band: GetDesignBandResponse }) {
 
   const hidden = pictures.filter(isPictureHidden).length;
   const composites = pictures.filter(isComposite).length;
+  // Дверь «+ add files» умерла вместе с полкой (R-18) — учим живые двери, а не снесённую.
   const why = !pictures.length
-    ? 'there is not a single picture on this card yet — bring files in with «+ add files».'
+    ? 'there is not a single picture on this card yet — bring files in with «+ reference» in the input block, or straight onto an empty slot.'
     : [
         composites
           ? `${composites} composite${composites === 1 ? '' : 's'} must be split first`
@@ -616,98 +291,77 @@ export function PickModeNote({ band }: { band: GetDesignBandResponse }) {
   );
 }
 
-/* ────────────────────────────── the merged feed ────────────────────────────── */
+/**
+ * ЛОТОК ВЫБОРА — отвечающая сторона режима выбора для принесённого руками, и НАСЛЕДНИК ПОЛКИ
+ * (R-18) в единственной её роли, которую больше некому играть.
+ *
+ * ПОЧЕМУ ОН НУЖЕН, ХОТЯ КОЛОНКИ НЕТ. Кандидатов выбора собирает `pickableFlats` — прогоны И пачки.
+ * Прогоны отвечают плитками истории; пачечные картинки (кропы сплита, старые ручные загрузки)
+ * после сноса полки не рисует НИКТО. Без лотка дверь «or mark a picture from the band» взводила бы
+ * режим над экраном, где нечего нажать, — живая дверь в никуда, ровно Г12. Проверять «есть ли
+ * поверхность» внутри чужого `pickEmptyReason` нельзя (файл верстака не наш), значит поверхность
+ * обязана быть.
+ *
+ * ПОЧЕМУ ОН ВИДЕН ТОЛЬКО ПРИ ВЗВЕДЁННОМ ВЫБОРЕ. Владелец снёс ПОСТОЯННУЮ колонку: вне выбора эти
+ * картинки живут строками входа и плитами верстака, и вторая постоянная витрина вернула бы снесённое
+ * под другим именем. Лоток — орган РЕЖИМА, как баннер: появился со взводом, ушёл с Esc.
+ *
+ * ТОЛЬКО ПАЧКИ. Прогоны здесь не рисуются — их плитки в истории уже отвечают выбору, и одна
+ * картинка на двух поверхностях резолвила бы один клик двумя местами.
+ */
+export function PickTray({ band }: { band: GetDesignBandResponse }): JSX.Element | null {
+  const pick = usePickMode();
 
-function runMeta(run: common_DesignRun): React.ReactNode {
-  const status = (run.status ?? '').trim();
-  const ask = (run.ask ?? '').trim();
-  const author = (run.author ?? '').trim();
-  const segments = [runHandle(run.id), ask, author, clockStamp(run.createdAt)].filter(Boolean);
+  const ordinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
+  const rows = useMemo(
+    () =>
+      (band.batches ?? [])
+        .map((batch) => ({
+          ordinal: ordinals.get(batch.id ?? 0),
+          // Спрятанное не предлагается ни из одного пикера — правило visibility, без люка.
+          pictures: selectVisiblePictures(batch.pictures ?? []),
+        }))
+        .filter((row) => row.pictures.length > 0)
+        // Свежее — первым: часовой порядок уже тотален в ординале (fallback на id).
+        .sort((a, b) => (b.ordinal ?? 0) - (a.ordinal ?? 0)),
+    [band.batches, ordinals],
+  );
+
+  if (!pick.target) return null;
+
+  const count = rows.reduce((n, row) => n + row.pictures.length, 0);
+  const label = pick.target.label;
+
   return (
     <>
-      <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-        {segments.join(' · ')}
-      </Text>
-      {status && status !== 'done' && (
-        <Pill tone={status === 'failed' ? 'warn' : 'attention'}>{status}</Pill>
+      <PickModeNote band={band} />
+      {count > 0 && (
+        <Section
+          id='design-pick-tray'
+          title='brought by hand'
+          question={`— click a picture to put it into ${label}; run outputs answer in the history above`}
+          action={
+            <Text size='micro' variant='label' component='span'>
+              {count} picture{count === 1 ? '' : 's'}
+            </Text>
+          }
+        >
+          <Tiles min={140}>
+            {rows.flatMap((row) =>
+              row.pictures.map((picture) => (
+                <TrayTile
+                  key={picture.id}
+                  band={band}
+                  picture={picture}
+                  shelfOrdinal={row.ordinal}
+                  targetLabel={label}
+                  onResolve={(pictureId) => pick.resolve(pictureId)}
+                />
+              )),
+            )}
+          </Tiles>
+        </Section>
       )}
     </>
-  );
-}
-
-function batchMeta(batch: common_DesignBatch, ordinal?: number): React.ReactNode {
-  const address = ordinal ? `upload ${ordinal} · ` : '';
-  return (
-    <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-      {address}
-      {batchCaption(batch)}
-    </Text>
-  );
-}
-
-/**
- * Runs and batches in one time-ordered list — the shape the contract pages in (`limit` counts rows
- * across both) and the shape the history reads in once generation exists.
- *
- * ABSENT, NOT EMPTY, WHEN THERE ARE NO RUNS. With the generative half cut there is nothing to merge
- * and the batches already have a home on the shelf; a titled block that shows the same rows twice
- * would be worse than no block. This is the switch to flip when generation lands: the feed becomes
- * the whole history and the shelf gives its rows up.
- */
-export function BandFeed({
-  techCardId,
-  band,
-  disabled,
-}: {
-  techCardId: number;
-  band: GetDesignBandResponse;
-  disabled?: boolean;
-}): JSX.Element {
-  const ordinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
-
-  const rows = useMemo<FeedRowModel[]>(() => {
-    const runRows: FeedRowModel[] = (band.runs ?? []).map((run) => ({
-      key: `run:${run.id}`,
-      createdAt: run.createdAt ?? '',
-      meta: runMeta(run),
-      pictures: run.pictures ?? [],
-      hiddenCount: hiddenCountOfRun(band, run.id ?? 0),
-    }));
-    const batchRows: FeedRowModel[] = (band.batches ?? []).map((batch) => ({
-      key: `batch:${batch.id}`,
-      createdAt: batch.createdAt ?? '',
-      meta: batchMeta(batch, ordinals.get(batch.id ?? 0)),
-      pictures: batch.pictures ?? [],
-      hiddenCount: hiddenCountOfBatch(band, batch.id ?? 0),
-      shelfOrdinal: ordinals.get(batch.id ?? 0),
-    }));
-    // Newest first. An undated row sorts last rather than to the top, where it would claim to be
-    // the most recent thing that happened.
-    return [...runRows, ...batchRows].sort((a, b) => {
-      if (a.createdAt === b.createdAt) return a.key < b.key ? 1 : -1;
-      if (!a.createdAt) return 1;
-      if (!b.createdAt) return -1;
-      return a.createdAt < b.createdAt ? 1 : -1;
-    });
-  }, [band, ordinals]);
-
-  const pictureCount = rows.reduce((n, row) => n + row.pictures.length, 0);
-
-  if (!(band.runs ?? []).length) return <></>;
-
-  return (
-    <Section
-      id='design-feed'
-      title='generation history'
-      question='— nothing is deleted; hiding is reversible'
-      action={
-        <Text size='micro' variant='label' component='span'>
-          {rows.length} row{rows.length === 1 ? '' : 's'} · {pictureCount} pictures
-        </Text>
-      }
-    >
-      <PickModeNote band={band} />
-      <FeedRows techCardId={techCardId} band={band} rows={rows} disabled={disabled} />
-    </Section>
   );
 }

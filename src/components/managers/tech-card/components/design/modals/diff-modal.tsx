@@ -156,7 +156,8 @@ function Thumb({ media, label }: { media?: common_MediaFull; label: string }) {
   const url = media?.media?.thumbnail?.mediaUrl || media?.media?.compressed?.mediaUrl || '';
   return (
     <span
-      className='relative block h-14 w-11 shrink-0 border border-borderColor bg-bgSecondary'
+      // мат под снимком белый (R-12); кадр здесь фиксированный, поэтому летербокс почти всегда
+      className='relative block h-14 w-11 shrink-0 border border-borderColor bg-bgColor'
       title={label}
     >
       {url ? (

@@ -676,7 +676,8 @@ export function MintDialog({
                     >
                       {plate.name}
                     </Text>
-                    <div className='mt-1 aspect-[4/5] w-full bg-bgSecondary'>
+                    {/* мат под снимком белый (R-12) */}
+                    <div className='mt-1 aspect-[4/5] w-full bg-bgColor'>
                       {url && (
                         <img
                           src={url}

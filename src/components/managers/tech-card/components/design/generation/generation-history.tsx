@@ -234,7 +234,8 @@ function RunTile({
   const thumb = thumbOf(picture.media);
   const media = (
     <div
-      className={cn('relative w-full bg-bgSecondary', hidden && 'opacity-40')}
+      // Мат под снимком БЕЛЫЙ (R-12) — см. довод в generation/thumb.tsx.
+      className={cn('relative w-full bg-bgColor', hidden && 'opacity-40')}
       style={{ aspectRatio: '4 / 5' }}
     >
       {thumb ? (

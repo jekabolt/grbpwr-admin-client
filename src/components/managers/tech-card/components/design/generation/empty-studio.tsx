@@ -38,10 +38,14 @@ export function EmptyStudio({
   const speaks = serverSpeaksDesign();
   const { showMessage } = useSnackBarStore();
 
-  const gotoUploads = () => {
-    const el = document.getElementById('design-uploads');
+  // Дверь ведёт в INPUT — REFERENCES: полка загрузок снесена владельцем (R-18), и «принести файлы»
+  // теперь значит «положить их во вход» — слот «+ reference» принимает клик в библиотеку, ⌘V и
+  // бросок файла, а склейку нескольких видов там же режет split. Якорь #design-input держит
+  // studio-tab.tsx; вести на #design-uploads значило бы жать живую кнопку в пустоту.
+  const gotoInput = () => {
+    const el = document.getElementById('design-input');
     if (!el) {
-      showMessage('the uploads shelf is not on this screen', 'error');
+      showMessage('the input block is not on this screen', 'error');
       return;
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -51,7 +55,7 @@ export function EmptyStudio({
     <Section
       id='design-studio-empty'
       title='pictures on this card'
-      question='— a run writes history, an upload gets a shelf; both feed the slots'
+      question='— a run writes history, hand-brought files land in the input; both feed the slots'
       action={
         <Text size='micro' variant='label' component='span'>
           no runs · no files yet
@@ -66,16 +70,20 @@ export function EmptyStudio({
         <Text size='micro' component='p' className='uppercase tracking-label'>
           <b>nothing here yet</b>
         </Text>
+        {/* ПУСТОЕ СОСТОЯНИЕ УЧИТ НОВОМУ ПУТИ (после сноса полки оно — единственный учитель):
+            вход → сплит → роли → слоты. Прежний текст обещал «полку загрузок», которой больше
+            нет, — учитель, показывающий на снесённую дверь, хуже молчания. */}
         <Text size='micro' variant='label' component='p' className='max-w-[82ch]'>
           Nothing has been generated or brought. A run would open a <b>generation history</b> here,
-          with the ask and the price on every row; files brought by hand get a shelf of their own —
-          the same pictures, no run. You then mark the ones that go into a slot below, and the empty
-          slots are the targets.
+          with the ask and the price on every row. Files brought by hand go into{' '}
+          <b>input — references</b> above: a sheet of several views gets <b>split</b> into frames,
+          and each frame arrives in the input already marked with its view. A single view can also
+          be dropped straight onto its empty slot below.
         </Text>
       </div>
 
       <div className='flex flex-wrap items-center gap-2'>
-        <Button variant='secondary' size='sm' onClick={gotoUploads}>
+        <Button variant='secondary' size='sm' onClick={gotoInput}>
           + add files
         </Button>
         {onGenerate && speaks ? (

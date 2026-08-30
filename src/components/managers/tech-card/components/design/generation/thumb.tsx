@@ -36,7 +36,17 @@ export function Thumb({
   return (
     <span
       className={cn(
-        'relative flex shrink-0 items-center justify-center overflow-hidden bg-bgSecondary',
+        // МАТ ПОД СНИМКОМ БЕЛЫЙ, И ЭТО ПРАВИЛО, А НЕ ВКУС (R-12).
+        //
+        // Владелец: «после кропа картинка с белым фоном становится серой». Серверный рез при этом
+        // невиновен — он отдаёт (255,255,255,a=255), это доказано опытом в бэкенде
+        // (design_crop_lossless_test.go). Серым белое делал МАТ, и двумя путями сразу: при
+        // object-contain он виден ВОКРУГ снимка, чьё соотношение не совпало с кадром, а у PNG с
+        // честной прозрачностью просвечивает СКВОЗЬ него.
+        //
+        // Пустоту называет СЛОВО («no image» / «deleted») — ровно как в band-feed. Цвет за
+        // «пусто» не отвечает, иначе он же начинает врать про «белое».
+        'relative flex shrink-0 items-center justify-center overflow-hidden bg-bgColor',
         className,
       )}
     >

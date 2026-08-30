@@ -145,7 +145,8 @@ export function NewDetailModal({
             {/* The picture's own ratio, `self-start` so the aspect box is not stretched to the
                 row's height and collapsed to nothing by it. */}
             <span
-              className='block w-20 shrink-0 self-start border border-borderColor bg-bgSecondary'
+              // мат под снимком белый (R-12)
+              className='block w-20 shrink-0 self-start border border-borderColor bg-bgColor'
               style={{ aspectRatio: w > 0 && h > 0 ? `${w}/${h}` : '4/5' }}
             >
               {url && (

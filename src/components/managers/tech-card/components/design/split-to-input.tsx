@@ -18,9 +18,9 @@ import { DESIGN_VIEW_KEYS, normaliseViewKey } from './views';
 
 /**
  * СПЛИТ → ВХОД: разметить на картинке кадры видов и получить их ОТДЕЛЬНЫМИ строками входа, уже
- * помеченными ролью (R-17). Логика вынесена из блока референсов, потому что та же кнопка нужна и
- * на плитах FLAT SLOTS (чужой файл): два экрана, один механизм, и разъехаться им нельзя — роль,
- * которую ставит один, обязана значить то же, что роль, которую ставит другой.
+ * помеченными ролью (R-17). Логика вынесена из блока референсов, потому что та же кнопка стоит и
+ * на плитах FLAT SLOTS (`bench.tsx` → `openForPicture`): два экрана, один механизм, и разъехаться
+ * им нельзя — роль, которую ставит один, обязана значить то же, что роль, которую ставит другой.
  *
  * ЦЕПОЧКА БЕЗ НОВЫХ RPC, и каждый её шаг вынужден контрактом:
  *   1. `RegisterDesignUpload(media)` — `SplitDesignPicture` режет только КАРТИНКУ ПОЛОСЫ (по
@@ -30,14 +30,18 @@ import { DESIGN_VIEW_KEYS, normaliseViewKey } from './views';
  *      Плиты верстака этот шаг пропускают (`openForPicture`): у них картинка уже есть.
  *   2. `SplitDesignPicture(frames)` — кадры размечает человек в модалке; каждый кадр обязан нести
  *      вид, безымянный кадр модалка не отпускает.
- *   3. Из вернувшихся кропов — строки входа + `SetDesignReferenceRole(role = view_key кадра)`.
- *      Словари ролей и видов совпадают буква в букву (`front|back|side_l|side_r|detail`), поэтому
- *      перенос — членство в `DESIGN_VIEW_KEYS`, а не догадка и не карта соответствия.
+ *   3. Из вернувшихся кропов — ТОЛЬКО строки входа. Роли кропам НЕ пишутся отсюда, и это не
+ *      экономия, а запрет двойного писателя: СЕРВЕР ставит `design_reference(role = view_key
+ *      кадра)` В ТОЙ ЖЕ транзакции, что и сами кропы (`internal/store/design/pictures.go`,
+ *      SplitPicture), с идемпотентностью по живым кропам родителя. Второй `SetDesignReferenceRole`
+ *      с клиента затирал бы серверный ordinal (хвост промпта) позицией строки и, по семантике
+ *      upsert-а, нёс бы `note: ''` — то есть пустую записку поверх строки, которой уже владеет
+ *      сервер. Роли приезжают со следующим чтением полосы (`invalidate` в шве записи сплита).
  *
- * ЧТО ВИДНО ПРИ ЧАСТИЧНОМ ПРОВАЛЕ. Запись ролей — N отдельных вызовов, они не атомарны. Кроп, чья
- * роль не встала, НЕ прячется и не откатывается: его строка входа уже на карточке, ячейка честно
- * говорит «not in prompt», и роль ставится руками тем же селектом, что и всегда. Отказ сервера
- * при этом кричит сноской шва записи (`useDesignWrites.onError`) — молча не теряется ничего.
+ * ЧТО ВИДНО ПРИ ЧАСТИЧНОМ ПРОВАЛЕ. Роль-без-строки невозможна наполовину: роли и кропы — одна
+ * серверная транзакция. Единственный частичный исход остаётся у ПОТОЛКА ВХОДА: кроп, не
+ * поместившийся в строки (`INPUT_MAX`), роль с сервера всё равно несёт и потому виден в блоке
+ * референсов плашкой «off the card» — его есть чем снять руками, а отказ приёма называет числа.
  */
 export function useSplitToInput({
   techCardId,
@@ -54,7 +58,7 @@ export function useSplitToInput({
   onAccepted?: (media: common_MediaFull[]) => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { registerUpload, setReferenceRole } = useDesignWrites(techCardId);
+  const { registerUpload } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
 
   const [target, setTarget] = useState<{ picture: common_DesignPicture; handle?: string } | null>(
@@ -133,7 +137,12 @@ export function useSplitToInput({
     );
   }
 
-  /** Кропы сплита → строки входа + роль вида на каждую. Вызывается модалкой после удавшегося разреза. */
+  /**
+   * Кропы сплита → строки входа. РОЛИ ЗДЕСЬ НЕ ПИШУТСЯ: их уже поставил сервер в транзакции
+   * самого разреза (см. шапку файла — второй писатель затирал бы серверный ordinal и записку).
+   * Отсюда уходит только ДОКУМЕНТНАЯ половина референса — строка `kind = REFERENCE` на карточке,
+   * которой серверу взять неоткуда: `tech_card_media` едет целиком с сейвом формы.
+   */
   function handleCrops(pictures: common_DesignPicture[]) {
     const withMedia = pictures.filter((p) => p.media?.id != null);
     const result = appendBoardPictures({
@@ -145,8 +154,9 @@ export function useSplitToInput({
       max: INPUT_MAX,
       scopeLabel: 'input',
     });
-    // Потолок входа держит и кропы: отказ приёма называет, сколько поместилось, — и кроп, не
-    // попавший в строки, роли НЕ получает, иначе родился бы носитель роли, которого нет на экране.
+    // Потолок входа держит и кропы, и отказ называет числа. Кроп, не поместившийся в строки,
+    // роль с сервера ВСЁ РАВНО несёт — прятать его нельзя (носитель роли обязан быть на экране),
+    // поэтому блок референсов покажет его плашкой «off the card», и его есть чем снять руками.
     if (result.refusal) showMessage(result.refusal, 'error');
     if (!result.accepted.length) return;
 
@@ -157,22 +167,15 @@ export function useSplitToInput({
     });
     onAccepted?.(result.accepted);
 
+    // Счёт для итоговой строки — по `ghost_view` кропа, членством в словаре: ровно то условие, по
+    // которому сервер ставил роль (`IsDesignGhostView`), и потому итог не обещает больше, чем
+    // покажет перечитанная полоса. Ключ вне словаря (сервер из будущего) в счёт не входит.
     const acceptedIds = new Set(result.accepted.map((m) => m.id));
-    const inputRows = result.next.filter(isInputRow);
-    let marked = 0;
-    for (const crop of withMedia) {
-      const mediaId = crop.media?.id as number;
-      if (!acceptedIds.has(mediaId)) continue;
-      // Роль кадра приезжает на кропе как `ghost_view`. Перенос — только членством в словаре:
-      // ключ вне его (сервер из будущего) не превращается в роль-догадку, строка остаётся
-      // «not in prompt», и человек ставит роль руками.
-      const role = normaliseViewKey(crop.ghostView);
-      if (!(DESIGN_VIEW_KEYS as readonly string[]).includes(role)) continue;
-      // ORDINAL — позиция во входе, не номер промпта: номер выводится сканом на чтении.
-      const ordinal = Math.max(1, inputRows.findIndex((i) => i.mediaId === mediaId) + 1);
-      setReferenceRole.mutate({ mediaId, role, ordinal, note: '' });
-      marked += 1;
-    }
+    const marked = withMedia.filter(
+      (crop) =>
+        acceptedIds.has(crop.media?.id as number) &&
+        (DESIGN_VIEW_KEYS as readonly string[]).includes(normaliseViewKey(crop.ghostView)),
+    ).length;
     showMessage(
       `${result.accepted.length} picture${result.accepted.length === 1 ? '' : 's'} added to the input — ${marked} marked with ${marked === 1 ? 'its view' : 'their views'}`,
       'success',

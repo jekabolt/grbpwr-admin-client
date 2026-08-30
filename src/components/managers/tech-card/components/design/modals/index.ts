@@ -5,7 +5,11 @@
  * built and are NOT re-exported, because a second spelling of a dialog is how two screens come to
  * disagree about the same act:
  *
- *   intake        → `useMediaIntake` + `MediaIntakeDialog`, wired in `uploads-shelf.tsx`. The
+ *   intake        → `useMediaIntake` + `MediaIntakeDialog`, wired in `media/utils/useMediaIntake.tsx`
+ *                   and reached from every media slot. (It used to be named as living in
+ *                   `uploads-shelf.tsx`; that organ was removed with R-18 and the pointer rotted
+ *                   with it — a reference to a deleted file reads as «this is not built here»,
+ *                   which is the opposite of true.) The
  *                   prototype's «pick what the files would depict» is a STAND-IN for a file system
  *                   it does not have; this admin has one, and the receiving dialog (preview, crop,
  *                   confirm) is the real article.

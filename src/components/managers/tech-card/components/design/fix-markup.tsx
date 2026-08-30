@@ -342,7 +342,8 @@ function PlateFrame({ entry, bandRev }: { entry: PreviewEntry; bandRev: number }
       {/* `items-start` on the row above is load-bearing — see compare-modal on why a stretched
           flex item collapses an aspect-ratio frame to 0×0. */}
       <div
-        className='relative w-full border border-borderColor bg-bgSecondary'
+        // мат под снимком белый (R-12)
+        className='relative w-full border border-borderColor bg-bgColor'
         style={{ aspectRatio: w > 0 && h > 0 ? `${w}/${h}` : '4/5' }}
       >
         {entry.state === 'ready' ? (

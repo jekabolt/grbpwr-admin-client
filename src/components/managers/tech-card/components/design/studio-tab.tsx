@@ -13,8 +13,8 @@ import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MoodBoard } from './mood-board';
 import { PickModeProvider, usePickMode } from './pick-mode';
+import { PickTray } from './band-feed';
 import { ReferencesSection } from './references-section';
-import { UploadsShelf } from './uploads-shelf';
 import { useDesignBand } from './use-design-band';
 
 /**
@@ -124,7 +124,7 @@ export function StudioTab({
         <PickBanner />
         <SectionStack>
           {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ (`proto.html:3875-3893`), А НЕ С ПАМЯТЬЮ:
-                topRow → moodboard → kinds → references → ГЕНЕРАЦИЯ → uploads → SLOTS → concept.
+                topRow → moodboard → kinds → references → ГЕНЕРАЦИЯ → SLOTS → concept.
               Шапка карточки (`topRowHtml`) стоит выше, в `index.tsx`: она первый ряд СТУДИИ.
               Генерация — это форма запуска, история прогонов и пустое состояние, и собирает их
               `GenerationStudio` по правилу самого прототипа (`briefContent`).
@@ -132,10 +132,12 @@ export function StudioTab({
               `sheetbarHtml` и `mixwarnHtml` в своей шапке), поэтому стоят вплотную над верстаком.
               Верстак ПОСЛЕДНИЙ: сначала материал, потом сборка. Описание — после всего, оно
               пишется по тому, что выше.
-              ЛЕНТЫ `BandFeed` ЗДЕСЬ БОЛЬШЕ НЕТ: она рисовала блок «generation history», слепляя
-              прогоны и пачки, — заглушка тех времён, когда генерации в клиенте не было. У
-              прототипа это два разных блока: история = прогоны, полка = пачки. Модуль остаётся:
-              полка загрузок берёт из него строки. */}
+              КОЛОНКИ UPLOADS ЗДЕСЬ БОЛЬШЕ НЕТ — снесена решением владельца (R-18). Прототип её
+              ещё несёт; расхождение сознательное и записано в описи `qa-parity.mjs`. Принесённое
+              руками входит через слот «+ reference» блока INPUT и через «+ add …» пустых слотов
+              верстака; кадры сплита приезжают во вход уже с ролью вида (R-17), поэтому полки им
+              не нужно. Единственная роль полки, которую больше некому играть, — отвечать режиму
+              выбора за пачечные картинки — живёт в `PickTray` над верстаком. */}
           <MoodBoard techCardId={techCardId} disabled={readOnly} />
           <KindsStrip band={band} kind={kind} onKindChange={setKind} />
           {bandless ? (
@@ -143,8 +145,8 @@ export function StudioTab({
               <Text variant='inactive' size='control'>
                 {error
                   ? `The bench could not be read: ${error.message}`
-                  : 'This server does not serve the design band yet, so the bench, the uploads and ' +
-                    'the reference roles are not available here. The moodboard and the description ' +
+                  : 'This server does not serve the design band yet, so the bench and the ' +
+                    'reference roles are not available here. The moodboard and the description ' +
                     'above save normally.'}
               </Text>
             </Section>
@@ -155,7 +157,13 @@ export function StudioTab({
                   клике, не на экране»): у рендера вход — слоты верстака, у 3D — рендеры. */}
               {kind === 'flat' && (
                 <>
-                  <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
+                  {/* ЯКОРЬ #design-input — снаружи, а не внутри блока: файл референсов чужой
+                      (дорожка E2), а на якорь смотрят двери «+ add files» пустой студии и свёрнутой
+                      формы генерации, которые до сноса полки вели на #design-uploads. Обёртка —
+                      законный ребёнок SectionStack: это flex с gap, и div наследует ритм 24px. */}
+                  <div id='design-input'>
+                    <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
+                  </div>
                   {/* ОДИН ЧИП НА ЭКРАН, и он здесь — НАД формой, как в прототипе. Заявка на
                       правку, сделанная нажатием `fix ▸` в слоте, обязана быть видна и тогда,
                       когда форма свёрнута и до неё ещё не долистали. Второй такой же чип стоял
@@ -163,7 +171,6 @@ export function StudioTab({
                       читалось как две разные. Снят там, оставлен здесь. */}
                   <FixContext band={band} techCardId={techCardId} disabled={readOnly} />
                   <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                  <UploadsShelf techCardId={techCardId} band={band} disabled={readOnly} />
                 </>
               )}
               {/* У РЕНДЕРА И 3D СВОЙ ЭКРАН И ТА ЖЕ ИСТОРИЯ ПРОГОНОВ: прототип собирает их как
@@ -190,6 +197,11 @@ export function StudioTab({
                   блока слотов (`slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml` внутри себя), и
                   тремя отдельными блоками они читались как три равновесных заявления, хотя два из
                   них — про третье. Монтирует их теперь `Bench`. */}
+              {/* ЛОТОК ВЫБОРА — ВПЛОТНУЮ НАД ВЕРСТАКОМ, потому что жест начинается на его пустом
+                  слоте («or mark a picture from the band») и заканчивается плиткой лотка: между
+                  дверью и ответом не должно стоять пол-экрана. Вне взведённого выбора лоток — null,
+                  постоянной колонки владелец не хочет (R-18). */}
+              <PickTray band={band} />
               <Bench techCardId={techCardId} band={band} disabled={readOnly} />
             </>
           )}

@@ -327,7 +327,8 @@ function ReferenceLine({ line, media }: { line: Line; media?: common_MediaFull }
   const url = thumbOf(media);
   return (
     <div className='flex items-center gap-2 border-b border-hairline py-1'>
-      <span className='block h-10 w-8 shrink-0 border border-borderColor bg-bgSecondary'>
+      {/* мат под снимком белый (R-12) */}
+      <span className='block h-10 w-8 shrink-0 border border-borderColor bg-bgColor'>
         {url ? (
           <img src={url} alt='' loading='lazy' className='h-full w-full object-cover' />
         ) : null}
