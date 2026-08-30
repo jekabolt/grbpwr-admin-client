@@ -269,23 +269,16 @@ export function serverStatesSelected(picture?: common_DesignPicture | null): boo
 }
 
 /**
- * THE VERB THAT WOULD WRITE THE MARK, AND IT DOES NOT EXIST YET.
- *
- * The field arrived with the contract wave; the RPC did not. `HideDesignPicture` is still the only
- * picture-level verb on `AdminService`, and it writes the OTHER statement — smuggling a `selected`
- * flag onto it would be exactly the collapse the contract's own comment forbids, and would put two
- * unrelated permissions behind one RBAC row.
- *
- * So the mark is READ-ONLY on this client: the badge is drawn from whatever the server states, and
- * the control that would set it is an inert door carrying this sentence. A local `useState`
- * standing in for the verb would be worse than an inert door — it would look like it worked and
- * lose the choice on the next refetch, with nothing saying so.
+ * THE VERB THAT WRITES THE MARK EXISTS NOW — `SetDesignPictureSelected`, on the band's write seam
+ * (`useDesignWrites().setPictureSelected`). The one case in which a select door must still be
+ * drawn inert is a SERVER that does not state the field at all (`serverStatesSelected` above): a
+ * binary older than the field would answer the verb's route with a 404/501, and a door that
+ * collects that refusal teaches «the admin is broken» where the truth is «this server is older
+ * than the mark». This sentence is that door's reason.
  */
-export const SELECT_VERB_MISSING =
-  'the field `DesignPicture.selected` is on this contract and this screen reads it, but nothing can ' +
-  'yet WRITE it: `HideDesignPicture` is still the only picture-level verb on the service, and it ' +
-  'carries the other statement — reversible invisibility, not an editorial choice. Setting the mark ' +
-  'needs an RPC of its own, which arrives with the handlers wave';
+export const SELECT_MARK_NOT_STATED =
+  'this server does not state `DesignPicture.selected` at all — a binary older than the field. ' +
+  'The mark cannot be set against it; nothing else is broken';
 
 /** The revisions the four sides currently come from, ascending and deduplicated. */
 export function renderRevisions(byView: RenderByView): number[] {

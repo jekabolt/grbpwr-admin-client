@@ -59,6 +59,12 @@ export {
   type VectorStroke,
 } from './vector-strokes';
 
+export {
+  RASTER_FALLBACK_W,
+  RASTER_MAX_W,
+  rasteriseStrokesOverBase,
+} from './rasterise-layer';
+
 export { SvgImportDoor } from './svg-import-door';
 export {
   arcToCubics,

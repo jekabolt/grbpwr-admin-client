@@ -3,7 +3,6 @@ import type {
   GetDesignBandResponse,
   common_DesignPicture,
 } from 'api/proto-http/admin';
-import { urlToDataUrl } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +19,7 @@ import Text from 'ui/components/text';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
 import { useDesignWrites } from '../use-design-band';
+import { RASTER_FALLBACK_W, rasteriseStrokesOverBase } from './rasterise-layer';
 import { SvgImportDoor } from './svg-import-door';
 import {
   findLayerForMedia,
@@ -85,10 +85,6 @@ function framePoint(rect: DOMRect, clientX: number, clientY: number): [number, n
   return [x, y];
 }
 
-/** The widest raster this editor produces. Past it a line drawing gains no readable detail. */
-const RASTER_MAX_W = 1600;
-/** The download's own box. Any size is legal — the file is scale-free — but it opens at a sane one. */
-const EXPORT_W = 800;
 /** The stage's SVG units. Only a coordinate space; the box itself is sized by CSS. */
 const STAGE_W = 1000;
 /** How close a click has to land, in stage pixels, to mean «this stroke». */
@@ -385,61 +381,14 @@ export function VectorModal({
   /**
    * Paint base + strokes into one canvas and hand back a PNG data URL.
    *
-   * THE BASE IS RE-FETCHED THROUGH THE CORS PROXY rather than reused from the `<img>` on screen: a
-   * media-server image painted onto a canvas TAINTS it, and `toDataURL` on a tainted canvas throws
-   * a SecurityError. That is the same dance the cropper and the zoom viewer already do.
+   * THE CANVAS ITSELF LIVES IN `rasterise-layer.ts`, SHARED — the fix flow rasterises «plate +
+   * layer» with the same code at launch (W-10), and two canvases drawing the same strokes would
+   * drift silently. This wrapper only binds the modal's own state to it.
    */
-  const rasterise = useCallback(async (): Promise<string> => {
-    let image: HTMLImageElement | null = null;
-    if (baseSrc) {
-      const dataUrl = await urlToDataUrl(baseSrc);
-      const img = new Image();
-      img.src = dataUrl;
-      await img.decode();
-      image = img;
-    }
-    const naturalW = image?.naturalWidth ?? 0;
-    const naturalH = image?.naturalHeight ?? 0;
-    const w = Math.min(RASTER_MAX_W, naturalW > 0 ? naturalW : EXPORT_W);
-    const h = Math.max(
-      1,
-      Math.round(
-        naturalW > 0 && naturalH > 0 ? (w * naturalH) / naturalW : w / (ratio || DEFAULT_RATIO),
-      ),
-    );
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('this browser refused a drawing canvas');
-
-    // A FLAT IS INK ON PAPER. Flattening onto transparency gives a file that reads as an empty
-    // rectangle wherever it is shown on a dark ground, so the ground is painted first — the same
-    // white the editor stages the drawing on.
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, w, h);
-    if (image) ctx.drawImage(image, 0, 0, w, h);
-
-    ctx.strokeStyle = '#000000';
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    for (const stroke of strokes) {
-      const g = strokeGeometry(stroke, w, h);
-      if (!g.d) continue;
-      const path = new Path2D(g.d);
-      ctx.lineWidth = g.strokeWidth;
-      ctx.setLineDash(g.dash ? g.dash.split(' ').map(Number) : []);
-      for (const dy of g.offsets) {
-        ctx.save();
-        ctx.translate(0, dy);
-        ctx.stroke(path);
-        ctx.restore();
-      }
-    }
-    ctx.setLineDash([]);
-    return canvas.toDataURL('image/png');
-  }, [baseSrc, ratio, strokes]);
+  const rasterise = useCallback(
+    () => rasteriseStrokesOverBase({ baseSrc, strokes, ratio }),
+    [baseSrc, ratio, strokes],
+  );
 
   const saveAsPicture = async () => {
     if (frozen || tooLarge || !strokes.length || busy) return;
@@ -497,7 +446,7 @@ export function VectorModal({
   };
 
   const download = () => {
-    const w = EXPORT_W;
+    const w = RASTER_FALLBACK_W;
     const h = Math.round(w / (ratio || DEFAULT_RATIO));
     const svg = layerSvg(strokes, { width: w, height: h, baseHref: baseSrc || undefined });
     const href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));

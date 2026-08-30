@@ -9,6 +9,7 @@ import { useCardFit, useColourDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow } from './generate-row';
 import { benchSides, recipeIsStated, renderGate, type Gate } from './model';
+import { OutputsSection } from './outputs';
 import { Palette } from './palette';
 import { RenderInputStrip } from './render-input-strip';
 import { useStartDesignRun } from './use-design-run';
@@ -127,6 +128,12 @@ export function RenderStudio({
           onInspect={() => setInspecting(true)}
         />
       </Section>
+
+      {/* The renders this page of the band holds — the outputs, where the mark «chosen» lives and
+          is SET. The owner's W-12 names 3D, but ARTIFACTS narrows its RENDERS segment to the
+          chosen ones too (W-14) — a mark that filters a list must be settable for that list, so
+          the same section stands on both generative screens. See `./outputs`. */}
+      <OutputsSection band={band} techCardId={techCardId} kind='render' disabled={disabled} />
 
       <WhatModelGetsRenderModal
         open={inspecting}

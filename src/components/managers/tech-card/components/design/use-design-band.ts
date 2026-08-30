@@ -201,6 +201,20 @@ export function useDesignWrites(techCardId?: number) {
     onError,
   });
 
+  /**
+   * THE MARK «CHOSEN» ON A PICTURE — W-12. `selected: false` takes the mark off; the server keeps
+   * the two picture flags INDEPENDENT and so does this seam: choosing is not un-hiding, hiding is
+   * not un-choosing, and nothing is exclusive — the owner speaks in the plural, so many pictures
+   * of a kind may carry the mark at once. No optimistic write, same as `hidePicture`: the badge is
+   * drawn from the refetched band, so the screen can never show a mark the server refused.
+   */
+  const setPictureSelected = useMutation({
+    mutationFn: (input: { pictureId: number; selected: boolean }) =>
+      adminService.SetDesignPictureSelected(input),
+    onSuccess: invalidate,
+    onError,
+  });
+
   const splitPicture = useMutation({
     mutationFn: (input: {
       pictureId: number;
@@ -252,6 +266,7 @@ export function useDesignWrites(techCardId?: number) {
       setBenchSlot,
       deleteDetailSlot,
       hidePicture,
+      setPictureSelected,
       splitPicture,
       setReferenceRole,
       recordIssue,
@@ -262,6 +277,7 @@ export function useDesignWrites(techCardId?: number) {
       setBenchSlot,
       deleteDetailSlot,
       hidePicture,
+      setPictureSelected,
       splitPicture,
       setReferenceRole,
       recordIssue,

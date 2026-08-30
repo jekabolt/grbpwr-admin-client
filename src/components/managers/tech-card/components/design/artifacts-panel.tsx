@@ -47,10 +47,15 @@ import {
   type MintOrigin,
 } from './mint-dialog';
 import { provenanceLabel, readProvenance } from './provenance';
-import { outputsOfKind, pictureIsSelected, serverStatesSelected } from './render';
+import {
+  SELECT_MARK_NOT_STATED,
+  outputsOfKind,
+  pictureIsSelected,
+  serverStatesSelected,
+} from './render';
 import { buildSheetSvg, downloadSvg, type SheetSvgPlate } from './sheet-svg';
 import { PrintSheetButton, SheetJournal, versionShortHash } from './sheet-journal';
-import { useDesignSheetVersion } from './use-design-band';
+import { useDesignSheetVersion, useDesignWrites } from './use-design-band';
 
 /**
  * ARTIFACTS — where the drawing is a document, and the document becomes paper.
@@ -104,6 +109,13 @@ export type DocumentPlate = {
   origin: 'card' | 'bench' | 'run';
   /** The server states this picture is the one the studio settled on — `DesignPicture.selected`. */
   chosen?: boolean;
+  /**
+   * The `DesignPicture` behind this plate, WHEN THE LOADED PAGE STATES ONE. The mark «chosen» is a
+   * fact about the picture, not the media, so the verb that writes it (`SetDesignPictureSelected`)
+   * needs this id — a plate whose run is off the loaded page honestly has none, and its select
+   * door is drawn inert with that reason rather than guessing.
+   */
+  pictureId?: number;
   /** Only for a bench plate: the address of its slot, for the door. */
   door?: string;
   note?: string;
@@ -164,13 +176,16 @@ export function runKindByMediaId(band: GetDesignBandResponse): Map<number, strin
  * mark W-12 asks for on a turntable. One notion, two requirements; a second one would drift.
  *
  * THE LIST NARROWS TO THE CHOSEN ONES ONLY WHEN A CHOICE HAS BEEN MADE, and that condition is the
- * whole of the honesty here. `DesignPicture.selected` is on the contract and is read — but nothing
- * can WRITE it yet (`render/model.ts` → `SELECT_VERB_MISSING`), so on most cards nothing is marked.
- * Filtering unconditionally would leave both segments permanently and inexplicably empty on a card
- * full of renders. So: if anything of this kind is marked, the segment IS the marked ones; if
- * nothing is, it lists every unhidden picture of that kind on the loaded page — and the panel says
- * WHICH of the two lists is on screen, rather than letting «renders · 3» read as «three chosen
- * renders» when nothing has been chosen at all.
+ * whole of the honesty here — PER KIND: a mark on a turntable narrows the 3D segment and leaves
+ * the renders segment whole, because «which turntable» and «which render» are separate verdicts.
+ * The mark is written by `SetDesignPictureSelected`, through the band's one write seam
+ * (`useDesignWrites().setPictureSelected`) — on the studio's outputs strips and on the plates of
+ * this very panel — so on most cards nothing is marked yet, and filtering unconditionally would
+ * leave both segments permanently and inexplicably empty on a card full of renders. So: if
+ * anything of this kind is marked, the segment IS the marked ones; if nothing is, it lists every
+ * unhidden picture of that kind on the loaded page — and the panel says WHICH of the two lists is
+ * on screen, rather than letting «renders · 3» read as «three chosen renders» when nothing has
+ * been chosen at all.
  */
 export function bandPlates(
   band: GetDesignBandResponse,
@@ -196,6 +211,7 @@ export function bandPlates(
       media: picture.media,
       origin: 'run',
       chosen: pictureIsSelected(picture),
+      pictureId: picture.id ?? 0,
       note: `run ${run.id ?? '—'}${run.rrev ? ` · r${run.rrev}` : ''}`,
     });
   }
@@ -329,6 +345,10 @@ export function ArtifactsPanel({
   const { showMessage } = useSnackBarStore();
   // The SAME cache entry the page reads and re-primes after every save. Not a second fetch.
   const { data: card } = useTechCard(techCardId);
+  // The band's ONE write seam — the same `setPictureSelected` the studio's outputs strips call.
+  // A second way to write the mark is exactly what must not exist; a second DOOR to the one way is
+  // what W-14 asks for: the choice is consumed here, so it can be amended here.
+  const { setPictureSelected } = useDesignWrites(techCardId);
 
   const callouts = (useWatch({ control: form.control, name: 'callouts' }) ?? []) as CalloutLike[];
   const technicalMedia = (useWatch({ control: form.control, name: 'technicalMedia' }) ?? []) as {
@@ -373,22 +393,35 @@ export function ArtifactsPanel({
    * came from. Without this the mark would vanish at the exact moment it starts to matter: taking a
    * chosen turntable onto the card turns it into a `card` plate, built by `documentPlates`, which
    * knows nothing about runs — and the badge would silently disappear as a REWARD for accepting it.
+   *
+   * `idByMedia` rides along for the same reason in the other direction: the verb that WRITES the
+   * mark addresses the picture, not the media, so a card plate needs its picture looked back up
+   * before its select door can act. A media the loaded page states no picture for stays out of the
+   * map, and its door is drawn inert with that reason.
    */
   const chosenMedia = useMemo(() => {
     const ids = new Set<number>();
+    const idByMedia = new Map<number, number>();
     for (const run of band.runs ?? []) {
       for (const picture of run.pictures ?? []) {
         const mediaId = picture.media?.id ?? 0;
-        if (mediaId > 0 && pictureIsSelected(picture)) ids.add(mediaId);
+        if (mediaId <= 0) continue;
+        if ((picture.id ?? 0) > 0 && !idByMedia.has(mediaId)) idByMedia.set(mediaId, picture.id!);
+        if (pictureIsSelected(picture)) ids.add(mediaId);
       }
     }
-    return ids;
+    return { ids, idByMedia };
   }, [band.runs]);
 
   const segments = useMemo(() => {
     const of = (p: DocumentPlate) => artifactKindOf(p.mediaId, runKinds, cardKindOf.get(p.mediaId));
     const mark = (list: DocumentPlate[]) =>
-      list.map((p) => (p.chosen || !chosenMedia.has(p.mediaId) ? p : { ...p, chosen: true }));
+      list.map((p) => {
+        const chosen = p.chosen || chosenMedia.ids.has(p.mediaId);
+        const pictureId = p.pictureId ?? chosenMedia.idByMedia.get(p.mediaId);
+        if (chosen === !!p.chosen && pictureId === p.pictureId) return p;
+        return { ...p, chosen, pictureId };
+      });
     const flat = plates.filter((p) => of(p) === 'flat');
     const onCard = new Set(plates.map((p) => p.mediaId));
     const renderBand = bandPlates(band, 'render', new Set(onCard));
@@ -742,7 +775,27 @@ export function ArtifactsPanel({
               onDetach={inspecting === 0 && !disabled ? askDetach : undefined}
               detachInert={detachInert}
               onTakeIn={inspecting === 0 && !disabled ? takeIntoCard : undefined}
-              offSheet={kind !== 'flat'}
+              /* THE MARK'S DOOR RIDES ONLY THE LIVE, NON-FLAT LISTS. A flat is chosen by standing
+                 in a bench slot, not by the mark, so a select door there would be a second registry
+                 of one election; a frozen version is a record, and records are not edited. */
+              onToggleChosen={
+                inspecting === 0 && kind !== 'flat' && !disabled && segment.serverStates
+                  ? (plate) =>
+                      setPictureSelected.mutate({
+                        pictureId: plate.pictureId ?? 0,
+                        selected: !plate.chosen,
+                      })
+                  : undefined
+              }
+              chosenInert={
+                inspecting > 0 || kind === 'flat'
+                  ? undefined
+                  : disabled
+                    ? 'the card is read-only for you — the mark is an edit of the card'
+                    : SELECT_MARK_NOT_STATED
+              }
+              chosenPending={setPictureSelected.isPending}
+              offSheet={inspecting === 0 && kind !== 'flat'}
             />
           )}
 
@@ -1095,8 +1148,18 @@ function SheetMembershipWarning({
       {hasPictures && !filteredToSelected && (
         <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
           {serverStates
-            ? 'Nothing of this kind is marked as chosen on this card, so the segment lists every one on the loaded page. The mark is read here and set elsewhere — no verb writes it yet.'
+            ? 'Nothing of this kind is marked as chosen on this card, so the segment lists every one on the loaded page. Press select on a picture — here, or on the studio’s own strip of this kind — and the segment narrows to the chosen ones.'
             : 'This server does not state the mark at all — a binary older than the field — so the segment lists every picture of this kind on the loaded page.'}
+        </Text>
+      )}
+      {/* THE WAY BACK IS SAID WHERE THE NARROWING HAPPENS. A narrowed list with no word about how
+          it widens again reads as «the other pictures are gone» — and the pictures it no longer
+          shows are exactly where a select door cannot be, so the sentence is the only door. */}
+      {filteredToSelected && (
+        <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
+          Only the chosen ones of this kind are listed. un-select takes the mark off a picture;
+          with none left chosen, the segment lists everything of this kind again. Choosing among
+          ALL of them — chosen or not — is done on the studio’s own strip of this kind.
         </Text>
       )}
     </CalloutBox>
@@ -1132,6 +1195,9 @@ function PlateGrid({
   onDetach,
   detachInert,
   onTakeIn,
+  onToggleChosen,
+  chosenInert,
+  chosenPending,
   offSheet,
 }: {
   plates: DocumentPlate[];
@@ -1147,6 +1213,16 @@ function PlateGrid({
   detachInert: string;
   /** Put a run's output into the card's own media, so a callout can address it at all. */
   onTakeIn?: (plate: DocumentPlate) => void;
+  /**
+   * Flip the mark «chosen» on the picture behind a plate (W-12), or `undefined` — and then
+   * `chosenInert` says why not. BOTH absent means the door is not part of this list at all: flats
+   * are chosen by the bench slot, and a frozen version is a record — on those lists absence is the
+   * truth, not an omission.
+   */
+  onToggleChosen?: (plate: DocumentPlate) => void;
+  chosenInert?: string;
+  /** A write of the mark is in flight — the doors wait for the band to answer. */
+  chosenPending?: boolean;
   /** This segment is not what the sheet is made of — every plate says so on its own face. */
   offSheet?: boolean;
 }) {
@@ -1294,6 +1370,31 @@ function PlateGrid({
                   detach
                 </Button>
               )}
+              {(onToggleChosen || chosenInert) &&
+                (onToggleChosen && (plate.pictureId ?? 0) > 0 ? (
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    disabled={chosenPending}
+                    onClick={() => onToggleChosen(plate)}
+                    title={
+                      plate.chosen
+                        ? 'take the mark off — with none of this kind chosen, the segment lists everything again'
+                        : 'mark as chosen — the segment narrows to the chosen ones of this kind'
+                    }
+                  >
+                    {plate.chosen ? 'un-select' : 'select'}
+                  </Button>
+                ) : (
+                  <InertDoor
+                    label={plate.chosen ? 'un-select' : 'select'}
+                    reason={
+                      onToggleChosen
+                        ? 'the picture behind this plate is not on the loaded page of the band — the mark is set on the picture, and this page does not carry it'
+                        : chosenInert!
+                    }
+                  />
+                ))}
             </div>
           </div>
         );

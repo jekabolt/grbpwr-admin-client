@@ -145,17 +145,20 @@ export function fixCandidate(
 }
 
 /**
- * WHAT A RUN ACTUALLY GETS, AND WHAT IT DOES NOT — the honest half of «pass them in already marked
- * up» (W-10).
+ * A LIVE EDIT LAYER SITS OVER THIS PLATE — and what that means now has two halves (W-10).
  *
- * A callout drawn with `edit ▸` is a row of STROKE DATA in a `design_edit_layer`, not pixels in the
- * picture. A run's inputs are assembled server-side from the slots' PICTURES, so a layer that has
- * never been flattened is invisible to the model however loudly the screen shows it. The layer
- * becomes visible to a run only after `edit ▸ → save as picture` (`FlattenDesignEditLayer`), which
- * rasterises it into a NEW picture that can then stand in the slot.
+ * A callout drawn with `edit ▸` is a row of STROKE DATA in a `design_edit_layer`, not pixels in
+ * the picture. For everything that is NOT a fix — the fabric render, the printed sheet, a minted
+ * version — those consumers read the PICTURE, so an unflattened layer stays invisible to them
+ * until `edit ▸ → save as picture` (`FlattenDesignEditLayer`) rasterises it into a new plate.
  *
- * Returns the name of the trouble or null. `liveLayerRev` answers for the media the plate IS, so a
- * plate that was itself produced by flattening carries no layer and says nothing.
+ * A FIX IS THE EXCEPTION, BY CONSTRUCTION. At GENERATE the client rasterises «plate + layer» for
+ * every marked slot in the selection and sends the result in `params.extra_input_media_ids`, so
+ * the model sees the marks without the plate ever changing — `fix-markup.tsx` holds the mechanism
+ * and this reader is what it counts by.
+ *
+ * `liveLayerRev` answers for the media the plate IS, so a plate that was itself produced by
+ * flattening carries no layer and says nothing.
  */
 export function unflattenedMarks(
   band: GetDesignBandResponse,
@@ -239,6 +242,10 @@ export function FixBars({
   const candidate = useMemo(() => fixCandidate(band, viewKey, slotId), [band, viewKey, slotId]);
   const elapsed = useElapsed(running?.startedAt ?? running?.createdAt);
 
+  // A live layer over the plate means the ARMED fix will carry «plate + marks» for this slot —
+  // said here, on the slot, because the truth line below it speaks only for a plain run (W-10).
+  const marksRide = unflattenedMarks(band, current);
+
   const armed =
     !!target &&
     (viewKey
@@ -260,6 +267,7 @@ export function FixBars({
               {target && target.labels.length > 1
                 ? `in this run with ${target.labels.length - 1} more — press GENERATE in the form`
                 : 'the generation form is asking for this one — press GENERATE there'}
+              {marksRide ? ' · its edit ▸ marks ride along, pressed into a copy of the plate' : ''}
             </Text>
             <Button variant='secondary' size='xs' onClick={cancel} disabled={disabled}>
               cancel
@@ -467,12 +475,13 @@ export function FixSelectionBar({
       </Text>
 
       {marked.length > 0 && (
-        // THE ONE THING THIS SCREEN MUST NOT LET SOMEBODY ASSUME. «Already marked up» is what W-10
-        // asks for, and the marks live in an edit layer, not in the picture — see `unflattenedMarks`.
-        <Text size='nano' component='p' className='mt-1 text-warning'>
+        // «ALREADY MARKED UP» IS NOW TRUE FOR A FIX, and the bar says so instead of demanding a
+        // flatten it no longer needs: at GENERATE each marked plate is rasterised «plate + marks»
+        // and travels beside the clean plate — see `unflattenedMarks` and `fix-markup.tsx`.
+        <Text size='nano' variant='label' component='p' className='mt-1'>
           {marked.map((t) => t.label).join(', ')} carr{marked.length === 1 ? 'ies' : 'y'} edit ▸
-          marks on a layer OVER the plate, and a run reads the plate. Flatten them first (edit ▸ →
-          save as picture) or the model never sees those lines.
+          marks — a fix takes them along: each marked slot adds one extra picture, plate + marks
+          pressed in, taken fresh at GENERATE. The plate itself is never changed.
         </Text>
       )}
     </CalloutBox>

@@ -174,12 +174,15 @@ export function WhatModelGetsModal({
       footerHint='nothing here is editable — every fact is edited at its own field'
     >
       <div className='space-y-stack'>
+        {/* This box used to say «nothing is sent from this admin — there is no generator behind
+            the button». That was true for exactly as long as the button answered Unimplemented.
+            It now starts a paid run, and a panel that opens beside a price is the last place that
+            may describe the previous world. */}
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
-            <b>nothing is sent from this admin.</b> Flats, renders and 3D are not made on this card
-            in this wave — there is no generator behind the button and the strip on STUDIO says so
-            at each of them. This is the INVENTORY: what a prompt would carry if one were assembled,
-            and it is exactly what a studio outside needs to be handed.
+            <b>this is what the model is given.</b> Pressing GENERATE sends exactly the pictures and
+            words listed below — nothing on the moodboard travels, and neither does anything absent
+            from this list. The same inventory is what a studio outside would need to be handed.
           </Text>
         </CalloutBox>
 

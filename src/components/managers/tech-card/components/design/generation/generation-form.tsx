@@ -1,6 +1,6 @@
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -14,6 +14,7 @@ import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
 import { InertDoor, readBench } from '../bench-slot';
+import { markedPlatesOf, useMarkedPlateUploads } from '../fix-markup';
 import { VectorModal, WhatModelGetsModal } from '../modals';
 import { serverSpeaksDesign } from '../capability';
 import { DESIGN_VIEW_KEYS, SHEET_MIN_VIEWS, viewLabel } from '../views';
@@ -127,6 +128,21 @@ export function GenerationForm({
   useAnnounceDesignQuestion(techCardId, ticked, layout);
   const fixing = !!fix;
 
+  /**
+   * THE MARKED PLATES OF THE ARMED FIX (W-10). Their «plate + marks» rasters are prepared at
+   * launch and travel in `extra_input_media_ids` — `fix-markup.tsx` holds the mechanism, this form
+   * only owes the human the count before the click and the busy state during it. All of it sits
+   * ABOVE the `if (!isOpen)` return: a hook below it changes the hook count between renders and
+   * React #310 takes the whole tree down.
+   */
+  const prepareMarks = useMarkedPlateUploads(techCardId);
+  const marked = useMemo(() => (fix ? markedPlatesOf(band, fix) : []), [band, fix]);
+  const [prepping, setPrepping] = useState(false);
+  const [marksRefusal, setMarksRefusal] = useState<string | null>(null);
+  // A state flag alone lets a double click in one tick through — the re-render that disables the
+  // button has not happened yet. The ref answers synchronously.
+  const preppingRef = useRef(false);
+
   const writesOff = !!disabled || !speaks;
   const noViews = !fixing && ticked.length === 0;
   const capReached = !!budget?.exhausted;
@@ -166,8 +182,40 @@ export function GenerationForm({
    * shared with the render and 3D studios, because the money and the idempotency are one mechanism
    * whichever of the three screens pressed the button.
    */
-  const submit = () => {
-    if (gateReason) return;
+  const submit = async () => {
+    if (gateReason || preppingRef.current || startRun.isPending) return;
+
+    /**
+     * THE MARKS GO FIRST, OR THE RUN DOES NOT GO AT ALL. For a fix over marked plates the screen
+     * has promised «already marked up»; a launch that silently proceeded with clean plates after a
+     * failed rasterisation would spend the money on the exact lie W-10 exists to remove. So a
+     * refusal here stops the launch with words, and nothing is filed or charged.
+     *
+     * TAKEN FRESH AT LAUNCH — the current layer revision, not a preview's snapshot. An unchanged
+     * layer re-uses its uploaded raster (same media ids, same params fingerprint, same
+     * `client_request_id` on retry); a layer that moved is a changed ask and honestly mints a new
+     * intent.
+     */
+    let extraInputMediaIds: number[] = [];
+    if (fixing && fix) {
+      preppingRef.current = true;
+      setPrepping(true);
+      setMarksRefusal(null);
+      try {
+        extraInputMediaIds = await prepareMarks(band, fix);
+      } catch (error) {
+        setMarksRefusal(
+          error instanceof Error && error.message
+            ? error.message
+            : 'the marked plates could not be prepared',
+        );
+        return;
+      } finally {
+        preppingRef.current = false;
+        setPrepping(false);
+      }
+    }
+
     const params: common_DesignRunParams = {
       // A fix asks for the SIDES ALREADY ON THE BENCH; the matrix took no part in it, and the
       // snapshot must say so rather than freezing ticks the run did not use.
@@ -192,7 +240,9 @@ export function GenerationForm({
       // true here, and refusing it by default would leave the guess permanently unasked-for while
       // the modal below is written to consume it.
       autoSplit: !fixing && layout === 'one' && ticked.length >= 2,
-      extraInputMediaIds: [],
+      // THE MARKED PLATES OF A FIX, «plate + marks» rasterised at this very launch — empty for an
+      // ordinary run and for a fix whose slots carry no layer. See `fix-markup.tsx`.
+      extraInputMediaIds,
     };
     startRun.start({ kind: 'flat', ask: ask.trim(), params }, () => setAsk(''));
   };
@@ -408,12 +458,24 @@ export function GenerationForm({
         {gateReason ? (
           <InertDoor label='GENERATE' reason={gateReason} />
         ) : (
-          <Button variant='main' size='sm' onClick={submit} disabled={startRun.isPending}>
-            {startRun.isPending ? 'starting…' : 'GENERATE'}
+          <Button
+            variant='main'
+            size='sm'
+            onClick={submit}
+            disabled={startRun.isPending || prepping}
+          >
+            {prepping ? 'pressing the marks in…' : startRun.isPending ? 'starting…' : 'GENERATE'}
           </Button>
         )}
         <Text size='micro' variant='label' component='span'>
           {outputsLine}
+          {/* THE COUNT STANDS BESIDE THE BUTTON THAT SPENDS THE MONEY. The chip above names the
+              marked slots and opens the preview; this is the last word before the click. */}
+          {fixing && marked.length > 0
+            ? ` · ${marked.length} marked plate${marked.length === 1 ? '' : 's'} ride${
+                marked.length === 1 ? 's' : ''
+              } along with the marks pressed in`
+            : ''}
         </Text>
         {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — `wmgModal` прототипа. Единственное место, где человек видит
             ПОЛНЫЙ состав запроса до того, как заплатит за прогон: доска, роли референсов, тексты
@@ -427,6 +489,13 @@ export function GenerationForm({
           </Text>
         )}
       </div>
+
+      {marksRefusal && (
+        <CalloutBox tone='error'>
+          <b>the run was not started.</b> {marksRefusal} Nothing was filed and nothing was charged —
+          press GENERATE to try again, or flatten the marks from edit ▸ and fix without them.
+        </CalloutBox>
+      )}
 
       {startRun.isError && (
         <CalloutBox tone='error'>

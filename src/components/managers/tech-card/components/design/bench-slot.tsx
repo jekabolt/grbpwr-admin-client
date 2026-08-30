@@ -333,11 +333,12 @@ export function BenchSlot(props: BenchSlotProps) {
    *
    *   the plate IS a flattening (`layerRev > 0`) and the layer has moved past it → it has gone
    *     STALE: the picture is an older rasterisation of a drawing that has since changed.
-   *   the plate was never flattened (`layerRev === 0`) → nothing is stale; the marks have simply
-   *     never been made into pixels, and every consumer downstream — a fix run, the fabric render,
-   *     the printed sheet — reads the PICTURE. This is the honest half of «pass it in already
-   *     marked up» (W-10): the marks are data, not ink, until `edit ▸ → save as picture` runs them
-   *     through the canvas.
+   *   the plate was never flattened (`layerRev === 0`) → nothing is stale; the marks are data, not
+   *     ink, and consumers split in two (W-10). A PLAIN run, the fabric render, the printed sheet
+   *     and a minted version read the PICTURE — for them the marks do not exist until `edit ▸ →
+   *     save as picture` runs them through the canvas. A FIX of this slot is the exception: at
+   *     GENERATE the client rasterises «plate + layer» and sends the copy beside the plate
+   *     (`fix-markup.tsx`), so the sentence below must claim exactly that much and no more.
    *
    * Only `layer_advanced` can fire on a LIVE plate at all: `content_hash` lives on a version's
    * frozen plate, never on a live picture (which IS the current file, so a second copy could only
@@ -353,7 +354,7 @@ export function BenchSlot(props: BenchSlotProps) {
 
   const unflattened =
     layerOverPlate && provenance.layerRev === 0
-      ? 'edit ▸ marks sit on a layer over this plate, not in it — a run reads the plate'
+      ? 'edit ▸ marks sit on a layer over this plate — a plain run reads the plate alone; a fix of this slot sends a marked copy too'
       : null;
 
   const mixedNote = provenance ? mixedInputNote(provenance) : null;

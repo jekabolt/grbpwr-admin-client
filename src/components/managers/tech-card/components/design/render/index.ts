@@ -15,6 +15,7 @@
  * fit models (`ListModels`, through the models manager's own `useAllModels`).
  */
 export { ColourHistory } from './colour-history';
+export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
 export { RenderStudio } from './render-studio';
@@ -27,7 +28,7 @@ export type { ColourDraft, ThreedDraft, ThreedDraftState } from './drafts';
 export { useStartDesignRun } from './use-design-run';
 export type { StartRunInput, StartRunState } from './use-design-run';
 export {
-  SELECT_VERB_MISSING,
+  SELECT_MARK_NOT_STATED,
   benchSides,
   budgetLine,
   colourChips,

@@ -5,6 +5,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 
 import { readBench } from '../bench-slot';
+import { MarkedPlatesModal, markedPlatesOf } from '../fix-markup';
 import { viewLabel } from '../views';
 
 /**
@@ -70,10 +71,17 @@ export function FixContextProvider({ children }: { children: React.ReactNode }) 
 
   // Esc cancels, and the bar promises it in words — so it has to be true even when focus is nowhere
   // in particular. Same document-level listener, same reason, as pick mode's.
+  //
+  // ESC BELONGS TO THE TOPMOST LAYER. A dialog can stand open OVER an armed fix — the marked-plates
+  // preview, a compare, the vector editor — and the press that closes it must not ALSO throw away
+  // the selection underneath: this listener runs in the capture phase, i.e. before the dialog's
+  // own handling, and without the guard one Esc did both at once (measured on the probe stand —
+  // closing the preview silently degraded the armed fix into an ordinary front+back run).
   useEffect(() => {
     if (!target) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (document.querySelector('[role="dialog"][data-state="open"]')) return;
         e.stopPropagation();
         setTarget(null);
       }
@@ -104,6 +112,7 @@ export function useFixContext(): FixContextValue {
  */
 export function FixContext({
   band,
+  techCardId,
   disabled,
 }: {
   band: GetDesignBandResponse;
@@ -111,12 +120,18 @@ export function FixContext({
   disabled?: boolean;
 }) {
   const { target, cancel } = useFixContext();
+  // ABOVE the early return, or the hook count changes with the armed state and React #310 takes the
+  // whole tree down — this screen has already paid an evening for exactly that.
+  const [marksOpen, setMarksOpen] = useState(false);
   if (!target) return null;
 
   const bench = readBench(band);
   const others = bench.sides
     .filter((s) => !target.viewKeys.includes(s.view) && (s.slot?.pictureId ?? 0) > 0)
     .map((s) => viewLabel(s.view));
+
+  // The slots of THIS selection whose plates carry a live edit layer — those marks travel (W-10).
+  const marked = markedPlatesOf(band, target);
 
   return (
     <CalloutBox tone='note' className='bg-bgColor'>
@@ -137,6 +152,32 @@ export function FixContext({
           </Button>
         </span>
       </div>
+
+      {/* THE MARKED PLATES ARE NAMED WHERE THE MONEY IS ABOUT TO BE SPENT, and they can be SEEN —
+          a count alone asks the human to pay for files nobody showed them. The rasters travel in
+          `extra_input_media_ids`, taken fresh at launch; `fix-markup.tsx` holds the whole story. */}
+      {marked.length > 0 && (
+        <div className='mt-1 flex flex-wrap items-baseline gap-2'>
+          <Text size='nano' variant='label' component='span' className='min-w-0'>
+            {marked.map((p) => p.label).join(', ')} go{marked.length === 1 ? 'es' : ''} in already
+            marked up — plate + edit ▸ marks as one extra picture each, pressed in at GENERATE.
+          </Text>
+          {!!techCardId && (
+            <>
+              <Button variant='secondary' size='xs' onClick={() => setMarksOpen(true)}>
+                see what travels ▸
+              </Button>
+              <MarkedPlatesModal
+                open={marksOpen}
+                onOpenChange={setMarksOpen}
+                techCardId={techCardId}
+                band={band}
+                sel={target}
+              />
+            </>
+          )}
+        </div>
+      )}
     </CalloutBox>
   );
 }
