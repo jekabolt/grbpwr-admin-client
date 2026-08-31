@@ -130,10 +130,24 @@ export type DocumentPlate = {
  */
 export type ArtifactKind = 'flat' | 'render' | 'threed';
 
+/**
+ * ПОДСКАЗКИ СЕГМЕНТОВ — ЭТО ТОЖЕ ЗАЯВЛЕНИЕ О БУМАГЕ, и здесь стояло то же неверное «not part of
+ * the sheet», что в коробке над рядом и на пилюле плиты. Лист — это медиа карточки, и тех-пак
+ * печатает их все; рендер и кадр турнтейбла отличаются от флэта не судьбой, а тем, ЧТО они
+ * показывают. Подсказка говорит про это, а не про несуществующий фильтр.
+ */
 export const ARTIFACT_KINDS: { value: ArtifactKind; label: string; hint: string }[] = [
-  { value: 'flat', label: 'flats', hint: 'the drawings — and the only thing the sheet is made of' },
-  { value: 'render', label: 'renders', hint: 'coloured over the flats; not part of the sheet' },
-  { value: 'threed', label: '3D', hint: 'turntable frames; not part of the sheet' },
+  { value: 'flat', label: 'flats', hint: 'the drawings the floor sews from' },
+  {
+    value: 'render',
+    label: 'renders',
+    hint: 'coloured over the flats; prints too, once it is in the card’s media',
+  },
+  {
+    value: 'threed',
+    label: '3D',
+    hint: 'turntable frames; print too, once they are in the card’s media',
+  },
 ];
 
 /**
@@ -889,10 +903,14 @@ export function ArtifactsPanel({
     form.setValue('technicalMedia', [...media, { mediaId: plate.mediaId, kind, caption: '' }], {
       shouldDirty: true,
     });
+    // ЧТО ГОВОРИТСЯ ЧЕЛОВЕКУ. Здесь стояло «it is not on the technical sheet, and callouts drawn
+    // on it are not either» — неправда: печать берёт `technicalMedia` целиком, и внесённая плита
+    // уходит на страницу технического эскиза вместе со своими выносками. Сообщение называет
+    // приобретённое СЛЕДСТВИЕ, потому что именно оно тут решается, а не «положил в список».
     showMessage(
       plate.origin === 'bench'
         ? 'taken into the card’s media as its bench view — you can draw on it now'
-        : 'taken into the card’s media — it is not on the technical sheet, and callouts drawn on it are not either',
+        : 'taken into the card’s media: it prints on the tech pack’s technical sketch page, with any callout you draw on it',
       'success',
     );
   }
@@ -911,15 +929,38 @@ export function ArtifactsPanel({
    *
    * ФЛЭТ — `DETAIL`, и это не догадка, а признание: библиотека не знает, перед это или спинка.
    * РЕНДЕР И 3D — оба `RENDER`, потому что в словаре карточки НЕТ члена для кадра турнтейбла, а
-   * `RENDER` по контракту и значит «принятая картинка прогона, уходящая с карточкой». Сегмент, в
-   * котором она потом покажется, читается по прогону-родителю, а не по этой метке, поэтому
-   * загруженный руками 3D-кадр не выдаёт себя за рендер нигде, кроме строки словаря.
+   * `RENDER` по контракту и значит «принятая картинка прогона, уходящая с карточкой».
+   *
+   * ═══ И ИМЕННО ЗДЕСЬ ТЕРЯЛСЯ РУЧНОЙ 3D-КАДР ═════════════════════════════════════════════════
+   *
+   * Прежний довод говорил: «сегмент читается по прогону-родителю, а не по этой метке». У картинки,
+   * загруженной РУКАМИ, прогона-родителя нет вовсе — её никто не генерировал. Значит
+   * `artifactKindOf` доходит до фолбэка по карточке, читает `RENDER` и кладёт кадр в сегмент
+   * `renders`. Человек стоял в 3D, нажал «+ add a 3D frame», выбрал файл — и плита не появлялась
+   * НИГДЕ на экране: ряд 3D оставался пустым и печатал «nothing of this kind». Молча.
+   *
+   * ЧИНИТСЯ НЕ ПОДПОРКОЙ, А ПРИЗНАНИЕМ. Записать «это турнтейбл» некуда: в словаре медиа карточки
+   * такого члена нет, и сессионная памятка в панели протухла бы первым же сохранением, унеся кадр
+   * в другой сегмент уже без всякого повода. Поэтому дверь перестаёт обещать несуществующее:
+   * плита кладётся туда, где действительно окажется, экран ТУДА ЖЕ и переключается, и человеку
+   * говорят, куда и почему. Слот в ряду 3D называет цену ещё до нажатия (`addPlateNote`).
+   *
+   * ПОВТОРНАЯ ЗАГРУЗКА ТОГО ЖЕ ФАЙЛА ТОЖЕ ПЕРЕСТАЛА БЫТЬ МОЛЧАНИЕМ: `return` без единого слова
+   * читался как сломанная кнопка, хотя всё было правильно.
    */
   function addPlateFromLibrary(items: common_MediaFull[]) {
     const media = form.getValues('technicalMedia') ?? [];
     const have = new Set(media.map((m) => m.mediaId ?? 0));
     const fresh = items.filter((it) => it.id != null && !have.has(it.id));
-    if (!fresh.length) return;
+    if (!fresh.length) {
+      showMessage(
+        items.length === 1
+          ? 'that picture is already on the sheet — nothing was added'
+          : 'every one of those pictures is already on the sheet — nothing was added',
+        'error',
+      );
+      return;
+    }
     const uploadedKind: common_TechCardMediaKind =
       kind === 'flat' ? 'TECH_CARD_MEDIA_KIND_DETAIL' : 'TECH_CARD_MEDIA_KIND_RENDER';
     setPicked((prev) => [...prev, ...fresh]);
@@ -935,6 +976,16 @@ export function ArtifactsPanel({
       ],
       { shouldDirty: true },
     );
+    // ГДЕ ПЛИТА ОКАЖЕТСЯ — читается ТЕМ ЖЕ правилом, каким читается любая другая плита экрана.
+    // Второе, «для загруженных», правило разошлось бы с первым на первой же правке.
+    const lands = artifactKindOf(fresh[0].id as number, runKinds, uploadedKind);
+    if (lands !== kind) {
+      setKind(lands);
+      showMessage(
+        `the card’s media has no kind for a turntable frame, so this one is filed as a render — it is listed under ${ARTIFACT_KINDS.find((k) => k.value === lands)?.label ?? lands}, and it prints like any other plate`,
+        'success',
+      );
+    }
   }
 
   /* ═══ `download SVG` И «replace the sheet with a file ▸» СНЯТЫ (V-21) ══════════════════════
@@ -1058,67 +1109,87 @@ export function ArtifactsPanel({
             </GroupLabel>
           )}
 
-          {onScreen.length === 0 ? (
-            kind === 'flat' ? (
-              <EmptyDocument
-                bench={bench}
-                disabled={disabled}
-                onAddPlate={!disabled ? addPlateFromLibrary : undefined}
-              />
-            ) : (
-              <Text size='micro' variant='label' component='p'>
-                nothing of this kind on the loaded page of the band.{' '}
-                {kind === 'render'
-                  ? 'A fabric render is made on STUDIO, from the flats standing in the bench slots.'
-                  : 'A turntable is made on STUDIO, and it turns the renders — so the renders come first.'}
-              </Text>
-            )
-          ) : (
-            <PlateGrid
-              plates={onScreen}
-              layout={layout}
-              calloutsOf={calloutsOfPlate}
-              selected={selected}
-              canPlaceOn={canPlaceOn}
-              drawInert={drawInert}
-              tool={tool}
-              onToolDone={() => setTool(null)}
-              onPlacedCountChange={setPlaced}
-              onAddCallout={addCalloutOn}
-              bindings={surfaceBindings}
-              onZoom={setZoomAt}
-              /* ДВЕРЬ ЗАГРУЗКИ СТОИТ ВО ВСЕХ ТРЁХ ВИДАХ (V-20 г) — см. довод у
-                 `addPlateFromLibrary`: род принесённого файла берётся у вида на экране. */
+          {onScreen.length === 0 && kind === 'flat' ? (
+            <EmptyDocument
+              bench={bench}
+              disabled={disabled}
               onAddPlate={!disabled ? addPlateFromLibrary : undefined}
-              addPlateLabel={
-                kind === 'flat' ? '+ add a flat' : kind === 'render' ? '+ add a render' : '+ add a 3D frame'
-              }
-              onDetach={!disabled ? askDetach : undefined}
-              detachInert={detachInert}
-              onEdit={!disabled ? takeIntoCard : undefined}
-              /* THE MARK'S DOOR RIDES ONLY THE NON-FLAT LISTS. A flat is chosen by standing in a
-                 bench slot, not by the mark, so a select door there would be a second registry of
-                 one election. */
-              onToggleChosen={
-                kind !== 'flat' && !disabled && segment.serverStates
-                  ? (plate) =>
-                      setPictureSelected.mutate({
-                        pictureId: plate.pictureId ?? 0,
-                        selected: !plate.chosen,
-                      })
-                  : undefined
-              }
-              chosenInert={
-                kind === 'flat'
-                  ? undefined
-                  : disabled
-                    ? 'the card is read-only for you — the mark is an edit of the card'
-                    : SELECT_MARK_NOT_STATED
-              }
-              chosenPending={setPictureSelected.isPending}
-              offSheet={kind !== 'flat'}
-              halo={kind !== 'flat'}
             />
+          ) : (
+            <>
+              {/* ПУСТОЙ СЕГМЕНТ ГОВОРИТ, ОТКУДА БЕРУТСЯ ЕГО КАРТИНКИ, И ОСТАВЛЯЕТ РЯД НА МЕСТЕ.
+                  Раньше здесь стояла ТОЛЬКО эта строка, вместо ряда целиком, — и вместе с рядом
+                  исчезала дверь загрузки. То есть на карточке без единого рендера положить свой
+                  рендер было нельзя вовсе, ровно вопреки V-20 (г) («если мы не хотим генерировать
+                  их в нашем туле»): отсутствие генерации и было тем случаем, ради которого дверь
+                  просили. Теперь ряд рисуется всегда, и в пустом сегменте он состоит из одного
+                  добавляющего слота. */}
+              {onScreen.length === 0 && (
+                <Text size='micro' variant='label' component='p'>
+                  nothing of this kind on the loaded page of the band.{' '}
+                  {kind === 'render'
+                    ? 'A fabric render is made on STUDIO, from the flats standing in the bench slots.'
+                    : 'A turntable is made on STUDIO, and it turns the renders — so the renders come first.'}{' '}
+                  Or put your own file straight into the slot below.
+                </Text>
+              )}
+              <PlateGrid
+                plates={onScreen}
+                layout={layout}
+                calloutsOf={calloutsOfPlate}
+                selected={selected}
+                canPlaceOn={canPlaceOn}
+                drawInert={drawInert}
+                tool={tool}
+                onToolDone={() => setTool(null)}
+                onPlacedCountChange={setPlaced}
+                onAddCallout={addCalloutOn}
+                bindings={surfaceBindings}
+                onZoom={setZoomAt}
+                /* ДВЕРЬ ЗАГРУЗКИ СТОИТ ВО ВСЕХ ТРЁХ ВИДАХ (V-20 г) — см. довод у
+                   `addPlateFromLibrary`: род принесённого файла берётся у вида на экране. */
+                onAddPlate={!disabled ? addPlateFromLibrary : undefined}
+                addPlateLabel={
+                  kind === 'flat'
+                    ? '+ add a flat'
+                    : kind === 'render'
+                      ? '+ add a render'
+                      : '+ add a 3D frame'
+                }
+                /* ЦЕНА НАЗВАНА ДО НАЖАТИЯ, А НЕ ПОСЛЕ. Словарь медиа карточки не знает кадра
+                   турнтейбла, поэтому принесённый сюда файл числится рендером и покажется среди
+                   рендеров. Сказать это тостом ПОСЛЕ выбора — значит дать человеку удивиться;
+                   строка стоит на самом слоте, в уже зарезервированном под подпись месте. */
+                addPlateNote={
+                  kind === 'threed' ? 'filed as a render: the card has no 3D kind' : undefined
+                }
+                onDetach={!disabled ? askDetach : undefined}
+                detachInert={detachInert}
+                onEdit={!disabled ? takeIntoCard : undefined}
+                /* THE MARK'S DOOR RIDES ONLY THE NON-FLAT LISTS. A flat is chosen by standing in a
+                   bench slot, not by the mark, so a select door there would be a second registry of
+                   one election. */
+                onToggleChosen={
+                  kind !== 'flat' && !disabled && segment.serverStates
+                    ? (plate) =>
+                        setPictureSelected.mutate({
+                          pictureId: plate.pictureId ?? 0,
+                          selected: !plate.chosen,
+                        })
+                    : undefined
+                }
+                chosenInert={
+                  kind === 'flat'
+                    ? undefined
+                    : disabled
+                      ? 'the card is read-only for you — the mark is an edit of the card'
+                      : SELECT_MARK_NOT_STATED
+                }
+                chosenPending={setPictureSelected.isPending}
+                sayPrints={kind !== 'flat'}
+                halo={kind !== 'flat'}
+              />
+            </>
           )}
         </Section>
 
@@ -1176,7 +1247,7 @@ export function ArtifactsPanel({
               <Text size='micro' variant='label' component='span'>
                 {onScreen[zoomAt].origin === 'card'
                   ? drawInert
-                  : 'this picture is not in the card’s media yet — take it in on its plate, and it becomes drawable here'}
+                  : 'this picture is not in the card’s media yet — press edit on its plate, and it becomes drawable here'}
               </Text>
             )
           }
@@ -1231,23 +1302,33 @@ export function ArtifactsPanel({
 /**
  * ═══ SAID BEFORE THE PENCIL IS PICKED UP, NOT AFTER ═══════════════════════════════════════════
  *
- * THE DEFECT THIS EXISTS TO PREVENT. The technical sheet is composed of FLATS ONLY. So a person who
- * opens ARTIFACTS, switches to «renders» and carefully annotates a fabric render has done work that
- * DOES NOT REACH THE SHEET — and nothing about the drawing itself says so. The annotation is not
- * corrupted and it is not lost; it simply lives on a picture the sheet is not made of.
+ * ЧТО ЗДЕСЬ СТОЯЛО И ПОЧЕМУ ЭТО БЫЛО ХУЖЕ ОТСУТСТВИЯ. Коробка утверждала: «callouts drawn here do
+ * not reach the technical sheet… the mint takes the bench's flat plates, and the freeze then keeps
+ * only the callouts standing on them… silently left out of every version minted from now on».
+ * Ни минта, ни заморозки, ни версий уже нет (V-22): фильтра, о котором шла речь, не существует
+ * нигде. А печать при этом устроена ровно наоборот — `tech-pack-document.tsx`, страница
+ * `technical sketch`, печатает `technicalMedia` ЦЕЛИКОМ, без единого условия по роду, и
+ * `printedOnSketch` считает напечатанной любую выноску, чьё медиа лежит в этом списке. То есть
+ * человек брал фабрик-рендер в медиа карточки, рисовал на нём, трижды читал «на лист это не
+ * попадёт» — и лист с этим рендером и его пинами уходил в цех.
  *
- * ЭТО ПЕРЕЖИЛО СНОС МИНТА, И НЕ СЛУЧАЙНО. Раньше цена была резче — серверный `freezeCallouts` при
- * минте МОЛЧА выбрасывал такие выноски, — но само правило «лист состоит из флэтов» жило не в минте,
- * а в определении листа. Минта нет, а правило есть, и предупреждать о нём нужно ровно так же.
+ * ВРУЩЕЕ ПРЕДУПРЕЖДЕНИЕ ОПАСНЕЕ ОТСУТСТВУЮЩЕГО: отсутствие оставляет человека настороже, а это
+ * учило его расслабиться ровно там, где решается, что увидит швея.
  *
- * WHY IT IS A BLUE BOX AND NOT A GREY FOOTNOTE. This is the mid-flight, needs-a-human tone of the
- * system, and it is the correct one: nothing is broken, and the person is not doing anything wrong
- * — annotating a render is a perfectly good thing to do, it just does not reach paper. Red would
- * claim a fault; a grey hint at the bottom of the block would be read after the drawing, which is
- * exactly too late. It sits ABOVE the pictures, tied to the representation that is on screen.
+ * ЧТО ГОВОРИТСЯ ВМЕСТО. Правда, и она проще прежней выдумки: ЛИСТ — ЭТО МЕДИА КАРТОЧКИ, и печатается
+ * весь. Значит цена решения переехала на один шаг раньше: она не в том, где рисовать, а в том, что
+ * вносить в медиа карточки дверью `edit`. Про это и предупреждаем.
  *
- * IT IS NOT SHOWN ON `flat`, and that is the point of tying it to the kind: a warning that is
- * always on screen is furniture, and furniture is not read.
+ * СОСТАВ ПЕЧАТИ НЕ СУЖЕН НАМЕРЕННО. Тихо выбросить рендеры из тех-пака значило бы подменить
+ * решение владельца своим: он просил снести минты и версии, а не менять содержимое комплекта.
+ *
+ * WHY IT IS A BLUE BOX AND NOT A GREY FOOTNOTE. Mid-flight, needs-a-human: ничего не сломано, и
+ * рисовать на рендере — совершенно законное занятие. Красный заявлял бы поломку; серая сноска под
+ * блоком читалась бы ПОСЛЕ рисования, то есть поздно. Коробка стоит НАД картинками и привязана к
+ * представлению на экране.
+ *
+ * IT IS NOT SHOWN ON `flat`, and that is the point of tying it to the kind: у флэта попадание на
+ * бумагу никого не удивляет, а предупреждение, висящее всегда, — мебель, и мебель не читают.
  */
 function SheetMembershipWarning({
   kind,
@@ -1265,12 +1346,12 @@ function SheetMembershipWarning({
   return (
     <CalloutBox tone='warning'>
       <Text size='micro' component='p'>
-        <b>callouts drawn here do not reach the technical sheet.</b> The sheet is composed of{' '}
-        <b>flats</b> and nothing else — the mint takes the bench’s flat plates, and the freeze then
-        keeps only the callouts standing on them. A callout you place on {what} stays on the card
-        and stays in the list beside this block, but it is <b>silently left out</b> of every version
-        minted from now on, and no message says so at the time. Mark up {what} for the studio and
-        for yourself; mark up the <b>flats</b> for the factory.
+        <b>everything in the card’s media goes to the factory, {what} included.</b> The tech pack
+        prints the whole of that list on its <b>technical sketch</b> page, each picture with the
+        callouts standing on it. So {what} you take in with <b>edit</b> prints there beside the
+        flats, and so do the callouts you draw on it here. That is the decision to make on purpose:
+        take one in when the floor should see the colour or the shape, and leave it out of the
+        card’s media when it is a note for the studio.
       </Text>
       {/* THE PROVENANCE OF THE LIST IS ONLY WORTH A SENTENCE WHEN THERE IS A LIST. With nothing of
           this kind on the page, «nothing is marked as chosen» and «this server does not state the
@@ -1331,8 +1412,45 @@ function plateAspect(plate: DocumentPlate): string {
  * ЧИСЛО, А НЕ `clamp`: этой же высотой живёт слот «+ add a plate», а он принимает пиксели. Ряд, в
  * котором добавляющая рамка ниже соседних плит, читается как сбой раскладки, и платить за это
  * отзывчивостью, которой на столе никто не пользуется, незачем. Полоса эскиза стоит на 480.
+ *
+ * ⚠ ЭТО ВЫСОТА КАДРА, А НЕ ПЛИТЫ, И РАЗНИЦА СТОИЛА ДЕФЕКТА. Слоту «+ add …» передавали ровно её —
+ * и слот вставал на 120 пикселей ниже соседей, потому что плита это ещё и строка заголовка, и
+ * коробка легенды, и строка подписи, и поля. Замерено: плита 521.5, слот 400. Теперь слот несёт
+ * ТУ ЖЕ СКЕЛЕТНУЮ РАЗМЕТКУ, что и плита (`AddPlateTile`), поэтому равенство держится по
+ * построению, а не совпадением чисел, и переживает правку любой из четырёх строк.
  */
 const PLATE_FRAME_HEIGHT = 400;
+
+/**
+ * КОРОБКА ЛЕГЕНДЫ ПИНОВ — ВТОРАЯ ПОЛОВИНА «ОДНОЙ ВЫСОТЫ ВСЕГДА» (V-20).
+ *
+ * Легенда растёт со числом выносок НА ЭТОЙ плите: плита с четырьмя пинами была ощутимо выше
+ * соседней с одним. 72px — четыре строки nano, столько несёт типичная плита; по-настоящему
+ * многолюдная прокручивается внутри.
+ *
+ * РОСТ НАЗНАЧАЕТСЯ ЛЕГЕНДЕ, А НЕ ВСЕЙ ПОДКАДРОВОЙ КОЛОНКЕ. Он стоял на `chromeClassName`, то есть
+ * на коробке, которая держит ещё и ряд «done · N / cancel» — единственный способ закончить
+ * мультивыноску или замкнуть зону пальцем. С заполненной легендой этот ряд уезжал под нижний край
+ * скроллера: на планшете, где Enter недоступен, жест становился незавершаемым. Довод про размер
+ * от этого не пострадал: коробка легенды по-прежнему ровно 72px у всех плит.
+ */
+const PLATE_LEGEND_BOX = 'h-[72px]';
+
+/**
+ * СТРОКА ЗАГОЛОВКА ПЛИТЫ — С РЕЗЕРВОМ ПОД ПИЛЮЛЮ.
+ *
+ * Замерено: заголовок из одного nano-текста занимает 13.5px, тот же заголовок с пилюлей — 19px.
+ * Плиты одного ряда носят пилюли неодинаково (`bench` есть только у верстачной, `on paper` — только
+ * у карточной, `not on the card` — только у выхода прогона), поэтому разница в 5.5px ходит ВНУТРИ
+ * ряда, а не между рядами. Внешние коробки её прячут — ряд растягивается по самой высокой, — но
+ * подпись под кадром у безпилюльной плиты садится на те же 5.5px выше, и ряд перестаёт кончаться
+ * одной линией.
+ *
+ * 20px — рост с запасом над самой пилюлей (граница + `py-px` + 10px строки). Токеном, а не
+ * подогнанным `h-[19px]`: занижать нельзя (пилюля выдавит строку обратно), а лишний полпикселя
+ * достаётся всем одинаково.
+ */
+const PLATE_HEAD_ROW = 'flex w-0 min-w-full min-h-5 items-baseline gap-1.5';
 
 /**
  * ВЫСОТА СТРОКИ ПОДПИСИ ПОД КАДРОМ — ЗАРЕЗЕРВИРОВАНА, А НЕ ВЫВЕДЕНА ИЗ ТЕКСТА.
@@ -1409,13 +1527,14 @@ function PlateGrid({
   onZoom,
   onAddPlate,
   addPlateLabel,
+  addPlateNote,
   onDetach,
   detachInert,
   onEdit,
   onToggleChosen,
   chosenInert,
   chosenPending,
-  offSheet,
+  sayPrints,
   halo,
 }: {
   plates: DocumentPlate[];
@@ -1440,6 +1559,12 @@ function PlateGrid({
   onAddPlate?: (items: common_MediaFull[]) => void;
   /** Слово на пустом слоте: оно называет РОД того, что появится, а род зависит от вида (V-20 г). */
   addPlateLabel?: string;
+  /**
+   * Строка подписи добавляющей плиты — цена, названная ДО нажатия, а не тостом после. Нужна ровно
+   * там, где принесённый файл ляжет не в тот сегмент, где стоит человек: словарь медиа карточки не
+   * знает кадра турнтейбла (см. `addPlateFromLibrary`).
+   */
+  addPlateNote?: string;
   /** Take a plate off the document, or `undefined` — and then `detachInert` says why not. */
   onDetach?: (plate: DocumentPlate) => void;
   detachInert: string;
@@ -1457,8 +1582,12 @@ function PlateGrid({
   chosenInert?: string;
   /** A write of the mark is in flight — the doors wait for the band to answer. */
   chosenPending?: boolean;
-  /** This segment is not what the sheet is made of — every plate says so on its own face. */
-  offSheet?: boolean;
+  /**
+   * Сказать на лице плиты, что она ПЕЧАТАЕТСЯ. Ставится в сегментах, где это удивляет (рендеры и
+   * 3D): лист — это медиа карточки, и тех-пак печатает их все. Прежний проп `offSheet` утверждал
+   * обратное и был неправдой — см. довод у пилюли.
+   */
+  sayPrints?: boolean;
   /**
    * Белая подложка под линиями указаний. ПО РОДУ АРТЕФАКТА, а не по вкусу: на рендере и на кадре
    * турнтейбла чернильная линия тонет в пёстром снимке, и указание перестаёт быть видно ровно там,
@@ -1512,7 +1641,7 @@ function PlateGrid({
             data-field={plate.door}
             className='group w-fit max-w-full shrink-0 border border-borderColor p-1'
           >
-            <div className='flex w-0 min-w-full items-baseline gap-1.5'>
+            <div className={PLATE_HEAD_ROW}>
               <Text
                 size='nano'
                 variant='uppercase'
@@ -1527,8 +1656,20 @@ function PlateGrid({
               {plate.chosen && <Pill tone='ok'>chosen</Pill>}
               {/* THE PLATE SAYS IT ITSELF, not only the box above the grid. The warning is read
                   once, on arrival; the badge is on screen for as long as the picture is, and it is
-                  what a person sees when they come back to this tab an hour later. */}
-              {offSheet && <Pill tone='attention'>not on the sheet</Pill>}
+                  what a person sees when they come back to this tab an hour later.
+                  ЗДЕСЬ ВИСЕЛО «not on the sheet» — прямая неправда: плита, лежащая в медиа
+                  карточки, печатается на странице технического эскиза вместе со своими выносками
+                  (`tech-pack-document.tsx`, без единого условия по роду). Пилюля называет теперь
+                  ровно это, и только там, где оно удивляет: у флэта попадание на бумагу и так
+                  никого не удивляет, а у плиты, которой в медиа карточки ещё нет, своя пилюля. */}
+              {sayPrints && plate.origin === 'card' && (
+                <Pill
+                  tone='attention'
+                  title='this picture is in the card’s media, so the tech pack prints it on the technical sketch page, with the callouts standing on it'
+                >
+                  on paper
+                </Pill>
+              )}
               <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
                 {mine.length || ''}
               </Text>
@@ -1561,16 +1702,15 @@ function PlateGrid({
                 }
                 legend
                 /* ЛЕГЕНДА — В КОРОБКЕ ПОСТОЯННОЙ ВЫСОТЫ, И ЭТО ВТОРАЯ ПОЛОВИНА «ОДНОЙ ВЫСОТЫ
-                   ВСЕГДА». Кадр фиксирован (`PLATE_FRAME_HEIGHT`), шапка — одна строка, подпись —
-                   зарезервированные 14px; оставалась легенда пинов, которая растёт со числом
-                   выносок НА ЭТОЙ плите. Плита с четырьмя пинами была ощутимо выше соседней с
-                   одним — то есть ровно то, на что жаловался владелец, и заметно это было бы
-                   только на карточке с выносками.
-                   72px — четыре строки nano: столько несёт типичная плита, и прокрутка включается
-                   лишь у по-настоящему многолюдной. Снять легенду было бы проще, но она не
+                   ВСЕГДА» (довод у `PLATE_LEGEND_BOX`). Снять легенду было бы проще, но она не
                    дублирует панель CALLOUTS: наведение на её строку подсвечивает СВОЙ пин на
-                   снимке, а это принадлежит поверхности и нигде больше не живёт. */
-                chromeClassName='h-[72px] overflow-y-auto'
+                   снимке, а это принадлежит поверхности и нигде больше не живёт.
+
+                   `legendClassName`, А НЕ `chromeClassName`: второй держит ВСЁ подкадровое, включая
+                   ряд «done · N / cancel», которым заканчивают мультивыноску и зону. Заперев его в
+                   72-пиксельном скроллере вместе с легендой, мы делали жест незавершаемым на
+                   планшете — там нет ни Enter, ни Escape. */
+                legendClassName={cn(PLATE_LEGEND_BOX, 'overflow-y-auto')}
                 halo={halo}
                 // ВЕРХ СПРАВА — РЯД, А НЕ УГОЛ, ровно как у `PictureTile`: увеличение и снятие
                 // обязаны стоять рядом, не наезжая. Место ряда назначает сама поверхность
@@ -1691,19 +1831,77 @@ function PlateGrid({
           файл и числится рендером, а лист по-прежнему собирается из флэтов. Отсутствие двери не
           защищало ни от чего — оно просто не давало обойтись без генератора. */}
       {onAddPlate && (
+        <AddPlateTile label={addPlateLabel} note={addPlateNote} onAddPlate={onAddPlate} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * ДОБАВЛЯЮЩАЯ ПЛИТА — ТА ЖЕ СКЕЛЕТНАЯ РАЗМЕТКА, ЧТО У НАСТОЯЩЕЙ, И ЭТО ВСЯ ПОЧИНКА.
+ *
+ * ЗАМЕРЕННЫЙ ДЕФЕКТ. Слоту передавали `heightPx={PLATE_FRAME_HEIGHT}` — высоту КАДРА. Плита же
+ * складывается из строки заголовка, кадра, коробки легенды, строки подписи и полей: 521.5 против
+ * 400, то есть 120 пикселей пустой земли под добавляющей рамкой. `items-start` в ряду снят
+ * намеренно, поэтому ячейка тянулась во весь рост соседей, а рамка сидела в её верху. Ровно то,
+ * на что жаловался владелец («всегда криво»), и ровно то, что запрещает его же V-20 («все
+ * карточки должны быть одной высоты всегда»).
+ *
+ * ПОЧЕМУ СКЕЛЕТ, А НЕ БОЛЬШЕЕ ЧИСЛО. Подогнанная константа (400 + 121) держалась бы ровно до
+ * первой правки любой из четырёх строк и разъезжалась бы молча. Здесь строки ТЕ ЖЕ САМЫЕ и в том
+ * же порядке: заголовок, кадр, коробка легенды, подпись. Равенство держится по построению.
+ *
+ * ЗАГОЛОВОК НЕСЁТ СЛОВО, А НЕ ПУСТОТУ: пустой span схлопнулся бы в ноль и вернул бы разницу
+ * высот, а «new plate» ещё и говорит, что появится на месте рамки.
+ */
+function AddPlateTile({
+  label,
+  note,
+  onAddPlate,
+}: {
+  label?: string;
+  /** Строка подписи: цена, названная ДО нажатия. Занимает уже зарезервированное место. */
+  note?: string;
+  onAddPlate: (items: common_MediaFull[]) => void;
+}) {
+  return (
+    <div className='w-fit max-w-full shrink-0 border border-borderColor p-1'>
+      <div className={PLATE_HEAD_ROW}>
+        <Text
+          size='nano'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          className='min-w-0 truncate'
+        >
+          new plate
+        </Text>
+      </div>
+      <div className='mt-1'>
         <MediaSlot
           aspectRatio={['Custom']}
           frameAspect='4/5'
           heightPx={PLATE_FRAME_HEIGHT}
-          label={addPlateLabel ?? '+ add a plate'}
+          label={label ?? '+ add a plate'}
           purpose='technical sheet plate'
           allowMultiple
           showVideos={false}
           onSelect={onAddPlate}
           sizeClassName='w-auto max-w-[85vw]'
-          className='shrink-0'
         />
-      )}
+      </div>
+      {/* Место легенды у настоящей плиты. Здесь оно пусто и молчит — но занято, иначе кадры
+          соседей и этой рамки встали бы на разной высоте. */}
+      <div className={cn('mt-1', PLATE_LEGEND_BOX)} />
+      <Text
+        size='nano'
+        variant='label'
+        component='p'
+        title={note}
+        className={cn('mt-1 w-0 min-w-full truncate', PLATE_NOTE_LINE)}
+      >
+        {note ?? ''}
+      </Text>
     </div>
   );
 }

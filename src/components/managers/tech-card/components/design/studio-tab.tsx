@@ -230,8 +230,8 @@ export function StudioTab({
 
 /**
  * ARTIFACTS is a second root over the SAME band read, not a second band. It is kept in this file so
- * that the two tabs cannot drift into calling different reads — the failure that would produce is a
- * sheet that disagrees with the bench it was minted from, under one signature.
+ * that the two tabs cannot drift into calling different reads — the failure that would produce is
+ * two tabs of one card showing different plates and different marks for the same picture.
  *
  * IT ALSO CARRIES THE DRAWING EDITOR, and the two props below are the whole of what that needs. The
  * editor is mounted over ARTIFACTS rather than in the studio because `mood-callouts.tsx` holds the
@@ -266,9 +266,13 @@ export function ArtifactsTab({
   if (!techCardId) {
     return (
       <SectionStack>
-        <Section title='artifacts' question='— the sheet the factory prints, and every version of it'>
+        {/* НИ «ВЕРСИЙ», НИ «МИНТА»: подсистема версий листа снята целиком (V-22), и обещать их с
+            пустого экрана значило бы звать человека к органу, которого нет. Ждёт эта заглушка
+            ровно одного — сохранённой карточки: пластины живут в её медиа, а у несохранённой
+            карточки медиа некуда положить. */}
+        <Section title='artifacts' question='— the pictures of this card, and the sheet the factory prints'>
           <Text variant='inactive' size='control'>
-            Save this tech card first — a sheet is minted from a card that exists.
+            Save this tech card first — pictures are kept on a card that exists.
           </Text>
         </Section>
       </SectionStack>
@@ -288,9 +292,9 @@ export function ArtifactsTab({
   }
 
   // Same rule as the studio: the LIVE DOCUMENT — the card's plates and their callouts — is form
-  // data and needs no design RPC at all. Only the version strip, the journal and the mint do. So the
-  // panel is mounted either way and is told, once, whether the band answered; refusing to mount it
-  // would take the callout editor away from every card on a contour without the band.
+  // data and needs no design RPC at all. Only the generated pictures and the shelves of assets do.
+  // So the panel is mounted either way and is told, once, whether the band answered; refusing to
+  // mount it would take the callout editor away from every card on a contour without the band.
   return (
     <DesignCapabilityProvider value={serverSpeaks}>
       <ArtifactsPanel

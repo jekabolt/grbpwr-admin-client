@@ -63,12 +63,27 @@ function sentences(text: string): string[] {
  *
  * МОДЕЛЬ ВПРАВЕ ОСЛУШАТЬСЯ. Ответ без заголовков — законный (старый бинарь сервера, другая модель),
  * поэтому null здесь — не ошибка, а команда «покажи как раньше»: всё прозой, всё предлагается.
+ *
+ * ═══ ПРОЗА ДО ПЕРВОГО ЗАГОЛОВКА — ЭТО ОПИСАНИЕ, А НЕ МУСОР ══════════════════════════════════
+ *
+ * ЗАМЕРЕННЫЙ ОТКАЗ. `current` начинался с `null`, и всё, что стояло ДО первого узнанного
+ * заголовка, отбрасывалось молча. Модель же чаще всего пишет описание первым абзацем и
+ * озаглавливает только списки — «DESIGN ASPECTS», «MISSING CALLOUTS». Тогда `bins.description`
+ * пуст, `current` уже не `null`, функция возвращает не-`null`, `sentences('')` даёт `[]` — и
+ * панель показывает советы при НУЛЕ кандидатов описания. Человек видит, что кнопка сработала, и
+ * не получает того, ради чего платил. Запасной путь «заголовков нет вовсе» тут не срабатывает:
+ * заголовки есть, просто не тот.
+ *
+ * ПРЕАМБУЛА ЗАСЧИТЫВАЕТСЯ ТОЛЬКО В ПУСТОЕ ОПИСАНИЕ. Если модель заголовок `DESCRIPTION` всё же
+ * поставила, её собственная разметка сильнее: строки вроде «Sure, here is the draft» не должны
+ * ехать кандидатами в печатаемый концепт.
  */
 function parseDraftSections(
   text: string,
 ): { description: string; aspects: string[]; missing: string[] } | null {
   const heads = /^\s*(?:#+\s*)?(description|design aspects|missing callouts)\b\s*[:—–-]?\s*/i;
   let current: 'description' | 'aspects' | 'missing' | null = null;
+  const preamble: string[] = [];
   const bins = { description: [] as string[], aspects: [] as string[], missing: [] as string[] };
   for (const raw of text.split('\n')) {
     const m = raw.match(heads);
@@ -80,6 +95,7 @@ function parseDraftSections(
       continue;
     }
     if (current) bins[current].push(raw);
+    else preamble.push(raw);
   }
   if (!current) return null;
   /** Маркер списка снимается: «- » перед советом — структура ответа, а не его слова. */
@@ -87,8 +103,9 @@ function parseDraftSections(
     xs
       .map((s) => s.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, '').trim())
       .filter(Boolean);
+  const described = bins.description.join('\n').trim();
   return {
-    description: bins.description.join('\n').trim(),
+    description: described || preamble.join('\n').trim(),
     aspects: lines(bins.aspects),
     missing: lines(bins.missing),
   };
@@ -346,6 +363,18 @@ export function MoodDraft({
                   </Text>
                 </div>
               ))}
+
+              {/* НОЛЬ КАНДИДАТОВ ОПИСАНИЯ НАЗЫВАЕТ СЕБЯ. Иначе прогон с советами, но без единой
+                  строки описания, выглядит как рамка, где кнопки «add» просто не нарисовались, —
+                  а человек уже заплатил за него и вправе знать, что получил. Две причины
+                  различаются, потому что и делать с ними надо разное. */}
+              {offered.length === 0 && (
+                <Text size='micro' variant='label' component='p'>
+                  {draft.lines.length === 0
+                    ? 'The draft came back with advice but no description lines, so there is nothing here to add to the concept.'
+                    : 'Every description line of this draft is already in the concept, added or dismissed.'}
+                </Text>
+              )}
 
               {/* СОВЕТЫ ДВУХ ДРУГИХ СЕКЦИЙ — БЕЗ ЧИПОВ, И ЭТО РЕШЕНИЕ. Аспект принимают в блоке
                   construction, выноску ставят на самой картинке; кнопка «add» здесь писала бы
