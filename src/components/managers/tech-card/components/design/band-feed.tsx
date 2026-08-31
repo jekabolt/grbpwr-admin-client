@@ -62,18 +62,18 @@ export function isPickablePicture(picture: common_DesignPicture): boolean {
 }
 
 /**
- * The four preconditions of `HideDesignPicture`, gathered from the band that is already on screen.
+ * The preconditions of `HideDesignPicture`, gathered from the band that is already on screen.
  *
- * TWO OF THE FOUR ARE ADDRESSED BY MEDIA, NOT BY PICTURE. A frozen sheet plate carries
- * `media`, and a run's input snapshot carries `media_id` — neither carries a picture id, because
- * both froze a FILE rather than a row. So they are resolved the only way they can be: media id →
- * every picture standing on that media.
+ * ONE OF THEM IS ADDRESSED BY MEDIA, NOT BY PICTURE. A run's input snapshot carries `media_id` and
+ * no picture id, because it froze a FILE rather than a row. So it is resolved the only way it can
+ * be: media id → every picture standing on that media.
  *
- * AND THE VERSION HALF IS DELIBERATELY UNDER-APPROXIMATE. The band ships only the LATEST version in
- * full (`version_numbers` is a list of integers), so a plate frozen in v1 but absent from v3 is not
- * seen here and its picture will be offered a ✕ that the server then refuses with `in_version`.
- * That refusal names the same reason this guard would have named — which is exactly why the codes
- * in `visibility.ts` are the server's own strings and not a second vocabulary.
+ * THERE USED TO BE A FOURTH, AND IT WENT OUT WITH THE SHEET'S VERSIONS. A picture frozen as a plate
+ * of a minted version could not be hidden — the server refused it with `in_version` and this guard
+ * mirrored the refusal so the ✕ was absent rather than drawn-and-refused. Versions are removed
+ * whole, backend included: no version freezes a plate, so no picture can be held by one, and a
+ * guard that still asked would be asking about rows that cannot exist. The remaining codes are
+ * still the server's own strings rather than a second vocabulary, for the same reason as before.
  */
 export function buildHideGuard(band: GetDesignBandResponse): HideGuard {
   const pictures = bandPictures(band);
@@ -94,11 +94,6 @@ export function buildHideGuard(band: GetDesignBandResponse): HideGuard {
   (band.bench ?? []).forEach((slot) => {
     const id = slot.pictureId ?? 0;
     if (id > 0) slotPictureIds.add(id);
-  });
-
-  const versionPlatePictureIds = new Set<number>();
-  (band.latestVersion?.plates ?? []).forEach((plate) => {
-    picturesOfMedia(plate.media?.id).forEach((id) => versionPlatePictureIds.add(id));
   });
 
   const liveRunInputPictureIds = new Set<number>();
@@ -125,7 +120,6 @@ export function buildHideGuard(band: GetDesignBandResponse): HideGuard {
 
   return {
     slotPictureIds,
-    versionPlatePictureIds,
     liveRunInputPictureIds,
     cropParentPictureIds,
   };

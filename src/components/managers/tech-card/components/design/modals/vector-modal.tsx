@@ -22,7 +22,7 @@ import { fitView, toWorld, zoomAt, type View } from '../../canvas-view';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
 import { useDesignWrites } from '../use-design-band';
-import { RASTER_FALLBACK_W, rasteriseStrokesOverBase } from './rasterise-layer';
+import { RASTER_FALLBACK_W, pickSceneInk, rasteriseStrokesOverBase } from './rasterise-layer';
 import { TraceVectorPanel } from './trace-vector-panel';
 import { findMediaUrlInBand, useTraceVector } from './use-trace-vector';
 import {
@@ -35,16 +35,41 @@ import {
 } from './use-edit-layer';
 import { VectorBrushRail } from './vector-brush-rail';
 import {
+  copyInsideSelection,
+  deleteInsideSelection,
+  pointInPolygon,
+  selectionPathD,
+  settleLasso,
+  type SelectionArea,
+} from './vector-lasso';
+import { DEFAULT_NIB, clampNib, eraseAlong, stampAlong } from './vector-nib';
+import {
+  penDown,
+  penMove,
+  penPolygon,
+  penPreviewD,
+  penRubberD,
+  penStroke,
+  penUndo,
+  penUp,
+  type PenState,
+} from './vector-pen';
+import {
+  DEFAULT_INK,
   DEFAULT_RATIO,
+  MAX_GAUGE,
   MAX_STROKES_BYTES,
+  MIN_GAUGE,
   STITCHES,
+  WEIGHT_GAUGE,
+  gaugeWeight,
   layerSvg,
+  readInk,
   readLayer,
   settleTrace,
   strokeGeometry,
   strokePolyline,
   writeLayer,
-  type CubicSeg,
   type StitchKey,
   type StrokeWeight,
   type VectorStroke,
@@ -103,7 +128,23 @@ import {
  * вектор».
  */
 
-type Tool = 'line' | 'freehand' | 'curve' | 'select' | 'erase' | 'pan';
+type Tool = 'line' | 'freehand' | 'curve' | 'lasso' | 'select' | 'erase' | 'stamp' | 'pan';
+
+/** Подпись чипа инструмента. Внутреннее имя `curve` — слово ФОРМАТА штриха и не меняется; на
+ *  экране инструмент называется тем словом, которым его просил владелец: pen. */
+const TOOL_LABEL: Record<Tool, string> = {
+  line: 'line',
+  freehand: 'freehand',
+  curve: 'pen',
+  lasso: 'lasso',
+  select: 'select',
+  erase: 'erase',
+  stamp: 'stamp',
+  pan: 'pan',
+};
+
+/** Инструменты круглого ниба — ластик и штамп. Их след копится так же, как след кисти. */
+const isNibTool = (t: Tool): t is 'erase' | 'stamp' => t === 'erase' || t === 'stamp';
 
 /** Ширина мира в css-пикселях до зума — она же ширина viewBox сцены, юниты совпадают 1:1. */
 const PLATE_W = 1000;
@@ -119,7 +160,6 @@ const Z_STEP = 1.2;
 const SCREEN_MARK = 'data-vector-screen';
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
-const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 /**
  * Клавиши-глаголы не срабатывают, пока набирают текст, — тот же гард, что у фулскрина сборки
@@ -144,96 +184,9 @@ const verbKey = (e: { key: string; code: string; shiftKey: boolean }): string =>
   return e.key;
 };
 
-/**
- * ПЕРО В ПРОЦЕССЕ. Якоря и ИСХОДЯЩИЕ рукоятки — в долях кадра, как и готовые штрихи: жест обязан
- * жить в той же системе координат, в которой будет храниться, иначе зум посреди построения
- * сдвинул бы недорисованную кривую.
- */
-type PenState = {
-  anchors: [number, number][];
-  /** Рукоятка якоря `i`, вытянутая при его постановке; `null` — якорь поставлен кликом. */
-  outs: ([number, number] | null)[];
-  /** Рукоятка последнего якоря прямо сейчас тянется. */
-  dragging: boolean;
-};
-
-/**
- * Готовый штрих из состояния пера.
- *
- * Рукоятки симметричны, как у всякого пера: исходящая `out_i` задаёт `c1` интервала `i`, а
- * ВХОДЯЩАЯ рукоятка якоря — зеркало его исходящей, поэтому `c2` интервала — `a_{i+1} − out_{i+1}`.
- * Подряд стоящие одинаковые якоря склеиваются: даблклик-коммит кладёт второй якорь в ту же точку.
- *
- * СПИСОК СЕГМЕНТОВ ПИШЕТСЯ ВСЕГДА, даже сплошь `null`. Это документированное различие формата
- * (vector-strokes.ts): без списка интервалы сглаживает Catmull-Rom, а перо, поставившее три якоря
- * кликами, обещало ПРЯМЫЕ прогоны — сгладить их значило бы нарисовать кривую, которую никто не
- * рисовал.
- */
-function penStroke(
-  pen: PenState,
-  brush: StitchKey,
-  weight: StrokeWeight,
-  dashed: boolean,
-): VectorStroke | null {
-  const anchors: [number, number][] = [];
-  const outs: ([number, number] | null)[] = [];
-  pen.anchors.forEach((a, i) => {
-    const prev = anchors[anchors.length - 1];
-    if (prev && prev[0] === a[0] && prev[1] === a[1]) {
-      // Совпавший якорь несёт рукоятку — жест «кликнул ещё раз и потянул» правит последний якорь.
-      if (pen.outs[i]) outs[outs.length - 1] = pen.outs[i];
-      return;
-    }
-    anchors.push(a);
-    outs.push(pen.outs[i]);
-  });
-  if (anchors.length < 2) return null;
-  const segs: (CubicSeg | null)[] = [];
-  for (let i = 0; i < anchors.length - 1; i++) {
-    const out = outs[i];
-    const nextOut = outs[i + 1];
-    if (!out && !nextOut) {
-      segs.push(null);
-      continue;
-    }
-    const a = anchors[i];
-    const b = anchors[i + 1];
-    const c1 = out ? [a[0] + out[0], a[1] + out[1]] : [a[0], a[1]];
-    const c2 = nextOut ? [b[0] - nextOut[0], b[1] - nextOut[1]] : [b[0], b[1]];
-    segs.push([r4(c1[0]), r4(c1[1]), r4(c2[0]), r4(c2[1])]);
-  }
-  return {
-    tool: 'curve',
-    brush,
-    weight,
-    dashed,
-    pts: anchors.map(([x, y]) => [r4(x), r4(y)] as [number, number]),
-    segs,
-  };
-}
-
-/** Живой путь пера для превью — та же арифметика рукояток, что у `penStroke`, в юнитах бокса. */
-function penPreviewD(pen: PenState, w: number, h: number): string {
-  const a = pen.anchors;
-  if (!a.length) return '';
-  let d = `M${(a[0][0] * w).toFixed(2)},${(a[0][1] * h).toFixed(2)}`;
-  for (let i = 0; i < a.length - 1; i++) {
-    const out = pen.outs[i];
-    const nextOut = pen.outs[i + 1];
-    const p = a[i];
-    const q = a[i + 1];
-    if (!out && !nextOut) {
-      d += ` L${(q[0] * w).toFixed(2)},${(q[1] * h).toFixed(2)}`;
-      continue;
-    }
-    const c1 = out ? [(p[0] + out[0]) * w, (p[1] + out[1]) * h] : [p[0] * w, p[1] * h];
-    const c2 = nextOut ? [(q[0] - nextOut[0]) * w, (q[1] - nextOut[1]) * h] : [q[0] * w, q[1] * h];
-    d += ` C${c1[0].toFixed(2)},${c1[1].toFixed(2)} ${c2[0].toFixed(2)},${c2[1].toFixed(2)} ${(
-      q[0] * w
-    ).toFixed(2)},${(q[1] * h).toFixed(2)}`;
-  }
-  return d;
-}
+/* Механика пера целиком живёт в vector-pen.ts: прежняя модель «одна исходящая рукоятка на якорь,
+ * входящая достраивается зеркалом» не могла выразить Alt-размыкание пары (две независимые
+ * величины не восстановить из одной) и переехала туда, вырастя, — см. довод в шапке того файла. */
 
 export function VectorModal({
   open,
@@ -296,6 +249,22 @@ export function VectorModal({
   const [brush, setBrush] = useState<StitchKey>('plain');
   const [weight, setWeight] = useState<StrokeWeight>('thin');
   const [dashed, setDashed] = useState(false);
+  /** Цвет нити в руке. Чёрный при входе: цвет — утверждение, и его делает человек, не машина. */
+  const [ink, setInk] = useState<string>(DEFAULT_INK);
+  /** Размер шва в руке, в пикселях платы. Стартует ступенью `thin` — прежним весом по умолчанию. */
+  const [gauge, setGauge] = useState<number>(WEIGHT_GAUGE.thin);
+  /** Круг ластика и штампа, в пикселях платы. Отдельно от нити — см. довод у пропа рейки. */
+  const [nib, setNib] = useState<number>(DEFAULT_NIB);
+  /** Пипетка взведена: следующий клик по холсту берёт цвет вместо жеста инструмента. */
+  const [picking, setPicking] = useState(false);
+  /**
+   * ИСТОЧНИК ШТАМПА и его смещение. Источник берут alt-кликом, как в фотошопе; смещение
+   * «источник → курсор» фиксируется ПЕРВЫМ мазком и держится до следующего alt-клика — это и есть
+   * режим Aligned, тот, что у фотошопа стоит по умолчанию: несколько мазков продолжают ОДИН
+   * отпечаток, а не перерисовывают его от источника каждый раз.
+   */
+  const [stampSrc, setStampSrc] = useState<[number, number] | null>(null);
+  const stampOffset = useRef<[number, number] | null>(null);
   const [vecOn, setVecOn] = useState(true);
   const [rasterOn, setRasterOn] = useState(true);
   const [trace, setTrace] = useState<[number, number][] | null>(null);
@@ -345,6 +314,25 @@ export function VectorModal({
   const putTrace = useCallback((next: [number, number][] | null) => {
     traceRef.current = next;
     setTrace(next);
+  }, []);
+
+  /**
+   * ВЫДЕЛЕНИЯ ЛАССО — рабочее состояние визита, как в фотошопе: в документ не пишутся и при
+   * пересиде обнуляются. Каждое несёт СВОЮ растушёвку (см. vector-lasso.ts); активное — то, к
+   * которому применяются copy/delete и клавиши. Истории отката они не принадлежат: она типизирована
+   * списком штрихов, и ⌘Z после «удалить внутри» возвращает ШТРИХИ, оставляя дорожку стоять — ровно
+   * как в фотошопе.
+   */
+  const [sels, setSels] = useState<SelectionArea[]>([]);
+  const [activeSel, setActiveSel] = useState<number | null>(null);
+  /** Курсор над холстом в режиме пера — конец резинки. Реф + зеркало, тем же приёмом, что жест. */
+  const penHoverRef = useRef<[number, number] | null>(null);
+  const [penHover, setPenHover] = useState<[number, number] | null>(null);
+  /** Курсор над холстом под круглым нибом — центр превью-круга ластика и штампа. */
+  const [nibHover, setNibHover] = useState<[number, number] | null>(null);
+  const putPenHover = useCallback((next: [number, number] | null) => {
+    penHoverRef.current = next;
+    setPenHover(next);
   }, []);
 
   /**
@@ -423,8 +411,17 @@ export function VectorModal({
     setBrush('plain');
     setWeight('thin');
     setDashed(false);
+    setInk(DEFAULT_INK);
+    setGauge(WEIGHT_GAUGE.thin);
+    setNib(DEFAULT_NIB);
+    setPicking(false);
+    setStampSrc(null);
+    stampOffset.current = null;
     putPen(null);
     putTrace(null);
+    putPenHover(null);
+    setSels([]);
+    setActiveSel(null);
     setRefusal(null);
     setConfirmExit(false);
     seededJson.current = JSON.stringify(doc.strokes);
@@ -566,6 +563,18 @@ export function VectorModal({
     return [clamp01(w.x / PLATE_W), clamp01(w.y / plateH)];
   };
 
+  /**
+   * То же, БЕЗ клампа кадром — для рукояток пера. Управляющая точка легально живёт за краем платы
+   * (CONTROL_REACH формата), и кламп здесь молча пригибал бы кривую у кромки; якоря кламшатся
+   * внутри самой механики пера.
+   */
+  const frameAtFree = (e: { clientX: number; clientY: number }): [number, number] => {
+    const vp = viewportRef.current;
+    if (!vp) return [0, 0];
+    const w = toWorld(e.clientX, e.clientY, vp.getBoundingClientRect(), viewRef.current);
+    return [w.x / PLATE_W, w.y / plateH];
+  };
+
   // ⌘Z / Ctrl+Z. MATCHED BY `code`, NEVER BY `key`: on a Russian layout `event.key` is «я» and a
   // comparison against the letter z is dead — the same trap the assembly screen was bitten by.
   useEffect(() => {
@@ -585,11 +594,7 @@ export function VectorModal({
       // делалось только что. Пустеющее перо гаснет целиком.
       const p = penRef.current;
       if (p) {
-        putPen(
-          p.anchors.length > 1
-            ? { anchors: p.anchors.slice(0, -1), outs: p.outs.slice(0, -1), dragging: false }
-            : null,
-        );
+        putPen(penUndo(p));
         return;
       }
       undo();
@@ -601,8 +606,30 @@ export function VectorModal({
 
   // ── рисование ──────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * КРАСКА В РУКЕ — всё, чем родится следующий штрих, одним объектом. Собрана в одном месте, чтобы
+   * ни один из трёх писателей (след, перо, импорт) не завёл свою версию «чем сейчас рисуют» и не
+   * забыл про цвет, как забыл бы про него `pieceStroke`, если бы его не дописали.
+   *
+   * `weight` пишется БЛИЖАЙШЕЙ ступенью к числу: это старое написание того же размера, и штрих,
+   * прочитанный бандлом без `gauge`, ляжет настолько близко к задуманному, насколько три ступени
+   * это позволяют. Цвет и размер кладутся только когда им есть что сказать — чёрная нить пресетной
+   * толщины не несёт ни одного нового ключа, и документ остаётся прежней версии.
+   */
+  const paint = useMemo(() => {
+    const px = Math.min(MAX_GAUGE, Math.max(MIN_GAUGE, gauge));
+    const hex = readInk(ink);
+    return {
+      brush,
+      weight: gaugeWeight(px),
+      dashed,
+      ...(hex && hex !== DEFAULT_INK ? { ink: hex } : {}),
+      gauge: px,
+    };
+  }, [brush, dashed, ink, gauge]);
+
   const commitTrace = useCallback(
-    (pts: [number, number][], asLine: boolean, liveBrush: StitchKey, liveWeight: StrokeWeight, liveDashed: boolean) => {
+    (pts: [number, number][], asLine: boolean, livePaint: typeof paint) => {
       const settled = asLine ? [pts[0], pts[pts.length - 1]] : settleTrace(pts);
       if (settled.length < 2) return;
       // Two identical endpoints are a click, not a line — a zero-length path draws nothing and can
@@ -623,9 +650,7 @@ export function VectorModal({
           // всегда `plain`, и ни одна машина не названа, пока её явно не выбрали. Прежний порядок
           // (штрих родился plain, вид назначили вторым жестом) сохранён как частный случай — им
           // остаётся инструмент select.
-          brush: liveBrush,
-          weight: liveWeight,
-          dashed: liveDashed,
+          ...livePaint,
           pts: settled,
         },
       ]);
@@ -633,16 +658,21 @@ export function VectorModal({
     [record],
   );
 
-  /** Коммит пера: Enter или даблклик. Смена инструмента тоже коммитит — построенное не выбрасывается. */
+  /**
+   * Коммит пера: Enter, Esc, даблклик или замыкание кликом по первому якорю. Смена инструмента
+   * тоже коммитит — построенное не выбрасывается. Меньше двух якорей — рисовать не из чего,
+   * недострой честно гаснет.
+   */
   const commitPen = useCallback(() => {
     const p = penRef.current;
     putPen(null);
+    putPenHover(null);
     if (!p) return;
-    const stroke = penStroke(p, brush, weight, dashed);
+    const stroke = penStroke(p, paint);
     if (!stroke) return;
     record();
     setStrokes((prev) => [...prev, stroke]);
-  }, [brush, weight, dashed, record, putPen]);
+  }, [paint, record, putPen, putPenHover]);
 
   /** Смена инструмента одной дорогой — и с клавиши, и с чипа: недостроенное перо коммитится. */
   const switchTool = useCallback(
@@ -653,6 +683,39 @@ export function VectorModal({
     },
     [commitPen],
   );
+
+  /** Пороги пера в мировых пикселях платы — доля по x и по y весят по-разному, мерить надо в мире. */
+  const penWorld = () => ({
+    w: PLATE_W,
+    h: plateH,
+    radius: HIT_PX / (viewRef.current.zoom || 1),
+  });
+
+  /**
+   * «ПУТЬ → ВЫДЕЛЕНИЕ»: контур пера становится областью лассо — фотошопный Make Selection. Пера
+   * после этого нет (контур ИЗРАСХОДОВАН на область, штриха не рождается), инструмент — лассо,
+   * чтобы операции над областью были под рукой.
+   */
+  const makeSelectionFromPen = () => {
+    const p = penRef.current;
+    if (!p) return;
+    const poly = penPolygon(p);
+    if (!poly) return;
+    putPen(null);
+    putPenHover(null);
+    setSels([...sels, { pts: poly, feather: 0 }]);
+    setActiveSel(sels.length);
+    setTool('lasso');
+    setSelected(null);
+  };
+
+  /** Верхнее выделение под точкой — клик лассо активирует его, как клик по объекту. */
+  const findSelAt = (at: [number, number]): number | null => {
+    for (let i = sels.length - 1; i >= 0; i--) {
+      if (pointInPolygon({ x: at[0], y: at[1] }, sels[i].pts)) return i;
+    }
+    return null;
+  };
 
   const onStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const vp = viewportRef.current;
@@ -669,36 +732,49 @@ export function VectorModal({
     if (event.button !== 0) return;
     const at = frameAt(event);
 
-    if (tool === 'select' || tool === 'erase') {
+    // ПИПЕТКА СТАРШЕ ЛЮБОГО ИНСТРУМЕНТА: пока она взведена, клик берёт цвет и НИЧЕГО не рисует.
+    // Так же ведёт себя alt-пипетка кисти в фотошопе — жест один, и он не оставляет следа.
+    if (picking) {
+      event.preventDefault();
+      void takeInkAt(at);
+      return;
+    }
+
+    if (tool === 'select') {
       const hit = hitStroke(strokes, at, PLATE_W, plateH, HIT_PX / (viewRef.current.zoom || 1));
-      if (hit === null) {
-        setSelected(null);
-        return;
-      }
-      if (tool === 'erase') {
-        if (frozen) return;
-        record();
-        setStrokes((prev) => prev.filter((_, i) => i !== hit));
-        setSelected(null);
-        return;
-      }
       setSelected(hit);
       return;
     }
 
     if (frozen) return;
+
+    // ШТАМП: alt-клик БЕРЁТ ИСТОЧНИК и ничего не печатает — жест фотошопа буква в букву.
+    if (tool === 'stamp' && event.altKey) {
+      event.preventDefault();
+      setStampSrc(at);
+      stampOffset.current = null;
+      showMessage('source taken. Now drag where it should be printed', 'success');
+      return;
+    }
+    if (tool === 'stamp' && !stampSrc) {
+      showMessage('alt-click the place to copy FROM first, then drag', 'error');
+      return;
+    }
     event.preventDefault();
     // Capture on the VIEWPORT: the pointer routinely leaves the box mid-drag and without capture
     // the stroke would end wherever it crossed the border.
     vp.setPointerCapture?.(event.pointerId);
 
     if (tool === 'curve') {
-      const prev = penRef.current;
-      putPen(
-        prev
-          ? { anchors: [...prev.anchors, at], outs: [...prev.outs, null], dragging: true }
-          : { anchors: [at], outs: [null], dragging: true },
-      );
+      // Вся механика — в penDown: замыкание по первому якорю, захват рукоятки, новый якорь.
+      const res = penDown(penRef.current, frameAtFree(event), penWorld());
+      if (res.closedNow) {
+        // Клик по первому якорю ЗАМКНУЛ контур — путь окончен, коммит немедленный, как в фотошопе.
+        penRef.current = res.pen;
+        commitPen();
+        return;
+      }
+      putPen(res.pen);
       return;
     }
     putTrace([at]);
@@ -718,19 +794,19 @@ export function VectorModal({
       return;
     }
     const livePen = penRef.current;
-    if (livePen?.dragging) {
-      const at = frameAt(event);
-      const last = livePen.anchors[livePen.anchors.length - 1];
-      if (!last) return;
-      const dx = at[0] - last[0];
-      const dy = at[1] - last[1];
-      const outs = livePen.outs.slice();
-      // Микродрожь под кликом — не рукоятка: порог полпроцента кадра отделяет «кликнул» от
-      // «потянул», иначе каждый клик пера рождал бы кривую с невидимой кривизной.
-      outs[outs.length - 1] = Math.hypot(dx, dy) < 0.005 ? null : [dx, dy];
-      putPen({ ...livePen, outs });
+    if (livePen?.drag) {
+      // Протяжка рукоятки: симметричная пара, Alt размыкает — вся арифметика в penMove.
+      putPen(penMove(livePen, frameAtFree(event), event.altKey, penWorld()));
       return;
     }
+    if (tool === 'curve' && livePen) {
+      // Резинка: перспективный сегмент от последнего якоря к курсору — кривизна видна ДО клика.
+      putPenHover(frameAtFree(event));
+      return;
+    }
+    // НИБ ВИДЕН ДО НАЖАТИЯ. Круг под курсором — единственный способ узнать, что сотрётся, ДО того
+    // как оно сотрётся; курсор-крестик про размер ниба не говорит ничего.
+    if (isNibTool(tool)) setNibHover(frameAt(event));
     if (!traceRef.current) return;
     const at = frameAt(event);
     // A LINE KEEPS TWO POINTS, A TRACE ACCUMULATES. Pushing every sample and slicing at the end
@@ -749,13 +825,55 @@ export function VectorModal({
       setPanning(false);
       return;
     }
-    if (penRef.current?.dragging) {
-      putPen({ ...penRef.current, dragging: false });
+    if (penRef.current?.drag) {
+      putPen(penUp(penRef.current));
       return;
     }
     const liveTrace = traceRef.current;
     if (!liveTrace) return;
-    if (liveTrace.length >= 2) commitTrace(liveTrace, tool === 'line', brush, weight, dashed);
+    if (tool === 'lasso') {
+      putTrace(null);
+      const poly = settleLasso(liveTrace);
+      if (poly) {
+        // Обводка стала областью — новой и сразу активной, с растушёвкой 0 (своей, не инструмента).
+        setSels([...sels, { pts: poly, feather: 0 }]);
+        setActiveSel(sels.length);
+      } else {
+        // Жест-клик: активировать область под курсором или снять активность вовсе.
+        setActiveSel(findSelAt(liveTrace[liveTrace.length - 1]));
+      }
+      return;
+    }
+    if (isNibTool(tool)) {
+      putTrace(null);
+      if (frozen) return;
+      const world = { w: PLATE_W, h: plateH };
+      const radius = nib / 2;
+      if (tool === 'erase') {
+        // РЕЖЕТ, А НЕ СНИМАЕТ ОБЪЕКТ ЦЕЛИКОМ — тем же резчиком, что «delete inside» лассо.
+        const { next, changed } = eraseAlong(strokes, liveTrace, radius, world);
+        if (!changed) return;
+        record();
+        setStrokes(next);
+        setSelected(null);
+        return;
+      }
+      const src = stampSrc;
+      if (!src) return;
+      // Смещение фиксируется ПЕРВЫМ мазком и живёт до следующего alt-клика — режим Aligned.
+      if (!stampOffset.current) {
+        stampOffset.current = [liveTrace[0][0] - src[0], liveTrace[0][1] - src[1]];
+      }
+      const born = stampAlong(strokes, liveTrace, stampOffset.current, radius, world);
+      if (!born.length) {
+        showMessage('nothing under the source: the stamp copies strokes, not pixels', 'error');
+        return;
+      }
+      record();
+      setStrokes((prev) => [...prev, ...born]);
+      return;
+    }
+    if (liveTrace.length >= 2) commitTrace(liveTrace, tool === 'line', paint);
     putTrace(null);
   };
 
@@ -774,18 +892,109 @@ export function VectorModal({
     setSelected(null);
   };
 
+  // ── операции над выделениями лассо ─────────────────────────────────────────────────────────
+
+  /** Копия того, что внутри области. Со смещением — копия точно поверх читалась бы как «ничего». */
+  const copySel = (i: number) => {
+    const sel = sels[i];
+    if (!sel || frozen) return;
+    const born = copyInsideSelection(strokes, sel.pts);
+    if (!born.length) {
+      showMessage('the selection holds no strokes — nothing was copied', 'error');
+      return;
+    }
+    record();
+    setStrokes((prev) => [...prev, ...born]);
+    showMessage(
+      `${born.length} stroke${born.length === 1 ? '' : 's'} copied — the copies sit slightly offset`,
+      'success',
+    );
+  };
+
+  /** Стереть то, что внутри: штрихи РЕЖУТСЯ по дорожке, наружные куски живут дальше. */
+  const deleteSel = (i: number) => {
+    const sel = sels[i];
+    if (!sel || frozen) return;
+    const { next, changed } = deleteInsideSelection(strokes, sel.pts);
+    if (!changed) {
+      showMessage('the selection holds no strokes — nothing was deleted', 'error');
+      return;
+    }
+    record();
+    setStrokes(next);
+    setSelected(null);
+  };
+
+  /** Снять саму область — штрихи не трогаются. */
+  const dropSel = (i: number) => {
+    setSels((prev) => prev.filter((_, k) => k !== i));
+    setActiveSel((a) => (a === null || a === i ? null : a > i ? a - 1 : a));
+  };
+
+  /** Растушёвка ОДНОЙ области — свойство выделения, а не инструмента: соседние не меняются. */
+  const featherSel = (i: number, px: number) => {
+    const clamped = Math.min(200, Math.max(0, Math.round(px)));
+    setSels((prev) => prev.map((s, k) => (k === i ? { ...s, feather: clamped } : s)));
+  };
+
   /** Свойство кисти ИЛИ выбранного штриха — какой контекст на рейке, тому и достаётся правка. */
   const pickBrush = (key: StitchKey) => {
     if (selected !== null) editStroke({ brush: key });
     else setBrush(key);
   };
-  const pickWeight = (w: StrokeWeight) => {
-    if (selected !== null) editStroke({ weight: w });
-    else setWeight(w);
-  };
   const pickDashed = (d: boolean) => {
     if (selected !== null) editStroke({ dashed: d });
     else setDashed(d);
+  };
+  /**
+   * ЦВЕТ ПРАВИТСЯ ТАМ ЖЕ, ГДЕ ВИД И ВЕС. Непонятную строку из поля hex НЕ ГЛОТАЕТ и не красит
+   * чёрным: пока человек допечатывает `#ff00`, значение остаётся текстом органа, а нить не
+   * меняется — иначе каждое второе нажатие в поле перекрашивало бы выбранный штрих.
+   */
+  const pickInk = (raw: string) => {
+    const hex = readInk(raw);
+    if (selected !== null) {
+      if (hex) editStroke({ ink: hex === DEFAULT_INK ? undefined : hex });
+      return;
+    }
+    setInk(hex ?? raw);
+  };
+  /** Размер: у выбранной строки правится её `gauge`, вместе с ближайшей ступенью `weight`. */
+  const pickGauge = (px: number) => {
+    const n = Math.min(MAX_GAUGE, Math.max(MIN_GAUGE, Math.round(px) || MIN_GAUGE));
+    if (selected !== null) editStroke({ gauge: n, weight: gaugeWeight(n) });
+    else {
+      setGauge(n);
+      setWeight(gaugeWeight(n));
+    }
+  };
+  /** Ступень — то же число, названное словом; и чип, и поле правят ОДНУ величину. */
+  const pickWeightPreset = (w: StrokeWeight) => pickGauge(WEIGHT_GAUGE[w]);
+
+  /**
+   * ПИПЕТКА: цвет из ТОГО ЖЕ композита, что уходит в плоскую картинку, — значит и с подложки.
+   * Гасится сразу после взятия: залипший режим «следующий клик не рисует» выглядит как сломанная
+   * кисть, а второе взятие стоит одного нажатия чипа.
+   *
+   * Слои учтены честно: погашенный растр не участвует в пробе, погашенный вектор тоже, — пипетка
+   * обязана брать то, что ВИДНО, а не то, что хранится.
+   */
+  const takeInkAt = async (at: [number, number]) => {
+    setPicking(false);
+    const hex = await pickSceneInk(
+      {
+        baseSrc: rasterOn ? baseSrc : '',
+        strokes: vecOn ? strokes : [],
+        ratio: ratio || DEFAULT_RATIO,
+      },
+      at,
+    );
+    if (!hex) {
+      showMessage('the colour under the pointer could not be read', 'error');
+      return;
+    }
+    pickInk(hex);
+    showMessage(`ink ${hex}`, 'success');
   };
 
   // ── the wire ───────────────────────────────────────────────────────────────────────────────
@@ -979,6 +1188,11 @@ export function VectorModal({
         e.preventDefault();
         zoomReset();
       }
+      // ⌘C над активной областью — копия её содержимого. По e.code: на кириллице e.key — «с».
+      if (e.code === 'KeyC' && activeSel !== null && !isTyping(e.target)) {
+        e.preventDefault();
+        copySel(activeSel);
+      }
       return;
     }
     if (!entered) return;
@@ -1002,6 +1216,20 @@ export function VectorModal({
       commitPen();
       return;
     }
+    // Delete/Backspace: содержимое активной области, иначе — выбранный штрих. По e.code —
+    // именованные клавиши раскладка не путает, но правило дома одно: физическая клавиша.
+    if ((e.code === 'Backspace' || e.code === 'Delete') && !frozen) {
+      if (activeSel !== null) {
+        e.preventDefault();
+        deleteSel(activeSel);
+        return;
+      }
+      if (selected !== null) {
+        e.preventDefault();
+        removeSelected();
+        return;
+      }
+    }
     const k = verbKey(e);
     switch (k) {
       case 'v':
@@ -1016,8 +1244,19 @@ export function VectorModal({
       case 'p':
         switchTool('curve');
         break;
+      case 'w':
+        switchTool('lasso');
+        break;
       case 'e':
         switchTool('erase');
+        break;
+      case 's':
+        switchTool('stamp');
+        break;
+      // Пипетка — не инструмент, а МОДИФИКАТОР следующего клика, поэтому она переключается, а не
+      // «берётся в руку»: `i` — та же буква, что и в фотошопе.
+      case 'i':
+        if (!frozen) setPicking((v) => !v);
         break;
       case 'h':
         switchTool('pan');
@@ -1065,7 +1304,7 @@ export function VectorModal({
       ? 'cursor-grab'
       : frozen
         ? 'cursor-default'
-        : tool === 'select' || tool === 'erase'
+        : tool === 'select'
           ? 'cursor-pointer'
           : 'cursor-crosshair';
 
@@ -1085,16 +1324,31 @@ export function VectorModal({
           {...{ [SCREEN_MARK]: '' }}
           className='fixed inset-0 z-[var(--z-modal)] bg-pageBg p-4 focus:outline-none'
           onEscapeKeyDown={(e) => {
-            // Esc-ЛЕСТНИЦА: живое перо → выделение → выход (через одну дверь со стражем).
-            // Без `preventDefault` Radix закрывает экран раньше любой ступени.
-            if (penRef.current) {
+            // Esc-ЛЕСТНИЦА: взведённая пипетка → живое перо → выбранный штрих → области лассо →
+            // выход (через одну дверь со стражем). Без `preventDefault` Radix закрывает экран
+            // раньше любой ступени.
+            if (picking) {
               e.preventDefault();
-              putPen(null);
+              setPicking(false);
+              return;
+            }
+            if (penRef.current) {
+              // Esc ЗАВЕРШАЕТ незамкнутый контур, а не выбрасывает его, — по механике фотошопа:
+              // построенное коммитится штрихом (недострой из одного якоря гаснет сам).
+              e.preventDefault();
+              commitPen();
               return;
             }
             if (selected !== null) {
               e.preventDefault();
               setSelected(null);
+              return;
+            }
+            if (sels.length > 0) {
+              // Deselect: дорожки снимаются все разом — фотошопный ⌘D, посаженный на Esc.
+              e.preventDefault();
+              setSels([]);
+              setActiveSel(null);
               return;
             }
             if (busy || (dirty && !frozen && strokes.length > 0)) {
@@ -1309,15 +1563,30 @@ export function VectorModal({
                 <VectorBrushRail
                   frozen={frozen}
                   brush={brush}
-                  weight={weight}
                   dashed={dashed}
+                  ink={ink}
+                  gauge={gauge}
                   selected={selected}
                   selectedStroke={selectedStroke}
                   onBrush={pickBrush}
-                  onWeight={pickWeight}
+                  onWeight={pickWeightPreset}
                   onDashed={pickDashed}
+                  onInk={pickInk}
+                  onGauge={pickGauge}
+                  nib={nib}
+                  onNib={(px) => setNib(clampNib(px))}
+                  nibTool={isNibTool(tool) ? tool : null}
+                  picking={picking}
+                  onPicking={setPicking}
                   onRemoveSelected={removeSelected}
                   onDeselect={() => setSelected(null)}
+                  sels={sels}
+                  activeSel={activeSel}
+                  onActivateSel={setActiveSel}
+                  onFeatherSel={featherSel}
+                  onCopySel={copySel}
+                  onDeleteSel={deleteSel}
+                  onDropSel={dropSel}
                   vecOn={vecOn}
                   onVecOn={() => setVecOn((v) => !v)}
                   rasterOn={rasterOn}
@@ -1352,8 +1621,10 @@ export function VectorModal({
                           ['line', 'l'],
                           ['freehand', 'b'],
                           ['curve', 'p'],
+                          ['lasso', 'w'],
                           ['select', 'v'],
                           ['erase', 'e'],
+                          ['stamp', 's'],
                           ['pan', 'h'],
                         ] as const
                       ).map(([t, key]) => (
@@ -1363,24 +1634,43 @@ export function VectorModal({
                           pressed={tool === t}
                           disabled={frozen && t !== 'select' && t !== 'pan'}
                           onClick={() => switchTool(t)}
-                          title={`${t} (${key})`}
+                          title={`${TOOL_LABEL[t]} (${key})`}
                         >
-                          {t}
+                          {TOOL_LABEL[t]}
                         </Chip>
                       ))}
                     </ChipRow>
+                    {/* Дверь Make Selection. ПРИСУТСТВИЕ — по инструменту, ДОСТУПНОСТЬ — по пути:
+                        чип, всплывающий на третьем якоре, переносил тулбар на новую строку и
+                        СДВИГАЛ холст на ~25px ПОСРЕДИ жеста — даблклик клал второй якорь в другую
+                        точку мира, а клик по первому якорю промахивался мимо зоны замыкания
+                        (замерено пробой 43). Всё, что стоит над холстом, обязано быть стабильным,
+                        пока идёт путь. */}
+                    {tool === 'curve' && (
+                      <Chip
+                        dashed
+                        disabled={frozen || !pen || pen.anchors.length < 3}
+                        onClick={makeSelectionFromPen}
+                        title='close this path into a lasso selection instead of a stroke (needs 3+ anchors)'
+                      >
+                        path → selection
+                      </Chip>
+                    )}
                     <Text size='nano' variant='label' component='span' className='min-w-0'>
                       {tool === 'curve'
-                        ? pen
-                          ? 'click adds an anchor, drag pulls its handle · enter or double-click finishes · esc drops it'
-                          : 'click to place anchors, drag to bend — a real pen'
-                        : tool === 'select'
-                          ? 'click a stroke — the rail edits its stitch'
-                          : tool === 'erase'
-                            ? 'click a stroke to remove it'
-                            : tool === 'pan'
-                              ? 'drag to move the sheet · scroll pans · pinch zooms'
-                              : 'press and drag to draw · space pans · ⌘z takes back the last gesture'}
+                        ? // ОДНА строка на весь путь: смена текста посреди жеста — тот же сдвиг холста.
+                          'click = corner · drag = curve · grab a handle to bend, alt splits the pair · click the first anchor closes · enter/esc finish'
+                        : tool === 'lasso'
+                          ? 'draw around an area · its strokes can be copied or deleted from the rail · feather is each selection’s own'
+                          : tool === 'select'
+                            ? 'click a stroke — the rail edits its stitch'
+                            : tool === 'erase'
+                              ? 'drag the nib: it CUTS what it covers, the rest of the line stays'
+                              : tool === 'stamp'
+                                ? 'alt-click to take the source, then drag. The strokes under the source are printed under your hand'
+                                : tool === 'pan'
+                                ? 'drag to move the sheet · scroll pans · pinch zooms'
+                                : 'press and drag to draw · space pans · ⌘z takes back the last gesture'}
                     </Text>
                   </div>
 
@@ -1393,6 +1683,9 @@ export function VectorModal({
                     onPointerMove={onStagePointerMove}
                     onPointerUp={onStagePointerUp}
                     onPointerCancel={onStagePointerUp}
+                    // Круг ниба гаснет вместе с уходом курсора: иначе он остался бы висеть на
+                    // краю платы и читался бы как след, которого нет.
+                    onPointerLeave={() => setNibHover(null)}
                     onDoubleClick={() => {
                       if (tool === 'curve' && penRef.current) commitPen();
                     }}
@@ -1448,15 +1741,20 @@ export function VectorModal({
                           {strokes.map((stroke, i) => {
                             const g = strokeGeometry(stroke, PLATE_W, plateH);
                             if (!g.d) return null;
+                            const strokeInk = readInk(stroke.ink) ?? 'currentColor';
                             return (
-                              <g key={i} opacity={selected !== null && selected !== i ? 0.45 : 1}>
+                              <g
+                                key={i}
+                                opacity={selected !== null && selected !== i ? 0.45 : 1}
+                                data-stroke-ink={readInk(stroke.ink) ?? ''}
+                              >
                                 {g.offsets.map((dy, k) => (
                                   <path
                                     key={k}
                                     d={g.d}
                                     transform={`translate(0 ${dy})`}
                                     fill='none'
-                                    stroke='currentColor'
+                                    stroke={strokeInk}
                                     strokeWidth={g.strokeWidth * (selected === i ? 1.8 : 1)}
                                     strokeDasharray={g.dash || undefined}
                                     strokeLinecap='round'
@@ -1466,14 +1764,161 @@ export function VectorModal({
                               </g>
                             );
                           })}
-                          {trace && trace.length > 1 && (
-                            <path
-                              d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
-                              fill='none'
-                              stroke='currentColor'
-                              strokeWidth={6 / zoomK}
-                              strokeDasharray={`${10 / zoomK} ${10 / zoomK}`}
-                            />
+                          {/* ── ОБЛАСТИ ЛАССО. Дорожка — двойной штрих (белая подложка + чёрный
+                              пунктир), видимый на любом растре; ореол растушёвки — блюр в мировых
+                              пикселях, то есть свойство ПЛАТЫ, а не экрана: приближение честно
+                              приближает и мягкость. Неактивная область глушится, а не прячется. */}
+                          {sels.map((s, i) => {
+                            const d = selectionPathD(s.pts, PLATE_W, plateH);
+                            if (!d) return null;
+                            const active = activeSel === i;
+                            return (
+                              <g
+                                key={`sel-${i}`}
+                                opacity={active ? 1 : 0.55}
+                                data-sel={i}
+                                data-sel-active={active ? '1' : '0'}
+                                data-sel-feather={s.feather}
+                              >
+                                {s.feather > 0 && (
+                                  <path
+                                    d={d}
+                                    fill='currentColor'
+                                    opacity={0.12}
+                                    style={{ filter: `blur(${s.feather / 2}px)` }}
+                                    data-sel-halo={i}
+                                  />
+                                )}
+                                <path
+                                  d={d}
+                                  fill={active ? 'currentColor' : 'none'}
+                                  fillOpacity={active ? 0.04 : 0}
+                                  stroke='#fff'
+                                  strokeWidth={2.5 / zoomK}
+                                />
+                                <path
+                                  d={d}
+                                  fill='none'
+                                  stroke='currentColor'
+                                  strokeWidth={1.25 / zoomK}
+                                  strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
+                                  data-sel-ants={i}
+                                />
+                              </g>
+                            );
+                          })}
+                          {trace &&
+                            trace.length > 1 &&
+                            (tool === 'lasso' ? (
+                              /* Живая обводка лассо: лёгкая линия + пунктир к началу — видно, где
+                                 контур замкнётся, когда кнопка отпустится. */
+                              <g>
+                                <path
+                                  d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                                  fill='currentColor'
+                                  fillOpacity={0.05}
+                                  stroke='currentColor'
+                                  strokeWidth={1.5 / zoomK}
+                                />
+                                <line
+                                  x1={trace[trace.length - 1][0] * PLATE_W}
+                                  y1={trace[trace.length - 1][1] * plateH}
+                                  x2={trace[0][0] * PLATE_W}
+                                  y2={trace[0][1] * plateH}
+                                  stroke='currentColor'
+                                  strokeWidth={1 / zoomK}
+                                  strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
+                                  opacity={0.6}
+                                />
+                              </g>
+                            ) : isNibTool(tool) ? (
+                              /* СЛЕД НИБА В НАТУРАЛЬНУЮ ШИРИНУ — не намёк линией, а ровно та
+                                 полоса, которую ластик вырежет (или штамп напечатает). Ширина в
+                                 МИРОВЫХ пикселях и на зум НЕ делится: ниб — свойство платы, и
+                                 приближение обязано приближать и его. */
+                              <path
+                                d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={nib}
+                                strokeLinecap='round'
+                                strokeLinejoin='round'
+                                opacity={0.18}
+                                data-nib-swath=''
+                              />
+                            ) : (
+                              <path
+                                d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={6 / zoomK}
+                                strokeDasharray={`${10 / zoomK} ${10 / zoomK}`}
+                              />
+                            ))}
+                          {/* ── КРУГЛЫЙ НИБ: где он сейчас и откуда штамп берёт. Обводка чёрным по
+                              белому, чтобы круг был виден и на тёмной фотографии. */}
+                          {isNibTool(tool) && nibHover && !trace && (
+                            <g data-nib-cursor='' pointerEvents='none'>
+                              <circle
+                                cx={nibHover[0] * PLATE_W}
+                                cy={nibHover[1] * plateH}
+                                r={nib / 2}
+                                fill='none'
+                                stroke='#fff'
+                                strokeWidth={2.5 / zoomK}
+                              />
+                              <circle
+                                cx={nibHover[0] * PLATE_W}
+                                cy={nibHover[1] * plateH}
+                                r={nib / 2}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={1.25 / zoomK}
+                              />
+                            </g>
+                          )}
+                          {tool === 'stamp' && stampSrc && (
+                            /* ИСТОЧНИК — перекрестие, как в фотошопе, и линия к нибу: без неё
+                               смещение «источник → курсор» невидимо, и печатается непонятно что. */
+                            <g data-stamp-src='' pointerEvents='none'>
+                              {nibHover && (
+                                <line
+                                  x1={stampSrc[0] * PLATE_W}
+                                  y1={stampSrc[1] * plateH}
+                                  x2={nibHover[0] * PLATE_W}
+                                  y2={nibHover[1] * plateH}
+                                  stroke='currentColor'
+                                  strokeWidth={1 / zoomK}
+                                  strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
+                                  opacity={0.5}
+                                />
+                              )}
+                              <circle
+                                cx={stampSrc[0] * PLATE_W}
+                                cy={stampSrc[1] * plateH}
+                                r={nib / 2}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={1 / zoomK}
+                                strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
+                              />
+                              <line
+                                x1={stampSrc[0] * PLATE_W - 9 / zoomK}
+                                y1={stampSrc[1] * plateH}
+                                x2={stampSrc[0] * PLATE_W + 9 / zoomK}
+                                y2={stampSrc[1] * plateH}
+                                stroke='currentColor'
+                                strokeWidth={1.5 / zoomK}
+                              />
+                              <line
+                                x1={stampSrc[0] * PLATE_W}
+                                y1={stampSrc[1] * plateH - 9 / zoomK}
+                                x2={stampSrc[0] * PLATE_W}
+                                y2={stampSrc[1] * plateH + 9 / zoomK}
+                                stroke='currentColor'
+                                strokeWidth={1.5 / zoomK}
+                              />
+                            </g>
                           )}
                           {pen && (
                             /* Превью пера. Толщины делятся на зум: превью — орган ЭКРАНА, его
@@ -1485,36 +1930,77 @@ export function VectorModal({
                                 stroke='currentColor'
                                 strokeWidth={3 / zoomK}
                                 strokeDasharray={`${8 / zoomK} ${6 / zoomK}`}
+                                data-pen-preview=''
                               />
-                              {pen.anchors.map(([x, y], i) => (
-                                <rect
-                                  key={i}
-                                  x={x * PLATE_W - 4 / zoomK}
-                                  y={y * plateH - 4 / zoomK}
-                                  width={8 / zoomK}
-                                  height={8 / zoomK}
-                                  fill='currentColor'
+                              {/* Резинка: кривая, которая родится, если кликнуть сейчас, — с
+                                  кривизной от исходящей рукоятки последнего якоря. */}
+                              {penHover && !pen.drag && !pen.closed && (
+                                <path
+                                  d={penRubberD(pen, penHover, PLATE_W, plateH)}
+                                  fill='none'
+                                  stroke='currentColor'
+                                  strokeWidth={1.5 / zoomK}
+                                  strokeDasharray={`${4 / zoomK} ${3 / zoomK}`}
+                                  opacity={0.7}
+                                  data-pen-rubber=''
                                 />
+                              )}
+                              {pen.anchors.map((an, i) => (
+                                <g key={i}>
+                                  {/* Обе рукоятки КАЖДОГО якоря — их видно и их можно взять. */}
+                                  {(['inH', 'outH'] as const).map((side) => {
+                                    const off = an[side];
+                                    if (!off) return null;
+                                    const hx = (an.a[0] + off[0]) * PLATE_W;
+                                    const hy = (an.a[1] + off[1]) * plateH;
+                                    return (
+                                      <g key={side}>
+                                        <line
+                                          x1={an.a[0] * PLATE_W}
+                                          y1={an.a[1] * plateH}
+                                          x2={hx}
+                                          y2={hy}
+                                          stroke='currentColor'
+                                          strokeWidth={1 / zoomK}
+                                          opacity={0.8}
+                                        />
+                                        <circle
+                                          cx={hx}
+                                          cy={hy}
+                                          r={3.5 / zoomK}
+                                          fill='#fff'
+                                          stroke='currentColor'
+                                          strokeWidth={1.25 / zoomK}
+                                          data-pen-handle={`${i}:${side === 'inH' ? 'in' : 'out'}`}
+                                        />
+                                      </g>
+                                    );
+                                  })}
+                                  {/* Первый якорь при живом пути — полый и крупнее: «клик сюда
+                                      замыкает контур». Остальные — залитые квадраты. */}
+                                  {i === 0 && pen.anchors.length >= 2 ? (
+                                    <rect
+                                      x={an.a[0] * PLATE_W - 5 / zoomK}
+                                      y={an.a[1] * plateH - 5 / zoomK}
+                                      width={10 / zoomK}
+                                      height={10 / zoomK}
+                                      fill='#fff'
+                                      stroke='currentColor'
+                                      strokeWidth={1.5 / zoomK}
+                                      data-pen-anchor={i}
+                                    />
+                                  ) : (
+                                    <rect
+                                      x={an.a[0] * PLATE_W - 4 / zoomK}
+                                      y={an.a[1] * plateH - 4 / zoomK}
+                                      width={8 / zoomK}
+                                      height={8 / zoomK}
+                                      fill='currentColor'
+                                      data-pen-anchor={i}
+                                    />
+                                  )}
+                                </g>
                               ))}
-                              {(() => {
-                                const last = pen.anchors[pen.anchors.length - 1];
-                                const out = pen.outs[pen.outs.length - 1];
-                                if (!last || !out) return null;
-                                const cx = last[0] * PLATE_W;
-                                const cy = last[1] * plateH;
-                                const dx = out[0] * PLATE_W;
-                                const dy = out[1] * plateH;
-                                return (
-                                  <line
-                                    x1={cx - dx}
-                                    y1={cy - dy}
-                                    x2={cx + dx}
-                                    y2={cy + dy}
-                                    stroke='currentColor'
-                                    strokeWidth={1.5 / zoomK}
-                                  />
-                                );
-                              })()}
                             </g>
                           )}
                         </svg>

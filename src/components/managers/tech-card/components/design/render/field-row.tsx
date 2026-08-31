@@ -9,8 +9,8 @@ import Text from 'ui/components/text';
  * `ui/components/row` is the row for a label and a VALUE: it right-aligns and tabulates the second
  * column, which is what makes a stack of figures read as a ledger and what makes a select in it sit
  * in the wrong place. Every organ of this band that puts a control on a ruled line writes this same
- * flex line by hand (`mint-dialog`, `concept-section`, `artifacts-panel`); this is that idiom, once,
- * so the render menu and the 3D menu cannot drift by two pixels of padding.
+ * flex line by hand (`artifacts-panel`, `references-section`); this is that idiom, once, so the render
+ * menu and the 3D menu cannot drift by two pixels of padding.
  */
 export function FieldRow({
   label,

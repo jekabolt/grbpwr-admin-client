@@ -15,10 +15,11 @@ import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
+import { openDoor } from '../doors';
 import { isRunLive } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';
-import { openDoor, type CalloutLike } from '../mint-dialog';
 import type { BoardItem } from '../mood-board';
+import type { CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 
 /**

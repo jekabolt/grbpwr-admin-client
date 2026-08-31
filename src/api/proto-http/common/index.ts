@@ -4386,8 +4386,9 @@ export type DesignRun = {
   // client-supplied provenance is not provenance, it is a claim. Capped at 64 KB.
   inputs: DesignInputSnapshot | undefined;
   // OUTPUT-ONLY copy of the card's fit at launch, so the badge «fit slim ≠ card oversized» can be
-  // drawn on an old picture. Empty = the fit was not stated; the mint asks then. Uploaded plates
-  // never state one at all, which is why MintDesignSheetVersion has uploaded_fit_confirmed.
+  // drawn on an old picture. Empty = the fit was not stated, which is the ordinary case for a
+  // manually uploaded picture: it carries no fit of its own, and stamping one would record a claim
+  // nobody actually made.
   fitAtLaunch: string | undefined;
   // OUTPUT-ONLY render revision — the «r4» caption in the colour history. MAX+1 per card, assigned
   // only for kind=render; 0 on every other kind.
@@ -4532,7 +4533,45 @@ export type DesignColourRecipe = {
   code: string | undefined;
   hex: string | undefined;
   words: string | undefined;
+  // FK media(id); REQUIRED when source=photo, otherwise 0.
+  // SUPERSEDED BY `fabrics` BELOW AND LEFT EXACTLY AS IT WAS, on the rule this file already
+  // applies to fix_target: runs frozen in the history state their swatch here, and re-typing the
+  // field would silently rewrite what those rows say. A NEW run states its cloths in `fabrics` and
+  // ALSO repeats the first one's texture here, because the prompt's order-of-authority paragraph
+  // (designgen/renderprompt.go) reads this field to name the governing photograph by its image
+  // number; a reader takes `fabrics` when it is non-empty and falls back to this scalar otherwise.
   fabricMediaId: number | undefined;
+  // THE CLOTHS OF THIS GARMENT — one entry per cloth, in the order they are stated (V-8: «если у
+  // нас в изделии используется больше чем одна ткань что бы была возможность добавить несколько
+  // тканей»).
+  // ONE FIELD, NOT TWO. A single-cloth run is this list with one member; there is no separate
+  // «one fabric» spelling and there must not be one, or the two would disagree the first time
+  // either grew a property.
+  fabrics: DesignFabricUse[] | undefined;
+};
+
+// DesignFabricUse is ONE cloth of a render submission: which card asset it came from, what it looks
+// like, and WHICH PART OF THE GARMENT it is for.
+// THE FACTS ARE FROZEN, NOT JOINED, and that is the same decision DesignInputSlot.detail_name
+// already records for the same reason: a run's history must still read after the asset is renamed,
+// re-coloured or deleted. asset_id is kept beside the copies as provenance — «which shelf row was
+// this» — and never as the thing a reader resolves in order to draw an old run.
+export type DesignFabricUse = {
+  assetId: number | undefined;
+  name: string | undefined;
+  mediaId: number | undefined;
+  colourCode: string | undefined;
+  colourHex: string | undefined;
+  words: string | undefined;
+  // WHICH PARTS OF THE GARMENT THIS CLOTH IS FOR, in the human's own words, composed from the
+  // marks drawn on the flats («body, back yoke»). EMPTY MEANS THE WHOLE GARMENT — the ordinary
+  // case of a single-cloth run — and NOT «unknown»: a run that states two cloths and no parts is
+  // telling the model to choose, which is a thing a person may legitimately ask for.
+  parts: string | undefined;
+  // The repeat of a PATTERN cloth, in whole millimetres on the finished garment; 0 = a plain
+  // cloth, no repeat stated. It is the answer to «какого размера располагать этот паттерн» (V-7)
+  // and it is a number the model can act on, unlike «large» or «small».
+  repeatMm: number | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -4549,6 +4588,15 @@ export type DesignThreedParams = {
   // panel cannot show what the rotation was assembled out of, and a turntable stitched from
   // different rrevs (i.e. from different colours) would be indistinguishable from a coherent one.
   sourcePictureIds: number[] | undefined;
+  // WHAT BODY the garment is asked to be shown on, when no particular model is named. A person
+  // picks a model when they know whose photographs they want; they pick a body when they only know
+  // the shape. The two are not alternatives to each other on the wire: model_id names an existing
+  // model row, this names a build, and a run may state both (this one then reads as the build the
+  // model is being asked to stand for). Empty = not stated; the generator picks.
+  // NOT AN ENUM ON PURPOSE. The vocabulary of builds is a wording question that belongs to the
+  // people writing the ask, and an enum would freeze today's four words into the contract and into
+  // every already-frozen run's history.
+  bodyType: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -4594,9 +4642,11 @@ export type DesignMoodSnapshot = {
 export type DesignMoodCallout = {
   mediaId: number | undefined;
   text: string | undefined;
-  // The frozen shape — the SAME TechCardAnnotation the sheet freezes and the card draws, at the
-  // same coordinate precision. Its own `text` is left empty: the words that were read live in
-  // `text` above, composed, exactly as DesignSheetCallout arranges the same pair.
+  // The frozen shape — the SAME TechCardAnnotation the card draws, at the same coordinate
+  // precision. Its own `text` is left empty: the words that were read live in `text` above,
+  // composed, exactly the way the card's own callouts arrange the same pair (a note is composed of
+  // part / description / dimensions, and it is the COMPOSED line a reader sees, not the geometry's
+  // label).
   // Unset = this callout carried no shape, or predates the field. That is a readable state and is
   // NOT the same as a zero-area rectangle at the top-left corner, which is what a non-optional
   // geometry would have made it indistinguishable from.
@@ -4636,7 +4686,7 @@ export type DesignInputSlot = {
   // WHICH SLOT, when view_key is `detail`. A view key alone cannot tell two details apart, and the
   // comparison «is this input stale» has no join key without it — so the badge would be
   // uncomputable for every card with more than one detail slot, FOREVER: a snapshot is frozen at
-  // launch and is never repaired later. DesignSheetPlate solved the same problem the same way.
+  // launch and is never repaired later.
   // 0 for the four silhouette sides, which view_key already identifies.
   slotId: number | undefined;
   // COPY of the detail's name at launch, so a snapshot still reads «detail: cuff» after the slot
@@ -4718,8 +4768,8 @@ export type DesignPicture = {
   mixedInput: boolean | undefined;
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
-  // HideDesignPicture: a plate in a slot, in a minted version, feeding a live run, or parenting a
-  // live crop cannot be hidden.
+  // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
+  // hidden.
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -4733,6 +4783,87 @@ export type DesignPicture = {
   // choice. A 3D frame has no slot to be put into (the bench refuses kind=threed), so without this
   // flag «this is the render we go with» had nowhere at all to be written down.
   selected: boolean | undefined;
+};
+
+// DesignAsset is ONE THING THIS CARD IS MADE OF that is not a picture of the garment: a cloth, a
+// pattern built from a cloth, or a piece of hardware. V-11, the owner's own words: «как-то надо
+// хранить отдельно набор асетов тканей паттернов сгенеренных и фурнитуры внутри одной тех карты».
+// ONE MESSAGE FOR THREE SHELVES, AND THE CHOICE IS THE WHOLE DESIGN. `kind` is a member of ONE
+// vocabulary — what this asset IS — and the three members share every operation there is: they are
+// listed on one shelf wall, uploaded through one door, marked onto a flat by one gesture, deleted
+// by one verb and cited by one placement row. Three messages would have made the placement
+// polymorphic (three nullable foreign keys, or a tag beside an id), which is exactly the false
+// split this repository has already paid for twice: two members are one dictionary when the only
+// difference between them is which neighbouring field is left unset.
+// AND `kind` IS NOT TWO KEYS UNDER ONE NAME. It says what the asset is, never how it was made:
+// a pattern's parentage is `derived_from_asset_id`, an edge of its own, so a pattern generated by a
+// model and a pattern tiled from an uploaded swatch are the SAME kind of thing with different
+// provenance — and a fabric may father several patterns at different repeats, which a «fabric with
+// a repeat field» could not express at all.
+// AN ASSET OUTLIVES A RUN. That is the point of the requirement: a run is a submission and dies
+// into history, a cloth is a fact about the style and stays until somebody removes it.
+export type DesignAsset = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  // fabric | pattern | hardware. An open string like every other vocabulary in this file: the
+  // shelf wall is a wording question that belongs to the people using it, and a proto enum would
+  // make the next shelf undeployable until every client is out.
+  kind: string | undefined;
+  // REQUIRED AND SHORT. The prompt cites a cloth by name («contrast rib on the collar») and the
+  // sheet prints it; an unnamed asset reaches the model as the word «fabric», which is the failure
+  // detail slots already went through once.
+  name: string | undefined;
+  // FK media(id): the texture, the pattern tile or the hardware photograph. 0 = the asset is
+  // stated in words and colour only, which is legal — a cloth may be known before it is
+  // photographed.
+  mediaId: number | undefined;
+  // Resolved from media_id at read time. UNSET when media_id is 0 or the file is gone.
+  media: MediaFull | undefined;
+  colourCode: string | undefined;
+  colourHex: string | undefined;
+  // What the human wrote about this asset — «brushed, slight sheen», «matte gunmetal, 15 mm».
+  note: string | undefined;
+  // The asset this one was BUILT FROM — design_asset(id), 0 when it was built from nothing.
+  // Set on a pattern made from a fabric (V-7). It is a soft edge: deleting the fabric leaves the
+  // pattern standing and clears this to 0, because a pattern with a picture and a repeat is still
+  // a usable instruction after its swatch is gone.
+  derivedFromAssetId: number | undefined;
+  // THE REPEAT OF A PATTERN, in whole millimetres on the finished garment — «how large to place
+  // it» (V-7). 0 on a plain cloth and on hardware.
+  repeatMm: number | undefined;
+  // How the pattern sits, degrees clockwise from upright, 0..359. 0 = upright, which is also the
+  // value of every asset that is not a pattern.
+  rotationDeg: number | undefined;
+  ordinal: number | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// DesignAssetPlacement is ONE MARK ON ONE FLAT saying that a particular asset belongs THERE.
+// IT IS THE ONE ANSWER TO THREE OF THE OWNER'S REQUIREMENTS, and they are one requirement wearing
+// three hats: «разметить на флетах где какая фурнитура» (V-6), «показать примером на флете как и
+// какого размера распологать этот паттерн» (V-7) and «на флетах показать маркером какая часть
+// какой тканью» (V-8). All three are «this thing, on this drawing, here», so all three are this
+// row. Three separate mechanisms would have been three geometries drifting apart on one picture.
+// THE GEOMETRY IS THE CARD'S OWN TechCardAnnotation, reused verbatim for the reason stated at the
+// top of this file: there is ONE annotation primitive in this system and a shape drawn on a flat
+// must stay the same shape wherever it is read.
+// IT HANGS OFF THE PICTURE, NOT OFF THE BENCH SLOT. Coordinates are fractions of an IMAGE; moving
+// them onto whatever plate happens to stand in the front slot tomorrow would point them at pixels
+// nobody drew them on. A slot that is re-marked therefore shows the marks of the plate it now
+// holds — which is correct — and the old plate keeps its own.
+export type DesignAssetPlacement = {
+  id: number | undefined;
+  assetId: number | undefined;
+  pictureId: number | undefined;
+  // WHERE. Its `text` is left empty: the words live in `note` below, composed the same way the
+  // band's frozen callouts arrange the same pair (see DesignMoodCallout).
+  annotation: TechCardAnnotation | undefined;
+  // What this mark says beyond naming the asset — «cut on the bias here», «two of these».
+  note: string | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
 };
 
 // DesignBatch is one upload gesture: the shelf stamp «uploaded · Т. · 14:41 · 12.4 MB» and the
@@ -4815,78 +4946,10 @@ export type DesignBenchSlot = {
   // is a flat slot, and every caller written before it keeps meaning the bench it meant.
   // ONE AXIS WAS A DEFECT, not a simplification. With view alone, a fabric render of the front and
   // the technical flat of the front are the same key: placing the render DISPLACES the flat, and
-  // the next mint lays a colour render onto a technical line-drawing sheet. Uniqueness is
+  // the bench then offers a colour render where the technical line-drawing stood — two different
+  // answers to «what is the front», with the second silently erasing the first. Uniqueness is
   // (tech_card_id, kind, exclusive_key).
   kind: string | undefined;
-};
-
-// DesignSheetVersion is a MINTED, FROZEN sheet: Rev.N as it was printed. Its plates and callouts
-// are rows of their own, not a JSON blob — a version must still print a year from now, so its
-// bytes must not be erasable, and that is expressed by a foreign key the media library can see.
-export type DesignSheetVersion = {
-  id: number | undefined;
-  versionNumber: number | undefined;
-  clientRequestId: string | undefined;
-  // The minter explicitly consented to a composition of mixed provenance. Without consent such a
-  // mint is refused (FailedPrecondition: mixed_needs_consent) rather than silently blessed.
-  mixedConsent: boolean | undefined;
-  // WHICH ACT gave birth to this version: callout | print | release | share. There is no «accept»
-  // button anywhere — a version is a by-product of an act, never a ceremony of its own.
-  mintedVia: string | undefined;
-  mintedBy: string | undefined;
-  mintedAt: wellKnownTimestamp | undefined;
-  plates: DesignSheetPlate[] | undefined;
-  // The frozen callouts of this version, at most 200 — the same readability ceiling the card's
-  // annotations already carry.
-  callouts: DesignSheetCallout[] | undefined;
-};
-
-// DesignSheetPlate is one frozen image of a version, with everything needed to explain a year later
-// what was printed and where it came from.
-export type DesignSheetPlate = {
-  viewKey: string | undefined;
-  // The bench slot this plate came from, or 0 if that slot has since been deleted. The version
-  // survives the slot's death, which is why detail_name below is a COPY and not a lookup.
-  slotId: number | undefined;
-  detailName: string | undefined;
-  media: MediaFull | undefined;
-  // THE HASH AT MINT — what this version actually froze. Empty = the media predates 0336.
-  // IT LIVES HERE, unlike on DesignPicture, and the asymmetry is the point rather than an
-  // oversight: a plate of a minted version is a FROZEN fact («these are the bytes the sheet was
-  // signed over»), and it must survive even a future recomputation of media.content_hash. A live
-  // picture has nothing to freeze — it is the current file — so for it a second copy could only
-  // disagree with the first.
-  contentHash: string | undefined;
-  layerRev: number | undefined;
-  sourceClass: string | undefined;
-  runId: number | undefined;
-  fitStamp: string | undefined;
-  mixedInput: boolean | undefined;
-  ordinal: number | undefined;
-};
-
-// DesignSheetCallout is one frozen callout of a version. Geometry is a TechCardAnnotation — the
-// system's single annotation primitive, at the same coordinate precision the card's annotations
-// already enforce.
-export type DesignSheetCallout = {
-  number: number | undefined;
-  media: MediaFull | undefined;
-  // The frozen shape: kind, points, colour, dashes. Its own `text` field is left EMPTY — the note
-  // that gets printed lives in `text` below, because a card callout's note is composed of
-  // part / description / dimensions and it is the COMPOSED line that goes on paper.
-  annotation: TechCardAnnotation | undefined;
-  text: string | undefined;
-};
-
-// DesignSheetIssue is one APPEND-ONLY journal line of a version: minted | printed | shared.
-// Reprinting a sheet does NOT mint a new version — it writes a line here. That distinction is the
-// whole reason the journal exists.
-export type DesignSheetIssue = {
-  id: number | undefined;
-  versionNumber: number | undefined;
-  action: string | undefined;
-  actor: string | undefined;
-  createdAt: wellKnownTimestamp | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
@@ -4902,7 +4965,8 @@ export type DesignEditLayer = {
   rev: number | undefined;
   // The layer's strokes, JSON-encoded. Capped at 512 KB — one vector edit; beyond that the answer
   // is «too many strokes, split it», not a slower save. There is deliberately no revision history:
-  // a minted version pins the content_hash of the already-rasterised file.
+  // the layer is a working surface, and what gets used downstream is the FLATTENED file, which is
+  // an ordinary media row with its own identity and its own content hash.
   // SERVED ONLY BY GetDesignEditLayer, AND LEFT EMPTY EVERYWHERE ELSE. GetDesignBand lists the
   // layers without their strokes on purpose: 512 KB is the cap per LAYER, a card may hold several,
   // and shipping them all would make every open of the tab cost megabytes to draw a list of

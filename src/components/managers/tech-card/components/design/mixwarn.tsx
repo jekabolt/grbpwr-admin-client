@@ -14,8 +14,8 @@ import { batchHandle, shelfBatchOrdinals } from './handles';
  * and this bar says exactly that and no more.
  *
  * IT ASSERTS NOTHING ABOUT THE PICTURES THEMSELVES. Grey, not red: two uploads MAY draw one garment
- * perfectly well. The bar does not forbid a mint, it refuses to imply a coherence it cannot check —
- * false green is the single outcome this organ exists to prevent.
+ * perfectly well. The bar forbids nothing at all — it refuses to imply a coherence it cannot check,
+ * and false green is the single outcome this organ exists to prevent.
  *
  * THE OTHER TWO BRANCHES OF THE PROTOTYPE ARE NOT BUILT, AND THAT IS DELIBERATE. Its red «FRONT is
  * behind» compares two GENERATION RUNS, and its second grey branch compares hand files against

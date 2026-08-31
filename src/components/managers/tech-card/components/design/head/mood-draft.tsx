@@ -23,13 +23,15 @@ import { draftIdeaRefusal, useDraftDesignIdea } from './use-draft-idea';
  * «dismissed». Автозапись прозы в концепт означала бы, что подпись стиля, которую печатает тех-пак
  * и которая входит в дайджест DESIGN, меняется от нажатия одной кнопки.
  *
- * ЧТО ЧИТАЕТСЯ. Сервер собирает вход сам (картинки доски, общая записка, карточка) — клиент НЕ шлёт
- * ему ни одного из этих полей: провенанс, который подаёт вызывающий, — это заявка, а не провенанс.
- * Поэтому кнопка не имеет тела запроса, кроме id карточки и ключа идемпотентности.
+ * ЧТО ЧИТАЕТСЯ. Сервер собирает вход сам (картинки доски, описание = `concept` плюс легаси
+ * `moodNote`, выноски с привязкой к картинке и месту) — клиент НЕ шлёт ему ни одного из этих
+ * полей: провенанс, который подаёт вызывающий, — это заявка, а не провенанс. Поэтому кнопка не
+ * имеет тела запроса, кроме id карточки и ключа идемпотентности.
  *
- * ЧЕРНОВИК ПРОТУХАЕТ, И СРАВНИВАЕТСЯ ИМЕННО ТО, ЧТО ЧЕЛОВЕК ПРАВИТ РУКАМИ: состав доски, общая
- * записка И ТЕКСТЫ МУДБОРДНЫХ УКАЗАНИЙ. Слепок из «числа плиток + записки» молчал ровно тогда,
- * когда работа шла: дописал пометку — черновик по-прежнему «свежий», хотя читал он другую доску.
+ * ЧЕРНОВИК ПРОТУХАЕТ, И СРАВНИВАЕТСЯ ИМЕННО ТО, ЧТО ЧЕЛОВЕК ПРАВИТ РУКАМИ: состав доски, описание
+ * (после V-16 — `concept`) И ТЕКСТЫ МУДБОРДНЫХ УКАЗАНИЙ. Слепок из «числа плиток + записки» молчал
+ * ровно тогда, когда работа шла: дописал пометку — черновик по-прежнему «свежий», хотя читал он
+ * другую доску.
  *
  * ЗДЕСЬ НЕТ `useFieldArray`, И ЭТО НЕ СЛУЧАЙНОСТЬ. Единственный экземпляр поля-массива над
  * `callouts` во всём дереве STUDIO живёт в `design/mood-callouts.tsx`; в react-hook-form 7.62
@@ -41,10 +43,55 @@ import { draftIdeaRefusal, useDraftDesignIdea } from './use-draft-idea';
  * блок в блоке.
  */
 
+/** Потолок поля `concept` — ЕДИНСТВЕННОЕ написание этого числа в полосе. Его же держит textarea
+ *  доски (mood-board.tsx) и проверка addLine ниже: два разных потолка на одно поле — это способ
+ *  молча потерять хвост описания на том из них, который меньше. */
+export const CONCEPT_MAX = 2000;
+
 /** Резка ответа на предложения-кандидаты. Без lookbehind: он есть не во всяком движке, а цена
  *  ошибки — пустой список там, где текст пришёл. */
 function sentences(text: string): string[] {
   return (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * ТРИ СЕКЦИИ ОТВЕТА (V-19). Системный промпт бэкенда просит ровно три заголовка — DESCRIPTION /
+ * DESIGN ASPECTS / MISSING CALLOUTS, — потому что у трёх ответов три разные судьбы: описание
+ * предлагается СТРОКАМИ в `concept`, аспекты — совет для блока construction, недостающие выноски —
+ * совет вернуться к доске и поставить пин. Смешанные в одну прозу, они предлагались бы в концепт
+ * ЦЕЛИКОМ — и «поставь пин на воротник второй картинки» уезжало бы на печать как текст описания.
+ *
+ * МОДЕЛЬ ВПРАВЕ ОСЛУШАТЬСЯ. Ответ без заголовков — законный (старый бинарь сервера, другая модель),
+ * поэтому null здесь — не ошибка, а команда «покажи как раньше»: всё прозой, всё предлагается.
+ */
+function parseDraftSections(
+  text: string,
+): { description: string; aspects: string[]; missing: string[] } | null {
+  const heads = /^\s*(?:#+\s*)?(description|design aspects|missing callouts)\b\s*[:—–-]?\s*/i;
+  let current: 'description' | 'aspects' | 'missing' | null = null;
+  const bins = { description: [] as string[], aspects: [] as string[], missing: [] as string[] };
+  for (const raw of text.split('\n')) {
+    const m = raw.match(heads);
+    if (m) {
+      const name = m[1].toLowerCase();
+      current = name === 'description' ? 'description' : name === 'design aspects' ? 'aspects' : 'missing';
+      const rest = raw.slice(m[0].length).trim();
+      if (rest) bins[current].push(rest);
+      continue;
+    }
+    if (current) bins[current].push(raw);
+  }
+  if (!current) return null;
+  /** Маркер списка снимается: «- » перед советом — структура ответа, а не его слова. */
+  const lines = (xs: string[]) =>
+    xs
+      .map((s) => s.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, '').trim())
+      .filter(Boolean);
+  return {
+    description: bins.description.join('\n').trim(),
+    aspects: lines(bins.aspects),
+    missing: lines(bins.missing),
+  };
 }
 
 const hhmm = () =>
@@ -54,7 +101,11 @@ const hhmm = () =>
 
 /** Слепок доски, по которому черновик понимает, что он протух. */
 type Draft = {
+  /** Предложения ОПИСАНИЯ — единственная часть ответа, которой предлагается стать текстом. */
   lines: string[];
+  /** Советы двух других секций (V-19): читаются глазами, в поля не пишутся ничем. */
+  aspects: string[];
+  missing: string[];
   readPictures: number;
   readNotes: number;
   time: string;
@@ -96,11 +147,13 @@ export function MoodDraft({
   const draftIdea = useDraftDesignIdea(techCardId);
 
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as { mediaId?: number }[];
-  const moodNote = (useWatch({ control, name: 'moodNote' }) ?? '') as string;
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as {
     mediaId?: number;
     description?: string;
   }[];
+  // ПОСЛЕ V-16 ЗАПИСКА ДОСКИ — ЭТО `concept`, поэтому и слепок свежести считается по нему:
+  // `moodNote` больше не редактируется нигде, и черновик, тухнущий от поля без редактора, не
+  // протух бы никогда.
   const concept = (useWatch({ control, name: 'concept' }) ?? '') as string;
 
   const boardIds = useMemo(
@@ -117,8 +170,8 @@ export function MoodDraft({
   );
 
   const fingerprint = useMemo(
-    () => JSON.stringify([[...boardIds], moodNote.trim(), boardNotes]),
-    [boardIds, moodNote, boardNotes],
+    () => JSON.stringify([[...boardIds], concept.trim(), boardNotes]),
+    [boardIds, concept, boardNotes],
   );
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -158,8 +211,13 @@ export function MoodDraft({
             showMessage('the run came back with no text — nothing to offer', 'error');
             return;
           }
+          // Ответ по возможности раскладывается на три секции; ответ без заголовков законен и
+          // целиком становится кандидатами описания (см. parseDraftSections).
+          const parsed = parseDraftSections(text);
           setDraft({
-            lines: sentences(text),
+            lines: sentences(parsed ? parsed.description : text),
+            aspects: parsed?.aspects ?? [],
+            missing: parsed?.missing ?? [],
             readPictures: snapshot.pictures,
             readNotes: snapshot.notes,
             time: hhmm(),
@@ -179,8 +237,27 @@ export function MoodDraft({
 
   function addLine(line: string) {
     const current = (getValues('concept') ?? '').trim();
-    setValue('concept', current ? `${current}\n${line}` : line, { shouldDirty: true });
+    const next = current ? `${current}\n${line}` : line;
+    // Потолок поля проверяется ДО записи, и отказ говорит числа: молча обрезанное описание — это
+    // предложение, потерявшее хвост без единого слова об этом.
+    if (next.length > CONCEPT_MAX) {
+      showMessage(
+        `this line does not fit — the description holds ${CONCEPT_MAX} characters and it is already ${current.length}`,
+        'error',
+      );
+      return;
+    }
+    setValue('concept', next, { shouldDirty: true });
     setTaken((prev) => [...prev, line]);
+    // СВОЯ ЖЕ ЗАПИСЬ НЕ ПРОТУХАЕТ ЧЕРНОВИК. Слепок теперь читает `concept`, и без этой строки
+    // первое же «add» поднимало бы плашку «the moodboard has changed since» — правдой она была бы
+    // буквально, но говорила бы человеку «перечитай доску» за его собственный клик. Рукописная
+    // правка описания слепок по-прежнему рвёт, и это честно: модель читала другой текст.
+    setDraft((prev) =>
+      prev
+        ? { ...prev, fingerprint: JSON.stringify([[...boardIds], next.trim(), boardNotes]) }
+        : prev,
+    );
   }
 
   // Предложение, уже стоящее в концепте (его добавили здесь, набрали руками или принесли из
@@ -206,8 +283,10 @@ export function MoodDraft({
           draft the idea ▸
         </Button>
         <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
-          reads the pictures, the shared note and every note pinned on them, and offers PROSE for
-          the concept. <b>Nothing is written until you add a line.</b>
+          reads the pictures, the description and every note pinned on them — knowing which
+          picture and which spot each note marks — and offers description lines, the design
+          aspects it sees, and the callouts that are missing.{' '}
+          <b>Nothing is written until you add a line.</b>
         </Text>
       </div>
 
@@ -232,7 +311,7 @@ export function MoodDraft({
             )}
           </div>
 
-          {offered.length === 0 ? (
+          {offered.length === 0 && draft.aspects.length === 0 && draft.missing.length === 0 ? (
             <Text size='micro' variant='label' component='p' className='mt-1'>
               Nothing new: every sentence of the draft is already in the description, added or
               dismissed.
@@ -263,10 +342,42 @@ export function MoodDraft({
                     {line}
                   </Text>
                   <Text size='nano' variant='label' component='span' className='shrink-0'>
-                    moodboard
+                    description
                   </Text>
                 </div>
               ))}
+
+              {/* СОВЕТЫ ДВУХ ДРУГИХ СЕКЦИЙ — БЕЗ ЧИПОВ, И ЭТО РЕШЕНИЕ. Аспект принимают в блоке
+                  construction, выноску ставят на самой картинке; кнопка «add» здесь писала бы
+                  совет в печатаемый концепт — ровно то смешение, ради которого ответ разрезан. */}
+              {draft.aspects.length > 0 && (
+                <div className='mt-1.5'>
+                  <Text size='nano' variant='label' component='p' className='uppercase'>
+                    design aspects to consider — take the ones that are true into construction
+                  </Text>
+                  {draft.aspects.map((line) => (
+                    <div key={line} className='border-b border-hairline py-1'>
+                      <Text size='micro' component='p' className='break-words'>
+                        {line}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {draft.missing.length > 0 && (
+                <div className='mt-1.5'>
+                  <Text size='nano' variant='label' component='p' className='uppercase'>
+                    callouts that are missing — pin them on the pictures above
+                  </Text>
+                  {draft.missing.map((line) => (
+                    <div key={line} className='border-b border-hairline py-1'>
+                      <Text size='micro' component='p' className='break-words'>
+                        {line}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

@@ -50,6 +50,28 @@ import {
  * `readLayer` refuses to let an unknown version be overwritten, so a curve document is protected
  * from an older tab that would silently flatten it — while a drawing that holds nothing but
  * polylines still goes out as `v: 1` and stays readable everywhere it has always been readable.
+ *
+ * ─── ЧТО ДОБАВИЛА ВТОРАЯ ПОЛОВИНА V-9: ЦВЕТ И РАЗМЕР (`v: 3`) ────────────────────────────────
+ *
+ * Владелец просил кисть «которую можно гибко настраивать в том числе цвет» и шов, у которого есть
+ * «более гибкая настройка размера». Ни того ни другого формат не держал: цвета в нём не было ВОВСЕ
+ * (чёрное зашито в четырёх местах), а размер существовал ровно в трёх ступенях `weight`. Оба
+ * поля — НЕОБЯЗАТЕЛЬНЫЕ, и их отсутствие означает ровно то, чем штрих был вчера.
+ *
+ *  - `ink` — цвет, `#rrggbb`. Нет поля — чёрный.
+ *  - `gauge` — РАЗМЕР ШВА одним числом, в пикселях платы (мир шириной 1000). Он же толщина нити,
+ *    он же масштаб фигуры стежка: длина волны зигзага, зазор между рядами двухигольного, шаг
+ *    гребёнки оверлока и длина стежка челночной строчки — все они теперь КРАТНЫ этому числу, а не
+ *    доли коробки, как были. Одна ручка, потому что на чертеже шов — один предмет: тяжёлая
+ *    отделочная строчка это и толстая нить, И длинный стежок, а «тонкая нить с гигантским
+ *    зигзагом» — не шов, а ошибка настройки, ради которой не стоит заводить второй орган.
+ *    Калибровка выбрана так, что `thin` (6) воспроизводит прежние константы ЧИСЛО В ЧИСЛО.
+ *
+ * `weight` НЕ СНЯТ И ПИШЕТСЯ ВСЕГДА — это старое написание того же числа. Читатель строго
+ * приоритетен: есть `gauge` — правит он, нет — три ступени. И `gauge` УХОДИТ НА ПРОВОД ТОЛЬКО
+ * КОГДА ОТЛИЧАЕТСЯ ОТ СВОЕЙ СТУПЕНИ, поэтому рисунок, сделанный тремя пресетами и чёрным, остаётся
+ * байт в байт документом `v: 1`/`v: 2` — версия поднимается лишь тогда, когда в ней ДЕЙСТВИТЕЛЬНО
+ * лежит то, чего старая вкладка не поймёт, тем же доводом, что и у кривых.
  */
 
 /** The nine machine kinds, with the ISO 4915 stitch class where one exists. */
@@ -117,7 +139,84 @@ export type VectorStroke = {
    * kept whenever it is well formed, empty of curves or not.
    */
   segs?: (CubicSeg | null)[];
+  /**
+   * ЦВЕТ НИТИ, `#rrggbb` строчными. Отсутствие — чёрный, то есть ровно то, чем был всякий штрих до
+   * появления поля; поэтому чёрный рисунок не несёт ключа вовсе и остаётся прежними байтами.
+   */
+  ink?: string;
+  /**
+   * РАЗМЕР ШВА в пикселях платы (мир шириной 1000): толщина нити И масштаб фигуры стежка разом.
+   * Отсутствие — значение ступени `weight`. См. довод в шапке про одну ручку.
+   */
+  gauge?: number;
 };
+
+/** Чёрный — цвет штриха, у которого цвет не назван. */
+export const DEFAULT_INK = '#000000';
+
+/**
+ * Цвет с провода или из органа. `#rgb` разворачивается, регистр приводится; всё остальное — не
+ * цвет, и вызывающий получает `undefined`, то есть «чёрный», а не молча покрашенный чем попало.
+ */
+export function readInk(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const s = raw.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(s)) return s;
+  if (/^#[0-9a-f]{3}$/.test(s)) return `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`;
+  return undefined;
+}
+
+/**
+ * Три ступени `weight` — в пикселях платы. Числа не выбраны заново: это ровно прежняя таблица долей
+ * коробки (0.003 / 0.006 / 0.01), умноженная на ширину платы, поэтому штрих без `gauge` рисуется
+ * тем же весом, что вчера.
+ */
+export const WEIGHT_GAUGE: Record<StrokeWeight, number> = {
+  hairline: 3,
+  thin: 6,
+  bold: 10,
+};
+
+/** Мир, в пикселях которого назван `gauge`, — та же плата шириной 1000, что у растушёвки лассо. */
+export const GAUGE_REF = 1000;
+export const MIN_GAUGE = 1;
+export const MAX_GAUGE = 60;
+
+/** Размер к записи: десятые доли пикселя платы. Дальше — цифры, которых не видно ни на одном зуме. */
+export const roundGauge = (n: number) =>
+  Math.round(Math.min(MAX_GAUGE, Math.max(MIN_GAUGE, n)) * 10) / 10;
+
+/**
+ * РАЗМЕР ШТРИХА, ОДНОЙ ФУНКЦИЕЙ И С ЯВНЫМ СТАРШИНСТВОМ: число, если оно названо, иначе ступень.
+ * Единственный читатель обоих полей — так «две записи одной величины» не превращаются в два
+ * источника истины, которые разъедутся первой же правкой.
+ */
+export function strokeGauge(stroke: VectorStroke): number {
+  const g = stroke.gauge;
+  if (typeof g === 'number' && Number.isFinite(g)) return roundGauge(g);
+  return WEIGHT_GAUGE[stroke.weight] ?? WEIGHT_GAUGE.thin;
+}
+
+/** Ближайшая ступень к числу — ею подписывается `weight` у штриха, рождённого числом. */
+export function gaugeWeight(px: number): StrokeWeight {
+  let best: StrokeWeight = 'thin';
+  let bestD = Infinity;
+  for (const w of ['hairline', 'thin', 'bold'] as const) {
+    const d = Math.abs(WEIGHT_GAUGE[w] - px);
+    if (d < bestD) {
+      bestD = d;
+      best = w;
+    }
+  }
+  return best;
+}
+
+/** Уходит ли `gauge` на провод: только когда он ОТЛИЧАЕТСЯ от своей ступени (см. довод в шапке). */
+function emitsGauge(stroke: VectorStroke): boolean {
+  const g = stroke.gauge;
+  if (typeof g !== 'number' || !Number.isFinite(g)) return false;
+  return roundGauge(g) !== WEIGHT_GAUGE[stroke.weight];
+}
 
 /**
  * Does this stroke carry an explicit segment list? The test is structural rather than «is `segs`
@@ -154,12 +253,13 @@ export const MAX_STROKES_BYTES = 512 * 1024;
 /**
  * The highest document version this bundle can read, and the one it writes when a curve is present.
  *
- * `1` — anchors only. `2` — anchors plus an optional per-interval cubic list. The number is raised
- * ONLY for a document that actually holds curvature (see `writeLayer`), because raising it costs
- * every older tab the right to save this layer at all — which is the correct price for a drawing an
- * older tab would silently straighten, and far too high a price for one it would read perfectly.
+ * `1` — anchors only. `2` — anchors plus an optional per-interval cubic list. `3` — plus a stroke's
+ * own colour and size. The number is raised ONLY for a document that actually holds the thing (see
+ * `writeLayer`), because raising it costs every older tab the right to save this layer at all —
+ * which is the correct price for a drawing an older tab would silently straighten or repaint black,
+ * and far too high a price for one it would read perfectly.
  */
-export const FORMAT_VERSION = 2;
+export const FORMAT_VERSION = 3;
 
 /**
  * The most points one stroke may keep. Not a server rule — a readability one: a freehand trace
@@ -258,6 +358,15 @@ function readStroke(raw: unknown, report: { broken: boolean }): VectorStroke | n
   // ASSIGNED ONLY WHEN THERE IS ONE, so a legacy stroke round-trips WITHOUT the key ever appearing
   // in the JSON — which is what keeps a polyline-only document at `v: 1` and byte-identical.
   if (segs) stroke.segs = segs;
+  // ЦВЕТ И РАЗМЕР — ПО ТОМУ ЖЕ ПРАВИЛУ. Непонятный цвет или нечисловой размер НЕ ломают документ:
+  // в отличие от рассинхронизированных сегментов, они не двигают ни одной линии — штрих просто
+  // остаётся чёрным и своей ступени, а это ровно то, чем он был бы на прошлом бандле.
+  const ink = readInk(r.ink);
+  if (ink) stroke.ink = ink;
+  const gauge = Number(r.gauge);
+  if (r.gauge !== undefined && r.gauge !== null && Number.isFinite(gauge)) {
+    stroke.gauge = roundGauge(gauge);
+  }
   return stroke;
 }
 
@@ -321,10 +430,20 @@ export function readLayer(raw?: string | null, fallbackRatio = DEFAULT_RATIO): L
  */
 export function writeLayer(strokes: VectorStroke[], ratio: number): string {
   const curved = strokes.some(hasSegments);
+  // Версия — самая высокая, какая КОМУ-ТО из штрихов действительно нужна. Цвет и размер стоят на
+  // третьей ступени: старая вкладка прочла бы такой документ, но перекрасила бы его в чёрный и
+  // свела к трём весам, а молча потерянный цвет ничем не лучше молча выпрямленной кривой.
+  const painted = strokes.some((s) => !!readInk(s.ink) || emitsGauge(s));
   return JSON.stringify({
-    v: curved ? FORMAT_VERSION : 1,
+    v: painted ? 3 : curved ? 2 : 1,
     ratio: round4(ratio),
     strokes: strokes.map((s) => {
+      // ПОРЯДОК КЛЮЧЕЙ И ИХ ОТСУТСТВИЕ — часть обещания «старый слой уходит теми же байтами»:
+      // необязательные ключи дописываются В КОНЕЦ и только когда им есть что сказать.
+      const paint: { ink?: string; gauge?: number } = {};
+      const ink = readInk(s.ink);
+      if (ink) paint.ink = ink;
+      if (emitsGauge(s)) paint.gauge = roundGauge(s.gauge as number);
       if (!hasSegments(s)) {
         return {
           tool: s.tool,
@@ -335,6 +454,7 @@ export function writeLayer(strokes: VectorStroke[], ratio: number): string {
             s.pts.map(([x, y]) => ({ x, y })),
             MAX_POINTS_PER_STROKE,
           ).map((p) => [round4(p.x), round4(p.y)]),
+          ...paint,
         };
       }
       return {
@@ -346,6 +466,7 @@ export function writeLayer(strokes: VectorStroke[], ratio: number): string {
         segs: s.segs.map((c) =>
           c ? [round4(c[0]), round4(c[1]), round4(c[2]), round4(c[3])] : null,
         ),
+        ...paint,
       };
     }),
   });
@@ -475,28 +596,24 @@ export type StrokeGeometry = {
   offsets: number[];
 };
 
-const WEIGHT_FRACTION: Record<StrokeWeight, number> = {
-  hairline: 0.003,
-  thin: 0.006,
-  bold: 0.01,
-};
+/* Прежняя таблица `WEIGHT_FRACTION` (доли коробки 0.003 / 0.006 / 0.01) переехала выше и стала
+   `WEIGHT_GAUGE` в пикселях платы (3 / 6 / 10) — те же числа в другой единице. Её больше нет
+   здесь, потому что вес перестал быть отдельной величиной: он ЕСТЬ размер шва (`gauge`). */
 
 /**
- * Per-stitch dash rhythm, in scaleRef fractions: [ink, gap]. Empty = solid.
+ * ПУНКТИР ОСТАЛСЯ РОВНО ОДИН — «ЭТО НЕ ШОВ».
  *
- * ЗДЕСЬ ОСТАЛИСЬ ТОЛЬКО ШВЫ, ЧЬЯ ФОРМА — ДЕЙСТВИТЕЛЬНО РИТМ. Зигзаг, оверлок и потайной раньше
- * тоже жили в этой таблице, и это была подмена: зигзаг рисовался мелким пунктиром, а не волной,
- * и на экране был неотличим от потрёпанной прямой. Теперь их вид строится геометрией ниже
- * (`wavePath` и родня), а пунктир несут челночная строчка и каверстич — у них верх шва и есть
- * череда стежков-чёрточек вдоль прямой.
+ * Челночная строчка и каверстич жили в таблице `STITCH_DASH` и рисовались `stroke-dasharray`, и это
+ * была последняя подмена в этом файле: `dasharray` — ритм ЗАЛИВКИ линии, а не стежки. Он не знает,
+ * где линия кончилась (обрывается на полустежке), не знает, где она согнулась, и на кривой раздаёт
+ * штрихи по длине заливки, а не по проколам иглы. Ровно этим шов и «не похож на реальность».
+ * Теперь оба строятся `stitchPath` — списком настоящих хорд от прокола до прокола, — а пунктиром
+ * говорится единственная вещь, которая ритмом и является: линия построительная, её не шьют.
+ *
+ * Числа — КРАТНЫЕ РАЗМЕРУ ШВА (`gauge`), а не доли коробки: на `thin` (6) это прежние 0.02/0.015
+ * scaleRef число в число.
  */
-const STITCH_DASH: Record<string, [number, number]> = {
-  lock: [0.015, 0.008],
-  cover: [0.015, 0.008],
-};
-
-/** A construction line's own rhythm — it outranks the stitch's, because it means «not sewn». */
-const CONSTRUCTION_DASH: [number, number] = [0.02, 0.015];
+const CONSTRUCTION_DASH: [number, number] = [3.33, 2.5];
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // ФОРМА ШВА — ГЕОМЕТРИЯ ВДОЛЬ ЛИНИИ, а не только ритм штриховки.
@@ -510,22 +627,41 @@ const CONSTRUCTION_DASH: [number, number] = [0.02, 0.015];
 // менялся: потребители по-прежнему рисуют `offsets` (теперь всегда `[0]`), и все четыре
 // поверхности обновились, не узнав об этом.
 //
-// Все размеры — доли scaleRef, как и веса: образец в пикере, сцена, экспорт и растр обязаны
-// показывать ОДНУ И ТУ ЖЕ волну, отличающуюся только масштабом.
+// ВСЕ РАЗМЕРЫ — КРАТНЫЕ РАЗМЕРУ ШВА (`gauge`), а не доли коробки. Прежде фигура стежка не зависела
+// от веса вовсе: волосяной зигзаг и жирный зигзаг несли ОДНУ волну в 30 юнитов, и «сделать шов
+// крупнее» было физически нечем — ровно жалоба владельца про «более гибкую настройку размера».
+// Теперь одна ручка тянет весь шов: нить, длину стежка, зазор между рядами, шаг гребёнки.
+// Калибровка выбрана так, что `thin` (6 пикселей платы) даёт ПРЕЖНИЕ доли число в число:
+// 5 × 0.006 = 0.03 — та самая длина волны зигзага, и так по всей таблице.
+//
+// Образец в пикере, сцена, экспорт и растр обязаны показывать ОДИН И ТОТ ЖЕ шов, отличающийся
+// только масштабом коробки.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Зигзаг 304: настоящая треугольная волна. */
-const ZIG = { wl: 0.03, amp: 0.011 };
+const ZIG = { wl: 5, amp: 1.8 };
 /** Закрепка: та же волна, но плотная и тяжёлая — брусок плотных стежков, а не линия. */
-const BART = { wl: 0.0055, amp: 0.007, widthK: 1.6 };
-/** Зазор между параллельными рядами двухигольного, каверстича и флэтлока. */
-const RAIL_GAP = 0.012;
+const BART = { wl: 0.92, amp: 1.17, widthK: 1.6 };
+/** Зазор между рядами двухигольного (401×2) и основой флэтлока — расстановка игл на игольнице. */
+const RAIL_GAP = 2;
+/**
+ * Каверстич 406 шире двухигольного, и это не вкус: у распошивальной машины иглы стоят на 4–6 мм,
+ * у двухигольной обычно на 2–4. Прежде оба рисовались ОДНИМ `railsPath` с одним зазором и были
+ * неотличимы друг от друга — два разных ISO-класса, дававшие одинаковую картинку.
+ */
+const COVER_GAP = 3.2;
 /** Внутренний зигзаг флэтлока — петлители между двумя рядами; амплитуда упирается в сами ряды. */
-const FLAT_ZIG_WL = 0.014;
+const FLAT_ZIG_WL = 2.33;
 /** Оверлок 504: наклонная гребёнка через край — шаг зубца и его длина. */
-const OVER = { spacing: 0.016, tick: 0.02 };
+const OVER = { spacing: 2.67, tick: 3.33 };
 /** Потайной 103: длинный пропуск и короткий «укол» — почти прямая с редкими зубчиками. */
-const BLIND = { period: 0.055, dip: 0.014, amp: 0.009 };
+const BLIND = { period: 9.17, dip: 2.33, amp: 1.5 };
+/**
+ * Челночная строчка 301 и ряд каверстича: шаг прокола и доля шага, занятая нитью.
+ * `pitch` 3.83 на `thin` даёт период 23 юнита — тот самый ритм, которым раньше притворялся
+ * `dasharray` [15, 8], только теперь это НАСТОЯЩИЕ стежки: целое число, посаженное на длину линии.
+ */
+const LOCK = { pitch: 3.83, duty: 0.65 };
 
 /** Та же квантизация, что и в strokeGeometry, — см. довод там про экспоненты в `d`. */
 const q2 = (n: number) => Math.round(n * 100) / 100;
@@ -619,10 +755,46 @@ function polyD(poly: ShapePoint[]): string {
   return `M${poly.map((p) => `${q2(p.x)},${q2(p.y)}`).join(' L')}`;
 }
 
-/** Два параллельных ряда — двухигольный, каверстич, основа флэтлока. */
+/** Два параллельных ряда СПЛОШНОЙ нитью — основа флэтлока, где ряды несут петлители. */
 function railsPath(poly: ShapePoint[], gap: number): string {
   const a = polyD(offsetPoly(poly, gap / 2));
   const b = polyD(offsetPoly(poly, -gap / 2));
+  return a && b ? `${a} ${b}` : '';
+}
+
+/**
+ * НАСТОЯЩИЕ СТЕЖКИ ВДОЛЬ ЛОМАНОЙ — цепочка отдельных хорд «от прокола до прокола».
+ *
+ * Это и есть разница между швом и пунктиром, и она не косметическая:
+ *  1. ШАГ ПОДГОНЯЕТСЯ ПОД ДЛИНУ. Число стежков целое, поэтому строчка КОНЧАЕТСЯ ПРОКОЛОМ, а не
+ *     обрывком нити в воздухе. Машина доводит строчку до края детали ровно так; `dasharray` —
+ *     никогда, он режет заливку и обрывается там, где придётся.
+ *  2. СТЕЖОК ПРЯМОЙ ДАЖЕ НА КРИВОЙ. Игла прокалывает две точки, нить между ними — хорда, и
+ *     строчка по дуге выглядит многоугольником коротких прямых. `dasharray` гнул бы нить вместе с
+ *     дугой, чего нить не делает.
+ *  3. ПРОКОЛЫ ВИДНЫ: концы хорд с круглой каппой читаются как точки входа иглы.
+ *
+ * `duty` — доля шага, занятая нитью на лице; остальное уходит протяжкой на изнанку.
+ */
+function stitchPath(poly: ShapePoint[], pitch: number, duty: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < pitch * 1.5) return '';
+  const n = Math.max(2, Math.round(w.len / pitch));
+  const step = w.len / n;
+  const ink = step * duty;
+  let d = '';
+  for (let i = 0; i < n; i++) {
+    const a = w.at(i * step);
+    const b = w.at(i * step + ink);
+    d += `${d ? ' ' : ''}M${q2(a.x)},${q2(a.y)} L${q2(b.x)},${q2(b.y)}`;
+  }
+  return d;
+}
+
+/** Два ряда НАСТОЯЩИХ стежков — двухигольная и распошивальная: у обеих лицо это две строчки. */
+function stitchedRails(poly: ShapePoint[], gap: number, pitch: number, duty: number): string {
+  const a = stitchPath(offsetPoly(poly, gap / 2), pitch, duty);
+  const b = stitchPath(offsetPoly(poly, -gap / 2), pitch, duty);
   return a && b ? `${a} ${b}` : '';
 }
 
@@ -721,55 +893,67 @@ export function strokeGeometry(
         c ? ([q(c[0] * w), q(c[1] * h), q(c[2] * w), q(c[3] * h)] as CubicSeg) : null,
       )
     : null;
-  const base = WEIGHT_FRACTION[stroke.weight] ?? WEIGHT_FRACTION.thin;
+  // РАЗМЕР ШВА В ЮНИТАХ КОРОБКИ — единственная величина, из которой считается всё остальное:
+  // толщина нити, длина стежка, зазор между рядами, шаг гребёнки. Ручка одна, потому что шов на
+  // чертеже — один предмет (см. довод в шапке файла).
+  const G = (strokeGauge(stroke) / GAUGE_REF) * scaleRef;
   const plainD = () => (segs ? curvePath(pts, segs) : inkPath(pts));
 
-  // Фигурные швы строятся по флэттену; гладкие (plain, lock) держат точный `C`-путь. Пустая
-  // строка от генератора означает «линия короче одной внятной фигуры» — тогда шов честно
-  // рисуется прямой, а не половиной пика, которую глаз прочтёт как дрогнувшую руку.
+  // Фигурные швы строятся по флэттену; гладкий `plain` держит точный `C`-путь. Пустая строка от
+  // генератора означает «линия короче одной внятной фигуры» — тогда шов честно рисуется прямой,
+  // а не половиной пика, которую глаз прочтёт как дрогнувшую руку.
   let d = '';
   let widthK = 1;
   switch (stroke.brush) {
     case 'zigzag':
-      d = wavePath(flatPoly(pts, segs), ZIG.wl * scaleRef, ZIG.amp * scaleRef);
+      d = wavePath(flatPoly(pts, segs), ZIG.wl * G, ZIG.amp * G);
       break;
     case 'bartack': {
       // Закрепка — брусок плотных стежков. Плотная волна даёт ему фактуру; отрезок короче
       // полутора волн остаётся прежним жирным штрихом (старый вид, прежний коэффициент).
-      d = wavePath(flatPoly(pts, segs), BART.wl * scaleRef, BART.amp * scaleRef);
+      d = wavePath(flatPoly(pts, segs), BART.wl * G, BART.amp * G);
       widthK = d ? BART.widthK : 2.4;
       break;
     }
+    case 'lock':
+      // 301 — ОДИН ряд настоящих стежков. Раньше здесь был `dasharray` по гладкой линии.
+      d = stitchPath(flatPoly(pts, segs), LOCK.pitch * G, LOCK.duty);
+      break;
     case 'double':
+      d = stitchedRails(flatPoly(pts, segs), RAIL_GAP * G, LOCK.pitch * G, LOCK.duty);
+      break;
     case 'cover':
-      d = railsPath(flatPoly(pts, segs), RAIL_GAP * scaleRef);
+      // 406 — те же два ряда стежков, но иглы стоят шире: см. довод у COVER_GAP.
+      d = stitchedRails(flatPoly(pts, segs), COVER_GAP * G, LOCK.pitch * G, LOCK.duty);
       break;
     case 'flatlock': {
       const flat = flatPoly(pts, segs);
-      const rails = railsPath(flat, RAIL_GAP * scaleRef);
-      const inner = wavePath(flat, FLAT_ZIG_WL * scaleRef, (RAIL_GAP / 2) * scaleRef);
+      const rails = railsPath(flat, RAIL_GAP * G);
+      const inner = wavePath(flat, FLAT_ZIG_WL * G, (RAIL_GAP / 2) * G);
       d = rails && inner ? `${rails} ${inner}` : rails;
       break;
     }
     case 'overlock': {
-      const ticks = tickPath(flatPoly(pts, segs), OVER.spacing * scaleRef, OVER.tick * scaleRef);
+      const ticks = tickPath(flatPoly(pts, segs), OVER.spacing * G, OVER.tick * G);
       const rail = plainD();
       d = ticks && rail ? `${rail} ${ticks}` : rail;
       break;
     }
     case 'blind':
-      d = blindPath(flatPoly(pts, segs), BLIND.period * scaleRef, BLIND.dip * scaleRef, BLIND.amp * scaleRef);
+      d = blindPath(flatPoly(pts, segs), BLIND.period * G, BLIND.dip * G, BLIND.amp * G);
       break;
     default:
       break;
   }
   if (!d) d = plainD();
 
-  const rhythm = stroke.dashed ? CONSTRUCTION_DASH : STITCH_DASH[stroke.brush];
+  // ЕДИНСТВЕННЫЙ ОСТАВШИЙСЯ ПУНКТИР — построительная линия. Ритм шва больше не подделывается
+  // заливкой: у всех девяти видов он теперь настоящая геометрия.
+  const rhythm = stroke.dashed ? CONSTRUCTION_DASH : null;
   return {
     d,
-    strokeWidth: base * widthK * scaleRef,
-    dash: rhythm ? `${(rhythm[0] * scaleRef).toFixed(2)} ${(rhythm[1] * scaleRef).toFixed(2)}` : '',
+    strokeWidth: G * widthK,
+    dash: rhythm ? `${(rhythm[0] * G).toFixed(2)} ${(rhythm[1] * G).toFixed(2)}` : '',
     // ВСЕГДА [0]: вторые ряды теперь лежат в самом `d`, вдоль линии, а не копией со сдвигом по Y.
     // Поле живёт, чтобы ни одному из четырёх потребителей не пришлось меняться вместе с этим
     // модулем, — их цикл по offsets исполняется ровно один раз.
@@ -803,10 +987,13 @@ export function layerSvg(
       const g = strokeGeometry(s, w, h);
       if (!g.d) return '';
       const dash = g.dash ? ` stroke-dasharray="${g.dash}"` : '';
+      // ЦВЕТ НИТИ ЕДЕТ В ФАЙЛ. Прежде здесь стоял литерал `#000`, и цвет, видимый на экране,
+      // терялся ровно в том файле, ради которого весь круговорот и существует.
+      const ink = readInk(s.ink) ?? DEFAULT_INK;
       return g.offsets
         .map(
           (dy) =>
-            `<path d="${g.d}" transform="translate(0 ${dy.toFixed(2)})" fill="none" stroke="#000"` +
+            `<path d="${g.d}" transform="translate(0 ${dy.toFixed(2)})" fill="none" stroke="${ink}"` +
             ` stroke-width="${g.strokeWidth.toFixed(2)}" stroke-linecap="round"` +
             ` stroke-linejoin="round"${dash}/>`,
         )

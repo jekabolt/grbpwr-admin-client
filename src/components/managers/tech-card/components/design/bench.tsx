@@ -25,7 +25,6 @@ import {
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
-import { SheetBar } from './sheet-bar';
 import { useSplitToInput } from './split-to-input';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 
@@ -304,14 +303,6 @@ export function Bench({
   /** Which slot the current pick is armed for — this bench's own affordance, not the band's. */
   const pickingKey = pick.target ? slotRefKey(pick.target.slot) : null;
 
-  const detailsCitedByLatest = useMemo(() => {
-    const cited = new Set<number>();
-    for (const plate of band.latestVersion?.plates ?? []) {
-      if (plate.slotId) cited.add(plate.slotId);
-    }
-    return cited;
-  }, [band.latestVersion]);
-
   const filledSides = bench.sides.filter(
     ({ view, slot }) => !!shownPicture(sideRef(view), slot?.picture),
   ).length;
@@ -340,11 +331,13 @@ export function Bench({
           What the bench adds instead is WHICH slot is armed — a thing said positionally, on the slot
           itself, which a page-level banner cannot do. */}
 
-      {/* ШАПКА БЛОКА — две строки о композиции целиком, до того как речь пойдёт об отдельном
-          слоте: что скажет лист и чем нельзя поручиться за смесь происхождений. В прототипе ровно
-          так: `slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml` в своей шапке. Полосы починки
-          («fix several ▸») здесь больше нет — цикл снят (S-15). */}
-      <SheetBar band={band} />
+      {/* ШАПКА БЛОКА — строка о композиции целиком, до того как речь пойдёт об отдельном слоте:
+          чем нельзя поручиться за смесь происхождений. Строк было две: рядом стоял `SheetBar`,
+          и он был высказыванием о ПОСЛЕДНЕЙ ВЫПУЩЕННОЙ ВЕРСИИ листа — «v3 · столько-то плит,
+          верстак с тех пор разошёлся». Версии снесены целиком, вместе с бэкендом, поэтому бар
+          снят, а не переписан: пересказывать его текст без версии значило бы говорить о состоянии,
+          которого больше не существует. Полосы починки («fix several ▸») здесь тоже нет — цикл
+          снят (S-15). */}
       <MixWarn band={band} />
 
       <GroupLabel
@@ -412,7 +405,6 @@ export function Bench({
           const rev = slot.slotRev ?? 0;
           const name = displayDetailName(bench.details, slot);
           const picture = shownPicture(ref, slot.picture);
-          const cited = slot.id ? detailsCitedByLatest.has(slot.id) : false;
           const key = slotRefKey(ref);
           return (
             <BenchSlot
@@ -445,12 +437,13 @@ export function Bench({
                   newDetailName: next,
                 })
               }
+              // СНЯТИЕ ДЕТАЛИ БОЛЬШЕ НИЧЕМ НЕ ЗАПЕРТО ОТСЮДА. Здесь стояло `deleteBlocked` с
+              // единственной причиной — «выпущенный лист ссылается на этот слот по имени», и она
+              // читалась из плит последней ВЕРСИИ листа. Версий больше нет — снесены целиком,
+              // вместе с бэкендом, — а значит нет и замороженного состава, который мог бы
+              // цитировать слот. Придумать запрету вторую причину было бы хуже, чем снять его:
+              // запрет, который клиент назначает сам, разойдётся с сервером на первом же отказе.
               onDelete={() => writes.deleteDetailSlot.mutate(slot.id ?? 0)}
-              deleteBlocked={
-                cited
-                  ? 'the issued sheet cites this slot by name — it cannot be removed'
-                  : null
-              }
               galleryItem={
                 picture?.media ? mediaFullToViewerItem(picture.media as common_MediaFull) : undefined
               }

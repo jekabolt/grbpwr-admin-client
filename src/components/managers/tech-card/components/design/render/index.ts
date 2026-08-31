@@ -24,7 +24,9 @@ export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
 export { RenderStudio } from './render-studio';
+export { ThreedInputStrip } from './threed-input-strip';
 export { ThreedStudio } from './threed-studio';
+export { BodyPicker, modelCaption, modelFacts, modelName } from './model-picker';
 export { WhatModelGetsRenderModal } from './what-model-gets';
 export type { WhatModelGetsKind } from './what-model-gets';
 
@@ -33,9 +35,11 @@ export type { ColourDraft, ThreedDraft, ThreedDraftState } from './drafts';
 export { useStartDesignRun } from './use-design-run';
 export type { StartRunInput, StartRunState } from './use-design-run';
 export {
+  BODY_TYPES,
   FABRIC_AUTHORITY,
   RENDER_SHEET_ORDER,
   SELECT_MARK_NOT_STATED,
+  benchKindOf,
   benchSides,
   budgetLine,
   colourLabel,
@@ -43,18 +47,28 @@ export {
   fabricRenderGate,
   fabricStatement,
   hexIsPaintable,
-  latestRenderByView,
   outputsOfKind,
+  pictureIsComposite,
   pictureIsSelected,
   recipeIsStated,
   renderGate,
-  renderRevisions,
   renderSheetViews,
   runKindOf,
+  runOfPicture,
   serverStatesSelected,
+  threedCandidates,
   threedGate,
+  threedRevisions,
+  threedSides,
   turntableSourceIds,
   unmarkedFlats,
   wireColourSource,
 } from './model';
-export type { BenchSide, FabricStatement, Gate, RenderByView, RenderPlate } from './model';
+export type {
+  BenchKind,
+  BenchSide,
+  BodyType,
+  FabricStatement,
+  Gate,
+  ThreedCandidate,
+} from './model';

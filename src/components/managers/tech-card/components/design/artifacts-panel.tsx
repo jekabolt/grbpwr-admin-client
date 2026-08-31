@@ -1,5 +1,6 @@
 import type {
   GetDesignBandResponse,
+  common_DesignBenchSlot,
   common_MediaFull,
   common_TechCard,
   common_TechCardMediaKind,
@@ -7,6 +8,7 @@ import type {
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
@@ -28,38 +30,19 @@ import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
-import { InertDoor } from './bench-slot';
-import { clockStamp } from './handles';
-import {
-  DiffRows,
-  MintDialog,
-  SHEET_MINIMUM,
-  SILHOUETTE_VIEWS,
-  VIEW_LABELS,
-  analyseMint,
-  benchDiverged,
-  benchDoor,
-  benchMinimumMet,
-  openDoor,
-  readBench,
-  sheetMinimumMissing,
-  slotIsFilled,
-  useDesignSaveHost,
-  type BenchSlots,
-  type MintOrigin,
-} from './mint-dialog';
+import { readBench, type BenchRead } from './bench-slot';
+import { benchDoor, openDoor } from './doors';
+import { TILE_CORNER, TILE_QUIET } from './picture-tile';
 import { provenanceLabel, readProvenance } from './provenance';
 import {
   SELECT_MARK_NOT_STATED,
@@ -67,42 +50,34 @@ import {
   pictureIsSelected,
   serverStatesSelected,
 } from './render';
-import { buildSheetSvg, downloadSvg, type SheetSvgPlate } from './sheet-svg';
-import { PrintSheetButton, SheetJournal, versionShortHash } from './sheet-journal';
-import { useDesignSheetVersion, useDesignWrites } from './use-design-band';
+import { useDesignWrites } from './use-design-band';
+import { SHEET_MIN_VIEWS, viewLabel } from './views';
 
 /**
- * ARTIFACTS — where the drawing is a document, and the document becomes paper.
+ * ARTIFACTS — the sheet of this card: its plates, and the callouts drawn on them.
  *
- * ═══ THE TWO STOREYS, AND WHY THEY ARE IN THIS ORDER ═══════════════════════════════════════════
+ * ═══ ОДИН ЭТАЖ, И РАНЬШЕ ИХ БЫЛО ДВА ══════════════════════════════════════════════════════════
  *
- * (a) THE DOCUMENT. The plates the card holds and the callouts drawn on them, editable, on every
- *     card that exists. It needs no new RPC and no bench: it reads `technicalMedia` and `callouts`
- *     off the form, exactly as they are saved by the ordinary Save. This is the storey that makes
- *     the tab useful to the whole of production on the day it ships (`17` П-Ж): every live card
- *     enters this band with its technical media full, its callouts drawn and a bench nobody has
- *     ever touched, and a screen that led with the bench would tell all of them «no plates» and ask
- *     for a re-upload of files the card already holds.
+ * THE DOCUMENT. Плиты, которые держит карточка, и указания на них — правятся на любой существующей
+ * карточке. Экрану не нужен ни отдельный RPC, ни верстак: он читает `technicalMedia` и `callouts`
+ * прямо из формы, ровно так, как их сохраняет обычный Save. Именно это делает вкладку полезной
+ * всему производству в день выката (`17` П-Ж): живая карточка приходит сюда с полными техническими
+ * медиа и нарисованными указаниями, но с верстаком, которого никто не трогал, — и экран, начинающий
+ * с верстака, сказал бы им всем «плит нет» и попросил бы заново загрузить файлы, которые у карточки
+ * уже есть.
  *
- * (b) THE VERSIONS. The strip, the journal, the divergence plate, the mint. This storey is ABSENT
- *     — not empty, absent — until a version exists. There is no `SHEET v0`: a version is a frozen
- *     composition somebody minted, so a zeroth one is a sentence about nothing. What stands in its
- *     place is one plate saying versions arrive with the mint, and the act that would mint one.
+ * ВТОРОГО ЭТАЖА — ВЕРСИЙ — БОЛЬШЕ НЕТ. Здесь стояли полоса версий, журнал выпусков, плита
+ * расхождения и минт: лист замораживался в подписанную vN с дайджестом плит, а печать и релиз этот
+ * минт порождали. Владелец снял всё это одной фразой: «PRINT — MINTS V1 вообще этот функционал не
+ * нужен как и VERSIONS», и на прямой вопрос о глубине сноса — с названной ценой (уже выпущенные
+ * подписанные листы, их дайджесты, ссылки из учёта медиа и записи в правах пропадают) — ответил:
+ * «Снести целиком, включая бэкенд». Цена названа и принята.
  *
- * ═══ WHAT A VERSION FREEZES ════════════════════════════════════════════════════════════════════
- *
- * THE COMPOSITION OF PLATES, AND ONLY THAT. Which pictures were on the sheet, with the hash of the
- * bytes each one pinned. THE CALLOUTS ARE NOT FROZEN: paper prints the callouts the card holds at
- * the moment it is printed. That is the prototype's own division — it snapshots the plates
- * (`70-actions.js:216-222`) and draws the shapes from live state at export (`:276`) — and it is the
- * division this build follows, against the plan's extra tier of frozen callouts (`design_sheet_
- * version_callout`, migration 0342). That tier is left INERT on purpose: nothing here writes it and
- * nothing here reads it. A second, frozen copy of a callout is precisely how one signature comes to
- * cover two different factory truths — the floor reading v3's frozen note while the card's own
- * callout says something else, and neither piece of paper admitting the other exists.
- *
- * The consequence, stated so nobody re-derives it wrongly: EDITING A CALLOUT AFTER v1 DOES NOT NEED
- * v2. A version is born of an ACT — a print, a release — never of a file changing under it.
+ * ЧТО ИЗ ЭТОГО СЛЕДУЕТ ДЛЯ ЧИТАЮЩЕГО ЭТОТ ФАЙЛ. Лист больше НЕ АРТЕФАКТ С ПОДПИСЬЮ, а живой
+ * документ: то, что на экране, и есть то, что у карточки. Исчезло само различение «документ против
+ * замороженной композиции», а с ним — состояние `inspecting`, ветки «только чтение, потому что на
+ * экране версия» и вопрос «какая из двух правд поедет на бумагу». Ни одной ветки «а если смотрим
+ * vN» ниже быть не должно: если такая появится, значит версии вернулись, а их нет.
  */
 
 /** One plate of the document: a picture with a name, wherever it came from. */
@@ -114,8 +89,8 @@ export type DocumentPlate = {
   /**
    * Where this plate is listed.
    *   `card`  — the card's own technical media. This is the DOCUMENT: what a callout's `media_id`
-   *             points at, what prints, and what the mint freezes.
-   *   `bench` — a design bench slot. The mint carries it into the card's media; until then it is
+   *             points at, and what prints.
+   *   `bench` — a design bench slot. Editing it carries it into the card's media; until then it is
    *             visible here and cannot be drawn on.
    *   `run`   — an output of a generation run that nobody has taken onto the card yet. It exists in
    *             the band and nowhere else, which is why it gets a verb of its own.
@@ -134,9 +109,8 @@ export type DocumentPlate = {
   door?: string;
   /**
    * Only for a bench plate: the slot's view key (`front` / `back` / `side_l` / `side_r`, anything
-   * else is a detail). It is what `takeIntoCard` derives the media KIND from — the same derivation
-   * the server's mint performs (`entity.DesignPlateMediaKind`), so a plate taken in by hand and a
-   * plate injected by the mint are filed under the same name.
+   * else is a detail). It is what `takeIntoCard` derives the media KIND from, so a bench view
+   * carried onto the card is filed under the name its side already had rather than under a guess.
    */
   viewKey?: string;
   note?: string;
@@ -160,6 +134,22 @@ export const ARTIFACT_KINDS: { value: ArtifactKind; label: string; hint: string 
   { value: 'flat', label: 'flats', hint: 'the drawings — and the only thing the sheet is made of' },
   { value: 'render', label: 'renders', hint: 'coloured over the flats; not part of the sheet' },
   { value: 'threed', label: '3D', hint: 'turntable frames; not part of the sheet' },
+];
+
+/**
+ * СТРИП ИЛИ СЕТКА. Одна ось, два значения, и разница между ними ровно одна: ряд прокручивается или
+ * переносится. Всё остальное — кадр, органы, высота плиты — у обеих раскладок общее, потому что это
+ * одни и те же плиты, показанные двумя способами, а не два разных экрана.
+ *
+ * `ViewSwitch`, А НЕ ЧИП: это «как я на это смотрю», то есть предпочтение, а не запись. Полоса из
+ * двух сегментов сообщает ПОЛОЖЕНИЕ, тогда как одиночный чип сообщал бы цель — с открытой лентой он
+ * читался бы «grid», и понять, где ты, можно было бы только по полотну под ним.
+ */
+export type PlateLayout = 'strip' | 'grid';
+
+export const PLATE_LAYOUTS: { value: PlateLayout; label: string; hint: string }[] = [
+  { value: 'strip', label: 'strip', hint: 'one row, scrolled sideways — the sheet read in order' },
+  { value: 'grid', label: 'grid', hint: 'the same plates wrapped over several rows' },
 ];
 
 export function artifactKindOf(
@@ -225,9 +215,7 @@ export function bandPlates(
     const view = (picture.ghostView ?? '').trim();
     plates.push({
       key: `run-${picture.id}`,
-      name:
-        (VIEW_LABELS[view] || view.toUpperCase() || '') ||
-        `frame ${picture.ordinal ?? plates.length + 1}`,
+      name: viewLabel(view).toUpperCase() || `frame ${picture.ordinal ?? plates.length + 1}`,
       mediaId,
       media: picture.media,
       origin: 'run',
@@ -278,31 +266,35 @@ export function frameFraction(value: string | number | null | undefined, fallbac
  * WHY A BENCH OR RUN PLATE CANNOT BE DRAWN ON *AS IT STANDS* — and what the door does about it.
  *
  * A callout addresses `technicalMedia` — the card's OWN media list. A bench slot and a run's output
- * are not in that list, so a plate of theirs cannot carry a callout as it stands, and its plate says
- * so on the face of its door («take in to draw on it ▸»). R-13 is the reason the door exists at all
- * — «к любому артефакту можно делать все виды колаутов» — and naming the price on the button rather
- * than hiding it in a side effect is what keeps it honest: taking a picture in IS an edit of the card.
+ * are not in that list, so a plate of theirs cannot carry a callout as it stands. R-13 is the reason
+ * the door exists at all — «к любому артефакту можно делать все виды колаутов».
+ *
+ * ДВЕРЬ ТЕПЕРЬ ЗОВЁТСЯ `edit` И ЖИВЁТ В УГЛУ НА ХОВЕР (V-20). Прежнее имя — «take in to draw on it ▸»
+ * — называло МЕХАНИКУ, и владелец на неё прямо пожаловался: «я не понимаю зачем она нужна». Сам шаг
+ * не выдуман и не убран: он есть цена, которую нельзя не заплатить, потому что выноска физически
+ * адресует медиа карточки. Изменилось то, ЧТО НАПИСАНО НА КНОПКЕ: человек хочет править картинку,
+ * а не изучать, куда её сперва положить. Цена не спрятана — она в заголовке органа, который читалка
+ * объявляет вместе с именем.
  *
  * ОДНОТАКТНАЯ, А НЕ СОСТАВНАЯ, С ТЕХ ПОР КАК ПЛИТА РИСУЕТ САМА. Дверь была парой «взять + открыть
  * редактор», и вторая половина была дефектом T-20: редактор разрешал свежий media_id через
  * СОХРАНЁННУЮ карточку, которая о нём ещё не знала. Открывать теперь нечего — взятая плита
  * становится рабочей на месте.
  *
- * FOR A BENCH PLATE THIS IS SANCTIONED BY THE SERVER, NOT GUESSED AT. The mint's
- * `injectBenchPlatesAsTechnicalMedia` (design_sheet_mint.go) skips media the document already
- * lists — «УЖЕ ПЕРЕЧИСЛЕННОЕ НЕ ТРОГАЕТСЯ. Клиент вправе прислать плиту сам (и со временем
- * будет)» — so a plate taken in here is NOT doubled by the next mint. Detaching it here is still
- * refused: the slot keeps holding the picture and the next mint would bring it straight back —
- * the way OFF the bench is clearing the slot in STUDIO.
+ * ОТЦЕПИТЬ ВЕРСТАЧНУЮ ПЛИТУ ЗДЕСЬ ВСЁ РАВНО НЕЛЬЗЯ, и причина пережила снос минта: слот
+ * продолжает держать картинку, а список плит собирается из верстака заново при каждом чтении
+ * полосы (`documentPlates` ниже). Убранная отсюда плита вернулась бы на следующей же отрисовке —
+ * то есть кнопка выглядела бы сломанной, хотя сработала. Дорога ПРОЧЬ с верстака одна: очистить
+ * слот в STUDIO.
  */
 const BENCH_PLATE_DETACH =
-  'a bench plate is taken off by clearing its slot in STUDIO — dropped here it would come back with the next mint';
+  'a bench plate is taken off by clearing its slot in STUDIO — dropped here it would come straight back';
 
 /**
- * The view key of a bench slot → the card's media kind. THE SAME DERIVATION THE MINT PERFORMS
- * (`entity.DesignPlateMediaKind`, backend): front/back/sides by name, everything else a detail.
- * A second, different mapping here would mean a plate taken in by hand and the same plate injected
- * by the mint disagree about what view they are — visibly, in the plate's own caption.
+ * The view key of a bench slot → the card's media kind: front/back/sides by name, everything else a
+ * detail. Одно отображение на весь экран: второе, отличающееся, означало бы, что одна и та же
+ * картинка называет свой вид по-разному в зависимости от того, какой дверью её внесли, — и видно
+ * это было бы в подписи самой плиты.
  */
 const BENCH_VIEW_MEDIA_KIND: Record<string, common_TechCardMediaKind> = {
   front: 'TECH_CARD_MEDIA_KIND_FRONT',
@@ -333,10 +325,23 @@ const CARD_PLATE_KINDS: Partial<Record<common_TechCardMediaKind, string>> = {
  * Pure, and exported, because the precedence between the two sources is the part of this tab most
  * likely to be «simplified» later by somebody who has not opened a production card.
  */
+/**
+ * ЗАНЯТ ЛИ СЛОТ. Локально, потому что после сноса минта у этой проверки на весь экран два читателя,
+ * и оба здесь. Раньше она приезжала из `mint-dialog.tsx` — файла, который держал ВТОРУЮ, устаревшую
+ * копию словаря видов (метка `SIDE L` против `side L` в `views.ts`). Копия умерла вместе с минтом;
+ * заводить ради двух строк новый общий модуль значило бы завести третью.
+ *
+ * Оба условия обязательны: слот может ССЫЛАТЬСЯ на картинку, которую полоса не разрешила (страница
+ * ленты, до которой чтение не дошло), и такая плита нарисовалась бы дырой без адреса.
+ */
+function slotIsFilled(slot?: common_DesignBenchSlot | null): boolean {
+  return !!slot && (slot.pictureId ?? 0) > 0 && !!slot.picture;
+}
+
 export function documentPlates(
   formMedia: { mediaId?: number; kind?: string }[],
   resolved: Map<number, common_MediaFull>,
-  bench: BenchSlots,
+  bench: BenchRead,
 ): DocumentPlate[] {
   const plates: DocumentPlate[] = [];
   const seen = new Set<number>();
@@ -354,10 +359,9 @@ export function documentPlates(
     });
   });
 
-  const benchSlots = [
-    ...SILHOUETTE_VIEWS.map((v) => bench.byView.get(v)).filter(Boolean),
-    ...bench.details,
-  ];
+  // Стороны идут в порядке `views.ts` (перед, спинка, бока), детали — за ними, как их отдала
+  // полоса. `readBench` уже разложил их именно так, поэтому порядок здесь не назначается заново.
+  const benchSlots = [...bench.sides.map((s) => s.slot), ...bench.details];
   for (const slot of benchSlots) {
     if (!slotIsFilled(slot)) continue;
     const media = slot!.picture?.media;
@@ -367,7 +371,7 @@ export function documentPlates(
     const view = (slot!.viewKey ?? '').trim();
     plates.push({
       key: `bench-${slot!.id}`,
-      name: (slot!.detailName ?? '').trim() || VIEW_LABELS[view] || view.toUpperCase() || 'detail',
+      name: (slot!.detailName ?? '').trim() || viewLabel(view).toUpperCase() || 'detail',
       mediaId,
       media,
       origin: 'bench',
@@ -406,7 +410,6 @@ export function ArtifactsPanel({
   calloutHistory?: EditHistory<SheetCallout>;
 }): JSX.Element {
   const form = useFormContext<TechCardFormData>();
-  const host = useDesignSaveHost();
   const { showMessage } = useSnackBarStore();
   // The SAME cache entry the page reads and re-primes after every save. Not a second fetch.
   const { data: card } = useTechCard(techCardId);
@@ -417,7 +420,7 @@ export function ArtifactsPanel({
 
   // `SheetCallout` (z.input строки формы), а НЕ узкий CalloutLike: плиты теперь РИСУЮТ фигуру
   // выноски (kind/points/dashed/filled/color), и тип обязан нести её, иначе каст компилируется, а
-  // превью молча теряет дуги и мерки — ровно та ловушка, о которой предупреждает downloadSheet.
+  // превью молча теряло бы дуги и мерки: каст скомпилировался бы, а фигура пропала.
   const callouts = (useWatch({ control: form.control, name: 'callouts' }) ?? []) as SheetCallout[];
   const technicalMedia = (useWatch({ control: form.control, name: 'technicalMedia' }) ?? []) as {
     mediaId?: number;
@@ -459,7 +462,7 @@ export function ArtifactsPanel({
     }
     // Верстачная плита берётся в карточку тем же нажатием, и её картинка так же обязана пережить
     // переезд. Слот может держать снимок прогона, которого на загруженной странице полосы уже нет.
-    for (const slot of [...bench.byView.values(), ...bench.details]) {
+    for (const slot of [...bench.sides.map((s) => s.slot), ...bench.details]) {
       const media = slot?.picture?.media;
       if (media?.id != null) map.set(media.id, media);
     }
@@ -479,8 +482,6 @@ export function ArtifactsPanel({
     () => documentPlates(technicalMedia, resolved, bench),
     [technicalMedia, resolved, bench],
   );
-  const diverged = useMemo(() => benchDiverged(band.latestVersion, bench), [band, bench]);
-
   /**
    * ═══ THE THREE REPRESENTATIONS OF THIS CARD, AS ONE LIST PER SEGMENT (W-14) ═════════════════
    *
@@ -552,13 +553,18 @@ export function ArtifactsPanel({
   }, [plates, band, runKinds, cardKindOf, chosenMedia]);
 
   const [selected, setSelected] = useState<number | null>(null);
-  const [mintOrigin, setMintOrigin] = useState<MintOrigin | null>(null);
   /** Which representation is on screen. `flat` is the default because the SHEET is made of flats. */
   const [kind, setKind] = useState<ArtifactKind>('flat');
-  /** The «replace the sheet with a file» explanation — a procedure, not a button. */
-  const [replacing, setReplacing] = useState(false);
-  /** Which frozen composition is on screen. 0 = the document, which is the default and the point. */
-  const [inspecting, setInspecting] = useState(0);
+  /**
+   * СТРИП ИЛИ СЕТКА — раскладка ряда плит. Владелец (V-20): «медиа должны отображаться стрипом и с
+   * возможностью грида».
+   *
+   * СТРИП ПО УМОЛЧАНИЮ, и это не вкусовое: лист читают по сторонам — перед, спинка, бока, детали —
+   * то есть КАК РЯД, и горизонтальная лента держит этот порядок одной строкой, не разрывая его на
+   * произвольном по ширине окна месте. Сетка нужна другому жесту: «покажи всё сразу», когда плит
+   * стало больше десятка и нужно найти одну.
+   */
+  const [layout, setLayout] = useState<PlateLayout>('strip');
   /**
    * Взведённый вид указания — ОДИН НА ВЕСЬ ЛИСТ, а не на плиту. Панель видов стоит над рядом
    * (семь чипов под каждой из десяти плит съели бы экран), но ТОЧКИ КОПЯТСЯ НА СВОЁМ КАДРЕ,
@@ -574,48 +580,8 @@ export function ArtifactsPanel({
   /** The plate whose detach is waiting on a human, because callouts stand on it. */
   const [detaching, setDetaching] = useState<DocumentPlate | null>(null);
 
-  const versionNumbers = useMemo(
-    () => [...(band.versionNumbers ?? [])].sort((a, b) => b - a),
-    [band.versionNumbers],
-  );
-  const latest = band.latestVersion?.versionNumber ?? 0;
-  const hasVersions = versionNumbers.length > 0 || latest > 0;
-
-  const frozen = useDesignSheetVersion(
-    techCardId,
-    inspecting > 0 && inspecting !== latest ? inspecting : undefined,
-  );
-  const shownVersion =
-    inspecting === 0
-      ? undefined
-      : inspecting === latest
-        ? band.latestVersion
-        : frozen.data?.version;
-
-  const frozenPlates: DocumentPlate[] = useMemo(() => {
-    const source = shownVersion?.plates ?? [];
-    return source.map((plate, i) => ({
-      key: `frozen-${i}`,
-      name:
-        (plate.detailName ?? '').trim() ||
-        VIEW_LABELS[plate.viewKey ?? ''] ||
-        (plate.viewKey ?? 'plate'),
-      mediaId: plate.media?.id ?? 0,
-      media: plate.media,
-      origin: 'card' as const,
-      note: (plate.contentHash ?? '').trim()
-        ? `froze ${(plate.contentHash ?? '').slice(0, 8)}`
-        : 'no hash — predates 0336',
-    }));
-  }, [shownVersion]);
-
-  /**
-   * A FROZEN VERSION HAS NO REPRESENTATIONS TO SWITCH BETWEEN. It froze a composition of flats and
-   * that is all it is; offering «renders» over it would draw a segment that could only ever be
-   * empty and would read as a defect. So inspecting a version drops back to the frozen list whole.
-   */
   const segment = segments[kind];
-  const onScreen = inspecting === 0 ? segment.plates : frozenPlates;
+  const onScreen = segment.plates;
 
   /**
    * ═══ РИСОВАНИЕ ЖИВЁТ НА САМИХ ПЛИТАХ, И МОДАЛКИ БОЛЬШЕ НЕТ (T-21) ═══════════════════════════
@@ -638,26 +604,25 @@ export function ArtifactsPanel({
    */
   const canDraw = !!calloutHistory;
   /**
-   * ТРИ ПРИЧИНЫ, А НЕ ДВЕ, и третья — та, что случается чаще всех. Мёртвая дверь обязана называть
-   * СВОЮ причину: «карточка выпущена» читалось как «экран собран без редактора», то есть как
-   * поломка сборки вместо состояния карточки.
+   * ДВЕ ПРИЧИНЫ, И КАЖДАЯ НАЗЫВАЕТ СЕБЯ. Мёртвая дверь обязана говорить СВОЮ причину: одно общее
+   * «нельзя» читалось как «экран собран без редактора», то есть как поломка сборки вместо
+   * состояния карточки.
+   *
+   * Третьей причиной была «на экране версия vN, она только для чтения». Версий больше нет, и ветка
+   * ушла вместе с ними — а не потому, что её сочли редкой.
    */
-  const drawInert =
-    inspecting > 0
-      ? `v${inspecting} is a record of what was minted — switch to “the document” to draw on it`
-      : disabled
-        ? 'the card is released: its sheet is frozen, and a callout is an edit of it'
-        : 'the form’s undo history was not handed to this screen, and a gesture without an undo is not one to offer';
+  const drawInert = disabled
+    ? 'the card is released: its sheet is frozen, and a callout is an edit of it'
+    : 'the form’s undo history was not handed to this screen, and a gesture without an undo is not one to offer';
 
   /**
    * Ставить указание можно ТОЛЬКО на плиту, которая уже числится в медиа карточки: `media_id`
    * выноски адресует именно этот список. Верстачная плита и выход прогона сперва берутся в
    * карточку — одним нажатием на своей плите, — и с этого мгновения рисуются здесь же.
    */
-  const canPlaceOn = (plate: DocumentPlate) =>
-    inspecting === 0 && !disabled && canDraw && plate.origin === 'card';
+  const canPlaceOn = (plate: DocumentPlate) => !disabled && canDraw && plate.origin === 'card';
   /** Панель видов имеет смысл, только если на экране есть хоть одна такая плита. */
-  const drawableHere = inspecting === 0 && !disabled && canDraw && onScreen.some(canPlaceOn);
+  const drawableHere = !disabled && canDraw && onScreen.some(canPlaceOn);
 
   /**
    * ═══ ЗАПИСЬ УКАЗАНИЙ: КОРНЕМ И ПО ИНДЕКСУ ═══════════════════════════════════════════════════
@@ -891,10 +856,7 @@ export function ArtifactsPanel({
     setDetaching(plate);
   }
 
-  const detachInert =
-    inspecting > 0
-      ? `v${inspecting} is a record of what was minted — nothing on this tab edits it`
-      : 'the card is released: its sheet is frozen';
+  const detachInert = 'the card is released: its sheet is frozen';
 
   /**
    * ═══ TAKE A GENERATED PICTURE ONTO THE CARD — the verb the switcher needs (W-14) ════════════
@@ -929,7 +891,7 @@ export function ArtifactsPanel({
     });
     showMessage(
       plate.origin === 'bench'
-        ? 'taken into the card’s media as its bench view — the next mint lists it once, not twice'
+        ? 'taken into the card’s media as its bench view — you can draw on it now'
         : 'taken into the card’s media — it is not on the technical sheet, and callouts drawn on it are not either',
       'success',
     );
@@ -942,15 +904,24 @@ export function ArtifactsPanel({
    * и добавляли. Модалки больше нет (T-21), поэтому дверь обязана вести куда-то ЗДЕСЬ — иначе
    * снятие модалки молча уносит единственный способ завести первую плиту на карточке без верстака.
    *
-   * ВИД — `DETAIL`, и это не догадка, а признание: библиотека не знает, перед это или спинка.
-   * Назвать его можно тут же, селектором в подвале плиты, — тем самым, что стоял в подвале кадра
-   * на листе эскиза.
+   * ВИД БЕРЁТСЯ У ПРЕДСТАВЛЕНИЯ, КОТОРОЕ СЕЙЧАС НА ЭКРАНЕ (V-20 г). Владелец: «так же должн быть
+   * возможность загрузить свой флет, рендер или 3д если мы не хотим генерировать их в нашем туле».
+   * Человек стоит в сегменте и кладёт файл ИМЕННО ТУДА — это и есть его заявление о роде, и
+   * спрашивать второй раз было бы переспрашиванием уже сказанного.
+   *
+   * ФЛЭТ — `DETAIL`, и это не догадка, а признание: библиотека не знает, перед это или спинка.
+   * РЕНДЕР И 3D — оба `RENDER`, потому что в словаре карточки НЕТ члена для кадра турнтейбла, а
+   * `RENDER` по контракту и значит «принятая картинка прогона, уходящая с карточкой». Сегмент, в
+   * котором она потом покажется, читается по прогону-родителю, а не по этой метке, поэтому
+   * загруженный руками 3D-кадр не выдаёт себя за рендер нигде, кроме строки словаря.
    */
   function addPlateFromLibrary(items: common_MediaFull[]) {
     const media = form.getValues('technicalMedia') ?? [];
     const have = new Set(media.map((m) => m.mediaId ?? 0));
     const fresh = items.filter((it) => it.id != null && !have.has(it.id));
     if (!fresh.length) return;
+    const uploadedKind: common_TechCardMediaKind =
+      kind === 'flat' ? 'TECH_CARD_MEDIA_KIND_DETAIL' : 'TECH_CARD_MEDIA_KIND_RENDER';
     setPicked((prev) => [...prev, ...fresh]);
     form.setValue(
       'technicalMedia',
@@ -958,7 +929,7 @@ export function ArtifactsPanel({
         ...media,
         ...fresh.map((it) => ({
           mediaId: it.id as number,
-          kind: 'TECH_CARD_MEDIA_KIND_DETAIL' as common_TechCardMediaKind,
+          kind: uploadedKind,
           caption: '',
         })),
       ],
@@ -966,69 +937,19 @@ export function ArtifactsPanel({
     );
   }
 
-  /**
-   * ═══ `download SVG` — THE SHEET AS ONE FILE ═════════════════════════════════════════════════
+  /* ═══ `download SVG` И «replace the sheet with a file ▸» СНЯТЫ (V-21) ══════════════════════
    *
-   * EXPORTS THE FLATS AND THEIR CALLOUTS, whatever segment is on screen, and that is deliberate.
-   * The sheet IS the flats — the mint composes it from them and nothing else — so an export that
-   * followed the switcher would produce a file called «sheet» containing three turntable frames.
-   * The button says which composition it took.
+   * Владелец дословно: «DOWNLOAD SVG в THE SHEET не нужна как и REPLACE THE SHEET WITH A FILE ▸
+   * мы туда можем просто загрузить свои файлы какие захотим».
+   *
+   * Обе двери отвечали на один вопрос — «а если лист надо собрать не нашим инструментом» — и обе
+   * отвечали на него ОБХОДНЫМ путём: одна выгружала лист наружу, вторая объясняла процедуру
+   * подмены картинки под выносками. Прямой ответ появился в V-20 (г): свой флэт, рендер или 3D
+   * кладут прямо в ряд плит слотом «+ add …». Дверь, объясняющая обход, при живой прямой дороге —
+   * это не подстраховка, а второй, худший способ, который кто-то однажды выберет.
+   *
+   * Вместе с выгрузкой ушёл и `sheet-svg.tsx` целиком: он существовал ровно ради этой кнопки.
    */
-  const exportPlates: DocumentPlate[] =
-    inspecting === 0 ? segments.flat.plates : frozenPlates;
-
-  const downloadSheet = async () => {
-    // READ THROUGH `getValues`, NOT THROUGH THE WATCHED LIST. `callouts` above is narrowed to
-    // `CalloutLike`, which carries only the fields the rest of this tab writes — the SHAPE
-    // (`kind`, `points`, `dashed`, `filled`, `color`) is on the form row and is exactly what the
-    // export must not lose. A cast would have compiled and shipped pins where arrows were drawn.
-    const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
-    const svgPlates: SheetSvgPlate[] = exportPlates.map((plate) => ({
-      name: plate.name,
-      url:
-        plate.media?.media?.fullSize?.mediaUrl ||
-        plate.media?.media?.compressed?.mediaUrl ||
-        plate.media?.media?.thumbnail?.mediaUrl ||
-        '',
-      callouts: rows
-        .map((c, index) => ({ c, index }))
-        .filter(({ c }) => (c.mediaId ?? 0) === plate.mediaId)
-        .map(({ c, index }) => {
-          return {
-            number: c.number || index + 1,
-            kind: c.kind ?? 'pin',
-            points: (c.points ?? []).map((p) => ({
-              x: Number(p.x ?? '') || 0,
-              y: Number(p.y ?? '') || 0,
-            })),
-            // ТА ЖЕ ФУНКЦИЯ, ЧТО У ЭКРАНА (`calloutsOfPlate`), и это обязательство: бумага обязана
-            // повторять экран. Своя копия разбора здесь и была вторым местом, где ноль от пустоты
-            // не отличался, — маркер садился в угол листа ровно так же, как садился на плите.
-            label: { x: frameFraction(c.posX), y: frameFraction(c.posY) },
-            hasText: !!(c.description ?? '').trim(),
-            color: c.color ?? '',
-            dashed: !!c.dashed,
-            filled: !!c.filled,
-          };
-        }),
-    }));
-
-    const style = (card?.techCard?.styleNumber ?? '').trim() || `card-${techCardId}`;
-    const version = inspecting === 0 ? (latest ? `v${latest}` : 'draft') : `v${inspecting}`;
-    const pinned = svgPlates.reduce((n, p) => n + p.callouts.length, 0);
-    try {
-      const markup = await buildSheetSvg({
-        title: `${style} · sheet ${version} · ${pinned} callout${pinned === 1 ? '' : 's'}`,
-        plates: svgPlates,
-      });
-      downloadSvg(`${style}-sheet-${version}.svg`, markup);
-    } catch (error) {
-      showMessage(
-        `the sheet could not be written: ${(error as Error)?.message || 'unknown failure'}`,
-        'error',
-      );
-    }
-  };
 
   /**
    * ЧТО ПОКАЗЫВАЕТ ПАНЕЛЬ CALLOUTS: только выноски, стоящие на плитах ДОКУМЕНТА (R-14).
@@ -1064,108 +985,85 @@ export function ArtifactsPanel({
 
   return (
     <SectionStack>
-      {/* ─── STOREY (a): THE DOCUMENT ─────────────────────────────────────────────────────── */}
       <SectionStack row>
         <Section
-          title={inspecting === 0 ? 'the sheet' : `sheet v${inspecting} — frozen`}
-          question={
-            inspecting === 0
-              ? '— the document as it stands; every change here is saved by the card’s own Save'
-              : '— the composition this version pinned; nothing on this tab edits it'
-          }
-          action={
-            hasVersions ? (
-              <ChipRow>
-                <Chip
-                  selected={inspecting === 0}
-                  pressed={inspecting === 0}
-                  onClick={() => setInspecting(0)}
-                >
-                  the document
-                </Chip>
-                {versionNumbers.map((n) => (
-                  <Chip
-                    key={n}
-                    selected={inspecting === n}
-                    pressed={inspecting === n}
-                    onClick={() => setInspecting(n)}
-                  >
-                    v{n}
-                  </Chip>
-                ))}
-              </ChipRow>
-            ) : undefined
-          }
+          title='the sheet'
+          question='— the document as it stands; every change here is saved by the card’s own Save'
           className='min-w-0 flex-1'
         >
-          {inspecting === 0 && (
-            <>
-              {/* THE SWITCH IS A `lead`, NOT AN `action`. It belongs to the label it sits beside, so
-                  its position must not depend on how wide the block happens to be in the current
-                  layout — the version chips already own the right edge of the header above. */}
-              <GroupLabel
-                flush
-                lead={
-                  <ViewSwitch<ArtifactKind>
-                    label='representation'
-                    value={kind}
-                    options={ARTIFACT_KINDS}
-                    onChange={setKind}
-                  />
-                }
-                action={
-                  <Text size='micro' variant='label' component='span'>
-                    {segment.plates.length} picture{segment.plates.length === 1 ? '' : 's'}
-                    {kind !== 'flat' &&
-                      (segment.filteredToSelected
-                        ? ' · the chosen ones'
-                        : ' · everything on this page')}
-                  </Text>
-                }
-              >
-                what you are marking up
-              </GroupLabel>
+          {/* ОБА ПЕРЕКЛЮЧАТЕЛЯ — `lead`, И ОНИ ОТВЕЧАЮТ НА РАЗНЫЕ ВОПРОСЫ. «Representation» —
+              ЧТО показано (флэт, рендер, 3D); «layout» — КАК показано (лентой или сеткой).
+              Стоят рядом, потому что оба относятся к ряду под ними, а не к блоку целиком;
+              правый край шапки, где раньше жили чипы версий, теперь свободен и пуст. */}
+          <GroupLabel
+            flush
+            lead={
+              <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
+                <ViewSwitch<ArtifactKind>
+                  label='representation'
+                  value={kind}
+                  options={ARTIFACT_KINDS}
+                  onChange={setKind}
+                />
+                <ViewSwitch<PlateLayout>
+                  label='layout'
+                  value={layout}
+                  options={PLATE_LAYOUTS}
+                  onChange={setLayout}
+                />
+              </div>
+            }
+            action={
+              <Text size='micro' variant='label' component='span'>
+                {segment.plates.length} picture{segment.plates.length === 1 ? '' : 's'}
+                {kind !== 'flat' &&
+                  (segment.filteredToSelected
+                    ? ' · the chosen ones'
+                    : ' · everything on this page')}
+              </Text>
+            }
+          >
+            what you are marking up
+          </GroupLabel>
 
-              <SheetMembershipWarning
-                kind={kind}
-                filteredToSelected={segment.filteredToSelected}
-                serverStates={segment.serverStates}
-                hasPictures={segment.plates.length > 0}
-              />
+          <SheetMembershipWarning
+            kind={kind}
+            filteredToSelected={segment.filteredToSelected}
+            serverStates={segment.serverStates}
+            hasPictures={segment.plates.length > 0}
+          />
 
-              {/* ПАНЕЛЬ ВИДОВ УКАЗАНИЙ — НАД РЯДОМ, ОДНА НА ЛИСТ. Не бордерная полоса: внутри
-                  блока новая коробка была бы блоком в блоке, а ступень «подгруппа» рисуется
-                  линией. Стоит только там, где ею есть чем воспользоваться: без единой плиты
-                  карточки взводить вид не на что, и панель обещала бы жест, которого нет. */}
-              {drawableHere && (
-                <GroupLabel
-                  lead={
-                    <AnnotationToolbar
-                      tool={tool}
-                      onTool={setTool}
-                      hint={tool ? placingHint(tool, placed) : undefined}
-                    />
-                  }
-                  action={
-                    <Text size='nano' variant='label' component='span' className='normal-case'>
-                      {tool
-                        ? 'click the plate you mean'
-                        : 'arm a kind, then click a plate — the text is written beside, under CALLOUTS'}
-                    </Text>
-                  }
-                >
-                  draw
-                </GroupLabel>
-              )}
-            </>
+          {/* ПАНЕЛЬ ВИДОВ УКАЗАНИЙ — НАД РЯДОМ, ОДНА НА ЛИСТ. Не бордерная полоса: внутри
+              блока новая коробка была бы блоком в блоке, а ступень «подгруппа» рисуется
+              линией. Стоит только там, где ею есть чем воспользоваться: без единой плиты
+              карточки взводить вид не на что, и панель обещала бы жест, которого нет. */}
+          {drawableHere && (
+            <GroupLabel
+              lead={
+                <AnnotationToolbar
+                  tool={tool}
+                  onTool={setTool}
+                  hint={tool ? placingHint(tool, placed) : undefined}
+                />
+              }
+              action={
+                <Text size='nano' variant='label' component='span' className='normal-case'>
+                  {tool
+                    ? 'click the plate you mean'
+                    : 'arm a kind, then click a plate — the text is written beside, under CALLOUTS'}
+                </Text>
+              }
+            >
+              draw
+            </GroupLabel>
           )}
 
           {onScreen.length === 0 ? (
-            kind === 'flat' || inspecting > 0 ? (
+            kind === 'flat' ? (
               <EmptyDocument
                 bench={bench}
                 disabled={disabled}
-                onAddPlate={inspecting === 0 && !disabled ? addPlateFromLibrary : undefined}
+                onAddPlate={!disabled ? addPlateFromLibrary : undefined}
               />
             ) : (
               <Text size='micro' variant='label' component='p'>
@@ -1178,8 +1076,9 @@ export function ArtifactsPanel({
           ) : (
             <PlateGrid
               plates={onScreen}
-              calloutsOf={inspecting === 0 ? calloutsOfPlate : () => []}
-              selected={inspecting === 0 ? selected : null}
+              layout={layout}
+              calloutsOf={calloutsOfPlate}
+              selected={selected}
               canPlaceOn={canPlaceOn}
               drawInert={drawInert}
               tool={tool}
@@ -1188,17 +1087,20 @@ export function ArtifactsPanel({
               onAddCallout={addCalloutOn}
               bindings={surfaceBindings}
               onZoom={setZoomAt}
-              onAddPlate={
-                inspecting === 0 && !disabled && kind === 'flat' ? addPlateFromLibrary : undefined
+              /* ДВЕРЬ ЗАГРУЗКИ СТОИТ ВО ВСЕХ ТРЁХ ВИДАХ (V-20 г) — см. довод у
+                 `addPlateFromLibrary`: род принесённого файла берётся у вида на экране. */
+              onAddPlate={!disabled ? addPlateFromLibrary : undefined}
+              addPlateLabel={
+                kind === 'flat' ? '+ add a flat' : kind === 'render' ? '+ add a render' : '+ add a 3D frame'
               }
-              onDetach={inspecting === 0 && !disabled ? askDetach : undefined}
+              onDetach={!disabled ? askDetach : undefined}
               detachInert={detachInert}
-              onTakeIn={inspecting === 0 && !disabled ? takeIntoCard : undefined}
-              /* THE MARK'S DOOR RIDES ONLY THE LIVE, NON-FLAT LISTS. A flat is chosen by standing
-                 in a bench slot, not by the mark, so a select door there would be a second registry
-                 of one election; a frozen version is a record, and records are not edited. */
+              onEdit={!disabled ? takeIntoCard : undefined}
+              /* THE MARK'S DOOR RIDES ONLY THE NON-FLAT LISTS. A flat is chosen by standing in a
+                 bench slot, not by the mark, so a select door there would be a second registry of
+                 one election. */
               onToggleChosen={
-                inspecting === 0 && kind !== 'flat' && !disabled && segment.serverStates
+                kind !== 'flat' && !disabled && segment.serverStates
                   ? (plate) =>
                       setPictureSelected.mutate({
                         pictureId: plate.pictureId ?? 0,
@@ -1207,54 +1109,16 @@ export function ArtifactsPanel({
                   : undefined
               }
               chosenInert={
-                inspecting > 0 || kind === 'flat'
+                kind === 'flat'
                   ? undefined
                   : disabled
                     ? 'the card is read-only for you — the mark is an edit of the card'
                     : SELECT_MARK_NOT_STATED
               }
               chosenPending={setPictureSelected.isPending}
-              offSheet={inspecting === 0 && kind !== 'flat'}
-              halo={inspecting === 0 && kind !== 'flat'}
+              offSheet={kind !== 'flat'}
+              halo={kind !== 'flat'}
             />
-          )}
-
-          {/* ─── THE TWO DOORS OF THE DOCUMENT ITSELF ─────────────────────────────────────── */}
-          <div className='flex flex-wrap items-center gap-1.5 pt-1'>
-            {exportPlates.length ? (
-              <Button variant='secondary' size='sm' onClick={downloadSheet}>
-                download SVG
-              </Button>
-            ) : (
-              <InertDoor
-                label='download SVG'
-                reason='there is nothing on the sheet to write: no flat plate stands on this card yet'
-              />
-            )}
-            <Button variant='secondary' size='sm' onClick={() => setReplacing(true)}>
-              replace the sheet with a file ▸
-            </Button>
-            <Text size='nano' variant='label' component='span' className='min-w-0 normal-case'>
-              the file carries the <b>flats</b> and the callouts standing on them — {exportPlates.length}{' '}
-              plate{exportPlates.length === 1 ? '' : 's'} — whichever representation is on screen,
-              because the sheet is made of flats. Pictures are LINKED by address, not embedded.
-            </Text>
-          </div>
-
-          {inspecting > 0 && (
-            <CalloutBox tone='note'>
-              <Text size='micro' component='p'>
-                <b>v{inspecting} as it was minted.</b> A version freezes the COMPOSITION — which
-                pictures are on the sheet.{' '}
-                {versionShortHash(shownVersion) && (
-                  <>
-                    Its first plate pinned bytes <code>{versionShortHash(shownVersion)}</code>.{' '}
-                  </>
-                )}
-                The callouts are not frozen: printing v{inspecting} prints the callouts the card
-                holds now, which is why fixing a note never needs a new version.
-              </Text>
-            </CalloutBox>
           )}
         </Section>
 
@@ -1276,136 +1140,13 @@ export function ArtifactsPanel({
             plates={plates}
             selected={selected}
             onSelect={setSelected}
-            disabled={disabled || inspecting > 0}
-            onRemove={inspecting === 0 && !disabled ? removeCalloutAt : undefined}
-            onDemote={inspecting === 0 && !disabled ? demoteCalloutAt : undefined}
+            disabled={disabled}
+            onRemove={!disabled ? removeCalloutAt : undefined}
+            onDemote={!disabled ? demoteCalloutAt : undefined}
             focusToken={focusEditor}
           />
         </Section>
       </SectionStack>
-
-      {/* ─── STOREY (b): THE VERSIONS ─────────────────────────────────────────────────────── */}
-      {hasVersions ? (
-        <>
-          {diverged && (
-            <Section
-              title={`differs from v${latest}`}
-              question='— the composition has moved on; the paper has not'
-              action={
-                <Pill tone='attention'>
-                  {diverged.length} change{diverged.length === 1 ? '' : 's'}
-                </Pill>
-              }
-            >
-              <Text size='micro' component='p'>
-                <b>{diverged.join(', ').toLowerCase()}</b> — pieces and print stay on v{latest}{' '}
-                until a new version is minted. Nothing here is broken: a version is born of an act,
-                so v{latest + 1} appears when somebody prints or releases, not when a picture
-                changes.
-              </Text>
-              <div>
-                <GroupLabel>v{latest} → the bench</GroupLabel>
-                <DiffRows version={band.latestVersion} bench={bench} />
-              </div>
-              <PrintSheetButton
-                techCardId={techCardId}
-                band={band}
-                diverged={diverged}
-                disabled={disabled}
-                onMintFirst={setMintOrigin}
-              />
-            </Section>
-          )}
-
-          <SectionStack row>
-            <Section
-              title={`v${latest}`}
-              question={
-                <>
-                  — minted by {(band.latestVersion?.mintedBy ?? '').trim() || '—'}{' '}
-                  {clockStamp(band.latestVersion?.mintedAt)}
-                  {band.latestVersion?.mintedVia ? ` · via ${band.latestVersion.mintedVia}` : ''}
-                  {band.latestVersion?.mixedConsent ? ' · mixed composition accepted' : ''}
-                </>
-              }
-              action={
-                <PrintSheetButton
-                  techCardId={techCardId}
-                  band={band}
-                  diverged={diverged}
-                  disabled={disabled}
-                  onMintFirst={setMintOrigin}
-                />
-              }
-              className='min-w-0 flex-1'
-            >
-              <Row
-                label={
-                  <Text size='micro' component='span'>
-                    versions minted
-                  </Text>
-                }
-                value={versionNumbers.length}
-              />
-              <Row
-                label={
-                  <Text size='micro' component='span'>
-                    plates frozen in v{latest}
-                  </Text>
-                }
-                value={band.latestVersion?.plates?.length ?? 0}
-              />
-              <Text size='micro' variant='label' component='p'>
-                No QR is printed in this wave. There is no public viewer behind one yet, and paper
-                carrying a code that answers nothing dies silently on the shop floor — so the sheet
-                carries its version number instead.
-              </Text>
-            </Section>
-
-            <Section
-              title='journal'
-              question='— what left the building, and when'
-              className='lg:w-[340px] lg:shrink-0'
-            >
-              <SheetJournal journal={band.journal} />
-              <Text size='nano' variant='label' component='p' className='uppercase'>
-                a reprint is a line here, never a new version
-              </Text>
-            </Section>
-          </SectionStack>
-        </>
-      ) : (
-        <NoVersionsYet
-          bench={bench}
-          plates={plates}
-          disabled={disabled}
-          onMint={setMintOrigin}
-          say={showMessage}
-        />
-      )}
-
-      {!host && (
-        <CalloutBox tone='note'>
-          <Text size='micro' component='p'>
-            <b>the mint is not wired to this card’s save path.</b> A version is written by the same
-            transaction that saves the document, so it cannot be minted until this tab is mounted
-            inside <code>DesignSaveHostProvider</code>. Everything above works; only minting does
-            not.
-          </Text>
-        </CalloutBox>
-      )}
-
-      {mintOrigin && (
-        <MintDialog
-          open
-          onOpenChange={(open) => !open && setMintOrigin(null)}
-          techCardId={techCardId}
-          band={band}
-          origin={mintOrigin}
-          disabled={disabled}
-          onMinted={() => setInspecting(0)}
-        />
-      )}
 
       {/* ═══ УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО НА ПЛИТЕ ═══════════════════════════════════
           Это НЕ возвращение модалки рисования: модалка была ЕДИНСТВЕННЫМ местом, где указание
@@ -1429,7 +1170,7 @@ export function ArtifactsPanel({
           selectedKey={selected == null ? null : String(selected)}
           {...surfaceBindings}
           legend
-          halo={inspecting === 0 && kind !== 'flat'}
+          halo={kind !== 'flat'}
           readOnlyNote={
             canPlaceOn(onScreen[zoomAt]) ? undefined : (
               <Text size='micro' variant='label' component='span'>
@@ -1451,58 +1192,6 @@ export function ArtifactsPanel({
           }
           position={{ index: zoomAt, total: onScreen.length }}
         />
-      )}
-
-      {/* ═══ «REPLACE THE SHEET WITH A FILE» — A PROCEDURE, EXPLAINED, NOT A BUTTON THAT DOES IT ══
-          The prototype's own modal of this name explains rather than acts, and this build keeps the
-          division for a reason it can state exactly: replacing the picture under a sheet means every
-          callout on it has to be WALKED to a new address by hand. `pos_x/pos_y` and `points` are
-          fractions of a FRAME; carried onto a different drawing they land somewhere else entirely
-          and look perfectly normal doing it. A one-press «replace» would therefore either lose the
-          markup or silently misplace it, and the second is worse. What this admin already has is
-          the honest version of the same walk, spread over controls that each do one thing. */}
-      {replacing && (
-        <ConfirmationModal
-          open
-          onOpenChange={(open) => !open && setReplacing(false)}
-          onConfirm={() => setReplacing(false)}
-          title='replace the sheet with a file'
-          confirmLabel='close'
-          cancelLabel='close'
-          width='md'
-        >
-          <div className='space-y-stack'>
-            <Text size='micro' component='p'>
-              There is no single «replace» here, and that is deliberate. A callout stores its
-              position as a <b>fraction of its own picture</b>. Swap the picture underneath it and
-              the marker keeps the fraction: it lands somewhere else on the garment and looks
-              entirely normal doing it. So the exchange is done as three visible acts instead of one
-              invisible one.
-            </Text>
-            <div>
-              <GroupLabel>the walk</GroupLabel>
-              <Row
-                label={<Text size='micro' component='span'>1 · bring the file in</Text>}
-                value={<Text size='micro' component='span'>the + reference slot in INPUT</Text>}
-              />
-              <Row
-                label={<Text size='micro' component='span'>2 · put it in the slot it replaces</Text>}
-                value={<Text size='micro' component='span'>the bench, same view</Text>}
-              />
-              <Row
-                label={<Text size='micro' component='span'>3 · move the callouts across</Text>}
-                value={<Text size='micro' component='span'>detach here, re-pin in the editor</Text>}
-              />
-            </div>
-            <Text size='micro' component='p'>
-              <b>The callouts go with the plate.</b> Their text, their number and their marker are
-              removed together with it — a callout is a fraction of THIS frame, and a fraction
-              outlives its picture only as a number nobody can place. This is what the owner asked
-              for; the previous wording promised they would survive as «unpinned», and that promise
-              is no longer true.
-            </Text>
-          </div>
-        </ConfirmationModal>
       )}
 
       {detaching && (
@@ -1542,12 +1231,14 @@ export function ArtifactsPanel({
 /**
  * ═══ SAID BEFORE THE PENCIL IS PICKED UP, NOT AFTER ═══════════════════════════════════════════
  *
- * THE DEFECT THIS EXISTS TO PREVENT. The technical sheet is composed of FLATS ONLY: the mint takes
- * the bench's flat plates and nothing else, and the server's `freezeCallouts` then keeps the
- * callouts that stand ON THOSE PLATES — SILENTLY DROPPING every other one. So a person who opens
- * ARTIFACTS, switches to «renders», carefully annotates a fabric render and mints a version gets a
- * sheet with none of that work on it, no error, no warning, and no line in the journal saying
- * anything went missing. The annotation is not corrupted; it simply is not there.
+ * THE DEFECT THIS EXISTS TO PREVENT. The technical sheet is composed of FLATS ONLY. So a person who
+ * opens ARTIFACTS, switches to «renders» and carefully annotates a fabric render has done work that
+ * DOES NOT REACH THE SHEET — and nothing about the drawing itself says so. The annotation is not
+ * corrupted and it is not lost; it simply lives on a picture the sheet is not made of.
+ *
+ * ЭТО ПЕРЕЖИЛО СНОС МИНТА, И НЕ СЛУЧАЙНО. Раньше цена была резче — серверный `freezeCallouts` при
+ * минте МОЛЧА выбрасывал такие выноски, — но само правило «лист состоит из флэтов» жило не в минте,
+ * а в определении листа. Минта нет, а правило есть, и предупреждать о нём нужно ровно так же.
  *
  * WHY IT IS A BLUE BOX AND NOT A GREY FOOTNOTE. This is the mid-flight, needs-a-human tone of the
  * system, and it is the correct one: nothing is broken, and the person is not doing anything wrong
@@ -1644,6 +1335,19 @@ function plateAspect(plate: DocumentPlate): string {
 const PLATE_FRAME_HEIGHT = 400;
 
 /**
+ * ВЫСОТА СТРОКИ ПОДПИСИ ПОД КАДРОМ — ЗАРЕЗЕРВИРОВАНА, А НЕ ВЫВЕДЕНА ИЗ ТЕКСТА.
+ *
+ * Владелец (V-20): «все карточки должны быть одной высоты всегда». «Всегда» — это и есть требование
+ * к ЭТОЙ строке: провенанс несёт только верстачная плита, у плиты карточки его нет вовсе, и строка,
+ * которая рисуется лишь когда ей есть что сказать, делала соседние плиты разной высоты — ряд
+ * переставал читаться как ряд. Поэтому элемент стоит ВСЕГДА и всегда занимает 14px; пустой он
+ * просто молчит. Обратный ход (дописать «—», как велит DESIGN.md для отсутствующих ДАННЫХ) здесь
+ * неверен: отсутствие провенанса у загруженного руками файла — это не пропущенное значение,
+ * а свойство, и прочерк под каждой второй плитой был бы шумом, который никто не читает.
+ */
+const PLATE_NOTE_LINE = 'h-3.5';
+
+/**
  * The plates — and each one IS the drawing surface, not a picture of it.
  *
  * ═══ ПОЧЕМУ ПЛИТА РИСУЕТ САМА (T-21) ═══════════════════════════════════════════════════════════
@@ -1661,15 +1365,38 @@ const PLATE_FRAME_HEIGHT = 400;
  * `pointerup` и `pointerenter` стреляют — то есть постановка указания (она начинается с
  * `pointerdown`) прошла бы сквозь такую «заморозку» в полный рост.
  *
- * ═══ ДВЕРИ ═══════════════════════════════════════════════════════════════════════════════════
+ * ═══ ДВЕРИ ЖИВУТ В УГЛАХ КАДРА, А НЕ СТРОКОЙ ПОД НИМ (V-20) ══════════════════════════════════
  *
- * EVERY PLATE CARRIES ITS DOORS, and a door that cannot act is DRAWN INERT WITH ITS REASON rather
- * than omitted. Absence teaches that the flow does not exist; a dead control with a reason teaches
- * which of the true things is in the way — a frozen version, a released card, or a plate that is
- * not on the document yet.
+ * Владелец: «не должно быть кнопки TAKE IN TO DRAW ON IT ▸ я не понимаю зачем она нужна должна
+ * быть кнопка эдит на ховер», и в том же пункте — «все карточки должны быть одной высоты всегда».
+ * Это ОДНО требование, а не два: строка дверей под кадром переносилась (`flex-wrap`), её состав
+ * менялся от вида к виду и от плиты к плите, и именно она делала соседние плиты разной высоты.
+ * Убрав её в углы, мы разом получаем и ховер-органы, и постоянную высоту.
+ *
+ * ЗАКОН УГЛОВ — ОБЩИЙ С `PictureTile`, и координаты берутся ИЗ НЕГО (`TILE_AT_*`), а не пишутся
+ * здесь заново: владелец уже жаловался («сделай везде одинаково включая кнопку сплит нахуя ты
+ * делаешь везде по разному»). Плита не может БЫТЬ `PictureTile` — она сама поверхность постановки
+ * указаний (T-21, «оно должно быть инлайн»), и обернуть её в плитку значило бы вернуть модалку
+ * рисования, которую владелец снял. Поэтому общий не компонент, а закон:
+ *
+ *      верх справа  — zoom, ✕ (снять плиту с листа)   ← ряд, кладётся в `cornerSlot` поверхности
+ *      низ слева    — select / un-select (метка W-12)
+ *      низ справа   — edit
+ *
+ * ЧТО ТАКОЕ `edit` ЗДЕСЬ. Ровно тот акт, что раньше назывался «take in to draw on it ▸»: картинка
+ * верстака или прогона вносится в медиа карточки, и с этого мгновения на ней можно ставить
+ * указания ПРЯМО ЗДЕСЬ (`media_id` выноски адресует медиа КАРТОЧКИ — это и есть вся причина, по
+ * которой шаг существует). Владелец не просил убрать шаг, он просил убрать НЕПОНЯТНОЕ ИМЯ: «я не
+ * понимаю зачем она нужна». Плита карточки своего `edit` не несёт — она уже правится кликом по
+ * себе, и второй орган, дублирующий работающий жест, был бы мебелью.
+ *
+ * МЁРТВАЯ ДВЕРЬ ОСТАЁТСЯ ВИДИМОЙ И НАЗЫВАЕТ ПРИЧИНУ — но теперь заголовком угла, а не строкой:
+ * отсутствие учит, что жеста не существует вовсе, а погашенный орган с причиной учит, что именно
+ * стоит на пути (выпущенная карточка, плита не на документе).
  */
 function PlateGrid({
   plates,
+  layout,
   calloutsOf,
   selected,
   canPlaceOn,
@@ -1681,9 +1408,10 @@ function PlateGrid({
   bindings,
   onZoom,
   onAddPlate,
+  addPlateLabel,
   onDetach,
   detachInert,
-  onTakeIn,
+  onEdit,
   onToggleChosen,
   chosenInert,
   chosenPending,
@@ -1691,6 +1419,8 @@ function PlateGrid({
   halo,
 }: {
   plates: DocumentPlate[];
+  /** Лента с прокруткой или переносящийся ряд. Высота плиты от этого не зависит — см. V-20. */
+  layout: PlateLayout;
   /** Указания одной плиты, уже в вью-модели поверхности. */
   calloutsOf: (mediaId: number) => SurfaceCallout[];
   selected: number | null;
@@ -1708,19 +1438,20 @@ function PlateGrid({
   onZoom: (index: number) => void;
   /** Положить на лист картинку из библиотеки, или `undefined` — и слота нет вовсе. */
   onAddPlate?: (items: common_MediaFull[]) => void;
+  /** Слово на пустом слоте: оно называет РОД того, что появится, а род зависит от вида (V-20 г). */
+  addPlateLabel?: string;
   /** Take a plate off the document, or `undefined` — and then `detachInert` says why not. */
   onDetach?: (plate: DocumentPlate) => void;
   detachInert: string;
   /**
-   * Put a bench slot's or a run's picture into the card's own media, so a callout can address it
-   * at all. С ним же живёт составная дверь «take in + draw ▸» на этих плитах (R-13).
+   * `edit` нижнего правого угла: внести картинку верстака или прогона в медиа карточки, чтобы на
+   * ней вообще можно было поставить указание. Прежнее имя двери — «take in to draw on it ▸».
    */
-  onTakeIn?: (plate: DocumentPlate) => void;
+  onEdit?: (plate: DocumentPlate) => void;
   /**
    * Flip the mark «chosen» on the picture behind a plate (W-12), or `undefined` — and then
-   * `chosenInert` says why not. BOTH absent means the door is not part of this list at all: flats
-   * are chosen by the bench slot, and a frozen version is a record — on those lists absence is the
-   * truth, not an omission.
+   * `chosenInert` says why not. BOTH absent means the door is not part of this list at all: a flat
+   * is chosen by standing in a bench slot, so on that list absence is the truth, not an omission.
    */
   onToggleChosen?: (plate: DocumentPlate) => void;
   chosenInert?: string;
@@ -1736,11 +1467,25 @@ function PlateGrid({
   halo?: boolean;
 }) {
   return (
-    // РЯД С ПЕРЕНОСОМ, А НЕ СЕТКА КОЛОНОК. Ширину плиты теперь диктует сам снимок (высота задана,
-    // пропорции его собственные), поэтому колонка фиксированной ширины либо резала бы широкий
-    // чертёж, либо оставляла бы пустоту под узким. `items-start`: плиты разной высоты подвала не
-    // растягивают друг друга.
-    <div className='flex flex-wrap items-start gap-2'>
+    // ОДНА РАСКЛАДКА, ДВА РЕЖИМА, И РАЗНИЦА РОВНО В ПЕРЕНОСЕ.
+    //
+    // Ширину плиты диктует сам снимок (высота задана, пропорции его собственные), поэтому колонка
+    // фиксированной ширины либо резала бы широкий чертёж, либо оставляла бы пустоту под узким —
+    // сетки колонок здесь нет ни в одном из режимов.
+    //
+    // СТРИП — `flex-nowrap` с горизонтальной прокруткой: ряд остаётся рядом и не рвётся на месте,
+    // выбранном шириной окна. СЕТКА — тот же ряд с `flex-wrap`.
+    //
+    // `items-start` УБРАН НАМЕРЕННО: он был нужен, пока плиты были разной высоты (подвал дверей
+    // переносился), и он же эту разницу закреплял. Высота теперь постоянна у всех, растягивать
+    // друг друга нечему, а `items-stretch` по умолчанию держит ряд ровным, если высота вдруг
+    // разойдётся, — то есть ошибка станет видна, а не замаскируется.
+    <div
+      className={cn(
+        'flex gap-2',
+        layout === 'strip' ? 'flex-nowrap overflow-x-auto pb-1' : 'flex-wrap',
+      )}
+    >
       {plates.map((plate, index) => {
         const drawable = canPlaceOn(plate);
         const mine = calloutsOf(plate.mediaId);
@@ -1757,12 +1502,15 @@ function PlateGrid({
           // ШИРИНУ ПЛИТЫ ЗАДАЁТ КАДР, И ТОЛЬКО ОН. `w-0 min-w-full` на всём, что стоит над и под
           // кадром (идиома этого репозитория, ею же обёрнута легенда внутри поверхности): такой
           // ряд рисуется во всю ширину плиты, но в её СОБСТВЕННУЮ ширину не входит. Без этого
-          // длинная строка дверей растягивала бы плиту шире её же картинки — у портретного
+          // длинное имя или подпись растянули бы плиту шире её же картинки — у портретного
           // чертежа заметно, и ряд переставал бы читаться как ряд равных.
+          //
+          // `shrink-0` — ДЛЯ СТРИПА: в ленте `flex-nowrap` плиты иначе сжимались бы, чтобы влезть
+          // в ширину блока, и лента «прокручивалась» бы, ничего не прокручивая.
           <div
             key={plate.key}
             data-field={plate.door}
-            className='w-fit max-w-full border border-borderColor p-1'
+            className='group w-fit max-w-full shrink-0 border border-borderColor p-1'
           >
             <div className='flex w-0 min-w-full items-baseline gap-1.5'>
               <Text
@@ -1812,106 +1560,142 @@ function PlateGrid({
                     : undefined
                 }
                 legend
+                /* ЛЕГЕНДА — В КОРОБКЕ ПОСТОЯННОЙ ВЫСОТЫ, И ЭТО ВТОРАЯ ПОЛОВИНА «ОДНОЙ ВЫСОТЫ
+                   ВСЕГДА». Кадр фиксирован (`PLATE_FRAME_HEIGHT`), шапка — одна строка, подпись —
+                   зарезервированные 14px; оставалась легенда пинов, которая растёт со числом
+                   выносок НА ЭТОЙ плите. Плита с четырьмя пинами была ощутимо выше соседней с
+                   одним — то есть ровно то, на что жаловался владелец, и заметно это было бы
+                   только на карточке с выносками.
+                   72px — четыре строки nano: столько несёт типичная плита, и прокрутка включается
+                   лишь у по-настоящему многолюдной. Снять легенду было бы проще, но она не
+                   дублирует панель CALLOUTS: наведение на её строку подсвечивает СВОЙ пин на
+                   снимке, а это принадлежит поверхности и нигде больше не живёт. */
+                chromeClassName='h-[72px] overflow-y-auto'
                 halo={halo}
-                // Читательский жест, живой и на выпущенной карточке: мерку и дугу на плите иначе
-                // не разглядеть, а увеличение и есть способ их прочесть.
+                // ВЕРХ СПРАВА — РЯД, А НЕ УГОЛ, ровно как у `PictureTile`: увеличение и снятие
+                // обязаны стоять рядом, не наезжая. Место ряда назначает сама поверхность
+                // (`cornerSlot` рисуется ею по `right-1 top-1`), поэтому координат здесь нет.
+                //
+                // ZOOM ЖИВ И НА ВЫПУЩЕННОЙ КАРТОЧКЕ: мерку и дугу на плите иначе не разглядеть, а
+                // увеличение и есть способ их прочесть. ✕ (detach) — правка листа, поэтому гаснет.
                 cornerSlot={
-                  <PlateCorner label={`zoom · ${plate.name}`} onPress={() => onZoom(index)}>
-                    zoom
-                  </PlateCorner>
+                  <>
+                    <PlateCorner label={`zoom · ${plate.name}`} onPress={() => onZoom(index)}>
+                      zoom
+                    </PlateCorner>
+                    {detachReason ? (
+                      <PlateCorner label={`detach ${plate.name}`} reason={detachReason}>
+                        ✕
+                      </PlateCorner>
+                    ) : (
+                      <PlateCorner
+                        label={`detach ${plate.name} — take this picture off the sheet; the callouts on it go with it`}
+                        onPress={() => onDetach?.(plate)}
+                      >
+                        ✕
+                      </PlateCorner>
+                    )}
+                  </>
+                }
+                /* НИЖНИЙ РЯД — СЛОТОМ ПОВЕРХНОСТИ, поверх кадра: место назначает она, потому что
+                   только она знает, где кончается снимок и начинается легенда. Первый ребёнок
+                   садится слева, последний справа — поэтому обе роли передаются ВСЕГДА, пустым
+                   `<span />` при отсутствии: иначе единственный орган сменил бы угол молча. */
+                cornerSlotBottom={
+                  <>
+                    {/* НИЗ СЛЕВА — МЕТКА «chosen» (W-12). Роль левого нижнего угла у плитки занята
+                        сплитом, а лист не режут; здесь это метка. */}
+                    {!(onToggleChosen || chosenInert) ? (
+                      <span />
+                    ) : onToggleChosen && (plate.pictureId ?? 0) > 0 ? (
+                      <PlateCorner
+                        disabled={chosenPending}
+                        label={
+                          plate.chosen
+                            ? `un-select ${plate.name} — with none of this kind chosen, the segment lists everything again`
+                            : `select ${plate.name} — the segment narrows to the chosen ones of this kind`
+                        }
+                        onPress={() => onToggleChosen(plate)}
+                      >
+                        {plate.chosen ? 'un-select' : 'select'}
+                      </PlateCorner>
+                    ) : (
+                      <PlateCorner
+                        label={plate.chosen ? `un-select ${plate.name}` : `select ${plate.name}`}
+                        reason={
+                          onToggleChosen
+                            ? 'the picture behind this plate is not on the loaded page of the band — the mark is set on the picture, and this page does not carry it'
+                            : chosenInert!
+                        }
+                      >
+                        {plate.chosen ? 'un-select' : 'select'}
+                      </PlateCorner>
+                    )}
+
+                    {/* НИЗ СПРАВА — `edit`, И ТОЛЬКО ТАМ, ГДЕ ЕМУ ЕСТЬ ЧТО СДЕЛАТЬ. Плита карточки
+                        правится кликом по самой себе, и дублирующий этот жест орган был бы мебелью.
+                        У плиты верстака и выхода прогона указание поставить НЕЛЬЗЯ, пока картинка не
+                        в медиа карточки, — `edit` ровно это и делает, одним тактом, на месте. */}
+                    {compound ? (
+                      onEdit ? (
+                        <PlateCorner
+                          label={`edit ${plate.name} — lists this picture in the card’s own media, and from that moment a callout can be placed on it right here`}
+                          onPress={() => onEdit(plate)}
+                        >
+                          edit
+                        </PlateCorner>
+                      ) : (
+                        <PlateCorner
+                          label={`edit ${plate.name}`}
+                          reason='this card is read-only for you — taking a picture onto the card is an edit of the card'
+                        >
+                          edit
+                        </PlateCorner>
+                      )
+                    ) : !drawable ? (
+                      <PlateCorner label={`draw on ${plate.name}`} reason={drawInert}>
+                        draw
+                      </PlateCorner>
+                    ) : (
+                      <span />
+                    )}
+                  </>
                 }
               />
             </div>
 
-            {/* Только когда есть что сказать: пустая строка занимала бы полтора десятка пикселей
-                под каждой плитой ради ничего. Размеры снимка отсюда ушли — их роль («доли честны»)
-                исполняет теперь сам кадр, взявший пропорции картинки. */}
-            {plate.note ? (
-              <Text
-                size='nano'
-                variant='label'
-                component='p'
-                className='mt-1 w-0 min-w-full truncate'
-              >
-                {plate.note}
-              </Text>
-            ) : null}
-
-            <div className='mt-1 flex w-0 min-w-full flex-wrap items-center gap-1'>
-              {compound &&
-                (onTakeIn ? (
-                  /* СОСТАВНАЯ ДВЕРЬ (R-13), И ТЕПЕРЬ ОНА ОДНОТАКТНАЯ. Выноска адресует медиа
-                     КАРТОЧКИ, поэтому рисованию предшествует взятие — но открывать после этого
-                     нечего: плита рисует сама, и взятая картинка становится рабочей на месте.
-                     Прежняя пара «взять + открыть модалку» и была дефектом T-20: модалка
-                     разрешала свежий id через СОХРАНЁННУЮ карточку и не находила его. */
-                  <Button
-                    variant='secondary'
-                    size='xs'
-                    onClick={() => onTakeIn(plate)}
-                    title='lists this picture in the card’s own media — from that moment a callout can be placed on it right here'
-                  >
-                    take in to draw on it ▸
-                  </Button>
-                ) : (
-                  <InertDoor
-                    label='take in to draw on it ▸'
-                    reason='this card is read-only for you, or a frozen version is on screen — taking a picture onto the card is an edit of the card'
-                  />
-                ))}
-              {!compound && !drawable && <InertDoor label='draw' reason={drawInert} />}
-              {detachReason ? (
-                <InertDoor label='detach' reason={detachReason} />
-              ) : (
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  onClick={() => onDetach?.(plate)}
-                  title='take this picture off the sheet — the callouts on it go with it'
-                >
-                  detach
-                </Button>
-              )}
-              {(onToggleChosen || chosenInert) &&
-                (onToggleChosen && (plate.pictureId ?? 0) > 0 ? (
-                  <Button
-                    variant='secondary'
-                    size='xs'
-                    disabled={chosenPending}
-                    onClick={() => onToggleChosen(plate)}
-                    title={
-                      plate.chosen
-                        ? 'take the mark off — with none of this kind chosen, the segment lists everything again'
-                        : 'mark as chosen — the segment narrows to the chosen ones of this kind'
-                    }
-                  >
-                    {plate.chosen ? 'un-select' : 'select'}
-                  </Button>
-                ) : (
-                  <InertDoor
-                    label={plate.chosen ? 'un-select' : 'select'}
-                    reason={
-                      onToggleChosen
-                        ? 'the picture behind this plate is not on the loaded page of the band — the mark is set on the picture, and this page does not carry it'
-                        : chosenInert!
-                    }
-                  />
-                ))}
-            </div>
+            {/* СТРОКА ПОДПИСИ СТОИТ ВСЕГДА, ДАЖЕ ПУСТАЯ — см. `PLATE_NOTE_LINE`. Провенанс несёт
+                только верстачная плита, и строка «по потребности» делала соседние плиты разной
+                высоты, чего владелец и просил не допускать. */}
+            <Text
+              size='nano'
+              variant='label'
+              component='p'
+              className={cn('mt-1 w-0 min-w-full truncate', PLATE_NOTE_LINE)}
+            >
+              {plate.note ?? ''}
+            </Text>
           </div>
         );
       })}
 
       {/* ПУСТОЙ КАДР И ЕСТЬ КНОПКА, КОТОРАЯ ЕГО ЗАПОЛНЯЕТ — тот же слот, что на листе эскиза и в
           мудборде. Кнопка «add a picture» в ряду органов ничего не говорила бы о том, что появится
-          на её месте, а появляется ПЛИТА. Стоит только на флэтах: лист состоит из них, и рендер,
-          положенный сюда руками, ушёл бы на бумагу под видом чертежа. */}
+          на её месте, а появляется ПЛИТА.
+
+          СТОИТ ТЕПЕРЬ ВО ВСЕХ ТРЁХ ВИДАХ (V-20 г). Владелец: «так же должн быть возможность
+          загрузить свой флет, рендер или 3д если мы не хотим генерировать их в нашем туле». Раньше
+          слот жил только на флэтах, и довод был честный — рендер, положенный в ряд флэтов, уехал бы
+          на бумагу под видом чертежа. Он никуда не делся, но решается НЕ ЗАПРЕТОМ, а тем, что
+          принесённый файл кладётся в вид, КОТОРЫЙ СЕЙЧАС НА ЭКРАНЕ: загруженный в сегменте рендеров
+          файл и числится рендером, а лист по-прежнему собирается из флэтов. Отсутствие двери не
+          защищало ни от чего — оно просто не давало обойтись без генератора. */}
       {onAddPlate && (
         <MediaSlot
           aspectRatio={['Custom']}
           frameAspect='4/5'
           heightPx={PLATE_FRAME_HEIGHT}
-          label='+ add a plate'
+          label={addPlateLabel ?? '+ add a plate'}
           purpose='technical sheet plate'
           allowMultiple
           showVideos={false}
@@ -1930,33 +1714,61 @@ function PlateGrid({
  * Chromium: гасятся ровно `click` и `focus`). Увеличение — единственный способ прочесть мерку на
  * плите, и делать его мёртвым на подписанной карточке значило бы закрыть чтение там, где только
  * чтение и осталось. Свои pointer-события орган гасит сам, иначе нажатие уходит в постановку.
+ *
+ * КОЖА И ПОЯВЛЕНИЕ — ОБЩИЕ С ПЛИТКОЙ ПОЛОСЫ (`TILE_CORNER`, `TILE_QUIET` из `picture-tile.tsx`).
+ * Владелец просил `edit` «на ховер», и формула появления у полосы уже была написана — своя вторая
+ * означала бы, что органы полосы проступают по двум разным правилам. `TILE_QUIET` слушает
+ * `group-hover` ХОЗЯИНА, поэтому плита несёт класс `group`: у клавиатуры ховера не бывает, и орган,
+ * видимый лишь пока фокус стоит на нём самом, нечем найти — там же формула ловит `group-focus-within`
+ * и устройство без наведения.
  */
 function PlateCorner({
   label,
   onPress,
+  reason,
+  disabled,
   children,
 }: {
   label: string;
-  onPress: () => void;
+  onPress?: () => void;
+  /**
+   * Дверь есть, но нажать нельзя — и орган НАЗЫВАЕТ ПРИЧИНУ вместо того, чтобы исчезнуть.
+   * Отсутствие учит, что жеста не существует вовсе; погашенный орган с причиной учит, что именно
+   * стоит на пути. Задан — `onPress` игнорируется.
+   */
+  reason?: string;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
+  const inert = !!reason || !onPress;
+  const dead = inert || disabled;
   return (
     <span
       role='button'
-      tabIndex={0}
+      // Мёртвый орган выпадает из таба: остановка на кнопке, которая ничего не делает, — это
+      // остановка ни на чём, а причину несёт заголовок, который читалка объявляет вместе с именем.
+      tabIndex={dead ? -1 : 0}
+      aria-disabled={dead || undefined}
       aria-label={label}
-      title={label}
+      title={reason ? `${label} — ${reason}` : label}
       onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation();
-        onPress();
+        if (dead) return;
+        onPress?.();
       }}
       onKeyDown={(e: React.KeyboardEvent) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
-        onPress();
+        if (dead) return;
+        onPress?.();
       }}
-      className='cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-nano uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+      className={cn(
+        TILE_CORNER,
+        TILE_QUIET,
+        'py-px leading-none',
+        dead ? 'cursor-not-allowed text-textInactiveColor' : 'cursor-pointer',
+      )}
     >
       {children}
     </span>
@@ -2223,7 +2035,7 @@ function EmptyDocument({
   disabled,
   onAddPlate,
 }: {
-  bench: BenchSlots;
+  bench: BenchRead;
   disabled?: boolean;
   /** Положить на лист картинку из библиотеки. `undefined` — карточка только читается. */
   onAddPlate?: (items: common_MediaFull[]) => void;
@@ -2233,8 +2045,8 @@ function EmptyDocument({
     <>
       <Text size='micro' variant='label' component='p'>
         Nothing is drawn on this card yet. A sheet is made of flats — put a drawing on it from the
-        library below, or fill a bench slot in <b>STUDIO</b>, which the mint carries into the card’s
-        own media. Callouts are placed on the plate itself, here, once one exists.
+        library below, or fill a bench slot in <b>STUDIO</b> and bring it in with <b>edit</b> on its
+        plate. Callouts are placed on the plate itself, here, once one exists.
       </Text>
       {/* СЛОТ, А НЕ КНОПКА: на месте пустой рамки появится ПЛИТА, и рамка тех же пропорций про это
           и говорит. ⌘V и бросок файла слот принимает сам. */}
@@ -2242,7 +2054,7 @@ function EmptyDocument({
         <MediaSlot
           aspectRatio={['Custom']}
           frameAspect='4/5'
-          label='+ add a plate'
+          label='+ add a flat'
           purpose='technical sheet plate'
           allowMultiple
           showVideos={false}
@@ -2250,8 +2062,12 @@ function EmptyDocument({
           sizeClassName='w-[200px] max-w-[85vw]'
         />
       )}
+      {/* ЧТО ДЕЛАЕТ ЛИСТ ЛИСТОМ — перед и спинка. Это КЛИЕНТСКОЕ соглашение (`SHEET_MIN_VIEWS` в
+          `views.ts`), сервер его не знает и ни на чём не настаивает: строка сообщает и ведёт к
+          слоту, но ничего не запрещает. Раньше эти два вида были ещё и условием минта — минта
+          больше нет, а лист без переда и спинки по-прежнему не лист. */}
       <div className='flex flex-wrap gap-1.5'>
-        {SHEET_MINIMUM.map((view) => (
+        {SHEET_MIN_VIEWS.map((view) => (
           <Button
             key={view}
             variant='secondary'
@@ -2260,131 +2076,16 @@ function EmptyDocument({
             onClick={() =>
               openDoor(
                 benchDoor({ viewKey: view }),
-                `the ${VIEW_LABELS[view]} slot is on the bench`,
+                `the ${viewLabel(view)} slot is on the bench`,
                 showMessage,
               )
             }
           >
-            {VIEW_LABELS[view]} slot {slotIsFilled(bench.byView.get(view)) ? '✓' : '✗'}
+            {viewLabel(view)} slot{' '}
+            {slotIsFilled(bench.sides.find((s) => s.view === view)?.slot) ? '✓' : '✗'}
           </Button>
         ))}
       </div>
     </>
-  );
-}
-
-/**
- * The version storey when there is no version.
- *
- * IT IS A PLATE, NOT AN EMPTY SECTION, AND THERE IS NO `SHEET v0`. A version numbered zero is a
- * sentence about a thing that does not exist; the truthful screen says versions arrive with the
- * mint and shows what the mint is waiting for. Every line is a door (Г10 — the lock used to name a
- * tab and offer no way to reach it).
- *
- * The two informational lines are informational on purpose: an uploaded plate states no fit of its
- * own and a mixed composition is legal with consent, so both are questions the mint ASKS rather
- * than conditions this list enforces. Marking them red would teach people that the list lies.
- */
-function NoVersionsYet({
-  bench,
-  plates,
-  disabled,
-  onMint,
-  say,
-}: {
-  bench: BenchSlots;
-  plates: DocumentPlate[];
-  disabled?: boolean;
-  onMint: (origin: MintOrigin) => void;
-  say: (m: string, t: 'error') => void;
-}) {
-  const analysis = useMemo(() => analyseMint(bench, []), [bench]);
-  const missing = sheetMinimumMissing(bench);
-  const ready = benchMinimumMet(bench);
-
-  return (
-    <Section
-      title='versions'
-      question='— none yet; a version arrives with the mint'
-      action={
-        <Button
-          variant='main'
-          size='sm'
-          disabled={disabled || !ready}
-          onClick={() => onMint('print')}
-          title={ready ? undefined : 'the sheet minimum is not met'}
-        >
-          print — mints v1
-        </Button>
-      }
-    >
-      <Text size='micro' component='p'>
-        Nothing has been minted. A version freezes <b>which pictures are on the sheet</b>, so that a
-        printed page can name one composition and be checked against it later. Callouts are not part
-        of that freeze — paper always prints the current ones — which is why a version is only ever
-        born of an act: the first print or release mints v1.
-        {plates.length > 0 && ' The document above is already usable and already prints.'}
-      </Text>
-
-      <div>
-        <GroupLabel>what the mint needs</GroupLabel>
-        {SHEET_MINIMUM.map((view) => {
-          const filled = slotIsFilled(bench.byView.get(view));
-          return (
-            <div key={view} className='flex items-center gap-2 border-b border-hairline py-1'>
-              <Text size='micro' component='span' className='min-w-0 flex-1'>
-                {VIEW_LABELS[view]} slot
-              </Text>
-              <Text size='micro' variant='label' component='span'>
-                {filled ? 'filled ✓' : 'empty ✗'}
-              </Text>
-              <Pill tone={filled ? 'ok' : 'warn'}>{filled ? 'ready' : 'blocks the mint'}</Pill>
-              {!filled && (
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  disabled={disabled}
-                  onClick={() =>
-                    openDoor(
-                      benchDoor({ viewKey: view }),
-                      `the ${VIEW_LABELS[view]} slot is on the bench`,
-                      say,
-                    )
-                  }
-                >
-                  go to it
-                </Button>
-              )}
-            </div>
-          );
-        })}
-        <Row
-          label={
-            <Text size='micro' component='span'>
-              fit on plates brought by hand
-            </Text>
-          }
-          value={<Pill tone='mut'>asked at mint</Pill>}
-        />
-        {analysis.mixed && (
-          <Row
-            label={
-              <Text size='micro' component='span'>
-                mixed composition
-              </Text>
-            }
-            value={<Pill tone='mut'>consent asked at mint</Pill>}
-          />
-        )}
-      </div>
-
-      {missing.length > 0 && (
-        <Text size='micro' variant='label' component='p'>
-          The bench is free to hold any view; the minimum lives here, at the mint — a sheet without{' '}
-          {SHEET_MINIMUM.map((v) => VIEW_LABELS[v]).join(' and ')} is not a sheet somebody can cut
-          from.
-        </Text>
-      )}
-    </Section>
   );
 }

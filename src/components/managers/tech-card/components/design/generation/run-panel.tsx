@@ -1,12 +1,11 @@
-import type { common_DesignRun } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_DesignRun } from 'api/proto-http/admin';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import { clockStamp } from '../handles';
-import { recallDesignRun, useRecallHostMounted } from '../history-recall';
+import { RecallDoors } from '../history-recall';
 import { viewLabel } from '../views';
 import { formatMoney } from './money';
 import { isCancelling, isRunLive, viewsLine } from './run-state';
@@ -84,15 +83,22 @@ const MUTED = (
 
 export function RunPanel({
   techCardId,
+  band,
   run,
   disabled,
 }: {
   techCardId: number;
+  /**
+   * Полоса — РАДИ ДВЕРЕЙ РЕКОЛА И БОЛЬШЕ НИ РАДИ ЧЕГО. Всё остальное на этой панели — снимок
+   * запуска, и join в живую карточку был бы ровно тем, чем снимок быть отказывается. Реколу же
+   * полоса нужна, чтобы посчитать вопрос: какие роли стоят на карточке сейчас и какие слоты
+   * верстака примут плиты этого прогона.
+   */
+  band: GetDesignBandResponse;
   run: common_DesignRun;
   disabled?: boolean;
 }) {
   const { cancelRun } = useGenerationWrites(techCardId);
-  const recallHosted = useRecallHostMounted(techCardId);
   const [textOpen, setTextOpen] = useState(false);
 
   const inputs = run.inputs;
@@ -107,20 +113,6 @@ export function RunPanel({
   const fit = (run.fitAtLaunch ?? '').trim();
   const sent = (run.prompt ?? '').trim();
 
-  const runId = run.id ?? 0;
-  const isVector = (run.kind ?? '').trim().toLowerCase() === 'vector';
-  /**
-   * WHEN THE RECALL IS OFFERED — the same four conditions as the chip on the row, and they are the
-   * same conditions because it is the same verb in a second posture, not a second verb.
-   *
-   * `inputs` — nothing frozen, nothing to hand over. NOT A VECTOR ROW — the owner's exception
-   * (T-16): a redraw is started from the plate's own editor and its input is that plate. A HOST ON
-   * SCREEN — the intake lives in INPUT — REFERENCES, drawn on the FLAT tab only, and this panel is
-   * opened from a history that RENDER and 3D mount without it; there the press would arm a gesture
-   * nobody takes and the chip would stay lit forever. NOT READ-ONLY — the recall writes reference
-   * rows and roles, and a frozen card can only refuse them.
-   */
-  const recallable = !!inputs && runId > 0 && !isVector && recallHosted && !disabled;
 
   return (
     <div className='mt-1 bg-bgZebra px-2 py-1.5'>
@@ -226,43 +218,33 @@ export function RunPanel({
         </PanelRow>
       )}
 
-      {(recallable || live) && (
-        <div className='mt-1 flex flex-wrap items-center gap-2'>
-          {/* THE DOOR THE OWNER ASKED FOR (S-9), IN THE SHAPE HE ASKED FOR IT LATER (T-10): put
-              this run's references back into the input, «so a reproduce can be made — maybe with a
-              change». It is the SAME verb as the chip on the row, in a second posture — and it no
-              longer SHOWS anything: the pictures become ordinary reference rows and the words go
-              into the garment description, which is why the caption says copy and not display. It
-              is also not a toggle any more; the intake consumes the selection in the same tick, so
-              «recalled — in the input» would have been a state that never survives its own frame.
-              No rerun door rides beside it: a run starts only from GENERATION — FLAT → GENERATE. */}
-          {recallable && (
-            <Chip
-              onClick={() => recallDesignRun(techCardId, run)}
-              title='copy this run’s pictures into the input references and its words into the garment description. A description you have already written is replaced only after a question. Nothing is launched.'
+      {/* ПОДВАЛ ПАНЕЛИ. `empty:mt-0` несущее: обе его половины условны, и на строке без дверей и без
+          отмены пустой блок иначе оставлял бы отступ под собой. */}
+      <div className='mt-1 flex flex-wrap items-center gap-2 empty:mt-0'>
+        {/* ТА ЖЕ ПАРА ДВЕРЕЙ, ЧТО НА СТРОКЕ ИСТОРИИ, И ТОТ ЖЕ ОРГАН (V-12/V-13) — не второй глагол
+            во второй позе, а один механизм в двух местах. Держать здесь свою копию условий и свой
+            вопрос значило бы завести второе описание одного разрушения, и короче оказалось бы то,
+            которое реже читают. Кнопки RERUN рядом по-прежнему нет: прогон запускается только из
+            GENERATION — FLAT → GENERATE. */}
+        <RecallDoors techCardId={techCardId} band={band} run={run} disabled={disabled} />
+        {live && (
+          <span className='ml-auto'>
+            <Button
+              variant='secondary'
+              size='xs'
+              disabled={disabled || isCancelling(run) || cancelRun.isPending}
+              onClick={() => cancelRun.mutate(run.id ?? 0)}
+              title={
+                isCancelling(run)
+                  ? 'already asked to stop — an answer that still arrives is recorded and paid for'
+                  : 'stop this run'
+              }
             >
-              recall — references back to input ▸
-            </Chip>
-          )}
-          {live && (
-            <span className='ml-auto'>
-              <Button
-                variant='secondary'
-                size='xs'
-                disabled={disabled || isCancelling(run) || cancelRun.isPending}
-                onClick={() => cancelRun.mutate(run.id ?? 0)}
-                title={
-                  isCancelling(run)
-                    ? 'already asked to stop — an answer that still arrives is recorded and paid for'
-                    : 'stop this run'
-                }
-              >
-                {isCancelling(run) ? 'cancelling…' : 'cancel this run'}
-              </Button>
-            </span>
-          )}
-        </div>
-      )}
+              {isCancelling(run) ? 'cancelling…' : 'cancel this run'}
+            </Button>
+          </span>
+        )}
+      </div>
     </div>
   );
 }

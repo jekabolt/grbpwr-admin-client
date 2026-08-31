@@ -20,6 +20,7 @@ import { MediaFilterBar } from './components/media-filter-bar';
 import { SlotFit } from './components/media-item';
 import { MediaList } from './components/media-list';
 import { MediaRail } from './components/media-rail';
+import { MediaExpandDialog } from './components/media-expand-dialog';
 import { MediaRecropDialog } from './components/media-recrop-dialog';
 import { MediaSelectionBar } from './components/media-selection-bar';
 import { PendingMediaPlate } from './components/pending-media-plate';
@@ -227,6 +228,9 @@ export function MediaManager({
   const viewer = useMediaViewer();
   const viewingMedia = viewable[viewer.index];
   const [recropping, setRecropping] = useState<common_MediaFull | undefined>(undefined);
+  // Обратный кроп — ОТДЕЛЬНОЕ состояние, а не флаг на кропе. Это два разных органа с разными
+  // рельсами и разным подвалом, и одно поле «что открыто» рано или поздно откроет их вместе.
+  const [expanding, setExpanding] = useState<common_MediaFull | undefined>(undefined);
 
   const handleView = (m: common_MediaFull) => {
     const at = viewable.findIndex((x) => x.id === m.id);
@@ -462,14 +466,27 @@ export function MediaManager({
           }}
           actions={() =>
             canUpload && viewingMedia ? (
-              <ViewerAction
-                onClick={() => {
-                  setRecropping(viewingMedia);
-                  viewer.onOpenChange(false);
-                }}
-              >
-                crop
-              </ViewerAction>
+              <>
+                <ViewerAction
+                  onClick={() => {
+                    setRecropping(viewingMedia);
+                    viewer.onOpenChange(false);
+                  }}
+                >
+                  crop
+                </ViewerAction>
+                {/* Обратный кроп стоит ВПЛОТНУЮ к кропу, потому что это одно решение с двумя
+                    знаками: кадр не той формы либо режут, либо обрамляют. Разведи их по разным
+                    углам — и второй не найдут, продолжая срезать подол. */}
+                <ViewerAction
+                  onClick={() => {
+                    setExpanding(viewingMedia);
+                    viewer.onOpenChange(false);
+                  }}
+                >
+                  expand
+                </ViewerAction>
+              </>
             ) : null
           }
         />
@@ -479,6 +496,12 @@ export function MediaManager({
         media={recropping}
         open={!!recropping}
         onOpenChange={(next) => !next && setRecropping(undefined)}
+      />
+
+      <MediaExpandDialog
+        media={expanding}
+        open={!!expanding}
+        onOpenChange={(next) => !next && setExpanding(undefined)}
       />
 
       {hasNextPage && (

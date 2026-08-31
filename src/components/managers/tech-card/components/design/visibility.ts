@@ -133,14 +133,18 @@ export function hiddenCountOfBatch(aggregates: HiddenAggregates, batchId: number
 }
 
 /**
- * Why this picture cannot be hidden — the four server preconditions of HideDesignPicture, read
+ * Why this picture cannot be hidden — the server preconditions of HideDesignPicture, read
  * client-side so the ✕ is ABSENT rather than drawn-and-refused.
  *
  * The strings are the server's own error codes, so a refusal that slips through anyway (a race:
  * someone puts the picture in a slot between render and click) names the same reason the UI would
  * have named, instead of a second vocabulary for one fact.
+ *
+ * `in_version` was the fourth and is gone: it named a picture frozen as a plate of a minted sheet
+ * version, and versions were removed whole — the server no longer has that refusal to give, so
+ * keeping the word here would mean holding a code nothing can ever return.
  */
-export type HideBlockReason = 'in_slot' | 'in_version' | 'live_run_input' | 'live_crop_parent';
+export type HideBlockReason = 'in_slot' | 'live_run_input' | 'live_crop_parent';
 
 /**
  * What the caller must gather for the guard. Sets, not arrays, because the caller holds one band
@@ -150,8 +154,6 @@ export type HideBlockReason = 'in_slot' | 'in_version' | 'live_run_input' | 'liv
 export type HideGuard = {
   /** Picture ids standing in a bench slot right now. */
   slotPictureIds: ReadonlySet<number>;
-  /** Picture ids frozen as a plate of ANY minted sheet version. */
-  versionPlatePictureIds: ReadonlySet<number>;
   /** Picture ids listed in the input snapshot of a run that is pending or running. */
   liveRunInputPictureIds: ReadonlySet<number>;
   /** Picture ids that are the `derived_from` parent of a picture that still exists. */
@@ -161,7 +163,6 @@ export type HideGuard = {
 export function hideBlockReason(pictureId: number, guard: HideGuard): HideBlockReason | null {
   // Order matches the server's, so the reason a human reads is the reason the server would give.
   if (guard.slotPictureIds.has(pictureId)) return 'in_slot';
-  if (guard.versionPlatePictureIds.has(pictureId)) return 'in_version';
   if (guard.liveRunInputPictureIds.has(pictureId)) return 'live_run_input';
   if (guard.cropParentPictureIds.has(pictureId)) return 'live_crop_parent';
   return null;
@@ -169,7 +170,7 @@ export function hideBlockReason(pictureId: number, guard: HideGuard): HideBlockR
 
 /**
  * May the ✕ be drawn on this tile at all? An already-hidden picture answers `false` — its control
- * is `unhide`, which no guard blocks: un-hiding can never break a slot or a frozen version.
+ * is `unhide`, which no guard blocks: un-hiding can never break a slot or a live run.
  */
 export function canOfferHide(picture: PictureVisibility, guard: HideGuard): boolean {
   if (isPictureHidden(picture)) return false;
@@ -180,7 +181,6 @@ export function canOfferHide(picture: PictureVisibility, guard: HideGuard): bool
 export function emptyHideGuard(): HideGuard {
   return {
     slotPictureIds: new Set(),
-    versionPlatePictureIds: new Set(),
     liveRunInputPictureIds: new Set(),
     cropParentPictureIds: new Set(),
   };

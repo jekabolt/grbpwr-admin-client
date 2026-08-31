@@ -102,15 +102,33 @@ export type BenchSide = {
 };
 
 /**
- * The four silhouette sides in a fixed order, present or not.
+ * WHICH BENCH. The bench has two axes — view × kind — and a render front and a flat front are two
+ * DIFFERENT slots both addressed by `view_key: 'front'`. Empty reads as `flat`, exactly as the
+ * column's own DEFAULT does, so every caller written before the second axis existed keeps reading
+ * the bench it meant.
+ */
+export type BenchKind = 'flat' | 'render';
+
+export function benchKindOf(slot?: common_DesignBenchSlot | null): string {
+  return (slot?.kind ?? '').trim().toLowerCase() || 'flat';
+}
+
+/**
+ * The four silhouette sides of ONE bench, in a fixed order, present or not.
  *
  * A side that has never been touched does not exist on the server — the rows are born lazily by the
  * first `SetDesignBenchSlot` — so `slot` is honestly null and `slotRev` is honestly 0, which is the
  * token a lazy first placement is required to send.
+ *
+ * ⚠ `kind` IS A FILTER, NOT DECORATION, AND ITS ABSENCE WAS A LATENT DEFECT. This function used to
+ * key the map by view alone, so the moment a card held BOTH a flat front and a render front, the
+ * last row of `band.bench` won and the flat strip could draw a render in its slot (or the reverse).
+ * Nothing showed it while nothing wrote render slots; the 3D input writes them now.
  */
-export function benchSides(band: GetDesignBandResponse): BenchSide[] {
+export function benchSides(band: GetDesignBandResponse, kind: BenchKind = 'flat'): BenchSide[] {
   const byView = new Map<string, common_DesignBenchSlot>();
   for (const row of band.bench ?? []) {
+    if (benchKindOf(row) !== kind) continue;
     const key = normaliseViewKey(row.viewKey);
     if (isSilhouetteView(key)) byView.set(key, row);
   }
@@ -125,10 +143,10 @@ export function benchSides(band: GetDesignBandResponse): BenchSide[] {
   });
 }
 
-/** Every picture standing in a silhouette slot right now, keyed by its own id. */
-function markedPictureIds(band: GetDesignBandResponse): Set<number> {
+/** Every picture standing in a silhouette slot of one bench right now, keyed by its own id. */
+function markedPictureIds(band: GetDesignBandResponse, kind: BenchKind = 'flat'): Set<number> {
   const ids = new Set<number>();
-  for (const side of benchSides(band)) {
+  for (const side of benchSides(band, kind)) {
     const id = side.picture?.id ?? 0;
     if (id > 0) ids.add(id);
   }
@@ -166,44 +184,88 @@ export function feedIsTruncated(band: GetDesignBandResponse): boolean {
 
 /* ─────────────────────────── renders, by view and by revision ─────────────────────────── */
 
-export type RenderPlate = {
-  picture: common_DesignPicture;
-  run: common_DesignRun;
-  /** MAX+1 per card, assigned only for `kind=render`. The «r4» of the colour history. */
-  rrev: number;
-};
-
-export type RenderByView = Partial<Record<SilhouetteView, RenderPlate>>;
+/**
+ * ═══ THE INPUT OF A TURNTABLE IS THE RENDER BENCH — V-14 ══════════════════════════════════════
+ *
+ * Владелец: «в 3д INPUT — RENDERS BY VIEW нельзя никаким образом просунуть правильные референсы я
+ * замаркал артефакты из фабрик рендера но они не отображаются в инпуте».
+ *
+ * ЗАМЕР, И ОН ОБЪЯСНЯЕТ ОБЕ ПОЛОВИНЫ ЖАЛОБЫ СРАЗУ. Экран 3D читал ЛЕНТУ: «последний рендер каждой
+ * стороны», выведенный из `ghost_view` и `rrev` прогонов первой страницы. А сервер, собирая тот же
+ * прогон, читает ВЕРСТАК — слоты `kind: render` (`designSelectBench`, design_run.go). Это два
+ * РАЗНЫХ списка, у которых не было ни одного общего писателя, и расходились они не иногда, а
+ * всегда:
+ *
+ *  · `select` («chosen») на артефакте фабрик-рендера не читался здесь вовсе — отсюда «замаркал, а
+ *    их нет во входе»: пометка ставилась в одном месте, а вход считался в другом;
+ *  · рендер приходит ОДНИМ СКЛЕЕННЫМ ЛИСТОМ (`layout: 'one'`), у листа нет `ghost_view` — значит
+ *    до разреза этот вывод не показывался вообще, и «0 of 4» стояло на карточке с готовым
+ *    рендером;
+ *  · а нажатый GENERATE отправлял прогон, входы которого сервер собирал из ПУСТОГО рендер-верстака.
+ *
+ * ПОЭТОМУ ВХОД 3D — ЭТО ВЕРСТАК, тот же самый, из которого его читает сервер, и marking сюда —
+ * такой же явный жест, как «mark ▸» у флэтов. Тогда «просунуть правильные референсы» перестаёт
+ * быть невозможным: человек ставит в сторону ЛЮБУЮ картинку рода `render` — сгенерённую, разрезанную
+ * из листа или принесённую руками, — и ровно она уезжает в сборку.
+ */
+export function threedSides(band: GetDesignBandResponse): BenchSide[] {
+  return benchSides(band, 'render');
+}
 
 /**
- * THE LATEST RENDER OF EACH SIDE — the input of a 3D turntable.
- *
- * GATHERED FROM RENDER RUNS ONLY, with no fallback to `picture.kind`, and the missing fallback is a
- * decision rather than an omission: a turntable must be assembled from four sides of ONE revision,
- * `rrev` lives on the RUN, and a render whose run is off-page therefore has no revision to compare.
- * Admitting it would let a rotation be stitched out of two different colours with nothing on screen
- * able to tell. The newest renders are on the newest page by construction, so the case is rare and
- * the honest answer to it is «missing», which the gate then says out loud.
- *
- * `ghost_view` IS THE VIEW. It is the only view-bearing field a picture has; on a generated output
- * the server states it rather than guessing, and the contract already uses it that way for the
- * declared view of a split frame.
+ * Составной лист — это НЕСКОЛЬКО видов в одном файле, и в слот он не встаёт: сервер отказывает
+ * (`ErrDesignCompositePlate`), потому что сторона поворотного стола — один вид. Экран обязан
+ * различать «такой картинки нет» и «эта есть, но её надо сначала разрезать».
  */
-export function latestRenderByView(band: GetDesignBandResponse): RenderByView {
-  const out: RenderByView = {};
-  for (const run of band.runs ?? []) {
-    if ((run.kind ?? '').trim().toLowerCase() !== 'render') continue;
-    const rrev = run.rrev ?? 0;
-    for (const picture of run.pictures ?? []) {
+export function pictureIsComposite(picture?: common_DesignPicture | null): boolean {
+  return (picture?.compositeViews ?? []).length > 0;
+}
+
+/** Одна картинка правой половины полосы 3D: сама плита плюс два факта, решающие её судьбу. */
+export type ThreedCandidate = {
+  picture: common_DesignPicture;
+  /** Помечена «chosen» в FABRIC RENDER (W-12). Такие идут первыми — это ответ владельца. */
+  chosen: boolean;
+  /** Склеенный лист: показывается, но пометить нельзя, пока не разрезан. */
+  composite: boolean;
+};
+
+/**
+ * КАЖДЫЙ РЕНДЕР ЭТОЙ КАРТОЧКИ, КОТОРЫЙ НЕ СТОИТ В СТОРОНЕ, — правая половина полосы 3D.
+ *
+ * РОД ЧИТАЕТСЯ С ПРОГОНА, А ПРИ ЕГО ОТСУТСТВИИ — С САМОЙ КАРТИНКИ, и второе здесь законно ровно
+ * потому, что род картинки задаётся НАМИ: дверь загрузки этого экрана шлёт `kind: 'render'`, а
+ * верстак сверяет род кадра с родом слота и отказывает при несовпадении. То есть предикат — зеркало
+ * серверного правила приёма, а не догадка о незнакомом словаре.
+ *
+ * ПОРЯДОК: сначала помеченные, потом остальные; внутри — порядок ленты (новое раньше). Пометка
+ * владельца обязана быть ВИДНА, иначе она снова «никуда не ведёт».
+ *
+ * PAGE-BOUND, И ЭКРАН ОБ ЭТОМ ГОВОРИТ: полоса отдаёт одну страницу ленты. Левая половина такого
+ * предела не знает — плита слота приезжает разрешённой, сколь бы старой ни была.
+ */
+export function threedCandidates(band: GetDesignBandResponse): ThreedCandidate[] {
+  const marked = markedPictureIds(band, 'render');
+  const out: ThreedCandidate[] = [];
+  const seen = new Set<number>();
+  const push = (pictures: common_DesignPicture[] | undefined | null) => {
+    for (const picture of pictures ?? []) {
+      const id = picture.id ?? 0;
+      if (id <= 0 || marked.has(id) || seen.has(id)) continue;
       if (isPictureHidden(picture)) continue;
-      const view = normaliseViewKey(picture.ghostView);
-      if (!isSilhouetteView(view)) continue;
-      const key = view as SilhouetteView;
-      const previous = out[key];
-      if (!previous || rrev > previous.rrev) out[key] = { picture, run, rrev };
+      const kind = runKindOf(band, picture) || declaredKind(picture);
+      if (kind !== 'render') continue;
+      seen.add(id);
+      out.push({
+        picture,
+        chosen: pictureIsSelected(picture),
+        composite: pictureIsComposite(picture),
+      });
     }
-  }
-  return out;
+  };
+  for (const run of band.runs ?? []) push(run.pictures);
+  for (const batch of band.batches ?? []) push(batch.pictures);
+  return [...out.filter((c) => c.chosen), ...out.filter((c) => !c.chosen)];
 }
 
 /**
@@ -280,21 +342,30 @@ export const SELECT_MARK_NOT_STATED =
   'this server does not state `DesignPicture.selected` at all — a binary older than the field. ' +
   'The mark cannot be set against it; nothing else is broken';
 
-/** The revisions the four sides currently come from, ascending and deduplicated. */
-export function renderRevisions(byView: RenderByView): number[] {
+/**
+ * The revisions the four marked sides come from, ascending and deduplicated.
+ *
+ * ⚠ ТОЛЬКО ИЗВЕСТНЫЕ. `rrev` живёт на ПРОГОНЕ, а плита слота законно бывает старше первой страницы
+ * ленты — и картинка, принесённая руками, прогона не имеет вовсе. Считать «неизвестно» отдельной
+ * ревизией значило бы блокировать 3D на каждой карточке с историей и на каждом своём файле;
+ * молчание здесь правдиво, а сравнивать есть смысл только то, что названо.
+ */
+export function threedRevisions(band: GetDesignBandResponse, sides: BenchSide[]): number[] {
   const revs = new Set<number>();
-  for (const view of SILHOUETTE_VIEWS) {
-    const plate = byView[view];
-    if (plate) revs.add(plate.rrev);
+  for (const side of sides) {
+    if (!side.picture) continue;
+    const rrev = runOfPicture(band, side.picture)?.rrev ?? 0;
+    if (rrev > 0) revs.add(rrev);
   }
   return Array.from(revs).sort((a, b) => a - b);
 }
 
 /** The picture ids a turntable would be built from, in view order. Empty when a side is missing. */
-export function turntableSourceIds(byView: RenderByView): number[] {
+export function turntableSourceIds(sides: BenchSide[]): number[] {
+  const byView = new Map(sides.map((side) => [side.view as string, side]));
   const ids: number[] = [];
   for (const view of SILHOUETTE_VIEWS) {
-    const id = byView[view]?.picture?.id ?? 0;
+    const id = byView.get(view)?.picture?.id ?? 0;
     if (id <= 0) return [];
     ids.push(id);
   }
@@ -457,15 +528,18 @@ export function threedGate(band: GetDesignBandResponse): Gate {
       reason: "today's generation ceiling is reached — no new run starts until it resets",
     };
   }
-  const byView = latestRenderByView(band);
-  const missing = SILHOUETTE_VIEWS.filter((view) => !byView[view]).map((view) => viewLabel(view));
+  const sides = threedSides(band);
+  const missing = sides.filter((side) => !side.picture).map((side) => viewLabel(side.view));
   if (missing.length) {
     return {
       ok: false,
-      reason: `3D turns the renders of all four sides — missing: ${missing.join(', ')}`,
+      // ГОВОРИТ НЕ ТОЛЬКО «ЧЕГО НЕТ», НО И ЧТО СДЕЛАТЬ. Сторона 3D — это СЛОТ, который заполняют
+      // жестом, а не «последний рендер», который находится сам: пока отказ этого не называл,
+      // человек искал ошибку в генерации, а не в том, что он не пометил ни одной плиты.
+      reason: `3D turns one render per side, and a side is a slot you mark — missing: ${missing.join(', ')}. The renders of this card are on the right of the line above`,
     };
   }
-  const revs = renderRevisions(byView);
+  const revs = threedRevisions(band, sides);
   if (revs.length > 1) {
     return {
       ok: false,
@@ -506,6 +580,10 @@ export const EMPTY_RECIPE: common_DesignColourRecipe = {
   hex: '',
   words: '',
   fabricMediaId: 0,
+  // `fabrics` появилось на проводе вместе с несколькими тканями на изделие (V-8). Пустой список —
+  // единственное правдивое значение «ничего не сказано вовсе»: `undefined` здесь означало бы то же,
+  // но говорило бы это молчанием поля, которого у типа больше нет права не иметь.
+  fabrics: [],
 };
 
 /** A hex a browser will actually paint. Three or six digits, the two shapes `<input type='color'>`
@@ -706,6 +784,32 @@ export const PRESENTATIONS = [
 ] as const;
 
 export type Presentation = (typeof PRESENTATIONS)[number]['value'];
+
+/**
+ * ═══ ТЕЛОСЛОЖЕНИЕ — V-15 ═════════════════════════════════════════════════════════════════════
+ *
+ * ОДИН ВОПРОС, ДВА РЕГИСТРА ОТВЕТА, И ЭТО НЕ ЛОЖНОЕ РАСЩЕПЛЕНИЕ. Вопрос у экрана один: «на каком
+ * теле это стоит». Ответить на него можно ИМЕНЕМ (одна из наших примерочных моделей: у неё есть
+ * фотографии, мерки, базовый размер) или СЛОВОМ О ФОРМЕ, когда чьё именно тело — не важно.
+ * Проверка по пяти признакам класса «ложный сплит»: вырожденного близнеца нет (модель — строка
+ * картотеки, телосложение — класс), выразить одно через другое нельзя (никакая строка картотеки не
+ * значит «любое атлетичное тело», и никакое слово не вернёт лицо и мерки Веры), дихотомия не
+ * ложная — технолог произносит обе фразы. Поэтому органов не два, а ОДИН: блок «the body», в
+ * котором обе половины стоят рядом и обе необязательны по отдельности.
+ *
+ * НА ПРОВОДЕ ЭТО СТРОКА, А НЕ ENUM, И ЭТО РЕШЕНИЕ КОНТРАКТА: словарь телосложений — вопрос
+ * ФОРМУЛИРОВОК, он будет переписан, а enum заморозил бы сегодняшние слова в истории каждого
+ * замороженного прогона. Отсюда же правило этого файла: слова живут ровно ЗДЕСЬ, в одном месте,
+ * рядом с остальным словарём 3D-подачи — второй список на экране разошёлся бы с первым молча,
+ * ровно как это уже случилось с фитом (см. FIT_OPTIONS ниже, «под протест»).
+ *
+ * СВОБОДНОГО ВВОДА НЕТ НАМЕРЕННО. Строка на проводе — про то, что словарь МЕНЯЕТСЯ, а не про то,
+ * что его нет: набранное руками «athlectic» уехало бы в замороженный прогон и не сошлось бы ни с
+ * чем никогда.
+ */
+export const BODY_TYPES = ['slim', 'athletic', 'average', 'curvy', 'plus'] as const;
+
+export type BodyType = (typeof BODY_TYPES)[number];
 
 /**
  * THE FIT VOCABULARY, AND IT IS RESTATED HERE UNDER PROTEST.

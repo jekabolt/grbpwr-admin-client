@@ -1,6 +1,12 @@
 import { urlToDataUrl } from 'lib/features/getCropped';
 
-import { DEFAULT_RATIO, strokeGeometry, type VectorStroke } from './vector-strokes';
+import {
+  DEFAULT_INK,
+  DEFAULT_RATIO,
+  readInk,
+  strokeGeometry,
+  type VectorStroke,
+} from './vector-strokes';
 
 /**
  * THE ONE RASTERISER — «base picture + strokes» into a PNG data URL, and there is deliberately no
@@ -27,18 +33,28 @@ export const RASTER_MAX_W = 1600;
  */
 export const RASTER_FALLBACK_W = 800;
 
-/** Paint base + strokes into one canvas and hand back a PNG data URL. */
-export async function rasteriseStrokesOverBase({
-  baseSrc,
-  strokes,
-  ratio,
-}: {
+export type SceneInput = {
   /** The picture underneath, or '' — a drawing from nothing rasterises onto white alone. */
   baseSrc?: string;
   strokes: readonly VectorStroke[];
   /** The frame's width/height ratio; only consulted when there is no base to measure. */
   ratio?: number;
-}): Promise<string> {
+};
+
+/**
+ * Base + strokes on one canvas — the composite BEFORE anything is asked of it.
+ *
+ * Split out of `rasteriseStrokesOverBase` for the eyedropper, and split rather than copied for the
+ * reason stated at the top of this file: two canvases drawing the same strokes drift silently, and
+ * a picker that sampled its own private redraw could hand back a colour the screen never showed.
+ * The picker reads pixels off this canvas; the flatten asks the very same canvas for its PNG.
+ */
+export async function composeScene({ baseSrc, strokes, ratio }: SceneInput): Promise<{
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  w: number;
+  h: number;
+}> {
   let image: HTMLImageElement | null = null;
   if (baseSrc) {
     const dataUrl = await urlToDataUrl(baseSrc);
@@ -70,13 +86,16 @@ export async function rasteriseStrokesOverBase({
   ctx.fillRect(0, 0, w, h);
   if (image) ctx.drawImage(image, 0, 0, w, h);
 
-  ctx.strokeStyle = '#000000';
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const stroke of strokes) {
     const g = strokeGeometry(stroke, w, h);
     if (!g.d) continue;
     const path = new Path2D(g.d);
+    // ЦВЕТ — У КАЖДОГО ШТРИХА СВОЙ, а не один чёрный на весь холст. Прежний `strokeStyle` стоял
+    // ОДИН РАЗ до цикла: покрашенный слой сплющивался бы в чёрный именно там, где растр и делается
+    // — на пути «сохранить как картинку» и на входе прогона FIX.
+    ctx.strokeStyle = readInk(stroke.ink) ?? DEFAULT_INK;
     ctx.lineWidth = g.strokeWidth;
     ctx.setLineDash(g.dash ? g.dash.split(' ').map(Number) : []);
     for (const dy of g.offsets) {
@@ -87,5 +106,42 @@ export async function rasteriseStrokesOverBase({
     }
   }
   ctx.setLineDash([]);
+  return { canvas, ctx, w, h };
+}
+
+/** Paint base + strokes into one canvas and hand back a PNG data URL. */
+export async function rasteriseStrokesOverBase(input: SceneInput): Promise<string> {
+  const { canvas } = await composeScene(input);
   return canvas.toDataURL('image/png');
+}
+
+/**
+ * ПИПЕТКА: цвет ПОД ТОЧКОЙ, долями кадра, `#rrggbb`.
+ *
+ * Берётся из ТОГО ЖЕ композита, что уходит в плоскую картинку, — значит из подложки тоже, а не
+ * только из своих штрихов. Это и было требование владельца: пипетка обязана брать цвет с холста,
+ * а холст под рукой это в первую очередь фотография или флэт, поверх которых и рисуют.
+ *
+ * Холст, испачканный чужим origin, `getImageData` не отдаёт вовсе (SecurityError), поэтому база
+ * приезжает сюда ТЕМ ЖЕ путём, что у флэттена, — через прокси, data-URL'ом (см. шапку файла).
+ * Отказ возвращается как `null`, а не как исключение: пипетка — жест, а не транзакция, и падать
+ * посреди рисования ей нечем.
+ */
+export async function pickSceneInk(
+  input: SceneInput,
+  at: [number, number],
+): Promise<string | null> {
+  try {
+    const { ctx, w, h } = await composeScene(input);
+    const x = Math.min(w - 1, Math.max(0, Math.round(at[0] * w)));
+    const y = Math.min(h - 1, Math.max(0, Math.round(at[1] * h)));
+    const d = ctx.getImageData(x, y, 1, 1).data;
+    // Полностью прозрачный пиксель — не цвет: белая подложка кладётся первой, так что это может
+    // случиться только на холсте, которого нет.
+    if (d[3] === 0) return null;
+    const hex = (n: number) => n.toString(16).padStart(2, '0');
+    return `#${hex(d[0])}${hex(d[1])}${hex(d[2])}`;
+  } catch {
+    return null;
+  }
 }

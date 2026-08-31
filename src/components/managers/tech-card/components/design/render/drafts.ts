@@ -117,6 +117,14 @@ export type ThreedDraft = {
   modelId: number;
   /** 0 = no size chosen. A real id, from the sizes dictionary. */
   garmentSizeId: number;
+  /**
+   * WHAT BUILD the garment is asked to sit on — one word of `BODY_TYPES`, or '' for «not stated».
+   *
+   * НЕ АЛЬТЕРНАТИВА `modelId`, А ВТОРАЯ ПОЛОВИНА ОДНОГО ОТВЕТА: имя называет, КТО, это слово — КАКОЙ
+   * ФОРМЫ, и контракт разрешает назвать оба. '' читается ровно как «не сказано» — генератор выбирает
+   * сам, — а не как «обычное телосложение».
+   */
+  bodyType: string;
   /** '' = the card's fit was used. Anything else is a stated deviation and is stamped as one. */
   fitOverride: string;
 };
@@ -131,6 +139,7 @@ const INITIAL_THREED: ThreedDraft = {
   presentation: 'air',
   modelId: 0,
   garmentSizeId: 0,
+  bodyType: '',
   fitOverride: '',
 };
 

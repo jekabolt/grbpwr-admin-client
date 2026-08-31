@@ -3,8 +3,10 @@
  *
  * This module exists because of a defect, not a preference. Three organs of this band were built in
  * parallel and each one spelled the sides for itself: the bench had `SILHOUETTE_VIEWS` with the
- * label `side L`, the mint dialog had `SILHOUETTE_VIEWS` with the label `SIDE L`, and the split
- * modal had `DESIGN_VIEW_KEYS`. Nothing was broken enough to fail a type check — the keys agreed —
+ * label `side L`, the mint dialog had `SILHOUETTE_VIEWS` with the label `SIDE L` (that dialog has
+ * since been removed along with the sheet's versions; its copy died with it and was not rehomed),
+ * and the split modal had `DESIGN_VIEW_KEYS`. Nothing was broken enough to fail a type check — the
+ * keys agreed —
  * but the SAME side read differently on three screens, and a fourth organ would have invented a
  * fourth spelling. A vocabulary duplicated per screen drifts silently and by construction.
  *
@@ -77,8 +79,13 @@ export function isDetailView(key?: string | null): boolean {
  *
  * A CLIENT CONSTANT, AND SAYING SO IS THE POINT: the contract carries no «what the sheet requires»
  * field, so this is the client agreeing with itself about a rule the server does not enforce. The
- * sheet bar reads it to say what is missing, and the mint dialog reads it to warn. Neither refuses
- * on it — refusing on a rule the server does not know would make the two disagree about whether a
- * card is mintable, and the server would win.
+ * bench reads it to mark those two slots REQUIRED, and marking is the whole of it — nothing here
+ * refuses. Refusing on a rule the server does not know would make the two disagree about whether a
+ * card is finished, and the server would win.
+ *
+ * (Two more organs read it and are gone: the sheet bar, which said what was missing, and the mint
+ * dialog, which warned before minting. Both went out with the sheet's versions. The rule outlived
+ * them because it was never about minting — front and back are what a person needs in order to cut
+ * a garment, whatever ceremony sits downstream of that.)
  */
 export const SHEET_MIN_VIEWS: readonly string[] = ['front', 'back'];

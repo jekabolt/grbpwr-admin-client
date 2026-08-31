@@ -1,13 +1,9 @@
-import type {
-  common_DesignBenchSlot,
-  common_DesignPicture,
-  common_DesignSheetPlate,
-} from 'api/proto-http/admin';
+import type { common_DesignBenchSlot, common_DesignPicture } from 'api/proto-http/admin';
 
 /**
- * THE provenance selector of the DESIGN band. There is exactly one, and the three places that show
- * provenance — the tile in a feed row, the footer of a bench slot, the snapshot of a minted version
- * and its print — read it from here.
+ * THE provenance selector of the DESIGN band. There is exactly one, and the places that show
+ * provenance — the tile in a feed row, the footer of a bench slot, the plate on ARTIFACTS — read it
+ * from here.
  *
  * WHAT PROVENANCE IS. Where the plate came from, which run produced it, and whether it has since
  * gone stale. It is computed from the plate's ancestry, never chosen by a human: the moment a
@@ -41,15 +37,19 @@ export type SourceClass = (typeof SOURCE_CLASSES)[number];
 export type ProvenanceClass = SourceClass | 'unknown';
 
 /**
- * The provenance columns, shared by the live picture and the frozen plate of a version — which is
- * why ONE reader serves both. The two disagree on exactly one point, and deliberately:
- * `content_hash` lives on the PLATE (the frozen fact a version was signed over) and not on the
- * picture (which IS the live file, so a second copy could only disagree with the first).
+ * The provenance columns of a live picture.
+ *
+ * THIS TYPE USED TO SPAN TWO SHAPES — the picture and the frozen plate of a minted version — and
+ * carried `content_hash` for the plate alone, because a version was SIGNED over those bytes. The
+ * mint and its versions were removed on the owner's decision, so the second shape no longer exists
+ * and the hash has no reader: a live picture IS the file, and a second copy of its hash could only
+ * ever disagree with the first. What is left is one shape, which is why the union is gone rather
+ * than merely narrowed.
  */
 export type PlateProvenanceSource = Partial<
   Pick<
-    common_DesignPicture & common_DesignSheetPlate,
-    'sourceClass' | 'runId' | 'batchId' | 'derivedFrom' | 'layerRev' | 'mixedInput' | 'contentHash'
+    common_DesignPicture,
+    'sourceClass' | 'runId' | 'batchId' | 'derivedFrom' | 'layerRev' | 'mixedInput'
   >
 >;
 
@@ -65,8 +65,6 @@ export type Provenance = {
   /** «AI + edits» — a stored class of its own, not a guess from layerRev. */
   handEdited: boolean;
   mixedInput: boolean;
-  /** '' means «this plate froze no hash / the media predates 0336», not «hashes differ». */
-  contentHash: string;
 };
 
 function isSourceClass(value: string): value is SourceClass {
@@ -89,7 +87,6 @@ export function readProvenance(source: PlateProvenanceSource): Provenance {
     layerRev: typeof source.layerRev === 'number' && source.layerRev > 0 ? source.layerRev : 0,
     handEdited: sourceClass === 'ai_edits',
     mixedInput: source.mixedInput === true,
-    contentHash: (source.contentHash ?? '').trim(),
   };
 }
 
@@ -102,10 +99,6 @@ export function readProvenance(source: PlateProvenanceSource): Provenance {
  */
 export function slotProvenance(slot: Pick<common_DesignBenchSlot, 'picture'>): Provenance | null {
   return slot.picture ? readProvenance(slot.picture) : null;
-}
-
-export function isProvenanceKnown(p: Provenance): boolean {
-  return p.sourceClass !== 'unknown';
 }
 
 /**
@@ -139,39 +132,15 @@ export function mixedInputNote(p: Provenance): string | null {
   return p.mixedInput ? 'from mixed input' : null;
 }
 
-/** The live facts a stale check is made against — the CURRENT state of the same plate's sources. */
-export type LivePlateFacts = {
-  /** The edit layer's current revision. */
-  layerRev?: number | null;
-  /** The media's current content hash. */
-  contentHash?: string | null;
-};
-
-export type StaleReason = 'layer_advanced' | 'bytes_replaced';
-
-/**
- * Has this plate gone stale?
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+ * ЗДЕСЬ СТОЯЛА ПРОВЕРКА УСТАРЕВАНИЯ ПЛИТЫ (`plateStaleReason` / `isPlateStale`), и её больше нет.
  *
- * Two causes, and both are read against facts the plate itself carries:
- *  - `layer_advanced` — someone saved a newer revision of the edit layer this plate was flattened
- *    from, so the picture on screen is an older rasterisation than the drawing behind it;
- *  - `bytes_replaced` — the media under it now hashes to something else.
+ * Она отвечала на вопрос, который задаёт только ПОДПИСАННАЯ ВЕРСИЯ: «плита, замороженная в vN,
+ * разошлась с тем, что под ней сейчас?» — слой правки уехал вперёд или байты подменили. Оба
+ * сравнения велись против фактов, которые несла сама плита версии (`layer_rev`, `content_hash` на
+ * момент минта). Минт и версии сняты по решению владельца, замороженных плит не существует, и
+ * сравнивать живую картинку стало НЕ С ЧЕМ: у неё нет второго «как было».
  *
- * Returns null when the answer is «no» AND when the answer is UNKNOWABLE: a missing live revision
- * or an empty hash on either side is not evidence of staleness. `content_hash` is empty for every
- * media older than 0336, and treating «I have no hash» as «the bytes changed» would light a stale
- * badge on most of the existing library at once.
- *
- * Layer advance wins when both fire: it is the CAUSE of the byte change, and naming the effect
- * would send the operator to the wrong door.
- */
-export function plateStaleReason(p: Provenance, live: LivePlateFacts): StaleReason | null {
-  if (typeof live.layerRev === 'number' && live.layerRev > p.layerRev) return 'layer_advanced';
-  const liveHash = (live.contentHash ?? '').trim();
-  if (p.contentHash && liveHash && liveHash !== p.contentHash) return 'bytes_replaced';
-  return null;
-}
-
-export function isPlateStale(p: Provenance, live: LivePlateFacts): boolean {
-  return plateStaleReason(p, live) !== null;
-}
+ * Оставить функции «на всякий случай» значило бы держать сторожа у мёртвого кода — он не может
+ * загореться никогда, а читается как работающая защита.
+ * ───────────────────────────────────────────────────────────────────────────────────────────── */

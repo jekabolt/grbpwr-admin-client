@@ -1,16 +1,24 @@
-import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
+import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useState, type JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
-import MediaComponent from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
+import { ColourPicker } from '../assets/colour-picker';
+import {
+  ASSET_FABRIC,
+  ASSET_PATTERN,
+  assetLabel,
+  assetThumb,
+  fabricUses,
+  partsOfAsset,
+  shelfAssets,
+} from '../assets/model';
 import { useColourDraft, type ColourDraft } from './drafts';
 import { FieldRow, Hint, Swatch } from './field-row';
 import {
@@ -20,7 +28,6 @@ import {
   colourSwatchHex,
   fabricStatement,
   hexIsPaintable,
-  mediaThumb,
 } from './model';
 
 /**
@@ -125,58 +132,147 @@ function DictionaryGrid({
   );
 }
 
+/* ─── СТАРЫЙ КВАДРАТ НАД НАТИВНЫМ `<input type='color'>` СНЯТ ЦЕЛИКОМ (V-5) ────────────────────
+   Он делал ровно одно: прятал хром операционной системы под нашей рамкой, — и всё, что человек
+   про цвет выбирал, происходило в чужом окне. Замена живёт в `../assets/colour-picker` и заменяет
+   не оформление, а орган: выбор, ввод, пипетка и уже использованные рецепты стоят в одном месте.
+   Двух пикеров в полосе быть не должно, поэтому здесь не остаётся и обёртки. */
+
 /**
- * The colour picker itself — a native `<input type='color'>` behind a square of our own.
+ * ═══ КОЛОНКА PHOTO ЗАМЕНЕНА НА ПОЛКУ ТКАНЕЙ (V-4, V-8) ════════════════════════════════════════
  *
- * THE NATIVE CONTROL IS THE RIGHT ONE AND IT IS ALSO THE WRONG SHAPE. It is the affordance every
- * operating system already gives a person for choosing a colour, and reinventing it in a brutalist
- * admin would be inventing a worse eyedropper. But its default chrome is a rounded, padded,
- * bordered swatch that belongs to no design system, so it is made invisible and stretched over a
- * square we draw: our border, our zero radius, our focus ring. The click target and the OS picker
- * are unchanged; only the skin is ours.
+ * Владелец, V-4 дословно: «сделать апплоуд текстуры материала и что бы он всегда был как
+ * плейсхолдер но не обязательный и что мы мы там могли замаркать его как материал ВМЕСТО КОЛОНКИ
+ * PHOTO в GENERATION — FABRIC RENDER». То есть PHOTO перестаёт быть самостоятельным органом: на
+ * его месте — ссылка на ассет-ткань, живущий на карточке.
  *
- * IT NEEDS A PAINTABLE VALUE. A half-typed `#4a5` is not a colour a native picker can open on, and
- * feeding it one makes browsers silently fall back to black — so the input holds the last paintable
- * value and the text field beside it stays the place where a partial hex is allowed to exist. While
- * nothing paintable is stated the square is STRIPED, the same way `Swatch` stripes an unknown
- * colour: a square that paints white would claim white was chosen.
+ * ПОЧЕМУ ЭТО ПРАВИЛЬНО, А НЕ ПРОСТО ВЫПОЛНЕНО. Файловый пикер, стоявший здесь, привязывал ткань к
+ * ОДНОМУ ПРОГОНУ: следующий рендер начинался с пустой рамки, и лоскут, выбранный вчера, приходилось
+ * искать в медиатеке заново. Ткань — свойство ИЗДЕЛИЯ, а не подачи; на полке она переживает прогон,
+ * несёт имя, цвет, слова и раппорт и размечается на флэтах.
  *
- * THE FOCUS RING BELONGS TO THE WRAPPER, NOT TO THE INPUT. The native control is held at
- * `opacity-0` and it must STAY there — revealing it on focus would drop the operating system's own
- * rounded, padded swatch on top of ours the moment somebody tabbed to it, which is precisely the
- * chrome this square exists to hide. `focus-within` puts our own ring on the square instead, so the
- * keyboard path is visible and the skin is still ours.
+ * НЕСКОЛЬКО ТКАНЕЙ — ЭТО ТО ЖЕ САМОЕ ПОЛЕ (V-8: «если у нас в изделии используется больше чем одна
+ * ткань что бы была возможность добавить несколько тканей»). Одна ткань это список из одного члена;
+ * отдельного написания «одна ткань» нет и быть не должно, иначе два написания разошлись бы, как
+ * только у любого из них появилось бы своё свойство.
+ *
+ * ЧТО УЕЗЖАЕТ НА ПРОВОД. `colour.fabrics` — замороженные копии (имя, медиа, цвет, слова, части,
+ * раппорт), чтобы история прогона читалась после переименования или удаления ассета. И ПЕРВАЯ ткань
+ * ДОПОЛНИТЕЛЬНО повторяется в скалярах `fabric_media_id`/`code`/`hex`/`words` — так велит контракт:
+ * абзац старшинства в промпте называет главную фотографию по её номеру и читает его оттуда, а
+ * прогон об одной ткани обязан композироваться теми же словами, что и все замороженные до него.
+ * Эхо в цвет и слова ставится ТОЛЬКО в пустые поля: набранный руками hex это осознанное отклонение,
+ * и затирать его выбором ткани значило бы отменять ранг 2 порядка старшинства.
+ *
+ * ЧАСТИ ИЗДЕЛИЯ НЕ НАБИРАЮТСЯ ЗДЕСЬ. Они выводятся из МЕТОК на флэтах (секция ASSETS), потому что
+ * второе место для тех же слов разошлось бы с разметкой молча: человек видел бы на чертеже одно,
+ * а модель читала другое.
  */
-function ColourPickerSquare({
-  hex,
+function ClothRow({
+  band,
+  state,
   disabled,
-  onPick,
 }: {
-  hex: string;
+  band: GetDesignBandResponse;
+  state: ColourDraft;
   disabled?: boolean;
-  onPick: (hex: string) => void;
 }): JSX.Element {
-  const paintable = hexIsPaintable(hex);
-  const value = paintable ? hex.trim() : '#ffffff';
+  // ПАТТЕРН СТОИТ В ЭТОМ ЖЕ РЯДУ, И ЭТО НЕ НЕБРЕЖНОСТЬ. Для модели «из чего сшито» и «чем это
+  // покрыто» — один вопрос; отдельного словаря у неё нет, а раппорт едет числом внутри той же
+  // записи. Разводить их по двум рядам значило бы заставить человека решать, куда класть
+  // набивную ткань.
+  const shelf = useMemo(
+    () => [...shelfAssets(band, ASSET_FABRIC), ...shelfAssets(band, ASSET_PATTERN)],
+    [band],
+  );
+  const chosen = (state.recipe.fabrics ?? [])
+    .map((f) => f.assetId ?? 0)
+    .filter((id) => id > 0);
+
+  function choose(assetId: number) {
+    const next = chosen.includes(assetId)
+      ? chosen.filter((id) => id !== assetId)
+      : [...chosen, assetId];
+    const fabrics = fabricUses(band, next);
+    const first = fabrics[0];
+    state.patch({
+      fabrics,
+      // ЭХО ПЕРВОЙ ТКАНИ В СКАЛЯРЫ — требование контракта, а не удобство; см. шапку.
+      fabricMediaId: first?.mediaId ?? 0,
+      // ...и только в ПУСТЫЕ поля: набранное руками это ранг 2, он старше фотографии по цвету.
+      code: (state.recipe.code ?? '').trim() || first?.colourCode || '',
+      hex: (state.recipe.hex ?? '').trim() || first?.colourHex || '',
+      words: (state.recipe.words ?? '').trim() || first?.words || '',
+    });
+  }
+
   return (
-    <span
-      title='pick a colour'
-      className={cn(
-        'relative block h-[22px] w-[22px] shrink-0 border border-textColor',
-        'focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-textColor',
-        disabled && 'opacity-50',
+    <FieldRow label='cloths'>
+      {shelf.length === 0 ? (
+        <Text size='micro' variant='label' component='span' className='normal-case'>
+          No cloth on this card's shelves yet. Put one on the ASSETS block above — a texture there is
+          what the render reads weave, sheen and drape from, and it stays on the card afterwards.
+        </Text>
+      ) : (
+        <ChipRow>
+          {shelf.map((a) => {
+            const id = a.id ?? 0;
+            const on = chosen.includes(id);
+            const parts = partsOfAsset(band, id);
+            const url = assetThumb(a);
+            return (
+              <Chip
+                key={id}
+                nonForm
+                selected={on}
+                pressed={on}
+                disabled={disabled}
+                data-cloth={id}
+                title={
+                  parts
+                    ? `${assetLabel(a)} — marked on: ${parts}`
+                    : `${assetLabel(a)} — not marked on any flat, so it is the whole garment`
+                }
+                onClick={() => choose(id)}
+              >
+                <span className='flex items-center gap-1'>
+                  {url ? (
+                    <img src={url} alt='' aria-hidden='true' className='size-[12px] object-cover' />
+                  ) : null}
+                  {assetLabel(a)}
+                  {a.repeatMm ? ` · ${a.repeatMm} mm` : ''}
+                </span>
+              </Chip>
+            );
+          })}
+        </ChipRow>
       )}
-      style={paintable ? { background: value } : PLACEHOLDER_SURFACE}
-    >
-      <input
-        type='color'
-        aria-label='pick a colour'
-        disabled={disabled}
-        value={value}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onPick(e.target.value)}
-        className='absolute inset-0 h-full w-full cursor-pointer appearance-none border-0 bg-transparent p-0 opacity-0 disabled:cursor-not-allowed'
-      />
-    </span>
+
+      {/* ЧТО ИМЕННО УЕДЕТ — СКАЗАНО ЗДЕСЬ, А НЕ ОБНАРУЖИТСЯ В КАРТИНКЕ. Ткань без меток покрывает
+          изделие целиком; это законный ответ, а не пробел, и молчать о нём нельзя: человек,
+          отметивший одну ткань из двух, обязан видеть, что вторая объявлена остатком. */}
+      <div className='w-full pl-[100px]'>
+        {chosen.length > 0 && (
+          <Text size='micro' variant='label' component='p' className='normal-case'>
+            {(state.recipe.fabrics ?? [])
+              .map(
+                (f) =>
+                  `${f.name || 'cloth'} → ${
+                    (f.parts ?? '').trim() || 'the whole garment, unless another cloth is marked'
+                  }`,
+              )
+              .join(' · ')}
+          </Text>
+        )}
+        <Hint>
+          {chosen.length === 0
+            ? 'optional — a cloth states the material a colour cannot. mark it on the flats to say which part it covers.'
+            : chosen.length === 1
+              ? 'one cloth: it is the whole garment. its texture governs the material, the picked colour below still beats it on colour.'
+              : `${chosen.length} cloths: the marks drawn on the flats say which part is which, and the prompt repeats them.`}
+        </Hint>
+      </div>
+    </FieldRow>
   );
 }
 
@@ -204,15 +300,17 @@ export function Palette({
   const colors = dictionary?.colors;
 
   /**
-   * The fabric photo as an OBJECT, remembered from the moment it was picked.
-   *
-   * The recipe carries only `fabric_media_id`, and `AdminService` has no verb that reads a media by
-   * id — so a recipe seeded from the card's last run names a file this screen cannot draw. It says
-   * so in words rather than showing an empty frame that reads as a broken picture.
+   * ЦВЕТА, КОТОРЫМИ ЭТА КАРТОЧКА УЖЕ РЕНДЕРИЛАСЬ. Это и есть «совместимость с сохранёнными
+   * рецептами» из V-5: рецепт возвращается одним кликом внутри пикера, а не пересобирается по
+   * памяти. Полоса привозит их уже дедуплицированными и свежими первыми.
    */
-  const [fabric, setFabric] = useState<common_MediaFull | null>(null);
-  const fabricId = recipe.fabricMediaId ?? 0;
-  const fabricUrl = fabric && fabric.id === fabricId ? mediaThumb(fabric) : '';
+  const recentColours = useMemo(
+    () =>
+      (band.colourRecipes ?? [])
+        .map((r) => ({ hex: (r.hex ?? '').trim(), code: (r.code ?? '').trim() }))
+        .filter((r) => hexIsPaintable(r.hex)),
+    [band.colourRecipes],
+  );
 
   return (
     <div>
@@ -247,60 +345,20 @@ export function Palette({
         </div>
       </div>
 
-      {/* ── 1. THE PHOTOGRAPH — the only source that can state a weave. */}
-      <FieldRow label='photo'>
-        {fabricUrl ? (
-          <span className='block size-[44px] shrink-0 border border-borderColor'>
-            <MediaComponent src={fabricUrl} alt='fabric photo' aspectRatio='auto' fit='cover' />
-          </span>
-        ) : fabricId > 0 ? (
-          <Text size='micro' variant='label' component='span'>
-            media {fabricId} — picked earlier, not drawn here
-          </Text>
-        ) : null}
-        {!disabled && (
-          <MediaSelector
-            label={fabricId > 0 ? 'change ▸' : 'pick a fabric photo ▸'}
-            purpose='design · fabric photo for the render'
-            aspectRatio={['Custom']}
-            allowMultiple={false}
-            showVideos={false}
-            triggerClassName='px-1.5 py-px text-micro uppercase tracking-label cursor-pointer border border-textInactiveColor hover:bg-textColor hover:text-bgColor'
-            saveSelectedMedia={(media) => {
-              const first = media[0];
-              if (!first?.id) return;
-              setFabric(first);
-              // ⚠ THE COLOUR IS NOT CLEARED. This one line is the change the owner asked for: the
-              // old switch wrote `{ code: '', hex: '' }` here, so attaching a swatch silently
-              // deleted the colour a person had already picked.
-              state.patch({ fabricMediaId: first.id });
-            }}
-          />
-        )}
-        {!disabled && fabricId > 0 && (
-          <Button
-            variant='secondary'
-            size='xs'
-            onClick={() => {
-              setFabric(null);
-              state.clear('photo');
-            }}
-          >
-            remove
-          </Button>
-        )}
-        <Hint>
-          {stated.photo
-            ? 'travels with THIS RUN as an image: its weave, texture and drape are what the cloth is read from'
-            : 'optional — a swatch states the material the colour picker cannot'}
-        </Hint>
-      </FieldRow>
+      {/* ── 1. THE CLOTHS — the shelf, not a file picker. */}
+      <ClothRow band={band} disabled={disabled} state={state} />
 
       {/* ── 2. THE PICKED COLOUR — dictionary code and hex are ONE statement, on one line. */}
       <FieldRow label='colour'>
-        <ColourPickerSquare
+        {/* V-5, дословно: «сделать нормальный колор пикер … а то сейчас он не очень». Здесь стоял
+            нативный `<input type='color'>`, открывавший пикер ОПЕРАЦИОННОЙ СИСТЕМЫ — чужое окно,
+            в котором нет ни словаря колорвеев, ни цветов, которыми эта карточка уже печаталась.
+            Теперь это `ColourPicker`: квадрат и полоса тона, поле HEX, пипетка там, где браузер её
+            даёт, и рецепты ЭТОЙ карточки одним кликом. Довод целиком — в шапке того файла. */}
+        <ColourPicker
           hex={recipe.hex ?? ''}
           disabled={disabled}
+          recent={recentColours}
           onPick={(hex) => state.patch({ hex })}
         />
         <div className='w-[100px]'>

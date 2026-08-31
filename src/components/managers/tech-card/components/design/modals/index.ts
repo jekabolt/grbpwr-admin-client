@@ -1,9 +1,9 @@
 /**
  * THE BAND'S REMAINING DIALOGS — one import surface for the composer.
  *
- * WHAT IS NOT HERE IS AS DELIBERATE AS WHAT IS. Four of the prototype's twelve modals are already
- * built and are NOT re-exported, because a second spelling of a dialog is how two screens come to
- * disagree about the same act:
+ * WHAT IS NOT HERE IS AS DELIBERATE AS WHAT IS. Two of the prototype's twelve modals are built
+ * elsewhere and are NOT re-exported, because a second spelling of a dialog is how two screens come
+ * to disagree about the same act:
  *
  *   intake        → `useMediaIntake` + `MediaIntakeDialog`, wired in `media/utils/useMediaIntake.tsx`
  *                   and reached from every media slot. (It used to be named as living in
@@ -13,10 +13,15 @@
  *                   prototype's «pick what the files would depict» is a STAND-IN for a file system
  *                   it does not have; this admin has one, and the receiving dialog (preview, crop,
  *                   confirm) is the real article.
- *   mint          → `mint-dialog.tsx`.
  *   split         → `split-modal.tsx`.
- *   print fork    → `PrintSheetButton` in `sheet-journal.tsx`, which owns the question because it
- *                   owns the journal line and the walk to the paper.
+ *
+ * TWO MORE ARE NOT BUILT ANYWHERE ANY MORE, and they are named here so the absence reads as a
+ * decision rather than as an oversight. `mint` and the `print fork` were built, and both were
+ * REMOVED with the sheet's versions on the owner's word: there is no minting a sheet into a
+ * numbered signed version, no journal of issues, and so no fork to ask which one goes to paper.
+ * The SHEET itself is untouched — it is the live composition on ARTIFACTS. Naming their old files
+ * here would be worse than saying nothing: a pointer to a deleted file reads as «this is not built
+ * here», which is the opposite of true for the sheet and stale for the mint.
  *
  * Two more are deliberately not ported at all — see the report accompanying this wave:
  *   confirm        → `ui/components/confirmation-modal` IS this dialog; the prototype's version is
@@ -27,9 +32,7 @@
 
 // `CompareModal` жила здесь и умерла вместе с циклом починки (S-15): её единственная дверь —
 // «compare ▸» на полосе «fix is in» — снята, а модалка без двери — это экспорт в никуда.
-export { DiffModal } from './diff-modal';
 export { NewDetailModal } from './new-detail-modal';
-export { PreconditionsModal } from './preconditions-modal';
 export { VectorModal } from './vector-modal';
 export { WhatModelGetsModal } from './what-model-gets-modal';
 

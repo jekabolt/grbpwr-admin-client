@@ -43,10 +43,13 @@ import { selectPickablePictures } from './visibility';
 /**
  * THE VOCABULARY MOVED OUT, and it moved because it had been written three times.
  *
- * This file, `mint-dialog.tsx` and `split-modal.tsx` each declared the sides for themselves — the
- * keys agreed, so nothing failed a type check, but the labels did not: the same side read `side L`
- * here and `SIDE L` on the mint. `./views` is now the only spelling, and these re-exports exist so
- * that the call sites inside this module keep reading the way they did.
+ * Three files declared the sides for themselves — this one, `split-modal.tsx` and the mint dialog,
+ * which has since been removed with the sheet's versions. The keys agreed, so nothing failed a type
+ * check, but the labels did not: the same side read `side L` here and `SIDE L` on the mint. That
+ * third speller is gone now, and its copy went down with it rather than being rehomed — a
+ * duplicate of a vocabulary is exactly what `./views` exists to end. `./views` is the only
+ * spelling, and these re-exports exist so that the call sites inside this module keep reading the
+ * way they did.
  */
 export {
   SHEET_MIN_VIEWS,
@@ -297,8 +300,6 @@ export type BenchSlotProps = {
   /** Details only. */
   onRename?: (name: string) => void;
   onDelete?: () => void;
-  /** Details only: why this slot may not be removed, or null. */
-  deleteBlocked?: string | null;
 };
 
 /**
@@ -348,7 +349,6 @@ export function BenchSlot(props: BenchSlotProps) {
     onSplit,
     onRename,
     onDelete,
-    deleteBlocked,
   } = props;
 
   const provenance = picture ? slotProvenance({ picture }) : null;
@@ -548,24 +548,18 @@ export function BenchSlot(props: BenchSlotProps) {
               '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
             )}
           >
-            {/* A DISABLED BUTTON DOES NOT SHOW ITS OWN `title`: pointer events are suppressed on
-                it, so the reason has to hang on a wrapper that still receives the hover. */}
-            {deleteBlocked ? (
-              <span data-inert={deleteBlocked} title={deleteBlocked} className='inline-flex'>
-                <Button variant='secondary' size='xs' disabled>
-                  remove slot
-                </Button>
-              </span>
-            ) : (
-              <Button
-                variant='secondary'
-                size='xs'
-                title='remove this detail slot — not just its picture'
-                onClick={onDelete}
-              >
-                remove slot
-              </Button>
-            )}
+            {/* ЗАПЕРТОГО СОСТОЯНИЯ У ЭТОЙ ДВЕРИ БОЛЬШЕ НЕТ. Запирал её ровно один довод — «слот
+                процитирован выпущенной версией листа», — а версий не существует: минт снесён по
+                слову владельца. Ветка «показать погашенную кнопку с причиной» осталась бы веткой,
+                в которую нечему привести. */}
+            <Button
+              variant='secondary'
+              size='xs'
+              title='remove this detail slot — not just its picture'
+              onClick={onDelete}
+            >
+              remove slot
+            </Button>
           </span>
         )}
       </div>

@@ -4,14 +4,15 @@ import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
+import { AssetsSection } from './assets';
 import { Bench } from './bench';
-import { ConceptSection } from './concept-section';
 import { GenerationStudio } from './generation';
 import { KindsStrip, type DesignKind } from './kinds-strip';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MoodBoard } from './mood-board';
+import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
 import { PickModeProvider, usePickMode } from './pick-mode';
 import { PickTray } from './band-feed';
@@ -53,20 +54,9 @@ function PickBanner() {
 export function StudioTab({
   techCardId,
   disabled,
-  constructionAspects,
 }: {
   techCardId?: number;
   disabled?: boolean;
-  /**
-   * The aspects editor, handed in from the page rather than imported here.
-   *
-   * It needs the whole loaded card, which this composer does not have and should not fetch a second
-   * time. It travels as a node because the alternative was worse: `concept & construction
-   * description` used to be one block on HEADER, and leaving the aspects behind there would have
-   * split one printed section across two tabs — concept and notes in the studio, the aspects a rail
-   * entry away, printing between them.
-   */
-  constructionAspects?: React.ReactNode;
 }) {
   // ВИД — состояние студии, как `state.kind` в прототипе. Живёт здесь, у композитора: полоса
   // представлений его показывает, а экраны читают, и третьего владельца у него быть не должно.
@@ -76,6 +66,13 @@ export function StudioTab({
   // загрузки исполняется — хуков становится БОЛЬШЕ, чем в прошлый раз. React отвечает ошибкой 310
   // и сносит ВСЁ дерево: вкладка уходит в белое целиком, потому что границы ошибок над ней нет.
   const [kind, setKind] = useState<DesignKind>('flat');
+  /* РЕКОЛ ПЕРЕКЛЮЧАЕТ ВИД СТУДИИ (V-12в, владелец: «если мы нажимаем на рекол из генерации
+     допустим фабрик рендера оно должно переключатся на фабрик рендер а не пихать их во флеты»).
+     Владелец вида — этот композитор, и второго источника правды заводить нельзя; поэтому наружу
+     отдаётся не копия состояния, а ссылка на владельца. Без этой строки жест не врёт, а честно
+     говорит «откройте вкладку сами» — но говорить это владельцу, который попросил обратного,
+     было бы отказом, а не решением. */
+  useStudioKindSwitch(techCardId ?? 0, kind, setKind);
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
 
   // A card that has not been created yet has no band and cannot have one: every write below is
@@ -210,12 +207,20 @@ export function StudioTab({
                   слоте («or mark a picture from the band») и заканчивается плиткой лотка: между
                   дверью и ответом не должно стоять пол-экрана. Вне взведённого выбора лоток — null,
                   постоянной колонки владелец не хочет (R-18). */}
+              {/* ПОЛКИ АССЕТОВ — СВОЯ СЕКЦИЯ СТУДИИ (V-11), И ОНА СТОИТ ВНЕ ВЕТОК ВИДА.
+                  Владелец выбрал форму прямым ответом: «Своя секция ASSETS в студии» — три полки,
+                  «оттуда их берут и фабрик-рендер, и разметка на флэтах». Раз берут ОБА, секция не
+                  может принадлежать ни одному из них: положенная внутрь `kind === 'render'`, она
+                  исчезала бы ровно тогда, когда человек размечает флэты, а положенная внутрь
+                  `flat` — когда он выбирает ткань для рендера.
+                  МЕСТО — НАД ВЕРСТАКОМ, по тому же доводу, которым верстак стоит последним:
+                  сначала материал, потом сборка. Ассет это материал изделия, а не подача прогона;
+                  он переживает прогон и потому не может жить в форме запуска. */}
+              <AssetsSection techCardId={techCardId} band={band} disabled={readOnly} />
               <PickTray band={band} />
               <Bench techCardId={techCardId} band={band} disabled={readOnly} />
             </>
           )}
-          <ConceptSection disabled={readOnly} />
-          {constructionAspects}
         </SectionStack>
       </PickModeProvider>
       </PictureGalleryProvider>

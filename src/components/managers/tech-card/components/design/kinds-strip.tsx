@@ -222,15 +222,11 @@ export function KindsStrip({
   // again while the eye was still on the control that raised the question.
   const [asked, setAsked] = useState<InertKey | null>(null);
 
-  // THE ONE LIVE READING. `latestVersion` unset is honestly «no version yet» and never «version 0»
-  // — the wire says so in as many words — so the two states are worded, not numbered.
-  const version = band.latestVersion;
-  const rev = version?.versionNumber ?? 0;
-  // ЧИСЛО УКАЗАНИЙ — ЖИВОЕ, А НЕ ЗАМОРОЖЕННОЕ. Стояло `version.callouts.length`, то есть копия,
-  // снятая в момент минта. Это расходится и с прототипом (`repsStripHtml` считает
-  // `state.callouts.length`), и с доктриной самой вкладки ARTIFACTS: версия морозит СОСТАВ ПЛИТ,
-  // а указания не морозятся — бумага печатает те, что карточка держит сейчас. Со старым чтением
-  // полоса называла бы прежнее число ещё долго после того, как технолог добавил выноску.
+  // ЧИСЛО УКАЗАНИЙ — ЖИВОЕ. Читается прямо из формы, поэтому меняется в тот же миг, что и лист.
+  // (Здесь же читалась ВЕРСИЯ листа — «v3» перед числом выносок. Версии снесены целиком, вместе
+  // с бэкендом, и подпись осталась при том единственном, что у неё было живого: указания на
+  // листе. Число выносок и раньше бралось из формы, а не из замороженной копии, — ровно затем,
+  // чтобы полоса не называла прежнее число после того, как технолог добавил выноску.)
   const calloutCount = ((useWatch({ control: form.control, name: 'callouts' }) as unknown[]) ?? [])
     .length;
   // Прототип (`repsStripHtml`) подписывает представление ЧИСЛОМ его картинок, а не словами
@@ -265,10 +261,14 @@ export function KindsStrip({
     : threedLocked
       ? 'locked — renders first'
       : 'none yet';
-  const sheetSub =
-    rev > 0
-      ? `v${rev} · ${calloutCount} callout${calloutCount === 1 ? '' : 's'}`
-      : 'draft — no version yet';
+  // Подпись листа держит тот же строй, что у двух соседних ячеек: СКОЛЬКО ИХ УЖЕ ЕСТЬ, а не в
+  // каком состоянии находится лист. «v3 · 5 callouts» / «draft — no version yet» стояло здесь,
+  // пока версии существовали; версия ушла, а счёт указаний — единственное живое, что было в той
+  // строке, — остался. Пустая подпись сделала бы одну ячейку из трёх немой, и это читалось бы как
+  // поломка, а не как «версий больше нет».
+  const sheetSub = calloutCount
+    ? `${calloutCount} callout${calloutCount === 1 ? '' : 's'}`
+    : 'none yet';
 
   return (
     <div>

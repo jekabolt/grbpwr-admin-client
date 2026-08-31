@@ -98,7 +98,6 @@ import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
 import { RolesField } from './roles-field';
 import { useEditHistory } from 'ui/components/annotation/history';
-import { DesignSaveHostProvider } from './design/mint-dialog';
 import { gateTechCardPayload, isDesignOnlyMediaKind } from './design/payload-gate';
 import { useDesignBand } from './design/use-design-band';
 import { ArtifactsTab, StudioTab } from './design/studio-tab';
@@ -215,10 +214,14 @@ const FOLDED_TABS: Record<string, TabId> = {
   // отвечает названное место. Мудборд студия заменила сразу: её доска пишет `moodboardMedia` и
   // указания на них. С техническим эскизом было три долга, и вот чем каждый закрыт.
   //
-  // ЗАВЕСТИ ЭСКИЗ. Плиты верстака вкладывает в `technicalMedia` документа СЕРВЕР, в транзакции
-  // минта — `injectBenchPlatesAsTechnicalMedia` (apisrv/admin/design_sheet_mint.go), и это уже на
-  // бете. Путь целиком: полка загрузок → слот верстака → минт. Пока этой вкладки не было, довод
-  // «свернём потом» был верен, и он держал `sketch` на рейле честно.
+  // ЗАВЕСТИ ЭСКИЗ. Путь целиком: полка загрузок → слот верстака → лист на ARTIFACTS. Пока этой
+  // вкладки не было, довод «свернём потом» был верен, и он держал `sketch` на рейле честно.
+  //
+  // (Здесь стояло, что плиты верстака вкладывает в `technicalMedia` документа СЕРВЕР, в транзакции
+  // минта. Минта больше нет — версии листа снесены целиком, вместе с бэкендом, — и вкладывать
+  // плиты в документ этим путём некому. Долг закрыт не этой транзакцией, а тем, что у эскиза
+  // появилось НАЗВАННОЕ МЕСТО: верстак заводит плиту, лист её показывает. Оставить прежний текст
+  // значило бы отправить читателя за доводом в файл, которого нет.)
   //
   // СНЯТЬ ЭСКИЗ. Раньше умел только `removeMedia` свёрнутой вкладки; теперь плиту откалывает от
   // документа ARTIFACTS, тем же правилом — выноски откалываются, их ТЕКСТ остаётся.
@@ -1921,8 +1924,30 @@ export function TechCardForm({
                 Маржа, а не обёртка: при `hidden` (display:none) она исчезает вместе со стеком и на
                 другие вкладки не протекает. */}
             <SectionStack hidden={activeTab !== 'studio'} className='mb-gutter'>
-              <SectionStack row>
-                <Section title='identification' className='w-full min-w-0 lg:flex-1'>
+              {/* V-18 · ЧЕТЫРЕ ПЛИТКИ ШАПКИ — ОДИН ГРИД, А НЕ ДВА FLEX-РЯДА. Владелец: «сделать
+                  что бы они всегда ровно отображались… одинаковой высоты в ряду и одинаковой
+                  ширины в колонку». «Криво» было не оформлением, а механикой: `SectionStack row`
+                  кладёт соседей `lg:items-start`, то есть каждый блок высотой в своё содержимое —
+                  ряд с рваным низом при ЛЮБОЙ разнице наполнения (а classification с браузером
+                  категорий всегда выше identification). Грид даёт оба равенства КОНСТРУКЦИЕЙ:
+                  `grid-cols-2` = repeat(2, minmax(0,1fr)) — колонки равной ширины, которые контент
+                  растянуть не может; растяжение по умолчанию (align stretch) — блоки одного ряда
+                  всегда одной высоты, при любом содержимом. Пара `min-w-0 overflow-x-auto` на
+                  плитке несущая, и это ДВЕ разные гарантии: min-w-0 снимает min-width:auto
+                  грид-элемента (иначе длинное значение раздувало бы саму плитку), а overflow-x-auto
+                  обрезает ОТРИСОВКУ рамкой — без него неразрывное значение красится ПОВЕРХ соседней
+                  плитки (замеренный здесь дефект «плитка-кнопка ложится поверх соседней»; наезд и
+                  обрезка замерены пробой tmp-стенда этой волны). Выпадашки внутри плиток портятся
+                  в body (Radix Portal в select/popover/date-picker), поэтому скролл-контейнер их
+                  не клипает. Группировка осталась 2×2 — identification/classification это
+                  «что за стиль», roles/products под ними — «кто и что к нему привязано»; слить их
+                  в два мегаблока значило бы потерять четыре именованных вопроса прототипа. */}
+              <div className='grid grid-cols-1 gap-gutter lg:grid-cols-2'>
+                <Section
+                  title='identification'
+                  question='— what this style is called'
+                  className='min-w-0 overflow-x-auto'
+                >
                   <StyleNumberField isIdea={isIdea} />
                   {isIdea && (
                     <Text variant='inactive' size='small'>
@@ -1949,7 +1974,11 @@ export function TechCardForm({
                   <InputField name='brand' label='brand' />
                 </Section>
 
-                <Section title='classification' className='w-full min-w-0 lg:flex-1'>
+                <Section
+                  title='classification'
+                  question='— what kind of thing it is'
+                  className='min-w-0 overflow-x-auto'
+                >
                   <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
                   {/* NF-07: the server refuses a purpose flip once the card is referenced — runs,
                     LIVE colourways, sold colourways, assembly usage. Live colourways are the one arm
@@ -2054,41 +2083,36 @@ export function TechCardForm({
                   <HeaderMetaFields hideCategory={isAux} />
                 </Section>
 
-              </SectionStack>
-
-              {/* R-1 · ВТОРОЙ РЯД ШАПКИ, а не третья колонка. U-1 ставил сюда узкую колонку
-                  `lg:w-[300px]` по прототипу (`1fr 1fr 300px`, `topRowHtml`, proto.html:3172) —
-                  владелец увидел результат и ОТМЕНИЛ это решение: «RESPONSIBLE ROLES и LINKED
-                  PRODUCTS расположи под IDENTIFICATION и CLASSIFICATION». Его слово новее макета.
-                  Роли встают под identification, продукты — под classification, тем же
-                  `SectionStack row`: 24px земли между блоками И ЕСТЬ разделитель, и он обязан
-                  оставаться одним значением на весь админ, а не локальным числом.
-                  Ряд условный. У несохранённой aux-карты в нём не было бы ни ролей (нужен
-                  сохранённый id), ни связанных продуктов — пустой ряд читался бы как блок,
-                  который не загрузился. Когда жив только один из двух, он честно занимает всю
-                  ширину: `lg:flex-1` без соседа растягивается сам, лишней пустой колонки нет. */}
-              {((isEditMode && !!numId) || !isAux) && (
-                <SectionStack row>
-                  {isEditMode && numId && (
-                    <Section title='responsible roles' className='w-full min-w-0 lg:flex-1'>
-                      <Text variant='inactive' size='small'>
-                        who is on this card (Q5) — admin accounts, saved immediately, not part of
-                        the card’s draft.
-                      </Text>
-                      <RolesField
-                        techCardId={numId}
-                        canEdit={canWrite(SECTION.techCards) && !frozen}
-                        initialAssignments={techCard?.roleAssignments}
-                      />
-                    </Section>
-                  )}
-                  {!isAux && (
-                    <Section title='linked products' className='w-full min-w-0 lg:flex-1'>
-                      <ProductIdsField />
-                    </Section>
-                  )}
-                </SectionStack>
-              )}
+                {/* R-1 · ВТОРОЙ РЯД ТОГО ЖЕ ГРИДА, а не третья колонка (владелец: «RESPONSIBLE
+                    ROLES и LINKED PRODUCTS расположи под IDENTIFICATION и CLASSIFICATION»).
+                    Плитки условные: у несохранённой карты нет ролей (нужен сохранённый id), у
+                    sellable-карты нет причин прятать продукты, у aux — наоборот. Когда в ряду
+                    живёт ОДНА плитка, она честно берёт обе колонки (`lg:col-span-2`): одинокая
+                    полуширинная плитка рядом с пустой клеткой земли читалась бы как блок,
+                    который не загрузился. Зазор — тот же `gap-gutter`: 24px земли И ЕСТЬ
+                    разделитель, второй величины зазора в этом админе нет. */}
+                {isEditMode && numId && (
+                  <Section
+                    title='responsible roles'
+                    question='— admin accounts, saved immediately, not part of the card’s draft'
+                    className={`min-w-0 overflow-x-auto${isAux ? ' lg:col-span-2' : ''}`}
+                  >
+                    <RolesField
+                      techCardId={numId}
+                      canEdit={canWrite(SECTION.techCards) && !frozen}
+                      initialAssignments={techCard?.roleAssignments}
+                    />
+                  </Section>
+                )}
+                {!isAux && (
+                  <Section
+                    title='linked products'
+                    className={`min-w-0 overflow-x-auto${!(isEditMode && !!numId) ? ' lg:col-span-2' : ''}`}
+                  >
+                    <ProductIdsField />
+                  </Section>
+                )}
+              </div>
 
               {/* U-2 · CARE SYMBOLS И CARE GUIDE УБРАНЫ ИЗ ПОЛОСЫ — прямое указание владельца.
                 Убран ТОЛЬКО экран: care хранится один раз, на care-ярлыке, и редактируется на
@@ -2111,16 +2135,18 @@ export function TechCardForm({
                 «concept & construction description» со своим `TextareaField name='concept'`, и он
                 был смонтирован ВСЕГДА — этот `SectionStack` прячется атрибутом `hidden`, то есть
                 display:none, а не размонтированием. Над одним полем формы жили два редактора: этот
-                и `design/concept-section.tsx`, который открывается в студии; тот же дубль был и у
+                и `design/concept-section.tsx`, открывавшийся в студии (сам этот файл потом снесён по
+                V-16, а поле переехало в записку доски); тот же дубль был и у
                 `DetailsEditor` (два экземпляра со своими локальными наборами показанных аспектов).
                 Вместе с блоком ушёл подблок `notes` («internal · not sent to the factory · outside
                 the DESIGN signature») — прямое указание владельца.
                 ПОЛЕ `notes` ИЗ СХЕМЫ НЕ УДАЛЕНО: уже написанные заметки продолжают круговой рейс
                 GET → defaultValues → full-replace UPSERT и сохранением не стираются.
-                `DetailsEditor` не потерялся — он уезжает в `StudioTab` пропом `constructionAspects`
-                и рисуется под `ConceptSection`, где теперь ровно один.
+                `DetailsEditor` не потерялся — он стоит блоком «construction» ниже в этой же
+                шапке (V-17), и экземпляр по-прежнему ровно один.
                 U-8 (блок «TECH PACK · DESCRIPTION SHEET») в этом файле не рождался и не вернулся —
-                его носителем был `design/concept-section.tsx`, где он снят. */}
+                его носителем был `design/concept-section.tsx`, УДАЛЁННЫЙ С ДИСКА вместе с самим
+                блоком; описание живёт теперь одной запиской доски (`design/mood-board.tsx`). */}
 
               {isAux && (
                 <Section title='output material'>
@@ -2178,6 +2204,25 @@ export function TechCardForm({
                   )}
                 </Section>
               )}
+
+              {/* V-17 · «construction described aspect by aspect поднять вверх к мудборду».
+                  Аспекты стояли ПОСЛЕДНИМ органом студии — пропом `constructionAspects` в
+                  StudioTab, пять экранов генерации ниже доски. Теперь они последний блок ШАПКИ,
+                  то есть вплотную НАД мудбордом: порядок монтирования студии живёт в чужом файле
+                  (`design/studio-tab.tsx`), а конец шапки — в этом, и он даёт ровно ту смежность,
+                  которую просил владелец. Экземпляр по-прежнему ОДИН (проп больше не передаётся):
+                  два всегда-смонтированных DetailsEditor уже расходились локальными наборами
+                  показанных аспектов — см. историю U-9 ниже.
+                  `Section`-обёртка — не косметика: DetailsEditor рисует голый div, и в стеке он
+                  стоял прямо на сером грунте — рамки его карточек-аспектов без заливки просвечивали
+                  землёй (DESIGN.md, Filled-Block Rule). Белый блок возвращает ему и материал, и
+                  имя печатной секции. */}
+              <Section
+                title='construction'
+                question='— described aspect by aspect; prints after the concept'
+              >
+                <DetailsEditor techCard={techCard} />
+              </Section>
             </SectionStack>
 
             {/* STUDIO — полоса DESIGN, где на стиль смотрят.
@@ -2193,45 +2238,38 @@ export function TechCardForm({
 
                 Размонтирование ничего не стоит: форма не ставит `shouldUnregister`, и уход со
                 вкладки сохраняет её значения. */}
-            {activeTab === 'studio' && (
-              <DesignSaveHostProvider
-                settle={withServerAssignedValues}
-                expectedLockVersion={lockOverride.current ?? techCard?.lockVersion ?? 0}
-                canWriteCosting={canWriteCosting}
-              >
-                <StudioTab
-                  techCardId={numId}
-                  disabled={frozen}
-                  constructionAspects={<DetailsEditor techCard={techCard} />}
-                />
-              </DesignSaveHostProvider>
-            )}
+            {/* V-17: `constructionAspects` больше не передаётся — аспекты поднялись в шапку,
+                последним блоком над мудбордом (см. блок construction выше). Проп в StudioTab
+                опционален и без значения не рисует ничего; сам слот может снять владелец
+                studio-tab.tsx. */}
+            {activeTab === 'studio' && <StudioTab techCardId={numId} disabled={frozen} />}
 
-            {/* ARTIFACTS — what the studio has been frozen into. Same conditional mount, same
-                reason: it edits the sheet's callouts, which are the same array. */}
-            {/* THE SAVE HOST IS NOT OPTIONAL HERE. Minting a sheet version writes the DOCUMENT in the
-                same transaction, so it must settle through this page's own `withServerAssignedValues`
-                — the closure over this form and its staging queue, which cannot be imported. Without
-                it the mint refuses in words rather than minting unsettled: a blank `signedDigest`
-                left in form state MEANS «approve now», so an unsettled mint would silently
-                re-approve every sign-off on the next save. */}
+            {/* ARTIFACTS — лист, на котором собрана композиция. Тот же условный монтаж и по той же
+                причине: он правит те же `callouts`.
+
+                ЗДЕСЬ СТОЯЛ `DesignSaveHostProvider` — на обеих вкладках. Он существовал ради ОДНОЙ
+                вещи: минт версии листа писал ДОКУМЕНТ в той же транзакции, и потому обязан был
+                «осадить» форму через здешний `withServerAssignedValues` — замыкание над этой формой
+                и её очередью, которое нельзя импортировать. Без него минт отказывал словами, а не
+                минтил неосаженное: пустой `signedDigest` в состоянии формы ЗНАЧИТ «одобрить
+                сейчас», и неосаженный минт молча переодобрил бы все подписи следующим сохранением.
+
+                Минт снесён целиком, вместе с бэкендом, — а с ним и единственный читатель хоста.
+                Провайдер снят, а не оставлен «на будущее»: контекст без потребителя — это приглашение
+                следующему органу начать писать документ мимо обычного сохранения, то есть ровно та
+                вторая дверь, от которой хост и стерёг. Обычное сохранение карточки как ходило через
+                `withServerAssignedValues`, так и ходит. */}
+            {/* КАРТОЧКА И ИСТОРИЯ ОТКАТА ИДУТ ВНИЗ ОТСЮДА, потому что редактор указаний
+                открывается модалкой над этой вкладкой, а история отката — ОДНА НА ФОРМУ.
+                Своя история у редактора означала бы, что откат в модалке возвращает снимок,
+                снятый до правок доски настроения, и они исчезают молча. */}
             {activeTab === 'artifacts' && (
-              <DesignSaveHostProvider
-                settle={withServerAssignedValues}
-                expectedLockVersion={lockOverride.current ?? techCard?.lockVersion ?? 0}
-                canWriteCosting={canWriteCosting}
-              >
-                {/* КАРТОЧКА И ИСТОРИЯ ОТКАТА ИДУТ ВНИЗ ОТСЮДА, потому что редактор указаний
-                    открывается модалкой над этой вкладкой, а история отката — ОДНА НА ФОРМУ.
-                    Своя история у редактора означала бы, что откат в модалке возвращает снимок,
-                    снятый до правок доски настроения, и они исчезают молча. */}
-                <ArtifactsTab
-                  techCardId={numId}
-                  disabled={frozen}
-                  techCard={techCard}
-                  calloutHistory={calloutHistory}
-                />
-              </DesignSaveHostProvider>
+              <ArtifactsTab
+                techCardId={numId}
+                disabled={frozen}
+                techCard={techCard}
+                calloutHistory={calloutHistory}
+              />
             )}
 
             {/* PATTERNS (size range + DXF выкройки по материалам) */}

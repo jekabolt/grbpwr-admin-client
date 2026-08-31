@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationEditor, ANNOTATION_EDITOR_H_COMPACT } from 'ui/components/annotation/editor';
 import { rememberPen } from 'ui/components/annotation/surface';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
@@ -16,7 +17,7 @@ import Textarea from 'ui/components/text-area';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
-import { MoodDraft } from './head/mood-draft';
+import { CONCEPT_MAX, MoodDraft } from './head/mood-draft';
 import { useMoodCallouts } from './mood-callouts';
 
 /**
@@ -24,9 +25,10 @@ import { useMoodCallouts } from './mood-callouts';
  *
  * ЧТО ЗДЕСЬ ЛЕЖИТ И ГДЕ ОНО ЖИВЁТ. Плитки — это `moodboardMedia` ДОКУМЕНТА (карточка знает свои
  * картинки и без полосы DESIGN); указания на плитках — `callouts` того же документа, отфильтрованные
- * по мудбордным `media_id` (см. `./mood-callouts`); общая записка — `moodNote`. Полоса DESIGN сюда
- * не приходит вовсе, и подпись органа это утверждает: доска не зависит от того, отвечает ли сервер
- * новые маршруты.
+ * по мудбордным `media_id` (см. `./mood-callouts`); записка доски — `concept` (V-16: «CONCEPT &
+ * CONSTRUCTION DESCRIPTION это и есть SHARED NOTE», редактор ровно один и стоит здесь), легаси
+ * `moodNote` показывается read-only до слияния или сноса. Полоса DESIGN сюда не приходит вовсе, и
+ * подпись органа это утверждает: доска не зависит от того, отвечает ли сервер новые маршруты.
  *
  * ПОЧЕМУ ЭТО НЕ ПРОМПТ. Мудборд читает человек и черновик идеи; в генерацию не уходит ничего
  * (`B2`). Оговорка стоит прямо в подписи блока, потому что «картинки, которые я собрал» и «картинки,
@@ -189,7 +191,19 @@ export function MoodBoard({
   const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
   const items = useMemo(() => all.filter(isBoardRow), [all]);
   const inputIds = useMemo(() => new Set(all.filter(isInputRow).map((i) => i.mediaId)), [all]);
-  const moodNote = useController({ control, name: 'moodNote' });
+  // V-16 · ЗАПИСКА ДОСКИ — ЭТО `concept`, И НИКАКОЕ ДРУГОЕ ПОЛЕ. Владелец дословно: «CONCEPT &
+  // CONSTRUCTION DESCRIPTION это и есть SHARED NOTE в MOODBOARD». По коду это были ДВА поля —
+  // `moodNote` (не печатается, вне подписи DESIGN, читал только черновик) и `concept` (печатается
+  // в тех-паке, входит в подпись) — и два органа над ними читались как два разных предмета.
+  // Редактор теперь ровно один и пишет `concept`; `moodNote` больше не редактируется нигде.
+  const concept = useController({ control, name: 'concept' });
+  // Легаси-содержимое `moodNote`. Поле живёт по протоколу «отсутствует = сохрани хранимое»,
+  // поэтому НЕ рисовать его — не значит стереть; но спрятать текст, который черновик всё ещё
+  // читает, значило бы завести невидимый вход в промпт. Непустая легаси-записка показывается
+  // ниже read-only, с двумя дверьми: забрать в описание или выбросить (обе пишут '' — команду
+  // «очисти» — и орган исчезает навсегда).
+  const legacyNote = (((useWatch({ control, name: 'moodNote' }) as string | null) ?? '') || '')
+    .trim();
   const noteId = useId();
   const bodyId = useId();
 
@@ -317,6 +331,29 @@ export function MoodBoard({
         (i) => !(i.mediaId === mediaId && isBoardRow(i)),
       ),
     );
+  }
+
+  // ── легаси-записка → описание (V-16) ────────────────────────────────────────────────────────
+  //
+  // Перенос уважает потолок поля: молча обрезанное описание — это предложение, потерявшее хвост
+  // без единого слова об этом. Отказ говорится вслух, текст остаётся на месте.
+  function takeLegacyNote() {
+    const current = ((getValues('concept') ?? '') as string).trim();
+    const next = current ? `${current}\n${legacyNote}` : legacyNote;
+    if (next.length > CONCEPT_MAX) {
+      showMessage(
+        `the note does not fit — the description holds ${CONCEPT_MAX} characters and it is already ${current.length}; shorten it first`,
+        'error',
+      );
+      return;
+    }
+    setValue('concept', next, { shouldDirty: true, shouldValidate: true });
+    // '' — КОМАНДА «очисти» по трёхсостоянийному протоколу поля; отсутствие значило бы «сохрани».
+    setValue('moodNote', '', { shouldDirty: true });
+  }
+
+  function dropLegacyNote() {
+    setValue('moodNote', '', { shouldDirty: true });
   }
 
   // ── колапс блока (U-3) ──────────────────────────────────────────────────────────────────────
@@ -472,33 +509,67 @@ export function MoodBoard({
           }}
         />
 
-        {/* ОБЩАЯ ЗАПИСКА — ОДНА НА ВСЮ ДОСКУ, и это НЕ описание изделия. Описание изделия уходит в
-            каждый прогон и живёт в блоке референсов; эта записка не покидает мудборда, её читает
-            только человек и черновик ниже.
-            Поле пустое ≠ поле не заполнено: `moodNote` объявлено `.nullish()` без `.default('')`,
-            потому что у него серверный протокол «отсутствует = сохрани хранимое», а пустая строка
-            это КОМАНДА «очисти». Поэтому в форму пишется ровно то, что напечатал человек, и
-            молчащая форма молчит. */}
-        <div>
-          <GroupLabel>shared note</GroupLabel>
+        {/* ОДНА ЗАПИСКА НА ДОСКУ — И ЭТО `concept` (V-16). Текст печатается в тех-паке и входит в
+            подпись DESIGN, поэтому подпись под полем называет обе судьбы вслух. Это по-прежнему НЕ
+            описание изделия для генерации: то — `garment description` блока референсов, уходит в
+            каждый прогон; этот текст генерация не видит (W-15), его читают человек, бумага и
+            черновик ниже. */}
+        {/* `data-field` — ЯКОРЬ ДВЕРИ, А НЕ УКРАШЕНИЕ. `revealField` (`utils/field-errors.ts:226`)
+            ищет поле по `[data-field="<путь>"]`, и этот штамп ставит `FormItem` из `ui/form`. Здесь
+            стоит ГОЛАЯ `Textarea`, потому что поле переехало из формы на доску (V-16) — вместе с
+            переездом якорь и пропал, а с ним онемели ОБЕ двери «what the model gets» (`edit the
+            description ▸` и `edit the concept ▸`): они отвечали «it is not on this tab», стоя на той
+            самой вкладке, где поле видно. Штамп возвращён руками ровно потому, что примитив формы
+            больше не участвует. */}
+        <div data-field='concept'>
+          <GroupLabel>concept & construction description</GroupLabel>
           <label htmlFor={noteId} className='sr-only'>
-            shared note
+            concept & construction description
           </label>
           <Textarea
-            {...moodNote.field}
+            {...concept.field}
             id={noteId}
             disabled={readOnly}
-            value={moodNote.field.value ?? ''}
-            rows={3}
-            maxLength={2000}
-            placeholder='what these pictures say together'
+            value={concept.field.value ?? ''}
+            rows={4}
+            maxLength={CONCEPT_MAX}
+            placeholder='what this thing is — the idea, the reference, the purpose'
             className='resize-none'
           />
           <Text size='micro' variant='label' className='mt-px'>
-            not the garment description — that one goes into every run; this one never leaves the
-            moodboard
+            printed for the factory · part of the DESIGN signature · read by «draft the idea» below
+            — the garment description for generation is a different field, in the input block
           </Text>
         </div>
+
+        {/* ЛЕГАСИ-ЗАПИСКА ДОСКИ. Существует только на карточках, писавших `moodNote` до слияния
+            V-16; после любой из двух дверей поле уезжает '' (командой «очисти») и орган исчезает.
+            Цитата стоит на экране целиком, поэтому «discard» не спрашивает второй раз. */}
+        {legacyNote !== '' && (
+          // CalloutBox, а не пунктирная рамка: пунктир в этой системе означает «добавить», а это —
+          // сообщение, которое стоит, пока его не разрешили одной из двух дверей (DESIGN.md §5).
+          <CalloutBox>
+            <div className='flex items-baseline justify-between gap-2'>
+              <Text size='micro' variant='label' component='span'>
+                the board’s old shared note — this field is retired; the description above is the
+                one note now
+              </Text>
+              {!readOnly && (
+                <ChipRow className='shrink-0'>
+                  <Chip nonForm onClick={takeLegacyNote} title='append it to the description above'>
+                    add to the description
+                  </Chip>
+                  <Chip nonForm onClick={dropLegacyNote} title='clear it — the text above is it'>
+                    discard
+                  </Chip>
+                </ChipRow>
+              )}
+            </div>
+            <Text size='micro' component='p' className='mt-1 whitespace-pre-wrap'>
+              {legacyNote}
+            </Text>
+          </CalloutBox>
+        )}
 
         {/* ЧЕРНОВИК ИДЕИ — `moodDraftHtml` прототипа, который зовёт его ПОСЛЕДНИМ внутри доски
             (`proto.html:3271`), поэтому и здесь он стоит внизу этой же секции.

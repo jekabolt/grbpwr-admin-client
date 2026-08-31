@@ -15,8 +15,8 @@ import { useCallback, useMemo } from 'react';
  * separate hands in parallel, and a second call site for the same write is where the two hands
  * disagree about what to invalidate afterwards.
  *
- * ONE READ. `GetDesignBand` returns the whole band — bench, versions, journal, budget, references,
- * layers, aggregates, the first page of the merged runs+batches feed. So there is exactly one
+ * ONE READ. `GetDesignBand` returns the whole band — bench, budget, references, layers,
+ * aggregates, the first page of the merged runs+batches feed. So there is exactly one
  * query key per card and every mutation invalidates exactly it. Splitting the read per organ would
  * buy nothing (the server composes it in one transaction anyway) and would cost the guarantee that
  * the bench and the feed on screen are the same instant of the card.
@@ -24,8 +24,6 @@ import { useCallback, useMemo } from 'react';
 export const designKeys = {
   all: ['design'] as const,
   band: (techCardId: number) => [...designKeys.all, 'band', techCardId] as const,
-  version: (techCardId: number, versionNumber: number) =>
-    [...designKeys.all, 'version', techCardId, versionNumber] as const,
   layer: (layerId: number) => [...designKeys.all, 'layer', layerId] as const,
 };
 
@@ -44,11 +42,15 @@ function isUnimplemented(error: unknown): boolean {
   return status === 404 || status === 501;
 }
 
+/**
+ * ПУСТАЯ ПОЛОСА — ответ карточке, чей сервер этих маршрутов не знает вовсе или ещё не ответил.
+ *
+ * ПЕРЕЧИСЛЕНА ЦЕЛИКОМ, БЕЗ `as` И БЕЗ РАСПАКОВКИ ПУСТОГО: недостача поля обязана краснеть здесь.
+ * Новое обязательное поле контракта — это вопрос «а что полоса показывает, пока его нет», и ответ
+ * на него принимает человек, а не приведение типа.
+ */
 const EMPTY_BAND: GetDesignBandResponse = {
   bench: [],
-  versionNumbers: [],
-  latestVersion: undefined,
-  journal: [],
   budget: undefined,
   references: [],
   layers: [],
@@ -61,6 +63,13 @@ const EMPTY_BAND: GetDesignBandResponse = {
   runs: [],
   batches: [],
   nextPageToken: '',
+  // ПОЛКИ АССЕТОВ КАРТОЧКИ (V-11) и метки, которые они оставили на флэтах. Пусто, а не
+  // `undefined`: «сервер про них не знает» и «на этой карточке их нет» рисуются одинаково —
+  // пустой полкой с живым плейсхолдером, — потому что завести ассет на старом бинаре всё равно
+  // нельзя, и полка, нарисованная иначе, обещала бы человеку разницу, которой он не может
+  // воспользоваться.
+  assets: [],
+  assetPlacements: [],
   // `undefined`, AND EXPLICITLY NOT `false`. This is the band handed to a card whose server does
   // not speak the routes at all, or one that has not answered yet — and `has_fabric_render` is the
   // mirror of the SERVER's own 3D gate (W-13). `false` here would be a claim we are not entitled
@@ -310,18 +319,6 @@ export function useDesignWrites(techCardId?: number) {
     onError,
   });
 
-  const recordIssue = useMutation({
-    mutationFn: (input: { versionNumber: number; action: string; clientRequestId: string }) =>
-      adminService.RecordDesignSheetIssue({
-        techCardId: techCardId ?? 0,
-        versionNumber: input.versionNumber,
-        action: input.action,
-        clientRequestId: input.clientRequestId,
-      }),
-    onSuccess: invalidate,
-    onError,
-  });
-
   return useMemo(
     () => ({
       registerUpload,
@@ -331,7 +328,6 @@ export function useDesignWrites(techCardId?: number) {
       setPictureSelected,
       splitPicture,
       setReferenceRole,
-      recordIssue,
       invalidate,
     }),
     [
@@ -342,36 +338,20 @@ export function useDesignWrites(techCardId?: number) {
       setPictureSelected,
       splitPicture,
       setReferenceRole,
-      recordIssue,
       invalidate,
     ],
   );
 }
 
 /**
- * A minted version, read whole and on demand. ARTIFACTS shows the LIVE document plus a «differs
- * from vN» plate; only printing or inspecting an old version pulls one of these, which is why it
- * is not folded into the band read.
- */
-export function useDesignSheetVersion(techCardId?: number, versionNumber?: number) {
-  return useQuery({
-    queryKey: designKeys.version(techCardId ?? 0, versionNumber ?? 0),
-    queryFn: () =>
-      adminService.GetDesignSheetVersion({
-        techCardId: techCardId ?? 0,
-        versionNumber: versionNumber ?? 0,
-      }),
-    enabled: !!techCardId && !!versionNumber && versionNumber > 0,
-    // A frozen version is immutable by construction; refetching it can only cost time.
-    staleTime: Infinity,
-  });
-}
-
-/**
  * `client_request_id` is the server's idempotency key: a repeated id returns the SAME row instead
- * of minting a phantom second one. It must therefore be minted once per user intent and survive a
+ * of creating a phantom second one. It must therefore be minted once per user intent and survive a
  * retry — generating it inside the mutation would defeat the entire mechanism, since a retry would
- * carry a fresh id and the server would honestly create a second version.
+ * carry a fresh id and the server would honestly create a second row.
+ *
+ * Every write of this band that a human can fire twice takes one: an upload registration, a split,
+ * a run. (The sheet's own version mint was the first reader of this rule and is gone; the rule is
+ * not — it belongs to the writes, not to that one act.)
  */
 export function newClientRequestId(): string {
   const c = globalThis.crypto;

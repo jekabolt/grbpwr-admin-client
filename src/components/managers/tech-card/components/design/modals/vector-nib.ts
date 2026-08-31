@@ -1,0 +1,204 @@
+import { simplifyPath } from 'ui/components/annotation/geometry';
+
+import { copyInsideSelection, deleteInsideSelection } from './vector-lasso';
+import type { VectorStroke } from './vector-strokes';
+
+/**
+ * КРУГЛЫЙ НИБ — ЛАСТИК И ШТАМП, и это ОДИН модуль, потому что это один жест.
+ *
+ * Оба инструмента — круг, проведённый рукой по холсту. Разница ровно в том, ЧТО делается с тем,
+ * что круг накрыл: ластик это выбрасывает, штамп это копирует со смещением «источник → курсор».
+ * Больше между ними нет ничего, поэтому здесь одна проводка следа и один построитель области, а
+ * две операции над штрихами взяты у лассо ЦЕЛИКОМ.
+ *
+ * ── ПОЧЕМУ ЛАСТИК РЕЖЕТ, А НЕ УДАЛЯЕТ ШТРИХИ ЦЕЛИКОМ ────────────────────────────────────────
+ *
+ * Прежний `erase` снимал штрих ЦЕЛИКОМ по клику, и это было не «другое решение», а другой предмет:
+ * снять объект целиком уже умеет `select` + ⌫. Ластик, повторяющий выбор-и-удаление, был вторым
+ * органом с той же работой, а настоящей — стереть КУСОК проведённой линии — не было ни у кого.
+ *
+ * Резать при этом нечем новым: `deleteInsideSelection` из vector-lasso.ts уже режет полилинию по
+ * границе области — с классификацией под-отрезков серединой, со склейкой соседей одного класса и с
+ * отсевом пыли. Второй резчик рядом был бы ЛОЖНЫМ РАСЩЕПЛЕНИЕМ: два куска кода, отвечающих на один
+ * вопрос «что внутри контура», разошлись бы первой же правкой, и «удалить лассо» начало бы резать
+ * иначе, чем «стереть ластиком», на той же линии. Поэтому ластик — это лассо, чья область бежит за
+ * рукой: след разбивается на КАПСУЛЫ (круг, протянутый вдоль отрезка), и каждая уходит в тот же
+ * резчик.
+ *
+ * ── ПОЧЕМУ ШТАМП КЛОНИРУЕТ ШТРИХИ, А НЕ ПИКСЕЛИ ─────────────────────────────────────────────
+ *
+ * Решает ФОРМАТ ДОКУМЕНТА, а не вкус. Слой хранит `strokes` — точки и кубические сегменты — и
+ * ничего больше; растра в нём нет вовсе. Клон по пикселям пришлось бы куда-то положить, и обе
+ * двери закрыты:
+ *   • в слой — значит завести в формате бинарный канал, который мгновенно съест потолок 512 КБ
+ *     (одна PNG-заплатка 200×200 больше всего документа) и потребует своей версии формата;
+ *   • в подложку — значит переписать байты БАЗОВОЙ картинки, а весь редактор построен на обратном:
+ *     «the picture underneath is never touched», и подпись минта пришпилена именно к этим байтам.
+ * Сверх того подложка — КАЛЬКА: её позволено перезалить другим файлом того же кроя, и штрих,
+ * записанный долями 0..1, это переживает, а пиксельная заплатка, приколоченная к прежнему растру,
+ * — нет.
+ *
+ * И снова не нужен новый копир: «взять то, что внутри области, и повторить со смещением» — это
+ * `copyInsideSelection`. Штамп отличается от «copy inside» лассо только тем, что область движется,
+ * а смещение задано парой «источник → курсор», а не фиксированным нуджем.
+ *
+ * КОПИЯ ВСЕГДА БЕРЁТСЯ ИЗ ИСХОДНОГО СПИСКА, а не из накопленного: иначе мазок, прошедший над своим
+ * же следом, клонировал бы клоны — та самая петля, из-за которой в фотошопе штамп «размазывает»
+ * при неудачно взятом источнике. Здесь она невозможна по построению.
+ */
+
+export type NibWorld = { w: number; h: number };
+
+/** Вершин на полукруглую каппу капсулы. Восемь: хорда 22.5° отходит от круга на 2% радиуса. */
+const CAP_STEPS = 8;
+
+/**
+ * Потолок числа капсул на один жест. Резчик — проход по всем штрихам, и след, разбитый на тысячу
+ * шагов, превратил бы отпускание кнопки в секунды. Длинный след прореживается сильнее, а не
+ * обрабатывается наполовину: стереть половину проведённого — хуже, чем стереть чуть грубее.
+ */
+const MAX_STEPS = 160;
+
+/** Наименьший размер ниба и наибольший, в пикселях платы (диаметр). */
+export const MIN_NIB = 4;
+export const MAX_NIB = 300;
+/** Ниб при входе — заметно крупнее нити, как и бывает у ластика. */
+export const DEFAULT_NIB = 48;
+
+export const clampNib = (n: number) =>
+  Math.round(Math.min(MAX_NIB, Math.max(MIN_NIB, Number.isFinite(n) ? n : DEFAULT_NIB)));
+
+/**
+ * КАПСУЛА: круг радиуса `r`, протянутый от `a` к `b`. Строится В МИРОВЫХ ПИКСЕЛЯХ и только потом
+ * переводится в доли кадра — кадр не квадратный, и круг, построенный прямо в долях, был бы
+ * эллипсом, вытянутым ровно во столько раз, во сколько плата выше своей ширины.
+ *
+ * Выпуклая по построению, и это важно: классификация точек идёт чёт-нечетом, а он на выпуклом
+ * контуре точен всегда. Самопересекающийся след (обычное дело, когда трут туда-сюда) не рождает
+ * невыпуклого многоугольника — он рождает несколько капсул, применяемых ПОДРЯД.
+ */
+export function nibCapsule(
+  a: [number, number],
+  b: [number, number],
+  r: number,
+  world: NibWorld,
+): [number, number][] {
+  const ax = a[0] * world.w;
+  const ay = a[1] * world.h;
+  const bx = b[0] * world.w;
+  const by = b[1] * world.h;
+  let dx = bx - ax;
+  let dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) {
+    // Точка, а не отрезок: капсула вырождается в круг, и направление берётся любое.
+    dx = 1;
+    dy = 0;
+  } else {
+    dx /= len;
+    dy /= len;
+  }
+  const base = Math.atan2(dy, dx);
+  const out: [number, number][] = [];
+  const put = (x: number, y: number) => out.push([x / world.w, y / world.h]);
+  for (let i = 0; i <= CAP_STEPS; i++) {
+    const t = base - Math.PI / 2 + (Math.PI * i) / CAP_STEPS;
+    put(bx + Math.cos(t) * r, by + Math.sin(t) * r);
+  }
+  for (let i = 0; i <= CAP_STEPS; i++) {
+    const t = base + Math.PI / 2 + (Math.PI * i) / CAP_STEPS;
+    put(ax + Math.cos(t) * r, ay + Math.sin(t) * r);
+  }
+  return out;
+}
+
+/**
+ * След ниба — парами «отрезок». Прореживание НЕ КРУПНЕЕ трети радиуса: капсула строится на
+ * СПРЯМЛЁННОМ отрезке, и порог, сравнимый с радиусом, оставил бы под накрытым следом полоски,
+ * которых человек уже не видел под нибом.
+ */
+function nibSteps(
+  path: [number, number][],
+  r: number,
+  world: NibWorld,
+): [[number, number], [number, number]][] {
+  if (!path.length) return [];
+  const eps = Math.max(1e-4, Math.min(r / 3 / world.w, 0.005));
+  const thin = simplifyPath(
+    path.map(([x, y]) => ({ x, y })),
+    eps,
+  );
+  const pts = thin.length ? thin : [{ x: path[0][0], y: path[0][1] }];
+  if (pts.length === 1) {
+    const p: [number, number] = [pts[0].x, pts[0].y];
+    return [[p, p]];
+  }
+  const stride = Math.max(1, Math.ceil((pts.length - 1) / MAX_STEPS));
+  const out: [[number, number], [number, number]][] = [];
+  for (let i = 0; i + stride < pts.length; i += stride) {
+    out.push([
+      [pts[i].x, pts[i].y],
+      [pts[i + stride].x, pts[i + stride].y],
+    ]);
+  }
+  // Хвост короче шага всё равно обязан быть стёрт — иначе конец мазка молча не срабатывает.
+  const last = out[out.length - 1];
+  const end = pts[pts.length - 1];
+  if (!last || last[1][0] !== end.x || last[1][1] !== end.y) {
+    const from = last ? last[1] : ([pts[0].x, pts[0].y] as [number, number]);
+    out.push([from, [end.x, end.y]]);
+  }
+  return out;
+}
+
+/**
+ * СТЕРЕТЬ ВДОЛЬ СЛЕДА. Возвращает новый список и признак «что-то изменилось» — тем же контрактом,
+ * что `deleteInsideSelection`, потому что это он и есть, применённый по капсуле за раз.
+ */
+export function eraseAlong(
+  strokes: VectorStroke[],
+  path: [number, number][],
+  radius: number,
+  world: NibWorld,
+): { next: VectorStroke[]; changed: boolean } {
+  let cur = strokes;
+  let changed = false;
+  for (const [a, b] of nibSteps(path, radius, world)) {
+    const res = deleteInsideSelection(cur, nibCapsule(a, b, radius, world));
+    if (res.changed) {
+      changed = true;
+      cur = res.next;
+    }
+  }
+  return { next: cur, changed };
+}
+
+/**
+ * ОТПЕЧАТАТЬ ВДОЛЬ СЛЕДА: то, что лежит под нибом СО СТОРОНЫ ИСТОЧНИКА (курсор минус смещение),
+ * копируется на сторону курсора. Возвращает РОЖДЁННЫЕ штрихи — вызывающий дописывает их к слою,
+ * как делает и «copy inside».
+ *
+ * Дубли снимаются по значению: соседние капсулы перекрываются нарочно (иначе мазок шёл бы
+ * пунктиром), и штрих, целиком уместившийся под нибом, попал бы в улов каждой из них.
+ */
+export function stampAlong(
+  strokes: VectorStroke[],
+  path: [number, number][],
+  offset: [number, number],
+  radius: number,
+  world: NibWorld,
+): VectorStroke[] {
+  const born: VectorStroke[] = [];
+  const seen = new Set<string>();
+  for (const [a, b] of nibSteps(path, radius, world)) {
+    const from: [number, number] = [a[0] - offset[0], a[1] - offset[1]];
+    const to: [number, number] = [b[0] - offset[0], b[1] - offset[1]];
+    for (const s of copyInsideSelection(strokes, nibCapsule(from, to, radius, world), offset)) {
+      const key = JSON.stringify(s);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      born.push(s);
+    }
+  }
+  return born;
+}

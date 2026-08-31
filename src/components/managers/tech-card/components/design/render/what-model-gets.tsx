@@ -17,8 +17,8 @@ import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
-import { openDoor } from '../mint-dialog';
-import { SILHOUETTE_VIEWS, viewLabel } from '../views';
+import { openDoor, openDoorAcrossKind } from '../doors';
+import { viewLabel } from '../views';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
@@ -28,10 +28,11 @@ import {
   colourSubtitle,
   colourSwatchHex,
   fabricStatement,
-  latestRenderByView,
   pictureThumb,
   renderSheetViews,
+  runOfPicture,
   stripProvenance,
+  threedSides,
 } from './model';
 
 /**
@@ -71,6 +72,30 @@ import {
 
 export type WhatModelGetsKind = 'render' | 'threed';
 
+/**
+ * The slice of a form callout the band reads. Deliberately a STRUCTURAL subset of `CalloutForm`
+ * rather than the schema type itself: every organ here only ever reads these seven fields, and
+ * naming the whole zod type would make this module refuse a callout that merely grew one.
+ *
+ * `posX` / `posY` are STRINGS on purpose — they are decimals on the wire and the form keeps them as
+ * typed, so the reader parses rather than assuming a number arrived.
+ *
+ * IT LIVES HERE BECAUSE ITS READERS DO. The type was declared in `mint-dialog.tsx`, a file that was
+ * only half about the mint; when the mint was removed the type would have gone down with it,
+ * although it never had anything to do with minting. The «what the model gets» pair — this module
+ * and its modal — are the only two readers left, so the type sits with them. A shared module for a
+ * single type would be the same mistake with a better name.
+ */
+export type CalloutLike = {
+  number?: number;
+  mediaId?: number;
+  description?: string;
+  part?: string;
+  dimensions?: string;
+  posX?: string;
+  posY?: string;
+};
+
 /** The dictionaries the two arms consult, resolved once by the caller's own hooks. */
 type Resolved = {
   colors: readonly common_Color[] | undefined;
@@ -108,7 +133,14 @@ export function WhatModelGetsRenderModal({
   // inside a form (a print root, a harness), and `useFormContext` answers `null` there while its
   // type promises it never does. There is no error boundary over this tab.
   const form = useFormContext<TechCardFormData>() as UseFormReturn<TechCardFormData> | null;
-  const garment = ((form?.getValues('concept') as string) ?? '').trim();
+  // `garmentDescription` (W-3), НЕ `concept`. Здесь стояло `concept`, и это разные документы:
+  // `concept` — проза, которая печатается для цеха и входит в подпись DESIGN, а `garmentDescription`
+  // — предложение, которое человек пишет ДЛЯ МОДЕЛИ и которое уходит в каждый прогон. Показывать
+  // одно под именем другого значит утверждать РЯДОМ С ЦЕНОЙ, что модель получит слова, которых она
+  // не получит, и одновременно прятать те, которые получит. Соседняя модалка это уже починила у
+  // себя (`modals/what-model-gets-modal.tsx:101`), а этот носитель остался с дефектом — и после
+  // V-16, где `concept` стал общей запиской доски, стал врать заметнее прежнего.
+  const garment = ((form?.getValues('garmentDescription') as string) ?? '').trim();
 
   const resolved: Resolved = {
     colors: dictionary?.colors,
@@ -201,7 +233,17 @@ export function WhatModelGetsRenderModal({
               variant='secondary'
               size='xs'
               onClick={() =>
-                openDoor('concept', 'the garment description is on STUDIO', showMessage)
+                /* ЧЕРЕЗ ВИД, А НЕ НА МЕСТЕ. Панель открыта со стороны FABRIC RENDER или 3D, а
+                   описание изделия живёт в INPUT — REFERENCES, то есть на FLAT: отсюда блок
+                   размонтирован, и `openDoor` честно ответил бы «не на этой вкладке», оставив
+                   переход человеку. Дверь закрывает панель, переводит студию и ждёт монтажа. */
+                openDoorAcrossKind(
+                  'garmentDescription',
+                  'flat',
+                  'the garment description is in INPUT — REFERENCES, on FLAT',
+                  showMessage,
+                  () => onOpenChange(false),
+                )
               }
             >
               edit the description ▸
@@ -392,8 +434,14 @@ function ThreedBody({
   resolved: Resolved;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
-  const byView = useMemo(() => latestRenderByView(band), [band]);
-  const present = SILHOUETTE_VIEWS.filter((view) => !!byView[view]).length;
+  /**
+   * ⚠ ЧИТАЕТСЯ РЕНДЕР-ВЕРСТАК, А НЕ ЛЕНТА (V-14). Инвентарь обязан называть ровно те картинки,
+   * которые уедут в сборку, а уедут плиты слотов `kind: render` — это отбирает сервер
+   * (`designSelectBench`). Панель, считавшая «последний рендер каждой стороны» по ленте, обещала
+   * человеку перед тратой денег не тот набор.
+   */
+  const sides = useMemo(() => threedSides(band), [band]);
+  const present = sides.filter((side) => !!side.picture).length;
 
   return (
     <>
@@ -402,24 +450,30 @@ function ThreedBody({
           flush
           action={
             <Text size='micro' variant='label' component='span'>
-              {present} of 4
+              {present} of 4 marked
             </Text>
           }
         >
           inputs — renders by view
         </GroupLabel>
-        {SILHOUETTE_VIEWS.map((view) => {
-          const plate = byView[view];
+        {sides.map((side) => {
+          const run = side.picture ? runOfPicture(band, side.picture) : null;
           return (
             <InventoryLine
-              key={view}
-              name={viewLabel(view)}
-              picture={plate?.picture}
+              key={side.view}
+              name={viewLabel(side.view)}
+              picture={side.picture}
               text={
-                plate ? (
-                  `r${plate.rrev} · ${colourLabel(plate.run.params?.colour, resolved.colors)}`
+                side.picture ? (
+                  [
+                    run?.rrev ? `r${run.rrev}` : '',
+                    run ? colourLabel(run.params?.colour, resolved.colors) : '',
+                    stripProvenance(band, side.picture),
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 ) : (
-                  <span className='text-error'>missing — blocks 3D</span>
+                  <span className='text-error'>not marked — blocks 3D</span>
                 )
               }
             />
@@ -443,12 +497,39 @@ function ThreedBody({
           </Text>
           <Text size='micro' component='span' className='min-w-0 flex-1'>
             {threed?.presentation === 'model'
-              ? `on ${modelCaptionOf(resolved.models, threed?.modelId) || '— no model chosen —'} · garment ${
+              ? `on ${bodyLine(resolved.models, threed)} · garment ${
                   resolved.sizeName(threed?.garmentSizeId ?? 0) || '— no size chosen —'
                 }`
               : 'in the air — no figure'}
           </Text>
         </div>
+        {threed?.presentation === 'model' && (
+          <div className='flex items-center gap-2 border-b border-hairline py-1'>
+            <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
+              the body
+            </Text>
+            {/* ЧТО ИЗ ЭТОГО ДОХОДИТ ДО МОДЕЛИ, СКАЗАНО ЗДЕСЬ, потому что ради этого панель и
+                открывают: слово о телосложении уезжает в промпт, а `model_id` — нет, у снимка нет
+                поля ни под имя модели, ни под её мерки. Человек, тратящий деньги, обязан знать,
+                какая половина его выбора управляет картинкой, а какая только записывает факт. */}
+            <Text size='micro' component='span' className='min-w-0 flex-1'>
+              {(threed?.bodyType ?? '').trim() ? (
+                <>
+                  build <b>{threed?.bodyType}</b> — travels to the model as a word.{' '}
+                </>
+              ) : (
+                <>no build stated — the generator picks one. </>
+              )}
+              {threed?.modelId ? (
+                <span className='text-labelColor'>
+                  the chosen model is recorded on the run and is not described to the generator
+                </span>
+              ) : (
+                <span className='text-labelColor'>no model named</span>
+              )}
+            </Text>
+          </div>
+        )}
         <div className='flex items-center gap-2 border-b border-hairline py-1'>
           <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
             fit
@@ -570,6 +651,24 @@ function modelCaptionOf(
 }
 
 /**
+ * «Vera K., a curvy build» / «a curvy build» / «Vera K.» / «— no body stated —».
+ *
+ * ОДИН ВОПРОС, ДВА РЕГИСТРА ОТВЕТА (V-15), поэтому и строка одна: панель повторяет то, что человек
+ * только что сказал на экране, а два отдельных поля здесь читались бы как два независимых решения.
+ */
+function bodyLine(
+  models: readonly common_Model[] | undefined,
+  threed?: ThreedDraft,
+): string {
+  const who = modelCaptionOf(models, threed?.modelId);
+  const build = (threed?.bodyType ?? '').trim();
+  if (who && build) return `${who}, a ${build} build`;
+  if (who) return who;
+  if (build) return `a ${build} build`;
+  return '— no body stated —';
+}
+
+/**
  * THE SAME FACTS AS PLAIN TEXT — what «copy as text» hands to a studio outside.
  *
  * ASSEMBLED FROM THE SAME VALUES THE PANEL DRAWS FROM, never from the DOM: a text built by walking
@@ -615,18 +714,24 @@ function plainText({
     return lines.join('\n');
   }
 
-  const byView = latestRenderByView(band);
+  const sides = threedSides(band);
   lines.push(
-    `inputs: ${SILHOUETTE_VIEWS.map((view) => {
-      const plate = byView[view];
-      return `${viewLabel(view)}=${plate ? `r${plate.rrev}` : 'MISSING'}`;
-    }).join(', ')}`,
+    `inputs: ${sides
+      .map((side) => {
+        if (!side.picture) return `${viewLabel(side.view)}=NOT MARKED`;
+        const rrev = runOfPicture(band, side.picture)?.rrev ?? 0;
+        return `${viewLabel(side.view)}=${rrev ? `r${rrev}` : 'marked'}`;
+      })
+      .join(', ')}`,
     `frames: ${threed?.frames ?? 0}`,
     threed?.presentation === 'model'
-      ? `presentation: on ${modelCaptionOf(resolved.models, threed?.modelId) || '—'} · garment ${
+      ? `presentation: on ${bodyLine(resolved.models, threed)} · garment ${
           resolved.sizeName(threed?.garmentSizeId ?? 0) || '—'
         }`
       : 'presentation: in the air',
+    threed?.presentation === 'model'
+      ? `build sent as a word: ${(threed?.bodyType ?? '').trim() || 'none — the generator picks'}`
+      : 'build: not applicable in the air',
     (threed?.fitOverride ?? '').trim()
       ? `fit override: ${threed?.fitOverride} (every frame is badged)`
       : 'fit override: none',

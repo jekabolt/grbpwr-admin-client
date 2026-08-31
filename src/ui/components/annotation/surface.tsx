@@ -175,6 +175,17 @@ export type AnnotationSurfaceProps = {
   halo?: boolean;
   cornerSlot?: ReactNode;
   /**
+   * НИЖНИЙ РЯД ОРГАНОВ КАДРА — симметрия к `cornerSlot`, и заведён он ровно по той же причине:
+   * место органа обязана назначать ПОВЕРХНОСТЬ, потому что только она знает, где кончается кадр.
+   * Без этого вызывающий писал бы свои `absolute` вокруг снимка и промахивался мимо рамки на
+   * величину легенды, которая рисуется ПОД кадром и в него не входит.
+   *
+   * Рисуется как ряд `justify-between`: первый ребёнок садится в левый нижний угол, последний — в
+   * правый. Вызывающий с одной ролью передаёт пустой `<span />` вместо второй, иначе единственный
+   * орган уедет влево — то есть роль сменит угол молча.
+   */
+  cornerSlotBottom?: ReactNode;
+  /**
    * КОРОБКА КАДРА БЕРЁТ ПРОПОРЦИИ У ЗАГРУЖЕННОЙ КАРТИНКИ, как только они известны, — поверх
    * `aspectRatio`-пропа. Нужен полосе фиксированной высоты (мудборд): у медиа без записанных
    * размеров проп несёт ФОЛБЭК, и `object-cover` на коробке чужих пропорций РЕЖЕТ снимок — а
@@ -339,6 +350,7 @@ export function AnnotationSurface({
   hideCallouts = false,
   halo = false,
   cornerSlot,
+  cornerSlotBottom,
   onBackgroundView,
   maxCallouts,
   onPlacedCountChange,
@@ -1871,6 +1883,11 @@ export function AnnotationSurface({
             />
           )}
           {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
+          {cornerSlotBottom && (
+            <div className='pointer-events-none absolute inset-x-1 bottom-1 z-[4] flex items-end justify-between gap-1'>
+              {cornerSlotBottom}
+            </div>
+          )}
         </div>
       </div>
 

@@ -9,7 +9,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
 import {
   mediaFullToViewerItem,
   mediaFullViewerSrc,
@@ -25,7 +24,8 @@ import { buildHideGuard, isPickablePicture } from '../band-feed';
 import { displayDetailName, readBench } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { clockStamp, pictureHandle, runHandle } from '../handles';
-import { recallDesignRun, useRecallHostMounted } from '../history-recall';
+import { RecallBenchIntake, RecallDoors } from '../history-recall';
+import { VectorModal } from '../modals';
 import { usePickMode } from '../pick-mode';
 import { PictureTile, useGalleryGroup } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
@@ -92,13 +92,18 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * of the page, i.e. T-17 would take back exactly what T-8 gives: «по всем картинкам из всех
  * генераций». See the group where it is declared, in the section below.
  *
- * RECALL COPIES, IT DOES NOT SHOW (T-10/T-11). The chip takes the run's pictures into INPUT —
- * REFERENCES and its words into the garment description, and from there they are ordinary
- * references the human edits like any other. There is no «recalled — run N» panel, no inventory of
- * what the run was given and no rerun door: a run starts only from GENERATION — FLAT → GENERATE.
- * The intake lives in the references block (`RecalledRunPrompt`, mounted there), so the chip is
- * offered only while that block is on screen — on the RENDER and 3D tabs it has nobody to hand the
- * pictures to, and a gesture with no receiver must not be drawn.
+ * RECALL ASKS, CLEARS AND ROUTES (V-12/V-13). The row draws no recall logic of its own any more —
+ * it mounts `RecallDoors`, and that organ owns all three of the owner's new statements: a question
+ * before the gesture, because it now REPLACES the flat prompt instead of topping it up; two doors,
+ * because «the pictures it was given» and «the pictures it produced» are different pictures and the
+ * old single door quietly handed back generated plates; and routing by the run's own kind, because
+ * a fabric render's input lives in INPUT — FLATS OF THIS CARD and not in the flat prompt. What T-10
+ * removed stays removed: no «recalled — run N» panel, no inventory of the snapshot, no rerun door —
+ * a run starts only from GENERATION — FLAT → GENERATE.
+ *
+ * AND THE PICTURES CAN BE DRAWN ON WITHOUT LEAVING (V-10). Every live tile carries the primitive's
+ * `edit` corner; saving there files a NEW picture that inherits this run's id, so the edit lands in
+ * THIS row beside the artefact it came from and can be marked into a slot like any other.
  */
 
 /** How many run rows one page of the history holds. The owner's number (T-17). */
@@ -143,7 +148,6 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
  */
 const HIDE_BLOCK_LONG: Record<HideBlockReason, string> = {
   in_slot: 'a picture of this run stands in a bench slot — unmark it there first',
-  in_version: 'a picture of this run is frozen into a minted sheet version and must stay printable',
   live_run_input: 'a run that has not finished is reading a picture of this run',
   live_crop_parent: 'a crop cut from a picture of this run still exists',
 };
@@ -215,6 +219,15 @@ function RunTile({
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
+  /**
+   * ПРАВКА ПРЯМО В ИСТОРИИ — V-10, дословно: «добавить функцию эдита в GENERATION HISTORY снизу
+   * слева что бы была кнопка эдит на ховер и там при эдите оно сохранялось в ту же строку где
+   * сгенеренный артефакт и потом можно было бы его замаркать».
+   *
+   * СОСТОЯНИЕ ЖИВЁТ У ПЛИТКИ, а не у строки: редактор открыт НАД КОНКРЕТНОЙ картинкой, и один
+   * флаг на строку означал бы, что открытие второй плитки молча меняет предмет правки.
+   */
+  const [editing, setEditing] = useState(false);
 
   const pictureId = picture.id ?? 0;
   const hidden = isPictureHidden(picture);
@@ -268,13 +281,11 @@ function RunTile({
           <CompositeMarks facts={facts} />
         </span>
       )}
-      {fitMismatch && (
-        // Bottom right is the primitive's `edit` corner and this tile has no edit door, so the
-        // corner is free. `pointer-events-none` keeps the zoom surface under it clickable.
-        <span className='pointer-events-none absolute bottom-1 right-1 z-20 bg-bgColor px-1 text-nano uppercase text-error'>
-          fit {runFit} ≠ card {cardFit}
-        </span>
-      )}
+      {/* ⚠ РАСХОЖДЕНИЕ ПОСАДКИ УЕХАЛО ИЗ УГЛА В ПОДПИСЬ, и это не перестановка ради красоты. Правый
+          нижний угол принадлежит роли `edit` примитива, и с V-10 у этой плитки такая роль ПОЯВИЛАСЬ:
+          два предмета в одном углу — это либо наезд, либо кнопка под ярлыком, который её глушит.
+          Само заявление не ослабло: оно и было текстом, а не органом, и в подписи стоит рядом с
+          происхождением — там, где читают факты о файле. */}
     </>
   );
 
@@ -290,6 +301,13 @@ function RunTile({
         {compositeTail(facts)}
         {mixed ? ` · ${mixed}` : ''}
       </Text>
+      {fitMismatch && (
+        // Слово, а не только цвет: система обязана читаться в монохроме, и «≠» здесь несёт смысл
+        // сама по себе. Обе величины названы — расхождение без второй половины ничего не значит.
+        <Text size='nano' component='span' className='truncate uppercase text-error'>
+          fit {runFit} ≠ card {cardFit}
+        </Text>
+      )}
     </>
   );
 
@@ -408,11 +426,56 @@ function RunTile({
               }
             : undefined
         }
+        /* ПРАВКА (V-10). ЗАКОН УГЛОВ ОСТАЁТСЯ ЗАКОНОМ: владелец просит орган «снизу слева на
+           ховер», и «на ховер снизу» здесь — про то, что орган тихий и нижний, а КАКОЙ из двух
+           нижних углов чей, решено кругом раньше и решено НАВСЕГДА («сплит должна быть снизу слева
+           я уже второй раз это прошу»). Сплит остаётся слева, правка встаёт справа — ровно так же,
+           как на плите верстака и в референсах. Одна плитка, нарушившая раскладку, вернула бы ту
+           самую «везде по разному», из-за которой углы вообще переехали в примитив.
+
+           ЧТО ЭТА ДВЕРЬ ДЕЛАЕТ С АРТЕФАКТОМ. Ничего с ним самим: слой правки — третий объект рядом
+           с базой, и «сохранить» рождает НОВУЮ картинку-сиблинга с `derived_from`. Сиблинг
+           наследует `run_id` базы, то есть встаёт В ТУ ЖЕ СТРОКУ ПРОГОНА — это и есть «сохранялось
+           в ту же строку где сгенеренный артефакт», и это свойство контракта, а не наша уборка.
+           Замаркать её потом можно обычным пикером под кадром: она такая же картинка полосы.
+
+           СКЛЕЙКА ДВЕРИ НЕ ПОЛУЧАЕТ, как не получает и пикера слота, и по той же причине: у неё
+           нет одного вида, рисование поверх дало бы такую же нерасслаиваемую склейку, и человек
+           получил бы вторую картинку, которую всё равно надо резать. Её единственная дверь —
+           разрез в левом углу. Со штампом `hidden` дверей нет вовсе, как и везде. */
+        onEdit={
+          !disabled && !hidden && !composite
+            ? {
+                onClick: () => setEditing(true),
+                ariaLabel: `edit ${handle} — draw over this picture`,
+                title:
+                  'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten',
+              }
+            : undefined
+        }
       >
         {overlays}
       </PictureTile>
       {caption}
       {footer && <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>}
+
+      {/* Редактор монтируется только раскрытым: он тянет слой правки и растр, и полсотни спящих
+          копий на странице истории — это полсотни лишних деревьев ради одной открытой.
+          `slot` НЕ ПЕРЕДАЁТСЯ НАРОЧНО: плитка истории — не слот верстака, и результат правки не
+          обязан никуда вставать. Машинная векторизация внутри редактора при этом честно откажет
+          («the machine reads the bench»), потому что читает она именно слот; рисование поверх
+          работает целиком. */}
+      {editing && (
+        <VectorModal
+          open
+          onOpenChange={setEditing}
+          techCardId={techCardId}
+          band={band}
+          base={picture}
+          slot={null}
+          disabled={disabled}
+        />
+      )}
     </div>
   );
 }
@@ -429,7 +492,6 @@ function RunRow({
   disabled,
   galleryKey,
   galleryIndexOf,
-  recallHosted,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -442,8 +504,6 @@ function RunRow({
   galleryKey: string;
   /** picture id → its offset in the section's gallery group. Absent = no showable address. */
   galleryIndexOf: Map<number, number>;
-  /** Is the block that takes a recall in on screen? See the chip below. */
-  recallHosted: boolean;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
@@ -484,27 +544,6 @@ function RunRow({
   const isVector = (run.kind ?? '').trim().toLowerCase() === 'vector';
   const status = runOutcomeNote(run);
 
-  /**
-   * WHEN THE RECALL IS OFFERED — THREE CONDITIONS, EACH THE NAME OF A DOOR THAT WOULD OTHERWISE
-   * OPEN ON NOTHING.
-   *
-   * `inputs` — a row served without a frozen snapshot has no pictures and no words to hand over;
-   * the gesture would report «nothing to reuse» on every press.
-   *
-   * NOT A VECTOR ROW — the owner's own exception (T-16, «рекола для генерации свг вектора не должно
-   * быть»): a redraw is started from the plate's editor and its input IS that plate, so «put the
-   * references back into the input» names a door this run never came through.
-   *
-   * A HOST ON SCREEN — the intake lives in INPUT — REFERENCES, and that block is drawn only on the
-   * FLAT tab. On RENDER and 3D this same history is mounted without it, and there the chip used to
-   * arm a selection nobody would ever take: the pictures went nowhere, no message was shown, and
-   * the chip stayed lit at «recalled» for the rest of the session. Not offering it is the honest
-   * posture — the gesture is not missing, its receiver is.
-   *
-   * A READ-ONLY CARD gets no chip either: the recall writes reference rows and roles, and the
-   * intake can only answer such a press with a refusal.
-   */
-  const recallable = !!run.inputs && !isVector && recallHosted && !disabled;
   const rerunOf = run.rerunOf ?? 0;
 
   const handle = runHandle(runId);
@@ -560,22 +599,16 @@ function RunRow({
         )}
         {archived && <Pill tone='mut'>archived</Pill>}
 
-        {/* RECALL — A ONE-SHOT COPY, NOT A MODE (T-10).
-            The chip used to be a toggle: pressing it selected the run and a panel elsewhere showed
-            its frozen prompt, pressing it again «stopped showing» — and the caption said exactly
-            that. Both halves are gone. The gesture now takes the run's pictures into the input and
-            its words into the description, the selection is consumed in the same tick by the intake,
-            and there is no state left to switch off; a `selected` chip here would light up for one
-            frame and lie for the rest. What it does is said in the title, in the order it happens,
-            and the answer to the press is the snackbar plus the rows that appear in the input. */}
-        {recallable && (
-          <Chip
-            onClick={() => recallDesignRun(techCardId, run)}
-            title='copy this run’s pictures into the input references and its words into the garment description. Nothing is launched and nothing on this row changes — a run starts only from GENERATION — FLAT → GENERATE.'
-          >
-            recall ▸
-          </Chip>
-        )}
+        {/* РЕКОЛ — ДВЕ ДВЕРИ И ВОПРОС ПЕРЕД НИМИ (V-12, V-13), и все три живут в `history-recall.tsx`,
+            а не здесь. Строка истории объявляет только МЕСТО жеста; что он берёт (референсы против
+            результата), куда кладёт (флэт, фабрик-рендер, 3D) и что при этом уничтожает — вопросы
+            одного механизма, и второй его экземпляр в раскрытой панели прогона разошёлся бы с этим
+            на первой же правке. Чипа «recalled» здесь нет и не будет: выбор потребляется приёмником
+            в том же тике, и подсветка горела бы ровно один кадр. */}
+        <RecallDoors techCardId={techCardId} band={band} run={run} disabled={disabled} />
+
+        {/* Ни кнопки RERUN, ни «THE PICTURES IT WAS GIVEN» здесь по-прежнему нет (T-10): прогон
+            запускается только из GENERATION — FLAT → GENERATE. */}
 
         {/* ARCHIVE IS THE ONE COLLAPSE VERB LEFT, AND IT TAKES THE WHOLE GENERATION (T-14). */}
         <span className='ml-auto'>
@@ -611,7 +644,7 @@ function RunRow({
         </span>
       </div>
 
-      {open && <RunPanel techCardId={techCardId} run={run} disabled={disabled} />}
+      {open && <RunPanel techCardId={techCardId} band={band} run={run} disabled={disabled} />}
 
       {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE. Its pictures are not hidden anywhere else — they
           simply stop taking up the screen until the row is unarchived. */}
@@ -722,12 +755,6 @@ export function GenerationHistory({
   const cardFit = (form?.watch('fit') ?? '').trim();
 
   const guard = useMemo(() => buildHideGuard(band), [band]);
-
-  /**
-   * Is the block that TAKES a recall on screen? The intake is mounted by INPUT — REFERENCES, which
-   * exists on the FLAT tab only; on RENDER and 3D the chip would arm a gesture with no receiver.
-   */
-  const recallHosted = useRecallHostMounted(techCardId);
 
   /**
    * The band's first page plus whatever continuations have been asked for, deduped by id: the
@@ -890,6 +917,14 @@ export function GenerationHistory({
         </CalloutBox>
       )}
 
+      {/* ПРИЁМНИК РЕКОЛА ДЛЯ РЕНДЕРА И 3D (V-12в). Он живёт ЗДЕСЬ, а не на экране фабрик-рендера, по
+          одной причине: история стоит на всех трёх вкладках, а экран рендера — только на своей, и
+          жест начинается ровно там, где человек видит строку render-прогона, то есть в том числе на
+          флэте. Видимого органа у него нет — он пишет в слоты верстака, которые показывает тот
+          экран, на который рекол же и переключает. Приёмник флэта отдельный и монтируется блоком
+          INPUT — REFERENCES: там у него есть карта разрешения media_id→файл, которой здесь нет. */}
+      <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
+
       {/* ЯКОРЬ ГРУППЫ. Он задаёт МЕСТО истории в полосе просмотрщика — между референсами сверху и
           верстаком снизу, — а внутренний порядок ряда берётся из списка группы, а не из того,
           сколько плиток сейчас смонтировано. */}
@@ -906,7 +941,6 @@ export function GenerationHistory({
             disabled={disabled || !speaks}
             galleryKey={galleryGroup.key}
             galleryIndexOf={gallery.indexOf}
-            recallHosted={recallHosted}
             onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
           />
         ))}

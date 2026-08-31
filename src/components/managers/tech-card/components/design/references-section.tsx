@@ -8,6 +8,7 @@ import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -24,6 +25,7 @@ import {
 import { RecalledRunPrompt } from './history-recall';
 import { PictureTile } from './picture-tile';
 import { useSplitToInput } from './split-to-input';
+import { DETAIL_VIEW, normaliseViewKey } from './views';
 import { useDesignWrites } from './use-design-band';
 
 /**
@@ -115,7 +117,7 @@ export function ReferencesSection({
   disabled?: boolean;
 }): JSX.Element {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const { setReferenceRole } = useDesignWrites(techCardId);
+  const { setReferenceRole, setBenchSlot } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
   const readOnly = !!disabled;
 
@@ -230,6 +232,28 @@ export function ReferencesSection({
 
   function setRole(mediaId: number, role: string) {
     const note = refOf.get(mediaId)?.note ?? '';
+    /* ─── РОЛЬ `detail` ЗАВОДИТ СЛОТ, А НЕ ТОЛЬКО ПОДПИСЫВАЕТ КАРТИНКУ ───
+     *
+     * Владелец (V-1): «я добавил в INPUT — REFERENCES реффренс с фото детали но GENERATION — FLAT
+     * его не оказалось и выбрать генерацию детали нельзя». Жест был ВЕРНЫЙ — в списке ролей стоит
+     * `detail`, он его и выбрал. Дефект в том, что выбор роли говорил только «модель увидит эту
+     * картинку как деталь» и НЕ заводил слота на верстаке, а форма генерации предлагает ровно
+     * слоты (`bench.details` → `detail_slot_ids` круга 4). Деталь существовала для модели и не
+     * существовала для человека.
+     *
+     * ПОЧЕМУ СЛОТ РОЖДАЕТСЯ ПУСТЫМ. Слот держит ПЛИТУ — технический чертёж детали, который и
+     * печатается на листе. Референс — это фотография, которую модель СМОТРИТ. Положить фотографию
+     * в слот значило бы напечатать снимок там, где обязан быть чертёж. Поэтому слот заводится
+     * пустым и ждёт того, что вернёт генерация, а фотография остаётся референсом с ролью.
+     *
+     * ИМЯ ОБЯЗАТЕЛЬНО, И ЭТО НЕ ФОРМАЛЬНОСТЬ: `detail_slot_ids` адресует деталь ИМЕНЕМ СЛОТА, и
+     * безымянный слот приезжает в промпт словом «detail» — ровно тем, от чего уходили в круге 4.
+     * Комментарий необязателен и едет ЗАПИСКОЙ РЕФЕРЕНСА: это и есть «что эта картинка добавляет»,
+     * поле уже существует и уже читается промптом. Второго места для тех же слов заводить нельзя. */
+    if (normaliseViewKey(role) === DETAIL_VIEW) {
+      setNamingDetail({ mediaId, note });
+      return;
+    }
     // СНЯТИЕ РОЛИ УНОСИТ ЗАПИСКУ, и это не наш выбор, а форма хранения: строка полосы И ЕСТЬ
     // существование роли, записка — её колонка. Раз цена не наша, тем более она обязана быть
     // названа ДО, а не обнаружена после: молчащий селект стёр бы набранные руками слова.
@@ -278,6 +302,8 @@ export function ReferencesSection({
   const pendingRuns = pendingRemove == null ? 0 : runsByMedia.get(pendingRemove) ?? 0;
   /** Снятие роли, которое уносит с собой набранную записку, — спрашивается отдельно. */
   const [pendingRoleClear, setPendingRoleClear] = useState<number | null>(null);
+  /** Референс, который назначают деталью: ждём имени (обязательного) и комментария. */
+  const [namingDetail, setNamingDetail] = useState<{ mediaId: number; note: string } | null>(null);
 
   function confirmRemove() {
     const mediaId = pendingRemove;
@@ -420,8 +446,13 @@ export function ReferencesSection({
         <label htmlFor={garmentId} className='sr-only'>
           garment description
         </label>
+        {/* `data-field` — ЯКОРЬ ДВЕРИ. `revealField` (`utils/field-errors.ts:226`) ищет поле по
+            `[data-field="<путь>"]`, и обычно этот штамп ставит `FormItem` из `ui/form`; здесь стоит
+            голая `Textarea`, поэтому штамп нужен руками. Без него дверь «edit the description ▸» из
+            панели WHAT THE MODEL GETS отвечает «it is not on this tab», стоя на той самой вкладке. */}
         <Textarea
           {...garment.field}
+          data-field='garmentDescription'
           id={garmentId}
           disabled={readOnly}
           value={garment.field.value ?? ''}
@@ -541,6 +572,38 @@ export function ReferencesSection({
           </Text>
         </div>
       </ConfirmationModal>
+
+      {/* ИМЯ ДЕТАЛИ СПРАШИВАЕТСЯ ДО ЗАПИСИ, А НЕ ПОСЛЕ. Слот без имени сервер отвергает
+          (`detail_name_required`), а безымянная деталь в промпте читается словом «detail» — то,
+          от чего уходили кругом раньше. Комментарий необязателен и уезжает ЗАПИСКОЙ РЕФЕРЕНСА:
+          поле «что эта картинка добавляет» уже есть и уже читается промптом, второго места для
+          тех же слов заводить нельзя. */}
+      <DetailNamingModal
+        open={namingDetail != null}
+        initialNote={namingDetail?.note ?? ''}
+        onCancel={() => setNamingDetail(null)}
+        onConfirm={(name, comment) => {
+          const target = namingDetail;
+          setNamingDetail(null);
+          if (!target) return;
+          // ДВЕ ЗАПИСИ, И ПОРЯДОК ВАЖЕН. Сначала роль с запиской — она и есть существование
+          // строки промпта; потом ПУСТОЙ слот с именем. Слот заводится пустым намеренно: он
+          // держит ЧЕРТЁЖ детали, а не фотографию, ради которой его завели.
+          writeRef(target.mediaId, DETAIL_VIEW, comment);
+          setBenchSlot.mutate(
+            {
+              slot: { viewKey: DETAIL_VIEW, kind: 'flat' },
+              pictureId: 0,
+              expectedSlotRev: 0,
+              newDetailName: name,
+            },
+            {
+              onSuccess: () =>
+                showMessage(`detail “${name}” added — tick it in generation — flat`, 'success'),
+            },
+          );
+        }}
+      />
 
       <ConfirmationModal
         open={pendingRoleClear != null}
@@ -760,5 +823,98 @@ function ReferenceCell({
         />
       </div>
     </div>
+  );
+}
+
+
+/**
+ * ИМЯ ДЕТАЛИ И НЕОБЯЗАТЕЛЬНЫЙ КОММЕНТАРИЙ.
+ *
+ * Владелец (V-1): «когда мы выбираем деталь нужно кратко обозвать деталь фри текстом обязательным
+ * и так же снизу еще был не обязательный коммент». Имя обязательно не по вкусу, а по устройству:
+ * лист цитирует деталь по имени, а промпт адресует её слотом — безымянная деталь неотличима от
+ * любой другой на бумаге и приезжает к модели словом «detail».
+ *
+ * ПОДТВЕРЖДЕНИЕ НЕДОСТУПНО, ПОКА ИМЯ ПУСТО, и рядом сказано почему. Кнопка, которая нажимается и
+ * молча ничего не делает, читается как сломанная.
+ */
+function DetailNamingModal({
+  open,
+  initialNote,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  initialNote: string;
+  onCancel: () => void;
+  onConfirm: (name: string, comment: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const [comment, setComment] = useState('');
+  const [seenOpen, setSeenOpen] = useState(false);
+
+  // Поля сбрасываются на КАЖДОЕ открытие, а не на монтировании: диалог живёт весь сеанс, и
+  // второй референс унаследовал бы имя первого.
+  if (open !== seenOpen) {
+    setSeenOpen(open);
+    if (open) {
+      setName('');
+      setComment(initialNote);
+    }
+  }
+
+  const ready = name.trim().length > 0;
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={(next) => !next && onCancel()}
+      onConfirm={() => ready && onConfirm(name.trim(), comment.trim())}
+      onCancel={onCancel}
+      title='name this detail'
+      confirmLabel='add the detail'
+      confirmDisabled={!ready}
+      width='sm'
+    >
+      <div className='space-y-3'>
+        <div className='space-y-1'>
+          <label htmlFor='detail-name' className='block'>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
+              name — the sheet cites it by this
+            </Text>
+          </label>
+          <Input
+            name='detail-name'
+            id='detail-name'
+            value={name}
+            maxLength={60}
+            autoFocus
+            placeholder='collar, patch pocket, cuff…'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+          />
+        </div>
+        <div className='space-y-1'>
+          <label htmlFor='detail-comment' className='block'>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
+              comment — optional, goes to the model with the picture
+            </Text>
+          </label>
+          <Textarea
+            name='detail-comment'
+            id='detail-comment'
+            value={comment}
+            maxLength={500}
+            autoGrow={false}
+            placeholder='+ what this picture adds'
+            className='h-20 resize-none'
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setComment(e.target.value)}
+          />
+        </div>
+        <Text size='nano' variant='label' component='p'>
+          The slot is created empty: it holds the technical drawing of the detail, and this
+          photograph stays a reference the model looks at.
+        </Text>
+      </div>
+    </ConfirmationModal>
   );
 }
