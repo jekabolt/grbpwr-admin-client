@@ -15623,8 +15623,17 @@ export type UpsertDesignAssetResponse = {
   asset: common_DesignAsset | undefined;
 };
 
+// DeleteDesignAssetRequest names BOTH the shelf row and the card it is being deleted from.
+// ⚠ THE CARD IS NOT A SECOND COPY OF A FACT THE ID ALREADY CARRIES — it is the CALLER'S BELIEF
+// ABOUT WHICH SHELF WALL IS ON THE SCREEN, and the server refuses when the two disagree. Without
+// it a client holding an asset id of a different card — a stale list, a second tab, a card
+// switched under an open panel — deleted somebody else's row and, by ON DELETE CASCADE, every mark
+// that row had left on their flats, with no error and nothing on either screen to notice it by.
+// Every other verb of this band already states the card for exactly this reason;
+// SetDesignAssetPlacement states it two messages down.
 export type DeleteDesignAssetRequest = {
   assetId: number | undefined;
+  techCardId: number | undefined;
 };
 
 export type DeleteDesignAssetResponse = {
@@ -15648,8 +15657,12 @@ export type SetDesignAssetPlacementResponse = {
   placement: common_DesignAssetPlacement | undefined;
 };
 
+// DeleteDesignAssetPlacementRequest names BOTH the mark and the card it is being taken off.
+// See DeleteDesignAssetRequest for why the card is stated; the scoping runs THROUGH the asset,
+// since a placement row deliberately carries no tech_card_id.
 export type DeleteDesignAssetPlacementRequest = {
   placementId: number | undefined;
+  techCardId: number | undefined;
 };
 
 export type DeleteDesignAssetPlacementResponse = {
@@ -16844,6 +16857,8 @@ export interface AdminService {
   // are the asset's own statements about itself and have no meaning once it is gone. A pattern
   // built from this asset SURVIVES with its parentage cleared; it still carries a picture and a
   // repeat, which is a usable instruction on its own.
+  // THE CARD IS NAMED IN THE PATH, and it is not decoration: the server refuses an asset_id that
+  // belongs to a DIFFERENT card. NotFound.
   DeleteDesignAsset(request: DeleteDesignAssetRequest): Promise<DeleteDesignAssetResponse>;
   // SetDesignAssetPlacement puts ONE mark on ONE flat: this asset, this drawing, here. Creates when
   // placement_id is 0, moves it otherwise.
@@ -16852,6 +16867,8 @@ export interface AdminService {
   SetDesignAssetPlacement(request: SetDesignAssetPlacementRequest): Promise<SetDesignAssetPlacementResponse>;
   // DeleteDesignAssetPlacement takes ONE mark off a flat. The asset stays on its shelf: unmarking
   // and removing are different acts, exactly as unmarking a bench slot is not deleting the plate.
+  // THE CARD IS NAMED IN THE PATH here too, and the mark is scoped to it THROUGH ITS ASSET — a
+  // placement row carries no tech_card_id of its own by design. NotFound on a mark of another card.
   DeleteDesignAssetPlacement(request: DeleteDesignAssetPlacementRequest): Promise<DeleteDesignAssetPlacementResponse>;
   // GetDesignEditLayer reads ONE layer WITH its strokes. It exists because GetDesignBand
   // deliberately lists the layers WITHOUT them: 512 KB is the cap per LAYER, a card may hold
@@ -23095,10 +23112,13 @@ export function createAdminServiceClient(
       }) as Promise<UpsertDesignAssetResponse>;
     },
     DeleteDesignAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
       if (!request.assetId) {
         throw new Error("missing required field request.asset_id");
       }
-      const path = `api/admin/design/asset/${request.assetId}`; // eslint-disable-line quotes
+      const path = `api/admin/tech-card/${request.techCardId}/design/asset/${request.assetId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
@@ -23135,10 +23155,13 @@ export function createAdminServiceClient(
       }) as Promise<SetDesignAssetPlacementResponse>;
     },
     DeleteDesignAssetPlacement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
       if (!request.placementId) {
         throw new Error("missing required field request.placement_id");
       }
-      const path = `api/admin/design/asset-placement/${request.placementId}`; // eslint-disable-line quotes
+      const path = `api/admin/tech-card/${request.techCardId}/design/asset-placement/${request.placementId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;

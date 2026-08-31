@@ -67,8 +67,18 @@ export function useAssetWrites(techCardId: number) {
     onError,
   });
 
+  /**
+   * УДАЛЕНИЕ НАЗЫВАЕТ КАРТОЧКУ, И ЭТО НЕ ЛИШНЕЕ ПОЛЕ.
+   *
+   * `techCardId` здесь — не копия факта, который и так известен серверу по `assetId`, а НАШЕ
+   * УТВЕРЖДЕНИЕ О ТОМ, ЧЬЮ СТЕНУ ПОЛОК МЫ СЕЙЧАС ПОКАЗЫВАЕМ. Сервер сверяет одно с другим и
+   * отказывает, когда они расходятся. Расходятся они ровно там, где заметить это нечем: список,
+   * отрендеренный до перехода на другую карточку, вторая вкладка, карточка, переключённая под
+   * открытой панелью, — раньше такой клик молча сносил чужую строку и КАСКАДОМ все её метки на
+   * чужих флэтах, отвечая OK.
+   */
   const deleteAsset = useMutation({
-    mutationFn: (assetId: number) => adminService.DeleteDesignAsset({ assetId }),
+    mutationFn: (assetId: number) => adminService.DeleteDesignAsset({ techCardId, assetId }),
     onSuccess: invalidate,
     onError,
   });
@@ -94,8 +104,10 @@ export function useAssetWrites(techCardId: number) {
     onError,
   });
 
+  /** Снятие метки называет карточку по тому же доводу; у самой метки своего tech_card_id нет. */
   const deletePlacement = useMutation({
-    mutationFn: (placementId: number) => adminService.DeleteDesignAssetPlacement({ placementId }),
+    mutationFn: (placementId: number) =>
+      adminService.DeleteDesignAssetPlacement({ techCardId, placementId }),
     onSuccess: invalidate,
     onError,
   });
