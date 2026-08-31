@@ -341,7 +341,11 @@ export function GenerationForm({
               selected={on}
               pressed={on}
               disabled={writesOff}
-              title='a described detail — ticked, it comes back as its own picture'
+              /* ПОДСКАЗКА НАЗЫВАЕТ ПРЕДМЕТ, А НЕ ПЕРЕСКАЗЫВАЕТ МЕХАНИКУ. Здесь стояло «ticked, it
+                 comes back as its own picture» — то же самое, что владелец снял абзацем выше
+                 (T-2, «этот текст не нужен»), только в подсказке. Просьба была про мысль, а не
+                 про место, где она написана. */
+              title={`detail described in the pictures: ${displayDetailName(bench.details, d)}`}
               onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
             >
               detail · {displayDetailName(bench.details, d)}
