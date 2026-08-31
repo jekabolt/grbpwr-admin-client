@@ -150,6 +150,7 @@ export function SplitModal({
   handle,
   open,
   onOpenChange,
+  forInput,
   onSplit,
 }: {
   techCardId: number;
@@ -158,6 +159,12 @@ export function SplitModal({
   handle?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Едут ли кропы В ПРОМПТ. Не косметика и не удобство: по этому слову сервер решает, писать ли
+   * им роли `design_reference`. Разрез на верстаке — раскладка видов по слотам, и промпт он
+   * пополнять не должен (T-15); разрез из блока входа — должен.
+   */
+  forInput: boolean;
   /**
    * Кропы удавшегося разреза — вызывающему. Полоса и так перечитается (`invalidate` в шве
    * записи), но вызывающему сплита «во вход» нужны САМИ кропы с их `ghost_view`, чтобы завести
@@ -296,6 +303,7 @@ export function SplitModal({
         pictureId: picture.id ?? 0,
         clientRequestId: requestIdRef.current,
         frames: frames.map(toWireFrame),
+        forInput,
       },
       {
         onSuccess: (data) => {

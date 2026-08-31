@@ -59,7 +59,12 @@ export type BudgetRead = {
   reserved: number;
   cap: number;
   currency: string;
-  /** `today $0.41 of $2.00` — the phrase the prototype's generate row ends with. */
+  /**
+   * `today $0.41 of $2.00` — дневная полоса. T-12 (круг 4): форма генерации её больше НЕ печатает
+   * и в отказ гейта не подставляет — человеку показывается только цена самого прогона, на его
+   * строке в истории. Поле живо, потому что его всё ещё читает экран рекола
+   * (`history-recall.tsx`); снятие полосы там — за веткой, владеющей тем файлом.
+   */
   line: string;
   /** `spent + reserved >= cap`. The gate the SERVER applies, read the same way here. */
   exhausted: boolean;

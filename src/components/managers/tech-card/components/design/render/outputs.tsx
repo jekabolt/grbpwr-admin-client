@@ -2,6 +2,7 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useMemo, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
@@ -114,6 +115,15 @@ export function OutputsSection({
               emphasis={chosen}
               src={pictureThumb(picture)}
               alt={`${noun} ${picture.ordinal ?? ''}`}
+              /* Выход прогона встаёт в ОБЩИЙ ряд просмотрщика студии. Без этой строки плитка
+                 рисовалась общим примитивом, но кадра в ряд не клала — то есть зума у неё не было
+                 вовсе, и «листать по всем картинкам» (T-8) обрывалось ровно на готовых рендерах,
+                 ради которых экран и открывают. */
+              gallery={
+                picture.media && mediaFullViewerSrc(picture.media)
+                  ? mediaFullToViewerItem(picture.media)
+                  : undefined
+              }
               badge={chosen ? 'selected' : undefined}
               lines={[`run ${run.id ?? '—'} · ${shape}`, stripProvenance(band, picture)]}
               action={

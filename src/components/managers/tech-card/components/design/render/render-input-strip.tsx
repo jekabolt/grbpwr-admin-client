@@ -2,7 +2,7 @@ import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -33,6 +33,16 @@ import { CELL_WIDTH, Strip, StripCell, StripDivider } from './strip-cell';
  * and feeds the render exactly like one. That is why the classification refuses a picture only on
  * positive evidence that it is an OUTPUT of the machine (see `isFlatCandidate`), and admits
  * everything else.
+ *
+ * ЭТОТ ЭКРАН БОЛЬШЕ НЕ ДЕРЖИТ СВОЕГО ПРОСМОТРЩИКА (T-8). Здесь стоял свой `MediaViewer` со своим
+ * рядом, собранным из плит ЭТОЙ полосы, и своя угловая кнопка `zoom`, нарисованная руками. Значит
+ * зум листал четыре флэта и упирался в край — до референсов, истории генераций и верстака из него
+ * было не добраться, хотя владелец просил ровно обратного: «что бы можно было в зум вью по всем
+ * картинкам из всех генераций итерироваться не только этой».
+ *
+ * Теперь ячейка объявляет только КАДР (`gallery`), а показывает его ОДИН `PictureGalleryProvider`
+ * на всю студию (смонтирован в `studio-tab.tsx`). Ряд собирают сами плитки и сортируются по
+ * порядку в документе, поэтому человек листает ровно то, что видит.
  */
 
 /** Radix forbids an empty item value, and an empty one reaching `Select.Root` shows a placeholder
@@ -49,7 +59,6 @@ export function RenderInputStrip({
   disabled?: boolean;
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
-  const viewer = useMediaViewer();
 
   const sides = useMemo(() => benchSides(band), [band]);
   const others = useMemo(() => unmarkedFlats(band), [band]);
@@ -58,12 +67,9 @@ export function RenderInputStrip({
   /** Which cell a write is in flight for — a shared `isPending` would say «saving» on all of them. */
   const [busy, setBusy] = useState<string | null>(null);
 
-  /** Everything with an address, in the order the strip draws it — the viewer pages the same list. */
-  const viewerPictures: common_DesignPicture[] = [
-    ...marked.map((side) => side.picture as common_DesignPicture),
-    ...others,
-  ].filter((picture) => !!picture.media);
-  const viewerItems = viewerPictures.map((picture) => mediaFullToViewerItem(picture.media!));
+  /** Кадр одной картинки для общего ряда студии, или ничего — у безадресной плиты зума нет. */
+  const frameOf = (picture: common_DesignPicture) =>
+    picture.media ? mediaFullToViewerItem(picture.media) : undefined;
 
   const mark = (picture: common_DesignPicture, view: string) => {
     const side = sides.find((s) => s.view === view);
@@ -103,7 +109,6 @@ export function RenderInputStrip({
       <Strip>
         {marked.map((side) => {
           const picture = side.picture!;
-          const index = viewerPictures.indexOf(picture);
           return (
             <StripCell
               key={`slot-${side.view}`}
@@ -111,20 +116,13 @@ export function RenderInputStrip({
               src={pictureThumb(picture)}
               alt={viewLabel(side.view)}
               badge={viewLabel(side.view)}
-              corner={
-                index >= 0 ? (
-                  <button
-                    type='button'
-                    onClick={() => viewer.openAt(index)}
-                    className='border border-borderColor bg-bgColor px-1 py-px uppercase hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                  >
-                    <Text size='nano' variant='uppercase' component='span'>
-                      zoom
-                    </Text>
-                  </button>
-                ) : undefined
-              }
+              gallery={frameOf(picture)}
               lines={[`in slot · ${viewLabel(side.view)}`, stripProvenance(band, picture)]}
+              /* «unmark» ОСТАЁТСЯ СЛОВОМ В ПОДВАЛЕ, А НЕ УГЛОВЫМ ✕ ПРИМИТИВА, и это не отступление
+                 от общего закона углов. ✕ примитива означает «убрать картинку», а здесь картинка
+                 никуда не девается: пустеет СЛОТ, а плита остаётся на карточке, справа от линии.
+                 Глифом эти два акта неразличимы, и на выпущенной карточке цена ошибки — потерянная
+                 работа. */
               action={
                 disabled ? undefined : (
                   <Button
@@ -187,26 +185,13 @@ export function RenderInputStrip({
         )}
 
         {others.map((picture) => {
-          const index = viewerPictures.indexOf(picture);
           const provenance = stripProvenance(band, picture);
           return (
             <StripCell
               key={`pic-${picture.id}`}
               src={pictureThumb(picture)}
               alt={provenance}
-              corner={
-                index >= 0 ? (
-                  <button
-                    type='button'
-                    onClick={() => viewer.openAt(index)}
-                    className='border border-borderColor bg-bgColor px-1 py-px uppercase hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                  >
-                    <Text size='nano' variant='uppercase' component='span'>
-                      zoom
-                    </Text>
-                  </button>
-                ) : undefined
-              }
+              gallery={frameOf(picture)}
               lines={['not marked', provenance]}
               action={
                 disabled ? undefined : (
@@ -256,14 +241,6 @@ export function RenderInputStrip({
           newest page; older ones are still on the card and still in their slots.
         </Text>
       )}
-
-      <MediaViewer
-        items={viewerItems}
-        index={viewer.index}
-        open={viewer.open}
-        onOpenChange={viewer.onOpenChange}
-        onIndexChange={viewer.onIndexChange}
-      />
     </Section>
   );
 }

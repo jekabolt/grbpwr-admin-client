@@ -1,56 +1,82 @@
 import type {
   GetDesignBandResponse,
-  common_DesignMoodCallout,
   common_DesignRun,
+  common_MediaFull,
 } from 'api/proto-http/admin';
-import { useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { AnnotationSurface, type SurfaceCallout } from 'ui/components/annotation/surface';
-import {
-  annotationColorFromWire,
-  annotationKindFromWire,
-} from 'ui/components/annotation/wire';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useFormContext } from 'react-hook-form';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
-import { InertDoor } from './bench-slot';
-import { serverSpeaksDesign } from './capability';
+import type { TechCardFormData } from '../schema';
 import { runHandle } from './handles';
-import { decimalToNumber, readBudget } from './generation/money';
-import { Thumb, thumbUrl } from './generation/thumb';
-import { viewsLine } from './generation/run-state';
-import { useStartRun } from './generation/use-generation';
-import { viewLabel } from './views';
+import {
+  INPUT_MAX,
+  REFERENCE_KIND,
+  appendBoardPictures,
+  isInputRow,
+  type BoardItem,
+} from './mood-board';
+import { useDesignWrites } from './use-design-band';
+import { DESIGN_VIEW_KEYS, normaliseViewKey } from './views';
 
 /**
- * RECALLING A PAST RUN — «show me what I asked that time, I may want it again».
+ * RECALL — ЭТО ЖЕСТ «ВОЗЬМИ ЭТО СЕБЕ», А НЕ ЭКРАН «ПОСМОТРИ, ЧТО БЫЛО».
  *
- * W-7 in the owner's words: pick a previous generation and the INPUT — REFERENCES block shows OUR
- * PROMPT — the pictures that were fed, their descriptions and the markup — in case we want to rerun
- * it. So the gesture lives on the history row and the ANSWER is drawn wherever this component is
- * mounted, which is meant to be inside the references block.
+ * И РАЗ ЭТО «ВОЗЬМИ», ТО ЭТО ЗАПИСЬ, И СКАЗАТЬ ЭТО НАДО ПЕРВЫМ ДЕЛОМ. Нажатие заводит строки
+ * референсов в форме карточки (`shouldDirty`), может заполнить описание изделия и посылает
+ * `SetDesignReferenceRole` за каждую заведённую строку. Ни одно из этого не откатывается само.
+ * Всякая подпись, обещающая «показать, что было» или «ничего не меняет», описывает орган, которого
+ * здесь нет с тех пор, как панель снимка снесли по T-10; такие подписи ещё стоят в чужих
+ * `generation-history.tsx` и `run-panel.tsx` и подлежат правке их дорожками.
  *
- * NOTHING ON THE CARD IS TOUCHED BY RECALLING. This is a viewer over a frozen snapshot, not a
- * restore: it does not re-tick views, does not re-attach references, does not rewrite the
- * description. A «restore» would silently overwrite the card the human is standing in, and the
- * moment they then generated, the history would show inputs that never existed together.
+ * Владелец, круг 4, пункт 10, дословно: «когда мы нажимаем на RECALL ▸ в GENERATION HISTORY у нас
+ * в INPUT — REFERENCES появляются поля RECALLED — RUN 3; ASKED; WORDS; VIEWS; THE PICTURES IT WAS
+ * GIVEN; THE PLATES IT WAS GIVEN и тд. это не нужно нужно только переиспользование картинок и
+ * промптов которые были записаны и больше ничего. мы просто добавляем те картинки и тексты которые
+ * были и дальше пользователь решает что делать а в разделе INPUT — REFERENCES нам вообще НИКОГДА
+ * не нужны отображения THE PICTURES IT WAS GIVEN THE PLATES IT WAS GIVEN. так же на рекол в этом
+ * разделе не должно быть кнопки RERUN THIS RUN ран мы можем сделать только из GENERATION — FLAT ->
+ * GENERATE». И пунктом 11: «INPUT — REFERENCES статичны там только референсы и тексты промпта все
+ * остальное там не нужно».
  *
- * THE RERUN IS THE SERVER'S JOB, AND WHAT TRAVELS IS A RUN NUMBER. `rerun_of_run_id` names the row
- * to repeat and the server re-reads THAT ROW'S own frozen snapshot to assemble the new run's
- * inputs. The alternative — this client rebuilding the inputs out of the snapshot and posting them
- * as a fresh request — is refused on purpose: inputs a caller supplies are a claim, and the history
- * would be able to assert a composition that was never fed to anything.
+ * ЧТО ЭТО ОТМЕНЯЕТ. Здесь стояла панель `RecalledRunPrompt`: заголовок «recalled — run N», строки
+ * `asked` / `words` / `views · layout`, опись «the pictures it was given» с замороженной разметкой
+ * на каждой картинке, опись «the plates it was given», опись доски и кнопка `rerun this run ▸` с
+ * полем `ask` и остатком дневного бюджета. Всё это снято ЦЕЛИКОМ, а не спрятано за условием:
+ * пункт 11 говорит не «показывай реже», а «раздел статичен».
  *
- * WHAT DOES TRAVEL FROM HERE IS THE QUESTION, NOT THE INPUTS: `params` (the views and layout that
- * run asked for) and `ask` (the delta phrase, editable — the contract calls a rerun with a new
- * phrase the ordinary case, and it is what makes this a rerun rather than a replay). The two are
- * client-written by design; the inputs never are.
+ * ЧТО ОСТАЛОСЬ ВМЕСТО ПАНЕЛИ. Тот же жест на строке истории теперь ПОПОЛНЯЕТ обычный вход:
+ * картинки прогона встают обычными строками референсов, а его слова — в описание изделия. Дальше
+ * это обычные референсы, которые человек правит как всякие другие; никакого «вспомненного
+ * прогона» как отдельной сущности на экране больше нет.
  *
- * WHY A MODULE STORE. Exactly the reason `history-question.ts` gives: the history row and the
- * references block are siblings under a composer neither of them owns, and a selection that has to
- * cross that seam needs no provider and no common parent to do it.
+ * КАКИЕ КАРТИНКИ ПЕРЕНОСЯТСЯ — ВСЕ, КОТОРЫЕ ПРОГОН ПОЛУЧИЛ. Снимок держит вход двумя списками,
+ * `refs` и `slots` (плиты верстака), и у render-прогона первый пуст закономерно, а весь вход лежит
+ * во втором. Читать один `refs` значило бы отдавать невоспроизводимый вход и говорить «kept no
+ * pictures» про запись с двумя плитами. Сборка ряда и дедупликация — в `keptPictures` ниже.
+ *
+ * ПОЧЕМУ РОЛИ ВСЁ-ТАКИ ЕДУТ ВМЕСТЕ С КАРТИНКАМИ. Референс без роли в промпт не идёт вовсе
+ * («not in prompt»), поэтому «переиспользование картинок» без ролей означало бы добавить десяток
+ * картинок, которые ничего не делают, и заставить человека заново собрать ту самую композицию,
+ * ради переиспользования которой он и нажал. Роль ставится ТОЛЬКО картинке, которой этот жест
+ * только что завёл строку и у которой роли на карточке ещё нет: чужую роль и чужую записку рекол
+ * не трогает ни при каких данных.
+ *
+ * ПОЧЕМУ ЗА ОПИСАНИЕ СПРАШИВАЮТ. Описание изделия ОДНО на карточку, и подстановка чужих слов
+ * поверх набранных — уничтожение текста, который нигде не хранится. Пустое поле заполняется молча
+ * (терять нечего), непустое — только после вопроса, который эти слова показывает.
+ *
+ * ЧТО СОХРАНИЛОСЬ ИЗ ПРЕЖНЕГО МЕХАНИЗМА, И ПОЧЕМУ ИМЕННО ТАК. Модульный стор ниже: строка истории
+ * и блок референсов — соседи под композитором, которым не владеет ни один из них, и жест,
+ * пересекающий этот шов, обходится без провайдера и общего родителя. Выбор теперь ЖИВЁТ ОДИН
+ * ТИК — приёмник снимает его сразу, как только взял, — поэтому чип в истории сам возвращается из
+ * «recalled» в «recall ▸», и состояние «выбранный прогон» на экране не залипает.
+ *
+ * ИМЯ ЭКСПОРТА `RecalledRunPrompt` ОСТАВЛЕНО НАРОЧНО: его монтирует чужой `generation-history.tsx`
+ * (ветка B), и переименование сломало бы сборку чужой ветки. Имя — след снесённого органа, а не
+ * сам орган; снять его — дело оркестратора после слияния веток.
  */
 
 /* ────────────────────────────── the selection ────────────────────────────── */
@@ -77,11 +103,40 @@ function subscribe(listener: () => void): () => void {
  * THE ROW ITSELF IS STORED, not its id, and that is not laziness: `DesignInputSnapshot` is frozen
  * at launch and can never change afterwards, so the copy the history was already given is exactly
  * as true as anything `GetDesignRun` would hand back. Re-reading would buy a request and no fact.
+ *
+ * ЖЕСТ БЕЗ ПРИЁМНИКА НЕ КОПИТСЯ, И ЭТО ГЛАВНОЕ ПРАВИЛО ЭТОГО МОДУЛЯ. Приёмник живёт в блоке
+ * INPUT — REFERENCES, а блок этот рисуется ТОЛЬКО на вкладке `flat — sheet` (`studio-tab.tsx`).
+ * Раньше выбор ложился в карту независимо от того, есть ли кому его взять: с FABRIC RENDER чип
+ * загорался «recalled», на экране не менялось ничего — а при следующем заходе на FLAT приёмник
+ * монтировался и ВНЕЗАПНО забирал прогон, заведя строки и записав роли БЕЗ НОВОГО ЖЕСТА. Отложенное
+ * невидимое действие — худший из возможных исходов: человек уже решил, что жест не сработал.
+ *
+ * ПОЧЕМУ ЭКСПОРТА `useRecallHostMounted` ДЛЯ ЭТОГО НЕ ХВАТАЛО. Он и не мог хватить: его читает
+ * ВЫЗЫВАЮЩИЙ, чтобы решить, показывать ли свой чип, — то есть он сторожит РАЗМЕТКУ ОДНОГО ЭКРАНА.
+ * Сторож на стороне вызывающего защищает ровно тех вызывающих, которые про него вспомнили: чипов
+ * рекола на карточке два (строка истории и раскрытая панель прогона), третий появится с третьим
+ * экраном, и забытый гейт снова даст отложенный жест — молча, потому что отказ жеста и есть
+ * тишина. Поэтому вопрос «есть ли кому ответить» задаётся ЗДЕСЬ, где выбор записывается, и это
+ * единственное место, которое новый экран не может обойти. Гейты у вызывающих остаются и полезны —
+ * они убирают мёртвый орган с экрана; но правило держит эта дверь, а не они.
+ *
+ * Отказ произносится вслух и НИЧЕГО не сохраняет: чип не загорается, потому что взять прогон
+ * некому, и экран не обещает того, чего не сделал.
  */
 export function recallDesignRun(techCardId: number, run: common_DesignRun | null): void {
   if (!techCardId || techCardId <= 0) return;
-  const current = recalled.get(techCardId) ?? null;
   const next = run ?? null;
+  // Снятие выбора разрешено всегда: убрать несделанное можно и без приёмника.
+  if (next && (hosts.get(techCardId) ?? 0) === 0) {
+    useSnackBarStore
+      .getState()
+      .showMessage(
+        'recall adds the run’s pictures and words to input — references, and that block is only on the flat — sheet view. switch to flat and press recall there.',
+        'error',
+      );
+    return;
+  }
+  const current = recalled.get(techCardId) ?? null;
   if (current === next) return;
   if (next) recalled.set(techCardId, next);
   else recalled.delete(techCardId);
@@ -97,13 +152,14 @@ export function useRecalledRun(techCardId: number): common_DesignRun | null {
 }
 
 /**
- * IS THE PROMPT BEING SHOWN SOMEWHERE ELSE ON THIS SCREEN?
+ * IS THE GESTURE ANSWERED SOMEWHERE ON THIS SCREEN?
  *
- * The owner puts the recalled prompt in INPUT — REFERENCES, and that block belongs to another
- * organ. Until it mounts one, the history draws the panel itself rather than offering a selection
- * whose result appears nowhere — a gesture with no visible answer reads as broken. A host announces
- * itself on mount, so the fallback disappears the moment the real home exists; the history is never
- * asked to guess by looking at the DOM.
+ * The intake below lives in INPUT — REFERENCES, and that block belongs to another organ. It
+ * announces itself on mount, so the history can tell a live gesture from a dead one instead of
+ * guessing by looking at the DOM.
+ *
+ * ЭТО ЖЕ ЧИСЛО — ДВЕРЬ ЖЕСТА: `recallDesignRun` отказывается записывать выбор, когда оно ноль.
+ * Читатель этого хука решает вопрос разметки, а не вопрос жеста; про их разницу см. `recallDesignRun`.
  */
 export function useRecallHostMounted(techCardId: number): boolean {
   return useSyncExternalStore(
@@ -120,427 +176,366 @@ function useRegisterRecallHost(techCardId: number, active: boolean): void {
     emit();
     return () => {
       const left = (hosts.get(techCardId) ?? 1) - 1;
-      if (left > 0) hosts.set(techCardId, left);
-      else hosts.delete(techCardId);
+      if (left > 0) {
+        hosts.set(techCardId, left);
+      } else {
+        hosts.delete(techCardId);
+        // ВТОРАЯ ПОЛОВИНА ЗАПРЕТА НА ОТЛОЖЕННЫЙ ЖЕСТ. Дверь в `recallDesignRun` закрывает вход
+        // выбору, которому некому ответить; эта строка выбрасывает выбор, ОТВЕТЧИК КОТОРОГО УШЁЛ
+        // (человек нажал recall и тут же переключил вид, пока эффект приёма не отработал). Без неё
+        // остаётся ровно тот же дефект в микроскопическом окне — а «невидимое отложенное действие»
+        // не бывает допустимым по размеру окна.
+        recalled.delete(techCardId);
+      }
       emit();
     };
   }, [techCardId, active]);
 }
 
-/* ────────────────────────────── the panel ────────────────────────────── */
+/* ────────────────────────────── what a run can hand back ────────────────────────────── */
 
-function PromptRow({ k, children }: { k: string; children: React.ReactNode }) {
-  return (
-    <div className='flex gap-2 border-b border-hairline py-1 last:border-b-0'>
-      <Text
-        size='micro'
-        variant='label'
-        component='span'
-        className='w-24 shrink-0 uppercase tracking-label'
-      >
-        {k}
-      </Text>
-      <span className='min-w-0 flex-1 break-words text-micro'>{children}</span>
-    </div>
-  );
-}
-
-const NOTHING = (
-  <Text size='micro' variant='label' component='span'>
-    —
-  </Text>
-);
-
-/** Frame fraction from the wire's decimal, with a stated fallback rather than a silent 0. */
-function frac(d: Parameters<typeof decimalToNumber>[0], fallback = 0): number {
-  const n = decimalToNumber(d);
-  return n === null ? fallback : n;
-}
+/** Одна картинка снимка, годная к переиспользованию, вместе с тем, чем она в снимке была. */
+type Kept = {
+  mediaId: number;
+  media: common_MediaFull;
+  /** Роль, которую снимок несёт для этой картинки. Пусто = роли в снимке не было. */
+  role: string;
+  note: string;
+};
 
 /**
- * A FROZEN CALLOUT, DRAWN BY THE SAME PRIMITIVE THAT DREW IT LIVE.
+ * ВСЁ, ЧТО ПРОГОН ПОЛУЧИЛ НА ВХОД, ОДНИМ РЯДОМ — И РЕФЕРЕНСЫ, И ПЛИТЫ.
  *
- * `DesignMoodCallout.annotation` is the very `TechCardAnnotation` the card stores, at the same
- * coordinate precision, so the recalled markup is the markup — not a paraphrase of it. Mapping it
- * to a view model by hand here rather than through the form's `annotationFromWire` is deliberate:
- * that path decodes INTO the editable form shape (decimal strings, piece keys, an editable text),
- * and nothing here is editable. What is needed is the read-only view model, and this is the whole
- * of it.
+ * ЗАЧЕМ ЭТО ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ СТРОКА `run.inputs?.refs ?? []`. Снимок хранит вход ДВУМЯ
+ * списками: `refs` — референсы, которые человек собрал руками, и `slots` — ПЛИТЫ ВЕРСТАКА, которые
+ * едут в прогоны рендера и починки. У render-прогона `refs` пуст ЗАКОНОМЕРНО, а весь его вход
+ * лежит в `slots`. Рекол, читавший только `refs`, на таком прогоне переносил ровно текст и говорил
+ * «kept no pictures» про снимок с двумя плитами — то есть врал про содержимое записи и отдавал
+ * невоспроизводимый вход. «Переиспользование картинок» (T-10) — это ВСЕ картинки, которые реально
+ * ушли модели, а из какого поля снимка они пришли — деталь хранения.
  *
- * THE WORDS COME FROM THE CALLOUT, NOT FROM THE ANNOTATION. The contract leaves
- * `annotation.text` empty on purpose and keeps the composed words one level up — the same
- * arrangement `DesignSheetCallout` uses — so reading `annotation.text` here would draw every
- * callout blank.
+ * ДЕДУПЛИКАЦИЯ ПО `media_id`, И РЕФЕРЕНС СТАРШЕ ПЛИТЫ. Одно и то же медиа имеет право стоять и
+ * референсом, и в слоте; во входе карточки строка на `media_id` бывает одна (роль хранится по
+ * `media_id`, двум строкам её нечем различить). Референс идёт первым, потому что несёт РУЧНЫЕ
+ * роль и записку, а плита — только свой вид: при выборе между ними теряться должно меньшее.
+ *
+ * РОЛЬ ПЛИТЫ — ЕЁ `view_key`, и это не выдумка про картинку, а то же самое утверждение другими
+ * словами: словарь ролей референса и словарь видов — один и тот же список (`front | back | side_l |
+ * side_r | detail`). Ключ ВНЕ словаря (сервер новее этой сборки) роли не даёт: угадывать за него
+ * значение нечем, и картинка приедет без роли, строкой, которую человек разметит сам.
+ *
+ * ПРОПАВШИЕ СЧИТАЮТСЯ ОДИН РАЗ НА МЕДИА, а не по числу упоминаний: «сколько картинок этого прогона
+ * больше нет на карточке» — свойство картинки, а не полей снимка.
  */
-function surfaceCallouts(callouts?: common_DesignMoodCallout[] | null): SurfaceCallout[] {
-  return (callouts ?? [])
-    .map((callout, i): SurfaceCallout | null => {
-      const shape = callout.annotation;
-      // Unset geometry is a readable state — the callout carried no shape, or predates the field.
-      // It is NOT a zero-area mark at the top-left corner, so it is dropped from the drawing and
-      // its words are still listed beside the picture.
-      if (!shape) return null;
-      const text = (callout.text ?? '').trim();
-      return {
-        key: `${callout.mediaId ?? 0}-${i}`,
-        kind: annotationKindFromWire(shape.kind),
-        points: (shape.points ?? []).map((point) => ({ x: frac(point.x), y: frac(point.y) })),
-        // A callout whose label was never placed falls back to the centre of the frame so it stays
-        // visible instead of hiding in the corner.
-        label: { x: frac(shape.labelX, 0.5), y: frac(shape.labelY, 0.5) },
-        number: i + 1,
-        // THE DRAWING CARRIES THE NUMBER, THE LIST BESIDE IT CARRIES THE WORDS — `hasText` is
-        // exactly the contract for «there is text whose home is elsewhere», and the fitting screen
-        // uses it the same way. Words on the overlay as well would print them twice, and the plate
-        // is absolutely positioned yet still counts toward its container's width — so the size of
-        // the frame would follow the length of somebody's note.
-        text: '',
-        hasText: !!text,
-        color: annotationColorFromWire(shape.color),
-        dashed: !!shape.dashed,
-        filled: !!shape.filled,
-      };
-    })
-    .filter((c): c is SurfaceCallout => !!c);
-}
+function keptPictures(run: common_DesignRun): { alive: Kept[]; gone: number } {
+  const alive: Kept[] = [];
+  const seen = new Set<number>();
+  let gone = 0;
 
-/**
- * ONE FROZEN INPUT PICTURE. When the snapshot kept markup on it, the markup is drawn ON the picture
- * by the read-only annotation surface — passing no write callbacks is what makes it read-only, and
- * `frozen` says so a second time rather than relying on the absence of a prop. Without markup the
- * cheap thumbnail is enough and the surface is not mounted at all.
- */
-function FrozenInputPicture({
-  media,
-  gone,
-  alt,
-  callouts,
-}: {
-  media?: Parameters<typeof Thumb>[0]['media'];
-  gone?: boolean;
-  alt?: string;
-  callouts: SurfaceCallout[];
-}) {
-  const src = thumbUrl(media);
-  // THE SAME HEIGHT WHETHER OR NOT THERE IS MARKUP. A 56px thumbnail beside a 120px annotated one
-  // makes the column look like two different lists; the height is what the eye reads down.
-  if (!callouts.length || !src) {
-    return <Thumb media={media} gone={gone} alt={alt} className='h-[120px] w-[96px]' />;
+  const take = (
+    mediaId: number | undefined,
+    media: common_MediaFull | undefined,
+    deleted: boolean | undefined,
+    role: string,
+    note: string,
+  ) => {
+    // `media_id` в снимке заполнен ВСЕГДА, включая удалённое медиа, — им и опознаём картинку;
+    // `media` серверу разрешено не присылать, и именно этим удалённая опознаётся.
+    const id = mediaId ?? media?.id;
+    if (id == null || seen.has(id)) return;
+    seen.add(id);
+    if (deleted || media?.id == null) {
+      gone++;
+      return;
+    }
+    // ЖИВАЯ СТРОКА ХРАНИТ `media.id`, А НЕ `media_id` СНИМКА, хотя это одна и та же строка: ниже по
+    // течению всё ключуется по `media.id` (приём во вход берёт объекты медиа, роли ставятся по их
+    // `id`), и один-единственный ключ здесь дешевле, чем допущение о равенстве двух полей.
+    alive.push({ mediaId: media.id, media, role, note });
+  };
+
+  for (const ref of run.inputs?.refs ?? []) {
+    take(ref.mediaId, ref.media, ref.deleted, (ref.role ?? '').trim(), (ref.note ?? '').trim());
   }
-  // NO LEGEND UNDER THE FRAME. The surface's own legend lists PINS only, and the words of every
-  // callout are already listed beside the picture — so it would print half of them twice, and at
-  // this width its unbreakable rows push the column 4px wider than the space it was given
-  // (measured: clientWidth 150, scrollWidth 154).
-  // THE FRAME IS SIZED BY HEIGHT AND KEEPS THE PICTURE'S OWN RATIO — its width follows from the
-  // file. A fixed-width frame would letterbox, and a fitted frame whose ratio is not the picture's
-  // puts every marker somewhere the human never put it: the callouts are FRACTIONS OF THE FRAME, so
-  // frame ≠ picture means the same fraction is a different place. That is why the wrapper states no
-  // width of its own either — a column narrower than the frame it holds reports the difference as
-  // overflow, and the row starts pushing its neighbour (measured: 150 wide holding 154).
-  return (
-    <div className='shrink-0'>
-      <AnnotationSurface src={src} alt={alt} callouts={callouts} heightPx={120} frozen />
-    </div>
-  );
+  for (const slot of run.inputs?.slots ?? []) {
+    const view = normaliseViewKey(slot.viewKey);
+    const role = (DESIGN_VIEW_KEYS as readonly string[]).includes(view) ? view : '';
+    take(slot.mediaId, slot.media, slot.deleted, role, '');
+  }
+  return { alive, gone };
 }
 
+/* ────────────────────────────── the intake ────────────────────────────── */
+
 /**
- * The recalled run's prompt: what was asked, the words, the reference pictures with their roles and
- * notes, and the moodboard markup the model was read.
- *
- * IT IS NOT A BLOCK. No border, no fill, no `Section` — it is a `GroupLabel` and ruled rows, so it
- * can stand inside INPUT — REFERENCES without putting a box inside a box (DESIGN.md §5).
+ * Приёмник рекола. Рисует ОДИН предмет — вопрос про описание изделия, и только когда описание уже
+ * непустое; в покое не рисует ничего. Всё остальное, что он делает, — это две записи в форму и
+ * сетевые роли для только что заведённых строк.
  */
 export function RecalledRunPrompt({
   techCardId,
   band,
   disabled,
   host = true,
+  onAccepted,
 }: {
   techCardId: number;
   /**
-   * The band, when the mounting screen has one. Only the MONEY is read from it, and only to refuse
-   * a rerun the day's cap would refuse anyway — without it the door stays live and the server's own
-   * refusal is what speaks.
+   * The band, when the mounting screen has one. Only the ROLES already standing on the card are
+   * read from it, and only so that a recall never overwrites one somebody set by hand.
    */
   band?: GetDesignBandResponse;
   disabled?: boolean;
   /**
-   * `false` for the history's own fallback copy, so it does not announce itself as the home of the
-   * prompt and hide the very panel it is standing in for.
+   * `false` mounts an INERT copy: it neither announces itself as the home of the gesture nor takes
+   * anything in. Recalling belongs to the input block, and filing pictures into a block that is not
+   * on the screen would be a change nobody can see.
+   *
+   * ЕДИНСТВЕННЫЙ ЕГО ПОТРЕБИТЕЛЬ — подменная копия в истории — СНЯТ (её убрали вместе с гейтом
+   * `recallHosted` на самом чипе). Проп оставлен ради одного утверждения, которое обязано остаться
+   * верным: инертная копия НЕ считается приёмником. Не считаясь, она закрывает дверь в
+   * `recallDesignRun`, и жест на экране, где взять прогон некому, отказывает вслух, а не копится.
    */
   host?: boolean;
+  /**
+   * Свежепринятые медиа — вызывающему, который держит СВОЮ карту разрешения media_id→файл. Медиа
+   * снимка прогона в библиотечной карте может не быть, и без этого колбэка блок референсов
+   * нарисовал бы «media #N not resolved» на строке, которую сам же и завёл.
+   */
+  onAccepted?: (media: common_MediaFull[]) => void;
 }) {
   useRegisterRecallHost(techCardId, host);
   const run = useRecalledRun(techCardId);
-  const speaks = serverSpeaksDesign();
-  const startRun = useStartRun(techCardId);
-  /**
-   * THE DELTA PHRASE OF THE RERUN, KEYED BY THE RUN IT BELONGS TO. Held as a pair rather than
-   * synced by an effect: recalling a different run must not carry the phrase typed for the previous
-   * one into a paid request, and a keyed value cannot lag the way an effect can.
-   */
-  const [draft, setDraft] = useState<{ runId: number; text: string } | null>(null);
-  const budget = useMemo(() => readBudget(band?.budget), [band?.budget]);
-
-  const runId = run?.id ?? 0;
-  const kind = (run?.kind ?? '').trim().toLowerCase();
-  const askValue = draft && draft.runId === runId ? draft.text : (run?.ask ?? '').trim();
-
-  if (!run) return null;
-
-  const inputs = run.inputs;
-  const refs = inputs?.refs ?? [];
-  const callouts = inputs?.mood?.callouts ?? [];
-  const moodNote = (inputs?.mood?.note ?? '').trim();
-  const slots = inputs?.slots ?? [];
-  const handle = runHandle(run.id) || 'this run';
-  const moodMarks = surfaceCallouts(callouts);
-  /** What was asked for, kept in one place so the refusal below and the request narrow together. */
-  const params = run.params;
+  const form = useFormContext<TechCardFormData>();
+  const { setReferenceRole } = useDesignWrites(techCardId);
+  const { showMessage } = useSnackBarStore();
 
   /**
-   * WHY A RERUN IS REFUSED, IN THE ORDER THE REFUSALS MATTER. `vector` and `draft_idea` are named
-   * rather than lumped into «cannot»: the first has a door of its own on this contract and the
-   * second has no picture inputs to repeat at all, and a reader deserves to know which.
+   * Вопрос про описание держится ПАРОЙ с прогоном: чужие слова не должны пережить свой прогон.
+   *
+   * И ВМЕСТЕ С НИМ — ИСХОД ПО КАРТИНКАМ, потому что модалка обязана его назвать. Раньше она
+   * утверждала «the pictures from that run are already in the input» БЕЗУСЛОВНО: при полном входе
+   * картинки отклонялись, а окно продолжало говорить, что они добавлены. Числа приезжают сюда с
+   * приёма, а не пересчитываются при рисовании: к моменту вопроса форму уже мог поправить человек.
    */
-  const rerunWhy = !speaks
-    ? 'this server does not speak the design band yet'
-    : disabled
-      ? 'this card is read-only'
-      : !runId
-        ? 'this row has no number to repeat'
-        : kind === 'draft_idea'
-          ? 'a text run has no picture inputs to repeat'
-          : kind !== 'flat' && kind !== 'render' && kind !== 'threed'
-            ? `a ${kind || 'run'} is started from its own screen, not from here`
-            : !params
-              ? 'this row did not keep what was asked for, so there is nothing to repeat it with'
-              : budget?.exhausted
-                ? `daily budget reached — ${budget.line}`
-                : null;
+  const [words, setWords] = useState<{
+    runId: number;
+    text: string;
+    added: number;
+    refused: number;
+    already: number;
+  } | null>(null);
+
+  /**
+   * Какой прогон этот приёмник уже взял. Сторож от повторного приёма: эффект переигрывается и на
+   * втором проходе StrictMode, и на любом соседнем ререндере, а приём — это сетевые записи и
+   * строки в форме. Сбрасывается, когда выбора нет, поэтому тот же прогон можно вспомнить снова.
+   */
+  const taken = useRef(0);
+
+  useEffect(() => {
+    if (!host) return;
+    const runId = run?.id ?? 0;
+    if (!run || !runId) {
+      taken.current = 0;
+      return;
+    }
+    if (taken.current === runId) return;
+    taken.current = runId;
+
+    // ВЫБОР СНИМАЕТСЯ СРАЗУ. Рекол — жест, а не состояние: то, что он принёс, дальше живёт
+    // обычными референсами, и «выбранный прогон» не имеет права оставаться на экране как режим.
+    recallDesignRun(techCardId, null);
+
+    const handle = runHandle(runId) || 'that run';
+    if (disabled) {
+      showMessage(`this card is read-only — nothing was taken from ${handle}`, 'error');
+      return;
+    }
+
+    // ВЕСЬ ВХОД ПРОГОНА — референсы И плиты, дедуплицированные по медиа (см. `keptPictures`).
+    // Картинка, которой на карточке больше нет, приезжает без медиа или помеченной `deleted` —
+    // взять её нечем, и число таких названо вслух, а не съедено.
+    const { alive, gone } = keptPictures(run);
+    const text = (run.inputs?.garmentNote ?? '').trim();
+
+    if (!alive.length && !text) {
+      showMessage(
+        gone > 0
+          ? `${handle} kept ${gone} picture${gone === 1 ? '' : 's'}, and ${gone === 1 ? 'it is' : 'they are'} gone from the card — there is nothing left to reuse`
+          : `${handle} kept no pictures and no words to reuse`,
+        'error',
+      );
+      return;
+    }
+
+    /* ── картинки ── */
+    const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
+    const otherListIds = ((form.getValues('technicalMedia') ?? []) as BoardItem[]).map(
+      (i) => i.mediaId,
+    );
+    // ТРИ ИСХОДА СЧИТАЮТСЯ ЗДЕСЬ, А НЕ ВЫВОДЯТСЯ ИЗ ОТВЕТА ПРИЁМА. `appendBoardPictures` возвращает
+    // только принятое и слова отказа, и «уже было во входе» от «не поместилось» по ним не отличить
+    // — а разница ровно та, ради которой человек читает итог: в первом случае делать нечего, во
+    // втором надо освободить место. Дублирования правила нет: занятость считается тем же ящиком и
+    // тем же вторым списком, которые приём получает аргументами.
+    const occupied = new Set<number>([
+      ...live.filter(isInputRow).map((i) => i.mediaId),
+      ...otherListIds,
+    ]);
+    const already = alive.filter((k) => occupied.has(k.mediaId)).length;
+
+    const result = appendBoardPictures({
+      live,
+      inScope: isInputRow,
+      otherListIds,
+      added: alive.map((k) => k.media),
+      kind: REFERENCE_KIND,
+      max: INPUT_MAX,
+      scopeLabel: 'input',
+    });
+    const added = result.accepted.length;
+    const refused = alive.length - already - added;
+    // `result.refusal` СОЗНАТЕЛЬНО НЕ ПОКАЗЫВАЕТСЯ ОТДЕЛЬНОЙ ПЛАШКОЙ. У этого жеста один итог, и он
+    // ниже: он называет и потолок, и числа, и прогон, из которого брали. Две красные плашки на одно
+    // нажатие — не «подробнее», а два голоса об одном событии, и второй неизбежно короче первого.
+    if (result.accepted.length) {
+      // Запись по КОРНЮ массива, как и везде в этой паре блоков: два экземпляра поля-массива на
+      // одно имя не синхронизируются, а мудборд правит вторую половину того же списка.
+      form.setValue('moodboardMedia', result.next as TechCardFormData['moodboardMedia'], {
+        shouldDirty: true,
+      });
+      onAccepted?.(result.accepted);
+    }
+
+    /* ── слова ── */
+    const current = (form.getValues('garmentDescription') ?? '').trim();
+    const asksAboutWords = !!text && text !== current && !!current;
+    if (text && text !== current && !current) {
+      form.setValue('garmentDescription', text, { shouldDirty: true });
+    }
+    if (asksAboutWords) setWords({ runId, text, added, refused, already });
+
+    /* ── роли ──
+       Только на СВОИХ новых строках и только там, где роли ещё нет: рекол пополняет вход, а не
+       переписывает его. Последовательно, а не залпом — залп делает порядок отказов случайным, а
+       «что доехало» должно совпадать с экраном детерминированно. */
+    const roleOf = new Map<number, { role: string; note: string }>();
+    for (const kept of alive) {
+      if (kept.role) roleOf.set(kept.mediaId, { role: kept.role, note: kept.note });
+    }
+    const roledOnCard = new Set(
+      (band?.references ?? [])
+        .filter((r) => r.mediaId != null && (r.role ?? '').trim())
+        .map((r) => r.mediaId as number),
+    );
+    const order = result.next.filter(isInputRow).map((i) => i.mediaId);
+    const wanted = result.accepted
+      .map((m) => m.id as number)
+      .filter((id) => roleOf.has(id) && !roledOnCard.has(id));
+
+    void (async () => {
+      let roled = 0;
+      let stayed = 0;
+      for (const mediaId of wanted) {
+        const it = roleOf.get(mediaId);
+        if (!it) continue;
+        try {
+          // ORDINAL — ПОЗИЦИЯ ВО ВХОДЕ, как и у ручной правки роли: номер промпта нигде не
+          // хранится, он выводится сканом, и второй источник одной величины разъехался бы с
+          // первым на первом же снятии роли.
+          await setReferenceRole.mutateAsync({
+            mediaId,
+            role: it.role,
+            ordinal: Math.max(1, order.indexOf(mediaId) + 1),
+            note: it.note,
+          });
+          roled++;
+        } catch {
+          stayed++;
+        }
+      }
+
+      // ИТОГ НАЗЫВАЕТ ОБЕ ПОЛОВИНЫ ЧАСТИЧНОГО ИСХОДА — сколько прошло и сколько нет. «Отклонено»
+      // и «уже было» разделены: одинаковое молчание про них — это и есть то, чем прежний итог
+      // обманывал на полном входе.
+      const said: string[] = [];
+      said.push(
+        added
+          ? `${added} picture${added === 1 ? '' : 's'} added to the input from ${handle}`
+          : refused
+            ? `nothing was added from ${handle} — the input already holds ${INPUT_MAX} of ${INPUT_MAX}`
+            : `nothing new came from ${handle} — its pictures are already in the input`,
+      );
+      if (added && refused)
+        said.push(
+          `${refused} did not fit — the input holds ${INPUT_MAX}; remove a picture and recall again`,
+        );
+      if (added && already)
+        said.push(`${already} ${already === 1 ? 'was' : 'were'} already in the input`);
+      if (roled) said.push(`${roled} kept ${roled === 1 ? 'its role' : 'their roles'}`);
+      if (stayed)
+        said.push(
+          `${stayed} could not be given ${stayed === 1 ? 'its role' : 'their roles'} — set ${stayed === 1 ? 'it' : 'them'} by hand`,
+        );
+      if (gone) said.push(`${gone} gone from the card, skipped`);
+      if (text && !current) said.push('the description was filled from the run');
+      if (asksAboutWords) said.push('the description is kept — answer the question about it');
+      showMessage(said.join(' · '), stayed || refused ? 'error' : 'success');
+    })();
+    // `form`, `showMessage` и `setReferenceRole` намеренно не в списке: приём взводится ВЫБОРОМ, и
+    // перезапуск его от смены ссылки на мутацию был бы вторым приёмом того же прогона.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, host, disabled, techCardId, band?.references]);
+
+  if (!host || !words) return null;
+
+  const handle = runHandle(words.runId) || 'that run';
+
+  /**
+   * ЧТО НА САМОМ ДЕЛЕ СТАЛО С КАРТИНКАМИ — первой строкой окна.
+   *
+   * Здесь стояло безусловное «the pictures from that run are already in the input». На полном
+   * входе это была прямая ложь: картинки отклонены, их там нет, а окно ими же и объясняло, почему
+   * спрашивает только про текст. Ветки перечислены все, включая «прогон был без картинок»: у
+   * вопроса про описание нет ни одной причины умалчивать про вторую половину жеста.
+   */
+  const pictures = words.added
+    ? `${words.added} picture${words.added === 1 ? '' : 's'} from ${handle} ${words.added === 1 ? 'is' : 'are'} now in the input` +
+      (words.refused ? `, ${words.refused} did not fit` : '') +
+      (words.already ? `, ${words.already} ${words.already === 1 ? 'was' : 'were'} already there` : '')
+    : words.refused
+      ? `None of ${handle}’s pictures fit — the input already holds ${INPUT_MAX}, so none of them were added`
+      : words.already
+        ? `${handle}’s pictures were already in the input`
+        : `${handle} brought no pictures`;
 
   return (
-    <>
-      <GroupLabel
-        action={
-          <button
-            type='button'
-            onClick={() => recallDesignRun(techCardId, null)}
-            className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
-          >
-            clear
-          </button>
-        }
-      >
-        recalled — {handle}
-      </GroupLabel>
-
-      <Text size='nano' variant='label' component='p'>
-        launch-time copies of what {handle} was given. Nothing on this card has been changed by
-        looking at them — the references above are still the ones a NEW run would be given.
-      </Text>
-
-      <PromptRow k='asked'>{(run.ask ?? '').trim() || NOTHING}</PromptRow>
-      <PromptRow k='words'>
-        {/* THE DESCRIPTION AS IT READ AT LAUNCH — `inputs.garment_note`, the run's own frozen copy
-            of the card's `garment_description`. Never the card's CURRENT description: the card has
-            one and it is a different fact, and showing it here would make an old run look as
-            though it had been told today's words. */}
-        {(inputs?.garmentNote ?? '').trim() || NOTHING}
-      </PromptRow>
-      <PromptRow k='views · layout'>{viewsLine(run.params) || NOTHING}</PromptRow>
-
-      {refs.length > 0 && (
-        <>
-          <GroupLabel>the pictures it was given</GroupLabel>
-          {refs.map((ref, i) => {
-            const marks = surfaceCallouts(ref.callouts);
-            return (
-              <div
-                key={`${ref.mediaId ?? 0}-${i}`}
-                className='flex items-start gap-2 border-b border-hairline py-1 last:border-b-0'
-              >
-                <FrozenInputPicture
-                  media={ref.media}
-                  gone={!!ref.deleted}
-                  alt={(ref.role ?? '').trim()}
-                  callouts={marks}
-                />
-                <Text
-                  size='micro'
-                  variant='label'
-                  component='span'
-                  className='w-16 shrink-0 uppercase tracking-label'
-                >
-                  {viewLabel(ref.role) || 'no role'}
-                </Text>
-                <span className='min-w-0 flex-1 break-words text-micro'>
-                  {(ref.note ?? '').trim() || (
-                    <Text size='micro' variant='label' component='span'>
-                      no note
-                    </Text>
-                  )}
-                  {/* THE MARKUP'S WORDS STAND BESIDE THE PICTURE, numbered to match the drawing.
-                      Not in the surface's own legend: that one lists PINS only, so half of what was
-                      said would be missing from it at exactly the size this is read at. */}
-                  {(ref.callouts ?? []).map((callout, j) => (
-                    <Text
-                      key={`${callout.mediaId ?? 0}-${j}`}
-                      size='nano'
-                      variant='label'
-                      component='p'
-                      className='break-words'
-                    >
-                      {j + 1}. {(callout.text ?? '').trim() || 'no words'}
-                      {!callout.annotation && ' · no shape kept'}
-                    </Text>
-                  ))}
-                </span>
-                {ref.deleted && <Pill tone='mut'>gone from the card</Pill>}
-              </div>
-            );
-          })}
-        </>
-      )}
-
-      {slots.length > 0 && (
-        <>
-          <GroupLabel>the plates it was given</GroupLabel>
-          {slots.map((slot, i) => (
-            <div
-              key={`${slot.slotId ?? 0}-${slot.viewKey ?? ''}-${i}`}
-              className='flex items-center gap-2 border-b border-hairline py-1 last:border-b-0'
-            >
-              <Thumb
-                media={slot.media}
-                gone={!!slot.deleted}
-                alt={(slot.viewKey ?? '').trim()}
-                className='h-14 w-11'
-              />
-              <Text
-                size='micro'
-                variant='label'
-                component='span'
-                className='w-16 shrink-0 uppercase tracking-label'
-              >
-                {(slot.detailName ?? '').trim() || viewLabel(slot.viewKey)}
-              </Text>
-              {slot.deleted && <Pill tone='mut'>gone from the card</Pill>}
-            </div>
-          ))}
-        </>
-      )}
-
-      {(moodNote || callouts.length > 0) && (
-        <>
-          <GroupLabel>the board it was read</GroupLabel>
-          {moodNote && (
-            <Text size='micro' component='p' className='break-words py-1'>
-              {moodNote}
-            </Text>
-          )}
-          {/* THE BOARD'S MARKUP IS LISTED AND NOT DRAWN, and the reason is in the snapshot rather
-              than in this organ: `DesignMoodSnapshot` freezes each callout's words and its shape,
-              but NOT the board picture it stood on — there is no resolved media to draw it over.
-              Joining today's board to fill the hole would show a shape over an image the run may
-              never have been given. The shapes are still frozen and are stated as kept. */}
-          {callouts.map((callout, i) => (
-            <Text
-              key={`${callout.mediaId ?? 0}-${i}`}
-              size='micro'
-              variant='label'
-              component='p'
-              className='break-words'
-            >
-              · {(callout.text ?? '').trim() || 'no text'}
-              {callout.annotation ? '' : ' · no shape kept'}
-            </Text>
-          ))}
-          {moodMarks.length > 0 && (
-            <Text size='nano' variant='label' component='p'>
-              {moodMarks.length} of these kept their shape — the board picture they stood on is not
-              part of the snapshot, so the shapes are not redrawn here.
-            </Text>
-          )}
-        </>
-      )}
-
-      {/* ── the rerun ── */}
-      <GroupLabel>run it again</GroupLabel>
-      <div className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'>
-        <Text
-          size='micro'
-          variant='label'
-          component='span'
-          className='w-24 shrink-0 uppercase tracking-label'
-        >
-          ask
+    <ConfirmationModal
+      open
+      onOpenChange={(open) => !open && setWords(null)}
+      onConfirm={() => {
+        form.setValue('garmentDescription', words.text, { shouldDirty: true });
+        setWords(null);
+      }}
+      onCancel={() => setWords(null)}
+      title='use the recalled description'
+      confirmLabel='replace the description'
+      cancelLabel='keep mine'
+      width='sm'
+    >
+      <div className='space-y-2'>
+        <Text size='control'>
+          {pictures}. These are the words {handle} was given — putting them in replaces the
+          description on this card, and the text you have now is not kept anywhere. Copy what you
+          need first.
         </Text>
-        <Input
-          name='design-rerun-ask'
-          value={askValue}
-          disabled={!!rerunWhy}
-          placeholder="what to change this time — becomes the new run's caption"
-          className='max-w-[420px]'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            setDraft({ runId, text: e.target.value })
-          }
-        />
-        <Text size='nano' variant='label' component='span' className='min-w-0'>
-          it starts as {handle}&apos;s own phrase — a rerun with a new one is the ordinary case
-        </Text>
-      </div>
-
-      <div className='flex flex-wrap items-center gap-2 pt-1'>
-        {/* `|| !params` is not belt-and-braces: it is what narrows `params` to a real request for
-            the branch below, so the button cannot be built out of a shape the refusal above already
-            called missing. */}
-        {rerunWhy || !params ? (
-          <InertDoor
-            label='rerun this run ▸'
-            reason={rerunWhy ?? 'this row did not keep what was asked for'}
-          />
-        ) : (
-          <Button
-            variant='secondary'
-            size='xs'
-            disabled={startRun.isPending}
-            onClick={() =>
-              startRun.start(
-                {
-                  // THE RUN NUMBER IS THE WHOLE OF WHAT NAMES THE INPUTS. The server re-reads
-                  // THIS run's frozen snapshot; nothing about the references, the description or
-                  // the board is composed here, and that is what keeps the history evidence
-                  // rather than a list of claims.
-                  rerunOfRunId: runId,
-                  // The QUESTION travels as always — it is client-written by the contract. It is
-                  // this run's own question, because «run it again» is a statement about this run
-                  // and not about whatever the form happens to be asking now.
-                  kind: kind as 'flat' | 'render' | 'threed',
-                  ask: askValue,
-                  params,
-                },
-                // The selection is cleared once the row is FILED, not on the click: a failed start
-                // must leave the prompt on screen to press again.
-                () => recallDesignRun(techCardId, null),
-              )
-            }
-            title={`repeat ${handle} with the inputs it actually had`}
-          >
-            {startRun.isPending ? 'starting…' : 'rerun this run ▸'}
-          </Button>
-        )}
-        <Text size='nano' variant='label' component='span' className='min-w-0'>
-          the server repeats what {handle} was given, not what the card holds now — that is why a
-          run number travels and a copy of the inputs does not.
-        </Text>
-        {budget && (
-          <Text size='micro' variant='label' component='span' className='ml-auto'>
-            {budget.line}
+        <div className='max-h-40 overflow-auto border border-borderColor bg-bgColor p-2'>
+          <Text size='control' component='p' className='whitespace-pre-wrap break-words'>
+            {words.text}
           </Text>
-        )}
+        </div>
       </div>
-    </>
+    </ConfirmationModal>
   );
 }

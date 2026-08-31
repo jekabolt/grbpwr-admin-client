@@ -1,4 +1,4 @@
-import type { common_DesignBudget } from 'api/proto-http/admin';
+import type { common_DesignRun } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -7,10 +7,10 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
 
 import type { TechCardFormData } from '../../schema';
 import { serverSpeaksDesign } from '../capability';
+import { formatMoney } from '../generation/money';
 import { newClientRequestId } from '../use-design-band';
 import { draftIdeaRefusal, useDraftDesignIdea } from './use-draft-idea';
 
@@ -61,17 +61,26 @@ type Draft = {
   fingerprint: string;
 };
 
-function budgetLine(budget?: common_DesignBudget): string | null {
-  if (!budget) return null;
-  const currency = (budget.currency ?? '').trim();
-  const spent = decimalToInput(budget.spent);
-  const reserved = decimalToInput(budget.reserved);
-  const cap = decimalToInput(budget.cap);
-  if (!spent && !cap) return null;
-  // ДВА ЧИСЛА, А НЕ СУММА: «списано» и «зарезервировано» — разные факты, и одно поле с именем
-  // «spent», держащее их сумму, врало бы про то, что реально оплачено.
-  const reservedPart = reserved && reserved !== '0' ? ` · ${reserved} reserved` : '';
-  return `today ${currency} ${spent || '0'}${reservedPart} of ${cap || '—'}`;
+/**
+ * ЦЕНА ЭТОГО ПРОГОНА — И БОЛЬШЕ НИЧЕГО (T-12).
+ *
+ * Владелец, дословно: «today US$0.4074 of US$2.00 — нам надо показывать только цену генерации и
+ * все». Здесь печаталась ровно та строка: дневной расход, резерв и потолок. Теперь печатается
+ * цена ОДНОГО прогона — того, который человек только что оплатил этой кнопкой.
+ *
+ * `price_actual` ВПЕРЕДИ `price_estimate`, и порядок несущий: смета — это то, что было отложено от
+ * дня ДО отправки, а факт — сумма попыток, оплаченные неудачи включительно. Текстовый прогон
+ * исполняется инлайном и возвращается уже завершённым, поэтому факт обычно на месте; смета
+ * остаётся запасным словом, а не вторым числом рядом.
+ *
+ * `null` — ПОЛНОЦЕННЫЙ ОТВЕТ, а не ноль. Все денежные поля контракта costing-подобны: у аккаунта
+ * без `costing:read` они вырезаны, и `$0.00` в этом случае утверждало бы, что прогон был
+ * бесплатным. Тогда строки цены нет вовсе.
+ */
+function runPrice(run?: common_DesignRun): string | null {
+  if (!run) return null;
+  const currency = run.currency;
+  return formatMoney(run.priceActual, currency) || formatMoney(run.priceEstimate, currency) || null;
 }
 
 export function MoodDraft({
@@ -113,7 +122,8 @@ export function MoodDraft({
   );
 
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [budget, setBudget] = useState<common_DesignBudget | undefined>(undefined);
+  /** Цена последнего прогона, уже словами. Живёт рядом с черновиком: это цена ЕГО, а не дня. */
+  const [price, setPrice] = useState<string | null>(null);
   const [taken, setTaken] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const stale = !!draft && draft.fingerprint !== fingerprint;
@@ -140,7 +150,7 @@ export function MoodDraft({
       {
         onSuccess: (res) => {
           intent.current = null;
-          setBudget(res.budget);
+          setPrice(runPrice(res.run));
           const text = (res.run?.outputText ?? '').trim();
           if (!text) {
             // ПУСТОЙ ОТВЕТ — НЕ ЧЕРНОВИК. Строка в реестре есть, деньги списаны, а предлагать
@@ -178,7 +188,6 @@ export function MoodDraft({
   const offered = (draft?.lines ?? []).filter(
     (line) => !taken.includes(line) && !dismissed.includes(line) && !concept.includes(line),
   );
-  const money = budgetLine(budget);
 
   return (
     <div>
@@ -216,9 +225,9 @@ export function MoodDraft({
               {draft.readNotes} note{draft.readNotes === 1 ? '' : 's'} · {draft.time}
             </Text>
             {stale && <Pill tone='attention'>the moodboard has changed since</Pill>}
-            {money && (
+            {price && (
               <Text size='nano' variant='label' component='span' className='ml-auto'>
-                {money}
+                {price}
               </Text>
             )}
           </div>

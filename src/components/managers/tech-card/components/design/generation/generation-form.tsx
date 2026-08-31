@@ -3,20 +3,18 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
-import { InertDoor, readBench } from '../bench-slot';
+import { InertDoor, displayDetailName, readBench } from '../bench-slot';
 import { markedPlatesOf } from '../fix-markup';
 import { WhatModelGetsModal } from '../modals';
 import { serverSpeaksDesign } from '../capability';
-import { DESIGN_VIEW_KEYS, SHEET_MIN_VIEWS, viewLabel } from '../views';
-import { useAnnounceDesignQuestion } from '../history-question';
+import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from '../views';
 import { readBudget } from './money';
 import { useStartRun } from './use-generation';
 
@@ -29,10 +27,16 @@ import { useStartRun } from './use-generation';
  * argues the opposite before the human has said anything. Once the card HAS a flat run, the form is
  * open by default: the question «what next» is now the standing one.
  *
- * WHAT TRAVELS AND WHAT DOES NOT. `StartDesignRun` takes the QUESTION — views, layout, the ask —
- * and nothing else. The references, the description, the moodboard and the bench are snapshotted
+ * WHAT TRAVELS AND WHAT DOES NOT. `StartDesignRun` takes the QUESTION — views and layout — and
+ * nothing else. The references, the description, the moodboard and the bench are snapshotted
  * BY THE SERVER, because provenance a caller supplies is a claim rather than provenance. So this
  * form has no inputs section: there is nothing here to send.
+ *
+ * THE ASK FIELD IS GONE (T-3, round 4): everything the human wants said lives in GARMENT
+ * DESCRIPTION, which the server freezes into every run. The wire still carries `ask`, so this form
+ * sends it EMPTY — and the removal does not blind the history, because the run stores the actual
+ * prompt it sent (`design_run.prompt`, round 3) and the row shows it. Do not "compensate" for the
+ * missing field here.
  *
  * THE FIX CYCLE IS GONE FROM THIS FORM, WHOLE (owner, S-15: «FIX функциональность выпиливаем
  * полностью»). `fix_targets` / `fix_slot_ids` stay LIVE on the wire — they now belong to the
@@ -50,8 +54,10 @@ import { useStartRun } from './use-generation';
  * THERE IS NO PRICE ON THIS SCREEN BEFORE THE CLICK, and its absence is a decision. The prototype
  * showed `$0.04 · ~25 s`, both of them constants of the prototype. The contract has no quote verb
  * and no profile catalogue: the first honest number is `price_estimate` on the row the server
- * files, and the day's ceiling is `budget`. Inventing a per-picture price here would make the one
- * screen in this admin that spends money the one screen that guesses about it.
+ * files. Inventing a per-picture price here would make the one screen in this admin that spends
+ * money the one screen that guesses about it. Since round 4 (T-12) the DAY BAR is not printed
+ * either: `today $x of $y` is gone, the ceiling still GATES the button when the day is spent, and
+ * the only money a person is shown is the price of the generation itself, on its history row.
  *
  * FIT IS NOT SHOWN HERE AT ALL (owner, S-3). It is a fact about the GARMENT — its home is the
  * HEADER's classification, and the run snapshots it server-side at launch — so this form neither
@@ -114,19 +120,31 @@ export function GenerationForm({
   );
 
   const [views, setViews] = useState<Record<string, boolean>>({ front: true, back: true });
+  // Галки ДЕТАЛЕЙ живут по id слота, отдельно от силуэтов (T-5): деталь можно спросить, только
+  // если она ОПИСАНА в THE PICTURES, и на каждую описанную — своя галка.
+  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>({});
   const [layout, setLayout] = useState<Layout>('per_view');
-  const [ask, setAsk] = useState('');
 
   const bench = useMemo(() => readBench(band), [band]);
   const budget = useMemo(() => readBudget(band.budget), [band.budget]);
 
-  const ticked = DESIGN_VIEW_KEYS.filter((v) => views[v]);
+  const tickedSides = SILHOUETTE_VIEWS.filter((v) => views[v]);
+  // Производная от стенда, не от состояния: деталь, снятая со стенда после отметки, выпадает из
+  // запроса сама, и чистить `detailTicks` не нужно.
+  const tickedDetails = bench.details.filter((d) => (d.id ?? 0) > 0 && detailTicks[d.id ?? 0]);
+  // ПРОВОД: по записи `detail` на каждую отмеченную деталь — и рядом ИМЕНА этих деталей,
+  // слотами. Ключ вида `detail` не различает воротник и карман, поэтому одного `views` было мало:
+  // прогон на две детали просил у модели «нарисуй две детали» и получал два произвольных крупных
+  // плана. `detail_slot_ids` идёт ПОЗИЦИОННО и в том же порядке, что элементы `detail` в `views`
+  // (сервер отвергает прогон, у которого длины разошлись), а разрезчик подписывает кадры
+  // склеенного листа тем же порядком — пересортировать любой из двух списков значит разъехаться.
+  const ticked: string[] = [...tickedSides, ...tickedDetails.map(() => DETAIL_VIEW)];
+  const tickedDetailIds: number[] = tickedDetails.map((d) => d.id ?? 0);
   // Половина сравнения для дивайдера «current / earlier» в истории живёт ТОЛЬКО здесь: только эта
   // форма знает, какой вопрос задан прямо сейчас. Хук стоит ВЫШЕ раннего возврата `if (!isOpen)`
   // намеренно — под ним число хуков менялось бы между рендерами, и React снял бы всё дерево
   // (ошибка #310, которой этот экран уже стоил одного вечера). При размонтировании вопрос
   // отзывается сам, поэтому свёрнутая форма не оставляет устаревшего.
-  useAnnounceDesignQuestion(techCardId, ticked, layout);
 
   /**
    * EVERY BENCH PLATE THAT CARRIES EDIT ▸ MARKS — not a fix selection (the fix cycle is gone,
@@ -158,25 +176,33 @@ export function GenerationForm({
           // reader to distrust every other sentence on the screen, so the tail went with the door.
           'no views ticked — tick at least one'
         : capReached
-          ? `daily budget reached — ${budget?.line ?? ''}`
+          ? // T-12: без чисел. Дневная полоса «today $x of $y» снята отовсюду; потолок по-прежнему
+            // ГЕЙТИТ кнопку, но человеку показывается только цена самого прогона — в истории.
+            'daily budget reached — new runs start tomorrow'
           : null;
 
   /**
    * The three variants of W-4, spoken. Null while nothing is ticked — there is no shape to name
    * yet, and the gate below already says why the button is off.
    */
+  // Единственная отмеченная деталь называется по имени, а не безликим `detail`: пилюля читает два
+  // органа выше, и «one view · detail · collar» — это то, что человек реально отметил.
+  const tickedNames = [
+    ...tickedSides.map((v) => viewLabel(v)),
+    ...tickedDetails.map((d) => `detail · ${displayDetailName(bench.details, d)}`),
+  ];
   const askShape =
     ticked.length === 0
       ? null
       : ticked.length === 1
-        ? `one view · ${viewLabel(ticked[0])}`
+        ? `one view · ${tickedNames[0]}`
         : layout === 'one'
           ? `${ticked.length} views · one picture`
           : `${ticked.length} views · a picture each`;
 
   const outputsLine =
     layout === 'one' && ticked.length >= 2
-      ? `1 picture · ${ticked.length} views inside · it comes back needing a cut, and no slot reads a composite until it is split`
+      ? `1 picture · ${ticked.length} views glued · split it before the slots read it`
       : `${ticked.length} picture${ticked.length === 1 ? '' : 's'}`;
 
   /**
@@ -189,6 +215,7 @@ export function GenerationForm({
 
     const params: common_DesignRunParams = {
       views: [...ticked],
+      detailSlotIds: [...tickedDetailIds],
       layout,
       colour: undefined,
       threed: undefined,
@@ -211,7 +238,10 @@ export function GenerationForm({
       // to an ordinary run would silently change what a paid request contains. See the header.
       extraInputMediaIds: [],
     };
-    startRun.start({ kind: 'flat', ask: ask.trim(), params }, () => setAsk(''));
+    // T-3: поле ASK снято — всё, что человек хочет сказать, живёт в GARMENT DESCRIPTION. Провод
+    // всё ещё принимает `ask` (сервер лишь триммит и меряет потолок), поэтому едет пустая строка —
+    // выдуманного значения здесь быть не может, а настоящий промпт прогона хранит сервер.
+    startRun.start({ kind: 'flat', ask: '', params });
   };
 
   // Дверь ведёт в INPUT — REFERENCES: полка загрузок снесена владельцем (R-18), файлы теперь
@@ -240,9 +270,8 @@ export function GenerationForm({
           <Button variant='main' size='sm' onClick={() => setOpen(true)} disabled={writesOff}>
             GENERATE ▸
           </Button>
-          <Text size='micro' variant='label' component='span'>
-            two equal doors — nothing on this card requires a run
-          </Text>
+          {/* Фраза «two equal doors…» здесь снята (T-6): её учит пустой стенд, где она — первый
+              экран; на карточке с материалом эксперт видит две кнопки и без подписи. */}
         </div>
       </Section>
     );
@@ -272,75 +301,61 @@ export function GenerationForm({
         </CalloutBox>
       )}
 
-      <>
-          <GroupLabel
-            action={
-              <Text size='micro' variant='label' component='span'>
-                {ticked.length} view{ticked.length === 1 ? '' : 's'} in this run
-              </Text>
-            }
-          >
-            views
-          </GroupLabel>
-          <div>
-            {DESIGN_VIEW_KEYS.map((view) => {
-              const required = SHEET_MIN_VIEWS.includes(view);
-              const on = !!views[view];
-              const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
-              const filled = (slot?.pictureId ?? 0) > 0;
-              const status =
-                view === 'detail'
-                  ? 'a detail comes back under its own name'
-                  : filled
-                    ? 'slot filled'
-                    : required && !on
-                      ? 'not asked · the sheet needs it'
-                      : 'slot empty';
-              const statusIsWarning = required && !on && !filled;
-              const boxId = `design-view-${view}`;
-              return (
-                <div
-                  key={view}
-                  className='flex items-center gap-2 border-b border-hairline py-1 last:border-b-0'
-                >
-                  <CheckboxCommon
-                    name={boxId}
-                    checked={on}
-                    disabled={writesOff}
-                    onChange={(checked: boolean) =>
-                      setViews((prev) => ({ ...prev, [view]: checked }))
-                    }
-                  />
-                  {/* `<button>` is a labelable element, so the name forwards the click to the box
-                      and the target stays as big as the words. */}
-                  <label htmlFor={boxId} className='cursor-pointer'>
-                    <Text
-                      size='micro'
-                      component='span'
-                      className={
-                        on ? 'uppercase tracking-label' : 'uppercase tracking-label opacity-60'
-                      }
-                    >
-                      {viewLabel(view)}
-                    </Text>
-                  </label>
-                  {required && <span className='text-error'>*</span>}
-                  <Text
-                    size='micro'
-                    variant={statusIsWarning ? 'default' : 'label'}
-                    component='span'
-                    className={statusIsWarning ? 'ml-auto text-error' : 'ml-auto'}
-                  >
-                    {status}
-                  </Text>
-                </div>
-              );
-            })}
-          </div>
-          <Text size='nano' variant='label' component='p'>
-            * the sheet needs {SHEET_MIN_VIEWS.map((v) => viewLabel(v)).join(' and ')} — a client
-            rule the server does not enforce, checked at the mint and not on these ticks.
+      {/* ПИКЕР ВИДОВ — ОДНА СТРОКА ЧИПОВ (T-4), а не пять строк с чекбоксами и прозой статусов.
+          Отмеченный чип заливается чернилами — это и есть состояние; «slot filled / slot empty»
+          переехали в title, потому что стенд с плитками стоит прямо под формой и показывает то же
+          самое глазами. Сноска про «the sheet needs front and back…» снята владельцем (T-1) вместе
+          со звёздочками: правило живёт в стенде (N of 4) и на минте, форма его не повторяет. */}
+      <GroupLabel>views</GroupLabel>
+      <ChipRow>
+        {SILHOUETTE_VIEWS.map((view) => {
+          const on = !!views[view];
+          const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
+          const filled = (slot?.pictureId ?? 0) > 0;
+          return (
+            <Chip
+              key={view}
+              selected={on}
+              pressed={on}
+              disabled={writesOff}
+              title={
+                filled ? 'its slot in the pictures is already filled' : 'its slot in the pictures is empty'
+              }
+              onClick={() => setViews((prev) => ({ ...prev, [view]: !prev[view] }))}
+            >
+              {viewLabel(view)}
+            </Chip>
+          );
+        })}
+        {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5, решение владельца). Деталь можно спросить,
+            только если она описана в THE PICTURES, поэтому чипы — производная от bench.details:
+            описал деталь — появился чип, снял со стенда — исчез. Каждая отмеченная едет своей
+            картинкой (запись `detail` в views на каждую), а её слот человек назначает на выходе. */}
+        {bench.details.map((d) => {
+          const id = d.id ?? 0;
+          if (id <= 0) return null;
+          const on = !!detailTicks[id];
+          return (
+            <Chip
+              key={`d:${id}`}
+              selected={on}
+              pressed={on}
+              disabled={writesOff}
+              title='a described detail — ticked, it comes back as its own picture'
+              onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
+            >
+              detail · {displayDetailName(bench.details, d)}
+            </Chip>
+          );
+        })}
+        {/* Отсутствие деталей сказано словами, а не пустотой (T-5): иначе ряд молча выглядит как
+            «деталей не бывает», и дверь к ним не видна. */}
+        {bench.details.length === 0 && (
+          <Text size='nano' variant='label' component='span'>
+            details appear here once described in the pictures
           </Text>
+        )}
+      </ChipRow>
 
           {/* THE SHAPE OF THE ASK, NAMED — and named by DERIVING it, never by a third control.
               The owner's three variants (W-4) are ① one view on its own, ② several views as
@@ -350,58 +365,41 @@ export function GenerationForm({
               glued», which is not a third thing but the same picture under another name. So the
               two organs stay free and this pill reads them back, which is also what makes «only one
               view is asked — both layouts return one picture» true rather than a caveat. */}
-          <GroupLabel
-            action={
-              askShape ? (
-                <Pill tone='mut' title='what the two controls above add up to'>
-                  {askShape}
-                </Pill>
-              ) : undefined
-            }
-          >
-            how it comes back
-          </GroupLabel>
-          <ViewSwitch
-            label='layout'
-            value={layout}
-            options={LAYOUT_OPTIONS}
-            disabled={writesOff}
-            onChange={setLayout}
-          />
-          {/* S-1 (owner): the glued-file paragraph is gone. The composite rule it recited is not
-              lost — it is CONSTRUCTION (a declared composite offers the cut and refuses the picker,
-              `generation-history.tsx`) and it is still worded once, in `outputsLine` beside the
-              button that spends the money. */}
-          {(ticked.length <= 1 || layout === 'per_view') && (
-            <Text size='nano' variant='label' component='p'>
-              {ticked.length <= 1
-                ? 'only one view is asked — both layouts return one picture, so this switch changes nothing here.'
-                : 'each ticked view comes back as its own picture with a guessed view; you mark the ones that go into a slot.'}
-            </Text>
-          )}
-      </>
-
-      <div className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'>
-        <Text
-          size='micro'
-          variant='label'
-          component='span'
-          className='w-20 shrink-0 uppercase tracking-label'
-        >
-          ask
+      <GroupLabel
+        action={
+          askShape ? (
+            <Pill tone='mut' title='what the two controls above add up to'>
+              {askShape}
+            </Pill>
+          ) : undefined
+        }
+      >
+        how it comes back
+      </GroupLabel>
+      <ViewSwitch
+        label='layout'
+        value={layout}
+        options={LAYOUT_OPTIONS}
+        disabled={writesOff}
+        onChange={setLayout}
+      />
+      {/* S-1 (owner): the glued-file paragraph is gone. The composite rule it recited is not
+          lost — it is CONSTRUCTION (a declared composite offers the cut and refuses the picker,
+          `generation-history.tsx`) and it is still worded once, in `outputsLine` beside the
+          button that spends the money. T-2 (round 4): the per-view teaching line («each ticked
+          view comes back as its own picture…») is gone too — the behaviour stays, the prose went.
+          What remains below is STATE speech, drawn only while the switch genuinely changes
+          nothing. */}
+      {ticked.length <= 1 && (
+        <Text size='nano' variant='label' component='p'>
+          only one view is asked — both layouts return one picture, so this switch changes nothing here.
         </Text>
-        <Input
-          name='design-ask'
-          value={ask}
-          disabled={writesOff}
-          placeholder="what to change — becomes the run's caption"
-          className='max-w-[420px]'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsk(e.target.value)}
-        />
-      </div>
-      {/* S-2 (owner): the «empty → captioned by its number» aside is gone; the numbering fallback
-          itself lives in the history row, which is where it speaks. S-3 (owner): the read-only FIT
-          row is gone with it — see the header comment for where fit lives and shows. */}
+      )}
+
+      {/* T-3 (круг 4): строки ASK больше нет — всё, что человек хочет сказать модели, описывается
+          в GARMENT DESCRIPTION. Провод шлёт `ask` пустым (см. submit), историю это не слепит:
+          настоящий отправленный промпт хранится на прогоне (`design_run.prompt`). S-2/S-3 прошлых
+          кругов: подпись о нумерации живёт в строке истории, FIT — в классификации хедера. */}
 
       <div className='flex flex-wrap items-center gap-2 py-1'>
         {gateReason ? (
@@ -420,11 +418,11 @@ export function GenerationForm({
         <Button variant='secondary' size='xs' onClick={() => setWmgOpen(true)}>
           what the model gets ▸
         </Button>
-        {budget && (
-          <Text size='micro' variant='label' component='span' className='ml-auto'>
-            {budget.line}
-          </Text>
-        )}
+        {/* T-12: дневная полоса «today $x of $y» снята — показывается только цена генерации, и
+            живёт она на строке прогона в истории; три слова справа говорят, где её искать. */}
+        <Text size='micro' variant='label' component='span' className='ml-auto'>
+          priced on its history row
+        </Text>
       </div>
 
       {/* THE MARKS DO NOT TRAVEL, SAID WHERE THE MONEY IS SPENT. Since the fix cycle was removed
@@ -451,11 +449,6 @@ export function GenerationForm({
           instead of a second paid one.
         </CalloutBox>
       )}
-
-      <Text size='nano' variant='label' component='p'>
-        the price of a run is stated on its history row once the server has filed it — nothing here
-        quotes one in advance.
-      </Text>
 
       {/* S-7 (owner): the «without the model» row and both of its doors are gone. Uploading lives
           where the file lands — a FLAT SLOTS plate takes it three equal ways (browse the library,

@@ -8,7 +8,6 @@ import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
-import { MediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -23,7 +22,8 @@ import {
   type BoardItem,
 } from './mood-board';
 import { RecalledRunPrompt } from './history-recall';
-import { SplitCornerButton, useSplitToInput } from './split-to-input';
+import { PictureTile } from './picture-tile';
+import { useSplitToInput } from './split-to-input';
 import { useDesignWrites } from './use-design-band';
 
 /**
@@ -64,6 +64,17 @@ import { useDesignWrites } from './use-design-band';
  * ✕ УНОСИТ СУЩНОСТЬ ЦЕЛИКОМ — картинку входа, её роль и её записку — и спрашивает перед этим,
  * называя, в скольких прогонах эта картинка участвовала. Доски он не касается: там своя строка со
  * своим ✕, который называет свою цену.
+ *
+ * БЛОК СТАТИЧЕН (T-11, круг 4): «INPUT — REFERENCES статичны там только референсы и тексты промпта
+ * все остальное там не нужно». Здесь нет и не должно появиться ни состояний прогона, ни описей
+ * снимка («the pictures it was given», «the plates it was given» — НИКОГДА, слово владельца), ни
+ * кнопки запуска: прогон стартует только из GENERATION — FLAT → GENERATE. Всё, что рисует этот
+ * блок, — описание изделия, картинки входа с ролями и записками и дверь добавления.
+ *
+ * ФЛЭТЫ САМИ СЮДА НЕ ПОПАДАЮТ (T-15): «в INPUT — REFERENCES не должны уходить все флеты если мы их
+ * явно туда сами не добавим». Строку входа заводят ровно три ЖЕСТА ЧЕЛОВЕКА — слот «+ reference»
+ * ниже, «take into input» на плитке мудборда и разрез СВОЕГО референса угловой кнопкой split. Тот
+ * же хук разреза работает и на верстаке, но там он входа не пополняет (`addToInput` ниже).
  */
 
 /**
@@ -339,27 +350,24 @@ export function ReferencesSection({
     }
   }
 
-  // ── зум: смотреть референс целиком ──────────────────────────────────────────────────────────
-  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
-  const viewerItems: MediaViewerItem[] = members.map((mediaId) => {
-    const full = mediaById.get(mediaId);
-    return {
-      src: fullUrl(full),
-      thumbnail: thumbUrl(full),
-      type: 'image',
-      alt: `reference ${promptNumber.get(mediaId) ?? mediaId}`,
-      meta: { id: mediaId },
-    };
-  });
+  // ЗУМА СВОЕГО У БЛОКА БОЛЬШЕ НЕТ. Здесь стоял локальный `MediaViewer` со списком, собранным из
+  // одних только референсов, — то есть шестой просмотрщик полосы со своим рядом листания. Владелец
+  // (круг 4, пункт 8): «что бы можно было в зум вью по всем картинкам из всех генераций
+  // итерироваться не только этой». Ряд теперь собирают сами плитки `PictureTile`, а показывает его
+  // ОДИН `PictureGalleryProvider`, смонтированный на всю студию.
 
   // ── описание изделия (W-3) ──────────────────────────────────────────────────────────────────
   const garment = useController({ control, name: 'garmentDescription' });
   const garmentId = useId();
 
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
+  // `addToInput` СКАЗАН ЯВНО и только здесь: кадры разреза становятся референсами лишь тогда,
+  // когда режут референс ИЗ ЭТОГО блока. Верстак зовёт тот же хук молча и входа не пополняет —
+  // это и есть T-15 (см. шапку `split-to-input.tsx`).
   const split = useSplitToInput({
     techCardId,
     band,
+    addToInput: true,
     onAccepted: (media) => setPicked((prev) => [...prev, ...media]),
   });
 
@@ -442,7 +450,7 @@ export function ReferencesSection({
             честно схлопывается в одну на узком окне. Между колонками — зазор, между строками —
             волосяная линия на самих ячейках. */}
         <div className='grid gap-x-gutter [grid-template-columns:repeat(auto-fit,minmax(470px,1fr))]'>
-          {members.map((mediaId, i) => (
+          {members.map((mediaId) => (
             <ReferenceCell
               key={mediaId}
               mediaId={mediaId}
@@ -454,7 +462,6 @@ export function ReferencesSection({
               onRole={(role) => setRole(mediaId, role)}
               onNote={(note) => commitNote(mediaId, note)}
               onRemove={() => setPendingRemove(mediaId)}
-              onZoom={() => setZoomIndex(i)}
               onSplit={() => {
                 const full = mediaById.get(mediaId);
                 if (full) split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
@@ -495,11 +502,16 @@ export function ReferencesSection({
         </Text>
       )}
 
-      {/* ПРОМТ ВЫБРАННОГО ПРОГОНА ПОКАЗЫВАЕТСЯ ЗДЕСЬ — так сказал владелец (W-7): «нам должен при
-          выборе в INPUT — REFERENCES отображаться наш промт». Макет показывает его в раскрытой
-          строке истории; слушаем владельца, а не макет. Это `GroupLabel` + строки, не `Section`:
-          блок внутри блока запрещён. */}
-      <RecalledRunPrompt techCardId={techCardId} band={band} disabled={disabled} />
+      {/* ПРИЁМНИК РЕКОЛА (T-10). Панели «recalled — run N» с описью снимка здесь больше НЕТ: жест
+          на строке истории просто добавляет картинки и тексты того прогона в обычные референсы
+          выше, и дальше это обычные референсы. Видимого органа у приёмника нет — он рисует только
+          вопрос про описание изделия, и только когда описание уже непустое. */}
+      <RecalledRunPrompt
+        techCardId={techCardId}
+        band={band}
+        disabled={disabled}
+        onAccepted={(media) => setPicked((prev) => [...prev, ...media])}
+      />
 
       {/* Модалка сплита (R-17) — монтируется хуком, когда для картинки получена картинка полосы. */}
       {split.modal}
@@ -529,14 +541,6 @@ export function ReferencesSection({
           </Text>
         </div>
       </ConfirmationModal>
-
-      <MediaViewer
-        items={viewerItems}
-        index={zoomIndex ?? 0}
-        open={zoomIndex != null}
-        onOpenChange={(open) => !open && setZoomIndex(null)}
-        onIndexChange={setZoomIndex}
-      />
 
       <ConfirmationModal
         open={pendingRoleClear != null}
@@ -588,8 +592,25 @@ export function ReferencesSection({
 }
 
 /**
- * Одна ячейка: слева кадр с номером промпта и зумом, справа сверху роль и ✕, справа снизу записка.
- * Без своей рамки-блока — ячейка это СТРОКА внутри блока, а блок в блоке в этой системе запрещён.
+ * Одна ячейка: слева ПЛИТКА, справа роль и записка. Без своей рамки-блока — ячейка это СТРОКА
+ * внутри блока, а блок в блоке в этой системе запрещён.
+ *
+ * КАДР РИСУЕТ ОБЩИЙ ПРИМИТИВ `PictureTile`, И ЭТО ВЕСЬ ОТВЕТ НА T-7. Владелец, дословно и во
+ * второй раз: «в INPUT — REFERENCES на тамбнейлах картинок на ховер кнопка сплит должна быть снизу
+ * слева я уже второй раз это прошу». Второй раз просьба прозвучала потому, что первый раз её
+ * выполнили в ОДНОМ месте — на плите верстака, — а эта ячейка держала свои органы по собственной
+ * раскладке: номер и split колонкой в ЛЕВОМ ВЕРХНЕМ углу (`left-0 top-0`), zoom в правом верхнем,
+ * плашка «not in prompt» подвалом во всю ширину, ✕ вообще в соседней колонке рядом с селектом.
+ *
+ * Поэтому чинится это не координатами, а переездом: у `PictureTile` нет пропа «где рисовать
+ * сплит», раскладка углов — решение примитива (ярлык слева сверху, zoom и ✕ справа сверху, split
+ * СЛЕВА СНИЗУ), и разойтись с верстаком физически больше негде. Ячейка объявляет только РОЛИ.
+ *
+ * ЧТО ПЕРЕЕХАЛО ВМЕСТЕ С УГЛАМИ. ✕ ушёл из правой колонки на плитку — иначе один и тот же орган
+ * стоял бы на двух экранах в двух разных местах, что и есть предмет жалобы. Номер промпта стал
+ * ЯРЛЫКОМ примитива, а слова «not in prompt» встали в тот же ярлык, потому что номер и его
+ * отсутствие — одно утверждение и им незачем два места: пустой ярлык читался бы как «ещё не
+ * посчитали». Подвал во всю ширину снят и по существу: он лёг бы поверх кнопки split.
  */
 function ReferenceCell({
   mediaId,
@@ -601,7 +622,6 @@ function ReferenceCell({
   onRole,
   onNote,
   onRemove,
-  onZoom,
   onSplit,
   splitPending,
 }: {
@@ -614,7 +634,6 @@ function ReferenceCell({
   onRole: (role: string) => void;
   onNote: (note: string) => void;
   onRemove: () => void;
-  onZoom: () => void;
   onSplit: () => void;
   splitPending: boolean;
 }) {
@@ -642,77 +661,64 @@ function ReferenceCell({
     setDraft(note);
   }
 
-  // ✕ и zoom приходят по наведению и по фокусу внутри ячейки. На устройстве без наведения они
-  // видны всегда: иначе на планшете к ним нет пути вовсе.
-  const hoverOnly =
-    'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ' +
-    'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ' +
-    'motion-reduce:transition-none';
+  const label = `reference ${number ?? mediaId}`;
 
   return (
-    <div className={cn(CELL, 'group border-b border-hairline')}>
-      {/* КАДР ФИКСИРОВАН 160×200, КАРТИНКА ВПИСЫВАЕТСЯ ЦЕЛИКОМ (`object-contain`).
+    <div className={cn(CELL, 'border-b border-hairline')}>
+      {/* КАДР ФИКСИРОВАН 160×200, КАРТИНКА ВПИСЫВАЕТСЯ ЦЕЛИКОМ (`fit='contain'`).
           Навязанное соотношение законно ровно потому, что на референсе НЕТ выносок: доля кадра
           здесь ничего не адресует, и обрезать нечего. На мудборде и на флэте кадр обязан быть в
           пропорциях снимка — там по кадру ставят указания. */}
-      <div className='relative h-[200px] w-[160px] border border-borderColor bg-bgColor'>
-        {url ? (
-          <img
-            src={url}
-            alt={`reference ${number ?? mediaId}`}
-            className='h-full w-full object-contain'
-          />
-        ) : (
-          <div className='flex h-full w-full items-center justify-center px-1 text-center'>
-            <Text size='nano' variant='inactive' component='span'>
+      <PictureTile
+        url={url}
+        alt={label}
+        aspect='4/5'
+        fit='contain'
+        className='w-[160px]'
+        // ЯРЛЫК ГОВОРИТ ОДНО ИЗ ДВУХ: номер в промпте — или что промпт этой картинки не видит.
+        // Приглушать кадр вместо слова нельзя: приглушённый кадр читается как «картинка сломана».
+        badge={number ?? 'not in prompt'}
+        // Ряд листания собирает сам примитив, поэтому здесь объявляется только КАДР этой плитки.
+        // Пустой адрес зума не обещает — примитив в этом случае не рисует ни кнопки, ни курсора.
+        gallery={
+          url ? { src: fullUrl(full), thumbnail: url, type: 'image', alt: label } : undefined
+        }
+        onSplit={
+          !readOnly && url
+            ? {
+                onClick: onSplit,
+                pending: splitPending,
+                ariaLabel: `split ${label} into views`,
+                title: 'split — cut the views out of this picture',
+              }
+            : undefined
+        }
+        onRemove={
+          !readOnly
+            ? {
+                onClick: onRemove,
+                ariaLabel: `remove ${label} — picture, role and note together`,
+                title: 'remove this reference — picture, role and note together',
+              }
+            : undefined
+        }
+      >
+        {/* ПРИЧИНА ПУСТОГО КАДРА. Примитив говорит СОСТОЯНИЕ («no image»); карточка знает, почему
+            именно: строка есть, а файла под её `media_id` не нашлось ни в библиотеке, ни в полосе.
+            Низ кадра здесь свободен — split у безадресной плитки не рисуется. */}
+        {!url && (
+          <div className='pointer-events-none absolute inset-x-0 bottom-1 z-20 px-1 text-center'>
+            <Text size='nano' variant='label' component='span'>
               media #{mediaId} not resolved
             </Text>
           </div>
         )}
-        {/* ЛЕВЫЙ ВЕРХНИЙ УГОЛ — колонкой: номер промпта, под ним «split» (R-17: с противоположной
-            от зума стороны). Колонка, а не два absolute-органа на одну точку: у картинки с ролью
-            номер и кнопка иначе легли бы друг на друга. Видимость кнопки — та же формула, что у
-            зума и ✕: наведение ИЛИ фокус внутри ячейки; у клавиатуры ховера не бывает, и орган,
-            живущий только под курсором, для неё не существовал бы вовсе. */}
-        <div className='absolute left-0 top-0 flex flex-col items-start'>
-          {number != null && (
-            <span className='bg-textColor px-1 text-nano tabular-nums text-bgColor'>{number}</span>
-          )}
-          {!readOnly && url && (
-            <SplitCornerButton
-              onClick={onSplit}
-              pending={splitPending}
-              ariaLabel={`split reference ${number ?? mediaId} into views`}
-              className={hoverOnly}
-            />
-          )}
-        </div>
-        <button
-          type='button'
-          onClick={onZoom}
-          aria-label={`zoom reference ${number ?? mediaId}`}
-          className={cn(
-            'absolute right-0 top-0 border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label text-labelColor hover:text-textColor',
-            hoverOnly,
-          )}
-        >
-          zoom
-        </button>
-        {/* ПРИЗРАК «НЕ В ПРОМПТЕ» — СЛОВАМИ, А НЕ ПРИГЛУШЕНИЕМ. Приглушённый кадр читается как
-            «картинка сломана»; строка говорит, чего именно не хватает. Плашка непрозрачная: в этой
-            системе прозрачностей нет вовсе, а полупрозрачная подложка на пёстром снимке даёт серый
-            текст на сером — то есть не читается ровно там, где нужна. */}
-        {off && (
-          <span className='absolute bottom-0 left-0 right-0 border-t border-borderColor bg-bgColor px-1 text-center text-nano uppercase tracking-label text-labelColor'>
-            not in prompt
-          </span>
-        )}
-      </div>
+      </PictureTile>
 
       {/* ПРАВАЯ КОЛОНКА РОСТОМ В КАДР: строка роли фиксированной высоты, записка занимает
           остаток. Иначе поле записки росло бы по тексту и рвало ряд грида. */}
       <div className='grid h-[200px] min-w-0 grid-rows-[26px_1fr] gap-1.5'>
-        <div className='flex min-w-0 items-center gap-2'>
+        <div className='flex min-w-0 items-center'>
           <Select
             name={`ref-role-${mediaId}`}
             items={ROLE_ITEMS}
@@ -722,19 +728,6 @@ function ReferenceCell({
             onValueChange={onRole}
             className='w-[172px]'
           />
-          <button
-            type='button'
-            disabled={readOnly}
-            onClick={onRemove}
-            aria-label='remove this reference — picture, role and note together'
-            title='remove this reference — picture, role and note together'
-            className={cn(
-              'ml-auto px-1 text-labelColor hover:text-textColor disabled:text-textInactiveColor',
-              hoverOnly,
-            )}
-          >
-            ✕
-          </button>
         </div>
 
         <label htmlFor={noteId} className='sr-only'>

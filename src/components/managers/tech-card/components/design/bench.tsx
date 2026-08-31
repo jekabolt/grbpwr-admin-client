@@ -6,7 +6,7 @@ import type {
 } from 'api/proto-http/admin';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GroupLabel } from 'ui/components/group-label';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -106,7 +106,6 @@ export function Bench({
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
   const pick = usePickMode();
-  const viewer = useMediaViewer();
 
   const [optimistic, setOptimistic] = useState<Record<string, Optimistic>>({});
   /** A detail being minted has no slot to key on yet — it is born by this very write. */
@@ -317,17 +316,11 @@ export function Bench({
     ({ view, slot }) => !!shownPicture(sideRef(view), slot?.picture),
   ).length;
 
-  /** Everything the viewer can page through, in the order the bench draws it. */
-  const viewerPictures: common_DesignPicture[] = [];
-  for (const { view, slot } of bench.sides) {
-    const p = shownPicture(sideRef(view), slot?.picture);
-    if (p?.media) viewerPictures.push(p);
-  }
-  for (const slot of bench.details) {
-    const p = shownPicture(detailRef(slot.id), slot.picture);
-    if (p?.media) viewerPictures.push(p);
-  }
-  const viewerItems = viewerPictures.map((p) => mediaFullToViewerItem(p.media as common_MediaFull));
+  /* РЯД ПРОСМОТРЩИКА БОЛЬШЕ НЕ СОБИРАЕТСЯ ЗДЕСЬ. Он собирался из плит ВЕРСТАКА и только из них,
+     поэтому «дальше» упиралось в последнюю плиту: за краем верстака ряду просто нечего было
+     показать. Теперь каждая плитка регистрируется в общий `PictureGalleryProvider` студии
+     (смонтирован в `studio-tab.tsx`), а порядок ряда берётся из порядка в документе — листается
+     ровно то, что человек видит, включая референсы и историю прогонов. */
 
   return (
     <Section
@@ -395,10 +388,8 @@ export function Bench({
               onUnmark={() => unmark(ref, rev)}
               // Ручкой сплиту служит имя слота: человек режет «плиту FRONT», а не «upload 3 · b».
               onSplit={picture ? () => split.openForPicture(picture, viewLabel(view)) : undefined}
-              onOpenViewer={
-                picture?.media
-                  ? () => viewer.openAt(viewerPictures.findIndex((p) => p.id === picture.id))
-                  : undefined
+              galleryItem={
+                picture?.media ? mediaFullToViewerItem(picture.media as common_MediaFull) : undefined
               }
             />
           );
@@ -460,10 +451,8 @@ export function Bench({
                   ? 'the issued sheet cites this slot by name — it cannot be removed'
                   : null
               }
-              onOpenViewer={
-                picture?.media
-                  ? () => viewer.openAt(viewerPictures.findIndex((p) => p.id === picture.id))
-                  : undefined
+              galleryItem={
+                picture?.media ? mediaFullToViewerItem(picture.media as common_MediaFull) : undefined
               }
             />
           );
@@ -490,7 +479,6 @@ export function Bench({
       {/* Модалка сплита (R-17) — одна на верстак, открывается кнопкой «split» любой плиты. */}
       {split.modal}
 
-      <MediaViewer items={viewerItems} {...viewer} />
     </Section>
   );
 }

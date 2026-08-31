@@ -72,10 +72,13 @@ export function EmptyStudio({
         </Text>
         {/* ПУСТОЕ СОСТОЯНИЕ УЧИТ НОВОМУ ПУТИ (после сноса полки оно — единственный учитель):
             вход → сплит → роли → слоты. Прежний текст обещал «полку загрузок», которой больше
-            нет, — учитель, показывающий на снесённую дверь, хуже молчания. */}
+            нет, — учитель, показывающий на снесённую дверь, хуже молчания. «prompt», не «ask»:
+            поле ASK снято владельцем (T-3, круг 4), строка истории показывает настоящий
+            отправленный промпт — обещать здесь орган, которого больше нет, значило бы учить
+            снесённой двери второй раз. */}
         <Text size='micro' variant='label' component='p' className='max-w-[82ch]'>
           Nothing has been generated or brought. A run would open a <b>generation history</b> here,
-          with the ask and the price on every row. Files brought by hand go into{' '}
+          with its prompt and price on every row. Files brought by hand go into{' '}
           <b>input — references</b> above: a sheet of several views gets <b>split</b> into frames,
           and each frame arrives in the input already marked with its view. A single view can also
           be dropped straight onto its empty slot below.

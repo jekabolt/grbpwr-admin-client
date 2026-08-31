@@ -336,7 +336,11 @@ export function useTraceVector(input: {
           threed: undefined,
           fixTarget: '',
           fixTargets: req.fixTargets,
-          fixSlotIds: req.fixSlotIds,
+          // Деталей этот прогон не просит, и список пуст ЯВНО: сервер сверяет его длину с числом
+        // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
+        // список, только молча.
+        detailSlotIds: [],
+        fixSlotIds: req.fixSlotIds,
           extraInputMediaIds: [],
           autoSplit: false,
         },

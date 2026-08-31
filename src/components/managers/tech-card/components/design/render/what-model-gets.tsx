@@ -22,12 +22,15 @@ import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
+  FABRIC_AUTHORITY,
   benchSides,
   colourLabel,
   colourSubtitle,
   colourSwatchHex,
+  fabricStatement,
   latestRenderByView,
   pictureThumb,
+  renderSheetViews,
   stripProvenance,
 } from './model';
 
@@ -221,9 +224,14 @@ export function WhatModelGetsRenderModal({
 
 /**
  * INPUTS ARE THE PLATES IN THE SLOTS, and the panel counts them out of four rather than listing
- * only the ones that exist. A render is asked for one picture per FILLED slot, so an empty side is
- * not a footnote — it is a side that will not come back, and the count is what says so before the
+ * only the ones that exist. A render is asked for exactly the FILLED slots, so an empty side is not
+ * a footnote — it is a side that will not be in the sheet, and the count is what says so before the
  * money moves.
+ *
+ * THE FABRIC IS SHOWN AS THREE SOURCES AND A RANKING, not as one colour. Since the owner allowed
+ * them to be combined they can contradict each other, and the panel exists precisely so a person
+ * about to spend money sees what was actually said — including which of two disagreeing statements
+ * the model is instructed to obey. The ranking is quoted from the prompt, never recomputed here.
  */
 function RenderBody({
   band,
@@ -239,6 +247,9 @@ function RenderBody({
   const { showMessage } = useSnackBarStore();
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
+  /** The sheet's own left-to-right order — the same list the run sends and the splitter labels. */
+  const views = useMemo(() => renderSheetViews(band), [band]);
+  const stated = fabricStatement(recipe);
   const references = (band.references ?? []).length;
 
   return (
@@ -264,20 +275,36 @@ function RenderBody({
                 stripProvenance(band, side.picture)
               ) : (
                 <span className='text-labelColor'>
-                  empty — this side is not asked for and does not come back
+                  empty — this side is not in the sheet and does not come back
                 </span>
               )
             }
           />
         ))}
         <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
-          one picture per filled slot. A slot is filled on the input strip of this very screen —
+          {views.length > 1 ? (
+            <>
+              One picture comes back: <b>{views.length} views in a row</b> on one sheet, left to
+              right — {views.map(viewLabel).join(', ')} — split into the slots afterwards.
+            </>
+          ) : (
+            <>One picture comes back. </>
+          )}{' '}
+          A slot is filled on the input strip of this very screen —
           <b> input — flats of this card</b>, above the menu.
         </Text>
       </div>
 
       <div>
-        <GroupLabel>colour</GroupLabel>
+        <GroupLabel
+          action={
+            <Text size='micro' variant='label' component='span' className='normal-case'>
+              {FABRIC_AUTHORITY}
+            </Text>
+          }
+        >
+          fabric
+        </GroupLabel>
         <div className='flex items-center gap-2 border-b border-hairline py-1'>
           <Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={22} />
           <Text size='micro' component='span' className='min-w-0 flex-1'>
@@ -286,11 +313,26 @@ function RenderBody({
         </div>
         <div className='flex items-center gap-2 border-b border-hairline py-1'>
           <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
+            photo
+          </Text>
+          <Text size='micro' component='span' className='min-w-0 flex-1'>
+            {stated.photo ? (
+              <>
+                media {recipe?.fabricMediaId} — goes out as an image; the weave, texture and drape
+                are read from it
+              </>
+            ) : (
+              <span className='text-labelColor'>none — no material is stated by a picture</span>
+            )}
+          </Text>
+        </div>
+        <div className='flex items-center gap-2 border-b border-hairline py-1'>
+          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
             words
           </Text>
           <Text size='micro' component='span' className='min-w-0 flex-1'>
             {(recipe?.words ?? '').trim() || (
-              <span className='text-labelColor'>none — the colour goes in unqualified</span>
+              <span className='text-labelColor'>none — nothing is added beyond the two above</span>
             )}
           </Text>
         </div>
@@ -563,8 +605,11 @@ function plainText({
       `inputs: ${sides
         .map((side) => `${viewLabel(side.view)}=${side.picture ? 'plate' : 'empty'}`)
         .join(', ')}`,
-      `colour: ${colourLabel(recipe, resolved.colors)}`,
-      `material words: ${(recipe?.words ?? '').trim() || '—'}`,
+      `sheet: ${renderSheetViews(band).map(viewLabel).join(', ') || '—'} (one picture, split afterwards)`,
+      `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,
+      `picked colour: ${colourLabel(recipe, resolved.colors)}`,
+      `fabric in words: ${(recipe?.words ?? '').trim() || '—'}`,
+      `order of authority: ${FABRIC_AUTHORITY}`,
       'not sent: references, moodboard, callouts',
     );
     return lines.join('\n');

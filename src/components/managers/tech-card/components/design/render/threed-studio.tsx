@@ -3,7 +3,7 @@ import { useAllModels } from 'components/managers/models/components/useModelQuer
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState, type JSX } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
@@ -56,6 +56,12 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * THE FIT OVERRIDE IS A STATED DEVIATION. It applies to this submission only, and the contract
  * stamps every frame it produces — the card stays the single place of truth about the garment's
  * fit, which is why the override is worded as a badge rather than as a setting.
+ *
+ * ЗУМ ЗДЕСЬ ТОТ ЖЕ, ЧТО ВЕЗДЕ (T-8). Экран держал СВОЙ `MediaViewer`, а его ряд состоял ровно из
+ * четырёх сторон этой полосы — то есть увеличенный кадр турнтейбла был тупиком: ни к рендерам, ни
+ * к истории прогонов, ни к флэтам из него было не перелистнуть. Своего просмотрщика больше нет:
+ * плита объявляет кадр (`gallery`), а ряд собирает и показывает общий `PictureGalleryProvider`
+ * студии.
  */
 
 /** Radix forbids an empty item value, so every «nothing chosen» option here is a sentinel. */
@@ -97,7 +103,6 @@ export function ThreedStudio({
 }): JSX.Element {
   const { draft, patch } = useThreedDraft();
   const cardFit = useCardFit();
-  const viewer = useMediaViewer();
   const { dictionary } = useDictionary();
   const { data: models } = useAllModels();
   const run = useStartDesignRun(techCardId);
@@ -111,11 +116,6 @@ export function ThreedStudio({
   const sizes = dictionary?.sizes ?? [];
   const sizeName = (id: number) =>
     (sizes.find((s) => s.id === id)?.name ?? '').trim() || (id ? `size ${id}` : '');
-
-  const viewerPictures = present
-    .map((view) => byView[view]!.picture)
-    .filter((picture) => !!picture.media);
-  const viewerItems = viewerPictures.map((picture) => mediaFullToViewerItem(picture.media!));
 
   const gate: Gate = useMemo(() => {
     const base = threedGate(band);
@@ -151,7 +151,11 @@ export function ThreedStudio({
       ask: '',
       params: {
         views: [...SILHOUETTE_VIEWS],
-        layout: '',
+        // Деталей этот прогон не просит, и список пуст ЯВНО: сервер сверяет его длину с числом
+      // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
+      // список, только молча.
+      detailSlotIds: [],
+      layout: '',
         colour: undefined,
         threed: {
           frames: draft.frames,
@@ -227,7 +231,6 @@ export function ThreedStudio({
                 />
               );
             }
-            const index = viewerPictures.indexOf(plate.picture);
             return (
               <StripCell
                 key={view}
@@ -235,18 +238,8 @@ export function ThreedStudio({
                 src={pictureThumb(plate.picture)}
                 alt={viewLabel(view)}
                 badge={viewLabel(view)}
-                corner={
-                  index >= 0 ? (
-                    <button
-                      type='button'
-                      onClick={() => viewer.openAt(index)}
-                      className='border border-borderColor bg-bgColor px-1 py-px uppercase hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                    >
-                      <Text size='nano' variant='uppercase' component='span'>
-                        zoom
-                      </Text>
-                    </button>
-                  ) : undefined
+                gallery={
+                  plate.picture.media ? mediaFullToViewerItem(plate.picture.media) : undefined
                 }
                 lines={[
                   `latest · ${viewLabel(view)}`,
@@ -288,14 +281,6 @@ export function ThreedStudio({
             )}
           </LockBar>
         )}
-
-        <MediaViewer
-          items={viewerItems}
-          index={viewer.index}
-          open={viewer.open}
-          onOpenChange={viewer.onOpenChange}
-          onIndexChange={viewer.onIndexChange}
-        />
       </Section>
 
       <Section title='generation — 3D' question='— frames and how it sits'>

@@ -55,8 +55,12 @@ export type ColourDraft = {
   recipe: common_DesignColourRecipe;
   /** Replace one field of the recipe. */
   patch: (next: Partial<common_DesignColourRecipe>) => void;
-  /** Restore a whole recipe — what a colour-history chip does. */
-  restore: (recipe: common_DesignColourRecipe) => void;
+  /** Clear one source of the recipe without touching the other two — «remove the photo», «clear the
+   *  colour». A `patch` could express it, but only by spelling the empty value of each field at the
+   *  call site, and the three sources now combine: an organ that cleared a photo by writing
+   *  `{ fabricMediaId: 0, code: '', hex: '' }` (the old switch's habit) would take the colour with
+   *  it, silently, on a screen whose whole point is that the two coexist. */
+  clear: (source: 'photo' | 'colour' | 'words') => void;
 };
 
 /**
@@ -64,7 +68,9 @@ export type ColourDraft = {
  *
  * SEEDED ONCE, AND ONLY WHILE UNTOUCHED. `colour_recipes` is newest first, so the first entry is
  * what the card last rendered — opening the studio on it is what makes «render the same thing in
- * another size» a single press. The seed is dropped the moment a human touches anything, because a
+ * another size» a single press. This seed is now the ONLY way a past recipe comes back: the colour
+ * history that used to restore one by chip was removed on the owner's word («COLOUR HISTORY нам не
+ * нужен»), so the last recipe has to arrive by itself or not at all. The seed is dropped the moment a human touches anything, because a
  * band refetch (any write on the card invalidates it) would otherwise reach in and overwrite a
  * half-made choice with the last finished one.
  */
@@ -86,14 +92,17 @@ export function useColourDraft(band: GetDesignBandResponse): ColourDraft {
       touched.current = true;
       setRecipe((prev) => ({ ...prev, ...next }));
     },
-    restore: (next) => {
+    clear: (source) => {
       touched.current = true;
-      setRecipe({
-        source: next.source ?? '',
-        code: next.code ?? '',
-        hex: next.hex ?? '',
-        words: next.words ?? '',
-        fabricMediaId: next.fabricMediaId ?? 0,
+      setRecipe((prev) => {
+        switch (source) {
+          case 'photo':
+            return { ...prev, fabricMediaId: 0 };
+          case 'colour':
+            return { ...prev, code: '', hex: '' };
+          default:
+            return { ...prev, words: '' };
+        }
       });
     },
   };

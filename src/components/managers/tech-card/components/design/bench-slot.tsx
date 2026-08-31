@@ -18,7 +18,8 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
-import { SplitCornerButton } from './split-to-input';
+import type { MediaViewerItem } from 'ui/components/media-viewer';
+import { PictureTile } from './picture-tile';
 import { selectPickablePictures } from './visibility';
 
 /**
@@ -278,7 +279,13 @@ export type BenchSlotProps = {
   onPick: () => void;
   onCancelPick: () => void;
   onUnmark: () => void;
-  onOpenViewer?: () => void;
+  /**
+   * Кадр этой плиты для ОБЩЕГО просмотрщика студии (`PictureGalleryProvider`). Раньше здесь стоял
+   * `onOpenViewer?: () => void` и открывал просмотрщик ВЕРСТАКА — свой, со своим рядом, поэтому
+   * листание упиралось в край верстака. Теперь плитка регистрируется в один ряд на всю полосу, и
+   * «дальше» уводит в референсы и историю, как и просил владелец (круг 4, пункт 8).
+   */
+  galleryItem?: MediaViewerItem;
   /**
    * Разрезать плиту этого слота на кадры видов → строки входа (R-17, владелец: «тоже самое должно
    * работать в FLAT SLOTS»). Механизм живёт в `split-to-input.tsx` и подаётся сверху (`bench.tsx`
@@ -337,7 +344,7 @@ export function BenchSlot(props: BenchSlotProps) {
     onPick,
     onCancelPick,
     onUnmark,
-    onOpenViewer,
+    galleryItem,
     onSplit,
     onRename,
     onDelete,
@@ -405,75 +412,45 @@ export function BenchSlot(props: BenchSlotProps) {
       </div>
 
       {url ? (
-        <div
-          className={cn(
-            'relative border',
-            picking ? 'border-textColor' : 'border-textInactiveColor',
-          )}
-          style={{ aspectRatio: '4/5' }}
-        >
-          {/* `contain`, not `cover`: a flat is a DRAWING and a crop of it loses the garment's
-              outline, which is the one thing the sheet is printed for. */}
-          <MediaComponent src={url} alt={label} aspectRatio='auto' fit='contain' />
-          {/* ЧЕТЫРЕ УГЛА ПЛИТЫ (S-4/S-15, владелец дословно: «сплит слева снизу и эдит справа
-              снизу на тамбнейле», «unmark заменить на крестик в правом верхнем углу»):
-                левый верхний  — ярлык слота (не кнопка);
-                правый верхний — ✕, бывший «unmark»: очистить слот, двери пустого слота откроются;
-                левый нижний   — split (R-17);
-                правый нижний  — edit, векторный редактор штрихов (бывший `edit ▸` подвала).
-              Все углы выше просмотрщика (z-20 против его inset-0 z-10), иначе клик уходил бы в
-              зум. Ярлык прозрачен для указателя и ограничен шириной ДО крестика — углы не смеют
-              наезжать ни друг на друга, ни на нижнюю строку органов. Тихие органы живут по
-              QUIET_ORGAN: наведение ИЛИ фокус внутри плитки, всегда — без наведения. */}
-          <div className='pointer-events-none absolute left-1 top-1 z-20 max-w-[calc(100%-32px)]'>
-            <span className='inline-block bg-textColor px-1.5 py-0.5'>
-              <Text size='nano' variant='uppercase' component='span' className='!text-bgColor break-words'>
-                {label}
-              </Text>
-            </span>
-          </div>
-          {!disabled && picture && (
-            <button
-              type='button'
-              aria-label={`unmark ${label}`}
-              title='unmark — empty this slot'
-              disabled={saving}
-              onClick={onUnmark}
-              className={cn('absolute right-1 top-1 z-20 py-0.5 leading-none', CORNER_ORGAN, QUIET_ORGAN)}
-            >
-              ✕
-            </button>
-          )}
-          {!disabled && onSplit && (
-            <SplitCornerButton
-              onClick={onSplit}
-              ariaLabel={`split ${label} into views`}
-              className={cn('absolute bottom-1 left-1 z-20 pointer-events-auto', QUIET_ORGAN)}
-            />
-          )}
-          {/* `edit` — ВЕКТОРНЫЙ РЕДАКТОР ШТРИХОВ (`vectorModal` прототипа): рисование по самому
-              чертежу, своим слоем, с растром-калькой снизу. Слой пишется настоящими
-              `GetDesignEditLayer` / `SaveDesignEditLayer` / `FlattenDesignEditLayer`. Не путать с
-              редактором УКАЗАНИЙ: тот живёт на ARTIFACTS, над плитами документа. */}
-          {!disabled && picture && (
-            <button
-              type='button'
-              aria-label={`edit ${label} — draw over the plate`}
-              onClick={() => setVectorOpen(true)}
-              className={cn('absolute bottom-1 right-1 z-20', CORNER_ORGAN, QUIET_ORGAN)}
-            >
-              edit
-            </button>
-          )}
-          {onOpenViewer && (
-            <button
-              type='button'
-              aria-label={`open ${label}`}
-              onClick={onOpenViewer}
-              className='absolute inset-0 z-10 cursor-zoom-in focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-            />
-          )}
-        </div>
+        /* ЧЕТЫРЕ УГЛА ПЛИТЫ БОЛЬШЕ НЕ ЗАДАЮТСЯ ЗДЕСЬ. Владелец (круг 4, пункт 8): «сделай везде
+           одинаково включая кнопку сплит нахуя ты делаешь везде по разному может сделать это
+           компонентом». Раскладка переехала в примитив `PictureTile`, и задать другую нельзя —
+           пропа «где рисовать сплит» у него нет намеренно. Плита объявляет только РОЛИ:
+           ✕ очищает слот, split режет на виды, edit открывает векторный редактор штрихов.
+           `contain`, не `cover`: плита — ЧЕРТЁЖ, и кроп съедает контур изделия, ради которого
+           лист и печатают. */
+        <PictureTile
+          url={url}
+          alt={label}
+          badge={label}
+          aspect='4/5'
+          fit='contain'
+          selected={picking}
+          gallery={galleryItem}
+          onRemove={
+            !disabled && picture
+              ? {
+                  onClick: onUnmark,
+                  ariaLabel: `unmark ${label}`,
+                  title: 'unmark — empty this slot',
+                  disabled: saving,
+                }
+              : undefined
+          }
+          onSplit={
+            !disabled && onSplit
+              ? { onClick: onSplit, ariaLabel: `split ${label} into views` }
+              : undefined
+          }
+          onEdit={
+            !disabled && picture
+              ? {
+                  onClick: () => setVectorOpen(true),
+                  ariaLabel: `edit ${label} — draw over the plate`,
+                }
+              : undefined
+          }
+        />
       ) : (
         <MediaSlot
           aspectRatio={['Custom']}

@@ -1,12 +1,12 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
+import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import { clockStamp } from '../handles';
-import { recallDesignRun, useRecalledRun } from '../history-recall';
+import { recallDesignRun, useRecallHostMounted } from '../history-recall';
 import { viewLabel } from '../views';
 import { formatMoney } from './money';
 import { isCancelling, isRunLive, viewsLine } from './run-state';
@@ -14,16 +14,31 @@ import { Thumb } from './thumb';
 import { useGenerationWrites } from './use-generation';
 
 /**
- * THE RUN PANEL — the run's detail, at the owner's density (S-9): the input reference thumbnails
- * in one row, `views · layout`, `fit at launch`, `who · when`, the attempts, and the door that
- * puts the references back into the input. Nothing else.
+ * THE RUN PANEL — the run's detail at the owner's density (T-9: «сделай раскрытую деталку рана еще
+ * компактнее»). Denser is a matter of CHROME, not of facts: the label column narrowed, the row
+ * padding halved, `views · layout` and `fit at launch` folded into one line because they are one
+ * sentence about one launch, and the attempts lost their group bar and their per-row rules. Nothing
+ * that was stated here stopped being stated.
  *
  * EVERYTHING DRAWN HERE IS A LAUNCH-TIME COPY. The card has almost certainly moved on since —
  * references get deleted, plates get replaced — and the snapshot is what makes «why did this
  * picture come out like that» answerable a month later, precisely because it is NOT a live join
- * into the card. The full prompt — the words, the roles, the notes, the markup — is one gesture
- * away: `recall` shows it in INPUT — REFERENCES, where a rerun can be asked for from it. This
- * panel deliberately repeats none of it.
+ * into the card.
+ *
+ * IT NOW CARRIES THE SENT TEXT, AND THAT IS WHY THE ASK COULD GO. The `ask` field was removed from
+ * the flat form and from the history's own caption (T-3), so the row would have lost the only words
+ * it printed. `run.prompt` is a better answer than the one it replaces: the ask was what somebody
+ * typed, this is what the worker STORED AT DISPATCH, before the first paid attempt. It is folded
+ * away by default because it is a paragraph, not a field.
+ *
+ * ⚠ THE STORED TEXT IS THE BASE INSTRUCTION, AND THE WORD IS THE CONTRACT'S. On the single-call
+ * flat route it is what the provider received byte for byte; on `per_view` each paid call also gets
+ * its own view line appended, and on 3D the text is cut to the provider's texture ceiling. The row
+ * says «base text» for that reason and its title spells the two deviations out.
+ *
+ * EMPTY MEANS TWO DIFFERENT THINGS AND THEY ARE NOT COLLAPSED: a run nobody has picked up yet has
+ * not composed one, and every row older than the column (migration 0352) has none and never will.
+ * A screen that says «not dispatched yet» over an old finished run is lying about history.
  *
  * THE SNAPSHOT IS THE SERVER'S. `DesignInputSnapshot` is output-only — a client-supplied
  * provenance is a claim, not provenance — so this component reads and never composes. A frozen
@@ -36,14 +51,23 @@ import { useGenerationWrites } from './use-generation';
  * attempts are rows and not a counter.
  */
 
-function PanelRow({ k, children }: { k: string; children: React.ReactNode }) {
+function PanelRow({
+  k,
+  title,
+  children,
+}: {
+  k: string;
+  /** The clause a compacted label no longer has room to say out loud. */
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className='flex gap-2 border-b border-hairline py-1 last:border-b-0'>
+    <div className='flex gap-2 border-b border-hairline py-0.5 last:border-b-0' title={title}>
       <Text
         size='micro'
         variant='label'
         component='span'
-        className='w-28 shrink-0 uppercase tracking-label'
+        className='w-20 shrink-0 uppercase tracking-label'
       >
         {k}
       </Text>
@@ -68,7 +92,8 @@ export function RunPanel({
   disabled?: boolean;
 }) {
   const { cancelRun } = useGenerationWrites(techCardId);
-  const recalled = useRecalledRun(techCardId);
+  const recallHosted = useRecallHostMounted(techCardId);
+  const [textOpen, setTextOpen] = useState(false);
 
   const inputs = run.inputs;
   const refs = inputs?.refs ?? [];
@@ -79,22 +104,30 @@ export function RunPanel({
   const priceEstimate = formatMoney(run.priceEstimate, run.currency);
   const money = priceActual || (priceEstimate ? `${priceEstimate} reserved` : '');
 
+  const fit = (run.fitAtLaunch ?? '').trim();
+  const sent = (run.prompt ?? '').trim();
+
   const runId = run.id ?? 0;
+  const isVector = (run.kind ?? '').trim().toLowerCase() === 'vector';
   /**
-   * RECALL IS OFFERED ONLY WHERE THERE IS A SNAPSHOT TO SHOW — same rule as the row's own chip. A
-   * row served without `inputs` would select into an empty panel, and a gesture whose whole
-   * promise is «put what was fed back in front of you» must not be offered when nothing was
-   * frozen.
+   * WHEN THE RECALL IS OFFERED — the same four conditions as the chip on the row, and they are the
+   * same conditions because it is the same verb in a second posture, not a second verb.
+   *
+   * `inputs` — nothing frozen, nothing to hand over. NOT A VECTOR ROW — the owner's exception
+   * (T-16): a redraw is started from the plate's own editor and its input is that plate. A HOST ON
+   * SCREEN — the intake lives in INPUT — REFERENCES, drawn on the FLAT tab only, and this panel is
+   * opened from a history that RENDER and 3D mount without it; there the press would arm a gesture
+   * nobody takes and the chip would stay lit forever. NOT READ-ONLY — the recall writes reference
+   * rows and roles, and a frozen card can only refuse them.
    */
-  const recallable = !!inputs && runId > 0;
-  const isRecalled = recallable && (recalled?.id ?? 0) === runId;
+  const recallable = !!inputs && runId > 0 && !isVector && recallHosted && !disabled;
 
   return (
-    <div className='my-1.5 bg-bgZebra px-2.5 py-2'>
+    <div className='mt-1 bg-bgZebra px-2 py-1.5'>
       {/* THE INPUT REFERENCES, AS THUMBNAILS IN A ROW (S-9). Role and note ride in the title —
           the full, worded prompt is what `recall` below is for. */}
       {refs.length > 0 && (
-        <div className='flex flex-wrap items-center gap-1 border-b border-hairline pb-1.5'>
+        <div className='flex flex-wrap items-center gap-1 border-b border-hairline pb-1'>
           {refs.map((ref, i) => (
             <span
               key={`${ref.mediaId ?? 0}-${i}`}
@@ -107,21 +140,19 @@ export function RunPanel({
                 media={ref.media}
                 gone={!!ref.deleted}
                 alt={viewLabel(ref.role) || 'reference'}
-                className='h-14 w-11'
+                className='h-11 w-9'
               />
             </span>
           ))}
         </div>
       )}
 
-      <PanelRow k='views · layout'>{viewsLine(run.params)}</PanelRow>
-
-      <PanelRow k='fit at launch'>
-        {(run.fitAtLaunch ?? '').trim() || (
-          <Text size='micro' variant='label' component='span'>
-            not stated — the mint asks
-          </Text>
-        )}
+      {/* ONE LINE FOR THE LAUNCH: what was asked for and the fit it was asked under. Two rows for
+          one sentence was the loosest thing on this panel. */}
+      <PanelRow k='asked' title='the views and layout this run requested, and the fit the card carried at launch'>
+        {[viewsLine(run.params), fit ? `fit ${fit}` : 'fit not stated — the mint asks']
+          .filter(Boolean)
+          .join(' · ')}
       </PanelRow>
 
       <PanelRow k='who · when'>
@@ -129,19 +160,51 @@ export function RunPanel({
           MUTED}
       </PanelRow>
 
+      <PanelRow
+        k='base text'
+        title='the base instruction the worker composed and stored at dispatch, before the first paid attempt. A per-view run appends its own view line to each call and a 3D run is cut to the texture ceiling, so on those two routes this is the base and not a transcript.'
+      >
+        {sent ? (
+          <>
+            <button
+              type='button'
+              onClick={() => setTextOpen((v) => !v)}
+              aria-expanded={textOpen}
+              className='cursor-pointer uppercase tracking-label text-labelColor underline hover:text-textColor'
+            >
+              {textOpen ? '▾ hide' : '▸ show'} · {sent.length} characters
+            </button>
+            {textOpen && (
+              <Text size='micro' component='p' className='mt-1 whitespace-pre-wrap break-words'>
+                {sent}
+              </Text>
+            )}
+          </>
+        ) : live ? (
+          <Text size='micro' variant='label' component='span'>
+            not composed yet — the worker writes it when it picks the run up
+          </Text>
+        ) : (
+          <Text size='micro' variant='label' component='span'>
+            not kept for this run
+          </Text>
+        )}
+      </PanelRow>
+
       {/* ATTEMPTS ARE THE HONEST HALF OF THE MONEY: without per-attempt rows, `price_actual` reads
           as the price of the LAST attempt and the budget bar undercounts every retry. «Failed, and
-          the money was still taken» is exactly the sentence a money register exists to say. */}
+          the money was still taken» is exactly the sentence a money register exists to say. They
+          sit inside one row now instead of under a group bar of their own — same lines, one less
+          rule and one less heading. */}
       {attempts.length > 0 && (
-        <>
-          <GroupLabel>attempts</GroupLabel>
+        <PanelRow k={`attempts · ${attempts.length}`}>
           {attempts.map((attempt, i) => (
-            <div
+            <span
               key={`${attempt.attemptNo ?? i}`}
-              className='flex flex-wrap items-baseline gap-2 border-b border-hairline py-1 last:border-b-0'
+              className='flex flex-wrap items-baseline gap-1.5'
             >
               <Text size='micro' component='span' className='uppercase tracking-label'>
-                attempt {attempt.attemptNo ?? i + 1}
+                {attempt.attemptNo ?? i + 1}
               </Text>
               <Text size='micro' variant='label' component='span'>
                 {[
@@ -158,29 +221,27 @@ export function RunPanel({
               {(attempt.state ?? '') === 'unknown' && (
                 <Pill tone='attention'>outcome not knowable</Pill>
               )}
-            </div>
+            </span>
           ))}
-        </>
+        </PanelRow>
       )}
 
       {(recallable || live) && (
-        <div className='mt-1.5 flex flex-wrap items-center gap-2'>
-          {/* THE DOOR THE OWNER ASKED FOR (S-9): put this run's references back into the input,
-              «so a reproduce can be made — maybe with a change». It is the SAME `recall` selection
-              as the chip on the row — one verb, two postures — and it reads the card, never writes
-              it: the frozen prompt appears in INPUT — REFERENCES with the rerun door beside it. */}
+        <div className='mt-1 flex flex-wrap items-center gap-2'>
+          {/* THE DOOR THE OWNER ASKED FOR (S-9), IN THE SHAPE HE ASKED FOR IT LATER (T-10): put
+              this run's references back into the input, «so a reproduce can be made — maybe with a
+              change». It is the SAME verb as the chip on the row, in a second posture — and it no
+              longer SHOWS anything: the pictures become ordinary reference rows and the words go
+              into the garment description, which is why the caption says copy and not display. It
+              is also not a toggle any more; the intake consumes the selection in the same tick, so
+              «recalled — in the input» would have been a state that never survives its own frame.
+              No rerun door rides beside it: a run starts only from GENERATION — FLAT → GENERATE. */}
           {recallable && (
             <Chip
-              selected={isRecalled}
-              pressed={isRecalled}
-              onClick={() => recallDesignRun(techCardId, isRecalled ? null : run)}
-              title={
-                isRecalled
-                  ? 'stop showing this run’s prompt'
-                  : 'show this run’s frozen prompt — pictures, words and markup — in INPUT — REFERENCES, ready for a rerun'
-              }
+              onClick={() => recallDesignRun(techCardId, run)}
+              title='copy this run’s pictures into the input references and its words into the garment description. A description you have already written is replaced only after a question. Nothing is launched.'
             >
-              {isRecalled ? 'recalled — in the input' : 'recall — references back to input ▸'}
+              recall — references back to input ▸
             </Chip>
           )}
           {live && (

@@ -3,16 +3,15 @@ import type {
   GetDesignBandResponse,
   common_DesignPicture,
   common_DesignRun,
-  common_MediaFull,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Fragment, useCallback, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
 import {
-  MediaViewer,
-  mediaFullListToViewerItems,
+  mediaFullToViewerItem,
   mediaFullViewerSrc,
   type MediaViewerItem,
 } from 'ui/components/media-viewer';
@@ -26,31 +25,20 @@ import { buildHideGuard, isPickablePicture } from '../band-feed';
 import { displayDetailName, readBench } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { clockStamp, pictureHandle, runHandle } from '../handles';
-import {
-  DIVIDER_SCOPE,
-  fingerprint,
-  firstEarlierIndex,
-  refsOfCard,
-} from '../history-fingerprint';
-import { useDesignQuestion } from '../history-question';
-import { RecalledRunPrompt, recallDesignRun, useRecallHostMounted, useRecalledRun } from '../history-recall';
+import { recallDesignRun, useRecallHostMounted } from '../history-recall';
 import { usePickMode } from '../pick-mode';
+import { PictureTile, useGalleryGroup } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { SplitModal } from '../split-modal';
 import { useDesignWrites } from '../use-design-band';
 import {
-  canOfferHide,
-  countHiddenPictures,
-  hiddenCountOfRun,
-  hideBlockReason,
   isPictureHidden,
   isRunArchived,
-  selectVisiblePictures,
   type HideBlockReason,
   type HideGuard,
 } from '../visibility';
 import { viewLabel } from '../views';
-import { CompositeBadge, CompositeMarks, compositeTail, readComposite, splitVerb } from './composite';
+import { CompositeMarks, compositeTail, readComposite, splitVerb } from './composite';
 import { formatMoney } from './money';
 import { RunPanel } from './run-panel';
 import {
@@ -59,45 +47,62 @@ import {
   fixSelectionOf,
   isCancelling,
   isRunLive,
-  runCaption,
   runOutcomeNote,
 } from './run-state';
 import { SlotPicker } from './slot-picker';
+import { thumbUrl } from './thumb';
 import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from './use-generation';
 
 /**
  * THE GENERATION HISTORY — runs, and only runs.
  *
- * NOTHING IS EVER DELETED HERE. A run row is permanent: archiving collapses it (presentational,
- * reversible, and refused while any of its pictures is protected), and hiding a picture is a
- * separate, equally reversible verb on the picture itself. The two are deliberately not one
- * control — archiving the row must never do in bulk what the ✕ refuses to do one tile at a time.
+ * NOTHING IS EVER DELETED HERE, AND THE GENERATION IS THE UNIT THAT COLLAPSES. Archiving folds a
+ * whole run row away — presentational, reversible, and refused while any of its pictures is
+ * protected. There is NO per-picture hide any more (T-14): «каждую отдельную картинку в генерации
+ * не нужно иметь возможности хайдить … а архив всю генерацию». So a row shows everything its run
+ * produced, including a picture still carrying the old `hidden_at` stamp — that stamp is read by
+ * every picker, so the tile says the word rather than dropping the picture out of the row with
+ * nothing on screen to explain the gap.
  *
  * RUNS ONLY, BECAUSE UPLOADS ARE NOT RUNS. A hand-brought file has no run row and no price; it
  * belongs on the uploads shelf, which is its own block. The wire ships both halves of the merged
  * feed and this organ reads one of them — the shelf reads the other, from the same band.
  *
- * THE ROWS ARE PAGED, AND THE HEADER'S SUMS ARE NOT. `total_runs` and `archived_runs` are
- * aggregates over the WHOLE band; counting the rows on screen would make the header lie by exactly
- * the amount that is not on screen, and it would lie MORE the more history a card has.
+ * THREE ROWS AT A TIME, AND THE HEADER'S SUMS ARE NOT PAGED (T-17). The pager walks pages and the
+ * `show all` beside it drops the window entirely, reading the server's continuations to the end —
+ * both, because «next» is for reading down a long history and «all» is for searching one. The
+ * counts in the header are `total_runs` / `archived_runs`, aggregates over the WHOLE band: counting
+ * the rows on screen would make the header lie by exactly the amount that is not on screen, and it
+ * would lie MORE the more history a card has.
  *
- * THE `earlier — inputs have changed` DIVIDER SEPARATES ANSWERS TO THE CURRENT QUESTION FROM
- * ANSWERS TO AN OLDER ONE. It is computed over the WHOLE list and not over the page, so a long
- * history does not lose it at the page seam — the pager carries its words instead when the line
- * falls past the edge. The arithmetic and, more importantly, the exact width of what it claims live
- * in `history-fingerprint.ts`; the line states its own scope on screen so it can never be read as
- * comparing more than it compares. WITH NO GENERATION FORM ON THE SCREEN THERE IS NO CURRENT
- * QUESTION AND NO DIVIDER — an absent line says nothing, which is the only honest thing to say when
- * half of a comparison is missing.
+ * NO RUN IS MEASURED AGAINST THE CURRENT INPUTS (T-18). The `earlier — inputs have changed` divider
+ * and the fingerprint behind it are gone on the owner's order: «каждый ран самостоятельный просто
+ * мы можем для удобства копировать промпты». A row states what it was given — through `recall` —
+ * and is never declared stale by a comparison with a card that has moved on since.
  *
- * RECALLING A RUN (W-7) SELECTS IT AND SHOWS ITS PROMPT — the pictures, the descriptions and the
- * markup it was given — where the owner asked for it: in INPUT — REFERENCES. That panel is
- * `RecalledRunPrompt` and it is mounted THERE; this block draws it only as long as nothing else
- * has, so the gesture always has a visible answer. Recalling changes nothing on the card, and the
- * rerun itself is the server's verb (`rerun_of_run_id`), not a client-side rebuild of the inputs.
+ * THE ASK IS NOT PRINTED (T-3). `run.ask` was the caption of every line here; the owner took the
+ * field out of the flat form and out of the history with it. What was actually sent is not lost —
+ * `run.prompt` is the worker's own stored dispatch text and the run panel shows it per row, which
+ * is the only reason removing the ask is safe.
+ *
+ * THE TILES DO NOT OWN THEIR VIEWER, AND THEY DO NOT OWN THE ROW EITHER (T-8). Every picture is a
+ * `PictureTile`, so the corner law is the primitive's (badge left, zoom and ✕ right, split BOTTOM
+ * LEFT). The row the zoom walks is ONE `useGalleryGroup` over every loaded picture of every run —
+ * not over the tiles that happen to be mounted. Built out of mounted tiles it would end at the edge
+ * of the page, i.e. T-17 would take back exactly what T-8 gives: «по всем картинкам из всех
+ * генераций». See the group where it is declared, in the section below.
+ *
+ * RECALL COPIES, IT DOES NOT SHOW (T-10/T-11). The chip takes the run's pictures into INPUT —
+ * REFERENCES and its words into the garment description, and from there they are ordinary
+ * references the human edits like any other. There is no «recalled — run N» panel, no inventory of
+ * what the run was given and no rerun door: a run starts only from GENERATION — FLAT → GENERATE.
+ * The intake lives in the references block (`RecalledRunPrompt`, mounted there), so the chip is
+ * offered only while that block is on screen — on the RENDER and 3D tabs it has nobody to hand the
+ * pictures to, and a gesture with no receiver must not be drawn.
  */
 
-const PAGE = 4;
+/** How many run rows one page of the history holds. The owner's number (T-17). */
+const PAGE = 3;
 
 /* ────────────────────────────── reading ────────────────────────────── */
 
@@ -131,24 +136,17 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
   return null;
 }
 
-const HIDE_BLOCK_SHORT: Record<HideBlockReason, string> = {
-  in_slot: 'kept · in a slot',
-  in_version: 'kept · in a version',
-  live_run_input: 'kept · a run reads it',
-  live_crop_parent: 'kept · a crop needs it',
-};
-
+/**
+ * Why a WHOLE RUN may not be archived, in words. The picture-level half of this map went out with
+ * the ✕ (T-14); what is left is the refusal the row itself states, and the reasons are still the
+ * server's own tokens rather than a second vocabulary.
+ */
 const HIDE_BLOCK_LONG: Record<HideBlockReason, string> = {
-  in_slot: 'this picture stands in a bench slot — unmark it there first',
-  in_version: 'this picture is frozen into a minted sheet version and must stay printable',
-  live_run_input: 'a run that has not finished is reading this picture',
-  live_crop_parent: 'a crop cut from this picture still exists',
+  in_slot: 'a picture of this run stands in a bench slot — unmark it there first',
+  in_version: 'a picture of this run is frozen into a minted sheet version and must stay printable',
+  live_run_input: 'a run that has not finished is reading a picture of this run',
+  live_crop_parent: 'a crop cut from a picture of this run still exists',
 };
-
-function thumbOf(media?: common_MediaFull): string {
-  const m = media?.media;
-  return m?.thumbnail?.mediaUrl || m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || '';
-}
 
 function TileAction({
   onClick,
@@ -174,14 +172,23 @@ function TileAction({
 /* ────────────────────────────── the tile ────────────────────────────── */
 
 /**
- * A run's output, with the two doors the feed's own tile cannot offer: the SLOT PICKER and UNMARK.
+ * A run's output. THE PICTURE ITSELF IS `PictureTile` AND NOTHING ELSE (T-8).
  *
- * IT IS NOT A SECOND `PictureTile`. The rules are the shared ones — `visibility.ts` decides what
- * may be hidden, `provenance.ts` says where a picture came from, `handles.ts` names it, and pick
- * mode takes the tile over exactly as it does in the feed. What differs is the FOOTER, and the
- * footer is the one thing the feed's tile fixes: a picture standing in a slot offers `unmark` and
- * neither a ✕ nor a picker (the prototype's И-1, and the ✕ would be refused by the server anyway),
- * a free flat offers the picker, and a composite offers the cut.
+ * The owner asked twice, and the second time in anger: «сделай везде одинаково включая кнопку сплит
+ * нахуя ты делаешь везде по разному может сделать это компонентом». So this file no longer draws a
+ * frame, a hover organ or a viewer of its own — it says WHICH roles the picture has (`onSplit`,
+ * a place in the gallery) and the primitive decides where they sit.
+ *
+ * THE TILE DOES NOT PUT ITSELF IN THE GALLERY ROW; it is handed its OFFSET in a row the section
+ * assembled from the whole loaded history (`galleryIndex`). That is what makes the arrow leave the
+ * page it was opened from. `undefined` means this picture has no address the viewer could show, and
+ * then the tile promises no zoom at all rather than opening on an empty stage.
+ *
+ * WHAT IS STILL LOCAL IS THE FOOTER, and only the footer: a picture standing in a slot offers
+ * `unmark` (И-1 — neither a ✕ nor a picker, both would be refused), a free flat offers the slot
+ * picker, and a composite offers nothing under the frame because its one door is the split in the
+ * corner. Those are placements the primitive deliberately has no prop for, which is why they live
+ * BELOW the frame rather than fighting the corners for a spot.
  */
 function RunTile({
   band,
@@ -189,10 +196,9 @@ function RunTile({
   picture,
   cardFit,
   runFit,
-  guard,
   disabled,
-  onZoom,
-  onHide,
+  galleryKey,
+  galleryIndex,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -200,10 +206,11 @@ function RunTile({
   picture: common_DesignPicture;
   cardFit: string;
   runFit: string;
-  guard: HideGuard;
   disabled?: boolean;
-  onZoom: () => void;
-  onHide: (pictureId: number, hidden: boolean) => void;
+  /** The section's one gallery group — see `useGalleryGroup` below. */
+  galleryKey: string;
+  /** Where this picture stands in that group, or `undefined` if it has no showable address. */
+  galleryIndex?: number;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const pick = usePickMode();
@@ -219,8 +226,6 @@ function RunTile({
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture);
   const inSlot = slotOfPicture(band, pictureId);
-  const blockReason = hidden ? null : hideBlockReason(pictureId, guard);
-  const mayHide = !disabled && canOfferHide(picture, guard);
   const mixed = mixedInputNote(provenance);
 
   /**
@@ -231,73 +236,76 @@ function RunTile({
    */
   const fitMismatch = !!runFit && !!cardFit && runFit !== cardFit;
 
-  const thumb = thumbOf(picture.media);
-  const media = (
-    <div
-      // Мат под снимком БЕЛЫЙ (R-12) — см. довод в generation/thumb.tsx.
-      className={cn('relative w-full bg-bgColor', hidden && 'opacity-40')}
-      style={{ aspectRatio: '4 / 5' }}
-    >
-      {thumb ? (
-        <img
-          src={thumb}
-          alt={handle}
-          loading='lazy'
-          className='absolute inset-0 block h-full w-full'
-          style={{ objectFit: 'contain' }}
-        />
-      ) : (
-        <span className='absolute inset-0 flex items-center justify-center'>
-          <Text size='nano' variant='label' component='span'>
-            no image
-          </Text>
+  const url = thumbUrl(picture.media);
+  /**
+   * WHERE THIS PICTURE STANDS IN THE BAND'S ROW. The frame itself is composed by the section, once
+   * for the whole history; here there is only the offset. Handing the primitive a `gallery` frame
+   * INSTEAD would put the picture in the row a second time — the group already holds it — and the
+   * arrow would walk past the same file twice.
+   */
+  const galleryGroup = galleryIndex == null ? undefined : { key: galleryKey, index: galleryIndex };
+
+  /**
+   * ONE BADGE, THREE MUTUALLY EXCLUSIVE CASES — the primitive writes the top-left corner once, so
+   * the caller must hand it one word. A composite has no single view and therefore no badge at all;
+   * it wears its marks over the picture instead, one per view it declares.
+   */
+  const badge = composite
+    ? undefined
+    : inSlot
+      ? inSlot.label
+      : picture.ghostView
+        ? `probably ${viewLabel(picture.ghostView)}`
+        : undefined;
+
+  const overlays = (
+    <>
+      {composite && (
+        // `CompositeMarks` positions itself against the nearest POSITIONED ancestor by `inset-x-0
+        // top-0`. This box is that ancestor, and it exists to keep the right edge clear of the
+        // quiet zoom button — at a 140px track «probably SIDE L» otherwise runs under it.
+        <span className='pointer-events-none absolute inset-y-0 left-0 right-14'>
+          <CompositeMarks facts={facts} />
         </span>
       )}
-      {/* A COMPOSITE HAS NO SINGLE VIEW, so it never carries the single-guess badge: it carries one
-          mark per view it declares. A slot badge is impossible on it by the rule below, so the
-          three cases are exclusive and the top-left corner is never written twice. */}
-      {composite ? (
-        <CompositeMarks facts={facts} />
-      ) : inSlot ? (
-        <span className='absolute left-0 top-0 bg-textColor px-1 text-nano uppercase text-bgColor'>
-          {inSlot.label}
-        </span>
-      ) : picture.ghostView ? (
-        <span className='absolute left-0 top-0 bg-bgColor px-1 text-nano uppercase text-labelColor'>
-          probably {viewLabel(picture.ghostView)}
-        </span>
-      ) : null}
-      <CompositeBadge facts={facts} />
       {fitMismatch && (
-        <span className='absolute bottom-0 right-0 bg-bgColor px-1 text-nano uppercase text-error'>
+        // Bottom right is the primitive's `edit` corner and this tile has no edit door, so the
+        // corner is free. `pointer-events-none` keeps the zoom surface under it clickable.
+        <span className='pointer-events-none absolute bottom-1 right-1 z-20 bg-bgColor px-1 text-nano uppercase text-error'>
           fit {runFit} ≠ card {cardFit}
         </span>
       )}
-    </div>
+    </>
   );
 
   // `AI · run 7 · 3 views · split into 3` — the prototype's caption for a composite, and the
   // ordinary provenance line for everything else. The tail is empty unless the file declares views.
-  const sub = (
+  const caption = (
     <>
-      {provenanceLabel(provenance)}
-      {compositeTail(facts)}
-      {mixed ? ` · ${mixed}` : ''}
+      <Text size='micro' className='mt-1 truncate font-bold uppercase' title={handle}>
+        {handle}
+      </Text>
+      <Text size='micro' variant='label' className='truncate'>
+        {provenanceLabel(provenance)}
+        {compositeTail(facts)}
+        {mixed ? ` · ${mixed}` : ''}
+      </Text>
     </>
   );
 
-  // PICK MODE TAKES THE TILE OVER. A clickable tile is a real `<button>`, and a button may not
-  // contain buttons — so while a slot is armed the tile answers exactly one gesture and its own
-  // controls step aside. Same rule, same reason, as the feed's tile.
+  /**
+   * PICK MODE TAKES THE TILE OVER, and the picture keeps its skin while it does. The tile becomes
+   * one button, so the frame is handed NO gallery and no corner roles — without them `PictureTile`
+   * renders not a single button of its own, and a button may not contain buttons. Same rule, same
+   * reason, as the feed's tile.
+   */
   if (pick.target) {
     const pickable = isPickablePicture(picture);
     return (
-      <Tile
-        media={media}
-        name={handle}
-        sub={sub}
-        selected={pickable}
+      <button
+        type='button'
         onClick={pickable ? () => pick.resolve(pictureId) : undefined}
+        aria-disabled={!pickable}
         title={
           pickable
             ? `put ${handle} into ${pick.target.label}`
@@ -305,108 +313,107 @@ function RunTile({
               ? 'a composite holds several views — split it first'
               : 'hidden pictures are not offered'
         }
-        className={pickable ? '' : 'opacity-40'}
-      />
+        className={cn(
+          'flex h-full w-full min-w-0 flex-col text-left',
+          pickable ? 'cursor-pointer' : 'cursor-not-allowed opacity-40',
+        )}
+      >
+        {/* `w-full` НЕСУЩЕЕ, а не уборка: обёртка здесь — <button>, а у кнопки UA-раскладка не
+            растягивает детей по поперечной оси, и кадр с одним лишь `aspect-ratio` схлопнулся бы
+            по ширине содержимого. Тот же довод, что у `Tile`, где его несёт сама подложка media. */}
+        <PictureTile
+          url={url}
+          alt={handle}
+          badge={badge}
+          selected={pickable}
+          className='w-full'
+        >
+          {overlays}
+        </PictureTile>
+        {caption}
+      </button>
     );
   }
 
-  let footer: React.ReactNode;
+  let footer: React.ReactNode = null;
   if (hidden) {
-    footer = !disabled ? (
-      <TileAction onClick={() => onHide(pictureId, false)}>unhide</TileAction>
-    ) : (
-      <Text size='nano' variant='label' component='span'>
-        hidden
-      </Text>
-    );
-  } else if (composite) {
+    /**
+     * A STATE, NOT AN ORGAN. Hiding one picture is gone (T-14) and so is its undo; what is left is
+     * a stamp some earlier session wrote, which every picker still obeys. The word says why the
+     * picture is not offered anywhere, and promises no door that does not exist.
+     */
     footer = (
-      <>
-        {/* NO SLOT PICKER IN THIS BRANCH, AND THAT IS THE RULE, NOT AN OMISSION: a slot holds one
-            view and this file holds several, so the only door it gets is the one that turns it into
-            pictures a slot can read. The same refusal answers pick mode above. */}
-        {!disabled && (
-          <TileAction onClick={() => onSplit(picture)}>{splitVerb(facts)}</TileAction>
-        )}
-        {mayHide && (
-          <TileAction
-            onClick={() => onHide(pictureId, true)}
-            label='hide this picture — reversible'
-          >
-            ✕ hide
-          </TileAction>
-        )}
-      </>
+      <Pill
+        tone='mut'
+        title='hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.'
+      >
+        hidden
+      </Pill>
     );
   } else if (inSlot) {
-    // И-1: a plate that a slot reads carries NEITHER a ✕ nor a picker. Both would be refused —
-    // the server guards the hide, and re-picking a slot it already fills says nothing — so the one
-    // honest door is the one that undoes the placement.
-    footer = (
-      <>
-        {!disabled && (
-          <TileAction
-            onClick={() =>
-              setBenchSlot.mutate({
-                slot: inSlot.ref,
-                // 0 is UNMARK: empty the slot without deleting it. A different act from deleting a
-                // detail slot, and it has to stay different.
-                pictureId: 0,
-                expectedSlotRev: inSlot.rev,
-              })
-            }
-            label={`take this picture out of ${inSlot.label}`}
-          >
-            unmark
-          </TileAction>
-        )}
-        {mixed && (
-          <Text size='nano' variant='label' component='span'>
-            {mixed}
-          </Text>
-        )}
-      </>
+    // И-1: a plate that a slot reads carries neither a ✕ nor a picker — both would be refused — so
+    // the one honest door is the one that undoes the placement.
+    footer = !disabled && (
+      <TileAction
+        onClick={() =>
+          setBenchSlot.mutate({
+            slot: inSlot.ref,
+            // 0 is UNMARK: empty the slot without deleting it. A different act from deleting a
+            // detail slot, and it has to stay different.
+            pictureId: 0,
+            expectedSlotRev: inSlot.rev,
+          })
+        }
+        label={`take this picture out of ${inSlot.label}`}
+      >
+        unmark
+      </TileAction>
     );
-  } else {
-    footer = (
-      <>
-        {!disabled && (
-          <SlotPicker
-            band={band}
-            techCardId={techCardId}
-            picture={picture}
-            className='h-[20px] w-full'
-          />
-        )}
-        {mayHide ? (
-          <TileAction
-            onClick={() => onHide(pictureId, true)}
-            label='hide this picture — reversible'
-          >
-            ✕ hide
-          </TileAction>
-        ) : blockReason ? (
-          <Text
-            size='nano'
-            variant='label'
-            component='span'
-            title={HIDE_BLOCK_LONG[blockReason]}
-            className='truncate'
-          >
-            {HIDE_BLOCK_SHORT[blockReason]}
-          </Text>
-        ) : null}
-      </>
+  } else if (!composite) {
+    // NO SLOT PICKER UNDER A COMPOSITE, AND THAT IS THE RULE, NOT AN OMISSION: a slot holds one
+    // view and that file holds several, so its only door is the split in the corner.
+    footer = !disabled && (
+      <SlotPicker band={band} techCardId={techCardId} picture={picture} className='h-[20px] w-full' />
     );
   }
 
   return (
-    <Tile media={media} name={handle} sub={sub} className={hidden ? 'border-dashed' : ''}>
-      <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>
-        <TileAction onClick={onZoom}>zoom</TileAction>
-        {footer}
-      </div>
-    </Tile>
+    <div className='flex h-full w-full min-w-0 flex-col'>
+      <PictureTile
+        url={url}
+        alt={handle}
+        badge={badge}
+        galleryGroup={galleryGroup}
+        className={cn('w-full', hidden && 'opacity-40')}
+        /* THE CUT IS OFFERED ON EVERY LIVE PICTURE, NOT ONLY ON A DECLARED COMPOSITE (T-8).
+           `composite_views` is written by the server and is empty on every row today, so a door
+           gated on it is a door nobody has ever seen — while the references block and the bench
+           put the same cut on any picture at all. That was the «везде по разному» the owner named
+           twice. `SplitDesignPicture` takes any band picture by contract, the parent survives the
+           cut, and the verb below still reads the file: `split again` once crops exist. A stamped
+           (hidden) picture keeps no doors, the way it keeps none anywhere else. */
+        onSplit={
+          !disabled && !hidden
+            ? {
+                onClick: () => onSplit(picture),
+                // No ▸ in an aria-label: a screen reader spells the glyph out as its Unicode name.
+                ariaLabel:
+                  facts.splitInto > 0
+                    ? `split ${handle} again`
+                    : `split ${handle} into views`,
+                title:
+                  facts.splitInto > 0
+                    ? `${splitVerb(facts)} cut another view out of this file`
+                    : `${splitVerb(facts)} cut this file into pictures a slot can take`,
+              }
+            : undefined
+        }
+      >
+        {overlays}
+      </PictureTile>
+      {caption}
+      {footer && <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>}
+    </div>
   );
 }
 
@@ -420,9 +427,9 @@ function RunRow({
   cardFit,
   guard,
   disabled,
-  closedByDivider,
-  onZoom,
-  onHide,
+  galleryKey,
+  galleryIndexOf,
+  recallHosted,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -432,31 +439,27 @@ function RunRow({
   cardFit: string;
   guard: HideGuard;
   disabled?: boolean;
-  /**
-   * TRUE ON THE ROW THE `earlier` DIVIDER STANDS UNDER. That row yields its own list-row rule:
-   * the divider draws the closing-total line (1px ink) right below it, and a row that kept its
-   * hairline would put TWO drawn rules on one seam, 12px apart (S-8, measured) — the ladder in
-   * DESIGN.md gives every separation exactly one weight.
-   */
-  closedByDivider?: boolean;
-  onZoom: (pictures: common_DesignPicture[], picture: common_DesignPicture) => void;
-  onHide: (pictureId: number, hidden: boolean) => void;
+  galleryKey: string;
+  /** picture id → its offset in the section's gallery group. Absent = no showable address. */
+  galleryIndexOf: Map<number, number>;
+  /** Is the block that takes a recall in on screen? See the chip below. */
+  recallHosted: boolean;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
   const [open, setOpen] = useState(false);
-  const [revealHidden, setRevealHidden] = useState(false);
-  const recalled = useRecalledRun(techCardId);
 
   const runId = run.id ?? 0;
   const archived = isRunArchived(run);
   const live = isRunLive(run);
   const elapsed = useElapsed(run.startedAt || run.createdAt);
+  /**
+   * EVERY PICTURE THE RUN PRODUCED, UNFILTERED (T-14). While the ✕ existed the row showed the
+   * visible ones and counted the rest; with the verb gone there is no way back for a stamped
+   * picture, so filtering it out here would make it disappear from the only screen that still
+   * mentions it. The tile marks it instead.
+   */
   const pictures = run.pictures ?? [];
-  const shown = selectVisiblePictures(pictures, { revealHidden });
-  // The aggregate states the count over the WHOLE run; the row's own pictures are the fallback for
-  // a row that arrived through a continuation page, where the map has no entry for it.
-  const hiddenCount = hiddenCountOfRun(band, runId) || countHiddenPictures(pictures);
   const archiveWhy = archiveBlockReason(run, guard);
   const price = formatMoney(run.priceActual ?? run.priceEstimate, run.currency);
   /**
@@ -482,43 +485,49 @@ function RunRow({
   const status = runOutcomeNote(run);
 
   /**
-   * RECALL IS OFFERED ONLY WHERE THERE IS A SNAPSHOT TO SHOW. A row served without `inputs` — an
-   * older row, a server that has not filed one yet — would select into an empty panel, and a
-   * gesture whose whole promise is «see what was fed» must not be offered when nothing was frozen.
+   * WHEN THE RECALL IS OFFERED — THREE CONDITIONS, EACH THE NAME OF A DOOR THAT WOULD OTHERWISE
+   * OPEN ON NOTHING.
+   *
+   * `inputs` — a row served without a frozen snapshot has no pictures and no words to hand over;
+   * the gesture would report «nothing to reuse» on every press.
+   *
+   * NOT A VECTOR ROW — the owner's own exception (T-16, «рекола для генерации свг вектора не должно
+   * быть»): a redraw is started from the plate's editor and its input IS that plate, so «put the
+   * references back into the input» names a door this run never came through.
+   *
+   * A HOST ON SCREEN — the intake lives in INPUT — REFERENCES, and that block is drawn only on the
+   * FLAT tab. On RENDER and 3D this same history is mounted without it, and there the chip used to
+   * arm a selection nobody would ever take: the pictures went nowhere, no message was shown, and
+   * the chip stayed lit at «recalled» for the rest of the session. Not offering it is the honest
+   * posture — the gesture is not missing, its receiver is.
+   *
+   * A READ-ONLY CARD gets no chip either: the recall writes reference rows and roles, and the
+   * intake can only answer such a press with a refusal.
    */
-  const recallable = !!run.inputs;
-  const isRecalled = recallable && (recalled?.id ?? 0) === runId && runId > 0;
+  const recallable = !!run.inputs && !isVector && recallHosted && !disabled;
   const rerunOf = run.rerunOf ?? 0;
 
   const handle = runHandle(runId);
-  const caption = runCaption(run, firstRunId);
-  const meta = [
-    handle,
-    // An ask-less row that is not the first one is captioned by its number — which IS the handle,
-    // and printing «run 7 · run 7» says one thing twice.
-    caption === handle ? '' : caption,
-    (run.author ?? '').trim(),
-    clockStamp(run.createdAt),
-    price,
-  ]
+  /**
+   * THE LINE NO LONGER PRINTS THE ASK (T-3). `runCaption` answers with `run.ask` when the row has
+   * one, and the owner took that field off the screen everywhere, history included. What is left is
+   * the one caption that is a fact about the ROW rather than a copy of a prompt: the run that
+   * started this card. It is claimed only when the whole history is on screen — see `firstRunId`.
+   */
+  const caption = firstRunId && runId && runId === firstRunId ? 'from references' : '';
+  const meta = [handle, caption, (run.author ?? '').trim(), clockStamp(run.createdAt), price]
     .filter(Boolean)
     .join(' · ');
 
   return (
-    <div
-      className={cn(
-        'space-y-1 pb-2',
-        // See `closedByDivider` above: the seam under this row is drawn by exactly one rule.
-        !closedByDivider && 'border-b border-hairline last:border-b-0',
-      )}
-    >
+    <div className='space-y-1 border-b border-hairline pb-2 last:border-b-0'>
       <div className='flex flex-wrap items-baseline gap-2'>
         <button
           type='button'
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           className='min-w-0 cursor-pointer text-left'
-          title='what this run was given and what it cost — launch-time copies'
+          title='what this run was given, what it sent and what it cost — launch-time copies'
         >
           <Text
             size='micro'
@@ -544,45 +553,31 @@ function RunRow({
             without opening either panel. */}
         {rerunOf > 0 && <Pill tone='mut'>repeat of {runHandle(rerunOf)}</Pill>}
         {live && (
-          <Pill tone='attention'>
-            {isCancelling(run) ? 'cancelling…' : `${status} ${elapsed}`}
-          </Pill>
+          <Pill tone='attention'>{isCancelling(run) ? 'cancelling…' : `${status} ${elapsed}`}</Pill>
         )}
         {!live && status !== 'done' && (
           <Pill tone={status.startsWith('failed') ? 'warn' : 'mut'}>{status}</Pill>
         )}
         {archived && <Pill tone='mut'>archived</Pill>}
 
-        {hiddenCount > 0 && (
-          <button
-            type='button'
-            onClick={() => setRevealHidden((v) => !v)}
-            aria-expanded={revealHidden}
-            className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
-          >
-            · {hiddenCount} hidden {revealHidden ? '▾' : '▸'}
-          </button>
-        )}
-
-        {/* THE SELECTION GESTURE (W-7). A Chip and not a link, because selection is exactly what a
-            chip is for in this system, and `selected` is the one affordance that fills with ink —
-            so which run is recalled is legible at a glance down the list. It reads the card, never
-            writes it: recalling shows the frozen prompt somewhere else and changes nothing here. */}
+        {/* RECALL — A ONE-SHOT COPY, NOT A MODE (T-10).
+            The chip used to be a toggle: pressing it selected the run and a panel elsewhere showed
+            its frozen prompt, pressing it again «stopped showing» — and the caption said exactly
+            that. Both halves are gone. The gesture now takes the run's pictures into the input and
+            its words into the description, the selection is consumed in the same tick by the intake,
+            and there is no state left to switch off; a `selected` chip here would light up for one
+            frame and lie for the rest. What it does is said in the title, in the order it happens,
+            and the answer to the press is the snackbar plus the rows that appear in the input. */}
         {recallable && (
           <Chip
-            selected={isRecalled}
-            pressed={isRecalled}
-            onClick={() => recallDesignRun(techCardId, isRecalled ? null : run)}
-            title={
-              isRecalled
-                ? 'stop showing this run’s prompt'
-                : 'show what this run was given — its pictures, notes and markup — for a rerun'
-            }
+            onClick={() => recallDesignRun(techCardId, run)}
+            title='copy this run’s pictures into the input references and its words into the garment description. Nothing is launched and nothing on this row changes — a run starts only from GENERATION — FLAT → GENERATE.'
           >
-            {isRecalled ? 'recalled' : 'recall ▸'}
+            recall ▸
           </Chip>
         )}
 
+        {/* ARCHIVE IS THE ONE COLLAPSE VERB LEFT, AND IT TAKES THE WHOLE GENERATION (T-14). */}
         <span className='ml-auto'>
           {archived ? (
             <button
@@ -606,6 +601,7 @@ function RunRow({
                 type='button'
                 disabled={archiveRun.isPending}
                 onClick={() => archiveRun.mutate({ runId, archived: true })}
+                title='fold this whole generation away — reversible, and it hides no picture from anywhere else'
                 className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor disabled:cursor-not-allowed'
               >
                 archive ▸
@@ -617,8 +613,8 @@ function RunRow({
 
       {open && <RunPanel techCardId={techCardId} run={run} disabled={disabled} />}
 
-      {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE. Its pictures are NOT hidden — the ✕ is the only verb
-          for that — they simply stop taking up the screen until the row is opened again. */}
+      {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE. Its pictures are not hidden anywhere else — they
+          simply stop taking up the screen until the row is unarchived. */}
       {!archived && live && (
         <Tiles min={140}>
           {Array.from({ length: expectedTileCount(run) }, (_, i) => (
@@ -642,9 +638,9 @@ function RunRow({
         </Tiles>
       )}
 
-      {!archived && !live && shown.length > 0 && (
+      {!archived && !live && pictures.length > 0 && (
         <Tiles min={140}>
-          {shown.map((picture) => (
+          {pictures.map((picture) => (
             <RunTile
               key={picture.id}
               band={band}
@@ -652,10 +648,9 @@ function RunRow({
               picture={picture}
               cardFit={cardFit}
               runFit={(run.fitAtLaunch ?? '').trim()}
-              guard={guard}
               disabled={disabled}
-              onZoom={() => onZoom(shown, picture)}
-              onHide={onHide}
+              galleryKey={galleryKey}
+              galleryIndex={galleryIndexOf.get(picture.id ?? 0)}
               onSplit={onSplit}
             />
           ))}
@@ -664,44 +659,14 @@ function RunRow({
 
       {/* A FAILED OR CANCELLED ROW WITH NOTHING UNDER IT SAYS NOTHING MORE (S-10): its own pill
           already states the outcome, and the price on the line already keeps the cost. */}
-      {!archived && !live && shown.length === 0 && (
-        pictures.length ? (
-          <Text size='micro' variant='label'>
-            every picture of this run is hidden — the link above brings them back
-          </Text>
-        ) : status.startsWith('failed') || status === 'cancelled' ? null : (
+      {!archived &&
+        !live &&
+        pictures.length === 0 &&
+        !(status.startsWith('failed') || status === 'cancelled') && (
           <Text size='micro' variant='label'>
             no pictures under this row
           </Text>
-        )
-      )}
-    </div>
-  );
-}
-
-/* ────────────────────────────── the divider ────────────────────────────── */
-
-/**
- * `earlier — inputs have changed`, drawn at the weight of a CLOSING TOTAL: 1px ink with the caption
- * sitting on the line. It is the fourth rung of the ladder in DESIGN.md and the right one — the
- * line closes the runs that still answer today's question, it does not open a new group.
- *
- * IT STATES ITS OWN SCOPE. A divider is a claim about a comparison, and a reader cannot check a
- * comparison whose terms are invisible; `DIVIDER_SCOPE` names them, so «inputs» never reads as
- * «everything about the inputs».
- */
-function EarlierDivider({ runs, pictures }: { runs: number; pictures: number }) {
-  return (
-    <div className='mt-3 flex flex-wrap items-baseline gap-2 border-t border-textColor pt-1.5'>
-      <Text size='micro' component='span' className='uppercase' tracking='group'>
-        earlier — inputs have changed
-      </Text>
-      <Text size='nano' variant='label' component='span'>
-        {runs} run{runs === 1 ? '' : 's'} · {pictures} picture{pictures === 1 ? '' : 's'} below
-      </Text>
-      <Text size='nano' variant='label' component='span' className='ml-auto'>
-        compared on {DIVIDER_SCOPE}
-      </Text>
+        )}
     </div>
   );
 }
@@ -718,49 +683,50 @@ export function GenerationHistory({
   disabled?: boolean;
 }) {
   const speaks = serverSpeaksDesign();
-  const { hidePicture } = useDesignWrites(techCardId);
   const more = useMoreHistory(techCardId, band);
   const live = useRunPolling(techCardId, band);
 
   const [archShown, setArchShown] = useState(false);
   const [page, setPage] = useState(0);
+  /** The window off: every run this card has, and the server's continuations read to the end. */
+  const [showAll, setShowAll] = useState(false);
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
   } | null>(null);
-  const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
+
+  /**
+   * КАРТОЧКА СМЕНИЛАСЬ — ОКНО ИСТОРИИ НАЧИНАЕТСЯ ЗАНОВО.
+   *
+   * Клиентский переход на соседнюю тех-карту НЕ размонтирует этот блок: если полоса соседа уже в
+   * кэше, родитель не показывает «loading…» вовсе и просто перерисовывает нас с новым
+   * `techCardId`. Тогда «страница 4», «показать все» и раскрытая полка архива — решения о ЧУЖОЙ
+   * истории — переезжали на новую карточку и открывали её на странице, которой у неё, может быть,
+   * и нет. `splitting` в этом же списке и по более простой причине: модалка держит картинку
+   * прогона прежней карточки, и резать её, стоя на другой, нельзя.
+   *
+   * В РЕНДЕРЕ, А НЕ В ЭФФЕКТЕ — по тому же доводу, что и сброс курсора в `useMoreHistory`: эффект
+   * оставляет один закоммиченный кадр со старым состоянием и новой карточкой, а в этом кадре
+   * эффект «показать все» ниже успевает попросить у сервера продолжение, которого никто не хотел.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (page !== 0) setPage(0);
+    if (showAll) setShowAll(false);
+    if (archShown) setArchShown(false);
+    if (splitting) setSplitting(null);
+  }
 
   const form = useFormContext<TechCardFormData>();
   const cardFit = (form?.watch('fit') ?? '').trim();
-  /**
-   * The card's CURRENT garment description — the live half of the pair a run freezes as
-   * `inputs.garment_note`. Read from the form and not from the band, because the description is a
-   * field of the tech card and the form is where its unsaved edits live: comparing against a saved
-   * copy would leave the divider a save behind the human typing.
-   */
-  const cardGarment = (form?.watch('garmentDescription') ?? '').trim();
 
   const guard = useMemo(() => buildHideGuard(band), [band]);
 
   /**
-   * THE CURRENT QUESTION — the form's half announced through `history-question.ts`, the card's half
-   * read from the band and the card. `null` when no generation form is on this screen, and a null
-   * question draws no divider at all.
+   * Is the block that TAKES a recall on screen? The intake is mounted by INPUT — REFERENCES, which
+   * exists on the FLAT tab only; on RENDER and 3D the chip would arm a gesture with no receiver.
    */
-  const question = useDesignQuestion(techCardId);
-  const currentPrint = useMemo(
-    () =>
-      question
-        ? fingerprint({
-            views: question.views,
-            layout: question.layout,
-            refs: refsOfCard(band.references),
-            garmentNote: cardGarment,
-          })
-        : null,
-    [question, band.references, cardGarment],
-  );
-  /** Is the recalled prompt already being shown by its real home (INPUT — REFERENCES)? */
   const recallHosted = useRecallHostMounted(techCardId);
 
   /**
@@ -790,48 +756,85 @@ export function GenerationHistory({
   const firstRunId =
     runs.length >= totalRuns && runs.length ? (runs[runs.length - 1].id ?? null) : null;
 
-  const visible = runs.filter((run) => !isRunArchived(run) || archShown);
-  const shown = visible.slice(0, (page + 1) * PAGE);
-  const localLeft = visible.length - shown.length;
-  const canPage = localLeft > 0 || more.hasMore;
+  const visible = useMemo(
+    () => runs.filter((run) => !isRunArchived(run) || archShown),
+    [runs, archShown],
+  );
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE));
+  /**
+   * THE WINDOW IS CLAMPED RATHER THAN TRUSTED. `page` survives things that shorten the list — the
+   * archived rows being folded away again, a row archiving under the cursor — and a window past the
+   * end would draw an empty history over a card that has one.
+   */
+  const current = Math.min(page, pageCount - 1);
+  /**
+   * AND THE CLAMP IS WRITTEN BACK, ONCE THE OVERSHOOT CAN NO LONGER COME TRUE.
+   *
+   * Clamping only for the draw leaves `page` holding a number the list no longer has, and that
+   * number comes back the moment the list grows again: fold the archived rows away on page 5,
+   * unfold them, and the window jumps to page 5 without anybody asking for it.
+   *
+   * ONE PAGE OF OVERSHOOT IS LEGAL AND MUST SURVIVE, which is why this is not a plain `min`.
+   * Pressing «older ›» on the last local page asks the server for a page AND steps into it, so
+   * between the click and the answer `page` is deliberately one beyond the end. Anything past that
+   * one page — or any overshoot at all once the server has nothing left to send — is the residue of
+   * a list that shrank, and is dropped.
+   */
+  const reachable = pageCount - 1 + (more.hasMore || more.loading ? 1 : 0);
+  if (page > reachable) setPage(reachable);
+  const shown = showAll ? visible : visible.slice(current * PAGE, current * PAGE + PAGE);
+  const onLastLocalPage = current >= pageCount - 1;
 
   /**
-   * THE DIVIDER IS PLACED OVER THE WHOLE LIST, NOT OVER THE PAGE. Computed on `shown` it would
-   * appear and disappear as pages are read, i.e. be missing exactly on the long histories that need
-   * it; when it falls past the edge of the page the PAGER carries its words instead.
+   * ОДИН РЯД ПРОСМОТРЩИКА НА ВСЮ ЗАГРУЖЕННУЮ ИСТОРИЮ — ЗДЕСЬ ЖИВЁТ T-8.
+   *
+   * Владелец, пункт 8: «что бы можно было в зум вью по всем картинкам из всех генераций
+   * итерироваться не только этой». Пунктом 17 он же просил окно по три прогона. Ряд, который
+   * собирают САМИ ПЛИТКИ, отменяет первое вторым: смонтированы только плитки текущей страницы, и
+   * при четырёх прогонах по одной картинке из зума нельзя дойти до четвёртой — стрелка упирается
+   * не в конец истории, а в край окна.
+   *
+   * Поэтому ряд объявляется ОДНОЙ группой (`useGalleryGroup`) на весь загруженный список и висит
+   * на якоре-контейнере строк: место группы в полосе задаёт якорь, порядок внутри — сам список.
+   * Плитки внутри группы своих кадров не регистрируют, а получают СМЕЩЕНИЕ, поэтому картинка стоит
+   * в ряду ровно один раз.
+   *
+   * ПОРЯДОК РЯДА — ПОРЯДОК ПОКАЗА, и это обязательство: `visible` уже отсортирован (новые сверху),
+   * страницы режут его же, значит «дальше» ведёт туда, куда ведёт взгляд, и через край страницы
+   * тоже. По той же причине из ряда выпадает всё, чего на экране нет ни на какой странице:
+   * заархивированная строка свёрнута в строку (её плитки не рисуются вовсе), живая строка ещё
+   * рисует заглушки, а кадр без адреса просмотрщик всё равно выбросил бы — и тогда смещения
+   * разъехались бы с рядом, а панель приписала бы одному файлу сведения другого.
    */
-  const pastAt = firstEarlierIndex(visible, currentPrint);
-  const earlierRuns = pastAt >= 0 ? visible.length - pastAt : 0;
-  const earlierPictures =
-    pastAt >= 0
-      ? visible.slice(pastAt).reduce((n, run) => n + (run.pictures ?? []).length, 0)
-      : 0;
+  const gallery = useMemo(() => {
+    const items: MediaViewerItem[] = [];
+    const indexOf = new Map<number, number>();
+    for (const run of visible) {
+      if (isRunArchived(run) || isRunLive(run)) continue;
+      for (const picture of run.pictures ?? []) {
+        const id = picture.id ?? 0;
+        const media = picture.media;
+        if (!id || indexOf.has(id) || !media || !mediaFullViewerSrc(media)) continue;
+        indexOf.set(id, items.length);
+        items.push(mediaFullToViewerItem(media));
+      }
+    }
+    return { items, indexOf };
+  }, [visible]);
+  const galleryGroup = useGalleryGroup(gallery.items);
 
-  const onHide = useCallback(
-    (pictureId: number, hidden: boolean) => {
-      if (disabled || !speaks) return;
-      hidePicture.mutate({ pictureId, hidden });
-    },
-    [hidePicture, disabled, speaks],
-  );
-
-  const openZoom = useCallback(
-    (pictures: common_DesignPicture[], picture: common_DesignPicture) => {
-      // The index is computed on the ALREADY FILTERED list: the viewer drops frames without an
-      // address, so one address-less picture would otherwise shift everything behind it and the
-      // meta panel would describe the wrong file.
-      const withSrc = pictures
-        .map((p) => p.media)
-        .filter((m): m is common_MediaFull => !!m && !!mediaFullViewerSrc(m));
-      if (!withSrc.length) return;
-      const index = Math.max(
-        0,
-        withSrc.findIndex((m) => m.id === picture.media?.id),
-      );
-      setViewer({ items: mediaFullListToViewerItems(withSrc), index });
-    },
-    [],
-  );
+  /**
+   * «SHOW ALL» READS THE SERVER'S PAGES TO THE END. One fetch would not be «all»: the history is
+   * paged on the wire too, and the button promises every run rather than every run that happens to
+   * have arrived. The pull repeats only while a page is not already in flight, and `hasMore` goes
+   * false on its own, so the chain terminates.
+   */
+  useEffect(() => {
+    if (showAll && more.hasMore && !more.loading) more.fetchMore();
+    // `fetchMore` is rebuilt on every render of the hook; depending on it would run this effect on
+    // every render instead of on the three facts that actually decide anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAll, more.hasMore, more.loading]);
 
   // ABSENT, NOT AN EMPTY HEADER. A card that has never generated anything has no history, and a
   // titled block saying so would be a second, quieter version of the empty studio.
@@ -839,12 +842,13 @@ export function GenerationHistory({
 
   const liveRun = runs.find(isRunLive) ?? null;
   const pictureCount = runs.reduce((n, run) => n + (run.pictures ?? []).length, 0);
+  const paged = visible.length > PAGE || more.hasMore;
 
   return (
     <Section
       id='design-history'
       title='generation history'
-      question='— nothing is deleted; archive hides the row, ✕ hides a picture'
+      question='— nothing is deleted; archive folds a whole generation away'
       collapsible
       action={
         <div className='flex flex-wrap items-baseline gap-2'>
@@ -859,7 +863,12 @@ export function GenerationHistory({
           {archivedRuns > 0 && (
             <button
               type='button'
-              onClick={() => setArchShown((v) => !v)}
+              onClick={() => {
+                setArchShown((v) => !v);
+                // The list under the window changes length; starting again from the top is the only
+                // reading of «page 1» that stays true after it.
+                setPage(0);
+              }}
               aria-expanded={archShown}
               className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
             >
@@ -881,76 +890,108 @@ export function GenerationHistory({
         </CalloutBox>
       )}
 
-      <div className='space-y-2'>
-        {shown.map((run, i) => (
-          <Fragment key={run.id}>
-            {i === pastAt && <EarlierDivider runs={earlierRuns} pictures={earlierPictures} />}
-            <RunRow
-              band={band}
-              techCardId={techCardId}
-              run={run}
-              firstRunId={firstRunId}
-              cardFit={cardFit}
-              guard={guard}
-              closedByDivider={i === pastAt - 1}
-              disabled={disabled || !speaks}
-              onZoom={openZoom}
-              onHide={onHide}
-              onSplit={(picture) =>
-                setSplitting({ picture, handle: pictureHandle(picture) })
-              }
-            />
-          </Fragment>
+      {/* ЯКОРЬ ГРУППЫ. Он задаёт МЕСТО истории в полосе просмотрщика — между референсами сверху и
+          верстаком снизу, — а внутренний порядок ряда берётся из списка группы, а не из того,
+          сколько плиток сейчас смонтировано. */}
+      <div ref={galleryGroup.anchorRef} className='space-y-2'>
+        {shown.map((run) => (
+          <RunRow
+            key={run.id}
+            band={band}
+            techCardId={techCardId}
+            run={run}
+            firstRunId={firstRunId}
+            cardFit={cardFit}
+            guard={guard}
+            disabled={disabled || !speaks}
+            galleryKey={galleryGroup.key}
+            galleryIndexOf={gallery.indexOf}
+            recallHosted={recallHosted}
+            onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
+          />
         ))}
       </div>
 
-      {canPage && (
-        <button
-          type='button'
-          disabled={more.loading}
-          onClick={() => {
-            // READING A SERVER PAGE ALSO REVEALS ONE. Fetching without advancing the local window
-            // spent a click on nothing visible: the rows arrived, the button changed its wording,
-            // and the human had to press it a second time to actually see them.
-            setPage((p) => p + 1);
-            if (localLeft <= 0) more.fetchMore();
-          }}
-          className='cursor-pointer border-t border-textColor pt-1 text-left text-micro uppercase tracking-label text-labelColor hover:text-textColor disabled:cursor-not-allowed'
-        >
-          {more.loading
-            ? 'reading earlier runs…'
-            : /* The divider's own words when the line itself is past the edge of the page — the
-                 prototype's rule, and the reason the divider is computed over the whole list. */
-              pastAt >= 0 && pastAt >= shown.length
-              ? `earlier — inputs have changed · ${localLeft > 0 ? `${localLeft} more` : 'read the next page'} ▸`
-              : localLeft > 0
-                ? `earlier runs · ${localLeft} more ▸`
-                : 'earlier runs · read the next page ▸'}
-        </button>
+      {/* THE PAGER, AND THE DOOR THAT SWITCHES IT OFF (T-17). Both, because they answer different
+          questions: the pages are for reading a long history down, `show all` is for searching it.
+          The rule under the whole thing is the ladder's closing total — 1px ink — because the line
+          closes the rows above it rather than opening a group. */}
+      {paged && (
+        <div className='flex flex-wrap items-center gap-2 border-t border-textColor pt-1.5'>
+          {showAll ? (
+            <>
+              <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
+                {more.loading
+                  ? 'reading earlier runs…'
+                  : `all ${visible.length} run${visible.length === 1 ? '' : 's'}`}
+              </Text>
+              <span className='ml-auto'>
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => {
+                    setShowAll(false);
+                    setPage(0);
+                  }}
+                  title='back to three runs a page'
+                >
+                  paged again
+                </Button>
+              </span>
+            </>
+          ) : (
+            <>
+              <Button
+                variant='secondary'
+                size='xs'
+                disabled={current === 0}
+                onClick={() => setPage(current - 1)}
+                title='newer runs'
+              >
+                ‹ newer
+              </Button>
+              <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
+                page {current + 1} of {pageCount}
+                {/* The server has pages this client has not read, so the total is a floor and says
+                    so rather than naming a number it would have to correct on the next click. */}
+                {more.hasMore ? '+' : ''}
+              </Text>
+              <Button
+                variant='secondary'
+                size='xs'
+                disabled={(onLastLocalPage && !more.hasMore) || more.loading}
+                onClick={() => {
+                  // READING A SERVER PAGE ALSO REVEALS ONE. Fetching without advancing the window
+                  // spent a click on nothing visible: the rows arrived, the button changed its
+                  // wording, and the human had to press it a second time to actually see them.
+                  if (onLastLocalPage) more.fetchMore();
+                  setPage(current + 1);
+                }}
+                title='earlier runs'
+              >
+                {more.loading ? 'reading…' : 'older ›'}
+              </Button>
+              <span className='ml-auto'>
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => setShowAll(true)}
+                  title='drop the window and read every run this card has, server pages included'
+                >
+                  show all
+                </Button>
+              </span>
+            </>
+          )}
+        </div>
       )}
 
-      {/* THE RECALLED PROMPT'S HOME IS INPUT — REFERENCES, and this is the stand-in for as long as
-          nothing has claimed that home. `RecalledRunPrompt` announces itself when mounted, so this
-          copy vanishes the moment the real one exists — and until then the selection gesture on a
-          row still has a visible answer instead of pointing at an empty screen. */}
-      {!recallHosted && (
-        <RecalledRunPrompt
-          techCardId={techCardId}
-          band={band}
-          disabled={disabled || !speaks}
-          host={false}
-        />
-      )}
-
-      {viewer && (
-        <MediaViewer
-          items={viewer.items}
-          index={viewer.index}
-          open
-          onOpenChange={(open) => !open && setViewer(null)}
-          onIndexChange={(index) => setViewer((prev) => (prev ? { ...prev, index } : prev))}
-        />
-      )}
+      {/* ЗДЕСЬ СТОЯЛА ЗАПАСНАЯ КОПИЯ `RecalledRunPrompt` с `host={false}` — «показать промпт, пока
+          настоящий дом не смонтирован». Дома у промпта больше нет: рекол ничего не показывает, он
+          КЛАДЁТ картинки и слова во вход (T-10), а копия с `host={false}` по своему же контракту
+          инертна — не объявляет себя приёмником и ничего не принимает, то есть рисовала ровно
+          ничего. Ответ жесту теперь даёт сам вход, а там, где входа на экране нет, чипа нет тоже
+          (см. `recallable` в строке). */}
 
       {splitting && (
         <SplitModal
@@ -958,6 +999,11 @@ export function GenerationHistory({
           picture={splitting.picture}
           handle={splitting.handle}
           open
+          /* Разрез в истории — раскладка склеенного листа на виды, а НЕ пополнение промпта:
+             владелец (T-15) «в INPUT — REFERENCES не должны уходить все флеты если мы их явно
+             туда сами не добавим». Кадры получат вид и станут картинками полосы; ролей промпта
+             сервер им не поставит. */
+          forInput={false}
           onOpenChange={(open) => !open && setSplitting(null)}
         />
       )}

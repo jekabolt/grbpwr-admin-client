@@ -12,6 +12,7 @@ import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MoodBoard } from './mood-board';
+import { PictureGalleryProvider } from './picture-tile';
 import { PickModeProvider, usePickMode } from './pick-mode';
 import { PickTray } from './band-feed';
 import { ReferencesSection } from './references-section';
@@ -117,6 +118,16 @@ export function StudioTab({
 
   return (
     <DesignCapabilityProvider value={!bandless}>
+      {/* ОДИН ПРОСМОТРЩИК НА ВСЮ СТУДИЮ, и он монтируется ЗДЕСЬ, потому что это единственное
+          место, откуда видны сразу все органы полосы: референсы, история прогонов, верстак.
+          Владелец (круг 4, пункт 8): «что бы можно было в зум вью по всем картинкам из всех
+          генераций итерироваться не только этой».
+
+          До этого в полосе жило ПЯТЬ отдельных `MediaViewer`, и каждый получал свой список — тот,
+          что в истории, получал список ОДНОГО прогона. Стрелка «дальше» упиралась в край прогона
+          не по решению, а потому что дальше ничего не было передано. Ряд собирают сами плитки
+          (`PictureTile`), а порядок берётся из документа, поэтому листается ровно то, что видно. */}
+      <PictureGalleryProvider>
       <PickModeProvider>
         {/* `FixContextProvider` здесь БОЛЬШЕ НЕ МОНТИРУЕТСЯ: цикл починки снят (S-15), взводить
             контекст стало некому. Сам `fix-context.tsx` жив — `generation-form` читает
@@ -207,6 +218,7 @@ export function StudioTab({
           {constructionAspects}
         </SectionStack>
       </PickModeProvider>
+      </PictureGalleryProvider>
     </DesignCapabilityProvider>
   );
 }
@@ -220,6 +232,12 @@ export function StudioTab({
  * editor is mounted over ARTIFACTS rather than in the studio because `mood-callouts.tsx` holds the
  * studio's single `useFieldArray` over `callouts` and the editor holds one of its own — and in
  * react-hook-form 7.62 two instances over one name do not synchronise. This tab holds none.
+ *
+ * ⚠ РИСОВАНИЕ БОЛЬШЕ НЕ ЖИВЁТ В МОДАЛКЕ. T-21 круга 4, владелец дословно: «для выставления
+ * колаутов не нужна модалка оно должно быть инлайн и высота картинок должна быть больше».
+ * Выноски ставятся прямо на плите панели, кадры выросли, а составная дверь «take in + draw ▸»
+ * стала однотактной. Довод про два `useFieldArray` при этом НЕ УСТАРЕЛ и остаётся причиной, по
+ * которой редактор живёт здесь, а не в студии: он про владение полем формы, а не про модалку.
  */
 export function ArtifactsTab({
   techCardId,

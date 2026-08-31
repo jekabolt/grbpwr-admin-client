@@ -15030,6 +15030,14 @@ export type common_DesignRunParams = {
   // replaces it — so the server may GUESS and only a person may act. The flag records that the
   // guess was asked for, which is why it belongs in the frozen params and not in a UI preference.
   autoSplit: boolean | undefined;
+  // The DETAIL slots whose own outputs this run requested, by design_bench_slot(id), in the same
+  // order as the `detail` entries in views. A mutable detail name cannot keep a frozen run's output
+  // attached to the same bench address after that detail is renamed, while the slot id can.
+  // EMPTY DOES NOT MEAN «the card has no details»; it means this run requested no detail outputs.
+  // Its length MUST equal the number of `detail` entries in views: otherwise one list says how many
+  // detail pictures were requested and the other cannot name all and only their slots, so one of
+  // the two statements is false.
+  detailSlotIds: number[] | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -15120,7 +15128,14 @@ export type common_DesignInputRef = {
   callouts: common_DesignMoodCallout[] | undefined;
 };
 
-// DesignInputSlot is one bench plate fed to a render or a fix.
+// DesignInputSlot is one bench slot this run either SHOWED the model or was ASKED TO DRAW.
+// TWO KINDS OF ROW, TOLD APART BY media_id. A plate (media_id > 0) is a picture that went out: it
+// becomes a reference url and a numbered caption. A row with media_id = 0 is a detail slot named in
+// `DesignRunParams.detail_slot_ids` that held NO picture at launch — the ordinary case of that
+// field, since a person ticks a detail precisely so it gets drawn. It carries nothing but the slot
+// address and the frozen name, and it exists because the name has exactly one reader
+// (`detail_slot_ids` → `slots[*].slot_id` → `detail_name`) and no other place to come from. Without
+// it the prompt said «draw these details: detail», which is what the ids were introduced to end.
 export type common_DesignInputSlot = {
   viewKey: string | undefined;
   // WHICH SLOT, when view_key is `detail`. A view key alone cannot tell two details apart, and the
@@ -15132,6 +15147,8 @@ export type common_DesignInputSlot = {
   // COPY of the detail's name at launch, so a snapshot still reads «detail: cuff» after the slot
   // has been renamed or deleted. Empty for the silhouette sides.
   detailName: string | undefined;
+  // What the snapshot froze, deleted media included. 0 ONLY on an asked-for-but-empty detail slot
+  // (see the message comment); every plate has it.
   mediaId: number | undefined;
   // Resolved at read time from media_id. UNSET when deleted is true (see DesignInputRef).
   media: common_MediaFull | undefined;
@@ -15377,6 +15394,19 @@ export type SplitDesignPictureRequest = {
   pictureId: number | undefined;
   clientRequestId: string | undefined;
   frames: DesignSplitFrame[] | undefined;
+  // WHETHER THE CROPS JOIN THE PROMPT. A cut names the views on the pieces either way; this says
+  // whether those names are also filed as `design_reference` roles, i.e. whether the crops are
+  // shown to the model on the next run.
+  // FALSE IS THE DEFAULT AND IT IS THE OWNER'S RULE, not a conservative guess: «в INPUT —
+  // REFERENCES не должны уходить все флеты если мы их явно туда сами не добавим». A cut made on
+  // the bench is a person laying views into slots, and it used to fill the prompt behind their
+  // back. Only a cut made FROM the input block is a person saying «these go to the model».
+  // WHY IT MUST BE THE SERVER THAT ASKS. A client that did not want the rows could only delete
+  // them afterwards — and between the write and the delete a person can put their OWN role and
+  // note on that media, which the delete would then destroy. There is no client-side way to close
+  // that window: the clear verb is a bare DELETE by (card, media) with no expected-value guard.
+  // So the only place the question can be answered without a race is before the write.
+  forInput: boolean | undefined;
 };
 
 export type SplitDesignPictureResponse = {

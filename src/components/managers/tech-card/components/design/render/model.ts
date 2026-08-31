@@ -395,7 +395,10 @@ export function renderGate(band: GetDesignBandResponse): Gate {
   if (budget?.exhausted) {
     return {
       ok: false,
-      reason: `today's ceiling is reached — ${formatMoney(budget.booked, budget.currency)} of ${formatMoney(budget.cap, budget.currency)} is already spent or reserved`,
+      // БЕЗ СУММ (T-12: «нам надо показывать только цену генерации и все»). Отказ обязан назвать
+      // ПРИЧИНУ, а причина — «день исчерпан», а не «сколько именно». Числа жили здесь ещё и в
+      // подсказке инертной двери, то есть на экране, стоило навести указатель.
+      reason: "today's generation ceiling is reached — no new run starts until it resets",
     };
   }
   const sides = benchSides(band);
@@ -448,7 +451,10 @@ export function threedGate(band: GetDesignBandResponse): Gate {
   if (budget?.exhausted) {
     return {
       ok: false,
-      reason: `today's ceiling is reached — ${formatMoney(budget.booked, budget.currency)} of ${formatMoney(budget.cap, budget.currency)} is already spent or reserved`,
+      // БЕЗ СУММ (T-12: «нам надо показывать только цену генерации и все»). Отказ обязан назвать
+      // ПРИЧИНУ, а причина — «день исчерпан», а не «сколько именно». Числа жили здесь ещё и в
+      // подсказке инертной двери, то есть на экране, стоило навести указатель.
+      reason: "today's generation ceiling is reached — no new run starts until it resets",
     };
   }
   const byView = latestRenderByView(band);
@@ -469,57 +475,85 @@ export function threedGate(band: GetDesignBandResponse): Gate {
   return { ok: true };
 }
 
-/* ─────────────────────────── the colour recipe ─────────────────────────── */
+/* ─────────────────────────── the fabric of a render ─────────────────────────── */
 
 /**
- * The three ways a colour can be stated. AN OPEN STRING ON THE WIRE, and this is what this bundle
- * understands — `code` is a dictionary colour, `hex` is one typed by hand, `fabric_media_id` is a
- * photograph. `DesignColourRecipe` carries exactly those three fields, which is where the list
- * comes from; it is not a guess about a vocabulary nobody wrote down.
+ * THREE WAYS TO STATE CLOTH, AND THEY COMBINE. The owner's answer of 2026-08-31, verbatim:
+ * «можно комбинировать» фото ткани, цвет пикером и текст.
+ *
+ * They are not three modes of one field. They are three DIFFERENT statements about one garment —
+ * a photograph carries the material, a picked colour carries the colour, prose carries the finish —
+ * and a render may carry any subset of them at once. `DesignColourRecipe` always had room for all
+ * three (`fabric_media_id`, `code`/`hex`, `words`) and the server never enforced exclusivity: it
+ * was this screen that forced a choice, through a segmented switch that cleared the other two
+ * fields every time it moved.
+ *
+ * BECAUSE THEY COMBINE THEY CAN DISAGREE, AND THE ANSWER IS NOT COMPUTED HERE. A blue swatch beside
+ * a red picker is not an input error to be validated away; it is two claims about one cloth. The
+ * ranking that settles it is written into the PROMPT — `internal/designgen/renderprompt.go`, in
+ * words the model reads — so that the same disagreement resolves the same way on every run. This
+ * module only REPEATS that ranking to the human (`FABRIC_AUTHORITY`); a client that resolved the
+ * conflict for itself would be a second opinion about a question the prompt has already answered,
+ * and the two would drift the first day one of them was edited.
  */
-export const COLOUR_SOURCES = ['dictionary', 'own', 'photo'] as const;
-export type ColourSource = (typeof COLOUR_SOURCES)[number];
+export const FABRIC_AUTHORITY =
+  'the photo states the material · the picked colour overrides the photo\u2019s colour · the words only add what neither states';
 
-export const COLOUR_SOURCE_LABEL: Record<ColourSource, string> = {
-  dictionary: 'dictionary',
-  own: 'own colour',
-  photo: 'fabric photo',
-};
-
-/** The default recipe of a card that has never rendered: a dictionary colour, nothing chosen. */
+/** The default recipe of a card that has never rendered: nothing stated at all. */
 export const EMPTY_RECIPE: common_DesignColourRecipe = {
-  source: 'dictionary',
+  source: '',
   code: '',
   hex: '',
   words: '',
   fabricMediaId: 0,
 };
 
-/**
- * Which of the three a stored recipe is.
- *
- * An unrecognised or absent `source` is answered from the POPULATED FIELD rather than from a
- * default, so a recipe minted by a server that spells the sources differently still restores as the
- * thing it actually is instead of silently becoming a dictionary colour with no code.
- */
-export function colourSourceOf(recipe?: common_DesignColourRecipe | null): ColourSource {
-  const raw = (recipe?.source ?? '').trim().toLowerCase();
-  if (raw === 'dictionary' || raw === 'own' || raw === 'photo') return raw;
-  if ((recipe?.fabricMediaId ?? 0) > 0) return 'photo';
-  if ((recipe?.code ?? '').trim()) return 'dictionary';
-  if ((recipe?.hex ?? '').trim()) return 'own';
-  return 'dictionary';
+/** A hex a browser will actually paint. Three or six digits, the two shapes `<input type='color'>`
+ *  and CSS agree on; anything else is a half-typed value and must not reach a swatch. */
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+export function hexIsPaintable(hex?: string | null): boolean {
+  return HEX_RE.test((hex ?? '').trim());
 }
 
-/** A stable identity for a recipe — the key of a history chip and the join onto a run. */
-export function colourRecipeKey(recipe?: common_DesignColourRecipe | null): string {
-  return [
-    colourSourceOf(recipe),
-    (recipe?.code ?? '').trim().toUpperCase(),
-    (recipe?.hex ?? '').trim().toLowerCase(),
-    (recipe?.words ?? '').trim().toLowerCase(),
-    String(recipe?.fabricMediaId ?? 0),
-  ].join('|');
+/**
+ * WHAT THIS RECIPE ACTUALLY STATES — one boolean per source, and every reader asks this instead of
+ * asking «which source is it».
+ *
+ * There is no longer a single answer to that older question, which is exactly why it is gone: with
+ * combination legal, «the source» of a recipe carrying a photo AND a hex is a question with two
+ * true answers, and a function forced to return one of them silently hid the other. The gate, the
+ * swatch, the caption and the inventory all read this shape instead.
+ */
+export type FabricStatement = {
+  /** A photograph of the cloth travels with the run, as an image in its prompt. */
+  photo: boolean;
+  /** A colour was picked — a dictionary code, a hex of your own, or both. */
+  colour: boolean;
+  /** A free description was typed. */
+  words: boolean;
+};
+
+export function fabricStatement(recipe?: common_DesignColourRecipe | null): FabricStatement {
+  return {
+    photo: (recipe?.fabricMediaId ?? 0) > 0,
+    colour:
+      !!(recipe?.code ?? '').trim() || hexIsPaintable(recipe?.hex),
+    words: !!(recipe?.words ?? '').trim(),
+  };
+}
+
+/**
+ * A recipe that could be submitted: SOMETHING states the cloth.
+ *
+ * ANY ONE OF THE THREE IS ENOUGH, AND THAT IS THE OWNER'S OWN LIST — «пример фото ткани цвет ткани
+ * или описание ткани текстом или выбрать цвет пикером». A description alone is a legitimate render
+ * («black heavy cotton twill»); demanding a colour beside it would refuse a submission the owner
+ * named in as many words.
+ */
+export function recipeIsStated(recipe?: common_DesignColourRecipe | null): boolean {
+  const stated = fabricStatement(recipe);
+  return stated.photo || stated.colour || stated.words;
 }
 
 export function findDictionaryColour(
@@ -532,147 +566,125 @@ export function findDictionaryColour(
 }
 
 /**
- * The swatch fill of a recipe, or '' when there is no colour to paint (a fabric photo, or a
- * dictionary code this card's dictionary does not carry). '' is drawn as a striped surface, never
- * as black — an unknown colour that paints itself black is a lie a swatch tells convincingly.
+ * The swatch fill of a recipe, or '' when no colour is stated. '' is drawn as a striped surface,
+ * never as black — an unknown colour that paints itself black is a lie a swatch tells convincingly,
+ * and a photo-only recipe genuinely has no colour of its own on this screen.
+ *
+ * A TYPED HEX OUTRANKS THE DICTIONARY'S OWN, because a person who types one after picking a code is
+ * stating a deviation from that code and the swatch has to show the deviation.
  */
 export function colourSwatchHex(
   recipe: common_DesignColourRecipe | null | undefined,
   colors: readonly common_Color[] | undefined,
 ): string {
-  const source = colourSourceOf(recipe);
-  if (source === 'photo') return '';
-  if (source === 'own') return (recipe?.hex ?? '').trim();
+  const hex = (recipe?.hex ?? '').trim();
+  if (hexIsPaintable(hex)) return hex;
   const entry = findDictionaryColour(colors, recipe?.code);
-  return (entry?.hex ?? recipe?.hex ?? '').trim();
+  return (entry?.hex ?? '').trim();
 }
 
-/** The short name of a recipe — the caption of a chip. */
+/**
+ * The short name of what is stated — the headline over the palette.
+ *
+ * A HEX THAT DEVIATES FROM ITS CODE IS NAMED AS A DEVIATION, not swallowed. Picking a dictionary
+ * colour fills BOTH halves (the code and the hex it stands for), so the only way the two can differ
+ * is that a person typed over the hex afterwards — a deliberate shift. Printing «OLV · olive drab»
+ * over a swatch painted red would be the screen contradicting itself in the two places a person
+ * actually looks, and the prompt does not: it sends the code as a name and the hex as the exact
+ * value (`colourStatement`, renderprompt.go). The headline says the same thing.
+ */
 export function colourLabel(
   recipe: common_DesignColourRecipe | null | undefined,
   colors: readonly common_Color[] | undefined,
 ): string {
-  const source = colourSourceOf(recipe);
-  if (source === 'photo') return 'fabric photo';
-  if (source === 'own') return (recipe?.hex ?? '').trim() || 'own colour';
+  const stated = fabricStatement(recipe);
   const code = (recipe?.code ?? '').trim().toUpperCase();
-  if (!code) return 'no colour picked';
-  const entry = findDictionaryColour(colors, code);
-  return entry?.name ? `${code} · ${entry.name}` : code;
+  const hex = (recipe?.hex ?? '').trim().toLowerCase();
+  if (code) {
+    const entry = findDictionaryColour(colors, code);
+    const named = entry?.name ? `${code} · ${entry.name}` : code;
+    const dictHex = (entry?.hex ?? '').trim().toLowerCase();
+    if (hexIsPaintable(hex) && dictHex && hex !== dictHex) return `${code} → ${hex}`;
+    return named;
+  }
+  if (hexIsPaintable(hex)) return hex;
+  if (stated.photo) return 'the fabric photo';
+  if (stated.words) return 'described in words';
+  return 'no fabric stated';
 }
 
-/** The line under the name: where the colour comes from, and what goes into the prompt with it. */
+/**
+ * The line under the name: EVERY source this run carries, named, in the order of authority.
+ *
+ * It lists rather than chooses. The old subtitle answered «where the colour comes from» with one
+ * source because only one could exist; naming one of three now would hide the other two, and the
+ * two it hid are the ones a person would be surprised by when the picture came back.
+ */
 export function colourSubtitle(
   recipe: common_DesignColourRecipe | null | undefined,
   colors: readonly common_Color[] | undefined,
 ): string {
-  const source = colourSourceOf(recipe);
-  if (source === 'photo') {
-    return (recipe?.fabricMediaId ?? 0) > 0
-      ? 'the photo goes into the prompt as an image'
-      // NOT «pick one below»: on a read-only card there is nothing below to pick with, and a line
-      // that names a control which is not there is the smallest kind of lie a screen can tell.
-      : 'no fabric photo yet';
+  const stated = fabricStatement(recipe);
+  const parts: string[] = [];
+  if (stated.photo) parts.push('a fabric photo (material)');
+  if (stated.colour) {
+    const code = (recipe?.code ?? '').trim().toUpperCase();
+    const hex = (recipe?.hex ?? '').trim().toLowerCase();
+    const entry = findDictionaryColour(colors, code);
+    if (code && !entry) {
+      parts.push(`${code} — not in this dictionary, the code travels and the hex cannot`);
+    } else {
+      parts.push(`a picked colour (${[code, hexIsPaintable(hex) ? hex : ''].filter(Boolean).join(' · ')})`);
+    }
   }
-  if (source === 'own') {
-    return 'own colour · visualisation override — cannot become canonical';
-  }
-  const code = (recipe?.code ?? '').trim().toUpperCase();
-  if (!code) return 'colour dictionary — nothing picked yet';
-  const entry = findDictionaryColour(colors, code);
-  if (!entry) {
-    return `colour dictionary · ${code} is not in this dictionary — the code travels, the hex cannot`;
-  }
-  return `colour dictionary · ${(entry.hex ?? '').trim() || 'no hex stated'}`;
-}
-
-/** A recipe that could be submitted: something has actually been picked. */
-export function recipeIsStated(recipe?: common_DesignColourRecipe | null): boolean {
-  switch (colourSourceOf(recipe)) {
-    case 'photo':
-      return (recipe?.fabricMediaId ?? 0) > 0;
-    case 'own':
-      return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test((recipe?.hex ?? '').trim());
-    default:
-      return !!(recipe?.code ?? '').trim();
-  }
-}
-
-/* ─────────────────────────── the colour history ─────────────────────────── */
-
-export type ColourChip = {
-  key: string;
-  recipe: common_DesignColourRecipe;
-  /** The newest render run that used this recipe, when it is on the loaded page. */
-  run: common_DesignRun | null;
-  rrev: number;
-  pictures: number;
-  archived: boolean;
-  /** The bench has moved since that run — the chip restores a recipe, not a composition. */
-  stale: boolean;
-};
-
-/** view → the media id standing in that silhouette slot right now. 0 = the slot is empty. */
-function benchMediaByView(band: GetDesignBandResponse): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const side of benchSides(band)) {
-    out[side.view] = side.picture?.media?.id ?? 0;
-  }
-  return out;
-}
-
-/** view → the media id that side held when the run was launched. 0 = it held nothing. */
-function snapshotMediaByView(run: common_DesignRun): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const view of SILHOUETTE_VIEWS) out[view] = 0;
-  for (const slot of run.inputs?.slots ?? []) {
-    const view = normaliseViewKey(slot.viewKey);
-    if (!isSilhouetteView(view)) continue;
-    out[view] = slot.mediaId || slot.media?.id || 0;
-  }
-  return out;
+  if (stated.words) parts.push('a description in words');
+  if (!parts.length) return 'nothing stated yet — a photo, a colour or a description, or any mix of them';
+  return parts.join(' + ');
 }
 
 /**
- * THE CHIPS OF THE COLOUR HISTORY — «the same run ladder, sliced by colour».
+ * The `source` string the wire still carries, DERIVED rather than chosen by a control.
  *
- * THE SOURCE IS `band.colourRecipes`, NOT `band.runs`, and the difference matters on a busy card:
- * the recipes are computed over the WHOLE band, newest first, while the runs are one page. So every
- * colour this card has ever rendered gets a chip; the `r4 · 3 pictures` tail is added only for the
- * ones whose run is on the page, because a tail invented from nothing would be worse than a chip
- * that only offers to restore the recipe — which is all a chip ever does anyway. The contract says
- * as much: a chip restores a RECIPE and never a picture.
+ * The field predates combination: its documented vocabulary is `dictionary | own | photo` and it
+ * cannot spell «a photo and a picked colour together». Nothing reads it any more — the prompt is
+ * built from the populated fields, and this screen reads them too — so writing it is pure
+ * compatibility with recipes already stored, and the derivation follows the same order of authority
+ * the prompt states: the picked colour is the strongest single word available, the photo the next.
+ * It is never allowed to become the thing that DECIDES what travels; the three fields are.
  */
-export function colourChips(band: GetDesignBandResponse): ColourChip[] {
-  const bench = benchMediaByView(band);
-  const bestRun = new Map<string, common_DesignRun>();
-  for (const run of band.runs ?? []) {
-    if ((run.kind ?? '').trim().toLowerCase() !== 'render') continue;
-    const key = colourRecipeKey(run.params?.colour);
-    const held = bestRun.get(key);
-    if (!held || (run.rrev ?? 0) > (held.rrev ?? 0)) bestRun.set(key, run);
-  }
+export function wireColourSource(recipe?: common_DesignColourRecipe | null): string {
+  if ((recipe?.code ?? '').trim()) return 'dictionary';
+  if (hexIsPaintable(recipe?.hex)) return 'own';
+  if ((recipe?.fabricMediaId ?? 0) > 0) return 'photo';
+  return '';
+}
 
-  const seen = new Set<string>();
-  const chips: ColourChip[] = [];
-  for (const recipe of band.colourRecipes ?? []) {
-    if (!recipe) continue;
-    const key = colourRecipeKey(recipe);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const run = bestRun.get(key) ?? null;
-    const snapshot = run ? snapshotMediaByView(run) : null;
-    chips.push({
-      key,
-      recipe,
-      run,
-      rrev: run?.rrev ?? 0,
-      pictures: (run?.pictures ?? []).filter((p) => !isPictureHidden(p)).length,
-      archived: !!(run?.archivedAt ?? '').trim(),
-      stale: !!snapshot && SILHOUETTE_VIEWS.some((view) => snapshot[view] !== bench[view]),
-    });
-  }
-  return chips;
+/* ─────────────────────────── the sheet a render comes back as ─────────────────────────── */
+
+/**
+ * THE LEFT-TO-RIGHT ORDER OF THE VIEWS ON A RENDER SHEET — a walk around the garment.
+ *
+ * The owner's own sample is front, side, back in that order, and this list is that sample
+ * generalised to a card that also holds a right side: you walk around the body rather than
+ * enumerating a database. It is deliberately NOT `SILHOUETTE_VIEWS` (front, back, side L, side R),
+ * which is the order the bench is DRAWN in — a bench is a set of slots to fill and reads best with
+ * the two main sides adjacent, a sheet is a photograph and reads as a rotation.
+ *
+ * ⚠ THIS ORDER IS THE ORDER THE SPLITTER WILL TRUST. `params.views` is recorded verbatim by the
+ * store (`compositeViewsOf`) as «what is glued into this image», and the split frames are labelled
+ * off that record. So the list sent here, the list the prompt says left-to-right, and the labels
+ * of the cut frames are one list — which is only true while exactly one place decides it.
+ */
+export const RENDER_SHEET_ORDER = ['front', 'side_l', 'back', 'side_r'] as const;
+
+/** The views a render run is asked for: the filled bench slots, in sheet order. */
+export function renderSheetViews(band: GetDesignBandResponse): string[] {
+  const filled = new Set(
+    benchSides(band)
+      .filter((side) => !!side.picture)
+      .map((side) => side.view as string),
+  );
+  return RENDER_SHEET_ORDER.filter((view) => filled.has(view));
 }
 
 /* ─────────────────────────── the 3D submission ─────────────────────────── */

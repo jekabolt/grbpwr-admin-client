@@ -23,6 +23,20 @@ import { budgetLine, type Gate } from './model';
  * carrying its reason, which is the wave's rule and the reason the strip above it exists at all: a
  * missing button teaches «this admin has no renders», a dead one with a reason teaches «front is
  * empty», and only the second is true.
+ *
+ * ═══ ДНЕВНОЙ РАСХОД ОТСЮДА СНЯТ (T-12) ═══════════════════════════════════════════════════════
+ *
+ * Владелец, дословно: «today US$0.4074 of US$2.00 — нам надо показывать только цену генерации и
+ * все». Здесь печаталась ровно эта строка, обоими генеративными экранами.
+ *
+ * ПОТОЛОК ПРИ ЭТОМ ПРОДОЛЖАЕТ ГЕЙТИТЬ ЗАПУСК, и это не оговорка: отказ по исчерпанному бюджету
+ * ставит сервер, а `renderGate`/`threedGate` лишь читают тот же факт заранее, чтобы не собирать
+ * отказ дороже. Ушёл ПОКАЗ ЧИСЕЛ, а не проверка.
+ *
+ * ЧТО ОСТАЛОСЬ НА ЭКРАНЕ ПРИ ИСЧЕРПАНИИ — ОДНА ФРАЗА БЕЗ СУММ. Совсем немой экран здесь хуже
+ * лишней строки: `GENERATE` мертва, и единственное объяснение жило бы в `title` мёртвой двери, то
+ * есть под наведением мыши. Человек, пришедший запустить прогон, читал бы это как поломку. Фраза
+ * называет состояние и не называет ни одного числа — ни списанного, ни потолка.
  */
 export function GenerateRow({
   band,
@@ -47,7 +61,8 @@ export function GenerateRow({
   onInspect?: () => void;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
-  const budget = budgetLine(band);
+  /** Читается ТОЛЬКО ради флага «потолок выбран». Ни `spent`, ни `cap` на экран не идут. */
+  const ceilingReached = !!budgetLine(band)?.exhausted;
 
   const frozen = disabled
     ? 'this card is read-only for you — a run spends money, so it is one of the writes that stops here'
@@ -90,9 +105,9 @@ export function GenerateRow({
         {shape} · priced by the server when the run starts
       </Text>
 
-      {budget && (
+      {ceilingReached && (
         <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-          {budget.text}
+          today’s generation ceiling is reached — no new run starts until it resets
         </Text>
       )}
     </div>

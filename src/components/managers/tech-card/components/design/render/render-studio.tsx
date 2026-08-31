@@ -4,11 +4,17 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { ColourHistory } from './colour-history';
+import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow } from './generate-row';
-import { benchSides, recipeIsStated, renderGate, type Gate } from './model';
+import {
+  recipeIsStated,
+  renderGate,
+  renderSheetViews,
+  wireColourSource,
+  type Gate,
+} from './model';
 import { OutputsSection } from './outputs';
 import { Palette } from './palette';
 import { RenderInputStrip } from './render-input-strip';
@@ -19,7 +25,8 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * THE FABRIC RENDER STUDIO — the whole of the `render` view of the DESIGN band.
  *
  * TWO BLOCKS, IN THIS ORDER, AND THE ORDER IS THE ARGUMENT. First what the render is MADE FROM (the
- * flats, with the line down the middle), then what it is made WITH (colour, material, words). The
+ * flats, with the line down the middle), then what it is made WITH (the fabric: photo, colour, words
+ * — any of them, in any combination, ranked by the prompt and not by this screen). The
  * prototype puts the inputs above the menu on both generative screens for the same reason the bench
  * stands below the feed on FLAT: you look at the material before you decide what to do to it.
  *
@@ -27,6 +34,11 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * fabric render is coloured over THE FLATS OF THIS CARD, and the model never sees the reference
  * photographs at all. Drawing them would put a section on screen that has no effect on the button
  * beneath it. They belong to FLAT, one click away.
+ *
+ * ONE RUN COMES BACK AS ONE SHEET OF SEVERAL VIEWS, and it is split into the slots afterwards —
+ * the owner's answer of 2026-08-31. That is why there is no «pictures» count in the menu: the money
+ * and the picture are both singular no matter how many sides the bench holds, and the plural is
+ * created for free, later, by the split.
  *
  * FIT IS READ-ONLY HERE, WITH ITS REASON. Fit is a property of the garment; presentation cannot
  * change it. The render menu therefore states the card's fit and refuses to edit it — unlike 3D,
@@ -41,16 +53,22 @@ export function RenderStudio({
   techCardId: number;
   disabled?: boolean;
 }): JSX.Element {
-  // ONE DRAFT FOR BOTH ORGANS. The palette writes it and the colour history restores into it; two
-  // drafts would make a restored chip visibly change nothing.
   const draft = useColourDraft(band);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
   const [inspecting, setInspecting] = useState(false);
 
-  const sides = useMemo(() => benchSides(band), [band]);
-  const filled = sides.filter((side) => !!side.picture);
+  /**
+   * THE VIEWS THIS RUN ASKS FOR, IN SHEET ORDER — a walk around the garment (front, side L, back,
+   * side R), narrowed to the slots that actually hold a drawing.
+   *
+   * ⚠ THIS LIST IS SENT, PROMPTED AND SPLIT AS ONE. It travels as `params.views`; the store records
+   * it VERBATIM as «what is glued into this image» (`compositeViewsOf`); the prompt names it
+   * left-to-right; the splitter labels the cut frames off the record. Sorting it anywhere else in
+   * that chain would hand back a sheet whose frames are systematically mislabeled.
+   */
+  const views = useMemo(() => renderSheetViews(band), [band]);
 
   const gate: Gate = useMemo(() => {
     const base = renderGate(band);
@@ -59,7 +77,7 @@ export function RenderStudio({
       return {
         ok: false,
         reason:
-          'no colour is stated yet — pick one from the dictionary, type a hex of your own, or choose a fabric photo above',
+          'no fabric is stated yet — attach a fabric photo, pick a colour, or describe the cloth in words above. Any one of them is enough, and they may be combined',
       };
     }
     return { ok: true };
@@ -70,11 +88,29 @@ export function RenderStudio({
       kind: 'render',
       ask: '',
       params: {
-        // ONE PICTURE PER FILLED SLOT: the render colours the drawings that are on the bench, and
-        // the views it is asked for are exactly the ones that hold one.
-        views: filled.map((side) => side.view),
-        layout: 'per_view',
-        colour: draft.recipe,
+        views,
+        // ─── ONE PICTURE, ALL THE VIEWS IN A ROW — the owner's own answer of 2026-08-31 to «что
+        // возвращает один прогон»: «Три вида в одной картинке… в слоты кладётся уже после разреза».
+        //
+        // IT USED TO BE `per_view`, AND THE DIFFERENCE IS NOT COSMETIC. `per_view` is one PAID CALL
+        // per view (see designgen/images.go, imageCalls), so a three-side card bought three
+        // pictures — three separate photographs of what is supposed to be one garment, each free to
+        // drift a shade of white, a neckline and a light. A sheet is one call, one cloth, one light,
+        // and the store's own compositeViewsOf records the row so the splitter can cut it into the
+        // slots afterwards. Cheaper AND more coherent, which is unusual enough to be worth the note.
+        // Деталей этот прогон не просит, и список пуст ЯВНО: сервер сверяет его длину с числом
+      // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
+      // список, только молча.
+      detailSlotIds: [],
+      layout: 'one',
+        colour: {
+          ...draft.recipe,
+          // DERIVED AT THE DOOR, NOT HELD BY A CONTROL. `source` predates combination and cannot
+          // spell «a photo and a picked colour together»; it is written here purely so recipes
+          // already stored stay readable, and it never decides what travels — the three populated
+          // fields do.
+          source: wireColourSource(draft.recipe),
+        },
         threed: undefined,
         fixTarget: '',
         extraInputMediaIds: [],
@@ -83,9 +119,11 @@ export function RenderStudio({
         // Empty in all three is «this run corrects nothing», which is what these two screens do.
         fixTargets: [],
         fixSlotIds: [],
-        // `auto_split` is only meaningful with layout = one, and neither of these screens produces
-        // a composite: a render comes back one picture per filled slot, a turntable frame by frame.
-        autoSplit: false,
+        // ASK FOR THE PROPOSED CUT. A render now comes back as ONE sheet of several views, and the
+        // whole point of the flag is that the human confirms frames instead of drawing rectangles
+        // from nothing. It cuts nothing by itself — the cut stays `SplitDesignPicture`'s and stays
+        // a person's — it only records that the guess was wanted.
+        autoSplit: true,
       },
     });
   };
@@ -96,10 +134,9 @@ export function RenderStudio({
 
       <Section
         title='generation — fabric render'
-        question='— colour, material and the words that go with them'
+        question='— the cloth: a photo, a colour, words, or any mix of them'
       >
         <Palette band={band} techCardId={techCardId} disabled={disabled} draft={draft} />
-        <ColourHistory band={band} techCardId={techCardId} disabled={disabled} draft={draft} />
 
         <FieldRow label='fit'>
           {/* A READ-ONLY CONTROL WITH ITS REASON, not a disabled input. It looks like the field it
@@ -121,7 +158,11 @@ export function RenderStudio({
         <GenerateRow
           band={band}
           gate={gate}
-          shape={`${filled.length} picture${filled.length === 1 ? '' : 's'} · one per filled slot`}
+          shape={
+            views.length > 1
+              ? `1 picture · ${views.length} views in a row · split into the slots afterwards`
+              : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`
+          }
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}

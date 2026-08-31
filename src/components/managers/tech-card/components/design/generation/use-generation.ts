@@ -283,9 +283,37 @@ export function useMoreHistory(
   band: GetDesignBandResponse,
 ): MoreHistory {
   const [wanted, setWanted] = useState(false);
-  // Captured once. `initial_page_token` changing under an open continuation would otherwise restart
-  // the whole chain from a different place and reshuffle what is already on screen.
+  // Captured once PER CARD. `initial_page_token` changing under an open continuation would
+  // otherwise restart the whole chain from a different place and reshuffle what is already on
+  // screen.
   const firstToken = useRef<string>('');
+  /**
+   * ЧЕЙ ЭТО КУРСОР — ВОПРОС, НА КОТОРЫЙ ОБЯЗАН БЫТЬ ОТВЕТ.
+   *
+   * `page_token` — величина ОДНОЙ карточки: сервер режет им список прогонов именно этой тех-карты.
+   * А компонент между карточками НЕ РАЗМОНТИРУЕТСЯ: клиентский переход на соседнюю карточку, чья
+   * полоса уже лежит в кэше React Query, не поднимает `isLoading` вовсе, и вкладка перерисовывается
+   * с новым `techCardId` на тех же самых рефах. Курсор карточки A переживал переход, `wanted`
+   * переживал его тоже — и первый же рендер карточки B уходил в
+   * `ListDesignRuns(tech_card_id = B, page_token = <курсор A>)`, никем не прошенный. Ответом на
+   * такой запрос бывает ошибка или ЧУЖОЕ продолжение; второе хуже, потому что выглядит как история.
+   *
+   * СБРОС ИДЁТ В РЕНДЕРЕ, А НЕ В `useEffect`, и это не вкусовщина. Эффект исполняется после
+   * коммита, то есть остаётся ровно один кадр, в котором `enabled` уже сложился из нового
+   * `techCardId` и старого курсора — запрос успевает уйти ДО того, как эффект его отменит.
+   * Правка состояния при смене пропа прямо в рендере — штатный приём React: он выбрасывает
+   * результат текущего рендера и считает его заново, не коммитя промежуточное состояние никуда.
+   */
+  const cursorOwner = useRef<number>(techCardId ?? 0);
+  if (cursorOwner.current !== (techCardId ?? 0)) {
+    cursorOwner.current = techCardId ?? 0;
+    firstToken.current = '';
+    // Продолжение новой карточки никто не просил: «показать все» на карточке A — не согласие
+    // вычитать до конца карточку B.
+    if (wanted) setWanted(false);
+  }
+  // Пока полоса новой карточки не прочитана, `nextPageToken` пуст (`EMPTY_BAND`), и запрос не
+  // уходит вовсе — курсор захватывается только из ответа, который уже про эту карточку.
   if (!firstToken.current) firstToken.current = (band.nextPageToken ?? '').trim();
   const token = firstToken.current;
 

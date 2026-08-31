@@ -121,57 +121,49 @@ export function splitVerb(facts: CompositeFacts): string {
 }
 
 /**
- * THE GHOST MARKS — «probably FRONT», one per glued view, over the picture itself.
+ * ОДИН ТЕКСТ «MULTI-VIEW» НА КАРТИНКЕ — вместо стопки «probably FRONT / probably BACK / …» по
+ * числу склеенных видов (T-13, круг 4). Владелец: перечисление трёх догадок на ОДНОЙ картинке
+ * читается как три картинки — а этот файл ровно один. Поэтому на изображении стоит одно слово о
+ * его природе, а НЕ список гипотез.
  *
- * STACKED IN DECLARED ORDER, NOT PLACED OVER THE VIEWS THEY NAME. The prototype draws each ghost
- * on top of its own box, because the prototype's media carries `boxes` with coordinates. Our wire
- * carries `composite_views` and NOTHING ELSE — a list, not a geometry — so a mark positioned at a
- * third of the width would be this client asserting where a view sits, which is exactly the kind of
- * confident guess a person then confirms without checking. What the file actually tells us is the
- * ORDER, so the order is what is drawn, and the crop modal is where position gets decided by a
- * human dragging a frame.
- *
- * They are also the same order the `2 across` / `3 across` presets seed their frames in, so this
- * strip is a preview of what those chips will put on the stage.
+ * Имена и порядок склеенных видов при этом не пропадают: порядок — в `title` (и он же сеет кадры
+ * пресетов `2 across` / `3 across` в разрезе), счётчик — в хвосте провенанса (`compositeTail`), а
+ * где какой вид СИДИТ, по-прежнему решает человек рамкой в сплите — провод несёт список, не
+ * геометрию, и рисовать метку «на своей трети ширины» значило бы уверенно угадывать за него.
  */
 export function CompositeMarks({ facts }: { facts: CompositeFacts }) {
   if (!facts.declared) return null;
+  const named = facts.views.filter(Boolean).map((view) => viewLabel(view));
   return (
     <span
       // `inset-x-0`, NOT `left-0`. An absolute box positioned by one edge is shrink-to-fit, so
-      // `max-w-full` on the marks below would resolve against the marks themselves and `truncate`
-      // would never fire — `probably SIDE L` measured 4px past the picture at a 140px track, which
-      // is the width the feed actually uses. Pinning both edges gives the children the picture's
-      // width to be clipped against; `items-start` keeps each mark as narrow as its own words.
+      // `max-w-full` on the mark below would resolve against the mark itself and `truncate`
+      // would never fire. Pinning both edges gives the child the picture's width to be clipped
+      // against; `items-start` keeps the mark as narrow as its own words.
       className='pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start'
-      title='the views this file declares, in the order it declares them — where each one sits is decided in the split'
+      title={
+        named.length
+          ? `declares ${named.join(', ')} — where each one sits is decided in the split`
+          : 'a multi-view file — which views it holds is decided in the split'
+      }
     >
-      {facts.views.map((view, i) =>
-        view ? (
-          <span
-            key={`${view}-${i}`}
-            className='max-w-full truncate bg-bgColor px-1 text-nano uppercase text-labelColor'
-          >
-            probably {viewLabel(view)}
-          </span>
-        ) : null,
-      )}
+      <span className='max-w-full truncate bg-bgColor px-1 text-nano uppercase text-labelColor'>
+        multi-view
+      </span>
     </span>
   );
 }
 
 /**
- * `3 views glued` — the badge that says this one file is not one picture.
+ * БЕЙДЖ «N VIEWS GLUED» ПОГАШЕН (T-13, круг 4): на плитке остаётся ОДИН текст о мульти-виде — метка
+ * `multi-view` сверху, — а счётчик видов и след разреза продолжают жить в хвосте провенанса
+ * (`compositeTail`). Заодно это освобождает нижний-левый угол плитки, куда владелец велел ставить
+ * сплит (T-7, примитив плитки).
  *
- * It sits on the IMAGE rather than in the footer because it is a fact about the bytes, and because
- * the footer line it would otherwise share is the provenance line, which answers a different
- * question («where is it from»). The two are printed together only in the run panel's prose.
+ * Экспорт сохранён и рисует НИЧЕГО: места монтажа (`generation-history.tsx`) принадлежат другой
+ * ветке этого круга, и живой null дешевле, чем шов через чужой файл. Когда примитив плитки
+ * усвоит метки, этот экспорт снимается вместе со своим монтажом.
  */
-export function CompositeBadge({ facts }: { facts: CompositeFacts }) {
-  if (!facts.declared) return null;
-  return (
-    <span className='absolute bottom-0 left-0 bg-bgColor px-1 text-nano uppercase text-labelColor'>
-      {facts.views.length} view{facts.views.length === 1 ? '' : 's'} glued
-    </span>
-  );
+export function CompositeBadge(_props: { facts: CompositeFacts }) {
+  return null;
 }
