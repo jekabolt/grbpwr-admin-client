@@ -343,6 +343,8 @@ export function useTraceVector(input: {
         fixSlotIds: req.fixSlotIds,
           extraInputMediaIds: [],
           autoSplit: false,
+          pattern: undefined,
+          useFlatSlots: false,
         },
         rerunOfRunId: 0,
       }),

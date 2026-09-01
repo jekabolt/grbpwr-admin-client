@@ -102,7 +102,55 @@ export function RunPanel({
   const [textOpen, setTextOpen] = useState(false);
 
   const inputs = run.inputs;
-  const refs = inputs?.refs ?? [];
+  /**
+   * ВСЁ, ЧТО УЕХАЛО МОДЕЛИ — ОДНИМ РЯДОМ, В ПОРЯДКЕ СЕРВЕРА И С НОМЕРАМИ (K-1д).
+   *
+   * ⚠ ЗДЕСЬ РИСОВАЛАСЬ ПОЛОВИНА СНИМКА. Панель показывала только `refs` — то, что человек принёс
+   * сам, — а `slots` (плиты верстака, которые сервер прикладывал молча) не читала вовсе. Владелец
+   * увидел в промпте шесть строк на две поданные картинки и не мог понять, откуда взялись
+   * остальные: они уезжали, но на экране их не было НИГДЕ.
+   *
+   * Заголовок этой панели обещает «всё нарисованное здесь — копия на момент запуска, то, что делает
+   * вопрос „почему картинка вышла такой“ отвечаемым через месяц». Обещание держится только теперь.
+   *
+   * Порядок и нумерация — ровно те, что у сервера (`referenceList`): сначала плиты, отсортированные
+   * front → back → side_l → side_r → detail, потом референсы. Номер здесь читается ВМЕСТЕ со
+   * строками «- image k: …» под base text; два ряда без номеров были бы третьим мнением о том, что
+   * ушло.
+   */
+  const VIEW_RANK: Record<string, number> = {
+    front: 0,
+    back: 1,
+    side_l: 2,
+    side_r: 3,
+    detail: 4,
+  };
+  const plateRows = [...(inputs?.slots ?? [])]
+    .filter((sl) => (sl.mediaId ?? 0) > 0)
+    .sort((a, b) => (VIEW_RANK[a.viewKey ?? ''] ?? 5) - (VIEW_RANK[b.viewKey ?? ''] ?? 5))
+    .map((sl) => ({
+      mediaId: sl.mediaId ?? 0,
+      media: sl.media,
+      deleted: !!sl.deleted,
+      caption:
+        `current state of the garment — ${viewLabel(sl.viewKey) || 'view'}` +
+        ((sl.detailName ?? '').trim() ? ` (${sl.detailName})` : ''),
+    }));
+  const refRows = (inputs?.refs ?? []).map((r) => ({
+    mediaId: r.mediaId ?? 0,
+    media: r.media,
+    deleted: !!r.deleted,
+    caption:
+      [viewLabel(r.role), (r.note ?? '').trim()].filter(Boolean).join(' — ') || 'reference image',
+  }));
+  // Дедуп по медиа за ПЕРВОЙ позицией — так же, как складывает список сервер: одна и та же
+  // картинка, попавшая и в плиту, и в референс, уезжает один раз и нумеруется один раз.
+  const seenMedia = new Set<number>();
+  const refs = [...plateRows, ...refRows].filter((r) => {
+    if (r.mediaId <= 0 || seenMedia.has(r.mediaId)) return false;
+    seenMedia.add(r.mediaId);
+    return true;
+  });
   const attempts = run.attempts ?? [];
   const live = isRunLive(run);
 
@@ -119,23 +167,36 @@ export function RunPanel({
       {/* THE INPUT REFERENCES, AS THUMBNAILS IN A ROW (S-9). Role and note ride in the title —
           the full, worded prompt is what `recall` below is for. */}
       {refs.length > 0 && (
-        <div className='flex flex-wrap items-center gap-1 border-b border-hairline pb-1'>
-          {refs.map((ref, i) => (
-            <span
-              key={`${ref.mediaId ?? 0}-${i}`}
-              title={
-                [viewLabel(ref.role), (ref.note ?? '').trim()].filter(Boolean).join(' · ') ||
-                undefined
-              }
-            >
-              <Thumb
-                media={ref.media}
-                gone={!!ref.deleted}
-                alt={viewLabel(ref.role) || 'reference'}
-                className='h-11 w-9'
-              />
-            </span>
-          ))}
+        <div className='flex flex-col gap-1 border-b border-hairline pb-1'>
+          <div className='flex flex-wrap items-center gap-1'>
+            {refs.map((ref, i) => (
+              <span
+                key={`${ref.mediaId}-${i}`}
+                title={`image ${i + 1}: ${ref.caption}`}
+                className='relative'
+                data-sent-picture={i + 1}
+              >
+                <Thumb
+                  media={ref.media}
+                  gone={ref.deleted}
+                  alt={ref.caption}
+                  className='h-11 w-9'
+                />
+                {/* НОМЕР НА КАРТИНКЕ. Промпт говорит «- image 3: …», и без номера соотнести
+                    строку со снимком можно было только счётом слева направо — то есть повторив
+                    работу, которую экран обязан был сделать сам. */}
+                <span className='absolute left-0 top-0 bg-bgColor px-0.5 text-[9px] leading-none'>
+                  {i + 1}
+                </span>
+              </span>
+            ))}
+          </div>
+          <Text size='nano' variant='label' component='p'>
+            {refs.length} picture{refs.length === 1 ? '' : 's'} sent
+            {plateRows.length > 0
+              ? ` · ${plateRows.length} from flat slots · ${refs.length - plateRows.length} reference${refs.length - plateRows.length === 1 ? '' : 's'}`
+              : ' · all from the card’s references'}
+          </Text>
         </div>
       )}
 

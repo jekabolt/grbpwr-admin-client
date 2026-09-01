@@ -101,9 +101,11 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * removed stays removed: no «recalled — run N» panel, no inventory of the snapshot, no rerun door —
  * a run starts only from GENERATION — FLAT → GENERATE.
  *
- * AND THE PICTURES CAN BE DRAWN ON WITHOUT LEAVING (V-10). Every live tile carries the primitive's
- * `edit` corner; saving there files a NEW picture that inherits this run's id, so the edit lands in
- * THIS row beside the artefact it came from and can be marked into a slot like any other.
+ * AND THE PICTURES CAN BE DRAWN ON WITHOUT LEAVING (V-10, K-6). EVERY picture of every run carries
+ * the primitive's `edit` corner — a composite and a picture wearing an old `hidden` stamp included,
+ * because the editor never touches its base: saving files a NEW picture that inherits this run's id,
+ * so the edit lands in THIS row beside the artefact it came from and can be marked into a slot like
+ * any other. The one thing that closes the corner is a released card, which is a state of the CARD.
  */
 
 /** How many run rows one page of the history holds. The owner's number (T-17). */
@@ -439,17 +441,39 @@ function RunTile({
            в ту же строку где сгенеренный артефакт», и это свойство контракта, а не наша уборка.
            Замаркать её потом можно обычным пикером под кадром: она такая же картинка полосы.
 
-           СКЛЕЙКА ДВЕРИ НЕ ПОЛУЧАЕТ, как не получает и пикера слота, и по той же причине: у неё
-           нет одного вида, рисование поверх дало бы такую же нерасслаиваемую склейку, и человек
-           получил бы вторую картинку, которую всё равно надо резать. Её единственная дверь —
-           разрез в левом углу. Со штампом `hidden` дверей нет вовсе, как и везде. */
+           ═══ ДВЕРЬ СТОИТ НА КАЖДОМ СГЕНЕРИРОВАННОМ МЕДИА (K-6) ══════════════════════════════
+           Владелец, дословно: «в GENERATION HISTORY для всех медиа сгенерированных сделать
+           возможность эдитить их». Здесь стояло `!disabled && !hidden && !composite`, то есть
+           ДВА исключения; оба сняты, и оба — по разбору, а не оптом.
+
+           СКЛЕЙКА. Довод был: «у неё нет одного вида, рисование поверх дало бы такую же
+           нерасслаиваемую склейку». Это довод о ВКУСЕ результата, а не о том, что жест невозможен:
+           редактор работает от `base_media_id`, а склейка — такое же медиа, как любое другое.
+           Резать её сперва по-прежнему разумно, и об этом говорит заголовок двери; запрещать за
+           человека то, что он вправе сделать, — не то же самое, что предупредить.
+
+           ШТАМП `hidden`. Правило «у скрытой картинки дверей нет» держится там, где дверь
+           действует НА САМУ картинку: разрез плодит её обрезки, пикер ставит её в слот — и то и
+           другое пикеры потом отказываются видеть. Правка не действует на картинку вовсе: по
+           контракту `FlattenDesignEditLayer` рождает СИБЛИНГА, наследующего `run_id` базы, а
+           штампа `hidden_at` у новорождённой картинки нет. То есть правка — единственный жест,
+           которым старый штамп вообще снимается с работы: из скрытой картинки достают живую.
+
+           Что НЕ изменилось: `disabled`. Выпущенная карточка не заводит новых картинок, и это
+           состояние карточки, а не свойство плитки. */
         onEdit={
-          !disabled && !hidden && !composite
+          !disabled
             ? {
                 onClick: () => setEditing(true),
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
-                  'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten',
+                  'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten' +
+                  (composite
+                    ? '. This file holds several views at once, so the edit keeps them together — cut it into views first if you want them apart'
+                    : '') +
+                  (hidden
+                    ? '. This one carries an old hidden stamp; the picture your edit makes does not'
+                    : ''),
               }
             : undefined
         }

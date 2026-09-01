@@ -1,6 +1,7 @@
 import type {
   GetDesignBandResponse,
   common_DesignBenchSlot,
+  common_DesignPicture,
   common_MediaFull,
   common_TechCard,
   common_TechCardMediaKind,
@@ -29,7 +30,6 @@ import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
 import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
@@ -42,6 +42,7 @@ import { ViewSwitch } from 'ui/components/view-switch';
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import { readBench, type BenchRead } from './bench-slot';
 import { benchDoor, openDoor } from './doors';
+import { VectorModal } from './modals';
 import { TILE_CORNER, TILE_QUIET } from './picture-tile';
 import { provenanceLabel, readProvenance } from './provenance';
 import {
@@ -496,6 +497,39 @@ export function ArtifactsPanel({
     () => documentPlates(technicalMedia, resolved, bench),
     [technicalMedia, resolved, bench],
   );
+
+  /**
+   * ═══ media id → КАРТИНКА ПОЛОСЫ, ДЛЯ РАСТРОВОГО РЕДАКТОРА (K-7) ═════════════════════════════
+   *
+   * `VectorModal` живёт от МЕДИА: и слой (`base_media_id`), и склейка растра адресуются им, а не
+   * картинкой. Значит редактор открылся бы и от одной `plate.media`. Картинка полосы нужна ему для
+   * другого — чтобы НАЗВАТЬ основу вслух: `run 5 · b` в пилюле «base», провенанс рядом с ней и имя
+   * файла в выгрузке SVG. Без неё модалка честно, но бесполезно скажет «upload · a» о картинке,
+   * которая приехала из прогона 5.
+   *
+   * ЗАЧЕМ ОТДЕЛЬНАЯ КАРТА, ЕСЛИ РЯДОМ УЖЕ ЕСТЬ `resolved`. Та отображает id → МЕДИА и намеренно
+   * собрана из четырёх источников, включая сохранённую карточку и библиотеку, — там картинок
+   * полосы нет вовсе. Эта собирается только из полосы, потому что только полоса и знает про
+   * прогоны и штампы.
+   */
+  const bandPictureOfMedia = useMemo(() => {
+    const map = new Map<number, common_DesignPicture>();
+    for (const run of band.runs ?? []) {
+      for (const picture of run.pictures ?? []) {
+        const id = picture.media?.id ?? 0;
+        if (id > 0 && !map.has(id)) map.set(id, picture);
+      }
+    }
+    // Плита верстака — та же картинка полосы, просто добравшаяся до слота. Её прогона на
+    // загруженной странице может уже не быть, а сама она приезжает объектом внутри слота.
+    for (const slot of [...bench.sides.map((s) => s.slot), ...bench.details]) {
+      const picture = slot?.picture;
+      const id = picture?.media?.id ?? 0;
+      if (id > 0 && !map.has(id)) map.set(id, picture!);
+    }
+    return map;
+  }, [band.runs, bench]);
+
   /**
    * ═══ THE THREE REPRESENTATIONS OF THIS CARD, AS ONE LIST PER SEGMENT (W-14) ═════════════════
    *
@@ -593,6 +627,12 @@ export function ArtifactsPanel({
   const [focusEditor, setFocusEditor] = useState(0);
   /** The plate whose detach is waiting on a human, because callouts stand on it. */
   const [detaching, setDetaching] = useState<DocumentPlate | null>(null);
+  /**
+   * Плита, открытая в РАСТРОВОМ РЕДАКТОРЕ (K-7). Плита, а не флаг: редактор стоит НАД конкретной
+   * картинкой, и один булев флаг на панель означал бы, что открытие второй плиты молча меняет
+   * предмет правки. Тот же довод и то же решение, что у плитки истории генераций.
+   */
+  const [rasterOn, setRasterOn] = useState<DocumentPlate | null>(null);
 
   const segment = segments[kind];
   const onScreen = segment.plates;
@@ -628,6 +668,15 @@ export function ArtifactsPanel({
   const drawInert = disabled
     ? 'the card is released: its sheet is frozen, and a callout is an edit of it'
     : 'the form’s undo history was not handed to this screen, and a gesture without an undo is not one to offer';
+
+  /**
+   * ПРИЧИНЫ ДВУХ МЁРТВЫХ ДВЕРЕЙ ВЫПУЩЕННОЙ КАРТОЧКИ, И ОНИ РАЗНЫЕ (K-7). «Взять к себе» правит
+   * СПИСОК медиа карточки; «править» заводит НОВУЮ картинку. Одно общее «карточка только для
+   * чтения» на обеих дверях читалось бы как одна запертая дверь, показанная дважды.
+   */
+  const takeInInert = 'this card is read-only for you — taking a picture onto the card is an edit of the card';
+  const editInert =
+    'this card is read-only for you — a drawing is filed as a new picture, and that is an edit of the card';
 
   /**
    * Ставить указание можно ТОЛЬКО на плиту, которая уже числится в медиа карточки: `media_id`
@@ -1077,12 +1126,27 @@ export function ArtifactsPanel({
             what you are marking up
           </GroupLabel>
 
-          <SheetMembershipWarning
-            kind={kind}
-            filteredToSelected={segment.filteredToSelected}
-            serverStates={segment.serverStates}
-            hasPictures={segment.plates.length > 0}
-          />
+          {/* ═══ ЗДЕСЬ СТОЯЛА КОРОБКА `SheetMembershipWarning`, И ЕЁ СНЯЛИ НАСОВСЕМ (K-5) ═══════
+              Владелец, четвёртым кругом: «этот текст полностью убери». Абзац объяснял устройство
+              («всё из медиа карточки уезжает на фабрику») и поведение отбора («выбрано ничего —
+              показывается всё»). Ни то, ни другое не потеряно, и НИ ОДНО из этого не вернётся
+              сюда прозой: каждый факт живёт на органе, который его касается.
+
+                печать        → пилюля `on paper` на самой плите карточки (свой `title`) и подсказки
+                                сегментов в `ARTIFACT_KINDS` («prints too, once it is in the card’s
+                                media»);
+                состав списка → строка справа от заголовка ряда: `· the chosen ones` против
+                                `· everything on this page`;
+                путь туда     → `title` живой метки `select` («the segment narrows to the chosen
+                                ones of this kind»);
+                путь обратно  → `title` метки `un-select` («with none of this kind chosen, the
+                                segment lists everything again») — единственное неочевидное
+                                поведение отбора, и оно объяснено ровно на том органе, который его
+                                вызывает;
+                старый сервер → причина погашенной метки (`SELECT_MARK_NOT_STATED`).
+
+              Абзац над рядом читают один раз и потом перестают видеть; заголовок органа читают
+              тогда, когда рука уже на органе. */}
 
           {/* ПАНЕЛЬ ВИДОВ УКАЗАНИЙ — НАД РЯДОМ, ОДНА НА ЛИСТ. Не бордерная полоса: внутри
               блока новая коробка была бы блоком в блоке, а ступень «подгруппа» рисуется
@@ -1139,7 +1203,6 @@ export function ArtifactsPanel({
                 calloutsOf={calloutsOfPlate}
                 selected={selected}
                 canPlaceOn={canPlaceOn}
-                drawInert={drawInert}
                 tool={tool}
                 onToolDone={() => setTool(null)}
                 onPlacedCountChange={setPlaced}
@@ -1165,7 +1228,18 @@ export function ArtifactsPanel({
                 }
                 onDetach={!disabled ? askDetach : undefined}
                 detachInert={detachInert}
-                onEdit={!disabled ? takeIntoCard : undefined}
+                /* ═══ ДВЕ ДВЕРИ, КОТОРЫЕ РАНЬШЕ БЫЛИ ОДНОЙ (K-7) ══════════════════════════════
+                   `edit` открывает РАСТРОВЫЙ РЕДАКТОР — слова владельца: «в артифактс фабрик
+                   рендерс кнопка эдит должна открывать растр эдитор». Прежний акт этой двери
+                   (внести картинку в медиа карточки) никуда не делся и не мог: `media_id` выноски
+                   адресует медиа КАРТОЧКИ, и без этого шага на рендере полосы указание не
+                   поставить вовсе. Он переехал в свой орган — `take in`, в верхний правый ряд, к
+                   `✕`: обе двери про ОДНО И ТО ЖЕ — состоит ли картинка в медиа карточки, — и
+                   стоять они обязаны на одной оси. */
+                onEdit={!disabled ? setRasterOn : undefined}
+                editInert={editInert}
+                onTakeIn={!disabled ? takeIntoCard : undefined}
+                takeInInert={takeInInert}
                 /* THE MARK'S DOOR RIDES ONLY THE NON-FLAT LISTS. A flat is chosen by standing in a
                    bench slot, not by the mark, so a select door there would be a second registry of
                    one election. */
@@ -1247,7 +1321,7 @@ export function ArtifactsPanel({
               <Text size='micro' variant='label' component='span'>
                 {onScreen[zoomAt].origin === 'card'
                   ? drawInert
-                  : 'this picture is not in the card’s media yet — press edit on its plate, and it becomes drawable here'}
+                  : 'this picture is not in the card’s media yet — press take in on its plate, and it becomes drawable here'}
               </Text>
             )
           }
@@ -1262,6 +1336,30 @@ export function ArtifactsPanel({
               : undefined
           }
           position={{ index: zoomAt, total: onScreen.length }}
+        />
+      )}
+
+      {/* ═══ РАСТРОВЫЙ РЕДАКТОР ПЛИТЫ (K-7) ═══════════════════════════════════════════════════════
+          Тот же `VectorModal`, что открывает `edit` на плитке истории генераций и на плите
+          верстака, — не второй редактор, а ОДИН, вызванный с третьего экрана. Второй означал бы
+          два набора кистей, две истории отката и две трактовки «сохранить».
+
+          МОНТИРУЕТСЯ ТОЛЬКО РАСКРЫТЫМ: редактор тянет слой и растр, и десяток спящих копий по
+          числу плит на ленте — это десяток лишних деревьев ради одной открытой.
+
+          `slot` НЕ ПЕРЕДАЁТСЯ: плита листа — не слот верстака, и результат правки никуда не обязан
+          вставать. Он рождается сиблингом основы (наследует её `run_id` или `batch_id`) и попадает
+          в историю генераций или на полку загрузок — туда же, куда попадает правка из тех мест.
+          Положить его на ЭТОТ лист — отдельное решение, и оно принимается дверью `take in`. */}
+      {rasterOn && (
+        <VectorModal
+          open
+          onOpenChange={(open) => !open && setRasterOn(null)}
+          techCardId={techCardId}
+          band={band}
+          base={bandPictureOfMedia.get(rasterOn.mediaId) ?? plateAsPicture(rasterOn)}
+          slot={null}
+          disabled={disabled}
         />
       )}
 
@@ -1300,82 +1398,37 @@ export function ArtifactsPanel({
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * ═══ SAID BEFORE THE PENCIL IS PICKED UP, NOT AFTER ═══════════════════════════════════════════
+ * ПЛИТА, У КОТОРОЙ КАРТИНКИ ПОЛОСЫ НЕТ ВОВСЕ, — КАК ОСНОВА РЕДАКТОРА (K-7).
  *
- * ЧТО ЗДЕСЬ СТОЯЛО И ПОЧЕМУ ЭТО БЫЛО ХУЖЕ ОТСУТСТВИЯ. Коробка утверждала: «callouts drawn here do
- * not reach the technical sheet… the mint takes the bench's flat plates, and the freeze then keeps
- * only the callouts standing on them… silently left out of every version minted from now on».
- * Ни минта, ни заморозки, ни версий уже нет (V-22): фильтра, о котором шла речь, не существует
- * нигде. А печать при этом устроена ровно наоборот — `tech-pack-document.tsx`, страница
- * `technical sketch`, печатает `technicalMedia` ЦЕЛИКОМ, без единого условия по роду, и
- * `printedOnSketch` считает напечатанной любую выноску, чьё медиа лежит в этом списке. То есть
- * человек брал фабрик-рендер в медиа карточки, рисовал на нём, трижды читал «на лист это не
- * попадёт» — и лист с этим рендером и его пинами уходил в цех.
+ * Такие плиты обычны: файл, положенный на лист из библиотеки, и медиа карточки, чей прогон давно
+ * ушёл с загруженной страницы полосы. Растровому редактору этого достаточно — и слой, и склейка
+ * адресуются по `base_media_id`, — но НАЗВАТЬ такую основу нечем.
  *
- * ВРУЩЕЕ ПРЕДУПРЕЖДЕНИЕ ОПАСНЕЕ ОТСУТСТВУЮЩЕГО: отсутствие оставляет человека настороже, а это
- * учило его расслабиться ровно там, где решается, что увидит швея.
- *
- * ЧТО ГОВОРИТСЯ ВМЕСТО. Правда, и она проще прежней выдумки: ЛИСТ — ЭТО МЕДИА КАРТОЧКИ, и печатается
- * весь. Значит цена решения переехала на один шаг раньше: она не в том, где рисовать, а в том, что
- * вносить в медиа карточки дверью `edit`. Про это и предупреждаем.
- *
- * СОСТАВ ПЕЧАТИ НЕ СУЖЕН НАМЕРЕННО. Тихо выбросить рендеры из тех-пака значило бы подменить
- * решение владельца своим: он просил снести минты и версии, а не менять содержимое комплекта.
- *
- * WHY IT IS A BLUE BOX AND NOT A GREY FOOTNOTE. Mid-flight, needs-a-human: ничего не сломано, и
- * рисовать на рендере — совершенно законное занятие. Красный заявлял бы поломку; серая сноска под
- * блоком читалась бы ПОСЛЕ рисования, то есть поздно. Коробка стоит НАД картинками и привязана к
- * представлению на экране.
- *
- * IT IS NOT SHOWN ON `flat`, and that is the point of tying it to the kind: у флэта попадание на
- * бумагу никого не удивляет, а предупреждение, висящее всегда, — мебель, и мебель не читают.
+ * ⚠ НИ ОДНО ПОЛЕ НЕ ВЫДУМЫВАЕТСЯ. Соблазн написать `sourceClass: 'uploaded'` силён и ложен: про
+ * файл из библиотеки мы знаем ровно то, что он лежит в медиа карточки, а не то, кто его сделал.
+ * `readProvenance` от пустого класса отвечает `unknown`, и подпись основы честно говорит «не
+ * читается» вместо уверенной неправды о происхождении.
  */
-function SheetMembershipWarning({
-  kind,
-  filteredToSelected,
-  serverStates,
-  hasPictures,
-}: {
-  kind: ArtifactKind;
-  filteredToSelected: boolean;
-  serverStates: boolean;
-  hasPictures: boolean;
-}): JSX.Element | null {
-  if (kind === 'flat') return null;
-  const what = kind === 'render' ? 'a fabric render' : 'a turntable frame';
-  return (
-    <CalloutBox tone='warning'>
-      <Text size='micro' component='p'>
-        <b>everything in the card’s media goes to the factory, {what} included.</b> The tech pack
-        prints the whole of that list on its <b>technical sketch</b> page, each picture with the
-        callouts standing on it. So {what} you take in with <b>edit</b> prints there beside the
-        flats, and so do the callouts you draw on it here. That is the decision to make on purpose:
-        take one in when the floor should see the colour or the shape, and leave it out of the
-        card’s media when it is a note for the studio.
-      </Text>
-      {/* THE PROVENANCE OF THE LIST IS ONLY WORTH A SENTENCE WHEN THERE IS A LIST. With nothing of
-          this kind on the page, «nothing is marked as chosen» and «this server does not state the
-          mark» are both true and both useless — and the second one names a server defect that may
-          not exist, because an empty page gives nothing to sample the flag from. */}
-      {hasPictures && !filteredToSelected && (
-        <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
-          {serverStates
-            ? 'Nothing of this kind is marked as chosen on this card, so the segment lists every one on the loaded page. Press select on a picture — here, or on the studio’s own strip of this kind — and the segment narrows to the chosen ones.'
-            : 'This server does not state the mark at all — a binary older than the field — so the segment lists every picture of this kind on the loaded page.'}
-        </Text>
-      )}
-      {/* THE WAY BACK IS SAID WHERE THE NARROWING HAPPENS. A narrowed list with no word about how
-          it widens again reads as «the other pictures are gone» — and the pictures it no longer
-          shows are exactly where a select door cannot be, so the sentence is the only door. */}
-      {filteredToSelected && (
-        <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
-          Only the chosen ones of this kind are listed. un-select takes the mark off a picture;
-          with none left chosen, the segment lists everything of this kind again. Choosing among
-          ALL of them — chosen or not — is done on the studio’s own strip of this kind.
-        </Text>
-      )}
-    </CalloutBox>
-  );
+function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
+  return {
+    id: plate.pictureId,
+    techCardId: undefined,
+    media: plate.media,
+    runId: undefined,
+    batchId: undefined,
+    ordinal: undefined,
+    kind: undefined,
+    ghostView: undefined,
+    compositeViews: undefined,
+    derivedFrom: undefined,
+    sourceClass: undefined,
+    mixedInput: undefined,
+    layerRev: undefined,
+    hiddenAt: undefined,
+    hiddenBy: undefined,
+    createdAt: undefined,
+    selected: undefined,
+  };
 }
 
 /** Адрес плиты: полный размер, потом сжатый, потом миниатюра. Пусто — поверхность скажет сама. */
@@ -1478,6 +1531,18 @@ const PLATE_LEGEND_BOX = 'max-h-[72px]';
  */
 const PLATE_BADGE_BAR =
   'pointer-events-none absolute left-1 top-1 z-[5] flex max-w-[calc(100%-96px)] flex-col items-start gap-0.5';
+/**
+ * ЯРЛЫК УСТУПАЕТ РОВНО СТОЛЬКО, СКОЛЬКО ЗАНЯЛ ПРОТИВОПОЛОЖНЫЙ УГОЛ (K-7).
+ *
+ * 96px в базовом классе — это `zoom · ✕` с их полями. У плиты, которой в медиа карточки ещё нет,
+ * между ними встаёт третий орган (`take in`), и ряд вырастает примерно до 150px. Оставить резерв
+ * прежним значило бы, что имя вида уезжает под кнопку ровно на тех плитах, где имя нужнее всего:
+ * это ряд выходов прогона, и различают их именно по имени.
+ *
+ * Резерв ДВУХ ЗНАЧЕНИЙ, а не одно широкое на все плиты: у карточной плиты третьего органа нет, и
+ * отобранные у ярлыка 64 пикселя резали бы длинное имя без всякой причины.
+ */
+const PLATE_BADGE_BAR_WIDE_RESERVE = 'max-w-[calc(100%-160px)]';
 const PLATE_BADGE_CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 bg-bgColor px-1 py-0.5';
 
 /**
@@ -1512,16 +1577,23 @@ const PLATE_BADGE_CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 bg-bgColo
  * указаний (T-21, «оно должно быть инлайн»), и обернуть её в плитку значило бы вернуть модалку
  * рисования, которую владелец снял. Поэтому общий не компонент, а закон:
  *
- *      верх справа  — zoom, ✕ (снять плиту с листа)   ← ряд, кладётся в `cornerSlot` поверхности
+ *      верх справа  — zoom, take in, ✕                 ← ряд, кладётся в `cornerSlot` поверхности
  *      низ слева    — select / un-select (метка W-12)
  *      низ справа   — edit
  *
- * ЧТО ТАКОЕ `edit` ЗДЕСЬ. Ровно тот акт, что раньше назывался «take in to draw on it ▸»: картинка
- * верстака или прогона вносится в медиа карточки, и с этого мгновения на ней можно ставить
- * указания ПРЯМО ЗДЕСЬ (`media_id` выноски адресует медиа КАРТОЧКИ — это и есть вся причина, по
- * которой шаг существует). Владелец не просил убрать шаг, он просил убрать НЕПОНЯТНОЕ ИМЯ: «я не
- * понимаю зачем она нужна». Плита карточки своего `edit` не несёт — она уже правится кликом по
- * себе, и второй орган, дублирующий работающий жест, был бы мебелью.
+ * ВЕРХНИЙ ПРАВЫЙ РЯД — ОДНА ОСЬ: состоит ли картинка в медиа карточки. `take in` вносит, `✕`
+ * выносит, и второй появляется ровно там, где первого уже не нужно. Ось эта существует не ради
+ * симметрии: `media_id` выноски адресует медиа КАРТОЧКИ, поэтому на плите прогона или верстака
+ * указание не поставить, пока её не внесли.
+ *
+ * ЧТО ТАКОЕ `edit` ЗДЕСЬ (K-7). Растровый редактор — тот же `VectorModal`, что открывают плитка
+ * истории генераций и плита верстака. Слова владельца: «в артифактс фабрик рендерс кнопка эдит
+ * должна открывать растр эдитор». До этого круга дверь с тем же именем вносила картинку в медиа
+ * карточки; акт остался, имя у него теперь своё (`take in`), и путать их больше нечем.
+ *
+ * `edit` СТОИТ НА КАЖДОЙ ПЛИТЕ. Раньше карточная плита нижнего правого органа не имела вовсе —
+ * довод был «она правится кликом по себе». Клик по себе ставит УКАЗАНИЕ; кисть — другое умение, и
+ * отсутствие двери учило, что кистью по плите карточки нельзя, хотя можно.
  *
  * МЁРТВАЯ ДВЕРЬ ОСТАЁТСЯ ВИДИМОЙ И НАЗЫВАЕТ ПРИЧИНУ — но теперь заголовком угла, а не строкой:
  * отсутствие учит, что жеста не существует вовсе, а погашенный орган с причиной учит, что именно
@@ -1533,7 +1605,6 @@ function PlateGrid({
   calloutsOf,
   selected,
   canPlaceOn,
-  drawInert,
   tool,
   onToolDone,
   onPlacedCountChange,
@@ -1546,6 +1617,9 @@ function PlateGrid({
   onDetach,
   detachInert,
   onEdit,
+  editInert,
+  onTakeIn,
+  takeInInert,
   onToggleChosen,
   chosenInert,
   chosenPending,
@@ -1560,8 +1634,6 @@ function PlateGrid({
   selected: number | null;
   /** Принимает ли эта плита указание — и, значит, заморожена её поверхность или нет. */
   canPlaceOn: (plate: DocumentPlate) => boolean;
-  /** Почему рисовать нельзя нигде на этом экране — для мёртвой двери на плите карточки. */
-  drawInert: string;
   tool: string | null;
   onToolDone: () => void;
   onPlacedCountChange: (n: number) => void;
@@ -1584,10 +1656,18 @@ function PlateGrid({
   onDetach?: (plate: DocumentPlate) => void;
   detachInert: string;
   /**
-   * `edit` нижнего правого угла: внести картинку верстака или прогона в медиа карточки, чтобы на
-   * ней вообще можно было поставить указание. Прежнее имя двери — «take in to draw on it ▸».
+   * `edit` нижнего правого угла: открыть плиту в РАСТРОВОМ РЕДАКТОРЕ (K-7). Стоит на КАЖДОЙ плите
+   * ряда, чем бы она ни была: редактор работает от медиа, а медиа есть у всех.
    */
   onEdit?: (plate: DocumentPlate) => void;
+  editInert: string;
+  /**
+   * `take in` верхнего правого ряда: внести картинку верстака или прогона в медиа карточки, чтобы
+   * на ней вообще можно было поставить указание. До K-7 этот акт носил имя `edit`, а до того —
+   * «take in to draw on it ▸».
+   */
+  onTakeIn?: (plate: DocumentPlate) => void;
+  takeInInert: string;
   /**
    * Flip the mark «chosen» on the picture behind a plate (W-12), or `undefined` — and then
    * `chosenInert` says why not. BOTH absent means the door is not part of this list at all: a flat
@@ -1633,7 +1713,6 @@ function PlateGrid({
       {plates.map((plate, index) => {
         const drawable = canPlaceOn(plate);
         const mine = calloutsOf(plate.mediaId);
-        const compound = plate.origin === 'bench' || plate.origin === 'run';
         const detachReason = !onDetach
           ? detachInert
           : plate.origin === 'bench'
@@ -1662,7 +1741,12 @@ function PlateGrid({
                 нужно, а лишняя стояла бы между поверхностью и её собственными углами.
                 `pointer-events-none` НЕСУЩИЙ: под ярлыком лежит поверхность постановки указаний, и
                 проглоченный им `pointerdown` означал бы мёртвую зону в углу каждого чертежа. */}
-            <div className={PLATE_BADGE_BAR}>
+            <div
+              className={cn(
+                PLATE_BADGE_BAR,
+                plate.origin !== 'card' && PLATE_BADGE_BAR_WIDE_RESERVE,
+              )}
+            >
               <div className={PLATE_BADGE_CHIP}>
                 <Text
                   size='nano'
@@ -1774,11 +1858,35 @@ function PlateGrid({
                 //
                 // ZOOM ЖИВ И НА ВЫПУЩЕННОЙ КАРТОЧКЕ: мерку и дугу на плите иначе не разглядеть, а
                 // увеличение и есть способ их прочесть. ✕ (detach) — правка листа, поэтому гаснет.
+                //
+                // ═══ И ЗДЕСЬ ЖЕ ВТОРАЯ ПОЛОВИНА ОДНОЙ ОСИ — `take in` (K-7) ══════════════════
+                // Ряд отвечает на один вопрос: СОСТОИТ ЛИ КАРТИНКА В МЕДИА КАРТОЧКИ. `✕` выносит
+                // её оттуда, `take in` вносит. Держать вход и выход в разных углах плиты значило
+                // бы, что одна и та же ось читается в двух местах — ровно то «везде по-разному»,
+                // из-за которого закон углов вообще появился.
+                //
+                // ТОЛЬКО У ПЛИТЫ, КОТОРОЙ В МЕДИА КАРТОЧКИ ЕЩЁ НЕТ. У карточной плиты вносить
+                // нечего, и живая дверь «внести» рядом с живой «вынести» читалась бы как выбор
+                // там, где выбора нет. Погашенной её тоже не рисуем: `✕` по соседству уже
+                // говорит, что плита на листе.
                 cornerSlot={
                   <>
                     <PlateCorner label={`zoom · ${plate.name}`} onPress={() => onZoom(index)}>
                       zoom
                     </PlateCorner>
+                    {plate.origin !== 'card' &&
+                      (onTakeIn ? (
+                        <PlateCorner
+                          label={`take ${plate.name} into the card’s media — from that moment a callout can be placed on it right here, and it prints on the tech pack’s technical sketch page`}
+                          onPress={() => onTakeIn(plate)}
+                        >
+                          take in
+                        </PlateCorner>
+                      ) : (
+                        <PlateCorner label={`take ${plate.name} in`} reason={takeInInert}>
+                          take in
+                        </PlateCorner>
+                      ))}
                     {detachReason ? (
                       <PlateCorner label={`detach ${plate.name}`} reason={detachReason}>
                         ✕
@@ -1828,32 +1936,33 @@ function PlateGrid({
                       </PlateCorner>
                     )}
 
-                    {/* НИЗ СПРАВА — `edit`, И ТОЛЬКО ТАМ, ГДЕ ЕМУ ЕСТЬ ЧТО СДЕЛАТЬ. Плита карточки
-                        правится кликом по самой себе, и дублирующий этот жест орган был бы мебелью.
-                        У плиты верстака и выхода прогона указание поставить НЕЛЬЗЯ, пока картинка не
-                        в медиа карточки, — `edit` ровно это и делает, одним тактом, на месте. */}
-                    {compound ? (
-                      onEdit ? (
-                        <PlateCorner
-                          label={`edit ${plate.name} — lists this picture in the card’s own media, and from that moment a callout can be placed on it right here`}
-                          onPress={() => onEdit(plate)}
-                        >
-                          edit
-                        </PlateCorner>
-                      ) : (
-                        <PlateCorner
-                          label={`edit ${plate.name}`}
-                          reason='this card is read-only for you — taking a picture onto the card is an edit of the card'
-                        >
-                          edit
-                        </PlateCorner>
-                      )
-                    ) : !drawable ? (
-                      <PlateCorner label={`draw on ${plate.name}`} reason={drawInert}>
-                        draw
+                    {/* ═══ НИЗ СПРАВА — `edit`, И ОН ОТКРЫВАЕТ РАСТРОВЫЙ РЕДАКТОР (K-7) ═════════
+                        Владелец: «в артифактс фабрик рендерс кнопка эдит должна открывать растр
+                        эдитор». Здесь этой дверью вносили картинку в медиа карточки; тот акт жив,
+                        но зовётся `take in` и стоит в верхнем правом ряду, на своей оси.
+
+                        СТОИТ НА КАЖДОЙ ПЛИТЕ, БЕЗ ВЕТКИ ПО ПРОИСХОЖДЕНИЮ. Прежнее `compound ?`
+                        оставляло карточную плиту вовсе без нижнего правого органа: рисовать на ней
+                        было можно только указаниями, а кистью — нельзя, и объяснить эту разницу
+                        человеку нечем. Редактор работает от `base_media_id`, а медиа несёт любая
+                        плита ряда.
+
+                        ЧЕГО ЗДЕСЬ БОЛЬШЕ НЕТ. Погашенная дверь `draw` с причиной «рисовать нельзя»
+                        ушла вместе с веткой: угол один, слово в нём одно, и `edit` — то слово,
+                        которое назвал владелец. Сама причина не потерялась — увеличенный вид
+                        печатает её строкой (`readOnlyNote`), а панель видов над рядом просто не
+                        появляется, когда взводить вид не на что. */}
+                    {onEdit ? (
+                      <PlateCorner
+                        label={`edit ${plate.name} — draw over this picture; saving files a NEW picture and never overwrites this one`}
+                        onPress={() => onEdit(plate)}
+                      >
+                        edit
                       </PlateCorner>
                     ) : (
-                      <span />
+                      <PlateCorner label={`edit ${plate.name}`} reason={editInert}>
+                        edit
+                      </PlateCorner>
                     )}
                   </>
                 }

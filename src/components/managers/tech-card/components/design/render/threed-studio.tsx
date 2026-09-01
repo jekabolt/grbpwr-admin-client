@@ -169,6 +169,8 @@ export function ThreedStudio({
         // `auto_split` is only meaningful with layout = one, and neither of these screens produces
         // a composite: a render comes back one picture per filled slot, a turntable frame by frame.
         autoSplit: false,
+        pattern: undefined,
+        useFlatSlots: false,
       },
     });
   };

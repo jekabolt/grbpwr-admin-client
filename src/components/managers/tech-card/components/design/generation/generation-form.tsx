@@ -123,6 +123,13 @@ export function GenerationForm({
   // Галки ДЕТАЛЕЙ живут по id слота, отдельно от силуэтов (T-5): деталь можно спросить, только
   // если она ОПИСАНА в THE PICTURES, и на каждую описанную — своя галка.
   const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>({});
+  /**
+   * ОТДАВАТЬ ЛИ МОДЕЛИ ПЛИТЫ ФЛЕТ-СЛОТОВ (K-1). УМОЛЧАНИЕ — НЕТ, и это всё содержание галочки.
+   * Сервер брал их молча, а плита флет-слота, как правило, флет, который эта же машина и
+   * нарисовала: модель получала готовый ответ и переписывала его один в один, не глядя на
+   * фотографии, которые человек принёс.
+   */
+  const [useFlatSlots, setUseFlatSlots] = useState(false);
   const [layout, setLayout] = useState<Layout>('per_view');
 
   const bench = useMemo(() => readBench(band), [band]);
@@ -234,6 +241,8 @@ export function GenerationForm({
       // true here, and refusing it by default would leave the guess permanently unasked-for while
       // the modal below is written to consume it.
       autoSplit: layout === 'one' && ticked.length >= 2,
+      pattern: undefined,
+      useFlatSlots,
       // Empty since S-15: the marked-plate rasters travelled only inside a fix, and feeding them
       // to an ordinary run would silently change what a paid request contains. See the header.
       extraInputMediaIds: [],
@@ -387,6 +396,32 @@ export function GenerationForm({
         disabled={writesOff}
         onChange={setLayout}
       />
+      {/* ПОСЛЕДНИЙ ВОПРОС ПЕРЕД ДЕНЬГАМИ. Чип, а не галочка: в этой полосе нет ни одного
+          checkbox, а виды и детали прямо над ним включаются ровно так же. Рядом — не проза, а
+          СОСТОЯНИЕ: сколько плит поедет и каких. Пустой верстак отключает чип и говорит почему,
+          иначе он был бы органом, который нажимается и не делает ничего. */}
+      <div className='flex flex-col gap-1'>
+        <GroupLabel>what the model is shown</GroupLabel>
+        <ChipRow>
+          <Chip
+            selected={useFlatSlots}
+            pressed={useFlatSlots}
+            disabled={writesOff || marked.length === 0}
+            data-use-flat-slots=''
+            onClick={() => setUseFlatSlots((v) => !v)}
+            title='the plates already in flat slots go to the model as references — they are usually flats it drew before, so it tends to redraw them'
+          >
+            also send the flat slots
+          </Chip>
+        </ChipRow>
+        <Text size='nano' variant='label' component='p'>
+          {marked.length === 0
+            ? 'no flat slots are filled — nothing extra to send'
+            : useFlatSlots
+              ? `${marked.length} plate${marked.length === 1 ? '' : 's'} travel: ${marked.map((p) => p.label).join(', ')}`
+              : 'only the card’s references travel'}
+        </Text>
+      </div>
       {/* S-1 (owner): the glued-file paragraph is gone. The composite rule it recited is not
           lost — it is CONSTRUCTION (a declared composite offers the cut and refuses the picker,
           `generation-history.tsx`) and it is still worded once, in `outputsLine` beside the
@@ -440,8 +475,9 @@ export function GenerationForm({
             <b>
               the edit ▸ marks on {marked.map((p) => p.label).join(', ')} stay on this screen.
             </b>{' '}
-            a flat run reads the card’s references, never the bench plates, so nothing drawn there
-            travels with GENERATE — the marks remain on their plates for people.
+            {useFlatSlots
+              ? 'the plates themselves travel with GENERATE — you asked for them above. The marks drawn on them do not: they stay here for people.'
+              : 'a flat run reads the card’s references, never the bench plates, so nothing drawn there travels with GENERATE — the marks remain on their plates for people.'}
           </Text>
         </CalloutBox>
       )}

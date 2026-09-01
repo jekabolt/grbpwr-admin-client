@@ -124,6 +124,8 @@ export function RenderStudio({
         // from nothing. It cuts nothing by itself — the cut stays `SplitDesignPicture`'s and stays
         // a person's — it only records that the guess was wanted.
         autoSplit: true,
+        pattern: undefined,
+        useFlatSlots: false,
       },
     });
   };
