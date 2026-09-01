@@ -4996,6 +4996,47 @@ export type DesignEditLayer = {
   // fix run needs in order to feed the raster and the vector as one input rather than two
   // unrelated ones.
   sourcePictureId: number | undefined;
+  // FK media(id) RESTRICT: THE PIXEL CHANNEL OF THIS LAYER — one RGBA image holding the FULL state
+  // of its pixels, never a delta. 0 = nothing has been painted; the layer is pure vector.
+  // WHY FULL STATE AND NOT A DELTA. The eraser chews through the BASE as well (the owner's answer,
+  // verbatim: «И саму фотографию тоже»), so the result is not expressible as «the base plus
+  // something on top» at all — a hole in the photograph is the ALPHA OF THIS IMAGE. That is also
+  // why there is no separate base mask: it would be a second way of stating the same fact, and a
+  // second channel obliged not to drift from the revision.
+  // ONE PAINT LAYER PER PICTURE — the owner's answer, verbatim: «Один. Как сейчас».
+  // THE CLIENT PAINTS IT AND UPLOADS IT, exactly as it already does for the flatten: the server
+  // does not rasterise (Р-2), so this arrives as a media id from UploadContentImage. It is served
+  // by GetDesignBand as well as GetDesignEditLayer — unlike `strokes` it is a bare id, not
+  // kilobytes, and the band's thumbnails need to know a layer has been painted.
+  // THE VECTOR STROKES LIVE ABOVE IT. Pen, curves and seams are a DRAWING and must stay editable;
+  // a flatten is raster first, strokes on top.
+  rasterMediaId: number | undefined;
+  // THE RESOLVED PIXELS, joined from raster_media_id at read time — the same promise
+  // `DesignInputRef.media` and `DesignInputSlot.media` already make, kept by the same batch join.
+  // WHY THE ID ALONE WAS NOT ENOUGH. A bare id is a fact the writer stored; it is not a picture. The
+  // editor's ONLY way back to yesterday's painting is its bytes, and no verb in this contract reads
+  // a media by id — so a client handed the id and nothing else has exactly two moves, and both are
+  // wrong: refuse to open the pixel tools, or seed the canvas from the BASE and let the next save
+  // write that copy over the painting. There is no revision history on a layer, so that second move
+  // is final. Serving the resolved media is what makes «painted → saved → reopened» a circle.
+  // SERVED BY GetDesignEditLayer AND LEFT UNSET BY GetDesignBand, and that is the same split
+  // `strokes` is under, for the same reason read the other way round: the band needs to KNOW a layer
+  // has been painted, which `raster_media_id` already answers, and it draws no layer pixels
+  // anywhere — its thumbnails are pictures. Resolving it there would buy a media read on every open
+  // of the tab for URLs nothing paints. The editor opens ONE layer and is the only screen that needs
+  // the bytes.
+  // UNSET when raster_deleted is true, and ALSO unset when the join itself failed — see there.
+  rasterMedia: MediaFull | undefined;
+  // THE PAINTING'S MEDIA ROW IS GONE. True ONLY when the row was actually looked for and not found.
+  // «WE DO NOT KNOW» IS NOT «IT IS NOT THERE». If the media read fails, this stays false and
+  // raster_media stays unset: the layer still answers with its strokes, its rev and its id, and a
+  // client seeing an id with neither bytes nor a deletion knows it was told nothing — which is the
+  // truth. Setting it on a failed read would be a lie about a file that is probably alive, and
+  // failing the whole call would hide a layer whose strokes are perfectly readable.
+  // The distinction is not cosmetic: `raster_media_id = 0` means «nothing was ever painted, start
+  // from the base», this flag means «there WAS a painting and it is unrecoverable», and neither one
+  // may be shown to a person as the other.
+  rasterDeleted: boolean | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.

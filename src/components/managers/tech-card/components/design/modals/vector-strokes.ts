@@ -72,6 +72,43 @@ import {
  * КОГДА ОТЛИЧАЕТСЯ ОТ СВОЕЙ СТУПЕНИ, поэтому рисунок, сделанный тремя пресетами и чёрным, остаётся
  * байт в байт документом `v: 1`/`v: 2` — версия поднимается лишь тогда, когда в ней ДЕЙСТВИТЕЛЬНО
  * лежит то, чего старая вкладка не поймёт, тем же доводом, что и у кривых.
+ *
+ * ─── X-8: ОДНА РУЧКА РАЗЪЕХАЛАСЬ НА ДВЕ — НИТЬ И СТЕЖОК (`v: 4`) ─────────────────────────────
+ *
+ * Довод «одна ручка, потому что на чертеже шов — один предмет» выше ПЕРЕЖИЛ СВОЮ ПРИЧИНУ и снят
+ * прямым ответом владельца на прямой вопрос: **«Разделить на два»**. Он прав, а прежний абзац был
+ * рассуждением вместо замера: «тонкая нить длинным стежком» — не ошибка настройки, а обычная
+ * отделочная строчка тонкой нитью, и на настоящей машине длина стежка и номер нити стоят на разных
+ * органах, потому что они физически независимы. `gauge` держал оба сразу, и половина комбинаций,
+ * которые машина умеет, была НЕВЫРАЗИМА.
+ *
+ * ШОВ РАСПАЛСЯ РОВНО ПО ТОМУ ШВУ, ПО КОТОРОМУ ЕГО ОПИСЫВАЛ СТАРЫЙ АБЗАЦ — «он же толщина нити, он
+ * же масштаб фигуры стежка»:
+ *
+ *  - `gauge` — ТОЛЩИНА НИТИ и только она: ширина линии, которой рисуется шов. Имя не менялось,
+ *    смысл сузился до половины прежнего, и эта половина у всех сохранённых слоёв та же самая.
+ *  - `step` — ДЛИНА СТЕЖКА, шаг между проколами, в тех же пикселях платы. Из неё считается ВСЯ
+ *    фигура: период челночной строчки, длина волны зигзага, зазор между рядами двухигольного и
+ *    распошивальной, шаг гребёнки оверлока, период потайного и ритм построительного пунктира.
+ *    Фигура едет ЦЕЛИКОМ, вместе с поперечными размерами: зигзаг с длинной волной и амплитудой в
+ *    полтора волоса — не «длинный стежок тонкой нитью», а прямая линия, и девятый вид шва перестал
+ *    бы отличаться от первого ровно в той паре значений, ради которой всё и разделялось.
+ *
+ * ОЧЕРЁДНОСТЬ ЧТЕНИЯ — ЛЕСТНИЦА В ТРИ СТУПЕНИ, И У КАЖДОЙ ВЕЛИЧИНЫ РОВНО ОДИН ЧИТАТЕЛЬ.
+ * Толщину читает `strokeGauge`: `gauge` → ступень `weight`. Длину стежка читает `strokeStep`:
+ * `step` → и, если его нет, ЧЕРЕЗ `strokeGauge` — то есть `gauge` → ступень. Второго читателя
+ * `gauge` в файле нет и заводить его нельзя: `strokeStep` спрашивает старое поле не сам, а рукой
+ * `strokeGauge`, поэтому «два написания одной величины» не могут разъехаться.
+ *
+ * ОТСУТСТВИЕ `step` ОЗНАЧАЕТ «СТЕЖОК РАВЕН НИТИ» — то есть ровно прежнее поведение, когда обе
+ * величины были одним числом. Поэтому старый слой рисуется НЕ ПОХОЖЕ, а ТЕМ ЖЕ `d`: каждая
+ * константа фигуры умножается на `strokeStep`, который у такого слоя тождественно равен прежнему
+ * `G`. И `step` уходит на провод ТОЛЬКО КОГДА ОТЛИЧАЕТСЯ ОТ ТОЛЩИНЫ — тем же приёмом, что и
+ * `gauge` от своей ступени, — так что документ, у которого нить и стежок связаны, остаётся байт в
+ * байт тем, чем был, вплоть до номера версии. `v: 4` поднимается только над документом, в котором
+ * они РАЗВЕДЕНЫ: старая вкладка прочла бы такой слой и молча свела бы стежок к толщине нити —
+ * длинная отделочная строчка стала бы мелкой, и это та же молча потерянная работа, что выпрямленная
+ * кривая и перекрашенный в чёрный цвет.
  */
 
 /** The nine machine kinds, with the ISO 4915 stitch class where one exists. */
@@ -145,10 +182,19 @@ export type VectorStroke = {
    */
   ink?: string;
   /**
-   * РАЗМЕР ШВА в пикселях платы (мир шириной 1000): толщина нити И масштаб фигуры стежка разом.
-   * Отсутствие — значение ступени `weight`. См. довод в шапке про одну ручку.
+   * ТОЛЩИНА НИТИ в пикселях платы (мир шириной 1000) — ширина линии, и ничего больше.
+   * Отсутствие — значение ступени `weight`. До X-8 это поле держало ещё и масштаб фигуры стежка;
+   * теперь фигуру держит `step`, а у слоя, где `step` не назван, она по-прежнему считается отсюда.
    */
   gauge?: number;
+  /**
+   * ДЛИНА СТЕЖКА — шаг между проколами, в тех же пикселях платы, что и `gauge`.
+   *
+   * ОТСУТСТВИЕ ЗНАЧИТ «РАВНА ТОЛЩИНЕ НИТИ», то есть ровно то, чем шов был, пока ручка была одна.
+   * Поэтому поле необязательное не из вежливости к формату, а потому что его отсутствие — это
+   * осмысленное состояние «нить и стежок связаны», в котором нарисован каждый уже сохранённый слой.
+   */
+  step?: number;
 };
 
 /** Чёрный — цвет штриха, у которого цвет не назван. */
@@ -177,14 +223,50 @@ export const WEIGHT_GAUGE: Record<StrokeWeight, number> = {
   bold: 10,
 };
 
-/** Мир, в пикселях которого назван `gauge`, — та же плата шириной 1000, что у растушёвки лассо. */
+/** Мир, в пикселях которого названы `gauge` и `step`, — та же плата шириной 1000, что у лассо. */
 export const GAUGE_REF = 1000;
 export const MIN_GAUGE = 1;
 export const MAX_GAUGE = 60;
 
+/**
+ * ГРАНИЦЫ ДЛИНЫ СТЕЖКА — ТЕ ЖЕ, ЧТО У ТОЛЩИНЫ, и это не лень, а условие совместимости: у штриха
+ * без `step` длина стежка ТОЖДЕСТВЕННО равна толщине, а тождество между двумя величинами с разными
+ * отсечками — не тождество. Разойдись отсечки хоть на десятую, и старый слой с `gauge` за границей
+ * чужого диапазона нарисовался бы фигурой другого размера, чем рисовался вчера.
+ */
+export const MIN_STEP = MIN_GAUGE;
+export const MAX_STEP = MAX_GAUGE;
+
 /** Размер к записи: десятые доли пикселя платы. Дальше — цифры, которых не видно ни на одном зуме. */
 export const roundGauge = (n: number) =>
   Math.round(Math.min(MAX_GAUGE, Math.max(MIN_GAUGE, n)) * 10) / 10;
+
+/** Та же квантизация для длины стежка — см. довод у `MIN_STEP` про общую отсечку. */
+export const roundStep = (n: number) =>
+  Math.round(Math.min(MAX_STEP, Math.max(MIN_STEP, n)) * 10) / 10;
+
+/**
+ * ПРЕСЕТЫ ДВУХ РЕГУЛЯТОРОВ — то, что рейка показывает чипами рядом с числовым полем.
+ *
+ * Ступени толщины НЕ ПЕРЕПИСАНЫ ЗАНОВО, а выведены из `WEIGHT_GAUGE`: у веса уже есть три
+ * канонических числа, и второй их список разъехался бы с первым на первой же правке.
+ */
+export const GAUGE_PRESETS: readonly { key: StrokeWeight; label: string; px: number }[] = [
+  { key: 'hairline', label: 'hairline', px: WEIGHT_GAUGE.hairline },
+  { key: 'thin', label: 'thin', px: WEIGHT_GAUGE.thin },
+  { key: 'bold', label: 'bold', px: WEIGHT_GAUGE.bold },
+];
+
+/**
+ * Ступени длины стежка. Средняя — 6, ровно `WEIGHT_GAUGE.thin`, потому что это ИСТОРИЧЕСКАЯ
+ * калибровка фигуры: на шестёрке все константы формы дают прежние доли коробки число в число, и
+ * «обычный стежок» обязан быть тем самым швом, который этот редактор рисовал до разделения.
+ */
+export const STEP_PRESETS: readonly { key: string; label: string; px: number }[] = [
+  { key: 'short', label: 'short', px: 3 },
+  { key: 'normal', label: 'normal', px: WEIGHT_GAUGE.thin },
+  { key: 'long', label: 'long', px: 14 },
+];
 
 /**
  * РАЗМЕР ШТРИХА, ОДНОЙ ФУНКЦИЕЙ И С ЯВНЫМ СТАРШИНСТВОМ: число, если оно названо, иначе ступень.
@@ -195,6 +277,28 @@ export function strokeGauge(stroke: VectorStroke): number {
   const g = stroke.gauge;
   if (typeof g === 'number' && Number.isFinite(g)) return roundGauge(g);
   return WEIGHT_GAUGE[stroke.weight] ?? WEIGHT_GAUGE.thin;
+}
+
+/**
+ * ДЛИНА СТЕЖКА, ВТОРАЯ ЛЕСТНИЦА И ТОЖЕ С ОДНИМ ЧИТАТЕЛЕМ: `step`, если он назван, иначе — ТОЛЩИНА,
+ * и берётся она не отсюда, а у `strokeGauge`, чтобы у `gauge` остался ровно один читатель.
+ *
+ * Тождество `strokeStep(s) === strokeGauge(s)` для штриха без `step` — это и есть обещание «уже
+ * сохранённый слой рисуется тем же `d`»: вся фигура шва умножается на возвращённое здесь число.
+ */
+export function strokeStep(stroke: VectorStroke): number {
+  const s = stroke.step;
+  if (typeof s === 'number' && Number.isFinite(s)) return roundStep(s);
+  return strokeGauge(stroke);
+}
+
+/**
+ * Развёл ли этот штрих нить и стежок СВОИМ полем, или они всё ещё связаны. Рейке — чтобы сказать
+ * человеку, следует ли длина стежка за толщиной; формату — чтобы не писать поле, которое ничего
+ * не добавляет.
+ */
+export function hasOwnStep(stroke: VectorStroke): boolean {
+  return typeof stroke.step === 'number' && Number.isFinite(stroke.step);
 }
 
 /** Ближайшая ступень к числу — ею подписывается `weight` у штриха, рождённого числом. */
@@ -216,6 +320,17 @@ function emitsGauge(stroke: VectorStroke): boolean {
   const g = stroke.gauge;
   if (typeof g !== 'number' || !Number.isFinite(g)) return false;
   return roundGauge(g) !== WEIGHT_GAUGE[stroke.weight];
+}
+
+/**
+ * Уходит ли `step` на провод: только когда стежок РАЗВЕДЁН с нитью. Тот же приём, что у `gauge`, и
+ * по той же причине: поле, повторяющее величину, которая и так выводится, стоило бы целой версии
+ * формата — то есть права старых вкладок сохранять слой, который они понимают правильно.
+ */
+function emitsStep(stroke: VectorStroke): boolean {
+  const s = stroke.step;
+  if (typeof s !== 'number' || !Number.isFinite(s)) return false;
+  return roundStep(s) !== strokeGauge(stroke);
 }
 
 /**
@@ -254,12 +369,13 @@ export const MAX_STROKES_BYTES = 512 * 1024;
  * The highest document version this bundle can read, and the one it writes when a curve is present.
  *
  * `1` — anchors only. `2` — anchors plus an optional per-interval cubic list. `3` — plus a stroke's
- * own colour and size. The number is raised ONLY for a document that actually holds the thing (see
- * `writeLayer`), because raising it costs every older tab the right to save this layer at all —
- * which is the correct price for a drawing an older tab would silently straighten or repaint black,
- * and far too high a price for one it would read perfectly.
+ * own colour and size. `4` — plus a stitch length told apart from the thread's thickness. The number
+ * is raised ONLY for a document that actually holds the thing (see `writeLayer`), because raising it
+ * costs every older tab the right to save this layer at all — which is the correct price for a
+ * drawing an older tab would silently straighten, repaint black or re-stitch fine, and far too high
+ * a price for one it would read perfectly.
  */
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 
 /**
  * The most points one stroke may keep. Not a server rule — a readability one: a freehand trace
@@ -367,6 +483,13 @@ function readStroke(raw: unknown, report: { broken: boolean }): VectorStroke | n
   if (r.gauge !== undefined && r.gauge !== null && Number.isFinite(gauge)) {
     stroke.gauge = roundGauge(gauge);
   }
+  // ДЛИНА СТЕЖКА ЧИТАЕТСЯ ТАК ЖЕ МЯГКО. Нечисловой `step` не ломает документ по той же причине,
+  // что и нечисловой `gauge`: он не двигает ни одной линии — стежок просто остаётся равным нити,
+  // то есть тем, чем он был бы на бандле, который про это поле не знает вовсе.
+  const step = Number(r.step);
+  if (r.step !== undefined && r.step !== null && Number.isFinite(step)) {
+    stroke.step = roundStep(step);
+  }
   return stroke;
 }
 
@@ -434,16 +557,21 @@ export function writeLayer(strokes: VectorStroke[], ratio: number): string {
   // третьей ступени: старая вкладка прочла бы такой документ, но перекрасила бы его в чёрный и
   // свела к трём весам, а молча потерянный цвет ничем не лучше молча выпрямленной кривой.
   const painted = strokes.some((s) => !!readInk(s.ink) || emitsGauge(s));
+  // ЧЕТВЁРТАЯ СТУПЕНЬ — И ТОЛЬКО НАД РАЗВЕДЁННЫМИ. Документ, в котором стежок равен нити, не несёт
+  // поля `step` вовсе и остаётся ровно той версией, какой был: бандл, не знающий про X-8, прочтёт
+  // его и нарисует то же самое. Разведённый — нет: он свёл бы длинную строчку к толщине нити.
+  const stitched = strokes.some(emitsStep);
   return JSON.stringify({
-    v: painted ? 3 : curved ? 2 : 1,
+    v: stitched ? 4 : painted ? 3 : curved ? 2 : 1,
     ratio: round4(ratio),
     strokes: strokes.map((s) => {
       // ПОРЯДОК КЛЮЧЕЙ И ИХ ОТСУТСТВИЕ — часть обещания «старый слой уходит теми же байтами»:
       // необязательные ключи дописываются В КОНЕЦ и только когда им есть что сказать.
-      const paint: { ink?: string; gauge?: number } = {};
+      const paint: { ink?: string; gauge?: number; step?: number } = {};
       const ink = readInk(s.ink);
       if (ink) paint.ink = ink;
       if (emitsGauge(s)) paint.gauge = roundGauge(s.gauge as number);
+      if (emitsStep(s)) paint.step = roundStep(s.step as number);
       if (!hasSegments(s)) {
         return {
           tool: s.tool,
@@ -598,7 +726,8 @@ export type StrokeGeometry = {
 
 /* Прежняя таблица `WEIGHT_FRACTION` (доли коробки 0.003 / 0.006 / 0.01) переехала выше и стала
    `WEIGHT_GAUGE` в пикселях платы (3 / 6 / 10) — те же числа в другой единице. Её больше нет
-   здесь, потому что вес перестал быть отдельной величиной: он ЕСТЬ размер шва (`gauge`). */
+   здесь, потому что вес перестал быть отдельной величиной: он ЕСТЬ толщина нити (`gauge`), а
+   после X-8 — только она: длина стежка живёт в `step` и своей ступени не имеет. */
 
 /**
  * ПУНКТИР ОСТАЛСЯ РОВНО ОДИН — «ЭТО НЕ ШОВ».
@@ -610,8 +739,9 @@ export type StrokeGeometry = {
  * Теперь оба строятся `stitchPath` — списком настоящих хорд от прокола до прокола, — а пунктиром
  * говорится единственная вещь, которая ритмом и является: линия построительная, её не шьют.
  *
- * Числа — КРАТНЫЕ РАЗМЕРУ ШВА (`gauge`), а не доли коробки: на `thin` (6) это прежние 0.02/0.015
- * scaleRef число в число.
+ * Числа — КРАТНЫЕ ДЛИНЕ СТЕЖКА (`step`, а у слоя без него — `gauge`), а не доли коробки: на 6 это
+ * прежние 0.02/0.015 scaleRef число в число. Ритм построительной линии стоит на длине стежка, а не
+ * на толщине нити, потому что это ритм ВДОЛЬ линии — как и всё остальное, что считает `S`.
  */
 const CONSTRUCTION_DASH: [number, number] = [3.33, 2.5];
 
@@ -627,11 +757,17 @@ const CONSTRUCTION_DASH: [number, number] = [3.33, 2.5];
 // менялся: потребители по-прежнему рисуют `offsets` (теперь всегда `[0]`), и все четыре
 // поверхности обновились, не узнав об этом.
 //
-// ВСЕ РАЗМЕРЫ — КРАТНЫЕ РАЗМЕРУ ШВА (`gauge`), а не доли коробки. Прежде фигура стежка не зависела
-// от веса вовсе: волосяной зигзаг и жирный зигзаг несли ОДНУ волну в 30 юнитов, и «сделать шов
-// крупнее» было физически нечем — ровно жалоба владельца про «более гибкую настройку размера».
-// Теперь одна ручка тянет весь шов: нить, длину стежка, зазор между рядами, шаг гребёнки.
-// Калибровка выбрана так, что `thin` (6 пикселей платы) даёт ПРЕЖНИЕ доли число в число:
+// ВСЕ РАЗМЕРЫ НИЖЕ — КРАТНЫЕ ДЛИНЕ СТЕЖКА (`S` в `strokeGeometry`), а не доли коробки и не
+// толщина нити. Прежде фигура стежка не зависела от веса вовсе: волосяной зигзаг и жирный зигзаг
+// несли ОДНУ волну в 30 юнитов, и «сделать шов крупнее» было физически нечем — ровно жалоба
+// владельца про «более гибкую настройку размера». Потом весь шов поехал от одного числа, и стало
+// невыразимо обратное — тонкая нить длинным стежком. Теперь ручек ДВЕ (X-8): нить правит только
+// ширину линии, а вся таблица ниже — длину стежка.
+// ПОПЕРЕЧНЫЕ РАЗМЕРЫ (амплитуда волны, зазор между рядами, длина зубца) СТОЯТ ТОЖЕ НА СТЕЖКЕ, и
+// это выбор, а не недосмотр: посади их на толщину нити — и зигзаг тонкой нитью схлопнется в
+// прямую, то есть девять видов перестанут различаться ровно в той паре значений, ради которой
+// ручки и разделялись. Фигура стежка едет целиком; нить — это чем её рисуют.
+// Калибровка не сдвинулась: 6 пикселей платы дают ПРЕЖНИЕ доли число в число:
 // 5 × 0.006 = 0.03 — та самая длина волны зигзага, и так по всей таблице.
 //
 // Образец в пикере, сцена, экспорт и растр обязаны показывать ОДИН И ТОТ ЖЕ шов, отличающийся
@@ -893,10 +1029,14 @@ export function strokeGeometry(
         c ? ([q(c[0] * w), q(c[1] * h), q(c[2] * w), q(c[3] * h)] as CubicSeg) : null,
       )
     : null;
-  // РАЗМЕР ШВА В ЮНИТАХ КОРОБКИ — единственная величина, из которой считается всё остальное:
-  // толщина нити, длина стежка, зазор между рядами, шаг гребёнки. Ручка одна, потому что шов на
-  // чертеже — один предмет (см. довод в шапке файла).
+  // ДВЕ ВЕЛИЧИНЫ В ЮНИТАХ КОРОБКИ, И РОВНО ЗДЕСЬ ПРОХОДИТ ГРАНИЦА МЕЖДУ НИМИ (X-8).
+  //  `G` — ТОЛЩИНА НИТИ. Её потребитель ровно один: `strokeWidth` внизу.
+  //  `S` — ДЛИНА СТЕЖКА. Из неё считается ВСЯ фигура: период строчки, длина волны, зазор между
+  //        рядами, шаг гребёнки, ритм построительного пунктира.
+  // У штриха, который не назвал `step`, `strokeStep` тождественно равен `strokeGauge`, поэтому
+  // `S === G` и каждое произведение ниже — то самое число, что и до разделения.
   const G = (strokeGauge(stroke) / GAUGE_REF) * scaleRef;
+  const S = (strokeStep(stroke) / GAUGE_REF) * scaleRef;
   const plainD = () => (segs ? curvePath(pts, segs) : inkPath(pts));
 
   // Фигурные швы строятся по флэттену; гладкий `plain` держит точный `C`-путь. Пустая строка от
@@ -906,41 +1046,41 @@ export function strokeGeometry(
   let widthK = 1;
   switch (stroke.brush) {
     case 'zigzag':
-      d = wavePath(flatPoly(pts, segs), ZIG.wl * G, ZIG.amp * G);
+      d = wavePath(flatPoly(pts, segs), ZIG.wl * S, ZIG.amp * S);
       break;
     case 'bartack': {
       // Закрепка — брусок плотных стежков. Плотная волна даёт ему фактуру; отрезок короче
       // полутора волн остаётся прежним жирным штрихом (старый вид, прежний коэффициент).
-      d = wavePath(flatPoly(pts, segs), BART.wl * G, BART.amp * G);
+      d = wavePath(flatPoly(pts, segs), BART.wl * S, BART.amp * S);
       widthK = d ? BART.widthK : 2.4;
       break;
     }
     case 'lock':
       // 301 — ОДИН ряд настоящих стежков. Раньше здесь был `dasharray` по гладкой линии.
-      d = stitchPath(flatPoly(pts, segs), LOCK.pitch * G, LOCK.duty);
+      d = stitchPath(flatPoly(pts, segs), LOCK.pitch * S, LOCK.duty);
       break;
     case 'double':
-      d = stitchedRails(flatPoly(pts, segs), RAIL_GAP * G, LOCK.pitch * G, LOCK.duty);
+      d = stitchedRails(flatPoly(pts, segs), RAIL_GAP * S, LOCK.pitch * S, LOCK.duty);
       break;
     case 'cover':
       // 406 — те же два ряда стежков, но иглы стоят шире: см. довод у COVER_GAP.
-      d = stitchedRails(flatPoly(pts, segs), COVER_GAP * G, LOCK.pitch * G, LOCK.duty);
+      d = stitchedRails(flatPoly(pts, segs), COVER_GAP * S, LOCK.pitch * S, LOCK.duty);
       break;
     case 'flatlock': {
       const flat = flatPoly(pts, segs);
-      const rails = railsPath(flat, RAIL_GAP * G);
-      const inner = wavePath(flat, FLAT_ZIG_WL * G, (RAIL_GAP / 2) * G);
+      const rails = railsPath(flat, RAIL_GAP * S);
+      const inner = wavePath(flat, FLAT_ZIG_WL * S, (RAIL_GAP / 2) * S);
       d = rails && inner ? `${rails} ${inner}` : rails;
       break;
     }
     case 'overlock': {
-      const ticks = tickPath(flatPoly(pts, segs), OVER.spacing * G, OVER.tick * G);
+      const ticks = tickPath(flatPoly(pts, segs), OVER.spacing * S, OVER.tick * S);
       const rail = plainD();
       d = ticks && rail ? `${rail} ${ticks}` : rail;
       break;
     }
     case 'blind':
-      d = blindPath(flatPoly(pts, segs), BLIND.period * G, BLIND.dip * G, BLIND.amp * G);
+      d = blindPath(flatPoly(pts, segs), BLIND.period * S, BLIND.dip * S, BLIND.amp * S);
       break;
     default:
       break;
@@ -953,7 +1093,7 @@ export function strokeGeometry(
   return {
     d,
     strokeWidth: G * widthK,
-    dash: rhythm ? `${(rhythm[0] * G).toFixed(2)} ${(rhythm[1] * G).toFixed(2)}` : '',
+    dash: rhythm ? `${(rhythm[0] * S).toFixed(2)} ${(rhythm[1] * S).toFixed(2)}` : '',
     // ВСЕГДА [0]: вторые ряды теперь лежат в самом `d`, вдоль линии, а не копией со сдвигом по Y.
     // Поле живёт, чтобы ни одному из четырёх потребителей не пришлось меняться вместе с этим
     // модулем, — их цикл по offsets исполняется ровно один раз.

@@ -67,6 +67,20 @@ export function useEditLayerWrites(techCardId: number) {
       baseMediaId: number;
       expectedRev: number;
       strokes: string;
+      /**
+       * ПИКСЕЛЬНЫЙ КАНАЛ — ТРИ СОСТОЯНИЯ, И МОЛЧАНИЕ ЗНАЧИТ «ОСТАВИТЬ КАК БЫЛО».
+       *
+       * Асимметрия с идиомой `*_omitted` намеренная и объяснена контрактом теми же словами: пустой
+       * ТЕКСТ — настоящий ответ, поэтому пустая записка стирает; ссылка на медиа — СУЩЕСТВОВАНИЕ,
+       * поэтому пустая означала бы уничтожение. Если бы отсутствие значило «очистить», сохранение
+       * ОДНИХ ШТРИХОВ — или вкладка со вчерашним бандлом, не знающая про пиксели вовсе — молча
+       * стёрло бы человеку живопись.
+       *
+       * Оба поля разом — противоречие, а не задача на приоритет: сервер отвечает InvalidArgument,
+       * и здесь они поэтому исключают друг друга по построению вызова, а не по договорённости.
+       */
+      rasterMediaId?: number;
+      clearRaster?: boolean;
     }) =>
       adminService.SaveDesignEditLayer({
         techCardId,
@@ -74,6 +88,8 @@ export function useEditLayerWrites(techCardId: number) {
         baseMediaId: input.baseMediaId,
         expectedRev: input.expectedRev,
         strokes: input.strokes,
+        rasterMediaId: input.rasterMediaId,
+        clearRaster: input.clearRaster,
       }),
     onSuccess: invalidate,
   });
@@ -101,6 +117,26 @@ export function useEditLayerWrites(techCardId: number) {
     () => ({ saveLayer, flattenLayer, invalidate }),
     [saveLayer, flattenLayer, invalidate],
   );
+}
+
+/**
+ * THE BYTES OF THE LAYER'S STORED PAINTING, from the media the SERVER resolved (`raster_media`).
+ *
+ * ⚠ FULL SIZE ONLY, AND A MISSING FULL SIZE IS «WE DO NOT KNOW» — never a thumbnail.
+ *
+ * Everywhere else in this admin a picture degrades happily: fullSize → compressed → thumbnail, and
+ * a smaller one is merely a worse view of the same thing. The layer's raster is NOT a view. It is
+ * the DOCUMENT — the full RGBA state of the layer's pixels, uploaded with `preserveOriginal` for
+ * exactly this reason (see `uploadRaster`). A derived copy is re-encoded and downsampled: the
+ * eraser's transparent holes come back as flattened colour, every hard edge rings, and the canvas
+ * seeded from it would be saved back as the new truth on the next press. That is a silent,
+ * irreversible degradation of somebody's work, and it would happen once per round trip.
+ *
+ * So the fallback chain that is right for a thumbnail is wrong here by construction: '' means the
+ * caller must say it does not know, and let the person decide.
+ */
+export function layerRasterUrl(layer: common_DesignEditLayer | undefined): string {
+  return layer?.rasterMedia?.media?.fullSize?.mediaUrl || '';
 }
 
 /**

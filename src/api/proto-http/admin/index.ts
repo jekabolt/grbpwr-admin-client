@@ -14786,6 +14786,47 @@ export type common_DesignEditLayer = {
   // fix run needs in order to feed the raster and the vector as one input rather than two
   // unrelated ones.
   sourcePictureId: number | undefined;
+  // FK media(id) RESTRICT: THE PIXEL CHANNEL OF THIS LAYER — one RGBA image holding the FULL state
+  // of its pixels, never a delta. 0 = nothing has been painted; the layer is pure vector.
+  // WHY FULL STATE AND NOT A DELTA. The eraser chews through the BASE as well (the owner's answer,
+  // verbatim: «И саму фотографию тоже»), so the result is not expressible as «the base plus
+  // something on top» at all — a hole in the photograph is the ALPHA OF THIS IMAGE. That is also
+  // why there is no separate base mask: it would be a second way of stating the same fact, and a
+  // second channel obliged not to drift from the revision.
+  // ONE PAINT LAYER PER PICTURE — the owner's answer, verbatim: «Один. Как сейчас».
+  // THE CLIENT PAINTS IT AND UPLOADS IT, exactly as it already does for the flatten: the server
+  // does not rasterise (Р-2), so this arrives as a media id from UploadContentImage. It is served
+  // by GetDesignBand as well as GetDesignEditLayer — unlike `strokes` it is a bare id, not
+  // kilobytes, and the band's thumbnails need to know a layer has been painted.
+  // THE VECTOR STROKES LIVE ABOVE IT. Pen, curves and seams are a DRAWING and must stay editable;
+  // a flatten is raster first, strokes on top.
+  rasterMediaId: number | undefined;
+  // THE RESOLVED PIXELS, joined from raster_media_id at read time — the same promise
+  // `DesignInputRef.media` and `DesignInputSlot.media` already make, kept by the same batch join.
+  // WHY THE ID ALONE WAS NOT ENOUGH. A bare id is a fact the writer stored; it is not a picture. The
+  // editor's ONLY way back to yesterday's painting is its bytes, and no verb in this contract reads
+  // a media by id — so a client handed the id and nothing else has exactly two moves, and both are
+  // wrong: refuse to open the pixel tools, or seed the canvas from the BASE and let the next save
+  // write that copy over the painting. There is no revision history on a layer, so that second move
+  // is final. Serving the resolved media is what makes «painted → saved → reopened» a circle.
+  // SERVED BY GetDesignEditLayer AND LEFT UNSET BY GetDesignBand, and that is the same split
+  // `strokes` is under, for the same reason read the other way round: the band needs to KNOW a layer
+  // has been painted, which `raster_media_id` already answers, and it draws no layer pixels
+  // anywhere — its thumbnails are pictures. Resolving it there would buy a media read on every open
+  // of the tab for URLs nothing paints. The editor opens ONE layer and is the only screen that needs
+  // the bytes.
+  // UNSET when raster_deleted is true, and ALSO unset when the join itself failed — see there.
+  rasterMedia: common_MediaFull | undefined;
+  // THE PAINTING'S MEDIA ROW IS GONE. True ONLY when the row was actually looked for and not found.
+  // «WE DO NOT KNOW» IS NOT «IT IS NOT THERE». If the media read fails, this stays false and
+  // raster_media stays unset: the layer still answers with its strokes, its rev and its id, and a
+  // client seeing an id with neither bytes nor a deletion knows it was told nothing — which is the
+  // truth. Setting it on a failed read would be a lie about a file that is probably alive, and
+  // failing the whole call would hide a layer whose strokes are perfectly readable.
+  // The distinction is not cosmetic: `raster_media_id = 0` means «nothing was ever painted, start
+  // from the base», this flag means «there WAS a painting and it is unrecoverable», and neither one
+  // may be shown to a person as the other.
+  rasterDeleted: boolean | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -15512,8 +15553,28 @@ export type SaveDesignEditLayerRequest = {
   techCardId: number | undefined;
   layerId: number | undefined;
   baseMediaId: number | undefined;
+  // CAS; 0 on create. Mismatch → Aborted:layer_rev_mismatch {current_rev}.
+  // IT COVERS BOTH CHANNELS OF THE LAYER. Pixels and strokes are two channels of ONE layer, they
+  // live on one row and move under one rev: saving pixels over somebody else's revision is the
+  // same loss of work as saving strokes over it, and the same refusal answers both.
   expectedRev: number | undefined;
   strokes: string | undefined;
+  // FK media(id): the layer's PIXEL CHANNEL — one RGBA image holding the full state of its pixels
+  // (see common.DesignEditLayer.raster_media_id). The client painted it and uploaded it through
+  // UploadContentImage; the server records the reference.
+  // ⚠ THREE STATES, AND SILENCE IS «KEEP», NOT «CLEAR».
+  // raster_media_id > 0                    → this is the new pixel state
+  // raster_media_id = 0, clear_raster = 0  → NOTHING IS SAID; whatever is stored survives
+  // raster_media_id = 0, clear_raster = 1  → drop the pixel channel, back to pure vector
+  // The asymmetry with SetDesignReferenceRole.note is deliberate and it is the SAME rule that verb
+  // states: empty TEXT is a real answer, so a blank note clears it; a media reference is an
+  // EXISTENCE, so a blank one is a destruction and must be said out loud. Were absence to mean
+  // «clear», a stroke-only autosave — or a stale tab running yesterday's bundle — would silently
+  // delete a person's painting, which is the one outcome the CAS on this row exists to prevent.
+  // Sending both a media id and clear_raster is a contradiction, not a precedence puzzle:
+  // InvalidArgument.
+  rasterMediaId: number | undefined;
+  clearRaster: boolean | undefined;
 };
 
 export type SaveDesignEditLayerResponse = {
@@ -16878,7 +16939,12 @@ export interface AdminService {
   // SaveDesignEditLayer stores a vector layer under compare-and-set on its rev. `layer_id = 0` with
   // `base_media_id = 0` gives birth to a CLEAN VECTOR BASE — the `draw it` door out of an empty
   // studio, which has no picture underneath it at all.
-  // Aborted: layer_rev_mismatch {current_rev}. InvalidArgument: strokes_too_large (> 512 KB).
+  // IT CARRIES BOTH CHANNELS OF THE LAYER — the vector `strokes` and the pixel `raster_media_id`
+  // — under ONE compare-and-set, because they are one layer. Saving pixels over somebody else's
+  // revision loses exactly as much work as saving strokes over it.
+  // Aborted: layer_rev_mismatch {current_rev}. InvalidArgument: strokes_too_large (> 512 KB), a
+  // raster_media_id that does not exist or belongs to another tech card, or a request that both
+  // names a raster and asks to clear one.
   SaveDesignEditLayer(request: SaveDesignEditLayerRequest): Promise<SaveDesignEditLayerResponse>;
   // FlattenDesignEditLayer records a flattened layer: it files an ALREADY-RASTERISED image as a
   // DesignPicture carrying derived_from, source_class and layer_rev.
@@ -16887,6 +16953,14 @@ export interface AdminService {
   // format, so the only place that can turn them into pixels honestly is the canvas that drew them.
   // The client uploads the raster through UploadContentImage (preserve_original) and passes its
   // media_id here.
+  // ⚠ THE COMPOSITE IS RASTER FIRST, STROKES ON TOP. Since the layer grew a pixel channel
+  // (DesignEditLayer.raster_media_id) the client MUST draw raster_media_id — or, when the layer has
+  // none, the base — and then the vector strokes over it. Flattening only the strokes would file a
+  // picture with the brushwork missing; flattening only the raster would drop the drawing.
+  // A LAYER WITH PIXELS AND NO STROKES IS FLATTENABLE. `empty_layer` used to mean «no strokes»,
+  // which was the only way to be empty when strokes were the only channel. It now means «neither
+  // channel holds anything» — a layer that was painted with the brush and never touched with the
+  // pen is a finished piece of work, and refusing it would refuse the very editor this wave added.
   // expected_rev IS STILL REQUIRED, and for exactly the reason it always was: it names the revision
   // the person actually looked at. Without it a colleague saves r4 while somebody who last saw r3
   // presses flatten, and r4 is materialised under an intention that never saw it. The compare-and-

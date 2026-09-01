@@ -10,7 +10,6 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { nearestOnPolyline } from 'ui/components/annotation/geometry';
-import { useEditHistory } from 'ui/components/annotation/history';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -27,6 +26,7 @@ import { TraceVectorPanel } from './trace-vector-panel';
 import { findMediaUrlInBand, useTraceVector } from './use-trace-vector';
 import {
   findLayerForMedia,
+  layerRasterUrl,
   layerRefusalText,
   uploadRaster,
   useDesignEditLayer,
@@ -44,6 +44,33 @@ import {
 } from './vector-lasso';
 import { DEFAULT_NIB, clampNib, eraseAlong, stampAlong } from './vector-nib';
 import {
+  PLATE_W,
+  RASTER_UNDO_BYTES,
+  RASTER_UNDO_DEPTH,
+  clearGesture,
+  cloneAlong,
+  commitStage,
+  exportRasterPng,
+  markRect,
+  maskBox,
+  nibRadius,
+  paintAlong,
+  rasterBox,
+
+  renderView,
+  seedRaster,
+  selectionMask,
+  softenInside,
+  stageScratch,
+  type PaintMode,
+  type RasterLayer,
+} from './vector-raster';
+import {
+  EditTimeline,
+  emptyTimelineState,
+  type TimelineState,
+} from './vector-raster-history';
+import {
   penDown,
   penMove,
   penPolygon,
@@ -58,8 +85,10 @@ import {
   DEFAULT_INK,
   DEFAULT_RATIO,
   MAX_GAUGE,
+  MAX_STEP,
   MAX_STROKES_BYTES,
   MIN_GAUGE,
+  MIN_STEP,
   STITCHES,
   WEIGHT_GAUGE,
   gaugeWeight,
@@ -128,26 +157,127 @@ import {
  * вектор».
  */
 
-type Tool = 'line' | 'freehand' | 'curve' | 'lasso' | 'select' | 'erase' | 'stamp' | 'pan';
+type Tool =
+  | 'line'
+  | 'freehand'
+  | 'curve'
+  | 'select'
+  | 'cut'
+  | 'clone'
+  | 'paint'
+  | 'erase'
+  | 'stamp'
+  | 'lasso'
+  | 'pan';
 
-/** Подпись чипа инструмента. Внутреннее имя `curve` — слово ФОРМАТА штриха и не меняется; на
- *  экране инструмент называется тем словом, которым его просил владелец: pen. */
+/**
+ * ДВА МАТЕРИАЛА, И КАЖДЫЙ ЧИП НАЗЫВАЕТ СВОЙ. Это главное решение круга 6 на поверхности.
+ *
+ * До растра у редактора был один материал — ЛИНИИ, — и всякий инструмент, как бы он ни назывался,
+ * работал по ним. С появлением пикселей появился второй, и «ластик» перестал быть одним словом:
+ * стереть пиксели фотографии и вырезать кусок проведённой линии — разные работы над разными
+ * вещами, с разными последствиями (пиксель уходит навсегда в картинку, линия остаётся правимой).
+ *
+ * ── ПОЧЕМУ ЭТО НЕ ЛОЖНОЕ РАСЩЕПЛЕНИЕ ───────────────────────────────────────────────────────
+ *
+ * Признак ложного расщепления — два органа, делающих ОДНУ работу и различающихся лишь тем, у кого
+ * сосед не задан. Здесь различие в МАТЕРИАЛЕ: `erase` читает и пишет пиксели, `cut` читает и пишет
+ * полилинии; у них разные входы, разные выходы и разные времена жизни результата. Ни один из них
+ * невыразим через другого: растровым ластиком нельзя убрать линию (она живёт НАД растром и остаётся
+ * чертежом), а векторным резчиком нельзя проковырять фотографию.
+ *
+ * ── ПОЧЕМУ ЭТО И НЕ ВЕДРО ПОД ДВУМЯ СМЫСЛАМИ ───────────────────────────────────────────────
+ *
+ * Обратная ловушка — ОДИН орган, означающий два разных дела в зависимости от скрытого режима.
+ * Именно её мы бы получили, оставив один чип «erase», чей смысл зависит от того, какой слой сейчас
+ * «активен». Поэтому режима нет: чипов два, они стоят в РАЗНЫХ полосах с надписанным материалом, и
+ * подпись каждого говорит, что он трогает и что оставляет нетронутым.
+ *
+ * ── ЧТО СТАЛО С ДОВОДОМ `vector-nib.ts` ────────────────────────────────────────────────────
+ *
+ * Шапка того файла объясняла, почему штамп клонирует ШТРИХИ: «растра в документе нет вовсе».
+ * Довод УМЕР — растр появился. Но вывод пережил свою причину не по инерции, а по новой: линии —
+ * материал, у которого своё вычитание и своё размножение, и `clone` остаётся ЕДИНСТВЕННЫМ способом
+ * положить копию линий туда, куда показала рука (у «copy inside» смещение фиксированное, а
+ * инструмента переноса штрихов в редакторе нет вовсе).
+ */
+type Material = 'lines' | 'pixels' | 'view';
+
 const TOOL_LABEL: Record<Tool, string> = {
   line: 'line',
   freehand: 'freehand',
+  // Внутреннее имя `curve` — слово ФОРМАТА штриха и не меняется; на экране инструмент называется
+  // тем словом, которым его просил владелец: pen.
   curve: 'pen',
-  lasso: 'lasso',
   select: 'select',
+  cut: 'cut',
+  clone: 'clone',
+  paint: 'brush',
   erase: 'erase',
   stamp: 'stamp',
+  lasso: 'lasso',
   pan: 'pan',
 };
 
-/** Инструменты круглого ниба — ластик и штамп. Их след копится так же, как след кисти. */
-const isNibTool = (t: Tool): t is 'erase' | 'stamp' => t === 'erase' || t === 'stamp';
+/** Клавиша-глагол каждого инструмента. Сверяется по `e.code` — см. `verbKey`. */
+const TOOL_KEY: Record<Tool, string> = {
+  line: 'l',
+  freehand: 'b',
+  curve: 'p',
+  select: 'v',
+  cut: 'x',
+  clone: 'c',
+  paint: 'r',
+  erase: 'e',
+  stamp: 's',
+  lasso: 'w',
+  pan: 'h',
+};
 
-/** Ширина мира в css-пикселях до зума — она же ширина viewBox сцены, юниты совпадают 1:1. */
-const PLATE_W = 1000;
+/**
+ * Что инструмент делает — одной строкой, и в ней ОБЯЗАТЕЛЬНО сказано, чего он НЕ трогает. Пара
+ * «cut / erase» без этой половины читается как два слова для одного дела.
+ */
+const TOOL_HINT: Record<Tool, string> = {
+  line: 'a straight line, born with the stitch in hand',
+  freehand: 'a line that follows the hand',
+  curve: 'anchors and handles — the drawing tool for curves',
+  select: 'pick one line and edit its stitch, colour, size',
+  cut: 'cut a piece out of a drawn LINE. The pixels underneath are not touched',
+  clone: 'copy the LINES under the source and lay them under your hand',
+  paint: 'paint PIXELS with the ink, size, hardness and opacity in hand',
+  erase: 'rub PIXELS away to transparency — the photo included. Drawn lines stay',
+  stamp: 'copy PIXELS from the source to under your hand, as in photoshop',
+  lasso: 'draw an area — it holds the raster tools in and cuts the lines at its edge',
+  pan: 'move the sheet',
+};
+
+/** Порядок полос над холстом. Материал надписан — он и есть то, что различает cut и erase. */
+const TOOL_BANDS: { material: Material; label: string; tools: Tool[] }[] = [
+  { material: 'lines', label: 'lines', tools: ['line', 'freehand', 'curve', 'select', 'cut', 'clone'] },
+  { material: 'pixels', label: 'pixels', tools: ['paint', 'erase', 'stamp'] },
+  { material: 'view', label: 'area & view', tools: ['lasso', 'pan'] },
+];
+
+/** Инструменты, красящие ПИКСЕЛИ. Их жест копится в буфере растра, а не в списке штрихов. */
+const isRasterTool = (t: Tool): t is 'paint' | 'erase' | 'stamp' =>
+  t === 'paint' || t === 'erase' || t === 'stamp';
+
+/** Инструменты, режущие и множащие ЛИНИИ круглым нибом. */
+const isLineNib = (t: Tool): t is 'cut' | 'clone' => t === 'cut' || t === 'clone';
+
+/**
+ * Круглый ниб в руке — у всех пяти. ОДНО число размера на все, а не по числу на инструмент: довод
+ * прежнего ниба («стирают крупным кругом, а рисуют тонкой нитью») отделял КРУГЛЫЙ КОНЧИК от НИТИ,
+ * а не ластик от штампа. Пять чисел на пять круглых кончиков были бы пятью ручками, которые человек
+ * крутит в одну и ту же сторону.
+ */
+const isNibTool = (t: Tool): t is 'cut' | 'clone' | 'paint' | 'erase' | 'stamp' =>
+  isRasterTool(t) || isLineNib(t);
+
+/** Инструменты, берущие ИСТОЧНИК alt-кликом. */
+const isSourceTool = (t: Tool): t is 'clone' | 'stamp' => t === 'clone' || t === 'stamp';
+
 /** How close a click has to land, in SCREEN pixels, to mean «this stroke». */
 const HIT_PX = 10;
 /** Шаг зума кнопкой и клавишей — тот же, что у полотна сборки (ZOOM_STEP его HUD). */
@@ -251,10 +381,24 @@ export function VectorModal({
   const [dashed, setDashed] = useState(false);
   /** Цвет нити в руке. Чёрный при входе: цвет — утверждение, и его делает человек, не машина. */
   const [ink, setInk] = useState<string>(DEFAULT_INK);
-  /** Размер шва в руке, в пикселях платы. Стартует ступенью `thin` — прежним весом по умолчанию. */
+  /** Толщина нити в руке, в пикселях платы. Стартует ступенью `thin` — прежним весом по умолчанию. */
   const [gauge, setGauge] = useState<number>(WEIGHT_GAUGE.thin);
-  /** Круг ластика и штампа, в пикселях платы. Отдельно от нити — см. довод у пропа рейки. */
+  /**
+   * ДЛИНА СТЕЖКА В РУКЕ — ВТОРОЙ РЕГУЛЯТОР ШВА (X-8). Пока `stepOwn` ложно, стежок СЛЕДУЕТ за
+   * нитью: это не «не задано по умолчанию», а рабочее состояние, которое формат умеет выразить и
+   * которое держит документ на прежней версии. Разводит их первое движение самого регулятора.
+   */
+  const [step, setStep] = useState<number>(WEIGHT_GAUGE.thin);
+  const [stepOwn, setStepOwn] = useState(false);
+  /** Круг ниба, в пикселях платы. Отдельно от нити — см. довод у `isNibTool`. */
   const [nib, setNib] = useState<number>(DEFAULT_NIB);
+  /**
+   * ЖЁСТКОСТЬ КРАЯ И НЕПРОЗРАЧНОСТЬ — свойства КРУГЛОГО КОНЧИКА, а не нити, и живут только пока в
+   * руке пиксельный инструмент: у резчика линий мягкого края не бывает вовсе (полилиния режется ПО
+   * контуру, между «внутри» и «снаружи» нет полутона), а «полупрозрачно вырезать» — не операция.
+   */
+  const [hardness, setHardness] = useState(80);
+  const [opacity, setOpacity] = useState(100);
   /** Пипетка взведена: следующий клик по холсту берёт цвет вместо жеста инструмента. */
   const [picking, setPicking] = useState(false);
   /**
@@ -356,8 +500,117 @@ export function VectorModal({
   /** Снимок штрихов на момент сида — им меряется «есть что терять» у стража выхода. */
   const seededJson = useRef('[]');
 
-  const history = useEditHistory<VectorStroke>(strokes, setStrokes);
-  const { record, undo, reset: resetHistory } = history;
+  /* ═══ ПИКСЕЛЬНЫЙ КАНАЛ ═══════════════════════════════════════════════════════════════════
+   *
+   * Растр — ЛЕНИВЫЙ: он не заводится, пока в руку не взяли пиксельный инструмент. Копия подложки
+   * стоит запроса через прокси и декодирования картинки, и платить их за визит, в котором человек
+   * провёл две линии пером, незачем. До первого пиксельного жеста на плате стоит обычный `<img>`.
+   */
+  const rasterRef = useRef<RasterLayer | null>(null);
+  const viewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** Растр заведён — зеркало рефа для рендера (холст вместо `<img>`, строки рейки). */
+  const [rasterReady, setRasterReady] = useState(false);
+  /** Пиксели менялись с момента сида — страж выхода и решение «грузить ли растр». */
+  const [rasterDirty, setRasterDirty] = useState(false);
+  const rasterDirtyRef = useRef(false);
+  const seeding = useRef(false);
+  /**
+   * ПИКСЕЛЬНЫЙ КАНАЛ, ХРАНИМЫЙ СЕРВЕРОМ. Голый id — контракт отдаёт его и полосой, и слоем именно
+   * потому, что это НЕ 512 КБ: вкладка обязана отличать покрашенный холст от пустого, не открывая
+   * слой. Ноль значит «не покрашено», и тогда холст заводится копией подложки.
+   */
+  const [storedRasterId, setStoredRasterId] = useState(0);
+  /**
+   * БАЙТЫ ХРАНИМОЙ ЖИВОПИСИ — и они приезжают ТОЛЬКО глаголом слоя.
+   *
+   * Полоса перечисляет слои и отдаёт `rasterMediaId`, но НЕ `rasterMedia`: пиксели слоя ей негде
+   * рисовать, и чтение медиа на каждое открытие вкладки было бы куплено ни за что. Поэтому здесь
+   * читается `loaded`, а не `known`, — и это не забытый фолбэк: у `known` этого поля нет по
+   * контракту, а второй источник URL для одного факта разошёлся бы с первым на первой же пропаже.
+   */
+  const [storedRasterUrl, setStoredRasterUrl] = useState('');
+  /**
+   * ⚠ ТРИ СОСТОЯНИЯ, А НЕ ДВА, И СРЕДНЕЕ — САМОЕ ВАЖНОЕ.
+   *
+   *   `storedRasterId === 0`  — НИКОГДА НЕ КРАСИЛИ. Холст заводится копией подложки, молча: терять
+   *                             нечего, и говорить не о чем.
+   *   `gone === true`         — КРАСИЛИ, И ФАЙЛ ПРОПАЛ. Сервер искал строку медиа и не нашёл.
+   *   `gone === false`, но URL пуст — СЕРВЕР НИЧЕГО НЕ СКАЗАЛ (соединение отказало, или бандл
+   *                             старше бекенда). Это «мы не знаем», а не «его нет».
+   *
+   * Первое от второго отличается тем, что во втором ЕСТЬ ЧТО ТЕРЯТЬ: молча завести холст копией
+   * подложки значит показать нетронутое фото как «сохранённое состояние» — и первое же сохранение
+   * запишет эту копию поверх вчерашней живописи, безвозвратно, потому что ленты правок у слоя нет.
+   * Поэтому «нет растра» проходит молча, а «растр пропал» обязано быть НАЗВАНО словами.
+   */
+  const [storedRasterGone, setStoredRasterGone] = useState(false);
+  /**
+   * ЧЕЛОВЕК ПОПРОСИЛ СНЯТЬ ПИКСЕЛИ. Отдельный флаг, а не «пустой растр»: пустой растр — это
+   * прозрачная картинка, которую сервер послушно сохранит, и фотография осталась бы стёртой
+   * навсегда. `clear_raster` — единственный способ сказать «верни нетронутое фото», и он ОБЯЗАН
+   * исключать отправку id (сервер отвечает на пару InvalidArgument).
+   */
+  const dropRasterRef = useRef(false);
+
+  /** Маска активного выделения в пикселях растра; пересобирается при смене области. */
+  const maskRef = useRef<HTMLCanvasElement | null>(null);
+  /** Живой жест: чем он ляжет. `null` — жеста нет, и видимый холст равен документу. */
+  const liveRef = useRef<{ mode: PaintMode; opacity: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  /** ОДНА ЛЕНТА ОТМЕНЫ НА ДВА МАТЕРИАЛА — довод в шапке `vector-raster-history.ts`. */
+  const timeline = useRef(new EditTimeline());
+  const [tl, setTl] = useState<TimelineState>(emptyTimelineState());
+  const bumpTl = useCallback(() => setTl(timeline.current.state()), []);
+
+  /**
+   * Штрихи В РЕФЕ — тем же приёмом и по той же причине, что жест: лента отмены запоминает пару
+   * «до / после», а «до» она обязана взять на момент ЖЕСТА, а не на момент последнего рендера.
+   */
+  const strokesRef = useRef(strokes);
+  strokesRef.current = strokes;
+
+  /**
+   * ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ СПИСКА ШТРИХОВ, ходящий через ленту. Прежний `record()` запоминал только
+   * «до» — для возврата этого мало, и второй писатель мимо ленты означал бы ⌘⇧Z, который иногда
+   * работает.
+   */
+  const commitLines = useCallback(
+    (next: VectorStroke[]) => {
+      timeline.current.recordLines(strokesRef.current, next);
+      strokesRef.current = next;
+      setStrokes(next);
+      setTl(timeline.current.state());
+    },
+    [],
+  );
+
+  const resetHistory = useCallback(() => {
+    timeline.current.reset();
+    setTl(timeline.current.state());
+  }, []);
+
+  /** Видимый холст = документ + живой жест. Один путь на превью и на коммит — см. `stageScratch`. */
+  const paintView = useCallback(() => {
+    const layer = rasterRef.current;
+    const view = viewCanvasRef.current;
+    if (!layer || !view) return;
+    const live = liveRef.current;
+    if (live) stageScratch(layer, maskRef.current);
+    renderView(view, layer, live);
+  }, []);
+
+  /**
+   * Перерисовка не чаще кадра. Мазок шлёт `pointermove` быстрее, чем экран успевает показать, и
+   * полная пересборка вида на каждое событие — это несколько блитов холста 1600×2000 впустую.
+   */
+  const scheduleView = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      paintView();
+    });
+  }, [paintView]);
 
   /**
    * ВЕТКА «ДА» РАЗВИЛКИ — машинная перерисовка растра в вектор. Данные и деньги — в
@@ -413,10 +666,30 @@ export function VectorModal({
     setDashed(false);
     setInk(DEFAULT_INK);
     setGauge(WEIGHT_GAUGE.thin);
+    setStep(WEIGHT_GAUGE.thin);
+    setStepOwn(false);
     setNib(DEFAULT_NIB);
+    setHardness(80);
+    setOpacity(100);
     setPicking(false);
     setStampSrc(null);
     stampOffset.current = null;
+    // ПИКСЕЛИ ЗАБЫВАЮТСЯ ВМЕСТЕ СО ВСЕМ ОСТАЛЬНЫМ. Растр, доживший до следующего открытия над
+    // ДРУГОЙ платой, положил бы чужую фотографию под чужие штрихи — и, что хуже, молча.
+    rasterRef.current = null;
+    maskRef.current = null;
+    liveRef.current = null;
+    seeding.current = false;
+    setRasterReady(false);
+    setRasterDirty(false);
+    rasterDirtyRef.current = false;
+    dropRasterRef.current = false;
+    setStoredRasterId(loaded?.rasterMediaId ?? known?.rasterMediaId ?? 0);
+    // БАЙТЫ И ПРОПАЖА — ТОЛЬКО ИЗ ПРОЧИТАННОГО СЛОЯ. Полоса их не несёт (см. объявление), поэтому
+    // `known` здесь не участвует вовсе: подставить сюда его молчание значило бы прочитать «полоса
+    // об этом не говорит» как «сервер сказал: пусто».
+    setStoredRasterUrl(layerRasterUrl(loaded));
+    setStoredRasterGone(loaded?.rasterDeleted === true);
     putPen(null);
     putTrace(null);
     putPenHover(null);
@@ -575,8 +848,44 @@ export function VectorModal({
     return [w.x / PLATE_W, w.y / plateH];
   };
 
-  // ⌘Z / Ctrl+Z. MATCHED BY `code`, NEVER BY `key`: on a Russian layout `event.key` is «я» and a
-  // comparison against the letter z is dead — the same trap the assembly screen was bitten by.
+  /**
+   * ОТМЕНА И ВОЗВРАТ — ОДНА ДОРОГА НА ОБА МАТЕРИАЛА. Шаг по линиям возвращает список штрихов, шаг
+   * по пикселям кладёт их обратно в холст сам; экран перерисовывается в обоих случаях, потому что
+   * «ничего не произошло» и «произошло невидимо» человек различить не может.
+   */
+  const doUndo = useCallback(() => {
+    const res = timeline.current.undo(rasterRef.current);
+    if (!res) return;
+    if (res.kind === 'lines') {
+      strokesRef.current = res.strokes;
+      setStrokes(res.strokes);
+    } else {
+      paintView();
+      rasterDirtyRef.current = true;
+      setRasterDirty(true);
+    }
+    setSelected(null);
+    setTl(timeline.current.state());
+  }, [paintView]);
+
+  const doRedo = useCallback(() => {
+    const res = timeline.current.redo(rasterRef.current);
+    if (!res) return;
+    if (res.kind === 'lines') {
+      strokesRef.current = res.strokes;
+      setStrokes(res.strokes);
+    } else {
+      paintView();
+      rasterDirtyRef.current = true;
+      setRasterDirty(true);
+    }
+    setSelected(null);
+    setTl(timeline.current.state());
+  }, [paintView]);
+
+  // ⌘Z / Ctrl+Z, ⌘⇧Z — возврат. MATCHED BY `code`, NEVER BY `key`: on a Russian layout
+  // `event.key` is «я» and a comparison against the letter z is dead — the same trap the assembly
+  // screen was bitten by.
   useEffect(() => {
     if (!open || frozen) return;
     const onKey = (event: KeyboardEvent) => {
@@ -590,6 +899,10 @@ export function VectorModal({
       )
         return;
       event.preventDefault();
+      if (event.shiftKey) {
+        doRedo();
+        return;
+      }
       // Перо в работе: ⌘Z снимает ПОСЛЕДНИЙ ЯКОРЬ, а не последний штрих, — отменяется то, что
       // делалось только что. Пустеющее перо гаснет целиком.
       const p = penRef.current;
@@ -597,12 +910,191 @@ export function VectorModal({
         putPen(penUndo(p));
         return;
       }
-      undo();
-      setSelected(null);
+      doUndo();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, frozen, undo, putPen]);
+  }, [open, frozen, doUndo, doRedo, putPen]);
+
+  // ── пиксельный канал: заведение, маска выделения, жест ─────────────────────────────────────
+
+  /**
+   * ЗАВЕСТИ РАСТР — ИЗ ХРАНИМОЙ ЖИВОПИСИ, ЕСЛИ ОНА ЕСТЬ, И КОПИЕЙ ПОДЛОЖКИ, ЕСЛИ ЕЁ НЕТ.
+   *
+   * Зовётся при ВЗЯТИИ пиксельного инструмента, а не при первом мазке: чтение картинки стоит
+   * запроса и декодирования, и человек, у которого первый мазок замер на полсекунды, решит, что
+   * редактор сломался, — а не что он готовится.
+   *
+   * ЭТО ВТОРАЯ ПОЛОВИНА КРУГА «покрасил → сохранил → открыл заново». Первая — `persist`, она
+   * отправляет полный RGBA слоя в медиа и кладёт его id на слой; здесь этот id, УЖЕ РАЗРЕШЁННЫЙ
+   * СЕРВЕРОМ в картинку (`raster_media`), становится холстом. Пока разрешения не было, круг был
+   * разорван, и разорван молча: сервер отдавал число, а числом холст не заводится.
+   *
+   * Отказ (испорченный CORS'ом холст, мёртвая картинка) НЕ МОЛЧИТ и не оставляет пустой холст под
+   * рукой: инструмент откатывается на `select`, и причина названа. Растр, заведённый пустым там,
+   * где под ним есть фотография, стёр бы её с экрана одним переключением чипа.
+   */
+  const ensureRaster = useCallback(async (): Promise<RasterLayer | null> => {
+    if (rasterRef.current) return rasterRef.current;
+    if (seeding.current) return null;
+    seeding.current = true;
+    setBusy('preparing the pixel layer…');
+    try {
+      const naturalW = baseMedia?.media?.fullSize?.width ?? 0;
+      const box = rasterBox(naturalW, ratio || DEFAULT_RATIO);
+      /**
+       * СНЯТИЕ КАНАЛА УЖЕ ЗАЯВЛЕНО — ХОЛСТ ЗАВОДИТСЯ ПОДЛОЖКОЙ, а не тем, что человек только что
+       * попросил снять. `dropRasterPixels` обнуляет холст и ставит заявку на `clear_raster`;
+       * взявшись после этого за кисть, человек начинает С НЕТРОНУТОГО ФОТО — ровно того, что
+       * кнопка ему пообещала. Прочитать здесь хранимый URL значило бы воскресить снятую живопись
+       * ПОД ЕГО НОВЫМИ МАЗКАМИ, а следующее сохранение (уже без `clear_raster`, потому что
+       * пиксели изменились) записало бы этот гибрид как новую правду.
+       */
+      const dropped = dropRasterRef.current;
+      if (!dropped && storedRasterId > 0 && !storedRasterUrl) {
+        /**
+         * ЖИВОПИСЬ БЫЛА, А БАЙТОВ НЕТ — И ТОГДА ПИКСЕЛЬНЫЕ ИНСТРУМЕНТЫ ЗАПЕРТЫ СЛОВАМИ.
+         *
+         * ЗАВЕСТИ ХОЛСТ КОПИЕЙ ПОДЛОЖКИ ЗДЕСЬ БЫЛО БЫ ХУЖЕ ОТКАЗА, а не мягче: экран показал бы
+         * нетронутое фото как «сохранённое состояние», человек дорисовал бы по нему один мазок, и
+         * первое же сохранение записало бы эту копию ПОВЕРХ вчерашней живописи — молча и
+         * безвозвратно, потому что ленты правок у слоя нет по контракту.
+         *
+         * ДВЕ ПРИЧИНЫ — ДВА РАЗНЫХ ОТВЕТА, потому что человеку от них нужно разное. «Файл удалён»
+         * — это конец: ждать нечего, и единственный честный ход дальше назван кнопкой. «Сервер
+         * промолчал» — это, скорее всего, минута: перезагрузить и попробовать снова. Слить их в
+         * одну фразу значило бы либо отправить человека ждать того, чего уже нет, либо толкнуть
+         * его снимать канал, который цел.
+         */
+        setRefusal(
+          storedRasterGone
+            ? `the painted pixels of this layer are GONE: the media row it points at (${storedRasterId}) no longer exists in the library, so the painting cannot be brought back — there is no revision history on a layer. Pixel tools stay closed so a fresh copy of the base cannot quietly take its place. When you are ready to start over, press «revert to the untouched picture» — that says out loud that the channel is being dropped. The line tools are unaffected.`
+            : `this layer holds painted pixels (media ${storedRasterId}) and the server did not hand them over on this read — that is «we do not know», not «they are gone»: the painting is very probably intact. Reopen the layer to ask again. Pixel tools are closed until the bytes arrive, so that a fresh copy of the base cannot be written over them; the line tools are unaffected.`,
+        );
+        return null;
+      }
+      /**
+       * ХРАНИМАЯ ЖИВОПИСЬ СТАРШЕ ПОДЛОЖКИ. Слой, у которого растр есть, заводится ИЗ НЕГО: только
+       * там живут дырки, прогрызенные ластиком в прошлый визит. Копия подложки на его месте
+       * бесшумно заклеила бы каждую из них оригиналом.
+       *
+       * А `storedRasterId === 0` — это «никогда не красили», и тогда копия подложки и есть
+       * правильное начало. Молча: терять нечего, и говорить не о чем.
+       */
+      const layer = await seedRaster((!dropped && storedRasterUrl) || baseSrc, box);
+      rasterRef.current = layer;
+      setRasterReady(true);
+      return layer;
+    } catch {
+      setRefusal(
+        'the pixel layer could not be started: the picture underneath refused to come through the proxy, and a raster editor that cannot read its own pixels would quietly draw on nothing. Line tools still work.',
+      );
+      return null;
+    } finally {
+      seeding.current = false;
+      setBusy(null);
+    }
+  }, [baseMedia, baseSrc, ratio, storedRasterId, storedRasterUrl, storedRasterGone]);
+
+  /** Растр только что появился — нарисовать документ в видимый холст (он смонтирован этим же кадром). */
+  useLayoutEffect(() => {
+    if (rasterReady) paintView();
+  }, [rasterReady, paintView]);
+
+  /**
+   * МАСКА АКТИВНОГО ВЫДЕЛЕНИЯ — ОДИН объект и на «куда пускать кисть» (X-6), и на «насколько мягок
+   * край» (X-5). Пересобирается при смене области или её растушёвки, а не на каждом отпечатке:
+   * размытие полигона по холсту в полтора мегапикселя посреди мазка стоило бы кадров.
+   */
+  const activeArea = activeSel !== null ? sels[activeSel] ?? null : null;
+  const areaKey = activeArea ? `${JSON.stringify(activeArea.pts)}|${activeArea.feather}` : '';
+  useEffect(() => {
+    const layer = rasterRef.current;
+    if (!layer || !activeArea) {
+      maskRef.current = null;
+      return;
+    }
+    maskRef.current = selectionMask(layer, activeArea.pts, activeArea.feather);
+    // areaKey — содержимое области строкой: массив точек приезжает новой ссылкой на каждый рендер.
+  }, [areaKey, rasterReady, activeArea]);
+
+  /**
+   * ВЕРНУТЬ НЕТРОНУТОЕ ФОТО. Единственная дорога к `clear_raster`, и она НЕ «стереть холст»:
+   * прозрачный холст, записанный как новое состояние, оставил бы фотографию стёртой навсегда, а
+   * снятие канала возвращает подложку такой, какой она лежит в своём медиа.
+   *
+   * Заявка ставится флагом и уходит СЛЕДУЮЩИМ сохранением, а не немедленным запросом: сохранение
+   * несёт ревизию, одну на оба канала, и второй писатель рядом с ней разошёлся бы с первым на
+   * первой же гонке.
+   */
+  const dropRasterPixels = useCallback(() => {
+    dropRasterRef.current = true;
+    rasterRef.current = null;
+    maskRef.current = null;
+    liveRef.current = null;
+    timeline.current.reset();
+    setTl(timeline.current.state());
+    setRasterReady(false);
+    // ЗАЯВКА — ЭТО НЕСОХРАНЁННАЯ ПРАВКА. Уйти отсюда молча значило бы, что человек считает
+    // фотографию восстановленной, а на сервере лежит прежняя живопись.
+    rasterDirtyRef.current = true;
+    setRasterDirty(true);
+    showMessage(
+      'the pixel layer will be dropped on the next save — the picture underneath comes back untouched',
+      'success',
+    );
+  }, [showMessage]);
+
+  /** Режим пиксельного жеста: ластик вычитает, кисть и штамп кладут. */
+  const paintModeOf = (t: Tool): PaintMode => (t === 'erase' ? 'erase' : 'paint');
+
+  /** Начало пиксельного жеста: буфер чист, коробка пуста, режим и непрозрачность зафиксированы. */
+  const beginRasterGesture = (t: Tool) => {
+    const layer = rasterRef.current;
+    if (!layer) return;
+    clearGesture(layer);
+    liveRef.current = { mode: paintModeOf(t), opacity: opacity / 100 };
+  };
+
+  /** Продолжение жеста: в буфер уходит ТОЛЬКО НОВЫЙ отрезок следа, а не весь след заново. */
+  const growRasterGesture = (t: Tool, from: [number, number], to: [number, number]) => {
+    const layer = rasterRef.current;
+    if (!layer) return;
+    const nibSpec = {
+      r: nibRadius(nib, layer),
+      hardness: hardness / 100,
+      ink: readInk(ink) ?? DEFAULT_INK,
+    };
+    if (t === 'stamp') {
+      const off = stampOffset.current;
+      if (!off) return;
+      cloneAlong(layer, [from, to], off, nibSpec);
+    } else {
+      paintAlong(layer, [from, to], nibSpec);
+    }
+    scheduleView();
+  };
+
+  /**
+   * КОНЕЦ ЖЕСТА — единственное место, где документ меняется. Порядок обязателен: просеять буфер
+   * через выделение, положить его непрозрачностью руки, записать шаг (он читает и буфер, и уже
+   * изменённый документ), и только потом забыть жест.
+   */
+  const endRasterGesture = (t: Tool) => {
+    const layer = rasterRef.current;
+    liveRef.current = null;
+    if (!layer) return;
+    stageScratch(layer, maskRef.current);
+    const changed = timeline.current.recordGesture(layer, () =>
+      commitStage(layer, paintModeOf(t), opacity / 100),
+    );
+    clearGesture(layer);
+    paintView();
+    if (!changed) return;
+    rasterDirtyRef.current = true;
+    setRasterDirty(true);
+    bumpTl();
+  };
 
   // ── рисование ──────────────────────────────────────────────────────────────────────────────
 
@@ -625,8 +1117,13 @@ export function VectorModal({
       dashed,
       ...(hex && hex !== DEFAULT_INK ? { ink: hex } : {}),
       gauge: px,
+      // ДЛИНА СТЕЖКА КЛАДЁТСЯ, ТОЛЬКО ЕСЛИ РУКА ЕЁ РАЗВЕЛА С НИТЬЮ. «Не задан» — законное
+      // состояние формата («стежок следует за нитью»), и штрих, у которого поле равно нити,
+      // поднял бы версию документа до 4 ни за что: старые вкладки потеряли бы право читать
+      // чертёж, в котором ничего нового не сказано.
+      ...(stepOwn ? { step: Math.min(MAX_STEP, Math.max(MIN_STEP, step)) } : {}),
     };
-  }, [brush, dashed, ink, gauge]);
+  }, [brush, dashed, ink, gauge, step, stepOwn]);
 
   const commitTrace = useCallback(
     (pts: [number, number][], asLine: boolean, livePaint: typeof paint) => {
@@ -640,9 +1137,8 @@ export function VectorModal({
         settled[0][1] === settled[1][1]
       )
         return;
-      record();
-      setStrokes((prev) => [
-        ...prev,
+      commitLines([
+        ...strokesRef.current,
         {
           tool: asLine ? 'line' : 'freehand',
           // ШТРИХ РОЖДАЕТСЯ КИСТЬЮ В РУКЕ. Шов остаётся промышленным утверждением о машине — но
@@ -655,7 +1151,7 @@ export function VectorModal({
         },
       ]);
     },
-    [record],
+    [commitLines],
   );
 
   /**
@@ -670,18 +1166,30 @@ export function VectorModal({
     if (!p) return;
     const stroke = penStroke(p, paint);
     if (!stroke) return;
-    record();
-    setStrokes((prev) => [...prev, stroke]);
-  }, [paint, record, putPen, putPenHover]);
+    commitLines([...strokesRef.current, stroke]);
+  }, [paint, commitLines, putPen, putPenHover]);
 
-  /** Смена инструмента одной дорогой — и с клавиши, и с чипа: недостроенное перо коммитится. */
+  /**
+   * Смена инструмента одной дорогой — и с клавиши, и с чипа: недостроенное перо коммитится, а
+   * пиксельный инструмент ЗАВОДИТ РАСТР ЗАРАНЕЕ (см. `ensureRaster`), чтобы первый мазок не ждал
+   * картинку. На замороженном экране пиксельный инструмент не берётся вовсе — растр там нечем
+   * менять, и заводить копию подложки было бы платой ни за что.
+   */
   const switchTool = useCallback(
     (t: Tool) => {
       if (penRef.current) commitPen();
       setTool(t);
       if (t !== 'select') setSelected(null);
+      if (isRasterTool(t) && !frozen) {
+        // ЗАПЕРТЫЙ ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ НЕ ОСТАЁТСЯ В РУКЕ. Чип, выбранный и молча ничего не
+        // делающий, читается как сломанный редактор; рука возвращается к `select`, а причина
+        // стоит отказом над холстом.
+        void ensureRaster().then((layer) => {
+          if (!layer) setTool((cur) => (isRasterTool(cur) ? 'select' : cur));
+        });
+      }
     },
-    [commitPen],
+    [commitPen, ensureRaster, frozen],
   );
 
   /** Пороги пера в мировых пикселях платы — доля по x и по y весят по-разному, мерить надо в мире. */
@@ -720,6 +1228,18 @@ export function VectorModal({
   const onStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const vp = viewportRef.current;
     if (!vp) return;
+    /**
+     * РУКА НА ХОЛСТЕ ЗАБИРАЕТ ФОКУС У ЧИСЛОВОГО ПОЛЯ, и это не косметика — это чинит МЁРТВУЮ
+     * КЛАВИАТУРУ. Замерено пробой 76: набрали размер в поле, ушли рисовать — и ⌘Z молчит, потому
+     * что гард «в текстовом поле ⌘Z принадлежит браузеру» видит `event.target` = тот самый инпут,
+     * который никто не покидал (холст — не фокусируемый элемент, и клик по нему фокус не двигает).
+     * Тем же гардом (`isTyping`) были мертвы ВСЕ одноклавишные глаголы: буква уходила в поле числа.
+     * Возврат фокуса экрану — тот же приём, что у стража выхода ниже.
+     */
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.closest?.('input, textarea, [contenteditable=""], [contenteditable="true"]')) {
+      contentRef.current?.focus();
+    }
     // Панорама — средней кнопкой, зажатым пробелом или инструментом «рука» — живёт и на замороженном
     // экране: смотреть можно всегда.
     if (event.button === 1 || spaceHeld || tool === 'pan') {
@@ -748,16 +1268,24 @@ export function VectorModal({
 
     if (frozen) return;
 
-    // ШТАМП: alt-клик БЕРЁТ ИСТОЧНИК и ничего не печатает — жест фотошопа буква в букву.
-    if (tool === 'stamp' && event.altKey) {
+    // ШТАМП И КЛОН: alt-клик БЕРЁТ ИСТОЧНИК и ничего не печатает — жест фотошопа буква в букву.
+    if (isSourceTool(tool) && event.altKey) {
       event.preventDefault();
       setStampSrc(at);
       stampOffset.current = null;
       showMessage('source taken. Now drag where it should be printed', 'success');
       return;
     }
-    if (tool === 'stamp' && !stampSrc) {
+    if (isSourceTool(tool) && !stampSrc) {
       showMessage('alt-click the place to copy FROM first, then drag', 'error');
+      return;
+    }
+    // ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ БЕЗ РАСТРА НЕ РИСУЕТ В ПУСТОТУ. `ensureRaster` уже сработал на смене
+    // чипа; сюда попадают только случаи, когда копия подложки не приехала — и молчаливый мазок
+    // «в никуда» был бы худшим из возможных ответов.
+    if (isRasterTool(tool) && !rasterRef.current) {
+      showMessage('the pixel layer is not ready yet — one moment', 'error');
+      void ensureRaster();
       return;
     }
     event.preventDefault();
@@ -776,6 +1304,17 @@ export function VectorModal({
       }
       putPen(res.pen);
       return;
+    }
+    if (isRasterTool(tool)) {
+      // Смещение штампа фиксируется ПЕРВОЙ точкой мазка и держится до следующего alt-клика — это и
+      // есть режим Aligned, тот, что у фотошопа стоит по умолчанию: несколько мазков продолжают
+      // ОДИН отпечаток, а не перерисовывают его от источника каждый раз.
+      if (tool === 'stamp' && stampSrc && !stampOffset.current) {
+        stampOffset.current = [at[0] - stampSrc[0], at[1] - stampSrc[1]];
+      }
+      beginRasterGesture(tool);
+      // Точка без протяжки — тоже отпечаток: клик кистью обязан оставить пятно.
+      growRasterGesture(tool, at, at);
     }
     putTrace([at]);
   };
@@ -814,6 +1353,9 @@ export function VectorModal({
     // collinear samples and the «straight» line would arrive with a wobble nobody drew.
     {
       const prev = traceRef.current;
+      // ПИКСЕЛИ КЛАДУТСЯ ПРЯМО СЕЙЧАС, ОТРЕЗКОМ. Копить след и красить его целиком на отпускании
+      // значило бы рисовать вслепую: мазок появлялся бы после того, как рука его закончила.
+      if (isRasterTool(tool)) growRasterGesture(tool, prev[prev.length - 1], at);
       putTrace(tool === 'line' ? [prev[0], at] : [...prev, at]);
     }
   };
@@ -844,17 +1386,25 @@ export function VectorModal({
       }
       return;
     }
-    if (isNibTool(tool)) {
+    if (isRasterTool(tool)) {
+      putTrace(null);
+      if (frozen) return;
+      endRasterGesture(tool);
+      return;
+    }
+    if (isLineNib(tool)) {
       putTrace(null);
       if (frozen) return;
       const world = { w: PLATE_W, h: plateH };
       const radius = nib / 2;
-      if (tool === 'erase') {
+      if (tool === 'cut') {
         // РЕЖЕТ, А НЕ СНИМАЕТ ОБЪЕКТ ЦЕЛИКОМ — тем же резчиком, что «delete inside» лассо.
-        const { next, changed } = eraseAlong(strokes, liveTrace, radius, world);
-        if (!changed) return;
-        record();
-        setStrokes(next);
+        const { next, changed } = eraseAlong(strokesRef.current, liveTrace, radius, world);
+        if (!changed) {
+          showMessage('no line under the nib — «cut» takes lines, «erase» takes pixels', 'error');
+          return;
+        }
+        commitLines(next);
         setSelected(null);
         return;
       }
@@ -864,13 +1414,15 @@ export function VectorModal({
       if (!stampOffset.current) {
         stampOffset.current = [liveTrace[0][0] - src[0], liveTrace[0][1] - src[1]];
       }
-      const born = stampAlong(strokes, liveTrace, stampOffset.current, radius, world);
+      const born = stampAlong(strokesRef.current, liveTrace, stampOffset.current, radius, world);
       if (!born.length) {
-        showMessage('nothing under the source: the stamp copies strokes, not pixels', 'error');
+        showMessage(
+          'no line under the source: «clone» copies lines, «stamp» copies pixels',
+          'error',
+        );
         return;
       }
-      record();
-      setStrokes((prev) => [...prev, ...born]);
+      commitLines([...strokesRef.current, ...born]);
       return;
     }
     if (liveTrace.length >= 2) commitTrace(liveTrace, tool === 'line', paint);
@@ -881,14 +1433,12 @@ export function VectorModal({
 
   const editStroke = (fields: Partial<VectorStroke>) => {
     if (selected === null || frozen) return;
-    record();
-    setStrokes((prev) => prev.map((s, i) => (i === selected ? { ...s, ...fields } : s)));
+    commitLines(strokesRef.current.map((s, i) => (i === selected ? { ...s, ...fields } : s)));
   };
 
   const removeSelected = () => {
     if (selected === null || frozen) return;
-    record();
-    setStrokes((prev) => prev.filter((_, i) => i !== selected));
+    commitLines(strokesRef.current.filter((_, i) => i !== selected));
     setSelected(null);
   };
 
@@ -898,13 +1448,12 @@ export function VectorModal({
   const copySel = (i: number) => {
     const sel = sels[i];
     if (!sel || frozen) return;
-    const born = copyInsideSelection(strokes, sel.pts);
+    const born = copyInsideSelection(strokesRef.current, sel.pts);
     if (!born.length) {
       showMessage('the selection holds no strokes — nothing was copied', 'error');
       return;
     }
-    record();
-    setStrokes((prev) => [...prev, ...born]);
+    commitLines([...strokesRef.current, ...born]);
     showMessage(
       `${born.length} stroke${born.length === 1 ? '' : 's'} copied — the copies sit slightly offset`,
       'success',
@@ -915,14 +1464,49 @@ export function VectorModal({
   const deleteSel = (i: number) => {
     const sel = sels[i];
     if (!sel || frozen) return;
-    const { next, changed } = deleteInsideSelection(strokes, sel.pts);
+    const { next, changed } = deleteInsideSelection(strokesRef.current, sel.pts);
     if (!changed) {
       showMessage('the selection holds no strokes — nothing was deleted', 'error');
       return;
     }
-    record();
-    setStrokes(next);
+    commitLines(next);
     setSelected(null);
+  };
+
+  /**
+   * РАСТУШЕВАТЬ ПИКСЕЛИ ВНУТРИ ОБЛАСТИ (X-5) — операция, а не ореол.
+   *
+   * Число области играет здесь ОБЕ свои роли и одним значением: оно же радиус смягчения и оно же
+   * мягкость края, с которой смягчение сходит на нет. Иначе «растушёвка» на рейке значила бы одно
+   * у кисти и другое у кнопки, и человек, поставивший 24, получал бы два разных 24.
+   */
+  const softenSel = async (i: number) => {
+    const sel = sels[i];
+    if (!sel || frozen) return;
+    if (sel.feather <= 0) {
+      showMessage('give this area a feather first — it is the radius the pixels soften by', 'error');
+      return;
+    }
+    const layer = await ensureRaster();
+    if (!layer) return;
+    const mask = selectionMask(layer, sel.pts, sel.feather);
+    if (!mask) return;
+    // Коробка операции — контур области плюс запас на размытие; она приходит от самой маски, а не
+    // считается здесь вторым разом: два расчёта одной геометрии разошлись бы первой же правкой
+    // коэффициента размытия, и ⌘Z начал бы оставлять ободок по краю области.
+    const rect = maskBox(mask);
+    clearGesture(layer);
+    if (rect) markRect(layer, rect);
+    const changed = timeline.current.recordGesture(layer, () =>
+      softenInside(layer, mask, (sel.feather / 2) * (layer.w / PLATE_W)),
+    );
+    clearGesture(layer);
+    paintView();
+    if (!changed) return;
+    rasterDirtyRef.current = true;
+    setRasterDirty(true);
+    bumpTl();
+    showMessage(`pixels inside area ${i + 1} softened by ${sel.feather}px`, 'success');
   };
 
   /** Снять саму область — штрихи не трогаются. */
@@ -959,17 +1543,43 @@ export function VectorModal({
     }
     setInk(hex ?? raw);
   };
-  /** Размер: у выбранной строки правится её `gauge`, вместе с ближайшей ступенью `weight`. */
+  /** Толщина нити: у выбранной строки правится её `gauge`, вместе с ближайшей ступенью `weight`. */
   const pickGauge = (px: number) => {
     const n = Math.min(MAX_GAUGE, Math.max(MIN_GAUGE, Math.round(px) || MIN_GAUGE));
     if (selected !== null) editStroke({ gauge: n, weight: gaugeWeight(n) });
     else {
       setGauge(n);
       setWeight(gaugeWeight(n));
+      // СВЯЗАННЫЙ СТЕЖОК ИДЁТ ЗА НИТЬЮ — иначе «follows the thread» было бы надписью, а не
+      // поведением: число в поле стежка осталось бы прежним, и человек читал бы на рейке пару,
+      // которой на плате нет.
+      if (!stepOwn) setStep(n);
     }
   };
-  /** Ступень — то же число, названное словом; и чип, и поле правят ОДНУ величину. */
-  const pickWeightPreset = (w: StrokeWeight) => pickGauge(WEIGHT_GAUGE[w]);
+
+  /**
+   * ДЛИНА СТЕЖКА. Движение самого регулятора РАЗВОДИТ стежок с нитью — это и есть тот жест, ради
+   * которого поле в формате появилось. Возврат к связанности — отдельная дверь («follow»), а не
+   * догадка по совпадению чисел: стежок, случайно равный нити, это по-прежнему СВОЙ стежок.
+   */
+  const pickStep = (px: number) => {
+    const n = Math.min(MAX_STEP, Math.max(MIN_STEP, Math.round(px) || MIN_STEP));
+    if (selected !== null) editStroke({ step: n });
+    else {
+      setStep(n);
+      setStepOwn(true);
+    }
+  };
+
+  /** Вернуть стежок под нить. У выбранной строки это снимает поле — документ снова связан. */
+  const followStep = () => {
+    if (selected !== null) {
+      editStroke({ step: undefined });
+      return;
+    }
+    setStepOwn(false);
+    setStep(gauge);
+  };
 
   /**
    * ПИПЕТКА: цвет из ТОГО ЖЕ композита, что уходит в плоскую картинку, — значит и с подложки.
@@ -983,7 +1593,12 @@ export function VectorModal({
     setPicking(false);
     const hex = await pickSceneInk(
       {
-        baseSrc: rasterOn ? baseSrc : '',
+        // ПИПЕТКА БЕРЁТ С КОМПОЗИТА, А КОМПОЗИТ ТЕПЕРЬ НЕСЁТ КРАСКУ. Растр заведён — он и есть
+        // подложка (он её копия), поэтому `baseSrc` в этом случае не передаётся вовсе: иначе
+        // фотография нарисовалась бы поверх собственных дырок и пипетка вернула бы цвет, которого
+        // на экране нет.
+        baseSrc: rasterOn && !rasterRef.current ? baseSrc : '',
+        raster: rasterOn ? rasterRef.current : null,
         strokes: vecOn ? strokes : [],
         ratio: ratio || DEFAULT_RATIO,
       },
@@ -1003,15 +1618,59 @@ export function VectorModal({
   const payloadBytes = useMemo(() => new TextEncoder().encode(payload).length, [payload]);
   const tooLarge = payloadBytes > MAX_STROKES_BYTES;
   const strokesJson = useMemo(() => JSON.stringify(strokes), [strokes]);
-  const dirty = entered && strokesJson !== seededJson.current;
+  /**
+   * «ЕСТЬ ЧТО ТЕРЯТЬ» СЧИТАЕТ И ПИКСЕЛИ. Страж выхода, знающий только про штрихи, выпускал бы
+   * человека, стёршего полфотографии, без единого вопроса — и это была бы потеря, которую нечем
+   * вернуть: ленты правок у слоя нет по контракту.
+   */
+  const dirty = entered && (strokesJson !== seededJson.current || rasterDirty);
 
-  /** Store the strokes and adopt the rev the server hands back. Returns the layer's id. */
+  /**
+   * Store the strokes and adopt the rev the server hands back. Returns the layer's id.
+   *
+   * ── ШОВ ПИКСЕЛЬНОГО КАНАЛА — ОДИН, И ОН ЗДЕСЬ ─────────────────────────────────────────────
+   *
+   * Растр покидает редактор ровно двумя дорогами, и обе идут через один и тот же неперекодирующий
+   * `uploadRaster`:
+   *   • В СЛОЙ — это сохранение. PNG БЕЗ БЕЛОЙ ЗЕМЛИ (`exportRasterPng`), потому что слой это
+   *     ДОКУМЕНТ и дырка на нём обязана остаться дыркой; белая земля превратила бы её в краску,
+   *     которую следующий визит уже нечем стереть.
+   *   • ВО ФЛЭТ — это `saveAsPicture`: там композит с белой землёй, потому что флэт это КАРТИНКА,
+   *     и под дыркой на ней видно бумагу.
+   *
+   * ГРУЗИТСЯ ТОЛЬКО ИЗМЕНЁННЫЙ РАСТР, и это не оптимизация, а требование контракта: полноразмерный
+   * PNG — мегабайты, а «ничего не сказано» (оба поля пустые) означает «хранимое переживает
+   * сохранение». Сохранение одних штрихов обязано молчать про пиксели — иначе оно платило бы
+   * мегабайтами за то, чтобы записать то же самое.
+   *
+   * ОБА ПОЛЯ РАЗОМ — ПРОТИВОРЕЧИЕ (сервер отвечает InvalidArgument), поэтому «снять пиксели»
+   * исключает «вот новые пиксели» ветвлением, а не порядком присваивания.
+   */
   const persist = useCallback(async (): Promise<number> => {
+    const layer = rasterRef.current;
+    let rasterMediaId: number | undefined;
+    let clearRaster: boolean | undefined;
+    // URL ТОЛЬКО ЧТО ЗАГРУЖЕННЫХ ПИКСЕЛЕЙ. Сохранение отвечает слоем БЕЗ разрешённого медиа — его
+    // разрешает читающий глагол, а не пишущий, — поэтому единственный, кто знает адрес свежей
+    // живописи, это ответ самой загрузки. Оставить здесь прежний URL значило бы держать в руке
+    // ссылку на ПОЗАВЧЕРАШНЮЮ картинку, и первый же повторный заход за холстом (после «снять» и
+    // отмены снятия) завёл бы его из неё.
+    let freshRasterUrl: string | undefined;
+    if (dropRasterRef.current) {
+      clearRaster = true;
+    } else if (layer && rasterDirtyRef.current) {
+      const media = await uploadRaster(exportRasterPng(layer));
+      rasterMediaId = media.id ?? 0;
+      if (!rasterMediaId) throw new Error('the painted pixels went up but came back without an id');
+      freshRasterUrl = media.media?.fullSize?.mediaUrl || '';
+    }
     const res = await saveLayer.mutateAsync({
       layerId: layerRef.current.id,
       baseMediaId,
       expectedRev: layerRef.current.rev,
       strokes: payload,
+      rasterMediaId,
+      clearRaster,
     });
     const stored = res.layer;
     const next: LayerHandle = {
@@ -1020,10 +1679,23 @@ export function VectorModal({
     };
     layerRef.current = next;
     setLayer(next);
-    // Сохранённое перестаёт быть «несохранённым» у стража выхода.
+    // Сохранённое перестаёт быть «несохранённым» у стража выхода — по ОБОИМ каналам: ревизия одна
+    // на них двоих, и «пиксели ещё не сохранены» после успешной записи было бы ложью.
     seededJson.current = strokesJson;
+    setStoredRasterId(stored?.rasterMediaId ?? (clearRaster ? 0 : rasterMediaId ?? storedRasterId));
+    // Адрес идёт ЗА идентификатором, иначе пара разошлась бы: снятие обнуляет оба, загрузка
+    // переставляет оба, а сохранение одних штрихов не трогает ни один.
+    if (clearRaster) setStoredRasterUrl('');
+    else if (freshRasterUrl !== undefined) setStoredRasterUrl(freshRasterUrl);
+    // ПОСЛЕ УСПЕШНОЙ ЗАПИСИ НИЧЕГО НЕ ПРОПАЛО. Флаг «медиа пропало» — это ответ ПРОШЛОГО чтения о
+    // ПРОШЛОМ идентификаторе; оставить его поднятым над только что записанным значило бы объявить
+    // потерянной живопись, которую человек сохранил секунду назад.
+    if (clearRaster || freshRasterUrl !== undefined) setStoredRasterGone(false);
+    rasterDirtyRef.current = false;
+    setRasterDirty(false);
+    dropRasterRef.current = false;
     return next.id;
-  }, [saveLayer, baseMediaId, payload, strokesJson]);
+  }, [saveLayer, baseMediaId, payload, strokesJson, storedRasterId]);
 
   /**
    * ПРИЁМКА МАШИННОГО ВЕКТОРА. Слой уже подшит сервером (`ImportDesignVector`, rev = 1) — редактор
@@ -1051,12 +1723,18 @@ export function VectorModal({
   );
 
   const saveDrawingOnly = async () => {
-    if (frozen || tooLarge || !strokes.length || busy) return;
+    if (frozen || tooLarge || !anyContent || busy) return;
     setBusy('saving the drawing…');
     setRefusal(null);
     try {
+      const carriedPixels = rasterDirtyRef.current;
       await persist();
-      showMessage('the drawing is saved — no picture was made', 'success');
+      showMessage(
+        carriedPixels
+          ? 'the drawing AND the painted pixels are saved — no picture was made'
+          : 'the drawing is saved — no picture was made',
+        'success',
+      );
     } catch (error) {
       setRefusal(layerRefusalText(error));
     } finally {
@@ -1069,12 +1747,21 @@ export function VectorModal({
    * `rasterise-layer.ts`, SHARED — two canvases drawing the same strokes would drift silently.
    */
   const rasterise = useCallback(
-    () => rasteriseStrokesOverBase({ baseSrc, strokes, ratio }),
+    () =>
+      rasteriseStrokesOverBase({
+        // ФЛЭТ НЕСЁТ КРАСКУ. Здесь видимость слоёв НЕ учитывается нарочно — как не учитывалась и
+        // до растра: погашенный на время работы слой это свойство ВЗГЛЯДА, а сплющивается
+        // рисунок, а не взгляд.
+        baseSrc: rasterRef.current ? '' : baseSrc,
+        raster: rasterRef.current,
+        strokes,
+        ratio,
+      }),
     [baseSrc, ratio, strokes],
   );
 
   const saveAsPicture = async () => {
-    if (frozen || tooLarge || !strokes.length || busy) return;
+    if (frozen || tooLarge || !anyContent || busy) return;
     setRefusal(null);
     try {
       setBusy('saving the drawing…');
@@ -1231,35 +1918,19 @@ export function VectorModal({
       }
     }
     const k = verbKey(e);
+    // ОДНА ТАБЛИЦА КЛАВИШ НА ЧИПЫ И НА КЛАВИАТУРУ. Прежний switch дублировал `TOOL_KEY` руками, и
+    // одиннадцатый инструмент был бы одиннадцатым шансом написать в подсказке чипа одну букву, а
+    // поймать в обработчике другую.
+    const byKey = (Object.keys(TOOL_KEY) as Tool[]).find((t) => TOOL_KEY[t] === k);
+    if (byKey) {
+      switchTool(byKey);
+      return;
+    }
     switch (k) {
-      case 'v':
-        switchTool('select');
-        break;
-      case 'l':
-        switchTool('line');
-        break;
-      case 'b':
-        switchTool('freehand');
-        break;
-      case 'p':
-        switchTool('curve');
-        break;
-      case 'w':
-        switchTool('lasso');
-        break;
-      case 'e':
-        switchTool('erase');
-        break;
-      case 's':
-        switchTool('stamp');
-        break;
       // Пипетка — не инструмент, а МОДИФИКАТОР следующего клика, поэтому она переключается, а не
       // «берётся в руку»: `i` — та же буква, что и в фотошопе.
       case 'i':
         if (!frozen) setPicking((v) => !v);
-        break;
-      case 'h':
-        switchTool('pan');
         break;
       case 'f':
         fitPlate();
@@ -1286,11 +1957,29 @@ export function VectorModal({
   };
 
   const selectedStroke = selected === null ? null : strokes[selected] ?? null;
-  const ready = !frozen && strokes.length > 0 && !tooLarge && !busy;
+  /**
+   * ЕСТЬ ЧТО СОХРАНЯТЬ — теперь это ДВА материала. Кнопки, запертые на «ни одной линии» у человека,
+   * который стёр фотографии половину фона, читались бы как «эта работа ничего не стоит».
+   */
+  const anyContent = strokes.length > 0 || rasterDirty;
+  const ready = !frozen && anyContent && !tooLarge && !busy;
   /** Слой-файл без редактируемой проекции: файл цел, штрихов нет — экран обязан сказать это. */
   const fileOnly = entered && fileMediaId > 0 && strokes.length === 0 && !readPending;
-  const anyCallout =
-    unreadable || readPending || readFailed || !!refusal || tooLarge || fileOnly;
+  /**
+   * ЧТО ИМЕННО ЗАПИСЫВАЮТ ПИКСЕЛИ — СКАЗАНО ВСЛУХ, НО В РЕЙКЕ, А НЕ КОРОБКОЙ НАД ХОЛСТОМ.
+   *
+   * ЗАМЕРЕНО ДВАЖДЫ. Сперва коробка всплывала после первого мазка и сдвигала холст на свою высоту
+   * — проба 66 показала числом, что второй мазок лёг мимо точки, в которую его вели. Перенос
+   * условия на «взяли пиксельный инструмент» это не вылечил, а передвинул: проба 83 померила
+   * коробку холста по всем инструментам и увидела 117/767 у линейных против 173/711 у пиксельных —
+   * тот же сдвиг, просто на клике по чипу.
+   *
+   * ВЫВОД: НАД ХОЛСТОМ НЕТ МЕСТА НИЧЕМУ УСЛОВНОМУ. Объяснение уехало в рейку, к группе слоёв, где
+   * оно и по смыслу на месте (там же живёт дверь «вернуть нетронутое фото»), а рейка — колонка со
+   * своей прокруткой: её рост не стоит холсту ни пикселя. Коробками над холстом остаются только
+   * ОТКАЗЫ — они и должны отнимать место, потому что работать поверх них нельзя.
+   */
+  const anyCallout = unreadable || readPending || readFailed || !!refusal || tooLarge || fileOnly;
 
   const saveNote = base
     ? `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
@@ -1432,16 +2121,30 @@ export function VectorModal({
                     <Chip nonForm dashed onClick={zoomReset} title='zoom back to 1:1 (⌘0)'>
                       1:1
                     </Chip>
+                    {/* ОТМЕНА НАЗЫВАЕТ, ЧТО ИМЕННО ВЕРНЁТСЯ, И СКОЛЬКО ШАГОВ ЕЩЁ ЕСТЬ. Лента одна
+                        на линии и пиксели, и без слова материала «undo» на растровом шаге читался
+                        бы как «отменить последнюю линию» — и не сработал бы так, как ожидали. */}
                     <Chip
                       dashed
-                      disabled={frozen || !history.canUndo()}
-                      onClick={() => {
-                        undo();
-                        setSelected(null);
-                      }}
-                      title='undo the last gesture (⌘z)'
+                      disabled={frozen || !tl.depth}
+                      onClick={doUndo}
+                      data-undo-chip={timeline.current.nextUndoKind() ?? ''}
+                      title={
+                        tl.depth
+                          ? `undo the last ${timeline.current.nextUndoKind() === 'pixels' ? 'pixel gesture' : 'line gesture'} (⌘z) · ${tl.depth} step${tl.depth === 1 ? '' : 's'} kept, ceiling ${RASTER_UNDO_DEPTH} or ${RASTER_UNDO_BYTES / 1024 / 1024} MB of pixels`
+                          : 'nothing to undo yet (⌘z)'
+                      }
                     >
-                      undo
+                      undo{tl.depth ? ` ${tl.depth}` : ''}
+                    </Chip>
+                    <Chip
+                      dashed
+                      disabled={frozen || !tl.redoDepth}
+                      onClick={doRedo}
+                      data-redo-chip={timeline.current.nextRedoKind() ?? ''}
+                      title='put back what undo took (⌘⇧z)'
+                    >
+                      redo
                     </Chip>
                   </>
                 )}
@@ -1569,13 +2272,31 @@ export function VectorModal({
                   selected={selected}
                   selectedStroke={selectedStroke}
                   onBrush={pickBrush}
-                  onWeight={pickWeightPreset}
                   onDashed={pickDashed}
                   onInk={pickInk}
                   onGauge={pickGauge}
+                  step={step}
+                  stepOwn={stepOwn}
+                  onStep={pickStep}
+                  onStepFollow={followStep}
                   nib={nib}
-                  onNib={(px) => setNib(clampNib(px))}
-                  nibTool={isNibTool(tool) ? tool : null}
+                  onNib={(px: number) => setNib(clampNib(px))}
+                  nibLabel={isNibTool(tool) ? TOOL_LABEL[tool] : ''}
+                  rasterTool={isRasterTool(tool)}
+                  lineTool={!isRasterTool(tool)}
+                  hardness={hardness}
+                  onHardness={(n: number) =>
+                    setHardness(Math.min(100, Math.max(0, Math.round(n) || 0)))
+                  }
+                  opacity={opacity}
+                  onOpacity={(n: number) =>
+                    setOpacity(Math.min(100, Math.max(1, Math.round(n) || 1)))
+                  }
+                  undoDepth={tl.depth}
+                  undoBytes={tl.bytes}
+                  undoEvicted={tl.evicted}
+                  undoCeiling={RASTER_UNDO_DEPTH}
+                  undoByteCeiling={RASTER_UNDO_BYTES / 1024 / 1024}
                   picking={picking}
                   onPicking={setPicking}
                   onRemoveSelected={removeSelected}
@@ -1587,12 +2308,20 @@ export function VectorModal({
                   onCopySel={copySel}
                   onDeleteSel={deleteSel}
                   onDropSel={dropSel}
+                  onSoftenSel={(i: number) => void softenSel(i)}
                   vecOn={vecOn}
                   onVecOn={() => setVecOn((v) => !v)}
                   rasterOn={rasterOn}
                   onRasterOn={() => setRasterOn((v) => !v)}
                   strokesCount={strokes.length}
                   baseLabel={base ? pictureHandle(base) : null}
+                  rasterReady={rasterReady}
+                  rasterDirty={rasterDirty}
+                  rasterStored={storedRasterId > 0 && !dropRasterRef.current}
+                  onDropRaster={dropRasterPixels}
+                  rasterSize={
+                    rasterRef.current ? `${rasterRef.current.w}×${rasterRef.current.h}` : ''
+                  }
                   // Слой-файл отдаёт ФАЙЛ (и только когда URL известен); рисованный слой —
                   // сериализацию своих штрихов. Довод — у `download`.
                   canDownload={fileMediaId > 0 ? !!fileUrl : strokes.length > 0}
@@ -1605,41 +2334,57 @@ export function VectorModal({
                   frameRatio={ratio || DEFAULT_RATIO}
                   strokes={strokes}
                   onImport={(incoming, mode) => {
-                    record();
-                    setStrokes((prev) => (mode === 'replace' ? incoming : [...prev, ...incoming]));
+                    commitLines(
+                      mode === 'replace' ? incoming : [...strokesRef.current, ...incoming],
+                    );
                     setSelected(null);
                   }}
                   saveNote={saveNote}
                 />
 
                 <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-1'>
-                  {/* Инструменты — НАД холстом, во всю его ширину: рейка отдана кистям. */}
-                  <div className='flex flex-wrap items-center gap-2 border border-borderColor bg-bgColor px-2 py-1'>
-                    <ChipRow>
-                      {(
-                        [
-                          ['line', 'l'],
-                          ['freehand', 'b'],
-                          ['curve', 'p'],
-                          ['lasso', 'w'],
-                          ['select', 'v'],
-                          ['erase', 'e'],
-                          ['stamp', 's'],
-                          ['pan', 'h'],
-                        ] as const
-                      ).map(([t, key]) => (
-                        <Chip
-                          key={t}
-                          selected={tool === t}
-                          pressed={tool === t}
-                          disabled={frozen && t !== 'select' && t !== 'pan'}
-                          onClick={() => switchTool(t)}
-                          title={`${TOOL_LABEL[t]} (${key})`}
+                  {/* Инструменты — НАД холстом, во всю его ширину: рейка отдана кистям.
+                      ВЫСОТА ЭТОГО БЛОКА НЕ ЗАВИСИТ ОТ ИНСТРУМЕНТА. Подсказка стоит СВОЕЙ строкой
+                      фиксированной высоты, а не в одном ряду с чипами: она у каждого инструмента
+                      своей длины, и в общем ряду длинная подсказка переносила бы чипы на вторую
+                      строку — то есть СДВИГАЛА БЫ ХОЛСТ на смене инструмента. Тот же дефект уже
+                      был замерен пробой 43 на чипе «path → selection». */}
+                  <div className='flex flex-col gap-1 border border-borderColor bg-bgColor px-2 py-1'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                    {/* ПОЛОСЫ ПО МАТЕРИАЛУ. Надпись «lines» / «pixels» — не украшение группы, а
+                        единственное, что различает `cut` и `erase`: два слова для двух работ над
+                        двумя разными вещами. Один ряд из одиннадцати чипов сделал бы их
+                        синонимами. */}
+                    {TOOL_BANDS.map((band) => (
+                      <span
+                        key={band.material}
+                        className='flex min-w-0 items-center gap-1.5'
+                        data-tool-band={band.material}
+                      >
+                        <Text
+                          size='nano'
+                          variant='label'
+                          component='span'
+                          className='shrink-0 uppercase'
                         >
-                          {TOOL_LABEL[t]}
-                        </Chip>
-                      ))}
-                    </ChipRow>
+                          {band.label}
+                        </Text>
+                        <ChipRow>
+                          {band.tools.map((t) => (
+                            <Chip
+                              key={t}
+                              selected={tool === t}
+                              pressed={tool === t}
+                              disabled={frozen && t !== 'select' && t !== 'pan'}
+                              onClick={() => switchTool(t)}
+                              title={`${TOOL_LABEL[t]} (${TOOL_KEY[t]}) — ${TOOL_HINT[t]}`}
+                            >
+                              {TOOL_LABEL[t]}
+                            </Chip>
+                          ))}
+                        </ChipRow>
+                      </span>
+                    ))}
                     {/* Дверь Make Selection. ПРИСУТСТВИЕ — по инструменту, ДОСТУПНОСТЬ — по пути:
                         чип, всплывающий на третьем якоре, переносил тулбар на новую строку и
                         СДВИГАЛ холст на ~25px ПОСРЕДИ жеста — даблклик клал второй якорь в другую
@@ -1656,21 +2401,34 @@ export function VectorModal({
                         path → selection
                       </Chip>
                     )}
-                    <Text size='nano' variant='label' component='span' className='min-w-0'>
+                    </div>
+                    <Text
+                      size='nano'
+                      variant='label'
+                      component='p'
+                      className='h-4 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'
+                      data-tool-hint={tool}
+                    >
                       {tool === 'curve'
                         ? // ОДНА строка на весь путь: смена текста посреди жеста — тот же сдвиг холста.
                           'click = corner · drag = curve · grab a handle to bend, alt splits the pair · click the first anchor closes · enter/esc finish'
                         : tool === 'lasso'
-                          ? 'draw around an area · its strokes can be copied or deleted from the rail · feather is each selection’s own'
+                          ? 'draw around an area · it holds the pixel tools in and cuts the lines at its edge · feather is each area’s own'
                           : tool === 'select'
                             ? 'click a stroke — the rail edits its stitch'
-                            : tool === 'erase'
-                              ? 'drag the nib: it CUTS what it covers, the rest of the line stays'
-                              : tool === 'stamp'
-                                ? 'alt-click to take the source, then drag. The strokes under the source are printed under your hand'
-                                : tool === 'pan'
-                                ? 'drag to move the sheet · scroll pans · pinch zooms'
-                                : 'press and drag to draw · space pans · ⌘z takes back the last gesture'}
+                            : tool === 'cut'
+                              ? 'drag the nib: it CUTS the LINE it covers, the rest of the line stays. Pixels are not touched'
+                              : tool === 'clone'
+                                ? 'alt-click to take the source, then drag. The LINES under the source are laid under your hand'
+                                : tool === 'erase'
+                                  ? 'drag the nib: it rubs PIXELS away to transparency, the photo included. Drawn lines stay'
+                                  : tool === 'stamp'
+                                    ? 'alt-click to take the source, then drag. The PIXELS under the source are printed under your hand'
+                                    : tool === 'paint'
+                                      ? 'drag to paint PIXELS · size, hardness and opacity are in the rail · an active area holds the paint in'
+                                      : tool === 'pan'
+                                        ? 'drag to move the sheet · scroll pans · pinch zooms'
+                                        : 'press and drag to draw · space pans · ⌘z takes back the last gesture'}
                     </Text>
                   </div>
 
@@ -1704,6 +2462,12 @@ export function VectorModal({
                         willChange: 'transform',
                       }}
                     >
+                      {/* ПОДЛОЖКА ЖИВЁТ ДО ПЕРВОГО ПИКСЕЛЬНОГО ИНСТРУМЕНТА, а потом ГАСНЕТ, но
+                          остаётся в разметке: она — оракул натуральных пропорций (`onLoad`), и
+                          снять её значило бы потерять форму платы у того, кто взял кисть раньше,
+                          чем картинка договорила. Прячется прозрачностью, а не размонтированием:
+                          растр УЖЕ содержит её пиксели, и нарисовать её ещё раз под ним значило бы
+                          заклеить каждую дырку от ластика оригиналом. */}
                       {baseSrc && rasterOn && (
                         <img
                           src={baseSrc}
@@ -1715,8 +2479,22 @@ export function VectorModal({
                               setRatio(img.naturalWidth / img.naturalHeight);
                             }
                           }}
+                          data-base-img=''
                           className='pointer-events-none absolute inset-0 block h-full w-full'
-                          style={{ objectFit: 'fill' }}
+                          style={{ objectFit: 'fill', opacity: rasterReady ? 0 : 1 }}
+                        />
+                      )}
+                      {/* ПИКСЕЛЬНЫЙ КАНАЛ. Холст в разрешении растра, растянутый в плату теми же
+                          правилами, что и подложка: доли кадра значат одно и то же на обоих. */}
+                      {rasterReady && rasterOn && rasterRef.current && (
+                        <canvas
+                          ref={viewCanvasRef}
+                          width={rasterRef.current.w}
+                          height={rasterRef.current.h}
+                          data-raster-canvas=''
+                          role='img'
+                          aria-label={`the pixel layer${base ? ` over «${pictureHandle(base)}»` : ''} — ${rasterDirty ? 'painted' : 'a copy of the picture underneath'}`}
+                          className='pointer-events-none absolute inset-0 block h-full w-full'
                         />
                       )}
                       {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый
@@ -1831,11 +2609,14 @@ export function VectorModal({
                                   opacity={0.6}
                                 />
                               </g>
-                            ) : isNibTool(tool) ? (
+                            ) : isLineNib(tool) ? (
                               /* СЛЕД НИБА В НАТУРАЛЬНУЮ ШИРИНУ — не намёк линией, а ровно та
-                                 полоса, которую ластик вырежет (или штамп напечатает). Ширина в
+                                 полоса, которую резчик вырежет (или клон напечатает). Ширина в
                                  МИРОВЫХ пикселях и на зум НЕ делится: ниб — свойство платы, и
-                                 приближение обязано приближать и его. */
+                                 приближение обязано приближать и его.
+                                 ПИКСЕЛЬНЫМ ИНСТРУМЕНТАМ ЭТА ПОЛОСА НЕ РИСУЕТСЯ: у них мазок УЖЕ
+                                 виден — он лежит на холсте под этим SVG, — и призрак поверх него
+                                 показывал бы мазок вдвое темнее, чем он есть. */
                               <path
                                 d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
                                 fill='none'
@@ -1877,7 +2658,7 @@ export function VectorModal({
                               />
                             </g>
                           )}
-                          {tool === 'stamp' && stampSrc && (
+                          {isSourceTool(tool) && stampSrc && (
                             /* ИСТОЧНИК — перекрестие, как в фотошопе, и линия к нибу: без неё
                                смещение «источник → курсор» невидимо, и печатается непонятно что. */
                             <g data-stamp-src='' pointerEvents='none'>

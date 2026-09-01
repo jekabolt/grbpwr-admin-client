@@ -1,5 +1,6 @@
 import { urlToDataUrl } from 'lib/features/getCropped';
 
+import type { RasterLayer } from './vector-raster';
 import {
   DEFAULT_INK,
   DEFAULT_RATIO,
@@ -39,6 +40,15 @@ export type SceneInput = {
   strokes: readonly VectorStroke[];
   /** The frame's width/height ratio; only consulted when there is no base to measure. */
   ratio?: number;
+  /**
+   * ПИКСЕЛЬНЫЙ КАНАЛ СЛОЯ, КОГДА ОН ЗАВЕДЁН, — И ТОГДА ПОДЛОЖКА НЕ РИСУЕТСЯ ВОВСЕ.
+   *
+   * Растр заводится КОПИЕЙ подложки (см. `vector-raster.ts`), то есть уже содержит её пиксели —
+   * вместе с дырками, которые в ней прогрыз ластик. Нарисовать подложку ещё раз под ним значило бы
+   * заклеить каждую дырку оригиналом: ластик работал бы на экране и переставал работать на
+   * картинке, которую сохраняют. Поэтому здесь ветка, а не наложение.
+   */
+  raster?: RasterLayer | null;
 };
 
 /**
@@ -49,22 +59,22 @@ export type SceneInput = {
  * a picker that sampled its own private redraw could hand back a colour the screen never showed.
  * The picker reads pixels off this canvas; the flatten asks the very same canvas for its PNG.
  */
-export async function composeScene({ baseSrc, strokes, ratio }: SceneInput): Promise<{
+export async function composeScene({ baseSrc, strokes, ratio, raster }: SceneInput): Promise<{
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   w: number;
   h: number;
 }> {
   let image: HTMLImageElement | null = null;
-  if (baseSrc) {
+  if (baseSrc && !raster) {
     const dataUrl = await urlToDataUrl(baseSrc);
     const img = new Image();
     img.src = dataUrl;
     await img.decode();
     image = img;
   }
-  const naturalW = image?.naturalWidth ?? 0;
-  const naturalH = image?.naturalHeight ?? 0;
+  const naturalW = raster?.w ?? image?.naturalWidth ?? 0;
+  const naturalH = raster?.h ?? image?.naturalHeight ?? 0;
   const w = Math.min(RASTER_MAX_W, naturalW > 0 ? naturalW : RASTER_FALLBACK_W);
   const h = Math.max(
     1,
@@ -81,10 +91,13 @@ export async function composeScene({ baseSrc, strokes, ratio }: SceneInput): Pro
 
   // A FLAT IS INK ON PAPER. Flattening onto transparency gives a file that reads as an empty
   // rectangle wherever it is shown on a dark ground, so the ground is painted first — the same
-  // white the editor stages the drawing on.
+  // white the editor stages the drawing on. ДЫРКА ОТ ЛАСТИКА НА ФЛЭТЕ — БУМАГА, А НЕ ПРОЗРАЧНОСТЬ,
+  // и это то же решение, а не его исключение: слой хранит дырку альфой (см. `exportRasterPng`),
+  // флэт показывает то, что под ней видно, и под ней бумага.
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, w, h);
-  if (image) ctx.drawImage(image, 0, 0, w, h);
+  if (raster) ctx.drawImage(raster.doc, 0, 0, w, h);
+  else if (image) ctx.drawImage(image, 0, 0, w, h);
 
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
