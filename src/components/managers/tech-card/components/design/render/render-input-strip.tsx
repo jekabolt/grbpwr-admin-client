@@ -167,10 +167,13 @@ function useClothRun({
   band,
   techCardId,
   disabled,
+  onMakePattern,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** K-16: увести на вкладку PATTERN. Не задан — второй двери у плейсхолдера нет. */
+  onMakePattern?: () => void;
 }): { cells: JSX.Element; count: number; notes: JSX.Element; modal: JSX.Element } {
   const writes = useAssetWrites(techCardId);
   const { showMessage } = useSnackBarStore();
@@ -338,6 +341,20 @@ function useClothRun({
             <Text size='nano' variant='label' component='span'>
               {full ? 'at the limit' : '⌘V · drop · browse'}
             </Text>
+            {/* ═══ ВТОРАЯ ДВЕРЬ ПЛЕЙСХОЛДЕРА (K-16) ══════════════════════════════════════════
+                Дословно владелец: «на плейсхолдере фабрик можно выбрать из библиотеки или же оно
+                должно предлагать сделать это как паттерн». Две двери, «или же» — и обе стоят на
+                одной ячейке: слева взять готовую ткань, ниже — уйти делать повторяемую плитку.
+
+                ДВЕРЬ РИСУЕТСЯ, ТОЛЬКО КОГДА ЕЙ ЕСТЬ КУДА ВЕСТИ. Без `onMakePattern` монтирующий
+                экран не умеет переключать представление — кнопка, которая никуда не ведёт, хуже
+                её отсутствия. И она НЕ гаснет на потолке активов: сделать плитку можно всегда,
+                упрётся только `KEEP AS CLOTH`, и упрётся своими словами. */}
+            {onMakePattern && (
+              <Button variant='secondary' size='xs' onClick={onMakePattern}>
+                make a pattern
+              </Button>
+            )}
           </div>
         )}
     </>
@@ -361,16 +378,17 @@ function useClothRun({
       <Text size='micro' variant='label' component='p' className='normal-case'>
         The render reads weave, sheen and drape off these; pick which one a run uses under FABRIC →
         CLOTHS below.
-        {/* ПАТТЕРНЫ НАЗЫВАЮТСЯ ТОЛЬКО ТОГДА, КОГДА ОНИ ЕСТЬ (Д-1). Строка про снятый редактор на
-            карточке без паттернов рассказывала бы про орган, которого человек никогда не видел; на
-            карточке С паттерном она отвечает на единственный вопрос, который у него возникнет, —
-            почему эту плитку нельзя завести заново. */}
+        {/* ПАТТЕРНЫ НАЗЫВАЮТСЯ ТОЛЬКО ТОГДА, КОГДА ОНИ ЕСТЬ (Д-1).
+            ⚠ ЭТА СТРОКА БЫЛА ЛОЖЬЮ С МОМЕНТА, КАК ПОЯВИЛАСЬ ВКЛАДКА PATTERN (K-13). Она говорила,
+            что плитки «были сделаны на снятых полках ASSETS» и «новую завести нельзя, потому что
+            её редактор ушёл вместе с полками», — а завести теперь можно, и дверь стоит прямо над
+            этим абзацем. Утверждение о снятом органе переживает свою причину молча: ничего не
+            падает, экран просто начинает врать. */}
         {cloths.some(assetIsPattern) && (
           <>
             {' '}
-            The ones marked <b>pattern</b> were made on the removed ASSETS shelves: they still count
-            as cloth for a run, and they can still be removed here, but a new one cannot be made —
-            its repeat and rotation had their own editor, and it went with the shelves.
+            The ones marked <b>pattern</b> are repeating tiles, made on STUDIO → PATTERN and kept
+            here with <b>keep as cloth</b>.
           </>
         )}
       </Text>
@@ -428,10 +446,13 @@ export function RenderInputStrip({
   band,
   techCardId,
   disabled,
+  onMakePattern,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** K-16: уход на вкладку PATTERN со второй двери плейсхолдера тканей. */
+  onMakePattern?: () => void;
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
 
@@ -440,7 +461,7 @@ export function RenderInputStrip({
   const marked = sides.filter((side) => !!side.picture);
   /* Ткани отдаются частями (см. довод у `useClothRun`): ячейки уходят в ту же ленту, что и виды,
      подписи и вопрос удаления — под неё. */
-  const cloth = useClothRun({ band, techCardId, disabled });
+  const cloth = useClothRun({ band, techCardId, disabled, onMakePattern });
 
   /** Which cell a write is in flight for — a shared `isPending` would say «saving» on all of them. */
   const [busy, setBusy] = useState<string | null>(null);

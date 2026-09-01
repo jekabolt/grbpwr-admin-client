@@ -48,10 +48,17 @@ export function RenderStudio({
   band,
   techCardId,
   disabled,
+  onGoToKind,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /**
+   * Уйти на другое представление студии. Тем же пропом и по тому же доводу, что у `ThreedStudio`:
+   * состояние `kind` живёт в ОДНОМ месте на всю студию (`StudioTab`), и экран, заведший своё,
+   * рассинхронил бы полосу вкладок со своим же содержимым.
+   */
+  onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
 }): JSX.Element {
   const draft = useColourDraft(band);
   const cardFit = useCardFit();
@@ -132,7 +139,13 @@ export function RenderStudio({
 
   return (
     <>
-      <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} />
+      <RenderInputStrip
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        // K-16: вторая дверь плейсхолдера тканей. Без `onGoToKind` её нет вовсе — см. довод там.
+        onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
+      />
 
       <Section
         title='generation — fabric render'

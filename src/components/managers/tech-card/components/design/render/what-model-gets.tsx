@@ -3,6 +3,7 @@ import type {
   common_Color,
   common_DesignColourRecipe,
   common_DesignPicture,
+  common_MediaFull,
   common_Model,
 } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -28,6 +29,7 @@ import {
   colourSubtitle,
   colourSwatchHex,
   fabricStatement,
+  mediaThumb,
   pictureThumb,
   renderSheetViews,
   runOfPicture,
@@ -70,7 +72,20 @@ import {
  * cannot lead anywhere is worse than a sentence that can be read.
  */
 
-export type WhatModelGetsKind = 'render' | 'threed';
+/**
+ * `recolor` IS THE THIRD ARM (K-17) AND IT IS THE SHORTEST, because a recolour is told the least:
+ * one photograph per paid call and a target colour. That shortness is exactly why the panel earns
+ * its place here — the intuition «the model can see the other shots, so it will keep them
+ * consistent» is wrong and is bought one call at a time.
+ */
+export type WhatModelGetsKind = 'render' | 'threed' | 'recolor';
+
+/** The screen's own name, spelled ONCE — the title and the copied text must not diverge. */
+function kindLabel(kind: WhatModelGetsKind): string {
+  if (kind === 'threed') return '3D';
+  if (kind === 'recolor') return 'on model';
+  return 'fabric render';
+}
 
 /**
  * The slice of a form callout the band reads. Deliberately a STRUCTURAL subset of `CalloutForm`
@@ -110,6 +125,7 @@ export function WhatModelGetsRenderModal({
   kind,
   recipe,
   threed,
+  sources,
   cardFit,
   models,
   sizeName,
@@ -118,10 +134,12 @@ export function WhatModelGetsRenderModal({
   onOpenChange: (open: boolean) => void;
   band: GetDesignBandResponse;
   kind: WhatModelGetsKind;
-  /** The colour the render menu currently states. Ignored by the 3D arm. */
+  /** The colour the menu currently states. Read by the render arm and by the recolour arm. */
   recipe?: common_DesignColourRecipe;
-  /** The turntable draft the 3D menu currently states. Ignored by the render arm. */
+  /** The turntable draft the 3D menu currently states. Ignored by the other arms. */
   threed?: ThreedDraft;
+  /** The photographs the ON MODEL menu currently holds — one paid call each. Recolour arm only. */
+  sources?: readonly common_MediaFull[];
   cardFit: string;
   models?: readonly common_Model[];
   sizeName?: (id: number) => string;
@@ -151,6 +169,8 @@ export function WhatModelGetsRenderModal({
   const body =
     kind === 'render' ? (
       <RenderBody band={band} recipe={recipe} garment={garment} resolved={resolved} />
+    ) : kind === 'recolor' ? (
+      <RecolorBody sources={sources} recipe={recipe} garment={garment} resolved={resolved} />
     ) : (
       <ThreedBody
         band={band}
@@ -162,11 +182,11 @@ export function WhatModelGetsRenderModal({
     );
 
   const words = useMemo(
-    () => plainText({ kind, band, recipe, threed, cardFit, garment, resolved }),
+    () => plainText({ kind, band, recipe, threed, sources, cardFit, garment, resolved }),
     // `resolved` is rebuilt each render by design (it is three references, not state); the text is
     // recomputed from the same inputs the panel draws from, so the dictionaries are named here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kind, band, recipe, threed, cardFit, garment, dictionary?.colors, models],
+    [kind, band, recipe, threed, sources, cardFit, garment, dictionary?.colors, models],
   );
 
   const copy = async () => {
@@ -192,7 +212,7 @@ export function WhatModelGetsRenderModal({
       onConfirm={() => onOpenChange(false)}
       closeOnConfirm={false}
       width='lg'
-      title={`what the model gets — ${kind === 'threed' ? '3D' : 'fabric render'}`}
+      title={`what the model gets — ${kindLabel(kind)}`}
       cancelLabel='close'
       confirmLabel='close'
       footerHint='nothing here is editable — every fact is edited at its own field'
@@ -413,6 +433,131 @@ function RenderBody({
   );
 }
 
+/* ─────────────────────────── the recolour arm ─────────────────────────── */
+
+/**
+ * A RECOLOUR IS TOLD VERY LITTLE, AND THE SHORTNESS OF THIS LIST IS THE POINT.
+ *
+ * ONE PHOTOGRAPH PER PAID CALL, AND THE MODEL SEES ONLY THAT ONE. It is not shown the other shots,
+ * it is not told they are the same garment, and it cannot make them agree by looking at them. The
+ * thing that keeps four pictures the same shade is the COLOUR NAMED — which is why that line sits
+ * directly under the count of calls rather than in a section of its own.
+ *
+ * THE CARD CONTRIBUTES ALMOST NOTHING HERE, and that is worth reading before paying per shot: no
+ * bench plate, no reference, no moodboard, no fit. A recolour is about a photograph that already
+ * exists; the card's drawings would be a second, contradictory description of the same garment.
+ */
+function RecolorBody({
+  sources,
+  recipe,
+  garment,
+  resolved,
+}: {
+  sources?: readonly common_MediaFull[];
+  recipe?: common_DesignColourRecipe;
+  garment: string;
+  resolved: Resolved;
+}): JSX.Element {
+  const { showMessage } = useSnackBarStore();
+  const shots = sources ?? [];
+  const stated = fabricStatement(recipe);
+
+  return (
+    <>
+      <div>
+        <GroupLabel
+          flush
+          action={
+            <Text size='micro' variant='label' component='span'>
+              {shots.length} photograph{shots.length === 1 ? '' : 's'} · {shots.length} paid call
+              {shots.length === 1 ? '' : 's'}
+            </Text>
+          }
+        >
+          inputs — the photographs, one call each
+        </GroupLabel>
+        {shots.length === 0 ? (
+          <Text size='micro' variant='inactive' component='p' className='py-1 normal-case'>
+            No photograph is in the menu, so there is nothing to recolour and nothing to buy.
+          </Text>
+        ) : (
+          shots.map((media, index) => (
+            <InventoryLine
+              key={media.id ?? index}
+              name={`photo ${index + 1}`}
+              thumb={mediaThumb(media)}
+              text={
+                <>
+                  media <b>{media.id ?? '—'}</b> — its own paid call, recoloured on its own. The
+                  model is not shown the other {shots.length === 1 ? 'shots' : 'photographs'}.
+                </>
+              }
+            />
+          ))
+        )}
+      </div>
+
+      <div>
+        <GroupLabel>the target colour</GroupLabel>
+        <div className='flex flex-wrap items-start gap-3 border-b border-hairline py-1'>
+          <Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={32} />
+          <div className='min-w-0 flex-1'>
+            <Text size='micro' component='p'>
+              <b>{colourLabel(recipe, resolved.colors)}</b>
+            </Text>
+            <Text size='micro' variant='label' component='p' className='normal-case'>
+              {colourSubtitle(recipe, resolved.colors)}
+            </Text>
+          </div>
+        </div>
+        <div className='flex items-center gap-2 border-b border-hairline py-1'>
+          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
+            in words
+          </Text>
+          <Text size='micro' component='span' className='min-w-0 flex-1'>
+            {stated.words ? (
+              (recipe?.words ?? '').trim()
+            ) : (
+              <span className='text-labelColor'>nothing said in words</span>
+            )}
+          </Text>
+        </div>
+        <div className='flex items-center gap-2 border-b border-hairline py-1'>
+          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
+            garment
+          </Text>
+          <Text size='micro' component='span' className='min-w-0 flex-1'>
+            {garment || <span className='text-labelColor'>the card states no description</span>}
+          </Text>
+        </div>
+      </div>
+
+      <NotSent
+        showMessage={showMessage}
+        chips={[
+          {
+            label: 'the flats',
+            title:
+              'a recolour repaints a photograph that exists — the card\u2019s drawings would be a second, contradictory description of the same garment',
+          },
+          {
+            label: 'the bench',
+            title: 'the bench is what a fabric render is built from; a recolour is built from the photograph you handed it',
+          },
+          {
+            label: 'the other photographs',
+            title:
+              'each shot is its own paid call and the model sees only that one — what keeps them the same shade is the colour you named, not that they went together',
+          },
+          { label: 'references', title: 'reference photographs belong to FLAT and never reach this run' },
+          { label: 'moodboard', title: 'mood is for the human — it is never instruction' },
+          { label: 'the fit', title: 'fit describes a garment being drawn; this one has already been photographed on a body' },
+        ]}
+      />
+    </>
+  );
+}
+
 /* ─────────────────────────── the 3D arm ─────────────────────────── */
 
 /**
@@ -450,7 +595,7 @@ function ThreedBody({
           flush
           action={
             <Text size='micro' variant='label' component='span'>
-              {present} of 4 marked
+              {present} of 4 marked · front required
             </Text>
           }
         >
@@ -472,8 +617,14 @@ function ThreedBody({
                   ]
                     .filter(Boolean)
                     .join(' · ')
-                ) : (
+                ) : side.view === 'front' ? (
+                  /* ОДНА СТОРОНА ОБЯЗАТЕЛЬНА, И ЭТО ФРОНТ (K-10/K-11): без него прогон отвергается
+                     бесплатно. Красным было помечено ВСЁ пустое, пока это был поворотный стол. */
                   <span className='text-error'>not marked — blocks 3D</span>
+                ) : (
+                  <span className='text-labelColor'>
+                    not marked — optional; each extra side makes the model better
+                  </span>
                 )
               }
             />
@@ -483,14 +634,6 @@ function ThreedBody({
 
       <div>
         <GroupLabel>how it sits</GroupLabel>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            frames
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {threed?.frames ?? 0} — each frame is its own picture in the history
-          </Text>
-        </div>
         <div className='flex items-center gap-2 border-b border-hairline py-1'>
           <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
             presentation
@@ -537,8 +680,8 @@ function ThreedBody({
           <Text size='micro' component='span' className='min-w-0 flex-1'>
             {(threed?.fitOverride ?? '').trim() ? (
               <>
-                <b>{threed?.fitOverride}</b> — an override; every frame it produces carries the
-                badge, and the card still says {cardFit || '—'}
+                <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge,
+                and the card still says {cardFit || '—'}
               </>
             ) : (
               `${cardFit || '—'} (from the card)`
@@ -563,11 +706,11 @@ function ThreedBody({
           {
             label: 'references',
             title:
-              'a turntable is built out of the four RENDERS — the reference photographs are two ' +
+              'a 3D model is built out of the marked RENDERS — the reference photographs are two ' +
               'steps upstream and are not shown to it. They are on the FLAT view of the strip',
           },
           { label: 'moodboard', title: 'mood is for the human — it is never instruction' },
-          { label: 'the flats', title: '3D turns the renders, not the drawings underneath them' },
+          { label: 'the flats', title: '3D is built from the renders, not from the drawings underneath them' },
           { label: 'notes', title: 'notes are internal and reach neither the factory nor a model' },
         ]}
       />
@@ -581,13 +724,20 @@ function ThreedBody({
 function InventoryLine({
   name,
   picture,
+  thumb,
   text,
 }: {
   name: string;
   picture?: common_DesignPicture | null;
+  /**
+   * An address for a line whose subject is NOT a card picture — the recolour arm's inputs are raw
+   * media, and there is no `DesignPicture` to derive a thumbnail from. Supplied wins; the picture
+   * is still accepted so the two older arms are untouched.
+   */
+  thumb?: string;
   text: React.ReactNode;
 }): JSX.Element {
-  const url = pictureThumb(picture);
+  const url = thumb || pictureThumb(picture);
   return (
     <div className='flex items-center gap-2 border-b border-hairline py-1'>
       {/* мат под снимком белый (R-12) */}
@@ -680,6 +830,7 @@ function plainText({
   band,
   recipe,
   threed,
+  sources,
   cardFit,
   garment,
   resolved,
@@ -688,15 +839,34 @@ function plainText({
   band: GetDesignBandResponse;
   recipe?: common_DesignColourRecipe;
   threed?: ThreedDraft;
+  sources?: readonly common_MediaFull[];
   cardFit: string;
   garment: string;
   resolved: Resolved;
 }): string {
   const lines: string[] = [
-    `what the model gets — ${kind === 'threed' ? '3D' : 'fabric render'}`,
+    `what the model gets — ${kindLabel(kind)}`,
     `garment: ${garment || '—'}`,
     `fit: ${cardFit || '—'} (from the card)`,
   ];
+
+  if (kind === 'recolor') {
+    const shots = sources ?? [];
+    return [
+      // `fit` НЕ ПЕЧАТАЕТСЯ У РЕКОЛА, и строка выше его уже поставила: посадка описывает вещь,
+      // которую рисуют, а эта уже снята на человеке. Поэтому текст рекола собирается своим
+      // списком, а не дописывается к общему.
+      `what the model gets — ${kindLabel(kind)}`,
+      `garment: ${garment || '—'}`,
+      `inputs: ${shots.length} photograph${shots.length === 1 ? '' : 's'} — ${
+        shots.map((m) => `media ${m.id ?? '—'}`).join(', ') || 'none'
+      }`,
+      `paid calls: ${shots.length} (one per photograph; each call sees only its own picture)`,
+      `target colour: ${colourLabel(recipe, resolved.colors)}`,
+      `colour in words: ${(recipe?.words ?? '').trim() || '—'}`,
+      'not sent: the flats, the bench, the other photographs, references, moodboard, the fit',
+    ].join('\n');
+  }
 
   if (kind === 'render') {
     const sides = benchSides(band);
@@ -718,12 +888,13 @@ function plainText({
   lines.push(
     `inputs: ${sides
       .map((side) => {
-        if (!side.picture) return `${viewLabel(side.view)}=NOT MARKED`;
+        if (!side.picture) {
+          return `${viewLabel(side.view)}=${side.view === 'front' ? 'NOT MARKED (required)' : 'not marked (optional)'}`;
+        }
         const rrev = runOfPicture(band, side.picture)?.rrev ?? 0;
         return `${viewLabel(side.view)}=${rrev ? `r${rrev}` : 'marked'}`;
       })
       .join(', ')}`,
-    `frames: ${threed?.frames ?? 0}`,
     threed?.presentation === 'model'
       ? `presentation: on ${bodyLine(resolved.models, threed)} · garment ${
           resolved.sizeName(threed?.garmentSizeId ?? 0) || '—'
@@ -733,7 +904,7 @@ function plainText({
       ? `build sent as a word: ${(threed?.bodyType ?? '').trim() || 'none — the generator picks'}`
       : 'build: not applicable in the air',
     (threed?.fitOverride ?? '').trim()
-      ? `fit override: ${threed?.fitOverride} (every frame is badged)`
+      ? `fit override: ${threed?.fitOverride} (the result is badged)`
       : 'fit override: none',
     'not sent: references, moodboard, the flats, notes',
   );

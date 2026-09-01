@@ -221,7 +221,7 @@ export function ThreedInputStrip({
   return (
     <Section
       title='input — renders by view'
-      question='— 3D turns the renders, not the drawings: one render marked into each side'
+      question='— 3D is built from the renders, not the drawings: front is required, more sides are better'
       action={
         <span className='flex items-center gap-3'>
           <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -253,12 +253,22 @@ export function ThreedInputStrip({
                     <span className='text-labelColor'>no render marked</span>
                   </span>
                 }
-                lines={[
-                  'required',
-                  <span key='blocks' className='text-error'>
-                    blocks 3D
-                  </span>,
-                ]}
+                /* ═══ ОБЯЗАТЕЛЕН ФРОНТ, ОСТАЛЬНЫЕ ТРИ — ПОЛЬЗА, А НЕ УСЛОВИЕ (K-10/K-11) ═══════
+                   Красное «required · blocks 3D» стояло на КАЖДОЙ пустой стороне, пока 3D было
+                   поворотным столом и собиралось полным кругом. Провайдер строит объём из видов
+                   (`multi-view-to-3d`) и бесплатно отвергает ровно одно — отсутствие фронта.
+                   Ячейка, кричащая «blocks 3D» там, где ничего не блокируется, учит не читать
+                   красное: следующий раз человек так же пролистает и настоящий запрет. */
+                lines={
+                  side.view === 'front'
+                    ? [
+                        'required',
+                        <span key='blocks' className='text-error'>
+                          blocks 3D
+                        </span>,
+                      ]
+                    : ['optional', 'one more angle = a better model']
+                }
                 action={
                   /* ДВЕРЬ ЗДЕСЬ — «СДЕЛАТЬ РЕНДЕР», А НЕ «ПОМЕТИТЬ». Пометка живёт справа от линии,
                      на самой картинке, и она там одна на все четыре стороны; вторая дверь в углу
@@ -468,9 +478,11 @@ export function ThreedInputStrip({
       )}
 
       <Text size='micro' variant='label' component='p' className='normal-case'>
-        Left of the line — the four sides the turntable is actually built from, one render each.
-        Right of the line — every other render of this card; the ones you chose in FABRIC RENDER
-        come first. Marking one displaces the render that held the side; nothing is deleted.
+        Left of the line — the sides the model is actually built from, one render each. Only{' '}
+        <b>front</b> is required: a run without it is rejected before anything is charged, and every
+        further side you mark gives the model another angle to build from. Right of the line — every
+        other render of this card; the ones you chose in FABRIC RENDER come first. Marking one
+        displaces the render that held the side; nothing is deleted.
       </Text>
 
       {/* ЧТО ИМЕННО СДЕЛАЕТ ДВЕРЬ — СКАЗАНО ДО НАЖАТИЯ, а не после. Она ставит несколько сторон

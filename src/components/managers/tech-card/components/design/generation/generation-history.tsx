@@ -404,7 +404,12 @@ function RunTile({
         alt={handle}
         badge={badge}
         galleryGroup={galleryGroup}
-        className={cn('w-full', hidden && 'opacity-40')}
+        /* ПРИГЛУШАЕТСЯ СНИМОК, А НЕ ПЛИТКА (K-6). Класс стоял на всей плитке, и это было
+           безобидно ровно до тех пор, пока у скрытой плитки не появилось двери: прозрачность
+           наследуется и ребёнком не отменяется, так что `edit` выходил серым по белому около
+           1.6:1. Слово «hidden» под кадром состояние держит и без заливки. */
+        dim={hidden}
+        className='w-full'
         /* THE CUT IS OFFERED ON EVERY LIVE PICTURE, NOT ONLY ON A DECLARED COMPOSITE (T-8).
            `composite_views` is written by the server and is empty on every row today, so a door
            gated on it is a door nobody has ever seen — while the references block and the bench

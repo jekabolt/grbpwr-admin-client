@@ -11,6 +11,8 @@ import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MoodBoard } from './mood-board';
+import { OnModelStudio } from './onmodel';
+import { PatternStudio } from './pattern';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
 import { PickModeProvider, usePickMode } from './pick-mode';
@@ -213,12 +215,31 @@ export function StudioTab({
                   <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
               )}
+              {/* ═══ PATTERN — ТРЕТИЙ ГЕНЕРАТИВНЫЙ ЭКРАН, ПО ТОЙ ЖЕ СБОРКЕ (K-13) ═════════════
+                  Экран плюс ОБЩАЯ история прогонов — ровно как у рендера и 3D ниже, и не ради
+                  симметрии: `GenerationHistory` монтирует `useRunPolling`, то есть это ЕДИНСТВЕННОЕ
+                  место полосы, откуда перечитывается живой прогон. Вид без неё показывал бы
+                  «making a tile…» вечно — до тех пор, пока человек не тронет карточку сам.
+                  Лента при этом одна на карточку и показывает все рода: прогон-плитка стоит в ней
+                  теми же деньгами и тем же временем, что рендер, и заводить ей вторую историю
+                  значило бы завести второй ответ на вопрос «во что обошлась эта карточка». */}
+              {kind === 'pattern' && (
+                <>
+                  <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                </>
+              )}
               {/* У РЕНДЕРА И 3D СВОЙ ЭКРАН И ТА ЖЕ ИСТОРИЯ ПРОГОНОВ: прототип собирает их как
                   `studioRenderHtml() + generationHistoryHtml() + slotsHtml()`. Полки загрузок в
                   этих видах нет — принесённый руками файл кладут во флэт. */}
               {kind === 'render' && (
                 <>
-                  <RenderStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                  <RenderStudio
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    onGoToKind={setKind}
+                  />
                   <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
               )}
@@ -230,6 +251,17 @@ export function StudioTab({
                     disabled={readOnly}
                     onGoToKind={setKind}
                   />
+                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                </>
+              )}
+              {/* ═══ ON MODEL — ПЕРЕКРАС ФОТОГРАФИИ НА ЖИВОМ ЧЕЛОВЕКЕ (K-17) ══════════════════
+                  Ячейка полосы была МЁРТВОЙ и объясняла, почему такого экрана нет; теперь он есть,
+                  и объяснение снято вместе с механизмом (см. `kinds-strip.tsx`).
+                  История — та же и по той же причине, что у трёх соседей выше: без неё
+                  `useRunPolling` не смонтирован, и перекрас показывал бы `pending` бесконечно. */}
+              {kind === 'onmodel' && (
+                <>
+                  <OnModelStudio band={band} techCardId={techCardId} disabled={readOnly} />
                   <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
               )}

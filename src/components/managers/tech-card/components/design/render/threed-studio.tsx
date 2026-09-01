@@ -2,21 +2,19 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState, type JSX } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import { ViewSwitch } from 'ui/components/view-switch';
 
-import { SILHOUETTE_VIEWS } from '../views';
 import { useCardFit, useThreedDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow, LockBar } from './generate-row';
 import {
-  FRAME_CHOICES,
   PRESENTATIONS,
   fitChoices,
   threedGate,
+  threedRunViews,
   threedSides,
   turntableSourceIds,
   type Gate,
@@ -31,11 +29,11 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
 /**
  * THE 3D STUDIO — the turntable, and the four sides it is turned from.
  *
- * 3D TURNS THE RENDERS, NOT THE DRAWINGS. That single sentence is the whole shape of this screen:
- * its input strip lists RENDERS by view, not flats, and the screen is locked until all four sides
- * are marked AND come from ONE revision. The second half of that condition is the one worth stating
- * out loud — four sides of different revisions are four different colours, and a rotation stitched
- * out of them looks like a rotation right up until somebody notices the back is the wrong green.
+ * 3D IS BUILT FROM THE RENDERS, NOT FROM THE DRAWINGS. That single sentence is the whole shape of
+ * this screen: its input strip lists RENDERS by view, not flats, and the screen is locked until the
+ * FRONT is marked and every marked side comes from ONE revision. The second half of that condition
+ * is the one worth stating out loud — sides of different revisions are different colours, and a
+ * model stitched out of them looks right up until somebody notices the back is the wrong green.
  *
  * ⚠ «СТОРОНА» — ЭТО СЛОТ ВЕРСТАКА, А НЕ «ПОСЛЕДНИЙ РЕНДЕР» (V-14). Экран считал вход сам, из ленты
  * прогонов, а сервер собирал тот же прогон из слотов `kind: render` — два списка без единого общего
@@ -49,11 +47,15 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * photographs they want and a build when they only know the shape, and a run may state both.
  *
  * LOCKED IS A STATE OF THE SCREEN, NOT ITS ABSENCE. A missing side draws a dashed cell that says
- * `required · blocks 3D` and offers the way out, and the bar under the strip names every side that
- * is missing. A technologist must be able to see why 3D is not available without pressing anything.
+ * `required · blocks 3D` and offers the way out, and the bar under the strip names what is
+ * missing. A technologist must be able to see why 3D is not available without pressing anything.
+ *
+ * ⚠ ОБЯЗАТЕЛЬНА ОДНА СТОРОНА — ФРОНТ (K-10/K-11). Четыре требовались, пока это был поворотный
+ * стол; `multi-view-to-3d` строит объём из ВИДОВ, и бесплатный отказ провайдера ставится ровно на
+ * отсутствие фронта. Остальные три делают объём лучше и названы поощрением, а не условием.
  *
  * THE FIT OVERRIDE IS A STATED DEVIATION. It applies to this submission only, and the contract
- * stamps every frame it produces — the card stays the single place of truth about the garment's
+ * stamps whatever it produces — the card stays the single place of truth about the garment's
  * fit, which is why the override is worded as a badge rather than as a setting.
  *
  * ЗУМ ЗДЕСЬ ТОТ ЖЕ, ЧТО ВЕЗДЕ (T-8): плита объявляет кадр (`gallery`), а ряд собирает и показывает
@@ -126,7 +128,16 @@ export function ThreedStudio({
     return { ok: true };
   }, [input, draft.presentation, draft.modelId, draft.bodyType, draft.garmentSizeId]);
 
-  const shape = `${draft.frames} frame${draft.frames === 1 ? '' : 's'} · four marked sides`;
+  /**
+   * ЧТО БУДЕТ КУПЛЕНО — В ЧИСЛЕ ВИДОВ, А НЕ КАДРОВ (K-11). «12 frames» описывало поворотный стол,
+   * которого больше нет; покупается ОДИН объём, собранный из отмеченных сторон, и единственное
+   * число, которое человеку тут полезно, — сколько сторон он в него положил.
+   */
+  const marked = useMemo(() => threedRunViews(sides), [sides]);
+  const shape =
+    marked.length === 1
+      ? '1 model · from the front alone'
+      : `1 model · from ${marked.length} marked sides`;
 
   const fitOptions = useMemo(() => fitChoices(cardFit), [cardFit]);
 
@@ -139,7 +150,11 @@ export function ThreedStudio({
       kind: 'threed',
       ask: '',
       params: {
-        views: [...SILHOUETTE_VIEWS],
+        // ТОЛЬКО ОТМЕЧЕННЫЕ СТОРОНЫ. Здесь стоял полный список четырёх видов — заявление, что
+        // прогон просит все четыре, — и оно перестало быть правдой, когда обязательным остался
+        // один фронт: `views` замораживается в истории как «что просили», и четыре вида над двумя
+        // плитами были бы записью о запросе, которого не было.
+        views: marked,
         // Деталей этот прогон не просит, и список пуст ЯВНО: сервер сверяет его длину с числом
         // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
         // список, только молча.
@@ -147,7 +162,10 @@ export function ThreedStudio({
         layout: '',
         colour: undefined,
         threed: {
-          frames: draft.frames,
+          // ЯВНЫЙ НОЛЬ — «не сказано» (K-11). Поле контракта живо, органа за ним больше нет, и
+          // отправлять 12 после того, как никто не поворачивает вещь на 12 кадров, значило бы
+          // заморозить в истории число, которого никто не просил.
+          frames: 0,
           presentation: draft.presentation,
           modelId: draft.presentation === 'model' ? draft.modelId : 0,
           garmentSizeId: draft.presentation === 'model' ? draft.garmentSizeId : 0,
@@ -185,26 +203,10 @@ export function ThreedStudio({
         onGoToKind={onGoToKind}
       />
 
-      <Section title='generation — 3D' question='— frames, and what body it sits on'>
+      <Section title='generation — 3D' question='— what body it sits on, and how it is worn'>
         {/* ТОЛЬКО ПРИЧИНЫ МЕНЮ: то, чего не хватает на входе, уже названо под входной полосой, и
             повторять это здесь значило бы показать один отказ дважды. */}
         {input.ok && !gate.ok && <LockBar reason={gate.reason} />}
-
-        <FieldRow label='frames'>
-          <ChipRow>
-            {FRAME_CHOICES.map((choice) => (
-              <Chip
-                key={choice.frames}
-                selected={draft.frames === choice.frames}
-                pressed={draft.frames === choice.frames}
-                onClick={disabled ? undefined : () => patch({ frames: choice.frames })}
-              >
-                {choice.label}
-              </Chip>
-            ))}
-          </ChipRow>
-          <Hint>each frame is its own picture in the history</Hint>
-        </FieldRow>
 
         <FieldRow label='presentation'>
           {/* A SEGMENTED STRIP, NOT A SELECT. Both options are on screen at all times, so the strip
@@ -220,7 +222,7 @@ export function ThreedStudio({
           <Hint>
             {draft.presentation === 'model'
               ? 'a figure wears it — say whose body, or what build, below'
-              : 'no figure — the garment turns alone'}
+              : 'no figure — the garment stands alone'}
           </Hint>
         </FieldRow>
 
@@ -289,12 +291,12 @@ export function ThreedStudio({
             />
           </div>
           {draft.fitOverride ? (
-            <Pill tone='attention'>≠ card — every frame will carry the badge</Pill>
+            <Pill tone='attention'>≠ card — the result will carry the badge</Pill>
           ) : (
             <Pill>from classification</Pill>
           )}
           <Hint>
-            a one-run override for the turntable only — the card stays the single place of truth
+            a one-run override for this submission only — the card stays the single place of truth
           </Hint>
         </FieldRow>
 

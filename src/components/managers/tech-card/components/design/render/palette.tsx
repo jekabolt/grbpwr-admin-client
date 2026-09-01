@@ -6,10 +6,8 @@ import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import { ColourPicker } from '../assets/colour-picker';
 import {
   ASSETS_PER_CARD_MAX,
   assetIsPattern,
@@ -20,6 +18,7 @@ import {
   partsOfAsset,
 } from '../assets/model';
 import { useColourDraft, type ColourDraft } from './drafts';
+import { ColourStatementRow } from './colour-statement';
 import { FieldRow, Hint, Swatch } from './field-row';
 import {
   FABRIC_AUTHORITY,
@@ -27,7 +26,6 @@ import {
   colourSubtitle,
   colourSwatchHex,
   fabricStatement,
-  hexIsPaintable,
 } from './model';
 
 /**
@@ -66,71 +64,12 @@ import {
  * a technologist rendering a colour the dyehouse has already rejected. Absent beats guessed.
  */
 
-/** The block a dictionary colour is picked out of. Wrapped so it can scroll on a narrow screen. */
-function DictionaryGrid({
-  code,
-  disabled,
-  onPick,
-}: {
-  code: string;
-  disabled?: boolean;
-  onPick: (code: string, hex: string) => void;
-}): JSX.Element {
-  const { dictionary, loading } = useDictionary();
-  const colors = (dictionary?.colors ?? []).filter((c) => !c.archived && (c.code ?? '').trim());
-
-  if (loading && !colors.length) {
-    return (
-      <Text size='micro' variant='inactive' component='span'>
-        loading the colour dictionary…
-      </Text>
-    );
-  }
-  if (!colors.length) {
-    return (
-      <Text size='micro' variant='inactive' component='span' className='normal-case'>
-        The colour dictionary is empty on this server. Type a hex beside it, or leave the colour to
-        the fabric photo.
-      </Text>
-    );
-  }
-
-  const current = (code ?? '').trim().toUpperCase();
-  return (
-    <div className='flex flex-wrap gap-1.5'>
-      {colors.map((colour) => {
-        const value = (colour.code ?? '').trim().toUpperCase();
-        const hex = (colour.hex ?? '').trim();
-        const selected = value === current;
-        return (
-          <button
-            key={value}
-            type='button'
-            disabled={disabled}
-            aria-pressed={selected}
-            title={`${value}${colour.name ? ` · ${colour.name}` : ''}${hex ? ` · ${hex}` : ''}`}
-            onClick={() => onPick(value, hex)}
-            className={cn(
-              'flex w-[34px] shrink-0 flex-col items-center gap-0.5 p-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-              selected ? 'bg-textColor' : 'hover:bg-bgZebra',
-              disabled && 'cursor-not-allowed opacity-50',
-            )}
-          >
-            <Swatch hex={hex} size={22} />
-            <Text
-              size='nano'
-              variant='uppercase'
-              component='span'
-              className={selected ? '!text-bgColor' : 'text-labelColor'}
-            >
-              {value}
-            </Text>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+/* ─── СЕТКА СЛОВАРЯ ЖИЛА ЗДЕСЬ И ПЕРЕЕХАЛА В `colour-statement.tsx` ───────────────────────────
+   Приватная `DictionaryGrid` была недоступна второму экрану, и волна K-17 честно скопировала её
+   себе — после чего копии разошлись за неполные сутки: у одной появился `data-colour-code`, у
+   другой осталась своя фраза про пустой словарь. Список одного словаря, живущий дважды, расходится
+   МОЛЧА. Орган теперь один; различие экранов сказано двумя пропами (`hint`, `emptyNote`), а не
+   двумя телами функции. */
 
 /* ─── СТАРЫЙ КВАДРАТ НАД НАТИВНЫМ `<input type='color'>` СНЯТ ЦЕЛИКОМ (V-5) ────────────────────
    Он делал ровно одно: прятал хром операционной системы под нашей рамкой, — и всё, что человек
@@ -328,19 +267,6 @@ export function Palette({
   const { dictionary } = useDictionary();
   const colors = dictionary?.colors;
 
-  /**
-   * ЦВЕТА, КОТОРЫМИ ЭТА КАРТОЧКА УЖЕ РЕНДЕРИЛАСЬ. Это и есть «совместимость с сохранёнными
-   * рецептами» из V-5: рецепт возвращается одним кликом внутри пикера, а не пересобирается по
-   * памяти. Полоса привозит их уже дедуплицированными и свежими первыми.
-   */
-  const recentColours = useMemo(
-    () =>
-      (band.colourRecipes ?? [])
-        .map((r) => ({ hex: (r.hex ?? '').trim(), code: (r.code ?? '').trim() }))
-        .filter((r) => hexIsPaintable(r.hex)),
-    [band.colourRecipes],
-  );
-
   return (
     <div>
       <GroupLabel
@@ -377,61 +303,24 @@ export function Palette({
       {/* ── 1. THE CLOTHS — the shelf, not a file picker. */}
       <ClothRow band={band} disabled={disabled} state={state} />
 
-      {/* ── 2. THE PICKED COLOUR — dictionary code and hex are ONE statement, on one line. */}
-      <FieldRow label='colour'>
-        {/* V-5, дословно: «сделать нормальный колор пикер … а то сейчас он не очень». Здесь стоял
-            нативный `<input type='color'>`, открывавший пикер ОПЕРАЦИОННОЙ СИСТЕМЫ — чужое окно,
-            в котором нет ни словаря колорвеев, ни цветов, которыми эта карточка уже печаталась.
-            Теперь это `ColourPicker`: квадрат и полоса тона, поле HEX, пипетка там, где браузер её
-            даёт, и рецепты ЭТОЙ карточки одним кликом. Довод целиком — в шапке того файла. */}
-        <ColourPicker
-          hex={recipe.hex ?? ''}
-          disabled={disabled}
-          recent={recentColours}
-          onPick={(hex) => state.patch({ hex })}
-        />
-        <div className='w-[100px]'>
-          <Input
-            name='design-colour-hex'
-            value={recipe.hex ?? ''}
-            disabled={disabled}
-            placeholder='#4a5a3c'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              state.patch({ hex: e.target.value })
-            }
-          />
-        </div>
-        {!disabled && stated.colour && (
-          <Button variant='secondary' size='xs' onClick={() => state.clear('colour')}>
-            clear
-          </Button>
-        )}
-        {hexIsPaintable(recipe.hex) && !(recipe.code ?? '').trim() && (
-          <Pill tone='attention'>visualisation override — cannot become canonical</Pill>
-        )}
-        {/* THE DICTIONARY IS THE SAME STATEMENT AND THEREFORE THE SAME ROW. It wraps onto its own
-            line under the picker (the row is `flex-wrap`, this child is full-width) instead of
-            opening a second ruled line with an empty label column: three statements, three rules,
-            so «which of these did I fill in» is answerable by running an eye down one column.
-            ⚠ THE INDENT IS THE LABEL COLUMN, MEASURED AND NOT GUESSED — `FieldRow`'s label is 92px
-            wide with an 8px gap after it. Without it the wrapped line starts at the block's left
-            edge, under the word COLOUR rather than under the control it belongs to, and the swatch
-            grid reads as a separate section that lost its heading. */}
-        <div className='w-full space-y-1 pl-[100px]'>
-          <DictionaryGrid
-            code={recipe.code ?? ''}
-            disabled={disabled}
-            // A dictionary colour states BOTH halves: the code the prompt names and the hex the
-            // screen paints. Picking one leaves the photo and the words exactly where they are.
-            onPick={(code, hex) => state.patch({ code, hex })}
-          />
-          <Hint>
-            The colour goes to the model as a name and a hex together, and it overrides the colour
-            of the photo above. Picking one states nothing about the style — a colourway is signed
-            off by a lab dip, not by a render.
-          </Hint>
-        </div>
-      </FieldRow>
+      {/* ── 2. THE PICKED COLOUR — dictionary code and hex are ONE statement, on one line.
+          ⚠ ОРГАН ОБЩИЙ С ON MODEL (`ColourStatementRow`), И РАЗЛИЧИЕ ЭКРАНОВ — В ДВУХ ПРОПАХ.
+          `hint` говорит, что с цветом СДЕЛАЮТ (здесь — покрасят чертёж), `emptyNote` — есть ли на
+          этом экране третий путь назвать цвет. Здесь он есть: фотография ткани. В перекрасе его
+          нет, и та же фраза была бы советом, которому нельзя последовать. */}
+      <ColourStatementRow
+        band={band}
+        draft={state}
+        disabled={disabled}
+        emptyNote='The colour dictionary is empty on this server. Type a hex beside it, or leave the colour to the fabric photo.'
+        hint={
+          <>
+            The colour goes to the model as a name and a hex together, and it overrides the colour of
+            the photo above. Picking one states nothing about the style — a colourway is signed off
+            by a lab dip, not by a render.
+          </>
+        }
+      />
 
       {/* ── 3. THE WORDS — the lowest rank, and a legal statement entirely on its own. */}
       <FieldRow label='in words'>

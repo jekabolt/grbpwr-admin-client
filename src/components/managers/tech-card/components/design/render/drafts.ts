@@ -9,7 +9,7 @@ import { EMPTY_RECIPE, type Presentation } from './model';
  * THE SUBMISSION DRAFTS — what is about to be asked for, and nothing else.
  *
  * A draft is NOT card data and never becomes any. It is the state of a menu: the colour a render
- * would be given, the frames a turntable would be turned in. It lives in the studio, dies with the
+ * would be given, the body a 3D asset is asked to sit on. It lives in the studio, dies with the
  * tab, and reaches the server exactly once — inside `StartDesignRun.params`, which the run then
  * freezes as its own history. Storing any of it on the card would put a second, competing answer to
  * «what colour is this style» next to the colourways, which is the one thing the palette's own
@@ -111,7 +111,12 @@ export function useColourDraft(band: GetDesignBandResponse): ColourDraft {
 /* ─────────────────────────── the 3D draft ─────────────────────────── */
 
 export type ThreedDraft = {
-  frames: number;
+  /**
+   * `frames` СНЯТ ОТСЮДА (K-11) вместе со своим рядом выбора и своей строкой описи. Довод целиком
+   * — в `./model.ts`, на месте покойного `FRAME_CHOICES`: 3D строится из ВИДОВ, промежуточной
+   * сущности «кадр» на этом пути нет, и вопрос «сколько кадров» перестал иметь ответ. Черновик
+   * его больше не держит, поэтому подставить его молча неоткуда.
+   */
   presentation: Presentation;
   /** 0 = no model chosen. A real id, from the models dictionary. */
   modelId: number;
@@ -135,7 +140,6 @@ export type ThreedDraftState = {
 };
 
 const INITIAL_THREED: ThreedDraft = {
-  frames: 12,
   presentation: 'air',
   modelId: 0,
   garmentSizeId: 0,

@@ -86,6 +86,7 @@ import {
   type ExpandFill,
 } from './vector-expand';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
+import { healMask } from './vector-heal';
 import {
   COPY_NUDGE,
   copyInsideSelection,
@@ -235,6 +236,7 @@ type Tool =
   | 'erase'
   | 'stamp'
   | 'fill'
+  | 'heal'
   | 'lasso'
   | 'pan';
 
@@ -284,6 +286,7 @@ const TOOL_LABEL: Record<Tool, string> = {
   erase: 'erase',
   stamp: 'stamp',
   fill: 'fill',
+  heal: 'heal',
   lasso: 'lasso',
   pan: 'pan',
 };
@@ -299,6 +302,8 @@ const TOOL_KEY: Record<Tool, string> = {
   erase: 'e',
   stamp: 's',
   fill: 'g',
+  // `j` — та же клавиша, что у лечащей кисти в фотошопе, и она здесь свободна.
+  heal: 'j',
   lasso: 'w',
   pan: 'h',
 };
@@ -319,6 +324,8 @@ const TOOL_HINT: Record<Tool, string> = {
     'rub away everything under the nib — the pixels go to transparency, the photo included, and the drawn lines are cut through. Lines are only cut at full opacity (a line cannot be half-erased), never while the lines layer is hidden, and never outside an active area',
   stamp: 'copy PIXELS from the source to under your hand, as in photoshop',
   fill: 'flood the area under the cursor with the ink in hand — an active area holds it in',
+  heal:
+    'brush over a spot — a mole, a speck, a stray mark — and let go: it grows over with the texture around it. The colour in hand is not used; opacity is how hard it heals. An active area holds it in. When nothing nearby matches, that spot is smoothed instead of grown, and the tool says so',
   lasso: 'draw an area — it holds the raster tools in and cuts the lines at its edge',
   pan: 'move the sheet',
 };
@@ -333,7 +340,7 @@ const TOOL_HINT: Record<Tool, string> = {
  */
 const TOOL_BANDS: { material: Material; label: string; tools: Tool[] }[] = [
   { material: 'lines', label: 'lines', tools: ['line', 'freehand', 'curve', 'select', 'clone'] },
-  { material: 'pixels', label: 'pixels', tools: ['paint', 'erase', 'stamp', 'fill'] },
+  { material: 'pixels', label: 'pixels', tools: ['paint', 'erase', 'stamp', 'fill', 'heal'] },
   { material: 'view', label: 'area & view', tools: ['lasso', 'pan'] },
 ];
 
@@ -348,7 +355,30 @@ const isRasterTool = (t: Tool): t is 'paint' | 'erase' | 'stamp' =>
  * «нужен ли растр» спрашивается отдельным предикатом — иначе она поехала бы по пути scratch→stage,
  * которого у неё нет.
  */
-const needsRaster = (t: Tool): boolean => isRasterTool(t) || t === 'fill';
+const needsRaster = (t: Tool): boolean => isRasterTool(t) || t === 'fill' || t === 'heal';
+
+/**
+ * МАЖУЩИЙ ЖЕСТ — те, у кого есть протяжка по холсту: буфер мазка копится в `scratch`, превью
+ * показывает след под рукой.
+ *
+ * ЛЕЧИЛКА ЗДЕСЬ, НО НЕ В `isRasterTool`, И ЭТО НЕСУЩЕЕ РАЗЛИЧИЕ. `isRasterTool` гейтит путь
+ * scratch → просеять → положить краску (`endRasterGesture`); лечилка краски не кладёт вовсе,
+ * буфер ей нужен только как НАКОПИТЕЛЬ МАСКИ — «вот сюда я мазнул». Поставь её в `isRasterTool`,
+ * и отпускание руки записало бы тёмный мазок превью в документ как живопись.
+ */
+const smears = (t: Tool): boolean => isRasterTool(t) || t === 'heal';
+
+/**
+ * ПРЕВЬЮ ЛЕЧИЛКИ — ФИКСИРОВАННОЕ, и оба числа тут не вкус.
+ *
+ * Цвет в руке лечилка не использует вовсе (движок читает только альфу маски), поэтому красить
+ * превью им значило бы прятать след, когда в руке белое: человек вёл бы по белой ткани белым по
+ * белому и не видел, где мажет. Непрозрачность тоже своя: у лечилки ползунок непрозрачности — это
+ * СИЛА ЛЕЧЕНИЯ, а не видимость следа, и на 10% силы след был бы почти невидим ровно тогда, когда
+ * целиться надо точнее всего.
+ */
+const HEAL_PREVIEW_INK = '#00000080';
+const HEAL_PREVIEW_ALPHA = 0.5;
 
 /** Инструмент, множащий ЛИНИИ круглым нибом. Резчик ушёл в ластик — см. `TOOL_BANDS`. */
 const isLineNib = (t: Tool): t is 'clone' => t === 'clone';
@@ -359,8 +389,8 @@ const isLineNib = (t: Tool): t is 'clone' => t === 'clone';
  * а не ластик от штампа. Пять чисел на пять круглых кончиков были бы пятью ручками, которые человек
  * крутит в одну и ту же сторону.
  */
-const isNibTool = (t: Tool): t is 'clone' | 'paint' | 'erase' | 'stamp' =>
-  isRasterTool(t) || isLineNib(t);
+const isNibTool = (t: Tool): t is 'clone' | 'paint' | 'erase' | 'stamp' | 'heal' =>
+  isRasterTool(t) || isLineNib(t) || t === 'heal';
 
 /** Инструменты, берущие ИСТОЧНИК alt-кликом. */
 const isSourceTool = (t: Tool): t is 'clone' | 'stamp' => t === 'clone' || t === 'stamp';
@@ -1483,7 +1513,7 @@ export function VectorModal({
     const layer = rasterRef.current;
     if (!layer) return;
     clearGesture(layer);
-    liveRef.current = { mode: paintModeOf(t), opacity: opacity / 100 };
+    liveRef.current = { mode: paintModeOf(t), opacity: t === 'heal' ? HEAL_PREVIEW_ALPHA : opacity / 100 };
   };
 
   /** Продолжение жеста: в буфер уходит ТОЛЬКО НОВЫЙ отрезок следа, а не весь след заново. */
@@ -1493,7 +1523,7 @@ export function VectorModal({
     const nibSpec = {
       r: nibRadius(nib, layer),
       hardness: hardness / 100,
-      ink: readInk(ink) ?? DEFAULT_INK,
+      ink: t === 'heal' ? HEAL_PREVIEW_INK : readInk(ink) ?? DEFAULT_INK,
     };
     if (t === 'stamp') {
       const off = stampOffset.current;
@@ -1863,7 +1893,7 @@ export function VectorModal({
       void fillAt(at);
       return;
     }
-    if (isRasterTool(tool)) {
+    if (smears(tool)) {
       // Смещение штампа фиксируется ПЕРВОЙ точкой мазка и держится до следующего alt-клика — это и
       // есть режим Aligned, тот, что у фотошопа стоит по умолчанию: несколько мазков продолжают
       // ОДИН отпечаток, а не перерисовывают его от источника каждый раз.
@@ -1951,7 +1981,7 @@ export function VectorModal({
       const prev = traceRef.current;
       // ПИКСЕЛИ КЛАДУТСЯ ПРЯМО СЕЙЧАС, ОТРЕЗКОМ. Копить след и красить его целиком на отпускании
       // значило бы рисовать вслепую: мазок появлялся бы после того, как рука его закончила.
-      if (isRasterTool(tool)) growRasterGesture(tool, prev[prev.length - 1], at);
+      if (smears(tool)) growRasterGesture(tool, prev[prev.length - 1], at);
       putTrace(tool === 'line' ? [prev[0], at] : [...prev, at]);
     }
   };
@@ -2000,12 +2030,15 @@ export function VectorModal({
       }
       return;
     }
-    if (isRasterTool(tool) || (gestureToolRef.current && isRasterTool(gestureToolRef.current))) {
+    if (smears(tool) || (gestureToolRef.current && smears(gestureToolRef.current))) {
       putTrace(null);
       const started = gestureToolRef.current ?? tool;
       gestureToolRef.current = null;
       if (frozen) return;
-      endRasterGesture(started, liveTrace);
+      // РАЗВИЛКА ПО ИНСТРУМЕНТУ, КОТОРЫМ ЖЕСТ НАЧАЛСЯ, а не по тому, что в руке сейчас, — по тому
+      // же доводу, что у `gestureToolRef` вообще: клавиши инструментов живые всё время.
+      if (started === 'heal') void healGesture();
+      else endRasterGesture(started, liveTrace);
       return;
     }
     if (isLineNib(tool)) {
@@ -2440,6 +2473,80 @@ export function VectorModal({
    * у заливки нет жеста, и путь scratch→stage ей нечем кормить. Активная область держит её внутри —
    * то же правило, что у всех пиксельных глаголов.
    */
+  /**
+   * ═══ ЛЕЧЕНИЕ — КОНЕЦ МАЗКА ЛЕЧИЛКИ (Q-14) ═══════════════════════════════════════════════════
+   *
+   * Владелец: «добавить тул Spot Healing Brush Tool как в фотошопе».
+   *
+   * СВОЙ ГЛАГОЛ, А НЕ ВЕТКА В `endRasterGesture`. Тот кладёт БУФЕР МАЗКА в документ как краску;
+   * здесь буфер — не краска, а МАСКА: «вот сюда я мазнул, зарасти это». Слить их значило бы
+   * записать тёмный след превью в фотографию.
+   *
+   * ЛЕЧИТ НА ОТПУСКАНИИ, А НЕ ПОД РУКОЙ, и это тот же выбор, что у фотошопа: донора ищут по всему
+   * пятну целиком, а пятно ещё рисуется. Лечить каждый отрезок отдельно значило бы искать донора
+   * для куска мазка и склеивать заплату из несогласованных кусков.
+   *
+   * ПОРЯДОК ЛЕНТЫ — ДОСЛОВНО ТОТ ЖЕ, ЧТО У ЗАЛИВКИ: стереть буфер жеста, разметить коробку,
+   * записать шаг, стереть снова. Лента снимает «как было» ПО РАЗМЕЧЕННОЙ КОРОБКЕ и делает это ДО
+   * применения, поэтому буфер обязан уйти раньше разметки — иначе в снимок «как было» попал бы
+   * тёмный след превью, и ⌘Z вернул бы его на картинку.
+   */
+  const healGesture = async () => {
+    const layer = rasterRef.current;
+    if (!layer || frozenRef.current) return;
+    const ctx = rasterCtx(layer.doc);
+    const src = ctx.getImageData(0, 0, layer.w, layer.h);
+    // МАСКА МАЗКА — из буфера жеста, той же функцией, какой читается маска выделения. Второго
+    // построителя следа здесь нет нарочно: два пути дали бы два разных ответа на вопрос «где
+    // прошла рука», и расходились бы они молча.
+    const stroke = selectionAlpha(rasterCtx(layer.scratch).getImageData(0, 0, layer.w, layer.h));
+
+    let selAlpha: Uint8Array | null = null;
+    const sel = activeSel !== null ? sels[activeSel] : null;
+    if (sel) {
+      const mask = selectionMask(layer, sel.pts, sel.feather);
+      if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
+    }
+
+    setBusy('healing…');
+    let res;
+    try {
+      res = healMask(src, stroke, { strength: opacity / 100, selection: selAlpha });
+    } finally {
+      setBusy(null);
+    }
+
+    if (!res.rect) {
+      clearGesture(layer);
+      paintView();
+      showMessage('nothing under the brush to heal', 'error');
+      return;
+    }
+    const r = res.rect;
+    clearGesture(layer);
+    markRect(layer, [r.x, r.y, r.x + r.w - 1, r.y + r.h - 1]);
+    const changed = timeline.current.recordGesture(layer, () =>
+      ctx.putImageData(res.image, 0, 0, r.x, r.y, r.w, r.h),
+    );
+    clearGesture(layer);
+    paintView();
+    if (!changed) return;
+    rasterDirtyRef.current = true;
+    setRasterDirty(true);
+    bumpTl();
+    // ПОДМЕНА НАЗЫВАЕТ СЕБЯ. Пятно, которому не нашлось похожего места рядом, заглаживается
+    // гладко — результат ВИДИМО другой (мыло вместо зерна), и человек, не предупреждённый об
+    // этом, спишет разницу на кривой инструмент. Молчать здесь дешевле и хуже.
+    if (res.donors < res.spots) {
+      showMessage(
+        res.donors === 0
+          ? 'no matching texture nearby — the spot was smoothed over instead of grown'
+          : `${res.spots - res.donors} of ${res.spots} spots had no matching texture nearby and were smoothed over`,
+        'error',
+      );
+    }
+  };
+
   const fillAt = async (at: [number, number]) => {
     if (frozenRef.current) return;
     const layer = await ensureRaster();

@@ -1,11 +1,19 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 
-/** Три представления, между которыми переключается студия. `state.kind` прототипа. */
-export type DesignKind = 'flat' | 'render' | 'threed';
+/**
+ * Представления, между которыми переключается студия. `state.kind` прототипа.
+ *
+ * `pattern` ДОБАВЛЕН ВОЛНОЙ K-13 («вкладка паттерн криейшен между FLAT — SHEET и FABRIC RENDER»).
+ * Он член ЭТОГО союза, а не отдельный экран рядом: полоса представлений — единственное место,
+ * которое знает словарь видов, и вкладка, не названная в нём, была бы вкладкой, до которой нельзя
+ * дойти. Читатели союза (`history-recall.ts`) сводят неизвестный вид к `flat` ветками `else`, и
+ * `recallTargetKind` никогда не возвращает `pattern` — прогон-плитка не имеет входа, в который
+ * можно «кинуть» картинки, поэтому рекол ему не предлагается.
+ */
+export type DesignKind = 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel';
 import { cn } from 'lib/utility';
-import { useState, type JSX } from 'react';
+import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
@@ -49,14 +57,16 @@ import { fabricRenderGate } from './render';
  * dead end with a way round it is a working screen and a dead end without one is a bug report.
  */
 
-/** What a dead representation says when it is asked. Sentence case: this is prose, not a label. */
-const INERT_REASON = {
-  onModel:
-    'On-model pictures are not made on this card. Shoot the garment or take the picture from the ' +
-    'shoot, and bring the file in through the slot it belongs to.',
-} as const;
+/* ─── МЁРТВЫХ ПРЕДСТАВЛЕНИЙ В ЭТОМ РЯДУ БОЛЬШЕ НЕТ ────────────────────────────────────────────
+   Здесь стоял `INERT_REASON` с единственным членом — «on-model pictures are not made on this
+   card» — и весь механизм вокруг него: `InertKey`, состояние последнего заданного вопроса и
+   записка под полосой. Волна K-17 сделала это представление ЖИВЫМ (перекрас по фотографии
+   модели), и объяснение, почему его нельзя сделать, стало ложью на экране.
 
-type InertKey = keyof typeof INERT_REASON;
+   Механизм снят целиком, а не оставлен пустым: словарь без членов — это приглашение завести
+   второе мёртвое представление вместо того, чтобы его построить. Появится настоящая причина —
+   вернётся вместе со своей причиной. Проп `inert`/`onInert` у `RepCell` жив: он про ячейку, а
+   не про этот ряд. */
 
 /**
  * The cell metrics, shared so the live cell and the dead one sit on exactly one baseline. NOTE
@@ -224,10 +234,6 @@ export function KindsStrip({
   onKindChange?: (kind: DesignKind) => void;
 }): JSX.Element {
   const form = useFormContext();
-  // The reason last asked for, kept until it is dismissed. A toast would take the answer away
-  // again while the eye was still on the control that raised the question.
-  const [asked, setAsked] = useState<InertKey | null>(null);
-
   // ЧИСЛО УКАЗАНИЙ — ЖИВОЕ. Читается прямо из формы, поэтому меняется в тот же миг, что и лист.
   // (Здесь же читалась ВЕРСИЯ листа — «v3» перед числом выносок. Версии снесены целиком, вместе
   // с бэкендом, и подпись осталась при том единственном, что у неё было живого: указания на
@@ -240,7 +246,33 @@ export function KindsStrip({
   const pictures = (band.runs ?? []).flatMap((r) => r.pictures ?? []);
   const renders = pictures.filter((p) => p.kind === 'render' && !p.hiddenAt).length;
   const turns = pictures.filter((p) => p.kind === 'threed' && !p.hiddenAt).length;
-  const renderSub = renders ? `${renders} render${renders === 1 ? '' : 's'}` : 'none yet';
+  /**
+   * ПЕРЕКРАС ОБЪЯВЛЯЕТ СЕБЯ РЕНДЕРОМ, И ПОТОМУ ЕГО НАДО СЧИТАТЬ ЧЕРЕЗ ПРОГОН, А НЕ ЧЕРЕЗ РОД
+   * КАРТИНКИ. Вывод ON MODEL приходит с `picture.kind === 'render'` — тем же словом, что и
+   * фабрик-рендер, — так что без чтения рода ПРОГОНА обе ячейки называли бы одно и то же число
+   * дважды: «fabric render · 7 renders» включало бы перекрашенные фотографии, которых
+   * фабрик-рендер не делал.
+   *
+   * ВЫЧИТАЕТСЯ ЗДЕСЬ, А НЕ ПРИБАВЛЯЕТСЯ ТАМ: ряд отвечает на вопрос «сколько их уже есть», и
+   * картинка, посчитанная в двух ячейках, делает сумму ряда больше, чем картинок в полосе.
+   */
+  const recolours = pictures.filter(
+    (p) =>
+      p.kind === 'render' &&
+      !p.hiddenAt &&
+      (band.runs ?? []).find((r) => r.id === p.runId)?.kind === 'recolor',
+  ).length;
+  const fabricRenders = Math.max(0, renders - recolours);
+  const renderSub = fabricRenders
+    ? `${fabricRenders} render${fabricRenders === 1 ? '' : 's'}`
+    : 'none yet';
+  const onModelSub = recolours ? `${recolours} recoloured` : 'none yet';
+  /* ПЛИТКИ СЧИТАЮТСЯ ТЕМ ЖЕ ПРАВИЛОМ, ЧТО И СОСЕДИ ПО РЯДУ, — по роду самой картинки: полоса
+     отвечает на вопрос «сколько их уже есть», и второй способ счёта в одном ряду читался бы как
+     разное утверждение о разных ячейках. Плитка объявляет `kind = "pattern"` собственным полем
+     контракта, ровно затем, чтобы не считаться ни флэтом, ни рендером. */
+  const tiles = pictures.filter((p) => p.kind === 'pattern' && !p.hiddenAt).length;
+  const patternSub = tiles ? `${tiles} tile${tiles === 1 ? '' : 's'}` : 'none yet';
   /**
    * ═══ ПОСЛЕДОВАТЕЛЬНОСТЬ ФЛЭТЫ → РЕНДЕР → 3D, ВИДНАЯ НА ПОЛОСЕ (W-13) ════════════════════════
    *
@@ -291,6 +323,16 @@ export function KindsStrip({
             onSelect={onKindChange && (() => onKindChange('flat'))}
             className={SHARE}
           />
+          {/* PATTERN СТОИТ МЕЖДУ ЛИСТОМ И РЕНДЕРОМ, И ЭТО МЕСТО НАЗВАЛ ВЛАДЕЛЕЦ (K-13): «между
+              вкладкой FLAT — SHEET и FABRIC RENDER». Порядок ряда — порядок работы: чертёж, потом
+              ткань, которой его покроют, потом покрытый рендер, потом поворот. */}
+          <RepCell
+            name='pattern'
+            sub={patternSub}
+            active={kind === 'pattern'}
+            onSelect={onKindChange && (() => onKindChange('pattern'))}
+            className={cn(SHARE, 'border-l border-hairline')}
+          />
           <RepCell
             name='fabric render'
             sub={renderSub}
@@ -308,36 +350,15 @@ export function KindsStrip({
           />
           <RepCell
             name='on model'
-            sub='not made here'
-            inert={INERT_REASON.onModel}
-            onInert={() => setAsked('onModel')}
+            sub={onModelSub}
+            active={kind === 'onmodel'}
+            onSelect={onKindChange && (() => onKindChange('onmodel'))}
             className={cn(SHARE, 'border-l border-hairline')}
           />
           {/* «prompt profile» СНЯТА (K-18) — довод в шапке файла. Ряд из четырёх делит ширину
               ровно, без ячейки на отшибе, поэтому `ASIDE` тоже ушёл: он существовал только для неё. */}
         </div>
       </TooltipProvider>
-      {/* `bg-bgColor` on the note is required, not cosmetic: it sits on the grey page ground
-          rather than inside a block, and a bordered box without a fill lets the ground through
-          its own text. */}
-      {asked && (
-        <CalloutBox tone='note' className='mt-1.5 bg-bgColor'>
-          <div className='flex items-start gap-2'>
-            <Text size='micro' component='span' className='min-w-0 flex-1'>
-              {INERT_REASON[asked]}
-            </Text>
-            <button
-              type='button'
-              onClick={() => setAsked(null)}
-              className='shrink-0 uppercase text-labelColor hover:text-textColor focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-            >
-              <Text size='nano' variant='uppercase' tracking='label' component='span'>
-                dismiss
-              </Text>
-            </button>
-          </div>
-        </CalloutBox>
-      )}
     </div>
   );
 }

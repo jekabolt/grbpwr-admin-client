@@ -88,7 +88,22 @@ export function isFlatCandidate(
   // split first. Same refusal the bench makes, for the same reason.
   if ((picture.compositeViews ?? []).length > 0) return false;
   const kind = runKindOf(band, picture) || declaredKind(picture);
-  return kind !== 'render' && kind !== 'threed';
+  // ═══ `recolor` ДОБАВЛЕН СЮДА ВОЛНОЙ K-17 ══════════════════════════════════════════════════
+  //
+  // Перекрашенный снимок — ВЫВОД ГЕНЕРАТИВНОЙ МАШИНЫ, то есть ровно то «положительное
+  // свидетельство», по которому этот предикат и отказывает. Без строки ниже он попадал бы в
+  // правую половину полосы «input — flats of this card» как законный чертёж — а это фотография
+  // вещи на живом человеке, и отдать её фабрик-рендеру значило бы просить перерисовать снимок
+  // как флэт.
+  //
+  // ⚠ ОН НЕ ЛОВИТСЯ РОДОМ КАРТИНКИ, И ЭТО НЕ МЕЛОЧЬ: вывод рекола объявляет `kind: "render"`
+  // собственным полем, поэтому отказывает ему ТОЛЬКО чтение рода ПРОГОНА (`runKindOf`) —
+  // в точности то, ради чего эта функция читает прогон первым.
+  //
+  // СОСЕДНИЙ СЛУЧАЙ, КОТОРЫЙ ЗДЕСЬ НЕ ЗАКРЫТ И ПРИНАДЛЕЖИТ ДРУГОЙ ВОЛНЕ: `pattern` (K-13).
+  // Плитка объявляет собственный род и потому уже отсеивается родом картинки, но не родом
+  // прогона; владельцу того экрана стоит решить, дописывать ли сюда его имя.
+  return kind !== 'render' && kind !== 'threed' && kind !== 'recolor';
 }
 
 /* ─────────────────────────── the bench, as the render reads it ─────────────────────────── */
@@ -526,16 +541,35 @@ export function threedRevisions(band: GetDesignBandResponse, sides: BenchSide[])
   return Array.from(revs).sort((a, b) => a - b);
 }
 
-/** The picture ids a turntable would be built from, in view order. Empty when a side is missing. */
+/**
+ * The picture ids a 3D run would be built from, in view order. Empty when FRONT is missing.
+ *
+ * ═══ ЧЕТЫРЁХ СТОРОН БОЛЬШЕ НЕ ТРЕБУЕТСЯ, ТРЕБУЕТСЯ ФРОНТ (K-10/K-11) ══════════════════════════
+ *
+ * Раньше отсутствие ЛЮБОЙ стороны возвращало пустой список, и это было верно, пока 3D собиралось
+ * из поворотного стола: кадры вокруг вещи имеют смысл только полным кругом. Теперь модель
+ * провайдера — `multi-view-to-3d`: она строит объём ИЗ ВИДОВ, и видов может быть от одного. Мягче
+ * стал не наш вкус, а вход: единственная сторона, без которой прогон отвергается (бесплатно,
+ * `provider_bad_request`), — фронт.
+ *
+ * ПОЭТОМУ СПИСОК СОБИРАЕТСЯ ИЗ ЗАПОЛНЕННЫХ, В ПОРЯДКЕ ВИДОВ, а пустым остаётся ровно в одном
+ * случае — фронта нет. Больше видов даёт лучший объём, и это говорит экран; но требовать все
+ * четыре значило бы запрещать законный прогон, а обходится такой запрет перезагрузкой вкладки.
+ */
 export function turntableSourceIds(sides: BenchSide[]): number[] {
   const byView = new Map(sides.map((side) => [side.view as string, side]));
+  if ((byView.get('front')?.picture?.id ?? 0) <= 0) return [];
   const ids: number[] = [];
   for (const view of SILHOUETTE_VIEWS) {
     const id = byView.get(view)?.picture?.id ?? 0;
-    if (id <= 0) return [];
-    ids.push(id);
+    if (id > 0) ids.push(id);
   }
   return ids;
+}
+
+/** The views a 3D run actually carries — the marked sides, in the bench's own order. */
+export function threedRunViews(sides: BenchSide[]): string[] {
+  return sides.filter((side) => !!side.picture).map((side) => side.view as string);
 }
 
 /* ─────────────────────────── money ─────────────────────────── */
@@ -695,19 +729,22 @@ export function threedGate(band: GetDesignBandResponse): Gate {
     };
   }
   const sides = threedSides(band);
-  const missing = sides.filter((side) => !side.picture).map((side) => viewLabel(side.view));
-  if (missing.length) {
+  const front = sides.find((side) => side.view === 'front');
+  if (!front?.picture) {
     // ОТКАЗ НАЗЫВАЕТ ДВЕРЬ, КОТОРАЯ ЕГО СНИМАЕТ. Человек, пометивший рендеры в «renders of this
     // card», приходит сюда именно с вопросом «а где они»; отказ, который про них молчит, отправляет
     // его искать ошибку в генерации.
     const chosen = chosenRenderPlacements(band).length;
     return {
       ok: false,
-      // ГОВОРИТ НЕ ТОЛЬКО «ЧЕГО НЕТ», НО И ЧТО СДЕЛАТЬ. Сторона 3D — это СЛОТ, который заполняют
-      // жестом, а не «последний рендер», который находится сам: пока отказ этого не называл,
-      // человек искал ошибку в генерации, а не в том, что он не пометил ни одной плиты.
+      // ═══ ОДНА СТОРОНА ОБЯЗАТЕЛЬНА, И ЭТО ФРОНТ (K-10/K-11) ═══════════════════════════════════
+      // Здесь перечислялись ВСЕ незаполненные стороны как «missing», потому что поворотный стол
+      // собирался кругом. `multi-view-to-3d` строит объём из видов, и без фронта прогон
+      // отвергается бесплатно (`provider_bad_request`) — а без спинки не отвергается. Отказ,
+      // называющий обязательным то, что обязательным не является, запрещает законный прогон.
       reason:
-        `3D turns one render per side, and a side is a slot you mark — missing: ${missing.join(', ')}. ` +
+        '3D is built from the marked renders, and the FRONT is the one it cannot do without — ' +
+        'a run without it is rejected before anything is charged. Mark a render into front. ' +
         (chosen
           ? `You chose ${chosen} render${chosen === 1 ? '' : 's'} in FABRIC RENDER: «use the ${chosen} you chose» above puts ${chosen === 1 ? 'it into its side' : 'them into their sides'}`
           : 'The renders of this card are on the right of the line above'),
@@ -942,15 +979,26 @@ export function renderSheetViews(band: GetDesignBandResponse): string[] {
 /* ─────────────────────────── the 3D submission ─────────────────────────── */
 
 /**
- * The three shapes a turntable comes back in. `frames` IS A NUMBER ON THE WIRE
- * (`DesignThreedParams.frames`), so the label is presentation and the number is the submission —
- * the prototype's `'turntable 12'` string was a prototype's convenience and must not travel.
+ * ═══ FRAMES СНЯТ ЦЕЛИКОМ (K-11) ══════════════════════════════════════════════════════════════
+ *
+ * Владелец, дословно: «и по сути FRAMES пропадает надобность». Здесь стоял `FRAME_CHOICES` —
+ * `turntable 12 | turntable 24 | 4 angles`, — то есть ВО СКОЛЬКО КАДРОВ обернуть вещь.
+ *
+ * ЭТО СЛЕДСТВИЕ K-10, А НЕ ОТДЕЛЬНОЕ ЖЕЛАНИЕ. 3D больше не собирается как поворотный стол из
+ * покадровой съёмки: провайдер строит объём ИЗ ВИДОВ (`multi-view-to-3d`), и промежуточной сущности
+ * «кадр» на этом пути нет вовсе. Вопрос «сколько кадров» перестал иметь ответ, а не стал
+ * неудобным, — поэтому убран орган, а не спрятана кнопка.
+ *
+ * ЧТО ПРОВЕРЕНО ПЕРЕД СНОСОМ. `frames` на проводе (`DesignThreedParams.frames`) читали РОВНО ДВА
+ * места, оба — про ЧЕРНОВИК, а не про историю: ряд выбора в `threed-studio` и строка описи в
+ * `what-model-gets`. Ни одна панель прогона, ни история, ни артефакты его не печатали, поэтому
+ * снос не осиротил ни одного читателя и не спрятал ни одного факта о замороженных прогонах: их
+ * `params.threed.frames` как лежал в базе, так и лежит, просто больше некому спросить.
+ *
+ * ЧТО УЕЗЖАЕТ ТЕПЕРЬ. Поле контракта живо и заполняется ЯВНЫМ НУЛЁМ — «не сказано». Отправлять
+ * 12 после того, как никто не поворачивает вещь на 12 кадров, значило бы заморозить в истории
+ * число, которого никто не просил и которое ничему не соответствует.
  */
-export const FRAME_CHOICES = [
-  { frames: 12, label: 'turntable 12' },
-  { frames: 24, label: 'turntable 24' },
-  { frames: 4, label: '4 angles' },
-] as const;
 
 export const PRESENTATIONS = [
   { value: 'air', label: 'in the air' },

@@ -1449,8 +1449,15 @@ export function VectorBrushRail(p: RailProps) {
               probe='hardness'
             />
             <Regulator
+              // У ЛЕЧИЛКИ ЭТОТ ЖЕ ПОЛЗУНОК ЗНАЧИТ ДРУГОЕ, И ПОДПИСЬ ОБЯЗАНА ЭТО СКАЗАТЬ. Она не
+              // кладёт краску вовсе — число уходит в движок СИЛОЙ лечения. Одна фраза на два
+              // разных смысла — это подпись, которая врёт на одном из экранов.
               name='opacity'
-              hint='how much one pass lays down — passes do not stack inside a single stroke'
+              hint={
+                p.nibLabel === 'heal'
+                  ? 'how hard it heals — at 100 the spot is replaced outright, lower leaves some of what was there'
+                  : 'how much one pass lays down — passes do not stack inside a single stroke'
+              }
               value={p.opacity}
               min={1}
               max={100}

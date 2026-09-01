@@ -25,8 +25,15 @@ function isAborted(error: unknown): boolean {
 }
 
 export type StartRunInput = {
-  /** flat | render | threed. `draft_idea` is refused by the server — it has its own verb. */
-  kind: 'flat' | 'render' | 'threed';
+  /**
+   * flat | render | threed | recolor. `draft_idea` is refused by the server — it has its own verb.
+   *
+   * `recolor` IS THE ON MODEL SCREEN'S VERB (K-17) and it takes THIS door rather than one of its
+   * own for the contract's own stated reason: it spends the image key's money, so it must be
+   * counted against the day and must show up in the one history. What it needs and what it refuses
+   * for free is on `StartDesignRunRequest.kind`; the screen's gate mirrors those refusals.
+   */
+  kind: 'flat' | 'render' | 'threed' | 'recolor';
   /** The delta phrase the human typed; the caption of the history row. May be empty. */
   ask: string;
   params: common_DesignRunParams;
@@ -45,6 +52,21 @@ export type StartRunInput = {
 export type StartRunState = {
   start: (input: StartRunInput) => void;
   isPending: boolean;
+  /**
+   * THE REFUSAL OF THE LAST PRESS, VERBATIM, AND IT SURVIVES THE TOAST.
+   *
+   * Every refusal already reaches a person as a snackbar — and a snackbar lives for seconds, which
+   * is fine for «somebody moved first» and wrong for the refusals a run door collects. Two of them
+   * are sentences the operator must ACT on: the server naming which half of the request is missing
+   * (`no_source_picture` / `no_target_colour` and their kin), and the route refusing because the
+   * provider key is not configured — that one NAMES THE ENVIRONMENT VARIABLE, and a variable name
+   * that flashes past is a variable name nobody can pass on.
+   *
+   * SO THE ERROR IS EXPOSED AND NOT INTERPRETED. Callers render `error.message` as it arrived;
+   * substituting our own prose for the server's would erase exactly the part that identifies the
+   * fault. Null whenever the last press succeeded or nothing has been pressed.
+   */
+  error: Error | null;
 };
 
 /**
@@ -112,5 +134,11 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
     [techCardId, mutation],
   );
 
-  return { start, isPending: mutation.isPending };
+  return {
+    start,
+    isPending: mutation.isPending,
+    // `mutation.error` is cleared by react-query on the next successful mutate, so the exposed
+    // refusal is always the LAST press's and never an old one kept alive by a screen.
+    error: (mutation.error as Error | null) ?? null,
+  };
 }

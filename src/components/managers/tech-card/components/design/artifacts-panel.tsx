@@ -43,6 +43,12 @@ import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schem
 import { readBench, type BenchRead } from './bench-slot';
 import { benchDoor, openDoor } from './doors';
 import { VectorModal } from './modals';
+// K-15 — ПЛИТКИ. Читатель ленты и раппорт прогона берутся у экрана паттернов: одно определение
+// «что такое выход прогона-плитки» на панель и на сам экран, иначе сегмент `patterns` и вкладка
+// PATTERN однажды разойдутся в составе и никто этого не заметит.
+// ⚠ ИЗ `./pattern/model`, А НЕ ИЗ `./pattern`. Индекс папки тянет за собой сам экран, а тот —
+// `../render` и `../generation` целиком; этой панели нужны две чистые функции без единого хука.
+import { patternOutputs, repeatOfRun } from './pattern/model';
 import { TILE_CORNER, TILE_QUIET } from './picture-tile';
 import { provenanceLabel, readProvenance } from './provenance';
 import {
@@ -129,7 +135,7 @@ export type DocumentPlate = {
  * page of the feed the band no longer ships, is not in `band.runs` at all — and `kind=RENDER` on
  * the card media is exactly the statement «this is a render and it is official».
  */
-export type ArtifactKind = 'flat' | 'render' | 'threed';
+export type ArtifactKind = 'flat' | 'pattern' | 'render' | 'threed';
 
 /**
  * ПОДСКАЗКИ СЕГМЕНТОВ — ЭТО ТОЖЕ ЗАЯВЛЕНИЕ О БУМАГЕ, и здесь стояло то же неверное «not part of
@@ -139,6 +145,13 @@ export type ArtifactKind = 'flat' | 'render' | 'threed';
  */
 export const ARTIFACT_KINDS: { value: ArtifactKind; label: string; hint: string }[] = [
   { value: 'flat', label: 'flats', hint: 'the drawings the floor sews from' },
+  {
+    // K-15, дословно: «паттерны можно будет сохранять и как мы делаем с фабрик рендерами и они так
+    // же попадают в артифакты». Тем же жестом — пометкой `selected` — и в тот же ряд.
+    value: 'pattern',
+    label: 'patterns',
+    hint: 'repeating tiles; print too, once they are in the card’s media',
+  },
   {
     value: 'render',
     label: 'renders',
@@ -175,6 +188,17 @@ export function artifactKindOf(
   const fromRun = runKindByMedia.get(mediaId);
   if (fromRun === 'render') return 'render';
   if (fromRun === 'threed') return 'threed';
+  /* ПЛИТКА ЧИТАЕТСЯ ПО ПРОГОНУ, И ФОЛБЭКА У НЕЁ НЕТ — как и у кадра турнтейбла: в словаре
+     `TechCardMediaKind` нет члена «повторяемая плитка», и взятая на карточку она числится там
+     `RENDER`. Отсюда два РАЗНЫХ случая, и путать их нельзя:
+       · плитка, ВЗЯТАЯ НА КАРТОЧКУ, чей прогон ещё на загруженной странице ленты, остаётся в
+         сегменте `patterns` — род прочитан с прогона, и `RENDER` на карточке до фолбэка не доходит.
+         Замерено пробой `oncard=1`: без этой строки принятие плитки МОЛЧА переносило бы её к
+         рендерам, то есть было бы наказанием за принятие;
+       · плитка, ПРИНЕСЁННАЯ РУКАМИ (прогона нет вовсе) или пережившая свою страницу ленты, честно
+         числится рендером — записать «это плитка» просто некуда. Дверь загрузки говорит об этом
+         словами до нажатия (`addPlateNote`) и после (`addPlateFromLibrary`). */
+  if (fromRun === 'pattern') return 'pattern';
   if (cardKind === 'TECH_CARD_MEDIA_KIND_RENDER') return 'render';
   return 'flat';
 }
@@ -184,7 +208,7 @@ export function runKindByMediaId(band: GetDesignBandResponse): Map<number, strin
   const map = new Map<number, string>();
   for (const run of band.runs ?? []) {
     const kind = (run.kind ?? '').trim().toLowerCase();
-    if (kind !== 'render' && kind !== 'threed' && kind !== 'flat') continue;
+    if (kind !== 'render' && kind !== 'threed' && kind !== 'flat' && kind !== 'pattern') continue;
     for (const picture of run.pictures ?? []) {
       const mediaId = picture.media?.id ?? 0;
       if (mediaId > 0) map.set(mediaId, kind);
@@ -215,10 +239,14 @@ export function runKindByMediaId(band: GetDesignBandResponse): Map<number, strin
  */
 export function bandPlates(
   band: GetDesignBandResponse,
-  kind: 'render' | 'threed',
+  kind: 'pattern' | 'render' | 'threed',
   already: Set<number>,
 ): { plates: DocumentPlate[]; filteredToSelected: boolean; serverStates: boolean } {
-  const outputs = outputsOfKind(band, kind);
+  /* ПЛИТКИ БЕРУТСЯ СВОИМ ЧИТАТЕЛЕМ, А НЕ ЧЕРЕЗ `outputsOfKind`. Та функция сужена типом до
+     `'render' | 'threed'`, и расширять её — правка файла соседней дорожки; `patternOutputs`
+     повторяет её правило чтения дословно (род с ПРОГОНА, скрытые прочь, одна страница ленты) и
+     живёт рядом со своим экраном. */
+  const outputs = kind === 'pattern' ? patternOutputs(band) : outputsOfKind(band, kind);
   const serverStates = outputs.some((o) => serverStatesSelected(o.picture));
   const filteredToSelected = outputs.some((o) => pictureIsSelected(o.picture));
   const plates: DocumentPlate[] = [];
@@ -228,15 +256,27 @@ export function bandPlates(
     if (mediaId <= 0 || already.has(mediaId)) continue;
     already.add(mediaId);
     const view = (picture.ghostView ?? '').trim();
+    /* У ПЛИТКИ НЕТ ВИДА ИЗДЕЛИЯ, И ВЫДУМЫВАТЬ ЕГО НЕЛЬЗЯ: она не сторона и не кадр поворота, а
+       квадрат ткани. Её опознают по РАППОРТУ, потому что это единственное, чем две плитки одной
+       карточки отличаются друг от друга на глаз в маленьком кадре. */
+    const repeat = kind === 'pattern' ? repeatOfRun(run) : 0;
     plates.push({
       key: `run-${picture.id}`,
-      name: viewLabel(view).toUpperCase() || `frame ${picture.ordinal ?? plates.length + 1}`,
+      name:
+        kind === 'pattern'
+          ? repeat
+            ? `TILE ${repeat} MM`
+            : `TILE ${picture.ordinal ?? plates.length + 1}`
+          : viewLabel(view).toUpperCase() || `frame ${picture.ordinal ?? plates.length + 1}`,
       mediaId,
       media: picture.media,
       origin: 'run',
       chosen: pictureIsSelected(picture),
       pictureId: picture.id ?? 0,
-      note: `run ${run.id ?? '—'}${run.rrev ? ` · r${run.rrev}` : ''}`,
+      note:
+        kind === 'pattern'
+          ? `run ${run.id ?? '—'}${repeat ? ` · ${repeat} mm` : ' · no repeat stated'}`
+          : `run ${run.id ?? '—'}${run.rrev ? ` · r${run.rrev}` : ''}`,
     });
   }
   return { plates, filteredToSelected, serverStates };
@@ -284,11 +324,14 @@ export function frameFraction(value: string | number | null | undefined, fallbac
  * are not in that list, so a plate of theirs cannot carry a callout as it stands. R-13 is the reason
  * the door exists at all — «к любому артефакту можно делать все виды колаутов».
  *
- * ДВЕРЬ ТЕПЕРЬ ЗОВЁТСЯ `edit` И ЖИВЁТ В УГЛУ НА ХОВЕР (V-20). Прежнее имя — «take in to draw on it ▸»
- * — называло МЕХАНИКУ, и владелец на неё прямо пожаловался: «я не понимаю зачем она нужна». Сам шаг
- * не выдуман и не убран: он есть цена, которую нельзя не заплатить, потому что выноска физически
- * адресует медиа карточки. Изменилось то, ЧТО НАПИСАНО НА КНОПКЕ: человек хочет править картинку,
- * а не изучать, куда её сперва положить. Цена не спрятана — она в заголовке органа, который читалка
+ * ДВЕРЬ ЗОВЁТСЯ `take in` И ЖИВЁТ В ВЕРХНЕМ ПРАВОМ УГЛУ НА ХОВЕР (V-20, K-7). Имена этой двери шли
+ * так: «take in to draw on it ▸» → `edit` → `take in`. Средний шаг снял МЕХАНИКУ из названия по
+ * жалобе владельца («я не понимаю зачем она нужна»), но занял слово, которое ему понадобилось для
+ * другого: круг K-7 — «в артифактс фабрик рендерс кнопка эдит должна открывать растр эдитор». Имя
+ * `edit` ушло растровому редактору, а этой двери досталось имя её собственного действия.
+ *
+ * Сам шаг не выдуман и не убран: он есть цена, которую нельзя не заплатить, потому что выноска
+ * физически адресует медиа карточки. Цена не спрятана — она в заголовке органа, который читалка
  * объявляет вместе с именем.
  *
  * ОДНОТАКТНАЯ, А НЕ СОСТАВНАЯ, С ТЕХ ПОР КАК ПЛИТА РИСУЕТ САМА. Дверь была парой «взять + открыть
@@ -583,10 +626,19 @@ export function ArtifactsPanel({
       });
     const flat = plates.filter((p) => of(p) === 'flat');
     const onCard = new Set(plates.map((p) => p.mediaId));
+    const patternBand = bandPlates(band, 'pattern', new Set(onCard));
     const renderBand = bandPlates(band, 'render', new Set(onCard));
     const threedBand = bandPlates(band, 'threed', new Set(onCard));
     return {
       flat: { plates: mark(flat), filteredToSelected: false, serverStates: true },
+      // K-15 — ПЛИТКИ ПОПАДАЮТ СЮДА ТЕМ ЖЕ ПУТЁМ, ЧТО РЕНДЕРЫ: сначала те, что уже в медиа
+      // карточки, потом помеченные `selected` из ленты. Сужение до помеченных — то же правило и
+      // ПО РОДУ: вердикт «эта плитка» ничего не говорит о том, какой рендер выбран.
+      pattern: {
+        plates: mark([...plates.filter((p) => of(p) === 'pattern'), ...patternBand.plates]),
+        filteredToSelected: patternBand.filteredToSelected,
+        serverStates: patternBand.serverStates,
+      },
       render: {
         plates: mark([...plates.filter((p) => of(p) === 'render'), ...renderBand.plates]),
         filteredToSelected: renderBand.filteredToSelected,
@@ -1031,7 +1083,11 @@ export function ArtifactsPanel({
     if (lands !== kind) {
       setKind(lands);
       showMessage(
-        `the card’s media has no kind for a turntable frame, so this one is filed as a render — it is listed under ${ARTIFACT_KINDS.find((k) => k.value === lands)?.label ?? lands}, and it prints like any other plate`,
+        // ЧТО ИМЕННО ЛЕГЛО НЕ ТУДА — НАЗЫВАЕТСЯ ТЕМ СЛОВОМ, КОТОРОЕ ЧЕЛОВЕК ВЫБРАЛ САМ. Фраза была
+        // прибита к «turntable frame», и с появлением сегмента плиток она стала бы врать: человек
+        // кладёт файл в PATTERNS, а ему отвечают про поворотный стол. У словаря медиа карточки нет
+        // члена ни для того, ни для другого — и это две разные новости, а не одна.
+        `the card’s media has no kind for ${kind === 'pattern' ? 'a repeating tile' : 'a turntable frame'}, so this one is filed as a render — it is listed under ${ARTIFACT_KINDS.find((k) => k.value === lands)?.label ?? lands}, and it prints like any other plate`,
         'success',
       );
     }
@@ -1193,7 +1249,9 @@ export function ArtifactsPanel({
                   nothing of this kind on the loaded page of the band.{' '}
                   {kind === 'render'
                     ? 'A fabric render is made on STUDIO, from the flats standing in the bench slots.'
-                    : 'A turntable is made on STUDIO, and it turns the renders — so the renders come first.'}{' '}
+                    : kind === 'pattern'
+                      ? 'A repeating tile is made on STUDIO → PATTERN, out of one picture; the ones you mark as chosen there are listed here.'
+                      : 'A turntable is made on STUDIO, and it turns the renders — so the renders come first.'}{' '}
                   Or put your own file straight into the slot below.
                 </Text>
               )}
@@ -1217,14 +1275,20 @@ export function ArtifactsPanel({
                     ? '+ add a flat'
                     : kind === 'render'
                       ? '+ add a render'
-                      : '+ add a 3D frame'
+                      : kind === 'pattern'
+                        ? '+ add a tile'
+                        : '+ add a 3D frame'
                 }
                 /* ЦЕНА НАЗВАНА ДО НАЖАТИЯ, А НЕ ПОСЛЕ. Словарь медиа карточки не знает кадра
                    турнтейбла, поэтому принесённый сюда файл числится рендером и покажется среди
                    рендеров. Сказать это тостом ПОСЛЕ выбора — значит дать человеку удивиться;
                    строка стоит на самом слоте, в уже зарезервированном под подпись месте. */
                 addPlateNote={
-                  kind === 'threed' ? 'filed as a render: the card has no 3D kind' : undefined
+                  kind === 'threed'
+                    ? 'filed as a render: the card has no 3D kind'
+                    : kind === 'pattern'
+                      ? 'filed as a render: the card has no tile kind'
+                      : undefined
                 }
                 onDetach={!disabled ? askDetach : undefined}
                 detachInert={detachInert}

@@ -243,6 +243,19 @@ export interface PictureTileProps {
   fit?: 'cover' | 'contain';
   /** Обводка кадра. `true` подсвечивает выбранную плитку толстой чёрной. */
   selected?: boolean;
+  /**
+   * ПРИГЛУШИТЬ СНИМОК — И ТОЛЬКО ЕГО. «Эту картинку нигде не предлагают» — утверждение о КАРТИНКЕ,
+   * а не о дверях, которые с ней работают.
+   *
+   * ЗАМЕРЕНО, И ИМЕННО ПОЭТОМУ ПРОП ЕСТЬ. Вызывающий гасил всю плитку классом `opacity-40` на
+   * `className`, и до K-6 это было безобидно: у скрытой плитки органов почти не было. Теперь на
+   * ней стоит `edit`, а прозрачность НАСЛЕДУЕТСЯ и ребёнком не отменяется — кнопка выходила
+   * `#666` при 40% над белым, то есть около 1.6:1 при пороге 4.5:1. Дверь, которую не прочесть,
+   * — не дверь.
+   *
+   * Состояние при этом не теряется: его несёт слово («hidden» пилюлей), а не одна лишь заливка.
+   */
+  dim?: boolean;
   className?: string;
   /**
    * Кадр для общего просмотрщика. Есть — вся поверхность открывает зум и в верхнем правом углу
@@ -299,6 +312,7 @@ export function PictureTile({
   aspect = '4/5',
   fit = 'contain',
   selected,
+  dim,
   className,
   gallery,
   galleryGroup,
@@ -340,17 +354,22 @@ export function PictureTile({
       )}
       style={{ aspectRatio: aspect }}
     >
-      {url ? (
-        <MediaComponent src={url} alt={alt} aspectRatio='auto' fit={fit} />
-      ) : (
-        // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
-        // от «картинка не загрузилась».
-        <div className='flex h-full w-full items-center justify-center bg-bgSecondary'>
-          <Text size='nano' variant='label' component='span' className='uppercase'>
-            no image
-          </Text>
-        </div>
-      )}
+      {/* ОБЁРТКА НЕСЁТ ТОЛЬКО ПРИГЛУШЕНИЕ И НИЧЕГО БОЛЬШЕ. `h-full w-full` в потоке — ровно те
+          же коробка и место, что были у самого `MediaComponent` (его контейнер при
+          `aspectRatio='auto'` таков же), поэтому кадр не сдвигается ни на пиксель. */}
+      <div className={cn('h-full w-full', dim && 'opacity-40')}>
+        {url ? (
+          <MediaComponent src={url} alt={alt} aspectRatio='auto' fit={fit} />
+        ) : (
+          // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
+          // от «картинка не загрузилась».
+          <div className='flex h-full w-full items-center justify-center bg-bgSecondary'>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
+              no image
+            </Text>
+          </div>
+        )}
+      </div>
 
       {/* Поверхность-зум лежит НИЖЕ углов (z-10 против z-20): иначе клик по сплиту уходил бы в
           просмотрщик. Это ровно тот дефект, из-за которого углы обязаны жить в примитиве. */}
