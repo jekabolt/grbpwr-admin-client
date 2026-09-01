@@ -2,6 +2,7 @@ import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
@@ -12,6 +13,7 @@ import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import { LockBar } from './generate-row';
 import {
+  chosenRenderPlacements,
   feedIsTruncated,
   pictureThumb,
   stripProvenance,
@@ -46,6 +48,31 @@ import { CELL_WIDTH, Strip, StripCell, StripDivider } from './strip-cell';
  *    это один вид, лист надо сначала разрезать;
  *  · просунуть СВОЮ картинку было нельзя ничем. Дверь «+ render» стоит здесь по тому же праву, по
  *    которому «+ flat» стоит у рендера: принесённый руками файл всегда был законным входом.
+ *
+ * ═══ И ПОЧЕМУ ЭТОГО НЕ ХВАТИЛО: «ВСЁ РАВНО НЕ ПОПАДАЕТ» ══════════════════════════════════════
+ *
+ * Владелец, следующий круг: «заселекченный рендер в RENDERS OF THIS CARD все равно не попадает в
+ * GENERATION — 3D».
+ *
+ * Круг выше починил ПОКАЗ: помеченные встали первыми и получили ярлык `selected`. Замер показал,
+ * что на этом всё и кончалось — четыре кадра со своими `ghost_view`, все помечены, а полоса пишет
+ * «0 of 4 marked», четыре стороны «blocks 3D», кнопки GENERATE нет вовсе, и на провод не уходит
+ * ничего. Между пометкой и прогоном стоял второй жест, поштучный, в котором человек НАЗЫВАЛ СТОРОНУ
+ * ЗАНОВО — ту самую, которую плита несёт сама и которую этот же экран под ней и печатает.
+ *
+ * Дверь «use the N you chose» — этот жест, сделанный один раз для всех. Она пишет ВЕРСТАК (снимок
+ * входов собирает сервер, и никакой список параметров его не заменит), ставит каждый помеченный
+ * рендер в сторону, которую он объявляет, и говорит до нажатия, какие это стороны и что будет
+ * вытеснено. Почему это дверь, а не автоматика на самой пометке, и кто побеждает при споре за
+ * сторону — в `chosenRenderPlacements` (`./model.ts`).
+ *
+ * ═══ ДВЕРЬ ПИШЕТ НЕСКОЛЬКО СЛОТОВ, ЗНАЧИТ ОНА МОЖЕТ ВСТАТЬ НА ПОЛОВИНЕ (Д-3) ══════════════════
+ *
+ * Транзакции здесь нет и быть не может: глагол верстака адресует РОВНО ОДИН слот, у каждой стороны
+ * свой CAS-токен. Значит частичный исход — не сбой, а штатная возможность, и экран обязан его
+ * ПРОГОВАРИВАТЬ, а не изображать успех. Дверь пробует ВСЕ стороны (отказ одной ничего не говорит о
+ * соседней), ничего не откатывает и печатает под полосой, сколько сторон встало и какие не встали
+ * с чем именно. Полный довод — у `adoptChosen`.
  */
 
 /** Radix запрещает пустое значение пункта; «mark ▸» — сентинел, а не ''. */
@@ -76,9 +103,25 @@ export function ThreedInputStrip({
   const sides = useMemo(() => threedSides(band), [band]);
   const others = useMemo(() => threedCandidates(band), [band]);
   const marked = sides.filter((side) => !!side.picture);
+  /** Помеченные в «renders of this card» рендеры, которым есть куда встать. Довод — в `./model.ts`. */
+  const placements = useMemo(() => chosenRenderPlacements(band), [band]);
 
   /** Для какой ячейки идёт запись. Общий `isPending` сказал бы «сохраняю» на всех сразу. */
   const [busy, setBusy] = useState<string | null>(null);
+  /** Своё состояние у двери «взять выбранные»: она пишет НЕСКОЛЬКО слотов, а не один. */
+  const [adopting, setAdopting] = useState(false);
+  /**
+   * ИСХОД ПОСЛЕДНЕГО НАЖАТИЯ ДВЕРИ — сколько сторон встало и какие не встали, с причинами (Д-3).
+   *
+   * Держится СОСТОЯНИЕМ, а не всплывающим сообщением, и это не украшение. Тост живёт секунды и
+   * приходит по одному на отказ; вопрос же, который остаётся у человека после частичной записи, —
+   * «какие стороны у меня теперь новые» — он задаёт, глядя на полосу, и ответ обязан стоять рядом
+   * с ней, пока он не нажмёт снова.
+   */
+  const [outcome, setOutcome] = useState<{
+    done: string[];
+    failed: { view: string; reason: string }[];
+  } | null>(null);
 
   const frameOf = (picture: common_DesignPicture) =>
     picture.media ? mediaFullToViewerItem(picture.media) : undefined;
@@ -98,6 +141,74 @@ export function ThreedInputStrip({
     );
   };
 
+  /**
+   * ДОВЕСТИ ПОМЕТКУ ДО ВЕРСТАКА — прямой ответ на «заселекченный рендер не попадает в GENERATION».
+   *
+   * ПИШЕТСЯ ИМЕННО ВЕРСТАК, а не список входов прогона: снимок входов собирает СЕРВЕР
+   * (`DesignInputSnapshot` — «Assembled by the SERVER only»), и `params.threed.sourcePictureIds`
+   * это ЗАПИСЬ о сборке, а не её приказ. Дверь, которая наполняла бы только список параметров,
+   * зеленела бы на пробе и не меняла бы ни одного прогона.
+   *
+   * ПОСЛЕДОВАТЕЛЬНО И ПО ОДНОМУ СЛОТУ, потому что CAS у каждой стороны свой: `expectedSlotRev`
+   * читается из полосы ДО первой записи, а стороны между собой не пересекаются, поэтому чужой
+   * токен ни одна из этих записей не трогает. Одним запросом это не отправить — глагол верстака
+   * адресует РОВНО ОДИН слот.
+   *
+   * ═══ ОТКАЗ ОДНОЙ СТОРОНЫ НЕ ОСТАНАВЛИВАЕТ ОСТАЛЬНЫЕ, И ИТОГ НАЗЫВАЕТСЯ ВСЛУХ (Д-3) ══════════
+   *
+   * Дверь бросала цикл на первом отказе и не откатывала уже сделанное. Замер: четыре помеченных
+   * рендера, отказ на `back` — на провод ушли ДВЕ попытки (front, back), `side L` и `side R` не
+   * исполнились вовсе, верстак остался с одним фронтом, а полоса написала «1 of 4 marked» и не
+   * сказала НИ СЛОВА о том, что произошло. Человек видел частично заменённый вход и не мог узнать,
+   * какие стороны новые.
+   *
+   * ПОЧЕМУ ПРОДОЛЖАЕМ, А НЕ БРОСАЕМ. Полноценной транзакции здесь быть не может — сервер даёт по
+   * слоту, — значит выбор стоит между двумя НЕПОЛНЫМИ исходами, и он не симметричен:
+   *   · стороны независимы: отказ на `back` (чужая вкладка сдвинула его `slot_rev`) не говорит
+   *     ничего о `side L`, и не пытаться его поставить — потерять годную запись из-за соседа;
+   *   · брошенный цикл оставляет БОЛЬШЕ гибрида, а не меньше: две стороны новые, две старые;
+   *   · повтор после броска заново бьёт по уже поставленному фронту — теперь с протухшим токеном,
+   *     то есть первый же отказ порождает второй.
+   * Продолжив, мы доводим карточку до максимума исполнимого и сужаем отчёт ровно до тех сторон,
+   * которым нужен человек.
+   *
+   * ОТКАТ НЕ ДЕЛАЕТСЯ, И ЭТО ТОЖЕ ВЫБОР. Снятие уже поставленной стороны — такая же запись, она
+   * может так же отказать, а «вернуть как было» она не умеет вовсе: под ней мог стоять чужой
+   * рендер, и мы затёрли бы его пустотой. Молчаливая уборка на отказе опаснее честного отчёта.
+   *
+   * ⚠ КАЖДЫЙ ОТКАЗ ВДОБАВОК ЗОВЁТ `onError` ШВА ПОЛОСЫ, то есть на четыре отказа придёт четыре
+   * сообщения. Это шум, но не ложь; глушить их отсюда нельзя — шов общий, а тост это единственное,
+   * что видит человек, ушедший глазами с этой полосы.
+   */
+  const adoptChosen = async () => {
+    if (!placements.length || adopting) return;
+    setAdopting(true);
+    setOutcome(null);
+    const done: string[] = [];
+    const failed: { view: string; reason: string }[] = [];
+    for (const placement of placements) {
+      try {
+        await writes.setBenchSlot.mutateAsync({
+          slot: { viewKey: placement.view, kind: 'render' },
+          pictureId: placement.picture.id ?? 0,
+          expectedSlotRev: placement.slotRev,
+        });
+        done.push(placement.view);
+      } catch (error) {
+        // ПРИЧИНА БЕРЁТСЯ С ОТКАЗА, А НЕ СОЧИНЯЕТСЯ. Слова сервера («slot_rev mismatch», бюджет,
+        // род кадра) — единственное, из чего человек поймёт, повторять ему жест или звать другого.
+        failed.push({
+          view: placement.view,
+          reason: (error as Error)?.message?.trim() || 'the server refused without saying why',
+        });
+      }
+    }
+    setAdopting(false);
+    // Полный успех не рапортуется: он ВИДЕН — стороны заполнились, счётчик дошёл до 4 of 4, дверь
+    // исчезла. Полоса «всё хорошо» под уже случившимся хорошим — шум, который учит не читать.
+    setOutcome(failed.length ? { done, failed } : null);
+  };
+
   const unmark = (view: string, slotRev: number) => {
     setBusy(`v${view}`);
     writes.setBenchSlot.mutate(
@@ -112,9 +223,20 @@ export function ThreedInputStrip({
       title='input — renders by view'
       question='— 3D turns the renders, not the drawings: one render marked into each side'
       action={
-        <Text size='micro' variant='label' component='span' className='uppercase'>
-          {marked.length} of 4 marked · {others.length} not marked
-        </Text>
+        <span className='flex items-center gap-3'>
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            {marked.length} of 4 marked · {others.length} not marked
+          </Text>
+          {/* ДВЕРЬ СТОИТ В ШАПКЕ ПОЛОСЫ, ПОТОМУ ЧТО ГОВОРИТ ПРО ПОЛОСУ ЦЕЛИКОМ, а не про одну
+              ячейку: она ставит СРАЗУ НЕСКОЛЬКО сторон. Пропадает она ровно тогда, когда ставить
+              нечего — все помеченные уже на своих местах, — а не «когда ворота открыты»: человек,
+              выбравший другие рендеры на собранной карточке, меняет ими вход тем же жестом. */}
+          {!disabled && placements.length > 0 && (
+            <Button variant='secondary' size='xs' loading={adopting} onClick={adoptChosen}>
+              use the {placements.length} you chose ▸
+            </Button>
+          )}
+        </span>
       }
     >
       <Strip>
@@ -232,7 +354,7 @@ export function ThreedInputStrip({
           </div>
         )}
 
-        {others.map(({ picture, chosen, composite }) => {
+        {others.map(({ picture, chosen, fromChosen, composite }) => {
           const provenance = stripProvenance(band, picture);
           return (
             <StripCell
@@ -240,9 +362,19 @@ export function ThreedInputStrip({
               src={pictureThumb(picture)}
               alt={provenance}
               gallery={frameOf(picture)}
-              /* Ярлык — ПОМЕТКА ВЛАДЕЛЬЦА, поставленная в FABRIC RENDER. Она и привела его сюда. */
+              /* Ярлык — ПОМЕТКА ВЛАДЕЛЬЦА, поставленная в FABRIC RENDER. Она и привела его сюда.
+                 Кадру разреза ярлык НЕ ОДАЛЖИВАЕТСЯ: `selected` под плиткой обязан означать поле
+                 `selected` этой самой плиты, иначе экран снова говорит одно, а провод несёт другое.
+                 Унаследованный вердикт называется словами в строке под кадром. */
               badge={chosen ? 'selected' : undefined}
-              lines={[chosen ? 'chosen · not marked' : 'not marked', provenance]}
+              lines={[
+                chosen
+                  ? 'chosen · not marked'
+                  : fromChosen
+                    ? 'cut of a chosen render · not marked'
+                    : 'not marked',
+                provenance,
+              ]}
               action={
                 disabled ? undefined : composite ? (
                   <InertDoor
@@ -281,6 +413,28 @@ export function ThreedInputStrip({
         )}
       </Strip>
 
+      {/* ═══ ИТОГ ПОСЛЕДНЕГО НАЖАТИЯ ДВЕРИ (Д-3) ═══════════════════════════════════════════════
+          Стоит ПОД ПОЛОСОЙ, а не у кнопки: вопрос, на который он отвечает, человек задаёт, глядя
+          на четыре стороны, — «какие из них теперь новые». Пропадает он при следующем нажатии, а
+          не по таймеру: пока стороны не поставлены, отчёт остаётся единственным их списком. */}
+      {outcome && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='p' className='normal-case'>
+            <b>
+              {outcome.done.length} of {outcome.done.length + outcome.failed.length} sides took the
+              render you chose.
+            </b>{' '}
+            {outcome.done.length > 0 && <>Now new: {outcome.done.map(viewLabel).join(', ')}. </>}
+            {outcome.failed.length === 1
+              ? 'This one did not, and still holds whatever stood there before: '
+              : 'These did not, and still hold whatever stood there before: '}
+            {outcome.failed.map((f) => `${viewLabel(f.view)} — ${f.reason}`).join('; ')}. Nothing was
+            undone: the sides are separate slots, and taking a good one back would be another write
+            that can fail in its turn. Press the door again — it now offers only what is left.
+          </Text>
+        </CalloutBox>
+      )}
+
       {lock && !lock.ok && (
         <LockBar reason={lock.reason}>
           {onGoToKind ? (
@@ -318,6 +472,43 @@ export function ThreedInputStrip({
         Right of the line — every other render of this card; the ones you chose in FABRIC RENDER
         come first. Marking one displaces the render that held the side; nothing is deleted.
       </Text>
+
+      {/* ЧТО ИМЕННО СДЕЛАЕТ ДВЕРЬ — СКАЗАНО ДО НАЖАТИЯ, а не после. Она ставит несколько сторон
+          разом и может вытеснить то, что там стоит; кнопка, у которой это не написано рядом,
+          заставляет узнавать её правило нажатием. */}
+      {!disabled && placements.length > 0 && (
+        <Text size='nano' variant='label' component='p' className='normal-case'>
+          «use the {placements.length} you chose» takes the renders you marked <b>selected</b> in
+          FABRIC RENDER — and the frames cut out of a chosen sheet, which is the same picture — and
+          puts each into the side it declares: {placements.map((p) => viewLabel(p.view)).join(', ')}
+          {placements.some((p) => p.displaces)
+            ? '. It displaces what stands there now; nothing is deleted.'
+            : '.'}{' '}
+          A chosen render that names no side, and the glued sheet itself, are not among them: the
+          first is marked by hand, the second is split first.
+          {/* ═══ СПОР ЗА СТОРОНУ НАЗЫВАЕТСЯ ЗДЕСЬ (Д-4) ══════════════════════════════════════
+              Помечать несколько кандидатов на одну сторону ЗАКОННО — «More than one may be
+              chosen», человек сравнивает. Сторона исключительна, поэтому лишние вердикты не
+              исполняются; раньше они просто исчезали из счёта, и абзац перечислял одних
+              победителей, называя лишь два исключения. Теперь третье исключение названо вместе с
+              ними — с именем стороны, числом претендентов и тем, кто её забрал. */}
+          {placements.some((p) => p.alsoChosen.length > 0) && (
+            <>
+              {' '}
+              More than one chosen render names the same side, and a side holds one:{' '}
+              {placements
+                .filter((p) => p.alsoChosen.length > 0)
+                .map(
+                  (p) =>
+                    `${viewLabel(p.view)} is claimed by ${p.alsoChosen.length + 1} of them and goes to the newest — run ${p.picture.runId || '—'}`,
+                )
+                .join('; ')}
+              . The others stay where they are, still marked <b>selected</b> — un-select them in
+              FABRIC RENDER if the newest is not the one you meant.
+            </>
+          )}
+        </Text>
+      )}
 
       {/* СТРАНИЦА ПРИЗНАЁТСЯ, А НЕ ПРЯЧЕТСЯ. Полоса отдаёт одну страницу ленты, поэтому у карточки
           с длинной историей есть рендеры, которых эта половина не видит. Оператор, которому этого

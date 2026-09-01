@@ -11,13 +11,13 @@ import Text from 'ui/components/text';
 
 import { ColourPicker } from '../assets/colour-picker';
 import {
-  ASSET_FABRIC,
-  ASSET_PATTERN,
+  ASSETS_PER_CARD_MAX,
+  assetIsPattern,
   assetLabel,
   assetThumb,
+  clothShelf,
   fabricUses,
   partsOfAsset,
-  shelfAssets,
 } from '../assets/model';
 import { useColourDraft, type ColourDraft } from './drafts';
 import { FieldRow, Hint, Swatch } from './field-row';
@@ -164,9 +164,15 @@ function DictionaryGrid({
  * Эхо в цвет и слова ставится ТОЛЬКО в пустые поля: набранный руками hex это осознанное отклонение,
  * и затирать его выбором ткани значило бы отменять ранг 2 порядка старшинства.
  *
- * ЧАСТИ ИЗДЕЛИЯ НЕ НАБИРАЮТСЯ ЗДЕСЬ. Они выводятся из МЕТОК на флэтах (секция ASSETS), потому что
- * второе место для тех же слов разошлось бы с разметкой молча: человек видел бы на чертеже одно,
- * а модель читала другое.
+ * ЧАСТИ ИЗДЕЛИЯ НЕ НАБИРАЮТСЯ ЗДЕСЬ. Они выводятся из МЕТОК на флэтах, потому что второе место для
+ * тех же слов разошлось бы с разметкой молча: человек видел бы на чертеже одно, а модель читала
+ * другое.
+ *
+ * ⚠ ОТКУДА ТЕПЕРЬ БЕРЁТСЯ САМА ПОЛКА (Y-11 + Y-12). Секция ASSETS, которая её наполняла, снята с
+ * экрана целиком; ткань заводит дверь «+ cloth» в блоке INPUT — FLATS OF THIS CARD, тем же
+ * `UpsertDesignAsset` рода `fabric`. Для ЭТОГО ряда не изменилось ничего: он как читал
+ * `band.assets`, так и читает. Изменилось одно — НОВЫХ МЕТОК больше нет, поэтому `parts` непусты
+ * только на карточках, размеченных до снятия, и звать сюда «разметьте на флэтах» больше нельзя.
  */
 function ClothRow({
   band,
@@ -181,10 +187,14 @@ function ClothRow({
   // покрыто» — один вопрос; отдельного словаря у неё нет, а раппорт едет числом внутри той же
   // записи. Разводить их по двум рядам значило бы заставить человека решать, куда класть
   // набивную ткань.
-  const shelf = useMemo(
-    () => [...shelfAssets(band, ASSET_FABRIC), ...shelfAssets(band, ASSET_PATTERN)],
-    [band],
-  );
+  //
+  // ⚠ СОСТАВ РЯДА НЕ НАБИРАЕТСЯ ЗДЕСЬ (Д-1). Список полок жил ДВАЖДЫ — здесь и у двери «+ cloth»
+  // в INPUT, — и разошёлся: читатель брал две полки, писатель показывал одну, и ассет-паттерн
+  // легаси-карточки нельзя было ни увидеть, ни удалить нигде, хотя выбрать и отправить в промпт
+  // было можно. Теперь состав называет ОДНА функция, которую зовут оба; довод — в её шапке.
+  const shelf = useMemo(() => clothShelf(band), [band]);
+  /** Пуст ряд ПОТОМУ ЧТО ничего не завели — или потому что завести уже некуда. Это разные ответы. */
+  const cardIsFull = (band.assets ?? []).length >= ASSETS_PER_CARD_MAX;
   const chosen = (state.recipe.fabrics ?? [])
     .map((f) => f.assetId ?? 0)
     .filter((id) => id > 0);
@@ -209,9 +219,17 @@ function ClothRow({
   return (
     <FieldRow label='cloths'>
       {shelf.length === 0 ? (
+        /* ОДНА СТРОКА-УКАЗАТЕЛЬ ВМЕСТО АБЗАЦА (Y-13). Владелец снял объяснение отсюда целиком;
+           совсем пустой ряд, однако, читался бы как сломанный орган — у него есть подпись CLOTHS
+           и ничего под ней. Осталась ровно вывеска: где дверь. Что фактура даёт рендеру, сказано
+           ОДИН раз — у самой двери, в INPUT.
+           ⚠ УКАЗАТЕЛЬ ОБЯЗАН ЗНАТЬ, ЗАКРЫТА ЛИ ДВЕРЬ (Д-2). Карточка легаси может держать потолок
+           ассетов фурнитурой и не иметь ни одной ткани: «add one above» тогда посылает человека к
+           погашенному кадру, и он читает это как поломку экрана, а не как предел карточки. */
         <Text size='micro' variant='label' component='span' className='normal-case'>
-          No cloth on this card's shelves yet. Put one on the ASSETS block above — a texture there is
-          what the render reads weave, sheen and drape from, and it stays on the card afterwards.
+          {cardIsFull
+            ? `none on this card, and no room for one — it already holds its ${ASSETS_PER_CARD_MAX} assets, none of which is a cloth.`
+            : 'none on this card — add one under INPUT → CLOTH above.'}
         </Text>
       ) : (
         <ChipRow>
@@ -228,10 +246,16 @@ function ClothRow({
                 pressed={on}
                 disabled={disabled}
                 data-cloth={id}
+                /* РОД НАЗВАН И ЗДЕСЬ — тем же словом, что на плитке в INPUT. Раппорт в подписи
+                   выдаёт паттерн только тогда, когда он проставлен; у паттерна без числа чип был
+                   неотличим от ткани, а два экрана про один ассет обязаны говорить одно. */
                 title={
-                  parts
-                    ? `${assetLabel(a)} — marked on: ${parts}`
-                    : `${assetLabel(a)} — not marked on any flat, so it is the whole garment`
+                  [
+                    assetIsPattern(a) ? `${assetLabel(a)} — pattern` : assetLabel(a),
+                    parts
+                      ? `marked on: ${parts}`
+                      : 'not marked on any flat, so it is the whole garment',
+                  ].join(' — ')
                 }
                 onClick={() => choose(id)}
               >
@@ -250,27 +274,32 @@ function ClothRow({
 
       {/* ЧТО ИМЕННО УЕДЕТ — СКАЗАНО ЗДЕСЬ, А НЕ ОБНАРУЖИТСЯ В КАРТИНКЕ. Ткань без меток покрывает
           изделие целиком; это законный ответ, а не пробел, и молчать о нём нельзя: человек,
-          отметивший одну ткань из двух, обязан видеть, что вторая объявлена остатком. */}
+          отметивший одну ткань из двух, обязан видеть, что вторая объявлена остатком.
+          ⚠ ЭТО ЕДИНСТВЕННОЕ, ЧТО ЗДЕСЬ ОСТАЛОСЬ ОТ ПРОЗЫ (Y-13), и оно осталось намеренно: это не
+          объяснение экрана, а ОТЧЁТ О ПОДАЧЕ — что именно уедет в промпт этого прогона. */}
       <div className='w-full pl-[100px]'>
         {chosen.length > 0 && (
           <Text size='micro' variant='label' component='p' className='normal-case'>
             {(state.recipe.fabrics ?? [])
-              .map(
-                (f) =>
-                  `${f.name || 'cloth'} → ${
-                    (f.parts ?? '').trim() || 'the whole garment, unless another cloth is marked'
-                  }`,
-              )
+              // «unless another cloth is marked» УБРАНО ИЗ ХВОСТА: разметка тканей на флэтах снята
+              // вместе с секцией ASSETS (Y-11), и звать человека к органу, которого больше нет, —
+              // не подсказка, а тупик. Сами `parts` по-прежнему читаются: на карточках,
+              // размеченных до снятия, они есть и по-прежнему уезжают в промпт.
+              .map((f) => `${f.name || 'cloth'} → ${(f.parts ?? '').trim() || 'the whole garment'}`)
               .join(' · ')}
           </Text>
         )}
-        <Hint>
-          {chosen.length === 0
-            ? 'optional — a cloth states the material a colour cannot. mark it on the flats to say which part it covers.'
-            : chosen.length === 1
-              ? 'one cloth: it is the whole garment. its texture governs the material, the picked colour below still beats it on colour.'
-              : `${chosen.length} cloths: the marks drawn on the flats say which part is which, and the prompt repeats them.`}
-        </Hint>
+        {/* ПОДСКАЗКА ЖИВЁТ ТОЛЬКО ТАМ, ГДЕ СООБЩАЕТ ПОРЯДОК СТАРШИНСТВА. Строка «optional — a cloth
+            states the material a colour cannot…» снята по прямому требованию владельца (Y-13):
+            необязательность поля и так сказана воротами кнопки GENERATE, а «mark it on the flats»
+            указывало на снятый орган. Осталось одно — чего человек НЕ может вывести из чипов:
+            кто кого перебивает по цвету. */}
+        {chosen.length === 1 && (
+          <Hint>
+            one cloth: it is the whole garment. its texture governs the material, the picked colour
+            below still beats it on colour.
+          </Hint>
+        )}
       </div>
     </FieldRow>
   );

@@ -149,10 +149,19 @@ export function OutputsSection({
                         selected: !chosen,
                       })
                     }
+                    /* ПОДПИСЬ НАЗЫВАЕТ ПОСЛЕДСТВИЕ, И У ДВУХ РОДОВ ОНО РАЗНОЕ. Владелец пометил
+                       рендер здесь и ждал его в 3D; пока подпись говорила только про ARTIFACTS,
+                       пометка выглядела обещанием, которого экран не давал. */
                     title={
                       chosen
                         ? 'take the mark off — with none chosen, ARTIFACTS goes back to listing every picture of this kind'
-                        : 'mark this picture as chosen — ARTIFACTS offers the chosen ones for markup'
+                        : kind === 'render'
+                          ? // ЦЕНА ВТОРОЙ ПОМЕТКИ НА ТУ ЖЕ СТОРОНУ НАЗЫВАЕТСЯ ЗДЕСЬ, ГДЕ ЕЁ И
+                            // СТАВЯТ (Д-4). Помечать нескольких кандидатов законно — экран 3D
+                            // теперь говорит, кто из них забрал сторону, — но узнавать об этом
+                            // только там значит ставить вердикт вслепую.
+                            'mark this render as chosen — ARTIFACTS offers the chosen ones for markup, and 3D puts the chosen renders into their sides with one door; if two of them name the same side, that side goes to the newer'
+                          : 'mark this picture as chosen — ARTIFACTS offers the chosen ones for markup'
                     }
                   >
                     {chosen ? 'un-select' : 'select'}
@@ -170,6 +179,15 @@ export function OutputsSection({
         thing as hiding one: a hidden picture is out of sight and can come back, a chosen one is
         what the card is going with — and what ARTIFACTS narrows its list to. More than one may be
         chosen.
+        {/* КУДА ВЕДЁТ ПОМЕТКА — СКАЗАНО ТАМ, ГДЕ ЕЁ СТАВЯТ. Она никого никуда не двигает сама:
+            сторона поворотного стола исключительна, а помеченных может быть много. */}
+        {kind === 'render' && (
+          <>
+            {' '}
+            On <b>3D</b>, the input strip offers to put the renders you chose here into the sides
+            they declare — one door, one gesture; the mark itself moves nothing.
+          </>
+        )}
       </Text>
     </Section>
   );

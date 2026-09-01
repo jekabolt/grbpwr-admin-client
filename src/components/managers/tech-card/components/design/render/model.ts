@@ -221,14 +221,62 @@ export function pictureIsComposite(picture?: common_DesignPicture | null): boole
   return (picture?.compositeViews ?? []).length > 0;
 }
 
-/** Одна картинка правой половины полосы 3D: сама плита плюс два факта, решающие её судьбу. */
+/** Одна картинка правой половины полосы 3D: сама плита плюс три факта, решающие её судьбу. */
 export type ThreedCandidate = {
   picture: common_DesignPicture;
   /** Помечена «chosen» в FABRIC RENDER (W-12). Такие идут первыми — это ответ владельца. */
   chosen: boolean;
+  /**
+   * СВОЕЙ пометки нет, но это КАДР ПОМЕЧЕННОГО ЛИСТА — и это не то же самое, что «не выбран».
+   *
+   * Сразу после прогона фабрик-рендера на карточке ровно один артефакт, склеенный лист, и он
+   * единственное, чему человек вообще может сказать `select`. Разрез рождает НОВЫЕ картинки, и
+   * своей пометки у них нет — а по контракту кроп это «SIBLING OF ITS PARENT», та же самая
+   * картинка, разрезанная. Читать такой кадр как «не выбранный» значит терять вердикт человека
+   * ровно в тот момент, когда он впервые становится исполнимым.
+   */
+  fromChosen: boolean;
   /** Склеенный лист: показывается, но пометить нельзя, пока не разрезан. */
   composite: boolean;
 };
+
+/** Каждая картинка страницы по её id — по этой карте поднимаются вверх по `derived_from`. */
+function picturesById(band: GetDesignBandResponse): Map<number, common_DesignPicture> {
+  const map = new Map<number, common_DesignPicture>();
+  const push = (pictures: common_DesignPicture[] | undefined | null) => {
+    for (const picture of pictures ?? []) {
+      const id = picture.id ?? 0;
+      if (id > 0) map.set(id, picture);
+    }
+  };
+  for (const run of band.runs ?? []) push(run.pictures);
+  for (const batch of band.batches ?? []) push(batch.pictures);
+  return map;
+}
+
+/**
+ * Есть ли ВЫШЕ по цепочке разрезов картинка, помеченная человеком.
+ *
+ * `seen` — не осторожность на всякий случай: цикл в `derived_from` (родитель, пришедший с сервера
+ * ссылкой на потомка) повесил бы вкладку намертво, а не показал бы неверную плитку. Родитель НЕ НА
+ * ЭТОЙ СТРАНИЦЕ ленты — это честное «судить не о чем»: полоса отдаёт одну страницу, и выдумывать
+ * пометку за невидимую картинку нельзя.
+ */
+function derivesFromChosen(
+  picture: common_DesignPicture,
+  byId: Map<number, common_DesignPicture>,
+): boolean {
+  const seen = new Set<number>();
+  let parentId = picture.derivedFrom ?? 0;
+  while (parentId > 0 && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = byId.get(parentId);
+    if (!parent) return false;
+    if (pictureIsSelected(parent)) return true;
+    parentId = parent.derivedFrom ?? 0;
+  }
+  return false;
+}
 
 /**
  * КАЖДЫЙ РЕНДЕР ЭТОЙ КАРТОЧКИ, КОТОРЫЙ НЕ СТОИТ В СТОРОНЕ, — правая половина полосы 3D.
@@ -246,6 +294,7 @@ export type ThreedCandidate = {
  */
 export function threedCandidates(band: GetDesignBandResponse): ThreedCandidate[] {
   const marked = markedPictureIds(band, 'render');
+  const byId = picturesById(band);
   const out: ThreedCandidate[] = [];
   const seen = new Set<number>();
   const push = (pictures: common_DesignPicture[] | undefined | null) => {
@@ -256,16 +305,133 @@ export function threedCandidates(band: GetDesignBandResponse): ThreedCandidate[]
       const kind = runKindOf(band, picture) || declaredKind(picture);
       if (kind !== 'render') continue;
       seen.add(id);
+      const chosen = pictureIsSelected(picture);
       out.push({
         picture,
-        chosen: pictureIsSelected(picture),
+        chosen,
+        // Своя пометка и унаследованная — РАЗНЫЕ факты и здесь не складываются в один: ярлык
+        // `selected` под плиткой обязан означать поле `selected` этой плиты и ничего больше.
+        fromChosen: !chosen && derivesFromChosen(picture, byId),
         composite: pictureIsComposite(picture),
       });
     }
   };
   for (const run of band.runs ?? []) push(run.pictures);
   for (const batch of band.batches ?? []) push(batch.pictures);
-  return [...out.filter((c) => c.chosen), ...out.filter((c) => !c.chosen)];
+  // Три ступени, а не две: сперва помеченные сами, затем кадры помеченного листа, затем остальные.
+  return [
+    ...out.filter((c) => c.chosen),
+    ...out.filter((c) => !c.chosen && c.fromChosen),
+    ...out.filter((c) => !c.chosen && !c.fromChosen),
+  ];
+}
+
+/** Одна постановка, которую делает дверь «use the N you chose»: плита, её сторона и что она вытеснит. */
+export type ChosenPlacement = {
+  view: SilhouetteView;
+  picture: common_DesignPicture;
+  /** CAS-токен стороны на момент чтения полосы. 0 — сторона ещё не рождена. */
+  slotRev: number;
+  /** Плита, стоящая в этой стороне сейчас: постановка её ВЫТЕСНИТ, ничего не удаляя. */
+  displaces: common_DesignPicture | null;
+  /**
+   * ПРОИГРАВШИЕ СПОР ЗА ЭТУ СТОРОНУ — помеченные рендеры, объявившие ТОТ ЖЕ вид (Д-4).
+   *
+   * Раньше их просто не существовало: цикл делал `continue` по `taken.has(view)`, дверь писала
+   * «use the 1 you chose», а объясняющий абзац перечислял только победителей. То есть на законной
+   * позе («More than one may be chosen» — человек помечает трёх кандидатов на фронт, чтобы
+   * сравнить) ДВА его вердикта исчезали без единого слова, и он не мог отличить «эти два не
+   * подошли» от «экран их не увидел».
+   *
+   * Список пуст в подавляющем большинстве случаев и непуст ровно тогда, когда человеку есть что
+   * решить. Кто победил — не выдумывается здесь: порядок `threedCandidates` (своя пометка раньше
+   * унаследованной, внутри — лента, новое раньше) — тот же, которым полоса и нарисована.
+   */
+  alsoChosen: common_DesignPicture[];
+};
+
+/**
+ * ═══ ПОМЕТКА `select` ОБЯЗАНА ДОВОДИТЬ РЕНДЕР ДО ПРОГОНА ══════════════════════════════════════
+ *
+ * Владелец: «заселекченный рендер в RENDERS OF THIS CARD все равно не попадает в GENERATION — 3D».
+ *
+ * ЗАМЕР, СНЯТЫЙ С ПОСЛЕДСТВИЯ, А НЕ С РАЗМЕТКИ. Полоса, где `selected` стоит на четырёх кадрах
+ * разреза (101..104), каждый со своим `ghost_view` (front, back, side L, side R), а рендер-верстак
+ * пуст: «renders of this card» честно говорит «6 renders · 4 selected», вход 3D показывает те же
+ * четыре плиты с ярлыком `selected` и подписью «chosen · not marked» — и при этом «0 of 4 marked»,
+ * все четыре стороны «required · blocks 3D», кнопки GENERATE в «generation — 3D» НЕТ ВОВСЕ, и на
+ * провод не уходит ничего. Пометка была видна и не значила ничего.
+ *
+ * ПОЧЕМУ ЭТОГО НЕ ЗАКРЫЛ ПРЕДЫДУЩИЙ КРУГ (V-14). Тогда починили ПОКАЗ: помеченные встали первыми
+ * справа от линии и получили ярлык. Но вход прогона — это ВЕРСТАК (сервер собирает снимок входов
+ * сам, `DesignInputSnapshot` «Assembled by the SERVER only»), а в верстак пометка не писала ничего.
+ * Между «я выбрал этот рендер» и «прогон его увидел» стоял второй, поштучный жест `mark ▸ → сторона`
+ * — четыре раза, причём сторону человек называл ЗАНОВО, хотя её несёт сама плита (`ghost_view`) и
+ * экран её же и печатает («run 3 · front · r3»).
+ *
+ * ПОЧЕМУ ДВЕРЬ, А НЕ АВТОМАТИКА. `selected` — множественная пометка-вердикт («More than one may be
+ * chosen»): человек законно помечает три кандидата на фронт, чтобы сравнить. Ставить каждый из них
+ * в сторону молча значило бы, что последний вердикт втихую вытесняет предыдущий, а сторона —
+ * исключительна. Поэтому пометка НЕ пишет верстак сама; её доводит один явный жест, и этот жест
+ * называет, сколько плит поставит.
+ *
+ * ЧЕЙ ВЕРДИКТ ПОБЕЖДАЕТ ПРИ СПОРЕ ЗА СТОРОНУ. Порядок `threedCandidates` — сначала помеченные, а
+ * внутри порядок ленты (новое раньше), — поэтому сторону забирает САМЫЙ СВЕЖИЙ помеченный рендер.
+ * Другого порядка на этом экране нет: ровно так же он и нарисован.
+ *
+ * И ПРОИГРАВШИЙ СПОР НАЗЫВАЕТСЯ ВСЛУХ (Д-4). Он не выбрасывается из счёта, а ложится в
+ * `alsoChosen` победителя — потому что «More than one may be chosen» это ЗАКОННАЯ поза (три
+ * кандидата на фронт, чтобы сравнить), а сторона исключительна. До этого дверь писала «use the 1
+ * you chose» и перечисляла одних победителей, называя лишь два исключения — лист и рендер без
+ * стороны; два вердикта человека исчезали без единого слова, и отличить «эти не подошли» от
+ * «экран их не увидел» было нечем.
+ *
+ * КАДР ПОМЕЧЕННОГО ЛИСТА СЧИТАЕТСЯ ВЫБРАННЫМ, И БЕЗ ЭТОГО ПОЧИНКА НЕ РАБОТАЛА БЫ В САМОМ ЧАСТОМ
+ * СЛУЧАЕ. Замерено: полоса, где `select` стоит на ЛИСТЕ (100), а четыре кадра разреза своей
+ * пометки не несут, — дверь не появлялась, прогон по-прежнему не отправлялся. А это ровно та поза,
+ * в которую приходит человек, пометивший рендер сразу после прогона: тогда на карточке НЕТ НИЧЕГО,
+ * КРОМЕ ЛИСТА, и пометить он может только его; кадры рождаются позже и пустыми. См. `fromChosen`.
+ *
+ * ЧТО СЮДА НЕ ПОПАДАЕТ, И ЭТО НЕ УМОЛЧАНИЕ, А ПРАВИЛО. Сам склеенный лист — несколько видов в
+ * одном файле, сервер отказывает ему в слоте (`ErrDesignCompositePlate`), и разрезать его должен
+ * человек. Помеченный рендер БЕЗ `ghost_view` не называет стороны, и подставить её за него значило
+ * бы выдумать факт: такую плиту по-прежнему ставят руками через `mark ▸`.
+ */
+export function chosenRenderPlacements(band: GetDesignBandResponse): ChosenPlacement[] {
+  const bySide = new Map(threedSides(band).map((side) => [side.view as string, side]));
+  /** Победитель каждой стороны — чтобы проигравший приписывался К НЕМУ, а не считался нигде. */
+  const won = new Map<string, ChosenPlacement>();
+  const out: ChosenPlacement[] = [];
+  for (const candidate of threedCandidates(band)) {
+    // `threedCandidates` уже выбросил плиты, СТОЯЩИЕ в сторонах: помеченный рендер, который уже на
+    // своём месте, не порождает постановки, и счётчик двери честно доходит до нуля.
+    // Порядок кандидатов — своя пометка раньше унаследованной, — поэтому при споре за сторону
+    // кадр с собственным вердиктом побеждает кадр, который вердикт лишь унаследовал.
+    if ((!candidate.chosen && !candidate.fromChosen) || candidate.composite) continue;
+    if ((candidate.picture.id ?? 0) <= 0) continue;
+    const view = normaliseViewKey(candidate.picture.ghostView);
+    if (!isSilhouetteView(view)) continue;
+    const side = bySide.get(view);
+    if (!side) continue;
+    const winner = won.get(view);
+    if (winner) {
+      // ПРОИГРАВШИЙ НЕ ВЫБРАСЫВАЕТСЯ, А ЗАПИСЫВАЕТСЯ ЗА ПОБЕДИТЕЛЕМ (Д-4). Сторона исключительна,
+      // поэтому поставить его некуда; но это ВЕРДИКТ ЧЕЛОВЕКА, и молча его терять нельзя — экран
+      // обязан сказать, что на сторону претендовало несколько и кто её забрал.
+      winner.alsoChosen.push(candidate.picture);
+      continue;
+    }
+    const placement: ChosenPlacement = {
+      view: view as SilhouetteView,
+      picture: candidate.picture,
+      slotRev: side.slotRev,
+      displaces: side.picture,
+      alsoChosen: [],
+    };
+    won.set(view, placement);
+    out.push(placement);
+  }
+  return out;
 }
 
 /**
@@ -531,12 +697,20 @@ export function threedGate(band: GetDesignBandResponse): Gate {
   const sides = threedSides(band);
   const missing = sides.filter((side) => !side.picture).map((side) => viewLabel(side.view));
   if (missing.length) {
+    // ОТКАЗ НАЗЫВАЕТ ДВЕРЬ, КОТОРАЯ ЕГО СНИМАЕТ. Человек, пометивший рендеры в «renders of this
+    // card», приходит сюда именно с вопросом «а где они»; отказ, который про них молчит, отправляет
+    // его искать ошибку в генерации.
+    const chosen = chosenRenderPlacements(band).length;
     return {
       ok: false,
       // ГОВОРИТ НЕ ТОЛЬКО «ЧЕГО НЕТ», НО И ЧТО СДЕЛАТЬ. Сторона 3D — это СЛОТ, который заполняют
       // жестом, а не «последний рендер», который находится сам: пока отказ этого не называл,
       // человек искал ошибку в генерации, а не в том, что он не пометил ни одной плиты.
-      reason: `3D turns one render per side, and a side is a slot you mark — missing: ${missing.join(', ')}. The renders of this card are on the right of the line above`,
+      reason:
+        `3D turns one render per side, and a side is a slot you mark — missing: ${missing.join(', ')}. ` +
+        (chosen
+          ? `You chose ${chosen} render${chosen === 1 ? '' : 's'} in FABRIC RENDER: «use the ${chosen} you chose» above puts ${chosen === 1 ? 'it into its side' : 'them into their sides'}`
+          : 'The renders of this card are on the right of the line above'),
     };
   }
   const revs = threedRevisions(band, sides);

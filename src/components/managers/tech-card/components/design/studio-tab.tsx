@@ -4,7 +4,6 @@ import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
-import { AssetsSection } from './assets';
 import { Bench } from './bench';
 import { GenerationStudio } from './generation';
 import { KindsStrip, type DesignKind } from './kinds-strip';
@@ -207,16 +206,19 @@ export function StudioTab({
                   слоте («or mark a picture from the band») и заканчивается плиткой лотка: между
                   дверью и ответом не должно стоять пол-экрана. Вне взведённого выбора лоток — null,
                   постоянной колонки владелец не хочет (R-18). */}
-              {/* ПОЛКИ АССЕТОВ — СВОЯ СЕКЦИЯ СТУДИИ (V-11), И ОНА СТОИТ ВНЕ ВЕТОК ВИДА.
-                  Владелец выбрал форму прямым ответом: «Своя секция ASSETS в студии» — три полки,
-                  «оттуда их берут и фабрик-рендер, и разметка на флэтах». Раз берут ОБА, секция не
-                  может принадлежать ни одному из них: положенная внутрь `kind === 'render'`, она
-                  исчезала бы ровно тогда, когда человек размечает флэты, а положенная внутрь
-                  `flat` — когда он выбирает ткань для рендера.
-                  МЕСТО — НАД ВЕРСТАКОМ, по тому же доводу, которым верстак стоит последним:
-                  сначала материал, потом сборка. Ассет это материал изделия, а не подача прогона;
-                  он переживает прогон и потому не может жить в форме запуска. */}
-              <AssetsSection techCardId={techCardId} band={band} disabled={readOnly} />
+              {/* ═══ СЕКЦИЯ ASSETS СНЯТА С ЭКРАНА ЦЕЛИКОМ (Y-11) ═══════════════════════════════
+                  Владелец, дословно: «ASSETS в студио давай пока полностью выпилим». Слово «пока»
+                  здесь несущее: снимается ЭКРАН, а не подсистема. Серверные ручки
+                  (`UpsertDesignAsset`, `DeleteDesignAsset`, обе про метки) и поля полосы
+                  (`band.assets`, `band.assetPlacements`) стоят нетронутыми, и карточки, у которых
+                  ассеты уже заведены, читаются как читались.
+                  ЕДИНСТВЕННЫЙ ЧИТАТЕЛЬ, КОТОРЫЙ ОТ ЭТОГО МОГ ОСИРОТЕТЬ, — ряд CLOTHS в FABRIC
+                  RENDER: он берёт ткани с полки, а заводила их только эта секция. Поэтому дверь
+                  загрузки фактуры не исчезла, а ПЕРЕЕХАЛА в «input — flats of this card» (Y-12),
+                  и цепочка «загрузили → chip в CLOTHS → `params.colour.fabrics`» осталась целой.
+                  ЧЕГО БОЛЬШЕ НЕТ НИГДЕ: разметка тканей на флэтах (`assetPlacement`), полка
+                  паттернов и полка фурнитуры. Уже поставленные метки живут в базе и всё ещё
+                  подписывают чипы CLOTHS — новых поставить нечем. */}
               <PickTray band={band} />
               <Bench techCardId={techCardId} band={band} disabled={readOnly} />
             </>

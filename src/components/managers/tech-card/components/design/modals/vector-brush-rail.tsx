@@ -1,8 +1,10 @@
 import { cn } from 'lib/utility';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 
 import { SvgImportDoor } from './svg-import-door';
@@ -39,17 +41,35 @@ import {
  * то есть в масштабе обычного чертежа, БЕЗ подмены scaleRef. Прежний пикер рисовал образец
  * 44×12 и девять видов были неотличимы: волна зигзага в 44-юнитовом боксе — полтора пикселя.
  * Образец шириной в честные 200 юнитов, показанный 1:1, — это тот же штрих, каким он ляжет на
- * плату, и различимость здесь свойство геометрии, а не увеличения.
+ * плату, и различимость здесь свойство геометрии, а не увеличения. ОБРАЗЕЦ ТЕПЕРЬ ОДИН — вида,
+ * выбранного в списке (Y-6); довод о честном боксе этим не тронут: он о масштабе, а не о числе
+ * образцов, и девять боксов по 200 юнитов уносили под нижний край всё, что крутят чаще.
+ *
+ * ЗДЕСЬ ЖЕ ЖИВУТ ЗНАЧКИ ИНСТРУМЕНТОВ (`TOOL_ICONS`, `ToolIcon`) — их рисует не полоса над
+ * холстом, а этот файл, потому что рисующая идиома (инлайновый `<svg>` под `currentColor`) уже
+ * заведена здесь `StitchSample`, и второй такой же набор в соседнем файле разошёлся бы с этим
+ * первой же правкой толщины линии.
  */
 
 /** Бокс образца, в юнитах И в пикселях разом (1:1 — см. довод в шапке). */
 const SAMPLE_W = 200;
 
 /**
- * ВЫСОТА ОБРАЗЦА РАСТЁТ ВМЕСТЕ С РАЗМЕРОМ ШВА. 22 юнита — прежний бокс, и на кисти по умолчанию
- * (6) он ровно прежний. Но крупный шов кладёт волну амплитудой в полторы толщины нити, и в
- * фиксированном боксе она была бы срезана краем: образец показывал бы шов МЕНЬШЕ, чем он ляжет,
- * ровно на той настройке, ради которой ручку размера и завели.
+ * ВЫСОТА ОБРАЗЦА РАСТЁТ ПО ТОЛЩИНЕ НИТИ — И ТОЛЬКО ПО НЕЙ, потому что поперёк линии меряет она
+ * одна. Это та же граница осей, по которой построен `strokeGeometry`: ВДОЛЬ линии (период волны,
+ * шаг прокола, ритм пунктира) считает длина стежка, ПОПЕРЁК (амплитуда, зазор между рядами, вылет
+ * зубца) — толщина нити. Вдоль линии образец смотрит в СВОЮ ШИРИНУ, а она фиксирована в 200
+ * юнитов, так что стежку в этой формуле делать нечего.
+ *
+ * АРИФМЕТИКА МНОЖИТЕЛЯ, А НЕ ВКУС. Самый широкий поперёк вид — зигзаг: размах ±1.8·G плюс половина
+ * нити 0.5·G с каждой стороны, итого 4.6·G во всю ширь (следом идут каверстич 4.2·G и оверлок
+ * ≈3.9·G). В боксе шириной 200 юнитов G = gauge × SAMPLE_W / GAUGE_REF = 0.2 × gauge, значит
+ * фигура занимает 0.92 × gauge пикселей — 1.1 это тот же множитель с запасом на круглую каппу.
+ *
+ * 22 — ПОЛ И ПРЕЖНИЙ БОКС. На всём видимом диапазоне нити (MIN_GAUGE..MAX_GAUGE = 1..20) высота
+ * так и остаётся 22: 20 × 1.1 = 22 ровно. Расти бокс начинает только на числах, которых рукой не
+ * набрать, — у штриха из старого документа, где формат хранит нить до 60. Ветку не убрать: такой
+ * штрих можно ВЫБРАТЬ, и тогда образец обязан показать его целиком, а не срезанным краем.
  */
 const sampleH = (gauge: number) => Math.max(22, Math.round(gauge * 1.1));
 
@@ -67,14 +87,19 @@ export function StitchSample({
 }: {
   brush: StitchKey;
   gauge: number;
-  /** Длина стежка. Именно она задаёт фигуру — образец обязан слушать её, а не одну нить. */
+  /**
+   * Длина стежка. Она задаёт ритм ВДОЛЬ линии — образец обязан слушать её, иначе покажет не тот
+   * шов. В ВЫСОТУ бокса она не входит вовсе: вдоль линии образец смотрит в свою ширину (`sampleH`).
+   */
   step: number;
   dashed: boolean;
 }) {
-  // ВЫСОТА БОКСА РАСТЁТ ПО СТЕЖКУ, А НЕ ПО НИТИ: поперечные размеры фигуры посажены на стежок, и
-  // «тонкая нитка длинным стежком» — та самая пара, ради которой регулятора стало два, — была бы
-  // срезана краем бокса ровно на ней.
-  const h = sampleH(Math.max(gauge, step));
+  // ВЫСОТА БОКСА — ПО НИТИ, СТЕЖОК СЮДА НЕ ВХОДИТ (Д-3). Прежний `sampleH(max(gauge, step))`
+  // пережил свою причину: он писался, когда поперечные размеры шва считались от стежка, а с тех
+  // пор их посадили на нить. На паре «нить 1, стежок 60» настоящий шов остаётся ниткой в пятую
+  // долю пикселя, а бокс раздувался до 66 пикселей почти пустого места и уносил нижние органы
+  // рейки за нижний край. Образец обязан быть ростом с то, что показывает.
+  const h = sampleH(gauge);
   const g = strokeGeometry(
     {
       tool: 'line',
@@ -117,21 +142,286 @@ export function StitchSample({
 }
 
 /**
- * ПАЛИТРА НИТИ — шесть цветов, и это НЕ украшение, поэтому правило монохрома не нарушено.
+ * ЗНАЧКИ — ТОЙ ЖЕ ИДИОМОЙ, ЧТО `StitchSample`: инлайновый `<svg>` в этом же файле, монохром через
+ * `currentColor`, никаких иконочных библиотек. Значок наследует цвет чипа, поэтому он сам собой
+ * инвертируется на выбранном (чёрном) чипе и гаснет на запертом — второго набора «для тёмного
+ * фона» не существует по построению.
  *
- * Чёрное и белое — сама нить: белым размечают по тёмной фотографии, чёрным по всему остальному.
- * Остальные четыре взяты НЕ произвольно, а ровно из палитры системы, и означают на чертеже то же
- * самое, что и везде в админке: красный — сломано и подлежит переделке, синий — вопрос в полёте,
- * зелёный — принято, фиолетовый — единственный акцент. Технолог, читающий флэт, читает те же
- * четыре слова, что и на любом другом экране, — а не «цветовое кодирование по вкусу рисовавшего».
+ * ОДИН БОКС 16×16 НА ВСЕ, ОДНА ТОЛЩИНА ЛИНИИ. Разные боксы у соседних значков читаются как разный
+ * вес: восемь одинаковых по смыслу инструментов выглядели бы восемью разными по важности.
+ */
+function Glyph({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <svg
+      viewBox='0 0 16 16'
+      width={14}
+      height={14}
+      aria-hidden
+      focusable='false'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={1.3}
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      className={cn('block shrink-0', className)}
+    >
+      {children}
+    </svg>
+  );
+}
+
+/**
+ * ЗНАЧКИ ИНСТРУМЕНТОВ, КЛЮЧ — СТРОКА, А НЕ ТИП `Tool`. Тип объявлен в `vector-modal.tsx`, а тот
+ * импортирует эту рейку: ключевать карту им значило бы завести круг импортов ради подписи под
+ * кнопкой. Ключ-строка снимает связность в одну сторону, и цена названа честно — неизвестное имя
+ * даёт ПУСТОТУ (`ToolIcon` вернёт `null`), а не белый экран: чип нового инструмента появится на
+ * полосе со своей подписью, просто без значка, пока значок не нарисуют здесь.
+ *
+ * СПИСОК ЗАКРЫТ И СВЕРЕН С `Tool` РУКАМИ: line, freehand, curve, select, clone, paint, erase,
+ * stamp, lasso, pan — десять имён, десять значков, ни одного лишнего.
+ *
+ * `cut` УШЁЛ (Y-9) — ластик снимает оба материала одним жестом, второго ластика для линий больше
+ * нет. НОВОГО ИНСТРУМЕНТА ВЗАМЕН НЕ ЗАВОДИЛИ, и это решение, а не пропуск: `paint` УЖЕ круглая
+ * мягкая кисть без фактуры, и отдельный чип рядом с ним был бы двумя кнопками с одним смыслом.
+ * Поэтому мёртвый значок `plain` отсюда убран: он рисовал инструмент, которого нет и не будет, а
+ * само слово `plain` в этом редакторе ЗАНЯТО — это первый вид шва (`StitchKey`, «plain line»,
+ * который рисует `StitchSample` выше). Одно имя о двух разных вещах в одном файле — ровно то, на
+ * чём споткнётся следующий читатель.
+ *
+ * ЧТО ЗНАЧОК ОБЯЗАН НАРИСОВАТЬ — РАБОТУ, А НЕ АБСТРАКЦИЮ: ластик СНИМАЕТ след, кисть КЛАДЁТ, и
+ * значки повторяют это различие формой, а не оттенком.
+ */
+export const TOOL_ICONS: Record<string, React.ReactNode> = {
+  // Отрезок между двумя узлами: сама работа инструмента — две точки и прямая между ними.
+  line: (
+    <Glyph>
+      <path d='M3.7 12.3 12.3 3.7' />
+      <circle cx='3.4' cy='12.6' r='1.5' fill='currentColor' stroke='none' />
+      <circle cx='12.6' cy='3.4' r='1.5' fill='currentColor' stroke='none' />
+    </Glyph>
+  ),
+  // След руки — та же линия, но ведённая, а не построенная.
+  freehand: (
+    <Glyph>
+      <path d='M2.2 10.8c1.4-4.6 3.1-4.9 4.2-2.6 1 2.3 2.6 2.4 3.7.3 1-1.9 2.3-2.4 3.7-1.3' />
+    </Glyph>
+  ),
+  // PEN — перо: якоря и ручки. Рисуется НЕ пунктиром пути, а самим пером, потому что путь без
+  // инструмента неотличим от `line` в боксе 16 юнитов.
+  curve: (
+    <Glyph>
+      <path d='M8 14.6 4.4 6.4 8 1.4l3.6 5-3.6 8.2Z' />
+      <circle cx='8' cy='6.4' r='1' fill='currentColor' stroke='none' />
+      <path d='M8 8.6v3' />
+    </Glyph>
+  ),
+  // Курсор-стрелка: единственный инструмент, который ничего не кладёт, а берёт.
+  select: (
+    <Glyph>
+      <path d='M4.2 2.3v10.6l2.7-2.3 1.9 3.6 1.6-.8-1.9-3.5 3.5-.5L4.2 2.3Z' />
+    </Glyph>
+  ),
+  // Две рамки внахлёст — универсальное «копия»: клон кладёт копию линий под руку.
+  clone: (
+    <Glyph>
+      <path d='M10.4 2.6H2.6v7.8' />
+      <rect x='5.6' y='5.6' width='7.8' height='7.8' />
+    </Glyph>
+  ),
+  // BRUSH — кисть: круглый мягкий кончик, кладущий цвет. Нарисована именно кистью, а не кругом,
+  // потому что круг на этой полосе уже занят ластиком: два круга различались бы одной заливкой.
+  paint: (
+    <Glyph>
+      <path d='M6 7.9l5.4-5.4a1.9 1.9 0 1 1 2.7 2.7L8.7 10.6' />
+      <path d='M4.7 10c-1.1 0-2 .9-2 2 0 .9-1.7 1-1.3 1.4.7.7 1.7 1.3 2.7 1.3 1.5 0 2.7-1.2 2.7-2.7 0-1.1-.9-2-2.1-2Z' />
+    </Glyph>
+  ),
+  // Ластик на поверхности: скошенный брусок и линия, по которой он трёт.
+  erase: (
+    <Glyph>
+      <path d='M5.4 12.2 2.4 9.2 9.4 2.2l3 3-7 7Z' />
+      <path d='M8.3 9.4 5.3 6.4' />
+      <path d='M5.4 13.8H14' />
+    </Glyph>
+  ),
+  // Штамп: колодка на основании — «взял оттуда, приложил сюда».
+  stamp: (
+    <Glyph>
+      <path d='M3.3 14.4h9.4' />
+      <path d='M12.9 9.2a1.7 1.7 0 0 0-1.2-.5H4.3a1.7 1.7 0 0 0-1.6 1.6v1.1c0 .4.3.7.6.7h9.4c.4 0 .6-.3.6-.7v-1.1c0-.4-.2-.9-.4-1.1Z' />
+      <path d='M9.3 8.7V5.7c0-1 .7-1 .7-2.4a2 2 0 0 0-4 0c0 1.4.7 1.4.7 2.4v3' />
+    </Glyph>
+  ),
+  // Лассо: петля ПУНКТИРОМ — тем же «муравьиным» пунктиром, каким обведена готовая область на
+  // холсте, плюс висящая верёвка. Сплошная петля в боксе 16 юнитов читалась как лупа; пунктир
+  // говорит «выделение», а не «увеличение», и повторяет то, что человек увидит после жеста.
+  lasso: (
+    <Glyph>
+      <ellipse cx='8' cy='6.4' rx='5.4' ry='4.2' strokeDasharray='1.9 1.7' />
+      <path d='M4.9 9.8c-1 1.1-1.3 2.5-.4 3.3' />
+      <circle cx='4.9' cy='14' r='1' fill='currentColor' stroke='none' />
+    </Glyph>
+  ),
+  // Панорама: лист двигают во все четыре стороны. Рука в боксе 16 юнитов сминается в кляксу,
+  // крест со стрелками — нет.
+  pan: (
+    <Glyph>
+      <path d='M8 2.4v11.2M2.4 8h11.2' />
+      <path d='M6.4 4 8 2.4 9.6 4M6.4 12 8 13.6 9.6 12M4 6.4 2.4 8 4 9.6M12 6.4 13.6 8 12 9.6' />
+    </Glyph>
+  ),
+};
+
+/**
+ * Значок инструмента по имени. Неизвестное имя — ПУСТОТА, а не исключение: полосы инструментов
+ * рисует соседний файл, и его новый инструмент не должен уносить весь редактор в белое до того,
+ * как здесь появится значок.
+ */
+export function ToolIcon({ kind }: { kind: string }) {
+  return <>{TOOL_ICONS[kind] ?? null}</>;
+}
+
+/**
+ * ПИПЕТКА И ПАЛИТРА — ДВА РАЗНЫХ ГЛАГОЛА, И ЗНАЧКИ ОБЯЗАНЫ РАЗЛИЧАТЬСЯ СИЛУЭТОМ, а не деталью:
+ * пипетка ВЗЯТЬ цвет с холста (следующий клик читает картинку), палитра НАЗНАЧИТЬ цвет (открывает
+ * системный выбор). Два похожих значка рядом читались бы как одна кнопка, нажатая дважды.
+ */
+const EyedropperIcon = () => (
+  <Glyph>
+    <path d='M2.5 13.5v-2.1l6-6 2.1 2.1-6 6H2.5Z' />
+    <path d='M10 2.9a1.7 1.7 0 0 1 2.4 0l.7.7a1.7 1.7 0 0 1 0 2.4l-1.2 1.2-2.4-2.4L10 2.9Z' />
+  </Glyph>
+);
+
+const PaletteIcon = () => (
+  <Glyph>
+    <path d='M8 1.6a6.4 6.4 0 1 0 0 12.8c.9 0 1.5-.6 1.5-1.4 0-.7-.5-1.1-.5-1.7 0-.6.5-1.1 1.1-1.1h1.3A3.2 3.2 0 0 0 14.4 7c0-3-2.8-5.4-6.4-5.4Z' />
+    <circle cx='5' cy='5.4' r='.95' fill='currentColor' stroke='none' />
+    <circle cx='8.4' cy='4.3' r='.95' fill='currentColor' stroke='none' />
+    <circle cx='4.2' cy='9' r='.95' fill='currentColor' stroke='none' />
+  </Glyph>
+);
+
+/**
+ * КОЛОРПИКЕР — ОТДЕЛЬНЫЙ ОРГАН-ЗНАЧОК (Y-8), а не третья плашка. Плашка означает «вот этот цвет»;
+ * здесь орган означает «любой цвет», и одинаковый с плашками вид обещал бы конечный список.
+ * Технически это `<input type=color>` под ярлыком: ярлык и есть кнопка, поле спрятано `sr-only` —
+ * но НЕ `display:none`, иначе клик по ярлыку некуда переслать и системный выбор не открывается
+ * вовсе. Стоит рядом с пипеткой и различается с ней силуэтом: пипетка ЧИТАЕТ цвет с холста,
+ * палитра НАЗНАЧАЕТ его.
+ *
+ * ── ОДНА ЗАПИСЬ В ДОКУМЕНТ НА ЖЕСТ, А НЕ ПОТОК (Д-1) ───────────────────────────────────────────
+ *
+ * Chrome шлёт `input` НЕПРЕРЫВНО, пока тянут ползунок оттенка, — по событию на кадр. React зовёт
+ * `onChange` именно на `input` (`color` стоит в его списке текстоподобных полей), поэтому одна
+ * протяжка приезжала сюда двумя десятками правок. А при ВЫБРАННОМ штрихе писатель цвета — это
+ * `editStroke`, то есть полноценный шаг ленты отмены с копией всего массива штрихов: одна протяжка
+ * съедала всю глубину ленты (24) и вытесняла из неё ВСЁ нарисованное до этого — молча, без единого
+ * слова на экране, и ⌘Z переставал возвращать линии. Замерено на микро-стенде рейки: 24 события
+ * `input` за протяжку → 24 вызова `onInk` до правки, 1 вызов после.
+ *
+ * ЛЕЧИТСЯ НЕ ДРОССЕЛЕМ, А ВЫБОРОМ СОБЫТИЯ, и это важно: дроссель по времени пришлось бы подбирать
+ * под скорость руки и он всё равно писал бы в ленту середину жеста. У нативного поля цвета есть
+ * два РАЗНЫХ события, и они означают разное: `input` — ход ползунка, `change` — завершённый жест
+ * (браузер шлёт его, когда диалог закрывают). В документ уходит `change`; `blur` оставлен
+ * страховкой на случай, когда диалог закрыли так, что `change` не пришёл, а `sentRef` не даёт паре
+ * записать один и тот же цвет дважды.
+ *
+ * ЭТО ТОТ ЖЕ ПРИЁМ, ЧТО У СОСЕДНЕГО ПОЛЯ HEX: там писателя бережёт `readInk` в модалке — пока
+ * набрано «#2f», в документ не уходит ничего, и правка случается ОДИН раз, когда цвет стал цветом.
+ * `change` и есть «цвет стал цветом» для пальца на ползунке.
+ *
+ * ПОЧЕМУ СЛУШАТЕЛЬ ВЕШАЕТСЯ РУКАМИ: у React нет пропа для нативного `change` текстоподобного поля
+ * — его `onChange` это `input`, и другого имени у события нет. `addEventListener('change')` на
+ * своём же узле — не обход рамки, а единственный способ отличить жест от его хода.
+ *
+ * ЖИВОЕ ЗНАЧЕНИЕ ОРГАНА (`live`) ВО ВРЕМЯ ПРОТЯЖКИ ДЕРЖИТСЯ ЛОКАЛЬНО — иначе контролируемое поле
+ * откатывалось бы к цвету документа под пальцем. Живого превью на РЕЙКЕ при этом нарочно нет:
+ * плашка, показывающая цвет, которого в нити ещё нет, становится ложью органа ровно в тот раз,
+ * когда жест кончился без `change`. Живое превью уместно на ХОЛСТЕ, и это правка в модалке —
+ * превью-цвет мимо документа и мимо ленты (см. отчёт).
+ */
+function InkPicker({
+  value,
+  disabled,
+  onPick,
+}: {
+  /** Последний ПОЛНЫЙ цвет нити, `#rrggbb`: другого нативное поле не принимает. */
+  value: string;
+  disabled: boolean;
+  onPick: (hex: string) => void;
+}) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  const [live, setLive] = useState(value);
+  const liveRef = useRef(value);
+  /** Последнее, что ушло писателю. Страж от второй записи того же цвета парой `change`+`blur`. */
+  const sentRef = useRef(value);
+  // Внешняя правка цвета (плашка, пипетка, поле hex) обязана догнать орган. Во время протяжки
+  // `value` не меняется — в документ ничего не уходит, — поэтому эффект не дёргает поле под рукой.
+  useEffect(() => {
+    liveRef.current = value;
+    sentRef.current = value;
+    setLive(value);
+  }, [value]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const commit = () => {
+      const next = liveRef.current;
+      if (!next || next.toLowerCase() === sentRef.current.toLowerCase()) return;
+      sentRef.current = next;
+      onPick(next);
+    };
+    el.addEventListener('change', commit);
+    el.addEventListener('blur', commit);
+    return () => {
+      el.removeEventListener('change', commit);
+      el.removeEventListener('blur', commit);
+    };
+  }, [onPick]);
+  return (
+    <label
+      title='pick any colour — the system colour picker'
+      className={cn(
+        'relative flex h-5 w-5 shrink-0 items-center justify-center border',
+        'focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-textColor',
+        disabled
+          ? 'cursor-default border-borderColor text-textInactiveColor'
+          : 'cursor-pointer border-borderColor text-textColor hover:border-textColor',
+      )}
+    >
+      <PaletteIcon />
+      <input
+        ref={ref}
+        type='color'
+        value={live}
+        disabled={disabled}
+        aria-label='pick any ink colour'
+        data-ink-picker=''
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+          liveRef.current = e.target.value;
+          setLive(e.target.value);
+        }}
+        className='sr-only'
+      />
+    </label>
+  );
+}
+
+/**
+ * ПАЛИТРА НИТИ — ДВА ОБРАЗЦА, А НЕ ШЕСТЬ (Y-7). Чёрное и белое — не «два цвета из шести», а два
+ * РЕЖИМА разметки: белым размечают по тёмной фотографии, чёрным по всему остальному, и других
+ * значений по умолчанию у нити нет. Прежние четыре системных цвета (красный/синий/зелёный/
+ * фиолетовый) были словарём статусов на чертеже — словарём, которым никто не пользовался, зато
+ * четыре плашки занимали ряд, ради которого рейка переносилась на вторую строку.
+ *
+ * ПРОИЗВОЛЬНЫЙ ЦВЕТ НЕ ПОТЕРЯН — он переехал В ОРГАН, а не в список: палитра-значок рядом
+ * (`data-ink-picker`) открывает системный выбор, поле hex (`data-ink-hex`) принимает число руками.
+ * То есть выбор стал БЕСКОНЕЧНЫМ вместо шести штук, а не сузился.
  */
 const INKS: { hex: string; name: string }[] = [
   { hex: '#000000', name: 'ink — the default line' },
   { hex: '#ffffff', name: 'white — for marking over a dark photo' },
-  { hex: '#ff0000', name: 'red — broken, to be redone' },
-  { hex: '#2323ff', name: 'blue — a question, mid-flight' },
-  { hex: '#0f7a34', name: 'green — approved as drawn' },
-  { hex: '#311eee', name: 'purple — the single accent' },
 ];
 
 /** Пресеты ниба: тот же ряд из трёх чипов, что у нити, только числами — имён у ниба нет. */
@@ -364,12 +654,14 @@ export type RailProps = {
   /** Сервер уже хранит живопись этого слоя — тогда её можно снять и вернуть нетронутое фото. */
   rasterStored: boolean;
   onDropRaster: () => void;
-  /* Лента отмены — ОДНА на линии и пиксели. Потолок называется вслух: см. группу «history». */
+  /* ЛЕНТА ОТМЕНЫ — ПРИНИМАЕТСЯ, НО БОЛЬШЕ НЕ ПЕЧАТАЕТСЯ: группа «history» убрана по Y-3. Пропы
+     оставлены НАМЕРЕННО, а не по забывчивости — снять их значило бы править вызывающую сторону
+     ради удаления текста, а вернуть сигнал о вытеснении (`undoEvicted`) — это одна строка здесь.
+     Потолки приходят ПРОПОМ, а не берутся из модуля: печатать можно только те числа, по которым
+     лента реально вытесняет, а не свою копию их. */
   undoDepth: number;
   undoBytes: number;
   undoEvicted: boolean;
-  /** Потолки приходят ПРОПОМ, а не берутся здесь из модуля: рейка обязана печатать те числа, по
-   *  которым лента реально вытесняет, а не свою копию их. */
   undoCeiling: number;
   undoByteCeiling: number;
   /* Туда и обратно. */
@@ -378,6 +670,7 @@ export type RailProps = {
   /**
    * Чем «download SVG» является для ЭТОГО слоя. Слой-файл отдаёт оригинал производителя, а не
    * пересериализацию, и слова обязаны сказать это; без пропа остаётся правда рисованного слоя.
+   * После Y-3 живёт ПОДСКАЗКОЙ кнопки, а не абзацем на экране, — различие осталось выразимым.
    */
   outNote?: string;
   frameRatio: number;
@@ -413,6 +706,20 @@ export function VectorBrushRail(p: RailProps) {
    * взята строка — виды показываются, чем бы рука ни была занята.
    */
   const showStitches = editing || p.lineTool;
+  /**
+   * ВИД ШВА КАК СТРОКА СПИСКА, А НЕ КАК КЛЮЧ. Выпадающий список и превью под ним обязаны говорить
+   * об одном и том же виде; беря обоих отсюда, развести их нельзя. Фолбэк на первый вид — не
+   * украшение: ключ приезжает из документа, а документ мог быть записан вкладкой, знавшей вид,
+   * которого в этой сборке ещё (или уже) нет, — и тогда список без совпадающего пункта прислал бы
+   * обратно пустоту, стерев вид у выбранной строки.
+   */
+  const curStitch = STITCHES.find((s) => s.key === curBrush) ?? STITCHES[0];
+  /**
+   * Значение системного выбора цвета обязано быть `#rrggbb` — поле hex рядом принимает набранное
+   * руками, и на полпути там законно живёт «#2f». Отдаём в орган последний ПОЛНЫЙ цвет, иначе
+   * браузер молча подставит чёрный и вернёт его же следующим событием, перекрасив нить.
+   */
+  const pickerInk = /^#[0-9a-fA-F]{6}$/.test(curInk) ? curInk : '#000000';
 
   return (
     <div className='flex h-full w-[264px] shrink-0 flex-col gap-2 overflow-y-auto border border-borderColor bg-bgColor p-2.5'>
@@ -443,45 +750,53 @@ export function VectorBrushRail(p: RailProps) {
           <Text size='nano' variant='label' component='p' className='mb-1'>
             {editing
               ? 'these controls now edit the picked line. Esc or «done» puts the brush back in hand.'
-              : 'pick the machine, then draw — every line is born with the stitch in hand. 1–9 pick from the keyboard.'}
+              : 'pick the machine, then draw. 1–9 pick from the keyboard.'}
           </Text>
-          {/* ДЕВЯТЬ ВИДОВ — СПИСКОМ С ОБРАЗЦАМИ, потому что на цеховом полу шов узнают по рисунку,
-              а не по номеру; ISO-класс едет рядом для того, кто держит номера в голове. Роль radio:
-              ровно один вид активен, и стрелки читалки говорят об этом честно. */}
-          <div role='radiogroup' aria-label='stitch kind' className='space-y-1'>
-            {STITCHES.map((s, i) => {
-              const active = curBrush === s.key;
-              return (
-                <button
-                  key={s.key}
-                  type='button'
-                  role='radio'
-                  aria-checked={active}
-                  disabled={p.frozen}
-                  onClick={() => p.onBrush(s.key)}
-                  className={cn(
-                    'block w-full cursor-pointer border px-1.5 py-1 text-left transition-colors duration-150 motion-reduce:transition-none',
-                    'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
-                    'disabled:cursor-default disabled:text-textInactiveColor',
-                    active
-                      ? 'border-textColor bg-textColor text-bgColor'
-                      : 'border-borderColor bg-bgColor text-textColor hover:border-textColor',
-                  )}
-                >
-                  <span className='flex items-baseline justify-between gap-1.5'>
-                    <Text size='micro' component='span' className='min-w-0 truncate'>
-                      {i + 1} · {s.name}
-                    </Text>
-                    <Text size='nano' component='span' className='shrink-0'>
-                      {s.iso}
-                    </Text>
-                  </span>
-                  {/* Образец — тем же РАЗМЕРОМ и «строительностью», какими штрих реально ляжет:
-                      крупный шов и виден крупным, вместе с высотой бокса. Цвет — см. StitchSample. */}
-                  <StitchSample brush={s.key} gauge={curGauge} step={curStep} dashed={curDashed} />
-                </button>
-              );
-            })}
+          {/* ОДИН ВЫБОР ВМЕСТО ДЕВЯТИ ОБРАЗЦОВ РАЗОМ (Y-6). Девять боксов по 200 юнитов занимали
+              полрейки и прокручивали всё остальное за нижний край: человек, крутящий толщину,
+              не видел ни цвета, ни стежка. Список видов — вещь, которую читают РАЗ в начале
+              строчки, а размер и цвет крутят ПОСТОЯННО, и место на экране обязано делиться по
+              частоте обращения, а не по числу вариантов.
+
+              ЗНАЧЕНИЕ БЕРЁТСЯ ИЗ САМОГО СПИСКА (`curStitch`), а не из пропа: у Radix рядом со
+              списком живёт скрытый нативный `<select>`, и значение, которого НЕТ среди пунктов,
+              он принять не может — обратно приходит `onValueChange('')`, то есть пустота, которой
+              никто не выбирал (замерено на операциях, см. довод в `ui/components/select.tsx`).
+              Здесь пункты и значение считаются из ОДНОГО массива `STITCHES`, поэтому разъехаться
+              им негде по построению.
+
+              КЛАВИШИ 1–9 ЖИВЫ И НЕ ТРОНУТЫ: они висят в `vector-modal.tsx` на экране целиком, а
+              гард `isTyping` глушит их на фокусе внутри поля/списка — ровно так же, как глушил на
+              прежних кнопках `role=radio`. Смена органа этого не меняет. */}
+          {/* Метка для проб стоит на ОБЁРТКЕ, а не на самом списке: примитив раздаёт лишние пропы
+              `Select.Root`, а тот — не узел DOM, и `data-*` на нём просто исчезает (замерено:
+              переписи узлов селектор не находил вовсе). */}
+          <div data-stitch-select=''>
+            <Select
+              name='stitch-kind'
+              placeholder='stitch kind'
+              fullWidth
+              disabled={p.frozen}
+              // Запертый список обязан ВЫГЛЯДЕТЬ запертым: Radix метит кнопку `disabled`, но у
+              // примитива на этот случай цвета нет, и в режиме только-чтения выбор видов читался
+              // как живой (замерено на пресете `unreadable`).
+              className='disabled:text-textInactiveColor'
+              value={curStitch.key}
+              items={STITCHES.map((s, i) => ({ value: s.key, label: `${i + 1} · ${s.name}` }))}
+              onValueChange={(v: string) => p.onBrush(v as StitchKey)}
+            />
+          </div>
+          {/* ПРЕВЬЮ РОВНО ВЫБРАННОГО ВИДА, В ЕГО ЖЕ НАСТРОЙКАХ — тем же `strokeGeometry`, что
+              рисует сцену и экспорт. ISO-класс уехал СЮДА из строк списка: в пункте он воровал
+              ширину у названия, а нужен он ровно в одном месте — рядом с тем, на что смотрят. */}
+          <div
+            className='mt-1 border border-borderColor px-1.5 py-1'
+            data-stitch-preview={curBrush}
+          >
+            <StitchSample brush={curBrush} gauge={curGauge} step={curStep} dashed={curDashed} />
+            <Text size='nano' variant='label' component='p'>
+              {curStitch.name} · {curStitch.iso}
+            </Text>
           </div>
         </div>
       )}
@@ -522,6 +837,32 @@ export function VectorBrushRail(p: RailProps) {
               </button>
             );
           })}
+          {/* СИСТЕМНЫЙ ВЫБОР ЦВЕТА — свой орган: в документ он пишет ОДИН раз за жест, а не по
+              событию на кадр протяжки. Довод и замер — у самого `InkPicker`. */}
+          <InkPicker value={pickerInk} disabled={p.frozen} onPick={p.onInk} />
+          {/* ПИПЕТКА — ТОТ ЖЕ ОРГАН, ЧТО БЫЛ, ТОЛЬКО ЗНАЧКОМ (Y-8/Y-10): она взводит СЛЕДУЮЩИЙ
+              клик по холсту, а не красит сейчас, поэтому у неё есть нажатое состояние, и оно
+              нарисовано заливкой — тем же способом, что у выбранной плашки рядом. Имя для читалки
+              осталось словом «eyedropper»: значок без имени невыразим ни голосом, ни пробой. */}
+          <button
+            type='button'
+            disabled={p.frozen}
+            aria-pressed={p.picking}
+            aria-label='eyedropper'
+            data-ink-eyedropper=''
+            onClick={() => p.onPicking(!p.picking)}
+            title='eyedropper — take the colour from the canvas, the picture underneath and the paint included (i)'
+            className={cn(
+              'flex h-5 w-5 shrink-0 items-center justify-center border',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
+              'disabled:cursor-default disabled:text-textInactiveColor',
+              p.picking
+                ? 'border-textColor bg-textColor text-bgColor'
+                : 'cursor-pointer border-borderColor bg-bgColor text-textColor hover:border-textColor',
+            )}
+          >
+            <EyedropperIcon />
+          </button>
           <Input
             type='text'
             value={curInk}
@@ -531,18 +872,6 @@ export function VectorBrushRail(p: RailProps) {
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.onInk(e.target.value)}
             className='ml-auto w-20 shrink-0 uppercase tabular-nums'
           />
-        </div>
-
-        <div className='flex flex-wrap items-center gap-1.5 py-1'>
-          <Chip
-            selected={p.picking}
-            pressed={p.picking}
-            disabled={p.frozen}
-            onClick={() => p.onPicking(!p.picking)}
-            title='take the colour from the canvas, the picture underneath and the paint included (i)'
-          >
-            eyedropper
-          </Chip>
         </div>
 
         {/* РЕГУЛЯТОР — ОДИН КОМПОНЕНТ НА ВСЕ ЧЕТЫРЕ ЧИСЛА (нить, стежок, ниб, жёсткость,
@@ -679,24 +1008,13 @@ export function VectorBrushRail(p: RailProps) {
             }
           />
         )}
-        {p.baseLabel && (
-          <Text size='nano' variant='label' component='p' data-base-note=''>
-            «{p.baseLabel}» is the original underneath. It is never written to — the eraser eats
-            through the COPY, and the hole lives in the copy&rsquo;s own transparency.
-          </Text>
-        )}
-        {/* ЧЕМ ПЛАТИТ СОХРАНЕНИЕ ПИКСЕЛЕЙ — В РЕЙКЕ, А НЕ КОРОБКОЙ НАД ХОЛСТОМ. Условная коробка
-            там сдвигала холст на свою высоту в момент, когда рука уже целилась (замерено пробами
-            66 и 83); рейка — колонка со своей прокруткой, и её рост холсту ничего не стоит. */}
-        {p.rasterReady && (
-          <Text size='nano' variant='label' component='p' data-pixels-note=''>
-            The pixel layer is a whole picture, not a patch
-            {p.rasterDirty ? ', and it has changed' : ''}. Saving uploads it in full{' '}
-            <b>only when the paint actually changed</b> — a save that touched lines alone says
-            nothing about pixels, and the stored ones survive untouched. The original media is{' '}
-            <b>never written to</b>; «revert to the untouched picture» brings it back.
-          </Text>
-        )}
+        {/* ДВА ПОЯСНИТЕЛЬНЫХ АБЗАЦА ОТСЮДА УБРАНЫ (Y-3): `data-base-note` («… is the original
+            underneath…») и `data-pixels-note` («The pixel layer is a whole picture…»). Оба
+            объясняли УСТРОЙСТВО хранения тому, кто в этот момент целится рукой; владелец прочёл
+            их один раз и с тех пор они занимали треть колонки над органами, которые он крутит
+            каждую минуту. Всё, что они обещали, осталось ОРГАНОМ, а не словами: возврат нетронутой
+            картинки — кнопкой ниже (`data-drop-raster`), состояние пиксельного слоя — подписью
+            строки слоя («painted» / «a copy of the base»). Ни один писатель не потерян. */}
         {/* СНЯТЬ ЖИВОПИСЬ — НЕ «СТЕРЕТЬ ХОЛСТ». Прозрачный холст, записанный как новое состояние,
             оставил бы фотографию стёртой навсегда; снятие канала возвращает подложку. Дверь
             существует только там, где есть что снимать. */}
@@ -716,24 +1034,15 @@ export function VectorBrushRail(p: RailProps) {
         )}
       </div>
 
-      {/* ── ЛЕНТА ОТМЕНЫ. ПОТОЛОК НАЗВАН ЧИСЛОМ, а не подразумевается: молчаливая потеря истории
-          выглядит как поломка отмены, и человек, у которого ⌘Z однажды не вернул, перестаёт ему
-          верить навсегда. Одна лента на оба материала — довод в `vector-raster-history.ts`. */}
-      <div>
-        <GroupLabel flush>history</GroupLabel>
-        <Text size='nano' variant='label' component='p' data-undo-note=''>
-          {p.undoDepth
-            ? `${p.undoDepth} step${p.undoDepth === 1 ? '' : 's'} back${p.undoBytes ? ` · ${(p.undoBytes / 1024 / 1024).toFixed(1)} MB of pixels held` : ''}. `
-            : 'nothing to take back yet. '}
-          Lines and pixels share ONE ⌘z, in the order they happened. The ceiling is{' '}
-          <b>
-            {p.undoCeiling} steps or {p.undoByteCeiling} MB
-          </b>{' '}
-          of pixels, whichever comes first; past it the oldest step is dropped.
-          {p.undoEvicted ? ' Some of the oldest steps have already been dropped.' : ''}
-        </Text>
-      </div>
-
+      {/* ── ГРУППА «HISTORY» УБРАНА ЦЕЛИКОМ (Y-3). Она не держала ни одного органа — только счёт
+          шагов, размер удержанных пикселей и слова про общий ⌘z, — поэтому убирать было нечего,
+          кроме прозы. ⌘z и его потолок работают ровно как работали: и лента, и вытеснение живут в
+          `vector-raster-history.ts`, рейка их лишь ПЕЧАТАЛА.
+          ЧЕГО СТОИТ ЭТО УДАЛЕНИЕ, ЧЕСТНО: вместе с абзацем ушло единственное место, где вслух
+          говорилось о вытеснении (`undoEvicted`) — то есть о молча потерянных старых шагах. Пропы
+          `undoDepth/undoBytes/undoEvicted/undoCeiling/undoByteCeiling` РЕЙКА ПО-ПРЕЖНЕМУ
+          ПРИНИМАЕТ (см. `RailProps`), так что вернуть сигнал одной строкой — или поднять его в
+          шапку над холстом — можно, не трогая вызывающую сторону. */}
       {/* ОБЛАСТИ ЛАССО. Группа существует только вместе с областями: пустой пульт — шум.
           Растушёвка стоит В СТРОКЕ области — она принадлежит выделению, не инструменту, и две
           области честно держат два разных числа. Операции — под списком и только у АКТИВНОЙ:
@@ -803,7 +1112,7 @@ export function VectorBrushRail(p: RailProps) {
                 size='xs'
                 disabled={p.frozen}
                 onClick={() => p.onCopySel(p.activeSel!)}
-                title='duplicate the strokes inside the active area (⌘c) — copies land slightly offset'
+                title='duplicate the LINES inside the active area (⌘c) — copies land slightly offset. Pixels are not copied.'
               >
                 copy inside
               </Button>
@@ -812,7 +1121,8 @@ export function VectorBrushRail(p: RailProps) {
                 size='xs'
                 disabled={p.frozen}
                 onClick={() => p.onDeleteSel(p.activeSel!)}
-                title='cut the strokes at the ants line and remove what is inside (⌫)'
+                data-delete-inside=''
+                title='remove everything inside this area (⌫) — the PIXELS erase through to transparency, and the lines are cut at the ants line so their outside pieces live on. A feather softens the erased edge.'
               >
                 delete inside
               </Button>
@@ -838,14 +1148,27 @@ export function VectorBrushRail(p: RailProps) {
         </div>
       )}
 
+      {/* ── ДВЕРИ НАРУЖУ И ОБРАТНО. АБЗАЦ УБРАН (Y-3), ОБА ОРГАНА НА МЕСТЕ И ТАМ ЖЕ, ГДЕ БЫЛИ:
+          «download SVG» и дверь импорта — это ЕДИНСТВЕННЫЙ путь работы в стороннем редакторе, и
+          потерять их значило бы потерять функцию, а не текст. Заголовок группы укорочен до «svg»:
+          «out and back» был половиной объяснения, а не именем.
+          ТЕКСТ АБЗАЦА НЕ ПРОПАЛ, А СТАЛ ПОДСКАЗКОЙ КНОПКИ. Он говорил то, чего по кнопке не
+          видно, — чем именно является выгрузка ДЛЯ ЭТОГО слоя (файл производителя против
+          пересериализации нарисованного), — и на слое-файле это разные вещи; `outNote` приходит
+          пропом ровно ради этого различия. На экране его больше нет, под курсором он есть. */}
       <div>
-        <GroupLabel flush>out and back</GroupLabel>
-        <Text size='nano' variant='label' component='p' className='mb-1'>
-          {p.outNote ??
-            'the SVG is written by the same renderer that draws this screen; the raster is LINKED underneath, not embedded. Fix it outside, upload it back — what a stroke cannot hold is refused by name, never dropped quietly.'}
-        </Text>
+        <GroupLabel flush>svg</GroupLabel>
         <div className='flex flex-wrap items-center gap-1.5'>
-          <Button variant='secondary' size='xs' disabled={!p.canDownload} onClick={p.onDownload}>
+          <Button
+            variant='secondary'
+            size='xs'
+            disabled={!p.canDownload}
+            onClick={p.onDownload}
+            title={
+              p.outNote ??
+              'the SVG is written by the same renderer that draws this screen; the raster is LINKED underneath, not embedded'
+            }
+          >
             download SVG
           </Button>
           <SvgImportDoor

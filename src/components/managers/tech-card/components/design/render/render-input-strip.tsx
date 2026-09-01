@@ -1,12 +1,33 @@
-import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignAsset,
+  common_DesignPicture,
+} from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
+import {
+  ASSET_FABRIC,
+  ASSETS_PER_CARD_MAX,
+  assetFull,
+  assetIsPattern,
+  assetLabel,
+  assetThumb,
+  clothShelf,
+  placementsOfAsset,
+  unmanagedAssets,
+} from '../assets/model';
+import { useAssetWrites } from '../assets/use-assets';
+import { PictureTile } from '../picture-tile';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import { benchSides, feedIsTruncated, pictureThumb, stripProvenance, unmarkedFlats } from './model';
@@ -28,6 +49,13 @@ import { CELL_WIDTH, Strip, StripCell, StripDivider } from './strip-cell';
  * says so rather than letting a technologist conclude that a drawing he uploaded last week has
  * disappeared.
  *
+ * THE SECTION NOW HOLDS A SECOND INPUT, AND IT IS A DIFFERENT KIND OF THING (Y-12). Below the
+ * flats stands CLOTH: the fabric textures of this card. A render is made FROM the drawings and OF
+ * the cloth, so both belong to «input» — but they answer different questions and therefore stand as
+ * two labelled groups rather than one ragged strip. The door moved here because the ASSETS section
+ * that used to hold it was removed (Y-11), and its reader — the CLOTHS row of the render menu — was
+ * not. See `ClothStrip` for the whole argument.
+ *
  * A HAND FILE WAS ALWAYS LEGAL INPUT HERE. Nothing on this card requires a run: an uploaded flat
  * sits on the right of the line exactly like a generated one, marks into a slot exactly like one,
  * and feeds the render exactly like one. That is why the classification refuses a picture only on
@@ -48,6 +76,321 @@ import { CELL_WIDTH, Strip, StripCell, StripDivider } from './strip-cell';
 /** Radix forbids an empty item value, and an empty one reaching `Select.Root` shows a placeholder
  *  where a label should be — so «mark ▸» is a sentinel, never `''`. */
 const MARK_PROMPT = '__mark__';
+
+/**
+ * ═══ CLOTH — ВТОРОЙ ВХОД ЭТОЙ СЕКЦИИ, И ОН ПРИЕХАЛ СЮДА ИЗ СНЯТЫХ ПОЛОК (Y-11 + Y-12) ══════════
+ *
+ * Владелец: «в INPUT — FLATS OF THIS CARD добавь ещё одно поле загружаемое: это фактура ткани».
+ * Секция ASSETS, где фактуру заводили раньше, снята целиком — а ряд CLOTHS в меню FABRIC RENDER
+ * по-прежнему берёт ткани с полки карточки. То есть дверь нельзя было просто закрыть: закрытая,
+ * она оставила бы читателя без единственного писателя, и CLOTHS навсегда остался бы пуст.
+ *
+ * ЧТО ЭТА ДВЕРЬ ПИШЕТ — ТО ЖЕ САМОЕ, ЧТО ПИСАЛА ПОЛКА: `UpsertDesignAsset` рода `fabric`. Ни одного
+ * нового поля, ни одной новой ручки; цепочка «загрузили → чип в CLOTHS → `params.colour.fabrics`»
+ * та же, что была, и история прогонов остаётся читаемой.
+ *
+ * ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ГРУППА, А НЕ ЯЧЕЙКА В ПОЛОСЕ ФЛЭТОВ. Флэт — ЧЕРТЁЖ, который рендер
+ * раскрашивает; фактура — МАТЕРИАЛ, которым он красит. Поставленные в один ряд, они читались бы
+ * как один список с одним вопросом, а «отметить в слот front» у лоскута ткани смысла не имеет
+ * вовсе. `GroupLabel` — ровно вес «на ступень ниже заголовка секции», и рамки внутри рамки он не
+ * заводит.
+ *
+ * КАДР РЕЖЕТСЯ (`cover`), А НЕ ВПИСЫВАЕТСЯ. Флэты стоят `contain`, потому что у чертежа обрезанный
+ * край — потерянный контур изделия. У лоскута края нет: это образец плетения, и поля вокруг него
+ * показывали бы фактуру мельче, чем она есть.
+ *
+ * ИМЯ ЧЕКАНИТСЯ ЗДЕСЬ, И ЭТО СОЗНАТЕЛЬНАЯ ПОТЕРЯ. Сервер безымянный ассет отвергает, а полка
+ * спрашивала имя отдельным редактором — редактора больше нет, и заводить его заново значило бы
+ * вернуть полку под другим названием. Имени файла на проводе нет (`common_MediaFull` его не
+ * несёт), так что «IMG_4471» не грозит; ассет получает `cloth N`, а СКАЗАТЬ, что это за ткань,
+ * человек по-прежнему может словами в поле IN WORDS того же прогона.
+ *
+ * ═══ РЯД ПОКАЗЫВАЕТ ОБЕ ПОЛКИ, А ЗАВОДИТ ОДНУ (Д-1) ═══════════════════════════════════════════
+ *
+ * Этот ряд был писателем ОДНОЙ полки (`fabric`), а его читатель — ряд CLOTHS в меню FABRIC RENDER
+ * — брал ДВЕ (`fabric` + `pattern`). Значит на карточке, размеченной до снятия секции ASSETS,
+ * ассет-паттерн стоял чипом, выбирался и уезжал в промпт, но плитки не имел: увидеть и удалить его
+ * было НЕЛЬЗЯ НИГДЕ во всей админке. Замер: одна ткань и один паттерн давали два чипа и одну
+ * плитку.
+ *
+ * Разрыв закрыт в сторону ПОКАЗА: состав ряда теперь называет `clothShelf` — та же функция, что
+ * читает палитра, — и паттерн получает свою плитку, свой «✕» и слово `pattern` под именем. Обратный
+ * ход (сузить читателя) молча изменил бы промпт выпущенных карточек и оставил бы строки в базе без
+ * единого органа. Полный довод — в шапке `clothShelf` (`../assets/model`).
+ *
+ * НОВЫЙ ПАТТЕРН ЗДЕСЬ НЕ ЗАВОДИТСЯ: он ткань ПЛЮС раппорт и поворот, а редактора этих чисел не
+ * осталось. Дверь честно шлёт `fabric`, и это сказано на самих плитках паттернов, а не только тут.
+ */
+function nextClothName(taken: common_DesignAsset[]): string {
+  // `taken` — ВЕСЬ ряд, ткани и паттерны вместе (Д-1). Имя должно быть уникально по тому, что
+  // ВИДНО и что уезжает в промпт: паттерн, названный когда-то «cloth 3», занимает это слово, и
+  // выдать его второй раз значило бы отправить модели две разные вещи под одним именем.
+  const names = new Set(taken.map((a) => (a.name ?? '').trim().toLowerCase()));
+  // Первое свободное, а не «сколько есть + 1»: после удаления второй из трёх счётчик выдал бы
+  // имя, которое уже занято, и две разные ткани уехали бы в промпт под одним словом.
+  for (let n = 1; n <= ASSETS_PER_CARD_MAX + 1; n += 1) {
+    if (!names.has(`cloth ${n}`)) return `cloth ${n}`;
+  }
+  return `cloth ${taken.length + 1}`;
+}
+
+function ClothStrip({
+  band,
+  techCardId,
+  disabled,
+}: {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  disabled?: boolean;
+}): JSX.Element {
+  const writes = useAssetWrites(techCardId);
+  const { showMessage } = useSnackBarStore();
+  // ОДНА ФУНКЦИЯ НА ЧИТАТЕЛЯ И ПИСАТЕЛЯ (Д-1) — ткани И паттерны, ровно то, что берёт CLOTHS.
+  const cloths = useMemo(() => clothShelf(band), [band]);
+  const [pendingRemove, setPendingRemove] = useState<common_DesignAsset | null>(null);
+
+  /**
+   * ПОТОЛОК СЧИТАЕТСЯ ПО ВСЕЙ КАРТОЧКЕ, И ЭТО ЧЕСТНО ДАЖЕ ТЕПЕРЬ, КОГДА УПРАВЛЯТЬ МОЖНО НЕ ВСЕМ.
+   *
+   * Он ЗЕРКАЛО СЕРВЕРНОГО: `UpsertDesignAsset` отвергает 41-й ассет карточки независимо от полки,
+   * и считать здесь только ткани значило бы обещать дверь, которую отвергнет провод. Но у зеркала
+   * была цена, и она и есть Д-2: место могло быть занято родом, у которого на этом экране нет ни
+   * одной плитки (`hardware` легаси-карточки), — и человек читал «the card holds 40 assets», не
+   * имея НИ ОДНОГО способа его освободить и ни одного слова о том, чем оно занято.
+   *
+   * Поэтому потолок остался общим, а ОТЧЁТ стал раздельным: сколько мест держит этот ряд и сколько
+   * — то, чего он не показывает. Числа собираются здесь, слова — у самой двери.
+   */
+  const totalAssets = (band.assets ?? []).length;
+  const unmanaged = useMemo(() => unmanagedAssets(band), [band]);
+  const full = totalAssets >= ASSETS_PER_CARD_MAX;
+  const marksOnPending = pendingRemove ? placementsOfAsset(band, pendingRemove.id ?? 0).length : 0;
+
+  /**
+   * ПОЧЕМУ ДВЕРЬ ЗАКРЫТА — СЛОВАМИ, А НЕ ЧИСЛОМ. Причина стоит и в `data-inert`, и в `title`: это
+   * единственное, что человек прочтёт, обнаружив, что плейсхолдер не кликается.
+   */
+  const fullReason =
+    unmanaged.length === 0
+      ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, all of them in this row — remove one below to make room`
+      : cloths.length === 0
+        ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, and every one of them is hardware from the removed ASSETS shelves — nothing on this screen can free a place, so this card cannot take a cloth`
+        : `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets: ${cloths.length} in this row and ${unmanaged.length} hardware from the removed ASSETS shelves, which no screen can remove any more — free a place by removing a cloth below`;
+
+  return (
+    <>
+      <GroupLabel
+        action={
+          <Text size='micro' variant='label' component='span'>
+            {cloths.length === 0 ? 'none yet' : `${cloths.length} on this card`}
+          </Text>
+        }
+      >
+        cloth
+      </GroupLabel>
+
+      <Strip>
+        {cloths.map((a) => {
+          const id = a.id ?? 0;
+          const name = assetLabel(a);
+          const url = assetThumb(a);
+          const marks = placementsOfAsset(band, id).length;
+          const pattern = assetIsPattern(a);
+          /* ВТОРАЯ СТРОКА — ТОЛЬКО ФАКТЫ, КОТОРЫХ НЕ ВИДНО НА КАДРЕ. Род называется словом лишь у
+             паттерна: ткань — умолчание этого ряда, и подписывать её «fabric» под группой CLOTH
+             значило бы повторять подпись. Паттерн же ОТЛИЧАЕТСЯ и судьбой (нового такого здесь не
+             завести), и числом (раппорт), а на глаз лоскут от набивки не отличить. */
+          const notes = [
+            pattern ? ['pattern', a.repeatMm ? `${a.repeatMm} mm` : ''].filter(Boolean).join(' · ') : '',
+            marks > 0 ? `${marks} marked` : '',
+          ].filter(Boolean);
+          return (
+            <div key={`cloth-${id}`} className={`flex flex-col gap-1 ${CELL_WIDTH}`}>
+              <PictureTile
+                url={url}
+                alt={name}
+                aspect='132/148'
+                fit='cover'
+                className='w-full bg-bgColor'
+                gallery={
+                  url ? { src: assetFull(a), thumbnail: url, type: 'image', alt: name } : undefined
+                }
+                /* ✕ ПРИМИТИВА ЗДЕСЬ ЗНАЧИТ ИМЕННО «УБРАТЬ», и это не то же самое, что «unmark»
+                   слева от линии. Там пустеет слот, а плита остаётся на карточке; здесь ткань
+                   уходит с карточки совсем. Убрать эту кнопку было бы дешевле — и оставило бы
+                   единственного писателя тканей БЕЗ отката: ошибочная загрузка висела бы чипом в
+                   CLOTHS вечно, потому что снять её больше негде во всей админке. */
+                onRemove={
+                  disabled
+                    ? undefined
+                    : {
+                        onClick: () => setPendingRemove(a),
+                        ariaLabel: `remove ${name}`,
+                        title: pattern
+                          ? 'remove this pattern from the card'
+                          : 'remove this cloth from the card',
+                      }
+                }
+              />
+              <Text size='nano' component='span' className='min-w-0 truncate font-bold uppercase'>
+                {name}
+              </Text>
+              {/* ВТОРАЯ СТРОКА ТОЛЬКО ТОГДА, КОГДА ЕЙ ЕСТЬ ЧТО СКАЗАТЬ. Здесь стояло слово
+                  «texture» на каждой ячейке — под группой, которая и так называется CLOTH, оно
+                  повторяло подпись и читалось как украшение. Метки же — настоящий факт, и на
+                  карточке, размеченной до снятия ASSETS, это единственное место, где их вообще
+                  видно; они же назовут цену удаления в вопросе ниже. */}
+              {notes.length > 0 && (
+                <Text size='nano' variant='label' component='span'>
+                  {notes.join(' · ')}
+                </Text>
+              )}
+            </div>
+          );
+        })}
+
+        {!disabled && (
+          <div className={`flex flex-col gap-1 ${CELL_WIDTH}`}>
+            {/* ═══ ДВЕРЬ НА ПОТОЛКЕ ГАСНЕТ, А НЕ ГЛОТАЕТ (Д-2) ═════════════════════════════════
+                Здесь стоял живой `MediaSlot`, а отказ жил ПОСЛЕДНЕЙ строкой обработчика:
+                `if (!first?.id || full) return`. Человек проходил приёмную модалку целиком —
+                превью, кроп, подтверждение — и не происходило НИЧЕГО, без единого слова. Это
+                худший из возможных отказов: он неотличим от поломки.
+
+                Теперь на потолке рисуется мёртвый кадр с причиной (`data-inert` + `title`),
+                ровно по общему закону полосы: вырезанное — инертно и с доводом, а не отсутствует.
+                Тот же кадр, те же пропорции; исчезает только жест, который всё равно ничего не
+                делал. */}
+            {full ? (
+              <span data-inert={fullReason} title={fullReason} className='block w-full'>
+                <Placeholder
+                  label='+ cloth'
+                  dashed
+                  style={{ aspectRatio: '132/148' }}
+                  className='w-full'
+                />
+              </span>
+            ) : (
+              <MediaSlot
+                aspectRatio={['Custom']}
+                frameAspect='132/148'
+                label='+ cloth'
+                hint={null}
+                purpose='design · cloth texture of this tech card'
+                showVideos={false}
+                editMode
+                onSelect={(media) => {
+                  const first = media[0];
+                  if (!first?.id) return;
+                  /* ВТОРАЯ ПРОВЕРКА ПОТОЛКА, И ОНА ГОВОРИТ ВСЛУХ. Дверь погашена по полосе,
+                     прочитанной ЭТИМ рендером, а между её отрисовкой и подтверждением модалки
+                     стоит целая прогулка человека: соседняя вкладка успевает добрать потолок.
+                     Молчать в этом случае — тот же дефект под другим именем, поэтому здесь не
+                     `return`, а сообщение. Сам вызов не отправляется: сервер отказал бы, и отказ
+                     пришёл бы теми же словами, но на секунду позже и без числа. */
+                  if (totalAssets >= ASSETS_PER_CARD_MAX) {
+                    showMessage(fullReason, 'error');
+                    return;
+                  }
+                  writes.upsertAsset.mutate({
+                    // `assetId: 0` заводит. Род — УТВЕРЖДЕНИЕ этой двери: она стоит под подписью
+                    // CLOTH, значит через неё приходит ткань. По пикселям это не восстановимо.
+                    assetId: 0,
+                    kind: ASSET_FABRIC,
+                    name: nextClothName(cloths),
+                    mediaId: first.id,
+                  });
+                }}
+              />
+            )}
+            <Text size='nano' variant='label' component='span' className='normal-case'>
+              {/* ПОДПИСЬ НАЗЫВАЕТ ЧИСЛА, А НЕ ТОЛЬКО ФАКТ. «the card holds 40 assets» не отвечало
+                  на единственный вопрос человека — что убрать; при потолке, добранном фурнитурой,
+                  оно ещё и звало убирать то, чего на экране нет. */}
+              {!full
+                ? 'optional'
+                : unmanaged.length === 0
+                  ? `${ASSETS_PER_CARD_MAX} of ${ASSETS_PER_CARD_MAX} — remove one below`
+                  : `${ASSETS_PER_CARD_MAX} of ${ASSETS_PER_CARD_MAX} — ${cloths.length} here, ${unmanaged.length} hardware`}
+            </Text>
+            <Text size='nano' variant='label' component='span'>
+              {full ? 'at the limit' : '⌘V · drop · browse'}
+            </Text>
+          </div>
+        )}
+      </Strip>
+
+      {/* ОДНА СТРОКА, А НЕ АБЗАЦ. Владелец только что снял объяснение из CLOTHS (Y-13); написать
+          здесь абзац значило бы перенести ту же прозу на два блока выше. Остаётся ровно то, чего
+          из картинок не видно: что рендер читает с этого снимка и где им пользуются. */}
+      {/* ПРИЧИНА ПОТОЛКА — ВИДИМОЙ СТРОКОЙ, А НЕ ТОЛЬКО ПОДСКАЗКОЙ. В `title` она есть, но
+          подсказка требует НАВЕСТИ на кадр, а человек, у которого дверь погасла, смотрит на неё и
+          уходит. На карточке, где потолок добран фурнитурой, это к тому же ТУПИК: сказать про него
+          мышью — почти то же молчание, ради которого этот дефект и заводили. */}
+      {full && (
+        <Text size='micro' variant='label' component='p' className='normal-case'>
+          {fullReason}.
+        </Text>
+      )}
+
+      <Text size='micro' variant='label' component='p' className='normal-case'>
+        The render reads weave, sheen and drape off these; pick which one a run uses under FABRIC →
+        CLOTHS below.
+        {/* ПАТТЕРНЫ НАЗЫВАЮТСЯ ТОЛЬКО ТОГДА, КОГДА ОНИ ЕСТЬ (Д-1). Строка про снятый редактор на
+            карточке без паттернов рассказывала бы про орган, которого человек никогда не видел; на
+            карточке С паттерном она отвечает на единственный вопрос, который у него возникнет, —
+            почему эту плитку нельзя завести заново. */}
+        {cloths.some(assetIsPattern) && (
+          <>
+            {' '}
+            The ones marked <b>pattern</b> were made on the removed ASSETS shelves: they still count
+            as cloth for a run, and they can still be removed here, but a new one cannot be made —
+            its repeat and rotation had their own editor, and it went with the shelves.
+          </>
+        )}
+      </Text>
+
+      <ConfirmationModal
+        open={!!pendingRemove}
+        onOpenChange={(open) => !open && setPendingRemove(null)}
+        title={`remove ${pendingRemove ? assetLabel(pendingRemove) : 'this cloth'}?`}
+        confirmLabel='remove'
+        onConfirm={() => {
+          const id = pendingRemove?.id ?? 0;
+          if (id > 0) writes.deleteAsset.mutate(id);
+          setPendingRemove(null);
+        }}
+      >
+        <div className='flex flex-col gap-2'>
+          {/* ЦЕНА НАЗЫВАЕТСЯ ЧИСЛОМ, А НЕ ОБЩИМИ СЛОВАМИ. Удаление ткани КАСКАДОМ сносит её метки
+              на флэтах, а поставить их заново после снятия секции ASSETS нечем — так что здесь
+              это не «переделаете», а «потеряете». Молчать об этом на карточке, размеченной до
+              снятия, значило бы дать человеку нажать «ok» на необратимом. */}
+          {marksOnPending > 0 && (
+            <Text size='control'>
+              {marksOnPending} mark{marksOnPending === 1 ? '' : 's'} drawn on the flats go with it,
+              and they cannot be drawn again — the marking screen is gone.
+            </Text>
+          )}
+          {/* УДАЛЕНИЕ ПАТТЕРНА ДОРОЖЕ УДАЛЕНИЯ ТКАНИ, И ЭТО НАДО СКАЗАТЬ ДО «ok». Ткань заводится
+              этой же дверью заново из той же картинки; паттерн — нет: его раппорт и поворот
+              задавались редактором, снятым вместе с секцией ASSETS. Одинаковый вопрос на два
+              разных по цене жеста учил бы нажимать не глядя. */}
+          {assetIsPattern(pendingRemove ?? undefined) && (
+            <Text size='control'>
+              This one is a <b>pattern</b>: it cannot be made again here — the repeat and rotation
+              had their own editor, and it went with the removed ASSETS shelves.
+            </Text>
+          )}
+          <Text size='control'>
+            The picture file stays in the library. Runs already made keep their own frozen copy of
+            this cloth, so their history stays readable.
+          </Text>
+        </div>
+      </ConfirmationModal>
+    </>
+  );
+}
 
 export function RenderInputStrip({
   band,
@@ -99,13 +442,19 @@ export function RenderInputStrip({
   return (
     <Section
       title='input — flats of this card'
-      question='— the drawings the render is made from: generated, uploaded or drawn'
+      question='— the drawings the render is made from, and the cloth it is made of'
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
           {marked.length} marked · {others.length} not marked
         </Text>
       }
     >
+      {/* ДВЕ ГРУППЫ ПОД ОДНИМ ЗАГОЛОВКОМ, И ОБЕ ПОДПИСАНЫ. Пока вход был один, подписывать его
+          заголовком секции было достаточно; со второй группой безымянная первая читалась бы как
+          «просто содержимое секции», а вторая — как приписка к ней. Это не два блока: `GroupLabel`
+          это вес линейки, а блок в блоке в этой системе запрещён. */}
+      <GroupLabel flush>flats</GroupLabel>
+
       <Strip>
         {marked.map((side) => {
           const picture = side.picture!;
@@ -241,6 +590,8 @@ export function RenderInputStrip({
           newest page; older ones are still on the card and still in their slots.
         </Text>
       )}
+
+      <ClothStrip band={band} techCardId={techCardId} disabled={disabled} />
     </Section>
   );
 }
