@@ -23,6 +23,7 @@ import {
   type BoardItem,
 } from './mood-board';
 import { RecalledRunPrompt } from './history-recall';
+import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { useSplitToInput } from './split-to-input';
 import { DETAIL_VIEW, normaliseViewKey } from './views';
@@ -397,6 +398,31 @@ export function ReferencesSection({
     onAccepted: (media) => setPicked((prev) => [...prev, ...media]),
   });
 
+  /**
+   * ─── РИСОВАНИЕ РЕФЕРЕНСА С НУЛЯ (M-2), дословно: «в референсах дать возможность создать новый
+   * референс в эдиторе».
+   *
+   * ЭТО ВТОРАЯ ДВЕРЬ В ТУ ЖЕ КОМНАТУ, А НЕ ВТОРОЙ СОРТ РЕФЕРЕНСА. Слева слот — «принести
+   * картинку» (библиотека, ⌘V, бросок); справа — «нарисовать её». Что выйдет из редактора, станет
+   * обычной строкой входа: та же роль, та же записка, тот же ✕. Отдельного вида референса не
+   * заводится, потому что модели всё равно, откуда взялся пиксель.
+   *
+   * `base={null}` — ЭТО НЕ ЗАГЛУШКА, А ЗАЯВЛЕННЫЙ РЕЖИМ МОДАЛКИ («Absent = a drawing from nothing,
+   * which is its own kind of layer») И ЖИВОЙ ПУТЬ НА СЕРВЕРЕ: слой с `base_media_id = 0` — это
+   * «the clean vector base of the «draw it» door» (store/design/layer.go), а сплющивание такого
+   * слоя просто не находит родителя и заводит картинку без деривации. До этой правки режим не
+   * звал никто: все три прежних вызова передавали картинку.
+   *
+   * БУМАГА ПОД РИСУНКОМ БЕЛАЯ, А НЕ ПРОЗРАЧНАЯ, и это уже так: `composeScene` заливает холст
+   * `#ffffff` прежде всего остального. Иначе человек рисовал бы чёрным по белой плате, а в промпт
+   * уходил бы PNG, который у половины просмотрщиков читается как пустой прямоугольник.
+   *
+   * ⚠ T-15 НЕ НАРУШЕНА. «В INPUT — REFERENCES не должны уходить все флеты если мы их явно туда
+   * сами не добавим» — здесь жест человека и есть то самое явное добавление, четвёртое в ряду со
+   * слотом, «take into input» и разрезом.
+   */
+  const [drawOpen, setDrawOpen] = useState(false);
+
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
   const nothingToClear =
     members.length === 0 && refOf.size === 0 && !(garment.field.value ?? '').trim();
@@ -523,6 +549,27 @@ export function ReferencesSection({
                 onSelect={addReferences}
               />
             )}
+            {/* ВТОРАЯ ДВЕРЬ СТОИТ В ПУСТОЙ ПРАВОЙ КОЛОНКЕ ЭТОЙ ЖЕ ЯЧЕЙКИ, а не отдельной
+                пунктирной клеткой рядом. Два одинаковых пунктирных прямоугольника читались бы как
+                два пустых слота, а не как две двери; здесь же колонка справа всё равно пустовала —
+                у плейсхолдера нет ни роли, ни записки, которые она держит у остальных.
+                ОБЪЯСНЯЮЩЕГО АБЗАЦА НЕТ НАРОЧНО (R-16, K-5, K-19): «or» — связка между двумя
+                дверями, а не подпись к ним. Что делает кнопка, сказано глаголом на самой кнопке. */}
+            {!readOnly && (
+              <div className='flex min-w-0 flex-col items-start gap-2 pt-1'>
+                <Text size='micro' variant='label' component='span'>
+                  or
+                </Text>
+                <Button
+                  size='xs'
+                  variant='secondary'
+                  onClick={() => setDrawOpen(true)}
+                  title='opens the picture editor on a blank plate; what you draw joins the input'
+                >
+                  draw a reference
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -546,6 +593,27 @@ export function ReferencesSection({
 
       {/* Модалка сплита (R-17) — монтируется хуком, когда для картинки получена картинка полосы. */}
       {split.modal}
+
+      {/* РЕДАКТОР НА ЧИСТОЙ ПЛАТЕ (M-2). Смонтирован только когда открыт: у модалки есть
+          собственные оконные слушатели клавиш (⌘Z, ⌘C/⌘V, [ и ]), и держать их живыми под
+          закрытым диалогом значило бы отбирать эти клавиши у страницы. */}
+      {!readOnly && drawOpen && (
+        <VectorModal
+          open={drawOpen}
+          onOpenChange={setDrawOpen}
+          techCardId={techCardId}
+          band={band}
+          base={null}
+          disabled={readOnly}
+          onFlattened={(picture) => {
+            // Медиа берётся ИЗ ОТВЕТА СЕРВЕРА, а не из того, что клиент только что загрузил:
+            // строку входа заводит `appendBoardPictures` по `common_MediaFull`, и половинчатая
+            // запись без адресов нарисовала бы ячейку с пустым кадром.
+            const full = picture.media;
+            if (full) addReferences([full]);
+          }}
+        />
+      )}
 
       {/* ВОПРОС ПЕРЕД СНОСОМ ВХОДА (R-15) — с числами и с границей честности: роли и записки
           уходят с сервера СЕЙЧАС, строки и описание — с карточки при её сохранении. */}
