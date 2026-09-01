@@ -35,6 +35,7 @@ import {
 } from './use-edit-layer';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
 import {
+  COPY_NUDGE,
   copyInsideSelection,
   deleteInsideSelection,
   pointInPolygon,
@@ -42,6 +43,12 @@ import {
   settleLasso,
   type SelectionArea,
 } from './vector-lasso';
+import {
+  DEFAULT_TOLERANCE,
+  bucketFill,
+  parseFillColor,
+  selectionAlpha,
+} from './vector-fill';
 import { DEFAULT_NIB, clampNib, eraseAlong, stampAlong } from './vector-nib';
 import {
   PLATE_W,
@@ -50,11 +57,15 @@ import {
   clearGesture,
   cloneAlong,
   commitStage,
+  cutoutInside,
+  cutoutRect,
+  drawCutout,
   exportRasterPng,
   markRect,
   maskBox,
   nibRadius,
   paintAlong,
+  rasterCtx,
   rasterBox,
 
   renderView,
@@ -92,6 +103,9 @@ import {
   DEFAULT_GAUGE,
   DEFAULT_STEP,
   clampGauge,
+  stitchMinLength,
+  strokeGauge,
+  strokeStep,
   clampStep,
   gaugeWeight,
   layerSvg,
@@ -167,6 +181,7 @@ type Tool =
   | 'paint'
   | 'erase'
   | 'stamp'
+  | 'fill'
   | 'lasso'
   | 'pan';
 
@@ -215,6 +230,7 @@ const TOOL_LABEL: Record<Tool, string> = {
   paint: 'brush',
   erase: 'erase',
   stamp: 'stamp',
+  fill: 'fill',
   lasso: 'lasso',
   pan: 'pan',
 };
@@ -229,6 +245,7 @@ const TOOL_KEY: Record<Tool, string> = {
   paint: 'r',
   erase: 'e',
   stamp: 's',
+  fill: 'g',
   lasso: 'w',
   pan: 'h',
 };
@@ -248,6 +265,7 @@ const TOOL_HINT: Record<Tool, string> = {
   erase:
     'rub away everything under the nib — the pixels go to transparency, the photo included, and the drawn lines are cut through. Lines are only cut at full opacity (a line cannot be half-erased), never while the lines layer is hidden, and never outside an active area',
   stamp: 'copy PIXELS from the source to under your hand, as in photoshop',
+  fill: 'flood the area under the cursor with the ink in hand — an active area holds it in',
   lasso: 'draw an area — it holds the raster tools in and cuts the lines at its edge',
   pan: 'move the sheet',
 };
@@ -262,13 +280,22 @@ const TOOL_HINT: Record<Tool, string> = {
  */
 const TOOL_BANDS: { material: Material; label: string; tools: Tool[] }[] = [
   { material: 'lines', label: 'lines', tools: ['line', 'freehand', 'curve', 'select', 'clone'] },
-  { material: 'pixels', label: 'pixels', tools: ['paint', 'erase', 'stamp'] },
+  { material: 'pixels', label: 'pixels', tools: ['paint', 'erase', 'stamp', 'fill'] },
   { material: 'view', label: 'area & view', tools: ['lasso', 'pan'] },
 ];
 
 /** Инструменты, красящие ПИКСЕЛИ. Их жест копится в буфере растра, а не в списке штрихов. */
 const isRasterTool = (t: Tool): t is 'paint' | 'erase' | 'stamp' =>
   t === 'paint' || t === 'erase' || t === 'stamp';
+
+/**
+ * ПИКСЕЛЬНЫЙ, НО НЕ МАЖУЩИЙ. Заливке нужен растр — и только это у неё общего с кистью: жеста у неё
+ * нет (один клик), буфера мазка нет (пишет прямо в документ, как «стереть внутри»), кольца ниба нет
+ * (заливка не имеет размера). Поэтому она НЕ входит ни в `isRasterTool`, ни в `isNibTool`, а
+ * «нужен ли растр» спрашивается отдельным предикатом — иначе она поехала бы по пути scratch→stage,
+ * которого у неё нет.
+ */
+const needsRaster = (t: Tool): boolean => isRasterTool(t) || t === 'fill';
 
 /** Инструмент, множащий ЛИНИИ круглым нибом. Резчик ушёл в ластик — см. `TOOL_BANDS`. */
 const isLineNib = (t: Tool): t is 'clone' => t === 'clone';
@@ -284,6 +311,10 @@ const isNibTool = (t: Tool): t is 'clone' | 'paint' | 'erase' | 'stamp' =>
 
 /** Инструменты, берущие ИСТОЧНИК alt-кликом. */
 const isSourceTool = (t: Tool): t is 'clone' | 'stamp' => t === 'clone' || t === 'stamp';
+
+/** Инструменты, рисующие НИТЬЮ: их «размер в руке» — толщина, а не радиус круга. */
+const isThreadTool = (t: Tool): t is 'line' | 'freehand' | 'curve' =>
+  t === 'line' || t === 'freehand' || t === 'curve';
 
 /** How close a click has to land, in SCREEN pixels, to mean «this stroke». */
 const HIT_PX = 10;
@@ -416,6 +447,11 @@ export function VectorModal({
   const [stepOwn, setStepOwn] = useState(false);
   /** Круг ниба, в пикселях платы. Отдельно от нити — см. довод у `isNibTool`. */
   const [nib, setNib] = useState<number>(DEFAULT_NIB);
+  /** Заливка: насколько далеко от цвета под курсором она соглашается идти, и на сколько заходит под
+   *  антиалиасинг соседнего контура. Мягкость края и размытие маски наружу не выведены нарочно —
+   *  четыре ручки на одну работу это ручки, которые человек крутит в одну сторону. */
+  const [fillTolerance, setFillTolerance] = useState<number>(DEFAULT_TOLERANCE);
+  const [fillExpand, setFillExpand] = useState<number>(0);
   /**
    * ЖЁСТКОСТЬ КРАЯ И НЕПРОЗРАЧНОСТЬ — свойства КРУГЛОГО КОНЧИКА, а не нити, и живут только пока в
    * руке пиксельный инструмент: у резчика линий мягкого края не бывает вовсе (полилиния режется ПО
@@ -493,6 +529,23 @@ export function VectorModal({
    */
   const [sels, setSels] = useState<SelectionArea[]>([]);
   const [activeSel, setActiveSel] = useState<number | null>(null);
+  /**
+   * БУФЕР ОБМЕНА ОБЛАСТИ (Q-6). Держит ОБА материала: линии внутри дорожки и вырезанные по той же
+   * маске пиксели. Прежний глагол «copy inside» умел только линии — тот же дефект, который владелец
+   * нашёл у «удалить внутри»: человек обводил кусок фотографии, копировал и не получал ничего.
+   *
+   * Живёт в ref, а не в состоянии: содержимое буфера ничего не рисует, и перерисовка на ⌘C была бы
+   * работой ради ничего. Каждая следующая вставка отступает дальше предыдущей, чтобы две вставки
+   * подряд не легли одна в одну.
+   */
+  const clip = useRef<{
+    strokes: VectorStroke[];
+    cut: HTMLCanvasElement | null;
+    at: [number, number];
+    pastes: number;
+  } | null>(null);
+  /** Последняя СНЯТАЯ область — для ⇧⌘D. Так же, как Reselect в фотошопе. */
+  const lastDropped = useRef<SelectionArea | null>(null);
   /** Курсор над холстом в режиме пера — конец резинки. Реф + зеркало, тем же приёмом, что жест. */
   const penHoverRef = useRef<[number, number] | null>(null);
   const [penHover, setPenHover] = useState<[number, number] | null>(null);
@@ -958,6 +1011,49 @@ export function VectorModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, frozen, doUndo, doRedo, putPen]);
 
+  /**
+   * ⌘C / ⌘V — БУФЕР ОБЛАСТИ (Q-6), ⌘D / ⇧⌘D — снять и вернуть выделение (Q-4).
+   *
+   * ⚠ НА ОКНЕ, А НЕ НА МОДАЛКЕ, и это не стиль. Обработчик модалки срабатывает, только если фокус
+   * внутри неё; после клика по любой кнопке рейки он на этой кнопке — внутри, — но стоит фокусу
+   * оказаться на самом холсте (не фокусируемом) или уйти после закрытия всплывашки, и клавиша
+   * молчит. Замерено пробой: ⌘V после нажатия «copy inside» не вставлял ничего. ⌘Z по этой самой
+   * причине живёт на окне с самого начала; клавиши буфера — та же порода.
+   *
+   * Гард текстового поля тот же: в настоящем поле ⌘C/⌘V принадлежат браузеру.
+   */
+  useEffect(() => {
+    if (!open || frozen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (
+        (event.target as HTMLElement)?.closest?.(
+          'input, textarea, [contenteditable=""], [contenteditable="true"]',
+        )
+      )
+        return;
+      // По `e.code`: на кириллической раскладке `e.key` для этих клавиш — «с», «м» и «в».
+      if (event.code === 'KeyC') {
+        if (activeSel === null) return;
+        event.preventDefault();
+        void copySel(activeSel);
+        return;
+      }
+      if (event.code === 'KeyV') {
+        event.preventDefault();
+        void pasteClip();
+        return;
+      }
+      if (event.code === 'KeyD') {
+        event.preventDefault();
+        if (event.shiftKey) reselect();
+        else if (dropSel(activeSel)) showMessage('area dropped — ⇧⌘D brings it back', 'success');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   // ── пиксельный канал: заведение, маска выделения, жест ─────────────────────────────────────
 
   /**
@@ -1330,12 +1426,12 @@ export function VectorModal({
       if (penRef.current) commitPen();
       setTool(t);
       if (t !== 'select') setSelected(null);
-      if (isRasterTool(t) && !frozen) {
+      if (needsRaster(t) && !frozen) {
         // ЗАПЕРТЫЙ ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ НЕ ОСТАЁТСЯ В РУКЕ. Чип, выбранный и молча ничего не
         // делающий, читается как сломанный редактор; рука возвращается к `select`, а причина
         // стоит отказом над холстом.
         void ensureRaster().then((layer) => {
-          if (!layer) setTool((cur) => (isRasterTool(cur) ? 'select' : cur));
+          if (!layer) setTool((cur) => (needsRaster(cur) ? 'select' : cur));
         });
       }
     },
@@ -1433,7 +1529,7 @@ export function VectorModal({
     // ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ БЕЗ РАСТРА НЕ РИСУЕТ В ПУСТОТУ. `ensureRaster` уже сработал на смене
     // чипа; сюда попадают только случаи, когда копия подложки не приехала — и молчаливый мазок
     // «в никуда» был бы худшим из возможных ответов.
-    if (isRasterTool(tool) && !rasterRef.current) {
+    if (needsRaster(tool) && !rasterRef.current) {
       showMessage('the pixel layer is not ready yet — one moment', 'error');
       void ensureRaster();
       return;
@@ -1453,6 +1549,10 @@ export function VectorModal({
         return;
       }
       putPen(res.pen);
+      return;
+    }
+    if (tool === 'fill') {
+      void fillAt(at);
       return;
     }
     if (isRasterTool(tool)) {
@@ -1495,7 +1595,13 @@ export function VectorModal({
     }
     // НИБ ВИДЕН ДО НАЖАТИЯ. Круг под курсором — единственный способ узнать, что сотрётся, ДО того
     // как оно сотрётся; курсор-крестик про размер ниба не говорит ничего.
-    if (isNibTool(tool)) setNibHover(frameAt(event));
+    /**
+     * РАЗМЕР ПОД КУРСОРОМ — И У ЛИНИЙ ТОЖЕ (Q-8). Круг ниба показывался только пиксельным
+     * инструментам; линия, перо и след руки рисовали НИТЬЮ, толщину которой человек мог узнать
+     * только нарисовав. Владелец просил показывать размер кисти на наведении — «кисть» здесь и
+     * есть то, чем рисует инструмент в руке, какого бы он ни был материала.
+     */
+    if (isNibTool(tool) || isThreadTool(tool)) setNibHover(frameAt(event));
     if (!traceRef.current) return;
     const at = frameAt(event);
     // A LINE KEEPS TWO POINTS, A TRACE ACCUMULATES. Pushing every sample and slicing at the end
@@ -1531,8 +1637,16 @@ export function VectorModal({
         setSels([...sels, { pts: poly, feather: 0 }]);
         setActiveSel(sels.length);
       } else {
-        // Жест-клик: активировать область под курсором или снять активность вовсе.
-        setActiveSel(findSelAt(liveTrace[liveTrace.length - 1]));
+        /**
+         * ЖЕСТ-КЛИК (Q-5). Владелец: «выделение должно пропадать на просто клик такое же поведение
+         * как в фотошопе». Клик ВНУТРИ области берёт её в руку — областей тут может быть несколько,
+         * и переключаться между ними надо чем-то. Клик по пустому месту СНИМАЕТ ту, что в руке:
+         * прежде он лишь снимал активность, дорожка оставалась на экране, и убрать её можно было
+         * только кнопкой в панели — ровно то, на что владелец и жалуется.
+         */
+        const hit = findSelAt(liveTrace[liveTrace.length - 1]);
+        if (hit !== null) setActiveSel(hit);
+        else if (dropSel(activeSel)) showMessage('area dropped — ⇧⌘D brings it back', 'success');
       }
       return;
     }
@@ -1602,19 +1716,130 @@ export function VectorModal({
   // ── операции над выделениями лассо ─────────────────────────────────────────────────────────
 
   /** Копия того, что внутри области. Со смещением — копия точно поверх читалась бы как «ничего». */
-  const copySel = (i: number) => {
+  /**
+   * СКОПИРОВАТЬ ТО, ЧТО ВНУТРИ — И ЛИНИИ, И ПИКСЕЛИ (Q-6).
+   *
+   * ⚠ ЗДЕСЬ БЫЛ ТОТ ЖЕ ДЕФЕКТ, ЧТО ВЛАДЕЛЕЦ НАШЁЛ У УДАЛЕНИЯ: глагол брал только штрихи. Обвёл
+   * кусок фотографии, нажал копировать — «the selection holds no strokes», отказ, объясняющий не
+   * то, что произошло. Рядом стояла кнопка «soften inside», которая пиксели трогает.
+   *
+   * И это уже не «дублировать», а НАСТОЯЩИЙ БУФЕР. Прежний глагол клал копию сразу и на месте:
+   * вставить её в другую область, в другую часть плиты или дважды было нечем. Теперь ⌘C кладёт в
+   * буфер, ⌘V достаёт — как везде.
+   */
+  const copySel = async (i: number) => {
     const sel = sels[i];
     if (!sel || frozen) return;
-    const born = copyInsideSelection(strokesRef.current, sel.pts);
-    if (!born.length) {
-      showMessage('the selection holds no strokes — nothing was copied', 'error');
+    const born = copyInsideSelection(strokesRef.current, sel.pts, [0, 0]);
+
+    // Пиксели берём, только если растр уже заведён: заводить его РАДИ КОПИИ значило бы molча
+    // испачкать слой (копия подложки — это правка) ради жеста, который ничего не меняет.
+    let cut: HTMLCanvasElement | null = null;
+    const layer = rasterRef.current;
+    if (layer) {
+      const mask = selectionMask(layer, sel.pts, sel.feather);
+      if (mask) cut = cutoutInside(layer, mask)?.canvas ?? null;
+    }
+    if (!born.length && !cut) {
+      showMessage('the selection holds nothing to copy', 'error');
       return;
     }
-    commitLines([...strokesRef.current, ...born]);
-    showMessage(
-      `${born.length} stroke${born.length === 1 ? '' : 's'} copied — the copies sit slightly offset`,
-      'success',
-    );
+    clip.current = { strokes: born, cut, at: [0, 0], pastes: 0 };
+    const what = [
+      born.length ? `${born.length} line${born.length === 1 ? '' : 's'}` : '',
+      cut ? 'pixels' : '',
+    ]
+      .filter(Boolean)
+      .join(' and ');
+    showMessage(`${what} copied — ⌘V puts them down`, 'success');
+  };
+
+  /**
+   * ВСТАВИТЬ (Q-6). Один жест — ОДИН шаг ленты на оба материала, как у «удалить внутри»: записанные
+   * порознь, они требовали бы двух ⌘Z, и первое нажатие оставляло бы состояние, которого никто не
+   * создавал — линии вернулись, вставленные пиксели остались.
+   */
+  const pasteClip = async () => {
+    const c = clip.current;
+    if (!c || frozen) {
+      if (!c) showMessage('nothing in the clipboard — copy an area first', 'error');
+      return;
+    }
+    // Каждая следующая вставка отступает дальше: две подряд не лягут одна в одну и не будут
+    // выглядеть как «вставилось один раз».
+    const step = c.pastes + 1;
+    const off: [number, number] = [COPY_NUDGE[0] * step, COPY_NUDGE[1] * step];
+
+    const layer = c.cut ? await ensureRaster() : rasterRef.current;
+    if (frozenRef.current) return;
+
+    // Список штрихов читается ПОСЛЕ ожидания: `ensureRaster` может ждать загрузку сотни
+    // миллисекунд, и снятый до неё список затёр бы всё, что человек успел нарисовать.
+    const linesBase = strokesRef.current;
+    const born = c.strokes.map((st) => ({
+      ...st,
+      pts: st.pts.map(([x, y]) => [x + off[0], y + off[1]] as [number, number]),
+      ...(st.segs
+        ? {
+            segs: st.segs.map((seg) =>
+              seg
+                ? ([seg[0] + off[0], seg[1] + off[1], seg[2] + off[0], seg[3] + off[1]] as [
+                    number,
+                    number,
+                    number,
+                    number,
+                  ])
+                : null,
+            ),
+          }
+        : {}),
+    }));
+    const next = born.length ? [...linesBase, ...born] : linesBase;
+
+    let put: (() => void) | null = null;
+    if (layer && c.cut) {
+      const cut = c.cut;
+      const dx = off[0] * layer.w;
+      const dy = off[1] * layer.h;
+      // Коробка размечается ДО записи: `recordCombined` читает её, чтобы понять, какой кусок
+      // холста запомнить, и пустая коробка означала бы шаг, ничего не восстанавливающий.
+      clearGesture(layer);
+      const box = cutoutRect(layer, cut, dx, dy);
+      if (box) {
+        markRect(layer, box);
+        put = () => drawCutout(layer, cut, dx, dy);
+      }
+    }
+    const done = timeline.current.recordCombined(layer, linesBase, next, born.length > 0, put);
+    if (layer) {
+      clearGesture(layer);
+      paintView();
+    }
+    if (done.pixels) {
+      rasterDirtyRef.current = true;
+      setRasterDirty(true);
+    }
+    if (done.lines) {
+      strokesRef.current = next;
+      setStrokes(next);
+    }
+    if (done.lines || done.pixels) {
+      bumpTl();
+      clip.current = { ...c, pastes: step };
+      showMessage('pasted', 'success');
+      return;
+    }
+    showMessage('the clipboard held nothing that could be put down here', 'error');
+  };
+
+  const reselect = () => {
+    const sel = lastDropped.current;
+    if (!sel || frozen) return;
+    lastDropped.current = null;
+    setSels((prev) => {
+      setActiveSel(prev.length);
+      return [...prev, sel];
+    });
   };
 
   /**
@@ -1772,10 +1997,25 @@ export function VectorModal({
     showMessage(`pixels inside area ${i + 1} softened by ${sel.feather}px`, 'success');
   };
 
-  /** Снять саму область — штрихи не трогаются. */
-  const dropSel = (i: number) => {
+  /**
+   * СНЯТЬ САМУ ОБЛАСТЬ — штрихи не трогаются.
+   *
+   * Отсюда же ходят ⌘D и клик по пустому месту (Q-4, Q-5): владелец просил, чтобы область
+   * «пропадала на просто клик, как в фотошопе», а «пропасть» и «перестать быть активной» — разные
+   * вещи, и вторая оставляла бы дорожку на экране. Раз область теперь уходит и от промаха мышью,
+   * СНЯТАЯ ЗАПОМИНАЕТСЯ: ⇧⌘D её возвращает, это Reselect фотошопа. Без него один случайный клик
+   * уносил бы минуту обводки насовсем.
+   *
+   * Возвращает, было ли что снимать: вызывающему нужно знать, говорить ли про ⇧⌘D.
+   */
+  const dropSel = (i: number | null): boolean => {
+    if (i === null) return false;
+    const sel = sels[i];
+    if (!sel) return false;
+    lastDropped.current = sel;
     setSels((prev) => prev.filter((_, k) => k !== i));
     setActiveSel((a) => (a === null || a === i ? null : a > i ? a - 1 : a));
+    return true;
   };
 
   /** Растушёвка ОДНОЙ области — свойство выделения, а не инструмента: соседние не меняются. */
@@ -1788,6 +2028,7 @@ export function VectorModal({
   const pickBrush = (key: StitchKey) => {
     if (selected !== null) editStroke({ brush: key });
     else setBrush(key);
+    warnPlainFallback(key, selected !== null ? strokeStep(strokes[selected]) : step);
   };
   const pickDashed = (d: boolean) => {
     if (selected !== null) editStroke({ dashed: d });
@@ -1824,6 +2065,77 @@ export function VectorModal({
    * которого поле в формате появилось. Возврат к связанности — отдельная дверь («follow»), а не
    * догадка по совпадению чисел: стежок, случайно равный нити, это по-прежнему СВОЙ стежок.
    */
+  /**
+   * СКАЗАТЬ ВСЛУХ, ЧТО ШОВ БОЛЬШЕ НЕ НАРИСУЕТСЯ.
+   *
+   * Генератор фигуры на линии короче одной внятной фигуры возвращает пустоту, и вместо шва молча
+   * встаёт прямая. Пока потолок стежка был 60, это трогало только совсем короткие линии. С потолком
+   * 200 (Q-7) порог потайного шва — 2200 юнитов при плате в 1000, то есть подмена стала БЕЗУСЛОВНОЙ:
+   * человек переключал бы виды шва и не видел ни одного изменения, а орган выбора выглядел бы
+   * сломанным. Раз потолок поднят по прямой просьбе, подмена обязана называть себя.
+   */
+  const warnPlainFallback = (key: StitchKey, stepPx: number) => {
+    const need = stitchMinLength(key, stepPx);
+    if (need <= PLATE_W) return;
+    showMessage(
+      `at this stitch length ${key} needs a line ${Math.round(need / PLATE_W)}× wider than the sheet — shorter lines are drawn plain`,
+      'error',
+    );
+  };
+
+  /**
+   * ЗАЛИТЬ ОБЛАСТЬ ПОД КУРСОРОМ (Q-15). Один клик — один шаг ленты.
+   *
+   * Пишет ПРЯМО в документ, как «стереть внутри» и «смягчить внутри», а не через буфер мазка:
+   * у заливки нет жеста, и путь scratch→stage ей нечем кормить. Активная область держит её внутри —
+   * то же правило, что у всех пиксельных глаголов.
+   */
+  const fillAt = async (at: [number, number]) => {
+    if (frozenRef.current) return;
+    const layer = await ensureRaster();
+    if (frozenRef.current || !layer) return;
+    const ctx = rasterCtx(layer.doc);
+    const src = ctx.getImageData(0, 0, layer.w, layer.h);
+
+    let selAlpha: Uint8Array | null = null;
+    const sel = activeSel !== null ? sels[activeSel] : null;
+    if (sel) {
+      const mask = selectionMask(layer, sel.pts, sel.feather);
+      if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
+    }
+
+    const res = bucketFill(
+      src,
+      Math.floor(at[0] * layer.w),
+      Math.floor(at[1] * layer.h),
+      parseFillColor(ink),
+      {
+        tolerance: fillTolerance,
+        expand: fillExpand,
+        opacity: opacity / 100,
+        selection: selAlpha,
+      },
+    );
+    if (!res.rect) {
+      showMessage('nothing under the cursor to fill', 'error');
+      return;
+    }
+    const r = res.rect;
+    // Порядок обязателен: лента снимает «как было» ПО РАЗМЕЧЕННОЙ КОРОБКЕ и делает это ДО того,
+    // как позовёт применение. Разметка после — это шаг, восстанавливающий пустоту.
+    clearGesture(layer);
+    markRect(layer, [r.x, r.y, r.x + r.w - 1, r.y + r.h - 1]);
+    const changed = timeline.current.recordGesture(layer, () =>
+      ctx.putImageData(res.image, 0, 0, r.x, r.y, r.w, r.h),
+    );
+    clearGesture(layer);
+    paintView();
+    if (!changed) return;
+    rasterDirtyRef.current = true;
+    setRasterDirty(true);
+    bumpTl();
+  };
+
   const pickStep = (px: number) => {
     const n = clampStep(px);
     if (selected !== null) editStroke({ step: n });
@@ -1831,6 +2143,7 @@ export function VectorModal({
       setStep(n);
       setStepOwn(true);
     }
+    warnPlainFallback(selected !== null ? strokes[selected].brush : brush, n);
   };
 
   /** Вернуть стежок под нить. У выбранной строки это снимает поле — документ снова связан. */
@@ -2147,11 +2460,7 @@ export function VectorModal({
         e.preventDefault();
         zoomReset();
       }
-      // ⌘C над активной областью — копия её содержимого. По e.code: на кириллице e.key — «с».
-      if (e.code === 'KeyC' && activeSel !== null && !isTyping(e.target)) {
-        e.preventDefault();
-        copySel(activeSel);
-      }
+      // ⌘C / ⌘V / ⌘D живут НА ОКНЕ, рядом с ⌘Z — см. эффект ниже. Здесь их нет нарочно.
       return;
     }
     if (!entered) return;
@@ -2188,6 +2497,24 @@ export function VectorModal({
         removeSelected();
         return;
       }
+    }
+    /**
+     * [ И ] — РАЗМЕР ТОГО, ЧТО В РУКЕ (Q-8), как в фотошопе. Меняется именно тот размер, которым
+     * этот инструмент рисует: у круглого ниба — ниб, у линии — толщина нити. Одна пара клавиш на
+     * две величины здесь не «две работы под одной ручкой»: в руке в каждый момент ровно одна из
+     * них, и вторая ничего не рисует.
+     *
+     * По `e.code`, а не по символу: на кириллической раскладке `e.key` для этих клавиш — «х» и «ъ».
+     */
+    if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !frozen) {
+      e.preventDefault();
+      const up = e.code === 'BracketRight';
+      // Шаг МУЛЬТИПЛИКАТИВНЫЙ: на тонком краю прибавка в единицу — это удвоение, на толстом —
+      // полпроцента. Одна и та же доля на всём ходу и есть то, чего ждёт рука.
+      const grow = (v: number) => (up ? Math.max(v * 1.15, v + 0.25) : Math.min(v / 1.15, v - 0.25));
+      if (isNibTool(tool)) setNib((v) => clampNib(grow(v)));
+      else pickGauge(grow(selected !== null ? strokeGauge(strokes[selected]) : gauge));
+      return;
     }
     const k = verbKey(e);
     // ОДНА ТАБЛИЦА КЛАВИШ НА ЧИПЫ И НА КЛАВИАТУРУ. Прежний switch дублировал `TOOL_KEY` руками, и
@@ -2554,8 +2881,8 @@ export function VectorModal({
                   nib={nib}
                   onNib={(px: number) => setNib(clampNib(px))}
                   nibLabel={isNibTool(tool) ? TOOL_LABEL[tool] : ''}
-                  rasterTool={isRasterTool(tool)}
-                  lineTool={!isRasterTool(tool)}
+                  rasterTool={needsRaster(tool)}
+                  lineTool={!needsRaster(tool)}
                   hardness={hardness}
                   onHardness={(n: number) =>
                     setHardness(Math.min(100, Math.max(0, Math.round(n) || 0)))
@@ -2955,6 +3282,27 @@ export function VectorModal({
                               ластика собственного следа нет по определению — он убирает, — и без
                               круга рука во время стирания не видит ни границы, ни размера того,
                               чем стирает. Прежде круг гас ровно в тот момент, когда нужен. */}
+                          {isThreadTool(tool) && nibHover && (
+                            /* ТОЧКА В НАТУРАЛЬНУЮ ТОЛЩИНУ НИТИ. Не кольцо: кольцо означает
+                               «столько заберётся», а нить — это то, что ЛЯЖЕТ, и показывать её
+                               надо тем же телом, каким она рисуется. Белая подложка — чтобы
+                               тонкая тёмная точка была видна и на тёмной фотографии. */
+                            <g data-thread-cursor='' pointerEvents='none'>
+                              <circle
+                                cx={nibHover[0] * PLATE_W}
+                                cy={nibHover[1] * plateH}
+                                r={Math.max(gauge / 2 + 1.5 / zoomK, 1 / zoomK)}
+                                fill='#fff'
+                                opacity={0.85}
+                              />
+                              <circle
+                                cx={nibHover[0] * PLATE_W}
+                                cy={nibHover[1] * plateH}
+                                r={Math.max(gauge / 2, 0.2)}
+                                fill={ink}
+                              />
+                            </g>
+                          )}
                           {isNibTool(tool) && nibHover && (
                             <g data-nib-cursor='' pointerEvents='none'>
                               <circle

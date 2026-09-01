@@ -453,6 +453,72 @@ export function clearInside(layer: RasterLayer, mask: HTMLCanvasElement): void {
 }
 
 /**
+ * ВЫРЕЗКА ИЗ ОБЛАСТИ — то, что кладётся в буфер обмена (Q-6).
+ *
+ * Возвращается холст РАЗМЕРОМ С КОРОБКУ маски, а не с весь документ: копия целой плиты на каждое
+ * ⌘C стоила бы двадцати мегабайт на жест, а буфер живёт до закрытия редактора.
+ *
+ * Пиксели гасятся той же маской, что у стирания и смягчения, — значит мягкий край области
+ * вырезается ЧАСТИЧНО, ровно как он выглядит. Своей арифметики края здесь нет: одно число
+ * растушёвки обязано значить у соседних глаголов одно и то же.
+ */
+export function cutoutInside(
+  layer: RasterLayer,
+  mask: HTMLCanvasElement,
+): { canvas: HTMLCanvasElement; box: Bounds } | null {
+  const box = maskBox(mask);
+  if (!box) return null;
+  const [x0, y0, x1, y1] = box;
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  if (w <= 0 || h <= 0) return null;
+  const out = make(w, h);
+  const octx = ctxOf(out);
+  octx.drawImage(layer.doc, x0, y0, w, h, 0, 0, w, h);
+  octx.save();
+  octx.globalCompositeOperation = 'destination-in';
+  octx.drawImage(mask, -x0, -y0);
+  octx.restore();
+  return { canvas: out, box };
+}
+
+/**
+ * ПОЛОЖИТЬ ВЫРЕЗКУ обратно, со сдвигом. Обычное `source-over`: вставка кладётся ПОВЕРХ, она не
+ * прогрызает и не заменяет — вставка это добавление, а не стирание.
+ *
+ * Возвращает занятый прямоугольник, обрезанный по холсту: он нужен ленте отмены, и без обрезки шаг
+ * унёс бы память под область, которой на плите нет.
+ */
+export function cutoutRect(
+  layer: RasterLayer,
+  cut: HTMLCanvasElement,
+  dx: number,
+  dy: number,
+): Bounds | null {
+  const x0 = Math.max(0, Math.round(dx));
+  const y0 = Math.max(0, Math.round(dy));
+  const x1 = Math.min(layer.w - 1, Math.round(dx) + cut.width - 1);
+  const y1 = Math.min(layer.h - 1, Math.round(dy) + cut.height - 1);
+  if (x1 < x0 || y1 < y0) return null;
+  return [x0, y0, x1, y1];
+}
+
+/**
+ * ⚠ КОРОБКА СЧИТАЕТСЯ ОТДЕЛЬНО И ДО РИСОВАНИЯ (`cutoutRect`), а не возвращается отсюда. Лента
+ * отмены снимает «как было» по размеченной коробке ПЕРЕД тем, как позвать это, — и рисунок,
+ * сделанный ради того, чтобы УЗНАТЬ коробку, попал бы в снимок «как было». Отмена тогда вернула бы
+ * вставку вместо того, что стояло до неё.
+ */
+export function drawCutout(
+  layer: RasterLayer,
+  cut: HTMLCanvasElement,
+  dx: number,
+  dy: number,
+): void {
+  ctxOf(layer.doc).drawImage(cut, Math.round(dx), Math.round(dy));
+}
+
+/**
  * РАСТУШЕВАТЬ ПИКСЕЛИ ВНУТРИ ВЫДЕЛЕНИЯ (X-5) — смягчить их, а не положить ореол сверху.
  *
  * Смешение честное: область сначала гасится маской (`destination-out`), потом на её место кладётся

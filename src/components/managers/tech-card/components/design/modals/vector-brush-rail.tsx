@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
@@ -11,12 +11,10 @@ import { SvgImportDoor } from './svg-import-door';
 import type { SelectionArea } from './vector-lasso';
 import { MAX_NIB, MIN_NIB } from './vector-nib';
 import {
-  GAUGE_PRESETS,
   MAX_GAUGE,
   MAX_STEP,
   MIN_GAUGE,
   MIN_STEP,
-  STEP_PRESETS,
   STITCHES,
   hasOwnStep,
   strokeGauge,
@@ -443,36 +441,322 @@ const INKS: { hex: string; name: string }[] = [
   { hex: '#ffffff', name: 'white — for marking over a dark photo' },
 ];
 
-/** Пресеты ниба: тот же ряд из трёх чипов, что у нити, только числами — имён у ниба нет. */
-const NIB_PRESETS = [12, 48, 120];
-
 /**
- * Пресеты жёсткости и непрозрачности — той же формы `{key,label,px}`, что у нити и стежка, чтобы
- * их рисовал ТОТ ЖЕ `Regulator`. `px` здесь читается как «значение», а не как пиксели: единица
- * подписана отдельным полем, и общая форма стоит того, чтобы имя поля было чуть шире своего
- * первого смысла.
+ * ── ОБРАЗЦЫ РАЗМЕРА: ОДИН БОКС НА ВСЕ ПЯТЬ РЕГУЛЯТОРОВ ─────────────────────────────────────────
+ *
+ * ЧИСЛО ГОВОРИТ «СКОЛЬКО», ОБРАЗЕЦ — «НАСКОЛЬКО», и без второго ползунок врёт на обоих концах: у
+ * тонкого края разница между 0.5 и 1 в цифре не видна вовсе, у толстого цифра растёт быстрее, чем
+ * ощущение. Поэтому у КАЖДОГО регулятора справа от ползунка стоит его собственный образец.
+ *
+ * ОДИН БОКС 56×18 НА ВСЕ — ТОТ ЖЕ ДОВОД, ЧТО У `Glyph` ВЫШЕ: разные боксы у соседних образцов
+ * читаются как разный вес, а это пять равноправных чисел одной рейки.
+ *
+ * МАСШТАБ 1:1 В ПИКСЕЛЯХ ПЛАТЫ — ТО ЖЕ ПРАВИЛО, ЧТО У `StitchSample` ВЫШЕ (см. довод у `GAUGE_REF`
+ * в её вызове): один пиксель платы = один пиксель экрана. Второй масштаб на той же рейке означал
+ * бы, что две картинки одного размера показывают разные вещи. Цена правила названа честно: размер
+ * шире бокса ОБРЕЗАЕТСЯ его краем — и это тоже сведение, а не потеря, потому что обрезанный
+ * образец видно КАК обрезанный, а точное число стоит в поле рядом.
+ *
+ * ОБРАЗЕЦ БЕЗ ЦВЕТА — по тому же доводу, что у `StitchSample`: белая нить сделала бы его невидимым
+ * ровно на той настройке, ради которой белую нить и завели (разметка по тёмной фотографии).
  */
-const HARDNESS_PRESETS: readonly { key: string; label: string; px: number }[] = [
-  { key: 'soft', label: 'soft', px: 0 },
-  { key: 'half', label: 'half', px: 50 },
-  { key: 'hard', label: 'hard', px: 100 },
-];
-const OPACITY_PRESETS: readonly { key: string; label: string; px: number }[] = [
-  { key: 'faint', label: '20', px: 20 },
-  { key: 'half', label: '50', px: 50 },
-  { key: 'full', label: '100', px: 100 },
-];
+const SIZE_BOX_W = 56;
+const SIZE_BOX_H = 18;
+
+function SampleBox({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      width={SIZE_BOX_W}
+      height={SIZE_BOX_H}
+      viewBox={`0 0 ${SIZE_BOX_W} ${SIZE_BOX_H}`}
+      aria-hidden
+      focusable='false'
+      // Рамка ВОЛОСЯНАЯ (внутренняя черта блока), а не `borderColor`: бокс — не отдельная
+      // коробка на рейке, а ячейка внутри неё. Заливка обязательна — иначе сквозь рамку
+      // просвечивает фон страницы (правило «залитого блока» из DESIGN.md).
+      className='block shrink-0 border border-hairline bg-bgColor text-textColor'
+    >
+      {children}
+    </svg>
+  );
+}
 
 /**
- * ОДИН РЕГУЛЯТОР НА ВСЕ ЧИСЛА РЕЙКИ: имя, поле, единица, ряд пресетов, строка объяснения.
+ * НИТЬ — ОТРЕЗОК С КРУГЛЫМИ КОНЦАМИ. Круглый конец И ЕСТЬ «точка размера»: это ровно тот диаметр,
+ * каким нить ложится поперёк, — а длина отрезка говорит, что перед нами нить, а не пятно. Каппа
+ * та же (`round`), что у `strokeGeometry` на плате: образец не выдумывает своей формы.
+ */
+function ThreadSample({ gauge }: { gauge: number }) {
+  const w = Math.max(0.2, gauge);
+  // Отступ не даёт отрезку вывернуться наизнанку на толщине шире бокса: там он честно вырождается
+  // в круг диаметром `gauge`, обрезанный краями, — и это правда о таком размере, а не сбой.
+  const inset = Math.min(w / 2 + 1, SIZE_BOX_W / 2 - 1);
+  return (
+    <SampleBox>
+      <line
+        x1={inset}
+        y1={SIZE_BOX_H / 2}
+        x2={SIZE_BOX_W - inset}
+        y2={SIZE_BOX_H / 2}
+        stroke='currentColor'
+        strokeWidth={w}
+        strokeLinecap='round'
+      />
+    </SampleBox>
+  );
+}
+
+/**
+ * СТЕЖОК — РИТМ ПРОКОЛОВ ВДОЛЬ ЛИНИИ, и меряет образец РАССТОЯНИЕ между ними, а не толщину:
+ * толщина стоит в своём образце строкой выше, и повторить её здесь значило бы показать одно число
+ * двумя картинками. Ровно поэтому прокол одного размера при любом стежке.
  *
- * Пять почти одинаковых рядов, написанных руками, — это пять мест, где грамматика разъедется:
- * у одного появится пресет, у другого исчезнет единица, третий забудет `aria-label`. Пресеты
- * приходят одной формой `{key,label,px}` — специально общей у нити, стежка, ниба, жёсткости и
- * непрозрачности, — и поэтому ряд чипов рисуется один раз.
+ * ДВА КРАЯ ДИАПАЗОНА НАЗВАНЫ ЧЕСТНО. Стежок ДЛИННЕЕ бокса даёт один прокол и линию, уходящую за
+ * край, — тот же обрез, что у нити. Стежок мельче полутора пикселей рисуется СПЛОШНОЙ полосой, а
+ * не полусотней слипшихся точек: на таком ритме проколов не различает глаз, и полоса — это то,
+ * что человек увидит на плате, а не приукрашенная россыпь.
+ */
+function StitchRhythmSample({ step }: { step: number }) {
+  const s = Math.max(0.05, step);
+  const mid = SIZE_BOX_H / 2;
+  const dense = s < 1.5;
+  const marks: number[] = [];
+  if (!dense) for (let x = 3; x <= SIZE_BOX_W - 2; x += s) marks.push(x);
+  return (
+    <SampleBox>
+      <line x1={2} y1={mid} x2={SIZE_BOX_W - 2} y2={mid} stroke='currentColor' strokeWidth={1} />
+      {dense ? (
+        <rect x={2} y={mid - 1.5} width={SIZE_BOX_W - 4} height={3} fill='currentColor' />
+      ) : (
+        marks.map((x, i) => <circle key={i} cx={x} cy={mid} r={1.4} fill='currentColor' />)
+      )}
+    </SampleBox>
+  );
+}
+
+/**
+ * НИБ — ЕДИНСТВЕННЫЙ ОБРАЗЕЦ РЕЙКИ НЕ В НАТУРАЛЬНУЮ ВЕЛИЧИНУ, И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЧТЕНО.
  *
- * ВЫБРАННЫЙ ПРЕСЕТ СВЕРЯЕТСЯ ОКРУГЛЕНИЕМ ДО ЦЕЛОГО: числа хранятся десятыми долями, и чип «thin»
- * гас бы на 6.0000001 после единственного клика по стрелке поля.
+ * 1:1 ЗДЕСЬ НЕ РАБОТАЕТ АРИФМЕТИЧЕСКИ. Диапазон ниба — 4…300 пикселей платы при умолчании 48, а
+ * бокс высотой 18: при честном масштабе кружок перерастает рамку уже на 18 и дальше рисуется
+ * сплошной плашкой. То есть на СВОЁМ ЖЕ УМОЛЧАНИИ образец был бы чёрным прямоугольником, и 48 от
+ * 300 в нём не отличить вовсе (снято на стенде: обе величины дают одну и ту же залитую плашку).
+ * Нить и стежок остаются 1:1 ровно потому, что у них обратное: работают ими в 0.25…6, а это в
+ * боксе помещается с запасом, и саморез «толще рамки» там означает по-настоящему толстую линию.
+ *
+ * ЧТО ВЗАМЕН: КОЛЬЦО, РАСТУЩЕЕ ПО ТОЙ ЖЕ ШКАЛЕ, ЧТО И ХОД ПОЛЗУНКА РЯДОМ. Оно отвечает на вопрос,
+ * который у ниба и задают, — «больше или меньше прежнего» — и растёт синхронно с ручкой, так что
+ * картинка и орган не могут разойтись.
+ *
+ * ПУСТОЕ, А НЕ ЗАЛИТОЕ, И ЭТО ПОДПИСЬ, А НЕ УКРАШЕНИЕ: залитые образцы этой рейки заявляют
+ * натуральную величину, пустой — что величина сведена в рамку. Разный вид у разного обещания.
+ *
+ * НАТУРАЛЬНУЮ ВЕЛИЧИНУ ПРИ ЭТОМ НЕ ПОТЕРЯЛИ: круглый кончик рисуется под курсором НА ХОЛСТЕ, в
+ * настоящем зуме (`nibHover` в `vector-modal.tsx`), — то есть там, где по нему и целятся.
+ */
+function NibSample({ nib, min, max }: { nib: number; min: number; max: number }) {
+  const rMax = SIZE_BOX_H / 2 - 1.5;
+  const t =
+    max > min && min > 0
+      ? Math.log(Math.min(max, Math.max(min, nib)) / min) / Math.log(max / min)
+      : 0;
+  return (
+    <SampleBox>
+      <circle
+        cx={SIZE_BOX_W / 2}
+        cy={SIZE_BOX_H / 2}
+        r={1 + t * (rMax - 1)}
+        fill='none'
+        stroke='currentColor'
+        strokeWidth={1}
+      />
+    </SampleBox>
+  );
+}
+
+/**
+ * ЖЁСТКОСТЬ — ПОПЕРЕЧНЫЙ РАЗРЕЗ КОНЧИКА, А НЕ КРУЖОК, и это тоже правка по замеру.
+ *
+ * Кружок с радиальным спадом клал весь переход в ПОСЛЕДНИЕ проценты радиуса: в боксе высотой 18
+ * радиус равен 8, и на умолчании 80 спад занимал 1.6 пикселя — на экране неотличимо от сплошного
+ * чёрного круга. Орган, у которого умолчание выглядит как край диапазона, не показывает ничего.
+ *
+ * РАЗРЕЗ БЕРЁТ ВСЮ ШИРИНУ БОКСА (56 против 16 у диаметра кружка), поэтому те же 20 % спада — это
+ * 5.6 пикселя с каждой стороны, и 80 от 100 отличается с одного взгляда. Показывает он ровно то,
+ * что жёсткость и означает: сколько краски лежит вдоль поперечника следа.
+ */
+function HardnessSample({ pct }: { pct: number }) {
+  // ИМЯ ГРАДИЕНТА СВОЁ У КАЖДОГО ЭКЗЕМПЛЯРА. Два одинаковых `id` в одном документе схлопываются в
+  // первый, и второй образец нарисовался бы ЧУЖИМ спадом. Двоеточия `useId` вырезаны: они законны
+  // в атрибуте, но ломают ссылку `url(#…)` в части движков.
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const id = `nib-falloff-${uid}`;
+  const flat = Math.min(100, Math.max(0, pct)) / 2;
+  return (
+    <SampleBox>
+      <defs>
+        <linearGradient id={id} x1='0' y1='0' x2='1' y2='0'>
+          <stop offset='0%' stopColor='currentColor' stopOpacity={0} />
+          <stop offset={`${50 - flat}%`} stopColor='currentColor' stopOpacity={1} />
+          <stop offset={`${50 + flat}%`} stopColor='currentColor' stopOpacity={1} />
+          <stop offset='100%' stopColor='currentColor' stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <rect x={1} y={1} width={SIZE_BOX_W - 2} height={SIZE_BOX_H - 2} fill={`url(#${id})`} />
+    </SampleBox>
+  );
+}
+
+/**
+ * НЕПРОЗРАЧНОСТЬ — ТОТ ЖЕ РАЗРЕЗ, ТОЛЬКО РОВНЫЙ. Пара образцов нарочно одной формы: обе величины
+ * отвечают на «сколько краски», и различаются они ровно тем, что видно, — у жёсткости плечи,
+ * у непрозрачности плоскость. Разные формы прятали бы это родство.
+ */
+function OpacitySample({ pct }: { pct: number }) {
+  return (
+    <SampleBox>
+      <rect
+        x={1}
+        y={1}
+        width={SIZE_BOX_W - 2}
+        height={SIZE_BOX_H - 2}
+        fill='currentColor'
+        fillOpacity={Math.min(100, Math.max(0, pct)) / 100}
+      />
+    </SampleBox>
+  );
+}
+
+/**
+ * ── ПОЛЗУНОК С НЕРАВНОМЕРНЫМ ХОДОМ ────────────────────────────────────────────────────────────
+ *
+ * ЛИНЕЙНЫЙ ХОД НА ДИАПАЗОНЕ ВРОДЕ 0.25…200 — ЭТО НЕ ПОЛЗУНОК, А ЗАГЛУШКА, И ЭТО АРИФМЕТИКА, А НЕ
+ * ВКУС. Вся работа техчертежа живёт в 0.25…6 (умолчание нити — 2), то есть в 2.9 % длины линейной
+ * дорожки: на рейке шириной 180 px весь рабочий диапазон занял бы 5 пикселей, и одно движение мыши
+ * перепрыгивало бы через треть его. Логарифмический ход отдаёт тонкому концу столько же дорожки,
+ * сколько толстому: на 0.25…200 отрезок 0.25…6 занимает 47 % хода, а 6…200 — остальные 53 %.
+ *
+ * ГРУБОСТЬ НА ЛЮБОМ КОНЦЕ КОМПЕНСИРУЕТ ПОЛЕ РЯДОМ, а не второй ползунок: число набирается точно,
+ * и оба органа зовут ОДНОГО писателя, так что разъехаться им нечем.
+ *
+ * ПРОЦЕНТЫ ХОДЯТ ЛИНЕЙНО (`curve='linear'`), и это не недоделка: у жёсткости и непрозрачности нет
+ * тонкого конца — 0…100 это ДОЛЯ, а не отношение размеров, и растягивать в ней нечего.
+ *
+ * ОРГАН — НАТИВНЫЙ `input[type=range]` ПОД `accent-color`, ровно как полоса зума у кадрирования
+ * (`crop-range`) и полоса тона у пикера цвета. Клавиатура (стрелки, Home/End, PageUp/Down),
+ * автоповтор, касание и перетаскивание уже написаны в браузере; свой ползунок — это
+ * переизобретение стандартного органа, которое этот продукт запрещает прямо, и вдобавок потеря
+ * всего перечисленного.
+ *
+ * ХОД ХРАНИТСЯ ПОЗИЦИЕЙ 0…1000, А НЕ ЗНАЧЕНИЕМ: у нативного `range` шаг постоянен, а постоянен он
+ * у нас ИМЕННО В ПОЗИЦИИ — тысяча делений и есть та плавность, за которой послали. Значение
+ * считается из позиции, позиция из значения, поэтому поле и ползунок показывают одно и то же
+ * число по построению.
+ *
+ * ЧТО ОБЪЯВЛЯЕТСЯ ЧИТАЛКЕ. Нативный `range` назвал бы вслух позицию («634 из 1000») — число, к
+ * которому человек не имеет отношения; `aria-valuetext` подменяет её действующим значением с
+ * единицей, и голосом орган говорит то же, что показывает поле.
+ */
+const RAMP_STOPS = 1000;
+
+/**
+ * КВАНТ ЗНАЧЕНИЯ РАСТЁТ ВМЕСТЕ С НИМ. Сотые доли уместны у 0.3 и бессмысленны у 150: там они дают
+ * числа вроде 147.83, которых не различить ни глазом, ни платой.
+ */
+const rampQuantum = (v: number) => (v < 1 ? 0.05 : v < 10 ? 0.1 : v < 100 ? 0.5 : 1);
+
+/**
+ * КВАНТ НЕ БЫВАЕТ МЕЛЬЧЕ, ЧЕМ ПОЗВОЛЯЕТ ПОЛ ДИАПАЗОНА, И ЭТО НЕ ПРИДИРКА, А ЖИВОЙ ДЕФЕКТ.
+ *
+ * Писатели нити и стежка (`clampGauge`/`clampStep` в `vector-strokes.ts`) сегодня КВАНТУЮТ ВВОД
+ * ЦЕЛЫМИ — и делают это ровно потому, что пол диапазона стоит на 1. Предложи поле шаг 0.1 при
+ * таком писателе — и стрелка поля выглядела бы МЁРТВОЙ: 2 → 2.1 → обратно 2, нажатие без единого
+ * видимого следа. Орган, который на вид работает, а на деле нет, хуже отсутствующего.
+ *
+ * Поэтому дробность органов выводится ИЗ ТОГО ЖЕ ЧИСЛА, которое её и разрешает: пол ниже единицы
+ * — значит писатель принимает доли, значит и шаг может быть дробным. Опустят `MIN_GAUGE` до 0.25
+ * (см. отчёт) — обе половины органа станут дробными сами, без правки здесь.
+ */
+const stepFor = (v: number, min: number) =>
+  min >= 1 ? Math.max(1, rampQuantum(v)) : rampQuantum(v);
+
+function Ramp({
+  value,
+  min,
+  max,
+  curve,
+  unit,
+  label,
+  disabled,
+  probe,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  curve: 'log' | 'linear';
+  unit: string;
+  label: string;
+  disabled: boolean;
+  probe: string;
+  onChange: (n: number) => void;
+}) {
+  // Логарифм требует положительного пола и непустого диапазона. Не выполнено — ход линейный:
+  // молчаливый откат лучше NaN в позиции, от которого орган перестал бы двигаться вовсе.
+  const ratio = curve === 'log' && min > 0 && max > min;
+  const span = max - min || 1;
+  const here = Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+  const pos = Math.round(
+    (ratio ? Math.log(here / min) / Math.log(max / min) : (here - min) / span) * RAMP_STOPS,
+  );
+  const valueAt = (p: number) => {
+    const t = Math.min(1, Math.max(0, p / RAMP_STOPS));
+    const v = ratio ? min * Math.pow(max / min, t) : min + t * span;
+    if (!ratio) return Math.round(v);
+    // Ползунок встаёт на ту же решётку, что примет писатель. Иначе ручка садилась бы на 4.5,
+    // писатель возвращал 5, а ход дёргался бы назад под пальцем на каждом втором делении.
+    const q = stepFor(v, min);
+    // Второе округление — не украшение: `Math.round(v / q) * q` на двоичной дроби даёт хвост
+    // вроде 0.30000000000000004, и он доехал бы до поля и до платы как есть.
+    return Math.round(Math.round(v / q) * q * 100) / 100;
+  };
+  return (
+    <input
+      type='range'
+      min={0}
+      max={RAMP_STOPS}
+      step={1}
+      value={pos}
+      disabled={disabled}
+      aria-label={label}
+      aria-valuetext={`${Math.round(here * 100) / 100}${unit === '%' ? ' per cent' : ' plate pixels'}`}
+      {...{ [`data-${probe}-ramp`]: '' }}
+      onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(valueAt(Number(e.target.value)))}
+      className='h-[14px] min-w-0 flex-1 cursor-pointer accent-textColor disabled:cursor-default'
+    />
+  );
+}
+
+/**
+ * ОДИН РЕГУЛЯТОР НА ВСЕ ЧИСЛА РЕЙКИ: имя, точное поле, ползунок, образец, строка объяснения.
+ *
+ * Пять почти одинаковых рядов, написанных руками, — это пять мест, где грамматика разъедется: у
+ * одного появится образец, у другого исчезнет единица, третий забудет `aria-label`.
+ *
+ * ЧИПОВ-ПРЕСЕТОВ БОЛЬШЕ НЕТ, И ЭТО ЗАМЕНА, А НЕ ПОТЕРЯ (Q-7/Q-11). `short/normal/long` — это три
+ * точки на отрезке из двух сотен: они отвечали на «какой стежок обычный» и не отвечали на «чуть
+ * длиннее», а крутят люди именно это. Ползунок отвечает на оба вопроса, точное число осталось
+ * полем, и ни один писатель не потерян: чип и поле всегда звали одну `onChange` — теперь её зовут
+ * поле и ползунок.
+ *
+ * ПОБОЧНОЕ СЛЕДСТВИЕ, РАДИ КОТОРОГО СТОИЛО БЫ СДЕЛАТЬ ЭТО И БЕЗ ПРОСЬБЫ: у жёсткости чипы были
+ * 0/50/100, а экран открывался на 80 — то есть в точке, которую нельзя было ткнуть, и орган с
+ * первой секунды выглядел рассогласованным со своим же значением. У ползунка достижима всякая
+ * точка диапазона, и рассогласование исчезло вместе с чипами, а не подгонкой умолчания.
+ *
+ * `GAUGE_PRESETS` В `vector-strokes.ts` ПРИ ЭТОМ ЖИВ И НЕ ТРОНУТ — он там не только список чипов,
+ * а ещё и ТАБЛИЦА ЗАПИСИ СЛОВА `weight` (её читает `gaugeWeight`). Рейка перестала его ПЕЧАТАТЬ;
+ * формат от этого не изменился ни на бит.
  */
 function Regulator({
   name,
@@ -481,58 +765,58 @@ function Regulator({
   min,
   max,
   unit,
+  curve,
   disabled,
   onChange,
-  presets,
+  sample,
   probe,
   trailing,
+  fused,
 }: {
   name: string;
-  hint: string;
+  /** Строка под рядом. У сросшейся пары она ОДНА НА ДВОИХ и стоит под нижним рядом — см. `fused`. */
+  hint?: string;
   value: number;
   min: number;
   max: number;
   unit: string;
+  /** `log` — размеры (отношение), `linear` — проценты (доля). Довод — у `Ramp`. */
+  curve: 'log' | 'linear';
   disabled: boolean;
   onChange: (n: number) => void;
-  presets: readonly { key: string; label: string; px: number }[];
-  /** Метка для проб: `data-<probe>-input` на поле, `data-<probe>-presets` на ряду чипов. */
+  /** Картинка действующего значения в натуральную величину. Довод — у `SampleBox`. */
+  sample: React.ReactNode;
+  /** Метка для проб: `data-<probe>-input` на поле, `data-<probe>-ramp` на ползунке. */
   probe: string;
   trailing?: React.ReactNode;
+  /**
+   * Ряд БЕЗ нижней черты. Так два ряда срастаются в один блок: в этой системе разделитель —
+   * это черта, поэтому убрать её между двумя рядами и есть «сгруппировать их», и делается это
+   * БЕЗ второй рамки (коробка в коробке здесь запрещена) и без цветной полосы у края.
+   */
+  fused?: boolean;
 }) {
-  const shown = Math.round(value * 10) / 10;
+  // Показываем сотыми, а не десятыми: у нити с полом 0.25 десятые превратили бы её в 0.3 — число,
+  // которого человек не выбирал. Хвост нулей при этом не печатается: 2 остаётся «2».
+  const shown = Math.round(value * 100) / 100;
+  const spoken = unit === '%' ? 'per cent' : 'plate pixels';
   return (
-    <div className='border-b border-hairline py-1' data-regulator={probe}>
-      <div className='flex flex-wrap items-center gap-1.5'>
+    <div className={cn('py-1', !fused && 'border-b border-hairline')} data-regulator={probe}>
+      <div className='flex items-center gap-1.5'>
         <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
           {name}
         </Text>
-        <ChipRow>
-          {presets.map((preset) => {
-            const on = Math.round(shown) === Math.round(preset.px);
-            return (
-              <Chip
-                key={preset.key}
-                selected={on}
-                pressed={on}
-                disabled={disabled}
-                onClick={() => onChange(preset.px)}
-                title={`${name} ${preset.px}${unit}`}
-              >
-                {preset.label}
-              </Chip>
-            );
-          })}
-        </ChipRow>
         {trailing}
         <Input
           type='number'
           min={min}
           max={max}
-          step={1}
+          // Шаг стрелок поля идёт тем же квантом, что и ползунок, иначе у одной величины было бы
+          // две решётки и стрелка уводила бы с точки, на которую ползунок только что встал.
+          step={curve === 'log' ? stepFor(shown, min) : 1}
           value={shown}
           disabled={disabled}
-          aria-label={`${name}, ${unit === '%' ? 'per cent' : 'plate pixels'}`}
+          aria-label={`${name}, ${spoken}`}
           {...{ [`data-${probe}-input`]: '' }}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))}
           className='ml-auto w-14 shrink-0 text-right tabular-nums'
@@ -541,10 +825,70 @@ function Regulator({
           {unit}
         </Text>
       </div>
-      <Text size='nano' variant='label' component='p'>
-        {hint}
-      </Text>
+      <div className='mt-1 flex items-center gap-1.5'>
+        <Ramp
+          value={value}
+          min={min}
+          max={max}
+          curve={curve}
+          unit={unit}
+          // Имя ползунка НЕ совпадает с именем поля: два органа с одинаковым именем в одном ряду
+          // читалка объявляет неразличимо, и голосом их не выбрать.
+          label={`${name} slider, ${spoken}`}
+          disabled={disabled}
+          probe={probe}
+          onChange={onChange}
+        />
+        {sample}
+      </div>
+      {hint && (
+        <Text size='nano' variant='label' component='p' className='mt-0.5'>
+          {hint}
+        </Text>
+      )}
     </div>
+  );
+}
+
+/**
+ * ПЛАШКА ЦВЕТА — ОДИН ВИД НА ВЕСЬ РЯД. Словарные плашки (чёрное/белое) и плашка последнего взятого
+ * цвета обязаны выглядеть и вести себя одинаково: две копии этих классов разъехались бы первой же
+ * правкой рамки, и «выбрано» начало бы рисоваться в одном ряду двумя разными способами.
+ */
+function Swatch({
+  hex,
+  on,
+  disabled,
+  title,
+  label,
+  probeAttr,
+  onPick,
+}: {
+  hex: string;
+  on: boolean;
+  disabled: boolean;
+  title: string;
+  label: string;
+  probeAttr: Record<string, string>;
+  onPick: (hex: string) => void;
+}) {
+  return (
+    <button
+      type='button'
+      disabled={disabled}
+      aria-pressed={on}
+      title={title}
+      aria-label={label}
+      {...probeAttr}
+      onClick={() => onPick(hex)}
+      className={cn(
+        'h-5 w-5 shrink-0 cursor-pointer disabled:cursor-default',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
+        on ? 'border-2 border-textColor p-px' : 'border border-borderColor p-0.5',
+      )}
+    >
+      <span className='block h-full w-full' style={{ background: hex }} />
+    </button>
   );
 }
 
@@ -695,7 +1039,22 @@ export type RailProps = {
   frameRatio: number;
   strokes: VectorStroke[];
   onImport: (strokes: VectorStroke[], mode: 'add' | 'replace') => void;
-  /* Что случится при сохранении — слова зависят от того, есть ли база и слот. */
+  /**
+   * ЧТО СЛУЧИТСЯ ПРИ СОХРАНЕНИИ — ПРИНИМАЕТСЯ, НО БОЛЬШЕ НЕ ПЕЧАТАЕТСЯ (Q-12), тем же порядком,
+   * что и пропы ленты отмены выше. Абзац «saving writes the vector over «…» into a NEW picture…»
+   * убран с экрана целиком: он объяснял УСТРОЙСТВО хранения тому, кто в этот момент целится рукой,
+   * и это третий круг, на котором владелец просит убрать объясняющую прозу.
+   *
+   * ЧТО ИМЕННО УШЛО, ЧЕСТНО. Ни одного писателя абзац не держал, и НИ ОДНОГО ПРЕДУПРЕЖДЕНИЯ тоже:
+   * его единственная фраза о необратимости — «The original is never overwritten» — говорила, что
+   * необратимого здесь НЕТ, то есть была успокоением, а не сторожем. Слов о деньгах в нём не было
+   * вовсе. Поэтому переносить в подсказку было нечего: подсказка о том, что беды не будет, — это
+   * та же проза, просто спрятанная под курсор.
+   *
+   * ПРОП ОСТАВЛЕН НАМЕРЕННО, А НЕ ПО ЗАБЫВЧИВОСТИ: снять его значило бы править вызывающую сторону
+   * ради удаления текста, а вернуть слова — одна строка здесь. Место, где им стоило бы жить, если
+   * они понадобятся, — подсказка (`title`) на самой кнопке сохранения, а она живёт в `vector-modal`.
+   */
   saveNote: string;
 };
 
@@ -739,6 +1098,42 @@ export function VectorBrushRail(p: RailProps) {
    * браузер молча подставит чёрный и вернёт его же следующим событием, перекрасив нить.
    */
   const pickerInk = /^#[0-9a-fA-F]{6}$/.test(curInk) ? curInk : '#000000';
+
+  /**
+   * ПОСЛЕДНИЙ ВЗЯТЫЙ ЦВЕТ — ТРЕТЬЯ ПЛАШКА РЯДОМ С ПАЛИТРОЙ (Q-13).
+   *
+   * ЖИВЁТ В СОСТОЯНИИ, А НЕ В РАЗМЕТКЕ, потому что обязан пережить смену инструмента. Рейка при
+   * ней не размонтируется — её рисует один и тот же узел в `vector-modal.tsx` на всех
+   * инструментах, — поэтому `useState` здесь И ЕСТЬ та память, которую просили, и второго
+   * писателя в модалке для неё заводить не пришлось.
+   *
+   * ЗАПОМИНАЕТСЯ НЕ НАЖАТИЕ ОРГАНА, А ЦВЕТ, СТАВШИЙ ЦВЕТОМ. Ловить клики по палитре было бы мимо
+   * цели: ПИПЕТКА берёт цвет не отсюда, а с холста — через модалку, — и её добыча в такую память
+   * не попала бы вовсе, хотя это ровно тот случай, ради которого память и заводят.
+   *
+   * ЧЕТЫРЕ СТОРОЖА, И КАЖДЫЙ ЗАКРЫВАЕТ СВОЙ СПОСОБ СОВРАТЬ:
+   *  0. НИЧЕГО НЕ МЕНЯЛОСЬ — НЕЧЕГО ЗАПОМИНАТЬ. Иначе первый же рендер объявлял бы «последним
+   *     взятым» цвет, который человек в этой сессии не выбирал ни разу.
+   *  1. СМЕНА ВЫБРАННОГО ШТРИХА — НЕ ВЫБОР ЦВЕТА. `curInk` при ней меняется сам собой, и без
+   *     этого сторожа один взгляд на старую красную линию СТИРАЛ БЫ только что подобранный цвет,
+   *     то есть память теряла бы ровно то, ради чего заведена.
+   *  2. НЕ ПОЛНЫЙ HEX — НЕ ЦВЕТ. Поле hex пишет на каждой букве, и «#2f» по дороге к «#2f8a10» —
+   *     половина набора, а не выбор.
+   *  3. ПЛАШКА СЛОВАРЯ НЕ ЗАПОМИНАЕТСЯ. У чёрного и белого свои плашки в этом же ряду; третья,
+   *     повторяющая соседнюю, была бы органом, который ничего не добавляет.
+   */
+  const [recentInk, setRecentInk] = useState<string | null>(null);
+  const inkWatchRef = useRef<{ sel: number | null; ink: string }>({ sel: p.selected, ink: curInk });
+  useEffect(() => {
+    const prev = inkWatchRef.current;
+    inkWatchRef.current = { sel: p.selected, ink: curInk };
+    if (prev.ink === curInk) return;
+    if (prev.sel !== p.selected) return;
+    const hex = curInk.toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(hex)) return;
+    if (INKS.some((c) => c.hex === hex)) return;
+    setRecentInk(hex);
+  }, [curInk, p.selected]);
 
   return (
     <div className='flex h-full w-[264px] shrink-0 flex-col gap-2 overflow-y-auto border border-borderColor bg-bgColor p-2.5'>
@@ -834,31 +1229,38 @@ export function VectorBrushRail(p: RailProps) {
         </Text>
 
         <div className='flex flex-wrap items-center gap-1 border-b border-hairline py-1'>
-          {INKS.map((c) => {
-            const on = curInk.toLowerCase() === c.hex;
-            return (
-              <button
-                key={c.hex}
-                type='button'
-                disabled={p.frozen}
-                aria-pressed={on}
-                title={c.name}
-                aria-label={`ink ${c.name}`}
-                data-ink-swatch={c.hex}
-                onClick={() => p.onInk(c.hex)}
-                className={cn(
-                  'h-5 w-5 shrink-0 cursor-pointer disabled:cursor-default',
-                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
-                  on ? 'border-2 border-textColor p-px' : 'border border-borderColor p-0.5',
-                )}
-              >
-                <span className='block h-full w-full' style={{ background: c.hex }} />
-              </button>
-            );
-          })}
+          {INKS.map((c) => (
+            <Swatch
+              key={c.hex}
+              hex={c.hex}
+              on={curInk.toLowerCase() === c.hex}
+              disabled={p.frozen}
+              title={c.name}
+              label={`ink ${c.name}`}
+              probeAttr={{ 'data-ink-swatch': c.hex }}
+              onPick={p.onInk}
+            />
+          ))}
           {/* СИСТЕМНЫЙ ВЫБОР ЦВЕТА — свой орган: в документ он пишет ОДИН раз за жест, а не по
               событию на кадр протяжки. Довод и замер — у самого `InkPicker`. */}
           <InkPicker value={pickerInk} disabled={p.frozen} onPick={p.onInk} />
+          {/* ПОСЛЕДНИЙ ВЗЯТЫЙ ЦВЕТ СТОИТ ВПЛОТНУЮ К ПАЛИТРЕ, А НЕ В КОНЦЕ РЯДА: он её ПАМЯТЬ, и
+              рядом с органом, который его произвёл, читается как «вот что ты выбрал», а через
+              две кнопки — как третий словарный цвет.
+              ПОКА ЕГО НЕТ — ЕГО НЕТ. Пустая плашка-заглушка была бы органом, молча ничего не
+              делающим, а на этой рейке такие уже выпалывали дважды (виды шва у пиксельной кисти,
+              жёсткость у резчика линий). */}
+          {recentInk && (
+            <Swatch
+              hex={recentInk}
+              on={curInk.toLowerCase() === recentInk}
+              disabled={p.frozen}
+              title={`last colour you picked — ${recentInk} · click to put it back in the thread`}
+              label={`last picked ink ${recentInk}`}
+              probeAttr={{ 'data-ink-recent': recentInk }}
+              onPick={p.onInk}
+            />
+          )}
           {/* ПИПЕТКА — ТОТ ЖЕ ОРГАН, ЧТО БЫЛ, ТОЛЬКО ЗНАЧКОМ (Y-8/Y-10): она взводит СЛЕДУЮЩИЙ
               клик по холсту, а не красит сейчас, поэтому у неё есть нажатое состояние, и оно
               нарисовано заливкой — тем же способом, что у выбранной плашки рядом. Имя для читалки
@@ -893,63 +1295,73 @@ export function VectorBrushRail(p: RailProps) {
           />
         </div>
 
-        {/* РЕГУЛЯТОР — ОДИН КОМПОНЕНТ НА ВСЕ ЧЕТЫРЕ ЧИСЛА (нить, стежок, ниб, жёсткость,
-            непрозрачность). Три похожих ряда, написанных руками, разошлись бы первой правкой:
-            у одного появилось бы поле, у другого пресеты, и «размер» начал бы означать разное. */}
-        <Regulator
-          name={sizingNib ? 'nib' : 'thread'}
-          hint={
-            sizingNib
-              ? 'the diameter of the round tip, in plate pixels'
-              : 'the thickness of the thread, in plate pixels'
-          }
-          value={size}
-          min={sizeMin}
-          max={sizeMax}
-          unit='px'
-          disabled={p.frozen}
-          onChange={setSize}
-          presets={
-            sizingNib
-              ? NIB_PRESETS.map((n) => ({ key: String(n), label: String(n), px: n }))
-              : GAUGE_PRESETS
-          }
-          probe='size'
-        />
+        {/* ── НИТЬ И СТЕЖОК — ОДИН СРОСШИЙСЯ БЛОК, А НЕ ДВА СОСЕДА (Q-7) ──────────────────────
+            Это ДВА ЧИСЛА ОДНОГО ШВА: одно меряет поперёк линии, другое вдоль, и порознь ни одно
+            из них шва не описывает («тонкая нить длинным стежком» — это намёточная строчка, а
+            «тонкая нить» — это ничто). Сращены они тем единственным способом, который эта
+            система знает: между ними УБРАНА ЧЕРТА, а пару закрывает общая — разделитель здесь
+            субтрактивный, и рамка вокруг пары была бы коробкой в коробке, чего DESIGN.md
+            запрещает прямо. По той же причине у пары ОДНА строка объяснения на двоих, под нижним
+            рядом: два почти одинаковых определения подряд читаются как повтор, а не как пара.
 
-        {/* ДЛИНА СТЕЖКА — ВТОРОЕ ЧИСЛО ШВА, и оно живёт только в контексте линии: у круглого ниба
-            стежков не бывает. «Follows the thread» — законное состояние формата, а не пропуск:
-            штрих без своего `step` шьётся стежком по нити, и документ остаётся прежней версии. */}
-        {!sizingNib && (
+            У КРУГЛОГО НИБА СТЕЖКОВ НЕ БЫВАЕТ — там ряд остаётся один и черту закрывает сам. */}
+        <div data-seam={sizingNib ? undefined : ''}>
           <Regulator
-            name='stitch'
-            hint={
-              stepOwn
-                ? 'the length of one stitch, set apart from the thread'
-                : 'the length of one stitch — following the thread until you move it'
-            }
-            value={curStep}
-            min={MIN_STEP}
-            max={MAX_STEP}
+            name={sizingNib ? 'nib' : 'thread'}
+            hint={sizingNib ? 'the diameter of the round tip, in plate pixels' : undefined}
+            value={size}
+            min={sizeMin}
+            max={sizeMax}
             unit='px'
+            // Размер — ОТНОШЕНИЕ, а не доля: ход логарифмический. Довод и замер — у `Ramp`.
+            curve='log'
             disabled={p.frozen}
-            onChange={p.onStep}
-            presets={STEP_PRESETS}
-            probe='step'
-            trailing={
-              stepOwn ? (
-                <Chip
-                  dashed
-                  disabled={p.frozen}
-                  onClick={p.onStepFollow}
-                  title='let the stitch follow the thread again — the document stops carrying a stitch of its own'
-                >
-                  follow
-                </Chip>
-              ) : undefined
+            onChange={setSize}
+            sample={
+              sizingNib ? (
+                <NibSample nib={size} min={sizeMin} max={sizeMax} />
+              ) : (
+                <ThreadSample gauge={size} />
+              )
             }
+            probe='size'
+            fused={!sizingNib}
           />
-        )}
+
+          {/* «Follows the thread» — законное состояние формата, а не пропуск: штрих без своего
+              `step` шьётся стежком по нити, и документ остаётся прежней версии. */}
+          {!sizingNib && (
+            <Regulator
+              name='stitch'
+              hint={
+                stepOwn
+                  ? 'thread across the line, stitch along it — this stitch is set apart from the thread'
+                  : 'thread across the line, stitch along it — the stitch follows the thread until you move it'
+              }
+              value={curStep}
+              min={MIN_STEP}
+              max={MAX_STEP}
+              unit='px'
+              curve='log'
+              disabled={p.frozen}
+              onChange={p.onStep}
+              sample={<StitchRhythmSample step={curStep} />}
+              probe='step'
+              trailing={
+                stepOwn ? (
+                  <Chip
+                    dashed
+                    disabled={p.frozen}
+                    onClick={p.onStepFollow}
+                    title='let the stitch follow the thread again — the document stops carrying a stitch of its own'
+                  >
+                    follow
+                  </Chip>
+                ) : undefined
+              }
+            />
+          )}
+        </div>
 
         {/* ЖЁСТКОСТЬ И НЕПРОЗРАЧНОСТЬ — только у пиксельного кончика. У резчика линий полутона нет
             вовсе: полилиния либо внутри контура, либо снаружи, и «наполовину вырезать» — не
@@ -958,14 +1370,19 @@ export function VectorBrushRail(p: RailProps) {
           <>
             <Regulator
               name='hardness'
-              hint='1 is a hard round edge; 0 fades from the centre out'
+              // Подпись говорит в тех же единицах, что и орган. Прежняя строка объясняла «1 is a
+              // hard round edge; 0 fades», пока поле рядом ходило от 0 до 100: два разных языка
+              // об одной величине в одном ряду.
+              hint='100 is a hard round edge; at 0 the tip fades from the centre out'
               value={p.hardness}
               min={0}
               max={100}
               unit='%'
+              // Доля, а не отношение размеров: тонкого конца, который стоило бы растянуть, тут нет.
+              curve='linear'
               disabled={p.frozen}
               onChange={p.onHardness}
-              presets={HARDNESS_PRESETS}
+              sample={<HardnessSample pct={p.hardness} />}
               probe='hardness'
             />
             <Regulator
@@ -975,9 +1392,10 @@ export function VectorBrushRail(p: RailProps) {
               min={1}
               max={100}
               unit='%'
+              curve='linear'
               disabled={p.frozen}
               onChange={p.onOpacity}
-              presets={OPACITY_PRESETS}
+              sample={<OpacitySample pct={p.opacity} />}
               probe='opacity'
             />
           </>
@@ -1199,11 +1617,21 @@ export function VectorBrushRail(p: RailProps) {
         </div>
       </div>
 
-      <div className='mt-auto border-t border-hairline pt-1.5'>
-        <Text size='nano' variant='label' component='p'>
-          {p.saveNote}
-        </Text>
-      </div>
+      {/* ── АБЗАЦ О СОХРАНЕНИИ УБРАН ЦЕЛИКОМ (Q-12) ─────────────────────────────────────────────
+          Здесь печаталось `p.saveNote` — «saving writes the vector over «…» into a NEW picture — a
+          sibling of the base, taking the … slot. The original is never overwritten. «Save the
+          drawing only» keeps the strokes and makes no picture.» Убрана ТОЛЬКО проза: ни одной
+          кнопки на этой рейке абзац не держал, и ни одна не тронута — сами двери сохранения живут
+          в `vector-modal.tsx` и стоят там же, где стояли.
+
+          КОРОЧЕ НЕ ПЕРЕПИСЫВАЛИ, А УБРАЛИ: это третий круг, на котором владелец просит убрать
+          объясняющий абзац, и абзац покороче — это тот же абзац. Почему в подсказку тоже ничего не
+          перенесено — разобрано у пропа `saveNote` в `RailProps`: единственная фраза о
+          необратимости говорила, что необратимого здесь НЕТ.
+
+          `mt-auto` УШЁЛ ВМЕСТЕ С НИМ И НЕ ПЕРЕЕХАЛ НА СОСЕДА: он прижимал к низу колонки ИМЕННО
+          подпись. Повесь его на группу «svg» — и две кнопки, которые сегодня стоят сразу под
+          слоями, уехали бы к нижнему краю рейки, оторвавшись от всего остального. */}
     </div>
   );
 }
