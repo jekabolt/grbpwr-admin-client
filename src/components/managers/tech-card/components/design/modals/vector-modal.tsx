@@ -33,6 +33,27 @@ import {
   useEditLayerWrites,
   type LayerHandle,
 } from './use-edit-layer';
+import {
+  BACKDROP_GONE_TEXT,
+  adoptBackdrop,
+  backdropCss,
+  backdropScopeKey,
+  fitBackdrop,
+  flipBackdrop,
+  flushBackdrop,
+  forgetBackdrop,
+  moveBackdrop,
+  probeBackdrop,
+  readBackdrop,
+  reconcileBackdrop,
+  rotateBackdrop,
+  saveBackdropSoon,
+  setBackdropDepth,
+  setBackdropLocked,
+  setBackdropOpacity,
+  type Backdrop,
+  type BackdropFit,
+} from './vector-backdrop';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
 import {
   COPY_NUDGE,
@@ -551,6 +572,23 @@ export function VectorModal({
   const [penHover, setPenHover] = useState<[number, number] | null>(null);
   /** Курсор над холстом под круглым нибом — центр превью-круга ластика и штампа. */
   const [nibHover, setNibHover] = useState<[number, number] | null>(null);
+  /**
+   * ПОДЛОЖКА ДЛЯ СРИСОВЫВАНИЯ (Q-1, Q-9) — шаблон, а не слой картинки.
+   *
+   * ⚠ ОНА НЕ СОХРАНЯЕТСЯ. Прямое решение владельца: подложка живёт только в редакторе, как template
+   * layer в Illustrator. На сервер уходят линии и пиксели, и ничего больше — поэтому её нет ни в
+   * `writeLayer`, ни в сплющивании, ни в `dirty`. Положение при этом помнится между открытиями
+   * (localStorage по ключу слоя): выставить шаблон стоит минуты, и терять эту работу на каждом
+   * закрытии было бы хуже, чем не иметь шаблона вовсе.
+   *
+   * ЗАПЕРТА ИЛИ НЕТ — ЭТО И ЕСТЬ ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА. Отпертая ловит руку и двигается; запертая
+   * прозрачна для указателя, и по ней рисуют. Отдельного чипа-инструмента для этого нет нарочно:
+   * одиннадцатый чип означал бы, что «подвинуть шаблон» — такой же глагол, как «нарисовать линию»,
+   * а это подготовка, а не работа.
+   */
+  const [backdrop, setBackdrop] = useState<Backdrop | null>(null);
+  const backdropRef = useRef<Backdrop | null>(null);
+  const bdDrag = useRef<{ id: number; at: [number, number] } | null>(null);
   const putPenHover = useCallback((next: [number, number] | null) => {
     penHoverRef.current = next;
     setPenHover(next);
@@ -704,6 +742,36 @@ export function VectorModal({
 
   const plateH = PLATE_W / (ratio || DEFAULT_RATIO);
   const zoomK = zoomPct / 100 || 1;
+  const plateRect = useMemo(() => ({ w: PLATE_W, h: plateH }), [plateH]);
+  /** Ключ памяти положения подложки. До первого сохранения `layer.id` = 0 — перенос записи ниже. */
+  const bdKey = useMemo(
+    () => backdropScopeKey({ techCardId, baseMediaId, layerId: layer.id }),
+    [techCardId, baseMediaId, layer.id],
+  );
+  /**
+   * ОДИН ПИСАТЕЛЬ ПОДЛОЖКИ. Реф и состояние меняются вместе: `pointermove` прилетает раньше
+   * рендера, и чтение состояния во время протяжки давало бы позапрошлое положение — шаблон полз бы
+   * за рукой с отставанием на кадр.
+   */
+  /**
+   * ⚠ ПЛАТА ЧИТАЕТСЯ РЕФОМ, А НЕ ЗАВИСИМОСТЬЮ. Её высота меняется, пока грузится подложка (форма
+   * приходит из натуральных пропорций картинки), а восстановление шаблона — асинхронная проба
+   * файла. Плата в зависимостях означала бы, что каждая такая смена ОТМЕНЯЕТ пробу на полпути, и
+   * шаблон не появлялся никогда: замерено пробой, три красных подряд на верном коде.
+   */
+  const plateRef = useRef(plateRect);
+  plateRef.current = plateRect;
+
+  const putBackdrop = useCallback(
+    (next: Backdrop | null, remember = true) => {
+      backdropRef.current = next;
+      setBackdrop(next);
+      if (!remember) return;
+      if (next) saveBackdropSoon(bdKey, next);
+      else forgetBackdrop(bdKey);
+    },
+    [bdKey],
+  );
 
   /**
    * Seed on opening — and forget everything on the way out, so reopening over another plate cannot
@@ -977,6 +1045,48 @@ export function VectorModal({
     setSelected(null);
     setTl(timeline.current.state());
   }, [applyUndoResult]);
+
+  /**
+   * ВОССТАНОВИТЬ ПОДЛОЖКУ ПРИ ОТКРЫТИИ — И ТОЛЬКО ПОСЛЕ ТОГО, КАК ФАЙЛ ОТВЕТИЛ.
+   *
+   * Рисовать её до пробы нельзя: медиа могли удалить из библиотеки, и битая картинка на плате
+   * читалась бы как «редактор сломался». Пропавшая говорит об этом словами и снимается — иначе
+   * следующее открытие показывало бы то же сообщение навсегда.
+   *
+   * Проба заодно возвращает НАСТОЯЩИЕ натуральные размеры: запись помнит те, что были при
+   * постановке, а картинку могли перезалить.
+   */
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const stored = readBackdrop(bdKey);
+    if (!stored) return;
+    void probeBackdrop(stored.src).then((probe) => {
+      if (!alive) return;
+      if (!probe.ok) {
+        forgetBackdrop(bdKey);
+        showMessage(BACKDROP_GONE_TEXT, 'error');
+        return;
+      }
+      // Без записи: это ЧТЕНИЕ, а не правка, и трогать хранимое здесь нечем.
+      putBackdrop(reconcileBackdrop(stored, probe, plateRef.current), false);
+    });
+    return () => {
+      alive = false;
+    };
+    // Ключ меняется, когда слой получает свой id после первого сохранения.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, bdKey, putBackdrop]);
+
+  /** Отложенная запись обязана лечь до того, как вкладку закроют. */
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener('pagehide', flushBackdrop);
+    return () => {
+      window.removeEventListener('pagehide', flushBackdrop);
+      flushBackdrop();
+    };
+  }, [open]);
 
   // ⌘Z / Ctrl+Z, ⌘⇧Z — возврат. MATCHED BY `code`, NEVER BY `key`: on a Russian layout
   // `event.key` is «я» and a comparison against the letter z is dead — the same trap the assembly
@@ -1498,6 +1608,19 @@ export function VectorModal({
     if (event.button !== 0) return;
     const at = frameAt(event);
 
+    /**
+     * ОТПЕРТЫЙ ШАБЛОН ЛОВИТ РУКУ РАНЬШЕ ЛЮБОГО ИНСТРУМЕНТА. Замок и есть переключатель режима:
+     * пока подложка отперта, экран занят её постановкой, и рисовать по ней нельзя — иначе первый
+     * же штрих лёг бы поверх шаблона, который человек ещё двигает. Заперта — прозрачна для руки.
+     */
+    const bd = backdropRef.current;
+    if (bd && !bd.locked && !frozen && !picking) {
+      event.preventDefault();
+      vp.setPointerCapture?.(event.pointerId);
+      bdDrag.current = { id: event.pointerId, at };
+      return;
+    }
+
     // ПИПЕТКА СТАРШЕ ЛЮБОГО ИНСТРУМЕНТА: пока она взведена, клик берёт цвет и НИЧЕГО не рисует.
     // Так же ведёт себя alt-пипетка кисти в фотошопе — жест один, и он не оставляет следа.
     if (picking) {
@@ -1570,6 +1693,20 @@ export function VectorModal({
   };
 
   const onStagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const bdd = bdDrag.current;
+    if (bdd && event.pointerId === bdd.id) {
+      const now = frameAt(event);
+      const b = backdropRef.current;
+      // Сдвиг считается В ЮНИТАХ ПЛАТЫ: `frameAt` даёт доли кадра, а подложка живёт в юнитах, и
+      // умножение на плату — единственное место, где эти две системы встречаются.
+      if (b) {
+        putBackdrop(
+          moveBackdrop(b, plateRect, (now[0] - bdd.at[0]) * PLATE_W, (now[1] - bdd.at[1]) * plateH),
+        );
+      }
+      bdDrag.current = { id: bdd.id, at: now };
+      return;
+    }
     const drag = panDrag.current;
     if (drag && event.pointerId === drag.id) {
       const { pan, zoom } = viewRef.current;
@@ -1617,6 +1754,10 @@ export function VectorModal({
   };
 
   const onStagePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (bdDrag.current && event.pointerId === bdDrag.current.id) {
+      bdDrag.current = null;
+      return;
+    }
     const drag = panDrag.current;
     if (drag && event.pointerId === drag.id) {
       panDrag.current = null;
@@ -2939,6 +3080,24 @@ export function VectorModal({
                     setSelected(null);
                   }}
                   saveNote={saveNote}
+                  backdrop={backdrop}
+                  backdropKey={bdKey}
+                  plate={plateRect}
+                  onBackdropPick={(media) => {
+                    const r = adoptBackdrop(media[0], plateRect);
+                    if (!r.ok) {
+                      showMessage(r.reason, 'error');
+                      return;
+                    }
+                    putBackdrop(r.backdrop);
+                  }}
+                  onBackdropOp={(next) => putBackdrop(next)}
+                  onBackdropFit={(mode) => {
+                    const b = backdropRef.current;
+                    if (!b) return;
+                    putBackdrop(fitBackdrop(b, plateRect, mode));
+                  }}
+                  onBackdropRemove={() => putBackdrop(null)}
                 />
 
                 <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-1'>
@@ -3064,6 +3223,23 @@ export function VectorModal({
                         willChange: 'transform',
                       }}
                     >
+                      {backdrop && backdrop.depth === 'under' && (
+                        /* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
+                           сама сцена, и `pointer-events` на картинке только отняли бы у неё
+                           события. Отпертый обведён рамкой: это единственный признак, по которому
+                           видно, что экран сейчас двигает шаблон, а не рисует. */
+                        <img
+                          src={backdrop.src}
+                          alt=''
+                          draggable={false}
+                          data-backdrop='under'
+                          className={cn(
+                            'pointer-events-none absolute left-0 top-0 block max-w-none',
+                            !backdrop.locked && 'outline-dashed outline-2 outline-textColor/60',
+                          )}
+                          style={backdropCss(backdrop)}
+                        />
+                      )}
                       {/* ПОДЛОЖКА ЖИВЁТ ДО ПЕРВОГО ПИКСЕЛЬНОГО ИНСТРУМЕНТА, а потом ГАСНЕТ, но
                           остаётся в разметке: она — оракул натуральных пропорций (`onLoad`), и
                           снять её значило бы потерять форму платы у того, кто взял кисть раньше,
@@ -3097,6 +3273,23 @@ export function VectorModal({
                           role='img'
                           aria-label={`the pixel layer${base ? ` over «${pictureHandle(base)}»` : ''} — ${rasterDirty ? 'painted' : 'a copy of the picture underneath'}`}
                           className='pointer-events-none absolute inset-0 block h-full w-full'
+                        />
+                      )}
+                      {backdrop && backdrop.depth === 'over' && (
+                        /* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
+                           сама сцена, и `pointer-events` на картинке только отняли бы у неё
+                           события. Отпертый обведён рамкой: это единственный признак, по которому
+                           видно, что экран сейчас двигает шаблон, а не рисует. */
+                        <img
+                          src={backdrop.src}
+                          alt=''
+                          draggable={false}
+                          data-backdrop='over'
+                          className={cn(
+                            'pointer-events-none absolute left-0 top-0 block max-w-none',
+                            !backdrop.locked && 'outline-dashed outline-2 outline-textColor/60',
+                          )}
+                          style={backdropCss(backdrop)}
                         />
                       )}
                       {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый

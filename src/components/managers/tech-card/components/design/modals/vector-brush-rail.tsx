@@ -7,7 +7,24 @@ import Input from 'ui/components/input';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 
+import { MediaSlot } from 'components/managers/media/components/media-slot';
+import type { common_MediaFull } from 'api/proto-http/admin';
+
 import { SvgImportDoor } from './svg-import-door';
+import {
+  BACKDROP_ROT_SNAP,
+  MAX_BACKDROP_OPACITY,
+  MIN_BACKDROP_OPACITY,
+  containScale,
+  flipBackdrop,
+  rotateBackdrop,
+  scaleBackdrop,
+  setBackdropDepth,
+  setBackdropLocked,
+  setBackdropOpacity,
+  type Backdrop,
+  type BackdropFit,
+} from './vector-backdrop';
 import type { SelectionArea } from './vector-lasso';
 import { MAX_NIB, MIN_NIB } from './vector-nib';
 import {
@@ -1056,6 +1073,22 @@ export type RailProps = {
    * они понадобятся, — подсказка (`title`) на самой кнопке сохранения, а она живёт в `vector-modal`.
    */
   saveNote: string;
+
+  /**
+   * ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ (Q-1, Q-9). Он НЕ СОХРАНЯЕТСЯ — это template layer, а не слой картинки,
+   * и на сервер не уходит никогда. Поэтому у него нет ни «применить», ни «сплющить»: единственное,
+   * что с ним делают, — ставят так, чтобы по нему было удобно рисовать.
+   *
+   * `backdropLocked` — не украшение, а ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА: отпертый шаблон ловит руку и
+   * двигается, запертый прозрачен для указателя и по нему рисуют.
+   */
+  backdrop: Backdrop | null;
+  backdropKey: string;
+  onBackdropPick: (media: common_MediaFull[]) => void;
+  onBackdropOp: (next: Backdrop) => void;
+  onBackdropFit: (mode: BackdropFit) => void;
+  onBackdropRemove: () => void;
+  plate: { w: number; h: number };
 };
 
 export function VectorBrushRail(p: RailProps) {
@@ -1445,6 +1478,118 @@ export function VectorBrushRail(p: RailProps) {
             }
           />
         )}
+        {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Стоит в слоях, а не отдельной группой, потому что он и есть
+            слой — просто тот, который никуда не уходит. Строка сама говорит, чем он отличается от
+            соседей: «never saved». */}
+        {/* Ключ памяти положения печатается в разметку нарочно: проба обязана спрашивать ТОТ ключ,
+            которым пользуется код, а не тот, который она про него думает. Угаданный ключ дал бы
+            зелёную пробу над мёртвым восстановлением. */}
+        <div className='mt-1.5 flex flex-col gap-1' data-backdrop-rail={p.backdropKey}>
+          <GroupLabel flush>template · never saved</GroupLabel>
+          {!p.backdrop ? (
+            <MediaSlot
+              aspectRatio={['Custom']}
+              frameAspect='4/5'
+              heightPx={64}
+              label='+ trace over a photo'
+              purpose='tracing template'
+              showVideos={false}
+              onSelect={p.onBackdropPick}
+              sizeClassName='w-full'
+            />
+          ) : (
+            <>
+              <ChipRow>
+                {(['contain', 'cover', 'actual'] as BackdropFit[]).map((m) => (
+                  <Chip key={m} onClick={() => p.onBackdropFit(m)} disabled={p.frozen}>
+                    {m === 'actual' ? '1:1' : m}
+                  </Chip>
+                ))}
+                <Chip
+                  onClick={() => p.onBackdropOp(flipBackdrop(p.backdrop!, p.plate))}
+                  disabled={p.frozen}
+                >
+                  flip
+                </Chip>
+                <Chip
+                  onClick={() =>
+                    p.onBackdropOp(rotateBackdrop(p.backdrop!, p.plate, BACKDROP_ROT_SNAP))
+                  }
+                  disabled={p.frozen}
+                >
+                  rotate 15°
+                </Chip>
+              </ChipRow>
+              {/* ЗАМОК ПЕРВЫЙ И САМЫЙ КРУПНЫЙ: он решает, рисует сейчас экран или двигает шаблон,
+                  и человек, который этого не понял, решит, что редактор перестал рисовать. */}
+              <ChipRow>
+                <Chip
+                  selected={p.backdrop.locked}
+                  pressed={p.backdrop.locked}
+                  data-backdrop-lock=''
+                  onClick={() =>
+                    p.onBackdropOp(setBackdropLocked(p.backdrop!, !p.backdrop!.locked))
+                  }
+                  disabled={p.frozen}
+                >
+                  {p.backdrop.locked ? 'locked — you draw' : 'unlocked — you place it'}
+                </Chip>
+                <Chip
+                  selected={p.backdrop.depth === 'under'}
+                  pressed={p.backdrop.depth === 'under'}
+                  onClick={() =>
+                    p.onBackdropOp(
+                      setBackdropDepth(p.backdrop!, p.backdrop!.depth === 'over' ? 'under' : 'over'),
+                    )
+                  }
+                  disabled={p.frozen}
+                >
+                  {p.backdrop.depth === 'over' ? 'on top' : 'underneath'}
+                </Chip>
+              </ChipRow>
+              {/* ЗУМ ШАБЛОНА В ДОЛЯХ ОТ ВПИСАННОГО. Абсолютные юниты здесь ничего не сказали бы:
+                  «масштаб 0.37» — это число про файл, а человек думает «крупнее, чем помещается».
+                  Сто процентов и есть «вписан целиком», и от него считается всё остальное. */}
+              <Regulator
+                name='zoom'
+                value={Math.round((p.backdrop.scale / containScale(p.backdrop, p.plate)) * 100)}
+                min={10}
+                max={800}
+                curve='log'
+                unit='%'
+                disabled={p.frozen}
+                onChange={(v) => {
+                  const b = p.backdrop!;
+                  const want = (v / 100) * containScale(b, p.plate);
+                  p.onBackdropOp(scaleBackdrop(b, p.plate, want / b.scale));
+                }}
+                hint='how big the template sits on the sheet; 100% is fitted whole'
+                sample={null}
+                probe='backdrop-zoom'
+              />
+              <Regulator
+                name='template'
+                value={Math.round(p.backdrop.opacity * 100)}
+                min={Math.round(MIN_BACKDROP_OPACITY * 100)}
+                max={Math.round(MAX_BACKDROP_OPACITY * 100)}
+                curve='linear'
+                unit='%'
+                disabled={p.frozen}
+                onChange={(v) =>
+                  p.onBackdropOp(setBackdropOpacity(p.backdrop!, p.plate, v / 100))
+                }
+                hint='how strongly the template shows through'
+                sample={null}
+                probe='backdrop-opacity'
+              />
+              <ChipRow>
+                <Chip onClick={p.onBackdropRemove} disabled={p.frozen} data-backdrop-remove=''>
+                  remove template
+                </Chip>
+              </ChipRow>
+            </>
+          )}
+        </div>
         {/* ДВА ПОЯСНИТЕЛЬНЫХ АБЗАЦА ОТСЮДА УБРАНЫ (Y-3): `data-base-note` («… is the original
             underneath…») и `data-pixels-note` («The pixel layer is a whole picture…»). Оба
             объясняли УСТРОЙСТВО хранения тому, кто в этот момент целится рукой; владелец прочёл
