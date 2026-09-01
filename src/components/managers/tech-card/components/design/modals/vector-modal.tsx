@@ -86,13 +86,18 @@ import {
   type ExpandFill,
 } from './vector-expand';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
-import type { TraceKnobs } from './trace-raster-panel';
+import type { TraceKnobs, CentreReading } from './trace-raster-panel';
+import { measureRaster } from './trace-measure';
+import { centerlineRun } from './trace-centerline';
+import { solveDashes } from './trace-dashes';
 import {
   DEFAULT_TRACE_MIN_AREA,
   DEFAULT_TRACE_THRESHOLD,
   DEFAULT_TRACE_TOLERANCE,
   traceInk,
   traceRaster,
+  traceSize,
+  DEFAULT_OPEN_TOLERANCE,
   type TraceReading,
 } from './vector-trace';
 import { healMask } from './vector-heal';
@@ -622,13 +627,17 @@ export function VectorModal({
   const [traceOpen, setTraceOpen] = useState(false);
   const [tracePreview, setTracePreview] = useState(true);
   const [traceKnobs, setTraceKnobs] = useState<TraceKnobs>({
+    /* Умолчание — осевая: на техническом флэте почти всё нарисовано пером, а не залито. */
+    mode: 'centreline',
     threshold: DEFAULT_TRACE_THRESHOLD,
-    tolerance: DEFAULT_TRACE_TOLERANCE,
+    /* Умолчание допуска — того маршрута, который стоит умолчанием: 0.4 px, число отчёта. */
+    tolerance: DEFAULT_OPEN_TOLERANCE,
     minArea: DEFAULT_TRACE_MIN_AREA,
     polarity: 'dark',
     channel: 'luma',
   });
   const [traceReading, setTraceReading] = useState<TraceReading | null>(null);
+  const [traceCentre, setTraceCentre] = useState<CentreReading | null>(null);
   const [traceSuggest, setTraceSuggest] = useState<number | null>(null);
   const [tracing, setTracing] = useState(false);
   const tracePreviewRef = useRef<HTMLCanvasElement | null>(null);
@@ -976,13 +985,15 @@ export function VectorModal({
     setTraceOpen(false);
     setTracePreview(true);
     setTraceKnobs({
+      mode: 'centreline',
       threshold: DEFAULT_TRACE_THRESHOLD,
-      tolerance: DEFAULT_TRACE_TOLERANCE,
+      tolerance: DEFAULT_OPEN_TOLERANCE,
       minArea: DEFAULT_TRACE_MIN_AREA,
       polarity: 'dark',
       channel: 'luma',
     });
     setTraceReading(null);
+    setTraceCentre(null);
     setTraceSuggest(null);
     setTracing(false);
     setConfirmExit(false);
@@ -2730,6 +2741,7 @@ export function VectorModal({
     if (frozenRef.current) return;
     setRefusal(null);
     setTraceReading(null);
+    setTraceCentre(null);
     setTraceSuggest(null);
     const layer = await ensureRaster();
     if (!layer || frozenRef.current) return;
@@ -2740,6 +2752,84 @@ export function VectorModal({
     if (sel) {
       const mask = selectionMask(layer, sel.pts, sel.feather);
       if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
+    }
+
+    /**
+     * ═══ ОСЕВАЯ — ДРУГОЙ МАРШРУТ, А НЕ ДРУГАЯ НАСТРОЙКА ОДНОГО ═══════════════════════════════
+     *
+     * Обвод спрашивает у человека порог; осевая находит его сама (деление на фон, белая точка,
+     * глобальный Otsu) — поэтому и ручки у них разные, и панель это говорит вслух.
+     *
+     * ЛАССО ЗДЕСЬ РАБОТАЕТ ИНАЧЕ, И ЭТО НАЗВАНО. Измеритель выделения не принимает вовсе: он
+     * меряет ВСЮ картинку, потому что толщина, KDE-моды и коллинеарная поддержка — свойства
+     * рисунка целиком, и посчитанные по обрезку они означали бы другое. Поэтому область
+     * применяется К ИСХОДНИКУ: за её пределами кладётся бумага. Разница с обводом честная —
+     * фигура, пересекающая край области, у обвода вернётся ОБРЕЗАННОЙ вместе с краем лассо, а
+     * здесь просто не будет измерена.
+     *
+     * ДВА ДВИЖКА НА ОДНОМ ИЗМЕРЕНИИ. `traceCenterline` снимает ось со сплошных штрихов,
+     * `solveDashes` собирает стежки в ряды. Оба читают ОДИН `TraceMeasurement`: второй проход
+     * измерителя дал бы второй набор компонент с другими номерами, и «ряд собран из компонент,
+     * которых нет в этом чтении» — ровно тот сорт расхождения, который не виден на экране.
+     */
+    if (traceKnobs.mode === 'centreline') {
+      let img = src;
+      if (selAlpha) {
+        const clipped = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
+        for (let i = 0, n = src.width * src.height; i < n; i++) {
+          if (selAlpha[i] === 0) {
+            clipped.data[i * 4] = 255;
+            clipped.data[i * 4 + 1] = 255;
+            clipped.data[i * 4 + 2] = 255;
+            clipped.data[i * 4 + 3] = 255;
+          }
+        }
+        img = clipped;
+      }
+      setBusy('measuring the drawing…');
+      setTracing(true);
+      let centre;
+      let dash;
+      try {
+        const m = measureRaster(img);
+        centre = centerlineRun(m, { ratio: ratio || DEFAULT_RATIO, tolerance: traceKnobs.tolerance });
+        dash = solveDashes(m, { tolerance: traceKnobs.tolerance });
+      } finally {
+        setBusy(null);
+        setTracing(false);
+      }
+      if (frozenRef.current) return;
+      const born = [...centre.strokes, ...dash.strokes];
+      /**
+       * ПОТОЛОК ПРОВЕРЯЕТСЯ ЗДЕСЬ, ПОТОМУ ЧТО ДВИЖКА ДВА. Каждый мерил СВОИ байты и про соседа не
+       * знал: два «влезаю» подряд складываются в «не влезает», и узнал бы об этом человек от
+       * сервера, отказавшего всему слою. Считается то, что реально уедет — оба списка вместе с
+       * тем, что уже лежит в документе.
+       */
+      const bytes = new TextEncoder().encode(
+        writeLayer([...strokesRef.current, ...born], ratio || DEFAULT_RATIO),
+      ).length;
+      if (bytes > MAX_STROKES_BYTES) {
+        setRefusal(
+          `the drawing traced into ${born.length} lines, and that is ${traceSize(bytes)} against a ceiling of ${traceSize(
+            MAX_STROKES_BYTES,
+          )} for one layer. Nothing was written. Raise the tolerance and trace again, or trace one lasso area at a time — thinning it here would move lines that were measured on purpose.`,
+        );
+        return;
+      }
+      setTraceCentre({
+        strokes: born.length,
+        nodes: centre.nodes,
+        junctions: centre.junctions,
+        deviation: centre.deviation,
+        bytes,
+        rows: dash.chains.length,
+        pairs: dash.pairs.length,
+        notes: [...centre.notes, ...dash.notes],
+      });
+      if (born.length === 0) return;
+      commitLines([...strokesRef.current, ...born]);
+      return;
     }
 
     setBusy('tracing…');
@@ -3655,6 +3745,7 @@ export function VectorModal({
                   }}
                   traceKnobs={traceKnobs}
                   onTraceKnobs={setTraceKnobs}
+                  traceCentre={traceCentre}
                   tracePreview={tracePreview}
                   onTracePreview={setTracePreview}
                   traceBusy={tracing}

@@ -12,7 +12,7 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import type { common_MediaFull } from 'api/proto-http/admin';
 
 import { SvgImportDoor } from './svg-import-door';
-import { TraceRasterGroup, type TraceKnobs } from './trace-raster-panel';
+import { TraceRasterGroup, type TraceKnobs, type CentreReading } from './trace-raster-panel';
 import type { TraceReading } from './vector-trace';
 import {
   DEFAULT_EXPAND_FILL,
@@ -1139,6 +1139,8 @@ export type RailProps = {
   traceSelectionNo: number | null;
   traceBudgetBytes: number;
   traceReading: TraceReading | null;
+  /** Чтение осевого маршрута — второе, потому что и работа вторая. Довод — у самой панели. */
+  traceCentre: CentreReading | null;
   traceSuggest: number | null;
   onTraceRun: () => void;
 };
@@ -1908,6 +1910,7 @@ export function VectorBrushRail(p: RailProps) {
         selectionNo={p.traceSelectionNo}
         budgetBytes={p.traceBudgetBytes}
         reading={p.traceReading}
+        centre={p.traceCentre}
         suggest={p.traceSuggest}
         onRun={p.onTraceRun}
       />

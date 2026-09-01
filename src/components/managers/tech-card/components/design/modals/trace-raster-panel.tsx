@@ -6,6 +6,8 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 
 import {
+  DEFAULT_OPEN_TOLERANCE,
+  DEFAULT_TRACE_TOLERANCE,
   MAX_TRACE_TOLERANCE,
   MIN_TRACE_TOLERANCE,
   traceSize,
@@ -43,11 +45,42 @@ import {
 
 /** Черновик ручек: ровно те поля `TraceOptions`, которые человек крутит руками. */
 export type TraceKnobs = {
+  /**
+   * ⚠ ГЛАВНАЯ РУЧКА, И ОНА НЕ ПРО КАЧЕСТВО, А ПРО ТО, ЧЕМ НАРИСОВАН ПРЕДМЕТ.
+   *
+   * `centreline` — медиальная ось: линия возвращается ОДНОЙ открытой кривой со своей измеренной
+   * толщиной. Это швы, конструктив, контур-как-обводка и строчка, то есть почти весь технический
+   * флэт.
+   * `outline` — граница краски: у всякого штриха ДВЕ стороны, и он возвращается замкнутой петлёй
+   * ВОКРУГ себя. Это правильно ровно для залитого — пуговиц, люверсов, лейблов.
+   *
+   * Выбор необратим по существу, а не по интерфейсу: из двойного контура штрих не
+   * восстанавливается. Замерено в отчёте владельца — скелетизировать обвод и обвести скелет
+   * обратно ХУЖЕ, чем обвести оригинал (586 якорей против 536).
+   */
+  mode: 'centreline' | 'outline';
   threshold: number;
   tolerance: number;
   minArea: number;
   polarity: 'dark' | 'light';
   channel: 'luma' | 'alpha';
+};
+
+/**
+ * Что осевой маршрут сообщает о своей работе. Собран здесь, а не импортом из двух движков, чтобы
+ * панель не тянула типы `trace-centerline` и `trace-dashes` ради четырёх чисел — и чтобы вызывающий
+ * решал сам, что из двух чтений он показывает.
+ */
+export type CentreReading = {
+  strokes: number;
+  nodes: number;
+  junctions: number;
+  deviation: number;
+  bytes: number;
+  /** Рядов пунктирной строчки и сколько из них встали парами двойной отстрочки. */
+  rows: number;
+  pairs: number;
+  notes: string[];
 };
 
 const clamp = (n: number, lo: number, hi: number) => (n < lo ? lo : n > hi ? hi : n);
@@ -64,6 +97,7 @@ export function TraceRasterGroup({
   selectionNo,
   budgetBytes,
   reading,
+  centre,
   suggest,
   onRun,
 }: {
@@ -81,12 +115,15 @@ export function TraceRasterGroup({
   /** Сколько байт документа осталось под обводку — то же число, что уедет в движок. */
   budgetBytes: number;
   reading: TraceReading | null;
+  /** Чтение осевого маршрута: рёбра скелета, узлы, ряды строчки и найденные пары. */
+  centre: CentreReading | null;
   /** Допуск, который движок назвал ОЦЕНКОЙ в своём отказе. Ставится щелчком, не сам. */
   suggest: number | null;
   onRun: () => void;
 }) {
   const set = (patch: Partial<TraceKnobs>) => onKnobs({ ...knobs, ...patch });
   const byAlpha = knobs.channel === 'alpha';
+  const outline = knobs.mode === 'outline';
 
   /**
    * ОТКРЫТАЯ ГРУППА ПОДТЯГИВАЕТСЯ В ВИДИМУЮ ЧАСТЬ РЕЙКИ, И ЭТО НЕ ЛОСК, А ЗАМЕРЕННЫЙ ДЕФЕКТ.
@@ -113,7 +150,7 @@ export function TraceRasterGroup({
             disabled={frozen}
             data-trace-open=''
             onClick={() => onOpen(!open)}
-            title='outline the pixels of this plate as editable curves — free, local, no request'
+            title='turn the pixels of this plate into editable curves — free, local, no request'
           >
             {open ? 'close' : 'open'}
           </Chip>
@@ -124,21 +161,73 @@ export function TraceRasterGroup({
 
       {!open ? (
         <Text size='nano' variant='label' component='p'>
-          outlines the pixels that are already on this plate as editable curves — free, local, and
+          turns the pixels that are already on this plate into editable curves — free, local, and
           faithful to a named number of pixels. It is not the paid redraw on the entry screen: that
           one draws the garment again, this one traces what is there.
         </Text>
       ) : (
         <>
+          {/* ═══ ЧЕМ НАРИСОВАН ПРЕДМЕТ — ПЕРО ИЛИ ЗАЛИВКА ══════════════════════════════════════
+              Это первый вопрос, а не настройка качества, и потому он стоит первым органом.
+              Ответ определяет, что вернётся: ОДНА линия со своей толщиной или замкнутая петля
+              вокруг штриха. Обратного хода нет — из двойного контура штрих не восстанавливается,
+              и это замерено, а не предположено. */}
+          <ChipRow>
+            {(['centreline', 'outline'] as const).map((mo) => (
+              <Chip
+                key={mo}
+                selected={knobs.mode === mo}
+                pressed={knobs.mode === mo}
+                disabled={frozen}
+                data-trace-mode={mo}
+                /**
+                 * ДОПУСК ЕДЕТ ЗА РЕЖИМОМ, НО ТОЛЬКО ПОКА ЕГО НЕ ТРОГАЛИ РУКОЙ.
+                 *
+                 * У двух маршрутов РАЗНЫЕ откалиброванные умолчания — 1.0 у обвода и 0.4 у осевой
+                 * (отчёт владельца: 0.3–0.5 px для флэтов). Одна общая ручка, оставленная на 1.0,
+                 * запустила бы осевую в два с половиной раза грубее, чем её мерили, — и молча:
+                 * число на экране выглядело бы как выбор человека. Перенести его нельзя тоже: тот,
+                 * кто поставил 0.2 нарочно, не должен получить 1.0 от смены режима. Поэтому
+                 * подменяется РОВНО умолчание соседа, и ничто другое.
+                 */
+                onClick={() => {
+                  const other = mo === 'outline' ? DEFAULT_OPEN_TOLERANCE : DEFAULT_TRACE_TOLERANCE;
+                  const mine = mo === 'outline' ? DEFAULT_TRACE_TOLERANCE : DEFAULT_OPEN_TOLERANCE;
+                  set({ mode: mo, tolerance: knobs.tolerance === other ? mine : knobs.tolerance });
+                }}
+                title={
+                  mo === 'centreline'
+                    ? 'drawn with a pen: every line comes back as ONE open curve with its own measured thickness — seams, construction lines, the outline as a stroke, topstitching'
+                    : 'filled areas: buttons, eyelets, labels, a silhouette meant as a fill. A drawn LINE traced this way returns as a closed loop around itself'
+                }
+              >
+                {mo === 'centreline' ? 'drawn with a pen' : 'filled areas'}
+              </Chip>
+            ))}
+          </ChipRow>
+
           <Text size='nano' variant='label' component='p'>
-            every shape comes back as its OUTLINE, not as a filled area — a drawn line has two
-            sides, so a 3&nbsp;px stroke returns as a closed loop AROUND itself, not as one
-            centreline. That is what boundary tracing is, and this layer holds threads, not fills.
+            {outline
+              ? 'every shape comes back as its OUTLINE, not as a filled area — a drawn line has two sides, so a 3 px stroke returns as a closed loop AROUND itself, not as one centreline. That is what boundary tracing is, and this layer holds threads, not fills.'
+              : 'every line comes back as ONE curve carrying the thickness it was drawn with, measured across the line and not guessed. Rows of dashed stitching are assembled into a single stroke with the period they were stitched at, and a double topstitch stays two strokes — one stroke cannot state two parallel rows.'}
           </Text>
 
           {/* ЧТО СЧИТАТЬ КРАСКОЙ. Две оси, и обе названы, потому что автовыбора у движка нет
               нарочно: догадка «похоже, тут прозрачный фон» ошибается МОЛЧА и возвращает контур
-              всей плиты вместо рисунка. */}
+              всей плиты вместо рисунка.
+
+              ⚠ ТОЛЬКО У ОБВОДА. Осевой маршрут порог НЕ СПРАШИВАЕТ: он выравнивает фон делением
+              и берёт ГЛОБАЛЬНЫЙ Otsu — то есть находит порог замером, а не догадкой человека.
+              Оставить здесь три мёртвые ручки значило бы предложить крутить то, что ни на что не
+              влияет; это тот же дефект, что и молчаливый отказ, только вежливее. */}
+          {!outline ? (
+            <Text size='nano' variant='label' component='p'>
+              the threshold is not asked for here: this route flattens the lighting by division and
+              takes a global Otsu, so what counts as ink is MEASURED on this plate rather than
+              guessed at a slider. Speck size is measured too, from the size of the marks it finds.
+            </Text>
+          ) : (
+          <>
           <ChipRow>
             {(['dark', 'light'] as const).map((p) => (
               <Chip
@@ -197,6 +286,8 @@ export function TraceRasterGroup({
               className='ml-auto w-16 shrink-0 text-right tabular-nums'
             />
           </div>
+          </>
+          )}
           <div className='flex items-center gap-1.5 border-b border-hairline py-1'>
             <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
               tolerance
@@ -225,6 +316,7 @@ export function TraceRasterGroup({
               px
             </Text>
           </div>
+          {outline && (
           <div className='flex items-center gap-1.5 border-b border-hairline py-1'>
             <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
               speck size
@@ -247,7 +339,15 @@ export function TraceRasterGroup({
               px²
             </Text>
           </div>
+          )}
 
+          {/* ⚠ ПРЕДПРОСМОТР ПРИНАДЛЕЖИТ ОБВОДУ, И ЭТО НЕ ЭКОНОМИЯ. Он красит `traceInk` — ТУ ЖЕ
+              бинаризацию, которой обвод и решает «краска или фон». У осевой бинаризация ДРУГАЯ
+              (деление на фон, белая точка, глобальный Otsu), и та же заливка показывала бы не то,
+              что произойдёт: человек сверил бы синее с картинкой, согласился, и получил бы обводку
+              по другому порогу. Врущий предпросмотр хуже отсутствующего — его читают как обещание. */}
+          {outline && (
+          <>
           <ChipRow>
             <Chip
               selected={preview}
@@ -265,6 +365,8 @@ export function TraceRasterGroup({
               ? 'judged by transparency alone: every pixel opaque enough is ink, whatever its colour, and the threshold above does nothing at all in this mode.'
               : 'the blue wash is exactly what the tracer will call ink — polarity, channel and threshold decide it, and nothing else does. Tolerance and speck size act AFTER, on shapes this wash has already fixed.'}
           </Text>
+          </>
+          )}
 
           <ChipRow>
             <Button
@@ -297,6 +399,38 @@ export function TraceRasterGroup({
                   budgetBytes,
                 )} left in the layer.`}
           </Text>
+
+          {centre && (
+            /* ЧТЕНИЕ ОСЕВОГО МАРШРУТА. Числа другие, потому что и работа другая: у обвода предмет —
+               ПЯТНА и их дырки, у осевой — РЁБРА скелета и УЗЛЫ, где детали сходятся. Печатать их
+               под одной подписью значило бы называть разные вещи одним словом. Замечания движков
+               идут дословно: «топология в зоне пересечения деталей не решается автоматически» —
+               ровно то, что человек обязан проверить глазом, и пересказ короче однажды соврёт. */
+            <div
+              className='flex flex-col gap-0.5 border-t border-textColor pt-1'
+              data-trace-centre-reading=''
+            >
+              <Text size='nano' variant='label' component='p' className='tabular-nums'>
+                {centre.strokes} line{centre.strokes === 1 ? '' : 's'} · {centre.nodes} node
+                {centre.nodes === 1 ? '' : 's'} · {centre.junctions} junction
+                {centre.junctions === 1 ? '' : 's'} · within {centre.deviation.toFixed(2)} px of the
+                axis · {traceSize(centre.bytes)}
+              </Text>
+              {centre.rows > 0 && (
+                <Text size='nano' variant='label' component='p' className='tabular-nums'>
+                  {centre.rows} row{centre.rows === 1 ? '' : 's'} of dashed stitching, each one
+                  stroke{centre.pairs > 0
+                    ? `, of which ${centre.pairs} pair${centre.pairs === 1 ? '' : 's'} run parallel and stay two strokes each`
+                    : ''}
+                </Text>
+              )}
+              {centre.notes.map((n) => (
+                <Text key={n} size='nano' variant='label' component='p'>
+                  {n}
+                </Text>
+              ))}
+            </div>
+          )}
 
           {reading && (
             /* ЧТЕНИЕ ДВИЖКА ПЕЧАТАЕТСЯ ЧИСЛАМИ И ЕГО СОБСТВЕННЫМИ ЗАМЕЧАНИЯМИ, ДОСЛОВНО. Пересказ
