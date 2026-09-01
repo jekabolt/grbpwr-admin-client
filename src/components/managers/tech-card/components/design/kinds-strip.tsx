@@ -18,6 +18,7 @@ import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
 import { fabricRenderGate } from './render';
+import { countThreedResults } from './threed/media';
 
 /**
  * THE STRIP OF REPRESENTATIONS — the four ways this card's design can exist as a picture.
@@ -245,7 +246,14 @@ export function KindsStrip({
   // «не делается здесь»: полоса отвечает на вопрос «сколько их уже есть».
   const pictures = (band.runs ?? []).flatMap((r) => r.pictures ?? []);
   const renders = pictures.filter((p) => p.kind === 'render' && !p.hiddenAt).length;
-  const turns = pictures.filter((p) => p.kind === 'threed' && !p.hiddenAt).length;
+  /**
+   * ⚠ ПРОГОН 3D ЗАВОДИТ ДВЕ КАРТИНКИ НА ОДИН РЕЗУЛЬТАТ — модель `.glb` и её растровую миниатюру, —
+   * и обе с `kind = threed` (`Produces()` у обоих маршрутов, origin/beta). Счёт по роду картинки
+   * поэтому показывал «2 turntables» там, где сделана ОДНА модель. Правило склейки живёт одно на
+   * всех в `threed/media.ts`; второе, написанное здесь по месту, разошлось бы с ним первой же
+   * правкой маршрута.
+   */
+  const turns = countThreedResults(pictures.filter((p) => p.kind === 'threed' && !p.hiddenAt));
   /**
    * ПЕРЕКРАС ОБЪЯВЛЯЕТ СЕБЯ РЕНДЕРОМ, И ПОТОМУ ЕГО НАДО СЧИТАТЬ ЧЕРЕЗ ПРОГОН, А НЕ ЧЕРЕЗ РОД
    * КАРТИНКИ. Вывод ON MODEL приходит с `picture.kind === 'render'` — тем же словом, что и
@@ -294,8 +302,10 @@ export function KindsStrip({
    */
   const gate = fabricRenderGate(band);
   const threedLocked = gate.ok ? null : gate.reason;
+  /* «turntable» — слово, которого на этих экранах больше нет: K-10/K-11 переименовали весь 3D в
+     «3D models», и полоса осталась единственным местом со старым существительным. */
   const threedSub = turns
-    ? `${turns} turntable${turns === 1 ? '' : 's'}`
+    ? `${turns} 3D model${turns === 1 ? '' : 's'}`
     : threedLocked
       ? 'locked — renders first'
       : 'none yet';

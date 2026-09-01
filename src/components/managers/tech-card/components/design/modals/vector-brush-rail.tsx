@@ -12,6 +12,8 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import type { common_MediaFull } from 'api/proto-http/admin';
 
 import { SvgImportDoor } from './svg-import-door';
+import { TraceRasterGroup, type TraceKnobs } from './trace-raster-panel';
+import type { TraceReading } from './vector-trace';
 import {
   DEFAULT_EXPAND_FILL,
   EXPAND_ANCHORS,
@@ -1114,6 +1116,31 @@ export type RailProps = {
   onBackdropFit: (mode: BackdropFit) => void;
   onBackdropRemove: () => void;
   plate: { w: number; h: number };
+
+  /**
+   * ЛОКАЛЬНАЯ ТРАССИРОВКА — ОПЕРАЦИЯ НАД ПЛИТОЙ, А НЕ ОДИННАДЦАТЫЙ ЧИП НАД ХОЛСТОМ.
+   *
+   * Она не берётся в руку и не имеет жеста: как «расширить лист» и как импорт SVG, она читает всё,
+   * что уже лежит, и кладёт результат одним шагом. Инструмент, у которого нельзя провести рукой,
+   * стоящий в одном ряду с кистью и ластиком, обещал бы жест, которого нет.
+   *
+   * Черновик ручек живёт ЗДЕСЬ же, где черновик обратного кропа, и по той же причине: пока не
+   * нажали, он ничего не значит, а модалке достаётся один вызов с готовыми числами. Исключение —
+   * `traceOpen` и `tracePreview`: их знает модалка, потому что предпросмотр рисуется НА ПЛИТЕ, и
+   * состояние, от которого зависит холст, обязано жить там, где холст.
+   */
+  traceOpen: boolean;
+  onTraceOpen: (next: boolean) => void;
+  traceKnobs: TraceKnobs;
+  onTraceKnobs: (next: TraceKnobs) => void;
+  tracePreview: boolean;
+  onTracePreview: (next: boolean) => void;
+  traceBusy: boolean;
+  traceSelectionNo: number | null;
+  traceBudgetBytes: number;
+  traceReading: TraceReading | null;
+  traceSuggest: number | null;
+  onTraceRun: () => void;
 };
 
 export function VectorBrushRail(p: RailProps) {
@@ -1865,6 +1892,26 @@ export function VectorBrushRail(p: RailProps) {
           видно, — чем именно является выгрузка ДЛЯ ЭТОГО слоя (файл производителя против
           пересериализации нарисованного), — и на слое-файле это разные вещи; `outNote` приходит
           пропом ровно ради этого различия. На экране его больше нет, под курсором он есть. */}
+      {/* ТРАССИРОВКА СТОИТ РЯДОМ С «SVG», А НЕ РЯДОМ С КИСТЯМИ, И ЭТО НЕ ПОРЯДОК ПО ВКУСУ. Эти две
+          группы — единственные два способа, которыми штрихи ПОЯВЛЯЮТСЯ НЕ ИЗ РУКИ: один читает
+          чужой файл, другой читает собственные пиксели плиты. Стоя рядом, они читаются как один
+          вопрос «откуда взять линии», а не как два разных пульта в разных концах рейки. */}
+      <TraceRasterGroup
+        open={p.traceOpen}
+        onOpen={p.onTraceOpen}
+        knobs={p.traceKnobs}
+        onKnobs={p.onTraceKnobs}
+        preview={p.tracePreview}
+        onPreview={p.onTracePreview}
+        frozen={p.frozen}
+        busy={p.traceBusy}
+        selectionNo={p.traceSelectionNo}
+        budgetBytes={p.traceBudgetBytes}
+        reading={p.traceReading}
+        suggest={p.traceSuggest}
+        onRun={p.onTraceRun}
+      />
+
       <div>
         <GroupLabel flush>svg</GroupLabel>
         <div className='flex flex-wrap items-center gap-1.5'>

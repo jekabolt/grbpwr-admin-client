@@ -86,6 +86,15 @@ import {
   type ExpandFill,
 } from './vector-expand';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
+import type { TraceKnobs } from './trace-raster-panel';
+import {
+  DEFAULT_TRACE_MIN_AREA,
+  DEFAULT_TRACE_THRESHOLD,
+  DEFAULT_TRACE_TOLERANCE,
+  traceInk,
+  traceRaster,
+  type TraceReading,
+} from './vector-trace';
 import { healMask } from './vector-heal';
 import {
   COPY_NUDGE,
@@ -597,6 +606,32 @@ export function VectorModal({
    */
   const [expanded, setExpanded] = useState(false);
   const expandedRef = useRef(false);
+
+  /* ═══ ЛОКАЛЬНАЯ ТРАССИРОВКА ════════════════════════════════════════════════════════════════
+   *
+   * Ручки живут в рейке (черновик, ровно как у обратного кропа), а ЗДЕСЬ — только то, от чего
+   * зависит ПЛИТА: открыта ли панель и рисуется ли поверх неё живая бинаризация. Предпросмотр —
+   * холст в стопке платы, и состояние, которым он управляется, обязано жить там же, где стопка.
+   *
+   * ЧТЕНИЕ И ОТКАЗ РАЗВЕДЕНЫ ПО РАЗНЫМ ОРГАНАМ НАРОЧНО. Отказ движка уходит в `setRefusal` — в тот
+   * же единственный красный блок над холстом, которым отказывают растр, чтение слоя и сохранение;
+   * второй красный блок в рейке был бы вторым местом, где экран говорит «нет», и человек читал бы
+   * их по очереди. А `traceSuggest` остаётся ЗДЕСЬ и рисуется чипом рядом с ручкой допуска: это не
+   * отказ, а предложение, и трогать его должен тот же палец, который крутит допуск.
+   */
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [tracePreview, setTracePreview] = useState(true);
+  const [traceKnobs, setTraceKnobs] = useState<TraceKnobs>({
+    threshold: DEFAULT_TRACE_THRESHOLD,
+    tolerance: DEFAULT_TRACE_TOLERANCE,
+    minArea: DEFAULT_TRACE_MIN_AREA,
+    polarity: 'dark',
+    channel: 'luma',
+  });
+  const [traceReading, setTraceReading] = useState<TraceReading | null>(null);
+  const [traceSuggest, setTraceSuggest] = useState<number | null>(null);
+  const [tracing, setTracing] = useState(false);
+  const tracePreviewRef = useRef<HTMLCanvasElement | null>(null);
   const [nodeEdit, setNodeEdit] = useState<EditState | null>(null);
   const nodeEditRef = useRef<EditState | null>(null);
 
@@ -932,6 +967,24 @@ export function VectorModal({
     setSels([]);
     setActiveSel(null);
     setRefusal(null);
+    /**
+     * ЧТЕНИЕ ОБВОДКИ ПРИНАДЛЕЖИТ ВИЗИТУ, А НЕ СЛОЮ. «3 фигуры, 214 узлов, в пределах 0.62 px» —
+     * утверждение о ТОМ прогоне и о ТЕХ пикселях; дожив до следующего открытия над другой платой,
+     * оно называло бы числа, которых на экране больше нет. Ручки при этом возвращаются к
+     * умолчаниям движка тем же движением, что кисть и ниб выше.
+     */
+    setTraceOpen(false);
+    setTracePreview(true);
+    setTraceKnobs({
+      threshold: DEFAULT_TRACE_THRESHOLD,
+      tolerance: DEFAULT_TRACE_TOLERANCE,
+      minArea: DEFAULT_TRACE_MIN_AREA,
+      polarity: 'dark',
+      channel: 'luma',
+    });
+    setTraceReading(null);
+    setTraceSuggest(null);
+    setTracing(false);
     setConfirmExit(false);
     seededJson.current = JSON.stringify(doc.strokes);
     userMoved.current = false;
@@ -977,6 +1030,13 @@ export function VectorModal({
    */
   const frozenRef = useRef(frozen);
   frozenRef.current = frozen;
+
+  /**
+   * ЗЕМЛЯ ПОД РАСТРОМ ВИДНА РОВНО ТОГДА, КОГДА ЕСТЬ ЧЕМУ БЫТЬ ПРОЗРАЧНЫМ. Условие названо, а не
+   * вписано в разметку, по двум причинам: его читают два соседних узла (шахматка и сам холст), и
+   * мутационный прогон обязан уметь сломать ИМЕННО ЕГО, не задев холст.
+   */
+  const showChecker = rasterReady && rasterOn && !!rasterRef.current;
 
   // ── вид: применение, вписывание, зум ───────────────────────────────────────────────────────
 
@@ -2593,6 +2653,132 @@ export function VectorModal({
     bumpTl();
   };
 
+  /**
+   * ЖИВОЙ ПРЕДПРОСМОТР БИНАРИЗАЦИИ — ОДНИМ И ТЕМ ЖЕ ПРАВИЛОМ, ЧТО И САМА ОБВОДКА.
+   *
+   * Красит `traceInk` — ТОТ ЖЕ экспорт, которым движок решает «краска или фон» внутри себя. Второй
+   * копии этого правила здесь нет и быть не должно: она разошлась бы с настоящей первой же
+   * правкой, и предпросмотр врал бы ровно про то, ради чего заведён.
+   *
+   * ЗАЧЕМ ОН ВООБЩЕ. Неверная полярность НЕ ОТКАЗЫВАЕТ — она молча объявляет краской всё поле
+   * вокруг рисунка, и обводка возвращает один контур во всю плиту. Отличить это от правильного
+   * результата после обводки уже нельзя; до неё — видно с одного взгляда.
+   *
+   * ЗАВИСИМОСТИ — РОВНО ТРИ РУЧКИ, И ЭТО УТВЕРЖДЕНИЕ, А НЕ ЭКОНОМИЯ. Полярность, канал и порог —
+   * всё, что решает бинаризацию; допуск и размер сора действуют ПОСЛЕ неё, над уже определёнными
+   * пятнами, и подмешать их сюда значило бы обещать, что синяя заливка меняется от допуска.
+   * Выделение здесь тоже участвует: оно пересекается ровно там же, где у движка, — после порога.
+   */
+  useEffect(() => {
+    const cv = tracePreviewRef.current;
+    const layer = rasterRef.current;
+    if (!cv || !layer) return;
+    const src = rasterCtx(layer.doc).getImageData(0, 0, layer.w, layer.h);
+    let selAlpha: Uint8Array | null = null;
+    if (activeArea) {
+      const mask = selectionMask(layer, activeArea.pts, activeArea.feather);
+      if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
+    }
+    const ink = traceInk(src, {
+      threshold: traceKnobs.threshold,
+      polarity: traceKnobs.polarity,
+      channel: traceKnobs.channel,
+      selection: selAlpha,
+    });
+    const out = new ImageData(layer.w, layer.h);
+    const px = out.data;
+    // СИНИЙ, А НЕ КРАСНЫЙ И НЕ ЗЕЛЁНЫЙ: в этой системе синее значит «на полпути, нужен человек», и
+    // предпросмотр — ровно это. Полупрозрачно, потому что под ним обязан читаться сам рисунок:
+    // непрозрачная заливка прятала бы то, с чем её сравнивают.
+    for (let i = 0; i < ink.length; i++) {
+      if (!ink[i]) continue;
+      const p = i * 4;
+      px[p] = 0x23;
+      px[p + 1] = 0x23;
+      px[p + 2] = 0xff;
+      px[p + 3] = 0xb4;
+    }
+    cv.getContext('2d')?.putImageData(out, 0, 0);
+    // `tl` — не украшение в списке: она меняется на каждом уложенном жесте, и без неё синяя
+    // заливка осталась бы показывать пиксели, которых на плите уже нет.
+  }, [
+    traceOpen,
+    tracePreview,
+    traceKnobs.threshold,
+    traceKnobs.polarity,
+    traceKnobs.channel,
+    activeArea,
+    areaKey,
+    rasterReady,
+    tl,
+  ]);
+
+  /**
+   * ОБВЕСТИ ПИКСЕЛИ — ОПЕРАЦИЯ НАД ВСЕЙ ПЛИТОЙ ИЛИ НАД ОБЛАСТЬЮ, ровно как заливка и лечилка, и
+   * читает она ту же пару: `layer.doc` целиком и `selectionAlpha` активного лассо.
+   *
+   * ОДИН `commitLines`, И ЭТО НЕСУЩЕЕ. Обводка кладёт сотни штрихов; уложи их по одному — и ⌘Z
+   * снимал бы контур по петле, сотню раз, а лента при этом хранила бы сотню шагов. Один вызов
+   * единственного писателя списка означает ОДИН шаг ленты: одно ⌘Z снимает всю обводку целиком.
+   *
+   * ОТКАЗ НИЧЕГО НЕ МЕНЯЕТ И НИЧЕГО НЕ ПОДБИРАЕТ САМ. Движок умеет назвать допуск, при котором
+   * результат, скорее всего, влез бы, — и называет его ОЦЕНКОЙ. Пересчитать по ней автоматически
+   * значило бы «немного сдвинуть линии, чтобы влезло»: сдвинуть ровно те линии, которые лежат
+   * там, где их поставила картинка. Оценка становится чипом рядом с ручкой; жмёт его человек.
+   */
+  const runTrace = async () => {
+    if (frozenRef.current) return;
+    setRefusal(null);
+    setTraceReading(null);
+    setTraceSuggest(null);
+    const layer = await ensureRaster();
+    if (!layer || frozenRef.current) return;
+    const src = rasterCtx(layer.doc).getImageData(0, 0, layer.w, layer.h);
+
+    let selAlpha: Uint8Array | null = null;
+    const sel = activeSel !== null ? sels[activeSel] : null;
+    if (sel) {
+      const mask = selectionMask(layer, sel.pts, sel.feather);
+      if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
+    }
+
+    setBusy('tracing…');
+    setTracing(true);
+    let res;
+    try {
+      res = traceRaster(src, {
+        threshold: traceKnobs.threshold,
+        polarity: traceKnobs.polarity,
+        channel: traceKnobs.channel,
+        tolerance: traceKnobs.tolerance,
+        minArea: traceKnobs.minArea,
+        selection: selAlpha,
+        /**
+         * ОСТАТОК, А НЕ ПОТОЛОК. В слое уже может лежать час работы пером; движок, которому
+         * назвали весь потолок, пообещал бы «влезет» на обводке, после которой документ
+         * перестал бы сохраняться вовсе, — и узнал бы об этом человек от сервера.
+         */
+        budgetBytes: MAX_STROKES_BYTES - payloadBytes,
+        ratio: ratio || DEFAULT_RATIO,
+      });
+    } finally {
+      setBusy(null);
+      setTracing(false);
+    }
+
+    if (!res.ok) {
+      setRefusal(res.reason);
+      setTraceSuggest(res.suggestTolerance ?? null);
+      return;
+    }
+    setTraceReading(res);
+    // ПУСТАЯ ОБВОДКА НЕ КЛАДЁТСЯ В ЛЕНТУ. «Ни одного пятна при этом пороге» — это законный
+    // результат со своим замечанием, а не изменение документа; шаг ленты «ничего на ничего»
+    // означал бы, что одно ⌘Z после него не делает ровно ничего.
+    if (res.strokes.length === 0) return;
+    commitLines([...strokesRef.current, ...res.strokes]);
+  };
+
   const pickStep = (px: number) => {
     const n = clampStep(px);
     if (selected !== null) editStroke({ step: n });
@@ -3330,6 +3516,17 @@ export function VectorModal({
                 baseMediaId={baseMediaId}
                 ratio={ratio || DEFAULT_RATIO}
                 onDraw={() => setEntered(true)}
+                /* ТРЕТИЙ ОТВЕТ РАЗВИЛКИ ВЕДЁТ В РЕДАКТОР С ОТКРЫТОЙ ПАНЕЛЬЮ И ЗАЖЖЁННЫМ
+                   ПРЕДПРОСМОТРОМ, НО НЕ ОБВОДИТ. Порог решает, что станет контуром, а неверная
+                   полярность отказом не сопровождается — она молча обводит всё поле; обводка «в
+                   один щелчок с умолчаниями» иногда возвращала бы рамку вместо рисунка, и это
+                   было бы первое, что человек увидел бы от бесплатной двери. */
+                onTraceHere={() => {
+                  setEntered(true);
+                  setTraceOpen(true);
+                  setTracePreview(true);
+                  void ensureRaster();
+                }}
                 onAccepted={adoptImported}
               />
             ) : (
@@ -3447,6 +3644,28 @@ export function VectorModal({
                     putBackdrop(fitBackdrop(b, plateRect, mode));
                   }}
                   onBackdropRemove={() => putBackdrop(null)}
+                  traceOpen={traceOpen}
+                  /* ОТКРЫТАЯ ПАНЕЛЬ ЗАВОДИТ РАСТР СРАЗУ. Он ленивый и до первого пиксельного
+                     инструмента не существует вовсе — а предпросмотр без него не рисуется НИЧЕМ:
+                     человек жал бы «show the ink» и видел пустую плиту, не понимая, порог у него
+                     неверный или орган сломан. Обводке растр нужен так же, как кисти. */
+                  onTraceOpen={(next) => {
+                    setTraceOpen(next);
+                    if (next) void ensureRaster();
+                  }}
+                  traceKnobs={traceKnobs}
+                  onTraceKnobs={setTraceKnobs}
+                  tracePreview={tracePreview}
+                  onTracePreview={setTracePreview}
+                  traceBusy={tracing}
+                  traceSelectionNo={activeSel}
+                  /* ОСТАТОК ДОКУМЕНТА ОДНИМ ЧИСЛОМ, ТЕМ ЖЕ, КОТОРОЕ УЕЗЖАЕТ В ДВИЖОК. Второе
+                     число на экране («примерно столько влезет») разошлось бы с настоящим замером
+                     `writeLayer` и обещало бы то, чего не будет. */
+                  traceBudgetBytes={Math.max(0, MAX_STROKES_BYTES - payloadBytes)}
+                  traceReading={traceReading}
+                  traceSuggest={traceSuggest}
+                  onTraceRun={() => void runTrace()}
                 />
 
                 <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-1'>
@@ -3613,6 +3832,36 @@ export function VectorModal({
                           style={{ objectFit: 'fill', opacity: rasterReady ? 0 : 1 }}
                         />
                       )}
+                      {/* ═══ ШАХМАТКА ПРОЗРАЧНОСТИ — ЗЕМЛЯ ПОД РАСТРОМ (N-4) ══════════════════
+                          Владелец: «на фабрик рендерах в эдит моде не работает erase». Ластик
+                          РАБОТАЛ: замер стенда на настоящих байтах беты показывает альфу в нуле
+                          под кистью и на флэте, и на рендере. Не работал ЭКРАН — плата белая
+                          (`bg-bgColor`), и дырка до прозрачности рисовалась белым. На флэте, где
+                          по белой бумаге идут тёмные линии, это видно (максимальная разница
+                          канала на снимке 217); на фабрик-рендере светлой вещи на светлом фоне —
+                          38 при том же жесте. «Прогрыз насквозь» и «закрасил белым» выглядели
+                          одинаково, и на светлой картинке второе неотличимо от «ничего не
+                          произошло».
+                          Шахматка — тот самый орган, которым это различает фотошоп, и она стоит
+                          РОВНО ПОД РАСТРОМ и ровно при тех же условиях: пока канал не заведён,
+                          плата остаётся белой бумагой для линий, а копия подложки непрозрачна и
+                          сама её закрывает. Видно её становится только там, где прозрачность
+                          ПОЯВИЛАСЬ, — то есть только там, где ластик действительно взял. */}
+                      {showChecker && (
+                        <div
+                          data-raster-checker=''
+                          aria-hidden
+                          className='pointer-events-none absolute inset-0'
+                          style={{
+                            backgroundColor: '#ffffff',
+                            backgroundImage:
+                              'linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%),' +
+                              'linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%)',
+                            backgroundSize: '24px 24px',
+                            backgroundPosition: '0 0, 12px 12px',
+                          }}
+                        />
+                      )}
                       {/* ПИКСЕЛЬНЫЙ КАНАЛ. Холст в разрешении растра, растянутый в плату теми же
                           правилами, что и подложка: доли кадра значат одно и то же на обоих. */}
                       {rasterReady && rasterOn && rasterRef.current && (
@@ -3623,6 +3872,25 @@ export function VectorModal({
                           data-raster-canvas=''
                           role='img'
                           aria-label={`the pixel layer${base ? ` over «${pictureHandle(base)}»` : ''} — ${rasterDirty ? 'painted' : 'a copy of the picture underneath'}`}
+                          className='pointer-events-none absolute inset-0 block h-full w-full'
+                        />
+                      )}
+                      {/* ═══ ЖИВАЯ БИНАРИЗАЦИЯ ТРАССИРОВЩИКА ══════════════════════════════════
+                          Синяя заливка — ровно те пиксели, которые движок назовёт краской, и
+                          считает её `traceInk`, а не вторая копия правила (довод — у эффекта,
+                          который её красит). Стоит ПОВЕРХ растра и ПОД штрихами: сравнивают её с
+                          картинкой, а не с тем, что уже нарисовано, и линия, только что уложенная
+                          обводкой, обязана лечь ПОВЕРХ своего же предпросмотра — иначе синее
+                          закрывало бы результат ровно там, где на него смотрят.
+                          Разрешение — растровое, растяжение в плату то же, что у холста: доли
+                          кадра значат на обоих одно и то же. */}
+                      {traceOpen && tracePreview && rasterReady && rasterRef.current && (
+                        <canvas
+                          ref={tracePreviewRef}
+                          width={rasterRef.current.w}
+                          height={rasterRef.current.h}
+                          data-trace-preview=''
+                          aria-hidden
                           className='pointer-events-none absolute inset-0 block h-full w-full'
                         />
                       )}

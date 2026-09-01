@@ -1,5 +1,5 @@
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useMemo, type JSX } from 'react';
+import type { common_DesignPicture, common_DesignRun, GetDesignBandResponse } from 'api/proto-http/admin';
+import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
@@ -8,6 +8,8 @@ import Text from 'ui/components/text';
 
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
+import { threedResults } from '../threed/media';
+import { ThreedModelModal } from '../threed/model-modal';
 import { useDesignWrites } from '../use-design-band';
 import { viewLabel } from '../views';
 import {
@@ -43,6 +45,18 @@ import { Strip, StripCell } from './strip-cell';
  * nothing here folds one gesture into the other. Nothing is exclusive either — the owner speaks
  * in the plural, so the doors toggle each picture on its own and never un-mark a neighbour.
  */
+/**
+ * Одна ячейка полосы. `modelUrl` непуст ровно тогда, когда за ячейкой стоит файл модели: у
+ * рендеров он пуст всегда, у 3D — всегда, кроме исторической строки, приехавшей без `.glb`.
+ */
+interface Row {
+  picture: common_DesignPicture;
+  run: common_DesignRun;
+  /** Растр для кадра. Пусто — рисуется заглушка со словом, а не молчаливая дыра. */
+  src: string;
+  modelUrl: string;
+}
+
 export function OutputsSection({
   band,
   techCardId,
@@ -58,16 +72,44 @@ export function OutputsSection({
   // between renders and take the whole tree down (React #310; this screen has paid for it once).
   const speaks = serverSpeaksDesign();
   const { setPictureSelected } = useDesignWrites(techCardId);
-  const outputs = useMemo(() => outputsOfKind(band, kind), [band, kind]);
+  const [openModel, setOpenModel] = useState<string | null>(null);
 
-  if (!outputs.length) return null;
+  /**
+   * ═══ РЯД ЯЧЕЕК: ДЛЯ РЕНДЕРОВ — КАРТИНКА, ДЛЯ 3D — РЕЗУЛЬТАТ ═══════════════════════════════
+   *
+   * ⚠ ПРОГОН 3D ОТДАЁТ ДВЕ СТРОКИ НА ОДИН ПРЕДМЕТ, и до этой правки раздел считал их за два:
+   * заголовок говорил «2 models» там, где модель одна, а вторая ячейка отдавала `.glb` в `<img>`
+   * и показывала битый кадр. Пару сводит `threedResults` — ЕДИНСТВЕННОЕ место, где живёт этот
+   * счёт; здесь она только вызывается. Второй свод рядом с ним разошёлся бы молча.
+   */
+  const rows = useMemo<Row[]>(() => {
+    const outputs = outputsOfKind(band, kind);
+    if (kind !== 'threed') {
+      return outputs.map(({ picture, run }) => ({
+        picture,
+        run,
+        src: pictureThumb(picture),
+        modelUrl: '',
+      }));
+    }
+    return threedResults(outputs).map((result) => ({
+      picture: result.markable,
+      run: result.run,
+      // Растр, который маршрут прислал ВМЕСТЕ с моделью, ровно для этого и прислан: «the raster
+      // thumbnail that stands in for it wherever a list has to draw a tile» (`threedfal.go`).
+      src: result.posterUrl,
+      modelUrl: result.modelUrl,
+    }));
+  }, [band, kind]);
+
+  if (!rows.length) return null;
 
   // Does the binary that answered state the mark at all? With `EmitUnpopulated` a server that
   // knows the field sends it on EVERY picture (as `false` when unset), so one picture is a
   // truthful sample for all of them — and `undefined` means «rolled-back binary», against which
   // the verb's own route would 404 too, so the doors are drawn inert rather than collecting it.
-  const carries = serverStatesSelected(outputs[0].picture);
-  const marked = outputs.filter((o) => pictureIsSelected(o.picture)).length;
+  const carries = serverStatesSelected(rows[0].picture);
+  const marked = rows.filter((r) => pictureIsSelected(r.picture)).length;
   const writesOff = !!disabled || !speaks;
 
   /**
@@ -90,8 +132,8 @@ export function OutputsSection({
       }
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
-          {outputs.length} {noun}
-          {outputs.length === 1 ? '' : 's'}
+          {rows.length} {noun}
+          {rows.length === 1 ? '' : 's'}
           {carries ? ` · ${marked} selected` : ''}
         </Text>
       }
@@ -109,20 +151,31 @@ export function OutputsSection({
       )}
 
       <Strip>
-        {outputs.map(({ picture, run }) => {
+        {rows.map(({ picture, run, src, modelUrl }) => {
           const chosen = pictureIsSelected(picture);
           const view = viewLabel((picture.ghostView ?? '').trim());
-          const shape =
-            kind === 'threed'
-              ? `model ${picture.ordinal ?? '—'}`
+          const shape = modelUrl
+            ? '3d model'
+            : kind === 'threed'
+              ? `picture ${picture.ordinal ?? '—'}`
               : [view, run.rrev ? `r${run.rrev}` : ''].filter(Boolean).join(' · ') ||
                 `picture ${picture.ordinal ?? '—'}`;
           return (
             <StripCell
               key={picture.id}
               emphasis={chosen}
-              src={pictureThumb(picture)}
-              alt={`${noun} ${picture.ordinal ?? ''}`}
+              src={src}
+              alt={modelUrl ? `3d model of run ${run.id ?? ''}` : `${noun} ${picture.ordinal ?? ''}`}
+              /* Прогон без миниатюры — законное состояние (`if thumb.Len() > 0` в Collect), и на
+                 нём рисовать нечего. Заглушка обязана СКАЗАТЬ это словом: пустая рамка читается
+                 как несработавший сервер. */
+              empty={
+                modelUrl ? (
+                  <Text size='nano' variant='label' component='span'>
+                    3d model · no preview
+                  </Text>
+                ) : undefined
+              }
               /* Выход прогона встаёт в ОБЩИЙ ряд просмотрщика студии. Без этой строки плитка
                  рисовалась общим примитивом, но кадра в ряд не клала — то есть зума у неё не было
                  вовсе, и «листать по всем картинкам» (T-8) обрывалось ровно на готовых рендерах,
@@ -132,10 +185,31 @@ export function OutputsSection({
                   ? mediaFullToViewerItem(picture.media)
                   : undefined
               }
-              badge={chosen ? 'selected' : undefined}
+              badge={modelUrl ? (chosen ? '3d · selected' : '3d model') : chosen ? 'selected' : undefined}
               lines={[`run ${run.id ?? '—'} · ${shape}`, stripProvenance(band, picture)]}
               action={
-                !carries ? (
+                <div className='flex flex-wrap items-center gap-1'>
+                  {/* ФАЙЛ ОТДАЁТСЯ ДО ВСЯКОГО ПРОСМОТРА И НЕЗАВИСИМО ОТ НЕГО. Модель — то, за что
+                      заплачено; просмотрщик — удобство поверх неё, и его отказ не должен уносить
+                      предмет вместе с собой. */}
+                  {modelUrl && (
+                    <>
+                      <Button
+                        variant='secondary'
+                        size='xs'
+                        onClick={() => setOpenModel(modelUrl)}
+                        title='open the model in the viewer'
+                      >
+                        open
+                      </Button>
+                      <Button asChild variant='secondary' size='xs'>
+                        <a href={modelUrl} target='_blank' rel='noopener noreferrer' download>
+                          download
+                        </a>
+                      </Button>
+                    </>
+                  )}
+                  {!carries ? (
                   <InertDoor label='select' reason={SELECT_MARK_NOT_STATED} />
                 ) : writesOff ? (
                   <InertDoor
@@ -174,12 +248,19 @@ export function OutputsSection({
                   >
                     {chosen ? 'un-select' : 'select'}
                   </Button>
-                )
+                  )}
+                </div>
               }
             />
           );
         })}
       </Strip>
+
+      {/* ОДНО ОКНО НА ВЕСЬ РАЗДЕЛ, А НЕ ПО ОДНОМУ НА ЯЧЕЙКУ: сцена WebGL дорога, и держать её
+          смонтированной под каждой плиткой — это упереться в потолок живых контекстов браузера. */}
+      {openModel && (
+        <ThreedModelModal url={openModel} title='3d model' onClose={() => setOpenModel(null)} />
+      )}
 
       <Text size='nano' variant='label' component='p' className='normal-case'>
         This is the page of the feed the band shipped, newest run first — not every {noun} this

@@ -14,8 +14,13 @@ import type { VectorStroke } from './vector-strokes';
  * full-screen surface. A second stacked modal was the lazy spelling; the editor already owns a
  * whole screen, and the question «draw or convert» IS this screen's first state, not a detour.
  *
- *   fork      — the question. Draw over the raster (free, works today), or have the machine redraw
- *               it as vector (paid, judged by a human before anything is filed).
+ *   fork      — the question, and it has THREE answers, not two. Draw over the raster (free, works
+ *               today); trace the pixels that are there (free, local, exact — `vector-trace.ts`,
+ *               reached through the editor's own rail so the threshold can be seen before it
+ *               decides anything); or have the machine redraw it as vector (paid, judged by a
+ *               human before anything is filed). The free trace sits between them on purpose: it
+ *               is the answer somebody paying for a redraw of an already-correct flat was looking
+ *               for, and it is the one that used to be invisible here.
  *   starting  — the paid door was pressed; the row is being filed.
  *   waiting   — the run is live. Leaving is safe and says so: the run is a server job, and the
  *               fork picks it back up on re-entry instead of selling a second one.
@@ -76,6 +81,7 @@ export function TraceVectorPanel({
   baseMediaId,
   ratio,
   onDraw,
+  onTraceHere,
   onAccepted,
 }: {
   trace: TraceVector;
@@ -86,6 +92,11 @@ export function TraceVectorPanel({
   /** The plate's width ÷ height; both judgment panes share it so the eye compares places. */
   ratio: number;
   onDraw: () => void;
+  /**
+   * Enter the editor with the LOCAL tracer already open — the free half of «raster → vector».
+   * It does not trace anything by itself: see the button's own argument.
+   */
+  onTraceHere: () => void;
   onAccepted: (result: {
     layer: common_DesignEditLayer;
     strokes: VectorStroke[];
@@ -121,10 +132,12 @@ export function TraceVectorPanel({
               this flat has no vector yet
             </Text>
             <Text size='micro' variant='label' component='p'>
-              Two ways from here. Draw over the raster: your strokes live on their own layer, the
+              Three ways from here. Draw over the raster: your strokes live on their own layer, the
               picture underneath is never touched, and next time this screen opens the vector is
-              already here. Or have the machine redraw the flat as clean vector curves — a paid
-              run, and nothing is filed until you have judged the result beside the original.
+              already here. Or trace the pixels that are already on the plate — free, local, no
+              request at all, and the contour comes back exactly where the paint ends. Or have the
+              machine redraw the flat as clean vector curves — a paid run, and nothing is filed
+              until you have judged the result beside the original.
             </Text>
             <div className='flex flex-wrap items-center gap-1.5'>
               <Button
@@ -136,6 +149,26 @@ export function TraceVectorPanel({
                 onClick={onDraw}
               >
                 draw over the raster
+              </Button>
+              {/* ТРЕТИЙ ОТВЕТ НА ТОТ ЖЕ ВОПРОС, И ОН ОБЯЗАН СТОЯТЬ ЗДЕСЬ, А НЕ ТОЛЬКО В РЕЙКЕ.
+                  Развилка спрашивает «откуда на этой плите возьмётся вектор», и до сих пор у неё
+                  было два ответа: нарисовать руками или купить перерисовку. Обводка — третий, и
+                  он ДЕШЕВЛЕ ОБОИХ; человек, не увидевший его в этом вопросе, узнаёт о нём только
+                  после того, как заплатил за перерисовку или провёл час пером.
+
+                  ВЕДЁТ В РЕДАКТОР С ОТКРЫТОЙ ПАНЕЛЬЮ, А НЕ ОБВОДИТ САМА. Порог, полярность и
+                  канал решают, что именно станет контуром, и запустить движок с умолчаниями по
+                  одному нажатию значило бы иногда молча обвести ВСЁ ПОЛЕ вокруг рисунка. Дверь
+                  доводит до органов и до живого предпросмотра — решение остаётся за человеком. */}
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                data-trace-here=''
+                disabled={phase.k === 'starting'}
+                onClick={onTraceHere}
+              >
+                trace the pixels as they are
               </Button>
               {door.live ? (
                 <Button

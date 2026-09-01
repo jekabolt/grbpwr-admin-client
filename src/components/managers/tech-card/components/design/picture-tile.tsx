@@ -14,6 +14,9 @@ import MediaComponent from 'ui/components/media';
 import { MediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 
+import { ThreedModelModal } from './threed/model-modal';
+import { isModelUrl } from './threed/media';
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
  * ОДИН ЗАКОН УГЛОВ НА ВСЮ ПОЛОСУ DESIGN.
  *
@@ -326,6 +329,27 @@ export function PictureTile({
   const key = useId();
   const ctx = useContext(GalleryContext);
   const hostRef = useRef<HTMLDivElement>(null);
+  const [modelOpen, setModelOpen] = useState(false);
+
+  /**
+   * ═══ ЭТОТ АДРЕС — НЕ КАРТИНКА, А ФАЙЛ МОДЕЛИ ══════════════════════════════════════════════
+   *
+   * ЗАЧЕМ ЭТО ЗНАЕТ ПРИМИТИВ, А НЕ ЭКРАН. Прогон 3D заводит ДВЕ строки — сам `.glb` и растровую
+   * миниатюру, — и обе приезжают с одним родом `threed`. Значит `.glb` попадает в `url` не в
+   * одном месте, а всюду, где полоса рисует выход прогона: в историю генераций, в полосу
+   * результатов, в верстак. До этой ветки каждое из тех мест отдавало модель в `<img>`, браузер
+   * получал файл там, где ждал картинку, и человек видел битый кадр — то есть ЛОЖЬ: кадр читается
+   * как «сервер не справился», хотя сервер отработал и деньги за модель списаны.
+   *
+   * Чинить это у каждого вызывающего значит чинить наполовину — ровно тот дефект, ради которого
+   * этот примитив и заведён (см. закон углов выше). Тип файла решает КАК его рисовать, а «как
+   * рисовать» — решение примитива.
+   *
+   * ⚠ СНАЧАЛА ЧЕСТНОСТЬ, ПОТОМ КРАСОТА. Плитка называет себя моделью и даёт забрать файл ДО
+   * всякого просмотрщика и независимо от него: WebGL может быть выключен, разбор может упасть, а
+   * файл, за который заплачено, человеку нужен всё равно.
+   */
+  const model = isModelUrl(url);
 
   // Регистрация переигрывается на смене адреса кадра, иначе просмотрщик листал бы вчерашние
   // ссылки: строка истории переезжает с картинки на картинку, не размонтируясь.
@@ -333,12 +357,14 @@ export function PictureTile({
     const node = hostRef.current;
     // Кадр БЕЗ адреса в ряд не встаёт. Иначе «дальше» приводило бы человека к пустой сцене, и
     // выглядело бы это как сломанный просмотрщик, а не как отсутствующая картинка.
-    if (!ctx || galleryGroup || !gallery?.src || !node) return;
+    // Модель в ряд не встаёт ПО ТОЙ ЖЕ ПРИЧИНЕ: общий просмотрщик — это `<img>`, и `.glb` в ряду
+    // дал бы человеку пустую сцену посреди листания, ничем не объяснённую.
+    if (!ctx || galleryGroup || !gallery?.src || isModelUrl(gallery.src) || !node) return;
     ctx.register(key, { node, items: [gallery] });
     return () => ctx.register(key, null);
   }, [ctx, key, galleryGroup?.key, gallery?.src, gallery?.thumbnail, gallery?.alt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const zoomable = !!ctx && !!url && (!!galleryGroup || !!gallery);
+  const zoomable = !!ctx && !!url && !model && (!!galleryGroup || !!gallery);
   const openZoom = useCallback(() => {
     if (galleryGroup) ctx?.openAt(galleryGroup.key, galleryGroup.index);
     else ctx?.openAt(key);
@@ -358,7 +384,35 @@ export function PictureTile({
           же коробка и место, что были у самого `MediaComponent` (его контейнер при
           `aspectRatio='auto'` таков же), поэтому кадр не сдвигается ни на пиксель. */}
       <div className={cn('h-full w-full', dim && 'opacity-40')}>
-        {url ? (
+        {model && url ? (
+          <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 bg-bgSecondary px-1 text-center'>
+            <Text size='nano' variant='uppercase' component='span'>
+              3d model
+            </Text>
+            <div className='flex flex-wrap items-center justify-center gap-1'>
+              <button
+                type='button'
+                onClick={() => setModelOpen(true)}
+                title='open the model in the viewer'
+                className={cn(TILE_CORNER, 'py-0.5 leading-none')}
+              >
+                open
+              </button>
+              {/* ССЫЛКА, А НЕ КНОПКА: забрать файл человек обязан мочь и тогда, когда сцена не
+                  завелась, и тогда, когда JS этой страницы уже упал. */}
+              <a
+                href={url}
+                target='_blank'
+                rel='noopener noreferrer'
+                download
+                title='download the .glb file'
+                className={cn(TILE_CORNER, 'py-0.5 leading-none')}
+              >
+                download
+              </a>
+            </div>
+          </div>
+        ) : url ? (
           <MediaComponent src={url} alt={alt} aspectRatio='auto' fit={fit} />
         ) : (
           // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
@@ -418,6 +472,12 @@ export function PictureTile({
 
       {onSplit && <Corner action={onSplit} label={splitLabel} className='absolute bottom-1 left-1' />}
       {onEdit && <Corner action={onEdit} label={editLabel} className='absolute bottom-1 right-1' />}
+
+      {/* Окно монтируется только открытым: `three` грузится динамически, но и сама оболочка не
+          обязана стоять по одной на каждую плитку сетки из двадцати. */}
+      {modelOpen && url && (
+        <ThreedModelModal url={url} title={alt || '3d model'} onClose={() => setModelOpen(false)} />
+      )}
     </div>
   );
 }

@@ -57,6 +57,7 @@ import {
   pictureIsSelected,
   serverStatesSelected,
 } from './render';
+import { pictureIsModel } from './threed/media';
 import { useDesignWrites } from './use-design-band';
 import { SHEET_MIN_VIEWS, viewLabel } from './views';
 
@@ -246,7 +247,22 @@ export function bandPlates(
      `'render' | 'threed'`, и расширять её — правка файла соседней дорожки; `patternOutputs`
      повторяет её правило чтения дословно (род с ПРОГОНА, скрытые прочь, одна страница ленты) и
      живёт рядом со своим экраном. */
-  const outputs = kind === 'pattern' ? patternOutputs(band) : outputsOfKind(band, kind);
+  /**
+   * ⚠ ФАЙЛ МОДЕЛИ ПЛИТОЙ НЕ БЫВАЕТ, И ОТСЕИВАЕТСЯ ОН ЗДЕСЬ, ДО ВСЕХ ТРЁХ ЧТЕНИЙ СПИСКА.
+   *
+   * Прогон 3D отдаёт две строки одного рода `threed` — сам `.glb` и растровую миниатюру. Плита —
+   * это поверхность, по которой рисуют указания; по `.glb` рисовать нечего, и до этой строки он
+   * становился второй плитой сегмента: счётчик говорил «2 pictures» на один результат, а листание
+   * приводило человека на кадр, который не рисуется ничем.
+   *
+   * ОТСЕВ СТОИТ НАД `serverStates` И `filteredToSelected`, А НЕ В ЦИКЛЕ, И ЭТО НЕСУЩЕЕ МЕСТО. На
+   * прогоне БЕЗ миниатюры пометку несёт сама модель (см. `markable` в `threed/media.ts`); фильтр
+   * «показывать только помеченные», посчитанный ВМЕСТЕ с моделями, увидел бы такую пометку и
+   * вычистил бы из сегмента все настоящие плиты, оставив его пустым.
+   */
+  const outputs = (kind === 'pattern' ? patternOutputs(band) : outputsOfKind(band, kind)).filter(
+    ({ picture }) => !pictureIsModel(picture),
+  );
   const serverStates = outputs.some((o) => serverStatesSelected(o.picture));
   const filteredToSelected = outputs.some((o) => pictureIsSelected(o.picture));
   const plates: DocumentPlate[] = [];
