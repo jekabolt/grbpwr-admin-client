@@ -206,15 +206,27 @@ export function WhatModelGetsRenderModal({
   };
 
   return (
+    /**
+     * ДИАЛОГ НИЧЕГО НЕ РЕШАЕТ — ЗНАЧИТ И КНОПОК РЕШЕНИЯ У НЕГО НЕТ (L-7).
+     *
+     * Здесь стояли `cancelLabel='close'` И `confirmLabel='close'`, то есть ДВЕ кнопки с одним
+     * словом и одним действием, плюс третий выход — ✕ в шапке. Владелец увидел это на 3D, но
+     * модалка одна на три студии (рендер, 3D, on model), и лишняя кнопка была во всех трёх.
+     *
+     * Два органа с одним смыслом — не мелочь оформления: человек ищет между ними разницу, потому
+     * что интерфейс её пообещал. `hideActions` снимает обе; ✕ в шапке остаётся и достаточен, а
+     * подпись подвала — единственное, что этому диалогу в подвале нужно, — теперь переживает
+     * `hideActions` (правка в самом примитиве: до неё она уходила вместе с кнопками).
+     */
     <ConfirmationModal
       open={open}
       onOpenChange={onOpenChange}
+      /* Обязателен по контракту примитива и при `hideActions` не вызывается ничем: кнопки, которая
+         его звала, больше нет. Закрытием заведует ✕ — тот же приём, что у просмотра DXF и модели. */
       onConfirm={() => onOpenChange(false)}
-      closeOnConfirm={false}
       width='lg'
       title={`what the model gets — ${kindLabel(kind)}`}
-      cancelLabel='close'
-      confirmLabel='close'
+      hideActions
       footerHint='nothing here is editable — every fact is edited at its own field'
     >
       <div className='space-y-stack'>

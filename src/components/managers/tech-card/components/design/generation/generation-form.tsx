@@ -132,7 +132,8 @@ export function GenerationForm({
   const [useFlatSlots, setUseFlatSlots] = useState(false);
   const [layout, setLayout] = useState<Layout>('per_view');
 
-  const bench = useMemo(() => readBench(band), [band]);
+  // The FLAT bench: this form generates flats, its detail ticks and slot toggle read flat slots.
+  const bench = useMemo(() => readBench(band, 'flat'), [band]);
   const budget = useMemo(() => readBudget(band.budget), [band.budget]);
 
   const tickedSides = SILHOUETTE_VIEWS.filter((v) => views[v]);

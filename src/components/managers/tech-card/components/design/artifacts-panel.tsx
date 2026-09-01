@@ -520,7 +520,10 @@ export function ArtifactsPanel({
    * стоит первой: её разбор — официальное слово документа о своих плитах, полоса лишь закрывает
    * промежуток между «взял» и «сохранил».
    */
-  const bench = useMemo(() => readBench(band), [band]);
+  // The FLAT bench: `documentPlates` below offers bench plates to the DOCUMENT, and «whatever is
+  // marked here is what the sheet and the tech pack read» is the flat bench's own subtitle. Before
+  // the kind filter (L-5) a render front row could displace the flat front in this read.
+  const bench = useMemo(() => readBench(band, 'flat'), [band]);
   /**
    * Картинки, выбранные в библиотеке ПРЯМО СЕЙЧАС. Живут здесь, а не в форме: форма несёт только
    * `media_id`, а адрес до ближайшего Save знает лишь тот, кто картинку выбрал.
@@ -536,7 +539,9 @@ export function ArtifactsPanel({
     }
     // Верстачная плита берётся в карточку тем же нажатием, и её картинка так же обязана пережить
     // переезд. Слот может держать снимок прогона, которого на загруженной странице полосы уже нет.
-    for (const slot of [...bench.sides.map((s) => s.slot), ...bench.details]) {
+    // ОБА ВЕРСТАКА, впрямую по строкам: это разрешение БАЙТОВ по media_id, а не чтение одного
+    // верстака — плита render-верстака, взятая в медиа карточки, обязана разрешаться так же.
+    for (const slot of band.bench ?? []) {
       const media = slot?.picture?.media;
       if (media?.id != null) map.set(media.id, media);
     }
@@ -550,7 +555,7 @@ export function ArtifactsPanel({
     // сохранено», и без неё новая плита рождалась бы пустой, как рождалась взятая.
     for (const item of picked) if (item.id != null) map.set(item.id, item);
     return map;
-  }, [card?.resolvedTechnicalMedia, techCard?.resolvedTechnicalMedia, band.runs, bench, picked]);
+  }, [card?.resolvedTechnicalMedia, techCard?.resolvedTechnicalMedia, band.runs, band.bench, picked]);
 
   const plates = useMemo(
     () => documentPlates(technicalMedia, resolved, bench),
@@ -581,13 +586,15 @@ export function ArtifactsPanel({
     }
     // Плита верстака — та же картинка полосы, просто добравшаяся до слота. Её прогона на
     // загруженной странице может уже не быть, а сама она приезжает объектом внутри слота.
-    for (const slot of [...bench.sides.map((s) => s.slot), ...bench.details]) {
+    // ОБА ВЕРСТАКА, впрямую по строкам: карта разрешает media_id → картинку, а не читает один
+    // верстак, и плита render-верстака имеет ровно те же права на своё имя в пилюле «base».
+    for (const slot of band.bench ?? []) {
       const picture = slot?.picture;
       const id = picture?.media?.id ?? 0;
-      if (id > 0 && !map.has(id)) map.set(id, picture!);
+      if (picture && id > 0 && !map.has(id)) map.set(id, picture);
     }
     return map;
-  }, [band.runs, bench]);
+  }, [band.runs, band.bench]);
 
   /**
    * ═══ THE THREE REPRESENTATIONS OF THIS CARD, AS ONE LIST PER SEGMENT (W-14) ═════════════════

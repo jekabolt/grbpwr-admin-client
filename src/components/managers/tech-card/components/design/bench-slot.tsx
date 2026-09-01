@@ -58,7 +58,14 @@ export {
   viewLabel,
   type SilhouetteView,
 } from './views';
-import { SILHOUETTE_VIEWS, isSilhouetteView, viewLabel, type SilhouetteView } from './views';
+import {
+  SILHOUETTE_VIEWS,
+  isSilhouetteView,
+  normaliseViewKey,
+  viewLabel,
+  type SilhouetteView,
+} from './views';
+import { benchKindOf, pictureBenchKind } from './bench-kinds';
 
 
 /** Total over the vocabulary: an unknown key prints itself rather than becoming a wrong side. */
@@ -70,18 +77,32 @@ export type BenchRead = {
 };
 
 /**
- * The band's `bench` array split into the two shapes the screen draws.
+ * ONE BENCH's rows split into the two shapes the screen draws.
  *
  * A row whose `view_key` is not one of the four sides IS a detail — that is the only classification
  * the wire supports, and it deliberately does not test for the literal `detail`: `view_key=detail`
  * is the MINT verb, and a stored detail row is addressed by id from then on.
+ *
+ * ⚠ `kind` IS A FILTER, NOT DECORATION, AND ITS ABSENCE WAS A MEASURED DEFECT (L-5). This function
+ * used to key the map by view alone; the moment a card held BOTH a flat front and a render front
+ * (migration 0349, two rows per view), the LAST row of `band.bench` won — the server orders by
+ * kind, so the render row overwrote the flat one. The studio bench then displayed the RENDER slot
+ * under FRONT (rev 4, no picture) while every write from it addressed the FLAT bench, and the owner
+ * got «slot is at rev 11, 4 was echoed» on an ordinary upload. Nothing showed it while nothing
+ * wrote render slots; the 3D input writes them now. Same latent defect, same wording, as the one
+ * `benchSides` (`render/model.ts`) fixed for the generative screens — the rule now has one
+ * spelling, `benchKindOf` in `./bench-kinds`.
+ *
+ * The default is `flat` because that is what the contract fixes for an empty kind — every caller
+ * written before the second axis existed keeps reading the bench it meant. Callers still spell it.
  */
-export function readBench(band: GetDesignBandResponse): BenchRead {
+export function readBench(band: GetDesignBandResponse, kind: string = 'flat'): BenchRead {
   const rows = band.bench ?? [];
   const byView = new Map<string, common_DesignBenchSlot>();
   const details: common_DesignBenchSlot[] = [];
   for (const row of rows) {
-    const key = (row.viewKey ?? '').trim().toLowerCase();
+    if (benchKindOf(row) !== kind) continue;
+    const key = normaliseViewKey(row.viewKey);
     if (isSilhouetteView(key)) byView.set(key, row);
     else details.push(row);
   }
@@ -107,10 +128,13 @@ export function displayDetailName(
   return `${name} (${same.indexOf(slot) + 1})`;
 }
 
-/** A stable string identity for a slot ref — the key of the optimistic map and of pick targets. */
+/** A stable string identity for a slot ref — the key of the optimistic map and of pick targets.
+ *  The bench kind is part of the identity: `front` names TWO slots since the second axis, and a
+ *  key without the kind would hand a flat side's optimistic paint to the render side of the same
+ *  name (or the reverse). */
 export function slotRefKey(ref: DesignBenchSlotRef): string {
   if (ref.slotId) return `id:${ref.slotId}`;
-  return `view:${(ref.viewKey ?? '').trim().toLowerCase()}`;
+  return `view:${benchKindOf(ref)}:${normaliseViewKey(ref.viewKey)}`;
 }
 
 /** The live row a ref addresses, or null when the slot has never been written. */
@@ -122,27 +146,51 @@ export function findSlot(
   // A stored silhouette row carries BOTH an id and a view key; callers address it by the VIEW, so
   // matching on the id alone would miss every side and re-mint it with rev 0 on the next write.
   if (ref.slotId) return rows.find((row) => row.id === ref.slotId) ?? null;
-  const view = (ref.viewKey ?? '').trim().toLowerCase();
+  const view = normaliseViewKey(ref.viewKey);
   if (!view || view === 'detail') return null;
-  return rows.find((row) => (row.viewKey ?? '').trim().toLowerCase() === view) ?? null;
+  // BOTH halves of the ref's address, view AND kind (L-5): `front` alone names two rows now, and
+  // matching the wrong one made the optimistic overlay in `bench.tsx` compare its CAS token
+  // against the other bench's revision.
+  const kind = benchKindOf(ref);
+  return (
+    rows.find(
+      (row) => benchKindOf(row) === kind && normaliseViewKey(row.viewKey) === view,
+    ) ?? null
+  );
 }
 
 /**
- * Every picture on the card that MAY be clicked into a slot.
+ * WHICH BENCH a ref actually addresses. For a view ref the answer is on the ref itself (empty =
+ * flat, by the contract); for a minted id the ROW is the authority — the contract says `kind` is
+ * IGNORED beside a slot_id, so reading the ref's word there would trust exactly the field the
+ * server does not.
+ */
+export function refBenchKind(band: GetDesignBandResponse, ref: DesignBenchSlotRef): string {
+  if (ref.slotId) return benchKindOf(findSlot(band, ref));
+  return benchKindOf(ref);
+}
+
+/**
+ * Every picture on the card that MAY be clicked into a FLAT slot — the name has always said so,
+ * and since L-1 the body finally agrees with it.
  *
- * Two exclusions, both from the contract rather than from taste: a hidden picture must not be
- * reachable from any picker (`selectPickablePictures`, which has no reveal hatch on purpose), and
- * a COMPOSITE has no single view — it must be split first, so it is not a candidate at all.
+ * Three exclusions, all from the contract rather than from taste: a hidden picture must not be
+ * reachable from any picker (`selectPickablePictures`, which has no reveal hatch on purpose); a
+ * COMPOSITE has no single view — it must be split first, so it is not a candidate at all; and a
+ * picture whose kind addresses ANOTHER bench (or none) is not a flat and would be refused
+ * `wrong_kind` — or worse, accepted, which is how fabric renders ended up on the flat sheet.
  *
- * Deliberately NOT filtered by `kind`: the generative machine is cut in this wave, every picture
- * on a live card arrives through a batch, and a kind filter written against a dictionary this
- * bundle has not seen in production would silently empty the picker.
+ * (Here stood «deliberately NOT filtered by kind: the generative machine is cut in this wave…».
+ * The rationale outlived its cause: the machine ships, both benches are live, and the kinds this
+ * filter reads are on production cards. The stale argument was defending the L-1 defect.)
  */
 export function pickableFlats(band: GetDesignBandResponse): common_DesignPicture[] {
   const all: common_DesignPicture[] = [];
   for (const run of band.runs ?? []) all.push(...(run.pictures ?? []));
   for (const batch of band.batches ?? []) all.push(...(batch.pictures ?? []));
-  return selectPickablePictures(all).filter((p) => (p.compositeViews ?? []).length === 0);
+  return selectPickablePictures(all).filter(
+    (p) => (p.compositeViews ?? []).length === 0 && pictureBenchKind(p) === 'flat',
+  );
 }
 
 /**
@@ -160,7 +208,7 @@ export function pickEmptyReason(band: GetDesignBandResponse): string | null {
   if (composites === all.length) {
     return `nothing to pick yet — all ${all.length} pictures are composites; split one first`;
   }
-  return `nothing to pick yet — every picture on this card is hidden or a composite`;
+  return `nothing to pick yet — every picture on this card is hidden, a composite, or not a flat`;
 }
 
 /** The current revision of an edit layer drawn over this exact media, if there is one. */

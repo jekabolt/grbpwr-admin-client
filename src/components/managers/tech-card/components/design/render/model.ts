@@ -121,12 +121,14 @@ export type BenchSide = {
  * DIFFERENT slots both addressed by `view_key: 'front'`. Empty reads as `flat`, exactly as the
  * column's own DEFAULT does, so every caller written before the second axis existed keeps reading
  * the bench it meant.
+ *
+ * THE SPELLING MOVED TO `../bench-kinds` AND IS RE-EXPORTED FOR THIS FILE'S OWN READERS. It moved
+ * because it had been written three times — here, `benchRow` in `history-recall.tsx`, and NOT in
+ * `readBench`/`findSlot`, whose missing fourth copy was the L-5 defect. One vocabulary module ends
+ * exactly that, the way `../views` did for the first axis.
  */
-export type BenchKind = 'flat' | 'render';
-
-export function benchKindOf(slot?: common_DesignBenchSlot | null): string {
-  return (slot?.kind ?? '').trim().toLowerCase() || 'flat';
-}
+import { benchKindOf, type BenchKind } from '../bench-kinds';
+export { benchKindOf, type BenchKind };
 
 /**
  * The four silhouette sides of ONE bench, in a fixed order, present or not.

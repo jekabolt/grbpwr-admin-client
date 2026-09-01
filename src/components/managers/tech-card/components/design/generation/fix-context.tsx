@@ -125,7 +125,8 @@ export function FixContext({
   const [marksOpen, setMarksOpen] = useState(false);
   if (!target) return null;
 
-  const bench = readBench(band);
+  // The FLAT bench — the fix selection is a selection of flat slots.
+  const bench = readBench(band, 'flat');
   const others = bench.sides
     .filter((s) => !target.viewKeys.includes(s.view) && (s.slot?.pictureId ?? 0) > 0)
     .map((s) => viewLabel(s.view));

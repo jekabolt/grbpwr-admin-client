@@ -22,6 +22,7 @@ import {
   slotRefKey,
   viewLabel,
 } from './bench-slot';
+import { type BenchKind } from './bench-kinds';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
@@ -71,9 +72,11 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
  * view key `front`. The wire reads an empty kind as `flat`, so this file would still work spelling
  * nothing — and that is exactly the failure worth avoiding, because the day a render bench is built
  * from a copy of this component the silence would put its plates on the flat sheet. FLAT SLOTS says
- * flat.
+ * flat — on every ref it writes AND on every read it makes: `readBench` filters by kind since L-5,
+ * because a card with a render bench carries TWO rows per view and the kind-blind read handed this
+ * screen the RENDER front (rev 4, empty) to display and to echo against a flat write.
  */
-const FLAT_BENCH = 'flat';
+const FLAT_BENCH: BenchKind = 'flat';
 
 /** A silhouette side of the FLAT bench, addressed the way it is addressed for its whole life. */
 const sideRef = (view: string): DesignBenchSlotRef => ({ viewKey: view, kind: FLAT_BENCH });
@@ -110,7 +113,7 @@ export function Bench({
   /** A detail being minted has no slot to key on yet — it is born by this very write. */
   const [mintingDetail, setMintingDetail] = useState(false);
 
-  const bench = useMemo(() => readBench(band), [band]);
+  const bench = useMemo(() => readBench(band, FLAT_BENCH), [band]);
   const candidates = useMemo(() => pickableFlats(band), [band]);
   const pickEmpty = useMemo(() => pickEmptyReason(band), [band]);
   const shelfOrdinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);

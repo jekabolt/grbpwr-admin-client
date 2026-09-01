@@ -36,7 +36,8 @@ import { batchHandle, shelfBatchOrdinals } from './handles';
 type MixedPlate = { view: string; picture: common_DesignPicture; batchId: number };
 
 export function MixWarn({ band }: { band: GetDesignBandResponse }): JSX.Element | null {
-  const bench = readBench(band);
+  // The FLAT bench: this warning is a row of FLAT SLOTS and speaks about the sheet's composition.
+  const bench = readBench(band, 'flat');
   const plates: MixedPlate[] = [];
   for (const { view, slot } of bench.sides) {
     const picture = slot?.picture;

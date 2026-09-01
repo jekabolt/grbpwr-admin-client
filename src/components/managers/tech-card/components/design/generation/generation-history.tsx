@@ -21,7 +21,8 @@ import { Tile, Tiles } from 'ui/components/tiles';
 
 import type { TechCardFormData } from '../../schema';
 import { buildHideGuard, isPickablePicture } from '../band-feed';
-import { displayDetailName, readBench } from '../bench-slot';
+import { benchKindOf, pictureBenchKind } from '../bench-kinds';
+import { displayDetailName, readBench, refBenchKind } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { clockStamp, pictureHandle, runHandle } from '../handles';
 import { RecallBenchIntake, RecallDoors } from '../history-recall';
@@ -37,7 +38,7 @@ import {
   type HideBlockReason,
   type HideGuard,
 } from '../visibility';
-import { viewLabel } from '../views';
+import { isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
 import { CompositeMarks, compositeTail, readComposite, splitVerb } from './composite';
 import { formatMoney } from './money';
 import { RunPanel } from './run-panel';
@@ -115,30 +116,38 @@ const PAGE = 3;
 
 type SlotOfPicture = { ref: DesignBenchSlotRef; label: string; rev: number };
 
-/** Which bench slot holds this picture, addressed the way a write to it must be addressed. */
+/**
+ * Which bench slot holds this picture, addressed the way a write to it must be addressed.
+ *
+ * THE ROW ITSELF NAMES ITS BENCH (L-1/L-5). This used to read one kind-blind `readBench` and write
+ * `kind: undefined` — i.e. whichever row the collision handed over, unmarked as FLAT. Now it walks
+ * the raw rows: whatever bench the picture actually stands on — its own, or the wrong one placed
+ * by the old defect — the unmark addresses THAT row, with THAT row's kind and CAS token, which is
+ * the only ref the server will not refuse. The kind is spelled from the row, never guessed from
+ * the picture: for a misplaced plate the two disagree, and the row is where the plate stands.
+ */
 function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPicture | null {
   if (!pictureId) return null;
-  const bench = readBench(band);
-  for (const side of bench.sides) {
-    if ((side.slot?.pictureId ?? 0) === pictureId) {
+  for (const row of band.bench ?? []) {
+    if ((row.pictureId ?? 0) !== pictureId) continue;
+    const view = normaliseViewKey(row.viewKey);
+    if (isSilhouetteView(view)) {
+      const kind = benchKindOf(row);
       return {
-        // `kind` names WHICH BENCH; empty is flat by the contract, which is the bench this history
-        // unmarks from. Left empty rather than spelled — see the same note in `slot-picker.tsx`.
-        ref: { viewKey: side.view, kind: undefined },
-        label: viewLabel(side.view),
-        rev: side.slot?.slotRev ?? 0,
+        ref: { viewKey: view, kind },
+        // The flat bench keeps its bare labels — the look every tile has always had; any other
+        // bench says its name, because «FRONT» alone now names two different slots.
+        label: kind === 'flat' ? viewLabel(view) : `${kind} · ${viewLabel(view)}`,
+        rev: row.slotRev ?? 0,
       };
     }
-  }
-  for (const detail of bench.details) {
-    if ((detail.pictureId ?? 0) === pictureId) {
-      return {
-        // A minted id already names its bench; `kind` is ignored beside a slot_id.
-        ref: { slotId: detail.id, kind: undefined },
-        label: displayDetailName(bench.details, detail),
-        rev: detail.slotRev ?? 0,
-      };
-    }
+    return {
+      // A minted id already names its bench; `kind` is ignored beside a slot_id.
+      ref: { slotId: row.id, kind: undefined },
+      // `(2)` suffixes are per-bench — the siblings are the details of THIS row's bench.
+      label: displayDetailName(readBench(band, benchKindOf(row)).details, row),
+      rev: row.slotRev ?? 0,
+    };
   }
   return null;
 }
@@ -320,7 +329,16 @@ function RunTile({
    * reason, as the feed's tile.
    */
   if (pick.target) {
-    const pickable = isPickablePicture(picture);
+    /**
+     * THE ARMED SLOT'S BENCH GATES THE CLICK (L-1). Pick mode is the OTHER door of the same verb
+     * the tile's picker speaks, and the invariant does not care which end the gesture started
+     * from: a fabric render must not land in a flat slot however it travels. The armed ref's
+     * bench comes from the ref itself (or from its row, for a minted id); the picture's comes
+     * from its own kind — and a kind with no bench matches no target at all.
+     */
+    const targetKind = refBenchKind(band, pick.target.slot);
+    const kindOk = pictureBenchKind(picture) === targetKind;
+    const pickable = isPickablePicture(picture) && kindOk;
     return (
       <button
         type='button'
@@ -329,9 +347,11 @@ function RunTile({
         title={
           pickable
             ? `put ${handle} into ${pick.target.label}`
-            : composite
-              ? 'a composite holds several views — split it first'
-              : 'hidden pictures are not offered'
+            : !kindOk
+              ? `${pick.target.label} is a ${targetKind} slot — benches do not mix, and this picture is not a ${targetKind}`
+              : composite
+                ? 'a composite holds several views — split it first'
+                : 'hidden pictures are not offered'
         }
         className={cn(
           'flex h-full w-full min-w-0 flex-col text-left',

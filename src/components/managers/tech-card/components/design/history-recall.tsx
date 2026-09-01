@@ -23,6 +23,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
+import { findSlot } from './bench-slot';
 import { runHandle } from './handles';
 import type { DesignKind } from './kinds-strip';
 import {
@@ -513,17 +514,15 @@ function pictureIdByMedia(band: GetDesignBandResponse): Map<number, number> {
   return m;
 }
 
-/** Строка верстака нужного ВЕРСТАКА (ось `kind`) и нужного вида. Пусто = слот ещё не рождён. */
+/** Строка верстака нужного ВЕРСТАКА (ось `kind`) и нужного вида. Пусто = слот ещё не рождён.
+ *  Правило «пустой род читается как flat» здесь больше не пишется в третий раз: адресует та же
+ *  пара view × kind, что и всюду, — `findSlot` поверх словаря `bench-kinds` (L-5). */
 function benchRow(
   band: GetDesignBandResponse,
   kind: string,
   view: string,
 ): common_DesignBenchSlot | null {
-  for (const row of band.bench ?? []) {
-    if (((row.kind ?? '').trim().toLowerCase() || 'flat') !== kind) continue;
-    if (normaliseViewKey(row.viewKey) === view) return row;
-  }
-  return null;
+  return findSlot(band, { viewKey: view, kind });
 }
 
 /**

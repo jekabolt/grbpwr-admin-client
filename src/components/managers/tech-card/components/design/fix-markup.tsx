@@ -74,7 +74,8 @@ export function markedPlatesOf(
   band: GetDesignBandResponse,
   sel: FixSelectionShape,
 ): MarkedPlate[] {
-  const bench = readBench(band);
+  // The FLAT bench: the fix selection names flat slots — the cycle only ever ran on the flats.
+  const bench = readBench(band, 'flat');
   const out: MarkedPlate[] = [];
   for (const { view, slot } of bench.sides) {
     if (!sel.viewKeys.includes(view)) continue;

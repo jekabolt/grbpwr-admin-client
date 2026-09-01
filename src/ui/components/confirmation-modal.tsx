@@ -169,7 +169,14 @@ export function ConfirmationModal({
             )}
           </div>
 
-          {!hideActions && (
+          {/* ПОДВАЛ ЖИВЁТ И БЕЗ КНОПОК, ЕСЛИ ЕМУ ЕСТЬ ЧТО СКАЗАТЬ.
+              Диалог, который НИЧЕГО не решает, а только показывает (инвентарь прогона, просмотр
+              файла), кнопок в подвале иметь не должен: у него уже есть ✕ в шапке, и «close»
+              рядом с «close» — это два органа с одним смыслом. Но `hideActions` до сих пор уносил
+              вместе с кнопками и `footerHint`, то есть строку вроде «здесь ничего не правится,
+              каждый факт правится у своего поля» — а она у такого диалога и есть единственное
+              содержание подвала. Поэтому условия теперь два, а не одно. */}
+          {(!hideActions || footerHint) && (
             <div className='flex shrink-0 items-center justify-end gap-1.5 border-t border-borderColor px-2.5 py-1.5'>
               {footerHint && (
                 <Text
@@ -181,6 +188,8 @@ export function ConfirmationModal({
                   {footerHint}
                 </Text>
               )}
+              {!hideActions && (
+                <>
               <Button type='button' onClick={handleCancel} variant='secondary' size='sm'>
                 {cancelLabel}
               </Button>
@@ -193,6 +202,8 @@ export function ConfirmationModal({
               >
                 {confirmLabel}
               </Button>
+                </>
+              )}
             </div>
           )}
         </DialogPrimitives.Content>

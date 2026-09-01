@@ -1,9 +1,9 @@
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
+import { pictureBenchKind } from '../bench-kinds';
 import { displayDetailName, readBench } from '../bench-slot';
 import { NewDetailModal } from '../modals';
 import { useDesignWrites } from '../use-design-band';
@@ -22,6 +22,15 @@ import { SILHOUETTE_VIEWS, normaliseViewKey, viewLabel } from '../views';
  * so there is one write path, one CAS token and one invalidation. Two affordances over one verb is
  * a choice; two verbs over one relation would have been the defect.
  *
+ * WHICH BENCH IT ADDRESSES: THE PICTURE'S OWN (L-1). Here stood «`kind` is left empty rather than
+ * spelled, because this organ has no way to know a second bench is on screen» — a rationale that
+ * outlived its cause. Both benches are live, and the picture CARRIES its bench in its own `kind`:
+ * a flat addresses the flat bench, a fabric render addresses the render bench, and neither is ever
+ * offered the other's slots — «во флеты не должны попадать фабрик рендеры и наоборот». A kind with
+ * no bench of its own (a 3D frame, a repeating tile, anything newer) gets the REASON in this spot,
+ * not a picker that would file it as a flat: silently offering the flat bench to every kind is
+ * exactly the defect this comment replaces.
+ *
  * THE PLACEHOLDER OPTION CARRIES A REAL VALUE. An empty `value` in this repository's `Select` is a
  * measured hazard — Radix keeps a hidden native select beside the list and syncs it after render,
  * and a value that is not among the options comes back as a phantom `onValueChange('')` that
@@ -31,6 +40,18 @@ import { SILHOUETTE_VIEWS, normaliseViewKey, viewLabel } from '../views';
 
 const NONE = '__slot';
 const NEW_DETAIL = '__new_detail';
+
+/**
+ * WHY THIS PICTURE HAS NO PICKER, in words — drawn in the picker's place, never a dead control.
+ * The vocabulary is open on the wire, so an unknown kind is echoed verbatim (the `views.ts` rule):
+ * inventing a bench for it is what the server would refuse as `wrong_kind`.
+ */
+function noBenchReason(picture: common_DesignPicture): string {
+  const kind = (picture.kind ?? '').trim().toLowerCase();
+  if (kind === 'threed') return 'a 3D frame stands in no slot — «chosen» is its mark';
+  if (kind === 'pattern') return 'a repeating tile stands in no slot — it is cloth, not a view';
+  return `no bench takes kind «${kind}»`;
+}
 
 export function SlotPicker({
   band,
@@ -48,7 +69,9 @@ export function SlotPicker({
   const { setBenchSlot } = useDesignWrites(techCardId);
   const [naming, setNaming] = useState(false);
 
-  const bench = useMemo(() => readBench(band), [band]);
+  /** The bench this picture's own kind addresses — `null` when no bench takes it. */
+  const kind = pictureBenchKind(picture);
+  const bench = useMemo(() => readBench(band, kind ?? 'flat'), [band, kind]);
   const pictureId = picture.id ?? 0;
 
   const items = useMemo(() => {
@@ -68,15 +91,34 @@ export function SlotPicker({
         label: ghost === view ? `${viewLabel(view)} · probably` : viewLabel(view),
       });
     });
-    bench.details.forEach((slot) => {
-      if (!slot.id) return;
-      out.push({ value: `d:${slot.id}`, label: displayDetailName(bench.details, slot) });
-    });
-    out.push({ value: NEW_DETAIL, label: '+ new detail…' });
+    // DETAILS ARE THE FLAT BENCH'S ALONE. A detail is a named close-up the sheet cites — cuff,
+    // collar — and no organ of the render bench draws detail slots at all: a detail minted there
+    // would be a row no screen shows. So the render picker offers the four sides and nothing else.
+    if (kind === 'flat') {
+      bench.details.forEach((slot) => {
+        if (!slot.id) return;
+        out.push({ value: `d:${slot.id}`, label: displayDetailName(bench.details, slot) });
+      });
+      out.push({ value: NEW_DETAIL, label: '+ new detail…' });
+    }
     return out;
-  }, [bench.details, picture.ghostView]);
+  }, [bench.details, picture.ghostView, kind]);
 
   if (!pictureId) return null;
+
+  // NO BENCH TAKES THIS KIND — the reason stands where the picker would, in the tile's own quiet
+  // voice (`data-inert` with the reason, the wave's rule for a cut door: never absence, never a
+  // dead control).
+  if (!kind) {
+    const reason = noBenchReason(picture);
+    return (
+      <span data-inert={reason} title={reason} className={className}>
+        <Text size='nano' variant='label' component='span'>
+          {reason}
+        </Text>
+      </span>
+    );
+  }
 
   const place = (value: string) => {
     if (value === NONE) return;
@@ -88,12 +130,11 @@ export function SlotPicker({
       const view = value.slice(2);
       const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
       setBenchSlot.mutate({
-        // `kind` NAMES THE BENCH, and this picker addresses the FLAT one. It is left empty rather
-        // than spelled, because the contract fixes empty = flat («every caller written before the
-        // second axis existed keeps addressing the bench it meant») and this organ has no way to
-        // know a second bench is on screen. Spelling a kind here would be this picker choosing an
-        // axis it cannot see.
-        slot: { viewKey: view, kind: undefined },
+        // `kind` NAMES THE BENCH, and it is SPELLED, not left to the wire's default: the bench
+        // this picker addresses is the picture's own, and «empty means flat» would file a fabric
+        // render onto the flat sheet — the L-1 defect. The slot rev beside it is read from the
+        // SAME bench, so the CAS token can never be the other bench's revision (L-5).
+        slot: { viewKey: view, kind },
         pictureId,
         // 0 is the honest value for a side nobody has ever touched: the slot is born by this write.
         expectedSlotRev: slot?.slotRev ?? 0,
@@ -119,6 +160,7 @@ export function SlotPicker({
   // ОДНОИМЁННУЮ деталь. Сервер два одинаковых имени разрешает, и лист потом цитирует деталь ПО
   // ИМЕНИ, поэтому два «cuff» — это две строки, которые невозможно различить на бумаге.
   // Прототип на это место ставит модалку (`newDetailModal`), и предупреждение живёт в ней.
+  // Достижима только с флэтовой плитки: у рендера пункта «+ new detail…» нет вовсе.
   if (naming) {
     return (
       <NewDetailModal
