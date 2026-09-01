@@ -84,6 +84,7 @@ import {
   type PenState,
 } from './vector-pen';
 import {
+  decodeStrokesWire,
   DEFAULT_INK,
   DEFAULT_RATIO,
   MAX_STROKES_BYTES,
@@ -666,7 +667,7 @@ export function VectorModal({
     if (knownId > 0 && !loaded) return;
     seeded.current = true;
 
-    const doc = readLayer(loaded?.strokes, wireRatio);
+    const doc = readLayer(decodeStrokesWire(loaded?.strokes), wireRatio);
     setLayer({ id: loaded?.id ?? knownId, rev: loaded?.rev ?? knownRev });
     setStrokes(doc.strokes);
     // Файл слоя — из прочитанного слоя или из списка полосы; URL — лучшая попытка по картинкам

@@ -4,6 +4,7 @@ import type { common_DesignEditLayer, common_MediaFull } from 'api/proto-http/ad
 import { useCallback, useMemo } from 'react';
 
 import { designKeys } from '../use-design-band';
+import { encodeStrokesWire } from './vector-strokes';
 
 /**
  * THE EDIT LAYER'S DATA SEAM — the three RPCs the band's read layer deliberately does not carry.
@@ -87,7 +88,9 @@ export function useEditLayerWrites(techCardId: number) {
         layerId: input.layerId,
         baseMediaId: input.baseMediaId,
         expectedRev: input.expectedRev,
-        strokes: input.strokes,
+        // Провод возит `bytes` в base64 — см. `encodeStrokesWire`. Документ уходит тем же,
+        // каким его написал `writeLayer`; кодируется только переезд.
+        strokes: encodeStrokesWire(input.strokes),
         rasterMediaId: input.rasterMediaId,
         clearRaster: input.clearRaster,
       }),

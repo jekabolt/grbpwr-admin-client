@@ -764,6 +764,44 @@ export function readLayer(raw?: string | null, fallbackRatio = DEFAULT_RATIO): L
  * THE VERSION IS THE HIGHEST ANY STROKE NEEDS. A drawing with no curves is still `v: 1` — the same
  * bytes this function has always produced — so nothing that used to be readable stops being so.
  */
+/**
+ * ПЕРЕХОД НА ПРОВОД. `DesignEditLayer.strokes` объявлено в proto как `bytes`, а protojson возит
+ * `bytes` ТОЛЬКО в base64 — в ОБЕ стороны. Клиент с первого дня клал туда сырой JSON, поэтому
+ * сохранение не работало НИ РАЗУ: сервер отвечал «invalid value for bytes field strokes».
+ *
+ * Кодировать внутри `writeLayer` НЕЛЬЗЯ. Её вывод меряется о потолок 512 КБ в трёх местах, а
+ * сервер меряет длину УЖЕ РАСКОДИРОВАННОГО. Base64 раздувает на 4/3, и потолок начал бы отвергать
+ * законные рисунки, которые сервер принял бы. Документ — это то, что видит сервер; провод — отдельно.
+ *
+ * И обе стороны обязаны ехать ОДНИМ коммитом. Починить только запись — значит превратить громкий
+ * отказ в слой, который потом не открыть никогда: чтение делает `JSON.parse` и на base64 объявит
+ * документ «написанным новой админкой», после чего откажется сохранять поверх.
+ */
+export function encodeStrokesWire(json: string): string {
+  if (!json) return '';
+  const bytes = new TextEncoder().encode(json);
+  // По кускам: `fromCharCode(...)` с полумегабайтом аргументов переполняет стек вызовов.
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+export function decodeStrokesWire(wire?: string | null): string {
+  const s = (wire ?? '').trim();
+  if (!s) return '';
+  // Уже текст: значение, записанное до появления этого перехода, либо сервер, отдающий `string`.
+  if (s.startsWith('{')) return s;
+  try {
+    const bin = atob(s);
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    // Отдаём как есть: пусть `readLayer` назовёт его нечитаемым вслух, а не подменит пустым.
+    return s;
+  }
+}
+
 export function writeLayer(strokes: VectorStroke[], ratio: number): string {
   const curved = strokes.some(hasSegments);
   // Версия — самая высокая, какая КОМУ-ТО из штрихов действительно нужна. Цвет и размер стоят на

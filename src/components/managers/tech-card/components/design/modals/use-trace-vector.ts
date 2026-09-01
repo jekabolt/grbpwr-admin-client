@@ -14,7 +14,7 @@ import { isRunLive, runStatus } from '../generation/run-state';
 import { designKeys, newClientRequestId } from '../use-design-band';
 import { SILHOUETTE_VIEWS } from '../views';
 import { importSvg, type SvgImportResult } from './svg-import';
-import { writeLayer, type VectorStroke } from './vector-strokes';
+import { encodeStrokesWire, writeLayer, type VectorStroke } from './vector-strokes';
 
 /**
  * MACHINE VECTORISATION — the data seam of the entry fork's «yes, convert the raster» branch.
@@ -512,7 +512,7 @@ export function useTraceVector(input: {
           sourcePictureId: base?.id ?? 0,
           origin: 'vectorised',
           baseMediaId,
-          strokes: doc,
+          strokes: encodeStrokesWire(doc),
         });
         importLedger.current = null;
         invalidateBand();

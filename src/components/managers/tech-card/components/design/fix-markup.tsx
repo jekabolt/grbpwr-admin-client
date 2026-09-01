@@ -10,7 +10,7 @@ import Text from 'ui/components/text';
 import { displayDetailName, readBench } from './bench-slot';
 import { findLayerForMedia, uploadRaster } from './modals/use-edit-layer';
 import { rasteriseStrokesOverBase } from './modals/rasterise-layer';
-import { DEFAULT_RATIO, readLayer } from './modals/vector-strokes';
+import { DEFAULT_RATIO, decodeStrokesWire, readLayer } from './modals/vector-strokes';
 import { viewLabel } from './views';
 
 /**
@@ -140,7 +140,7 @@ export async function takeMarkedRaster(
   const media = plate.picture.media?.media;
   const w = media?.fullSize?.width ?? 0;
   const h = media?.fullSize?.height ?? 0;
-  const doc = readLayer(layer?.strokes, w > 0 && h > 0 ? w / h : DEFAULT_RATIO);
+  const doc = readLayer(decodeStrokesWire(layer?.strokes), w > 0 && h > 0 ? w / h : DEFAULT_RATIO);
   if (doc.unreadable) {
     throw new Error(
       `the marks over ${plate.label} were written by a newer admin than this one and cannot be drawn here — reload the admin, or flatten them from edit ▸ on that slot`,
