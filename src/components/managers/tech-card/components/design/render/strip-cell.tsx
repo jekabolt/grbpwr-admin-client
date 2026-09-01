@@ -63,6 +63,14 @@ export function StripCell({
    * увеличение, и человек читает его как испорченный файл.
    */
   gallery,
+  /**
+   * КАДР, КОТОРЫЙ ЭТА ЯЧЕЙКА ПРЕДЛАГАЕТ ВЗЯТЬ, — не тот, что уже стоит. Едет в разметку как
+   * `data-offered` и служит якорем и пробам, и человеку в инспекторе: список кандидатов — это
+   * ровно то, что волна G-1 фильтрует, а «какая плитка сейчас предложена» иначе читается только
+   * по картинке. Ячейки ЛЕВОЙ половины полосы (то, что стоит в слоте) его не несут намеренно:
+   * они адресуются своим слотом, а не картинкой.
+   */
+  offeredPictureId,
   /** Shown instead of the frame when there is no picture. */
   empty,
   emphasis,
@@ -74,6 +82,7 @@ export function StripCell({
   alt: string;
   badge?: string;
   gallery?: MediaViewerItem;
+  offeredPictureId?: number;
   empty?: React.ReactNode;
   /** The cell holds something the screen READS — a heavier frame, as on a filled bench slot. */
   emphasis?: boolean;
@@ -82,7 +91,10 @@ export function StripCell({
   className?: string;
 }): JSX.Element {
   return (
-    <div className={cn('flex flex-col gap-1', CELL_WIDTH, className)}>
+    <div
+      data-offered={offeredPictureId || undefined}
+      className={cn('flex flex-col gap-1', CELL_WIDTH, className)}
+    >
       {src ? (
         /* `contain`, never `cover`: these are DRAWINGS, and a crop of a flat loses the outline of
            the garment — the one thing the sheet is printed for. Белая подложка задаётся здесь, а не

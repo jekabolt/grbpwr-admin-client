@@ -53,7 +53,6 @@ export {
   recipeIsStated,
   renderGate,
   renderSheetViews,
-  runKindOf,
   runOfPicture,
   serverStatesSelected,
   threedCandidates,

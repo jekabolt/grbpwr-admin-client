@@ -29,6 +29,7 @@ import {
   pinSaveGate,
   repeatLabel,
   repeatSaveGate,
+  stalePlacements,
   tilesAcross,
   wrapRotation,
 } from './model';
@@ -61,6 +62,8 @@ export function PlacementBlock({
 }): JSX.Element {
   const flats = useMemo(() => fittingFlats(band), [band]);
   const cloths = useMemo(() => fittingCloths(band), [band]);
+  /** Метки, чей флэт больше не стоит в слоте: они всё ещё сужают платный промпт. См. `./model`. */
+  const stale = useMemo(() => stalePlacements(band), [band]);
   const writes = useAssetWrites(techCardId);
 
   const [flatId, setFlatId] = useState(0);
@@ -122,7 +125,11 @@ export function PlacementBlock({
     >
       <FieldRow label='flat'>
         {flats.length === 0 ? (
-          <Hint>none on this card — a fitting needs a drawing to lay the cloth under.</Hint>
+          /* СЛОВА МЕНЯЮТСЯ ВМЕСТЕ СО СМЫСЛОМ ПУСТОТЫ (G-2). Прежнее «none on this card» стало бы
+             ложью на карточке, полной неразмеченных чертежей: их тут ровно столько же, сколько
+             было, — просто примерка читает теперь FLAT SLOTS, и пусты именно они. Фраза называет
+             и источник, и выход. */
+          <Hint>none marked — the fitting reads FLAT SLOTS; mark a drawing into a slot first.</Hint>
         ) : (
           <ChipRow>
             {flats.map((p) => {
@@ -329,6 +336,36 @@ export function PlacementBlock({
             : 'the render prompt will read: it is used on this part and on no other part of this garment'}
         </Hint>
       </FieldRow>
+
+      {/* ═══ МЕТКИ НА ФЛЭТАХ, КОТОРЫХ В СЛОТАХ УЖЕ НЕТ ═══════════════════════════════════════
+          Не украшение и не отчёт: такая метка ПРОДОЛЖАЕТ сужать платный промпт, а показать и снять
+          её больше негде — пикер до этого флэта не дотягивается. Одна строка словами и та же
+          дверь, что у обычной метки; довод целиком — в `stalePlacements`. */}
+      {stale.length > 0 && (
+        <FieldRow label='stale marks'>
+          <div className='flex flex-col gap-1' data-probe='stale-pins'>
+            {stale.map(({ placement, label }) => (
+              <div key={placement.id} className='flex items-baseline gap-2'>
+                <Text size='micro' variant='label' component='span' className='normal-case'>
+                  {label}
+                </Text>
+                <Button
+                  size='sm'
+                  disabled={disabled || writes.deletePlacement.isPending}
+                  data-probe='remove-stale'
+                  data-placement={placement.id}
+                  onClick={() => writes.deletePlacement.mutate(placement.id ?? 0)}
+                >
+                  remove
+                </Button>
+              </div>
+            ))}
+          </div>
+          <Hint>
+            these still narrow the paid render prompt — the flat they sit on is no longer in a slot
+          </Hint>
+        </FieldRow>
+      )}
 
       {/* ЧТО ПЕРЕЖИВЁТ ПЕРЕЗАГРУЗКУ — СКАЗАНО, А НЕ ПОДРАЗУМЕВАЕТСЯ. Регулятор, чьё значение
           пропадёт, обязан объявить это рядом с собой: иначе человек читает потерю как поломку. */}

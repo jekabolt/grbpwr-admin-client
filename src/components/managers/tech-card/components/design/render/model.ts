@@ -32,42 +32,22 @@ import type { SilhouetteView } from '../views';
 /* ─────────────────────────── what kind of picture is this ─────────────────────────── */
 
 /**
- * The run a picture came out of, when that run is on the loaded page.
+ * THE KIND VOCABULARY LIVES IN `../bench-kinds`, AND THIS FILE RE-EXPORTS WHAT IT ALWAYS EXPORTED.
  *
- * `GetDesignBand` returns only the FIRST page of the feed, with each run's pictures already under
- * it — so a picture reached THROUGH `band.runs` always finds its run here. The ones that may not
- * are the plates reached through a bench slot: `slot.picture` is resolved server-side precisely
- * because it is routinely older than the page. Null therefore means «not on this page», never «no
- * run» — for that, read `runId`.
+ * `runOfPicture` moved there so that `pictureRepresentation` — the one classifier the history
+ * filter, the strip's counters, the flat lists and the artifacts panel now share — can live beside
+ * the vocabulary it speaks without importing back up into the render section. Same move, same
+ * reason, as `benchKindOf` below: this file's own readers see no change.
  */
-export function runOfPicture(
-  band: GetDesignBandResponse,
-  picture: common_DesignPicture,
-): common_DesignRun | null {
-  const runId = picture.runId ?? 0;
-  if (runId <= 0) return null;
-  return (band.runs ?? []).find((run) => run.id === runId) ?? null;
-}
+export { runOfPicture };
 
-/**
- * `flat | render | threed | draft_idea`, or '' when it cannot be told.
- *
- * READ OFF THE RUN AND NOT OFF `picture.kind`, and that is the whole point of this function. The
- * contract spells the run's vocabulary in as many words and freezes it at launch; `DesignPicture.
- * kind` is an open string whose members this bundle has never seen in production, and a filter
- * written against a dictionary you have not seen silently empties a picker — the trap `bench-slot`
- * already documents for the bench. A batch picture answers '' because a manual upload is not a run
- * at all, which is exactly what makes it a legal FLAT input.
- */
-export function runKindOf(band: GetDesignBandResponse, picture: common_DesignPicture): string {
-  const run = runOfPicture(band, picture);
-  return (run?.kind ?? '').trim().toLowerCase();
-}
-
-/** The picture's own declared kind, normalised. Corroborating evidence only — see `runKindOf`. */
-function declaredKind(picture: common_DesignPicture): string {
-  return (picture.kind ?? '').trim().toLowerCase();
-}
+/* ═══ ЗДЕСЬ ЖИЛИ `runKindOf` И `declaredKind` — ДВЕ ПОЛОВИНЫ ОДНОГО ПРАВИЛА ════════════════════
+   Правило «род прогона первым, объявленный род картинки — запасным» набиралось выражением
+   `runKindOf(band, p) || declaredKind(p)` здесь и ещё в трёх местах полосы, каждый раз своими
+   словами. Волна G-1 свела их в ОДИН орган — `pictureRepresentation` в `../bench-kinds`, — и обе
+   половины остались бы вторым написанием того же: живой экспорт, которым никто не пользуется,
+   это приглашение написать правило заново. Кому нужен род прогона как строка — у `common_DesignRun`
+   есть поле `kind`; кому нужен РОД КАРТИНКИ как решение — есть классификатор. */
 
 /**
  * MAY THIS PICTURE BE FED TO A FABRIC RENDER? The strip's right-hand side, and the prototype's rule
@@ -87,23 +67,27 @@ export function isFlatCandidate(
   // A composite holds several views at once; a render reads ONE drawing per view, so it must be
   // split first. Same refusal the bench makes, for the same reason.
   if ((picture.compositeViews ?? []).length > 0) return false;
-  const kind = runKindOf(band, picture) || declaredKind(picture);
-  // ═══ `recolor` ДОБАВЛЕН СЮДА ВОЛНОЙ K-17 ══════════════════════════════════════════════════
-  //
-  // Перекрашенный снимок — ВЫВОД ГЕНЕРАТИВНОЙ МАШИНЫ, то есть ровно то «положительное
-  // свидетельство», по которому этот предикат и отказывает. Без строки ниже он попадал бы в
-  // правую половину полосы «input — flats of this card» как законный чертёж — а это фотография
-  // вещи на живом человеке, и отдать её фабрик-рендеру значило бы просить перерисовать снимок
-  // как флэт.
-  //
-  // ⚠ ОН НЕ ЛОВИТСЯ РОДОМ КАРТИНКИ, И ЭТО НЕ МЕЛОЧЬ: вывод рекола объявляет `kind: "render"`
-  // собственным полем, поэтому отказывает ему ТОЛЬКО чтение рода ПРОГОНА (`runKindOf`) —
-  // в точности то, ради чего эта функция читает прогон первым.
-  //
-  // СОСЕДНИЙ СЛУЧАЙ, КОТОРЫЙ ЗДЕСЬ НЕ ЗАКРЫТ И ПРИНАДЛЕЖИТ ДРУГОЙ ВОЛНЕ: `pattern` (K-13).
-  // Плитка объявляет собственный род и потому уже отсеивается родом картинки, но не родом
-  // прогона; владельцу того экрана стоит решить, дописывать ли сюда его имя.
-  return kind !== 'render' && kind !== 'threed' && kind !== 'recolor';
+  /**
+   * ═══ ОДИН КЛАССИФИКАТОР НА ВСЕ МЕСТА, ГДЕ МЫ ФИЛЬТРУЕМ ПО РОДУ (G-1) ═════════════════════════
+   *
+   * Здесь стояли три родовых имени, набранных строками, и рядом — записка, что `pattern` в этот
+   * список НЕ дописан и принадлежит другой волне. Это и был дефект: плитка раппорта попадала в
+   * «input — flats of this card» и в примерку как законный чертёж. Волна G-1 закрывает его не
+   * четвёртой строкой, а тем, что список родов больше не набирается здесь вовсе:
+   * `pictureRepresentation` читает ПРОГОН первым (без этого перекрас, объявляющий себя
+   * `kind: "render"`, прошёл бы сюда) и собственный род картинки — только как запасной ответ.
+   *
+   * ⚠ `null` ПО-ПРЕЖНЕМУ ДОПУСКАЕТСЯ, и это та же асимметрия, что была: отказ выносится только по
+   * ПОЛОЖИТЕЛЬНОМУ свидетельству, что кадр — вывод генеративной машины. Цена строгого чтения —
+   * пустая полоса на карточке, полной чертежей; цена мягкого — одна лишняя плитка, которую человек
+   * пропустит глазами.
+   *
+   * ⚠ ПРОИЗВОДНЫЕ КАДРЫ ЗДЕСЬ НЕ ТРЕБУЮТ НИ ОДНОЙ СТРОКИ. Кроп и правка наследуют род и прогон
+   * предка НА СЕРВЕРЕ, в момент записи (`SplitPicture`, `FlattenEditLayer`), поэтому правка флэта
+   * приходит сюда флэтом, а кроп рендера — рендером. Полный довод — в шапке `pictureRepresentation`.
+   */
+  const rep = pictureRepresentation(band, picture);
+  return rep === 'flat' || rep === null;
 }
 
 /* ─────────────────────────── the bench, as the render reads it ─────────────────────────── */
@@ -127,7 +111,12 @@ export type BenchSide = {
  * `readBench`/`findSlot`, whose missing fourth copy was the L-5 defect. One vocabulary module ends
  * exactly that, the way `../views` did for the first axis.
  */
-import { benchKindOf, type BenchKind } from '../bench-kinds';
+import {
+  benchKindOf,
+  pictureRepresentation,
+  runOfPicture,
+  type BenchKind,
+} from '../bench-kinds';
 export { benchKindOf, type BenchKind };
 
 /**
@@ -319,8 +308,11 @@ export function threedCandidates(band: GetDesignBandResponse): ThreedCandidate[]
       const id = picture.id ?? 0;
       if (id <= 0 || marked.has(id) || seen.has(id)) continue;
       if (isPictureHidden(picture)) continue;
-      const kind = runKindOf(band, picture) || declaredKind(picture);
-      if (kind !== 'render') continue;
+      /* ТОТ ЖЕ КЛАССИФИКАТОР, ЧТО У ФЛЭТОВОГО СПИСКА И У ФИЛЬТРА ИСТОРИИ (G-1). Читалось это и
+         раньше «прогон, потом род картинки» — но своей строкой, и рекол отсеивался тем, что его
+         род прогона просто не равен `render`. Теперь он отсеивается ИМЕНЕМ: его представление —
+         `onmodel`. Кроп рендера при этом остаётся кандидатом, потому что наследует прогон предка. */
+      if (pictureRepresentation(band, picture) !== 'render') continue;
       seen.add(id);
       const chosen = pictureIsSelected(picture);
       out.push({

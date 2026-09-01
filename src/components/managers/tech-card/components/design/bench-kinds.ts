@@ -1,4 +1,10 @@
-import type { DesignBenchSlotRef, common_DesignBenchSlot, common_DesignPicture } from 'api/proto-http/admin';
+import type {
+  DesignBenchSlotRef,
+  GetDesignBandResponse,
+  common_DesignBenchSlot,
+  common_DesignPicture,
+  common_DesignRun,
+} from 'api/proto-http/admin';
 
 /**
  * THE BENCH-KIND VOCABULARY — the second axis of the bench, said once.
@@ -63,5 +69,140 @@ export function pictureBenchKind(
   const kind = (picture?.kind ?? '').trim().toLowerCase();
   if (!kind || kind === 'flat') return 'flat';
   if (kind === 'render') return 'render';
+  return null;
+}
+
+/* ═══════════════════ THE REPRESENTATION AXIS — the same word on every screen ═══════════════════
+ *
+ * The bench axis above answers «which bench takes this plate» (a WRITE-side question with two
+ * legal answers). This second axis answers a different one — «what KIND OF PICTURE am I looking
+ * at» — and it has five answers, because that is how many the strip of representations switches
+ * between. It lives here rather than in a module of its own for the reason the file already
+ * states: a vocabulary spelled per organ drifts silently and by construction. Before this block
+ * the rule existed in FOUR spellings — `runKindOf || declaredKind` inside `render/model.ts`, the
+ * hand-made recolor subtraction in `kinds-strip.tsx`, `runKindByMediaId` in `artifacts-panel.tsx`
+ * and `recolorRuns` in `onmodel/model.ts` — and the fourth missing copy of the FIRST axis is
+ * already recorded as a shipped bug (L-1/L-5).
+ */
+export const REPRESENTATIONS = ['flat', 'pattern', 'render', 'threed', 'onmodel'] as const;
+export type Representation = (typeof REPRESENTATIONS)[number];
+
+/**
+ * `DesignKind` — the same five members under the name the studio's own state uses (`state.kind` of
+ * the prototype). Declared here, re-exported by `kinds-strip.tsx` for its existing importers: one
+ * union, two names, and the names cannot drift apart because there is only one declaration.
+ *
+ * ЕГО СОБСТВЕННЫЙ ДОВОД, ПЕРЕЕХАВШИЙ СЮДА ВМЕСТЕ С НИМ: `pattern` добавлен волной K-13 («вкладка
+ * паттерн криейшен между FLAT — SHEET и FABRIC RENDER»). Он член ЭТОГО союза, а не отдельный экран
+ * рядом: полоса представлений — единственное место, которое знает словарь видов, и вкладка, не
+ * названная в нём, была бы вкладкой, до которой нельзя дойти. Читатели союза (`history-recall`)
+ * сводят неизвестный вид к `flat` ветками `else`, и `recallTargetKind` никогда не возвращает
+ * `pattern` — прогон-плитка не имеет входа, в который можно «кинуть» картинки, поэтому рекол ему
+ * не предлагается.
+ */
+export type DesignKind = Representation;
+
+/**
+ * THE REPRESENTATION A RUN BELONGS TO, or `null` for a run kind this bundle has never seen.
+ *
+ *   flat | vector | draft_idea → 'flat'.  A machine redraw and a text draft are work ON the flat,
+ *                                and the server agrees: `DesignPictureKindOfRun` files both under
+ *                                `flat` (its `default` branch).
+ *   render                     → 'render'.
+ *   recolor                    → 'onmodel'.  ⚠ THIS IS THE WHOLE REASON THE RUN IS READ FIRST.
+ *                                A recolor's outputs declare `kind: "render"` — the backend calls
+ *                                that «правда, а не удобство» — so a picture-kind read alone
+ *                                cannot tell a fabric render from a photograph of the thing on a
+ *                                person. Only the RUN can.
+ *   threed                     → 'threed'.
+ *   pattern                    → 'pattern'.
+ *   anything else              → null.  Guessing a bucket for a kind this bundle has not heard of
+ *                                is the L-1 defect with a new name; the caller decides what to do
+ *                                with «I cannot tell», in place, and says so.
+ */
+export function runRepresentation(
+  run?: Pick<common_DesignRun, 'kind'> | null,
+): Representation | null {
+  switch ((run?.kind ?? '').trim().toLowerCase()) {
+    case 'flat':
+    case 'vector':
+    case 'draft_idea':
+      return 'flat';
+    case 'render':
+      return 'render';
+    case 'recolor':
+      return 'onmodel';
+    case 'threed':
+      return 'threed';
+    case 'pattern':
+      return 'pattern';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The run a picture came out of, when that run is on the loaded page.
+ *
+ * `GetDesignBand` returns only the FIRST page of the feed, with each run's pictures already under
+ * it — so a picture reached THROUGH `band.runs` always finds its run here. The ones that may not
+ * are the plates reached through a bench slot: `slot.picture` is resolved server-side precisely
+ * because it is routinely older than the page. Null therefore means «not on this page», never «no
+ * run» — for that, read `runId`.
+ *
+ * MOVED HERE FROM `render/model.ts` (which re-exports it) so that the classifier below can live
+ * beside the vocabulary it speaks instead of importing back up into the render section.
+ */
+export function runOfPicture(
+  band: GetDesignBandResponse,
+  picture: common_DesignPicture,
+): common_DesignRun | null {
+  const runId = picture.runId ?? 0;
+  if (runId <= 0) return null;
+  return (band.runs ?? []).find((run) => run.id === runId) ?? null;
+}
+
+/**
+ * THE REPRESENTATION OF A PICTURE — the run first, the picture's own kind as the fallback.
+ *
+ * ═══ WHY THIS NEEDS NO `derived_from` WALK, WHICH IS THE OWNER'S ACTUAL REQUIREMENT ════════════
+ *
+ * «каждый сплит или каждый эдит чего либо должен быть там же где и генерация и всегда
+ * фильтроваться как часть генерации». It already is, and the evidence is in the store's own
+ * INSERTs rather than in this client's hope:
+ *
+ *   · `SplitPicture` files every crop with `"kind": parent.Kind`, `"run": nullInt32(parent.RunId)`,
+ *     `"batch": nullInt32(parent.BatchId)`, `"parent": parent.Id`;
+ *   · `FlattenEditLayer` does the same — `kind = parent.Kind` whenever the layer has a base
+ *     picture, with run/batch/colorway copied and `derived_from` set (only a drawing from NOTHING
+ *     is born `flat`).
+ *
+ * So a crop of a render IS a render and hangs in the render's own row, and an edit of a flat IS a
+ * flat — by construction, at write time, on the server. Ancestry is materialised; classifying a
+ * derived picture is therefore the same act as classifying any other one.
+ *
+ * FALLBACK, and it is only reached when the run says nothing (off-page, a hand upload with no run
+ * at all, or a run kind this bundle does not know):
+ *   ''      → 'flat'   — the column's own DEFAULT, so every row minted before the field existed
+ *                        keeps meaning what it meant;
+ *   flat | render | threed | pattern → themselves;
+ *   anything else → null.
+ *
+ * ⚠ PAGE-BOUND, SAID ONCE AND HONESTLY: a picture whose run fell off the loaded feed pages is
+ * classified by its own kind, so an off-page RECOLOR crop answers 'render'. That is today's
+ * behaviour of every neighbour this function replaces, and it does not change here. The history
+ * filter itself is immune — a run row carries its own `kind`.
+ */
+export function pictureRepresentation(
+  band: GetDesignBandResponse,
+  picture: common_DesignPicture,
+): Representation | null {
+  const fromRun = runRepresentation(runOfPicture(band, picture));
+  if (fromRun) return fromRun;
+  const kind = (picture.kind ?? '').trim().toLowerCase();
+  if (!kind || kind === 'flat') return 'flat';
+  if (kind === 'render') return 'render';
+  if (kind === 'threed') return 'threed';
+  if (kind === 'pattern') return 'pattern';
   return null;
 }

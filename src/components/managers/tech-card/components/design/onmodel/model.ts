@@ -5,6 +5,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
+import { runRepresentation } from '../bench-kinds';
 import { formatMoney } from '../generation/money';
 import { isPictureHidden } from '../visibility';
 import { budgetLine, fabricStatement, type Gate } from '../render/model';
@@ -42,9 +43,16 @@ import { budgetLine, fabricStatement, type Gate } from '../render/model';
  */
 export const RECOLOR_SOURCES_MAX = 24;
 
-/** Прогоны перекраски этой страницы ленты, новые раньше — порядок самой полосы. */
+/**
+ * Прогоны перекраски этой страницы ленты, новые раньше — порядок самой полосы.
+ *
+ * РОД СПРАШИВАЕТСЯ У ОБЩЕГО СЛОВАРЯ (`runRepresentation`), а не сравнивается со строкой на месте
+ * (G-1): `onmodel` — то же представление, которым ряд представлений считает свою ячейку «on model»
+ * и которым фильтр истории выбирает эти же строки. Единственный род прогона, дающий `onmodel`, —
+ * `recolor`, поэтому свёртка точная, а не приблизительная.
+ */
 export function recolorRuns(band: GetDesignBandResponse): common_DesignRun[] {
-  return (band.runs ?? []).filter((run) => (run.kind ?? '').trim().toLowerCase() === 'recolor');
+  return (band.runs ?? []).filter((run) => runRepresentation(run) === 'onmodel');
 }
 
 /**

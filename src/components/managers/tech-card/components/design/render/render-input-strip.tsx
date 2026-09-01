@@ -606,6 +606,7 @@ export function RenderInputStrip({
           return (
             <StripCell
               key={`pic-${picture.id}`}
+              offeredPictureId={picture.id}
               src={pictureThumb(picture)}
               alt={provenance}
               gallery={frameOf(picture)}

@@ -40,6 +40,7 @@ import Textarea from 'ui/components/text-area';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
+import { runRepresentation } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
 import { benchDoor, openDoor } from './doors';
 import { VectorModal } from './modals';
@@ -204,15 +205,31 @@ export function artifactKindOf(
   return 'flat';
 }
 
-/** media id → the kind of the run that produced it, for every picture on the loaded page. */
+/**
+ * media id → the representation of the run that produced it, for every picture on the loaded page.
+ *
+ * ═══ ОДИН СЛОВАРЬ РОДА НА ВСЮ ПОЛОСУ (G-1), И ЭТО СВЁРТКА БЕЗ ВИДИМЫХ ПОСЛЕДСТВИЙ ══════════════
+ *
+ * Здесь стоял свой список допустимых родов прогона строками — четвёртое написание правила,
+ * которое волна G-1 сводит в `runRepresentation`. Свёртка проверена по случаям, а не по виду:
+ *
+ *   · `recolor` → `onmodel` и ПРОПУСКАЕТСЯ — ровно как прежний список пропускал `recolor`.
+ *     Перекрашенные снимки в ARTIFACTS не появляются и теперь; заслуживают ли они там своего
+ *     сегмента — вопрос владельцу, а не молчаливая правка этой волны;
+ *   · неизвестный род → `null` и пропускается — как пропускался прежде;
+ *   · `vector`/`draft_idea` → `flat`, то есть ПОПАДАЮТ в карту, тогда как прежний список их
+ *     отбрасывал. Видимого следствия нет и быть не может: `artifactKindOf` ветки на `flat` не
+ *     имеет вовсе, и значение `flat` доходит до того же запасного чтения рода карточки, до
+ *     которого доходило ОТСУТСТВИЕ записи. Тот же ответ, другим путём.
+ */
 export function runKindByMediaId(band: GetDesignBandResponse): Map<number, string> {
   const map = new Map<number, string>();
   for (const run of band.runs ?? []) {
-    const kind = (run.kind ?? '').trim().toLowerCase();
-    if (kind !== 'render' && kind !== 'threed' && kind !== 'flat' && kind !== 'pattern') continue;
+    const rep = runRepresentation(run);
+    if (!rep || rep === 'onmodel') continue;
     for (const picture of run.pictures ?? []) {
       const mediaId = picture.media?.id ?? 0;
-      if (mediaId > 0) map.set(mediaId, kind);
+      if (mediaId > 0) map.set(mediaId, rep);
     }
   }
   return map;

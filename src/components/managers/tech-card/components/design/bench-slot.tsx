@@ -65,7 +65,7 @@ import {
   viewLabel,
   type SilhouetteView,
 } from './views';
-import { benchKindOf, pictureBenchKind } from './bench-kinds';
+import { benchKindOf, pictureRepresentation } from './bench-kinds';
 
 
 /** Total over the vocabulary: an unknown key prints itself rather than becoming a wrong side. */
@@ -188,8 +188,16 @@ export function pickableFlats(band: GetDesignBandResponse): common_DesignPicture
   const all: common_DesignPicture[] = [];
   for (const run of band.runs ?? []) all.push(...(run.pictures ?? []));
   for (const batch of band.batches ?? []) all.push(...(batch.pictures ?? []));
+  /* РОД СПРАШИВАЕТСЯ У ТОГО ЖЕ КЛАССИФИКАТОРА, ЧТО И ВЕЗДЕ (G-1). `pictureBenchKind` отвечал на
+     ЭТОТ вопрос верно, но своим чтением — по объявленному роду картинки, — и оставался пятым
+     местом, где живёт правило. Свёртка замерена по всем нынешним родам и ничего не двигает:
+     перекрасы и плитки отсеивались собственным родом и раньше. Разница появляется ровно в одном
+     случае — кадр НЕИЗВЕСТНОГО ЭТОЙ СБОРКЕ рода прогона: он больше не считается флэтом. Так и
+     задумано: догадка «флэт» для рода, о котором сборка не слышала, — это дефект L-1 под новым
+     именем, а `pictureBenchKind` остаётся при своём вопросе (КАКОЙ ВЕРСТАК берёт плиту) и при
+     своих читателях. */
   return selectPickablePictures(all).filter(
-    (p) => (p.compositeViews ?? []).length === 0 && pictureBenchKind(p) === 'flat',
+    (p) => (p.compositeViews ?? []).length === 0 && pictureRepresentation(band, p) === 'flat',
   );
 }
 

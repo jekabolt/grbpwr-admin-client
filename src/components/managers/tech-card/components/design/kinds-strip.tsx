@@ -1,24 +1,22 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 
-/**
- * Представления, между которыми переключается студия. `state.kind` прототипа.
- *
- * `pattern` ДОБАВЛЕН ВОЛНОЙ K-13 («вкладка паттерн криейшен между FLAT — SHEET и FABRIC RENDER»).
- * Он член ЭТОГО союза, а не отдельный экран рядом: полоса представлений — единственное место,
- * которое знает словарь видов, и вкладка, не названная в нём, была бы вкладкой, до которой нельзя
- * дойти. Читатели союза (`history-recall.ts`) сводят неизвестный вид к `flat` ветками `else`, и
- * `recallTargetKind` никогда не возвращает `pattern` — прогон-плитка не имеет входа, в который
- * можно «кинуть» картинки, поэтому рекол ему не предлагается.
- */
-export type DesignKind = 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel';
 import { cn } from 'lib/utility';
 import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
+import { pictureRepresentation, type DesignKind } from './bench-kinds';
 import { fabricRenderGate } from './render';
 import { countThreedResults } from './threed/media';
+
+/**
+ * СОЮЗ ПЕРЕЕХАЛ В `./bench-kinds` И ВОЗВРАЩАЕТСЯ ОТСЮДА ТЕМ ЖЕ ИМЕНЕМ (G-1) — импортёры
+ * (`studio-tab`, `history-recall`) не заметили ничего. Он объявлен там же, где живёт
+ * классификатор, читающий тот же словарь: два объявления одного союза разошлись бы молча, а
+ * поймать это было бы нечем — оба компилируются.
+ */
+export type { DesignKind };
 
 /**
  * THE STRIP OF REPRESENTATIONS — the four ways this card's design can exist as a picture.
@@ -245,7 +243,24 @@ export function KindsStrip({
   // Прототип (`repsStripHtml`) подписывает представление ЧИСЛОМ его картинок, а не словами
   // «не делается здесь»: полоса отвечает на вопрос «сколько их уже есть».
   const pictures = (band.runs ?? []).flatMap((r) => r.pictures ?? []);
-  const renders = pictures.filter((p) => p.kind === 'render' && !p.hiddenAt).length;
+  /**
+   * ═══ ВСЕ ЧЕТЫРЕ ЧИСЛА СЧИТАЮТСЯ ОДНИМ КЛАССИФИКАТОРОМ (G-1) ══════════════════════════════════
+   *
+   * До этой волны ряд считал тремя разными способами сразу: рендеры и плитки — по роду КАРТИНКИ,
+   * 3D — по роду картинки с правилом склейки из `threed/media`, а перекрасы — по роду ПРОГОНА, и
+   * из рендеров они потом ВЫЧИТАЛИСЬ, потому что вывод рекола объявляет себя `kind: "render"`.
+   * Вычитание давало верное число и было при этом вторым написанием правила: третье такое же
+   * жило в `render/model.ts`, четвёртое — в `artifacts-panel`. Теперь правило одно, и «сколько
+   * их есть» на полосе, «что показывает фильтр истории» и «что считает панель артефактов»
+   * отвечают одним словарём по построению, а не по совпадению.
+   *
+   * ⚠ СКРЫТЫЕ КАДРЫ ОТСЕИВАЮТСЯ ОТДЕЛЬНО, И ЭТО НЕ ЗАБЫТАЯ ЧАСТЬ КЛАССИФИКАТОРА. Невидимость —
+   * свой регистр (`visibility.ts`), и представление о нём мнения не имеет: спрятанный рендер
+   * остаётся рендером, его просто не считают.
+   */
+  const shown = pictures.filter((p) => !p.hiddenAt);
+  const repOf = (p: (typeof shown)[number]) => pictureRepresentation(band, p);
+  const fabricRenders = shown.filter((p) => repOf(p) === 'render').length;
   /**
    * ⚠ ПРОГОН 3D ЗАВОДИТ ДВЕ КАРТИНКИ НА ОДИН РЕЗУЛЬТАТ — модель `.glb` и её растровую миниатюру, —
    * и обе с `kind = threed` (`Produces()` у обоих маршрутов, origin/beta). Счёт по роду картинки
@@ -253,33 +268,13 @@ export function KindsStrip({
    * всех в `threed/media.ts`; второе, написанное здесь по месту, разошлось бы с ним первой же
    * правкой маршрута.
    */
-  const turns = countThreedResults(pictures.filter((p) => p.kind === 'threed' && !p.hiddenAt));
-  /**
-   * ПЕРЕКРАС ОБЪЯВЛЯЕТ СЕБЯ РЕНДЕРОМ, И ПОТОМУ ЕГО НАДО СЧИТАТЬ ЧЕРЕЗ ПРОГОН, А НЕ ЧЕРЕЗ РОД
-   * КАРТИНКИ. Вывод ON MODEL приходит с `picture.kind === 'render'` — тем же словом, что и
-   * фабрик-рендер, — так что без чтения рода ПРОГОНА обе ячейки называли бы одно и то же число
-   * дважды: «fabric render · 7 renders» включало бы перекрашенные фотографии, которых
-   * фабрик-рендер не делал.
-   *
-   * ВЫЧИТАЕТСЯ ЗДЕСЬ, А НЕ ПРИБАВЛЯЕТСЯ ТАМ: ряд отвечает на вопрос «сколько их уже есть», и
-   * картинка, посчитанная в двух ячейках, делает сумму ряда больше, чем картинок в полосе.
-   */
-  const recolours = pictures.filter(
-    (p) =>
-      p.kind === 'render' &&
-      !p.hiddenAt &&
-      (band.runs ?? []).find((r) => r.id === p.runId)?.kind === 'recolor',
-  ).length;
-  const fabricRenders = Math.max(0, renders - recolours);
+  const turns = countThreedResults(shown.filter((p) => repOf(p) === 'threed'));
+  const recolours = shown.filter((p) => repOf(p) === 'onmodel').length;
   const renderSub = fabricRenders
     ? `${fabricRenders} render${fabricRenders === 1 ? '' : 's'}`
     : 'none yet';
   const onModelSub = recolours ? `${recolours} recoloured` : 'none yet';
-  /* ПЛИТКИ СЧИТАЮТСЯ ТЕМ ЖЕ ПРАВИЛОМ, ЧТО И СОСЕДИ ПО РЯДУ, — по роду самой картинки: полоса
-     отвечает на вопрос «сколько их уже есть», и второй способ счёта в одном ряду читался бы как
-     разное утверждение о разных ячейках. Плитка объявляет `kind = "pattern"` собственным полем
-     контракта, ровно затем, чтобы не считаться ни флэтом, ни рендером. */
-  const tiles = pictures.filter((p) => p.kind === 'pattern' && !p.hiddenAt).length;
+  const tiles = shown.filter((p) => repOf(p) === 'pattern').length;
   const patternSub = tiles ? `${tiles} tile${tiles === 1 ? '' : 's'}` : 'none yet';
   /**
    * ═══ ПОСЛЕДОВАТЕЛЬНОСТЬ ФЛЭТЫ → РЕНДЕР → 3D, ВИДНАЯ НА ПОЛОСЕ (W-13) ════════════════════════

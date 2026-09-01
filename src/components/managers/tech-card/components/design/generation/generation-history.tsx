@@ -14,14 +14,16 @@ import {
   mediaFullViewerSrc,
   type MediaViewerItem,
 } from 'ui/components/media-viewer';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
+import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
 import { buildHideGuard, isPickablePicture } from '../band-feed';
-import { benchKindOf, pictureBenchKind } from '../bench-kinds';
+import { benchKindOf, pictureBenchKind, runRepresentation, type Representation } from '../bench-kinds';
 import { displayDetailName, readBench, refBenchKind } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { clockStamp, pictureHandle, runHandle } from '../handles';
@@ -608,7 +610,14 @@ function RunRow({
     .join(' · ');
 
   return (
-    <div className='space-y-1 border-b border-hairline pb-2 last:border-b-0'>
+    /* ЯКОРЯ СТРОКИ (G-1): её прогон и её представление. Они не украшение — по ним читают строку и
+       проба, и человек, отлаживающий фильтр в инспекторе; `data-rep` пуст ровно тогда, когда род
+       прогона этой сборке неизвестен, то есть отвечает тем же `null`, что и классификатор. */
+    <div
+      data-run={runId || undefined}
+      data-rep={runRepresentation(run) ?? ''}
+      className='space-y-1 border-b border-hairline pb-2 last:border-b-0'
+    >
       <div className='flex flex-wrap items-baseline gap-2'>
         <button
           type='button'
@@ -753,6 +762,54 @@ function RunRow({
   );
 }
 
+/* ────────────────────────────── the representation filter ────────────────────────────── */
+
+/**
+ * ═══ ФИЛЬТР РОДА НАД ИСТОРИЕЙ (G-1) ═══════════════════════════════════════════════════════════
+ *
+ * Владелец: «в GENERATION HISTORY сделай фильтр с возможностью отфильтровать только флеты, только
+ * рендеры только 3д и так далее. так же ВАЖНО что каждый сплит или каждый эдит чего либо должен
+ * быть там же где и генерация и всегда фильтроваться как часть генерации по тому же механизму».
+ *
+ * ЭТО ФИЛЬТР СТРОК, А НЕ ПЛИТОК, И ВТОРОЕ ТРЕБОВАНИЕ ЗАКРЫВАЕТСЯ ИМЕННО ЭТИМ. Кроп и правка
+ * наследуют `run_id` предка НА СЕРВЕРЕ (`SplitPicture`, `FlattenEditLayer` копируют его вместе с
+ * родом), поэтому они уже рисуются ВНУТРИ строки своей генерации — и фильтр, отбирающий строки,
+ * уносит их вместе с ней по построению. Ни одной строки кода про производные кадры здесь нет и
+ * быть не должно: их отдельная обработка означала бы второе мнение о том, где они живут.
+ *
+ * СЛОВАРЬ — `runRepresentation`, ТОТ ЖЕ, ЧТО У ПОЛОСЫ ПРЕДСТАВЛЕНИЙ И У СПИСКОВ ФЛЭТОВ. Подписи
+ * скопированы у `ARTIFACT_KINDS` и у ячеек полосы, чтобы три поверхности спрягали один язык.
+ *
+ * ПРОГОН РОДА, КОТОРОГО ЭТА СБОРКА НЕ ЗНАЕТ (`runRepresentation` → `null`), ВИДЕН ТОЛЬКО ПОД
+ * `all`. Он не пропадает молча и не приписывается к ведру наугад — угадывание ведра и есть дефект,
+ * от которого `bench-kinds` избавляется.
+ */
+type RepFilter = 'all' | Representation;
+
+const REP_FILTERS: readonly ViewSwitchOption<RepFilter>[] = [
+  { value: 'all', label: 'all', hint: 'every generation this card has, newest first' },
+  {
+    value: 'flat',
+    label: 'flats',
+    hint: 'the drawings the floor sews from — a machine redraw and a text draft are work on the flat, and crops and edits of a flat filter with it',
+  },
+  { value: 'pattern', label: 'patterns', hint: 'repeating tiles' },
+  {
+    value: 'render',
+    label: 'renders',
+    hint: 'runs that coloured the flats — crops and edits of a render filter with it',
+  },
+  { value: 'threed', label: '3D', hint: '3D models' },
+  {
+    value: 'onmodel',
+    label: 'on model',
+    hint: 'the garment recoloured on a photograph — its outputs say «render» on the wire, so this segment reads the run',
+  },
+];
+
+const repLabel = (rep: RepFilter): string =>
+  REP_FILTERS.find((o) => o.value === rep)?.label ?? String(rep);
+
 /* ────────────────────────────── the section ────────────────────────────── */
 
 export function GenerationHistory({
@@ -770,6 +827,12 @@ export function GenerationHistory({
 
   const [archShown, setArchShown] = useState(false);
   const [page, setPage] = useState(0);
+  /**
+   * КАКОЕ ПРЕДСТАВЛЕНИЕ ПОКАЗАНО. Состояние ПРЕХОДЯЩЕЕ и намеренно НЕ сохраняемое — ровно как
+   * `archShown` и `page`: это способ смотреть, а не свойство карточки, и человек, вернувшийся
+   * назавтра к отфильтрованной истории, прочитал бы её как потерю прогонов.
+   */
+  const [rep, setRep] = useState<RepFilter>('all');
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
   const [splitting, setSplitting] = useState<{
@@ -797,6 +860,9 @@ export function GenerationHistory({
     if (page !== 0) setPage(0);
     if (showAll) setShowAll(false);
     if (archShown) setArchShown(false);
+    // Фильтр — решение о ЧУЖОЙ истории: сосед не должен открыться уже суженным, иначе его
+    // пустая отфильтрованная история читается как «у карточки нет генераций».
+    if (rep !== 'all') setRep('all');
     if (splitting) setSplitting(null);
   }
 
@@ -832,9 +898,22 @@ export function GenerationHistory({
   const firstRunId =
     runs.length >= totalRuns && runs.length ? (runs[runs.length - 1].id ?? null) : null;
 
-  const visible = useMemo(
+  /** Загруженные строки БЕЗ фильтра рода — знаменатель дроби «N из M» и ничего больше. */
+  const unfiltered = useMemo(
     () => runs.filter((run) => !isRunArchived(run) || archShown),
     [runs, archShown],
+  );
+  /**
+   * ВСЁ, ЧТО НИЖЕ, ВЫВОДИТСЯ ИЗ `visible`: страницы, зажим окна, ряд просмотрщика, «show all» и
+   * подпись пейджера. Поэтому фильтр стоит ЗДЕСЬ и ровно одной строкой — второй предикат, дописанный
+   * ниже по течению, развёл бы зум с экраном (ряд листал бы то, чего на странице нет).
+   *
+   * ЗНАМЕНАТЕЛЬ БЕРЁТСЯ ИЗ `unfiltered`, А НЕ ИЗ `runs`: свёрнутая полка архива уже убрала строки с
+   * экрана, и «1 из 6» на карточке, где четыре свёрнуты, сравнивало бы разное с разным.
+   */
+  const visible = useMemo(
+    () => (rep === 'all' ? unfiltered : unfiltered.filter((run) => runRepresentation(run) === rep)),
+    [unfiltered, rep],
   );
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE));
   /**
@@ -974,6 +1053,48 @@ export function GenerationHistory({
           INPUT — REFERENCES: там у него есть карта разрешения media_id→файл, которой здесь нет. */}
       <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
 
+      {/* ═══ ФИЛЬТР РОДА — `ViewSwitch` В РЯДУ `GroupLabel`, ТОЧНО КАК В ARTIFACTS ══════════════
+          Тот же примитив, та же расстановка (переключатель в `lead`, счёт в `action`), то же слово
+          «representation» — потому что это тот же вопрос «как я смотрю на эти данные», и второй
+          язык для него был бы вторым словарём на экране.
+
+          НЕ В `action` СЕКЦИИ, и это замер, а не вкус: там уже стоят пульс живого прогона,
+          агрегаты по всей карточке и раскладка архива, и шесть сегментов рядом с ними переносятся
+          на ноутбучной ширине в кашу.
+
+          СЕГМЕНТЫ НИКОГДА НЕ ГАСНУТ. Переключатель вида обязан отвечать всегда; пустой ответ
+          говорится СЛОВАМИ ниже, а не мёртвой кнопкой, по которой не понять, чего нет — прогонов
+          или самой возможности. */}
+      <GroupLabel
+        flush
+        lead={
+          <ViewSwitch<RepFilter>
+            label='representation'
+            value={rep}
+            options={REP_FILTERS}
+            onChange={(next) => {
+              setRep(next);
+              // Тот же довод, что у полки архива: список под окном меняет длину, и «страница 1» —
+              // единственное прочтение окна, которое остаётся верным после этого.
+              setPage(0);
+            }}
+          />
+        }
+        action={
+          rep === 'all' ? undefined : (
+            <Text size='micro' variant='label' component='span'>
+              {/* АГРЕГАТЫ В ШАПКЕ СЕКЦИИ (`{totalRuns} runs`) СЧИТАЮТ ВСЮ КАРТОЧКУ И НЕ ВРУТ ОТ
+                  ФИЛЬТРА — поэтому число «сколько показано из скольких» стоит здесь, у самого
+                  переключателя, и говорит про ЗАГРУЖЕННЫЕ строки, а не про историю целиком. */}
+              {visible.length} of {unfiltered.length} loaded run{unfiltered.length === 1 ? '' : 's'}
+              {more.hasMore ? ' …' : ''}
+            </Text>
+          )
+        }
+      >
+        representation
+      </GroupLabel>
+
       {/* ЯКОРЬ ГРУППЫ. Он задаёт МЕСТО истории в полосе просмотрщика — между референсами сверху и
           верстаком снизу, — а внутренний порядок ряда берётся из списка группы, а не из того,
           сколько плиток сейчас смонтировано. */}
@@ -994,6 +1115,17 @@ export function GenerationHistory({
           />
         ))}
       </div>
+
+      {/* ПУСТОЙ ОТВЕТ ФИЛЬТРА — СЛОВАМИ, НА МЕСТЕ СТРОК. Пустое место под живым переключателем
+          читается как поломка; фраза называет, ЧЕГО нет, и — когда сервер держит ещё страницы —
+          куда идти за остальным. Блок при этом не сворачивается: он существует потому, что у
+          карточки есть прогоны, а не потому, что этот сегмент их нашёл. */}
+      {rep !== 'all' && visible.length === 0 && (
+        <Text size='micro' variant='inactive' component='p' data-probe='rep-empty'>
+          no {repLabel(rep)} generations among the loaded runs
+          {more.hasMore ? ' — show all reads the rest of the history' : ''}
+        </Text>
+      )}
 
       {/* THE PAGER, AND THE DOOR THAT SWITCHES IT OFF (T-17). Both, because they answer different
           questions: the pages are for reading a long history down, `show all` is for searching it.
