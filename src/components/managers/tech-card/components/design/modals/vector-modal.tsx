@@ -72,6 +72,19 @@ import {
   nodeEditable,
   type EditState,
 } from './vector-pen-edit';
+import {
+  DEFAULT_EXPAND_FILL,
+  EXPAND_ANCHORS,
+  ExpandGuardError,
+  expandAreas,
+  expandFromFactor,
+  expandRasterLayer,
+  expandStrokes,
+  isNoExpand,
+  planExpand,
+  type ExpandAnchor,
+  type ExpandFill,
+} from './vector-expand';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
 import {
   COPY_NUDGE,
@@ -91,6 +104,7 @@ import {
 import { DEFAULT_NIB, clampNib, eraseAlong, stampAlong } from './vector-nib';
 import {
   PLATE_W,
+  RASTER_MAX_W,
   RASTER_UNDO_BYTES,
   RASTER_UNDO_DEPTH,
   clearGesture,
@@ -541,6 +555,18 @@ export function VectorModal({
    *
    * Реф рядом с состоянием по той же причине, что у пера: `pointermove` прилетает раньше рендера.
    */
+  /**
+   * ОБРАТНЫЙ КРОП (Q-3): расширить плиту и залить новое поле цветом.
+   *
+   * ⚠ РАСШИРЕНИЕ НЕ ПЕРЕЖИВАЕТ ПЕРЕОТКРЫТИЕ САМО ПО СЕБЕ, и это не недосмотр, а действующий
+   * инвариант: «есть база — её форма побеждает». Расширенное соотношение уезжает в документ, но при
+   * следующем открытии проигрывает натуральным пропорциям НЕИЗМЕНИВШЕЙСЯ подложки, и рисунок
+   * приезжает сплющенным — молча. Поэтому расширение здесь ОДИН АКТ С МИНТОМ НОВОЙ КАРТИНКИ:
+   * пока `expanded` взведён, «save the drawing only» отказывается словами, а предлагается «save as
+   * a new picture» — её натуральные пропорции и станут новой истиной.
+   */
+  const [expanded, setExpanded] = useState(false);
+  const expandedRef = useRef(false);
   const [nodeEdit, setNodeEdit] = useState<EditState | null>(null);
   const nodeEditRef = useRef<EditState | null>(null);
 
@@ -834,7 +860,8 @@ export function VectorModal({
     // WITH A BASE, THE BASE'S SHAPE WINS. The stored ratio is only the memory of a drawing that has
     // no picture under it; letting it override a real picture would put every stroke in the wrong
     // place the moment the two disagree.
-    setRatio(baseMediaId > 0 ? wireRatio : doc.ratio);
+    // Расширенную плату НЕ перебиваем формой базы: она и есть то, что человек только что сделал.
+    if (!expandedRef.current) setRatio(baseMediaId > 0 ? wireRatio : doc.ratio);
     setUnreadable(doc.unreadable);
     setSelected(null);
     setTool('line');
@@ -1049,6 +1076,80 @@ export function VectorModal({
    * ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ ДОКУМЕНТА ИЗ ПРАВКИ УЗЛОВ. Всё, что меняет форму, проходит здесь и нигде
    * больше: два писателя означали бы два разных представления о том, что сейчас в документе.
    */
+  /**
+   * РАСШИРИТЬ ПЛИТУ (Q-3, «обратный кроп»).
+   *
+   * ⚠ ПЕРЕСЧИТЫВАЕТСЯ ВСЁ, ЧТО ЖИВЁТ В КООРДИНАТАХ. Штрихи, области выделения и растр — три разных
+   * хранилища одной геометрии; забыть любое значит увидеть, как рисунок уезжает относительно
+   * картинки. `expandStrokes` перечисляет поля-координаты ПОИМЁННО и падает на незнакомом ключе:
+   * добавит кто-нибудь новое поле с координатой — узнает об этом отказом, а не молчаливым сдвигом.
+   *
+   * ⚠ ЛЕНТА ОТМЕНЫ СНОСИТСЯ, И ЭТО ЧЕСТНЕЕ, ЧЕМ ОСТАВИТЬ. Её шаги — прямоугольники в пикселях
+   * СТАРОГО холста; применённые к новому, они вернули бы кусок не на своё место. Само расширение
+   * поэтому неотменяемо, и человек об этом предупреждён вслух.
+   */
+  const applyExpand = useCallback(
+    async (factor: number, anchor: ExpandAnchor, fill: ExpandFill) => {
+      if (frozenRef.current) return;
+      const layer = rasterRef.current;
+      const from = layer
+        ? { w: layer.w, h: layer.h }
+        : { w: RASTER_FALLBACK_W, h: Math.round(RASTER_FALLBACK_W / (ratio || DEFAULT_RATIO)) };
+      const spec = expandFromFactor(from, factor, anchor, fill);
+      if (isNoExpand(spec)) {
+        showMessage('nothing to expand — set a factor above 1', 'error');
+        return;
+      }
+      const plan = planExpand(from, spec);
+
+      // Незавершённые жесты отменяются ДО пересчёта: перо, след руки и источник штампа держат
+      // координаты, которых после расширения уже нет.
+      if (penRef.current) putPen(null);
+      putPenHover(null);
+      putTrace(null);
+      putNodeEdit(null);
+      setStampSrc(null);
+      stampOffset.current = null;
+      setNibHover(null);
+
+      try {
+        const nextStrokes = expandStrokes(strokesRef.current, plan);
+        const nextSels = expandAreas(sels, plan);
+        if (layer) {
+          rasterRef.current = expandRasterLayer(layer, plan, spec.fill, RASTER_MAX_W);
+        }
+        strokesRef.current = nextStrokes;
+        setStrokes(nextStrokes);
+        setSels(nextSels);
+        setActiveSel(null);
+        maskRef.current = null;
+        expandedRef.current = true;
+        setExpanded(true);
+        setRatio(plan.ratio);
+        timeline.current.reset();
+        bumpTl();
+        rasterDirtyRef.current = true;
+        setRasterDirty(true);
+        paintView();
+        fitPlate();
+        showMessage(
+          'the sheet is bigger. This cannot be undone, and it only survives as a NEW picture — use “save as a new picture”',
+          'success',
+        );
+      } catch (err) {
+        if (err instanceof ExpandGuardError) {
+          showMessage(
+            `the sheet was not expanded: a stroke carries a field this screen does not know how to move (${err.unknownKeys.join(", ")}). Nothing was changed`,
+            'error',
+          );
+          return;
+        }
+        throw err;
+      }
+    },
+    [ratio, sels, putPen, putPenHover, putTrace, putNodeEdit, bumpTl, paintView, fitPlate, showMessage],
+  );
+
   const commitNodes = useCallback(
     (st: EditState) => {
       const res = editCommit(strokesRef.current, st);
@@ -3206,6 +3307,8 @@ export function VectorModal({
                   saveNote={saveNote}
                   backdrop={backdrop}
                   backdropKey={bdKey}
+                  expanded={expanded}
+                  onExpand={(f, a, fill) => void applyExpand(f, a, fill)}
                   nodeCount={nodeEdit?.path.nodes.length ?? 0}
                   nodeSelected={nodeEdit?.sel ?? -1}
                   nodeSmooth={
@@ -3393,7 +3496,9 @@ export function VectorModal({
                           onLoad={(event) => {
                             const img = event.currentTarget;
                             if (baseMediaId > 0 && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                              setRatio(img.naturalWidth / img.naturalHeight);
+                              if (!expandedRef.current) {
+                                setRatio(img.naturalWidth / img.naturalHeight);
+                              }
                             }
                           }}
                           data-base-img=''
@@ -3769,17 +3874,44 @@ export function VectorModal({
                             </g>
                           )}
                           {pen && (
-                            /* Превью пера. Толщины делятся на зум: превью — орган ЭКРАНА, его
-                               линия обязана быть одной и той же руке при любом приближении. */
+                            /**
+                             * ПРЕВЬЮ ПЕРА РИСУЕТСЯ ТЕМ ЖЕ ШВОМ, КАКОЙ ВЫБРАН (M-1).
+                             *
+                             * ⚠ ЗДЕСЬ БЫЛ СЕРЫЙ ПУНКТИР — ОДИН И ТОТ ЖЕ ПРИ ЛЮБОМ ШВЕ. Владелец
+                             * называл этот дефект уже дважды: в круге 7 про линию и след руки
+                             * («хочется что бы под зажатием курсора отображалось именно то что
+                             * рисуется а не пунктирная линия»), теперь про перо. Тогда починили
+                             * две ветки из трёх; у пера осталась своя резинка, и она про шов не
+                             * знала ничего.
+                             *
+                             * Геометрия берётся ТЕМ ЖЕ вызовом, что рисует уложенные штрихи, — не
+                             * похожим, а тем же: иначе превью и результат разошлись бы в первый же
+                             * день, когда кто-нибудь поправит один из двух.
+                             */
                             <g>
-                              <path
-                                d={penPreviewD(pen, PLATE_W, plateH)}
-                                fill='none'
-                                stroke='currentColor'
-                                strokeWidth={3 / zoomK}
-                                strokeDasharray={`${8 / zoomK} ${6 / zoomK}`}
-                                data-pen-preview=''
-                              />
+                              {(() => {
+                                const st = penStroke(pen, paint);
+                                const g = st ? strokeGeometry(st, PLATE_W, plateH) : null;
+                                if (!g?.d) {
+                                  // Один якорь — швом рисовать ещё нечего; точка, а не пунктир.
+                                  return null;
+                                }
+                                const previewInk = readInk(st!.ink) ?? 'currentColor';
+                                return (g.offsets ?? [0]).map((dy: number, k: number) => (
+                                  <path
+                                    key={k}
+                                    d={g.d}
+                                    transform={`translate(0 ${dy})`}
+                                    fill='none'
+                                    stroke={previewInk}
+                                    strokeWidth={g.strokeWidth}
+                                    strokeDasharray={g.dash || undefined}
+                                    strokeLinecap='round'
+                                    strokeLinejoin='round'
+                                    data-pen-preview=''
+                                  />
+                                ));
+                              })()}
                               {/* Резинка: кривая, которая родится, если кликнуть сейчас, — с
                                   кривизной от исходящей рукоятки последнего якоря. */}
                               {penHover && !pen.drag && !pen.closed && (

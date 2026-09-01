@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import type React from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -11,6 +12,12 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import type { common_MediaFull } from 'api/proto-http/admin';
 
 import { SvgImportDoor } from './svg-import-door';
+import {
+  DEFAULT_EXPAND_FILL,
+  EXPAND_ANCHORS,
+  type ExpandAnchor,
+  type ExpandFill,
+} from './vector-expand';
 import {
   BACKDROP_ROT_SNAP,
   MAX_BACKDROP_OPACITY,
@@ -1090,6 +1097,13 @@ export type RailProps = {
    * сколько узлов, какой в руке и чем он является. Сами жесты — на холсте, и правильно: тянуть
    * узел кнопкой в панели никто не станет.
    */
+  /**
+   * ОБРАТНЫЙ КРОП (Q-3). Расширение неотменяемо и живёт только как НОВАЯ картинка — об обоих
+   * фактах человек обязан узнать до нажатия, а не после.
+   */
+  expanded: boolean;
+  onExpand: (factor: number, anchor: ExpandAnchor, fill: ExpandFill) => void;
+
   nodeCount: number;
   nodeSelected: number;
   nodeSmooth: boolean;
@@ -1103,6 +1117,11 @@ export type RailProps = {
 };
 
 export function VectorBrushRail(p: RailProps) {
+  // Черновик обратного кропа живёт в рейке: он ничего не значит, пока не нажали, и модалке о нём
+  // знать незачем — она получает три готовых числа одним вызовом.
+  const [expandFactor, setExpandFactor] = useState(1.2);
+  const [expandAnchor, setExpandAnchor] = useState<ExpandAnchor>('center');
+  const [expandFill, setExpandFill] = useState<ExpandFill>(DEFAULT_EXPAND_FILL);
   const editing = p.selected !== null && p.selectedStroke !== null;
   // Контекст органов: свойства выбранного штриха либо кисти в руке. Одна пятёрка значений на оба
   // случая — потому и одна пятёрка органов.
@@ -1636,6 +1655,72 @@ export function VectorBrushRail(p: RailProps) {
           `undoDepth/undoBytes/undoEvicted/undoCeiling/undoByteCeiling` РЕЙКА ПО-ПРЕЖНЕМУ
           ПРИНИМАЕТ (см. `RailProps`), так что вернуть сигнал одной строкой — или поднять его в
           шапку над холстом — можно, не трогая вызывающую сторону. */}
+      {/* ОБРАТНЫЙ КРОП. Множитель, а не четыре числа: «раздвинь на 20 % от центра» — то, чем
+          человек думает, а четыре прибавки он бы считал в уме. Якорь — как Canvas Size. */}
+      <div className='flex flex-col gap-1' data-expand-rail=''>
+        <GroupLabel flush>sheet</GroupLabel>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Input
+            type='number'
+            min={1.05}
+            max={4}
+            step={0.05}
+            value={String(expandFactor)}
+            disabled={p.frozen}
+            data-expand-factor=''
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setExpandFactor(Number(e.currentTarget.value) || 1.2)
+            }
+            className='w-16'
+          />
+          <input
+            type='color'
+            value={expandFill ?? '#ffffff'}
+            disabled={p.frozen || expandFill === null}
+            data-expand-fill=''
+            onChange={(e) => setExpandFill(e.currentTarget.value)}
+            className='h-6 w-8 border border-borderColor bg-transparent p-0'
+            aria-label='colour of the new margin'
+          />
+          <Chip
+            selected={expandFill === null}
+            pressed={expandFill === null}
+            disabled={p.frozen}
+            onClick={() => setExpandFill((v) => (v === null ? DEFAULT_EXPAND_FILL : null))}
+          >
+            transparent
+          </Chip>
+        </div>
+        <ChipRow>
+          {EXPAND_ANCHORS.map((a) => (
+            <Chip
+              key={a}
+              selected={expandAnchor === a}
+              pressed={expandAnchor === a}
+              disabled={p.frozen}
+              onClick={() => setExpandAnchor(a)}
+            >
+              {a.replace('_', ' ')}
+            </Chip>
+          ))}
+        </ChipRow>
+        <ChipRow>
+          <Chip
+            disabled={p.frozen}
+            data-expand-apply=''
+            onClick={() => p.onExpand(expandFactor, expandAnchor, expandFill)}
+            title='grow the sheet and fill the new margin — this cannot be undone'
+          >
+            expand the sheet
+          </Chip>
+        </ChipRow>
+        <Text size='nano' variant='label' component='p'>
+          {p.expanded
+            ? 'the sheet was expanded — it only survives as a NEW picture; “save the drawing only” will refuse'
+            : 'grows the sheet around what is drawn; cannot be undone'}
+        </Text>
+      </div>
+
       {p.nodeCount > 0 && (
         /* УЗЛЫ ВЫБРАННОЙ КРИВОЙ. Группа живёт только когда линия взята: пустой пульт — шум.
            Жестов здесь нет нарочно — тянуть узел кнопкой в панели никто не станет; здесь стоит
