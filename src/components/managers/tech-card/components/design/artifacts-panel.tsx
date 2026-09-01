@@ -1797,6 +1797,11 @@ function PlateGrid({
           <div
             key={plate.key}
             data-field={plate.door}
+/* ЯКОРЬ ДЛЯ ПРОБ, ПАРНЫЙ К `data-annot-frame`: тот метит КАДР, этот — ПЛИТКУ целиком
+               (рамка, шапка, кадр, подпись, подвал дверей). Пробы геометрии меряют вписанность
+               кадра в плитку, и опознавать плитку по классам оказалось нельзя — «p-1» ушёл вместе
+               с волной медиа, и проба стала находить `null`, то есть молча перестала мерить. */
+            data-plate-tile=''
             className='group relative w-fit max-w-full shrink-0'
           >
             {/* ЯРЛЫК ПЛИТЫ — НАКЛАДКОЙ НА КАДРЕ (K-2, довод у `PLATE_BADGE_BAR`). Кадр стоит первым
@@ -2086,7 +2091,7 @@ function AddPlateTile({
   onAddPlate: (items: common_MediaFull[]) => void;
 }) {
   return (
-    <div className='group relative w-fit max-w-full shrink-0'>
+    <div data-plate-tile='' className='group relative w-fit max-w-full shrink-0'>
       <div className={PLATE_BADGE_BAR}>
         <div className={PLATE_BADGE_CHIP}>
           <Text
