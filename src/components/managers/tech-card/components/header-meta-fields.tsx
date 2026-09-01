@@ -316,29 +316,34 @@ export function HeaderMetaFields({ hideCategory = false }: { hideCategory?: bool
       {/* Браузер категорий прячется у aux-карты: там классификацию задаёт AUXILIARY TYPE.
           Скрывается ТОЛЬКО орган — значение categoryId остаётся в форме и раунд-трипится. */}
       {!hideCategory && <CategoryBrowser />}
-      {/* base model / base sample size are optional provenance FKs — both still print to the spec,
-          so they stay mounted (values round-trip) but sit behind a disclosure to keep the header
-          leading with category. Expand to set them. */}
-      <details>
-        <summary className='cursor-pointer select-none text-micro uppercase tracking-label text-labelColor hover:text-textColor'>
-          base model & sample size — optional
-        </summary>
-        <div className='mt-2.5 grid grid-cols-1 gap-2.5 lg:grid-cols-2'>
-          <SelectField
-            name='baseModelId'
-            label='base model'
-            items={modelOptions}
-            valueAsNumber
-            loading={modelsLoading}
-          />
-          <SelectField
-            name='baseSampleSizeId'
-            label='base sample size'
-            items={sampleSizeOptions}
-            valueAsNumber
-          />
-        </div>
-      </details>
+      {/* K-21 · ОБЫЧНЫЕ ПОЛЯ, НЕ РАСКРЫВАШКА. Владелец: «бейс модел и семпл сайз сделать обычным
+          не колапс инпутом как все остальные в карточке».
+          Прежний довод за `<details>` («чтобы шапка начиналась с категории») стоил дороже, чем
+          покупал: base_sample_size_id — это размер, по которому считается СЕБЕСТОИМОСТЬ (норма
+          базового размера берётся без фолбэка), то есть поле, спрятанное под словом «optional»,
+          молча решало деньги. Схлопнутое поле к тому же не показывает, что оно уже заполнено, —
+          оператор не видел ни значения, ни его отсутствия.
+          Форма полей не тронута: те же два `SelectField`, те же имена, тот же `valueAsNumber`,
+          тот же `loading`, та же серверная кросс-валидация по диапазону размеров. Сетка снята
+          намеренно — соседи по блоку `classification` (purpose / auxiliary type / target gender /
+          fit) стоят полной шириной один под другим, и «как все остальные» здесь значит именно
+          общий вертикальный ряд, а не собственный двухколоночный островок.
+          Обязательность помечать не нужно: в этой форме маркер несут ТРЕБУЕМЫЕ поля («name *»),
+          так что немаркированное поле и читается как необязательное — слово «optional» из
+          заголовка раскрывашки не потерялось, оно было избыточным. */}
+      <SelectField
+        name='baseModelId'
+        label='base model'
+        items={modelOptions}
+        valueAsNumber
+        loading={modelsLoading}
+      />
+      <SelectField
+        name='baseSampleSizeId'
+        label='base sample size'
+        items={sampleSizeOptions}
+        valueAsNumber
+      />
     </div>
   );
 }

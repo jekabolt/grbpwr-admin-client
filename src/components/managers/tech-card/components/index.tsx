@@ -1956,14 +1956,26 @@ export function TechCardForm({
                     </Text>
                   )}
                   <InputField name='name' label='name *' placeholder='garment name' />
-                  <SeasonField />
-                  {isEditMode && (
-                    <Text variant='label' size='micro'>
-                      changing the season re-issues the SKU of every colourway of the style. if even
-                      one of them is already frozen (there were orders, or labels were printed) —
-                      the save will be rejected; for that case there is clone for season.
-                    </Text>
-                  )}
+                  {/* K-19 · ПОСЛЕДСТВИЕ СМЕНЫ СЕЗОНА СЪЕХАЛО С ЭКРАНА НА ОРГАН. Владелец снёс
+                      абзац — это третий круг просьб убрать объясняющие простыни, поэтому замены
+                      «абзацем покороче» здесь нет. Но перед сносом проверено грепом по src/:
+                      факт «смена сезона перевыпускает SKU каждой расцветки» не сказан больше
+                      НИГДЕ в клиенте, и он единственный тут не самоназывается. Отказ сервер
+                      называет сам (techCardErrorMessage пропускает его текст наружу), а вот
+                      МОЛЧАЛИВЫЙ перевыпуск на УСПЕШНОМ сохранении не называет никто: оператор
+                      узнал бы о нём по печатным ярлыкам. Поэтому фраза осталась ровно одна и
+                      ровно подсказкой на «pick» — единственном писателе поля (input readOnly).
+                      Клауза «for that case there is clone for season» выброшена целиком, и не
+                      ради краткости: `clone` в клиенте не существует ни под каким именем (греп
+                      по src/ — ноль совпадений), то есть абзац отправлял оператора к
+                      несуществующему органу. */}
+                  <SeasonField
+                    pickHint={
+                      isEditMode
+                        ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
+                        : undefined
+                    }
+                  />
                   <CollectionField />
                   {/* brand sits inline with the rest of the card's identity rather than behind a
                     disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
@@ -1988,8 +2000,18 @@ export function TechCardForm({
                     only; that refusal names itself, and techCardErrorMessage now passes the server's
                     own text through (it arrives as a 400 — grpc-gateway maps FailedPrecondition
                     there, not to 412). */}
+                  {/* K-20 · ЗАПРЕТ ОСТАЁТСЯ, КРИК УХОДИТ. Владелец: «размер этого текста должен
+                      быть меньше». Кричал он не размером как таковым, а РЕГИСТРОМ: `variant='error'`
+                      зашивает `uppercase` в примитиве, а `size='small'` — это устаревший алиас
+                      `default`, то есть рабочие 12px. Получалось предложение в 20 слов капслоком
+                      в полную ширину блока — ровно то, что DESIGN.md §3 запрещает («капслок = ярлык
+                      в четыре слова и короче; предложения и подсказки остаются обычным регистром»).
+                      Теперь это `errorLabel` + `micro` — та же геометрия, что у соседней подсказки
+                      «unclassified — …» ниже в этом же блоке, то есть «как у соседних полей».
+                      Красный и ведущий `!` сохранены: это настоящий запрет, а не примечание, и
+                      состояние не должно держаться одним цветом. */}
                   {liveColorways.length > 0 && (
-                    <Text variant='error' size='small'>
+                    <Text variant='errorLabel' size='micro'>
                       ! purpose is locked while {liveColorways.length} live colourway(s) are linked
                       — saving as auxiliary offers to archive them first (archived ones do not
                       count)
@@ -2005,8 +2027,11 @@ export function TechCardForm({
                     instant the operator selects «sellable» — the one moment it is worth reading. A
                     variant can only exist on a card the server holds as auxiliary, so its presence
                     is the whole condition. */}
+                  {/* K-20 · тот же приём, что у соседа выше: это второй арм того же запрета,
+                      и оставить его капслоком значило бы получить два разных голоса на одну
+                      мысль в одном блоке. */}
                   {outputVariants.length > 0 && (
-                    <Text variant='error' size='small'>
+                    <Text variant='errorLabel' size='micro'>
                       ! purpose is locked while {outputVariants.length} colour variant(s) are
                       registered — delete them on the header tab first (a colour variant pins the
                       auxiliary purpose)
@@ -2016,8 +2041,11 @@ export function TechCardForm({
                     replace — flag the destruction BEFORE it happens, it's not reversible. There is
                     no matching warning for the other direction: a colourway links itself to a style
                     (R1), so switching to auxiliary unlinks nothing this save could destroy. */}
+                  {/* K-20 · третья реплика того же блока. Она короче, но стоит вплотную к двум
+                      предыдущим: оставленная капслоком, она читалась бы как более важная из
+                      трёх, хотя это ровно наоборот — здесь предупреждение, а не запрет. */}
                   {!isAux && outputMaterialId > 0 && (
-                    <Text variant='error' size='small'>
+                    <Text variant='errorLabel' size='micro'>
                       ! saving as sellable clears the output material
                     </Text>
                   )}
@@ -2072,12 +2100,14 @@ export function TechCardForm({
                     />
                   )}
                   {/* U-2 · CATEGORY ПЕРЕЕХАЛ СЮДА вместе со своим носителем. `HeaderMetaFields` —
-                    это браузер категорий ПЛЮС раскрывашка «base model & sample size — optional»,
-                    один неделимый компонент; прототип заканчивает колонку classification той же
-                    раскрывашкой, так что порядок совпал. Блок в блок не вложен: HeaderMetaFields
-                    рисует обычный div, а не Section (DESIGN.md §5).
+                    это браузер категорий ПЛЮС поля base model / base sample size, один неделимый
+                    компонент; прототип заканчивает колонку classification ими же, так что порядок
+                    совпал. Блок в блок не вложен: HeaderMetaFields рисует обычный div, а не
+                    Section (DESIGN.md §5).
+                    K-21: раскрывашки вокруг этих двух полей больше нет, они стоят обычным рядом
+                    вместе с остальными полями блока.
                     У aux-карты классификацию задаёт AUXILIARY TYPE, поэтому браузер категорий там
-                    спрятан, а раскрывашка остаётся: себестоимость считается по норме базового
+                    спрятан, а пара полей остаётся: себестоимость считается по норме базового
                     размера без фолбэка, и aux-карта обязана иметь путь к костингу. Сохранённый
                     categoryId не стирается — он живёт в форме и уезжает в full-replace. */}
                   <HeaderMetaFields hideCategory={isAux} />
@@ -2205,24 +2235,16 @@ export function TechCardForm({
                 </Section>
               )}
 
-              {/* V-17 · «construction described aspect by aspect поднять вверх к мудборду».
-                  Аспекты стояли ПОСЛЕДНИМ органом студии — пропом `constructionAspects` в
-                  StudioTab, пять экранов генерации ниже доски. Теперь они последний блок ШАПКИ,
-                  то есть вплотную НАД мудбордом: порядок монтирования студии живёт в чужом файле
-                  (`design/studio-tab.tsx`), а конец шапки — в этом, и он даёт ровно ту смежность,
-                  которую просил владелец. Экземпляр по-прежнему ОДИН (проп больше не передаётся):
-                  два всегда-смонтированных DetailsEditor уже расходились локальными наборами
-                  показанных аспектов — см. историю U-9 ниже.
-                  `Section`-обёртка — не косметика: DetailsEditor рисует голый div, и в стеке он
-                  стоял прямо на сером грунте — рамки его карточек-аспектов без заливки просвечивали
-                  землёй (DESIGN.md, Filled-Block Rule). Белый блок возвращает ему и материал, и
-                  имя печатной секции. */}
-              <Section
-                title='construction'
-                question='— described aspect by aspect; prints after the concept'
-              >
-                <DetailsEditor techCard={techCard} />
-              </Section>
+              {/* K-8 · «помести карточку CONSTRUCTION под мудборд».
+                  Круг 9 переставляет её ещё раз, и это ТРЕТЬЕ её место: сначала она стояла
+                  последним органом студии, ниже пяти экранов генерации; по V-17 поднялась в конец
+                  шапки, вплотную НАД мудбордом; теперь владелец просит её ПОД мудбордом. Смежность
+                  та же, сторона другая — и решает это тот, кто ходит по экрану каждый день.
+                  ЭКЗЕМПЛЯР ПО-ПРЕЖНЕМУ ОДИН. Он уезжает пропом в студию, и здесь его больше нет:
+                  два всегда-смонтированных DetailsEditor расходились локальными наборами
+                  показанных аспектов — это дефект U-9, и он вернулся бы в тот же день.
+                  `Section`-обёртка уехала вместе с ним: DetailsEditor рисует голый div и без блока
+                  стоял бы прямо на сером грунте, просвечивая землёй сквозь рамки аспектов. */}
             </SectionStack>
 
             {/* STUDIO — полоса DESIGN, где на стиль смотрят.
@@ -2242,7 +2264,13 @@ export function TechCardForm({
                 последним блоком над мудбордом (см. блок construction выше). Проп в StudioTab
                 опционален и без значения не рисует ничего; сам слот может снять владелец
                 studio-tab.tsx. */}
-            {activeTab === 'studio' && <StudioTab techCardId={numId} disabled={frozen} />}
+            {activeTab === 'studio' && (
+              <StudioTab
+                techCardId={numId}
+                disabled={frozen}
+                constructionAspects={<DetailsEditor techCard={techCard} />}
+              />
+            )}
 
             {/* ARTIFACTS — лист, на котором собрана композиция. Тот же условный монтаж и по той же
                 причине: он правит те же `callouts`.

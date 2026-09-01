@@ -1,5 +1,5 @@
 import type { common_TechCard } from 'api/proto-http/admin';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
@@ -53,9 +53,32 @@ function PickBanner() {
 export function StudioTab({
   techCardId,
   disabled,
+  constructionAspects,
 }: {
   techCardId?: number;
   disabled?: boolean;
+  /**
+   * ═══ АСПЕКТЫ СБОРКИ, ВСТАВЛЯЕМЫЕ ПОД МУДБОРД (K-8) ═══════════════════════════════════════════
+   *
+   * Владелец: «помести карточку CONSTRUCTION — described aspect by aspect; prints after the
+   * concept под мудборд». Сейчас она стоит НАД ним, и не по решению этого файла: конец шапки
+   * карточки (`components/index.tsx`) физически предшествует началу студии, а мудборд — первый
+   * орган студии. Смежность «вплотную сверху» была ровно тем, что дал V-17 прошлой волной.
+   *
+   * ПОЧЕМУ ПРОП, А НЕ ИМПОРТ `DetailsEditor` ЗДЕСЬ. Редактор аспектов держит СВОЁ локальное
+   * состояние показанных аспектов, и два всегда-смонтированных экземпляра уже расходились им
+   * (U-9). Смонтировав второй здесь, мы получили бы ту же поломку под новым именем. Значит
+   * экземпляр обязан остаться ОДИН, а переехать может только его МЕСТО — и отдать его может
+   * только владелец шапки. Пока он этого не сделал, слот пуст и не рисует ничего: полустрочка
+   * `{constructionAspects}` ниже — это `undefined`, а не пустая секция.
+   *
+   * `Section`-ОБЁРТКА ЖИВЁТ ЗДЕСЬ, А НЕ У ВЫЗЫВАЮЩЕГО, и это не мелочь: порядок и материал блоков
+   * полосы DESIGN — решение этого файла (он и заведён как «единственное место, которое знает
+   * порядок своих органов»). Вызывающий отдаёт СОДЕРЖИМОЕ; имя печатной секции, её вопрос и белый
+   * грунт под ним назначаются тут. `DetailsEditor` рисует голый div — без обёртки его карточки
+   * аспектов стояли бы прямо на сером грунте страницы (DESIGN.md, Filled-Block Rule).
+   */
+  constructionAspects?: ReactNode;
 }) {
   // ВИД — состояние студии, как `state.kind` в прототипе. Живёт здесь, у композитора: полоса
   // представлений его показывает, а экраны читают, и третьего владельца у него быть не должно.
@@ -147,6 +170,18 @@ export function StudioTab({
               не нужно. Единственная роль полки, которую больше некому играть, — отвечать режиму
               выбора за пачечные картинки — живёт в `PickTray` над верстаком. */}
           <MoodBoard techCardId={techCardId} disabled={readOnly} />
+          {/* CONSTRUCTION — СРАЗУ ПОД МУДБОРДОМ (K-8, довод у пропа `constructionAspects`).
+              Порядок читается как рассказ: сначала чем стиль выглядит, потом чем он собран.
+              Слот пуст, пока `components/index.tsx` не отдаст сюда свой единственный
+              `DetailsEditor`; пустой он не рисует ни секции, ни отступа. */}
+          {constructionAspects && (
+            <Section
+              title='construction'
+              question='— described aspect by aspect; prints after the concept'
+            >
+              {constructionAspects}
+            </Section>
+          )}
           <KindsStrip band={band} kind={kind} onKindChange={setKind} />
           {bandless ? (
             <Section title='bench' question='— the flats this style is drawn from'>

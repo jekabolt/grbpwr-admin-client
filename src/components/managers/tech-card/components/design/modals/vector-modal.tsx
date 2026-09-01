@@ -54,6 +54,24 @@ import {
   type Backdrop,
   type BackdropFit,
 } from './vector-backdrop';
+import { handleEnd } from './vector-pen';
+import {
+  editBegin,
+  editCommit,
+  editConvert,
+  editDelete,
+  editDown,
+  editHit,
+  editMove,
+  editNudge,
+  editPreviewD,
+  editResync,
+  editSelect,
+  editUp,
+  nearestOnPath,
+  nodeEditable,
+  type EditState,
+} from './vector-pen-edit';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
 import {
   COPY_NUDGE,
@@ -512,6 +530,19 @@ export function VectorModal({
   const [zoomPct, setZoomPct] = useState(100);
   const [panning, setPanning] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  /** Shift у пера — притяжение к 45°. Резинка обязана показывать это ДО клика, иначе притяжение
+   *  видно только по факту, и человек ставит якорь наугад. */
+  const [shiftHeld, setShiftHeld] = useState(false);
+  /**
+   * ПРАВКА УЗЛОВ УЛОЖЕННОЙ КРИВОЙ (Q-10). Владелец: «пока ты не покинул эдит подравнять кривую как
+   * надо». Живёт под инструментом `select` — это Direct Selection иллюстратора, а не одиннадцатый
+   * чип: выбрать линию и подвинуть её узел — одно и то же действие, разделённое только точностью
+   * попадания.
+   *
+   * Реф рядом с состоянием по той же причине, что у пера: `pointermove` прилетает раньше рендера.
+   */
+  const [nodeEdit, setNodeEdit] = useState<EditState | null>(null);
+  const nodeEditRef = useRef<EditState | null>(null);
 
   /**
    * The layer's identity. STATE, because the header prints the rev and a ref would leave a stale
@@ -535,6 +566,10 @@ export function VectorModal({
   const putPen = useCallback((next: PenState | null) => {
     penRef.current = next;
     setPen(next);
+  }, []);
+  const putNodeEdit = useCallback((next: EditState | null) => {
+    nodeEditRef.current = next;
+    setNodeEdit(next);
   }, []);
   const putTrace = useCallback((next: [number, number][] | null) => {
     traceRef.current = next;
@@ -1010,6 +1045,23 @@ export function VectorModal({
    * Составной шаг (`both`) трогает ОБА материала: пиксели лента уже вернула в холст сама, штрихи
    * возвращает вызывающему — поэтому здесь делается и то, и другое.
    */
+  /**
+   * ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ ДОКУМЕНТА ИЗ ПРАВКИ УЗЛОВ. Всё, что меняет форму, проходит здесь и нигде
+   * больше: два писателя означали бы два разных представления о том, что сейчас в документе.
+   */
+  const commitNodes = useCallback(
+    (st: EditState) => {
+      const res = editCommit(strokesRef.current, st);
+      if (!res) {
+        putNodeEdit(st);
+        return;
+      }
+      commitLines(res.strokes);
+      putNodeEdit(res.st);
+    },
+    [commitLines, putNodeEdit],
+  );
+
   const applyUndoResult = useCallback(
     (res: NonNullable<UndoResult>) => {
       if (res.kind === 'lines' || res.kind === 'both') {
@@ -1021,8 +1073,13 @@ export function VectorModal({
         rasterDirtyRef.current = true;
         setRasterDirty(true);
       }
+      // ПРАВКА УЗЛОВ ПЕРЕСОБИРАЕТСЯ ПО НОВОМУ ДОКУМЕНТУ. Без этого она держала бы узлы штриха,
+      // которого после отмены уже нет, и следующий сдвиг записал бы их обратно.
+      if (res.kind === 'lines' || res.kind === 'both') {
+        putNodeEdit(nodeEditRef.current ? editResync(res.strokes, nodeEditRef.current) : null);
+      }
     },
-    [paintView],
+    [paintView, putNodeEdit],
   );
 
   /**
@@ -1535,7 +1592,10 @@ export function VectorModal({
     (t: Tool) => {
       if (penRef.current) commitPen();
       setTool(t);
-      if (t !== 'select') setSelected(null);
+      if (t !== 'select') {
+        setSelected(null);
+        putNodeEdit(null);
+      }
       if (needsRaster(t) && !frozen) {
         // ЗАПЕРТЫЙ ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ НЕ ОСТАЁТСЯ В РУКЕ. Чип, выбранный и молча ничего не
         // делающий, читается как сломанный редактор; рука возвращается к `select`, а причина
@@ -1630,8 +1690,26 @@ export function VectorModal({
     }
 
     if (tool === 'select') {
+      /**
+       * УЗЕЛ СТАРШЕ ШТРИХА. Кривая уже выбрана — значит рука целится в её узел или рукоятку, а не
+       * в саму линию; попадание мимо всех узлов означает «выбираю другую линию» и уходит ниже.
+       */
+      const ne = nodeEditRef.current;
+      if (ne && !frozen) {
+        const r = editDown(ne, at, penWorld(), { alt: event.altKey });
+        if (r.took) {
+          event.preventDefault();
+          vp.setPointerCapture?.(event.pointerId);
+          if (r.st.dirty) commitNodes(r.st);
+          else putNodeEdit(r.st);
+          return;
+        }
+      }
       const hit = hitStroke(strokes, at, PLATE_W, plateH, HIT_PX / (viewRef.current.zoom || 1));
       setSelected(hit);
+      // Взяли линию — сразу открыли её узлы: отдельного «войти в правку» нет, потому что и не
+      // нужно. У линии без кривизны узлы тоже есть, править их так же законно.
+      putNodeEdit(hit === null ? null : editBegin(strokesRef.current, hit));
       return;
     }
 
@@ -1664,7 +1742,13 @@ export function VectorModal({
 
     if (tool === 'curve') {
       // Вся механика — в penDown: замыкание по первому якорю, захват рукоятки, новый якорь.
-      const res = penDown(penRef.current, frameAtFree(event), penWorld());
+      // МОДИФИКАТОРЫ ЕДУТ ОБЪЕКТОМ, а не голым alt. Прежняя булева форма компилируется и сегодня,
+      // и в этом её опасность: Shift (угол кратен 45°) и пробел (двигать сам якорь, не отпуская)
+      // были бы мертвы МОЛЧА — «собирается» здесь не значит «работает».
+      const res = penDown(penRef.current, frameAtFree(event), penWorld(), {
+        alt: event.altKey,
+        shift: event.shiftKey,
+      });
       if (res.closedNow) {
         // Клик по первому якорю ЗАМКНУЛ контур — путь окончен, коммит немедленный, как в фотошопе.
         penRef.current = res.pen;
@@ -1722,7 +1806,25 @@ export function VectorModal({
     const livePen = penRef.current;
     if (livePen?.drag) {
       // Протяжка рукоятки: симметричная пара, Alt размыкает — вся арифметика в penMove.
-      putPen(penMove(livePen, frameAtFree(event), event.altKey, penWorld()));
+      putPen(
+        penMove(
+          livePen,
+          frameAtFree(event),
+          { alt: event.altKey, shift: event.shiftKey, space: spaceHeld },
+          penWorld(),
+        ),
+      );
+      return;
+    }
+    if (nodeEditRef.current?.drag) {
+      putNodeEdit(
+        editMove(
+          nodeEditRef.current,
+          frameAtFree(event),
+          { alt: event.altKey, shift: event.shiftKey },
+          penWorld(),
+        ),
+      );
       return;
     }
     if (tool === 'curve' && livePen) {
@@ -1762,6 +1864,12 @@ export function VectorModal({
     if (drag && event.pointerId === drag.id) {
       panDrag.current = null;
       setPanning(false);
+      return;
+    }
+    if (nodeEditRef.current?.drag) {
+      // ОДИН ЖЕСТ — ОДИН ⌘Z. Запись в документ только здесь, на отпускании: писать на каждом
+      // движении значило бы набить ленту сотней шагов одного перетаскивания.
+      commitNodes(editUp(nodeEditRef.current));
       return;
     }
     if (penRef.current?.drag) {
@@ -2608,6 +2716,7 @@ export function VectorModal({
     // ПРОБЕЛ ПЕРЕХВАТЫВАЕТСЯ РАНЬШЕ гарда набора — но только НЕ в текстовом поле. На фокусе-кнопке
     // пробел по умолчанию «нажать кнопку», и после клика по чипу инструмента зажатая ладонь
     // дёргала бы этот чип вместо панорамы; Enter кнопкам остаётся.
+    if (e.shiftKey) setShiftHeld(true);
     if (e.code === 'Space') {
       if (
         (e.target as HTMLElement)?.closest?.(
@@ -2628,6 +2737,20 @@ export function VectorModal({
     // Delete/Backspace: содержимое активной области, иначе — выбранный штрих. По e.code —
     // именованные клавиши раскладка не путает, но правило дома одно: физическая клавиша.
     if ((e.code === 'Backspace' || e.code === 'Delete') && !frozen) {
+      // ЖИВОЕ ПЕРО СТАРШЕ ВСЕГО: Backspace над недоложенным контуром снимает ПОСЛЕДНИЙ ЯКОРЬ, как
+      // в фотошопе, — отменяется то, что делалось только что, а не то, что лежит рядом.
+      const livePenNow = penRef.current;
+      if (livePenNow) {
+        e.preventDefault();
+        putPen(penUndo(livePenNow));
+        return;
+      }
+      const ne = nodeEditRef.current;
+      if (ne && ne.sel >= 0) {
+        e.preventDefault();
+        commitNodes(editDelete(ne, ne.sel));
+        return;
+      }
       if (activeSel !== null) {
         e.preventDefault();
         deleteSel(activeSel);
@@ -2693,6 +2816,7 @@ export function VectorModal({
   };
 
   const onKeyUp = (e: React.KeyboardEvent) => {
+    if (!e.shiftKey) setShiftHeld(false);
     if (e.code === 'Space') setSpaceHeld(false);
   };
 
@@ -3082,6 +3206,21 @@ export function VectorModal({
                   saveNote={saveNote}
                   backdrop={backdrop}
                   backdropKey={bdKey}
+                  nodeCount={nodeEdit?.path.nodes.length ?? 0}
+                  nodeSelected={nodeEdit?.sel ?? -1}
+                  nodeSmooth={
+                    nodeEdit && nodeEdit.sel >= 0
+                      ? nodeEdit.path.nodes[nodeEdit.sel]?.linked === true
+                      : false
+                  }
+                  onNodeConvert={() => {
+                    const ne = nodeEditRef.current;
+                    if (ne && ne.sel >= 0) commitNodes(editConvert(ne, ne.sel, penWorld()));
+                  }}
+                  onNodeDelete={() => {
+                    const ne = nodeEditRef.current;
+                    if (ne && ne.sel >= 0) commitNodes(editDelete(ne, ne.sel));
+                  }}
                   plate={plateRect}
                   onBackdropPick={(media) => {
                     const r = adoptBackdrop(media[0], plateRect);
@@ -3475,6 +3614,76 @@ export function VectorModal({
                               ластика собственного следа нет по определению — он убирает, — и без
                               круга рука во время стирания не видит ни границы, ни размера того,
                               чем стирает. Прежде круг гас ровно в тот момент, когда нужен. */}
+                          {nodeEdit && (
+                            /**
+                             * УЗЛЫ И РУКОЯТКИ ПРАВЯЩЕЙСЯ КРИВОЙ.
+                             *
+                             * Тонкая обводка живого пути рисуется ОТДЕЛЬНО от самого штриха: пока
+                             * рука тянет узел, документ ещё не тронут (запись — на отпускании), и
+                             * без этой обводки экран показывал бы старую форму до самого конца
+                             * жеста, то есть рука тянула бы вслепую.
+                             *
+                             * Все размеры делятся на зум: узел обязан оставаться одного размера
+                             * под пальцем на любом приближении, иначе на 400 % он закрывает то,
+                             * что двигают.
+                             */
+                            <g data-node-edit='' pointerEvents='none'>
+                              <path
+                                d={editPreviewD(nodeEdit.path, PLATE_W, plateH)}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={1 / zoomK}
+                                opacity={0.5}
+                              />
+                              {nodeEdit.path.nodes.map((an, i) => {
+                                const cx = an.a[0] * PLATE_W;
+                                const cy = an.a[1] * plateH;
+                                const r = (i === nodeEdit.sel ? 5 : 3.5) / zoomK;
+                                return (
+                                  <g key={i}>
+                                    {(['in', 'out'] as const).map((side) => {
+                                      const h = handleEnd(an, side);
+                                      if (!h) return null;
+                                      const hx = h[0] * PLATE_W;
+                                      const hy = h[1] * plateH;
+                                      return (
+                                        <g key={side}>
+                                          <line
+                                            x1={cx}
+                                            y1={cy}
+                                            x2={hx}
+                                            y2={hy}
+                                            stroke='currentColor'
+                                            strokeWidth={0.8 / zoomK}
+                                            opacity={0.6}
+                                          />
+                                          <circle
+                                            cx={hx}
+                                            cy={hy}
+                                            r={3 / zoomK}
+                                            fill='#fff'
+                                            stroke='currentColor'
+                                            strokeWidth={1 / zoomK}
+                                            data-node-handle={`${i}:${side}`}
+                                          />
+                                        </g>
+                                      );
+                                    })}
+                                    <rect
+                                      x={cx - r}
+                                      y={cy - r}
+                                      width={r * 2}
+                                      height={r * 2}
+                                      fill={i === nodeEdit.sel ? '#fff' : 'currentColor'}
+                                      stroke='currentColor'
+                                      strokeWidth={1.2 / zoomK}
+                                      data-node={i}
+                                    />
+                                  </g>
+                                );
+                              })}
+                            </g>
+                          )}
                           {isThreadTool(tool) && nibHover && (
                             /* ТОЧКА В НАТУРАЛЬНУЮ ТОЛЩИНУ НИТИ. Не кольцо: кольцо означает
                                «столько заберётся», а нить — это то, что ЛЯЖЕТ, и показывать её
@@ -3575,7 +3784,7 @@ export function VectorModal({
                                   кривизной от исходящей рукоятки последнего якоря. */}
                               {penHover && !pen.drag && !pen.closed && (
                                 <path
-                                  d={penRubberD(pen, penHover, PLATE_W, plateH)}
+                                  d={penRubberD(pen, penHover, PLATE_W, plateH, penWorld(), shiftHeld)}
                                   fill='none'
                                   stroke='currentColor'
                                   strokeWidth={1.5 / zoomK}

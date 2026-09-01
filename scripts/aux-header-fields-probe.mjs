@@ -142,7 +142,10 @@ await esbuild({
 });
 const bundle = readFileSync(outfile, 'utf8');
 rmSync(outfile, { force: true });
-if (!bundle.includes('base model & sample size'))
+// K-21 · раньше здесь искалась подпись раскрывашки «base model & sample size». Раскрывашки
+// больше нет (владелец: «сделать обычным не колапс инпутом»), поэтому якорем стала подпись
+// самого поля — она и была тем, ради чего разметку проверяли.
+if (!bundle.includes('base sample size'))
   dieNotRun('в бандле нет разметки хедера — собралось не то');
 
 let cssDir = [];
@@ -256,7 +259,16 @@ head('ЦИТАТА А — SELLABLE: категория и fit на месте (�
   const fit = await visibleField('fit');
   ck(fit.present && fit.visible, 'поле fit видно');
   ck(await hasText('category'), 'браузер категорий на экране');
-  ck(await hasText('base model & sample size'), 'дисклоужер базовой модели на экране');
+  // K-21 · ВИДНЫ, А НЕ ПРОСТО СМОНТИРОВАНЫ. Проверка сменила предмет вместе с правкой: раньше
+  // спрашивали «подпись раскрывашки на экране», и она была зелёной, пока оба поля лежали
+  // СХЛОПНУТЫМИ внутри <details>. Теперь спрашивается ровно то, что просил владелец, — что поля
+  // стоят обычными полями и их ВИДНО. `visibleField` меряет через checkVisibility, а он —
+  // единственное, что ловит схлопнутый <details>: геометрия закрытого блока врёт «видим».
+  // Поэтому эта пара проверок покраснела бы, верни кто-нибудь раскрывашку обратно.
+  const bmSell = await visibleField('baseModelId');
+  const ssSell = await visibleField('baseSampleSizeId');
+  ck(bmSell.present && bmSell.visible, 'base model — обычное видимое поле, не под раскрывашкой');
+  ck(ssSell.present && ssSell.visible, 'base sample size — обычное видимое поле');
 }
 
 head('ЦИТАТА Б — AUX: категории и fit нет, базовая модель осталась');
@@ -266,7 +278,11 @@ head('ЦИТАТА Б — AUX: категории и fit нет, базовая 
   ck(!fit.present, 'поля fit в разметке нет вовсе', fit.present ? 'оно там' : '');
   ck(!(await hasText('care symbols')), 'пикера care нет');
   ck(!(await hasText('— category —')), 'браузера категорий нет');
-  ck(await hasText('base model & sample size'), 'путь к костингу остался (базовый размер)');
+  // K-21 · тот же вопрос, что и на sellable: путь к костингу у aux-карты не просто смонтирован,
+  // а виден. Себестоимость считается по норме БАЗОВОГО РАЗМЕРА без фолбэка, так что поле,
+  // спрятанное под словом «optional», решало деньги молча.
+  const ssAux = await visibleField('baseSampleSizeId');
+  ck(ssAux.present && ssAux.visible, 'путь к костингу виден (базовый размер), не спрятан');
 }
 
 head('ЦИТАТА В — AUX: спрятанная панель ВСЁ ЕЩЁ ПИШЕТ бренд (это и есть предмет проверки)');

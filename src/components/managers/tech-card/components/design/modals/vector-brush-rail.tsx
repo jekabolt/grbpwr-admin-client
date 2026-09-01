@@ -1084,6 +1084,17 @@ export type RailProps = {
    */
   backdrop: Backdrop | null;
   backdropKey: string;
+
+  /**
+   * ПРАВКА УЗЛОВ ВЫБРАННОЙ КРИВОЙ (Q-10). Рейка показывает только то, чего не видно на плате:
+   * сколько узлов, какой в руке и чем он является. Сами жесты — на холсте, и правильно: тянуть
+   * узел кнопкой в панели никто не станет.
+   */
+  nodeCount: number;
+  nodeSelected: number;
+  nodeSmooth: boolean;
+  onNodeConvert: () => void;
+  onNodeDelete: () => void;
   onBackdropPick: (media: common_MediaFull[]) => void;
   onBackdropOp: (next: Backdrop) => void;
   onBackdropFit: (mode: BackdropFit) => void;
@@ -1625,6 +1636,30 @@ export function VectorBrushRail(p: RailProps) {
           `undoDepth/undoBytes/undoEvicted/undoCeiling/undoByteCeiling` РЕЙКА ПО-ПРЕЖНЕМУ
           ПРИНИМАЕТ (см. `RailProps`), так что вернуть сигнал одной строкой — или поднять его в
           шапку над холстом — можно, не трогая вызывающую сторону. */}
+      {p.nodeCount > 0 && (
+        /* УЗЛЫ ВЫБРАННОЙ КРИВОЙ. Группа живёт только когда линия взята: пустой пульт — шум.
+           Жестов здесь нет нарочно — тянуть узел кнопкой в панели никто не станет; здесь стоит
+           ровно то, чего на плате не видно: сколько их всего и чем является тот, что в руке. */
+        <div className='flex flex-col gap-1' data-node-rail=''>
+          <GroupLabel flush>nodes</GroupLabel>
+          <Text size='nano' variant='label' component='p'>
+            {p.nodeCount} node{p.nodeCount === 1 ? '' : 's'}
+            {p.nodeSelected >= 0
+              ? ` · #${p.nodeSelected + 1} in hand · ${p.nodeSmooth ? 'smooth' : 'corner'}`
+              : ' · drag one on the sheet, alt-click a segment to add'}
+          </Text>
+          {p.nodeSelected >= 0 && (
+            <ChipRow>
+              <Chip onClick={p.onNodeConvert} disabled={p.frozen} data-node-convert=''>
+                {p.nodeSmooth ? 'make corner' : 'make smooth'}
+              </Chip>
+              <Chip onClick={p.onNodeDelete} disabled={p.frozen} data-node-delete=''>
+                delete node
+              </Chip>
+            </ChipRow>
+          )}
+        </div>
+      )}
       {/* ОБЛАСТИ ЛАССО. Группа существует только вместе с областями: пустой пульт — шум.
           Растушёвка стоит В СТРОКЕ области — она принадлежит выделению, не инструменту, и две
           области честно держат два разных числа. Операции — под списком и только у АКТИВНОЙ:

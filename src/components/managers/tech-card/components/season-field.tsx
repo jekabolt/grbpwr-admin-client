@@ -33,7 +33,19 @@ function buildSeason(t: SeasonType, year: number): string {
 // The picker used to hand-roll its own `fixed inset-0 bg-black/60` backdrop — the one dialog in the
 // app that did. It now rides the shared modal shell, so it dims, stacks, closes on outside-click
 // and traps focus exactly like every other dialog. The two-step flow itself is unchanged.
-export function SeasonField({ name = 'season' }: { name?: string }) {
+export function SeasonField({
+  name = 'season',
+  pickHint,
+}: {
+  name?: string;
+  /**
+   * K-19 · Последствие смены сезона, сказанное ОРГАНОМ, а не абзацем на экране. Садится на
+   * «pick», потому что это единственный писатель поля: сам Input readOnly, руками сезон здесь
+   * не набирается. Необязательный: на новой карте перевыпускать нечего, и подсказка про SKU
+   * уже существующих расцветок была бы враньём.
+   */
+  pickHint?: string;
+}) {
   const { setValue } = useFormContext();
   const value = (useWatch({ name }) as string) || '';
   // The control is hand-rolled (a read-only Input + a picker), so it gets none of ui/form's error
@@ -74,6 +86,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
           variant='secondary'
           size='sm'
           className='shrink-0'
+          title={pickHint}
           onClick={() => {
             setManual(value);
             setOpen(true);

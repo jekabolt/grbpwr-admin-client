@@ -1063,6 +1063,87 @@ const calloutSchema = z.object({
   clientRef: z.string().nullish(),
 });
 
+// K-3 · ПОЛНОСТЬЮ ПУСТАЯ ВЫНОСКА НЕ СОХРАНЯЕТСЯ.
+//
+// ГРАНИЦА ВЫБРАНА НА СОХРАНЕНИИ, А НЕ НА РОЖДЕНИИ, и это не осторожность, а требование жеста.
+// Выноску ставят как в фотошопе: сначала тычок в нужное место кадра, потом подпись. Запрет
+// «нельзя создать пустую» сделал бы её неставимой вовсе — рождение и есть тот момент, когда она
+// заведомо пуста (`description: ''` при рождении на всех пяти точках рождения). Поэтому пустую
+// МОЖНО начать: она рисуется, её видно (`plateWhenEmpty` у пина), в неё можно писать. Она просто
+// не переживает сохранение — ушли, ничего не написав, и ряда нет.
+//
+// Прецедент ровно тот же и в этом же файле: `isBlankPiece` выбрасывает начатую и брошенную
+// СТРОКУ ДЕТАЛИ на сохранении, а не запрещает «добавить деталь».
+//
+// ЧТО СЧИТАЕТСЯ СОДЕРЖИМЫМ — по тому же правилу, что у детали: содержимое это ОТВЕТ ОПЕРАТОРА.
+//   * `description` / `dimensions` — текст, ради которого выноска и ставится;
+//   * `part` / `parts` — половина связи «деталь ↔ выноска», сказанная со стороны выноски;
+//   * `points` — те самые «пометки»: у мерки, скобки, дуги и росчерка нарисованная геометрия И
+//     ЕСТЬ содержание, текста там может не быть законно (владелец: «без текста И БЕЗ ПОМЕТОК»);
+//   * номер, на который уже ССЫЛАЮТСЯ деталь, операция или дефект. Такая выноска бессловесна, но
+//     не пуста: она держит вторую половину связи. Выбросить её значило бы оставить `calloutNumber`
+//     указывать в никуда — известная ловушка «ложного detached», когда номер есть, а выноски нет.
+//
+// ЧТО СОДЕРЖИМЫМ НЕ СЧИТАЕТСЯ, и это главное решение здесь: `color` / `dashed` / `filled`. Перо
+// в панели ЛИПКОЕ — свежая выноска наследует то, чем рисовали в прошлый раз, а не то, что про неё
+// решили. Считай мы перо ответом, непустой оказалась бы почти любая брошенная выноска, и правило
+// не выбросило бы ничего. `number`, `clientRef`, `mediaId`, `posX/posY` — тоже не ответ: их
+// проставляет само рождение, и «пин с координатами и больше ничем» это буквально тот ряд, который
+// владелец просил не сохранять.
+export function isBlankCallout(
+  c: {
+    number?: number;
+    part?: string;
+    parts?: string[];
+    description?: string;
+    dimensions?: string;
+    points?: unknown[];
+  },
+  referencedNumbers: ReadonlySet<number>,
+): boolean {
+  if (c.description?.trim() || c.dimensions?.trim()) return false;
+  if (c.part?.trim() || (c.parts ?? []).some((p) => p?.trim())) return false;
+  if ((c.points ?? []).length > 0) return false;
+  const n = c.number ?? 0;
+  if (n > 0 && referencedNumbers.has(n)) return false;
+  return true;
+}
+
+// Номера выносок, на которые уже кто-то ссылается. Три ссылающихся списка — те же, по которым
+// считается следующий свободный номер (см. `nextNumber` на вкладке эскиза): номер, который
+// занят ссылкой, не свободен, и выноска под ним не пуста.
+export function referencedCalloutNumbers(data: {
+  pieces?: { calloutNumber?: number }[];
+  operations?: { calloutNumber?: number }[];
+  issues?: { calloutNumber?: number }[];
+}): Set<number> {
+  const out = new Set<number>();
+  for (const row of [
+    ...(data.pieces ?? []),
+    ...(data.operations ?? []),
+    ...(data.issues ?? []),
+  ]) {
+    const n = row.calloutNumber ?? 0;
+    if (Number.isFinite(n) && n > 0) out.add(n);
+  }
+  return out;
+}
+
+// K-3, вторая половина: выноска на СНИМКЕ ШАГА (annotationSchema). Тот же довод и та же граница,
+// другой набор полей — здесь текст лежит в `text`, а связь с деталью в `pieceLineKey(s)`.
+// Внешнего номера у неё нет, поэтому и ссылаться на неё некому: проверять нечего.
+export function isBlankAnnotation(a: {
+  text?: string;
+  points?: unknown[];
+  pieceLineKey?: string;
+  pieceLineKeys?: string[];
+}): boolean {
+  if (a.text?.trim()) return false;
+  if ((a.points ?? []).length > 0) return false;
+  if (a.pieceLineKey?.trim() || (a.pieceLineKeys ?? []).some((k) => k?.trim())) return false;
+  return true;
+}
+
 // ИМЕНА ПОЛЕЙ ШАГА — ИЗ САМОЙ СХЕМЫ, ОДИН РАЗ НА РЕПОЗИТОРИЙ.
 //
 // У этого списка два потребителя, и они обязаны спрашивать ОДНО: проба круга «чтение → форма →
@@ -2879,6 +2960,10 @@ export function mapFormToTechCardInsert(
       .filter((p) => !isBlankPiece(p) && !!p.lineKey?.trim())
       .map((p) => p.lineKey!.trim().toLowerCase()),
   );
+  // K-3 · номера выносок, занятые ссылками детали / операции / дефекта. Считается ОДИН раз на
+  // сохранение: предикат пустоты спрашивает его для каждого ряда, а сами списки за время одного
+  // маппинга не меняются.
+  const referencedCallouts = referencedCalloutNumbers(data);
   const outBomRef = (
     lineKey?: string,
   ): { bomLineKey: string | undefined; bomItemIndex: number | undefined } => {
@@ -3006,7 +3091,12 @@ export function mapFormToTechCardInsert(
       : UNSET_AUX_SUBTYPE) as common_TechCardAuxSubtype,
     moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
-    callouts: (data.callouts ?? []).map((c) => ({
+    // K-3 · начатая и брошенная выноска до провода не доезжает. Предикат и его довод — рядом с
+    // `calloutSchema` (`isBlankCallout`); множество занятых ссылками номеров считается ОДИН раз
+    // на сохранение, а не на каждый ряд.
+    callouts: (data.callouts ?? [])
+      .filter((c) => !isBlankCallout(c, referencedCallouts))
+      .map((c) => ({
       number: c.number || 0,
       // Первым элементом списка, а не сырым полем: сервер хранит `part` = parts[0], и разойтись
       // им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатается тех-пак.
@@ -3451,7 +3541,11 @@ export function mapFormToTechCardInsert(
           .map((m) => ({
             mediaId: wireInt(m.mediaId),
             caption: (m.caption ?? '').trim(),
-            annotations: (m.annotations ?? []).map((a) => ({
+            // K-3 · начатая и брошенная выноска снимка шага до провода не доезжает — тот же
+            // довод, что у выносок карточки (`isBlankAnnotation`).
+            annotations: (m.annotations ?? [])
+              .filter((a) => !isBlankAnnotation(a))
+              .map((a) => ({
               kind: annotationKindToWire(a.kind),
               points: (a.points ?? []).map((pt) => ({
                 x: inputToDecimal(pt.x),

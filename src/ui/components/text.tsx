@@ -14,6 +14,25 @@ const textVariants = cva('', {
       inactive: ['text-textInactiveColor'],
       // Readable secondary text for functional field labels/hints (AA on white).
       label: ['text-labelColor'],
+      /**
+       * K-20 · ЗАПРЕТ, СКАЗАННЫЙ ПРЕДЛОЖЕНИЕМ. Тон `error`, но БЕЗ `uppercase`.
+       *
+       * Это не вкусовая добавка, а недостающая половина системы. DESIGN.md §3
+       * («The Uppercase-Is-A-Label Rule») разрешает капслок только ярлыку, контролу или
+       * заголовку секции — вещам в четыре слова и короче; предложения и подсказки остаются в
+       * обычном регистре. При этом `variant='error'` зашивает `uppercase` безусловно, поэтому
+       * ЛЮБОЙ error-текст длиннее ярлыка автоматически нарушал собственное правило проекта и
+       * кричал абзацем во всю ширину.
+       *
+       * Добавлено СВЕРХУ, а не правкой `error`: тот стоит в 80+ местах приложения (archive,
+       * orders, accounting, fulfillment), и снятие капслока там — отдельное решение по всему
+       * админу, а не побочный эффект правки одной карточки.
+       *
+       * Красный ЗДЕСЬ ОСТАЁТСЯ: это настоящий блокирующий запрет, а не примечание. Монохромную
+       * безопасность (DESIGN.md, «state is never carried by colour alone») держит ведущий
+       * глиф `!` и сама формулировка, а не цвет.
+       */
+      errorLabel: ['text-error'],
     },
     size: {
       default: ['text-textBaseSize'],

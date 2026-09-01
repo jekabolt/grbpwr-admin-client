@@ -12,8 +12,20 @@ import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 import { fabricRenderGate } from './render';
 
 /**
- * THE STRIP OF REPRESENTATIONS — the four ways this card's design can exist as a picture, plus the
- * prompt profile that would drive the ones that are drawn rather than photographed.
+ * THE STRIP OF REPRESENTATIONS — the four ways this card's design can exist as a picture.
+ *
+ * ═══ ПЯТОЙ ЯЧЕЙКИ, «prompt profile», ЗДЕСЬ БОЛЬШЕ НЕТ (K-18) ═══════════════════════════════════
+ *
+ * Владелец: «вкладки PROMPT PROFILE не должно быть». Проверено перед сносом — она не была
+ * единственным входом НИ ВО ЧТО: она не выбиралась (`DesignKind` её не содержит и никогда не
+ * содержал), ничего не открывала и ничего не показывала, кроме одной фразы про серверную
+ * настройку. Ту же фразу — и подробнее — говорит `render/what-model-gets.tsx`, у самой формы
+ * запуска, где вопрос «из чего собран промпт» и возникает. Снос ничего не осиротил.
+ *
+ * И довод «мёртвое остаётся с причиной» (ниже) на неё не распространялся: он про ПРЕДСТАВЛЕНИЯ —
+ * технолог, не увидевший «fabric render», решит, что рендеров в админке нет. Профиль
+ * представлением не был; он был единственной ячейкой полосы, стоявшей на отшибе (`ml-auto`),
+ * то есть сам себя объявлял чужим этому ряду.
  *
  * It is a POLOSA, not a block: the strip is its own surface (border + white fill, ruled internally
  * with hairlines), so it is never wrapped in a `Section` — see DESIGN.md → «tiles, boards and
@@ -42,18 +54,14 @@ const INERT_REASON = {
   onModel:
     'On-model pictures are not made on this card. Shoot the garment or take the picture from the ' +
     'shoot, and bring the file in through the slot it belongs to.',
-  profile:
-    'Prompt profiles are server configuration, not a card field — there is nothing to pick here and ' +
-    'nothing on this card would read it. A profile is changed by whoever keeps the server settings.',
 } as const;
 
 type InertKey = keyof typeof INERT_REASON;
 
 /**
- * The cell metrics, shared so the live cell and the dead ones sit on exactly one baseline. NOTE
- * that this carries NO flex sizing: the four representations share the strip (`SHARE`) and the
- * profile is pushed to the far end at its own width (`ASIDE`), and mixing the two into one string
- * would leave twMerge to pick a winner between them.
+ * The cell metrics, shared so the live cell and the dead one sit on exactly one baseline. NOTE
+ * that this carries NO flex sizing: the four representations share the strip (`SHARE`), and mixing
+ * sizing into this string would leave twMerge to pick a winner between the two.
  */
 const CELL = 'flex min-w-0 flex-col gap-0.5 px-2.5 py-2 text-left';
 /**
@@ -66,8 +74,6 @@ const CELL = 'flex min-w-0 flex-col gap-0.5 px-2.5 py-2 text-left';
  * visible to a check that reads text — `innerText` returns the same string at every width.
  */
 const SHARE = 'flex-1';
-/** The profile sits at the far end, at its own width — it is a setting, not a representation. */
-const ASIDE = 'ml-auto shrink-0 grow-0';
 function RepCell({
   name,
   sub,
@@ -307,13 +313,8 @@ export function KindsStrip({
             onInert={() => setAsked('onModel')}
             className={cn(SHARE, 'border-l border-hairline')}
           />
-          <RepCell
-            name='prompt profile'
-            sub='server configuration'
-            inert={INERT_REASON.profile}
-            onInert={() => setAsked('profile')}
-            className={cn(ASIDE, 'border-l border-hairline')}
-          />
+          {/* «prompt profile» СНЯТА (K-18) — довод в шапке файла. Ряд из четырёх делит ширину
+              ровно, без ячейки на отшибе, поэтому `ASIDE` тоже ушёл: он существовал только для неё. */}
         </div>
       </TooltipProvider>
       {/* `bg-bgColor` on the note is required, not cosmetic: it sits on the grey page ground

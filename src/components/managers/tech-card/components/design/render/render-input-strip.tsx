@@ -8,7 +8,6 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
@@ -49,12 +48,13 @@ import { CELL_WIDTH, Strip, StripCell, StripDivider } from './strip-cell';
  * says so rather than letting a technologist conclude that a drawing he uploaded last week has
  * disappeared.
  *
- * THE SECTION NOW HOLDS A SECOND INPUT, AND IT IS A DIFFERENT KIND OF THING (Y-12). Below the
- * flats stands CLOTH: the fabric textures of this card. A render is made FROM the drawings and OF
- * the cloth, so both belong to «input» — but they answer different questions and therefore stand as
- * two labelled groups rather than one ragged strip. The door moved here because the ASSETS section
- * that used to hold it was removed (Y-11), and its reader — the CLOTHS row of the render menu — was
- * not. See `ClothStrip` for the whole argument.
+ * THE SECTION HOLDS A SECOND INPUT, AND IT STANDS IN THE SAME LINE (Y-12, then K-9). After the four
+ * view slots come the CLOTHS: the fabric textures of this card. A render is made FROM the drawings
+ * and OF the cloth, and both are read by the same run, so both stand left of the line, in one
+ * strip, in one glance. They were two labelled rows for one wave and the owner had them joined —
+ * see `useClothRun` for what that argument got right and what it got wrong. The door moved here
+ * because the ASSETS section that used to hold it was removed (Y-11), and its reader — the CLOTHS
+ * row of the render menu — was not.
  *
  * A HAND FILE WAS ALWAYS LEGAL INPUT HERE. Nothing on this card requires a run: an uploaded flat
  * sits on the right of the line exactly like a generated one, marks into a slot exactly like one,
@@ -89,11 +89,22 @@ const MARK_PROMPT = '__mark__';
  * нового поля, ни одной новой ручки; цепочка «загрузили → чип в CLOTHS → `params.colour.fabrics`»
  * та же, что была, и история прогонов остаётся читаемой.
  *
- * ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ГРУППА, А НЕ ЯЧЕЙКА В ПОЛОСЕ ФЛЭТОВ. Флэт — ЧЕРТЁЖ, который рендер
- * раскрашивает; фактура — МАТЕРИАЛ, которым он красит. Поставленные в один ряд, они читались бы
- * как один список с одним вопросом, а «отметить в слот front» у лоскута ткани смысла не имеет
- * вовсе. `GroupLabel` — ровно вес «на ступень ниже заголовка секции», и рамки внутри рамки он не
- * заводит.
+ * ⚠ ЗДЕСЬ СТОЯЛ ДОВОД «ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ГРУППА, А НЕ ЯЧЕЙКА В ПОЛОСЕ ФЛЭТОВ». ОН ОТМЕНЁН
+ * ВЛАДЕЛЬЦЕМ (K-9), И ОТМЕНЁН ПО ДЕЛУ — записываю обе половины, чтобы следующий читатель не
+ * восстановил снятое как «было же написано».
+ *
+ * Довод был: флэт — ЧЕРТЁЖ, который рендер раскрашивает, фактура — МАТЕРИАЛ, которым он красит;
+ * в одном ряду они читались бы как один список с одним вопросом, а «отметить в слот front» у
+ * лоскута ткани смысла не имеет вовсе. Первая половина верна и сегодня: ТКАНЬ — НЕ ВИД. Виды это
+ * четыре проекции ОДНОГО изделия, каждая занимает слот (`SetDesignBenchSlot`, `view_key`, ровно
+ * один снимок на слот); ткань — материал, её пишет `UpsertDesignAsset`, слота у неё нет, число не
+ * ограничено четырьмя, и «отметить в front» ей нечем.
+ *
+ * Ошибка была во второй половине — в том, ЧТО ИМЕННО спрашивает эта лента. Она спрашивает не «под
+ * каким углом снято», а «из чего собирается рендер», и на этот вопрос чертёж и ткань — два ответа
+ * одного рода. Ряд, разорванный надвое абзацем прозы, заставлял читать один ответ в два приёма.
+ * Владелец ходит по этому экрану каждый день и увидел это раньше, чем довод успел устареть на
+ * бумаге.
  *
  * КАДР РЕЖЕТСЯ (`cover`), А НЕ ВПИСЫВАЕТСЯ. Флэты стоят `contain`, потому что у чертежа обрезанный
  * край — потерянный контур изделия. У лоскута края нет: это образец плетения, и поля вокруг него
@@ -134,7 +145,25 @@ function nextClothName(taken: common_DesignAsset[]): string {
   return `cloth ${taken.length + 1}`;
 }
 
-function ClothStrip({
+/**
+ * ═══ CLOTH ВЕРНУЛСЯ В ЛИНИЮ, И ПОЭТОМУ ЭТО ХУК, А НЕ КОМПОНЕНТ (K-9) ══════════════════════════
+ *
+ * Владелец: «CLOTH должен быть дальше в линии с фронт бэк сайд л р и т д а не снизу». Ткани стояли
+ * ВТОРЫМ рядом под первым, отделённые от него абзацем прозы, — то есть человек, читающий вход
+ * рендера, читал его в два приёма и в двух местах.
+ *
+ * Одна лента не даётся компонентом: ячейки обязаны стать ДЕТЬМИ того же `<Strip>`, что и виды
+ * (иначе это снова два ряда), а подпись потолка, прозу и вопрос удаления рисовать внутри ленты
+ * нельзя — они не ячейки. Значит орган отдаёт свои части врозь, а состояние (`pendingRemove`) и
+ * писателей держит у себя, в одном месте. Компонент, отрендеренный дважды, держал бы два разных
+ * `pendingRemove`, и «ok» в одном не закрыл бы вопрос в другом.
+ *
+ * ЛИНИЯ (`StripDivider`) НЕ СДВИНУЛАСЬ, И ЭТО НЕ СЛУЧАЙНОСТЬ. Она отделяет «что рендер читает» от
+ * «всё остальное на карточке». Ткань рендер читает — значит ткани стоят СЛЕВА от неё, сразу за
+ * видами, а не в конце ленты. Поставить их справа значило бы сохранить слово владельца и потерять
+ * смысл линии.
+ */
+function useClothRun({
   band,
   techCardId,
   disabled,
@@ -142,7 +171,7 @@ function ClothStrip({
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
-}): JSX.Element {
+}): { cells: JSX.Element; count: number; notes: JSX.Element; modal: JSX.Element } {
   const writes = useAssetWrites(techCardId);
   const { showMessage } = useSnackBarStore();
   // ОДНА ФУНКЦИЯ НА ЧИТАТЕЛЯ И ПИСАТЕЛЯ (Д-1) — ткани И паттерны, ровно то, что берёт CLOTHS.
@@ -177,19 +206,12 @@ function ClothStrip({
         ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, and every one of them is hardware from the removed ASSETS shelves — nothing on this screen can free a place, so this card cannot take a cloth`
         : `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets: ${cloths.length} in this row and ${unmanaged.length} hardware from the removed ASSETS shelves, which no screen can remove any more — free a place by removing a cloth below`;
 
-  return (
+  /* ПОДПИСИ ГРУППЫ ЗДЕСЬ БОЛЬШЕ НЕТ: `GroupLabel` — строка НАД лентой, а лента теперь одна на
+     виды и ткани, и второй заголовок над ней подписывал бы чужую половину. Счёт тканей уехал в
+     `action` самой секции, к двум другим числам входа; род каждой плитки называет её собственная
+     подпись («CLOTH 1»), а не заголовок над рядом. */
+  const cells = (
     <>
-      <GroupLabel
-        action={
-          <Text size='micro' variant='label' component='span'>
-            {cloths.length === 0 ? 'none yet' : `${cloths.length} on this card`}
-          </Text>
-        }
-      >
-        cloth
-      </GroupLabel>
-
-      <Strip>
         {cloths.map((a) => {
           const id = a.id ?? 0;
           const name = assetLabel(a);
@@ -318,8 +340,11 @@ function ClothStrip({
             </Text>
           </div>
         )}
-      </Strip>
+    </>
+  );
 
+  const notes = (
+    <>
       {/* ОДНА СТРОКА, А НЕ АБЗАЦ. Владелец только что снял объяснение из CLOTHS (Y-13); написать
           здесь абзац значило бы перенести ту же прозу на два блока выше. Остаётся ровно то, чего
           из картинок не видно: что рендер читает с этого снимка и где им пользуются. */}
@@ -349,7 +374,14 @@ function ClothStrip({
           </>
         )}
       </Text>
+    </>
+  );
 
+  return {
+    cells,
+    count: cloths.length,
+    notes,
+    modal: (
       <ConfirmationModal
         open={!!pendingRemove}
         onOpenChange={(open) => !open && setPendingRemove(null)}
@@ -388,8 +420,8 @@ function ClothStrip({
           </Text>
         </div>
       </ConfirmationModal>
-    </>
-  );
+    ),
+  };
 }
 
 export function RenderInputStrip({
@@ -406,6 +438,9 @@ export function RenderInputStrip({
   const sides = useMemo(() => benchSides(band), [band]);
   const others = useMemo(() => unmarkedFlats(band), [band]);
   const marked = sides.filter((side) => !!side.picture);
+  /* Ткани отдаются частями (см. довод у `useClothRun`): ячейки уходят в ту же ленту, что и виды,
+     подписи и вопрос удаления — под неё. */
+  const cloth = useClothRun({ band, techCardId, disabled });
 
   /** Which cell a write is in flight for — a shared `isPending` would say «saving» on all of them. */
   const [busy, setBusy] = useState<string | null>(null);
@@ -445,16 +480,22 @@ export function RenderInputStrip({
       question='— the drawings the render is made from, and the cloth it is made of'
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
-          {marked.length} marked · {others.length} not marked
+          {/* Одной строкой, а не двумя: JSX схлопывает перенос в ПРОБЕЛ, и «0 cloth s» вылезло бы
+              ровно из аккуратного форматирования. */}
+          {marked.length} marked · {others.length} not marked ·{' '}
+          {`${cloth.count} cloth${cloth.count === 1 ? '' : 's'}`}
         </Text>
       }
     >
-      {/* ДВЕ ГРУППЫ ПОД ОДНИМ ЗАГОЛОВКОМ, И ОБЕ ПОДПИСАНЫ. Пока вход был один, подписывать его
-          заголовком секции было достаточно; со второй группой безымянная первая читалась бы как
-          «просто содержимое секции», а вторая — как приписка к ней. Это не два блока: `GroupLabel`
-          это вес линейки, а блок в блоке в этой системе запрещён. */}
-      <GroupLabel flush>flats</GroupLabel>
+      {/* ═══ ОДНА ЛЕНТА, ТРИ ПРОБЕГА (K-9) ═══════════════════════════════════════════════════
+          Владелец: «CLOTH должен быть дальше в линии с фронт бэк сайд л р и т д а не снизу».
+          Порядок ленты: виды в слотах → ткани → ЛИНИЯ → всё прочее, чем карточка располагает.
 
+          ДВУХ `GroupLabel` НАД ЛЕНТОЙ БОЛЬШЕ НЕТ. Они появились, когда рядов было два, и каждый
+          подписывал свой; над ОДНОЙ лентой «flats» подписывал бы и ткани тоже, то есть врал бы.
+          Кто есть кто, лента говорит сама: у вида — ярлык вида на кадре и толстая рамка слота, у
+          ткани — её собственное имя строкой под кадром. Числа обеих групп стоят в `action`
+          секции, одной строкой, где их и читают вместе. */}
       <Strip>
         {marked.map((side) => {
           const picture = side.picture!;
@@ -487,6 +528,12 @@ export function RenderInputStrip({
             />
           );
         })}
+
+        {/* ТКАНИ — ВТОРЫМ ПРОБЕГОМ ТОЙ ЖЕ ЛЕНТЫ, СРАЗУ ЗА ВИДАМИ И ЛЕВЕЕ ЛИНИИ. Рендер читает и
+            чертёж, и ткань; линия отделяет читаемое от остального, поэтому обе группы стоят по
+            одну её сторону. Разделителя между видами и тканями нет намеренно: второй такой же
+            штрих сравнял бы его с линией и отнял бы у неё значение. */}
+        {cloth.cells}
 
         {/* The line. It stands even when one side is empty: it separates two QUESTIONS, not two
             non-empty lists, and a divider that comes and goes stops reading as a boundary. */}
@@ -576,9 +623,10 @@ export function RenderInputStrip({
       </Strip>
 
       <Text size='micro' variant='label' component='p' className='normal-case'>
-        Left of the line — what the render actually reads: one drawing per view, with its
-        provenance. Right of the line — every other flat of this card; a hand file was always legal
-        input here. Marking one displaces the picture that held the slot; nothing is deleted.
+        Left of the line — what the render actually reads: one drawing per view with its
+        provenance, then the cloths it is made of. Right of the line — every other flat of this
+        card; a hand file was always legal input here. Marking one displaces the picture that held
+        the slot; nothing is deleted.
       </Text>
 
       {/* THE PAGE IS ADMITTED, NOT HIDDEN. The band ships one page of the feed, so a card with a
@@ -591,7 +639,10 @@ export function RenderInputStrip({
         </Text>
       )}
 
-      <ClothStrip band={band} techCardId={techCardId} disabled={disabled} />
+      {/* Подписи ткани и вопрос удаления — ПОД лентой: ячейки уехали в неё, а прозе и модалке в
+          прокручиваемом ряду места нет. Один орган, две точки монтирования — см. `useClothRun`. */}
+      {cloth.notes}
+      {cloth.modal}
     </Section>
   );
 }
