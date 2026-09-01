@@ -188,20 +188,19 @@ export class EditTimeline {
    * не сделал», а такой отмене человек не верит уже никогда.
    */
   recordGesture(layer: RasterLayer, apply: () => void): boolean {
-    const box = gestureBox(layer);
-    if (!box) {
-      apply();
-      return false;
-    }
-    const ctx = rasterCtx(layer.doc);
-    const before = ctx.getImageData(box.x, box.y, box.w, box.h);
-    apply();
-    const after = ctx.getImageData(box.x, box.y, box.w, box.h);
-    // Коробка есть, а байты те же — жеста не было. См. довод у `sameBytes`.
-    if (sameBytes(before, after)) return false;
-    const bytes = box.w * box.h * 4 * 2;
-    this.push({ kind: 'pixels', ...box, before, after, bytes });
-    return true;
+    /**
+     * ЖЕСТ ПО ОДНИМ ПИКСЕЛЯМ — ЧАСТНЫЙ СЛУЧАЙ ЖЕСТА ПО ДВУМ МАТЕРИАЛАМ, а не отдельный механизм.
+     *
+     * Здесь стояла ВТОРАЯ КОПИЯ той же арифметики: снять «до», применить, снять «после», сравнить
+     * байты, положить шаг. Копия и повела себя как копия — мутационный прогон показал, что у неё
+     * НЕТ СТОРОЖА вовсе: проба пустого жеста ходит через `recordCombined` (им пользуются все
+     * пиксельные инструменты), а этой веткой остался один «смягчить внутри». Сломать её можно было
+     * молча, и ни одна из ста трёх проб не покраснела бы.
+     *
+     * Два места, считающие одно и то же, разошлись бы и по существу: любое правило про «что
+     * считается изменением» пришлось бы чинить дважды, и второй раз бы забыли.
+     */
+    return this.recordCombined(layer, [], [], false, apply).pixels;
   }
 
   /**
