@@ -70,14 +70,22 @@ export function OutputsSection({
   const marked = outputs.filter((o) => pictureIsSelected(o.picture)).length;
   const writesOff = !!disabled || !speaks;
 
-  const noun = kind === 'threed' ? 'frame' : 'render';
+  /**
+   * ⚠ «FRAME» И «TURNTABLE» БЫЛИ НЕПРАВДОЙ, И ЭТО ПРОВЕРЕНО ПО ЗАДЕПЛОЕННОМУ БЭКЕНДУ, А НЕ ПО
+   * ПАМЯТИ. Маршрут 3D — `hitem3d/…/multi-view-to-3d` через fal, и его `Produces` называет ровно
+   * два предмета: САМУ МОДЕЛЬ (`.glb`) и растровую миниатюру, которая стоит вместо неё там, где
+   * список обязан нарисовать плитку (`internal/designgen/threedfal.go` на origin/beta). Кадров
+   * оборота не возвращается ни одного и не возвращалось с тех пор, как поворотный стол сменился
+   * сборкой объёма из видов. Слово «кадр» звало человека искать ряд картинок, которого нет.
+   */
+  const noun = kind === 'threed' ? 'model' : 'render';
 
   return (
     <Section
-      title={kind === 'threed' ? 'turntables of this card' : 'renders of this card'}
+      title={kind === 'threed' ? '3D models of this card' : 'renders of this card'}
       question={
         kind === 'threed'
-          ? '— the frames that came back, and which of them is the chosen one'
+          ? '— the models that came back, and which of them is the chosen one'
           : '— the coloured plates that came back, and which of them are chosen'
       }
       action={
@@ -106,7 +114,7 @@ export function OutputsSection({
           const view = viewLabel((picture.ghostView ?? '').trim());
           const shape =
             kind === 'threed'
-              ? `frame ${picture.ordinal ?? '—'}`
+              ? `model ${picture.ordinal ?? '—'}`
               : [view, run.rrev ? `r${run.rrev}` : ''].filter(Boolean).join(' · ') ||
                 `picture ${picture.ordinal ?? '—'}`;
           return (

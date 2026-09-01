@@ -160,7 +160,7 @@ export const ARTIFACT_KINDS: { value: ArtifactKind; label: string; hint: string 
   {
     value: 'threed',
     label: '3D',
-    hint: 'turntable frames; print too, once they are in the card’s media',
+    hint: '3D models; their thumbnails print too, once they are in the card’s media',
   },
 ];
 
@@ -1087,7 +1087,7 @@ export function ArtifactsPanel({
         // прибита к «turntable frame», и с появлением сегмента плиток она стала бы врать: человек
         // кладёт файл в PATTERNS, а ему отвечают про поворотный стол. У словаря медиа карточки нет
         // члена ни для того, ни для другого — и это две разные новости, а не одна.
-        `the card’s media has no kind for ${kind === 'pattern' ? 'a repeating tile' : 'a turntable frame'}, so this one is filed as a render — it is listed under ${ARTIFACT_KINDS.find((k) => k.value === lands)?.label ?? lands}, and it prints like any other plate`,
+        `the card’s media has no kind for ${kind === 'pattern' ? 'a repeating tile' : 'a 3D model'}, so this one is filed as a render — it is listed under ${ARTIFACT_KINDS.find((k) => k.value === lands)?.label ?? lands}, and it prints like any other plate`,
         'success',
       );
     }
@@ -1277,7 +1277,7 @@ export function ArtifactsPanel({
                       ? '+ add a render'
                       : kind === 'pattern'
                         ? '+ add a tile'
-                        : '+ add a 3D frame'
+                        : '+ add a 3D model'
                 }
                 /* ЦЕНА НАЗВАНА ДО НАЖАТИЯ, А НЕ ПОСЛЕ. Словарь медиа карточки не знает кадра
                    турнтейбла, поэтому принесённый сюда файл числится рендером и покажется среди

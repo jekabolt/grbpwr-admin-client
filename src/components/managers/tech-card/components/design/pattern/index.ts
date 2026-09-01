@@ -19,8 +19,10 @@ export { PatternInput } from './pattern-input';
 export { PatternOutputs } from './pattern-outputs';
 export { ClothSource } from './cloth-source';
 export { ScaleStrip, SPANS, TileGrid } from './tile-preview';
-export { useStartPatternRun } from './use-pattern-run';
-export type { PatternRunInput, PatternRunState } from './use-pattern-run';
+/* `useStartPatternRun` ЖИЛ ЗДЕСЬ НЕДЕЛЮ И СНЕСЁН. Он минтил СВОЙ ключ идемпотентности по СВОЕМУ
+   отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
+   именно на этом вопросе и разъезжается оплаченный дважды прогон. Плитка стартует тем же
+   `useStartDesignRun`, что рендер, перекрас и 3D; параметры собирает вызывающий экран. */
 export {
   PATTERN,
   REFUSAL_ADVICE,

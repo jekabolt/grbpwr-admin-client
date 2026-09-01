@@ -17,6 +17,7 @@ import {
 } from './model';
 import { OutputsSection } from './outputs';
 import { Palette } from './palette';
+import { PlacementBlock } from './placement';
 import { RenderInputStrip } from './render-input-strip';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
@@ -190,6 +191,11 @@ export function RenderStudio({
           chosen ones too (W-14) — a mark that filters a list must be settable for that list, so
           the same section stands on both generative screens. See `./outputs`. */}
       <OutputsSection band={band} techCardId={techCardId} kind='render' disabled={disabled} />
+
+      {/* THE FITTING — K-14, and it stands BELOW the paid blocks on purpose: it is the one organ on
+          this screen that spends nothing. Putting a free rehearsal above the button that charges
+          would read as a step of the generation flow, which it is not. */}
+      <PlacementBlock band={band} techCardId={techCardId} disabled={disabled} />
 
       <WhatModelGetsRenderModal
         open={inspecting}

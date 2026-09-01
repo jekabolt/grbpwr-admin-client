@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { designKeys, newClientRequestId } from '../use-design-band';
 
@@ -26,14 +26,20 @@ function isAborted(error: unknown): boolean {
 
 export type StartRunInput = {
   /**
-   * flat | render | threed | recolor. `draft_idea` is refused by the server — it has its own verb.
+   * flat | render | threed | recolor | pattern. `draft_idea` is refused by the server — it has its
+   * own verb.
    *
    * `recolor` IS THE ON MODEL SCREEN'S VERB (K-17) and it takes THIS door rather than one of its
    * own for the contract's own stated reason: it spends the image key's money, so it must be
    * counted against the day and must show up in the one history. What it needs and what it refuses
    * for free is on `StartDesignRunRequest.kind`; the screen's gate mirrors those refusals.
+   *
+   * `pattern` JOINED FOR THE SAME REASON AND AT THE SAME COST OF NOT JOINING. It had a hook of its
+   * own (`pattern/use-pattern-run.ts`) for one week, and that hook minted its own idempotency key
+   * against its own fingerprint — a second answer to «is this press the same intent as the last
+   * one», which is exactly the question a duplicated paid job turns on. One verb, one door.
    */
-  kind: 'flat' | 'render' | 'threed' | 'recolor';
+  kind: 'flat' | 'render' | 'threed' | 'recolor' | 'pattern';
   /** The delta phrase the human typed; the caption of the history row. May be empty. */
   ask: string;
   params: common_DesignRunParams;
@@ -62,11 +68,19 @@ export type StartRunState = {
    * provider key is not configured — that one NAMES THE ENVIRONMENT VARIABLE, and a variable name
    * that flashes past is a variable name nobody can pass on.
    *
-   * SO THE ERROR IS EXPOSED AND NOT INTERPRETED. Callers render `error.message` as it arrived;
-   * substituting our own prose for the server's would erase exactly the part that identifies the
-   * fault. Null whenever the last press succeeded or nothing has been pressed.
+   * SO THE ERROR IS EXPOSED AND NOT INTERPRETED. Callers render it as it arrived; substituting our
+   * own prose for the server's would erase exactly the part that identifies the fault. Null
+   * whenever the last press succeeded or nothing has been pressed.
+   *
+   * ⚠ ЭТО СОБСТВЕННОЕ СОСТОЯНИЕ, А НЕ `mutation.error`, И РАЗНИЦА В ОДНОМ ГЛАГОЛЕ: ошибку
+   * react-query нельзя СНЯТЬ, она живёт до следующей мутации. Отказ, который нечем закрыть, стоит
+   * на экране поверх работы и после того, как человек его прочёл и исправил, — а исправление
+   * здесь как раз может НЕ быть новым нажатием (дописать цвет, добавить фотографию). Поэтому
+   * снятие — глагол, и он рядом.
    */
-  error: Error | null;
+  refusal: string | null;
+  /** Убрать отказ с экрана. Ничего не отменяет — просто человек его прочёл. */
+  dismissRefusal: () => void;
 };
 
 /**
@@ -85,6 +99,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: (input: StartRunInput & { clientRequestId: string }) =>
@@ -98,18 +113,22 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       }),
     onSuccess: () => {
       ledger.current = null;
+      setRefusal(null);
       qc.invalidateQueries({ queryKey: designKeys.band(techCardId ?? 0) });
       // The run comes back PENDING, not done: the picture arrives in the feed when the provider
       // answers. Saying so is the difference between «nothing happened» and «it was booked».
       showMessage('run started — the pictures land in the history when it finishes', 'success');
     },
     onError: (error: unknown) => {
-      const message = (error as Error)?.message || 'the run did not start';
+      const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
         qc.invalidateQueries({ queryKey: designKeys.band(techCardId ?? 0) });
         return;
       }
+      // ОБА КАНАЛА, И ЭТО НЕ ДУБЛИРОВАНИЕ. Всплывашка — для отказа, который человек просто увидел;
+      // поле — для того, на который он обязан подействовать, и оно переживает секунды всплывашки.
+      setRefusal(message);
       showMessage(message, 'error');
     },
   });
@@ -134,11 +153,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
     [techCardId, mutation],
   );
 
-  return {
-    start,
-    isPending: mutation.isPending,
-    // `mutation.error` is cleared by react-query on the next successful mutate, so the exposed
-    // refusal is always the LAST press's and never an old one kept alive by a screen.
-    error: (mutation.error as Error | null) ?? null,
-  };
+  const dismissRefusal = useCallback(() => setRefusal(null), []);
+
+  return { start, isPending: mutation.isPending, refusal, dismissRefusal };
 }

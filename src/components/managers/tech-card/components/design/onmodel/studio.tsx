@@ -138,7 +138,7 @@ export function OnModelStudio({
   };
 
   /** Слова последнего отказа. Живут до следующего нажатия — тост живёт секунды. */
-  const refusal = (run.error?.message ?? '').trim();
+  const refusal = (run.refusal ?? '').trim();
 
   return (
     <>

@@ -24,7 +24,7 @@ import {
 import { PatternInput } from './pattern-input';
 import { PatternOutputs } from './pattern-outputs';
 import { SPANS, ScaleStrip } from './tile-preview';
-import { useStartPatternRun } from './use-pattern-run';
+import { useStartDesignRun } from '../render/use-design-run';
 
 /**
  * ═══ ВКЛАДКА PATTERN — ВЕСЬ ВИД `pattern` ПОЛОСЫ DESIGN (K-13) ════════════════════════════════
@@ -74,7 +74,7 @@ export function PatternStudio({
   disabled?: boolean;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
-  const run = useStartPatternRun(techCardId);
+  const run = useStartDesignRun(techCardId);
   const [source, setSource] = useState<common_MediaFull | null>(null);
   /** Черновик раппорта живёт СТРОКОЙ: половина набранного числа («12» на пути к «120») не должна
    *  превращаться в 12 на проводе, а пустое поле — в 0, пока человек ещё печатает. */
@@ -264,7 +264,33 @@ export function PatternStudio({
               variant='main'
               size='sm'
               loading={run.isPending}
-              onClick={() => run.start({ sourceMediaId: sourceId, repeatMm: repeat })}
+              onClick={() =>
+                run.start({
+                  kind: 'pattern',
+                  ask: '',
+                  params: {
+                    // ПЛИТКА НЕ ИМЕЕТ ВИДА ИЗДЕЛИЯ. Список пуст ЯВНО, а не отсутствует: пустой
+                    // список — утверждение «этот прогон не просит ни одной стороны», и сервер
+                    // сверяет его длину.
+                    views: [],
+                    layout: '',
+                    colour: undefined,
+                    threed: undefined,
+                    fixTarget: '',
+                    // ⚠ ИМЯ ПОЛЯ ГОВОРИТ «EXTRA», А ВЕЗЁТ ОНО ЗДЕСЬ ЕДИНСТВЕННЫЙ ВХОД. Это
+                    // переиспользование из контракта, а не небрежность: на рендере это правда
+                    // «сверх слотов», на `pattern` — та самая одна картинка, из которой строится
+                    // плитка, и сервер отвергает любое другое их число.
+                    extraInputMediaIds: [sourceId],
+                    fixTargets: [],
+                    fixSlotIds: [],
+                    autoSplit: false,
+                    detailSlotIds: [],
+                    pattern: { repeatMm: normaliseRepeat(repeat) },
+                    useFlatSlots: false,
+                  },
+                })
+              }
             >
               GENERATE
             </Button>
