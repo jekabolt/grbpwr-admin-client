@@ -22,7 +22,7 @@ import {
   slotRefKey,
   viewLabel,
 } from './bench-slot';
-import { type BenchKind } from './bench-kinds';
+import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
@@ -78,15 +78,42 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
  */
 const FLAT_BENCH: BenchKind = 'flat';
 
-/** A silhouette side of the FLAT bench, addressed the way it is addressed for its whole life. */
-const sideRef = (view: string): DesignBenchSlotRef => ({ viewKey: view, kind: FLAT_BENCH });
+/**
+ * ═══ И КОЛОРВЕЯ У ЭТОГО ВЕРСТАКА НЕТ — L-4, И ЭТО ГРАНИЦА, А НЕ ПРОБЕЛ ════════════════════════
+ *
+ * Владелец записал её ОТДЕЛЬНЫМ пунктом, чтобы её не «доделали» заодно с рендером: «флэты — одна
+ * разметка». Чертёж изделия у всех колорвеев один, и вторая его копия означала бы N разметок
+ * одного рисунка, расходящихся молча. Сервер согласен и отвечает жёстче нас: флэтовый реф с
+ * положительным колорвеем ОТВЕРГАЕТСЯ (`colorway_forbidden`), а не тихо обнуляется, — то есть
+ * подстановка сюда выбранного цвета сломала бы этот экран в первый же день оси.
+ *
+ * `COLORWAY_NONE` СТОИТ ЯВНО, А НЕ ОПУЩЕН, по тому же доводу, по которому здесь явно стоит
+ * `kind`: «пустое читается как ноль» — правило провода, а не наше утверждение, и день, когда
+ * умолчание изменится, не должен быть днём, когда эти рефы начнут означать другое.
+ */
+const sideRef = (view: string): DesignBenchSlotRef => ({
+  viewKey: view,
+  kind: FLAT_BENCH,
+  colorwayId: COLORWAY_NONE,
+});
 
 /** An existing slot by its minted id. `kind` is ignored here by the contract — an id names its own
- *  bench, and a kind disagreeing with it would be a contradiction nobody could adjudicate. */
-const detailRef = (slotId?: number): DesignBenchSlotRef => ({ slotId, kind: undefined });
+ *  bench, and a kind disagreeing with it would be a contradiction nobody could adjudicate. The
+ *  colourway travels for the same reason and with the same outcome: the SLOT'S OWN colourway wins
+ *  beside a `slot_id`, and 0 is «not stated», which is what lets it. A detail slot is a flat-bench
+ *  row anyway — details are the flat bench's alone. */
+const detailRef = (slotId?: number): DesignBenchSlotRef => ({
+  slotId,
+  kind: undefined,
+  colorwayId: COLORWAY_NONE,
+});
 
 /** `view_key = detail` is the MINT VERB, not an address: it names no row and requires a name. */
-const mintDetailRef = (): DesignBenchSlotRef => ({ viewKey: 'detail', kind: FLAT_BENCH });
+const mintDetailRef = (): DesignBenchSlotRef => ({
+  viewKey: 'detail',
+  kind: FLAT_BENCH,
+  colorwayId: COLORWAY_NONE,
+});
 
 type Optimistic = {
   ref: DesignBenchSlotRef;
@@ -218,7 +245,16 @@ export function Bench({
           // Minted once per human intent and NOT inside the mutation: a retry that carried a fresh
           // id would make the server honestly file a second batch.
           clientRequestId: newClientRequestId(),
-          items: [{ mediaId, ghostView: ref.slotId ? 'detail' : ghostView, kind: FLAT_BENCH }],
+          // КОЛОРВЕЯ У ФЛЭТА НЕТ ПО СУЩЕСТВУ (L-4), и на элементе загрузки это ровно тот же
+          // отказ, что на рефе: `colorway_forbidden`. Ноль здесь — не «ещё не проставлен».
+          items: [
+            {
+              mediaId,
+              ghostView: ref.slotId ? 'detail' : ghostView,
+              kind: FLAT_BENCH,
+              colorwayId: COLORWAY_NONE,
+            },
+          ],
           target: ref,
           expectedSlotRev,
           newDetailName,

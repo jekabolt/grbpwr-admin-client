@@ -522,7 +522,12 @@ function benchRow(
   kind: string,
   view: string,
 ): common_DesignBenchSlot | null {
-  return findSlot(band, { viewKey: view, kind });
+  // КОЛОРВЕЙ 0: рекол пишет ТОЛЬКО флэтовый верстак (все три вызова `platePlan` передают 'flat'),
+  // а у него оси нет (L-4). Если этот орган когда-нибудь научат возвращать плиты в РЕНДЕРНЫЙ
+  // верстак, колорвей обязан прийти сюда параметром — и тогда же прогон, чей колорвей удалён,
+  // придётся решать отдельно: `run.colorwayId` у такого прогона читается нулём, то есть плиты
+  // уехали бы в безколорвейный верстак молча.
+  return findSlot(band, { viewKey: view, kind, colorwayId: 0 });
 }
 
 /**
@@ -574,7 +579,7 @@ function platePlan(
         continue;
       }
       moves.push({
-        ref: { slotId, kind: undefined },
+        ref: { slotId, kind: undefined, colorwayId: 0 },
         label: (slot.detailName ?? '').trim() || (row.detailName ?? '').trim() || 'detail',
         pictureId,
         slotRev: row.slotRev ?? 0,
@@ -586,9 +591,11 @@ function platePlan(
     if (!isSilhouetteView(view)) continue;
     const row = benchRow(band, benchKind, view);
     moves.push({
-      // `kind` НАЗЫВАЕТСЯ ЯВНО: у верстака две оси, и render-front и flat-front — разные слоты,
+      // `kind` НАЗЫВАЕТСЯ ЯВНО: у верстака ТРИ оси, и render-front и flat-front — разные слоты,
       // оба адресуемые `view_key: front`. Пустое поле означало бы flat сегодня и что угодно завтра.
-      ref: { viewKey: view, kind: benchKind },
+      // Колорвей 0 — по доводу у `benchRow` выше: рекол адресует флэтовый верстак, а у него оси
+      // нет (L-4), и положительное значение здесь сервер отверг бы (`colorway_forbidden`).
+      ref: { viewKey: view, kind: benchKind, colorwayId: 0 },
       label: viewLabel(view),
       pictureId,
       slotRev: row?.slotRev ?? 0,

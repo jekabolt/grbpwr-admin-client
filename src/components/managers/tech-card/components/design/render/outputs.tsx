@@ -62,11 +62,27 @@ export function OutputsSection({
   techCardId,
   kind,
   disabled,
+  colorwayId,
+  colorwayLabel,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   kind: 'render' | 'threed';
   disabled?: boolean;
+  /**
+   * ═══ ВЫХОДЫ ТОГО ЖЕ КОЛОРВЕЯ, ЧТО И МЕНЮ НАД НИМИ (L-2) ═══════════════════════════════════
+   *
+   * `undefined` — экран без оси (сегодня таких нет; оставлено для композитора, у которого выбора
+   * колорвея нет вовсе), и тогда список не сужается ничем. Число — включая 0 — сужает до прогонов
+   * ЭТОГО колорвея; 0 это безколорвейные, то есть все, сделанные до оси.
+   *
+   * ПЛИТКА ЧУЖОГО КОЛОРВЕЯ ОТСЮДА ПРОПАДАЕТ, И ЭТО ОТВЕТ, А НЕ ПРОПАЖА. Она лежит на карточке,
+   * видна в ленте прогонов ниже и в ARTIFACTS; здесь её нет потому, что раздел стоит под меню
+   * ОДНОГО цвета и «renders of this card» без сужения читалось бы как «вход, который увидит 3D».
+   */
+  colorwayId?: number;
+  /** Имя выбранного колорвея для подписи; пусто = безколорвейный верстак. */
+  colorwayLabel?: string;
 }): JSX.Element | null {
   // HOOKS ABOVE THE EARLY RETURN, unconditionally — a hook below it would change the hook count
   // between renders and take the whole tree down (React #310; this screen has paid for it once).
@@ -83,7 +99,7 @@ export function OutputsSection({
    * счёт; здесь она только вызывается. Второй свод рядом с ним разошёлся бы молча.
    */
   const rows = useMemo<Row[]>(() => {
-    const outputs = outputsOfKind(band, kind);
+    const outputs = outputsOfKind(band, kind, colorwayId);
     if (kind !== 'threed') {
       return outputs.map(({ picture, run }) => ({
         picture,
@@ -100,7 +116,7 @@ export function OutputsSection({
       src: result.posterUrl,
       modelUrl: result.modelUrl,
     }));
-  }, [band, kind]);
+  }, [band, kind, colorwayId]);
 
   if (!rows.length) return null;
 
@@ -138,6 +154,16 @@ export function OutputsSection({
         </Text>
       }
     >
+      {/* ЧЕЙ ЭТО СПИСОК И ГДЕ ОН КОНЧАЕТСЯ — ОДНОЙ СТРОКОЙ, ДО ПЛИТОК. Два сужения сразу, и оба
+          обязаны быть сказаны: колорвей (иначе «а где мой рендер» на соседнем цвете) и страница
+          ленты (полоса привозит ОДНУ страницу — это ограничение экрана, не карточки). */}
+      {colorwayId !== undefined && (
+        <Text size='nano' variant='label' component='p' data-outputs-scope={colorwayId} className='normal-case'>
+          {colorwayLabel?.trim()
+            ? `${noun}s of ${colorwayLabel.trim()}, on this page of the feed`
+            : `${noun}s filed without a colourway, on this page of the feed`}
+        </Text>
+      )}
       {!carries && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>

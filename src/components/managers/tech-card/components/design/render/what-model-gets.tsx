@@ -129,6 +129,8 @@ export function WhatModelGetsRenderModal({
   cardFit,
   models,
   sizeName,
+  colorwayId,
+  colorwayLabel,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -143,6 +145,14 @@ export function WhatModelGetsRenderModal({
   cardFit: string;
   models?: readonly common_Model[];
   sizeName?: (id: number) => string;
+  /**
+   * ЧЕЙ ВЕРСТАК ЧИТАЕТ 3D (L-3). Инвентарь обязан называть РОВНО те плиты, которые уедут в сборку,
+   * а уедут слоты `kind: render` ЭТОГО колорвея — так их отбирает сервер. Панель без колорвея
+   * показывала бы соседний цвет и обещала бы его перед тратой денег. Рендерная рука поля не
+   * читает: её вход — флэтовый верстак, а он один на карточку (L-4).
+   */
+  colorwayId?: number;
+  colorwayLabel?: string;
 }): JSX.Element {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -178,15 +188,41 @@ export function WhatModelGetsRenderModal({
         cardFit={cardFit}
         garment={garment}
         resolved={resolved}
+        colorwayId={colorwayId ?? 0}
+        colorwayLabel={colorwayLabel ?? ''}
       />
     );
 
   const words = useMemo(
-    () => plainText({ kind, band, recipe, threed, sources, cardFit, garment, resolved }),
+    () =>
+      plainText({
+        kind,
+        band,
+        recipe,
+        threed,
+        sources,
+        cardFit,
+        garment,
+        resolved,
+        colorwayId: colorwayId ?? 0,
+        colorwayLabel: colorwayLabel ?? '',
+      }),
     // `resolved` is rebuilt each render by design (it is three references, not state); the text is
     // recomputed from the same inputs the panel draws from, so the dictionaries are named here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kind, band, recipe, threed, sources, cardFit, garment, dictionary?.colors, models],
+    [
+      kind,
+      band,
+      recipe,
+      threed,
+      sources,
+      cardFit,
+      garment,
+      dictionary?.colors,
+      models,
+      colorwayId,
+      colorwayLabel,
+    ],
   );
 
   const copy = async () => {
@@ -583,12 +619,16 @@ function ThreedBody({
   cardFit,
   garment,
   resolved,
+  colorwayId,
+  colorwayLabel,
 }: {
   band: GetDesignBandResponse;
   threed?: ThreedDraft;
   cardFit: string;
   garment: string;
   resolved: Resolved;
+  colorwayId: number;
+  colorwayLabel: string;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
   /**
@@ -597,7 +637,7 @@ function ThreedBody({
    * (`designSelectBench`). Панель, считавшая «последний рендер каждой стороны» по ленте, обещала
    * человеку перед тратой денег не тот набор.
    */
-  const sides = useMemo(() => threedSides(band), [band]);
+  const sides = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
   const present = sides.filter((side) => !!side.picture).length;
 
   return (
@@ -612,6 +652,7 @@ function ThreedBody({
           }
         >
           inputs — renders by view
+          {colorwayLabel.trim() ? ` · ${colorwayLabel.trim()}` : ' · no colourway'}
         </GroupLabel>
         {sides.map((side) => {
           const run = side.picture ? runOfPicture(band, side.picture) : null;
@@ -846,6 +887,8 @@ function plainText({
   cardFit,
   garment,
   resolved,
+  colorwayId,
+  colorwayLabel,
 }: {
   kind: WhatModelGetsKind;
   band: GetDesignBandResponse;
@@ -855,6 +898,8 @@ function plainText({
   cardFit: string;
   garment: string;
   resolved: Resolved;
+  colorwayId: number;
+  colorwayLabel: string;
 }): string {
   const lines: string[] = [
     `what the model gets — ${kindLabel(kind)}`,
@@ -896,8 +941,11 @@ function plainText({
     return lines.join('\n');
   }
 
-  const sides = threedSides(band);
+  const sides = threedSides(band, colorwayId);
   lines.push(
+    // ЧЕЙ ЭТО ВЕРСТАК — ПЕРВОЙ СТРОКОЙ 3D-БЛОКА. Текст уезжает в буфер и живёт дальше без экрана,
+    // а колорвей — единственное, чего по списку сторон восстановить нельзя.
+    `colourway: ${colorwayLabel.trim() || 'none (the unattributed render bench)'}`,
     `inputs: ${sides
       .map((side) => {
         if (!side.picture) {

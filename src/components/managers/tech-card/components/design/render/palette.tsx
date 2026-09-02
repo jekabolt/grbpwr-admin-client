@@ -1,4 +1,4 @@
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, type JSX } from 'react';
@@ -13,14 +13,19 @@ import {
   assetIsPattern,
   assetLabel,
   assetThumb,
+  assetWornBy,
   clothShelf,
+  fabricOfColorway,
   fabricUses,
   partsOfAsset,
 } from '../assets/model';
+import { useAssetWrites } from '../assets/use-assets';
+import { colorwayLabel, colorwaySubtitle } from '../colorway-picker';
 import { useColourDraft, type ColourDraft } from './drafts';
 import { ColourStatementRow } from './colour-statement';
 import { FieldRow, Hint, Swatch } from './field-row';
 import {
+  EMPTY_RECIPE,
   FABRIC_AUTHORITY,
   colourLabel,
   colourSubtitle,
@@ -244,22 +249,187 @@ function ClothRow({
   );
 }
 
+/**
+ * ═══ ТКАНЬ ЭТОГО КОЛОРВЕЯ — ОДИН ОРГАН НА «ЦВЕТ ИЛИ ПАТТЕРН» (G-15) ═══════════════════════════
+ *
+ * Владелец: паттерн — это бесшовная плитка, бесшовная плитка — это ТКАНЬ, и «в рендере и 3D она
+ * выбирается как ткань ЭТОГО КОЛОРВЕЯ». Отсюда единственное число ряда: колорвей носит ОДНУ ткань,
+ * и клик по соседнему чипу И ЕСТЬ намерение «теперь ткань ROSSO — вот эта». Сервер исполняет это
+ * одной транзакцией (назначение снимает колорвей со всех прочих ассетов), поэтому клиент шлёт ОДИН
+ * вызов и ничего не имитирует.
+ *
+ * ЦВЕТНАЯ ПОЛОВИНА НЕ ХРАНИТСЯ И НЕ МОЖЕТ ХРАНИТЬСЯ ЗДЕСЬ. `its own colour` — не запись, а СНЯТИЕ
+ * назначения (`colorway_id = 0`): цвет у колорвея уже есть — `devHex`/`pantone`/`colorCode` в его
+ * собственной строке, — и второе поле для него было бы конкурирующим ответом на вопрос, у которого
+ * ответ есть. Ровно от этого палитра отгораживается прямым текстом с самого начала.
+ *
+ * ═══ ПОЧЕМУ РЯД НЕ ТОЛЬКО ПИШЕТ КАРТОЧКУ, НО И ПРАВИТ ПОДАЧУ ═════════════════════════════════
+ *
+ * Провальный режим, ради которого писан весь G-15, — «сохранено, но до модели не доехало». Если
+ * назначение меняет карточку и НЕ меняет того, что уедет в этот прогон, человек нажал «ткань ROSSO
+ * — pattern 2», нажал GENERATE и купил прежний рецепт. Поэтому удавшееся назначение сразу правит
+ * черновик: ткань встаёт в `fabrics`, эхо — в скаляры (требование контракта), а снятие возвращает
+ * собственный цвет колорвея. Это ПРАВКА ЧЕЛОВЕКА, а не второй засев: черновик после неё честно
+ * считается тронутым.
+ *
+ * ⚠ ПРАВКА — В `onSuccess`, А НЕ ОПТИМИСТИЧНО. Отказ сервера (`colorway_forbidden` на фурнитуре,
+ * `foreign_colorway` на чужом колорвее) обязан оставить экран в том состоянии, которое он
+ * описывает; подача, уехавшая вперёд отказа, показывала бы ткань, которой колорвей не носит.
+ */
+function FabricOfRow({
+  band,
+  techCardId,
+  colorwayId,
+  colorway,
+  state,
+  disabled,
+}: {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  colorwayId: number;
+  colorway: common_AdminColorwayRef | null;
+  state: ColourDraft;
+  disabled?: boolean;
+}): JSX.Element | null {
+  const { setAssetColorway } = useAssetWrites(techCardId);
+  const shelf = useMemo(() => clothShelf(band), [band]);
+  const worn = useMemo(() => fabricOfColorway(band, colorwayId), [band, colorwayId]);
+
+  // РЯДА ПРОСТО НЕТ ПОД «NO COLOURWAY», и он не «серый»: у безколорвейного верстака ткани-факта не
+  // существует — назначить её некому. Всё, что ниже, ведёт себя тогда байт в байт как до оси.
+  if (colorwayId <= 0) return null;
+
+  const name = colorwayLabel(colorway) || `#${colorwayId}`;
+  const wornId = worn?.id ?? 0;
+
+  const wear = (assetId: number) => {
+    if (disabled || setAssetColorway.isPending) return;
+    setAssetColorway.mutate(
+      { assetId, colorwayId },
+      {
+        onSuccess: () => {
+          const fabrics = fabricUses(band, [assetId]);
+          const first = fabrics[0];
+          state.patch({
+            fabrics,
+            // ЭХО ПЕРВОЙ ТКАНИ В СКАЛЯРЫ — требование контракта, то же, что делает ряд CLOTHS.
+            fabricMediaId: first?.mediaId ?? 0,
+            // ⚠ И БЕЗ ПОДМЕШИВАНИЯ СОБСТВЕННОГО ЦВЕТА КОЛОРВЕЯ: выбранный цвет ПЕРЕБИВАЕТ цвет
+            // фотографии, поэтому `devHex` поверх набивки залил бы её одним тоном. Довод целиком —
+            // в засеве `useColourDraft` (`./drafts`), где живёт то же правило.
+            code: first?.colourCode || '',
+            hex: first?.colourHex || '',
+            words: first?.words || '',
+          });
+        },
+      },
+    );
+  };
+
+  const takeOff = () => {
+    if (disabled || !wornId || setAssetColorway.isPending) return;
+    setAssetColorway.mutate(
+      { assetId: wornId, colorwayId: 0 },
+      {
+        onSuccess: () =>
+          state.patch({
+            ...EMPTY_RECIPE,
+            hex: (colorway?.devHex ?? '').trim(),
+            code: (colorway?.colorCode ?? '').trim(),
+            words: (colorway?.pantone ?? '').trim(),
+          }),
+      },
+    );
+  };
+
+  return (
+    <FieldRow label='fabric of' data-fabric-of={colorwayId}>
+      <Text size='control' variant='uppercase' tracking='label' component='span' className='font-bold'>
+        {name}
+      </Text>
+      <ChipRow>
+        <Chip
+          nonForm
+          selected={!wornId}
+          pressed={!wornId}
+          disabled={disabled || setAssetColorway.isPending}
+          data-wear-asset='none'
+          title={
+            wornId
+              ? `take the fabric off ${name} — it goes back to wearing its own colour, ${colorwaySubtitle(colorway) || 'as stated on the colourway'}`
+              : `${name} wears its own colour — ${colorwaySubtitle(colorway) || 'stated on the colourway itself'}`
+          }
+          onClick={takeOff}
+        >
+          <span className='flex items-center gap-1'>
+            <Swatch hex={(colorway?.devHex ?? '').trim()} size={11} />
+            its own colour
+          </span>
+        </Chip>
+        {shelf.map((a) => {
+          const id = a.id ?? 0;
+          const on = assetWornBy(a) === colorwayId;
+          const url = assetThumb(a);
+          return (
+            <Chip
+              key={id}
+              nonForm
+              selected={on}
+              pressed={on}
+              disabled={disabled || setAssetColorway.isPending}
+              data-wear-asset={id}
+              title={
+                on
+                  ? `${assetLabel(a)} is the fabric of ${name} — press «its own colour» to take it off`
+                  : `make ${assetLabel(a)} the fabric of ${name}. This writes the card: it comes back on every render of ${name}, and it takes ${name} off whatever else was wearing it`
+              }
+              onClick={() => (on ? takeOff() : wear(id))}
+            >
+              <span className='flex items-center gap-1'>
+                {url ? (
+                  <img src={url} alt='' aria-hidden='true' className='size-[12px] object-cover' />
+                ) : null}
+                {assetLabel(a)}
+                {a.repeatMm ? ` · ${a.repeatMm} mm` : ''}
+              </span>
+            </Chip>
+          );
+        })}
+      </ChipRow>
+      <div className='w-full pl-[100px]'>
+        <Hint>
+          {wornId
+            ? `${name} wears ${assetLabel(worn)} on every render — this is a fact of the card. The rows below are this run only.`
+            : `${name} wears its own colour. Picking a cloth here writes the card; the rows below are this run only.`}
+        </Hint>
+      </div>
+    </FieldRow>
+  );
+}
+
 export function Palette({
   disabled,
   /** Supplied by `RenderStudio`, so the palette and the studio's gate read one draft. */
   draft,
   band,
+  techCardId,
+  colorwayId = 0,
+  colorway = null,
 }: {
   band: GetDesignBandResponse;
-  /** Accepted for one signature across the band's organs; the palette itself writes nothing — the
-   *  recipe travels inside the run the studio starts. */
+  /** ⚠ ПАЛИТРА БОЛЬШЕ НЕ «НИЧЕГО НЕ ПИШЕТ»: ряд `fabric of` пишет назначение ткани колорвею
+   *  (`SetDesignAssetColorway`, G-15) — единственная запись КАРТОЧКИ на этом экране. Рецепт по-
+   *  прежнему не карточка: он уезжает внутри прогона и живёт замороженной историей. */
   techCardId: number;
   disabled?: boolean;
   draft?: ColourDraft;
+  /** Выбранный колорвей; 0 = безколорвейный верстак, и ряда `fabric of` тогда нет вовсе. */
+  colorwayId?: number;
+  colorway?: common_AdminColorwayRef | null;
 }): JSX.Element {
   // Own draft when mounted alone, the studio's when composed. The hook is called unconditionally —
   // rules of hooks — and its result is simply not used when a draft was handed in.
-  const own = useColourDraft(band);
+  const own = useColourDraft(band, colorwayId, colorway);
   const state = draft ?? own;
   const recipe = state.recipe;
   const stated = fabricStatement(recipe);
@@ -269,6 +439,19 @@ export function Palette({
 
   return (
     <div>
+      {/* ── 0. ТКАНЬ КОЛОРВЕЯ — ФАКТ КАРТОЧКИ, И ОН СТОИТ ВЫШЕ ГРУППЫ «FABRIC» (G-15).
+             Порядок здесь и есть довод: сверху то, что переживает прогон, ниже — подача, которая
+             живёт ровно один раз. Внутри группы «fabric» этот ряд читался бы как ещё одно поле
+             подачи, то есть ровно наоборот. Граница названа словами в хвосте самого ряда. */}
+      <FabricOfRow
+        band={band}
+        techCardId={techCardId}
+        colorwayId={colorwayId}
+        colorway={colorway}
+        state={state}
+        disabled={disabled}
+      />
+
       <GroupLabel
         action={
           <Text size='micro' variant='label' component='span' className='normal-case'>

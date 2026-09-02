@@ -1,8 +1,14 @@
-import type { GetDesignBandResponse, common_DesignColourRecipe } from 'api/proto-http/admin';
-import { useEffect, useRef, useState } from 'react';
+import type {
+  GetDesignBandResponse,
+  common_AdminColorwayRef,
+  common_DesignColourRecipe,
+} from 'api/proto-http/admin';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
+import { COLORWAY_NONE } from '../bench-kinds';
+import { fabricOfColorway, fabricUses } from '../assets/model';
 import { EMPTY_RECIPE, type Presentation } from './model';
 
 /**
@@ -74,17 +80,90 @@ export type ColourDraft = {
  * band refetch (any write on the card invalidates it) would otherwise reach in and overwrite a
  * half-made choice with the last finished one.
  */
-export function useColourDraft(band: GetDesignBandResponse): ColourDraft {
+export function useColourDraft(
+  band: GetDesignBandResponse,
+  /**
+   * WHOSE render this is. `0` (or omitted) is the colourway-less bench and keeps the legacy seed
+   * byte for byte. A named colourway seeds from the CARD instead — see below.
+   */
+  colorwayId: number = COLORWAY_NONE,
+  /** Its row, for the colour half of the seed. Absent = the fabric half only. */
+  colorway?: common_AdminColorwayRef | null,
+): ColourDraft {
   const [recipe, setRecipe] = useState<common_DesignColourRecipe>(EMPTY_RECIPE);
   const touched = useRef(false);
   const seeded = useRef(false);
 
+  /**
+   * ═══ ВЫБОР КОЛОРВЕЯ ЗАСЕВАЕТ ПОДАЧУ — ЭТО И ЕСТЬ ПРОБРОС ПАТТЕРНА В РЕНДЕР (G-15) ═══════════
+   *
+   * Владелец: «как мы туда можем пробрасывать паттерны которые мы сделаем». Провод от плитки до
+   * промпта существует ЦЕЛИКОМ и здоров — ассет → чип в CLOTHS → `params.colour.fabrics` → воркер
+   * прикрепляет медиа картинкой → `renderClothLine` цитирует имя и раппорт. Провальный режим был
+   * один и он КЛИЕНТСКИЙ: «сохранено, но не поехало» — плитка лежала на полке, а в промпт не
+   * попадала, пока человек не тикнет чип. Отсюда правило: назначенная ткань колорвея НАЧИНАЕТ
+   * подачу выбранной, и строка над GENERATE (и модалка «what the model gets») показывают её ещё до
+   * денег.
+   *
+   * ТРИ ЗАСЕВА, ПО ОДНОМУ НА СЛУЧАЙ, И НИ ОДИН НЕ ВЫВОДИТСЯ ИЗ ДРУГИХ:
+   *   · колорвей 0 — последний рецепт карточки (`colour_recipes[0]`), ЛЕГАСИ-ПОВЕДЕНИЕ БАЙТ В БАЙТ.
+   *     Никакого «своего цвета» у безколорвейного верстака нет, и выдумывать его нечем;
+   *   · колорвей N с назначенной тканью — эта ткань: `fabrics=[она]` плюс ЭХО первой ткани в
+   *     скаляры, ровно как это делает ряд CLOTHS (требование контракта: абзац старшинства в промпте
+   *     читает главную фотографию из `fabric_media_id`);
+   *   · колорвей N без назначения — ЕГО СОБСТВЕННЫЙ ЦВЕТ: hex ← `devHex`, code ← `colorCode`,
+   *     words ← `pantone`. Это не догадка: «колорвей несёт цвет ИЛИ паттерн», и цветная половина
+   *     уже лежит в строке колорвея.
+   *
+   * ЗАСЕВ ОДИН РАЗ И ТОЛЬКО ПОКА НЕ ТРОНУТО — правило не менялось: рефетч полосы (её инвалидирует
+   * любая запись на карточке) иначе затирал бы наполовину сделанный выбор. Переключение колорвея
+   * пересевает не здесь, а РЕМОУНТОМ (`key={colorwayId}` в `studio-tab.tsx`): «засеяно однажды»
+   * и «засеяно заново при смене цвета» — два разных правила, и складывать их в одно условие
+   * значило бы отменять первое.
+   */
   const latest = (band.colourRecipes ?? [])[0];
+  const seed = useMemo<common_DesignColourRecipe | null>(() => {
+    if (colorwayId <= 0) return latest ?? null;
+    const asset = fabricOfColorway(band, colorwayId);
+    if (asset) {
+      const fabrics = fabricUses(band, [asset.id ?? 0]);
+      const first = fabrics[0];
+      if (first) {
+        /**
+         * ⚠ СОБСТВЕННЫЙ ЦВЕТ КОЛОРВЕЯ СЮДА НЕ ПОДМЕШИВАЕТСЯ, И ЭТО НЕ ЭКОНОМИЯ.
+         *
+         * Порядок старшинства в промпте (`FABRIC_AUTHORITY`, `renderprompt.go`): фотография задаёт
+         * МАТЕРИАЛ, а выбранный цвет ПЕРЕБИВАЕТ цвет фотографии. Значит дописать сюда `devHex`
+         * колорвея, у которого ткань — многоцветная набивка, значило бы приказать модели залить
+         * паттерн одним тоном: рецепт, собранный «на всякий случай полнее», отменил бы ровно ту
+         * ткань, ради проброса которой всё и делалось. Ткань говорит за себя; цвет колорвея — это
+         * ДРУГАЯ ветка засева, ниже, и она включается ровно тогда, когда ткани нет.
+         */
+        return {
+          ...EMPTY_RECIPE,
+          fabrics,
+          // ЭХО ПЕРВОЙ ТКАНИ В СКАЛЯРЫ — требование контракта: абзац старшинства в промпте
+          // называет главную фотографию по её номеру и читает его отсюда.
+          fabricMediaId: first.mediaId ?? 0,
+          code: first.colourCode || '',
+          hex: first.colourHex || '',
+          words: first.words || '',
+        };
+      }
+    }
+    if (!colorway) return null;
+    const hex = (colorway.devHex ?? '').trim();
+    const code = (colorway.colorCode ?? '').trim();
+    const words = (colorway.pantone ?? '').trim();
+    if (!hex && !code && !words) return null;
+    return { ...EMPTY_RECIPE, hex, code, words };
+  }, [band, colorwayId, colorway, latest]);
+
   useEffect(() => {
-    if (touched.current || seeded.current || !latest) return;
+    if (touched.current || seeded.current || !seed) return;
     seeded.current = true;
-    setRecipe(latest);
-  }, [latest]);
+    setRecipe(seed);
+  }, [seed]);
 
   return {
     recipe,

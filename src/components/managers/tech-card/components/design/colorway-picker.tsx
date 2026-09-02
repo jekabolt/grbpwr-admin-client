@@ -1,0 +1,234 @@
+import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { Chip, ChipRow } from 'ui/components/chip';
+import Text from 'ui/components/text';
+
+import { COLORWAY_NONE, renderBenchOccupied, colorwayOf } from './bench-kinds';
+import { FieldRow, Hint, Swatch } from './render/field-row';
+
+/**
+ * ═══ WHICH COLOURWAY THIS STUDIO IS WORKING ON — L-2 / L-3 ════════════════════════════════════
+ *
+ * Владелец: «у фабрик-рендера 1 колорвей — там мультивью, из него сплитом стороны, и так на каждый
+ * колорвей», и «в 3д рендере выбираем колорвей, который будем рендерить». So the render bench is
+ * per colourway and 3D builds from exactly one of them. This row is where that one is named.
+ *
+ * ═══ ЧТО ЗДЕСЬ НЕ ЯВЛЯЕТСЯ ПУСТЫМ СОСТОЯНИЕМ, И ЭТО ГЛАВНОЕ РЕШЕНИЕ ЭКРАНА ════════════════════
+ *
+ * `NO COLOURWAY` — ПЕРВЫЙ ЧИП РЯДА, ВСЕГДА, И РИСУЕТСЯ ОН ТЕМ ЖЕ ЧИПОМ, ЧТО ИМЕНОВАННЫЕ. Это не
+ * «ничего не выбрано» и не ошибка: безколорвейный верстак — настоящий, выбираемый и вечно законный
+ * (контракт: «every render made before the colourway axis stands on it», и 3D-прогон, не назвавший
+ * колорвея, читает ровно его). Нарисовать его серым, курсивом или предупреждением значило бы
+ * сказать человеку, что половина его карточек сломана, — а сломано в них ничего нет.
+ *
+ * ═══ ПОДПИСИ БЕРУТСЯ ИЗ РАЗРАБОТОЧНЫХ ПОЛЕЙ, А НЕ ИЗ ПЕРЕВОДОВ, И ЭТО ЗАМЕР, А НЕ ВКУС ════════
+ *
+ * `AdminColorwayRef` несёт `devName` / `colorCode` / `baseSku` — внутренние имена цвета, которые
+ * заводит сама студия. Витринные переводы (`display.translations`) читать ЗАПРЕЩЕНО: на бете у
+ * карточек семь языков, а `product_translation` заполнен только для `language_id = 1`, поэтому
+ * пикер, собранный на переводах, выглядел бы у шести языков из семи пустым — и человек читал бы
+ * это как сломанный орган, хотя сломаны данные и в другой подсистеме.
+ */
+
+/** ЧЕЛОВЕЧЕСКОЕ ИМЯ КОЛОРВЕЯ — одно определение на пикер, палитру и библиотеку паттернов. */
+export function colorwayLabel(ref?: common_AdminColorwayRef | null): string {
+  const dev = (ref?.devName ?? '').trim();
+  if (dev) return dev;
+  const code = (ref?.colorCode ?? '').trim();
+  if (code) return code;
+  const sku = (ref?.baseSku ?? '').trim();
+  if (sku) return sku;
+  const id = ref?.colorwayId ?? 0;
+  return id > 0 ? `#${id}` : 'colourway';
+}
+
+/** Вторая строка чипа-носителя в палитре: чем именно этот колорвей ЕСТЬ, кроме имени. */
+export function colorwaySubtitle(ref?: common_AdminColorwayRef | null): string {
+  const parts = [
+    (ref?.pantone ?? '').trim(),
+    (ref?.colorCode ?? '').trim(),
+    (ref?.devHex ?? '').trim(),
+  ].filter(Boolean);
+  return [...new Set(parts)].join(' · ');
+}
+
+export type ColorwayChoice = {
+  /** `0` = the colourway-less bench. A value, never an absence. */
+  colorwayId: number;
+  setColorwayId: (id: number) => void;
+  /** The card's colourways, in the card's own order. */
+  colorways: common_AdminColorwayRef[];
+  /** The picked one, or `null` under NO COLOURWAY. */
+  current: common_AdminColorwayRef | null;
+  /** Its human name; `''` under NO COLOURWAY, which the refusals spell out in words instead. */
+  label: string;
+  /** The card has not been read yet — the row draws a skeleton rather than «no colourways». */
+  loading: boolean;
+};
+
+/**
+ * ОДНО СОСТОЯНИЕ НА ВСЮ СТУДИЮ, И ЖИВЁТ ОНО У КОМПОЗИТОРА (`studio-tab.tsx`), как `kind`.
+ *
+ * Экраны его читают и переключают, но не владеют: второй владелец сделал бы возможной студию, где
+ * полоса входа 3D показывает ROSSO, а прогон уезжает за OLIVE. Ремоунт генеративных экранов по
+ * `key={colorwayId}` — работа композитора по той же причине.
+ *
+ * ═══ УМОЛЧАНИЕ: ТОТ ВЕРСТАК, ГДЕ У КАРТОЧКИ УЖЕ ЛЕЖАТ РЕНДЕРЫ ═════════════════════════════════
+ *
+ * Считается ОДИН РАЗ, когда полоса и карточка впервые сошлись, и человека после этого не двигает
+ * (иначе первый же чужой рендер, приехавший с рефетчем, перекинул бы его на другой верстак посреди
+ * работы). Правило: `0` в `render_bench_colorway_ids` ИЛИ у карточки нет колорвеев → NO COLOURWAY;
+ * иначе первый колорвей ИЗ ТЕХ, У КОГО РЕНДЕРЫ ЕСТЬ, а если таких нет — первый колорвей карточки.
+ *
+ * ПОЧЕМУ НЕ «ВСЕГДА ПЕРВЫЙ КОЛОРВЕЙ». Легаси-карточка — их на бете большинство — открылась бы на
+ * ИМЕНОВАННОМ и, значит, ПУСТОМ верстаке, притом что все её рендеры лежат рядом, на безколорвейном.
+ * Снаружи это читается как пропажа данных, и первое, что делает человек, — идёт их искать.
+ */
+export function useColorwayChoice(
+  techCardId: number | undefined,
+  band: GetDesignBandResponse,
+): ColorwayChoice {
+  const { data: techCard, isLoading } = useTechCard(techCardId);
+  const colorways = useMemo(
+    () => (techCard?.colorways ?? []).filter((c) => (c.colorwayId ?? 0) > 0),
+    [techCard],
+  );
+
+  const [colorwayId, setColorwayId] = useState<number>(COLORWAY_NONE);
+  const settled = useRef(false);
+
+  const withRenders = band.renderBenchColorwayIds;
+  useEffect(() => {
+    if (settled.current || isLoading) return;
+    settled.current = true;
+    if (!colorways.length) return; // NO COLOURWAY, and the row says why.
+    // Список ОТСУТСТВУЕТ (старый бинарь) — это «не сказано», а не «нигде нет рендеров»: правило
+    // умолчания тогда неприменимо, и честный ответ — безколорвейный верстак, где всё и лежало.
+    if (!withRenders) return;
+    if (withRenders.some((id) => colorwayOf({ colorwayId: id }) === COLORWAY_NONE)) return;
+    const first = colorways.find((c) =>
+      withRenders.some((id) => id === (c.colorwayId ?? 0)),
+    );
+    setColorwayId((first ?? colorways[0]).colorwayId ?? COLORWAY_NONE);
+  }, [isLoading, colorways, withRenders]);
+
+  const current = useMemo(
+    () => colorways.find((c) => (c.colorwayId ?? 0) === colorwayId) ?? null,
+    [colorways, colorwayId],
+  );
+
+  return {
+    colorwayId,
+    setColorwayId,
+    colorways,
+    current,
+    label: current ? colorwayLabel(current) : '',
+    loading: !!techCardId && isLoading,
+  };
+}
+
+/**
+ * РЯД ЧИПОВ. Та же грамматика, что у CLOTHS: `FieldRow` + `ChipRow`, ни одного нового примитива —
+ * «одна форма для одного жеста» на всей полосе.
+ *
+ * ПРИСУТСТВИЕ РЕНДЕРА — ГЛИФ, А НЕ СЧЁТЧИК, и это предел честности данных: `render_bench_colorway_ids`
+ * говорит «у этого колорвея занят хотя бы один слот» и ничего больше. Считать плиты по колорвею со
+ * страницы ленты нельзя — она одна страница, — и число на чипе было бы правдоподобной неправдой.
+ */
+export function ColorwayPicker({
+  band,
+  choice,
+  disabled,
+  /** Что стоит под рядом на карточке БЕЗ колорвеев — экраны говорят разное, оба правдиво. */
+  emptyNote,
+}: {
+  band: GetDesignBandResponse;
+  choice: ColorwayChoice;
+  disabled?: boolean;
+  emptyNote?: string;
+}): JSX.Element {
+  const { colorwayId, setColorwayId, colorways, loading } = choice;
+  const has = (id: number) => renderBenchOccupied(band.renderBenchColorwayIds, id);
+  // Точка означает что-то ТОЛЬКО когда сервер список прислал: у старого бинаря `renderBenchOccupied`
+  // отвечает «занят» на любой вопрос, и ряд точек над пустой карточкой был бы украшением.
+  const stated = !!band.renderBenchColorwayIds;
+
+  return (
+    <FieldRow label='colourway' data-cw-picker={colorwayId}>
+      {loading ? (
+        <Text size='micro' variant='label' component='span' className='normal-case'>
+          reading this card’s colourways…
+        </Text>
+      ) : (
+        <ChipRow>
+          <Chip
+            nonForm
+            selected={colorwayId === COLORWAY_NONE}
+            pressed={colorwayId === COLORWAY_NONE}
+            disabled={disabled}
+            data-cw='none'
+            title={
+              'renders filed without a colourway — everything made before colourways existed lives ' +
+              'here. A real bench, selectable like any other, and a 3D run that names no colourway ' +
+              'reads exactly it.'
+            }
+            onClick={() => setColorwayId(COLORWAY_NONE)}
+          >
+            <span className='flex items-center gap-1'>
+              {/* ПУСТОЙ КВАДРАТ СО ШТРИХОВКОЙ — ГЛИФ, А НЕ ЦВЕТ. Закрасить его чем угодно значило
+                  бы назвать цвет верстаку, у которого цвета нет по существу. */}
+              <Swatch hex='' size={11} />
+              no colourway
+              {stated && has(COLORWAY_NONE) ? ' ·' : ''}
+            </span>
+          </Chip>
+
+          {colorways.map((c) => {
+            const id = c.colorwayId ?? 0;
+            const on = id === colorwayId;
+            const renders = stated && has(id);
+            return (
+              <Chip
+                key={id}
+                nonForm
+                selected={on}
+                pressed={on}
+                disabled={disabled}
+                data-cw={id}
+                title={[
+                  colorwayLabel(c),
+                  colorwaySubtitle(c),
+                  renders
+                    ? 'its render bench holds at least one plate'
+                    : 'no plate stands on its render bench yet',
+                ]
+                  .filter(Boolean)
+                  .join(' — ')}
+                onClick={() => setColorwayId(id)}
+              >
+                <span className='flex items-center gap-1'>
+                  <Swatch hex={(c.devHex ?? '').trim()} size={11} />
+                  {colorwayLabel(c)}
+                  {renders ? ' ·' : ''}
+                </span>
+              </Chip>
+            );
+          })}
+        </ChipRow>
+      )}
+
+      {!loading && colorways.length === 0 ? (
+        /* НЕ ПУСТОЕ СОСТОЯНИЕ И НЕ ОШИБКА: работать можно, всё уезжает в безколорвейный верстак,
+           ровно как жило до оси. Строка называет, ГДЕ колорвеи заводят, и что будет без них. */
+        <Hint>
+          {emptyNote ??
+            'this card has no colourways — they are made on the colourways tab. Renders made here stay unattributed, which is a permanent, legal place for them.'}
+        </Hint>
+      ) : (
+        !loading &&
+        stated && <Hint>· marks a colourway whose render bench already holds a plate</Hint>
+      )}
+    </FieldRow>
+  );
+}

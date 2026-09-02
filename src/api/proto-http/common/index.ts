@@ -4476,6 +4476,11 @@ export type DesignRun = {
   // is empty forever — the text was never kept — so a screen that says «not dispatched yet» over
   // an old finished run is lying about history.
   prompt: string | undefined;
+  // OUTPUT-ONLY: which colourway this run was FOR — product(id), 0 = none. The server copies it
+  // from params.colorway_id at start (see there for the semantics per kind); it is a live column
+  // so the history can be sliced by colourway, while the frozen params remember forever what was
+  // asked even after the colourway itself is deleted (this echo then reads 0).
+  colorwayId: number | undefined;
 };
 
 // DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
@@ -4559,6 +4564,32 @@ export type DesignRunParams = {
   // содержание тех видов прогона, а не их настройка. Вектор сужается до своей единственной плиты
   // через fix_slot_ids.
   useFlatSlots: boolean | undefined;
+  // WHICH COLOURWAY THIS RUN IS FOR — product(id), the colourway object of the card (colourways
+  // ARE product rows since their domain merge). The owner's model, verbatim: «у фабрик рендера
+  // должно быть так 1 колорвей там должно быть мультивью которое мы генерим … и потом мы в 3д
+  // рендере уже выбираем колорвей который будем рендерить».
+  // MEANINGFUL ON render / recolor (the multiview being generated is THIS colourway's) and on
+  // threed (the build reads ONLY this colourway's render bench). REFUSED on flat / vector /
+  // pattern / draft_idea with `colorway_forbidden`: a flat is ONE markup for the whole card and
+  // has no colourway BY NATURE — not «not filled in yet». 0 = no colourway stated, which on a
+  // render keeps the legacy meaning (an unattributed render, exactly what every render made
+  // before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
+  // never a mixture of colourways.
+  // FROZEN LIKE EVERY OTHER PARAM: a rerun inherits it from the parent's params, so repeating a
+  // colourway-A render is a colourway-A render without restating it. An inherited colourway that
+  // has since been DELETED does not make the rerun impossible — the run rides unattributed while
+  // these params keep naming what was asked (the same pair the parent row itself ends up in).
+  // ⚠ NOTHING RECONCILES THIS FIELD WITH `colour` (RECORDED, NOT FIXED). A run may name colourway
+  // 7 (navy in the card's colourway list) and carry colour.hex = "#FF0000", and the server accepts
+  // it: the two are independent inputs, one an attribution and one a recipe. Migration 0356
+  // refuses to backfill old renders precisely because their recipe may match no colourway row —
+  // and going forward the axis now PERMITS that same divergence rather than closing it. Two honest
+  // exits exist and neither is taken here: derive the recipe from the named colourway on
+  // kind=render (making the attribution authoritative), or keep them independent and stop treating
+  // "recipe may not match a colourway" as a fact about legacy data only. The second is what the
+  // code does today; whoever revisits it should pick deliberately, because a wrong-coloured render
+  // filed under a colourway is indistinguishable from a right one after the fact.
+  colorwayId: number | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -4843,6 +4874,17 @@ export type DesignPicture = {
   // choice. A 3D frame has no slot to be put into (the bench refuses kind=threed), so without this
   // flag «this is the render we go with» had nowhere at all to be written down.
   selected: boolean | undefined;
+  // WHICH COLOURWAY this picture belongs to — product(id), 0 = none. The pair (kind, colorway_id)
+  // carries TWO different «none»s and a reader must not collapse them: on kind=flat (and pattern)
+  // 0 means the picture has no colourway BY NATURE — a flat is one markup for the whole card, and
+  // every write door refuses to give it one (`colorway_forbidden`). On kind=render|threed 0 means
+  // UNATTRIBUTED: the picture predates the colourway axis, was filed without naming one, or its
+  // colourway was deleted. Unattributed plates are legal forever — they form their own render
+  // bench and feed only a 3D run that itself names no colourway; they are never silently mixed
+  // into a named colourway's run.
+  // OUTPUT-ONLY here: a generated picture inherits the run's colourway, a crop and a flatten
+  // inherit their parent's, an upload states it on DesignUploadItem.
+  colorwayId: number | undefined;
 };
 
 // DesignAsset is ONE THING THIS CARD IS MADE OF that is not a picture of the garment: a cloth, a
@@ -4898,6 +4940,22 @@ export type DesignAsset = {
   createdBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // WHOSE FABRIC THIS IS — product(id) of the colourway wearing it, 0 = nobody's. The owner's
+  // model: a pattern is a seamless tile, a seamless tile is fabric, and a colourway wears «a
+  // colour OR a pattern». The colour half is NOT stored here — the colourway row already carries
+  // devHex / pantone / colorCode / swatch, and a second field would be a competing answer to a
+  // question that already has one. Only «colourway N wears asset X» needed a home.
+  // ⚠ OUTPUT-ONLY, AND WRITTEN BY EXACTLY ONE VERB: SetDesignAssetColorway. UpsertDesignAsset
+  // NEITHER CARRIES NOR CLEARS IT. That is deliberate and it is the whole reason the assignment
+  // does not live on Upsert: Upsert is a full replace, so a proto3 scalar there would arrive as 0
+  // from every client that predates this field — and from every unrelated save (a rename, a colour
+  // edit, «keep as cloth») — silently taking the fabric off the colourway. This codebase has paid
+  // for that trap twice already. An assignment therefore survives any edit to the asset.
+  // SINGLE-SELECT: one colourway wears one fabric. Assigning an asset to a colourway takes that
+  // colourway off every other asset of the card, in the same transaction.
+  // Reads 0 after the colourway is deleted (FK ON DELETE SET NULL): the asset stays a fabric of
+  // the card, just nobody's.
+  colorwayId: number | undefined;
 };
 
 // DesignAssetPlacement is ONE MARK ON ONE FLAT saying that a particular asset belongs THERE.
@@ -5010,6 +5068,16 @@ export type DesignBenchSlot = {
   // answers to «what is the front», with the second silently erasing the first. Uniqueness is
   // (tech_card_id, kind, exclusive_key).
   kind: string | undefined;
+  // WHOSE render bench this slot stands on — product(id) of the colourway, 0 = none. THE RENDER
+  // BENCH IS PER COLOURWAY (the owner: «1 колорвей там должно быть мультивью которое мы генерим +
+  // из его нарезаем сплитом стороны размеченные и на каждый колорвей так»): colourway A's front
+  // and colourway B's front are TWO slots, occupied simultaneously — the colourway is part of the
+  // slot's exclusivity key on the server, so they never collide.
+  // 0 on every flat slot (a flat bench has no colourway axis and a ref naming one is refused) and
+  // on the legacy render bench: slots born before this axis keep 0 and stay exactly the slots
+  // they were. The plate in a slot always carries the SAME colorway_id as the slot — a mismatch
+  // is refused at placement (`colorway_mismatch`).
+  colorwayId: number | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.

@@ -206,3 +206,131 @@ export function pictureRepresentation(
   if (kind === 'pattern') return 'pattern';
   return null;
 }
+
+/* ═══════════════════ THE COLOURWAY AXIS — the THIRD axis of the bench, said once ═══════════════
+ *
+ * L-2, the owner: «у фабрик-рендера 1 колорвей — там мультивью, из него сплитом стороны, и так на
+ * каждый колорвей». So colourway A's FRONT and colourway B's FRONT are two different render slots,
+ * occupied at the same time; the colourway is part of the slot's exclusivity key on the server.
+ *
+ * ⚠ IT LIVES HERE, BESIDE THE OTHER TWO, FOR THE REASON THIS FILE ALREADY EXISTS. The kind axis was
+ * spelled three times and MISSING from a fourth reader, and that missing copy shipped as two
+ * defects (L-1: every history picture filed onto the flat bench; L-5: a flat write echoing the
+ * render row's CAS token). A third axis spelled per organ would repeat that word for word — and it
+ * would repeat it on a bench where the two colliding rows are now `render/front@ROSSO` and
+ * `render/front@OLIVE`, i.e. two plates of the same kind, which is far harder to notice on screen
+ * than a line drawing standing where a colour render belongs.
+ *
+ * ═══ L-4 IS ENCODED HERE AND NOWHERE ELSE ══════════════════════════════════════════════════════
+ *
+ * «флэты — одна разметка»: the FLAT bench is one per card and takes no colourway. That is a
+ * BOUNDARY the owner wrote down separately so it would not be «finished off» by symmetry, and the
+ * server enforces it (a flat ref naming a colourway is refused `colorway_forbidden`). Encoding it
+ * as a predicate — `benchScopesColorway` — is what keeps a caller from filtering the flat bench by
+ * the picked colourway and making every drawing on the card disappear the moment somebody picks a
+ * colour. That failure would read exactly like data loss.
+ */
+
+/** «NOT STATED» on a ref and on the band filter; «none» on a stored row. One spelling of zero. */
+export const COLORWAY_NONE = 0;
+
+/**
+ * THE NAMED COLOURWAY-LESS BENCH, as `GetDesignBandRequest.bench_colorway_id` spells it.
+ *
+ * Declared for completeness of the vocabulary and DELIBERATELY NOT SENT by this bundle: the band
+ * read is unfiltered (one query key per card) and the scoping happens here, in `benchRowMatches`.
+ * See `use-design-band.ts` for the whole argument. It is written down so that the next reader of
+ * this file learns that `-1` is a real, legal value of the FILTER and never of a slot ref — a ref
+ * says 0 for the same bench.
+ */
+export const COLORWAY_BENCH_NONE = -1;
+
+/**
+ * THE COLOURWAY OF ANYTHING THAT CARRIES ONE — `product(id)`, 0 = none.
+ *
+ * ONE READER FOR SIX CARRIERS, and that is the point of putting it here: a bench slot, a slot ref,
+ * a picture, a run, an upload item and a shelf asset all spell the field the same way and all mean
+ * the same thing by it. Six per-organ parses is the shape L-5 already took once.
+ *
+ * Everything unusable answers 0, and the three unusable cases are genuinely one answer: an absent
+ * field (a binary older than the axis), an explicit null off the wire (`EmitUnpopulated`), and a
+ * negative number (which no stored row may carry — the server refuses it at every write door).
+ * They all mean «this thing is not attributed to a colourway», which is the legacy bench.
+ */
+export function colorwayOf(owner?: { colorwayId?: number | null } | null): number {
+  const id = owner?.colorwayId ?? COLORWAY_NONE;
+  return Number.isFinite(id) && id > 0 ? Math.trunc(id) : COLORWAY_NONE;
+}
+
+/**
+ * DOES THIS BENCH HAVE A COLOURWAY AXIS AT ALL? L-4, as a predicate.
+ *
+ * `flat` → no, and permanently: one drawing of the garment serves every colour, and a second copy
+ * of it per colourway would be N markups of one picture drifting apart in silence.
+ * Everything else → yes. `render` is what the owner named; an unknown bench from a newer server
+ * answers yes too, because the alternative — silently unscoping a bench this bundle has not heard
+ * of — is the L-1 defect wearing the third axis.
+ */
+export function benchScopesColorway(kind: string): boolean {
+  return kind !== 'flat';
+}
+
+/**
+ * ═══ THE ONE MATCH: does this stored row stand on the bench I am addressing? ═══════════════════
+ *
+ * BOTH halves, kind AND colourway, in ONE place. Every reader of the bench goes through this —
+ * `benchSides` (the generative screens), `readBench`/`findSlot` (the flat studio, the tile picker,
+ * the history's unmark). A second parse of a slot's colourway anywhere else is forbidden, and the
+ * review of this wave is obliged to catch one: it would be the fourth copy that L-5 already cost.
+ */
+export function benchRowMatches(
+  row: common_DesignBenchSlot | null | undefined,
+  kind: string,
+  colorwayId: number,
+): boolean {
+  if (!row) return false;
+  if (benchKindOf(row) !== kind) return false;
+  if (!benchScopesColorway(kind)) return true;
+  return colorwayOf(row) === colorwayOf({ colorwayId });
+}
+
+/**
+ * THE COLOURWAY HALF OF A SLOT REF, given the bench it addresses.
+ *
+ * A writer states its bench (`kind`) and the colourway currently picked; this returns what may
+ * legally travel. On the flat bench that is ALWAYS 0 — not because we are being careful, but
+ * because a positive value there is REFUSED (`colorway_forbidden`) rather than dropped, so a
+ * caller that forwarded the picked colourway into a flat write would break the flat studio the
+ * first time anybody chose a colour.
+ *
+ * 0 ON A RENDER REF IS NOT AN ABSENCE EITHER: it addresses the unattributed bench, which is where
+ * every render made before this axis stands, and it stays permanently legal.
+ */
+export function refColorwayFor(kind: string | undefined, colorwayId: number): number {
+  return benchScopesColorway(benchKindOf({ kind } as DesignBenchSlotRef))
+    ? colorwayOf({ colorwayId })
+    : COLORWAY_NONE;
+}
+
+/**
+ * IS THIS COLOURWAY'S RENDER BENCH OCCUPIED — the 3D door, read off the server's own set.
+ *
+ * ⚠ NOT `has_fabric_render`, AND THE CONTRACT NOW SAYS SO IN CAPITALS. That flag counts PICTURES
+ * on the card; this set counts OCCUPIED SLOTS, and the two legitimately disagree — a render that
+ * was uploaded but never placed on a side sets the flag true and leaves the set empty, and a
+ * client following the old rule opens the button straight into a `no_fabric_render` refusal.
+ *
+ * `undefined` IS NOT «EMPTY», and that distinction is the same one `has_fabric_render` already
+ * carries: a binary older than the field answers without it, and reading its silence as «no bench
+ * is occupied» would lock 3D on every card that server serves. Absence answers `true` here — say
+ * nothing and let the server refuse if it must.
+ */
+export function renderBenchOccupied(
+  renderBenchColorwayIds: number[] | undefined,
+  colorwayId: number,
+): boolean {
+  if (!renderBenchColorwayIds) return true;
+  return renderBenchColorwayIds.some(
+    (id) => colorwayOf({ colorwayId: id }) === colorwayOf({ colorwayId }),
+  );
+}

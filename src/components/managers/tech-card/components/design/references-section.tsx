@@ -660,7 +660,9 @@ export function ReferencesSection({
           writeRef(target.mediaId, DETAIL_VIEW, comment);
           setBenchSlot.mutate(
             {
-              slot: { viewKey: DETAIL_VIEW, kind: 'flat' },
+              // Деталь — строка ФЛЭТОВОГО верстака, а у него колорвея нет (L-4): положительное
+              // значение здесь сервер отвергает, а не проглатывает.
+              slot: { viewKey: DETAIL_VIEW, kind: 'flat', colorwayId: 0 },
               pictureId: 0,
               expectedSlotRev: 0,
               newDetailName: name,

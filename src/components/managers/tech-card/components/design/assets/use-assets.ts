@@ -111,6 +111,35 @@ export function useAssetWrites(techCardId: number) {
     onError,
   });
 
+  /**
+   * ═══ «ТКАНЬ КОЛОРВЕЯ N — ЭТОТ АССЕТ» — СВОЙ ГЛАГОЛ, А НЕ ПОЛЕ В UPSERT (G-15) ═══════════════
+   *
+   * Довод контракта, дословно и он же довод этого шва: `UpsertDesignAsset` — ПОЛНАЯ ЗАМЕНА, и
+   * proto3-скаляр в нём приезжал бы нулём от любого клиента старше поля И ОТ ЛЮБОГО постороннего
+   * сохранения — переименования, правки цвета, «keep as cloth», — молча снимая ткань с колорвея.
+   * Этот репозиторий за такую ловушку платил уже дважды (`materialId`, `normMarkerId` в рецепте
+   * колорвея). SET-список Upsert'а колонку не называет вовсе, поэтому назначение переживает любую
+   * правку ассета — и ровно поэтому мутация здесь ОТДЕЛЬНАЯ, а не поле в `upsertAsset` выше.
+   *
+   * `colorwayId: 0` — ЭТО СНЯТИЕ, И ЭТО ОТВЕТ, А НЕ ПРОПУСК: «колорвей носит свой собственный
+   * цвет». Отрицательное значение сервер отвергает (InvalidArgument), поэтому клиент его не шлёт.
+   *
+   * SINGLE-SELECT ИСПОЛНЯЕТ СЕРВЕР, В ОДНОЙ ТРАНЗАКЦИИ: назначить X на N значит снять N со всех
+   * прочих ассетов карточки. Клиент это НЕ имитирует и не шлёт второго вызова — «сними, потом
+   * назначь» дало бы окно, в котором у колорвея нет ткани, и второй вызов мог бы не доехать.
+   * Инвалидация та же, что у всех: полка перечитывается вместе с полосой.
+   */
+  const setAssetColorway = useMutation({
+    mutationFn: (input: { assetId: number; colorwayId: number }) =>
+      adminService.SetDesignAssetColorway({
+        techCardId,
+        assetId: input.assetId,
+        colorwayId: Math.max(0, Math.trunc(input.colorwayId || 0)),
+      }),
+    onSuccess: invalidate,
+    onError,
+  });
+
   /** Снятие метки называет карточку по тому же доводу; у самой метки своего tech_card_id нет. */
   const deletePlacement = useMutation({
     mutationFn: (placementId: number) =>
@@ -120,7 +149,7 @@ export function useAssetWrites(techCardId: number) {
   });
 
   return useMemo(
-    () => ({ upsertAsset, deleteAsset, setPlacement, deletePlacement, invalidate }),
-    [upsertAsset, deleteAsset, setPlacement, deletePlacement, invalidate],
+    () => ({ upsertAsset, deleteAsset, setAssetColorway, setPlacement, deletePlacement, invalidate }),
+    [upsertAsset, deleteAsset, setAssetColorway, setPlacement, deletePlacement, invalidate],
   );
 }

@@ -157,7 +157,11 @@ export function useSplitToInput({
     setRegistering(mediaId);
     registerUpload.mutate(
       // `ghostView: ''` — у исходника-склейки одного вида нет; `kind: ''` читается сервером как flat.
-      { clientRequestId: keep.requestId, items: [{ mediaId, ghostView: '', kind: '' }] },
+      // `kind: ''` читается сервером как flat, а у флэта колорвея нет по существу (L-4) — ноль
+      // здесь единственное принимаемое значение. Колорвей самих КАДРОВ разреза клиент не заявляет
+      // вовсе: `SplitPicture` наследует его от родителя на сервере, и второе мнение о нём отсюда
+      // было бы догадкой о картинке, которую мы ещё не видели.
+      { clientRequestId: keep.requestId, items: [{ mediaId, ghostView: '', kind: '', colorwayId: 0 }] },
       {
         onSuccess: (data) => {
           setRegistering(null);

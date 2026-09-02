@@ -107,7 +107,9 @@ export function NewDetailModal({
         // `view_key: 'detail'` MINTS. `expected_slot_rev` must be 0 — the row does not exist yet.
         // `kind` names WHICH BENCH and is left empty, which the contract fixes as the flat one —
         // this modal is reached from a flat tile's picker and knows of no second bench.
-        slot: { viewKey: 'detail', kind: undefined },
+        // `colorway_id: 0` FOR THE SAME REASON, ONE AXIS LATER (L-4): details are the FLAT bench's
+        // alone, and a flat ref naming a colourway is REFUSED (`colorway_forbidden`), not zeroed.
+        slot: { viewKey: 'detail', kind: undefined, colorwayId: 0 },
         pictureId: picture?.id ?? 0,
         expectedSlotRev: 0,
         newDetailName: named,

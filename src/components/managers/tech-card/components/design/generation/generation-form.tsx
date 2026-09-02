@@ -225,6 +225,12 @@ export function GenerationForm({
       views: [...ticked],
       detailSlotIds: [...tickedDetailIds],
       layout,
+      // ═══ У ФЛЭТА КОЛОРВЕЯ НЕТ ПО СУЩЕСТВУ, И ЭТО ОТКАЗ СЕРВЕРА, А НЕ НАША СКРОМНОСТЬ (L-4) ══
+      // `params.colorway_id` осмыслен на render / recolor / threed и ОТВЕРГАЕТСЯ на flat, vector,
+      // pattern и draft_idea токеном `colorway_forbidden`. Эта форма запускает ровно флэтовые и
+      // векторные прогоны, поэтому ноль здесь — не «ещё не выбрано», а единственное принимаемое
+      // значение: чертёж изделия один на все цвета, и прогон, который его рисует, — тоже.
+      colorwayId: 0,
       colour: undefined,
       threed: undefined,
       // THE FIX FIELDS — SCALAR AND ARRAYS ALIKE — STAY EMPTY ON EVERY RUN THIS FORM STARTS. The

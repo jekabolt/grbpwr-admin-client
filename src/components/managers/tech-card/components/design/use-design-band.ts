@@ -77,6 +77,14 @@ const EMPTY_BAND: GetDesignBandResponse = {
   // card for the duration of its first read, worded as «this card owns no fabric render» when the
   // truth is «nobody has been asked». Absence is read as «not stated» by every consumer of it.
   hasFabricRender: undefined,
+  // `undefined`, AND NOT `[]`, BY THE SAME RULE AND FOR A SHARPER REASON. This set is now the 3D
+  // DOOR (L-3): a client reads «is my colourway's render bench occupied» off it. An empty list is
+  // a claim — «no bench on this card holds a plate» — and on a rolled-back binary, or during the
+  // first read, it is a claim nobody made: it would draw 3D shut on every card of that contour with
+  // a sentence naming a colourway, which is a lie with a proper noun in it. Absence is read as «not
+  // stated» by `renderBenchOccupied`, which then answers «occupied» and lets the SERVER refuse if
+  // it must — the same posture `hasFabricRender` above takes.
+  renderBenchColorwayIds: undefined,
 };
 
 export type DesignBandState = {
@@ -100,7 +108,36 @@ export type DesignBandState = {
 function bandQuery(techCardId: number) {
   return {
     queryKey: designKeys.band(techCardId),
-    queryFn: () => adminService.GetDesignBand({ techCardId }),
+    queryFn: () =>
+      adminService.GetDesignBand({
+        techCardId,
+        /**
+         * ═══ THE BENCH IS READ WHOLE, AND SCOPED ON THE CLIENT (L-2, D6) ═════════════════════
+         *
+         * `bench_colorway_id` has THREE outcomes and 0 is «NOT STATED», i.e. the WHOLE bench —
+         * byte for byte what every client before this axis sent. That is what travels here, and
+         * the picked colourway narrows the rows in `benchRowMatches` instead.
+         *
+         * WHY NOT FILTER ON THE SERVER, WHICH IT CAN DO (`-1` for the colourway-less bench, a
+         * product id for a named one). Because this message is not the bench: it is the bench PLUS
+         * the budget, the references, the layers, the shelves, the aggregates and the first page of
+         * the merged feed — and the filter narrows `bench` ONLY, by the contract's own words. A
+         * per-colourway argument would therefore mint one CACHE ENTRY PER COLOURWAY of the same
+         * card, each holding its own copy of a feed that is identical in all of them, and every
+         * write on the card would have to invalidate all of them or leave the others stale. One
+         * key per card is the guarantee this seam was built for: «the bench and the feed on screen
+         * are the same instant of the card».
+         *
+         * IT ALSO KEEPS COLOURWAY SWITCHING FREE. The rows are already in hand, so picking a
+         * colour redraws without a round trip — and `render_bench_colorway_ids`, which the picker
+         * draws its presence dots from, is whole-card regardless of this argument.
+         *
+         * THE COST IS NAMED AND PAID IN ONE PLACE: every reader of the render bench must match the
+         * TRIPLE (view, kind, colourway). That is `benchRowMatches` in `./bench-kinds`, and a
+         * second parse of a slot's colourway anywhere else is the L-5 defect with a new axis.
+         */
+        benchColorwayId: 0,
+      }),
   };
 }
 

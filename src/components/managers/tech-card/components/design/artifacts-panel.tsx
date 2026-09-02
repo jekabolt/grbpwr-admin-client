@@ -1522,6 +1522,12 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     batchId: undefined,
     ordinal: undefined,
     kind: undefined,
+    // КОЛОРВЕЙ — ТОЖЕ `undefined`, ПО ПРАВИЛУ ЭТОЙ ЖЕ ШАПКИ: ни одно поле не выдумывается. `0` на
+    // проводе означало бы «не атрибутирован» — УТВЕРЖДЕНИЕ о картинке, которой в полосе нет вовсе;
+    // мы же не знаем о ней ничего, кроме того, что её файл лежит в медиа карточки. `undefined` —
+    // «эта подделка про колорвей не говорит», и `colorwayOf` читает его нулём там, где ответ
+    // всё-таки нужен, не превращая молчание в запись.
+    colorwayId: undefined,
     ghostView: undefined,
     compositeViews: undefined,
     derivedFrom: undefined,

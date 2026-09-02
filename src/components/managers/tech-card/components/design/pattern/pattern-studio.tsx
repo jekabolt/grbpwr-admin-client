@@ -1,9 +1,12 @@
-import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_AdminColorwayRef,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
@@ -13,47 +16,55 @@ import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { isRunLive, useElapsed } from '../generation';
 import { budgetLine } from '../render';
-import { ClothSource } from './cloth-source';
-import {
-  REPEAT_MAX,
-  normaliseRepeat,
-  patternOutputs,
-  patternRuns,
-  refusalAdvice,
-} from './model';
+import { REPEAT_MAX, normaliseRepeat, patternOutputs, patternRuns, refusalAdvice } from './model';
 import { PatternInput } from './pattern-input';
+import { PatternLibrary } from './pattern-library';
 import { PatternOutputs } from './pattern-outputs';
-import { SPANS, ScaleStrip } from './tile-preview';
 import { useStartDesignRun } from '../render/use-design-run';
 
 /**
- * ═══ ВКЛАДКА PATTERN — ВЕСЬ ВИД `pattern` ПОЛОСЫ DESIGN (K-13) ════════════════════════════════
+ * ═══ ВКЛАДКА PATTERN — ТРИ АКТА ВМЕСТО ЧЕТЫРЁХ СЕКЦИЙ С ПРОЗОЙ (G-15) ════════════════════════
  *
- * Владелец: «между вкладкой FLAT — SHEET и FABRIC RENDER сделать одну вкладку паттерн криейшен
- * где можно заапдоудить картинку и где мы через gpt image 2 сделаем из нее повторяемый паттерн».
+ * Владелец: «переделай юай создания паттернов сделай его максимально простым сейчас там хуй пойми
+ * что используй импакбл».
  *
- * ЧЕТЫРЕ БЛОКА, И ПОРЯДОК — ЭТО ДОВОД, тот же, что у двух соседних генеративных экранов: сначала
- * ИЗ ЧЕГО (одна картинка), потом ЧТО ПРОСИМ (раппорт и кнопка), потом ЧТО ПОЛУЧИЛОСЬ (плитки и
- * суд над ними), и в конце — КУДА ЭТО ВЕДЁТ (полка ткани и ответ «заполнять ли CLOTH»).
+ * ЧТО ИМЕННО БЫЛО НЕПОНЯТНО — ЗАМЕР, А НЕ ВПЕЧАТЛЕНИЕ. Экран стоял ЧЕТЫРЬМЯ белыми блоками:
+ *   1. INPUT — слот и чипы полки;
+ *   2. GENERATION — раппорт, ВТОРАЯ линейка «at this size» с четырьмя чипами пролётов, блок «what
+ *      the model gets» из двух фактов и кнопка;
+ *   3. TILES — сцена, суд, KEEP, и две пометки с абзацем, объясняющим их разницу;
+ *   4. CLOTH SOURCE — мета-блок, объясняющий, что произойдёт на ДРУГОЙ вкладке.
+ * На сером грунте четыре блока читаются как четыре равновесных заявления, из которых три — про
+ * одно действие; PRODUCT.md называет это своим анти-референсом дословно: «wizard-style
+ * over-explained flows. These are expert users; don't pad the path».
+ *
+ * ТРИ АКТА, И КАЖДЫЙ — ОТДЕЛЬНЫЙ ВОПРОС, А НЕ ОТДЕЛЬНЫЙ ШАГ МАСТЕРА:
+ *   · СДЕЛАТЬ — одна картинка внутрь, раппорт, кнопка. Один блок, три ruled-ряда;
+ *   · СУДИТЬ — 3×3, линейка в раппорте ПРОГОНА, вердикт шва, KEEP;
+ *   · ХРАНИТЬ И ОТДАВАТЬ — библиотека паттернов карточки, где плитка получает имя и КОЛОРВЕЯ.
+ *
+ * ЧТО СНЕСЕНО И ПОЧЕМУ ИМЕННО ЭТО:
+ *   · СЕКЦИЯ `CLOTH SOURCE` целиком (`cloth-source.tsx`). Она объясняла СОСТОЯНИЕ ПОЛКИ словами
+ *     («две ткани, и они не альтернативы…»), потому что связи «этот паттерн — ткань этого цвета»
+ *     негде было ни записать, ни показать. Теперь связь ЕСТЬ (`SetDesignAssetColorway`), и её
+ *     показывает третий акт строкой «worn by ROSSO». Объяснение, заменённое фактом, — это уже не
+ *     объяснение, а второе мнение.
+ *   · ПРЕ-ГЕНЕРАЦИОННАЯ ЛИНЕЙКА «at this size» с чипами пролётов. Двойник линейки сцены,
+ *     отвечавший на вопрос («того ли размера плитка»), который решается ПОСЛЕ получения плитки, по
+ *     настоящему изображению, а не по исходнику. Два органа с одним именем на одном экране — то,
+ *     что заставляет искать между ними разницу.
+ *   · БЛОК «what the model gets». Двух фактов (медиа и раппорт), и оба стоят в подписи у самой
+ *     кнопки, в двух шагах от денег.
  *
  * ═══ ЧЕГО ЗДЕСЬ НЕТ НАМЕРЕННО: ПРИМЕРКИ ПАТТЕРНА НА ИЗДЕЛИЕ (K-14) ═══════════════════════════
  *
- * Владелец, дословно: «на вкладке паттерны можно генерить паттерны а давай разметка уже будет в
- * разделе рендерс». Двумя пунктами раньше (K-13) он же просил «взять какой нибудь флет из
- * выбранных или даже все обрезать там белый фон и прикинуть размер этого паттерна» — и это НЕ
- * противоречие, а два разных жеста, которые легко спутать:
- *
- *   · ПРИКИНУТЬ РАЗМЕР — вопрос к ЧИСЛУ раппорта, и он решается здесь, линейкой (`ScaleStrip`).
- *   · ПОЛОЖИТЬ ПАТТЕРН НА СИЛУЭТ — вопрос к ИЗДЕЛИЮ: где какая ткань, под каким углом, с каким
- *     смещением. Это разметка, и K-14 увёл её в RENDERS.
- *
- * И ЕСТЬ ТРЕТЬЯ ПРИЧИНА, ТЕХНИЧЕСКАЯ, КОТОРАЯ ЗАКРЫВАЕТ ВОПРОС ОКОНЧАТЕЛЬНО: чтобы нарисовать
- * плитку НА ФЛЭТЕ в верном масштабе, надо знать РОСТ ИЗДЕЛИЯ В МИЛЛИМЕТРАХ. Карточка его не
- * называет — технический чертёж не несёт масштаба вовсе, а `tech_card_size` меряет обхваты, а не
- * высоту картинки. Значит любая «примерка на флэт» здесь была бы нарисована по ВЫДУМАННОМУ росту,
- * и человек мерил бы паттерн по нашей выдумке, считая, что мерит по своему изделию. Названный
- * отрезок ткани («500 мм — половина обхвата груди») — то же сравнение с честно объявленным
- * допущением. Что для настоящей примерки должен сделать RENDERS — в отчёте волны, списком.
+ * Владелец: «на вкладке паттерны можно генерить паттерны а давай разметка уже будет в разделе
+ * рендерс». Двумя пунктами раньше (K-13) он же просил «прикинуть размер этого паттерна» — и это НЕ
+ * противоречие, а два жеста: ПРИКИНУТЬ РАЗМЕР решается линейкой второго акта, ПОЛОЖИТЬ НА СИЛУЭТ
+ * — это разметка, и K-14 увёл её в RENDERS. Третья причина, техническая: чтобы нарисовать плитку
+ * НА ФЛЭТЕ в верном масштабе, нужен РОСТ ИЗДЕЛИЯ В МИЛЛИМЕТРАХ, а карточка его не называет вовсе
+ * (`tech_card_size` меряет обхваты). Любая «примерка на флэт» здесь была бы нарисована по
+ * выдуманному росту.
  */
 
 /** Быстрые раппорты. Не «размеры», а ЧЕТЫРЕ УЗНАВАЕМЫХ МАСШТАБА, от мелкого до плащёвого. */
@@ -64,14 +75,32 @@ const QUICK: { mm: number; what: string }[] = [
   { mm: 300, what: 'a placement-scale repeat' },
 ];
 
+/** Что число значит глазу — одной фразой у самого поля, вместо линейки-двойника. */
+function scaleWords(mm: number): string {
+  if (mm <= 0) return 'no scale stated — the model chooses the density itself';
+  const exact = QUICK.find((q) => q.mm === mm);
+  if (exact) return exact.what;
+  if (mm < 40) return 'a fine all-over print';
+  if (mm < 90) return 'a shirting check';
+  if (mm < 200) return 'a coat-scale motif';
+  return 'a placement-scale repeat';
+}
+
 export function PatternStudio({
   band,
   techCardId,
   disabled,
+  colorways,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /**
+   * Колорвеи карточки — для третьего акта. Приходят СВЕРХУ, из общего состояния студии, а не
+   * читаются здесь вторым запросом: два чтения одной карточки расходятся ровно тем, чем расходятся
+   * два кэша.
+   */
+  colorways?: common_AdminColorwayRef[];
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
   const run = useStartDesignRun(techCardId);
@@ -79,12 +108,9 @@ export function PatternStudio({
   /** Черновик раппорта живёт СТРОКОЙ: половина набранного числа («12» на пути к «120») не должна
    *  превращаться в 12 на проводе, а пустое поле — в 0, пока человек ещё печатает. */
   const [repeatText, setRepeatText] = useState('120');
-  const [spanMm, setSpanMm] = useState(SPANS[1].mm);
 
   const repeat = normaliseRepeat(repeatText);
   const sourceId = source?.id ?? 0;
-  const sourceUrl =
-    source?.media?.fullSize?.mediaUrl || source?.media?.thumbnail?.mediaUrl || '';
 
   const outputs = useMemo(() => patternOutputs(band), [band]);
   const live = useMemo(() => patternRuns(band).filter(isRunLive), [band]);
@@ -108,20 +134,24 @@ export function PatternStudio({
 
   return (
     <>
-      <PatternInput
-        band={band}
-        source={source}
-        onPick={setSource}
-        onClear={() => setSource(null)}
-        disabled={disabled}
-      />
-
+      {/* ═══════════════════ АКТ 1 — СДЕЛАТЬ ПЛИТКУ ═══════════════════ */}
       <Section
-        title='generation — repeating tile'
-        question='— how large one tile lies on the finished cloth'
+        title='make a tile'
+        question='— one picture in, a repeating fabric out; how large one tile lies on the finished cloth'
       >
+        <PatternInput
+          band={band}
+          source={source}
+          onPick={setSource}
+          onClear={() => setSource(null)}
+          disabled={disabled}
+        />
+
         {/* ─── РАППОРТ: ЧИСЛО, БЫСТРЫЕ ЗНАЧЕНИЯ И ТО, ЧТО ЭТО ЗНАЧИТ ГЛАЗУ ─────────────────── */}
-        <div className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'>
+        <div
+          data-pattern-act='repeat'
+          className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+        >
           <Text
             size='micro'
             variant='label'
@@ -174,88 +204,22 @@ export function PatternStudio({
               not stated
             </Chip>
           </ChipRow>
-          <Text size='micro' variant='label' component='span' className='min-w-0 normal-case'>
-            whole millimetres of finished cloth per tile, up to {REPEAT_MAX}. The model is told the
-            scale in words; it never receives a pixel size.
-          </Text>
-        </div>
-
-        {/* ─── ЧТО ЭТО ЧИСЛО ЗНАЧИТ — ЛИНЕЙКОЙ, А НЕ НА СЛОВАХ ─────────────────────────────
-            Полос на вкладке ДВЕ — эта (о числе, которое сейчас набирают) и та, что на сцене
-            результата (о числе, при котором плитка уже сделана). Они отвечают на разные вопросы и
-            обязаны быть различимы снаружи: без метки замер «полоса нарисована» брал бы первую
-            попавшуюся и зеленел бы у сломанной. */}
-        <div data-probe='menu-scale'>
-          <GroupLabel
-            action={
-              <ChipRow>
-                {SPANS.map((s) => (
-                  <Chip
-                    key={s.mm}
-                    nonForm
-                    selected={spanMm === s.mm}
-                    pressed={spanMm === s.mm}
-                    onClick={() => setSpanMm(s.mm)}
-                    title={`lay it across ${s.label} of cloth — ${s.what}`}
-                  >
-                    {s.label}
-                  </Chip>
-                ))}
-              </ChipRow>
-            }
-          >
-            at this size
-          </GroupLabel>
-          <ScaleStrip url={sourceUrl} repeatMm={repeat} spanMm={spanMm} />
-          <Text
-            size='nano'
-            variant='label'
-            component='p'
-            data-probe='scale-note'
-            className='normal-case'
-          >
-            {!sourceUrl ? (
-              <>Attach a picture above and it is laid out here at the repeat you type.</>
-            ) : repeat > 0 ? (
-              <>
-                Your source picture laid across {spanMm} mm of cloth —{' '}
-                <b>{(spanMm / repeat).toFixed(1)} tiles</b> ({SPANS.find((s) => s.mm === spanMm)?.what}
-                ). This is the <b>scale</b> the run is asked for, not a preview of the answer: what
-                the model draws inside the tile is its own. The strip and the rule share one scale,
-                so the count is true; neither is life-size on your screen.
-              </>
-            ) : (
-              <>
-                No repeat stated, so there is no scale to draw. That is legal — the model then
-                chooses the density — but nothing on the card will record how large this tile was
-                meant to lie, and the shelf will carry no repeat either.
-              </>
-            )}
-          </Text>
-        </div>
-
-        {/* ─── ЧТО УЕЗЖАЕТ. ПОЛНОСТЬЮ, ЗДЕСЬ, БЕЗ МОДАЛКИ ──────────────────────────────────
-            У двух соседних экранов инвентарь промпта — отдельная панель, потому что там уезжают
-            плиты верстака, референсы, посадка, рецепт цвета и абзацы владельца. Здесь уезжают ДВА
-            факта. Список из двух строк, спрятанный за дверью, — это дверь, за которой человек уже
-            знает, что найдёт; а деньги он тратит прямо под ней. */}
-        <div className='border-b border-hairline pb-1'>
-          <GroupLabel flush>what the model gets</GroupLabel>
+          {/* ЧИСЛО НЕ ОСТАЁТСЯ НЕМЫМ, И ЭТО ЗАМЕНА СНЕСЁННОЙ ЛИНЕЙКЕ-ДВОЙНИКУ: одна фраза говорит,
+              что 120 мм — это плащёвый мотив, а не «просто число миллиметров». Полный ответ на «того
+              ли размера» даёт линейка ВТОРОГО акта, где есть настоящая плитка. */}
           <Text
             size='micro'
             variant='label'
-            component='p'
-            data-probe='payload'
-            className='normal-case'
+            component='span'
+            data-repeat-words
+            className='min-w-0 normal-case'
           >
-            {sourceId ? `one picture — media ${sourceId}` : 'one picture — none attached yet'} ·{' '}
-            {repeat > 0 ? `the scale «one tile covers ${repeat} mm of cloth»` : 'no scale stated'}.
-            Nothing else from this card travels: not the bench, not the references, not the
-            garment description. A tile is made out of a picture, and the card has no say in it.
+            {scaleWords(repeat)} · whole millimetres of finished cloth per tile, up to {REPEAT_MAX}.
+            The model is told the scale in words; it never receives a pixel size.
           </Text>
         </div>
 
-        {/* ─── ДВЕРЬ ─────────────────────────────────────────────────────────────────────── */}
+        {/* ─── ДВЕРЬ. ИНВЕНТАРЬ — ЭТО ЕЁ ПОДПИСЬ, БЛОКА БОЛЬШЕ НЕТ ────────────────────────── */}
         <div className='flex flex-wrap items-center gap-2 pt-1'>
           {frozen ? (
             <InertDoor label='generate' reason={frozen} />
@@ -273,6 +237,13 @@ export function PatternStudio({
                     // список — утверждение «этот прогон не просит ни одной стороны», и сервер
                     // сверяет его длину.
                     views: [],
+                    // ═══ И КОЛОРВЕЯ У ПЛИТКИ НЕТ — ПРОГОН ЕГО ОТВЕРГАЕТ (G-15) ═══════════════
+                    // `params.colorway_id` осмыслен на render / recolor / threed и отвергается на
+                    // pattern токеном `colorway_forbidden`. Это не пробел контракта: плитка
+                    // делается ОДИН РАЗ и живёт тканью КАРТОЧКИ; чей она цвет — вопрос не к
+                    // прогону, а к назначению (`SetDesignAssetColorway`), и задаётся он в третьем
+                    // акте ниже, над сохранённым ассетом, а не над платной генерацией.
+                    colorwayId: 0,
                     layout: '',
                     colour: undefined,
                     threed: undefined,
@@ -295,9 +266,21 @@ export function PatternStudio({
               GENERATE
             </Button>
           )}
-          <Text size='micro' variant='label' component='span' className='min-w-0'>
-            1 picture · 1 tile{repeat > 0 ? ` · ${repeat} mm` : ''} · priced by the server when the
-            run starts
+          {/* ИНВЕНТАРЬ ПРОМПТА, ОДНОЙ СТРОКОЙ И ДОСЛОВНО. У двух соседних экранов он — панель,
+              потому что там уезжают плиты верстака, референсы, посадка и рецепт цвета. Здесь
+              уезжают ДВА факта, и список из двух строк за дверью — это дверь, за которой человек
+              уже знает, что найдёт, притом что деньги он тратит прямо под ней. */}
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            data-probe='payload'
+            className='min-w-0 normal-case'
+          >
+            {sourceId ? `one picture — media ${sourceId}` : 'one picture — none attached yet'} ·{' '}
+            {repeat > 0 ? `one tile covers ${repeat} mm of cloth` : 'no scale stated'} · priced by
+            the server when the run starts. Nothing else from this card travels: not the bench, not
+            the references, not the garment description.
           </Text>
           {ceilingReached && (
             <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
@@ -358,27 +341,32 @@ export function PatternStudio({
         )}
       </Section>
 
-      {outputs.length === 0 && live.length === 0 && (
-        <Section title='tiles of this card' question='— nothing yet'>
+      {/* ═══════════════════ АКТ 2 — СУДИТЬ ═══════════════════ */}
+      {outputs.length === 0 && live.length === 0 ? (
+        <Section title='tiles' question='— nothing has come back yet'>
           <Text size='micro' variant='label' component='p' className='normal-case'>
-            No tile has been made on this card. A tile is one picture made to repeat: attach a
-            swatch, a scan or a drawn motif above, say how large one tile should lie on the cloth,
-            and press GENERATE. What comes back is judged here on a 3×3 preview — a single square
-            of cloth looks right every time, and nine of them do not.
+            A tile is one picture made to repeat. What comes back is judged here on a 3×3 preview: a
+            single square of cloth looks right every time, and nine of them do not.
           </Text>
         </Section>
+      ) : (
+        <PatternOutputs band={band} techCardId={techCardId} disabled={disabled} />
       )}
 
-      <PatternOutputs band={band} techCardId={techCardId} disabled={disabled} />
-
-      <ClothSource band={band} />
+      {/* ═══════════════════ АКТ 3 — ХРАНИТЬ И ОТДАТЬ КОЛОРВЕЮ ═══════════════════ */}
+      <PatternLibrary
+        band={band}
+        techCardId={techCardId}
+        colorways={colorways ?? []}
+        disabled={disabled}
+      />
     </>
   );
 }
 
 /**
  * Строка живого прогона. Отдельным компонентом РАДИ ХУКА: `useElapsed` тикает раз в секунду, и
- * вызванный в теле студии он перерисовывал бы вместе с собой всю вкладку, включая две сцены с
+ * вызванный в теле студии он перерисовывал бы вместе с собой всю вкладку, включая сцену с
  * фоновыми плитками. Здесь он перерисовывает одну строку.
  */
 function LiveLine({ startedAt, count }: { startedAt?: string | null; count: number }): JSX.Element {

@@ -17,7 +17,13 @@
 export { PatternStudio } from './pattern-studio';
 export { PatternInput } from './pattern-input';
 export { PatternOutputs } from './pattern-outputs';
-export { ClothSource } from './cloth-source';
+/* `ClothSource` СНЕСЁН ВМЕСТЕ СО СВОИМ ФАЙЛОМ (G-15). Он объяснял СЛОВАМИ, какой из двух
+   источников ткани сейчас действует, потому что связи «этот паттерн — ткань этого цвета» негде
+   было записать: на проводе стоял один `params.colour`, а полка была общей кучей. Связь теперь
+   существует (`SetDesignAssetColorway`) и ПОКАЗЫВАЕТСЯ — строкой «worn by ROSSO» в библиотеке
+   паттернов и рядом `fabric of` в палитре рендера. Объяснение, заменённое фактом, перестаёт быть
+   объяснением и становится вторым мнением. */
+export { PatternLibrary } from './pattern-library';
 export { ScaleStrip, SPANS, TileGrid } from './tile-preview';
 /* `useStartPatternRun` ЖИЛ ЗДЕСЬ НЕДЕЛЮ И СНЕСЁН. Он минтил СВОЙ ключ идемпотентности по СВОЕМУ
    отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
@@ -30,7 +36,6 @@ export {
   SEAM_CODE,
   SEAM_WORDS,
   assetOfMedia,
-  fabricAssets,
   nextPatternName,
   normaliseRepeat,
   patternAssets,

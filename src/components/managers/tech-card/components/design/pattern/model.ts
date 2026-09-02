@@ -198,11 +198,6 @@ export function patternAssets(band: GetDesignBandResponse): common_DesignAsset[]
   return (band.assets ?? []).filter((a) => shelfOf(a.kind ?? '') === ASSET_PATTERN);
 }
 
-/** Ткани карточки, НЕ считая паттернов, — вторая половина ответа «какой источник действует». */
-export function fabricAssets(band: GetDesignBandResponse): common_DesignAsset[] {
-  return (band.assets ?? []).filter((a) => shelfOf(a.kind ?? '') !== ASSET_PATTERN);
-}
-
 /** Эта плитка уже лежит на полке? Ищем по медиа: ассет держит `media_id`, а не `picture_id`. */
 export function assetOfMedia(
   band: GetDesignBandResponse,

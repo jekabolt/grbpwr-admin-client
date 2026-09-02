@@ -16,13 +16,19 @@ export function FieldRow({
   label,
   children,
   className,
+  ...rest
 }: {
   label: string;
   children: React.ReactNode;
   className?: string;
+  /** `data-*` for probes and nothing else: this row owns no behaviour worth a prop. */
+  [k: `data-${string}`]: unknown;
 }): JSX.Element {
   return (
-    <div className={cn('flex flex-wrap items-center gap-2 border-b border-hairline py-1', className)}>
+    <div
+      {...rest}
+      className={cn('flex flex-wrap items-center gap-2 border-b border-hairline py-1', className)}
+    >
       <Text
         size='micro'
         variant='label'

@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
-import { pictureBenchKind } from '../bench-kinds';
+import { COLORWAY_NONE, colorwayOf, pictureBenchKind, refColorwayFor } from '../bench-kinds';
 import { displayDetailName, readBench } from '../bench-slot';
 import { NewDetailModal } from '../modals';
 import { useDesignWrites } from '../use-design-band';
@@ -134,7 +134,15 @@ export function SlotPicker({
         // this picker addresses is the picture's own, and «empty means flat» would file a fabric
         // render onto the flat sheet — the L-1 defect. The slot rev beside it is read from the
         // SAME bench, so the CAS token can never be the other bench's revision (L-5).
-        slot: { viewKey: view, kind },
+        //
+        // ═══ И КОЛОРВЕЙ БЕРЁТСЯ У САМОЙ КАРТИНКИ — ТОТ ЖЕ ДОВОД, ЧТО У РОДА (L-1 → L-2) ══════
+        // Плита несёт свой колорвей в себе: рендер ROSSO знает, что он ROSSO, потому что прогон,
+        // родивший его, назвал цвет, а разрез и правка это унаследовали на сервере. Значит пикер
+        // на плитке НЕ спрашивает у экрана, какой цвет сейчас выбран, — экран этой картинки может
+        // и не показывать вовсе (лента показывает все). Подставить сюда выбор студии значило бы
+        // отправить кадр ROSSO в верстак OLIVE, а сервер отвечает на это `colorway_mismatch`.
+        // У флэта `refColorwayFor` возвращает 0 всегда: там оси нет (L-4).
+        slot: { viewKey: view, kind, colorwayId: refColorwayFor(kind, colorwayOf(picture)) },
         pictureId,
         // 0 is the honest value for a side nobody has ever touched: the slot is born by this write.
         expectedSlotRev: slot?.slotRev ?? 0,
@@ -146,9 +154,12 @@ export function SlotPicker({
       const slot = bench.details.find((d) => d.id === slotId) ?? null;
       if (!slot) return;
       setBenchSlot.mutate({
-        // A minted id already names its bench, and the contract says `kind` is IGNORED beside a
-        // slot_id — so sending one could only ever be a contradiction nobody could adjudicate.
-        slot: { slotId, kind: undefined },
+        // A minted id already names its bench AND its colourway, and the contract says `kind` is
+        // IGNORED beside a slot_id while a STATED colourway that disagrees is REFUSED rather than
+        // dropped — so sending either could only ever be a contradiction nobody could adjudicate.
+        // 0 is «not stated», which is exactly how the slot's own value is allowed to stand.
+        // (Details are the flat bench's alone anyway: this branch is unreachable from a render.)
+        slot: { slotId, kind: undefined, colorwayId: COLORWAY_NONE },
         pictureId,
         expectedSlotRev: slot.slotRev ?? 0,
       });

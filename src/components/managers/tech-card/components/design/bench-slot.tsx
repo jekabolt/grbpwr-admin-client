@@ -65,7 +65,14 @@ import {
   viewLabel,
   type SilhouetteView,
 } from './views';
-import { benchKindOf, pictureRepresentation } from './bench-kinds';
+import {
+  COLORWAY_NONE,
+  benchKindOf,
+  benchRowMatches,
+  pictureRepresentation,
+  refColorwayFor,
+  colorwayOf,
+} from './bench-kinds';
 
 
 /** Total over the vocabulary: an unknown key prints itself rather than becoming a wrong side. */
@@ -95,13 +102,26 @@ export type BenchRead = {
  *
  * The default is `flat` because that is what the contract fixes for an empty kind — every caller
  * written before the second axis existed keeps reading the bench it meant. Callers still spell it.
+ *
+ * ⚠ AND `colorwayId` IS THE THIRD AXIS, ADDED FOR THE SAME REASON AND WITH THE SAME EVIDENCE. The
+ * render bench is now PER COLOURWAY (L-2), so a card with two coloured multiviews carries
+ * `render/front@ROSSO` AND `render/front@OLIVE` — two rows, one view key, ONE map entry under the
+ * old body, last row wins. That is L-5 exactly, one axis later, and this time both colliding rows
+ * are plates of the same kind: nothing on screen would look wrong, the CAS token echoed back would
+ * simply belong to the other colourway. The match is not spelled here — it is `benchRowMatches` in
+ * `./bench-kinds`, the one place the three axes are compared, and the flat bench is exempted there
+ * (L-4: one markup per card) rather than by a condition written out again in this file.
  */
-export function readBench(band: GetDesignBandResponse, kind: string = 'flat'): BenchRead {
+export function readBench(
+  band: GetDesignBandResponse,
+  kind: string = 'flat',
+  colorwayId: number = COLORWAY_NONE,
+): BenchRead {
   const rows = band.bench ?? [];
   const byView = new Map<string, common_DesignBenchSlot>();
   const details: common_DesignBenchSlot[] = [];
   for (const row of rows) {
-    if (benchKindOf(row) !== kind) continue;
+    if (!benchRowMatches(row, kind, colorwayId)) continue;
     const key = normaliseViewKey(row.viewKey);
     if (isSilhouetteView(key)) byView.set(key, row);
     else details.push(row);
@@ -134,7 +154,11 @@ export function displayDetailName(
  *  name (or the reverse). */
 export function slotRefKey(ref: DesignBenchSlotRef): string {
   if (ref.slotId) return `id:${ref.slotId}`;
-  return `view:${benchKindOf(ref)}:${normaliseViewKey(ref.viewKey)}`;
+  /* И КОЛОРВЕЙ ТОЖЕ ЧАСТЬ ЛИЧНОСТИ (L-2): `render/front` называет теперь по слоту НА КАЖДЫЙ
+     колорвей карточки, и ключ без него отдал бы оптимистичную закраску стороны ROSSO стороне
+     OLIVE того же имени. У флэта он всегда 0 — там оси нет (L-4), — поэтому старые ключи
+     флэтового верстака не двигаются ни на байт. */
+  return `view:${benchKindOf(ref)}:${refColorwayFor(ref.kind, colorwayOf(ref))}:${normaliseViewKey(ref.viewKey)}`;
 }
 
 /** The live row a ref addresses, or null when the slot has never been written. */
@@ -151,10 +175,15 @@ export function findSlot(
   // BOTH halves of the ref's address, view AND kind (L-5): `front` alone names two rows now, and
   // matching the wrong one made the optimistic overlay in `bench.tsx` compare its CAS token
   // against the other bench's revision.
+  // ВСЕ ТРИ ПОЛОВИНЫ АДРЕСА — вид, верстак И колорвей (L-2). `front` называет теперь по строке на
+  // каждый колорвей рендер-верстака, и матч по паре вернул бы первую попавшуюся: оптимистичная
+  // накладка `bench.tsx` сравнивала бы свой CAS-токен с ревизией ЧУЖОГО ЦВЕТА. Сравнение — одно,
+  // в `benchRowMatches`; второго разбора колорвея слота в дереве быть не должно.
   const kind = benchKindOf(ref);
+  const colorwayId = colorwayOf(ref);
   return (
     rows.find(
-      (row) => benchKindOf(row) === kind && normaliseViewKey(row.viewKey) === view,
+      (row) => benchRowMatches(row, kind, colorwayId) && normaliseViewKey(row.viewKey) === view,
     ) ?? null
   );
 }

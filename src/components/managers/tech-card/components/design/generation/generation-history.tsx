@@ -23,7 +23,14 @@ import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
 import { buildHideGuard, isPickablePicture } from '../band-feed';
-import { benchKindOf, pictureBenchKind, runRepresentation, type Representation } from '../bench-kinds';
+import {
+  COLORWAY_NONE,
+  benchKindOf,
+  colorwayOf,
+  pictureBenchKind,
+  runRepresentation,
+  type Representation,
+} from '../bench-kinds';
 import { displayDetailName, readBench, refBenchKind } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { clockStamp, pictureHandle, runHandle } from '../handles';
@@ -136,7 +143,13 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
     if (isSilhouetteView(view)) {
       const kind = benchKindOf(row);
       return {
-        ref: { viewKey: view, kind },
+        /* ═══ И КОЛОРВЕЙ БЕРЁТСЯ У САМОЙ СТРОКИ, А НЕ У ЭКРАНА (L-2) ═════════════════════════
+           Это ровно тот же довод, что двумя строками выше про род: снятие адресует ТУ строку, в
+           которой плита стоит, — со всеми тремя половинами её адреса. Подставить сюда выбранный
+           в студии колорвей значило бы отправить снятие в верстак ДРУГОГО цвета: сервер отдал бы
+           `slot_rev_mismatch` (или, что хуже, честно опустошил бы чужую сторону), а человек
+           видел бы, что плитка «не снимается». Разбор — один, `colorwayOf` в `../bench-kinds`. */
+        ref: { viewKey: view, kind, colorwayId: colorwayOf(row) },
         // The flat bench keeps its bare labels — the look every tile has always had; any other
         // bench says its name, because «FRONT» alone now names two different slots.
         label: kind === 'flat' ? viewLabel(view) : `${kind} · ${viewLabel(view)}`,
@@ -144,8 +157,9 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
       };
     }
     return {
-      // A minted id already names its bench; `kind` is ignored beside a slot_id.
-      ref: { slotId: row.id, kind: undefined },
+      // A minted id already names its bench AND its colourway; both are ignored/deferred to beside
+      // a slot_id, so 0 here is «not stated» and lets the row's own value stand.
+      ref: { slotId: row.id, kind: undefined, colorwayId: COLORWAY_NONE },
       // `(2)` suffixes are per-bench — the siblings are the details of THIS row's bench.
       label: displayDetailName(readBench(band, benchKindOf(row)).details, row),
       rev: row.slotRev ?? 0,

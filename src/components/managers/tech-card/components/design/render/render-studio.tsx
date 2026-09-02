@@ -4,6 +4,7 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
+import { ColorwayPicker, type ColorwayChoice } from '../colorway-picker';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
@@ -50,6 +51,7 @@ export function RenderStudio({
   techCardId,
   disabled,
   onGoToKind,
+  colorway,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -60,8 +62,15 @@ export function RenderStudio({
    * рассинхронил бы полосу вкладок со своим же содержимым.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
+  /**
+   * КАКОЙ КОЛОРВЕЙ РЕНДЕРИМ (L-2). Владеет состоянием `StudioTab`, экран его только читает и
+   * переключает; при смене он ремоунтит этот экран целиком (`key`), поэтому черновик засевается
+   * заново — см. `./drafts`.
+   */
+  colorway?: ColorwayChoice;
 }): JSX.Element {
-  const draft = useColourDraft(band);
+  const colorwayId = colorway?.colorwayId ?? 0;
+  const draft = useColourDraft(band, colorwayId, colorway?.current);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
@@ -97,6 +106,13 @@ export function RenderStudio({
       ask: '',
       params: {
         views,
+        // ─── КОЛОРВЕЙ ПРОГОНА (L-2). Осмыслен именно на `render`: мультивью, который сейчас
+        // покупается, — ЭТОГО цвета, и сервер копирует поле в живую колонку прогона, чтобы
+        // историю можно было нарезать по колорвею, а разрез и флэттен унаследовали атрибуцию
+        // кадрам. `0` — не пропуск, а «без колорвея»: ровно то, чем является каждый рендер,
+        // сделанный до появления оси, и единственное значение, при котором плиты этого прогона
+        // встают в безколорвейный верстак.
+        colorwayId,
         // ─── ONE PICTURE, ALL THE VIEWS IN A ROW — the owner's own answer of 2026-08-31 to «что
         // возвращает один прогон»: «Три вида в одной картинке… в слоты кладётся уже после разреза».
         //
@@ -152,7 +168,27 @@ export function RenderStudio({
         title='generation — fabric render'
         question='— the cloth: a photo, a colour, words, or any mix of them'
       >
-        <Palette band={band} techCardId={techCardId} disabled={disabled} draft={draft} />
+        {/* ПИКЕР — ПЕРВЫМ РЯДОМ СЕКЦИИ, И ГРАНИЦА ЕГО ВЛАСТИ ПРОВЕДЕНА ЗДЕСЬ (L-4). Всё, что ниже,
+            принадлежит выбранному колорвею: его ткань, его прогон, его выходы. Полоса ВХОДА —
+            флэты — стоит ВЫШЕ и вне его скоупа намеренно: чертёж изделия у всех колорвеев один,
+            и вторая его копия означала бы N разметок одного рисунка, расходящихся молча. */}
+        {colorway && (
+          <ColorwayPicker
+            band={band}
+            choice={colorway}
+            disabled={disabled}
+            emptyNote='this card has no colourways — they are made on the colourways tab. This render will be filed unattributed, exactly where every render made before colourways stands.'
+          />
+        )}
+
+        <Palette
+          band={band}
+          techCardId={techCardId}
+          disabled={disabled}
+          draft={draft}
+          colorwayId={colorwayId}
+          colorway={colorway?.current ?? null}
+        />
 
         <FieldRow label='fit'>
           {/* A READ-ONLY CONTROL WITH ITS REASON, not a disabled input. It looks like the field it
@@ -190,7 +226,14 @@ export function RenderStudio({
           is SET. The owner's W-12 names 3D, but ARTIFACTS narrows its RENDERS segment to the
           chosen ones too (W-14) — a mark that filters a list must be settable for that list, so
           the same section stands on both generative screens. See `./outputs`. */}
-      <OutputsSection band={band} techCardId={techCardId} kind='render' disabled={disabled} />
+      <OutputsSection
+        band={band}
+        techCardId={techCardId}
+        kind='render'
+        disabled={disabled}
+        colorwayId={colorwayId}
+        colorwayLabel={colorway?.label ?? ''}
+      />
 
       {/* THE FITTING — K-14, and it stands BELOW the paid blocks on purpose: it is the one organ on
           this screen that spends nothing. Putting a free rehearsal above the button that charges

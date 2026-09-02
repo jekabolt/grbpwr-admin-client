@@ -7,6 +7,7 @@ import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import { ViewSwitch } from 'ui/components/view-switch';
 
+import { ColorwayPicker, type ColorwayChoice } from '../colorway-picker';
 import { useCardFit, useThreedDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow, LockBar } from './generate-row';
@@ -70,6 +71,7 @@ export function ThreedStudio({
   band,
   techCardId,
   disabled,
+  colorway,
   /**
    * Switch the band's strip to another representation — what the input strip's `ask for it ▸` and
    * the doors of the lock bar do. The studio does not own the strip, so when the composer does not
@@ -81,7 +83,15 @@ export function ThreedStudio({
   techCardId: number;
   disabled?: boolean;
   onGoToKind?: (kind: 'flat' | 'render') => void;
+  /**
+   * КАКОЙ КОЛОРВЕЙ СОБИРАЕМ (L-3, владелец: «в 3д рендере выбираем колорвей, который будем
+   * рендерить»). Состояние общее со студией: пришедший с FABRIC RENDER человек застаёт здесь тот
+   * же цвет, на котором работал, — иначе он платил бы за сборку не того.
+   */
+  colorway?: ColorwayChoice;
 }): JSX.Element {
+  const colorwayId = colorway?.colorwayId ?? 0;
+  const colorwayName = colorway?.label ?? '';
   const { draft, patch } = useThreedDraft();
   const cardFit = useCardFit();
   const { dictionary } = useDictionary();
@@ -90,7 +100,7 @@ export function ThreedStudio({
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
   const [inspecting, setInspecting] = useState(false);
 
-  const sides = useMemo(() => threedSides(band), [band]);
+  const sides = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
 
   const sizes = dictionary?.sizes ?? [];
   const sizeName = (id: number) =>
@@ -102,7 +112,10 @@ export function ThreedStudio({
    * читает кнопка. Одной полосой они выглядели бы одинаково и стояли бы не там: «pick a body» под
    * полосой картинок — это указание не на тот орган.
    */
-  const input: Gate = useMemo(() => threedGate(band), [band]);
+  const input: Gate = useMemo(
+    () => threedGate(band, colorwayId, colorwayName),
+    [band, colorwayId, colorwayName],
+  );
 
   const gate: Gate = useMemo(() => {
     const base = input;
@@ -159,6 +172,11 @@ export function ThreedStudio({
         // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
         // список, только молча.
         detailSlotIds: [],
+        // КОЛОРВЕЙ СБОРКИ (L-3). Сервер читает ТОЛЬКО верстак этого колорвея (`designSelectBench`)
+        // и отказывает прогону, чей колорвей не значится в `render_bench_colorway_ids`. `0` —
+        // безколорвейный верстак: легаси-карточка собирается ровно как вчера, и смеси колорвеев
+        // не бывает ни при каком значении поля.
+        colorwayId,
         layout: '',
         colour: undefined,
         threed: {
@@ -201,9 +219,22 @@ export function ThreedStudio({
         disabled={disabled}
         lock={input}
         onGoToKind={onGoToKind}
+        colorwayId={colorwayId}
+        colorwayLabel={colorwayName}
       />
 
       <Section title='generation — 3D' question='— what body it sits on, and how it is worn'>
+        {/* ПИКЕР — ПЕРВЫМ РЯДОМ МЕНЮ, НАД ВСЕМ, ЧТО ОПИСЫВАЕТ ПОДАЧУ. Полоса входа над секцией И
+            ЕСТЬ верстак выбранного колорвея, поэтому переключение здесь меняет её целиком: это не
+            фильтр списка, а смена предмета, из которого будет собран объём. */}
+        {colorway && (
+          <ColorwayPicker
+            band={band}
+            choice={colorway}
+            disabled={disabled}
+            emptyNote='this card has no colourways — they are made on the colourways tab. 3D will build from the unattributed render bench, which is where every render made before colourways stands.'
+          />
+        )}
         {/* ТОЛЬКО ПРИЧИНЫ МЕНЮ: то, чего не хватает на входе, уже названо под входной полосой, и
             повторять это здесь значило бы показать один отказ дважды. */}
         {input.ok && !gate.ok && <LockBar reason={gate.reason} />}
@@ -313,7 +344,14 @@ export function ThreedStudio({
 
       {/* The turntables this page of the band holds — the outputs, where the mark «chosen» lives
           and is SET (W-12). One shared section with FABRIC RENDER; see `./outputs`. */}
-      <OutputsSection band={band} techCardId={techCardId} kind='threed' disabled={disabled} />
+      <OutputsSection
+        band={band}
+        techCardId={techCardId}
+        kind='threed'
+        disabled={disabled}
+        colorwayId={colorwayId}
+        colorwayLabel={colorwayName}
+      />
 
       <WhatModelGetsRenderModal
         open={inspecting}
@@ -324,6 +362,8 @@ export function ThreedStudio({
         cardFit={cardFit}
         models={models}
         sizeName={sizeName}
+        colorwayId={colorwayId}
+        colorwayLabel={colorwayName}
       />
     </>
   );

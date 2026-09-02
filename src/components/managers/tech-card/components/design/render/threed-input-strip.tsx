@@ -91,20 +91,33 @@ export function ThreedInputStrip({
   lock,
   /** Уйти на другое представление полосы — «ask for it ▸» пустой стороны и двери полосы отказа. */
   onGoToKind,
+  colorwayId,
+  colorwayLabel,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   lock?: Gate;
   onGoToKind?: (kind: 'flat' | 'render') => void;
+  /**
+   * ═══ ЭТА ПОЛОСА И ЕСТЬ ВЕРСТАК ОДНОГО КОЛОРВЕЯ (L-2/L-3) ══════════════════════════════════
+   *
+   * Все три записи слота ниже адресуют `render`-верстак ЭТОГО колорвея, и правая половина
+   * предлагает только плиты того же цвета: у слота колорвей входит в ключ исключительности, а
+   * постановка чужой плиты отвергается сервером (`colorway_mismatch`). Предлагать её значило бы
+   * рисовать дверь, за которой отказ. `0` — безколорвейный верстак, вечно законный.
+   */
+  colorwayId?: number;
+  colorwayLabel?: string;
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
+  const colorway = colorwayId ?? 0;
 
-  const sides = useMemo(() => threedSides(band), [band]);
-  const others = useMemo(() => threedCandidates(band), [band]);
+  const sides = useMemo(() => threedSides(band, colorway), [band, colorway]);
+  const others = useMemo(() => threedCandidates(band, colorway), [band, colorway]);
   const marked = sides.filter((side) => !!side.picture);
   /** Помеченные в «renders of this card» рендеры, которым есть куда встать. Довод — в `./model.ts`. */
-  const placements = useMemo(() => chosenRenderPlacements(band), [band]);
+  const placements = useMemo(() => chosenRenderPlacements(band, colorway), [band, colorway]);
 
   /** Для какой ячейки идёт запись. Общий `isPending` сказал бы «сохраняю» на всех сразу. */
   const [busy, setBusy] = useState<string | null>(null);
@@ -136,7 +149,11 @@ export function ThreedInputStrip({
       // слота, ОБА адресуемые `view_key: 'front'`; пустое поле означало бы flat, то есть плита
       // уехала бы в вход фабрик-рендера, а сервер отказал бы ей по роду кадра. Именно это поле
       // связывает то, что человек видит здесь, с тем, что прогон отправит в сборку.
-      { slot: { viewKey: side.view, kind: 'render' }, pictureId, expectedSlotRev: side.slotRev },
+      {
+        slot: { viewKey: side.view, kind: 'render', colorwayId: colorway },
+        pictureId,
+        expectedSlotRev: side.slotRev,
+      },
       { onSettled: () => setBusy(null) },
     );
   };
@@ -189,7 +206,7 @@ export function ThreedInputStrip({
     for (const placement of placements) {
       try {
         await writes.setBenchSlot.mutateAsync({
-          slot: { viewKey: placement.view, kind: 'render' },
+          slot: { viewKey: placement.view, kind: 'render', colorwayId: colorway },
           pictureId: placement.picture.id ?? 0,
           expectedSlotRev: placement.slotRev,
         });
@@ -213,7 +230,11 @@ export function ThreedInputStrip({
     setBusy(`v${view}`);
     writes.setBenchSlot.mutate(
       // `picture_id = 0` — ОСВОБОДИТЬ сторону, не удаляя ничего: плита остаётся на карточке.
-      { slot: { viewKey: view, kind: 'render' }, pictureId: 0, expectedSlotRev: slotRev },
+      {
+        slot: { viewKey: view, kind: 'render', colorwayId: colorway },
+        pictureId: 0,
+        expectedSlotRev: slotRev,
+      },
       { onSettled: () => setBusy(null) },
     );
   };
@@ -221,7 +242,11 @@ export function ThreedInputStrip({
   return (
     <Section
       title='input — renders by view'
-      question='— 3D is built from the renders, not the drawings: front is required, more sides are better'
+      question={
+        colorwayLabel?.trim()
+          ? `— the render bench of ${colorwayLabel.trim()}: 3D is built from these and from nothing else. Front is required, more sides are better`
+          : '— 3D is built from the renders, not the drawings: front is required, more sides are better'
+      }
       action={
         <span className='flex items-center gap-3'>
           <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -344,7 +369,12 @@ export function ThreedInputStrip({
                 const items = media
                   .map((m) => m.id ?? 0)
                   .filter((id) => id > 0)
-                  .map((mediaId) => ({ mediaId, ghostView: '', kind: 'render' }));
+                  // КОЛОРВЕЙ — ТАКОЕ ЖЕ УТВЕРЖДЕНИЕ, КАК РОД, И ПО ТОЙ ЖЕ ПРИЧИНЕ: принесённый
+                  // руками рендер — это рендер КАКОГО-ТО цвета, и восстановить какого из пикселей
+                  // нельзя ничем. Дверь стоит внутри верстака выбранного колорвея, поэтому она и
+                  // называет его. `0` — безколорвейный, ровно то, чем является всякий рендер,
+                  // загруженный до появления оси.
+                  .map((mediaId) => ({ mediaId, ghostView: '', kind: 'render', colorwayId: colorway }));
                 if (!items.length) return;
                 writes.registerUpload.mutate({
                   // Минтуется ОДИН раз на намерение человека и НЕ внутри мутации: повтор со свежим

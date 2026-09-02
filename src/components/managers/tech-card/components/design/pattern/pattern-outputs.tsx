@@ -103,8 +103,8 @@ export function PatternOutputs({
 
   return (
     <Section
-      title='tiles of this card'
-      question='— what came back, whether it joins, and how big it lies'
+      title='tiles'
+      question='— fresh from the runs: judge the join, keep what works'
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
           {outputs.length} tile{outputs.length === 1 ? '' : 's'}
@@ -112,6 +112,7 @@ export function PatternOutputs({
         </Text>
       }
     >
+      <span data-pattern-act='judge' hidden />
       {!carries && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
@@ -150,8 +151,7 @@ export function PatternOutputs({
           </GroupLabel>
           <TileGrid url={url} alt={`tile from run ${run.id ?? ''}`} edges={edges} />
           <Text size='nano' variant='label' component='p' className='normal-case'>
-            Nine copies of one tile. The ticks outside the frame mark the two joins each way — look
-            along them for a line, a shift, or a border the tile carries round its own edge.
+            nine copies of one tile — look along the ticks for a line, a shift, or a border.
           </Text>
         </div>
 
@@ -182,15 +182,13 @@ export function PatternOutputs({
           <Text size='nano' variant='label' component='p' className='normal-case'>
             {repeat > 0 ? (
               <>
-                Made at <b>{repeat} mm</b> — {(spanMm / repeat).toFixed(1)} tiles across{' '}
-                {spanMm} mm of cloth ({SPANS.find((s) => s.mm === spanMm)?.what}). The strip and the
-                rule share one scale, so the count is true; the strip is not life-size on your
-                screen, and no page can make it so.
+                made at <b>{repeat} mm</b> — {(spanMm / repeat).toFixed(1)} tiles across {spanMm} mm
+                of cloth ({SPANS.find((s) => s.mm === spanMm)?.what}). The strip and the rule share
+                one scale, so the count is true; neither is life-size on your screen.
               </>
             ) : (
               <>
-                This run stated no repeat, so there is no scale to draw. The tile is still a tile —
-                a repeat is a decision about the cloth, and it can be made later, on the shelf.
+                this run stated no repeat, so there is no scale to draw. The tile is still a tile.
               </>
             )}
           </Text>
@@ -224,42 +222,52 @@ export function PatternOutputs({
                 }
               />
             ) : (
-              <Button
-                variant='secondary'
-                size='xs'
+              /* ═══ ПОМЕТКА ДЕМОТИРОВАНА ДО ЧИПА, И ЭТО НЕ КОСМЕТИКА (G-15) ══════════════════
+                 Здесь стояли ДВА органа на один факт — кнопка `select` и Pill `selected` рядом с
+                 ней, — плюс абзац, объяснявший, чем `selected` отличается от «на полке». Владелец
+                 просил снять ровно эту сложность. Чип-тоггл говорит СОСТОЯНИЕ И ЖЕСТ одним телом
+                 (заливка ink = помечено), а разница двух пометок ушла в его `title` — читается
+                 тем, кто спросил, и не занимает экран у тех, кто не спрашивал.
+                 ⚠ САМУ ПОМЕТКУ СНЯТЬ НЕЛЬЗЯ: у неё живой потребитель — ARTIFACTS (W-14) сужает
+                 сегмент PATTERNS ровно по ней. Снести орган, оставив фильтр, значило бы оставить
+                 переключатель, который никто не может взвести. */
+              <Chip
+                nonForm
+                selected={chosen}
+                pressed={chosen}
+                data-tile-selected={chosen ? '1' : '0'}
                 disabled={setPictureSelected.isPending}
                 onClick={() =>
                   setPictureSelected.mutate({ pictureId: picture.id ?? 0, selected: !chosen })
                 }
                 title={
                   chosen
-                    ? 'take the mark off — with none chosen, ARTIFACTS goes back to listing every tile of this card'
-                    : 'mark this tile as chosen — ARTIFACTS narrows its PATTERNS list to the chosen ones'
+                    ? 'chosen — ARTIFACTS narrows its PATTERNS list to the chosen tiles. Press again to take the mark off. It is a verdict about the PICTURE; keeping a tile in the library is a fact about the STYLE, and a tile can carry either, both or neither'
+                    : 'mark this tile as chosen — ARTIFACTS narrows its PATTERNS list to the chosen ones. It is a verdict about the PICTURE and it neither keeps nor uses the tile anywhere'
                 }
               >
-                {chosen ? 'un-select' : 'select'}
-              </Button>
+                selected
+              </Chip>
             )}
-            {chosen && <Pill tone='ink'>selected</Pill>}
 
             {/* ─── ПОЛКА ТКАНИ: ОТСЮДА ПЛИТКУ ВИДИТ FABRIC RENDER (K-13, хвост) ─── */}
             {onShelf ? (
-              <Pill tone='ok' title={`on the cloth shelf as ${assetLabel(onShelf)}`}>
-                on the cloth shelf · {assetLabel(onShelf)}
+              <Pill tone='ok' title={`kept in this card's library as ${assetLabel(onShelf)} — rename it and give it to a colourway below`}>
+                in the library · {assetLabel(onShelf)}
               </Pill>
             ) : writesOff ? (
               <InertDoor
-                label='keep as cloth'
+                label='keep in library'
                 reason={
                   disabled
-                    ? 'this card is read-only for you — the cloth shelf is card data'
+                    ? 'this card is read-only for you — the library is card data'
                     : 'this server does not answer the design routes'
                 }
               />
             ) : shelfFull ? (
               <InertDoor
-                label='keep as cloth'
-                reason='this card already holds its 40 assets — free a place under FABRIC RENDER → INPUT → CLOTH before keeping another'
+                label='keep in library'
+                reason='this card already holds its 40 assets — delete one in PATTERNS OF THIS CARD below, or under FABRIC RENDER → INPUT → CLOTH, before keeping another'
               />
             ) : (
               <Button
@@ -278,9 +286,9 @@ export function PatternOutputs({
                     repeatMm: repeat,
                   })
                 }
-                title='put this tile on the card’s cloth shelf — FABRIC RENDER can then tick it under FABRIC → CLOTHS, and you do not have to state a cloth there at all'
+                title='keep this tile as a fabric of the card — below it can be renamed and given to a colourway, and every render of that colourway then starts from it'
               >
-                KEEP AS CLOTH
+                KEEP IN LIBRARY
               </Button>
             )}
           </div>
@@ -292,10 +300,11 @@ export function PatternOutputs({
             {onShelf ? (
               <>
                 {' '}
-                · kept as <b>{assetLabel(onShelf)}</b>; it is removed from the shelf under FABRIC
-                RENDER → INPUT → CLOTH, where removing one names what it costs.
+                · kept as <b>{assetLabel(onShelf)}</b>
               </>
-            ) : null}
+            ) : (
+              ' · a kept tile becomes a fabric of this card; a tile left here reaches no render'
+            )}
           </Text>
         </div>
       </div>
@@ -303,7 +312,7 @@ export function PatternOutputs({
       {/* ─────────────────────────── РЕЛЬС ─────────────────────────── */}
       {outputs.length > 1 && (
         <>
-          <GroupLabel>every tile this page of the feed holds</GroupLabel>
+          <GroupLabel>every tile on this page of the feed</GroupLabel>
           <Strip>
             {outputs.map(({ picture: p, run: r }) => {
               const on = p.id === picture.id;
@@ -346,9 +355,7 @@ export function PatternOutputs({
       )}
 
       <Text size='nano' variant='label' component='p' className='normal-case'>
-        This is the page of the feed the band shipped, newest run first — not every tile this card
-        has ever produced. The mark is a verdict about a picture; keeping a tile as cloth is a fact
-        about the style. A tile can carry either, both, or neither.
+        this page of the feed, newest run first — not every tile this card has ever produced.
       </Text>
     </Section>
   );

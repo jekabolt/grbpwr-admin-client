@@ -13,6 +13,7 @@ import { DesignCapabilityProvider } from './capability';
 import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
 import { PatternStudio } from './pattern';
+import { useColorwayChoice } from './colorway-picker';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
 import { PickModeProvider, usePickMode } from './pick-mode';
@@ -98,6 +99,13 @@ export function StudioTab({
      было бы отказом, а не решением. */
   useStudioKindSwitch(techCardId ?? 0, kind, setKind);
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
+  /* КОЛОРВЕЙ — ВТОРОЕ СОСТОЯНИЕ СТУДИИ, И ЖИВЁТ ОНО ЗДЕСЬ ПО ТОМУ ЖЕ ДОВОДУ, ЧТО `kind` (L-2/L-3).
+     Рендер-верстак теперь на колорвей, 3D читает РОВНО ОДИН из них, а палитра засевается тканью
+     выбранного — три экрана, один вопрос, и второй его владелец сделал бы возможной студию, где
+     вход показывает ROSSO, а прогон уезжает за OLIVE.
+     ⚠ ХУК СТОИТ ВЫШЕ ЛЮБОГО РАННЕГО ВОЗВРАТА, как и `kind`: ниже них он исполнялся бы через раз,
+     число хуков менялось бы между отрисовками, и React снёс бы всю вкладку ошибкой 310. */
+  const colorway = useColorwayChoice(techCardId, band);
 
   // A card that has not been created yet has no band and cannot have one: every write below is
   // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
@@ -225,7 +233,16 @@ export function StudioTab({
                   значило бы завести второй ответ на вопрос «во что обошлась эта карточка». */}
               {kind === 'pattern' && (
                 <>
-                  <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                  {/* ПАТТЕРН ПИКЕРА НЕ ПОКАЗЫВАЕТ И РЕМОУНТА НЕ ТРЕБУЕТ: плитка делается ОДИН РАЗ и
+                      живёт в библиотеке карточки, а колорвей ей НАЗНАЧАЮТ — это отдельный жест на
+                      третьем акте экрана. Прогон рода `pattern` колорвея не принимает вовсе
+                      (`colorway_forbidden`), поэтому выбор здесь не решал бы ничего. */}
+                  <PatternStudio
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    colorways={colorway.colorways}
+                  />
                   <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
               )}
@@ -234,11 +251,17 @@ export function StudioTab({
                   этих видах нет — принесённый руками файл кладут во флэт. */}
               {kind === 'render' && (
                 <>
+                  {/* `key={colorwayId}` — ПЕРЕКЛЮЧЕНИЕ КОЛОРВЕЯ ПЕРЕСЕВАЕТ ЧЕРНОВИКИ, А НЕ ПРАВИТ ИХ.
+                      Черновик рецепта засеян ТКАНЬЮ ВЫБРАННОГО колорвея и по правилу «seeded once,
+                      until touched» больше не пересевается сам; без ремоунта человек, переключивший
+                      цвет, увидел бы под новым именем рецепт предыдущего и заплатил за него. */}
                   <RenderStudio
+                    key={colorway.colorwayId}
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     onGoToKind={setKind}
+                    colorway={colorway}
                   />
                   <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
                 </>
@@ -246,10 +269,12 @@ export function StudioTab({
               {kind === 'threed' && (
                 <>
                   <ThreedStudio
+                    key={colorway.colorwayId}
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     onGoToKind={setKind}
+                    colorway={colorway}
                   />
                   <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
                 </>

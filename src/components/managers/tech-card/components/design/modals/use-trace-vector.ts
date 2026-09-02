@@ -331,6 +331,11 @@ export function useTraceVector(input: {
         ask: '',
         params: {
           views: [],
+          // У ВЕКТОРНОГО ПРОГОНА КОЛОРВЕЯ НЕТ, И ЭТО ОТКАЗ СЕРВЕРА (L-4). `params.colorway_id`
+          // осмыслен на render / recolor / threed и отвергается на flat / vector / pattern /
+          // draft_idea токеном `colorway_forbidden`: машинная обводка — работа НАД чертежом, а
+          // чертёж один на все цвета стиля.
+          colorwayId: 0,
           layout: '',
           colour: undefined,
           threed: undefined,

@@ -112,9 +112,13 @@ export type BenchSide = {
  * exactly that, the way `../views` did for the first axis.
  */
 import {
+  COLORWAY_NONE,
   benchKindOf,
+  benchRowMatches,
   pictureRepresentation,
+  renderBenchOccupied,
   runOfPicture,
+  colorwayOf,
   type BenchKind,
 } from '../bench-kinds';
 export { benchKindOf, type BenchKind };
@@ -131,10 +135,14 @@ export { benchKindOf, type BenchKind };
  * last row of `band.bench` won and the flat strip could draw a render in its slot (or the reverse).
  * Nothing showed it while nothing wrote render slots; the 3D input writes them now.
  */
-export function benchSides(band: GetDesignBandResponse, kind: BenchKind = 'flat'): BenchSide[] {
+export function benchSides(
+  band: GetDesignBandResponse,
+  kind: BenchKind = 'flat',
+  colorwayId: number = COLORWAY_NONE,
+): BenchSide[] {
   const byView = new Map<string, common_DesignBenchSlot>();
   for (const row of band.bench ?? []) {
-    if (benchKindOf(row) !== kind) continue;
+    if (!benchRowMatches(row, kind, colorwayId)) continue;
     const key = normaliseViewKey(row.viewKey);
     if (isSilhouetteView(key)) byView.set(key, row);
   }
@@ -150,9 +158,13 @@ export function benchSides(band: GetDesignBandResponse, kind: BenchKind = 'flat'
 }
 
 /** Every picture standing in a silhouette slot of one bench right now, keyed by its own id. */
-function markedPictureIds(band: GetDesignBandResponse, kind: BenchKind = 'flat'): Set<number> {
+function markedPictureIds(
+  band: GetDesignBandResponse,
+  kind: BenchKind = 'flat',
+  colorwayId: number = COLORWAY_NONE,
+): Set<number> {
   const ids = new Set<number>();
-  for (const side of benchSides(band, kind)) {
+  for (const side of benchSides(band, kind, colorwayId)) {
     const id = side.picture?.id ?? 0;
     if (id > 0) ids.add(id);
   }
@@ -214,8 +226,11 @@ export function feedIsTruncated(band: GetDesignBandResponse): boolean {
  * быть невозможным: человек ставит в сторону ЛЮБУЮ картинку рода `render` — сгенерённую, разрезанную
  * из листа или принесённую руками, — и ровно она уезжает в сборку.
  */
-export function threedSides(band: GetDesignBandResponse): BenchSide[] {
-  return benchSides(band, 'render');
+export function threedSides(
+  band: GetDesignBandResponse,
+  colorwayId: number = COLORWAY_NONE,
+): BenchSide[] {
+  return benchSides(band, 'render', colorwayId);
 }
 
 /**
@@ -298,8 +313,11 @@ function derivesFromChosen(
  * PAGE-BOUND, И ЭКРАН ОБ ЭТОМ ГОВОРИТ: полоса отдаёт одну страницу ленты. Левая половина такого
  * предела не знает — плита слота приезжает разрешённой, сколь бы старой ни была.
  */
-export function threedCandidates(band: GetDesignBandResponse): ThreedCandidate[] {
-  const marked = markedPictureIds(band, 'render');
+export function threedCandidates(
+  band: GetDesignBandResponse,
+  colorwayId: number = COLORWAY_NONE,
+): ThreedCandidate[] {
+  const marked = markedPictureIds(band, 'render', colorwayId);
   const byId = picturesById(band);
   const out: ThreedCandidate[] = [];
   const seen = new Set<number>();
@@ -308,6 +326,13 @@ export function threedCandidates(band: GetDesignBandResponse): ThreedCandidate[]
       const id = picture.id ?? 0;
       if (id <= 0 || marked.has(id) || seen.has(id)) continue;
       if (isPictureHidden(picture)) continue;
+      /* ═══ ЧУЖОЙ КОЛОРВЕЙ НЕ ПРЕДЛАГАЕТСЯ, ПОТОМУ ЧТО ОН ЗАВЕДОМО МЁРТВ (L-2) ═══════════════
+         Плита несёт СВОЙ колорвей, и верстак сверяет его с колорвеем слота: постановка кадра
+         ROSSO в верстак OLIVE отвергается сервером (`colorway_mismatch`). Предлагать её значило
+         бы рисовать дверь, за которой отказ, — ровно то, чего стоило снятие `hasFabricRender` с
+         роли ворот 3D. Легаси-кадр (колорвей 0) при этом законно предлагается в безколорвейный
+         верстак и НЕ предлагается в именованный: атрибуцию фильтр не выдумывает. */
+      if (colorwayOf(picture) !== colorwayOf({ colorwayId })) continue;
       /* ТОТ ЖЕ КЛАССИФИКАТОР, ЧТО У ФЛЭТОВОГО СПИСКА И У ФИЛЬТРА ИСТОРИИ (G-1). Читалось это и
          раньше «прогон, потом род картинки» — но своей строкой, и рекол отсеивался тем, что его
          род прогона просто не равен `render`. Теперь он отсеивается ИМЕНЕМ: его представление —
@@ -406,12 +431,15 @@ export type ChosenPlacement = {
  * человек. Помеченный рендер БЕЗ `ghost_view` не называет стороны, и подставить её за него значило
  * бы выдумать факт: такую плиту по-прежнему ставят руками через `mark ▸`.
  */
-export function chosenRenderPlacements(band: GetDesignBandResponse): ChosenPlacement[] {
-  const bySide = new Map(threedSides(band).map((side) => [side.view as string, side]));
+export function chosenRenderPlacements(
+  band: GetDesignBandResponse,
+  colorwayId: number = COLORWAY_NONE,
+): ChosenPlacement[] {
+  const bySide = new Map(threedSides(band, colorwayId).map((side) => [side.view as string, side]));
   /** Победитель каждой стороны — чтобы проигравший приписывался К НЕМУ, а не считался нигде. */
   const won = new Map<string, ChosenPlacement>();
   const out: ChosenPlacement[] = [];
-  for (const candidate of threedCandidates(band)) {
+  for (const candidate of threedCandidates(band, colorwayId)) {
     // `threedCandidates` уже выбросил плиты, СТОЯЩИЕ в сторонах: помеченный рендер, который уже на
     // своём месте, не порождает постановки, и счётчик двери честно доходит до нуля.
     // Порядок кандидатов — своя пометка раньше унаследованной, — поэтому при споре за сторону
@@ -457,10 +485,22 @@ export function chosenRenderPlacements(band: GetDesignBandResponse): ChosenPlace
 export function outputsOfKind(
   band: GetDesignBandResponse,
   kind: 'render' | 'threed',
+  /**
+   * WHOSE outputs — `undefined` narrows nothing and is the honest default for a caller that has no
+   * colourway in hand. A number (0 included) narrows to the runs made FOR that colourway, 0 being
+   * the unattributed ones, which is every render made before this axis existed.
+   *
+   * ⚠ PAGE-BOUND, AND THE SCREEN THAT PASSES THIS MUST SAY SO. The band ships one page of the feed,
+   * so «renders of ROSSO» here means «of ROSSO, on this page» and never «all of ROSSO's renders».
+   * A colourway whose runs are all older than the page shows nothing, and that is a fact about the
+   * page rather than about the colourway.
+   */
+  colorwayId?: number,
 ): { picture: common_DesignPicture; run: common_DesignRun }[] {
   const out: { picture: common_DesignPicture; run: common_DesignRun }[] = [];
   for (const run of band.runs ?? []) {
     if ((run.kind ?? '').trim().toLowerCase() !== kind) continue;
+    if (colorwayId !== undefined && colorwayOf(run) !== colorwayOf({ colorwayId })) continue;
     for (const picture of run.pictures ?? []) {
       if (isPictureHidden(picture)) continue;
       if ((picture.id ?? 0) <= 0) continue;
@@ -681,13 +721,19 @@ export function renderGate(band: GetDesignBandResponse): Gate {
 }
 
 /**
- * THE SERVER'S OWN ANSWER TO «MAY 3D BE ASKED FOR AT ALL» — W-13, read and never recomputed.
+ * DOES THIS CARD OWN A FABRIC RENDER AT ALL — W-13, read and never recomputed.
  *
- * `has_fabric_render` is on the band response precisely so the interface does not have to derive
- * it: `StartDesignRun` refuses `kind=threed` without an unhidden fabric render, and a client
- * counting renders off the page it was handed would be wrong by exactly the renders that are NOT on
- * that page — the usual case on a card with any history. So a screen that computed its own answer
- * would draw the door open and collect a refusal, or draw it shut over a card that is ready.
+ * ⚠ THIS IS NO LONGER THE 3D DOOR, AND THE CONTRACT SAYS SO IN CAPITALS ON THE FIELD ITSELF. The
+ * door is membership in `render_bench_colorway_ids` (see `threedGate`): that set counts OCCUPIED
+ * SLOTS, this flag counts PICTURES, and the two legitimately disagree — a render uploaded and never
+ * placed on a side makes the flag true and leaves the set empty. A screen following the old rule
+ * opens the button into a `no_fabric_render` refusal.
+ *
+ * WHAT IT IS STILL THE RIGHT ANSWER TO: the EMPTY-STATE question — «this card has no fabric renders
+ * whatsoever», as opposed to «it has them, they are simply not on a bench yet». That is what the
+ * kinds strip asks when it decides whether the 3D cell should send a person to the flats, and that
+ * sentence is true whatever colourway is picked, because a card with no renders has no colourway
+ * with renders either.
  *
  * `undefined` IS NOT `false`. A rolled-back binary answers without the field; reading its silence
  * as «no render» would lock 3D on every card that server serves. Absence means «this server does
@@ -706,12 +752,46 @@ export function fabricRenderGate(band: GetDesignBandResponse): Gate {
   return { ok: true };
 }
 
-export function threedGate(band: GetDesignBandResponse): Gate {
+export function threedGate(
+  band: GetDesignBandResponse,
+  /** Which colourway is being built. 0 = the unattributed bench, a real and permanently legal one. */
+  colorwayId: number = COLORWAY_NONE,
+  /** Its human name, for the refusal. Empty = «no colourway», said in those words below. */
+  colorwayLabel: string = '',
+): Gate {
   // THE SERVER'S REFUSAL COMES FIRST, so the client's first sentence about 3D is the same sentence
   // the server would answer with. The finer conditions below are about assembling ONE turntable out
   // of four sides and are the client's own; they can only narrow this, never widen it.
   const fabric = fabricRenderGate(band);
   if (!fabric.ok) return fabric;
+  /**
+   * ═══ THE DOOR IS MEMBERSHIP IN `render_bench_colorway_ids`, NOT `has_fabric_render` (L-3) ═════
+   *
+   * The contract now says this in capitals on the flag itself: «DO NOT DRAW THE 3D DOOR FROM THIS
+   * FLAG». The two facts legitimately disagree — the flag counts PICTURES on the card, the set
+   * counts OCCUPIED SLOTS — and a card whose fabric render was uploaded but never placed on a side
+   * carries the flag true with the set empty. Under the old rule that card drew an open button
+   * straight into a `no_fabric_render` refusal, which is the outcome the set was added to prevent.
+   *
+   * SCOPED, BECAUSE THE RUN IS SCOPED. A threed run reads ONLY its own colourway's render bench
+   * (`designSelectBench`), so «this card has renders» is no longer an answer to «may THIS run be
+   * asked for»: a card with four ROSSO sides and nothing under OLIVE must refuse OLIVE, or it
+   * would sell a build with no input at all.
+   *
+   * THE FLAG IS STILL READ, ONE LINE ABOVE, AND IT IS NOT A DUPLICATE. It answers the OTHER
+   * question — «this card owns no fabric render AT ALL» — which is the empty-state sentence that
+   * sends a person to the flats, and it cannot contradict this check (no pictures ⇒ no occupied
+   * slots). The finer refusal below then names the colourway rather than the card.
+   */
+  if (!renderBenchOccupied(band.renderBenchColorwayIds, colorwayId)) {
+    const named = colorwayLabel.trim();
+    return {
+      ok: false,
+      reason: named
+        ? `${named} has no fabric render on its bench yet — render this colourway first, then mark its sides. 3D reads ONLY that colourway's bench, never a mixture`
+        : 'the colourway-less bench holds no fabric render — render one without a colourway, or pick a colourway that has renders. 3D reads ONE bench, never a mixture',
+    };
+  }
   const budget = budgetLine(band);
   if (budget?.exhausted) {
     return {
@@ -722,13 +802,13 @@ export function threedGate(band: GetDesignBandResponse): Gate {
       reason: "today's generation ceiling is reached — no new run starts until it resets",
     };
   }
-  const sides = threedSides(band);
+  const sides = threedSides(band, colorwayId);
   const front = sides.find((side) => side.view === 'front');
   if (!front?.picture) {
     // ОТКАЗ НАЗЫВАЕТ ДВЕРЬ, КОТОРАЯ ЕГО СНИМАЕТ. Человек, пометивший рендеры в «renders of this
     // card», приходит сюда именно с вопросом «а где они»; отказ, который про них молчит, отправляет
     // его искать ошибку в генерации.
-    const chosen = chosenRenderPlacements(band).length;
+    const chosen = chosenRenderPlacements(band, colorwayId).length;
     return {
       ok: false,
       // ═══ ОДНА СТОРОНА ОБЯЗАТЕЛЬНА, И ЭТО ФРОНТ (K-10/K-11) ═══════════════════════════════════
