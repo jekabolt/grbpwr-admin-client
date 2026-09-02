@@ -1449,7 +1449,7 @@ export function traceRaster(src: ImageData, opts: TraceOptions = {}): TraceResul
     return refuse(
       `this trace is ${size(bytes)} of strokes against ${size(
         budget,
-      )} left in the layer — ${nodes.toLocaleString('en-US')} nodes at a tolerance of ${tol} px. Nothing was added: thinning it here would move lines that are exactly where the picture put them. Try a tolerance around ${suggest} px, raise the speck size, or trace part of the picture at a time.`,
+      )} left in the layer — ${nodes.toLocaleString('en-US')} nodes at a tolerance of ${tol} px. Nothing was added: thinning it here would move lines that are exactly where the picture put them. Trace it coarser, or lasso part of the picture and trace that.`,
       suggest,
     );
   }

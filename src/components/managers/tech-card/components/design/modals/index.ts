@@ -73,7 +73,6 @@ export {
   rasteriseStrokesOverBase,
 } from './rasterise-layer';
 
-export { SvgImportDoor } from './svg-import-door';
 export {
   arcToCubics,
   importSvg,

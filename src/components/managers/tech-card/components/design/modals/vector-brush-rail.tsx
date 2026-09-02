@@ -11,9 +11,8 @@ import Text from 'ui/components/text';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import type { common_MediaFull } from 'api/proto-http/admin';
 
-import { SvgImportDoor } from './svg-import-door';
-import { TraceRasterGroup, type TraceKnobs, type CentreReading } from './trace-raster-panel';
-import type { TraceReading } from './vector-trace';
+import { TraceRasterGroup } from './trace-raster-panel';
+import type { OnePressStage } from './trace-onepress';
 import {
   DEFAULT_EXPAND_FILL,
   EXPAND_ANCHORS,
@@ -303,6 +302,41 @@ export const TOOL_ICONS: Record<string, React.ReactNode> = {
       <ellipse cx='8' cy='6.4' rx='5.4' ry='4.2' strokeDasharray='1.9 1.7' />
       <path d='M4.9 9.8c-1 1.1-1.3 2.5-.4 3.3' />
       <circle cx='4.9' cy='14' r='1' fill='currentColor' stroke='none' />
+    </Glyph>
+  ),
+  /* ЗАЛИВКА — ВЕДРО С КАПЛЕЙ (G-11: «FILL и HEAL должны иметь свои иконки»).
+     До этой правки в карте не было ни того, ни другого ключа, и `ToolIcon` честно рисовал ПУСТОТУ:
+     два чипа из пяти в полосе пикселей стояли голым словом рядом с тремя нарисованными — то есть
+     ряд читался как незаконченный, а не как ряд.
+     Ведро наклонено к носику; ЖЕРЛО — ЭЛЛИПС, А НЕ ВТОРАЯ ПРЯМАЯ, и это правка по снимку: с
+     прямой второй линией силуэт получался почти тем же, что у ЛАСТИКА в соседнем чипе (тоже
+     наклонённый четырёхугольник с внутренней диагональю), и два инструмента подряд читались как
+     один. Раскрытое жерло говорит «сосуд» мгновенно и у ластика не встречается нигде.
+     Капля — отдельным залитым телом: именно она отличает «заливает» от «несёт». */
+  fill: (
+    <Glyph>
+      <path d='M8 1.7 14.3 8l-4.9 4.9a2 2 0 0 1-2.8 0l-3.5-3.5a2 2 0 0 1 0-2.8Z' />
+      <ellipse cx='11.15' cy='4.85' rx='4.45' ry='1.5' transform='rotate(45 11.15 4.85)' />
+      <path
+        d='M13.6 10.3c.9 1.2 1.4 2.1 1.4 2.6a1.4 1.4 0 0 1-2.8 0c0-.5.5-1.4 1.4-2.6Z'
+        fill='currentColor'
+        stroke='none'
+      />
+    </Glyph>
+  ),
+  /* ЛЕЧИЛКА — ПЛАСТЫРЬ ПО ДИАГОНАЛИ. Язык фотошопа взят намеренно: у этого инструмента нет своего
+     жеста, отличного от кисти, и узнают его именно по пластырю. Две поперечные насечки отбивают
+     подушечку, две перфорации стоят в ней — тем же приёмом «заливка вместо обводки», каким
+     отмечены узлы у `line` и `curve`.
+     Прямоугольник с поворотом, а не путь: капсула, набранная дугами вручную, читается в исходнике
+     как загадка, а её концы всё равно обязаны быть полукругами — форма, которую `rx` держит сама. */
+  heal: (
+    <Glyph>
+      <rect x='1.6' y='5.7' width='12.8' height='4.6' rx='2.3' transform='rotate(-45 8 8)' />
+      <path d='M8.1 5.4 10.6 7.9' />
+      <path d='M5.4 8.1 7.9 10.6' />
+      <circle cx='7.1' cy='7.1' r='.55' fill='currentColor' stroke='none' />
+      <circle cx='8.9' cy='8.9' r='.55' fill='currentColor' stroke='none' />
     </Glyph>
   ),
   // Панорама: лист двигают во все четыре стороны. Рука в боксе 16 юнитов сминается в кляксу,
@@ -1053,8 +1087,18 @@ export type RailProps = {
   undoEvicted: boolean;
   undoCeiling: number;
   undoByteCeiling: number;
-  /* Туда и обратно. */
-  canDownload: boolean;
+  /**
+   * НАРУЖУ — И ТОЛЬКО НАРУЖУ (G-10).
+   *
+   * ⚠ `canDownload` СНЯТ, а не переименован: владелец прямым требованием запретил серую кнопку
+   * («кнопка должна быть сразу активна мы подождем все что нужно подождать»). Ждать разрешено,
+   * показывать мёртвый орган — нет; поэтому вместо запрета кнопка называет СТАДИЮ работы.
+   *
+   * ⚠ ДВЕРИ ИМПОРТА SVG ЗДЕСЬ БОЛЬШЕ НЕТ («SVG аплоуда не должно быть в эдиторе»). Модуль
+   * `svg-import.ts` жив и снят с этой двери не будет: им читает проекцию ПЛАТНЫЙ векторизатор в
+   * `use-trace-vector.ts` — это другая дверь и другой контракт.
+   */
+  downloadStage: string | null;
   onDownload: () => void;
   /**
    * Чем «download SVG» является для ЭТОГО слоя. Слой-файл отдаёт оригинал производителя, а не
@@ -1062,9 +1106,6 @@ export type RailProps = {
    * После Y-3 живёт ПОДСКАЗКОЙ кнопки, а не абзацем на экране, — различие осталось выразимым.
    */
   outNote?: string;
-  frameRatio: number;
-  strokes: VectorStroke[];
-  onImport: (strokes: VectorStroke[], mode: 'add' | 'replace') => void;
   /**
    * ЧТО СЛУЧИТСЯ ПРИ СОХРАНЕНИИ — ПРИНИМАЕТСЯ, НО БОЛЬШЕ НЕ ПЕЧАТАЕТСЯ (Q-12), тем же порядком,
    * что и пропы ленты отмены выше. Абзац «saving writes the vector over «…» into a NEW picture…»
@@ -1124,25 +1165,16 @@ export type RailProps = {
    * что уже лежит, и кладёт результат одним шагом. Инструмент, у которого нельзя провести рукой,
    * стоящий в одном ряду с кистью и ластиком, обещал бы жест, которого нет.
    *
-   * Черновик ручек живёт ЗДЕСЬ же, где черновик обратного кропа, и по той же причине: пока не
-   * нажали, он ничего не значит, а модалке достаётся один вызов с готовыми числами. Исключение —
-   * `traceOpen` и `tracePreview`: их знает модалка, потому что предпросмотр рисуется НА ПЛИТЕ, и
-   * состояние, от которого зависит холст, обязано жить там, где холст.
+   * ⚠ ЧЕРНОВИКА РУЧЕК ЗДЕСЬ БОЛЬШЕ НЕТ (G-7). Ручек нет вовсе: канал, полярность, порог, режим,
+   * допуск и размер сора считает `trace-onepress.ts` замером по самой плите. Осталась стадия
+   * прогона (её показывает кнопка), номер активной области (от него зависит слово на кнопке) и
+   * оценка допуска, которую движок назвал в СВОЁМ отказе.
    */
-  traceOpen: boolean;
-  onTraceOpen: (next: boolean) => void;
-  traceKnobs: TraceKnobs;
-  onTraceKnobs: (next: TraceKnobs) => void;
-  tracePreview: boolean;
-  onTracePreview: (next: boolean) => void;
-  traceBusy: boolean;
+  traceStage: OnePressStage | null;
   traceSelectionNo: number | null;
-  traceBudgetBytes: number;
-  traceReading: TraceReading | null;
-  /** Чтение осевого маршрута — второе, потому что и работа вторая. Довод — у самой панели. */
-  traceCentre: CentreReading | null;
   traceSuggest: number | null;
   onTraceRun: () => void;
+  onTraceCoarser: (tolerance: number) => void;
 };
 
 export function VectorBrushRail(p: RailProps) {
@@ -1860,7 +1892,7 @@ export function VectorBrushRail(p: RailProps) {
                 disabled={p.frozen}
                 onClick={() => p.onDeleteSel(p.activeSel!)}
                 data-delete-inside=''
-                title='remove everything inside this area (⌫) — the PIXELS erase through to transparency, and the lines are cut at the ants line so their outside pieces live on. A feather softens the erased edge.'
+                title='remove everything inside this area (⌫) — the PIXELS are filled with white paper, and the lines are cut at the ants line so their outside pieces live on. A feather softens the edge of the paper. The eraser still rubs through to transparency.'
               >
                 delete inside
               </Button>
@@ -1899,43 +1931,34 @@ export function VectorBrushRail(p: RailProps) {
           чужой файл, другой читает собственные пиксели плиты. Стоя рядом, они читаются как один
           вопрос «откуда взять линии», а не как два разных пульта в разных концах рейки. */}
       <TraceRasterGroup
-        open={p.traceOpen}
-        onOpen={p.onTraceOpen}
-        knobs={p.traceKnobs}
-        onKnobs={p.onTraceKnobs}
-        preview={p.tracePreview}
-        onPreview={p.onTracePreview}
         frozen={p.frozen}
-        busy={p.traceBusy}
+        stage={p.traceStage}
         selectionNo={p.traceSelectionNo}
-        budgetBytes={p.traceBudgetBytes}
-        reading={p.traceReading}
-        centre={p.traceCentre}
         suggest={p.traceSuggest}
         onRun={p.onTraceRun}
+        onCoarser={p.onTraceCoarser}
       />
 
       <div>
         <GroupLabel flush>svg</GroupLabel>
         <div className='flex flex-wrap items-center gap-1.5'>
+          {/* ⚠ БЕЗ `disabled`, И ЭТО НЕ НЕДОСМОТР. Пустая плита, слой-файл без URL, растр без
+              единого штриха — прежде каждый из этих случаев ГАСИЛ кнопку, и человек оставался с
+              серым органом без объяснения. Теперь кнопка отвечает всегда: делом (файл) или
+              словами (снекбар). Долгая работа показывает стадию прямо на себе. */}
           <Button
             variant='secondary'
             size='xs'
-            disabled={!p.canDownload}
+            data-download-svg=''
+            data-download-stage={p.downloadStage ?? ''}
             onClick={p.onDownload}
             title={
               p.outNote ??
-              'the SVG is written by the same renderer that draws this screen; the raster is LINKED underneath, not embedded'
+              'a real vector: one path per line carrying its measured thickness, stitch rows as one path with a dasharray, no raster inside. A plate with no lines is traced first — it can take a moment'
             }
           >
-            download SVG
+            {p.downloadStage ?? 'download SVG'}
           </Button>
-          <SvgImportDoor
-            disabled={p.frozen}
-            frameRatio={p.frameRatio}
-            existing={p.strokes}
-            onApply={p.onImport}
-          />
         </div>
       </div>
 

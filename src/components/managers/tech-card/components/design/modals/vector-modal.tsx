@@ -86,20 +86,8 @@ import {
   type ExpandFill,
 } from './vector-expand';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
-import type { TraceKnobs, CentreReading } from './trace-raster-panel';
-import { measureRaster } from './trace-measure';
-import { centerlineRun } from './trace-centerline';
-import { solveDashes } from './trace-dashes';
-import {
-  DEFAULT_TRACE_MIN_AREA,
-  DEFAULT_TRACE_THRESHOLD,
-  DEFAULT_TRACE_TOLERANCE,
-  traceInk,
-  traceRaster,
-  traceSize,
-  DEFAULT_OPEN_TOLERANCE,
-  type TraceReading,
-} from './vector-trace';
+import { STAGE_WORDS, traceOnePress, type OnePressStage } from './trace-onepress';
+import { layerVectorSvg } from './svg-export';
 import { healMask } from './vector-heal';
 import {
   COPY_NUDGE,
@@ -139,7 +127,7 @@ import {
   renderView,
   seedRaster,
   selectionMask,
-  clearInside,
+  fillInside,
   softenInside,
   stageScratch,
   type PaintMode,
@@ -176,7 +164,6 @@ import {
   strokeStep,
   clampStep,
   gaugeWeight,
-  layerSvg,
   readInk,
   readLayer,
   settleTrace,
@@ -419,6 +406,29 @@ const HIT_PX = 10;
 const Z_STEP = 1.2;
 
 /**
+ * ПОТОЛОК ЗУМА РЕДАКТОРА — СВОЙ, 800% (G-6: «самый большой зум должен быть ещё ближе»).
+ *
+ * Общий `ZOOM_MAX = 2.5` из `canvas-view.ts` не тронут: им живёт полотно сборки, у которого своя
+ * причина стоять на 250% и свои гейты. Здесь потолок передаётся вызовом.
+ *
+ * ПОЧЕМУ 8 И ЧТО ЕГО ОГРАНИЧИВАЕТ. Зум — это CSS-трансформ мира; backing store холста от него не
+ * растёт, поэтому память не ограничивает вовсе. Ограничивает ИНТЕРПОЛЯЦИЯ: на 8× один пиксель
+ * растра (плата 1600) занимает около пяти экранных, и браузер по умолчанию размазывает его
+ * билинейно — «ближе» читалось бы как «мыльнее». Отсюда второй половиной этого пункта идёт
+ * `image-rendering: pixelated` начиная с `PIXELATED_FROM`: с этого масштаба человек смотрит на
+ * ПИКСЕЛИ, и показывать их надо пикселями. Выше восьми смысла нет: всё в редакторе позиционируется
+ * в юнитах платы, а 8× уже даёт ~13 экранных точек на юнит — крупнее самой единицы адресации.
+ */
+const EDITOR_ZOOM_MAX = 8;
+
+/**
+ * С какого масштаба растр рисуется пикселями, а не сглаженной кашей. Три — это точка, где один
+ * пиксель растра занимает около двух экранных: ниже сглаживание ещё помогает, выше оно уже врёт
+ * о том, где проходит край краски, — а ретушь нибом в один юнит (G-5) делается именно по краю.
+ */
+const PIXELATED_FROM = 3;
+
+/**
  * Признак экрана в DOM — тем же приёмом, что `data-assembly-screen`: модалка поверх (страж выхода)
  * живёт в СВОЁМ портале у body, и вернуть фокус экрану после её закрытия можно только найдя его.
  */
@@ -614,33 +624,28 @@ export function VectorModal({
 
   /* ═══ ЛОКАЛЬНАЯ ТРАССИРОВКА ════════════════════════════════════════════════════════════════
    *
-   * Ручки живут в рейке (черновик, ровно как у обратного кропа), а ЗДЕСЬ — только то, от чего
-   * зависит ПЛИТА: открыта ли панель и рисуется ли поверх неё живая бинаризация. Предпросмотр —
-   * холст в стопке платы, и состояние, которым он управляется, обязано жить там же, где стопка.
+   * ⚠ ОТ ВОСЬМИ РУЧЕК ОСТАЛОСЬ ДВА ЧИСЛА (G-7). Ни режима, ни полярности, ни канала, ни порога, ни
+   * допуска, ни размера сора здесь больше нет: их считает `trace-onepress.ts` по самой плите.
+   * Живого предпросмотра бинаризации нет тоже — он существовал, чтобы человек ПРОВЕРИЛ свой ответ
+   * про полярность до обводки, а ответа больше нет.
    *
-   * ЧТЕНИЕ И ОТКАЗ РАЗВЕДЕНЫ ПО РАЗНЫМ ОРГАНАМ НАРОЧНО. Отказ движка уходит в `setRefusal` — в тот
-   * же единственный красный блок над холстом, которым отказывают растр, чтение слоя и сохранение;
-   * второй красный блок в рейке был бы вторым местом, где экран говорит «нет», и человек читал бы
-   * их по очереди. А `traceSuggest` остаётся ЗДЕСЬ и рисуется чипом рядом с ручкой допуска: это не
-   * отказ, а предложение, и трогать его должен тот же палец, который крутит допуск.
+   * ЧТО ОСТАЛОСЬ: `traceStage` — какая стадия прогона идёт (её показывает кнопка, и без неё
+   * долгий прогон читался бы как зависший экран), и `traceSuggest` — допуск, который движок назвал
+   * ОЦЕНКОЙ в своём отказе.
+   *
+   * ОТКАЗ УХОДИТ В `setRefusal` — в тот же единственный красный блок над холстом, которым
+   * отказывают растр, чтение слоя и сохранение; второй красный блок в рейке был бы вторым местом,
+   * где экран говорит «нет», и человек читал бы их по очереди.
    */
-  const [traceOpen, setTraceOpen] = useState(false);
-  const [tracePreview, setTracePreview] = useState(true);
-  const [traceKnobs, setTraceKnobs] = useState<TraceKnobs>({
-    /* Умолчание — осевая: на техническом флэте почти всё нарисовано пером, а не залито. */
-    mode: 'centreline',
-    threshold: DEFAULT_TRACE_THRESHOLD,
-    /* Умолчание допуска — того маршрута, который стоит умолчанием: 0.4 px, число отчёта. */
-    tolerance: DEFAULT_OPEN_TOLERANCE,
-    minArea: DEFAULT_TRACE_MIN_AREA,
-    polarity: 'dark',
-    channel: 'luma',
-  });
-  const [traceReading, setTraceReading] = useState<TraceReading | null>(null);
-  const [traceCentre, setTraceCentre] = useState<CentreReading | null>(null);
+  const [traceStage, setTraceStage] = useState<OnePressStage | null>(null);
   const [traceSuggest, setTraceSuggest] = useState<number | null>(null);
-  const [tracing, setTracing] = useState(false);
-  const tracePreviewRef = useRef<HTMLCanvasElement | null>(null);
+  /**
+   * ⚠ ПОВТОРНЫЙ ВХОД ЗАКРЫВАЕТ РЕФ, А НЕ `disabled` КНОПКИ. Прогон запускают ТРИ пальца — кнопка,
+   * чип «trace coarser» и дверь развилки, — и последняя жмётся ДО того, как рейка вообще
+   * смонтирована. Два прогона на одном растре не «немного медленнее»: каждый кладёт СВОЙ
+   * `commitLines`, и одно ⌘Z сняло бы только половину линий.
+   */
+  const tracingRef = useRef(false);
   const [nodeEdit, setNodeEdit] = useState<EditState | null>(null);
   const nodeEditRef = useRef<EditState | null>(null);
 
@@ -977,25 +982,13 @@ export function VectorModal({
     setActiveSel(null);
     setRefusal(null);
     /**
-     * ЧТЕНИЕ ОБВОДКИ ПРИНАДЛЕЖИТ ВИЗИТУ, А НЕ СЛОЮ. «3 фигуры, 214 узлов, в пределах 0.62 px» —
-     * утверждение о ТОМ прогоне и о ТЕХ пикселях; дожив до следующего открытия над другой платой,
-     * оно называло бы числа, которых на экране больше нет. Ручки при этом возвращаются к
-     * умолчаниям движка тем же движением, что кисть и ниб выше.
+     * ОЦЕНКА ДОПУСКА ПРИНАДЛЕЖИТ ВИЗИТУ, А НЕ СЛОЮ: это число ТОГО отказа о ТЕХ пикселях, и,
+     * дожив до следующего открытия над другой платой, чип «trace coarser» предлагал бы загрубить
+     * прогон, которого не было.
      */
-    setTraceOpen(false);
-    setTracePreview(true);
-    setTraceKnobs({
-      mode: 'centreline',
-      threshold: DEFAULT_TRACE_THRESHOLD,
-      tolerance: DEFAULT_OPEN_TOLERANCE,
-      minArea: DEFAULT_TRACE_MIN_AREA,
-      polarity: 'dark',
-      channel: 'luma',
-    });
-    setTraceReading(null);
-    setTraceCentre(null);
+    setTraceStage(null);
     setTraceSuggest(null);
-    setTracing(false);
+    tracingRef.current = false;
     setConfirmExit(false);
     seededJson.current = JSON.stringify(doc.strokes);
     userMoved.current = false;
@@ -1086,7 +1079,13 @@ export function VectorModal({
       const vp = viewportRef.current;
       if (!vp) return;
       const r = vp.getBoundingClientRect();
-      viewRef.current = zoomAt(viewRef.current, factor, r.width / 2, r.height / 2);
+      viewRef.current = zoomAt(
+        viewRef.current,
+        factor,
+        r.width / 2,
+        r.height / 2,
+        EDITOR_ZOOM_MAX,
+      );
       userMoved.current = true;
       applyView();
     },
@@ -1116,6 +1115,7 @@ export function VectorModal({
           Math.exp(-e.deltaY * 0.0022),
           e.clientX - r.left,
           e.clientY - r.top,
+          EDITOR_ZOOM_MAX,
         );
       } else {
         const { pan, zoom } = viewRef.current;
@@ -2370,7 +2370,7 @@ export function VectorModal({
       linesBase,
       next,
       linesChanged,
-      layer && mask ? () => clearInside(layer, mask!) : null,
+      layer && mask ? () => fillInside(layer, mask!) : null,
     );
     if (layer) {
       clearGesture(layer);
@@ -2665,83 +2665,28 @@ export function VectorModal({
   };
 
   /**
-   * ЖИВОЙ ПРЕДПРОСМОТР БИНАРИЗАЦИИ — ОДНИМ И ТЕМ ЖЕ ПРАВИЛОМ, ЧТО И САМА ОБВОДКА.
+   * ═══ ОБВЕСТИ ПИКСЕЛИ — ОДНО НАЖАТИЕ ═══════════════════════════════════════════════════════
    *
-   * Красит `traceInk` — ТОТ ЖЕ экспорт, которым движок решает «краска или фон» внутри себя. Второй
-   * копии этого правила здесь нет и быть не должно: она разошлась бы с настоящей первой же
-   * правкой, и предпросмотр врал бы ровно про то, ради чего заведён.
-   *
-   * ЗАЧЕМ ОН ВООБЩЕ. Неверная полярность НЕ ОТКАЗЫВАЕТ — она молча объявляет краской всё поле
-   * вокруг рисунка, и обводка возвращает один контур во всю плиту. Отличить это от правильного
-   * результата после обводки уже нельзя; до неё — видно с одного взгляда.
-   *
-   * ЗАВИСИМОСТИ — РОВНО ТРИ РУЧКИ, И ЭТО УТВЕРЖДЕНИЕ, А НЕ ЭКОНОМИЯ. Полярность, канал и порог —
-   * всё, что решает бинаризацию; допуск и размер сора действуют ПОСЛЕ неё, над уже определёнными
-   * пятнами, и подмешать их сюда значило бы обещать, что синяя заливка меняется от допуска.
-   * Выделение здесь тоже участвует: оно пересекается ровно там же, где у движка, — после порога.
-   */
-  useEffect(() => {
-    const cv = tracePreviewRef.current;
-    const layer = rasterRef.current;
-    if (!cv || !layer) return;
-    const src = rasterCtx(layer.doc).getImageData(0, 0, layer.w, layer.h);
-    let selAlpha: Uint8Array | null = null;
-    if (activeArea) {
-      const mask = selectionMask(layer, activeArea.pts, activeArea.feather);
-      if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
-    }
-    const ink = traceInk(src, {
-      threshold: traceKnobs.threshold,
-      polarity: traceKnobs.polarity,
-      channel: traceKnobs.channel,
-      selection: selAlpha,
-    });
-    const out = new ImageData(layer.w, layer.h);
-    const px = out.data;
-    // СИНИЙ, А НЕ КРАСНЫЙ И НЕ ЗЕЛЁНЫЙ: в этой системе синее значит «на полпути, нужен человек», и
-    // предпросмотр — ровно это. Полупрозрачно, потому что под ним обязан читаться сам рисунок:
-    // непрозрачная заливка прятала бы то, с чем её сравнивают.
-    for (let i = 0; i < ink.length; i++) {
-      if (!ink[i]) continue;
-      const p = i * 4;
-      px[p] = 0x23;
-      px[p + 1] = 0x23;
-      px[p + 2] = 0xff;
-      px[p + 3] = 0xb4;
-    }
-    cv.getContext('2d')?.putImageData(out, 0, 0);
-    // `tl` — не украшение в списке: она меняется на каждом уложенном жесте, и без неё синяя
-    // заливка осталась бы показывать пиксели, которых на плите уже нет.
-  }, [
-    traceOpen,
-    tracePreview,
-    traceKnobs.threshold,
-    traceKnobs.polarity,
-    traceKnobs.channel,
-    activeArea,
-    areaKey,
-    rasterReady,
-    tl,
-  ]);
-
-  /**
-   * ОБВЕСТИ ПИКСЕЛИ — ОПЕРАЦИЯ НАД ВСЕЙ ПЛИТОЙ ИЛИ НАД ОБЛАСТЬЮ, ровно как заливка и лечилка, и
-   * читает она ту же пару: `layer.doc` целиком и `selectionAlpha` активного лассо.
+   * Операция над всей плитой или над областью, ровно как заливка и лечилка, и читает она ту же
+   * пару: `layer.doc` целиком и `selectionAlpha` активного лассо. Всё, что раньше спрашивалось
+   * ручками (режим, полярность, канал, порог, допуск, размер сора), теперь МЕРЯЕТСЯ — довод и
+   * числа в `trace-onepress.ts`.
    *
    * ОДИН `commitLines`, И ЭТО НЕСУЩЕЕ. Обводка кладёт сотни штрихов; уложи их по одному — и ⌘Z
    * снимал бы контур по петле, сотню раз, а лента при этом хранила бы сотню шагов. Один вызов
    * единственного писателя списка означает ОДИН шаг ленты: одно ⌘Z снимает всю обводку целиком.
    *
-   * ОТКАЗ НИЧЕГО НЕ МЕНЯЕТ И НИЧЕГО НЕ ПОДБИРАЕТ САМ. Движок умеет назвать допуск, при котором
-   * результат, скорее всего, влез бы, — и называет его ОЦЕНКОЙ. Пересчитать по ней автоматически
-   * значило бы «немного сдвинуть линии, чтобы влезло»: сдвинуть ровно те линии, которые лежат
-   * там, где их поставила картинка. Оценка становится чипом рядом с ручкой; жмёт его человек.
+   * ⚠ ПОСЛЕ ПРОГОНА РУКА САМА БЕРЁТ `select`, И ЭТО ОТВЕТ НА ВТОРУЮ ПОЛОВИНУ ЖАЛОБЫ («я не могу
+   * ничего все равно менять»). Линии УЖЕ были правимыми объектами; невидимым это было потому, что
+   * в руке оставался инструмент, который по ним рисует, а не берёт их. Один щелчок по линии
+   * открывает её узлы — но только если рука к этому готова.
+   *
+   * СНЕКБАР, А НЕ БЛОК НА ЭКРАНЕ. Числа прогона — событие, а не свойство панели: отчёт, который
+   * висел бы в рейке до следующего прогона (G-9), владелец снял прямым требованием.
    */
-  const runTrace = async () => {
-    if (frozenRef.current) return;
+  const runTraceOnePress = async (tolerance?: number) => {
+    if (frozenRef.current || tracingRef.current) return;
     setRefusal(null);
-    setTraceReading(null);
-    setTraceCentre(null);
     setTraceSuggest(null);
     const layer = await ensureRaster();
     if (!layer || frozenRef.current) return;
@@ -2754,119 +2699,47 @@ export function VectorModal({
       if (mask) selAlpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
     }
 
-    /**
-     * ═══ ОСЕВАЯ — ДРУГОЙ МАРШРУТ, А НЕ ДРУГАЯ НАСТРОЙКА ОДНОГО ═══════════════════════════════
-     *
-     * Обвод спрашивает у человека порог; осевая находит его сама (деление на фон, белая точка,
-     * глобальный Otsu) — поэтому и ручки у них разные, и панель это говорит вслух.
-     *
-     * ЛАССО ЗДЕСЬ РАБОТАЕТ ИНАЧЕ, И ЭТО НАЗВАНО. Измеритель выделения не принимает вовсе: он
-     * меряет ВСЮ картинку, потому что толщина, KDE-моды и коллинеарная поддержка — свойства
-     * рисунка целиком, и посчитанные по обрезку они означали бы другое. Поэтому область
-     * применяется К ИСХОДНИКУ: за её пределами кладётся бумага. Разница с обводом честная —
-     * фигура, пересекающая край области, у обвода вернётся ОБРЕЗАННОЙ вместе с краем лассо, а
-     * здесь просто не будет измерена.
-     *
-     * ДВА ДВИЖКА НА ОДНОМ ИЗМЕРЕНИИ. `traceCenterline` снимает ось со сплошных штрихов,
-     * `solveDashes` собирает стежки в ряды. Оба читают ОДИН `TraceMeasurement`: второй проход
-     * измерителя дал бы второй набор компонент с другими номерами, и «ряд собран из компонент,
-     * которых нет в этом чтении» — ровно тот сорт расхождения, который не виден на экране.
-     */
-    if (traceKnobs.mode === 'centreline') {
-      let img = src;
-      if (selAlpha) {
-        const clipped = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
-        for (let i = 0, n = src.width * src.height; i < n; i++) {
-          if (selAlpha[i] === 0) {
-            clipped.data[i * 4] = 255;
-            clipped.data[i * 4 + 1] = 255;
-            clipped.data[i * 4 + 2] = 255;
-            clipped.data[i * 4 + 3] = 255;
-          }
-        }
-        img = clipped;
-      }
-      setBusy('measuring the drawing…');
-      setTracing(true);
-      let centre;
-      let dash;
-      try {
-        const m = measureRaster(img);
-        centre = centerlineRun(m, { ratio: ratio || DEFAULT_RATIO, tolerance: traceKnobs.tolerance });
-        dash = solveDashes(m, { tolerance: traceKnobs.tolerance });
-      } finally {
-        setBusy(null);
-        setTracing(false);
-      }
-      if (frozenRef.current) return;
-      const born = [...centre.strokes, ...dash.strokes];
-      /**
-       * ПОТОЛОК ПРОВЕРЯЕТСЯ ЗДЕСЬ, ПОТОМУ ЧТО ДВИЖКА ДВА. Каждый мерил СВОИ байты и про соседа не
-       * знал: два «влезаю» подряд складываются в «не влезает», и узнал бы об этом человек от
-       * сервера, отказавшего всему слою. Считается то, что реально уедет — оба списка вместе с
-       * тем, что уже лежит в документе.
-       */
-      const bytes = new TextEncoder().encode(
-        writeLayer([...strokesRef.current, ...born], ratio || DEFAULT_RATIO),
-      ).length;
-      if (bytes > MAX_STROKES_BYTES) {
-        setRefusal(
-          `the drawing traced into ${born.length} lines, and that is ${traceSize(bytes)} against a ceiling of ${traceSize(
-            MAX_STROKES_BYTES,
-          )} for one layer. Nothing was written. Raise the tolerance and trace again, or trace one lasso area at a time — thinning it here would move lines that were measured on purpose.`,
-        );
-        return;
-      }
-      setTraceCentre({
-        strokes: born.length,
-        nodes: centre.nodes,
-        junctions: centre.junctions,
-        deviation: centre.deviation,
-        bytes,
-        rows: dash.chains.length,
-        pairs: dash.pairs.length,
-        notes: [...centre.notes, ...dash.notes],
-      });
-      if (born.length === 0) return;
-      commitLines([...strokesRef.current, ...born]);
-      return;
-    }
-
-    setBusy('tracing…');
-    setTracing(true);
+    tracingRef.current = true;
     let res;
     try {
-      res = traceRaster(src, {
-        threshold: traceKnobs.threshold,
-        polarity: traceKnobs.polarity,
-        channel: traceKnobs.channel,
-        tolerance: traceKnobs.tolerance,
-        minArea: traceKnobs.minArea,
-        selection: selAlpha,
-        /**
-         * ОСТАТОК, А НЕ ПОТОЛОК. В слое уже может лежать час работы пером; движок, которому
-         * назвали весь потолок, пообещал бы «влезет» на обводке, после которой документ
-         * перестал бы сохраняться вовсе, — и узнал бы об этом человек от сервера.
-         */
-        budgetBytes: MAX_STROKES_BYTES - payloadBytes,
+      res = await traceOnePress(src, {
         ratio: ratio || DEFAULT_RATIO,
+        selection: selAlpha,
+        existing: strokesRef.current,
+        tolerance,
+        onStage: (stage) => {
+          setTraceStage(stage);
+          setBusy(STAGE_WORDS[stage]);
+        },
       });
     } finally {
+      tracingRef.current = false;
+      setTraceStage(null);
       setBusy(null);
-      setTracing(false);
     }
+    if (frozenRef.current) return;
 
     if (!res.ok) {
       setRefusal(res.reason);
       setTraceSuggest(res.suggestTolerance ?? null);
       return;
     }
-    setTraceReading(res);
-    // ПУСТАЯ ОБВОДКА НЕ КЛАДЁТСЯ В ЛЕНТУ. «Ни одного пятна при этом пороге» — это законный
-    // результат со своим замечанием, а не изменение документа; шаг ленты «ничего на ничего»
-    // означал бы, что одно ⌘Z после него не делает ровно ничего.
-    if (res.strokes.length === 0) return;
+    /* ПУСТАЯ ОБВОДКА НЕ КЛАДЁТСЯ В ЛЕНТУ. «Ни одной линии на этой плите» — законный результат, а
+       не изменение документа; шаг ленты «ничего на ничего» означал бы, что одно ⌘Z после него не
+       делает ровно ничего, а нажатие человек уже потратил. */
+    if (res.strokes.length === 0) {
+      showMessage('nothing on this plate reads as a drawn line', 'error');
+      return;
+    }
     commitLines([...strokesRef.current, ...res.strokes]);
+    switchTool('select');
+    const parts = [`${res.strokes.length} line${res.strokes.length === 1 ? '' : 's'} traced`];
+    if (res.rows > 0) parts.push(`${res.rows} stitch row${res.rows === 1 ? '' : 's'}`);
+    if (res.spots > 0) parts.push(`${res.spots} filled spot${res.spots === 1 ? '' : 's'}`);
+    showMessage(
+      `${parts.join(' · ')} — click one to edit it, drag its nodes, ⌫ deletes it`,
+      'success',
+    );
   };
 
   const pickStep = (px: number) => {
@@ -3132,30 +3005,133 @@ export function VectorModal({
   };
 
   /**
-   * СКАЧАТЬ SVG. Слой, рождённый файлом, отдаёт ФАЙЛ — контракт говорит это дословно: «download
-   * SVG hands back THIS media, never a re-serialisation of the strokes». Круг через собственный
-   * формат холста — не тот файл, который производитель вернул, а тихая подмена одного другим —
-   * ровно то, как поставщику уезжает не тот чертёж, который принимали. Слой без файла (рисованный)
-   * сериализуется, как и раньше: там штрихи и ЕСТЬ оригинал.
+   * ═══ СКАЧАТЬ SVG — КНОПКА, КОТОРАЯ НЕ БЫВАЕТ СЕРОЙ (G-10) ════════════════════════════════
+   *
+   * Владелец: «свг данлоуд экспорт который нам будет выдавать хороший вектор без хуйни и кнопка
+   * должна быть сразу активна мы подождем все что нужно подождать». Отсюда ЧЕТЫРЕ ветки, и ни
+   * одна из них не «ничего не произошло»:
+   *
+   *  1. СЛОЙ-ФАЙЛ С ЖИВЫМ URL → отдаётся ОРИГИНАЛ производителя. Контракт говорит это дословно:
+   *     «download SVG hands back THIS media, never a re-serialisation of the strokes». Круг через
+   *     собственный формат — тихая подмена одного чертежа другим, ровно то, как поставщику уезжает
+   *     не тот файл, который принимали.
+   *  2. ЕСТЬ ШТРИХИ → `svg-export` по ним. ⚠ РАСТР ПРИ ЭТОМ НЕ ТРАССИРУЕТСЯ, и это осознанный
+   *     отход от плана круга. План предлагал добавлять трассу растра группой рядом; но самый
+   *     частый путь владельца — «обвёл плиту одним нажатием, поправил пару линий, выгрузил», и на
+   *     нём добавка означала бы КАЖДУЮ ЛИНИЮ ДВАЖДЫ: один раз правленую рукой, один раз заново
+   *     снятую с тех же пикселей. Дубль в файле хуже отсутствия: его не видно на глаз и он
+   *     удваивает узлы.
+   *  3. ШТРИХОВ НЕТ, А ПИКСЕЛИ ЕСТЬ → `trace-onepress` ПРЯМО В ПАМЯТИ. Документ не трогается
+   *     вовсе: ни шага ленты, ни коммита, — значит потолок слоя в 512 КБ здесь ни при чём, и
+   *     плита, которая не влезла бы в документ, всё равно выгружается файлом.
+   *  4. ПУСТО ВОВСЕ → снекбар словами. Не серая кнопка: «нечего выгружать» это ответ, а
+   *     недоступный орган — загадка.
+   *
+   * Подмена НАЗЫВАЕТСЯ: слой-файл, чей оригинал не достаётся из корзины, отдаёт структурный
+   * экспорт и говорит об этом вслух — молчаливая подмена здесь стоила бы чужого чертежа.
    */
+  const downloadingRef = useRef(false);
+  const [downloadStage, setDownloadStage] = useState<string | null>(null);
+
   const download = () => {
+    if (downloadingRef.current) return;
+    const w = RASTER_FALLBACK_W;
+    const h = Math.round(w / (ratio || DEFAULT_RATIO));
+    const name = () => `${base ? pictureHandle(base) : 'drawing'}`;
+
+    // 1 · оригинал производителя.
     if (fileMediaId > 0 && fileUrl) {
+      downloadingRef.current = true;
+      setDownloadStage('fetching the original…');
       void (async () => {
         try {
           saveBlob(await fetchMediaBlob(fileUrl));
         } catch {
-          showMessage(
-            'the vector file could not be fetched from the bucket — nothing was downloaded. Try again.',
-            'error',
-          );
+          const svg = layerVectorSvg(strokesRef.current, { width: w, height: h });
+          if (svg) {
+            saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
+            showMessage(
+              'the vectoriser’s original could not be fetched — exported the editable projection instead',
+              'error',
+            );
+          } else {
+            showMessage(
+              'the vector file could not be fetched from the bucket, and this layer holds no strokes of its own to export instead',
+              'error',
+            );
+          }
+        } finally {
+          downloadingRef.current = false;
+          setDownloadStage(null);
         }
       })();
       return;
     }
-    const w = RASTER_FALLBACK_W;
-    const h = Math.round(w / (ratio || DEFAULT_RATIO));
-    const svg = layerSvg(strokes, { width: w, height: h, baseHref: baseSrc || undefined });
-    saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
+
+    /**
+     * 1б · СЛОЙ-ФАЙЛ, У КОТОРОГО ОРИГИНАЛА НЕ ДОСТАТЬ. Раньше здесь кнопка просто гасла
+     * (`canDownload = fileMediaId > 0 ? !!fileUrl : …`) — то есть человек оставался с серым
+     * органом и без объяснения. Теперь выгрузка идёт дальше по общим веткам, но ПОДМЕНА
+     * НАЗЫВАЕТСЯ: то, что уедет, — не файл производителя, а проекция, которую редактор умеет
+     * построить сам. Молчаливая подмена здесь стоила бы чужого чертежа у поставщика.
+     */
+    if (fileMediaId > 0 && !fileUrl) {
+      showMessage(
+        'the vectoriser’s original is not on this screen, so it cannot be handed back — exporting the editable projection instead',
+        'error',
+      );
+    }
+
+    // 2 · штрихи есть — они и есть чертёж.
+    const drawn = strokesRef.current;
+    if (drawn.length > 0) {
+      const svg = layerVectorSvg(drawn, { width: w, height: h });
+      if (!svg) {
+        showMessage('nothing on the plate yet', 'error');
+        return;
+      }
+      saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
+      showMessage(`${drawn.length} line${drawn.length === 1 ? '' : 's'} written to ${name()}-vector.svg`, 'success');
+      return;
+    }
+
+    // 3 · штрихов нет — обвести пиксели В ПАМЯТИ и выгрузить результат.
+    downloadingRef.current = true;
+    void (async () => {
+      try {
+        const layer = await ensureRaster();
+        if (!layer) {
+          showMessage('nothing on the plate yet', 'error');
+          return;
+        }
+        const src = rasterCtx(layer.doc).getImageData(0, 0, layer.w, layer.h);
+        const res = await traceOnePress(src, {
+          ratio: ratio || DEFAULT_RATIO,
+          /* ПОТОЛОК СЛОЯ ЗДЕСЬ НИ ПРИ ЧЁМ: в документ не уезжает ни один штрих. Поэтому список
+             «что уже лежит» пуст — иначе отказ по байтам сорвал бы выгрузку файла, который
+             сохранять никто и не собирался. */
+          onStage: (stage) => setDownloadStage(STAGE_WORDS[stage]),
+        });
+        if (!res.ok) {
+          showMessage(res.reason, 'error');
+          return;
+        }
+        setDownloadStage('writing the file…');
+        const svg = layerVectorSvg(res.strokes, { width: w, height: h });
+        if (!svg) {
+          showMessage('nothing on the plate yet', 'error');
+          return;
+        }
+        saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
+        showMessage(
+          `${res.strokes.length} line${res.strokes.length === 1 ? '' : 's'} traced from the pixels and written to ${name()}-vector.svg — the drawing itself was not changed`,
+          'success',
+        );
+      } finally {
+        downloadingRef.current = false;
+        setDownloadStage(null);
+      }
+    })();
   };
 
   // ── выход ──────────────────────────────────────────────────────────────────────────────────
@@ -3606,16 +3582,15 @@ export function VectorModal({
                 baseMediaId={baseMediaId}
                 ratio={ratio || DEFAULT_RATIO}
                 onDraw={() => setEntered(true)}
-                /* ТРЕТИЙ ОТВЕТ РАЗВИЛКИ ВЕДЁТ В РЕДАКТОР С ОТКРЫТОЙ ПАНЕЛЬЮ И ЗАЖЖЁННЫМ
-                   ПРЕДПРОСМОТРОМ, НО НЕ ОБВОДИТ. Порог решает, что станет контуром, а неверная
-                   полярность отказом не сопровождается — она молча обводит всё поле; обводка «в
-                   один щелчок с умолчаниями» иногда возвращала бы рамку вместо рисунка, и это
-                   было бы первое, что человек увидел бы от бесплатной двери. */
+                /* ⚠ ТРЕТИЙ ОТВЕТ РАЗВИЛКИ ТЕПЕРЬ И ОБВОДИТ, А НЕ ТОЛЬКО ВЕДЁТ В РЕДАКТОР.
+                   Прежний довод («умолчания могут молча обвести рамку вместо рисунка, потому что
+                   неверная полярность не отказывает») закрыт: полярность больше не умолчание, она
+                   МЕРЯЕТСЯ — краска это класс Otsu, которого меньше. Дверь обещает словами «trace
+                   the pixels as they are», и человек, нажавший её, вправе увидеть линии, а не ещё
+                   одну кнопку с тем же словом. */
                 onTraceHere={() => {
                   setEntered(true);
-                  setTraceOpen(true);
-                  setTracePreview(true);
-                  void ensureRaster();
+                  void runTraceOnePress();
                 }}
                 onAccepted={adoptImported}
               />
@@ -3682,22 +3657,15 @@ export function VectorModal({
                     rasterRef.current ? `${rasterRef.current.w}×${rasterRef.current.h}` : ''
                   }
                   // Слой-файл отдаёт ФАЙЛ (и только когда URL известен); рисованный слой —
-                  // сериализацию своих штрихов. Довод — у `download`.
-                  canDownload={fileMediaId > 0 ? !!fileUrl : strokes.length > 0}
+                  // экспорт своих штрихов; плита без штрихов — обводку в памяти. Довод — у
+                  // `download`. Запрета нет ни у одной ветки: у каждой есть ответ.
+                  downloadStage={downloadStage}
                   onDownload={download}
                   outNote={
                     fileMediaId > 0
                       ? '«download SVG» hands back the layer’s ORIGINAL file — the one the vectoriser produced — never a re-serialisation. Strokes drawn here live on the layer and in saved pictures, not inside the file.'
                       : undefined
                   }
-                  frameRatio={ratio || DEFAULT_RATIO}
-                  strokes={strokes}
-                  onImport={(incoming, mode) => {
-                    commitLines(
-                      mode === 'replace' ? incoming : [...strokesRef.current, ...incoming],
-                    );
-                    setSelected(null);
-                  }}
                   saveNote={saveNote}
                   backdrop={backdrop}
                   backdropKey={bdKey}
@@ -3734,29 +3702,14 @@ export function VectorModal({
                     putBackdrop(fitBackdrop(b, plateRect, mode));
                   }}
                   onBackdropRemove={() => putBackdrop(null)}
-                  traceOpen={traceOpen}
-                  /* ОТКРЫТАЯ ПАНЕЛЬ ЗАВОДИТ РАСТР СРАЗУ. Он ленивый и до первого пиксельного
-                     инструмента не существует вовсе — а предпросмотр без него не рисуется НИЧЕМ:
-                     человек жал бы «show the ink» и видел пустую плиту, не понимая, порог у него
-                     неверный или орган сломан. Обводке растр нужен так же, как кисти. */
-                  onTraceOpen={(next) => {
-                    setTraceOpen(next);
-                    if (next) void ensureRaster();
-                  }}
-                  traceKnobs={traceKnobs}
-                  onTraceKnobs={setTraceKnobs}
-                  traceCentre={traceCentre}
-                  tracePreview={tracePreview}
-                  onTracePreview={setTracePreview}
-                  traceBusy={tracing}
+                  traceStage={traceStage}
                   traceSelectionNo={activeSel}
-                  /* ОСТАТОК ДОКУМЕНТА ОДНИМ ЧИСЛОМ, ТЕМ ЖЕ, КОТОРОЕ УЕЗЖАЕТ В ДВИЖОК. Второе
-                     число на экране («примерно столько влезет») разошлось бы с настоящим замером
-                     `writeLayer` и обещало бы то, чего не будет. */
-                  traceBudgetBytes={Math.max(0, MAX_STROKES_BYTES - payloadBytes)}
-                  traceReading={traceReading}
                   traceSuggest={traceSuggest}
-                  onTraceRun={() => void runTrace()}
+                  onTraceRun={() => void runTraceOnePress()}
+                  /* ЧИП ЗАПУСКАЕТ САМ, А НЕ СТАВИТ ЧИСЛО В ПОЛЕ. Поля больше нет, и «поставил
+                     допуск» превратилось бы в жест, после которого надо вспомнить нажать ещё
+                     что-то. Оценку назвал движок — он же её и применяет. */
+                  onTraceCoarser={(tolerance) => void runTraceOnePress(tolerance)}
                 />
 
                 <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-1'>
@@ -3964,27 +3917,22 @@ export function VectorModal({
                           role='img'
                           aria-label={`the pixel layer${base ? ` over «${pictureHandle(base)}»` : ''} — ${rasterDirty ? 'painted' : 'a copy of the picture underneath'}`}
                           className='pointer-events-none absolute inset-0 block h-full w-full'
+                          /* ═══ БЛИЖЕ ТРЁХКРАТНОГО СМОТРЯТ НА ПИКСЕЛИ, А НЕ НА КАРТИНКУ (G-6) ═══
+                             Билинейное сглаживание браузера на 8× размазывает край краски на
+                             половину экранного сантиметра, и ретушь нибом в один юнит делается
+                             вслепую: видно пятно, а не то, какие пиксели оно накрыло. Атрибут
+                             ставится ПОРОГОМ, а не всегда, потому что на 100% то же правило дало
+                             бы лестницу на всякой фотографической подложке. */
+                          style={{
+                            imageRendering: zoomPct >= PIXELATED_FROM * 100 ? 'pixelated' : 'auto',
+                          }}
                         />
                       )}
-                      {/* ═══ ЖИВАЯ БИНАРИЗАЦИЯ ТРАССИРОВЩИКА ══════════════════════════════════
-                          Синяя заливка — ровно те пиксели, которые движок назовёт краской, и
-                          считает её `traceInk`, а не вторая копия правила (довод — у эффекта,
-                          который её красит). Стоит ПОВЕРХ растра и ПОД штрихами: сравнивают её с
-                          картинкой, а не с тем, что уже нарисовано, и линия, только что уложенная
-                          обводкой, обязана лечь ПОВЕРХ своего же предпросмотра — иначе синее
-                          закрывало бы результат ровно там, где на него смотрят.
-                          Разрешение — растровое, растяжение в плату то же, что у холста: доли
-                          кадра значат на обоих одно и то же. */}
-                      {traceOpen && tracePreview && rasterReady && rasterRef.current && (
-                        <canvas
-                          ref={tracePreviewRef}
-                          width={rasterRef.current.w}
-                          height={rasterRef.current.h}
-                          data-trace-preview=''
-                          aria-hidden
-                          className='pointer-events-none absolute inset-0 block h-full w-full'
-                        />
-                      )}
+                      {/* ⚠ ЖИВОЙ БИНАРИЗАЦИИ ЗДЕСЬ БОЛЬШЕ НЕТ (G-7). Синяя заливка показывала,
+                          что движок СЧИТАЕТ КРАСКОЙ при выбранной человеком полярности, — то есть
+                          существовала ради проверки ответа, которого человек больше не даёт.
+                          Оставить её значило бы держать холст в стопке платы ради утверждения,
+                          которое некому опровергнуть. */}
                       {backdrop && backdrop.depth === 'over' && (
                         /* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
                            сама сцена, и `pointer-events` на картинке только отняли бы у неё
