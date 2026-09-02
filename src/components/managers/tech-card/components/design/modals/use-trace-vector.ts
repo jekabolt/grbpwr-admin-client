@@ -29,8 +29,11 @@ import { encodeStrokesWire, writeLayer, type VectorStroke } from './vector-strok
  * anything until a person has looked and pressed «keep».
  *
  * THE MONEY GOES THROUGH THE ONE DOOR. `StartDesignRun(kind = 'vector')` — the same paid-run verb
- * as every generation, with the same server gate (a provider configured for this kind — the
- * budget ceiling and the hourly one are gone, and «one run in flight» never existed). This hook copies the gates NOWHERE: the door stays live and the server's
+ * as every generation. Серверных причин отказа, которые этот файл знает по имени, ДВЕ:
+ * маршрут не выкачен и у рода нет провайдера. Потолок дня снесён как понятие (0358), а
+ * «часовой предел» и «один прогон в полёте» не существовали на сервере ни дня.
+ *
+ * This hook copies the gates NOWHERE: the door stays live and the server's
  * refusal is shown in words, because a client-side copy of a server rule is a copy that drifts
  * (the flag lives next to the check, and the check is on the server).
  *
