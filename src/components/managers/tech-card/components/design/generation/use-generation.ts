@@ -35,8 +35,8 @@ export function useGenerationWrites(techCardId?: number) {
   const onError = useCallback(
     (error: unknown) => {
       showMessage((error as Error)?.message || 'the run did not start', 'error');
-      // Even a refusal moves the day's money on the server (a reservation released, an attempt
-      // billed), so the band is re-read rather than left showing a budget from before the attempt.
+      // Even a refusal moves money on the server (a reservation released, an attempt billed), so
+      // the band is re-read rather than left showing prices from before the attempt.
       invalidate();
     },
     [showMessage, invalidate],

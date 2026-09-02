@@ -1,4 +1,3 @@
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import type { JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -6,7 +5,7 @@ import Text from 'ui/components/text';
 
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
-import { budgetLine, type Gate } from './model';
+import type { Gate } from './model';
 
 /**
  * THE GENERATE ROW — one button, one refusal, one money line, on both generative screens.
@@ -24,22 +23,27 @@ import { budgetLine, type Gate } from './model';
  * missing button teaches «this admin has no renders», a dead one with a reason teaches «front is
  * empty», and only the second is true.
  *
- * ═══ ДНЕВНОЙ РАСХОД ОТСЮДА СНЯТ (T-12) ═══════════════════════════════════════════════════════
+ * ═══ ДНЕВНОГО ПОТОЛКА НЕТ — НИ КАК ЧИСЛА, НИ КАК ЗАПРЕТА ═════════════════════════════════════
  *
- * Владелец, дословно: «today US$0.4074 of US$2.00 — нам надо показывать только цену генерации и
- * все». Здесь печаталась ровно эта строка, обоими генеративными экранами.
+ * Двумя кругами это уходило в два приёма, и второй отменяет первый.
  *
- * ПОТОЛОК ПРИ ЭТОМ ПРОДОЛЖАЕТ ГЕЙТИТЬ ЗАПУСК, и это не оговорка: отказ по исчерпанному бюджету
- * ставит сервер, а `renderGate`/`threedGate` лишь читают тот же факт заранее, чтобы не собирать
- * отказ дороже. Ушёл ПОКАЗ ЧИСЕЛ, а не проверка.
+ * КРУГ 4 (T-12) снял ЧИСЛА: «today US$0.4074 of US$2.00 — нам надо показывать только цену
+ * генерации и все». Полоса `today $x of $y` печаталась ровно здесь. Тогда осталась одна фраза без
+ * сумм — «today’s generation ceiling is reached», — потому что при исчерпанном дне `GENERATE`
+ * всё равно была мертва и молчащий экран читался бы как поломка.
  *
- * ЧТО ОСТАЛОСЬ НА ЭКРАНЕ ПРИ ИСЧЕРПАНИИ — ОДНА ФРАЗА БЕЗ СУММ. Совсем немой экран здесь хуже
- * лишней строки: `GENERATE` мертва, и единственное объяснение жило бы в `title` мёртвой двери, то
- * есть под наведением мыши. Человек, пришедший запустить прогон, читал бы это как поломку. Фраза
- * называет состояние и не называет ни одного числа — ни списанного, ни потолка.
+ * ТЕПЕРЬ СНЯТ САМ ПОТОЛОК: «у нас в принципе не должно быть потолка похуй чем он съеден убери
+ * потолок». Сервер снёс колонку, оба отказа и повод `budget_exceeded`; `DesignBudget.cap` стал
+ * `reserved 4`. Фраза ушла ВМЕСТЕ с состоянием, которое она называла, — а не осталась висеть
+ * условием, которое никогда не истинно. Строка про деньги на этом ряду теперь ровно одна и всегда
+ * одна и та же: `{shape} · priced by the server when the run starts`.
+ *
+ * НИЧЕГО НА ЕЁ МЕСТО НЕ ВСТАЛО, И ЭТО ТОЖЕ ПО СЛОВУ ВЛАДЕЛЬЦА. Дневная сумма без потолка не
+ * отвечает ни на один вопрос, который человек задаёт на этом экране: решение он принимает по цене
+ * ПРОГОНА, и она обещана здесь же, а называется на строке прогона в истории. Число, по которому
+ * никто не действует, в этой системе — украшение.
  */
 export function GenerateRow({
-  band,
   gate,
   /** What is about to be asked for, in the shape the human can check: «3 pictures · one per side». */
   shape,
@@ -52,7 +56,6 @@ export function GenerateRow({
    */
   onInspect,
 }: {
-  band: GetDesignBandResponse;
   gate: Gate;
   shape: string;
   pending?: boolean;
@@ -61,8 +64,6 @@ export function GenerateRow({
   onInspect?: () => void;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
-  /** Читается ТОЛЬКО ради флага «потолок выбран». Ни `spent`, ни `cap` на экран не идут. */
-  const ceilingReached = !!budgetLine(band)?.exhausted;
 
   const frozen = disabled
     ? 'this card is read-only for you — a run spends money, so it is one of the writes that stops here'
@@ -101,15 +102,18 @@ export function GenerateRow({
         />
       )}
 
-      <Text size='micro' variant='label' component='span' className='min-w-0'>
+      {/* ОДНА СТРОКА ПРО ДЕНЬГИ, БЕЗУСЛОВНАЯ. Справа от неё стояла фраза про исчерпанный день;
+          дня-потолка больше нет, и `data-probe` держится на самой строке, чтобы проба спрашивала
+          орган, который экран действительно рисует, а не тот, которого не стало. */}
+      <Text
+        size='micro'
+        variant='label'
+        component='span'
+        data-probe='run-price'
+        className='min-w-0'
+      >
         {shape} · priced by the server when the run starts
       </Text>
-
-      {ceilingReached && (
-        <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-          today’s generation ceiling is reached — no new run starts until it resets
-        </Text>
-      )}
     </div>
   );
 }

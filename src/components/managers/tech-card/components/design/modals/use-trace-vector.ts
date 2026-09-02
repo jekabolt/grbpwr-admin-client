@@ -29,8 +29,8 @@ import { encodeStrokesWire, writeLayer, type VectorStroke } from './vector-strok
  * anything until a person has looked and pressed «keep».
  *
  * THE MONEY GOES THROUGH THE ONE DOOR. `StartDesignRun(kind = 'vector')` — the same paid-run verb
- * as every generation, with the same server gates (budget, hourly ceiling, one run in flight,
- * provider configured). This hook copies the gates NOWHERE: the door stays live and the server's
+ * as every generation, with the same server gate (a provider configured for this kind — the
+ * budget ceiling and the hourly one are gone, and «one run in flight» never existed). This hook copies the gates NOWHERE: the door stays live and the server's
  * refusal is shown in words, because a client-side copy of a server rule is a copy that drifts
  * (the flag lives next to the check, and the check is on the server).
  *
@@ -84,12 +84,12 @@ export function startRefusalText(error: unknown): string {
     return 'this server does not know the vector run yet — the routes are not deployed. Nothing was charged.';
   if (has('kind_not_available'))
     return 'machine vectorisation is switched off on this contour — the vector route has no provider configured (kind_not_available). Nothing was charged; drawing over the raster works as always.';
-  if (has('budget_exceeded'))
-    return 'today’s generation budget is spent (budget_exceeded) — the run was refused before any money moved. The bar resets with the budget’s own day.';
-  if (has('run_in_flight'))
-    return 'another run on this card is still in flight (run_in_flight) — one at a time. Watch it in the history; press again when it lands.';
-  if (has('hourly_limit'))
-    return 'the hourly ceiling on runs was reached (hourly_limit) — nothing was charged. Wait a little and press again.';
+  /* ⚠ ЗДЕСЬ СТОЯЛИ ТРИ ВЕТКИ, И НИ ОДНА БОЛЬШЕ НЕ МОЖЕТ СРАБОТАТЬ. `budget_exceeded` исчез
+   * вместе с самим потолком (0358: понятие снесено, а не поднято), а `run_in_flight` и
+   * `hourly_limit` были перечислены в контракте отказов и НЕ СУЩЕСТВОВАЛИ в коде сервера ни
+   * дня — то есть две из трёх врали читателю с самого начала. Снизу и так лежит правило этого
+   * файла: `if (raw) return raw` печатает слова сервера дословно, поэтому откат бинаря на
+   * старый не оставляет человека без объяснения. */
   if (raw) return raw;
   return 'the run did not start. Nothing was filed and nothing was charged — pressing again carries the same request id, so a run that DID start comes back instead of a second paid one.';
 }

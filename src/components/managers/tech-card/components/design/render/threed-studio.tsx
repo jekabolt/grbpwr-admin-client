@@ -332,7 +332,6 @@ export function ThreedStudio({
         </FieldRow>
 
         <GenerateRow
-          band={band}
           gate={gate}
           shape={shape}
           pending={run.isPending}

@@ -29,8 +29,9 @@ export function useDraftDesignIdea(techCardId?: number) {
         techCardId: techCardId ?? 0,
         clientRequestId: input.clientRequestId,
       }),
-    // Прогон встал в реестр и подвинул дневной бюджет — полоса обязана перечитаться, иначе
-    // счётчик денег на соседних органах отстаёт ровно на один платный вызов.
+    // Прогон встал в реестр — полоса обязана перечитаться, иначе его строка и её ЦЕНА появятся
+    // только со следующим опросом, а платный вызов уже случился. (Дневной суммы на экране нет и
+    // не будет: потолок снят, показывается цена прогона.)
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: designKeys.band(techCardId ?? 0) });
     },
@@ -38,18 +39,23 @@ export function useDraftDesignIdea(techCardId?: number) {
 }
 
 /**
- * Отказ, сказанный словами технолога. Сервер называет две предпосылки токенами
- * (`no_moodboard`, `budget_exceeded`), и обе — не поломка, а состояние карточки: их нельзя
- * показывать как «что-то сломалось», потому что чинить нечего, надо доложить картинок или
- * дождаться завтра.
+ * Отказ, сказанный словами технолога. Сервер называет предпосылку токеном (`no_moodboard`), и это
+ * не поломка, а состояние карточки: показывать это как «что-то сломалось» нельзя, потому что
+ * чинить нечего — надо доложить картинок.
+ *
+ * ВТОРЫМ ЗДЕСЬ СТОЯЛ `budget_exceeded` («today’s generation budget is spent»). Такого отказа
+ * больше НЕ СУЩЕСТВУЕТ: сервер снёс дневной потолок целиком — колонку, обе проверки и сам повод, —
+ * по слову владельца «убери потолок». Ветка на несуществующий токен не защищает, а обещает
+ * состояние, в которое продукт не умеет попасть.
+ *
+ * ЕСЛИ ОТВЕЧАЕТ ОТКАТАННЫЙ БИНАРЬ, который этот токен ещё шлёт, человек не остаётся без слов:
+ * последняя строка печатает сообщение сервера ДОСЛОВНО — это и есть правило волны, и оно называет
+ * причину точнее, чем наш пересказ.
  */
 export function draftIdeaRefusal(error: unknown): string {
   const message = (error as Error | null)?.message ?? '';
   if (message.includes('no_moodboard')) {
     return 'there is nothing to read: put at least one picture on the moodboard first';
-  }
-  if (message.includes('budget_exceeded')) {
-    return 'today’s generation budget is spent — the draft is a paid call like any other';
   }
   return message || 'the draft did not come back';
 }

@@ -12,7 +12,7 @@ export { RunPanel } from './run-panel';
 export { SlotPicker } from './slot-picker';
 export { GenerationStudio } from './studio';
 
-export { formatMoney, readBudget, decimalToNumber, type BudgetRead } from './money';
+export { formatMoney, decimalToNumber } from './money';
 export {
   archiveBlockReason,
   expectedTileCount,

@@ -14774,14 +14774,16 @@ export type common_DesignBudget = {
   // ACTUALLY CHARGED today: the sum of attempt prices, paid failures included.
   spent: googletype_Decimal | undefined;
   // RESERVED today: the estimates of runs that are still in flight and have not been billed yet.
-  // TWO FIELDS, NOT ONE SUM, even though the ceiling check adds them. The gate MUST compare
-  // `spent + reserved` against `cap` — counting only the charged half would let two simultaneous
-  // starts both pass a ceiling only one of them fits under. But a single field called «spent»
-  // holding that sum would LIE to the reader about what was actually paid. One fact, one field;
-  // the bar draws `spent` solid and `reserved` as a pale tail, and the sum is derived where it is
-  // needed.
+  // TWO FIELDS, NOT ONE SUM — and the reason is no longer the one written here before. That
+  // sentence argued that the GATE must add them, because counting only the charged half would let
+  // two simultaneous starts both pass a ceiling only one of them fits under. There is no gate any
+  // more (field 4 below), so the argument died with it, and it is replaced rather than deleted
+  // silently: a rationale that outlives its reason is how the thing it justified grows back.
+  // What survives is the honest half. A single field called «spent» holding charged-plus-reserved
+  // would LIE to the reader about what was actually paid: one is money gone, the other is money
+  // promised by runs still in flight, and only the first is a fact. One fact, one field; whoever
+  // needs the sum derives it where it is needed and says why.
   reserved: googletype_Decimal | undefined;
-  cap: googletype_Decimal | undefined;
   currency: string | undefined;
   // WHOSE «today» resets the bar. On the wire because that is an organisational decision, not a
   // property of the database session that happened to answer.
@@ -17055,9 +17057,14 @@ export interface AdminService {
   // StartDesignRun opens a paid job. ONE SERIALIZABLE transaction does all of it: the gate belts,
   // the reservation against the day's budget, the server-assembled input snapshot, and the row.
   // IDEMPOTENT BY client_request_id: a repeat returns the EXISTING row with OK, and buys nothing.
-  // FailedPrecondition: budget_exceeded | profile_requirements_unmet | composite_input |
-  // run_in_flight | hourly_limit | kind_not_available. InvalidArgument for a malformed or oversized
-  // params.
+  // FailedPrecondition: profile_requirements_unmet | composite_input | kind_not_available.
+  // InvalidArgument for a malformed or oversized params.
+  // ⚠ NO RUN IS EVER REFUSED FOR MONEY. `budget_exceeded` was listed here and is GONE (0358): the
+  // daily ceiling was removed as a concept, not raised, so the token is unreachable and a client
+  // branch waiting for it waits forever. Spend is still measured and served on DesignBudget —
+  // what was removed is a machine deciding the day is over, not the accounting.
+  // `run_in_flight` and `hourly_limit` were listed here too and NEVER EXISTED IN THE CODE; they
+  // are removed from this list as documentation of refusals the server cannot produce.
   // kind_not_available: a generation KIND with no provider configured for it refuses EXPLICITLY, so
   // the client can draw an honest lock with a reason on it. Silence, or a run that sits pending
   // forever, would be the same fact told as a bug.
@@ -17223,7 +17230,8 @@ export interface AdminService {
   // DraftDesignIdea is a TEXT run through the same money and idempotency machine as every picture
   // run — a paid call with no row in the register would be a hole in the ledger. It runs INLINE:
   // the response already carries a finished DesignRun with status=done and output_text set.
-  // FailedPrecondition: budget_exceeded | no_moodboard.
+  // FailedPrecondition: no_moodboard. (`budget_exceeded` was listed here until 0358 removed the
+  // generation ceiling as a concept — no verb refuses for money any more.)
   DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting

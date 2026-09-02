@@ -15,7 +15,6 @@ import { markedPlatesOf } from '../fix-markup';
 import { WhatModelGetsModal } from '../modals';
 import { serverSpeaksDesign } from '../capability';
 import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from '../views';
-import { readBudget } from './money';
 import { useStartRun } from './use-generation';
 
 /**
@@ -55,9 +54,11 @@ import { useStartRun } from './use-generation';
  * showed `$0.04 · ~25 s`, both of them constants of the prototype. The contract has no quote verb
  * and no profile catalogue: the first honest number is `price_estimate` on the row the server
  * files. Inventing a per-picture price here would make the one screen in this admin that spends
- * money the one screen that guesses about it. Since round 4 (T-12) the DAY BAR is not printed
- * either: `today $x of $y` is gone, the ceiling still GATES the button when the day is spent, and
- * the only money a person is shown is the price of the generation itself, on its history row.
+ * money the one screen that guesses about it. Round 4 (T-12) took the DAY BAR off the screen
+ * («нам надо показывать только цену генерации и все»), and this round took the DAY CEILING out of
+ * the product entirely («убери потолок»): the server dropped the column, both refusals and the
+ * `budget_exceeded` reason, and the form no longer gates on money at all. The only money a person
+ * is shown anywhere in the band is the price of one generation, on its own history row.
  *
  * FIT IS NOT SHOWN HERE AT ALL (owner, S-3). It is a fact about the GARMENT — its home is the
  * HEADER's classification, and the run snapshots it server-side at launch — so this form neither
@@ -134,7 +135,6 @@ export function GenerationForm({
 
   // The FLAT bench: this form generates flats, its detail ticks and slot toggle read flat slots.
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
-  const budget = useMemo(() => readBudget(band.budget), [band.budget]);
 
   const tickedSides = SILHOUETTE_VIEWS.filter((v) => views[v]);
   // Производная от стенда, не от состояния: деталь, снятая со стенда после отметки, выпадает из
@@ -172,8 +172,11 @@ export function GenerationForm({
 
   const writesOff = !!disabled || !speaks;
   const noViews = ticked.length === 0;
-  const capReached = !!budget?.exhausted;
 
+  // ЧЕТВЁРТЫМ ОТКАЗОМ ЗДЕСЬ СТОЯЛ ДНЕВНОЙ ПОТОЛОК («daily budget reached — new runs start
+  // tomorrow»). Он снят вместе с самим понятием: «у нас в принципе не должно быть потолка похуй
+  // чем он съеден убери потолок». Деньги не ушли — цена ПРОГОНА по-прежнему называется на его
+  // строке в истории, о чём говорит подпись у кнопки.
   const gateReason = !speaks
     ? 'this server does not speak the design band yet — nothing can be generated here'
     : disabled
@@ -183,11 +186,7 @@ export function GenerationForm({
           // cycle (S-15). A refusal that advises a verb the product no longer has teaches the
           // reader to distrust every other sentence on the screen, so the tail went with the door.
           'no views ticked — tick at least one'
-        : capReached
-          ? // T-12: без чисел. Дневная полоса «today $x of $y» снята отовсюду; потолок по-прежнему
-            // ГЕЙТИТ кнопку, но человеку показывается только цена самого прогона — в истории.
-            'daily budget reached — new runs start tomorrow'
-          : null;
+        : null;
 
   /**
    * The three variants of W-4, spoken. Null while nothing is ticked — there is no shape to name

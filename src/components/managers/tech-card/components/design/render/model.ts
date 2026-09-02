@@ -6,9 +6,7 @@ import type {
   common_DesignPicture,
   common_DesignRun,
   common_MediaFull,
-  googletype_Decimal,
 } from 'api/proto-http/admin';
-import { parseDecimalNumber } from 'utils/decimal';
 
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { isPictureHidden } from '../visibility';
@@ -608,79 +606,26 @@ export function threedRunViews(sides: BenchSide[]): string[] {
 
 /* ─────────────────────────── money ─────────────────────────── */
 
-export type BudgetLine = {
-  spent: number;
-  reserved: number;
-  cap: number;
-  currency: string;
-  /** `spent + reserved` — what the ceiling is actually compared against. */
-  booked: number;
-  exhausted: boolean;
-  /** `today $0.41 of $2.00`, already formatted. */
-  text: string;
-};
-
-function decimalNumber(value?: googletype_Decimal | null): number {
-  const parsed = parseDecimalNumber(value?.value ?? '');
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 /**
- * `$0.41`, or `0.41` when the currency is not one `Intl` knows.
+ * ═══ ЗДЕСЬ НЕТ ЧИТАТЕЛЯ ДЕНЕГ, И ЭТО РЕШЕНИЕ, А НЕ ПРОПУСК ════════════════════════════════════
  *
- * THE TRY/CATCH IS LOAD-BEARING. `Intl.NumberFormat` throws `RangeError` on an unknown currency
- * code, and the code is on the wire precisely so the bar never hard-codes `$` — so a server that
- * one day answers with something this runtime does not recognise would otherwise take the studio
- * white on a money label.
- */
-export function formatMoney(amount: number, currency: string): string {
-  const code = (currency ?? '').trim().toUpperCase();
-  if (code) {
-    try {
-      return new Intl.NumberFormat('en-GB', {
-        style: 'currency',
-        currency: code,
-        // `narrowSymbol`, or an en-GB locale renders USD as `US$0.41` — technically correct and
-        // unreadable in a one-line money bar that already says which day it is about.
-        currencyDisplay: 'narrowSymbol',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      /* falls through to the plain number below */
-    }
-  }
-  return amount.toFixed(2);
-}
-
-/**
- * The band's money bar, or null.
+ * Тут жили `BudgetLine` и `budgetLine()` — дневная полоса `today $0.41 of $2.00` и, главное, флаг
+ * `exhausted`, которым ЧЕТВЕРО ворот этой полосы отказывали в запуске. Ушло всё, вместе с
+ * потолком как понятием. Владелец, дословно и дважды: «у нас в принципе не должно быть потолка
+ * похуй чем он съеден убери потолок».
  *
- * NULL IS A FIRST-CLASS ANSWER: every money field is stripped for an account without
- * `costing:read`, and the contract says such a band must show NO BAR AT ALL — a bar with blanks in
- * it reads as «the budget is zero», which is a different and false statement. A cap of zero is read
- * the same way: no ceiling was stated, so no ceiling is claimed and nothing is ever refused on it.
+ * ПОТОЛКА БОЛЬШЕ НЕТ НИ НА ОДНОЙ СТОРОНЕ. Сервер снёс колонку `design_settings.daily_budget`,
+ * оба своих отказа и самый повод `budget_exceeded`; `DesignBudget.cap` объявлен `reserved 4`, то
+ * есть номер поля закрыт навсегда и вернуть его молча нельзя. Читатель, оставленный здесь «на
+ * всякий случай», разыменовывал бы поле, которого не может быть, — и был бы ровно той дверью, в
+ * которую потолок вернулся бы.
+ *
+ * ДЕНЬГИ ПРИ ЭТОМ НЕ УШЛИ. Расход жив целиком: оценка, факт, цена попытки, движение дня, снятие
+ * резерва и `GetBudget`. Человеку показывается ЦЕНА ПРОГОНА — на его строке в истории, в панели
+ * прогона и в свидетельстве рекола, — и показывается тем же `formatMoney` из `generation/money`.
+ * Дневной СУММЫ на экране нет с круга 4 (T-12), и тоже по слову владельца: «нам надо показывать
+ * только цену генерации и все». Не заводить её здесь снова.
  */
-export function budgetLine(band: GetDesignBandResponse): BudgetLine | null {
-  const budget = band.budget;
-  if (!budget) return null;
-  const cap = decimalNumber(budget.cap);
-  if (cap <= 0) return null;
-  const spent = decimalNumber(budget.spent);
-  const reserved = decimalNumber(budget.reserved);
-  const currency = (budget.currency ?? '').trim();
-  const booked = spent + reserved;
-  const reservedText = reserved > 0 ? ` · ${formatMoney(reserved, currency)} reserved` : '';
-  return {
-    spent,
-    reserved,
-    cap,
-    currency,
-    booked,
-    exhausted: booked >= cap,
-    text: `today ${formatMoney(spent, currency)} of ${formatMoney(cap, currency)}${reservedText}`,
-  };
-}
 
 /* ─────────────────────────── the two gates ─────────────────────────── */
 
@@ -696,16 +641,6 @@ export type Gate = { ok: true } | { ok: false; reason: string };
  * itself, which is the half of that sentence the technologist can act on anyway.
  */
 export function renderGate(band: GetDesignBandResponse): Gate {
-  const budget = budgetLine(band);
-  if (budget?.exhausted) {
-    return {
-      ok: false,
-      // БЕЗ СУММ (T-12: «нам надо показывать только цену генерации и все»). Отказ обязан назвать
-      // ПРИЧИНУ, а причина — «день исчерпан», а не «сколько именно». Числа жили здесь ещё и в
-      // подсказке инертной двери, то есть на экране, стоило навести указатель.
-      reason: "today's generation ceiling is reached — no new run starts until it resets",
-    };
-  }
   const sides = benchSides(band);
   const missing = sides
     .filter((side) => side.view === 'front' || side.view === 'back')
@@ -790,16 +725,6 @@ export function threedGate(
       reason: named
         ? `${named} has no fabric render on its bench yet — render this colourway first, then mark its sides. 3D reads ONLY that colourway's bench, never a mixture`
         : 'the colourway-less bench holds no fabric render — render one without a colourway, or pick a colourway that has renders. 3D reads ONE bench, never a mixture',
-    };
-  }
-  const budget = budgetLine(band);
-  if (budget?.exhausted) {
-    return {
-      ok: false,
-      // БЕЗ СУММ (T-12: «нам надо показывать только цену генерации и все»). Отказ обязан назвать
-      // ПРИЧИНУ, а причина — «день исчерпан», а не «сколько именно». Числа жили здесь ещё и в
-      // подсказке инертной двери, то есть на экране, стоило навести указатель.
-      reason: "today's generation ceiling is reached — no new run starts until it resets",
     };
   }
   const sides = threedSides(band, colorwayId);

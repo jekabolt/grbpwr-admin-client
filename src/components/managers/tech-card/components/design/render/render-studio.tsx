@@ -208,7 +208,6 @@ export function RenderStudio({
         </FieldRow>
 
         <GenerateRow
-          band={band}
           gate={gate}
           shape={
             views.length > 1

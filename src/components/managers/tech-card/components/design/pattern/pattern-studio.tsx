@@ -15,7 +15,6 @@ import Text from 'ui/components/text';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { isRunLive, useElapsed } from '../generation';
-import { budgetLine } from '../render';
 import { REPEAT_MAX, normaliseRepeat, patternOutputs, patternRuns, refusalAdvice } from './model';
 import { PatternInput } from './pattern-input';
 import { PatternLibrary } from './pattern-library';
@@ -114,21 +113,21 @@ export function PatternStudio({
 
   const outputs = useMemo(() => patternOutputs(band), [band]);
   const live = useMemo(() => patternRuns(band).filter(isRunLive), [band]);
-  const ceilingReached = !!budgetLine(band)?.exhausted;
 
-  /* ВОРОТА СОБИРАЮТСЯ ЗДЕСЬ, А НЕ ЧИТАЮТСЯ ИЗ `patternGate`, ПО ОДНОЙ ПРИЧИНЕ: к трём условиям
-     полосы добавляются два, которые полоса знать не может — право на запись и то, говорит ли этот
-     сервер вообще на языке DESIGN. Порядок отказов — от самого широкого к самому узкому, чтобы
-     первая фраза, которую читает человек, была той же, что сказал бы сервер. */
+  /* ВОРОТА СОБИРАЮТСЯ ЗДЕСЬ, А НЕ ЧИТАЮТСЯ ИЗ `patternGate`, ПО ОДНОЙ ПРИЧИНЕ: к условиям полосы
+     добавляются два, которые полоса знать не может — право на запись и то, говорит ли этот сервер
+     вообще на языке DESIGN. Порядок отказов — от самого широкого к самому узкому, чтобы первая
+     фраза, которую читает человек, была той же, что сказал бы сервер.
+
+     ТРЕТЬИМ ЗДЕСЬ СТОЯЛ ДНЕВНОЙ ПОТОЛОК. Он снят целиком — и на сервере, и во всех воротах
+     полосы: «у нас в принципе не должно быть потолка похуй чем он съеден убери потолок». */
   const frozen = disabled
     ? 'this card is read-only for you — a run spends money, so it is one of the writes that stops here'
     : !speaks
       ? 'this server does not serve the design band, so there is nothing to start a run on'
-      : ceilingReached
-        ? "today's generation ceiling is reached — no new run starts until it resets"
-        : !sourceId
-          ? 'no picture is attached — a repeating tile is made out of exactly one picture. Attach one above: from the library, from the clipboard, or one of this card’s cloths'
-          : null;
+      : !sourceId
+        ? 'no picture is attached — a repeating tile is made out of exactly one picture. Attach one above: from the library, from the clipboard, or one of this card’s cloths'
+        : null;
 
   const advice = run.refusal ? refusalAdvice(run.refusal) : '';
 
@@ -282,11 +281,6 @@ export function PatternStudio({
             the server when the run starts. Nothing else from this card travels: not the bench, not
             the references, not the garment description.
           </Text>
-          {ceilingReached && (
-            <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-              today’s generation ceiling is reached — no new run starts until it resets
-            </Text>
-          )}
         </div>
 
         {/* ⚠ ОТКАЗ ДЕРЖИТСЯ НА ЭКРАНЕ И ЦИТИРУЕТСЯ ДОСЛОВНО.

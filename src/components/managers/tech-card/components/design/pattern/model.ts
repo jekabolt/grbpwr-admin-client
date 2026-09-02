@@ -6,7 +6,7 @@ import type {
 } from 'api/proto-http/admin';
 
 import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, shelfOf } from '../assets/model';
-import { budgetLine, type Gate } from '../render';
+import type { Gate } from '../render';
 
 /**
  * ═══ ЧТО ТАКОЕ ПРОГОН РОДА `pattern`, И ЧЕМ ОН НЕ ПОХОЖ НА ДВУХ СОСЕДЕЙ ═══════════════════════
@@ -142,11 +142,9 @@ export function refusalAdvice(message: string): string {
 /**
  * ЧЕГО НЕ ХВАТАЕТ, ЧТОБЫ НАЖАТЬ GENERATE.
  *
- * ДЕНЬГИ ЧИТАЮТСЯ ТЕМ ЖЕ `budgetLine`, ЧТО И У ДВУХ СОСЕДЕЙ, а не пересчитываются здесь: потолок
- * дня один на карточку, и второе прочтение тех же полей разошлось бы с первым в первый же день,
- * когда одно из них научится новому полю. Слова отказа по потолку тоже повторены дословно с
- * `renderGate` — человеку, переключившемуся между вкладками, один и тот же запрет обязан звучать
- * одинаково, иначе он читается как два разных.
+ * ДЕНЕГ В ЭТИХ ВОРОТАХ НЕТ ВОВСЕ, И У ДВУХ СОСЕДЕЙ ТОЖЕ. Здесь стоял отказ по исчерпанному
+ * дневному потолку; потолок снесён с обеих сторон провода («убери потолок»), и ворота, которые
+ * читали бы его остатки, отказывали бы по факту, которого больше не бывает.
  *
  * ЧИСЛО КАРТИНОК ПРОВЕРЯЕТСЯ ЗДЕСЬ, ХОТЯ ЕГО ПРОВЕРЯЕТ И СЕРВЕР. Это не дубль правила: сервер
  * отвечает `one_source_picture` бесплатно, ДО резервации, — но отвечает он по сети и с задержкой,
@@ -154,13 +152,6 @@ export function refusalAdvice(message: string): string {
  * заменяет серверную и ничего не гарантирует; она только не даёт нажать заведомо мёртвое.
  */
 export function patternGate(band: GetDesignBandResponse, sourceMediaId: number): Gate {
-  const budget = budgetLine(band);
-  if (budget?.exhausted) {
-    return {
-      ok: false,
-      reason: "today's generation ceiling is reached — no new run starts until it resets",
-    };
-  }
   if (!sourceMediaId || sourceMediaId <= 0) {
     return {
       ok: false,

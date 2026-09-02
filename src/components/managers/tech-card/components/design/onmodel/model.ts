@@ -8,7 +8,7 @@ import type {
 import { runRepresentation } from '../bench-kinds';
 import { formatMoney } from '../generation/money';
 import { isPictureHidden } from '../visibility';
-import { budgetLine, fabricStatement, type Gate } from '../render/model';
+import { fabricStatement, type Gate } from '../render/model';
 
 /**
  * ═══ ON MODEL — ЧТЕНИЕ ПОЛОСЫ ДЛЯ ЭКРАНА ПЕРЕКРАСКИ (K-17) ════════════════════════════════════
@@ -152,15 +152,6 @@ export function recolorGate(
   sources: number,
   recipe: common_DesignColourRecipe | null | undefined,
 ): Gate {
-  const budget = budgetLine(band);
-  if (budget?.exhausted) {
-    return {
-      ok: false,
-      // БЕЗ СУММ, как у обоих соседей (T-12): отказ называет ПРИЧИНУ, а не то, сколько именно
-      // списано за день.
-      reason: "today's generation ceiling is reached — no new run starts until it resets",
-    };
-  }
   if (sources <= 0) {
     return {
       ok: false,

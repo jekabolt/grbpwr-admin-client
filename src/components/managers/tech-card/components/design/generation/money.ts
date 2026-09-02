@@ -1,22 +1,26 @@
-import type { common_DesignBudget, googletype_Decimal } from 'api/proto-http/admin';
+import type { googletype_Decimal } from 'api/proto-http/admin';
 
 /**
  * MONEY, AS THE BAND SPEAKS IT — and the whole of this file is about the difference between «zero»
  * and «not stated».
  *
+ * WHAT IT IS MONEY *FOR*: the price of ONE RUN — `price_estimate`, `price_actual`, `attempt.price`
+ * — on its history row, in its run panel, on the idea draft and in the recolour's testimony. There
+ * is no daily total and no ceiling anywhere in the band; both were removed at the owner's word,
+ * and the note further down says with what.
+ *
  * EVERY MONEY FIELD IN THIS CONTRACT IS costing-shaped: it is STRIPPED when the account lacks
- * `costing:read`. `DesignBudget` says so in as many words, and so do `price_estimate`,
- * `price_actual` and `attempt.price`. So an absent decimal here is not 0 — it is «this reader is
- * not allowed to see it», and the two must never render the same. `$0.00 of $0.00` reads as a
- * budget that is exhausted, which is a different and false statement about a card nobody can
- * generate on for a completely different reason.
+ * `costing:read`. `price_estimate`, `price_actual` and `attempt.price` all say so. So an absent
+ * decimal here is not 0 — it is «this reader is not allowed to see it», and the two must never
+ * render the same. A run priced `$0.00` claims the provider worked for free, which is a different
+ * and false statement about a row whose price we were simply not shown.
  *
  * Hence: every function below answers `null` / `''` for «not stated», never a zero, and every
  * caller is expected to DROP the organ rather than draw it blank.
  *
  * THE CURRENCY IS ON THE WIRE and is never assumed to be dollars. The contract puts `currency` on
- * both the budget and the run for exactly that reason, and an unknown code is printed verbatim
- * beside the number rather than swapped for a symbol we made up.
+ * the run for exactly that reason, and an unknown code is printed verbatim beside the number
+ * rather than swapped for a symbol we made up.
  */
 
 /** `{ value: "0.04" }` → 0.04. `null` for every spelling of «not stated», including a blank value. */
@@ -54,49 +58,21 @@ export function formatMoney(d?: googletype_Decimal | null, currency?: string | n
   return code ? `${d?.value ?? n} ${code}` : String(d?.value ?? n);
 }
 
-export type BudgetRead = {
-  spent: number;
-  reserved: number;
-  cap: number;
-  currency: string;
-  /**
-   * `today $0.41 of $2.00` — дневная полоса. T-12 (круг 4): форма генерации её больше НЕ печатает
-   * и в отказ гейта не подставляет — человеку показывается только цена самого прогона, на его
-   * строке в истории. Поле живо, потому что его всё ещё читает экран рекола
-   * (`history-recall.tsx`); снятие полосы там — за веткой, владеющей тем файлом.
-   */
-  line: string;
-  /** `spent + reserved >= cap`. The gate the SERVER applies, read the same way here. */
-  exhausted: boolean;
-};
-
 /**
- * The band's money bar, or `null` when this reader may not see money at all.
+ * ═══ ВТОРОГО ЧИТАТЕЛЯ ДНЕВНОГО БЮДЖЕТА ЗДЕСЬ БОЛЬШЕ НЕТ ══════════════════════════════════════
  *
- * TWO FIELDS, NOT ONE SUM. `spent` is what was actually charged; `reserved` is what runs in flight
- * have taken out of the day and not yet been billed for. The CEILING is checked against the sum —
- * counting only the charged half would let two simultaneous starts both pass a ceiling only one of
- * them fits under — but the reader is told what was actually PAID, because a single field holding
- * the sum would lie about that. The contract makes the same point at greater length.
+ * Тут стояли `BudgetRead` и `readBudget()` — вторая копия того же чтения (первая жила в
+ * `render/model.ts`), и обе существовали ради одного: полосы `today $x of $y` и флага
+ * `exhausted`, которым форма запирала `GENERATE`.
+ *
+ * СНЯТО ВМЕСТЕ С ПОНЯТИЕМ ПОТОЛКА, а не «поднято повыше». Владелец: «у нас в принципе не должно
+ * быть потолка похуй чем он съеден убери потолок». На сервере ушли колонка `daily_budget`, оба
+ * отказа и повод `budget_exceeded`, а `DesignBudget.cap` стал `reserved 4` — номер поля закрыт,
+ * и заполнить его снова нельзя даже случайно.
+ *
+ * ЧТО ИЗ ЭТОГО ФАЙЛА ЖИВО И ПОЧЕМУ. `decimalToNumber` и `formatMoney` — они читают ЦЕНУ ПРОГОНА
+ * (`price_estimate`, `price_actual`, `attempt.price`) на строке истории, в панели прогона, в
+ * черновике замысла и в свидетельстве рекола. Это и есть те деньги, которые владелец просил
+ * оставить: заметил он $100 за прогон, а не сумму за день. Дневного итога на экране нет с круга 4
+ * («нам надо показывать только цену генерации и все») и заводить его заново не надо.
  */
-export function readBudget(budget?: common_DesignBudget | null): BudgetRead | null {
-  if (!budget) return null;
-  const spent = decimalToNumber(budget.spent);
-  const cap = decimalToNumber(budget.cap);
-  // `reserved` may honestly be absent while `spent` and `cap` are present; treat it as 0 THEN, and
-  // only then — a missing cap means the whole bar is unreadable and there is nothing to draw.
-  if (spent === null || cap === null) return null;
-  const reserved = decimalToNumber(budget.reserved) ?? 0;
-  const currency = (budget.currency ?? '').trim();
-  const spentText = formatMoney(budget.spent, currency);
-  const capText = formatMoney(budget.cap, currency);
-  const held = reserved > 0 ? ` · ${formatMoney(budget.reserved, currency)} held` : '';
-  return {
-    spent,
-    reserved,
-    cap,
-    currency,
-    line: `today ${spentText} of ${capText}${held}`,
-    exhausted: cap > 0 && spent + reserved >= cap,
-  };
-}

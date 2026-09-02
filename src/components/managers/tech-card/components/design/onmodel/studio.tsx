@@ -256,7 +256,6 @@ export function OnModelStudio({
         </div>
 
         <GenerateRow
-          band={band}
           gate={gate}
           shape={recolorShape(count)}
           pending={run.isPending}

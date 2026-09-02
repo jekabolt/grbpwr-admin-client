@@ -41,7 +41,6 @@ export {
   SELECT_MARK_NOT_STATED,
   benchKindOf,
   benchSides,
-  budgetLine,
   colourLabel,
   colourSubtitle,
   fabricRenderGate,

@@ -5176,14 +5176,16 @@ export type DesignBudget = {
   // ACTUALLY CHARGED today: the sum of attempt prices, paid failures included.
   spent: googletype_Decimal | undefined;
   // RESERVED today: the estimates of runs that are still in flight and have not been billed yet.
-  // TWO FIELDS, NOT ONE SUM, even though the ceiling check adds them. The gate MUST compare
-  // `spent + reserved` against `cap` — counting only the charged half would let two simultaneous
-  // starts both pass a ceiling only one of them fits under. But a single field called «spent»
-  // holding that sum would LIE to the reader about what was actually paid. One fact, one field;
-  // the bar draws `spent` solid and `reserved` as a pale tail, and the sum is derived where it is
-  // needed.
+  // TWO FIELDS, NOT ONE SUM — and the reason is no longer the one written here before. That
+  // sentence argued that the GATE must add them, because counting only the charged half would let
+  // two simultaneous starts both pass a ceiling only one of them fits under. There is no gate any
+  // more (field 4 below), so the argument died with it, and it is replaced rather than deleted
+  // silently: a rationale that outlives its reason is how the thing it justified grows back.
+  // What survives is the honest half. A single field called «spent» holding charged-plus-reserved
+  // would LIE to the reader about what was actually paid: one is money gone, the other is money
+  // promised by runs still in flight, and only the first is a fact. One fact, one field; whoever
+  // needs the sum derives it where it is needed and says why.
   reserved: googletype_Decimal | undefined;
-  cap: googletype_Decimal | undefined;
   currency: string | undefined;
   // WHOSE «today» resets the bar. On the wire because that is an organisational decision, not a
   // property of the database session that happened to answer.
