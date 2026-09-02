@@ -14650,6 +14650,62 @@ export type GetDesignBandResponse = {
   // marked on THIS drawing» — and nesting would force the client to walk every asset to draw one
   // picture.
   assetPlacements: common_DesignAssetPlacement[] | undefined;
+  // THE CARD'S GENERATIVE OUTPUTS, WHOLE-CARD — every render, 3D frame, pattern tile and recolour
+  // this card holds, NOT just the ones whose run happens to sit on the page above.
+  // WHY IT EXISTS. `runs` is one page of the feed (12 rows), and the screen's «RENDERS OF THIS
+  // CARD» section was reading exactly that page. Every run of any kind — a flat re-trace, a vector
+  // redraw, a 3D try — pushes an older run off the window, so renders left the section one at a
+  // time and the crops split off them left with their parent run. The section's title claims the
+  // CARD; the answer had the scope of a page.
+  // HOW MUCH OF IT COMES BACK, AND WHY THAT IS NOT A MONEY QUESTION. An earlier draft of this
+  // comment said these kinds are MONEY-BOUND — «every one of these pictures was paid for», so the
+  // ceiling could never be reached. THAT WAS FALSE and it mattered. A crop inherits its parent's
+  // run_id AND kind (SplitPicture says outright that no money was spent on a crop), a flatten does
+  // the same, neither is de-duplicated, and hidden pictures are deliberately still counted — so
+  // hiding crops and re-cutting them adds rows to this list forever, for free. Measured: one paid
+  // render run plus three free re-split cycles = 16 outputs; a dozen more cycles = 200.
+  // So the ceiling is a RESPONSE-SIZE bound (every output carries a MediaFull), it is genuinely
+  // reachable, and what matters is how it is SPENT: it is spent PER COLOURWAY — 60 newest per
+  // colourway — never as one whole-card LIMIT. A whole-card «newest 200» would drop the OLDEST
+  // pictures of the card, which is not a fair slice of anything the screen draws: the section
+  // narrows by colourway, so a colourway whose every picture sits older than the 200th id would
+  // come back EMPTY. That is precisely the defect this field exists to kill, deferred to a
+  // 200-row horizon. A per-colourway window makes that unrepresentable — no section can be
+  // starved by the volume of another. The whole response is therefore bounded by
+  // (colourways on the card + 1) × 60, which is the same axis the bench is already bounded by.
+  // HIDDEN PICTURES ARE INCLUDED, CARRYING THEIR FLAG, exactly as they do inside `runs` and
+  // `batches` — the server never lies about what exists and the client filters.
+  // BATCH-HUNG (UPLOADED) PICTURES OF THESE KINDS ARE INCLUDED TOO. An uploaded render is a render
+  // of this card, and `selected` writes against any picture id — a plate that cannot be listed
+  // cannot be chosen. Such a row carries run_id 0, run_kind "" and a batch_id.
+  // ORDER: newest picture first (design_picture.id descending).
+  // ⚠ ABSENT ≠ EMPTY, and a client must keep the distinction. The gateway emits unpopulated
+  // fields, so a server that knows this field always sends at least `[]`; nothing at all means a
+  // binary older than the field, where the page-bound reading is still the only answer available.
+  outputs: common_DesignCardOutput[] | undefined;
+  // How many generative outputs the card has IN TOTAL, counted over the whole card in the same
+  // read, over the same predicate as `outputs`. It is the SUM of `outputs_total_by_colorway`, not
+  // a second count of its own.
+  // ⚠ THIS NUMBER CANNOT CAPTION A NARROWED SECTION. A screen showing one colourway that says «60
+  // of 412» is lying: 412 is the whole card. Caption with `outputs_total_by_colorway` instead —
+  // this field answers the card-level question only.
+  outputsTotal: number | undefined;
+  // HOW MANY OUTPUTS EACH COLOURWAY HAS IN TOTAL — key: picture.colorway_id (0 = unattributed),
+  // value: the true count for that colourway, counted over the whole card, uncapped, in the same
+  // read and by the same predicate as `outputs`.
+  // WHY IT EXISTS. `outputs` carries at most 60 per colourway. Without this map a client that
+  // narrows to one colourway cannot tell «this colourway has 41 pictures and you have all of
+  // them» from «this colourway has 300 and you have the newest 60» — the truncation would be
+  // invisible to the only reader who can see it, which is the same failure class as the page-bound
+  // reading this whole field replaced.
+  // ⚠ THE KEY IS THE PICTURE'S COLOURWAY, NOT `DesignCardOutput.run_colorway_id`, and the two are
+  // NOT interchangeable. For everything a run produced they are equal by construction (the run's
+  // colourway is written onto its output pictures, and crops and flattens inherit it). They part
+  // company on a picture with no run: an uploaded render plate names a colourway but has
+  // run_colorway_id 0, so keying by the run would file a BLK plate under «unattributed» and drop
+  // it out of its own section. This is also the key the bench already narrows by.
+  // A colourway with no outputs at all is simply absent from the map; read a missing key as 0.
+  outputsTotalByColorway: { [key: string]: number } | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
@@ -15496,6 +15552,56 @@ export type common_DesignAssetPlacement = {
   note: string | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
+};
+
+// DesignCardOutput is ONE generative output of the card, carrying the minimal facts of the run it
+// came out of.
+// WHY THE STAMP EXISTS AT ALL. This list is deliberately NOT page-bound (see
+// GetDesignBandResponse.outputs), so the run a picture came out of may be nowhere in the response.
+// Two facts are then unrecoverable from the picture alone and both are load-bearing:
+// * WHICH SECTION IT BELONGS TO. A recolour run produces pictures whose own kind is `render` —
+// that is true rather than a shortcut, the output IS a photograph of the garment — so a client
+// reading picture.kind files an ON MODEL result under RENDERS and the two sections lie about
+// each other. run_kind is the only place the difference survives.
+// * WHICH COLOURWAY AND WHICH REVISION. Both live on the run and neither is recoverable from
+// the picture's own row once the run has left the page.
+// ⚠ THE STAMP SAYS WHICH RUN THIS BRANCH GREW OUT OF — IT DOES NOT SAY «A RUN PRODUCED THIS».
+// The difference is real and a client that ignores it will mislabel pictures. A crop inherits its
+// parent's run_id, and so does a flatten, so a hand-painted flatten laid over a render arrives here
+// as run_id X, run_kind "render", run_rrev 7 — byte-for-byte indistinguishable from a direct output
+// of run X IF THE STAMP IS ALL YOU READ. What separates them travels on the picture itself:
+// `picture.source_class` (a direct output is `generated`; an edit over one carries an editor class)
+// and `picture.derived_from` (0 on a direct output, the parent's id on a crop or a flatten). Any
+// «was this generated or drawn?» question must be asked of those two fields, never of a non-empty
+// run_kind.
+// WHAT THE STAMP DOES CERTIFY, exactly: the kind, revision and colourway of the run this picture's
+// ANCESTRY came out of. Since crops and flattens inherit kind and colourway along with run_id,
+// those are precisely the facts needed to file the picture in the right section — which is what the
+// stamp is for.
+// A picture that hangs under an upload batch rather than a run answers run_id 0 and run_kind "" —
+// nobody generated it, so there is no stamp to make up. It is classified by picture.kind, and
+// batch_id says where it came from.
+// ⚠ «NO RUN» DOES NOT IMPLY «HAS A BATCH». run_id 0 AND batch_id 0 together is a reachable, legal
+// row: a flatten with no underlying picture (FlattenLayer with no parent) writes NULL to both
+// columns. Such a picture belongs to the card and to nothing else. A client that treats
+// `run_id == 0` as «came from batch_id» will render a shelf reference that does not exist.
+export type common_DesignCardOutput = {
+  picture: common_DesignPicture | undefined;
+  // FK design_run(id). 0 = no run: an uploaded picture, or a parentless flatten. It does NOT imply
+  // «a run produced this picture» when non-zero — see the ancestry note above.
+  runId: number | undefined;
+  // render | threed | pattern | recolor — the kind of the RUN, never of the picture. "" when there
+  // is no run at all.
+  runKind: string | undefined;
+  runRrev: number | undefined;
+  // The run's colourway — product(id), 0 = unattributed or no run.
+  // ⚠ THIS IS NOT THE SECTION KEY. Narrow by `picture.colorway_id`, which is what
+  // GetDesignBandResponse.outputs_total_by_colorway is keyed by and what the bench already narrows
+  // by. For everything a run produced the two are equal by construction (the run's colourway is
+  // written onto its outputs, and crops and flattens inherit it); they part company on a picture
+  // with no run, where this field is 0 while the picture's own colourway is named and real.
+  runColorwayId: number | undefined;
+  batchId: number | undefined;
 };
 
 export type ListDesignRunsRequest = {

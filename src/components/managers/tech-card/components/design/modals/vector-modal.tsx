@@ -2,7 +2,6 @@ import * as Dialog from '@radix-ui/react-dialog';
 import type {
   DesignBenchSlotRef,
   GetDesignBandResponse,
-  common_DesignEditLayer,
   common_DesignPicture,
 } from 'api/proto-http/admin';
 import { fetchMediaBlob } from 'lib/features/media-blob';
@@ -17,13 +16,11 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import { fitView, toWorld, zoomAt, type View } from '../../canvas-view';
+import { FIT_INSET, FIT_MIN, fitView, revealDelta, toWorld, zoomAt, type View } from '../../canvas-view';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
-import { useDesignWrites } from '../use-design-band';
+import { findMediaUrlInBand, useDesignWrites } from '../use-design-band';
 import { RASTER_FALLBACK_W, pickSceneInk, rasteriseStrokesOverBase } from './rasterise-layer';
-import { TraceVectorPanel } from './trace-vector-panel';
-import { findMediaUrlInBand, useTraceVector } from './use-trace-vector';
 import {
   findLayerForMedia,
   layerRasterUrl,
@@ -234,16 +231,23 @@ import {
  * АВТОМАТИЧЕСКОЕ пред-заполнение, и потому кисть при входе — `plain`, машина не названа, пока
  * человек сам не взял её в руку. Явный выбор человека этим доводом не гейтуется.
  *
- * ВОПРОС ПРИ ВХОДЕ. Плата без вектора встречает развилкой: рисовать поверх растра или перевести
- * растр в вектор машиной. Вторая ветка ЖИВАЯ: контракт дорос (род прогона `vector` +
- * `UploadContentVector`/`ImportDesignVector`), и весь её ход — платный прогон, ожидание, ПРИЁМКА
- * ЧЕЛОВЕКОМ рядом с исходником, подшивка слоя — живёт на этом же экране, в
- * `trace-vector-panel.tsx` (UI) и `use-trace-vector.ts` (данные и деньги). Прежняя точка
- * подключения `onTraceToVector` снята: она существовала, пока контракта не было, а флоу целиком
- * принадлежит редактору — у него есть всё (band, base, slot), и второй модалки поверх экрана
- * правило «сперва исчерпай встроенное» не разрешает. Слой, в котором вектор уже есть — штрихами
- * ИЛИ файлом (`source_media_id`), — развилку не показывает: «если зашли ещё раз — оно уже имеет
- * вектор».
+ * ВХОДА-ВОПРОСА БОЛЬШЕ НЕТ (H-1, круг 14). Владелец: «пока отложим это пока из эдит мода
+ * полностью выпили как нажиаешь что перевести в вектор итд сразу открывать эдитор». Развилка
+ * «рисовать / перевести машиной» снята ЦЕЛИКОМ вместе со своей веткой «да»: панель, платный
+ * прогон `StartDesignRun(kind='vector')`, поллинг, приёмка `ImportDesignVector` и разборщик
+ * чужого SVG удалены файлами, а не спрятаны флагом — мёртвый читатель это дверь, через которую
+ * вещь отрастает обратно, и git помнит всё.
+ *
+ * ⚠ ЦЕНА НАЗВАНА ВСЛУХ: готовый, но НЕ ПРИНЯТЫЙ векторный прогон остаётся строкой истории с
+ * картинкой, но подшить его слоем больше нечем — клиентская приёмка удалена. Деньги не спрятаны
+ * (история прогон показывает), дверь «keep this vector» исчезла.
+ *
+ * Серверные глаголы живы и не тронуты: это «пока отложим», а не «снесли контракт». Возврат —
+ * новая сборка, не раскопка.
+ *
+ * ОБВОДКА ОСТАЛАСЬ, И ОНА БЕСПЛАТНАЯ: `trace-onepress.ts` поверх собственного движка
+ * (`vector-trace.ts`), дверь — чип `data-trace-run` в рейке. Машина рисунок не ПЕРЕРИСОВЫВАЕТ,
+ * она обводит те пиксели, что есть.
  */
 
 type Tool =
@@ -712,8 +716,6 @@ export function VectorModal({
    */
   const [fileMediaId, setFileMediaId] = useState(0);
   const [fileUrl, setFileUrl] = useState('');
-  /** Развилка входа пройдена (или не нужна) — редактор на экране. */
-  const [entered, setEntered] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
   const [zoomPct, setZoomPct] = useState(100);
   const [panning, setPanning] = useState(false);
@@ -1040,19 +1042,6 @@ export function VectorModal({
     });
   }, [paintView]);
 
-  /**
-   * ВЕТКА «ДА» РАЗВИЛКИ — машинная перерисовка растра в вектор. Данные и деньги — в
-   * `use-trace-vector.ts`; хук живёт здесь безусловно (правило хуков), но просыпается только
-   * пока развилка на экране.
-   */
-  const traceVector = useTraceVector({
-    techCardId,
-    band,
-    base,
-    slot: slot ? { ref: slot.ref, label: slot.label } : null,
-    active: open && !entered && !disabled,
-  });
-
   const plateH = PLATE_W / (ratio || DEFAULT_RATIO);
   const zoomK = zoomPct / 100 || 1;
   const plateRect = useMemo(() => ({ w: PLATE_W, h: plateH }), [plateH]);
@@ -1093,6 +1082,11 @@ export function VectorModal({
   useEffect(() => {
     if (!open) {
       seeded.current = false;
+      /* ⚠ ПРИЗНАК «ПРО ПОЛ УЖЕ СКАЗАНО» ГАСИТСЯ НА ЗАКРЫТИИ, А НЕ НИЖЕ ПО ТЕЛУ СИДА. Ниже —
+         значит после РАННЕГО ВЫХОДА (`knownId > 0 && !loaded`), которого на повторном входе не
+         миновать: «один раз за визит» превращалось в «один раз на два визита». Закрытие
+         наступает всегда и ровно один раз. */
+      cropFloorSaid.current = false;
       return;
     }
     if (seeded.current) return;
@@ -1132,6 +1126,9 @@ export function VectorModal({
     setPicking(false);
     setStampSrc(null);
     stampOffset.current = null;
+    // Точка отрыва — свойство ВИЗИТА: пережив открытие над другой платой, она провела бы прямую
+    // от места, которого на этом листе нет.
+    lastMark.current = null;
     // ПИКСЕЛИ ЗАБЫВАЮТСЯ ВМЕСТЕ СО ВСЕМ ОСТАЛЬНЫМ. Растр, доживший до следующего открытия над
     // ДРУГОЙ платой, положил бы чужую фотографию под чужие штрихи — и, что хуже, молча.
     rasterRef.current = null;
@@ -1165,30 +1162,10 @@ export function VectorModal({
     setConfirmExit(false);
     seededJson.current = JSON.stringify(doc.strokes);
     userMoved.current = false;
-    /**
-     * РАЗВИЛКА — ТОЛЬКО ПЕРЕД ПЛАТОЙ БЕЗ ВЕКТОРА. Слой со штрихами уже «имеет вектор»; слой с
-     * ФАЙЛОМ (source_media_id) имеет его тоже, даже когда редактируемой проекции ещё нет — задать
-     * вопрос над ним значило бы предложить купить то, что уже куплено. Рисование с нуля растра не
-     * имеет и спрашивать не о чем; нечитаемый слой обязан показать своё предупреждение, а не
-     * прятать его за вопросом; read-only визит не рисует вовсе.
-     */
-    setEntered(
-      !baseSrc || !!disabled || doc.unreadable || doc.strokes.length > 0 || storedFileId > 0,
-    );
     resetHistory();
-  }, [
-    open,
-    knownId,
-    knownRev,
-    known,
-    band,
-    baseMediaId,
-    baseSrc,
-    disabled,
-    loaded,
-    wireRatio,
-    resetHistory,
-  ]);
+    // `baseSrc` и `disabled` ушли из зависимостей вместе с развилкой входа (H-1): читала их
+    // только она. Оставленные, они пересеивали бы визит на каждое прибытие подложки.
+  }, [open, knownId, knownRev, known, band, baseMediaId, loaded, wireRatio, resetHistory]);
 
   /**
    * THE EDITOR IS FROZEN UNTIL IT KNOWS WHAT IS ALREADY THERE — a correctness gate, not a spinner:
@@ -1238,14 +1215,111 @@ export function VectorModal({
   }, [ratio, applyView]);
 
   /**
-   * Вписывание на входе и при смене формы платы — но ТОЛЬКО пока человек не двигал вид сам:
-   * прибытие натуральных размеров картинки не имеет права вырывать мир из-под руки.
+   * ВПИСЫВАНИЕ ВЕШАЕТСЯ НА САМ УЗЕЛ, А НЕ НА ЭФФЕКТ, И ЭТО ЗАМЕРЕНО.
+   *
+   * Раньше вписывание висело на `entered`: развилка входа занимала первый кадр, а холст
+   * появлялся на СЛЕДУЮЩЕМ — и эффект, перезапущенный сменой `entered`, заставал вьюпорт уже
+   * измеренным. Это была случайная подпорка. Со снятием развилки (H-1) единственный прогон
+   * эффекта уехал на самый первый коммит модалки, а её содержимое живёт в ПОРТАЛЕ Radix и
+   * монтируется коммитом позже: `viewportRef.current` там ещё `null`, повода перезапуститься у
+   * эффекта больше нет, и редактор открывался в 100 % с платой вдвое больше экрана.
+   * Замерено инструментом: `{open: true, vp: false}` — ровно один прогон, и тот вхолостую.
+   *
+   * Callback-реф отвечает на вопрос «когда узел появился» ТОЧНО, каким бы коммитом это ни
+   * случилось, а `ResizeObserver` на нём чинит заодно вторую дыру того же рода — смену размера
+   * окна при нетронутом виде. `fitPlate` читается рефом, чтобы смена формы платы не
+   * переприцепляла наблюдателя.
    */
+  const fitPlateRef = useRef(fitPlate);
+  fitPlateRef.current = fitPlate;
+  const applyViewRef = useRef(applyView);
+  applyViewRef.current = applyView;
+  const viewportRO = useRef<ResizeObserver | null>(null);
+  const viewportOff = useRef<(() => void) | null>(null);
+  /**
+   * ВСЁ, ЧТО ВЕШАЕТСЯ НА УЗЕЛ ВЬЮПОРТА, ВЕШАЕТСЯ ЗДЕСЬ — И ЭТО ПРАВИЛО, А НЕ УДОБСТВО.
+   *
+   * ⚠ ОДИН И ТОТ ЖЕ ДЕФЕКТ СЛУЧИЛСЯ ДВАЖДЫ, ПОТОМУ ЧТО ОРГАНОВ БЫЛО ДВА. Эффект, читающий
+   * `viewportRef.current` в момент своего прогона, застаёт `null`: содержимое модалки живёт в
+   * ПОРТАЛЕ Radix и монтируется коммитом позже. Пока такие эффекты зависели от `entered`, смена
+   * флага давала им второй прогон — случайная подпорка. Снятие развилки (H-1) убрало её разом у
+   * ОБОИХ: вписывание молча не отрабатывало, и слушатель `wheel` молча не вешался, отчего
+   * панорама скроллом и зум щипком умерли, а подпись под холстом продолжала их обещать.
+   * Вписывание я починил, колесо — не заметил, потому что колесо не крутила НИ ОДНА проба из ста
+   * с лишним (`grep -l 'mouse.wheel\|WheelEvent' tmp/dsgprobe/*.mjs` — пусто).
+   *
+   * Callback-реф отвечает на вопрос «когда узел появился» точно, каким бы коммитом это ни
+   * случилось. Держать здесь ОБА подписчика — единственный способ не наступить в третий раз:
+   * добавить эффект, читающий вьюпорт по монтированию, теперь просто некуда.
+   */
+  const attachViewport = useCallback((node: HTMLDivElement | null) => {
+    viewportRef.current = node;
+    viewportRO.current?.disconnect();
+    viewportRO.current = null;
+    viewportOff.current?.();
+    viewportOff.current = null;
+    if (!node) return;
+
+    /**
+     * ⚠ ВИД ПРИМЕНЯЕТСЯ ВСЕГДА; НА «ЧЕЛОВЕК ТРОНУЛ САМ» ГЕЙТИТСЯ ТОЛЬКО ВПИСЫВАНИЕ.
+     *
+     * Прежде здесь стоял ранний выход по `userMoved` ДО применения — и это разводило две
+     * половины одного утверждения: числа вида (`viewRef`) и `transform` узла мира. На повторном
+     * входе узел мира монтируется заново и приезжает БЕЗ трансформа, а `userMoved` к тому
+     * моменту ещё взведён: сид визита гасит его, но сам выходит рано, пока читается слой
+     * (`knownId > 0 && !loaded`), а `gcTime: 0` у этого чтения делает «рано» неизбежным для
+     * любого, кто закрыл и открыл окно не мгновенно.
+     *
+     * ЦЕНА БЫЛА НЕ КОСМЕТИЧЕСКОЙ. Плата рисовалась в 1:1 поверх вьюпорта, показатель зума при
+     * этом честно говорил 91 %, а `toWorld` продолжал делить на ПРОШЛЫЙ зум и вычитать ПРОШЛУЮ
+     * панораму: линия, проведённая рукой через видимую плату, уезжала в документ на пятую часть
+     * листа мимо. Замерено: рука [[0.25,0.306],[0.75,0.306]] → запись [[0.150,0.500],[0.702,0.500]].
+     * Молча, и обнаружилось бы на бумаге.
+     */
+    const ro = new ResizeObserver(() => {
+      // Человек, тронувший вид сам, распоряжается им дальше один: мир из-под руки не вырывают.
+      // Но НАРИСОВАТЬ то, что уже описано числами, надо в любом случае.
+      if (userMoved.current) applyViewRef.current();
+      else fitPlateRef.current();
+    });
+    ro.observe(node);
+    viewportRO.current = ro;
+    // Узел появился — на нём немедленно оказывается тот вид, который числа уже описывают.
+    applyViewRef.current();
+
+    /**
+     * Колесо: скролл — панорама, щипок (ctrlKey у трекпада) и ⌘ — зум вокруг курсора.
+     * НАТИВНЫЙ слушатель, потому что React вешает wheel пассивным и `preventDefault` оттуда мёртв
+     * — страница под редактором уезжала бы вместе с миром.
+     */
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const r = node.getBoundingClientRect();
+        viewRef.current = zoomAt(
+          viewRef.current,
+          Math.exp(-e.deltaY * 0.0022),
+          e.clientX - r.left,
+          e.clientY - r.top,
+          EDITOR_ZOOM_MAX,
+        );
+      } else {
+        const { pan, zoom } = viewRef.current;
+        viewRef.current = { zoom, pan: { x: pan.x - e.deltaX, y: pan.y - e.deltaY } };
+      }
+      userMoved.current = true;
+      applyViewRef.current();
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    viewportOff.current = () => node.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /** Смена ФОРМЫ платы (натуральные пропорции подложки, кроп) — второй повод вписать заново. */
   useLayoutEffect(() => {
-    if (!open || !entered) return;
+    if (!open || !viewportRef.current) return;
     if (userMoved.current) return;
     fitPlate();
-  }, [open, entered, ratio, fitPlate]);
+  }, [open, ratio, fitPlate]);
 
   const zoomBy = useCallback(
     (factor: number) => {
@@ -1270,36 +1344,6 @@ export function VectorModal({
     userMoved.current = true;
     applyView();
   }, [applyView]);
-
-  /**
-   * Колесо: скролл — панорама, щипок (ctrlKey у трекпада) и ⌘ — зум вокруг курсора. Нативный
-   * слушатель, потому что React вешает wheel пассивным и `preventDefault` оттуда мёртв — страница
-   * под редактором уезжала бы вместе с миром.
-   */
-  useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp || !open || !entered) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
-        const r = vp.getBoundingClientRect();
-        viewRef.current = zoomAt(
-          viewRef.current,
-          Math.exp(-e.deltaY * 0.0022),
-          e.clientX - r.left,
-          e.clientY - r.top,
-          EDITOR_ZOOM_MAX,
-        );
-      } else {
-        const { pan, zoom } = viewRef.current;
-        viewRef.current = { zoom, pan: { x: pan.x - e.deltaX, y: pan.y - e.deltaY } };
-      }
-      userMoved.current = true;
-      applyView();
-    };
-    vp.addEventListener('wheel', onWheel, { passive: false });
-    return () => vp.removeEventListener('wheel', onWheel);
-  }, [open, entered, applyView]);
 
   /**
    * Потеря окна гасит зажатый пробел и панораму: keyup после ⌘Tab не приходит НИКОГДА, и без
@@ -1766,6 +1810,27 @@ export function VectorModal({
    */
   const gestureToolRef = useRef<Tool | null>(null);
 
+  /**
+   * ГДЕ КИСТЬ ОТОРВАЛАСЬ ОТ БУМАГИ В ПРОШЛЫЙ РАЗ — для Shift-клика «точка, потом точка = прямая»
+   * (H-15, владелец: «нажал одну точку нажал наследующю с шифтом оно сделало пряму линию»).
+   *
+   * КЛЮЧ ПО ИНСТРУМЕНТУ, А НЕ ПРОСТО КООРДИНАТА. Мазнуть кистью, взять ластик и Shift-кликнуть
+   * означало бы стереть полосу вдоль отрезка, которого ластик не рисовал; связывать разнородные
+   * жесты нельзя, и сторожить это условием в трёх местах — тоже: имя инструмента лежит рядом с
+   * точкой, и соединить разное просто нечем.
+   *
+   * ⚠ МОДИФИКАТОР ЧИТАЕТСЯ С УКАЗАТЕЛЯ (`event.shiftKey` на pointerdown), А НЕ С КЛАВИАТУРЫ.
+   * Клавиатурный путь этого экрана проходит через гард набора (`isTyping`, а `TYPING_TARGETS`
+   * содержит `button`), и после клика по любому чипу инструмента он мёртв — Enter над рамкой
+   * ловится оконным слушателем именно поэтому. Указательное событие несёт состояние Shift само и
+   * ни через один гард не идёт.
+   *
+   * Смену инструмента НЕ чистит (ключ сам не даст соединить разное), undo не чистит (координаты
+   * остаются законными — как в фотошопе). Чистится там, где точка перестаёт что-то значить:
+   * на входе визита и при пересчёте листа кропом.
+   */
+  const lastMark = useRef<{ tool: Tool; at: [number, number] } | null>(null);
+
   /** Начало пиксельного жеста: буфер чист, коробка пуста, режим и непрозрачность зафиксированы. */
   const beginRasterGesture = (t: Tool) => {
     gestureToolRef.current = t;
@@ -2084,6 +2149,98 @@ export function VectorModal({
     setFrameHover(null);
   };
 
+  /**
+   * ⚠ ПОЛ ВПИСЫВАНИЯ НАЗЫВАЕТСЯ ВСЛУХ, ОДИН РАЗ ЗА ВИЗИТ. `fitView` не опускается ниже
+   * `FIT_MIN` (0.35), а кадру разрешено вырасти до `CROP_MAX_GROWTH` (×4) — то есть примерно
+   * с 3.2 ширины платы «показать целиком» перестаёт быть выполнимым, и без слов это выглядит
+   * ровно как жалоба H-14: тяну, а экран не отвечает.
+   */
+  const cropFloorSaid = useRef(false);
+
+  /**
+   * ВИД ОТСТУПАЕТ И ПОКАЗЫВАЕТ КАДР — НА ОТПУСКАНИИ, И ТОЛЬКО КОГДА ЕМУ ПРАВДА ТЕСНО.
+   *
+   * ⚠ ПЕРВАЯ РЕДАКЦИЯ ЭТОГО ОРГАНА СТИРАЛА ПРИБЛИЖЕНИЕ ЧЕЛОВЕКА НА КАЖДОМ ЖЕСТЕ, и вопрос был
+   * задан неверно: «влезает ли ВЕСЬ кадр в экран». Кадр открывается ровно по границам платы, а
+   * выше вписывающего зума плата в экран не влезает — значит ответ был «нет» ВСЕГДА, и любое,
+   * даже направленное ВНУТРЬ, движение ручки отбрасывало вид к вписыванию. Замерено: зум 1.087,
+   * ручка сдвинута внутрь на 30 px, отпущено — вид вернулся точно к вписывающей матрице. Человек,
+   * подводящий кромку к шву на увеличении, терял его на первом же движении, и так без конца.
+   * Побочно взводился `userMoved`, глушивший до конца визита и перевписывание по смене формы
+   * платы, и наблюдателя размера окна.
+   *
+   * ВЕРНЫЙ ВОПРОС — ДВА, И ОБА УЖЕ: (1) вырос ли лист ЗА ПРЕДЕЛЫ ПЛАТЫ (обрезка внутрь за экран
+   * не уводит ничего и вида не касается вовсе); (2) ушло ли выросшее за кромку экрана. И только
+   * тогда — минимальное вмешательство: сперва ПАНОРАМА, потому что приближение принадлежит
+   * человеку, и трогать его надо последним; зум отступает лишь когда кадр не помещается в экран
+   * при нынешнем приближении НИКАК.
+   *
+   * Во время протяжки вид не трогается вовсе: мир, поехавший из-под руки, уводит и точку, за
+   * которую держат. Фотошоп так не делает буквально — у него бесконечный пастборд; у нас его нет.
+   */
+  const revealCropFrame = (fr: FrameState) => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const r = vp.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return;
+    const b = quadBounds(fr.quad);
+    /* Пол-юнита допуска — от арифметики клампа, а не от вкуса: кадр, «ровно по плате», не обязан
+       совпасть с ней до последнего бита, и дрожь в шестом знаке не повод двигать экран. */
+    const grew =
+      b.x0 < -0.5 || b.y0 < -0.5 || b.x1 > PLATE_W + 0.5 || b.y1 > plateH + 0.5;
+    if (!grew) return;
+    const view = viewRef.current;
+    const box = { x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 };
+    const port = { w: r.width, h: r.height };
+    /**
+     * ⚠ ВОПРОС ЗАДАЁТСЯ ПО ОСЯМ, КОТОРЫЕ ВЫРОСЛИ, А НЕ ПРО ВЕСЬ КАДР СРАЗУ.
+     *
+     * Первая починка закрыла движение ВНУТРЬ и оставила открытым РОСТ: выросший кадр всегда
+     * содержит плату, значит «влезает ли он целиком» выше вписывающего зума — снова всегда «нет»,
+     * и приближение снова стиралось. Замерено: 91 % → 52 % от протяжки правой кромки на 30 px
+     * НАРУЖУ, при том что сама кромка оставалась на экране, — вмешательство гнала ВЫСОТА кадра,
+     * которой рука не касалась вовсе.
+     *
+     * Ось, по которой человек ничего не тянул, не имеет права двигать его экран.
+     */
+    const grewX = b.x0 < -0.5 || b.x1 > PLATE_W + 0.5;
+    const grewY = b.y0 < -0.5 || b.y1 > plateH + 0.5;
+    const raw = revealDelta(box, port, view, FIT_INSET);
+    const d = { x: grewX ? raw.x : 0, y: grewY ? raw.y : 0 };
+    if (d.x === 0 && d.y === 0) return; // выросшее и так на экране — руки прочь
+    const fitsAtZoom =
+      (!grewX || box.w * view.zoom <= port.w - FIT_INSET * 2) &&
+      (!grewY || box.h * view.zoom <= port.h - FIT_INSET * 2);
+    if (fitsAtZoom) {
+      // ПРИБЛИЖЕНИЕ СОХРАНЯЕТСЯ: подвинуть мир достаточно, чтобы кадр стал виден целиком.
+      viewRef.current = { zoom: view.zoom, pan: { x: view.pan.x + d.x, y: view.pan.y + d.y } };
+    } else {
+      // Показывается ОБЪЕДИНЕНИЕ платы и кадра: кадр, уведённый вбок, всё равно режет лист, и
+      // видеть надо оба — иначе экран показал бы рамку над пустотой.
+      const x0 = Math.min(0, b.x0);
+      const y0 = Math.min(0, b.y0);
+      const x1 = Math.max(PLATE_W, b.x1);
+      const y1 = Math.max(plateH, b.y1);
+      const next = fitView({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, port);
+      viewRef.current = next;
+      const floored =
+        next.zoom <= FIT_MIN + 1e-6 &&
+        ((x1 - x0) * next.zoom > port.w - FIT_INSET * 2 ||
+          (y1 - y0) * next.zoom > port.h - FIT_INSET * 2);
+      if (floored && !cropFloorSaid.current) {
+        cropFloorSaid.current = true;
+        showMessage(
+          'the sheet is now bigger than this view can show at once — zooming out has reached its limit. Scroll to reach the edge you are pulling; the frame itself keeps growing.',
+          'error',
+        );
+      }
+    }
+    /* ⚠ `userMoved` ЗДЕСЬ НЕ ВЗВОДИТСЯ. Это поправка МАШИНЫ, а не жест человека, и объявлять ею
+       вид «человек распорядился сам» значило бы заглушить до конца визита и перевписывание по
+       смене формы платы, и наблюдателя размера окна — оба гейтятся ровно этим признаком. */
+    applyView();
+  };
+
   /** Рамка кадра — по нынешним границам платы. Тянуть наружу больше её, внутрь — меньше. */
   const openCropFrame = () => {
     const quad = quadFromRect(0, 0, PLATE_W, plateH);
@@ -2311,6 +2468,10 @@ export function VectorModal({
     putNodeEdit(null);
     setStampSrc(null);
     stampOffset.current = null;
+    /* И ТОЧКА ОТРЫВА ТОЖЕ. Она хранится ДОЛЯМИ кадра, а кроп пересчитывает сам кадр: доля 0.8
+       старого листа — это другое место нового, и Shift-клик провёл бы прямую откуда попало.
+       Тот же довод, по которому здесь же гасится источник штампа. */
+    lastMark.current = null;
     setNibHover(null);
     closeFrame();
 
@@ -2553,8 +2714,13 @@ export function VectorModal({
         stampOffset.current = [at[0] - stampSrc[0], at[1] - stampSrc[1]];
       }
       beginRasterGesture(tool);
+      /* SHIFT-КЛИК КЛАДЁТ ПРЯМУЮ ОТ ПРОШЛОЙ ТОЧКИ (H-15). Отрезок уходит в буфер ТОГО ЖЕ жеста,
+         поэтому протяжка после него продолжает вести от `at`, а отпускание коммитит всё ОДНИМ
+         шагом ленты: прямая плюс возможное продолжение руки = один ⌘Z, ровно как в фотошопе.
+         Последовательные Shift-клики цепляются сами — каждое отпускание переписывает `lastMark`. */
+      const chain = event.shiftKey && lastMark.current?.tool === tool ? lastMark.current.at : at;
       // Точка без протяжки — тоже отпечаток: клик кистью обязан оставить пятно.
-      growRasterGesture(tool, at, at);
+      growRasterGesture(tool, chain, at);
     }
     putTrace([at]);
   };
@@ -2698,6 +2864,7 @@ export function VectorModal({
       const fr = frameRef.current;
       const b = backdropRef.current;
       if (fr?.owner === 'backdrop' && b) putBackdrop(setBackdropQuad(b, fr.quad));
+      if (fr?.owner === 'crop') revealCropFrame(fr);
       return;
     }
     if (patchDrag.current && event.pointerId === patchDrag.current.id) {
@@ -2755,6 +2922,10 @@ export function VectorModal({
       const started = gestureToolRef.current ?? tool;
       gestureToolRef.current = null;
       if (frozen) return;
+      /* ТОЧКА ОТРЫВА ЗАПОМИНАЕТСЯ ПОД ИМЕНЕМ ИНСТРУМЕНТА, КОТОРЫМ ЖЕСТ ШЁЛ, — тем же `started`,
+         что решает развилку ниже, а не тем, что в руке сейчас. Только после гарда `frozen`:
+         жест, ничего не написавший, не имеет права оставить якорь для следующей прямой. */
+      lastMark.current = { tool: started, at: liveTrace[liveTrace.length - 1] };
       // РАЗВИЛКА ПО ИНСТРУМЕНТУ, КОТОРЫМ ЖЕСТ НАЧАЛСЯ, а не по тому, что в руке сейчас, — по тому
       // же доводу, что у `gestureToolRef` вообще: клавиши инструментов живые всё время.
       if (started === 'heal') void healGesture();
@@ -3580,7 +3751,7 @@ export function VectorModal({
    * человека, стёршего полфотографии, без единого вопроса — и это была бы потеря, которую нечем
    * вернуть: ленты правок у слоя нет по контракту.
    */
-  const dirty = entered && (strokesJson !== seededJson.current || rasterDirty);
+  const dirty = strokesJson !== seededJson.current || rasterDirty;
 
   /**
    * Store the strokes and adopt the rev the server hands back. Returns the layer's id.
@@ -3665,31 +3836,6 @@ export function VectorModal({
     dropRasterRef.current = false;
     return next.id;
   }, [saveLayer, baseMediaId, ratio, storedRasterId]);
-
-  /**
-   * ПРИЁМКА МАШИННОГО ВЕКТОРА. Слой уже подшит сервером (`ImportDesignVector`, rev = 1) — редактор
-   * его УСЫНОВЛЯЕТ, не пере-читая: ответ и есть слой, а второй GET купил бы запрос и ноль фактов.
-   * Проекция может быть пустой — тогда на плате рисуется сам ФАЙЛ, и об этом сказано словами.
-   */
-  const adoptImported = useCallback(
-    (result: { layer: common_DesignEditLayer; strokes: VectorStroke[]; fileUrl: string }) => {
-      const next: LayerHandle = { id: result.layer.id ?? 0, rev: result.layer.rev ?? 1 };
-      layerRef.current = next;
-      setLayer(next);
-      setStrokes(result.strokes);
-      seededJson.current = JSON.stringify(result.strokes);
-      setFileMediaId(result.layer.sourceMediaId ?? 0);
-      setFileUrl(result.fileUrl);
-      setSelected(null);
-      setEntered(true);
-      resetHistory();
-      showMessage(
-        'the vector is filed as this plate’s layer — it will already be here on the next visit',
-        'success',
-      );
-    },
-    [resetHistory, showMessage],
-  );
 
   const saveDrawingOnly = async () => {
     if (frozen || tooLarge || !anyContent || busy) return;
@@ -3982,7 +4128,6 @@ export function VectorModal({
       // ⌘C / ⌘V / ⌘D живут НА ОКНЕ, рядом с ⌘Z — см. эффект ниже. Здесь их нет нарочно.
       return;
     }
-    if (!entered) return;
     // ПРОБЕЛ ПЕРЕХВАТЫВАЕТСЯ РАНЬШЕ гарда набора — но только НЕ в текстовом поле. На фокусе-кнопке
     // пробел по умолчанию «нажать кнопку», и после клика по чипу инструмента зажатая ладонь
     // дёргала бы этот чип вместо панорамы; Enter кнопкам остаётся.
@@ -4101,7 +4246,7 @@ export function VectorModal({
   const anyContent = strokes.length > 0 || rasterDirty;
   const ready = !frozen && anyContent && !tooLarge && !busy;
   /** Слой-файл без редактируемой проекции: файл цел, штрихов нет — экран обязан сказать это. */
-  const fileOnly = entered && fileMediaId > 0 && strokes.length === 0 && !readPending;
+  const fileOnly = fileMediaId > 0 && strokes.length === 0 && !readPending;
   /**
    * ЧТО ИМЕННО ЗАПИСЫВАЮТ ПИКСЕЛИ — СКАЗАНО ВСЛУХ, НО В РЕЙКЕ, А НЕ КОРОБКОЙ НАД ХОЛСТОМ.
    *
@@ -4305,10 +4450,9 @@ export function VectorModal({
               )}
 
               <span className='ml-auto flex flex-wrap items-center gap-1'>
-                {/* Органы вида живут только вместе с холстом: на развилке входа холста нет, и
-                    чип, молча ничего не делающий, хуже отсутствующего — тот же довод, что у
-                    запертой двери конверсии. */}
-                {entered && (
+                {/* Органы вида живут вместе с холстом, а холст здесь теперь ВСЕГДА (H-1): гард
+                    `entered` сторожил развилку входа, а её больше нет. */}
+                {
                   <>
                     <Chip nonForm dashed onClick={() => zoomBy(1 / Z_STEP)} title='zoom out (−)'>
                       −
@@ -4365,15 +4509,12 @@ export function VectorModal({
                       redo
                     </Chip>
                   </>
-                )}
+                }
                 {frozen ? (
                   <Pill tone='mut'>read-only</Pill>
                 ) : (
-                  /* Писатели — только вместе с холстом: на развилке и на суде им нечего писать,
-                     и пара призрачных кнопок там — шум, а не состояние. Тот же довод, что у
-                     органов вида строкой выше. */
-                  entered && (
-                    <>
+                  /* Писатели живут вместе с холстом — и он здесь безусловен (H-1). */
+                  <>
                       <Button
                         variant='secondary'
                         size='sm'
@@ -4392,8 +4533,7 @@ export function VectorModal({
                       >
                         {busy ?? 'save as a new picture'}
                       </Button>
-                    </>
-                  )
+                  </>
                 )}
                 <Chip nonForm onClick={requestClose} title='leave the editor (esc)'>
                   exit
@@ -4465,32 +4605,11 @@ export function VectorModal({
               </div>
             )}
 
-            {!entered ? (
-              /* ── развилка входа и вся ветка «да» за ней ─────────────────────────────────
-                 Вопрос, платный прогон, ожидание, приёмка рядом с исходником — четыре фазы
-                 одной панели на этом же экране; довод и слова — в trace-vector-panel.tsx. */
-              <TraceVectorPanel
-                trace={traceVector}
-                baseSrc={baseSrc}
-                baseLabel={base ? pictureHandle(base) : 'this plate'}
-                baseMediaId={baseMediaId}
-                ratio={ratio || DEFAULT_RATIO}
-                onDraw={() => setEntered(true)}
-                /* ⚠ ТРЕТИЙ ОТВЕТ РАЗВИЛКИ ТЕПЕРЬ И ОБВОДИТ, А НЕ ТОЛЬКО ВЕДЁТ В РЕДАКТОР.
-                   Прежний довод («умолчания могут молча обвести рамку вместо рисунка, потому что
-                   неверная полярность не отказывает») закрыт: полярность больше не умолчание, она
-                   МЕРЯЕТСЯ — краска это класс Otsu, которого меньше. Дверь обещает словами «trace
-                   the pixels as they are», и человек, нажавший её, вправе увидеть линии, а не ещё
-                   одну кнопку с тем же словом. */
-                onTraceHere={() => {
-                  setEntered(true);
-                  void runTraceOnePress();
-                }}
-                onAccepted={adoptImported}
-              />
-            ) : (
-              /* ── рейка + холст ───────────────────────────────────────────────────────── */
-              <div className='flex min-h-0 min-w-0 flex-1 gap-2'>
+            {/* ── рейка + холст: ОДИН И ЕДИНСТВЕННЫЙ вид этого экрана (H-1) ────────────────
+                Развилки «рисовать / перевести машиной» здесь больше нет: открытие плиты — уже
+                редактор. Бесплатная обводка стоит чипом в рейке (`data-trace-run`), платного
+                прогона нет нигде. */}
+            <div className='flex min-h-0 min-w-0 flex-1 gap-2'>
                 <VectorBrushRail
                   frozen={frozen}
                   brush={brush}
@@ -4725,7 +4844,7 @@ export function VectorModal({
                       это край белого на сером, по правилу «зазор и есть разделитель», без
                       нарисованной рамки, которая съедала бы пиксель системы координат. */}
                   <div
-                    ref={viewportRef}
+                    ref={attachViewport}
                     onPointerDown={onStagePointerDown}
                     onPointerMove={onStagePointerMove}
                     onPointerUp={onStagePointerUp}
@@ -5423,13 +5542,16 @@ export function VectorModal({
                           hover={frameHover}
                           plateW={PLATE_W}
                           plateH={plateH}
+                          /* Кольцо роста рисуется ТЕМ ЖЕ цветом, каким `expandRasterLayer`
+                             потом зальёт новое поле: экран показывает не «где будет край», а
+                             буквально что там появится. */
+                          cropFill={frame.owner === 'crop' ? cropFill : undefined}
                         />
                       )}
                     </div>
                   </div>
                 </div>
               </div>
-            )}
           </div>
 
           {/* Страж выхода. Возврат фокуса экрану — тем же приёмом, что у фулскрина сборки: без

@@ -38,9 +38,10 @@ import { useStartRun } from './use-generation';
  * missing field here.
  *
  * THE FIX CYCLE IS GONE FROM THIS FORM, WHOLE (owner, S-15: «FIX функциональность выпиливаем
- * полностью»). `fix_targets` / `fix_slot_ids` stay LIVE on the wire — they now belong to the
- * vector path, which narrows a machine redraw to its plate (`modals/use-trace-vector.ts`) — but
- * every run STARTED HERE sends them empty. With the fix went the one road marked-up plates had
+ * полностью»). `fix_targets` / `fix_slot_ids` stay LIVE on the wire and are still READ by frozen
+ * history rows — but no client writer fills them any more: the vector path that inherited them
+ * (a machine redraw narrowing itself to its plate) was removed whole in H-1, round 14, and every
+ * run started anywhere in this client now sends them empty. With the fix went the one road marked-up plates had
  * into a run's input: `useFixContext().target` was permanently null after the provider was
  * unmounted, so `prepareMarks` could never run again and every branch below that read `fixing`
  * was dead weight promising a door that no longer exists. Deliberately NOT resurrected — feeding

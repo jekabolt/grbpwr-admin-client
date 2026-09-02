@@ -70,6 +70,17 @@ const EMPTY_BAND: GetDesignBandResponse = {
   // воспользоваться.
   assets: [],
   assetPlacements: [],
+  // ВЫХОДЫ КАРТОЧКИ ЦЕЛИКОМ (H-9). Пусто, а не `undefined`, и это ответ на вопрос, который
+  // комментарий выше требует решать человеком: на бинаре, который поля не знает, читатель обязан
+  // упасть обратно на обход первой страницы `runs` — то есть увидеть ровно то, что видел до этой
+  // волны. Пустой список это и означает: «сказать нечего», а не «выходов нет».
+  //
+  // ⚠ `outputsTotal` НОЛЬ здесь НЕ ЗНАЧИТ «карточка пуста». Ноль рядом с непустыми `runs` читается
+  // как «эта половина ответа не пришла», и подписывать усечение по нему нельзя — подпись берётся
+  // из `outputsTotalByColorway` и только когда там есть ключ секции.
+  outputs: [],
+  outputsTotal: 0,
+  outputsTotalByColorway: {},
   // `undefined`, AND EXPLICITLY NOT `false`. This is the band handed to a card whose server does
   // not speak the routes at all, or one that has not answered yet — and `has_fabric_render` is the
   // mirror of the SERVER's own 3D gate (W-13). `false` here would be a claim we are not entitled
@@ -396,4 +407,36 @@ export function newClientRequestId(): string {
   const bytes = new Uint8Array(16);
   if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Best-effort URL of a media id, out of the pictures the band's FIRST PAGE already carries. The
+ * contract has no media-by-id read on purpose (the band is the one source of re-entry truth), so
+ * a file whose run has paged out of the first history page comes back as '' — the caller must
+ * degrade to words, never to a broken image.
+ *
+ * ⚠ ЖИВЁТ ЗДЕСЬ, А НЕ У ПЛАТНОГО ПРОГОНА (H-1, круг 14). Функция читает `GetDesignBandResponse` —
+ * это словарь полосы, и её настоящий потребитель СЛОЙ-ФАЙЛ на повторном заходе: у слоя есть
+ * `source_media_id`, а URL к нему надо чем-то найти. Прежний дом (`use-trace-vector.ts`) снесён
+ * вместе с векторным прогоном, а эта работа его смерть пережила и от неё не зависела ни дня.
+ */
+export function findMediaUrlInBand(band: GetDesignBandResponse, mediaId: number): string {
+  if (!mediaId) return '';
+  const pools = [
+    ...(band.runs ?? []).map((r) => r.pictures ?? []),
+    ...(band.batches ?? []).map((b) => b.pictures ?? []),
+  ];
+  for (const pictures of pools) {
+    for (const p of pictures) {
+      if ((p.media?.id ?? 0) === mediaId) {
+        return (
+          p.media?.media?.fullSize?.mediaUrl ||
+          p.media?.media?.compressed?.mediaUrl ||
+          p.media?.media?.thumbnail?.mediaUrl ||
+          ''
+        );
+      }
+    }
+  }
+  return '';
 }

@@ -72,12 +72,3 @@ export {
   RASTER_MAX_W,
   rasteriseStrokesOverBase,
 } from './rasterise-layer';
-
-export {
-  arcToCubics,
-  importSvg,
-  parsePathData,
-  type SvgImportReading,
-  type SvgImportRefusal,
-  type SvgImportResult,
-} from './svg-import';
