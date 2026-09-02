@@ -14,7 +14,9 @@ import { useDesignWrites } from '../use-design-band';
 import { viewLabel } from '../views';
 import {
   SELECT_MARK_NOT_STATED,
+  outputsHorizon,
   outputsOfKind,
+  serverStatesOutputs,
   pictureIsSelected,
   pictureThumb,
   serverStatesSelected,
@@ -129,6 +131,24 @@ export function OutputsSection({
   const writesOff = !!disabled || !speaks;
 
   /**
+   * ═══ КАКОЙ ИЗ ДВУХ ОТВЕТОВ НАРИСОВАН — И ПОДПИСЬ ЧИТАЕТ ИМЕННО ЕГО (H-9) ═══════════════════
+   *
+   * `serverStatesOutputs` спрашивает про БИНАРЬ («поле прислано вообще?»), а не про длину списка.
+   * Разница поймана ревью: пустой, но объявленный список — это «выходов нет», а не «сервер старше
+   * поля», и подписывать его фразой про страницу ленты значит обманывать охватом в подписи ровно
+   * так же, как раньше обманывал сам список. Читатель списка при этом продолжает складывать пустое
+   * с несказанным, и это безопасно по надмножеству — довод стоит у самих предикатов.
+   *
+   * `horizon` — не «сколько всего у карточки». Это «сколько У ЭТОГО КОЛОРВЕЯ и сколько из них
+   * доехало»: потолок сервера тратится ПОКОЛОРВЕЙНО, и `outputs_total` подписал бы суженную
+   * секцию числом всей карточки. `null` — ничего не осталось за горизонтом, и тогда о нём молчим.
+   */
+  const stated = serverStatesOutputs(band);
+  // Горизонт спрашивается только у СЕКЦИИ С КОЛОРВЕЕМ — теперь это требование типа, а не
+  // договорённость: секция без сужения не имеет числа, которым её можно честно подписать.
+  const horizon = colorwayId === undefined ? null : outputsHorizon(band, colorwayId);
+
+  /**
    * ⚠ «FRAME» И «TURNTABLE» БЫЛИ НЕПРАВДОЙ, И ЭТО ПРОВЕРЕНО ПО ЗАДЕПЛОЕННОМУ БЭКЕНДУ, А НЕ ПО
    * ПАМЯТИ. Маршрут 3D — `hitem3d/…/multi-view-to-3d` через fal, и его `Produces` называет ровно
    * два предмета: САМУ МОДЕЛЬ (`.glb`) и растровую миниатюру, которая стоит вместо неё там, где
@@ -144,7 +164,12 @@ export function OutputsSection({
       question={
         kind === 'threed'
           ? '— the models that came back, and which of them is the chosen one'
-          : '— the coloured plates that came back, and which of them are chosen'
+          : stated
+            ? // ГОВОРИТ ПРО КАРТОЧКУ ЦЕЛИКОМ И ПРО ОБА ПРОИСХОЖДЕНИЯ. В списке теперь стоят и
+              // загруженные руками плиты (у них нет прогона вовсе), а «came back» — слово о
+              // прогоне, и под ним рука выглядела бы чужой строкой.
+              '— the coloured plates of this card, generated or brought, and which are chosen'
+            : '— the coloured plates that came back, and which of them are chosen'
       }
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -154,14 +179,22 @@ export function OutputsSection({
         </Text>
       }
     >
-      {/* ЧЕЙ ЭТО СПИСОК И ГДЕ ОН КОНЧАЕТСЯ — ОДНОЙ СТРОКОЙ, ДО ПЛИТОК. Два сужения сразу, и оба
-          обязаны быть сказаны: колорвей (иначе «а где мой рендер» на соседнем цвете) и страница
-          ленты (полоса привозит ОДНУ страницу — это ограничение экрана, не карточки). */}
+      {/* ЧЕЙ ЭТО СПИСОК И ГДЕ ОН КОНЧАЕТСЯ — ОДНОЙ СТРОКОЙ, ДО ПЛИТОК. Сужение по колорвею надо
+          сказать всегда (иначе «а где мой рендер» на соседнем цвете); ВТОРОЕ сужение — по странице
+          ленты — теперь есть не всегда, и строка называет ровно то, что нарисовано: всю карточку
+          на сервере, который выходы объявляет, и страницу ленты на откаченном бинаре. */}
       {colorwayId !== undefined && (
-        <Text size='nano' variant='label' component='p' data-outputs-scope={colorwayId} className='normal-case'>
+        <Text
+          size='nano'
+          variant='label'
+          component='p'
+          data-outputs-scope={colorwayId}
+          data-outputs-whole={stated ? '1' : '0'}
+          className='normal-case'
+        >
           {colorwayLabel?.trim()
-            ? `${noun}s of ${colorwayLabel.trim()}, on this page of the feed`
-            : `${noun}s filed without a colourway, on this page of the feed`}
+            ? `${noun}s of ${colorwayLabel.trim()}, ${stated ? 'of this whole card' : 'on this page of the feed'}`
+            : `${noun}s filed without a colourway, ${stated ? 'of this whole card' : 'on this page of the feed'}`}
         </Text>
       )}
       {!carries && (
@@ -179,6 +212,18 @@ export function OutputsSection({
       <Strip>
         {rows.map(({ picture, run, src, modelUrl }) => {
           const chosen = pictureIsSelected(picture);
+          /**
+           * ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ. Со времён H-9 в списке стоят и плиты, за которыми
+           * прогона нет вовсе: загруженная руками и «плоская» правка без основы обе приходят с
+           * `run_id = 0`. Печатать им `run 0` значило бы назвать номер, которого нет.
+           *
+           * И слово тут именно «no run», а не «upload», хотя загрузка — частый случай: контракт
+           * прямо предупреждает, что `run_id 0` НЕ влечёт «пришло из партии» (`batch_id` тоже
+           * бывает нулём). Откуда плита взялась на самом деле, говорит вторая строка — она читает
+           * `source_class` и печатает `uploaded` / `drawn` / `imported SVG`. Первая строка отвечает
+           * только за прогон, и её честный ответ — что прогона нет.
+           */
+          const stamped = (run.id ?? 0) > 0;
           const view = viewLabel((picture.ghostView ?? '').trim());
           const shape = modelUrl
             ? '3d model'
@@ -189,6 +234,7 @@ export function OutputsSection({
           return (
             <StripCell
               key={picture.id}
+              cellPictureId={picture.id}
               emphasis={chosen}
               src={src}
               alt={modelUrl ? `3d model of run ${run.id ?? ''}` : `${noun} ${picture.ordinal ?? ''}`}
@@ -212,7 +258,10 @@ export function OutputsSection({
                   : undefined
               }
               badge={modelUrl ? (chosen ? '3d · selected' : '3d model') : chosen ? 'selected' : undefined}
-              lines={[`run ${run.id ?? '—'} · ${shape}`, stripProvenance(band, picture)]}
+              lines={[
+                stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`,
+                stripProvenance(band, picture),
+              ]}
               action={
                 <div className='flex flex-wrap items-center gap-1'>
                   {/* ФАЙЛ ОТДАЁТСЯ ДО ВСЯКОГО ПРОСМОТРА И НЕЗАВИСИМО ОТ НЕГО. Модель — то, за что
@@ -288,12 +337,39 @@ export function OutputsSection({
         <ThreedModelModal url={openModel} title='3d model' onClose={() => setOpenModel(null)} />
       )}
 
-      <Text size='nano' variant='label' component='p' className='normal-case'>
-        This is the page of the feed the band shipped, newest run first — not every {noun} this
-        card has ever produced. The mark is a verdict about a picture and is <b>not</b> the same
-        thing as hiding one: a hidden picture is out of sight and can come back, a chosen one is
-        what the card is going with — and what ARTIFACTS narrows its list to. More than one may be
-        chosen.
+      <Text
+        size='nano'
+        variant='label'
+        component='p'
+        data-outputs-note={stated ? 'whole' : 'page'}
+        className='normal-case'
+      >
+        {/* ⚠ ЭТА СНОСКА БЫЛА ПРИЗНАНИЕМ, А ПРИЗНАНИЕ — НЕ ПОЧИНКА. Она годами говорила «это
+            страница ленты, а не все рендеры карточки», и владелец нашёл ровно то, о чём она
+            предупреждала. Теперь у неё две редакции, и печатается та, которая соответствует
+            нарисованному списку: сервер, объявляющий выходы, показывает карточку целиком; сервер
+            старше поля — по-прежнему страницу, и говорит об этом прежними словами. */}
+        {stated ? (
+          <>
+            Every {noun} this card holds, newest first — including the pieces cut out of a sheet,
+            and the plates brought in by hand rather than generated. Hidden ones are folded away.
+            {horizon ? (
+              <>
+                {' '}
+                This colourway has {horizon.total} generative pictures in all and the card shipped
+                the newest {horizon.carried} of them, so the oldest are not on this list.
+              </>
+            ) : null}{' '}
+          </>
+        ) : (
+          <>
+            This is the page of the feed the band shipped, newest run first — not every {noun} this
+            card has ever produced.{' '}
+          </>
+        )}
+        The mark is a verdict about a picture and is <b>not</b> the same thing as hiding one: a
+        hidden picture is out of sight and can come back, a chosen one is what the card is going
+        with — and what ARTIFACTS narrows its list to. More than one may be chosen.
         {/* КУДА ВЕДЁТ ПОМЕТКА — СКАЗАНО ТАМ, ГДЕ ЕЁ СТАВЯТ. Она никого никуда не двигает сама:
             сторона поворотного стола исключительна, а помеченных может быть много. */}
         {kind === 'render' && (

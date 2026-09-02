@@ -5,7 +5,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -48,7 +48,8 @@ import {
   type HideGuard,
 } from '../visibility';
 import { isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
-import { CompositeMarks, compositeTail, readComposite, splitVerb } from './composite';
+import { CompositeMarks, compositeTail, cropFamilies, readComposite, splitVerb } from './composite';
+import { CropDeck } from './crop-deck';
 import { formatMoney } from './money';
 import { RunPanel } from './run-panel';
 import {
@@ -230,6 +231,7 @@ function RunTile({
   disabled,
   galleryKey,
   galleryIndex,
+  deckMemberOf,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -242,6 +244,13 @@ function RunTile({
   galleryKey: string;
   /** Where this picture stands in that group, or `undefined` if it has no showable address. */
   galleryIndex?: number;
+  /**
+   * THE SHEET THIS PIECE WAS CUT OUT OF, when the tile is standing in an OPEN deck (H-10). It
+   * changes nothing about the tile — a piece is an ordinary card with every corner role it always
+   * had — and exists so that the deck's members are addressable from the outside: a probe that
+   * cannot tell a member from a sibling cannot prove that a closed deck holds its pieces back.
+   */
+  deckMemberOf?: number;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const pick = usePickMode();
@@ -358,6 +367,8 @@ function RunTile({
     return (
       <button
         type='button'
+        data-picture={pictureId || undefined}
+        data-deck-member={deckMemberOf || undefined}
         onClick={pickable ? () => pick.resolve(pictureId) : undefined}
         aria-disabled={!pickable}
         title={
@@ -434,7 +445,14 @@ function RunTile({
   }
 
   return (
-    <div className='flex h-full w-full min-w-0 flex-col'>
+    /* ЯКОРЯ ПЛИТКИ: своя картинка и — у куска — свой лист. `data-picture` есть у КАЖДОЙ плитки, и
+       это не только для проб: порядок ряда просмотрщика обязан совпадать с порядком показа, а
+       сравнить два порядка можно только тогда, когда у нарисованного кадра есть имя. */
+    <div
+      className='flex h-full w-full min-w-0 flex-col'
+      data-picture={pictureId || undefined}
+      data-deck-member={deckMemberOf || undefined}
+    >
       <PictureTile
         url={url}
         alt={handle}
@@ -557,6 +575,8 @@ function RunRow({
   disabled,
   galleryKey,
   galleryIndexOf,
+  openDeck,
+  onDeck,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -569,6 +589,15 @@ function RunRow({
   galleryKey: string;
   /** picture id → its offset in the section's gallery group. Absent = no showable address. */
   galleryIndexOf: Map<number, number>;
+  /**
+   * THE ONE OPEN DECK OF THE WHOLE FEED, or `null` (H-10). The row is handed the state rather than
+   * holding it, because the owner's law is «нажимаешь на другой мультивью старый колапсится
+   * обратно» and the other multiview is routinely in ANOTHER ROW. A per-row flag would keep one
+   * deck open in every row at once and satisfy the sentence only by accident, on a card with one
+   * run.
+   */
+  openDeck: number | null;
+  onDeck: (rootId: number) => void;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
@@ -585,6 +614,12 @@ function RunRow({
    * mentions it. The tile marks it instead.
    */
   const pictures = run.pictures ?? [];
+  /**
+   * WHICH PICTURES OF THIS ROW WERE CUT OUT OF WHICH (H-10). Read from `derived_from`, transitive,
+   * inside this row only — see `cropFamilies`. A row with no cut in it produces two empty
+   * collections and every tile below is drawn exactly as it was before this wave.
+   */
+  const families = useMemo(() => cropFamilies(pictures), [pictures]);
   const archiveWhy = archiveBlockReason(run, guard);
   const price = formatMoney(run.priceActual ?? run.priceEstimate, run.currency);
   /**
@@ -594,12 +629,13 @@ function RunRow({
    * believed.
    *
    * ⚠ THE SAME WIRE FIELDS NO LONGER MEAN «FIX» ON EVERY KIND. The owner removed the fix cycle
-   * whole (S-15), and `fix_targets`/`fix_slot_ids` were INHERITED by the vector path: a machine
-   * redraw narrows itself to the plate its editor was opened from (`use-trace-vector.ts`), or the
-   * worker would redraw FRONT whatever the person was looking at. So on a `vector` row the
-   * selection is an ADDRESS, not a repair — and the word the owner ordered out must not sign every
-   * redraw. The pill below reads the kind: `redraw of front` on a vector row, and `fix: …` only on
-   * the flat rows already frozen with it — history is a record, and those rows WERE fixes.
+   * whole (S-15), and `fix_targets`/`fix_slot_ids` were then INHERITED by the vector path, which
+   * narrowed a machine redraw to the plate its editor was opened from. That path was itself
+   * removed in H-1 (round 14), so NOTHING in this client writes those fields today — but the
+   * frozen `vector` rows that DO carry them are still on screen, and on them the selection is an
+   * ADDRESS, not a repair. The word the owner ordered out must not sign a redraw. The pill below
+   * reads the kind: `redraw of front` on a vector row, and `fix: …` only on the flat rows already
+   * frozen with it — history is a record, and those rows WERE fixes.
    */
   const fix = fixSelectionOf(run);
   const fixNames = [
@@ -744,21 +780,64 @@ function RunRow({
       )}
 
       {!archived && !live && pictures.length > 0 && (
+        /* ═══ ОДИН ГРИД, А НЕ ГРИД В ГРИДЕ (H-10) ══════════════════════════════════════════════
+           Куски открытой колоды встают ОБЫЧНЫМИ карточками в тот же ряд, сразу за своим листом:
+           у них те же углы, тот же пикер под кадром и то же место в ряду просмотрщика, что и у
+           любой плитки. Вложенная сетка была бы блоком в блоке — в этой системе такого нет, — и
+           заодно отобрала бы у кусков ширину дорожки. Фрагмент не создаёт DOM-узла, поэтому
+           `[&>*]:min-w-0` у `Tiles` по-прежнему достаётся самим плиткам. */
         <Tiles min={140}>
-          {pictures.map((picture) => (
-            <RunTile
-              key={picture.id}
-              band={band}
-              techCardId={techCardId}
-              picture={picture}
-              cardFit={cardFit}
-              runFit={(run.fitAtLaunch ?? '').trim()}
-              disabled={disabled}
-              galleryKey={galleryKey}
-              galleryIndex={galleryIndexOf.get(picture.id ?? 0)}
-              onSplit={onSplit}
-            />
-          ))}
+          {pictures.map((picture) => {
+            const pictureId = picture.id ?? 0;
+            // Кусок рисуется ТОЛЬКО под своим листом. Здесь он пропускается, иначе открытая
+            // колода показала бы его дважды, а закрытая — вопреки собственной двери.
+            if (families.rootOf.has(pictureId)) return null;
+            const members = families.membersOf.get(pictureId) ?? [];
+            const tile = (
+              <RunTile
+                band={band}
+                techCardId={techCardId}
+                picture={picture}
+                cardFit={cardFit}
+                runFit={(run.fitAtLaunch ?? '').trim()}
+                disabled={disabled}
+                galleryKey={galleryKey}
+                galleryIndex={galleryIndexOf.get(pictureId)}
+                onSplit={onSplit}
+              />
+            );
+            // Лист, из которого ничего не вырезано, колодой не становится: за ним ничего нет.
+            if (!members.length) return <Fragment key={pictureId}>{tile}</Fragment>;
+            const open = openDeck === pictureId;
+            return (
+              <Fragment key={pictureId}>
+                <CropDeck
+                  rootId={pictureId}
+                  count={members.length}
+                  open={open}
+                  onToggle={() => onDeck(pictureId)}
+                >
+                  {tile}
+                </CropDeck>
+                {open &&
+                  members.map((member) => (
+                    <RunTile
+                      key={member.id}
+                      band={band}
+                      techCardId={techCardId}
+                      picture={member}
+                      cardFit={cardFit}
+                      runFit={(run.fitAtLaunch ?? '').trim()}
+                      disabled={disabled}
+                      galleryKey={galleryKey}
+                      galleryIndex={galleryIndexOf.get(member.id ?? 0)}
+                      deckMemberOf={pictureId}
+                      onSplit={onSplit}
+                    />
+                  ))}
+              </Fragment>
+            );
+          })}
         </Tiles>
       )}
 
@@ -853,6 +932,18 @@ export function GenerationHistory({
     picture: common_DesignPicture;
     handle: string;
   } | null>(null);
+  /**
+   * ═══ ОДНА ОТКРЫТАЯ КОЛОДА НА ВСЮ ЛЕНТУ — И ПОЭТОМУ ОНА ЖИВЁТ ЗДЕСЬ (H-10) ══════════════════
+   *
+   * Владелец: «если нажимаешь на другой мультивью старый колапсится обратно». «Другой мультивью»
+   * почти никогда не лежит в той же строке — это соседний прогон, — так что закон формулируется
+   * над ЛЕНТОЙ, а не над строкой. Флаг внутри `RunRow` держал бы по колоде в каждой строке разом
+   * и совпадал бы с просьбой только на карточке с одним прогоном.
+   *
+   * Значение — id ЛИСТА (корневой картинки), а не индекс: строки перестраиваются от фильтра,
+   * страницы и дочитанных продолжений, а id картинки переживает всё это.
+   */
+  const [openDeck, setOpenDeck] = useState<number | null>(null);
 
   /**
    * КАРТОЧКА СМЕНИЛАСЬ — ОКНО ИСТОРИИ НАЧИНАЕТСЯ ЗАНОВО.
@@ -878,6 +969,9 @@ export function GenerationHistory({
     // пустая отфильтрованная история читается как «у карточки нет генераций».
     if (rep !== 'all') setRep('all');
     if (splitting) setSplitting(null);
+    // Колода — тоже решение о ЧУЖОЙ карточке, и вдобавок её ключ (id картинки) у соседа означает
+    // другую картинку или не означает ничего. Сосед обязан открыться со сложенными колодами.
+    if (openDeck !== null) setOpenDeck(null);
   }
 
   const form = useFormContext<TechCardFormData>();
@@ -978,18 +1072,41 @@ export function GenerationHistory({
   const gallery = useMemo(() => {
     const items: MediaViewerItem[] = [];
     const indexOf = new Map<number, number>();
+    const put = (picture: common_DesignPicture) => {
+      const id = picture.id ?? 0;
+      const media = picture.media;
+      if (!id || indexOf.has(id) || !media || !mediaFullViewerSrc(media)) return;
+      indexOf.set(id, items.length);
+      items.push(mediaFullToViewerItem(media));
+    };
     for (const run of visible) {
       if (isRunArchived(run) || isRunLive(run)) continue;
-      for (const picture of run.pictures ?? []) {
+      const pictures = run.pictures ?? [];
+      /**
+       * ⚠ ЭТОТ ОБХОД — КОПИЯ ОБХОДА СТРОКИ, И ЭТО ТРЕБОВАНИЕ, А НЕ СОВПАДЕНИЕ (разбор ревью).
+       *
+       * «ПОРЯДОК РЯДА — ПОРЯДОК ПОКАЗА» стоит абзацем выше как обязательство. Пока здесь шёл
+       * ПРОВОДНОЙ порядок `run.pictures`, а строка ставила куски сразу за их листом, два порядка
+       * совпадали ровно до тех пор, пока каждый кроп лежал в массиве вплотную к своему листу.
+       * Прогон, вернувший две картинки прежде чем одну из них разрезали, ломает это молча:
+       * замерено — строка рисует [760, 761, 762, 763, 765], а ряд листал [760, 765, 761, 762,
+       * 763], и «дальше» с листа уводило на чужой кадр. Адрес кадра при этом оставался верным, то
+       * есть ошибка была невидима на клик и видима только на стрелку.
+       *
+       * Поэтому обход здесь ПОВТОРЯЕТ решение строки построчно: корни в проводном порядке, куски
+       * ОТКРЫТОЙ колоды — сразу за своим корнем, куски закрытых — нигде (их нет на экране, по
+       * тому же правилу, по которому в ряд не попадает свёрнутая заархивированная строка).
+       */
+      const families = cropFamilies(pictures);
+      for (const picture of pictures) {
         const id = picture.id ?? 0;
-        const media = picture.media;
-        if (!id || indexOf.has(id) || !media || !mediaFullViewerSrc(media)) continue;
-        indexOf.set(id, items.length);
-        items.push(mediaFullToViewerItem(media));
+        if (families.rootOf.has(id)) continue;
+        put(picture);
+        if (openDeck === id) for (const member of families.membersOf.get(id) ?? []) put(member);
       }
     }
     return { items, indexOf };
-  }, [visible]);
+  }, [visible, openDeck]);
   const galleryGroup = useGalleryGroup(gallery.items);
 
   /**
@@ -1034,6 +1151,9 @@ export function GenerationHistory({
               type='button'
               onClick={() => {
                 setArchShown((v) => !v);
+                // Полка архива меняет ДЛИНУ списка под окном — тот же довод, что у фильтра и у
+                // пейджера: открытая колода пережила бы смену окна и вернулась бы раскрытой.
+                setOpenDeck(null);
                 // The list under the window changes length; starting again from the top is the only
                 // reading of «page 1» that stays true after it.
                 setPage(0);
@@ -1091,6 +1211,10 @@ export function GenerationHistory({
               // Тот же довод, что у полки архива: список под окном меняет длину, и «страница 1» —
               // единственное прочтение окна, которое остаётся верным после этого.
               setPage(0);
+              // И колода складывается вместе с окном: её строка после сужения может уехать с
+              // экрана вовсе, а состояние «открыта» пережило бы это и вернулось при возврате
+              // фильтра — открытой без единого нажатия.
+              setOpenDeck(null);
             }}
           />
         }
@@ -1125,6 +1249,11 @@ export function GenerationHistory({
             disabled={disabled || !speaks}
             galleryKey={galleryGroup.key}
             galleryIndexOf={gallery.indexOf}
+            openDeck={openDeck}
+            /* ОДИН ОТКРЫТЫЙ — ЗДЕСЬ И ЕСТЬ ЭТОТ ЗАКОН, ОДНОЙ СТРОКОЙ. Нажатие на дверь другой
+               колоды не «закрывает ту и открывает эту» двумя действиями, а ПЕРЕПИСЫВАЕТ адрес: у
+               состояния из одного значения второе открытое просто невыразимо. */
+            onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
             onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
           />
         ))}
@@ -1161,6 +1290,7 @@ export function GenerationHistory({
                   onClick={() => {
                     setShowAll(false);
                     setPage(0);
+                    setOpenDeck(null);
                   }}
                   title='back to three runs a page'
                 >
@@ -1174,7 +1304,10 @@ export function GenerationHistory({
                 variant='secondary'
                 size='xs'
                 disabled={current === 0}
-                onClick={() => setPage(current - 1)}
+                onClick={() => {
+                  setPage(current - 1);
+                  setOpenDeck(null);
+                }}
                 title='newer runs'
               >
                 ‹ newer
@@ -1195,6 +1328,7 @@ export function GenerationHistory({
                   // wording, and the human had to press it a second time to actually see them.
                   if (onLastLocalPage) more.fetchMore();
                   setPage(current + 1);
+                  setOpenDeck(null);
                 }}
                 title='earlier runs'
               >
@@ -1204,7 +1338,10 @@ export function GenerationHistory({
                 <Button
                   variant='secondary'
                   size='xs'
-                  onClick={() => setShowAll(true)}
+                  onClick={() => {
+                    setShowAll(true);
+                    setOpenDeck(null);
+                  }}
                   title='drop the window and read every run this card has, server pages included'
                 >
                   show all

@@ -113,6 +113,9 @@ import {
   COLORWAY_NONE,
   benchKindOf,
   benchRowMatches,
+  cardOutputRows,
+  outputsHorizon,
+  serverStatesOutputs,
   pictureRepresentation,
   renderBenchOccupied,
   runOfPicture,
@@ -120,6 +123,13 @@ import {
   type BenchKind,
 } from '../bench-kinds';
 export { benchKindOf, type BenchKind };
+/**
+ * RE-EXPORTED, NOT RE-IMPLEMENTED. The render section prints WHICH of the two answers it drew and
+ * how much of the colourway the server had to leave behind; both facts live with the reader that
+ * produced them (`../bench-kinds`), and this file is the door the render screens already come in
+ * through — see `runOfPicture` above, moved for the same reason.
+ */
+export { outputsHorizon, serverStatesOutputs };
 
 /**
  * The four silhouette sides of ONE bench, in a fixed order, present or not.
@@ -470,15 +480,33 @@ export function chosenRenderPlacements(
 }
 
 /**
- * EVERY OUTPUT OF ONE KIND THIS PAGE OF THE BAND HOLDS — the renders, or the turntable frames.
+ * EVERY OUTPUT OF ONE KIND THE CARD HOLDS — the renders, or the turntable frames.
  *
  * READ OFF THE RUN, like everything else here (`runKindOf`): `picture.kind` is an open string whose
  * production vocabulary this bundle has never seen, and a list filtered against a dictionary you
  * have not seen empties silently. Hidden pictures are dropped — `hidden_at` is the one persistent
  * verb for invisibility and a screen that ignores it shows a plate its owner has already withdrawn.
  *
- * PAGE-BOUND, AND EVERY CALLER SAYS SO. The band ships one page of the merged feed; this is what
- * that page carries, newest run first, and never a claim about the whole card.
+ * ═══ WHOLE-CARD WHEN THE SERVER STATES IT, THIS PAGE OF THE FEED WHEN IT DOES NOT (H-9) ════════
+ *
+ * The body below used to be the whole function, and it walked `band.runs` — twelve rows of the
+ * merged feed. So «renders of this card» meant «renders among the twelve newest runs», an older
+ * render run left the section the moment a flat trace or a 3D try was launched, and every crop
+ * split off it left with it, because a crop lives inside its parent's run row. That is the bug the
+ * owner caught on beta with one render on screen out of four runs' worth.
+ *
+ * `cardOutputRows` answers whole-card. `null` from it is a server older than the field, and then —
+ * and ONLY then — this page walk still runs, unchanged to the line, so a rolled-back binary keeps
+ * showing exactly what it showed before this wave. The caller must say which of the two it drew;
+ * `render/outputs.tsx` prints a different scope line and a different footnote for each.
+ *
+ * ⚠ THE NARROWING KEY DIFFERS BETWEEN THE TWO BRANCHES, AND ON PURPOSE. The whole-card branch
+ * narrows by `picture.colorway_id`, which is the key the server's own per-colourway totals are
+ * built on and the key the bench already narrows by; the run's colourway would file an uploaded
+ * BLK render plate — `run_colorway_id` 0, its own colourway named and real — under «unattributed»
+ * and drop it out of its own section. The page walk keeps narrowing by the RUN because every
+ * picture it can reach came out of one, and rewriting it would be changing old binaries' behaviour
+ * in a branch nobody can measure.
  */
 export function outputsOfKind(
   band: GetDesignBandResponse,
@@ -488,13 +516,19 @@ export function outputsOfKind(
    * colourway in hand. A number (0 included) narrows to the runs made FOR that colourway, 0 being
    * the unattributed ones, which is every render made before this axis existed.
    *
-   * ⚠ PAGE-BOUND, AND THE SCREEN THAT PASSES THIS MUST SAY SO. The band ships one page of the feed,
-   * so «renders of ROSSO» here means «of ROSSO, on this page» and never «all of ROSSO's renders».
-   * A colourway whose runs are all older than the page shows nothing, and that is a fact about the
-   * page rather than about the colourway.
+   * ⚠ ON A SERVER THAT DOES NOT STATE `outputs` THIS IS STILL PAGE-BOUND, AND THE SCREEN MUST SAY
+   * SO. In that branch «renders of ROSSO» means «of ROSSO, on this page», a colourway whose runs
+   * are all older than the page shows nothing, and that is a fact about the page rather than about
+   * the colourway. `serverStatesOutputs` is how a screen tells the two apart.
    */
   colorwayId?: number,
 ): { picture: common_DesignPicture; run: common_DesignRun }[] {
+  const whole = cardOutputRows(band, kind);
+  if (whole) {
+    if (colorwayId === undefined) return whole;
+    return whole.filter(({ picture }) => colorwayOf(picture) === colorwayOf({ colorwayId }));
+  }
+
   const out: { picture: common_DesignPicture; run: common_DesignRun }[] = [];
   for (const run of band.runs ?? []) {
     if ((run.kind ?? '').trim().toLowerCase() !== kind) continue;
@@ -640,10 +674,27 @@ export type Gate = { ok: true } | { ok: false; reason: string };
  * profiles are server configuration that no card field reads. So the reason states the requirement
  * itself, which is the half of that sentence the technologist can act on anyway.
  */
+/**
+ * ═══ БЕЗ КАКИХ СТОРОН ПРОГОН РЕНДЕРА НЕ СТАРТУЕТ — ОДИН ОТВЕТ НА ОДИН ВОПРОС ══════════════════
+ *
+ * Вынесено из тела `renderGate` и экспортировано, потому что этот список читают ДВОЕ: сами ворота
+ * (они отказывают) и полоса входа (она красит пустой слот и говорит «the render needs it»). Пока
+ * ответов было два, они совпадали ПО СОВПАДЕНИЮ: полоса брала свой из `SHEET_MIN_VIEWS`, а тот
+ * документирован как требование ЛИСТА и прямо оговаривает, что «nothing here refuses». В день,
+ * когда листу понадобится третья сторона, полоса покрасила бы SIDE L и заявила, что рендер её
+ * требует, — при живой кнопке GENERATE и воротах, отвечающих «ok». Экран, отказывающий в прогоне,
+ * который ворота разрешают, — это тот самый разъезд, ради устранения которого этот файл и
+ * называет вещи один раз.
+ *
+ * `SHEET_MIN_VIEWS` при этом остаётся у листа и у верстака («the sheet needs it») — одна константа
+ * с одной властью, а не с двумя.
+ */
+export const RENDER_MIN_VIEWS: readonly string[] = ['front', 'back'];
+
 export function renderGate(band: GetDesignBandResponse): Gate {
   const sides = benchSides(band);
   const missing = sides
-    .filter((side) => side.view === 'front' || side.view === 'back')
+    .filter((side) => RENDER_MIN_VIEWS.includes(side.view))
     .filter((side) => !side.picture)
     .map((side) => viewLabel(side.view));
   if (missing.length) {

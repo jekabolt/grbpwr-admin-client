@@ -29,8 +29,15 @@ import { useAssetWrites } from '../assets/use-assets';
 import { PictureTile } from '../picture-tile';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { SILHOUETTE_VIEWS, viewLabel } from '../views';
-import { benchSides, feedIsTruncated, pictureThumb, stripProvenance, unmarkedFlats } from './model';
-import { CELL_WIDTH, Strip, StripCell, StripDivider } from './strip-cell';
+import {
+  RENDER_MIN_VIEWS,
+  benchSides,
+  feedIsTruncated,
+  pictureThumb,
+  stripProvenance,
+  unmarkedFlats,
+} from './model';
+import { CELL_WIDTH, EmptyStripCell, Strip, StripCell, StripDivider } from './strip-cell';
 
 /**
  * INPUT — FLATS OF THIS CARD. What a fabric render is actually made from.
@@ -520,8 +527,25 @@ export function RenderInputStrip({
           ткани — её собственное имя строкой под кадром. Числа обеих групп стоят в `action`
           секции, одной строкой, где их и читают вместе. */}
       <Strip>
-        {marked.map((side) => {
-          const picture = side.picture!;
+        {/* ═══ ЧЕТЫРЕ СЛОТА РИСУЮТСЯ ВСЕГДА, ЗАНЯТЫ ОНИ ИЛИ НЕТ (H-11) ══════════════════════════
+            Пробег идёт по `sides`, а не по `marked`: порядок обхода (`SILHOUETTE_VIEWS`) — это и
+            есть порядок слотов, и пустой вид обязан стоять на СВОЁМ месте между занятыми, иначе
+            «чего не хватает» приходится вычислять, а не читать. Счётчики в шапке секции считают
+            по-прежнему занятые (`marked`) — теперь они совпадают с тем, что видит глаз. */}
+        {sides.map((side) => {
+          const picture = side.picture;
+          if (!picture) {
+            return (
+              <EmptyStripCell
+                key={`slot-${side.view}`}
+                view={side.view}
+                /* ⚠ ТРЕБОВАНИЕ ЧИТАЕТСЯ У ТЕХ ЖЕ ВОРОТ, КОТОРЫЕ ОТКАЗЫВАЮТ (`renderGate`), а не у
+                   `SHEET_MIN_VIEWS`: тот отвечает на вопрос ЛИСТА и сам оговаривает, что ничего не
+                   запрещает. Довод целиком — у константы в `./model`. */
+                required={RENDER_MIN_VIEWS.includes(side.view)}
+              />
+            );
+          }
           return (
             <StripCell
               key={`slot-${side.view}`}
@@ -643,16 +667,19 @@ export function RenderInputStrip({
 
         {!marked.length && !others.length && (
           <Text size='micro' variant='inactive' component='span' className='py-6'>
-            no flats on this card yet — bring one in, or generate one on FLAT.
+            nothing to mark yet — use + FLAT to bring a drawing in, or generate one on the FLAT
+            screen.
           </Text>
         )}
       </Strip>
 
       <Text size='micro' variant='label' component='p' className='normal-case'>
-        Left of the line — what the render actually reads: one drawing per view with its
-        provenance, then the cloths it is made of. Right of the line — every other flat of this
-        card; a hand file was always legal input here. Marking one displaces the picture that held
-        the slot; nothing is deleted.
+        Left of the line — what the render actually reads: all four view slots are always drawn,
+        each filled one carrying its provenance, then the cloths it is made of. A striped slot
+        holds no drawing; front and back must hold one before a fabric render can start, and the
+        two sides are optional. Right of the line — every other flat of this card; a hand file was always
+        legal input here. Marking one displaces the picture that held the slot; nothing is
+        deleted.
       </Text>
 
       {/* THE PAGE IS ADMITTED, NOT HIDDEN. The band ships one page of the feed, so a card with a

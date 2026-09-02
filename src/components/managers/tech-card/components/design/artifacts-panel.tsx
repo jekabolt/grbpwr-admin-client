@@ -40,9 +40,10 @@ import Textarea from 'ui/components/text-area';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
-import { runRepresentation } from './bench-kinds';
+import { runIsOnPage, runRepresentation, serverStatesOutputs } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
 import { benchDoor, openDoor } from './doors';
+import { pictureHandle } from './handles';
 import { VectorModal } from './modals';
 // K-15 — ПЛИТКИ. Читатель ленты и раппорт прогона берутся у экрана паттернов: одно определение
 // «что такое выход прогона-плитки» на панель и на сам экран, иначе сегмент `patterns` и вкладка
@@ -261,9 +262,19 @@ export function bandPlates(
   already: Set<number>,
 ): { plates: DocumentPlate[]; filteredToSelected: boolean; serverStates: boolean } {
   /* ПЛИТКИ БЕРУТСЯ СВОИМ ЧИТАТЕЛЕМ, А НЕ ЧЕРЕЗ `outputsOfKind`. Та функция сужена типом до
-     `'render' | 'threed'`, и расширять её — правка файла соседней дорожки; `patternOutputs`
-     повторяет её правило чтения дословно (род с ПРОГОНА, скрытые прочь, одна страница ленты) и
-     живёт рядом со своим экраном. */
+     `'render' | 'threed'`; `patternOutputs` держит то же правило чтения и живёт рядом со своим
+     экраном.
+
+     ⚠ ОХВАТ БОЛЬШЕ НЕ «ОДНА СТРАНИЦА ЛЕНТЫ», И ЭТОТ ЭКРАН УЗНАЛ ОБ ЭТОМ ПОСЛЕДНИМ. Волна H-9
+     сделала обоих читателей ОБЩЕКАРТОЧНЫМИ, и ARTIFACTS получил новый охват даром — вместе со
+     старыми словами вокруг него. Так и вышло, что экран, который никто не правил, стал единственным
+     местом, где остались все четыре починенные по соседству неправды разом: «everything on this
+     page» над полным списком, `run 0` у плиты без прогона, «no repeat stated» о прогоне, которого
+     нет, и два одинаковых имени у двух разных плиток. Список тут ни при чём — врали ПОДПИСИ.
+
+     ЧЕТВЁРТЫЙ ПОТРЕБИТЕЛЬ — ЭТО ТЕПЕРЬ СКАЗАНО ВСЛУХ И ЗДЕСЬ, И У САМОГО ЧИТАТЕЛЯ
+     (`bench-kinds.ts`): кто расширяет охват — обязан обойти всех, кто на него подписан, а не
+     только тех, чей экран он в тот день открыл. */
   /**
    * ⚠ ФАЙЛ МОДЕЛИ ПЛИТОЙ НЕ БЫВАЕТ, И ОТСЕИВАЕТСЯ ОН ЗДЕСЬ, ДО ВСЕХ ТРЁХ ЧТЕНИЙ СПИСКА.
    *
@@ -292,24 +303,46 @@ export function bandPlates(
     /* У ПЛИТКИ НЕТ ВИДА ИЗДЕЛИЯ, И ВЫДУМЫВАТЬ ЕГО НЕЛЬЗЯ: она не сторона и не кадр поворота, а
        квадрат ткани. Её опознают по РАППОРТУ, потому что это единственное, чем две плитки одной
        карточки отличаются друг от друга на глаз в маленьком кадре. */
-    const repeat = kind === 'pattern' ? repeatOfRun(run) : 0;
+    /* РАППОРТ ЧИТАЕТСЯ С ПРОГОНА, И ПРОГОНА МОЖЕТ НЕ БЫТЬ. У выхода, вытесненного со страницы
+       ленты, рядом стоит ШТАМП из четырёх фактов, в котором `params` нет вовсе, и `repeatOfRun`
+       отвечает на него 0 — это «спросить не у кого», а не «не назван». Та же ловушка, что стоила
+       PATTERNS записи выдуманного нуля на полку; здесь она стоит дешевле (только слова), и
+       закрывается тем же предикатом. */
+    const runKnown = runIsOnPage(band, run);
+    const repeat = kind === 'pattern' && runKnown ? repeatOfRun(run) : 0;
+    /* ИМЯ ОБЯЗАНО БЫТЬ РАЗНЫМ У РАЗНЫХ ПЛИТ, И `ordinal` ЭТОГО НЕ ДАЁТ. Он нумерует выход ВНУТРИ
+       своего прогона, так что две плитки из двух прогонов — обе «первые»; вдобавок `?? ` не ловит
+       ноль, и обе выходили `TILE 0`. Два одинаковых имени в одном списке — это разметка не той
+       картинки. `pictureHandle` (`run 70 · A`) уникален по построению: прогон плюс буква выхода —
+       и это тот же словарь имён, которым плитку зовут в ленте. */
+    const handle = pictureHandle(picture).toUpperCase();
     plates.push({
       key: `run-${picture.id}`,
       name:
         kind === 'pattern'
           ? repeat
             ? `TILE ${repeat} MM`
-            : `TILE ${picture.ordinal ?? plates.length + 1}`
-          : viewLabel(view).toUpperCase() || `frame ${picture.ordinal ?? plates.length + 1}`,
+            : `TILE · ${handle}`
+          : viewLabel(view).toUpperCase() || handle,
       mediaId,
       media: picture.media,
       origin: 'run',
       chosen: pictureIsSelected(picture),
       pictureId: picture.id ?? 0,
+      /* ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ, а его отсутствие: `?? '—'` мимо нуля не срабатывает,
+         а общекарточный список впервые привёл сюда плиты, за которыми прогона нет вовсе
+         (загруженная руками, «плоская» правка без основы). Слово то же, что на полосе выходов
+         рендеров, — одно имя одному состоянию на всех экранах. */
       note:
         kind === 'pattern'
-          ? `run ${run.id ?? '—'}${repeat ? ` · ${repeat} mm` : ' · no repeat stated'}`
-          : `run ${run.id ?? '—'}${run.rrev ? ` · r${run.rrev}` : ''}`,
+          ? `${(run.id ?? 0) > 0 ? `run ${run.id}` : 'no run'}${
+              repeat
+                ? ` · ${repeat} mm`
+                : runKnown
+                  ? ' · no repeat stated'
+                  : ' · repeat unknown, its run is off this page of the feed'
+            }`
+          : `${(run.id ?? 0) > 0 ? `run ${run.id}` : 'no run'}${run.rrev ? ` · r${run.rrev}` : ''}`,
     });
   }
   return { plates, filteredToSelected, serverStates };
@@ -1212,10 +1245,18 @@ export function ArtifactsPanel({
             action={
               <Text size='micro' variant='label' component='span'>
                 {segment.plates.length} picture{segment.plates.length === 1 ? '' : 's'}
+                {/* ⚠ ОХВАТ НАЗЫВАЕТСЯ ТЕМ, ЧЕМ ОН СТАЛ. Список этого сегмента — плиты карточки плюс
+                    ВЫХОДЫ ВСЕЙ КАРТОЧКИ (H-9), и фраза про страницу ленты над сорока рендерами
+                    двадцати прогонов — ровно та неправда охватом, которую владелец поймал на
+                    соседнем экране. Читается БИНАРЬ (`serverStatesOutputs`), а не длина списка:
+                    на сервере старше поля читатели по-прежнему обходят страницу, и прежние слова
+                    там по-прежнему верны. */}
                 {kind !== 'flat' &&
                   (segment.filteredToSelected
                     ? ' · the chosen ones'
-                    : ' · everything on this page')}
+                    : serverStatesOutputs(band)
+                      ? ' · everything this card holds'
+                      : ' · everything on this page')}
               </Text>
             }
           >
@@ -1232,7 +1273,8 @@ export function ArtifactsPanel({
                                 сегментов в `ARTIFACT_KINDS` («prints too, once it is in the card’s
                                 media»);
                 состав списка → строка справа от заголовка ряда: `· the chosen ones` против
-                                `· everything on this page`;
+                                `· everything this card holds` (и `· everything on this page` на
+                                сервере старше поля `outputs`);
                 путь туда     → `title` живой метки `select` («the segment narrows to the chosen
                                 ones of this kind»);
                 путь обратно  → `title` метки `un-select` («with none of this kind chosen, the
@@ -1868,6 +1910,7 @@ function PlateGrid({
                   variant='uppercase'
                   tracking='label'
                   component='span'
+                  data-plate-name
                   className='min-w-0 truncate'
                 >
                   {plate.name}
@@ -1919,6 +1962,7 @@ function PlateGrid({
                     size='nano'
                     variant='label'
                     component='span'
+                    data-plate-note
                     className='line-clamp-2 min-w-0 break-words'
                   >
                     {plate.note}

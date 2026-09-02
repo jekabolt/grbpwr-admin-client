@@ -5,6 +5,7 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 
 import { PictureTile } from '../picture-tile';
+import { viewLabel } from '../views';
 
 /**
  * ONE CELL OF AN INPUT STRIP — a frame, two caption lines and one action, at a fixed width.
@@ -71,6 +72,14 @@ export function StripCell({
    * они адресуются своим слотом, а не картинкой.
    */
   offeredPictureId,
+  /**
+   * КАКУЮ КАРТИНКУ ЯЧЕЙКА ПОКАЗЫВАЕТ. Едет в разметку как `data-cell-picture` и существует по той
+   * же причине, что и `data-offered` рядом: у полосы выходов не было НИ ОДНОГО якоря, по которому
+   * ячейку можно назвать, — только вёрстка, а вёрстка переживает правку смысла и делает пробу
+   * зелёной над сломанным экраном. Здесь якорь несёт ещё и ответ: со времён H-9 раздел показывает
+   * выходы всей карточки, и «какие именно» — это и есть проверяемое утверждение.
+   */
+  cellPictureId,
   /** Shown instead of the frame when there is no picture. */
   empty,
   emphasis,
@@ -83,6 +92,7 @@ export function StripCell({
   badge?: string;
   gallery?: MediaViewerItem;
   offeredPictureId?: number;
+  cellPictureId?: number;
   empty?: React.ReactNode;
   /** The cell holds something the screen READS — a heavier frame, as on a filled bench slot. */
   emphasis?: boolean;
@@ -93,6 +103,7 @@ export function StripCell({
   return (
     <div
       data-offered={offeredPictureId || undefined}
+      data-cell-picture={cellPictureId || undefined}
       className={cn('flex flex-col gap-1', CELL_WIDTH, className)}
     >
       {src ? (
@@ -125,6 +136,74 @@ export function StripCell({
       ))}
 
       {action && <div className='mt-auto pt-0.5'>{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * ONE SLOT THAT HOLDS NOTHING — H-11.
+ *
+ * Владелец, дословно: «в FABRIC RENDER если мы не добавили одну INPUT — FLATS OF THIS CARD она
+ * всегда должна отображатся пустым плейсхолдером».
+ *
+ * ЗАЧЕМ ЭТО ВООБЩЕ ОТДЕЛЬНАЯ ЯЧЕЙКА. Полоса рисовала ТОЛЬКО занятые слоты, поэтому карточка без
+ * разметки открывалась голым разделителем: слоты, которых человек не видит, он читает не как
+ * «пустые», а как «их нет», и следующий его вопрос — почему GENERATE мёртв. Пустая ячейка
+ * отвечает на оба сразу: слот существует, он этого вида, и он пуст.
+ *
+ * ПИСАТЕЛЯ ЗДЕСЬ НЕТ НАМЕРЕННО. Пометка живёт на правой половине линии (`mark ▸`) и на верстаке;
+ * плейсхолдер, принимающий бросок, был бы ВТОРЫМ написанием того же жеста, и два способа сделать
+ * одно расходятся ровно там, где расходятся их проверки.
+ *
+ * СЛОВА — ТЕ ЖЕ, ЧТО У ВЕРСТАКА (`bench-slot.tsx`): жирное `empty`, красная приписка у
+ * обязательной стороны и `*` у её имени. Один и тот же факт, сказанный на двух экранах двумя
+ * словарями, заставляет искать между ними разницу.
+ */
+export function EmptyStripCell({
+  view,
+  required,
+}: {
+  view: string;
+  /**
+   * Сторона, без которой прогон НЕ СТАРТУЕТ (`renderGate`: перед и спинка). Проп, а не проверка
+   * внутри: обязательность — свойство ЭКРАНА, а не ячейки, и у полосы входа 3D она другая.
+   */
+  required?: boolean;
+}): JSX.Element {
+  const label = viewLabel(view) || view;
+  return (
+    <div data-slot-empty={view} className={cn('flex flex-col gap-1', CELL_WIDTH)}>
+      <div
+        className={cn(
+          placeholderClass({ dashed: true }),
+          FRAME_HEIGHT,
+          'w-full flex-col gap-0.5 px-1 text-center',
+        )}
+        style={PLACEHOLDER_SURFACE}
+        title={`no drawing is marked for ${label}. Mark one from the right of the line, or generate one on FLAT.`}
+      >
+        {/* Имя вида — В ЦЕНТРЕ, а не угловым ярлыком, как на занятой плите: угловой ярлык на
+            пустой полосатой коробке читается как забытая подпись, центр говорит «эта коробка
+            целиком и есть слот такой-то». Цвет — `labelColor`: `textInactiveColor` (#ccc) в этой
+            системе для рамок и заглушек, а не для текста, который читают. */}
+        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+          {label}
+          {required && (
+            <span className='text-error' title='the render needs it'>
+              {' *'}
+            </span>
+          )}
+        </Text>
+      </div>
+
+      <Text
+        size='nano'
+        component='span'
+        className={cn('min-w-0 break-words', required ? 'text-error' : 'text-labelColor')}
+      >
+        <b>empty</b>
+        {required ? ' · the render needs it' : ''}
+      </Text>
     </div>
   );
 }

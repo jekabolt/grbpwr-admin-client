@@ -16,6 +16,7 @@ import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { isRunLive, useElapsed } from '../generation';
 import { REPEAT_MAX, normaliseRepeat, patternOutputs, patternRuns, refusalAdvice } from './model';
+import { ClothSwatchStrip, swatchTiles } from './tile-preview';
 import { PatternInput } from './pattern-input';
 import { PatternLibrary } from './pattern-library';
 import { PatternOutputs } from './pattern-outputs';
@@ -66,23 +67,65 @@ import { useStartDesignRun } from '../render/use-design-run';
  * выдуманному росту.
  */
 
-/** Быстрые раппорты. Не «размеры», а ЧЕТЫРЕ УЗНАВАЕМЫХ МАСШТАБА, от мелкого до плащёвого. */
-const QUICK: { mm: number; what: string }[] = [
-  { mm: 20, what: 'a fine all-over print' },
-  { mm: 60, what: 'a shirting check' },
-  { mm: 120, what: 'a coat-scale motif' },
-  { mm: 300, what: 'a placement-scale repeat' },
+/**
+ * ═══ РЯД SCALE ВМЕСТО РЯДА REPEAT (H-7) ══════════════════════════════════════════════════════
+ *
+ * Владелец, дословно: «в MAKE A TILE REPEAT mm / 20 MM / 60 MM / 120 MM / 300 MM / NOT STATED эти
+ * кнопки мне вообще не понятны».
+ *
+ * ЧТО ЭТИ КНОПКИ ДЕЛАЮТ НА САМОМ ДЕЛЕ — замер по коду обеих сторон, а не догадка. Число уезжает
+ * как `pattern.repeat_mm`; сервер (`patternprompt.go`) при `RepeatMM > 0` дописывает в промпт
+ * «Draw the motif at the scale of a N mm repeat … one whole tile covers N mm of cloth in each
+ * direction», то есть от него зависит, НАСКОЛЬКО КРУПНО нарисован мотив внутри квадрата. То же
+ * число наследует сохранённый ассет («generated at N» = «placed at N»), его ест линейка второго
+ * акта и промпт рендера. Вопрос ЗАКОНЕН и задан в правильном месте.
+ *
+ * НЕПОНЯТНЫ БЫЛИ НЕ МИЛЛИМЕТРЫ, А ТО, ЧТО ЧЕЛОВЕК ВЫБИРАЕТ. Решение — «как крупно мотив ляжет на
+ * ткань»; миллиметры — ЕДИНИЦА ОТВЕТА, а не сам ответ. Ряд же показывал «20 MM», а смысл («a fine
+ * all-over print») прятал в `title`-тултипе: под курсором, с задержкой, и никогда для клавиатуры.
+ *
+ * ЧТО ВСТАЛО ВМЕСТО:
+ *   · ряд называется SCALE, и на лице кнопки СЛОВО ВПЕРЁД, число вторым: `fine · 20`;
+ *   · пятая кнопка — `model decides`, то есть ВЫБОР, а не статус «NOT STATED»;
+ *   · поле числа стоит ПОСЛЕ кнопок — орган точности для того, кто знает своё число;
+ *   · при приложенном источнике и названном масштабе под рядом стоит ПОЛОСА ПЛОТНОСТИ: своя
+ *     картинка, замощённая на полуметре ткани. Она отвечает на «что значит 60 против 120 НА МОЕЙ
+ *     картинке» ДО денег — и честно называет свой предел («шов чинит прогон»).
+ *
+ * ЭТО НЕ ВОСКРЕШЕНИЕ СНЕСЁННОЙ ПРЕ-ЛИНЕЙКИ «at this size». Та была ИНСТРУМЕНТОМ-двойником линейки
+ * второго акта: свои чипы отрезков, свои деления, ответ на вопрос СУДА («того ли размера вышла
+ * плитка»), который решается по настоящей плитке, а не по исходнику. Полоса плотности — не
+ * инструмент, а ИЛЛЮСТРАЦИЯ ВЫБОРА: один фиксированный отрезок, ноль делений, ноль своих
+ * состояний, живёт только пока человек решает.
+ *
+ * ПРОВОД НЕ ТРОНУТ: те же четыре числа и тот же 0 уезжают в `params.pattern.repeat_mm`.
+ */
+const QUICK: { mm: number; label: string; what: string }[] = [
+  { mm: 20, label: 'fine', what: 'a fine all-over print' },
+  { mm: 60, label: 'shirting', what: 'a shirting check' },
+  { mm: 120, label: 'coat', what: 'a coat-scale motif' },
+  { mm: 300, label: 'placement', what: 'a placement-scale repeat' },
 ];
 
-/** Что число значит глазу — одной фразой у самого поля, вместо линейки-двойника. */
+/** Отрезок ткани, на котором показывается плотность. Полметра — половина обхвата груди. */
+const DENSITY_SPAN_MM = 500;
+
+/**
+ * Масштаб набранного числа — ОДИН словарь на лицо кнопки и на строку значения: слово кнопки
+ * (`coat`) — это голова её же фразы (`a coat-scale motif`). Раздельные списки разъехались бы
+ * первой правкой, и человек читал бы два разных факта об одном числе.
+ */
+function scaleOf(mm: number): string {
+  if (mm < 40) return QUICK[0].what;
+  if (mm < 90) return QUICK[1].what;
+  if (mm < 200) return QUICK[2].what;
+  return QUICK[3].what;
+}
+
+/** Что число значит глазу — одной фразой у самого ряда, включая числа, набранные рукой. */
 function scaleWords(mm: number): string {
-  if (mm <= 0) return 'no scale stated — the model chooses the density itself';
-  const exact = QUICK.find((q) => q.mm === mm);
-  if (exact) return exact.what;
-  if (mm < 40) return 'a fine all-over print';
-  if (mm < 90) return 'a shirting check';
-  if (mm < 200) return 'a coat-scale motif';
-  return 'a placement-scale repeat';
+  if (mm <= 0) return 'no scale stated · the model chooses the density itself';
+  return scaleOf(mm);
 }
 
 export function PatternStudio({
@@ -110,6 +153,11 @@ export function PatternStudio({
 
   const repeat = normaliseRepeat(repeatText);
   const sourceId = source?.id ?? 0;
+  /** Адрес источника для полосы плотности. Полный кадр, а не миниатюра: замощённое мыло читается
+   *  как испорченный файл, а не как масштаб. Та же лестница, что у слота ввода. */
+  const sourceUrl = source?.media?.fullSize?.mediaUrl || source?.media?.thumbnail?.mediaUrl || '';
+  /** Шов виден или нет — ОДИН ответ на кадр и на подпись под ним (`swatchTiles`), не два. */
+  const tilesAtThisScale = swatchTiles(repeat, DENSITY_SPAN_MM);
 
   const outputs = useMemo(() => patternOutputs(band), [band]);
   const live = useMemo(() => patternRuns(band).filter(isRunLive), [band]);
@@ -146,76 +194,137 @@ export function PatternStudio({
           disabled={disabled}
         />
 
-        {/* ─── РАППОРТ: ЧИСЛО, БЫСТРЫЕ ЗНАЧЕНИЯ И ТО, ЧТО ЭТО ЗНАЧИТ ГЛАЗУ ─────────────────── */}
+        {/* ─── SCALE: СЛОВА ВПЕРЁД, ЧИСЛО ВТОРЫМ, СВОЯ КАРТИНКА КАК ОТВЕТ (H-7) ───────────── */}
+        {/* ⚠ ЗНАЧЕНИЕ `data-pattern-act` ОСТАЁТСЯ `repeat`, ХОТЯ РЯД НАЗЫВАЕТСЯ SCALE. Это адрес
+            акта в композиции, по которому стоящий гейт (`qa-patacts`) сверяет ПОРЯДОК трёх актов;
+            переименование адреса вместе с заголовком сломало бы сторожа, ничего не изменив на
+            экране. Слово на экране и ключ в разметке — разные вещи, и здесь это сказано вслух. */}
         <div
           data-pattern-act='repeat'
-          className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+          className='flex flex-wrap items-start gap-2 border-b border-hairline py-1'
         >
           <Text
             size='micro'
             variant='label'
             tracking='label'
             component='span'
-            className='w-[92px] shrink-0 uppercase'
+            className='w-[92px] shrink-0 pt-1 uppercase'
           >
-            repeat
+            scale
           </Text>
-          <div className='w-[90px]'>
-            <Input
-              name='design-pattern-repeat'
-              type='number'
-              min={0}
-              max={REPEAT_MAX}
-              step={1}
-              value={repeatText}
-              disabled={disabled}
-              placeholder='120'
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRepeatText(e.target.value)}
-            />
-          </div>
-          <Text size='micro' variant='label' component='span'>
-            mm
-          </Text>
-          <ChipRow>
-            {QUICK.map((q) => (
+
+          <div className='flex min-w-0 flex-1 flex-col gap-1'>
+            {/* КНОПКИ ПЕРВЫМИ, ПОЛЕ ЧИСЛА ЗА НИМИ. Человек решает «как крупно», а не «сколько
+                миллиметров»: слово — это ответ, число — единица, в которой он записан. Поле не
+                снято: тот, кто знает своё число, набирает его, и масштаб называется словами и для
+                него тоже (85 → «a shirting check»).
+
+                ⚠ ДВА ЯКОРЯ НА ОДНОЙ КНОПКЕ, И ЭТО НЕ НЕБРЕЖНОСТЬ. `data-scale-chip` — имя этой
+                волны; `data-quick-repeat` держат ДВЕ стоящие пробы (`qa-pat` D1…D3, E21), которые
+                эта волна не перенацеливает. Снять старое имя сейчас значило бы покрасить чужой
+                гейт правкой, к которой он отношения не имеет.
+                TODO: снять `data-quick-repeat`, когда `tmp/dsgprobe/qa-pat.mjs` (строки 318, 322,
+                430) будет перенацелена на `data-scale-chip`; других потребителей у алиаса нет. */}
+            <ChipRow>
+              {QUICK.map((q) => (
+                <Chip
+                  key={q.mm}
+                  nonForm
+                  selected={repeat === q.mm}
+                  pressed={repeat === q.mm}
+                  disabled={disabled}
+                  data-scale-chip={q.mm}
+                  data-quick-repeat={q.mm}
+                  onClick={() => !disabled && setRepeatText(String(q.mm))}
+                >
+                  {q.label} · {q.mm}
+                </Chip>
+              ))}
+              {/* «MODEL DECIDES» — ВЫБОР, А НЕ СТАТУС. «NOT STATED» описывало ПОЛЕ («значение не
+                  задано»), то есть говорило о нашей форме; человек же выбирает, кто принимает
+                  решение о плотности. Названный исполнитель делает пустоту законной. */}
               <Chip
-                key={q.mm}
                 nonForm
-                selected={repeat === q.mm}
-                pressed={repeat === q.mm}
+                selected={repeat === 0}
+                pressed={repeat === 0}
                 disabled={disabled}
-                data-quick-repeat={q.mm}
-                title={`${q.mm} mm — ${q.what}`}
-                onClick={() => !disabled && setRepeatText(String(q.mm))}
+                data-scale-chip='0'
+                data-quick-repeat='0'
+                title='legal: a tile without a declared scale is still a tile, and the model then chooses the density itself'
+                onClick={() => !disabled && setRepeatText('0')}
               >
-                {q.mm} mm
+                model decides
               </Chip>
-            ))}
-            <Chip
-              nonForm
-              selected={repeat === 0}
-              pressed={repeat === 0}
-              disabled={disabled}
-              data-quick-repeat='0'
-              title='leave the scale undecided — legal, and the model then chooses the density itself'
-              onClick={() => !disabled && setRepeatText('0')}
+
+              {/* ПОЛЕ — ОТДЕЛЬНЫЙ ОРГАН, А НЕ ШЕСТАЯ КНОПКА: свой отступ отделяет «точное число» от
+                  ряда названных масштабов, иначе на общем шаге ряда оно читается их продолжением. */}
+              <div className='ml-2 w-[90px]'>
+                <Input
+                  name='design-pattern-repeat'
+                  type='number'
+                  min={0}
+                  max={REPEAT_MAX}
+                  step={1}
+                  value={repeatText}
+                  disabled={disabled}
+                  placeholder='120'
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setRepeatText(e.target.value)
+                  }
+                />
+              </div>
+              <Text size='micro' variant='label' component='span'>
+                mm
+              </Text>
+            </ChipRow>
+
+            {/* МОСТ МЕЖДУ СЛОВОМ SCALE И СЛОВОМ REPEAT. В актах 2 и 3 остаётся «repeat»: они о
+                НАСТОЯЩЕЙ плитке, где число стоит при линейке и при поле ассета. Здесь сказано, что
+                это одно и то же, — иначе два слова на трёх экранах читаются как две величины. */}
+            {/* `micro`, а не `nano`: DESIGN.md §3 отдаёт 10px подсказкам и полям, а 9px — бэджам,
+                номерам пинов и ярлыкам полос. Предложение в 179 знаков — подсказка, а не бэдж. */}
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              data-repeat-words
+              className='min-w-0 normal-case'
             >
-              not stated
-            </Chip>
-          </ChipRow>
-          {/* ЧИСЛО НЕ ОСТАЁТСЯ НЕМЫМ, И ЭТО ЗАМЕНА СНЕСЁННОЙ ЛИНЕЙКЕ-ДВОЙНИКУ: одна фраза говорит,
-              что 120 мм — это плащёвый мотив, а не «просто число миллиметров». Полный ответ на «того
-              ли размера» даёт линейка ВТОРОГО акта, где есть настоящая плитка. */}
-          <Text
-            size='micro'
-            variant='label'
-            component='span'
-            data-repeat-words
-            className='min-w-0 normal-case'
-          >
-            {scaleWords(repeat)} · whole millimetres of finished cloth per tile, up to {REPEAT_MAX}.
-            The model is told the scale in words; it never receives a pixel size.
-          </Text>
+              {repeat > 0
+                ? `one tile covers ${repeat} mm of finished cloth — the print trade calls this the repeat. That is ${scaleWords(repeat)}. The model is told the scale in words; it never receives a pixel size.`
+                : `${scaleWords(0)}. Whole millimetres up to ${REPEAT_MAX} if you state one; the model is told the scale in words and never receives a pixel size.`}
+            </Text>
+
+            {/* ═══ ПОЛОСА ПЛОТНОСТИ — СВОЯ КАРТИНКА КАК ОТВЕТ НА «60 ПРОТИВ 120» ═══════════════
+                Стоит только тогда, когда есть на что смотреть: приложен источник И назван масштаб.
+                Отрезок ФИКСИРОВАН (полметра) и делений не несёт — это иллюстрация выбора, а не
+                вторая линейка. И она обязана назвать свой предел: сырое замощение показывает
+                верную ПЛОТНОСТЬ и заведомо неверный ШОВ, а видимый шов без предупреждения читается
+                как поломка ещё до того, как что-то куплено. */}
+            {sourceUrl && repeat > 0 && (
+              <div data-density-preview data-span={DENSITY_SPAN_MM} className='flex flex-col gap-1'>
+                {/* ⚠ ПОДПИСЬ ОТДАНА САМОМУ ЛОСКУТУ, А НЕ НАПЕЧАТАНА РЯДОМ. Стоя здесь, она
+                    выбиралась ОДНИМ масштабом и не знала про отказ загрузки, который видит только
+                    сторож внутри полосы: на битом файле плейсхолдер говорил «the picture did not
+                    load», а эта строка под ним — «only the density is true». Теперь оба слова
+                    решает один флаг, и противоречие стало невыразимым. */}
+                <ClothSwatchStrip
+                  url={sourceUrl}
+                  repeatMm={repeat}
+                  spanMm={DENSITY_SPAN_MM}
+                  probe='density-cloth'
+                  /* Здесь замощается ПРОИЗВОЛЬНОЕ ФОТО, а не сгенерированная квадратная плитка, —
+                     и от этого зависит вертикальный период. Довод — у пропа в `tile-preview`. */
+                  subject='picture'
+                  caption={
+                    tilesAtThisScale
+                      ? 'your own picture laid out raw at this scale — only the density is true; the seam is what the run fixes'
+                      : `at this scale one tile is wider than the ${DENSITY_SPAN_MM} mm shown here, so this is your picture whole, not a repeat — there is no seam to judge`
+                  }
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ─── ДВЕРЬ. ИНВЕНТАРЬ — ЭТО ЕЁ ПОДПИСЬ, БЛОКА БОЛЬШЕ НЕТ ────────────────────────── */}
@@ -277,9 +386,11 @@ export function PatternStudio({
             className='min-w-0 normal-case'
           >
             {sourceId ? `one picture — media ${sourceId}` : 'one picture — none attached yet'} ·{' '}
-            {repeat > 0 ? `one tile covers ${repeat} mm of cloth` : 'no scale stated'} · priced by
-            the server when the run starts. Nothing else from this card travels: not the bench, not
-            the references, not the garment description.
+            {repeat > 0
+              ? `one tile covers ${repeat} mm of cloth (${scaleOf(repeat)})`
+              : 'no scale stated'}{' '}
+            · priced by the server when the run starts. Nothing else from this card travels: not
+            the bench, not the references, not the garment description.
           </Text>
         </div>
 

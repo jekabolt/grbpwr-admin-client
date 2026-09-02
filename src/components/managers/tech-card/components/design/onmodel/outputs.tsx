@@ -6,6 +6,7 @@ import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-v
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
+import { serverStatesOutputs } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { isRunLive, runOutcomeNote } from '../generation/run-state';
@@ -117,6 +118,10 @@ export function OnModelOutputs({
         <Strip>
           {outputs.map(({ picture, run }) => {
             const chosen = pictureIsSelected(picture);
+            /* «ИЗ N» СТАВИТСЯ ТОЛЬКО ТОГДА, КОГДА N ИЗВЕСТНО. У выхода, чей прогон вытеснен со
+               страницы ленты, рядом стоит штамп, а у штампа `pictures` нет вовсе — то есть 0, и
+               подпись честно сокращается до «picture 2». Не потеря: единственная альтернатива —
+               назвать «из 1», сосчитав по себе, а это выдуманное число о чужом прогоне. */
             const total = (run.pictures ?? []).length;
             const shape = total > 1
               ? `picture ${picture.ordinal ?? '—'} of ${total}`
@@ -175,10 +180,24 @@ export function OnModelOutputs({
         </Strip>
       )}
 
-      <Text size='nano' variant='label' component='p' className='normal-case'>
-        This is the page of the feed the band shipped, newest run first — not every recolour this
-        card has ever produced. The mark is a verdict about a picture and is <b>not</b> the same
-        thing as hiding one. More than one may be chosen.
+      {/* ⚠ ЧИТАЕТСЯ БИНАРЬ, А НЕ ДЛИНА СПИСКА, И ЗДЕСЬ ЭТО ЕДИНСТВЕННОЕ МЕСТО ПОЛОСЫ, ГДЕ РАЗНИЦА
+          ВИДНА. Раздел рисуется и с нулём картинок — когда на странице есть живой или павший
+          прогон, — то есть «список пуст» и «сервер поля не знает» встречаются здесь одновременно.
+          Фраза про страницу ленты над полным ответом сервера говорила бы владельцу, что часть
+          ОПЛАЧЕННЫХ перекрасок где-то потерялась, тогда как не пришло ни одной. */}
+      <Text
+        size='nano'
+        variant='label'
+        component='p'
+        /* Тот же контракт значений, что у RENDERS: `whole` | `page`. */
+        data-outputs-note={serverStatesOutputs(band) ? 'whole' : 'page'}
+        className='normal-case'
+      >
+        {serverStatesOutputs(band)
+          ? 'Every recolour this card holds, newest first; hidden ones are folded away.'
+          : 'This is the page of the feed the band shipped, newest run first — not every recolour this card has ever produced.'}{' '}
+        The mark is a verdict about a picture and is <b>not</b> the same thing as hiding one. More
+        than one may be chosen.
       </Text>
     </Section>
   );

@@ -63,26 +63,30 @@ export type CompositeFacts = {
 export const NO_COMPOSITE: CompositeFacts = { declared: false, views: [], splitInto: 0 };
 
 /**
- * How many pictures on this band point at `parentId`.
+ * How many pictures on this band came out of `parentId` — the whole line of descent, not the first
+ * generation of it.
+ *
+ * ⚠ IT WAS DIRECT CHILDREN, AND THAT MADE ONE TILE PRINT TWO DIFFERENT COUNTS OF ONE CUT. The deck
+ * below the tile counts the family TRANSITIVELY (`cropFamilies`, and it must: beta run 7 holds a
+ * chain, 53 and 54 cut out of 52 cut out of the sheet). This counter fed the provenance tail six
+ * pixels above that door and answered `split into 1` beside `▸ 3 cut pieces`. Two counters of one
+ * fact, free to disagree, is exactly what the header of this file forbids — so there is now ONE
+ * walk and this is a caller of it, not a second opinion.
  *
  * Walked here rather than through `bandPictures` in `band-feed.tsx` on purpose: the feed's tile
- * imports THIS module, and importing it back would close a module cycle for the sake of four
- * lines. A duplicated ten-line walk is cheaper than a cycle that fails at load time.
+ * imports THIS module, and importing it back would close a module cycle.
+ *
+ * The pool is the WHOLE loaded band, runs and batches alike, which is wider than the run row the
+ * deck reads — and the two still agree wherever both are drawn, because a crop inherits its
+ * parent's `run_id` and therefore never leaves its parent's row. The extra reach only serves the
+ * upload shelf, which has families but no deck.
  */
 function countDerivedFrom(band: GetDesignBandResponse, parentId: number): number {
   if (parentId <= 0) return 0;
-  let n = 0;
-  for (const run of band.runs ?? []) {
-    for (const picture of run.pictures ?? []) {
-      if ((picture.derivedFrom ?? 0) === parentId) n += 1;
-    }
-  }
-  for (const batch of band.batches ?? []) {
-    for (const picture of batch.pictures ?? []) {
-      if ((picture.derivedFrom ?? 0) === parentId) n += 1;
-    }
-  }
-  return n;
+  const pool: common_DesignPicture[] = [];
+  for (const run of band.runs ?? []) pool.push(...(run.pictures ?? []));
+  for (const batch of band.batches ?? []) pool.push(...(batch.pictures ?? []));
+  return (cropFamilies(pool).membersOf.get(parentId) ?? []).length;
 }
 
 export function readComposite(
@@ -92,6 +96,100 @@ export function readComposite(
   const views = (picture.compositeViews ?? []).map((view) => normaliseViewKey(view));
   if (!views.length) return NO_COMPOSITE;
   return { declared: true, views, splitInto: countDerivedFrom(band, picture.id ?? 0) };
+}
+
+/* ─────────────────────────── the family a cut leaves behind (H-10) ─────────────────────────── */
+
+/**
+ * ═══ A SHEET AND EVERYTHING CUT OUT OF IT, INSIDE ONE RUN ROW ══════════════════════════════════
+ *
+ * Owner: «мультивью и сплиты надо ка-то группировать что я вижу это так карточка с мультивью за
+ * ней выглядывают кусочки заспличеные если нажимаешь то они в ленте показываются карточками».
+ *
+ * Today a run row draws the sheet and every crop as equal sibling tiles, because that is exactly
+ * what they are on the wire: `SplitPicture` files a crop with its parent's `run_id`, so a sheet cut
+ * into seven pieces is eight identical-looking cells in one row and nothing on screen says which
+ * came out of which. The grouping is drawn from `derived_from`, the field that already carries the
+ * answer — no new state, no new wire field, nothing stored.
+ *
+ * ⚠ TRANSITIVE, AND THAT IS NOT A NICETY. Beta run 7 already holds a chain: pictures 53 and 54 were
+ * cut out of 52, which was itself cut out of the sheet 22. A direct-children rule would count six
+ * pieces where there are seven and leave the two grandchildren standing loose in the row beside a
+ * deck that claims to hold everything cut from the sheet. The walk therefore climbs to the ROOT of
+ * each picture's ancestry.
+ *
+ * ⚠ IT CLIMBS ONLY INSIDE THE LIST IT WAS GIVEN. A crop whose parent is not in this row — the
+ * parent was cut from a picture of another run, or is off the loaded page — is a root of its own
+ * here, which is the truthful answer for a screen that draws one row at a time: a deck may not
+ * promise pieces of a sheet that is not on screen.
+ *
+ * A ROOT WITH NO DESCENDANTS IS NOT A FAMILY and is deliberately absent from the map. Nothing is
+ * behind it, so it gets no deck, no door and no offset sheets — its composite mark and its split
+ * corner already say what it is.
+ *
+ * HIDDEN MEMBERS STAY MEMBERS. The history is unfiltered by T-14 and shows a stamped picture with
+ * its word; folding one away here would make the deck a second hiding place, and the count on the
+ * door would stop matching the cards behind it.
+ *
+ * The cycle guard is not defensive dressing over a shape the server cannot produce: `derived_from`
+ * points at a picture minted BEFORE this one, so a cycle is unreachable. It is here because this
+ * walk is unbounded by construction and a malformed page must not take the whole tab white — there
+ * is no error boundary over this tree.
+ */
+export type CropFamilies = {
+  /** Root picture id → every picture descended from it, in the row's own order. Roots with no
+   *  descendants are absent. */
+  membersOf: Map<number, common_DesignPicture[]>;
+  /**
+   * Member picture id → the id of the SHEET at the top of its ancestry. Roots are never keys here,
+   * so `rootOf.has(id)` is also the answer to «is this picture somebody's piece».
+   *
+   * ⚠ THE ROOT, NOT THE PARENT, AND THE CHAIN IS WHY. In beta's run 7, picture 54's parent is 52
+   * and its root is the sheet 22. A reader that folded a grandchild away by its PARENT would keep
+   * it hidden while the deck it belongs to stands open.
+   */
+  rootOf: Map<number, number>;
+};
+
+export function cropFamilies(pictures: readonly common_DesignPicture[]): CropFamilies {
+  const byId = new Map<number, common_DesignPicture>();
+  for (const picture of pictures) {
+    const id = picture.id ?? 0;
+    if (id > 0) byId.set(id, picture);
+  }
+
+  const membersOf = new Map<number, common_DesignPicture[]>();
+  const rootOf = new Map<number, number>();
+
+  for (const picture of pictures) {
+    const id = picture.id ?? 0;
+    if (id <= 0) continue;
+    // Climb to the root of this picture's ancestry WITHIN the list. `seen` stops a malformed
+    // page dead rather than hanging the tab; the server cannot mint one.
+    let root = picture;
+    const seen = new Set<number>([id]);
+    for (;;) {
+      const parentId = root.derivedFrom ?? 0;
+      if (parentId <= 0 || seen.has(parentId)) break;
+      const parent = byId.get(parentId);
+      if (!parent) break;
+      seen.add(parentId);
+      root = parent;
+    }
+    const rootId = root.id ?? 0;
+    if (rootId <= 0 || rootId === id) continue;
+    rootOf.set(id, rootId);
+    const members = membersOf.get(rootId);
+    if (members) members.push(picture);
+    else membersOf.set(rootId, [picture]);
+  }
+
+  return { membersOf, rootOf };
+}
+
+/** `7 cut pieces` — the number the deck's door carries, because a fan of edges cannot be counted. */
+export function cutPiecesWord(count: number): string {
+  return `${count} cut piece${count === 1 ? '' : 's'}`;
 }
 
 /**

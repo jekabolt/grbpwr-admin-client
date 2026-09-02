@@ -6,6 +6,8 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
+import { isPictureHidden } from './visibility';
+
 /**
  * THE BENCH-KIND VOCABULARY — the second axis of the bench, said once.
  *
@@ -205,6 +207,248 @@ export function pictureRepresentation(
   if (kind === 'threed') return 'threed';
   if (kind === 'pattern') return 'pattern';
   return null;
+}
+
+/**
+ * ═══ THE CARD'S GENERATIVE OUTPUTS OF ONE REPRESENTATION — WHOLE-CARD (H-9) ════════════════════
+ *
+ * Owner: «в RENDERS OF THIS CARD почему-то показывается только один рендер на бете хотя их было
+ * несколько и не показываются те что мы сплитнули». The section's title claimed the CARD while its
+ * reader walked `band.runs` — one page of the merged feed, twelve rows. Every run of any kind (a
+ * flat re-trace, a 3D try, a pattern) pushed an older run off that window, so render runs left the
+ * section one at a time and each one took its crops with it, because a crop inherits its parent's
+ * `run_id` and therefore lives inside its parent's row.
+ *
+ * `GetDesignBandResponse.outputs` is the whole-card answer, and this is its one reader. Three
+ * screens consume it — RENDERS/3D (`outputsOfKind`), PATTERNS (`patternOutputs`), ON MODEL
+ * (`recolorOutputs`) — and a second spelling of any rule below would drift exactly the way the
+ * kind axis drifted before this file existed.
+ *
+ * ⚠ `null` MEANS «THIS SERVER DID NOT STATE IT», AND THE CALLER MUST FALL BACK TO ITS PAGE WALK.
+ * The gateway emits unpopulated fields, so a binary that knows the field always sends at least
+ * `[]`; nothing at all is a rolled-back binary, for which the page-bound reading is still the only
+ * answer available. An EMPTY list is folded into the same answer on purpose, and it is safe rather
+ * than sloppy: this field is a SUPERSET of what a page walk can find, so when it is genuinely
+ * empty the page walk finds nothing either. Deciding «stated» by `outputsTotal` instead would be
+ * the trap the contract warns about — a zero there beside non-empty `runs` reads «this half of the
+ * answer did not arrive», never «the card has no outputs».
+ *
+ * ⚠ THE SECTION IS CHOSEN BY THE RUN STAMP, NOT BY `picture.kind`. A recolour run's outputs
+ * declare `kind: "render"` on the wire — that is true rather than a shortcut, the output IS a
+ * photograph of the garment — so a picture-kind read files an ON MODEL result under RENDERS. Only
+ * `run_kind` separates them, and off the feed page it is the only place that fact survives at all.
+ * A row with no stamp (an uploaded plate, a parentless flatten) has no run to ask, and is
+ * classified by its own kind through `pictureRepresentation`.
+ *
+ * ⚠ THE REAL RUN WINS OVER THE STAMP WHENEVER IT IS ON THE PAGE, and that is not tidiness. The
+ * stamp carries four facts (id, kind, revision, colourway); the run object carries its attempts,
+ * its params and its money. `pattern-outputs.tsx` reads `repeatOfRun(run)` and `seamWarningOf(run)`
+ * off the run beside each tile — a measured seam is a warning about money already spent — and a
+ * synthesised four-field literal would silence both. So on-page rows keep behaving exactly as they
+ * do today, and only genuinely off-page rows degrade to the stamp: for those there is no row on
+ * screen at all today, so nothing is lost that was ever shown.
+ *
+ * ⚠ THE ORDER IS REBUILT, AND IT IS LOAD-BEARING. `outputs` arrives newest picture id FIRST, whole
+ * card. `threedResults` pairs a `.glb` with the raster that follows it in WRITE order — model
+ * first, its poster next — so handing it a descending list would split every 3D result in two and
+ * make the section count two models where the card has one. Rows are therefore grouped by run,
+ * groups keep the descending order of their newest picture, and inside a group pictures ascend by
+ * id. That is precisely the order the page walk produced (newest run first, pictures in creation
+ * order), so every consumer sees the shape it already expects. A picture with no run is its own
+ * group and keeps its place in the descending stream.
+ *
+ * ⚠ SAID OUT LOUD, BECAUSE IT IS A CHANGE OF ORDER AND NOT ONLY OF SCOPE: a group sorts by its
+ * NEWEST PICTURE, not by its run. So a run whose sheet was cut yesterday comes back ahead of a run
+ * that generated nothing since — the crop is newer than the neighbour's output, and «newest first»
+ * is a claim about PICTURES here, which is what this list is a list of. The feed below still
+ * orders by run, and the two lists therefore disagree about order on purpose.
+ *
+ * Hidden pictures are dropped here, as all three page walks drop them: the server ships them
+ * carrying their flag and the client filters. `id <= 0` is dropped for the same reason it is
+ * everywhere — nothing can be marked, zoomed or split against an id the card does not have.
+ */
+/**
+ * A RUN NOBODY STATED — every field of `common_DesignRun` explicitly absent.
+ *
+ * ⚠ SPELLED OUT RATHER THAN CAST, AND THE VERBOSITY IS THE POINT. The stamp of an off-page output
+ * carries FOUR facts; a `{...} as common_DesignRun` would let the next field the contract grows
+ * arrive silently as `undefined` inside an object the reader believes is a run. Written out, the
+ * type checker stops on the day the contract grows, and a person decides whether the stamp should
+ * carry the new fact too. The generated type already declares every field `| undefined`, so no
+ * consumer is entitled to assume presence — this constant only makes that explicit at the seam.
+ */
+const RUN_NOT_STATED: common_DesignRun = {
+  id: undefined,
+  techCardId: undefined,
+  kind: undefined,
+  status: undefined,
+  clientRequestId: undefined,
+  profileName: undefined,
+  profileVersion: undefined,
+  ask: undefined,
+  params: undefined,
+  inputs: undefined,
+  fitAtLaunch: undefined,
+  rrev: undefined,
+  requestedOutputs: undefined,
+  attempts: undefined,
+  priceEstimate: undefined,
+  priceActual: undefined,
+  currency: undefined,
+  author: undefined,
+  cancelRequestedAt: undefined,
+  archivedAt: undefined,
+  archivedBy: undefined,
+  errorCode: undefined,
+  lastError: undefined,
+  outputText: undefined,
+  createdAt: undefined,
+  startedAt: undefined,
+  completedAt: undefined,
+  pictures: undefined,
+  rerunOf: undefined,
+  prompt: undefined,
+  colorwayId: undefined,
+};
+
+/**
+ * ═══ TWO QUESTIONS ABOUT `outputs`, AND THEY ARE NOT THE SAME QUESTION ═════════════════════════
+ *
+ * They were one function once, and the conflation was caught in review. The names below are
+ * deliberately unlike each other so that a call site cannot pick the wrong one by looking.
+ *
+ * `serverStatesOutputs` — DID THIS BINARY SEND THE FIELD. The gateway emits unpopulated fields, so
+ * a server that knows `outputs` always sends at least `[]`; nothing at all is a binary older than
+ * the field. This is the question a CAPTION asks: «am I allowed to say <of this whole card>».
+ *
+ * `outputsCarryRows` — IS THERE ANYTHING IN IT TO READ. This is the question the READER asks, and
+ * it folds «empty» in with «not stated» ON PURPOSE: the server's predicate for `outputs` is a
+ * strict superset of everything the three page walks can reach, so when the field is empty the
+ * page walk finds nothing either, and falling back costs nothing and risks nothing.
+ *
+ * ⚠ THE TWO ANSWERS DIVERGE IN EXACTLY ONE PLACE ON SCREEN, and it is worth naming because it was
+ * a live defect: `OnModelOutputs` draws itself when a run is LIVE OR FAILED even with zero
+ * pictures. There, and only there, a new server can be answering whole-card while the list is
+ * empty — and the footnote must read the BINARY, not the list, or it tells the owner his paid
+ * recolours are off the page when the truth is that none came back.
+ */
+export function serverStatesOutputs(band: GetDesignBandResponse): boolean {
+  return Array.isArray(band.outputs);
+}
+
+export function outputsCarryRows(band: GetDesignBandResponse): boolean {
+  return (band.outputs ?? []).length > 0;
+}
+
+/**
+ * IS THIS RUN ON THE LOADED PAGE — i.e. is there anything to ASK it beyond its four stamped facts?
+ *
+ * ⚠ THE QUESTION EXISTS BECAUSE A STAMP IS NOT A RUN, AND ONE SCREEN ALREADY PAID FOR THE
+ * DIFFERENCE. `cardOutputRows` hands back the real run object whenever the page holds it and a
+ * four-field literal otherwise; on that literal `params`, `attempts`, `pictures` and every money
+ * field are `undefined`, which reads as 0/empty at every call site that does not check. PATTERNS
+ * read `params.pattern.repeat_mm` off it and wrote the resulting **0** onto the card's fabric —
+ * an invented number that then feeds the render prompt. A value you cannot read is not a value,
+ * and this predicate is how a screen tells the two apart before speaking or writing.
+ */
+export function runIsOnPage(band: GetDesignBandResponse, run?: common_DesignRun | null): boolean {
+  const id = run?.id ?? 0;
+  if (id <= 0) return false;
+  return (band.runs ?? []).some((r) => r.id === id);
+}
+
+export function cardOutputRows(
+  band: GetDesignBandResponse,
+  rep: Representation,
+): { picture: common_DesignPicture; run: common_DesignRun }[] | null {
+  if (!outputsCarryRows(band)) return null;
+  const outputs = band.outputs ?? [];
+
+  type Row = { picture: common_DesignPicture; run: common_DesignRun };
+  const groups = new Map<string, Row[]>();
+  const order: string[] = [];
+
+  for (const output of outputs) {
+    const picture = output.picture;
+    if (!picture) continue;
+    const pictureId = picture.id ?? 0;
+    if (pictureId <= 0) continue;
+    if (isPictureHidden(picture)) continue;
+
+    const runKind = (output.runKind ?? '').trim().toLowerCase();
+    const mine = runKind
+      ? runRepresentation({ kind: runKind })
+      : pictureRepresentation(band, picture);
+    if (mine !== rep) continue;
+
+    const runId = output.runId ?? 0;
+    const run: common_DesignRun = (runId > 0 ? runOfPicture(band, picture) : null) ?? {
+      ...RUN_NOT_STATED,
+      id: runId,
+      kind: runKind,
+      rrev: output.runRrev,
+      colorwayId: output.runColorwayId,
+    };
+
+    const key = runId > 0 ? `r${runId}` : `p${pictureId}`;
+    const group = groups.get(key);
+    if (group) {
+      group.push({ picture, run });
+    } else {
+      groups.set(key, [{ picture, run }]);
+      order.push(key);
+    }
+  }
+
+  const rows: Row[] = [];
+  for (const key of order) {
+    const group = groups.get(key) ?? [];
+    group.sort((a, b) => (a.picture.id ?? 0) - (b.picture.id ?? 0));
+    rows.push(...group);
+  }
+  return rows;
+}
+
+/**
+ * WHAT THE WHOLE-CARD LIST LEFT BEHIND, or `null` when it left nothing behind (and when this
+ * server states no list at all).
+ *
+ * ⚠ THE CAP IS PER COLOURWAY — 60 newest of each — NEVER a whole-card ceiling, and the difference
+ * is the whole reason this reader exists. A whole-card «newest 200» would drop the OLDEST pictures
+ * of the card, so a colourway whose every picture is older than the cut would come back EMPTY,
+ * which is the defect the field was added to kill, merely deferred. Per colourway that state is
+ * unrepresentable.
+ *
+ * ⚠ AND THE CAPTION IS THEREFORE `outputs_total_by_colorway`, NEVER `outputs_total`. A section
+ * showing one colourway that says «60 of 412» is lying: 412 is the whole card. The contract says
+ * this in as many words; it is repeated here because this is the only place a screen could get it
+ * wrong.
+ *
+ * `carried` counts what ARRIVED for that colourway, of every generative kind — not what the
+ * calling section drew. That is deliberate: the cap is spent per colourway across kinds, so «are
+ * older pictures missing from this colourway» is the only question the numbers can honestly
+ * answer. A per-kind fraction would need a per-kind count the wire does not carry, and inventing
+ * one from the capped list would understate by exactly the amount that was capped away.
+ */
+export function outputsHorizon(
+  band: GetDesignBandResponse,
+  /**
+   * ⚠ ОБЯЗАТЕЛЕН, И ЭТО ЗАМЕНА КОММЕНТАРИЯ НА ТИП. Раньше он был необязательным, и на `undefined`
+   * функция падала обратно на `outputs_total` — число ВСЕЙ КАРТОЧКИ, которым контракт прямо
+   * запрещает подписывать суженную секцию. Запрет держался абзацем выше и ничем больше: сегодня
+   * до той ветки никто не доходит, а завтра ею становится первый, кто смонтирует `OutputsSection`
+   * без колорвея, — и подпись соврёт молча, ровно тем числом, о котором предупреждает контракт.
+   * Отсутствующего колорвея у этого вопроса просто не бывает: горизонт ПО ОПРЕДЕЛЕНИЮ про одну
+   * секцию, а секция всегда чья-то. Вызывающий без колорвея обязан не звать её вовсе.
+   */
+  colorwayId: number,
+): { total: number; carried: number } | null {
+  const outputs = band.outputs ?? [];
+  if (!outputsCarryRows(band)) return null;
+  const cw = colorwayOf({ colorwayId });
+  const total = (band.outputsTotalByColorway ?? {})[String(cw)] ?? 0;
+  const carried = outputs.filter((output) => colorwayOf(output.picture) === cw).length;
+  return total > carried ? { total, carried } : null;
 }
 
 /* ═══════════════════ THE COLOURWAY AXIS — the THIRD axis of the bench, said once ═══════════════

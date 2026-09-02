@@ -11,6 +11,7 @@ import Text from 'ui/components/text';
 
 import { ASSET_PATTERN, assetLabel } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
+import { runIsOnPage, serverStatesOutputs } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { SELECT_MARK_NOT_STATED, pictureIsSelected, serverStatesSelected } from '../render';
@@ -90,7 +91,22 @@ export function PatternOutputs({
   const run = focused.run;
   const mediaId = picture.media?.id ?? 0;
   const url = pictureFull(picture);
-  const repeat = repeatOfRun(run);
+  /**
+   * ═══ РАППОРТ ЧИТАЕТСЯ С ПРОГОНА, А ПРОГОНА МОЖЕТ НЕ БЫТЬ (H-9, разбор ревью) ═══════════════
+   *
+   * До волны H-9 этот вопрос не стоял: плитка попадала на экран только вместе со своим прогоном,
+   * потому что список был обходом страницы ленты. Теперь список — выходы ВСЕЙ карточки, и у
+   * плитки, чей прогон вытеснен со страницы, рядом стоит ШТАМП из четырёх фактов, в котором
+   * `params` нет вовсе. `repeatOfRun` отвечает на него 0 — и это НЕ «раппорт не назван», это
+   * «спросить не у кого».
+   *
+   * Разница стоила бы карточке ткани с выдуманным нулём: дверь ниже писала `repeat_mm: 0` на
+   * полку, а оттуда число уходит в промпт рендера, в линейку второго акта и в имя плиты в
+   * ARTIFACTS. Контракт требует, чтобы «сгенерировано при 120 мм» и «положено при 120 мм»
+   * оставались ОДНИМ утверждением; ноль вместо неизвестного разрывает его молча.
+   */
+  const runKnown = runIsOnPage(band, run);
+  const repeat = runKnown ? repeatOfRun(run) : 0;
   const seam = seamWarningOf(run);
   const chosen = pictureIsSelected(picture);
   // Знает ли ОТВЕТИВШИЙ БИНАРЬ про метку вообще. С `EmitUnpopulated` сервер, у которого поле есть,
@@ -270,6 +286,17 @@ export function PatternOutputs({
                 reason='this card already holds its 40 assets — delete one in PATTERNS OF THIS CARD below, or under FABRIC RENDER → INPUT → CLOTH, before keeping another'
               />
             ) : (
+              !runKnown ? (
+              /* ЗАКРЫТА, А НЕ ПИШЕТ НАУГАД. Единственная альтернатива — положить ткань с нулевым
+                 раппортом и надеяться, что кто-то поправит его руками до первого рендера; ровно
+                 это и было дефектом. Причина названа целиком, включая выход: строка прогона
+                 доезжает до экрана через `show all` в истории генераций, и оттуда плитка
+                 кладётся на полку со своим настоящим числом. */
+              <InertDoor
+                label='KEEP IN LIBRARY'
+                reason='the run that made this tile is off this page of the feed, so its repeat cannot be read — and a fabric kept without one would send an invented 0 mm into every render of it. Press `show all` in GENERATION HISTORY to bring that run back, then keep the tile from here'
+              />
+            ) : (
               <Button
                 variant='main'
                 size='sm'
@@ -290,12 +317,18 @@ export function PatternOutputs({
               >
                 KEEP IN LIBRARY
               </Button>
-            )}
+            ))}
           </div>
 
-          <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
-            run {run.id ?? '—'}
-            {repeat > 0 ? ` · ${repeat} mm` : ' · no repeat stated'} ·{' '}
+          <Text size='nano' variant='label' component='p' data-tile-facts className='mt-1 normal-case'>
+            {(run.id ?? 0) > 0 ? `run ${run.id}` : 'no run'}
+            {/* «Не назван» — утверждение О ПРОГОНЕ, и делать его, не имея прогона, экран не
+                вправе. Отсутствие числа и отсутствие собеседника читаются по-разному. */}
+            {repeat > 0
+              ? ` · ${repeat} mm`
+              : runKnown
+                ? ' · no repeat stated'
+                : ' · repeat unknown, its run is off this page of the feed'} ·{' '}
             {(picture.sourceClass ?? '').trim() || 'ai'}
             {onShelf ? (
               <>
@@ -312,7 +345,9 @@ export function PatternOutputs({
       {/* ─────────────────────────── РЕЛЬС ─────────────────────────── */}
       {outputs.length > 1 && (
         <>
-          <GroupLabel>every tile on this page of the feed</GroupLabel>
+          <GroupLabel>
+            {serverStatesOutputs(band) ? 'every tile of this card' : 'every tile on this page of the feed'}
+          </GroupLabel>
           <Strip>
             {outputs.map(({ picture: p, run: r }) => {
               const on = p.id === picture.id;
@@ -330,7 +365,7 @@ export function PatternOutputs({
                   }
                   badge={pictureIsSelected(p) ? 'selected' : undefined}
                   lines={[
-                    `run ${r.id ?? '—'}${rep ? ` · ${rep} mm` : ''}`,
+                    `${(r.id ?? 0) > 0 ? `run ${r.id}` : 'no run'}${rep ? ` · ${rep} mm` : ''}`,
                     seamWarningOf(r) ? 'join measured as visible' : '',
                   ]}
                   action={
@@ -354,8 +389,20 @@ export function PatternOutputs({
         </>
       )}
 
-      <Text size='nano' variant='label' component='p' className='normal-case'>
-        this page of the feed, newest run first — not every tile this card has ever produced.
+      {/* ⚠ ПОДПИСЬ ЧИТАЕТ БИНАРЬ, А НЕ ДЛИНУ СПИСКА (разбор ревью). Волна H-9 сделала список
+          общекарточным на трёх экранах, а сноску поправила на одном — и два оставшихся продолжали
+          обещать, что плитки где-то потерялись, стоя над полным списком. */}
+      <Text
+        size='nano'
+        variant='label'
+        component='p'
+        /* Тот же контракт значений, что у RENDERS: `whole` | `page`. */
+        data-outputs-note={serverStatesOutputs(band) ? 'whole' : 'page'}
+        className='normal-case'
+      >
+        {serverStatesOutputs(band)
+          ? 'every tile this card holds, newest first. Hidden ones are folded away, and a tile whose run has left the page above keeps its picture but not its repeat.'
+          : 'this page of the feed, newest run first — not every tile this card has ever produced.'}
       </Text>
     </Section>
   );

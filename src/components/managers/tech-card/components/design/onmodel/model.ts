@@ -5,7 +5,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
-import { runRepresentation } from '../bench-kinds';
+import { cardOutputRows, runRepresentation } from '../bench-kinds';
 import { formatMoney } from '../generation/money';
 import { isPictureHidden } from '../visibility';
 import { fabricStatement, type Gate } from '../render/model';
@@ -63,10 +63,29 @@ export function recolorRuns(band: GetDesignBandResponse): common_DesignRun[] {
  * теория: вывод рекола ПРИХОДИТ С `kind: "render"` — у карточки нет отдельного рода для
  * перекрашенного снимка, — так что фильтр по картинке сложил бы перекраски в один список с
  * фабрик-рендерами, а `ghost_view` у них пуст, и различить их было бы нечем.
+ *
+ * ═══ СНИМКИ ВСЕЙ КАРТОЧКИ, А НЕ ЭТОЙ СТРАНИЦЫ ЛЕНТЫ (H-9) ════════════════════════════════════
+ *
+ * Тот же охват, что у рендеров и плиток, и та же причина. Здесь у него есть и своя цена: рекол —
+ * единственный экран полосы, где КАЖДЫЙ снимок стоит отдельного платного вызова, так что снимок,
+ * выпавший со страницы ленты, — это оплаченная работа, пропавшая с экрана, который её показывает.
+ *
+ * ⚠ ЛОВУШКА `recolor → render` ЗАКРЫТА НА ШТАМПЕ, А НЕ ЗДЕСЬ. Общий читатель классифицирует строку
+ * по роду ПРОГОНА (`run_kind`), который контракт кладёт в каждый выход именно затем, чтобы это
+ * различение пережило уход прогона со страницы. Читай он `picture.kind`, перекраски всей карточки
+ * легли бы в RENDERS OF THIS CARD, а этот раздел опустел бы — ровно наоборот тому, что чинится.
+ *
+ * `recolorRuns` рядом НАМЕРЕННО остаётся постраничным: он отвечает на вопрос о ПРОГОНАХ («какие
+ * живы, какие пали, во что обошёлся последний»), а живой прогон по определению новейший и со
+ * страницы не выпадает. Деньги и состояния — свойства прогона, и брать их из штампа было бы
+ * вымыслом: у штампа их нет.
  */
 export function recolorOutputs(
   band: GetDesignBandResponse,
 ): { picture: common_DesignPicture; run: common_DesignRun }[] {
+  const whole = cardOutputRows(band, 'onmodel');
+  if (whole) return whole;
+
   const out: { picture: common_DesignPicture; run: common_DesignRun }[] = [];
   for (const run of recolorRuns(band)) {
     for (const picture of run.pictures ?? []) {

@@ -24,7 +24,7 @@ export { PatternOutputs } from './pattern-outputs';
    паттернов и рядом `fabric of` в палитре рендера. Объяснение, заменённое фактом, перестаёт быть
    объяснением и становится вторым мнением. */
 export { PatternLibrary } from './pattern-library';
-export { ScaleStrip, SPANS, TileGrid } from './tile-preview';
+export { ClothSwatchStrip, ScaleStrip, SPANS, TileGrid } from './tile-preview';
 /* `useStartPatternRun` ЖИЛ ЗДЕСЬ НЕДЕЛЮ И СНЕСЁН. Он минтил СВОЙ ключ идемпотентности по СВОЕМУ
    отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
    именно на этом вопросе и разъезжается оплаченный дважды прогон. Плитка стартует тем же
