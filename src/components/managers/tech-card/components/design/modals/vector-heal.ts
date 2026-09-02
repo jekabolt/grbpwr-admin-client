@@ -205,7 +205,16 @@ const clamp = (n: number, lo: number, hi: number) => (n < lo ? lo : n > hi ? hi 
 type Spot = { id: number; x0: number; y0: number; x1: number; y1: number; n: number };
 
 /** Сетка одного уровня пирамиды. `kind`: 0 — земля, 1 — наша дырка, 2 — чужая дырка (вне счёта). */
-type Grid = { w: number; h: number; kind: Uint8Array; val: Float32Array };
+/**
+ * ⚠ ЭКСПОРТИРОВАНЫ ВМЕСТЕ С `solveMembrane` РАДИ ЗАПЛАТКИ (G-12), И ЭТО НЕ ПОСЛАБЛЕНИЕ.
+ *
+ * Patch Tool — та же математика: скопировать пиксели из целевого места и слить шов интерполяцией
+ * граничной разницы. Разное у них только то, ОТКУДА берётся дырка и ОТКУДА донор: лечилка ищет
+ * пятна мазка и подбирает донора сама, заплатка берёт обведённую область и смещение руки. Второй
+ * решатель мембраны рядом с этим означал бы, что найденный здесь дефект огрубления (см. `coarsen`)
+ * придётся ловить второй раз — а он был невидим на глаз и стоил замера наклоном.
+ */
+export type Grid = { w: number; h: number; kind: Uint8Array; val: Float32Array };
 
 /**
  * ЗАРАСТИТЬ МАЗОК.
@@ -813,7 +822,7 @@ function healSpot(
  * градиенте каскад даёт ТОЧНЫЙ ответ, и лечение продолжает наклон, а не кладёт среднее. Это
  * проверяется пробой, меряющей наклон до и после.
  */
-function solveMembrane(base: Grid): void {
+export function solveMembrane(base: Grid): void {
   const levels: Grid[] = [base];
   while (levels.length < MAX_LEVELS) {
     const top = levels[levels.length - 1];

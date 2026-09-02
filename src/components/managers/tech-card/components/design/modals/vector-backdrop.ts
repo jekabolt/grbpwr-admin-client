@@ -1,5 +1,7 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 
+import { quadCss, type Quad } from './transform-frame';
+
 /**
  * ПОДЛОЖКА ДЛЯ СРИСОВЫВАНИЯ — ШАБЛОН, КОТОРЫЙ НЕ СОХРАНЯЕТСЯ. НИКОГДА.
  *
@@ -91,6 +93,22 @@ export type Backdrop = {
   /** Заперта: не двигается и не берёт указатель, пока по ней рисуют. */
   locked: boolean;
   depth: BackdropDepth;
+  /**
+   * ЧЕТЫРЕ УГЛА В ЮНИТАХ ПЛАТЫ — ИСТИНА, КОГДА ОНА ЕСТЬ (G-3).
+   *
+   * ⚠ ПОЧЕМУ ПОЛЕ, А НЕ ЗАМЕНА ТРОЙКИ «ЦЕНТР/МАСШТАБ/УГОЛ». Тройка выразить не может ни разный
+   * масштаб по осям, ни перспективу — у неё для них нет чисел, — а рамка умеет и то, и другое с
+   * первого жеста. Значит истиной обязан стать квад. Но записи в localStorage переживают бандл, и
+   * у СТАРЫХ квада нет: выбросив тройку, мы стёрли бы всем выставленные шаблоны молча. Поэтому
+   * поле необязательное, читатель берёт `quad ?? матрица из тройки`, а первый же жест рамки квад
+   * материализует.
+   *
+   * Тройка при этом НЕ ОБНОВЛЯЕТСЯ вслед за квадом и остаётся тем, чем была на момент
+   * материализации: перевести квад с перспективой обратно в «центр, масштаб, угол» невозможно в
+   * принципе, и написанное туда приближение было бы вторым, расходящимся описанием одного и того
+   * же — ровно тем, чего этот файл избегает единственным клампом.
+   */
+  quad?: [number, number][];
 };
 
 /**
@@ -174,7 +192,14 @@ export function backdropMatrix(b: Backdrop): Mat6 {
 
 const q3 = (n: number) => Math.round(n * 1000) / 1000;
 
-/** Готовый CSS для элемента размера `natW × natH` с `transform-origin: 0 0`. */
+/**
+ * Готовый CSS для элемента размера `natW × natH` с `transform-origin: 0 0`.
+ *
+ * ⚠ КВАД СТАРШЕ ТРОЙКИ. Как только рамка (`transform-frame.ts`) записала четыре угла, они и есть
+ * положение шаблона: тройка выразить перспективу не может, и продолжать читать её значило бы
+ * показывать человеку не то, что он поставил. Перевод в матрицу делает вызывающий — здесь
+ * возвращается голая правда о том, чем сейчас живёт запись.
+ */
 export function backdropCss(b: Backdrop): {
   width: string;
   height: string;
@@ -182,15 +207,36 @@ export function backdropCss(b: Backdrop): {
   transformOrigin: string;
   opacity: number;
 } {
+  const q = readQuad(b.quad);
   const m = backdropMatrix(b).map(q3);
   return {
     width: `${b.natW}px`,
     height: `${b.natH}px`,
-    transform: `matrix(${m.join(', ')})`,
+    transform: q ? quadCss(q, b.natW, b.natH) : `matrix(${m.join(', ')})`,
     transformOrigin: '0 0',
     opacity: b.opacity,
   };
 }
+
+/** Четыре конечные пары или ничего. Половина квада — не квад, и матрица из неё делит на ноль. */
+export function readQuad(raw: unknown): Quad | null {
+  if (!Array.isArray(raw) || raw.length !== 4) return null;
+  const out: [number, number][] = [];
+  for (const p of raw) {
+    if (!Array.isArray(p) || p.length !== 2) return null;
+    const x = Number(p[0]);
+    const y = Number(p[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    out.push([x, y]);
+  }
+  return out as unknown as Quad;
+}
+
+/** Записать положение рамки в шаблон. Единственная дверь к `quad`. */
+export const setBackdropQuad = (b: Backdrop, q: Quad): Backdrop => ({
+  ...b,
+  quad: q.map((p) => [Math.round(p[0] * 1000) / 1000, Math.round(p[1] * 1000) / 1000] as [number, number]),
+});
 
 /**
  * Та же матрица для холста, у которого юнит платы не равен пикселю: `k` — пикселей холста на юнит
@@ -201,8 +247,15 @@ export function backdropCanvasMatrix(b: Backdrop, k = 1): Mat6 {
   return [a * k, bb * k, c * k, d * k, e * k, f * k];
 }
 
-/** Четыре угла подложки в юнитах платы, по часовой от левого верхнего угла файла. */
+/**
+ * Четыре угла подложки в юнитах платы, по часовой от левого верхнего угла файла.
+ *
+ * Записанный квад ОТДАЁТСЯ КАК ЕСТЬ: он и есть углы, а вывод их из тройки после перспективы вернул
+ * бы прямоугольник, которого на экране нет. Отсюда же рамка берёт своё начальное положение.
+ */
 export function backdropCorners(b: Backdrop): [number, number][] {
+  const q = readQuad(b.quad);
+  if (q) return q.map((p) => [p[0], p[1]] as [number, number]);
   const [a, bb, c, d, e, f] = backdropMatrix(b);
   const at = (u: number, v: number): [number, number] => [a * u + c * v + e, bb * u + d * v + f];
   return [at(0, 0), at(b.natW, 0), at(b.natW, b.natH), at(0, b.natH)];
@@ -276,6 +329,13 @@ export function clampBackdrop(b: Backdrop, plate: PlateRect): Backdrop {
     rotDeg: normRot(b.rotDeg),
     opacity: clamp(finite(b.opacity, DEFAULT_BACKDROP_OPACITY), MIN_BACKDROP_OPACITY, MAX_BACKDROP_OPACITY),
   };
+  /**
+   * ⚠ У ЗАПИСИ С КВАДОМ КЛАМПИТСЯ ТОЛЬКО НЕПРОЗРАЧНОСТЬ. Место держит сама рамка
+   * (`keepQuadReachable`, тем же числом `BACKDROP_KEEP_UNITS`), а тройка «центр/масштаб/угол» при
+   * живом кваде уже ничего не описывает — двигать по ней значило бы двигать то, чего на экране
+   * нет, и первым же движением развалить перспективу, которую человек выставил руками.
+   */
+  if (readQuad(scaled.quad)) return scaled;
   const bb = backdropBounds(scaled);
   const hw = (bb.x1 - bb.x0) / 2;
   const hh = (bb.y1 - bb.y0) / 2;
@@ -296,7 +356,9 @@ export type BackdropFit = 'contain' | 'cover' | 'actual';
 export function fitBackdrop(b: Backdrop, plate: PlateRect, mode: BackdropFit): Backdrop {
   const scale =
     mode === 'contain' ? containScale(b, plate) : mode === 'cover' ? coverScale(b, plate) : 1;
-  return clampBackdrop({ ...b, scale, x: plate.w / 2, y: plate.h / 2 }, plate);
+  // Вписывание СНИМАЕТ квад: оно и есть заявление «стой прямо, вот такого размера», а квад с
+  // перспективой, переживший его, означал бы, что кнопка нажата, а картинка стоит как стояла.
+  return clampBackdrop({ ...b, quad: undefined, scale, x: plate.w / 2, y: plate.h / 2 }, plate);
 }
 
 /**
@@ -467,6 +529,9 @@ export const BACKDROP_GONE_TEXT =
  */
 export function reconcileBackdrop(b: Backdrop, probe: { natW: number; natH: number }, plate: PlateRect): Backdrop {
   if (probe.natW === b.natW && probe.natH === b.natH) return clampBackdrop(b, plate);
+  /* У записи с квадом экранный размер задан САМИМ КВАДОМ — пересчитывать нечего: перезалитая
+     другой картинка ляжет ровно в ту же рамку, что и прежняя, и это ровно то, что человек ставил. */
+  if (readQuad(b.quad)) return clampBackdrop({ ...b, natW: probe.natW, natH: probe.natH }, plate);
   const keptWidth = b.natW * b.scale;
   return clampBackdrop(
     { ...b, natW: probe.natW, natH: probe.natH, scale: probe.natW > 0 ? keptWidth / probe.natW : b.scale },
@@ -538,6 +603,10 @@ export function parseBackdrop(raw: unknown): StoredBackdrop | null {
     opacity: clamp(finite(r.opacity, DEFAULT_BACKDROP_OPACITY), MIN_BACKDROP_OPACITY, MAX_BACKDROP_OPACITY),
     locked: r.locked === true,
     depth: r.depth === 'under' ? 'under' : 'over',
+    /* Квад НЕОБЯЗАТЕЛЕН, и запись без него — не сломанная, а СТАРАЯ: её положение по-прежнему
+       описывает тройка. Мусор вместо квада читается как «квада нет» тем же правилом, что и всё
+       остальное здесь: взять только то, что похоже на правду. */
+    ...(readQuad(r.quad) ? { quad: readQuad(r.quad)!.map((p) => [p[0], p[1]] as [number, number]) } : {}),
     at: finite(r.at, 0),
   };
 }

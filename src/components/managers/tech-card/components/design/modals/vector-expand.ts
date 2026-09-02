@@ -214,6 +214,52 @@ export function planExpand(from: Extent, spec: ExpandSpec): ExpandPlan {
   };
 }
 
+/**
+ * ОДНА РАМКА КАДРА — И РОСТ, И ОБРЕЗКА (G-4: «EXPAND THE SHEET должно работать как кроп тул в
+ * фотошопе … через кроп делается экспанд»).
+ *
+ * `rect` — будущий лист В ТЕХ ЖЕ ЕДИНИЦАХ, что `from`, и он вправе выходить за него в любую
+ * сторону: наружу — поле прирастает, внутрь — отрезается. Никакого второго плана для обрезки не
+ * нужно, и это не экономия, а устройство: вся арифметика пересчёта — четыре числа `kx/ky/ox/oy`,
+ * и у обрезки они те же самые, только `ox` уходит в минус. Отдельный `planCrop` со своей формулой
+ * был бы вторым местом, где живёт одно правило.
+ *
+ * ⚠ ВЫЗЫВАЮЩИЙ ОБЯЗАН СНАЧАЛА ОТРЕЗАТЬ ШТРИХИ. Этот план — чистая арифметика, он послушно уводит
+ * координаты за 0..1; а `readPoint` при следующем чтении слоя клампит якоря обратно на край, и
+ * линия, ушедшая за кадр, вернулась бы ПРИЖАТОЙ К ГРАНИЦЕ — молчаливая потеря формы, откатить
+ * которую нечем. Резать умеет `copyInsideSelection` из `vector-lasso.ts` (та же машинерия, что у
+ * «скопировать внутри»); довод, почему кроп нельзя выразить одними прибавками, — в шапке файла, и
+ * он не отменён: он именно про то, что без резки этого делать нельзя.
+ */
+export function planFrame(
+  from: Extent,
+  rect: { x0: number; y0: number; x1: number; y1: number },
+): ExpandPlan {
+  const fw = Math.max(1, Math.round(from.w));
+  const fh = Math.max(1, Math.round(from.h));
+  const x0 = Math.round(rect.x0);
+  const y0 = Math.round(rect.y0);
+  const tw = Math.max(1, Math.round(rect.x1) - x0);
+  const th = Math.max(1, Math.round(rect.y1) - y0);
+  return {
+    from: { w: fw, h: fh },
+    to: { w: tw, h: th },
+    dx: -x0,
+    dy: -y0,
+    ratio: tw / th,
+    kx: fw / tw,
+    ky: fh / th,
+    ox: -x0 / tw,
+    oy: -y0 / th,
+  };
+}
+
+/** Рамка кадра отрезает хоть с одной стороны — значит штрихи обязаны быть разрезаны до пересчёта. */
+export const framePlanCuts = (
+  from: Extent,
+  rect: { x0: number; y0: number; x1: number; y1: number },
+): boolean => rect.x0 > 0.5 || rect.y0 > 0.5 || rect.x1 < from.w - 0.5 || rect.y1 < from.h - 0.5;
+
 /** Точка в долях кадра — старая доля в новую. ОДНА функция; все остальные зовут её. */
 export const mapPoint = (
   p: readonly [number, number],

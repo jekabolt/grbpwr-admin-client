@@ -35,25 +35,48 @@ import {
 } from './use-edit-layer';
 import {
   BACKDROP_GONE_TEXT,
+  BACKDROP_KEEP_UNITS,
   adoptBackdrop,
+  backdropCorners,
   backdropCss,
   backdropScopeKey,
-  fitBackdrop,
-  flipBackdrop,
   flushBackdrop,
   forgetBackdrop,
-  moveBackdrop,
   probeBackdrop,
   readBackdrop,
   reconcileBackdrop,
-  rotateBackdrop,
   saveBackdropSoon,
   setBackdropDepth,
   setBackdropLocked,
   setBackdropOpacity,
+  setBackdropQuad,
   type Backdrop,
-  type BackdropFit,
 } from './vector-backdrop';
+import {
+  FULL_REGION,
+  MIN_FRAME_SIDE,
+  CORNER_HANDLES,
+  drawWarped,
+  hitFrame,
+  keepQuadReachable,
+  moveQuad,
+  pinQuad,
+  pointInQuad,
+  quadAngleDeg,
+  quadBounds,
+  quadCenter,
+  quadCss,
+  quadFromRect,
+  rotateQuad,
+  scaleQuad,
+  snapDeg,
+  warpMapper,
+  type FrameHit,
+  type Quad,
+  type WarpRegion,
+} from './transform-frame';
+import { TransformFrameOverlay, type FrameOwner } from './transform-frame-overlay';
+import { patchRegion } from './vector-patch';
 import { handleEnd } from './vector-pen';
 import {
   editBegin,
@@ -74,15 +97,11 @@ import {
 } from './vector-pen-edit';
 import {
   DEFAULT_EXPAND_FILL,
-  EXPAND_ANCHORS,
   ExpandGuardError,
-  expandAreas,
-  expandFromFactor,
   expandRasterLayer,
   expandStrokes,
-  isNoExpand,
-  planExpand,
-  type ExpandAnchor,
+  framePlanCuts,
+  planFrame,
   type ExpandFill,
 } from './vector-expand';
 import { ToolIcon, VectorBrushRail } from './vector-brush-rail';
@@ -238,7 +257,9 @@ type Tool =
   | 'stamp'
   | 'fill'
   | 'heal'
+  | 'patch'
   | 'lasso'
+  | 'crop'
   | 'pan';
 
 /**
@@ -288,7 +309,9 @@ const TOOL_LABEL: Record<Tool, string> = {
   stamp: 'stamp',
   fill: 'fill',
   heal: 'heal',
+  patch: 'patch',
   lasso: 'lasso',
+  crop: 'crop',
   pan: 'pan',
 };
 
@@ -305,6 +328,17 @@ const TOOL_KEY: Record<Tool, string> = {
   fill: 'g',
   // `j` — та же клавиша, что у лечащей кисти в фотошопе, и она здесь свободна.
   heal: 'j',
+  /**
+   * ⚠ `k` И `q` ВМЕСТО ФОТОШОПНЫХ `c` И `j`, И ЭТО ВЫНУЖДЕННО, А НЕ ПО ВКУСУ.
+   *
+   * У фотошопа кроп — `c`, заплатка — `j`. Обе буквы здесь ЗАНЯТЫ РАНЬШЕ: `c` — клон линий (он
+   * появился, когда растра в редакторе не было вовсе), `j` — лечащая кисть. Отобрать их у соседей
+   * значило бы переучивать руку тех, кто уже привык, ради двух новых инструментов; поэтому
+   * фотошопная раскладка нарушена ОСОЗНАННО и названа здесь. Свободные буквы рядом по смыслу:
+   * `k` — «kadr», ближайшая к `c` незанятая, и `q` — под мизинцем, как и вся тройка ретуши.
+   */
+  crop: 'k',
+  patch: 'q',
   lasso: 'w',
   pan: 'h',
 };
@@ -327,7 +361,11 @@ const TOOL_HINT: Record<Tool, string> = {
   fill: 'flood the area under the cursor with the ink in hand — an active area holds it in',
   heal:
     'brush over a spot — a mole, a speck, a stray mark — and let go: it grows over with the texture around it. The colour in hand is not used; opacity is how hard it heals. An active area holds it in. When nothing nearby matches, that spot is smoothed instead of grown, and the tool says so',
+  patch:
+    'lasso a region, then drag it onto a clean place — the region is REBUILT from where you dropped it and the seam is blended into what surrounds it. Nothing is invented: the pixels come from the place you chose, not from the rest of the picture. Lines are never touched',
   lasso: 'draw an area — it holds the raster tools in and cuts the lines at its edge',
+  crop:
+    'drag the frame — outward grows the sheet, inward crops it. Enter applies, esc cancels. This cannot be undone and survives only as a NEW picture',
   pan: 'move the sheet',
 };
 
@@ -341,8 +379,18 @@ const TOOL_HINT: Record<Tool, string> = {
  */
 const TOOL_BANDS: { material: Material; label: string; tools: Tool[] }[] = [
   { material: 'lines', label: 'lines', tools: ['line', 'freehand', 'curve', 'select', 'clone'] },
-  { material: 'pixels', label: 'pixels', tools: ['paint', 'erase', 'stamp', 'fill', 'heal'] },
-  { material: 'view', label: 'area & view', tools: ['lasso', 'pan'] },
+  {
+    material: 'pixels',
+    label: 'pixels',
+    tools: ['paint', 'erase', 'stamp', 'fill', 'heal', 'patch'],
+  },
+  /**
+   * КРОП СТОИТ В ПОЛОСЕ «ОБЛАСТЬ И ВИД», А НЕ В ПИКСЕЛЯХ (G-4: «добавь его просто в набор тулов в
+   * верхнем баре»). Он не производит ни линий, ни пикселей — он меняет САМ ЛИСТ, то есть коробку,
+   * в которой живут оба материала; в полосе `pixels` он обещал бы, что линии переживут его
+   * нетронутыми, а он их режет.
+   */
+  { material: 'view', label: 'area & view', tools: ['lasso', 'crop', 'pan'] },
 ];
 
 /** Инструменты, красящие ПИКСЕЛИ. Их жест копится в буфере растра, а не в списке штрихов. */
@@ -356,7 +404,8 @@ const isRasterTool = (t: Tool): t is 'paint' | 'erase' | 'stamp' =>
  * «нужен ли растр» спрашивается отдельным предикатом — иначе она поехала бы по пути scratch→stage,
  * которого у неё нет.
  */
-const needsRaster = (t: Tool): boolean => isRasterTool(t) || t === 'fill' || t === 'heal';
+const needsRaster = (t: Tool): boolean =>
+  isRasterTool(t) || t === 'fill' || t === 'heal' || t === 'patch';
 
 /**
  * МАЖУЩИЙ ЖЕСТ — те, у кого есть протяжка по холсту: буфер мазка копится в `scratch`, превью
@@ -457,6 +506,77 @@ const verbKey = (e: { key: string; code: string; shiftKey: boolean }): string =>
   if (!e.shiftKey && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
   if (!e.shiftKey && /^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
   return e.key;
+};
+
+/**
+ * ЗОНЫ ПОПАДАНИЯ РАМКИ, В ЭКРАННЫХ ПИКСЕЛЯХ — как `HIT_PX` у штриха, и делятся на зум там же, где
+ * он: десять экранных пикселей обязаны значить десять экранных на любом приближении.
+ *
+ * Зона поворота ШИРЕ ручки и лежит СНАРУЖИ квада: внутри её нет вовсе, иначе она отбирала бы у
+ * человека перетаскивание тела ровно у углов, где он чаще всего целится.
+ */
+const FRAME_HANDLE_PX = 9;
+const FRAME_ROTATE_PX = 26;
+
+/**
+ * САМАЯ МЕЛКАЯ РАМКА ВСТАВКИ, в долях кадра. Копия одной ГОРИЗОНТАЛЬНОЙ линии имеет нулевую
+ * высоту, и нормировать по ней значило бы делить на ноль: вставка приезжала бы с NaN в каждой
+ * координате и не рисовалась вовсе. Коробка раздаётся симметрично, поэтому вставка без единого
+ * жеста ложится ровно туда же, куда клала прежняя мгновенная — числа проб 48 не сдвигаются.
+ *
+ * ⚠ ЧИСЛО ВЫРОСЛО С 0.02 ПО ЗАМЕРУ. При двух сотых рамка получалась высотой в 25 юнитов платы —
+ * тоньше, чем зона захвата её собственных ручек, — и ВЗЯТЬСЯ ЗА ТЕЛО БЫЛО НЕЧЕМ: любое нажатие
+ * попадало в ручку, то есть тонкая вставка не двигалась вовсе, а только растягивалась. Зона ручки
+ * теперь сужается вместе с рамкой (`hitFrame`), но полоса тела обязана остаться видимой и пальцу.
+ */
+const MIN_FLOAT_SPAN = 0.05;
+
+/** Во сколько раз кадру позволено вырасти за один жест — тот же потолок, что стоял у множителя. */
+const CROP_MAX_GROWTH = 4;
+
+/** Пиксели вставки: их источник и место в домене рамки. */
+type FloatPaste = {
+  /** Штрихи, нормированные в единичный квадрат домена рамки. */
+  strokes: VectorStroke[];
+  /** Вырезка пикселей и её место в том же домене. */
+  cut: HTMLCanvasElement | null;
+  cutRegion: WarpRegion;
+  /** Исходная коробка в долях кадра — ею меряется, во сколько раз изменилась толщина нити. */
+  srcW: number;
+  srcH: number;
+};
+
+type FrameState = {
+  owner: FrameOwner;
+  quad: Quad;
+  /** Кроп: осе-выровненная рамка без поворота и перспективы — у листа нет ни угла, ни схода. */
+  axis: boolean;
+  snapshot: Quad;
+  float?: FloatPaste;
+};
+
+/**
+ * Часть рамки, занятая ВЫРЕЗКОЙ ПИКСЕЛЕЙ. Углы берутся у того же `warpMapper`, что рисует коммит,
+ * — значит превью и результат не могут разойтись даже под перспективой.
+ */
+const cutQuadOf = (quad: Quad, r: WarpRegion): Quad => {
+  const f = warpMapper({ quad });
+  return [f(r.u0, r.v0), f(r.u1, r.v0), f(r.u1, r.v1), f(r.u0, r.v1)] as unknown as Quad;
+};
+
+/** Одно и то же ли попадание. Сравнение по РОДУ и НОМЕРУ: объект приезжает новой ссылкой всегда. */
+const sameHit = (a: FrameHit, b: FrameHit): boolean =>
+  a === b ||
+  (!!a && !!b && a.kind === b.kind && (a.kind === 'body' || b.kind === 'body' || a.handle === b.handle));
+
+type FrameDrag = {
+  id: number;
+  mode: 'move' | 'scale' | 'rotate' | 'pin';
+  handle: number;
+  startQuad: Quad;
+  startAt: [number, number];
+  /** Угол «центр → точка нажатия», градусы. Поворот считает приращение от него. */
+  startDeg: number;
 };
 
 /* Механика пера целиком живёт в vector-pen.ts: прежняя модель «одна исходящая рукоятка на якорь,
@@ -702,7 +822,9 @@ export function VectorModal({
   const clip = useRef<{
     strokes: VectorStroke[];
     cut: HTMLCanvasElement | null;
-    at: [number, number];
+    /** Коробка вырезки В ДОЛЯХ КАДРА: пиксели и штрихи обязаны жить в одной системе координат,
+     *  иначе одна рамка над ними двумя означала бы два разных места. */
+    cutFrac: { x0: number; y0: number; x1: number; y1: number } | null;
     pastes: number;
   } | null>(null);
   /** Последняя СНЯТАЯ область — для ⇧⌘D. Так же, как Reselect в фотошопе. */
@@ -721,18 +843,69 @@ export function VectorModal({
    * (localStorage по ключу слоя): выставить шаблон стоит минуты, и терять эту работу на каждом
    * закрытии было бы хуже, чем не иметь шаблона вовсе.
    *
-   * ЗАПЕРТА ИЛИ НЕТ — ЭТО И ЕСТЬ ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА. Отпертая ловит руку и двигается; запертая
-   * прозрачна для указателя, и по ней рисуют. Отдельного чипа-инструмента для этого нет нарочно:
-   * одиннадцатый чип означал бы, что «подвинуть шаблон» — такой же глагол, как «нарисовать линию»,
-   * а это подготовка, а не работа.
+   * ⚠ ЗАМОК БОЛЬШЕ НЕ ОРГАН (G-3). Хранимым битом он остался — им шаблон помнит между сессиями,
+   * ставят его сейчас или по нему рисуют, — но чипа «unlocked — you place it» нет: его место занял
+   * ЖЕСТ. Рамка видима ⇔ шаблон отперт; Enter или клик мимо запирают его, строка «place it» в
+   * группе слоёв отпирает обратно. Владелец снёс весь ряд кнопок дословно, и замок был в этом
+   * ряду.
    */
   const [backdrop, setBackdrop] = useState<Backdrop | null>(null);
   const backdropRef = useRef<Backdrop | null>(null);
-  const bdDrag = useRef<{ id: number; at: [number, number] } | null>(null);
   const putPenHover = useCallback((next: [number, number] | null) => {
     penHoverRef.current = next;
     setPenHover(next);
   }, []);
+
+  /* ═══ ТРАНСФОРМ-РАМКА — ОДИН СЛОТ НА ТРЁХ ХОЗЯЕВ (G-3, G-13, G-4) ═════════════════════════
+   *
+   * ⚠ РАМКА ОДНА, И ЭТО НЕСУЩЕЕ РЕШЕНИЕ КРУГА. Шаблон, вставленный кусок и кадр листа — три разных
+   * содержимых под ОДНИМ жестом (тянуть тело, тянуть ручку, крутить за углом, Ctrl-тянуть угол).
+   * Три состояния рядом означали бы три рамки на экране одновременно и три ответа на вопрос «что
+   * сейчас двигает Enter»; один слот делает это невыразимым: взять рамку кому-то второму можно
+   * только поставив первую.
+   *
+   * `snapshot` — квад НА МОМЕНТ ОТКРЫТИЯ. Им живут Esc и ⌘Z: отмена трансформа обязана возвращать
+   * не «предыдущий шаг ручки», а то положение, с которого человек начал, — ровно как в фотошопе.
+   */
+  const [frame, setFrame] = useState<FrameState | null>(null);
+  const frameRef = useRef<FrameState | null>(null);
+  const putFrame = useCallback((next: FrameState | null) => {
+    frameRef.current = next;
+    setFrame(next);
+  }, []);
+  /** Жест рамки. В рефе по той же причине, что перо: `pointermove` прилетает раньше рендера. */
+  const frameDrag = useRef<FrameDrag | null>(null);
+  /**
+   * ЧТО СЕЙЧАС ПОД УКАЗАТЕЛЕМ. Состояние, а не реф: от него зависит и подсветка ручки, и значок
+   * поворота, и курсор — то есть картинка. Пишется ТОЛЬКО при смене рода попадания, иначе каждое
+   * движение мыши над рамкой перерисовывало бы весь редактор.
+   */
+  const [frameHover, setFrameHover] = useState<FrameHit>(null);
+  /** Живой жест заплатки: откуда потащили область. */
+  const patchDrag = useRef<{ id: number; from: [number, number] } | null>(null);
+  /**
+   * КУДА ТАЩАТ, В ДОЛЯХ КАДРА. Дорожка области при этом СТОИТ НА МЕСТЕ — она и есть то, что будет
+   * перестроено, — а призрак-копия показывает, ОТКУДА берутся пиксели. Без него человек видел бы,
+   * как содержимое области меняется, и не понимал бы, чем он управляет.
+   */
+  const [patchOffset, setPatchOffset] = useState<[number, number] | null>(null);
+  /** Цвет нового поля у кроп-рамки; `null` — прозрачно (законное состояние, а не «не выбрано»). */
+  const [cropFill, setCropFill] = useState<ExpandFill>(DEFAULT_EXPAND_FILL);
+  /**
+   * ОТМЕНА РАМКИ, ЧИТАЕМАЯ ИЗ ОБРАБОТЧИКА НА ОКНЕ.
+   *
+   * ⌘Z висит на `window` в эффекте, чей список зависимостей намеренно короток — иначе слушатель
+   * пересоздавался бы на каждый рендер редактора. Замыкание там ЗАМОРОЖЕНО на кадре, в котором
+   * эффект последний раз сработал, а отмена рамки пишет подложку по ключу слоя, который после
+   * первого сохранения МЕНЯЕТСЯ. Ссылка отвечает про сейчас — тот же приём, что у `frozenRef`.
+   */
+  const cancelFrameRef = useRef<() => void>(() => {});
+  /** Постановка рамки, читаемая из обработчика на окне, — тот же приём и по той же причине. */
+  const commitFrameRef = useRef<() => void>(() => {});
+  /** Открытие рамки шаблона, читаемое из эффекта восстановления — тот же приём, что у отмены. */
+  const openBackdropFrameRef = useRef<(b: Backdrop) => void>(() => {});
+  /** Холст превью вставки. Байты в него кладёт эффект — рендер JSX холсты не красит. */
+  const floatCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   /**
    * SEEDED ONCE PER OPENING, AND NEVER AGAIN WHILE IT IS OPEN. Boolean on purpose — a content key
@@ -1178,79 +1351,12 @@ export function VectorModal({
    * больше: два писателя означали бы два разных представления о том, что сейчас в документе.
    */
   /**
-   * РАСШИРИТЬ ПЛИТУ (Q-3, «обратный кроп»).
-   *
-   * ⚠ ПЕРЕСЧИТЫВАЕТСЯ ВСЁ, ЧТО ЖИВЁТ В КООРДИНАТАХ. Штрихи, области выделения и растр — три разных
-   * хранилища одной геометрии; забыть любое значит увидеть, как рисунок уезжает относительно
-   * картинки. `expandStrokes` перечисляет поля-координаты ПОИМЁННО и падает на незнакомом ключе:
-   * добавит кто-нибудь новое поле с координатой — узнает об этом отказом, а не молчаливым сдвигом.
-   *
-   * ⚠ ЛЕНТА ОТМЕНЫ СНОСИТСЯ, И ЭТО ЧЕСТНЕЕ, ЧЕМ ОСТАВИТЬ. Её шаги — прямоугольники в пикселях
-   * СТАРОГО холста; применённые к новому, они вернули бы кусок не на своё место. Само расширение
-   * поэтому неотменяемо, и человек об этом предупреждён вслух.
+   * ⚠ «РАСШИРИТЬ ЛИСТ» СНЯТО КАК ОТДЕЛЬНЫЙ ГЛАГОЛ (G-4). Множитель, девять якорей и кнопка
+   * «expand the sheet» просили человека посчитать в уме то, что рамка кадра показывает: расти лист
+   * теперь одним жестом с обрезкой — см. `applyCropFrame`. Сама машинерия пересчёта
+   * (`planFrame` → `expandStrokes` / `expandRasterLayer`) переиспользована целиком, ни одной новой
+   * арифметики к ней не добавлено.
    */
-  const applyExpand = useCallback(
-    async (factor: number, anchor: ExpandAnchor, fill: ExpandFill) => {
-      if (frozenRef.current) return;
-      const layer = rasterRef.current;
-      const from = layer
-        ? { w: layer.w, h: layer.h }
-        : { w: RASTER_FALLBACK_W, h: Math.round(RASTER_FALLBACK_W / (ratio || DEFAULT_RATIO)) };
-      const spec = expandFromFactor(from, factor, anchor, fill);
-      if (isNoExpand(spec)) {
-        showMessage('nothing to expand — set a factor above 1', 'error');
-        return;
-      }
-      const plan = planExpand(from, spec);
-
-      // Незавершённые жесты отменяются ДО пересчёта: перо, след руки и источник штампа держат
-      // координаты, которых после расширения уже нет.
-      if (penRef.current) putPen(null);
-      putPenHover(null);
-      putTrace(null);
-      putNodeEdit(null);
-      setStampSrc(null);
-      stampOffset.current = null;
-      setNibHover(null);
-
-      try {
-        const nextStrokes = expandStrokes(strokesRef.current, plan);
-        const nextSels = expandAreas(sels, plan);
-        if (layer) {
-          rasterRef.current = expandRasterLayer(layer, plan, spec.fill, RASTER_MAX_W);
-        }
-        strokesRef.current = nextStrokes;
-        setStrokes(nextStrokes);
-        setSels(nextSels);
-        setActiveSel(null);
-        maskRef.current = null;
-        expandedRef.current = true;
-        setExpanded(true);
-        setRatio(plan.ratio);
-        timeline.current.reset();
-        bumpTl();
-        rasterDirtyRef.current = true;
-        setRasterDirty(true);
-        paintView();
-        fitPlate();
-        showMessage(
-          'the sheet is bigger. This cannot be undone, and it only survives as a NEW picture — use “save as a new picture”',
-          'success',
-        );
-      } catch (err) {
-        if (err instanceof ExpandGuardError) {
-          showMessage(
-            `the sheet was not expanded: a stroke carries a field this screen does not know how to move (${err.unknownKeys.join(", ")}). Nothing was changed`,
-            'error',
-          );
-          return;
-        }
-        throw err;
-      }
-    },
-    [ratio, sels, putPen, putPenHover, putTrace, putNodeEdit, bumpTl, paintView, fitPlate, showMessage],
-  );
-
   const commitNodes = useCallback(
     (st: EditState) => {
       const res = editCommit(strokesRef.current, st);
@@ -1328,7 +1434,17 @@ export function VectorModal({
         return;
       }
       // Без записи: это ЧТЕНИЕ, а не правка, и трогать хранимое здесь нечем.
-      putBackdrop(reconcileBackdrop(stored, probe, plateRef.current), false);
+      const back = reconcileBackdrop(stored, probe, plateRef.current);
+      putBackdrop(back, false);
+      /**
+       * ⚠ РАМКА ВИДИМА ⇔ ШАБЛОН ОТПЕРТ, И ЭТО ОДНО ПРАВИЛО, А НЕ ДВА СОСТОЯНИЯ РЯДОМ.
+       *
+       * Бит замка переживает сессию: человек, ушедший на середине постановки, возвращается ровно
+       * туда, где остановился. Не открыть здесь рамку значило бы восстановить «отпертый» шаблон,
+       * который ничем не отпёрт — он не ловит руку и не двигается, а строка рейки при этом
+       * показывает «place it», то есть предлагает взять то, что якобы уже в руке.
+       */
+      if (!back.locked) openBackdropFrameRef.current(back);
     });
     return () => {
       alive = false;
@@ -1336,6 +1452,55 @@ export function VectorModal({
     // Ключ меняется, когда слой получает свой id после первого сохранения.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, bdKey, putBackdrop]);
+
+  /**
+   * ПИКСЕЛИ ВСТАВКИ — В ЕЁ СОБСТВЕННЫЙ ХОЛСТ, И ЗАНОВО ПРИ КАЖДОМ МОНТИРОВАНИИ.
+   *
+   * Тот же урок, что стоил владельцу дефекта Y-2: React монтирует ЧИСТЫЙ `<canvas>`, а байты живут
+   * в объекте вырезки. Нарисовать их один раз при создании флоата было бы недостаточно — стоит
+   * элементу размонтироваться (сменилась глубина шаблона, переключили слой), и на экране остался бы
+   * пустой прямоугольник вместо вставки.
+   */
+  const floatCut = frame?.owner === 'paste' ? frame.float?.cut ?? null : null;
+  useLayoutEffect(() => {
+    const c = floatCanvasRef.current;
+    if (!c || !floatCut) return;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(floatCut, 0, 0);
+  }, [floatCut]);
+
+  /**
+   * ═══ ENTER СТАВИТ ЖИВУЮ РАМКУ — НА ОКНЕ, А НЕ НА ДИАЛОГЕ ═════════════════════════════════
+   *
+   * ⚠ ЗАМЕРЕНО ПРОБОЙ, И ЭТО НЕ ПЕРЕСТРАХОВКА. Обработчик клавиш модалки стоит ПОСЛЕ гарда
+   * `isTyping`, а в списке его целей есть `button`: после нажатия на любой чип рейки фокус стоит
+   * на кнопке, и Enter до ветки рамки НЕ ДОХОДИЛ ВООБЩЕ. Проба показала это числом — рамка не
+   * ставилась ни разу за прогон.
+   *
+   * Живая рамка — РЕЖИМ: пока она на экране, Enter означает «поставь это» и ничего другого. Кнопки
+   * при этом не мертвы — их по-прежнему жмут пробелом; отобран ровно один смысл ровно на то время,
+   * пока на плите стоит незаконченный жест. Настоящее текстовое поле не трогается: там Enter
+   * принадлежит форме.
+   */
+  const frameLive = !!frame;
+  useEffect(() => {
+    if (!open || !frameLive) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        (event.target as HTMLElement)?.closest?.(
+          'input, textarea, [contenteditable=""], [contenteditable="true"]',
+        )
+      )
+        return;
+      event.preventDefault();
+      commitFrameRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, frameLive]);
 
   /** Отложенная запись обязана лечь до того, как вкладку закроют. */
   useEffect(() => {
@@ -1365,6 +1530,13 @@ export function VectorModal({
       event.preventDefault();
       if (event.shiftKey) {
         doRedo();
+        return;
+      }
+      /* ЖИВАЯ РАМКА СТАРШЕ ЛЕНТЫ. Трансформ ещё не в документе, и снимать им шаг ленты значило бы
+         забирать у человека прошлый мазок вместо того, что он делает прямо сейчас. Отменяется
+         РАМКА — к снимку на открытии, а вставка просто исчезает. */
+      if (frameRef.current) {
+        cancelFrameRef.current();
         return;
       }
       // Перо в работе: ⌘Z снимает ПОСЛЕДНИЙ ЯКОРЬ, а не последний штрих, — отменяется то, что
@@ -1517,9 +1689,25 @@ export function VectorModal({
    * Поэтому `rasterOn` — полноправная зависимость, а не условие внутри: именно её переход
    * false→true и есть тот момент, когда на экране появляется новый, ещё не закрашенный элемент.
    */
+  /**
+   * ⚠ РАЗМЕР ХОЛСТА — ТОЖЕ ЗАВИСИМОСТЬ, И ЭТО НАЙДЕНО ПРОБОЙ КРОПА, А НЕ ПРЕДУСМОТРЕНО.
+   *
+   * Кроп и расширение ЗАМЕНЯЮТ пиксельный слой новым, другого размера. React ставит новому
+   * `<canvas>` новые `width`/`height` — а присваивание любого из них ОЧИЩАЕТ холст по спецификации,
+   * — и происходит это ПОСЛЕ того, как `applyCropFrame` уже нарисовал документ в старый элемент.
+   * Эффект, слушавший только `rasterReady`/`rasterOn`, при этом не срабатывал: ни то, ни другое не
+   * менялось. На экране оставался ПУСТОЙ холст поверх целого документа.
+   *
+   * Замерено: после роста листа пиксель нового поля читался как [0,0,0,0] вместо белой бумаги, хотя
+   * в документе она была. Это ровно тот же дефект Y-2 («нажать чекбокс — пропадут и не появятся»),
+   * пришедший со второй стороны, и лечится он тем же — назвать зависимостью то, из-за чего на
+   * экране появляется НОВЫЙ, ещё не закрашенный элемент.
+   */
+  const rasterW = rasterRef.current?.w ?? 0;
+  const rasterH = rasterRef.current?.h ?? 0;
   useLayoutEffect(() => {
     if (rasterReady && rasterOn) paintView();
-  }, [rasterReady, rasterOn, paintView]);
+  }, [rasterReady, rasterOn, rasterW, rasterH, paintView]);
 
   /**
    * МАСКА АКТИВНОГО ВЫДЕЛЕНИЯ — ОДИН объект и на «куда пускать кисть» (X-6), и на «насколько мягок
@@ -1790,10 +1978,29 @@ export function VectorModal({
    * картинку. На замороженном экране пиксельный инструмент не берётся вовсе — растр там нечем
    * менять, и заводить копию подложки было бы платой ни за что.
    */
-  const switchTool = useCallback(
-    (t: Tool) => {
+  /**
+   * ⚠ БЕЗ `useCallback`, И ЭТО НЕ НЕБРЕЖНОСТЬ. Отсюда закрывается трансформ-рамка, а её закрытие
+   * ставит вставку в документ — то есть читает `plateH`, размер платы и список областей. Замыкание,
+   * замороженное на кадре, в котором рамки ещё не было, положило бы кусок по ПОЗАПРОШЛОЙ форме
+   * платы; ровно этой породы дефект уже стоил редактору первого сэмпла следа (см. довод у `putPen`).
+   * Функция дешёвая, зовут её от нажатия пальцем, и мемоизация здесь покупала бы только этот риск.
+   */
+  const switchTool = (t: Tool) => {
       if (penRef.current) commitPen();
+      /**
+       * СМЕНА ИНСТРУМЕНТА ЗАКРЫВАЕТ РАМКУ — И ПО-РАЗНОМУ У РАЗНЫХ ХОЗЯЕВ.
+       *
+       * Шаблон и вставка СТАВЯТСЯ: построенное не выбрасывается, ровно как коммитится недоложенный
+       * контур пера. Кадр ОТМЕНЯЕТСЯ: его применение необратимо и сносит ленту, и запускать такое
+       * от нажатия на соседний чип нельзя — там ставят только Enter или двойной клик.
+       */
+      const fr = frameRef.current;
+      if (fr && !(t === 'crop' && fr.owner === 'crop')) {
+        if (fr.owner === 'crop') closeFrame();
+        else commitFrame();
+      }
       setTool(t);
+      if (t === 'crop' && frameRef.current?.owner !== 'crop') openCropFrame();
       if (t !== 'select') {
         setSelected(null);
         putNodeEdit(null);
@@ -1806,9 +2013,7 @@ export function VectorModal({
           if (!layer) setTool((cur) => (needsRaster(cur) ? 'select' : cur));
         });
       }
-    },
-    [commitPen, ensureRaster, frozen],
-  );
+  };
 
   /** Пороги пера в мировых пикселях платы — доля по x и по y весят по-разному, мерить надо в мире. */
   const penWorld = () => ({
@@ -1843,6 +2048,324 @@ export function VectorModal({
     return null;
   };
 
+  /* ═══ ТРАНСФОРМ-РАМКА: ОТКРЫТЬ, ПОСТАВИТЬ, ОТМЕНИТЬ ════════════════════════════════════════ */
+
+  /** Точка события В ЮНИТАХ ПЛАТЫ и БЕЗ клампа: рамка законно свисает за край, как и подложка. */
+  const plateAt = (e: { clientX: number; clientY: number }): [number, number] => {
+    const f = frameAtFree(e);
+    return [f[0] * PLATE_W, f[1] * plateH];
+  };
+
+  /**
+   * РАМКА КАДРА ОСТАЁТСЯ ОСЕ-ВЫРОВНЕННОЙ И КОНЕЧНОЙ.
+   *
+   * Потолок роста тот же, что стоял у прежнего множителя (×4): выше него растр всё равно упирается
+   * в `RASTER_MAX_W` и старое содержимое начинает пересэмпливаться вниз — то есть «расширил ещё»
+   * означало бы «потерял в чёткости», молча. Пол — `MIN_FRAME_SIDE`: рамка, схлопнутая в линию,
+   * даёт лист нулевой высоты, из которого нечего восстанавливать.
+   */
+  const clampCropQuad = (q: Quad): Quad => {
+    const b = quadBounds(q);
+    const grow = CROP_MAX_GROWTH;
+    const x0 = Math.min(Math.max(b.x0, -PLATE_W * (grow - 1)), PLATE_W * grow - MIN_FRAME_SIDE);
+    const y0 = Math.min(Math.max(b.y0, -plateH * (grow - 1)), plateH * grow - MIN_FRAME_SIDE);
+    const x1 = Math.max(Math.min(b.x1, PLATE_W * grow), x0 + MIN_FRAME_SIDE);
+    const y1 = Math.max(Math.min(b.y1, plateH * grow), y0 + MIN_FRAME_SIDE);
+    return quadFromRect(x0, y0, x1 - x0, y1 - y0);
+  };
+
+  /** Рамка на шаблоне. Открывается выбором картинки и строкой «place it» в группе слоёв. */
+  const openBackdropFrame = (b: Backdrop, remember = true) => {
+    const quad = backdropCorners(b) as unknown as Quad;
+    putFrame({ owner: 'backdrop', quad, axis: false, snapshot: quad });
+    /* Запись трогается ТОЛЬКО когда бит замка правда меняется: восстановление из хранилища — это
+       чтение, и писать в него отсюда значило бы переставить `at` записи на каждое открытие окна. */
+    if (b.locked) putBackdrop(setBackdropLocked(b, false), remember);
+    setFrameHover(null);
+  };
+
+  /** Рамка кадра — по нынешним границам платы. Тянуть наружу больше её, внутрь — меньше. */
+  const openCropFrame = () => {
+    const quad = quadFromRect(0, 0, PLATE_W, plateH);
+    putFrame({ owner: 'crop', quad, axis: true, snapshot: quad });
+    setFrameHover(null);
+  };
+
+  const closeFrame = () => {
+    frameDrag.current = null;
+    putFrame(null);
+    setFrameHover(null);
+  };
+
+  /**
+   * ПОСТАВИТЬ — Enter или клик мимо. У каждого хозяина своё «поставить», и это ТРИ РАЗНЫХ ГЛАГОЛА
+   * под одним жестом, а не один: шаблон запирается, вставка ложится в документ одним шагом ленты,
+   * кадр применяется необратимо. Общим здесь остаётся только то, что рамка после этого исчезает.
+   */
+  const commitFrame = () => {
+    const fr = frameRef.current;
+    if (!fr) return;
+    if (fr.owner === 'backdrop') {
+      const b = backdropRef.current;
+      closeFrame();
+      if (b) putBackdrop(setBackdropLocked(setBackdropQuad(b, fr.quad), true));
+      return;
+    }
+    if (fr.owner === 'paste') {
+      void commitFloat(fr);
+      return;
+    }
+    void applyCropFrame(fr);
+  };
+
+  /**
+   * ОТМЕНИТЬ — Esc и ⌘Z над живой рамкой.
+   *
+   * Возвращается СНИМОК НА ОТКРЫТИИ, а не предыдущий шаг ручки: трансформ — один жест, сколько бы
+   * раз рука ни бралась за ручки, и «отменить его наполовину» не значит ничего. У вставки отмены
+   * нет вовсе — есть отказ: непоставленный кусок просто исчезает, документа он не касался.
+   */
+  const cancelFrame = () => {
+    const fr = frameRef.current;
+    if (!fr) return;
+    closeFrame();
+    if (fr.owner === 'backdrop') {
+      const b = backdropRef.current;
+      if (b) putBackdrop(setBackdropLocked(setBackdropQuad(b, fr.snapshot), true));
+      return;
+    }
+    if (fr.owner === 'paste') {
+      showMessage('the pasted piece was dropped — the drawing was never touched', 'success');
+      return;
+    }
+    setTool('select');
+  };
+  cancelFrameRef.current = cancelFrame;
+  commitFrameRef.current = commitFrame;
+  openBackdropFrameRef.current = (b: Backdrop) => openBackdropFrame(b, false);
+
+  /**
+   * ⚠ ПЕРЕД ЛЮБЫМ ПИСАТЕЛЕМ ДОКУМЕНТА — ПОСТАВИТЬ ЖИВУЮ ВСТАВКУ.
+   *
+   * Сохранение, удаление внутри области и вторая вставка обязаны идти по ОДНОЙ дороге: либо кусок
+   * поставлен, либо его нет. Молчаливое сохранение при живом флоате означало бы картинку, на
+   * которой человек своими глазами видел вставку, а на сервере её нет.
+   */
+  const settleFloatFirst = async () => {
+    const fr = frameRef.current;
+    if (fr?.owner === 'paste') await commitFloat(fr);
+  };
+
+  /* ═══ ВСТАВКА: ПОСТАВИТЬ ФЛОАТ В ДОКУМЕНТ (G-13) ══════════════════════════════════════════
+   *
+   * ОДИН ШАГ ЛЕНТЫ НА ОБА МАТЕРИАЛА — тем же `recordCombined`, что у «удалить внутри»: записанные
+   * порознь, они требовали бы двух ⌘Z, и первое нажатие оставляло бы состояние, которого никто не
+   * создавал (линии вернулись, вставленные пиксели остались).
+   */
+  const commitFloat = async (fr: FrameState) => {
+    const f = fr.float;
+    closeFrame();
+    if (!f || frozenRef.current) return;
+    const map = warpMapper({ quad: fr.quad });
+    const toFrac = (p: readonly [number, number]): [number, number] => [p[0] / PLATE_W, p[1] / plateH];
+
+    /**
+     * ТОЛЩИНА НИТИ УМНОЖАЕТСЯ НА КОРЕНЬ ИЗ ОТНОШЕНИЯ ПЛОЩАДЕЙ, и это НАЗВАННАЯ АППРОКСИМАЦИЯ.
+     * Формат несёт ОДНУ толщину на штрих; под перспективой честная толщина менялась бы вдоль
+     * линии, и выразить это нечем. Альтернатива — растеризовать штрихи при перспективной вставке —
+     * отвергнута: она молча превращает правимые линии в пиксели.
+     */
+    const srcArea = Math.max(1e-9, f.srcW * PLATE_W * f.srcH * plateH);
+    const b = quadBounds(fr.quad);
+    const gaugeK = Math.sqrt(Math.max(1e-9, (b.x1 - b.x0) * (b.y1 - b.y0)) / srcArea);
+
+    const linesBase = strokesRef.current;
+    const born = f.strokes.map((st) => {
+      const out: VectorStroke = {
+        ...st,
+        pts: st.pts.map(([u, v]) => toFrac(map(u, v))),
+        gauge: clampGauge(strokeGauge(st) * gaugeK),
+        weight: gaugeWeight(clampGauge(strokeGauge(st) * gaugeK)),
+      };
+      if (st.segs) {
+        out.segs = st.segs.map((seg) =>
+          seg
+            ? ((): [number, number, number, number] => {
+                const a = toFrac(map(seg[0], seg[1]));
+                const c = toFrac(map(seg[2], seg[3]));
+                return [a[0], a[1], c[0], c[1]];
+              })()
+            : null,
+        );
+      }
+      if (st.step !== undefined) out.step = clampStep(st.step * gaugeK);
+      return out;
+    });
+    const next = born.length ? [...linesBase, ...born] : linesBase;
+
+    const layer = f.cut ? await ensureRaster() : rasterRef.current;
+    if (frozenRef.current) return;
+
+    let put: (() => void) | null = null;
+    if (layer && f.cut) {
+      const cut = f.cut;
+      const kx = layer.w / PLATE_W;
+      const ky = layer.h / plateH;
+      const quadPx = fr.quad.map((p) => [p[0] * kx, p[1] * ky] as [number, number]) as unknown as Quad;
+      // Коробка размечается ДО записи: лента снимает «как было» по ней, и пустая коробка означала
+      // бы шаг, ничего не восстанавливающий.
+      const corners = [
+        map(f.cutRegion.u0, f.cutRegion.v0),
+        map(f.cutRegion.u1, f.cutRegion.v0),
+        map(f.cutRegion.u1, f.cutRegion.v1),
+        map(f.cutRegion.u0, f.cutRegion.v1),
+      ];
+      const xs = corners.map((p) => p[0] * kx);
+      const ys = corners.map((p) => p[1] * ky);
+      const x0 = Math.max(0, Math.floor(Math.min(...xs)) - 1);
+      const y0 = Math.max(0, Math.floor(Math.min(...ys)) - 1);
+      const x1 = Math.min(layer.w - 1, Math.ceil(Math.max(...xs)) + 1);
+      const y1 = Math.min(layer.h - 1, Math.ceil(Math.max(...ys)) + 1);
+      clearGesture(layer);
+      if (x1 >= x0 && y1 >= y0) {
+        markRect(layer, [x0, y0, x1, y1]);
+        put = () =>
+          drawWarped(
+            rasterCtx(layer.doc),
+            cut,
+            cut.width,
+            cut.height,
+            { quad: quadPx },
+            f.cutRegion,
+          );
+      }
+    }
+
+    const done = timeline.current.recordCombined(layer, linesBase, next, born.length > 0, put);
+    if (layer) {
+      clearGesture(layer);
+      paintView();
+    }
+    if (done.pixels) {
+      rasterDirtyRef.current = true;
+      setRasterDirty(true);
+    }
+    if (done.lines) {
+      strokesRef.current = next;
+      setStrokes(next);
+    }
+    if (done.lines || done.pixels) {
+      bumpTl();
+      showMessage('placed', 'success');
+      return;
+    }
+    showMessage('the pasted piece held nothing that could be put down here', 'error');
+  };
+
+  /* ═══ КРОП: РАМКА КАДРА ПРИМЕНЯЕТСЯ (G-4) ═════════════════════════════════════════════════
+   *
+   * ⚠ ОДИН ЖЕСТ, ОБА НАПРАВЛЕНИЯ. Наружу — лист прирастает, внутрь — отрезается, и никакого
+   * второго органа для второго направления нет: у фотошопного кропа его тоже нет, а прежний ряд
+   * «множитель + девять якорей + кнопка» просил человека посчитать в уме то, что рамка показывает.
+   *
+   * ⚠ ШТРИХИ РЕЖУТСЯ ДО ПЕРЕСЧЁТА, И БЕЗ ЭТОГО КРОП МОЛЧА ГНУЛ БЫ ЛИНИИ. Координата за 0..1
+   * клампится `readPoint` при следующем чтении слоя — линия, ушедшая за кадр, вернулась бы
+   * ПРИЖАТОЙ К КРОМКЕ. Резка идёт той же машинерией, что «скопировать внутри»: то, что внутри
+   * рамки, остаётся; пересечённые штрихи делятся по её краю.
+   *
+   * ⚠ ЛЕНТА ОТМЕНЫ СНОСИТСЯ. Её шаги — прямоугольники в пикселях СТАРОГО холста; применённые к
+   * новому, они вернули бы кусок не на своё место.
+   */
+  const applyCropFrame = async (fr: FrameState) => {
+    if (frozenRef.current) return;
+    const layer = rasterRef.current;
+    const from = layer
+      ? { w: layer.w, h: layer.h }
+      : { w: RASTER_FALLBACK_W, h: Math.round(RASTER_FALLBACK_W / (ratio || DEFAULT_RATIO)) };
+    const b = quadBounds(fr.quad);
+    const rect = {
+      x0: (b.x0 / PLATE_W) * from.w,
+      y0: (b.y0 / plateH) * from.h,
+      x1: (b.x1 / PLATE_W) * from.w,
+      y1: (b.y1 / plateH) * from.h,
+    };
+    const same =
+      Math.abs(rect.x0) < 0.5 &&
+      Math.abs(rect.y0) < 0.5 &&
+      Math.abs(rect.x1 - from.w) < 0.5 &&
+      Math.abs(rect.y1 - from.h) < 0.5;
+    if (same) {
+      closeFrame();
+      setTool('select');
+      showMessage('the frame is exactly the sheet — nothing to crop or grow', 'error');
+      return;
+    }
+    const plan = planFrame(from, rect);
+    const cuts = framePlanCuts(from, rect);
+
+    // Незавершённые жесты отменяются ДО пересчёта: перо, след руки и источник штампа держат
+    // координаты, которых после кропа уже нет.
+    if (penRef.current) putPen(null);
+    putPenHover(null);
+    putTrace(null);
+    putNodeEdit(null);
+    setStampSrc(null);
+    stampOffset.current = null;
+    setNibHover(null);
+    closeFrame();
+
+    try {
+      const kept = cuts
+        ? copyInsideSelection(
+            strokesRef.current,
+            [
+              [b.x0 / PLATE_W, b.y0 / plateH],
+              [b.x1 / PLATE_W, b.y0 / plateH],
+              [b.x1 / PLATE_W, b.y1 / plateH],
+              [b.x0 / PLATE_W, b.y1 / plateH],
+            ],
+            [0, 0],
+          )
+        : strokesRef.current;
+      const nextStrokes = expandStrokes(kept, plan);
+      if (layer) {
+        rasterRef.current = expandRasterLayer(layer, plan, cropFill, RASTER_MAX_W);
+      }
+      strokesRef.current = nextStrokes;
+      setStrokes(nextStrokes);
+      /* ОБЛАСТИ СНИМАЮТСЯ ЦЕЛИКОМ, И ЭТО СКАЗАНО. Пересчитанная область, половина которой лежала
+         за новым краем, стала бы дорожкой вокруг того, чего больше нет; одно правило на оба
+         направления жеста честнее двух похожих. */
+      setSels([]);
+      setActiveSel(null);
+      maskRef.current = null;
+      expandedRef.current = true;
+      setExpanded(true);
+      setRatio(plan.ratio);
+      timeline.current.reset();
+      bumpTl();
+      rasterDirtyRef.current = true;
+      setRasterDirty(true);
+      setSelected(null);
+      paintView();
+      fitPlate();
+      setTool('select');
+      showMessage(
+        `the sheet is now ${plan.to.w}×${plan.to.h}${cuts ? ' — what fell outside the frame was cut, areas were dropped' : ''}. This cannot be undone, and it only survives as a NEW picture — use “save as a new picture”`,
+        'success',
+      );
+    } catch (err) {
+      if (err instanceof ExpandGuardError) {
+        showMessage(
+          `the sheet was not changed: a stroke carries a field this screen does not know how to move (${err.unknownKeys.join(', ')}). Nothing was changed`,
+          'error',
+        );
+        return;
+      }
+      throw err;
+    }
+  };
+
   const onStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const vp = viewportRef.current;
     if (!vp) return;
@@ -1871,15 +2394,50 @@ export function VectorModal({
     const at = frameAt(event);
 
     /**
-     * ОТПЕРТЫЙ ШАБЛОН ЛОВИТ РУКУ РАНЬШЕ ЛЮБОГО ИНСТРУМЕНТА. Замок и есть переключатель режима:
-     * пока подложка отперта, экран занят её постановкой, и рисовать по ней нельзя — иначе первый
-     * же штрих лёг бы поверх шаблона, который человек ещё двигает. Заперта — прозрачна для руки.
+     * ЖИВАЯ РАМКА СПРАШИВАЕТСЯ ПЕРВОЙ — РАНЬШЕ ПИПЕТКИ И РАНЬШЕ ЛЮБОГО ИНСТРУМЕНТА.
+     *
+     * Рамка — это РЕЖИМ, а не орган: пока она на экране, экран занят постановкой, и рисовать по
+     * ней нельзя — иначе первый же штрих лёг бы поверх того, что человек ещё двигает. Так ведёт
+     * себя всякий трансформ: он забирает холст целиком, пока его не поставили.
+     *
+     * КЛИК МИМО СТАВИТ И ПРОГЛАТЫВАЕТСЯ — тоже дословно по фотошопу. Проглатывается потому, что
+     * этот же клик иначе положил бы штрих в то место, куда человек ткнул, чтобы ЗАКОНЧИТЬ жест.
+     * У кропа выхода «мимо» нет вовсе: применение необратимо, и промах мышью не имеет права его
+     * запускать — там ставят только Enter или двойной клик.
      */
-    const bd = backdropRef.current;
-    if (bd && !bd.locked && !frozen && !picking) {
+    const fr = frameRef.current;
+    if (fr && !frozen) {
+      const p = plateAt(event);
+      const zoomNow = viewRef.current.zoom || 1;
+      const hit = hitFrame(fr.quad, p, {
+        handle: FRAME_HANDLE_PX / zoomNow,
+        rotate: FRAME_ROTATE_PX / zoomNow,
+        axis: fr.axis,
+      });
+      if (hit) {
+        event.preventDefault();
+        vp.setPointerCapture?.(event.pointerId);
+        const c = quadCenter(fr.quad);
+        frameDrag.current = {
+          id: event.pointerId,
+          mode:
+            hit.kind === 'rotate'
+              ? 'rotate'
+              : hit.kind === 'body'
+                ? 'move'
+                : (event.metaKey || event.ctrlKey) && !fr.axis && CORNER_HANDLES.includes(hit.handle)
+                  ? 'pin'
+                  : 'scale',
+          handle: hit.kind === 'body' ? -1 : hit.handle,
+          startQuad: fr.quad,
+          startAt: p,
+          startDeg: (Math.atan2(p[1] - c[1], p[0] - c[0]) * 180) / Math.PI,
+        };
+        setFrameHover(hit);
+        return;
+      }
       event.preventDefault();
-      vp.setPointerCapture?.(event.pointerId);
-      bdDrag.current = { id: event.pointerId, at };
+      if (fr.owner !== 'crop') commitFrame();
       return;
     }
 
@@ -1942,6 +2500,29 @@ export function VectorModal({
     // the stroke would end wherever it crossed the border.
     vp.setPointerCapture?.(event.pointerId);
 
+    /**
+     * ЗАПЛАТКА — ДВУХФАЗНЫЙ ЖЕСТ, ДОСЛОВНО ПО ФОТОШОПУ (G-12).
+     *
+     * Первый драг ВНЕ области рисует контур (тем же лассо: второго построителя областей в
+     * редакторе нет и не будет — растушёвка, прореживание и резка живут в одном месте). Драг
+     * ИЗНУТРИ области тащит её на чистое место, и вот он-то и есть заплатка. Разводит их
+     * попадание указателя, а не скрытый режим: человек видит дорожку и видит, внутри он или снаружи.
+     */
+    if (tool === 'patch') {
+      const sel = activeSel !== null ? sels[activeSel] : null;
+      if (sel && pointInPolygon({ x: at[0], y: at[1] }, sel.pts)) {
+        patchDrag.current = { id: event.pointerId, from: at };
+        const layer = rasterRef.current;
+        if (layer) {
+          clearGesture(layer);
+          // Превью — НЕПРОЗРАЧНАЯ подмена содержимого области, а не мазок: заплатка не кладёт
+          // краску поверх, она показывает, ЧТО встанет на место.
+          liveRef.current = { mode: 'paint', opacity: 1 };
+        }
+        return;
+      }
+    }
+
     if (tool === 'curve') {
       // Вся механика — в penDown: замыкание по первому якорю, захват рукоятки, новый якорь.
       // МОДИФИКАТОРЫ ЕДУТ ОБЪЕКТОМ, а не голым alt. Прежняя булева форма компилируется и сегодня,
@@ -1979,18 +2560,69 @@ export function VectorModal({
   };
 
   const onStagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const bdd = bdDrag.current;
-    if (bdd && event.pointerId === bdd.id) {
-      const now = frameAt(event);
-      const b = backdropRef.current;
-      // Сдвиг считается В ЮНИТАХ ПЛАТЫ: `frameAt` даёт доли кадра, а подложка живёт в юнитах, и
-      // умножение на плату — единственное место, где эти две системы встречаются.
-      if (b) {
-        putBackdrop(
-          moveBackdrop(b, plateRect, (now[0] - bdd.at[0]) * PLATE_W, (now[1] - bdd.at[1]) * plateH),
-        );
+    const fd = frameDrag.current;
+    const fr = frameRef.current;
+    if (fd && fr && event.pointerId === fd.id) {
+      const p = plateAt(event);
+      let quad = fr.quad;
+      if (fd.mode === 'move') {
+        quad = moveQuad(fd.startQuad, p[0] - fd.startAt[0], p[1] - fd.startAt[1]);
+      } else if (fd.mode === 'pin') {
+        quad = pinQuad(fd.startQuad, CORNER_HANDLES.indexOf(fd.handle), p);
+      } else if (fd.mode === 'rotate') {
+        const c = quadCenter(fd.startQuad);
+        const now = (Math.atan2(p[1] - c[1], p[0] - c[0]) * 180) / Math.PI;
+        const want = quadAngleDeg(fd.startQuad) + (now - fd.startDeg);
+        quad = rotateQuad(fd.startQuad, event.shiftKey ? snapDeg(want) : want);
+      } else {
+        quad = scaleQuad(fd.startQuad, fd.handle, p, {
+          proportional: event.shiftKey,
+          // Кроп не отражается: перевёрнутая рамка кадра означала бы отрицательный размер листа.
+          allowFlip: !fr.axis,
+          minSide: MIN_FRAME_SIDE,
+        });
       }
-      bdDrag.current = { id: bdd.id, at: now };
+      if (fr.axis) quad = clampCropQuad(quad);
+      else quad = keepQuadReachable(quad, plateRect, BACKDROP_KEEP_UNITS);
+      putFrame({ ...fr, quad });
+      return;
+    }
+    /**
+     * НАВЕДЕНИЕ НАД ЖИВОЙ РАМКОЙ ЗАБИРАЕТ ДВИЖЕНИЕ ЦЕЛИКОМ, и это то же правило, что у нажатия:
+     * пока рамка на экране, курсор говорит про НЕЁ, а не про инструмент в руке. Состояние
+     * пишется только при смене рода попадания — иначе каждый кадр протяжки мыши над рамкой
+     * перерисовывал бы весь редактор.
+     */
+    if (fr && !frozen) {
+      const p = plateAt(event);
+      const zoomNow = viewRef.current.zoom || 1;
+      const hit = hitFrame(fr.quad, p, {
+        handle: FRAME_HANDLE_PX / zoomNow,
+        rotate: FRAME_ROTATE_PX / zoomNow,
+        axis: fr.axis,
+      });
+      if (!sameHit(hit, frameHover)) setFrameHover(hit);
+      return;
+    }
+    /**
+     * ПЕРЕТАСКИВАНИЕ ОБЛАСТИ ЗАПЛАТКОЙ. Превью строится КАЖДЫЙ КАДР заново из документа, а не
+     * копится: заплатка не мажет, она ПОДМЕНЯЕТ, и накопленный буфер показывал бы след руки там,
+     * где на самом деле встанет одно последнее положение.
+     */
+    const pd = patchDrag.current;
+    if (pd && event.pointerId === pd.id) {
+      const now = frameAt(event);
+      const off: [number, number] = [now[0] - pd.from[0], now[1] - pd.from[1]];
+      setPatchOffset(off);
+      const layer = rasterRef.current;
+      if (layer) {
+        // Смещение ОТРИЦАТЕЛЬНОЕ при отрисовке: в области обязано оказаться то, что лежит ТАМ,
+        // куда её тащат, — то есть `scratch(x) = doc(x + Δ)`.
+        const s = rasterCtx(layer.scratch);
+        s.clearRect(0, 0, layer.w, layer.h);
+        s.drawImage(layer.doc, -Math.round(off[0] * layer.w), -Math.round(off[1] * layer.h));
+        scheduleView();
+      }
       return;
     }
     const drag = panDrag.current;
@@ -2058,8 +2690,22 @@ export function VectorModal({
   };
 
   const onStagePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (bdDrag.current && event.pointerId === bdDrag.current.id) {
-      bdDrag.current = null;
+    if (frameDrag.current && event.pointerId === frameDrag.current.id) {
+      frameDrag.current = null;
+      /* ПОЛОЖЕНИЕ ШАБЛОНА ПИШЕТСЯ НА ОТПУСКАНИИ, А НЕ НА КАЖДОМ ДВИЖЕНИИ: `saveBackdropSoon`
+         отложена на 400 мс, но состояние подложки — нет, и запись из-под руки означала бы
+         перерисовку всего редактора на каждый кадр протяжки. */
+      const fr = frameRef.current;
+      const b = backdropRef.current;
+      if (fr?.owner === 'backdrop' && b) putBackdrop(setBackdropQuad(b, fr.quad));
+      return;
+    }
+    if (patchDrag.current && event.pointerId === patchDrag.current.id) {
+      const from = patchDrag.current.from;
+      patchDrag.current = null;
+      setPatchOffset(null);
+      liveRef.current = null;
+      void patchGesture(from, frameAt(event));
       return;
     }
     const drag = panDrag.current;
@@ -2080,7 +2726,10 @@ export function VectorModal({
     }
     const liveTrace = traceRef.current;
     if (!liveTrace) return;
-    if (tool === 'lasso') {
+    /* ЗАПЛАТКА ОБВОДИТ ТЕМ ЖЕ ЛАССО. Своего построителя области у неё нет нарочно: растушёвка,
+       прореживание обводки и резка линий по дорожке живут в одном месте, и второй набор тех же
+       правил разошёлся бы с первым на первой же правке. */
+    if (tool === 'lasso' || tool === 'patch') {
       putTrace(null);
       const poly = settleLasso(liveTrace);
       if (poly) {
@@ -2189,16 +2838,29 @@ export function VectorModal({
     // Пиксели берём, только если растр уже заведён: заводить его РАДИ КОПИИ значило бы molча
     // испачкать слой (копия подложки — это правка) ради жеста, который ничего не меняет.
     let cut: HTMLCanvasElement | null = null;
+    let cutFrac: { x0: number; y0: number; x1: number; y1: number } | null = null;
     const layer = rasterRef.current;
     if (layer) {
       const mask = selectionMask(layer, sel.pts, sel.feather);
-      if (mask) cut = cutoutInside(layer, mask)?.canvas ?? null;
+      const taken = mask ? cutoutInside(layer, mask) : null;
+      if (taken) {
+        cut = taken.canvas;
+        // Коробка приходит В ПИКСЕЛЯХ РАСТРА и переводится в доли ЗДЕСЬ, один раз: вставка живёт в
+        // юнитах платы, и второй перевод на её стороне разошёлся бы с этим на первой же плите
+        // непривычного размера.
+        cutFrac = {
+          x0: taken.box[0] / layer.w,
+          y0: taken.box[1] / layer.h,
+          x1: (taken.box[0] + taken.canvas.width) / layer.w,
+          y1: (taken.box[1] + taken.canvas.height) / layer.h,
+        };
+      }
     }
     if (!born.length && !cut) {
       showMessage('the selection holds nothing to copy', 'error');
       return;
     }
-    clip.current = { strokes: born, cut, at: [0, 0], pastes: 0 };
+    clip.current = { strokes: born, cut, cutFrac, pastes: 0 };
     const what = [
       born.length ? `${born.length} line${born.length === 1 ? '' : 's'}` : '',
       cut ? 'pixels' : '',
@@ -2209,9 +2871,22 @@ export function VectorModal({
   };
 
   /**
-   * ВСТАВИТЬ (Q-6). Один жест — ОДИН шаг ленты на оба материала, как у «удалить внутри»: записанные
-   * порознь, они требовали бы двух ⌘Z, и первое нажатие оставляло бы состояние, которого никто не
-   * создавал — линии вернулись, вставленные пиксели остались.
+   * ═══ ВСТАВИТЬ — И НЕ ПОЛОЖИТЬ (G-13) ═════════════════════════════════════════════════════
+   *
+   * Дословно от владельца: «когда с помощью выделения делаешь вставку вставленным объектом нужно
+   * что бы было можно управлять пока мы его не заплейсим ибо сейчас он просто в радомную точку
+   * приземляется и ничего с ним не сделать».
+   *
+   * ⚠ ⌘V БОЛЬШЕ НЕ КОММИТИТ. Он строит ПЛАВАЮЩИЙ объект в той же рамке, что у шаблона (§0), и
+   * документа не касается ни одним байтом до Enter или клика мимо. Прежняя мгновенная вставка была
+   * не «быстрее», а невыразима: положить кусок и потом двигать его было нечем — инструмента
+   * переноса пикселей в редакторе нет вовсе.
+   *
+   * НАЧАЛЬНОЕ СМЕЩЕНИЕ ОСТАЁТСЯ НАРАСТАЮЩИМ (`COPY_NUDGE·n`): две вставки подряд по-прежнему не
+   * лягут одна в одну и не прочтутся как «вставилось один раз».
+   *
+   * ВТОРАЯ ВСТАВКА СПЕРВА СТАВИТ ПЕРВУЮ — слот рамки один. Иначе на экране жили бы два плавающих
+   * куска и один Enter, и человек не знал бы, какой из них он сейчас кладёт.
    */
   const pasteClip = async () => {
     const c = clip.current;
@@ -2219,71 +2894,95 @@ export function VectorModal({
       if (!c) showMessage('nothing in the clipboard — copy an area first', 'error');
       return;
     }
-    // Каждая следующая вставка отступает дальше: две подряд не лягут одна в одну и не будут
-    // выглядеть как «вставилось один раз».
+    await settleFloatFirst();
     const step = c.pastes + 1;
     const off: [number, number] = [COPY_NUDGE[0] * step, COPY_NUDGE[1] * step];
 
-    const layer = c.cut ? await ensureRaster() : rasterRef.current;
-    if (frozenRef.current) return;
-
-    // Список штрихов читается ПОСЛЕ ожидания: `ensureRaster` может ждать загрузку сотни
-    // миллисекунд, и снятый до неё список затёр бы всё, что человек успел нарисовать.
-    const linesBase = strokesRef.current;
-    const born = c.strokes.map((st) => ({
-      ...st,
-      pts: st.pts.map(([x, y]) => [x + off[0], y + off[1]] as [number, number]),
-      ...(st.segs
-        ? {
-            segs: st.segs.map((seg) =>
-              seg
-                ? ([seg[0] + off[0], seg[1] + off[1], seg[2] + off[0], seg[3] + off[1]] as [
-                    number,
-                    number,
-                    number,
-                    number,
-                  ])
-                : null,
-            ),
-          }
-        : {}),
-    }));
-    const next = born.length ? [...linesBase, ...born] : linesBase;
-
-    let put: (() => void) | null = null;
-    if (layer && c.cut) {
-      const cut = c.cut;
-      const dx = off[0] * layer.w;
-      const dy = off[1] * layer.h;
-      // Коробка размечается ДО записи: `recordCombined` читает её, чтобы понять, какой кусок
-      // холста запомнить, и пустая коробка означала бы шаг, ничего не восстанавливающий.
-      clearGesture(layer);
-      const box = cutoutRect(layer, cut, dx, dy);
-      if (box) {
-        markRect(layer, box);
-        put = () => drawCutout(layer, cut, dx, dy);
+    /* ИСХОДНАЯ КОРОБКА — ОДНА НА ОБА МАТЕРИАЛА. Линии и пиксели буфера обязаны ехать в ОДНОЙ
+       рамке: две коробки означали бы, что перспектива гнёт их по-разному, и вставленный кусок
+       расползался бы на глазах. */
+    let x0 = Number.POSITIVE_INFINITY;
+    let y0 = Number.POSITIVE_INFINITY;
+    let x1 = Number.NEGATIVE_INFINITY;
+    let y1 = Number.NEGATIVE_INFINITY;
+    for (const st of c.strokes) {
+      for (const [x, y] of st.pts) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
       }
     }
-    const done = timeline.current.recordCombined(layer, linesBase, next, born.length > 0, put);
-    if (layer) {
-      clearGesture(layer);
-      paintView();
+    if (c.cutFrac) {
+      x0 = Math.min(x0, c.cutFrac.x0);
+      y0 = Math.min(y0, c.cutFrac.y0);
+      x1 = Math.max(x1, c.cutFrac.x1);
+      y1 = Math.max(y1, c.cutFrac.y1);
     }
-    if (done.pixels) {
-      rasterDirtyRef.current = true;
-      setRasterDirty(true);
-    }
-    if (done.lines) {
-      strokesRef.current = next;
-      setStrokes(next);
-    }
-    if (done.lines || done.pixels) {
-      bumpTl();
-      clip.current = { ...c, pastes: step };
-      showMessage('pasted', 'success');
+    if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
+      showMessage('the clipboard held nothing that could be put down here', 'error');
       return;
     }
-    showMessage('the clipboard held nothing that could be put down here', 'error');
+    /* ⚠ ВЫРОЖДЕННАЯ КОРОБКА РАЗДАЁТСЯ СИММЕТРИЧНО. Копия ОДНОЙ ГОРИЗОНТАЛЬНОЙ линии имеет нулевую
+       высоту, и нормировать по ней значило бы делить на ноль: вставка приезжала бы с NaN в каждой
+       координате и не рисовалась вовсе. Раздача симметрична, поэтому вставка без единого жеста
+       ложится ровно туда же, куда клала прежняя мгновенная. */
+    if (x1 - x0 < MIN_FLOAT_SPAN) {
+      const c0 = (x0 + x1) / 2;
+      x0 = c0 - MIN_FLOAT_SPAN / 2;
+      x1 = c0 + MIN_FLOAT_SPAN / 2;
+    }
+    if (y1 - y0 < MIN_FLOAT_SPAN) {
+      const c0 = (y0 + y1) / 2;
+      y0 = c0 - MIN_FLOAT_SPAN / 2;
+      y1 = c0 + MIN_FLOAT_SPAN / 2;
+    }
+    const sw = x1 - x0;
+    const sh = y1 - y0;
+    const norm = (p: readonly [number, number]): [number, number] => [(p[0] - x0) / sw, (p[1] - y0) / sh];
+
+    const strokes = c.strokes.map((st) => {
+      const out: VectorStroke = { ...st, pts: st.pts.map(norm) };
+      if (st.segs) {
+        out.segs = st.segs.map((seg) =>
+          seg
+            ? ((): [number, number, number, number] => {
+                const a = norm([seg[0], seg[1]]);
+                const b = norm([seg[2], seg[3]]);
+                return [a[0], a[1], b[0], b[1]];
+              })()
+            : null,
+        );
+      }
+      return out;
+    });
+    const cutRegion: WarpRegion = c.cutFrac
+      ? {
+          u0: (c.cutFrac.x0 - x0) / sw,
+          v0: (c.cutFrac.y0 - y0) / sh,
+          u1: (c.cutFrac.x1 - x0) / sw,
+          v1: (c.cutFrac.y1 - y0) / sh,
+        }
+      : FULL_REGION;
+
+    const quad = quadFromRect(
+      (x0 + off[0]) * PLATE_W,
+      (y0 + off[1]) * plateH,
+      sw * PLATE_W,
+      sh * plateH,
+    );
+    putFrame({
+      owner: 'paste',
+      quad,
+      axis: false,
+      snapshot: quad,
+      float: { strokes, cut: c.cut, cutRegion, srcW: sw, srcH: sh },
+    });
+    clip.current = { ...c, pastes: step };
+    showMessage(
+      'pasted — drag it, pull a handle to size it, ⌘-drag a corner for perspective; enter puts it down',
+      'success',
+    );
   };
 
   const reselect = () => {
@@ -2318,6 +3017,10 @@ export function VectorModal({
   const deleteSel = async (i: number) => {
     const sel = sels[i];
     if (!sel || frozen) return;
+    /* ЖИВАЯ ВСТАВКА СТАВИТСЯ ПЕРВОЙ. Иначе «удалить внутри» вычистило бы область, а плавающий
+       кусок над ней остался бы висеть и лёг бы поверх очищенного следующим Enter — то есть
+       глагол, обещающий «внутри не остаётся ничего», оставлял бы там что-то. */
+    await settleFloatFirst();
 
     /**
      * ХРАНИМЫЕ ПИКСЕЛИ ЕСТЬ, НО НЕ ПРИШЛИ — ОТКАЗ ЦЕЛИКОМ, А НЕ ПОЛОВИНА РАБОТЫ.
@@ -2618,6 +3321,79 @@ export function VectorModal({
     }
   };
 
+  /**
+   * ═══ ЗАПЛАТКА — КОНЕЦ ПЕРЕТАСКИВАНИЯ ОБЛАСТИ (G-12) ══════════════════════════════════════
+   *
+   * Владелец: «нам нужен Patch Tool … что бы работал 1 в 1 как в фотошопе». Что здесь есть и чего
+   * нет — перечислено в шапке `vector-patch.ts` и сказано человеку подсказкой инструмента.
+   *
+   * ПОРЯДОК ЛЕНТЫ — ДОСЛОВНО ТОТ ЖЕ, ЧТО У ЗАЛИВКИ И ЛЕЧИЛКИ: стереть буфер жеста, разметить
+   * коробку, записать шаг, стереть снова. Лента снимает «как было» ПО РАЗМЕЧЕННОЙ КОРОБКЕ и делает
+   * это ДО применения, поэтому буфер обязан уйти раньше разметки — иначе в снимок «как было» попал
+   * бы живой предпросмотр, и ⌘Z вернул бы его на картинку.
+   *
+   * ШТРИХИ НЕ ТРОГАЮТСЯ ВОВСЕ: это пиксельный глагол, и линия поперёк области переживает его
+   * нетронутой — как переживает кисть или лечилку.
+   */
+  const patchGesture = async (from: [number, number], to: [number, number]) => {
+    const layer = rasterRef.current;
+    if (!layer || frozenRef.current) {
+      if (layer) {
+        clearGesture(layer);
+        paintView();
+      }
+      return;
+    }
+    const sel = activeSel !== null ? sels[activeSel] : null;
+    if (!sel) {
+      clearGesture(layer);
+      paintView();
+      return;
+    }
+    const mask = selectionMask(layer, sel.pts, sel.feather);
+    if (!mask) {
+      clearGesture(layer);
+      paintView();
+      return;
+    }
+    // Буфер предпросмотра уходит ДО всего: он не документ, и попасть в снимок ленты не имеет права.
+    clearGesture(layer);
+    paintView();
+
+    const ctx = rasterCtx(layer.doc);
+    const src = ctx.getImageData(0, 0, layer.w, layer.h);
+    const alpha = selectionAlpha(rasterCtx(mask).getImageData(0, 0, layer.w, layer.h));
+    const dx = Math.round((to[0] - from[0]) * layer.w);
+    const dy = Math.round((to[1] - from[1]) * layer.h);
+
+    setBusy('rebuilding the area…');
+    let res;
+    try {
+      res = patchRegion(src, alpha, dx, dy, { strength: opacity / 100 });
+    } finally {
+      setBusy(null);
+    }
+    if (!res.rect) {
+      if (res.refusal) showMessage(res.refusal, 'error');
+      return;
+    }
+    const r = res.rect;
+    markRect(layer, [r.x, r.y, r.x + r.w - 1, r.y + r.h - 1]);
+    const changed = timeline.current.recordGesture(layer, () =>
+      ctx.putImageData(res.image, 0, 0, r.x, r.y, r.w, r.h),
+    );
+    clearGesture(layer);
+    paintView();
+    if (!changed) return;
+    rasterDirtyRef.current = true;
+    setRasterDirty(true);
+    bumpTl();
+    showMessage(
+      `area ${activeSel! + 1} rebuilt from where you dropped it, seam blended — the lines are untouched`,
+      'success',
+    );
+  };
+
   const fillAt = async (at: [number, number]) => {
     if (frozenRef.current) return;
     const layer = await ensureRaster();
@@ -2828,6 +3604,18 @@ export function VectorModal({
    * исключает «вот новые пиксели» ветвлением, а не порядком присваивания.
    */
   const persist = useCallback(async (): Promise<number> => {
+    /**
+     * ⚠ ДОКУМЕНТ БЕРЁТСЯ ИЗ РЕФА, А НЕ ИЗ ЗАПОМНЕННОГО `payload`.
+     *
+     * `payload` — это `useMemo` над СОСТОЯНИЕМ, то есть снимок ПРОШЛОГО рендера. Пока штрихи
+     * менялись только жестами, разницы не было: жест кончался, React перерисовывал, кнопку жали
+     * потом. Плавающая вставка (G-13) сломала это молча — она ставится ТУТ ЖЕ, в том же обработчике
+     * нажатия на «сохранить», и запомненное значение о ней ещё не знает: на сервер уехал бы
+     * документ БЕЗ вставки, которую человек только что видел на экране.
+     *
+     * Реф — единственный писатель, знающий про СЕЙЧАС (тот же довод, что у `strokesRef` вообще).
+     */
+    const doc = writeLayer(strokesRef.current, ratio);
     const layer = rasterRef.current;
     let rasterMediaId: number | undefined;
     let clearRaster: boolean | undefined;
@@ -2849,7 +3637,7 @@ export function VectorModal({
       layerId: layerRef.current.id,
       baseMediaId,
       expectedRev: layerRef.current.rev,
-      strokes: payload,
+      strokes: doc,
       rasterMediaId,
       clearRaster,
     });
@@ -2862,7 +3650,7 @@ export function VectorModal({
     setLayer(next);
     // Сохранённое перестаёт быть «несохранённым» у стража выхода — по ОБОИМ каналам: ревизия одна
     // на них двоих, и «пиксели ещё не сохранены» после успешной записи было бы ложью.
-    seededJson.current = strokesJson;
+    seededJson.current = JSON.stringify(strokesRef.current);
     setStoredRasterId(stored?.rasterMediaId ?? (clearRaster ? 0 : rasterMediaId ?? storedRasterId));
     // Адрес идёт ЗА идентификатором, иначе пара разошлась бы: снятие обнуляет оба, загрузка
     // переставляет оба, а сохранение одних штрихов не трогает ни один.
@@ -2876,7 +3664,7 @@ export function VectorModal({
     setRasterDirty(false);
     dropRasterRef.current = false;
     return next.id;
-  }, [saveLayer, baseMediaId, payload, strokesJson, storedRasterId]);
+  }, [saveLayer, baseMediaId, ratio, storedRasterId]);
 
   /**
    * ПРИЁМКА МАШИННОГО ВЕКТОРА. Слой уже подшит сервером (`ImportDesignVector`, rev = 1) — редактор
@@ -2905,6 +3693,27 @@ export function VectorModal({
 
   const saveDrawingOnly = async () => {
     if (frozen || tooLarge || !anyContent || busy) return;
+    /**
+     * ⚠ ЭТОТ ОТКАЗ БЫЛ ОБЕЩАН КОММЕНТАРИЕМ И НЕ СУЩЕСТВОВАЛ В КОДЕ. Шапка `expanded` с круга Q-3
+     * дословно утверждает: «пока `expanded` взведён, „save the drawing only“ отказывается словами»
+     * — но ни одной ветки, которая бы отказывала, в файле не было, и ни одна проба этого не
+     * спрашивала. Нашлось при постановке кропа (G-4), потому что кроп сделал цену выше: расширение
+     * возвращалось растянутым, а обрезка вернётся РАСТЯНУТОЙ СИЛЬНЕЕ и с потерянными краями.
+     *
+     * Механизм отказа: форма платы, сохранённая без картинки, при следующем открытии ПРОИГРЫВАЕТ
+     * натуральным пропорциям неизменившейся подложки (см. `if (!expandedRef.current) setRatio(...)`
+     * в сиде) — и рисунок приезжает сплющенным МОЛЧА. Единственный способ сделать новую форму
+     * правдой — новая картинка, чьи натуральные пропорции ею и станут.
+     */
+    if (expandedRef.current) {
+      setRefusal(
+        'the sheet was cropped or grown, and a drawing saved on its own cannot carry that: on the next visit the picture underneath wins its shape back and the strokes come back squashed. Use «save as a new picture» — the new sheet’s own proportions become the truth.',
+      );
+      return;
+    }
+    /* СОХРАНЕНИЕ С ПЛАВАЮЩИМ КУСКОМ НЕ МОЛЧИТ: он либо поставлен, либо его нет. Молчаливое
+       сохранение мимо него дало бы файл, на котором человек своими глазами видел вставку. */
+    await settleFloatFirst();
     setBusy('saving the drawing…');
     setRefusal(null);
     try {
@@ -2943,6 +3752,7 @@ export function VectorModal({
 
   const saveAsPicture = async () => {
     if (frozen || tooLarge || !anyContent || busy) return;
+    await settleFloatFirst();
     setRefusal(null);
     try {
       setBusy('saving the drawing…');
@@ -3189,6 +3999,9 @@ export function VectorModal({
       return;
     }
     if (isTyping(e.target)) return;
+    /* Enter НАД ЖИВОЙ РАМКОЙ ловится НА ОКНЕ, а не здесь — см. эффект `frameLive` ниже: сюда он
+       не доходит вовсе, если фокус стоит на чипе рейки (а после любого нажатия он стоит именно
+       там). Замерено пробой: рамка не ставилась ни разу. */
     if (e.key === 'Enter' && tool === 'curve' && penRef.current) {
       e.preventDefault();
       commitPen();
@@ -3311,15 +4124,87 @@ export function VectorModal({
       }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`
     : 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.';
 
+  /**
+   * ГДЕ СТОИТ ШАБЛОН — ОДИН ОТВЕТ НА ДВА ЭЛЕМЕНТА (над растром и под ним).
+   *
+   * Пока рамка живая, ИСТИНА — ЕЁ КВАД, а не запись: запись обновляется на отпускании кнопки, и
+   * читать её во время протяжки значило бы показывать шаблон на кадр позади руки. Записанный квад
+   * (`backdropCss`) остаётся правдой во всё остальное время, включая восстановление из хранилища.
+   */
+  const backdropStyle = useMemo(() => {
+    if (!backdrop) return undefined;
+    const live = frame?.owner === 'backdrop' ? frame.quad : null;
+    const base = backdropCss(backdrop);
+    return live ? { ...base, transform: quadCss(live, backdrop.natW, backdrop.natH) } : base;
+  }, [backdrop, frame]);
+
+  /**
+   * ШТРИХИ ПЛАВАЮЩЕЙ ВСТАВКИ, ПРОГНАННЫЕ ЧЕРЕЗ РАМКУ. Считаются ОДНОЙ функцией с коммитом
+   * (`warpMapper`), поэтому «что видно» и «что ляжет» не могут разойтись: разошлись бы они молча,
+   * и первым узнал бы об этом человек, у которого вставка прыгнула на Enter.
+   */
+  const floatPreview = useMemo(() => {
+    const f = frame?.owner === 'paste' ? frame.float : null;
+    if (!f || !f.strokes.length) return [];
+    const map = warpMapper({ quad: frame!.quad });
+    const toFrac = (p: readonly [number, number]): [number, number] => [p[0] / PLATE_W, p[1] / plateH];
+    return f.strokes.map((st) => {
+      const out: VectorStroke = { ...st, pts: st.pts.map(([u, v]) => toFrac(map(u, v))) };
+      if (st.segs) {
+        out.segs = st.segs.map((seg) =>
+          seg
+            ? ((): [number, number, number, number] => {
+                const a = toFrac(map(seg[0], seg[1]));
+                const b = toFrac(map(seg[2], seg[3]));
+                return [a[0], a[1], b[0], b[1]];
+              })()
+            : null,
+        );
+      }
+      return out;
+    });
+  }, [frame, plateH]);
+
+  /**
+   * КУРСОР НАД РАМКОЙ ГОВОРИТ, ЧТО СЛУЧИТСЯ. Восемь ручек — четыре направления изменения размера
+   * (стандартный словарь браузера, а не выдуманный); тело — «двигать»; зона поворота курсора не
+   * имеет вовсе, потому что его нет в CSS: там вместо курсора рисуется ДУГА СО СТРЕЛКОЙ, прямо у
+   * руки, — см. оверлей. Выдумывать битмап под стандартную работу этому админу запрещено.
+   */
+  /* Классы ПОЛНЫМИ ЛИТЕРАЛАМИ: Tailwind ищет их в исходнике текстом, и `cursor-${x}-resize` не
+     попал бы в сборку вовсе — курсор молча остался бы стрелкой на всех восьми ручках. */
+  const FRAME_CURSOR = [
+    'cursor-nwse-resize',
+    'cursor-ns-resize',
+    'cursor-nesw-resize',
+    'cursor-ew-resize',
+    'cursor-ew-resize',
+    'cursor-nesw-resize',
+    'cursor-ns-resize',
+    'cursor-nwse-resize',
+  ];
+  const frameCursor =
+    frameHover?.kind === 'handle'
+      ? FRAME_CURSOR[frameHover.handle]
+      : frameHover?.kind === 'body'
+        ? 'cursor-move'
+        : frameHover?.kind === 'rotate'
+          ? 'cursor-crosshair'
+          : '';
+
   const stageCursor = panning
     ? 'cursor-grabbing'
     : spaceHeld || tool === 'pan'
       ? 'cursor-grab'
       : frozen
         ? 'cursor-default'
-        : tool === 'select'
-          ? 'cursor-pointer'
-          : 'cursor-crosshair';
+        : frame && frameCursor
+          ? frameCursor
+          : frame
+            ? 'cursor-default'
+            : tool === 'select'
+              ? 'cursor-pointer'
+              : 'cursor-crosshair';
 
   if (!open) return null;
 
@@ -3337,9 +4222,18 @@ export function VectorModal({
           {...{ [SCREEN_MARK]: '' }}
           className='fixed inset-0 z-[var(--z-modal)] bg-pageBg p-4 focus:outline-none'
           onEscapeKeyDown={(e) => {
-            // Esc-ЛЕСТНИЦА: взведённая пипетка → живое перо → выбранный штрих → области лассо →
-            // выход (через одну дверь со стражем). Без `preventDefault` Radix закрывает экран
-            // раньше любой ступени.
+            // Esc-ЛЕСТНИЦА: ЖИВАЯ РАМКА → взведённая пипетка → живое перо → выбранный штрих →
+            // области лассо → выход (через одну дверь со стражем). Без `preventDefault` Radix
+            // закрывает экран раньше любой ступени.
+            //
+            // РАМКА — ВЕРХНЯЯ СТУПЕНЬ, потому что она единственная держит НЕСОХРАНЁННЫЙ жест,
+            // видимый на экране: Esc над ней возвращает то, с чего человек начал, а над вставкой
+            // выбрасывает кусок, документа не тронув.
+            if (frameRef.current) {
+              e.preventDefault();
+              cancelFrame();
+              return;
+            }
             if (picking) {
               e.preventDefault();
               setPicking(false);
@@ -3670,7 +4564,12 @@ export function VectorModal({
                   backdrop={backdrop}
                   backdropKey={bdKey}
                   expanded={expanded}
-                  onExpand={(f, a, fill) => void applyExpand(f, a, fill)}
+                  cropTool={tool === 'crop'}
+                  cropFill={cropFill}
+                  onCropFill={setCropFill}
+                  penTool={tool === 'curve'}
+                  penCanClose={!!pen && pen.anchors.length >= 3}
+                  onPathToSelection={makeSelectionFromPen}
                   nodeCount={nodeEdit?.path.nodes.length ?? 0}
                   nodeSelected={nodeEdit?.sel ?? -1}
                   nodeSmooth={
@@ -3693,15 +4592,29 @@ export function VectorModal({
                       showMessage(r.reason, 'error');
                       return;
                     }
+                    /* ВЫБРАЛ КАРТИНКУ — СРАЗУ СТАВИШЬ ЕЁ. Прежде шаблон приезжал вписанным и
+                       незапертым, то есть уже «в режиме постановки», просто без органа, которым
+                       это видно. Рамка и есть тот орган. */
                     putBackdrop(r.backdrop);
+                    openBackdropFrame(r.backdrop);
                   }}
                   onBackdropOp={(next) => putBackdrop(next)}
-                  onBackdropFit={(mode) => {
+                  backdropPlacing={frame?.owner === 'backdrop'}
+                  onBackdropPlace={() => {
                     const b = backdropRef.current;
                     if (!b) return;
-                    putBackdrop(fitBackdrop(b, plateRect, mode));
+                    if (frameRef.current?.owner === 'backdrop') commitFrame();
+                    else openBackdropFrame(b);
                   }}
-                  onBackdropRemove={() => putBackdrop(null)}
+                  onBackdropDepth={() => {
+                    const b = backdropRef.current;
+                    if (!b) return;
+                    putBackdrop(setBackdropDepth(b, b.depth === 'over' ? 'under' : 'over'));
+                  }}
+                  onBackdropRemove={() => {
+                    if (frameRef.current?.owner === 'backdrop') closeFrame();
+                    putBackdrop(null);
+                  }}
                   traceStage={traceStage}
                   traceSelectionNo={activeSel}
                   traceSuggest={traceSuggest}
@@ -3760,35 +4673,38 @@ export function VectorModal({
                         </ChipRow>
                       </span>
                     ))}
-                    {/* Дверь Make Selection. ПРИСУТСТВИЕ — по инструменту, ДОСТУПНОСТЬ — по пути:
-                        чип, всплывающий на третьем якоре, переносил тулбар на новую строку и
-                        СДВИГАЛ холст на ~25px ПОСРЕДИ жеста — даблклик клал второй якорь в другую
-                        точку мира, а клик по первому якорю промахивался мимо зоны замыкания
-                        (замерено пробой 43). Всё, что стоит над холстом, обязано быть стабильным,
-                        пока идёт путь. */}
-                    {tool === 'curve' && (
-                      <Chip
-                        dashed
-                        disabled={frozen || !pen || pen.anchors.length < 3}
-                        onClick={makeSelectionFromPen}
-                        title='close this path into a lasso selection instead of a stroke (needs 3+ anchors)'
-                      >
-                        path → selection
-                      </Chip>
-                    )}
+                    {/* ⚠ ДВЕРЬ MAKE SELECTION ПЕРЕЕХАЛА В РЕЙКУ, И ЭТО НЕ ПЕРЕСТАНОВКА МЕБЕЛИ.
+                        Она стояла здесь по правилу «присутствие — по инструменту, доступность — по
+                        пути», и правило работало, пока ряд чипов помещался в одну строку С НЕЙ. С
+                        приходом `patch` и `crop` (круг 13) запас кончился: проба 83 померила
+                        144/740 у пера против 117/767 у всех прочих — ряд переносился на вторую
+                        строку и СДВИГАЛ ХОЛСТ ровно тогда, когда по нему ведут путь.
+                        Правило этого файла старше и сильнее: НАД ХОЛСТОМ НЕТ МЕСТА НИЧЕМУ
+                        УСЛОВНОМУ. Рейка — колонка со своей прокруткой, её рост не стоит холсту ни
+                        пикселя, и дверь живёт теперь там, рядом с областями, которые она рождает. */}
                     </div>
                     <Text
                       size='nano'
                       variant='label'
                       component='p'
                       className='h-4 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'
-                      data-tool-hint={tool}
+                      data-tool-hint={frame ? `frame-${frame.owner}` : tool}
                     >
-                      {tool === 'curve'
+                      {/* ЖИВАЯ РАМКА ГОВОРИТ ЗА ИНСТРУМЕНТ: пока она на экране, работа — это она.
+                          Строка стоит В ТОЙ ЖЕ коробке фиксированной высоты (`h-4`, без переноса,
+                          с многоточием) — холст от смены текста не двигается ни на пиксель, и
+                          сторожем этому стоит проба 83. */}
+                      {frame
+                        ? frame.owner === 'crop'
+                          ? 'drag the frame — outward grows the sheet, inward crops it · enter or double-click applies, esc cancels · cannot be undone'
+                          : `drag to move · handles scale (shift keeps the proportion) · drag outside a corner to rotate (shift snaps 15°) · ⌘-drag a corner for perspective · enter ${frame.owner === 'paste' ? 'puts it down' : 'places the template'}`
+                        : tool === 'curve'
                         ? // ОДНА строка на весь путь: смена текста посреди жеста — тот же сдвиг холста.
                           'click = corner · drag = curve · grab a handle to bend, alt splits the pair · click the first anchor closes · enter/esc finish'
                         : tool === 'lasso'
                           ? 'draw around an area · it holds the pixel tools in and cuts the lines at its edge · feather is each area’s own'
+                          : tool === 'patch'
+                          ? 'lasso a region, then drag it onto a clean place — the region is rebuilt from there and the seam blended. No texture is invented; the lines are not touched'
                           : tool === 'select'
                             ? 'click a stroke — the rail edits its stitch'
                             : tool === 'clone'
@@ -3818,6 +4734,12 @@ export function VectorModal({
                     // краю платы и читался бы как след, которого нет.
                     onPointerLeave={() => setNibHover(null)}
                     onDoubleClick={() => {
+                      // Двойной клик применяет КАДР — второй фотошопный способ сказать «да» там,
+                      // где клика мимо нет нарочно (применение необратимо).
+                      if (frameRef.current?.owner === 'crop') {
+                        commitFrame();
+                        return;
+                      }
                       if (tool === 'curve' && penRef.current) commitPen();
                     }}
                     className={cn(
@@ -3838,18 +4760,15 @@ export function VectorModal({
                       {backdrop && backdrop.depth === 'under' && (
                         /* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
                            сама сцена, и `pointer-events` на картинке только отняли бы у неё
-                           события. Отпертый обведён рамкой: это единственный признак, по которому
-                           видно, что экран сейчас двигает шаблон, а не рисует. */
+                           события. Когда его ставят, поверх стоит трансформ-рамка — она и есть
+                           признак того, что экран сейчас двигает шаблон, а не рисует. */
                         <img
                           src={backdrop.src}
                           alt=''
                           draggable={false}
                           data-backdrop='under'
-                          className={cn(
-                            'pointer-events-none absolute left-0 top-0 block max-w-none',
-                            !backdrop.locked && 'outline-dashed outline-2 outline-textColor/60',
-                          )}
-                          style={backdropCss(backdrop)}
+                          className='pointer-events-none absolute left-0 top-0 block max-w-none'
+                          style={backdropStyle}
                         />
                       )}
                       {/* ПОДЛОЖКА ЖИВЁТ ДО ПЕРВОГО ПИКСЕЛЬНОГО ИНСТРУМЕНТА, а потом ГАСНЕТ, но
@@ -3928,26 +4847,46 @@ export function VectorModal({
                           }}
                         />
                       )}
+                      {/* ═══ ПЛАВАЮЩАЯ ВСТАВКА — ПИКСЕЛЬНАЯ ПОЛОВИНА (G-13) ══════════════════
+                          Стоит НАД пиксельным каналом и ПОД линиями: вставленный кусок ложится
+                          поверх краски, как ложится и при постановке (`source-over` у выреза), —
+                          иначе превью обещало бы одно, а Enter давал другое.
+                          Холст, а не картинка: вырезка живёт в памяти как canvas, и перегонять её
+                          в data-URL ради показа значило бы кодировать PNG на каждую вставку. */}
+                      {frame?.owner === 'paste' && frame.float?.cut && (
+                        <canvas
+                          ref={floatCanvasRef}
+                          width={frame.float.cut.width}
+                          height={frame.float.cut.height}
+                          data-paste-float=''
+                          aria-hidden
+                          className='pointer-events-none absolute left-0 top-0 block max-w-none'
+                          style={{
+                            width: `${frame.float.cut.width}px`,
+                            height: `${frame.float.cut.height}px`,
+                            transformOrigin: '0 0',
+                            transform: quadCss(
+                              cutQuadOf(frame.quad, frame.float.cutRegion),
+                              frame.float.cut.width,
+                              frame.float.cut.height,
+                            ),
+                          }}
+                        />
+                      )}
                       {/* ⚠ ЖИВОЙ БИНАРИЗАЦИИ ЗДЕСЬ БОЛЬШЕ НЕТ (G-7). Синяя заливка показывала,
                           что движок СЧИТАЕТ КРАСКОЙ при выбранной человеком полярности, — то есть
                           существовала ради проверки ответа, которого человек больше не даёт.
                           Оставить её значило бы держать холст в стопке платы ради утверждения,
                           которое некому опровергнуть. */}
                       {backdrop && backdrop.depth === 'over' && (
-                        /* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
-                           сама сцена, и `pointer-events` на картинке только отняли бы у неё
-                           события. Отпертый обведён рамкой: это единственный признак, по которому
-                           видно, что экран сейчас двигает шаблон, а не рисует. */
+                        /* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ — см. близнеца выше: он же под растром. */
                         <img
                           src={backdrop.src}
                           alt=''
                           draggable={false}
                           data-backdrop='over'
-                          className={cn(
-                            'pointer-events-none absolute left-0 top-0 block max-w-none',
-                            !backdrop.locked && 'outline-dashed outline-2 outline-textColor/60',
-                          )}
-                          style={backdropCss(backdrop)}
+                          className='pointer-events-none absolute left-0 top-0 block max-w-none'
+                          style={backdropStyle}
                         />
                       )}
                       {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый
@@ -4398,6 +5337,93 @@ export function VectorModal({
                             </g>
                           )}
                         </svg>
+                      )}
+                      {/* ═══ ПЛАВАЮЩАЯ ВСТАВКА — ЛИНЕЙНАЯ ПОЛОВИНА (G-13) ════════════════════
+                          Своим слоем, а не внутри общего SVG штрихов: тот гаснет вместе с
+                          галочкой «lines», а вставка обязана быть видна, пока её ставят — иначе
+                          Enter клал бы то, чего человек не видит. Геометрия — ОДНА функция с
+                          зафиксированными штрихами (`strokeGeometry`), поэтому превью не может
+                          соврать про шов или толщину. */}
+                      {floatPreview.length > 0 && (
+                        <svg
+                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                          preserveAspectRatio='none'
+                          className='pointer-events-none absolute inset-0 h-full w-full'
+                          data-paste-strokes={floatPreview.length}
+                        >
+                          {floatPreview.map((stroke, i) => {
+                            const g = strokeGeometry(stroke, PLATE_W, plateH);
+                            if (!g.d) return null;
+                            const strokeInk = readInk(stroke.ink) ?? 'currentColor';
+                            return (
+                              <g key={i}>
+                                {g.offsets.map((dy, k) => (
+                                  <path
+                                    key={k}
+                                    d={g.d}
+                                    transform={`translate(0 ${dy})`}
+                                    fill='none'
+                                    stroke={strokeInk}
+                                    strokeWidth={g.strokeWidth}
+                                    strokeDasharray={g.dash || undefined}
+                                    strokeLinecap='round'
+                                    strokeLinejoin='round'
+                                  />
+                                ))}
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      )}
+                      {/* ═══ ЗАПЛАТКА: ОТКУДА БЕРУТСЯ ПИКСЕЛИ (G-12) ═════════════════════════
+                          Дорожка области стоит на месте — она и есть то, что перестраивается, — а
+                          призрак показывает МЕСТО-ДОНОР под рукой. Без него человек видел бы, как
+                          содержимое области меняется, и не понимал бы, чем он управляет. */}
+                      {patchOffset && activeSel !== null && sels[activeSel] && (
+                        <svg
+                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                          preserveAspectRatio='none'
+                          className='pointer-events-none absolute inset-0 h-full w-full'
+                          data-patch-ghost=''
+                        >
+                          <path
+                            d={selectionPathD(
+                              sels[activeSel].pts.map(
+                                ([x, y]) => [x + patchOffset[0], y + patchOffset[1]] as [number, number],
+                              ),
+                              PLATE_W,
+                              plateH,
+                            )}
+                            fill='none'
+                            stroke='#fff'
+                            strokeWidth={2.5 / zoomK}
+                          />
+                          <path
+                            d={selectionPathD(
+                              sels[activeSel].pts.map(
+                                ([x, y]) => [x + patchOffset[0], y + patchOffset[1]] as [number, number],
+                              ),
+                              PLATE_W,
+                              plateH,
+                            )}
+                            fill='none'
+                            stroke='currentColor'
+                            strokeWidth={1.25 / zoomK}
+                            strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
+                          />
+                        </svg>
+                      )}
+                      {/* ТРАНСФОРМ-РАМКА — ПОВЕРХ ВСЕГО И ВСЕГДА ОДНА (G-3, G-13, G-4). */}
+                      {frame && (
+                        <TransformFrameOverlay
+                          quad={frame.quad}
+                          owner={frame.owner}
+                          axis={frame.axis}
+                          zoom={zoomK}
+                          hover={frameHover}
+                          plateW={PLATE_W}
+                          plateH={plateH}
+                        />
                       )}
                     </div>
                   </div>

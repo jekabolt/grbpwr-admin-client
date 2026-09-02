@@ -13,25 +13,12 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 
 import { TraceRasterGroup } from './trace-raster-panel';
 import type { OnePressStage } from './trace-onepress';
+import { DEFAULT_EXPAND_FILL, type ExpandFill } from './vector-expand';
 import {
-  DEFAULT_EXPAND_FILL,
-  EXPAND_ANCHORS,
-  type ExpandAnchor,
-  type ExpandFill,
-} from './vector-expand';
-import {
-  BACKDROP_ROT_SNAP,
   MAX_BACKDROP_OPACITY,
   MIN_BACKDROP_OPACITY,
-  containScale,
-  flipBackdrop,
-  rotateBackdrop,
-  scaleBackdrop,
-  setBackdropDepth,
-  setBackdropLocked,
   setBackdropOpacity,
   type Backdrop,
-  type BackdropFit,
 } from './vector-backdrop';
 import type { SelectionArea } from './vector-lasso';
 import { MAX_NIB, MIN_NIB } from './vector-nib';
@@ -337,6 +324,28 @@ export const TOOL_ICONS: Record<string, React.ReactNode> = {
       <path d='M5.4 8.1 7.9 10.6' />
       <circle cx='7.1' cy='7.1' r='.55' fill='currentColor' stroke='none' />
       <circle cx='8.9' cy='8.9' r='.55' fill='currentColor' stroke='none' />
+    </Glyph>
+  ),
+  /* ЗАПЛАТКА — ЛОСКУТ СО СТЕЖКАМИ ПО КРАЮ (G-12). Пластырь уже занят лечилкой, и второй пластырь
+     рядом читался бы как та же кнопка; лоскут говорит ровно то, что инструмент делает, — кладёт
+     кусок на место и пришивает его по контуру. Пунктирная строчка идёт ВНУТРИ контура, а не по
+     нему: обводка пунктиром означала бы выделение (так нарисовано лассо), а здесь пунктир — это
+     шов, и он обязан читаться как деталь заплаты, а не как её граница. */
+  patch: (
+    <Glyph>
+      <path d='M2.6 4.4 4.4 2.6l9 9-1.8 1.8-9-9Z' />
+      <path d='M9.1 2.6h4.3v4.3' />
+      <path d='M6.9 13.4H2.6V9.1' />
+      <path d='M5.6 5.6 10.4 10.4' strokeDasharray='1.4 1.5' />
+    </Glyph>
+  ),
+  /* КРОП — ДВЕ СКОБЫ ВНАХЛЁСТ, значок из любого редактора: две буквы Г, повёрнутые друг к другу,
+     и линии, выходящие за них. Ровно так его узнают, и выдумывать свой рисунок под стандартную
+     работу этому админу запрещено. */
+  crop: (
+    <Glyph>
+      <path d='M4.4 1.4v10.2h10.2' />
+      <path d='M1.4 4.4h10.2v10.2' />
     </Glyph>
   ),
   // Панорама: лист двигают во все четыре стороны. Рука в боксе 16 юнитов сминается в кляксу,
@@ -1145,7 +1154,10 @@ export type RailProps = {
    * фактах человек обязан узнать до нажатия, а не после.
    */
   expanded: boolean;
-  onExpand: (factor: number, anchor: ExpandAnchor, fill: ExpandFill) => void;
+  /** Кроп в руке — только тогда у рейки есть его контекст (цвет нового поля). */
+  cropTool: boolean;
+  cropFill: ExpandFill;
+  onCropFill: (fill: ExpandFill) => void;
 
   nodeCount: number;
   nodeSelected: number;
@@ -1154,7 +1166,23 @@ export type RailProps = {
   onNodeDelete: () => void;
   onBackdropPick: (media: common_MediaFull[]) => void;
   onBackdropOp: (next: Backdrop) => void;
-  onBackdropFit: (mode: BackdropFit) => void;
+  /**
+   * ШАБЛОН СЕЙЧАС В РУКЕ — на плите стоит его трансформ-рамка. Одна строка на два состояния
+   * («взять» / «поставить»), а не две кнопки: взять и поставить — концы ОДНОГО жеста, и две
+   * кнопки рядом означали бы, что можно быть в обоих состояниях сразу.
+   */
+  backdropPlacing: boolean;
+  onBackdropPlace: () => void;
+  /**
+   * ДВЕРЬ MAKE SELECTION — контур пера становится областью. Стоит ЗДЕСЬ, а не над холстом: чип,
+   * всплывающий на третьем якоре, переносил ряд инструментов на вторую строку и сдвигал холст
+   * посреди жеста (замерено пробой 83 после того, как круг 13 добавил в ряд `crop` и `patch`).
+   * `penCanClose` — доступность: меньше трёх якорей замкнуть не во что.
+   */
+  penTool: boolean;
+  penCanClose: boolean;
+  onPathToSelection: () => void;
+  onBackdropDepth: () => void;
   onBackdropRemove: () => void;
   plate: { w: number; h: number };
 
@@ -1178,11 +1206,10 @@ export type RailProps = {
 };
 
 export function VectorBrushRail(p: RailProps) {
-  // Черновик обратного кропа живёт в рейке: он ничего не значит, пока не нажали, и модалке о нём
-  // знать незачем — она получает три готовых числа одним вызовом.
-  const [expandFactor, setExpandFactor] = useState(1.2);
-  const [expandAnchor, setExpandAnchor] = useState<ExpandAnchor>('center');
-  const [expandFill, setExpandFill] = useState<ExpandFill>(DEFAULT_EXPAND_FILL);
+  /* ⚠ ЧЕРНОВИК ОБРАТНОГО КРОПА ОТСЮДА СНЯТ (G-4). Множитель, якорь и цвет жили в рейке, потому
+     что «ничего не значат, пока не нажали»; теперь два из трёх показывает сама рамка на плите, а
+     цвет нового поля стал НАСТОЯЩИМ состоянием инструмента и живёт у того, кто им кроит, — в
+     модалке. Черновик, переживший свой орган, был бы третьим местом, где хранится размер листа. */
   const editing = p.selected !== null && p.selectedStroke !== null;
   // Контекст органов: свойства выбранного штриха либо кисти в руке. Одна пятёрка значений на оба
   // случая — потому и одна пятёрка органов.
@@ -1597,74 +1624,45 @@ export function VectorBrushRail(p: RailProps) {
             />
           ) : (
             <>
-              <ChipRow>
-                {(['contain', 'cover', 'actual'] as BackdropFit[]).map((m) => (
-                  <Chip key={m} onClick={() => p.onBackdropFit(m)} disabled={p.frozen}>
-                    {m === 'actual' ? '1:1' : m}
-                  </Chip>
-                ))}
-                <Chip
-                  onClick={() => p.onBackdropOp(flipBackdrop(p.backdrop!, p.plate))}
-                  disabled={p.frozen}
-                >
-                  flip
-                </Chip>
-                <Chip
-                  onClick={() =>
-                    p.onBackdropOp(rotateBackdrop(p.backdrop!, p.plate, BACKDROP_ROT_SNAP))
-                  }
-                  disabled={p.frozen}
-                >
-                  rotate 15°
-                </Chip>
-              </ChipRow>
-              {/* ЗАМОК ПЕРВЫЙ И САМЫЙ КРУПНЫЙ: он решает, рисует сейчас экран или двигает шаблон,
-                  и человек, который этого не понял, решит, что редактор перестал рисовать. */}
+              {/* ═══ РЯД КНОПОК ТРАНСФОРМА СНЕСЁН ЦЕЛИКОМ (G-3) ═══════════════════════════
+                  Дословно от владельца: «"CONTAIN COVER 1:1 FLIP ROTATE 15° UNLOCKED — YOU PLACE
+                  IT ON TOP" всех этих кнопок быть не должно». Ушли: вписать, заполнить, 1:1,
+                  отражение, поворот на 15°, замок и регулятор масштаба шаблона — ВСЁ ЭТО ДЕЛАЕТ
+                  РАМКА на самой плите, и делает жестом, а не семью кнопками, каждая из которых
+                  умеет ровно одно.
+                  Осталось три органа, и ни один из них рамкой не выражается: ВЗЯТЬ шаблон в руку
+                  («place it» — рамка невидима, пока её не позвали), сказать, ГДЕ он в стопке
+                  (над краской или под ней — это свойство слоя, а не его положения), и СНЯТЬ его.
+                  Плюс непрозрачность: она про то, сквозь что смотрят, а не про то, где стоит. */}
               <ChipRow>
                 <Chip
-                  selected={p.backdrop.locked}
-                  pressed={p.backdrop.locked}
-                  data-backdrop-lock=''
-                  onClick={() =>
-                    p.onBackdropOp(setBackdropLocked(p.backdrop!, !p.backdrop!.locked))
-                  }
+                  selected={p.backdropPlacing}
+                  pressed={p.backdropPlacing}
+                  data-backdrop-place=''
+                  onClick={p.onBackdropPlace}
                   disabled={p.frozen}
+                  title={
+                    p.backdropPlacing
+                      ? 'put the template down (enter) — after that you draw over it'
+                      : 'take the template in hand: a frame appears on the sheet — drag to move, handles scale, outside a corner rotates, ⌘-drag a corner for perspective'
+                  }
                 >
-                  {p.backdrop.locked ? 'locked — you draw' : 'unlocked — you place it'}
+                  {p.backdropPlacing ? 'place it' : 'move / scale it'}
                 </Chip>
+                {/* ГЛУБИНА — СВОЙСТВО СЛОЯ, И ЖИВЁТ В ПАНЕЛИ СЛОЁВ. В ряду трансформа она стояла
+                    рядом с поворотом и масштабом, то есть притворялась положением; здесь она
+                    рядом со строками «lines» и «pixels», между которыми шаблон и встаёт. */}
                 <Chip
                   selected={p.backdrop.depth === 'under'}
                   pressed={p.backdrop.depth === 'under'}
-                  onClick={() =>
-                    p.onBackdropOp(
-                      setBackdropDepth(p.backdrop!, p.backdrop!.depth === 'over' ? 'under' : 'over'),
-                    )
-                  }
+                  data-backdrop-depth={p.backdrop.depth}
+                  onClick={p.onBackdropDepth}
                   disabled={p.frozen}
+                  title='where the template sits in the stack'
                 >
-                  {p.backdrop.depth === 'over' ? 'on top' : 'underneath'}
+                  {p.backdrop.depth === 'over' ? 'over the pixels' : 'under the pixels'}
                 </Chip>
               </ChipRow>
-              {/* ЗУМ ШАБЛОНА В ДОЛЯХ ОТ ВПИСАННОГО. Абсолютные юниты здесь ничего не сказали бы:
-                  «масштаб 0.37» — это число про файл, а человек думает «крупнее, чем помещается».
-                  Сто процентов и есть «вписан целиком», и от него считается всё остальное. */}
-              <Regulator
-                name='zoom'
-                value={Math.round((p.backdrop.scale / containScale(p.backdrop, p.plate)) * 100)}
-                min={10}
-                max={800}
-                curve='log'
-                unit='%'
-                disabled={p.frozen}
-                onChange={(v) => {
-                  const b = p.backdrop!;
-                  const want = (v / 100) * containScale(b, p.plate);
-                  p.onBackdropOp(scaleBackdrop(b, p.plate, want / b.scale));
-                }}
-                hint='how big the template sits on the sheet; 100% is fitted whole'
-                sample={null}
-                probe='backdrop-zoom'
-              />
               <Regulator
                 name='template'
                 value={Math.round(p.backdrop.opacity * 100)}
@@ -1723,71 +1721,60 @@ export function VectorBrushRail(p: RailProps) {
           `undoDepth/undoBytes/undoEvicted/undoCeiling/undoByteCeiling` РЕЙКА ПО-ПРЕЖНЕМУ
           ПРИНИМАЕТ (см. `RailProps`), так что вернуть сигнал одной строкой — или поднять его в
           шапку над холстом — можно, не трогая вызывающую сторону. */}
-      {/* ОБРАТНЫЙ КРОП. Множитель, а не четыре числа: «раздвинь на 20 % от центра» — то, чем
-          человек думает, а четыре прибавки он бы считал в уме. Якорь — как Canvas Size. */}
-      <div className='flex flex-col gap-1' data-expand-rail=''>
-        <GroupLabel flush>sheet</GroupLabel>
-        <div className='flex flex-wrap items-center gap-1.5'>
-          <Input
-            type='number'
-            min={1.05}
-            max={4}
-            step={0.05}
-            value={String(expandFactor)}
-            disabled={p.frozen}
-            data-expand-factor=''
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setExpandFactor(Number(e.currentTarget.value) || 1.2)
-            }
-            className='w-16'
-          />
-          <input
-            type='color'
-            value={expandFill ?? '#ffffff'}
-            disabled={p.frozen || expandFill === null}
-            data-expand-fill=''
-            onChange={(e) => setExpandFill(e.currentTarget.value)}
-            className='h-6 w-8 border border-borderColor bg-transparent p-0'
-            aria-label='colour of the new margin'
-          />
-          <Chip
-            selected={expandFill === null}
-            pressed={expandFill === null}
-            disabled={p.frozen}
-            onClick={() => setExpandFill((v) => (v === null ? DEFAULT_EXPAND_FILL : null))}
-          >
-            transparent
-          </Chip>
-        </div>
-        <ChipRow>
-          {EXPAND_ANCHORS.map((a) => (
+      {/* ═══ КОНТЕКСТ КРОП-ИНСТРУМЕНТА (G-4) ══════════════════════════════════════════════
+          Дословно от владельца: «EXPAND THE SHEET в эдиторе должно работать как кроп тул в
+          фотошопе добавь его просто в набор тулов в верхнем баре и у этого кропа сделай
+          функционал как в фотошопе через кроп делается экспанд».
+
+          ЧТО СНЕСЕНО: множитель, девять якорей Canvas Size и кнопка «expand the sheet». Все
+          четыре числа теперь показывает САМА РАМКА на плите, и якорь ей не нужен — рамка и есть
+          ответ на вопрос «куда расти».
+
+          ЧТО ОСТАЛОСЬ И ПОЧЕМУ ИМЕННО ЗДЕСЬ: цвет нового поля. Рамкой его не выразить, а над
+          холстом ему места нет — блок над холстом обязан быть неизменной высоты, иначе холст
+          уезжает под рукой (сторожем этому стоит проба 83, и она поймала ровно этот дефект
+          дважды). Группа появляется только вместе с инструментом: пустой пульт — шум. */}
+      {p.cropTool && (
+        <div className='flex flex-col gap-1' data-crop-rail=''>
+          <GroupLabel flush>crop</GroupLabel>
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
+              margin
+            </Text>
+            <input
+              type='color'
+              value={p.cropFill ?? '#ffffff'}
+              disabled={p.frozen || p.cropFill === null}
+              data-crop-fill=''
+              onChange={(e) => p.onCropFill(e.currentTarget.value)}
+              className='h-6 w-8 border border-borderColor bg-transparent p-0'
+              aria-label='colour of the new margin'
+            />
             <Chip
-              key={a}
-              selected={expandAnchor === a}
-              pressed={expandAnchor === a}
+              selected={p.cropFill === null}
+              pressed={p.cropFill === null}
               disabled={p.frozen}
-              onClick={() => setExpandAnchor(a)}
+              data-crop-transparent=''
+              onClick={() => p.onCropFill(p.cropFill === null ? DEFAULT_EXPAND_FILL : null)}
             >
-              {a.replace('_', ' ')}
+              transparent
             </Chip>
-          ))}
-        </ChipRow>
-        <ChipRow>
-          <Chip
-            disabled={p.frozen}
-            data-expand-apply=''
-            onClick={() => p.onExpand(expandFactor, expandAnchor, expandFill)}
-            title='grow the sheet and fill the new margin — this cannot be undone'
-          >
-            expand the sheet
-          </Chip>
-        </ChipRow>
-        <Text size='nano' variant='label' component='p'>
-          {p.expanded
-            ? 'the sheet was expanded — it only survives as a NEW picture; “save the drawing only” will refuse'
-            : 'grows the sheet around what is drawn; cannot be undone'}
-        </Text>
-      </div>
+          </div>
+          <Text size='nano' variant='label' component='p'>
+            outward grows the sheet, inward crops it · applying resets undo and only survives as a
+            NEW picture
+          </Text>
+        </div>
+      )}
+      {p.expanded && !p.cropTool && (
+        <div className='flex flex-col gap-1' data-crop-done=''>
+          <GroupLabel flush>sheet</GroupLabel>
+          <Text size='nano' variant='label' component='p'>
+            the sheet was changed — it only survives as a NEW picture; “save the drawing only” will
+            refuse
+          </Text>
+        </div>
+      )}
 
       {p.nodeCount > 0 && (
         /* УЗЛЫ ВЫБРАННОЙ КРИВОЙ. Группа живёт только когда линия взята: пустой пульт — шум.
@@ -1811,6 +1798,23 @@ export function VectorBrushRail(p: RailProps) {
               </Chip>
             </ChipRow>
           )}
+        </div>
+      )}
+      {/* КОНТУР ПЕРА → ОБЛАСТЬ. Группа живёт вместе с пером в руке и стоит НАД списком областей —
+          она их и рождает. Пустой пульт при другом инструменте был бы шумом. */}
+      {p.penTool && (
+        <div className='flex flex-col gap-1' data-path-rail=''>
+          <GroupLabel flush>path</GroupLabel>
+          <ChipRow>
+            <Chip
+              dashed
+              disabled={p.frozen || !p.penCanClose}
+              onClick={p.onPathToSelection}
+              title='close this path into a lasso selection instead of a stroke (needs 3+ anchors)'
+            >
+              path → selection
+            </Chip>
+          </ChipRow>
         </div>
       )}
       {/* ОБЛАСТИ ЛАССО. Группа существует только вместе с областями: пустой пульт — шум.
