@@ -18,6 +18,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
+import { assetById, assetThumb } from '../assets/model';
 import { openDoor, openDoorAcrossKind } from '../doors';
 import { viewLabel } from '../views';
 import type { ThreedDraft } from './drafts';
@@ -180,7 +181,7 @@ export function WhatModelGetsRenderModal({
     kind === 'render' ? (
       <RenderBody band={band} recipe={recipe} garment={garment} resolved={resolved} />
     ) : kind === 'recolor' ? (
-      <RecolorBody sources={sources} recipe={recipe} garment={garment} resolved={resolved} />
+      <RecolorBody band={band} sources={sources} recipe={recipe} garment={garment} resolved={resolved} />
     ) : (
       <ThreedBody
         band={band}
@@ -467,7 +468,12 @@ function RenderBody({
               {cloths
                 .map(
                   (f) =>
-                    `${(f.name ?? '').trim() || 'cloth'} → ${(f.parts ?? '').trim() || 'the whole garment'}`,
+                    /* ⚠ «→ the whole garment» БОЛЬШЕ НЕ УТВЕРЖДАЕТСЯ. Части выводились из
+                       меток на флэтах; экрана меток нет с J-21, `fabricUses` шлёт `parts`
+                       пустым ВСЕГДА, и левая ветка мертва. Печатать «каждая ткань кроет всё
+                       изделие» там, где провод говорит «разделение за вами», — это панель,
+                       противоречащая телу запроса, на котором стоит цена. */
+                    `${(f.name ?? '').trim() || 'cloth'}${(f.parts ?? '').trim() ? ` → ${(f.parts ?? '').trim()}` : ''}`,
                 )
                 .join(' · ')}
               {cloths.length > 1 ? (
@@ -554,11 +560,13 @@ function RenderBody({
  * exists; the card's drawings would be a second, contradictory description of the same garment.
  */
 function RecolorBody({
+  band,
   sources,
   recipe,
   garment,
   resolved,
 }: {
+  band: GetDesignBandResponse;
   sources?: readonly common_MediaFull[];
   recipe?: common_DesignColourRecipe;
   garment: string;
@@ -567,6 +575,25 @@ function RecolorBody({
   const { showMessage } = useSnackBarStore();
   const shots = sources ?? [];
   const stated = fabricStatement(recipe);
+
+  /**
+   * ⚠ ЧИТАЕТСЯ ИЗ `params.colour.fabrics`, А НЕ ИЗ ЧЕРНОВИКА ЭКРАНА, И ЭТО ВЕСЬ СМЫСЛ ЭТОЙ
+   * ПАНЕЛИ. Она называется «what the model gets» и обязана перечислять картинки ВЫЗОВА; рецепт,
+   * который ей передан, — тот самый объект, который уедет. Миниатюра берётся у ассета карточки по
+   * `asset_id` (сам рецепт — замороженная копия и адреса картинки не несёт); нет ассета — строка
+   * всё равно печатается, потому что ЕДЕТ она по `media_id`, а не по полке.
+   */
+  const cloth = useMemo(() => {
+    const use = (recipe?.fabrics ?? []).find((f) => (f.mediaId ?? 0) > 0);
+    if (!use) return null;
+    const asset = assetById(band).get(use.assetId ?? 0);
+    return {
+      name: (use.name ?? '').trim() || 'the cloth',
+      mediaId: use.mediaId ?? 0,
+      repeatMm: use.repeatMm ?? 0,
+      thumb: assetThumb(asset),
+    };
+  }, [band, recipe]);
 
   return (
     <>
@@ -604,7 +631,32 @@ function RecolorBody({
       </div>
 
       <div>
-        <GroupLabel>the target colour</GroupLabel>
+        {/* ⚠ ЗАГОЛОВОК НАЗЫВАЕТ ТО, ЧТО ПОД НИМ, И НЕ БОЛЬШЕ. Ткань добавилась В БЛОК ЦВЕТА, а не
+            вместо него: ниже по-прежнему живут образец, слова и изделие. Заголовок «the cloth»
+            над ними один означал бы, что панель, на которой стоит цена, называет свои строки
+            чужим именем — а когда ткань не названа, блок и вовсе был бы озаглавлен тканью,
+            которой нет. */}
+        <GroupLabel>{cloth ? 'the cloth and the target colour' : 'the target colour'}</GroupLabel>
+        {/* ═══ ПЛИТКА ТКАНИ — ВТОРАЯ КАРТИНКА КАЖДОГО ПЛАТНОГО ВЫЗОВА (J-31) ═══════════════════
+            Опись обязана называть ВСЕ картинки вызова, а не только фотографии: с плиткой вызов
+            несёт две, и промпт называет их номерами («image 1 … image 2»). Строки нет, когда
+            ткани нет, — тогда вызов действительно об одной картинке. */}
+        {cloth && (
+          <InventoryLine
+            name='the cloth'
+            thumb={cloth.thumb}
+            text={
+              <>
+                <b>{cloth.name}</b> — media {cloth.mediaId}, <b>image 2 of every call</b>: the
+                garment is re-made in this cloth
+                {cloth.repeatMm > 0 ? `, and its pattern repeats every ${cloth.repeatMm} mm` : ''}.
+                {stated.colour
+                  ? ' The picked colour re-tints it and keeps its motif, weave and scale.'
+                  : ''}
+              </>
+            }
+          />
+        )}
         <div className='flex flex-wrap items-start gap-3 border-b border-hairline py-1'>
           <Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={32} />
           <div className='min-w-0 flex-1'>

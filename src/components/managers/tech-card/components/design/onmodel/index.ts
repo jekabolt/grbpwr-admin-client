@@ -1,8 +1,8 @@
 /**
  * ON MODEL — ТРЕТИЙ ГЕНЕРАТИВНЫЙ ЭКРАН ПОЛОСЫ DESIGN (K-17).
  *
- * Отдай `OnModelStudio` полосу — он нарисует вход (фотографии), меню (целевой цвет с ценой,
- * названной ДО нажатия) и результаты. Органы под ним экспортируются потому, что композитор может
+ * Отдай `OnModelStudio` полосу — он нарисует вход (фотографии), меню (ткань: паттерн и/или цвет,
+ * с ценой, названной ДО нажатия) и результаты. Органы под ним экспортируются потому, что композитор может
  * захотеть их порознь, а не потому, что экран полагается пересобирать руками.
  *
  * ЧТО ОН ЧИТАЕТ И ПИШЕТ. Одно чтение — `GetDesignBand`, переданное пропом (никогда второй вызов), —
@@ -19,15 +19,19 @@ export { OnModelStudio } from './studio';
 export { OnModelInputStrip } from './input-strip';
 export { OnModelOutputs } from './outputs';
 export { PriceBeforeThePress } from './price';
-export { useRecolorSources, useTargetColourDraft } from './drafts';
-export type { RecolorSources } from './drafts';
+export { ClothRow } from './cloth-row';
+export { useClothChoice, useRecolorSources, useTargetColourDraft } from './drafts';
+export type { ClothChoiceDraft, RecolorSources } from './drafts';
 export {
   RECOLOR_SOURCES_MAX,
+  chosenCloth,
+  clothChoices,
   lastRecolorCharge,
   recolorGate,
   recolorOutputs,
   recolorRuns,
   recolorShape,
-  targetColourIsStated,
+  recolourWireColour,
+  targetIsStated,
 } from './model';
-export type { RecolorCharge } from './model';
+export type { ClothChoice, RecolorCharge } from './model';

@@ -195,6 +195,17 @@ export type ColourPickerProps = {
   children?: React.ReactNode;
   /** Подпись кнопки-квадрата для скринридера — на экране рядом с ней стоит поле HEX. */
   label?: string;
+  /**
+   * ЛИЦО КНОПКИ, ЕСЛИ ВЫЗЫВАЮЩЕМУ НУЖЕН НЕ КВАДРАТ 22px (J-20).
+   *
+   * На экране фабрик-рендера цвет стал ПЛЕЙСХОЛДЕРОМ размером с кадр — «в другой можно выбрать
+   * цвет пикером», — и делать его вторым пикером было бы ровно тем, против чего написан этот
+   * файл: два органа на один предмет расходятся первой же правкой. Поэтому меняется ЛИЦО, а
+   * выбор, приведение hex и плашки прошлых рецептов остаются одни на всю полосу.
+   *
+   * Не задан — поведение байт в байт прежнее (22px свотч), и ON MODEL его не замечает.
+   */
+  face?: React.ReactNode;
 };
 
 /**
@@ -210,6 +221,7 @@ export function ColourPicker({
   recent = [],
   children,
   label = 'pick a colour',
+  face,
 }: ColourPickerProps): JSX.Element {
   const paintable = hexIsPaintable(hex);
   const [open, setOpen] = useState(false);
@@ -287,8 +299,16 @@ export function ColourPicker({
       }}
       noTail
       className='w-[240px]'
-      triggerProps={{ disabled, 'aria-label': label, title: label }}
+      /* Своё лицо занимает ВСЮ ширину колонки: у Radix-триггера свой `flex items-center`, и
+         кадр 132px внутри него схлопнулся бы по контенту. */
+      triggerProps={{
+        disabled,
+        'aria-label': label,
+        title: label,
+        ...(face ? { className: 'block w-full' } : {}),
+      }}
       openElement={
+        face ?? (
         <span
           data-colour-swatch
           className={cn(
@@ -305,6 +325,7 @@ export function ColourPicker({
                 }
           }
         />
+        )
       }
     >
       <div className='space-y-2'>

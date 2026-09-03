@@ -341,6 +341,10 @@ export function MediaViewer({
         <Dialog.Content
           onKeyDown={handleKeyDown}
           aria-label='Media viewer'
+          /* ЯКОРЬ ПРОБЫ. «Модель открылась в просмотрщике КАРТИНОК» — утверждение, которое надо
+             уметь опровергнуть, а роль `dialog` у этого окна та же, что у окна модели: по ней их
+             не различить. Класс для этого не годится — он переживает правку смысла. */
+          data-media-viewer=''
           className='media-viewer-content fixed inset-0 z-[var(--z-modal)] flex flex-col text-bgColor focus:outline-none'
         >
           <Dialog.Title className='sr-only'>Media viewer</Dialog.Title>

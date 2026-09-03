@@ -47,7 +47,7 @@ export function OnModelInputStrip({
   return (
     <Section
       title='input — photographs on a model'
-      question='— the shots this run recolours: one paid call each, from any side'
+      question='— the shots this run re-dresses: one paid call each, from any side'
       action={
         /* ДВЕРЬ, ДЕЙСТВУЮЩАЯ НА ВСЮ ПОЛОСУ, ЖИВЁТ В ЕЁ ШАПКЕ — та же грамматика, что у «use the N
            you chose» на входе 3D. Внизу блока, под объясняющим абзацем, она читалась как приписка
@@ -125,17 +125,21 @@ export function OnModelInputStrip({
       </Strip>
 
       {count === 0 && (
-        <Text size='micro' variant='inactive' component='p' className='normal-case'>
-          Nothing to recolour yet. Bring in the shots of this garment — front, back, a side, a
-          detail: whatever exists. Each one comes back recoloured on its own.
+        /* ⚠ `label` (#666), А НЕ `inactive` (#ccc). Пустое состояние — единственный текст, который
+           человек на этом экране читает целиком, и стоял он в 1.6:1 при пороге 4.5:1. DESIGN.md
+           называет `textInactiveColor` цветом ДЕКОРАЦИИ, а не читаемых слов. */
+        <Text size='micro' variant='label' component='p' className='normal-case'>
+          Nothing to work on yet. Bring in the shots of this garment — front, back, a side, a
+          detail: whatever exists. Each one comes back on its own, in the cloth you name below.
         </Text>
       )}
 
       <Text size='micro' variant='label' component='p' className='normal-case'>
         Each photograph is its own paid call, and the model is shown <b>one</b> photograph at a
-        time: it never sees the others and does not know they are the same garment. So the thing
-        that keeps four shots the same shade is the colour you name below, not the fact that they
-        were sent together.
+        time — plus the cloth you pick below, which rides with every one of them as the call&apos;s
+        second picture. It never sees the other shots and does not know they are the same garment.
+        So the thing that keeps four of them the same is the cloth and colour you name below, not
+        the fact that they were sent together.
         {count > 0 && (
           <>
             {' '}

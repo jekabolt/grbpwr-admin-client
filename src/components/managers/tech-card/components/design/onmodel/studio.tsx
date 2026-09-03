@@ -9,22 +9,16 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { ColourStatementRow } from '../render/colour-statement';
-import { FieldRow, Hint, Swatch } from '../render/field-row';
+import { FieldRow, Hint } from '../render/field-row';
 import { GenerateRow } from '../render/generate-row';
-import {
-  colourLabel,
-  colourSubtitle,
-  colourSwatchHex,
-  fabricStatement,
-  hexIsPaintable,
-  wireColourSource,
-  type Gate,
-} from '../render/model';
+import { ASSET_PATTERN, shelfAssets } from '../assets/model';
+import { fabricStatement, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
 import { WhatModelGetsRenderModal } from '../render/what-model-gets';
-import { useRecolorSources, useTargetColourDraft } from './drafts';
+import { ClothRow } from './cloth-row';
+import { useClothChoice, useRecolorSources, useTargetColourDraft } from './drafts';
 import { OnModelInputStrip } from './input-strip';
-import { recolorGate, recolorShape } from './model';
+import { chosenCloth, clothChoices, recolorGate, recolorShape, recolourWireColour } from './model';
 import { OnModelOutputs } from './outputs';
 import { PriceBeforeThePress } from './price';
 
@@ -83,6 +77,7 @@ export function OnModelStudio({
 }): JSX.Element {
   const sources = useRecolorSources();
   const colour = useTargetColourDraft(band);
+  const cloth = useClothChoice();
   const run = useStartDesignRun(techCardId);
   const { dictionary } = useDictionary();
   const colors = dictionary?.colors;
@@ -92,9 +87,29 @@ export function OnModelStudio({
   const count = sources.items.length;
   const stated = fabricStatement(colour.recipe);
 
+  const choices = useMemo(
+    () => clothChoices(band, sources.mediaIds),
+    [band, sources.mediaIds.join(',')], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const picked = chosenCloth(choices, cloth.assetId);
+
+  /**
+   * ═══ ОДИН ОБЪЕКТ НА СУД, НА ПОДПИСЬ И НА ПРОВОД (J-31) ════════════════════════════════════
+   *
+   * `wireColour` — РОВНО ТО, что уедет в `params.colour`. Его же судят ворота, его же печатает
+   * строка у кнопки, его же описывает заголовок ряда и опись перед деньгами. Три читателя,
+   * реконструирующие тело из черновика каждый по-своему, — это три утверждения об одном платном
+   * прогоне, и расходятся они молча: на соседнем экране подпись говорила «плиты не едут» ровно
+   * тогда, когда тело говорило «шли все».
+   */
+  const wireColour = useMemo(
+    () => recolourWireColour(band, colour.recipe, picked?.assetId ?? 0),
+    [band, colour.recipe, picked?.assetId],
+  );
+
   const gate: Gate = useMemo(
-    () => recolorGate(band, count, colour.recipe),
-    [band, count, colour.recipe],
+    () => recolorGate(sources.mediaIds, wireColour),
+    [sources.mediaIds.join(','), wireColour], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const generate = () => {
@@ -133,22 +148,14 @@ export function OnModelStudio({
          */
         colorwayId: 0,
         layout: '',
-        colour: {
-          ...colour.recipe,
-          /**
-           * ⚠ ТОТ ЖЕ ИНВАРИАНТ, ЧТО У ФАБРИК-РЕНДЕРА, И ПО ТОЙ ЖЕ ПРИЧИНЕ: орган выбора цвета у
-           * двух экранов ОДИН, значит и полунабранный hex сюда приходит тот же. Сервер считает
-           * цвет заявленным по ЛЮБОМУ непустому hex, а этот экран — по `hexIsPaintable`; без
-           * этой строки «#a41f2» уезжал бы целевым цветом перекраски, которого свотч над ним не
-           * признаёт. Предикат здесь ТОТ ЖЕ, которым экран признаёт, а не похожий: дверь
-           * ПРОПУСКАЕТ, а не достраивает — достраивание живёт на `blur` поля, где его видно.
-           */
-          hex: hexIsPaintable(colour.recipe.hex) ? (colour.recipe.hex ?? '').trim() : '',
-          // ВЫВЕДЕНО У ДВЕРИ, А НЕ ХРАНИТСЯ КОНТРОЛОМ. `source` старше комбинирования и не умеет
-          // выговорить «код и слова вместе»; пишется он только ради читаемости уже сохранённых
-          // рецептов и никогда не решает, что уедет, — решают заполненные поля.
-          source: wireColourSource(colour.recipe),
-        },
+        /**
+         * ЦВЕТ И ТКАНЬ — ОДИН ОБЪЕКТ, СОБРАННЫЙ ОДНОЙ ФУНКЦИЕЙ (`recolourWireColour`), и здесь
+         * он только называется. Все инварианты — «полунабранный hex не уезжает», «ткань без
+         * картинки не уезжает», «`fabric_media_id` обязан повторять `fabrics[0].media_id`, иначе
+         * воркер не приложит плитку, а промпт всё равно скажет image 2» — живут там, потому что
+         * там же их читают ворота.
+         */
+        colour: wireColour,
         threed: undefined,
         fixTarget: '',
         // ЗДЕСЬ ЭТО НЕ «ДОПОЛНИТЕЛЬНЫЕ» ВХОДЫ, А ПЕРВИЧНЫЕ, и имя поля это переживает: контракт
@@ -179,7 +186,7 @@ export function OnModelStudio({
 
       <Section
         title='generation — on model'
-        question='— the colour the garment in those photographs is repainted in'
+        question='— the cloth those photographs are re-dressed in: a pattern, a colour, or both'
       >
         <PriceBeforeThePress band={band} sources={count} />
 
@@ -200,42 +207,27 @@ export function OnModelStudio({
           <GroupLabel
             action={
               <Text size='micro' variant='label' component='span' className='normal-case'>
-                the colour is stated by a code, a hex, words, or any mix of them
+                a pattern, a colour, or both — one cloth per run
               </Text>
             }
           >
-            target colour
+            the cloth
           </GroupLabel>
 
-          {/* ЧТО СКАЗАНО — СКАЗАНО ДО ТОГО, КАК ЭТО ПРАВЯТ. Плашка, имя и полный список источников
-              стоят над контролами, чтобы ответ на «во что это перекрасится» не приходилось
-              собирать, пробегая глазами два ряда в поисках заполненного.
-
-              ⚠ НА ФАБРИК-РЕНДЕРЕ ЭТОТ ЖЕ ЗАГОЛОВОК СНЕСЁН (H-12), И ЗДЕСЬ ОН ОСТАЁТСЯ НАМЕРЕННО.
-              Там его работу взяли ряд FABRIC (факт колорвея, с которого черновик засеян) и строка
-              инвентаря у кнопки — то есть было ДВА ответа на один вопрос, и остался один. У
-              перекраса колорвейного ряда нет вовсе: заявление здесь — ЕДИНСТВЕННЫЙ ответ «во что
-              это перекрасится», и снести его значило бы оставить экран без него. */}
-          <div
-            data-colour-headline
-            className='flex flex-wrap items-start gap-3 border-b border-hairline pb-2'
-          >
-            <Swatch hex={colourSwatchHex(colour.recipe, colors)} size={44} />
-            <div className='min-w-0 flex-1'>
-              <Text
-                size='control'
-                variant='uppercase'
-                tracking='label'
-                component='p'
-                className='font-bold'
-              >
-                {colourLabel(colour.recipe, colors)}
-              </Text>
-              <Text size='micro' variant='label' component='p' className='normal-case'>
-                {colourSubtitle(colour.recipe, colors)}
-              </Text>
-            </div>
-          </div>
+          {/* ═══ ЗАГОЛОВОК-ЗАЯВЛЕНИЕ + РЯД ПЛИТОК (J-31) ═════════════════════════════════════
+              Довод формы и порядка старшинства целиком в `./cloth-row.tsx`. Здесь важно одно:
+              всё, что этот ряд показывает, читается из `wireColour` — тела запроса, — а не из
+              черновика рядом с ним. */}
+          <ClothRow
+            choices={choices}
+            chosen={picked}
+            colour={wireColour}
+            colors={colors}
+            disabled={disabled}
+            onPick={cloth.pick}
+            onClear={() => cloth.pick(0)}
+            hasAnyPattern={shelfAssets(band, ASSET_PATTERN).length > 0}
+          />
 
           {/* ТОТ ЖЕ ОРГАН, ЧТО В ФАБРИК-РЕНДЕРЕ, А НЕ ПОХОЖИЙ НА НЕГО: пикер, значение и имя — один
               компонент на два экрана. Цвет здесь тот же предмет, и второе написание разошлось бы с
@@ -251,15 +243,30 @@ export function OnModelStudio({
             draft={colour}
             disabled={disabled}
             hint={
-              <>
-                The colour goes to the model as a name and a hex together. It repaints the garment
-                only: the weave, the folds and the shadows of the photograph are kept, and nothing
-                else in the frame is touched. Picking one states nothing about the style — a
-                colourway is signed off by a lab dip, not by a picture.
-              </>
+              picked ? (
+                <>
+                  With a pattern picked, the colour <b>re-tints that pattern</b> and keeps its
+                  motif, weave and scale — the same order of authority a fabric render uses. On its
+                  own it repaints the cloth already in the photograph, keeping its weave, folds and
+                  shadows.
+                </>
+              ) : (
+                <>
+                  The colour goes to the model as a name and a hex together. It repaints the garment
+                  only: the weave, the folds and the shadows of the photograph are kept, and nothing
+                  else in the frame is touched. Picking one states nothing about the style — a
+                  colourway is signed off by a lab dip, not by a picture.
+                </>
+              )
             }
           />
 
+          {/* ⚠ РЯД `in words` ОСТАЁТСЯ, ХОТЯ ВЛАДЕЛЕЦ НАЗВАЛ ТОЛЬКО «паттерн/цвет».
+              Слова — ТРЕТЬЕ законное заявление цели у двери (`no_target_colour` довольствуется
+              `params.colour.words`), и оно работает СЕГОДНЯ. J-31 сформулирован как «должна быть
+              возможность», то есть прибавление; снять при этом уже работающий бесплатный способ
+              заказать «washed indigo» значило бы отнять у человека орган, о котором он не просил
+              и которого потом не хватится вслух. */}
           <FieldRow label='in words'>
             <div className='w-full max-w-[420px]'>
               <Input
@@ -279,14 +286,14 @@ export function OnModelStudio({
             )}
             <Hint>
               adds what a swatch cannot say — a finish, a wash, a fade. Enough on its own: the
-              server takes a colour named in words alone.
+              server takes a target named in words alone.
             </Hint>
           </FieldRow>
         </div>
 
         <GenerateRow
           gate={gate}
-          shape={recolorShape(count)}
+          shape={recolorShape(count, wireColour)}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
@@ -296,12 +303,15 @@ export function OnModelStudio({
 
       <OnModelOutputs band={band} techCardId={techCardId} disabled={disabled} />
 
+      {/* ОПИСЬ ЧИТАЕТ ТЕЛО ЗАПРОСА, А НЕ ЧЕРНОВИК. Панель называется «what the model gets»; она
+          обязана перечислять то, что действительно уедет, включая плитку ткани второй картинкой
+          каждого вызова. */}
       <WhatModelGetsRenderModal
         open={inspecting}
         onOpenChange={setInspecting}
         band={band}
         kind='recolor'
-        recipe={colour.recipe}
+        recipe={wireColour}
         sources={sources.items}
         cardFit=''
       />

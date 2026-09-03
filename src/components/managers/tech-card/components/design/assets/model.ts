@@ -2,7 +2,6 @@ import { colorwayOf } from '../bench-kinds';
 import type {
   GetDesignBandResponse,
   common_DesignAsset,
-  common_DesignAssetPlacement,
   common_DesignFabricUse,
   common_DesignPicture,
 } from 'api/proto-http/admin';
@@ -24,14 +23,13 @@ import type {
  * ушли `assets-section.tsx`, `asset-shelf.tsx`, `asset-marks.tsx` и `pattern-preview.tsx`. Модель
  * осталась, потому что её читают ДВА живых органа, и оба не про полки:
  *   • `render/palette.tsx` — ряд CLOTHS: берёт ткани и паттерны карточки и замораживает выбранные
- *     в `params.colour.fabrics` (`clothShelf`, `fabricUses`, `assetLabel`, `assetThumb`,
- *     `partsOfAsset`);
+ *     в `params.colour.fabrics` (`clothShelf`, `fabricUses`, `assetLabel`, `assetThumb`);
  *   • `render/render-input-strip.tsx` — ряд CLOTH: показывает и снимает те же ассеты и заводит
  *     новые ткани; читает полку ТЕМ ЖЕ `clothShelf`, что и палитра. Одно определение на обоих —
  *     единственное, что мешает читателю и писателю разойтись снова (см. `clothShelf`).
  *
  * ПОЭТОМУ ЗДЕСЬ ЕСТЬ ЭКСПОРТЫ, КОТОРЫХ СЕЙЧАС НИКТО НЕ ЗОВЁТ (`ASSET_SHELVES`, `kindTakesRepeat`,
- * `ASSET_NAME_MAX`/`NOTE`/`REPEAT`, `allAssets`, `placementsOnPicture`, `pictureThumbUrl`,
+ * `ASSET_NAME_MAX`/`NOTE`/`REPEAT`, `allAssets`, `pictureThumbUrl`,
  * `ASSET_HARDWARE`). Они не мусор, а СПЕЦИФИКАЦИЯ снятого экрана: владелец сказал «пока», сервер
  * все три полки и метки по-прежнему принимает, и переписывать эти правила заново по памяти при
  * возврате означало бы разойтись с сервером молча. Стоимость — ноль байт в бандле: они не
@@ -164,49 +162,28 @@ export function assetById(band: GetDesignBandResponse): Map<number, common_Desig
   return m;
 }
 
-/** Метки, стоящие НА ЭТОЙ картинке. Экран читает разметку по кадру, а не по ассету. */
-export function placementsOnPicture(
-  band: GetDesignBandResponse,
-  pictureId: number,
-): common_DesignAssetPlacement[] {
-  return (band.assetPlacements ?? []).filter((p) => p.pictureId === pictureId);
-}
-
-/** Метки ЭТОГО ассета, по всем кадрам — цена, которую называет вопрос перед удалением. */
-export function placementsOfAsset(
-  band: GetDesignBandResponse,
-  assetId: number,
-): common_DesignAssetPlacement[] {
-  return (band.assetPlacements ?? []).filter((p) => p.assetId === assetId);
-}
-
 /**
- * ЧАСТИ ИЗДЕЛИЯ, КОТОРЫЕ ЭТА ТКАНЬ ЗАКРЫВАЕТ, СЛОВАМИ (V-8).
+ * ═══ РАЗМЕТКА ТКАНЕЙ НА ФЛЭТАХ СНЕСЕНА ЦЕЛИКОМ (J-21) ═════════════════════════════════════════
  *
- * Составляется ИЗ МЕТОК, а не набирается отдельным полем, и это не экономия на органе: второе
- * место для тех же слов разошлось бы с разметкой в первый же день, а спорят они молча — человек
- * видит на флэте одно, модель читает другое.
+ * Владелец, дословно: «в FABRIC FITTING давай удалим полностью эту функцональность она слишком
+ * громоздкая и плохо работает». Здесь стояли три функции — `placementsOnPicture`,
+ * `placementsOfAsset` и `partsOfAsset`, — и все три читали `band.asset_placements`.
  *
- * Источник слов — записка метки. Метка без записки даёт номер («mark 2»): у неё есть геометрия и
- * нет имени, и промолчать про неё значило бы отправить модели ткань, у которой на флэте есть
- * место, а в промпте нет.
+ * ЧТО ИМЕННО УМЕРЛО ВМЕСТЕ С НИМИ, СКАЗАНО ВСЛУХ, ПОТОМУ ЧТО ЭТО ДЕНЬГИ. `partsOfAsset` собирал
+ * поле `DesignFabricUse.parts` — «на каких частях изделия лежит эта ткань», — и оно доезжало в
+ * ПЛАТНЫЙ промпт рендера: при двух и более тканях сервер печатал «It is used on: … — and on no
+ * other part of this garment» (`renderprompt.go`, `renderClothPartsRule`). Теперь `fabricUses`
+ * шлёт `parts: ''` (см. ниже), и прогон с двумя тканями получает правило «the division is yours to
+ * make» вместо сужения. Это ПРАВДА состояния: поставить новую метку было нечем и до J-21, а
+ * теперь и увидеть её негде — то есть промпт переставал бы сужаться по разметке, которой ни один
+ * экран не показывает и никто не может снять.
  *
- * ⚠ НОВЫХ МЕТОК ПОСТАВИТЬ БОЛЬШЕ НЕЧЕМ (Y-11): экран разметки снят вместе с секцией ASSETS. Читать
- * их эта функция обязана по-прежнему — на карточках, размеченных до снятия, метки лежат в базе и
- * по-прежнему решают, какая ткань какую часть покрывает. Молча начать считать их пустыми значило
- * бы тихо изменить промпт выпущенной карточки.
+ * ⚠ ЧТО ОСТАЛОСЬ ЖИВЫМ И НЕ ТРОНУТО: таблица `design_asset_placement` и её строки на бете, ручки
+ * `SetDesignAssetPlacement` / `DeleteDesignAssetPlacement`, тип `DesignAssetPlacement` и поле
+ * `GetDesignBandResponse.asset_placements`. Удаление данных — отдельное решение владельца, и
+ * миграции этот круг не пишет. Замороженные `parts` внутри параметров СТАРЫХ прогонов тоже живы:
+ * перезапуск замороженного прогона обязан повторить те же слова, а история — это улика.
  */
-export function partsOfAsset(band: GetDesignBandResponse, assetId: number): string {
-  const words: string[] = [];
-  const marks = placementsOfAsset(band, assetId);
-  marks.forEach((p, i) => {
-    const note = (p.note ?? '').trim();
-    words.push(note || `mark ${i + 1}`);
-  });
-  // Дедупликация по тексту: две метки «collar» на левом и правом флэте это ОДНО место изделия,
-  // и повторённое слово в промпте читается как два разных воротника.
-  return [...new Set(words)].join(', ');
-}
 
 /**
  * ТКАНИ ПРОГОНА — то, что уезжает в `params.colour.fabrics` (V-4, V-8).
@@ -217,6 +194,8 @@ export function partsOfAsset(band: GetDesignBandResponse, assetId: number): stri
  *
  * ПАТТЕРН — ЭТО ТОЖЕ ТКАНЬ ДЛЯ ПРОМПТА. Для модели «из чего сшито» и «чем это покрыто» один
  * вопрос; отдельного словаря у неё нет, а раппорт едет числом в `repeatMm`.
+ *
+ * ⚠ `parts` БОЛЬШЕ НЕ СОБИРАЕТСЯ (J-21) — довод у снесённого `partsOfAsset` выше.
  */
 export function fabricUses(
   band: GetDesignBandResponse,
@@ -234,7 +213,16 @@ export function fabricUses(
       colourCode: (a.colourCode ?? '').trim(),
       colourHex: (a.colourHex ?? '').trim(),
       words: (a.note ?? '').trim(),
-      parts: partsOfAsset(band, id),
+      // ⚠ ПУСТАЯ СТРОКА — УТВЕРЖДЕНИЕ, А НЕ ПРОПУСК (J-21). Части изделия выводились ИЗ МЕТОК на
+      // флэтах; экрана меток больше нет, поставить и снять их нечем, и поле обязано говорить то,
+      // что есть на самом деле: разделения не заявлено. Композировать его из строк, которых никто
+      // не видит и никто не может убрать, — это «орган молчит, владелец платит».
+      parts: '',
+      // ЧТО ЭТА ТКАНЬ ТАКОЕ — 'fabric' | 'pattern', род строки полки НА МОМЕНТ ЗАПУСКА.
+      // Промпт спрашивает «из чего сшито» и «чем покрыто» одним вопросом, но плитку от
+      // снимка материала отличает именно это слово. Пустое значит 'fabric', как и было до
+      // круга 15, поэтому старые замороженные прогоны читаются ровно как прежде.
+      kind: (a.kind ?? '').trim(),
       repeatMm: a.repeatMm ?? 0,
     });
   }

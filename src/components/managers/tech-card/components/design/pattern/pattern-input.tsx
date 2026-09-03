@@ -6,7 +6,19 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
 import { assetLabel, assetThumb, clothShelf } from '../assets/model';
-import { CELL_WIDTH } from '../render/strip-cell';
+
+/**
+ * ═══ КАДР ИСТОЧНИКА — 196 КВАДРАТНЫХ, А НЕ 132×148 ЛЕНТЫ (J-12) ═══════════════════════════════
+ *
+ * 132×148 — коробка ВХОДНОЙ ЛЕНТЫ: ею меряются ячейки верстака, флэты, ткани, — то есть вещи,
+ * которых на экране много и которые перечисляют. Здесь картинка ОДНА, она обязательна, и она —
+ * главный предмет экрана: в ленточной коробке она читалась как один из слотов какого-то ряда,
+ * которого на этой вкладке нет вовсе.
+ *
+ * КВАДРАТ, А НЕ 132/148: источник — лоскут ткани, снятый как попало, и портретная рамка обрезала
+ * бы его по вертикали ни за чем. Плитка, которая из него выйдет, тоже квадратная.
+ */
+const SOURCE_WIDTH = 'w-[196px]';
 
 /**
  * ═══ ВХОД ПЛИТКИ — РОВНО ОДНА КАРТИНКА, И ЭТО НЕ НАСТРОЙКА ════════════════════════════════════
@@ -49,13 +61,31 @@ export function PatternInput({
   onPick,
   onClear,
   disabled,
+  children,
 }: {
   band: GetDesignBandResponse;
   /** Что сейчас поедет в прогон. `null` — ничего, и ворота GENERATE это скажут. */
   source: common_MediaFull | null;
-  onPick: (media: common_MediaFull) => void;
+  /** Второй довод — РОДСТВО (`source_asset_id`): чип полки знает свою строку, и терять
+   *  её здесь значит потерять «этот паттерн сделан из той ткани» навсегда. Библиотека и
+   *  буфер родителя не имеют и не передают ничего. */
+  onPick: (media: common_MediaFull, sourceAssetId?: number) => void;
   onClear: () => void;
   disabled?: boolean;
+  /**
+   * ═══ ДВЕРЬ И ЕЁ ПОДПИСЬ — В ТОЙ ЖЕ СТРОКЕ, ЧТО КАРТИНКА (J-12) ══════════════════════════════
+   *
+   * Замер, а не вкус: слот стал квадратом 196 px, а справа от него стояли ряд чипов и одна строка
+   * подсказки — то есть колонка высотой в три строки рядом с колонкой высотой в 196. Дверь при
+   * этом висела ПОД обеими, и между ними оставался пустой белый прямоугольник примерно 250 px
+   * высотой во всю ширину блока. Пустое поле внутри блока читается как «здесь что-то не
+   * загрузилось», а не как воздух.
+   *
+   * Теперь правая колонка держит всё, что не картинка, и заканчивается дверью: блок ровно такой
+   * высоты, какой предмет, о котором он говорит, а строка «что уедет и почём» стоит НА УРОВНЕ
+   * ГЛАЗ рядом с тем, что уедет, — не под сгибом.
+   */
+  children?: React.ReactNode;
 }): JSX.Element {
   const shelf = useMemo(() => clothShelf(band).filter((a) => (a.mediaId ?? 0) > 0), [band]);
   const sourceUrl = source?.media?.fullSize?.mediaUrl || source?.media?.thumbnail?.mediaUrl || '';
@@ -64,29 +94,24 @@ export function PatternInput({
   return (
     <div
       data-pattern-act='make'
-      className='flex flex-wrap items-start gap-3 border-b border-hairline pb-2'
+      className='flex flex-wrap items-start gap-3'
     >
-      <div className={`flex flex-col gap-1 ${CELL_WIDTH}`}>
+      <div className={`flex flex-col gap-1 ${SOURCE_WIDTH}`}>
         {disabled && !sourceUrl ? (
           <span
             data-inert='this card is read-only for you — a run spends money, so attaching its input stops here too'
             title='this card is read-only for you — a run spends money, so attaching its input stops here too'
             className='block w-full'
           >
-            <Placeholder
-              label='+ picture'
-              dashed
-              style={{ aspectRatio: '132/148' }}
-              className='w-full'
-            />
+            <Placeholder label='+ picture' dashed aspect='square' className='w-full' />
           </span>
         ) : (
           <MediaSlot
             aspectRatio={['Custom']}
-            frameAspect='132/148'
+            frameAspect='1/1'
             label='+ picture'
             hint={null}
-            purpose='design · the picture a repeating tile is built from'
+            purpose='design · the picture a pattern is made from'
             showVideos={false}
             editMode={!disabled}
             mediaUrl={sourceUrl || undefined}
@@ -149,7 +174,7 @@ export function PatternInput({
                       /* АССЕТ ДЕРЖИТ РАЗРЕШЁННОЕ МЕДИА ЦЕЛИКОМ (`asset.media`), поэтому источник
                          ставится без второго чтения. Ассет без разрешённого медиа сюда не попадает
                          — ряд отфильтрован по `mediaId > 0` выше. */
-                      if (a.media) onPick(a.media);
+                      if (a.media) onPick(a.media, a.id ?? 0);
                     }}
                   >
                     <span className='flex items-center gap-1'>
@@ -171,13 +196,19 @@ export function PatternInput({
           </div>
         ) : null}
 
-        {/* ОДНА СТРОКА ВМЕСТО АБЗАЦА. Здесь стояли четыре предложения о том, почему картинка одна;
-            запрет и так невыразим — слот держит один кадр. Осталось то, чего из слота не видно:
-            что годится в источники. */}
+        {/* ⚠ СТРОКА ПЕРЕПИСАНА ПОД ТО, ЧТО ВЛАДЕЛЕЦ НА САМОМ ДЕЛЕ КЛАДЁТ СЮДА (J-12), дословно:
+            «я могу дать картинку на которой может быть какая-то ткань например помятая или что-то
+            еще с ней она не как прямо паттерн нам надо через аи ее превратить в реальный паттерн».
+            Прежняя редакция обещала «сделать эту картинку повторяющейся» — то есть замостить её
+            как есть, — и человек с фотографией мятого трикотажа читал это как «так нельзя». */}
         <Text size='nano' variant='label' component='p' className='normal-case'>
-          a photograph of real cloth works as well as a drawn motif — the model is asked to make
-          this picture repeat, not to invent one.
+          a photograph of real cloth — folded, crumpled, shot at an angle — works as well as a drawn
+          motif. The model flattens it, completes the motif and makes it repeat seamlessly.
         </Text>
+
+        {/* ХВОСТ КОЛОНКИ. Правило лестницы: 1px `hairline` — ВНУТРЕННЯЯ линия между рядами
+            (DESIGN.md, «две серых»), и здесь она отделяет «из чего делаем» от «делаем». */}
+        {children && <div className='mt-3 border-t border-hairline pt-2'>{children}</div>}
       </div>
     </div>
   );

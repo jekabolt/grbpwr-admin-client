@@ -21,7 +21,12 @@ import { useDesignWrites } from '../use-design-band';
 import { recolorOutputs, recolorRuns } from './model';
 
 /**
- * RECOLOURED PICTURES OF THIS CARD — то, что вернулось, и который из них выбран.
+ * ON-MODEL PICTURES OF THIS CARD — то, что вернулось, и который из них выбран.
+ *
+ * ⚠ ЗАГОЛОВОК СМЕНИЛСЯ ВМЕСТЕ С ТЕМ, ЧТО ЭКРАН ДЕЛАЕТ (J-31). «Recoloured» описывало ровно один
+ * из двух платных промптов маршрута; с тех пор как прогон умеет ПЕРЕОДЕВАТЬ вещь в названную
+ * ткань (`reclothCraft`), это слово стало неверным ровно для половины строк — и неверным молча,
+ * потому что по картинке одно от другого не отличить.
  *
  * ═══ ПОЧЕМУ ЭТО НЕ `render/outputs.tsx`, ХОТЯ ОРГАН ТОТ ЖЕ ══════════════════════════════════════
  *
@@ -75,7 +80,7 @@ export function OnModelOutputs({
 
   return (
     <Section
-      title='recoloured pictures of this card'
+      title='on-model pictures of this card'
       question='— what came back, one picture per photograph, and which of them are chosen'
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -131,7 +136,7 @@ export function OnModelOutputs({
                 key={picture.id}
                 emphasis={chosen}
                 src={pictureThumb(picture)}
-                alt={`recoloured picture ${picture.ordinal ?? ''}`}
+                alt={`on-model picture ${picture.ordinal ?? ''}`}
                 gallery={
                   picture.media && mediaFullViewerSrc(picture.media)
                     ? mediaFullToViewerItem(picture.media)
@@ -140,7 +145,7 @@ export function OnModelOutputs({
                 badge={chosen ? 'selected' : undefined}
                 /* ВИДА ЗДЕСЬ НЕТ, И ЭТО ЧЕСТНО: `ghost_view` перекраски пуст — сторона снимка не
                    объявлена ни файлом, ни сервером, и подставить её значило бы выдумать факт. */
-                lines={[`run ${run.id ?? '—'} · ${shape}`, 'recoloured · no view declared']}
+                lines={[`run ${run.id ?? '—'} · ${shape}`, 'on model · no view declared']}
                 action={
                   !carries ? (
                     <InertDoor label='select' reason={SELECT_MARK_NOT_STATED} />

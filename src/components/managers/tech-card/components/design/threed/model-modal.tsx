@@ -73,7 +73,9 @@ export function ThreedModelModal({
       width='lg'
       hideActions
     >
-      <div className='space-y-2'>
+      {/* ЯКОРЬ ПРОБЫ: «открылось окно МОДЕЛИ, а не общий просмотрщик картинок». Обе поверхности —
+          `role=dialog`, и различить их по роли нельзя. */}
+      <div className='space-y-2' data-threed-model=''>
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='micro' variant='label' component='span' className='min-w-0 flex-1 truncate'>
             {facts

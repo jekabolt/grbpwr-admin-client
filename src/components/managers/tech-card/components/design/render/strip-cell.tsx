@@ -1,3 +1,5 @@
+import type { common_MediaFull } from 'api/proto-http/admin';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
 import type { MediaViewerItem } from 'ui/components/media-viewer';
@@ -163,9 +165,23 @@ export function StripCell({
  * «пустые», а как «их нет», и следующий его вопрос — почему GENERATE мёртв. Пустая ячейка
  * отвечает на оба сразу: слот существует, он этого вида, и он пуст.
  *
- * ПИСАТЕЛЯ ЗДЕСЬ НЕТ НАМЕРЕННО. Пометка живёт на правой половине линии (`mark ▸`) и на верстаке;
- * плейсхолдер, принимающий бросок, был бы ВТОРЫМ написанием того же жеста, и два способа сделать
- * одно расходятся ровно там, где расходятся их проверки.
+ * ═══ ПУСТОЙ СЛОТ ПРИНИМАЕТ ФАЙЛ ПРЯМО ЗДЕСЬ (J-17) ═══════════════════════════════════════════
+ *
+ * Владелец, дословно: «во вкладке FABRIC RENDER если у нас эмпти слот его от сюда же можно
+ * добавить из медиа селектора».
+ *
+ * ⚠ ЗДЕСЬ СТОЯЛО «ПИСАТЕЛЯ НЕТ НАМЕРЕННО: плейсхолдер, принимающий бросок, был бы ВТОРЫМ
+ * написанием того же жеста». Довод записан целиком, чтобы его не восстановили как «было же
+ * сказано», — и он БЫЛ НЕВЕРЕН в своей посылке. Второго написания нет: `mark ▸` справа от линии
+ * берёт КАРТИНКУ, УЖЕ ЛЕЖАЩУЮ НА КАРТОЧКЕ (`SetDesignBenchSlot`), а эта дверь берёт ФАЙЛ ИЗ
+ * МЕДИАТЕКИ и в ОДНОЙ транзакции заводит его в полосу и кладёт в слот
+ * (`RegisterDesignUpload` + `target`). Два разных глагола на два разных предмета; до J-17 второй
+ * приходилось исполнять в два приёма — «+ flat» слева, потом `mark ▸` справа, — и человек,
+ * смотревший на пустой слот, не имел на нём ни одной двери вовсе.
+ *
+ * ДВЕРЬ — ТА ЖЕ, ЧТО НА ВЕРСТАКЕ (`bench-slot.tsx`), и это правило PRODUCT.md «one editor
+ * grammar»: `MediaSlot` с той же приёмной модалкой (библиотека / ⌘V / бросок). Без обработчика
+ * ячейка рисуется ровно как рисовалась — полоса входа 3D его не передаёт.
  *
  * СЛОВА — ТЕ ЖЕ, ЧТО У ВЕРСТАКА (`bench-slot.tsx`): жирное `empty`, красная приписка у
  * обязательной стороны и `*` у её имени. Один и тот же факт, сказанный на двух экранах двумя
@@ -174,6 +190,7 @@ export function StripCell({
 export function EmptyStripCell({
   view,
   required,
+  onPlaceMedia,
 }: {
   view: string;
   /**
@@ -181,32 +198,62 @@ export function EmptyStripCell({
    * внутри: обязательность — свойство ЭКРАНА, а не ячейки, и у полосы входа 3D она другая.
    */
   required?: boolean;
+  /**
+   * J-17: положить файл ИЗ МЕДИАТЕКИ прямо в этот слот. Не задан — ячейка мертва, как была
+   * (полоса входа 3D и режим read-only).
+   */
+  onPlaceMedia?: (media: common_MediaFull) => void;
 }): JSX.Element {
   const label = viewLabel(view) || view;
   return (
-    <div data-slot-empty={view} className={cn('flex flex-col gap-1', CELL_WIDTH)}>
-      <div
-        className={cn(
-          placeholderClass({ dashed: true }),
-          FRAME_HEIGHT,
-          'w-full flex-col gap-0.5 px-1 text-center',
-        )}
-        style={PLACEHOLDER_SURFACE}
-        title={`no drawing is marked for ${label}. Mark one from the right of the line, or generate one on FLAT.`}
-      >
-        {/* Имя вида — В ЦЕНТРЕ, а не угловым ярлыком, как на занятой плите: угловой ярлык на
-            пустой полосатой коробке читается как забытая подпись, центр говорит «эта коробка
-            целиком и есть слот такой-то». Цвет — `labelColor`: `textInactiveColor` (#ccc) в этой
-            системе для рамок и заглушек, а не для текста, который читают. */}
-        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-          {label}
-          {required && (
-            <span className='text-error' title='the render needs it'>
-              {' *'}
-            </span>
+    <div
+      data-slot-empty={view}
+      data-slot-door={onPlaceMedia ? 'media' : undefined}
+      className={cn('flex flex-col gap-1', CELL_WIDTH)}
+    >
+      {onPlaceMedia ? (
+        /* Кадр СТАЛ дверью, а не получил дверь рядом с собой. Кнопка под полосатой коробкой
+           означала бы два органа на один слот; коробка, которая и есть слот, принимает файл сама —
+           ровно как пустая плита верстака. Имя вида при этом остаётся В ПОДПИСИ снизу, потому что
+           лицо `MediaSlot` рисует своё («+ add front») и второе имя внутри кадра читалось бы как
+           заголовок чужого органа. */
+        <MediaSlot
+          aspectRatio={['Custom']}
+          frameAspect={FRAME_ASPECT}
+          label={`+ add ${label}`}
+          hint={null}
+          purpose={`design · flat for the ${label} slot`}
+          showVideos={false}
+          editMode
+          onSelect={(media) => {
+            const first = media[0];
+            if (first?.id) onPlaceMedia(first);
+          }}
+        />
+      ) : (
+        <div
+          className={cn(
+            placeholderClass({ dashed: true }),
+            FRAME_HEIGHT,
+            'w-full flex-col gap-0.5 px-1 text-center',
           )}
-        </Text>
-      </div>
+          style={PLACEHOLDER_SURFACE}
+          title={`no drawing is marked for ${label}. Mark one from the right of the line, or generate one on FLAT.`}
+        >
+          {/* Имя вида — В ЦЕНТРЕ, а не угловым ярлыком, как на занятой плите: угловой ярлык на
+              пустой полосатой коробке читается как забытая подпись, центр говорит «эта коробка
+              целиком и есть слот такой-то». Цвет — `labelColor`: `textInactiveColor` (#ccc) в этой
+              системе для рамок и заглушек, а не для текста, который читают. */}
+          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+            {label}
+            {required && (
+              <span className='text-error' title='the render needs it'>
+                {' *'}
+              </span>
+            )}
+          </Text>
+        </div>
+      )}
 
       <Text
         size='nano'
@@ -216,6 +263,12 @@ export function EmptyStripCell({
         <b>empty</b>
         {required ? ' · the render needs it' : ''}
       </Text>
+
+      {onPlaceMedia && (
+        <Text size='nano' variant='label' component='span'>
+          ⌘V · drop · browse
+        </Text>
+      )}
     </div>
   );
 }

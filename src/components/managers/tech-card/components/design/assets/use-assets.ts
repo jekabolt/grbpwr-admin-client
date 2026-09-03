@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { common_TechCardAnnotation } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useMemo } from 'react';
 
@@ -84,32 +83,17 @@ export function useAssetWrites(techCardId: number) {
   });
 
   /**
-   * Метка на флэте: заводится с `placementId = 0`, двигается с его id.
+   * ═══ ДВА ГЛАГОЛА МЕТОК СНЕСЕНЫ (J-21) ══════════════════════════════════════════════════════
    *
-   * ⚠ ЗВАТЬ ЭТИ ДВА ГЛАГОЛА СЕЙЧАС НЕКОМУ (Y-11): экран разметки снят вместе с секцией ASSETS.
-   * Оставлены намеренно — ручки на сервере живы, метки в базе живы и всё ещё подписывают чипы
-   * CLOTHS, а владелец снял экран словом «пока». Пересобирать шов заново по памяти при возврате
-   * значило бы разойтись с серверными правилами (в том числе с тем, зачем здесь `techCardId`).
+   * Здесь стояли `setPlacement` и `deletePlacement`. Владелец: «в FABRIC FITTING давай удалим
+   * полностью эту функцональность». Их единственным вызывающим был блок примерки
+   * (`render/placement/`), снесённый вместе с ними, — то есть это не «мутация без экрана», а
+   * половина одного удалённого органа.
+   *
+   * ⚠ РУЧКИ СЕРВЕРА ЖИВЫ И НЕ ТРОНУТЫ: `SetDesignAssetPlacement` / `DeleteDesignAssetPlacement`
+   * по-прежнему отвечают, таблица и её строки на бете стоят. Клиент просто перестал быть их
+   * читателем и писателем. Снос ручек и миграция — отдельное решение владельца, не этот круг.
    */
-  const setPlacement = useMutation({
-    mutationFn: (input: {
-      placementId?: number;
-      assetId: number;
-      pictureId: number;
-      annotation: common_TechCardAnnotation;
-      note?: string;
-    }) =>
-      adminService.SetDesignAssetPlacement({
-        techCardId,
-        placementId: input.placementId ?? 0,
-        assetId: input.assetId,
-        pictureId: input.pictureId,
-        annotation: input.annotation,
-        note: input.note ?? '',
-      }),
-    onSuccess: invalidate,
-    onError,
-  });
 
   /**
    * ═══ «ТКАНЬ КОЛОРВЕЯ N — ЭТОТ АССЕТ» — СВОЙ ГЛАГОЛ, А НЕ ПОЛЕ В UPSERT (G-15) ═══════════════
@@ -140,16 +124,8 @@ export function useAssetWrites(techCardId: number) {
     onError,
   });
 
-  /** Снятие метки называет карточку по тому же доводу; у самой метки своего tech_card_id нет. */
-  const deletePlacement = useMutation({
-    mutationFn: (placementId: number) =>
-      adminService.DeleteDesignAssetPlacement({ techCardId, placementId }),
-    onSuccess: invalidate,
-    onError,
-  });
-
   return useMemo(
-    () => ({ upsertAsset, deleteAsset, setAssetColorway, setPlacement, deletePlacement, invalidate }),
-    [upsertAsset, deleteAsset, setAssetColorway, setPlacement, deletePlacement, invalidate],
+    () => ({ upsertAsset, deleteAsset, setAssetColorway, invalidate }),
+    [upsertAsset, deleteAsset, setAssetColorway, invalidate],
   );
 }

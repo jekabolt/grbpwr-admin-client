@@ -5,10 +5,11 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
+import { ASSET_PATTERN, assetLabel, assetThumb, fabricUses, shelfAssets } from '../assets/model';
 import { cardOutputRows, runRepresentation } from '../bench-kinds';
 import { formatMoney } from '../generation/money';
 import { isPictureHidden } from '../visibility';
-import { fabricStatement, type Gate } from '../render/model';
+import { fabricStatement, hexIsPaintable, wireColourSource, type Gate } from '../render/model';
 
 /**
  * ═══ ON MODEL — ЧТЕНИЕ ПОЛОСЫ ДЛЯ ЭКРАНА ПЕРЕКРАСКИ (K-17) ════════════════════════════════════
@@ -97,6 +98,135 @@ export function recolorOutputs(
   return out;
 }
 
+/* ─────────────────────────── ТКАНЬ, В КОТОРУЮ ПЕРЕОДЕВАЮТ (J-31) ─────────────────────────── */
+
+/**
+ * ═══ ОДНА ПЛИТКА НА ПРОГОН, И ЭТО ФОРМА СОСТОЯНИЯ, А НЕ ПРАВИЛО ПОВЕРХ НЕГО ══════════════════
+ *
+ * Владелец, дословно: «ON MODEL у нас должна быть возможность загрузить несколько фото на модели
+ * в нашей вещи и выбрать и или паттерн/цвет и результатом должен быть уже то что там вещь
+ * поменяла цвет ткань и тд». Жест единственного числа: паттерн — один, цвет — один, фотографий
+ * сколько угодно.
+ *
+ * ⚠ И СЕРВЕР ОТКАЗЫВАЕТ ВТОРОЙ ПЛИТКЕ ПОИМЁННО. `one_cloth_only` (`design_run.go`, до резерва):
+ * «a recolour re-dresses the garment in ONE cloth … the instruction names exactly one («the
+ * garment made of the cloth in image 2»)». Значит выразить две — это выразить прогон, который
+ * человек не может запустить. Поэтому выбор здесь — ЧИСЛО (`assetId`), а не список: не «список,
+ * который мы обещаем не отращивать», а тип, в котором второй плитки нет.
+ *
+ * ⚠ ПЛИТКА БЕЗ КАРТИНКИ НЕ ПРЕДЛАГАЕТСЯ ВОВСЕ. Второй серверный отказ, `cloth_without_picture`:
+ * «a cloth stated in words alone cannot be laid on a photograph». Ткань уезжает ВТОРОЙ КАРТИНКОЙ
+ * вызова, и ткань без `media_id` не уезжает никуда.
+ *
+ * ⚠ И ТРЕТИЙ ОТКАЗ — ЕДИНСТВЕННЫЙ, КОТОРЫЙ ЖЕСТ ЧЕЛОВЕКА ВСЁ ЕЩЁ МОЖЕТ ПОСТРОИТЬ.
+ * `cloth_is_also_a_photograph`: медиа, названное И фотографией к перекрасу, И тканью, дало бы
+ * вызов `[9.png, 9.png]` — одна картинка дважды в одном платном запросе. Порядок жестов тут
+ * решает всё: выбрать плитку, а ПОТОМ добавить её же из библиотеки снимком — законная
+ * последовательность двух законных нажатий. Поэтому правило стоит В ОБЕ СТОРОНЫ: плитка,
+ * совпавшая со снимком, выключается в ряду с названной причиной, а ворота отказывают, если она
+ * уже выбрана.
+ */
+export interface ClothChoice {
+  assetId: number;
+  mediaId: number;
+  name: string;
+  thumb: string;
+  repeatMm: number;
+  /** Непусто — плитку выбрать нельзя, и это причина словами. Пусто — выбирается. */
+  blocked: string;
+}
+
+/**
+ * ПЛИТКИ ЭТОЙ КАРТОЧКИ, ПРИГОДНЫЕ ДЛЯ ПЕРЕОДЕВАНИЯ.
+ *
+ * Полка спрашивается у ОБЩЕГО читателя (`shelfAssets(band, ASSET_PATTERN)`) — того же, которым
+ * полку читают экран паттернов и ряд тканей фабрик-рендера. Свой фильтр `kind === 'pattern'`
+ * рядом был бы вторым определением «что такое паттерн этой карточки».
+ */
+export function clothChoices(
+  band: GetDesignBandResponse,
+  photoMediaIds: readonly number[],
+): ClothChoice[] {
+  const photos = new Set(photoMediaIds.filter((id) => id > 0));
+  const out: ClothChoice[] = [];
+  for (const asset of shelfAssets(band, ASSET_PATTERN)) {
+    const mediaId = asset.mediaId ?? 0;
+    // Плитка без картинки не показывается: класть на фотографию нечего, и сервер отказал бы
+    // `cloth_without_picture`. Предлагать её значило бы предлагать мёртвый выбор.
+    if (mediaId <= 0) continue;
+    out.push({
+      assetId: asset.id ?? 0,
+      mediaId,
+      name: assetLabel(asset),
+      thumb: assetThumb(asset),
+      repeatMm: asset.repeatMm ?? 0,
+      blocked: photos.has(mediaId)
+        ? `this tile is also one of the photographs above (media ${mediaId}) — one call cannot carry the same picture twice. Take it out of the photographs, or pick another pattern`
+        : '',
+    });
+  }
+  return out;
+}
+
+/** Выбранная плитка среди предложенных, или `null`. */
+export function chosenCloth(choices: readonly ClothChoice[], assetId: number): ClothChoice | null {
+  if (assetId <= 0) return null;
+  return choices.find((c) => c.assetId === assetId) ?? null;
+}
+
+/**
+ * ═══ ЦВЕТ ПРОГОНА — ОДИН ОБЪЕКТ, КОТОРЫЙ ЭКРАН СУДИТ, ПЕЧАТАЕТ И ОТПРАВЛЯЕТ ══════════════════
+ *
+ * ЭТО ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ `params.colour` ЭТОГО ЭКРАНА, и он чистый. Ворота, строка у кнопки,
+ * заголовок-заявление и опись перед деньгами читают РОВНО ЕГО РЕЗУЛЬТАТ, а не каждый свою
+ * реконструкцию черновика. Дефект ровно этой формы стоил недели на соседнем экране: подпись
+ * говорила «плиты не едут», а тело запроса говорило «шли все».
+ *
+ * ⚠ `fabric_media_id` ЗДЕСЬ НЕ ЭХО ДЛЯ КРАСОТЫ — БЕЗ НЕГО ТКАНЬ НЕ УЕЗЖАЕТ ВОВСЕ, А ПРОМПТ ВСЁ
+ * РАВНО ГОВОРИТ «IMAGE 2». Замерено по задеплоенному бэкенду (`origin/beta`, `designgen`):
+ *
+ *   · воркер выбирает ремесло по ЗАМОРОЖЕННЫМ параметрам: `clothsWithTexture(p)` смотрит на
+ *     `colour.fabrics[].media_id` и при непустом списке ставит `reclothCraft` — «the garment made
+ *     of the cloth in image 2»;
+ *   · а ВЛОЖЕНИЯ собирает `referenceList`, и у прогона с ОДНОЙ тканью он прикладывает
+ *     `p.Colour.FabricMediaID` — скаляр, а не `fabrics[0].media_id` (ветка `len(cloths) < 2`);
+ *   · `clothPictures` затем отбирает из этого списка по `fabrics[].media_id`.
+ *
+ * То есть при `fabrics=[{mediaId:3101}]` и `fabricMediaId:0` список пуст, `ClothReferences` пуст,
+ * вызов уезжает одной картинкой — и всё это НА ОПЛАЧЕННОМ прогоне, чей промпт указывает на
+ * картинку, которой нет. Дверь такой прогон НЕ ловит: она проверяет `fabrics`, а не скаляр.
+ * Единственная защита — эта строка.
+ *
+ * ⚠ ТКАНЬ БЕЗ КАРТИНКИ ОТСЕИВАЕТСЯ И ЗДЕСЬ, хотя ряд её и не предлагает. Ряд — это UI, а это
+ * дверь на провод; предикат тот же, что у сервера (`media_id > 0`), и стоит он там, где
+ * собирается тело.
+ */
+export function recolourWireColour(
+  band: GetDesignBandResponse,
+  recipe: common_DesignColourRecipe,
+  clothAssetId: number,
+): common_DesignColourRecipe {
+  const fabrics =
+    clothAssetId > 0
+      ? fabricUses(band, [clothAssetId]).filter((f) => (f.mediaId ?? 0) > 0)
+      : [];
+  const built: common_DesignColourRecipe = {
+    ...recipe,
+    /**
+     * ⚠ ТОТ ЖЕ ИНВАРИАНТ, ЧТО У ФАБРИК-РЕНДЕРА: орган выбора цвета у двух экранов ОДИН, значит и
+     * полунабранный hex сюда приходит тот же. Сервер считает цвет заявленным по ЛЮБОМУ непустому
+     * hex, а этот экран — по `hexIsPaintable`; без этой строки «#a41f2» уезжал бы целевым цветом,
+     * которого свотч над ним не признаёт. Дверь ПРОПУСКАЕТ, а не достраивает.
+     */
+    hex: hexIsPaintable(recipe.hex) ? (recipe.hex ?? '').trim() : '',
+    fabrics,
+    fabricMediaId: fabrics[0]?.mediaId ?? 0,
+  };
+  // ВЫВЕДЕНО ПОСЛЕ СБОРКИ, А НЕ ДО: `wireColourSource` читает `fabricMediaId`, и вызов над
+  // черновиком дал бы «источник» рецепта, которого на провод не уедет.
+  return { ...built, source: wireColourSource(built) };
+}
+
 /* ─────────────────────────── цена, названная до нажатия ─────────────────────────── */
 
 /** Во что обошёлся ПОСЛЕДНИЙ закончившийся рекол этой карточки — свидетельство, не прогноз. */
@@ -140,14 +270,35 @@ export function lastRecolorCharge(band: GetDesignBandResponse): RecolorCharge | 
  * дорожает»: у соседних экранов один вызов покупает лист из четырёх видов, здесь каждый снимок
  * покупается отдельно.
  */
-export function recolorShape(sources: number): string {
+export function recolorShape(sources: number, colour?: common_DesignColourRecipe | null): string {
   // ПУСТОЙ НАБОР НАЗЫВАЕТ ПРАВИЛО, А НЕ ОТСУТСТВИЕ. Строка кнопки всегда кончается словами «priced
   // by the server when the run starts», и «nothing to buy · priced by the server» противоречило бы
   // само себе на пол-строки. Правило же верно всегда, и это ровно то, что человеку надо знать до
   // того, как он положит первый снимок.
   if (sources <= 0) return 'each photograph is one paid call';
   const s = sources === 1 ? '' : 's';
-  return `${sources} picture${s} back · ${sources} paid call${s}, one per photograph`;
+  const head = `${sources} picture${s} back · ${sources} paid call${s}, one per photograph`;
+  /**
+   * ⚠ ЧТО ИМЕННО СДЕЛАЮТ С КАЖДЫМ СНИМКОМ — ТОЖЕ ЗДЕСЬ, И ЧИТАЕТСЯ ЭТО С ТЕЛА ЗАПРОСА (J-31).
+   * Строка собирается из `recolourWireColour` — того самого объекта, который уедет, — потому что
+   * «переодели» и «перекрасили» это два РАЗНЫХ платных промпта на сервере (`reclothCraft` против
+   * `recolorCraft`), и выбирает между ними ровно наличие ткани с картинкой в `params.colour`.
+   * Строка, собранная из черновика, могла бы обещать одно, а купить другое.
+   */
+  const cloth = (colour?.fabrics ?? []).find((f) => (f.mediaId ?? 0) > 0);
+  const hex = (colour?.hex ?? '').trim();
+  const code = (colour?.code ?? '').trim();
+  const tint = code || hex;
+  const did = cloth
+    ? tint
+      ? `re-clothed in ${(cloth.name ?? '').trim() || 'the picked pattern'}, re-tinted to ${tint}`
+      : `re-clothed in ${(cloth.name ?? '').trim() || 'the picked pattern'}`
+    : tint
+      ? `recoloured to ${tint}`
+      : (colour?.words ?? '').trim()
+        ? 'recoloured to the colour described in words'
+        : '';
+  return did ? `${head} · ${did}` : head;
 }
 
 /* ─────────────────────────── ворота ─────────────────────────── */
@@ -167,15 +318,21 @@ export function recolorShape(sources: number): string {
  * помеха, а не защита.
  */
 export function recolorGate(
-  band: GetDesignBandResponse,
-  sources: number,
-  recipe: common_DesignColourRecipe | null | undefined,
+  photoMediaIds: readonly number[],
+  /**
+   * ⚠ ТЕЛО ЗАПРОСА, А НЕ ЧЕРНОВИК. Ворота судят РОВНО ТОТ объект, который уедет
+   * (`recolourWireColour`), и по той же причине, по которой его же печатает строка у кнопки:
+   * ворота, судящие черновик, и провод, везущий выведенное из него, — это два утверждения об
+   * одном прогоне, и расходятся они молча.
+   */
+  colour: common_DesignColourRecipe,
 ): Gate {
+  const sources = photoMediaIds.length;
   if (sources <= 0) {
     return {
       ok: false,
       reason:
-        'no photograph yet — a recolour changes the colour of a picture that already exists, so it needs at least one. Add the shots above; several sides of the same garment are the ordinary case',
+        'no photograph yet — an on-model run works on a picture that already exists, so it needs at least one. Add the shots above; several sides of the same garment are the ordinary case',
     };
   }
   if (sources > RECOLOR_SOURCES_MAX) {
@@ -184,29 +341,47 @@ export function recolorGate(
       reason: `${sources} photographs in one run — the server takes at most ${RECOLOR_SOURCES_MAX} and refuses the rest before anything is charged. Take some out, or run them in two goes`,
     };
   }
-  if (!targetColourIsStated(recipe)) {
+  /**
+   * ⚠ ЗЕРКАЛО `cloth_is_also_a_photograph`, И ЭТО ЕДИНСТВЕННЫЙ ИЗ ЧЕТЫРЁХ ТКАНЕВЫХ ОТКАЗОВ,
+   * КОТОРЫЙ ЖЕСТ ЧЕЛОВЕКА ЕЩЁ МОЖЕТ ПОСТРОИТЬ. Ряд плиток выключает совпавшую плитку, но порядок
+   * обратный — сначала выбрать плитку, потом добавить её же снимком из библиотеки — это два
+   * законных нажатия, между которыми ничего не запрещено. Сервер отказал бы бесплатно; ворота
+   * избавляют от круга по сети и называют номер медиа, потому что чинится это одним жестом.
+   */
+  const dup = (colour.fabrics ?? []).find(
+    (f) => (f.mediaId ?? 0) > 0 && photoMediaIds.includes(f.mediaId ?? 0),
+  );
+  if (dup) {
+    return {
+      ok: false,
+      reason: `media ${dup.mediaId} is both a photograph to work on and the cloth to lay on it — one paid call cannot carry the same picture twice, and the server refuses this before anything is charged. Take it out of the photographs, or pick another pattern`,
+    };
+  }
+  if (!targetIsStated(colour)) {
     return {
       ok: false,
       reason:
-        'no target colour stated — pick one from the dictionary, type a hex, or describe it in words. The server refuses a recolour with no colour named: «change the colour» with nothing named is a request a model answers with any shade at all, at full price',
+        'nothing to re-dress it in — pick a pattern, pick a colour, or describe one in words. The server refuses a run that names none of them: «change the cloth» with nothing named is a request a model answers with any cloth at all, at full price',
     };
   }
   return { ok: true };
 }
 
 /**
- * СКАЗАН ЛИ ЦЕЛЕВОЙ ЦВЕТ — И ЭТО НЕ `recipeIsStated`.
+ * ЧТО СЧИТАЕТСЯ НАЗВАННОЙ ЦЕЛЬЮ НА ЭТОМ ЭКРАНЕ — И ЭТО НЕ `recipeIsStated`.
  *
- * Тот общий предикат считает рецепт заявленным, если сказано ЛЮБОЕ из трёх, ФОТОГРАФИЮ ТКАНИ
- * ВКЛЮЧАЯ, — и для фабрик-рендера это верно: лоскут действительно называет материал. Для рекола
- * фотография ткани не является целевым цветом ни в каком смысле, а контракт перечисляет
- * удовлетворяющие поля поимённо: «Any one of code / hex / words satisfies it». Взять сюда общий
- * предикат значило бы открыть ворота рецептом, в котором названа только ткань, и купить отказ
- * `no_target_colour` за круг по сети.
+ * ⚠ ПРЕДИКАТ РАСШИРЕН ВМЕСТЕ С ДВЕРЬЮ, А НЕ ВМЕСТО НЕЁ (J-31). До этой волны цель могла быть
+ * названа только цветом или словами, и общий `recipeIsStated` был здесь ШИРЕ серверного правила:
+ * он считал фотографию ткани достаточной, а `no_target_colour` — нет. Теперь дверь считает ткань
+ * с картинкой законной целью прямым текстом («…or a cloth with a picture in
+ * params.colour.fabrics»), и предикат следует за ней.
+ *
+ * ⚠ НО НЕ ДО `recipeIsStated`, И РАЗНИЦА ЖИВАЯ. Тот считает заявлением скаляр `fabric_media_id`
+ * САМ ПО СЕБЕ; сервер же смотрит на `fabrics[].media_id`. Рецепт, у которого заполнен только
+ * скаляр, открыл бы здесь ворота и получил бы `no_target_colour` за круг по сети.
  */
-export function targetColourIsStated(
-  recipe: common_DesignColourRecipe | null | undefined,
-): boolean {
+export function targetIsStated(recipe: common_DesignColourRecipe | null | undefined): boolean {
   const stated = fabricStatement(recipe);
-  return stated.colour || stated.words;
+  if (stated.colour || stated.words) return true;
+  return (recipe?.fabrics ?? []).some((f) => (f.mediaId ?? 0) > 0);
 }

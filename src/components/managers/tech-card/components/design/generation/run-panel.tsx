@@ -189,6 +189,24 @@ export function RunPanel({
   });
   /** Сколько из показанных пришло с верстака — считается ПО ПОКАЗАННЫМ, а не по снимку. */
   const platesShown = refs.filter((r) => plateRows.some((pl) => pl.mediaId === r.mediaId)).length;
+  /**
+   * ═══ ТКАНЬ ПЕРЕКРАСА ЕДЕТ, НО В СНИМКЕ ВХОДОВ ЕЁ НЕТ (J-31) ═══════════════════════════════
+   *
+   * ⚠ ЭТО НЕ УКРАШЕНИЕ ПАНЕЛИ, А ПОДПИСЬ, КОТОРАЯ ИНАЧЕ ПРОТИВОРЕЧИТ ТЕЛУ ЗАПРОСА. С круга J-31
+   * вызов перекраса несёт ДВЕ картинки — `refs: [фото_i, плитка]` (`designgen/images.go`), — а
+   * `inputs.refs` снимка перечисляет только фотографии: ткань живёт в ЗАМОРОЖЕННЫХ
+   * `params.colour`, куда `designAssembleInputs` её не складывает. Значит строка «N pictures
+   * sent» была бы верна про снимок и неверна про то, что уехало поставщику.
+   *
+   * ЧИТАЕТСЯ ИЗ ПАРАМЕТРОВ ПРОГОНА, А НЕ ИЗ СЕГОДНЯШНЕЙ ПОЛКИ: параметры заморожены, полка
+   * меняется, и панель — это улика о прошлом, а не о настоящем. Миниатюры у такой строки нет по
+   * той же причине — адреса картинки замороженная копия не несёт, а разрешать `media_id` в
+   * сегодняшнюю строку значило бы показать то, чем ткань стала, вместо того, чем она была.
+   */
+  const runCloth =
+    run.kind === 'recolor'
+      ? (run.params?.colour?.fabrics ?? []).find((f) => (f.mediaId ?? 0) > 0)
+      : undefined;
   const attempts = run.attempts ?? [];
   const live = isRunLive(run);
 
@@ -235,6 +253,9 @@ export function RunPanel({
                 искать во FLAT SLOTS картинки, которых там нет. Ось верстака две — вид × род, —
                 и род выбирается родом прогона (`designSelectBench`). */}
             {refs.length} picture{refs.length === 1 ? '' : 's'} sent
+            {runCloth
+              ? ` · one paid call each, and every call also carried the cloth «${(runCloth.name ?? '').trim() || 'cloth'}» (media ${runCloth.mediaId}) as its second picture`
+              : ''}
             {platesShown > 0
               ? ` · ${platesShown} ${run.kind === 'threed' ? 'render plate' : 'flat slot'}${platesShown === 1 ? '' : 's'}${
                   refs.length - platesShown > 0

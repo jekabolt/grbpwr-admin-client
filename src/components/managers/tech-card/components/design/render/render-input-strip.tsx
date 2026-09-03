@@ -2,6 +2,7 @@ import type {
   GetDesignBandResponse,
   common_DesignAsset,
   common_DesignPicture,
+  common_MediaFull,
 } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -22,7 +23,6 @@ import {
   assetLabel,
   assetThumb,
   clothShelf,
-  placementsOfAsset,
   unmanagedAssets,
 } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
@@ -203,7 +203,6 @@ function useClothRun({
   const totalAssets = (band.assets ?? []).length;
   const unmanaged = useMemo(() => unmanagedAssets(band), [band]);
   const full = totalAssets >= ASSETS_PER_CARD_MAX;
-  const marksOnPending = pendingRemove ? placementsOfAsset(band, pendingRemove.id ?? 0).length : 0;
 
   /**
    * ПОЧЕМУ ДВЕРЬ ЗАКРЫТА — СЛОВАМИ, А НЕ ЧИСЛОМ. Причина стоит и в `data-inert`, и в `title`: это
@@ -226,15 +225,16 @@ function useClothRun({
           const id = a.id ?? 0;
           const name = assetLabel(a);
           const url = assetThumb(a);
-          const marks = placementsOfAsset(band, id).length;
           const pattern = assetIsPattern(a);
           /* ВТОРАЯ СТРОКА — ТОЛЬКО ФАКТЫ, КОТОРЫХ НЕ ВИДНО НА КАДРЕ. Род называется словом лишь у
              паттерна: ткань — умолчание этого ряда, и подписывать её «fabric» под группой CLOTH
              значило бы повторять подпись. Паттерн же ОТЛИЧАЕТСЯ и судьбой (нового такого здесь не
              завести), и числом (раппорт), а на глаз лоскут от набивки не отличить. */
+          /* ⚠ «N MARKED» СНЯТО ВМЕСТЕ С МЕТКАМИ (J-21). Строка была единственным местом, где метки
+             ткани вообще были видны, — и ровно поэтому она обязана уйти вместе с ними: счётчик
+             того, что нельзя ни поставить, ни снять, ни посмотреть, читается как исправная функция. */
           const notes = [
             pattern ? ['pattern', a.repeatMm ? `${a.repeatMm} mm` : ''].filter(Boolean).join(' · ') : '',
-            marks > 0 ? `${marks} marked` : '',
           ].filter(Boolean);
           return (
             <div key={`cloth-${id}`} className={`flex flex-col gap-1 ${CELL_WIDTH}`}>
@@ -269,9 +269,8 @@ function useClothRun({
               </Text>
               {/* ВТОРАЯ СТРОКА ТОЛЬКО ТОГДА, КОГДА ЕЙ ЕСТЬ ЧТО СКАЗАТЬ. Здесь стояло слово
                   «texture» на каждой ячейке — под группой, которая и так называется CLOTH, оно
-                  повторяло подпись и читалось как украшение. Метки же — настоящий факт, и на
-                  карточке, размеченной до снятия ASSETS, это единственное место, где их вообще
-                  видно; они же назовут цену удаления в вопросе ниже. */}
+                  повторяло подпись и читалось как украшение. Раппорт паттерна — настоящий факт,
+                  и на глаз он не читается вовсе. */}
               {notes.length > 0 && (
                 <Text size='nano' variant='label' component='span'>
                   {notes.join(' · ')}
@@ -356,7 +355,8 @@ function useClothRun({
                 ДВЕРЬ РИСУЕТСЯ, ТОЛЬКО КОГДА ЕЙ ЕСТЬ КУДА ВЕСТИ. Без `onMakePattern` монтирующий
                 экран не умеет переключать представление — кнопка, которая никуда не ведёт, хуже
                 её отсутствия. И она НЕ гаснет на потолке активов: сделать плитку можно всегда,
-                упрётся только `KEEP AS CLOTH`, и упрётся своими словами. */}
+                упрётся только дверь `keep` в блоке `patterns of this card`, и упрётся своими
+                словами. */}
             {onMakePattern && (
               <Button variant='secondary' size='xs' onClick={onMakePattern}>
                 make a pattern
@@ -395,7 +395,7 @@ function useClothRun({
           <>
             {' '}
             The ones marked <b>pattern</b> are repeating tiles, made on STUDIO → PATTERN and kept
-            here with <b>keep as cloth</b>.
+            on the card there.
           </>
         )}
       </Text>
@@ -419,24 +419,12 @@ function useClothRun({
         }}
       >
         <div className='flex flex-col gap-2'>
-          {/* ЦЕНА НАЗЫВАЕТСЯ ЧИСЛОМ, А НЕ ОБЩИМИ СЛОВАМИ. Удаление ткани КАСКАДОМ сносит её метки
-              на флэтах, а поставить их заново после снятия секции ASSETS нечем — так что здесь
-              это не «переделаете», а «потеряете». Молчать об этом на карточке, размеченной до
-              снятия, значило бы дать человеку нажать «ok» на необратимом. */}
-          {marksOnPending > 0 && (
-            <Text size='control'>
-              {marksOnPending} mark{marksOnPending === 1 ? '' : 's'} drawn on the flats go with it,
-              and they cannot be drawn again — the marking screen is gone.
-            </Text>
-          )}
           {/* УДАЛЕНИЕ ПАТТЕРНА ДОРОЖЕ УДАЛЕНИЯ ТКАНИ, И ЭТО НАДО СКАЗАТЬ ДО «ok». Ткань заводится
-              этой же дверью заново из той же картинки; паттерн — нет: его раппорт и поворот
-              задавались редактором, снятым вместе с секцией ASSETS. Одинаковый вопрос на два
-              разных по цене жеста учил бы нажимать не глядя. */}
+              этой же дверью заново из той же картинки; плитку надо СГЕНЕРИРОВАТЬ заново, и это
+              стоит денег. Одинаковый вопрос на два разных по цене жеста учил бы нажимать не глядя. */}
           {assetIsPattern(pendingRemove ?? undefined) && (
             <Text size='control'>
-              This one is a <b>pattern</b>: it cannot be made again here — the repeat and rotation
-              had their own editor, and it went with the removed ASSETS shelves.
+              This one is a <b>pattern</b>: making it again is a paid run on STUDIO → PATTERN.
             </Text>
           )}
           <Text size='control'>
@@ -494,6 +482,45 @@ export function RenderInputStrip({
     );
   };
 
+  /**
+   * ═══ J-17 — ФАЙЛ ИЗ МЕДИАТЕКИ ПРЯМО В ПУСТОЙ СЛОТ, ОДНОЙ ТРАНЗАКЦИЕЙ ═════════════════════════
+   *
+   * Владелец: «во вкладке FABRIC RENDER если у нас эмпти слот его от сюда же можно добавить из
+   * медиа селектора».
+   *
+   * ОДНА РУЧКА ДЕЛАЕТ ОБЕ ПОЛОВИНЫ: `RegisterDesignUpload` заводит медиа в полосу карточки И
+   * кладёт картинку в слот, названный в `target`, в одной транзакции. Значит карточка не может
+   * оказаться с плитой в слоте, под которой нет строки, — и наоборот, с загруженным файлом,
+   * который никуда не встал.
+   *
+   * ⚠ ЭТО ТОТ ЖЕ ВЫЗОВ, ЧТО У ВЕРСТАКА (`bench.tsx:placeMedia`), И ПОЛЯ НАЗВАНЫ ТЕ ЖЕ, ПОИМЁННО:
+   *   · `kind: 'flat'` — УТВЕРЖДЕНИЕ этой полосы, а не догадка: под подписью «input — flats of
+   *     this card» приходит чертёж. Пустое поле значило бы «flat» и сегодня, и «что бы ни стало
+   *     умолчанием» завтра;
+   *   · `colorwayId: 0` — у чертежа цвета не бывает по существу (L-4): `colorway_forbidden` на
+   *     флэте это ОТКАЗ, а не обнуление;
+   *   · `ghostView` — сторона, которую человек ТОЛЬКО ЧТО НАЗВАЛ, положив файл в этот слот; ровно
+   *     для подтверждаемой человеком догадки поле и заведено;
+   *   · `expectedSlotRev` — ревизия строки, прочитанная ЭТИМ рендером: чужая правка того же слота
+   *     обязана отказать, а не молча вытеснить плиту;
+   *   · `clientRequestId` минтится ОДИН РАЗ на намерение человека и НЕ внутри мутации — повтор со
+   *     свежим ключом сервер честно завёл бы второй партией.
+   */
+  const placeMedia = (media: common_MediaFull, view: string, expectedSlotRev: number) => {
+    const mediaId = media.id ?? 0;
+    if (!mediaId) return;
+    setBusy(`v${view}`);
+    writes.registerUpload.mutate(
+      {
+        clientRequestId: newClientRequestId(),
+        items: [{ mediaId, ghostView: view, kind: 'flat', colorwayId: 0 }],
+        target: { viewKey: view, kind: 'flat', colorwayId: 0 },
+        expectedSlotRev,
+      },
+      { onSettled: () => setBusy(null) },
+    );
+  };
+
   const unmark = (view: string, slotRev: number) => {
     setBusy(`v${view}`);
     writes.setBenchSlot.mutate(
@@ -543,6 +570,11 @@ export function RenderInputStrip({
                    `SHEET_MIN_VIEWS`: тот отвечает на вопрос ЛИСТА и сам оговаривает, что ничего не
                    запрещает. Довод целиком — у константы в `./model`. */
                 required={RENDER_MIN_VIEWS.includes(side.view)}
+                /* J-17. На read-only карточке двери нет вовсе — не серая кнопка, а её отсутствие:
+                   каждая запись этого экрана гаснет так же. */
+                onPlaceMedia={
+                  disabled ? undefined : (media) => placeMedia(media, side.view, side.slotRev)
+                }
               />
             );
           }
@@ -675,11 +707,11 @@ export function RenderInputStrip({
 
       <Text size='micro' variant='label' component='p' className='normal-case'>
         Left of the line — what the render actually reads: all four view slots are always drawn,
-        each filled one carrying its provenance, then the cloths it is made of. A striped slot
-        holds no drawing; front and back must hold one before a fabric render can start, and the
-        two sides are optional. Right of the line — every other flat of this card; a hand file was always
-        legal input here. Marking one displaces the picture that held the slot; nothing is
-        deleted.
+        each filled one carrying its provenance, then the cloths it is made of. An empty slot takes
+        a file straight from the library, and front and back must hold one before a fabric render
+        can start; the two sides are optional. Right of the line — every other flat of this card; a
+        hand file was always legal input here. Marking one displaces the picture that held the
+        slot; nothing is deleted.
       </Text>
 
       {/* THE PAGE IS ADMITTED, NOT HIDDEN. The band ships one page of the feed, so a card with a

@@ -1,13 +1,11 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
-import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { ColorwayPicker, type ColorwayChoice } from '../colorway-picker';
+import { ColorwaySelect, type ColorwayChoice } from '../colorway-picker';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
-import { FieldRow, Hint } from './field-row';
 import { GenerateRow } from './generate-row';
 import {
   hexIsPaintable,
@@ -21,7 +19,6 @@ import {
 } from './model';
 import { OutputsSection } from './outputs';
 import { Palette } from './palette';
-import { PlacementBlock } from './placement';
 import { RenderInputStrip } from './render-input-strip';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
@@ -45,9 +42,18 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * and the picture are both singular no matter how many sides the bench holds, and the plural is
  * created for free, later, by the split.
  *
- * FIT IS READ-ONLY HERE, WITH ITS REASON. Fit is a property of the garment; presentation cannot
- * change it. The render menu therefore states the card's fit and refuses to edit it — unlike 3D,
- * where a one-run override exists and is stamped on every frame it produces.
+ * ═══ FIT БОЛЬШЕ НЕ СТОИТ НА ЭТОМ ЭКРАНЕ (J-20) ═══════════════════════════════════════════════
+ *
+ * Владелец: «FIT полностью убираем отсюда». Здесь стоял read-only ряд, который печатал посадку
+ * карточки и объяснял, почему её нельзя править, — то есть занимал строку настройки, ничего не
+ * настраивая.
+ *
+ * ⚠ «ОТСЮДА» — ЭТО ЭКРАН, А НЕ ПРОВОД, И РАЗНИЦА ЗДЕСЬ ДЕНЕЖНАЯ. Сервер по-прежнему морозит
+ * `fit` в снимок КАЖДОГО рендер-прогона и печатает его в платный промпт (`snapshot.go`,
+ * `composePrompt`). Поэтому `useCardFit` остался и по-прежнему кормит модалку «what the model
+ * gets»: инвентарь обязан называть ВСЁ, что уезжает, иначе экран говорит одно, а тело запроса
+ * другое. Перестать ОТПРАВЛЯТЬ посадку — правка бэкенда и другой промпт на каждом рендере; это
+ * отдельное решение владельца, и здесь оно не принимается молча.
  */
 export function RenderStudio({
   band,
@@ -221,46 +227,29 @@ export function RenderStudio({
 
       <Section
         title='generation — fabric render'
-        question='— the cloth: a photo, a colour, words, or any mix of them'
+        question='— the cloth: a pattern, a colour, or both'
+        /* ═══ КОЛОРВЕЙ — АДРЕС БЛОКА, А НЕ ЕГО ПЕРВАЯ НАСТРОЙКА (J-20) ═══════════════════════
+           Он стоял первым рядом секции; владелец счёл три ряда настроек лишними и попросил два
+           плейсхолдера. Ось при этом несущая — ею ключуются верстак, выходы, ворота 3D и
+           `params.colorway_id`, — поэтому она переехала в заголовочную линейку: «чей это рендер»
+           это ЗАГОЛОВОК блока, а не ингредиент ткани. Граница власти та же, что была (L-4): всё
+           НИЖЕ принадлежит выбранному колорвею, полоса входа ВЫШЕ — общая для всех, потому что
+           чертёж изделия один на карточку. */
+        action={
+          colorway ? <ColorwaySelect band={band} choice={colorway} disabled={disabled} /> : undefined
+        }
       >
-        {/* ПИКЕР — ПЕРВЫМ РЯДОМ СЕКЦИИ, И ГРАНИЦА ЕГО ВЛАСТИ ПРОВЕДЕНА ЗДЕСЬ (L-4). Всё, что ниже,
-            принадлежит выбранному колорвею: его ткань, его прогон, его выходы. Полоса ВХОДА —
-            флэты — стоит ВЫШЕ и вне его скоупа намеренно: чертёж изделия у всех колорвеев один,
-            и вторая его копия означала бы N разметок одного рисунка, расходящихся молча. */}
-        {colorway && (
-          <ColorwayPicker
-            band={band}
-            choice={colorway}
-            disabled={disabled}
-            emptyNote='this card has no colourways — they are made on the colourways tab. This render will be filed unattributed, exactly where every render made before colourways stands.'
-          />
+        {/* КАРТОЧКА БЕЗ КОЛОРВЕЕВ — НЕ ПУСТОЕ СОСТОЯНИЕ И НЕ ОШИБКА: всё уезжает в безколорвейный
+            верстак, ровно как жило до оси. Строка стояла подсказкой под снятым рядом чипов и
+            обязана была пережить его — иначе самое частое состояние беты объясняется нигде. */}
+        {colorway && !colorway.loading && colorway.colorways.length === 0 && (
+          <Text size='micro' variant='label' component='p' className='normal-case'>
+            This card has no colourways — they are made on the colourways tab. This render will be
+            filed unattributed, exactly where every render made before colourways stands.
+          </Text>
         )}
 
-        <Palette
-          band={band}
-          techCardId={techCardId}
-          disabled={disabled}
-          draft={draft}
-          colorwayId={colorwayId}
-          colorway={colorway?.current ?? null}
-        />
-
-        <FieldRow label='fit'>
-          {/* A READ-ONLY CONTROL WITH ITS REASON, not a disabled input. It looks like the field it
-              is (so the eye finds the fit where it expects it) and it answers when asked why it
-              cannot be typed in — the card is the single place fit is edited. */}
-          <span
-            data-inert='fit is a property of the garment — presentation cannot change it. It is edited in classification, on the card.'
-            title='fit is a property of the garment — presentation cannot change it. It is edited in classification, on the card.'
-            className='inline-flex min-h-[22px] w-[180px] cursor-help items-center border border-borderColor bg-bgZebra px-[7px] py-[3px]'
-          >
-            <Text size='default' component='span'>
-              {cardFit || '—'}
-            </Text>
-          </span>
-          <Pill>from classification</Pill>
-          <Hint>fit is a garment property, not a presentation one: edited on the card</Hint>
-        </FieldRow>
+        <Palette band={band} disabled={disabled} draft={draft} />
 
         {/* СТРОКА ИНВЕНТАРЯ НАЗЫВАЕТ И ТКАНЬ (H-12). «made of pattern 2» — вторая половина работы
             снесённого заголовка-заявления: правда прогона стоит в двух шагах от денег, там, где на
@@ -296,10 +285,14 @@ export function RenderStudio({
         colorwayLabel={colorway?.label ?? ''}
       />
 
-      {/* THE FITTING — K-14, and it stands BELOW the paid blocks on purpose: it is the one organ on
-          this screen that spends nothing. Putting a free rehearsal above the button that charges
-          would read as a step of the generation flow, which it is not. */}
-      <PlacementBlock band={band} techCardId={techCardId} disabled={disabled} />
+      {/* ═══ БЛОК ПРИМЕРКИ (FABRIC FITTING) СНЕСЁН ЦЕЛИКОМ — J-21 ══════════════════════════════
+          Владелец, дословно: «в FABRIC FITTING давай удалим полностью эту функцальность она
+          слишком громоздкая и плохо работает». Вместе с блоком ушли `render/placement/` целиком,
+          обе мутации меток (`assets/use-assets`) и три читателя разметки (`assets/model`).
+          Таблица, ручки сервера и поле `asset_placements` полосы ЖИВЫ и не тронуты: удаление
+          данных — отдельное решение владельца, и миграции этот круг не пишет.
+          ⚠ ДЕНЕЖНОЕ ПОСЛЕДСТВИЕ НАЗВАНО ВСЛУХ у `fabricUses` в `assets/model.ts`: `parts` теперь
+          пусты, и прогон с двумя тканями перестал сужаться правилом «It is used on: …». */}
 
       <WhatModelGetsRenderModal
         open={inspecting}

@@ -21,6 +21,7 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
 
 import { ThreedModelModal } from './threed/model-modal';
 import { isModelUrl } from './threed/media';
+import { ThreedModelIndexContext, threedModelIndex, useModelBehind } from './threed/model-index';
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
  * ОДИН ЗАКОН УГЛОВ НА ВСЮ ПОЛОСУ DESIGN.
@@ -251,9 +252,22 @@ export function PictureGalleryProvider({
 
   const api = useMemo<GalleryApi>(() => ({ register, openAt }), [register, openAt]);
 
+  /**
+   * ═══ КАКОЙ РАСТР ЗАМЕЩАЕТ КАКУЮ МОДЕЛЬ — СЧИТАЕТСЯ ЗДЕСЬ, ОДИН РАЗ НА ПОЛОСУ (J-29) ═══════
+   *
+   * ЗДЕСЬ, А НЕ У ЯЧЕЙКИ, ПО ТОЙ ЖЕ ПРИЧИНЕ, ПО КОТОРОЙ ЗДЕСЬ ЖИВЁТ РЯД ПРОСМОТРЩИКА: факт
+   * «эта миниатюра стоит вместо той модели» — свойство ПОЛОСЫ, а не ячейки, и вывести его из
+   * одной строки нельзя (контракт родства не несёт — довод в `threed/media.ts`). Провайдер уже
+   * держит полосу; второй читатель рядом разошёлся бы с первым молча.
+   *
+   * ПРОВАЙДЕР БЕЗ ПОЛОСЫ ОТДАЁТ ПУСТУЮ КАРТУ, И ЭТО ПРАВДА, А НЕ ЗАГЛУШКА: экран, которому
+   * полосу не дали, о 3D-прогонах карточки не знает ничего, и плитка ведёт себя как картинка.
+   */
+  const modelIndex = useMemo(() => threedModelIndex(band), [band]);
+
   return (
     <GalleryContext.Provider value={api}>
-      {children}
+      <ThreedModelIndexContext.Provider value={modelIndex}>{children}</ThreedModelIndexContext.Provider>
       <MediaViewer
         items={row?.items ?? []}
         index={row?.index ?? 0}
@@ -394,6 +408,19 @@ export interface PictureTileProps {
   editLabel?: string;
   /** Всё, что рисуется ПОВЕРХ кадра вызывающим (например, слой указаний). */
   children?: ReactNode;
+  /**
+   * ═══ ЛИЦО КАДРА, НАРИСОВАННОЕ ВЫЗЫВАЮЩИМ (J-12) ═══════════════════════════════════════════
+   *
+   * Заменяет ТОЛЬКО поверхность — не углы, не регистрацию в общем ряду просмотрщика, не зум.
+   * Заведено ради одного случая, и он не про оформление: карточка паттерна показывает плитку
+   * ЗАМОЩЁННОЙ 2×2, потому что вопрос к ней — «стык виден?», а на одном экземпляре у этого
+   * вопроса нет ответа вовсе. Замощение — это `background-repeat` по тому же адресу, что и
+   * `url`; `<img>` его нарисовать не может.
+   *
+   * ⚠ `url` ПРИ ЭТОМ ВСЁ РАВНО ОБЯЗАТЕЛЕН И ЗНАЧИМ: по нему решается, есть ли зум вообще
+   * (`zoomable`), и он же адресует `.glb`-ветку. Лицо — это КАК рисовать, а не ЧТО показывать.
+   */
+  face?: ReactNode;
 }
 
 function Corner({
@@ -442,6 +469,7 @@ export function PictureTile({
   cropLabel = 'crop',
   editLabel = 'edit',
   children,
+  face,
 }: PictureTileProps) {
   const key = useId();
   const ctx = useContext(GalleryContext);
@@ -468,6 +496,35 @@ export function PictureTile({
    */
   const model = isModelUrl(url);
 
+  /**
+   * ═══ ЗА ЭТОЙ КАРТИНКОЙ СТОИТ ФАЙЛ МОДЕЛИ (J-29) ═══════════════════════════════════════════
+   *
+   * Владелец: «в 3D MODELS OF THIS CARD на клик должен открываться просмотр 3д модели а сейчас
+   * открывает в медиа просмотре и там это не работает».
+   *
+   * ⚠ ВЕТКА ВЫШЕ ЗАКРЫВАЛА ТОЛЬКО ПОЛОВИНУ СЛУЧАЯ. `isModelUrl(url)` ловит прогон, у которого
+   * миниатюры НЕ ПРИШЛО, — там в `url` сам `.glb`. А обычный прогон 3D присылает и модель, и
+   * растр, и в списке рисуется РАСТР: адрес у него картиночный, признак не срабатывал, и
+   * единственная видимая плитка прогона вела в `<img>`-просмотрщик. Владелец кликает именно её.
+   *
+   * ОТВЕЧАЕТ ИНДЕКС ПОЛОСЫ, А НЕ ПРОП ЭКРАНА, и это то же решение, что закон углов десятью
+   * строками выше: плитку 3D-прогона рисуют четыре разных места, и проп, который надо вспомнить
+   * в каждом, возвращается забытым ровно в одном — то есть незаметно. Довод целиком в
+   * `./threed/model-index.ts`.
+   */
+  const behind = useModelBehind(url);
+  /** Адрес модели этой плитки: сам кадр, если он `.glb`, иначе модель, чей растр он замещает. */
+  const modelHref = model ? url : behind;
+  const opensModel = !!modelHref;
+  /**
+   * ⚠ У ПЛИТКИ, ЧЕЙ `url` — САМ `.glb`, ПОВЕРХНОСТИ НЕТ, И ЭТО НЕ ВКУС. Её лицо (ветка ниже) —
+   * не картинка, а коробка с ДВУМЯ СОБСТВЕННЫМИ органами: `open` и, главное, `download`. Слой
+   * `absolute inset-0 z-10` накрыл бы их обоих, и ссылка на файл, за который заплачено, перестала
+   * бы нажиматься — ровно то, чего комментарий у лица требует не допускать. Замерено пробой:
+   * P11 («open на плитке поднимает сцену») покраснела на первой же редакции этой правки.
+   */
+  const surfaceToModel = opensModel && !model;
+
   // Регистрация переигрывается на смене адреса кадра, иначе просмотрщик листал бы вчерашние
   // ссылки: строка истории переезжает с картинки на картинку, не размонтируясь.
   useEffect(() => {
@@ -476,12 +533,19 @@ export function PictureTile({
     // выглядело бы это как сломанный просмотрщик, а не как отсутствующая картинка.
     // Модель в ряд не встаёт ПО ТОЙ ЖЕ ПРИЧИНЕ: общий просмотрщик — это `<img>`, и `.glb` в ряду
     // дал бы человеку пустую сцену посреди листания, ничем не объяснённую.
-    if (!ctx || galleryGroup || !gallery?.src || isModelUrl(gallery.src) || !node) return;
+    //
+    // ⚠ И ПОСТЕР МОДЕЛИ ТОЖЕ НЕ ВСТАЁТ (J-29). Он картинка, листать его технически можно — но
+    // тогда у него было бы ДВА клика с разным смыслом (поверхность открывает модель, стрелка
+    // «дальше» приводит сюда же плоским кадром), и человек, дошедший до него листанием, увидел
+    // бы PNG вместо предмета, за который заплачено. Ряд обязан состоять из того, что в нём
+    // показывается одинаково.
+    if (!ctx || galleryGroup || !gallery?.src || isModelUrl(gallery.src) || opensModel || !node)
+      return;
     ctx.register(key, { node, items: [gallery] });
     return () => ctx.register(key, null);
-  }, [ctx, key, galleryGroup?.key, gallery?.src, gallery?.thumbnail, gallery?.alt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ctx, key, galleryGroup?.key, gallery?.src, gallery?.thumbnail, gallery?.alt, opensModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const zoomable = !!ctx && !!url && !model && (!!galleryGroup || !!gallery);
+  const zoomable = !!ctx && !!url && !opensModel && (!!galleryGroup || !!gallery);
   const openZoom = useCallback(() => {
     if (galleryGroup) ctx?.openAt(galleryGroup.key, galleryGroup.index);
     else ctx?.openAt(key);
@@ -490,6 +554,12 @@ export function PictureTile({
   return (
     <div
       ref={hostRef}
+      /* ОБЪЯВЛЕННЫЙ ЯКОРЬ КАДРА. Раньше единственным способом ткнуть в поверхность плитки был её
+         css-класс — то есть проба держалась за оформление и пережила бы правку смысла. */
+      data-picture-tile=''
+      /* И ОБЪЯВЛЕННОЕ СОСТОЯНИЕ: «мой клик ведёт в модель, а не в просмотрщик картинок» (J-29).
+         Флаг не заменяет пробу последствия — он даёт ей чем прицелиться. */
+      data-opens-model={opensModel || undefined}
       className={cn(
         'group relative border',
         selected ? 'border-2 border-textColor' : 'border-textInactiveColor',
@@ -529,6 +599,8 @@ export function PictureTile({
               </a>
             </div>
           </div>
+        ) : face ? (
+          face
         ) : url ? (
           <MediaComponent src={url} alt={alt} aspectRatio='auto' fit={fit} />
         ) : (
@@ -556,13 +628,21 @@ export function PictureTile({
           «везде по разному», против которого написан этот файл. Плитка без зума, но с `onOpen`,
           поверхность всё равно получает: свёрнутая колода обязана раскрываться нажатием в лист,
           есть у листа адрес картинки или нет. */}
-      {(zoomable || onOpen) && (
+      {/* ⚠ ПОРЯДОК ТРЁХ СМЫСЛОВ ПОВЕРХНОСТИ — ЭТО ДОВОД, А НЕ ПОРЯДОК НАПИСАНИЯ. `onOpen`
+          (раскрытие колоды) старше всего: пока лист свёрнут, за ним стоит не один предмет, и
+          открывать «его» нечего. Дальше — МОДЕЛЬ: если за кадром файл модели, поверхность ведёт
+          туда, потому что предмет здесь модель, а картинка — только её изображение (J-29). Зум
+          остаётся тем, чем был, для всего остального. */}
+      {(zoomable || onOpen || surfaceToModel) && (
         <button
           type='button'
           tabIndex={-1}
           aria-hidden='true'
-          onClick={onOpen ?? openZoom}
-          className={cn('absolute inset-0 z-10', onOpen ? 'cursor-pointer' : 'cursor-zoom-in')}
+          onClick={onOpen ?? (surfaceToModel ? () => setModelOpen(true) : openZoom)}
+          className={cn(
+            'absolute inset-0 z-10',
+            onOpen || surfaceToModel ? 'cursor-pointer' : 'cursor-zoom-in',
+          )}
         />
       )}
 
@@ -579,12 +659,31 @@ export function PictureTile({
       )}
 
       {/* Верх справа — РЯД, а не угол: зум и ✕ обязаны стоять рядом, не наезжая. */}
-      {(zoomable || onRemove) && (
+      {(zoomable || surfaceToModel || onRemove) && (
         <div className='absolute right-1 top-1 z-20 flex items-start gap-1'>
           {zoomable && (
             <Corner
               action={{ onClick: openZoom, ariaLabel: `zoom ${alt}`, title: 'zoom — open the viewer' }}
               label='zoom'
+              className=''
+            />
+          )}
+          {/* ОБЪЯВЛЕННЫЙ ОРГАН — УГЛОВАЯ КНОПКА, А НЕ ПОВЕРХНОСТЬ, и здесь это правило то же,
+              что у зума: поверхность `aria-hidden` и живёт только для мыши, а имя, фокус и
+              объявление читалке принадлежат кнопке. Слово другое, потому что и предмет другой:
+              «zoom» обещает ту же картинку крупнее, а здесь открывается модель.
+
+              У плитки, чей `url` — сам `.glb`, кнопки тут нет: её лицо (ветка выше) уже несёт
+              собственные `open` и `download`, и второй орган того же действия в углу был бы
+              вторым способом сделать одно. */}
+          {surfaceToModel && (
+            <Corner
+              action={{
+                onClick: () => setModelOpen(true),
+                ariaLabel: `open the 3D model of ${alt}`,
+                title: 'open the 3D model — orbit, zoom, download',
+              }}
+              label='open 3d'
               className=''
             />
           )}
@@ -606,8 +705,12 @@ export function PictureTile({
 
       {/* Окно монтируется только открытым: `three` грузится динамически, но и сама оболочка не
           обязана стоять по одной на каждую плитку сетки из двадцати. */}
-      {modelOpen && url && (
-        <ThreedModelModal url={url} title={alt || '3d model'} onClose={() => setModelOpen(false)} />
+      {modelOpen && modelHref && (
+        <ThreedModelModal
+          url={modelHref}
+          title={alt || '3d model'}
+          onClose={() => setModelOpen(false)}
+        />
       )}
     </div>
   );

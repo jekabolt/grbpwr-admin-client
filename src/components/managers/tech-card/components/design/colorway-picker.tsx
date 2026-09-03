@@ -2,6 +2,7 @@ import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-h
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
+import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
 import { assetThumb, fabricOfColorway } from './assets/model';
@@ -137,6 +138,24 @@ export function useColorwayChoice(
  * говорит «у этого колорвея занят хотя бы один слот» и ничего больше. Считать плиты по колорвею со
  * страницы ленты нельзя — она одна страница, — и число на чипе было бы правдоподобной неправдой.
  */
+/**
+ * ⚠ У ЭТОГО РЯДА ЧИПОВ НЕ ОСТАЛОСЬ НИ ОДНОГО ПРОДУКТОВОГО ВЫЗЫВАЮЩЕГО — И ЭТО СОВМЕСТНЫЙ ЭФФЕКТ
+ * ДВУХ ВОЛН ОДНОГО КРУГА, КОТОРЫЙ НИ ОДНА ИЗ НИХ ПО ОТДЕЛЬНОСТИ НЕ ВИДИТ.
+ *
+ * Замерено на ОБЪЕДИНЁННОМ дереве, а не на своей половине:
+ *   · J-20 (эта волна) снял ряд с экрана фабрик-рендера — там теперь `ColorwaySelect`, компактный
+ *     адрес блока в его заголовочной линейке;
+ *   · J-27 (соседняя волна, вкладка 3D) снял поле колорвея оттуда целиком — `threed-studio.tsx`
+ *     больше не упоминает этот компонент вовсе.
+ * Читателей осталось двое, и оба — стенды проб (`cw-stand.tsx`).
+ *
+ * ЧТО С ЭТИМ ДЕЛАТЬ — РЕШЕНИЕ РЕВЬЮ ОБЪЕДИНЁННОГО ДИФФА, А НЕ ОДНОЙ ИЗ ВОЛН. Снести его отсюда
+ * значило бы править файл под чужой незакрытой волной; оставить молча — завести ровно тот мёртвый
+ * орган, против которого написан весь этот круг. Поэтому он назван вслух здесь.
+ *
+ * `colorwayLabel` / `colorwaySubtitle` / `useColorwayChoice` из этого же файла ЖИВЫ и нужны обеим
+ * волнам — снос обязан коснуться ровно этой функции, а не файла.
+ */
 export function ColorwayPicker({
   band,
   choice,
@@ -250,5 +269,83 @@ export function ColorwayPicker({
         stated && <Hint>· marks a colourway whose render bench already holds a plate</Hint>
       )}
     </FieldRow>
+  );
+}
+
+/**
+ * ═══ ТОТ ЖЕ ВЫБОР, НО КАК АДРЕС БЛОКА, А НЕ КАК РЯД НАСТРОЙКИ (J-20) ══════════════════════════
+ *
+ * Владелец: «COLOURWAY и фабрик должен быть в одной строке настройки как два плейсхолдера … я не
+ * понимаю зачем там 3 вообще двух достаточно». Ряд COLOURWAY на экране фабрик-рендера был первым
+ * из трёх, и он единственный из трёх НЕ отвечал на вопрос «из чего этот рендер»: он отвечал на
+ * «чей он». Это адрес, а не ингредиент.
+ *
+ * ПОЭТОМУ ОСЬ НЕ СНЯТА, А ПЕРЕЕХАЛА В ЗАГОЛОВОЧНУЮ ЛИНЕЙКУ БЛОКА (`Section action`) — то место,
+ * которое DESIGN.md отдаёт фильтрам и счётчикам. Снять ось совсем было нельзя: ею ключуются
+ * верстак рендеров (`0349`/`0356`), список выходов, ворота 3D и `params.colorway_id` каждого
+ * прогона; «двух достаточно» сказано про настройки ткани, а не про то, чей это рендер.
+ *
+ * ⚠ ЗНАЧЕНИЕ ВСЕГДА ЕСТЬ СРЕДИ ПУНКТОВ, И ЭТО НЕ ПЕДАНТИЧНОСТЬ. Radix держит рядом со списком
+ * скрытый нативный `<select>`; текущее значение, которого нет среди `<option>`, он принять не
+ * может и присылает обратно ПУСТУЮ строку как «выбор человека». `no colourway` — полноценный
+ * пункт со значением `'0'`, а не отсутствие пункта, поэтому выразить такое состояние нечем.
+ *
+ * ⚠ ЧИПОВЫЙ РЯД (`ColorwayPicker`) ЖИВ И НЕ ТРОНУТ: на 3D он по-прежнему первый ряд экрана, и его
+ * снятие там — отдельный пункт владельца (J-27), отдельная волна и отдельный замер.
+ */
+export function ColorwaySelect({
+  band,
+  choice,
+  disabled,
+}: {
+  band: GetDesignBandResponse;
+  choice: ColorwayChoice;
+  disabled?: boolean;
+}): JSX.Element {
+  const { colorwayId, setColorwayId, colorways, loading } = choice;
+  const stated = !!band.renderBenchColorwayIds;
+  const has = (id: number) => renderBenchOccupied(band.renderBenchColorwayIds, id);
+
+  if (loading) {
+    return (
+      <Text size='micro' variant='label' component='span' className='normal-case'>
+        reading this card’s colourways…
+      </Text>
+    );
+  }
+
+  return (
+    <span data-cw-picker={colorwayId} className='inline-flex items-center gap-2'>
+      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+        colourway
+      </Text>
+      <span className='w-[190px]'>
+        <SelectComponent
+          name='design-render-colourway'
+          value={String(colorwayId)}
+          disabled={disabled}
+          items={[
+            {
+              value: String(COLORWAY_NONE),
+              label: `no colourway${stated && has(COLORWAY_NONE) ? ' ·' : ''}`,
+            },
+            ...colorways.map((c) => {
+              const id = c.colorwayId ?? 0;
+              return {
+                value: String(id),
+                label: `${colorwayLabel(c)}${stated && has(id) ? ' ·' : ''}`,
+              };
+            }),
+          ]}
+          onValueChange={(value: string) => {
+            /* Пустая строка сюда доехать не может (см. шапку), но если доедет — это НЕ выбор
+               человека, и молчание честнее записи. */
+            if (!value) return;
+            setColorwayId(Number(value) || COLORWAY_NONE);
+          }}
+          fullWidth
+        />
+      </span>
+    </span>
   );
 }
