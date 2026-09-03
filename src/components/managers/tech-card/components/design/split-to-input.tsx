@@ -1,7 +1,7 @@
 import type { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
@@ -93,19 +93,41 @@ export function useSplitToInput({
    * блок референсов рисовал бы «media #N not resolved» на строке, которую сам же завёл.
    */
   onAccepted,
+  /**
+   * ═══ КРОП ЗАМЕЩАЕТ, А НЕ ДОПИСЫВАЕТ (J-8) ═══════════════════════════════════════════════════
+   *
+   * Владелец: «в INPUT — REFERENCES должна быть возможность кропнуть картинку в тамбнейле».
+   * «Кропнуть картинку» — это ОДНА картинка до и ОДНА после, на том же месте; разрез, который
+   * дописывает кроп в конец списка и оставляет исходник рядом, — другой жест (он и так есть, это
+   * `split`).
+   *
+   * ПОЭТОМУ ЗАМЕЩЕНИЕ ДЕЛАЕТ ВЫЗЫВАЮЩИЙ, А НЕ ЭТОТ ХУК. Строка входа — это `moodboardMedia`
+   * КАРТОЧКИ плюс роль и записка в `design_reference`, и обе половины принадлежат блоку
+   * референсов: у хука нет ни номера строки, ни её роли, ни её записки. Хук отдаёт факт («вот
+   * кроп, вот из чьего медиа он вырезан») и не решает за экран, что с ним делать.
+   */
+  onCropped,
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
   addToInput?: boolean;
   onAccepted?: (media: common_MediaFull[]) => void;
+  onCropped?: (crop: common_DesignPicture, sourceMediaId: number) => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const { registerUpload } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
 
-  const [target, setTarget] = useState<{ picture: common_DesignPicture; handle?: string } | null>(
-    null,
-  );
+  const [target, setTarget] = useState<{
+    picture: common_DesignPicture;
+    handle?: string;
+    /** `crop` — один кадр, без вида, замещающий исходную строку входа (J-8). */
+    mode: 'split' | 'crop';
+    /** Медиа, ИЗ КОТОРОГО режут. У кропа это адрес строки, которую предстоит заместить. */
+    sourceMediaId: number;
+    /** Цена жеста словами вызывающего — рисуется в окне ДО реза. */
+    note?: ReactNode;
+  } | null>(null);
   /** Чьё медиа сейчас регистрируется — кнопке-инициатору, чтобы показать «split…» и не дать второй клик. */
   const [registering, setRegistering] = useState<number | null>(null);
 
@@ -136,16 +158,22 @@ export function useSplitToInput({
 
   /** Дверь для плит, у которых картинка полосы уже есть (FLAT SLOTS): регистрация пропускается. */
   function openForPicture(picture: common_DesignPicture, handle?: string) {
-    setTarget({ picture, handle });
+    setTarget({ picture, handle, mode: 'split', sourceMediaId: picture.media?.id ?? 0 });
   }
 
   /** Дверь для референсов: у входа только `media_id`, картинку полосы сначала надо получить. */
-  function openForMedia(full: common_MediaFull, handle?: string) {
+  function openForMedia(
+    full: common_MediaFull,
+    handle?: string,
+    opts?: { mode?: 'split' | 'crop'; note?: ReactNode },
+  ) {
     const mediaId = full.id;
     if (mediaId == null) return;
+    const mode = opts?.mode ?? 'split';
+    const note = opts?.note;
     const existing = findBandPicture(mediaId) ?? registered.current.get(mediaId)?.picture;
     if (existing) {
-      openForPicture(existing, handle);
+      setTarget({ picture: existing, handle, mode, sourceMediaId: mediaId, note });
       return;
     }
     let entry = registered.current.get(mediaId);
@@ -174,7 +202,7 @@ export function useSplitToInput({
             return;
           }
           keep.picture = picture;
-          openForPicture(picture, handle);
+          setTarget({ picture, handle, mode, sourceMediaId: mediaId, note });
         },
         // Слова отказа уже показал шов записи (`useDesignWrites.onError`); здесь — только снять
         // «split…» с кнопки, чтобы она не осталась вечно занятой.
@@ -271,15 +299,41 @@ export function useSplitToInput({
   }
 
 
+  /**
+   * КРОП — РОВНО ОДНА КАРТИНКА НА ВЫХОДЕ. Окно кропа отпускает только один кадр (`ready` там —
+   * `frames.length === 1`), поэтому список из двух и больше здесь означал бы, что сервер сделал
+   * не то, о чём его просили; молча взять первую значило бы скрыть это. Пустой список — то же
+   * самое, только вслух: строку замещать нечем.
+   */
+  function handleCrop(pictures: common_DesignPicture[], sourceMediaId: number) {
+    const withMedia = pictures.filter((p) => p.media?.id != null);
+    if (withMedia.length !== 1) {
+      showMessage(
+        withMedia.length
+          ? `the crop came back as ${withMedia.length} pictures — the reference is left as it was`
+          : 'the crop was filed but no picture came back — the reference is left as it was',
+        'error',
+      );
+      return;
+    }
+    onCropped?.(withMedia[0], sourceMediaId);
+  }
+
   const modal = target ? (
     <SplitModal
       techCardId={techCardId}
       picture={target.picture}
       handle={target.handle}
+      mode={target.mode}
+      note={target.note}
       open
       onOpenChange={(open) => !open && setTarget(null)}
       forInput={addToInput}
-      onSplit={handleCrops}
+      onSplit={
+        target.mode === 'crop'
+          ? (pictures) => handleCrop(pictures, target.sourceMediaId)
+          : handleCrops
+      }
     />
   ) : null;
 

@@ -124,6 +124,7 @@ import {
   pointInPolygon,
   selectionPathD,
   settleLasso,
+  thinLasso,
   type SelectionArea,
 } from './vector-lasso';
 import {
@@ -148,7 +149,9 @@ import {
   markRect,
   maskBox,
   nibRadius,
+  PAPER_INK,
   paintAlong,
+  smoothSegment,
   rasterCtx,
   rasterBox,
 
@@ -183,11 +186,12 @@ import {
   DEFAULT_INK,
   DEFAULT_RATIO,
   MAX_STROKES_BYTES,
-  STITCHES,
+  HOTKEYS,
   DEFAULT_GAUGE,
   DEFAULT_STEP,
   clampGauge,
   stitchMinLength,
+  stitchName,
   strokeGauge,
   strokeStep,
   clampStep,
@@ -195,6 +199,7 @@ import {
   readInk,
   readLayer,
   settleTrace,
+  thinTrace,
   strokeGeometry,
   strokePolyline,
   writeLayer,
@@ -372,7 +377,7 @@ const TOOL_HINT: Record<Tool, string> = {
   clone: 'copy the LINES under the source and lay them under your hand',
   paint: 'paint PIXELS with the ink, size, hardness and opacity in hand',
   erase:
-    'rub away everything under the nib — the pixels go to transparency, the photo included, and the drawn lines are cut through. Lines are only cut at full opacity (a line cannot be half-erased), never while the lines layer is hidden, and never outside an active area',
+    'rub away everything under the nib — the pixels are rubbed to PAPER WHITE, the photo included, and the drawn lines are cut through. Lines are only cut at full opacity (a line cannot be half-erased), never while the lines layer is hidden, and never outside an active area',
   stamp: 'copy PIXELS from the source to under your hand, as in photoshop',
   fill: 'flood the area under the cursor with the ink in hand — an active area holds it in',
   heal:
@@ -420,8 +425,52 @@ const isRasterTool = (t: Tool): t is 'paint' | 'erase' | 'stamp' =>
  * «нужен ли растр» спрашивается отдельным предикатом — иначе она поехала бы по пути scratch→stage,
  * которого у неё нет.
  */
+/**
+ * ⚠ КРОП ЗДЕСЬ ЕСТЬ, ХОТЯ В ПОЛОСЕ ОН СТОИТ НЕ В ПИКСЕЛЯХ (круг 15, J-32).
+ *
+ * Владелец: «в эдит моде когда мы хотим увеличить полотно через кроп … после применения оно не
+ * увеличивает картинку а просто растягивает то что было». Дословно так и было — и не с прошлого
+ * круга, а с самого G-4. Кроп ПЕРЕСЧИТЫВАЕТ ХОЛСТ (`expandRasterLayer`), а холста на плате с
+ * фотографией, к которой не притрагивались пиксельным инструментом, ПРОСТО НЕТ: ветка
+ * `layer === null` в `applyCropFrame` меняла только форму платы, подложку растягивал
+ * `objectFit:'fill'`, а сохранение брало размер у НАТУРАЛЬНЫХ размеров картинки. Замерено: плата
+ * 0.8 → 1.046, `stretchX` 1.3075, аплоад 800×1000 вместо 1046×1000.
+ *
+ * Дефект не находили два круга по одной причине: `qa-crop` перед КАЖДЫМ кропом нажимает `brush`
+ * (`qa-crop.mjs:189, 391`), а `switchTool('brush')` заводит холст. Проба сама создавала состояние,
+ * в котором дефекта нет. Владелец открывает фотографию и берёт кроп сразу.
+ *
+ * Отсюда: кроп заводит растр, как всякий инструмент, который его ТРОГАЕТ, — и цена названа вслух:
+ * с этого круга кроп на плате с фотографией ЗАВИСИТ ОТ ПРОКСИ ровно так же, как кисть, и
+ * отказывает теми же словами.
+ */
+/**
+ * ПРЯМОУГОЛЬНИК ВЬЮПОРТА, В КОТОРОМ ЖИВЁТ МИР, — ОДИН НА ВСЕХ ЧИТАТЕЛЕЙ (круг 15, J-36).
+ *
+ * ⚠ РАМКА В 1 px ВХОДИЛА В `getBoundingClientRect`, НО НЕ В МИР. Узел вьюпорта несёт
+ * `border border-borderColor`; `getBoundingClientRect().left` — ВНЕШНИЙ край рамки, а мир
+ * (`absolute left-0 top-0`) стоит от ВНУТРЕННЕГО. `toWorld` вычитал внешний — и всё, что рисует
+ * редактор, оказывалось на 1 px правее и ниже указателя. Замерено: круг ниба (+1,+1) px и
+ * отпечаток (+0.98,+0.98) px на зуме 0.524, (+1,+1.01) на 0.905; между собой они сходились до
+ * 0.02 px, то есть пара «превью и результат» была ЦЕЛА, а мимо шли ОБА. В юнитах платы это
+ * 1.9 на вписывании и 0.125 на 8× — «выделяем не так ровно, как хотелось бы» дословно.
+ *
+ * Шесть чтений прямоугольника у шести читателей (вписывание, колесо, зум кнопкой, две обёртки
+ * координаты, отступ вида) сводятся сюда. Размер берётся `clientWidth/clientHeight` по тому же
+ * доводу: это коробка СОДЕРЖИМОГО, а вписывать надо в неё, а не в неё плюс две рамки.
+ */
+const viewportRect = (vp: HTMLElement) => {
+  const r = vp.getBoundingClientRect();
+  return {
+    left: r.left + vp.clientLeft,
+    top: r.top + vp.clientTop,
+    width: vp.clientWidth,
+    height: vp.clientHeight,
+  };
+};
+
 const needsRaster = (t: Tool): boolean =>
-  isRasterTool(t) || t === 'fill' || t === 'heal' || t === 'patch';
+  isRasterTool(t) || t === 'fill' || t === 'heal' || t === 'patch' || t === 'crop';
 
 /**
  * МАЖУЩИЙ ЖЕСТ — те, у кого есть протяжка по холсту: буфер мазка копится в `scratch`, превью
@@ -734,6 +783,15 @@ export function VectorModal({
 
   const [strokes, setStrokes] = useState<VectorStroke[]>([]);
   const [tool, setTool] = useState<Tool>('line');
+  /**
+   * ИНСТРУМЕНТ В РУКЕ, ОТВЕЧАЮЩИЙ ПРО СЕЙЧАС. Состояние React отвечает про кадр, в котором
+   * замыкание родилось, а с круга 15 у кропа есть ОЖИДАНИЕ между нажатием чипа и открытием
+   * рамки: холст заводится асинхронно. За это время рука успевает взять другой инструмент, и
+   * рамка, открытая по старому значению, встала бы поверх чужого жеста. Ссылка пишется в
+   * `switchTool` СИНХРОННО — до всякой перерисовки.
+   */
+  const toolRef = useRef<Tool>('line');
+  toolRef.current = tool;
   const [selected, setSelected] = useState<number | null>(null);
   /**
    * Кисть в руке: вид шва и «строительность» СЛЕДУЮЩЕГО штриха.
@@ -798,7 +856,24 @@ export function VectorModal({
   const [ratio, setRatio] = useState<number>(wireRatio);
   const [unreadable, setUnreadable] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, putRefusal] = useState<string | null>(null);
+  /**
+   * ДВЕРЬ ВНУТРИ ОТКАЗА. Отказ, называющий выход словами, и отказ, дающий его нажатием, — разные
+   * экраны для руки, и второй здесь возможен ровно потому, что выход ОДИН и он уже есть в шапке.
+   */
+  const [refusalDoor, setRefusalDoor] = useState<'picture' | null>(null);
+  /**
+   * ⚠ ТЕКСТ ОТКАЗА И ЕГО ДВЕРЬ СТАВЯТСЯ ОДНИМ ВЫЗОВОМ, И ЭТО НЕ УДОБСТВО.
+   *
+   * Отказов в этом файле десять, и гасят они друг друга в любом порядке. Разведи текст и кнопку
+   * по двум сеттерам — и первый же отказ, поставленный без кнопки поверх кропового, оставил бы
+   * «save as a new picture» под ЧУЖИМИ словами: кнопка, обещающая одно, под текстом про другое.
+   * Забыть о ней здесь нельзя по устройству — двери без текста не существует.
+   */
+  const setRefusal = useCallback((text: string | null, door: 'picture' | null = null) => {
+    putRefusal(text);
+    setRefusalDoor(text ? door : null);
+  }, []);
   /**
    * ФАЙЛ СЛОЯ — авторитетный SVG (`source_media_id`), когда слой им рождён (машинная перерисовка
    * или импорт). Медиа-ид и, когда полоса его ещё несёт, URL: у контракта нет чтения медиа по id
@@ -1132,6 +1207,49 @@ export function VectorModal({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const contentOff = useRef<(() => void) | null>(null);
+  /**
+   * ЩИПОК НА ХРОМЕ РЕДАКТОРА НЕ ЗУМИТ САМО ОКНО (круг 15, J-38).
+   *
+   * Владелец: «когда мы случайно делаем пинч не на холсте, а на верхней и боковой панелях, само
+   * окно не должно в принципе приближаться». Замерено: единственный слушатель колеса висел на
+   * ВЬЮПОРТЕ, и над рейкой и над шапкой ctrl+wheel — так Chromium отдаёт щипок трекпада —
+   * доходил до документа с `defaultPrevented === false`: две поверхности из трёх.
+   *
+   * ⚠ CALLBACK-РЕФ, А НЕ ЭФФЕКТ, И ЭТО ТОТ ЖЕ УРОК, ЧТО У `attachViewport`. Содержимое диалога
+   * живёт в ПОРТАЛЕ Radix и монтируется коммитом позже: эффект, читающий `contentRef.current`
+   * в свой единственный прогон, застаёт `null` — ровно так уже дважды молча не вешался слушатель
+   * колеса на холсте.
+   *
+   * ⚠ ОБЫЧНЫЙ СКРОЛЛ РЕЙКИ ЖИВЁТ. Отнимать `wheel` целиком означало бы, что рейка перестала
+   * прокручиваться, — и игла «prevent всё» зеленела бы на пробе, доказывающей ровно обратное
+   * тому, что нужно. Поэтому условие на `ctrlKey || metaKey`, а контроль пробы — что рейка
+   * ПРОКРУТИЛАСЬ на обычном колесе.
+   *
+   * ⚠ SAFARI ЩИПОК ШЛЁТ НЕ КОЛЕСОМ, а `gesturestart/gesturechange/gestureend`, которых не слушал
+   * никто. Headless Chromium их не воспроизводит вовсе — это честно ЗАМЕРИТЬ здесь нельзя, и
+   * живой смоук на маке владельца остаётся обязательным.
+   */
+  const attachContent = useCallback((node: HTMLDivElement | null) => {
+    contentRef.current = node;
+    contentOff.current?.();
+    contentOff.current = null;
+    if (!node) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+    };
+    const onGesture = (e: Event) => e.preventDefault();
+    node.addEventListener('wheel', onWheel, { passive: false });
+    node.addEventListener('gesturestart', onGesture as EventListener);
+    node.addEventListener('gesturechange', onGesture as EventListener);
+    node.addEventListener('gestureend', onGesture as EventListener);
+    contentOff.current = () => {
+      node.removeEventListener('wheel', onWheel);
+      node.removeEventListener('gesturestart', onGesture as EventListener);
+      node.removeEventListener('gesturechange', onGesture as EventListener);
+      node.removeEventListener('gestureend', onGesture as EventListener);
+    };
+  }, []);
 
   /** Вид: мир во вьюпорте. Реф + императивный трансформ — панорама не должна перерисовывать SVG. */
   const viewRef = useRef<View>({ pan: { x: 0, y: 0 }, zoom: 1 });
@@ -1412,18 +1530,44 @@ export function VectorModal({
 
   // ── вид: применение, вписывание, зум ───────────────────────────────────────────────────────
 
+  /**
+   * ГДЕ УКАЗАТЕЛЬ СТОИТ СЕЙЧАС, В КООРДИНАТАХ ОКНА (круг 15, J-36, дефект 2).
+   *
+   * Превью инструмента (круг ниба, резинка пера, попадание в рамку) считалось ОДИН РАЗ — на
+   * `pointermove` — и с тех пор жило в координатах МИРА. Панорама колесом, зум щипком, кнопками
+   * и клавишами, отступ вида после кропа и вписывание двигают мир ПОД НЕПОДВИЖНЫМ УКАЗАТЕЛЕМ:
+   * событий указателя при этом нет ни одного, и круг оставался на старом месте мира, а нажатие
+   * брало точку под указателем. Замерено: `wheel(60,40)` без движения мыши — круг уезжает на
+   * (−120,−80) px, отпечаток ложится под указатель; расхождение 229×153 юнита платы. Это и есть
+   * «вижу превью кисти на ховер полотна, но оттиск появляется не там, где было превью».
+   *
+   * Ссылка гасится уходом курсора: превью, пересчитанное для указателя за пределами холста, было
+   * бы кругом, висящим на кромке, — ровно тем, ради чего `onPointerLeave` его и снимает.
+   */
+  const lastClient = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * ⚠ ПЕРЕСЧЁТ ЗОВЁТСЯ ССЫЛКОЙ, А НЕ ПРЯМО. `applyView` объявлен раньше всего, что читает
+   * инструмент в руке и форму платы, и обязан остаться `useCallback([])` — он висит на узле через
+   * `applyViewRef` и в `ResizeObserver`. Ссылка на живое замыкание — единственный способ дать ему
+   * СЕГОДНЯШНИЙ пересчёт, не потащив в его зависимости половину экрана.
+   */
+  const refreshHoverRef = useRef<() => void>(() => {});
+
   const applyView = useCallback(() => {
     const world = worldRef.current;
     if (!world) return;
     const { pan, zoom } = viewRef.current;
     world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
     setZoomPct(Math.round(zoom * 100));
+    /* ОДНА ДВЕРЬ: всякий писатель вида уже проходит здесь, поэтому и превью пересчитывается
+       здесь — иначе следующий способ подвинуть мир снова забыли бы. */
+    refreshHoverRef.current();
   }, []);
 
   const fitPlate = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    const r = vp.getBoundingClientRect();
+    const r = viewportRect(vp);
     if (r.width < 2 || r.height < 2) return;
     viewRef.current = fitView(
       { x: 0, y: 0, w: PLATE_W, h: PLATE_W / (ratio || DEFAULT_RATIO) },
@@ -1513,7 +1657,7 @@ export function VectorModal({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
-        const r = node.getBoundingClientRect();
+        const r = viewportRect(node);
         viewRef.current = zoomAt(
           viewRef.current,
           Math.exp(-e.deltaY * 0.0022),
@@ -1543,7 +1687,7 @@ export function VectorModal({
     (factor: number) => {
       const vp = viewportRef.current;
       if (!vp) return;
-      const r = vp.getBoundingClientRect();
+      const r = viewportRect(vp);
       viewRef.current = zoomAt(
         viewRef.current,
         factor,
@@ -1590,7 +1734,7 @@ export function VectorModal({
   const frameAt = (e: { clientX: number; clientY: number }): [number, number] => {
     const vp = viewportRef.current;
     if (!vp) return [0, 0];
-    const w = toWorld(e.clientX, e.clientY, vp.getBoundingClientRect(), viewRef.current);
+    const w = toWorld(e.clientX, e.clientY, viewportRect(vp), viewRef.current);
     return [clamp01(w.x / PLATE_W), clamp01(w.y / plateH)];
   };
 
@@ -1602,7 +1746,7 @@ export function VectorModal({
   const frameAtFree = (e: { clientX: number; clientY: number }): [number, number] => {
     const vp = viewportRef.current;
     if (!vp) return [0, 0];
-    const w = toWorld(e.clientX, e.clientY, vp.getBoundingClientRect(), viewRef.current);
+    const w = toWorld(e.clientX, e.clientY, viewportRect(vp), viewRef.current);
     return [w.x / PLATE_W, w.y / plateH];
   };
 
@@ -1641,6 +1785,50 @@ export function VectorModal({
 
   const applyUndoResult = useCallback(
     (res: NonNullable<UndoResult>) => {
+      /**
+       * СМЕНА ЛИСТА ОТМЕНЯЕТСЯ ЦЕЛИКОМ, ОДНИМ КАДРОМ (круг 15, J-34).
+       *
+       * Холст, штрихи и форма платы меняются ВМЕСТЕ: подставь их по одному, и между двумя
+       * присваиваниями существовал бы кадр, в котором штрихи считаны в долях нового листа, а
+       * холст ещё старый, — то есть ровно та рассинхронизация, из-за которой круг G-4 ленту и
+       * сносил. Всё, что держало координаты старого листа (маска, область, точка отрыва, живой
+       * жест), здесь же и гасится.
+       *
+       * ⚠ `expanded` СТАНОВИТСЯ ПРОИЗВОДНЫМ ОТ ФОРМЫ, А НЕ ОТ ФАКТА КРОПА. Флаг запирает «save the
+       * drawing only», и если бы он оставался взведённым после отмены, человек, вернувший лист к
+       * подложке, остался бы заперт в «save as a new picture» навсегда — за жест, который он уже
+       * отменил.
+       */
+      if (res.kind === 'sheet') {
+        rasterRef.current = res.layer;
+        strokesRef.current = res.strokes;
+        setStrokes(res.strokes);
+        setRatio(res.ratio);
+        setRasterReady(!!res.layer);
+        maskRef.current = null;
+        liveRef.current = null;
+        setSel(null);
+        lastDropped.current = null;
+        pressDropped.current = false;
+        lastMark.current = null;
+        setNibHover(null);
+        putTrace(null);
+        putPen(null);
+        putPenHover(null);
+        putNodeEdit(null);
+        setStampSrc(null);
+        stampOffset.current = null;
+        expandedRef.current = res.expanded;
+        setExpanded(res.expanded);
+        rasterDirtyRef.current = true;
+        setRasterDirty(true);
+        paintView();
+        /* Вписывание — ссылкой: `fitPlate` читает форму платы из состояния, а `setRatio` выше в
+           этом же кадре ещё не перерисовал его. Перевписывание по новой форме доделает
+           `useLayoutEffect` на `ratio` — тот же порядок, каким живёт сам кроп. */
+        fitPlateRef.current();
+        return;
+      }
       if (res.kind === 'lines' || res.kind === 'both') {
         strokesRef.current = res.strokes;
         setStrokes(res.strokes);
@@ -2055,32 +2243,96 @@ export function VectorModal({
    */
   const lastMark = useRef<{ tool: Tool; at: [number, number] } | null>(null);
 
+  /**
+   * СЭМПЛЫ ТЕКУЩЕГО ПИКСЕЛЬНОГО ЖЕСТА — ОТДЕЛЬНО ОТ `trace`.
+   *
+   * `trace` — это то, что ПОКАЗЫВАЕТСЯ и что уйдёт в штрих; здесь копится то, по чему кладётся
+   * КРАСКА, и это разные списки: у линии `trace` держит две точки, а рука прошла двадцать, и
+   * сплайн по двум точкам — прямая. Держать оба в одном списке значило бы выбирать, кому соврать.
+   */
+  const dabSamples = useRef<[number, number][]>([]);
+
   /** Начало пиксельного жеста: буфер чист, коробка пуста, режим и непрозрачность зафиксированы. */
   const beginRasterGesture = (t: Tool) => {
     gestureToolRef.current = t;
+    dabSamples.current = [];
     const layer = rasterRef.current;
     if (!layer) return;
     clearGesture(layer);
     liveRef.current = { mode: paintModeOf(t), opacity: t === 'heal' ? HEAL_PREVIEW_ALPHA : opacity / 100 };
   };
 
-  /** Продолжение жеста: в буфер уходит ТОЛЬКО НОВЫЙ отрезок следа, а не весь след заново. */
-  const growRasterGesture = (t: Tool, from: [number, number], to: [number, number]) => {
+  /** Продолжение жеста: в буфер уходит ТОЛЬКО НОВЫЙ участок следа, а не весь след заново. */
+  const growRasterGesture = (t: Tool, path: readonly [number, number][]) => {
     const layer = rasterRef.current;
     if (!layer) return;
+    if (path.length < 2) return;
     const nibSpec = {
       r: nibRadius(nib, layer),
       hardness: hardness / 100,
-      ink: t === 'heal' ? HEAL_PREVIEW_INK : readInk(ink) ?? DEFAULT_INK,
+      /* ЛАСТИК РИСУЕТ БУМАГОЙ (круг 15, J-33). Цвет назван ЗДЕСЬ, у ниба, а не веткой композита в
+         `commitStage`: композит у кисти и ластика теперь один, и различает их ровно то, чем они
+         красят, — плюс резка линий на отпускании, которая осталась ластику одному. */
+      ink:
+        t === 'heal'
+          ? HEAL_PREVIEW_INK
+          : t === 'erase'
+            ? PAPER_INK
+            : readInk(ink) ?? DEFAULT_INK,
     };
     if (t === 'stamp') {
       const off = stampOffset.current;
       if (!off) return;
-      cloneAlong(layer, [from, to], off, nibSpec);
+      cloneAlong(layer, path, off, nibSpec);
     } else {
-      paintAlong(layer, [from, to], nibSpec);
+      paintAlong(layer, path, nibSpec);
     }
     scheduleView();
+  };
+
+  /**
+   * ПУТЬ КИСТИ СТРОИТСЯ СПЛАЙНОМ, А НЕ ОТРЕЗКАМИ (круг 15, J-35).
+   *
+   * ⚠ ЦЕНА НАЗВАНА: КРАСКА ОТСТАЁТ РОВНО НА ОДИН СЭМПЛ. Сегмент между `p[n-3]` и `p[n-2]`
+   * определён только тогда, когда пришёл `p[n-1]` — таково устройство любой интерполяции по
+   * четырём точкам. Шестьдесят герц это 16 мс; так живёт фотошоп, и это несравнимо дешевле, чем
+   * рисовать хордой и потом «сглаживать» уже положенную краску, которой не отменить.
+   * Хвост дотягивается на отпускании: без этого конец мазка молча терялся бы.
+   *
+   * ⚠ ВСЕ АППАРАТНЫЕ СЭМПЛЫ, А НЕ КАДРЫ. `getCoalescedEvents()` отдаёт то, что устройство успело
+   * прислать между кадрами: у планшета и трекпада их 2-8 на кадр, и ломаная по ним уже вдвое
+   * короче ещё до всякого сплайна. У синтетической мыши Playwright их нет — там список из одного
+   * события, и путь тождественно совпадает с прежним. Это записано в ожиданиях иглы `M45`.
+   */
+  const feedRasterSamples = (t: Tool, pts: readonly [number, number][]) => {
+    const box = rasterRef.current;
+    if (!box) return;
+    const buf = dabSamples.current;
+    for (const at of pts) {
+      buf.push(at);
+      if (buf.length === 2) {
+        /* Первый отрезок контекста не имеет вовсе: до него точек нет. Квадратичный к концу —
+           это тот же CR с удвоенной первой точкой. */
+        growRasterGesture(t, [buf[0], buf[1]]);
+        continue;
+      }
+      if (buf.length < 4) continue;
+      const n = buf.length;
+      const seg = smoothSegment(buf[n - 4], buf[n - 3], buf[n - 2], buf[n - 1], box);
+      growRasterGesture(t, [buf[n - 3], ...seg]);
+    }
+  };
+
+  /** Дотянуть хвост: последний сегмент, у которого не было точки-контекста справа. */
+  const flushRasterSamples = (t: Tool) => {
+    const box = rasterRef.current;
+    const buf = dabSamples.current;
+    const n = buf.length;
+    if (box && n >= 3) {
+      const seg = smoothSegment(buf[n - 3], buf[n - 2], buf[n - 1], buf[n - 1], box);
+      growRasterGesture(t, [buf[n - 2], ...seg]);
+    }
+    dabSamples.current = [];
   };
 
   /**
@@ -2216,9 +2468,21 @@ export function VectorModal({
     };
   }, [brush, dashed, ink, gauge, step, stepOwn]);
 
+  /**
+   * ПОРОГ ПРОРЕЖИВАНИЯ — «НЕ ХУЖЕ 0.75 ЭКРАННОГО ПИКСЕЛЯ НА ЭТОМ ЗУМЕ», В ЮНИТАХ ПЛАТЫ.
+   *
+   * ОДНО ЧИСЛО НА ЛАССО, СЛЕД РУКИ И НИБ — потому что человек рисует их одной рукой и на одном
+   * приближении, и три разных порога означали бы, что обводка, линия и ластик срезают углы
+   * по-разному на одном и том же жесте. Пол в пол-юнита: ниже него прореживание перестаёт
+   * выбрасывать шум и начинает хранить дрожь руки, а вместе с ней — вес документа.
+   */
+  const thinEps = () => Math.max(0.5, 0.75 / (viewRef.current.zoom || 1));
+
   const commitTrace = useCallback(
     (pts: [number, number][], asLine: boolean, livePaint: typeof paint) => {
-      const settled = asLine ? [pts[0], pts[pts.length - 1]] : settleTrace(pts);
+      const settled = asLine
+        ? [pts[0], pts[pts.length - 1]]
+        : settleTrace(pts, { w: PLATE_W, h: plateH }, thinEps());
       if (settled.length < 2) return;
       // Two identical endpoints are a click, not a line — a zero-length path draws nothing and can
       // never be selected again, so it would sit in the layer for ever as an invisible row.
@@ -2242,7 +2506,10 @@ export function VectorModal({
         },
       ]);
     },
-    [commitLines],
+    /* `plateH` и `thinEps` — в зависимостях, а не в ссылках: замыкание, замороженное на форме
+       позапрошлой платы, прорядило бы след по чужой высоте. `thinEps` читает зум ссылкой и потому
+       сам по себе не устаревает; в списке он стоит честно, как всякое читаемое имя. */
+    [commitLines, plateH, thinEps],
   );
 
   /**
@@ -2288,6 +2555,7 @@ export function VectorModal({
         else commitFrame();
       }
       setTool(t);
+      toolRef.current = t;
       /**
        * ⚠ СМЕНА ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ЛИЧНОСТЬ НАЖАТИЯ — И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО
        * ПРАВДА ДЛЯ ВСЕХ ПУТЕЙ. Отметка значит «ЭТО нажатие сняло область». Гасил её только хвост
@@ -2301,7 +2569,26 @@ export function VectorModal({
        * за нажатие, не снявшее ничего.
        */
       pressDropped.current = false;
-      if (t === 'crop' && frameRef.current?.owner !== 'crop') openCropFrame();
+      /**
+       * РАМКА КАДРА ОТКРЫВАЕТСЯ ПОСЛЕ ХОЛСТА, А НЕ ДО НЕГО — но только когда холст ещё надо завести.
+       *
+       * Порядок несущий в обе стороны. Открой рамку раньше — и отказ прокси оставил бы на экране
+       * живой жест, чьё применение растянуло бы подложку ровно так, как жалуется владелец. Жди
+       * холста ТАМ, ГДЕ ОН УЖЕ ЕСТЬ, — и рамка появлялась бы кадром позже без всякой причины,
+       * а рука, привыкшая к мгновенному отклику, успела бы нажать мимо.
+       */
+      /* ⚠ `needsRaster(t)` В УСЛОВИИ — НЕ ИЗБЫТОЧНОСТЬ, А СЦЕПКА ДВУХ ПОЛОВИН ОДНОГО РЕШЕНИЯ.
+         Ждать холста имеет смысл ровно тогда, когда его кто-то заводит. Без этой связки снятие
+         `'crop'` из `needsRaster` дало бы кроп, у которого рамка НЕ ОТКРЫВАЕТСЯ ВОВСЕ: ждать
+         некого, а синхронная ветка пропущена. Замерено иглой C7. */
+      const seedForCrop =
+        t === 'crop' &&
+        needsRaster(t) &&
+        !frozen &&
+        baseMediaId > 0 &&
+        !rasterRef.current &&
+        frameRef.current?.owner !== 'crop';
+      if (t === 'crop' && frameRef.current?.owner !== 'crop' && !seedForCrop) openCropFrame();
       if (t !== 'select') {
         setSelected(null);
         putNodeEdit(null);
@@ -2311,7 +2598,13 @@ export function VectorModal({
         // делающий, читается как сломанный редактор; рука возвращается к `select`, а причина
         // стоит отказом над холстом.
         void ensureRaster().then((layer) => {
-          if (!layer) setTool((cur) => (needsRaster(cur) ? 'select' : cur));
+          if (!layer) {
+            setTool((cur) => (needsRaster(cur) ? 'select' : cur));
+            return;
+          }
+          if (seedForCrop && toolRef.current === 'crop' && frameRef.current?.owner !== 'crop') {
+            openCropFrame();
+          }
         });
       }
   };
@@ -2377,6 +2670,36 @@ export function VectorModal({
       axis: fr.axis,
     });
   };
+
+  /**
+   * ПЕРЕСЧИТАТЬ ПРЕВЬЮ ПОД НЕПОДВИЖНЫМ УКАЗАТЕЛЕМ (круг 15, J-36, дефект 2).
+   *
+   * Зовётся из `applyView`, то есть из ЕДИНСТВЕННОЙ двери, через которую вид вообще меняется, —
+   * колесо, щипок, кнопки зума, клавиши, панорама рукой, вписывание, отступ после кропа. Читает
+   * ровно те же `frameAt`/`frameAtFree`/`plateAt`, что и настоящие события указателя: две
+   * арифметики «где мы» разошлись бы первой правкой, и разошлись бы МОЛЧА.
+   *
+   * Что здесь НЕ делается: живой жест не трогается вовсе. Протяжка держит свои координаты сама и
+   * получает настоящие события; подменить их пересчётом значило бы дорисовать руке движение,
+   * которого она не делала.
+   */
+  const refreshHover = () => {
+    const at = lastClient.current;
+    if (!at) return;
+    const e = { clientX: at.x, clientY: at.y };
+    const fr = frameRef.current;
+    if (fr && !frozenRef.current) {
+      const hit = frameHitAt(fr, plateAt(e));
+      if (!sameHit(hit, frameHover)) setFrameHover(hit);
+      return;
+    }
+    if (tool === 'curve' && penRef.current) {
+      putPenHover(frameAtFree(e));
+      return;
+    }
+    if (isNibTool(tool) || isThreadTool(tool)) setNibHover(frameAt(e));
+  };
+  refreshHoverRef.current = refreshHover;
 
   /**
    * РАМКА КАДРА ОСТАЁТСЯ ОСЕ-ВЫРОВНЕННОЙ И КОНЕЧНОЙ.
@@ -2591,7 +2914,7 @@ export function VectorModal({
   const revealCropFrame = (fr: FrameState) => {
     const vp = viewportRef.current;
     if (!vp) return;
-    const r = vp.getBoundingClientRect();
+    const r = viewportRect(vp);
     if (r.width < 2 || r.height < 2) return;
     const b = quadBounds(fr.quad);
     /* Пол-юнита допуска — от арифметики клампа, а не от вкуса: кадр, «ровно по плате», не обязан
@@ -2639,9 +2962,17 @@ export function VectorModal({
           (y1 - y0) * next.zoom > port.h - FIT_INSET * 2);
       if (floored && !cropFloorSaid.current) {
         cropFloorSaid.current = true;
+        /**
+         * ⚠ ЭТО СПРАВКА, А НЕ ОТКАЗ — И ТИП ТОСТА ОБЯЗАН ЭТО ГОВОРИТЬ (круг 15, J-32).
+         *
+         * Владелец: «когда мы хотим увеличить полотно через кроп выдаёт ошибку». Ничего не
+         * ломалось: лист рос, жест продолжался, — но красный тост читается как «редактор
+         * отказал», и человек бросает жест на середине. Ровно из-за этого «выдаёт ошибку» и
+         * «функциональность вообще не работает» слились у него в одну жалобу.
+         */
         showMessage(
-          'the sheet is now bigger than this view can show at once — zooming out has reached its limit. Scroll to reach the edge you are pulling; the frame itself keeps growing.',
-          'error',
+          'the sheet no longer fits the view — scroll to reach the edge you are pulling',
+          'success',
         );
       }
     }
@@ -2850,11 +3181,30 @@ export function VectorModal({
    * ПРИЖАТОЙ К КРОМКЕ. Резка идёт той же машинерией, что «скопировать внутри»: то, что внутри
    * рамки, остаётся; пересечённые штрихи делятся по её краю.
    *
-   * ⚠ ЛЕНТА ОТМЕНЫ СНОСИТСЯ. Её шаги — прямоугольники в пикселях СТАРОГО холста; применённые к
-   * новому, они вернули бы кусок не на своё место.
+   * ⚠ ЛЕНТА ОТМЕНЫ БОЛЬШЕ НЕ СНОСИТСЯ (круг 15, J-34: «ctrl z после кропа не работает»). Довод
+   * G-4 — «шаги ленты адресуют пиксели СТАРОГО холста» — не смягчён, а закрыт четвёртым родом шага
+   * `sheet`, который старый холст УДЕРЖИВАЕТ объектом и возвращает раньше, чем до шагов под ним
+   * дойдёт очередь. См. `recordSheet` в `vector-raster-history.ts`.
+   *
+   * ⚠ БЕЗ ХОЛСТА КРОП НЕ ПЛАНИРУЕТСЯ ВОВСЕ, ПОКА ПОД ПЛАТОЙ ЕСТЬ КАРТИНКА. Это ВТОРОЙ сторож, и
+   * он обязателен: `switchTool` заводит холст АСИНХРОННО, а Enter приходит от клавиатуры и может
+   * прийти раньше. Ветка `layer === null` остаётся законной ровно для рисунка с нуля
+   * (`baseMediaId === 0`), где растягивать нечего, а штрихи пересчитываются честно.
    */
   const applyCropFrame = async (fr: FrameState) => {
     if (frozenRef.current) return;
+    if (baseMediaId > 0 && !rasterRef.current) {
+      const seeded = await ensureRaster();
+      if (!seeded) {
+        closeFrame();
+        setTool('select');
+        showMessage(
+          'the sheet was not changed: the pixel layer could not be started, and growing the sheet without it would only stretch the picture instead of adding room. The reason stands above the canvas',
+          'error',
+        );
+        return;
+      }
+    }
     const layer = rasterRef.current;
     const from = layer
       ? { w: layer.w, h: layer.h }
@@ -2909,7 +3259,12 @@ export function VectorModal({
           )
         : strokesRef.current;
       const nextStrokes = expandStrokes(kept, plan);
+      const beforeStrokes = strokesRef.current;
+      const beforeRatio = ratio;
+      const beforeExpanded = expandedRef.current;
       if (layer) {
+        /* НОВЫЙ ХОЛСТ — НОВЫЙ ОБЪЕКТ; старый уходит в ленту ЖИВЫМ, а не копией: шаги ниже по
+           стопке адресуют его пиксели, и отмена обязана вернуть им ИМЕННО их холст. */
         rasterRef.current = expandRasterLayer(layer, plan, cropFill, RASTER_MAX_W);
       }
       strokesRef.current = nextStrokes;
@@ -2928,7 +3283,16 @@ export function VectorModal({
       expandedRef.current = true;
       setExpanded(true);
       setRatio(plan.ratio);
-      timeline.current.reset();
+      timeline.current.recordSheet({
+        beforeLayer: layer,
+        afterLayer: rasterRef.current,
+        beforeStrokes,
+        afterStrokes: nextStrokes,
+        beforeRatio,
+        afterRatio: plan.ratio,
+        beforeExpanded,
+        afterExpanded: true,
+      });
       bumpTl();
       rasterDirtyRef.current = true;
       setRasterDirty(true);
@@ -2937,7 +3301,7 @@ export function VectorModal({
       fitPlate();
       setTool('select');
       showMessage(
-        `the sheet is now ${plan.to.w}×${plan.to.h}${cuts ? ' — what fell outside the frame was cut, areas were dropped' : ''}. This cannot be undone, and it only survives as a NEW picture — use “save as a new picture”`,
+        `the sheet is now ${plan.to.w}×${plan.to.h}${cuts ? ' — what fell outside the frame was cut, areas were dropped' : ''}. ⌘Z brings the old sheet back; as it stands it survives only as a NEW picture — use “save as a new picture”`,
         'success',
       );
     } catch (err) {
@@ -3143,8 +3507,10 @@ export function VectorModal({
          шагом ленты: прямая плюс возможное продолжение руки = один ⌘Z, ровно как в фотошопе.
          Последовательные Shift-клики цепляются сами — каждое отпускание переписывает `lastMark`. */
       const chain = event.shiftKey && lastMark.current?.tool === tool ? lastMark.current.at : at;
-      // Точка без протяжки — тоже отпечаток: клик кистью обязан оставить пятно.
-      growRasterGesture(tool, chain, at);
+      /* SHIFT-ЛИНИЯ ОСТАЁТСЯ ПРЯМОЙ — её и просили прямой (H-15), сглаживать здесь нечего.
+         Точка без протяжки — тоже отпечаток: клик кистью обязан оставить пятно. */
+      growRasterGesture(tool, [chain, at]);
+      dabSamples.current = [at];
     }
     /**
      * ═══ ПРЕЖНЯЯ ОБЛАСТЬ СНИМАЕТСЯ НА НАЖАТИИ, А НЕ НА ОТПУСКАНИИ (H-2) ═══════════════════════
@@ -3178,6 +3544,10 @@ export function VectorModal({
   };
 
   const onStagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    /* ГДЕ РУКА СТОИТ — ПИШЕТСЯ ПЕРВОЙ СТРОКОЙ, ДО ВСЯКОЙ ВЕТКИ. Половина веток ниже выходит
+       ранним `return` (протяжка рамки, панорама, перо), и запись в конце означала бы, что после
+       панорамы рукой превью пересчитывать не от чего. */
+    lastClient.current = { x: event.clientX, y: event.clientY };
     const fd = frameDrag.current;
     const fr = frameRef.current;
     if (fd && fr && event.pointerId === fd.id) {
@@ -3319,16 +3689,37 @@ export function VectorModal({
      */
     if (isNibTool(tool) || isThreadTool(tool)) setNibHover(frameAt(event));
     if (!traceRef.current) return;
-    const at = frameAt(event);
+    /**
+     * ВСЕ АППАРАТНЫЕ СЭМПЛЫ, А НЕ ОДИН КАДР (круг 15, J-35).
+     *
+     * Браузер объединяет события указателя в одно на кадр: планшет и трекпад шлют 125-1000 Гц,
+     * экран показывает 60. `getCoalescedEvents()` отдаёт объединённые — то, что устройство
+     * ДЕЙСТВИТЕЛЬНО прислало. Пока их выбрасывали, путь строился по одной точке на кадр, и на
+     * быстрой руке соседние сэмплы отстояли на 10-30 px: угол виден до всякого сплайна.
+     *
+     * ⚠ У СИНТЕТИЧЕСКОЙ МЫШИ ИХ НЕТ, и это записано в ожиданиях иглы: на стенде Playwright
+     * список всегда из одного события, и снятие этой строки НЕ ПОКРАСНЕЕТ ни одной пробы,
+     * ходящей через `page.mouse`. Мерить её можно только событием, у которого
+     * `getCoalescedEvents` подделан (проба 147b), — и это не обход оракула, а признание того,
+     * что стенд не умеет быть планшетом.
+     */
+    const native = event.nativeEvent as PointerEvent & {
+      getCoalescedEvents?: () => PointerEvent[];
+    };
+    const coalesced = native.getCoalescedEvents?.() ?? [];
+    const samples: [number, number][] = (coalesced.length ? coalesced : [event]).map((e) =>
+      frameAt({ clientX: e.clientX, clientY: e.clientY }),
+    );
+    const at = samples[samples.length - 1];
     // A LINE KEEPS TWO POINTS, A TRACE ACCUMULATES. Pushing every sample and slicing at the end
     // looks identical on screen and is not: the thinning pass would then run over a hundred nearly
     // collinear samples and the «straight» line would arrive with a wobble nobody drew.
     {
       const prev = traceRef.current;
-      // ПИКСЕЛИ КЛАДУТСЯ ПРЯМО СЕЙЧАС, ОТРЕЗКОМ. Копить след и красить его целиком на отпускании
-      // значило бы рисовать вслепую: мазок появлялся бы после того, как рука его закончила.
-      if (smears(tool)) growRasterGesture(tool, prev[prev.length - 1], at);
-      putTrace(tool === 'line' ? [prev[0], at] : [...prev, at]);
+      // ПИКСЕЛИ КЛАДУТСЯ ПРЯМО СЕЙЧАС. Копить след и красить его целиком на отпускании значило бы
+      // рисовать вслепую: мазок появлялся бы после того, как рука его закончила.
+      if (smears(tool)) feedRasterSamples(tool, samples);
+      putTrace(tool === 'line' ? [prev[0], at] : [...prev, ...samples]);
     }
   };
 
@@ -3378,7 +3769,7 @@ export function VectorModal({
        правил разошёлся бы с первым на первой же правке. */
     if (tool === 'lasso' || tool === 'patch') {
       putTrace(null);
-      const poly = settleLasso(liveTrace);
+      const poly = settleLasso(liveTrace, { w: PLATE_W, h: plateH }, thinEps());
       if (poly) {
         /**
          * ОБВОДКА ЗАМЕНЯЕТ ПРЕЖНЮЮ ОБЛАСТЬ, А НЕ ВСТАЁТ РЯДОМ (H-2). Растушёвка у новой — СВОЙ
@@ -3427,6 +3818,9 @@ export function VectorModal({
       lastMark.current = { tool: started, at: liveTrace[liveTrace.length - 1] };
       // РАЗВИЛКА ПО ИНСТРУМЕНТУ, КОТОРЫМ ЖЕСТ НАЧАЛСЯ, а не по тому, что в руке сейчас, — по тому
       // же доводу, что у `gestureToolRef` вообще: клавиши инструментов живые всё время.
+      /* Хвост дотягивается ДО развилки: лечилка тоже мажет (`smears`), и её маска обязана
+         дойти до последней точки ровно так же, как краска кисти. */
+      flushRasterSamples(started);
       if (started === 'heal') void healGesture();
       else endRasterGesture(started, liveTrace);
       return;
@@ -3897,7 +4291,7 @@ export function VectorModal({
     const need = stitchMinLength(key, stepPx);
     if (need <= PLATE_W) return;
     showMessage(
-      `at this stitch length ${key} needs a line ${Math.round(need / PLATE_W)}× wider than the sheet — shorter lines are drawn plain`,
+      `at this stitch length ${stitchName(key)} needs a line ${Math.round(need / PLATE_W)}× wider than the sheet — shorter lines are drawn plain`,
       'error',
     );
   };
@@ -4339,8 +4733,17 @@ export function VectorModal({
      * правдой — новая картинка, чьи натуральные пропорции ею и станут.
      */
     if (expandedRef.current) {
+      /**
+       * ⚠ ОТКАЗ НЕСЁТ ДВЕРЬ, О КОТОРОЙ ГОВОРИТ (круг 15, J-32, чтение «б»).
+       *
+       * Отказ верен по смыслу и всегда был верен; человеку он читается «ошибка» — это второй
+       * кандидат на «выдаёт ошибку» из слов владельца. Красный колаут, называющий кнопку, до
+       * которой надо ещё дотянуться глазами через всю шапку, и есть тот самый тупик. Дверь
+       * стоит ВНУТРИ отказа: сказал «нельзя так — можно вот так» и тут же дал «вот так».
+       */
       setRefusal(
-        'the sheet was cropped or grown, and a drawing saved on its own cannot carry that: on the next visit the picture underneath wins its shape back and the strokes come back squashed. Use «save as a new picture» — the new sheet’s own proportions become the truth.',
+        'the sheet was cropped or grown, and a drawing saved on its own cannot carry that: on the next visit the picture underneath wins its shape back and the strokes come back squashed. The new sheet’s own proportions become the truth only as a new picture — or press ⌘Z to take the crop back and save the drawing as before.',
+        'picture',
       );
       return;
     }
@@ -4752,8 +5155,11 @@ export function VectorModal({
         break;
       default: {
         const n = Number(k);
-        if (Number.isInteger(n) && n >= 1 && n <= STITCHES.length && !frozen) {
-          pickBrush(STITCHES[n - 1].key);
+        // ЦИФРА ЗНАЧИТ НАЗВАННЫЙ ВИД, А НЕ n-ю СТРОКУ СПИСКА (круг 15). `STITCHES` перерос девять
+        // записей и переупорядочен по семьям; читай клавиша порядок списка, восьмёрка молча
+        // сменила бы потайной на blanket — довод у самого `HOTKEYS`.
+        if (Number.isInteger(n) && n >= 1 && n <= HOTKEYS.length && !frozen) {
+          pickBrush(HOTKEYS[n - 1]);
         }
       }
     }
@@ -4975,9 +5381,14 @@ export function VectorModal({
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
         <Dialog.Content
-          ref={contentRef}
+          ref={attachContent}
           {...{ [SCREEN_MARK]: '' }}
-          className='fixed inset-0 z-[var(--z-modal)] bg-pageBg p-4 focus:outline-none'
+          /* `touch-action: pan-x pan-y` — тач-половина того же запрета: без неё щипок пальцами по
+             хрому зумит страницу мимо всякого слушателя. `select-none` — J-39: протяжка по шапке
+             и рейке выделяла 103 и 302 символа вместо того, чтобы ничего не делать; поля ввода
+             возвращают себе выделение явно, потому что Safari отнимает его и у них. */
+          style={{ touchAction: 'pan-x pan-y' }}
+          className='fixed inset-0 z-[var(--z-modal)] select-none bg-pageBg p-4 focus:outline-none [&_[contenteditable]]:select-text [&_input]:select-text [&_textarea]:select-text'
           onEscapeKeyDown={(e) => {
             // Esc-ЛЕСТНИЦА: ЖИВАЯ РАМКА → взведённая пипетка → живое перо → выбранный штрих →
             // области лассо → выход (через одну дверь со стражем). Без `preventDefault` Radix
@@ -5127,7 +5538,7 @@ export function VectorModal({
                       data-undo-chip={timeline.current.nextUndoKind() ?? ''}
                       title={
                         tl.depth
-                          ? `undo the last ${{ pixels: 'pixel gesture', lines: 'line gesture', both: 'gesture — it took both lines and pixels' }[timeline.current.nextUndoKind() ?? 'lines']} (⌘z) · ${tl.depth} step${tl.depth === 1 ? '' : 's'} kept, ceiling ${RASTER_UNDO_DEPTH} or ${RASTER_UNDO_BYTES / 1024 / 1024} MB of pixels`
+                          ? `undo the last ${{ pixels: 'pixel gesture', lines: 'line gesture', both: 'gesture — it took both lines and pixels', sheet: 'change of the sheet itself — the crop comes off and the old sheet comes back' }[timeline.current.nextUndoKind() ?? 'lines']} (⌘z) · ${tl.depth} step${tl.depth === 1 ? '' : 's'} kept, ceiling ${RASTER_UNDO_DEPTH} or ${RASTER_UNDO_BYTES / 1024 / 1024} MB of pixels`
                           : 'nothing to undo yet (⌘z)'
                       }
                     >
@@ -5213,6 +5624,20 @@ export function VectorModal({
                     <Text size='micro' component='p'>
                       {refusal}
                     </Text>
+                    {refusalDoor === 'picture' && !frozen && (
+                      <div className='mt-1.5'>
+                        <Button
+                          type='button'
+                          variant='main'
+                          size='sm'
+                          disabled={!ready}
+                          data-refusal-door='picture'
+                          onClick={saveAsPicture}
+                        >
+                          {busy ?? 'save as a new picture'}
+                        </Button>
+                      </div>
+                    )}
                   </CalloutBox>
                 )}
                 {fileOnly && (
@@ -5471,7 +5896,7 @@ export function VectorModal({
                             : tool === 'clone'
                                 ? 'alt-click to take the source, then drag. The LINES under the source are laid under your hand'
                                 : tool === 'erase'
-                                  ? 'drag the nib: it rubs the PIXELS away to transparency, the photo included, and CUTS the drawn lines it covers. One eraser for both'
+                                  ? 'drag the nib: it rubs the PIXELS to paper white, the photo included, and CUTS the drawn lines it covers. One eraser for both'
                                   : tool === 'stamp'
                                     ? 'alt-click to take the source, then drag. The PIXELS under the source are printed under your hand'
                                     : tool === 'paint'
@@ -5493,7 +5918,16 @@ export function VectorModal({
                     onPointerCancel={onStagePointerUp}
                     // Круг ниба гаснет вместе с уходом курсора: иначе он остался бы висеть на
                     // краю платы и читался бы как след, которого нет.
-                    onPointerLeave={() => setNibHover(null)}
+                    onPointerLeave={() => {
+                      /* И ПАМЯТЬ О ПОЛОЖЕНИИ РУКИ ГАСНЕТ ВМЕСТЕ С НИМ. Иначе следующий зум
+                         кнопкой, сделанный уже без курсора над холстом, ВОСКРЕСИЛ БЫ круг на
+                         месте, где руки давно нет. */
+                      lastClient.current = null;
+                      setNibHover(null);
+                    }}
+                    onPointerEnter={(event) => {
+                      lastClient.current = { x: event.clientX, y: event.clientY };
+                    }}
                     onDoubleClick={() => {
                       // Двойной клик применяет КАДР — второй фотошопный способ сказать «да» там,
                       // где клика мимо нет нарочно (применение необратимо).
@@ -5734,24 +6168,41 @@ export function VectorModal({
                               </g>
                             );
                           })()}
-                          {trace &&
-                            trace.length > 1 &&
-                            (tool === 'lasso' ? (
+                          {/* ⚠ ПРЕВЬЮ РИСУЕТСЯ ПРОРЕЖЕННЫМ СЛЕДОМ, А НЕ СЫРЫМ (круг 15, J-36/J-35).
+                              Пока превью вело сырую ломаную, а итог получался из прореженной,
+                              «что видел — то и получил» было обещанием: на отпускании контур
+                              подменялся другим, и человек видел, как его обводка дёргается. Одна
+                              функция на оба — и тождество держится устройством. Цена — RDP на
+                              сотнях точек каждый кадр: доли миллисекунды. */}
+                          {((raw: [number, number][] | null) => {
+                            if (!raw || raw.length <= 1) return null;
+                            /* ⚠ ИМЯ ДРУГОЕ НАРОЧНО. `const trace = …` внутри этой функции затенил
+                               бы внешний `trace` целиком, включая строку, которая его читает, —
+                               то есть обращение в мёртвую зону и падение экрана на первом же
+                               движении руки. Сырой след приходит параметром. */
+                            const shown =
+                              tool === 'lasso'
+                                ? thinLasso(raw, { w: PLATE_W, h: plateH }, thinEps())
+                                : tool === 'freehand'
+                                  ? thinTrace(raw, { w: PLATE_W, h: plateH }, thinEps())
+                                  : raw;
+                            if (shown.length <= 1) return null;
+                            return tool === 'lasso' ? (
                               /* Живая обводка лассо: лёгкая линия + пунктир к началу — видно, где
                                  контур замкнётся, когда кнопка отпустится. */
                               <g>
                                 <path
-                                  d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                                  d={`M${shown.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
                                   fill='currentColor'
                                   fillOpacity={0.05}
                                   stroke='currentColor'
                                   strokeWidth={1.5 / zoomK}
                                 />
                                 <line
-                                  x1={trace[trace.length - 1][0] * PLATE_W}
-                                  y1={trace[trace.length - 1][1] * plateH}
-                                  x2={trace[0][0] * PLATE_W}
-                                  y2={trace[0][1] * plateH}
+                                  x1={shown[shown.length - 1][0] * PLATE_W}
+                                  y1={shown[shown.length - 1][1] * plateH}
+                                  x2={shown[0][0] * PLATE_W}
+                                  y2={shown[0][1] * plateH}
                                   stroke='currentColor'
                                   strokeWidth={1 / zoomK}
                                   strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
@@ -5767,7 +6218,7 @@ export function VectorModal({
                                  виден — он лежит на холсте под этим SVG, — и призрак поверх него
                                  показывал бы мазок вдвое темнее, чем он есть. */
                               <path
-                                d={`M${trace.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                                d={`M${shown.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
                                 fill='none'
                                 stroke='currentColor'
                                 strokeWidth={nib}
@@ -5798,7 +6249,7 @@ export function VectorModal({
                                */
                               (() => {
                                 const g = strokeGeometry(
-                                  { tool: tool === 'line' ? 'line' : 'freehand', ...paint, pts: trace },
+                                  { tool: tool === 'line' ? 'line' : 'freehand', ...paint, pts: shown },
                                   PLATE_W,
                                   plateH,
                                 );
@@ -5822,7 +6273,8 @@ export function VectorModal({
                                   </g>
                                 );
                               })()
-                            ))}
+                            );
+                          })(trace)}
                           {/* ── КРУГЛЫЙ НИБ: где он сейчас и откуда штамп берёт. Обводка чёрным по
                               белому, чтобы круг был виден и на тёмной фотографии. */}
                           {/* КРУГ НИБА ВИДЕН И ВО ВРЕМЯ ЖЕСТА, а не только при наведении: у

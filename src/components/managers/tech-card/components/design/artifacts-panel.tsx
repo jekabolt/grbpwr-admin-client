@@ -1573,6 +1573,11 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     ghostView: undefined,
     compositeViews: undefined,
     derivedFrom: undefined,
+    // И ГЛАГОЛ ПРОИСХОЖДЕНИЯ — ТОЖЕ МОЛЧАНИЕ, по тому же правилу. Пустая строка здесь была бы
+    // УТВЕРЖДЕНИЕМ («сервер посмотрел и не смог определить»), а эта подделка ничего не смотрела:
+    // она знает только, что файл лежит в медиа карточки. Читатели ленты требуют `'crop'` явно, и
+    // молчание у них само выпадает из колоды — то есть подделка не может создать колоду.
+    derivation: undefined,
     sourceClass: undefined,
     mixedInput: undefined,
     layerRev: undefined,

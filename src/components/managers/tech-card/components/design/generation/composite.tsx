@@ -109,8 +109,8 @@ export function readComposite(
  * Today a run row draws the sheet and every crop as equal sibling tiles, because that is exactly
  * what they are on the wire: `SplitPicture` files a crop with its parent's `run_id`, so a sheet cut
  * into seven pieces is eight identical-looking cells in one row and nothing on screen says which
- * came out of which. The grouping is drawn from `derived_from`, the field that already carries the
- * answer — no new state, no new wire field, nothing stored.
+ * came out of which. The grouping is drawn from `derived_from` PAIRED WITH `derivation` — see
+ * `isCutOut` below, which is the whole of J-1.
  *
  * ⚠ TRANSITIVE, AND THAT IS NOT A NICETY. Beta run 7 already holds a chain: pictures 53 and 54 were
  * cut out of 52, which was itself cut out of the sheet 22. A direct-children rule would count six
@@ -136,6 +136,64 @@ export function readComposite(
  * walk is unbounded by construction and a malformed page must not take the whole tab white — there
  * is no error boundary over this tree.
  */
+/**
+ * ═══ DID THIS ROW DETACH FROM ITS PARENT BY A **CUT**? — J-1, and the whole of it ══════════════
+ *
+ * Owner, verbatim: «у нас сейчас колапсится в карточки даже если это был просто эдит мульивью а
+ * колапсится в карточки должны быть только после сплита мультивью».
+ *
+ * ⚠ `derived_from` HAS TWO WRITERS AND THEY ARE DIFFERENT VERBS. `SplitPicture` files a CUT;
+ * `FlattenEditLayer` files an EDIT. Both point the child at its parent, so a walk that reads only
+ * `derived_from` calls an edited multiview a «cut piece» and folds the row into a deck of one —
+ * the owner's complaint word for word. `layer_rev` cannot separate them and never could: a crop
+ * COPIES its parent's rev verbatim, so the crop of an edited sheet arrives with exactly the
+ * non-zero revision a flatten arrives with, and «edit, save, edit again» files two flattens whose
+ * revs may coincide. The proto says this in as many words on the field itself.
+ *
+ * ═══ THE THIRD STATE IS A REFUSAL, NOT A GAP, AND IT DOES NOT FOLD ═══════════════════════════
+ *
+ * `derivation` has three readings, and only ONE of them opens a deck:
+ *   · `'crop'`    — a cut. The row is a piece of its parent. FOLDS.
+ *   · `'flatten'` — an edit. The row is a NEW STATE of its parent, not a piece of it, and it
+ *                   stands beside it as an ordinary sibling card. Does not fold.
+ *   · `''`        — the server was asked and DECLINED TO GUESS. Migration 0359's backfill could
+ *                   not classify these rows because the parent they name is already gone
+ *                   (`derived_from` carries no FK by design), so there was nothing to compare.
+ *                   Measured on beta the day this landed: of 24 derived pictures, 18 `crop`,
+ *                   4 `flatten`, **2 `''`**. Does not fold — see below.
+ *
+ * WHY `''` MUST NOT BE READ AS EITHER VERB. A deck is a CLAIM: «these cards are the pieces cut out
+ * of this sheet». A row that cannot say which gesture made it cannot be used to make that claim,
+ * and the honest direction of failure for an unknown is the flat one — the card stands where it
+ * has always stood, visible, next to its parent. Folding it instead would hide a card behind a
+ * door on a guess, which is the defect this whole change exists to remove, merely with a smaller
+ * blast radius. Reading it as `flatten` would be the same guess wearing the other hat. THE SET CAN
+ * ONLY SHRINK: every row minted from now on carries a verb, so `''` is a closed legacy population
+ * of two, not a state the product keeps producing.
+ *
+ * ⚠ AND `undefined` IS A FOURTH THING — IGNORANCE, NOT REFUSAL. A server older than the column
+ * omits the key entirely. It lands in the same branch («do not fold») and the outcome is right,
+ * but the REASONS are not the same and a later reader must not collapse them: `''` is this server
+ * telling us it does not know, `undefined` is a server that was never asked.
+ *
+ * NO LEGACY GUESS, AND THAT IS A DECISION WITH A PRICE NAMED. A `layer_rev`-based fallback for the
+ * old server was considered and refused twice over. It is WRONG on «edit, save, edit again» — it
+ * would call the second flatten a crop — so it reintroduces exactly J-1 under a fallback's name,
+ * silently, on the one flow the owner reported. And the server itself, holding the same
+ * `layer_rev` and more, DECLINED to apply that heuristic to the two rows above: a client that
+ * guesses where the server refused is claiming a certainty the system does not have. The cost of
+ * refusing is that a pre-column server draws NO decks at all — flatter than today, never false —
+ * and by this project's deploy order (backend to beta and to prod ahead of the client) no such
+ * server ever meets this code outside a rollback.
+ *
+ * PAIRED READ, ALWAYS. `derivation` is meaningless alone: `'crop'` on a row with no
+ * `derived_from` is not a state the server can mint, and the climb below refuses it anyway by
+ * checking the parent id one line later.
+ */
+export function isCutOut(picture: common_DesignPicture): boolean {
+  return picture.derivation === 'crop';
+}
+
 export type CropFamilies = {
   /** Root picture id → every picture descended from it, in the row's own order. Roots with no
    *  descendants are absent. */
@@ -166,9 +224,17 @@ export function cropFamilies(pictures: readonly common_DesignPicture[]): CropFam
     if (id <= 0) continue;
     // Climb to the root of this picture's ancestry WITHIN the list. `seen` stops a malformed
     // page dead rather than hanging the tab; the server cannot mint one.
+    //
+    // ⚠ THE CLIMB STOPS AT THE FIRST LINK THAT IS NOT A CUT (J-1). `isCutOut` is asked about the
+    // node we are standing on, i.e. about ITS OWN link upward — so an edit ends the ancestry
+    // rather than being walked through. That is what makes the owner's own order come out right:
+    // sheet → EDIT → cut, cut. The two pieces climb one step to the edited sheet and stop there,
+    // so the deck sits under the picture they were actually cut out of, and the edit stands as an
+    // ordinary card beside the original instead of being folded away as a piece of it.
     let root = picture;
     const seen = new Set<number>([id]);
     for (;;) {
+      if (!isCutOut(root)) break;
       const parentId = root.derivedFrom ?? 0;
       if (parentId <= 0 || seen.has(parentId)) break;
       const parent = byId.get(parentId);

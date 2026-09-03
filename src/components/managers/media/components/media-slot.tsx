@@ -62,6 +62,26 @@ export type MediaSlotProps = {
    */
   sizeClassName?: string;
   className?: string;
+  /**
+   * ═══ ВТОРЫЕ ДВЕРИ, ЖИВУЩИЕ ВНУТРИ ПУСТОЙ РАМКИ (J-7) ══════════════════════════════════════
+   *
+   * Владелец, дословно: «DRAW A REFERENCE в INPUT — REFERENCES должна быть внутри плейсхолдера».
+   *
+   * ПОЧЕМУ ЭТО ПРОП ПРИМИТИВА, А НЕ КНОПКА РЯДОМ У ВЫЗЫВАЮЩЕГО. Пустая ветка слота — ОДНА
+   * `<button>` (триггер библиотеки), выкрашенная полосатой поверхностью, а кнопка внутри кнопки
+   * невыразима в HTML: парсер закроет внешнюю. Значит «внутри плейсхолдера» физически
+   * недостижимо снаружи, и каждый экран, которому нужна вторая дверь, вынужден ставить её РЯДОМ
+   * — то есть ровно то, на что владелец и жалуется. Здесь же пустая рамка становится
+   * позиционированной коробкой: триггер растягивается на неё целиком (`absolute inset-0`), а
+   * двери стоят его СОСЕДЯМИ поверх (`z-10`), и «внутри» — это факт о коробках, а не о вёрстке.
+   *
+   * ЗАПОЛНЕННЫЙ КАДР ЭТОТ ПРОП ИГНОРИРУЕТ: там низ рамки уже занят полосой «change · remove», и
+   * третий орган в том же ряду был бы разговором о другом предмете.
+   *
+   * Годится и для J-17 («на пустом слоте FABRIC RENDER добавить из медиа-селектора») — это та же
+   * форма: одна рамка, несколько способов её заполнить.
+   */
+  doors?: { label: string; onClick: () => void; title?: string; disabled?: boolean }[];
   /** Клик по заполненному кадру. Без него кадр не кликается. */
   onOpenViewer?: () => void;
   onSelect: (media: common_MediaFull[]) => void;
@@ -103,6 +123,7 @@ export function MediaSlot({
   compact = false,
   sizeClassName,
   className,
+  doors,
   onOpenViewer,
   onSelect,
   onClear,
@@ -155,23 +176,40 @@ export function MediaSlot({
     // ПОЛОСАТАЯ ПОВЕРХНОСТЬ РИСУЕТСЯ НА САМОЙ КНОПКЕ, а не внутри неё. Размер слота живёт ровно на
     // одном элементе: кнопка-обёртка шириной по содержимому вокруг ребёнка шириной в сто процентов
     // считает ширину по кругу — а именно так задан слот, который меряется ростом (`sm:h-44`).
-    return (
-      <>
-        <MediaSelector
-          label={label}
-          purpose={purpose}
-          aspectRatio={aspectRatio}
-          allowMultiple={allowMultiple}
-          showVideos={showVideos}
-          saveSelectedMedia={onSelect}
-          trigger={
+    //
+    // ⚠ С `doors` РАЗМЕР ПЕРЕЕЗЖАЕТ НА РАМКУ, И ТОЛЬКО ТОГДА. Двери обязаны стоять ВНУТРИ коробки
+    // плейсхолдера и при этом быть соседями триггера, а не его детьми (кнопка в кнопке
+    // невыразима); значит нужна позиционированная коробка, и размер обязан жить на НЕЙ, иначе он
+    // жил бы на двух элементах сразу. Слот без дверей собирает ту же разметку, что собирал всегда
+    // — ни одного лишнего узла, — потому что этой ветке довод про «ширину по кругу» верен
+    // по-прежнему.
+    const doorStrip = doors?.length ? doors : null;
+    const trigger = (
+      <MediaSelector
+        label={label}
+        purpose={purpose}
+        aspectRatio={aspectRatio}
+        allowMultiple={allowMultiple}
+        showVideos={showVideos}
+        saveSelectedMedia={onSelect}
+        trigger={
             <button
-              {...intake.regionHandlers}
+              {...(doorStrip ? {} : intake.regionHandlers)}
               type='button'
               aria-label={label}
-              style={{ ...PLACEHOLDER_SURFACE, ...frameStyle }}
+              style={
+                doorStrip
+                  ? { ...PLACEHOLDER_SURFACE }
+                  : { ...PLACEHOLDER_SURFACE, ...frameStyle }
+              }
               className={cn(
                 placeholderClass({ dashed: true }),
+                // Растянут на рамку целиком: коробка триггера и коробка плейсхолдера — одна и та
+                // же, поэтому «дверь внутри плейсхолдера» проверяется измерением, а не верой.
+                doorStrip && 'absolute inset-0 h-full w-full',
+                // Место под полосу дверей внизу. Содержимое кнопки центрируется по её коробке, и
+                // без этого подпись слота лежала бы под кнопкой, а не над ней.
+                doorStrip && 'pb-7',
                 // ПОДПИСЬ СЛОТА — ЧИТАЕМЫЙ ТЕКСТ, а не инертная заглушка: `Placeholder` красит
                 // содержимое в #ccc, годный для рамок и выключенных состояний, но на полосатом
                 // фоне дающий полтора к одному. Здесь это ЕДИНСТВЕННОЕ, что объясняет жест.
@@ -181,8 +219,12 @@ export function MediaSlot({
                 // кашу, а список мест, где слот узкий, никто не будет поддерживать вручную.
                 '@container',
                 intake.dragging && 'border-textColor text-textColor',
-                sizeClass,
-                className,
+                // ⚠ РАЗМЕР ЖИВЁТ РОВНО НА ОДНОМ ЭЛЕМЕНТЕ. С дверями его несёт рамка, и оставить
+                // `sizeClass` здесь значило бы дать `w-auto` выиграть у `w-full` в `twMerge` —
+                // растянутый триггер схлопнулся бы по содержимому, а «дверь внутри» перестала бы
+                // быть правдой при зелёной сборке.
+                !doorStrip && sizeClass,
+                !doorStrip && className,
               )}
             >
               {!compact && <PhotoGlyph className='hidden @[6rem]:block' />}
@@ -194,7 +236,44 @@ export function MediaSlot({
               )}
             </button>
           }
-        />
+      />
+    );
+
+    return (
+      <>
+        {doorStrip ? (
+          /* РАМКА — ПОЗИЦИОНИРОВАННАЯ КОРОБКА СЛОТА. Жесты приёмки (наведение, фокус, бросок)
+             висят на НЕЙ, а не на триггере: полоса дверей стоит внутри той же рамки, и файл,
+             брошенный на неё, обязан попасть в слот, а не быть съеденным кнопкой поверх. */
+          <div
+            {...intake.regionHandlers}
+            style={frameStyle}
+            className={cn('relative', sizeClass, className)}
+          >
+            {trigger}
+            {/* ДВЕРИ — СОСЕДИ ТРИГГЕРА, А НЕ ЕГО ДЕТИ, И СТОЯТ ПОВЕРХ НЕГО. Кожа — вторичная
+                кнопка системы (белая заливка, рамка #ccc, нано-капс): тот же орган, что `split`
+                и `zoom` в углах плитки, потому что это тот же жанр — маленькая дверь на кадре. */}
+            <div className='pointer-events-none absolute inset-x-1 bottom-1 z-10 flex flex-wrap items-center justify-center gap-1'>
+              {doorStrip.map((door) => (
+                <Button
+                  key={door.label}
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  disabled={door.disabled}
+                  title={door.title}
+                  onClick={door.onClick}
+                  className='pointer-events-auto'
+                >
+                  {door.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          trigger
+        )}
         {intake.dialog}
       </>
     );

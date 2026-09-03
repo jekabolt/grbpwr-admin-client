@@ -17,12 +17,13 @@ import {
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
-import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
+import type { ViewSwitchOption } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
-import { buildHideGuard, isPickablePicture } from '../band-feed';
+import { isPickablePicture } from '../band-feed';
 import {
   COLORWAY_NONE,
   benchKindOf,
@@ -41,19 +42,13 @@ import { PictureTile, useGalleryGroup } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { SplitModal } from '../split-modal';
 import { useDesignWrites } from '../use-design-band';
-import {
-  isPictureHidden,
-  isRunArchived,
-  type HideBlockReason,
-  type HideGuard,
-} from '../visibility';
+import { isPictureHidden, isRunArchived } from '../visibility';
 import { isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
 import { CompositeMarks, compositeTail, cropFamilies, readComposite, splitVerb } from './composite';
 import { CropDeck } from './crop-deck';
 import { formatMoney } from './money';
 import { RunPanel } from './run-panel';
 import {
-  archiveBlockReason,
   expectedTileCount,
   fixSelectionOf,
   isCancelling,
@@ -169,16 +164,9 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
   return null;
 }
 
-/**
- * Why a WHOLE RUN may not be archived, in words. The picture-level half of this map went out with
- * the ✕ (T-14); what is left is the refusal the row itself states, and the reasons are still the
- * server's own tokens rather than a second vocabulary.
- */
-const HIDE_BLOCK_LONG: Record<HideBlockReason, string> = {
-  in_slot: 'a picture of this run stands in a bench slot — unmark it there first',
-  live_run_input: 'a run that has not finished is reading a picture of this run',
-  live_crop_parent: 'a crop cut from a picture of this run still exists',
-};
+/* ЗДЕСЬ СТОЯЛ `HIDE_BLOCK_LONG` — словарь причин, по которым строке ОТКАЗЫВАЛИ в архивации.
+   Он снят вместе с самим отказом (J-22): причины были скопированы у `HideDesignPicture`, а
+   `ArchiveRun` ни одной из них не держит. Словарь без читателя объяснял бы запрет, которого нет. */
 
 function TileAction({
   onClick,
@@ -228,10 +216,12 @@ function RunTile({
   picture,
   cardFit,
   runFit,
+  dim,
   disabled,
   galleryKey,
   galleryIndex,
   deckMemberOf,
+  onOpen,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -239,6 +229,8 @@ function RunTile({
   picture: common_DesignPicture;
   cardFit: string;
   runFit: string;
+  /** Приглушить кадр: строка стоит на полке архива и на неё смотрят, а не работают ею (J-22). */
+  dim?: boolean;
   disabled?: boolean;
   /** The section's one gallery group — see `useGalleryGroup` below. */
   galleryKey: string;
@@ -251,6 +243,13 @@ function RunTile({
    * cannot tell a member from a sibling cannot prove that a closed deck holds its pieces back.
    */
   deckMemberOf?: number;
+  /**
+   * ПОВЕРХНОСТЬ КАДРА ОТКРЫВАЕТ НЕ ЗУМ, А ЭТО (J-2). Ставится ТОЛЬКО листом СВЁРНУТОЙ колоды:
+   * первое нажатие раскрывает её, и лишь у раскрытой карточки поверхность снова принадлежит
+   * просмотрщику. Угловая кнопка `zoom` не трогается ни в одном из двух состояний — см.
+   * `PictureTile.onOpen`, где эта роль и живёт.
+   */
+  onOpen?: () => void;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const pick = usePickMode();
@@ -457,12 +456,13 @@ function RunTile({
         url={url}
         alt={handle}
         badge={badge}
+        onOpen={onOpen}
         galleryGroup={galleryGroup}
         /* ПРИГЛУШАЕТСЯ СНИМОК, А НЕ ПЛИТКА (K-6). Класс стоял на всей плитке, и это было
            безобидно ровно до тех пор, пока у скрытой плитки не появилось двери: прозрачность
            наследуется и ребёнком не отменяется, так что `edit` выходил серым по белому около
            1.6:1. Слово «hidden» под кадром состояние держит и без заливки. */
-        dim={hidden}
+        dim={hidden || dim}
         className='w-full'
         /* THE CUT IS OFFERED ON EVERY LIVE PICTURE, NOT ONLY ON A DECLARED COMPOSITE (T-8).
            `composite_views` is written by the server and is empty on every row today, so a door
@@ -571,7 +571,7 @@ function RunRow({
   run,
   firstRunId,
   cardFit,
-  guard,
+  shelf,
   disabled,
   galleryKey,
   galleryIndexOf,
@@ -584,7 +584,13 @@ function RunRow({
   run: common_DesignRun;
   firstRunId: number | null;
   cardFit: string;
-  guard: HideGuard;
+  /**
+   * ЭТА СТРОКА СТОИТ НА ПОЛКЕ АРХИВА, А НЕ В ОКНЕ (J-22). Заархивированная строка в окне свёрнута
+   * в свою строку — это правило T-14 и оно остаётся. Полка же существует РОВНО ЗАТЕМ, чтобы
+   * посмотреть, что в архиве лежит, и строка на ней разворачивается: плитки рисуются приглушённо
+   * (`dim`), потому что смотреть на них можно, а работать этой карточкой уже не собираются.
+   */
+  shelf?: boolean;
   disabled?: boolean;
   galleryKey: string;
   /** picture id → its offset in the section's gallery group. Absent = no showable address. */
@@ -605,6 +611,11 @@ function RunRow({
 
   const runId = run.id ?? 0;
   const archived = isRunArchived(run);
+  /**
+   * СВЁРНУТА — НЕ ТО ЖЕ САМОЕ, ЧТО ЗААРХИВИРОВАНА. В окне заархивированная строка показывает одну
+   * свою строку (T-14); на полке архива она показывает всё, ради чего полку и открыли.
+   */
+  const folded = archived && !shelf;
   const live = isRunLive(run);
   const elapsed = useElapsed(run.startedAt || run.createdAt);
   /**
@@ -620,7 +631,6 @@ function RunRow({
    * collections and every tile below is drawn exactly as it was before this wave.
    */
   const families = useMemo(() => cropFamilies(pictures), [pictures]);
-  const archiveWhy = archiveBlockReason(run, guard);
   const price = formatMoney(run.priceActual ?? run.priceEstimate, run.currency);
   /**
    * WHAT THIS ROW WAS ASKED TO FIX, WHOLE. A fix may name several sides and a detail in one run, so
@@ -666,6 +676,7 @@ function RunRow({
     <div
       data-run={runId || undefined}
       data-rep={runRepresentation(run) ?? ''}
+      data-run-archived={archived ? '' : undefined}
       className='space-y-1 border-b border-hairline pb-2 last:border-b-0'
     >
       <div className='flex flex-wrap items-baseline gap-2'>
@@ -729,13 +740,18 @@ function RunRow({
             >
               unarchive
             </button>
-          ) : archiveWhy ? (
-            // The reason lives in THIS line's own title — a greyed-out «archive» beside a row
-            // whose pictures are all in a sheet reads as a broken control, not as a refusal.
-            <Text size='nano' variant='label' component='span' title={HIDE_BLOCK_LONG[archiveWhy]}>
-              archive is off
-            </Text>
           ) : (
+            /* ⚠ ЗДЕСЬ СТОЯЛ КЛИЕНТСКИЙ ЗАПРЕТ «archive is off», И ЭТО БЫЛ ЗАПРЕТ, КОТОРОГО НЕТ НА
+               СЕРВЕРЕ (J-22). Он звал `archiveBlockReason` — копию предусловий `HideDesignPicture`
+               («картинка стоит в слоте», «вход живого прогона», «родитель видимого кропа») — и
+               гасил дверь на любой строке, хоть одна картинка которой под них подходит.
+
+               `ArchiveRun` (`internal/store/design/pictures.go` на origin/beta) не держит ни
+               одного из них: это один UPDATE флага `archived_at` плюс перечитывание строки, и его
+               собственный комментарий говорит «It does NOT hide the row's pictures». Ни в
+               `apisrv/admin/design_band.go`, ни в rbac второго условия тоже нет.
+               То есть клиент отказывал в том, что сервер разрешает: на карточке, где лист
+               разрезали или плиту поставили в слот, вместо двери стояло серое слово. */
             !disabled &&
             !live && (
               <button
@@ -754,9 +770,9 @@ function RunRow({
 
       {open && <RunPanel techCardId={techCardId} band={band} run={run} disabled={disabled} />}
 
-      {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE. Its pictures are not hidden anywhere else — they
-          simply stop taking up the screen until the row is unarchived. */}
-      {!archived && live && (
+      {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE IN THE WINDOW, and unfolds on the archived shelf —
+          the one place opened in order to look at it. Its pictures are not hidden anywhere else. */}
+      {!folded && live && (
         <Tiles min={140}>
           {Array.from({ length: expectedTileCount(run) }, (_, i) => (
             <Tile
@@ -779,7 +795,7 @@ function RunRow({
         </Tiles>
       )}
 
-      {!archived && !live && pictures.length > 0 && (
+      {!folded && !live && pictures.length > 0 && (
         /* ═══ ОДИН ГРИД, А НЕ ГРИД В ГРИДЕ (H-10) ══════════════════════════════════════════════
            Куски открытой колоды встают ОБЫЧНЫМИ карточками в тот же ряд, сразу за своим листом:
            у них те же углы, тот же пикер под кадром и то же место в ряду просмотрщика, что и у
@@ -793,6 +809,7 @@ function RunRow({
             // колода показала бы его дважды, а закрытая — вопреки собственной двери.
             if (families.rootOf.has(pictureId)) return null;
             const members = families.membersOf.get(pictureId) ?? [];
+            const open = openDeck === pictureId;
             const tile = (
               <RunTile
                 band={band}
@@ -800,20 +817,48 @@ function RunRow({
                 picture={picture}
                 cardFit={cardFit}
                 runFit={(run.fitAtLaunch ?? '').trim()}
+                dim={shelf}
                 disabled={disabled}
                 galleryKey={galleryKey}
                 galleryIndex={galleryIndexOf.get(pictureId)}
+                /* ПЕРВЫЙ КЛИК АНКОЛАПСИТ, ВТОРОЙ ОТКРЫВАЕТ ЗУМ (J-2). Роль отдаётся ТОЛЬКО листу
+                   СВЁРНУТОЙ колоды: у раскрытой лист — обычная карточка ряда, и её поверхность
+                   обязана вести туда же, куда ведёт поверхность любого куска, а карточка без
+                   колоды вовсе не знает о её существовании. */
+                onOpen={members.length && !open ? () => onDeck(pictureId) : undefined}
                 onSplit={onSplit}
               />
             );
             // Лист, из которого ничего не вырезано, колодой не становится: за ним ничего нет.
             if (!members.length) return <Fragment key={pictureId}>{tile}</Fragment>;
-            const open = openDeck === pictureId;
             return (
               <Fragment key={pictureId}>
                 <CropDeck
                   rootId={pictureId}
                   count={members.length}
+                  /* НАСТОЯЩИЕ КУСКИ, А НЕ ПУСТЫЕ КРАЯ (J-2). Веер режется по `DECK_PEEK_MAX` внутри
+                     самой колоды — здесь список отдаётся целиком, чтобы порядок веера был порядком
+                     ряда, а не вторым мнением о нём. */
+                  peeks={members.map((member) => ({
+                    id: member.id ?? 0,
+                    url: thumbUrl(member.media),
+                    alt: pictureHandle(member),
+                  }))}
+                  /* ШИРИНА ОДНОЙ ДОРОЖКИ, СКАЗАННАЯ ЧЕРЕЗ СОБСТВЕННУЮ КОРОБКУ КОЛОДЫ. Свёрнутая
+                     колода занимает ДВЕ дорожки `Tiles` (`span 2`), а между ними лежит 8px зазора
+                     этой сетки (`gap-2`), поэтому одна дорожка — это `(100% - 8px) / 2`. Считать
+                     её из `min={140}` было бы неправдой: дорожка `1fr` и почти всегда шире. */
+                  sheetWidth='calc((100% - 8px) / 2)'
+                  /* Кадр плитки ленты — `4/5` по умолчанию `PictureTile`. Куски рисуются ОДНИМИ
+                     КАДРАМИ, без подписи, и обязаны совпасть с кадром листа до пикселя. */
+                  frameAspect='4/5'
+                  /* ⚠ ДВЕ ДОРОЖКИ РЕЗЕРВИРУЮТСЯ, А НЕ ЗАНИМАЮТСЯ ВПРИТЫК, И ЭТО ОТВЕТ НА «не так
+                     компактно». Веер из трёх третей кончается ровно на `2W`, то есть на 8px раньше
+                     правого края второй дорожки: этот остаток — тот самый зазор сетки, и он не даёт
+                     последнему куску прислониться к соседней плитке. У колоды из одного-двух кусков
+                     справа остаётся грунт — по правилу «зазор и есть разделитель» это законная
+                     пустота, а не дыра. */
+                  style={open ? undefined : { gridColumn: 'span 2' }}
                   open={open}
                   onToggle={() => onDeck(pictureId)}
                 >
@@ -828,6 +873,7 @@ function RunRow({
                       picture={member}
                       cardFit={cardFit}
                       runFit={(run.fitAtLaunch ?? '').trim()}
+                      dim={shelf}
                       disabled={disabled}
                       galleryKey={galleryKey}
                       galleryIndex={galleryIndexOf.get(member.id ?? 0)}
@@ -843,7 +889,7 @@ function RunRow({
 
       {/* A FAILED OR CANCELLED ROW WITH NOTHING UNDER IT SAYS NOTHING MORE (S-10): its own pill
           already states the outcome, and the price on the line already keeps the cost. */}
-      {!archived &&
+      {!folded &&
         !live &&
         pictures.length === 0 &&
         !(status.startsWith('failed') || status === 'cancelled') && (
@@ -877,7 +923,7 @@ function RunRow({
  * `all`. Он не пропадает молча и не приписывается к ведру наугад — угадывание ведра и есть дефект,
  * от которого `bench-kinds` избавляется.
  */
-type RepFilter = 'all' | Representation;
+export type RepFilter = 'all' | Representation;
 
 const REP_FILTERS: readonly ViewSwitchOption<RepFilter>[] = [
   { value: 'all', label: 'all', hint: 'every generation this card has, newest first' },
@@ -909,10 +955,20 @@ export function GenerationHistory({
   band,
   techCardId,
   disabled,
+  defaultRep = 'all',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /**
+   * ГДЕ ЛЕНТА ОТКРЫВАЕТСЯ, А НЕ ЧТО ЕЙ ПОКАЗЫВАТЬ (J-12, J-18, J-31).
+   *
+   * Одна и та же лента стоит на пяти вкладках, и владелец просил, чтобы на каждой она открывалась
+   * на СВОЁМ роде — «с возможностью переключить». Поэтому это НАЧАЛЬНОЕ положение сегмента и точка
+   * возврата при смене карточки, а не фильтр: переключатель остаётся живым и все шесть его
+   * сегментов достижимы. `'all'` по умолчанию — вкладка FLAT, где лента и родилась.
+   */
+  defaultRep?: RepFilter;
 }) {
   const speaks = serverSpeaksDesign();
   const more = useMoreHistory(techCardId, band);
@@ -925,7 +981,7 @@ export function GenerationHistory({
    * `archShown` и `page`: это способ смотреть, а не свойство карточки, и человек, вернувшийся
    * назавтра к отфильтрованной истории, прочитал бы её как потерю прогонов.
    */
-  const [rep, setRep] = useState<RepFilter>('all');
+  const [rep, setRep] = useState<RepFilter>(defaultRep);
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
   const [splitting, setSplitting] = useState<{
@@ -959,15 +1015,33 @@ export function GenerationHistory({
    * оставляет один закоммиченный кадр со старым состоянием и новой карточкой, а в этом кадре
    * эффект «показать все» ниже успевает попросить у сервера продолжение, которого никто не хотел.
    */
+  /**
+   * ВКЛАДКА СМЕНИЛАСЬ — СЕГМЕНТ ВОЗВРАЩАЕТСЯ К ЕЁ СОБСТВЕННОМУ ПОЛОЖЕНИЮ.
+   *
+   * Сегодня переход между вкладками разносит эти ленты по РАЗНЫМ позициям дерева, поэтому React и
+   * так монтирует новую с начальным состоянием. Сравнение стоит здесь на случай, когда это
+   * перестанет быть правдой (композитор сведёт ветки в одну), — и стоит В РЕНДЕРЕ, по тому же
+   * доводу, что и сброс карточки ниже: эффект оставил бы один закоммиченный кадр, в котором
+   * вкладка уже новая, а сегмент ещё чужой.
+   */
+  const shownDefaultRep = useRef(defaultRep);
+  if (shownDefaultRep.current !== defaultRep) {
+    shownDefaultRep.current = defaultRep;
+    if (rep !== defaultRep) setRep(defaultRep);
+    if (page !== 0) setPage(0);
+    if (openDeck !== null) setOpenDeck(null);
+  }
+
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     if (page !== 0) setPage(0);
     if (showAll) setShowAll(false);
     if (archShown) setArchShown(false);
-    // Фильтр — решение о ЧУЖОЙ истории: сосед не должен открыться уже суженным, иначе его
-    // пустая отфильтрованная история читается как «у карточки нет генераций».
-    if (rep !== 'all') setRep('all');
+    // Фильтр — решение о ЧУЖОЙ истории: сосед не должен унаследовать сужение, которое человек
+    // сделал руками на предыдущей карточке. Возврат — к `defaultRep` ВКЛАДКИ, а не к `'all'`:
+    // иначе смена карточки молча отменяла бы J-12/J-18/J-31 и открывала соседа на «all».
+    if (rep !== defaultRep) setRep(defaultRep);
     if (splitting) setSplitting(null);
     // Колода — тоже решение о ЧУЖОЙ карточке, и вдобавок её ключ (id картинки) у соседа означает
     // другую картинку или не означает ничего. Сосед обязан открыться со сложенными колодами.
@@ -976,8 +1050,6 @@ export function GenerationHistory({
 
   const form = useFormContext<TechCardFormData>();
   const cardFit = (form?.watch('fit') ?? '').trim();
-
-  const guard = useMemo(() => buildHideGuard(band), [band]);
 
   /**
    * The band's first page plus whatever continuations have been asked for, deduped by id: the
@@ -1006,10 +1078,31 @@ export function GenerationHistory({
   const firstRunId =
     runs.length >= totalRuns && runs.length ? (runs[runs.length - 1].id ?? null) : null;
 
-  /** Загруженные строки БЕЗ фильтра рода — знаменатель дроби «N из M» и ничего больше. */
-  const unfiltered = useMemo(
-    () => runs.filter((run) => !isRunArchived(run) || archShown),
-    [runs, archShown],
+  /**
+   * Загруженные строки БЕЗ фильтра рода — знаменатель дроби «N из M» и ничего больше.
+   *
+   * ⚠ ЗААРХИВИРОВАННЫЕ СТРОКИ ОТСЮДА ИСКЛЮЧЕНЫ ВСЕГДА, И ЭТО ПОЧИНКА J-22, А НЕ УЖЕСТОЧЕНИЕ.
+   * Раньше нажатие «· N archived ▸» ВПУСКАЛО их в этот список — то есть в ОКНО по три строки, на
+   * их месте по номеру прогона, — и тем же нажатием сбрасывало окно на первую страницу. На
+   * карточке, где заархивированный прогон четвёртый по свежести, человек нажимал кнопку и не
+   * видел ровно ничего: строка уезжала на вторую страницу. Теперь архив живёт на СВОЕЙ полке
+   * (ниже), окно его не пагинирует, и «страница 1 из N» после нажатия остаётся верной.
+   */
+  const unfiltered = useMemo(() => runs.filter((run) => !isRunArchived(run)), [runs]);
+
+  /**
+   * ═══ ПОЛКА АРХИВА: ВСЁ, ЧТО ЗААРХИВИРОВАНО И ЗАГРУЖЕНО ═══════════════════════════════════
+   *
+   * Тем же фильтром рода, что и окно — сегмент над лентой это «как я смотрю на эту карточку», и
+   * полка, игнорирующая его, показывала бы под «renders» заархивированные флэты.
+   */
+  const archivedLoaded = useMemo(() => runs.filter(isRunArchived), [runs]);
+  const archivedRows = useMemo(
+    () =>
+      rep === 'all'
+        ? archivedLoaded
+        : archivedLoaded.filter((run) => runRepresentation(run) === rep),
+    [archivedLoaded, rep],
   );
   /**
    * ВСЁ, ЧТО НИЖЕ, ВЫВОДИТСЯ ИЗ `visible`: страницы, зажим окна, ряд просмотрщика, «show all» и
@@ -1079,8 +1172,11 @@ export function GenerationHistory({
       indexOf.set(id, items.length);
       items.push(mediaFullToViewerItem(media));
     };
-    for (const run of visible) {
-      if (isRunArchived(run) || isRunLive(run)) continue;
+    /* ПОРЯДОК РЯДА — ПОРЯДОК ПОКАЗА, поэтому полка идёт ПОСЛЕ окна: в документе она стоит под
+       строками окна и над пейджером. Строки полки развёрнуты и их плитки на экране есть, значит
+       они обязаны быть и в ряду — иначе «дальше» с плитки полки уводило бы на чужой кадр. */
+    for (const run of [...visible, ...(archShown ? archivedRows : [])]) {
+      if (isRunLive(run)) continue;
       const pictures = run.pictures ?? [];
       /**
        * ⚠ ЭТОТ ОБХОД — КОПИЯ ОБХОДА СТРОКИ, И ЭТО ТРЕБОВАНИЕ, А НЕ СОВПАДЕНИЕ (разбор ревью).
@@ -1106,7 +1202,7 @@ export function GenerationHistory({
       }
     }
     return { items, indexOf };
-  }, [visible, openDeck]);
+  }, [visible, archShown, archivedRows, openDeck]);
   const galleryGroup = useGalleryGroup(gallery.items);
 
   /**
@@ -1122,9 +1218,37 @@ export function GenerationHistory({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAll, more.hasMore, more.loading]);
 
+  /**
+   * ═══ ОТКРЫТАЯ ПОЛКА ДОЧИТЫВАЕТ ПРОДОЛЖЕНИЯ САМА — ВТОРАЯ ПОЛОВИНА ПОЧИНКИ J-22 ════════════
+   *
+   * `N` в шапке — `band.archivedRuns`, число ПО ВСЕЙ КАРТОЧКЕ; строки же приезжают страницей
+   * ленты в 12 прогонов. Заархивированный прогон старше этой страницы считался в `N` и не
+   * загружался НИКОГДА: полка обещала бы шесть строк и рисовала две, без единого слова о том,
+   * куда делись остальные. Цикл тот же, что у «show all», и по той же причине конечен:
+   * `hasMore` гаснет сам, а условие сравнивает загруженное с обещанным.
+   */
+  useEffect(() => {
+    if (archShown && archivedLoaded.length < archivedRuns && more.hasMore && !more.loading) {
+      more.fetchMore();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archShown, archivedLoaded.length, archivedRuns, more.hasMore, more.loading]);
+
   // ABSENT, NOT AN EMPTY HEADER. A card that has never generated anything has no history, and a
   // titled block saying so would be a second, quieter version of the empty studio.
   if (totalRuns === 0 && runs.length === 0) return <></>;
+
+  /**
+   * ЧТО ПОЛКА ГОВОРИТ О СЕБЕ. `archivedRuns` — число ВСЕЙ КАРТОЧКИ, строки приезжают страницами.
+   * Пока продолжения дочитываются, полка говорит об этом; когда страницы кончились, а строк
+   * всё равно меньше обещанного, она называет ДРОБЬ, а не число, которого показать не может.
+   */
+  const shelfNote =
+    archivedLoaded.length >= archivedRuns
+      ? `${archivedRuns} run${archivedRuns === 1 ? '' : 's'}`
+      : more.hasMore || more.loading
+        ? 'reading earlier runs…'
+        : `${archivedLoaded.length} of ${archivedRuns} loaded`;
 
   const liveRun = runs.find(isRunLive) ?? null;
   const pictureCount = runs.reduce((n, run) => n + (run.pictures ?? []).length, 0);
@@ -1151,12 +1275,14 @@ export function GenerationHistory({
               type='button'
               onClick={() => {
                 setArchShown((v) => !v);
-                // Полка архива меняет ДЛИНУ списка под окном — тот же довод, что у фильтра и у
-                // пейджера: открытая колода пережила бы смену окна и вернулась бы раскрытой.
+                // Колода складывается: на полке ниже может стоять её же строка, и «одна открытая
+                // на всю ленту» — закон над лентой целиком, а не над окном.
                 setOpenDeck(null);
-                // The list under the window changes length; starting again from the top is the only
-                // reading of «page 1» that stays true after it.
-                setPage(0);
+                // ⚠ `setPage(0)` ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО ПОЛОВИНА ПОЧИНКИ J-22. Полка не меняет
+                // длину списка под окном — окно её не пагинирует вовсе, — поэтому сбрасывать
+                // страницу не за чем. А раньше именно этот сброс и съедал жест: человек нажимал
+                // «archived ▸», окно прыгало на первую страницу, и заархивированная строка,
+                // стоявшая четвёртой, оказывалась на второй.
               }}
               aria-expanded={archShown}
               className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
@@ -1187,36 +1313,63 @@ export function GenerationHistory({
           INPUT — REFERENCES: там у него есть карта разрешения media_id→файл, которой здесь нет. */}
       <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
 
-      {/* ═══ ФИЛЬТР РОДА — `ViewSwitch` В РЯДУ `GroupLabel`, ТОЧНО КАК В ARTIFACTS ══════════════
-          Тот же примитив, та же расстановка (переключатель в `lead`, счёт в `action`), то же слово
-          «representation» — потому что это тот же вопрос «как я смотрю на эти данные», и второй
-          язык для него был бы вторым словарём на экране.
+      {/* ═══ ФИЛЬТР РОДА — СПИСОК, А НЕ ПОЛОСА СЕГМЕНТОВ (J-3) ═══════════════════════════════════
+          Владелец, дословно: «в REPRESENTATION фильтре должно быть дропдаун списком а не
+          кнопками».
 
-          НЕ В `action` СЕКЦИИ, и это замер, а не вкус: там уже стоят пульс живого прогона,
-          агрегаты по всей карточке и раскладка архива, и шесть сегментов рядом с ними переносятся
-          на ноутбучной ширине в кашу.
+          ЧТО ЭТО МЕНЯЕТ ПО СУЩЕСТВУ, А НЕ ПО ВКУСУ. `ViewSwitch` — примитив «покажи все положения
+          сразу», и он честен там, где положений два-три: полоса тогда СОСТОЯНИЕ, читаемое одним
+          взглядом. Здесь положений ШЕСТЬ, и они стоят в `lead` шапки рядом со счётом «N of M
+          loaded runs»; на ноутбучной ширине шесть сегментов переносились и растаскивали строку
+          шапки на два ряда. Список занимает одну коробку постоянной ширины, и вопрос «как я смотрю
+          на эти данные» задаётся ровно там же, где задавался.
 
-          СЕГМЕНТЫ НИКОГДА НЕ ГАСНУТ. Переключатель вида обязан отвечать всегда; пустой ответ
-          говорится СЛОВАМИ ниже, а не мёртвой кнопкой, по которой не понять, чего нет — прогонов
-          или самой возможности. */}
+          ⚠ И ТОЛЬКО ЗДЕСЬ. У ARTIFACTS стоит такой же переключатель с тем же словом, но там он
+          стоит В ПАРЕ со вторым (`layout`), и превратить в список ОДИН из двух соседей значило бы
+          нарисовать на одной строке две грамматики одного вопроса — то самое «везде по разному».
+          Пара переезжает целиком или не переезжает вовсе, а владелец назвал GENERATION HISTORY.
+
+          ПОДСКАЗКИ СЕГМЕНТОВ (`hint`) ПЕРЕЕХАЛИ НА ТРИГГЕР, А НЕ ПРОПАЛИ. У пункта списка нет
+          места для второй строки — `SelectItem` заворачивает ярлык в `<p>`, — но подсказка
+          описывает ВЫБРАННОЕ положение, и на триггере она читается тем же наведением, что и
+          раньше на сегменте. Чего действительно нет — подсказок у НЕвыбранных положений; их
+          заменяет фраза `rep-empty` ниже, которая называет, чего именно нет.
+
+          `data-rep-filter` — ЯКОРЬ НА ОБЁРТКЕ, А НЕ НА ТРИГГЕРЕ. Примитив списка не пробрасывает
+          произвольные атрибуты в `Select.Trigger`, а лезть в общий примитив ради одного якоря
+          значит менять восемьдесят списков админки ради одной пробы. Обёртка несёт и якорь, и
+          постоянную ширину. */}
       <GroupLabel
         flush
         lead={
-          <ViewSwitch<RepFilter>
-            label='representation'
-            value={rep}
-            options={REP_FILTERS}
-            onChange={(next) => {
-              setRep(next);
-              // Тот же довод, что у полки архива: список под окном меняет длину, и «страница 1» —
-              // единственное прочтение окна, которое остаётся верным после этого.
-              setPage(0);
-              // И колода складывается вместе с окном: её строка после сужения может уехать с
-              // экрана вовсе, а состояние «открыта» пережило бы это и вернулось при возврате
-              // фильтра — открытой без единого нажатия.
-              setOpenDeck(null);
-            }}
-          />
+          <div
+            data-rep-filter={rep}
+            title={REP_FILTERS.find((option) => option.value === rep)?.hint}
+            className='w-[136px]'
+          >
+            <Select
+              name='representation'
+              placeholder='representation'
+              value={rep}
+              items={REP_FILTERS.map((option) => ({ value: option.value, label: option.label }))}
+              onValueChange={(next) => {
+                // ПУСТОТА СЮДА НЕ ДОЕДЕТ — примитив её гасит сам (`offersEmptyOption`), потому что
+                // пустого пункта в списке нет. Но сузить тип нечем, и молча привести чужую строку
+                // к `RepFilter` значило бы записать в фильтр положение, которого не существует.
+                const hit = REP_FILTERS.find((option) => option.value === next);
+                if (!hit) return;
+                setRep(hit.value);
+                // Тот же довод, что у полки архива: список под окном меняет длину, и «страница 1» —
+                // единственное прочтение окна, которое остаётся верным после этого.
+                setPage(0);
+                // И колода складывается вместе с окном: её строка после сужения может уехать с
+                // экрана вовсе, а состояние «открыта» пережило бы это и вернулось при возврате
+                // фильтра — открытой без единого нажатия.
+                setOpenDeck(null);
+              }}
+              fullWidth
+            />
+          </div>
         }
         action={
           rep === 'all' ? undefined : (
@@ -1245,7 +1398,6 @@ export function GenerationHistory({
             run={run}
             firstRunId={firstRunId}
             cardFit={cardFit}
-            guard={guard}
             disabled={disabled || !speaks}
             galleryKey={galleryGroup.key}
             galleryIndexOf={gallery.indexOf}
@@ -1268,6 +1420,69 @@ export function GenerationHistory({
           no {repLabel(rep)} generations among the loaded runs
           {more.hasMore ? ' — show all reads the rest of the history' : ''}
         </Text>
+      )}
+
+      {/* ═══ ПОЛКА АРХИВА — J-22, «кнопка ARCHIVED не работает» ══════════════════════════════
+          ГДЕ СТОИТ И ПОЧЕМУ ИМЕННО ЗДЕСЬ. Под строками окна и НАД пейджером: пейджер — это
+          закрывающая черта окна (1px ink, нижняя ступень лестницы правил), и полка, поставленная
+          под ним, читалась бы как продолжение страниц. Она не страница: окно её не пагинирует.
+
+          ЧТО ЭТО ЗА ОРГАН ПО СИСТЕМЕ. Не блок — блока в блоке в этой системе нет. Это подгруппа:
+          `GroupLabel` (1px #ccc, вторая ступень лестницы) и под ней те же строки прогонов, что и
+          в окне, с той же внутренней волосяной чертой. Ни рамки, ни заливки, ни отступа своего —
+          отбивка сверху принадлежит самой подписи группы.
+
+          ПОЧЕМУ СТРОКИ РАЗВЁРНУТЫ. «Свёрнута в свою строку» (T-14) — правило ОКНА, где архив
+          мешает работе. Полку открывают ровно затем, чтобы посмотреть, что в архиве лежит;
+          свёрнутые строки здесь означали бы «открой полку, чтобы не увидеть». Плитки приглушены
+          (`dim`), потому что это уже не рабочий материал. */}
+      {archShown && archivedRuns > 0 && (
+        <div data-archived-shelf={archivedRuns}>
+          <GroupLabel
+            action={
+              <Text size='micro' variant='label' component='span'>
+                {shelfNote}
+              </Text>
+            }
+          >
+            archived
+          </GroupLabel>
+          {archivedRows.length > 0 ? (
+            <div className='space-y-2'>
+              {archivedRows.map((run) => (
+                <RunRow
+                  key={run.id}
+                  band={band}
+                  techCardId={techCardId}
+                  run={run}
+                  firstRunId={firstRunId}
+                  cardFit={cardFit}
+                  shelf
+                  disabled={disabled || !speaks}
+                  galleryKey={galleryGroup.key}
+                  galleryIndexOf={gallery.indexOf}
+                  openDeck={openDeck}
+                  onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
+                  onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
+                />
+              ))}
+            </div>
+          ) : (
+            /* ПУСТОЙ ОТВЕТ — СЛОВАМИ, а не пустым местом под живой подписью: тот же закон, что у
+               сегмента родов выше. Причин ровно две, и они разные: сегмент сузил полку до рода,
+               которого в архиве нет, — или строки ещё едут со следующей страницы ленты. */
+            /* `label` (#666), НЕ `inactive` (#ccc): на белом это 1.6:1, то есть фраза, которая
+               существует ровно затем, чтобы полка не выглядела пустым местом, сама была бы
+               невидима. DESIGN.md §6. */
+            <Text size='micro' variant='label' component='p' data-probe='archived-empty'>
+              {archivedLoaded.length < archivedRuns
+                ? 'reading earlier runs…'
+                : rep === 'all'
+                  ? 'nothing archived among the loaded runs'
+                  : `no archived ${repLabel(rep)} among the loaded runs`}
+            </Text>
+          )}
+        </div>
       )}
 
       {/* THE PAGER, AND THE DOOR THAT SWITCHES IT OFF (T-17). Both, because they answer different

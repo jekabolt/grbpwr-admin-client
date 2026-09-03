@@ -1,15 +1,15 @@
 import { widthModesOf } from './trace-measure';
 import {
   CONSTRUCTION_DASH,
-  COVER_GAP,
+  coverGap,
   DEFAULT_INK,
   GAUGE_REF,
   LOCK,
-  RAIL_GAP,
   readInk,
   strokeGauge,
   strokeGeometry,
   strokeStep,
+  twinGap,
   type CubicSeg,
   type VectorStroke,
 } from './vector-strokes';
@@ -87,8 +87,15 @@ const ROLE_CONSTRUCTION = 'fold-and-construction';
 
 /** Виды, у которых ритм ДЕЙСТВИТЕЛЬНО периодичен вдоль линии и выражается пунктиром. */
 const RHYTHMIC = new Set(['lock', 'double', 'cover']);
-/** Виды, идущие парой параллельных строчек: в файл — двумя путями во вложенной группе. */
-const PAIRED: Record<string, number> = { double: RAIL_GAP, cover: COVER_GAP };
+/**
+ * Виды, идущие парой параллельных строчек: в файл — двумя путями во вложенной группе.
+ *
+ * ⚠ ЗАЗОР БЕРЁТСЯ ФУНКЦИЕЙ, А НЕ МНОЖИТЕЛЕМ, и это не стиль. У пары есть ПОЛ РАЗБОРЧИВОСТИ
+ * (`twinGap`/`coverGap` в `vector-strokes.ts`), нелинейный по толщине нити; повторённый здесь
+ * множитель `2·G` разошёлся бы с экраном ровно на тонкой нити — то есть файл показывал бы одну
+ * жирную линию там, где на плате нарисована пара. Одна формула, два потребителя.
+ */
+const PAIRED: Record<string, (gauge: number) => number> = { double: twinGap, cover: coverGap };
 
 export type SvgExportOptions = {
   width: number;
@@ -219,7 +226,7 @@ export function layerVectorSvg(strokes: VectorStroke[], opts: SvgExportOptions):
       ink: readInk(s.ink) ?? DEFAULT_INK,
       dash: dashOf(s, stepPx, width),
       role: '',
-      rail: PAIRED[s.brush] ? (PAIRED[s.brush] * ((strokeGauge(s) / GAUGE_REF) * w)) / 2 : 0,
+      rail: PAIRED[s.brush] ? (PAIRED[s.brush](strokeGauge(s)) * (w / GAUGE_REF)) / 2 : 0,
     });
   }
   if (!pieces.length) return null;

@@ -9,6 +9,7 @@ export default function SelectComponent({
   name,
   items,
   className,
+  itemClassName,
   customWidth,
   fullWidth,
   renderValue,
@@ -20,8 +21,29 @@ export default function SelectComponent({
   name: string;
   // `disabled` marks an option that is real but not choosable YET — the label is expected to say
   // why. SelectItem already carries the greyed-out styling for it (data-[disabled]).
-  items: { value: string | number; label: string; disabled?: boolean }[];
+  //
+  // ЯРЛЫК — УЗЕЛ, А НЕ ТОЛЬКО СТРОКА (круг 15). Список видов шва выбирают ГЛАЗАМИ: семнадцать
+  // названий без картинок — это тот же слепой список, по которому владелец уже ходил. `ItemText`
+  // законно держит разметку, и доступное имя пункта по-прежнему собирается из его ТЕКСТА, поэтому
+  // `<svg aria-hidden>` рядом с названием ничего не ломает ни в чтении с экрана, ни в пробах,
+  // ищущих пункт по имени.
+  //
+  // `group` — СОСЕДНИЕ пункты с одним значением заворачиваются в `Select.Group` с заголовком.
+  // Именно соседние, а не «все с таким значением»: порядок пунктов задаёт вызывающая сторона, и
+  // переставлять их за неё список не имеет права. Пункт без `group` рендерится ровно как прежде.
+  items: { value: string | number; label: React.ReactNode; disabled?: boolean; group?: string }[];
   className?: string;
+  /**
+   * Классы КАЖДОГО пункта этого списка. Заведено ради одного свойства, которого у примитива не
+   * было вовсе: показать, КАКОЙ пункт выбран, когда список раскрыт (`data-[state=checked]`).
+   *
+   * ПОЧЕМУ НЕ ГЛОБАЛЬНО. Инверсия выбранной строки — правильное поведение и ступень
+   * `chip-selected` из DESIGN.md, но включить её разом во всех восьмидесяти списках админки
+   * значит поменять вид экранов, о которых этот круг не спрашивал и которых он не меряет.
+   * Правка вида — отдельное решение по всему админу; здесь — общая дверь, а не флаг под одного
+   * вызывающего.
+   */
+  itemClassName?: string;
   customWidth?: number;
   fullWidth?: boolean;
   readOnly?: boolean;
@@ -31,7 +53,7 @@ export default function SelectComponent({
   onValueChange?: (value: string) => void;
   renderValue?: (
     selectedValue: string | number,
-    selectedItem: { label: string; value: string | number } | undefined,
+    selectedItem: { label: React.ReactNode; value: string | number } | undefined,
   ) => React.ReactNode;
   [k: string]: any;
 }) {
@@ -100,18 +122,63 @@ export default function SelectComponent({
         <Arrow />
       </SelectTrigger>
       <SelectContent fullWidth={fullWidth} customWidth={customWidth}>
-        {items.map((item) => (
-          <SelectItem
-            key={item.value}
-            value={String(item.value) === '' ? EMPTY_SENTINEL : String(item.value)}
-            disabled={item.disabled}
-          >
-            {item.label}
-          </SelectItem>
-        ))}
+        {groupRuns(items).map((run) =>
+          run.group === undefined ? (
+            run.items.map((item) => (
+              <SelectItem
+                key={item.value}
+                value={String(item.value) === '' ? EMPTY_SENTINEL : String(item.value)}
+                disabled={item.disabled}
+                className={itemClassName}
+              >
+                {item.label}
+              </SelectItem>
+            ))
+          ) : (
+            <Select.Group key={`grp:${run.group}`}>
+              {/* СТУПЕНЬ `GroupLabel`, А НЕ ВТОРАЯ ГРАММАТИКА: 10px uppercase серым над чертой
+                  `borderColor`. Заголовок внутри списка — то же деление, что заголовок группы
+                  на рейке, и выглядеть иначе он не имеет права. */}
+              <Select.Label className='border-b border-borderColor px-2.5 pb-0.5 pt-1.5 text-micro font-bold uppercase tracking-group text-labelColor'>
+                {run.group}
+              </Select.Label>
+              {run.items.map((item) => (
+                <SelectItem
+                  key={item.value}
+                  value={String(item.value) === '' ? EMPTY_SENTINEL : String(item.value)}
+                  disabled={item.disabled}
+                  className={itemClassName}
+                >
+                  {item.label}
+                </SelectItem>
+              ))}
+            </Select.Group>
+          ),
+        )}
       </SelectContent>
     </Select.Root>
   );
+}
+
+/**
+ * ПУНКТЫ, РАЗБИТЫЕ НА ПОДРЯД ИДУЩИЕ ПРОБЕГИ ОДНОЙ ГРУППЫ. Пробег без имени группы отдаётся
+ * пунктами как есть — то есть список БЕЗ `group` собирает ровно ту же разметку, что собирал до
+ * этой правки, и это утверждение проверяется снимком операций (`operation-work-apply-probe.mjs`).
+ */
+type SelectRun = {
+  group: string | undefined;
+  items: { value: string | number; label: React.ReactNode; disabled?: boolean; group?: string }[];
+};
+function groupRuns(
+  items: { value: string | number; label: React.ReactNode; disabled?: boolean; group?: string }[],
+): SelectRun[] {
+  const runs: SelectRun[] = [];
+  for (const item of items) {
+    const last = runs[runs.length - 1];
+    if (last && last.group === item.group) last.items.push(item);
+    else runs.push({ group: item.group, items: [item] });
+  }
+  return runs;
 }
 
 // todo: add type
@@ -119,12 +186,17 @@ export function SelectItem({ children, className, ref, ...props }: any) {
   return (
     <Select.Item
       className={cn(
-        'relative flex h-6 select-none items-center px-2.5 leading-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[rgba(0,0,0,0.08)] data-[highlighted]:text-textColor data-[disabled]:opacity-30 data-[highlighted]:outline-none',
+        'relative flex min-h-6 select-none items-center px-2.5 leading-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[rgba(0,0,0,0.08)] data-[highlighted]:text-textColor data-[disabled]:opacity-30 data-[highlighted]:outline-none',
         className,
       )}
       {...props}
       ref={ref}
     >
+      {/* ⚠ `Text` РЕНДЕРИТ <p>, И ПОЭТОМУ ВЫСОТА ЗДЕСЬ `min-h`, А НЕ `h`. Ярлык-узел (образец шва
+          над названием) выше двадцати четырёх пикселей, и жёсткая высота срезала бы его молча.
+          На однострочном текстовом ярлыке `min-h-6` даёт ТУ ЖЕ коробку, что `h-6`: 12px строка с
+          `leading-none` в неё не упирается. И по той же причине узел-ярлык обязан состоять из
+          фразовых элементов (`span`, `svg`): `<div>` внутри `<p>` парсер закрыл бы абзацем. */}
       <Select.ItemText>
         <Text variant='uppercase'>{children}</Text>
       </Select.ItemText>
@@ -150,10 +222,10 @@ export function SelectTrigger({
   className?: string;
   renderValue?: (
     selectedValue: string | number,
-    selectedItem: { label: string; value: string | number } | undefined,
+    selectedItem: { label: React.ReactNode; value: string | number } | undefined,
   ) => React.ReactNode;
   value?: string | number;
-  items?: { label: string; value: string | number }[];
+  items?: { label: React.ReactNode; value: string | number }[];
   isOpen?: boolean;
   readOnly?: boolean;
   invalid?: boolean;

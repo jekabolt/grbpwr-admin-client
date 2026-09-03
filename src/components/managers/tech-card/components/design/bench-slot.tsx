@@ -359,15 +359,12 @@ export type BenchSlotProps = {
   required?: boolean;
   /** A write for this slot is in flight or its refetch has not landed. */
   saving?: boolean;
-  /** Pick mode is armed FOR THIS SLOT. */
+  /** Pick mode is armed FOR THIS SLOT. Armed only by the tile picker since J-15. */
   picking?: boolean;
-  /** Why the band offers nothing to pick, or null when it does (Г12). */
-  pickEmpty?: string | null;
   /** Writers frozen — by prop, never by `<fieldset disabled>`, which mutes clicks and nothing else. */
   disabled?: boolean;
   shelfOrdinals: Map<number, number>;
   onPlaceMedia: (media: common_MediaFull) => void;
-  onPick: () => void;
   onCancelPick: () => void;
   onUnmark: () => void;
   /**
@@ -426,11 +423,9 @@ export function BenchSlot(props: BenchSlotProps) {
     required,
     saving,
     picking,
-    pickEmpty,
     disabled,
     shelfOrdinals,
     onPlaceMedia,
-    onPick,
     onCancelPick,
     onUnmark,
     galleryItem,
@@ -556,16 +551,18 @@ export function BenchSlot(props: BenchSlotProps) {
         />
       )}
 
-      {/* THE SECOND DOOR of an EMPTY slot, equal in weight to the first: mark something the band
-          already holds. At zero candidates it becomes an inert note with the reason (Г12) instead
-          of a live control that sends the human to click on pictures that are not there.
+      {/* ⚠ ВТОРОЙ ДВЕРИ ПУСТОГО СЛОТА («or mark a picture from the band») БОЛЬШЕ НЕТ — J-15,
+          владелец. Она была равной первой и вела в режим выбора по полосе.
 
-          У ЗАНЯТОГО СЛОТА ЭТОЙ СТРОКИ БОЛЬШЕ НЕТ (S-15, владелец: «убрать текст на ховер or mark
-          another picture from the band»). Сам жест «картинка полосы → занятый слот» при этом ЖИВ,
-          двумя объявленными дорогами: пикер «— slot —» на плитке полосы (`slot-picker.tsx`,
-          обратное направление того же глагола, один жест) и ✕ в правом верхнем углу → двери
-          опустевшего слота (два жеста). Взведённый выбор (`picking`) рисуется и у занятого слота:
-          состояние обязано быть видно там, где его взвели, — например, с пикера плитки. */}
+          ЖЕСТ «КАРТИНКА ПОЛОСЫ → СЛОТ» ПРИ ЭТОМ ЖИВ, обратным направлением того же глагола:
+          пикер «— slot —» под плиткой полосы (`slot-picker.tsx`) кладёт картинку в слот одним
+          жестом, а ✕ в углу занятой плиты освобождает слот под неё. Убрана ДВЕРЬ, а не дорога.
+
+          ⚠ ВЕТКА `picking` НИЖЕ ОСТАВЛЕНА, НО ВЗВЕСТИ ЕЁ БОЛЬШЕ НЕЧЕМ, и это надо сказать прямо:
+          `pick.start` звали ровно три двери (стороны, детали, ячейка минта), все три сняты этим же
+          пунктом. Пикер плитки режим НЕ взводит — он пишет в слот напрямую. Ветка сохранена вместе
+          с самим `PickModeProvider` (он же владеет Esc) как отдельный, названный след, а не как
+          живой орган. */}
       {!disabled && picking && (
         <div>
           <button
@@ -577,27 +574,6 @@ export function BenchSlot(props: BenchSlotProps) {
               choosing — click a picture in the band · cancel
             </Text>
           </button>
-        </div>
-      )}
-      {!disabled && !picking && !picture && (
-        <div>
-          {pickEmpty ? (
-            <span data-inert={pickEmpty} title={pickEmpty}>
-              <Text size='nano' variant='label' component='span'>
-                {pickEmpty}
-              </Text>
-            </span>
-          ) : (
-            <button
-              type='button'
-              onClick={onPick}
-              className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-            >
-              <Text size='nano' variant='label' component='span'>
-                or mark a picture from the band
-              </Text>
-            </button>
-          )}
         </div>
       )}
 
@@ -731,19 +707,18 @@ function DetailNameField({
  * The cell that MINTS a detail — and the name comes before the picture, which is the whole rule of
  * this cell. A detail slot is addressed by id and cited by name on a printed sheet; a nameless one
  * would be born with nothing to call it and the server refuses it
- * (`FailedPrecondition:detail_name_required`). So the doors do not open until the field has a word
- * in it: they say so and put the caret where the answer goes.
+ * (`FailedPrecondition:detail_name_required`). So the door does not open until the field has a word
+ * in it: it says so and puts the caret where the answer goes.
+ *
+ * ONE DOOR, NOT TWO, SINCE J-15 — «or mark from the band» was the second, and it went with its
+ * twins on the slots themselves.
  */
 export function NewDetailCell({
   disabled,
-  pickEmpty,
   onPlaceMedia,
-  onPick,
 }: {
   disabled?: boolean;
-  pickEmpty?: string | null;
   onPlaceMedia: (media: common_MediaFull, name: string) => void;
-  onPick: (name: string) => void;
 }) {
   const [name, setName] = useState('');
   const [bad, setBad] = useState(false);
@@ -808,37 +783,9 @@ export function NewDetailCell({
         }}
       />
 
-      <div>
-        {pickEmpty ? (
-          <span data-inert={pickEmpty} title={pickEmpty}>
-            <Text size='nano' variant='label' component='span'>
-              {pickEmpty}
-            </Text>
-          </span>
-        ) : (
-          !disabled && (
-            <button
-              type='button'
-              onClick={() => {
-                if (!named) {
-                  demandName();
-                  return;
-                }
-                onPick(named);
-                // The name has been handed to the pick target; leaving it in the field would offer
-                // to mint a SECOND detail of the same name on the next gesture.
-                setName('');
-                setBad(false);
-              }}
-              className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-            >
-              <Text size='nano' variant='label' component='span'>
-                or mark from the band
-              </Text>
-            </button>
-          )
-        )}
-      </div>
+      {/* J-15: «or mark from the band» снята и здесь. Это была ВТОРАЯ ОРФОГРАФИЯ той же двери
+          (та же `pick.start`, другие слова), и оставить её значило бы закрыть жест на слотах и
+          оставить его на ячейке минта — одна дверь, две судьбы. */}
 
       <Text size='nano' component='span' className={bad ? 'text-error' : 'text-labelColor'}>
         <b>new</b> · name it, then fill it

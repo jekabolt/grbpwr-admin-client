@@ -1,4 +1,4 @@
-import { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
+import { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { cn } from 'lib/utility';
@@ -6,9 +6,11 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -22,6 +24,13 @@ import {
   isInputRow,
   type BoardItem,
 } from './mood-board';
+import { displayDetailName, readBench } from './bench-slot';
+import {
+  filledFlatSlots,
+  sentFlatSlotIds,
+  useFlatSlotsSend,
+  useFlatSlotsSendWrites,
+} from './flat-slots-send';
 import { RecalledRunPrompt } from './history-recall';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
@@ -108,6 +117,9 @@ const fullUrl = (full?: common_MediaFull): string =>
  */
 const CELL = 'grid min-w-0 grid-cols-[160px_1fr] items-start gap-3 py-3';
 
+/** Строка указаний карточки. Поле одно на всю карточку и приколото к `media_id` (см. J-8 ниже). */
+type CalloutRow = NonNullable<TechCardFormData['callouts']>[number];
+
 export function ReferencesSection({
   techCardId,
   band,
@@ -159,13 +171,41 @@ export function ReferencesSection({
    * считается ролью, а не превращается в невидимого носителя записки.
    */
   const refOf = useMemo(() => {
-    const m = new Map<number, { role: string; note: string }>();
+    const m = new Map<number, { role: string; note: string; detailSlotId: number }>();
     for (const r of band.references ?? []) {
       const role = (r.role ?? '').trim();
-      if (r.mediaId != null && role) m.set(r.mediaId, { role, note: r.note ?? '' });
+      if (r.mediaId != null && role)
+        m.set(r.mediaId, {
+          role,
+          note: r.note ?? '',
+          // КАКОЙ ДЕТАЛИ ЭТА КАРТИНКА (J-9) — `design_bench_slot(id)`, 0 = не сказано. Ноль здесь
+          // НЕ ошибка и не пустота данных: строка старше поля, либо слот удалён (FK ON DELETE SET
+          // NULL). Оба состояния ячейка говорит СЛОВАМИ, а не выдумывает имя, которого у неё нет.
+          detailSlotId: r.detailSlotId ?? 0,
+        });
     }
     return m;
   }, [band.references]);
+
+  /**
+   * ═══ ИМЯ ДЕТАЛИ ТАМ, ГДЕ ДЕТАЛЬ — J-9 ═══════════════════════════════════════════════════════
+   *
+   * ОДИН СПИСОК НА ДВА ЭКРАНА, И ЭТО НЕ ЭКОНОМИЯ, А УСЛОВИЕ ЗАДАЧИ. Владелец требует одно и то же
+   * имя здесь и в GENERATION — FLAT — VIEWS; та форма рисует свои чипы из `readBench(band,'flat')
+   * .details`, поэтому ячейка читает РОВНО ТОТ ЖЕ список тем же `displayDetailName` — включая его
+   * суффикс `(2)` для тёзок. Второй способ добыть имя разошёлся бы с первым на первой же
+   * переименованной детали, и владелец увидел бы два разных слова про одну деталь.
+   *
+   * ⚠ ИМЯ НЕ КОПИРУЕТСЯ В РЕФЕРЕНС, И ЭТО РЕШЕНИЕ КОНТРАКТА. На проводе лежит УКАЗАТЕЛЬ
+   * (`detail_slot_id`), а не текст: имя детали переименуемо, и копия начала бы расходиться с
+   * оригиналом молча. Поэтому имя РАЗРЕШАЕТСЯ здесь, на каждом рендере, из живого верстака.
+   */
+  const flatDetails = useMemo(() => readBench(band, 'flat').details, [band]);
+  const detailNameOf = (slotId: number): string | null => {
+    if (slotId <= 0) return null;
+    const slot = flatDetails.find((d) => (d.id ?? 0) === slotId);
+    return slot ? displayDetailName(flatDetails, slot) : null;
+  };
 
   // ЧЛЕНСТВО И ПОРЯДОК. Порядок — это порядок добавления во вход, то есть позиция строки входа в
   // `moodboardMedia`; картинка, несущая роль, но потерявшая строку (дрейф), встаёт в хвост, чтобы
@@ -224,11 +264,23 @@ export function ReferencesSection({
   const ordinalOf = (mediaId: number) =>
     Math.max(1, rows.findIndex((i) => i.mediaId === mediaId) + 1);
 
-  function writeRef(mediaId: number, role: string, note: string) {
+  /**
+   * @param detailSlotId — ТОЛЬКО когда вызывающий ЗНАЕТ слот детали (J-9). Опущенный параметр
+   * едет нулём, а ноль на проводе значит «оставь как было», НЕ «очисти»: правка одной записки не
+   * смеет разорвать связь с деталью, о которой её никто не спрашивал. Роль, отличная от `detail`,
+   * очищает связь на сервере сама — присылать что-либо ради этого не нужно.
+   */
+  function writeRef(mediaId: number, role: string, note: string, detailSlotId?: number) {
     // ORDINAL — ЭТО ПОЗИЦИЯ ВО ВХОДЕ, а не номер промпта. Номер промпта выводится сканом (см.
     // выше), и класть его в хранимое поле значило бы завести второй источник одной величины,
     // который расходится с первым при каждом снятии роли.
-    setReferenceRole.mutate({ mediaId, role, ordinal: role ? ordinalOf(mediaId) : 0, note });
+    setReferenceRole.mutate({
+      mediaId,
+      role,
+      ordinal: role ? ordinalOf(mediaId) : 0,
+      note,
+      detailSlotId,
+    });
   }
 
   function setRole(mediaId: number, role: string) {
@@ -396,7 +448,64 @@ export function ReferencesSection({
     band,
     addToInput: true,
     onAccepted: (media) => setPicked((prev) => [...prev, ...media]),
+    onCropped: (crop, sourceMediaId) => replaceReference(sourceMediaId, crop),
   });
+
+  /**
+   * ═══ КРОП ЗАМЕЩАЕТ СТРОКУ ВХОДА НА МЕСТЕ (J-8) ══════════════════════════════════════════════
+   *
+   * Владелец: «в INPUT — REFERENCES должна быть возможность кропнуть картинку в тамбнейле».
+   * После жеста во входе обязано остаться СТОЛЬКО ЖЕ строк, кропнутая — на СВОЁМ месте, с ТОЙ ЖЕ
+   * ролью и запиской. Дописать кроп в конец и оставить исходник рядом — это `split`, другая
+   * дверь; она никуда не делась и стоит рядом.
+   *
+   * ПОРЯДОК ЗАПИСЕЙ ОБЯЗАТЕЛЕН И ОН ИМЕННО ТАКОЙ: СНАЧАЛА поставить роль новому медиа, ПОТОМ
+   * снять со старого. Обратный порядок на отказе второй записи оставил бы картинку без роли —
+   * то есть молча выкинул бы её из промпта; этот же на отказе оставляет ДВЕ строки, обе видимые,
+   * обе снимаемые руками. Отказ, который видно, всегда лучше отказа, который стирает.
+   *
+   * ⚠ УКАЗАНИЯ СТАРОЙ КАРТИНКИ СНИМАЮТСЯ, А НЕ ПЕРЕНОСЯТСЯ. Указание приколото долей кадра
+   * (`x`,`y` в долях), а кроп ДВИГАЕТ рамку: та же доля на кропе — другое место на изделии.
+   * Перенос дал бы стрелку, показывающую не туда, и это хуже отсутствия стрелки. Цену называет
+   * окно ДО реза (`note` ниже), а не снекбар после.
+   *
+   * ⚠ ИСХОДНИК ОСТАЁТСЯ КАРТИНКОЙ ПОЛОСЫ. Чтобы что-то резать, медиа сначала регистрируется как
+   * картинка полосы (`split-to-input.tsx`, шаг 1) — это не утечка, а то, чем «картинка полосы»
+   * является; на полке загрузок она и останется. Из ВХОДА она уходит.
+   */
+  function replaceReference(oldMediaId: number, crop: common_DesignPicture) {
+    const media = crop.media;
+    const newMediaId = media?.id;
+    if (newMediaId == null || newMediaId === oldMediaId) return;
+
+    // Кроп рисуется ДО того, как библиотечная карта о нём узнает: без этого ячейка, которую мы
+    // сами и завели, нарисовала бы «media #N not resolved».
+    setPicked((prev) => [...prev, media as common_MediaFull]);
+
+    const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
+    const at = live.findIndex((item) => isInputRow(item) && item.mediaId === oldMediaId);
+    if (at < 0) {
+      showMessage('the cropped reference is no longer in the input — nothing was replaced', 'error');
+      return;
+    }
+    writeItems(live.map((item, i) => (i === at ? { ...item, mediaId: newMediaId } : item)));
+
+    // Указания, приколотые к старому медиа, уходят вместе с ним (см. шапку функции).
+    const callouts = (getValues('callouts') ?? []) as CalloutRow[];
+    const keptCallouts = callouts.filter((c) => (c?.mediaId ?? 0) !== oldMediaId);
+    if (keptCallouts.length !== callouts.length)
+      setValue('callouts', keptCallouts as TechCardFormData['callouts'], { shouldDirty: true });
+
+    const carried = refOf.get(oldMediaId);
+    if (!carried) return;
+    // ORDINAL — позиция СТАРОЙ строки: новая встала ровно на её место, а `ordinalOf` читает ещё не
+    // перечитанный `rows` и ответил бы про несуществующую строку.
+    const ordinal = Math.max(1, rows.findIndex((i) => i.mediaId === oldMediaId) + 1);
+    setReferenceRole.mutate(
+      { mediaId: newMediaId, role: carried.role, ordinal, note: carried.note },
+      { onSuccess: () => setReferenceRole.mutate({ mediaId: oldMediaId, role: '', ordinal: 0, note: '' }) },
+    );
+  }
 
   /**
    * ─── РИСОВАНИЕ РЕФЕРЕНСА С НУЛЯ (M-2), дословно: «в референсах дать возможность создать новый
@@ -515,6 +624,15 @@ export function ReferencesSection({
               role={refOf.get(mediaId)?.role ?? ''}
               number={promptNumber.get(mediaId)}
               note={refOf.get(mediaId)?.note ?? ''}
+              /* J-9: УКАЗАТЕЛЬ И РАЗРЕШЁННОЕ ПО НЕМУ ИМЯ — ДВА РАЗНЫХ ФАКТА, и ячейке нужны оба.
+                 По имени она печатает `detail · collar`; по указателю РАЗЛИЧАЕТ два молчания —
+                 «строка старше поля» (0) и «слот удалён» (id есть, слота нет), — которые зовут
+                 к одной и той же двери, но врать друг за друга не должны. */
+              detailSlotId={refOf.get(mediaId)?.detailSlotId ?? 0}
+              detailName={detailNameOf(refOf.get(mediaId)?.detailSlotId ?? 0)}
+              onNameDetail={() =>
+                setNamingDetail({ mediaId, note: refOf.get(mediaId)?.note ?? '' })
+              }
               readOnly={readOnly}
               onRole={(role) => setRole(mediaId, role)}
               onNote={(note) => commitNote(mediaId, note)}
@@ -522,6 +640,26 @@ export function ReferencesSection({
               onSplit={() => {
                 const full = mediaById.get(mediaId);
                 if (full) split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
+              }}
+              /* ═══ КРОП ЭТОЙ ЖЕ СТРОКИ (J-8) ═════════════════════════════════════════════════
+                 Та же дверь режет, что и `split`, и потому стоит с ним в одном кластере (закон
+                 углов, `picture-tile.tsx`); разный у них ИСХОД: сплит рождает несколько картинок
+                 и дописывает их, кроп рождает одну и ЗАМЕЩАЕТ ею эту строку.
+
+                 ЦЕНА НАЗЫВАЕТСЯ ДО РЕЗА, ЧИСЛОМ. Указания приколоты долей кадра, а кроп двигает
+                 рамку — перенести их некуда, и узнать об этом после реза человек не должен. */
+              onCrop={() => {
+                const full = mediaById.get(mediaId);
+                if (!full) return;
+                const marks = ((getValues('callouts') ?? []) as CalloutRow[]).filter(
+                  (c) => (c?.mediaId ?? 0) === mediaId,
+                ).length;
+                split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`, {
+                  mode: 'crop',
+                  note: marks
+                    ? `${marks} callout${marks === 1 ? '' : 's'} on this picture ${marks === 1 ? 'is' : 'are'} dropped — the crop moves the frame, and a mark pinned to a fraction of the old one would land somewhere else on the garment.`
+                    : undefined,
+                });
               }}
               splitPending={split.registering === mediaId}
             />
@@ -547,28 +685,30 @@ export function ReferencesSection({
                 allowMultiple
                 showVideos={false}
                 onSelect={addReferences}
+                /* ═══ ВТОРАЯ ДВЕРЬ ПЕРЕЕХАЛА ВНУТРЬ ПЛЕЙСХОЛДЕРА (J-7) ═════════════════════════
+                   Владелец, дословно: «DRAW A REFERENCE в INPUT — REFERENCES должна быть внутри
+                   плейсхолдера».
+
+                   ЗДЕСЬ ОНА СТОЯЛА В ПУСТОЙ ПРАВОЙ КОЛОНКЕ ЭТОЙ ЖЕ ЯЧЕЙКИ, со связкой «or» между
+                   рамкой и кнопкой. Довод был честный (две пунктирные клетки читались бы как два
+                   пустых слота), но результат владелец назвал сам: дверь стояла НЕ ТАМ, где кадр,
+                   который она заводит. Обе двери заводят ОДИН предмет — новую строку входа, — и
+                   стоять они обязаны на одной коробке. Кнопка внутри кнопки невыразима, поэтому
+                   «внутрь» умеет только сам примитив слота (`MediaSlot.doors`), и там это факт о
+                   коробках: дверь лежит внутри рамки, а не рядом с ней.
+
+                   Правая колонка ячейки снова пуста — у плейсхолдера нет ни роли, ни записки,
+                   которые она держит у остальных, — и объясняющего абзаца тут по-прежнему нет
+                   (R-16, K-5, K-19): что делает кнопка, сказано глаголом на ней самой. */
+                doors={[
+                  {
+                    label: 'draw a reference',
+                    onClick: () => setDrawOpen(true),
+                    title:
+                      'opens the picture editor on a blank plate; what you draw joins the input',
+                  },
+                ]}
               />
-            )}
-            {/* ВТОРАЯ ДВЕРЬ СТОИТ В ПУСТОЙ ПРАВОЙ КОЛОНКЕ ЭТОЙ ЖЕ ЯЧЕЙКИ, а не отдельной
-                пунктирной клеткой рядом. Два одинаковых пунктирных прямоугольника читались бы как
-                два пустых слота, а не как две двери; здесь же колонка справа всё равно пустовала —
-                у плейсхолдера нет ни роли, ни записки, которые она держит у остальных.
-                ОБЪЯСНЯЮЩЕГО АБЗАЦА НЕТ НАРОЧНО (R-16, K-5, K-19): «or» — связка между двумя
-                дверями, а не подпись к ним. Что делает кнопка, сказано глаголом на самой кнопке. */}
-            {!readOnly && (
-              <div className='flex min-w-0 flex-col items-start gap-2 pt-1'>
-                <Text size='micro' variant='label' component='span'>
-                  or
-                </Text>
-                <Button
-                  size='xs'
-                  variant='secondary'
-                  onClick={() => setDrawOpen(true)}
-                  title='opens the picture editor on a blank plate; what you draw joins the input'
-                >
-                  draw a reference
-                </Button>
-              </div>
             )}
           </div>
         </div>
@@ -579,6 +719,14 @@ export function ReferencesSection({
           the input holds {INPUT_MAX} pictures — the moodboard counts separately.
         </Text>
       )}
+
+      <FlatPlatesShown
+        techCardId={techCardId}
+        band={band}
+        readOnly={readOnly}
+        firstNumber={inPrompt + 1}
+        referenceMediaNumbers={promptNumber}
+      />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Панели «recalled — run N» с описью снимка здесь больше НЕТ: жест
           на строке истории просто добавляет картинки и тексты того прогона в обычные референсы
@@ -650,28 +798,50 @@ export function ReferencesSection({
         open={namingDetail != null}
         initialNote={namingDetail?.note ?? ''}
         onCancel={() => setNamingDetail(null)}
-        onConfirm={(name, comment) => {
+        onConfirm={async (name, comment) => {
           const target = namingDetail;
           setNamingDetail(null);
           if (!target) return;
-          // ДВЕ ЗАПИСИ, И ПОРЯДОК ВАЖЕН. Сначала роль с запиской — она и есть существование
-          // строки промпта; потом ПУСТОЙ слот с именем. Слот заводится пустым намеренно: он
-          // держит ЧЕРТЁЖ детали, а не фотографию, ради которой его завели.
-          writeRef(target.mediaId, DETAIL_VIEW, comment);
-          setBenchSlot.mutate(
-            {
+          /* ═══ ПОРЯДОК ДВУХ ЗАПИСЕЙ ПЕРЕВЁРНУТ, И ЭТО САМА ПОЧИНКА J-9 ══════════════════════
+           *
+           * Владелец: «когда мы добавляем в INPUT — REFERENCES detail у нас должен в плейсхолдере
+           * разметки меняться название на то что мы вписали (название детали)».
+           *
+           * Раньше сначала писалась РОЛЬ, потом заводился слот, — и связать их было нечем: id
+           * слота рождается только в ОТВЕТЕ на его заведение, а роль к тому моменту уже уехала.
+           * Имя, которое человек набрал, жило на слоте, строка референса о нём не знала, и ячейка
+           * могла напечатать только голое слово «detail». Теперь слот заводится ПЕРВЫМ, его id
+           * берётся из ответа и едет со ролью тем же запросом.
+           *
+           * ⚠ ОТКАЗ ЗАВЕДЕНИЯ ОТМЕНЯЕТ И РОЛЬ — НАМЕРЕННО, И ЭТО ЛУЧШАЯ ИЗ ДВУХ ПОЛОВИН. Прежний
+           * порядок ломался ровно наоборот: роль вставала, слот не заводился, и на карточке
+           * оставался референс со словом «detail», не показывающий ни на что, — то самое
+           * состояние V-1, где деталь существует для модели и не существует для человека, причём
+           * человеку об этом никто не говорит. Теперь неудача не делает НИЧЕГО и говорит об этом
+           * словами (`onError` мутации), а жест повторяется целиком.
+           */
+          let slotId = 0;
+          try {
+            const created = await setBenchSlot.mutateAsync({
               // Деталь — строка ФЛЭТОВОГО верстака, а у него колорвея нет (L-4): положительное
               // значение здесь сервер отвергает, а не проглатывает.
               slot: { viewKey: DETAIL_VIEW, kind: 'flat', colorwayId: 0 },
+              // Слот заводится ПУСТЫМ намеренно: он держит ЧЕРТЁЖ детали, а не фотографию, ради
+              // которой его завели.
               pictureId: 0,
               expectedSlotRev: 0,
               newDetailName: name,
-            },
-            {
-              onSuccess: () =>
-                showMessage(`detail “${name}” added — tick it in generation — flat`, 'success'),
-            },
-          );
+            });
+            slotId = created?.slot?.id ?? 0;
+          } catch {
+            // Сообщение уже показано `onError` мутации; второго текста об одной беде не нужно.
+            return;
+          }
+          // Ноль сюда доехать может только если сервер завёл слот и не назвал его id — состояние,
+          // которого контракт не допускает. Проводом это читается как «оставь связь как была», то
+          // есть деградация до вчерашнего поведения, а не порча чужой связи.
+          writeRef(target.mediaId, DETAIL_VIEW, comment, slotId);
+          showMessage(`detail “${name}” added — tick it in generation — flat`, 'success');
         }}
       />
 
@@ -745,17 +915,225 @@ export function ReferencesSection({
  * отсутствие — одно утверждение и им незачем два места: пустой ярлык читался бы как «ещё не
  * посчитали». Подвал во всю ширину снят и по существу: он лёг бы поверх кнопки split.
  */
+/**
+ * ═══ «ALSO SHOWN — FLAT SLOTS»: ПЕРЕКЛЮЧАТЕЛЬ И САМИ ПЛИТЫ, ЗДЕСЬ (J-10) ═══════════════════════
+ *
+ * Владелец: «WHAT THE MODEL IS SHOWN должно быть в INPUT — REFERENCES и переключатель и сами
+ * картинки должны быть в тамбнейлах с разметкой но с серой пеленой поверх типо инэктив и дожны
+ * убираться по кнопке так же они всегда добавляются в конец промпта».
+ *
+ * ПОЧЕМУ ОРГАН СТОИТ ИМЕННО ЗДЕСЬ, А НЕ В ФОРМЕ. Вопрос «что увидит модель» обязан стоять рядом с
+ * ТЕМ, ЧТО ОНА УВИДИТ. В форме он был списком имён без картинок — согласиться на оплаченный вход
+ * приходилось по описанию. Здесь вход виден целиком: сначала референсы, потом плиты, в том самом
+ * порядке, в котором их пронумерует сервер.
+ *
+ * ⚠ ПЕЛЕНА — НА СНИМКЕ, И ТОЛЬКО НА НЁМ (`PictureTile.dim`). Гасить ЯЧЕЙКУ целиком классом
+ * прозрачности нельзя: прозрачность наследуется и ребёнком не отменяется, и кнопка «✕» вышла бы
+ * серым по белому около 1.6:1 при пороге 4.5:1 — примитив несёт этот замер у себя в шапке.
+ * Дверь, которую не прочесть, — не дверь, а «инэктив» относится к КАРТИНКЕ.
+ *
+ * ⚠ СОСТОЯНИЕ НЕСУТ СЛОВА, А НЕ ОДНА ПЕЛЕНА. Пелена стоит на ВСЕХ плитах всегда — она говорит
+ * «это не референсы», а не «эта не едет». Едет плита или нет, сказано ярлыком (`3` против
+ * `not sent`) и глаголом на двери (`✕` против `send`), то есть двумя независимыми словесными
+ * носителями. Так требует и PRODUCT.md: состояние никогда не несётся одной заливкой.
+ *
+ * ⚠ НОМЕРА ЗДЕСЬ — НЕ УКРАШЕНИЕ, А ОБЕЩАНИЕ ПРО ПРОВОД. Сервер на флэтовом маршруте кладёт
+ * СНАЧАЛА референсы, ПОТОМ плиты (`referenceList`, ветка `kind == flat`), поэтому счёт плит
+ * продолжается с `firstNumber`. Если бы порядок был прежним (плиты первыми), эти цифры были бы
+ * уверенной ложью рядом с кнопкой, которая тратит деньги.
+ *
+ * ⚠ И ОДНА ЧЕСТНОСТЬ ПРО ДУБЛИКАТ. Дедупликация на сервере оставляет ПЕРВОЕ вхождение медиа.
+ * Плита, чей файл уже стоит референсом, второго номера не получает — и не притворяется, что
+ * получила: она говорит, под каким номером её файл уже едет. Случай редкий (одну картинку надо
+ * положить и в слот, и во вход), но цена ошибки — неверная цифра рядом с деньгами.
+ */
+function FlatPlatesShown({
+  techCardId,
+  band,
+  readOnly,
+  firstNumber,
+  referenceMediaNumbers,
+}: {
+  techCardId: number;
+  band: GetDesignBandResponse;
+  readOnly: boolean;
+  /** Номер, с которого продолжается счёт после последнего референса. */
+  firstNumber: number;
+  /** Медиа референсов → их номер в промпте. Нужен ровно для случая дубликата выше. */
+  referenceMediaNumbers: ReadonlyMap<number, number>;
+}): JSX.Element | null {
+  const plates = useMemo(() => filledFlatSlots(band), [band]);
+  const state = useFlatSlotsSend(techCardId);
+  const { setOn, exclude, restore } = useFlatSlotsSendWrites();
+
+  const sent = new Set(sentFlatSlotIds(state, plates.map((p) => p.slotId)));
+
+  // Номера присваиваются сканом по ТОМУ ЖЕ порядку, что уедет на сервер, и только едущим —
+  // снятая плита номера не занимает, ровно как безролевой референс не занимает его выше.
+  let next = firstNumber;
+  const rows = plates.map((plate) => {
+    const already = referenceMediaNumbers.get(plate.mediaId);
+    const travels = sent.has(plate.slotId);
+    return {
+      ...plate,
+      travels,
+      duplicateOf: already,
+      number: travels && already == null ? next++ : null,
+    };
+  });
+
+  const travelling = rows.filter((r) => r.travels);
+  const numbered = travelling.filter((r) => r.number != null);
+
+  return (
+    <div data-flat-plates={plates.length}>
+      {/* ЧИП — В `lead`, А НЕ В `action`. Это переключатель, принадлежащий самому заголовку, и его
+          место не должно зависеть от того, какой ширины блок оказался в текущей раскладке;
+          правый край отдан сводке, которая читается последней. */}
+      <GroupLabel
+        lead={
+          <ChipRow>
+            <Chip
+              selected={state.on}
+              pressed={state.on}
+              disabled={readOnly || plates.length === 0}
+              data-use-flat-slots=''
+              onClick={() => setOn(techCardId, !state.on)}
+              title='the plates already in flat slots go to the model as references — they are usually flats it drew before, so it tends to redraw them'
+            >
+              also send the flat slots
+            </Chip>
+          </ChipRow>
+        }
+        action={
+          <Text size='micro' variant='label' component='span' data-flat-slots-line={plates.length}>
+            {plates.length === 0
+              ? 'no flat slots are filled — nothing extra to send'
+              : !state.on
+                ? 'only the card’s references travel'
+                : travelling.length === 0
+                  ? 'no plates travel — every one is taken out'
+                  : /* ⚠ «ЕДЕТ» И «ПОЛУЧАЕТ НОМЕР» — РАЗНЫЕ ЧИСЛА, И РАСХОДЯТСЯ ОНИ НА ДУБЛИКАТЕ.
+                       Слот дубликата уезжает в `flat_slot_ids` как всякий не снятый — человек его
+                       не снимал, — но НОВОЙ картинки в промпт не добавляет: сервер дедуплицирует
+                       и оставляет первое вхождение, то есть референс. Строка, считавшая только
+                       пронумерованных, говорила «едут 2», пока на проводе ехало 3. Замерено на
+                       стенде: `flatSlotIds [41,43,44]` при «2 plates travel». */
+                    numbered.length === travelling.length
+                      ? `${plural(travelling.length, 'plate')} travel${travelling.length === 1 ? 's' : ''}, ${numberSpan(numbered)}`
+                      : `${plural(travelling.length, 'plate')} travel — ${numbered.length ? `${numberSpan(numbered)}` : 'none numbered'}, ${travelling.length - numbered.length} already in the prompt`}
+          </Text>
+        }
+      >
+        also shown — flat slots
+      </GroupLabel>
+
+      {plates.length === 0 ? (
+        /* ПУСТОЙ ВЕРСТАК ГОВОРИТ, ГДЕ ЕГО ЗАПОЛНИТЬ. Пустое состояние обязано учить экрану, а не
+           сообщать «здесь ничего нет»: слоты стоят ниже, на этой же вкладке. */
+        <Text size='nano' variant='label' component='p' className='py-2'>
+          plates put into FLAT SLOTS below can be sent to the model with the picture references.
+        </Text>
+      ) : (
+        /* ОДНОМЕРНЫЙ РЯД — `flex-wrap`, А НЕ ГРИД. Плит от одной до примерно шести, они равные и
+           переносятся по ширине; сетка завела бы дорожки, которых этому ряду нечем заполнить. */
+        <div className='flex flex-wrap gap-3 py-2'>
+          {rows.map((plate) => {
+            const badge =
+              plate.duplicateOf != null
+                ? `already #${plate.duplicateOf}`
+                : plate.number != null
+                  ? plate.number
+                  : 'not sent';
+            return (
+              <div key={plate.slotId} className='w-[104px] min-w-0' data-flat-plate={plate.slotId}>
+                <PictureTile
+                  url={plate.mediaId ? thumbUrl(mediaOfPlate(band, plate.mediaId)) : ''}
+                  alt={`flat slot ${plate.label}`}
+                  aspect='4/5'
+                  fit='contain'
+                  className='w-[104px]'
+                  // ПЕЛЕНА ВСЕГДА: эти снимки не референсы, и выглядеть как референсы не должны.
+                  dim
+                  badge={badge}
+                />
+                <div className='mt-1 flex min-w-0 items-center justify-between gap-1'>
+                  <Text
+                    size='nano'
+                    variant='label'
+                    component='span'
+                    className='min-w-0 truncate'
+                    title={`flat slot · ${plate.label}`}
+                  >
+                    {plate.label}
+                  </Text>
+                  {/* ДВЕРЬ РИСУЕТСЯ, ТОЛЬКО КОГДА ЕЙ ЕСТЬ ЧТО СДЕЛАТЬ. При выключенном чипе не
+                      едет ничего, и «убрать» было бы нажатием без последствий — орган, который
+                      жмётся и молчит, читается как сломанный. Дубликат снимать тоже нечего: его
+                      файл едет референсом, а не этой плитой. */}
+                  {!readOnly && state.on && plate.duplicateOf == null && (
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      data-flat-plate-door={plate.slotId}
+                      aria-label={
+                        plate.travels
+                          ? `do not send the ${plate.label} plate`
+                          : `send the ${plate.label} plate again`
+                      }
+                      onClick={() =>
+                        plate.travels
+                          ? exclude(techCardId, plate.slotId)
+                          : restore(techCardId, plate.slotId)
+                      }
+                    >
+                      {plate.travels ? '✕' : 'send'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** `numbered 6` для одной и `numbered 6–8` для нескольких — диапазон из одного числа не пишут. */
+function numberSpan(rows: readonly { number: number | null }[]): string {
+  if (!rows.length) return 'none numbered';
+  const first = rows[0].number;
+  const last = rows[rows.length - 1].number;
+  return first === last ? `numbered ${first}` : `numbered ${first}–${last}`;
+}
+
+/** Медиа плиты по её id — плита уже приехала в полосе, второй запрос за ней не нужен. */
+function mediaOfPlate(band: GetDesignBandResponse, mediaId: number): common_MediaFull | undefined {
+  for (const row of band.bench ?? []) {
+    const media = row.picture?.media;
+    if (media?.id === mediaId) return media;
+  }
+  return undefined;
+}
+
 function ReferenceCell({
   mediaId,
   full,
   role,
   number,
   note,
+  detailSlotId,
+  detailName,
+  onNameDetail,
   readOnly,
   onRole,
   onNote,
   onRemove,
   onSplit,
+  onCrop,
   splitPending,
 }: {
   mediaId: number;
@@ -763,11 +1141,19 @@ function ReferenceCell({
   role: string;
   number?: number;
   note: string;
+  /** `design_bench_slot(id)` этой детали, 0 = не сказано (строка старше поля или слот удалён). */
+  detailSlotId: number;
+  /** Имя, разрешённое по указателю из живого верстака, или null — если разрешить не удалось. */
+  detailName: string | null;
+  /** Дверь починки: завести деталь заново. Рисуется ТОЛЬКО когда имени нет (см. ниже). */
+  onNameDetail: () => void;
   readOnly: boolean;
   onRole: (role: string) => void;
   onNote: (note: string) => void;
   onRemove: () => void;
   onSplit: () => void;
+  /** Кроп этой же картинки на месте (J-8) — см. вызывающего. */
+  onCrop: () => void;
   splitPending: boolean;
 }) {
   const noteId = useId();
@@ -814,7 +1200,13 @@ function ReferenceCell({
         // Ряд листания собирает сам примитив, поэтому здесь объявляется только КАДР этой плитки.
         // Пустой адрес зума не обещает — примитив в этом случае не рисует ни кнопки, ни курсора.
         gallery={
-          url ? { src: fullUrl(full), thumbnail: url, type: 'image', alt: label } : undefined
+          url && full
+            ? // `meta` НЕСЁТ ID МЕДИА, и без него дверь «сохранить как новую картинку» отказывает
+              // сообщением, которое САМО называет референс рабочим путём: `item.meta?.id ?? 0`
+              // даёт ноль. Все прочие галереи собираются `mediaFullToViewerItem`, эта одна
+              // собиралась литералом — и потому была единственной, где дверь не открывалась.
+              { ...mediaFullToViewerItem(full), thumbnail: url, alt: label }
+            : undefined
         }
         onSplit={
           !readOnly && url
@@ -823,6 +1215,17 @@ function ReferenceCell({
                 pending: splitPending,
                 ariaLabel: `split ${label} into views`,
                 title: 'split — cut the views out of this picture',
+              }
+            : undefined
+        }
+        onCrop={
+          !readOnly && url
+            ? {
+                onClick: onCrop,
+                pending: splitPending,
+                ariaLabel: `crop ${label} in place`,
+                title:
+                  'crop — cut one frame out of this picture and put it in this row, with the same role and note',
               }
             : undefined
         }
@@ -851,7 +1254,23 @@ function ReferenceCell({
       {/* ПРАВАЯ КОЛОНКА РОСТОМ В КАДР: строка роли фиксированной высоты, записка занимает
           остаток. Иначе поле записки росло бы по тексту и рвало ряд грида. */}
       <div className='grid h-[200px] min-w-0 grid-rows-[26px_1fr] gap-1.5'>
-        <div className='flex min-w-0 items-center'>
+        {/* ═══ РОЛЬ, А У ДЕТАЛИ — ЕЁ ИМЯ (J-9) ══════════════════════════════════════════════════
+            Владелец: «когда мы добавляем в INPUT — REFERENCES detail у нас должен в плейсхолдере
+            разметки меняться название на то что мы вписали».
+
+            ИМЯ ПЕЧАТАЕТСЯ НА ТРИГГЕРЕ, А НЕ В СПИСКЕ. Пункт списка — это ВОПРОС («сделать
+            деталью?»), один на все детали; имя — ОТВЕТ про эту строку. Класть ответ в список
+            значило бы отвечать за все строки сразу.
+
+            ДВЕРЬ ПОЧИНКИ СТОИТ РЯДОМ, А НЕ В ТРИГГЕРЕ, И ЭТО НЕ УКРАШЕНИЕ. Слова «name it again»
+            зовут к жесту, которого у человека НЕ БЫЛО БЫ: пункт `detail` уже выбран, а Radix не
+            шлёт `onValueChange` на повторный выбор того же значения — модалка не открылась бы
+            никогда. Кнопка в триггер не вкладывается (кнопка в кнопке), поэтому дверь — соседняя
+            и появляется РОВНО в сломанном состоянии. */}
+        {/* ЯКОРЬ ДЛЯ ПРОБЫ, а не украшение: у всех триггеров селекта один `aria-label`
+            (плейсхолдер), а `name` примитив в DOM не выносит — адресовать роль КОНКРЕТНОЙ строки
+            было бы нечем. */}
+        <div className='flex min-w-0 items-center gap-2' data-ref-role={mediaId}>
           <Select
             name={`ref-role-${mediaId}`}
             items={ROLE_ITEMS}
@@ -860,7 +1279,29 @@ function ReferenceCell({
             readOnly={readOnly}
             onValueChange={onRole}
             className='w-[172px]'
+            renderValue={(value, item) =>
+              normaliseViewKey(String(value)) === DETAIL_VIEW ? (
+                <span className='min-w-0 truncate' data-ref-detail={mediaId}>
+                  {detailName
+                    ? `detail · ${detailName}`
+                    : detailSlotId > 0
+                      ? 'detail · slot removed'
+                      : 'detail · unnamed'}
+                </span>
+              ) : (
+                item?.label
+              )
+            }
           />
+          {/* ⚠ ДВА МОЛЧАНИЯ РАЗЛИЧАЮТСЯ СЛОВАМИ, ХОТЯ ЗОВУТ К ОДНОЙ ДВЕРИ. `0` — строка старше
+              поля; `id`, который не разрешился, — слот удалён (FK ON DELETE SET NULL). Сказать
+              «slot removed» про строку, у которой слота никогда не было, значило бы сообщить
+              человеку событие, которого не происходило. */}
+          {normaliseViewKey(role) === DETAIL_VIEW && !detailName && !readOnly && (
+            <Button variant='secondary' size='xs' onClick={onNameDetail} data-name-detail={mediaId}>
+              name it
+            </Button>
+          )}
         </div>
 
         <label htmlFor={noteId} className='sr-only'>

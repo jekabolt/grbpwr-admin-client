@@ -14,7 +14,6 @@ export { GenerationStudio } from './studio';
 
 export { formatMoney, decimalToNumber } from './money';
 export {
-  archiveBlockReason,
   expectedTileCount,
   fixTargetOf,
   hasLiveRun,

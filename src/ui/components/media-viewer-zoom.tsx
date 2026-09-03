@@ -1,5 +1,6 @@
 import {
   DownloadIcon,
+  Half2Icon,
   Pencil1Icon,
   RotateCounterClockwiseIcon,
   TrashIcon,
@@ -8,7 +9,7 @@ import {
 } from '@radix-ui/react-icons';
 import { urlToDataUrl } from 'lib/features/getCropped';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // Real pan + zoom and a session-only draw overlay for the media viewer's image
 // stage. Kept out of media-viewer.tsx to keep the gesture math (wheel-zoom
@@ -383,6 +384,255 @@ const paintStrokes = (ctx: CanvasRenderingContext2D, strokes: Stroke[]) => {
   }
 };
 
+/* ── КОРРЕКЦИЯ КАДРА: ЯРКОСТЬ, КОНТРАСТ, ТОЧКА ЧЁРНОГО ───────────────────────────────────────
+ *
+ * Владелец (круг 15, J-13): «в зум вью должна быть возомжность добавить яркость контрасность
+ * поменять точку черного короче как эдит мод в айфоне похожий принцип».
+ *
+ * КОРРЕКЦИЯ — ВЗГЛЯД, ПОКА ОТКРЫТ ПРОСМОТРЩИК; картинкой она становится только по кнопке. Это то
+ * же правило, по которому здесь живут зум и рисование: `resetKey` (смена кадра или закрытие)
+ * снимает её начисто. Хранимой дельты на строке картинки НЕТ и в этот круг она не входит — это
+ * был бы бэкендный контракт, который обязан честно применять КАЖДЫЙ рендерер (плитка, тамбнейл,
+ * вход модели, экспорт), и всё это ради одного «revert», который полоса даёт и так: оригинал
+ * остаётся на месте, а скорректированная копия — отдельная новая картинка.
+ *
+ * ОДИН ОРГАН НА ЭКРАН И НА ФАЙЛ. Не CSS-`filter` для экрана и канвас для файла: два рисовальщика
+ * разошлись бы молча — Safari не знает `ctx.filter`, а `feComponentTransfer` и `contrast()`
+ * считают по разным формулам, — и разница вылезла бы в тот день, когда кто-то сохранит файл и
+ * сравнит его с тем, что видел. Поэтому пока коррекция не тождественна, поверх `<img>` встаёт
+ * канвас ТОГО ЖЕ БОКСА, и в него пиксели идут через ту же `applyAdjustLut`, которой запекается
+ * файл: разойтись им нечем.
+ */
+
+export interface AdjustParams {
+  /** −100…+100. Сдвиг всей шкалы: `br = brightness/200`, то есть +100 это +127.5 к каналу. */
+  brightness: number;
+  /** −100…+100. Растяжение вокруг середины: `c = 1 + contrast/100`. */
+  contrast: number;
+  /**
+   * 0…50 %. Точка чёрного — это `levels` ПО ВХОДУ: всё ниже неё становится чёрным, остальное
+   * растягивается на полную шкалу. Именно это владелец и называет «поменять точку чёрного».
+   */
+  black: number;
+}
+
+export const ADJUST_ZERO: AdjustParams = { brightness: 0, contrast: 0, black: 0 };
+
+export const adjustIsZero = (p: AdjustParams) =>
+  p.brightness === 0 && p.contrast === 0 && p.black === 0;
+
+/**
+ * 256 значений на смену параметров — и ни одного деления на пиксель.
+ *
+ * `v' = clamp(((v/255 − b)/(1 − b) − 0.5)·c + 0.5 + br)`
+ *
+ * Порядок множителей не украшение: точка чёрного правит ВХОД (что считать нулём), контраст
+ * крутит вокруг середины, яркость двигает результат. Переставь их — и «яркость» начнёт менять
+ * силу контраста, то есть две ручки перестанут быть двумя ручками.
+ */
+export function buildAdjustLut(p: AdjustParams): Uint8ClampedArray {
+  const b = clamp(p.black, 0, 50) / 100;
+  const c = 1 + clamp(p.contrast, -100, 100) / 100;
+  const br = clamp(p.brightness, -100, 100) / 200;
+  const span = 1 - b || 1e-6;
+  const lut = new Uint8ClampedArray(256);
+  for (let v = 0; v < 256; v += 1) {
+    lut[v] = Math.round((((v / 255 - b) / span - 0.5) * c + 0.5 + br) * 255);
+  }
+  return lut;
+}
+
+/** Прогон готовой таблицы по пикселям. Альфа не трогается: к этому моменту она уже сплющена. */
+export function applyAdjustLut(image: ImageData, lut: Uint8ClampedArray): void {
+  const d = image.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = lut[d[i]!]!;
+    d[i + 1] = lut[d[i + 1]!]!;
+    d[i + 2] = lut[d[i + 2]!]!;
+  }
+}
+
+/** Что просмотрщик передаёт запекальщику: сами ручки и уже разжатая подложка, если она есть. */
+export interface AdjustHandoff {
+  params: AdjustParams;
+  /** Натуральная копия снимка, уже привезённая через прокси. `null` — привезти самому. */
+  source: HTMLImageElement | null;
+}
+
+/**
+ * ЕДИНСТВЕННЫЙ ЗАПЕКАЛЬЩИК: и «скачать», и «завести новой картинкой» проходят здесь.
+ *
+ * Источник берётся заново через CORS-прокси (или готовым от коррекции, которая уже его привезла),
+ * а не с `<img>` на экране: снимок медиа-сервера, нарисованный на канвасе, ОТРАВЛЯЕТ его, и
+ * `toBlob`/`getImageData` после этого бросают. Ровно поэтому у коррекции и у файла ОДНА подложка —
+ * та, что читается.
+ *
+ * Порядок слоёв: белая земля (просмотрщик ставит прозрачные PNG на белое — файл обязан совпасть с
+ * тем, что было на экране) → снимок → коррекция → чернила. Чернила ПОСЛЕ коррекции, потому что
+ * они не часть снимка: подкрутка яркости не имеет права перекрашивать пометку.
+ */
+async function bakePicture(opts: {
+  src: string;
+  strokes: Stroke[];
+  baseSize: Size;
+  adjust: AdjustParams;
+  source?: HTMLImageElement | null;
+}): Promise<HTMLCanvasElement | null> {
+  const { src, strokes, baseSize, adjust } = opts;
+  let img = opts.source ?? null;
+  if (!img) {
+    const dataUrl = await urlToDataUrl(src);
+    const el = new Image();
+    el.src = dataUrl;
+    await el.decode();
+    img = el;
+  }
+
+  const w = img.naturalWidth || baseSize.w;
+  const h = img.naturalHeight || baseSize.h;
+  if (!w || !h) return null;
+
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d');
+  if (!ctx) return null;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+
+  if (!adjustIsZero(adjust)) {
+    const image = ctx.getImageData(0, 0, w, h);
+    applyAdjustLut(image, buildAdjustLut(adjust));
+    ctx.putImageData(image, 0, 0);
+  }
+
+  if (strokes.length) {
+    // Штрихи хранятся в координатах ПОКАЗАННОГО кадра, поэтому масштабируются до натуральных:
+    // экспорт — полное разрешение, а не снимок экрана.
+    ctx.save();
+    ctx.scale(w / (baseSize.w || w), h / (baseSize.h || h));
+    paintStrokes(ctx, strokes);
+    ctx.restore();
+  }
+  return out;
+}
+
+/**
+ * Коррекция на время сеанса: три ручки, одна таблица, один канвас поверх снимка.
+ *
+ * ПОДЛОЖКУ ПРИВОЗИТ СЮДА, А НЕ БЕРЁТ С ЭКРАНА. `<img>` со стороннего медиа-сервера читать нельзя
+ * (отравленный канвас), поэтому при входе в режим снимок один раз едет через прокси. Пока он не
+ * приехал, ручки заперты и об этом СКАЗАНО: ползунок, который двигается и ничего не делает, хуже
+ * отсутствующего.
+ */
+export function useImageAdjust(params: {
+  resetKey: unknown;
+  baseSize: Size;
+  src: string;
+  enabled: boolean;
+}) {
+  const { resetKey, baseSize, src, enabled } = params;
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<AdjustParams>(ADJUST_ZERO);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sourceRef = useRef<HTMLImageElement | null>(null);
+  const loadedForRef = useRef('');
+
+  // Свежий кадр (переход / переоткрытие) → чистая коррекция. Тот же `resetKey`, что у зума и
+  // чернил: одно правило на все три сеансовые вещи, чтобы «сбрасывается ли это» было одним
+  // вопросом, а не тремя.
+  useEffect(() => {
+    setOpen(false);
+    setValues(ADJUST_ZERO);
+    setStatus('idle');
+    loadedForRef.current = '';
+    sourceRef.current = null;
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (!open || !enabled || !src) return;
+    if (sourceRef.current && loadedForRef.current === src) {
+      setStatus('ready');
+      return;
+    }
+    let alive = true;
+    setStatus('loading');
+    void (async () => {
+      try {
+        const dataUrl = await urlToDataUrl(src);
+        const el = new Image();
+        el.src = dataUrl;
+        await el.decode();
+        if (!alive) return;
+        sourceRef.current = el;
+        loadedForRef.current = src;
+        setStatus('ready');
+      } catch {
+        if (alive) setStatus('failed');
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [open, enabled, src]);
+
+  const lut = useMemo(
+    () => buildAdjustLut(values),
+    [values.brightness, values.contrast, values.black],
+  );
+
+  /** Канвас стоит ТОЛЬКО пока коррекция не тождественна: ноль на всех ручках = обычный `<img>`. */
+  const on =
+    open && enabled && status === 'ready' && !adjustIsZero(values) && baseSize.w > 0 && baseSize.h > 0;
+
+  // Отрисовка в rAF: ползунок сыплет событиями пачками, а перерисовка нужна одна на кадр.
+  // Буфер — размер ПОКАЗАННОГО кадра (≤ ~1.5 Мп), а не натуральный: тянуть 24 Мп на каждое
+  // движение ручки значило бы сделать плавную ручку рваной. Файл при этом уходит натуральным.
+  useEffect(() => {
+    if (!on) return;
+    const canvas = canvasRef.current;
+    const img = sourceRef.current;
+    if (!canvas || !img) return;
+    const id = requestAnimationFrame(() => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.round(baseSize.w * dpr));
+      const h = Math.max(1, Math.round(baseSize.h * dpr));
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      const image = ctx.getImageData(0, 0, w, h);
+      applyAdjustLut(image, lut);
+      ctx.putImageData(image, 0, 0);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [on, lut, baseSize.w, baseSize.h]);
+
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+  const reset = useCallback(() => setValues(ADJUST_ZERO), []);
+
+  return {
+    /** Открыт ли ряд ручек. Не то же самое, что «коррекция стоит». */
+    open,
+    toggle,
+    values,
+    setValues,
+    reset,
+    status,
+    /** Коррекция реально нарисована — канвас на сцене. */
+    on,
+    /** Тождественна ли коррекция. НЕ то же, что `on`: ручки могут стоять, а подложка ещё ехать. */
+    isZero: adjustIsZero(values),
+    canvasRef,
+    sourceRef,
+  };
+}
+
 /**
  * Freehand annotation over the image. Strokes live in a ref and are dropped whenever `resetKey`
  * changes (navigate / close) — there is still no backend field to persist markup against a media
@@ -497,42 +747,36 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
   const toggleDrawMode = useCallback(() => setDrawMode((v) => !v), []);
 
   /**
-   * Flatten the ink onto a copy of the picture and download it. The source is re-fetched through
-   * the CORS proxy rather than reused from the <img> on screen: a media-server image painted onto
-   * a canvas taints it, and `toBlob` on a tainted canvas throws.
+   * Сплющить чернила И КОРРЕКЦИЮ на копию снимка натурального размера.
    *
-   * Strokes are stored in displayed-image space (`baseSize`), so they are scaled up to the media's
-   * natural size — the export is full resolution, not a screenshot of the stage.
+   * Обе двери наружу — «скачать» и «завести новой картинкой» — зовут ОДИН `bakePicture`. Второй
+   * запекальщик рядом с первым разошёлся бы с ним на первой же правке, и разошёлся бы молча:
+   * файл отличался бы от того, что человек видел, а сказать об этом было бы некому.
+   *
+   * Пустой акт (ни чернил, ни коррекции) возвращает `null`, а не пустой файл: скачать копию,
+   * тождественную оригиналу, значит завести в бакете второй такой же.
    */
+  const bake = useCallback(
+    async (src: string, adjust?: AdjustHandoff) => {
+      const params = adjust?.params ?? ADJUST_ZERO;
+      if (!src || (!strokesRef.current.length && adjustIsZero(params))) return null;
+      return bakePicture({
+        src,
+        strokes: strokesRef.current,
+        baseSize: { w: baseSize.w, h: baseSize.h },
+        adjust: params,
+        source: adjust?.source ?? null,
+      });
+    },
+    [baseSize.w, baseSize.h],
+  );
+
   const saveImage = useCallback(
-    async (src: string, filename?: string) => {
-      if (!src || !strokesRef.current.length) return;
+    async (src: string, filename?: string, adjust?: AdjustHandoff) => {
       setSaving(true);
       try {
-        const dataUrl = await urlToDataUrl(src);
-        const img = new Image();
-        img.src = dataUrl;
-        await img.decode();
-
-        const w = img.naturalWidth || baseSize.w;
-        const h = img.naturalHeight || baseSize.h;
-        if (!w || !h) return;
-
-        const out = document.createElement('canvas');
-        out.width = w;
-        out.height = h;
-        const ctx = out.getContext('2d');
-        if (!ctx) return;
-        // The viewer stages transparent media on white — flatten onto the same
-        // ground so the exported file matches what was on screen when drawing.
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        ctx.save();
-        ctx.scale(w / (baseSize.w || w), h / (baseSize.h || h));
-        paintStrokes(ctx, strokesRef.current);
-        ctx.restore();
-
+        const out = await bake(src, adjust);
+        if (!out) return;
         const blob = await new Promise<Blob | null>((r) => out.toBlob(r, 'image/png'));
         if (!blob) return;
         const href = URL.createObjectURL(blob);
@@ -547,7 +791,21 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
         setSaving(false);
       }
     },
-    [baseSize.w, baseSize.h],
+    [bake],
+  );
+
+  /** Тот же файл, но байтами для двери хозяина: полоса заведёт его новой картинкой. */
+  const bakeDataUrl = useCallback(
+    async (src: string, adjust?: AdjustHandoff) => {
+      setSaving(true);
+      try {
+        const out = await bake(src, adjust);
+        return out ? out.toDataURL('image/png') : null;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [bake],
   );
 
   return {
@@ -564,6 +822,7 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
     clear,
     saving,
     saveImage,
+    bakeDataUrl,
     canvasRef,
     canvasHandlers: {
       onPointerDown,
@@ -579,12 +838,15 @@ function ToolbarIconButton({
   disabled,
   active,
   label,
+  probe,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
   active?: boolean;
   label: string;
+  /** Якорь для проб. Роль органа читается по нему, а не по подписи, которая меняется с состоянием. */
+  probe?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -595,6 +857,7 @@ function ToolbarIconButton({
       title={label}
       disabled={disabled}
       onClick={onClick}
+      {...(probe ? { 'data-probe': probe } : {})}
       className={cn(
         'flex size-8 shrink-0 items-center justify-center border transition-colors',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
@@ -606,6 +869,110 @@ function ToolbarIconButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Словесная кнопка тёмного хрома. Та же кожа, что у глифовой: одна грамматика на весь тулбар,
+ * иначе «reset» и «undo» читались бы как органы разных приложений.
+ *
+ * ВЫКЛЮЧЕННАЯ — НЕ СЕРАЯ ПЛИТА, А КОНТУР (система, «Buttons/Disabled»): гасятся линия и подпись,
+ * заливка не появляется.
+ */
+function ToolbarTextButton({
+  onClick,
+  disabled,
+  label,
+  probe,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  label: string;
+  probe?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type='button'
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      {...(probe ? { 'data-probe': probe } : {})}
+      className={cn(
+        'shrink-0 border px-2 py-1 text-micro uppercase leading-4 tracking-label transition-colors',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
+        'border-bgColor/40 text-bgColor hover:bg-bgColor hover:text-textColor',
+        'disabled:cursor-not-allowed disabled:border-bgColor/20 disabled:text-bgColor/30 disabled:hover:bg-transparent disabled:hover:text-bgColor/30',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * ОДНА РУЧКА КОРРЕКЦИИ: имя, ползунок, число.
+ *
+ * ОРГАН — НАТИВНЫЙ `input[type=range]` ПОД `accent-color`, как полоса зума у кадрирования
+ * (`crop-range`) и рейка кисти: клавиатура (стрелки, Home/End), автоповтор, касание и
+ * перетаскивание уже написаны в браузере, а свой ползунок — это переизобретение стандартного
+ * органа, которое продукт запрещает прямо, и вдобавок потеря всего перечисленного.
+ *
+ * `accent-bgColor` НЕ УКРАШЕНИЕ: без него браузер красит ход системным синим — цветом, который в
+ * этой системе обязан значить «в полёте» и не значит здесь ничего.
+ *
+ * Число слева от края фиксированной ширины и `tabular-nums`: иначе ряд дёргался бы на каждой
+ * смене разряда, пока ручку ведут.
+ */
+function AdjustSlider({
+  name,
+  probe,
+  value,
+  min,
+  max,
+  unit,
+  disabled,
+  onChange,
+}: {
+  name: string;
+  probe: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: '' | '%';
+  disabled: boolean;
+  onChange: (v: number) => void;
+}) {
+  const shown =
+    unit === '%' ? `${value}%` : value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : '0';
+  return (
+    <label className='flex shrink-0 items-center gap-1.5'>
+      <span className='text-micro uppercase tracking-label text-bgColor/70'>{name}</span>
+      <input
+        type='range'
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        disabled={disabled}
+        aria-label={name}
+        // Читалке объявляется ЗНАЧЕНИЕ СО ЗНАКОМ, а не голое число хода: «минус тридцать» и
+        // «тридцать» — это две разные картинки, и различать их обязан и голос.
+        aria-valuetext={shown}
+        data-probe={`adjust-${probe}`}
+        title={`${name} — double-click to reset`}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onDoubleClick={() => onChange(0)}
+        className={cn(
+          'h-[14px] w-24 min-w-0 cursor-pointer accent-bgColor',
+          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
+          'disabled:cursor-default disabled:opacity-40',
+        )}
+      />
+      <span className='w-8 shrink-0 text-right text-micro tabular-nums'>{shown}</span>
+    </label>
   );
 }
 
@@ -631,10 +998,25 @@ interface ZoomDrawToolbarProps {
   /** Flatten the ink onto the picture and download it. Omitted where there is nothing to save to. */
   onSave?: () => void;
   saving?: boolean;
+  /* ── Коррекция кадра (J-13). Ряд ручек живёт ЗДЕСЬ, потому что он такой же сеансовый орган
+        поверх снимка, как перо: одно место — один закон сброса. ── */
+  adjustOpen: boolean;
+  onToggleAdjust: () => void;
+  adjust: AdjustParams;
+  onAdjustChange: (next: AdjustParams) => void;
+  onAdjustReset: () => void;
+  /** Пока подложка не привезена, ручки заперты — и сказано, почему. */
+  adjustStatus: 'idle' | 'loading' | 'ready' | 'failed';
+  /**
+   * Завести результат НОВОЙ КАРТИНКОЙ у хозяина просмотрщика. Absent — хозяина нет (библиотека),
+   * и единственная дверь наружу это «скачать», как было до J-13.
+   */
+  onSaveAsPicture?: () => void;
 }
 
 /** Floating bottom-center toolbar: zoom controls always shown, draw controls
- * (pen weight / colors / undo / clear / save) appear once draw mode is toggled on. */
+ * (pen weight / colors / undo / clear) appear once draw mode is toggled on, and the three
+ * correction knobs appear on their own row once `adjust` is toggled on. */
 export function ZoomDrawToolbar({
   scale,
   canZoomIn,
@@ -656,17 +1038,99 @@ export function ZoomDrawToolbar({
   onClear,
   onSave,
   saving,
+  adjustOpen,
+  onToggleAdjust,
+  adjust,
+  onAdjustChange,
+  onAdjustReset,
+  adjustStatus,
+  onSaveAsPicture,
 }: ZoomDrawToolbarProps) {
+  const knobsLive = adjustStatus === 'ready';
+  /** Нечего запекать: ни чернил, ни коррекции. Обе двери наружу тогда заперты, и это честно. */
+  const nothingToBake = !hasStrokes && adjustIsZero(adjust);
   return (
     <div
       role='toolbar'
-      aria-label='Image zoom and drawing controls'
+      aria-label='Image zoom, adjust and drawing controls'
       // Stop clicks/gestures on the toolbar itself from reaching the stage's
       // close-on-background-click and pan/swipe handling.
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
-      className='absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 px-2'
+      /* ЦЕНТРИРОВАНИЕ ПОЛЯМИ, А НЕ СДВИГОМ. `left-1/2 + -translate-x-1/2` центрирует картинкой, но
+         ШИРИНУ при этом считает от левого края до правого края сцены — то есть ровно половину, — и
+         ряд ручек ломался на две строки посреди пустого экрана. `left-3 right-3` + `w-fit` даёт
+         тот же центр и всю ширину. */
+      className='absolute bottom-3 left-3 right-3 z-10 mx-auto flex w-fit flex-col items-center gap-1.5'
     >
+      {/* РЯД РУЧЕК СТОИТ НАД РЯДОМ КНОПОК, А НЕ ПОД НИМ. Кнопки — постоянный орган, и они обязаны
+          оставаться на одном расстоянии от низа сцены: ряд, вставший снизу, толкал бы их вверх на
+          каждое открытие, и человек попадал бы мимо той кнопки, в которую целился. */}
+      {adjustOpen && (
+        <div
+          data-probe='adjust-row'
+          className='flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border border-bgColor/40 bg-black/40 px-2 py-1 backdrop-blur-sm'
+        >
+          <AdjustSlider
+            name='brightness'
+            probe='brightness'
+            value={adjust.brightness}
+            min={-100}
+            max={100}
+            unit=''
+            disabled={!knobsLive}
+            onChange={(v) => onAdjustChange({ ...adjust, brightness: v })}
+          />
+          <AdjustSlider
+            name='contrast'
+            probe='contrast'
+            value={adjust.contrast}
+            min={-100}
+            max={100}
+            unit=''
+            disabled={!knobsLive}
+            onChange={(v) => onAdjustChange({ ...adjust, contrast: v })}
+          />
+          <AdjustSlider
+            name='black point'
+            probe='black'
+            value={adjust.black}
+            min={0}
+            max={50}
+            unit='%'
+            disabled={!knobsLive}
+            onChange={(v) => onAdjustChange({ ...adjust, black: v })}
+          />
+          {/* Внутренняя линейка ряда — `/20`, как между строками панели сведений; внешний контур
+              коробки — `/40`. Две ступени, не одна. */}
+          <span aria-hidden className='h-4 w-px shrink-0 bg-bgColor/20' />
+          {!knobsLive && (
+            <span className='shrink-0 text-micro text-bgColor/70'>
+              {adjustStatus === 'failed' ? 'pixels unreadable' : 'reading pixels…'}
+            </span>
+          )}
+          <ToolbarTextButton
+            label='Reset adjustments'
+            probe='adjust-reset'
+            onClick={onAdjustReset}
+            disabled={adjustIsZero(adjust)}
+          >
+            reset
+          </ToolbarTextButton>
+          {onSaveAsPicture && (
+            <ToolbarTextButton
+              label='Save as a new picture'
+              probe='save-as-picture'
+              onClick={onSaveAsPicture}
+              disabled={nothingToBake || !!saving}
+            >
+              save as a new picture
+            </ToolbarTextButton>
+          )}
+        </div>
+      )}
+
+      <div className='flex max-w-full flex-wrap items-center justify-center gap-1.5'>
       <div className='flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm'>
         <ToolbarIconButton label='Zoom out' onClick={onZoomOut} disabled={!canZoomOut}>
           <ZoomOutIcon className='size-4' />
@@ -687,6 +1151,20 @@ export function ZoomDrawToolbar({
       </div>
 
       <div className='flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm'>
+        {/* ЧИП КОРРЕКЦИИ — В ТОЙ ЖЕ КОРОБКЕ, ЧТО КАРАНДАШ, И ПЕРЕД НИМ. Это два режима одного
+            занятия «поправить снимок», и разводить их по разным группам значило бы сказать, что они
+            из разных семейств. ПЕРЕД, а не после: когда перо раскрыто, его собственные органы
+            (вес, цвет, откат, очистка) идут следом за ним сплошняком — чип, поставленный в хвост,
+            оказался бы за корзиной и читался бы как ещё один инструмент рисования.
+            Глиф — половина круга, обычный знак контраста. */}
+        <ToolbarIconButton
+          label={adjustOpen ? 'Close adjust' : 'Adjust brightness, contrast and black point'}
+          probe='adjust-chip'
+          active={adjustOpen}
+          onClick={onToggleAdjust}
+        >
+          <Half2Icon className='size-4' />
+        </ToolbarIconButton>
         <ToolbarIconButton
           label={drawMode ? 'Exit draw mode' : 'Draw on image'}
           active={drawMode}
@@ -754,19 +1232,28 @@ export function ZoomDrawToolbar({
             <ToolbarIconButton label='Clear drawing' onClick={onClear} disabled={!hasStrokes}>
               <TrashIcon className='size-4' />
             </ToolbarIconButton>
-            {onSave && (
-              // The markup is session-only — there is no backend field to persist it against — so
-              // downloading the flattened picture is the only way it survives the dialog closing.
-              <ToolbarIconButton
-                label={saving ? 'Saving…' : 'Save image with drawing'}
-                onClick={onSave}
-                disabled={!hasStrokes || !!saving}
-              >
-                <DownloadIcon className='size-4' />
-              </ToolbarIconButton>
-            )}
           </>
         )}
+
+      </div>
+
+      {/* ДВЕРИ НАРУЖУ — СВОЯ ГРУППА, А НЕ ХВОСТ ГРУППЫ ПЕРА.
+          Раньше «скачать» жила ВНУТРИ пера и показывалась только в режиме рисования — то есть
+          человек, который ничего не рисовал, а только поправил яркость, не мог вынести результат
+          вовсе, пока не возьмёт карандаш. Дверей две («скачать себе» и «завести картинкой»), они
+          одни и те же для чернил и для коррекции, и поэтому стоят снаружи обоих режимов. */}
+      {(drawMode || adjustOpen) && onSave && (
+        <div className='flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm'>
+          <ToolbarIconButton
+            label={saving ? 'Saving…' : 'Download this picture with the changes'}
+            probe='save-download'
+            onClick={onSave}
+            disabled={nothingToBake || !!saving}
+          >
+            <DownloadIcon className='size-4' />
+          </ToolbarIconButton>
+        </div>
+      )}
       </div>
     </div>
   );

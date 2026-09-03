@@ -4590,6 +4590,22 @@ export type DesignRunParams = {
   // code does today; whoever revisits it should pick deliberately, because a wrong-coloured render
   // filed under a colourway is indistinguishable from a right one after the fact.
   colorwayId: number | undefined;
+  // WHICH of the card's flat slots travel, when `use_flat_slots` is on — design_bench_slot(id).
+  // EMPTY IS TODAY'S BEHAVIOUR AND MEANS «ALL FILLED FLAT SLOTS», never «none». That is what makes
+  // the field additive: every run frozen before it, and every client that does not know it,
+  // keeps meaning exactly what it meant. «Send no plates» already has its own spelling, and it is
+  // `use_flat_slots = false`.
+  // ONLY MEANINGFUL TOGETHER WITH `use_flat_slots` ON A kind=flat RUN — it narrows that switch, it
+  // does not replace it. It is IGNORED on render / 3D / recolor / pattern, whose plates are the
+  // content of those kinds rather than an option (see `use_flat_slots`), and on the selective fix
+  // path, which does its own narrowing through `fix_targets` / `fix_slot_ids`.
+  // WHY THE LIST IS OF SLOT IDS AND NOT MEDIA IDS: the operator is excluding a PLACE on the bench
+  // («not the left side»), and the plate standing there can be replaced between the click and the
+  // GENERATE. A media id would silently start meaning a different slot; a slot id cannot.
+  // FROZEN LIKE EVERY OTHER PARAM: a rerun repeats the same exclusion without restating it. An id
+  // naming a slot that has since been deleted or emptied simply matches nothing — the run loses
+  // that plate, which is what its absence already means.
+  flatSlotIds: number[] | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -4850,6 +4866,25 @@ export type DesignPicture = {
   // because no money was spent on it. A crop of an uploaded composite therefore sits under the same
   // BATCH the composite arrived in.
   derivedFrom: number | undefined;
+  // WHICH VERB produced this picture from `derived_from`: '' | crop | flatten.
+  // READ IT ONLY AS A PAIR WITH `derived_from`, because '' carries TWO different meanings and a
+  // reader that collapses them will call an orphaned crop a root:
+  // * derived_from = 0 and derivation = ''  — a ROOT: a run's output, an uploaded file, or the
+  // flatten of a layer drawn from nothing;
+  // * derived_from ≠ 0 and derivation = ''  — a legacy row migration 0359's backfill could not
+  // classify, because its parent is already gone (`derived_from` carries no FK by design).
+  // ⚠ `layer_rev` IS NOT A DISCRIMINATOR AND NEVER WAS — THIS FIELD EXISTS BECAUSE IT ISN'T.
+  // A CROP INHERITS ITS PARENT'S `layer_rev` verbatim, so the crop of an EDITED sheet arrives with
+  // exactly the non-zero revision a flatten arrives with; and «edit, save, edit again» files two
+  // flattens whose revisions may coincide. The sentence on `layer_rev` below — «0 = not flattened»
+  // — is therefore false in one direction already, and was false before this field existed: a
+  // non-zero rev proves nothing about the verb. Grouping the feed by anything but `derivation`
+  // folds a mere edit into the deck of cut pieces, which is the defect J-1 names.
+  // ⚠ IT IS NOT A SECOND SPELLING OF `source_class` either. That one answers «where the pixels
+  // came from» (machine, hand, a foreign file); this one answers «by what gesture this row
+  // detached from its parent's». A crop of an AI sheet and a flatten of an AI sheet share one
+  // `source_class` and differ here.
+  derivation: string | undefined;
   // PROVENANCE, an open vocabulary: ai | uploaded | ai_edits | imported_svg | drawn.
   // It has already grown once (`drawn`, for a vector base drawn from nothing), which is why it is
   // a string and not an enum.
@@ -4857,6 +4892,11 @@ export type DesignPicture = {
   // This picture is the output of a fix whose INPUT slots were of mixed provenance. The flag does
   // not forbid anything — it refuses to let the mixture be laundered by one more generation.
   mixedInput: boolean | undefined;
+  // The edit layer revision this picture was flattened from.
+  // ⚠ ITS OLD SENTENCE — «0 = not flattened» — WAS ONLY EVER HALF TRUE, AND THE FALSE HALF COST A
+  // FEATURE. A crop COPIES its parent's value, so a non-zero rev does NOT mean «this row is a
+  // flatten»: the crop of an edited sheet carries one too. Zero still means «no layer was involved
+  // in producing THIS row's pixels». To ask what verb made the row, read `derivation`.
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
@@ -5084,6 +5124,17 @@ export type DesignReference = {
   // the row and takes the note with it, because the row is the role's existence — see the comment
   // on `role` above and SetDesignReferenceRole.
   note: string | undefined;
+  // WHICH DETAIL this reference is about — design_bench_slot(id), 0 = none.
+  // A REFERENCE WITH role=detail USED TO BE ABLE TO SAY ONLY THE BARE WORD «detail». The name the
+  // operator typed lives on the bench slot the same gesture mints, and the two rows were
+  // strangers, so the cell had nothing to print. This is the link, and it is a POINTER, not a copy
+  // of the name: a detail name is renameable presentation, and a copy would drift from it in
+  // silence. The same argument is already written on DesignRunParams.detail_slot_ids.
+  // 0 ON A role=detail ROW IS NOT AN ERROR: the row predates this field, or the slot was deleted
+  // (the FK is ON DELETE SET NULL). Both are states a client says in words — «name it again» —
+  // rather than inventing a name it does not have. On any role other than `detail` it is always 0,
+  // and the store enforces that.
+  detailSlotId: number | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four

@@ -156,7 +156,7 @@ export function StudioTab({
           что в истории, получал список ОДНОГО прогона. Стрелка «дальше» упиралась в край прогона
           не по решению, а потому что дальше ничего не было передано. Ряд собирают сами плитки
           (`PictureTile`), а порядок берётся из документа, поэтому листается ровно то, что видно. */}
-      <PictureGalleryProvider>
+      <PictureGalleryProvider techCardId={techCardId} band={band}>
       <PickModeProvider>
         {/* `FixContextProvider` здесь БОЛЬШЕ НЕ МОНТИРУЕТСЯ: цикл починки снят (S-15), взводить
             контекст стало некому. Сам `fix-context.tsx` жив — `generation-form` читает
@@ -243,7 +243,16 @@ export function StudioTab({
                     disabled={readOnly}
                     colorways={colorway.colorways}
                   />
-                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                  {/* ЛЕНТА ОТКРЫВАЕТСЯ НА СВОЁМ РОДЕ, А НЕ НА «ALL» (J-12). Переключатель при этом
+                      остаётся — владелец просил «с возможностью переключить», — и `defaultRep`
+                      это именно НАЧАЛЬНОЕ положение, к которому лента возвращается при смене
+                      карточки, а не запрет. */}
+                  <GenerationHistory
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    defaultRep='pattern'
+                  />
                 </>
               )}
               {/* У РЕНДЕРА И 3D СВОЙ ЭКРАН И ТА ЖЕ ИСТОРИЯ ПРОГОНОВ: прототип собирает их как
@@ -263,7 +272,14 @@ export function StudioTab({
                     onGoToKind={setKind}
                     colorway={colorway}
                   />
-                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                  {/* J-18: «в GENERATION HISTORY по дефолту должен быть фильтр по фабрик
+                      рендерам с возможностью переключить». */}
+                  <GenerationHistory
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    defaultRep='render'
+                  />
                 </>
               )}
               {kind === 'threed' && (
@@ -276,7 +292,12 @@ export function StudioTab({
                     onGoToKind={setKind}
                     colorway={colorway}
                   />
-                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                  <GenerationHistory
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    defaultRep='threed'
+                  />
                 </>
               )}
               {/* ═══ ON MODEL — ПЕРЕКРАС ФОТОГРАФИИ НА ЖИВОМ ЧЕЛОВЕКЕ (K-17) ══════════════════
@@ -287,17 +308,31 @@ export function StudioTab({
               {kind === 'onmodel' && (
                 <>
                   <OnModelStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                  <GenerationHistory band={band} techCardId={techCardId} disabled={readOnly} />
+                  {/* J-31: «GENERATION HISTORY в этой вкладке по дефолту сортирует в on model». */}
+                  <GenerationHistory
+                    band={band}
+                    techCardId={techCardId}
+                    disabled={readOnly}
+                    defaultRep='onmodel'
+                  />
                 </>
               )}
               {/* ПОЛОСА ЛИСТА И ПРЕДУПРЕЖДЕНИЕ О СМЕСИ БОЛЬШЕ НЕ СТОЯТ ЗДЕСЬ. Это строки ШАПКИ
                   блока слотов (`slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml` внутри себя), и
                   тремя отдельными блоками они читались как три равновесных заявления, хотя два из
                   них — про третье. Монтирует их теперь `Bench`. */}
-              {/* ЛОТОК ВЫБОРА — ВПЛОТНУЮ НАД ВЕРСТАКОМ, потому что жест начинается на его пустом
-                  слоте («or mark a picture from the band») и заканчивается плиткой лотка: между
-                  дверью и ответом не должно стоять пол-экрана. Вне взведённого выбора лоток — null,
-                  постоянной колонки владелец не хочет (R-18). */}
+              {/* ⚠ ЛОТОК ВЫБОРА СМОНТИРОВАН, НО ВЗВЕСТИ ЕГО БОЛЬШЕ НЕЧЕМ — сказать это прямо честнее,
+                  чем оставить прежнее объяснение. J-15 снял все три двери `pick.start` (стороны,
+                  детали, ячейка минта), и других вызывающих у режима нет: `PickTray` теперь всегда
+                  рисует null, а `PickModeProvider` держит только свой Esc.
+
+                  ПОЧЕМУ ОРГАН ВСЁ РАВНО ЗДЕСЬ: снос `pick-mode.tsx` целиком — отдельный след, и
+                  он про Esc-обработчик, а не про эту волну. Оставлено ПОД ГЕЙТОМ FLAT вместе с
+                  верстаком, чтобы мёртвый орган хотя бы не монтировался на четырёх чужих вкладках.
+
+                  Жест «картинка полосы → слот» при этом ЖИВ и идёт встречным направлением: пикер
+                  «— slot —» под плиткой (`slot-picker.tsx`) пишет `SetDesignBenchSlot` напрямую,
+                  минуя режим выбора вовсе. */}
               {/* ═══ СЕКЦИЯ ASSETS СНЯТА С ЭКРАНА ЦЕЛИКОМ (Y-11) ═══════════════════════════════
                   Владелец, дословно: «ASSETS в студио давай пока полностью выпилим». Слово «пока»
                   здесь несущее: снимается ЭКРАН, а не подсистема. Серверные ручки
@@ -311,8 +346,24 @@ export function StudioTab({
                   ЧЕГО БОЛЬШЕ НЕТ НИГДЕ: разметка тканей на флэтах (`assetPlacement`), полка
                   паттернов и полка фурнитуры. Уже поставленные метки живут в базе и всё ещё
                   подписывают чипы CLOTHS — новых поставить нечем. */}
-              <PickTray band={band} />
-              <Bench techCardId={techCardId} band={band} disabled={readOnly} />
+              {/* ═══ ВЕРСТАК СТОИТ ТОЛЬКО НА FLAT — ОДНА СТРОКА, ТРИ ПУНКТА ВЛАДЕЛЬЦА ══════════
+                  J-14 («во вкладке паттернс мы не должны показывать FLAT SLOTS в принципе»),
+                  J-18 («во вкладке FABRIC RENDER нам не нужен FLAT SLOTS») и J-30 («в 3Д вкладке
+                  не должно показывать FLAT SLOTS так же и во вкладке ON MODEL») — это ОДИН орган,
+                  смонтированный СНАРУЖИ переключателя вида, и потому видимый на всех пяти.
+                  Плоские слоты — вход ФЛЭТА: лист и тех-пак читают их, а рендер, паттерн, 3D и
+                  перекраска берут вход из своих собственных полос («input — flats of this card»,
+                  «input — renders by view»). Гейт стоит ЗДЕСЬ, а не внутри `Bench`, потому что род
+                  знает композитор — сам верстак читает ровно одну полосу и про вкладку не знает.
+
+                  `RecallBenchIntake` (в `generation-history.tsx`) пишет слоты ЧЕРЕЗ API, а не
+                  через этот орган, поэтому рекол на вкладке рендера не задет. */}
+              {kind === 'flat' && (
+                <>
+                  <PickTray band={band} />
+                  <Bench techCardId={techCardId} band={band} disabled={readOnly} />
+                </>
+              )}
             </>
           )}
         </SectionStack>

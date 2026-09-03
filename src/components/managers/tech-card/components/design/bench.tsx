@@ -16,7 +16,6 @@ import {
   SHEET_MIN_VIEWS,
   displayDetailName,
   findSlot,
-  pickEmptyReason,
   pickableFlats,
   readBench,
   slotRefKey,
@@ -143,7 +142,6 @@ export function Bench({
 
   const bench = useMemo(() => readBench(band, FLAT_BENCH), [band]);
   const candidates = useMemo(() => pickableFlats(band), [band]);
-  const pickEmpty = useMemo(() => pickEmptyReason(band), [band]);
   const shelfOrdinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
 
   /**
@@ -410,13 +408,9 @@ export function Bench({
               required={SHEET_MIN_VIEWS.includes(view)}
               saving={isSaving(ref)}
               picking={pickingKey === key}
-              pickEmpty={pickEmpty}
               disabled={disabled}
               shelfOrdinals={shelfOrdinals}
               onPlaceMedia={(media) => placeMedia(media, ref, rev)}
-              onPick={() =>
-                pick.start({ slot: ref, label: viewLabel(view), expectedSlotRev: rev })
-              }
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
               // Ручкой сплиту служит имя слота: человек режет «плиту FRONT», а не «upload 3 · b».
@@ -459,11 +453,9 @@ export function Bench({
               detail
               saving={isSaving(ref)}
               picking={pickingKey === key}
-              pickEmpty={pickEmpty}
               disabled={disabled}
               shelfOrdinals={shelfOrdinals}
               onPlaceMedia={(media) => placeMedia(media, ref, rev)}
-              onPick={() => pick.start({ slot: ref, label: name, expectedSlotRev: rev })}
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
               onSplit={picture ? () => split.openForPicture(picture, name) : undefined}
@@ -491,23 +483,17 @@ export function Bench({
           );
         })}
 
+        {/* J-15: у ячейки минта остался ОДИН вход — файл. `onPick` («or mark from the band») снят
+            вместе с двумя своими близнецами на слотах: одна дверь, одна судьба. */}
         <NewDetailCell
           disabled={disabled}
-          pickEmpty={pickEmpty}
           onPlaceMedia={(media, name) => placeMedia(media, mintDetailRef(), 0, name)}
-          onPick={(name) =>
-            // The label IS the name here: a detail that does not exist yet has no other identity,
-            // and `new_detail_name` is required by the mint.
-            pick.start({ slot: mintDetailRef(), label: name, expectedSlotRev: 0 })
-          }
         />
       </Tiles>
 
-      <Text size='nano' variant='label' component='p'>
-        A slot takes a file three ways and they are equal: browse the library (an existing flat of
-        this card goes straight in — no re-upload), ⌘V or drop a file, or mark a picture the band
-        already holds.
-      </Text>
+      {/* J-16 (владелец): абзац «A slot takes a file three ways…» снят. Факты, которые он
+          пересказывал, стоят на самом слоте (плейсхолдер медиа и строка жестов), а третьей дороги
+          — «mark a picture the band already holds» — больше нет вовсе (J-15). */}
 
       {/* Модалка сплита (R-17) — одна на верстак, открывается кнопкой «split» любой плиты. */}
       {split.modal}

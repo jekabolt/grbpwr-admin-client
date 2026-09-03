@@ -11,6 +11,7 @@ import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import { InertDoor, displayDetailName, readBench } from '../bench-slot';
+import { filledFlatSlots, sentFlatSlotIds, useFlatSlotsSend } from '../flat-slots-send';
 import { markedPlatesOf } from '../fix-markup';
 import { WhatModelGetsModal } from '../modals';
 import { serverSpeaksDesign } from '../capability';
@@ -130,8 +131,13 @@ export function GenerationForm({
    * Сервер брал их молча, а плита флет-слота, как правило, флет, который эта же машина и
    * нарисовала: модель получала готовый ответ и переписывала его один в один, не глядя на
    * фотографии, которые человек принёс.
+   *
+   * ⚠ ПЕРЕКЛЮЧАТЕЛЬ ЖИВЁТ НЕ ЗДЕСЬ (J-10). Владелец перенёс «WHAT THE MODEL IS SHOWN» в
+   * INPUT — REFERENCES целиком — и чип, и сами плиты; нажимает GENERATE по-прежнему эта форма,
+   * поэтому состояние вынесено в общее хранилище, а не протащено пропами через пять органов
+   * между ними. Здесь остаётся ЧТЕНИЕ: что уедет и по какой цене.
    */
-  const [useFlatSlots, setUseFlatSlots] = useState(false);
+  const flatSend = useFlatSlotsSend(techCardId);
   const [layout, setLayout] = useState<Layout>('per_view');
 
   // The FLAT bench: this form generates flats, its detail ticks and slot toggle read flat slots.
@@ -170,6 +176,36 @@ export function GenerationForm({
     [bench],
   );
   const marked = useMemo(() => markedPlatesOf(band, wholeBench), [band, wholeBench]);
+
+  /**
+   * ═══ ЧТО НА САМОМ ДЕЛЕ ПОЕДЕТ ПО «ALSO SEND THE FLAT SLOTS» — J-5 ═════════════════════════
+   *
+   * Владелец: «в WHAT THE MODEL IS SHOWN - ALSO SEND THE FLAT SLOTS „no flat slots are filled —
+   * nothing extra to send“ но FLAT SLOTS заполнены».
+   *
+   * ⚠ ЧИП И СТРОКА ПОД НИМ ЧИТАЛИ `marked` — ПЛИТЫ С ЖИВЫМ СЛОЕМ ПРАВКИ, а не заполненные слоты.
+   * Это два РАЗНЫХ множества, и расходятся они в обе стороны:
+   *   · три слота заполнены, слоёв нет → `marked` пуст: чип выключен, а строка отрицает сами
+   *     слоты. Согласие на оплаченный вход недостижимо — это и есть жалоба владельца;
+   *   · слой на одной из трёх плит → строка говорит «1 plate travels», а сервер, получив
+   *     `use_flat_slots`, прикладывает ВСЕ ТРИ (`design_run.go`: каждый слот, у которого
+   *     `Picture.MediaId > 0`; слои ему безразличны). Строка рядом с деньгами занижала вход.
+   *
+   * Поэтому предикат здесь — клиентская орфография серверного: «в слоте лежит картинка», и ничего
+   * больше. `marked` остаётся ровно у одного читателя — сноски про то, что штрихи не едут
+   * (`:479`); её предложение действительно про слои и написано верно.
+   *
+   * ⚠ САМ ПРЕДИКАТ ПЕРЕЕХАЛ В `flat-slots-send.ts` ВМЕСТЕ С ОРГАНОМ (J-10), и читают его теперь
+   * ДВА экрана — полоса референсов рисует по нему плиты, а эта форма считает по нему деньги.
+   * Второе написание того же предиката разошлось бы с первым, и разошлось бы именно на
+   * исключении: полоса сказала бы «едут две», а прогон увёз три.
+   */
+  const filled = useMemo(() => filledFlatSlots(band), [band]);
+  /** Что реально уедет — тот же вывод, что печатает полоса. Ноль читателей «на глазок». */
+  const sentSlotIds = useMemo(
+    () => sentFlatSlotIds(flatSend, filled.map((p) => p.slotId)),
+    [flatSend, filled],
+  );
 
   const writesOff = !!disabled || !speaks;
   const noViews = ticked.length === 0;
@@ -249,7 +285,20 @@ export function GenerationForm({
       // the modal below is written to consume it.
       autoSplit: layout === 'one' && ticked.length >= 2,
       pattern: undefined,
-      useFlatSlots,
+      /* ПУСТОЙ СПИСОК ПРИ ВКЛЮЧЁННОМ ЧИПЕ ЗНАЧИТ «ВСЕ» — поэтому «вычеркнул все плиты» обязано
+         схлопнуться в ВЫКЛЮЧЕННЫЙ чип, а не уехать пустым списком. Замер шва: экран печатал
+         «no plates travel — every one is taken out», а провод вёз `use_flat_slots=true, ids=[]`,
+         и сервер (`design.proto:331`, `design_run.go:1884`) читал это как «ВСЕ заполненные».
+         Потолка трат на сервере нет, так что эта строка — единственное, что стоит между
+         отказом человека и оплаченным прогоном, который этот отказ не услышал. */
+      useFlatSlots: flatSend.on && sentSlotIds.length > 0,
+      /* ═══ КАКИЕ ИМЕННО ПЛИТЫ (J-10) ═══════════════════════════════════════════════════════════
+         ПУСТОЙ СПИСОК ПРИ ВКЛЮЧЁННОМ ЧИПЕ ЗНАЧИЛ БЫ «ВСЕ», А НЕ «НИ ОДНОЙ» — так написано на
+         `DesignRunParams.flat_slot_ids`, и это то, что делает поле аддитивным: всякий прогон,
+         замороженный до него, продолжает значить ровно то, что значил. Поэтому «не слать плиты»
+         пишется выключенным чипом, а не пустым списком, и `sentFlatSlotIds` отдаёт пустоту РОВНО
+         в этом случае. Пара согласована в одном месте — здесь. */
+      flatSlotIds: sentSlotIds,
       // Empty since S-15: the marked-plate rasters travelled only inside a fix, and feeding them
       // to an ordinary run would silently change what a paid request contains. See the header.
       extraInputMediaIds: [],
@@ -403,32 +452,17 @@ export function GenerationForm({
         disabled={writesOff}
         onChange={setLayout}
       />
-      {/* ПОСЛЕДНИЙ ВОПРОС ПЕРЕД ДЕНЬГАМИ. Чип, а не галочка: в этой полосе нет ни одного
-          checkbox, а виды и детали прямо над ним включаются ровно так же. Рядом — не проза, а
-          СОСТОЯНИЕ: сколько плит поедет и каких. Пустой верстак отключает чип и говорит почему,
-          иначе он был бы органом, который нажимается и не делает ничего. */}
-      <div className='flex flex-col gap-1'>
-        <GroupLabel>what the model is shown</GroupLabel>
-        <ChipRow>
-          <Chip
-            selected={useFlatSlots}
-            pressed={useFlatSlots}
-            disabled={writesOff || marked.length === 0}
-            data-use-flat-slots=''
-            onClick={() => setUseFlatSlots((v) => !v)}
-            title='the plates already in flat slots go to the model as references — they are usually flats it drew before, so it tends to redraw them'
-          >
-            also send the flat slots
-          </Chip>
-        </ChipRow>
-        <Text size='nano' variant='label' component='p'>
-          {marked.length === 0
-            ? 'no flat slots are filled — nothing extra to send'
-            : useFlatSlots
-              ? `${marked.length} plate${marked.length === 1 ? '' : 's'} travel: ${marked.map((p) => p.label).join(', ')}`
-              : 'only the card’s references travel'}
-        </Text>
-      </div>
+      {/* ═══ «WHAT THE MODEL IS SHOWN» ЖИВЁТ ТЕПЕРЬ В INPUT — REFERENCES (J-10) ══════════════
+          Владелец перенёс туда и переключатель, и сами плиты — как тамбнейлы под серой пеленой,
+          снимаемые поимённо. Здесь НЕ ОСТАВЛЕНО ни зеркала, ни ссылки: две поверхности одного
+          выключателя — это два места, где он может показывать разное, а орган про то, «что
+          увидит модель», обязан стоять рядом с тем, что модель видит. Провод по-прежнему
+          собирается здесь (`submit` выше), потому что деньги тратит эта кнопка.
+
+          СТРОКА СОСТОЯНИЯ УШЛА С НИМ ЖЕ. Её место — под плитами, где видно, о каких именно она.
+          Ниже, у самой кнопки, состав запроса называет `outputsLine` и дверь «what the model
+          gets ▸», и этого достаточно: два счётчика одного факта в шести пикселях друг от друга
+          — ровно то, от чего этот круг уходит. */}
       {/* S-1 (owner): the glued-file paragraph is gone. The composite rule it recited is not
           lost — it is CONSTRUCTION (a declared composite offers the cut and refuses the picker,
           `generation-history.tsx`) and it is still worded once, in `outputsLine` beside the
@@ -482,8 +516,8 @@ export function GenerationForm({
             <b>
               the edit ▸ marks on {marked.map((p) => p.label).join(', ')} stay on this screen.
             </b>{' '}
-            {useFlatSlots
-              ? 'the plates themselves travel with GENERATE — you asked for them above. The marks drawn on them do not: they stay here for people.'
+            {flatSend.on
+              ? 'the plates themselves travel with GENERATE — you asked for them in INPUT — REFERENCES. The marks drawn on them do not: they stay here for people.'
               : 'a flat run reads the card’s references, never the bench plates, so nothing drawn there travels with GENERATE — the marks remain on their plates for people.'}
           </Text>
         </CalloutBox>

@@ -33,6 +33,7 @@ import {
   isInputRow,
   type BoardItem,
 } from './mood-board';
+import { pictureIsModel } from './threed/media';
 import { useDesignWrites } from './use-design-band';
 import { isPictureHidden } from './visibility';
 import { isSilhouetteView, normaliseViewKey, viewLabel } from './views';
@@ -360,6 +361,31 @@ function keptResults(run: common_DesignRun): { alive: Kept[]; gone: number } {
   const seen = new Set<number>();
   let gone = 0;
   for (const picture of run.pictures ?? []) {
+    /**
+     * ═══ ФАЙЛ МОДЕЛИ — НЕ КАРТИНКА ПРОМПТА (J-11) ══════════════════════════════════════════
+     *
+     * Владелец, дословно: «в GENERATION HISTORY если мы жмем + RESULTS ▸ модель не должна
+     * добавлятся в промпт».
+     *
+     * ЗАМЕРЕНО ПО КОНТРАКТУ, А НЕ ПРЕДПОЛОЖЕНО. Прогон 3D заводит ДВЕ строки `design_picture` —
+     * сам `.glb` и растровую миниатюру, — и обе приезжают с одним родом `threed`
+     * (`internal/designgen/threedfal.go`: `Produces() = {model/gltf-binary, image/png}`, а
+     * `publish` кладёт обе как обычные выходы). Тип файла на проводе не сказан нигде: у медиа нет
+     * поля content-type, и у модели ВСЕ ТРИ адреса (`fullSize`/`compressed`/`thumbnail`)
+     * указывают на один и тот же `.glb`. Значит цикл выше, берущий «всякую картинку с медиа»,
+     * честно клал `.glb` в INPUT — REFERENCES: плитка подписывалась «3d model», а в промпт уезжал
+     * файл, который маршрут картинок прочитать не может.
+     *
+     * Признак берётся у `pictureIsModel` — ЕДИНСТВЕННОГО места, где живёт правило «это модель»
+     * (по расширению пути, см. `threed/media.ts`). Второй способ узнать модель разошёлся бы с
+     * первым молча.
+     *
+     * ⚠ И ЭТО НЕ СЧИТАЕТСЯ ПОТЕРЕЙ (`gone`). `gone` — про картинку, которой БОЛЬШЕ НЕТ на
+     * карточке, и вопрос перед дверью печатает это число словами «gone from the card, skipped».
+     * Модель никуда не делась: она лежит в 3D MODELS OF THIS CARD, её можно открыть и скачать.
+     * Её просто нельзя показать модели как картинку.
+     */
+    if (pictureIsModel(picture)) continue;
     const media = picture.media;
     const id = media?.id;
     // `media` и `media.id` проверяются ОБА, хотя одного хватило бы по данным: сузить тип нечем, а
@@ -418,12 +444,30 @@ function planFlat(input: {
   const inputRows = input.rows.filter(isInputRow);
 
   /**
-   * ЧИСТКА — ТОЛЬКО У ДВЕРИ ВХОДА, И ЭТО РАЗНИЦА ПО СМЫСЛУ, А НЕ ПО ОСТОРОЖНОСТИ. `recall ▸`
-   * ВОСПРОИЗВОДИТ прогон, а воспроизведение с чужими картинками в промпте — это уже другой прогон.
-   * `+ results ▸` ничего не воспроизводит, он ДОБАВЛЯЕТ картинки к тому, что человек собрал, и
-   * молча сносить его работу ради «кинуть сгенеренные» никто не просил.
+   * ═══ ОБЕ ДВЕРИ ЧИСТЯТ ВХОД (J-4) ═══════════════════════════════════════════════════════════
+   *
+   * Владелец, дословно: «когда нажимаешь + RESULTS ▸ в GENERATION HISTORY оно должно чистить все
+   * импуты в INPUT — REFERENCES и добавлять только то что является аутпутом».
+   *
+   * ЗДЕСЬ СТОЯЛ `input.mode === 'input'`, и довод был такой: `recall ▸` ВОСПРОИЗВОДИТ прогон, а
+   * `+ results ▸` ничего не воспроизводит и потому только ДОБАВЛЯЕТ. Довод пережил свою причину.
+   * Дверь результатов существует для одного жеста — «взять то, что вышло, и генерить дальше ИЗ
+   * ЭТОГО», — и в нём предыдущий вход не участвует ни одной картинкой: он уже отработал, из него
+   * и получились эти выходы. Дописывание в конец давало промпт-склейку из старого входа и нового
+   * результата, где номера картинок ползли, потолок `INPUT_MAX` съедался прошлым заходом, а роли
+   * прежних референсов молча продолжали ехать в модель.
+   *
+   * ЧТО ИМЕННО УХОДИТ, СЧИТАЕТСЯ НИЖЕ ОДНОЙ ФУНКЦИЕЙ НА ВОПРОС И НА ИСПОЛНЕНИЕ: строки входа, их
+   * роли и записки (у них свой RPC, они уходят СЕЙЧАС), и указания тех картинок, что покидают
+   * карточку целиком. Плиты верстака не трогаются ни при каких данных — их разметка принадлежит
+   * листу, а не промпту (`pinned` ниже).
+   *
+   * ⚠ ОПИСАНИЕ ИЗДЕЛИЯ НЕ ЧИСТИТСЯ, И ЭТО ГРАНИЦА, А НЕ НЕДОДЕЛКА. «Импуты» владельца — картинки
+   * входа; слова же были ВХОДОМ ЭТОГО САМОГО ПРОГОНА, из них эти выходы и получились, и следующий
+   * прогон без них станет прогоном другой вещи. Дверь блока «clear the input» (`runClear`) чистит
+   * и описание — но её жмут, чтобы начать с нуля, а эту, чтобы продолжить.
    */
-  const clearing = input.mode === 'input';
+  const clearing = true;
   const clearRows = clearing ? inputRows.map((i) => i.mediaId) : [];
   const clearRoles = clearRows.filter((id) => input.roled.has(id));
 
@@ -657,8 +701,26 @@ export function RecallDoors({
         ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
         : (run.inputs?.refs ?? []).length > 0 || !!(run.inputs?.garmentNote ?? '').trim();
   const inputDoor = !!run.inputs && handsOver && !isVector && runId > 0 && !disabled;
+  /**
+   * ═══ ПРОГОН 3D ЭТОЙ ДВЕРИ НЕ ИМЕЕТ ВОВСЕ (J-11) ═════════════════════════════════════════════
+   *
+   * Отсев `.glb` в `keptResults` — половина ответа, и одна она оставила бы дверь, которая на
+   * прогоне 3D кладёт во вход ПОСТЕР: растр, «который стоит вместо модели там, где список обязан
+   * нарисовать плитку» (`threedfal.go`), а не картинку, которую человек выбрал как результат. Это
+   * ровно тот жест, на который владелец и жалуется — «модель не должна добавлятся в промпт», —
+   * только сделанный её тенью.
+   *
+   * ⚠ И ЭТО НЕ «ОСТОРОЖНОСТЬ», А ГРАНИЦА: единственный настоящий выход прогона 3D — файл модели,
+   * а файл модели в промпт картинок не едет по построению. Дверь без предмета — не дверь.
+   * Векторный прогон исключён отдельно и по другой причине (T-16, см. `isVector` выше).
+   */
+  const isThreed = kind === 'threed';
   const resultsDoor =
-    !isVector && runId > 0 && !disabled && (run.pictures ?? []).some((p) => p.media?.id != null);
+    !isVector &&
+    !isThreed &&
+    runId > 0 &&
+    !disabled &&
+    (run.pictures ?? []).some((p) => p.media?.id != null && !pictureIsModel(p));
 
   /**
    * План считается ТОЛЬКО пока стоит вопрос. Считать его на каждый рендер строки значило бы
@@ -699,7 +761,9 @@ export function RecallDoors({
       : target === 'render'
         ? 'put the plates back'
         : asking === 'results'
-          ? 'add them to the prompt'
+          ? // ПОДПИСЬ КНОПКИ НАЗЫВАЕТ ПОСЛЕДСТВИЕ, А ОНО СТАЛО РАЗРУШИТЕЛЬНЫМ (J-4): дверь больше
+            // не «добавляет», она замещает вход результатами прогона.
+            'replace the input with its results'
           : 'replace the prompt';
 
   return (
@@ -715,7 +779,7 @@ export function RecallDoors({
       {resultsDoor && answerable('flat') && (
         <Chip
           onClick={() => setAsking('results')}
-          title={`put the pictures ${handle} PRODUCED into input — references, beside what is already there. Nothing is removed.`}
+          title={`replace input — references with the pictures ${handle} produced. Everything standing in the input now — pictures, roles, notes — leaves it. It asks first.`}
         >
           + results ▸
         </Chip>
@@ -732,7 +796,7 @@ export function RecallDoors({
         onCancel={() => setAsking(null)}
         title={
           asking === 'results'
-            ? `add ${handle}’s results to the prompt`
+            ? `replace the input with ${handle}’s results`
             : `recall ${handle} into ${kindLabel(target)}`
         }
         confirmLabel={confirmLabel}
@@ -784,16 +848,26 @@ function FlatQuestion({
   if (plan.clearRoles.length) removed.push(`${count(plan.clearRoles.length, 'role')} and their notes`);
   if (plan.clearCallouts) removed.push(count(plan.clearCallouts, 'callout'));
 
+  /**
+   * ОДНА ЧИСЛОВАЯ ФРАЗА НА ОБЕ ДВЕРИ (J-4). Обе теперь ЗАМЕЩАЮТ вход, и различаются ровно двумя
+   * словами: откуда картинки взялись и как они называются. Две редакции одного предложения
+   * разошлись бы в первый же день — и разошлись бы молча, потому что читают их поодиночке.
+   */
+  const results = mode === 'results';
+  const source = results ? 'PRODUCED' : 'was given';
+  const noun = results ? 'output picture' : 'reference picture';
+  const nothing = results
+    ? `produced nothing the prompt can take — a 3D model is a file, not a picture`
+    : `brought no reference pictures of its own`;
+
   return (
     <>
       <Text size='control' component='p'>
-        {mode === 'results'
-          ? `${count(plan.add.length, 'picture')} ${handle} produced ${plan.add.length === 1 ? 'goes' : 'go'} into input — references, beside what is already there.`
-          : plan.clearRows.length
-            ? plan.add.length
-              ? `The flat prompt is REPLACED with what ${handle} was given. ${removed.join(', ')} leave the input; ${count(plan.add.length, 'reference picture')} from ${handle} take their place.`
-              : `${removed.join(', ')} leave the input, and ${handle} brought no reference pictures of its own — the prompt is left empty.`
-            : `The input is empty, so nothing is removed. ${count(plan.add.length, 'reference picture')} from ${handle} go in.`}
+        {plan.clearRows.length
+          ? plan.add.length
+            ? `The flat prompt is REPLACED with what ${handle} ${source}. ${removed.join(', ')} leave the input; ${count(plan.add.length, noun)} from ${handle} take their place.`
+            : `${removed.join(', ')} leave the input, and ${handle} ${nothing} — the prompt is left empty.`
+          : `The input is empty, so nothing is removed. ${count(plan.add.length, noun)} from ${handle} go in.`}
       </Text>
 
       {plan.replaces && (
@@ -816,9 +890,10 @@ function FlatQuestion({
         </Text>
       )}
 
-      {mode === 'input' && plan.clearRoles.length > 0 && (
+      {plan.clearRoles.length > 0 && (
         // ГРАНИЦА ЧЕСТНОСТИ — та же, что у «clear the input»: у ролей свой RPC и они уходят СЕЙЧАС,
-        // а строки и описание живут в документе и уедут с ним при сохранении карточки.
+        // а строки и описание живут в документе и уедут с ним при сохранении карточки. С J-4 это
+        // верно для ОБЕИХ дверей: результаты тоже замещают вход, значит тоже снимают роли.
         <Text size='control' variant='label' component='p'>
           The roles and notes are removed on the server now; the rows and the description leave the
           card when you save it.

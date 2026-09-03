@@ -139,23 +139,120 @@ import {
  * толщине нити — длинная отделочная строчка стала бы мелкой, а пришпиленная исчезла бы как
  * пришпиленная, и это та же молча потерянная работа, что выпрямленная кривая и перекрашенный в
  * чёрный цвет.
+ *
+ * ─── КРУГ 15: СЛОВАРЬ ВИДОВ ВЫРОС ДО СЕМНАДЦАТИ, ОВЕРЛОК ПЕРЕРИСОВАН (`v: 5`) ────────────────
+ *
+ * Владелец прислал список строчек и одну фразу: «сделай нормальный визуал». Отсюда три правки, и
+ * каждая живёт в своём месте файла со своим доводом:
+ *  - `STITCHES` — 17 записей вместо девяти, восемь новых, НИ ОДИН СТАРЫЙ КЛЮЧ НЕ ПЕРЕИМЕНОВАН;
+ *    критерий отбора («читается ли вид как отдельный штрих в тех размерах, в каких рисует этот
+ *    редактор») и три правила отсева названы у самой таблицы;
+ *  - `OVER` — оверлок 504 перестал быть гребёнкой шпал и стал обмёткой: игольная строчка внутри
+ *    среза плюс непрерывный петлитель, обёрнутый ЗА срез;
+ *  - `twinGap`/`coverGap` — у пары параллельных рядов появился ПОЛ РАЗБОРЧИВОСТИ, потому что при
+ *    нити 2 двухигольная рисовалась одной жирной линией. При толстой нити зазор остался тем же
+ *    числом, что и был, — уже сохранённое не двигается.
+ *
+ * ПЯТАЯ СТУПЕНЬ ВЕРСИИ — по тому же правилу, что все четыре до неё: `readStroke` сводит
+ * неизвестный ключ к `plain` МОЛЧА, значит слой с новым видом, пересохранённый старой вкладкой,
+ * потерял бы вид шва без следа. Документ из девяти прежних видов пятёрку не поднимает и уходит
+ * ТЕМИ ЖЕ БАЙТАМИ (см. `writeLayer`).
  */
 
-/** The nine machine kinds, with the ISO 4915 stitch class where one exists. */
+/**
+ * ─── КРУГ 15 (J-42): СЕМНАДЦАТЬ ВИДОВ, И НИ ОДИН СТАРЫЙ КЛЮЧ НЕ ПЕРЕИМЕНОВАН ────────────────
+ *
+ * Владелец прислал список из сорока двух названий строчек и попросил «нормальный визуал». Все
+ * названия настоящие; отбор шёл НЕ по «существует ли такая машина», а по одному вопросу:
+ * ЧИТАЕТСЯ ЛИ ВИД КАК ОТДЕЛЬНЫЙ ШТРИХ НА ТЕХНИЧЕСКОМ РИСУНКЕ В ТЕХ РАЗМЕРАХ, В КАКИХ РИСУЕТ ЭТОТ
+ * РЕДАКТОР (нить 2–4 юнита платы, стежок 2–14, плата 1000). Три правила отсева:
+ *   • ПАРАМЕТР, А НЕ ВИД — «тройная прямая» это 301 нитью толще, «узкий зигзаг» это зигзаг тонкой
+ *     нитью, «basting» это 301 длинным стежком: одна запись плюс регулятор, а не вторая запись;
+ *   • ДУБЛИКАТ НА БУМАГЕ — трёхшаговый зигзаг, feather, backstitch: при нити 2 и круглой каппе
+ *     зазоры короче двух юнитов схлопываются, и на чертеже это тот же штрих;
+ *   • МЕСТО, А НЕ ВИД — topstitch, edge stitch, understitch: это ГДЕ проходит 301, а не как он
+ *     выглядит; место задаёт рука, ведущая линию.
+ *
+ * КЛЮЧ — ТО, ЧТО ЛЕЖИТ В ЧУЖОМ ДОКУМЕНТЕ, И ПОЭТОМУ НЕПРИКОСНОВЕНЕН. Восемь видов добавлены,
+ * девять старых ключей оставлены буква в букву; изменились только ЯРЛЫКИ двух из них, и оба раза
+ * это исправление ошибки, а не вкус:
+ *   • `double` был подписан «401 ×2» — двухигольная челночная это 301 ×2; 401 это цепная;
+ *   • `flatlock` был подписан «5-thread flatlock · 516» — 516 это safety stitch, у которого
+ *     СОВСЕМ ДРУГАЯ картинка (она заведена отдельным видом `safety`). Рисунок `flatlock` не
+ *     тронут: это лицо плоского шва, класс 607.
+ *
+ * `family` — единственная ось группировки в пикере, и групп РОВНО ЧЕТЫРЕ. `plain` стоит в
+ * `seams` не по классу (у него класса нет вовсе), а потому что пятая группа из одной строки —
+ * это заголовок, стоящий дороже своего содержимого.
+ *
+ * `since` — ВЕРСИЯ ФОРМАТА, НИЖЕ КОТОРОЙ ЭТОТ КЛЮЧ НЕ ВЫРАЗИМ. Не вторая таблица рядом с этой, а
+ * поле этой: `readStroke` превращает неизвестный ключ в `plain` МОЛЧА, значит документ с новым
+ * видом, открытый старой вкладкой и пересохранённый, потерял бы вид шва так же тихо, как v3 терял
+ * цвет. Поэтому `writeLayer` поднимает версию РОВНО НАД такими документами — см. довод там.
+ */
 export const STITCHES = [
-  { key: 'plain', name: 'plain line', iso: 'no stitch' },
-  { key: 'lock', name: 'straight lockstitch', iso: '301' },
-  { key: 'double', name: 'double needle', iso: '401 ×2' },
-  { key: 'zigzag', name: 'zigzag', iso: '304' },
-  { key: 'cover', name: 'coverstitch', iso: '406' },
-  { key: 'flatlock', name: '5-thread flatlock', iso: '516' },
-  { key: 'overlock', name: 'overlock 3-thread', iso: '504' },
-  { key: 'blind', name: 'blind hem', iso: '103' },
-  { key: 'bartack', name: 'bartack', iso: '—' },
+  // ── SEAMS · 300/400 ───────────────────────────────────────────────────────────────────────
+  { key: 'plain', name: 'plain line', iso: 'no stitch', family: 'seams' },
+  { key: 'lock', name: 'lockstitch', iso: '301', family: 'seams' },
+  { key: 'double', name: 'double needle', iso: '301 ×2', family: 'seams' },
+  { key: 'zigzag', name: 'zigzag', iso: '304', family: 'seams' },
+  { key: 'bartack', name: 'bartack', iso: 'satin bar', family: 'seams' },
+  { key: 'cover', name: 'coverstitch', iso: '406', family: 'seams' },
+  // ── OVEREDGE · 500/600 ────────────────────────────────────────────────────────────────────
+  { key: 'overlock', name: '3-thread overlock', iso: '504', family: 'overedge' },
+  { key: 'overlock4', name: '4-thread overlock', iso: '514', family: 'overedge', since: 5 },
+  { key: 'safety', name: '5-thread safety', iso: '516', family: 'overedge', since: 5 },
+  { key: 'flatlock', name: 'flatseam', iso: '607', family: 'overedge' },
+  // ── HEMS & EDGES ──────────────────────────────────────────────────────────────────────────
+  { key: 'blind', name: 'blind hem stitch', iso: '103', family: 'hems' },
+  { key: 'slantpin', name: 'slant pin', iso: 'overcast', family: 'hems', since: 5 },
+  { key: 'blanket', name: 'blanket', iso: 'appliqué', family: 'hems', since: 5 },
+  // ── DECORATIVE ────────────────────────────────────────────────────────────────────────────
+  { key: 'ladder', name: 'entredeux', iso: 'ladder', family: 'decorative', since: 5 },
+  { key: 'thorn', name: 'thorn', iso: 'hand', family: 'decorative', since: 5 },
+  { key: 'scallop', name: 'scallop', iso: 'shell', family: 'decorative', since: 5 },
+  { key: 'honeycomb', name: 'honeycomb', iso: 'smocking', family: 'decorative', since: 5 },
 ] as const;
 
 export type StitchKey = (typeof STITCHES)[number]['key'];
+export type StitchFamily = (typeof STITCHES)[number]['family'];
 export type StrokeWeight = 'hairline' | 'thin' | 'bold';
+
+/** Порядок семей в пикере — от частого к редкому; заголовки списка берутся отсюда. */
+export const STITCH_FAMILIES: readonly { key: StitchFamily; label: string }[] = [
+  { key: 'seams', label: 'seams · 300/400' },
+  { key: 'overedge', label: 'overedge · 500/600' },
+  { key: 'hems', label: 'hems & edges' },
+  { key: 'decorative', label: 'decorative' },
+];
+
+/**
+ * ЦИФРЫ 1–9 ЗАМОРОЖЕНЫ НА СЕГОДНЯШНИХ ВИДАХ, А НЕ ПРИВЯЗАНЫ К ПОРЯДКУ СПИСКА.
+ *
+ * `STITCHES` перерос девять записей и переупорядочен по семьям. Если бы клавиша по-прежнему
+ * значила «n-я строка списка», у человека, знающего 8 = потайной, восьмёрка молча стала бы
+ * blanket — мышечная память сломалась бы без единого сообщения. Поэтому ряд НАЗВАН ПОИМЁННО и
+ * равен нынешним 1…9 в нынешнем их порядке; восемь новых видов берутся мышью и стрелками.
+ */
+export const HOTKEYS: readonly StitchKey[] = [
+  'plain',
+  'lock',
+  'double',
+  'zigzag',
+  'cover',
+  'flatlock',
+  'overlock',
+  'blind',
+  'bartack',
+];
+
+/**
+ * Ключи, которых старая вкладка не знает, — выводятся из `since`, а не перечисляются второй раз.
+ * Второй список разошёлся бы с первым на первом же добавленном виде, и разошёлся бы МОЛЧА.
+ */
+export const NEW_KEYS: readonly StitchKey[] = STITCHES.filter((s) => 'since' in s).map(
+  (s) => s.key,
+);
 
 const STITCH_KEYS = STITCHES.map((s) => s.key) as readonly string[];
 const WEIGHTS: readonly string[] = ['hairline', 'thin', 'bold'];
@@ -609,8 +706,14 @@ export const MAX_STROKES_BYTES = 512 * 1024;
  * costs every older tab the right to save this layer at all — which is the correct price for a
  * drawing an older tab would silently straighten, repaint black or re-stitch fine, and far too high
  * a price for one it would read perfectly.
+ *
+ * `5` — ПЛЮС ВИД ШВА, КОТОРОГО В СЛОВАРЕ СТАРОЙ ВКЛАДКИ НЕТ (круг 15, J-42). Тем же доводом и
+ * ровно по тому же правилу: `readStroke` сводит неизвестный ключ к `plain` МОЛЧА, значит слой с
+ * `overlock4` прочтёт прод-клиент, покажет его обычной линией и следующим сохранением ЗАПИШЕТ
+ * туда `plain` — вид шва потерян без следа, как терялись кривая, цвет и стежок. Документ из
+ * девяти прежних видов пятёрку не поднимает и уходит ТЕМИ ЖЕ БАЙТАМИ, что вчера.
  */
-export const FORMAT_VERSION = 4;
+export const FORMAT_VERSION = 5;
 
 /**
  * The most points one stroke may keep. Not a server rule — a readability one: a freehand trace
@@ -620,6 +723,10 @@ export const FORMAT_VERSION = 4;
 const MAX_POINTS_PER_STROKE = 240;
 
 /** ~2 screen pixels on a 400px-wide stage, expressed in frame fractions. */
+/**
+ * ⚠ ПЕРЕЖИТОК, ОСТАВЛЕННЫЙ ИМЕНЕМ (круг 15). Порог прореживания следа больше не живёт в долях
+ * кадра — он считается от зума в юнитах платы, см. `settleTrace`. Число сохранено как запись.
+ */
 export const TRACE_EPSILON = 0.005;
 
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -835,8 +942,13 @@ export function writeLayer(strokes: VectorStroke[], ratio: number): string {
   // не знающий про X-8, прочтёт его и нарисует то же самое. Названный — нет: такой бандл свёл бы
   // длинную строчку к толщине нити, а пришпиленную развязал бы обратно, и обе потери молчаливы.
   const stitched = strokes.some(hasOwnStep);
+  // ПЯТАЯ СТУПЕНЬ — И ТОЛЬКО НАД ДОКУМЕНТОМ, НЕСУЩИМ ВИД ШВА ИЗ КРУГА 15. Ряд `NEW_KEYS` выведен
+  // из самой таблицы видов (поле `since`), поэтому забыть в нём вид нельзя: он попадает туда в тот
+  // же момент, когда объявлен. Девять прежних видов пятёрку не поднимают — документ, нарисованный
+  // ими, старая вкладка прочтёт и нарисует ТО ЖЕ САМОЕ, а значит запирать её не за что.
+  const named = strokes.some((s) => NEW_KEYS.includes(s.brush));
   return JSON.stringify({
-    v: stitched ? 4 : painted ? 3 : curved ? 2 : 1,
+    v: named ? 5 : stitched ? 4 : painted ? 3 : curved ? 2 : 1,
     ratio: round4(ratio),
     strokes: strokes.map((s) => {
       // ПОРЯДОК КЛЮЧЕЙ И ИХ ОТСУТСТВИЕ — часть обещания «старый слой уходит теми же байтами»:
@@ -959,13 +1071,46 @@ export function strokePolyline(stroke: VectorStroke, w = 1, h = 1): ShapePoint[]
   return out;
 }
 
-/** A finished freehand trace, thinned once at the moment the pen comes up. */
-export function settleTrace(pts: [number, number][]): [number, number][] {
-  const thinned = simplifyPath(
-    pts.map(([x, y]) => ({ x, y })),
-    TRACE_EPSILON,
-  );
+/**
+ * ПРОРЕЖИВАНИЕ СЛЕДА РУКИ — В ЮНИТАХ ПЛАТЫ И ПО ЗУМУ (круг 15, J-35/J-36).
+ *
+ * ⚠ ТА ЖЕ БОЛЕЗНЬ, ЧТО У ЛАССО, И ЛЕЧИТСЯ ТЕМ ЖЕ. `TRACE_EPSILON = 0.005` в долях кадра — это
+ * 5 юнитов по x и `0.005·plateH` по y (6.25 на форме 0.8), то есть порог зависел от того, куда
+ * идёт изгиб, и не знал о приближении вовсе: на 8× он срезал до полусотни экранных пикселей.
+ * Линия ПЕРЕРИСОВЫВАЛАСЬ на отпускании — превью вело сырой след, документ получал ломаную из
+ * 17 точек, — и это ровно та половина жалобы «рисунок выходит угловатый», которая приходится на
+ * нить, а не на пиксельную кисть.
+ *
+ * Потолок точек (`MAX_POINTS_PER_STROKE`) остаётся: документ ХРАНИТСЯ, и 512 КБ на слой — не
+ * теория. Порог и потолок делают разное: первый выбрасывает то, чего человек не рисовал, второй
+ * защищает формат, и подменять один другим значило бы либо резать рисунок, либо не сохранить его.
+ */
+export function settleTrace(
+  pts: [number, number][],
+  world: { w: number; h: number },
+  epsUnits: number,
+): [number, number][] {
+  const thinned = thinTrace(pts, world, epsUnits).map(([x, y]) => ({ x, y }));
   return simplifyToLimit(thinned, MAX_POINTS_PER_STROKE).map((p) => [round4(p.x), round4(p.y)]);
+}
+
+/**
+ * То же прореживание БЕЗ потолка и без округления — для живого превью.
+ *
+ * Превью и итог обязаны быть одной функцией, иначе «что видел, то и получил» — обещание, а не
+ * тождество. Потолок сюда не входит нарочно: он про формат хранения, а не про форму линии, и
+ * рисовать превью с ним значило бы показывать руке ограничение сервера посреди жеста.
+ */
+export function thinTrace(
+  pts: readonly [number, number][],
+  world: { w: number; h: number },
+  epsUnits: number,
+): [number, number][] {
+  const thinned = simplifyPath(
+    pts.map(([x, y]) => ({ x: x * world.w, y: y * world.h })),
+    Math.max(0.01, epsUnits),
+  );
+  return thinned.map((p) => [p.x / world.w, p.y / world.h] as [number, number]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1087,6 +1232,42 @@ export const RAIL_GAP = 2;
  * неотличимы друг от друга — два разных ISO-класса, дававшие одинаковую картинку. ПОПЕРЁК линии.
  */
 export const COVER_GAP = 3.2;
+
+/**
+ * ─── КРУГ 15: У ПАРЫ РЯДОВ ЕСТЬ ПОЛ РАЗБОРЧИВОСТИ, И ЭТО ПРАВИЛО ЧЕРТЕЖА, А НЕ ВТОРАЯ РУЧКА ───
+ *
+ * ЗАМЕР, С КОТОРОГО ВСЁ НАЧАЛОСЬ. Зазор осей был `RAIL_GAP·G = 2·G`; при нити 2 (умолчание) это
+ * 4 юнита между осями и РОВНО 2 ЮНИТА БЕЛОГО между рядами — при круглой каппе и толщине нити 2
+ * ряды сливаются, и двухигольная рисуется ОДНОЙ ЖИРНОЙ ЛИНИЕЙ. Это и есть единственное внятное
+ * объяснение, почему владелец попросил добавить «Double», которое в списке уже было семь кругов:
+ * вид существовал, а картинки у него не было.
+ *
+ * ЧТО ЗДЕСЬ НЕ ДЕЛАЕТСЯ. Рисовать в машинном масштабе нельзя: двойная игла ставится на 1.6–6 мм
+ * при нити 0.2–0.4 мм, то есть на 5–15 толщин нити, и на старой толстой нити (60 в формате) пара
+ * разъехалась бы на полплаты. Поэтому правило — МАШИННАЯ КРАТНОСТЬ ПЛЮС ПОЛ РАЗБОРЧИВОСТИ: тот же
+ * множитель нити, но белого между рядами никогда меньше названного числа юнитов.
+ *
+ * ПОЧЕМУ ЭТО НЕ НАРУШАЕТ ОСЬ Y-5. Пол назван в ЮНИТАХ ПЛАТЫ, а не в стежках: это утверждение о
+ * ЧЕРТЕЖЕ («пара, неотличимая от линии, — не рисунок пары»), а не второй, неподписанный орган
+ * ширины. Поперечный размер по-прежнему считает нить и только она.
+ *
+ * И ГЛАВНОЕ — СТАРОЕ НЕ СДВИНУЛОСЬ. При `G ≥ 4` (пара) и `G ≥ 3.64` (распошивалка) обе функции
+ * возвращают БАЙТ В БАЙТ прежние `2·G` и `3.2·G`: ступени формата 6 и 10 не двигаются ни на юнит,
+ * ступень 3 — ровно на один (7 против 6). Двигаются только тонкие штрихи, то есть ровно те, что
+ * были неразборчивы, и ровно те, на которые жалоба.
+ *
+ * ⚠ ЧИСЛА ЗДЕСЬ — ЮНИТЫ ПЛАТЫ (мир шириной `GAUGE_REF`), а не юниты коробки. Вызывающий обязан
+ * умножить результат на тот же множитель `scaleRef / GAUGE_REF`, каким он получил `G`, иначе пол
+ * уедет впятеро на образце в 200-юнитовом боксе. Ровно поэтому функция берёт `gauge`, а не `G`.
+ */
+/**
+ * ⚠ МАШИННЫЙ МНОЖИТЕЛЬ ЗДЕСЬ ТОТ ЖЕ САМЫЙ (`RAIL_GAP`, `COVER_GAP`), А НЕ ПЕРЕПИСАННЫЙ ЧИСЛОМ.
+ * Иначе на рейке появилось бы ДВА написания одной расстановки игл, и первая же правка одного из
+ * них разошлась бы со вторым молча. Пол — второй член `Math.max`, и он вступает ровно там, где
+ * машинная кратность даёт меньше 4 (пара) и 8 (распошивалка) юнитов от оси до оси.
+ */
+export const twinGap = (gauge: number) => Math.max(RAIL_GAP * gauge, gauge + 4);
+export const coverGap = (gauge: number) => Math.max(COVER_GAP * gauge, gauge + 8);
 /**
  * Внутренний зигзаг флэтлока — петлители между двумя рядами. Здесь только ПЕРИОД (ВДОЛЬ);
  * амплитуда своего числа не имеет вовсе — она упирается в сами ряды и берётся от `RAIL_GAP`,
@@ -1094,18 +1275,65 @@ export const COVER_GAP = 3.2;
  */
 const FLAT_ZIG_WL = 2.33;
 /**
- * Оверлок 504: наклонная гребёнка через край. `spacing` — шаг зубца (ВДОЛЬ), `tick` — его длина.
- * Зубец наклонён на 60° к касательной, то есть несёт обе составляющие; ПОПЕРЕЧНАЯ у него
- * преобладает (sin 60° ≈ 0.87 против cos 60° = 0.5), и именно она читается глазом как ширина
- * обмётки. Поэтому длина зубца кратна нити: обмётка шире не становится от длинного стежка, у
- * настоящего оверлока её задаёт вылет ножа и палец игольной пластины.
+ * ─── ОВЕРЛОК 504 ПЕРЕРИСОВАН (круг 15, J-41): ЭТО НЕ ГРЕБЁНКА, А ОБМЁТКА ────────────────────
+ *
+ * ЧТО БЫЛО. Сама линия плюс поперёк неё гребёнка коротких зубцов под 60° к касательной, каждый
+ * ПО ЦЕНТРУ линии (половина с одной стороны, половина с другой), не соединённых друг с другом.
+ * Довод «зубец под 60°, поперечная составляющая преобладает» стоял здесь семь кругов и ПЕРЕЖИЛ
+ * СВОЮ ПРИЧИНУ: он объяснял, почему длина зубца кратна нити, и ни слова не говорил о том, ПОХОЖ
+ * ЛИ рисунок на обмётку. Владелец посмотрел и сказал «сделай нормальный визуал» — он прав, на
+ * бумаге это шпалы на рельсе, у которых нет ни одного из трёх признаков оверлока:
+ *   1. НЕТ ИГОЛЬНОЙ СТРОЧКИ. У 504 игла прокалывает ткань на ширине захвата (3–5 мм от среза) и
+ *      оставляет с лица ОБЫЧНЫЙ РЯД СТЕЖКОВ, параллельный срезу и лежащий внутри детали.
+ *   2. НЕТ ПЕТЕЛЬ ЧЕРЕЗ КРАЙ. Верхний петлитель кладёт нить от игольной строчки к срезу и
+ *      ОБОРАЧИВАЕТ ЕГО — нить выходит ЗА линию среза и возвращается снизу. Именно эти петли,
+ *      висящие за краем, глаз и читает как «обмётано».
+ *   3. НИТЬ НЕ НЕПРЕРЫВНА. Петлительная нить одна, от прокола к краю и обратно; отдельные
+ *      палочки читаются как штриховка, а не как нить.
+ *
+ * ЧТО РИСУЕТСЯ ТЕПЕРЬ. Нарисованный человеком путь — это СРЕЗ (край детали, который на плане уже
+ * есть). Внутрь от него, на `bite`, ложится игольная строчка настоящими стежками (`stitchPath`,
+ * тот же шаг `LOCK.pitch·S`, что у 301 — это и есть та же игла). Между строчкой и краем идёт
+ * НЕПРЕРЫВНЫЙ зигзаг петлителя: по одному броску на стежок, у среза каждая вершина скруглена
+ * `C`-сегментом с контролями на `loop·G` ЗА срезом. Арифметика кубика даёт гребень ровно на
+ * 3/4 от контроля — 0.8 → 0.6, — то есть петля выходит за край на 0.6 нити: оборачивает его, но
+ * не отрывается.
+ *
+ * ЭТО УСЛОВНОСТЬ ТЕХНИЧЕСКОГО РИСУНКА, И НАЗВАНА ЕЮ ВСЛУХ. С лица настоящей 504 видны только
+ * параллельные диагонали верхнего петлителя, возвратные лежат снизу. Но кисти оверлока в
+ * техпаках рисуют именно зигзаг с петлями, потому что НА ЧЕРТЕЖЕ он узнаётся, а гребёнка — нет;
+ * а фотографической точности от штриха толщиной в два юнита требовать нечего.
+ *
+ * `bite` — ширина захвата, ПОПЕРЁК (свойство машины: вылет ножа и палец игольной пластины).
+ * `second` — вторая игольная строчка 514, `chain` — отдельный ряд 516 СНАРУЖИ петлевой полосы.
+ * `loop` — вынос контроля петли за срез; вдоль линии всё считает `LOCK.pitch·S`.
  */
-const OVER = { spacing: 2.67, tick: 3.33 };
+const OVER = { bite: 3, second: 1.6, chain: 6, loop: 0.8 };
 /**
  * Потайной 103: длинный пропуск и короткий «укол» — почти прямая с редкими зубчиками.
  * `period` и `dip` — ВДОЛЬ линии (сколько идти и с какого места отклоняться), `amp` — ПОПЕРЁК.
+ *
+ * КРУГ 15: ПРОЛЁТ ТЕПЕРЬ СТЕЖКИ, А УКОЛ ГЛУБЖЕ. Пролёт рисовался СПЛОШНОЙ линией — то есть
+ * потайной был единственным швом, у которого «прошитая» часть не выглядела прошитой; теперь
+ * пролёт идёт тем же `stitchPath`, что и 301, потому что это та же игла. Укол поднят с 1.5·G до
+ * 2·G: при нити 2 прежние три юнита читались дрожью руки, а не стежком. Период и ЧИСЛО уколов не
+ * тронуты — на слое, где потайной уже нарисован, ритм остался прежним.
  */
-const BLIND = { period: 9.17, dip: 2.33, amp: 1.5 };
+const BLIND = { period: 9.17, dip: 2.33, amp: 2 };
+/**
+ * ДЕКОРАТИВНЫЕ И КРАЕВЫЕ ВИДЫ КРУГА 15. Оси подписаны, как везде: `·S` вдоль линии, `·G` поперёк.
+ *
+ * `SLANT.arm` и `THORN.arm` — ПОПЕРЕЧНЫЙ вылет косого стежка в нитях, и вдоль линии он берёт
+ * СТОЛЬКО ЖЕ, отчего угол выходит ровно 45°. Это не нарушение оси, а её единственное честное
+ * прочтение для диагонали: число названо поперёк (там, где живёт размер машины), а угол — форма,
+ * а не размер. Прежняя гребёнка оверлока держала 60° и потому расходилась с осью молча.
+ */
+const SLANT = { arm: 3 };
+const THORN = { arm: 1.8 };
+/** Зубец обмёточного «одеяльного» шва — перпендикуляр внутрь от края. ПОПЕРЁК. */
+const BLANKET = { tooth: 3 };
+/** Фестон: хорда ВДОЛЬ, провис ПОПЕРЁК; контроль на 4/3 провиса даёт гребень ровно в провис. */
+const SCALLOP = { wl: 5, sag: 1.8, ctl: 4 / 3 };
 /**
  * Челночная строчка 301 и ряд каверстича: шаг прокола и доля шага, занятая нитью.
  * `pitch` 3.83 на `thin` даёт период 23 юнита — тот самый ритм, которым раньше притворялся
@@ -1134,18 +1362,79 @@ export function stitchMinLength(brush: StitchKey, step: number): number {
       return ZIG.wl * S * 1.5;
     case 'bartack':
       return BART.wl * S * 1.5;
+    case 'honeycomb':
+      return ZIG.wl * S * 1.5;
+    case 'scallop':
+      return SCALLOP.wl * S * 1.5;
     case 'lock':
     case 'double':
     case 'cover':
+    // Все краевые и декоративные виды круга 15 держатся на `stitchPath`/на его шаге, поэтому и
+    // порог у них ТОТ ЖЕ, что у 301: короче полутора шагов прокола нет ни строчки, ни петли.
+    case 'overlock':
+    case 'overlock4':
+    case 'safety':
+    case 'slantpin':
+    case 'blanket':
+    case 'ladder':
+    case 'thorn':
       return LOCK.pitch * S * 1.5;
     case 'flatlock':
       return FLAT_ZIG_WL * S * 1.5;
-    case 'overlock':
-      return OVER.spacing * S * 2;
     case 'blind':
       return BLIND.period * S * 1.2;
     default:
       return 0;
+  }
+}
+
+/**
+ * ПОПЕРЕЧНЫЙ ВЫЛЕТ ВИДА — сколько фигура берёт ВВЕРХ и ВНИЗ от самой линии, в юнитах платы при
+ * данной толщине нити. Толщина линии сюда НЕ входит: её прибавляет тот, кто меряет коробку.
+ *
+ * ЗАЧЕМ ОТДЕЛЬНАЯ ТАБЛИЦА, А НЕ ЗАМЕР НАРИСОВАННОГО. Высоту бокса надо знать ДО того, как
+ * `strokeGeometry` позовут: бокс — её аргумент. Прежняя формула `max(22, gauge·5)` держала это
+ * знание одним числом «5», выведенным для самого широкого СИММЕТРИЧНОГО вида (зигзаг, ±1.8·G), и
+ * с приходом односторонних видов начала врать в обе стороны разом: safety тянется на 6·G вниз и
+ * был бы срезан, а `plain` получал бы бокс под зигзаг.
+ *
+ * ⚠ ЕДИНИЦЫ — ЮНИТЫ ПЛАТЫ, как у `twinGap`: вызывающий, рисующий в чужой коробке, обязан
+ * умножить на свой `scaleRef / GAUGE_REF`.
+ */
+export function strokeAcross(brush: StitchKey, gauge: number): { up: number; down: number } {
+  const G = gauge;
+  const sym = (k: number) => ({ up: k, down: k });
+  switch (brush) {
+    case 'zigzag':
+    case 'honeycomb':
+      return sym(ZIG.amp * G);
+    case 'thorn':
+      return sym(THORN.arm * G);
+    case 'bartack':
+      return sym(BART.amp * G);
+    case 'double':
+    case 'flatlock':
+    case 'ladder':
+      return sym(twinGap(G) / 2);
+    case 'cover':
+      return sym(coverGap(G) / 2);
+    // ─ односторонние: фигура целиком по одну сторону, кроме петель обмётки, вылезающих за срез ─
+    case 'overlock':
+    case 'overlock4':
+      return { up: OVER.loop * 0.75 * G, down: OVER.bite * G };
+    case 'safety':
+      return { up: OVER.loop * 0.75 * G, down: OVER.chain * G };
+    case 'slantpin':
+      return { up: 0, down: SLANT.arm * G };
+    case 'blanket':
+      return { up: 0, down: BLANKET.tooth * G };
+    case 'scallop':
+      return { up: 0, down: SCALLOP.sag * G };
+    case 'blind':
+      return { up: 0, down: BLIND.amp * G };
+    default:
+      // `plain` и `lock` лежат НА линии и не берут ни юнита поперёк.
+      return sym(0);
   }
 }
 
@@ -1190,7 +1479,7 @@ function walkPolyline(poly: ShapePoint[]): { len: number; at: (s: number) => Wal
  * края детали. Короче полутора волн — пусто: вызывающий рисует обычную линию, потому что волна из
  * одного пика читается как случайный излом, а не как шов.
  */
-function wavePath(poly: ShapePoint[], wavelength: number, amp: number): string {
+function wavePath(poly: ShapePoint[], wavelength: number, amp: number, phase = 1): string {
   const w = walkPolyline(poly);
   if (w.len < wavelength * 1.5) return '';
   const halves = Math.max(2, Math.round(w.len / (wavelength / 2)));
@@ -1199,7 +1488,10 @@ function wavePath(poly: ShapePoint[], wavelength: number, amp: number): string {
   let d = `M${q2(p0.x)},${q2(p0.y)}`;
   for (let i = 1; i < halves; i++) {
     const p = w.at(i * step);
-    const side = i % 2 === 1 ? 1 : -1;
+    // `phase` — ЕДИНСТВЕННОЕ, что отличает две волны смокинга: та же длина волны, тот же размах,
+    // первый пик в другую сторону. Две такие волны пересекаются НА самой линии ровно посередине
+    // между вершинами, и решётка ромбов — следствие этого, а не отдельно нарисованная фигура.
+    const side = (i % 2 === 1 ? 1 : -1) * phase;
     d += ` L${q2(p.x - p.ty * amp * side)},${q2(p.y + p.tx * amp * side)}`;
   }
   const pn = w.at(w.len);
@@ -1284,41 +1576,217 @@ function stitchedRails(poly: ShapePoint[], gap: number, pitch: number, duty: num
   return a && b ? `${a} ${b}` : '';
 }
 
-/** Наклонная гребёнка оверлока: зубцы под 60° к касательной, через край линии. */
-function tickPath(poly: ShapePoint[], spacing: number, tickLen: number): string {
+/**
+ * ТОЧКА ЛОМАНОЙ, ОТНЕСЁННАЯ НА `k` ПО НОРМАЛИ `(-ty, tx)`. Знак назван ОДИН раз здесь, а не семь
+ * раз по генераторам: на линии, ведённой СЛЕВА НАПРАВО, положительное `k` кладёт фигуру ВНИЗ —
+ * ровно туда, куда кусал потайной с первого своего дня.
+ *
+ * ⚠ НОСИТЕЛЕЙ ЭТОГО ПРАВИЛА В ФАЙЛЕ ДВА, И ЭТО НАДО ЗНАТЬ. Точечные фигуры (петля обмётки, зубец,
+ * укол, перекладина) считают сторону здесь; ЦЕЛЫЕ РЯДЫ (игольная строчка обмётки, рельсы пары,
+ * лестницы, флэтлока) — в `offsetPoly`, у которого та же нормаль записана своими руками, потому
+ * что он строит не точку, а смещённую ломаную с усреднением нормалей на изломах. Сегодня они
+ * согласны; расходиться им нельзя, и мутация, переворачивающая ОДИН из двух, обязана красить
+ * пробу — замерено иглой M-SIDE, после которой утверждение о стороне пришлось усилить с «петли за
+ * срезом» до «строчка и петли ПО РАЗНЫЕ стороны пути».
+ *
+ * Второго механизма («перевернуть») в этом круге не заводится: флаг стороны это поле формата, а
+ * обратная сторона достаётся обратным движением руки, и владелец о стороне не спрашивал.
+ */
+const off = (p: WalkPoint, k: number): ShapePoint => ({ x: p.x - p.ty * k, y: p.y + p.tx * k });
+
+/**
+ * ОБМЁТКА КРАЯ 504/514/516 — ОДНА ФУНКЦИЯ НА ТРИ КЛАССА, потому что различает их РОВНО число
+ * игольных строчек, а не рисунок петли. Развилка `case` на каждую строчку означала бы три копии
+ * петлителя, которые разойдутся первой же правкой выноса петли.
+ *
+ * Нарисованный путь — СРЕЗ. Внутрь от него игольная строчка настоящими стежками (`bite`), наружу
+ * — непрерывный петлитель, обёрнутый за срез `C`-сегментом. Полный довод — у константы `OVER`.
+ */
+function overedgePath(
+  poly: ShapePoint[],
+  pitch: number,
+  duty: number,
+  G: number,
+  opts: { second?: boolean; chain?: boolean } = {},
+): string {
   const w = walkPolyline(poly);
-  if (w.len < spacing * 2) return '';
-  const n = Math.max(2, Math.floor(w.len / spacing));
+  if (w.len < pitch * 1.5) return '';
+  const n = Math.max(2, Math.round(w.len / pitch));
   const step = w.len / n;
-  const half = tickLen / 2;
-  const c = Math.cos(Math.PI / 3);
-  const s = Math.sin(Math.PI / 3);
-  let d = '';
-  for (let i = 0; i <= n; i++) {
-    const p = w.at(Math.min(w.len, i * step));
-    const dx = p.tx * c - p.ty * s;
-    const dy = p.tx * s + p.ty * c;
-    d += `${d ? ' ' : ''}M${q2(p.x - dx * half)},${q2(p.y - dy * half)} L${q2(p.x + dx * half)},${q2(p.y + dy * half)}`;
+
+  const rows: string[] = [];
+  const row = (k: number) => {
+    const r = stitchPath(offsetPoly(poly, k * G), pitch, duty);
+    if (r) rows.push(r);
+  };
+  row(OVER.bite);
+  // 514 — ВТОРАЯ ИГЛА ВНУТРИ ПЕТЛЕВОЙ ПОЛОСЫ: две линии под петлями против одной, и это ровно то,
+  // чем четырёхниточная отличается от трёхниточной на лице.
+  if (opts.second) row(OVER.second);
+  // 516 — ЦЕПНАЯ 401 СНАРУЖИ ПОЛОСЫ, отдельным рядом. С лица она неотличима от 301, поэтому
+  // рисуется теми же стежками; отдельной её делает МЕСТО, и пустая полоса между `bite` и `chain`
+  // и есть то, по чему safety узнаётся.
+  if (opts.chain) row(OVER.chain);
+
+  const a0 = off(w.at(0), OVER.bite * G);
+  let loop = `M${q2(a0.x)},${q2(a0.y)}`;
+  for (let i = 0; i < n; i++) {
+    const s0 = i * step;
+    const e1 = off(w.at(s0 + step * 0.25), 0);
+    const c1 = off(w.at(s0 + step * 0.35), -OVER.loop * G);
+    const c2 = off(w.at(s0 + step * 0.65), -OVER.loop * G);
+    const e2 = off(w.at(s0 + step * 0.75), 0);
+    const a1 = off(w.at(Math.min(w.len, s0 + step)), OVER.bite * G);
+    loop += ` L${q2(e1.x)},${q2(e1.y)}`;
+    loop += ` C${q2(c1.x)},${q2(c1.y)} ${q2(c2.x)},${q2(c2.y)} ${q2(e2.x)},${q2(e2.y)}`;
+    loop += ` L${q2(a1.x)},${q2(a1.y)}`;
+  }
+  return rows.length ? `${rows.join(' ')} ${loop}` : loop;
+}
+
+/**
+ * КОСАЯ ОБМЁТКА БЫТОВОЙ МАШИНЫ (slant pin / whip stitch): строчка ПО линии плюс от каждого
+ * прокола косой стежок вперёд-внутрь, НА ОДНУ сторону. Это ровно та гребёнка, что семь кругов
+ * притворялась оверлоком, — посаженная на одну сторону и получившая игольную строчку, которой у
+ * неё не было. То есть вид не удалён, а назван своим именем.
+ */
+function slantPath(poly: ShapePoint[], pitch: number, duty: number, arm: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < pitch * 1.5) return '';
+  const n = Math.max(2, Math.round(w.len / pitch));
+  const step = w.len / n;
+  let d = stitchPath(poly, pitch, duty);
+  for (let i = 0; i < n; i++) {
+    const p = w.at(i * step);
+    // Вдоль и поперёк берётся ОДНО И ТО ЖЕ число, поэтому угол ровно 45° при любой нити.
+    const bx = p.x + p.tx * arm - p.ty * arm;
+    const by = p.y + p.ty * arm + p.tx * arm;
+    d += `${d ? ' ' : ''}M${q2(p.x)},${q2(p.y)} L${q2(bx)},${q2(by)}`;
   }
   return d;
 }
 
-/** Потайной: длинные пролёты по самой линии с коротким треугольным «уколом» в конце периода. */
-function blindPath(poly: ShapePoint[], period: number, dip: number, amp: number): string {
+/**
+ * ОДЕЯЛЬНЫЙ ШОВ / МАШИННАЯ АППЛИКАЦИЯ: сплошная нить ПО краю (её петли и лежат на срезе) плюс
+ * перпендикулярные зубцы внутрь. От косой обмётки отличается прямым углом, от лестницы — тем,
+ * что рельс ОДИН.
+ */
+function blanketPath(poly: ShapePoint[], pitch: number, tooth: number): string {
   const w = walkPolyline(poly);
-  if (w.len < period * 1.2) return '';
-  const n = Math.max(1, Math.round(w.len / period));
+  if (w.len < pitch * 1.5) return '';
+  const n = Math.max(2, Math.round(w.len / pitch));
+  const step = w.len / n;
+  let d = polyD(poly);
+  for (let i = 0; i <= n; i++) {
+    const p = w.at(Math.min(w.len, i * step));
+    const b = off(p, tooth);
+    d += ` M${q2(p.x)},${q2(p.y)} L${q2(b.x)},${q2(b.y)}`;
+  }
+  return d;
+}
+
+/**
+ * МЕРЕЖКА (entredeux / ladder): два сплошных рельса и перекладины между ними. ВДОЛЬ рельсов
+ * внутри не идёт ни одна нить — именно этим лестница отличается от флэтлока, у которого между
+ * рельсами живёт зигзаг петлителей.
+ */
+function ladderPath(poly: ShapePoint[], gap: number, pitch: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < pitch * 1.5) return '';
+  const rails = railsPath(poly, gap);
+  if (!rails) return '';
+  const n = Math.max(2, Math.round(w.len / pitch));
+  const step = w.len / n;
+  let d = rails;
+  for (let i = 0; i <= n; i++) {
+    const p = w.at(Math.min(w.len, i * step));
+    const a = off(p, gap / 2);
+    const b = off(p, -gap / 2);
+    d += ` M${q2(a.x)},${q2(a.y)} L${q2(b.x)},${q2(b.y)}`;
+  }
+  return d;
+}
+
+/** Ручной «тёрн»: сплошной стебель ПО линии и крест × на каждом шаге, плечи под 45°. */
+function thornPath(poly: ShapePoint[], pitch: number, arm: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < pitch * 1.5) return '';
+  const n = Math.max(2, Math.round(w.len / pitch));
+  const step = w.len / n;
+  let d = polyD(poly);
+  for (let i = 0; i <= n; i++) {
+    const p = w.at(Math.min(w.len, i * step));
+    const ax = p.tx * arm;
+    const ay = p.ty * arm;
+    const nx = -p.ty * arm;
+    const ny = p.tx * arm;
+    d += ` M${q2(p.x - ax - nx)},${q2(p.y - ay - ny)} L${q2(p.x + ax + nx)},${q2(p.y + ay + ny)}`;
+    d += ` M${q2(p.x - ax + nx)},${q2(p.y - ay + ny)} L${q2(p.x + ax - nx)},${q2(p.y + ay - ny)}`;
+  }
+  return d;
+}
+
+/**
+ * ФЕСТОННЫЙ КРАЙ (scallop / shell hem) — ТОЛЬКО ДУГИ, без базовой линии: на чертеже предмет здесь
+ * сам край, а не строчка вдоль него. Контроль на 4/3 провиса — не подгонка: у кубика с концами на
+ * линии гребень равен 3/4 высоты контролей, значит 4/3 × провис даёт гребень РОВНО в провис.
+ */
+function scallopPath(poly: ShapePoint[], wl: number, sag: number, ctl: number): string {
+  const w = walkPolyline(poly);
+  if (w.len < wl * 1.5) return '';
+  const n = Math.max(2, Math.round(w.len / wl));
   const step = w.len / n;
   const p0 = w.at(0);
   let d = `M${q2(p0.x)},${q2(p0.y)}`;
   for (let i = 0; i < n; i++) {
+    const s0 = i * step;
+    const c1 = off(w.at(s0 + step / 3), sag * ctl);
+    const c2 = off(w.at(s0 + (2 * step) / 3), sag * ctl);
+    const e = w.at(Math.min(w.len, s0 + step));
+    d += ` C${q2(c1.x)},${q2(c1.y)} ${q2(c2.x)},${q2(c2.y)} ${q2(e.x)},${q2(e.y)}`;
+  }
+  return d;
+}
+
+/**
+ * ПОТАЙНОЙ 103: длинные пролёты и короткий треугольный «укол» в конце периода.
+ *
+ * КРУГ 15 — ПРОЛЁТ ТЕПЕРЬ ПРОШИТ. Прежде он был сплошной линией, и потайной оказывался
+ * единственным видом, у которого прошитая часть не выглядела прошитой; ту же иглу, что кладёт
+ * 301, рисуют те же стежки. Период и ЧИСЛО уколов не тронуты — на уже нарисованном слое ритм
+ * остался прежним, изменилась только детализация пролёта и глубина укола (довод у `BLIND`).
+ */
+function blindPath(
+  poly: ShapePoint[],
+  period: number,
+  dip: number,
+  amp: number,
+  pitch: number,
+  duty: number,
+): string {
+  const w = walkPolyline(poly);
+  if (w.len < period * 1.2) return '';
+  const n = Math.max(1, Math.round(w.len / period));
+  const step = w.len / n;
+  let d = '';
+  for (let i = 0; i < n; i++) {
     const sEnd = (i + 1) * step;
-    const flat = w.at(sEnd - dip);
+    const s0 = i * step;
+    const s1 = sEnd - dip;
+    // ПРОЛЁТ СТЕЖКАМИ. Число стежков целое и не меньше двух: пролёт короче двух проколов читался
+    // бы одной чёрточкой, то есть тем же сплошным пролётом, от которого этот круг и уходит.
+    const m = Math.max(2, Math.round((s1 - s0) / pitch));
+    const sp = (s1 - s0) / m;
+    for (let k = 0; k < m; k++) {
+      const a = w.at(s0 + k * sp);
+      const b = w.at(s0 + k * sp + sp * duty);
+      d += `${d ? ' ' : ''}M${q2(a.x)},${q2(a.y)} L${q2(b.x)},${q2(b.y)}`;
+    }
+    const flat = w.at(s1);
     const mid = w.at(sEnd - dip / 2);
     const end = w.at(Math.min(w.len, sEnd));
-    d += ` L${q2(flat.x)},${q2(flat.y)}`;
-    d += ` L${q2(mid.x - mid.ty * amp)},${q2(mid.y + mid.tx * amp)}`;
-    d += ` L${q2(end.x)},${q2(end.y)}`;
+    const tip = off(mid, amp);
+    d += ` M${q2(flat.x)},${q2(flat.y)} L${q2(tip.x)},${q2(tip.y)} L${q2(end.x)},${q2(end.y)}`;
   }
   return d;
 }
@@ -1388,8 +1856,15 @@ export function strokeGeometry(
   // дефект Y-5, при котором регулятор длины раздувал шов поперёк в двадцать с лишним раз.
   // У штриха, который не назвал `step`, `strokeStep` тождественно равен `strokeGauge`, поэтому
   // `S === G` и каждое произведение ниже — то самое число, что и до разделения ручек.
-  const G = (strokeGauge(stroke) / GAUGE_REF) * scaleRef;
-  const S = (strokeStep(stroke) / GAUGE_REF) * scaleRef;
+  // МНОЖИТЕЛЬ КОРОБКИ НАЗВАН ОТДЕЛЬНЫМ ЧИСЛОМ, потому что у пары рядов есть ПОЛ РАЗБОРЧИВОСТИ в
+  // юнитах ПЛАТЫ (см. `twinGap`), и умножить его надо ровно на то же, на что умножены `G` и `S`.
+  // Записанный «по месту» второй раз, он разошёлся бы с этими двумя молча — и образец в 200-юнитовом
+  // боксе показал бы пару впятеро шире, чем плата.
+  const K = scaleRef / GAUGE_REF;
+  const G = strokeGauge(stroke) * K;
+  const S = strokeStep(stroke) * K;
+  const twin = twinGap(strokeGauge(stroke)) * K;
+  const cover = coverGap(strokeGauge(stroke)) * K;
   const plainD = () => (segs ? curvePath(pts, segs) : inkPath(pts));
 
   // Фигурные швы строятся по флэттену; гладкий `plain` держит точный `C`-путь. Пустая строка от
@@ -1414,33 +1889,67 @@ export function strokeGeometry(
       d = stitchPath(flatPoly(pts, segs), LOCK.pitch * S, LOCK.duty);
       break;
     case 'double':
-      //                                  зазор ПОПЕРЁК ─┐              ┌─ шаг прокола ВДОЛЬ
-      d = stitchedRails(flatPoly(pts, segs), RAIL_GAP * G, LOCK.pitch * S, LOCK.duty);
+      //                              зазор ПОПЕРЁК с полом ─┐        ┌─ шаг прокола ВДОЛЬ
+      d = stitchedRails(flatPoly(pts, segs), twin, LOCK.pitch * S, LOCK.duty);
       break;
     case 'cover':
-      // 406 — те же два ряда стежков, но иглы стоят шире: см. довод у COVER_GAP.
-      d = stitchedRails(flatPoly(pts, segs), COVER_GAP * G, LOCK.pitch * S, LOCK.duty);
+      // 406 — те же два ряда стежков, но иглы стоят шире: см. довод у COVER_GAP и у `coverGap`.
+      d = stitchedRails(flatPoly(pts, segs), cover, LOCK.pitch * S, LOCK.duty);
       break;
     case 'flatlock': {
       const flat = flatPoly(pts, segs);
       // Оба поперечных размера — от НИТИ, и это одно число, а не два: амплитуда петлителей обязана
       // ровно упираться в рельсы, иначе внутренний зигзаг либо не достаёт до них, либо выходит
-      // наружу и флэтлок перестаёт читаться как шов между двумя строчками.
-      const rails = railsPath(flat, RAIL_GAP * G);
-      const inner = wavePath(flat, FLAT_ZIG_WL * S, (RAIL_GAP / 2) * G);
+      // наружу и флэтлок перестаёт читаться как шов между двумя строчками. Пол разборчивости
+      // достаётся рельсам, и амплитуда идёт за ними ТЕМ ЖЕ числом — одна ось, одна ручка.
+      const rails = railsPath(flat, twin);
+      const inner = wavePath(flat, FLAT_ZIG_WL * S, twin / 2);
       d = rails && inner ? `${rails} ${inner}` : rails;
       break;
     }
-    case 'overlock': {
-      //                                     шаг зубца ВДОЛЬ ─┐            ┌─ вылет ПОПЕРЁК
-      const ticks = tickPath(flatPoly(pts, segs), OVER.spacing * S, OVER.tick * G);
-      const rail = plainD();
-      d = ticks && rail ? `${rail} ${ticks}` : rail;
+    case 'overlock':
+      d = overedgePath(flatPoly(pts, segs), LOCK.pitch * S, LOCK.duty, G);
+      break;
+    case 'overlock4':
+      d = overedgePath(flatPoly(pts, segs), LOCK.pitch * S, LOCK.duty, G, { second: true });
+      break;
+    case 'safety':
+      d = overedgePath(flatPoly(pts, segs), LOCK.pitch * S, LOCK.duty, G, { chain: true });
+      break;
+    case 'slantpin':
+      //                                   шаг прокола ВДОЛЬ ─┐            ┌─ вылет ПОПЕРЁК
+      d = slantPath(flatPoly(pts, segs), LOCK.pitch * S, LOCK.duty, SLANT.arm * G);
+      break;
+    case 'blanket':
+      d = blanketPath(flatPoly(pts, segs), LOCK.pitch * S, BLANKET.tooth * G);
+      break;
+    case 'ladder':
+      d = ladderPath(flatPoly(pts, segs), twin, LOCK.pitch * S);
+      break;
+    case 'thorn':
+      d = thornPath(flatPoly(pts, segs), LOCK.pitch * S, THORN.arm * G);
+      break;
+    case 'scallop':
+      //                                  хорда ВДОЛЬ ─┐            ┌─ провис ПОПЕРЁК
+      d = scallopPath(flatPoly(pts, segs), SCALLOP.wl * S, SCALLOP.sag * G, SCALLOP.ctl);
+      break;
+    case 'honeycomb': {
+      const flat = flatPoly(pts, segs);
+      const a = wavePath(flat, ZIG.wl * S, ZIG.amp * G, 1);
+      const b = wavePath(flat, ZIG.wl * S, ZIG.amp * G, -1);
+      d = a && b ? `${a} ${b}` : '';
       break;
     }
     case 'blind':
       //                             период и пролёт ВДОЛЬ ─┐                      ┌─ укол ПОПЕРЁК
-      d = blindPath(flatPoly(pts, segs), BLIND.period * S, BLIND.dip * S, BLIND.amp * G);
+      d = blindPath(
+        flatPoly(pts, segs),
+        BLIND.period * S,
+        BLIND.dip * S,
+        BLIND.amp * G,
+        LOCK.pitch * S,
+        LOCK.duty,
+      );
       break;
     default:
       break;

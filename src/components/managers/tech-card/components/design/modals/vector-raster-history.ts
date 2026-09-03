@@ -68,13 +68,70 @@ type BothStep = {
   bytes: number;
 };
 
-export type TimelineStep = LinesStep | PixelsStep | BothStep;
+/**
+ * ЧЕТВЁРТЫЙ РОД ШАГА — САМ ЛИСТ (круг 15, J-34: «ctrl z после кропа не работает»).
+ *
+ * ⚠ ЧЕМ ОН ОТЛИЧАЕТСЯ ОТ ВСЕХ ПРЕДЫДУЩИХ И ПОЧЕМУ ЛЕНТУ БОЛЬШЕ НЕ НАДО СНОСИТЬ. Три прежних рода
+ * адресуют ПИКСЕЛИ ВНУТРИ ХОЛСТА прямоугольником `{x,y,w,h}`; кроп меняет сам холст, и шаг ниже
+ * по стопке, применённый к холсту другого размера, лёг бы не на своё место. Ровно поэтому круг
+ * G-4 ленту сносил (`timeline.reset()`), и это было ОСОЗНАННОЕ решение, а не упущение.
+ *
+ * Снос отменяется не смягчением того довода, а его закрытием: шаг `sheet` держит СТАРЫЙ ОБЪЕКТ
+ * `RasterLayer`, а не его копию. `expandRasterLayer` создаёт НОВЫЙ холст и старого не трогает —
+ * значит прямоугольники шагов ниже по стопке продолжают адресовать ровно те пиксели, в которых
+ * они были записаны, и исполняются только ПОСЛЕ того, как `sheet` вернул им их холст. Порядок
+ * ленты и есть доказательство: до `sheet` дойти, не сняв всё, что легло после него, нельзя.
+ *
+ * ЦЕНА НАЗВАНА И ПОСЧИТАНА. Шаг держит два полноразмерных холста и потому обязан весить в общем
+ * счёте: `bytes = (before.w·h + after.w·h)·4`. Лист 1600×2000 — это 12.8 МБ за холст, то есть
+ * пять кропов подряд упираются в потолок 64 МБ и начинают вытеснять самые старые шаги. Это
+ * честная граница, а не молчаливый рост: `trim()` считает по НАЛИЧИЮ ПОЛЯ `bytes`, а не по
+ * перечислению родов, — новый род попал в счёт сам, без правки счётчика.
+ */
+type SheetStep = {
+  kind: 'sheet';
+  /** Холст ДО кропа. `null` — рисунок с нуля, где пиксельного канала не было вовсе. */
+  beforeLayer: RasterLayer | null;
+  afterLayer: RasterLayer | null;
+  beforeStrokes: VectorStroke[];
+  afterStrokes: VectorStroke[];
+  beforeRatio: number;
+  afterRatio: number;
+  /**
+   * БЫЛ ЛИ ЛИСТ ОТЛИЧЕН ОТ ПОДЛОЖКИ ДО ЭТОГО ШАГА И ПОСЛЕ НЕГО.
+   *
+   * Флаг запирает «save the drawing only»: форма, сохранённая без картинки, при следующем открытии
+   * проигрывает натуральным пропорциям подложки, и рисунок приезжает сплющенным. Запомнить его
+   * ЗДЕСЬ, а не выводить при отмене из формы холста, — единственный способ не гадать: отменивший
+   * свой единственный кроп человек обязан снова получить обычное сохранение, а отменивший второй
+   * кроп из двух — не обязан, потому что лист всё ещё не подложка.
+   */
+  beforeExpanded: boolean;
+  afterExpanded: boolean;
+  bytes: number;
+};
+
+export type TimelineStep = LinesStep | PixelsStep | BothStep | SheetStep;
 
 /** Что вернула отмена: список штрихов, «пиксели уже на месте», оба разом, или пустая лента. */
 export type UndoResult =
   | { kind: 'lines'; strokes: VectorStroke[] }
   | { kind: 'pixels' }
   | { kind: 'both'; strokes: VectorStroke[] }
+  /**
+   * ЛИСТ ЛЕНТА ВЕРНУТЬ САМА НЕ МОЖЕТ. Пиксели она кладёт в холст своими руками, потому что холст
+   * ей передали; холст же живёт в `rasterRef` модалки вместе с формой платы и списком штрихов, и
+   * подменить их может только тот, кто ими владеет. Поэтому род `sheet` — единственный, который
+   * отдаёт наружу ВСЁ состояние листа разом: подменить его половинами значило бы кадр, в котором
+   * штрихи уже новые, а холст ещё старый.
+   */
+  | {
+      kind: 'sheet';
+      layer: RasterLayer | null;
+      strokes: VectorStroke[];
+      ratio: number;
+      expanded: boolean;
+    }
   | null;
 
 export type TimelineState = {
@@ -175,6 +232,39 @@ export class EditTimeline {
   }
 
   /**
+   * Запомнить СМЕНУ ЛИСТА. Зовётся ПОСЛЕ того, как новый холст построен, и получает ОБА объекта.
+   *
+   * ⚠ `beforeLayer` НЕ КОПИРУЕТСЯ, И ЭТО НЕСУЩЕЕ. Копия стоила бы ещё один полноразмерный холст и,
+   * что важнее, РАЗОШЛАСЬ БЫ с прямоугольниками шагов ниже по стопке: те адресуют пиксели ИМЕННО
+   * этого объекта, и `putImageData` в копию оставил бы оригинал нетронутым. Владелец объекта
+   * после кропа — лента: модалка на него больше не ссылается, пока отмена его не вернёт.
+   */
+  recordSheet(args: {
+    beforeLayer: RasterLayer | null;
+    afterLayer: RasterLayer | null;
+    beforeStrokes: readonly VectorStroke[];
+    afterStrokes: readonly VectorStroke[];
+    beforeRatio: number;
+    afterRatio: number;
+    beforeExpanded: boolean;
+    afterExpanded: boolean;
+  }): void {
+    const px = (l: RasterLayer | null) => (l ? l.w * l.h * 4 : 0);
+    this.push({
+      kind: 'sheet',
+      beforeLayer: args.beforeLayer,
+      afterLayer: args.afterLayer,
+      beforeStrokes: args.beforeStrokes.slice(),
+      afterStrokes: args.afterStrokes.slice(),
+      beforeRatio: args.beforeRatio,
+      afterRatio: args.afterRatio,
+      beforeExpanded: args.beforeExpanded,
+      afterExpanded: args.afterExpanded,
+      bytes: px(args.beforeLayer) + px(args.afterLayer),
+    });
+  }
+
+  /**
    * ЗАПОМНИТЬ РАСТРОВЫЙ ЖЕСТ — И САМОМУ ЖЕ ЕГО ПРИМЕНИТЬ. Порядок «снять до → изменить → снять
    * после» ОБЯЗАТЕЛЕН, и здесь он не соглашение между двумя вызовами, а одна функция: вызывающий,
    * перепутавший порядок, записал бы «до», равное «после», и ⌘Z молча перестал бы возвращать —
@@ -270,6 +360,15 @@ export class EditTimeline {
     if (!step) return null;
     this.future.push(step);
     if (step.kind === 'lines') return { kind: 'lines', strokes: step.before };
+    if (step.kind === 'sheet') {
+      return {
+        kind: 'sheet',
+        layer: step.beforeLayer,
+        strokes: step.beforeStrokes,
+        ratio: step.beforeRatio,
+        expanded: step.beforeExpanded,
+      };
+    }
     if (step.kind === 'both') {
       if (layer) rasterCtx(layer.doc).putImageData(step.pixelsBefore, step.x, step.y);
       return { kind: 'both', strokes: step.before };
@@ -283,6 +382,15 @@ export class EditTimeline {
     if (!step) return null;
     this.past.push(step);
     if (step.kind === 'lines') return { kind: 'lines', strokes: step.after };
+    if (step.kind === 'sheet') {
+      return {
+        kind: 'sheet',
+        layer: step.afterLayer,
+        strokes: step.afterStrokes,
+        ratio: step.afterRatio,
+        expanded: step.afterExpanded,
+      };
+    }
     if (step.kind === 'both') {
       if (layer) rasterCtx(layer.doc).putImageData(step.pixelsAfter, step.x, step.y);
       return { kind: 'both', strokes: step.after };
@@ -292,10 +400,10 @@ export class EditTimeline {
   }
 
   /** Что именно вернёт следующая отмена — рейка называет материал словом, а не глаголом «undo». */
-  nextUndoKind(): 'lines' | 'pixels' | 'both' | null {
+  nextUndoKind(): 'lines' | 'pixels' | 'both' | 'sheet' | null {
     return this.past[this.past.length - 1]?.kind ?? null;
   }
-  nextRedoKind(): 'lines' | 'pixels' | 'both' | null {
+  nextRedoKind(): 'lines' | 'pixels' | 'both' | 'sheet' | null {
     return this.future[this.future.length - 1]?.kind ?? null;
   }
 }

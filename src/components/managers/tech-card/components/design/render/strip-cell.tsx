@@ -45,10 +45,14 @@ import { viewLabel } from '../views';
  * to become the picture's own ratio — and `media.thumbnail.width/height` is on the wire for it.
  */
 
+/** Ширина ячейки ЧИСЛОМ. Класс ниже собран из неё же — колода кропов (J-23) считает по ней свою
+ *  ширину и шаг веера, а второе написание «132» разъехалось бы с первым молча. */
+export const STRIP_CELL_PX = 132;
 export const CELL_WIDTH = 'w-[132px] shrink-0';
 /** 132 × 148 — та же коробка, что была задана высотой, теперь сказанная пропорцией: `PictureTile`
  *  меряет кадр отношением сторон, а ячейка стоит в колонке шириной ровно 132px. */
-const FRAME_ASPECT = '132/148';
+export const STRIP_FRAME_ASPECT = '132/148';
+const FRAME_ASPECT = STRIP_FRAME_ASPECT;
 const FRAME_HEIGHT = 'h-[148px]';
 
 export function StripCell({
@@ -71,6 +75,12 @@ export function StripCell({
    * по картинке. Ячейки ЛЕВОЙ половины полосы (то, что стоит в слоте) его не несут намеренно:
    * они адресуются своим слотом, а не картинкой.
    */
+  /**
+   * ПОВЕРХНОСТЬ КАДРА ОТКРЫВАЕТ НЕ ЗУМ, А ЭТО (J-2/J-23). Ставится ячейкой, которая стоит листом
+   * СВЁРНУТОЙ колоды: первое нажатие раскрывает её. Зум остаётся угловой кнопкой примитива —
+   * см. `PictureTile.onOpen`, где эта роль и живёт.
+   */
+  onOpen,
   offeredPictureId,
   /**
    * КАКУЮ КАРТИНКУ ЯЧЕЙКА ПОКАЗЫВАЕТ. Едет в разметку как `data-cell-picture` и существует по той
@@ -91,6 +101,7 @@ export function StripCell({
   alt: string;
   badge?: string;
   gallery?: MediaViewerItem;
+  onOpen?: () => void;
   offeredPictureId?: number;
   cellPictureId?: number;
   empty?: React.ReactNode;
@@ -118,6 +129,7 @@ export function StripCell({
           fit='contain'
           selected={emphasis}
           gallery={gallery}
+          onOpen={onOpen}
           className='w-full bg-bgColor'
         />
       ) : (

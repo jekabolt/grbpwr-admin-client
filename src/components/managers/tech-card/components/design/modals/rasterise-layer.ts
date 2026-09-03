@@ -34,6 +34,22 @@ export const RASTER_MAX_W = 1600;
  */
 export const RASTER_FALLBACK_W = 800;
 
+/**
+ * ЛИСТ И КАРТИНКА ПОД НИМ ГОВОРЯТ РАЗНУЮ ФОРМУ. Отдельный род ошибки, а не `Error`: вызывающий
+ * обязан уметь отличить это от «прокси не отдал байты» — первое чинится растром, второе повтором.
+ */
+export class SceneShapeMismatch extends Error {
+  constructor(
+    readonly naturalRatio: number,
+    readonly sheetRatio: number,
+  ) {
+    super(
+      `the sheet says ${sheetRatio.toFixed(3)} but the picture underneath is ${naturalRatio.toFixed(3)} — flattening would squash the drawing instead of growing the sheet`,
+    );
+    this.name = 'SceneShapeMismatch';
+  }
+}
+
 export type SceneInput = {
   /** The picture underneath, or '' — a drawing from nothing rasterises onto white alone. */
   baseSrc?: string;
@@ -71,6 +87,24 @@ export async function composeScene({ baseSrc, strokes, ratio, raster }: SceneInp
     const img = new Image();
     img.src = dataUrl;
     await img.decode();
+    /**
+     * ⚠ ФОРМА ЛИСТА, ПРОТИВОРЕЧАЩАЯ ПОДЛОЖКЕ, — ЭТО ОТКАЗ, А НЕ ПОВОД СПЛЮЩИТЬ (круг 15, J-32).
+     *
+     * Ниже размер холста берётся у НАТУРАЛЬНЫХ размеров картинки, а штрихи кладутся долями
+     * НОВОГО кадра. Когда документ говорит форму 1.046, а картинка остаётся 0.8, эти два
+     * утверждения несовместимы, и прежний код молча выбирал второе: лист не рос вовсе, а рисунок
+     * сплющивался в 1/1.3075. Замерено на стенде: аплоад 800×1000 там, где выросший лист дал бы
+     * 1046×1000, граница цвета на 0.499 вместо 0.381.
+     *
+     * СТОРОЖ СТОИТ У ОРГАНА, А НЕ У ВЫЗЫВАЮЩЕГО — тот же урок, что у `assertKnownStrokeKeys`.
+     * После того как кроп стал заводить растр, этот путь недостижим; но недостижимость держится
+     * на двух ветках в соседнем файле, а сплющивание было МОЛЧАЛИВЫМ, и молчаливым оно вернулось
+     * бы при первой же третьей ветке.
+     */
+    const nat = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 0;
+    if (ratio && nat && Math.abs(nat - ratio) > 1e-3) {
+      throw new SceneShapeMismatch(nat, ratio);
+    }
     image = img;
   }
   const naturalW = raster?.w ?? image?.naturalWidth ?? 0;

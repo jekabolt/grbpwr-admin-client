@@ -14,7 +14,6 @@ import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import { LockBar } from './generate-row';
 import {
   chosenRenderPlacements,
-  feedIsTruncated,
   pictureThumb,
   stripProvenance,
   threedCandidates,
@@ -507,13 +506,9 @@ export function ThreedInputStrip({
         </LockBar>
       )}
 
-      <Text size='micro' variant='label' component='p' className='normal-case'>
-        Left of the line — the sides the model is actually built from, one render each. Only{' '}
-        <b>front</b> is required: a run without it is rejected before anything is charged, and every
-        further side you mark gives the model another angle to build from. Right of the line — every
-        other render of this card; the ones you chose in FABRIC RENDER come first. Marking one
-        displaces the render that held the side; nothing is deleted.
-      </Text>
+      {/* J-28 (владелец): абзац «Left of the line…» снят. Правила, которые он пересказывал,
+          сказаны там, где их исполняют: «front обязателен» — отказом самой двери запуска, а
+          «пометка вытесняет» — подписью двери «use the N you chose» ниже. */}
 
       {/* ЧТО ИМЕННО СДЕЛАЕТ ДВЕРЬ — СКАЗАНО ДО НАЖАТИЯ, а не после. Она ставит несколько сторон
           разом и может вытеснить то, что там стоит; кнопка, у которой это не написано рядом,
@@ -552,15 +547,11 @@ export function ThreedInputStrip({
         </Text>
       )}
 
-      {/* СТРАНИЦА ПРИЗНАЁТСЯ, А НЕ ПРЯЧЕТСЯ. Полоса отдаёт одну страницу ленты, поэтому у карточки
-          с длинной историей есть рендеры, которых эта половина не видит. Оператор, которому этого
-          не сказали, заключит, что его файл потерян. */}
-      {feedIsTruncated(band) && (
-        <Text size='nano' variant='label' component='p' className='normal-case'>
-          This card has more history than one page. The right of the line lists the renders of the
-          newest page; older ones are still on the card and still in their sides.
-        </Text>
-      )}
+      {/* J-28 (владелец): абзац «This card has more history than one page…» снят вместе с
+          соседним. ⚠ ПРИЗНАНИЕ УХОДИТ ВМЕСТЕ С НИМ: полоса по-прежнему отдаёт ОДНУ страницу
+          ленты, и рендеры старше её на этой половине не видны. Слово об этом снято по прямому
+          указанию владельца, а не потому, что усечения не стало; близнец в
+          `render-input-strip.tsx` (та же фраза про флэты) владельцем не назван и оставлен. */}
     </Section>
   );
 }

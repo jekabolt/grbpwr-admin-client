@@ -4,7 +4,12 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { useImageAnnotate, useMediaStageGestures, ZoomDrawToolbar } from './media-viewer-zoom';
+import {
+  useImageAdjust,
+  useImageAnnotate,
+  useMediaStageGestures,
+  ZoomDrawToolbar,
+} from './media-viewer-zoom';
 
 // One normalized shape the viewer understands. Every call site maps its own data
 // (proto MediaFull, a bare url, a { thumbnail, fullSize } row) down to this.
@@ -108,10 +113,19 @@ export function resolveViewerType(item: MediaViewerItem): 'image' | 'video' {
   return item.type ?? (isVideo(item.src) ? 'video' : 'image');
 }
 
-/** `…/sketch-front.jpg` -> `sketch-front-annotated.png`, so a folder of exports stays readable. */
-function annotatedFileName(src: string): string {
+/**
+ * `…/sketch-front.jpg` -> `sketch-front-annotated.png`, so a folder of exports stays readable.
+ *
+ * СУФФИКС НАЗЫВАЕТ ТО, ЧТО ДЕЙСТВИТЕЛЬНО СДЕЛАНО. С появлением коррекции (J-13) один и тот же
+ * файл мог уйти как «annotated», не неся ни одного штриха, — а имя файла это единственная
+ * подпись, которая доедет до чужой папки вместе с байтами.
+ */
+function exportFileName(src: string, marks: { ink: boolean; adjusted: boolean }): string {
   const base = src.split('?')[0]?.split('/').pop() || 'image';
-  return `${base.replace(/\.[^.]+$/, '') || 'image'}-annotated.png`;
+  const stem = base.replace(/\.[^.]+$/, '') || 'image';
+  const suffix =
+    marks.ink && marks.adjusted ? 'edited' : marks.ink ? 'annotated' : marks.adjusted ? 'adjusted' : 'copy';
+  return `${stem}-${suffix}.png`;
 }
 
 /**
@@ -185,6 +199,18 @@ interface MediaViewerProps {
    * «скопировать ссылку» должны работать как у настоящей ссылки.
    */
   onUsageNavigate?: (href: string) => void;
+  /**
+   * ЗАВЕСТИ ПОПРАВЛЕННЫЙ СНИМОК НОВОЙ КАРТИНКОЙ (J-13). Коррекция и чернила — взгляд на время
+   * сеанса; эта дверь — единственный способ, которым они становятся вещью.
+   *
+   * Устроена как `actions`: просмотрщик показывает, а мутации живут у того, кто им владеет. Он
+   * отдаёт БАЙТЫ и КАДР ЦЕЛИКОМ — хозяин по `item` находит исходную картинку и наследует её род.
+   *
+   * ⚠ `item.meta.id` — это id МЕДИА, а не картинки полосы: ссылки на картинку у кадра нет вовсе,
+   * и искать её хозяину придётся по медиа. Absent = двери нет (библиотека), и наружу ведёт
+   * прежнее «скачать».
+   */
+  onSaveAsPicture?: (dataUrl: string, item: MediaViewerItem) => Promise<void>;
   // РАНЬШЕ ЗДЕСЬ БЫЛ `renderOverlay` — крючок, которым галерея эскиза рисовала поверх снимка СВОЮ
   // копию указаний: он умел показывать, но не править, и расходился с плиткой на каждой правке.
   // Теперь увеличенный вид указаний это `annotation/zoom-dialog` — та же поверхность, что и на
@@ -199,6 +225,7 @@ export function MediaViewer({
   onIndexChange,
   actions,
   onUsageNavigate,
+  onSaveAsPicture,
 }: MediaViewerProps) {
   const [showMeta, setShowMeta] = useState(false);
   const count = items.length;
@@ -220,6 +247,24 @@ export function MediaViewer({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!hasMany) return;
+      /**
+       * СТРЕЛКИ ПРИНАДЛЕЖАТ СФОКУСИРОВАННОМУ ОРГАНУ, А НЕ ДИАЛОГУ.
+       *
+       * Замерено пробой `qa-adjust` 0f: у ползунка коррекции влево/вправо — это ШАГ ЗНАЧЕНИЯ (так
+       * нативный `range` и настраивают точно), и до этой проверки то же нажатие уводило
+       * просмотрщик на соседний кадр — а переход снимает коррекцию. То есть жест, которым её
+       * настраивают, ею же её и стирал, и выглядело это как «ползунок сам себя сбрасывает».
+       */
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (e.key === 'ArrowRight') {
         e.preventDefault();
         go(1);
@@ -236,8 +281,32 @@ export function MediaViewer({
   const resetKey = `${open ? 1 : 0}:${safeIndex}:${current?.src ?? ''}`;
   const gestures = useMediaStageGestures({ active: isImage, resetKey, hasMany, onSwipe: go });
   const annotate = useImageAnnotate({ resetKey, baseSize: gestures.baseSize });
+  // Коррекция подчиняется ТОМУ ЖЕ `resetKey`, что зум и чернила: смена кадра или закрытие снимают
+  // её начисто. Пережившая закрытие коррекция была бы уже хранимой дельтой, а это другой договор
+  // (поля на картинке полосы, прото, и каждый рендерер обязан её честно применять).
+  const adjust = useImageAdjust({
+    resetKey,
+    baseSize: gestures.baseSize,
+    src: current?.src ?? '',
+    enabled: isImage,
+  });
   // Callouts start visible — you open the viewer on an annotated sketch to read them. The toggle
   // is there to get them off the picture, which is what you want before drawing on it.
+
+  /**
+   * Байты для двери хозяина. Просмотрщик отдаёт КАДР ЦЕЛИКОМ, а не адрес: по одному адресу хозяин
+   * не найдёт ни картинку полосы, ни её род — искать он будет по `meta.id`.
+   */
+  const saveAsPicture = useCallback(async () => {
+    const item = items[safeIndex];
+    if (!onSaveAsPicture || !item) return;
+    const dataUrl = await annotate.bakeDataUrl(item.src, {
+      params: adjust.values,
+      source: adjust.sourceRef.current,
+    });
+    if (!dataUrl) return;
+    await onSaveAsPicture(dataUrl, item);
+  }, [onSaveAsPicture, items, safeIndex, annotate, adjust.values, adjust.sourceRef]);
 
   // Close only when the click lands on the empty ground (not the media or a control),
   // and not as the tail of a swipe.
@@ -343,6 +412,7 @@ export function MediaViewer({
                     src={current.src}
                     alt={current.alt || ''}
                     draggable={false}
+                    data-probe='viewer-image'
                     onDoubleClick={gestures.onImageDoubleClick}
                     className={cn(
                       // White ground behind the picture: transparent PNGs (background-removed
@@ -352,6 +422,19 @@ export function MediaViewer({
                       !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
                     )}
                   />
+                  {/* КАНВАС КОРРЕКЦИИ ЛЕЖИТ ПОВЕРХ СНИМКА И НЕ ЛОВИТ УКАЗАТЕЛЬ. `<img>` под ним
+                      остаётся в документе намеренно: он и МЕРИТ бокс (`ResizeObserver`), и держит
+                      попадание для панорамы и двойного клика. Убери его — и зум с перетаскиванием
+                      умерли бы ровно на то время, пока крутят яркость. */}
+                  {adjust.on && (
+                    <canvas
+                      ref={adjust.canvasRef}
+                      aria-hidden
+                      data-probe='adjust-canvas'
+                      style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
+                      className='pointer-events-none absolute left-0 top-0'
+                    />
+                  )}
                   {annotate.drawMode && (
                     <canvas
                       ref={annotate.canvasRef}
@@ -405,7 +488,23 @@ export function MediaViewer({
                 onUndo={annotate.undo}
                 onClear={annotate.clear}
                 saving={annotate.saving}
-                onSave={() => void annotate.saveImage(current.src, annotatedFileName(current.src))}
+                onSave={() =>
+                  void annotate.saveImage(
+                    current.src,
+                    exportFileName(current.src, {
+                      ink: annotate.hasStrokes,
+                      adjusted: !adjust.isZero,
+                    }),
+                    { params: adjust.values, source: adjust.sourceRef.current },
+                  )
+                }
+                adjustOpen={adjust.open}
+                onToggleAdjust={adjust.toggle}
+                adjust={adjust.values}
+                onAdjustChange={adjust.setValues}
+                onAdjustReset={adjust.reset}
+                adjustStatus={adjust.status}
+                onSaveAsPicture={onSaveAsPicture ? () => void saveAsPicture() : undefined}
               />
             )}
           </div>

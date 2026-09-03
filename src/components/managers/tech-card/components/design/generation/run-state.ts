@@ -4,7 +4,7 @@ import type {
   common_DesignRunParams,
 } from 'api/proto-http/admin';
 
-import { hideBlockReason, stampIsSet, type HideBlockReason, type HideGuard } from '../visibility';
+import { stampIsSet } from '../visibility';
 import { normaliseViewKey, viewLabel } from '../views';
 
 /**
@@ -116,23 +116,20 @@ export function runOutcomeNote(run: common_DesignRun): string {
   return why ? `retrying · ${why}` : status;
 }
 
-/**
- * WHY ARCHIVE IS OFF FOR THIS ROW.
+/* ⚠ ЗДЕСЬ ЖИЛ `archiveBlockReason`, И ЕГО СНЕСЛИ ПОТОМУ, ЧТО ОН БЫЛ ЗАПРЕТОМ КЛИЕНТА (J-22).
  *
- * Archiving hides a row wholesale, so it is refused while ANY picture of the run is protected —
- * otherwise `archive` would quietly do in bulk what the ✕ on each tile refuses to do one at a time.
- * The reasons are the server's own tokens, read through the same guard the tiles read.
+ * Он копировал предусловия `HideDesignPicture` — «картинка в слоте верстака», «вход живого
+ * прогона», «родитель видимого кропа» — и гасил дверь `archive ▸` на любой строке, хоть одна
+ * картинка которой под них подходила. Проверено по origin/beta: `ArchiveRun`
+ * (`internal/store/design/pictures.go`) — один UPDATE `archived_at` и перечитывание строки, ни
+ * одного из этих условий; его собственный комментарий говорит «It does NOT hide the row's
+ * pictures». `ArchiveDesignRun` в `apisrv/admin/design_band.go` их тоже не добавляет.
+ *
+ * Клиент отказывал в том, что сервер разрешает, и на карточке, где лист разрезали или плиту
+ * поставили в слот, вместо двери стояло серое слово. Запрет, который клиент назначает сам,
+ * расходится с сервером на первом же отказе — верна та же строка, что стоит у снятия детали
+ * в `bench.tsx`.
  */
-export function archiveBlockReason(
-  run: common_DesignRun,
-  guard: HideGuard,
-): HideBlockReason | null {
-  for (const picture of run.pictures ?? []) {
-    const reason = hideBlockReason(picture.id ?? 0, guard);
-    if (reason) return reason;
-  }
-  return null;
-}
 
 /**
  * The caption of a history line.

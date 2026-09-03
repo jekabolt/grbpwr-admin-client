@@ -139,11 +139,20 @@ function nibSteps(
   world: NibWorld,
 ): [[number, number], [number, number]][] {
   if (!path.length) return [];
-  const eps = Math.max(1e-4, Math.min(r / 3 / world.w, 0.005));
+  /**
+   * ⚠ ПОРОГ — В ЮНИТАХ ПЛАТЫ, А НЕ В ДОЛЯХ КАДРА (круг 15, J-36/J-35).
+   *
+   * Прежний `min(r/3/world.w, 0.005)` смешивал две системы: `r/3/world.w` — юниты, поделённые на
+   * ширину, то есть доля; потолок `0.005` — тоже доля, и по y она весит `plateH/PLATE_W` раз
+   * больше. Ниб резал СВОЮ ломаную, отличную от той, что рисует кисть и хранит документ, — и
+   * ластик с клоном шли не по нарисованному. Треть радиуса остаётся тем же доводом (капсула
+   * строится на спрямлённом отрезке), просто теперь в единицах, в которых радиус и назван.
+   */
+  const eps = Math.max(0.05, Math.min(r / 3, 5));
   const thin = simplifyPath(
-    path.map(([x, y]) => ({ x, y })),
+    path.map(([x, y]) => ({ x: x * world.w, y: y * world.h })),
     eps,
-  );
+  ).map((p) => ({ x: p.x / world.w, y: p.y / world.h }));
   const pts = thin.length ? thin : [{ x: path[0][0], y: path[0][1] }];
   if (pts.length === 1) {
     const p: [number, number] = [pts[0].x, pts[0].y];

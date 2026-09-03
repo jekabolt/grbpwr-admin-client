@@ -162,6 +162,10 @@ export function OnModelStudio({
         autoSplit: false,
         pattern: undefined,
         useFlatSlots: false,
+        // Поле НАРАЩИВАЕТ `use_flat_slots` и осмысленно только на kind=flat; здесь оно ИГНОРИРУЕТСЯ
+        // сервером, а пустой список и так значит «все заполненные». Стоит явно, потому что
+        // контракт требует назвать поле, а не потому, что этому прогону есть что им сказать.
+        flatSlotIds: [],
       },
     });
   };

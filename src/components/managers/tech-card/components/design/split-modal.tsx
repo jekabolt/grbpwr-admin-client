@@ -1,6 +1,6 @@
 import type { DesignSplitFrame, common_DesignPicture } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -150,6 +150,8 @@ export function SplitModal({
   handle,
   open,
   onOpenChange,
+  mode = 'split',
+  note,
   forInput,
   onSplit,
 }: {
@@ -159,6 +161,29 @@ export function SplitModal({
   handle?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * ═══ ДВА РЕЖИМА ОДНОГО РЕЗА (J-8) ═══════════════════════════════════════════════════════
+   *
+   * Владелец, дословно: «в INPUT — REFERENCES должна быть возможность кропнуть картинку в
+   * тамбнейле».
+   *
+   * `split` — то, чем это окно было всегда: разметить НЕСКОЛЬКО кадров, каждый обязан назвать
+   * свой вид, из одной картинки выходит несколько.
+   *
+   * `crop` — РОВНО ОДИН кадр, и вид ему не нужен. Это не послабление проверки, а другой предмет:
+   * вид кадра существует затем, чтобы сервер знал, в какой слот кладётся кусок и какую роль
+   * писать в промпт; у кропа референса слота нет вовсе, и `for_input` едет `false`, поэтому
+   * называть вид было бы требованием ради требования. Сервер такой кадр принимает: пустой
+   * `view_key` — «a legal frame on the wire» (см. `toWireFrame` ниже), а `SplitPicture` режет из
+   * оригинальных байтов независимо от вида.
+   *
+   * Пресеты «2 across»/«3 across»/«+ frame» в этом режиме не рисуются: каждый из них заводит
+   * второй кадр, то есть предлагает выйти из режима нажатием на его собственную панель.
+   */
+  mode?: 'split' | 'crop';
+  /** Строка, которую вызывающий обязан сказать ДО реза (цена жеста на его стороне: снятые
+   *  указания, потерянные привязки). Пусто — вызывающему сказать нечего. */
+  note?: ReactNode;
   /**
    * Едут ли кропы В ПРОМПТ. Не косметика и не удобство: по этому слову сервер решает, писать ли
    * им роли `design_reference`. Разрез на верстаке — раскладка видов по слотам, и промпт он
@@ -199,9 +224,16 @@ export function SplitModal({
 
   const declaredCount = (picture.compositeViews ?? []).length;
 
+  /**
+   * НАЧАЛЬНАЯ РАЗМЕТКА. В режиме кропа — ОДИН кадр, вписанный в середину с полями: рамка впритык к
+   * краю не имеет наружной ручки, за которую её тянут, а кроп «как есть» — это не кроп.
+   */
   const initial = useMemo(
-    () => acrossPreset(Math.max(2, compositeViews.length || 2), compositeViews),
-    [compositeViews],
+    () =>
+      mode === 'crop'
+        ? [{ x: 0.1, y: 0.1, w: 0.8, h: 0.8, viewKey: '' }]
+        : acrossPreset(Math.max(2, compositeViews.length || 2), compositeViews),
+    [compositeViews, mode],
   );
 
   const [frames, setFrames] = useState<SplitFrameDraft[]>(initial);
@@ -293,7 +325,7 @@ export function SplitModal({
    * one: the operator draws four frames, presses the button, and gets three pictures with no event
    * anywhere saying which one went missing or why.
    */
-  const ready = frames.length > 0 && viewless === 0;
+  const ready = mode === 'crop' ? frames.length === 1 : frames.length > 0 && viewless === 0;
 
   const submit = () => {
     if (!ready || pending) return;
@@ -303,7 +335,12 @@ export function SplitModal({
         pictureId: picture.id ?? 0,
         clientRequestId: requestIdRef.current,
         frames: frames.map(toWireFrame),
-        forInput,
+        // ⚠ КРОП НИКОГДА НЕ ПИШЕТ РОЛЕЙ. `for_input` — это слово, по которому СЕРВЕР решает,
+        // заводить ли `design_reference(role = view_key)` каждому кадру; у кропа вида нет, роль
+        // ему написалась бы пустая, а строку входа вызывающий заводит сам, ПЕРЕСТАВЛЯЯ её на
+        // место исходной. Флаг вызывающего здесь не спрашивается вовсе — иначе он был бы вторым
+        // мнением о том, чем режим кропа является.
+        forInput: mode === 'crop' ? false : forInput,
       },
       {
         onSuccess: (data) => {
@@ -323,9 +360,13 @@ export function SplitModal({
       onOpenChange={onOpenChange}
       onConfirm={submit}
       onCancel={() => onOpenChange(false)}
-      title='split the picture into views'
+      title={mode === 'crop' ? `crop ${handle || 'this picture'}` : 'split the picture into views'}
       confirmLabel={
-        ready ? `split into ${frames.length} picture${frames.length === 1 ? '' : 's'}` : 'split'
+        mode === 'crop'
+          ? 'crop it'
+          : ready
+            ? `split into ${frames.length} picture${frames.length === 1 ? '' : 's'}`
+            : 'split'
       }
       confirmDisabled={!ready || pending}
       closeOnConfirm={false}
@@ -348,9 +389,11 @@ export function SplitModal({
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' variant='label' component='span'>
             {handle ? `${handle} · ` : ''}
-            {declaredCount
-              ? `${declaredCount} view${declaredCount === 1 ? '' : 's'} glued into one image`
-              : 'one picture in, several out — the original stays'}
+            {mode === 'crop'
+              ? 'one frame in, one picture out — the original stays'
+              : declaredCount
+                ? `${declaredCount} view${declaredCount === 1 ? '' : 's'} glued into one image`
+                : 'one picture in, several out — the original stays'}
           </Text>
         </div>
 
@@ -359,35 +402,63 @@ export function SplitModal({
             invisible is exactly the kind of label a tired person confirms. When the column is empty
             — every picture on beta today, and every sheet brought by hand — the presets still lay
             frames out, they just name none, and the line says so rather than staying silent. */}
-        <Text size='micro' variant='label' component='p'>
-          {declaredLine
-            ? `the file declares ${declaredLine}, in that order — the presets below name the frames from it, left to right, and you move them.`
-            : 'this picture declares no views, so the presets lay frames out without naming them — every frame is named here by hand.'}
-        </Text>
+        {mode === 'crop' ? (
+          <Text size='micro' variant='label' component='p'>
+            one frame, and what is inside it becomes the picture. The original stays on the card —
+            the crop is filed beside it, not over it.
+          </Text>
+        ) : (
+          <Text size='micro' variant='label' component='p'>
+            {declaredLine
+              ? `the file declares ${declaredLine}, in that order — the presets below name the frames from it, left to right, and you move them.`
+              : 'this picture declares no views, so the presets lay frames out without naming them — every frame is named here by hand.'}
+          </Text>
+        )}
+
+        {/* ЦЕНА ЖЕСТА, НАЗВАННАЯ ВЫЗЫВАЮЩИМ. Окно режет пиксели и о чужих привязках не знает;
+            блок референсов знает — и обязан сказать про снятые указания ДО реза, а не снекбаром
+            после. */}
+        {note && (
+          <CalloutBox tone='warning'>
+            <Text size='micro' component='p'>
+              {note}
+            </Text>
+          </CalloutBox>
+        )}
 
         <ChipRow>
-          <Chip onClick={() => editFrames(() => acrossPreset(2, compositeViews))}>2 across</Chip>
-          <Chip onClick={() => editFrames(() => acrossPreset(3, compositeViews))}>3 across</Chip>
-          {/* A FOURTH CHIP ONLY WHEN THE FILE ASKS FOR ONE. Four ticks is an ordinary request on
-              this card — an asymmetric garment needs both sides — and its composite would otherwise
-              have to be reached by pressing «3 across» and then «+ frame», renaming as it goes. The
-              chip is absent when the declared count is one the two fixed chips already cover. */}
-          {declaredCount > 3 && (
-            <Chip onClick={() => editFrames(() => acrossPreset(declaredCount, compositeViews))}>
-              {declaredCount} across
-            </Chip>
+          {/* КАЖДЫЙ ИЗ ЭТИХ ПРЕСЕТОВ ЗАВОДИТ ВТОРОЙ КАДР, поэтому в режиме кропа их нет: панель,
+              предлагающая выйти из собственного режима, — это не выбор, а ловушка. `reset`
+              остаётся: он возвращает ОДИН кадр в исходное положение. */}
+          {mode !== 'crop' && (
+            <>
+              <Chip onClick={() => editFrames(() => acrossPreset(2, compositeViews))}>2 across</Chip>
+              <Chip onClick={() => editFrames(() => acrossPreset(3, compositeViews))}>3 across</Chip>
+              {/* A FOURTH CHIP ONLY WHEN THE FILE ASKS FOR ONE. Four ticks is an ordinary request on
+                  this card — an asymmetric garment needs both sides — and its composite would
+                  otherwise have to be reached by pressing «3 across» and then «+ frame», renaming as
+                  it goes. The chip is absent when the declared count is one the two fixed chips
+                  already cover. */}
+              {declaredCount > 3 && (
+                <Chip onClick={() => editFrames(() => acrossPreset(declaredCount, compositeViews))}>
+                  {declaredCount} across
+                </Chip>
+              )}
+              <Chip
+                dashed
+                onClick={() =>
+                  editFrames((prev) => [...prev, { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' }])
+                }
+              >
+                + frame
+              </Chip>
+            </>
           )}
-          <Chip
-            dashed
-            onClick={() =>
-              editFrames((prev) => [...prev, { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' }])
-            }
-          >
-            + frame
-          </Chip>
           <Chip onClick={() => editFrames(() => initial)}>reset</Chip>
           <Text size='micro' variant='label' component='span'>
-            drag a frame · pull an edge to resize · anything outside a frame is not cut
+            {mode === 'crop'
+              ? 'drag the frame · pull an edge to resize · anything outside it is not cut'
+              : 'drag a frame · pull an edge to resize · anything outside a frame is not cut'}
           </Text>
         </ChipRow>
 
@@ -443,7 +514,13 @@ export function SplitModal({
                 }}
               >
                 <span className='pointer-events-none absolute left-0 top-0 bg-textColor px-1 text-nano uppercase text-bgColor'>
-                  {frame.viewKey ? viewLabel(frame.viewKey) : `${i + 1} · no view`}
+                  {/* В РЕЖИМЕ КРОПА ЯРЛЫК НЕ ЖАЛУЕТСЯ НА ОТСУТСТВИЕ ВИДА: вида у кропа нет по
+                      устройству, и «no view» читалось бы как незакрытая ошибка. */}
+                  {frame.viewKey
+                    ? viewLabel(frame.viewKey)
+                    : mode === 'crop'
+                      ? 'crop'
+                      : `${i + 1} · no view`}
                 </span>
                 {(['l', 'r', 't', 'b'] as const).map((edge) => (
                   <span
@@ -463,6 +540,11 @@ export function SplitModal({
           </div>
         </div>
 
+        {/* СПИСОК КАДРОВ — ЭТО СПИСОК ВИДОВ. В режиме кропа кадр один и вида у него нет, поэтому
+            вся таблица говорила бы «frame 1 · — view — · not cut» о единственном предмете на
+            экране: три неправды в одной строке. Числа рамки при этом не пропадают — их видно на
+            самой рамке, которую тянут. */}
+        {mode !== 'crop' && (
         <div>
           <GroupLabel
             action={
@@ -527,8 +609,9 @@ export function SplitModal({
             />
           ))}
         </div>
+        )}
 
-        {viewless > 0 && (
+        {mode !== 'crop' && viewless > 0 && (
           <CalloutBox tone='warning'>
             <b>{viewless === 1 ? 'one frame has' : `${viewless} frames have`} no view.</b> The view
             is what says which piece of the garment a frame holds, so nothing is cut until every
