@@ -1,6 +1,4 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useDictionary } from 'lib/providers/dictionary-provider';
-import { cn } from 'lib/utility';
 import { useMemo, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -21,17 +19,11 @@ import {
 } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { colorwayLabel, colorwaySubtitle } from '../colorway-picker';
-import { useColourDraft, type ColourDraft } from './drafts';
+import { ClothIsRow } from './cloth-is';
+import type { ColourDraft } from './drafts';
 import { ColourStatementRow } from './colour-statement';
 import { FieldRow, Hint, Swatch } from './field-row';
-import {
-  EMPTY_RECIPE,
-  FABRIC_AUTHORITY,
-  colourLabel,
-  colourSubtitle,
-  colourSwatchHex,
-  fabricStatement,
-} from './model';
+import { clothWordsRank, fabricAuthority, fabricStatement, statedWords } from './model';
 
 /**
  * FABRIC — what a render is coloured and clothed with.
@@ -55,11 +47,13 @@ import {
  * `#e6e6e6` weight), because a block never contains a block and «which of these is filled in» has
  * to be answerable by running an eye down one column of labels.
  *
- * NOTHING HERE IS CARD DATA. A colourway is a fact about the style, signed off by a lab dip; this
- * is a submission to a picture generator, and the two must never be confused — which is why a typed
- * hex still carries its worded warning that it is a visualisation override. The recipe reaches the
- * server once, inside `StartDesignRun.params.colour`, and lives afterwards only as the run's own
- * frozen history.
+ * NOTHING HERE IS CARD DATA — С ОДНИМ НАЗВАННЫМ ИСКЛЮЧЕНИЕМ. A colourway is a fact about the
+ * style, signed off by a lab dip; the rows under `THIS RUN` are a submission to a picture generator,
+ * and the two must never be confused. The recipe reaches the server once, inside
+ * `StartDesignRun.params.colour`, and lives afterwards only as the run's own frozen history.
+ * Исключение — ряд FABRIC наверху: чипы `wears` пишут КАРТОЧКУ (`SetDesignAssetColorway`), и
+ * граница между двумя половинами теперь не сказана серой строкой, а НАРИСОВАНА лестницей: факт
+ * колорвея → `GroupLabel this run` → ворота.
  *
  * THE LAB-DIP CLAUSE OF THE PROTOTYPE IS STILL NOT HERE, AND STILL DELIBERATELY. The prototype
  * prints «also a colorway of this style — lab dip approved · round 1», and the badge reads the LAB
@@ -69,12 +63,12 @@ import {
  * a technologist rendering a colour the dyehouse has already rejected. Absent beats guessed.
  */
 
-/* ─── СЕТКА СЛОВАРЯ ЖИЛА ЗДЕСЬ И ПЕРЕЕХАЛА В `colour-statement.tsx` ───────────────────────────
-   Приватная `DictionaryGrid` была недоступна второму экрану, и волна K-17 честно скопировала её
-   себе — после чего копии разошлись за неполные сутки: у одной появился `data-colour-code`, у
-   другой осталась своя фраза про пустой словарь. Список одного словаря, живущий дважды, расходится
-   МОЛЧА. Орган теперь один; различие экранов сказано двумя пропами (`hint`, `emptyNote`), а не
-   двумя телами функции. */
+/* ─── СЕТКА СЛОВАРЯ ЖИЛА ЗДЕСЬ, ПЕРЕЕХАЛА В `colour-statement.tsx` И СНЕСЕНА ТАМ (H-8) ────────
+   Сначала она была приватной функцией палитры, вторая копия завелась в перекрасе и разошлась с
+   первой за неполные сутки — классический дефект «один список живёт дважды». Орган свели в один, а
+   потом владелец снял ВОПРОС, на который он отвечал: цвет выбирают пикером и называют словом. Довод
+   целиком — в шапке `colour-statement.tsx`. Пустой словарь цветов беты перестал быть видимым
+   состоянием этого экрана вовсе: одним ложно-сломанным экраном меньше. */
 
 /* ─── СТАРЫЙ КВАДРАТ НАД НАТИВНЫМ `<input type='color'>` СНЯТ ЦЕЛИКОМ (V-5) ────────────────────
    Он делал ровно одно: прятал хром операционной системы под нашей рамкой, — и всё, что человек
@@ -147,17 +141,14 @@ function ClothRow({
     const next = chosen.includes(assetId)
       ? chosen.filter((id) => id !== assetId)
       : [...chosen, assetId];
-    const fabrics = fabricUses(band, next);
-    const first = fabrics[0];
-    state.patch({
-      fabrics,
-      // ЭХО ПЕРВОЙ ТКАНИ В СКАЛЯРЫ — требование контракта, а не удобство; см. шапку.
-      fabricMediaId: first?.mediaId ?? 0,
-      // ...и только в ПУСТЫЕ поля: набранное руками это ранг 2, он старше фотографии по цвету.
-      code: (state.recipe.code ?? '').trim() || first?.colourCode || '',
-      hex: (state.recipe.hex ?? '').trim() || first?.colourHex || '',
-      words: (state.recipe.words ?? '').trim() || first?.words || '',
-    });
+    /**
+     * ⚠ ЭХО ИДЁТ ЧЕРЕЗ ЭХО-ДВЕРЬ, А НЕ СОБИРАЕТСЯ ЗДЕСЬ. Этот ряд СЧИТАЛСЯ образцовым — он берёг
+     * набранное руками, — но правило знал только наполовину: в ПУСТОЕ имя он клал `colourCode`
+     * ассета так же охотно, как это делал `wear()` поверх набранного. Замерено: колорвей, у
+     * которого не заявлено ничего, + чип ткани 801 → в имени цвета «ECRU», и `colourPhrase`
+     * печатает «colourway ECRU». Обе половины правила теперь живут у двери, в одном месте.
+     */
+    state.echo({ from: 'cloths', fabrics: fabricUses(band, next) });
   }
 
   return (
@@ -240,7 +231,7 @@ function ClothRow({
             кто кого перебивает по цвету. */}
         {chosen.length === 1 && (
           <Hint>
-            one cloth: it is the whole garment. its texture governs the material, the picked colour
+            one cloth: it is the whole garment. Its texture governs the material, the picked colour
             below still beats it on colour.
           </Hint>
         )}
@@ -250,25 +241,46 @@ function ClothRow({
 }
 
 /**
- * ═══ ТКАНЬ ЭТОГО КОЛОРВЕЯ — ОДИН ОРГАН НА «ЦВЕТ ИЛИ ПАТТЕРН» (G-15) ═══════════════════════════
+ * ═══ FABRIC — ОДИН РЯД ФАКТА: ЧТО ЭТОТ КОЛОРВЕЙ НОСИТ И ЧЕМ ЕГО ПЕРЕОДЕТЬ (H-12 + G-15) ══════
  *
- * Владелец: паттерн — это бесшовная плитка, бесшовная плитка — это ТКАНЬ, и «в рендере и 3D она
- * выбирается как ткань ЭТОГО КОЛОРВЕЯ». Отсюда единственное число ряда: колорвей носит ОДНУ ткань,
- * и клик по соседнему чипу И ЕСТЬ намерение «теперь ткань ROSSO — вот эта». Сервер исполняет это
- * одной транзакцией (назначение снимает колорвей со всех прочих ассетов), поэтому клиент шлёт ОДИН
- * вызов и ничего не имитирует.
+ * ═══ МЕНТАЛЬНАЯ МОДЕЛЬ, КОТОРУЮ РИСУЕТ ЭТОТ РЯД ══════════════════════════════════════════════
+ *
+ * Владелец просил «продумать механику … с самым минималистичным дизайном». Механика такая:
+ * **колорвей — это ткань с именем.** Он носит РОВНО ОДНУ вещь — свой цвет или одну плитку из
+ * библиотеки карточки, — и первый вопрос студии всегда «какой колорвей?». Всё, что ниже этого ряда,
+ * — подача ЭТОГО прогона: она может ДОБАВИТЬ к ткани колорвея или отклониться ДЛЯ СЕБЯ, но не
+ * переписать карточку.
+ *
+ * Значит под именованным колорвеем обязательных решений о цвете НОЛЬ: выбрал колорвей, взглянул на
+ * его ткань, нажал GENERATE.
+ *
+ * ═══ ПОЧЕМУ РЯД СЛИТЫЙ, А НЕ ДВА СОСЕДНИХ ═══════════════════════════════════════════════════
+ *
+ * ЗАМЕР, А НЕ ВПЕЧАТЛЕНИЕ: на вопрос «из чего будет этот рендер» отвечали ЧЕТЫРЕ органа — ряд
+ * `fabric of` (факт карточки), заголовок-заявление (свотч 44px + имя + подстрочник, состояние
+ * ЧЕРНОВИКА), ряд CLOTHS и ряд COLOUR с сеткой словаря. Под нетронутым черновиком первые два
+ * говорили ОДНО И ТО ЖЕ ДВАЖДЫ — черновик засеян ровно этим фактом. Экран читался «не минимально»
+ * не потому, что рядов много, а потому что ОТВЕТОВ БЫЛО БОЛЬШЕ, ЧЕМ ВОПРОСОВ.
+ *
+ * Поэтому заголовок-заявление снесён, а его работу взяли двое: (а) ЭТОТ ряд — лицом 44px и строкой
+ * факта, с которого черновик и засевается, и (б) строка инвентаря у кнопки GENERATE («made of
+ * pattern 2») — правда прогона в двух шагах от денег. Тот же ход, что владелец уже принял на экране
+ * паттернов: инвентарь = подпись кнопки, отдельного блока нет.
+ *
+ * ⚠ ОБРАТИМО. Если владельцу не хватит «большого свотча черновика», заявление возвращается лицом в
+ * `GenerateRow` — это одна строка, а не архитектура. На ON MODEL заявление ОСТАЛОСЬ: у перекраса
+ * нет колорвейного ряда FABRIC, и там оно единственный ответ «что поедет».
+ *
+ * ═══ ЧТО ЭТОТ РЯД ПИШЕТ ═════════════════════════════════════════════════════════════════════
  *
  * ЦВЕТНАЯ ПОЛОВИНА НЕ ХРАНИТСЯ И НЕ МОЖЕТ ХРАНИТЬСЯ ЗДЕСЬ. `its own colour` — не запись, а СНЯТИЕ
  * назначения (`colorway_id = 0`): цвет у колорвея уже есть — `devHex`/`pantone`/`colorCode` в его
  * собственной строке, — и второе поле для него было бы конкурирующим ответом на вопрос, у которого
- * ответ есть. Ровно от этого палитра отгораживается прямым текстом с самого начала.
+ * ответ есть.
  *
- * ═══ ПОЧЕМУ РЯД НЕ ТОЛЬКО ПИШЕТ КАРТОЧКУ, НО И ПРАВИТ ПОДАЧУ ═════════════════════════════════
- *
- * Провальный режим, ради которого писан весь G-15, — «сохранено, но до модели не доехало». Если
- * назначение меняет карточку и НЕ меняет того, что уедет в этот прогон, человек нажал «ткань ROSSO
- * — pattern 2», нажал GENERATE и купил прежний рецепт. Поэтому удавшееся назначение сразу правит
- * черновик: ткань встаёт в `fabrics`, эхо — в скаляры (требование контракта), а снятие возвращает
+ * Провальный режим, ради которого писан весь G-15, — «сохранено, но до модели не доехало»: человек
+ * нажал «ткань ROSSO — pattern 2», нажал GENERATE и купил прежний рецепт. Поэтому удавшееся
+ * назначение сразу правит черновик — ткань встаёт в `fabrics`, эхо в скаляры, — а снятие возвращает
  * собственный цвет колорвея. Это ПРАВКА ЧЕЛОВЕКА, а не второй засев: черновик после неё честно
  * считается тронутым.
  *
@@ -276,7 +288,7 @@ function ClothRow({
  * `foreign_colorway` на чужом колорвее) обязан оставить экран в том состоянии, которое он
  * описывает; подача, уехавшая вперёд отказа, показывала бы ткань, которой колорвей не носит.
  */
-function FabricOfRow({
+function FabricRow({
   band,
   techCardId,
   colorwayId,
@@ -301,27 +313,36 @@ function FabricOfRow({
 
   const name = colorwayLabel(colorway) || `#${colorwayId}`;
   const wornId = worn?.id ?? 0;
+  const subtitle = colorwaySubtitle(colorway);
+
+  /**
+   * СТРОКА ФАКТА. Три состояния, и третье — РАБОЧЕЕ, а не ошибка: на бете колорвеи с пустыми
+   * `devHex`/`pantone`/`colorCode` обычны, и молчащий ряд читался бы как поломка экрана. Поэтому
+   * он называет, чего нет, и обе двери наружу — одеть колорвей или сказать про ткань на один прогон.
+   */
+  const fact = wornId
+    ? `wears ${assetLabel(worn)}${worn?.repeatMm ? ` · ${worn.repeatMm} mm` : ''}`
+    : subtitle
+      ? `its own colour · ${subtitle}`
+      : 'nothing stated on the colourway yet: no dev colour, no fabric. Dress it below, or state the cloth for this run only.';
 
   const wear = (assetId: number) => {
     if (disabled || setAssetColorway.isPending) return;
     setAssetColorway.mutate(
       { assetId, colorwayId },
       {
-        onSuccess: () => {
-          const fabrics = fabricUses(band, [assetId]);
-          const first = fabrics[0];
-          state.patch({
-            fabrics,
-            // ЭХО ПЕРВОЙ ТКАНИ В СКАЛЯРЫ — требование контракта, то же, что делает ряд CLOTHS.
-            fabricMediaId: first?.mediaId ?? 0,
-            // ⚠ И БЕЗ ПОДМЕШИВАНИЯ СОБСТВЕННОГО ЦВЕТА КОЛОРВЕЯ: выбранный цвет ПЕРЕБИВАЕТ цвет
-            // фотографии, поэтому `devHex` поверх набивки залил бы её одним тоном. Довод целиком —
-            // в засеве `useColourDraft` (`./drafts`), где живёт то же правило.
-            code: first?.colourCode || '',
-            hex: first?.colourHex || '',
-            words: first?.words || '',
-          });
-        },
+        /**
+         * ⚠ ЭТА СТРОКА ГОВОРИЛА «то же, что делает ряд CLOTHS», И ЭТО БЫЛО НЕПРАВДОЙ. Она писала
+         * три скаляра БЕЗУСЛОВНО. Замерено: набрано `#a41f22` / «dusty rose» / «fine rib jersey,
+         * matte» → нажатие чипа `wears` на ассете 801 дало `#eee8dd` / «ECRU» / «fine rib», на
+         * провод уехало `code="ECRU" hex="#eee8dd"`, и бэкенд напечатал «colourway ECRU — the
+         * exact value is #eee8dd». Тот же жест на ряду CLOTHS все три значения берёг.
+         *
+         * Теперь оба ряда зовут ОДНУ дверь, и «то же самое» перестало быть обещанием в
+         * комментарии: собственного цвета колорвея дверь по-прежнему не подмешивает (`devHex`
+         * поверх набивки залил бы её одним тоном), а набранное руками — не трогает.
+         */
+        onSuccess: () => state.echo({ from: 'cloths', fabrics: fabricUses(band, [assetId]) }),
       },
     );
   };
@@ -331,76 +352,108 @@ function FabricOfRow({
     setAssetColorway.mutate(
       { assetId: wornId, colorwayId: 0 },
       {
-        onSuccess: () =>
-          state.patch({
-            ...EMPTY_RECIPE,
-            hex: (colorway?.devHex ?? '').trim(),
-            code: (colorway?.colorCode ?? '').trim(),
-            words: (colorway?.pantone ?? '').trim(),
-          }),
+        /**
+         * ⚠ ПИСАТЕЛЕЙ ИМЕНИ ДВА, И ВТОРОЙ ЖИЛ ПО СНЯТОМУ ПРАВИЛУ — так это было записано кругом
+         * раньше, и починена была ОДНА половина: жетон `colorCode` перестал попадать в имя. Вторая
+         * половина осталась и была замерена здесь же: тело писало `{ ...EMPTY_RECIPE, ... }`, то
+         * есть ОБНУЛЯЛО набранные человеком hex, имя и слова, а потом клало поверх собственный цвет
+         * колорвея И ЕГО `pantone` в поле ткани словами. «Снять ткань» уносило с собой ранг 2.
+         *
+         * Теперь это ОДИН вызов эхо-двери: она сама знает, что колорвей, носящий свой цвет, ткани
+         * не носит (`fabrics` и `fabric_media_id` очищает), сама берёт имя, а не складской код, и
+         * сама не читает `pantone` вовсе.
+         */
+        onSuccess: () => state.echo({ from: 'colourway', colorway }),
       },
     );
   };
 
+  /* ЛИЦО РЯДА — ПЛИТКА, ЕСЛИ КОЛОРВЕЙ НОСИТ ТКАНЬ, ИНАЧЕ ЕГО СОБСТВЕННЫЙ ЦВЕТ. Пустой девхекс
+     рисуется штриховкой, а не чёрным: свотч, закрасивший неизвестный цвет, врёт так, что глаз
+     верит целиком (`Swatch` держит это правило за всю полосу). */
+  const face = wornId ? assetThumb(worn) : '';
+
   return (
-    <FieldRow label='fabric of' data-fabric-of={colorwayId}>
-      <Text size='control' variant='uppercase' tracking='label' component='span' className='font-bold'>
-        {name}
-      </Text>
-      <ChipRow>
-        <Chip
-          nonForm
-          selected={!wornId}
-          pressed={!wornId}
-          disabled={disabled || setAssetColorway.isPending}
-          data-wear-asset='none'
-          title={
-            wornId
-              ? `take the fabric off ${name} — it goes back to wearing its own colour, ${colorwaySubtitle(colorway) || 'as stated on the colourway'}`
-              : `${name} wears its own colour — ${colorwaySubtitle(colorway) || 'stated on the colourway itself'}`
-          }
-          onClick={takeOff}
-        >
-          <span className='flex items-center gap-1'>
-            <Swatch hex={(colorway?.devHex ?? '').trim()} size={11} />
-            its own colour
-          </span>
-        </Chip>
-        {shelf.map((a) => {
-          const id = a.id ?? 0;
-          const on = assetWornBy(a) === colorwayId;
-          const url = assetThumb(a);
-          return (
-            <Chip
-              key={id}
-              nonForm
-              selected={on}
-              pressed={on}
-              disabled={disabled || setAssetColorway.isPending}
-              data-wear-asset={id}
-              title={
-                on
-                  ? `${assetLabel(a)} is the fabric of ${name} — press «its own colour» to take it off`
-                  : `make ${assetLabel(a)} the fabric of ${name}. This writes the card: it comes back on every render of ${name}, and it takes ${name} off whatever else was wearing it`
-              }
-              onClick={() => (on ? takeOff() : wear(id))}
-            >
-              <span className='flex items-center gap-1'>
-                {url ? (
-                  <img src={url} alt='' aria-hidden='true' className='size-[12px] object-cover' />
-                ) : null}
-                {assetLabel(a)}
-                {a.repeatMm ? ` · ${a.repeatMm} mm` : ''}
-              </span>
-            </Chip>
-          );
-        })}
-      </ChipRow>
-      <div className='w-full pl-[100px]'>
+    <FieldRow label='fabric' data-fabric-row={colorwayId}>
+      {face ? (
+        <img
+          src={face}
+          alt=''
+          aria-hidden='true'
+          data-fabric-face='cloth'
+          className='size-[44px] shrink-0 border border-textColor object-cover'
+        />
+      ) : (
+        <Swatch hex={(colorway?.devHex ?? '').trim()} size={44} />
+      )}
+      <div className='min-w-0 flex-1'>
+        <Text size='control' variant='uppercase' tracking='label' component='p' className='font-bold'>
+          {name}
+        </Text>
+        <Text size='micro' variant='label' component='p' className='normal-case'>
+          {fact}
+        </Text>
+      </div>
+
+      <div className='w-full space-y-1 pl-[100px]'>
+        <ChipRow>
+          <Chip
+            nonForm
+            selected={!wornId}
+            pressed={!wornId}
+            disabled={disabled || setAssetColorway.isPending}
+            data-wear-asset='none'
+            title={
+              wornId
+                ? `take the fabric off ${name} — it goes back to wearing its own colour, ${subtitle || 'as stated on the colourway'}`
+                : `${name} wears its own colour — ${subtitle || 'stated on the colourway itself'}`
+            }
+            onClick={takeOff}
+          >
+            <span className='flex items-center gap-1'>
+              <Swatch hex={(colorway?.devHex ?? '').trim()} size={11} />
+              its own colour
+            </span>
+          </Chip>
+          {shelf.map((a) => {
+            const id = a.id ?? 0;
+            const on = assetWornBy(a) === colorwayId;
+            const url = assetThumb(a);
+            return (
+              <Chip
+                key={id}
+                nonForm
+                selected={on}
+                pressed={on}
+                disabled={disabled || setAssetColorway.isPending}
+                data-wear-asset={id}
+                title={
+                  on
+                    ? `${assetLabel(a)} is the fabric of ${name} — press «its own colour» to take it off`
+                    : `make ${assetLabel(a)} the fabric of ${name}. This writes the card: it comes back on every render of ${name}, and it takes ${name} off whatever else was wearing it`
+                }
+                onClick={() => (on ? takeOff() : wear(id))}
+              >
+                <span className='flex items-center gap-1'>
+                  {url ? (
+                    <img src={url} alt='' aria-hidden='true' className='size-[12px] object-cover' />
+                  ) : null}
+                  {assetLabel(a)}
+                  {a.repeatMm ? ` · ${a.repeatMm} mm` : ''}
+                </span>
+              </Chip>
+            );
+          })}
+        </ChipRow>
+        {/* ГРАНИЦА «КАРТОЧКА ↑ / ПРОГОН ↓» СКАЗАНА ЗДЕСЬ ОДИН РАЗ. Ниже её рисует сама лестница —
+            `GroupLabel this run`, — поэтому повторять её у каждого ряда не нужно и вредно. */}
+        {/* ⚠ `Hint` (micro, 10px), А НЕ `nano`. Это бегущее предложение, а `nano` (9px) DESIGN.md
+            отдаёт бейджам, номерам пинов и подписям полос — вещам в два-три слова. Кегль здесь
+            заменил собой `Hint`, который стоял на этом месте до слияния рядов; предложение,
+            уменьшенное до размера бейджа, читается хуже ровно там, где объясняет запись КАРТОЧКИ. */}
         <Hint>
-          {wornId
-            ? `${name} wears ${assetLabel(worn)} on every render — this is a fact of the card. The rows below are this run only.`
-            : `${name} wears its own colour. Picking a cloth here writes the card; the rows below are this run only.`}
+          picking here writes the card — it comes back on every render of {name}. Everything under
+          THIS RUN is one run only.
         </Hint>
       </div>
     </FieldRow>
@@ -417,33 +470,58 @@ export function Palette({
   colorway = null,
 }: {
   band: GetDesignBandResponse;
-  /** ⚠ ПАЛИТРА БОЛЬШЕ НЕ «НИЧЕГО НЕ ПИШЕТ»: ряд `fabric of` пишет назначение ткани колорвею
+  /** ⚠ ПАЛИТРА БОЛЬШЕ НЕ «НИЧЕГО НЕ ПИШЕТ»: ряд FABRIC пишет назначение ткани колорвею
    *  (`SetDesignAssetColorway`, G-15) — единственная запись КАРТОЧКИ на этом экране. Рецепт по-
    *  прежнему не карточка: он уезжает внутри прогона и живёт замороженной историей. */
   techCardId: number;
   disabled?: boolean;
-  draft?: ColourDraft;
-  /** Выбранный колорвей; 0 = безколорвейный верстак, и ряда `fabric of` тогда нет вовсе. */
+  /**
+   * ⚠ ОБЯЗАТЕЛЕН, И ЭТО ПОЧИНКА МЁРТВОГО ПИСАТЕЛЯ, А НЕ УЖЕСТОЧЕНИЕ РАДИ СТРОГОСТИ. Проп был
+   * необязательным, а рядом безусловно звался `useColourDraft` — ЦЕЛЫЙ ВТОРОЙ ЧЕРНОВИК, который
+   * выбрасывался всегда, потому что `draft` передавали всегда (вызывающий на всю программу один).
+   * Мёртвый он был не весь: смонтируй кто-нибудь `Palette` без пропа, и ряд CLOTH IS писал бы в
+   * `own.cloth`, которого не композирует НИКТО, — «сохранено, но не поехало», тот самый провальный
+   * режим, от которого написана вся эта механика. Состояние подаёт студия; ворота и палитра
+   * обязаны читать ОДИН черновик, и теперь это невыразимо иначе.
+   */
+  draft: ColourDraft;
+  /** Выбранный колорвей; 0 = безколорвейный верстак, и ряда FABRIC тогда нет вовсе. */
   colorwayId?: number;
   colorway?: common_AdminColorwayRef | null;
 }): JSX.Element {
-  // Own draft when mounted alone, the studio's when composed. The hook is called unconditionally —
-  // rules of hooks — and its result is simply not used when a draft was handed in.
-  const own = useColourDraft(band, colorwayId, colorway);
-  const state = draft ?? own;
+  const state = draft;
   const recipe = state.recipe;
   const stated = fabricStatement(recipe);
-
-  const { dictionary } = useDictionary();
-  const colors = dictionary?.colors;
+  /** ЖИВАЯ КОМПОЗИЦИЯ — ТА ЖЕ ФУНКЦИЯ, ЧТО УЕДЕТ НА ПРОВОД. Второе написание склейки обещало бы
+   *  человеку одно, а покупало бы другое; поэтому подпись читает `statedWords`, а не собирается. */
+  const willSay = statedWords(state);
+  /**
+   * КТО ПЕРЕБЬЁТ ЭТИ СЛОВА — ВЫЧИСЛЯЕТ МОДЕЛЬ, ЭКРАН ТОЛЬКО ГОВОРИТ (H-13). Довод и построчное
+   * условие из `renderprompt.go` — у `clothWordsRank`.
+   */
+  const rank = clothWordsRank(recipe);
+  /** Подпись порядка старшинства — одна пара «состояние + текст» на обе поверхности. */
+  const authority = fabricAuthority(recipe);
+  /**
+   * ПУСТАЯ ПОДПИСЬ РАЗЛИЧАЕТ ТРИ СОСТОЯНИЯ, А НЕ ДВА, И ЭТО ВТОРАЯ ПРАВКА ОДНОЙ И ТОЙ ЖЕ ФРАЗЫ.
+   *
+   * Сначала она была одна и врала на колорвее, где не заявлено ничего. Потом стала двумя — и
+   * продолжала врать в САМОМ ЧАСТОМ состоянии: у колорвея с `devHex` и без назначенной ткани (ровно
+   * то, что производит собственный засев) выше заявлен ЦВЕТ, а фраза говорила «the fabric above
+   * already states the cloth», хотя ряд FABRIC двумя строками выше читается `its own colour`.
+   * Цвет — не ткань: он не несёт ни переплетения, ни веса, ни падения, и промпт строит материал
+   * не из него. Поэтому состояний три, и каждое названо своими словами.
+   */
+  const clothAbove = stated.photo;
+  const colourAbove = !stated.photo && stated.colour;
 
   return (
     <div>
-      {/* ── 0. ТКАНЬ КОЛОРВЕЯ — ФАКТ КАРТОЧКИ, И ОН СТОИТ ВЫШЕ ГРУППЫ «FABRIC» (G-15).
+      {/* ── 0. ТКАНЬ КОЛОРВЕЯ — ФАКТ КАРТОЧКИ, И ОН СТОИТ ВЫШЕ ГРУППЫ ПОДАЧИ (G-15 + H-12).
              Порядок здесь и есть довод: сверху то, что переживает прогон, ниже — подача, которая
-             живёт ровно один раз. Внутри группы «fabric» этот ряд читался бы как ещё одно поле
-             подачи, то есть ровно наоборот. Граница названа словами в хвосте самого ряда. */}
-      <FabricOfRow
+             живёт ровно один раз. Внутри группы «this run» этот ряд читался бы как ещё одно поле
+             подачи, то есть ровно наоборот. */}
+      <FabricRow
         band={band}
         techCardId={techCardId}
         colorwayId={colorwayId}
@@ -452,69 +530,68 @@ export function Palette({
         disabled={disabled}
       />
 
+      {/* ПОДПИСЬ ГРУППЫ НАЗЫВАЕТ СРОК ЖИЗНИ ТОГО, ЧТО ПОД НЕЙ. Под именованным колорвеем над ней
+          стоит ФАКТ КАРТОЧКИ, и различить их обязана лестница, а не серая строка: `this run`. На
+          безколорвейном верстаке факта-ткани не существует вовсе, различать нечего, и группа
+          остаётся тем, чем была, — `fabric`, байт в байт как до оси. */}
+      {/* ⚠ ПОДПИСЬ ПОРЯДКА СТАРШИНСТВА — ФУНКЦИЯ РЕЦЕПТА, А НЕ КОНСТАНТА. Довод целиком у
+          `fabricAuthority`: та же строка стоит в модалке «what the model gets», где строки ранга
+          нет по построению, и безусловное обещание звучало там при живой фотографии ткани.
+          `data-fabric-authority` — не украшение: он даёт пробе сверить ДВЕ поверхности между
+          собой, а не каждую с ожидаемым текстом по отдельности. */}
       <GroupLabel
         action={
-          <Text size='micro' variant='label' component='span' className='normal-case'>
-            {FABRIC_AUTHORITY}
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            data-fabric-authority={authority.state}
+            className='normal-case'
+          >
+            {authority.text}
           </Text>
         }
       >
-        fabric
+        {colorwayId > 0 ? 'this run' : 'fabric'}
       </GroupLabel>
-
-      {/* WHAT IS STATED, STATED BEFORE IT IS EDITED. The swatch, the name and the full list of
-          sources stand above the controls, so the answer to «what will this render be made of»
-          never depends on scanning three rows for whichever one is filled. */}
-      <div className='flex flex-wrap items-start gap-3 border-b border-hairline pb-2'>
-        <Swatch hex={colourSwatchHex(recipe, colors)} size={44} />
-        <div className='min-w-0 flex-1'>
-          <Text
-            size='control'
-            variant='uppercase'
-            tracking='label'
-            component='p'
-            className='font-bold'
-          >
-            {colourLabel(recipe, colors)}
-          </Text>
-          <Text size='micro' variant='label' component='p' className='normal-case'>
-            {colourSubtitle(recipe, colors)}
-          </Text>
-        </div>
-      </div>
 
       {/* ── 1. THE CLOTHS — the shelf, not a file picker. */}
       <ClothRow band={band} disabled={disabled} state={state} />
 
-      {/* ── 2. THE PICKED COLOUR — dictionary code and hex are ONE statement, on one line.
-          ⚠ ОРГАН ОБЩИЙ С ON MODEL (`ColourStatementRow`), И РАЗЛИЧИЕ ЭКРАНОВ — В ДВУХ ПРОПАХ.
-          `hint` говорит, что с цветом СДЕЛАЮТ (здесь — покрасят чертёж), `emptyNote` — есть ли на
-          этом экране третий путь назвать цвет. Здесь он есть: фотография ткани. В перекрасе его
-          нет, и та же фраза была бы советом, которому нельзя последовать. */}
+      {/* ── 2. THE PICKED COLOUR — a value and a name, on one line.
+          ⚠ ОРГАН ОБЩИЙ С ON MODEL (`ColourStatementRow`), И РАЗЛИЧИЕ ЭКРАНОВ — В ОДНОМ ПРОПЕ:
+          `hint` говорит, что с цветом СДЕЛАЮТ. Второй проп (`emptyNote`) исчез вместе с сеткой
+          словаря — он объяснял ПУСТОЙ СЛОВАРЬ, состояние, которого у этого ряда больше нет. */}
       <ColourStatementRow
         band={band}
         draft={state}
         disabled={disabled}
-        emptyNote='The colour dictionary is empty on this server. Type a hex beside it, or leave the colour to the fabric photo.'
         hint={
           <>
-            The colour goes to the model as a name and a hex together, and it overrides the colour of
-            the photo above. Picking one states nothing about the style — a colourway is signed off
-            by a lab dip, not by a render.
+            {/* ЦИТАТА ОБЯЗАНА БЫТЬ ЦИТАТОЙ. Сервер пишет ` — the exact value is ` (`colourPhrase`,
+                renderprompt.go); запятая здесь была нашей отсебятиной в кавычках, то есть примером
+                фразы, которой не существует. */}
+            The name and the hex go to the model together — «colourway dusty rose — the exact value
+            is #a41f22». Picking one states nothing about the style: a colourway is signed off by a
+            lab dip, not by a render.
           </>
         }
       />
 
-      {/* ── 3. THE WORDS — the lowest rank, and a legal statement entirely on its own. */}
+      {/* ── 3. WHAT THE CLOTH IS — H-13. Стоит МЕЖДУ цветом и словами намеренно: это свойство того
+          же предмета, что описывают слова ниже, и обе оси уезжают в одно поле провода. */}
+      <ClothIsRow draft={state} disabled={disabled} />
+
+      {/* ── 4. THE WORDS — the lowest rank, and a legal statement entirely on its own. */}
       <FieldRow label='in words'>
         <div className='w-full max-w-[420px]'>
           <Input
             name='design-fabric-words'
             value={recipe.words ?? ''}
             disabled={disabled}
-            placeholder='fine rib jersey, matte, slightly sheer…'
+            placeholder='fine rib jersey, matte…'
             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              state.patch({ words: e.target.value })
+              state.typed({ words: e.target.value })
             }
           />
         </div>
@@ -523,8 +600,63 @@ export function Palette({
             clear
           </Button>
         )}
-        <Hint>adds what the photo and the colour do not state; it never overrides either</Hint>
+        {/* ⚠ ТА ЖЕ УСЛОВНОСТЬ, ЧТО У ПОДПИСИ ГРУППЫ, И ПО ТОЙ ЖЕ ПРИЧИНЕ. Строка «adds what the
+            photo and the colour do not state; it never overrides either» стояла ДВУМЯ РЯДАМИ ВЫШЕ
+            той, что говорит «модель строит из этих слов переплетение, вес, поверхность и падение»,
+            — то есть занижала ровно там, где H-13 наконец начал работать, и обещала лишнего там,
+            где едет фотография. Условие читает `rank`, тот же, что подпись группы. */}
+        <Hint>
+          {rank.governs
+            ? 'with no cloth photograph riding, these words build the material: weave, weight, surface, drape'
+            : 'against the cloth photograph above these words are description, not instruction'}
+        </Hint>
       </FieldRow>
+
+      {/* ═══ ОДНА ЖИВАЯ ПОДПИСЬ НА ДВА РЯДА — ЧТО ИМЕННО УЕДЕТ СЛОВАМИ ═══════════════════════════
+          Не «предпросмотр» и не украшение: два контрола выше пишут ОДНО поле провода, и порядок
+          клауз в нём человек иначе не увидит до самой картинки. Строка показывает результат ДО
+          денег теми же словами, что и модалка «what the model gets», потому что читает ту же
+          функцию. Пустая композиция — законный ответ, и он тоже назван вслух: молчащая строка
+          читалась бы как «поле сломалось». */}
+      <div className='space-y-0.5 pl-[100px] pt-1'>
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          data-stated-words={willSay ? 'stated' : 'nothing'}
+          className='normal-case'
+        >
+          {willSay
+            ? `goes to the model as: «${willSay}»`
+            : clothAbove
+              ? 'nothing added — legal; the cloth above already states the material'
+              : colourAbove
+                ? 'nothing added — only a colour is stated above, so the material is left to the model'
+                : 'nothing added — and nothing above states the cloth yet either'}
+        </Text>
+
+        {/* ═══ ЧТО ЭТИ СЛОВА СДЕЛАЮТ — СКАЗАНО ДО ДЕНЕГ, А НЕ ОБНАРУЖИТСЯ В КАРТИНКЕ (H-13) ═══
+            Ранг живёт в промпте, экран его не меняет — но обязан НАЗВАТЬ его там, где принимают
+            решение: в двух строках от кнопки. Условие одно и вычисляет его `clothWordsRank`;
+            история двух неверных редакций и точная фраза промпта — в его шапке.
+            ⚠ СТРОКА ГОВОРИТ И ХОРОШУЮ ПОЛОВИНУ, А НЕ ТОЛЬКО ПРЕДУПРЕЖДЕНИЕ. На обычном пути слова
+            УПРАВЛЯЮТ материалом, и человеку, который только что ткнул `semi-sheer`, важнее всего
+            знать именно это; строка, загорающаяся только в беде, читается как «что-то не так» и
+            тогда, когда всё так. */}
+        {willSay && (
+          <Text
+            size='micro'
+            variant='label'
+            component='p'
+            data-words-rank={rank.governs ? 'governs' : 'outranked'}
+            className='normal-case'
+          >
+            {rank.governs
+              ? '…and the model builds the weave, the weight, the surface and the drape from these words: a stated colour states colour and nothing else.'
+              : '…but the cloth photograph above states transparency, weight and drape itself, so against it these words are description, not instruction. Take the cloth off to let them govern the material.'}
+          </Text>
+        )}
+      </div>
     </div>
   );
 }

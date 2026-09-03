@@ -41,7 +41,7 @@ import { STAGE_WORDS, type OnePressStage } from './trace-onepress';
 export function TraceRasterGroup({
   frozen,
   stage,
-  selectionNo,
+  hasSelection,
   suggest,
   onRun,
   onCoarser,
@@ -49,8 +49,8 @@ export function TraceRasterGroup({
   frozen: boolean;
   /** Какая стадия прогона идёт сейчас, либо `null` — кнопка в покое. */
   stage: OnePressStage | null;
-  /** Номер активной области лассо (с нуля) или `null` — обводится вся плита. */
-  selectionNo: number | null;
+  /** Есть ли область лассо: с ней обводится она, без неё — вся плита (H-2: область одна). */
+  hasSelection: boolean;
   /** Допуск, который движок назвал ОЦЕНКОЙ в своём отказе. Есть отказ — есть чип. */
   suggest: number | null;
   onRun: () => void;
@@ -86,9 +86,9 @@ export function TraceRasterGroup({
         >
           {running
             ? STAGE_WORDS[stage]
-            : selectionNo === null
-              ? 'trace the plate'
-              : `trace area ${selectionNo + 1}`}
+            : hasSelection
+              ? 'trace the area'
+              : 'trace the plate'}
         </Button>
         {suggest !== null && !running && (
           <Chip

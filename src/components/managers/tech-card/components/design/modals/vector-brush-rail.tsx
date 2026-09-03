@@ -1062,16 +1062,16 @@ export type RailProps = {
   /** Пипетка взведена: следующий клик по холсту возьмёт цвет, а не нарисует. */
   picking: boolean;
   onPicking: (on: boolean) => void;
-  /* Области лассо. Растушёвка — свойство КАЖДОЙ области; операции применяются к активной. */
-  sels: SelectionArea[];
-  activeSel: number | null;
-  onActivateSel: (i: number | null) => void;
-  onFeatherSel: (i: number, px: number) => void;
-  onCopySel: (i: number) => void;
-  onDeleteSel: (i: number) => void;
-  onDropSel: (i: number) => void;
+  /* ОБЛАСТЬ ЛАССО — ОДНА ИЛИ НИ ОДНОЙ (H-2). Индексного аргумента у глаголов больше нет:
+     выбирать было не из чего, а лишний параметр — это второй способ ошибиться. Растушёвка
+     по-прежнему свойство ВЫДЕЛЕНИЯ, а не инструмента. */
+  sel: SelectionArea | null;
+  onFeatherSel: (px: number) => void;
+  onCopySel: () => void;
+  onDeleteSel: () => void;
+  onDropSel: () => void;
   /** Растушевать ПИКСЕЛИ внутри области — операция, а не ореол. Радиус берётся из её же числа. */
-  onSoftenSel: (i: number) => void;
+  onSoftenSel: () => void;
   /* Слои сцены. */
   vecOn: boolean;
   onVecOn: () => void;
@@ -1176,6 +1176,18 @@ export type RailProps = {
   backdropPlacing: boolean;
   onBackdropPlace: () => void;
   /**
+   * WARP (H-4). Владелец: «варп эфекта в темплейте в эдиторе нету».
+   *
+   * Три состояния, а не два, и каждое видно на своей кнопке: рамка живёт с восемью ручками
+   * (`warpOn` ложь — чип предлагает войти), рамка живёт с сеткой (`warpOn` истина — тот же чип
+   * возвращает к ручкам), и сетка искривлена (`warpBent` — рядом появляется «flatten the warp»).
+   * Чип виден ТОЛЬКО пока рамка живая: гнуть то, что не взято в руку, нечем.
+   */
+  warpOn: boolean;
+  warpBent: boolean;
+  onWarpToggle: () => void;
+  onWarpFlatten: () => void;
+  /**
    * ДВЕРЬ MAKE SELECTION — контур пера становится областью. Стоит ЗДЕСЬ, а не над холстом: чип,
    * всплывающий на третьем якоре, переносил ряд инструментов на вторую строку и сдвигал холст
    * посреди жеста (замерено пробой 83 после того, как круг 13 добавил в ряд `crop` и `patch`).
@@ -1197,11 +1209,11 @@ export type RailProps = {
    *
    * ⚠ ЧЕРНОВИКА РУЧЕК ЗДЕСЬ БОЛЬШЕ НЕТ (G-7). Ручек нет вовсе: канал, полярность, порог, режим,
    * допуск и размер сора считает `trace-onepress.ts` замером по самой плите. Осталась стадия
-   * прогона (её показывает кнопка), номер активной области (от него зависит слово на кнопке) и
-   * оценка допуска, которую движок назвал в СВОЁМ отказе.
+   * прогона (её показывает кнопка), есть ли область (от неё зависит слово на кнопке) и оценка
+   * допуска, которую движок назвал в СВОЁМ отказе.
    */
   traceStage: OnePressStage | null;
-  traceSelectionNo: number | null;
+  traceHasSelection: boolean;
   traceSuggest: number | null;
   onTraceRun: () => void;
   onTraceCoarser: (tolerance: number) => void;
@@ -1651,6 +1663,41 @@ export function VectorBrushRail(p: RailProps) {
                 >
                   {p.backdropPlacing ? 'place it' : 'move / scale it'}
                 </Chip>
+                {/* WARP — ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА, И ПОДПИСЬ НАЗЫВАЕТ САМ РЕЖИМ, А НЕ ДЕЙСТВИЕ.
+                    ⚠ ПЕРВАЯ РЕДАКЦИЯ ПОДПИСЬ ПЕРЕВОРАЧИВАЛА («warp it» / «move / scale it»,
+                    как у соседа слева) — и на снимке это читалось ровно наоборот: залитый
+                    чернилами чип со словами «MOVE / SCALE IT» стоял рядом с залитым «PLACE IT»,
+                    то есть экран уверенно сообщал, что рука сейчас двигает и масштабирует, ровно
+                    когда она гнула сетку. Заливка по правилам дома значит «этот режим включён»,
+                    поэтому подпись обязана называть то, что залито. Соседу переворот подписи
+                    сходит с рук потому, что его два состояния — концы ОДНОГО жеста («взять» и
+                    «поставить»), а здесь это два РАЗНЫХ набора органов на экране. */}
+                {p.backdropPlacing && (
+                  <Chip
+                    selected={p.warpOn}
+                    pressed={p.warpOn}
+                    data-backdrop-warp-chip=''
+                    onClick={p.onWarpToggle}
+                    disabled={p.frozen}
+                    title={
+                      p.warpOn
+                        ? 'warping: sixteen nodes bend the template. Press to go back to the eight handles — move, scale, rotate, ⌘-drag a corner for perspective'
+                        : 'bend the template on a 4×4 mesh: sixteen nodes appear, drag one and the surface follows it'
+                    }
+                  >
+                    warp
+                  </Chip>
+                )}
+                {p.backdropPlacing && p.warpOn && p.warpBent && (
+                  <Chip
+                    data-backdrop-warp-flatten=''
+                    onClick={p.onWarpFlatten}
+                    disabled={p.frozen}
+                    title='throw the mesh away — the template keeps the place and size you gave it'
+                  >
+                    flatten the warp
+                  </Chip>
+                )}
                 {/* ГЛУБИНА — СВОЙСТВО СЛОЯ, И ЖИВЁТ В ПАНЕЛИ СЛОЁВ. В ряду трансформа она стояла
                     рядом с поворотом и масштабом, то есть притворялась положением; здесь она
                     рядом со строками «lines» и «pixels», между которыми шаблон и встаёт. */}
@@ -1819,108 +1866,99 @@ export function VectorBrushRail(p: RailProps) {
           </ChipRow>
         </div>
       )}
-      {/* ОБЛАСТИ ЛАССО. Группа существует только вместе с областями: пустой пульт — шум.
-          Растушёвка стоит В СТРОКЕ области — она принадлежит выделению, не инструменту, и две
-          области честно держат два разных числа. Операции — под списком и только у АКТИВНОЙ:
-          один пульт на текущий контекст, как у кисти и выбранного штриха выше. */}
-      {p.sels.length > 0 && (
+      {/* ОБЛАСТЬ ЛАССО — ОДНА (H-2). Группа существует только вместе с ней: пустой пульт — шум.
+          Список стал строкой, а чипа «area 1» не стало вовсе: он ПЕРЕКЛЮЧАЛ активность между
+          несколькими областями, а переключать больше не между чем — нажимать его значило бы
+          «взять ту же самую», то есть ничего. По правилам дома чип обязан быть кликабельным, а
+          пилюля — только для чтения; мёртвый чип не годится ни тем, ни другим, и заголовок
+          группы уже называет то, что он называл. Растушёвка осталась в строке области: она
+          принадлежит ВЫДЕЛЕНИЮ, а не инструменту, и смена кисти её не трогает.
+
+          ⚠ ИНДЕКС `0` В РАЗМЕТКЕ — КОНСТАНТА, А НЕ ПОРЯДКОВЫЙ НОМЕР: половина проб редактора
+          якорится на `data-sel-row="0"` и `data-sel-feather-input="0"`, и выбрасывать индекс
+          ради нуля информации значило бы переписать их все. */}
+      {p.sel && (
         <div>
-          <GroupLabel flush>selections</GroupLabel>
+          <GroupLabel flush>selection</GroupLabel>
           <Text size='nano' variant='label' component='p' className='mb-1'>
             an area holds the pixel tools inside it and cuts the lines at its edge. Feather is that
             area&rsquo;s own softness: it is how far the paint fades at the edge, and it is the
-            radius «soften inside» blurs the pixels by.
+            radius «soften inside» blurs the pixels by. Drawing a new outline replaces this one.
           </Text>
-          {p.sels.map((s, i) => {
-            const active = p.activeSel === i;
-            return (
-              <div
-                key={i}
-                className='flex items-center gap-1.5 border-b border-hairline py-1'
-                data-sel-row={i}
-              >
-                <Chip
-                  selected={active}
-                  pressed={active}
-                  onClick={() => p.onActivateSel(active ? null : i)}
-                  title={active ? 'deactivate this area' : 'make this area the active one'}
-                >
-                  area {i + 1}
-                </Chip>
-                <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
-                  feather
-                </Text>
-                <Input
-                  type='number'
-                  min={0}
-                  max={200}
-                  step={1}
-                  value={s.feather}
-                  disabled={p.frozen}
-                  aria-label={`feather of area ${i + 1}, plate pixels`}
-                  data-sel-feather-input={i}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    p.onFeatherSel(i, Number(e.target.value) || 0)
-                  }
-                  className='w-14 shrink-0 text-right tabular-nums'
-                />
-                <Text size='nano' variant='label' component='span' className='shrink-0'>
-                  px
-                </Text>
-                <button
-                  type='button'
-                  onClick={() => p.onDropSel(i)}
-                  title='drop this area — the strokes stay'
-                  aria-label={`drop area ${i + 1}`}
-                  className='shrink-0 cursor-pointer px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-                >
-                  <Text size='micro' component='span'>
-                    ✕
-                  </Text>
-                </button>
-              </div>
-            );
-          })}
-          {p.activeSel !== null && p.sels[p.activeSel] && (
-            <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>
-              <Button
-                variant='secondary'
-                size='xs'
-                disabled={p.frozen}
-                onClick={() => p.onCopySel(p.activeSel!)}
-                title='duplicate the LINES inside the active area (⌘c) — copies land slightly offset. Pixels are not copied.'
-              >
-                copy inside
-              </Button>
-              <Button
-                variant='secondary'
-                size='xs'
-                disabled={p.frozen}
-                onClick={() => p.onDeleteSel(p.activeSel!)}
-                data-delete-inside=''
-                title='remove everything inside this area (⌫) — the PIXELS are filled with white paper, and the lines are cut at the ants line so their outside pieces live on. A feather softens the edge of the paper. The eraser still rubs through to transparency.'
-              >
-                delete inside
-              </Button>
-              {/* РАСТУШЁВКА КАК ОПЕРАЦИЯ, А НЕ ОРЕОЛ. Число области здесь играет свою вторую роль
-                  — радиус смягчения; заперта кнопка ровно тогда, когда числа нет, и подпись
-                  говорит об этом, а не молчит. */}
-              <Button
-                variant='secondary'
-                size='xs'
-                disabled={p.frozen || !p.sels[p.activeSel]?.feather}
-                onClick={() => p.onSoftenSel(p.activeSel!)}
-                data-soften-inside=''
-                title={
-                  p.sels[p.activeSel]?.feather
-                    ? `blur the PIXELS inside this area by ${p.sels[p.activeSel]?.feather}px — the pixels themselves, not a halo over them`
-                    : 'give this area a feather first — it is the radius the pixels soften by'
-                }
-              >
-                soften inside
-              </Button>
-            </div>
-          )}
+          <div
+            className='flex items-center gap-1.5 border-b border-hairline py-1'
+            data-sel-row='0'
+          >
+            <Text size='nano' variant='label' component='span' className='shrink-0'>
+              feather
+            </Text>
+            <Input
+              type='number'
+              min={0}
+              max={200}
+              step={1}
+              value={p.sel.feather}
+              disabled={p.frozen}
+              aria-label='feather of the area, plate pixels'
+              data-sel-feather-input='0'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                p.onFeatherSel(Number(e.target.value) || 0)
+              }
+              className='w-14 shrink-0 text-right tabular-nums'
+            />
+            <Text size='nano' variant='label' component='span' className='shrink-0'>
+              px
+            </Text>
+            <button
+              type='button'
+              onClick={p.onDropSel}
+              title='drop this area (⌘d) — the strokes stay, and ⇧⌘d brings it back'
+              aria-label='drop the area'
+              className='ml-auto shrink-0 cursor-pointer px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+            >
+              <Text size='micro' component='span'>
+                ✕
+              </Text>
+            </button>
+          </div>
+          <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>
+            <Button
+              variant='secondary'
+              size='xs'
+              disabled={p.frozen}
+              onClick={p.onCopySel}
+              title='duplicate the LINES inside this area (⌘c) — copies land slightly offset. Pixels are not copied.'
+            >
+              copy inside
+            </Button>
+            <Button
+              variant='secondary'
+              size='xs'
+              disabled={p.frozen}
+              onClick={p.onDeleteSel}
+              data-delete-inside=''
+              title='remove everything inside this area (⌫) — the PIXELS are filled with white paper, and the lines are cut at the ants line so their outside pieces live on. A feather softens the edge of the paper. The eraser still rubs through to transparency.'
+            >
+              delete inside
+            </Button>
+            {/* РАСТУШЁВКА КАК ОПЕРАЦИЯ, А НЕ ОРЕОЛ. Число области здесь играет свою вторую роль
+                — радиус смягчения; заперта кнопка ровно тогда, когда числа нет, и подпись
+                говорит об этом, а не молчит. */}
+            <Button
+              variant='secondary'
+              size='xs'
+              disabled={p.frozen || !p.sel.feather}
+              onClick={p.onSoftenSel}
+              data-soften-inside=''
+              title={
+                p.sel.feather
+                  ? `blur the PIXELS inside this area by ${p.sel.feather}px — the pixels themselves, not a halo over them`
+                  : 'give this area a feather first — it is the radius the pixels soften by'
+              }
+            >
+              soften inside
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1939,7 +1977,7 @@ export function VectorBrushRail(p: RailProps) {
       <TraceRasterGroup
         frozen={p.frozen}
         stage={p.traceStage}
-        selectionNo={p.traceSelectionNo}
+        hasSelection={p.traceHasSelection}
         suggest={p.traceSuggest}
         onRun={p.onTraceRun}
         onCoarser={p.onTraceCoarser}

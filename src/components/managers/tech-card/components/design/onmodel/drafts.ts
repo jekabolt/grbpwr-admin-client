@@ -5,8 +5,8 @@ import type {
 } from 'api/proto-http/admin';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ColourDraft } from '../render/drafts';
-import { EMPTY_RECIPE } from '../render/model';
+import { echoOf, mergeEcho, type ColourDraft, type TypedColour } from '../render/drafts';
+import { EMPTY_CLOTH, EMPTY_RECIPE, clampColourName, type ClothDraft } from '../render/model';
 
 /**
  * ФОТОГРАФИИ, КОТОРЫЕ ЭТОТ ПРОГОН ПЕРЕКРАСИТ — состояние меню, а не данные карточки.
@@ -97,17 +97,36 @@ export function useRecolorSources(): RecolorSources {
  */
 export function useTargetColourDraft(band: GetDesignBandResponse): ColourDraft {
   const [recipe, setRecipe] = useState<common_DesignColourRecipe>(EMPTY_RECIPE);
+  /**
+   * ═══ ПРОЗРАЧНОСТЬ И ГРАММАЖ ЖИВУТ И ЗДЕСЬ — НАСТОЯЩИМ СОСТОЯНИЕМ, А НЕ ЗАГЛУШКОЙ (H-13) ══════
+   *
+   * Ряда CLOTH IS на перекрасе НЕТ, и это решение, а не пробел: владелец назвал свойство ткани для
+   * ГЕНЕРАЦИИ ФАБРИК-РЕНДЕРОВ, а перекрас работает по уже снятой ткани — её граммаж на фотографии
+   * виден, и объявлять его словами значило бы спорить со снимком. Значит это состояние здесь никто
+   * не заполняет.
+   *
+   * Но пустой писатель (`patchCloth: () => {}`) был бы ХУЖЕ, чем настоящий: орган, смонтированный
+   * сюда однажды по недосмотру, молча съедал бы выбор человека и выглядел бы рабочим. Тип общий на
+   * оба экрана, поэтому и реализация общая; разница между экранами — в том, что смонтировано, а не
+   * в том, что молча не работает.
+   */
+  const [cloth, setCloth] = useState<ClothDraft>(EMPTY_CLOTH);
   const touched = useRef(false);
   const seeded = useRef(false);
+  /** Что человек набрал сам — то же правило ранга, что у соседа; довод целиком в `../render/drafts`. */
+  const owned = useRef({ code: false, hex: false, words: false });
 
   const latest = (band.colourRecipes ?? [])[0];
   useEffect(() => {
     if (touched.current || seeded.current || !latest) return;
     seeded.current = true;
+    // ТА ЖЕ ДВЕРЬ РАЗБОРА ИСТОЧНИКА, ЧТО У СОСЕДА (`echoOf`), И СУЖЕНИЕ ПОВЕРХ НЕЁ. Своё чтение
+    // полей прошлого рецепта было бы вторым написанием правила, которое уже однажды потерялось.
+    const echo = echoOf({ from: 'recipe', recipe: latest });
     setRecipe({
       ...EMPTY_RECIPE,
-      code: (latest.code ?? '').trim(),
-      hex: (latest.hex ?? '').trim(),
+      code: echo.code ?? '',
+      hex: echo.hex ?? '',
       // ⚠ `words` НЕ ПЕРЕНОСИТСЯ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ. Поле на проводе одно, а значит оно на
       // двух экранах РАЗНОЕ: у фабрик-рендера это ТКАНЬ словами («heavy cotton twill»), здесь —
       // ЦВЕТ словами («washed indigo, faded at the seams»). Засеянное «heavy cotton twill»
@@ -120,25 +139,63 @@ export function useTargetColourDraft(band: GetDesignBandResponse): ColourDraft {
 
   return {
     recipe,
-    patch: (next) => {
+    cloth,
+    patchCloth: (next) => {
       touched.current = true;
-      // ТКАНЬ НЕ ПРОЛЕЗАЕТ И ЧЕРЕЗ ПРАВКУ. `patch` принимает `Partial<DesignColourRecipe>` — тип
-      // общий на всю полосу, — поэтому сужение держится здесь, а не надеждой на вызывающего:
-      // орган, который однажды передаст сюда лоскут, не сможет наполнить невидимое поле.
-      setRecipe((prev) => ({ ...prev, ...next, fabricMediaId: 0, fabrics: [] }));
+      setCloth((prev) => ({ ...prev, ...next }));
+    },
+    /**
+     * ТИПОВАННЫЙ ВХОД — БУКВА В БУКВУ ТОТ ЖЕ, ЧТО У СОСЕДА, И ТКАНЬ ЧЕРЕЗ НЕГО НЕ ПРОЛЕЗАЕТ УЖЕ
+     * ПО ТИПУ: `TypedColour` знает три скаляра и не знает ни `fabrics`, ни `fabric_media_id`.
+     * Раньше сужение держал `fabricMediaId: 0, fabrics: []` в теле — то есть надежда на то, что
+     * следующий редактор эту строку заметит.
+     */
+    typed: (next) => {
+      touched.current = true;
+      const clean: TypedColour = {};
+      // ⚠ ПРЕДЕЛ ИМЕНИ ПРИМЕНЯЕТСЯ И ЗДЕСЬ. Раньше его знал ТОЛЬКО черновик рендера, хотя орган
+      // выбора цвета у двух экранов ОДИН: `maxLength` держал набор с клавиатуры, а вставку — нет.
+      if (next.code !== undefined) clean.code = clampColourName(next.code);
+      if (next.hex !== undefined) clean.hex = next.hex;
+      if (next.words !== undefined) clean.words = next.words;
+      for (const key of ['code', 'hex', 'words'] as const) {
+        const value = clean[key];
+        if (value === undefined) continue;
+        owned.current[key] = value.trim() !== '';
+      }
+      setRecipe((prev) => ({ ...prev, ...clean }));
+    },
+    /**
+     * ⚠ ЭХО-ВХОД ЗДЕСЬ НАСТОЯЩИЙ, НО СУЖЕННЫЙ ДО ЦВЕТА — И СУЖЕНИЕ ЖИВЁТ У ДВЕРИ, А НЕ У
+     * ВЫЗЫВАЮЩЕГО. Пустой писатель (`echo: () => {}`) был бы ХУЖЕ: орган, смонтированный сюда
+     * однажды по недосмотру, молча съедал бы производное и выглядел бы рабочим.
+     *
+     * ЧТО ИМЕННО ОТБРАСЫВАЕТСЯ И ПОЧЕМУ:
+     *   · ТКАНЬ — ряда CLOTHS на перекрасе нет и быть не должно (перекрашивают снимок, а не шьют
+     *     из ткани), а `recipeIsStated` считает фотографию достаточным заявлением: невидимый
+     *     лоскут открыл бы ворота GENERATE при пустом цвете;
+     *   · СЛОВА — поле провода одно, а смысл у него на двух экранах РАЗНЫЙ: у фабрик-рендера это
+     *     ТКАНЬ словами («heavy cotton twill»), здесь — ЦВЕТ словами («washed indigo»). Замерено:
+     *     карточка, рендерившаяся твилом, открывала ON MODEL с твилом в поле «in words», то есть
+     *     перекрас получал приказ сменить МАТЕРИАЛ на фотографии.
+     */
+    echo: (source) => {
+      touched.current = true;
+      const values = echoOf(source);
+      setRecipe((prev) =>
+        mergeEcho(prev, { code: values.code, hex: values.hex }, owned.current),
+      );
     },
     clear: (source) => {
       touched.current = true;
-      setRecipe((prev) => {
-        switch (source) {
-          case 'photo':
-            return prev;
-          case 'colour':
-            return { ...prev, code: '', hex: '' };
-          default:
-            return { ...prev, words: '' };
-        }
-      });
+      if (source === 'colour') {
+        owned.current.code = false;
+        owned.current.hex = false;
+        setRecipe((prev) => ({ ...prev, code: '', hex: '' }));
+        return;
+      }
+      owned.current.words = false;
+      setRecipe((prev) => ({ ...prev, words: '' }));
     },
   };
 }

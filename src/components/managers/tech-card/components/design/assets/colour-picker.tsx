@@ -5,6 +5,7 @@ import Input from 'ui/components/input';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 
+import { normaliseTypedHex } from '../render/model';
 import { hexIsPaintable, normaliseHex } from './model';
 
 /**
@@ -175,7 +176,15 @@ function SaturationSquare({
 
 export type ColourPickerProps = {
   hex: string;
+  /** Выбрано ЗНАЧЕНИЕ — колесом, полем или пипеткой. Имени цвета этот жест не касается. */
   onPick: (hex: string) => void;
+  /**
+   * Возвращён ЦЕЛЫЙ прошлый рецепт карточки — значение И имя. Отдельный писатель, а не второй
+   * вызов `onPick`: у этих двух жестов разный предмет, и один писатель на оба уже стоил дефекта
+   * («вернул чужой цвет, оставил прежнее имя» — довод на самой плашке). Не передан — плашки
+   * возвращают только значение, как раньше.
+   */
+  onPickRecent?: (hex: string, code: string) => void;
   disabled?: boolean;
   /**
    * Цвета, которыми ЭТА карточка уже рендерилась (`band.colour_recipes`). Совместимость с
@@ -196,6 +205,7 @@ export type ColourPickerProps = {
 export function ColourPicker({
   hex,
   onPick,
+  onPickRecent,
   disabled,
   recent = [],
   children,
@@ -235,10 +245,46 @@ export function ColourPicker({
 
   const swatches = recent.filter((r) => hexIsPaintable(r.hex));
 
+  /**
+   * ═══ У ОДНОЙ ВЕЛИЧИНЫ ДВА ВХОДА, И ПРИВЕДЕНИЕ ОБЯЗАНО БЫТЬ ОДНО (ЗАМЕРЕННЫЙ ДЕФЕКТ) ══════════
+   *
+   * Hex набирают в ДВУХ полях: в ряду COLOUR (`design-colour-hex`) и здесь, в поповере. Приведение
+   * набранного стояло только у первого — и два входа одной величины разошлись. Замерено на стенде:
+   * имя «dusty rose», в ПОПОВЕРЕ набрано «a41f22» (без решётки — так его отдаёт любой сайт
+   * палитр), поповер закрыт, нажат GENERATE. Поле держало шесть знаков, `hexIsPaintable` говорил
+   * «нет», дверь композиции честно ставила `hex: ""` — а ворота открыты ИМЕНЕМ, поэтому платный
+   * прогон уходил: на проводе `{code: "dusty rose", hex: ""}`, и `colourPhrase` печатал «colourway
+   * dusty rose» без единого значения. Экран показывал цвет, провод не нёс никакого, деньги ушли.
+   *
+   * ⚠ ЗДЕСЬ НЕ ВТОРАЯ КОПИЯ ПРАВИЛА, А ТОТ ЖЕ НОРМАЛИЗАТОР. Копия и есть то, чем дефект начался:
+   * `normaliseTypedHex` живёт ОДИН (`render/model.ts`), и оба входа зовут именно его. Своя версия
+   * «дописать решётку» здесь разошлась бы с соседним полем при первой же правке одной из двух.
+   *
+   * ⚠ И ЗОВЁТСЯ ОН НА КОММИТЕ, А НЕ НА КАЖДОЙ БУКВЕ. Довод целиком — у `typed` в `render/drafts.ts`:
+   * набирающий «#a41f22» проходит через «#a», «#a4», «#a41», и приведение под пальцами достроило бы
+   * «#a41» до «#aa4411» — цвета, которого никто не просил. Поэтому `onChange` по-прежнему отдаёт
+   * НАБРАННОЕ дословно.
+   *
+   * ⚠ КОММИТОВ У ПОПОВЕРА ДВА, И ВТОРОЙ НЕ ИЗЛИШЕСТВО. `blur` показывает результат, пока поповер
+   * открыт (ушёл табом на пипетку — значение прибралось на глазах). Но закрытие СНИМАЕТ поле из
+   * DOM вместе с фокусом, а удаление сфокусированного узла `focusout` не гарантирует — то есть
+   * ровно на том жесте, которым дефект и воспроизводится (набрал, закрыл, нажал GENERATE), одного
+   * `blur` могло не хватить. Правило одно, дверей две.
+   */
+  const commitTypedHex = useCallback(() => {
+    const built = normaliseTypedHex(hex);
+    // Молчим, когда приводить нечего: лишний `onPick` поднял бы «человек тронул черновик» на
+    // открытии-закрытии пустого поповера и запретил бы засев прошлого рецепта.
+    if (built !== (hex ?? '')) onPick(built);
+  }, [hex, onPick]);
+
   return (
     <GenericPopover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) commitTypedHex();
+      }}
       noTail
       className='w-[240px]'
       triggerProps={{ disabled, 'aria-label': label, title: label }}
@@ -305,6 +351,9 @@ export function ColourPicker({
               placeholder='#4a5a3c'
               data-colour-hex
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => onPick(e.target.value)}
+              /* Тот же коммит, что и на закрытии поповера, — одно правило, две двери. Довод у
+                 `commitTypedHex`; частичный ввод остаётся законным ровно до этого мгновения. */
+              onBlur={commitTypedHex}
             />
           </div>
           {/* ПИПЕТКА РИСУЕТСЯ ТОЛЬКО ТАМ, ГДЕ ОНА РАБОТАЕТ. `EyeDropper` есть в Chromium и нет в
@@ -338,7 +387,23 @@ export function ColourPicker({
                   data-colour-recent={r.hex}
                   title={r.code ? `${r.code} · ${r.hex}` : r.hex}
                   aria-label={`reuse ${r.code ? `${r.code} ` : ''}${r.hex}`}
-                  onClick={() => onPick(normaliseHex(r.hex))}
+                  /**
+                   * ⚠ УЖЕ ИСПОЛЬЗОВАННЫЙ ЦВЕТ ВОЗВРАЩАЕТСЯ ПАРОЙ, А НЕ ПОЛОВИНОЙ (замеренный дефект).
+                   *
+                   * Плашка подписана `${r.code} · ${r.hex}` и обещает вернуть РЕЦЕПТ, а звала
+                   * `onPick(hex)` — только значение. Результат: с выбранным «dusty rose / #a41f22»
+                   * клик по соседнему «navy / #001122» оставлял `code: "dusty rose"` рядом с
+                   * `hex: "#001122"` — и это уезжало в платный запрос, где промпт склеивает их в
+                   * одну фразу «colourway dusty rose — the exact value is #001122».
+                   *
+                   * Пустое имя у прошлого рецепта — тоже часть пары: оно СНИМАЕТ имя, потому что
+                   * возвращается заявление целиком, а не дополняется текущее.
+                   */
+                  onClick={() =>
+                    onPickRecent
+                      ? onPickRecent(normaliseHex(r.hex), (r.code ?? '').trim())
+                      : onPick(normaliseHex(r.hex))
+                  }
                   className='size-[18px] border border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                   style={{ background: normaliseHex(r.hex) }}
                 />

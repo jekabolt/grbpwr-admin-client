@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
+import { assetThumb, fabricOfColorway } from './assets/model';
 import { COLORWAY_NONE, renderBenchOccupied, colorwayOf } from './bench-kinds';
 import { FieldRow, Hint, Swatch } from './render/field-row';
 
@@ -188,6 +189,14 @@ export function ColorwayPicker({
             const id = c.colorwayId ?? 0;
             const on = id === colorwayId;
             const renders = stated && has(id);
+            /**
+             * ЛИЦО ЧИПА — ТО ЖЕ, ЧТО ЛИЦО КОЛОРВЕЯ В РЯДУ FABRIC (H-12). Колорвей носит ЛИБО свой
+             * цвет, ЛИБО плитку; чип, всегда рисующий `devHex`, показывал бы у набивного колорвея
+             * цвет, которого в его рендерах не будет ни разу. Ткань есть — показываем ткань.
+             * Одиннадцать пикселей плитки не «превью раппорта», а опознавательный знак: он отвечает
+             * на «этот из тканевых?», и ровно на это его хватает.
+             */
+            const wornFace = assetThumb(fabricOfColorway(band, id));
             return (
               <Chip
                 key={id}
@@ -199,6 +208,7 @@ export function ColorwayPicker({
                 title={[
                   colorwayLabel(c),
                   colorwaySubtitle(c),
+                  wornFace ? 'wears a cloth of this card, so its chip shows the cloth' : '',
                   renders
                     ? 'its render bench holds at least one plate'
                     : 'no plate stands on its render bench yet',
@@ -208,7 +218,17 @@ export function ColorwayPicker({
                 onClick={() => setColorwayId(id)}
               >
                 <span className='flex items-center gap-1'>
-                  <Swatch hex={(c.devHex ?? '').trim()} size={11} />
+                  {wornFace ? (
+                    <img
+                      src={wornFace}
+                      alt=''
+                      aria-hidden='true'
+                      data-cw-face={id}
+                      className='size-[11px] shrink-0 border border-textColor object-cover'
+                    />
+                  ) : (
+                    <Swatch hex={(c.devHex ?? '').trim()} size={11} />
+                  )}
                   {colorwayLabel(c)}
                   {renders ? ' ·' : ''}
                 </span>

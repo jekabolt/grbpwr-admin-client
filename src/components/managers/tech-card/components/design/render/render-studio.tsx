@@ -10,9 +10,12 @@ import { useCardFit, useColourDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow } from './generate-row';
 import {
+  hexIsPaintable,
+  madeOfLine,
   recipeIsStated,
   renderGate,
   renderSheetViews,
+  statedWords,
   wireColourSource,
   type Gate,
 } from './model';
@@ -87,18 +90,66 @@ export function RenderStudio({
    */
   const views = useMemo(() => renderSheetViews(band), [band]);
 
+  /**
+   * ═══ ОДНА ТОЧКА КОМПОЗИЦИИ НА ВЕСЬ ЭКРАН ════════════════════════════════════════════════════
+   *
+   * Ворота, тело прогона, строка инвентаря и модалка «what the model gets» читают ОДИН объект.
+   * Собери его в четырёх местах — и первое же расхождение будет стоить купленной картинки: экран
+   * пообещал бы «semi-sheer, about 180 g/m²», ворота посчитали бы рецепт пустым, а уехало бы третье.
+   *
+   * ⚠ ВОРОТА ОБЯЗАНЫ СЧИТАТЬ ИМЕННО ЭТО, А НЕ `draft.recipe`. После H-13 прогон, заявленный ТОЛЬКО
+   * прозрачностью и граммажем, — законное заявление о ткани; ворота, читающие сырой рецепт, назвали
+   * бы его пустым и отказали бы человеку в том, что экран у него только что принял.
+   */
+  const sent = useMemo(
+    () => ({
+      ...draft.recipe,
+      words: statedWords(draft),
+      /**
+       * ⚠ ИНВАРИАНТ ЦВЕТА ДЕРЖИТ ЭТА ДВЕРЬ, А НЕ ПОЛЕ: НА ПРОВОД НЕ УЕЗЖАЕТ HEX, КОТОРЫЙ ЭКРАН
+       * НАЗЫВАЕТ НЕ ЗАЯВЛЕННЫМ.
+       *
+       * Двe оси расходились и расходились уверенно. Клиентская — `hexIsPaintable` (три или шесть
+       * знаков ПОСЛЕ решётки). Серверная — `strings.TrimSpace(colourPhrase(code, hex)) != ""`
+       * (`renderprompt.go`), то есть ЛЮБОЙ непустой hex. Замерено пять значений из шести: при
+       * «a41f22» / «#ab» / «red» / «#a41f2» / «#GGG» экран рисовал штриховку, не называл цвета и
+       * говорил, что прогон сделан ИЗ СЛОВ, — а купленный промпт получал ранг 2 «THE STATED
+       * COLOUR … governs the COLOUR of this garment» с блоком цвета «a41f22» и ТЕРЯЛ
+       * утвердительную сольную клаузу, которую экран только что пообещал. Одно значение поля
+       * покупало другой промпт, чем показанный.
+       *
+       * ОДНА ГАРАНТИЯ У КОМПОЗИРУЮЩЕЙ ДВЕРИ МИРИТ ОБЕ ОСИ ПРИ ЛЮБОМ СОДЕРЖИМОМ ПОЛЯ, и держится
+       * она не порядком событий: `blur` поля (он тоже есть) можно обойти — а мимо этой строки не
+       * проходит ни один прогон. `sent` читают и ворота, и строка денег, и модалка, поэтому все
+       * они видят ровно то, что уедет.
+       *
+       * ⚠ ДВЕРЬ ПРОПУСКАЕТ, А НЕ ДОСТРАИВАЕТ, И РАЗНИЦА ЗАМЕРЕНА. Первая редакция звала здесь
+       * `normaliseTypedHex`, то есть ДОПИСЫВАЛА решётку: «a41f22» уезжало как «#a41f22». Оси при
+       * этом мирились лишь наполовину — свотч и `fabricStatement` читают СЫРОЙ черновик и
+       * продолжали говорить «цвет не заявлен», пока на провод уезжал цвет. Инвариант сформулирован
+       * не «привести к цвету», а «не везти то, чего экран не признаёт», и предикат здесь обязан
+       * быть ТОТ ЖЕ, которым экран признаёт (`hexIsPaintable`), а не похожий на него.
+       *
+       * ДОСТРАИВАНИЕ ЖИВЁТ У ПОЛЯ, НА `blur`, ГДЕ ЧЕЛОВЕК ВИДИТ РЕЗУЛЬТАТ. Там оно — услуга; здесь
+       * оно было бы тихой подменой в пользу значения, которого свотч не рисовал.
+       */
+      hex: hexIsPaintable(draft.recipe.hex) ? (draft.recipe.hex ?? '').trim() : '',
+    }),
+    [draft.recipe, draft.cloth],
+  );
+
   const gate: Gate = useMemo(() => {
     const base = renderGate(band);
     if (!base.ok) return base;
-    if (!recipeIsStated(draft.recipe)) {
+    if (!recipeIsStated(sent)) {
       return {
         ok: false,
         reason:
-          'no fabric is stated yet — attach a fabric photo, pick a colour, or describe the cloth in words above. Any one of them is enough, and they may be combined',
+          'no fabric is stated yet — pick a cloth, pick a colour, say what the cloth is, or describe it in words above. Any one of them is enough, and they may be combined',
       };
     }
     return { ok: true };
-  }, [band, draft.recipe]);
+  }, [band, sent]);
 
   const generate = () => {
     run.start({
@@ -128,12 +179,12 @@ export function RenderStudio({
       detailSlotIds: [],
       layout: 'one',
         colour: {
-          ...draft.recipe,
+          ...sent,
           // DERIVED AT THE DOOR, NOT HELD BY A CONTROL. `source` predates combination and cannot
           // spell «a photo and a picked colour together»; it is written here purely so recipes
           // already stored stay readable, and it never decides what travels — the three populated
           // fields do.
-          source: wireColourSource(draft.recipe),
+          source: wireColourSource(sent),
         },
         threed: undefined,
         fixTarget: '',
@@ -207,13 +258,20 @@ export function RenderStudio({
           <Hint>fit is a garment property, not a presentation one: edited on the card</Hint>
         </FieldRow>
 
+        {/* СТРОКА ИНВЕНТАРЯ НАЗЫВАЕТ И ТКАНЬ (H-12). «made of pattern 2» — вторая половина работы
+            снесённого заголовка-заявления: правда прогона стоит в двух шагах от денег, там, где на
+            неё смотрят, а не над контролами, которые её же и правят. */}
         <GenerateRow
           gate={gate}
-          shape={
+          shape={[
             views.length > 1
-              ? `1 picture · ${views.length} views in a row · split into the slots afterwards`
-              : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`
-          }
+              ? `1 picture · ${views.length} views in a row`
+              : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`,
+            madeOfLine(sent),
+            views.length > 1 ? 'split into the slots afterwards' : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
@@ -244,7 +302,9 @@ export function RenderStudio({
         onOpenChange={setInspecting}
         band={band}
         kind='render'
-        recipe={draft.recipe}
+        /* МОДАЛКА О ЧИПАХ НЕ ЗНАЕТ И НЕ ДОЛЖНА: ей отдаётся ТО ЖЕ предложение, что уедет на провод,
+           одной строкой слов. Иначе «что получит модель» показывало бы не то, что получит модель. */
+        recipe={sent}
         cardFit={cardFit}
       />
     </>

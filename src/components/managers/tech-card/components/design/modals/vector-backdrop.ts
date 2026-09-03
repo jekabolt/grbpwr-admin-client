@@ -1,6 +1,6 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 
-import { quadCss, type Quad } from './transform-frame';
+import { clampGridDomain, quadCss, type Quad, type WarpGrid } from './transform-frame';
 
 /**
  * ПОДЛОЖКА ДЛЯ СРИСОВЫВАНИЯ — ШАБЛОН, КОТОРЫЙ НЕ СОХРАНЯЕТСЯ. НИКОГДА.
@@ -109,6 +109,16 @@ export type Backdrop = {
    * же — ровно тем, чего этот файл избегает единственным клампом.
    */
   quad?: [number, number][];
+  /**
+   * СЕТКА WARP 4×4 (H-4) — В ДОМЕНЕ КВАДА, а не в юнитах платы.
+   *
+   * ⚠ ПОЧЕМУ НЕОБЯЗАТЕЛЬНАЯ И ПОЧЕМУ ТОЖДЕСТВЕННАЯ НЕ ПИШЕТСЯ. Записи в localStorage переживают
+   * бандл: у всех старых сеток нет, и читатель обязан считать её отсутствие НОРМОЙ, а не
+   * поломкой. А тождественная сетка, записанная «на всякий случай», переводила бы показ шаблона
+   * с резкого `img` + `matrix3d` на канвас — то есть портила бы картинку тому, кто просто
+   * заглянул в режим и вышел.
+   */
+  grid?: WarpGrid;
 };
 
 /**
@@ -239,6 +249,63 @@ export const setBackdropQuad = (b: Backdrop, q: Quad): Backdrop => ({
 });
 
 /**
+ * Записать (или снять) сетку warp. Единственная дверь к `grid`, ровно как соседняя — к `quad`.
+ * Округление 1e-4 домена — это 0.1 юнита платы: мельче человек не выставит, а хранилище
+ * синхронное, и каждый лишний знак — байты на каждом отпускании кнопки.
+ */
+export const setBackdropGrid = (b: Backdrop, g: WarpGrid | undefined): Backdrop => {
+  if (!g) {
+    const { grid: _drop, ...rest } = b;
+    void _drop;
+    return rest;
+  }
+  return {
+    ...b,
+    grid: {
+      rows: g.rows,
+      cols: g.cols,
+      kind: g.kind,
+      pts: g.pts.map(
+        (p) => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4] as [number, number],
+      ),
+    },
+  };
+};
+
+/**
+ * Сетка из неизвестного объекта или ничего. Правило то же, что у квада: половина сетки — не
+ * сетка, и интерполяция читала бы в ней `undefined`. Размеры берутся ИЗ ЗАПИСИ, а не
+ * предполагаются 4×4: запись, сделанная будущей плотной решёткой, обязана читаться как своя.
+ *
+ * ⚠ РАЗМЕРЫ ОБЯЗАНЫ БЫТЬ ЦЕЛЫМИ, И ПРОВЕРКА СТОИТ ОТДЕЛЬНО ОТ `rows * cols`. Произведение врёт:
+ * `{rows: 2, cols: 2.5}` при пяти точках даёт ровно пять и проходит и здесь, и в `gridIsUsable`.
+ * А `gridPoint` адресует `pts[j * cols + i]` ДРОБНЫМ шагом, читает `undefined` и роняет рендер
+ * целиком — «Cannot read properties of undefined» уносит редактор вместе с подложкой (замерено).
+ * Это ровно та дыра, ради которой этот разбор и написан: половина сетки — не сетка.
+ *
+ * ⚠ И ДОМЕН КЛАМПИТСЯ ЗДЕСЬ ТОЖЕ. Жест стережёт `moveGridNode`, но записи в localStorage
+ * переживают бандл и приходят откуда угодно: сетка с точками на ±30 доменов поднимала холст
+ * 30724 × 38404 ПРЯМО НА ОТКРЫТИИ, без единого движения руки. Кламп у одного входа — не кламп.
+ */
+export function readGrid(raw: unknown): WarpGrid | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const rows = finite(r.rows, 0);
+  const cols = finite(r.cols, 0);
+  if (!Number.isInteger(rows) || !Number.isInteger(cols)) return null;
+  if (rows < 2 || cols < 2 || !Array.isArray(r.pts) || r.pts.length !== rows * cols) return null;
+  const pts: [number, number][] = [];
+  for (const p of r.pts) {
+    if (!Array.isArray(p) || p.length !== 2) return null;
+    const x = Number(p[0]);
+    const y = Number(p[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    pts.push([x, y]);
+  }
+  return clampGridDomain({ rows, cols, pts, kind: r.kind === 'bilinear' ? 'bilinear' : 'bezier' });
+}
+
+/**
  * Та же матрица для холста, у которого юнит платы не равен пикселю: `k` — пикселей холста на юнит
  * платы (`rasterW / PLATE_W`). ТОЛЬКО ДЛЯ ЭКРАНА: подложка ни в какой сохраняемый холст не идёт.
  */
@@ -356,9 +423,13 @@ export type BackdropFit = 'contain' | 'cover' | 'actual';
 export function fitBackdrop(b: Backdrop, plate: PlateRect, mode: BackdropFit): Backdrop {
   const scale =
     mode === 'contain' ? containScale(b, plate) : mode === 'cover' ? coverScale(b, plate) : 1;
-  // Вписывание СНИМАЕТ квад: оно и есть заявление «стой прямо, вот такого размера», а квад с
-  // перспективой, переживший его, означал бы, что кнопка нажата, а картинка стоит как стояла.
-  return clampBackdrop({ ...b, quad: undefined, scale, x: plate.w / 2, y: plate.h / 2 }, plate);
+  // Вписывание СНИМАЕТ и квад, и сетку: оно и есть заявление «стой прямо, вот такого размера», а
+  // перспектива или искривление, пережившие его, означали бы, что кнопка нажата, а картинка стоит
+  // как стояла.
+  return clampBackdrop(
+    { ...b, quad: undefined, grid: undefined, scale, x: plate.w / 2, y: plate.h / 2 },
+    plate,
+  );
 }
 
 /**
@@ -607,6 +678,9 @@ export function parseBackdrop(raw: unknown): StoredBackdrop | null {
        описывает тройка. Мусор вместо квада читается как «квада нет» тем же правилом, что и всё
        остальное здесь: взять только то, что похоже на правду. */
     ...(readQuad(r.quad) ? { quad: readQuad(r.quad)!.map((p) => [p[0], p[1]] as [number, number]) } : {}),
+    /* Сетка НЕОБЯЗАТЕЛЬНА, и запись без неё — не сломанная, а обычная: искривления просто нет.
+       Мусор вместо сетки читается как «сетки нет» тем же правилом, что и всё остальное здесь. */
+    ...(readGrid(r.grid) ? { grid: readGrid(r.grid)! } : {}),
     at: finite(r.at, 0),
   };
 }

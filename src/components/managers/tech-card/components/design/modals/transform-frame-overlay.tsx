@@ -2,8 +2,11 @@ import {
   CORNER_HANDLES,
   HANDLE_UV,
   handlePoint,
+  warpIsoline,
+  warpNodePoints,
   type FrameHit,
   type Quad,
+  type WarpGrid,
 } from './transform-frame';
 
 /**
@@ -37,6 +40,7 @@ export function TransformFrameOverlay({
   plateW,
   plateH,
   cropFill,
+  grid,
 }: {
   quad: Quad;
   owner: FrameOwner;
@@ -47,6 +51,13 @@ export function TransformFrameOverlay({
   hover: FrameHit;
   plateW: number;
   plateH: number;
+  /**
+   * ЖИВАЯ СЕТКА WARP (H-4). Есть — рамка показывает ШЕСТНАДЦАТЬ УЗЛОВ вместо восьми ручек и
+   * рисует саму поверхность; нет — прежние восемь ручек. Двух наборов органов разом не бывает
+   * нарочно: рука, у которой на одном экране и «тяни угол», и «гни сетку», каждый раз гадает,
+   * что сейчас случится.
+   */
+  grid?: WarpGrid;
   /**
    * ЧЕМ БУДЕТ ЗАЛИТО НОВОЕ ПОЛЕ. Тот же `cropFill`, что уедет в `expandRasterLayer`: кольцо
    * роста рисуется ИМ, а не выдуманным «цветом подсветки», — то есть показывает буквально то,
@@ -75,6 +86,25 @@ export function TransformFrameOverlay({
   const discard = frame ? cutOut(plate, frame) : [];
   /** Есть ли вообще рост — от этого зависит, надо ли рисовать кромку НЫНЕШНЕГО листа. */
   const grows = growth.length > 0;
+
+  /* ── СЕТКА WARP: ПОВЕРХНОСТЬ И ЕЁ УЗЛЫ ────────────────────────────────────────────────────
+   *
+   * Линии — ОБРАЗЫ ИЗОЛИНИЙ домена, семплированные ТЕМ ЖЕ `warpMapper`, который положит картинку
+   * при коммите: разойтись превью и результату нечем. Крайние четыре — граница патча, и рисуются
+   * весом контура рамки; внутренние четыре — его структура, и рисуются весом линий третей.
+   * Двойной штрих (белая подложка + чернильная нить) — тот же приём, что у контура и у муравьиной
+   * дорожки: одноцветная линия исчезает либо на белой бумаге, либо на тёмной фотографии, а
+   * шаблон бывает и тем, и другим.
+   */
+  const meshEdges = grid ? [0, 1].map((i) => warpIsoline({ quad, grid }, 'u', i)) : [];
+  const meshEdgesV = grid ? [0, 1].map((i) => warpIsoline({ quad, grid }, 'v', i)) : [];
+  const meshInner = grid
+    ? [1 / 3, 2 / 3].flatMap((t) => [
+        warpIsoline({ quad, grid }, 'u', t),
+        warpIsoline({ quad, grid }, 'v', t),
+      ])
+    : [];
+  const nodes = grid ? warpNodePoints(quad, grid) : [];
 
   return (
     <svg
@@ -144,9 +174,81 @@ export function TransformFrameOverlay({
 
       {/* Контур: белая подложка, чернильная линия поверх. У кропа линия сплошная (это край листа),
           у трансформа — тоже сплошная: пунктир здесь занят выделением, и два пунктира на одном
-          экране означали бы две одинаковые вещи. */}
-      <path d={d} fill='none' stroke='#fff' strokeWidth={3 / k} />
-      <path d={d} fill='none' stroke='currentColor' strokeWidth={1.25 / k} data-frame-outline='' />
+          экране означали бы две одинаковые вещи.
+
+          В РЕЖИМЕ WARP КВАД ОТСТУПАЕТ НА ВТОРОЙ ПЛАН и рисуется весом вспомогательной линии — той
+          же, что трети и кромка листа. Он там не объект, а СПРАВКА: показывает, что именно увезёт
+          «move / scale it», пока рука гнёт поверхность. Объектом становится граница патча ниже.
+          Атрибут `data-frame-outline` при этом остаётся НА КВАДЕ в обоих режимах: квад и есть
+          истина рамки, и проба, спрашивающая «где рамка», обязана получать один и тот же ответ. */}
+      {grid ? (
+        <path
+          d={d}
+          fill='none'
+          stroke='currentColor'
+          strokeWidth={0.75 / k}
+          opacity={0.4}
+          data-frame-outline=''
+        />
+      ) : (
+        <>
+          <path d={d} fill='none' stroke='#fff' strokeWidth={3 / k} />
+          <path
+            d={d}
+            fill='none'
+            stroke='currentColor'
+            strokeWidth={1.25 / k}
+            data-frame-outline=''
+          />
+        </>
+      )}
+
+      {/* ГРАНИЦА ПАТЧА — то, где картинка кончается на самом деле. Вес контура рамки, потому что
+          в этом режиме объект — она. */}
+      {[...meshEdges, ...meshEdgesV].map((line, i) => (
+        <polyline
+          key={`warp-edge-${i}`}
+          points={ptsAttr(line)}
+          fill='none'
+          stroke='#fff'
+          strokeWidth={3 / k}
+          data-warp-edge-under={i}
+        />
+      ))}
+      {[...meshEdges, ...meshEdgesV].map((line, i) => (
+        <polyline
+          key={`warp-edge-ink-${i}`}
+          points={ptsAttr(line)}
+          fill='none'
+          stroke='currentColor'
+          strokeWidth={1.25 / k}
+          data-warp-edge={i}
+        />
+      ))}
+
+      {/* ВНУТРЕННИЕ ИЗОЛИНИИ — структура поверхности, вес вспомогательной линии. Белая подложка
+          у них тоньше: на тёмной фотографии тонкая чернильная нить без неё пропадает целиком. */}
+      {meshInner.map((line, i) => (
+        <polyline
+          key={`warp-inner-under-${i}`}
+          points={ptsAttr(line)}
+          fill='none'
+          stroke='#fff'
+          strokeWidth={2 / k}
+          opacity={0.7}
+        />
+      ))}
+      {meshInner.map((line, i) => (
+        <polyline
+          key={`warp-inner-${i}`}
+          points={ptsAttr(line)}
+          fill='none'
+          stroke='currentColor'
+          strokeWidth={0.75 / k}
+          opacity={0.6}
+          data-warp-line={i}
+        />
+      ))}
 
       {/* Трети — линии кадрирования. Только у кропа: на шаблоне и вставке они спорили бы с самим
           содержимым, которое человек как раз и разглядывает. */}
@@ -180,16 +282,44 @@ export function TransformFrameOverlay({
           ];
         })}
 
-      {HANDLE_UV.map((_, h) => {
-        const at = handlePoint(quad, h);
-        const corner = CORNER_HANDLES.includes(h);
-        const on = hover?.kind === 'handle' && hover.handle === h;
-        // Угол крупнее середины стороны: он делает три работы (масштаб, поворот, перспектива),
-        // и целиться в него приходится точнее.
-        const r = ((corner ? 5 : 4) / k) * (on ? 1.35 : 1);
+      {/* ВОСЕМЬ РУЧЕК — ТОЛЬКО ВНЕ WARP. Масштаба, поворота и перспективы в режиме сетки нет
+          нарочно: два набора органов на одном экране означали бы, что рука каждый раз гадает,
+          что случится от нажатия. Вернуться к ним — тем же чипом рейки, отжатым. */}
+      {!grid &&
+        HANDLE_UV.map((_, h) => {
+          const at = handlePoint(quad, h);
+          const corner = CORNER_HANDLES.includes(h);
+          const on = hover?.kind === 'handle' && hover.handle === h;
+          // Угол крупнее середины стороны: он делает три работы (масштаб, поворот, перспектива),
+          // и целиться в него приходится точнее.
+          const r = ((corner ? 5 : 4) / k) * (on ? 1.35 : 1);
+          return (
+            <rect
+              key={h}
+              x={at[0] - r}
+              y={at[1] - r}
+              width={r * 2}
+              height={r * 2}
+              fill={on ? 'currentColor' : '#fff'}
+              stroke='currentColor'
+              strokeWidth={1.25 / k}
+              data-frame-handle={h}
+            />
+          );
+        })}
+
+      {/* ШЕСТНАДЦАТЬ УЗЛОВ. Та же идиома, что у ручек: белый квадрат с чернильной обводкой,
+          размер делится на зум, наведённый растёт и заливается чернилами. Один размер на все —
+          в этом режиме каждый узел делает ровно одну работу, и выделять углы было бы враньём про
+          иерархию. Внутренний узел — КОНТРОЛЬНАЯ точка кубика: он тянет поверхность к себе, и на
+          сильном изгибе линия проходит рядом с ним, а не сквозь него, — ровно как рукоятка
+          кривой у пера в этом же редакторе. */}
+      {nodes.map((at, i) => {
+        const on = hover?.kind === 'node' && hover.handle === i;
+        const r = (4 / k) * (on ? 1.35 : 1);
         return (
           <rect
-            key={h}
+            key={`warp-node-${i}`}
             x={at[0] - r}
             y={at[1] - r}
             width={r * 2}
@@ -197,7 +327,7 @@ export function TransformFrameOverlay({
             fill={on ? 'currentColor' : '#fff'}
             stroke='currentColor'
             strokeWidth={1.25 / k}
-            data-frame-handle={h}
+            data-warp-node={i}
           />
         );
       })}
@@ -235,6 +365,10 @@ const lerp = (a: readonly [number, number], b: readonly [number, number], t: num
   a[0] + (b[0] - a[0]) * t,
   a[1] + (b[1] - a[1]) * t,
 ];
+
+/** Ломаная в атрибут `points`. Два знака после запятой: юнит платы — это пиксель мира. */
+const ptsAttr = (line: readonly (readonly [number, number])[]): string =>
+  line.map((p) => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(' ');
 
 type Box = { x0: number; y0: number; x1: number; y1: number };
 

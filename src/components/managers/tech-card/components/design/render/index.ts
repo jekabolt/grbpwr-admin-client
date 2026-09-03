@@ -20,6 +20,8 @@
  * here: the colour dictionary (through `DictionaryProvider`, already loaded once at startup) and the
  * fit models (`ListModels`, through the models manager's own `useAllModels`).
  */
+export { ClothIsRow } from './cloth-is';
+export { ColourStatementRow, COLOUR_NAME_MAX } from './colour-statement';
 export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
@@ -30,13 +32,25 @@ export { BodyPicker, modelCaption, modelFacts, modelName } from './model-picker'
 export { WhatModelGetsRenderModal } from './what-model-gets';
 export type { WhatModelGetsKind } from './what-model-gets';
 
-export { useCardFit, useColourDraft, useThreedDraft } from './drafts';
-export type { ColourDraft, ThreedDraft, ThreedDraftState } from './drafts';
+export { echoOf, mergeEcho, useCardFit, useColourDraft, useThreedDraft } from './drafts';
+export type {
+  ColourDraft,
+  EchoSource,
+  EchoValues,
+  OperatorOwned,
+  ThreedDraft,
+  ThreedDraftState,
+  TypedColour,
+} from './drafts';
 export { useStartDesignRun } from './use-design-run';
 export type { StartRunInput, StartRunState } from './use-design-run';
 export {
   BODY_TYPES,
-  FABRIC_AUTHORITY,
+  CLOTH_GSM_MAX,
+  CLOTH_GSM_MIN,
+  CLOTH_OPACITIES,
+  EMPTY_CLOTH,
+  fabricAuthority,
   RENDER_SHEET_ORDER,
   SELECT_MARK_NOT_STATED,
   benchKindOf,
@@ -46,6 +60,10 @@ export {
   fabricRenderGate,
   fabricStatement,
   hexIsPaintable,
+  madeOfLine,
+  normaliseGsm,
+  normaliseTypedHex,
+  readGsm,
   outputsOfKind,
   pictureIsComposite,
   pictureIsSelected,
@@ -53,6 +71,7 @@ export {
   renderGate,
   renderSheetViews,
   runOfPicture,
+  statedWords,
   serverStatesSelected,
   threedCandidates,
   threedGate,
@@ -66,6 +85,8 @@ export type {
   BenchKind,
   BenchSide,
   BodyType,
+  ClothDraft,
+  ClothOpacity,
   FabricStatement,
   Gate,
   ThreedCandidate,

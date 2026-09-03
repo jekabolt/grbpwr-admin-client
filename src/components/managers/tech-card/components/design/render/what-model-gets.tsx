@@ -23,7 +23,7 @@ import { viewLabel } from '../views';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
-  FABRIC_AUTHORITY,
+  fabricAuthority,
   benchSides,
   colourLabel,
   colourSubtitle,
@@ -357,6 +357,8 @@ function RenderBody({
   const { showMessage } = useSnackBarStore();
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
+  /** Ткани этого прогона — то самое поле провода, а не второй список рядом с ним. */
+  const cloths = recipe?.fabrics ?? [];
   /** The sheet's own left-to-right order — the same list the run sends and the splitter labels. */
   const views = useMemo(() => renderSheetViews(band), [band]);
   const stated = fabricStatement(recipe);
@@ -406,10 +408,25 @@ function RenderBody({
       </div>
 
       <div>
+        {/* ⚠ ЭТА ПОДПИСЬ — ПОСЛЕДНЯЯ ПОВЕРХНОСТЬ ПЕРЕД ДЕНЬГАМИ, И ДО ЭТОГО КРУГА ОНА ЗДЕСЬ ЛГАЛА.
+            Строки ранга (`data-words-rank`) в модалке нет ПО ПОСТРОЕНИЮ: единственный вызывающий
+            `clothWordsRank` стоит на странице. Значит безусловное «the words state what neither of
+            them states — sheerness, weight, hand, drape» звучало здесь и при живой фотографии
+            ткани, которая ровно эти три свойства и заявляет, — а поправки, которую страница даёт
+            двумя рядами ниже, тут не было НИГДЕ.
+            Починка — не второй вызов ранга, а ОДИН ИСТОЧНИК: текст сам является функцией рецепта.
+            `data-fabric-authority` даёт пробе сверить эту поверхность СО СТРАНИЦЕЙ, а не каждую с
+            ожидаемым текстом по отдельности — расхождение двух поверхностей ловится только так. */}
         <GroupLabel
           action={
-            <Text size='micro' variant='label' component='span' className='normal-case'>
-              {FABRIC_AUTHORITY}
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              data-fabric-authority={fabricAuthority(recipe).state}
+              className='normal-case'
+            >
+              {fabricAuthority(recipe).text}
             </Text>
           }
         >
@@ -421,6 +438,47 @@ function RenderBody({
             <b>{colourLabel(recipe, resolved.colors)}</b> — {colourSubtitle(recipe, resolved.colors)}
           </Text>
         </div>
+        {/* ═══ ТКАНИ ЭТОГО ПРОГОНА — СТРОКА, КОТОРОЙ ЗДЕСЬ НЕ БЫЛО ВОВСЕ ═══════════════════════
+            Опись перечисляла входы ЗАКРЫТЫМ списком («fabric photo · picked colour · fabric in
+            words · garment») и закрывала его утвердительной фразой «not sent: …». `recipe.fabrics`
+            в этом списке не было НИ В ОДНОМ из двух написаний — ни на экране, ни в копируемом
+            тексте. А бэкенд при ДВУХ И БОЛЕЕ тканях прикладывает ПО КАРТИНКЕ НА ТКАНЬ
+            (`snapshot.go`, `len(statedCloths) >= 2`) и печатает список тканей (`renderprompt.go`).
+            То есть прогон о двух тканях покупал две входные картинки и список, которых панель не
+            показывала, — при строке `photo` с ОДНИМ номером медиа и при закрывающем «not sent»,
+            который был просто неверен.
+            Строка читает то самое поле, которое уезжает, поэтому список больше не «перечислен», а
+            ВЫВЕДЕН: ось, добавленная в `fabrics`, появится здесь сама. */}
+        {cloths.length > 0 && (
+          /* `data-sent-cloths` — ЯКОРЬ ДЛЯ ЗАМЕРА, И ОН НУЖЕН. Модалка несёт ВТОРОГО носителя того
+             же факта — блок COPY AS TEXT, который тоже лежит в DOM. Утверждение по тексту ВСЕГО
+             диалога проходило бы за счёт копируемой строки и молчало бы о снятом ряде: ровно та
+             ложная зелень, что уже случилась здесь однажды. Замерено мутацией M8. */
+          <div data-sent-cloths className='flex items-start gap-2 border-b border-hairline py-1'>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='w-[92px] shrink-0 uppercase'
+            >
+              cloths
+            </Text>
+            <Text size='micro' component='span' className='min-w-0 flex-1'>
+              {cloths
+                .map(
+                  (f) =>
+                    `${(f.name ?? '').trim() || 'cloth'} → ${(f.parts ?? '').trim() || 'the whole garment'}`,
+                )
+                .join(' · ')}
+              {cloths.length > 1 ? (
+                <>
+                  {' '}
+                  — <b>each travels as its own image</b>, and the prompt carries the list
+                </>
+              ) : null}
+            </Text>
+          </div>
+        )}
         <div className='flex items-center gap-2 border-b border-hairline py-1'>
           <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
             photo
@@ -932,10 +990,19 @@ function plainText({
         .map((side) => `${viewLabel(side.view)}=${side.picture ? 'plate' : 'empty'}`)
         .join(', ')}`,
       `sheet: ${renderSheetViews(band).map(viewLabel).join(', ') || '—'} (one picture, split afterwards)`,
+      // ⚠ ТКАНИ — ОТДЕЛЬНОЙ СТРОКОЙ, И ЭТО НЕ ДУБЛИРОВАНИЕ `fabric photo`. Скаляр называет ОДНУ
+      // главную фотографию; при двух и более тканях бэкенд прикладывает по картинке на каждую и
+      // печатает список. Текст уезжает в буфер и живёт дальше без экрана — закрытый перечень
+      // входов, в котором этой строки нет, там просто неверен.
+      `cloths: ${
+        (recipe?.fabrics ?? [])
+          .map((f) => (f.name ?? '').trim() || 'cloth')
+          .join(', ') || '—'
+      }`,
       `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,
       `picked colour: ${colourLabel(recipe, resolved.colors)}`,
       `fabric in words: ${(recipe?.words ?? '').trim() || '—'}`,
-      `order of authority: ${FABRIC_AUTHORITY}`,
+      `order of authority: ${fabricAuthority(recipe).text}`,
       'not sent: references, moodboard, callouts',
     );
     return lines.join('\n');

@@ -1,126 +1,69 @@
-import { useDictionary } from 'lib/providers/dictionary-provider';
-import { cn } from 'lib/utility';
 import { useMemo, type JSX } from 'react';
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import { ColourPicker } from '../assets/colour-picker';
 import type { ColourDraft } from './drafts';
-import { FieldRow, Hint, Swatch } from './field-row';
-import { fabricStatement, hexIsPaintable } from './model';
+import { FieldRow, Hint } from './field-row';
+import { COLOUR_NAME_MAX, fabricStatement, hexIsPaintable, normaliseTypedHex } from './model';
 
 /**
  * ═══ ВЫБОР ЦВЕТА — ОДИН ОРГАН НА ВСЮ ПОЛОСУ DESIGN ════════════════════════════════════════════
  *
- * Цвет в фабрик-рендере и целевой цвет в ON MODEL — ОДИН И ТОТ ЖЕ ПРЕДМЕТ: код словаря, hex, или
- * оба. Разница между экранами не в том, ЧЕМ его выбирают, а в том, что с ним потом делают —
+ * Цвет в фабрик-рендере и целевой цвет в ON MODEL — ОДИН И ТОТ ЖЕ ПРЕДМЕТ: значение и имя, которым
+ * его зовут. Разница между экранами не в том, ЧЕМ его выбирают, а в том, что с ним потом делают —
  * рендер им КРАСИТ чертёж, рекол ПЕРЕКРАШИВАЕТ фотографию. Поэтому орган здесь один, а различие
  * живёт ровно в одной строке подсказки (`hint`).
  *
- * ⚠ БЛИЗНЕЦ В `palette.tsx` СНЕСЁН, И ЭТО ЧАСТЬ ЭТОЙ ЖЕ ПРАВКИ. Файл родился выделением из
- * палитры, где сетка словаря стояла приватной функцией и была недоступна второму экрану. Пока
- * копий было две, они уже РАЗОШЛИСЬ — у одной появился `data-colour-code`, у другой осталась своя
- * фраза про пустой словарь, — за неполные сутки и без единого предупреждения. Ровно тот дефект,
- * ради которого в этой полосе заведён `views.ts`. Теперь орган один, а различие экранов живёт в
- * двух пропах: `hint` (что с цветом сделают) и `emptyNote` (есть ли третий путь назвать цвет).
+ * ═══ СЕТКА СЛОВАРЯ КОДОВ СНЕСЕНА ЦЕЛИКОМ (H-8), И ЭТО СЛОВО ВЛАДЕЛЬЦА ════════════════════════
+ *
+ * Дословно: «в GENERATION — FABRIC RENDER в COLOUR давай откажимся от BEI BLK BLU … ZSA а просто
+ * выбираем пикером цвет если хотим выбираем текстуру из паттернов и назначаем ей название».
+ *
+ * ЧТО ИМЕННО УШЛО И ПОЧЕМУ ЭТО НЕ ПОТЕРЯ. Сетка была САМЫМ БОЛЬШИМ органом ряда — около двадцати
+ * плашек — и отвечала на вопрос «каким из складских кодов назвать этот цвет». Вопрос снят: код
+ * колорвея продолжает жить ТАМ, ГДЕ ОН ЧТО-ТО ЗНАЧИТ, — на записи колорвея, в SKU и на витрине, — и
+ * каталог этой правкой не тронут вовсе. На экране генерации он был жетоном: промпт печатал
+ * «colourway OLV», и модель читала три буквы, не значащие ничего.
+ *
+ * ЧТО ВСТАЛО НА ЕГО МЕСТО — ПОЛЕ `name`. Это вторая половина фразы владельца («назначаем ей
+ * название»), и она едет на провод ТЕМ ЖЕ полем `code`: `DesignColourRecipe.code` был свободной
+ * строкой с рождения, а `colourPhrase` на сервере печатает его как есть. Поэтому бэкенд-дельта у
+ * всей правки — НОЛЬ: «colourway dusty rose — the exact value is #a41f22» собирается из тех же двух
+ * полей, из которых собиралось «colourway OLV — …».
+ *
+ * ═══ ПИЛЮЛЯ «VISUALISATION OVERRIDE» СНЕСЕНА ВМЕСТЕ С НЕЙ ════════════════════════════════════
+ *
+ * Она загоралась у hex БЕЗ кода — то есть у цвета, взятого пикером и никак не названного. Пока
+ * словарь стоял рядом, это значило «ты отклонился от кодифицированного цвета» и было осмысленным
+ * предупреждением. После H-8 руками взятый цвет — ЕДИНСТВЕННЫЙ путь, и пилюля горела бы на каждом
+ * экране всегда: постоянный сигнал не сигнал, а шум. Доктрина, которую она несла («рецепт ≠
+ * карточка»), не потеряна — она сказана словами в `hint` обоих экранов, где её и читают.
  *
  * НИЧЕГО ЗДЕСЬ НЕ ЯВЛЯЕТСЯ ДАННЫМИ КАРТОЧКИ. Колорвей подписывает лаб-дип; выбранный здесь цвет —
  * подача, он уезжает один раз внутри `StartDesignRun.params.colour` и живёт дальше только как
- * замороженная история прогона. Отсюда и предупреждение у набранного руками hex.
+ * замороженная история прогона.
  */
 
 /**
- * Словарь колорвеев как сетка плашек. Обёрнут так, чтобы переноситься на узком экране.
- *
- * ПУСТОЙ СЛОВАРЬ — ЭТО ОТВЕТ, А НЕ ПУСТОЕ МЕСТО. На бете он бывает пуст целиком; ряд, молча
- * исчезнувший, читается как поломка экрана, а не как состояние сервера.
+ * Имя цвета — свободный текст, а не список. Предел длины ЖИВЁТ В МОДЕЛИ (`clampColourName`), потому
+ * что значение приходит сюда и программно — засевом колорвея; `maxLength` ниже ограничивает только
+ * набор с клавиатуры и один, без модели, не держал ничего. Ре-экспорт оставлен, чтобы у импортов
+ * этого модуля не появилось второе имя одной константы.
  */
-export function DictionaryGrid({
-  code,
-  disabled,
-  onPick,
-  emptyNote,
-}: {
-  code: string;
-  disabled?: boolean;
-  onPick: (code: string, hex: string) => void;
-  /**
-   * Что сказать, когда словарь пуст. ЭТО НЕ ОФОРМЛЕНИЕ, А РАЗНАЯ ПРАВДА: на фабрик-рендере цвет
-   * можно вовсе не называть — его назовёт фотография ткани, — и там об этом надо сказать; в
-   * перекрасе третьего пути нет, и та же фраза была бы советом, которому нельзя последовать.
-   * Умолчание — общая половина, верная на обоих экранах.
-   */
-  emptyNote?: React.ReactNode;
-}): JSX.Element {
-  const { dictionary, loading } = useDictionary();
-  const colors = (dictionary?.colors ?? []).filter((c) => !c.archived && (c.code ?? '').trim());
-
-  if (loading && !colors.length) {
-    return (
-      <Text size='micro' variant='inactive' component='span'>
-        loading the colour dictionary…
-      </Text>
-    );
-  }
-  if (!colors.length) {
-    return (
-      <Text size='micro' variant='inactive' component='span' className='normal-case'>
-        {emptyNote ?? 'The colour dictionary is empty on this server. Type a hex beside it instead.'}
-      </Text>
-    );
-  }
-
-  const current = (code ?? '').trim().toUpperCase();
-  return (
-    <div className='flex flex-wrap gap-1.5'>
-      {colors.map((colour) => {
-        const value = (colour.code ?? '').trim().toUpperCase();
-        const hex = (colour.hex ?? '').trim();
-        const selected = value === current;
-        return (
-          <button
-            key={value}
-            type='button'
-            disabled={disabled}
-            aria-pressed={selected}
-            data-colour-code={value}
-            title={`${value}${colour.name ? ` · ${colour.name}` : ''}${hex ? ` · ${hex}` : ''}`}
-            onClick={() => onPick(value, hex)}
-            className={cn(
-              'flex w-[34px] shrink-0 flex-col items-center gap-0.5 p-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-              selected ? 'bg-textColor' : 'hover:bg-bgZebra',
-              disabled && 'cursor-not-allowed opacity-50',
-            )}
-          >
-            <Swatch hex={hex} size={22} />
-            <Text
-              size='nano'
-              variant='uppercase'
-              component='span'
-              className={selected ? '!text-bgColor' : 'text-labelColor'}
-            >
-              {value}
-            </Text>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+export { COLOUR_NAME_MAX } from './model';
 
 /**
- * ОДИН РУЛЁНЫЙ РЯД «COLOUR»: пикер, поле hex, снятие, и словарь под ними.
+ * ОДИН РУЛЁНЫЙ РЯД «COLOUR»: пикер, значение, имя, снятие.
  *
- * КОД И HEX — ОДНО ЗАЯВЛЕНИЕ, ПОЭТОМУ ОДИН РЯД. Выбор плашки словаря заполняет ОБЕ половины (имя,
- * которое читает промпт, и значение, которым красится экран); набранный поверх hex — осознанное
- * отклонение от кода, и подпись над палитрой называет его отклонением, а не подменяет им код.
+ * ЗНАЧЕНИЕ И ИМЯ — ОДНО ЗАЯВЛЕНИЕ, ПОЭТОМУ ОДИН РЯД И ОДНА КНОПКА `clear` НА ОБА. Промпт цитирует
+ * их ПАРОЙ («colourway dusty rose — the exact value is #a41f22»), и разводить их по двум рядам
+ * значило бы заставить человека дважды отвечать на один вопрос.
  *
- * ОТСТУП ПЕРЕНОСА ИЗМЕРЕН, А НЕ УГАДАН: колонка подписи `FieldRow` — 92px плюс 8px зазора. Без
- * него сетка словаря начиналась бы у левого края блока, под словом COLOUR, и читалась бы как
- * отдельная секция, потерявшая заголовок.
+ * ПОРЯДОК СЛЕВА НАПРАВО — ПОРЯДОК РЕШЕНИЯ: сначала выбирают цвет (пикер), потом видят его значение,
+ * потом называют. Имя необязательно: цвет без имени уезжает одним hex, и промпт это умеет.
  */
 export function ColourStatementRow({
   band,
@@ -129,14 +72,12 @@ export function ColourStatementRow({
   /** Чем этот цвет распорядится ЭТОТ экран. Главное, чем два вызова отличаются. */
   hint,
   label = 'colour',
-  emptyNote,
 }: {
   band: GetDesignBandResponse;
   draft: ColourDraft;
   disabled?: boolean;
   hint: React.ReactNode;
   label?: string;
-  emptyNote?: React.ReactNode;
 }): JSX.Element {
   const recipe = draft.recipe;
   const stated = fabricStatement(recipe);
@@ -159,15 +100,78 @@ export function ColourStatementRow({
         hex={recipe.hex ?? ''}
         disabled={disabled}
         recent={recent}
-        onPick={(hex) => draft.patch({ hex })}
+        /* ⚠ ПИКЕР — ТИПОВАННЫЙ ВХОД, А НЕ ЭХО, И РАЗНИЦА НЕ ФОРМАЛЬНАЯ. Человек, открывший пикер и
+           выбравший значение, сделал ОСОЗНАННОЕ заявление; это ранг 2 порядка старшинства, и
+           именно он обязан пережить последующий выбор ткани. «Производное» здесь — то, что
+           приезжает САМО (ассет, запись колорвея), а не то, во что ткнули пальцем. */
+        onPick={(hex) => draft.typed({ hex })}
+        /* ⚠ ПРОШЛЫЙ РЕЦЕПТ ВОЗВРАЩАЕТСЯ ЦЕЛИКОМ. Плашка обещает «уже использованный на карточке»
+           цвет вместе с его именем; вернуть половину значило бы собрать пару, которой на карточке
+           никогда не было, и уехать с ней в промпт. Пустое имя тоже возвращается — как пустое. */
+        /* ⚠ И ПЛАШКА ПРОШЛОГО РЕЦЕПТА — ТОЖЕ ТИПОВАННЫЙ ВХОД, хотя значение и взято из строки
+           истории. Отличает вход не происхождение байтов, а ЖЕСТ: это выбор, сделанный руками, и
+           он обязан ЗАМЕНИТЬ то, что стоит, а не «лечь только в пустое» — иначе плашка, обещающая
+           вернуть пару целиком, возвращала бы половину. */
+        onPickRecent={(hex, code) => draft.typed({ hex, code })}
       />
       <div className='w-[100px]'>
         <Input
           name='design-colour-hex'
+          aria-label='colour value, hex'
           value={recipe.hex ?? ''}
           disabled={disabled}
           placeholder='#4a5a3c'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => draft.patch({ hex: e.target.value })}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => draft.typed({ hex: e.target.value })}
+          /**
+           * ⚠ ПОЛЕ ПРИБИРАЕТСЯ НА `blur` — ЗАМЕРЕННОЕ РАСХОЖДЕНИЕ ДВУХ ОСЕЙ, А НЕ ОПРЯТНОСТЬ.
+           *
+           * Ось экрана — `hexIsPaintable`; ось сервера — «непустой `colourPhrase`», то есть ЛЮБОЙ
+           * непустой hex. На пяти значениях из шести проверенных они расходились: при «a41f22» /
+           * «#ab» / «red» / «#a41f2» / «#GGG» свотч рисовался штриховкой, строка денег говорила,
+           * что прогон сделан ИЗ СЛОВ, — а купленный промпт получал ранг 2 «THE STATED COLOUR …
+           * governs» с блоком цвета «a41f22» и ТЕРЯЛ утвердительную сольную клаузу.
+           *
+           * ⚠ ИНВАРИАНТ ДЕРЖИТ НЕ ЭТОТ `blur`, А ДВЕРЬ КОМПОЗИЦИИ: единственная дверь на провод
+           * обязана применять его сама, иначе он держится порядком событий (человек, нажавший
+           * GENERATE, не сняв фокус с поля, прошёл бы мимо). Здесь `blur` ПОКАЗЫВАЕТ человеку, что
+           * с его значением сделали: шесть знаков без решётки достраиваются, полунабранное
+           * ОЧИЩАЕТСЯ ВИДИМО. Соседний ряд `weight` получил такой же `blur` этой же волной, а этот
+           * остался без него — ровно поэтому он тут и появился.
+           */
+          onBlur={() => draft.typed({ hex: normaliseTypedHex(recipe.hex) })}
+        />
+      </div>
+      {/* ИМЯ ПИШЕТ `code` — ТО ЖЕ ПОЛЕ ПРОВОДА, ЧТО ПИСАЛА ПЛАШКА СЛОВАРЯ. Значит замороженная
+          история, лежащая с кодом `OLV`, читается ровно как читалась, а новая запись несёт слово,
+          которое что-то значит. Подпись стоит ПЕРЕД полем, той же грамматикой, что `weight` перед
+          граммажем: плейсхолдер исчезает, как только в поле что-то есть, и два соседних текстовых
+          поля, отличающиеся только содержимым, становятся неразличимы. */}
+      {/* Капслок по DESIGN.md §3 — тот же довод, что у `weight` в ряду CLOTH IS. */}
+      <Text
+        size='micro'
+        variant='uppercase'
+        tracking='label'
+        component='span'
+        className='shrink-0 pl-2'
+      >
+        name
+      </Text>
+      <div className='w-[160px]'>
+        <Input
+          name='design-colour-name'
+          data-colour-name
+          /* ПОДПИСЬ ДЛЯ СКРИНРИДЕРА, А НЕ ТОЛЬКО ДЛЯ ГЛАЗА. Серый `<span>` рядом — визуальный
+             сосед, и ничем полю не принадлежит: `Input` кладёт `name` в `id`, а `<label for>` в
+             этом ряду нет вовсе. Без этого три соседних поля (значение, имя, граммаж) звучат
+             одинаково — «edit text». */
+          aria-label='colour name'
+          maxLength={COLOUR_NAME_MAX}
+          value={recipe.code ?? ''}
+          disabled={disabled}
+          placeholder='dusty rose'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            draft.typed({ code: e.target.value })
+          }
         />
       </div>
       {!disabled && stated.colour && (
@@ -175,18 +179,10 @@ export function ColourStatementRow({
           clear
         </Button>
       )}
-      {hexIsPaintable(recipe.hex) && !(recipe.code ?? '').trim() && (
-        <Pill tone='attention'>visualisation override — cannot become canonical</Pill>
-      )}
-      <div className='w-full space-y-1 pl-[100px]'>
-        <DictionaryGrid
-          code={recipe.code ?? ''}
-          disabled={disabled}
-          emptyNote={emptyNote}
-          // Плашка словаря заявляет ОБЕ половины: код, который называет промпт, и hex, которым
-          // красится экран. Остальные поля рецепта она не трогает.
-          onPick={(code, hex) => draft.patch({ code, hex })}
-        />
+      {/* ОТСТУП ПЕРЕНОСА ИЗМЕРЕН, А НЕ УГАДАН: колонка подписи `FieldRow` — 92px плюс 8px зазора.
+          Тот же отступ у продолжения каждого ряда этой секции, поэтому вторая строка ряда читается
+          как его продолжение, а не как потерявшая заголовок секция. */}
+      <div className='w-full pl-[100px]'>
         <Hint>{hint}</Hint>
       </div>
     </FieldRow>
