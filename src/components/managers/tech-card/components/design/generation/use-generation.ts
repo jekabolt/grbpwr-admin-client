@@ -107,7 +107,14 @@ export function useGenerationWrites(techCardId?: number) {
    */
   const draftIdea = useMutation({
     mutationFn: (clientRequestId: string) =>
-      adminService.DraftDesignIdea({ techCardId: techCardId ?? 0, clientRequestId }),
+      adminService.DraftDesignIdea({
+        techCardId: techCardId ?? 0,
+        clientRequestId,
+        // `false` НАЗВАНО ЯВНО — см. довод у второй двери (`head/use-draft-idea.ts`). Эта дверь
+        // просит ПРОЗУ, и читатель её ответа режет `output_text` по трём заголовкам; попроси она
+        // структуру, читатель нашёл бы ноль заголовков и нарисовал пустой черновик без ошибки.
+        construction: false,
+      }),
     onSuccess: invalidate,
     onError,
   });

@@ -1085,6 +1085,12 @@ export function fabricAuthority(recipe?: common_DesignColourRecipe | null): {
 
 /** The default recipe of a card that has never rendered: nothing stated at all. */
 export const EMPTY_RECIPE: common_DesignColourRecipe = {
+  // ПУСТОЙ СПИСОК, А НЕ `undefined`, И РАЗНИЦА ЗДЕСЬ ЕСТЬ. Карты цвета (фича A) — это утверждение
+  // «детали размечены вот этой картинкой»; у карточки, которая не рендерилась ни разу, разметки
+  // НЕТ, и это факт, а не незнание. Сервер читает пустой список как «отметок не было» и оставляет
+  // прогон в честном правиле «деление на детали — ваше»; `undefined` сказало бы то же самое, но
+  // молчанием, а молчание тут уже один раз стоило промпту лжи (ревью `5dbb3b5`, находка 1).
+  colourMaps: [],
   source: '',
   code: '',
   hex: '',

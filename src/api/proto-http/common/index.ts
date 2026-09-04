@@ -4678,6 +4678,15 @@ export type DesignColourRecipe = {
   // «one fabric» spelling and there must not be one, or the two would disagree the first time
   // either grew a property.
   fabrics: DesignFabricUse[] | undefined;
+  // THE COLOUR MAPS OF THIS RUN — frozen copies, exactly like `fabrics`. Empty = nothing was
+  // painted, and that is the ordinary run.
+  // ⚠ A MAP IS NOT A REFERENCE, AND THAT IS WHY IT TRAVELS HERE RATHER THAN IN
+  // `extra_input_media_ids`. An extra input is captioned «additional reference image» — one
+  // sentence for every picture nobody else described — and a colour map read under that caption is
+  // a drawing of the garment in improbable colours. The map is part of the RECIPE: it is what
+  // `DesignFabricUse.map_hex` points at, and a picture the prompt names by number has to be a
+  // picture the prompt can recognise.
+  colourMaps: DesignColourMap[] | undefined;
 };
 
 // DesignFabricUse is ONE cloth of a render submission: which card asset it came from, what it looks
@@ -4714,6 +4723,50 @@ export type DesignFabricUse = {
   // keeps the render prompt of every existing single-cloth run byte-for-byte what it was: the new
   // paragraph fires on `kind == "pattern"` and on nothing else.
   kind: string | undefined;
+  // THE FLAT COLOUR THAT MARKS THIS CLOTH'S PARTS on the run's colour maps (#rrggbb, lower-case).
+  // '' = this cloth was not placed by painting, which is every run frozen before this field and
+  // every run of a card nobody painted.
+  // ⚠ IT DOES NOT REPLACE `parts`, IT ANSWERS A DIFFERENT QUESTION. `parts` is the human's words —
+  // «cuffs and collar» — and stays optional; this is the LABEL the map carries, and the prompt
+  // prints the two together when both are there («the parts painted steel blue (#3a7bd5) on the
+  // colour map»). A cloth with a map_hex and no words is fully placed: the picture says where.
+  // ⚠ AND IT IS IGNORED BY THE 3D STEER ON PURPOSE. That hint reaches a texturing stage which is
+  // shown the render plates and nothing else, so «painted steel blue on the colour map» would
+  // address a picture it has never seen.
+  mapHex: string | undefined;
+};
+
+// DesignColourMap is ONE PAINTED VIEW of a colour plan: the flat of `view`, flooded part by part in
+// flat colours.
+// ⚠ THE COLOURS ARE LABELS, NEVER THE GARMENT'S OWN, and everything about this message follows from
+// that one sentence. A part painted steel blue is not a part that will be steel blue; it is a part
+// that wears whatever cloth the plan pinned to `#3a7bd5`. The garment's actual colours are stated
+// where they have always been stated — on the cloths — so a reader that took these pixels for the
+// answer would render the plan instead of the garment.
+export type DesignColourMap = {
+  mediaId: number | undefined;
+  view: string | undefined;
+  // FK media(id): THE FLAT IT WAS PAINTED OVER. A different flat standing in that slot means the
+  // map is stale — the geometry it was painted against is gone — and the client refuses to send it.
+  // It is kept beside the map rather than derived because the slot legitimately moves on, and a map
+  // that could not name its own base would be un-stale-able for ever after.
+  baseMediaId: number | undefined;
+  // THE COLOURS ACTUALLY USED ON THIS MAP, with their exact-match pixel counts. Frozen with the
+  // map because the palette is what makes the map READABLE: it is the closed set of labels the
+  // prompt may name, and re-deriving it would mean scanning a PNG on the server.
+  palette: DesignColourSwatch[] | undefined;
+};
+
+// DesignColourSwatch is ONE label of a colour map: a colour somebody deliberately chose, and how
+// much of the map it covers.
+// `px` IS THE EXACT-MATCH COUNT AND NOTHING ELSE. The painter's brush and its bucket both blend at
+// their edges, so a raw scan of the pixels contains hundreds of intermediate colours nobody chose;
+// the count here is over the CLOSED set of recorded inks, which is what keeps an antialiased rim
+// from becoming a cloth. It is also what makes a three-pixel accident nameable as one (the stray
+// rule) instead of reaching the model as a part of the garment.
+export type DesignColourSwatch = {
+  hex: string | undefined;
+  px: number | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -4803,6 +4856,18 @@ export type DesignInputSnapshot = {
 export type DesignMoodSnapshot = {
   note: string | undefined;
   callouts: DesignMoodCallout[] | undefined;
+  // THE PICTURES THIS RUN ACTUALLY SENT, in wire order — media(id) of every moodboard image that
+  // survived resolution and became a content part.
+  // IT EXISTS BECAUSE THE SNAPSHOT USED TO LIE BY OMISSION. `draft the idea` has sent the board's
+  // images since the multimodal merge, and the snapshot could only hold the board's WORDS: a run
+  // over a wordless board would have filed a history row claiming nothing was read while twelve
+  // pictures were paid for as input tokens. That is why the door refused a pictures-only board
+  // (design_run.go), and this field is what lets the refusal shrink to «no pictures AND no words».
+  // ORDER IS THE BINDING, NOT A PREFERENCE: the prompt numbers the pinned notes «picture N» by this
+  // very order, so the list is the only record of what «picture 2» meant. Ids, not URLs — objects
+  // move, the same argument DesignInputRef.media_id already makes.
+  // Empty is a readable state: a board of words alone, or a run that predates this field.
+  mediaIds: number[] | undefined;
 };
 
 // DesignMoodCallout is one frozen callout inside a run snapshot: which image, what it said, and
@@ -5008,6 +5073,46 @@ export type DesignPicture = {
   // `display_only_input` (a run or a draft, before the reserve). A run's own outputs are never
   // display-only: the flag is a statement about a file a person brought in, not about pixels.
   displayOnly: boolean | undefined;
+};
+
+// DesignColourPlan is the DURABLE colour plan of a card — the pre-launch state, one document per
+// card: which views are painted, and which cloth each painted colour stands for.
+// ⚠ IT IS NOT A LAYER AND NOT A PICTURE, and both of those were the obvious homes. An edit layer is
+// unique per base (uq_design_edit_layer_base), so a colour painting over a flat would collide with
+// that flat's own trace; a DesignPicture would be offered to bench slots and listed among the
+// card's outputs as a drawing of the garment, which a map is precisely not. What it IS, is the
+// working state of a screen — minutes of painting that must survive a reload and be visible from a
+// colleague's browser — so it is one row per card under compare-and-set, the same shape
+// SaveDesignEditLayer already uses to replace a whole document.
+export type DesignColourPlan = {
+  techCardId: number | undefined;
+  // CAS TOKEN, exactly like DesignEditLayer.rev: SetDesignColourPlan echoes the rev it believed it
+  // was acting on, and a mismatch is Aborted:colour_plan_rev_mismatch carrying the current rev.
+  rev: number | undefined;
+  maps: DesignColourMap[] | undefined;
+  // THE PALETTE'S ASSIGNMENTS, keyed by hex. A colour with no row here is a colour somebody painted
+  // and has not yet said anything about — a legitimate half-finished state the screen shows as
+  // `unassigned`, never as a cloth.
+  cloths: DesignColourCloth[] | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// DesignColourCloth is WHAT ONE PAINTED COLOUR MEANS: the cloth, colour or words the parts wearing
+// that label are made of.
+// THE KEY IS THE HEX, not the asset. One cloth may legitimately label two colours (the same jersey
+// in two colourways is two rows), and a colour may name no asset at all — a plain colour or a
+// sentence is a complete answer to «what is this part made of». At least one of the three has to be
+// said, or the row states nothing and the map's label points at silence.
+export type DesignColourCloth = {
+  hex: string | undefined;
+  assetId: number | undefined;
+  colourHex: string | undefined;
+  words: string | undefined;
+  // THE HUMAN NAME OF THE PART(S) — «cuffs and collar» — or ''. It is what the render prompt prints
+  // beside the painted colour and the ONLY half of this row the 3D steer can carry, because a
+  // phrase addressed to a picture the texturing stage never sees is a phrase about nothing.
+  parts: string | undefined;
 };
 
 // DesignAsset is ONE THING THIS CARD IS MADE OF that is not a picture of the garment: a cloth, a
@@ -5416,6 +5521,73 @@ export type DesignBudget = {
   // WHOSE «today» resets the bar. On the wire because that is an organisational decision, not a
   // property of the database session that happened to answer.
   timezone: string | undefined;
+};
+
+// DesignConstructionDraft is what `draft the construction` answers: ONE proposal covering the four
+// groups the CONSTRUCTION tab draws, read off the moodboard pictures, the designer's concept and
+// the notes pinned on the images.
+// IT IS A PROPOSAL, NOT A WRITE. Nothing here is persisted onto the card by the run: every value
+// lands in the client's staging state and reaches the form only through the SAME writers a
+// hand-typed value uses, one deliberate click per row. That is why the shape is deliberately flat
+// and stringly — it carries VALUES for fields that already exist, never rows of any table, and no
+// field of it is ever handed to the card's own schema as an object.
+// EMPTY IS SILENCE, NOT «CLEAR IT». A field the model did not answer is absent, and absence means
+// the model had nothing to say — never that the card's value should go away. The client has no
+// «apply all» for the same reason: omission must not be able to erase.
+// WHAT IS DELIBERATELY NOT HERE: category, base model, base sample size (FK picks — a name is not
+// an id and a guessed id is a wrong card), the size run (PATTERNS owns it), and the callout table's
+// FEATURE and STITCH columns (derived from operations, so asking for them would invite a second,
+// disagreeing answer).
+export type DesignConstructionDraft = {
+  silhouette: string | undefined;
+  fabric: string | undefined;
+  fit: string | undefined;
+  // Offered ONLY when the card's own concept is empty — the designer's words outrank the model's,
+  // and a proposal that competes with them would ask a person to defend what they already wrote.
+  concept: string | undefined;
+  aspects: DesignConstructionAspect[] | undefined;
+  callouts: DesignConstructionCallout[] | undefined;
+  bom: DesignConstructionBomLine[] | undefined;
+  // What deserves a pinned note and has none. READ-ONLY ADVICE: it names a picture and a spot, it
+  // proposes no value, and there is nothing on the card for it to land in.
+  missing: string[] | undefined;
+};
+
+// DesignConstructionAspect is one row of the aspects editor: its key and its text.
+// The key is a STRING and not an enum because the aspects editor already accepts a custom key —
+// closing the vocabulary here would make the model's legitimate answer («cuff», «vent») invalid on
+// the wire while the human's identical answer stays legal.
+export type DesignConstructionAspect = {
+  key: string | undefined;
+  text: string | undefined;
+};
+
+// DesignConstructionCallout is one proposed row of the construction callout table, in the three
+// columns a human fills by hand: what it is, what to do about it, and how big it is.
+// NO media_id AND NO NUMBER, and that is the whole point of the shape. A proposal is born as an
+// UNPINNED row — the server mints the number on save, and the pin is a gesture on a picture that
+// only a person can make. A model naming either would be inventing our identifiers.
+export type DesignConstructionCallout = {
+  feature: string | undefined;
+  details: string | undefined;
+  dimensions: string | undefined;
+};
+
+// DesignConstructionBomLine is one proposed component of the bill of materials, named BY ITS ROLE
+// («main fabric», «neck binding», «care label») rather than by an article.
+// material_id IS 0 UNLESS THE SERVER CONFIRMED IT against the catalogue — an id is a claim about
+// our own database, and a model that guesses one produces a line that looks linked and priced while
+// pointing at somebody else's article. An unlinked line is a legal, useful BOM row; a wrongly
+// linked one is a costing error wearing a price tag.
+export type DesignConstructionBomLine = {
+  section: TechCardBomSection | undefined;
+  purpose: TechCardBomPurpose | undefined;
+  kind: TechCardBomKind | undefined;
+  name: string | undefined;
+  composition: string | undefined;
+  colour: string | undefined;
+  pantone: string | undefined;
+  materialId: number | undefined;
 };
 
 export type OrderFactor =
