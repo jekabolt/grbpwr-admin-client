@@ -6,7 +6,7 @@ import type { MediaViewerItem } from 'ui/components/media-viewer';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
-import { PictureTile } from '../picture-tile';
+import { PictureTile, type PictureTileAction } from '../picture-tile';
 import { viewLabel } from '../views';
 
 /**
@@ -83,6 +83,12 @@ export function StripCell({
    * см. `PictureTile.onOpen`, где эта роль и живёт.
    */
   onOpen,
+  /**
+   * УГОЛ `split` НА КАДРЕ ЭТОЙ ЯЧЕЙКИ — тот же орган примитива, что на плите верстака и на
+   * плитке ленты (владелец, круг 4: «сделай везде одинаково включая кнопку сплит»). Ячейка его не
+   * рисует и раскладку не выбирает: она только объявляет, что резать здесь есть что.
+   */
+  onSplit,
   offeredPictureId,
   /**
    * КАКУЮ КАРТИНКУ ЯЧЕЙКА ПОКАЗЫВАЕТ. Едет в разметку как `data-cell-picture` и существует по той
@@ -104,6 +110,7 @@ export function StripCell({
   badge?: string;
   gallery?: MediaViewerItem;
   onOpen?: () => void;
+  onSplit?: PictureTileAction;
   offeredPictureId?: number;
   cellPictureId?: number;
   empty?: React.ReactNode;
@@ -132,6 +139,7 @@ export function StripCell({
           selected={emphasis}
           gallery={gallery}
           onOpen={onOpen}
+          onSplit={onSplit}
           className='w-full bg-bgColor'
         />
       ) : (

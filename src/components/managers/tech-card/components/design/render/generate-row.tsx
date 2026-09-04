@@ -131,7 +131,10 @@ export function LockBar({ reason, children }: { reason: string; children?: React
   // is already a primitive. Hand-rolling the same border here is how the box-in-box rule gets lost.
   return (
     <CalloutBox tone='note'>
-      <div className='flex flex-wrap items-center gap-2'>
+      {/* ЯКОРЬ ОБЪЯВЛЕН, потому что отказ НАЗЫВАЕТ ЧИСЛА, а числа встречаются и на плитках рядом.
+          Утверждение «отказ говорит про r3 и r7», сделанное по тексту всей страницы, зеленело бы
+          от подписей сторон — то есть сторожило бы не тот орган. */}
+      <div data-lock-reason className='flex flex-wrap items-center gap-2'>
         <Text
           size='micro'
           variant='uppercase'

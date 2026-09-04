@@ -816,10 +816,18 @@ export function RecallDoors({
                   ? ' The studio switches to 3D.'
                   : ' Open 3D on the strip above to see it — this build does not switch views by itself.'}
               </Text>
+              {/* ⚠ ЭТА СТРОКА БЫЛА ЛОЖЬЮ С КРУГА V-14 И ПЕРЕЖИЛА ДВА КРУГА. Она говорила «3D
+                  reads the NEWEST render of each view, not a slot anybody can write» — а слоты
+                  есть с V-14 (рендер-верстак), и с J-25 их пишут прямо на FABRIC RENDER. Человек,
+                  прочитавший её, шёл искать несуществующий механизм «последнего рендера».
+                  ПОВЕДЕНИЕ ПРИ ЭТОМ НЕ МЕНЯЕТСЯ: рекол 3D по-прежнему ничего не ставит — плиты
+                  прогона 3D это МОДЕЛИ, а не рендеры сторон, и класть их в рендер-верстак было бы
+                  постановкой выхода вместо входа. Меняется только то, что сказано вслух. */}
               <Text size='control' variant='label' component='p'>
-                Nothing is placed: 3D reads the NEWEST render of each view, not a slot anybody can
-                write, so there is no input to put this run’s renders back into. Its plates stay
-                where they are.
+                Nothing is placed: the input of a 3D build is the FABRIC RENDER SLOTS of one
+                colourway, and this run’s plates are its OUTPUT — models, not renders of a side. To
+                change what the next build reads, put renders into the sides on FABRIC RENDER. Its
+                plates stay where they are.
               </Text>
             </>
           )}
@@ -1225,7 +1233,7 @@ export function RecallBenchIntake({
       // композитора перехода не будет вовсе, и фраза «moved to 3D» стала бы единственным враньём
       // в этом жесте. Итог говорит только то, за что отвечает приёмник.
       showMessage(
-        `${handle}’s renders were not placed: 3D reads the newest render of each view, so there is no input slot anybody can write.`,
+        `${handle}’s plates were not placed: they are 3D models, i.e. the output of a build. What a build READS is the FABRIC RENDER SLOTS of one colourway — fill those on FABRIC RENDER.`,
         'error',
       );
       return;

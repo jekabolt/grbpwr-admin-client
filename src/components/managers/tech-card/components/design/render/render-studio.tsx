@@ -6,6 +6,7 @@ import Text from 'ui/components/text';
 import { ColorwaySelect, type ColorwayChoice } from '../colorway-picker';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
+import { FabricRenderSlots } from './fabric-render-slots';
 import { GenerateRow } from './generate-row';
 import {
   hexIsPaintable,
@@ -280,6 +281,23 @@ export function RenderStudio({
         band={band}
         techCardId={techCardId}
         kind='render'
+        disabled={disabled}
+        colorwayId={colorwayId}
+        colorwayLabel={colorway?.label ?? ''}
+      />
+
+      {/* ═══ FABRIC RENDER SLOTS — ПОСЛЕ ВЫХОДОВ, ПОТОМУ ЧТО ЗАПОЛНЯЕТСЯ ИЗ НИХ (J-25) ══════════
+          Владелец: «отдельные независимые слоты именно для фабрик рендеров которые можно заполнять
+          в разделе RENDERS OF THIS CARD и там же можно и сплитить их». Порядок экрана поэтому
+          читается как рассказ: из чего рендерим (флэты) → чем (ткань) → что вышло (выходы) →
+          что из вышедшего пошло в дело (слоты). Тот же закон «сначала материал, потом сборка», по
+          которому флэтовый верстак стоит под лентой прогонов.
+          ⚠ FLAT SLOTS на этой вкладке НЕТ и не возвращается: гейт `kind === 'flat'` в
+          `studio-tab.tsx` (J-14/J-18/J-30). Этот блок — не его переодетая копия, а второй
+          верстак: другой род, другой скоуп, другие двери. */}
+      <FabricRenderSlots
+        band={band}
+        techCardId={techCardId}
         disabled={disabled}
         colorwayId={colorwayId}
         colorwayLabel={colorway?.label ?? ''}

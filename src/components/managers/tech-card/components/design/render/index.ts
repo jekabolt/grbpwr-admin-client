@@ -22,6 +22,7 @@
  */
 export { ClothIsRow } from './cloth-is';
 export { ColourStatementRow, COLOUR_NAME_MAX } from './colour-statement';
+export { FabricRenderSlots } from './fabric-render-slots';
 export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
@@ -73,7 +74,9 @@ export {
   runOfPicture,
   statedWords,
   serverStatesSelected,
-  threedCandidates,
+  renderPlacements,
+  slotOrigin,
+  slotOriginLine,
   threedGate,
   threedRevisions,
   threedSides,
@@ -89,5 +92,6 @@ export type {
   ClothOpacity,
   FabricStatement,
   Gate,
-  ThreedCandidate,
+  RenderPlacement,
+  SlotOrigin,
 } from './model';

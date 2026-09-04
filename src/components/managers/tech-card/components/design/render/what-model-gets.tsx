@@ -34,6 +34,8 @@ import {
   pictureThumb,
   renderSheetViews,
   runOfPicture,
+  slotOrigin,
+  slotOriginLine,
   stripProvenance,
   threedSides,
 } from './model';
@@ -765,7 +767,21 @@ function ThreedBody({
           {colorwayLabel.trim() ? ` · ${colorwayLabel.trim()}` : ' · no colourway'}
         </GroupLabel>
         {sides.map((side) => {
+          /**
+           * ⚠ РЕВИЗИЯ И РОД ПРОГОНА — СО ШТАМПА СЛОТА, А НЕ ИЗ ПОСТРАНИЧНОГО ПОИСКА.
+           *
+           * Это ПОСЛЕДНЯЯ поверхность перед деньгами, и до круга 15 она печатала здесь `r{rrev}`
+           * из `runOfPicture(band, side.picture)` — поиска по первой странице ленты. Плита слота
+           * законно старше её, поиск отвечал `null`, и инвентарь молча не показывал ревизию ровно
+           * на тех карточках, где она и важна: там, где сторон много и они разных прогонов.
+           * Тот же нуль ломал сторож смешения (см. `threedRevisions`).
+           *
+           * `run` при этом ЧИТАЕТСЯ ДАЛЬШЕ и только ради ЦВЕТА прогона: `params.colour` живёт на
+           * строке прогона и на слот не едет. Молчание о цвете на плите старше страницы — честное
+           * «не знаем», а не подставленный ноль.
+           */
           const run = side.picture ? runOfPicture(band, side.picture) : null;
+          const origin = slotOrigin(band, side);
           return (
             <InventoryLine
               key={side.view}
@@ -773,13 +789,18 @@ function ThreedBody({
               picture={side.picture}
               text={
                 side.picture ? (
-                  [
-                    run?.rrev ? `r${run.rrev}` : '',
-                    run ? colourLabel(run.params?.colour, resolved.colors) : '',
-                    stripProvenance(band, side.picture),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
+                  <span
+                    data-input-side={`${side.view}:${origin.runKind || 'none'}:${origin.rrev}`}
+                    className={origin.foreign ? 'text-warning' : undefined}
+                  >
+                    {[
+                      slotOriginLine(origin),
+                      run ? colourLabel(run.params?.colour, resolved.colors) : '',
+                      stripProvenance(band, side.picture),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                 ) : side.view === 'front' ? (
                   /* ОДНА СТОРОНА ОБЯЗАТЕЛЬНА, И ЭТО ФРОНТ (K-10/K-11): без него прогон отвергается
                      бесплатно. Красным было помечено ВСЁ пустое, пока это был поворотный стол. */
@@ -1070,8 +1091,13 @@ function plainText({
         if (!side.picture) {
           return `${viewLabel(side.view)}=${side.view === 'front' ? 'NOT MARKED (required)' : 'not marked (optional)'}`;
         }
-        const rrev = runOfPicture(band, side.picture)?.rrev ?? 0;
-        return `${viewLabel(side.view)}=${rrev ? `r${rrev}` : 'marked'}`;
+        // ТЕКСТ УЕЗЖАЕТ В БУФЕР И ЖИВЁТ ДАЛЬШЕ БЕЗ ЭКРАНА, поэтому он обязан нести те же два
+        // факта, что и строка на экране, и из того же источника — штампа слота. Прежняя
+        // редакция брала `rrev` постраничным поиском и на карточке с историей писала «marked»
+        // всем четырём сторонам, то есть теряла ровно тот факт, ради которого список копируют.
+        const origin = slotOrigin(band, side);
+        const said = slotOriginLine(origin);
+        return `${viewLabel(side.view)}=${said || 'filled'}`;
       })
       .join(', ')}`,
     threed?.presentation === 'model'

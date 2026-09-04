@@ -357,6 +357,28 @@ export type BenchSlotProps = {
   detail?: boolean;
   /** In the sheet minimum — an empty one is red and the mint is unreachable. */
   required?: boolean;
+  /**
+   * ПОЧЕМУ ЭТА СТОРОНА ОБЯЗАТЕЛЬНА — СЛОВАМИ ТОГО ЭКРАНА, КОТОРЫЙ ОТКАЗЫВАЕТ.
+   *
+   * Плита стоит теперь на ДВУХ верстаках, и требование у них разное по существу: у флэтов его
+   * предъявляет ЛИСТ (`SHEET_MIN_VIEWS`, перед и спина), у рендер-слотов — ПРОВАЙДЕР 3D, которому
+   * без фронта нечего строить (`no_front_render`, отказ до денег). Одна зашитая фраза «the sheet
+   * needs it» на рендер-слоте была бы неправдой про орган, который ничего не печатает.
+   */
+  requiredNote?: string;
+  /**
+   * ═══ ВЕКТОРНЫЙ РЕДАКТОР — ОРГАН ФЛЭТА, А НЕ ВСЯКОЙ ПЛИТЫ (J-25) ═══════════════════════════════
+   *
+   * `false` снимает угол `edit ▸` и не монтирует `VectorModal` вовсе. Умолчание `true` — флэтовый
+   * верстак не передаёт ничего и работает как работал.
+   *
+   * ПОЧЕМУ РЕНДЕР-СЛОТУ ЭТОТ УГОЛ НЕ ДАЁТСЯ. Редактор пишет СЛОЙ ШТРИХОВ над плитой
+   * (`design_edit_layer`) и живёт понятием «плоская правка чертежа»: его кисть, трассировка и
+   * «save as picture» рассчитаны на линию по белому. Над цветной фотографией ткани он не отказ
+   * даёт, а молча делает не то, — и это ровно тот вид двери, которую владелец просил не рисовать.
+   * Правка рендера — предмет отдельного круга (J-13), и её место в просмотрщике, а не здесь.
+   */
+  editable?: boolean;
   /** A write for this slot is in flight or its refetch has not landed. */
   saving?: boolean;
   /** Pick mode is armed FOR THIS SLOT. Armed only by the tile picker since J-15. */
@@ -421,6 +443,8 @@ export function BenchSlot(props: BenchSlotProps) {
     slotRev,
     detail,
     required,
+    requiredNote = 'the sheet needs it',
+    editable = true,
     saving,
     picking,
     disabled,
@@ -483,7 +507,7 @@ export function BenchSlot(props: BenchSlotProps) {
           {label}
         </Text>
         {required && (
-          <Text size='micro' component='span' className='text-error' title='the sheet needs it'>
+          <Text size='micro' component='span' className='text-error' title={requiredNote}>
             *
           </Text>
         )}
@@ -526,7 +550,7 @@ export function BenchSlot(props: BenchSlotProps) {
               : undefined
           }
           onEdit={
-            !disabled && picture
+            !disabled && editable && picture
               ? {
                   onClick: () => setVectorOpen(true),
                   ariaLabel: `edit ${label} — draw over the plate`,
@@ -593,7 +617,7 @@ export function BenchSlot(props: BenchSlotProps) {
             className={required ? 'text-error' : 'text-labelColor'}
           >
             <b>empty</b>
-            {required ? ' · the sheet needs it' : ''}
+            {required ? ` · ${requiredNote}` : ''}
           </Text>
         )}
 
@@ -628,8 +652,11 @@ export function BenchSlot(props: BenchSlotProps) {
         )}
       </div>
 
-      {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. */}
-      {!disabled && picture && (
+      {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. `editable`
+          снимает и дверь, и МОНТАЖ: модалка держит своё состояние холста и подписки на клавиши,
+          и оставить её висеть под плитой, у которой двери нет, значило бы платить за орган,
+          дойти до которого нельзя. */}
+      {!disabled && editable && picture && (
         <VectorModal
           open={vectorOpen}
           onOpenChange={setVectorOpen}

@@ -120,6 +120,9 @@ import {
   renderBenchOccupied,
   runOfPicture,
   colorwayOf,
+  serverStatesSlotRun,
+  slotRunKind,
+  slotRunRrev,
   type BenchKind,
 } from '../bench-kinds';
 export { benchKindOf, type BenchKind };
@@ -250,235 +253,6 @@ export function pictureIsComposite(picture?: common_DesignPicture | null): boole
   return (picture?.compositeViews ?? []).length > 0;
 }
 
-/** Одна картинка правой половины полосы 3D: сама плита плюс три факта, решающие её судьбу. */
-export type ThreedCandidate = {
-  picture: common_DesignPicture;
-  /** Помечена «chosen» в FABRIC RENDER (W-12). Такие идут первыми — это ответ владельца. */
-  chosen: boolean;
-  /**
-   * СВОЕЙ пометки нет, но это КАДР ПОМЕЧЕННОГО ЛИСТА — и это не то же самое, что «не выбран».
-   *
-   * Сразу после прогона фабрик-рендера на карточке ровно один артефакт, склеенный лист, и он
-   * единственное, чему человек вообще может сказать `select`. Разрез рождает НОВЫЕ картинки, и
-   * своей пометки у них нет — а по контракту кроп это «SIBLING OF ITS PARENT», та же самая
-   * картинка, разрезанная. Читать такой кадр как «не выбранный» значит терять вердикт человека
-   * ровно в тот момент, когда он впервые становится исполнимым.
-   */
-  fromChosen: boolean;
-  /** Склеенный лист: показывается, но пометить нельзя, пока не разрезан. */
-  composite: boolean;
-};
-
-/** Каждая картинка страницы по её id — по этой карте поднимаются вверх по `derived_from`. */
-function picturesById(band: GetDesignBandResponse): Map<number, common_DesignPicture> {
-  const map = new Map<number, common_DesignPicture>();
-  const push = (pictures: common_DesignPicture[] | undefined | null) => {
-    for (const picture of pictures ?? []) {
-      const id = picture.id ?? 0;
-      if (id > 0) map.set(id, picture);
-    }
-  };
-  for (const run of band.runs ?? []) push(run.pictures);
-  for (const batch of band.batches ?? []) push(batch.pictures);
-  return map;
-}
-
-/**
- * Есть ли ВЫШЕ по цепочке разрезов картинка, помеченная человеком.
- *
- * `seen` — не осторожность на всякий случай: цикл в `derived_from` (родитель, пришедший с сервера
- * ссылкой на потомка) повесил бы вкладку намертво, а не показал бы неверную плитку. Родитель НЕ НА
- * ЭТОЙ СТРАНИЦЕ ленты — это честное «судить не о чем»: полоса отдаёт одну страницу, и выдумывать
- * пометку за невидимую картинку нельзя.
- */
-function derivesFromChosen(
-  picture: common_DesignPicture,
-  byId: Map<number, common_DesignPicture>,
-): boolean {
-  const seen = new Set<number>();
-  let parentId = picture.derivedFrom ?? 0;
-  while (parentId > 0 && !seen.has(parentId)) {
-    seen.add(parentId);
-    const parent = byId.get(parentId);
-    if (!parent) return false;
-    if (pictureIsSelected(parent)) return true;
-    parentId = parent.derivedFrom ?? 0;
-  }
-  return false;
-}
-
-/**
- * КАЖДЫЙ РЕНДЕР ЭТОЙ КАРТОЧКИ, КОТОРЫЙ НЕ СТОИТ В СТОРОНЕ, — правая половина полосы 3D.
- *
- * РОД ЧИТАЕТСЯ С ПРОГОНА, А ПРИ ЕГО ОТСУТСТВИИ — С САМОЙ КАРТИНКИ, и второе здесь законно ровно
- * потому, что род картинки задаётся НАМИ: дверь загрузки этого экрана шлёт `kind: 'render'`, а
- * верстак сверяет род кадра с родом слота и отказывает при несовпадении. То есть предикат — зеркало
- * серверного правила приёма, а не догадка о незнакомом словаре.
- *
- * ПОРЯДОК: сначала помеченные, потом остальные; внутри — порядок ленты (новое раньше). Пометка
- * владельца обязана быть ВИДНА, иначе она снова «никуда не ведёт».
- *
- * PAGE-BOUND, И ЭКРАН ОБ ЭТОМ ГОВОРИТ: полоса отдаёт одну страницу ленты. Левая половина такого
- * предела не знает — плита слота приезжает разрешённой, сколь бы старой ни была.
- */
-export function threedCandidates(
-  band: GetDesignBandResponse,
-  colorwayId: number = COLORWAY_NONE,
-): ThreedCandidate[] {
-  const marked = markedPictureIds(band, 'render', colorwayId);
-  const byId = picturesById(band);
-  const out: ThreedCandidate[] = [];
-  const seen = new Set<number>();
-  const push = (pictures: common_DesignPicture[] | undefined | null) => {
-    for (const picture of pictures ?? []) {
-      const id = picture.id ?? 0;
-      if (id <= 0 || marked.has(id) || seen.has(id)) continue;
-      if (isPictureHidden(picture)) continue;
-      /* ═══ ЧУЖОЙ КОЛОРВЕЙ НЕ ПРЕДЛАГАЕТСЯ, ПОТОМУ ЧТО ОН ЗАВЕДОМО МЁРТВ (L-2) ═══════════════
-         Плита несёт СВОЙ колорвей, и верстак сверяет его с колорвеем слота: постановка кадра
-         ROSSO в верстак OLIVE отвергается сервером (`colorway_mismatch`). Предлагать её значило
-         бы рисовать дверь, за которой отказ, — ровно то, чего стоило снятие `hasFabricRender` с
-         роли ворот 3D. Легаси-кадр (колорвей 0) при этом законно предлагается в безколорвейный
-         верстак и НЕ предлагается в именованный: атрибуцию фильтр не выдумывает. */
-      if (colorwayOf(picture) !== colorwayOf({ colorwayId })) continue;
-      /* ТОТ ЖЕ КЛАССИФИКАТОР, ЧТО У ФЛЭТОВОГО СПИСКА И У ФИЛЬТРА ИСТОРИИ (G-1). Читалось это и
-         раньше «прогон, потом род картинки» — но своей строкой, и рекол отсеивался тем, что его
-         род прогона просто не равен `render`. Теперь он отсеивается ИМЕНЕМ: его представление —
-         `onmodel`. Кроп рендера при этом остаётся кандидатом, потому что наследует прогон предка. */
-      if (pictureRepresentation(band, picture) !== 'render') continue;
-      seen.add(id);
-      const chosen = pictureIsSelected(picture);
-      out.push({
-        picture,
-        chosen,
-        // Своя пометка и унаследованная — РАЗНЫЕ факты и здесь не складываются в один: ярлык
-        // `selected` под плиткой обязан означать поле `selected` этой плиты и ничего больше.
-        fromChosen: !chosen && derivesFromChosen(picture, byId),
-        composite: pictureIsComposite(picture),
-      });
-    }
-  };
-  for (const run of band.runs ?? []) push(run.pictures);
-  for (const batch of band.batches ?? []) push(batch.pictures);
-  // Три ступени, а не две: сперва помеченные сами, затем кадры помеченного листа, затем остальные.
-  return [
-    ...out.filter((c) => c.chosen),
-    ...out.filter((c) => !c.chosen && c.fromChosen),
-    ...out.filter((c) => !c.chosen && !c.fromChosen),
-  ];
-}
-
-/** Одна постановка, которую делает дверь «use the N you chose»: плита, её сторона и что она вытеснит. */
-export type ChosenPlacement = {
-  view: SilhouetteView;
-  picture: common_DesignPicture;
-  /** CAS-токен стороны на момент чтения полосы. 0 — сторона ещё не рождена. */
-  slotRev: number;
-  /** Плита, стоящая в этой стороне сейчас: постановка её ВЫТЕСНИТ, ничего не удаляя. */
-  displaces: common_DesignPicture | null;
-  /**
-   * ПРОИГРАВШИЕ СПОР ЗА ЭТУ СТОРОНУ — помеченные рендеры, объявившие ТОТ ЖЕ вид (Д-4).
-   *
-   * Раньше их просто не существовало: цикл делал `continue` по `taken.has(view)`, дверь писала
-   * «use the 1 you chose», а объясняющий абзац перечислял только победителей. То есть на законной
-   * позе («More than one may be chosen» — человек помечает трёх кандидатов на фронт, чтобы
-   * сравнить) ДВА его вердикта исчезали без единого слова, и он не мог отличить «эти два не
-   * подошли» от «экран их не увидел».
-   *
-   * Список пуст в подавляющем большинстве случаев и непуст ровно тогда, когда человеку есть что
-   * решить. Кто победил — не выдумывается здесь: порядок `threedCandidates` (своя пометка раньше
-   * унаследованной, внутри — лента, новое раньше) — тот же, которым полоса и нарисована.
-   */
-  alsoChosen: common_DesignPicture[];
-};
-
-/**
- * ═══ ПОМЕТКА `select` ОБЯЗАНА ДОВОДИТЬ РЕНДЕР ДО ПРОГОНА ══════════════════════════════════════
- *
- * Владелец: «заселекченный рендер в RENDERS OF THIS CARD все равно не попадает в GENERATION — 3D».
- *
- * ЗАМЕР, СНЯТЫЙ С ПОСЛЕДСТВИЯ, А НЕ С РАЗМЕТКИ. Полоса, где `selected` стоит на четырёх кадрах
- * разреза (101..104), каждый со своим `ghost_view` (front, back, side L, side R), а рендер-верстак
- * пуст: «renders of this card» честно говорит «6 renders · 4 selected», вход 3D показывает те же
- * четыре плиты с ярлыком `selected` и подписью «chosen · not marked» — и при этом «0 of 4 marked»,
- * все четыре стороны «required · blocks 3D», кнопки GENERATE в «generation — 3D» НЕТ ВОВСЕ, и на
- * провод не уходит ничего. Пометка была видна и не значила ничего.
- *
- * ПОЧЕМУ ЭТОГО НЕ ЗАКРЫЛ ПРЕДЫДУЩИЙ КРУГ (V-14). Тогда починили ПОКАЗ: помеченные встали первыми
- * справа от линии и получили ярлык. Но вход прогона — это ВЕРСТАК (сервер собирает снимок входов
- * сам, `DesignInputSnapshot` «Assembled by the SERVER only»), а в верстак пометка не писала ничего.
- * Между «я выбрал этот рендер» и «прогон его увидел» стоял второй, поштучный жест `mark ▸ → сторона`
- * — четыре раза, причём сторону человек называл ЗАНОВО, хотя её несёт сама плита (`ghost_view`) и
- * экран её же и печатает («run 3 · front · r3»).
- *
- * ПОЧЕМУ ДВЕРЬ, А НЕ АВТОМАТИКА. `selected` — множественная пометка-вердикт («More than one may be
- * chosen»): человек законно помечает три кандидата на фронт, чтобы сравнить. Ставить каждый из них
- * в сторону молча значило бы, что последний вердикт втихую вытесняет предыдущий, а сторона —
- * исключительна. Поэтому пометка НЕ пишет верстак сама; её доводит один явный жест, и этот жест
- * называет, сколько плит поставит.
- *
- * ЧЕЙ ВЕРДИКТ ПОБЕЖДАЕТ ПРИ СПОРЕ ЗА СТОРОНУ. Порядок `threedCandidates` — сначала помеченные, а
- * внутри порядок ленты (новое раньше), — поэтому сторону забирает САМЫЙ СВЕЖИЙ помеченный рендер.
- * Другого порядка на этом экране нет: ровно так же он и нарисован.
- *
- * И ПРОИГРАВШИЙ СПОР НАЗЫВАЕТСЯ ВСЛУХ (Д-4). Он не выбрасывается из счёта, а ложится в
- * `alsoChosen` победителя — потому что «More than one may be chosen» это ЗАКОННАЯ поза (три
- * кандидата на фронт, чтобы сравнить), а сторона исключительна. До этого дверь писала «use the 1
- * you chose» и перечисляла одних победителей, называя лишь два исключения — лист и рендер без
- * стороны; два вердикта человека исчезали без единого слова, и отличить «эти не подошли» от
- * «экран их не увидел» было нечем.
- *
- * КАДР ПОМЕЧЕННОГО ЛИСТА СЧИТАЕТСЯ ВЫБРАННЫМ, И БЕЗ ЭТОГО ПОЧИНКА НЕ РАБОТАЛА БЫ В САМОМ ЧАСТОМ
- * СЛУЧАЕ. Замерено: полоса, где `select` стоит на ЛИСТЕ (100), а четыре кадра разреза своей
- * пометки не несут, — дверь не появлялась, прогон по-прежнему не отправлялся. А это ровно та поза,
- * в которую приходит человек, пометивший рендер сразу после прогона: тогда на карточке НЕТ НИЧЕГО,
- * КРОМЕ ЛИСТА, и пометить он может только его; кадры рождаются позже и пустыми. См. `fromChosen`.
- *
- * ЧТО СЮДА НЕ ПОПАДАЕТ, И ЭТО НЕ УМОЛЧАНИЕ, А ПРАВИЛО. Сам склеенный лист — несколько видов в
- * одном файле, сервер отказывает ему в слоте (`ErrDesignCompositePlate`), и разрезать его должен
- * человек. Помеченный рендер БЕЗ `ghost_view` не называет стороны, и подставить её за него значило
- * бы выдумать факт: такую плиту по-прежнему ставят руками через `mark ▸`.
- */
-export function chosenRenderPlacements(
-  band: GetDesignBandResponse,
-  colorwayId: number = COLORWAY_NONE,
-): ChosenPlacement[] {
-  const bySide = new Map(threedSides(band, colorwayId).map((side) => [side.view as string, side]));
-  /** Победитель каждой стороны — чтобы проигравший приписывался К НЕМУ, а не считался нигде. */
-  const won = new Map<string, ChosenPlacement>();
-  const out: ChosenPlacement[] = [];
-  for (const candidate of threedCandidates(band, colorwayId)) {
-    // `threedCandidates` уже выбросил плиты, СТОЯЩИЕ в сторонах: помеченный рендер, который уже на
-    // своём месте, не порождает постановки, и счётчик двери честно доходит до нуля.
-    // Порядок кандидатов — своя пометка раньше унаследованной, — поэтому при споре за сторону
-    // кадр с собственным вердиктом побеждает кадр, который вердикт лишь унаследовал.
-    if ((!candidate.chosen && !candidate.fromChosen) || candidate.composite) continue;
-    if ((candidate.picture.id ?? 0) <= 0) continue;
-    const view = normaliseViewKey(candidate.picture.ghostView);
-    if (!isSilhouetteView(view)) continue;
-    const side = bySide.get(view);
-    if (!side) continue;
-    const winner = won.get(view);
-    if (winner) {
-      // ПРОИГРАВШИЙ НЕ ВЫБРАСЫВАЕТСЯ, А ЗАПИСЫВАЕТСЯ ЗА ПОБЕДИТЕЛЕМ (Д-4). Сторона исключительна,
-      // поэтому поставить его некуда; но это ВЕРДИКТ ЧЕЛОВЕКА, и молча его терять нельзя — экран
-      // обязан сказать, что на сторону претендовало несколько и кто её забрал.
-      winner.alsoChosen.push(candidate.picture);
-      continue;
-    }
-    const placement: ChosenPlacement = {
-      view: view as SilhouetteView,
-      picture: candidate.picture,
-      slotRev: side.slotRev,
-      displaces: side.picture,
-      alsoChosen: [],
-    };
-    won.set(view, placement);
-    out.push(placement);
-  }
-  return out;
-}
-
 /**
  * EVERY OUTPUT OF ONE KIND THE CARD HOLDS — the renders, or the turntable frames.
  *
@@ -542,6 +316,78 @@ export function outputsOfKind(
   return out;
 }
 
+/* ───────────────── ЗАПОЛНИТЬ ПУСТЫЕ СТОРОНЫ РЕНДЕР-ВЕРСТАКА КАДРАМИ КАРТОЧКИ (J-25) ───────────────── */
+
+/** Одна постановка двери «fill the empty sides»: какой кадр, в какую сторону, с каким CAS-токеном. */
+export type RenderPlacement = {
+  view: SilhouetteView;
+  picture: common_DesignPicture;
+  /** CAS-токен стороны на момент чтения полосы. 0 — сторона ещё не рождена, и это её первый жест. */
+  slotRev: number;
+};
+
+/**
+ * ═══ ДВЕРЬ ЗАПОЛНЯЕТ ТОЛЬКО ПУСТОЕ, И ЭТО ГЛАВНОЕ РЕШЕНИЕ ЭТОЙ ФУНКЦИИ ════════════════════════
+ *
+ * Владелец (J-25): слоты фабрик-рендера «можно заполнять в разделе RENDERS OF THIS CARD и там же
+ * можно и сплитить их». Настоящий жест, ради которого дверь существует: человек разрезал
+ * склеенный лист на четыре кадра и хочет, чтобы они встали по своим сторонам, а не выбирал вид в
+ * четырёх выпадающих списках подряд.
+ *
+ * ⚠ ЗАМЕНОЙ ЭТА ДВЕРЬ НЕ ЗАНИМАЕТСЯ, И ЭТО СУЖЕНИЕ, А НЕ НЕДОДЕЛКА. Предшественница
+ * (`chosenRenderPlacements`, снята вместе с полосой кандидатов 3D) ВЫТЕСНЯЛА стоящее и потому
+ * тащила за собой абзац «что именно будет вытеснено» и разбор спора за сторону — два экрана
+ * объяснений у кнопки, которую нажимают, чтобы не думать. Заполняя только пустое, дверь
+ * ИСЧЕРПЫВАЕТСЯ своей подписью: ничего из уже выбранного она тронуть не может по построению.
+ * Заменить сторону по-прежнему можно, и ровно одним жестом — `mark ▸` на самой плитке, где видно,
+ * что именно вытесняется.
+ *
+ * ИСТОЧНИК — ТОТ ЖЕ СПИСОК, ЧТО РИСУЕТ СЕКЦИЯ (`outputsOfKind`), а не лента прогонов. Разница
+ * несущая: секция «renders of this card» показывает выходы ВСЕЙ карточки (H-9), а лента — двенадцать
+ * последних прогонов. Дверь, считавшая по ленте, предлагала бы меньше, чем видно на экране, и
+ * человек читал бы это как «кадр не подошёл».
+ *
+ * ПОБЕЖДАЕТ ПЕРВЫЙ В ПОРЯДКЕ СПИСКА — новейший: тот же порядок, которым секция и нарисована.
+ * Второго мнения о старшинстве здесь не заводится.
+ *
+ * ЧТО НЕ ПРЕДЛАГАЕТСЯ, И КАЖДОЕ — ПО ОТКАЗУ СЕРВЕРА, А НЕ ПО ВКУСУ:
+ *   · склеенный лист (`composite`) — сервер отказывает `ErrDesignCompositePlate`, сторона это ОДИН
+ *     вид; его сначала режут, и дверь разреза стоит на той же плитке;
+ *   · кадр без `ghost_view` — стороны он не называет, а подставить её за него значило бы выдумать
+ *     факт; такой ставят руками через `mark ▸`;
+ *   · кадр чужого колорвея — сюда просто не попадает: `outputsOfKind` уже сужен колорвеем этого
+ *     верстака, а постановка чужой плиты отвергается (`colorway_mismatch`).
+ */
+export function renderPlacements(
+  band: GetDesignBandResponse,
+  colorwayId: number = COLORWAY_NONE,
+): RenderPlacement[] {
+  const empty = new Map<string, BenchSide>();
+  for (const side of threedSides(band, colorwayId)) {
+    if (!side.picture) empty.set(side.view as string, side);
+  }
+  if (!empty.size) return [];
+
+  const out: RenderPlacement[] = [];
+  for (const { picture } of outputsOfKind(band, 'render', colorwayId)) {
+    if ((picture.id ?? 0) <= 0) continue;
+    if (pictureIsComposite(picture)) continue;
+    const view = normaliseViewKey(picture.ghostView);
+    if (!isSilhouetteView(view)) continue;
+    const side = empty.get(view);
+    if (!side) continue;
+    // Сторона взята — второй претендент на неё не порождает постановки и не считается нигде: он
+    // остаётся в списке секции со своим `mark ▸`, то есть человек может поставить его сам.
+    empty.delete(view);
+    out.push({ view: view as SilhouetteView, picture, slotRev: side.slotRev });
+  }
+  // Порядок ВЫВОДА — порядок сторон, а не порядок ленты: подпись двери перечисляет их человеку,
+  // и «BACK, SIDE L, SIDE R» читается, а «SIDE R, BACK, SIDE L» заставляет пересобирать силуэт.
+  return SILHOUETTE_VIEWS.map((view) => out.find((p) => p.view === view)).filter(
+    (p): p is RenderPlacement => !!p,
+  );
+}
+
 /* ─────────────────────────── «selected», W-12 ─────────────────────────── */
 
 /**
@@ -590,21 +436,91 @@ export const SELECT_MARK_NOT_STATED =
   'The mark cannot be set against it; nothing else is broken';
 
 /**
- * The revisions the four marked sides come from, ascending and deduplicated.
+ * The revisions the marked sides come from, ascending and deduplicated.
  *
- * ⚠ ТОЛЬКО ИЗВЕСТНЫЕ. `rrev` живёт на ПРОГОНЕ, а плита слота законно бывает старше первой страницы
- * ленты — и картинка, принесённая руками, прогона не имеет вовсе. Считать «неизвестно» отдельной
- * ревизией значило бы блокировать 3D на каждой карточке с историей и на каждом своём файле;
- * молчание здесь правдиво, а сравнивать есть смысл только то, что названо.
+ * ═══ ЭТОТ СТОРОЖ НЕ МОГ СРАБОТАТЬ, И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО ══════════════════════════
+ *
+ * Строка читалась `runOfPicture(band, side.picture)?.rrev ?? 0`. `runOfPicture` ищет прогон в
+ * `band.runs` — ПЕРВОЙ СТРАНИЦЕ ленты, двенадцать строк, — а плита слота законно старше её: слот
+ * несёт разрешённую картинку любой давности, ровно за этим сервер её и разрешает. То есть на
+ * всякой карточке с историей поиск отвечал `null`, `?? 0` превращал это в ноль, ноль отбрасывался
+ * фильтром `rrev > 0`, множество схлопывалось в ПУСТОЕ и `revs.length > 1` не становилось истинным
+ * НИКОГДА. Поворотный стол из переда r3 и спины r7 — двух разных окрасок одной вещи — собирался,
+ * оплачивался и закрывался как `done`, а в истории не оставалось ничего, чем их различить.
+ *
+ * СТОРОЖ, НАКОРМЛЕННЫЙ НУЛЯМИ, ХУЖЕ ОТСУТСТВУЮЩЕГО: он читается как покрытие. Поэтому ревизия
+ * берётся со ШТАМПА САМОГО СЛОТА (`run_rrev`, круг 15) — поля, заведённого именно затем, что
+ * верстак это единственное место, где плита приезжает оторванной от своего прогона.
+ *
+ * ⚠ НОЛЬ ПО-ПРЕЖНЕМУ НЕ УЧАСТВУЕТ, И ЭТО ДРУГОЙ НОЛЬ. Теперь он значит «ревизии нет по существу»:
+ * прогона не было (плита принесена руками) либо род прогона ревизии не минтит (её минтит только
+ * `render`). Считать такое отдельной ревизией значило бы запрещать законный прогон с собственным
+ * файлом в стороне. А ноль «мы не смогли узнать» остался ровно на одном пути — сервер старше поля,
+ * — и там подставляется прежний постраничный поиск: см. `slotRunRrev`.
  */
 export function threedRevisions(band: GetDesignBandResponse, sides: BenchSide[]): number[] {
   const revs = new Set<number>();
   for (const side of sides) {
     if (!side.picture) continue;
-    const rrev = runOfPicture(band, side.picture)?.rrev ?? 0;
+    const rrev = slotRunRrev(band, side.slot);
     if (rrev > 0) revs.add(rrev);
   }
   return Array.from(revs).sort((a, b) => a - b);
+}
+
+/**
+ * ЧТО СТОИТ В СТОРОНЕ, ОДНОЙ СТРОКОЙ, ИЗ ШТАМПА СЛОТА — для плиты, ленты и модалки инвентаря.
+ *
+ * Три факта, и все три поднимаются с одной строки верстака, а не выводятся: ревизия рендера,
+ * род прогона и то, назван ли род ЧУЖИМ для этого верстака.
+ */
+export type SlotOrigin = {
+  /** `design_run.rrev`, 0 — ревизии нет либо сервер старше штампа. */
+  rrev: number;
+  /** `render | threed | pattern | recolor`, либо `''` — прогона нет вовсе. */
+  runKind: string;
+  /** Сервер прислал штамп: `false` — бинарь старше поля, и `rrev` выведен постранично. */
+  stated: boolean;
+  /**
+   * ═══ ПЛИТА ПРИШЛА НЕ ИЗ ФАБРИК-РЕНДЕРА, ХОТЯ ЕЁ РОД — `render` (круг 15) ════════════════════
+   *
+   * Перекрас (ON MODEL) отдаёт кадры рода `render`, и это ПРАВДА: на выходе фотография изделия.
+   * Значит его кроп законно встаёт в рендер-слот — сервер сверяет `picture.kind == slot.kind` и
+   * принимает, — и от фабрик-рендера на экране неотличим. 3D тогда строит тело по фотографии
+   * тела: объём собирается из видов, а вид, на котором уже есть человек, приезжает в модель
+   * вместе с ним.
+   *
+   * ОТКАЗЫВАТЬ ЗДЕСЬ НЕЛЬЗЯ — сервер этого не запрещает, и клиент, выдумавший запрет, отнял бы
+   * позу, которой владелец не лишал. Поэтому это СОСТОЯНИЕ, названное словом, а не ворота.
+   */
+  foreign: boolean;
+};
+
+export function slotOrigin(band: GetDesignBandResponse, side: BenchSide): SlotOrigin {
+  const runKind = slotRunKind(side.slot);
+  return {
+    rrev: slotRunRrev(band, side.slot),
+    runKind,
+    stated: serverStatesSlotRun(side.slot),
+    // ЧУЖИМ СЧИТАЕТСЯ ТОЛЬКО НАЗВАННЫЙ ЧУЖОЙ РОД. Пустая строка — «прогона нет» (принесено
+    // руками), и это законная плита рендер-верстака: дверь `+ add front` кладёт туда файл
+    // намеренно. Молчание — не обвинение.
+    foreign: runKind !== '' && runKind !== 'render',
+  };
+}
+
+/** Та же строка словами — одна редакция на плиту, ленту и инвентарь модалки. */
+export function slotOriginLine(origin: SlotOrigin): string {
+  const parts: string[] = [];
+  if (origin.rrev > 0) parts.push(`r${origin.rrev}`);
+  if (origin.foreign) {
+    parts.push(
+      origin.runKind === 'recolor'
+        ? 'from ON MODEL — a photograph, not a fabric render'
+        : `from a ${origin.runKind} run, not a fabric render`,
+    );
+  }
+  return parts.join(' · ');
 }
 
 /**
@@ -663,7 +579,25 @@ export function threedRunViews(sides: BenchSide[]): string[] {
 
 /* ─────────────────────────── the two gates ─────────────────────────── */
 
-export type Gate = { ok: true } | { ok: false; reason: string };
+export type Gate =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * ═══ КАКАЯ ДВЕРЬ СНИМАЕТ ИМЕННО ЭТОТ ОТКАЗ (круг 15, J-26) ══════════════════════════════
+       *
+       * Отказов у 3D теперь ДВА, и сервер их РАЗЛИЧАЕТ поимённо — `no_fabric_render` («на этом
+       * верстаке нет ничего») и `no_front_render` («есть, но не спереди»), с прямой оговоркой в
+       * контракте: «ЭТО НЕ ВТОРОЕ ИМЯ … различать их обязан экран». Следующий жест у них разный:
+       * первый отправляет РЕНДЕРИТЬ этот колорвей, второй — положить готовый кадр во ФРОНТ. Одна
+       * пара дверей на оба случая заставляла бы человека гадать, какую из них ему показали.
+       *
+       * Поле необязательное: у ворот, которым нечего предложить, его нет, и полоса тогда рисует
+       * то, что рисовала.
+       */
+      next?: 'flat' | 'render' | 'front-slot' | 'refill';
+    };
 
 /**
  * THE GATE NAMES WHAT IS MISSING, NEVER THE PROFILE.
@@ -733,6 +667,9 @@ export function fabricRenderGate(band: GetDesignBandResponse): Gate {
         '3D turns a fabric render, and this card owns none that is visible — draw the flats, ' +
         'render them, then come back. The refusal is the server’s: a run of kind 3D is rejected ' +
         'without one',
+      // ДВЕ ДВЕРИ, ПОТОМУ ЧТО ПУТЬ ДЛИННЫЙ: у карточки нет НИ ОДНОГО рендера, значит начинать
+      // может понадобиться с чертежа. Это единственный отказ 3D, у которого следующих шагов два.
+      next: 'flat',
     };
   }
   return { ok: true };
@@ -774,17 +711,34 @@ export function threedGate(
     return {
       ok: false,
       reason: named
-        ? `${named} has no fabric render on its bench yet — render this colourway first, then mark its sides. 3D reads ONLY that colourway's bench, never a mixture`
+        ? `${named} has no fabric render on its bench yet — render this colourway first, then put its sides in. 3D reads ONLY that colourway's bench, never a mixture`
         : 'the colourway-less bench holds no fabric render — render one without a colourway, or pick a colourway that has renders. 3D reads ONE bench, never a mixture',
+      // НЕЧЕГО СТАВИТЬ — СНАЧАЛА СДЕЛАТЬ. Это `no_fabric_render` сервера, слово в слово по
+      // предмету: на верстаке пусто.
+      next: 'render',
     };
   }
   const sides = threedSides(band, colorwayId);
   const front = sides.find((side) => side.view === 'front');
   if (!front?.picture) {
-    // ОТКАЗ НАЗЫВАЕТ ДВЕРЬ, КОТОРАЯ ЕГО СНИМАЕТ. Человек, пометивший рендеры в «renders of this
-    // card», приходит сюда именно с вопросом «а где они»; отказ, который про них молчит, отправляет
-    // его искать ошибку в генерации.
-    const chosen = chosenRenderPlacements(band, colorwayId).length;
+    /**
+     * ═══ ВЕРСТАК ЗАНЯТ, НО НЕ СПЕРЕДИ — ОТДЕЛЬНОЕ СОСТОЯНИЕ, А НЕ ХВОСТ ПРЕДЫДУЩЕГО ══════════
+     *
+     * У сервера это ОТДЕЛЬНЫЙ отказ с собственным именем — `no_front_render` (круг 15), и
+     * контракт прямо говорит, зачем: «Первый значит „на этом верстаке нет НИЧЕГО“ и отправляет
+     * человека рендерить; этот значит „есть, но не та сторона“ и отправляет его положить кадр во
+     * ФРОНТ — две разные двери и два разных следующих жеста».
+     *
+     * ⚠ ОН ДЕШЁВЫЙ У СЕРВЕРА И ОБЯЗАН БЫТЬ ДЕШЁВЫМ ЗДЕСЬ. Отказ стоит ДО резерва дня и до строки
+     * прогона; экран, доводящий человека до этого отказа сюрпризом, торгует нажатием, которое
+     * ничего не покупает и ничего не объясняет.
+     *
+     * ⚠ ТЕКСТ ПЕРЕПИСАН, ПОТОМУ ЧТО ПРЕЖНИЙ НАЗЫВАЛ ДВА СНЯТЫХ ОРГАНА. Он звал «use the N you
+     * chose above» и «the renders of this card are on the right of the line above» — обе полосы
+     * убраны с 3D по слову владельца (J-26), и отказ, посылающий к несуществующему органу, — это
+     * отказ, который нельзя исполнить.
+     */
+    const named = colorwayLabel.trim();
     return {
       ok: false,
       // ═══ ОДНА СТОРОНА ОБЯЗАТЕЛЬНА, И ЭТО ФРОНТ (K-10/K-11) ═══════════════════════════════════
@@ -793,18 +747,36 @@ export function threedGate(
       // отвергается бесплатно (`provider_bad_request`) — а без спинки не отвергается. Отказ,
       // называющий обязательным то, что обязательным не является, запрещает законный прогон.
       reason:
-        '3D is built from the marked renders, and the FRONT is the one it cannot do without — ' +
-        'a run without it is rejected before anything is charged. Mark a render into front. ' +
-        (chosen
-          ? `You chose ${chosen} render${chosen === 1 ? '' : 's'} in FABRIC RENDER: «use the ${chosen} you chose» above puts ${chosen === 1 ? 'it into its side' : 'them into their sides'}`
-          : 'The renders of this card are on the right of the line above'),
+        `${named ? `${named}'s render bench` : 'the render bench'} holds renders, but not on FRONT — ` +
+        'and FRONT is the one side 3D cannot do without: the provider is handed it as the primary ' +
+        'view and rejects a build that has none. Put a render into the FRONT slot on FABRIC RENDER. ' +
+        'Nothing is reserved and nothing is charged until it is there',
+      next: 'front-slot',
     };
   }
+  /**
+   * ═══ ЭТА ПРОВЕРКА ВПЕРВЫЕ МОЖЕТ СРАБОТАТЬ (круг 15) ══════════════════════════════════════════
+   *
+   * Она стояла здесь с самого начала и была МЁРТВОЙ: `threedRevisions` собирала ревизии
+   * постраничным поиском прогона, плита слота законно старше страницы, поиск отвечал `null`,
+   * множество схлопывалось в пустое. Довод целиком — в шапке `threedRevisions`; здесь важно одно
+   * последствие: с этого круга смешанный верстак ПЕРЕСТАЁТ отправляться. Это ужесточение того,
+   * что уезжает на провод, и оно намеренное.
+   */
   const revs = threedRevisions(band, sides);
   if (revs.length > 1) {
     return {
       ok: false,
-      reason: `four sides of ONE revision r — now mixing ${revs.map((r) => `r${r}`).join(' and ')}`,
+      reason:
+        `every side of one build must come from ONE render revision — this bench mixes ${revs
+          .map((r) => `r${r}`)
+          .join(' and ')}. They are different colourings of the same garment, and a model fused ` +
+        'out of them looks right until somebody notices the back is the wrong green. Re-fill the ' +
+        'odd sides from one revision on FABRIC RENDER',
+      // НЕ «СГЕНЕРИРОВАТЬ ЗАНОВО»: рендеры у этого колорвея ЕСТЬ, и нужный жест — переложить
+      // сторону, а не купить ещё один прогон. Дверь, зовущая генерировать, продавала бы решение
+      // проблемы, которая решается бесплатно.
+      next: 'refill',
     };
   }
   return { ok: true };

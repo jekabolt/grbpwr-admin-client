@@ -228,10 +228,12 @@ export function ThreedStudio({
 
   return (
     <>
+      {/* ⚠ `techCardId` И `disabled` БОЛЬШЕ НЕ ПЕРЕДАЮТСЯ, И ЭТО НЕ УБОРКА ПРОПОВ. Полоса стала
+          ЗЕРКАЛОМ верстака (J-26): у неё не осталось ни одной записи, а карточка, которую нечем
+          править, не нуждается в слове «read-only». Слоты пишутся на FABRIC RENDER, и там же
+          гаснут двери. */}
       <ThreedInputStrip
         band={band}
-        techCardId={techCardId}
-        disabled={disabled}
         lock={input}
         onGoToKind={onGoToKind}
         colorwayId={colorwayId}

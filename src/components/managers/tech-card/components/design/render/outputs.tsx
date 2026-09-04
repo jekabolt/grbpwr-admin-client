@@ -2,29 +2,39 @@ import type { common_DesignPicture, common_DesignRun, GetDesignBandResponse } fr
 import { Fragment, useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { Pill } from 'ui/components/pill';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
+import SelectComponent from 'ui/components/select';
+
 import { InertDoor } from '../bench-slot';
+import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies, type CropFamilies } from '../generation/composite';
 import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
+import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
 import { ThreedModelModal } from '../threed/model-modal';
 import { useDesignWrites } from '../use-design-band';
-import { viewLabel } from '../views';
+import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import {
   SELECT_MARK_NOT_STATED,
   outputsHorizon,
   outputsOfKind,
+  pictureIsComposite,
   serverStatesOutputs,
   pictureIsSelected,
   pictureThumb,
   serverStatesSelected,
   stripProvenance,
+  threedSides,
 } from './model';
 import { STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from './strip-cell';
+
+/** Radix запрещает пустое значение пункта, поэтому «ничего не выбрано» — сентинел, а не `''`. */
+const MARK_PROMPT = '__mark__';
 
 /** Пустая карта родства — для рода, который колодой не группируется. Один экземпляр: новая пустая
  *  карта на каждый рендер пересобирала бы `useMemo` ниже по кругу. */
@@ -95,8 +105,26 @@ export function OutputsSection({
   // HOOKS ABOVE THE EARLY RETURN, unconditionally — a hook below it would change the hook count
   // between renders and take the whole tree down (React #310; this screen has paid for it once).
   const speaks = serverSpeaksDesign();
-  const { setPictureSelected } = useDesignWrites(techCardId);
+  const { setPictureSelected, setBenchSlot } = useDesignWrites(techCardId);
   const [openModel, setOpenModel] = useState<string | null>(null);
+  /** Для какой плитки идёт запись слота. Общий `isPending` сказал бы «saving» на всех сразу. */
+  const [marking, setMarking] = useState<number | null>(null);
+  /**
+   * ═══ РЕЗАТЬ МОЖНО ЗДЕСЬ ЖЕ (J-25) ═══════════════════════════════════════════════════════════
+   *
+   * Владелец: слоты «можно заполнять в разделе RENDERS OF THIS CARD и там же можно и сплитить их».
+   * Тот же хук, что у верстака и у блока референсов, — второй механизм разъехался бы с первым в
+   * значении роли.
+   *
+   * ⚠ `addToInput` НЕ ПЕРЕДАЁТСЯ, И ЭТО ДЕНЕЖНОЕ УМОЛЧАНИЕ, А НЕ ЭКОНОМИЯ БУКВ. Оно `false`, и
+   * потому на провод уезжает `SplitDesignPicture.for_input = false`: сервер тогда НЕ заводит
+   * кадрам строки `design_reference`. Строка роли едет в промпт КАЖДОГО флэт-прогона
+   * (`designAssembleInputs`), то есть разрез рендера с `true` молча дописывал бы цветные кадры во
+   * вход всех последующих чертежей — и платил бы за них на каждом прогоне. Умолчание выбрано
+   * так, чтобы забытый проп давал ТИШИНУ, а не тихое пополнение промпта; см. шапку
+   * `split-to-input.tsx`.
+   */
+  const split = useSplitToInput({ techCardId, band });
   /**
    * ОДНА ОТКРЫТАЯ КОЛОДА НА РАЗДЕЛ, тем же законом, что и в ленте: «нажимаешь на другой мультивью
    * старый колапсится обратно». Состояние из одного значения делает второе открытое невыразимым.
@@ -193,6 +221,42 @@ export function OutputsSection({
   const selectable = kind !== 'render';
 
   /**
+   * ═══ ПОСТАВИТЬ РЕНДЕР В СТОРОНУ — ПРЯМО ОТСЮДА (J-25) ═══════════════════════════════════════
+   *
+   * Владелец: слоты фабрик-рендера «можно заполнять в разделе RENDERS OF THIS CARD».
+   *
+   * ⚠ АДРЕСУЕТСЯ ВЕРСТАК ПЛИТЫ, А НЕ ВЕРСТАК ЭКРАНА, И ЭТО НЕ ОСТОРОЖНОСТЬ. Колорвей входит в
+   * ключ исключительности слота, а сервер сверяет колорвей ПЛИТЫ с колорвеем СЛОТА и отвергает
+   * несовпадение (`colorway_mismatch`). Кадр ROSSO, помеченный при выбранном OLIVE, обязан
+   * адресовать верстак ROSSO — иначе экран рисует дверь, за которой отказ. Сегодня секция и так
+   * сужена колорвеем студии, то есть две величины совпадают; читать их как одну значило бы
+   * поставить починку в зависимость от сужения, которое живёт в другом файле и может смениться.
+   *
+   * ⚠ CAS-ТОКЕН БЕРЁТСЯ С ТОГО ЖЕ ВЕРСТАКА, ЧТО И АДРЕС. Полоса читается целиком
+   * (`bench_colorway_id: 0`, довод в `use-design-band.ts`), поэтому строка чужого колорвея у
+   * клиента на руках есть и второго круга запроса не нужно.
+   */
+  const markInto = (picture: common_DesignPicture, view: string) => {
+    const pictureId = picture.id ?? 0;
+    if (pictureId <= 0) return;
+    const bench = refColorwayFor('render', colorwayOf(picture));
+    const side = threedSides(band, bench).find((s) => s.view === view);
+    if (!side) return;
+    setMarking(pictureId);
+    setBenchSlot.mutate(
+      // `kind: 'render'` — КАКОЙ ВЕРСТАК, а не какой слот. Рендер-фронт и флэт-фронт — два разных
+      // слота, ОБА адресуемые `view_key: 'front'`; пустое поле читается сервером как flat, и плита
+      // уехала бы в чужой верстак, где её отвергли бы по роду кадра (`wrong_kind`).
+      {
+        slot: { viewKey: view, slotId: 0, kind: 'render', colorwayId: bench },
+        pictureId,
+        expectedSlotRev: side.slotRev,
+      },
+      { onSettled: () => setMarking(null) },
+    );
+  };
+
+  /**
    * ═══ КАКОЙ ИЗ ДВУХ ОТВЕТОВ НАРИСОВАН — И ПОДПИСЬ ЧИТАЕТ ИМЕННО ЕГО (H-9) ═══════════════════
    *
    * `serverStatesOutputs` спрашивает про БИНАРЬ («поле прислано вообще?»), а не про длину списка.
@@ -234,6 +298,20 @@ export function OutputsSection({
    */
   function cell({ picture, run, src, modelUrl }: Row, deckSheet?: boolean): JSX.Element {
     const chosen = pictureIsSelected(picture);
+    /**
+     * ═══ ТРИ ФАКТА, РЕШАЮЩИЕ СУДЬБУ ДВЕРИ `mark ▸` (J-25) ═════════════════════════════════════
+     *
+     * Все три — ЗЕРКАЛА СЕРВЕРНЫХ ОТКАЗОВ, а не вкус экрана, и потому дверь не рисуется живой там,
+     * где сервер уже сказал бы «нет»:
+     *   · `composite` — склеенный лист: `ErrDesignCompositePlate`, «сторона это ОДИН вид»;
+     *   · `held` — плита уже занимает какой-то слот ЭТОЙ карточки: `ErrDesignPictureAlreadyInSlot`,
+     *     и граница там карточка, а не верстак (довод у `slotHolding`);
+     *   · род — дверь стоит только у рендеров: у 3D слот верстака рода `threed` не принимает
+     *     вовсе (`IsDesignBenchKind` его знает, но выходов 3D в верстак никто не кладёт), и
+     *     единственное избрание модели там — пометка `selected`, которую J-23 у рендеров снял.
+     */
+    const composite = kind === 'render' && pictureIsComposite(picture);
+    const held = kind === 'render' ? slotHolding(band, picture.id ?? 0) : null;
     /**
      * ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ. Со времён H-9 в списке стоят и плиты, за которыми
      * прогона нет вовсе: загруженная руками и «плоская» правка без основы обе приходят с
@@ -284,6 +362,20 @@ export function OutputsSection({
             ? mediaFullToViewerItem(picture.media)
             : undefined
         }
+        /* ═══ РЕЗАТЬ — ТЕМ ЖЕ УГЛОМ, ЧТО ВЕЗДЕ (J-25) ══════════════════════════════════════════
+           Владелец про этот угол уже говорил один раз в общем виде: «сделай везде одинаково
+           включая кнопку сплит нахуя ты делаешь везде по разному». Поэтому он рисуется на КАЖДОМ
+           рендере, а не только на склеенном листе: у листа это единственный путь в слоты, у
+           одиночного кадра — обычный кроп, и разными органами эти два жеста не бывают.
+           У 3D его нет: резать модель нечем, а её постер поглощён парой (`threedResults`). */
+        onSplit={
+          kind === 'render' && !writesOff && !modelUrl
+            ? {
+                onClick: () => split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim()),
+                ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
+              }
+            : undefined
+        }
         badge={
           modelUrl
             ? chosen
@@ -299,6 +391,104 @@ export function OutputsSection({
         ]}
         action={
           <div className='flex flex-wrap items-center gap-1'>
+            {/* ═══ ДВЕРЬ В СЛОТ — ЗДЕСЬ, ГДЕ ЛЕЖИТ МАТЕРИАЛ (J-25) ═════════════════════════════
+                Четыре состояния, и каждое отвечает на СВОЙ вопрос человека:
+                  · «в какой стороне это уже стоит» — читаемая плашка (Pill), не кнопка: сторону
+                    освобождает ✕ на самой плите в FABRIC RENDER SLOTS, и второй глагол снятия
+                    здесь был бы вторым реестром одного действия;
+                  · «почему нельзя поставить лист» — инертная дверь со словом «split first»,
+                    рядом с углом, который его режет;
+                  · «почему дверь мертва» — карточка только читается либо сервер молчит;
+                  · и сама постановка — селект сторон.
+                ⚠ АТРИБУТ ВИСИТ НА ОБЁРТКЕ, А НЕ НА `SelectComponent`: корень Radix разбирает
+                ЗАКРЫТЫЙ список пропов, `data-*` до DOM не доезжает, и утверждение по нему было бы
+                зелёным над отсутствующим узлом. Тот же приём, что у `ColorwaySelect`. */}
+            {kind === 'render' &&
+              (held ? (
+                <span
+                  data-mark-held={picture.id || undefined}
+                  title={
+                    `this render already stands in a slot of this card, and one plate stands in one slot: ` +
+                    `the server refuses a second placement outright. Empty that side first — the ✕ on its ` +
+                    `plate in FABRIC RENDER SLOTS.`
+                  }
+                >
+                  <Pill>in {viewLabel((held.viewKey ?? '').trim()) || 'a slot'}</Pill>
+                </span>
+              ) : composite ? (
+                /* ═══ У ЛИСТА ДВЕРЬ ЖИВАЯ, И ЭТО ПОЧИНКА, А НЕ УКРАШЕНИЕ ══════════════════════
+                   Здесь стояла ПОГАШЕННАЯ дверь «split first ▸», чья причина отправляла человека
+                   «к угловой кнопке этой плитки». Угол — ТИХИЙ орган: он появляется по наведению,
+                   то есть отказ называл орган, которого на экране не видно. Дверь, объясняющая,
+                   куда пойти, вместо того чтобы туда вести, — самый дорогой вид мёртвого контрола:
+                   она занимает то самое место, где нужный жест и ожидается.
+                   Теперь глагол один и он исполним отсюда. «Почему нельзя пометить лист» переехало
+                   в `title` — это ответ на вопрос, который человек задаёт ПОСЛЕ, а не вместо. */
+                writesOff ? (
+                  <InertDoor
+                    label='split ▸'
+                    reason={
+                      disabled
+                        ? 'this card is read-only for you — cutting a sheet writes new pictures onto the card'
+                        : 'this server does not answer the design routes'
+                    }
+                  />
+                ) : (
+                  <span data-split-for={picture.id || undefined} className='inline-flex'>
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      onClick={() =>
+                        split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim())
+                      }
+                      title='one sheet with several views glued into it, and a side holds ONE view. Cut it into frames here, then put them into their sides below'
+                    >
+                      split ▸
+                    </Button>
+                  </span>
+                )
+              ) : writesOff ? (
+                <InertDoor
+                  label='mark ▸'
+                  reason={
+                    disabled
+                      ? 'this card is read-only for you — putting a render into a side is an edit of the card'
+                      : 'this server does not answer the design routes'
+                  }
+                />
+              ) : (
+                <span data-mark-for={picture.id || undefined} className='inline-flex w-[104px]'>
+                  <SelectComponent
+                    name={`mark-render-${picture.id}`}
+                    value={MARK_PROMPT}
+                    placeholder='mark ▸'
+                    disabled={marking === (picture.id ?? 0)}
+                    /* ⚠ ЗАНЯТАЯ СТОРОНА НАЗЫВАЕТ СЕБЯ ЗАНЯТОЙ. Пункт без пометки писал бы «front»
+                       и молча ВЫТЕСНЯЛ плиту, которая там стоит: запись идёт CAS-токеном ИМЕННО
+                       той строки, поэтому она проходит. Довод блока слотов гласит, что замена
+                       осталась отдельным жестом «где видно, что именно вытесняется» — в момент
+                       действия видно не было ничего. Сторона не запрещается: замена законна и
+                       обратима, она просто перестаёт быть немой. */
+                    items={[
+                      { value: MARK_PROMPT, label: 'mark ▸' },
+                      ...SILHOUETTE_VIEWS.map((view) => {
+                        const held = threedSides(band, refColorwayFor('render', colorwayOf(picture)))
+                          .find((s) => s.view === view)?.picture;
+                        const heldId = held?.id ?? 0;
+                        return {
+                          value: view,
+                          label: heldId > 0 ? `${viewLabel(view)} · replaces #${heldId}` : viewLabel(view),
+                        };
+                      }),
+                    ]}
+                    onValueChange={(value: string) => {
+                      if (!value || value === MARK_PROMPT) return;
+                      markInto(picture, value);
+                    }}
+                    fullWidth
+                  />
+                </span>
+              ))}
             {/* ФАЙЛ ОТДАЁТСЯ ДО ВСЯКОГО ПРОСМОТРА И НЕЗАВИСИМО ОТ НЕГО. Модель — то, за что
                 заплачено; просмотрщик — удобство поверх неё, и его отказ не должен уносить
                 предмет вместе с собой. */}
@@ -485,6 +675,11 @@ export function OutputsSection({
           );
         })}
       </Strip>
+      {/* ОДНО ОКНО РЕЗА НА ВЕСЬ РАЗДЕЛ. Оно рисуется хуком и монтируется только когда цель
+          выбрана; кадры размечает человек, а `for_input: false` уезжает на провод из самого хука
+          (довод — у его вызова выше). */}
+      {split.modal}
+
       {/* ОДНО ОКНО НА ВЕСЬ РАЗДЕЛ, А НЕ ПО ОДНОМУ НА ЯЧЕЙКУ: сцена WebGL дорога, и держать её
           смонтированной под каждой плиткой — это упереться в потолок живых контекстов браузера. */}
       {openModel && (
