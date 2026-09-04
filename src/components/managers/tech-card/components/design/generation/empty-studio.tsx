@@ -85,7 +85,8 @@ export function EmptyStudio({
         </Text>
       </div>
 
-      <div className='flex flex-wrap items-center gap-2'>
+      {/* `py-1` — тот же отступ ряда, что у трёх остальных рядов GENERATE (F-1, «и отступы»). */}
+      <div className='flex flex-wrap items-center gap-2 py-1'>
         <Button variant='secondary' size='sm' onClick={gotoInput}>
           + add files
         </Button>
@@ -96,6 +97,10 @@ export function EmptyStudio({
         ) : (
           <InertDoor
             label='GENERATE ▸'
+            /* ⚠ `sm`, А НЕ УМОЛЧАНИЕ (F-1). Тремя строками выше стоит ЖИВАЯ кнопка `size='sm'` —
+               эта дверь заменяет ИМЕННО ЕЁ, в том же ряду. Замерено: дверь была 20px с паддингом
+               1/6, кнопка 26px с паддингом 4/10, и ряд подпрыгивал ровно на этой замене. */
+            size='sm'
             reason={
               !speaks
                 ? 'this server does not speak the design band yet — bring the pictures in by hand instead; the bench treats them identically.'

@@ -806,9 +806,11 @@ function ThreedBody({
                      бесплатно. Красным было помечено ВСЁ пустое, пока это был поворотный стол. */
                   <span className='text-error'>not marked — blocks 3D</span>
                 ) : (
-                  <span className='text-labelColor'>
-                    not marked — optional; each extra side makes the model better
-                  </span>
+                  /* КОРОТКО, КАК НА САМОЙ ПОЛОСЕ (круг 17, F-14): «each extra side makes the
+                     model better» было тем же пояснением, что «one more angle = a better model»
+                     на пустой ячейке входа, — снято там, снято и здесь, чтобы две поверхности
+                     не разошлись словами. */
+                  <span className='text-labelColor'>not marked — optional</span>
                 )
               }
             />

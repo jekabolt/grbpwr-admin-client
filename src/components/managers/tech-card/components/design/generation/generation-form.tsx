@@ -483,7 +483,8 @@ export function GenerationForm({
 
       <div className='flex flex-wrap items-center gap-2 py-1'>
         {gateReason ? (
-          <InertDoor label='GENERATE' reason={gateReason} />
+          /* Размер двери отказа равен размеру живой кнопки под ней — см. `InertDoor` (F-1). */
+          <InertDoor label='GENERATE' reason={gateReason} size='sm' />
         ) : (
           <Button variant='main' size='sm' onClick={submit} disabled={startRun.isPending}>
             {startRun.isPending ? 'starting…' : 'GENERATE'}

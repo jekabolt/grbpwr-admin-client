@@ -1,7 +1,9 @@
 import type { common_DesignPicture, common_DesignRun, GetDesignBandResponse } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { Fragment, useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Pill } from 'ui/components/pill';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
@@ -19,7 +21,14 @@ import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
 import { useBringOwnModel } from '../threed/model-upload-cell';
 import { useDesignWrites } from '../use-design-band';
-import { SILHOUETTE_VIEWS, viewLabel } from '../views';
+import {
+  SILHOUETTE_VIEWS,
+  isSilhouetteView,
+  normaliseViewKey,
+  viewLabel,
+  type SilhouetteView,
+} from '../views';
+import { applyPlan, type SplitPiece } from './apply-split';
 import {
   SELECT_MARK_NOT_STATED,
   outputsHorizon,
@@ -29,7 +38,6 @@ import {
   pictureIsSelected,
   pictureThumb,
   serverStatesSelected,
-  stripProvenance,
   threedSides,
 } from './model';
 import { STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from './strip-cell';
@@ -40,6 +48,84 @@ const MARK_PROMPT = '__mark__';
 /** Пустая карта родства — для рода, который колодой не группируется. Один экземпляр: новая пустая
  *  карта на каждый рендер пересобирала бы `useMemo` ниже по кругу. */
 const EMPTY_FAMILIES: CropFamilies = { membersOf: new Map(), rootOf: new Map() };
+
+/**
+ * ═══ ОДНА СЕТКА НА ВЕСЬ РЯД ДВЕРЕЙ — F-9, И ЭТО ЗАМЕР, А НЕ ВКУС ══════════════════════════════
+ *
+ * Владелец, дословно: «отполируй дизайн импакаблом тк сейчас там все кнопки скачут селекторы
+ * болшего размера чем кнопки».
+ *
+ * ЗАМЕРЕНО ДО ПРАВКИ (`tmp/dsgprobe/k17w1-measure.mjs` над той же сборкой):
+ *   · органы ряда стояли трёх разных высот — Pill 19px, Button xs 20px, Radix-триггер 24px
+ *     (`min-h-[22px]` + две рамки), то есть селектор был на пятую часть выше соседней кнопки;
+ *   · верхние кромки органов разъезжались на 18.5px (1243 против 1261.5), потому что ячейка
+ *     листа колоды мерилась по содержимому, а соседние — по растянутому ряду;
+ *   · ряд был `flex-wrap`, и селектор шириной 104px в колонке 132px переносил соседа на вторую
+ *     строку, меняя высоту ячейки от её содержимого.
+ *
+ * ЛЕЧИТСЯ ТРЕМЯ ЧИСЛАМИ, А НЕ ПОДБОРОМ. Ряд — коробка ФИКСИРОВАННОЙ высоты в 20px (высота
+ * `Button size='xs'`: 16px `leading-4` + 2px паддинга + 2px рамок), органы центрируются по ней, и
+ * ровно ОДНА живая дверь на ячейку. Селектор приводится к той же высоте и к тому же кеглю
+ * (`text-micro uppercase`), а не остаётся полем ввода: `min-h-0` обязателен — `min-height` и
+ * `height` у twMerge разные группы, и без него 22px тихо победили бы 20px.
+ *
+ * ⚠ МЕТРИКА ЖИВЁТ ЗДЕСЬ, А НЕ В `StripCell`. Тот же примитив несёт ряды других экранов, и там в
+ * `action` стоят КОЛОНКИ (кнопка + абзац последствия у `ApplySplitDoor`): фиксированные 20px
+ * обрезали бы их молча.
+ */
+const DOOR_ROW = 'flex h-5 items-center gap-1';
+/** ⚠ `bg-bgColor` ЯВНО, А НЕ ПО УМОЛЧАНИЮ. Вторичная кнопка системы — «white fill, 1px edge
+ *  border», но БЕЛОГО В НЕЙ НЕТ: она полагается на белую страницу под собой. Над затемнённым
+ *  грунтом группы (`Bay`) сквозь неё просвечивал #ededed, и `set` читался залитым — то есть
+ *  нажатым или выключенным, — стоя рядом с белыми селекторами. Замерено снимком 2×. */
+const DOOR = 'h-5 w-full bg-bgColor';
+/** То же для `InertDoor`: класс приезжает на ЕЁ обёртку, а ширину надо отдать кнопке внутри —
+ *  примитив её наружу не пускает, а мёртвая дверь обязана занимать ровно то место, которое заняла
+ *  бы живая. Иначе отказ выглядит уже своей причины и читается как другой орган. */
+const INERT_DOOR = 'w-full [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor';
+
+/**
+ * ═══ ЗАТЕМНЁННЫЙ ГРУНТ ПОД РАСКРЫТОЙ ГРУППОЙ — F-6 ═══════════════════════════════════════════
+ *
+ * Владелец, дословно: «сплитнутые сейчас отображаются с обводкой один пиксель черной это убрать я
+ * имел ввиду другое когда они расколапшены сделай так что бы под ними мульти вью и стороны был
+ * немного затемнен бекграунд что бы когда оно анколапшено было понятно что это общие картинки как
+ * то визуально отделить».
+ *
+ * ГРУППА — ЭТО ЛИСТ ПЛЮС ЕГО КУСКИ, И ОНИ ЖИВУТ ПО РАЗНЫЕ СТОРОНЫ `CropDeck`. Куски раскрытой
+ * колоды рисуются РЯДОМ с ней, обычными ячейками ряда, поэтому коробки, охватывающей обе половины,
+ * у колоды нет и быть не может: она кончается на своём последнем пикселе (там же, где кончалась
+ * снятая обводка E-4 — та обводила ЛИСТ С ВЕЕРОМ, то есть не то, что владелец называл). Коробку
+ * даёт этот отсек.
+ *
+ * ⚠ ОТСЕК ОБЯЗАН БЫТЬ У КАЖДОГО ЧЛЕНА ПОЛОСЫ, А НЕ ТОЛЬКО У ГРУППЫ, И ЭТО НЕ СИММЕТРИЯ РАДИ
+ * СИММЕТРИИ. Отбивка сдвигает содержимое отсека относительно соседей, и группа перестала бы
+ * стоять с ними на одной линии. Одинаковый отсек у ВСЕХ снимает сдвиг по построению: тонируется
+ * ровно один из них, а метрика у всех одна. Замерено `k17w1-measure.mjs`: верхние кромки кадров
+ * совпадают до пикселя.
+ *
+ * ⚠ ОТБИВКА ТОЛЬКО ПО ВЕРТИКАЛИ, И ЭТО ТОЖЕ ЗАМЕР. Первая редакция брала `p-1` — грунт получал
+ * рамку в 4px со всех сторон и выглядел нарядно, но ЛЕВАЯ кромка первой ячейки уезжала с 33px на
+ * 37px, то есть полоса этого блока переставала стоять в одну линию с полосами трёх соседних
+ * (замерено `k17w1-shot.mjs` по левым кромкам всех секций страницы). Отвесная линия левых кромок —
+ * несущая в этой системе, а 4px на неё не стоят ничего: по горизонтали грунт и так виден в
+ * междурядьях, а под подписями и дверьми — во всю ширину группы.
+ *
+ * ⚠ ТОН — `bgSecondary` (#ededed), И ЭТО ЕДИНСТВЕННАЯ СВОБОДНАЯ КЛЕТКА СЛОВАРЯ. DESIGN.md: panel
+ * «a fill, not a container… where a tint is wanted but a new box is not» — дословно этот случай.
+ * Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка внутри — это box-in-box, прямой
+ * запрет системы. `bgZebra` (#fafafa) на белом не читается вовсе: 5 единиц яркости против 18.
+ */
+function Bay({ groupOf, children }: { groupOf?: number; children: React.ReactNode }): JSX.Element {
+  return (
+    <div
+      data-deck-group={groupOf || undefined}
+      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-bgSecondary' : '')}
+    >
+      {children}
+    </div>
+  );
+}
 
 /**
  * ═══ THE OUTPUTS OF ONE KIND, AND THE MARK «CHOSEN» ON THEM — W-12 ════════════════════════════
@@ -154,6 +240,31 @@ export function OutputsSection({
   const [openDeck, setOpenDeck] = useState<number | null>(null);
 
   /**
+   * ═══ ДВЕРЬ `set` РАСКРЫТОЙ КОЛОДЫ — ТРИ СОСТОЯНИЯ, ТРИ ЗНАЧЕНИЯ (F-7) ═════════════════════
+   *
+   * `applyingRoot` — какой лист сейчас пишется (занятость АДРЕСНАЯ: общий `isPending` сказал бы
+   * «saving» на всех сразу); `askingRoot` — какой лист ждёт подтверждения; `applyFailed` —
+   * стороны, которые сервер не принял.
+   *
+   * ⚠ ХУКИ ВЫШЕ РАННЕГО ВЫХОДА, как и все остальные в этом файле (React #310).
+   */
+  const [applyingRoot, setApplyingRoot] = useState(0);
+  const [askingRoot, setAskingRoot] = useState(0);
+  /**
+   * ⚠ ОТЧЁТ ОБ ОТКАЗЕ НОСИТ ИМЯ СВОЕЙ КОЛОДЫ, А НЕ ВИСИТ НАД ПОЛОСОЙ САМ ПО СЕБЕ.
+   *
+   * Без `root` он переживал и складывание своей колоды, и раскрытие ЧУЖОЙ: человек видел «press
+   * set again» там, где кнопки `set` уже нет, а после открытия соседнего листа тот же красный
+   * текст читался как отказ ЭТОГО листа и толкал применить не тот разрез. Это ровно тот класс,
+   * где «строка отчёта, севшая на чужую строку, не путает её, а СТИРАЕТ»: отчёт обязан исчезать
+   * вместе с тем, о чём он.
+   */
+  const [applyFailed, setApplyFailed] = useState<{
+    root: number;
+    list: { view: string; reason: string }[];
+  }>({ root: 0, list: [] });
+
+  /**
    * ═══ ДВЕРЬ «ПРИНЕСТИ СВОЮ МОДЕЛЬ» — ДВА УЗЛА В РАЗНЫХ МЕСТАХ ДОКУМЕНТА (E-13) ══════════════
    *
    * Хук, а не компонент, и по той же причине, по которой хуком отдаётся окно разреза строкой
@@ -239,6 +350,29 @@ export function OutputsSection({
     for (const row of rows) if (row.picture.id != null) m.set(row.picture.id, row);
     return m;
   }, [rows]);
+
+  /**
+   * ═══ КУСКИ РАЗРЕЗА, ПРИВЯЗАННЫЕ К СТОРОНАМ, — ВХОД `applyPlan` (F-7) ══════════════════════
+   *
+   * Берутся из `families.membersOf`, то есть из ТОГО ЖЕ списка, который экран и показывает
+   * раскрытым. Второй источник («спросить у `splitDecks`») отвечал бы на соседний вопрос — «какие
+   * листы этого рода вообще есть на карточке» — и разошёлся бы с тем, что человек видит, ровно в
+   * тех случаях, ради которых дверь и нужна.
+   *
+   * Первый кусок на сторону: разрез — один на лист, а кусок без стороны силуэта (`detail`, пустой
+   * вид) в слот не встаёт и в план не входит.
+   */
+  const piecesOf = (rootId: number): SplitPiece[] => {
+    const seen = new Set<string>();
+    const out: SplitPiece[] = [];
+    for (const member of families.membersOf.get(rootId) ?? []) {
+      const view = normaliseViewKey(member.ghostView);
+      if (!isSilhouetteView(view) || seen.has(view)) continue;
+      seen.add(view);
+      out.push({ view: view as SilhouetteView, picture: member });
+    }
+    return out;
+  };
 
   /**
    * ═══ ЗУМ ЧУЖОЙ КАРТОЧКИ СКЛАДЫВАЕТ ОТКРЫТУЮ КОЛОДУ (E-4) ══════════════════════════════════
@@ -361,6 +495,61 @@ export function OutputsSection({
   };
 
   /**
+   * ═══ `set` — ВХОД РЕНДЕРА СТАНОВИТСЯ РОВНО ЭТИМ РАЗРЕЗОМ (F-7) ════════════════════════════
+   *
+   * Владелец, дословно: «когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
+   * RENDER SLOTS и ставить те что в сплите».
+   *
+   * ⚠ ПЛАН СЧИТАЕТ ЧУЖОЙ МОДУЛЬ, И ЭТО РЕШЕНИЕ. `applyPlan` живёт в `render/apply-split.tsx`
+   * вместе с дверью «apply splitted» двух полос входа — тот же глагол, те же три правила
+   * (названную сторону ЗАНЯТЬ, неназванную занятую ОЧИСТИТЬ, неназванную пустую НЕ ТРОГАТЬ) и та
+   * же нетривиальная причина: `slot_rev` — CAS-токен, и буквальное «сначала снять все, потом
+   * положить» даёт ДВЕ записи на сторону, из которых вторая отказывает. Второе написание этих
+   * правил разошлось бы с первым на первой же правке.
+   *
+   * ⚠ БЕЗ `slotId`. `view_key` и `slot_id` — ЧЛЕНЫ ОДНОГО `oneof`, и ноль в proto-JSON это
+   * ЗАДАННОЕ поле: сервер отвечает «oneof … is already set» и не пишет НИ ОДНОЙ стороны. Форма
+   * тела здесь ровно та же, что у `markInto` выше и у `bench.tsx:95`.
+   *
+   * ⚠ ОТКАЗ ОДНОЙ СТОРОНЫ НЕ ОСТАНАВЛИВАЕТ ОСТАЛЬНЫЕ: батча у глагола верстака нет, стороны
+   * независимы, и брошенный цикл оставляет БОЛЬШЕ несогласованного, а не меньше.
+   */
+  const setStepsFor = (rootId: number) => {
+    const sheet = rowById.get(rootId)?.picture;
+    const pieces = piecesOf(rootId);
+    if (!sheet || !pieces.length) return { bench: 0, steps: [] as ReturnType<typeof applyPlan> };
+    const bench = refColorwayFor('render', colorwayOf(sheet));
+    return { bench, steps: applyPlan(threedSides(band, bench), pieces) };
+  };
+
+  const runSet = async (rootId: number) => {
+    const { bench, steps } = setStepsFor(rootId);
+    if (!steps.length) return;
+    setApplyingRoot(rootId);
+    setApplyFailed({ root: rootId, list: [] });
+    const failed: { view: string; reason: string }[] = [];
+    for (const step of steps) {
+      try {
+        await setBenchSlot.mutateAsync({
+          slot: { viewKey: step.view, kind: 'render', colorwayId: bench },
+          pictureId: step.pictureId,
+          expectedSlotRev: step.slotRev,
+        });
+      } catch (error) {
+        // Причина берётся С ОТКАЗА, а не сочиняется: слова сервера — единственное, из чего
+        // человек поймёт, повторять ему жест.
+        failed.push({
+          view: step.view,
+          reason: (error as Error)?.message?.trim() || 'the server refused without saying why',
+        });
+      }
+    }
+    setApplyingRoot(0);
+    // Полный успех не рапортуется: он ВИДЕН — стороны заполнились ниже, на этом же экране.
+    setApplyFailed({ root: rootId, list: failed });
+  };
+
+  /**
    * ═══ КАКОЙ ИЗ ДВУХ ОТВЕТОВ НАРИСОВАН — И ПОДПИСЬ ЧИТАЕТ ИМЕННО ЕГО (H-9) ═══════════════════
    *
    * `serverStatesOutputs` спрашивает про БИНАРЬ («поле прислано вообще?»), а не про длину списка.
@@ -396,11 +585,16 @@ export function OutputsSection({
    * разошлось бы с первым словом или пикселем — это ровно тот дефект, ради которого `StripCell`
    * и заведён.
    *
-   * `deckSheet` — «эта ячейка стоит листом СВЁРНУТОЙ колоды»: её поверхность раскрывает колоду
-   * вместо того, чтобы открыть просмотрщик (J-2, `PictureTile.onOpen`). Зум при этом не теряется
-   * — он остаётся угловой кнопкой, как и в ленте.
+   * `deck` — «эта ячейка стоит ЛИСТОМ КОЛОДЫ, и вот раскрыта ли она». Свёрнутой её поверхность
+   * раскрывает колоду вместо того, чтобы открыть просмотрщик (J-2, `PictureTile.onOpen`); зум при
+   * этом не теряется — он остаётся угловой кнопкой, как и в ленте. Раскрытой поверхность снова
+   * зумит, а складывает колоду объявленная дверь ряда (F-7/F-9, разбор у ряда `action`).
    */
-  function cell({ picture, run, src, modelUrl }: Row, deckSheet?: boolean): JSX.Element {
+  function cell(
+    { picture, run, src, modelUrl }: Row,
+    deck?: { open: boolean },
+  ): JSX.Element {
+    const deckSheet = !!deck && !deck.open;
     const chosen = pictureIsSelected(picture);
     /**
      * ═══ ТРИ ФАКТА, РЕШАЮЩИЕ СУДЬБУ ДВЕРИ `mark ▸` (J-25) ═════════════════════════════════════
@@ -470,12 +664,24 @@ export function OutputsSection({
             ? mediaFullToViewerItem(picture.media)
             : undefined
         }
-        /* ═══ РЕЗАТЬ — ТЕМ ЖЕ УГЛОМ, ЧТО ВЕЗДЕ (J-25) ══════════════════════════════════════════
-           Владелец про этот угол уже говорил один раз в общем виде: «сделай везде одинаково
-           включая кнопку сплит нахуя ты делаешь везде по разному». Поэтому он рисуется на КАЖДОМ
-           рендере, а не только на склеенном листе: у листа это единственный путь в слоты, у
-           одиночного кадра — обычный кроп, и разными органами эти два жеста не бывают.
-           У 3D его нет: резать модель нечем, а её постер поглощён парой (`threedResults`). */
+        /* ═══ РЕЗАТЬ ПРЕДЛАГАЕТСЯ ТОЛЬКО ТАМ, ГДЕ РЕЗАТЬ ЕСТЬ ЧТО (F-8, F-18) ═════════════════
+           Владелец, дословно: «на уже заспличеных картинках на ховер сплит писать не нужно так же
+           как и на не мультивью картинках» и «везде где картинка не мультивью флет или рендер там
+           не должно на ховер показываться сплит».
+
+           ЗДЕСЬ СТОЯЛО ОБРАТНОЕ ПРАВИЛО, И ОНО БЫЛО ВЫВЕДЕНО ИЗ ДРУГОЙ ПРОСЬБЫ. Круг 4: «сделай
+           везде одинаково включая кнопку сплит» — про ОДИНАКОВУЮ РАСКЛАДКУ органа (низ слева,
+           один примитив), и этот файл прочитал её как «рисовать его на каждом кадре». Отсюда
+           `split` на одиночном рендере, где он означал уже не разрез листа на виды, а произвольный
+           кроп — второй смысл у одного слова.
+
+           ДВА ЧЛЕНА ПРЕДИКАТА, И КАЖДЫЙ — СВОЙ ВОПРОС ЧЕЛОВЕКА:
+             · `composite` — «есть ли в этом файле несколько видов». Нет — резать нечего, и угол
+               обещал бы кроп, которого этот экран не делает;
+             · `!deck` — «а не разрезан ли он уже». Разрезан — жест другой и слово другое
+               (`expand` / `set` в ряду дверей), а второй разрез того же листа завёл бы вторую
+               колоду тех же видов.
+           У 3D угла нет по-прежнему: резать модель нечем, а её постер поглощён парой. */
         /* ═══ ПОМЕТКА — УГОЛ КАДРА, А НЕ КНОПКА ПОД НИМ (E-25) ════════════════════════════════
            Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на карточку
            а не кнопками снизу».
@@ -525,7 +731,7 @@ export function OutputsSection({
             : undefined
         }
         onSplit={
-          kind === 'render' && !writesOff && !modelUrl
+          kind === 'render' && !writesOff && !modelUrl && composite && !deck
             ? {
                 onClick: () => split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim()),
                 ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
@@ -548,10 +754,16 @@ export function OutputsSection({
               ? 'selected'
               : undefined
         }
-        lines={[
-          stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`,
-          stripProvenance(band, picture),
-        ]}
+        /* ═══ ВТОРАЯ СТРОКА ПОДПИСИ СНЯТА — F-13, ДОСЛОВНО «убери текст "AI · run 26 · from mixed
+           input"» ═══════════════════════════════════════════════════════════════════════════════
+           Это `stripProvenance`, и снята она ЗДЕСЬ, а не в мире: тем же вызовом живут полоса входа
+           рендера, полоса входа 3D и `what-model-gets` — там она отвечает на вопрос «а откуда
+           взялось ТО, ЧТО СЕЙЧАС ПОЙДЁТ В ПРОГОН», и молчать об этом нельзя. Здесь же список —
+           весь выход карточки, происхождение у всех строк одно и то же слово, и оно повторялось
+           столько раз, сколько плиток на экране.
+           Что при этом НЕ потеряно: номер прогона стоит первой строкой, и он же — единственный
+           член провенанса, который на этом экране различает строки. */
+        lines={[stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`]}
         /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
            под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
            `StripCell` даёт ему свою отбивку, и ряд ячеек разъезжается по высоте оттого, у какой
@@ -559,21 +771,124 @@ export function OutputsSection({
            ОТКАЗ пометки; живая пометка уехала на кадр. */
         action={
           kind === 'render' || (selectable && (!carries || writesOff)) ? (
-          <div className='flex flex-wrap items-center gap-1'>
+          /* ⚠ `flex-wrap` СНЯТ ВМЕСТЕ С ПРИЧИНОЙ ПЕРЕНОСА. Переносить было что, пока ряд мог
+             держать ДВА органа шириной 104px и 50px в колонке 132px; теперь живая дверь ровно
+             одна на ячейку (`held` ИЛИ колода ИЛИ лист ИЛИ пометка), и единственный ряд из двух
+             членов — раскрытая колода, где ширины заданы явно. Перенос при этом не «на всякий
+             случай», а вредный: он МЕНЯЕТ ВЫСОТУ ячейки от её содержимого, то есть и есть то
+             самое «кнопки скачут». Разбор метрики — у `DOOR_ROW` в шапке файла. */
+          <div data-door-row='' className={DOOR_ROW}>
             {/* ═══ ДВЕРЬ В СЛОТ — ЗДЕСЬ, ГДЕ ЛЕЖИТ МАТЕРИАЛ (J-25) ═════════════════════════════
-                Четыре состояния, и каждое отвечает на СВОЙ вопрос человека:
+                Пять состояний, и каждое отвечает на СВОЙ вопрос человека:
                   · «в какой стороне это уже стоит» — читаемая плашка (Pill), не кнопка: сторону
                     освобождает ✕ на самой плите в FABRIC RENDER SLOTS, и второй глагол снятия
                     здесь был бы вторым реестром одного действия;
-                  · «почему нельзя поставить лист» — инертная дверь со словом «split first»,
-                    рядом с углом, который его режет;
+                  · «этот лист уже разрезан — где куски» — `expand ▸`, а раскрытым `set` + `▾`
+                    (F-7, разбор у самой ветки);
+                  · «этот лист ещё не разрезан» — живой `split ▸`;
                   · «почему дверь мертва» — карточка только читается либо сервер молчит;
-                  · и сама постановка — селект сторон.
+                  · и сама постановка одиночного кадра — селект сторон.
                 ⚠ АТРИБУТ ВИСИТ НА ОБЁРТКЕ, А НЕ НА `SelectComponent`: корень Radix разбирает
                 ЗАКРЫТЫЙ список пропов, `data-*` до DOM не доезжает, и утверждение по нему было бы
                 зелёным над отсутствующим узлом. Тот же приём, что у `ColorwaySelect`. */}
             {kind === 'render' &&
-              (held ? (
+              (deck ? (
+                /* ═══ РАЗРЕЗАННЫЙ ЛИСТ: `expand ▸` ЗАКРЫТЫМ, `set` + `▾` РАСКРЫТЫМ (F-7) ═══════
+                   Владелец, дословно: «для уже сплитнутых … мы не должны показывать кнопку SPLIT ▸
+                   тк оно уже заслитано надо писать экспанд или что-то вроде того пока оно не
+                   открыто а когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
+                   RENDER SLOTS и ставить те что в сплите».
+
+                   ЭТО ЖЕ МЕСТО ЗАБРАЛО ДВЕРЬ КОЛОДЫ. Под кадром стояла ВТОРАЯ строка — «▸ 3 CUT
+                   PIECES», собственная дверь `CropDeck`, — и владелец назвал её визуальным мусором
+                   (F-9). Мусором её делало соседство: два органа одного кадра на двух строках,
+                   причём верхний («split ▸») врал, а нижний нёс единственный работающий глагол.
+                   Теперь глагол один и стоит в ряду дверей, как у всех соседей; счёт кусков ушёл в
+                   `title`, а раскрытая колода называет его собой — куски стоят рядом.
+
+                   ⚠ СКЛАДЫВАЮЩАЯ ДВЕРЬ ОБЯЗАТЕЛЬНА, И ЭТО НЕ УКРАШЕНИЕ. `CropDeck` объявленно нем
+                   при `hostDoor` (веер `aria-hidden`, поверхность листа тоже), поэтому без `▾`
+                   раскрытую колоду нечем было бы закрыть ни с клавиатуры, ни читалкой — только
+                   раскрыв ЧУЖУЮ. */
+                deck.open ? (
+                  <>
+                    {/* ⚠ ОТКАЗ НАЗЫВАЕТ СЕБЯ СЛОВОМ, А НЕ СЕРОЙ КНОПКОЙ. Тот же закон, что у
+                        `split ▸` и `mark ▸` двумя ветками ниже: выключенная дверь без причины
+                        отправляет человека искать, что он сделал не так. */}
+                    {/* ⚠ ПУСТОЙ ПЛАН — ЭТО ТОЖЕ ОТКАЗ, А НЕ ЖИВАЯ КНОПКА, КОТОРАЯ МОЛЧИТ.
+                        Разрез законно даёт кусок БЕЗ стороны силуэта: человек мог вырезать деталь,
+                        и `apply-split.tsx` говорит это прямым текстом («применить его некуда: он
+                        не называет слот»). Тогда `piecesOf` пуст, `applyPlan` отдаёт ноль шагов, и
+                        дверь, нарисованная живой, на нажатие не делала БУКВАЛЬНО НИЧЕГО — ни
+                        запроса, ни ошибки, ни слова. Соседняя реализация того же глагола этот
+                        случай закрывает (`if (!pieces.length) return null`); здесь он назван
+                        причиной, потому что колода уже раскрыта и исчезнувшая дверь читалась бы
+                        как пропажа. */}
+                    {writesOff || !setStepsFor(picture.id ?? 0).steps.length ? (
+                      <InertDoor
+                        className='flex-1 [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor'
+                        label='set'
+                        reason={
+                          disabled
+                            ? 'this card is read-only for you — putting the split into the sides is an edit of the card'
+                            : !speaks
+                              ? 'this server does not answer the design routes'
+                              : 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.'
+                        }
+                      />
+                    ) : (
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      className='h-5 flex-1 bg-bgColor'
+                      loading={applyingRoot === (picture.id ?? 0)}
+                      disabled={applyingRoot > 0}
+                      data-set-split={picture.id || undefined}
+                      onClick={() => {
+                        const { steps } = setStepsFor(picture.id ?? 0);
+                        if (!steps.length) return;
+                        if (steps.some((s) => s.displaces)) setAskingRoot(picture.id ?? 0);
+                        else void runSet(picture.id ?? 0);
+                      }}
+                      title={
+                        'the render input becomes exactly this split: every side named by it takes ' +
+                        'its piece, and every side it does not name is emptied'
+                      }
+                    >
+                      set
+                    </Button>
+                    )}
+                    <button
+                      type='button'
+                      aria-expanded
+                      aria-label={`fold the pieces of render ${picture.ordinal ?? ''} back behind the sheet`.trim()}
+                      data-deck-fold={picture.id || undefined}
+                      title='fold these pieces back behind the sheet'
+                      onClick={() => setOpenDeck(null)}
+                      className={
+                        'h-5 w-5 shrink-0 cursor-pointer border border-borderColor bg-bgColor ' +
+                        'text-micro leading-none text-textColor hover:bg-textColor hover:text-bgColor ' +
+                        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ' +
+                        'focus-visible:outline-textColor'
+                      }
+                    >
+                      ▾
+                    </button>
+                  </>
+                ) : (
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    className={DOOR}
+                    aria-expanded={false}
+                    data-deck-expand={picture.id || undefined}
+                    onClick={() => setOpenDeck(picture.id ?? 0)}
+                    title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`}
+                  >
+                    expand ▸
+                  </Button>
+                )
+              ) : held ? (
                 <span
                   data-mark-held={picture.id || undefined}
                   title={
@@ -595,6 +910,7 @@ export function OutputsSection({
                    в `title` — это ответ на вопрос, который человек задаёт ПОСЛЕ, а не вместо. */
                 writesOff ? (
                   <InertDoor
+                    className={INERT_DOOR}
                     label='split ▸'
                     reason={
                       disabled
@@ -603,10 +919,11 @@ export function OutputsSection({
                     }
                   />
                 ) : (
-                  <span data-split-for={picture.id || undefined} className='inline-flex'>
+                  <span data-split-for={picture.id || undefined} className='flex w-full'>
                     <Button
                       variant='secondary'
                       size='xs'
+                      className={DOOR}
                       onClick={() =>
                         split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim())
                       }
@@ -618,6 +935,7 @@ export function OutputsSection({
                 )
               ) : writesOff ? (
                 <InertDoor
+                  className={INERT_DOOR}
                   label='mark ▸'
                   reason={
                     disabled
@@ -626,12 +944,18 @@ export function OutputsSection({
                   }
                 />
               ) : (
-                <span data-mark-for={picture.id || undefined} className='inline-flex w-[104px]'>
+                <span data-mark-for={picture.id || undefined} className='flex w-full'>
                   <SelectComponent
                     name={`mark-render-${picture.id}`}
                     value={MARK_PROMPT}
                     placeholder='mark ▸'
                     disabled={marking === (picture.id ?? 0)}
+                    /* ⚠ СЕЛЕКТОР ПРИВОДИТСЯ К МЕТРИКЕ КНОПКИ, А НЕ НАОБОРОТ (F-9). `min-h-0`
+                       обязателен: `min-height` и `height` — РАЗНЫЕ группы у twMerge, поэтому
+                       `min-h-[22px]` примитива тихо победил бы `h-5` и селектор остался бы выше
+                       соседней кнопки — ровно то, на что владелец и жалуется. Кегль тоже: поле
+                       ввода говорит 12px строчными, ряд дверей — 10px прописными. */
+                    className='h-5 min-h-0 py-0 text-micro uppercase tracking-label'
                     /* ⚠ ЗАНЯТАЯ СТОРОНА НАЗЫВАЕТ СЕБЯ ЗАНЯТОЙ. Пункт без пометки писал бы «front»
                        и молча ВЫТЕСНЯЛ плиту, которая там стоит: запись идёт CAS-токеном ИМЕННО
                        той строки, поэтому она проходит. Довод блока слотов гласит, что замена
@@ -788,6 +1112,29 @@ export function OutputsSection({
           на это есть ширина, и он не исчезает сам: «a callout stays until it is resolved». */}
       {bringsOwnModel && bring.notice}
 
+      {/* ⚠ ОТКАЗ `set` СТОИТ НАД ПОЛОСОЙ, А НЕ В ЯЧЕЙКЕ, и по той же причине, что отказ модели
+          абзацем выше: «сторона front — slot_rev mismatch» в колонке 132 пикселя встаёт красной
+          стеной выше самого кадра. Стороны независимы, поэтому отчёт называет ИМЕНА, а не число:
+          повторять жест человеку по одной. */}
+      {applyFailed.list.length > 0 && applyFailed.root === openDeck && (
+        <CalloutBox tone='error'>
+          <Text
+            size='micro'
+            component='p'
+            className='normal-case'
+            data-set-failed={applyFailed.list.length}
+          >
+            <b>
+              {applyFailed.list.length} side{applyFailed.list.length === 1 ? '' : 's'} of the input{' '}
+              {applyFailed.list.length === 1 ? 'was' : 'were'} not written.
+            </b>{' '}
+            {applyFailed.list.map((f) => `${viewLabel(f.view)} — ${f.reason}`).join('; ')}. Nothing
+            was undone: the sides are separate slots, and taking a good one back would be another
+            write that can fail in its turn. Press <b>set</b> again — it reads the bench afresh.
+          </Text>
+        </CalloutBox>
+      )}
+
       <Strip>
         {/* ═══ ДВЕРЬ СТОИТ ПЕРВОЙ, И ЭТО ЗАМЕР, А НЕ ВКУС (E-13) ══════════════════════════════
             Сервер отдаёт выходы `ORDER BY o.id DESC` — новейшее первым, — поэтому только что
@@ -796,7 +1143,7 @@ export function OutputsSection({
             не видно. Первой она к тому же НЕ ПЕРЕЕЗЖАЕТ между пустой и полной полосой — один орган
             стоит в одном месте, — и это ровно та позиция, что у `+ flat` в полосе входа рендера:
             голова того списка, в который она добавляет. */}
-        {bringsOwnModel && bring.cell}
+        {bringsOwnModel && <Bay>{bring.cell}</Bay>}
         {rows.map((row) => {
           const rootId = row.picture.id ?? 0;
           // Кусок рисуется ТОЛЬКО под своим листом — иначе закрытая колода показала бы его вопреки
@@ -804,9 +1151,9 @@ export function OutputsSection({
           if (families.rootOf.has(rootId)) return null;
           const members = families.membersOf.get(rootId) ?? [];
           const open = openDeck === rootId;
-          if (!members.length) return <Fragment key={rootId}>{cell(row)}</Fragment>;
+          if (!members.length) return <Bay key={rootId}>{cell(row)}</Bay>;
           return (
-            <Fragment key={rootId}>
+            <Bay key={rootId} groupOf={open ? rootId : 0}>
               <CropDeck
                 rootId={rootId}
                 count={members.length}
@@ -833,15 +1180,18 @@ export function OutputsSection({
                 }
                 open={open}
                 onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
+                /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `set` + `▾`), а не своей
+                   строкой под кадром: F-9, разбор у ветки `deck` в `cell`. */
+                hostDoor
               >
-                {cell(row, !open)}
+                {cell(row, { open })}
               </CropDeck>
               {open &&
                 members.map((member) => {
                   const memberRow = rowById.get(member.id ?? 0);
                   return memberRow ? <Fragment key={member.id}>{cell(memberRow)}</Fragment> : null;
                 })}
-            </Fragment>
+            </Bay>
           );
         })}
       </Strip>
@@ -869,6 +1219,58 @@ export function OutputsSection({
           выбрана; кадры размечает человек, а `for_input: false` уезжает на провод из самого хука
           (довод — у его вызова выше). */}
       {split.modal}
+
+      {/* ═══ ВОПРОС ДВЕРИ `set` — ОДИН НА РАЗДЕЛ, ПО ИМЕНИ ЛИСТА (F-7) ═══════════════════════
+          «Guard the irreversible» (PRODUCT.md): `set` очищает стороны, о которых разрез молчит, и
+          вытесняет то, что стоит в названных. Вопрос задаётся ТОЛЬКО когда терять есть что —
+          пустой путь этих людей не пáдят («wizard-style over-explained flows»), и решает это
+          ветка `steps.some(s => s.displaces)` у самой двери.
+          ⚠ ОКНО ОДНО, А НЕ ПО ОДНОМУ НА ЯЧЕЙКУ: булев флаг внутри ячейки открыл бы их разом над
+          всеми листами — тот же довод, что у `VectorModal` ниже. */}
+      {askingRoot > 0 &&
+        (() => {
+          const { steps } = setStepsFor(askingRoot);
+          const places = steps.filter((s) => s.act === 'place');
+          const clears = steps.filter((s) => s.act === 'clear');
+          const losing = steps.filter((s) => s.displaces);
+          return (
+            <ConfirmationModal
+              open
+              onOpenChange={(next: boolean) => !next && setAskingRoot(0)}
+              title='replace the whole render input with this split?'
+              confirmLabel='replace the input'
+              onConfirm={() => {
+                const target = askingRoot;
+                setAskingRoot(0);
+                void runSet(target);
+              }}
+            >
+              <div className='flex flex-col gap-2' data-set-ask={askingRoot}>
+                <Text size='control' component='p' className='normal-case'>
+                  {places.length > 0 && (
+                    <>
+                      <b>{places.map((s) => viewLabel(s.view)).join(', ')}</b> take the pieces of
+                      this split.{' '}
+                    </>
+                  )}
+                  {clears.length > 0 && (
+                    <>
+                      <b>{clears.map((s) => viewLabel(s.view)).join(', ')}</b>{' '}
+                      {clears.length === 1 ? 'is' : 'are'} emptied — the split does not name{' '}
+                      {clears.length === 1 ? 'that side' : 'those sides'}.
+                    </>
+                  )}
+                </Text>
+                <Text size='control' component='p' className='normal-case'>
+                  {losing.length} of the sides {losing.length === 1 ? 'holds a render' : 'hold renders'}
+                  right now, and {losing.length === 1 ? 'it goes' : 'they go'} out of the input:{' '}
+                  {losing.map((s) => viewLabel(s.view)).join(', ')}. Nothing is deleted — every
+                  picture stays on the card and can be put back one side at a time.
+                </Text>
+              </div>
+            </ConfirmationModal>
+          );
+        })()}
 
       {/* ОДИН РЕДАКТОР НА ВЕСЬ РАЗДЕЛ, ПО ИМЕНИ ЦЕЛИ (E-3). Держать его внутри ячейки значило
           бы столько модалок, сколько плиток; булев флаг открыл бы их разом над всеми.

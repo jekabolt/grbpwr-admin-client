@@ -310,15 +310,29 @@ export function slotFootnote(
 export function InertDoor({
   label,
   reason,
+  size = 'xs',
   className,
 }: {
   label: React.ReactNode;
   reason: string;
+  /**
+   * ⚠ РАЗМЕР ОТКАЗА — ЭТО РАЗМЕР ДВЕРИ, КОТОРУЮ ОН СОБОЙ ЗАМЕНЯЕТ, И ЭТО НЕ УКРАШЕНИЕ (F-1).
+   *
+   * Дверь была прибита к `xs` навсегда, а живая кнопка на её месте — `sm`. Значит на КАЖДОМ
+   * экране, где ворота закрыты, орган стоял меньше себя самого и ПОДПРЫГИВАЛ, как только ворота
+   * открывались: на PATTERN — MAKE A PATTERN ворота закрыты, пока не введено имя, поэтому там
+   * человек почти всегда видел маленькую дверь, а на флэт-генерации — большую живую кнопку.
+   * Ровно это владелец и назвал: «сделай кноку генерейт такого же размера как на флет генерации».
+   *
+   * Умолчание `xs` оставлено намеренно: остальные шестнадцать дверей на умолчании этого band'а стоят рядом
+   * с `xs`-кнопками, и менять их размер значило бы чинить одну строку и сломать тридцать шесть.
+   */
+  size?: 'xs' | 'sm';
   className?: string;
 }) {
   return (
     <span data-inert={reason} title={reason} className={cn('inline-flex', className)}>
-      <Button variant='secondary' size='xs' disabled>
+      <Button variant='secondary' size={size} disabled>
         {label}
       </Button>
     </span>
@@ -396,14 +410,12 @@ export type BenchSlotProps = {
    * «дальше» уводит в референсы и историю, как и просил владелец (круг 4, пункт 8).
    */
   galleryItem?: MediaViewerItem;
-  /**
-   * Разрезать плиту этого слота на кадры видов → строки входа (R-17, владелец: «тоже самое должно
-   * работать в FLAT SLOTS»). Механизм живёт в `split-to-input.tsx` и подаётся сверху (`bench.tsx`
-   * → `openForPicture`): плита — УЖЕ картинка полосы, поэтому шаг регистрации, который нужен
-   * референсу, здесь пропущен. Absent = дверь не рисуется (read-only или пустой слот).
-   * Стоит В ЛЕВОМ НИЖНЕМ УГЛУ плиты (S-4/S-15).
-   */
-  onSplit?: () => void;
+  /* ⚠ ПРОПА `onSplit` У ПЛИТЫ БОЛЬШЕ НЕТ (F-18). Он вёл к углу «разрезать на виды», а плита,
+     стоящая в слоте, заведомо одновидовая: композит сервер в слот не пускает вовсе
+     (`store/design/bench.go` → `composite_plate`). Дверь обещала рез тому, у кого резать нечего.
+     Единственные два вызывающих (`bench.tsx`) сняты тем же движением; оставленный проп был бы
+     API, которого никто не вызывает, и приглашением вернуть орган обратно. Вырезать деталь из
+     плиты по-прежнему можно — это `onCrop`, другая дверь с другим исходом. */
   /** Details only. */
   onRename?: (name: string) => void;
   onDelete?: () => void;
@@ -453,7 +465,6 @@ export function BenchSlot(props: BenchSlotProps) {
     onCancelPick,
     onUnmark,
     galleryItem,
-    onSplit,
     onRename,
     onDelete,
   } = props;
@@ -542,11 +553,6 @@ export function BenchSlot(props: BenchSlotProps) {
                   title: 'unmark — empty this slot',
                   disabled: saving,
                 }
-              : undefined
-          }
-          onSplit={
-            !disabled && onSplit
-              ? { onClick: onSplit, ariaLabel: `split ${label} into views` }
               : undefined
           }
           onEdit={

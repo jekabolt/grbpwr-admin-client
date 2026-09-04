@@ -335,20 +335,24 @@ function RunTile({
    * the caller must hand it one word. A composite has no single view and therefore no badge at all;
    * it wears its marks over the picture instead, one per view it declares.
    */
-  const badge = composite
-    ? undefined
-    : inSlot
-      ? inSlot.label
-      : picture.ghostView
-        ? `probably ${viewLabel(picture.ghostView)}`
-        : undefined;
+  /* ⚠ ЯРЛЫК НАЗЫВАЕТ ТОЛЬКО ФАКТ — СТОРОНУ, В КОТОРОЙ ПЛИТА СТОИТ (F-17).
+     Владелец: «в GENERATION HISTORY не пиши probably». Слово убрано вместе с тем, что оно
+     оговаривало, и это не буквоедство: `ghost_view` по контракту — «A guess, never a fact — a
+     human confirms it by putting the plate into a slot», а комментарий пикера добавляет, что на
+     фронте и спине она «routinely wrong». Оставить слово нельзя — просил владелец; оставить одно
+     ИМЯ СТОРОНЫ, сняв слово, было бы хуже всего: плита, СТОЯЩАЯ во фронте, и плита, которую
+     машина лишь угадала фронтом, носили бы посимвольно одинаковый ярлык, а разница между ними
+     стоит денег — подтверждённая не та сторона уезжает в оплаченный прогон.
+     Догадка не потеряна и осталась ровно тем, чем была полезна: ПОРЯДКОМ в пикере слотов —
+     угаданная сторона стоит первой. Порядок сокращает путь и ничего не утверждает. */
+  const badge = composite ? undefined : inSlot ? inSlot.label : undefined;
 
   const overlays = (
     <>
       {composite && (
         // `CompositeMarks` positions itself against the nearest POSITIONED ancestor by `inset-x-0
         // top-0`. This box is that ancestor, and it exists to keep the right edge clear of the
-        // quiet zoom button — at a 140px track «probably SIDE L» otherwise runs under it.
+        // quiet zoom button — at a 140px track a view label otherwise runs under it.
         <span className='pointer-events-none absolute inset-y-0 left-0 right-14'>
           <CompositeMarks facts={facts} />
         </span>
@@ -514,28 +518,30 @@ function RunTile({
            1.6:1. Слово «hidden» под кадром состояние держит и без заливки. */
         dim={hidden || dim}
         className='w-full'
-        /* THE CUT IS OFFERED ON EVERY LIVE PICTURE, NOT ONLY ON A DECLARED COMPOSITE (T-8).
-           `composite_views` is written by the server and is empty on every row today, so a door
-           gated on it is a door nobody has ever seen — while the references block and the bench
-           put the same cut on any picture at all. That was the «везде по разному» the owner named
-           twice. `SplitDesignPicture` takes any band picture by contract, the parent survives the
-           cut, and the verb below still reads the file: `split again` once crops exist. A stamped
-           (hidden) picture keeps no doors, the way it keeps none anywhere else. */
+        /* ═══ РЕЗ ПРЕДЛАГАЕТСЯ НА ЖИВОЙ И ЕЩЁ НЕ РАЗРЕЗАННОЙ КАРТИНКЕ ════════════════════════
+           ⚠ ЗДЕСЬ СТОЯЛО «`composite_views` пуст на каждой строке сегодня» — ЭТО БОЛЬШЕ НЕВЕРНО.
+           Замер базы беты: непусто у 18 картинок из 73, и все восемнадцать — выходы прогонов; у
+           принесённых человеком — никогда. Довод «дверь, гейтованная на него, никем не видена»
+           умер, а вывод из него — нет, и вот почему он остаётся: этот экран и есть то место, где
+           человек ОБЪЯВЛЯЕТ свой лист многовидовым. Полосы входов показывают колоды только для
+           машинных композитов; закрой дверь и здесь — и лист, принесённый руками, станет
+           неразрезаемым вовсе.
+           ⚠ А ВОТ У УЖЕ РАЗРЕЗАННОЙ КАРТИНКИ УГЛА НЕТ (F-8, дословно: «на уже заспличеных
+           картинках на ховер сплит писать не нужно»). Подпись «split … again» вместе с ним ушла:
+           она и была признанием, что орган предлагает второй раз то, что уже сделано.
+           Помеченная (скрытая) картинка дверей не держит — как не держит их нигде. */
         /* ⚠ `!threedFile` — E-32, разбор у объявления. Роль без обработчика примитив не рисует
            вовсе, поэтому на 3D-плитке этого угла физически нет, а не «есть, но серый». */
         onSplit={
-          !disabled && !hidden && !threedFile
+          !disabled && !hidden && !threedFile && facts.splitInto === 0
             ? {
                 onClick: () => onSplit(picture),
                 // No ▸ in an aria-label: a screen reader spells the glyph out as its Unicode name.
-                ariaLabel:
-                  facts.splitInto > 0
-                    ? `split ${handle} again`
-                    : `split ${handle} into views`,
-                title:
-                  facts.splitInto > 0
-                    ? `${splitVerb(facts)} cut another view out of this file`
-                    : `${splitVerb(facts)} cut this file into pictures a slot can take`,
+                /* Ветка «again» снята вместе со своим состоянием: угол теперь появляется только
+                   у НЕразрезанной картинки, и подпись, описывающая второй рез, описывала бы то,
+                   чего на этом кадре уже не бывает. */
+                ariaLabel: `split ${handle} into views`,
+                title: `${splitVerb(facts)} cut this file into pictures a slot can take`,
               }
             : undefined
         }
@@ -1408,6 +1414,18 @@ export function GenerationHistory({
       question='— nothing is deleted; archive folds a whole generation away'
       collapsible
       defaultOpen={defaultOpen}
+      /* ⚠ ЖИВОЙ ПРОГОН ПЕРЕЖИВАЕТ СВЁРТКУ, И ЭТО ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ ИЗ F-2 — РАДИ ДЕНЕГ.
+         Свёрнутая лента показывает только имя и стрелку (F-2), но прогон, который идёт прямо
+         сейчас, назван и там: невидимый прогон — это второй платёж, потому что человек нажмёт
+         GENERATE ещё раз. Счётчик прогонов и серая клауза свёртку НЕ переживают: они отвечают на
+         вопрос, который в свёрнутом виде не задают. */
+      collapsedNote={
+        liveRun ? (
+          <Text size='micro' component='span' className='uppercase tracking-label text-warning'>
+            {runHandle(liveRun.id)} now
+          </Text>
+        ) : null
+      }
       action={
         <div className='flex flex-wrap items-baseline gap-2'>
           {liveRun && (

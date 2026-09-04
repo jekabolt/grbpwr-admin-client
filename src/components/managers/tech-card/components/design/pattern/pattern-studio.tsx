@@ -200,14 +200,22 @@ export function PatternStudio({
         </div>
 
         {/* ─── ДВЕРЬ. ИНВЕНТАРЬ — ЭТО ЕЁ ПОДПИСЬ, БЛОКА БОЛЬШЕ НЕТ ────────────────────────── */}
-        <div className='flex flex-wrap items-center gap-2'>
+        {/* ⚠ РЯД ТОЙ ЖЕ МЕТРИКИ, ЧТО НА ФЛЭТ-ГЕНЕРАЦИИ (F-1). Владелец: «в PATTERN - MAKE A
+            PATTERN сделай кноку генерейт такого же размера как на флет генерации вообще везде
+            сделай ее одиаковой и логику и отступы».
+            Три расхождения, каждое видимое: отступ ряда (`py-1` против ничего), размер двери
+            отказа (`InertDoor` был прибит к `xs`, а живая кнопка `sm` — и на ЭТОМ экране ворота
+            закрыты дольше всего, пока не введено имя, поэтому маленькую дверь здесь и видели),
+            и ожидание (`loading` подменяет надпись полосой в 175px, раздувая кнопку втрое в
+            момент нажатия). */}
+        <div className='flex flex-wrap items-center gap-2 py-1'>
           {frozen ? (
-            <InertDoor label='generate' reason={frozen} />
+            <InertDoor label='GENERATE' reason={frozen} size='sm' />
           ) : (
             <Button
               variant='main'
               size='sm'
-              loading={run.isPending}
+              disabled={run.isPending}
               onClick={() =>
                 run.start({
                   kind: 'pattern',
@@ -261,7 +269,7 @@ export function PatternStudio({
                 })
               }
             >
-              GENERATE
+              {run.isPending ? 'starting…' : 'GENERATE'}
             </Button>
           )}
           {/* ИНВЕНТАРЬ ПРОМПТА, ОДНОЙ СТРОКОЙ И ДОСЛОВНО. У двух соседних экранов он — панель,

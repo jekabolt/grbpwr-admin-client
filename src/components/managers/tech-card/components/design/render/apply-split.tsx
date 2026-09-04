@@ -46,11 +46,27 @@ import type { BenchSide } from './model';
  *   · сторона, которую разрез не называет и которая пуста → не трогается вовсе. Запись, ничего не
  *     меняющая, — это CAS-конфликт, купленный за просто так.
  *
- * ⚠ РАЗРУШИТЕЛЬНОЕ ДЕЙСТВИЕ НАЗЫВАЕТСЯ ДО НАЖАТИЯ, А НЕ ПОСЛЕ. Строка под дверью всегда говорит,
- * что именно встанет и что именно опустеет; и если опустеть или быть вытесненным есть чему —
- * вопрос задаётся модалкой, поимённо по сторонам. Если терять нечего (все затронутые стороны
- * пусты), вопроса нет: пустой путь этих людей не пáдят (PRODUCT.md, «wizard-style over-explained
- * flows»).
+ * ⚠ РАЗРУШИТЕЛЬНОЕ ДЕЙСТВИЕ НАЗЫВАЕТСЯ ДО ЗАПИСИ, А НЕ ПОСЛЕ. Если опустеть или быть вытесненным
+ * есть чему — вопрос задаётся модалкой, поимённо по сторонам, и ни одна запись не уходит, пока на
+ * него не ответили. Если терять нечего (все затронутые стороны пусты), вопроса нет: пустой путь
+ * этих людей не пáдят (PRODUCT.md, «wizard-style over-explained flows»).
+ *
+ * ═══ СТРОКИ ПОСЛЕДСТВИЙ ПОД ДВЕРЬЮ БОЛЬШЕ НЕТ (круг 17, F-10) ═════════════════════════════════
+ *
+ * Владелец, дословно: «этот текст нахуя тут "the input becomes exactly this split: front, back,
+ * side R take their pieces. Nothing stands in those sides now, so nothing is lost"». Строка была
+ * ВТОРЫМ написанием того, что говорит вопрос, и стояла под дверью всегда — в том числе когда
+ * терять нечего и говорить ей было не о чем. Снята.
+ *
+ * ЧТО ОСТАЛОСЬ ОТ «ДО НАЖАТИЯ»: дверь несёт потерю на себе — `title` называет стороны, которые
+ * опустеют, и `data-apply-split-losing` держит их число, — а вопрос по-прежнему стоит между
+ * нажатием и записью. Замерено пробой qa-k2 (21–23) и qa-w2 (W-2): вопрос задаётся, до ответа на
+ * провод не уходит ничего, после — ровно четыре стороны.
+ *
+ * ⚠ ПОДПИСЬ ДВЕРИ — «apply splitted» БЕЗ СТРЕЛКИ, И ЭТО ЗАМЕР, А НЕ ВКУС. Ячейка полосы — 132px;
+ * кнопка `xs` рендерится 12-пиксельным FeatureMono с трекингом, и «apply splitted ▸» меряется в
+ * 136px — то есть ПЕРЕНОСИЛАСЬ на вторую строку и стояла выше соседних дверей (F-14, «всё
+ * перекосоёбано»). Без стрелки — 121.5px, одна строка, та же высота, что у соседей.
  *
  * ⚠ ОТКАЗ ОДНОЙ СТОРОНЫ НЕ ОСТАНАВЛИВАЕТ ОСТАЛЬНЫЕ, и это тот же выбор, что у двери «fill the
  * empty sides»: батча у глагола верстака нет и не будет (решение сервера), значит выбор между
@@ -256,37 +272,30 @@ export function ApplySplitDoor({
 
   const placeWords = places.map((s) => viewLabel(s.view)).join(', ');
   const clearWords = clears.map((s) => viewLabel(s.view)).join(', ');
+  const losingWords = losing.map((s) => viewLabel(s.view)).join(', ');
 
   return (
     <div className='flex flex-col gap-1' data-apply-split={pieces.length}>
+      {/* `w-full` — та же ширина, что у соседних дверей полосы: все они — кнопки `xs` во всю
+          ячейку, на одной линии (F-14). Потеря названа на самой двери, до нажатия, подсказкой;
+          вопрос — между нажатием и записью. */}
       <Button
         variant='secondary'
         size='xs'
+        className='w-full'
         loading={busy}
         disabled={disabled}
         data-apply-split-door=''
+        data-apply-split-losing={losing.length}
+        title={
+          losing.length
+            ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
+            : `${placeWords || 'no side'} take the pieces; no side loses anything`
+        }
         onClick={() => (losing.length ? setAsking(true) : void run())}
       >
-        apply splitted ▸
+        apply splitted
       </Button>
-
-      {/* ⚠ ПОСЛЕДСТВИЕ СТОИТ ПОД ДВЕРЬЮ ВСЕГДА, А НЕ ТОЛЬКО В ВОПРОСЕ. Вопрос человек читает уже
-          решившимся; строка — до того, как потянулся. Обе половины жеста названы: что встанет и
-          что опустеет. */}
-      <Text
-        size='nano'
-        variant='label'
-        component='p'
-        data-apply-split-line={losing.length}
-        className='normal-case'
-      >
-        the input becomes exactly this split: {placeWords || 'no side'} take{' '}
-        {places.length === 1 ? 'its piece' : 'their pieces'}
-        {clearWords ? `, and ${clearWords} ${clears.length === 1 ? 'is' : 'are'} emptied` : ''}.
-        {losing.length > 0
-          ? ` ${losing.length} side${losing.length === 1 ? '' : 's'} now holding a ${noun} ${losing.length === 1 ? 'loses it' : 'lose it'}.`
-          : ' Nothing stands in those sides now, so nothing is lost.'}
-      </Text>
 
       <ConfirmationModal
         open={asking}
@@ -321,17 +330,29 @@ export function ApplySplitDoor({
         </div>
       </ConfirmationModal>
 
+      {/* ⚠ ОТЧЁТ ОБ ОТКАЗЕ СТОИТ В КОЛОНКЕ ШИРИНОЙ 132px, И ЭТО ОПРЕДЕЛЯЕТ ЕГО ФОРМУ (F-14).
+          Здесь стояли четыре предложения в `CalloutBox` — на ячейке полосы они вставали красной
+          стеной ВЫШЕ САМОГО КАДРА и разносили нижние края соседних дверей. Ровно этот блок
+          владелец и приложил снимком к F-11.
+          Разбор тот же, что у соседнего экрана, который вынес свой отчёт НАД полосой: сюда его
+          вынести нельзя — дверь живёт внутри чужой ячейки и хозяина у неё нет. Поэтому здесь
+          сокращена НЕ ПРАВДА, А ЕЁ ИЗЛОЖЕНИЕ: число и стороны видны глазом, полный разбор
+          (причина сервера по каждой стороне и почему ничего не откачено) — в `title`, там же, где
+          его ищут, когда решают, что делать дальше. */}
       {outcome && (
         <CalloutBox tone='error'>
-          <Text size='micro' component='p' className='normal-case'>
+          <Text
+            size='micro'
+            component='p'
+            className='normal-case'
+            title={`${outcome.failed
+              .map((f) => `${viewLabel(f.view)} — ${f.reason}`)
+              .join('; ')}. Nothing was undone: the sides are separate slots, and taking a good one back would be another write that can fail in its turn. Press the door again — it reads the bench afresh.`}
+          >
             <b>
-              {outcome.done.length} of {outcome.done.length + outcome.failed.length} sides were
-              written.
+              {outcome.done.length} of {outcome.done.length + outcome.failed.length} written.
             </b>{' '}
-            {outcome.failed.length === 1 ? 'This one was not: ' : 'These were not: '}
-            {outcome.failed.map((f) => `${viewLabel(f.view)} — ${f.reason}`).join('; ')}. Nothing was
-            undone: the sides are separate slots, and taking a good one back would be another write
-            that can fail in its turn. Press the door again — it reads the bench afresh.
+            {outcome.failed.map((f) => viewLabel(f.view)).join(', ')} failed — press again.
           </Text>
         </CalloutBox>
       )}

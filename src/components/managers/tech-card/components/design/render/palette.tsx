@@ -324,12 +324,30 @@ function TextureGrid({
         )}
       </Tiles>
 
-      {/* ПУСТАЯ ПОЛКА УЧИТ ЭКРАНУ, А НЕ СООБЩАЕТ «ЗДЕСЬ НИЧЕГО НЕТ»: обе двери стоят рядом. */}
-      {shelf.length === 0 && (
+      {/* ═══ ПРОСТЫНЯ ПУСТОЙ ПОЛКИ СНЯТА (F-19) ══════════════════════════════════════════════
+          Владелец, дословно: «убери текст». Абзац говорил ТРИ вещи, и каждая уже сказана органом,
+          который стоит ближе к делу, — поэтому снятие ничему не стоило смысла:
+            · «принеси фотографию ткани через + texture» — сама дверь `+ texture` и стоит справа,
+              с подписью «⌘V · drop · browse» под ней; текст пересказывал кнопку, на которую
+              человек в этот момент смотрит;
+            · «или сделай плитку на STUDIO → PATTERN» — вторая дверь, `make a pattern ▸`, стоит
+              там же и уводит туда же (её `title` называет и что оттуда вернётся);
+            · «прогон без текстуры законен» — единственный факт абзаца, которого не видно из
+              кнопок, и он сказан на этом же экране ТРИЖДЫ помимо него: вопросом секции («the
+              cloth: a texture, a colour, or both»), оговоркой этой группы («a texture, a colour,
+              or both — one texture per run») и рядом CLOTH IS, который на пустой полке прямо
+              говорит «No texture picture rides on this run, so these words govern the cloth».
+              А в момент, когда это знание нужно по-настоящему — палец над GENERATE, — его говорят
+              сами ворота: `recipeIsStated` отказывает словами «pick a cloth, pick a colour, say
+              what the cloth is, or describe it in words above. Any one of them is enough».
+          ЧТО ОСТАЛОСЬ, И ТОЛЬКО ДЛЯ ОДНОГО СЛУЧАЯ. На карточке ТОЛЬКО ДЛЯ ЧТЕНИЯ обеих дверей
+          нет вовсе (`!disabled` выше), и без единой строки сетка стала бы пустым местом без
+          подписи — «ткани нет» и «блок не загрузился» выглядели бы одинаково. Это признание
+          пустоты, а не урок: одна короткая строка вместо четырёх (DESIGN.md — «render `—` for
+          missing data»). */}
+      {shelf.length === 0 && disabled && (
         <Text size='micro' variant='label' component='p' data-texture-empty className='normal-case'>
-          No texture on this card yet. Bring a photograph of the cloth in with <b>+ texture</b>, or
-          make a repeating tile out of one on STUDIO → PATTERN. A run states no texture perfectly
-          legally — then the colour and the words below build the cloth on their own.
+          No texture on this card.
         </Text>
       )}
 

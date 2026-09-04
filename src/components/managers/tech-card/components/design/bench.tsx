@@ -25,7 +25,6 @@ import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
-import { useSplitToInput } from './split-to-input';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 
 /**
@@ -151,7 +150,12 @@ export function Bench({
    * Роли кадрам ставит СЕРВЕР в транзакции разреза (см. шапку `split-to-input.tsx`); отсюда кропы
    * получают только строки входа, а помеченными приезжают со следующим чтением полосы.
    */
-  const split = useSplitToInput({ techCardId, band });
+  /* ⚠ ХУКА РАЗРЕЗА ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО ПРОДОЛЖЕНИЕ F-18, А НЕ УБОРКА. Обе двери, которые его
+     открывали, сняты выше: композит в слот верстака не встаёт (сервер отвечает `composite_plate`),
+     значит резать здесь заведомо нечего. Оставленная модалка была бы органом, который ни один
+     жест этого экрана не открывает, — а такой орган читается как поломка ровно в тот день, когда
+     кто-нибудь заметит, что она не появляется. Разрез живёт там, где есть что резать: на листах
+     с объявленными видами (`splitDecks`) и на референсах. */
 
   /**
    * THE OPTIMISTIC PAINT IS RELEASED BY THE SERVER'S OWN ANSWER, not by a timer and not by the
@@ -413,8 +417,14 @@ export function Bench({
               onPlaceMedia={(media) => placeMedia(media, ref, rev)}
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
-              // Ручкой сплиту служит имя слота: человек режет «плиту FRONT», а не «upload 3 · b».
-              onSplit={picture ? () => split.openForPicture(picture, viewLabel(view)) : undefined}
+              /* ⚠ УГЛА `split` У ПЛИТЫ ВЕРСТАКА НЕТ (F-18). Владелец: «везде где картинка не
+                 мультивью флет или рендер там не должно на ховер показываться сплит».
+                 Здесь это не сужение по вкусу, а факт, гарантированный СЕРВЕРОМ: композит в слот
+                 не встаёт вовсе — `store/design/bench.go` отвечает `composite_plate` («picture %d
+                 is a composite and must be split first»). Значит КАЖДАЯ плита, стоящая в слоте,
+                 заведомо одновидовая, и дверь «разрезать на виды» обещала рез тому, у кого резать
+                 нечего. Вырезать деталь из плиты по-прежнему можно — это `crop`, другая дверь с
+                 другим исходом. */
               galleryItem={
                 picture?.media ? mediaFullToViewerItem(picture.media as common_MediaFull) : undefined
               }
@@ -458,7 +468,8 @@ export function Bench({
               onPlaceMedia={(media) => placeMedia(media, ref, rev)}
               onCancelPick={pick.cancel}
               onUnmark={() => unmark(ref, rev)}
-              onSplit={picture ? () => split.openForPicture(picture, name) : undefined}
+              /* Тот же довод, что у сторон выше (F-18): в detail-слоте композит стоять не может,
+                 сервер его туда не пускает. */
               onRename={(next) =>
                 writes.setBenchSlot.mutate({
                   slot: ref,
@@ -495,8 +506,9 @@ export function Bench({
           пересказывал, стоят на самом слоте (плейсхолдер медиа и строка жестов), а третьей дороги
           — «mark a picture the band already holds» — больше нет вовсе (J-15). */}
 
-      {/* Модалка сплита (R-17) — одна на верстак, открывается кнопкой «split» любой плиты. */}
-      {split.modal}
+      {/* ⚠ МОДАЛКИ СПЛИТА ЗДЕСЬ БОЛЬШЕ НЕТ — вместе с кнопкой, которая её открывала (F-18, разбор
+          у слотов выше). Комментарий переписан, а не снят, ровно потому, что старый описывал орган
+          как живой: следующий читатель восстановил бы по нему то, что убрано намеренно. */}
 
     </Section>
   );

@@ -112,9 +112,13 @@ export function SlotPicker({
 
   const items = useMemo(() => {
     const ghost = normaliseViewKey(picture.ghostView);
-    // THE GUESS STANDS FIRST, and it is labelled as a guess. `ghost_view` is a hypothesis about
-    // which side this is — routinely wrong on front/back — so it shortens the reach without ever
-    // claiming the answer.
+    // THE GUESS STANDS FIRST, AND THAT IS ALL IT DOES NOW (F-17). `ghost_view` is a hypothesis
+    // about which side this is — routinely wrong on front/back — so it shortens the reach without
+    // ever claiming the answer.
+    // ⚠ СЛОВА «· probably» БОЛЬШЕ НЕТ. Владелец: «в GENERATION HISTORY не пиши probably», а этот
+    // пикер рисуется ИМЕННО ТАМ — он импортирован в `generation-history.tsx`. Догадка осталась
+    // ровно тем, чем была полезна: ПОРЯДКОМ. Порядок сокращает путь и ничего не утверждает, а
+    // подпись именно утверждала — и притом хеджем, который владелец и назвал.
     const sides = [...SILHOUETTE_VIEWS].sort((a, b) => {
       if (a === ghost) return -1;
       if (b === ghost) return 1;
@@ -124,7 +128,7 @@ export function SlotPicker({
     sides.forEach((view) => {
       out.push({
         value: `v:${view}`,
-        label: ghost === view ? `${viewLabel(view)} · probably` : viewLabel(view),
+        label: viewLabel(view),
       });
     });
     // DETAILS ARE THE FLAT BENCH'S ALONE. A detail is a named close-up the sheet cites — cuff,

@@ -215,15 +215,19 @@ export function FabricRenderSlots({
          смысла и оставляет пробу зелёной над сломанным экраном. */
       id='design-render-bench'
       title='fabric render slots'
+      /* ВОПРОС И СЧЁТ — БЕЗ ДУБЛЕЙ (круг 17, F-14). «…3D is built from these and from nothing
+         else» и «front is what 3D needs» повторяли то, что уже сказано на самой плите FRONT
+         («3D cannot start without it») и в шапке зеркала на 3D; это тот же верстак, и оба его
+         экрана теперь говорят одно и то же одинаково коротко. */
       question={
         named
-          ? `— the render of ${named}, one side each; 3D is built from these and from nothing else`
-          : '— the render of this card, one side each; 3D is built from these and from nothing else'
+          ? `— the render of ${named}, one per side; the input of 3D`
+          : '— the render of this card, one per side; the input of 3D'
       }
       action={
         <span className='flex items-center gap-3'>
           <Text size='micro' variant='label' component='span' className='uppercase'>
-            {filled} of 4 · front is what 3D needs
+            {filled} of 4
           </Text>
           {/* ⚠ ДВЕРЬ ЗАПОЛНЕНИЯ НА ЧИТАЕМОЙ КАРТОЧКЕ РИСУЕТСЯ ИНЕРТНОЙ С ПРИЧИНОЙ, а не пропадает:
               предмет есть (кадры лежат и называют свои стороны), нет ПРАВА, — и это разные вещи.

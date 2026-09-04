@@ -72,15 +72,27 @@ export function GenerateRow({
       : null;
 
   return (
-    <div className='flex flex-wrap items-center gap-2 pt-1'>
+    <div className='flex flex-wrap items-center gap-2 py-1'>
+      {/* ⚠ ОДНА ДВЕРЬ НА ЧЕТЫРЁХ ЭКРАНАХ — ОДНА МЕТРИКА И ОДНА ЛОГИКА ОЖИДАНИЯ (F-1).
+          Владелец: «сделай кноку генерейт такого же размера как на флет генерации вообще везде
+          сделай ее одиаковой и логику и отступы».
+
+          Двери отказа теперь `sm` — размер живой кнопки, которую они собой заменяют (разбор у
+          `InertDoor`).
+
+          А `loading` СНЯТ, и это не косметика: `Loader` типа `default` — это полоса шириной
+          175px с отступом `p-2`, и она встаёт ВМЕСТО надписи. Кнопка на 70px раздувалась до
+          двухсот в тот момент, когда по ней нажали, — то есть ряд перекладывался ровно под
+          курсором. Флэт-генерация, которую владелец назвал образцом, всегда делала иначе: коробка
+          остаётся, меняется слово. Здесь теперь то же самое. */}
       {frozen ? (
-        <InertDoor label='generate' reason={frozen} />
+        <InertDoor label='GENERATE' reason={frozen} size='sm' />
       ) : gate.ok ? (
-        <Button variant='main' size='sm' onClick={onGenerate} loading={pending}>
-          GENERATE
+        <Button variant='main' size='sm' onClick={onGenerate} disabled={pending}>
+          {pending ? 'starting…' : 'GENERATE'}
         </Button>
       ) : (
-        <InertDoor label='generate' reason={gate.reason} />
+        <InertDoor label='GENERATE' reason={gate.reason} size='sm' />
       )}
 
       {/* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.

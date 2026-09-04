@@ -1,5 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useMemo, type JSX } from 'react';
+import { Button } from 'ui/components/button';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
@@ -46,9 +47,52 @@ import { Strip, StripCell } from './strip-cell';
  *   · признания «полоса отдаёт одну страницу ленты» — оно относилось к правой половине; у левой
  *     предела нет, плита слота приезжает разрешённой, сколь бы старой ни была.
  *
- * ЧТО ОСТАЛОСЬ: четыре плитки, счёт заполненных, `LockBar` с причиной отказа и дверью, которая
- * именно ЭТОТ отказ снимает (прототип рисует его ровно так, `proto.html:3741-3790`).
+ * ═══ КРУГ 17 (F-10 / F-11 / F-12 / F-14): ОДНА ПОЛОСА РОВНЫХ КНОПОК, БЕЗ ЛИШНИХ СЛОВ ═══════════
+ *
+ * Владелец: «в INPUT — RENDERS BY VIEW … полнейший пиздец этот текст», «для даже незаспличеного
+ * мультивью показываем кнопку аплай сплитед … убери все лишнее», «убери текст "WHAT IS MISSING /
+ * no fabric render stands on this card yet — …"», «сделай полировку … что бы все было ровно все
+ * кнопки ровные нет лишнего текста ничего не перекосоебано».
+ *
+ * ЧТО БЫЛО ЗАМЕРЕНО НА СТЕНДЕ (`tmp/dsgprobe/qa-w2.mjs`, прогон ДО правок):
+ *   · дверь «apply splitted ▸» рисовалась на НЕРАЗРЕЗАННОМ листе ровно в одной позе — у карточки
+ *     только для чтения: ветка `!canWrite` ставила `InertDoor` с этой подписью, не глядя, есть ли
+ *     что применять. У пишущей карточки на месте двери стояло слово «cut it first — split ▸ on the
+ *     frame», посылавшее к углу, который виден только под курсором (тот же дефект, за который
+ *     `outputs.tsx` уже платил, — см. П-4 в `qa-frs.mjs`);
+ *   · подпись «apply splitted ▸» мерялась в 136px при ячейке 132px и ПЕРЕНОСИЛАСЬ на вторую
+ *     строку; дверь «fill it on FABRIC RENDER ▸» была подчёркнутым текстом в три строки (36px)
+ *     против кнопок соседей — нижние края дверей расходились на 85–98px;
+ *   · под дверью «apply» всегда стояла розовая строка последствий (F-10), под входом на пустом
+ *     верстаке — полоса «what is missing» с простынёй (F-12), а в шапке — «front is required»,
+ *     уже сказанное на самой ячейке FRONT.
+ *
+ * ЧТО СТОИТ ТЕПЕРЬ, И ЭТО ОДНО ПРАВИЛО НА ВСЮ ПОЛОСУ: под каждой ячейкой, у которой есть жест,
+ * стоит РОВНО ОДНА кнопка `secondary/xs` во всю ширину ячейки, и больше ничего. Пустая сторона —
+ * «FABRIC RENDER ▸» (туда, где сторону заполняют); лист без разреза — «split ▸» (та же дверь, что
+ * на плитке в «renders of this card»); лист с разрезом — «apply splitted». На читаемой карточке те
+ * же три двери стоят инертными С ПРИЧИНОЙ, каждая со СВОЕЙ подписью, — дверь, которой нечего
+ * применять, не притворяется дверью «apply». Подписи выбраны ПО ЗАМЕРУ: кнопка `xs` рендерится
+ * 12-пиксельным FeatureMono с трекингом, и в 132px влезает не больше ~15 знаков.
+ *
+ * ⚠ ПОЛОСА «WHAT IS MISSING» НЕ РИСУЕТСЯ ДЛЯ ОДНОГО ОТКАЗА — ПУСТОГО ВЕРСТАКА (`next: 'render'`).
+ * Четыре пустые ячейки со словами «empty · required · blocks 3D» и дверью на FABRIC RENDER — это и
+ * есть ответ «чего не хватает», третье повторение под ними владелец и назвал простынёй. Остальные
+ * отказы (нет фронта, смешанные ревизии, на карточке нет рендеров вовсе) полосу сохраняют: они
+ * говорят то, чего по ячейкам не прочесть. Причина пустого верстака при этом ЖИВА — короткой, в
+ * подсказке погашенной GENERATE (`threedGate` → `InertDoor`), так что «почему кнопка не жмётся» не
+ * онемело.
  */
+
+/**
+ * Инертная дверь — во всю ячейку, как и живая. `InertDoor` рисует `inline-flex` по содержимому;
+ * ряд, где живая кнопка на 132px, а погашенная — на 90, читался бы как две разные вещи.
+ */
+const INERT_DOOR = 'flex w-full [&>button]:w-full';
+
+const READ_ONLY_REASON =
+  'this card is read-only for you — cutting a render or putting one into a side is an edit of the card';
+
 export function ThreedInputStrip({
   band,
   lock,
@@ -98,6 +142,7 @@ export function ThreedInputStrip({
    * вкладку.
    */
   const decks = useMemo(() => splitDecks(band, 'render'), [band]);
+  const canWrite = !!techCardId && !disabled;
 
   return (
     <Section
@@ -105,12 +150,15 @@ export function ThreedInputStrip({
       title='input — renders by view'
       question={
         named
-          ? `— the fabric render slots of ${named}, one per side; 3D is built from these and from nothing else`
-          : '— the fabric render slots, one per side; 3D is built from these and from nothing else'
+          ? `— the fabric render slots of ${named}, one per side`
+          : '— the fabric render slots, one per side'
       }
       action={
+        /* СЧЁТ, И ТОЛЬКО СЧЁТ. «front is required» стояло здесь вторым написанием того, что
+           говорит сама ячейка FRONT («required · blocks 3D»); один факт в двух местах учит
+           читать одно из них (F-14). */
         <Text size='micro' variant='label' component='span' className='uppercase'>
-          {filled} of 4 filled · front is required
+          {filled} of 4 filled
           {decks.length > 0 ? ` · ${decks.length} multi-view` : ''}
         </Text>
       }
@@ -140,7 +188,9 @@ export function ThreedInputStrip({
                    Красное «blocks 3D» стояло на КАЖДОЙ пустой стороне, пока 3D было поворотным
                    столом. `multi-view-to-3d` строит объём из видов и бесплатно отвергает ровно
                    одно — отсутствие фронта (`no_front_render` у двери, ДО резерва). Ячейка,
-                   кричащая «blocks 3D» там, где ничего не блокируется, учит не читать красное. */
+                   кричащая «blocks 3D» там, где ничего не блокируется, учит не читать красное.
+                   «one more angle = a better model» под необязательной стороной снято (F-14): это
+                   пояснение, а не факт о ячейке, и его читали четыре раза подряд. */
                 lines={
                   side.view === 'front'
                     ? [
@@ -149,29 +199,34 @@ export function ThreedInputStrip({
                           blocks 3D
                         </span>,
                       ]
-                    : ['optional', 'one more angle = a better model']
+                    : ['optional']
                 }
                 action={
                   /* ДВЕРЬ ВЕДЁТ ТУДА, ГДЕ СТОРОНУ ЗАПОЛНЯЮТ, И БОЛЬШЕ НЕ ПИШЕТ САМА. Прежняя
                      («ask for it ▸») звала генерировать рендер — верный жест ровно тогда, когда
                      рендера ещё нет вовсе; но самый частый случай другой: рендер есть, он лежит в
                      «renders of this card», и его надо ПОЛОЖИТЬ в сторону. Обе половины теперь на
-                     одном экране, и дверь называет его. */
+                     одном экране, и дверь называет его.
+
+                     КНОПКА, А НЕ ПОДЧЁРКНУТЫЙ ТЕКСТ (F-14): двери ячеек этой полосы и соседней
+                     («unmark», «mark ▸», «apply splitted») — кнопки `secondary/xs`; подчёркнутая
+                     строка в три переноса среди них была единственной иной формой и единственной
+                     иной высотой. Подпись — имя вкладки: «fill it on FABRIC RENDER ▸» меряется в
+                     213px и в ячейку не входит ни в одном переносе, «FABRIC RENDER ▸» — 128. */
                   onGoToKind ? (
-                    <button
-                      type='button'
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      className='w-full'
                       onClick={() => onGoToKind('render')}
-                      className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                      title={`fill ${viewLabel(side.view)} on FABRIC RENDER — from the renders of this card or from a file`}
                     >
-                      {/* НЕРАЗРЫВНЫЙ ПРОБЕЛ ПЕРЕД СТРЕЛКОЙ: ячейка 132px, подпись переносится, и
-                          стрелка иначе уезжает на свою строку одна — читается как обрубок. */}
-                      <Text size='nano' variant='label' component='span'>
-                        {'fill it on FABRIC\u00a0RENDER\u00a0▸'}
-                      </Text>
-                    </button>
+                      FABRIC RENDER ▸
+                    </Button>
                   ) : (
                     <InertDoor
-                      label='fill it on FABRIC RENDER ▸'
+                      className={INERT_DOOR}
+                      label='FABRIC RENDER ▸'
                       reason='switch to FABRIC RENDER on the strip above: its FABRIC RENDER SLOTS block is where a side is filled, from the renders of this card or from a file'
                     />
                   )
@@ -223,7 +278,7 @@ export function ThreedInputStrip({
             и глагол на двери, а не штрих. */}
         {decks.map((deck) => {
           const id = deck.sheet.id ?? 0;
-          const canWrite = !!techCardId && !disabled;
+          const cut = deck.pieces.length > 0;
           return (
             <StripCell
               key={`deck-${id}`}
@@ -232,11 +287,14 @@ export function ThreedInputStrip({
               alt={`multi-view render · ${deck.declared.map(viewLabel).join(', ')}`}
               badge='multi-view'
               gallery={deck.sheet.media ? mediaFullToViewerItem(deck.sheet.media) : undefined}
-              /* УГОЛ `split` — ТОТ ЖЕ ОРГАН, ЧТО ВЕЗДЕ. Для листа без разреза это единственный
-                 путь в стороны, и здесь он теперь есть: до E-6 за ним надо было идти на соседнюю
-                 вкладку. */
+              /* ⚠ У РАЗРЕЗАННОГО ЛИСТА УГЛА `split` НЕТ (F-8, дословно: «на уже заспличеных
+                 картинках на ховер сплит писать не нужно»). Здесь стоял обратный довод — «у листа
+                 с разрезом он остаётся путём перерезать», — и он пережил своё основание: у такого
+                 листа глагол уже другой, `apply splitted` под кадром, и два глагола на одном кадре
+                 читаются как один сломанный. Резать второй раз по-прежнему законно и делается там,
+                 где это единственный глагол кадра, — в ленте генераций. */
               onSplit={
-                canWrite
+                canWrite && !cut
                   ? {
                       onClick: () => split.openForPicture(deck.sheet, `sheet ${id}`),
                       ariaLabel: `split the multi-view render ${id} into views`,
@@ -249,13 +307,19 @@ export function ThreedInputStrip({
                   : 'a multi-view file',
                 stripProvenance(band, deck.sheet),
               ]}
+              /* ═══ ДВЕРЬ ПО СОСТОЯНИЮ ЛИСТА, А НЕ ПО ПРАВУ (F-11) ═══════════════════════════════
+                 «apply splitted» существует ТОЛЬКО там, где есть что применять. Раньше ветка
+                 «нет права» ставила эту подпись на любой лист, и владелец видел «apply» над
+                 листом, который никто не резал. Теперь право решает лишь, жива дверь или
+                 погашена; КАКАЯ это дверь — решает разрез. */
               action={
                 !canWrite ? (
                   <InertDoor
-                    label='apply splitted ▸'
-                    reason='this card is read-only for you — putting a render into a side is an edit of the card'
+                    className={INERT_DOOR}
+                    label={cut ? 'apply splitted' : 'split ▸'}
+                    reason={READ_ONLY_REASON}
                   />
-                ) : deck.pieces.length ? (
+                ) : cut ? (
                   <ApplySplitDoor
                     techCardId={techCardId ?? 0}
                     sides={sides}
@@ -267,9 +331,20 @@ export function ThreedInputStrip({
                     noun='render'
                   />
                 ) : (
-                  <Text size='nano' variant='label' component='span' className='normal-case'>
-                    cut it first — split ▸ on the frame
-                  </Text>
+                  /* ЖИВАЯ ДВЕРЬ РАЗРЕЗА, А НЕ СЛОВО О НЕЙ. «cut it first — split ▸ on the frame»
+                     называло угол, которого на экране без курсора нет (П-4 в `qa-frs.mjs` уже
+                     платила за это на соседнем экране). Якорь тот же, что у плитки листа в
+                     «renders of this card» — `data-split-for`. */
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    className='w-full'
+                    data-split-for={id}
+                    onClick={() => split.openForPicture(deck.sheet, `sheet ${id}`)}
+                    title='cut this multi-view render into one picture per side; the pieces can then be applied to the input at once'
+                  >
+                    split ▸
+                  </Button>
                 )
               }
             />
@@ -279,7 +354,9 @@ export function ThreedInputStrip({
 
       {split.modal}
 
-      {lock && !lock.ok && (
+      {/* ⚠ ПУСТОЙ ВЕРСТАК (`next: 'render'`) ПОЛОСУ НЕ РИСУЕТ — довод в шапке (F-12). Остальные
+          отказы говорят то, чего по ячейкам не прочесть, и остаются со своими дверями. */}
+      {lock && !lock.ok && lock.next !== 'render' && (
         <LockBar reason={lock.reason}>
           {/* ═══ ДВЕРЬ ОТВЕЧАЕТ ИМЕННО ЭТОМУ ОТКАЗУ (J-26) ══════════════════════════════════════
               Отказов у 3D два, и сервер их различает поимённо: `no_fabric_render` («на верстаке
@@ -327,7 +404,7 @@ export function ThreedInputStrip({
                   </Text>
                 </button>
               )}
-              {(lock.next === 'render' || lock.next === 'flat' || !lock.next) && (
+              {(lock.next === 'flat' || !lock.next) && (
                 <button
                   type='button'
                   onClick={() => onGoToKind('render')}

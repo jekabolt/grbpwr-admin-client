@@ -1,5 +1,4 @@
 import { cn } from 'lib/utility';
-import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { cutPiecesWord } from './composite';
@@ -100,38 +99,25 @@ import { cutPiecesWord } from './composite';
  * An orchestrated reflow of a twelve-column auto-fill grid is choreography this register rejects —
  * and animating grid layout is the one thing motion here must not do.
  *
- * ═══ E-4: КОЛОДА, КОТОРУЮ УЖЕ ОТКРЫВАЛИ, ОСТАЁТСЯ ПОМЕЧЕННОЙ ПОСЛЕ СКЛАДЫВАНИЯ ════════════════
+ * ═══ ЗДЕСЬ СТОЯЛА МЕТКА «ЭТУ КОЛОДУ УЖЕ ОТКРЫВАЛИ» (E-4), И ВЛАДЕЛЕЦ ЕЁ ОТМЕНИЛ ══════════════
  *
- * Владелец, дословно: «расколапшеные карточки + их мультивью после колапса должны как-то
- * визуально обводкой или фоном немножно помечены подумай импакблом как лучше это сделать».
+ * Круг 16 прочитал «расколапшеные карточки + их мультивью после колапса должны как-то визуально
+ * обводкой или фоном немножно помечены» как ОБВОДКУ ПОСЛЕ СКЛАДЫВАНИЯ: 1px ink вокруг листа с
+ * веером, пока колода закрыта.
  *
- * ЗАЧЕМ ЭТО ВООБЩЕ НУЖНО — ЭТО ВТОРАЯ ПОЛОВИНА ТОГО ЖЕ ПУНКТА. Первая половина велит колоде
- * складываться, когда человек зумит ЧУЖУЮ карточку. То есть отныне колода закрывается САМА, без
- * его нажатия, — и в ряду из шести мультивью он теряет ту, в которой только что работал. Метка
- * отвечает ровно на этот вопрос и ни на какой другой: «вот эту ты открывал».
+ * Круг 17, дословно: «сплитнутые сейчас отображаются с обводкой один пиксель черной это убрать я
+ * имел ввиду другое когда они расколапшены сделай так что бы под ними мульти вью и стороны был
+ * немного затемнен бекграунд что бы когда оно анколапшено было понятно что это общие картинки».
  *
- * ЧЕМ ПОМЕЧАТЬ — РАЗБОР, А НЕ ВКУС. В этой системе выбор рисуется ВЕСОМ (2px ink по рамке
- * карточки, `PictureTile.selected`), здоровье — цветом, состояние данных — словом. Значит:
- *   · 2px ink по рамке листа занят и означает СОВСЕМ другое («эта плита выбрана»);
- *   · заливка серым под карточками спорит с белым материалом блока и с самим грунтом колоды,
- *     который здесь несущий (E-5 выше);
- *   · рамка самой карточки 1px #ccc — её усиление читалось бы как «карточка выделена», а
- *     помечена не карточка, а ГРУППА.
- * Свободна ровно одна клетка словаря: 1px ink ВОКРУГ ГРУППЫ, отбитая от неё 2px. Она обводит
- * лист вместе с веером — то есть тот самый предмет, который владелец и называет («карточки + их
- * мультивью»), — не трогает ни одной существующей рамки и не стоит ни пикселя раскладки
- * (`outline` не участвует в потоке). Соседняя дорожка сетки в 8px от края, значит 2px отбивки
- * плюс 1px линии ни во что не упираются.
+ * ТО ЕСТЬ ПЕРЕПУТАНЫ БЫЛИ ОБА ЧЛЕНА: и СОСТОЯНИЕ (не «после колапса», а РАСКРЫТАЯ группа), и
+ * СРЕДСТВО (не линия по контуру, а грунт под группой). Обводка снята целиком — вместе с памятью
+ * `seen`, которая существовала только ради неё.
  *
- * И ЭТО НЕ ОДНА ЛИШЬ КРАСКА: слово двери тоже чернеет, а её `title` называет факт словами. Метка
- * навигационная, а не про данные, поэтому монохромной читаемости хватает и веса; но дверь —
- * единственный объявленный орган колоды, и состояние обязано быть слышно на ней.
- *
- * ⚠ ПАМЯТЬ ЖИВЁТ У КОЛОДЫ, А НЕ У ХОЗЯИНА, И ЭТО РЕШЕНИЕ. «Открывал» — свойство ЭТОГО ВЗГЛЯДА на
- * ленту, а не карточки: сменил страницу, сузил фильтр, ушёл на соседнюю тех-карту — колода
- * размонтировалась, и метка честно исчезла вместе с осмотром. Хозяин же держит ОДНУ открытую
- * колоду на всю ленту, и хранить у него ещё и список осмотренных значило бы завести второе
- * состояние там, где первое нарочно сделано одним значением.
+ * ⚠ И ГРУНТ РИСУЕТ НЕ ЭТОТ ФАЙЛ, ХОТЯ СОБЛАЗН ВЕЛИК. Раскрытая группа — это лист ПЛЮС его куски,
+ * а куски рисует ХОЗЯИН, рядом с колодой и вне её (`{open && members.map(...)}` в обоих хостах).
+ * Коробки, которая охватывала бы и лист, и куски, у колоды нет и быть не может: она кончается на
+ * своём последнем пикселе. Поэтому подложку кладёт тот, кто держит обе половины, — см.
+ * `data-deck-group` в `render/outputs.tsx`.
  */
 
 /** How many pieces peek out from behind the sheet. The deck claims two tracks; three thirds fill
@@ -154,6 +140,7 @@ export function CropDeck({
   frameAspect,
   open,
   onToggle,
+  hostDoor,
   className,
   style,
   children,
@@ -183,59 +170,44 @@ export function CropDeck({
   frameAspect: string;
   open: boolean;
   onToggle: () => void;
+  /**
+   * ═══ ДВЕРЬ КОЛОДЫ РИСУЕТ ХОЗЯИН, А НЕ КОЛОДА (F-9) ══════════════════════════════════════
+   *
+   * Владелец про полосу рендеров: «вот это еще "▸ 3 CUT PIECES" слишком много визуального
+   * мусора». Мусором её делает СОСЕДСТВО: под тем же кадром уже стоит ряд дверей ячейки, и
+   * «раскрыть колоду» оказывалось ВТОРЫМ органом того же кадра, на своей собственной строке.
+   * В полосе рендеров этот глагол переехал в ряд дверей ячейки и слился там с `split ▸`,
+   * который F-7 всё равно велел переименовать (`expand ▸` / `set`).
+   *
+   * ⚠ ПРОП, А НЕ ПРАВКА ПО МЕСТУ. Второй хозяин колоды — лента генераций — под карточкой ряда
+   * дверей не имеет вовсе, и снятие двери там оставило бы колоду без единого объявленного
+   * органа: только мышиная поверхность, ни `aria-expanded`, ни таб-стопа. Умолчание поэтому
+   * «дверь моя», и лента не меняется ни на пиксель.
+   *
+   * ⚠ ХОЗЯИН, ГАСЯЩИЙ ДВЕРЬ, ОБЯЗАН ПОСТАВИТЬ СВОЮ — с `aria-expanded` и словом. Колода этого
+   * проверить не может; ниже, в разметке, стоит напоминание на том же месте.
+   */
+  hostDoor?: boolean;
   /** How the root claims its space in ITS host: `span 2` in a grid, an explicit width in a strip. */
   className?: string;
   style?: CSSProperties;
   /** The root's own card, drawn exactly as any other card in the row. */
   children: ReactNode;
 }) {
-  /**
-   * ЭТУ КОЛОДУ УЖЕ ОТКРЫВАЛИ В ЭТОМ ВЗГЛЯДЕ НА ЛЕНТУ (E-4). Правка состояния прямо в отрисовке —
-   * тот же приём и тот же довод, что у зажима страницы в `generation-history.tsx`: React применит
-   * её до коммита, лишнего кадра со старым значением не будет, а эффект такой кадр оставил бы.
-   */
-  const [seen, setSeen] = useState(false);
-  if (open && !seen) setSeen(true);
-  const marked = !open && seen;
-
   const word = cutPiecesWord(count);
   const title = open
     ? `the pieces cut from this sheet are open in the row — press to fold them back behind it`
-    : marked
-      ? `you had these open — press to open them again. Zooming any card outside this sheet folds them back`
-      : `the pieces cut from this sheet — press the sheet or a piece to open them as cards in the row; opening another sheet's pieces folds these back`;
+    : `the pieces cut from this sheet — press the sheet or a piece to open them as cards in the row; opening another sheet's pieces folds these back`;
 
   const shown = peeks.slice(0, DECK_PEEK_MAX);
   /** `W/3`, said once. The fan's offsets, the visible strip and the hosts' widths all read it. */
   const step = `calc(var(--deck-card) / ${DECK_PEEK_MAX})`;
-
-  /**
-   * КОРОБКА ВЕЕРА — РОВНО ТА, ЧТО НАРИСОВАНА, а не коробка хозяина. В ленте корень колоды занимает
-   * ДВЕ дорожки сетки (`span 2`), а веер кончается на `2W`, то есть на 8px раньше; у колоды из
-   * одного куска — на две трети дорожки раньше. Обводка по корню обвела бы эту законную пустоту и
-   * читалась бы как промах, поэтому ширина считается по тем же числам, по которым разложен веер:
-   * лист плюс по трети на каждый выглядывающий кусок.
-   *
-   * ВЫСОТА ЗАДАЁТСЯ ПРОПОРЦИЕЙ, А НЕ СВОЙСТВОМ `height`, И ЭТО ТОТ ЖЕ КАПКАН, ЧТО В E-5, ТОЛЬКО
-   * ПО ДРУГОЙ ОСИ. Первая редакция считала `height: calc(var(--deck-card) * H/W)` — и это неверно
-   * дважды подряд: в переменной сидит `100%`, а процент в `height` разрешается от ВЫСОТЫ
-   * родителя, а не от ширины. Замерено пробой E4b-4: 157px вместо 181px, то есть метка обрезала
-   * кадр снизу примерно на восьмую часть, и ошибка была бы принята за «так задумано».
-   *
-   * Поэтому высоты здесь нет вовсе. Коробка получает СВОЮ пропорцию: она в `u` раз шире одного
-   * кадра, значит её отношение сторон — `u·W : H`. Процентов в этом числе нет ни одного.
-   */
-  const fanCards = 1 + shown.length / DECK_PEEK_MAX;
-  const [aspectW, aspectH] = frameAspect.split('/').map((n) => Number(n.trim()));
-  const markAspect = aspectW > 0 && aspectH > 0 ? `${fanCards * aspectW} / ${aspectH}` : '';
 
   return (
     <div
       className={cn('relative flex h-full min-w-0 flex-col', className)}
       style={{ ...style, ['--deck-card' as string]: sheetWidth }}
       data-deck-root={rootId}
-      /* ОБЪЯВЛЕННОЕ СОСТОЯНИЕ, А НЕ КЛАСС: проба обязана целиться в смысл, а не в оформление. */
-      data-deck-seen={marked ? rootId : undefined}
     >
       {/* ⚠ THE PEEKS COME FIRST IN THE DOM, AND THAT IS LOAD-BEARING. Positioned boxes paint in
           document order, and every box here is positioned, so «behind» is written rather than
@@ -282,8 +254,13 @@ export function CropDeck({
           otherwise the card would stretch across the fan and there would be nothing to peek from
           behind. Open, the deck occupies a single track again and the card fills it, exactly as
           every other card in the row (B6.1: an open deck's sheet must measure like its members). */}
+      {/* ⚠ `flex` НЕСУЩЕЕ, А НЕ УБОРКА, И ЭТО ЗАМЕРЕНО (F-9). Ячейка полосы прижимает свой ряд
+          дверей к низу (`mt-auto`), и работает это ровно тогда, когда ячейка РАСТЯНУТА на всю
+          высоту ряда. Обёртка была обычным блоком, поэтому лист колоды мерился по содержимому —
+          209px против 226.5px у соседей, — и его двери стояли на 18px выше соседних. Это и есть
+          «кнопки скачут» из претензии владельца: замерено `k17w1-measure.mjs` до правки. */}
       <div
-        className='relative flex-1'
+        className='relative flex flex-1'
         style={open ? undefined : { width: 'var(--deck-card)' }}
       >
         {/* THE CARD'S OWN GROUND, cut to the FRAME's box rather than to the whole card: below the
@@ -304,6 +281,10 @@ export function CropDeck({
         {children}
       </div>
 
+      {/* ⚠ ХОЗЯИН, ПОГАСИВШИЙ ЭТУ ДВЕРЬ (`hostDoor`), ОБЯЗАН ПОСТАВИТЬ СВОЮ — с `aria-expanded`,
+          словом и таб-стопом. Веер выше объявленно немой (`aria-hidden`, `tabIndex={-1}`) именно
+          потому, что объявленный орган здесь один; без него колода осталась бы мышиной. */}
+      {!hostDoor && (
       <button
         type='button'
         onClick={onToggle}
@@ -317,36 +298,12 @@ export function CropDeck({
            порядок попаданий совпадают с тем, что человек видит. */
         className={
           'relative mt-1 w-full cursor-pointer text-left text-nano uppercase tracking-label ' +
-          (marked ? 'text-textColor ' : 'text-labelColor ') +
-          'hover:text-textColor focus-visible:outline focus-visible:outline-2 ' +
+          'text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 ' +
           'focus-visible:outline-offset-2 focus-visible:outline-textColor'
         }
       >
         {open ? '▾' : '▸'} {word}
       </button>
-
-      {/* ═══ МЕТКА «ЭТУ КОЛОДУ УЖЕ ОТКРЫВАЛИ» (E-4) ══════════════════════════════════════════
-          Разбор — в шапке файла. Здесь только три несущих мелочи:
-
-          · СТОИТ ПОСЛЕДНЕЙ В РАЗМЕТКЕ. Позиционированные соседи рисуются в порядке дерева, и
-            линия, написанная выше веера, была бы им закрыта по той же причине, по которой край
-            листа однажды закрыл собой саму дверь (довод у `relative` двери выше).
-          · `outline`, А НЕ `border`. Рамка сдвинула бы коробку на пиксель и утащила бы за собой
-            веер; обводка не занимает места вовсе. Пишется СТИЛЕМ, а не классами: `cn` сводит
-            классы через twMerge, и голый `outline` рядом с `outline-2` он выбрасывает молча.
-          · `pointer-events-none`: под линией лежат и лист, и веер, и оба обязаны нажиматься. */}
-      {marked && markAspect && (
-        <span
-          aria-hidden='true'
-          data-deck-mark={rootId}
-          className='pointer-events-none absolute left-0 top-0'
-          style={{
-            width: `calc(var(--deck-card) * ${fanCards})`,
-            aspectRatio: markAspect,
-            outline: '1px solid var(--color-textColor)',
-            outlineOffset: '2px',
-          }}
-        />
       )}
     </div>
   );

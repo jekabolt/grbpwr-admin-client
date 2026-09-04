@@ -711,11 +711,20 @@ export function threedGate(
        колорвею, у которой есть рендеры» — а пикера колорвеи с круга 16 нет ни на одном экране,
        и всякий вызов приходит с нулём. То есть совет был неисполним, и исполнимой оставалась
        только вторая половина: «отрендерь заново», то есть заплати ещё раз за то, что уже есть.
-       Ветка с именем колорвеи мертва по той же причине и снята, а не оставлена про запас. */
+       Ветка с именем колорвеи мертва по той же причине и снята, а не оставлена про запас.
+
+       ═══ КОРОТКО, ПОТОМУ ЧТО ЧИТАЕТСЯ ПОДСКАЗКОЙ, А НЕ ПОЛОСОЙ (круг 17, F-12) ═══════════════
+       Владелец: «убери текст "WHAT IS MISSING / no fabric render stands on this card yet — make
+       one in FABRIC RENDER, then put its sides into FABRIC RENDER SLOTS. 3D is built from those
+       four sides and from nothing else"». Простыня стояла полосой под входом — третьим
+       повторением того, что четыре пустые ячейки уже говорят сами («empty · required · blocks
+       3D» и дверь на FABRIC RENDER). Полоса для ЭТОГО отказа больше не рисуется
+       (`threed-input-strip.tsx`, `next !== 'render'`); причина осталась там, где её читает
+       «почему кнопка не жмётся», — в подсказке погашенной GENERATE (`InertDoor`), и одной
+       строкой. `next: 'render'` при этом жив: по нему полоса и узнаёт, что молчать. */
     return {
       ok: false,
-      reason:
-        'no fabric render stands on this card yet — make one in FABRIC RENDER, then put its sides into FABRIC RENDER SLOTS. 3D is built from those four sides and from nothing else',
+      reason: 'the render slots are empty — 3D needs at least FRONT. Fill it on FABRIC RENDER',
       // НЕЧЕГО СТАВИТЬ — СНАЧАЛА СДЕЛАТЬ. Это `no_fabric_render` сервера, слово в слово по
       // предмету: на верстаке пусто.
       next: 'render',

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { cn } from 'lib/utility';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
+import { Arrow } from 'ui/icons/arrow';
 
 /**
  * THE block — the unit every screen in this admin is built from.
@@ -30,6 +31,7 @@ export function Section({
   title,
   question,
   action,
+  collapsedNote,
   id,
   className,
   headerClassName,
@@ -43,6 +45,19 @@ export function Section({
   question?: React.ReactNode;
   /** Right-aligned control in the header rule (a button, a count, a filter). */
   action?: React.ReactNode;
+  /**
+   * ЕДИНСТВЕННОЕ, ЧТО ПЕРЕЖИВАЕТ СВЁРТКУ, И ЭТО ИСКЛЮЧЕНИЕ РАДИ ДЕНЕГ, А НЕ РАДИ УДОБСТВА.
+   *
+   * F-2 требует, чтобы свёрнутая коробка несла ТОЛЬКО имя и стрелку, и по умолчанию так и есть:
+   * проп не задан — в строке ничего лишнего. Но у ленты генераций в шапке стоял маркер ИДУЩЕГО
+   * ПРОГОНА, и проба круга 16 (E21-7) держит его дословно: «иначе человек нажмёт GENERATE второй
+   * раз». Прогон стоит денег, и невидимый прогон — это второй платёж.
+   *
+   * Поэтому: не «спрятать поменьше», а назвать ровно один орган, которому позволено пережить
+   * свёртку, и позволить это ТОЛЬКО тому, кто спросил. Владелец, когда писал F-2, смотрел на
+   * ленту без живого прогона — в этом состоянии экран выглядит ровно так, как он просил.
+   */
+  collapsedNote?: React.ReactNode;
   /** Anchor id, for screens with an in-page section nav. */
   id?: string;
   className?: string;
@@ -59,6 +74,78 @@ export function Section({
   const [manual, setManual] = useState<boolean | null>(null);
   const open = manual ?? defaultOpen;
   const isOpen = !collapsible || open;
+
+  /**
+   * ⚠ ФОКУС ПЕРЕЕЗЖАЕТ ЗА ДВЕРЬЮ, ПОТОМУ ЧТО ДВЕРЬ — ДВА РАЗНЫХ УЗЛА.
+   *
+   * Свёрнутый блок — это отдельное дерево (вся коробка есть кнопка), развёрнутый — шапка со
+   * значком справа. Значит нажатие РАЗМОНТИРУЕТ ту самую кнопку, на которой стоял фокус, и
+   * браузеру некуда его деть: он уезжает в `<body>`. Замерено на живом блоке: до нажатия
+   * `BUTTON[data-section-toggle]`, после — `BODY`; следующий Tab начинается с начала документа.
+   * До круга 17 обе позы рисовала ОДНА кнопка («− hide» / «+ show»), и вопроса не возникало.
+   *
+   * Поэтому фокус переносится руками и ТОЛЬКО когда переключил человек: `moved` ставится в
+   * обработчике, а не выводится из смены состояния. Иначе блок, который открылся сам (данные
+   * приехали, `defaultOpen` стал истинным), воровал бы фокус у того, кто в этот момент печатает.
+   */
+  const door = useRef<HTMLButtonElement | null>(null);
+  const moved = useRef(false);
+  const toggle = () => {
+    moved.current = true;
+    setManual(!open);
+  };
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    door.current?.focus();
+  }, [isOpen]);
+
+  /**
+   * СВЁРНУТЫЙ БЛОК — ОДНА СТРОКА И ОДНА ДВЕРЬ (F-2 круга 17, дословно: «в свернутом варианте
+   * GENERATION HISTORY должен быть только текст GENERATION HISTORY и стрелочка и все и анколапс
+   * просходит на любое нажатие на бокс не только на стрелочку»).
+   *
+   * ЭТО ПРАВИЛО ПРИМИТИВА, А НЕ ОДНОГО ЭКРАНА. Свёрнутая коробка существует, чтобы её можно было
+   * пропустить глазом; счётчики, подзаголовок и вторые кнопки в ней — это содержимое, которое
+   * человек как раз и убрал. Поэтому здесь не прячется «лишнее», а не рисуется НИЧЕГО, кроме
+   * имени и знака.
+   *
+   * И ВСЯ КОРОБКА — КНОПКА, а не один значок в углу. Это безопасно ровно потому, что в свёрнутом
+   * виде внутри неё нет ни одного другого интерактивного органа: `action` не отрисован, дети не
+   * смонтированы. В РАЗВЁРНУТОМ виде так делать нельзя — там в шапке живут чужие кнопки
+   * (`archived ▸` у истории генераций), и кнопка внутри кнопки это невалидная разметка, которую
+   * браузер чинит на свой вкус.
+   *
+   * Заголовок обязателен: без него это не «свёрнутый блок», а коробка без двери — старое
+   * поведение (дети скрыты, открыть нечем) сохранено как есть, чтобы не выдумывать дверь там,
+   * где вызывающий её не просил.
+   */
+  if (collapsible && !isOpen && title) {
+    return (
+      <section id={id} className={cn('border border-borderColor bg-bgColor', id && 'scroll-mt-20', className)}>
+        <button
+          ref={door}
+          type='button'
+          onClick={toggle}
+          aria-expanded={false}
+          aria-controls={id}
+          data-section-collapsed=''
+          className='group flex w-full cursor-pointer items-center justify-between gap-2 p-block text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        >
+          <Text
+            component='h3'
+            variant='uppercase'
+            tracking='section'
+            className='min-w-0 break-words font-bold'
+          >
+            {title}
+          </Text>
+          {collapsedNote && <span className='ml-auto'>{collapsedNote}</span>}
+          <Arrow aria-hidden className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor' />
+        </button>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -78,16 +165,23 @@ export function Section({
             collapsible ? (
               <>
                 {action}
+                {/* ЗНАК ОДИН И ТОТ ЖЕ В ОБОИХ СОСТОЯНИЯХ — стрелка, а не пара слов «− hide» /
+                    «+ show». Слова были ДВУМЯ разными органами на одном месте: закрывающий и
+                    открывающий, и человек читал их как две разные кнопки. Стрелка — тот же самый
+                    знак, что уже несёт `FieldsGroup`, повёрнутый на 180°. */}
                 <button
+                  ref={door}
                   type='button'
-                  onClick={() => setManual(!open)}
-                  aria-expanded={isOpen}
+                  onClick={toggle}
+                  aria-expanded
                   aria-controls={id}
-                  className='cursor-pointer uppercase text-labelColor hover:text-textColor'
+                  aria-label='collapse'
+                  data-section-toggle=''
+                  className='group cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
                 >
-                  <Text size='micro' variant='uppercase' tracking='label' component='span'>
-                    {isOpen ? '− hide' : '+ show'}
-                  </Text>
+                  {/* Поворота здесь нет и быть не может: эта ветка рисуется только раскрытой —
+                      свёрнутую перехватывает ранний возврат выше. */}
+                  <Arrow aria-hidden className='shrink-0 text-labelColor group-hover:text-textColor' />
                 </button>
               </>
             ) : (
