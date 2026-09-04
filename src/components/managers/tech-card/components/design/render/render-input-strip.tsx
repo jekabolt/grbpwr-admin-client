@@ -729,6 +729,12 @@ export function RenderInputStrip({
    *     одной ветке;
    *   · «не мультивью — тоже не показываем» — общая ветка требует ОБЪЯВЛЕННЫХ видов, ручная
    *     требует `uploaded`; машинный чертёж одного вида не проходит ни туда, ни сюда.
+   *     ⚠ ОДНОВИДОВОЙ ФЛЭТ, ЗАГРУЖЕННЫЙ РУКАМИ, ЧЕРЕЗ ВТОРУЮ ВЕТКУ ПРОХОДИТ — и это цена
+   *     исключения, названная вслух, а не недосмотр. Отличить его от листа на четыре вида нечем:
+   *     оба `uploaded`, у обоих `composite_views` пусты, и знает разницу ровно один участник —
+   *     человек, который файл принёс. Поэтому угол на нём ПРЕДЛАГАЕТ действие и ничего не
+   *     утверждает (разбор подсказки — у самого `return` ниже); прежняя редакция утверждала, и
+   *     на этом самом кадре её утверждение было ложным.
    *
    * ⚠ ОБЩАЯ ВЕТКА ЗДЕСЬ НИЧЕГО НЕ РАСШИРЯЕТ, И ЭТО ПРОВЕРЕНО ПО КОДУ, А НЕ НА ГЛАЗ: кадр с
    * объявленными видами `sheetsOf` ВСЕГДА забирает в колоду (`!composite && …` — оба его выхода
@@ -744,19 +750,37 @@ export function RenderInputStrip({
     const alreadyCut = (families.membersOf.get(id) ?? []).length > 0;
     /** Лист, ПРИНЕСЁННЫЙ РУКАМИ и ещё не резанный, — именованное исключение из общего правила. */
     const broughtByHandAndUncut = originOf(picture) === 'uploaded' && !alreadyCut;
-    if (
-      disabled ||
-      id <= 0 ||
-      families.rootOf.has(id) ||
-      !(pictureOffersSplit(picture, alreadyCut) || broughtByHandAndUncut)
-    )
+    /** Система ЗНАЕТ, что видов несколько (`composite_views` заявлены), а не догадывается. */
+    const declared = pictureOffersSplit(picture, alreadyCut);
+    if (disabled || id <= 0 || families.rootOf.has(id) || !(declared || broughtByHandAndUncut))
       return undefined;
+    /**
+     * ⚠ ДВА ЧЛЕНА СОЮЗА ЗНАЮТ РАЗНОЕ, ЗНАЧИТ И ГОВОРИТЬ ОБЯЗАНЫ РАЗНОЕ.
+     *
+     * ЗДЕСЬ СТОЯЛА ОДНА ЗАШИТАЯ ПОДСКАЗКА НА ОБЕ ВЕТКИ: «this file holds several views in one
+     * picture and cannot stand in a single slot». На объявленном мультивью это факт, взятый с
+     * провода. На ветке исключения фактов нет вовсе — она и заведена ровно потому, что
+     * `composite_views` у принесённого руками листа ПУСТЫ ПО ОПРЕДЕЛЕНИЮ, — и та же фраза
+     * становилась УТВЕРЖДЕНИЕМ О ФАЙЛЕ, которого никто не проверял: обычный одновидовой FRONT,
+     * загруженный через `+ flat`, — тоже `uploaded` и тоже не резан, и ему объявляли, что он
+     * держит несколько видов и не может стоять в слоте. Он держит один и стоит прекрасно. Это тот
+     * же класс лжи, который этот коммит в трёх других местах снял.
+     *
+     * ПОЧИНЕНА ПОДСКАЗКА, А НЕ ПРЕДИКАТ: сузить исключение нечем — сузив, вернём тупик человека с
+     * листом на четыре вида (единственная дверь, где он может ОБЪЯВИТЬ его многовидовым, — эта).
+     * Поэтому ветка исключения ПРЕДЛАГАЕТ ДЕЙСТВИЕ и называет условие условием («if it holds
+     * several at once»), а знание оставляет за человеком: «nothing on record says it does».
+     * Та же формула стоит на второй двери этого вопроса — у референсов (`references-section.tsx`),
+     * — и стоит она дословно, чтобы два экрана не разошлись в ответе на один вопрос.
+     */
     return {
       onClick: () => split.openForPicture(picture, `drawing ${id}`),
-      ariaLabel: `split the uploaded drawing ${id} into views`,
-      title:
-        'this file holds several views in one picture and cannot stand in a single slot — cut it ' +
-        'into views first, then apply the whole split to the input at once',
+      ariaLabel: `cut drawing ${id} into views`,
+      title: declared
+        ? 'this file holds several views in one picture and cannot stand in a single slot — cut ' +
+          'it into views first, then apply the whole split to the input at once'
+        : 'cut this into views if it holds several at once — nothing on record says it does, so ' +
+          'only you can tell. Each view then stands in a slot of its own',
     };
   };
 

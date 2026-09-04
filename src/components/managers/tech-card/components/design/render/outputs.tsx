@@ -6,6 +6,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Pill } from 'ui/components/pill';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
+import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
@@ -16,6 +17,8 @@ import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies, type CropFamilies } from '../generation/composite';
 import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
+import { runStatus } from '../generation/run-state';
+import { useElapsed } from '../generation/use-generation';
 import { VectorModal } from '../modals';
 import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
@@ -31,6 +34,7 @@ import {
 import { applyPlan, type SplitPiece } from './apply-split';
 import {
   SELECT_MARK_NOT_STATED,
+  liveRunsOfKind,
   outputsHorizon,
   outputsOfKind,
   pictureIsComposite,
@@ -41,7 +45,7 @@ import {
   serverStatesSelected,
   threedSides,
 } from './model';
-import { STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from './strip-cell';
+import { CELL_WIDTH, STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from './strip-cell';
 
 /** Radix запрещает пустое значение пункта, поэтому «ничего не выбрано» — сентинел, а не `''`. */
 const MARK_PROMPT = '__mark__';
@@ -124,6 +128,47 @@ function Bay({ groupOf, children }: { groupOf?: number; children: React.ReactNod
       className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-bgSecondary' : '')}
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * ═══ ПУНКТИРНАЯ ЯЧЕЙКА ЖИВОГО ПРОГОНА — ДЫРА ФОРМЫ ОТВЕТА (круг 19) ═════════════════════════════
+ *
+ * ⚠ ЭТО ДЕНЬГИ. До неё на FABRIC RENDER и на 3D в состоянии покоя не было НИ ОДНОГО признака того,
+ * что прогон уже заказан: снекбар гаснет, кнопка возвращается в `GENERATE` в момент БРОНИ (её
+ * `pending` — полёт мутации, а не прогона), а свёрнутая лента генераций больше не носит маркера
+ * `run N now` по прямому слову владельца («в свернутом варианте GENERATION HISTORY должен быть
+ * только текст GENERATION HISTORY и стрелочка и все»). Человек нажимал второй раз и покупал второй
+ * прогон. ВОЗВРАЩАТЬ МАРКЕР В ШАПКУ ЛЕНТЫ НЕЛЬЗЯ — это ровно то, что снято; признак обязан стоять
+ * там, где стоит ответ.
+ *
+ * ФОРМА ОТВЕТА, А НЕ ФРАЗА О НЁМ, и это дословный приём экрана паттернов (`PendingTile` в
+ * `pattern/pattern-library.tsx`): прозаическая строка «a render is being made · 0:42 — it lands
+ * below» ОБЕЩАЛА БЫ СЛОВАМИ место, стоя при этом не в нём. Дыра, занимающая в полосе ту самую
+ * ячейку, в которую встанет готовая плита, говорит то же самое и соврать не может.
+ *
+ * ОТДЕЛЬНЫМ КОМПОНЕНТОМ РАДИ ХУКА: `useElapsed` тикает раз в секунду, и позванный в теле раздела
+ * он перерисовывал бы вместе с собой ВСЮ полосу — каждую замощённую плитку, каждую открытую колоду.
+ * Здесь он перерисовывает одну ячейку.
+ */
+function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
+  const elapsed = useElapsed(run.startedAt ?? run.createdAt);
+  return (
+    <div data-outputs-pending={run.id ?? 0} className={cn('flex flex-col gap-1', CELL_WIDTH)}>
+      {/* ПРОПОРЦИЯ — ТА ЖЕ, ЧТО У КАДРА ЗАНЯТОЙ ЯЧЕЙКИ (`STRIP_FRAME_ASPECT`), иначе дыра стоит
+          в полосе выше или ниже своих соседей и подписи перестают лежать на одной линии. */}
+      <Placeholder dashed className='w-full' style={{ aspectRatio: STRIP_FRAME_ASPECT }} />
+      <Text size='nano' component='span' className='min-w-0 break-words text-warning'>
+        <b>run {run.id ?? '—'}</b> · {elapsed || '0:00'}
+      </Text>
+      {/* СЛОВО СОСТОЯНИЯ — С ПРОВОДА (`pending` = в очереди, `running` = у провайдера), а не
+          выдуманное. Оно же различает две вещи, которые дыра сама по себе не различает, и ничего
+          не обещает про ЧИСЛО плиток: прогон рендера может попросить их несколько, и подпись
+          «the render lands here» была бы обещанием единственного числа там, где его нет. */}
+      <Text size='nano' variant='label' component='span'>
+        {runStatus(run) || 'in flight'}
+      </Text>
     </div>
   );
 }
@@ -320,6 +365,23 @@ export function OutputsSection({
   }, [band, kind, colorwayId]);
 
   /**
+   * ЖИВЫЕ ПРОГОНЫ ЭТОГО ЖЕ РОДА И ЭТОГО ЖЕ КОЛОРВЕЯ — ИСТОЧНИК ПУНКТИРНЫХ ЯЧЕЕК В ГОЛОВЕ ПОЛОСЫ.
+   *
+   * ЧИТАЕТСЯ ЗДЕСЬ, А НЕ ПРИНИМАЕТСЯ ПРОПОМ, в отличие от полки паттернов: там список уже держал
+   * ВЫЗЫВАЮЩИЙ ради собственного `pending`, и второе чтение разошлось бы с ним на одном кадре.
+   * Здесь вызывающих двое (`render-studio`, `threed-studio`), ни один из них такого списка не
+   * держит, и проп означал бы одно и то же правило, написанное в двух чужих файлах.
+   *
+   * СУЖЕНИЕ — ТО ЖЕ, ЧТО У РЯДА: род и колорвей. Прогон соседнего цвета в этой полосе был бы
+   * обещанием плитки, которая сюда не встанет (раздел сужен `colorwayId`), — то есть новой ложью
+   * вместо закрытой.
+   */
+  const pending = useMemo(
+    () => liveRunsOfKind(band, kind, colorwayId),
+    [band, kind, colorwayId],
+  );
+
+  /**
    * ═══ КОЛОДА КРОПОВ И ЗДЕСЬ, ТЕМ ЖЕ ОРГАНОМ (J-23) ═══════════════════════════════════════════
    *
    * Владелец, дословно: «в RENDERS OF THIS CARD должна быть такая же логика что мы можем нажать
@@ -424,8 +486,13 @@ export function OutputsSection({
    * которой она заведена: у карточки БЕЗ единой модели выходов нет, значит раздела нет, значит
    * принести свою некуда. Без двери правило остаётся прежним — пустой раздел, в котором нельзя
    * ничего сделать, это заголовок над пустотой.
+   *
+   * ⚠ И НЕ ИСЧЕЗАЕТ, КОГДА ИДЁТ ПРОГОН, — ЭТО ТРЕТИЙ ЧЛЕН И ОН ДЕНЕЖНЫЙ. Самый частый случай
+   * первого прогона на карточке: выходов ноль, двери нет (у рендеров её нет никогда), и без этого
+   * члена раздел вернул бы `null` — то есть пунктирная ячейка, ради которой всё это заведено,
+   * пропала бы ровно на том экране, где второе нажатие и стоит вторых денег.
    */
-  if (!rows.length && !bringsOwnModel) return null;
+  if (!rows.length && !bringsOwnModel && !pending.length) return null;
 
   // Does the binary that answered state the mark at all? With `EmitUnpopulated` a server that
   // knows the field sends it on EVERY picture (as `false` when unset), so one picture is a
@@ -1218,6 +1285,18 @@ export function OutputsSection({
             стоит в одном месте, — и это ровно та позиция, что у `+ flat` в полосе входа рендера:
             голова того списка, в который она добавляет. */}
         {bringsOwnModel && <Bay>{bring.cell}</Bay>}
+        {/* ═══ ЖИВОЙ ПРОГОН — В ГОЛОВЕ РЯДА, И ЭТО АДРЕС ОТВЕТА, А НЕ «НОВОЕ СВЕРХУ» ═══════════
+            Сервер отдаёт выходы `ORDER BY o.id DESC`, значит вернувшаяся плита встанет строкой
+            НОЛЬ — и дыра обязана стоять ровно там, иначе плита появится не на месте своей дыры.
+
+            ПОСЛЕ ДВЕРИ «принести свою модель», А НЕ ПЕРЕД НЕЙ: у той стоит собственный замер
+            («один орган стоит в одном месте», она не переезжает между пустой и полной полосой),
+            и пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
+        {pending.map((run) => (
+          <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
+            <PendingCell run={run} />
+          </Bay>
+        ))}
         {rows.map((row) => {
           const rootId = row.picture.id ?? 0;
           // Кусок рисуется ТОЛЬКО под своим листом — иначе закрытая колода показала бы его вопреки

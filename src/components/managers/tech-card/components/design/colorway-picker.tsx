@@ -68,6 +68,15 @@ import { FieldRow, Hint, Swatch } from './render/field-row';
  * это как сломанный орган, хотя сломаны данные и в другой подсистеме.
  */
 
+/**
+ * АРХИВНЫЙ — «ЭТИМ ЦВЕТОМ БОЛЬШЕ НЕ РАБОТАЮТ». Один предикат на хук и на оба органа: три написания
+ * сравнения со строкой энума разошлись бы в первый же день, когда у статуса появится четвёртое
+ * значение, и разошлись бы молча — тип у поля строковый.
+ */
+function archivedRef(ref?: common_AdminColorwayRef | null): boolean {
+  return ref?.status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
+}
+
 /** ЧЕЛОВЕЧЕСКОЕ ИМЯ КОЛОРВЕЯ — одно определение на пикер, палитру и библиотеку паттернов. */
 export function colorwayLabel(ref?: common_AdminColorwayRef | null): string {
   const dev = (ref?.devName ?? '').trim();
@@ -127,12 +136,38 @@ export function useColorwayChoice(
   band: GetDesignBandResponse,
 ): ColorwayChoice {
   const { data: techCard, isLoading } = useTechCard(techCardId);
+
+  const [colorwayId, setColorwayId] = useState<number>(COLORWAY_NONE);
+  const settled = useRef(false);
+
   /**
-   * ⚠ АРХИВНЫЕ НЕ ПРЕДЛАГАЮТСЯ, НО И НЕ СТИРАЮТСЯ ИЗ ИСТОРИИ. Предикат ровно один и добавлен
-   * кругом 19 рядом с прежним (`id > 0`): архив — это «этим цветом больше не работают», и держать
-   * его в списке значило бы звать человека покупать рендер под снятое имя. При этом РЕНДЕРЫ,
-   * снятые под архивным колорвеем, остаются его рендерами: их атрибуция заморожена в прогоне, и
-   * ни один экран её не переписывает — просто дверь к новым закрыта.
+   * ⚠ АРХИВ ЗАКРЫВАЕТ ДВЕРЬ К НОВОЙ РАБОТЕ, А НЕ К УЖЕ СДЕЛАННОЙ — И ЭТО ДВА РАЗНЫХ ПРЕДИКАТА,
+   * А НЕ ОДИН.
+   *
+   * ЗДЕСЬ СТОЯЛ ОДИН (`status !== ARCHIVED`), И ПРОЗА РЯДОМ ОБЕЩАЛА РОВНО ТО, ЧЕГО ОН НЕ ДЕЛАЛ:
+   * «рендеры, снятые под архивным колорвеем, остаются его рендерами … просто дверь к новым
+   * закрыта». Замерено по ИСХОДУ, а не по намерению: этот список — И пункты селекта, И область
+   * поиска умолчания ниже. ROSSO архивен и держит четыре рендера, OLIVE пуст → `withRenders`
+   * состоит из одного ROSSO, найти его среди `colorways` нечем, умолчание падает на первый
+   * колорвей карточки, FABRIC RENDER открывается ПУСТЫМ — а ROSSO нет ни в одном органе экрана.
+   * Четыре плиты видны НИОТКУДА, и это тот самый исход («снаружи это читается как пропажа
+   * данных»), против которого написан абзац про умолчание двадцатью строками ниже.
+   *
+   * ПОЭТОМУ АРХИВНЫЙ ОСТАЁТСЯ РОВНО В ДВУХ СЛУЧАЯХ, И ОБА — ПРО ДОСТИЖИМОСТЬ, А НЕ ПРО ВЫБОР:
+   *   · `renderBenchOccupied` — «его верстак держит хотя бы одну плиту». «Не сказано» (старый
+   *     бинарь, поля нет вовсе) этот помощник читает как «держит», и здесь это ПРАВИЛЬНАЯ сторона
+   *     ошибки: лишнее имя в фильтре стоит одну строку списка, спрятанная работа — весь путь к ней;
+   *   · `id === colorwayId` — на архивном МОЖНО СТОЯТЬ. Кто-то архивирует ROSSO, пока студия на
+   *     нём открыта, `useTechCard` перечитывает карточку — и строка уходит из-под ног: подпись
+   *     селекта пустеет, отказы начинают говорить «нет колорвея», а прогоны продолжают уезжать
+   *     под ROSSO. Инвариант «значение всегда среди пунктов» держится ЗДЕСЬ, конструкцией, а не
+   *     обещанием в шапке `ColorwaySelect`.
+   *
+   * ⚠ ЧЕГО ЭТОТ ФАЙЛ НЕ ДЕЛАЕТ И НЕ МОЖЕТ СДЕЛАТЬ ОДИН: ВОРОТА ГЕНЕРАЦИИ АРХИВ НЕ ЧИТАЮТ.
+   * `renderGate` / `threedGate` (`render/model.ts`) не знают ни статуса колорвея, ни этого
+   * правила, поэтому прогон под снятым именем физически возможен. Здесь он ОБЪЯВЛЕН нежелательным
+   * — подписью пункта `(archived)` и строкой под органом, — а не запрещён, и врать про запрет
+   * нельзя. Гасить пункт вместо этого НЕЛЬЗЯ: погашенный пункт прячет ту же работу второй раз.
    *
    * ЛЕСТНИЦА ОСТАЛЬНЫХ СОСТОЯНИЙ (`DRAFT`/`ACTIVE`/`HIDDEN`) ЗДЕСЬ НЕ ЧИТАЕТСЯ НАРОЧНО. `HIDDEN`
    * — это про ВИТРИНУ, а не про студию: цвет, снятый с продажи, продолжают разрабатывать, и
@@ -141,14 +176,14 @@ export function useColorwayChoice(
    */
   const colorways = useMemo(
     () =>
-      (techCard?.colorways ?? []).filter(
-        (c) => (c.colorwayId ?? 0) > 0 && c.status !== 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED',
-      ),
-    [techCard],
+      (techCard?.colorways ?? []).filter((c) => {
+        const id = c.colorwayId ?? 0;
+        if (id <= 0) return false;
+        if (!archivedRef(c)) return true;
+        return id === colorwayId || renderBenchOccupied(band.renderBenchColorwayIds, id);
+      }),
+    [techCard, band.renderBenchColorwayIds, colorwayId],
   );
-
-  const [colorwayId, setColorwayId] = useState<number>(COLORWAY_NONE);
-  const settled = useRef(false);
 
   const withRenders = band.renderBenchColorwayIds;
   useEffect(() => {
@@ -185,6 +220,31 @@ export function useColorwayChoice(
     );
     setColorwayId((first ?? colorways[0]).colorwayId ?? COLORWAY_NONE);
   }, [isLoading, colorways, withRenders]);
+
+  /**
+   * ⚠ ВТОРАЯ ПОЛОВИНА ИНВАРИАНТА: КОЛОРВЕЙ МОЖНО НЕ ТОЛЬКО АРХИВИРОВАТЬ, НО И УДАЛИТЬ.
+   *
+   * Архив строку из-под ног не выбивает (правило `colorways` выше держит выбранного при любом
+   * статусе), а вот СНЕСЁННЫЙ колорвей исчезает из `techCard.colorways` вовсе — держать его
+   * нечем, потому что держать нечего. Тогда выбор указывает в пустоту: подпись селекта пустеет,
+   * `current` становится `null`, `label` — пустой строкой, и отказы соседних экранов начинают
+   * говорить «нет колорвея», пока `params.colorway_id` каждого прогона по-прежнему несёт число
+   * снесённого. Это не косметика, а расхождение экрана с проводом.
+   *
+   * ПОЭТОМУ ДРЕЙФ НЕ ПРОСТО ВИДЕН, А ИСПРАВЛЕН, И ИСПРАВЛЕН В ЕДИНСТВЕННУЮ СТОРОНУ, КОТОРАЯ
+   * ЗАКОННА ВСЕГДА: `COLORWAY_NONE` — верстак, существующий на любой карточке (см. шапку файла).
+   * Угадывать «соседний колорвей» здесь было бы хуже молчания: человек увидел бы чужое имя над
+   * своей работой. Смена числа ремоунтит генеративные экраны (`key={colorwayId}` у композитора),
+   * то есть поправка ВИДНА, а не тиха.
+   *
+   * `settled.current` этой поправке не сторож нарочно: он про УМОЛЧАНИЕ («не двигать человека
+   * после того, как выбор однажды сделан»), а здесь двигать уже нечего — пункта нет.
+   */
+  useEffect(() => {
+    if (isLoading || colorwayId === COLORWAY_NONE) return;
+    if (colorways.some((c) => (c.colorwayId ?? 0) === colorwayId)) return;
+    setColorwayId(COLORWAY_NONE);
+  }, [isLoading, colorways, colorwayId]);
 
   const current = useMemo(
     () => colorways.find((c) => (c.colorwayId ?? 0) === colorwayId) ?? null,
@@ -287,6 +347,10 @@ export function ColorwayPicker({
              * на «этот из тканевых?», и ровно на это его хватает.
              */
             const wornFace = assetThumb(fabricOfColorway(band, id));
+            /* Архивный стоит в ряду только потому, что под ним лежит работа (или потому, что на
+               нём стоят) — и говорит об этом сам, словом, а не оттенком: серый чип читался бы как
+               «сломан», а сломанного в нём ничего нет. */
+            const archived = archivedRef(c);
             return (
               <Chip
                 key={id}
@@ -302,6 +366,9 @@ export function ColorwayPicker({
                   renders
                     ? 'its render bench holds at least one plate'
                     : 'no plate stands on its render bench yet',
+                  archived
+                    ? 'archived — kept here so its work stays reachable; file new work under a live colourway'
+                    : '',
                 ]
                   .filter(Boolean)
                   .join(' — ')}
@@ -320,6 +387,7 @@ export function ColorwayPicker({
                     <Swatch hex={(c.devHex ?? '').trim()} size={11} />
                   )}
                   {colorwayLabel(c)}
+                  {archived ? ' (archived)' : ''}
                   {renders ? ' ·' : ''}
                 </span>
               </Chip>
@@ -336,8 +404,19 @@ export function ColorwayPicker({
             'this card has no colourways — they are made on the colourways tab. Renders made here stay unattributed, which is a permanent, legal place for them.'}
         </Hint>
       ) : (
-        !loading &&
-        stated && <Hint>· marks a colourway whose render bench already holds a plate</Hint>
+        !loading && (
+          <>
+            {stated && <Hint>· marks a colourway whose render bench already holds a plate</Hint>}
+            {/* СТРОКА ПОЯВЛЯЕТСЯ ТОЛЬКО КОГДА В РЯДУ ЕСТЬ АРХИВНЫЙ: постоянная проза про случай,
+                которого на экране нет, — это шум, а не документация. */}
+            {colorways.some(archivedRef) && (
+              <Hint>
+                (archived) marks a colourway that is no longer worked on — it stands here so its
+                renders stay reachable. Make new work under a live colourway.
+              </Hint>
+            )}
+          </>
+        )
       )}
     </FieldRow>
   );
@@ -361,6 +440,14 @@ export function ColorwayPicker({
  * может и присылает обратно ПУСТУЮ строку как «выбор человека». `no colourway` — полноценный
  * пункт со значением `'0'`, а не отсутствие пункта, поэтому выразить такое состояние нечем.
  *
+ * ⚠ ЭТОТ ИНВАРИАНТ ЗДЕСЬ НЕ ОБЪЯВЛЯЕТСЯ, А ДЕРЖИТСЯ ДВУМЯ ПРАВИЛАМИ В `useColorwayChoice`, И
+ * ОДНАЖДЫ ОН УЖЕ ПЕРЕСТАВАЛ БЫТЬ ПРАВДОЙ. Список умеет схлопываться ПОД выбранным значением
+ * (колорвей архивируют или сносят, пока студия на нём открыта, и `useTechCard` перечитывает
+ * карточку), а `settled.current` мешал поправке. Теперь выбранная строка не выпадает по архиву
+ * (её держит `id === colorwayId` в фильтре), а снесённая — поправляется отдельным эффектом на
+ * `COLORWAY_NONE`. Сторож `if (!value) return` ниже при этом ЖИВ и не заменяется ими: он ловит
+ * фантомную пустоту Radix, а они — расхождение списка с выбором; это разные отказы.
+ *
  * ⚠ ЧИПОВЫЙ РЯД (`ColorwayPicker`) ЖИВ И НЕ ТРОНУТ: на 3D он по-прежнему первый ряд экрана, и его
  * снятие там — отдельный пункт владельца (J-27), отдельная волна и отдельный замер.
  */
@@ -373,7 +460,7 @@ export function ColorwaySelect({
   choice: ColorwayChoice;
   disabled?: boolean;
 }): JSX.Element {
-  const { colorwayId, setColorwayId, colorways, loading } = choice;
+  const { colorwayId, setColorwayId, colorways, current, loading } = choice;
   const stated = !!band.renderBenchColorwayIds;
   const has = (id: number) => renderBenchOccupied(band.renderBenchColorwayIds, id);
 
@@ -394,13 +481,24 @@ export function ColorwaySelect({
    */
   const none = colorways.length === 0;
   const emptyNote = 'this card has no colourways — make one on the COLORWAYS tab';
+  /**
+   * ⚠ АРХИВНЫЙ ПУНКТ ОБЪЯСНЯЕТСЯ РОВНО ТАМ, ГДЕ ОН ВЫБРАН, И НИГДЕ БОЛЬШЕ. Прозы под рядом
+   * представлений нет и не должно быть (см. абзац про пустую карточку выше), поэтому единственное
+   * место, куда эта фраза помещается честно, — заголовок того же органа: человек уже ведёт туда
+   * курсор, чтобы список раскрыть. Подпись `(archived)` в пункте при этом стоит ВСЕГДА — она
+   * называет факт, а заголовок называет ПОСЛЕДСТВИЕ.
+   */
+  const archivedNote = archivedRef(current)
+    ? `${colorwayLabel(current)} is archived — this colourway is no longer worked on. Its bench ` +
+      'stays here so its renders can be read; make new renders under a live colourway.'
+    : undefined;
 
   return (
     <span data-cw-picker={colorwayId} className='inline-flex items-center gap-2'>
       <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         colourway
       </Text>
-      <span className='w-[190px]' title={none ? emptyNote : undefined}>
+      <span className='w-[190px]' title={none ? emptyNote : archivedNote}>
         <SelectComponent
           name='design-render-colourway'
           value={String(colorwayId)}
@@ -412,9 +510,14 @@ export function ColorwaySelect({
             },
             ...colorways.map((c) => {
               const id = c.colorwayId ?? 0;
+              /* Два хвоста подписи значат РАЗНОЕ и потому написаны по-разному: `(archived)` — про
+                 имя цвета, `·` — про его верстак. Свести их к одному глифу значило бы сложить два
+                 факта в один, который не отвечает ни на один из двух вопросов. */
               return {
                 value: String(id),
-                label: `${colorwayLabel(c)}${stated && has(id) ? ' ·' : ''}`,
+                label: `${colorwayLabel(c)}${archivedRef(c) ? ' (archived)' : ''}${
+                  stated && has(id) ? ' ·' : ''
+                }`,
               };
             }),
           ]}

@@ -443,18 +443,36 @@ export function useColourDraft(
    * рецептом. Это честная деградация (хуже — не «взять соседний»), и лечится она полем
    * `DesignColourRecipe.colorway_id` на бэкенде, если окажется, что случай частый.
    *
-   * `recolor` ВХОДИТ В СПИСОК НАРАВНЕ С `render`: его выход объявляет себя рендером этого
-   * колорвея, а его `params.colour` — такой же полноценный рецепт. `pattern` и `flat` не входят:
-   * у первого рецепта нет вовсе, второй красится не колорвеем.
+   * `recolor` ВХОДИТ В СПИСОК НАРАВНЕ С `render`, НО БЕЗ `words`, И ЭТО НЕ ОСТОРОЖНОСТЬ, А
+   * ЗАМЕРЕННОЕ ПРАВИЛО СОСЕДА. Выход перекраса объявляет себя рендером этого колорвея, а его
+   * `params.colour` несёт настоящие код и hex — их брать можно и нужно. А вот `words` — ОДНО ПОЛЕ
+   * ПРОВОДА С ДВУМЯ РАЗНЫМИ СМЫСЛАМИ: на ON MODEL это ЦВЕТ словами («washed indigo, slightly faded
+   * at the seams»), здесь — ТКАНЬ словами («heavy cotton twill»). Пронести фразу через эту границу
+   * значит сказать платному промпту рендера строить ПЕРЕПЛЕТЕНИЕ из описания цвета.
+   * `useTargetColourDraft` (`onmodel/drafts.ts`) отказывается носить `words` в обратную сторону и
+   * называет отказ ЗАМЕРОМ — «карточка, рендерившаяся твилом, открывала ON MODEL с твилом в поле
+   * „in words“». Правило симметрично по построению: одна граница, два направления, один запрет.
+   * Сужение живёт ЗДЕСЬ, у источника, а не у места засева: `seed` ниже ходит через `echoOf` вместе
+   * с двумя другими ветками, и оговорка в общей двери стала бы вторым правилом на один вопрос.
+   *
+   * `pattern` и `flat` не входят вовсе: у первого рецепта нет, второй красится не колорвеем.
+   *
+   * ⚠ ВИД ПРОГОНА СРАВНИВАЕТСЯ НОРМАЛИЗОВАННЫМ, КАК У ВСЕХ СОСЕДЕЙ (`render/model.ts:343`,
+   * `bench-kinds.ts:128`, `pattern/model.ts:71`, `history-recall.tsx:128`). Сырое сравнение здесь
+   * было единственным на пять читателей одного поля: `Render` или ` render` с провода прошли бы
+   * мимо — и колорвей, у которого рецепт ЕСТЬ, засеялся бы своим голым цветом, молча.
    */
   const ofColorway = useMemo(() => {
     if (colorwayId <= 0) return undefined;
-    return (band.runs ?? []).find(
-      (r) =>
-        ((r.params?.colorwayId ?? 0) === colorwayId) &&
-        (r.kind === 'render' || r.kind === 'recolor') &&
-        !!r.params?.colour,
-    )?.params?.colour;
+    for (const r of band.runs ?? []) {
+      if ((r.params?.colorwayId ?? 0) !== colorwayId) continue;
+      const kind = (r.kind ?? '').trim().toLowerCase();
+      if (kind !== 'render' && kind !== 'recolor') continue;
+      const colour = r.params?.colour;
+      if (!colour) continue;
+      return kind === 'recolor' ? { ...colour, words: '' } : colour;
+    }
+    return undefined;
   }, [band.runs, colorwayId]);
 
   const seed = useMemo<EchoValues | null>(() => {

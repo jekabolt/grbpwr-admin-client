@@ -8,6 +8,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 
+import { isRunLive } from '../generation/run-state';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { isPictureHidden } from '../visibility';
 import { SILHOUETTE_VIEWS, isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
@@ -349,6 +350,40 @@ export function outputsOfKind(
     }
   }
   return out;
+}
+
+/**
+ * ═══ ПРОГОНЫ ЭТОГО РОДА И ЭТОГО КОЛОРВЕЯ, КОТОРЫЕ ПРЯМО СЕЙЧАС В ПОЛЁТЕ (круг 19) ═════════════
+ *
+ * ⚠ ЭТО ДЕНЬГИ, А НЕ УКРАШЕНИЕ. Свёрнутая лента генераций больше не несёт маркера идущего прогона
+ * (владелец: «в свернутом варианте GENERATION HISTORY должен быть только текст GENERATION HISTORY
+ * и стрелочка и все»), и на FABRIC RENDER с 3D после этого не осталось НИ ОДНОГО признака того,
+ * что прогон уже заказан: снекбар гаснет, кнопка возвращается в `GENERATE` в момент, когда прогон
+ * ЗАБРОНИРОВАН, а не когда закончен (`run.isPending` — это полёт МУТАЦИИ), обе истории свёрнуты.
+ * Второе нажатие минтит новый `client_request_id` и покупает ВТОРОЙ ПЛАТНЫЙ ПРОГОН. Дыру закрывает
+ * пунктирная ячейка в голове полосы выходов — тем же приёмом, каким её закрыл экран паттернов
+ * (`pattern/pattern-library.tsx`, `PendingTile`).
+ *
+ * ПОСТРАНИЧНО, И ЭТО НЕ УПУЩЕНИЕ. `cardOutputRows` отвечает про КАРТИНКИ всей карточки, а живой
+ * прогон картинок ещё не родил; сам он по определению НОВЕЙШИЙ и со страницы ленты выпасть не
+ * может. Тот же довод дословно записан у `recolorRuns` в `onmodel/model.ts`, и второй диалект
+ * одной мысли разошёлся бы с первым молча.
+ *
+ * КОЛОРВЕЙ СПРАШИВАЕТСЯ У ПРОГОНА, А НЕ У КАРТИНКИ, ровно потому, что картинок нет: у `outputsOfKind`
+ * целая ветка объясняет, почему готовый ряд сужается по `picture.colorway_id`, — здесь этого ключа
+ * не существует, и единственный честный ответ на «чей это прогон» даёт `run_colorway_id`.
+ */
+export function liveRunsOfKind(
+  band: GetDesignBandResponse,
+  kind: 'render' | 'threed',
+  /** `undefined` не сужает ничем; число (включая 0 — безколорвейный верстак) сужает до своего. */
+  colorwayId?: number,
+): common_DesignRun[] {
+  return (band.runs ?? []).filter((run) => {
+    if ((run.kind ?? '').trim().toLowerCase() !== kind) return false;
+    if (colorwayId !== undefined && colorwayOf(run) !== colorwayOf({ colorwayId })) return false;
+    return isRunLive(run);
+  });
 }
 
 /* ───────────────── ЗАПОЛНИТЬ ПУСТЫЕ СТОРОНЫ РЕНДЕР-ВЕРСТАКА КАДРАМИ КАРТОЧКИ (J-25) ───────────────── */
@@ -714,7 +749,10 @@ export function threedGate(
   band: GetDesignBandResponse,
   /** Which colourway is being built. 0 = the unattributed bench, a real and permanently legal one. */
   colorwayId: number = COLORWAY_NONE,
-  /** Its human name, for the refusal. Empty = «no colourway», said in those words below. */
+  /**
+   * Its human name, and the refusals below DO read it. Empty = the unattributed bench `0`, and then
+   * they fall back to their colourway-less wording rather than inventing a name for it.
+   */
   colorwayLabel: string = '',
 ): Gate {
   // THE SERVER'S REFUSAL COMES FIRST, so the client's first sentence about 3D is the same sentence
@@ -722,6 +760,24 @@ export function threedGate(
   // of four sides and are the client's own; they can only narrow this, never widen it.
   const fabric = fabricRenderGate(band);
   if (!fabric.ok) return fabric;
+  /**
+   * ═══ ИМЯ КОЛОРВЕЯ СНОВА НАЗЫВАЕТСЯ, И ЭТО ВОЗВРАТ ПРИНЯТОГО, НО ВЫБРОШЕННОГО ПРОПА ═══════════
+   *
+   * `colorwayLabel` принимался этой функцией и не читался НИ ОДНОЙ строкой: обе ветки, которым он
+   * нужен, несли записку «пикера нет ни на одном экране (E-16), всякий вызов приходит с нулём,
+   * ветка с именем мертва». Круг 19 вернул пикер (`ColorwaySelect` в ряду представлений
+   * `studio-tab.tsx`, один орган на всю студию), и довод перестал быть верным — а принятое и молча
+   * выброшенное поле это ровно та ловушка, ради которой в этом же коммите сносили `LockBar.reason`.
+   *
+   * ⚠ И ЭТО НЕ УКРАШЕНИЕ ОТКАЗА. Верстак рендеров ключуется колорвеем, а секция выходов сужена им
+   * же: карточка с четырьмя сторонами ROSSO под выбранным OLIVE показывает ПУСТОЙ экран и гасит
+   * GENERATE — и безымянный отказ «the render slots are empty» на ней читается как поломка, потому
+   * что человек своими глазами видел эти рендеры минуту назад. Имя превращает поломку в адрес.
+   *
+   * Пусто — это `no colourway`, законный безымянный верстак `0`; тогда работают прежние
+   * формулировки слово в слово, и выдумывать ему имя («unattributed») здесь незачем.
+   */
+  const named = colorwayLabel.trim();
   /**
    * ═══ THE DOOR IS MEMBERSHIP IN `render_bench_colorway_ids`, NOT `has_fabric_render` (L-3) ═════
    *
@@ -742,11 +798,12 @@ export function threedGate(
    * slots). The finer refusal below then names the colourway rather than the card.
    */
   if (!renderBenchOccupied(band.renderBenchColorwayIds, colorwayId)) {
-    /* ⚠ ФРАЗА БОЛЬШЕ НЕ ПОСЫЛАЕТ К СНЕСЁННОМУ ОРГАНУ. Прежняя редакция советовала «выбери
-       колорвею, у которой есть рендеры» — а пикера колорвеи с круга 16 нет ни на одном экране,
-       и всякий вызов приходит с нулём. То есть совет был неисполним, и исполнимой оставалась
-       только вторая половина: «отрендерь заново», то есть заплати ещё раз за то, что уже есть.
-       Ветка с именем колорвеи мертва по той же причине и снята, а не оставлена про запас.
+    /* ⚠ ИМЯ КОЛОРВЕЯ ВЕРНУЛОСЬ ВМЕСТЕ С ПИКЕРОМ (круг 19). Прежняя редакция называла ветку с
+       именем мёртвой, потому что органа выбора не было ни на одном экране и всякий вызов приходил
+       с нулём; орган вернулся, и «the render slots are empty» без имени снова стало бы отказом,
+       который человек читает как поломку, глядя на карточку, где рендеры есть — под другим цветом.
+       ЧЕГО ЗДЕСЬ ПО-ПРЕЖНЕМУ НЕТ, так это совета «выбери колорвею, у которой есть рендеры»: он
+       звал бы перебирать пункты вслепую, а нужный жест — заполнить фронт этого верстака.
 
        ═══ КОРОТКО, ПОТОМУ ЧТО ЧИТАЕТСЯ ПОДСКАЗКОЙ, А НЕ ПОЛОСОЙ (круг 17, F-12) ═══════════════
        Владелец: «убери текст "WHAT IS MISSING / no fabric render stands on this card yet — make
@@ -759,7 +816,9 @@ export function threedGate(
        строкой. `next: 'render'` при этом жив: по нему полоса и узнаёт, что молчать. */
     return {
       ok: false,
-      reason: 'the render slots are empty — 3D needs at least FRONT. Fill it on FABRIC RENDER',
+      reason: named
+        ? `the render slots of ${named} are empty — 3D is built from this colourway’s own bench and needs at least FRONT. Fill it on FABRIC RENDER, with ${named} picked`
+        : 'the render slots are empty — 3D needs at least FRONT. Fill it on FABRIC RENDER',
       // НЕЧЕГО СТАВИТЬ — СНАЧАЛА СДЕЛАТЬ. Это `no_fabric_render` сервера, слово в слово по
       // предмету: на верстаке пусто.
       next: 'render',
@@ -793,10 +852,12 @@ export function threedGate(
       // отвергается бесплатно (`provider_bad_request`) — а без спинки не отвергается. Отказ,
       // называющий обязательным то, что обязательным не является, запрещает законный прогон.
       reason:
-        /* ⚠ ИМЯ КОЛОРВЕИ ЗДЕСЬ БОЛЬШЕ НЕ НАЗЫВАЕТСЯ: пикера нет ни на одном экране (E-16),
-           всякий вызов приходит с нулём, и ветка с именем была мертва. Оставлять мёртвую
-           половину «про запас» — это второй смысл у одной фразы, расходящийся молча. */
-        'the render bench holds renders, but not on FRONT — ' +
+        /* ⚠ ИМЯ КОЛОРВЕИ НАЗЫВАЕТСЯ СНОВА (круг 19). Записка «пикера нет ни на одном экране
+           (E-16), всякий вызов приходит с нулём» пережила свою причину: орган вернулся в ряд
+           представлений, `colorwayId` у этого вызова теперь бывает любым, и «the render bench»
+           без имени на карточке с несколькими цветами не называет, О КАКОМ из верстаков речь. */
+        (named ? `the render bench of ${named} holds renders, ` : 'the render bench holds renders, ') +
+        'but not on FRONT — ' +
         'and FRONT is the one side 3D cannot do without: the provider is handed it as the primary ' +
         'view and rejects a build that has none. Put a render into the FRONT slot on FABRIC RENDER. ' +
         'Nothing is reserved and nothing is charged until it is there',
