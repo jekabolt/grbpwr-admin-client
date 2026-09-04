@@ -4,7 +4,7 @@ import { useController, useFieldArray, useFormContext, useWatch } from 'react-ho
 import { AnnotationEditor } from 'ui/components/annotation/editor';
 import { useEditHistory } from 'ui/components/annotation/history';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
-import type { AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
+import type { AnnotationCapsKey, AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
@@ -24,6 +24,8 @@ type FormCallout = {
   color?: AnnotationColorKey;
   dashed?: boolean;
   filled?: boolean;
+  /** Наконечник линии. Пусто — «по виду» (мерка засечками, скоба скобой), а не «без концов». */
+  caps?: AnnotationCapsKey;
 };
 
 const numOf = (v?: string) => {
@@ -241,6 +243,7 @@ export function FittingMedia({
         color: pen.color as AnnotationColorKey,
         dashed: pen.dashed,
         filled: pen.filled,
+        caps: pen.caps,
       },
     ]);
   }
@@ -272,6 +275,7 @@ export function FittingMedia({
           color: x.c?.color ?? '',
           dashed: !!x.c?.dashed,
           filled: !!x.c?.filled,
+          caps: x.c?.caps ?? '',
         };
       });
 
@@ -345,6 +349,7 @@ export function FittingMedia({
             color={c.color ?? ''}
             dashed={!!c.dashed}
             filled={!!c.filled}
+            caps={c.caps ?? ''}
             pieceKeys={[]}
             onText={(v) => setValue(`callouts.${i}.note`, v, { shouldDirty: true })}
             onColor={(v) => {
@@ -358,6 +363,13 @@ export function FittingMedia({
             onFilled={(v) => {
               rememberPen({ filled: v });
               setValue(`callouts.${i}.filled`, v, { shouldDirty: true });
+            }}
+            // ПАРА «вид + caps»: засечки и скоба — два ВИДА хранения, поэтому пишется и вид тоже.
+            // Замечание примерки переносят в тех-карту, и стрелка обязана остаться стрелкой.
+            onCaps={(next, chosen) => {
+              rememberPen({ caps: chosen });
+              setValue(`callouts.${i}.kind`, next.kind, { shouldDirty: true });
+              setValue(`callouts.${i}.caps`, next.caps, { shouldDirty: true });
             }}
             onPieces={() => {}}
             onRemove={() => {

@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationEditor } from 'ui/components/annotation/editor';
 import { type EditHistory } from 'ui/components/annotation/history';
+import { type AnnotationCapsKey } from 'ui/components/annotation/kinds';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
 import { moveItem } from 'components/managers/media/components/gallery-order';
@@ -110,6 +111,8 @@ type FormCallout = {
   dimensions?: string;
   dashed?: boolean;
   filled?: boolean;
+  /** Наконечник линии. Пусто — «по виду» (мерка засечками, скоба скобой), а не «без концов». */
+  caps?: AnnotationCapsKey;
   /** Детали указания. `part` — эхо первого элемента: на нём стоит связь «деталь ↔ выноска». */
   parts?: string[];
 };
@@ -340,6 +343,7 @@ function TechCardGallery({
         color: pen.color as AnnotationColor,
         dashed: pen.dashed,
         filled: pen.filled,
+        caps: pen.caps,
       },
     ]);
   }
@@ -373,6 +377,7 @@ function TechCardGallery({
           color: x.c?.color ?? '',
           dashed: !!x.c?.dashed,
           filled: !!x.c?.filled,
+          caps: x.c?.caps ?? '',
         };
       });
 
@@ -513,6 +518,7 @@ function TechCardGallery({
             color={c.color ?? ''}
             dashed={!!c.dashed}
             filled={!!c.filled}
+            caps={c.caps ?? ''}
             // ДЕТАЛИ ЗДЕСЬ ИМЕНАМИ, а не ключами: на именах стоит связь «деталь ↔ выноска»
             // (`piece.calloutNumber` сверяется по имени) и ими печатается тех-пак.
             pieceKeys={calloutParts(c)}
@@ -533,6 +539,17 @@ function TechCardGallery({
             onFilled={(v) => {
               rememberPen({ filled: v });
               setValue(`callouts.${i}.filled`, v, { shouldDirty: true });
+            }}
+            // НАКОНЕЧНИК ПИШЕТСЯ ПАРОЙ «вид + caps», и вид пишется ТОЖЕ (D-19): засечки и скоба —
+            // это два ВИДА хранения, а не два значения одного поля. Записать только `caps`
+            // значило бы оставить скобу видом `dim` и нарисовать её меркой.
+            //
+            // Перо помнит ВЫБОР (`chosen`), а не хранимую пару: человек, выбравший скобу, ставит
+            // следующую тоже скобой, а хранимое `caps` у скобы пусто.
+            onCaps={(next, chosen) => {
+              rememberPen({ caps: chosen });
+              setValue(`callouts.${i}.kind`, next.kind, { shouldDirty: true });
+              setValue(`callouts.${i}.caps`, next.caps, { shouldDirty: true });
             }}
             onPieces={(names) => {
               setValue(`callouts.${i}.parts`, names, { shouldDirty: true });

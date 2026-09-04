@@ -17,14 +17,24 @@ import {
 import {
   arcPath,
   bracketPath,
+  constrainTo45,
   leaderTarget,
+  midpoint,
   polygonPath,
   simplifyPath,
   simplifyToLimit,
   splitInkStrokes,
   type ShapePoint,
 } from './geometry';
-import { kindDef, labelKindForPoints, NOTE_MAX_POINTS, pointsFloor } from './kinds';
+import {
+  capsStorage,
+  effectiveCaps,
+  kindDef,
+  labelKindForPoints,
+  NOTE_MAX_POINTS,
+  pointsFloor,
+  type AnnotationCapsKey,
+} from './kinds';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
 // ПОВЕРХНОСТЬ УКАЗАНИЙ — картинка и всё, что на ней нарисовано и правится.
@@ -66,6 +76,11 @@ export type PenStyle = {
   color: string;
   dashed: boolean;
   filled: boolean;
+  /**
+   * Наконечник (D-19/D-20). В ПАМЯТИ пера — как ВЫБРАН («bracket»), в `onAdd` — как ХРАНИТСЯ:
+   * поверхность сводит выбор к паре «вид + caps» (`capsStorage`) перед тем, как отдать владельцу.
+   */
+  caps: AnnotationCapsKey;
 };
 
 /** Вью-модель одного указания. Владелец данных маппит сюда свою форму и обратно. */
@@ -85,6 +100,8 @@ export type SurfaceCallout = {
   color?: string;
   dashed?: boolean;
   filled?: boolean;
+  /** Наконечник как хранится; отсутствует — «не задано», рисуется как до круга 18. */
+  caps?: string;
   /** Детали кроя, о которых указание. */
   pieceLineKeys?: string[];
 };
@@ -388,6 +405,36 @@ export function joinInkStrokes(
  */
 const inkSessionMaxStrokes = (limit: number) => Math.max(1, Math.floor((limit + 1) / 3));
 
+/**
+ * ОТ ЧЕГО SHIFT ОТСЧИТЫВАЕТ УГОЛ ПРИ ПРАВКЕ ЯКОРЯ (D-17): у линии — от другого конца, у кривой
+ * концы держатся друг от друга, а изгиб — от середины хорды (симметричная дуга); у зоны — от
+ * предыдущей вершины; у записки луч держится от плашки. `null` — держать не от чего.
+ */
+function handleAnchor(
+  kind: string,
+  pts: ShapePoint[],
+  index: number,
+  label: ShapePoint,
+): ShapePoint | null {
+  const d = kindDef(kind);
+  switch (d.key) {
+    case 'dim':
+    case 'bracket':
+      return pts[index === 0 ? 1 : 0] ?? null;
+    case 'arc':
+      if (index === 1) return pts[0] && pts[2] ? midpoint(pts[0], pts[2]) : null;
+      return pts[index === 0 ? 2 : 0] ?? null;
+    case 'polygon':
+      return pts.length > 1 ? pts[(index - 1 + pts.length) % pts.length] : null;
+    case 'pin':
+    case 'label':
+    case 'multi':
+      return label;
+    default:
+      return null;
+  }
+}
+
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -396,7 +443,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
  * рисует им дальше, а не переназначает цвет каждой новой фигуре. Держать память на поверхности
  * значило бы, что в полосе из десяти кадров цвет сбрасывается при переходе к соседнему снимку.
  */
-const pen: PenStyle = { color: '', dashed: false, filled: false };
+const pen: PenStyle = { color: '', dashed: false, filled: false, caps: '' };
 export function rememberPen(next: Partial<PenStyle>) {
   Object.assign(pen, next);
 }
@@ -797,6 +844,34 @@ export function AnnotationSurface({
     [rawAt],
   );
 
+  /**
+   * SHIFT ДЕРЖИТ 0° · 45° · 90° (круг 18, D-17): «при зажатом шифте … вести ровно линией или под
+   * прямыми углами логика как в фотошопе». Считается в ПИКСЕЛЯХ кадра (`constrainTo45`) — доли по
+   * осям это разные единицы — и возвращается в доли с клампом: у края кадра угол уступает краю.
+   *
+   * ЧИТАЕТСЯ `e.shiftKey` САМОГО СОБЫТИЯ УКАЗАТЕЛЯ, а не клавиатурный слушатель: модификатор не
+   * зависит от раскладки (в отличие от `e.key`, мёртвого на кириллице), и он верен ровно в момент
+   * движения — отпустили Shift, следующий же сдвиг мыши освобождает точку.
+   */
+  const heldTo45 = useCallback(
+    (anchor: ShapePoint | null, p: ShapePoint): ShapePoint => {
+      if (!anchor) return p;
+      const r = unpx(constrainTo45(px(anchor), px(p)));
+      return { x: clamp01(r.x), y: clamp01(r.y) };
+    },
+    [px, unpx],
+  );
+  /**
+   * ОТ ЧЕГО ОТСЧИТЫВАТЬ УГОЛ ПРИ ПОСТАНОВКЕ: от последней поставленной точки — кроме изгиба
+   * кривой, который держится от СЕРЕДИНЫ ХОРДЫ: так Shift даёт симметричную дугу (изгиб строго
+   * поперёк хорды или вдоль неё), а от конца он не держал бы ничего осмысленного.
+   */
+  const shiftAnchor = (): ShapePoint | null => {
+    if (points.length === 0) return null;
+    if (def.grammar === 'arc' && points.length === 2) return midpoint(points[0], points[1]);
+    return points[points.length - 1];
+  };
+
   // ── ПОСТАНОВКА ────────────────────────────────────────────────────────────────────────────────
 
   const finishPlacing = useCallback(
@@ -814,15 +889,21 @@ export function AnnotationSurface({
       if (!full) {
         // Вид ХРАНЕНИЯ у подписи считается по числу якорей: панель знает один вид, провод
         // различает одну стрелку и несколько. Различие — счётчик, поэтому его считают.
-        const stored = d.key === 'label' || d.key === 'multi' ? labelKindForPoints(pts.length) : d.key;
+        const base = d.key === 'label' || d.key === 'multi' ? labelKindForPoints(pts.length) : d.key;
+        // НАКОНЕЧНИК ИЗ ПАМЯТИ ПЕРА СВОДИТСЯ К ПАРЕ «ВИД + caps» (D-19): линия со скобой хранится
+        // как `bracket`, с точками — как `dim` плюс `caps`. Виды без концов пишутся без него.
+        const stored = d.capped
+          ? capsStorage(base, pen.caps)
+          : { kind: base, caps: '' as AnnotationCapsKey };
         // Оба флага сужаются ПО ВИДУ. Пунктир у точки и штриховка у линии сервер приводит к
         // false, и форма, оставившая их поднятыми, разошлась бы с хранимым: карточка становится
         // «изменённой после подписи» за нажатие, которое ничего не изменило.
         mutate(() =>
-          onAdd?.(stored, pts, {
+          onAdd?.(stored.kind, pts, {
             color: pen.color,
             dashed: d.dashable ? pen.dashed : false,
             filled: d.fillable ? pen.filled : false,
+            caps: stored.caps,
           }),
         );
         // ТРЕТИЙ ТАКТ ЖЕСТА «клик-клик-ввод»: поставленная фигура выбирается сама и открывает
@@ -1126,7 +1207,9 @@ export function AnnotationSurface({
   function onFramePointerMove(e: ReactPointerEvent) {
     if ((placing && def.grammar !== 'ink') || adding !== null) {
       const p = at(e.clientX, e.clientY);
-      setCursor(p);
+      // Резиновая линия показывает УДЕРЖАННУЮ точку: превью обязано совпадать с тем, что поставит
+      // клик, иначе Shift виден только по результату.
+      setCursor(placing && e.shiftKey ? heldTo45(shiftAnchor(), p) : p);
     }
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1244,7 +1327,8 @@ export function AnnotationSurface({
       const raw = rawAt(e.clientX, e.clientY);
       const EPS = 0.001;
       if (!raw || raw.x < -EPS || raw.x > 1 + EPS || raw.y < -EPS || raw.y > 1 + EPS) return;
-      addPlacementPoint({ x: clamp01(raw.x), y: clamp01(raw.y) });
+      const p = { x: clamp01(raw.x), y: clamp01(raw.y) };
+      addPlacementPoint(e.shiftKey ? heldTo45(shiftAnchor(), p) : p);
       return;
     }
     if (selected !== null) {
@@ -1296,7 +1380,23 @@ export function AnnotationSurface({
       if (d.what === 'handle') {
         if (!d.moved && Math.hypot((p.x - d.at.x) * size.w, (p.y - d.at.y) * size.h) <= CLICK_MOVE_THRESHOLD)
           return;
-        setDragBoth({ ...d, moved: true, at: p });
+        // SHIFT ДЕРЖИТ УГОЛ И ПРИ ПРАВКЕ ЯКОРЯ (D-17) — от того, что назовёт `handleAnchor`.
+        // Пиксели, не доли — см. `constrainTo45`; `size` здесь свежий: он в зависимостях эффекта.
+        let held = p;
+        if (e.shiftKey) {
+          const c = live.current.callouts.find((x) => x.key === d.key);
+          const anchor = c ? handleAnchor(c.kind, c.points, d.index, c.label) : null;
+          if (anchor) {
+            const w = size.w || 1;
+            const h = size.h || 1;
+            const r = constrainTo45(
+              { x: anchor.x * w, y: anchor.y * h },
+              { x: p.x * w, y: p.y * h },
+            );
+            held = { x: clamp01(r.x / w), y: clamp01(r.y / h) };
+          }
+        }
+        setDragBoth({ ...d, moved: true, at: held });
         return;
       }
       const dx = p.x - d.from.x;
@@ -1870,6 +1970,7 @@ export function AnnotationSurface({
                       color={c.color || undefined}
                       dashed={c.dashed}
                       filled={c.filled}
+                      caps={c.caps}
                       halo={halo}
                       strokeWidth={selected === c.key ? 2 : 1.5}
                     />
@@ -1909,7 +2010,7 @@ export function AnnotationSurface({
                   adding === null &&
                   callouts.map((c) => {
                     const pts = pointsOf(c).map(px);
-                    const d = hitPath(c.kind, pts, px(labelOf(c)));
+                    const d = hitPath(c.kind, pts, px(labelOf(c)), effectiveCaps(c.kind, c.caps));
                     if (!d) return null;
                     // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
                     // а не в двухпиксельный контур по краю.
@@ -2342,12 +2443,12 @@ function EditorSlot({
  * Геометрия здесь НЕ ПОВТОРЯЕТСЯ, а зовётся из `geometry.ts` теми же функциями, которыми рисует
  * `CalloutShape`: вторая копия разошлась бы с первой ровно так, как разошлась эта.
  */
-function hitPath(kind: string, pts: ShapePoint[], label: ShapePoint): string | null {
+function hitPath(kind: string, pts: ShapePoint[], label: ShapePoint, caps = ''): string | null {
   const d = kindDef(kind);
   if (pts.length === 0) return null;
   /** Лидер — видимая линия, значит и ловится. У видов без лидера пусто. */
   const lead = (() => {
-    const t = leaderTarget(d.key, pts);
+    const t = leaderTarget(d.key, pts, caps);
     return t ? ` M${label.x},${label.y} L${t.x},${t.y}` : '';
   })();
   switch (d.key) {
@@ -2359,9 +2460,13 @@ function hitPath(kind: string, pts: ShapePoint[], label: ShapePoint): string | n
       // Хит подписи — её ЛУЧИ: единственное, что она рисует на кадре.
       return pts.map((p) => `M${label.x},${label.y} L${p.x},${p.y}`).join(' ');
     case 'dim':
-      return pts.length >= 2 ? `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}${lead}` : null;
     case 'bracket':
-      return pts.length >= 2 ? `${bracketPath(pts[0], pts[1])}${lead}` : null;
+      // ЛИНИЯ ЛОВИТСЯ ПО ТОМУ, ЧТО НАРИСОВАНО, а нарисованное решает НАКОНЕЧНИК, не ключ (D-19):
+      // скоба — ножки и перекладина, всё прочее — хорда между якорями.
+      if (pts.length < 2) return null;
+      return caps === 'bracket'
+        ? `${bracketPath(pts[0], pts[1])}${lead}`
+        : `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}${lead}`;
     case 'arc':
       // ТА ЖЕ КРИВАЯ, что нарисована: `stroke` попадания считается по настоящему пути Безье.
       return pts.length >= 3 ? `${arcPath(pts[0], pts[1], pts[2])}${lead}` : null;

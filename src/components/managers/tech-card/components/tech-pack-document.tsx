@@ -80,6 +80,7 @@ import {
   type AnnotationForm,
 } from './schema';
 import { kindDef } from 'ui/components/annotation/kinds';
+import { annotationCapsFromWire } from 'ui/components/annotation/wire';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
@@ -335,6 +336,13 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
               // печати значит отдать в цех другое указание, чем видно на экране.
               dashed={!!c.dashed}
               filled={!!c.filled}
+              // НАКОНЕЧНИК НА БУМАГЕ ОБЯЗАТЕЛЕН ПО ТОМУ ЖЕ ДОВОДУ, что пунктир: засечка говорит
+              // «этот участок измерен», стрелка — «смотри сюда», точка — «вот здесь». Напечатать
+              // мерку там, где на экране стрелка, значит отдать в цех другое указание.
+              //
+              // Читается с провода, где пусто значит «по виду»: `CalloutShape` раскрывает это сам
+              // (`effectiveCaps`), поэтому лист, напечатанный до круга 18, выглядит как выглядел.
+              caps={annotationCapsFromWire(c.caps)}
             />
           ))}
         </svg>
