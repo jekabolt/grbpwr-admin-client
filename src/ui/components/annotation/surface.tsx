@@ -168,6 +168,16 @@ export type AnnotationEditorSlotOpts = {
 };
 
 export type AnnotationSurfaceProps = {
+  /**
+   * ПОДСВЕЧЕННОЕ СНАРУЖИ — необязательно. Поверхность и так гасит соседей под мышью; этот проп
+   * даёт то же самое ИЗ СПИСКА: наведение на строку бокового меню указаний (C-2) обязано
+   * подсветить саму выноску на кадре, а изнутри поверхность про список ничего не знает.
+   *
+   * ВНУТРЕННЕЕ НАВЕДЕНИЕ СТАРШЕ ВНЕШНЕГО: мышь на кадре отвечает точнее, чем мышь над списком, и
+   * если человек ведёт мышь по кадру, список не имеет права перебивать его подсветку. Постановка
+   * фигуры гасит оба — во время рисования гасить соседей значит мешать целиться.
+   */
+  hoveredKey?: string | null;
   src: string;
   alt?: string;
   media?: 'image' | 'video';
@@ -528,6 +538,7 @@ export function AnnotationSurface({
   preferNaturalAspect = false,
   editorReserveHeight,
   hoverNotes = false,
+  hoveredKey,
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -1616,7 +1627,7 @@ export function AnnotationSurface({
 
   // ── ОТРИСОВКА ─────────────────────────────────────────────────────────────────────────────────
 
-  const isolatedKey = placing ? null : hovered;
+  const isolatedKey = placing ? null : (hovered ?? hoveredKey ?? null);
   const dim = (key: string) => isolatedKey !== null && isolatedKey !== key;
   const inv = 1 / (zoom ? scale || 1 : 1);
 

@@ -224,6 +224,27 @@ export type FocusedAnnotatorProps = {
    * «показать все записки» — остаются живыми: выпущенную карточку именно читают.
    */
   readOnly?: boolean;
+  /**
+   * ВЫБРАННОЕ УКАЗАНИЕ СНАРУЖИ — необязательно. Без этих двух пропов выбор целиком внутренний, и
+   * так работает каждый сегодняшний владелец: кликнули по фигуре — открылась правка.
+   *
+   * Пропы существуют затем, чтобы выбор мог прийти НЕ С КАДРА: боковое меню указаний (D-27, C-1)
+   * это тот же выбор, сделанный из списка. Держать там второй `useState` значило бы завести два
+   * источника правды об одном выборе — и получить экран, где строка меню подсвечена, а редактор
+   * показывает другую выноску.
+   *
+   * УПРАВЛЯЕМОСТЬ ЧАСТИЧНАЯ И ЭТО НАМЕРЕННО: `selectedKey` задан — снаружи, не задан — внутри.
+   * Полная управляемость заставила бы каждого сегодняшнего владельца завести состояние, которое
+   * ему не нужно.
+   */
+  selectedKey?: string | null;
+  onSelectedChange?: (key: string | null) => void;
+  /**
+   * ПОДСВЕЧЕННОЕ СНАРУЖИ. Наведение на строку бокового меню обязано подсветить саму выноску на
+   * кадре (C-2), а наведение на кадр — строку меню; изнутри поверхность знает только второе.
+   * Внутреннее наведение СТАРШЕ: мышь на кадре отвечает на вопрос точнее, чем мышь над списком.
+   */
+  hoveredKey?: string | null;
   /** Якоря поставленной фигуры изменились — точку подвинули, добавили или убрали. */
   onEditPoints?: (key: string, points: ShapePoint[]) => void;
   /** Перед каждой мутацией фигур: владелец запоминает состояние для отката (⌘Z). */
@@ -379,6 +400,9 @@ export function FocusedAnnotator({
   preferNaturalAspect = false,
   zoomEditorReserve = false,
   tilePick,
+  selectedKey,
+  onSelectedChange,
+  hoveredKey,
 }: FocusedAnnotatorProps) {
   /**
    * Инструмент постановки. ОДНО состояние вместо трёх (`addMode` + `shapeKind` + набранные точки):
@@ -394,7 +418,22 @@ export function FocusedAnnotator({
    * клик по пину и двигал соседние снимки. Сгруппированный с панелью, он не трогает ряд вовсе — и
    * заодно получает всю ширину листа вместо трёхсот пикселей плитки.
    */
-  const [selected, setSelected] = useState<string | null>(null);
+  const [ownSelected, setOwnSelected] = useState<string | null>(null);
+  /**
+   * ВЫБОР — СНАРУЖИ, ЕСЛИ ЕГО ДАЛИ. `selectedKey === undefined` значит «владелец про выбор не
+   * говорит», и тогда он внутренний, как был; `null` — законное значение снаружи («ничего не
+   * выбрано»), поэтому проверка идёт на `undefined`, а не на ложность: `?? ownSelected` отдал бы
+   * внутренний выбор владельцу, который явно попросил снять выбор.
+   *
+   * Внутреннее состояние двигается ВСЕГДА, даже когда управляет владелец: иначе владелец, который
+   * дал `selectedKey`, но забыл `onSelectedChange`, получил бы кадр, на котором клик не выбирает
+   * ничего, — молчаливо.
+   */
+  const selected = selectedKey === undefined ? ownSelected : selectedKey;
+  const setSelected = (key: string | null) => {
+    setOwnSelected(key);
+    onSelectedChange?.(key);
+  };
   /**
    * ВЗВОД «+ POINT» ЖИВЁТ ЗДЕСЬ, А НЕ В ПЛИТКЕ, ПОТОМУ ЧТО КНОПКА ЖИВЁТ ЗДЕСЬ.
    *
@@ -726,6 +765,7 @@ export function FocusedAnnotator({
                   )}
                 >
                   <AnnotationSurface
+                    hoveredKey={hoveredKey}
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
                     media={isVideo(url) ? 'video' : 'image'}
@@ -906,6 +946,7 @@ export function FocusedAnnotator({
           {focused && (
             <div className='mx-auto w-full max-w-[26rem] space-y-2'>
               <AnnotationSurface
+                hoveredKey={hoveredKey}
                 src={focusedUrl}
                 alt={focusedAlt}
                 media={isVideo(focusedUrl) ? 'video' : 'image'}
