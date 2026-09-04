@@ -54,7 +54,10 @@ import {
   fixSelectionOf,
   isCancelling,
   isRunLive,
+  isTextRun,
+  runOutcomeChip,
   runOutcomeNote,
+  runOutputText,
 } from './run-state';
 import { SlotPicker } from './slot-picker';
 import { thumbUrl } from './thumb';
@@ -484,12 +487,21 @@ function RunTile({
          словом `render`, поэтому без него пикер предлагал бы фотографии на человеке четыре
          стороны верстака фабрик-рендера — и оттуда её читала бы платная сборка 3D. Разбор целиком
          у `ONMODEL_NO_SLOT` в `slot-picker.tsx`. */
+      /* ⚠ ВЫСОТА — ПОЛ, А НЕ ПОТОЛОК, И ЭТО ЗАМЕРЕННЫЙ НАЕЗД (D-4, соседний случай).
+         `h-[20px]` резервировал под подвалом плитки ровно одну строку контрола, чтобы дорожки
+         сетки стояли ровно. Но одна из веток `SlotPicker` рисует здесь не контрол, а ФРАЗУ
+         («an on-model photograph stands in no slot — it is the garment on a person, not a plate»):
+         на 9px она укладывается в три строки, то есть в ~60px, и лишние 40 выходили за коробку
+         плитки НАРУЖУ — `overflow` у неё `visible` — и красились ПОВЕРХ мета-строки следующего
+         прогона. Замерено на бете, вкладка ALL, ширина 1400: низ последнего потомка строки 27 на
+         32px ниже верха строки 26. `min-h` держит то же выравнивание там, где подвал — контрол,
+         и даёт фразе вырасти в СВОЕЙ дорожке. */
       <SlotPicker
         band={band}
         techCardId={techCardId}
         picture={picture}
         rep={rep}
-        className='h-[20px] w-full'
+        className='min-h-[20px] w-full'
       />
     );
   }
@@ -675,6 +687,13 @@ function RunRow({
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
   const [open, setOpen] = useState(false);
+  /**
+   * Развёрнут ли ОТВЕТ текстового прогона (D-2). Отдельно от `open`: та дверь показывает, что
+   * прогону ДАЛИ, эта — что он ВЕРНУЛ, и складывать их в одну значило бы прятать результат за
+   * панелью входов. Свой `useState`, а не `<details>`: свёрнутый `<details>` меряется как видимый,
+   * и проба «текста на экране нет» зеленела бы на закрытом экране.
+   */
+  const [textOpen, setTextOpen] = useState(false);
 
   const runId = run.id ?? 0;
   const archived = isRunArchived(run);
@@ -726,7 +745,30 @@ function RunRow({
     ...fix.slotIds.map(() => 'a detail'),
   ].filter(Boolean);
   const isVector = (run.kind ?? '').trim().toLowerCase() === 'vector';
+  /**
+   * ⚠ ДВА ПРОЧТЕНИЯ ОДНОГО ИСХОДА, И ЭТО НЕ ДУБЛИРОВАНИЕ (D-4). `chip` — то, что влезает в
+   * `Pill` (он `whitespace-nowrap`, и текст провайдера длиной до 4 000 знаков уносил бы СТРАНИЦУ
+   * вбок); `status` — тот же исход целиком, и он едет в `title`, чтобы обрезка ничего не съела.
+   * Разбор — у `runOutcomeChip`.
+   */
   const status = runOutcomeNote(run);
+  const chip = runOutcomeChip(run);
+  /**
+   * ═══ ПРОГОН, КОТОРЫЙ ОТВЕЧАЕТ СЛОВАМИ (D-2) ═══════════════════════════════════════════════
+   *
+   * Владелец: «RUN 28 · STRING · 10:34 · US$0.02 на бете это генерация но не картинок она криво
+   * отображается». Строка рисовалась грамматикой картиночного прогона: пока он шёл — дашированная
+   * плитка 4/5 с обещанием кадра, когда кончился — голая строка без единого слова о том, что он
+   * вообще произвёл. Сам ответ (`output_text`, 2 081 знак на бете) не читал НИ ОДИН экран: до
+   * этой волны его единственным читателем был `mood-draft.tsx`, и только в тот тик, в который
+   * пришёл ответ мутации.
+   *
+   * («STRING» в его жалобе — не род и не поломка: это `run.author`, и на бете он у ВСЕХ прогонов
+   * буквально `string`, потому что таким приезжает username в JWT тестовой учётки. Строка мета
+   * стоит `uppercase`, поэтому он и прочитался как слово-заголовок.)
+   */
+  const textRun = isTextRun(run);
+  const outputText = runOutputText(run);
 
   const rerunOf = run.rerunOf ?? 0;
 
@@ -784,10 +826,14 @@ function RunRow({
             without opening either panel. */}
         {rerunOf > 0 && <Pill tone='mut'>repeat of {runHandle(rerunOf)}</Pill>}
         {live && (
-          <Pill tone='attention'>{isCancelling(run) ? 'cancelling…' : `${status} ${elapsed}`}</Pill>
+          <Pill tone='attention' title={isCancelling(run) ? undefined : status}>
+            {isCancelling(run) ? 'cancelling…' : `${chip} ${elapsed}`}
+          </Pill>
         )}
         {!live && status !== 'done' && (
-          <Pill tone={status.startsWith('failed') ? 'warn' : 'mut'}>{status}</Pill>
+          <Pill tone={status.startsWith('failed') ? 'warn' : 'mut'} title={status}>
+            {chip}
+          </Pill>
         )}
         {archived && <Pill tone='mut'>archived</Pill>}
 
@@ -843,9 +889,58 @@ function RunRow({
 
       {open && <RunPanel techCardId={techCardId} band={band} run={run} disabled={disabled} />}
 
+      {/* ═══ ТЕЛО ТЕКСТОВОГО ПРОГОНА — ТАМ ЖЕ, ГДЕ У ОСТАЛЬНЫХ СТОЯТ ПЛИТКИ (D-2) ═══════════════
+          Ответ прогона принадлежит СТРОКЕ, а не панели: панель отвечает на «что ему дали и во что
+          это обошлось», и текст, спрятанный в неё, был бы результатом за дверью входов. Поэтому
+          здесь ровно та же позиция в документе, что у `Tiles` ниже, и та же тройка состояний, что
+          у картиночной строки: идёт → вернул → вернул пусто.
+
+          ПРОЗА МЕРИТСЯ СТРОКОЙ, А НЕ БЛОКОМ. `max-w-[75ch]` — потолок длины строки для чтения;
+          на широком мониторе абзац во всю ширину блока читается хуже, чем не читается вовсе.
+          Пара `break-words` + собственная ширина держит его внутри колонки при любом ответе
+          модели: страницу вбок этот орган не двигает ни на каком тексте (D-4). */}
+      {!folded && textRun && (
+        <div data-run-text={runId}>
+          {live ? (
+            <Text size='micro' variant='label' component='p'>
+              writing the draft — {elapsed}
+            </Text>
+          ) : outputText ? (
+            <>
+              <button
+                type='button'
+                data-run-text-toggle={runId}
+                onClick={() => setTextOpen((v) => !v)}
+                aria-expanded={textOpen}
+                className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+              >
+                {textOpen ? '▾ hide the draft' : '▸ read the draft'} · {outputText.length} characters
+              </button>
+              {textOpen && (
+                <Text
+                  size='micro'
+                  component='p'
+                  className='mt-1 max-w-[75ch] whitespace-pre-wrap break-words bg-bgZebra px-2 py-1.5'
+                >
+                  {outputText}
+                </Text>
+              )}
+            </>
+          ) : (
+            status === 'done' && (
+              // ЗАКОНЧИЛСЯ И НЕ ПРИНЁС НИЧЕГО — это исход, а не пустое место. Молчащая строка
+              // здесь неотличима от строки, у которой просто не нарисовались плитки.
+              <Text size='micro' variant='label' component='p'>
+                finished with no text — nothing was stored for this run
+              </Text>
+            )
+          )}
+        </div>
+      )}
+
       {/* AN ARCHIVED ROW COLLAPSES TO ITS LINE IN THE WINDOW, and unfolds on the archived shelf —
           the one place opened in order to look at it. Its pictures are not hidden anywhere else. */}
-      {!folded && live && (
+      {!folded && live && expectedTileCount(run) > 0 && (
         <Tiles min={140}>
           {Array.from({ length: expectedTileCount(run) }, (_, i) => (
             <Tile
@@ -965,9 +1060,15 @@ function RunRow({
       )}
 
       {/* A FAILED OR CANCELLED ROW WITH NOTHING UNDER IT SAYS NOTHING MORE (S-10): its own pill
-          already states the outcome, and the price on the line already keeps the cost. */}
+          already states the outcome, and the price on the line already keeps the cost.
+
+          ⚠ И ТЕКСТОВЫЙ ПРОГОН ТОЖЕ МОЛЧИТ ЗДЕСЬ — ВТОРАЯ ПОЛОВИНА D-2. «no pictures under this
+          row» под черновиком идеи было формально верно и по смыслу ложно: оно называет ОТСУТСТВИЕ
+          там, где отсутствовать нечему, — и стояло ровно под дверью, за которой лежат 2 081 знак
+          ответа. Что этот прогон сделал, говорит его собственное тело выше. */}
       {!folded &&
         !live &&
+        !textRun &&
         pictures.length === 0 &&
         !(status.startsWith('failed') || status === 'cancelled') && (
           <Text size='micro' variant='label'>
@@ -1388,8 +1489,51 @@ export function GenerationHistory({
         : `${archivedLoaded.length} of ${archivedRuns} loaded`;
 
   const liveRun = runs.find(isRunLive) ?? null;
-  const pictureCount = runs.reduce((n, run) => n + (run.pictures ?? []).length, 0);
   const paged = visible.length > PAGE || more.hasMore;
+
+  /**
+   * ═══ ДВА ФАКТА, КОТОРЫЕ СТОЯЛИ ПОД ОДНОЙ ПОДПИСЬЮ (D-3) ═══════════════════════════════════
+   *
+   * Владелец: «из за пагинации и архивов у нас криво работают фильтры инишал на GENERATION
+   * HISTORY показывает кривое колличесвто». Шапка говорила
+   *
+   *     `{totalRuns} runs · {pictureCount} pictures shown`,
+   *
+   * и это ДВА РАЗНЫХ МНОЖЕСТВА, склеенные точкой. `totalRuns` — агрегат сервера ПО ВСЕЙ КАРТОЧКЕ
+   * (`SELECT COUNT(*) FROM design_run WHERE tech_card_id = :card`, архив ВКЛЮЧЁН).
+   * `pictureCount` считался по ЗАГРУЖЕННЫМ строкам — то есть по первой странице ленты в 12
+   * прогонов, вместе с заархивированными (их плитки в окне не рисуются вовсе) и вместе с теми,
+   * что фильтр рода со страницы убрал. Слово «shown» не было верным НИ ДЛЯ ОДНОГО из них.
+   *
+   * ЗАМЕРЕНО НА БЕТЕ, карточка 38, вкладка FLAT: шапка писала «28 runs · 18 pictures shown ·
+   * 7 archived», при том что на экране стояли три строки окна (прогоны 28, 27, 26) и в них
+   * 0 + 2 + 4 = ШЕСТЬ картинок. На вкладке FABRIC RENDER, где фильтр рода по умолчанию
+   * `render`, те же «28 runs · 18 pictures shown» стояли над четырьмя загруженными
+   * рендер-прогонами.
+   *
+   * ПОЭТОМУ ЧИСЛА РАЗВЕДЕНЫ ПО СВОИМ ПОВЕРХНОСТЯМ, И КАЖДОЕ НАЗЫВАЕТ СВОЁ МНОЖЕСТВО.
+   * · Шапка секции говорит только о КАРТОЧКЕ — оба её числа приходят одним агрегатом с сервера,
+   *   не зависят ни от страницы, ни от фильтра, и потому верны всегда.
+   * · Всё, что зависит от страницы и фильтра, стоит у САМОГО ФИЛЬТРА и подписано словом
+   *   «loaded». Оно там уже стояло — но только при суженном фильтре; под `all` человек видел
+   *   одну лишь шапку, то есть ровно то число, которое его и обмануло.
+   *
+   * ⚠ ЧЕГО ЗДЕСЬ НЕТ И БЫТЬ НЕ МОЖЕТ: «сколько на этой карточке РЕНДЕРОВ» — то есть агрегата по
+   * роду. На проводе его нет (`total_runs`/`archived_runs` — единственные счётчики полосы, а
+   * `outputs` это КАРТИНКИ генеративных родов с потолком в 60 на колорвей, не прогоны), и
+   * посчитать его по загруженной странице значило бы завести третье число, врущее ровно так же,
+   * как врало второе. Поэтому под суженным фильтром знаменатель ЧЕСТНО остаётся загруженным.
+   */
+  const picturesIn = (rows: common_DesignRun[]) =>
+    rows.reduce((n, run) => n + (run.pictures ?? []).length, 0);
+  /* `Math.max` — сторож против ОТРИЦАТЕЛЬНОГО остатка, а не украшение: агрегаты приезжают одним
+     чтением полосы, а продолжения — своими, и прогон, заархивированный между ними, на один кадр
+     делает загруженное больше обещанного. «11 of 10» — это ровно то враньё, ради которого вся
+     эта правка и делается. */
+  const loadedNote =
+    rep === 'all'
+      ? `${unfiltered.length} of ${Math.max(totalRuns - archivedRuns, unfiltered.length)} loaded · ${picturesIn(unfiltered)} pictures`
+      : `${visible.length} ${repLabel(rep)} of ${unfiltered.length} loaded · ${picturesIn(visible)} pictures`;
 
   return (
     <>
@@ -1433,8 +1577,17 @@ export function GenerationHistory({
               {runHandle(liveRun.id)} now
             </Text>
           )}
-          <Text size='micro' variant='label' component='span'>
-            {totalRuns} run{totalRuns === 1 ? '' : 's'} · {pictureCount} pictures shown
+          {/* ТОЛЬКО КАРТОЧКА. Это единственные два числа полосы, которые не зависят ни от
+              страницы, ни от фильтра, ни от того, раскрыта ли полка архива; разбор — у
+              `loadedNote` выше. Слова «on this card» тут несущие: без них «28» соседствует с
+              «7 archived» и читается как «28 плюс 7». */}
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            title={`${totalRuns} generation${totalRuns === 1 ? '' : 's'} have ever run on this card, ${archivedRuns} of them archived. What is loaded and shown right now is counted beside the representation filter below.`}
+          >
+            {totalRuns} run{totalRuns === 1 ? '' : 's'} on this card
           </Text>
           {archivedRuns > 0 && (
             <button
@@ -1538,15 +1691,21 @@ export function GenerationHistory({
           </div>
         }
         action={
-          rep === 'all' ? undefined : (
-            <Text size='micro' variant='label' component='span'>
-              {/* АГРЕГАТЫ В ШАПКЕ СЕКЦИИ (`{totalRuns} runs`) СЧИТАЮТ ВСЮ КАРТОЧКУ И НЕ ВРУТ ОТ
-                  ФИЛЬТРА — поэтому число «сколько показано из скольких» стоит здесь, у самого
-                  переключателя, и говорит про ЗАГРУЖЕННЫЕ строки, а не про историю целиком. */}
-              {visible.length} of {unfiltered.length} loaded run{unfiltered.length === 1 ? '' : 's'}
-              {more.hasMore ? ' …' : ''}
-            </Text>
-          )
+          /* ЧИСЛО СТОИТ ЗДЕСЬ ВСЕГДА, А НЕ ТОЛЬКО ПОД СУЖЕННЫМ ФИЛЬТРОМ (D-3). Раньше под `all`
+             эта строка исчезала — и единственным числом на экране оставался агрегат карточки в
+             шапке, тот самый, который человек и прочитал как «сколько тут показано». Теперь
+             ЗАГРУЖЕННОЕ названо словом «loaded» рядом с фильтром, который его и сужает, а
+             «…» говорит, что за ним у сервера ещё есть страницы. Разбор — у `loadedNote`. */
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            data-loaded-note
+            title='counted over the runs this screen has actually read — the first page of the feed plus every continuation asked for. The card’s own totals are in the block header above.'
+          >
+            {loadedNote}
+            {more.hasMore ? ' …' : ''}
+          </Text>
         }
       >
         representation

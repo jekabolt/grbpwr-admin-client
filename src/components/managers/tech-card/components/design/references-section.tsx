@@ -11,6 +11,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -116,6 +117,31 @@ const fullUrl = (full?: common_MediaFull): string =>
  * колонки — зазором в 24px. Рамка ячейки была бы блоком в блоке.
  */
 const CELL = 'grid min-w-0 grid-cols-[160px_1fr] items-start gap-3 py-3';
+
+/**
+ * Глиф нижней половины плейсхолдера (C-4) — перо, тем же штрихом и в той же коробке 24×24, что
+ * фотоглиф верхней половины у `MediaSlot`: две половины одной плитки обязаны читаться одной парой
+ * «знак + глагол», а не «знак + глагол» против «глагол». Тот глиф примитив не экспортирует, и
+ * этот ему не пара по коду — только по метрике: `aria-hidden`, `currentColor`, штрих 1.25.
+ */
+function PenGlyph() {
+  return (
+    <svg
+      aria-hidden
+      width={24}
+      height={24}
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.25'
+      className='shrink-0'
+    >
+      <path d='M4.5 19.5 6 14.5 16.5 4l3.5 3.5L9.5 18z' />
+      <path d='M14.5 6l3.5 3.5' />
+      <path d='M6 14.5l3.5 3.5' />
+    </svg>
+  );
+}
 
 /** Строка указаний карточки. Поле одно на всю карточку и приколото к `media_id` (см. J-8 ниже). */
 type CalloutRow = NonNullable<TechCardFormData['callouts']>[number];
@@ -677,38 +703,75 @@ export function ReferencesSection({
             {readOnly ? (
               <div className='h-[200px] w-[160px] border border-dashed border-borderColor' />
             ) : (
-              <MediaSlot
-                frameAspect='4/5'
-                heightPx={200}
-                label='+ reference'
-                purpose='design reference'
-                allowMultiple
-                showVideos={false}
-                onSelect={addReferences}
-                /* ═══ ВТОРАЯ ДВЕРЬ ПЕРЕЕХАЛА ВНУТРЬ ПЛЕЙСХОЛДЕРА (J-7) ═════════════════════════
-                   Владелец, дословно: «DRAW A REFERENCE в INPUT — REFERENCES должна быть внутри
-                   плейсхолдера».
+              /* ═══ ПЛЕЙСХОЛДЕР ПОДЕЛЕН ПОПОЛАМ ПО ГОРИЗОНТАЛИ (C-4, круг 18) ════════════════════
+                 Владелец, дословно: «плейсхолдер-бокс "+ REFERENCE / DRAW A REFERENCE" — этот бокс
+                 надо поделить горизонтально пополам и нижняя половина будет кнопка DRAW A
+                 REFERENCE а не как классическая кнопка».
 
-                   ЗДЕСЬ ОНА СТОЯЛА В ПУСТОЙ ПРАВОЙ КОЛОНКЕ ЭТОЙ ЖЕ ЯЧЕЙКИ, со связкой «or» между
-                   рамкой и кнопкой. Довод был честный (две пунктирные клетки читались бы как два
-                   пустых слота), но результат владелец назвал сам: дверь стояла НЕ ТАМ, где кадр,
-                   который она заводит. Обе двери заводят ОДИН предмет — новую строку входа, — и
-                   стоять они обязаны на одной коробке. Кнопка внутри кнопки невыразима, поэтому
-                   «внутрь» умеет только сам примитив слота (`MediaSlot.doors`), и там это факт о
-                   коробках: дверь лежит внутри рамки, а не рядом с ней.
+                 ЧТО БЫЛО (J-7). Дверь «draw a reference» стояла ВНУТРИ рамки плейсхолдера, но в
+                 коже вторичной кнопки системы (`MediaSlot.doors` → `Button variant='secondary'
+                 size='xs'`): белая пилюля с серой рамкой на полосатом поле. Ровно это владелец и
+                 назвал «классической кнопкой». Обе двери по-прежнему заводят ОДИН предмет — новую
+                 строку входа, — и по-прежнему стоят на одной коробке; изменилась ДОЛЯ коробки, а не
+                 её адрес.
 
-                   Правая колонка ячейки снова пуста — у плейсхолдера нет ни роли, ни записки,
-                   которые она держит у остальных, — и объясняющего абзаца тут по-прежнему нет
-                   (R-16, K-5, K-19): что делает кнопка, сказано глаголом на ней самой. */
-                doors={[
-                  {
-                    label: 'draw a reference',
-                    onClick: () => setDrawOpen(true),
-                    title:
-                      'opens the picture editor on a blank plate; what you draw joins the input',
-                  },
-                ]}
-              />
+                 ДВЕ ПОЛОВИНЫ ОДНОЙ ПЛИТКИ, А НЕ ПЛИТКА С КНОПКОЙ. Верхняя половина — тот же слот
+                 библиотеки, что и был (клик / ⌘V / бросок файла — всё внутри примитива); нижняя —
+                 ТА ЖЕ ПОВЕРХНОСТЬ, что у верхней: полосатое поле, пунктирная рамка, подпись по
+                 центру, чернеет по наведению и по фокусу так же, как верхняя. Кожа берётся из тех же
+                 примитивов (`PLACEHOLDER_SURFACE` + `placeholderClass`), которыми рисует себя
+                 `MediaSlot`, — второго начертания «пустой поверхности» здесь не заводится.
+
+                 ⚠ ДЕЛЕНИЕ — ГЕОМЕТРИЕЙ, А НЕ ВЕРОЙ. `<button>` меряется по содержимому и в
+                 плиточной раскладке уже ложился поверх соседа, пока `truncate` молчал (см. довод в
+                 `ui/components/tiles.tsx`). Поэтому размер живёт на КОРОБКЕ (`h-[200px] w-[160px]`,
+                 колонка-flex), а половинам заданы `h-1/2`, `w-full` и `min-w-0`; проба меряет
+                 `getBoundingClientRect` обеих половин против коробки.
+
+                 ОДНА ЛИНИЯ МЕЖДУ ПОЛОВИНАМИ, А НЕ ДВЕ. У каждой половины своя пунктирная рамка (её
+                 чернение по наведению — единственное состояние поверхности), и две рамки встык дали
+                 бы двойную линию посередине. Нижняя половина заезжает на пиксель вверх (`-mt-px`,
+                 рост на тот же пиксель), так что две линии ложатся в один ряд; наведённая половина
+                 поднимается над соседкой (`hover:z-[1]`), и её потемневшая рамка видна всеми
+                 четырьмя сторонами.
+
+                 Правая колонка ячейки по-прежнему пуста, объясняющего абзаца по-прежнему нет
+                 (R-16, K-5, K-19): что делает половина, сказано глаголом на ней самой. */
+              <div data-ref-placeholder='' className='flex h-[200px] w-[160px] flex-col'>
+                <MediaSlot
+                  frameAspect='4/5'
+                  label='+ reference'
+                  purpose='design reference'
+                  allowMultiple
+                  showVideos={false}
+                  onSelect={addReferences}
+                  sizeClassName='w-full'
+                  className='relative h-1/2 min-w-0 shrink-0 hover:z-[1] focus-visible:z-[1]'
+                />
+                <button
+                  type='button'
+                  data-ref-draw=''
+                  title='opens the picture editor on a blank plate; what you draw joins the input'
+                  onClick={() => setDrawOpen(true)}
+                  /* Рост и заезд на пиксель — ИНЛАЙНОМ, а не классами. Замерено: сборка СТЕНДА
+                     (cwd `tmp/dsgprobe`) не выпустила `h-[calc(50%+1px)]` и `-mt-px` из этого
+                     файла, и нижняя половина сжималась до 42px по содержимому; продовая сборка их
+                     выпускает. Геометрия деления не должна зависеть от того, откуда сканер читает
+                     исходники, — это не токен системы; классами остаётся всё, что несёт кожу. */
+                  style={{ ...PLACEHOLDER_SURFACE, height: 'calc(50% + 1px)', marginTop: -1 }}
+                  className={cn(
+                    placeholderClass({ dashed: true }),
+                    'relative w-full min-w-0 shrink-0 cursor-pointer flex-col gap-1 px-2 text-center text-labelColor',
+                    'hover:z-[1] hover:border-textColor hover:text-textColor',
+                    'focus-visible:z-[1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  )}
+                >
+                  <PenGlyph />
+                  <span className='leading-tight'>
+                    draw a reference
+                  </span>
+                </button>
+              </div>
             )}
           </div>
         </div>

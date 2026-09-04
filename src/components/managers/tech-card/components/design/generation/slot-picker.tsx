@@ -13,7 +13,7 @@ import {
 import { displayDetailName, readBench } from '../bench-slot';
 import { NewDetailModal } from '../modals';
 import { useDesignWrites } from '../use-design-band';
-import { SILHOUETTE_VIEWS, normaliseViewKey, viewLabel } from '../views';
+import { isDetailView, normaliseViewKey, sidesLeadingWith, viewLabel } from '../views';
 
 /**
  * THE PICKER ON A TILE — «this picture goes into that slot», said from the picture's side.
@@ -112,36 +112,56 @@ export function SlotPicker({
 
   const items = useMemo(() => {
     const ghost = normaliseViewKey(picture.ghostView);
-    // THE GUESS STANDS FIRST, AND THAT IS ALL IT DOES NOW (F-17). `ghost_view` is a hypothesis
-    // about which side this is — routinely wrong on front/back — so it shortens the reach without
-    // ever claiming the answer.
-    // ⚠ СЛОВА «· probably» БОЛЬШЕ НЕТ. Владелец: «в GENERATION HISTORY не пиши probably», а этот
-    // пикер рисуется ИМЕННО ТАМ — он импортирован в `generation-history.tsx`. Догадка осталась
-    // ровно тем, чем была полезна: ПОРЯДКОМ. Порядок сокращает путь и ничего не утверждает, а
-    // подпись именно утверждала — и притом хеджем, который владелец и назвал.
-    const sides = [...SILHOUETTE_VIEWS].sort((a, b) => {
-      if (a === ghost) return -1;
-      if (b === ghost) return 1;
-      return 0;
-    });
-    const out: { value: string; label: string }[] = [{ value: NONE, label: '— slot —' }];
-    sides.forEach((view) => {
-      out.push({
-        value: `v:${view}`,
-        label: viewLabel(view),
-      });
-    });
+    /**
+     * ═══ THE SIDE THIS PICTURE IS SAID TO BE STANDS FIRST — AND THAT IS ALL IT DOES (F-17, D-6) ═══
+     *
+     * On a cut piece `ghost_view` is the view the person NAMED on the frame in the split window
+     * («it becomes the crop's ghost_view», `DesignSplitFrame.view_key`); on a root it is the
+     * machine's guess, routinely wrong on front/back. Both are expressed as ORDER and nothing else:
+     * the reach is shortened, nothing is claimed — this picker's choice is the input of a paid
+     * run, and a confirmation nobody made would cost that run.
+     * ⚠ СЛОВА «· probably» БОЛЬШЕ НЕТ. Владелец: «в GENERATION HISTORY не пиши probably», а этот
+     * пикер рисуется ИМЕННО ТАМ — он импортирован в `generation-history.tsx`. Догадка осталась
+     * ровно тем, чем была полезна: ПОРЯДКОМ.
+     * ONE SPELLING OF THE SORT for every picker of the band — `sidesLeadingWith` in `../views`;
+     * the three hand-written copies that preceded it are the reason it exists (D-6).
+     */
+    const sides = sidesLeadingWith(ghost).map((view) => ({
+      value: `v:${view}`,
+      label: viewLabel(view),
+    }));
     // DETAILS ARE THE FLAT BENCH'S ALONE. A detail is a named close-up the sheet cites — cuff,
     // collar — and no organ of the render bench draws detail slots at all: a detail minted there
-    // would be a row no screen shows. So the render picker offers the four sides and nothing else.
+    // would be a row no screen shows. So the render picker offers the six sides and nothing else.
+    const details: { value: string; label: string }[] = [];
     if (kind === 'flat') {
       bench.details.forEach((slot) => {
         if (!slot.id) return;
-        out.push({ value: `d:${slot.id}`, label: displayDetailName(bench.details, slot) });
+        details.push({ value: `d:${slot.id}`, label: displayDetailName(bench.details, slot) });
       });
-      out.push({ value: NEW_DETAIL, label: '+ new detail…' });
+      details.push({ value: NEW_DETAIL, label: '+ new detail…' });
     }
-    return out;
+    /**
+     * ═══ A PIECE CUT AS A DETAIL LEADS WITH THE DETAILS (D-6) ═══════════════════════════════════
+     *
+     * Владелец, дословно: «после сплита мы уже знаем какая это деталь и в пикере отметок она
+     * должна быть первой».
+     *
+     * A frame named `detail` in the split window comes back as a crop whose ghost is `detail` —
+     * not a silhouette, so the side order above cannot say it, and before this wave the picker
+     * opened on `front` for a cuff. Measured on the stand (`tmp/dsgprobe/d18r-probe.mjs`, A2):
+     * the first three items after the placeholder read «front · back · side L».
+     *
+     * WHICH detail is not on the wire — a frame names the KIND of piece, not the slot — so the
+     * bench's named details come first (the ordinary case: the cuff was described in THE PICTURES
+     * before the sheet was cut), then the door to mint one, then the sides. Still order and
+     * nothing else: no detail is preselected, and the label of none of them changes.
+     */
+    const detailFirst = kind === 'flat' && isDetailView(ghost);
+    return [
+      { value: NONE, label: '— slot —' },
+      ...(detailFirst ? [...details, ...sides] : [...sides, ...details]),
+    ];
   }, [bench.details, picture.ghostView, kind]);
 
   if (!pictureId) return null;

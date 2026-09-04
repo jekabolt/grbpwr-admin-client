@@ -51,6 +51,14 @@ export type AnnotationValue = {
   color: string;
   dashed: boolean;
   filled: boolean;
+  /**
+   * Наконечник линии/кривой (круг 18, D-19/D-20). НЕОБЯЗАТЕЛЕН, и это несущее: значение приходит
+   * и с провода, у которого поля может ещё не быть (бэкенд выкатывается раньше клиента), и от
+   * владельцев, которые про него не знают (вложение задачи). Отсутствие читается как «не задано»,
+   * а незаданное рисуется так, как рисовалось до круга 18. Хранится КАНОНИЧЕСКОЙ парой с `kind`
+   * (`capsStorage`): скоба — это `bracket` без caps, не `dim` со `caps: bracket`.
+   */
+  caps?: string;
   pieceLineKey: string;
   pieceLineKeys: string[];
 };
@@ -172,6 +180,7 @@ export function useAnnotationSurface({
         color: a.color ?? '',
         dashed: !!a.dashed,
         filled: !!a.filled,
+        caps: a.caps ?? '',
         pieceLineKeys: a.pieceLineKeys ?? [],
       })),
     [annotations],
@@ -220,6 +229,8 @@ export function useAnnotationSurface({
               color: pen.color,
               dashed: pen.dashed,
               filled: pen.filled,
+              // Уже каноническая пара: поверхность свела память пера к «вид + caps» (`capsStorage`).
+              caps: pen.caps,
               pieceLineKey: '',
               pieceLineKeys: [],
             },
@@ -262,6 +273,9 @@ export function useAnnotationSurface({
               color={a.color ?? ''}
               dashed={!!a.dashed}
               filled={!!a.filled}
+              // ЧТО ХРАНИТСЯ — ТО И ПОКАЗАНО ВЫБРАННЫМ. Без этого пропа редактор под кадром держал
+              // нажатыми засечки у линии со стрелками (снимок cap18-shot-canvas-arrow.png).
+              caps={a.caps ?? ''}
               pieceKeys={a.pieceLineKeys ?? []}
               pieceLabel={pieceLabel}
               extra={renderExtraEditor?.({
@@ -283,6 +297,12 @@ export function useAnnotationSurface({
               onFilled={(v) => {
                 rememberPen({ filled: v });
                 patch(key, { filled: v });
+              }}
+              // Наконечник пишется ПАРОЙ с видом: скоба — это `bracket`, стрелки — `dim` + caps.
+              // Перо помнит ВЫБОР («bracket»), а не хранимое (`''`), иначе забывало бы скобу.
+              onCaps={(next, chosen) => {
+                rememberPen({ caps: chosen });
+                patch(key, { kind: next.kind, caps: next.caps });
               }}
               // Одиночное поле — эхо первого элемента: сервер хранит именно так, и разойтись им
               // нельзя, иначе печать покажет одну деталь, а экран другую.

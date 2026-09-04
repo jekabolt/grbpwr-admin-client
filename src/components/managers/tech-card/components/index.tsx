@@ -70,7 +70,6 @@ import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
 import { DetailsEditor } from './details-editor';
-import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
 import { LabelsField } from './labels-field';
@@ -132,13 +131,10 @@ import {
 } from './save-audit-banners';
 import { StagedChangesChip } from './staged-changes-chip';
 import { useTechCardStagingRequired } from './useTechCardStaging';
-import { FIT_OPTIONS } from './design/render/model';
 
-// U-2: словарь посадки для селекта в CLASSIFICATION. ТРЕТЬЕЙ КОПИИ СПИСКА ЗДЕСЬ НЕТ — он
-// импортирован из `design/render/model.ts`, где такая же копия уже лежит экспортом. Первоисточник
-// — приватный `FIT_OPTIONS` в `style-facts-field.tsx`, который этой волне править нельзя; когда
-// его экспортируют, обе копии обязаны исчезнуть (см. «TO FIX» в model.ts).
-const fitFormOptions = FIT_OPTIONS.map((f) => ({ label: f, value: f }));
+// U-2 / C-5: the fit select and its `FIT_OPTIONS` import left this file with the classification FKs
+// — they render in GENERAL INFORMATION on CONSTRUCTION now (construction-general-info.tsx, which
+// takes the same exported copy from `design/render/model.ts`).
 
 const TABS = [
   { id: 'studio', label: 'studio' },
@@ -266,6 +262,13 @@ const ERROR_TAB: Record<string, TabId> = {
   // Without this row it would fall through to the header default and the toast would name a field
   // that tab does not contain.
   requiredSeamAllowanceMm: 'construction',
+  // C-5 (круг 19): the four classification FKs render in GENERAL INFORMATION on CONSTRUCTION now
+  // (construction-general-info.tsx). Card-level fields still, so without these rows a server
+  // violation on any of them would route to the header tab and name a field it no longer shows.
+  fit: 'construction',
+  categoryId: 'construction',
+  baseModelId: 'construction',
+  baseSampleSizeId: 'construction',
   operations: 'construction',
   labels: 'labels',
   packaging: 'labels',
@@ -2082,35 +2085,15 @@ export function TechCardForm({
                     когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
                     (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
                     бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
-                  {/* U-2 · FIT ЖИВЁТ ЗДЕСЬ. Владелец: «поля FIT и CATEGORY уходят в верхние
-                    блоки»; прототип держит fit четвёртым полем classification и подписывает его
-                    «a style fact — the ONLY place fit is edited» (`topRowHtml`, proto.html:3172).
-                    ЭТО НЕ ВТОРОЙ ПИСАТЕЛЬ. Контрол пишет ПОЛЕ ФОРМЫ `fit`; в бэкенд его уносит
-                    staged `UpdateStyle` из `StyleFactsField` — он смонтирован ниже невидимым и
-                    остаётся единственным писателем. Ровно так же здесь, в шапке, уже
-                    редактируются brand / collection / season / target gender, а уезжают они его
-                    командой: `UpdateTechCard` их намеренно не пишет.
-                    У aux-карты посадки нет — довод тот же, что у скрытого трио ниже. */}
-                  {!isAux && (
-                    <SelectField
-                      name='fit'
-                      label='fit'
-                      items={fitFormOptions}
-                      readOnly={!canWrite(SECTION.techCards) || frozen}
-                    />
-                  )}
-                  {/* U-2 · CATEGORY ПЕРЕЕХАЛ СЮДА вместе со своим носителем. `HeaderMetaFields` —
-                    это браузер категорий ПЛЮС поля base model / base sample size, один неделимый
-                    компонент; прототип заканчивает колонку classification ими же, так что порядок
-                    совпал. Блок в блок не вложен: HeaderMetaFields рисует обычный div, а не
-                    Section (DESIGN.md §5).
-                    K-21: раскрывашки вокруг этих двух полей больше нет, они стоят обычным рядом
-                    вместе с остальными полями блока.
-                    У aux-карты классификацию задаёт AUXILIARY TYPE, поэтому браузер категорий там
-                    спрятан, а пара полей остаётся: себестоимость считается по норме базового
-                    размера без фолбэка, и aux-карта обязана иметь путь к костингу. Сохранённый
-                    categoryId не стирается — он живёт в форме и уезжает в full-replace. */}
-                  <HeaderMetaFields hideCategory={isAux} />
+                  {/* C-5 (круг 19) · FIT, CATEGORY, BASE MODEL и BASE SAMPLE SIZE УЕХАЛИ ОТСЮДА
+                    в блок GENERAL INFORMATION вкладки CONSTRUCTION (`construction-general-info.tsx`)
+                    — прямое указание владельца: «эти все аспекты надо перенести из CLASSIFICATION».
+                    Это ПЕРЕЕЗД, а не копия: те же поля формы (`fit`, `categoryId`, `baseModelId`,
+                    `baseSampleSizeId`), тот же `HeaderMetaFields`, и `fit` по-прежнему уносит на
+                    сервер staged `UpdateStyle` из `StyleFactsField` ниже — он остаётся единственным
+                    писателем, а сам селект пишет только поле формы. Маршрут отказов этих полей
+                    переведён на `construction` в ERROR_TAB выше — иначе тост называл бы поле,
+                    которого на этой вкладке больше нет. */}
                 </Section>
 
                 {/* R-1 · ВТОРОЙ РЯД ТОГО ЖЕ ГРИДА, а не третья колонка (владелец: «RESPONSIBLE

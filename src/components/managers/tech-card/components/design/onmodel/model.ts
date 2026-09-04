@@ -5,7 +5,14 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
-import { ASSET_PATTERN, assetLabel, assetThumb, fabricUses, shelfAssets } from '../assets/model';
+import {
+  assetFull,
+  assetIsPattern,
+  assetLabel,
+  assetThumb,
+  clothShelf,
+  fabricUses,
+} from '../assets/model';
 import { cardOutputRows, runRepresentation } from '../bench-kinds';
 import { formatMoney } from '../generation/money';
 import { isPictureHidden } from '../visibility';
@@ -131,27 +138,40 @@ export interface ClothChoice {
   mediaId: number;
   name: string;
   thumb: string;
+  /** Полный адрес картинки — для зума с плитки; пусто, если у ассета его нет. */
+  full: string;
+  /** Плитка набивки (с раппортом), а не фотография лоскута. Слово на плитке и число в промпте. */
+  pattern: boolean;
   repeatMm: number;
   /** Непусто — плитку выбрать нельзя, и это причина словами. Пусто — выбирается. */
   blocked: string;
 }
 
 /**
- * ПЛИТКИ ЭТОЙ КАРТОЧКИ, ПРИГОДНЫЕ ДЛЯ ПЕРЕОДЕВАНИЯ.
+ * ТЕКСТУРЫ ЭТОЙ КАРТОЧКИ, ПРИГОДНЫЕ ДЛЯ ПЕРЕОДЕВАНИЯ, — ТА ЖЕ ПОЛКА, ЧТО У FABRIC RENDER (D-14).
  *
- * Полка спрашивается у ОБЩЕГО читателя (`shelfAssets(band, ASSET_PATTERN)`) — того же, которым
- * полку читают экран паттернов и ряд тканей фабрик-рендера. Свой фильтр `kind === 'pattern'`
- * рядом был бы вторым определением «что такое паттерн этой карточки».
+ * Владелец, дословно: «ON MODEL так же должен принимать колор и текстур инпут как FABRIC RENDER».
+ *
+ * Здесь стояло `shelfAssets(band, ASSET_PATTERN)` — одни плитки набивки, по J-31 («выбрать и или
+ * паттерн/цвет»). Полка фабрик-рендера — `clothShelf`: ткани И паттерны, потому что для модели
+ * «из чего сшито» и «чем покрыто» один вопрос; сервер кладёт в вызов перекраса ЛЮБУЮ ткань с
+ * картинкой («the garment made of the cloth in image 2») и отказывает только ткани БЕЗ картинки
+ * (`cloth_without_picture`). Сузить полку здесь значило бы, что фотография лоскута, снятая руками
+ * на FABRIC RENDER, на ON MODEL невидима — та же потеря доступа к данным, которую `clothShelf`
+ * однажды уже закрывал (Д-1). Читатель ОДИН на оба экрана; порядок — паттерны первыми, как в
+ * сетке фабрик-рендера, и по той же причине: плитка набивки на этих экранах главнее лоскута.
  */
 export function clothChoices(
   band: GetDesignBandResponse,
   photoMediaIds: readonly number[],
 ): ClothChoice[] {
   const photos = new Set(photoMediaIds.filter((id) => id > 0));
+  const shelf = clothShelf(band);
+  const ordered = [...shelf.filter(assetIsPattern), ...shelf.filter((a) => !assetIsPattern(a))];
   const out: ClothChoice[] = [];
-  for (const asset of shelfAssets(band, ASSET_PATTERN)) {
+  for (const asset of ordered) {
     const mediaId = asset.mediaId ?? 0;
-    // Плитка без картинки не показывается: класть на фотографию нечего, и сервер отказал бы
+    // Текстура без картинки не показывается: класть на фотографию нечего, и сервер отказал бы
     // `cloth_without_picture`. Предлагать её значило бы предлагать мёртвый выбор.
     if (mediaId <= 0) continue;
     out.push({
@@ -159,9 +179,11 @@ export function clothChoices(
       mediaId,
       name: assetLabel(asset),
       thumb: assetThumb(asset),
+      full: assetFull(asset),
+      pattern: assetIsPattern(asset),
       repeatMm: asset.repeatMm ?? 0,
       blocked: photos.has(mediaId)
-        ? `this tile is also one of the photographs above (media ${mediaId}) — one call cannot carry the same picture twice. Take it out of the photographs, or pick another pattern`
+        ? `this texture is also one of the photographs above (media ${mediaId}) — one call cannot carry the same picture twice. Take it out of the photographs, or pick another texture`
         : '',
     });
   }
@@ -271,15 +293,8 @@ export function lastRecolorCharge(band: GetDesignBandResponse): RecolorCharge | 
  * покупается отдельно.
  */
 export function recolorShape(sources: number, colour?: common_DesignColourRecipe | null): string {
-  // ПУСТОЙ НАБОР НАЗЫВАЕТ ПРАВИЛО, А НЕ ОТСУТСТВИЕ. Строка кнопки всегда кончается словами «priced
-  // by the server when the run starts», и «nothing to buy · priced by the server» противоречило бы
-  // само себе на пол-строки. Правило же верно всегда, и это ровно то, что человеку надо знать до
-  // того, как он положит первый снимок.
-  if (sources <= 0) return 'each photograph is one paid call';
-  const s = sources === 1 ? '' : 's';
-  const head = `${sources} picture${s} back · ${sources} paid call${s}, one per photograph`;
   /**
-   * ⚠ ЧТО ИМЕННО СДЕЛАЮТ С КАЖДЫМ СНИМКОМ — ТОЖЕ ЗДЕСЬ, И ЧИТАЕТСЯ ЭТО С ТЕЛА ЗАПРОСА (J-31).
+   * ⚠ ЧТО ИМЕННО СДЕЛАЮТ С КАЖДЫМ СНИМКОМ — ЗДЕСЬ, И ЧИТАЕТСЯ ЭТО С ТЕЛА ЗАПРОСА (J-31).
    * Строка собирается из `recolourWireColour` — того самого объекта, который уедет, — потому что
    * «переодели» и «перекрасили» это два РАЗНЫХ платных промпта на сервере (`reclothCraft` против
    * `recolorCraft`), и выбирает между ними ровно наличие ткани с картинкой в `params.colour`.
@@ -291,13 +306,22 @@ export function recolorShape(sources: number, colour?: common_DesignColourRecipe
   const tint = code || hex;
   const did = cloth
     ? tint
-      ? `re-clothed in ${(cloth.name ?? '').trim() || 'the picked pattern'}, re-tinted to ${tint}`
-      : `re-clothed in ${(cloth.name ?? '').trim() || 'the picked pattern'}`
+      ? `re-clothed in ${(cloth.name ?? '').trim() || 'the picked texture'}, re-tinted to ${tint}`
+      : `re-clothed in ${(cloth.name ?? '').trim() || 'the picked texture'}`
     : tint
       ? `recoloured to ${tint}`
       : (colour?.words ?? '').trim()
         ? 'recoloured to the colour described in words'
         : '';
+  // ПУСТОЙ НАБОР НАЗЫВАЕТ ПРАВИЛО, А НЕ ОТСУТСТВИЕ. Строка кнопки всегда кончается словами «priced
+  // by the server when the run starts», и «nothing to buy · priced by the server» противоречило бы
+  // само себе на пол-строки. Правило же верно всегда, и это ровно то, что человеку надо знать до
+  // того, как он положит первый снимок. А ЧТО СДЕЛАЮТ — известно и до первого снимка (D-14):
+  // ткань и цвет выбираются раньше фотографий, и строка называет их с той же секунды.
+  const head =
+    sources <= 0
+      ? 'each photograph is one paid call'
+      : `${sources} picture${sources === 1 ? '' : 's'} back · ${sources} paid call${sources === 1 ? '' : 's'}, one per photograph`;
   return did ? `${head} · ${did}` : head;
 }
 
@@ -354,14 +378,14 @@ export function recolorGate(
   if (dup) {
     return {
       ok: false,
-      reason: `media ${dup.mediaId} is both a photograph to work on and the cloth to lay on it — one paid call cannot carry the same picture twice, and the server refuses this before anything is charged. Take it out of the photographs, or pick another pattern`,
+      reason: `media ${dup.mediaId} is both a photograph to work on and the cloth to lay on it — one paid call cannot carry the same picture twice, and the server refuses this before anything is charged. Take it out of the photographs, or pick another texture`,
     };
   }
   if (!targetIsStated(colour)) {
     return {
       ok: false,
       reason:
-        'nothing to re-dress it in — pick a pattern, pick a colour, or describe one in words. The server refuses a run that names none of them: «change the cloth» with nothing named is a request a model answers with any cloth at all, at full price',
+        'nothing to re-dress it in — pick a texture, pick a colour, or describe one in words. The server refuses a run that names none of them: «change the cloth» with nothing named is a request a model answers with any cloth at all, at full price',
     };
   }
   return { ok: true };

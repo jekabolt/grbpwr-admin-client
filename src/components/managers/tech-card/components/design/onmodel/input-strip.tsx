@@ -47,7 +47,7 @@ export function OnModelInputStrip({
   return (
     <Section
       title='input — photographs on a model'
-      question='— the shots this run re-dresses: one paid call each, from any side'
+      question='— the shots this run re-dresses: one paid call each, one shot per call'
       action={
         /* ДВЕРЬ, ДЕЙСТВУЮЩАЯ НА ВСЮ ПОЛОСУ, ЖИВЁТ В ЕЁ ШАПКЕ — та же грамматика, что у «use the N
            you chose» на входе 3D. Внизу блока, под объясняющим абзацем, она читалась как приписка
@@ -124,30 +124,23 @@ export function OnModelInputStrip({
         )}
       </Strip>
 
-      {count === 0 && (
-        /* ⚠ `label` (#666), А НЕ `inactive` (#ccc). Пустое состояние — единственный текст, который
-           человек на этом экране читает целиком, и стоял он в 1.6:1 при пороге 4.5:1. DESIGN.md
-           называет `textInactiveColor` цветом ДЕКОРАЦИИ, а не читаемых слов. */
+      {/* ═══ ДВЕ ПРОСТЫНИ СНЯТЫ (D-13) ═══════════════════════════════════════════════════════
+          Владелец назвал оба абзаца дословно и попросил убрать. Что в них было и куда делось:
+          · «каждый снимок — свой платный вызов» — это ЦЕНА, и она осталась там, где по ней
+            принимают решение: в вопросе секции и на ряду GENERATE, у самой кнопки;
+          · «модель видит по одному снимку и не знает, что это одна вещь» — объяснение УСТРОЙСТВА
+            вызова; на экране, где каждый снимок стоит своей карточкой и возвращается своей, оно
+            пересказывает видимое;
+          · «это МЕДИА, а не картинки карточки» — единственный факт, который иначе не узнать, и
+            поэтому он ОСТАЛСЯ, но одной строкой и только когда есть о чём (ниже).
+          Пустое состояние ушло целиком: полоса пустых плейсхолдеров с дверью и есть ответ
+          «принеси снимки», а абзац под ней повторял его словами. */}
+      {count > 0 && (
         <Text size='micro' variant='label' component='p' className='normal-case'>
-          Nothing to work on yet. Bring in the shots of this garment — front, back, a side, a
-          detail: whatever exists. Each one comes back on its own, in the cloth you name below.
+          These are <b>media</b>, not pictures of this card: what was sent is kept by the run
+          itself, in its input snapshot.
         </Text>
       )}
-
-      <Text size='micro' variant='label' component='p' className='normal-case'>
-        Each photograph is its own paid call, and the model is shown <b>one</b> photograph at a
-        time — plus the cloth you pick below, which rides with every one of them as the call&apos;s
-        second picture. It never sees the other shots and does not know they are the same garment.
-        So the thing that keeps four of them the same is the cloth and colour you name below, not
-        the fact that they were sent together.
-        {count > 0 && (
-          <>
-            {' '}
-            These are <b>media</b>, not pictures of this card: they are not filed on the card and
-            not on the bench. What was sent is kept by the run itself, in its input snapshot.
-          </>
-        )}
-      </Text>
 
     </Section>
   );

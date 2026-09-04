@@ -3,7 +3,7 @@ import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import type { ShapePoint } from 'ui/components/annotation/geometry';
 import type { PenStyle, SurfaceCallout } from 'ui/components/annotation/surface';
 
-import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
+import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import { newClientRequestId } from './use-design-band';
 
 /**
@@ -101,6 +101,12 @@ export type MoodCalloutsHandle = {
   setColor: (index: number, value: string) => void;
   setDashed: (index: number, value: boolean) => void;
   setFilled: (index: number, value: boolean) => void;
+  /**
+   * Наконечник (D-19/D-20) приходит ПАРОЙ «вид хранения + caps» — так его отдаёт ряд оформления
+   * (`capsStorage`): засечки и скоба это два ВИДА, точки и стрелки — `dim` плюс `caps`. Пишутся
+   * оба поля одной записью, иначе «скоба» осталась бы `dim` без caps, то есть засечками.
+   */
+  setCaps: (index: number, next: { kind: string; caps: string }) => void;
   demote: (index: number) => void;
   /** Сколько указаний стоит на этой картинке — цитата для ✕ плитки. */
   countOn: (mediaId: number) => number;
@@ -161,6 +167,9 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
           color: x.c?.color ?? '',
           dashed: !!x.c?.dashed,
           filled: !!x.c?.filled,
+          // КАК ХРАНИТСЯ, без раскрытия: «не задано» раскрывает по виду сама поверхность
+          // (`effectiveCaps`), и раскрыть здесь значило бы записать выбор, которого не было.
+          caps: x.c?.caps ?? '',
         };
       });
 
@@ -197,6 +206,11 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
         color: pen.color as AnnotationColor,
         dashed: pen.dashed,
         filled: pen.filled,
+        // Поверхность отдаёт `caps` УЖЕ В ФОРМЕ ХРАНЕНИЯ (пара с `kind`, см. `capsStorage`):
+        // линия со стрелками приходит как `dim` + `arrow`, скоба — как `bracket` + ''. Не
+        // записать поле — значит молча превратить нарисованные стрелки в засечки. Пустая строка
+        // — «не задано», ровно как её читает с провода `readAnnotationCaps`.
+        caps: pen.caps as AnnotationCaps,
         // КЛЮЧ СТРОКИ МИНТИТСЯ ПРИ РОЖДЕНИИ, ВСЕГДА. Он — личность строки: без него после сейва
         // форма не понимает, какой её строке достался какой серверный ответ, и «легаси-ноль»
         // становится неотличим от новорождённой выноски навсегда. Опустить его тут — значит
@@ -244,6 +258,10 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
     setValue(`callouts.${i}.dashed`, v, { shouldDirty: true });
   const setFilled = (i: number, v: boolean) =>
     setValue(`callouts.${i}.filled`, v, { shouldDirty: true });
+  const setCaps = (i: number, next: { kind: string; caps: string }) => {
+    setValue(`callouts.${i}.kind`, next.kind as AnnotationKind, { shouldDirty: true });
+    setValue(`callouts.${i}.caps`, next.caps as AnnotationCaps, { shouldDirty: true });
+  };
 
   // Разжаловать фигуру в точку — единственный способ избавиться от неудачной геометрии, СОХРАНИВ
   // текст: ручки ниже минимума точек не опускаются.
@@ -277,6 +295,7 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
     setColor,
     setDashed,
     setFilled,
+    setCaps,
     demote,
     countOn,
     removeOn,

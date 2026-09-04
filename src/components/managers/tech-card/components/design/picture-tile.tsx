@@ -8,6 +8,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type ReactNode,
@@ -22,6 +23,92 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { ThreedModelModal } from './threed/model-modal';
 import { isModelUrl } from './threed/media';
 import { ThreedModelIndexContext, threedModelIndex, useModelBehind } from './threed/model-index';
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+ * ОТКАТ НА МИНИАТЮРУ — КАДР, У КОТОРОГО НЕ ГРУЗИТСЯ КРУПНЫЙ ВАРИАНТ, ПОКАЗЫВАЕТ THUMB (D-7).
+ *
+ * Владелец: «сплит картинки не грузятся в зуме и в артефактах» — со снимком RENDERS OF THIS CARD,
+ * где три карточки NOT ON THE CARD стоят с битой иконкой картинки.
+ *
+ * ЗАМЕРЕНО НА БЕТЕ: из 28 кадров-кропов три отдают 403 на `og` и на `compressed`, но 200 на
+ * `thumb`. `AccessDenied` — это ответ S3 на ОТСУТСТВУЮЩИЙ ключ, когда у клиента нет права
+ * ListBucket, то есть «403» здесь читается как «файла нет». Причина починена на сервере (имя файла
+ * кропа было детерминированным, повторный разрез перезаписывал соседа), но уже загруженные битые
+ * кадры на бете останутся битыми: сервер чинит будущее, не прошлое. Значит клиентская половина —
+ * показать то, что есть.
+ *
+ * ГДЕ ЭТО ЖИВЁТ И ПОЧЕМУ ЗДЕСЬ. Ряд просмотрщика собирает ЭТОТ файл (`PictureGalleryProvider`), и
+ * только он: плитки кладут в реестр свой кадр, провайдер отдаёт ряд `MediaViewer`. Сам просмотрщик
+ * — примитив `ui`, который об источниках знает ровно `src` и `thumbnail`, и подменять ему кадр
+ * «снизу» некому, кроме того, кто ряд составил. Поэтому факт «крупный вариант этого адреса не
+ * загрузился» держится ЗДЕСЬ, на уровне полосы, и ряд пересобирается с миниатюрой на месте
+ * битого кадра — тем же `rebuild`, которым он и так живёт, пока открыт.
+ *
+ * ⚠ ЛОВУШКА `onError`, ВСЛУХ. У `<img>` ошибка стреляет один раз на источник; подставить тот же
+ * адрес — молчаливый цикл, подставить пустой — ещё одна ошибка. Здесь адрес пробуется ОТДЕЛЬНЫМ
+ * `Image()` ровно один раз на строку (`PROBES`), провалившийся ложится в `FALLEN` навсегда, и
+ * замена делается только на ДРУГОЙ непустой адрес. Миниатюра, которая тоже не грузится, ложится в
+ * тот же список и больше ничем не заменяется: кадр остаётся битым, но ЧЕСТНО битым, а число
+ * запросов к каждому адресу ограничено — измерено пробой (`d18r-probe.mjs`, C3).
+ *
+ * `useLoadableSrc` — ТА ЖЕ ПАМЯТЬ ДЛЯ ОРГАНОВ, КОТОРЫЕ РИСУЮТ `<img>` САМИ: лицо плитки здесь и
+ * плита ARTIFACTS (`artifacts-panel.tsx`, `plateUrl` предпочитает полный размер — вторая половина
+ * жалобы владельца). Один список битых адресов на всю полосу: кадр, не загрузившийся в зуме, не
+ * будет пробоваться заново на плите.
+ * ───────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** Адреса, чей крупный файл не загрузился. Факт о бакете, а не об экземпляре экрана. */
+const FALLEN = new Set<string>();
+/** Одна проба на адрес, сколько бы читателей её ни спросили. */
+const PROBES = new Map<string, Promise<boolean>>();
+
+/** Грузится ли картинка по адресу. Ответ кэшируется навсегда: бакет не оживляет ключ сам. */
+export function probeImage(src: string): Promise<boolean> {
+  const known = PROBES.get(src);
+  if (known) return known;
+  const probe = new Promise<boolean>((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = src;
+  });
+  PROBES.set(src, probe);
+  return probe;
+}
+
+/** Адрес, который стоит пробовать: непустой, не data-URL (байты страницы не бьются) и ещё не павший. */
+function worthProbing(src: string): boolean {
+  return !!src && !/^(data|blob):/i.test(src) && !FALLEN.has(src);
+}
+
+/**
+ * Адрес для `<img>`: `src`, пока он грузится; `fallback`, как только известно, что не грузится.
+ * Оба адреса одинаковы или запасного нет — возвращается `src` без единой пробы.
+ */
+export function useLoadableSrc(src?: string | null, fallback?: string | null): string {
+  const want = src ?? '';
+  const alt = fallback ?? '';
+  const [, fell] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!alt || alt === want || !worthProbing(want)) return;
+    let live = true;
+    void probeImage(want).then((loaded) => {
+      if (loaded || !live) return;
+      FALLEN.add(want);
+      fell();
+    });
+    return () => {
+      live = false;
+    };
+  }, [want, alt]);
+  return alt && FALLEN.has(want) ? alt : want;
+}
+
+/** Кадр ряда с миниатюрой на месте павшего крупного адреса; целый кадр возвращается как есть. */
+function withFallback(item: MediaViewerItem): MediaViewerItem {
+  if (!FALLEN.has(item.src) || !item.thumbnail || item.thumbnail === item.src) return item;
+  return { ...item, src: item.thumbnail };
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
  * ОДИН ЗАКОН УГЛОВ НА ВСЮ ПОЛОСУ DESIGN.
@@ -135,7 +222,9 @@ export function PictureGalleryProvider({
     const items: MediaViewerItem[] = [];
     for (const [k, e] of entries) {
       if (k === key) before = items.length;
-      items.push(...e.items);
+      // Павший крупный адрес подменяется миниатюрой ЗДЕСЬ, при сборке ряда, — и только здесь:
+      // плитки регистрируют кадр как есть, а «что показывать вместо битого» решает ряд (D-7).
+      items.push(...e.items.map(withFallback));
     }
     return { items, before };
   }, []);
@@ -162,6 +251,29 @@ export function PictureGalleryProvider({
       return { items, index };
     });
   }, [collect]);
+
+  /**
+   * КАДР НА СЦЕНЕ ПРОБУЕТСЯ, И ПАВШИЙ УХОДИТ В МИНИАТЮРУ (D-7). Проба идёт параллельно с
+   * собственным `<img>` просмотрщика по тому же адресу — второй запрос браузер склеивает с
+   * первым или берёт из кэша, — и как только известно, что крупного файла нет, ряд пересобирается
+   * тем же `rebuild`: кадр на месте, зум и перетаскивание сбрасываются (просмотрщик держит их по
+   * адресу кадра), человек видит миниатюру вместо битой иконки. Целый кадр не трогается ничем.
+   * Павший адрес второй раз не пробуется (`worthProbing`), поэтому миниатюра, которая тоже бита,
+   * останавливает откат, а не зацикливает его.
+   */
+  useEffect(() => {
+    const src = row?.items[row.index]?.src ?? '';
+    if (!worthProbing(src)) return;
+    let live = true;
+    void probeImage(src).then((loaded) => {
+      if (loaded || !live) return;
+      FALLEN.add(src);
+      rebuild();
+    });
+    return () => {
+      live = false;
+    };
+  }, [row, rebuild]);
 
   const register = useCallback(
     (key: string, entry: GalleryEntry | null) => {
@@ -205,8 +317,9 @@ export function PictureGalleryProvider({
   const writes = useDesignWrites(techCardId);
   const { registerUpload } = writes;
 
-  const kindOfMedia = useCallback(
-    (mediaId: number): string | null => {
+  /** Картинка полосы, стоящая за медиа, — или `null`: кадр не из полосы. */
+  const pictureOfMedia = useCallback(
+    (mediaId: number) => {
       if (!band || !mediaId) return null;
       const pools = [
         ...(band.runs ?? []).map((r) => r.pictures ?? []),
@@ -214,7 +327,7 @@ export function PictureGalleryProvider({
       ];
       for (const pictures of pools) {
         for (const p of pictures) {
-          if ((p.media?.id ?? 0) === mediaId) return p.kind || 'flat';
+          if ((p.media?.id ?? 0) === mediaId) return p;
         }
       }
       return null;
@@ -225,7 +338,8 @@ export function PictureGalleryProvider({
   const saveAsPicture = useCallback(
     async (dataUrl: string, item: MediaViewerItem) => {
       const mediaId = item.meta?.id ?? 0;
-      const kind = kindOfMedia(mediaId);
+      const source = pictureOfMedia(mediaId);
+      const kind = source ? source.kind || 'flat' : null;
       if (!kind) {
         showMessage(
           'this frame is not a picture of the band, so there is no kind to give the copy. Open it from a bench, reference or output tile.',
@@ -243,11 +357,25 @@ export function PictureGalleryProvider({
       const media = await uploadRaster(dataUrl);
       await registerUpload.mutateAsync({
         clientRequestId: newClientRequestId(),
-        items: [{ mediaId: media.id ?? 0, ghostView: '', kind, colorwayId: 0 }],
+        items: [
+          {
+            mediaId: media.id ?? 0,
+            ghostView: '',
+            kind,
+            colorwayId: 0,
+            // A CORRECTED COPY OF A MULTI-VIEW SHEET IS STILL A MULTI-VIEW SHEET: the views glued
+            // into it did not change with the brightness. Filing it without them would make it
+            // pickable into a single side — «the front of the garment» being four views at once.
+            compositeViews: source?.compositeViews ?? [],
+            // Not display-only: a copy baked from a band picture is a picture of the band, and the
+            // flag is a statement about a file a person brought in from outside (D-24).
+            displayOnly: false,
+          },
+        ],
       });
       showMessage('the corrected copy is in the band', 'success');
     },
-    [kindOfMedia, registerUpload, showMessage],
+    [pictureOfMedia, registerUpload, showMessage],
   );
 
   const api = useMemo<GalleryApi>(() => ({ register, openAt }), [register, openAt]);
@@ -590,6 +718,14 @@ export function PictureTile({
   const behind = useModelBehind(url);
   /** Адрес модели этой плитки: сам кадр, если он `.glb`, иначе модель, чей растр он замещает. */
   const modelHref = model ? url : behind;
+  /**
+   * ЛИЦО ПЛИТКИ — ТОЖЕ С ОТКАТОМ (D-7). Почти всякий вызывающий даёт сюда миниатюру, и тогда
+   * запасного адреса нет и пробы не будет; но плитка, которой дали крупный файл (`url` равен
+   * `gallery.src`), после его 403 показывает тот же thumb, что и ряд просмотрщика, — из той же
+   * памяти павших адресов. Признак модели и индекс за плиткой читают ИСХОДНЫЙ `url`: подмена —
+   * про то, КАК нарисовать, а не про то, что за этим адресом стоит.
+   */
+  const faceSrc = useLoadableSrc(url, gallery?.thumbnail);
   const opensModel = !!modelHref;
   /**
    * ⚠ ПОВЕРХНОСТЬ ЕСТЬ У ОБЕИХ ПЛИТОК 3D, И ЭТО ПРАВКА, А НЕ УПРОЩЕНИЕ (E-25).
@@ -676,7 +812,7 @@ export function PictureTile({
         ) : face ? (
           face
         ) : url ? (
-          <MediaComponent src={url} alt={alt} aspectRatio='auto' fit={fit} />
+          <MediaComponent src={faceSrc} alt={alt} aspectRatio='auto' fit={fit} />
         ) : (
           // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
           // от «картинка не загрузилась».

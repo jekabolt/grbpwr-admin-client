@@ -20,6 +20,29 @@ import { normaliseViewKey, viewLabel } from '../views';
 /** The two statuses that mean the band must keep looking. */
 export const LIVE_STATUSES: readonly string[] = ['pending', 'running'];
 
+/**
+ * ═══ THIS RUN ANSWERS IN WORDS, NOT IN PICTURES (D-2) ══════════════════════════════════════════
+ *
+ * `draft_idea` is the one kind of run that produces no file at all: the server executes it
+ * synchronously and writes the answer into `output_text`. Everything downstream of this reader
+ * exists because the history used to draw it with the picture-run's grammar — reserving a tile
+ * while it ran, and then showing a bare line with nothing under it once it finished. Measured on
+ * beta, card 38: run 28, `kind = draft_idea`, `requested_outputs = 0`, ZERO rows in
+ * `design_picture`, and 2 081 characters in `output_text` that no screen has ever read back.
+ *
+ * IT IS ASKED BY KIND, NOT BY «HAS NO PICTURES». A picture run that failed also has none, and the
+ * two must not collapse: one has nothing to show because it broke, the other because a paragraph
+ * is not a picture.
+ */
+export function isTextRun(run: Pick<common_DesignRun, 'kind'>): boolean {
+  return (run.kind ?? '').trim().toLowerCase() === 'draft_idea';
+}
+
+/** What a text run actually produced, or empty when it produced nothing (yet). */
+export function runOutputText(run: Pick<common_DesignRun, 'outputText'>): string {
+  return (run.outputText ?? '').trim();
+}
+
 export function runStatus(run: Pick<common_DesignRun, 'status'>): string {
   return (run.status ?? '').trim().toLowerCase();
 }
@@ -55,8 +78,15 @@ export function liveRuns(band: GetDesignBandResponse): common_DesignRun[] {
  * the client's arithmetic below is a fallback for a row that predates it, not a second opinion.
  * The fallback repeats the prototype's rule verbatim: a fix asks for one picture, a `one` layout
  * over two or more views comes back as ONE composite, and everything else is one picture per view.
+ *
+ * ⚠ A TEXT RUN RESERVES NOTHING, AND THIS IS THE FIRST HALF OF D-2. The fallback's last line
+ * («everything else is one») answered `1` for `draft_idea`, so a running text draft drew a dashed
+ * 4/5 picture frame saying «running 0:07» — a promise of a picture that cannot arrive. Its own
+ * `requested_outputs` is 0 on the wire (measured on beta run 28), i.e. the server already says
+ * this; the fallback was overruling it because `0` is not `> 0`.
  */
 export function expectedTileCount(run: common_DesignRun): number {
+  if (isTextRun(run)) return 0;
   const requested = run.requestedOutputs ?? 0;
   if (requested > 0) return requested;
   const views = run.params?.views ?? [];
@@ -86,6 +116,8 @@ export function runOutcomeNote(run: common_DesignRun): string {
   const delivered = (run.pictures ?? []).length;
   const requested = expectedTileCount(run);
   if (status === 'done') {
+    // A TEXT RUN IS NEVER «2 OF 3». Its denominator is `expectedTileCount` = 0 (see above), so the
+    // partial-answer clause is unreachable for it by construction rather than by a second `if`.
     return delivered && requested && delivered < requested
       ? `done · ${delivered} of ${requested}`
       : 'done';
@@ -114,6 +146,44 @@ export function runOutcomeNote(run: common_DesignRun): string {
   if (status === 'cancelled') return why ? `cancelled · ${why}` : 'cancelled';
   if (isCancelling(run)) return 'cancelling…';
   return why ? `retrying · ${why}` : status;
+}
+
+/**
+ * THE WHOLE FAILURE TEXT — the provider's own words, uncut, for a surface that can hold a
+ * paragraph. `error_code` is the stable machine token; `last_error` is the human tail, and the
+ * server caps it at 4 000 characters (`designMaxErrorText`), never at a line.
+ */
+export function runFailureText(
+  run: Pick<common_DesignRun, 'errorCode' | 'lastError'>,
+): { code: string; text: string } {
+  return { code: (run.errorCode ?? '').trim(), text: (run.lastError ?? '').trim() };
+}
+
+/**
+ * ═══ THE SAME OUTCOME, CUT TO FIT A PILL — AND THIS IS A WIDTH DEFECT, NOT TIDYING (D-4) ═══════
+ *
+ * `Pill` is `whitespace-nowrap` by construction: it is a status marker, and a marker that wraps
+ * stops being one. `runOutcomeNote` above, however, may return the PROVIDER'S OWN TEXT, and that
+ * text is bounded only by the server's `designMaxErrorText` = 4 000 characters. Four thousand
+ * characters on one unbreakable line is ~24 000 px of pill — sixteen screens — and because the
+ * history's `Section` is a plain block in a `SectionStack`, that width overflows visibly and
+ * scrolls THE WHOLE PAGE sideways.
+ *
+ * IT IS NOT HYPOTHETICAL. `failRun` writes `error_code = nullStr(req.ErrorCode)`, so a worker that
+ * reports a failure without a code stores NULL there and the full text is what this reader falls
+ * back to. Beta already holds such a tail — run 1 of card 38 carries 1 132 characters of provider
+ * JSON in `last_error` — and it stays off the screen today only because that row happens to also
+ * carry a code. Measured with that exact string in the stand: page 1 500 px → 6 800 px.
+ *
+ * SO THE PILL GETS A BOUNDED LINE AND NOTHING IS LOST. Newlines collapse (a pill is one line by
+ * definition), the tail is cut at `MAX` with an ellipsis that says so, the full note rides in the
+ * `title`, and the untruncated text lives in the run panel, which is a surface that can wrap.
+ */
+const OUTCOME_CHIP_MAX = 72;
+
+export function runOutcomeChip(run: common_DesignRun): string {
+  const note = runOutcomeNote(run).replace(/\s+/g, ' ').trim();
+  return note.length > OUTCOME_CHIP_MAX ? `${note.slice(0, OUTCOME_CHIP_MAX).trimEnd()}…` : note;
 }
 
 /* ⚠ ЗДЕСЬ ЖИЛ `archiveBlockReason`, И ЕГО СНЕСЛИ ПОТОМУ, ЧТО ОН БЫЛ ЗАПРЕТОМ КЛИЕНТА (J-22).

@@ -23,6 +23,19 @@ import { useEffect, useRef, type JSX } from 'react';
  *
  * THREE ГРУЗИТСЯ ДИНАМИЧЕСКИ. Статический импорт положил бы всю библиотеку в главный кусок сборки
  * ради экрана, который открывают по кнопке. Так же поступает `dxf-quick-view-modal`.
+ *
+ * ═══ КРУГ 19 (D-26): СНИМОК С РАКУРСА — ОТСЮДА, А НЕ ИЗ ОКНА ══════════════════════════════════
+ *
+ * Владелец: «в THE SHEET 3д можно что бы было посмотреть и сделать снапшот с определенного
+ * ракурса и сохранить его такой же функционал должен быть в студио». Снимок — это чтение
+ * буфера отрисовки, а буфер есть только у сцены; окно (и любой другой хозяин) получает от неё
+ * ИМПЕРАТИВНЫЙ ДОСТУП (`onApi`) и решает, куда кадр девать. Два хозяина — окно из студии и лист —
+ * снимают одним и тем же кодом по построению, а не по дисциплине.
+ *
+ * ⚠ КАДР ЧИТАЕТСЯ СРАЗУ ПОСЛЕ `render`, В ТОМ ЖЕ СИНХРОННОМ ТАКТЕ. Без `preserveDrawingBuffer`
+ * браузер вправе очистить буфер WebGL после композиции кадра, и `drawImage(canvas)` из другого
+ * такта отдал бы пустоту. Включать `preserveDrawingBuffer` ради редкого жеста — платить за него
+ * каждым кадром орбиты; вместо этого сцена рисуется ещё раз ровно перед чтением.
  */
 
 /** Что стало известно о модели ПОСЛЕ разбора — не обещание, а результат. */
@@ -35,21 +48,79 @@ export interface ModelFacts {
   size: [number, number, number];
 }
 
+/** One raster taken off the scene — a PNG data URL and its pixel size. */
+export interface ModelSnapshot {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * THE SCENE, TO WHOEVER HOLDS IT. Handed out once the model is on screen, taken back (`null`) when
+ * the scene is torn down — a caller holding a stale api would read pixels of a canvas that is gone.
+ */
+export interface ModelViewerApi {
+  /** The frame exactly as the camera sees it now. */
+  snapshot(): ModelSnapshot;
+  /**
+   * One frame per named silhouette side, laid side by side IN THE GIVEN ORDER — the multi-view
+   * sheet the split cuts back into sides. The camera comes back to where the person left it.
+   */
+  snapshotSides(views: readonly string[]): ModelSnapshot;
+  /**
+   * The silhouette side the camera is nearest to right now — the GUESS a single snapshot files
+   * as `ghost_view`. Empty when the camera looks from above or below: no side is honest then.
+   */
+  nearestSide(): string;
+}
+
+/**
+ * ═══ ГДЕ У МОДЕЛИ ПЕРЕД — И ЭТО ДОГАДКА, СКАЗАННАЯ ВСЛУХ ═══════════════════════════════════════
+ *
+ * glTF ставит модель лицом к +Z (так экспортирует всякий редактор по умолчанию, и так же
+ * смотрит начальный ракурс этой сцены). Камера на +Z глядит вдоль −Z с +Y вверх, её правая рука —
+ * +X; человек, стоящий к ней лицом, держит СВОЮ левую руку у её правой, то есть у +X. Отсюда:
+ * `side_l` — камера на +X, `side_r` — на −X, `back` — на −Z.
+ *
+ * Модель, выгруженная боком, даст листу перепутанные стороны — и это НЕ поломка снимка: вид на
+ * проводе так и называется «guess», и окно разреза предлагает пересобрать соответствие руками.
+ * Ни одна из четырёх сторон здесь не называется фактом.
+ */
+const SIDE_AZIMUTH: Record<string, number> = {
+  front: 0,
+  side_l: Math.PI / 2,
+  back: Math.PI,
+  side_r: -Math.PI / 2,
+};
+
+/**
+ * ПОТОЛОК ШИРИНЫ ОДНОГО КАДРА СНИМКА. Буфер сцены рисуется в `devicePixelRatio` (до ×2), то есть
+ * окно в 1100px даёт 2200px на кадр и 8800px на лист из четырёх; такой PNG уезжает на сервер
+ * десятками мегабайт ради снимка, который режут на плиты по 1000px. 1600 — с запасом больше, чем
+ * бакет вернёт после сжатия, и всё ещё умещается в тело запроса.
+ */
+const FRAME_MAX_PX = 1600;
+
 export function ModelViewer({
   url,
   onReady,
   onError,
+  onApi,
 }: {
   url: string;
   onReady: (facts: ModelFacts) => void;
   onError: (message: string) => void;
+  /** The scene's snapshot api — handed once it can draw, taken back with `null` on teardown. */
+  onApi?: (api: ModelViewerApi | null) => void;
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   // Обработчики держатся ссылкой: их пересоздание у вызывающего не обязано перезагружать модель.
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
+  const onApiRef = useRef(onApi);
   onReadyRef.current = onReady;
   onErrorRef.current = onError;
+  onApiRef.current = onApi;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -177,7 +248,9 @@ export function ModelViewer({
           return distance;
         };
 
-        const distance = fit();
+        // Расстояние вписывания живёт как переменная: снимок сторон ставит камеру на НЕГО, и после
+        // смены размера окна оно обязано быть свежим, а не тем, что было при загрузке.
+        let distance = fit();
         // Три четверти сверху: единственный ракурс, на котором сразу видно, что предмет объёмный.
         camera.position.set(
           center.x + distance * 0.55,
@@ -187,8 +260,7 @@ export function ModelViewer({
         controls.update();
 
         const observer = new ResizeObserver(() => {
-          const d = fit();
-          void d;
+          distance = fit();
           controls.update();
         });
         observer.observe(host);
@@ -198,14 +270,79 @@ export function ModelViewer({
           renderer.render(scene, camera);
         });
 
+        /**
+         * ═══ СНИМОК: ОДИН КАДР ИЛИ ЛИСТ ИЗ КАДРОВ, В ОДНОМ ТАКТЕ ═══════════════════════════════
+         *
+         * `frames` — азимуты камеры; `null` — «как стоит сейчас». Каждый кадр рисуется заново и
+         * ТУТ ЖЕ переносится на составной холст `drawImage`-ом с самого WebGL-канваса: это
+         * синхронно, значит буфер ещё не очищен (довод в шапке). Камера возвращается туда, где
+         * стояла, и `controls.update()` подхватывает её положение как своё.
+         */
+        const capture = (frames: readonly (number | null)[]): ModelSnapshot => {
+          const canvas = renderer.domElement;
+          const bw = Math.max(1, canvas.width);
+          const bh = Math.max(1, canvas.height);
+          const fw = Math.min(bw, FRAME_MAX_PX);
+          const fh = Math.max(1, Math.round((bh * fw) / bw));
+          const out = document.createElement('canvas');
+          out.width = fw * Math.max(1, frames.length);
+          out.height = fh;
+          const ctx = out.getContext('2d');
+          if (!ctx) throw new Error('no 2d canvas to compose the snapshot on');
+          const saved = camera.position.clone();
+          frames.forEach((azimuth, i) => {
+            if (azimuth != null) {
+              camera.position.set(
+                center.x + distance * Math.sin(azimuth),
+                center.y,
+                center.z + distance * Math.cos(azimuth),
+              );
+              camera.lookAt(center);
+            }
+            renderer.render(scene, camera);
+            ctx.drawImage(canvas, 0, 0, bw, bh, i * fw, 0, fw, fh);
+          });
+          camera.position.copy(saved);
+          camera.lookAt(center);
+          controls.update();
+          return { dataUrl: out.toDataURL('image/png'), width: out.width, height: out.height };
+        };
+
+        const api: ModelViewerApi = {
+          snapshot: () => capture([null]),
+          snapshotSides: (views) =>
+            capture(views.map((view) => SIDE_AZIMUTH[view] ?? 0)),
+          nearestSide: () => {
+            const dx = camera.position.x - center.x;
+            const dy = camera.position.y - center.y;
+            const dz = camera.position.z - center.z;
+            const flat = Math.hypot(dx, dz);
+            // Выше 60° над горизонтом видна крышка, а не сторона: гадать сторону нечестно.
+            if (flat < 1e-6 || Math.atan2(Math.abs(dy), flat) > Math.PI / 3) return '';
+            const azimuth = Math.atan2(dx, dz);
+            let best = '';
+            let bestGap = Infinity;
+            for (const [view, at] of Object.entries(SIDE_AZIMUTH)) {
+              const gap = Math.abs(Math.atan2(Math.sin(azimuth - at), Math.cos(azimuth - at)));
+              if (gap < bestGap) {
+                bestGap = gap;
+                best = view;
+              }
+            }
+            return best;
+          },
+        };
+
         onReadyRef.current({
           bytes: blob.size,
           meshes,
           triangles,
           size: [round3(size.x), round3(size.y), round3(size.z)],
         });
+        onApiRef.current?.(api);
 
         teardown = () => {
+          onApiRef.current?.(null);
           observer.disconnect();
           renderer.setAnimationLoop(null);
           controls.dispose();

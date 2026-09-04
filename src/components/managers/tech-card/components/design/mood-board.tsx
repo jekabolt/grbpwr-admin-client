@@ -1,24 +1,32 @@
-import { common_MediaFull } from 'api/proto-http/admin';
+import { common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationEditor, ANNOTATION_EDITOR_H_COMPACT } from 'ui/components/annotation/editor';
-import { rememberPen } from 'ui/components/annotation/surface';
+import { leaderTarget, type ShapePoint } from 'ui/components/annotation/geometry';
+import { effectiveCaps, kindDef } from 'ui/components/annotation/kinds';
+import { AnnotationDefs, CalloutShape } from 'ui/components/annotation/shapes';
+import { rememberPen, type SurfaceCallout } from 'ui/components/annotation/surface';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
+import { serverSpeaksDesign } from './capability';
 import { CONCEPT_MAX, MoodDraft } from './head/mood-draft';
+import { VectorModal } from './modals';
 import { useMoodCallouts } from './mood-callouts';
+import { TILE_CORNER } from './picture-tile';
+import { useDesignBand } from './use-design-band';
 
 /**
  * МУДБОРД — первый пункт процесса и единственная доска, которую человек наполняет руками.
@@ -178,6 +186,255 @@ export function takeIntoInput(
   return { next: [...live, { mediaId, kind: REFERENCE_KIND, caption: '' }], refusal: null };
 }
 
+/**
+ * ═══ БОКОВОЕ МЕНЮ УКАЗАНИЙ ДОСКИ (D-27, круг 18) ═════════════════════════════════════════════
+ *
+ * Владелец, дословно: «мудборд должен получить такое же боковое меню колаутов как в артефактах».
+ * В ARTIFACTS это блок `callouts` справа от листа (`artifacts-panel.tsx`, `CalloutPanel`): строка
+ * на выноску, рядом — на какой плите она стоит. Здесь ТА ЖЕ РАСКЛАДКА (`SectionStack row`: доска
+ * `flex-1`, справа блок в 340px) и та же грамматика строки.
+ *
+ * ⚠ ЭТО ВРЕМЕННЫЙ ОРГАН ИЗ ОБЩИХ ПРИМИТИВОВ, А НЕ КОПИЯ `CalloutPanel`. Меню артефактов живёт
+ * внутри чужого файла и прямо сейчас переписывается (круг 19: только выноски текущего листа,
+ * подсветка выноски по наведению на строку, пиктограмма вида в каждой строке). Скопировать его
+ * тело сюда значило бы завести два места, где правила расходятся. Поэтому строка собрана из
+ * примитивов указаний (`CalloutShape` рисует пиктограмму, реестр `kindDef` называет вид), а
+ * извлечение ОДНОГО общего `CalloutRail` из `artifacts-panel.tsx` названо в отчёте волны.
+ *
+ * ЧТО ЗДЕСЬ ЕСТЬ И ЧЕГО ПОКА НЕТ.
+ *   есть  — только указания ДОСКИ (по построению: `useMoodCallouts` фильтрует по `media_id`
+ *           плиток доски; строка с `media_id = 0` и строка входа сюда не попадают);
+ *   есть  — пиктограмма вида: не иконка из словаря, а САМА фигура, нарисованная общим
+ *           `CalloutShape` в 22×14 — с её цветом, пунктиром и наконечниками, то есть регистр видов
+ *           здесь не перечисляется, читается реестр;
+ *   есть  — на какой картинке стоит (номер плитки доски, тот же, что печатается в её углу);
+ *   нет   — выбор указания кликом по строке и подсветка выноски по наведению: выбор и наведение
+ *           принадлежат `FocusedAnnotator`/`AnnotationSurface`, у которых нет управляемых пропов
+ *           (`selectedKey`/`onSelectedChange`, `hoveredKey`). Строка поэтому НЕ кнопка: орган,
+ *           который ничего не делает по клику, обещал бы жест, которого нет. Пропы названы в отчёте.
+ */
+
+/**
+ * ПИКТОГРАММА ВИДА — фигура указания, нарисованная тем же `CalloutShape`, что рисует её на кадре,
+ * в коробке 22×14 (координаты — в 44×28, чтобы засечки, скоба и стрелки, чьи размеры заданы
+ * пикселями в `geometry.ts`, вошли в коробку вдвое мельче). Опорные точки выбираются ПО ГРАММАТИКЕ
+ * реестра (`grammar`, `capped`, `tool`), а не по списку ключей: новый вид с известной грамматикой
+ * получит пиктограмму без правки этого места; неизвестный, как всюду, читается пином.
+ *
+ * Подпись у фигуры ставится в ЦЕЛЬ ЛИДЕРА (`leaderTarget`), поэтому лидер нулевой длины и в
+ * пиктограмме не виден: пиктограмма показывает фигуру, а не её плашку.
+ */
+const GLYPH_W = 44;
+const GLYPH_H = 28;
+
+function glyphGeometry(kind: string, caps: string): { pts: ShapePoint[]; label: ShapePoint } {
+  const d = kindDef(kind);
+  if (d.grammar === 'ink') {
+    return {
+      pts: [
+        { x: 4, y: 20 },
+        { x: 12, y: 8 },
+        { x: 20, y: 20 },
+        { x: 28, y: 8 },
+        { x: 36, y: 20 },
+        { x: 40, y: 14 },
+      ],
+      label: { x: 22, y: 14 },
+    };
+  }
+  if (d.grammar === 'arc') {
+    const pts = [
+      { x: 4, y: 22 },
+      { x: 22, y: 6 },
+      { x: 40, y: 22 },
+    ];
+    return { pts, label: leaderTarget(d.key, pts, effectiveCaps(d.key, caps)) ?? pts[1] };
+  }
+  if (d.grammar === 'polygon') {
+    const pts = [
+      { x: 6, y: 4 },
+      { x: 38, y: 4 },
+      { x: 38, y: 24 },
+      { x: 6, y: 24 },
+    ];
+    return { pts, label: leaderTarget(d.key, pts, '') ?? { x: 22, y: 14 } };
+  }
+  if (d.tool === 'label') {
+    // Записка: стрелка от плашки к месту; у записки с лучами — два луча.
+    const pts =
+      d.points[0] >= 2
+        ? [
+            { x: 38, y: 22 },
+            { x: 38, y: 6 },
+          ]
+        : [{ x: 38, y: 22 }];
+    return { pts, label: { x: 8, y: d.points[0] >= 2 ? 14 : 6 } };
+  }
+  if (d.capped) {
+    // Линия: две точки, наконечники — какие хранятся (`effectiveCaps` раскрывает «не задано»).
+    const pts = [
+      { x: 6, y: 14 },
+      { x: 38, y: 14 },
+    ];
+    return { pts, label: leaderTarget(d.key, pts, effectiveCaps(d.key, caps)) ?? { x: 22, y: 14 } };
+  }
+  // Пин и всё неизвестное: одна точка.
+  return { pts: [{ x: 22, y: 14 }], label: { x: 22, y: 14 } };
+}
+
+function CalloutGlyph({
+  kind,
+  caps,
+  color,
+  dashed,
+  filled,
+}: {
+  kind: string;
+  caps?: string;
+  color?: string;
+  dashed?: boolean;
+  filled?: boolean;
+}) {
+  const d = kindDef(kind);
+  const { pts, label } = glyphGeometry(kind, caps ?? '');
+  return (
+    <svg
+      role='img'
+      aria-label={d.label}
+      width={GLYPH_W / 2}
+      height={GLYPH_H / 2}
+      viewBox={`0 0 ${GLYPH_W} ${GLYPH_H}`}
+      className='shrink-0 overflow-visible text-textColor'
+      data-mood-glyph={d.key}
+    >
+      {/* Маркеры стрелок и штриховка — те же определения, что кладёт в `<defs>` сам кадр; в каждой
+          пиктограмме свои, потому что она рисуется и там, где ни одного кадра на экране нет. */}
+      <defs>
+        <AnnotationDefs />
+      </defs>
+      {d.key === 'pin' ? (
+        // Пин на кадре — HTML-кружок с номером, а не SVG-фигура (`CalloutShape` рисует ему только
+        // точку привязки), поэтому его пиктограмма — тот же кружок.
+        <circle cx={22} cy={14} r={6} fill='none' stroke='currentColor' strokeWidth={2} />
+      ) : (
+        <CalloutShape
+          kind={kind}
+          pts={pts}
+          label={label}
+          color={color || undefined}
+          dashed={dashed}
+          filled={filled}
+          caps={caps}
+          strokeWidth={2}
+        />
+      )}
+    </svg>
+  );
+}
+
+/** Строка меню: указание доски вместе с номером плитки, на которой оно стоит. */
+type RailRow = SurfaceCallout & { picture: number };
+
+function MoodCalloutRail({ rows }: { rows: RailRow[] }): JSX.Element {
+  if (rows.length === 0) {
+    return (
+      <Text size='micro' variant='label' component='p' data-mood-rail=''>
+        none yet. A note is put on the picture itself — arm a kind above the board and click a
+        picture; the row appears here the moment it exists.
+      </Text>
+    );
+  }
+  return (
+    <div data-mood-rail=''>
+      {rows.map((row) => {
+        const text = (row.text ?? '').trim();
+        return (
+          <div
+            key={row.key}
+            data-mood-callout={row.key}
+            data-mood-callout-kind={kindDef(row.kind).key}
+            className='flex items-center gap-2 border-b border-hairline py-1'
+          >
+            <CalloutGlyph
+              kind={row.kind}
+              caps={row.caps}
+              color={row.color}
+              dashed={row.dashed}
+              filled={row.filled}
+            />
+            <Text
+              size='micro'
+              component='span'
+              className={cn('min-w-0 flex-1 truncate', !text && 'text-labelColor')}
+            >
+              {text || 'no text'}
+            </Text>
+            <Pill tone='mut'>picture {row.picture}</Pill>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * ═══ ПРАВКА КАРТИНКИ ДОСКИ ПО НАВЕДЕНИЮ (C-3, круг 18) ═══════════════════════════════════════
+ *
+ * Владелец, дословно: «MOODBOARD — должна быть возможность редактировать на ховер картинки».
+ *
+ * ЗАМЕРЕНО ДО ПРАВКИ: по наведению на плитку доски не происходило ничего — в её углу всегда стояли
+ * `zoom` и `✕` (органы кадра, не тихие), а двери «править картинку» у доски не было вовсе. Во всей
+ * полосе DESIGN «edit» на картинке означает одно: открыть редактор (`VectorModal`) на этой
+ * картинке — так у истории прогонов, у плит листа (K-7) и у верстака. Доска была единственной
+ * поверхностью с картинками без этой двери; вторая сущность здесь не выдумывается.
+ *
+ * ДВЕРЬ ТИХАЯ — ПОЯВЛЯЕТСЯ ПО НАВЕДЕНИЮ ИЛИ ФОКУСУ ВНУТРИ ПЛИТКИ И ВСЕГДА НА УСТРОЙСТВЕ БЕЗ
+ * НАВЕДЕНИЯ — та же формула, что у угловых органов `PictureTile` (`TILE_QUIET`), и та же кожа
+ * (`TILE_CORNER`). Формула переписана через `:hover > &`, потому что плитку доски рисует
+ * `FocusedAnnotator`, и класса `group` на ней нет; орган ставится в её угол через
+ * `renderFocusedFooter` — единственный слот, который галерея отдаёт вызывающему на плитке.
+ * Правильное место этой двери — нижний ряд органов кадра (`cornerSlotBottom` поверхности), и проп
+ * для него у `FocusedAnnotator` назван в отчёте волны.
+ *
+ * РЕЗУЛЬТАТ ПРАВКИ ВСТАЁТ НА ДОСКУ РЯДОМ С ОРИГИНАЛОМ, А НЕ ВМЕСТО НЕГО. Указания приколоты долями
+ * кадра оригинала, и подмена картинки под ними увела бы каждое не туда; оригинал остаётся со своими
+ * пометками, а снять его — отдельный ✕, который называет цену.
+ */
+const MOOD_QUIET =
+  'opacity-0 transition-opacity duration-100 [:hover>&]:opacity-100 [:focus-within>&]:opacity-100 ' +
+  'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none';
+
+/**
+ * Основа редактора для картинки ДОСКИ. У доски нет картинки полосы — это медиа библиотеки, — и
+ * редактору нужен ровно его файл: слой и склейка адресуются по `base_media_id`.
+ * ⚠ НИ ОДНО ДРУГОЕ ПОЛЕ НЕ ВЫДУМЫВАЕТСЯ (тот же довод, что у `plateAsPicture` в
+ * `artifacts-panel.tsx`): про файл известно только то, что он на доске.
+ */
+function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
+  return {
+    id: undefined,
+    techCardId: undefined,
+    media: full,
+    runId: undefined,
+    batchId: undefined,
+    ordinal: undefined,
+    kind: undefined,
+    ghostView: undefined,
+    compositeViews: undefined,
+    derivedFrom: undefined,
+    derivation: undefined,
+    sourceClass: undefined,
+    mixedInput: undefined,
+    layerRev: undefined,
+    hiddenAt: undefined,
+    hiddenBy: undefined,
+    createdAt: undefined,
+    selected: undefined,
+    colorwayId: undefined,
+    displayOnly: undefined,
+  };
+}
+
 export function MoodBoard({
   techCardId,
   disabled,
@@ -233,6 +490,17 @@ export function MoodBoard({
   );
   const callouts = useMoodCallouts(moodMediaIds);
 
+  // ── правка картинки (C-3) ───────────────────────────────────────────────────────────────────
+  //
+  // Полоса читается ТОЛЬКО ради редактора: доска по-прежнему не зависит от того, отвечает ли
+  // сервер её маршруты (шапка файла), и без полосы теряет одну дверь, а не себя. Ключ запроса тот
+  // же, что у студии, — второго чтения полосы не возникает.
+  const speaks = serverSpeaksDesign();
+  const { band } = useDesignBand(techCardId);
+  const [editing, setEditing] = useState<{ mediaId: number; full: common_MediaFull } | null>(
+    null,
+  );
+
   const views: FocusedView[] = items.map((i) => ({
     // Ключ — сам id медиа: он уникален ПО ДОСКЕ (во входе на тот же id стоит отдельная строка,
     // но её рисует другой блок) и переживает удаление соседа, в отличие от позиции в ряду.
@@ -272,6 +540,36 @@ export function MoodBoard({
     setPicked((prev) => [...prev, ...result.accepted]);
     writeItems(result.next);
     return result.accepted.map((it) => it.id as number);
+  }
+
+  /**
+   * Отредактированная картинка встаёт на доску СРАЗУ ЗА ОРИГИНАЛОМ (C-3). Приём — тот же
+   * `appendBoardPictures`, что у двери «+ picture»: те же потолок, дедупликация и слова отказа;
+   * меняется только место строки в ряду, потому что «рядом с тем, что правил» — единственное
+   * место, где результат правки находят глазами.
+   */
+  function placeEditedNextTo(originalId: number, full: common_MediaFull) {
+    const result = appendBoardPictures({
+      live: (getValues('moodboardMedia') ?? []) as BoardItem[],
+      inScope: isBoardRow,
+      otherListIds: ((getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
+      added: [full],
+      kind: 'TECH_CARD_MEDIA_KIND_MOODBOARD',
+      max: MOOD_MAX,
+      scopeLabel: 'board',
+    });
+    if (result.refusal) showMessage(result.refusal, 'error');
+    if (!result.accepted.length) return;
+    setPicked((prev) => [...prev, ...result.accepted]);
+    const next = [...result.next];
+    const fresh = next.pop() as BoardItem;
+    const at = next.findIndex((i) => isBoardRow(i) && i.mediaId === originalId);
+    next.splice(at < 0 ? next.length : at + 1, 0, fresh);
+    writeItems(next);
+    showMessage(
+      'the edited picture is on the board, right after the original — the original keeps its notes',
+      'success',
+    );
   }
 
   // ── взведённый выбор: плитка доски заводит запись во входе ──────────────────────────────────
@@ -363,10 +661,22 @@ export function MoodBoard({
   // отвечает на вопрос «стоит ли разворачивать» молчанием.
   const [open, setOpen] = useState(true);
 
+  // ── строки бокового меню (D-27) — в порядке доски, с номером плитки ─────────────────────────
+  //
+  // `calloutsFor` уже отдаёт вью-модель поверхности — ту же, что видит кадр, — поэтому меню и кадр
+  // не могут разойтись ни в цвете, ни в наконечнике, ни в тексте: один источник на оба.
+  const railRows: RailRow[] = views.flatMap((v, i) =>
+    callouts.calloutsFor(v.mediaId).map((c) => ({ ...c, picture: i + 1 })),
+  );
+
+  const canEdit = !readOnly && speaks;
+
   return (
+    <SectionStack row>
     <Section
       title='moodboard'
       question={`— the mood, not the prompt: nothing here is sent to generation · ${items.length} / ${MOOD_MAX}`}
+      className='min-w-0 flex-1'
       action={
         <button
           type='button'
@@ -457,12 +767,37 @@ export function MoodBoard({
           carouselLabel='moodboard'
           emptyLabel='nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
           mediaLabel={(view, i) => `moodboard picture ${i + 1}`}
-          // Подвал плитки БЕЗ пикера mood/swatch (R-5): ярлык ничего не решал и только просил
-          // выбора. Остаётся единственный факт, который человеку нужен у плитки, — «эта картинка
-          // уже и во входе»; у остальных подвала нет вовсе, чтобы не резервировать пустую строку.
-          renderFocusedFooter={(view) =>
-            inputIds.has(view.mediaId) ? <Pill tone='ink'>in the input</Pill> : null
-          }
+          // ПОДВАЛА У ПЛИТКИ НЕТ — ЕСТЬ НИЖНИЙ РЯД ОРГАНОВ НА САМОМ КАДРЕ (C-3). Слот подвала
+          // галерея отдаёт вызывающему, и он единственный, где можно встать на плитку; строка ПОД
+          // кадром при этом не рисуется — оба органа стоят накладкой на нижнем крае кадра, как на
+          // плитах листа (`PLATE_BADGE_BAR`): факт «эта картинка уже и во входе» — слева (R-5,
+          // единственный факт, который человеку нужен у плитки, — на непрозрачной подложке, потому
+          // что под ним снимок), тихая дверь `edit` — справа, там же, где у `PictureTile`.
+          // `bottom-2` = зазор колонки поверхности под кадром (4px) плюс отступ органа от края (4px).
+          renderFocusedFooter={(view, i) => (
+            <>
+              {inputIds.has(view.mediaId) && (
+                <span className='pointer-events-none absolute bottom-2 left-1 z-[6] inline-block bg-bgColor'>
+                  <Pill tone='ink'>in the input</Pill>
+                </span>
+              )}
+              {canEdit && view.full && (
+                <button
+                  type='button'
+                  data-mood-edit={view.mediaId}
+                  aria-label={`edit moodboard picture ${i + 1}`}
+                  title='edit — open the picture editor on this picture; the result joins the board right after it'
+                  onClick={() => setEditing({ mediaId: view.mediaId, full: view.full as common_MediaFull })}
+                  // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
+                  // постановки — тот же довод, что у `FrameButton` поверхности.
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className={cn(TILE_CORNER, MOOD_QUIET, 'absolute bottom-2 right-1 z-[6]')}
+                >
+                  edit
+                </button>
+              )}
+            </>
+          )}
           renderEditor={(key, { close, arrows }) => {
             const row = callouts.at(key);
             if (!row) return null;
@@ -480,6 +815,7 @@ export function MoodBoard({
                 color={value.color ?? ''}
                 dashed={!!value.dashed}
                 filled={!!value.filled}
+                caps={value.caps ?? ''}
                 // Деталей кроя у мудбордной пометки нет: она про настроение, а не про изделие.
                 pieceKeys={[]}
                 onPieces={() => {}}
@@ -487,6 +823,12 @@ export function MoodBoard({
                 onColor={(v) => {
                   rememberPen({ color: v });
                   callouts.setColor(index, v);
+                }}
+                // НАКОНЕЧНИКИ (D-19/D-20) — пара «вид хранения + caps» пишется целиком; перо
+                // помнит ВЫБРАННОЕ (`chosen`), потому что скоба в хранении — `bracket` без caps.
+                onCaps={(next, chosen) => {
+                  rememberPen({ caps: chosen });
+                  callouts.setCaps(index, next);
                 }}
                 onDashed={(v) => {
                   rememberPen({ dashed: v });
@@ -610,6 +952,48 @@ export function MoodBoard({
           )}
         </div>
       </ConfirmationModal>
+
+      {/* РЕДАКТОР КАРТИНКИ ДОСКИ (C-3) — тот же `VectorModal`, что открывает `edit` на плитке
+          истории, на плите листа и на верстаке: один редактор, вызванный с четвёртого экрана.
+          Монтируется только раскрытым: у модалки свои оконные слушатели клавиш. `slot` не
+          передаётся — доске некуда «поставить» результат, он входит строкой доски через
+          `placeEditedNextTo`. */}
+      {editing && (
+        <VectorModal
+          open
+          onOpenChange={(v) => !v && setEditing(null)}
+          techCardId={techCardId}
+          band={band}
+          base={pictureOfMedia(editing.full)}
+          slot={null}
+          disabled={readOnly}
+          onFlattened={(picture) => {
+            // Медиа берётся ИЗ ОТВЕТА СЕРВЕРА, а не из того, что клиент только что загрузил:
+            // строку доски заводит `appendBoardPictures` по `common_MediaFull`.
+            const full = picture.media;
+            if (full) placeEditedNextTo(editing.mediaId, full);
+          }}
+        />
+      )}
     </Section>
+
+      {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (D-27) — тот же блок, что стоит справа от листа в ARTIFACTS:
+          заголовок `callouts`, счётчик пилюлей, строка на указание. Сворачивается вместе с доской:
+          меню про то, что на доске, и без доски ему не о чем. */}
+      {open && (
+        <Section
+          title='callouts'
+          question='— pinned on the board, not numbered'
+          action={
+            <Pill tone='mut'>
+              {railRows.length} on the board
+            </Pill>
+          }
+          className='lg:w-[340px] lg:shrink-0'
+        >
+          <MoodCalloutRail rows={railRows} />
+        </Section>
+      )}
+    </SectionStack>
   );
 }

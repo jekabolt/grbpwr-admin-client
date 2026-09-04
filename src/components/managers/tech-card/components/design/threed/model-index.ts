@@ -40,15 +40,32 @@ import { threedResults } from './media';
  * Запрос и подпись сравниваются по ПУТИ: подписанный `?X-Amz-…` или якорь не должны ни включать,
  * ни выключать признак — то же правило и по той же причине, что у `isModelUrl`.
  *
+ * ═══ КРУГ 19 (D-26): ЗАПИСЬ ИНДЕКСА НЕСЁТ И КАРТОЧКУ, И ПУТЬ САМОЙ МОДЕЛИ ═══════════════════════
+ *
+ * Снимок с ракурса регистрируется на карточку (`RegisterDesignUpload`), а окно модели открывает
+ * ЧУЖОЙ примитив (`PictureTile`) с одним лишь адресом файла — карточки он окну не называет и
+ * назвать не может: у плитки её нет. Есть она у КАРТИНКИ ПОЛОСЫ (`DesignPicture.tech_card_id`),
+ * из которой этот индекс и собирается. Поэтому запись теперь пара «адрес модели + карточка», а
+ * ключом, кроме трёх адресов растра, служит и путь самой модели: окно, открытое по адресу `.glb`,
+ * находит по нему свою карточку, не прося вызывающего ни о чём. Читатель растра
+ * (`useModelBehind`) при этом отвечает тем же, чем отвечал, — строкой адреса.
+ *
+ * ⚠ ПУТЬ МОДЕЛИ В КЛЮЧАХ МЕНЯЕТ ОДНО ПОВЕДЕНИЕ ЧУЖОЙ ПЛИТКИ, И ЭТО НАЗВАНО: плитка, чей `url` и
+ * есть `.glb` (результат без миниатюры), раньше получала пустой ответ и открывала просмотрщик
+ * картинок над файлом модели — тот самый «не работает» из J-29; теперь она открывает окно модели.
+ *
  * ЧЕГО ИНДЕКС НЕ ДЕЛАЕТ: он не знает про прогоны без модели. Историческая строка рода `threed`
  * без `.glb` в индекс не попадает вовсе и остаётся обычной картинкой с обычным зумом — это
  * правда о ней, а не пробел.
  */
 
-/** Пустая карта — один экземпляр: новая на каждый рендер пересобирала бы всех потребителей. */
-const EMPTY: ReadonlyMap<string, string> = new Map();
+/** What stands behind a raster address: the model file, and the card it belongs to (0 = not stated). */
+export type ModelBehind = { modelUrl: string; techCardId: number };
 
-export const ThreedModelIndexContext = createContext<ReadonlyMap<string, string>>(EMPTY);
+/** Пустая карта — один экземпляр: новая на каждый рендер пересобирала бы всех потребителей. */
+const EMPTY: ReadonlyMap<string, ModelBehind> = new Map();
+
+export const ThreedModelIndexContext = createContext<ReadonlyMap<string, ModelBehind>>(EMPTY);
 
 /** Адрес без запроса и якоря — по нему индекс и кладёт, и ищет. */
 function pathKey(url?: string | null): string {
@@ -62,23 +79,28 @@ function pathKey(url?: string | null): string {
  * `threedResults`: второй способ считать разошёлся бы с первым молча в тот день, когда маршрут
  * начнёт возвращать что-то третье.
  */
-export function threedModelIndex(band?: GetDesignBandResponse | null): ReadonlyMap<string, string> {
+export function threedModelIndex(band?: GetDesignBandResponse | null): ReadonlyMap<string, ModelBehind> {
   if (!band) return EMPTY;
-  const out = new Map<string, string>();
+  const out = new Map<string, ModelBehind>();
+  const put = (url: string | undefined, entry: ModelBehind) => {
+    const key = pathKey(url);
+    // ПЕРВЫЙ ПОБЕЖДАЕТ. Один и тот же растр, приставший к двум прогонам, физически невозможен
+    // (`threedResults` присваивает миниатюру ровно одной модели), но правило записано, чтобы
+    // порядок обхода не решал молча.
+    if (key && !out.has(key)) out.set(key, entry);
+  };
   for (const result of threedResults(outputsOfKind(band, 'threed'))) {
-    if (!result.modelUrl || !result.poster) continue;
+    if (!result.modelUrl) continue;
+    const entry: ModelBehind = {
+      modelUrl: result.modelUrl,
+      techCardId: result.model?.techCardId ?? result.poster?.techCardId ?? 0,
+    };
+    put(result.modelUrl, entry);
+    if (!result.poster) continue;
     const media = result.poster.media?.media;
-    for (const url of [
-      media?.thumbnail?.mediaUrl,
-      media?.compressed?.mediaUrl,
-      media?.fullSize?.mediaUrl,
-    ]) {
-      const key = pathKey(url);
-      // ПЕРВЫЙ ПОБЕЖДАЕТ. Один и тот же растр, приставший к двум прогонам, физически невозможен
-      // (`threedResults` присваивает миниатюру ровно одной модели), но правило записано, чтобы
-      // порядок обхода не решал молча.
-      if (key && !out.has(key)) out.set(key, result.modelUrl);
-    }
+    put(media?.thumbnail?.mediaUrl, entry);
+    put(media?.compressed?.mediaUrl, entry);
+    put(media?.fullSize?.mediaUrl, entry);
   }
   return out;
 }
@@ -94,5 +116,18 @@ export function useModelBehind(url?: string | null): string {
   const index = useContext(ThreedModelIndexContext);
   const key = pathKey(url);
   if (!key) return '';
-  return index.get(key) ?? '';
+  return index.get(key)?.modelUrl ?? '';
+}
+
+/**
+ * THE CARD A MODEL BELONGS TO, by the model's own address — or 0 when the band never stated it.
+ *
+ * Zero is a truthful «not stated», not a card: the modal reads it and draws its snapshot doors
+ * inert with that reason instead of filing a picture onto card 0.
+ */
+export function useModelCard(modelUrl?: string | null): number {
+  const index = useContext(ThreedModelIndexContext);
+  const key = pathKey(modelUrl);
+  if (!key) return 0;
+  return index.get(key)?.techCardId ?? 0;
 }

@@ -93,16 +93,20 @@ import { wireInt } from './wire-int';
 import { SLIT_OVERCAST_WORK } from './operation-work';
 import { z } from 'zod';
 import {
+  ANNOTATION_CAPS_KEYS,
   ANNOTATION_COLOR_KEYS,
   ANNOTATION_KIND_KEYS,
+  type AnnotationCapsKey,
   type AnnotationColorKey,
   type AnnotationKindKey,
 } from 'ui/components/annotation/kinds';
 import {
+  annotationCapsOut,
   annotationColorFromWire,
   annotationColorToWire,
   annotationKindFromWire,
   annotationKindToWire,
+  readAnnotationCaps,
 } from 'ui/components/annotation/wire';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
@@ -908,6 +912,11 @@ export type AnnotationKind = AnnotationKindKey;
 export const ANNOTATION_COLORS = ANNOTATION_COLOR_KEYS;
 export type AnnotationColor = AnnotationColorKey;
 
+// Наконечник линии и кривой (круг 18, D-19/D-20) — тот же закрытый список, что в реестре. Пусто =
+// «не задано» = фигура рисуется как до круга 18; см. `effectiveCaps` в реестре.
+export const ANNOTATION_CAPS = ANNOTATION_CAPS_KEYS;
+export type AnnotationCaps = AnnotationCapsKey;
+
 // СЛОВАРИ ПРОВОДА ПЕРЕЕХАЛИ К РЕЕСТРУ ВИДОВ (`ui/components/annotation/wire`): указания рисует
 // теперь не только тех-карта, но и вложение задачи, а две копии таблицы «вид ↔ константа» — это
 // вид, который приезжает на один экран и не приезжает на другой. Реэкспорт оставлен намеренно:
@@ -958,6 +967,9 @@ export function annotationFromWire(a: common_TechCardAnnotation): AnnotationForm
     color: annotationColorFromWire(a.color),
     dashed: !!a.dashed,
     filled: !!a.filled,
+    // Поля `caps` в сгенерированном типе может ещё не быть (бэкенд едет отдельно): читается «если
+    // есть», отсутствие — «не задано». Незнакомое значение — тоже «не задано», не отказ.
+    caps: readAnnotationCaps(a),
     pieceLineKey: a.pieceLineKey ?? '',
     // Пустой список читается как [старое поле] — то же правило, что на сервере: карточка,
     // записанная до 0310, несёт только одиночный ключ.
@@ -994,6 +1006,11 @@ const annotationSchema = z.object({
   dashed: z.boolean().default(false),
   // Штриховка области. Только у полигона: у линии заливать нечего, и сервер обнуляет флаг сам.
   filled: z.boolean().default(false),
+  // Наконечник линии/кривой (D-19/D-20). `.optional()` БЕЗ `.default('')`, и это намеренно, как у
+  // `clientRef`: отсутствие остаётся отсутствием до самого провода, где оно и так читается как
+  // UNSPECIFIED, а владельцы, собирающие строку литералом (эскиз, примерка), не обязаны знать поле,
+  // которого их провод ещё не несёт. Хранится КАНОНИЧЕСКОЙ парой с `kind` (`capsStorage`).
+  caps: z.enum(ANNOTATION_CAPS).optional(),
   // Деталь кроя, о которой указание. Тот же стабильный ключ, которым деталь адресуют вход операции
   // и назначение материала, — не имя: имя переживает переименование хуже, чем ссылка. Пусто =
   // указание не про конкретную деталь (а про узел, шов, посадку).
@@ -1042,6 +1059,8 @@ const calloutSchema = z.object({
   // несёт хранимую дальше целиком.
   dashed: z.boolean().optional().default(false),
   filled: z.boolean().optional().default(false),
+  // Наконечник (D-19/D-20) — тот же довод и та же дисциплина отсутствия, что у выноски снимка шага.
+  caps: z.enum(ANNOTATION_CAPS).optional(),
   // Детали указания — ИМЕНАМИ, а не ключами: на именах стоит связь «деталь ↔ выноска»
   // (`piece.calloutNumber` сверяется по имени), и второй способ адресовать деталь развёл бы две
   // половины одной связи. `part` — эхо первого элемента.
@@ -2459,6 +2478,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       color: annotationColorFromWire(c.color),
       dashed: !!c.dashed,
       filled: !!c.filled,
+      caps: readAnnotationCaps(c),
       // Список приходит с сервера всегда непустым, если деталь есть вовсе (он собирает его из
       // `part` у карточек, записанных до 0310). Фолбэк здесь — на случай ответа старого сервера.
       parts: (c.parts ?? []).filter(Boolean).length
@@ -3117,6 +3137,9 @@ export function mapFormToTechCardInsert(
       color: annotationColorToWire(c.color),
       dashed: !!c.dashed,
       filled: !!c.filled,
+      // Наконечник ШЛЁТСЯ ВСЕГДА, как и вид, — спредом, потому что поля в сгенерированном типе
+      // может ещё не быть (см. довод в `wire.ts`). Старый сервер незнакомое поле отбрасывает.
+      ...annotationCapsOut(c.caps),
       // `part` шлётся ПЕРВЫМ ЭЛЕМЕНТОМ СПИСКА, а не тем, что лежит в поле: сервер хранит именно
       // так, и разойтись им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатают.
       parts: calloutPartsOut(c),
@@ -3557,6 +3580,7 @@ export function mapFormToTechCardInsert(
               color: annotationColorToWire(a.color),
               dashed: !!a.dashed,
               filled: !!a.filled,
+              ...annotationCapsOut(a.caps),
               pieceLineKey: annotationPieceKeysOut(a)[0] ?? '',
               pieceLineKeys: annotationPieceKeysOut(a),
             })),

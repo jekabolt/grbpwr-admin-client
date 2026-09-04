@@ -547,20 +547,31 @@ export function Palette({
         texture &amp; colour
       </GroupLabel>
 
+      {/* ═══ ТЕКСТУРА И ЦВЕТ — ОДНОЙ СТРОКОЙ (D-8) ═══════════════════════════════════════════
+          Владелец, дословно: «GENERATION — FABRIC RENDER TEXTURE и COLOUR пусть будут в одной
+          строке а не в одном столбце».
+          Это не только компактнее — это ЧЕСТНЕЕ. Два ряда друг под другом читаются как две
+          последовательные ступени («сначала ткань, потом цвет»), а они РАВНОПРАВНЫ: подпись
+          группы прямо говорит «a texture, a colour, or both». Плитка цвета ровно 104px — та же
+          мера, что минимальная колонка сетки текстур (`Tiles min={104}`), поэтому в одной строке
+          обе стоят по одной сетке, а не «картинка и приписка сбоку».
+          ⚠ ПОДПИСЬ РЯДА — `texture`, А НЕ «texture & colour»: заголовок группы строкой выше уже
+          сказал это ровно теми же словами, и повторить их в левой колонке значило бы напечатать
+          одно и то же дважды подряд. Плитка цвета называет себя сама — дверью `+ colour` и полем
+          имени цвета под ней. */}
       <FieldRow label='texture' data-fabric-pair className='items-start'>
-        <div className='min-w-0 flex-1'>
-          <TextureGrid
-            band={band}
-            techCardId={techCardId}
-            state={state}
-            disabled={disabled}
-            onMakePattern={onMakePattern}
-          />
+        <div className='flex min-w-0 flex-1 items-start gap-2'>
+          <div className='min-w-0 flex-1'>
+            <TextureGrid
+              band={band}
+              techCardId={techCardId}
+              state={state}
+              disabled={disabled}
+              onMakePattern={onMakePattern}
+            />
+          </div>
+          <ColourTile band={band} state={state} disabled={disabled} />
         </div>
-      </FieldRow>
-
-      <FieldRow label='colour' className='items-start'>
-        <ColourTile band={band} state={state} disabled={disabled} />
         {/* ⚠ ЗДЕСЬ СТОЯЛА ОБЩАЯ СТРОКА ПОРЯДКА СТАРШИНСТВА (`fabricAuthority`), И ОНА СНЯТА С
             ЭКРАНА — E-2. Она говорила ПРАВИЛО («the photo states the material · the picked colour
             overrides the photo’s colour · the words state what neither of them states»), а тремя

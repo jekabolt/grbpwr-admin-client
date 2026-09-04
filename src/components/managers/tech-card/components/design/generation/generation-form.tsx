@@ -97,30 +97,15 @@ export function GenerationForm({
   band,
   techCardId,
   disabled,
-  open,
-  onOpenChange,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
-  /** Controlled disclosure. Omit and the form manages its own, opening once the card has a run. */
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }) {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
   const { showMessage } = useSnackBarStore();
   const startRun = useStartRun(techCardId);
-
-  const [manual, setManual] = useState<boolean | null>(null);
-  const isOpen = open ?? manual ?? hasFlatRun(band);
-  const setOpen = useCallback(
-    (next: boolean) => {
-      setManual(next);
-      onOpenChange?.(next);
-    },
-    [onOpenChange],
-  );
 
   const [views, setViews] = useState<Record<string, boolean>>({ front: true, back: true });
   // Галки ДЕТАЛЕЙ живут по id слота, отдельно от силуэтов (T-5): деталь можно спросить, только
@@ -156,7 +141,7 @@ export function GenerationForm({
   const ticked: string[] = [...tickedSides, ...tickedDetails.map(() => DETAIL_VIEW)];
   const tickedDetailIds: number[] = tickedDetails.map((d) => d.id ?? 0);
   // Половина сравнения для дивайдера «current / earlier» в истории живёт ТОЛЬКО здесь: только эта
-  // форма знает, какой вопрос задан прямо сейчас. Хук стоит ВЫШЕ раннего возврата `if (!isOpen)`
+  // форма знает, какой вопрос задан прямо сейчас. Раннего возврата у формы больше нет (D-1),
   // намеренно — под ним число хуков менялось бы между рендерами, и React снял бы всё дерево
   // (ошибка #310, которой этот экран уже стоил одного вечера). При размонтировании вопрос
   // отзывается сам, поэтому свёрнутая форма не оставляет устаревшего.
@@ -322,42 +307,19 @@ export function GenerationForm({
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // CLOSED, AND THE CARD ALREADY HAS SOMETHING ON IT: two equal doors and no form. On a card with
-  // nothing at all the doors belong to `EmptyStudio`, which says more with them.
-  if (!isOpen) {
-    if (!hasAnyPictures(band)) return null;
-    return (
-      <Section title='generation' question='— the form unfolds when you ask for it'>
-        <div className='flex flex-wrap items-center gap-2'>
-          <Button variant='secondary' size='sm' onClick={gotoUploads}>
-            + add files
-          </Button>
-          <Button variant='main' size='sm' onClick={() => setOpen(true)} disabled={writesOff}>
-            GENERATE ▸
-          </Button>
-          {/* Фраза «two equal doors…» здесь снята (T-6): её учит пустой стенд, где она — первый
-              экран; на карточке с материалом эксперт видит две кнопки и без подписи. */}
-        </div>
-      </Section>
-    );
-  }
+  /* ═══ ФОРМА ФЛЭТА НЕ СКЛАДЫВАЕТСЯ ВООБЩЕ (D-1) ═══════════════════════════════════════════
+     Владелец, дословно: «GENERATION — FLAT форма не должна фолдиться в принципе».
+     Здесь стояла вторая поза — «две равные двери и никакой формы», — и вместе с ней жило целое
+     состояние: `manual`, проп `open`, кнопка «− fold away» и вывод «открыть, если у карточки уже
+     есть флэт-прогон». Всё это снято, а не спрятано за флагом: поза, в которую нельзя попасть, —
+     это код, который никто не читает и который однажды вернётся сам.
+     Пустая карточка по-прежнему принадлежит `EmptyStudio` — там у дверей есть что сказать. */
 
   return (
     <Section
       id='design-generation'
       title='generation — flat'
       question='— what to ask for, and in what shape it comes back'
-      action={
-        <button
-          type='button'
-          onClick={() => setOpen(false)}
-          className='cursor-pointer uppercase text-labelColor hover:text-textColor'
-        >
-          <Text size='micro' variant='uppercase' tracking='label' component='span'>
-            − fold away
-          </Text>
-        </button>
-      }
     >
       {!speaks && (
         <CalloutBox tone='note'>

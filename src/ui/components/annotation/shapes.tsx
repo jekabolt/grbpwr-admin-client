@@ -21,9 +21,19 @@ export {
   leaderTarget,
   type ShapePoint,
 } from './geometry';
-import { arcPath, bracketPath, inkPath, leaderTarget, polygonPath } from './geometry';
-import type { ShapePoint } from './geometry';
-import { kindDef } from './kinds';
+import {
+  arcEnds,
+  arcPath,
+  bracketPath,
+  inkPath,
+  leaderTarget,
+  legPath,
+  lineEnds,
+  polygonPath,
+  tickPath,
+} from './geometry';
+import type { ShapeEnds, ShapePoint } from './geometry';
+import { effectiveCaps, kindDef, type AnnotationCapsKey } from './kinds';
 
 export const CALLOUT_COLOR_HEX: Record<string, string> = {
   red: '#d02b2b',
@@ -41,7 +51,11 @@ export const calloutInk = (color?: string) =>
   (color && CALLOUT_COLOR_HEX[color]) || 'currentColor';
 
 /** Толщина линий и размеры фигур в пикселях кадра — не масштабируются вместе с картинкой. */
-const TICK = 7;
+/**
+ * Радиус наконечника «bullet». Крупнее точки-якоря (2.5) и точек-концов кривой без наконечников,
+ * иначе выбранный «bullet» был бы неотличим от «plain» — то есть выбором, который ничего не меняет.
+ */
+const BULLET_R = 3.5;
 /** След маркера тяжелее чертёжных фигур: он и должен читаться фломастером, а не волосяной линией. */
 const INK_WIDTH = 2;
 /** Пунктир ФИГУРЫ заведомо крупнее пунктира ЛИДЕРА (`2 2`) — иначе их не различить. */
@@ -219,6 +233,60 @@ function Leader({ from, to, color }: { from: ShapePoint; to: ShapePoint; color?:
   );
 }
 
+/**
+ * НАКОНЕЧНИКИ НА ДВУХ КОНЦАХ — одна отрисовка на линию и кривую (круг 18, D-19/D-20).
+ *
+ * `ends` — концы с касательными, направленными НАРУЖУ (`lineEnds`/`arcEnds`): у линии это
+ * направление хорды, у кривой — касательная Безье в концах, поэтому засечка на кривой стоит
+ * поперёк САМОЙ кривой, а не поперёк хорды. Стрелки здесь НЕ рисуются: они маркеры на самом
+ * штрихе (`markerStart`/`markerEnd`), и поворот им считает SVG.
+ *
+ * Скоба на КРИВОЙ — только ножки: Г на каждом конце, в одну сторону от хода линии. Перекладина у
+ * кривой невыразима; у прямой линии скоба остаётся прежней целой фигурой (`bracketPath`), и сюда
+ * с ключом `bracket` прямая не приходит вовсе.
+ */
+function EndCaps({
+  caps,
+  ends,
+  color,
+  width,
+  halo,
+}: {
+  caps: AnnotationCapsKey;
+  ends: ShapeEnds;
+  color?: string;
+  width: number;
+  halo?: boolean;
+}) {
+  const { a, ta, b, tb } = ends;
+  if (caps === 'tick') {
+    return (
+      <>
+        <Stroke d={tickPath(a, ta)} color={color} width={width} halo={halo} />
+        <Stroke d={tickPath(b, tb)} color={color} width={width} halo={halo} />
+      </>
+    );
+  }
+  if (caps === 'bullet') {
+    return (
+      <>
+        <Dot p={a} color={color} r={BULLET_R} />
+        <Dot p={b} color={color} r={BULLET_R} />
+      </>
+    );
+  }
+  if (caps === 'bracket') {
+    // Ход линии: в начале — ВНУТРЬ фигуры (против наружной касательной), в конце — наружу.
+    return (
+      <>
+        <Stroke d={legPath(a, { x: -ta.x, y: -ta.y })} color={color} width={width} halo={halo} />
+        <Stroke d={legPath(b, tb)} color={color} width={width} halo={halo} />
+      </>
+    );
+  }
+  return null;
+}
+
 // ── ФИГУРА ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -237,6 +305,7 @@ export function CalloutShape({
   color,
   dashed,
   filled,
+  caps,
   halo,
   strokeWidth = 1.5,
 }: {
@@ -246,11 +315,14 @@ export function CalloutShape({
   color?: string;
   dashed?: boolean;
   filled?: boolean;
+  /** Наконечник КАК ХРАНИТСЯ; незаданный раскрывается по виду (`effectiveCaps`). */
+  caps?: string;
   halo?: boolean;
   strokeWidth?: number;
 }) {
   if (pts.length === 0) return null;
   const def = kindDef(kind);
+  const ec = effectiveCaps(def.key, caps);
   const w = strokeWidth;
   // Пунктир и штриховка рисуются ТОЛЬКО там, где имеют смысл, даже если флаг пришёл с провода
   // поднятым. Сервер приводит их к false сам, но отрисовка не имеет права зависеть от того,
@@ -259,7 +331,7 @@ export function CalloutShape({
   const arrow = `url(#${arrowMarkerId(color)})`;
   // ЦЕЛЬ ЛИДЕРА СЧИТАЕТСЯ ОДНОЙ ФУНКЦИЕЙ С ХИТ-СЛОЕМ (`geometry.leaderTarget`). Пока она жила
   // здесь по месту, слой попадания о лидере не знал и по нему не ловил.
-  const lt = leaderTarget(def.key, pts);
+  const lt = leaderTarget(def.key, pts, ec);
 
   switch (def.key) {
     case 'pin':
@@ -284,42 +356,35 @@ export function CalloutShape({
         </g>
       );
 
-    case 'dim': {
-      const [p, q] = pts;
-      if (!q) return null;
-      // Засечки перпендикулярны линии — как в чертеже: они и делают линию РАЗМЕРНОЙ, а не просто
-      // отрезком между двумя точками.
-      const dx = q.x - p.x;
-      const dy = q.y - p.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = (-dy / len) * TICK;
-      const ny = (dx / len) * TICK;
-      return (
-        <g>
-          <Stroke d={`M${p.x},${p.y} L${q.x},${q.y}`} color={color} width={w} dashed={dash} halo={halo} />
-          <Stroke
-            d={`M${p.x - nx},${p.y - ny} L${p.x + nx},${p.y + ny}`}
-            color={color}
-            width={w}
-            halo={halo}
-          />
-          <Stroke
-            d={`M${q.x - nx},${q.y - ny} L${q.x + nx},${q.y + ny}`}
-            color={color}
-            width={w}
-            halo={halo}
-          />
-          {lt && <Leader from={label} to={lt} color={color} />}
-        </g>
-      );
-    }
-
+    case 'dim':
     case 'bracket': {
+      // ЛИНИЯ — ОДНА ФИГУРА НА ДВА ВИДА ХРАНЕНИЯ (круг 18, D-19). Что у неё на концах, решает
+      // `effectiveCaps`, а не ключ: `bracket` со `caps: arrow`, приехавший с провода, рисуется
+      // стрелками — данные говорят яснее ключа.
       const [p, q] = pts;
       if (!q) return null;
+      if (ec === 'bracket') {
+        // Скоба — прежняя фигура целиком: ножки и перекладина, отстоящая от хорды. Лидер и
+        // попадание считаются по ней же (`leaderTarget`, `hitPath`).
+        return (
+          <g data-callout-shape='line' data-caps='bracket'>
+            <Stroke d={bracketPath(p, q)} color={color} width={w} dashed={dash} halo={halo} />
+            {lt && <Leader from={label} to={lt} color={color} />}
+          </g>
+        );
+      }
       return (
-        <g>
-          <Stroke d={bracketPath(p, q)} color={color} width={w} dashed={dash} halo={halo} />
+        <g data-callout-shape='line' data-caps={ec}>
+          <Stroke
+            d={`M${p.x},${p.y} L${q.x},${q.y}`}
+            color={color}
+            width={w}
+            dashed={dash}
+            halo={halo}
+            markerStart={ec === 'arrow' ? arrow : undefined}
+            markerEnd={ec === 'arrow' ? arrow : undefined}
+          />
+          <EndCaps caps={ec} ends={lineEnds(p, q)} color={color} width={w} halo={halo} />
           {lt && <Leader from={label} to={lt} color={color} />}
         </g>
       );
@@ -329,12 +394,27 @@ export function CalloutShape({
       const [p, mid, q] = pts;
       if (!mid || !q) return null;
       return (
-        <g>
-          <Stroke d={arcPath(p, mid, q)} color={color} width={w} dashed={dash} halo={halo} />
-          {/* Концы отмечены точками: без них «где кривая начинается» читается только по изгибу, а
-              на пологой дуге его нет. */}
-          <Dot p={p} color={color} />
-          <Dot p={q} color={color} />
+        <g data-callout-shape='curve' data-caps={ec}>
+          <Stroke
+            d={arcPath(p, mid, q)}
+            color={color}
+            width={w}
+            dashed={dash}
+            halo={halo}
+            markerStart={ec === 'arrow' ? arrow : undefined}
+            markerEnd={ec === 'arrow' ? arrow : undefined}
+          />
+          {ec === '' ? (
+            <>
+              {/* Концы отмечены точками: без них «где кривая начинается» читается только по
+                  изгибу, а на пологой дуге его нет. Это НЕ наконечник «bullet» — точка вдвое
+                  меньше, и так кривая рисовалась до круга 18 (D-20: незаданное = как было). */}
+              <Dot p={p} color={color} />
+              <Dot p={q} color={color} />
+            </>
+          ) : (
+            <EndCaps caps={ec} ends={arcEnds(p, mid, q)} color={color} width={w} halo={halo} />
+          )}
           {lt && <Leader from={label} to={lt} color={color} />}
         </g>
       );
@@ -353,8 +433,17 @@ export function CalloutShape({
     }
 
     case 'ink':
+      // БЕЗ ПОДЛОЖКИ — СЛОВА ВЛАДЕЛЬЦА (круг 18, D-21): «freehand то что было нарисовано не должно
+      // быть с обводкой». Обводкой он видел ровно её: на фото-поверхностях под чернильный штрих
+      // ложилась белая линия на два пикселя шире, и след, который под рукой рисовался чистой
+      // линией (превью подложки не имеет), на отпускании кнопки обрастал белой каймой. Чертёжным
+      // фигурам подложка остаётся — они волосяные и на пёстром снимке тонут; след толщиной с
+      // фломастер читается и без неё. Белый цвет двухслоен по определению (`Stroke`), и это не
+      // подложка, а его тело.
       return (
-        <Stroke d={inkPath(pts)} color={color} width={INK_WIDTH} dashed={dash} halo={halo} />
+        <g data-callout-shape='ink'>
+          <Stroke d={inkPath(pts)} color={color} width={INK_WIDTH} dashed={dash} />
+        </g>
       );
 
     default:

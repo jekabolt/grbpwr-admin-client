@@ -38,9 +38,8 @@ export function GenerationStudio({
   techCardId: number;
   disabled?: boolean;
 }) {
-  // Derived, with an explicit fold winning from then on — the data never fights a human's choice.
-  const [manual, setManual] = useState<boolean | null>(null);
-  const open = manual ?? hasFlatRun(band);
+  /* Складывания у формы флэта больше нет (D-1) — вместе с ним ушло и состояние, которым эта
+     студия им управляла. Осталось ровно то, что решает СОСТАВ экрана, а не позу формы. */
   const anyContent = hasAnyPictures(band);
 
   return (
@@ -49,8 +48,6 @@ export function GenerationStudio({
         band={band}
         techCardId={techCardId}
         disabled={disabled}
-        open={open}
-        onOpenChange={setManual}
       />
       {anyContent ? (
         /* ═══ ЛЕНТА ФЛЭТА ОТКРЫВАЕТСЯ НА ФЛЭТАХ И РАЗВЁРНУТОЙ (E-14, и НЕ E-21…E-23) ══════════
@@ -75,14 +72,12 @@ export function GenerationStudio({
           defaultOpen
         />
       ) : (
-        !open && (
-          <EmptyStudio
-            band={band}
-            techCardId={techCardId}
-            disabled={disabled}
-            onGenerate={() => setManual(true)}
-          />
-        )
+        /* ⚠ ПУСТОЙ СТЕНД БОЛЬШЕ НЕ ЗАВИСИТ ОТ ПОЗЫ ФОРМЫ (D-1). Он рисовался «когда форма
+           сложена», а формы, которая складывается, больше нет: условием осталось то, чем он и
+           был — на карточке НЕЧЕГО показывать. Дверь `GENERATE ▸` ему теперь не нужна: форма
+           стоит тут же, развёрнутая, и вести к ней нажатием значило бы вести к тому, что уже
+           видно. */
+        <EmptyStudio band={band} techCardId={techCardId} disabled={disabled} />
       )}
     </>
   );

@@ -3,7 +3,13 @@ import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
-import { kindDef } from './kinds';
+import {
+  effectiveCaps,
+  isLineKind,
+  kindDef,
+  type AnnotationCapsKey,
+  type AnnotationKindKey,
+} from './kinds';
 import { AnnotationStyleRow } from './style-row';
 import type { NoteArrows } from './surface';
 
@@ -80,12 +86,14 @@ export function AnnotationEditor({
   color,
   dashed,
   filled,
+  caps = '',
   pieceKeys,
   pieceLabel,
   onText,
   onColor,
   onDashed,
   onFilled,
+  onCaps,
   onPieces,
   onRemove,
   onClose,
@@ -114,12 +122,22 @@ export function AnnotationEditor({
   color: string;
   dashed: boolean;
   filled: boolean;
+  /** Наконечник КАК ХРАНИТСЯ (`''` = не задан). Что показать выбранным, решает реестр. */
+  caps?: string;
   pieceKeys: string[];
   pieceLabel?: (lineKey: string) => string | undefined;
   onText: (v: string) => void;
   onColor: (v: string) => void;
   onDashed: (v: boolean) => void;
   onFilled: (v: boolean) => void;
+  /**
+   * Выбор наконечника (D-19/D-20) — приходит ПАРОЙ «вид хранения + caps», см. `AnnotationStyleRow`.
+   * Владелец пишет оба поля и помнит `chosen` пером. Отсутствует — чипов наконечников нет.
+   */
+  onCaps?: (
+    next: { kind: AnnotationKindKey; caps: AnnotationCapsKey },
+    chosen: AnnotationCapsKey,
+  ) => void;
   onPieces: (keys: string[]) => void;
   onRemove: () => void;
   onClose: () => void;
@@ -283,7 +301,13 @@ export function AnnotationEditor({
               onClose();
             }
           }}
-          placeholder={d.key === 'dim' ? 'a value with units — “6 mm”' : 'what to do here'}
+          // Подсказка про размер — у ЛИНИИ С ЗАСЕЧКАМИ, то есть у мерки: линия со стрелками
+          // или точками ничего не меряет, и «6 mm» там сбивал бы с толку.
+          placeholder={
+            isLineKind(kind) && effectiveCaps(kind, caps) === 'tick'
+              ? 'a value with units — “6 mm”'
+              : 'what to do here'
+          }
           maxLength={maxLength}
           className='w-full shrink-0 resize-none border border-borderColor bg-bgColor px-1 py-px text-micro leading-snug text-textColor focus:border-textColor focus:outline-none'
         />
@@ -343,9 +367,11 @@ export function AnnotationEditor({
               color={color}
               dashed={dashed}
               filled={filled}
+              caps={caps}
               onColor={onColor}
               onDashed={onDashed}
               onFilled={onFilled}
+              onCaps={onCaps}
             />
           </div>
         )}

@@ -1,7 +1,9 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
+import { SECTION } from 'constants/routes';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -15,7 +17,10 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionAudit } from './construction-audit';
+import { ConstructionBomTable } from './construction-bom-table';
+import { ConstructionCalloutTable } from './construction-callout-table';
 import { ConstructionField } from './construction-field';
+import { ConstructionGeneralInfo } from './construction-general-info';
 import { zoneOptions } from './operation-options';
 import {
   ColorwayArticles,
@@ -529,7 +534,17 @@ export function ConstructionTab({
   // всеми строками рельса) на каждый символ, набранный в любом поле BOM на соседней вкладке.
   // Подписка на ткань живёт ниже, в `useEffect` через `watch(cb)`, и рендер вызывает только на
   // смене отпечатка — см. там же.
-  const { getValues, watch } = useFormContext<TechCardFormData>();
+  const { getValues, watch, control } = useFormContext<TechCardFormData>();
+
+  // C-5 · GENERAL INFORMATION reads the same two gates the CLASSIFICATION block applied to these
+  // fields before they moved here: an auxiliary card has neither fit nor category (its AUXILIARY
+  // TYPE classifies it), and the Radix select has to be told about a released card explicitly —
+  // the outer `<fieldset disabled>` silences native inputs, not the portalled listbox.
+  const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
+  const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const { canWrite } = usePermissions();
+  const canWriteCard = canWrite(SECTION.techCards);
+  const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
   // Sketch pin ↔ operation and BOM line ↔ operation are the same mechanism, so both come from the
   // shared hook the pieces tab reuses for its mini-diagram.
@@ -739,6 +754,19 @@ export function ConstructionTab({
 
   return (
     <div className='flex flex-col gap-3.5'>
+      {/* C-5 · GENERAL INFORMATION — first, before the how: fit / category / base model / base
+          sample size moved here from the CLASSIFICATION block of the header (same form fields, same
+          components, one writer each), plus the derived size range and the two free-text aspects.
+          The seam-allowance and equipment defaults stay in «standards» below — two blocks, not one
+          in place of the other (C-6). */}
+      <Section title='general information' question='— what this style is, before how it is made'>
+        <ConstructionGeneralInfo
+          isAux={isAux}
+          readOnly={!canWriteCard || frozen}
+          onGoTab={onGoTab ? (t) => onGoTab(t) : undefined}
+        />
+      </Section>
+
       <ConstructionSummary />
 
       {/* The sketch is a reference, not the work: a fixed 320px column reads it fine and leaves the
@@ -844,6 +872,13 @@ export function ConstructionTab({
           </section>
         </div>
       </div>
+
+      {/* C-7 · the callouts as a table — the second face of the pins drawn above, joined to the
+          steps that reference them. C-8 · the BOM as a spec sheet — the second face of the lines
+          on the BOM tab, joined to the catalogue. Both are leaves with their own subscriptions, so
+          a keystroke in either re-renders that table and not the workspace above. */}
+      <ConstructionCalloutTable frozen={frozen} />
+      <ConstructionBomTable techCard={techCard} canWrite={canWriteCard} onGoTab={onGoTab} />
     </div>
   );
 }
