@@ -1578,6 +1578,27 @@ export type TechCardAnnotationColor =
   // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
   // на белом листе видно контур, а на чёрном снимке — саму линию.
   | "TECH_CARD_ANNOTATION_COLOR_WHITE";
+// Наконечник линии — ЧЕМ КОНЧАЕТСЯ отрезок или кривая. Ось, отдельная от вида: до круга 18 в
+// наборе стояли ДВА вида, различавшихся только концами (`DIM` — засечки, `BRACKET` — скобки),
+// и человек выбирал между ними как между разными инструментами, хотя рисовал одну и ту же линию.
+// ПАРА «ВИД + CAPS», А НЕ ЗАМЕНА ВИДА. Незаданное (UNSPECIFIED) раскрывается ПО ВИДУ: `DIM` без
+// caps — засечки, `BRACKET` без caps — скобки, `ARC` без caps — без наконечников. Поэтому уже
+// нарисованная мерка и уже нарисованная скоба, прочитанные и записанные обратно без правок,
+// уезжают байт в байт и не сдвигают подпись секции. Заданное caps СТАРШЕ ключа вида: `BRACKET`
+// с `ARROW` рисуется стрелками.
+// ЗАЧЕМ ОТДЕЛЬНАЯ ОСЬ, А НЕ ЕЩЁ ДВА ВИДА. Наконечников четыре, а видов линии было бы восемь
+// (линия × 4) плюс пять кривых — комбинаторика, которую пришлось бы валидировать поштучно, ровно
+// тот же довод, по которому вид не разложен на оси. Разница в том, что здесь ось ОДНА и она
+// ортогональна всему остальному.
+// ГДЕ ЖИВЁТ. Только у видов с концами: DIM, BRACKET, ARC. У пина, записки, зоны и следа сервер
+// ПРИВОДИТ поле к UNSPECIFIED, а не отвергает карточку, — по тому же доводу, что и `filled`
+// у не-полигона: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже.
+export type TechCardAnnotationCaps =
+  | "TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED"
+  | "TECH_CARD_ANNOTATION_CAPS_TICK"
+  | "TECH_CARD_ANNOTATION_CAPS_BRACKET"
+  | "TECH_CARD_ANNOTATION_CAPS_BULLET"
+  | "TECH_CARD_ANNOTATION_CAPS_ARROW";
 // TechCardIssueSeverity ranks a flagged construction issue.
 export type TechCardIssueSeverity =
   | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
@@ -1755,6 +1776,9 @@ export type TechCardCallout = {
   // The carry cannot collide with minting: minting is `number == 0`, carrying is
   // `number != 0`, and a legacy zero has neither a number to carry by nor a ref to mint for.
   clientRef: string | undefined;
+  // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
+  // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
+  caps: TechCardAnnotationCaps | undefined;
 };
 
 // Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
@@ -2936,6 +2960,14 @@ export type TechCardAnnotation = {
   // вытесняет старое поле целиком. Клиенту, который шлёт только piece_line_key, ничего менять не
   // нужно; сервер отдаёт оба, и piece_line_key = первый элемент списка.
   pieceLineKeys: string[] | undefined;
+  // НАКОНЕЧНИКИ ЛИНИИ. Оба конца одинаковы: разные концы у одной линии — это уже не «чем кончается
+  // отрезок», а лидер со стрелкой, и его роль несёт отдельный вид (LABEL).
+  // ВХОДИТ В ПОДПИСЬ СЕКЦИИ, как пунктир и штриховка, а не как цвет: засечка говорит «этот участок
+  // измерен», стрелка — «вот на это смотри», точка — «вот здесь». Это разные указания цеху, а не
+  // разное оформление одного.
+  // ХВОСТ ТРЕТИЙ И ОТКРЫВАЕТСЯ ТОЛЬКО ЗАДАННЫМ caps, обязательно таща за собой первые два: иначе
+  // отпечаток каждой уже нарисованной мерки сдвинулся бы в момент выката.
+  caps: TechCardAnnotationCaps | undefined;
 };
 
 // Одна картинка операции со своими выносками. Картинка ОПЕРАЦИОННАЯ: она принадлежит шагу, а не
@@ -4486,8 +4518,8 @@ export type DesignRun = {
 // DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
 // the run panel. Total encoded size is capped at 8 KB.
 export type DesignRunParams = {
-  // Which views were requested: front | back | side_l | side_r | detail. Drives the placeholder
-  // tiles that stand in for outputs that have not arrived yet.
+  // Which views were requested: front | back | side_l | side_r | three_quarter_l | three_quarter_r
+  // | detail. Drives the placeholder tiles that stand in for outputs that have not arrived yet.
   views: string[] | undefined;
   // one | per_view — a single composite sheet against one picture per view. A composite has no
   // single view and therefore cannot be clicked into a bench slot; it is split first.
@@ -4502,7 +4534,10 @@ export type DesignRunParams = {
   threed: DesignThreedParams | undefined;
   // `fix: back` — which view of the bench this run was asked to fix. Empty = not a fix. Feeds the
   // history column «input = slots (back)».
-  // SILHOUETTE SIDES ONLY: front | back | side_l | side_r. A detail slot is deliberately NOT
+  // SILHOUETTE SIDES ONLY: front | back | side_l | side_r | three_quarter_l | three_quarter_r. On a
+  // 3D run only the four cardinal sides (front, back, side_l, side_r) may be named — a three-quarter
+  // plate is neither a Meshy view nor a fal slot, and a run narrowed to one would be silently built
+  // from fewer sides than were picked. A detail slot is deliberately NOT
   // targetable, because a bare view key cannot name one of several details and this field is frozen
   // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
   // a detail is ever wanted, it arrives as a slot_id field beside this one, not as a `detail`
@@ -4529,7 +4564,8 @@ export type DesignRunParams = {
   // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
   // which a single string could not express at all: the studio marks up three plates and asks for
   // one correction across them, and a scalar target would make that three paid runs.
-  // SILHOUETTE SIDES ONLY, exactly as the scalar above: front | back | side_l | side_r. A detail is
+  // SILHOUETTE SIDES ONLY, exactly as the scalar above: front | back | side_l | side_r |
+  // three_quarter_l | three_quarter_r (3D: the four cardinal sides only, as above). A detail is
   // named in fix_slot_ids instead, because a bare view key cannot tell two details apart and this
   // list is frozen into the run's history, where an ambiguous target could never be repaired.
   fixTargets: string[] | undefined;
@@ -4820,7 +4856,7 @@ export type DesignInputSlot = {
   // comparison «is this input stale» has no join key without it — so the badge would be
   // uncomputable for every card with more than one detail slot, FOREVER: a snapshot is frozen at
   // launch and is never repaired later.
-  // 0 for the four silhouette sides, which view_key already identifies.
+  // 0 for the six silhouette sides, which view_key already identifies.
   slotId: number | undefined;
   // COPY of the detail's name at launch, so a snapshot still reads «detail: cuff» after the slot
   // has been renamed or deleted. Empty for the silhouette sides.
@@ -4957,6 +4993,13 @@ export type DesignPicture = {
   // OUTPUT-ONLY here: a generated picture inherits the run's colourway, a crop and a flatten
   // inherit their parent's, an upload states it on DesignUploadItem.
   colorwayId: number | undefined;
+  // ONLY FOR SHOWING (round 18, D-24). Visible on the sheet and in ARTIFACTS; never an input of any
+  // paid call, never a bench plate, never a reference. Stated on DesignUploadItem.display_only at
+  // registration and inherited by every crop and flatten of the picture. Every door that would let
+  // it reach a prompt refuses with `display_only` (slot, role, split-for-input) or
+  // `display_only_input` (a run or a draft, before the reserve). A run's own outputs are never
+  // display-only: the flag is a statement about a file a person brought in, not about pixels.
+  displayOnly: boolean | undefined;
 };
 
 // DesignAsset is ONE THING THIS CARD IS MADE OF that is not a picture of the garment: a cloth, a
@@ -5144,9 +5187,10 @@ export type DesignCardOutput = {
 export type DesignReference = {
   techCardId: number | undefined;
   mediaId: number | undefined;
-  // front | back | side_l | side_r | detail. NEVER EMPTY on the wire: clearing a role deletes the
-  // row, so «no role stated» is expressed by the ABSENCE of a DesignReference for that media, not
-  // by a present row carrying "". See SetDesignReferenceRole, which takes "" as the clear verb.
+  // front | back | side_l | side_r | three_quarter_l | three_quarter_r | detail. NEVER EMPTY on the
+  // wire: clearing a role deletes the row, so «no role stated» is expressed by the ABSENCE of a
+  // DesignReference for that media, not by a present row carrying "". See SetDesignReferenceRole,
+  // which takes "" as the clear verb.
   role: string | undefined;
   ordinal: number | undefined;
   setBy: string | undefined;
@@ -5173,9 +5217,9 @@ export type DesignReference = {
   detailSlotId: number | undefined;
 };
 
-// DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
-// silhouette sides (front/back/side_l/side_r) are born lazily on first touch; detail slots are
-// created by naming one.
+// DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
+// silhouette sides (front/back/side_l/side_r/three_quarter_l/three_quarter_r) are born lazily on
+// first touch; detail slots are created by naming one.
 export type DesignBenchSlot = {
   // The slot's OWN minted id. «Detail 1 / detail 2» as a key is forbidden: renaming a detail must
   // not move a plate, and two details named the same must still be two slots.
@@ -6269,6 +6313,9 @@ export type FittingCallout = {
   // приводится к false, а не отвергается.
   dashed: boolean | undefined;
   filled: boolean | undefined;
+  // Наконечники линии — см. TechCardAnnotationCaps в techcard.proto. Замечание примерки переносят
+  // в тех-карту, и стрелка обязана остаться стрелкой по обе стороны переноса.
+  caps: TechCardAnnotationCaps | undefined;
 };
 
 // FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the

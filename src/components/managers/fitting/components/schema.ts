@@ -13,7 +13,10 @@ import {
   annotationColorToWire,
   annotationKindFromWire,
   annotationKindToWire,
+  readAnnotationCaps,
+  annotationCapsOut,
 } from 'ui/components/annotation/wire';
+import { ANNOTATION_CAPS_KEYS } from 'ui/components/annotation/kinds';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 import { normalizeFittingZone } from './zone-options';
@@ -64,6 +67,10 @@ const fittingCalloutSchema = z.object({
   // промолчавший про вид, молчит про всю фигуру, и сервер несёт хранимую дальше целиком.
   dashed: z.boolean().optional().default(false),
   filled: z.boolean().optional().default(false),
+  // Наконечник линии (круг 18, D-19/D-20) — та же дисциплина отсутствия, что у выноски тех-карты:
+  // `.optional()` БЕЗ `.default('')`. Отсутствие остаётся отсутствием до самого провода, где оно и
+  // читается как «по виду» (мерка засечками, скоба скобками), а не как «концы сняли».
+  caps: z.enum(ANNOTATION_CAPS_KEYS).optional(),
 });
 
 /**
@@ -262,6 +269,7 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       color: annotationColorFromWire(c.color),
       dashed: !!c.dashed,
       filled: !!c.filled,
+      caps: readAnnotationCaps(c),
     })),
     roundNumber: insert?.roundNumber || 0,
     // '' on the wire → the non-empty 'undecided' sentinel the Select needs
@@ -358,6 +366,7 @@ export function mapFormToFittingInsert(
       color: annotationColorToWire(c.color),
       dashed: !!c.dashed,
       filled: !!c.filled,
+      ...annotationCapsOut(c.caps),
     })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
     // the 'undecided' sentinel maps back to '' on the wire.

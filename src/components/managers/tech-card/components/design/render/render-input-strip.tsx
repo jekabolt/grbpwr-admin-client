@@ -1,25 +1,39 @@
+import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import type {
   GetDesignBandResponse,
+  common_DesignBatch,
   common_DesignPicture,
+  common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { Chip } from 'ui/components/chip';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
-import { cardOutputRows } from '../bench-kinds';
+import { pictureRepresentation } from '../bench-kinds';
 import { cropFamilies, cutPiecesWord } from '../generation/composite';
 import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
 import { VectorModal } from '../modals';
+import { readProvenance } from '../provenance';
 import { useSplitToInput } from '../split-to-input';
-import { newClientRequestId, useDesignWrites } from '../use-design-band';
-import { SILHOUETTE_VIEWS, viewLabel } from '../views';
-import { ApplySplitDoor, splitDecks, type SplitDeck } from './apply-split';
+import { designKeys, newClientRequestId, useDesignWrites } from '../use-design-band';
+import { isPictureHidden } from '../visibility';
+import {
+  SILHOUETTE_VIEWS,
+  isSilhouetteView,
+  normaliseViewKey,
+  viewLabel,
+  type SilhouetteView,
+} from '../views';
+import { ApplySplitDoor, type SplitPiece } from './apply-split';
+import { uploadItem } from '../upload-item';
 import {
   RENDER_MIN_VIEWS,
   benchSides,
@@ -113,6 +127,51 @@ import {
  * затемнённом грунте. Никакого второго приёма здесь не заведено — ни своей кнопки, ни своего
  * состояния: правило «уже разрезанному листу не пишем split, пишем expand» принадлежит соседнему
  * экрану, и эта полоса ему подчиняется, а не спорит с ним.
+ *
+ * ═══ ТРЕТЬЯ ПРОСЬБА — D-5, КРУГ 18: «все подряд» БЫЛО ИЗМЕРЕНО НЕ НА ТОЙ КАРТОЧКЕ ═══════════════
+ *
+ * Владелец, дословно: «INPUT — FLATS OF THIS CARD все еще после дивайдера не показывают фильтр по
+ * флетам а там все подряд я прошу это 3 раз уже сколько можно».
+ *
+ * ЗАМЕР КРУГА 17 (выше) МЕРИЛ ФИКСТУРУ, У КОТОРОЙ ВСЯ КАРТОЧКА ЛЕЖАЛА НА ОДНОЙ СТРАНИЦЕ. Замер
+ * круга 18 сделан на ЖИВОЙ карточке беты (tech_card 38, 73 картинки, 28 прогонов, 21 партия) по
+ * строкам базы, и картина другая:
+ *
+ *   · `GetBand` отдаёт ДВЕНАДЦАТЬ строк ленты (DefaultRunPageLimit, архивные включены). На этой
+ *     карточке это прогоны 28…17 — перекрас, четыре рендера, три плитки, два 3D, один vector, — и
+ *     на всей странице стоит ОДИН чертёж (#66). Все прогоны рода flat (2, 4, 6, 13, 14, 16) — на
+ *     второй странице и дальше. `unmarkedFlats` обходит СТРАНИЦУ, значит справа от линии из
+ *     сгенерированных чертежей не стояло НИ ОДНОГО;
+ *   · `outputs` собирается сервером по предикату `r.kind IN (render, threed, pattern, recolor)` —
+ *     ФЛЭТОВ В НЁМ НЕТ ВОВСЕ. `cardOutputRows(band, 'flat')` на бете — пустой (истинный!) массив,
+ *     ветка обхода ленты в `splitDecks` не исполняется никогда, и склеенных листов эта полоса на
+ *     живой карточке НЕ ПОКАЗЫВАЛА — при семи листах на карточке;
+ *   · в двенадцати новейших партиях — 14 ручных загрузок рода `flat` (род ставит дверь `+ flat`,
+ *     а не содержимое файла): среди них фотография модели (#7), фабрик-рендер, принесённый через
+ *     флэтовую дверь (#79), два скана карандашных эскизов (#26, #41) и три листа, разрезанные
+ *     руками (#1, #26, #41), чьи куски стояли РЯДОМ с листом — `composite_views` у ручного файла
+ *     пуст, и `splitDecks` такой лист листом не считает.
+ *
+ *   Итого справа от линии стояло: 1 чертёж машины + 14 загрузок (из них 7 — куски трёх листов,
+ *   показанные второй раз) + 0 листов. То есть буквально ВСЁ, КРОМЕ ФЛЭТОВ. Три раза.
+ *
+ * ЧТО СДЕЛАНО, ТРИ ВЕЩИ, И КАЖДАЯ ЗАКРЫВАЕТ СВОЮ СТРОКУ ЗАМЕРА:
+ *   1. ПРАВАЯ ПОЛОВИНА ЧИТАЕТ ВСЮ КАРТОЧКУ. Когда лента усечена, полоса сама дочитывает её до
+ *      конца (`useWholeCardFeed`: `ListDesignRuns` от курсора полосы, по 24 строки, архивные
+ *      включены — тот же вызов и тот же флаг, что у продолжения ленты в `useMoreHistory`), и
+ *      правая половина считается по СКЛЕЕННОЙ полосе. Левая половина этого не требовала никогда:
+ *      слот приезжает разрешённым. Пока дочитывание идёт, счётчик так и говорит; если оно
+ *      отказало — стоит прежняя оговорка «newest page only», и это честно;
+ *   2. ЛИСТ — ЭТО КОРЕНЬ РОДОСЛОВНОЙ, А НЕ ПОЛЕ `composite_views`. Колоду получает КАЖДЫЙ кадр, из
+ *      которого что-то вырезано (`flatSheets`), объявил он виды или нет: ручной лист, который
+ *      человек разрезал сам, — лист по факту разреза. Строится здесь же, из той же родословной
+ *      (`cropFamilies`), а не через `splitDecks`: тот читает `outputs`, в которых флэтов нет;
+ *   3. ФИЛЬТР ПО ПРОИСХОЖДЕНИЮ СТОИТ СРАЗУ ЗА ЛИНИЕЙ — тем самым органом, о котором владелец
+ *      спрашивает словом «фильтр»: ряд чипов `all · generated · uploaded · drawn`, числами. Род
+ *      картинки здесь ничего не различает (все они `flat`), различает ПРОИСХОЖДЕНИЕ, и оно уже
+ *      напечатано под каждым кадром (`stripProvenance`) — чип лишь позволяет по нему сузить.
+ *      Умолчание — `all`: то, что человек только что принёс через `+ flat`, обязано остаться на
+ *      экране, а не исчезнуть под фильтром, который он не ставил.
  */
 
 /** Radix forbids an empty item value, and an empty one reaching `Select.Root` shows a placeholder
@@ -147,8 +206,181 @@ const MARK_TITLE =
  * страницу, где оговаривать было нечего.
  */
 const PAGE_TITLE =
-  'this card has more history than one page. The right of the line lists the drawings of the ' +
-  'newest page; older ones are still on the card and still standing in their slots.';
+  'this card has more history than one page, and reading the older pages failed. The right of ' +
+  'the line lists the drawings of the newest page; older ones are still on the card and still ' +
+  'standing in their slots.';
+
+const READING_TITLE =
+  'this card has more history than one page — the older pages are being read now, and their ' +
+  'drawings join the right of the line as they arrive.';
+
+/**
+ * ═══ ДОЧИТАТЬ ЛЕНТУ ДО КОНЦА — D-5 ═════════════════════════════════════════════════════════════
+ *
+ * Тот же вызов, тот же размер страницы и тот же флаг архивных, что у продолжения ленты
+ * (`useMoreHistory`): `ListDesignRuns` от курсора, который полоса уже принесла, `include_archived`
+ * — потому что сам `GetBand` архивные включает и курсор минчен над тем же множеством («THE TOKEN
+ * WINS»). Ключ — под ключом полосы, поэтому каждая запись верстака, инвалидируя полосу, сбрасывает
+ * и это чтение: правая половина не может показать чертёж, которого на карточке уже нет.
+ *
+ * ⚠ КУРСОР — ЧАСТЬ КЛЮЧА. Новый прогон сдвигает первую страницу и меняет курсор; чтение под
+ * старым курсором пропустило бы строку, ушедшую со страницы на вторую, и она исчезла бы с экрана
+ * ровно на время, пока никто не заметит. Новый курсор — новый ключ и новое чтение.
+ *
+ * ⚠ ПОТОЛОК СТРАНИЦ НАЗВАН ЧИСЛОМ, А НЕ ОСТАВЛЕН НА «ПОКА НЕ КОНЧИТСЯ». Двадцать страниц по 24 —
+ * 480 строк ленты; карточка длиннее этого — не карточка, а склад, и полоса тогда честно скажет,
+ * что читала не всё, вместо того чтобы читать минуту.
+ */
+const WALK_PAGE_LIMIT = 24;
+const WALK_PAGE_CAP = 20;
+
+type WholeFeed = {
+  runs: common_DesignRun[];
+  batches: common_DesignBatch[];
+  /** whole — вся карточка на экране; reading — идёт; failed / capped — показана не вся. */
+  state: 'whole' | 'reading' | 'failed' | 'capped';
+};
+
+function useWholeCardFeed(techCardId: number, band: GetDesignBandResponse): WholeFeed {
+  const token = (band.nextPageToken ?? '').trim();
+  const query = useQuery({
+    queryKey: [...designKeys.band(techCardId), 'input-flats', token] as const,
+    enabled: techCardId > 0 && !!token,
+    queryFn: async () => {
+      const runs: common_DesignRun[] = [];
+      const batches: common_DesignBatch[] = [];
+      let cursor = token;
+      let pages = 0;
+      while (cursor && pages < WALK_PAGE_CAP) {
+        const page = await adminService.ListDesignRuns({
+          techCardId,
+          limit: WALK_PAGE_LIMIT,
+          pageToken: cursor,
+          includeArchived: true,
+        });
+        runs.push(...(page.runs ?? []));
+        batches.push(...(page.batches ?? []));
+        cursor = (page.nextPageToken ?? '').trim();
+        pages += 1;
+      }
+      return { runs, batches, complete: !cursor };
+    },
+    staleTime: 60_000,
+  });
+
+  return useMemo<WholeFeed>(() => {
+    if (!token) return { runs: [], batches: [], state: 'whole' };
+    if (query.data) {
+      return {
+        runs: query.data.runs,
+        batches: query.data.batches,
+        state: query.data.complete ? 'whole' : 'capped',
+      };
+    }
+    return { runs: [], batches: [], state: query.isError ? 'failed' : 'reading' };
+  }, [token, query.data, query.isError]);
+}
+
+/**
+ * ═══ ПРОИСХОЖДЕНИЕ — ЕДИНСТВЕННОЕ, ЧЕМ ЧЕРТЕЖИ СПРАВА ОТ ЛИНИИ РАЗЛИЧАЮТСЯ (D-5) ═══════════════
+ *
+ * Род у них один (`flat`) — его ставит дверь, через которую файл вошёл, а не содержимое. Что
+ * различает фотографию модели, принесённую через `+ flat`, и чертёж, нарисованный машиной, — это
+ * `source_class`, и он уже читается ОДНИМ читателем на всю полосу (`readProvenance`) и печатается
+ * под каждым кадром. Чип — тот же словарь, свёрнутый до трёх семейств: слово «generated» покрывает
+ * `ai` и `ai + edits` (правка машинного чертежа — по-прежнему машинный чертёж), «uploaded» —
+ * файл и импортированный SVG, «drawn» — векторную основу, нарисованную с нуля.
+ *
+ * `null` — происхождение неизвестно (открытый словарь, новый сервер): такой кадр стоит под `all`
+ * и ни под одним семейством, а семейства, которых на карточке нет, чипов не получают.
+ */
+type Origin = 'generated' | 'uploaded' | 'drawn';
+type OriginFilter = 'all' | Origin;
+const ORIGINS: { value: Origin; label: string; hint: string }[] = [
+  { value: 'generated', label: 'generated', hint: 'drawn by the machine — a FLAT run, or an edit of one' },
+  { value: 'uploaded', label: 'uploaded', hint: 'brought in by hand — a file or an imported SVG' },
+  { value: 'drawn', label: 'drawn', hint: 'a vector base drawn from nothing' },
+];
+
+function originOf(picture: common_DesignPicture): Origin | null {
+  switch (readProvenance(picture).sourceClass) {
+    case 'ai':
+    case 'ai_edits':
+      return 'generated';
+    case 'uploaded':
+    case 'imported_svg':
+      return 'uploaded';
+    case 'drawn':
+      return 'drawn';
+    default:
+      return null;
+  }
+}
+
+/** Лист полосы входа: корень родословной с его кусками — объявил он виды или нет.
+ *  ⚠ ЭКСПОРТИРУЕТСЯ ДЛЯ ПОЛОСЫ ВХОДА 3D, у которой то же правило (D-9). Дом этого типа и
+ *  `sheetsOf` — рядом со `splitDecks` в `./apply-split.tsx`; файл чужой для этой волны, перенос
+ *  назван в отчёте. Второе написание правила «лист = корень с кусками» здесь не заведено. */
+export type FlatSheet = {
+  sheet: common_DesignPicture;
+  /** Виды, которые лист ОБЪЯВЛЯЕТ (`composite_views`). Пусто у ручного листа — его разрез и есть
+   *  единственное, что о нём известно. */
+  declared: string[];
+  /** Куски, которые полоса вправе предложить (не в слоте). Это то, что рисуется за листом. */
+  members: common_DesignPicture[];
+  /** Из них — по одному на сторону силуэта, в порядке обхода: вход `apply splitted`. */
+  pieces: SplitPiece[];
+};
+
+/**
+ * ═══ ЛИСТ — ЭТО КОРЕНЬ РОДОСЛОВНОЙ, А НЕ ПОЛЕ (D-5) ════════════════════════════════════════════
+ *
+ * Здесь стоял `splitDecks(band, 'flat')`, и на живой бете он возвращал ПУСТО ВСЕГДА: тот читает
+ * `outputs`, а сервер собирает `outputs` по родам render|threed|pattern|recolor — флэты в него не
+ * входят по предикату, а массив при этом непустой (рендеры), поэтому и запасная ветка обхода
+ * ленты не исполнялась. Семь склеенных листов карточки 38 полоса не показывала ни разу.
+ *
+ * Правило теперь одно и совпадает с соседним экраном (`render/outputs.tsx`): колоду получает
+ * КАЖДЫЙ кадр, из которого что-то вырезано, — `cropFamilies` над всем пулом чертежей карточки. Лист
+ * с объявленными видами, но ещё не разрезанный, — тоже лист: у него другая дверь (`split ▸`).
+ * Ручной файл, разрезанный человеком через окно разреза, — лист ПО ФАКТУ, хотя `composite_views` у
+ * него пуст: его куски стояли справа от линии рядом с ним самим, и это была половина «все подряд».
+ *
+ * ⚠ КОРЕНЬ, СТОЯЩИЙ В СЛОТЕ, КОЛОДЫ НЕ ПОЛУЧАЕТ. Он живёт слева от линии; его куски остаются
+ * одиночными чертежами — прятать их за лист, которого справа нет, значило бы потерять их молча.
+ */
+export function sheetsOf(
+  pool: common_DesignPicture[],
+  families: ReturnType<typeof cropFamilies>,
+  offered: Set<number>,
+): FlatSheet[] {
+  const out: FlatSheet[] = [];
+  for (const sheet of pool) {
+    const id = sheet.id ?? 0;
+    if (id <= 0 || families.rootOf.has(id)) continue;
+    const declared = (sheet.compositeViews ?? []).filter(Boolean);
+    const members = (families.membersOf.get(id) ?? []).filter((member) =>
+      offered.has(member.id ?? 0),
+    );
+    const composite = declared.length > 0;
+    // Одиночный чертёж без разреза — не лист. Лист без разреза — лист, если он объявил виды.
+    if (!composite && !members.length) continue;
+    // Корень в слоте — слева от линии; композит в слот не встаёт, значит слева его не бывает.
+    if (!composite && !offered.has(id)) continue;
+
+    const seen = new Set<string>();
+    const pieces: SplitPiece[] = [];
+    for (const piece of members) {
+      const view = normaliseViewKey(piece.ghostView);
+      if (!isSilhouetteView(view) || seen.has(view)) continue;
+      seen.add(view);
+      pieces.push({ view: view as SilhouetteView, picture: piece });
+    }
+    pieces.sort((a, b) => SILHOUETTE_VIEWS.indexOf(a.view) - SILHOUETTE_VIEWS.indexOf(b.view));
+    out.push({ sheet, declared, members, pieces });
+  }
+  return out.sort((a, b) => (b.sheet.id ?? 0) - (a.sheet.id ?? 0));
+}
 
 /**
  * ОТСЕК ОДНОГО ЧЛЕНА ЛЕНТЫ. Раскрытая колода — это ЛИСТ ПЛЮС ЕГО КУСКИ, которые живут по разные
@@ -214,52 +446,59 @@ export function RenderInputStrip({
   const split = useSplitToInput({ techCardId, band });
 
   const sides = useMemo(() => benchSides(band), [band]);
-  const others = useMemo(() => unmarkedFlats(band), [band]);
   const marked = sides.filter((side) => !!side.picture);
-  /**
-   * СКЛЕЕННЫЕ ЛИСТЫ ФЛЭТОВ — ВТОРОЙ РОД ЯЧЕЙКИ СПРАВА ОТ ЛИНИИ (E-6).
-   *
-   * Их НЕТ в `others` намеренно и правильно: `isFlatCandidate` выбрасывает композиты, потому что
-   * в СЛОТ такой лист не встаёт — сервер отказывает (`ErrDesignCompositePlate`). Ровно поэтому
-   * владелец их и не видел. Показываются они здесь ДРУГИМ глаголом: `split ▸` у неразрезанного,
-   * `expand ▸` + `apply splitted` у разрезанного, — а не `mark ▸`, который отказал бы.
-   *
-   * ⚠ «ЛИСТ» ЗДЕСЬ — ЭТО ВСЕГДА ВЫХОД ПРОГОНА, И ЭТО ЗАМЕР, А НЕ ДОПУЩЕНИЕ. На бете (73 картинки
-   * карточки) `composite_views` непусто у 18 строк, и ВСЕ восемнадцать — выходы прогонов; у 21
-   * загруженной руками картинки это поле не заполнено НИ РАЗУ. Значит `splitDecks` никогда не
-   * увидит листом файл, который человек принёс сам: ни колоды, ни `split ▸` в этой полосе он не
-   * получит, сколько бы видов на нём ни было нарисовано. Это НЕ дефект этой волны и чинить его
-   * здесь нечем (поле заполняет сервер на выходе прогона) — но и строить на «отсюда можно
-   * разрезать любой лист» нельзя: неверно.
-   */
-  const decks = useMemo(() => splitDecks(band, 'flat'), [band]);
 
   /**
-   * ═══ РОДСТВО — ОДИН ЧИТАТЕЛЬ И ОДИН ПУЛ (F-4) ════════════════════════════════════════════════
+   * ═══ ПРАВАЯ ПОЛОВИНА ЧИТАЕТ СКЛЕЕННУЮ ПОЛОСУ — ВСЮ КАРТОЧКУ, А НЕ СТРАНИЦУ (D-5) ═════════════
    *
-   * `cropFamilies` — тот же читатель, которым родство читают лента, выходы и сам `splitDecks`;
-   * пул — тот же, из которого `splitDecks` берёт листы (`cardOutputRows`, ВСЯ карточка), плюс
-   * страница ленты для откаченного бинаря, у которого `outputs` не пришло вовсе.
-   *
-   * ⚠ ПУЛ ОБЯЗАН БЫТЬ ТЕМ ЖЕ, А НЕ ПОХОЖИМ. `cropFamilies` лезет к КОРНЮ родословной ЧЕРЕЗ
-   * промежуточные звенья: кусок, вырезанный из ОТРЕДАКТИРОВАННОГО листа, доберётся до листа
-   * только если правка тоже лежит в пуле. Пул поуже — и внук остался бы одиночным чертежом рядом
-   * со своим листом, то есть ровно тем дефектом, который эта правка и закрывает.
-   *
-   * ⚠ И ЭТО ЖЕ ДЕЛАЕТ ДЕГРАДАЦИЮ ЧЕСТНОЙ. Кусок, чей лист до полосы не доехал (лист скрыт, лист
-   * не того рода), корня в пуле не находит и остаётся ОДИНОЧНЫМ. Это верно: спрятать кусок за
-   * лист, которого на экране нет, значило бы потерять его молча.
+   * Читатели ниже (`unmarkedFlats`, `pictureRepresentation`, `stripProvenance`) — те же, что и
+   * были, и получают ТУ ЖЕ форму: полосу. Только у этой полосы лента дочитана. Дедуп по id —
+   * потому что полоса перечитывается на каждую запись, и её первая страница может сдвинуться под
+   * уже прочитанным продолжением (тот же довод, что у `useMoreHistory`).
    */
-  const families = useMemo(() => {
-    const rows = cardOutputRows(band, 'flat');
-    const pool: common_DesignPicture[] = rows ? rows.map((row) => row.picture) : [];
-    const seen = new Set(pool.map((picture) => picture.id ?? 0));
-    for (const picture of others) {
-      const id = picture.id ?? 0;
-      if (!seen.has(id)) pool.push(picture);
-    }
-    return cropFamilies(pool);
-  }, [band, others]);
+  const more = useWholeCardFeed(techCardId, band);
+  const whole = useMemo<GetDesignBandResponse>(() => {
+    if (!more.runs.length && !more.batches.length) return band;
+    const runIds = new Set((band.runs ?? []).map((run) => run.id ?? 0));
+    const batchIds = new Set((band.batches ?? []).map((batch) => batch.id ?? 0));
+    return {
+      ...band,
+      runs: [...(band.runs ?? []), ...more.runs.filter((run) => !runIds.has(run.id ?? 0))],
+      batches: [
+        ...(band.batches ?? []),
+        ...more.batches.filter((batch) => !batchIds.has(batch.id ?? 0)),
+      ],
+    };
+  }, [band, more.runs, more.batches]);
+
+  const others = useMemo(() => unmarkedFlats(whole), [whole]);
+
+  /**
+   * ═══ РОДСТВО — ОДИН ЧИТАТЕЛЬ И ОДИН ПУЛ (F-4, D-5) ═══════════════════════════════════════════
+   *
+   * Пул — ВСЕ чертежи карточки (склеенной полосы), включая те, что стоят в слоте, и включая
+   * листы: `cropFamilies` лезет к КОРНЮ родословной ЧЕРЕЗ промежуточные звенья, и кусок,
+   * вырезанный из ОТРЕДАКТИРОВАННОГО листа, доберётся до листа только если правка тоже в пуле.
+   * Пул поуже — и внук остался бы одиночным чертежом рядом со своим листом, то есть ровно тем
+   * дефектом, который эта полоса закрывает.
+   *
+   * Скрытые — вон: `hidden_at` — единственный глагол невидимости, и корень, которого владелец
+   * не видит, не может держать колоду.
+   */
+  const flatPool = useMemo(() => {
+    const pool: common_DesignPicture[] = [];
+    const push = (pictures?: common_DesignPicture[] | null) => {
+      for (const picture of pictures ?? []) {
+        if ((picture.id ?? 0) <= 0 || isPictureHidden(picture)) continue;
+        if (pictureRepresentation(whole, picture) !== 'flat') continue;
+        pool.push(picture);
+      }
+    };
+    for (const run of whole.runs ?? []) push(run.pictures);
+    for (const batch of whole.batches ?? []) push(batch.pictures);
+    return pool;
+  }, [whole]);
+  const families = useMemo(() => cropFamilies(flatPool), [flatPool]);
 
   /**
    * ЛИСТ И ЕГО КУСКИ, НОВЕЙШИЙ ЛИСТ ПЕРВЫМ.
@@ -269,26 +508,51 @@ export function RenderInputStrip({
    * показать одну картинку в обеих половинах — тот самый дубль, ради снятия которого колода здесь
    * и появилась. Счёт кусков на двери поэтому тоже считает предлагаемые, а не все.
    */
-  const sheets = useMemo(() => {
-    const offered = new Set(others.map((picture) => picture.id ?? 0));
-    return decks
-      .map((deck) => ({
-        deck,
-        members: (families.membersOf.get(deck.sheet.id ?? 0) ?? []).filter((member) =>
-          offered.has(member.id ?? 0),
-        ),
-      }))
-      .sort((a, b) => (b.deck.sheet.id ?? 0) - (a.deck.sheet.id ?? 0));
-  }, [decks, families, others]);
+  const offered = useMemo(() => new Set(others.map((picture) => picture.id ?? 0)), [others]);
+  const sheets = useMemo(
+    () => sheetsOf(flatPool, families, offered),
+    [flatPool, families, offered],
+  );
 
-  /** Одиночные чертежи: то, что не ушло за свой лист. Новейшее первым. */
+  /** Одиночные чертежи: то, что не ушло за свой лист и само не стало листом. Новейшее первым. */
   const loose = useMemo(() => {
     const folded = new Set<number>();
-    for (const { members } of sheets) for (const member of members) folded.add(member.id ?? 0);
+    for (const { sheet, members } of sheets) {
+      folded.add(sheet.id ?? 0);
+      for (const member of members) folded.add(member.id ?? 0);
+    }
     return others
       .filter((picture) => !folded.has(picture.id ?? 0))
       .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   }, [others, sheets]);
+
+  /**
+   * ═══ ФИЛЬТР ПО ПРОИСХОЖДЕНИЮ — СОСТОЯНИЕ ЭКРАНА, НЕ ЗАПИСЬ (D-5) ═══════════════════════════
+   *
+   * Считается по ТОМУ, ЧТО СТОИТ СПРАВА ОТ ЛИНИИ: одиночные чертежи и листы (лист — одной
+   * единицей, по своему происхождению; куски идут за листом). Семейство без единого кадра чипа
+   * не получает, а сам ряд рисуется только когда есть из чего выбирать: два семейства и больше,
+   * либо уже поставленный фильтр, который надо чем-то снять.
+   */
+  const [origin, setOrigin] = useState<OriginFilter>('all');
+  const originCounts = useMemo(() => {
+    const counts: Record<Origin, number> = { generated: 0, uploaded: 0, drawn: 0 };
+    let all = 0;
+    const tally = (picture: common_DesignPicture) => {
+      all += 1;
+      const kind = originOf(picture);
+      if (kind) counts[kind] += 1;
+    };
+    loose.forEach(tally);
+    sheets.forEach(({ sheet }) => tally(sheet));
+    return { all, ...counts };
+  }, [loose, sheets]);
+  const originFamilies = ORIGINS.filter((o) => originCounts[o.value] > 0);
+  const filterShown = originFamilies.length > 1 || origin !== 'all';
+  const admits = (picture: common_DesignPicture) => origin === 'all' || originOf(picture) === origin;
+  const shownLoose = useMemo(() => loose.filter(admits), [loose, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shownSheets = useMemo(() => sheets.filter(({ sheet }) => admits(sheet)), [sheets, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hiddenByFilter = loose.length + sheets.length - shownLoose.length - shownSheets.length;
 
   /** Какие стороны заняты — это и есть «что вытеснит пометка», сказанное списком (F-5). */
   const occupied = useMemo(
@@ -372,7 +636,7 @@ export function RenderInputStrip({
     writes.registerUpload.mutate(
       {
         clientRequestId: newClientRequestId(),
-        items: [{ mediaId, ghostView: view, kind: 'flat', colorwayId: 0 }],
+        items: [uploadItem({ mediaId, ghostView: view, kind: 'flat', colorwayId: 0 })],
         target: { viewKey: view, kind: 'flat', colorwayId: 0 },
         expectedSlotRev,
       },
@@ -417,7 +681,21 @@ export function RenderInputStrip({
    *  ради которого `StripCell` и заведён. */
   const looseCell = (picture: common_DesignPicture): JSX.Element => {
     const id = picture.id ?? 0;
-    const provenance = stripProvenance(band, picture);
+    const provenance = stripProvenance(whole, picture);
+    /**
+     * ═══ УГАДАННАЯ СТОРОНА СТОИТ ПЕРВОЙ В СПИСКЕ, И ЭТО ВСЁ, ЧТО ОНА ДЕЛАЕТ (D-6) ════════════
+     *
+     * Владелец: «после сплита мы же знаем что это за деталь почему бы ее не показывать первой в
+     * разделе марк». У куска разреза `ghost_view` — сторона рамки, которую человек сам назвал в
+     * окне разреза; у машинного чертежа — догадка машины, часто неверная на перед/спинка. И то и
+     * другое выражается ПОРЯДКОМ: догадка сокращает путь и ничего не утверждает. Слова
+     * «probably» здесь нет и не будет (F-17) — подпись утверждала бы, и притом хеджем.
+     * Тот же закон, что у `SlotPicker` в ленте генераций.
+     */
+    const ghost = normaliseViewKey(picture.ghostView);
+    const views = [...SILHOUETTE_VIEWS].sort((a, b) =>
+      a === ghost ? -1 : b === ghost ? 1 : 0,
+    );
     return (
       <StripCell
         key={`pic-${id}`}
@@ -439,9 +717,13 @@ export function RenderInputStrip({
                 value={MARK_PROMPT}
                 placeholder='mark ▸'
                 disabled={busy === `p${id}`}
+                /* ⚠ СЕЛЕКТОР ПРИВОДИТСЯ К МЕТРИКЕ КНОПКИ (F-9/F-14): `h-5 min-h-0`, иначе
+                   `min-h-[22px]` примитива побеждает у twMerge и дверь стоит на 6px выше
+                   соседних. Тот же приём, что у `mark ▸` в `render/outputs.tsx` и во входе 3D. */
+                className='h-5 min-h-0 py-0 text-micro uppercase tracking-label'
                 items={[
                   { value: MARK_PROMPT, label: 'mark ▸' },
-                  ...SILHOUETTE_VIEWS.map((view) => ({
+                  ...views.map((view) => ({
                     value: view,
                     /* «занята» — это СОСТОЯНИЕ СТОРОНЫ, прочитанное у верстака, и стоит оно у
                        того пункта, о котором спрашивают. Пункт при этом ЖИВОЙ: вытеснить —
@@ -476,7 +758,7 @@ export function RenderInputStrip({
    * писать; гасить читателя вместе с писателями значит прятать материал от того, кому его как раз
    * и показывают. Гаснут ровно писатели: `split ▸`, `apply splitted`, `mark ▸`, правка.
    */
-  const sheetDoors = (deck: SplitDeck, members: common_DesignPicture[], open: boolean) => {
+  const sheetDoors = (deck: FlatSheet, members: common_DesignPicture[], open: boolean) => {
     const id = deck.sheet.id ?? 0;
 
     if (!members.length) {
@@ -568,20 +850,27 @@ export function RenderInputStrip({
   };
 
   const sheetCell = (
-    deck: SplitDeck,
+    deck: FlatSheet,
     members: common_DesignPicture[],
     open: boolean,
   ): JSX.Element => {
     const id = deck.sheet.id ?? 0;
-    const provenance = stripProvenance(band, deck.sheet);
+    const provenance = stripProvenance(whole, deck.sheet);
     const cut = members.length > 0;
+    const composite = deck.declared.length > 0;
     return (
       <StripCell
         key={`deck-${id}`}
         cellPictureId={id}
         src={pictureThumb(deck.sheet)}
-        alt={`multi-view sheet · ${deck.declared.map(viewLabel).join(', ')}`}
-        badge='multi-view'
+        alt={
+          composite
+            ? `multi-view sheet · ${deck.declared.map(viewLabel).join(', ')}`
+            : `sheet cut by hand · ${cutPiecesWord(members.length)}`
+        }
+        /* Ручной лист видов не объявлял — ярлык «multi-view» был бы утверждением, которого файл
+           не делал. Что он лист, говорит разрез: слово о кусках стоит строкой под кадром. */
+        badge={composite ? 'multi-view' : 'sheet'}
         gallery={frameOf(deck.sheet)}
         /* СВЁРНУТОЙ КОЛОДЕ ПОВЕРХНОСТЬ ЛИСТА РАСКРЫВАЕТ ЕЁ, А НЕ ЗУМИТ (J-2). Зум при этом не
            теряется — он остаётся угловой кнопкой примитива. Раскрытой поверхность снова зумит, а
@@ -594,7 +883,7 @@ export function RenderInputStrip({
            ячейки уже другой — `expand ▸`, — и два глагола на одном кадре читаются как один
            сломанный. */
         onSplit={
-          disabled || cut
+          disabled || cut || !composite
             ? undefined
             : {
                 onClick: () => split.openForPicture(deck.sheet, `sheet ${id}`),
@@ -602,9 +891,9 @@ export function RenderInputStrip({
               }
         }
         lines={[
-          deck.declared.length
+          composite
             ? `${deck.declared.length} views · ${deck.declared.map(viewLabel).join(', ')}`
-            : 'a multi-view file',
+            : cutPiecesWord(members.length),
           provenance,
         ]}
         action={sheetDoors(deck, members, open)}
@@ -612,7 +901,19 @@ export function RenderInputStrip({
     );
   };
 
+  /**
+   * ОГОВОРКА ОХВАТА — ПО СОСТОЯНИЮ ДОЧИТЫВАНИЯ, А НЕ ПО ОДНОМУ ФЛАГУ ЛЕНТЫ (D-5). Усечённая
+   * лента больше не значит «справа только страница»: она дочитывается. Оговорка стоит ровно в
+   * двух случаях, когда справа НЕ вся карточка, — пока чтение идёт и если оно отказало, — и у
+   * каждого своё слово, потому что следующий жест человека разный: подождать или перечитать.
+   */
   const truncated = feedIsTruncated(band);
+  const coverage =
+    !truncated || more.state === 'whole'
+      ? null
+      : more.state === 'reading'
+        ? { note: 'reading older pages…', title: READING_TITLE }
+        : { note: 'newest page only', title: PAGE_TITLE };
 
   return (
     <Section
@@ -630,14 +931,15 @@ export function RenderInputStrip({
           component='span'
           className='uppercase'
           data-input-count=''
+          data-input-coverage={coverage ? more.state : 'whole'}
           /* Оговорка охвата несёт предложение целиком — F-5, разбор у `PAGE_TITLE`. */
-          title={truncated ? PAGE_TITLE : undefined}
+          title={coverage?.title}
         >
           {/* Одной строкой, а не двумя: JSX схлопывает перенос в ПРОБЕЛ, и «0 sheet s» вылезло бы
               ровно из аккуратного форматирования. */}
           {marked.length} marked · {others.length} not marked
-          {decks.length > 0 ? ` · ${decks.length} multi-view` : ''}
-          {truncated ? ' · newest page only' : ''}
+          {sheets.length > 0 ? ` · ${sheets.length} sheet${sheets.length === 1 ? '' : 's'}` : ''}
+          {coverage ? ` · ${coverage.note}` : ''}
         </Text>
       }
     >
@@ -713,6 +1015,51 @@ export function RenderInputStrip({
             non-empty lists, and a divider that comes and goes stops reading as a boundary. */}
         <StripDivider />
 
+        {/* ═══ ФИЛЬТР ПО ПРОИСХОЖДЕНИЮ — СРАЗУ ЗА ЛИНИЕЙ, СТОЛБИКОМ (D-5) ═══════════════════════
+            Владелец: «после дивайдера не показывают фильтр». Стоит там, где назван: первым
+            членом правой половины, ПЕРЕД дверью и списком, которыми правит. Столбик, а не
+            строка: лента горизонтальная, и ряд чипов в ней читался бы как ещё три ячейки; столбик
+            шириной в самый длинный чип занимает одну колонку и стоит с кадрами на одном верхе.
+            Чипы — те же, что у ARTIFACTS и у выбора колорвея (`Chip`, `aria-pressed`): состояние
+            несут заливка и объявление, число — сколько под этим словом стоит справа от линии.
+            ⚠ РЯД НЕ РИСУЕТСЯ, КОГДА СУЖАТЬ НЕЧЕГО: одно семейство на карточке — фильтр из одного
+            члена обещал бы жест, у которого нет второго исхода. */}
+        {filterShown && (
+          <Bay>
+            <div
+              role='group'
+              aria-label='show drawings by origin'
+              data-flat-filter={origin}
+              className='flex shrink-0 flex-col items-start gap-1'
+            >
+              <Text size='nano' variant='label' component='span'>
+                filter
+              </Text>
+              <Chip
+                selected={origin === 'all'}
+                pressed={origin === 'all'}
+                onClick={() => setOrigin('all')}
+                data-flat-filter-chip='all'
+                title='every drawing of this card that is not standing in a slot'
+              >
+                all {originCounts.all}
+              </Chip>
+              {originFamilies.map((family) => (
+                <Chip
+                  key={family.value}
+                  selected={origin === family.value}
+                  pressed={origin === family.value}
+                  onClick={() => setOrigin(origin === family.value ? 'all' : family.value)}
+                  data-flat-filter-chip={family.value}
+                  title={family.hint}
+                >
+                  {family.label} {originCounts[family.value]}
+                </Chip>
+              ))}
+            </div>
+          </Bay>
+        )}
+
         {/* THE HAND DOOR, equal in weight to the machine. A flat brought here lands on the upload
             shelf UNMARKED — `RegisterDesignUpload` with no target — because the human has not yet
             said which view it is, and a ghost guess is not an answer. It appears on the right of
@@ -738,7 +1085,7 @@ export function RenderInputStrip({
                     // drawing. Nothing downstream could recover that from the pixels.
                     // …и колорвея у него нет по существу: `colorway_forbidden` на флэте — отказ,
                     // а не обнуление. Ноль здесь читается «у чертежа цвета не бывает».
-                    .map((mediaId) => ({ mediaId, ghostView: '', kind: 'flat', colorwayId: 0 }));
+                    .map((mediaId) => uploadItem({ mediaId, kind: 'flat' }));
                   if (!items.length) return;
                   writes.registerUpload.mutate({
                     // Minted once per human intent and NOT inside the mutation: a retry carrying a
@@ -759,7 +1106,7 @@ export function RenderInputStrip({
           </Bay>
         )}
 
-        {loose.map((picture) => (
+        {shownLoose.map((picture) => (
           <Bay key={`pic-${picture.id}`}>{looseCell(picture)}</Bay>
         ))}
 
@@ -767,7 +1114,8 @@ export function RenderInputStrip({
             Порядок не косметический: одиночный чертёж помечается В ОДНУ сторону, лист адресует
             ВЕСЬ вход сразу. Жест, переписывающий четыре слота, обязан стоять после жестов,
             переписывающих один, — иначе он читается как ещё один `mark ▸`, только пошире. */}
-        {sheets.map(({ deck, members }) => {
+        {shownSheets.map((deck) => {
+          const { members } = deck;
           const id = deck.sheet.id ?? 0;
           const open = openDeck === id;
           if (!members.length) {
@@ -815,10 +1163,24 @@ export function RenderInputStrip({
           );
         })}
 
-        {!marked.length && !others.length && !decks.length && (
+        {!marked.length && !others.length && !sheets.length && (
           <Text size='micro' variant='inactive' component='span' className='py-6'>
             nothing to mark yet — use + FLAT to bring a drawing in, or generate one on the FLAT
             screen.
+          </Text>
+        )}
+
+        {/* Фильтр скрыл всё — сказано словом и числом, а не пустотой: пустая правая половина под
+            поставленным чипом читалась бы как «чертежей нет», и человек пошёл бы генерировать. */}
+        {origin !== 'all' && !shownLoose.length && !shownSheets.length && (
+          <Text
+            size='micro'
+            variant='inactive'
+            component='span'
+            className='self-center'
+            data-flat-filter-empty={hiddenByFilter}
+          >
+            no {origin} drawings off the bench — {hiddenByFilter} hidden by the filter
           </Text>
         )}
       </Strip>
@@ -846,7 +1208,7 @@ export function RenderInputStrip({
         (() => {
           const base =
             others.find((picture) => (picture.id ?? 0) === editingId) ??
-            sheets.find(({ deck }) => (deck.sheet.id ?? 0) === editingId)?.deck.sheet;
+            sheets.find(({ sheet }) => (sheet.id ?? 0) === editingId)?.sheet;
           return base ? (
             <VectorModal
               open

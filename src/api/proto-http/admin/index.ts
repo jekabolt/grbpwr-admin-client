@@ -561,11 +561,18 @@ export type UploadContentModelRequest = {
   // trailing bytes after a complete container are allowed on purpose). Practical ceiling 50 MiB —
   // the transport's, not the bucket's; see the rpc's comment.
   raw: string | undefined;
+  // OPTIONAL raster preview of the model — the still that stands in for the .glb wherever a list
+  // draws a tile (D-29). JPEG, PNG or WebP, checked by its bytes exactly as `raw` is checked by its
+  // header; anything else is InvalidArgument and NOTHING is stored, the model included. Empty =
+  // no preview: the media row keeps the old shape (every url slot is the .glb), which is what every
+  // model uploaded before this field looks like. The same raster ceilings as UploadContentImage.
+  preview: string | undefined;
 };
 
 export type UploadContentModelResponse = {
-  // One media row, three url slots all pointing at the one .glb object, width and height 0. Feed
-  // its `id` to RegisterDesignUpload with kind = "threed" to file it onto a card.
+  // One media row. `full_size` is the .glb (width and height 0); `compressed` and `thumbnail` are
+  // the preview's variants when one was sent, and the .glb again when none was. Feed its `id` to
+  // RegisterDesignUpload with kind = "threed" to file it onto a card.
   media: common_MediaFull | undefined;
 };
 
@@ -4510,6 +4517,9 @@ export type common_FittingCallout = {
   // приводится к false, а не отвергается.
   dashed: boolean | undefined;
   filled: boolean | undefined;
+  // Наконечники линии — см. TechCardAnnotationCaps в techcard.proto. Замечание примерки переносят
+  // в тех-карту, и стрелка обязана остаться стрелкой по обе стороны переноса.
+  caps: common_TechCardAnnotationCaps | undefined;
 };
 
 // TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
@@ -4602,6 +4612,27 @@ export type common_TechCardAnnotationColor =
   // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
   // на белом листе видно контур, а на чёрном снимке — саму линию.
   | "TECH_CARD_ANNOTATION_COLOR_WHITE";
+// Наконечник линии — ЧЕМ КОНЧАЕТСЯ отрезок или кривая. Ось, отдельная от вида: до круга 18 в
+// наборе стояли ДВА вида, различавшихся только концами (`DIM` — засечки, `BRACKET` — скобки),
+// и человек выбирал между ними как между разными инструментами, хотя рисовал одну и ту же линию.
+// ПАРА «ВИД + CAPS», А НЕ ЗАМЕНА ВИДА. Незаданное (UNSPECIFIED) раскрывается ПО ВИДУ: `DIM` без
+// caps — засечки, `BRACKET` без caps — скобки, `ARC` без caps — без наконечников. Поэтому уже
+// нарисованная мерка и уже нарисованная скоба, прочитанные и записанные обратно без правок,
+// уезжают байт в байт и не сдвигают подпись секции. Заданное caps СТАРШЕ ключа вида: `BRACKET`
+// с `ARROW` рисуется стрелками.
+// ЗАЧЕМ ОТДЕЛЬНАЯ ОСЬ, А НЕ ЕЩЁ ДВА ВИДА. Наконечников четыре, а видов линии было бы восемь
+// (линия × 4) плюс пять кривых — комбинаторика, которую пришлось бы валидировать поштучно, ровно
+// тот же довод, по которому вид не разложен на оси. Разница в том, что здесь ось ОДНА и она
+// ортогональна всему остальному.
+// ГДЕ ЖИВЁТ. Только у видов с концами: DIM, BRACKET, ARC. У пина, записки, зоны и следа сервер
+// ПРИВОДИТ поле к UNSPECIFIED, а не отвергает карточку, — по тому же доводу, что и `filled`
+// у не-полигона: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже.
+export type common_TechCardAnnotationCaps =
+  | "TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED"
+  | "TECH_CARD_ANNOTATION_CAPS_TICK"
+  | "TECH_CARD_ANNOTATION_CAPS_BRACKET"
+  | "TECH_CARD_ANNOTATION_CAPS_BULLET"
+  | "TECH_CARD_ANNOTATION_CAPS_ARROW";
 // FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the
 // change CATEGORY; zone + piece_ids are the structured LOCATION (which replace the front's misuse of
 // target as a free "sleeve/collar" field, A2). status (open|resolved) replaces the old boolean
@@ -5079,6 +5110,14 @@ export type common_TechCardAnnotation = {
   // вытесняет старое поле целиком. Клиенту, который шлёт только piece_line_key, ничего менять не
   // нужно; сервер отдаёт оба, и piece_line_key = первый элемент списка.
   pieceLineKeys: string[] | undefined;
+  // НАКОНЕЧНИКИ ЛИНИИ. Оба конца одинаковы: разные концы у одной линии — это уже не «чем кончается
+  // отрезок», а лидер со стрелкой, и его роль несёт отдельный вид (LABEL).
+  // ВХОДИТ В ПОДПИСЬ СЕКЦИИ, как пунктир и штриховка, а не как цвет: засечка говорит «этот участок
+  // измерен», стрелка — «вот на это смотри», точка — «вот здесь». Это разные указания цеху, а не
+  // разное оформление одного.
+  // ХВОСТ ТРЕТИЙ И ОТКРЫВАЕТСЯ ТОЛЬКО ЗАДАННЫМ caps, обязательно таща за собой первые два: иначе
+  // отпечаток каждой уже нарисованной мерки сдвинулся бы в момент выката.
+  caps: common_TechCardAnnotationCaps | undefined;
 };
 
 // TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
@@ -7980,6 +8019,9 @@ export type common_TechCardCallout = {
   // The carry cannot collide with minting: minting is `number == 0`, carrying is
   // `number != 0`, and a legacy zero has neither a number to carry by nor a ref to mint for.
   clientRef: string | undefined;
+  // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
+  // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
+  caps: common_TechCardAnnotationCaps | undefined;
 };
 
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
@@ -14521,7 +14563,8 @@ export type AccrueCorporationTaxResponse = {
 // A DETAIL IS NEVER ADDRESSED BY NAME. «Detail 1 / detail 2» as a key would move a plate on rename
 // and would collide between two details a human called the same thing.
 export type DesignBenchSlotRef = {
-  // front | back | side_l | side_r — the four silhouette sides, each of which is its own slot.
+  // front | back | side_l | side_r | three_quarter_l | three_quarter_r — the six silhouette
+  // sides, each of which is its own slot.
   // ALSO `detail`, AND THAT VALUE MEANS «MINT A NEW DETAIL SLOT»: it addresses no existing row,
   // so a name is REQUIRED alongside it (SetDesignBenchSlotRequest.new_detail_name,
   // RegisterDesignUploadRequest.target) and expected_slot_rev must be 0. Creating a detail has no
@@ -14725,9 +14768,9 @@ export type GetDesignBandResponse = {
   outputsTotalByColorway: { [key: string]: number } | undefined;
 };
 
-// DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The four
-// silhouette sides (front/back/side_l/side_r) are born lazily on first touch; detail slots are
-// created by naming one.
+// DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
+// silhouette sides (front/back/side_l/side_r/three_quarter_l/three_quarter_r) are born lazily on
+// first touch; detail slots are created by naming one.
 export type common_DesignBenchSlot = {
   // The slot's OWN minted id. «Detail 1 / detail 2» as a key is forbidden: renaming a detail must
   // not move a plate, and two details named the same must still be two slots.
@@ -14897,6 +14940,13 @@ export type common_DesignPicture = {
   // OUTPUT-ONLY here: a generated picture inherits the run's colourway, a crop and a flatten
   // inherit their parent's, an upload states it on DesignUploadItem.
   colorwayId: number | undefined;
+  // ONLY FOR SHOWING (round 18, D-24). Visible on the sheet and in ARTIFACTS; never an input of any
+  // paid call, never a bench plate, never a reference. Stated on DesignUploadItem.display_only at
+  // registration and inherited by every crop and flatten of the picture. Every door that would let
+  // it reach a prompt refuses with `display_only` (slot, role, split-for-input) or
+  // `display_only_input` (a run or a draft, before the reserve). A run's own outputs are never
+  // display-only: the flag is a statement about a file a person brought in, not about pixels.
+  displayOnly: boolean | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.
@@ -14938,9 +14988,10 @@ export type common_DesignBudget = {
 export type common_DesignReference = {
   techCardId: number | undefined;
   mediaId: number | undefined;
-  // front | back | side_l | side_r | detail. NEVER EMPTY on the wire: clearing a role deletes the
-  // row, so «no role stated» is expressed by the ABSENCE of a DesignReference for that media, not
-  // by a present row carrying "". See SetDesignReferenceRole, which takes "" as the clear verb.
+  // front | back | side_l | side_r | three_quarter_l | three_quarter_r | detail. NEVER EMPTY on the
+  // wire: clearing a role deletes the row, so «no role stated» is expressed by the ABSENCE of a
+  // DesignReference for that media, not by a present row carrying "". See SetDesignReferenceRole,
+  // which takes "" as the clear verb.
   role: string | undefined;
   ordinal: number | undefined;
   setBy: string | undefined;
@@ -15255,8 +15306,8 @@ export type common_DesignRun = {
 // DesignRunParams is what was asked for — written by the client at start, replayed verbatim into
 // the run panel. Total encoded size is capped at 8 KB.
 export type common_DesignRunParams = {
-  // Which views were requested: front | back | side_l | side_r | detail. Drives the placeholder
-  // tiles that stand in for outputs that have not arrived yet.
+  // Which views were requested: front | back | side_l | side_r | three_quarter_l | three_quarter_r
+  // | detail. Drives the placeholder tiles that stand in for outputs that have not arrived yet.
   views: string[] | undefined;
   // one | per_view — a single composite sheet against one picture per view. A composite has no
   // single view and therefore cannot be clicked into a bench slot; it is split first.
@@ -15271,7 +15322,10 @@ export type common_DesignRunParams = {
   threed: common_DesignThreedParams | undefined;
   // `fix: back` — which view of the bench this run was asked to fix. Empty = not a fix. Feeds the
   // history column «input = slots (back)».
-  // SILHOUETTE SIDES ONLY: front | back | side_l | side_r. A detail slot is deliberately NOT
+  // SILHOUETTE SIDES ONLY: front | back | side_l | side_r | three_quarter_l | three_quarter_r. On a
+  // 3D run only the four cardinal sides (front, back, side_l, side_r) may be named — a three-quarter
+  // plate is neither a Meshy view nor a fal slot, and a run narrowed to one would be silently built
+  // from fewer sides than were picked. A detail slot is deliberately NOT
   // targetable, because a bare view key cannot name one of several details and this field is frozen
   // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
   // a detail is ever wanted, it arrives as a slot_id field beside this one, not as a `detail`
@@ -15298,7 +15352,8 @@ export type common_DesignRunParams = {
   // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
   // which a single string could not express at all: the studio marks up three plates and asks for
   // one correction across them, and a scalar target would make that three paid runs.
-  // SILHOUETTE SIDES ONLY, exactly as the scalar above: front | back | side_l | side_r. A detail is
+  // SILHOUETTE SIDES ONLY, exactly as the scalar above: front | back | side_l | side_r |
+  // three_quarter_l | three_quarter_r (3D: the four cardinal sides only, as above). A detail is
   // named in fix_slot_ids instead, because a bare view key cannot tell two details apart and this
   // list is frozen into the run's history, where an ambiguous target could never be repaired.
   fixTargets: string[] | undefined;
@@ -15528,7 +15583,7 @@ export type common_DesignInputSlot = {
   // comparison «is this input stale» has no join key without it — so the badge would be
   // uncomputable for every card with more than one detail slot, FOREVER: a snapshot is frozen at
   // launch and is never repaired later.
-  // 0 for the four silhouette sides, which view_key already identifies.
+  // 0 for the six silhouette sides, which view_key already identifies.
   slotId: number | undefined;
   // COPY of the detail's name at launch, so a snapshot still reads «detail: cuff» after the slot
   // has been renamed or deleted. Empty for the silhouette sides.
@@ -15882,8 +15937,10 @@ export type SetDesignPictureSelectedResponse = {
 // through UploadContentImage; this only says what the file IS.
 export type DesignUploadItem = {
   mediaId: number | undefined;
-  // The view this file is GUESSED to be: front | back | side_l | side_r | detail. Empty = no guess.
-  // A guess, never a fact — a human confirms it by putting the plate into a slot.
+  // The view this file is GUESSED to be: front | back | side_l | side_r | three_quarter_l |
+  // three_quarter_r | detail. Empty = no guess. A guess, never a fact — a human confirms it by
+  // putting the plate into a slot. Not combinable with composite_views: a composite has no single
+  // view to guess.
   ghostView: string | undefined;
   // WHAT THE FILE IS: flat | render | threed. Empty = flat. Unlike ghost_view this is a STATEMENT,
   // not a guess — the uploader knows whether the file they are dragging in is a line drawing or a
@@ -15899,6 +15956,33 @@ export type DesignUploadItem = {
   // refused when the colourway belongs to another card (`foreign_colorway`). 0 on a render files
   // it as unattributed, exactly what every render uploaded before this axis is.
   colorwayId: number | undefined;
+  // THE VIEWS GLUED INTO THIS ONE FILE (round 18, D-26: «если ты сделал снапшот из 3д он
+  // сохраняется как мультивью»). A snapshot of the 3D scene taken from several angles files itself
+  // as a MULTIVIEW, exactly as a `layout: one` run output does — the value lands in
+  // `design_picture.composite_views`, which until this field had a single writer (the arrival of a
+  // generative run; measured on beta: 18 of 73 pictures carry it, none of the 21 uploads).
+  // Two or more of front | back | side_l | side_r | three_quarter_l | three_quarter_r | detail, in
+  // LEFT-TO-RIGHT order of the sheet — the split reads them by position. Repeats are legal (two
+  // detail frames on one sheet), as they are on a run's sheet. Empty = a single picture. ONE entry
+  // is InvalidArgument: one view is a `ghost_view`, not a composite. Together with a non-empty
+  // ghost_view it is InvalidArgument too — a composite has no single view.
+  // ⚠ A COMPOSITE DOES NOT STAND IN A SLOT, and this door does not change that: `target` naming
+  // an item that declares composite_views is refused with `composite_plate` by the very same guard
+  // that refuses a run's sheet (store/design/bench.go), inside the same transaction, so the whole
+  // gesture — batch, pictures, placement — is rolled back together. A multiview is a SHEET, and a
+  // sheet is split first (SplitDesignPicture); the crops are what go on the bench.
+  compositeViews: string[] | undefined;
+  // ONLY FOR SHOWING (round 18, D-24: «медиа без слотов КОТОРЫЕ НЕ ПОЙДУТ в промпты они нужны
+  // только для визуализации в артефактах»). A picture filed with this flag is visible on the sheet
+  // and in ARTIFACTS and NEVER reaches a paid call: it is refused a bench slot (`display_only` —
+  // slots are what runs read), refused a reference role (`display_only`), refused a split «for the
+  // prompt» (`display_only`), and — the door that actually holds the money — refused as an input of
+  // any run or draft BEFORE the reserve (`display_only_input`, naming the media and where it came
+  // from), whichever of the five input sources it arrives through. A crop or a flatten of such a
+  // picture inherits the flag: cutting a picture up does not make it an input.
+  // Read back as DesignPicture.display_only. Not idempotency-compared on a retried batch (the same
+  // inherited hole as `kind`; see the store).
+  displayOnly: boolean | undefined;
 };
 
 export type RegisterDesignUploadRequest = {
@@ -16083,8 +16167,10 @@ export type ImportDesignVectorResponse = {
 export type SetDesignReferenceRoleRequest = {
   techCardId: number | undefined;
   mediaId: number | undefined;
-  // front | back | side_l | side_r | detail. EMPTY CLEARS the role — «no side stated» is a real
-  // answer and must not require a second verb.
+  // front | back | side_l | side_r | three_quarter_l | three_quarter_r | detail. EMPTY CLEARS the
+  // role — «no side stated» is a real answer and must not require a second verb. A media the card
+  // holds as a display-only picture is refused (`display_only`): a role is a promise to feed the
+  // prompt, and that picture must never reach one.
   role: string | undefined;
   ordinal: number | undefined;
   // The human's words about THIS reference — «only the collar», «the fabric, not the cut» (W-3).
@@ -16295,11 +16381,22 @@ export interface AdminService {
   // bucket, and that path does not cross this gateway.
   // No fourth constant is written here for the effective limit: two ceilings for one question are
   // how a file the checker accepts and the transport refuses come to have two different answers.
-  // WHAT COMES BACK, AND WHAT THE CLIENT DOES WITH IT. One media row whose full-size, compressed
-  // and thumbnail urls ALL point at the one .glb object (there is no frame to resize), width and
-  // height 0, no blurhash. The client then calls RegisterDesignUpload with that media_id and
-  // `kind: "threed"` — no ghost_view, no colourway unless it means one — and the model lands in
-  // 3D MODELS OF THIS CARD as a first-class row that is visibly not a run output.
+  // WHAT COMES BACK, AND WHAT THE CLIENT DOES WITH IT. ONE media row for the model AND its
+  // preview together (round 18, D-29: «загружали glb и + миниатюру фото превью … и это все как один
+  // объект»). The full-size slot is the .glb (width and height 0, content_hash = the sha of the
+  // model); the compressed and thumbnail slots are the RASTER PREVIEW handed in beside it — a
+  // WebP of the preview and a 1080px thumbnail of it, with real dimensions and a blurhash. So every
+  // list that draws `thumbnail` gets a picture, every viewer that reads `full_size` gets the model,
+  // and there is no second row to pair, order or lose. Without a preview the row keeps the old
+  // shape: all three slots point at the .glb. The client then calls RegisterDesignUpload with that
+  // media_id and `kind: "threed"` — no ghost_view, no colourway unless it means one — and the model
+  // lands in 3D MODELS OF THIS CARD as a first-class row that is visibly not a run output.
+  // THE PREVIEW IS CHECKED AS STRICTLY AS THE MODEL: sniffed by magic bytes (JPEG, PNG or WebP —
+  // the three a canvas snapshot produces; an animated GIF, a vector, a model or a video in that
+  // field is refused), its header read against the raster dimension and pixel ceilings, and
+  // decoded before a byte of either file is stored. ONE CALL, ONE ROW, OR NOTHING: a preview that
+  // fails after the model went up takes the model back with it — a model row without the preview
+  // it was sent with is exactly the half-object this verb exists not to mint.
   // ⚠ A MODEL FILED THIS WAY IS NOT WIRED AS THE INPUT OF ANY RUN, and that is a decision rather
   // than an omission. It may be viewed, kept and downloaded. A threed picture can only stand in a
   // threed bench slot (the kind guard in store/design/bench.go), and no run reads that bench:

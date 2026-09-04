@@ -16,6 +16,7 @@ import { shelfBatchOrdinals } from '../handles';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { viewLabel } from '../views';
 import { renderPlacements, slotOrigin, slotOriginLine, threedSides } from './model';
+import { uploadItem } from '../upload-item';
 
 /**
  * ═══ FABRIC RENDER SLOTS — четыре независимых слота ФАБРИК-РЕНДЕРА, по одному на сторону ══════
@@ -142,7 +143,7 @@ export function FabricRenderSlots({
     writes.registerUpload.mutate(
       {
         clientRequestId: newClientRequestId(),
-        items: [{ mediaId, ghostView: view, kind: 'render', colorwayId }],
+        items: [uploadItem({ mediaId, ghostView: view, kind: 'render', colorwayId })],
         target: sideRef(view),
         expectedSlotRev,
       },

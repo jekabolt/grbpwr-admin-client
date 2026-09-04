@@ -26,6 +26,7 @@ import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
+import { uploadItem } from './upload-item';
 
 /**
  * THE BENCH — the four silhouette sides and the named details, and the one place on the card where
@@ -251,12 +252,12 @@ export function Bench({
           // КОЛОРВЕЯ У ФЛЭТА НЕТ ПО СУЩЕСТВУ (L-4), и на элементе загрузки это ровно тот же
           // отказ, что на рефе: `colorway_forbidden`. Ноль здесь — не «ещё не проставлен».
           items: [
-            {
+            uploadItem({
               mediaId,
               ghostView: ref.slotId ? 'detail' : ghostView,
               kind: FLAT_BENCH,
               colorwayId: COLORWAY_NONE,
-            },
+            }),
           ],
           target: ref,
           expectedSlotRev,

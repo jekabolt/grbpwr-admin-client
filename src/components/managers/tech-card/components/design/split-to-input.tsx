@@ -15,6 +15,7 @@ import {
 import { SplitModal } from './split-modal';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { DESIGN_VIEW_KEYS, normaliseViewKey } from './views';
+import { uploadItem } from './upload-item';
 
 /**
  * СПЛИТ → ВХОД: разметить на картинке кадры видов и получить их ОТДЕЛЬНЫМИ строками входа, уже
@@ -189,7 +190,7 @@ export function useSplitToInput({
       // здесь единственное принимаемое значение. Колорвей самих КАДРОВ разреза клиент не заявляет
       // вовсе: `SplitPicture` наследует его от родителя на сервере, и второе мнение о нём отсюда
       // было бы догадкой о картинке, которую мы ещё не видели.
-      { clientRequestId: keep.requestId, items: [{ mediaId, ghostView: '', kind: '', colorwayId: 0 }] },
+      { clientRequestId: keep.requestId, items: [uploadItem({ mediaId })] },
       {
         onSuccess: (data) => {
           setRegistering(null);

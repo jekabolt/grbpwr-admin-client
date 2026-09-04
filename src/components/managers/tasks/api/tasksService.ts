@@ -17,6 +17,8 @@ import {
   annotationKindToWire,
   type AnnotationColorKey,
   type AnnotationKindKey,
+  readAnnotationCaps,
+  annotationCapsOut,
 } from 'ui/components/annotation/wire';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import {
@@ -126,6 +128,9 @@ function mapAnnotation(a: common_TechCardAnnotation): AnnotationValue {
     color: annotationColorFromWire(a.color),
     dashed: !!a.dashed,
     filled: !!a.filled,
+    // Наконечник линии (круг 18, D-19/D-20). Пусто — «по виду», а не «без наконечников»: мерка на
+    // вложении задачи рисуется засечками ровно так же, как рисовалась до контракта.
+    caps: readAnnotationCaps(a),
     // Деталей кроя у задачи нет: сервер эти ключи очищает, и держать их в форме значило бы
     // отправлять обратно то, чего он не принял.
     pieceLineKey: '',
@@ -147,6 +152,7 @@ function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
     color: annotationColorToWire(a.color as AnnotationColorKey),
     dashed: !!a.dashed,
     filled: !!a.filled,
+    ...annotationCapsOut(a.caps),
     pieceLineKey: '',
     pieceLineKeys: [],
   };
