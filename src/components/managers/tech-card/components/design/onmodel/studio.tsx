@@ -9,7 +9,7 @@ import Text from 'ui/components/text';
 
 import { FieldRow, Hint } from '../render/field-row';
 import { GenerateRow } from '../render/generate-row';
-import { fabricStatement, type Gate } from '../render/model';
+import { archivedColorwayGate, fabricStatement, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
 import { WhatModelGetsRenderModal } from '../render/what-model-gets';
 import { ClothRow } from './cloth-row';
@@ -76,6 +76,8 @@ export function OnModelStudio({
   techCardId,
   disabled,
   colorwayId = 0,
+  colorwayLabel = '',
+  colorwayArchived = false,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -87,6 +89,15 @@ export function OnModelStudio({
    * прогона ниже.
    */
   colorwayId?: number;
+  /** Его имя — отказ ниже НАЗЫВАЕТ цвет; `''` под `no colourway`, где отказывать не за что. */
+  colorwayLabel?: string;
+  /**
+   * ⚠ ИМ БОЛЬШЕ НЕ РАБОТАЮТ. Экран верстака не читает, но КОЛОРВЕЙ ОН ЗАМОРАЖИВАЕТ: `colorwayId`
+   * уезжает в тело прогона парой строк ниже, и перекрас под снятым именем навсегда встал бы в
+   * историю с атрибуцией цвету, которого больше нет в работе. Чинить это потом нечем —
+   * `colorway_id` прогона неизменяем, — поэтому дверь стоит ДО нажатия.
+   */
+  colorwayArchived?: boolean;
 }): JSX.Element {
   const sources = useRecolorSources();
   const colour = useTargetColourDraft(band);
@@ -142,10 +153,22 @@ export function OnModelStudio({
     [band, colour.recipe, picked?.assetId],
   );
 
-  const gate: Gate = useMemo(
-    () => recolorGate(sources.mediaIds, wireColour),
-    [sources.mediaIds.join(','), wireColour], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  /**
+   * ⚠ АРХИВНОЕ ИМЯ ОТКАЗЫВАЕТ ПЕРВЫМ, И СТОИТ ОНО ЗДЕСЬ, А НЕ ВНУТРИ `recolorGate`, НАРОЧНО. Тот
+   * зеркалит бесплатные отказы СЕРВЕРА и держит правило «ворота никогда не шире серверных»
+   * (`./model.ts`); архив серверного близнеца не имеет вовсе, и втащить его туда значило бы
+   * опровергнуть абзац, стоящий над функцией. Композиция здесь — тот же приём, каким
+   * `render-studio.tsx` доклеивает к `renderGate` свой вопрос про заявленную ткань.
+   *
+   * ПОРЯДОК: сначала имя, потом материал. «Add the shots above» под архивным колорвеем зовёт
+   * грузить фотографии, которые всё равно не купятся.
+   */
+  const gate: Gate = useMemo(() => {
+    const live = archivedColorwayGate(colorwayArchived, colorwayLabel, 'on-model picture');
+    if (!live.ok) return live;
+    return recolorGate(sources.mediaIds, wireColour);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources.mediaIds.join(','), wireColour, colorwayArchived, colorwayLabel]);
 
   const generate = () => {
     // Ворота уже отказали бы пустому набору; это второй, дешёвый сторож — прогон без снимков

@@ -109,6 +109,15 @@ export type ColorwayChoice = {
   current: common_AdminColorwayRef | null;
   /** Its human name; `''` under NO COLOURWAY, which the refusals spell out in words instead. */
   label: string;
+  /**
+   * ЭТИМ ЦВЕТОМ БОЛЬШЕ НЕ РАБОТАЮТ — резольвнутый ответ, а не статус, и он ЕДЕТ В ВОРОТА трёх
+   * студий (`archivedColorwayGate`, `render/model.ts`). Считается тем же единственным предикатом
+   * `archivedRef`, что и подписи пунктов: экран, называющий цвет архивным, и дверь, отказывающая
+   * по архиву, обязаны читать одну строку кода, иначе первое же четвёртое значение статуса
+   * разведёт их молча. Под `no colourway` `current` пуст, и здесь всегда `false` — безымянный
+   * верстак архивным не бывает по существу.
+   */
+  archived: boolean;
   /** The card has not been read yet — the row draws a skeleton rather than «no colourways». */
   loading: boolean;
 };
@@ -163,11 +172,18 @@ export function useColorwayChoice(
    *     под ROSSO. Инвариант «значение всегда среди пунктов» держится ЗДЕСЬ, конструкцией, а не
    *     обещанием в шапке `ColorwaySelect`.
    *
-   * ⚠ ЧЕГО ЭТОТ ФАЙЛ НЕ ДЕЛАЕТ И НЕ МОЖЕТ СДЕЛАТЬ ОДИН: ВОРОТА ГЕНЕРАЦИИ АРХИВ НЕ ЧИТАЮТ.
-   * `renderGate` / `threedGate` (`render/model.ts`) не знают ни статуса колорвея, ни этого
-   * правила, поэтому прогон под снятым именем физически возможен. Здесь он ОБЪЯВЛЕН нежелательным
-   * — подписью пункта `(archived)` и строкой под органом, — а не запрещён, и врать про запрет
-   * нельзя. Гасить пункт вместо этого НЕЛЬЗЯ: погашенный пункт прячет ту же работу второй раз.
+   * ⚠ ВТОРАЯ ПОЛОВИНА ПРАВИЛА ЖИВЁТ НЕ ЗДЕСЬ, И ТЕПЕРЬ ОНА ЕСТЬ. Здесь стояла записка «ВОРОТА
+   * ГЕНЕРАЦИИ АРХИВ НЕ ЧИТАЮТ … прогон под снятым именем физически возможен»: файл `render/model.ts`
+   * принадлежал соседней волне, дверь была закрыта ТОЛЬКО СЛОВАМИ — подписью пункта `(archived)` и
+   * строкой под органом, — и врать про запрет было нельзя. Волна закрыта, запрет поставлен:
+   * `archivedColorwayGate` (`render/model.ts`) отказывает в НОВОМ прогоне на всех трёх генеративных
+   * экранах — fabric render, 3D, on-model, — а хук отдаёт ему резольвнутый `archived`, посчитанный
+   * ТЕМ ЖЕ `archivedRef`, что и подписи ниже. Значит подсказка и дверь говорят одно.
+   *
+   * ⚠ ЗАПРЕТ РОВНО НА НОВОЕ, И ЭТО НЕ ОГОВОРКА, А ВЕСЬ СМЫСЛ ДВУХ ПРЕДИКАТОВ ВЫШЕ. Сделанное под
+   * архивным именем читается, размечается и режется как под живым: ворота стоят у кнопки прогона,
+   * а не над экраном. Гасить пункт вместо этого по-прежнему НЕЛЬЗЯ — погашенный пункт прячет ту же
+   * работу второй раз, то есть чинит дефект его же собственной половиной.
    *
    * ЛЕСТНИЦА ОСТАЛЬНЫХ СОСТОЯНИЙ (`DRAFT`/`ACTIVE`/`HIDDEN`) ЗДЕСЬ НЕ ЧИТАЕТСЯ НАРОЧНО. `HIDDEN`
    * — это про ВИТРИНУ, а не про студию: цвет, снятый с продажи, продолжают разрабатывать, и
@@ -257,6 +273,7 @@ export function useColorwayChoice(
     colorways,
     current,
     label: current ? colorwayLabel(current) : '',
+    archived: archivedRef(current),
     loading: !!techCardId && isLoading,
   };
 }
@@ -412,7 +429,8 @@ export function ColorwayPicker({
             {colorways.some(archivedRef) && (
               <Hint>
                 (archived) marks a colourway that is no longer worked on — it stands here so its
-                renders stay reachable. Make new work under a live colourway.
+                renders stay reachable, and a new run is refused under it. Make new work under a
+                live colourway.
               </Hint>
             )}
           </>
@@ -487,10 +505,16 @@ export function ColorwaySelect({
    * место, куда эта фраза помещается честно, — заголовок того же органа: человек уже ведёт туда
    * курсор, чтобы список раскрыть. Подпись `(archived)` в пункте при этом стоит ВСЕГДА — она
    * называет факт, а заголовок называет ПОСЛЕДСТВИЕ.
+   *
+   * ⚠ ПОСЛЕДСТВИЕ ТЕПЕРЬ НАСТОЯЩЕЕ, И ФРАЗА ПЕРЕПИСАНА ПОД НЕГО. Прежняя редакция звучала советом
+   * («make new renders under a live colourway»), потому что советом она и была: ворота архива не
+   * читали. Теперь читают (`archivedColorwayGate`), и подсказка обязана называть ОТКАЗ, а не
+   * пожелание, — иначе человек нажмёт GENERATE, чтобы проверить, что ему тут только советуют.
    */
   const archivedNote = archivedRef(current)
     ? `${colorwayLabel(current)} is archived — this colourway is no longer worked on. Its bench ` +
-      'stays here so its renders can be read; make new renders under a live colourway.'
+      'stays here to read, mark and split; a new run is refused under it, so pick a live ' +
+      'colourway to make more.'
     : undefined;
 
   return (

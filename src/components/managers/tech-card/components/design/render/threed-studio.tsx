@@ -78,6 +78,7 @@ export function ThreedStudio({
   onGoToKind,
   colorwayId = 0,
   colorwayLabel = '',
+  colorwayArchived = false,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -103,6 +104,15 @@ export function ThreedStudio({
   colorwayId?: number;
   /** Имя выбранного; `''` под `no colourway` — отказ двери говорит это словами, а не пустотой. */
   colorwayLabel?: string;
+  /**
+   * ⚠ ИМ БОЛЬШЕ НЕ РАБОТАЮТ, И ДВЕРЬ 3D ЭТО ТЕПЕРЬ ИСПОЛНЯЕТ, А НЕ ОБЪЯВЛЯЕТ. Резольвнутый ответ
+   * единственного органа выбора (`useColorwayChoice` в `studio-tab.tsx`) — второго предиката
+   * архива в студии нет и заводить его здесь нельзя.
+   *
+   * ⚠ ЧИТАЮТ ЕГО ТОЛЬКО ВОРОТА. Полоса входа под архивным колорвеем показывает те же четыре
+   * стороны, разметку сторон и разрез — сборка запрещена, ЧТЕНИЕ и разметка нет.
+   */
+  colorwayArchived?: boolean;
 }): JSX.Element {
   const { draft, patch } = useThreedDraft();
   const cardFit = useCardFit();
@@ -125,8 +135,8 @@ export function ThreedStudio({
    * полосой картинок — это указание не на тот орган.
    */
   const input: Gate = useMemo(
-    () => threedGate(band, colorwayId, colorwayLabel),
-    [band, colorwayId, colorwayLabel],
+    () => threedGate(band, colorwayId, colorwayLabel, colorwayArchived),
+    [band, colorwayId, colorwayLabel, colorwayArchived],
   );
 
   const gate: Gate = useMemo(() => {

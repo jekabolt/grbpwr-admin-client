@@ -89,6 +89,7 @@ export function RenderStudio({
   colorwayId = 0,
   colorwayRef = null,
   colorwayLabel = '',
+  colorwayArchived = false,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -104,6 +105,14 @@ export function RenderStudio({
   colorwayRef?: common_AdminColorwayRef | null;
   /** Его имя — для отказов и подписей выходов; `''` под `no colourway`, и это тоже утверждение. */
   colorwayLabel?: string;
+  /**
+   * ⚠ ИМ БОЛЬШЕ НЕ РАБОТАЮТ — И ЭТО ЕДИНСТВЕННОЕ, ЧТО ЭТОТ ЭКРАН ЗАПРЕЩАЕТ ПО ИМЕНИ ЦВЕТА.
+   * Резольвнутый ответ хука (`useColorwayChoice`), а не статус: предикат архива один на всю
+   * студию. Читают его ТОЛЬКО ворота — верстак, палитра, выходы и разрез мультивью работают под
+   * архивным колорвеем слово в слово как под живым, потому что архивный вернули в селект РАДИ ТОГО,
+   * чтобы его работа была достижима.
+   */
+  colorwayArchived?: boolean;
   /**
    * Уйти на другое представление студии. Тем же пропом и по тому же доводу, что у `ThreedStudio`:
    * состояние `kind` живёт в ОДНОМ месте на всю студию (`StudioTab`), и экран, заведший своё,
@@ -177,7 +186,10 @@ export function RenderStudio({
   );
 
   const gate: Gate = useMemo(() => {
-    const base = renderGate(band);
+    /* АРХИВНОЕ ИМЯ ОТКАЗЫВАЕТ ПЕРВЫМ — раньше даже пустого верстака: под снятым цветом «front and
+       back must hold a drawing» посылает чертить то, что всё равно не купится. Довод целиком — у
+       `archivedColorwayGate`. */
+    const base = renderGate(band, colorwayArchived, colorwayLabel);
     if (!base.ok) return base;
     if (!recipeIsStated(sent)) {
       return {
@@ -187,7 +199,7 @@ export function RenderStudio({
       };
     }
     return { ok: true };
-  }, [band, sent]);
+  }, [band, sent, colorwayArchived, colorwayLabel]);
 
   const generate = () => {
     run.start({

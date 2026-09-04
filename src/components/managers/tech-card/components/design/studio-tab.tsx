@@ -406,6 +406,12 @@ export function StudioTab({
                       видимо; замена (карта черновиков по колорвею внутри `useColourDraft`) —
                       удобство, и заводить его до того, как владелец переключателем попользовался,
                       значило бы усложнить механизм под догадку. */}
+                  {/* ⚠ `colorwayArchived` — ОДИН ПРЕДИКАТ АРХИВА НА ВСЮ СТУДИЮ, ПОСЧИТАННЫЙ ХУКОМ
+                      (`useColorwayChoice`), и три генеративных экрана получают ТОТ ЖЕ булев, что
+                      рисует подпись `(archived)` в селекте. Поэтому подсказка органа и отказ двери
+                      разойтись не могут — а до этой волны они и расходились: подсказка обещала
+                      запрет, которого ворота не знали. Считать статус в трёх экранах заново значило
+                      бы завести три места, где эта пара снова разъедется. */}
                   <RenderStudio
                     key={colorway.colorwayId}
                     band={band}
@@ -415,6 +421,7 @@ export function StudioTab({
                     colorwayId={colorway.colorwayId}
                     colorwayRef={colorway.current}
                     colorwayLabel={colorway.label}
+                    colorwayArchived={colorway.archived}
                   />
                   {/* J-18: «в GENERATION HISTORY по дефолту должен быть фильтр по фабрик
                       рендерам с возможностью переключить».
@@ -449,6 +456,7 @@ export function StudioTab({
                     onGoToKind={setKind}
                     colorwayId={colorway.colorwayId}
                     colorwayLabel={colorway.label}
+                    colorwayArchived={colorway.archived}
                   />
                   {/* E-23: «в 3D GENERATION HISTORY по дефолту заколапшена и также в on model».
                       Над ней стоит `3D MODELS OF THIS CARD`. */}
@@ -481,11 +489,16 @@ export function StudioTab({
                       держит mount-scoped `seeded`, который смену колорвея пережить не может.
                       Довод «перекрас атрибутируется колорвеем» верен и не оспаривается — но он
                       про то, ЧТО пишется в прогон, а не про то, надо ли ронять форму. */}
+                  {/* ⚠ ИМЯ И АРХИВ ЕДУТ СЮДА ПО ТОЙ ЖЕ ПРИЧИНЕ, ПО КОТОРОЙ СЮДА ЕДЕТ ЧИСЛО. Верстака
+                      этот экран не читает, но `colorwayId` он ЗАМОРАЖИВАЕТ в прогоне — значит и
+                      отказывать по имени обязан он же, а не только два соседа. */}
                   <OnModelStudio
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     colorwayId={colorway.colorwayId}
+                    colorwayLabel={colorway.label}
+                    colorwayArchived={colorway.archived}
                   />
                   {/* J-31: «GENERATION HISTORY в этой вкладке по дефолту сортирует в on model».
                       E-23, вторая половина: «и также в on model» — над ней стоит
