@@ -20,8 +20,10 @@ import type { EditHistory } from 'ui/components/annotation/history';
 // больше не нужна (см. довод у `ArtifactsPanel`).
 import {
   AnnotationSurface,
+  noteArrowsOf,
   rememberPen,
   type AnnotationSurfaceProps,
+  type NoteArrows,
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
@@ -935,25 +937,24 @@ export function ArtifactsPanel({
     setSelected(null);
   }
 
-  /** Фигура становится нумерованной точкой, номер остаётся. Откатывается ⌘Z, как и жест. */
-  function demoteCalloutAt(index: number) {
-    calloutHistory?.record();
-    writeCallout(index, {
-      kind: 'pin',
-      points: [],
-      // Пунктир и штриховка у точки не значат ничего: сервер обнулил бы их сам, а расхождение
-      // формы с хранимым делает карточку «изменённой» сразу после сохранения.
-      dashed: false,
-      filled: false,
-    });
-  }
-
   /**
    * ОБВЯЗКА ПОВЕРХНОСТИ — ОДНА НА ОБА ЕЁ ВОПЛОЩЕНИЯ: плита в ряду и она же во весь экран. Второй
    * набор колбэков означал бы, что перетаскивание маркера в увеличенном виде и на плитке пишут
    * разными путями, и разойтись им негде, кроме как молча.
    */
+  /**
+   * ВЗВОД «+ POINT» ЛИСТА ARTIFACTS. Тот же довод, что у выбора: кнопка стоит в списке CALLOUTS
+   * сбоку, а клик, которого она ждёт, приходит на ПЛИТУ — держать взвод внутри плиты значило бы,
+   * что кнопка не может ни поднять его, ни погасить.
+   *
+   * Строку здесь адресуют ИНДЕКСОМ, поверхность — строковым ключом: перевод в обе стороны стоит
+   * ровно `String`/`Number`, как и у выбора выше.
+   */
+  const [addingCallout, setAddingCallout] = useState<number | null>(null);
+
   const surfaceBindings = {
+    addingKey: addingCallout == null ? null : String(addingCallout),
+    onAddingChange: (key: string | null) => setAddingCallout(key == null ? null : Number(key)),
     onMoveLabel: (key: string, at: ShapePoint) =>
       writeCallout(Number(key), { posX: at.x.toFixed(3), posY: at.y.toFixed(3) }),
     onEditPoints: (key: string, points: ShapePoint[]) => {
@@ -977,6 +978,8 @@ export function ArtifactsPanel({
     // дать два наведения курсора.
     onSelect: (key: string | null, opts?: { focus?: boolean }) => {
       setSelected(key == null ? null : Number(key));
+      // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
+      setAddingCallout(null);
       if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
     },
     onBeforeMutate: calloutHistory?.record,
@@ -1433,7 +1436,15 @@ export function ArtifactsPanel({
             onSelect={setSelected}
             disabled={disabled}
             onRemove={!disabled ? removeCalloutAt : undefined}
-            onDemote={!disabled ? demoteCalloutAt : undefined}
+            arrows={
+              disabled
+                ? undefined
+                : noteArrowsOf(selected == null ? undefined : callouts[selected], {
+                    arming: addingCallout != null && addingCallout === selected,
+                    arm: () => setAddingCallout(selected),
+                    cancel: () => setAddingCallout(null),
+                  })
+            }
             focusToken={focusEditor}
           />
         </Section>
@@ -2322,7 +2333,7 @@ function CalloutPanel({
   onSelect,
   disabled,
   onRemove,
-  onDemote,
+  arrows,
   focusToken = 0,
 }: {
   rows: { c: SheetCallout; index: number }[];
@@ -2332,8 +2343,11 @@ function CalloutPanel({
   disabled?: boolean;
   /** Удалить выноску целиком, или `undefined` — и двери нет: на выпущенной карточке её и не должно быть. */
   onRemove?: (index: number) => void;
-  /** Разжаловать фигуру в нумерованную точку, сохранив номер. */
-  onDemote?: (index: number) => void;
+  /**
+   * ЛУЧИ ВЫБРАННОЙ ЗАПИСКИ. Считаются ОДНОЙ функцией с редактором под кадром (`noteArrowsOf`):
+   * ответ на вопрос «есть ли у этого указания лучи» обязан совпадать на всех экранах.
+   */
+  arrows?: NoteArrows;
   /**
    * Просьба поставить курсор в правку выбранной строки: растёт по жесту выбора на плите.
    *
@@ -2477,22 +2491,44 @@ function CalloutPanel({
                       delete
                     </Button>
                   )}
-                  {/* РАЗЖАЛОВАТЬ ФИГУРУ В ТОЧКУ — единственный способ избавиться от неудачной
-                      геометрии, СОХРАНИВ выноску: ручки ниже минимума точек не опускаются, а
-                      «удалить и поставить заново» даёт новый номер, на который уже ссылаются
-                      деталь, операция и дефект. */}
-                  {onDemote && (c.kind ?? 'pin') !== 'pin' && (
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      onClick={() => onDemote(index)}
-                      title='drop the drawn shape and keep the callout as a numbered pin — the number survives'
-                    >
-                      make it a pin
-                    </Button>
-                  )}
+                  {/* НА МЕСТЕ «MAKE IT A PIN» — «+ POINT», И ЭТО ОБМЕН, А НЕ ДВЕ ПРАВКИ.
+                      Убрана она вместе с «make it a point» редактора (E-27): жест один, имён было
+                      два, и оставленная здесь кнопка вернула бы на соседний экран ровно то, что
+                      владелец убрал. Смысла у неё тоже не осталось — пин ушёл из палитры (E-29).
+                      Пришедшая на её место кнопка добавляет записке ещё один луч и заменяет собой
+                      весь бывший «мультилидер». */}
+                  {arrows &&
+                    selected === index &&
+                    (arrows.arming ? (
+                      <Button
+                        variant='secondary'
+                        size='xs'
+                        data-arrows='cancel'
+                        onClick={arrows.cancel}
+                        title='stop waiting for the click'
+                      >
+                        cancel
+                      </Button>
+                    ) : (
+                      <Button
+                        variant='secondary'
+                        size='xs'
+                        data-arrows='add'
+                        disabled={arrows.full}
+                        onClick={arrows.arm}
+                        title={
+                          arrows.full
+                            ? `a note points at ${arrows.max} places at most`
+                            : 'point this note at one more place — then click it on the plate'
+                        }
+                      >
+                        + point
+                      </Button>
+                    ))}
                   <Text size='nano' variant='label' component='span' className='normal-case'>
-                    shape and position are dragged on the plate itself
+                    {arrows && arrows.count > 1
+                      ? `${arrows.count} points · shape and position are dragged on the plate itself`
+                      : 'shape and position are dragged on the plate itself'}
                   </Text>
                 </div>
               </CalloutEditRow>

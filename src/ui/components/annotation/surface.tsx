@@ -14,8 +14,17 @@ import {
   type ReactNode,
 } from 'react';
 
-import { simplifyPath, simplifyToLimit, splitInkStrokes, type ShapePoint } from './geometry';
-import { kindDef, labelKindForPoints } from './kinds';
+import {
+  arcPath,
+  bracketPath,
+  leaderTarget,
+  polygonPath,
+  simplifyPath,
+  simplifyToLimit,
+  splitInkStrokes,
+  type ShapePoint,
+} from './geometry';
+import { kindDef, labelKindForPoints, NOTE_MAX_POINTS, pointsFloor } from './kinds';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
 // ПОВЕРХНОСТЬ УКАЗАНИЙ — картинка и всё, что на ней нарисовано и правится.
@@ -80,6 +89,67 @@ export type SurfaceCallout = {
   pieceLineKeys?: string[];
 };
 
+/**
+ * ЛУЧИ ЗАПИСКИ — ОПИСАНИЕ, КОТОРОЕ ПОВЕРХНОСТЬ ОТДАЁТ РЕДАКТОРУ.
+ *
+ * Наружу уходит состояние и две команды, а НЕ сеттер: взвод обязан умирать вместе с выбором, со
+ * сменой инструмента и с заморозкой карточки, и знает об этом только поверхность. Владелец,
+ * получивший сеттер, рано или поздно завёл бы свой параллельный взвод — и «правка ровно одна на
+ * экране» перестала бы быть правдой.
+ *
+ * Отсутствует — у выбранного указания лучей не бывает (мерка, зона, след) либо владелец не умеет
+ * писать якоря. Орган тогда не рисуется вовсе: кнопка, которая ничего не добавит, хуже её
+ * отсутствия.
+ */
+export type NoteArrows = {
+  /** Сколько лучей у записки сейчас. */
+  count: number;
+  /** Потолок — зеркало серверного предела `multi`. */
+  max: number;
+  /** Ждём клик по кадру. */
+  arming: boolean;
+  full: boolean;
+  arm: () => void;
+  cancel: () => void;
+};
+
+/**
+ * ЛУЧИ ЕСТЬ ТОЛЬКО У ЗАПИСКИ — ОДНО ПРАВИЛО НА ДВА ДОМА.
+ *
+ * Редактор стоит то ПОД кадром (снимок шага, вложение задачи — им владеет поверхность), то НАД
+ * рядом кадров (мудборд, эскиз, примерка — им владеет лист). Оба обязаны отвечать на вопрос «есть
+ * ли у этого указания лучи» ОДИНАКОВО: разъехавшись, они дали бы кнопку, которая на одном экране
+ * есть, а на другом нет, без всякой причины, видимой человеку.
+ */
+export function noteArrowsOf(
+  /**
+   * СТРУКТУРНЫЙ МИНИМУМ, а не `SurfaceCallout`: один и тот же вопрос задают вью-модель поверхности
+   * и строка формы листа ARTIFACTS, и требовать от второй превратиться в первую значило бы
+   * заводить конвертацию ради двух полей.
+   */
+  c: { kind?: string; points?: readonly unknown[] } | undefined,
+  ctl: { arming: boolean; arm: () => void; cancel: () => void },
+): NoteArrows | undefined {
+  if (!c) return undefined;
+  const k = kindDef(c.kind).key;
+  if (k !== 'label' && k !== 'multi') return undefined;
+  const count = c.points?.length ?? 0;
+  return {
+    count,
+    max: NOTE_MAX_POINTS,
+    arming: ctl.arming,
+    /** Потолок — зеркало серверного: девятый луч отказал бы в сохранении ВСЕЙ карточки. */
+    full: count >= NOTE_MAX_POINTS,
+    arm: ctl.arm,
+    cancel: ctl.cancel,
+  };
+}
+
+export type AnnotationEditorSlotOpts = {
+  close: () => void;
+  arrows?: NoteArrows;
+};
+
 export type AnnotationSurfaceProps = {
   src: string;
   alt?: string;
@@ -88,6 +158,27 @@ export type AnnotationSurfaceProps = {
   aspectRatio?: string;
   /** Фиксированная высота кадра: полоса кадров выстраивается в ровный ряд. */
   heightPx?: number;
+  /**
+   * ЖЕЛАЕМАЯ высота кадра, px — но ШИРИНА СТАРШЕ: кадр не выходит за доступное место, а высота
+   * уступает. Пропорции при этом не трогаются НИКОГДА.
+   *
+   * ЗАЧЕМ ОТДЕЛЬНЫЙ ПРОП, А НЕ `heightPx`/`frameStyle.height`. Жёсткая высота задаёт ширину
+   * (`высота × пропорция`), и у панорамы 4:1 при 280px это 1120px — шире доски. Дальше выбор был
+   * из двух зол, и оба стояли в коде: либо плитка уносит страницу вбок, либо она листает снимок
+   * в СВОЁМ горизонтальном скроллере. Второе и выбрали (K-12), и владелец назвал это ровно так:
+   * «в MOODBOARD при грид вью картинки кропаются» — снимок цел, но виден не весь.
+   *
+   * Третий выход — тот, что здесь: ширина упирается в место, высота считается от неё пропорцией.
+   * Ряд остаётся ровным по высоте для всех кадров, которые ВЛЕЗАЮТ, и только для не влезающих
+   * высота меньше — то есть «равные высоты» уступают «не кропать», как и сказано словами.
+   *
+   * ЧИСТЫМ `height` + `max-width` ЭТО НЕ ПИШЕТСЯ, и это замерено: при заданной высоте `max-width`
+   * ужимает ШИРИНУ, не трогая высоту, — коробка перестаёт совпадать с пропорцией снимка, и
+   * `object-cover` начинает резать по-настоящему. Поэтому здесь задаётся ШИРИНА
+   * (`min(100%, высота × пропорция)`), а высоту выводит `aspect-ratio` — та же формула, которой
+   * уже вписан увеличенный вид.
+   */
+  rowHeightPx?: number;
   /** Потолок высоты изображения классом — печать. */
   maxHeightClass?: string;
   frameClassName?: string;
@@ -117,6 +208,15 @@ export type AnnotationSurfaceProps = {
    */
   selectedKey?: string | null;
   /**
+   * ВЗВОД «+ POINT», КОГДА ИМ ВЛАДЕЕТ ВЛАДЕЛЕЦ — по той же причине и той же парой пропов, что
+   * выбор. У листа (мудборд, эскиз, примерка) редактор стоит НАД рядом кадров, то есть вне любой
+   * поверхности: кнопка «+ point» живёт там, а клик, который она ждёт, приходит на плитку. Если
+   * бы взвод держала плитка, кнопка не смогла бы его ни поднять, ни погасить.
+   * Не задан — поверхность держит взвод сама (снимок шага, вложение задачи: там редактор её).
+   */
+  addingKey?: string | null;
+  onAddingChange?: (key: string | null) => void;
+  /**
    * Зовётся ПЕРЕД каждой мутацией фигур — владелец запоминает состояние для отката (см. history.ts).
    *
    * Одна точка вместо пяти: иначе «запомнить перед изменением» пришлось бы дописывать в каждый
@@ -135,7 +235,7 @@ export type AnnotationSurfaceProps = {
   onToolDone?: () => void;
 
   /** Редактор выбранного указания — рисуется ПОД КАДРОМ. Единственный путь правки текста. */
-  renderEditor?: (key: string, opts: { close: () => void }) => ReactNode;
+  renderEditor?: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
   /**
    * Подложка ПОД ВСЁ, что живёт под кадром: редактор, легенду, строку завершения жеста.
    *
@@ -344,6 +444,7 @@ export function AnnotationSurface({
   media = 'image',
   aspectRatio,
   heightPx,
+  rowHeightPx,
   maxHeightClass,
   frameClassName,
   frameStyle,
@@ -355,6 +456,8 @@ export function AnnotationSurface({
   onRemove,
   onSelect,
   selectedKey,
+  addingKey,
+  onAddingChange,
   onBeforeMutate,
   onUndo,
   canUndo,
@@ -387,6 +490,26 @@ export function AnnotationSurface({
   // ложатся мимо — ровно на время до его загрузки, то есть незаметно и каждый раз по-разному.
   useEffect(() => setNaturalRatio(null), [src]);
   const fitting = fit && naturalRatio != null;
+  /**
+   * ПРОПОРЦИЯ ЧИСЛОМ. Собственные пропорции картинки старше объявленных: проп честен только до
+   * загрузки, а дальше он и есть та ложь, из-за которой `object-cover` режет.
+   * `null` — пропорция неизвестна вовсе (нет ни проп, ни загрузки), и тогда ширину никто не
+   * считает: кадр ведёт себя как раньше.
+   */
+  const ratioNum = (() => {
+    if (naturalRatio != null) return naturalRatio;
+    if (!aspectRatio) return null;
+    const m = /^\s*([\d.]+)\s*\/\s*([\d.]+)\s*$/.exec(aspectRatio);
+    if (m) {
+      const w = Number(m[1]);
+      const h = Number(m[2]);
+      return h > 0 ? w / h : null;
+    }
+    const n = Number(aspectRatio);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
+  /** Кадр «высотой в ряд, но не шире места» — только когда пропорция известна. */
+  const rowFit = rowHeightPx != null && ratioNum != null;
 
   // Наведение и выбор — РАЗНЫЕ состояния: наведение изолирует (мышь), выбор открывает правку и
   // переживает уход курсора, иначе редактор закрывался бы от каждого движения.
@@ -402,6 +525,28 @@ export function AnnotationSurface({
   );
   /** Вооружённая ручка: Delete тогда уносит ТОЧКУ, а не всю фигуру. */
   const [armed, setArmed] = useState<{ key: string; index: number } | null>(null);
+  /**
+   * ЗАПИСКА, КОТОРОЙ СЕЙЧАС ДОБАВЛЯЮТ ЛУЧ. Следующий клик по кадру дописывает ей якорь и жест
+   * кончается — ОДИН клик, один луч.
+   *
+   * ЭТО ЗАМЕНА МУЛЬТИЛИДЕРА, И ЗАМЕНА ИМЕННО ЖЕСТА, А НЕ ЧИПА. У мультилидера конца не было:
+   * постановка кончалась либо восьмым кликом, либо чипом «done · N», который появлялся под кадром
+   * только во время жеста. Отсюда «почему-то всегда 7 направляющих» — не потому что столько нужно,
+   * а потому что раньше остановиться было негде. Здесь останавливаться не нужно вовсе: после
+   * каждого клика фигура завершена.
+   *
+   * СОСТОЯНИЕ ЖИВЁТ В ПОВЕРХНОСТИ, А НЕ У ВЛАДЕЛЬЦА: взвод обязан умирать вместе с выбором, со
+   * сменой инструмента и с заморозкой карточки, а всё это знает только она. Наружу уходит ОПИСАНИЕ
+   * (`renderEditor` → `arrows`), не сеттер.
+   */
+  const [ownAdding, setOwnAdding] = useState<string | null>(null);
+  const adding = addingKey !== undefined ? addingKey : ownAdding;
+  const onAddingChangeRef = useRef(onAddingChange);
+  onAddingChangeRef.current = onAddingChange;
+  const setAdding = useCallback((next: string | null) => {
+    setOwnAdding(next);
+    onAddingChangeRef.current?.(next);
+  }, []);
 
   // Незавершённая постановка. ВИД приходит снаружи (панель одна на полосу/лист), точки копятся
   // здесь: они принадлежат ЭТОМУ снимку, и общий счётчик достраивал бы мерку, начатую на первом
@@ -508,6 +653,7 @@ export function AnnotationSurface({
     if (selected !== null) onSelectRef.current?.(null);
     setSelected(null);
     setArmed(null);
+    setAdding(null);
     setPoints([]);
   };
   useEffect(() => {
@@ -562,6 +708,9 @@ export function AnnotationSurface({
       focusOnce.current = !!opts?.focus;
       setSelected(key);
       setArmed(null);
+      // Взвод «+ point» принадлежит ОДНОЙ записке. Перевыбор — это уже другая запись, и
+      // переживший его взвод дописал бы луч не туда, о чём никто не просил.
+      setAdding(null);
       onSelect?.(key, opts);
     },
     [onSelect, setSelected],
@@ -585,6 +734,9 @@ export function AnnotationSurface({
     prevTool.current = tool;
     if (points.length) setPoints([]);
     if (cursor) setCursor(null);
+    // Взятый в палитре вид отменяет взвод «+ point»: рука одна, и два ожидания одного клика — это
+    // клик, о судьбе которого нельзя догадаться заранее.
+    if (adding) setAdding(null);
   }
 
   // У СЛЕДА СЧИТАЮТСЯ ШТРИХИ, А НЕ ТОЧКИ. Панель рисует подсказку по этому числу, а «поставлено
@@ -683,6 +835,37 @@ export function AnnotationSurface({
       if (!d.sticky) onToolDone?.();
     },
     [full, onAdd, onToolDone],
+  );
+
+  /** Записка, которой сейчас добавляют луч, — по ней рисуется живое превью. */
+  const addingCallout = adding !== null ? byKey.get(adding) : undefined;
+  const noteArrows = noteArrowsOf(
+    editable && onEditPoints && selected !== null ? byKey.get(selected) : undefined,
+    {
+      arming: adding !== null && adding === selected,
+      arm: () => {
+        if (selected !== null) setAdding(selected);
+      },
+      cancel: () => setAdding(null),
+    },
+  );
+
+  /**
+   * КЛИК ПОТРАЧЕН — ЛУЧ ДОПИСАН, ВЗВОД СНЯТ. Записка при этом остаётся выбранной: обычно за первым
+   * лучом просят второй, и снятый выбор заставлял бы искать её заново на кадре.
+   */
+  const spendAddingClick = useCallback(
+    (p: ShapePoint) => {
+      const key = adding;
+      if (key === null) return;
+      setAdding(null);
+      const c = live.current.callouts.find((x) => x.key === key);
+      if (!c) return;
+      const next = [...c.points, p];
+      if (next.length > NOTE_MAX_POINTS) return;
+      mutate(() => live.current.onEditPoints?.(key, next));
+    },
+    [adding, mutate],
   );
 
   const cancelPlacing = useCallback(() => {
@@ -941,7 +1124,7 @@ export function AnnotationSurface({
   }
 
   function onFramePointerMove(e: ReactPointerEvent) {
-    if (placing && def.grammar !== 'ink') {
+    if ((placing && def.grammar !== 'ink') || adding !== null) {
       const p = at(e.clientX, e.clientY);
       setCursor(p);
     }
@@ -1046,6 +1229,15 @@ export function AnnotationSurface({
     releasePointer(e);
     if (!wasPress || moved) return;
 
+    // ВЗВЕДЁННЫЙ «+ POINT» СТАРШЕ ВСЕГО ОСТАЛЬНОГО НА КАДРЕ, включая «клик по фону снимает выбор»:
+    // человек только что попросил один клик и получает ровно его.
+    if (adding !== null) {
+      const raw = rawAt(e.clientX, e.clientY);
+      const EPS = 0.001;
+      if (!raw || raw.x < -EPS || raw.x > 1 + EPS || raw.y < -EPS || raw.y > 1 + EPS) return;
+      spendAddingClick({ x: clamp01(raw.x), y: clamp01(raw.y) });
+      return;
+    }
     if (placing) {
       // Клик мимо картинки отвергается, а не прижимается к краю: иначе промах родил бы фантомную
       // точку на самой кромке, которую потом ищут глазами.
@@ -1188,7 +1380,11 @@ export function AnnotationSurface({
         // увеличенном виде отменял наполовину набранную зону И закрывал диалог, а в полосе из
         // десяти кадров снимал выбор на одном и инструмент на другом одновременно.
         let stepped = true;
-        if (armed) setArmed(null);
+        // ВЗВОД «+ POINT» — ПЕРВАЯ СТУПЕНЬ: он моложе выбора и снимается раньше него. Иначе один
+        // Esc уносил бы и ожидание клика, и саму записку из правки, то есть отменял бы больше, чем
+        // просили.
+        if (adding !== null) setAdding(null);
+        else if (armed) setArmed(null);
         else if (selected !== null) select(null);
         // ESC КОММИТИТ СЕССИЮ ФРИХЕНДА, А НЕ ОТМЕНЯЕТ ЕЁ, и это единственная ступень лестницы, где
         // Esc что-то СОХРАНЯЕТ. У прочих видов «незавершённый жест» — это набранные, но ещё ничем
@@ -1252,8 +1448,10 @@ export function AnnotationSurface({
       if (armed) {
         const c = byKey.get(armed.key);
         if (!c) return;
-        const d = kindDef(c.kind);
-        if (c.points.length <= d.points[0]) return;
+        // ПОЛ — ПО `pointsFloor`, А НЕ ПО МИНИМУМУ ПОСТАНОВКИ. У записки с двумя лучами минимум
+        // постановки равен двум (она хранится как `multi`), но записка с ОДНИМ лучом законна —
+        // это `label`. Пока пол читался из `points[0]`, добавленный луч снять было нечем.
+        if (c.points.length <= pointsFloor(c.kind)) return;
         e.preventDefault();
         const next = c.points.filter((_, i) => i !== armed.index);
         setArmed(null);
@@ -1299,6 +1497,7 @@ export function AnnotationSurface({
   }, [
     editable,
     armed,
+    adding,
     selected,
     tool,
     placing,
@@ -1415,7 +1614,7 @@ export function AnnotationSurface({
     };
   })();
 
-  const cursorClass = placing
+  const cursorClass = placing || adding !== null
     ? 'cursor-crosshair'
     : zoom && scale > 1
       ? panning
@@ -1426,7 +1625,18 @@ export function AnnotationSurface({
         : 'cursor-default';
 
   return (
-    <div className={cn('flex flex-col gap-1', heightPx != null && 'w-fit', className)}>
+    <div
+      className={cn(
+        'flex flex-col gap-1',
+        heightPx != null && 'w-fit',
+        // УПОР В МЕСТО ОБЯЗАН ДОЙТИ ДО КАДРА, А ПРОЦЕНТ ЧИТАЕТСЯ У БЛИЖАЙШЕГО ПРЕДКА.
+        // Замерено: колонка поверхности — `w-fit`, то есть шириной по содержимому, поэтому
+        // `max-width: 100%` кадра считался от 1120px самой колонки и не клампил НИЧЕГО; плитка
+        // же (1018px) при этом честно листала снимок вбок. Колонка обязана упереться первой.
+        rowFit && 'max-w-full',
+        className,
+      )}
+    >
       {/* ДОСТУПНОЕ МЕСТО ДЛЯ ВПИСАННОГО КАДРА — И ЕДИНИЦА ИЗМЕРЕНИЯ ДЛЯ НЕГО.
           Кадр обязан иметь пропорции САМОГО СНИМКА: доли, в которых хранятся указания, меряются
           по кадру, и коробка другой формы означает указание, показывающее не туда. Вписать
@@ -1482,7 +1692,9 @@ export function AnnotationSurface({
             // `self-start` при этом продолжает делать своё дело: тянуться под самого широкого
             // соседа кадр не может, потому что всё, что под ним, вынуто из ширины колонки
             // (`w-0 min-w-full` ниже).
-            aspectRatio && heightPx == null && !fitting && 'w-full',
+            // Кадр «в ряд, но не шире места» держит ширину СТИЛЕМ (см. `rowHeightPx`), поэтому
+            // `w-full` ему противопоказан: он вернул бы ширину коробки и снял бы весь смысл упора.
+            aspectRatio && heightPx == null && !fitting && !rowFit && 'w-full',
             // Вписанный кадр занимает всё доступное место, упираясь в ту сторону, которая кончится
             // раньше. Высота выводится из ОБЪЯВЛЕННЫХ пропорций, ширина считается в стиле ниже —
             // `max-height` здесь стоять не должен: он ужимал высоту, не трогая ширину, и кадр
@@ -1498,7 +1710,7 @@ export function AnnotationSurface({
             // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент касания,
             // и запрет, выставленный позже, уже ничего не решает — палец уводит страницу в
             // прокрутку, прилетает pointercancel, и полштриха теряется.
-            (zoom || placing) && 'touch-none',
+            (zoom || placing || adding !== null) && 'touch-none',
             zoom && 'overflow-hidden',
             frameClassName,
             cursorClass,
@@ -1513,10 +1725,26 @@ export function AnnotationSurface({
               : preferNaturalAspect && naturalRatio != null
                 ? String(naturalRatio)
                 : aspectRatio,
-            // ШИРИНА — МЕНЬШЕЕ ИЗ ДВУХ УПОРОВ: вся ширина места или та, при которой в него ещё
-            // влезает высота. Высоту дальше считает `aspect-ratio`, поэтому коробка выходит
-            // вписанной и ТОЧНО пропорциональной снимку с обеих сторон.
-            width: fitting ? `min(100%, calc(100cqh * ${naturalRatio}))` : undefined,
+            // ШИРИНА — МЕНЬШЕЕ ИЗ ДВУХ УПОРОВ, и в обоих случаях ВЫСОТУ СЧИТАЕТ `aspect-ratio`:
+            //   · вписанный кадр (зум) — «вся ширина места» против «той, при которой влезает
+            //     высота места»;
+            //   · кадр ряда (`rowHeightPx`) — «вся ширина места» против «той, при которой кадр
+            //     ростом в ряд».
+            // Задать вместо этого ВЫСОТУ и подпереть `max-width` нельзя: `max-width` ужимает
+            // ширину, не трогая высоту, и коробка перестаёт совпадать с пропорцией снимка —
+            // то есть `object-cover` начинает резать по-настоящему (замерено).
+            width: fitting
+              ? `min(100%, calc(100cqh * ${naturalRatio}))`
+              : rowFit
+                ? // ДЛИНА, А НЕ ПРОЦЕНТ, И ЭТО ЗАМЕРЕНО. `min(100%, …)` здесь схлопывает кадр в
+                  // 2×3 пикселя: плитка ряда — `w-fit`, то есть её ширина считается ПО СОДЕРЖИМОМУ,
+                  // а вклад ребёнка с процентной шириной в это вычисление нулевой. Поэтому ширина
+                  // объявляется настоящей длиной (её вклад в max-content честный), а упор в место
+                  // ставит `max-width` НИЖЕ — и высоту после клампа пересчитывает `aspect-ratio`,
+                  // потому что явной высоты у кадра нет вовсе.
+                  `${rowHeightPx * ratioNum}px`
+                : undefined,
+            maxWidth: rowFit ? '100%' : undefined,
             ...frameStyle,
           }}
           onPointerDown={onFramePointerDown}
@@ -1675,6 +1903,10 @@ export function AnnotationSurface({
                     для кликов, иначе точку под чужой фигурой не поставить. */}
                 {editable &&
                   !placing &&
+                  // ...И ПОКА ЖДУТ КЛИК ДЛЯ НОВОГО ЛУЧА. Слой попадания перехватил бы его на
+                  // первой же фигуре, попавшейся под курсором, и луч не появился бы нигде —
+                  // ровно тот же довод, по которому слой мёртв во время постановки.
+                  adding === null &&
                   callouts.map((c) => {
                     const pts = pointsOf(c).map(px);
                     const d = hitPath(c.kind, pts, px(labelOf(c)));
@@ -1729,6 +1961,24 @@ export function AnnotationSurface({
                       color={pen.color || undefined}
                     />
                   ))}
+                {/* ПРЕВЬЮ ДОБАВЛЯЕМОГО ЛУЧА — НАСТОЯЩИЙ ЛУЧ, от плашки записки к курсору.
+                    У мультилидера превью врало: пока набираешь, рисуется ЛОМАНАЯ по кликам, а
+                    получается ВЕЕР от плашки — то есть человек видел на экране одну фигуру, а
+                    ставил другую. Здесь показано ровно то, что появится. */}
+                {addingCallout && cursor && (
+                  <g opacity={0.75} pointerEvents='none'>
+                    <line
+                      x1={px(labelOf(addingCallout)).x}
+                      y1={px(labelOf(addingCallout)).y}
+                      x2={px(cursor).x}
+                      y2={px(cursor).y}
+                      stroke='var(--color-textColor)'
+                      strokeWidth={1.5}
+                      strokeDasharray='3 3'
+                    />
+                    <circle cx={px(cursor).x} cy={px(cursor).y} r={3} fill='var(--color-textColor)' />
+                  </g>
+                )}
                 {placing && points.length > 0 && (
                   <PlacingShape
                     kind={def.key}
@@ -1906,6 +2156,21 @@ export function AnnotationSurface({
               className='bottom-1 left-1'
             />
           )}
+          {/* ЧТО ДЕЛАТЬ СО ВЗВЕДЁННЫМ «+ POINT» — НА САМОМ КАДРЕ, а не строкой под ним.
+              Под кадром эта строка растила бы плитку на время ожидания, то есть двигала бы вниз
+              весь ряд снимков на каждое нажатие «+ point» — ровно то дёрганье, ради которого
+              высота редактора и зафиксирована. Здесь же она стоит там, куда и так смотрят: на
+              снимок, по которому сейчас щёлкнут. */}
+          {adding !== null && (
+            <div
+              data-annot-adding=''
+              className='pointer-events-none absolute inset-x-0 bottom-1 z-[6] flex justify-center px-8'
+            >
+              <span className='max-w-full truncate border border-borderColor bg-bgColor/95 px-1.5 py-0.5 text-nano uppercase leading-tight tracking-label text-textColor'>
+                click where this note should also point · esc cancels
+              </span>
+            </div>
+          )}
           {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
           {cornerSlotBottom && (
             <div className='pointer-events-none absolute inset-x-1 bottom-1 z-[4] flex items-end justify-between gap-1'>
@@ -2010,12 +2275,12 @@ export function AnnotationSurface({
               <div className='shrink-0 overflow-hidden' style={{ height: editorReserveHeight }}>
                 {selected !== null && byKey.has(selected) ? (
                   <EditorSlot focusRequested={takeFocusRequest} className='h-full'>
-                    {renderEditor(selected, { close: () => select(null) })}
+                    {renderEditor(selected, { close: () => select(null), arrows: noteArrows })}
                   </EditorSlot>
                 ) : (
                   <div className='flex h-full items-center border border-dashed border-borderColor px-1.5'>
                     <Text size='micro' variant='label' component='span'>
-                      no callout selected — click a pin or a line on the frame · Backspace deletes
+                      no callout selected — click a note or a line on the frame · Backspace deletes
                       it · Enter opens this editor
                     </Text>
                   </div>
@@ -2025,7 +2290,7 @@ export function AnnotationSurface({
           : selected !== null &&
             byKey.has(selected) && (
               <EditorSlot focusRequested={takeFocusRequest}>
-                {renderEditor(selected, { close: () => select(null) })}
+                {renderEditor(selected, { close: () => select(null), arrows: noteArrows })}
               </EditorSlot>
             ))}
       </div>
@@ -2061,36 +2326,53 @@ function EditorSlot({
 }
 
 /**
- * Путь ДЛЯ ПОПАДАНИЯ мышью — упрощённая копия видимого штриха. Не сама фигура: у мерки хит-путь
- * это одна линия без засечек, у подписи — лучи к якорям, и утолщать засечки значило бы ловить
- * клики там, где линии нет.
+ * Путь ДЛЯ ПОПАДАНИЯ мышью — утолщённая копия ВИДИМОГО штриха.
+ *
+ * ПРАВИЛО ОДНО: ловится ровно то, что нарисовано, и ничего сверх. Нарушения этого правила и есть
+ * жалоба владельца «выделение колаута спан происходит не по всей видимой поверхности»:
+ *
+ *   · у СКОБЫ хит шёл по ХОРДЕ между якорями — по линии, которой на кадре нет вовсе. Перекладина
+ *     отстоит от хорды на `BRACKET_DROP` = 10px, полоса попадания ловит ±6px, то есть по самой
+ *     скобе не попадало НИЧЕГО, зато нажималось пустое место между её ножками;
+ *   · у ДУГИ хит был ломаной по трём точкам, а нарисована кривая: на выгнутой дуге промах равен
+ *     половине стрелки прогиба;
+ *   · ЛИДЕР не ловился ни у одного вида, кроме подписи, хотя это такая же видимая линия — и часто
+ *     самая длинная в фигуре.
+ *
+ * Геометрия здесь НЕ ПОВТОРЯЕТСЯ, а зовётся из `geometry.ts` теми же функциями, которыми рисует
+ * `CalloutShape`: вторая копия разошлась бы с первой ровно так, как разошлась эта.
  */
 function hitPath(kind: string, pts: ShapePoint[], label: ShapePoint): string | null {
   const d = kindDef(kind);
   if (pts.length === 0) return null;
+  /** Лидер — видимая линия, значит и ловится. У видов без лидера пусто. */
+  const lead = (() => {
+    const t = leaderTarget(d.key, pts);
+    return t ? ` M${label.x},${label.y} L${t.x},${t.y}` : '';
+  })();
   switch (d.key) {
     case 'pin':
       // У пина видимой линии нет вовсе: его хит — сам нумерованный кружок, HTML-слоем.
       return null;
     case 'label':
     case 'multi':
-      // Хит подписи — её ЛИДЕРЫ: единственное, что она рисует на кадре.
+      // Хит подписи — её ЛУЧИ: единственное, что она рисует на кадре.
       return pts.map((p) => `M${label.x},${label.y} L${p.x},${p.y}`).join(' ');
     case 'dim':
-      return pts.length >= 2 ? `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}` : null;
+      return pts.length >= 2 ? `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}${lead}` : null;
+    case 'bracket':
+      return pts.length >= 2 ? `${bracketPath(pts[0], pts[1])}${lead}` : null;
+    case 'arc':
+      // ТА ЖЕ КРИВАЯ, что нарисована: `stroke` попадания считается по настоящему пути Безье.
+      return pts.length >= 3 ? `${arcPath(pts[0], pts[1], pts[2])}${lead}` : null;
+    case 'polygon':
+      return pts.length >= 2 ? `${polygonPath(pts)}${lead}` : null;
     case 'ink': {
       // ХИТ-ПУТЬ СЛЕДА ТОЖЕ РВЁТСЯ НА ПОДНЯТОМ ПЕРЕ. Иначе по фигуре из двух штрихов можно было бы
       // попасть мышью в ПУСТОТУ между ними — там, где линии нет и никогда не было.
       const runs = splitInkStrokes(pts).filter((r) => r.length >= 2);
       if (runs.length === 0) return null;
       return runs.map((r) => `M${r.map((p) => `${p.x},${p.y}`).join(' L')}`).join(' ');
-    }
-    case 'bracket':
-    case 'arc':
-    case 'polygon': {
-      if (pts.length < 2) return null;
-      const line = `M${pts.map((p) => `${p.x},${p.y}`).join(' L')}`;
-      return d.key === 'polygon' ? `${line} Z` : line;
     }
     default:
       return null;
@@ -2261,6 +2543,20 @@ function PinMarker({
 }
 
 /** Плашка. Текст ВСЕГДА чёрным по белому — см. довод в `editor.tsx`. */
+/**
+ * ПОТОЛОК ПЛАШКИ НА ЭКРАНЕ, ЗНАКОВ.
+ *
+ * ЗАМЕР, РАДИ КОТОРОГО ЭТО ЗАВЕДЕНО: записка на 697 знаков рисует плашку 90×668 на кадре 600×400 —
+ * СТО ШЕСТЬДЕСЯТ СЕМЬ ПРОЦЕНТОВ высоты кадра, белым столбом поверх снимка. Раньше это было редким
+ * случаем: длинную мысль писали ПИНОМ, чей текст читается легендой под кадром. Пин ушёл из палитры
+ * (E-29), записка стала умолчанием — и вместе с ней это стало обычным случаем, особенно на
+ * примерке, где у поля потолок 2000 знаков.
+ *
+ * ЧИСЛО — ВЫБОР, А НЕ ЗАМЕР: около четырёх строк при типичной ширине плашки. Текст при этом НЕ
+ * ТЕРЯЕТСЯ нигде: целиком он в редакторе, в подсказке (`title`) и НА БУМАГЕ (см. ниже).
+ */
+const PLATE_TEXT_MAX = 220;
+
 function Plate({
   at,
   inv,
@@ -2311,7 +2607,14 @@ function Plate({
         onPress();
       }}
       className={cn(
-        'absolute block max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
+        // `w-max` — НЕ ОФОРМЛЕНИЕ. Плашка позиционирована абсолютно и лишь ПОТОМ сдвигается на
+        // −50% трансформом; без `w-max` её ширина считается как «сколько осталось от `left` до
+        // правого края кадра», и плашка у правого края сжимается в столб. ЗАМЕРЕНО: записка на
+        // 221 знак с подписью на 0.85 ширины кадра давала плашку 90×229 при разрешённых 270px —
+        // то есть текст, который влез бы в восемь строк, вытягивался в двадцать поверх снимка.
+        // С `w-max` ширину задаёт содержимое, а упор ставит `max-w`, и оба независимы от того,
+        // где плашка стоит.
+        'absolute block w-max max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
         // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
         // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
         selected
@@ -2340,7 +2643,24 @@ function Plate({
           {number}
         </span>
       )}
-      {text || (tail ? '' : '—')}
+      {/* НА БУМАГЕ ПЛАШКА ЦЕЛАЯ, НА ЭКРАНЕ — ОБРЕЗАННАЯ, И ЭТО НЕ ДВА МНЕНИЯ ОБ ОДНОМ ТЕКСТЕ.
+          Лист у машинки читают ЦЕЛИКОМ и без наведения: обрезать там значило бы потерять указание,
+          а не спрятать его. На экране плашка стоит ПОВЕРХ снимка, ради которого её и поставили, и
+          столб в 668 пикселей закрывает собой предмет разговора. Поэтому обрезка живёт ровно в
+          экранной ветке, а печать берёт тот же текст без потолка.
+          Многоточие ВИДИМОЕ: молча укоротить — это соврать про длину записки. */}
+      {text ? (
+        <>
+          <span className='print:hidden'>
+            {text.length > PLATE_TEXT_MAX ? `${text.slice(0, PLATE_TEXT_MAX).trimEnd()}…` : text}
+          </span>
+          <span className='hidden print:inline'>{text}</span>
+        </>
+      ) : tail ? (
+        ''
+      ) : (
+        '—'
+      )}
       {tail && (
         <span className='block uppercase tracking-label text-labelColor'>{tail}</span>
       )}

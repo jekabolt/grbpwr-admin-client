@@ -14,9 +14,9 @@ import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies, type CropFamilies } from '../generation/composite';
 import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
+import { VectorModal } from '../modals';
 import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
-import { ThreedModelModal } from '../threed/model-modal';
 import { useDesignWrites } from '../use-design-band';
 import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import {
@@ -106,9 +106,27 @@ export function OutputsSection({
   // between renders and take the whole tree down (React #310; this screen has paid for it once).
   const speaks = serverSpeaksDesign();
   const { setPictureSelected, setBenchSlot } = useDesignWrites(techCardId);
-  const [openModel, setOpenModel] = useState<string | null>(null);
+  /* ⚠ `openModel` СНЯТ ВМЕСТЕ С КНОПКОЙ `open` (E-25). Единственным, кто взводил это состояние,
+     была она; окно модели теперь поднимает сама плитка, у которой на руках адрес `.glb`.
+     И довод прежней сноски («одно окно на весь раздел, а не по одному на ячейку: сцена WebGL
+     дорога») от переезда НЕ нарушен: плитка монтирует окно только раскрытым
+     (`{modelOpen && modelHref && …}`), поэтому смонтированных сцен по-прежнему не больше одной —
+     ровно той, которую человек открыл. */
   /** Для какой плитки идёт запись слота. Общий `isPending` сказал бы «saving» на всех сразу. */
   const [marking, setMarking] = useState<number | null>(null);
+  /**
+   * ⚠ И ТО ЖЕ САМОЕ ДЛЯ ПОМЕТКИ — ПРАВИЛО СТРОКОЙ ВЫШЕ НАКОНЕЦ РАСПРОСТРАНЕНО НА ВТОРУЮ ЗАПИСЬ.
+   *
+   * Пока пометка была кнопкой ПОД карточкой, она гасилась общим `setPictureSelected.isPending`,
+   * то есть все плитки раздела разом. Стерпеть это было можно: серая кнопка среди серых кнопок
+   * читается как «идёт запись». На КАДРЕ (E-25) так уже нельзя: угол — тихий орган, и погашенный
+   * он выходит `#ccc` по белому, около 1.6:1, то есть просто исчезает — причём на всех плитках
+   * сразу и без единого слова о том, что происходит.
+   *
+   * Поэтому занятость адресная, а орган говорит `select…` СВОИМ словом (`pending` у роли
+   * примитива) и остаётся видимым, пока идёт запись.
+   */
+  const [selecting, setSelecting] = useState<number | null>(null);
   /**
    * ═══ РЕЗАТЬ МОЖНО ЗДЕСЬ ЖЕ (J-25) ═══════════════════════════════════════════════════════════
    *
@@ -125,6 +143,9 @@ export function OutputsSection({
    * `split-to-input.tsx`.
    */
   const split = useSplitToInput({ techCardId, band });
+  /* КАКУЮ ИМЕННО КАРТИНКУ ПРАВИМ. Не булево `editing`: ячеек в полосе много, а модалка одна,
+     и флаг открыл бы редактор сразу над всеми. Ноль — закрыто. */
+  const [editingId, setEditingId] = useState(0);
   /**
    * ОДНА ОТКРЫТАЯ КОЛОДА НА РАЗДЕЛ, тем же законом, что и в ленте: «нажимаешь на другой мультивью
    * старый колапсится обратно». Состояние из одного значения делает второе открытое невыразимым.
@@ -154,7 +175,20 @@ export function OutputsSection({
       run: result.run,
       // Растр, который маршрут прислал ВМЕСТЕ с моделью, ровно для этого и прислан: «the raster
       // thumbnail that stands in for it wherever a list has to draw a tile» (`threedfal.go`).
-      src: result.posterUrl,
+      //
+      // ⚠ А ЕСЛИ РАСТРА НЕ ПРИШЛО — В КАДР ИДЁТ САМА МОДЕЛЬ, И ЭТО ПОЧИНКА, А НЕ ЗАПАСНОЙ ПУТЬ
+      // (E-25). «Модель без миниатюры» — законное состояние прогона (`if thumb.Len() > 0` в
+      // Collect), и до этой волны такая строка рисовалась ПЛЕЙСХОЛДЕРОМ: не плиткой, а полосатой
+      // коробкой со словами «3d model · no preview». Пока органы стояли кнопками ПОД карточкой,
+      // это работало. Как только они переехали на кадр (владелец: «должны появляться на ховер на
+      // карточку»), плейсхолдер остался бы КАДРОМ БЕЗ ЕДИНОЙ ДВЕРИ: ни открыть, ни пометить
+      // модель, за которую заплачено, стало бы нечем.
+      //
+      // Отвечает на это примитив, а не этот файл: `PictureTile` умеет лицо `.glb` — слово «3d
+      // model» в кадре, поверхность в просмотрщик и угловой `open 3d` по наведению. То есть
+      // плейсхолдер здесь был ВТОРЫМ написанием того же лица, сделанным до того, как примитив
+      // научился первому.
+      src: result.posterUrl || result.modelUrl,
       modelUrl: result.modelUrl,
     }));
   }, [band, kind, colorwayId]);
@@ -191,6 +225,28 @@ export function OutputsSection({
     for (const row of rows) if (row.picture.id != null) m.set(row.picture.id, row);
     return m;
   }, [rows]);
+
+  /**
+   * ═══ ЗУМ ЧУЖОЙ КАРТОЧКИ СКЛАДЫВАЕТ ОТКРЫТУЮ КОЛОДУ (E-4) ══════════════════════════════════
+   *
+   * Владелец, дословно: «в RENDERS OF THIS CARD после экспанда спличеных карточек при зуме любой
+   * другой они должны обратно колапсится».
+   *
+   * ЗАКОН ТОТ ЖЕ И НАПИСАН ТЕМИ ЖЕ ТРЕМЯ СТРОКАМИ, ЧТО В ЛЕНТЕ, И ЭТО НАМЕРЕННО: «одна открытая
+   * колода» уже живёт в обоих хостах одинаково, и второй ДИАЛЕКТ той же мысли разошёлся бы с
+   * первым на первой же правке. Читатели родства при этом остаются одним — `families.rootOf`,
+   * который этот файл уже считает для самой колоды.
+   *
+   * ГРАНИЦА — ПО КОЛОДЕ, А НЕ ПО КАРТОЧКЕ. Зум по САМОМУ листу и по любому его куску — это работа
+   * ВНУТРИ раскрытой группы; сложить её там значило бы унести куски из документа под уже открытым
+   * окном, и человек, ткнувший в кусок, оказался бы на соседнем кадре.
+   */
+  const foldOnForeignZoom = (pictureId: number) =>
+    setOpenDeck((current) => {
+      if (current === null || !pictureId) return current;
+      if (pictureId === current) return current;
+      return families.rootOf.get(pictureId) === current ? current : null;
+    });
 
   if (!rows.length) return null;
 
@@ -310,6 +366,8 @@ export function OutputsSection({
      *     вовсе (`IsDesignBenchKind` его знает, но выходов 3D в верстак никто не кладёт), и
      *     единственное избрание модели там — пометка `selected`, которую J-23 у рендеров снял.
      */
+    /** В кадре стоит РАСТР, а не сам `.glb`: у прогона без миниатюры это не так (E-25). */
+    const posterShown = !!src && !!modelUrl && src !== modelUrl;
     const composite = kind === 'render' && pictureIsComposite(picture);
     const held = kind === 'render' ? slotHolding(band, picture.id ?? 0) : null;
     /**
@@ -338,20 +396,22 @@ export function OutputsSection({
           deckSheet ? () => setOpenDeck((current) => (current === (picture.id ?? 0) ? null : picture.id ?? 0)) : undefined
         }
         cellPictureId={picture.id}
+        /* E-4: зум чужой карточки складывает открытую колоду; своя и её куски — нет. */
+        onZoom={() => foldOnForeignZoom(picture.id ?? 0)}
         /* Толстая рамка — «этот экран это ЧИТАЕТ». У рендеров пометка больше ничего не
            открывает, и подсветка обещала бы вес, которого у неё нет (J-23). */
         emphasis={selectable && chosen}
         src={src}
         alt={modelUrl ? `3d model of run ${run.id ?? ''}` : `${noun} ${picture.ordinal ?? ''}`}
-        /* Прогон без миниатюры — законное состояние (`if thumb.Len() > 0` в Collect), и на
-           нём рисовать нечего. Заглушка обязана СКАЗАТЬ это словом: пустая рамка читается
-           как несработавший сервер. */
+        /* ⚠ ЗАГЛУШКА БОЛЬШЕ НЕ ЛОВИТ «ПРОГОН БЕЗ МИНИАТЮРЫ» — ЕГО ЛОВИТ КАДР (E-25, разбор у
+           `src` выше): у такой строки в кадре теперь стоит САМА модель, и примитив рисует ей
+           лицо с дверью. Остался единственный случай, при котором рисовать нечем вообще: у
+           строки нет НИ ОДНОГО адреса файла — ни растра, ни `.glb`. Он должен быть назван
+           словом: пустая рамка читается как несработавший сервер, а сервер тут ни при чём. */
         empty={
-          modelUrl ? (
-            <Text size='nano' variant='label' component='span'>
-              3d model · no preview
-            </Text>
-          ) : undefined
+          <Text size='nano' variant='label' component='span'>
+            no file address on this row
+          </Text>
         }
         /* Выход прогона встаёт в ОБЩИЙ ряд просмотрщика студии. Без этой строки плитка
            рисовалась общим примитивом, но кадра в ряд не клала — то есть зума у неё не было
@@ -368,6 +428,54 @@ export function OutputsSection({
            рендере, а не только на склеенном листе: у листа это единственный путь в слоты, у
            одиночного кадра — обычный кроп, и разными органами эти два жеста не бывают.
            У 3D его нет: резать модель нечем, а её постер поглощён парой (`threedResults`). */
+        /* ═══ ПОМЕТКА — УГОЛ КАДРА, А НЕ КНОПКА ПОД НИМ (E-25) ════════════════════════════════
+           Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на карточку
+           а не кнопками снизу».
+
+           ⚠ СЮДА ПЕРЕЕХАЛА ТОЛЬКО ЖИВАЯ ДВЕРЬ, И ЭТО РЕШЕНИЕ ЭТОГО ЖЕ ФАЙЛА, ПРИНЯТОЕ РАНЬШЕ.
+           Двумя сотнями строк выше стоит разбор снесённой двери «split first ▸»: «Угол — ТИХИЙ
+           орган: он появляется по наведению, то есть отказ называл орган, которого на экране не
+           видно». Отказ, спрятанный в наведение, — это отсутствие отказа. Поэтому оба неживых
+           состояния (сервер не знает пометки; карточка только для чтения) остаются `InertDoor`
+           ПОД кадром, словами и всегда видимыми, — см. ряд `action` ниже. */
+        onSelect={
+          selectable && carries && !writesOff
+            ? {
+                onClick: () => {
+                  const id = picture.id ?? 0;
+                  setSelecting(id);
+                  setPictureSelected.mutate(
+                    { pictureId: id, selected: !chosen },
+                    { onSettled: () => setSelecting(null) },
+                  );
+                },
+                /* Занятость АДРЕСНАЯ и со СВОИМ словом — довод у `selecting` выше. */
+                pending: selecting === (picture.id ?? 0),
+                ariaLabel: chosen
+                  ? `take the chosen mark off ${noun} ${picture.ordinal ?? ''}`.trim()
+                  : `mark ${noun} ${picture.ordinal ?? ''} as chosen`.trim(),
+                title: chosen
+                  ? 'take the mark off — with none chosen, ARTIFACTS goes back to listing every picture of this kind'
+                  : 'mark this picture as chosen — ARTIFACTS offers the chosen ones for markup',
+              }
+            : undefined
+        }
+        selectLabel={chosen ? 'un-select' : 'select'}
+        /* ⚠ ПРАВКА — ТОЛЬКО РЯДОМ СО СПЛИТОМ И ТОЛЬКО У РАСТРА (E-3). Владелец просил на
+           ховер «сплит и эдит», и оба угла живут по одному правилу: редактор работает ОТ
+           РАСТРА, а `.glb` растром не является — на постере же он сработал бы и завёл в
+           строке прогона обычную картинку, выдающую себя за выход 3D. `slot` не передаётся:
+           плитка полосы не слот верстака, и результат правки никуда вставать не обязан. */
+        onEdit={
+          kind === 'render' && !writesOff && !modelUrl
+            ? {
+                onClick: () => setEditingId(picture.id ?? 0),
+                ariaLabel: `edit render ${picture.ordinal ?? ''} — draw over this picture`.trim(),
+                title:
+                  'draw over this picture — saving makes a NEW picture; the original is never overwritten',
+              }
+            : undefined
+        }
         onSplit={
           kind === 'render' && !writesOff && !modelUrl
             ? {
@@ -376,11 +484,18 @@ export function OutputsSection({
               }
             : undefined
         }
+        /* ⚠ ЯРЛЫК ГОВОРИТ ТО, ЧЕГО НЕ ГОВОРИТ САМ КАДР. У прогона С ПОСТЕРОМ кадр — обычный
+           растр, и по нему не видно, что за ним модель: слово нужно. У прогона БЕЗ постера в
+           кадре стоит `.glb`, и примитив уже пишет «3d model» посреди него — второй такой же
+           ярлык поверх был бы одним фактом, сказанным дважды. Пометка при этом называется
+           всегда: это состояние, а не тип файла. */
         badge={
           modelUrl
             ? chosen
               ? '3d · selected'
-              : '3d model'
+              : posterShown
+                ? '3d model'
+                : undefined
             : selectable && chosen
               ? 'selected'
               : undefined
@@ -389,7 +504,13 @@ export function OutputsSection({
           stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`,
           stripProvenance(band, picture),
         ]}
+        /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
+           под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
+           `StripCell` даёт ему свою отбивку, и ряд ячеек разъезжается по высоте оттого, у какой
+           из них дверь жива. Единственные жильцы ряда — двери рендера (плашка/`split`/`mark ▸`) и
+           ОТКАЗ пометки; живая пометка уехала на кадр. */
         action={
+          kind === 'render' || (selectable && (!carries || writesOff)) ? (
           <div className='flex flex-wrap items-center gap-1'>
             {/* ═══ ДВЕРЬ В СЛОТ — ЗДЕСЬ, ГДЕ ЛЕЖИТ МАТЕРИАЛ (J-25) ═════════════════════════════
                 Четыре состояния, и каждое отвечает на СВОЙ вопрос человека:
@@ -489,26 +610,25 @@ export function OutputsSection({
                   />
                 </span>
               ))}
-            {/* ФАЙЛ ОТДАЁТСЯ ДО ВСЯКОГО ПРОСМОТРА И НЕЗАВИСИМО ОТ НЕГО. Модель — то, за что
-                заплачено; просмотрщик — удобство поверх неё, и его отказ не должен уносить
-                предмет вместе с собой. */}
-            {modelUrl && (
-              <>
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  onClick={() => setOpenModel(modelUrl)}
-                  title='open the model in the viewer'
-                >
-                  open
-                </Button>
-                <Button asChild variant='secondary' size='xs'>
-                  <a href={modelUrl} target='_blank' rel='noopener noreferrer' download>
-                    download
-                  </a>
-                </Button>
-              </>
-            )}
+            {/* ═══ ЗДЕСЬ СТОЯЛИ `open` И `download` — ОБЕ СНЯТЫ (E-25) ═══════════════════════
+                Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на
+                карточку а не кнопками снизу а кнопки DOWNLOAD быть не должно она только во вьере».
+
+                `open` НЕ ПОТЕРЯН, А ПЕРЕЕХАЛ В ПРИМИТИВ: у плитки, за которой стоит модель,
+                поверхность открывает просмотрщик модели, а по наведению в верхнем правом углу
+                появляется объявленный орган `open 3d` (`picture-tile.tsx`). Это верно для ОБЕИХ
+                строк 3D — и для постера, и для самого `.glb`, — потому что кадр теперь всегда
+                есть (разбор у `src` выше).
+
+                `download` СНЯТ НАСОВСЕМ, и довод «файл отдаётся до всякого просмотра и независимо
+                от него» ПРОВЕРЕН, а не отброшен: ссылка на файл в окне модели стоит НАД сценой и
+                от неё не зависит — так написана её собственная шапка (`threed/model-modal.tsx`).
+                Упавший разбор `.glb`, выключенный WebGL, нехватка памяти уносят картинку, но не
+                ссылку. Файл стал на одно нажатие дальше и не стал недостижимым.
+
+                А ВОТ ОТКАЗ ПОМЕТКИ ОСТАЛСЯ ЗДЕСЬ, И ЭТО НЕ НЕДОДЕЛКА: дверь, которой нельзя
+                воспользоваться, обязана быть ВИДНА без наведения — довод у пропа `onSelect`
+                выше. Живая пометка ушла на кадр; неживая говорит словом на прежнем месте. */}
             {!selectable ? null : !carries ? (
             <InertDoor label='select' reason={SELECT_MARK_NOT_STATED} />
           ) : writesOff ? (
@@ -521,31 +641,13 @@ export function OutputsSection({
               }
             />
           ) : (
-            <Button
-              variant='secondary'
-              size='xs'
-              disabled={setPictureSelected.isPending}
-              onClick={() =>
-                setPictureSelected.mutate({
-                  pictureId: picture.id ?? 0,
-                  selected: !chosen,
-                })
-              }
-              /* ⚠ РЕДАКЦИЯ ДЛЯ РЕНДЕРА ОТСЮДА УБРАНА, И ЭТО НЕ ПОТЕРЯ, А ДОКАЗАННАЯ МЁРТВОСТЬ.
-                 Дверь рисуется только при `selectable`, то есть только у 3D (J-23) — компилятор
-                 сузил `kind` до `'threed'` и назвал ветку рендера недостижимой сам. Слова про
-                 «3D ставит помеченные рендеры в стороны» жили ровно в той ветке; ставить их
-                 больше негде, потому что и ставить пометку на рендер больше негде. */
-              title={
-                chosen
-                  ? 'take the mark off — with none chosen, ARTIFACTS goes back to listing every picture of this kind'
-                  : 'mark this picture as chosen — ARTIFACTS offers the chosen ones for markup'
-              }
-            >
-              {chosen ? 'un-select' : 'select'}
-            </Button>
-            )}
+            /* ЖИВАЯ ПОМЕТКА СТОИТ НА КАДРЕ (проп `onSelect` выше), поэтому под кадром её нет.
+               Ветка оставлена пустой намеренно: три состояния одной двери читаются подряд, и
+               «а где же третье» — вопрос, который иначе задавал бы каждый следующий читатель. */
+            null
+          )}
           </div>
+          ) : undefined
         }
       />
     );
@@ -680,10 +782,20 @@ export function OutputsSection({
           (довод — у его вызова выше). */}
       {split.modal}
 
-      {/* ОДНО ОКНО НА ВЕСЬ РАЗДЕЛ, А НЕ ПО ОДНОМУ НА ЯЧЕЙКУ: сцена WebGL дорога, и держать её
-          смонтированной под каждой плиткой — это упереться в потолок живых контекстов браузера. */}
-      {openModel && (
-        <ThreedModelModal url={openModel} title='3d model' onClose={() => setOpenModel(null)} />
+      {/* ОДИН РЕДАКТОР НА ВЕСЬ РАЗДЕЛ, ПО ИМЕНИ ЦЕЛИ (E-3). Держать его внутри ячейки значило
+          бы столько модалок, сколько плиток; булев флаг открыл бы их разом над всеми.
+          `slot={null}` — плитка полосы не слот верстака: машинная векторизация внутри честно
+          откажет («the machine reads the bench»), а рисование поверх работает целиком. */}
+      {editingId > 0 && rows.some((r) => (r.picture.id ?? 0) === editingId) && (
+        <VectorModal
+          open
+          onOpenChange={(next: boolean) => !next && setEditingId(0)}
+          techCardId={techCardId}
+          band={band}
+          base={rows.find((r) => (r.picture.id ?? 0) === editingId)!.picture}
+          slot={null}
+          disabled={disabled}
+        />
       )}
 
       {/* J-19 (владелец, дословно): сноска «Every render this card holds, newest first…» снята

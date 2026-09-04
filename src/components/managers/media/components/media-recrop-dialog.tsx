@@ -19,10 +19,21 @@ export function MediaRecropDialog({
   media,
   open,
   onOpenChange,
+  onCropped,
 }: {
   media: common_MediaFull | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * КОМУ ОТДАТЬ КАДРИРОВАННУЮ КОПИЮ, КРОМЕ БИБЛИОТЕКИ (E-9).
+   *
+   * Диалог всегда рождал НОВЫЙ объект медиа и на этом заканчивался: библиотека перечитывала себя
+   * и показывала копию рядом с оригиналом. Экрану, который кадрирует картинку РАДИ СВОЕГО СЛОТА
+   * («предлагай сразу кропнуть картинку с текстурой на аплоуд»), этого мало — ему нужен сам
+   * объект, чтобы поставить его на место исходного. Проп необязателен, и без него поведение
+   * побайтово прежнее.
+   */
+  onCropped?: (media: common_MediaFull) => void;
 }) {
   const [source, setSource] = useState<string | undefined>(undefined);
   const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined);
@@ -64,8 +75,11 @@ export function MediaRecropDialog({
   const handleSave = async (croppedDataUrl: string) => {
     setBusy(true);
     try {
-      await uploadMedia.mutateAsync(croppedDataUrl);
+      const uploaded = await uploadMedia.mutateAsync(croppedDataUrl);
       showMessage('cropped copy uploaded', 'success');
+      // Извещение ПОСЛЕ успешной загрузки и ДО закрытия: слушатель ставит копию себе, а окно
+      // закрывается уже над сделанным. Порядок наоборот отдавал бы объект в размонтированное окно.
+      if (uploaded) onCropped?.(uploaded);
       onOpenChange(false);
     } catch (error) {
       showMessage(error instanceof Error ? error.message : 'the upload failed', 'error');

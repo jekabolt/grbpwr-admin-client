@@ -6,6 +6,7 @@ import { kindDef } from './kinds';
 import {
   AnnotationSurface,
   rememberPen,
+  type AnnotationEditorSlotOpts,
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
@@ -249,7 +250,7 @@ export function useAnnotationSurface({
     onUndo: editable ? history.undo : undefined,
     canUndo: history.canUndo,
     renderEditor: editable
-      ? (key: string, { close }: { close: () => void }) => {
+      ? (key: string, { close, arrows }: AnnotationEditorSlotOpts) => {
           const i = Number(key);
           const a = annotations[i];
           if (!a) return null;
@@ -291,6 +292,7 @@ export function useAnnotationSurface({
                 close();
               }}
               onClose={close}
+              arrows={arrows}
               renderPiecePicker={renderPiecePicker}
             />
           );

@@ -463,7 +463,7 @@ export function MoodBoard({
           renderFocusedFooter={(view) =>
             inputIds.has(view.mediaId) ? <Pill tone='ink'>in the input</Pill> : null
           }
-          renderEditor={(key, { close }) => {
+          renderEditor={(key, { close, arrows }) => {
             const row = callouts.at(key);
             if (!row) return null;
             const { index, value } = row;
@@ -496,9 +496,10 @@ export function MoodBoard({
                   rememberPen({ filled: v });
                   callouts.setFilled(index, v);
                 }}
-                onDemote={
-                  (value.kind ?? 'pin') === 'pin' ? undefined : () => callouts.demote(index)
-                }
+                // ЛУЧИ ЗАПИСКИ приходят от поверхности: взвод «жду клик по кадру» принадлежит
+                // кадру, а не форме. Здесь стояла «make it a point» — владелец её убрал (E-27), и
+                // вместе с ней ушёл единственный смысл разжалования: пина в палитре больше нет.
+                arrows={arrows}
                 onRemove={() => {
                   callouts.removeByKey(key);
                   close();

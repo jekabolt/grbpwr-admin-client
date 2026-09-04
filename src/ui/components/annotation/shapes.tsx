@@ -17,9 +17,11 @@ export {
   simplifyToLimit,
   nearestOnPolyline,
   projectOnSegment,
+  bracketPath,
+  leaderTarget,
   type ShapePoint,
 } from './geometry';
-import { arcPath, inkPath, polygonPath } from './geometry';
+import { arcPath, bracketPath, inkPath, leaderTarget, polygonPath } from './geometry';
 import type { ShapePoint } from './geometry';
 import { kindDef } from './kinds';
 
@@ -40,7 +42,6 @@ export const calloutInk = (color?: string) =>
 
 /** Толщина линий и размеры фигур в пикселях кадра — не масштабируются вместе с картинкой. */
 const TICK = 7;
-const BRACKET_DROP = 10;
 /** След маркера тяжелее чертёжных фигур: он и должен читаться фломастером, а не волосяной линией. */
 const INK_WIDTH = 2;
 /** Пунктир ФИГУРЫ заведомо крупнее пунктира ЛИДЕРА (`2 2`) — иначе их не различить. */
@@ -256,6 +257,9 @@ export function CalloutShape({
   // прошли ли данные через сегодняшний сервер: архив релиза и клон сезона приходят мимо него.
   const dash = dashed && def.dashable;
   const arrow = `url(#${arrowMarkerId(color)})`;
+  // ЦЕЛЬ ЛИДЕРА СЧИТАЕТСЯ ОДНОЙ ФУНКЦИЕЙ С ХИТ-СЛОЕМ (`geometry.leaderTarget`). Пока она жила
+  // здесь по месту, слой попадания о лидере не знал и по нему не ловил.
+  const lt = leaderTarget(def.key, pts);
 
   switch (def.key) {
     case 'pin':
@@ -305,7 +309,7 @@ export function CalloutShape({
             width={w}
             halo={halo}
           />
-          <Leader from={label} to={{ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }} color={color} />
+          {lt && <Leader from={label} to={lt} color={color} />}
         </g>
       );
     }
@@ -313,25 +317,10 @@ export function CalloutShape({
     case 'bracket': {
       const [p, q] = pts;
       if (!q) return null;
-      const dx = q.x - p.x;
-      const dy = q.y - p.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = (-dy / len) * BRACKET_DROP;
-      const ny = (dx / len) * BRACKET_DROP;
       return (
         <g>
-          <Stroke
-            d={`M${p.x},${p.y} L${p.x + nx},${p.y + ny} L${q.x + nx},${q.y + ny} L${q.x},${q.y}`}
-            color={color}
-            width={w}
-            dashed={dash}
-            halo={halo}
-          />
-          <Leader
-            from={label}
-            to={{ x: (p.x + q.x) / 2 + nx, y: (p.y + q.y) / 2 + ny }}
-            color={color}
-          />
+          <Stroke d={bracketPath(p, q)} color={color} width={w} dashed={dash} halo={halo} />
+          {lt && <Leader from={label} to={lt} color={color} />}
         </g>
       );
     }
@@ -346,7 +335,7 @@ export function CalloutShape({
               на пологой дуге его нет. */}
           <Dot p={p} color={color} />
           <Dot p={q} color={color} />
-          <Leader from={label} to={mid} color={color} />
+          {lt && <Leader from={label} to={lt} color={color} />}
         </g>
       );
     }
@@ -358,7 +347,7 @@ export function CalloutShape({
         <g>
           {filled && <path d={d} fill={`url(#${hatchId(color)})`} stroke='none' />}
           <Stroke d={d} color={color} width={w} dashed={dash} halo={halo} />
-          <Leader from={label} to={centroidOf(pts)} color={color} />
+          {lt && <Leader from={label} to={lt} color={color} />}
         </g>
       );
     }
@@ -371,14 +360,6 @@ export function CalloutShape({
     default:
       return null;
   }
-}
-
-/** Среднее вершин — для лидера зоны. Полный центроид живёт в geometry и нужен постановке. */
-function centroidOf(pts: ShapePoint[]): ShapePoint {
-  return {
-    x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
-    y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
-  };
 }
 
 // ── НЕЗАВЕРШЁННАЯ ПОСТАНОВКА ────────────────────────────────────────────────────────────────────

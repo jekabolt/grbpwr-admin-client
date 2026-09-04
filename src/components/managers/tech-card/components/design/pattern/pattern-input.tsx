@@ -1,6 +1,8 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
+import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { useMemo, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
+import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
@@ -91,6 +93,34 @@ export function PatternInput({
   const sourceUrl = source?.media?.fullSize?.mediaUrl || source?.media?.thumbnail?.mediaUrl || '';
   const sourceId = source?.id ?? 0;
 
+  /**
+   * ═══ КРОП ПРЕДЛАГАЕТСЯ СРАЗУ ПОСЛЕ ЗАГРУЗКИ — E-9 ═══════════════════════════════════════════
+   *
+   * Владелец, дословно: «в MAKE A PATTERN предлагай сразу кропнуть картинку с текстурой на
+   * аплоуд».
+   *
+   * ПОЧЕМУ ЭТО НЕ ПРИДИРКА К ЛИШНЕМУ КЛИКУ, А ДЕНЬГИ. Источником плитки чаще всего служит
+   * ФОТОГРАФИЯ живой ткани — и на ней, кроме ткани, есть стол, рука, край рулона и половина
+   * мастерской. Модель «читает картинку целиком»: лишнее в кадре уезжает в оплаченный прогон
+   * мотивом, которого в ткани нет. Кадрировать ПОСЛЕ — значит купить плитку второй раз.
+   *
+   * ⚠ «НА АПЛОУД» — ЭТО РОВНО ДВЕРЬ ЗАГРУЗКИ, А НЕ ЛЮБОЕ ПОЯВЛЕНИЕ ИСТОЧНИКА, И РАЗЛИЧИЕ ЗДЕСЬ
+   * ЕСТЬ ЧЕМ СДЕЛАТЬ. Источник приходит ДВУМЯ путями: `MediaSlot` (загрузка, ⌘V, бросок,
+   * библиотека) и ЧИП ПОЛКИ — «или лоскут этой карточки». Лоскут уже кадрирован тем, кто его
+   * заводил; окно, распахивающееся на клик по чипу, было бы модалкой на ровном месте (PRODUCT.md:
+   * «Modal as first thought. Modals are usually laziness»). Поэтому окно поднимает САМ обработчик
+   * двери загрузки, а не эффект на изменение `sourceId`: эффект обоих путей не различает вовсе.
+   *
+   * ⚠ ДВЕРЬ `crop ▸` ПРИ ЭТОМ ВИДНА ВСЕГДА, пока есть что резать. Решение «обрезать» приходит и
+   * позже — уже посмотрев на лоскут, — а окно, которое нельзя открыть повторно, это тупик.
+   *
+   * ⚠ КРОП РОЖДАЕТ НОВОЕ МЕДИА, А НЕ ПРАВИТ СТАРОЕ, и это поведение диалога, а не наше решение.
+   * Оригинал остаётся в библиотеке нетронутым; сюда возвращается КОПИЯ и встаёт источником
+   * прогона. Сказано словами под кадром, потому что «обрезал и потерял оригинал» — самый дорогой
+   * из возможных здесь домыслов.
+   */
+  const [cropping, setCropping] = useState(false);
+
   return (
     <div
       data-pattern-act='make'
@@ -118,7 +148,11 @@ export function PatternInput({
             alt='pattern source'
             onSelect={(media) => {
               const first = media[0];
-              if (first?.id) onPick(first);
+              if (!first?.id) return;
+              onPick(first);
+              // «предлагай СРАЗУ кропнуть … НА АПЛОУД» — дословно. Окно поднимается здесь и
+              // только здесь; чип полки его не поднимает (довод у `cropping` выше).
+              setCropping(true);
             }}
             onClear={sourceUrl && !disabled ? onClear : undefined}
           />
@@ -129,6 +163,25 @@ export function PatternInput({
         <Text size='nano' variant='label' component='span'>
           {disabled ? 'read-only' : '⌘V · drop · browse'}
         </Text>
+
+        {/* ДВЕРЬ КРОПА — ПОД КАДРОМ, ВИДИМАЯ, ВСЕГДА, ПОКА ЕСТЬ ЧТО РЕЗАТЬ (E-9). Окно
+            предлагается само один раз; кнопка отвечает за все следующие разы. */}
+        {sourceId > 0 && !disabled && (
+          <>
+            <Button
+              variant='secondary'
+              size='xs'
+              data-pattern-crop={sourceId}
+              onClick={() => setCropping(true)}
+              title='trim the picture down to the cloth itself — the table, the hand and the background reach the paid prompt as part of the motif'
+            >
+              crop ▸
+            </Button>
+            <Text size='nano' variant='label' component='span' className='normal-case'>
+              a crop is saved as a new file; this one is left as it is
+            </Text>
+          </>
+        )}
       </div>
 
       {/* ─── ТКАНИ КАРТОЧКИ КАК ИСТОЧНИК, В ОДИН КЛИК ─────────────────────────────────────── */}
@@ -210,6 +263,22 @@ export function PatternInput({
             (DESIGN.md, «две серых»), и здесь она отделяет «из чего делаем» от «делаем». */}
         {children && <div className='mt-3 border-t border-hairline pt-2'>{children}</div>}
       </div>
+
+      {/* ⚠ ОКНО МОНТИРУЕТСЯ ТОЛЬКО ПРИ ЖИВОМ ИСТОЧНИКЕ. `MediaRecropDialog` тянет оригинал
+          блобом при каждом открытии; смонтированное впустую, оно било бы в сеть на каждой
+          отрисовке экрана, где картинки ещё нет. */}
+      {source && (
+        <MediaRecropDialog
+          media={source}
+          open={cropping}
+          onOpenChange={setCropping}
+          /* КОПИЯ СТАНОВИТСЯ ИСТОЧНИКОМ ПРОГОНА. Родство (`sourceAssetId`) при этом ОБНУЛЯЕТСЯ, и
+             это правда: обрезанная копия — новый файл, и лоскутом карточки она уже не является.
+             Соврать здесь значило бы записать в родословную плитки ассет, из которого её на самом
+             деле не делали. */
+          onCropped={(cropped) => onPick(cropped, 0)}
+        />
+      )}
     </div>
   );
 }

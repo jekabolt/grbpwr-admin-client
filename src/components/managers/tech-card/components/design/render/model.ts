@@ -707,12 +707,15 @@ export function threedGate(
    * slots). The finer refusal below then names the colourway rather than the card.
    */
   if (!renderBenchOccupied(band.renderBenchColorwayIds, colorwayId)) {
-    const named = colorwayLabel.trim();
+    /* ⚠ ФРАЗА БОЛЬШЕ НЕ ПОСЫЛАЕТ К СНЕСЁННОМУ ОРГАНУ. Прежняя редакция советовала «выбери
+       колорвею, у которой есть рендеры» — а пикера колорвеи с круга 16 нет ни на одном экране,
+       и всякий вызов приходит с нулём. То есть совет был неисполним, и исполнимой оставалась
+       только вторая половина: «отрендерь заново», то есть заплати ещё раз за то, что уже есть.
+       Ветка с именем колорвеи мертва по той же причине и снята, а не оставлена про запас. */
     return {
       ok: false,
-      reason: named
-        ? `${named} has no fabric render on its bench yet — render this colourway first, then put its sides in. 3D reads ONLY that colourway's bench, never a mixture`
-        : 'the colourway-less bench holds no fabric render — render one without a colourway, or pick a colourway that has renders. 3D reads ONE bench, never a mixture',
+      reason:
+        'no fabric render stands on this card yet — make one in FABRIC RENDER, then put its sides into FABRIC RENDER SLOTS. 3D is built from those four sides and from nothing else',
       // НЕЧЕГО СТАВИТЬ — СНАЧАЛА СДЕЛАТЬ. Это `no_fabric_render` сервера, слово в слово по
       // предмету: на верстаке пусто.
       next: 'render',
@@ -738,7 +741,6 @@ export function threedGate(
      * убраны с 3D по слову владельца (J-26), и отказ, посылающий к несуществующему органу, — это
      * отказ, который нельзя исполнить.
      */
-    const named = colorwayLabel.trim();
     return {
       ok: false,
       // ═══ ОДНА СТОРОНА ОБЯЗАТЕЛЬНА, И ЭТО ФРОНТ (K-10/K-11) ═══════════════════════════════════
@@ -747,7 +749,10 @@ export function threedGate(
       // отвергается бесплатно (`provider_bad_request`) — а без спинки не отвергается. Отказ,
       // называющий обязательным то, что обязательным не является, запрещает законный прогон.
       reason:
-        `${named ? `${named}'s render bench` : 'the render bench'} holds renders, but not on FRONT — ` +
+        /* ⚠ ИМЯ КОЛОРВЕИ ЗДЕСЬ БОЛЬШЕ НЕ НАЗЫВАЕТСЯ: пикера нет ни на одном экране (E-16),
+           всякий вызов приходит с нулём, и ветка с именем была мертва. Оставлять мёртвую
+           половину «про запас» — это второй смысл у одной фразы, расходящийся молча. */
+        'the render bench holds renders, but not on FRONT — ' +
         'and FRONT is the one side 3D cannot do without: the provider is handed it as the primary ' +
         'view and rejects a build that has none. Put a render into the FRONT slot on FABRIC RENDER. ' +
         'Nothing is reserved and nothing is charged until it is there',

@@ -103,7 +103,29 @@ export function OnModelStudio({
    * тогда, когда тело говорило «шли все».
    */
   const wireColour = useMemo(
-    () => recolourWireColour(band, colour.recipe, picked?.assetId ?? 0),
+    () => ({
+      ...recolourWireColour(band, colour.recipe, picked?.assetId ?? 0),
+      /**
+       * ═══ ИМЯ ЦВЕТА НЕ УЕЗЖАЕТ С ЭТОГО ЭКРАНА — E-11, И ЭТО ДВЕРЬ, А НЕ СКРЫТОЕ ПОЛЕ ════════
+       *
+       * Владелец: «в GENERATION — ON MODEL текстфилд NAME не нужен». Поле снято
+       * (`showName={false}` у ряда цвета) — но снять ТОЛЬКО поле значило бы оставить писателя без
+       * органа: `code` приезжает в черновик ещё и с плашки прошлого рецепта карточки, и
+       * `colourPhrase` печатает его в промпт ПАРОЙ с hex. Экран без имени покупал бы «colourway
+       * dusty rose — the exact value is #001122», а человек не увидел бы ни имени, ни способа его
+       * снять.
+       *
+       * ⚠ ПОЭТОМУ ЧИСТКА СТОИТ У ЕДИНСТВЕННОЙ ДВЕРИ НА ПРОВОД, А НЕ У ПОЛЯ. `wireColour` читают
+       * ВСЕ четверо — ворота, строка у кнопки, заголовок ряда и опись «what the model gets», —
+       * поэтому все четверо видят ровно то, что уедет. Правка у поля держалась бы порядком
+       * событий и мимо плашки не проходила бы вовсе.
+       *
+       * ЧТО ЭТИМ ПОТЕРЯНО, ВСЛУХ: цель перекраса теперь заявляется ЗНАЧЕНИЕМ и СЛОВАМИ, без
+       * имени. Ворота это принимают (`no_target_colour` довольствуется hex или words), и промпт
+       * тоже: ветка `colourPhrase` без кода печатает hex голым.
+       */
+      code: '',
+    }),
     [band, colour.recipe, picked?.assetId],
   );
 
@@ -238,10 +260,19 @@ export function OnModelStudio({
               копию компонента — то есть заплатив ровно тем дефектом, ради устранения которого его
               и сводили в один. Цвет на перекрасе выбирают тем же жестом, потому что это тот же
               предмет. Если коды на перекрасе владельцу нужны — это один проп, а не развилка. */}
+          {/* ⚠ ВТОРАЯ ПОДСКАЗКА СНЯТА ЦЕЛИКОМ — E-10, ДОСЛОВНО «этот текст не нужен». Это был
+              абзац «The colour goes to the model as a name and a hex together…»: четыре строки, из
+              которых две объясняли механику, которой на экране больше нет (имени, E-11), а две —
+              доктрину «рецепт ≠ карточка», сказанную на этой полосе уже трижды. Подсказка ПЕРВОЙ
+              ветки оставлена: она описывает ЖИВОЕ взаимодействие двух выбранных вещей (цвет
+              перетонирует выбранный паттерн), которого больше нигде не видно. */}
           <ColourStatementRow
             band={band}
             draft={colour}
             disabled={disabled}
+            /* E-11: имени у цели перекраса нет — ни поля, ни значения на проводе. Довод целиком
+               у `wireColour` выше и в шапке `ColourStatementRow`. */
+            showName={false}
             hint={
               picked ? (
                 <>
@@ -250,14 +281,7 @@ export function OnModelStudio({
                   own it repaints the cloth already in the photograph, keeping its weave, folds and
                   shadows.
                 </>
-              ) : (
-                <>
-                  The colour goes to the model as a name and a hex together. It repaints the garment
-                  only: the weave, the folds and the shadows of the photograph are kept, and nothing
-                  else in the frame is touched. Picking one states nothing about the style — a
-                  colourway is signed off by a lab dip, not by a picture.
-                </>
-              )
+              ) : undefined
             }
           />
 

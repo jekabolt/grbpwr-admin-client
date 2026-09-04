@@ -82,6 +82,83 @@ export function polygonCentroid(pts: ShapePoint[]): ShapePoint {
   return { x: cx / (3 * a2), y: cy / (3 * a2) };
 }
 
+// ── СКОБА («SPAN») ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Насколько скоба отступает от прямой между якорями, ПИКСЕЛЕЙ КАДРА.
+ *
+ * ЖИВЁТ ЗДЕСЬ, А НЕ В ОТРИСОВКЕ, И ЭТО ОПЛАЧЕНО ДЕФЕКТОМ. Число знали двое: тот, кто рисует скобу,
+ * и тот, кто ловит по ней мышь. Второй его не знал вовсе — хит-путь шёл ПО ХОРДЕ между якорями,
+ * то есть по линии, которой на кадре нет. Полоса попадания шириной 12px ловит ±6px от хорды,
+ * перекладина стоит на 10px, и промах в 4px означал ровно то, что владелец и сказал: «выделение
+ * колаута спан происходит не по всей видимой поверхности». Заодно нажималось пустое место между
+ * якорями, где не нарисовано ничего.
+ */
+export const BRACKET_DROP = 10;
+
+const mid = (p: ShapePoint, q: ShapePoint): ShapePoint => ({
+  x: (p.x + q.x) / 2,
+  y: (p.y + q.y) / 2,
+});
+
+/** Нормаль к отрезку p→q длиной `d`. Вырожденный отрезок даёт нулевую длину — делить не на что. */
+function offsetNormal(p: ShapePoint, q: ShapePoint, d: number): ShapePoint {
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: (-dy / len) * d, y: (dx / len) * d };
+}
+
+/** Четыре точки скобы: ножка — перекладина — ножка. Ими рисуют и по ним же ловят. */
+export function bracketPoints(p: ShapePoint, q: ShapePoint): ShapePoint[] {
+  const n = offsetNormal(p, q, BRACKET_DROP);
+  return [p, { x: p.x + n.x, y: p.y + n.y }, { x: q.x + n.x, y: q.y + n.y }, q];
+}
+
+export function bracketPath(p: ShapePoint, q: ShapePoint): string {
+  return `M${bracketPoints(p, q)
+    .map((t) => `${t.x},${t.y}`)
+    .join(' L')}`;
+}
+
+// ── ЛИДЕР ───────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * КУДА УПИРАЕТСЯ ЛИДЕР — ОДНА ФУНКЦИЯ НА ОТРИСОВКУ И НА ПОПАДАНИЕ.
+ *
+ * Лидер — та же видимая линия указания, что и сама фигура: он тянется от плашки к фигуре и по нему
+ * в эту фигуру и целятся. Пока цель лидера считалась внутри отрисовки, хит-слой о нём не знал —
+ * и пунктирная линия через полкадра не нажималась нигде.
+ *
+ * `null` — у вида лидера нет вовсе (пин, след): у первого нет линии, у второго плашка стоит на
+ * самом штрихе.
+ */
+export function leaderTarget(kindKey: string, pts: ShapePoint[]): ShapePoint | null {
+  if (pts.length === 0) return null;
+  switch (kindKey) {
+    case 'dim':
+      return pts.length >= 2 ? mid(pts[0], pts[1]) : null;
+    case 'bracket': {
+      if (pts.length < 2) return null;
+      const n = offsetNormal(pts[0], pts[1], BRACKET_DROP);
+      const m = mid(pts[0], pts[1]);
+      return { x: m.x + n.x, y: m.y + n.y };
+    }
+    case 'arc':
+      // Горб дуги: середина ХРАНЕНИЯ — это точка НА кривой, туда лидер и приходит.
+      return pts.length >= 3 ? pts[1] : null;
+    case 'polygon':
+      // Среднее вершин, а не полный центроид: так рисуется лидер зоны, и хит обязан совпасть с
+      // нарисованным, а не быть «правильнее» его.
+      return {
+        x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
+        y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
+      };
+    default:
+      return null;
+  }
+}
+
 // ── СВОБОДНЫЙ СЛЕД ──────────────────────────────────────────────────────────────────────────────
 
 /**

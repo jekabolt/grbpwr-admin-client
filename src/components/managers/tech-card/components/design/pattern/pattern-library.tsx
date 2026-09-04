@@ -1,11 +1,6 @@
-import type {
-  GetDesignBandResponse,
-  common_AdminColorwayRef,
-  common_DesignAsset,
-} from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_DesignAsset } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
@@ -14,13 +9,13 @@ import { Section } from 'ui/components/section';
 import { Tiles } from 'ui/components/tiles';
 import Text from 'ui/components/text';
 
-import { ASSET_NAME_MAX, ASSET_PATTERN, assetFull, assetLabel, assetThumb, assetWornBy } from '../assets/model';
+import { ASSET_NAME_MAX, ASSET_PATTERN, assetFull, assetLabel, assetThumb } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { runIsOnPage } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
-import { colorwayLabel } from '../colorway-picker';
 import { PictureTile } from '../picture-tile';
+import { useDesignWrites } from '../use-design-band';
 import { Strip, StripCell } from '../render/strip-cell';
 import {
   SEAM_WORDS,
@@ -75,14 +70,36 @@ import {
  * зумом и одной кнопкой. Полоса исчезает целиком, когда таких плиток нет, — а это нормальное
  * состояние карточки, где всё положено.
  *
- * ЧТО ЗДЕСЬ ЗАПИСЬ КАРТОЧКИ, А ЧТО НЕТ. Чипы носки пишут `SetDesignAssetColorway` — факт о стиле,
- * переживающий прогон, и после J-20 это ЕДИНСТВЕННОЕ место админки, где он ставится. Пометка
- * `selected` на картинке (вердикт о КАДРЕ) сюда не переехала и не должна: её читает и ставит
- * ARTIFACTS, там же, где она и фильтрует.
+ * ═══ E-15 — ЧТО ЗНАЧИТ `KEEP` ТЕПЕРЬ, И ЧЕГО ОНО БОЛЬШЕ НЕ ЗНАЧИТ ════════════════════════════
  *
- * ЧИПА «NO COLOURWAY» В РЯДУ НЕТ, И ЭТО НЕ ЗАБЫТЫЙ СЛУЧАЙ. Назначение — заявление о КОЛОРВЕЕ
- * («этот цвет носит эту ткань»), а у безколорвейного верстака носителя нет. Снятие делается
- * повторным нажатием на чип текущего носителя — там же, где назначение, тем же пальцем.
+ * Владелец, дословно: «если мы сделали keep в PATTERNS OF THIS CARD это не значит что надо их
+ * сразу добавлять как текстуру в рендер это значит что мы его просто проименовали и он тогда
+ * должен появлять в артефактах».
+ *
+ * ДВЕ ПРАВКИ, ОБЕ БУКВАЛЬНЫЕ:
+ *
+ *   1. `KEEP` БОЛЬШЕ НЕ ДЕЛАЕТ ПЛИТКУ ТЕКСТУРОЙ РЕНДЕРА. Механизмом этого были ЧИПЫ НОСКИ
+ *      (`SetDesignAssetColorway`, «worn by ROSSO»): назначенная колорвею ткань ЗАСЕВАЛА подачу
+ *      рендера сама (`useColourDraft` → `fabricOfColorway`), то есть открытие экрана уже несло
+ *      выбранную текстуру, которую человек не выбирал. Чипы сняты целиком. Это не расширение
+ *      слова владельца, а его исполнение: он назвал ровно тот эффект, который они производили, и
+ *      той же волной снял колорвеи с обоих экранов (E-1/E-16), после чего у носки не осталось ни
+ *      одного читателя вовсе.
+ *      ⚠ КОЛОНКА `design_asset.colorway_id` ЖИВА И НЕ ТРОНУТА. Снят ОРГАН; данные, ручка
+ *      `SetDesignAssetColorway` и FK на месте, и удаление данных — отдельное решение владельца.
+ *      Значение, проставленное раньше, просто больше нигде не читается.
+ *
+ *   2. `KEEP` ТЕПЕРЬ ЖЕ КЛАДЁТ ПЛИТКУ В АРТЕФАКТЫ. «Проименовали → появляется в артефактах» —
+ *      это ровно пометка `selected`: сегмент PATTERNS панели ARTIFACTS сужается по ней
+ *      (`artifacts-panel.tsx`, `bandPlates`), и до этой правки названная плитка в него не
+ *      попадала, если на карточке была помечена хоть одна другая. Поэтому дверь пишет ДВА факта
+ *      одним нажатием — ассет полки и пометку кадра, — и говорит об этом на себе.
+ *
+ * ⚠ ДВЕ ЗАПИСИ, И ВТОРАЯ МОЖЕТ ОТКАЗАТЬ ОТДЕЛЬНО. Транзакции на пару у клиента нет и быть не
+ * может: это два разных глагола сервера. Порядок выбран так, что ЧАСТИЧНЫЙ ИСХОД БЕЗВРЕДЕН —
+ * сначала ассет (без него плитка не ткань карточки вовсе), потом пометка (без неё плитка просто
+ * не сузила сегмент). Обратный порядок оставил бы помеченный кадр без ассета, то есть артефакт,
+ * которого нет на полке.
  */
 
 /**
@@ -111,14 +128,12 @@ function TiledFace({ url, alt }: { url: string; alt: string }): JSX.Element {
 
 function Card({
   asset,
-  colorways,
   disabled,
   techCardId,
   seam,
   runId,
 }: {
   asset: common_DesignAsset;
-  colorways: common_AdminColorwayRef[];
   disabled?: boolean;
   techCardId: number;
   /** Сервер померил стык этой плитки и нашёл его видимым. Читается с ПРОГОНА, не с ассета. */
@@ -126,7 +141,7 @@ function Card({
   /** Прогон, сделавший плитку, если он ещё на странице ленты. `0` — спрашивать не у кого. */
   runId: number;
 }): JSX.Element {
-  const { upsertAsset, deleteAsset, setAssetColorway } = useAssetWrites(techCardId);
+  const { upsertAsset, deleteAsset } = useAssetWrites(techCardId);
   const speaks = serverSpeaksDesign();
   const writesOff = !!disabled || !speaks;
 
@@ -135,8 +150,6 @@ function Card({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const id = asset.id ?? 0;
-  const worn = assetWornBy(asset);
-  const wearer = colorways.find((c) => (c.colorwayId ?? 0) === worn) ?? null;
 
   /**
    * ПЕРЕИМЕНОВАНИЕ — `UpsertDesignAsset` С ЭХОМ ВСЕХ ПОЛЕЙ, И ЭТО НЕ ПЕДАНТИЧНОСТЬ.
@@ -174,17 +187,12 @@ function Card({
     );
   };
 
-  const wear = (colorwayId: number) => {
-    if (writesOff || setAssetColorway.isPending) return;
-    setAssetColorway.mutate({ assetId: id, colorwayId: colorwayId === worn ? 0 : colorwayId });
-  };
-
   const thumb = assetThumb(asset);
   const full = assetFull(asset) || thumb;
   const label = assetLabel(asset);
 
   return (
-    <div data-pattern-asset={id} data-worn-by={worn} className='flex flex-col gap-1'>
+    <div data-pattern-asset={id} className='flex flex-col gap-1'>
       {/* ПЛИТКА — «СВОЯ ПОВЕРХНОСТЬ», а не блок в блоке: у неё одна рамка от `PictureTile` и
           никакого второго border+bg вокруг (DESIGN.md, «блок не содержит блока»). */}
       {full ? (
@@ -250,14 +258,22 @@ function Card({
         )}
       </div>
 
-      <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-        {wearer ? `worn by ${colorwayLabel(wearer)}` : 'not worn yet'}
-        {/* ЛЕГАСИ-ЧИСЛО ПОКАЗЫВАЕТСЯ ТОЛЬКО ТОГДА, КОГДА ОНО ЕСТЬ. Новые паттерны его не несут
-            (J-12 снял ряд SCALE, и `repeat_mm` уезжает нулём), а у старых оно настоящее и
-            по-прежнему доезжает в промпт многоткани — молчать о нём было бы потерей. */}
-        {asset.repeatMm ? ` · ${asset.repeatMm} mm` : ''}
-        {runId > 0 ? ` · run ${runId}` : ''}
-      </Text>
+      {/* ⚠ СТРОКА «worn by ROSSO» СНЯТА ВМЕСТЕ С ЧИПАМИ НОСКИ (E-15). Она называла факт, у
+          которого не осталось ни одного читателя, — а подпись под фактом без читателя учит, что
+          механизм жив. Осталось то, чего не видно на картинке. */}
+      {(asset.repeatMm || runId > 0) && (
+        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
+          {[
+            /* ЛЕГАСИ-ЧИСЛО ПОКАЗЫВАЕТСЯ ТОЛЬКО ТОГДА, КОГДА ОНО ЕСТЬ. Новые паттерны его не несут
+               (J-12 снял ряд SCALE, и `repeat_mm` уезжает нулём), а у старых оно настоящее и
+               по-прежнему доезжает в промпт многоткани — молчать о нём было бы потерей. */
+            asset.repeatMm ? `${asset.repeatMm} mm` : '',
+            runId > 0 ? `run ${runId}` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      )}
 
       {/* ⚠ ВЕРДИКТ О СТЫКЕ — РЯДОМ С ПЛИТКОЙ, А НЕ В ИСТОРИИ. Строка ленты говорит `done`, потому
           что прогон и правда завершился и был оплачен; шов сервер померил ОТДЕЛЬНО и записал на
@@ -270,38 +286,11 @@ function Card({
         </span>
       )}
 
-      {/* ─── КТО ЭТО НОСИТ ──────────────────────────────────────────────────────────────────── */}
-      {colorways.length === 0 ? (
-        <Text size='nano' variant='label' component='p' className='normal-case'>
-          this card has no colourways — any render can still pick this pattern under FABRIC RENDER.
-        </Text>
-      ) : (
-        <ChipRow>
-          {colorways.map((c) => {
-            const cid = c.colorwayId ?? 0;
-            const on = cid === worn;
-            return (
-              <Chip
-                key={cid}
-                nonForm
-                selected={on}
-                pressed={on}
-                disabled={writesOff || setAssetColorway.isPending}
-                data-wear-cw={cid}
-                title={
-                  on
-                    ? `press again to take ${label} off ${colorwayLabel(c)} — it goes back to wearing its own colour`
-                    : `make ${label} the fabric of ${colorwayLabel(c)}. One colourway wears one fabric, so this takes ${colorwayLabel(c)} off whatever else was wearing it`
-                }
-                onClick={() => wear(cid)}
-              >
-                {colorwayLabel(c)}
-                {on ? ' ✓' : ''}
-              </Chip>
-            );
-          })}
-        </ChipRow>
-      )}
+      {/* ═══ ЗДЕСЬ СТОЯЛ РЯД ЧИПОВ НОСКИ, И ОН СНЯТ ПО СЛОВУ ВЛАДЕЛЬЦА (E-15) ═══════════════
+          Разбор целиком — в шапке файла. Коротко: чип «ROSSO» делал эту плитку ТЕКСТУРОЙ
+          РЕНДЕРА того цвета — подача засевалась ею сама, — а владелец сказал, что `keep` значит
+          «проименовали», и ничего больше. Вместе с чипами ушла и строка «worn by …»: подпись
+          под фактом, которого никто не читает, учит, что механизм жив. */}
 
       <div className='mt-auto flex flex-wrap items-center gap-1 pt-0.5'>
         {writesOff ? (
@@ -352,10 +341,9 @@ function Card({
         }}
       >
         <Text size='micro' component='p' className='normal-case'>
-          It leaves the card’s cloth shelf, so FABRIC RENDER can no longer pick it.
-          {wearer ? ` ${colorwayLabel(wearer)} goes back to wearing its own colour.` : ''} The
-          PICTURE survives: the tile stays in the run’s history and in ARTIFACTS, and it can be kept
-          again from the strip below.
+          It leaves the card’s texture shelf, so FABRIC RENDER can no longer pick it. The PICTURE
+          survives: the tile stays in the run’s history and in ARTIFACTS, and it can be kept again
+          from the strip below.
         </Text>
       </ConfirmationModal>
     </div>
@@ -365,22 +353,24 @@ function Card({
 export function PatternLibrary({
   band,
   techCardId,
-  colorways,
   disabled,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
-  /** Колорвеи КАРТОЧКИ — приходят из общего состояния студии, вторым чтением не берутся. */
-  colorways: common_AdminColorwayRef[];
   disabled?: boolean;
 }): JSX.Element {
   const { upsertAsset } = useAssetWrites(techCardId);
+  /**
+   * ВТОРАЯ ПОЛОВИНА ЖЕСТА `KEEP` (E-15): пометка кадра, по которой ARTIFACTS сужает свой сегмент
+   * PATTERNS. Отдельный глагол сервера, поэтому и отдельная мутация; порядок и цена частичного
+   * исхода — в шапке файла.
+   */
+  const { setPictureSelected } = useDesignWrites(techCardId);
   const speaks = serverSpeaksDesign();
   const writesOff = !!disabled || !speaks;
 
   const assets = useMemo(() => patternAssets(band), [band]);
   const outputs = useMemo(() => patternOutputs(band), [band]);
-  const dressed = assets.filter((a) => assetWornBy(a) > 0).length;
 
   /**
    * ПРОГОН, СДЕЛАВШИЙ ПЛИТКУ, ИЩЕТСЯ ПО МЕДИА — у ассета нет `picture_id`, у него `media_id`.
@@ -409,18 +399,18 @@ export function PatternLibrary({
   return (
     <Section
       title='patterns of this card'
-      question='— its fabrics; give one to a colourway and every render of that colour starts from it'
+      question='— the tiles it has named; each one is an artifact and a texture FABRIC RENDER can pick'
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
           {assets.length} kept
-          {colorways.length ? ` · ${dressed} worn` : ''}
         </Text>
       }
     >
       {assets.length === 0 ? (
         <Text size='micro' variant='label' component='p' data-pattern-empty className='normal-case'>
-          No pattern is kept yet. Attach a picture above and press GENERATE — what comes back is
-          kept here, it can be renamed, and the colourway that wears it starts every render from it.
+          No pattern is named yet. Attach a picture above and press GENERATE — what comes back is
+          named here, and a named tile is listed in ARTIFACTS and offered in the texture grid under
+          FABRIC RENDER. It is offered there, never chosen for you.
         </Text>
       ) : (
         /* 220 px — НИЖНЯЯ ГРАНИЦА, ПРИ КОТОРОЙ ЛИЦО ЕЩЁ ОТВЕЧАЕТ НА СВОЙ ВОПРОС: каждая из
@@ -433,7 +423,6 @@ export function PatternLibrary({
               <Card
                 key={a.id}
                 asset={a}
-                colorways={colorways}
                 disabled={disabled}
                 techCardId={techCardId}
                 seam={!!found?.seam}
@@ -453,7 +442,7 @@ export function PatternLibrary({
           <GroupLabel
             action={
               <Text size='micro' variant='label' component='span' className='normal-case'>
-                paid for, but no render can use one until it is kept
+                paid for, but unnamed — a nameless tile is in no artifact and in no texture grid
               </Text>
             }
           >
@@ -501,7 +490,7 @@ export function PatternLibrary({
                     ) : shelfFull ? (
                       <InertDoor
                         label='keep'
-                        reason='this card already holds its 40 assets — delete a pattern above, or a cloth under FABRIC RENDER → INPUT → CLOTH, before keeping another'
+                        reason='this card already holds its 40 assets — delete a pattern above, or a texture under FABRIC RENDER → TEXTURE & COLOUR, before naming another'
                       />
                     ) : !known ? (
                       <InertDoor
@@ -513,17 +502,31 @@ export function PatternLibrary({
                         variant='secondary'
                         size='xs'
                         data-keep-tile={picture.id}
-                        disabled={upsertAsset.isPending || mediaId <= 0}
-                        onClick={() =>
+                        disabled={
+                          upsertAsset.isPending || setPictureSelected.isPending || mediaId <= 0
+                        }
+                        onClick={() => {
+                          /* ⚠ ПОРЯДОК НЕСУЩИЙ, И ЭТО ПРО ЧАСТИЧНЫЙ ИСХОД (E-15). Транзакции на
+                             два глагола сервера у клиента нет; значит одна из двух записей может
+                             пройти в одиночку. Ассет ПЕРВЫМ: без него плитка не ткань карточки
+                             вовсе, и оставшаяся одна пометка дала бы артефакт, которого нет на
+                             полке. Обратный порядок стоил бы ровно этого. */
                           upsertAsset.mutate({
                             assetId: 0,
                             kind: ASSET_PATTERN,
                             name: nextPatternName(band),
                             mediaId,
                             repeatMm: repeat,
-                          })
-                        }
-                        title='keep this tile as a fabric of the card — above it can be renamed and given to a colourway, and every render of that colourway then starts from it'
+                          });
+                          /* «и он тогда должен появлять в артефактах» — дословно. Сегмент
+                             PATTERNS панели ARTIFACTS сужается по `selected`, поэтому названная
+                             плитка без пометки в него не попадала, стоило пометить любую другую. */
+                          const pictureId = picture.id ?? 0;
+                          if (pictureId > 0) {
+                            setPictureSelected.mutate({ pictureId, selected: true });
+                          }
+                        }}
+                        title='name this tile: it is filed on the card’s texture shelf, listed in ARTIFACTS, and offered in the texture grid of FABRIC RENDER. It is offered there — it does not become the texture of anything by itself'
                       >
                         keep
                       </Button>

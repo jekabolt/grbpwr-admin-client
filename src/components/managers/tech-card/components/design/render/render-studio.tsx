@@ -1,9 +1,7 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
 import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
 
-import { ColorwaySelect, type ColorwayChoice } from '../colorway-picker';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
 import { FabricRenderSlots } from './fabric-render-slots';
@@ -56,12 +54,36 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * другое. Перестать ОТПРАВЛЯТЬ посадку — правка бэкенда и другой промпт на каждом рендере; это
  * отдельное решение владельца, и здесь оно не принимается молча.
  */
+/**
+ * ═══ КОЛОРВЕЙ УШЁЛ С ЭТОГО ЭКРАНА ЦЕЛИКОМ — E-16, И ЭТО ОРГАН, А НЕ ОСЬ ══════════════════════
+ *
+ * Владелец, дословно: «в GENERATION — FABRIC RENDER мы полностью убираем колорвеи только имена
+ * остаются». Тем же кругом, про соседний экран: «в MAKE A PATTERN оставь только имя убери
+ * колорвей» (E-1).
+ *
+ * ЧТО ИМЕННО СНЯТО: `ColorwaySelect` из заголовочной линейки блока, проп `colorway` и всё, что от
+ * него зависело, — засев черновика тканью колорвея, ремоунт по `key={colorwayId}` в композиторе и
+ * подпись «this card has no colourways…».
+ *
+ * ЧТО НЕ СНЯТО И СНЯТО БЫТЬ НЕ МОГЛО: САМА ОСЬ. `params.colorway_id` живёт в контракте, колонка
+ * `design_bench_slot.colorway_id` — в базе (0356), `render_bench_colorway_ids` — в полосе, и
+ * `DesignRunKindTakesColorway` перечисляет render (сверено на `origin/beta`). Клиент теперь
+ * АДРЕСУЕТ безколорвейный верстак — `0`, — и это не пропуск, а НАСТОЯЩЕЕ, вечно законное значение:
+ * ровно на нём стоит каждый рендер, сделанный до появления оси, и ровно его читает 3D-прогон, не
+ * назвавший колорвея.
+ *
+ * ⚠ И ЭТО ОБЯЗАНО БЫТЬ ОДНО ЧИСЛО НА ВСЮ СТУДИЮ. Верстак рендеров пишется ЗДЕСЬ (`FabricRenderSlots`,
+ * `OutputsSection` → `mark ▸`), а читается на 3D (`threedSides`) и сервером при сборке
+ * (`designSelectBench`). Оставь композитор своё прежнее умолчание («первый колорвей, у которого
+ * есть рендеры») — и 3D смотрело бы в ИМЕНОВАННЫЙ верстак, пока этот экран наполняет
+ * БЕЗЫМЯННЫЙ: вход показывал бы пусто на карточке с готовыми рендерами. Поэтому состояние снято и
+ * у композитора (`studio-tab.tsx`), а не заглушено здесь.
+ */
 export function RenderStudio({
   band,
   techCardId,
   disabled,
   onGoToKind,
-  colorway,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -72,15 +94,10 @@ export function RenderStudio({
    * рассинхронил бы полосу вкладок со своим же содержимым.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
-  /**
-   * КАКОЙ КОЛОРВЕЙ РЕНДЕРИМ (L-2). Владеет состоянием `StudioTab`, экран его только читает и
-   * переключает; при смене он ремоунтит этот экран целиком (`key`), поэтому черновик засевается
-   * заново — см. `./drafts`.
-   */
-  colorway?: ColorwayChoice;
 }): JSX.Element {
-  const colorwayId = colorway?.colorwayId ?? 0;
-  const draft = useColourDraft(band, colorwayId, colorway?.current);
+  /** Безколорвейный верстак — ВЫБРАННОЕ значение, а не отсутствие. Довод целиком в шапке выше. */
+  const colorwayId = 0;
+  const draft = useColourDraft(band, colorwayId, null);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
@@ -218,39 +235,25 @@ export function RenderStudio({
 
   return (
     <>
-      <RenderInputStrip
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        // K-16: вторая дверь плейсхолдера тканей. Без `onGoToKind` её нет вовсе — см. довод там.
-        onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
-      />
+      <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} />
 
       <Section
+        /* ЯКОРЬ ОБЪЯВЛЕН по тому же доводу, что у полосы входа: об этом блоке делаются
+           утверждения ОТСУТСТВИЯ (в нём нет пикера колорвея — E-16) и ПРИНАДЛЕЖНОСТИ (сетка
+           текстур живёт ИМЕННО здесь, а не во входе — E-7). */
+        id='design-fabric-menu'
         title='generation — fabric render'
-        question='— the cloth: a pattern, a colour, or both'
-        /* ═══ КОЛОРВЕЙ — АДРЕС БЛОКА, А НЕ ЕГО ПЕРВАЯ НАСТРОЙКА (J-20) ═══════════════════════
-           Он стоял первым рядом секции; владелец счёл три ряда настроек лишними и попросил два
-           плейсхолдера. Ось при этом несущая — ею ключуются верстак, выходы, ворота 3D и
-           `params.colorway_id`, — поэтому она переехала в заголовочную линейку: «чей это рендер»
-           это ЗАГОЛОВОК блока, а не ингредиент ткани. Граница власти та же, что была (L-4): всё
-           НИЖЕ принадлежит выбранному колорвею, полоса входа ВЫШЕ — общая для всех, потому что
-           чертёж изделия один на карточку. */
-        action={
-          colorway ? <ColorwaySelect band={band} choice={colorway} disabled={disabled} /> : undefined
-        }
+        question='— the cloth: a texture, a colour, or both'
       >
-        {/* КАРТОЧКА БЕЗ КОЛОРВЕЕВ — НЕ ПУСТОЕ СОСТОЯНИЕ И НЕ ОШИБКА: всё уезжает в безколорвейный
-            верстак, ровно как жило до оси. Строка стояла подсказкой под снятым рядом чипов и
-            обязана была пережить его — иначе самое частое состояние беты объясняется нигде. */}
-        {colorway && !colorway.loading && colorway.colorways.length === 0 && (
-          <Text size='micro' variant='label' component='p' className='normal-case'>
-            This card has no colourways — they are made on the colourways tab. This render will be
-            filed unattributed, exactly where every render made before colourways stands.
-          </Text>
-        )}
-
-        <Palette band={band} disabled={disabled} draft={draft} />
+        <Palette
+          band={band}
+          techCardId={techCardId}
+          disabled={disabled}
+          draft={draft}
+          /* K-16: вторая дверь у полки текстур. Приехала сюда вместе с самой полкой (E-7); без
+             `onGoToKind` её нет вовсе — кнопка, которой некуда вести, хуже её отсутствия. */
+          onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
+        />
 
         {/* СТРОКА ИНВЕНТАРЯ НАЗЫВАЕТ И ТКАНЬ (H-12). «made of pattern 2» — вторая половина работы
             снесённого заголовка-заявления: правда прогона стоит в двух шагах от денег, там, где на
@@ -283,7 +286,7 @@ export function RenderStudio({
         kind='render'
         disabled={disabled}
         colorwayId={colorwayId}
-        colorwayLabel={colorway?.label ?? ''}
+        colorwayLabel=''
       />
 
       {/* ═══ FABRIC RENDER SLOTS — ПОСЛЕ ВЫХОДОВ, ПОТОМУ ЧТО ЗАПОЛНЯЕТСЯ ИЗ НИХ (J-25) ══════════
@@ -300,7 +303,7 @@ export function RenderStudio({
         techCardId={techCardId}
         disabled={disabled}
         colorwayId={colorwayId}
-        colorwayLabel={colorway?.label ?? ''}
+        colorwayLabel=''
       />
 
       {/* ═══ БЛОК ПРИМЕРКИ (FABRIC FITTING) СНЕСЁН ЦЕЛИКОМ — J-21 ══════════════════════════════

@@ -41,6 +41,7 @@ import { usePickMode } from '../pick-mode';
 import { PictureTile, useGalleryGroup } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { SplitModal } from '../split-modal';
+import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden, isRunArchived } from '../visibility';
 import { isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
@@ -214,6 +215,7 @@ function RunTile({
   band,
   techCardId,
   picture,
+  rep,
   cardFit,
   runFit,
   dim,
@@ -222,11 +224,18 @@ function RunTile({
   galleryIndex,
   deckMemberOf,
   onOpen,
+  onZoom,
   onSplit,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   picture: common_DesignPicture;
+  /**
+   * РОД ПРОГОНА, В СТРОКЕ КОТОРОГО СТОИТ ЭТА ПЛИТКА. Его знает строка и НЕ знает картинка: выходы
+   * перекраса подписаны на проводе словом `render` (разбор — в `slot-picker.tsx`, E-12). `null` —
+   * род, которого эта сборка не знает; тогда о картинке судят по ней самой.
+   */
+  rep: Representation | null;
   cardFit: string;
   runFit: string;
   /** Приглушить кадр: строка стоит на полке архива и на неё смотрят, а не работают ею (J-22). */
@@ -250,6 +259,12 @@ function RunTile({
    * `PictureTile.onOpen`, где эта роль и живёт.
    */
   onOpen?: () => void;
+  /**
+   * ЭТА ПЛИТКА ТОЛЬКО ЧТО УВЕЛА РЯД В ПРОСМОТРЩИК (E-4). Лента складывает открытую колоду, если
+   * зумнули не её лист и не её кусок; плитка о колодах не знает и знать не должна — см.
+   * `PictureTile.onZoom`, где эта роль объявлена извещением, а не дверью.
+   */
+  onZoom?: (pictureId: number) => void;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const pick = usePickMode();
@@ -285,6 +300,28 @@ function RunTile({
   const fitMismatch = !!runFit && !!cardFit && runFit !== cardFit;
 
   const url = thumbUrl(picture.media);
+
+  /**
+   * ═══ ЭТО ФАЙЛ 3D, И У НЕГО НЕТ НИ РАЗРЕЗА, НИ ПРАВКИ (E-32) ═══════════════════════════════
+   *
+   * Владелец, дословно: «в GENERATION HISTORY для 3д файлов на ховер не должно быть split и edit».
+   *
+   * ПОЧЕМУ ОБА ГЛАГОЛА, А НЕ ОДИН. Разрез (`SplitDesignPicture`) режет ЛИСТ НА ВИДЫ — у сборки
+   * видов нет вовсе, а у её постера вид ровно один; резать нечего ни в том, ни в другом случае.
+   * Правка (`FlattenDesignEditLayer`) рождает СИБЛИНГА, наследующего `run_id` базы, — то есть
+   * рисование поверх постера завело бы в строке 3D-прогона обычный растр, который потом
+   * называется выходом сборки. Оба глагола не «неудобны», а не имеют предмета.
+   *
+   * ПРОГОН СЧИТАЕТСЯ ЦЕЛИКОМ, А НЕ ПО ОДНОЙ СТРОКЕ. Маршрут возвращает ДВЕ картинки — сам `.glb`
+   * и растровую миниатюру, — и обе приезжают с родом `threed` (`threed/media.ts`). Гейт по одному
+   * лишь `isModelUrl` закрыл бы двери на модели и оставил их на постере, то есть выполнил бы
+   * просьбу ровно наполовину и незаметно: видимая плитка прогона — как раз постер.
+   *
+   * `isModelUrl` при этом остаётся ВТОРОЙ половиной условия, а не украшением: род на проводе —
+   * поле строки, и историческая (или принесённая руками) строка с `.glb` в медиа, но без рода,
+   * всё равно остаётся файлом модели.
+   */
+  const threedFile = (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(url);
   /**
    * WHERE THIS PICTURE STANDS IN THE BAND'S ROW. The frame itself is composed by the section, once
    * for the whole history; here there is only the offset. Handing the primitive a `gallery` frame
@@ -439,7 +476,17 @@ function RunTile({
     // NO SLOT PICKER UNDER A COMPOSITE, AND THAT IS THE RULE, NOT AN OMISSION: a slot holds one
     // view and that file holds several, so its only door is the split in the corner.
     footer = !disabled && (
-      <SlotPicker band={band} techCardId={techCardId} picture={picture} className='h-[20px] w-full' />
+      /* `rep` — РОД ПРОГОНА, И ОН ЗДЕСЬ НЕСУЩИЙ (E-12): выходы перекраса подписаны на проводе
+         словом `render`, поэтому без него пикер предлагал бы фотографии на человеке четыре
+         стороны верстака фабрик-рендера — и оттуда её читала бы платная сборка 3D. Разбор целиком
+         у `ONMODEL_NO_SLOT` в `slot-picker.tsx`. */
+      <SlotPicker
+        band={band}
+        techCardId={techCardId}
+        picture={picture}
+        rep={rep}
+        className='h-[20px] w-full'
+      />
     );
   }
 
@@ -457,6 +504,9 @@ function RunTile({
         alt={handle}
         badge={badge}
         onOpen={onOpen}
+        /* ЛЕНТА СКЛАДЫВАЕТ КОЛОДУ, ЕСЛИ ЗУМНУЛИ ЧУЖУЮ КАРТОЧКУ (E-4). Плитка отдаёт свой id и
+           ничего не решает; решает секция, у которой на руках адрес открытой колоды. */
+        onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
         galleryGroup={galleryGroup}
         /* ПРИГЛУШАЕТСЯ СНИМОК, А НЕ ПЛИТКА (K-6). Класс стоял на всей плитке, и это было
            безобидно ровно до тех пор, пока у скрытой плитки не появилось двери: прозрачность
@@ -471,8 +521,10 @@ function RunTile({
            twice. `SplitDesignPicture` takes any band picture by contract, the parent survives the
            cut, and the verb below still reads the file: `split again` once crops exist. A stamped
            (hidden) picture keeps no doors, the way it keeps none anywhere else. */
+        /* ⚠ `!threedFile` — E-32, разбор у объявления. Роль без обработчика примитив не рисует
+           вовсе, поэтому на 3D-плитке этого угла физически нет, а не «есть, но серый». */
         onSplit={
-          !disabled && !hidden
+          !disabled && !hidden && !threedFile
             ? {
                 onClick: () => onSplit(picture),
                 // No ▸ in an aria-label: a screen reader spells the glyph out as its Unicode name.
@@ -519,9 +571,15 @@ function RunTile({
            которым старый штамп вообще снимается с работы: из скрытой картинки достают живую.
 
            Что НЕ изменилось: `disabled`. Выпущенная карточка не заводит новых картинок, и это
-           состояние карточки, а не свойство плитки. */
+           состояние карточки, а не свойство плитки.
+
+           ⚠ И ПОЯВИЛОСЬ РОВНО ОДНО НОВОЕ ИСКЛЮЧЕНИЕ — ФАЙЛ 3D (E-32). Оно НЕ ИЗ ТОГО ЖЕ РЯДА, что
+           два снятых выше: те запрещали жест, который РАБОТАЕТ (склейку можно рисовать, скрытую
+           картинку можно править). Здесь предмета нет вовсе — редактор работает от растра, а
+           `.glb` растром не является; на постере же он сработал бы и завёл бы в строке сборки
+           обычную картинку, выдающую себя за её выход. Разбор — у `threedFile`. */
         onEdit={
-          !disabled
+          !disabled && !threedFile
             ? {
                 onClick: () => setEditing(true),
                 ariaLabel: `edit ${handle} — draw over this picture`,
@@ -577,6 +635,7 @@ function RunRow({
   galleryIndexOf,
   openDeck,
   onDeck,
+  onZoomPicture,
   onSplit,
 }: {
   band: GetDesignBandResponse;
@@ -604,6 +663,8 @@ function RunRow({
    */
   openDeck: number | null;
   onDeck: (rootId: number) => void;
+  /** Зум по картинке этой строки — лента решает, складывать ли открытую колоду (E-4). */
+  onZoomPicture?: (pictureId: number) => void;
   onSplit: (picture: common_DesignPicture) => void;
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
@@ -611,6 +672,12 @@ function RunRow({
 
   const runId = run.id ?? 0;
   const archived = isRunArchived(run);
+  /**
+   * РОД ПРОГОНА, СКАЗАННЫЙ ОДИН РАЗ НА СТРОКУ. Его читают и якорь `data-rep`, и каждая плитка
+   * (E-12): выходы перекраса подписаны на проводе словом `render`, и второе прочтение этого
+   * вопроса ниже по файлу разошлось бы с первым молча.
+   */
+  const rep = runRepresentation(run);
   /**
    * СВЁРНУТА — НЕ ТО ЖЕ САМОЕ, ЧТО ЗААРХИВИРОВАНА. В окне заархивированная строка показывает одну
    * свою строку (T-14); на полке архива она показывает всё, ради чего полку и открыли.
@@ -675,7 +742,7 @@ function RunRow({
        прогона этой сборке неизвестен, то есть отвечает тем же `null`, что и классификатор. */
     <div
       data-run={runId || undefined}
-      data-rep={runRepresentation(run) ?? ''}
+      data-rep={rep ?? ''}
       data-run-archived={archived ? '' : undefined}
       className='space-y-1 border-b border-hairline pb-2 last:border-b-0'
     >
@@ -815,6 +882,7 @@ function RunRow({
                 band={band}
                 techCardId={techCardId}
                 picture={picture}
+                rep={rep}
                 cardFit={cardFit}
                 runFit={(run.fitAtLaunch ?? '').trim()}
                 dim={shelf}
@@ -826,6 +894,7 @@ function RunRow({
                    обязана вести туда же, куда ведёт поверхность любого куска, а карточка без
                    колоды вовсе не знает о её существовании. */
                 onOpen={members.length && !open ? () => onDeck(pictureId) : undefined}
+                onZoom={onZoomPicture}
                 onSplit={onSplit}
               />
             );
@@ -871,6 +940,7 @@ function RunRow({
                       band={band}
                       techCardId={techCardId}
                       picture={member}
+                      rep={rep}
                       cardFit={cardFit}
                       runFit={(run.fitAtLaunch ?? '').trim()}
                       dim={shelf}
@@ -878,6 +948,7 @@ function RunRow({
                       galleryKey={galleryKey}
                       galleryIndex={galleryIndexOf.get(member.id ?? 0)}
                       deckMemberOf={pictureId}
+                      onZoom={onZoomPicture}
                       onSplit={onSplit}
                     />
                   ))}
@@ -956,6 +1027,7 @@ export function GenerationHistory({
   techCardId,
   disabled,
   defaultRep = 'all',
+  defaultOpen = true,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -969,6 +1041,24 @@ export function GenerationHistory({
    * сегментов достижимы. `'all'` по умолчанию — вкладка FLAT, где лента и родилась.
    */
   defaultRep?: RepFilter;
+  /**
+   * ═══ РАЗВЁРНУТА ЛИ ЛЕНТА, КОГДА ЭКРАН ТОЛЬКО ОТКРЫЛИ (E-21, E-22, E-23) ═══════════════════
+   *
+   * Владелец назвал ЧЕТЫРЕ вкладки — pattern, fabric render, 3D и on model, — и ровно на них у
+   * ленты над головой стоит СВОЙ раздел выходов («… of this card»), который показывает те же
+   * картинки крупнее и ближе к работе. Свёрнутая лента там возвращает экрану его собственную
+   * работу; развёрнутая уводила её на два экрана вниз. На FLAT такого раздела нет вовсе — лента
+   * там и есть выход, — поэтому её положение по умолчанию не тронуто.
+   *
+   * ⚠ ЭТО ПОЛОЖЕНИЕ БЛОКА, А НЕ ЕГО ЖИЗНЬ. Сворачивается только СОДЕРЖИМОЕ `Section`; сам орган
+   * остаётся смонтированным, поэтому опрос живого прогона (`useRunPolling`) продолжает идти, а
+   * шапка продолжает называть его словом «RUN N now». Это несущее: без опроса «making a tile…»
+   * стояло бы вечно, человек решил бы, что прогон потерян, и нажал GENERATE ВТОРОЙ РАЗ — то есть
+   * заплатил дважды за одно.
+   *
+   * ⚠ И ПОЭТОМУ ЖЕ `RecallBenchIntake` ВЫНЕСЕН ИЗ СКЛАДЫВАЕМОЙ ЧАСТИ — см. его вызов ниже.
+   */
+  defaultOpen?: boolean;
 }) {
   const speaks = serverSpeaksDesign();
   const more = useMoreHistory(techCardId, band);
@@ -1206,6 +1296,47 @@ export function GenerationHistory({
   const galleryGroup = useGalleryGroup(gallery.items);
 
   /**
+   * ═══ ЧЕЙ КУСОК ЭТА КАРТИНКА — КАРТА НА ВСЮ ПОКАЗАННУЮ ИСТОРИЮ (E-4) ═══════════════════════
+   *
+   * Читается ровно одним вопросом: «зумнули ЧУЖУЮ карточку или свою?». Отвечать на него по одной
+   * строке нельзя — открытая колода лежит в какой-то одной строке, а зумят из любой.
+   *
+   * ⚠ СОБИРАЕТСЯ БЕЗ ОГЛЯДКИ НА `openDeck`, В ОТЛИЧИЕ ОТ РЯДА ВЫШЕ. Ряд перечисляет то, что НА
+   * ЭКРАНЕ, и куски закрытых колод в него не входят; здесь же нужен состав КАЖДОЙ колоды, потому
+   * что вопрос задаётся о колоде, которая как раз открыта. Зависимость от `openDeck` заодно
+   * пересобирала бы карту на каждом раскрытии впустую.
+   */
+  const deckOf = useMemo(() => {
+    const out = new Map<number, number>();
+    for (const run of [...visible, ...(archShown ? archivedRows : [])]) {
+      const families = cropFamilies(run.pictures ?? []);
+      for (const [memberId, rootId] of families.rootOf) out.set(memberId, rootId);
+    }
+    return out;
+  }, [visible, archShown, archivedRows]);
+
+  /**
+   * ═══ ЗУМ ЧУЖОЙ КАРТОЧКИ СКЛАДЫВАЕТ ОТКРЫТУЮ КОЛОДУ (E-4) ══════════════════════════════════
+   *
+   * Владелец, дословно: «после экспанда спличеных карточек при зуме любой другой они должны
+   * обратно колапсится».
+   *
+   * «ЛЮБОЙ ДРУГОЙ» ЧИТАЕТСЯ БУКВАЛЬНО, И ГРАНИЦА ПРОХОДИТ ПО КОЛОДЕ, А НЕ ПО КАРТОЧКЕ. Зум по
+   * САМОМУ листу и по любому его куску — это работа ВНУТРИ раскрытой группы, и складывать её там
+   * было бы не выполнением просьбы, а поломкой: куски уходят из документа, ряд просмотрщика
+   * пересобирается под открытым окном, и человек, ткнувший в кусок, оказывается на соседнем кадре.
+   *
+   * ЗАКОН ТОТ ЖЕ И ЖИВЁТ ТАМ ЖЕ, ЧТО «ОДНА ОТКРЫТАЯ НА ВСЮ ЛЕНТУ»: состояние из одного значения,
+   * и второе открытое в нём невыразимо. Здесь просто ещё один повод его обнулить.
+   */
+  const foldOnForeignZoom = (pictureId: number) =>
+    setOpenDeck((current) => {
+      if (current === null || !pictureId) return current;
+      if (pictureId === current) return current;
+      return deckOf.get(pictureId) === current ? current : null;
+    });
+
+  /**
    * «SHOW ALL» READS THE SERVER'S PAGES TO THE END. One fetch would not be «all»: the history is
    * paged on the wire too, and the button promises every run rather than every run that happens to
    * have arrived. The pull repeats only while a page is not already in flight, and `hasMore` goes
@@ -1255,11 +1386,28 @@ export function GenerationHistory({
   const paged = visible.length > PAGE || more.hasMore;
 
   return (
+    <>
+    {/* ═══ ПРИЁМНИК РЕКОЛА СТОИТ СНАРУЖИ СКЛАДЫВАЕМОЙ ЧАСТИ (E-21…E-23) ═══════════════════════
+        Он `return null` — ни коробки, ни отступа, ни строки в раскладке `SectionStack`, — поэтому
+        физически это тот же экран, что и раньше.
+
+        А НЕ СТОЯТЬ ЗДЕСЬ ОН БОЛЬШЕ НЕ МОЖЕТ, И ЭТО НЕ УБОРКА. `Section` не прячет содержимое, а
+        РАЗМОНТИРУЕТ его (`{isOpen && children}`), а этот орган объявляет себя домом жеста
+        (`useRegisterRecallHost` для render и threed) и потребляет отложенный выбор. Отсюда,
+        изнутри свёрнутой ленты, цепочка рвалась бы ровно посередине и молча: `recall ▸` на строке
+        render-прогона переключает студию на вкладку FABRIC RENDER, лента там теперь свёрнута,
+        приёмник не смонтирован — и уборка последнего дома этого рода ВЫБРАСЫВАЕТ выбор
+        (`recalled.delete`). Человек нажал, экран переключился, плиты не приехали, и ни одна
+        строка на экране об этом не сказала.
+
+        Разбор владения — в `history-recall.tsx`; здесь только место. */}
+    <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
     <Section
       id='design-history'
       title='generation history'
       question='— nothing is deleted; archive folds a whole generation away'
       collapsible
+      defaultOpen={defaultOpen}
       action={
         <div className='flex flex-wrap items-baseline gap-2'>
           {liveRun && (
@@ -1305,13 +1453,13 @@ export function GenerationHistory({
         </CalloutBox>
       )}
 
-      {/* ПРИЁМНИК РЕКОЛА ДЛЯ РЕНДЕРА И 3D (V-12в). Он живёт ЗДЕСЬ, а не на экране фабрик-рендера, по
-          одной причине: история стоит на всех трёх вкладках, а экран рендера — только на своей, и
-          жест начинается ровно там, где человек видит строку render-прогона, то есть в том числе на
+      {/* ПРИЁМНИК РЕКОЛА ДЛЯ РЕНДЕРА И 3D (V-12в) СТОЯЛ ЗДЕСЬ и переехал НАД `Section` — довод
+          у самого вызова. Причина, по которой он принадлежит ИМЕННО ЭТОМУ органу, не изменилась:
+          история стоит на всех пяти вкладках, а экран рендера — только на своей, и жест
+          начинается ровно там, где человек видит строку render-прогона, то есть в том числе на
           флэте. Видимого органа у него нет — он пишет в слоты верстака, которые показывает тот
           экран, на который рекол же и переключает. Приёмник флэта отдельный и монтируется блоком
           INPUT — REFERENCES: там у него есть карта разрешения media_id→файл, которой здесь нет. */}
-      <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
 
       {/* ═══ ФИЛЬТР РОДА — СПИСОК, А НЕ ПОЛОСА СЕГМЕНТОВ (J-3) ═══════════════════════════════════
           Владелец, дословно: «в REPRESENTATION фильтре должно быть дропдаун списком а не
@@ -1406,6 +1554,7 @@ export function GenerationHistory({
                колоды не «закрывает ту и открывает эту» двумя действиями, а ПЕРЕПИСЫВАЕТ адрес: у
                состояния из одного значения второе открытое просто невыразимо. */
             onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
+            onZoomPicture={foldOnForeignZoom}
             onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
           />
         ))}
@@ -1463,6 +1612,7 @@ export function GenerationHistory({
                   galleryIndexOf={gallery.indexOf}
                   openDeck={openDeck}
                   onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
+                  onZoomPicture={foldOnForeignZoom}
                   onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
                 />
               ))}
@@ -1589,5 +1739,6 @@ export function GenerationHistory({
         />
       )}
     </Section>
+    </>
   );
 }

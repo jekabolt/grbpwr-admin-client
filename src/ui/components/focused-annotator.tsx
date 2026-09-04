@@ -12,6 +12,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ANNOTATION_EDITOR_H } from './annotation/editor';
 import {
   AnnotationSurface,
+  noteArrowsOf,
+  type AnnotationEditorSlotOpts,
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
@@ -160,7 +162,7 @@ export type FocusedAnnotatorProps = {
    * подписанной выноски правился на выпущенной карточке молча. Плюс это был ВТОРОЙ способ
    * записать текст указания: у снимка шага он всегда жил в редакторе под кадром.
    */
-  renderEditor: (key: string, opts: { close: () => void }) => ReactNode;
+  renderEditor: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
   /** Optional header title inside a note (e.g. a part code, or a constant "fit note"). */
 
   /** Commit newly-picked media (caller dedupes + appends) and return the ids actually added, so the
@@ -393,6 +395,14 @@ export function FocusedAnnotator({
    * заодно получает всю ширину листа вместо трёхсот пикселей плитки.
    */
   const [selected, setSelected] = useState<string | null>(null);
+  /**
+   * ВЗВОД «+ POINT» ЖИВЁТ ЗДЕСЬ, А НЕ В ПЛИТКЕ, ПОТОМУ ЧТО КНОПКА ЖИВЁТ ЗДЕСЬ.
+   *
+   * Редактор листа стоит НАД рядом кадров (иначе клик по выноске раздвигал бы плитку и двигал
+   * соседние снимки — см. довод у `selected`), а клик, которого ждёт взвод, приходит на плитку.
+   * Одно состояние на обе половины — та же пара пропов, что у выбора.
+   */
+  const [adding, setAdding] = useState<string | null>(null);
   const [focusEditor, setFocusEditor] = useState(0);
   const [placed, setPlaced] = useState(0);
   /** Индекс кадра, открытого во весь экран. */
@@ -519,19 +529,38 @@ export function FocusedAnnotator({
    * ПРИ ОТКРЫТОМ УВЕЛИЧЕННОМ ВИДЕ ЗДЕСЬ РЕДАКТОРА НЕТ: он там, где сейчас работают. Два textarea
    * на одно поле означали бы драку за фокус и правку, которую не видно.
    */
+  /**
+   * ВЫБРАННОЕ УКАЗАНИЕ, НАЙДЕННОЕ ПО ВСЕМУ ЛИСТУ. Редактор один на лист, а выноски приходят
+   * по кадрам — какому именно кадру принадлежит выбранный ключ, здесь неизвестно, и спрашивать
+   * это у владельца значило бы завести ВТОРОЙ ответ на вопрос, на который поверхность уже
+   * отвечает сама.
+   */
+  const selectedCallout =
+    selected == null
+      ? undefined
+      : views.reduce<SurfaceCallout | undefined>(
+          (found, v) => found ?? calloutsFor(v.mediaId).find((c) => c.key === selected),
+          undefined,
+        );
+  const arrows = noteArrowsOf(readOnly ? undefined : selectedCallout, {
+    arming: adding !== null && adding === selected,
+    arm: () => setAdding(selected),
+    cancel: () => setAdding(null),
+  });
+
   const editorSlot =
     !readOnly && hasMedia ? (
       <div className='shrink-0 overflow-hidden' style={{ height: editorHeight }}>
         {selected != null && zoomIndex == null ? (
           <EditorPanel focusToken={focusEditor}>
-            {renderEditor(selected, { close: () => setSelected(null) })}
+            {renderEditor(selected, { close: () => setSelected(null), arrows })}
           </EditorPanel>
         ) : (
           <div className='flex h-full items-center border border-dashed border-borderColor px-1.5'>
             <Text size='micro' variant='label' component='span'>
               {zoomIndex != null
                 ? 'the callout is being edited in the zoomed view'
-                : 'no callout selected — click a pin or a line on a frame · Backspace deletes it · Enter opens this editor'}
+                : 'no callout selected — click a note or a line on a frame · Backspace deletes it · Enter opens this editor'}
             </Text>
           </div>
         )}
@@ -548,7 +577,7 @@ export function FocusedAnnotator({
         ? placingHint(tool, placed)
         : pinText === 'hover'
           ? // Легенды нет — обещать её значило бы отправить человека искать несуществующий список.
-            'the pin text shows on hover or focus of its marker · ⌘V pastes a picture'
+            'a note reads on the picture; an old numbered pin shows its text on hover or focus · ⌘V pastes a picture'
           : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
@@ -704,7 +733,25 @@ export function FocusedAnnotator({
                     preferNaturalAspect={preferNaturalAspect}
                     className={rowMode ? 'w-fit' : undefined}
                     frameClassName={rowMode ? 'w-auto' : 'w-full'}
-                    frameStyle={rowMode ? { height: gridRowHeight } : undefined}
+                    // РЯД, ПЕРЕНЕСЁННЫЙ ПО СТРОКАМ, УПИРАЕТСЯ В ШИРИНУ, А НЕ В ВЫСОТУ (E-30).
+                    //
+                    // Жёсткая высота задаёт ширину («высота × пропорция»), и панорама 4:1 при
+                    // 280px просит 1120px — шире доски. Пока это была `frameStyle.height`, лишняя
+                    // ширина уходила в СОБСТВЕННЫЙ горизонтальный скроллер плитки (K-12, чтобы не
+                    // утащить страницу вбок): снимок целый, но виден не весь, и владелец назвал
+                    // это «в грид вью картинки кропаются». ЗАМЕРЕНО (`ml-dbg-grid.mjs`): доска
+                    // 1018px, кадр 1120×280 — плитка листает 102px снимка.
+                    //
+                    // `rowHeightPx` меняет, ЧТО уступает: ширина упирается в место, высоту считает
+                    // пропорция. Ряд остаётся ровным для всех кадров, которые влезают; не влезающий
+                    // становится ниже — «равные высоты» уступают «не кропать», как и сказано
+                    // словами владельца.
+                    //
+                    // ФИЛМСТРИП (одна строка) ЖИВЁТ ПО-ПРЕЖНЕМУ: там вбок листается САМ РЯД, это
+                    // его смысл, и укорачивать в нём панораму значило бы отвечать на вопрос,
+                    // которого не задавали.
+                    rowHeightPx={rowsWrap ? gridRowHeight : undefined}
+                    frameStyle={rowMode && !rowsWrap ? { height: gridRowHeight } : undefined}
                     callouts={calloutsFor(v.mediaId)}
                     frozen={readOnly}
                     tool={tool}
@@ -719,8 +766,12 @@ export function FocusedAnnotator({
                     onUndo={onUndo}
                     canUndo={canUndo}
                     selectedKey={selected}
+                    addingKey={adding}
+                    onAddingChange={setAdding}
                     onSelect={(key, opts) => {
                       setSelected(key);
+                      // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая запись.
+                      setAdding(null);
                       if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
                     }}
                     pieceLabel={pieceLabel}
@@ -871,8 +922,11 @@ export function FocusedAnnotator({
                 onUndo={onUndo}
                 canUndo={canUndo}
                 selectedKey={selected}
+                addingKey={adding}
+                onAddingChange={setAdding}
                 onSelect={(key, opts) => {
                   setSelected(key);
+                  setAdding(null);
                   if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
                 }}
                 pieceLabel={pieceLabel}
@@ -986,8 +1040,11 @@ export function FocusedAnnotator({
           onUndo={onUndo}
           canUndo={canUndo}
           selectedKey={selected}
+          addingKey={adding}
+          onAddingChange={setAdding}
           onSelect={(key, opts) => {
             setSelected(key);
+            setAdding(null);
             if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
           }}
           pieceLabel={pieceLabel}

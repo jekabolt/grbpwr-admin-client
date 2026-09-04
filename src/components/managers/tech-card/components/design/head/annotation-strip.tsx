@@ -36,7 +36,7 @@ import Text from 'ui/components/text';
 export const ANNOTATION_CHIPS_H = 26;
 
 const DEFAULT_EMPTY =
-  'no callout selected — click a pin or a line on a frame · Backspace deletes it · Enter opens this editor';
+  'no callout selected — click a note or a line on a frame · Backspace deletes it · Enter opens this editor';
 
 export function AnnotationStrip({
   tool,

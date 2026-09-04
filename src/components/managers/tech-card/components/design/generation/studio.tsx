@@ -53,7 +53,27 @@ export function GenerationStudio({
         onOpenChange={setManual}
       />
       {anyContent ? (
-        <GenerationHistory band={band} techCardId={techCardId} disabled={disabled} />
+        /* ═══ ЛЕНТА ФЛЭТА ОТКРЫВАЕТСЯ НА ФЛЭТАХ И РАЗВЁРНУТОЙ (E-14, и НЕ E-21…E-23) ══════════
+         *
+         * `defaultRep='flat'` — владелец, дословно: «в FLAT — SHEET GENERATION HISTORY
+         * REPRESENTATION по дефолту фильтр на флеты только». Это НАЧАЛЬНОЕ положение сегмента, а
+         * не запрет: все шесть его положений достижимы, и `'all'` в одном нажатии. Тем самым
+         * последняя из пяти вкладок перестала открываться на «all» — правило J-12/J-18/J-31
+         * («каждая открывается на своём роде») стало общим, без исключения.
+         *
+         * ⚠ И РАЗВЁРНУТОЙ — ЭТО ВТОРАЯ ПОЛОВИНА ТОГО ЖЕ РЕШЕНИЯ, И ОНА ЯВНАЯ, А НЕ УМОЛЧАНИЕ.
+         * Владелец свернул ленту на четырёх вкладках (E-21…E-23) и НЕ назвал FLAT — потому что
+         * над лентой здесь нет раздела выходов: у флэта их не бывает («the bench slot IS the
+         * choice for a flat»), и лента — единственное место, где видно, что прогон вернул.
+         * Свернуть её тут значило бы спрятать сам результат генерации за нажатием.
+         */
+        <GenerationHistory
+          band={band}
+          techCardId={techCardId}
+          disabled={disabled}
+          defaultRep='flat'
+          defaultOpen
+        />
       ) : (
         !open && (
           <EmptyStudio

@@ -1034,6 +1034,24 @@ function FlatPlatesShown({
         <Text size='nano' variant='label' component='p' className='py-2'>
           plates put into FLAT SLOTS below can be sent to the model with the picture references.
         </Text>
+      ) : !state.on ? (
+        /* ═══ ТАМБНЕЙЛЫ ТОЛЬКО ПРИ ВКЛЮЧЁННОМ ЧИПЕ — E-24 ═════════════════════════════════════
+           Владелец, дословно: «в FLAT — SHEET ALSO SHOWN — FLAT SLOTS тамбнейлы показываются
+           только если ALSO SEND THE FLAT SLOTS включена».
+
+           И ЭТО ЧИНИТ РАСХОЖДЕНИЕ, А НЕ ЭКОНОМИТ МЕСТО. Ряд плит стоит внутри блока «what the
+           model is shown»: пока чип выключен, модель не видит НИ ОДНОЙ из них — то есть ряд
+           показывал шесть картинок под заголовком «что показано», ни одна из которых не
+           показывается. Пелена и слово `not sent` объясняли это на каждой плите по отдельности,
+           шесть раз, вместо одного выключателя.
+
+           ⚠ ЧИСЛО ОСТАЁТСЯ ВИДИМЫМ ВСЕГДА (`action` заголовка, `data-flat-slots-line`), поэтому
+           «сколько плит есть» и «сколько едет» по-прежнему читается не наводя мышь: сворачивается
+           РЯД КАРТИНОК, а не факт. */
+        <Text size='nano' variant='label' component='p' className='py-2'>
+          {plates.length === 1 ? 'one plate stands' : `${plates.length} plates stand`} in FLAT SLOTS
+          below. Turn <b>also send the flat slots</b> on to see them and choose which ones travel.
+        </Text>
       ) : (
         /* ОДНОМЕРНЫЙ РЯД — `flex-wrap`, А НЕ ГРИД. Плит от одной до примерно шести, они равные и
            переносятся по ширине; сетка завела бы дорожки, которых этому ряду нечем заполнить. */

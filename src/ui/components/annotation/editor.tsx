@@ -5,6 +5,7 @@ import Text from 'ui/components/text';
 
 import { kindDef } from './kinds';
 import { AnnotationStyleRow } from './style-row';
+import type { NoteArrows } from './surface';
 
 // РЕДАКТОР ВЫНОСКИ (режим плашки) — текст, детали, оформление, удаление.
 //
@@ -90,7 +91,7 @@ export function AnnotationEditor({
   onClose,
   renderPiecePicker,
   extra,
-  onDemote,
+  arrows,
   sameKey = (a, b) => a === b,
   style = true,
   maxLength = 500,
@@ -133,13 +134,11 @@ export function AnnotationEditor({
    */
   extra?: ReactNode;
   /**
-   * Разжаловать фигуру обратно в нумерованную точку. Отсутствует — чипа нет.
-   *
-   * Нужен там, где номер выноски АДРЕСУЕТ её снаружи: удалить и поставить заново означало бы новый
-   * номер и повисшие ссылки. У выноски снимка шага номера-адреса нет, и разжаловать её незачем —
-   * проще стереть.
+   * ЛУЧИ ЗАПИСКИ — приходят слотом от поверхности (`renderEditor(key, { arrows })`), потому что
+   * взвод «жду клик по кадру» принадлежит кадру, а не форме. Отсутствуют — у этого вида лучей
+   * не бывает либо владелец не умеет писать якоря, и органа нет вовсе.
    */
-  onDemote?: () => void;
+  arrows?: NoteArrows;
   /**
    * Совпадают ли два ключа детали. По умолчанию — точное равенство: у выноски снимка шага это
    * ULID, и «почти равно» там не бывает.
@@ -207,6 +206,47 @@ export function AnnotationEditor({
           </Text>
         )}
         <span className='ml-auto flex shrink-0 items-center gap-1'>
+          {/* ЕЩЁ ОДИН ЛУЧ — ОДИН КЛИК, И ЖЕСТ КОНЧИЛСЯ. Это весь бывший «мультилидер»: раньше
+              число стрелок объявляли ЗАРАНЕЕ, набирая точки, пока их не станет восемь (кончить
+              раньше можно было только чипом «done · N» под кадром, который никто не искал) —
+              отсюда «почему-то всегда 7 направляющих». Теперь лучей ровно столько, сколько раз
+              нажали здесь, и после каждого записка целая.
+              СТОИТ НА МЕСТЕ БЫВШЕЙ «make it a point» (её владелец убрал), поэтому шапка не выросла
+              ни на пиксель: высота полосы фиксирована и держит ряд кадров от сдвига. */}
+          {arrows && arrows.count > 1 && (
+            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+              {arrows.count} points
+            </Text>
+          )}
+          {arrows &&
+            (arrows.arming ? (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                data-arrows='cancel'
+                onClick={arrows.cancel}
+                title='stop waiting for the click'
+              >
+                cancel
+              </Button>
+            ) : (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                data-arrows='add'
+                disabled={arrows.full}
+                onClick={arrows.arm}
+                title={
+                  arrows.full
+                    ? `a note points at ${arrows.max} places at most`
+                    : 'point this note at one more place — then click it on the picture'
+                }
+              >
+                + point
+              </Button>
+            ))}
           <Button
             type='button'
             variant='secondary'
@@ -216,17 +256,6 @@ export function AnnotationEditor({
           >
             delete
           </Button>
-          {onDemote && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              onClick={onDemote}
-              title='drop the shape, keep the numbered point'
-            >
-              make it a point
-            </Button>
-          )}
           <Button
             type='button'
             variant='secondary'

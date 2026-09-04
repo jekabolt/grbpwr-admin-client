@@ -54,7 +54,9 @@ import {
   FULL_REGION,
   MIN_FRAME_SIDE,
   CORNER_HANDLES,
+  HANDLE_UV,
   drawWarped,
+  fitQuadRatio,
   hitFrame,
   keepQuadReachable,
   moveQuad,
@@ -83,6 +85,18 @@ import {
   type WarpGrid,
   type WarpRegion,
 } from './transform-frame';
+import {
+  MAX_GUIDES,
+  addGuide,
+  flushGuides,
+  hitGuide,
+  readGuides,
+  sameSpot,
+  saveGuidesSoon,
+  snapFrac,
+  tickStep,
+  type Guide,
+} from './vector-guides';
 import { BackdropWarpCanvas } from './backdrop-warp-canvas';
 import { TransformFrameOverlay, type FrameOwner } from './transform-frame-overlay';
 import { patchRegion } from './vector-patch';
@@ -549,6 +563,117 @@ const PIXELATED_FROM = 3;
 const SCREEN_MARK = 'data-vector-screen';
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+
+/* ═══ SHIFT ДЕЛАЕТ ЛИНИЮ РОВНОЙ (E-18) ══════════════════════════════════════════════════════
+ *
+ * Владелец: «при зажатом шифте линии должны быть ровными». Ровно фотошопное правило: рука ведёт
+ * куда угодно, а линия ложится по ближайшей из ВОСЬМИ осей — 0°, 45°, 90° и так по кругу.
+ *
+ * ⚠ УГЛЫ СЧИТАЮТСЯ В ЮНИТАХ ПЛАТЫ, А НЕ В ДОЛЯХ, И БЕЗ ЭТОГО ПРАВИЛО ВРЁТ. Указатель приходит
+ * долями кадра (`frameAt`), а плата не квадрат: при 4:5 доля по вертикали в 1.25 раза «длиннее»
+ * доли по горизонтали, и «45°» в долях легло бы на экране под 38.66°. Тот же класс ошибки, что
+ * уже стоил анизотропного прореживания лассо: доли — не метры.
+ *
+ * ⚠ ТОЧКА КЛАДЁТСЯ ПРОЕКЦИЕЙ, А НЕ ПОВОРОТОМ. Поворот сохранил бы ДЛИНУ и увёл бы конец линии
+ * из-под курсора: рука на 100 юнитов вправо и 10 вниз получила бы горизонталь длиной 100.5 —
+ * длиннее, чем показывает рука. Проекция даёт ровно ту составляющую, которая вдоль оси.
+ */
+/* ═══ ЛИНЕЙКИ: РАЗМЕРЫ И ЧЕРНИЛА (E-17) ═════════════════════════════════════════════════════
+ *
+ * Полосы кладутся ПОВЕРХ вьюпорта, а не рядом с ним, и это несущее решение, а не экономия
+ * разметки. Полоса, занявшая место в потоке, УМЕНЬШИЛА БЫ вьюпорт на 16 px в тот момент, когда
+ * человек нажимает чип, — то есть холст уехал бы под рукой, а `viewportRect()` (шесть читателей,
+ * от лассо до кольца кисти) сменил бы размер на кадре без единого жеста. Ровно этот класс
+ * дефектов уже сторожит проба 83. Наложенная полоса не двигает ничего.
+ *
+ * Цвета — токены дома, а не выдуманные: белая полоса это МАТЕРИАЛ на сером грунте вьюпорта,
+ * #666 подписи (labelColor, ~5.7:1 — читаемо, в отличие от #ccc), #e6e6e6 внутреннее правило
+ * между хромом и холстом.
+ */
+const RULER_PX = 16;
+const RULER_FONT_PX = 9;
+const RULER_MAJOR_PX = 6;
+const RULER_MINOR_PX = 3;
+/**
+ * Наименьшее расстояние между ПОДПИСАННЫМИ делениями. Не замер, а арифметика: самая длинная
+ * подпись здесь — пять знаков («−1000»), моноширинный 9 px даёт около 5.4 px на знак, то есть
+ * 27 px текста плюс отступ; 56 оставляет между соседними числами примерно столько же пустого
+ * места, сколько занимает само число, — ниже этого шкала читается как сплошная строка цифр.
+ */
+const RULER_LABEL_MIN_PX = 56;
+const RULER_MINOR_MIN_PX = 5;
+const RULER_BG = '#ffffff';
+const RULER_INK = '#666666';
+const RULER_RULE = '#e6e6e6';
+const RULER_EDGE = '#000000';
+
+/** Насколько близко к направляющей надо подвести руку, чтобы взять её, — в пикселях ЭКРАНА. */
+const GUIDE_GRAB_PX = 5;
+/** Насколько близко конец линии притягивается к разметке — в пикселях ЭКРАНА. */
+const GUIDE_SNAP_PX = 7;
+
+const STRAIGHT_STEP = Math.PI / 4;
+
+/**
+ * Насколько рука обязана уйти от точки нажатия, прежде чем у жеста появится направление, — в
+ * юнитах платы (плата шириной 1000). Порог несущий у МАЗКА: его ось выбирается один раз и
+ * держится, и дрожь в один юнит на нажатии заперла бы весь мазок на случайной оси.
+ */
+const STRAIGHT_MIN_UNITS = 3;
+
+/** Единичное направление ближайшей из восьми осей, в юнитах платы. `null` — рука не сдвинулась. */
+const straightDir = (
+  from: [number, number],
+  to: [number, number],
+  plateH: number,
+): [number, number] | null => {
+  const dx = (to[0] - from[0]) * PLATE_W;
+  const dy = (to[1] - from[1]) * plateH;
+  if (Math.hypot(dx, dy) < STRAIGHT_MIN_UNITS) return null;
+  const a = Math.round(Math.atan2(dy, dx) / STRAIGHT_STEP) * STRAIGHT_STEP;
+  return [Math.cos(a), Math.sin(a)];
+};
+
+/**
+ * Отрезок параметра t, на котором `o + d·t` не выходит за [0, size]. Луч ДВУСТОРОННИЙ нарочно:
+ * при заблокированной оси (мазок) рука имеет право пойти назад по той же линии, и обрезка
+ * отрицательной половины запирала бы её у точки нажатия.
+ */
+const rayRange = (o: number, d: number, size: number): [number, number] => {
+  if (Math.abs(d) < 1e-9) {
+    return o < 0 || o > size
+      ? [0, 0]
+      : [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
+  }
+  const a = -o / d;
+  const b = (size - o) / d;
+  return a < b ? [a, b] : [b, a];
+};
+
+/**
+ * Точка руки, положенная на луч `dir` из `from`, — в долях кадра.
+ *
+ * ⚠ ПЛАТА ОБРЕЗАЕТ ДЛИНУ, А НЕ КООРДИНАТЫ. Прижать x и y порознь (`clamp01` у каждой, как это
+ * делает `frameAt`) значило бы СЛОМАТЬ УГОЛ: диагональ, ушедшая за верхний край, вернулась бы с
+ * прижатым y и прежним x, то есть перестала бы быть диагональю ровно там, где человек смотрит.
+ */
+const alongDir = (
+  from: [number, number],
+  to: [number, number],
+  dir: [number, number],
+  plateH: number,
+): [number, number] => {
+  const ox = from[0] * PLATE_W;
+  const oy = from[1] * plateH;
+  const dx = to[0] * PLATE_W - ox;
+  const dy = to[1] * plateH - oy;
+  const rx = rayRange(ox, dir[0], PLATE_W);
+  const ry = rayRange(oy, dir[1], plateH);
+  const lo = Math.max(rx[0], ry[0]);
+  const hi = Math.min(rx[1], ry[1]);
+  const len = Math.min(Math.max(dx * dir[0] + dy * dir[1], lo), Math.max(hi, lo));
+  return [clamp01((ox + dir[0] * len) / PLATE_W), clamp01((oy + dir[1] * len) / plateH)];
+};
 
 /**
  * Клавиши-глаголы не срабатывают, пока набирают текст, — тот же гард, что у фулскрина сборки
@@ -1181,6 +1306,50 @@ export function VectorModal({
   /** Цвет нового поля у кроп-рамки; `null` — прозрачно (законное состояние, а не «не выбрано»). */
   const [cropFill, setCropFill] = useState<ExpandFill>(DEFAULT_EXPAND_FILL);
   /**
+   * ЗАПЕРТОЕ ОТНОШЕНИЕ СТОРОН КАДРА (E-18); `null` — свободная рамка, и это НЕ «не выбрано», а
+   * законный, притом умолчальный, режим фотошопного кропа.
+   *
+   * ЖИВЁТ ДОЛЬШЕ РАМКИ И ДОЛЬШЕ ИНСТРУМЕНТА — как всякая настройка кисти в этой рейке: человек,
+   * кадрирующий десяток картинок в 4:5, называет форму один раз, а не на каждой.
+   */
+  const [cropRatio, setCropRatio] = useState<number | null>(null);
+
+  /* ═══ ЛИНЕЙКИ И НАПРАВЛЯЮЩИЕ (E-17) ══════════════════════════════════════════════════════
+   *
+   * ⚠ ОДИН ВЫКЛЮЧАТЕЛЬ НА ЛИНЕЙКИ И НА НАПРАВЛЯЮЩИЕ, А НЕ ДВА. У фотошопа их два (⌘R и ⌘;), и
+   * там это оправдано: направляющие живут в документе и переживают закрытие линеек. Здесь второй
+   * выключатель означал бы состояние «направляющие есть, но взяться за них нечем» — линейка ведь
+   * и есть место, откуда их берут и куда возвращают. Одно понятие — один орган.
+   */
+  const [rulersOn, setRulersOn] = useState(false);
+  const [guides, setGuides] = useState<Guide[]>([]);
+  /**
+   * ⚠ РЕФ РЯДОМ С СОСТОЯНИЕМ — ТОТ ЖЕ ЗАМЕРЕННЫЙ ДЕФЕКТ, что у следа и у пера: `pointermove`
+   * прилетает раньше, чем React перерисует после `pointerdown`, и чтение `guides` из замыкания
+   * во время протяжки видело бы позапрошлый набор — вытащенная направляющая теряла бы саму себя
+   * на первом же кадре. Писатель один: `putGuides`.
+   */
+  const guidesRef = useRef<Guide[]>([]);
+  /** Что сейчас тащат: индекс живой направляющей либо `-1` для только что вытянутой из линейки. */
+  const guideDrag = useRef<{ id: number; index: number; dir: 'h' | 'v' } | null>(null);
+  const bdKeyRef = useRef('');
+  /** Ключ, по которому разметку читали в прошлый раз, — им опознаётся переезд после сохранения. */
+  const guideKeyRef = useRef('');
+
+  /**
+   * ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ РАЗМЕТКИ: реф, экран и память меняются вместе.
+   *
+   * `persist` — про ПАМЯТЬ, а не про экран: кадры протяжки идут сюда десятками в секунду, и
+   * писать хранилище на каждый было бы синхронной записью в `localStorage` под рукой. Запись
+   * ставится на отпускании; отложенная (`saveGuidesSoon`) она и там, потому что отпусканий подряд
+   * тоже бывает много.
+   */
+  const writeGuides = useCallback((next: Guide[], persist: boolean) => {
+    guidesRef.current = next;
+    setGuides(next);
+    if (persist) saveGuidesSoon(bdKeyRef.current, next);
+  }, []);
+  /**
    * ОТМЕНА РАМКИ, ЧИТАЕМАЯ ИЗ ОБРАБОТЧИКА НА ОКНЕ.
    *
    * ⌘Z висит на `window` в эффекте, чей список зависимостей намеренно короток — иначе слушатель
@@ -1380,6 +1549,7 @@ export function VectorModal({
     () => backdropScopeKey({ techCardId, baseMediaId, layerId: layer.id }),
     [techCardId, baseMediaId, layer.id],
   );
+  bdKeyRef.current = bdKey;
   /**
    * ОДИН ПИСАТЕЛЬ ПОДЛОЖКИ. Реф и состояние меняются вместе: `pointermove` прилетает раньше
    * рендера, и чтение состояния во время протяжки давало бы позапрошлое положение — шаблон полз бы
@@ -1552,6 +1722,8 @@ export function VectorModal({
    * СЕГОДНЯШНИЙ пересчёт, не потащив в его зависимости половину экрана.
    */
   const refreshHoverRef = useRef<() => void>(() => {});
+  /** Перерисовка делений линеек — ссылкой, по тому же доводу, что у `refreshHoverRef`. */
+  const drawRulersRef = useRef<() => void>(() => {});
 
   const applyView = useCallback(() => {
     const world = worldRef.current;
@@ -1562,6 +1734,12 @@ export function VectorModal({
     /* ОДНА ДВЕРЬ: всякий писатель вида уже проходит здесь, поэтому и превью пересчитывается
        здесь — иначе следующий способ подвинуть мир снова забыли бы. */
     refreshHoverRef.current();
+    /* ⚠ ЛИНЕЙКИ ПЕРЕРИСОВЫВАЮТСЯ ЗДЕСЬ ЖЕ, И ЭТО ЕДИНСТВЕННОЕ ВЕРНОЕ МЕСТО. Мир двигается
+       ИМПЕРАТИВНО — трансформом узла, без рендера React, — а деления линейки суть проекция мира
+       на кромку экрана. Рисуй их из состояния, и они отставали бы на всю панораму колесом: линейка
+       показывала бы координаты того места, где холст был до прокрутки. Та же дверь, тот же довод,
+       что у `refreshHover` строкой выше. */
+    drawRulersRef.current();
   }, []);
 
   const fitPlate = useCallback(() => {
@@ -1962,12 +2140,55 @@ export function VectorModal({
   /** Отложенная запись обязана лечь до того, как вкладку закроют. */
   useEffect(() => {
     if (!open) return;
-    window.addEventListener('pagehide', flushBackdrop);
-    return () => {
-      window.removeEventListener('pagehide', flushBackdrop);
+    const flushBoth = () => {
       flushBackdrop();
+      flushGuides();
+    };
+    window.addEventListener('pagehide', flushBoth);
+    return () => {
+      window.removeEventListener('pagehide', flushBoth);
+      flushBoth();
     };
   }, [open]);
+
+  /**
+   * РАЗМЕТКА СЛОЯ ПОДНИМАЕТСЯ ПРИ ОТКРЫТИИ (E-17). Ключ тот же, что у подложки: «какой это слой» —
+   * вопрос с ОДНИМ ответом, и второй его формы в проекте нет.
+   *
+   * Пробы файла здесь нет и не нужно — направляющая ни на что не ссылается; поэтому и синхронно.
+   */
+  useEffect(() => {
+    if (!open) {
+      guideKeyRef.current = '';
+      return;
+    }
+    const stored = readGuides(bdKey);
+    const prev = guideKeyRef.current;
+    guideKeyRef.current = bdKey;
+    /**
+     * ⚠ КЛЮЧ МЕНЯЕТСЯ ПОД РУКОЙ ОДИН РАЗ ЗА ЖИЗНЬ СЛОЯ: до первого сохранения `layer.id` равен
+     * нулю, после — настоящий. Перечитать по новому ключу значило бы, что разметка ИСЧЕЗАЕТ
+     * ровно в момент сохранения — человек нажал «save» и потерял расстановку, которой сохранение
+     * не касалось. Поэтому она переезжает за ключом.
+     *
+     * ⚠ ПЕРЕЕЗД УЗКИЙ НАРОЧНО: только тот же лист (карточка и медиа совпадают) и только из
+     * «слоя без id». Иначе разметка одной плиты досталась бы соседней — окно между открытиями не
+     * размонтируется, и `guidesRef` переживает смену плиты.
+     *
+     * ⚠ ЭТА ВЕТКА НЕ ЗАМЕРЕНА ПРОБОЙ, и это сказано вслух: чтобы её исполнить, стенду нужен
+     * круг «сохранить и получить id» — сеть там подменена, и такого круга у него нет. Правило
+     * взято у соседа по хранилищу (чтение подложки тоже НЕ ГАСИТ то, что на экране, когда по
+     * новому ключу пусто), а не выдумано здесь.
+     */
+    const sameSheet =
+      !!prev && prev !== bdKey && prev.endsWith(':0') && prev.slice(0, -2) === bdKey.slice(0, bdKey.lastIndexOf(':'));
+    if (!stored.length && sameSheet && guidesRef.current.length) {
+      saveGuidesSoon(bdKey, guidesRef.current);
+      return;
+    }
+    guidesRef.current = stored;
+    setGuides(stored);
+  }, [open, bdKey]);
 
   // ⌘Z / Ctrl+Z, ⌘⇧Z — возврат. MATCHED BY `code`, NEVER BY `key`: on a Russian layout
   // `event.key` is «я» and a comparison against the letter z is dead — the same trap the assembly
@@ -2021,7 +2242,7 @@ export function VectorModal({
    * Гард текстового поля тот же: в настоящем поле ⌘C/⌘V принадлежат браузеру.
    */
   useEffect(() => {
-    if (!open || frozen) return;
+    if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
       if (
@@ -2030,6 +2251,25 @@ export function VectorModal({
         )
       )
         return;
+      /**
+       * ⌘R — ЛИНЕЙКИ (E-17), та же клавиша, что у фотошопа, и она стоит ВЫШЕ гарда заморозки
+       * НАРОЧНО: линейка ничего не пишет. На «read-only» смотреть и мерить можно ровно так же,
+       * как зумить, — тем же правилом, по которому органы вида там остаются живыми.
+       *
+       * ⚠ ОДНОКЛАВИШНОГО `r` здесь быть не может: `r` занята кистью (`TOOL_KEY`), и отнять её
+       * значило бы переучивать руку ради переключателя вида.
+       *
+       * ⚠ И ДА, ЭТО ОТНИМАЕТ У БРАУЗЕРА ПЕРЕЗАГРУЗКУ, ПОКА ОТКРЫТ РЕДАКТОР. Именно этого и надо:
+       * ⌘R над полноэкранным редактором с несохранённой работой — почти всегда промах по
+       * фотошопной привычке. Ничего при этом не теряется: `preventDefault` останавливает
+       * перезагрузку до того, как она начнётся.
+       */
+      if (event.code === 'KeyR') {
+        event.preventDefault();
+        setRulersOn((v) => !v);
+        return;
+      }
+      if (frozen) return;
       // По `e.code`: на кириллической раскладке `e.key` для этих клавиш — «с», «м» и «в».
       if (event.code === 'KeyC') {
         if (!sel) return;
@@ -2242,6 +2482,13 @@ export function VectorModal({
    * на входе визита и при пересчёте листа кропом.
    */
   const lastMark = useRef<{ tool: Tool; at: [number, number] } | null>(null);
+
+  /**
+   * ОСЬ, ПО КОТОРОЙ ИДЁТ ТЕКУЩИЙ МАЗОК ПОД SHIFT (E-18) — только у пикселей и только на время
+   * жеста. Ссылкой, а не состоянием: она читается и пишется внутри одного кадра протяжки, и
+   * перерисовывать ради неё весь редактор шестьдесят раз в секунду было бы платой ни за что.
+   */
+  const shiftAxis = useRef<[number, number] | null>(null);
 
   /**
    * СЭМПЛЫ ТЕКУЩЕГО ПИКСЕЛЬНОГО ЖЕСТА — ОТДЕЛЬНО ОТ `trace`.
@@ -2701,6 +2948,178 @@ export function VectorModal({
   };
   refreshHoverRef.current = refreshHover;
 
+  // ── линейки по кромкам вьюпорта (E-17) ─────────────────────────────────────────────────────
+
+  const rulerTopRef = useRef<HTMLCanvasElement | null>(null);
+  const rulerLeftRef = useRef<HTMLCanvasElement | null>(null);
+  const markXRef = useRef<HTMLDivElement | null>(null);
+  const markYRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * ГДЕ РУКА НА ЛИНЕЙКЕ — ДВЕ НИТИ, ДВИГАЕМЫЕ ТРАНСФОРМОМ, А НЕ ПЕРЕРИСОВКОЙ ХОЛСТА.
+   *
+   * Указатель шлёт события десятками в секунду, и перерисовывать ради метки все деления с
+   * подписями значило бы жечь кадр на каждое движение руки — под мазком кистью это видно.
+   * Трансформ узла не трогает ни разметку, ни layout.
+   */
+  const moveRulerMarks = (clientX: number, clientY: number) => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const r = viewportRect(vp);
+    const mx = markXRef.current;
+    const my = markYRef.current;
+    if (mx) mx.style.transform = `translateX(${Math.round(clientX - r.left)}px)`;
+    if (my) my.style.transform = `translateY(${Math.round(clientY - r.top)}px)`;
+  };
+
+  /**
+   * ДЕЛЕНИЯ ОБЕИХ ЛИНЕЕК. Всё — в ЮНИТАХ ПЛАТЫ, и ноль стоит на её левом верхнем углу: другой
+   * системы координат у этого редактора нет вовсе (толщина нити, размер ниба, растушёвка области
+   * — все они уже названы в юнитах платы), и вторая, «в пикселях снимка», означала бы два разных
+   * ответа на вопрос «сколько тут».
+   */
+  const drawRulers = () => {
+    const vp = viewportRef.current;
+    const top = rulerTopRef.current;
+    const left = rulerLeftRef.current;
+    if (!vp || !top || !left) return;
+    const r = viewportRect(vp);
+    if (r.width < 2 || r.height < 2) return;
+    const { pan, zoom } = viewRef.current;
+    const k = zoom || 1;
+    /* Плотность экрана — иначе подписи 9 px выходят мыльными на любом ретина-мониторе, а линейка
+       с нечитаемыми числами не линейка. Потолок 2: выше него разница уже не видна, а память
+       холста растёт квадратично. */
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+
+    const prep = (cv: HTMLCanvasElement, w: number, h: number) => {
+      const W = Math.max(1, Math.round(w * dpr));
+      const H = Math.max(1, Math.round(h * dpr));
+      if (cv.width !== W) cv.width = W;
+      if (cv.height !== H) cv.height = H;
+      const g = cv.getContext('2d');
+      if (!g) return null;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, w, h);
+      g.fillStyle = RULER_BG;
+      g.fillRect(0, 0, w, h);
+      /* ⚠ ШРИФТ ДОМА, А НЕ СИСТЕМНЫЙ МОНОШИРИННЫЙ. Холст не наследует CSS, и «ui-monospace»
+         здесь было бы ВТОРОЙ гарнитурой на экране, где вся типографика — одна. Не приехавший
+         `FeatureMono` не страшен: шкала перерисовывается на каждой записи вида, и первая же
+         панорама покажет её правильной. */
+      g.font = `${RULER_FONT_PX}px FeatureMono, ui-monospace, SFMono-Regular, Menlo, monospace`;
+      g.textBaseline = 'alphabetic';
+      return g;
+    };
+
+    const step = tickStep(k, RULER_LABEL_MIN_PX);
+    /* Мелкое деление рисуется, только когда ему есть где поместиться: пять штрихов в шести
+       пикселях — это серая полоса, а не шкала. */
+    const minor = step / 5;
+    const minorVisible = minor * k >= RULER_MINOR_MIN_PX;
+
+    const gTop = prep(top, r.width, RULER_PX);
+    if (gTop) {
+      gTop.strokeStyle = RULER_INK;
+      gTop.fillStyle = RULER_INK;
+      gTop.lineWidth = 1;
+      const from = Math.floor((0 - pan.x) / k / step) * step;
+      const to = (r.width - pan.x) / k;
+      for (let w0 = from; w0 <= to; w0 += step) {
+        const x = Math.round(pan.x + w0 * k) + 0.5;
+        gTop.globalAlpha = 1;
+        gTop.beginPath();
+        gTop.moveTo(x, RULER_PX - RULER_MAJOR_PX);
+        gTop.lineTo(x, RULER_PX);
+        gTop.stroke();
+        gTop.fillText(String(Math.round(w0)), x + 2, RULER_FONT_PX + 1);
+        if (!minorVisible) continue;
+        gTop.globalAlpha = 0.5;
+        for (let m = 1; m < 5; m += 1) {
+          const mx = Math.round(pan.x + (w0 + minor * m) * k) + 0.5;
+          gTop.beginPath();
+          gTop.moveTo(mx, RULER_PX - RULER_MINOR_PX);
+          gTop.lineTo(mx, RULER_PX);
+          gTop.stroke();
+        }
+      }
+      /* Кромка ЛИСТА на линейке: без неё числа висят в пустоте, и «где кончается бумага» видно
+         только по холсту. Вес и цвет — внутреннего правила (#e6e6e6 здесь потерялся бы на белом
+         фоне самой линейки, поэтому чернила с прозрачностью, как у линий третей рамки). */
+      gTop.globalAlpha = 0.35;
+      gTop.strokeStyle = RULER_EDGE;
+      for (const w0 of [0, PLATE_W]) {
+        const x = Math.round(pan.x + w0 * k) + 0.5;
+        gTop.beginPath();
+        gTop.moveTo(x, 0);
+        gTop.lineTo(x, RULER_PX);
+        gTop.stroke();
+      }
+      gTop.globalAlpha = 1;
+      gTop.strokeStyle = RULER_RULE;
+      gTop.beginPath();
+      gTop.moveTo(0, RULER_PX - 0.5);
+      gTop.lineTo(r.width, RULER_PX - 0.5);
+      gTop.stroke();
+    }
+
+    const gLeft = prep(left, RULER_PX, r.height);
+    if (gLeft) {
+      gLeft.strokeStyle = RULER_INK;
+      gLeft.fillStyle = RULER_INK;
+      gLeft.lineWidth = 1;
+      const from = Math.floor((0 - pan.y) / k / step) * step;
+      const to = (r.height - pan.y) / k;
+      for (let w0 = from; w0 <= to; w0 += step) {
+        const y = Math.round(pan.y + w0 * k) + 0.5;
+        gLeft.globalAlpha = 1;
+        gLeft.beginPath();
+        gLeft.moveTo(RULER_PX - RULER_MAJOR_PX, y);
+        gLeft.lineTo(RULER_PX, y);
+        gLeft.stroke();
+        /* Подпись вертикальной линейки ПОВЁРНУТА, а не составлена из цифр столбиком: столбик
+           читается по букве, а число читается целиком. */
+        gLeft.save();
+        gLeft.translate(RULER_FONT_PX + 1, y + 2);
+        gLeft.rotate(-Math.PI / 2);
+        gLeft.fillText(String(Math.round(w0)), 0, 0);
+        gLeft.restore();
+        if (!minorVisible) continue;
+        gLeft.globalAlpha = 0.5;
+        for (let m = 1; m < 5; m += 1) {
+          const my = Math.round(pan.y + (w0 + minor * m) * k) + 0.5;
+          gLeft.beginPath();
+          gLeft.moveTo(RULER_PX - RULER_MINOR_PX, my);
+          gLeft.lineTo(RULER_PX, my);
+          gLeft.stroke();
+        }
+      }
+      gLeft.globalAlpha = 0.35;
+      gLeft.strokeStyle = RULER_EDGE;
+      for (const w0 of [0, plateH]) {
+        const y = Math.round(pan.y + w0 * k) + 0.5;
+        gLeft.beginPath();
+        gLeft.moveTo(0, y);
+        gLeft.lineTo(RULER_PX, y);
+        gLeft.stroke();
+      }
+      gLeft.globalAlpha = 1;
+      gLeft.strokeStyle = RULER_RULE;
+      gLeft.beginPath();
+      gLeft.moveTo(RULER_PX - 0.5, 0);
+      gLeft.lineTo(RULER_PX - 0.5, r.height);
+      gLeft.stroke();
+    }
+  };
+  drawRulersRef.current = rulersOn ? drawRulers : () => {};
+
+  /* Линейки включили, плата сменила форму, окно изменило размер — деления обязаны стать на место
+     ДО того, как человек по ним что-то отмерит. Вид при этом не трогается: перерисовка шкалы —
+     не жест. */
+  useEffect(() => {
+    drawRulersRef.current();
+  }, [rulersOn, plateH, zoomPct]);
+
   /**
    * РАМКА КАДРА ОСТАЁТСЯ ОСЕ-ВЫРОВНЕННОЙ И КОНЕЧНОЙ.
    *
@@ -2982,11 +3401,46 @@ export function VectorModal({
     applyView();
   };
 
+  /**
+   * РАМКА НАЗВАННОЙ ФОРМЫ — НАИБОЛЬШАЯ ТАКАЯ ВНУТРИ ЛИСТА, ПО ЦЕНТРУ (E-18).
+   *
+   * ОДНА ФУНКЦИЯ НА ДВЕ ДВЕРИ: открытие кропа и выбор формы чипом обязаны давать ОДНУ И ТУ ЖЕ
+   * рамку — иначе «взял кроп при выбранном 1:1» и «взял кроп, потом нажал 1:1» давали бы разное,
+   * и человек не смог бы сказать, какое из двух правильное.
+   */
+  const cropQuadFor = (r: number | null): Quad => {
+    const sheet = quadFromRect(0, 0, PLATE_W, plateH);
+    return r === null ? sheet : fitQuadRatio(sheet, r, 'fit', [0.5, 0.5]);
+  };
+
   /** Рамка кадра — по нынешним границам платы. Тянуть наружу больше её, внутрь — меньше. */
   const openCropFrame = () => {
-    const quad = quadFromRect(0, 0, PLATE_W, plateH);
+    const quad = cropQuadFor(cropRatio);
     putFrame({ owner: 'crop', quad, axis: true, snapshot: quad });
     setFrameHover(null);
+  };
+
+  /**
+   * ВЫБРАТЬ ОТНОШЕНИЕ СТОРОН КАДРА (E-18).
+   *
+   * ⚠ ФОРМА СЧИТАЕТСЯ ОТ ЛИСТА, А НЕ ОТ НЫНЕШНЕЙ РАМКИ, И ЭТО ДВА РАЗНЫХ ДЕФЕКТА СРАЗУ.
+   *
+   * От рамки «по площади»: 16:9 на листе 4:5 дал бы рамку ШИРЕ ЛИСТА (1490 при 1000) — то есть
+   * простой выбор формы, не тронув ни одной ручки, ПРЕДЛОЖИЛ БЫ НАРАСТИТЬ бумагу на четверть с
+   * каждой стороны. Кроп умеет расти, но растить обязан ЧЕЛОВЕК рукой, а не выпадающий выбор.
+   *
+   * От рамки «по стороне»: 16:9 → 9:16 → 16:9 не вернулось бы туда, откуда ушло, — каждое
+   * переключение отгрызало бы кусок, и через три нажатия рамка схлопывалась бы в щель.
+   *
+   * От ЛИСТА обе беды исчезают разом: результат зависит только от названной формы, значит он
+   * повторим и обратим, и он по построению внутри бумаги. Ровно так ведёт себя выбор пресета у
+   * фотошопного кропа.
+   */
+  const chooseCropRatio = (r: number | null) => {
+    setCropRatio(r);
+    const fr = frameRef.current;
+    if (!fr || fr.owner !== 'crop' || r === null) return;
+    putFrame({ ...fr, quad: cropQuadFor(r) });
   };
 
   const closeFrame = () => {
@@ -3316,6 +3770,112 @@ export function VectorModal({
     }
   };
 
+  /* ═══ НАПРАВЛЯЮЩИЕ: ТРИ ПОЛОВИНЫ ОДНОГО ЖЕСТА (E-17) ══════════════════════════════════════
+   *
+   * Вытянуть из линейки, подвинуть на листе, вернуть на линейку — это ОДИН жест указателя с тремя
+   * дверьми, и все три сведены сюда, потому что состояние у них общее (`guideDrag`). Порознь
+   * первая из них (нажатие на линейку) жила бы в разметке, вторая — в движении сцены, третья — в
+   * отпускании, и «что сейчас в руке» пришлось бы выводить в трёх местах по-разному.
+   */
+
+  /** Долю листа под указателем вдоль поперечной оси направляющей. */
+  const guideAtPointer = (
+    e: { clientX: number; clientY: number },
+    dir: 'h' | 'v',
+    skip: number,
+  ): number => {
+    const f = frameAtFree(e);
+    const raw = dir === 'h' ? f[1] : f[0];
+    /* ⚠ ДОПУСК ПРИВЯЗКИ ПЕРЕВОДИТСЯ В ДОЛИ ТОЙ ЖЕ ОСИ. Плата не квадрат: один допуск «в долях»
+       на обе оси притягивал бы по вертикали 4:5-листа на четверть сильнее, чем по горизонтали. */
+    const span = dir === 'h' ? plateH : PLATE_W;
+    const tol = GUIDE_SNAP_PX / (viewRef.current.zoom || 1) / Math.max(1e-6, span);
+    /* ⚠ САМА СЕБЯ НЕ ПРИТЯГИВАЕТ. Живая направляющая лежит в том же списке, и без выброса она
+       прилипла бы к своему прошлому положению — то есть перестала бы двигаться вовсе. */
+    const others = guidesRef.current.filter((_, i) => i !== skip);
+    return clamp01(snapFrac(others, dir, raw, tol));
+  };
+
+  /**
+   * ═══ КОНЕЦ ЛИНИИ ПРИТЯГИВАЕТСЯ К РАЗМЕТКЕ (E-17) ════════════════════════════════════════
+   *
+   * ⚠ ТОЛЬКО ЛИНИЯ, И ЭТО ГРАНИЦА, А НЕ НЕДОДЕЛКА. Направляющая существует, чтобы ПОСТАВИТЬ
+   * что-то точно; линия — единственный инструмент, у которого «точно» выражается двумя точками.
+   * След руки и кисть притягивать нельзя вовсе: у них сотня точек, и притянутая середина мазка
+   * означала бы, что рисунок сам себя правит там, где рука его не вела.
+   *
+   * ⚠ ПРИТЯГИВАЕТ ТОЛЬКО К ВИДИМОМУ. Опорных долей листа (`GUIDE_MARKS` — кромки и середина)
+   * здесь нет нарочно: невидимая привязка — это рука, которую держат, не показав чем. У самой
+   * направляющей они есть, потому что там на экране виден хотя бы результат — линия встала.
+   */
+  const snapDraw = (p: [number, number]): [number, number] => {
+    if (!rulersOn || !guidesRef.current.length) return p;
+    const k = viewRef.current.zoom || 1;
+    return [
+      snapFrac(guidesRef.current, 'v', p[0], GUIDE_SNAP_PX / k / PLATE_W, []),
+      snapFrac(guidesRef.current, 'h', p[1], GUIDE_SNAP_PX / k / plateH, []),
+    ];
+  };
+
+  /** Указатель стоит на одной из линеек — по координатам ЭКРАНА, а не мира. */
+  const overRuler = (e: { clientX: number; clientY: number }): boolean => {
+    const vp = viewportRef.current;
+    if (!vp) return false;
+    const r = viewportRect(vp);
+    return e.clientX - r.left < RULER_PX || e.clientY - r.top < RULER_PX;
+  };
+
+  /**
+   * НАЖАЛИ НА ЛИНЕЙКУ — РОДИЛАСЬ НАПРАВЛЯЮЩАЯ И СРАЗУ ПОЕХАЛА ЗА РУКОЙ.
+   *
+   * ⚠ ЗАХВАТ СТАВИТСЯ НА ВЬЮПОРТ, А НЕ НА САМУ ЛИНЕЙКУ. Захваченный линейкой указатель слал бы
+   * ей же и движение, и отпускание — то есть жест, вышедший за 16 пикселей полосы (а он выходит
+   * весь), обрывался бы на первом кадре. Вьюпорт ведёт указатель для всего редактора; сюда
+   * приходит ровно одна дверь.
+   */
+  const beginGuideFromRuler = (event: React.PointerEvent<HTMLCanvasElement>, dir: 'h' | 'v') => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const vp = viewportRef.current;
+    const want: Guide = { dir, at: guideAtPointer(event, dir, -1) };
+    const born = addGuide(guidesRef.current, want);
+    const grab = () => {
+      try {
+        vp?.setPointerCapture?.(event.pointerId);
+      } catch {
+        /* Захват — удобство, а не условие: без него жест доживёт до выхода за вьюпорт и
+           оборвётся отпусканием, что честнее, чем не начаться вовсе. */
+      }
+    };
+    if (born === guidesRef.current) {
+      /**
+       * ⚠ ДВА ОТКАЗА С РАЗНЫМ СМЫСЛОМ, И НИ ОДИН ИЗ НИХ НЕ «НИЧЕГО НЕ ПРОИЗОШЛО».
+       *
+       * ТАМ УЖЕ ЕСТЬ ТАКАЯ — берём ЕЁ в руку и ведём дальше. Родиться направляющая обязана в
+       * точке под указателем, а указатель в этот миг стоит НА ЛИНЕЙКЕ, то есть за кромкой листа:
+       * доля клампится в 0 (или 1) и садится на опорную. Значит стоит человеку однажды прижать
+       * направляющую к кромке — и следующий жест от той же линейки упирался бы в совпадение и
+       * МОЛЧА не делал бы ничего. Пустой жест — тот самый дефект, который этот редактор чинит по
+       * кругу; здесь он закрыт тем, что жест продолжается той направляющей, что уже есть.
+       *
+       * ПОТОЛОК — говорит. Жест, «не сработавший» на тридцать третьей, неотличим от сломанного
+       * редактора: на экране ничего, и причина не названа нигде.
+       */
+      const twin = sameSpot(guidesRef.current, want);
+      if (twin >= 0) {
+        grab();
+        guideDrag.current = { id: event.pointerId, index: twin, dir };
+        return;
+      }
+      showMessage(`${MAX_GUIDES} guides is all one sheet holds — «clear guides» empties it`, 'error');
+      return;
+    }
+    grab();
+    writeGuides(born, false);
+    guideDrag.current = { id: event.pointerId, index: born.length - 1, dir };
+  };
+
   const onStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const vp = viewportRef.current;
     if (!vp) return;
@@ -3397,6 +3957,37 @@ export function VectorModal({
       event.preventDefault();
       void takeInkAt(at);
       return;
+    }
+
+    /**
+     * ═══ ВЗЯТЬ НАПРАВЛЯЮЩУЮ — ТОЛЬКО СТРЕЛКОЙ И РУКОЙ (E-17) ══════════════════════════════
+     *
+     * ⚠ ИНСТРУМЕНТЫ ЗДЕСЬ НАЗВАНЫ ПОИМЁННО, И ЭТО ГЛАВНОЕ РЕШЕНИЕ ЖЕСТА. Направляющая — тонкая
+     * линия, а полоса захвата вокруг неё шире неё самой; отдай ей нажатие ОТ ЛЮБОГО инструмента,
+     * и человек, ведущий шов ВДОЛЬ разметки (то есть ровно то, ради чего он её и поставил), вместо
+     * штриха утащил бы саму разметку. У фотошопа то же правило и по той же причине: направляющую
+     * берёт `Move`, а не кисть. `select` — наша стрелка, и клавиша у неё та же `v`.
+     *
+     * ⚠ РУКИ (`pan`) В ЭТОМ СПИСКЕ НЕТ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ: панорама уходит ранним `return`
+     * в самом начале обработчика, вместе со средней кнопкой и зажатым пробелом. Названная здесь,
+     * она была бы мёртвой строкой, обещающей жест, который сюда не доходит.
+     *
+     * Замороженный слой не исключение: разметка не документ, её можно двигать и на «read-only» —
+     * тем же правилом, по которому там живут зум и вписывание.
+     */
+    if (rulersOn && tool === 'select' && guidesRef.current.length) {
+      const idx = hitGuide(
+        guidesRef.current,
+        plateAt(event),
+        plateRect,
+        GUIDE_GRAB_PX / (viewRef.current.zoom || 1),
+      );
+      if (idx >= 0) {
+        event.preventDefault();
+        vp.setPointerCapture?.(event.pointerId);
+        guideDrag.current = { id: event.pointerId, index: idx, dir: guidesRef.current[idx].dir };
+        return;
+      }
     }
 
     if (tool === 'select') {
@@ -3540,7 +4131,10 @@ export function VectorModal({
        уносил бы минуту обводки насовсем, потому что отпускание не находит, что сохранять, и ⇧⌘D
        возвращать уже нечего. `dropSel` — единственное место, где живёт «снятая помнится». */
     if (tool === 'lasso' || tool === 'patch') pressDropped.current = dropSel();
-    putTrace([at]);
+    /* НАЧАЛО ЛИНИИ ПРИТЯГИВАЕТСЯ ТАК ЖЕ, КАК КОНЕЦ. Притянуть один конец из двух значило бы, что
+       отрезок, начатый на направляющей, ложится рядом с ней — и человек узнаёт об этом, только
+       приблизив. */
+    putTrace([tool === 'line' ? snapDraw(at) : at]);
   };
 
   const onStagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3548,6 +4142,25 @@ export function VectorModal({
        ранним `return` (протяжка рамки, панорама, перо), и запись в конце означала бы, что после
        панорамы рукой превью пересчитывать не от чего. */
     lastClient.current = { x: event.clientX, y: event.clientY };
+    /* НИТИ НА ШКАЛАХ ИДУТ ЗА РУКОЙ ВСЕГДА, какой бы жест ни был в работе: линейка отвечает на
+       вопрос «где я», а он не зависит от того, что сейчас в руке. */
+    if (rulersOn) moveRulerMarks(event.clientX, event.clientY);
+    /**
+     * НАПРАВЛЯЮЩАЯ В РУКЕ ЗАБИРАЕТ ДВИЖЕНИЕ ЦЕЛИКОМ — тем же правилом, что живая рамка: пока её
+     * ведут, экран занят ею, и рисовать под ней нечем.
+     */
+    const gd = guideDrag.current;
+    if (gd && event.pointerId === gd.id) {
+      const at = guideAtPointer(event, gd.dir, gd.index);
+      const cur = guidesRef.current[gd.index];
+      if (cur && cur.at !== at) {
+        writeGuides(
+          guidesRef.current.map((g, i) => (i === gd.index ? { dir: gd.dir, at } : g)),
+          false,
+        );
+      }
+      return;
+    }
     const fd = frameDrag.current;
     const fr = frameRef.current;
     if (fd && fr && event.pointerId === fd.id) {
@@ -3584,6 +4197,9 @@ export function VectorModal({
         return;
       }
       let quad = fr.quad;
+      /* Точка, которая обязана стоять на месте, пока рамка меняет форму под запертое отношение
+         (E-18). Значение по умолчанию — центр: у сдвига всей рамки ручки нет вовсе. */
+      let holdUv: [number, number] = [0.5, 0.5];
       if (fd.mode === 'move') {
         quad = moveQuad(fd.startQuad, p[0] - fd.startAt[0], p[1] - fd.startAt[1]);
       } else if (fd.mode === 'pin') {
@@ -3594,15 +4210,39 @@ export function VectorModal({
         const want = quadAngleDeg(fd.startQuad) + (now - fd.startDeg);
         quad = rotateQuad(fd.startQuad, event.shiftKey ? snapDeg(want) : want);
       } else {
+        /**
+         * ЗАПЕРТОЕ ОТНОШЕНИЕ РАБОТАЕТ ТЕМ ЖЕ ОРГАНОМ, ЧТО SHIFT (E-18), И ЭТО НЕ СОВПАДЕНИЕ:
+         * «держи форму» — одно правило, названное двумя способами. Разница только в том, ЧТО
+         * держится: Shift держит нынешнюю форму рамки, чип — названную.
+         *
+         * ⚠ `proportional` НЕДОСТАТОЧНО, И БЕЗ ВТОРОЙ ПОЛОВИНЫ ОТНОШЕНИЕ ТЕРЯЛОСЬ БЫ НА ПОЛОВИНЕ
+         * ручек: в `scaleQuad` эта ветка живёт только при `movesX && movesY`, то есть у УГЛОВ.
+         * Потянув середину стороны, человек менял бы один размер, не трогая второй, — и рамка
+         * молча переставала бы быть 4:5, оставаясь подписанной как 4:5.
+         */
         quad = scaleQuad(fd.startQuad, fd.handle, p, {
-          proportional: event.shiftKey,
+          proportional: event.shiftKey || (fr.axis && cropRatio !== null),
           // Кроп не отражается: перевёрнутая рамка кадра означала бы отрицательный размер листа.
           allowFlip: !fr.axis,
           minSide: MIN_FRAME_SIDE,
         });
+        const uv = HANDLE_UV[fd.handle];
+        /* ЯКОРЬ — ПРОТИВОПОЛОЖНАЯ РУЧКА. Тянут правую сторону — стоит левая; тянут угол —
+           стоит угол напротив. Иначе рамка уезжала бы из-под пальца, который её тянет. */
+        if (uv) holdUv = [1 - uv[0], 1 - uv[1]];
+        if (fr.axis && cropRatio !== null) {
+          quad = fitQuadRatio(quad, cropRatio, uv && uv[0] === 0.5 ? 'h' : 'w', holdUv);
+        }
       }
       if (fr.axis) quad = clampCropQuad(quad);
       else quad = keepQuadReachable(quad, plateRect, BACKDROP_KEEP_UNITS);
+      /* ⚠ ПОЧИНКА ПОСЛЕ КЛАМПА, И ОНА ТОЧНО НИЧЕГО НЕ ДЕЛАЕТ В ОБЫЧНОМ СЛУЧАЕ. `clampCropQuad`
+         режет по потолку роста (×4) СТОРОНАМИ ПОРОЗНЬ и потому имеет право сломать отношение —
+         редко, но молча. `fit` берёт наибольший прямоугольник нужной формы ВНУТРИ полученного:
+         когда кламп ничего не изменил, `min(w, h·ratio) === w`, и это тождество. */
+      if (fr.axis && cropRatio !== null && fd.mode !== 'move') {
+        quad = fitQuadRatio(quad, cropRatio, 'fit', holdUv);
+      }
       putFrame({ ...fr, quad });
       return;
     }
@@ -3716,14 +4356,79 @@ export function VectorModal({
     // collinear samples and the «straight» line would arrive with a wobble nobody drew.
     {
       const prev = traceRef.current;
+      /**
+       * ═══ SHIFT: ЛИНИЯ ВЫХОДИТ РОВНОЙ (E-18) ═════════════════════════════════════════════
+       *
+       * Начало жеста — `prev[0]`: ту же точку положил `putTrace([at])` на нажатии, и заводить ей
+       * ВТОРУЮ память значило бы держать два ответа на вопрос «откуда линия», которые разойдутся
+       * на первом же жесте, начатом не мышью.
+       *
+       * ⚠ ДВА МАТЕРИАЛА — ДВА ПОВЕДЕНИЯ, И ЭТО НЕ НЕПОСЛЕДОВАТЕЛЬНОСТЬ, А СЛЕДСТВИЕ ТОГО, ЧЕМ
+       * ОНИ РАЗЛИЧАЮТСЯ. Векторная линия каждый кадр СТРОИТСЯ ЗАНОВО из двух точек, поэтому рука
+       * вольна перекидывать её между восемью осями сколько угодно — на экране всегда ровно одна
+       * последняя. Пиксель ЛОЖИТСЯ НАВСЕГДА: перекинув ось на середине, человек оставил бы на
+       * холсте угол из двух мазков и не смог бы стереть половину. Поэтому у мазка ось решается
+       * ОДИН РАЗ, на первом заметном движении, и держится до конца жеста — ровно так ведёт себя
+       * кисть в фотошопе.
+       *
+       * ⚠ SHIFT ЧИТАЕТСЯ С УКАЗАТЕЛЯ. Клавиатурный `shiftHeld` этого экрана нужен рейке, а не
+       * жесту: он живёт через оконный слушатель и после клика по чипу отстаёт на кадр.
+       */
+      const straight =
+        event.shiftKey &&
+        !!prev.length &&
+        (tool === 'line' || tool === 'freehand' || smears(tool));
+      if (!straight) shiftAxis.current = null;
+      const dir = straight
+        ? (shiftAxis.current ?? straightDir(prev[0], at, plateH))
+        : null;
+      if (straight && dir && smears(tool)) shiftAxis.current = dir;
+      /* ⚠ SHIFT СТАРШЕ ПРИВЯЗКИ, И ПОРЯДОК ЗДЕСЬ — ЭТО ПРАВИЛО, А НЕ СЛУЧАЙНОСТЬ. Притянуть
+         конец УЖЕ ВЫПРЯМЛЕННОЙ линии к направляющей значило бы сломать угол, который человек
+         держит пальцем: он попросил ровно, а получил бы «почти ровно, зато по разметке». */
+      const fixed = dir
+        ? alongDir(prev[0], at, dir, plateH)
+        : tool === 'line'
+          ? snapDraw(at)
+          : at;
       // ПИКСЕЛИ КЛАДУТСЯ ПРЯМО СЕЙЧАС. Копить след и красить его целиком на отпускании значило бы
       // рисовать вслепую: мазок появлялся бы после того, как рука его закончила.
-      if (smears(tool)) feedRasterSamples(tool, samples);
-      putTrace(tool === 'line' ? [prev[0], at] : [...prev, ...samples]);
+      if (smears(tool)) feedRasterSamples(tool, dir ? [fixed] : samples);
+      putTrace(
+        tool === 'line' || dir ? [prev[0], fixed] : [...prev, ...samples],
+      );
     }
   };
 
   const onStagePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    /* ОСЬ ЖИВЁТ РОВНО ОДИН ЖЕСТ (E-18). Пережив отпускание, она заперла бы СЛЕДУЮЩИЙ мазок на
+       направлении позапрошлого — и человек не нашёл бы, чем это отменить: Shift он отпустил. */
+    shiftAxis.current = null;
+    /**
+     * НАПРАВЛЯЮЩУЮ СТАВЯТ ИЛИ ВЫБРАСЫВАЮТ (E-17) — и второе тоже жест, а не кнопка: вернуть её
+     * на линейку, откуда взял, — то, что рука делает не думая, и ровно то, что делает фотошоп.
+     *
+     * ⚠ ДВА ПРИЗНАКА «ВЫБРОСИЛ», А НЕ ОДИН, потому что вопросов тоже два. «Отпустил над
+     * линейкой» — экранный, и он ловит возврат туда, откуда взял. «Отпустил вне листа» —
+     * мировой, и он ловит уведённую за кромку разметку, которая на листе не лежит и потому
+     * ничего не размечает. Один без другого оставлял бы законный способ спрятать направляющую
+     * так, что убрать её было бы уже нечем: на линейку она из-за края не вернётся.
+     *
+     * ЗАПИСЬ В ПАМЯТЬ — ЗДЕСЬ, И ТОЛЬКО ЗДЕСЬ: кадры протяжки идут десятками в секунду, а
+     * `localStorage` синхронен. Жест кончился — можно писать.
+     */
+    const gd = guideDrag.current;
+    if (gd && event.pointerId === gd.id) {
+      guideDrag.current = null;
+      const f = frameAtFree(event);
+      const off = f[0] < 0 || f[0] > 1 || f[1] < 0 || f[1] > 1;
+      const drop = off || overRuler(event);
+      writeGuides(
+        drop ? guidesRef.current.filter((_, i) => i !== gd.index) : guidesRef.current,
+        true,
+      );
+      return;
+    }
     if (frameDrag.current && event.pointerId === frameDrag.current.id) {
       frameDrag.current = null;
       /* ПОЛОЖЕНИЕ ШАБЛОНА ПИШЕТСЯ НА ОТПУСКАНИИ, А НЕ НА КАЖДОМ ДВИЖЕНИИ: `saveBackdropSoon`
@@ -3898,10 +4603,32 @@ export function VectorModal({
     if (!sel || frozen) return;
     const born = copyInsideSelection(strokesRef.current, sel.pts, [0, 0]);
 
-    // Пиксели берём, только если растр уже заведён: заводить его РАДИ КОПИИ значило бы molча
-    // испачкать слой (копия подложки — это правка) ради жеста, который ничего не меняет.
+    /**
+     * ═══ ХОЛСТ ЗАВОДИТСЯ ЗДЕСЬ ЖЕ, КАК У ВСЕХ ОСТАЛЬНЫХ ПИКСЕЛЬНЫХ ГЛАГОЛОВ (E-19) ══════════
+     *
+     * Владелец: «когда делаешь выделение через лассо и жмешь ctrl c ошибка что selection holds
+     * nothing to copy». ЗАМЕРЕНО, а не выведено чтением: на пресете `fresh` (картинка есть, слоя
+     * на ней ещё не было — это КАЖДЫЙ первый заход) `rasterRef.current` на момент ⌘C равен null,
+     * область при этом честно построена, и отказ печатается. Тот же жест, той же областью, после
+     * одного взятия кисти — «pixels copied». Разница ровно одна: холст успели завести.
+     *
+     * ⚠ ПРЕЖНИЙ ДОВОД — «заводить растр РАДИ КОПИИ значило бы молча испачкать слой» — ОКАЗАЛСЯ
+     * НЕВЕРЕН, и это проверяется одной строкой: `ensureRaster` не трогает `rasterDirtyRef`, а
+     * сохранение пишет пиксели ТОЛЬКО при `rasterDirtyRef.current` (см. `persist`). Заведение
+     * холста — это чтение картинки в память, а не правка; ровно поэтому его же делает простая
+     * СМЕНА ЧИПА на кисть, которая тоже ничего не меняет. Довод пережил свою причину и защищал
+     * дефект: единственный глагол над пикселями, который спрашивал холст, вместо того чтобы его
+     * попросить.
+     *
+     * ⚠ ГЕЙТ `baseMediaId > 0` — ТОТ ЖЕ, ЧТО У КРОПА (`applyCropFrame`), и он несущий: на рисунке
+     * с нуля картинки под платой нет вовсе, `seedRaster` откажет, и ⌘C над областью с ЛИНИЯМИ
+     * внутри выдал бы отказ про пиксельный слой вместо того, чтобы просто скопировать линии.
+     * Отказ заведения тоже не роняет жест: линии копируются, а пустая область получает свой
+     * прежний ответ.
+     */
     let cut: HTMLCanvasElement | null = null;
     let cutFrac: { x0: number; y0: number; x1: number; y1: number } | null = null;
+    if (baseMediaId > 0 && !rasterRef.current) await ensureRaster();
     const layer = rasterRef.current;
     if (layer) {
       const mask = selectionMask(layer, sel.pts, sel.feather);
@@ -5458,10 +6185,14 @@ export function VectorModal({
           onKeyUp={onKeyUp}
         >
           <Dialog.Title className='sr-only'>
-            {base ? 'vector edit — flat' : 'vector edit — a new drawing'}
+            {/* ⚠ РОД КАДРА, А НЕ СЛОВО «FLAT» ВСЕГДА. Редактор открывается и над рендером — с
+                круга 16 прямо из полосы рендеров, — и заголовок называл его флэтом в ста
+                процентах случаев. Правка при этом ничего не переносит между верстаками:
+                `FlattenEditLayer` наследует род и колорвею родителя. */}
+            {base ? `vector edit — ${(base.kind || 'flat').trim()}` : 'vector edit — a new drawing'}
           </Dialog.Title>
           <Dialog.Description className='sr-only'>
-            strokes over the flat on a pan and zoom canvas; the raster underneath is never touched
+            strokes over the picture on a pan and zoom canvas; the raster underneath is never touched
           </Dialog.Description>
 
           <div className='flex h-full flex-col gap-2'>
@@ -5528,6 +6259,42 @@ export function VectorModal({
                     <Chip nonForm dashed onClick={zoomReset} title='zoom back to 1:1 (⌘0)'>
                       1:1
                     </Chip>
+                    {/* ═══ ЛИНЕЙКИ (E-17) ══════════════════════════════════════════════════
+                        Орган вида, и стоит он среди органов вида: линейка ничего не рисует и
+                        ничего не сохраняет. `nonForm` — по тому же правилу, что у зума: на
+                        замороженном слое смотреть и мерить можно, и `<fieldset disabled>` не
+                        имеет права это отнять.
+
+                        ПОДПИСЬ НАЗЫВАЕТ ЖЕСТ, А НЕ СОСТОЯНИЕ. «rulers» на кнопке и «drag one
+                        out of a ruler» в подсказке — единственное место, где человек узнаёт,
+                        что направляющие вообще бывают: вытягивание из кромки не подсказывается
+                        ничем на экране. */}
+                    <Chip
+                      nonForm
+                      dashed
+                      selected={rulersOn}
+                      pressed={rulersOn}
+                      data-rulers-chip={rulersOn ? '1' : '0'}
+                      onClick={() => setRulersOn((v) => !v)}
+                      title={
+                        rulersOn
+                          ? `rulers are on (⌘R) · drag a guide out of a ruler; the arrow tool moves one, dropping it back on a ruler removes it${guides.length ? ` · ${guides.length} guide${guides.length === 1 ? '' : 's'}` : ''}`
+                          : 'show rulers along the edges and drag guides out of them (⌘R)'
+                      }
+                    >
+                      rulers{rulersOn && guides.length ? ` ${guides.length}` : ''}
+                    </Chip>
+                    {rulersOn && guides.length > 0 && (
+                      <Chip
+                        nonForm
+                        dashed
+                        data-guides-clear=''
+                        onClick={() => writeGuides([], true)}
+                        title='take every guide off this sheet'
+                      >
+                        clear guides
+                      </Chip>
+                    )}
                     {/* ОТМЕНА НАЗЫВАЕТ, ЧТО ИМЕННО ВЕРНЁТСЯ, И СКОЛЬКО ШАГОВ ЕЩЁ ЕСТЬ. Лента одна
                         на линии и пиксели, и без слова материала «undo» на растровом шаге читался
                         бы как «отменить последнюю линию» — и не сработал бы так, как ожидали. */}
@@ -5743,6 +6510,9 @@ export function VectorModal({
                   cropTool={tool === 'crop'}
                   cropFill={cropFill}
                   onCropFill={setCropFill}
+                  cropRatio={cropRatio}
+                  sheetRatio={PLATE_W / plateH}
+                  onCropRatio={chooseCropRatio}
                   penTool={tool === 'curve'}
                   penCanClose={!!pen && pen.anchors.length >= 3}
                   onPathToSelection={makeSelectionFromPen}
@@ -5892,7 +6662,14 @@ export function VectorModal({
                           : tool === 'patch'
                           ? 'lasso a region, then drag it onto a clean place — the region is rebuilt from there and the seam blended. No texture is invented; the lines are not touched'
                           : tool === 'select'
-                            ? 'click a stroke — the rail edits its stitch'
+                            ? /* Единственное место, где сказано, что направляющую можно взять:
+                                 тонкая синяя нить сама об этом не говорит, а курсор над ней не
+                                 меняется — рамка перехватывает наведение раньше. Строка растёт
+                                 ТОЛЬКО когда разметка на листе есть; болтаться постоянно она не
+                                 имеет права (высота блока над холстом неизменна — проба 83). */
+                              guides.length && rulersOn
+                              ? 'click a stroke — the rail edits its stitch · drag a guide to move it, onto a ruler to remove it'
+                              : 'click a stroke — the rail edits its stitch'
                             : tool === 'clone'
                                 ? 'alt-click to take the source, then drag. The LINES under the source are laid under your hand'
                                 : tool === 'erase'
@@ -6622,6 +7399,52 @@ export function VectorModal({
                           />
                         </svg>
                       )}
+                      {/* ═══ НАПРАВЛЯЮЩИЕ (E-17) ═══════════════════════════════════════════
+                          В МИРЕ, А НЕ НА ЭКРАНЕ: они привязаны к листу, значит обязаны ехать с
+                          ним на панораме и зуме — своей арифметики вида им не нужно вовсе,
+                          трансформ мира уже сделан. Толщина делится на зум по тому же правилу,
+                          что у рамки и у муравьёв: линия разметки обязана оставаться волосяной
+                          на любом приближении, иначе на 800 % она закрывает то, что размечает.
+
+                          ЦВЕТ — ЕДИНСТВЕННОЕ, ЧЕМ ОНА ОТЛИЧАЕТСЯ ОТ НАРИСОВАННОЙ ЛИНИИ, и
+                          поэтому он здесь не украшение: пунктир на этом экране уже занят
+                          выделением, сплошная чёрная — это шов. Синий (#2323ff, токен дома) не
+                          значит ничего другого ни на одном экране админки. Белая подложка под
+                          ним — тот же приём, что у контура рамки: на тёмной фотографии
+                          одноцветная нить пропадает целиком.
+
+                          Указателя не ловит НИКОГДА (`pointer-events: none`): жест ведёт сама
+                          сцена — иначе тонкая линия отнимала бы нажатие у кисти раньше, чем
+                          инструмент успеет о нём узнать. */}
+                      {rulersOn && guides.length > 0 && (
+                        <svg
+                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                          preserveAspectRatio='none'
+                          className='pointer-events-none absolute inset-0 h-full w-full'
+                          data-guides={guides.length}
+                        >
+                          {guides.map((g, i) => {
+                            const held = guideDrag.current?.index === i;
+                            const p =
+                              g.dir === 'h'
+                                ? { x1: 0, y1: g.at * plateH, x2: PLATE_W, y2: g.at * plateH }
+                                : { x1: g.at * PLATE_W, y1: 0, x2: g.at * PLATE_W, y2: plateH };
+                            return (
+                              <g key={`${g.dir}${i}`}>
+                                <line {...p} stroke='#fff' strokeWidth={3 / zoomK} opacity={0.6} />
+                                <line
+                                  {...p}
+                                  stroke='#2323ff'
+                                  strokeWidth={(held ? 2 : 1) / zoomK}
+                                  data-guide={i}
+                                  data-guide-dir={g.dir}
+                                  data-guide-at={g.at.toFixed(4)}
+                                />
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      )}
                       {/* ТРАНСФОРМ-РАМКА — ПОВЕРХ ВСЕГО И ВСЕГДА ОДНА (G-3, G-13, G-4). */}
                       {frame && (
                         <TransformFrameOverlay
@@ -6642,6 +7465,52 @@ export function VectorModal({
                         />
                       )}
                     </div>
+                    {/* ═══ ЛИНЕЙКИ (E-17) ══════════════════════════════════════════════════
+                        СЁСТРЫ МИРА, А НЕ ЕГО ДЕТИ: мир двигается трансформом, и линейка внутри
+                        него уехала бы вместе с ним — то есть перестала бы быть кромкой экрана.
+                        Лежат ПОВЕРХ вьюпорта, размера ему не меняя (довод у `RULER_PX`).
+
+                        Указатель они ЛОВЯТ, в отличие от всех прочих накладок редактора, и это
+                        и есть орган «добавить направляющую»: нажать на линейку и повести. */}
+                    {rulersOn && (
+                      <>
+                        <canvas
+                          ref={rulerTopRef}
+                          data-ruler='top'
+                          onPointerDown={(e) => beginGuideFromRuler(e, 'h')}
+                          className='absolute left-0 top-0 cursor-row-resize'
+                          style={{ width: '100%', height: `${RULER_PX}px` }}
+                        />
+                        <canvas
+                          ref={rulerLeftRef}
+                          data-ruler='left'
+                          onPointerDown={(e) => beginGuideFromRuler(e, 'v')}
+                          className='absolute left-0 top-0 cursor-col-resize'
+                          style={{ width: `${RULER_PX}px`, height: '100%' }}
+                        />
+                        {/* Угол: место, где сходятся обе шкалы. Ничего не делает нарочно — он не
+                            орган, а стык хрома, и кнопка здесь обещала бы жест, которого нет. */}
+                        <div
+                          data-ruler='corner'
+                          className='pointer-events-none absolute left-0 top-0 border-b border-r border-hairline bg-bgColor'
+                          style={{ width: `${RULER_PX}px`, height: `${RULER_PX}px` }}
+                        />
+                        {/* ГДЕ РУКА — ДВЕ НИТИ ПО ШКАЛАМ. Единственное, что здесь чернильное:
+                            это ответ на вопрос «сколько», и он обязан читаться сразу. */}
+                        <div
+                          ref={markXRef}
+                          data-ruler-cursor='x'
+                          className='pointer-events-none absolute left-0 top-0 bg-textColor'
+                          style={{ width: '1px', height: `${RULER_PX}px` }}
+                        />
+                        <div
+                          ref={markYRef}
+                          data-ruler-cursor='y'
+                          className='pointer-events-none absolute left-0 top-0 bg-textColor'
+                          style={{ width: `${RULER_PX}px`, height: '1px' }}
+                        />
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

@@ -65,6 +65,23 @@ export { COLOUR_NAME_MAX } from './model';
  * ПОРЯДОК СЛЕВА НАПРАВО — ПОРЯДОК РЕШЕНИЯ: сначала выбирают цвет (пикер), потом видят его значение,
  * потом называют. Имя необязательно: цвет без имени уезжает одним hex, и промпт это умеет.
  */
+/**
+ * ═══ ПОЛЕ ИМЕНИ ВЫКЛЮЧАЕМО — E-11, И ВЫКЛЮЧАЕТСЯ ВМЕСТЕ СО ЗНАЧЕНИЕМ ═════════════════════════
+ *
+ * Владелец: «в GENERATION — ON MODEL текстфилд NAME не нужен».
+ *
+ * ⚠ СНЯТЬ ОДНО ПОЛЕ БЫЛО БЫ ПОЛОВИНОЙ ПРАВКИ И ХУДШЕЙ ИЗ ДВУХ. `code` уезжает на провод внутри
+ * `params.colour` и печатается в промпт ПАРОЙ с hex («colourway dusty rose — the exact value is
+ * #a41f22»). Значение попадает в него не только с клавиатуры: плашка прошлого рецепта в пикере
+ * возвращает РЕЦЕПТ ЦЕЛИКОМ, имя вместе со значением. Спрячь поле, оставив писателя, — и экран,
+ * на котором имени нет, покупал бы промпт с именем, которого человек не видел и снять не мог.
+ * Это ровно тот дефект («подпись утверждает не то, что несёт тело»), который эта полоса уже
+ * дважды оплачивала.
+ *
+ * ПОЭТОМУ `showName={false}` СНИМАЕТ И ПОЛЕ, И ПИСАТЕЛЯ: плашка возвращает ОДНО значение, а
+ * вызывающий экран стирает `code` у самой двери на провод (`onmodel/studio.tsx`). Двух половин у
+ * этого выключателя нет.
+ */
 export function ColourStatementRow({
   band,
   draft,
@@ -72,12 +89,19 @@ export function ColourStatementRow({
   /** Чем этот цвет распорядится ЭТОТ экран. Главное, чем два вызова отличаются. */
   hint,
   label = 'colour',
+  showName = true,
 }: {
   band: GetDesignBandResponse;
   draft: ColourDraft;
   disabled?: boolean;
-  hint: React.ReactNode;
+  /**
+   * ⚠ НЕОБЯЗАТЕЛЕН (E-10). Пустая подсказка — это ОТСУТСТВИЕ строки, а не пустая серая строка:
+   * `Hint` в пустом виде занимает высоту и читается как «здесь что-то не загрузилось».
+   */
+  hint?: React.ReactNode;
   label?: string;
+  /** E-11: имя цвета этому экрану не нужно — снимается вместе со своим писателем, см. выше. */
+  showName?: boolean;
 }): JSX.Element {
   const recipe = draft.recipe;
   const stated = fabricStatement(recipe);
@@ -112,7 +136,11 @@ export function ColourStatementRow({
            истории. Отличает вход не происхождение байтов, а ЖЕСТ: это выбор, сделанный руками, и
            он обязан ЗАМЕНИТЬ то, что стоит, а не «лечь только в пустое» — иначе плашка, обещающая
            вернуть пару целиком, возвращала бы половину. */
-        onPickRecent={(hex, code) => draft.typed({ hex, code })}
+        onPickRecent={(hex, code) =>
+          /* ⚠ ЭКРАН БЕЗ ПОЛЯ ИМЕНИ НЕ ПРИНИМАЕТ ИМЕНИ И ОТСЮДА (E-11). Иначе плашка вернула бы
+             `code`, которого негде увидеть и нечем снять, а промпт процитировал бы его вслух. */
+          showName ? draft.typed({ hex, code }) : draft.typed({ hex })
+        }
       />
       <div className='w-[100px]'>
         <Input
@@ -141,39 +169,43 @@ export function ColourStatementRow({
           onBlur={() => draft.typed({ hex: normaliseTypedHex(recipe.hex) })}
         />
       </div>
-      {/* ИМЯ ПИШЕТ `code` — ТО ЖЕ ПОЛЕ ПРОВОДА, ЧТО ПИСАЛА ПЛАШКА СЛОВАРЯ. Значит замороженная
-          история, лежащая с кодом `OLV`, читается ровно как читалась, а новая запись несёт слово,
-          которое что-то значит. Подпись стоит ПЕРЕД полем, той же грамматикой, что `weight` перед
-          граммажем: плейсхолдер исчезает, как только в поле что-то есть, и два соседних текстовых
-          поля, отличающиеся только содержимым, становятся неразличимы. */}
-      {/* Капслок по DESIGN.md §3 — тот же довод, что у `weight` в ряду CLOTH IS. */}
-      <Text
-        size='micro'
-        variant='uppercase'
-        tracking='label'
-        component='span'
-        className='shrink-0 pl-2'
-      >
-        name
-      </Text>
-      <div className='w-[160px]'>
-        <Input
-          name='design-colour-name'
-          data-colour-name
-          /* ПОДПИСЬ ДЛЯ СКРИНРИДЕРА, А НЕ ТОЛЬКО ДЛЯ ГЛАЗА. Серый `<span>` рядом — визуальный
-             сосед, и ничем полю не принадлежит: `Input` кладёт `name` в `id`, а `<label for>` в
-             этом ряду нет вовсе. Без этого три соседних поля (значение, имя, граммаж) звучат
-             одинаково — «edit text». */
-          aria-label='colour name'
-          maxLength={COLOUR_NAME_MAX}
-          value={recipe.code ?? ''}
-          disabled={disabled}
-          placeholder='dusty rose'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            draft.typed({ code: e.target.value })
-          }
-        />
-      </div>
+      {showName && (
+        <>
+        {/* ИМЯ ПИШЕТ `code` — ТО ЖЕ ПОЛЕ ПРОВОДА, ЧТО ПИСАЛА ПЛАШКА СЛОВАРЯ. Значит замороженная
+            история, лежащая с кодом `OLV`, читается ровно как читалась, а новая запись несёт слово,
+            которое что-то значит. Подпись стоит ПЕРЕД полем, той же грамматикой, что `weight` перед
+            граммажем: плейсхолдер исчезает, как только в поле что-то есть, и два соседних текстовых
+            поля, отличающиеся только содержимым, становятся неразличимы. */}
+        {/* Капслок по DESIGN.md §3 — тот же довод, что у `weight` в ряду CLOTH IS. */}
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          className='shrink-0 pl-2'
+        >
+          name
+        </Text>
+        <div className='w-[160px]'>
+          <Input
+            name='design-colour-name'
+            data-colour-name
+            /* ПОДПИСЬ ДЛЯ СКРИНРИДЕРА, А НЕ ТОЛЬКО ДЛЯ ГЛАЗА. Серый `<span>` рядом — визуальный
+               сосед, и ничем полю не принадлежит: `Input` кладёт `name` в `id`, а `<label for>` в
+               этом ряду нет вовсе. Без этого три соседних поля (значение, имя, граммаж) звучат
+               одинаково — «edit text». */
+            aria-label='colour name'
+            maxLength={COLOUR_NAME_MAX}
+            value={recipe.code ?? ''}
+            disabled={disabled}
+            placeholder='dusty rose'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              draft.typed({ code: e.target.value })
+            }
+          />
+        </div>
+        </>
+      )}
       {!disabled && stated.colour && (
         <Button variant='secondary' size='xs' onClick={() => draft.clear('colour')}>
           clear
@@ -182,9 +214,14 @@ export function ColourStatementRow({
       {/* ОТСТУП ПЕРЕНОСА ИЗМЕРЕН, А НЕ УГАДАН: колонка подписи `FieldRow` — 92px плюс 8px зазора.
           Тот же отступ у продолжения каждого ряда этой секции, поэтому вторая строка ряда читается
           как его продолжение, а не как потерявшая заголовок секция. */}
-      <div className='w-full pl-[100px]'>
-        <Hint>{hint}</Hint>
-      </div>
+      {/* ⚠ РЯД БЕЗ ПОДСКАЗКИ НЕ РИСУЕТ ПУСТОЙ КОРОБКИ (E-10). Владелец снял абзац
+          «The colour goes to the model as a name and a hex together…» целиком; серая полоска в
+          92 пикселя отступа на его месте читалась бы как не догрузившийся текст. */}
+      {hint ? (
+        <div className='w-full pl-[100px]'>
+          <Hint>{hint}</Hint>
+        </div>
+      ) : null}
     </FieldRow>
   );
 }

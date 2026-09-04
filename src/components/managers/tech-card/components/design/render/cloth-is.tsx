@@ -5,7 +5,14 @@ import Text from 'ui/components/text';
 
 import type { ColourDraft } from './drafts';
 import { FieldRow } from './field-row';
-import { CLOTH_GSM_MAX, CLOTH_GSM_MIN, CLOTH_OPACITIES, normaliseGsm, readGsm } from './model';
+import {
+  CLOTH_GSM_MAX,
+  CLOTH_GSM_MIN,
+  CLOTH_OPACITIES,
+  clothWordsRank,
+  normaliseGsm,
+  readGsm,
+} from './model';
 
 /**
  * ═══ CLOTH IS — ЧТО ЗА ТКАНЬ, СКАЗАННОЕ НА ПРОГОНЕ (H-13) ════════════════════════════════════
@@ -34,6 +41,28 @@ import { CLOTH_GSM_MAX, CLOTH_GSM_MIN, CLOTH_OPACITIES, normaliseGsm, readGsm } 
  * ⚠ ЭТОТ РЯД НЕ ПИШЕТ `words`. Он пишет ПОЛЯ ЧЕРНОВИКА, а склейку делает `statedWords` — один
  * писатель на всю композицию. Ряд, писавший бы прямо в `recipe.words`, затирал бы свободный текст
  * соседнего ряда при каждом клике и расходился бы с ним при каждом порядке действий.
+ *
+ * ═══ E-2 — И ЭТО НЕ ПОЧИНКА ПОЛЯ, А ПЕРЕЕЗД ОДНОГО ПРЕДЛОЖЕНИЯ ═══════════════════════════════
+ *
+ * Владелец: «OPAQUE SEMI-SHEER SHEER видимо не попадают в пропмт тк никакой разницы нету в
+ * генерации».
+ *
+ * ЗАМЕРЕНО НА БЕТЕ, И ПОЛЕ НЕ ТЕРЯЕТСЯ. Из восьми рендеров карточки слово прозрачности несут ТРИ,
+ * и все три несут ЕЩЁ И ФОТОГРАФИЮ ТКАНИ. Промпт ранжирует источники (`renderFabricAuthority`,
+ * `renderprompt.go`, сверено на `origin/beta`): СНИМОК → ЦВЕТ → СЛОВА, и ранг 1 читается дословно
+ * «Read the cloth from that image and from nothing else», а ранг 3 сам говорит, что против
+ * фотографии слово о прозрачности, весе и падении — «description and not instruction». То есть
+ * прогонов БЕЗ фотографии владелец не делал ни разу, и случая, где эти чипы управляют, он не видел.
+ * Без фотографии они управляют: дельта промпта между `semi-sheer` и `opaque` — ровно одно слово.
+ *
+ * ЗНАЧИТ ЧИНИТЬ НАДО ЭКРАН, А НЕ КОД. Утверждение о старшинстве на экране БЫЛО — тремя тихими
+ * копиями сразу: подсказкой ряда `in words`, абзацем `data-words-rank` под плитками и ничем здесь.
+ * Три тихих экземпляра складываются в шум, а не в громкость, и ни один из них не стоял ТАМ, ГДЕ
+ * ПРИНИМАЮТ ОТМЕНЯЕМОЕ ИМИ РЕШЕНИЕ. Копия теперь ОДНА и стоит вплотную к чипам: человек, ткнувший
+ * `sheer`, читает ответ про свой чип, не отводя глаз.
+ *
+ * ⚠ ЯКОРЬ `data-words-rank` СОХРАНЁН ИМЕННО ТОТ ЖЕ, А НЕ ЗАВЕДЁН НОВЫЙ: утверждение то же самое,
+ * переехало только место, и второе имя для одного факта развело бы пробы по двум half-правдам.
  */
 export function ClothIsRow({
   draft,
@@ -43,6 +72,11 @@ export function ClothIsRow({
   disabled?: boolean;
 }): JSX.Element {
   const { opacity, weightGsm } = draft.cloth;
+  /**
+   * КТО ПЕРЕБЬЁТ ЭТИ СЛОВА — ВЫЧИСЛЯЕТ МОДЕЛЬ, ЭКРАН ТОЛЬКО ГОВОРИТ. Читается ТА ЖЕ функция, что
+   * у модалки «what the model gets» и у строки денег: расхождение здесь стоит купленной картинки.
+   */
+  const rank = clothWordsRank(draft.recipe);
 
   /**
    * ═══ ПОЧЕМУ У ПОЛЯ СВОЙ ТЕКСТОВЫЙ БУФЕР, А НЕ `String(weightGsm)` ═══════════════════════════
@@ -161,6 +195,39 @@ export function ClothIsRow({
       <Text size='micro' variant='label' component='span' className='shrink-0'>
         g/m²
       </Text>
+
+      {/* ═══ ЕДИНСТВЕННАЯ СТРОКА О СТАРШИНСТВЕ, И ОНА СТОИТ ЗДЕСЬ (E-2) ═══════════════════════
+          Отступ переноса измерен, а не угадан: колонка подписи `FieldRow` — 92px плюс 8px зазора,
+          тот же, что у продолжения каждого ряда этой секции.
+
+          ГОВОРИТСЯ ВСЕГДА, А НЕ ТОЛЬКО ПРИ ФОТОГРАФИИ. Строка, появляющаяся ровно тогда, когда
+          выбор перестал работать, читается как ошибка экрана; строка, стоящая всегда, — это
+          ПРАВИЛО, и человек узнаёт его до того, как оно его настигнет. Меняется одно слово-глагол,
+          и оно же несёт состояние. */}
+      <div className='w-full pl-[100px]'>
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          data-words-rank={rank.governs ? 'governs' : 'outranked'}
+          className='normal-case'
+        >
+          {rank.governs ? (
+            <>
+              No texture picture rides on this run, so these words <b>govern the cloth</b>: the
+              model builds the weave, the weight, the surface and the drape from them. A stated
+              colour states colour and nothing else.
+            </>
+          ) : (
+            <>
+              A texture picture rides on this run, and a photograph states transparency, weight and
+              drape as surely as it states the weave — so against it these words are{' '}
+              <b>description, not instruction</b>. Take the texture off above to let them govern the
+              cloth.
+            </>
+          )}
+        </Text>
+      </div>
     </FieldRow>
   );
 }

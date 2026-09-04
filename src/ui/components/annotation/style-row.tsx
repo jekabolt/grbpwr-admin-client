@@ -79,7 +79,7 @@ export function AnnotationStyleRow({
       {!d.dashable && !d.fillable && (
         <Text size='nano' variant='label' component='span'>
           {d.key === 'pin' || d.key === 'label' || d.key === 'multi'
-            ? 'a label has one style only: a leader with an arrow'
+            ? 'a note has one style only: a leader with an arrow'
             : ''}
         </Text>
       )}

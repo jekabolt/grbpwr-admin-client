@@ -5,7 +5,9 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { InertDoor } from '../bench-slot';
+import { useSplitToInput } from '../split-to-input';
 import { viewLabel } from '../views';
+import { ApplySplitDoor, splitDecks } from './apply-split';
 import { LockBar } from './generate-row';
 import { pictureThumb, slotOrigin, slotOriginLine, stripProvenance, threedSides, type Gate } from './model';
 import { Strip, StripCell } from './strip-cell';
@@ -53,6 +55,8 @@ export function ThreedInputStrip({
   onGoToKind,
   colorwayId,
   colorwayLabel,
+  techCardId,
+  disabled,
 }: {
   band: GetDesignBandResponse;
   /** Отказ ворот 3D целиком — рисуется полосой под плитками, вместе со своей дверью. */
@@ -72,12 +76,28 @@ export function ThreedInputStrip({
    */
   colorwayId?: number;
   colorwayLabel?: string;
-  /** ⚠ `techCardId` и `disabled` СНЯТЫ НАМЕРЕННО: у этого экрана не осталось ни одной записи. */
+  /**
+   * ⚠ ВЕРНУЛИСЬ РАДИ ОДНОЙ ЗАПИСИ — `apply splitted` (E-6). Разбор того, чем эта запись отличается
+   * от «второго писателя», которого запрещал J-26, — у места вызова в `threed-studio.tsx`.
+   */
+  techCardId?: number;
+  disabled?: boolean;
 }): JSX.Element {
   const colorway = colorwayId ?? 0;
   const sides = useMemo(() => threedSides(band, colorway), [band, colorway]);
   const filled = sides.filter((side) => !!side.picture).length;
   const named = colorwayLabel?.trim() ?? '';
+  const split = useSplitToInput({ techCardId: techCardId ?? 0, band });
+  /**
+   * СКЛЕЕННЫЕ ЛИСТЫ РЕНДЕРОВ — ВТОРОЙ РОД ЯЧЕЙКИ ЭТОЙ ПОЛОСЫ (E-6).
+   *
+   * Владелец: «мультивью карточек тоже должно отображаться». До этой волны экран показывал ровно
+   * четыре стороны верстака — и на самой частой карточке беты все четыре были пусты, потому что
+   * рендер приходит ОДНИМ СКЛЕЕННЫМ ЛИСТОМ и в сторону не встаёт до разреза. То есть «0 of 4»
+   * стояло на карточке с готовым, оплаченным рендером, и путь дальше был только через соседнюю
+   * вкладку.
+   */
+  const decks = useMemo(() => splitDecks(band, 'render'), [band]);
 
   return (
     <Section
@@ -91,6 +111,7 @@ export function ThreedInputStrip({
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
           {filled} of 4 filled · front is required
+          {decks.length > 0 ? ` · ${decks.length} multi-view` : ''}
         </Text>
       }
     >
@@ -190,7 +211,73 @@ export function ThreedInputStrip({
             />
           );
         })}
+
+        {/* ═══ СКЛЕЕННЫЕ ЛИСТЫ — ПОСЛЕ ЧЕТЫРЁХ СТОРОН (E-6) ═════════════════════════════════════
+            Порядок не косметический. Четыре стороны — это ТО, ЧТО УЕДЕТ; лист — это ПРЕДЛОЖЕНИЕ
+            переписать их все разом. Предложение, стоящее перед фактом, читается как часть факта.
+
+            ⚠ ЛИНИИ-РАЗДЕЛИТЕЛЯ МЕЖДУ НИМИ НЕТ НАМЕРЕННО. J-26 снял её вместе с правой половиной
+            полосы, потому что она отделяла ДВА ВОПРОСА, а второго вопроса не осталось. Здесь
+            второй вопрос не вернулся: лист — не «что ещё есть на карточке», а другой способ
+            ответить на тот же вопрос «что стоит в сторонах». Ячейки различает ярлык `multi-view`
+            и глагол на двери, а не штрих. */}
+        {decks.map((deck) => {
+          const id = deck.sheet.id ?? 0;
+          const canWrite = !!techCardId && !disabled;
+          return (
+            <StripCell
+              key={`deck-${id}`}
+              cellPictureId={id}
+              src={pictureThumb(deck.sheet)}
+              alt={`multi-view render · ${deck.declared.map(viewLabel).join(', ')}`}
+              badge='multi-view'
+              gallery={deck.sheet.media ? mediaFullToViewerItem(deck.sheet.media) : undefined}
+              /* УГОЛ `split` — ТОТ ЖЕ ОРГАН, ЧТО ВЕЗДЕ. Для листа без разреза это единственный
+                 путь в стороны, и здесь он теперь есть: до E-6 за ним надо было идти на соседнюю
+                 вкладку. */
+              onSplit={
+                canWrite
+                  ? {
+                      onClick: () => split.openForPicture(deck.sheet, `sheet ${id}`),
+                      ariaLabel: `split the multi-view render ${id} into views`,
+                    }
+                  : undefined
+              }
+              lines={[
+                deck.declared.length
+                  ? `${deck.declared.length} views · ${deck.declared.map(viewLabel).join(', ')}`
+                  : 'a multi-view file',
+                stripProvenance(band, deck.sheet),
+              ]}
+              action={
+                !canWrite ? (
+                  <InertDoor
+                    label='apply splitted ▸'
+                    reason='this card is read-only for you — putting a render into a side is an edit of the card'
+                  />
+                ) : deck.pieces.length ? (
+                  <ApplySplitDoor
+                    techCardId={techCardId ?? 0}
+                    sides={sides}
+                    pieces={deck.pieces}
+                    benchKind='render'
+                    /* ТОТ ЖЕ ВЕРСТАК, ЧТО ЧИТАЕТ ЭТА ПОЛОСА И ЧТО СОБИРАЕТ СЕРВЕР. Одно число на
+                       обе половины — иначе вход показывал бы одно, а прогон уезжал бы с другим. */
+                    colorwayId={colorway}
+                    noun='render'
+                  />
+                ) : (
+                  <Text size='nano' variant='label' component='span' className='normal-case'>
+                    cut it first — split ▸ on the frame
+                  </Text>
+                )
+              }
+            />
+          );
+        })}
       </Strip>
+
+      {split.modal}
 
       {lock && !lock.ok && (
         <LockBar reason={lock.reason}>

@@ -69,6 +69,28 @@ import {
 const SAMPLE_W = 200;
 
 /**
+ * ФОРМЫ КАДРА, НАЗВАННЫЕ ИМЕНАМИ (E-18). Значение — ровно то, что написано на чипе: ширина,
+ * делённая на высоту, поэтому «16:9» это альбом, а «4:5» — портрет, и переворачивает их чип ⇄.
+ * Читать значение с ярлыка нельзя (`'4:5'` пришлось бы парсить на каждом кадре), но писать их
+ * порознь — значит однажды разойтись: пара живёт одной строкой.
+ */
+const CROP_RATIOS: readonly { label: string; value: number }[] = [
+  { label: '1:1', value: 1 },
+  { label: '4:5', value: 4 / 5 },
+  { label: '3:4', value: 3 / 4 },
+  { label: '2:3', value: 2 / 3 },
+  { label: '16:9', value: 16 / 9 },
+];
+
+/**
+ * Одно ли это отношение. Сравнивать дроби на `===` нельзя: `16/9` с провода, `16/9` из чипа и
+ * `1/(9/16)` после переворота — три РАЗНЫХ числа с плавающей точкой, и подсветка выбранного чипа
+ * гасла бы после каждого ⇄. Допуск в тысячную неразличим на экране: 4:5 и 401:500 — одна рамка.
+ */
+const sameRatio = (a: number | null, b: number | null): boolean =>
+  a !== null && b !== null && Math.abs(a - b) < 1e-3;
+
+/**
  * ВЫСОТА ОБРАЗЦА РАСТЁТ ПО ТОЛЩИНЕ НИТИ — И ТОЛЬКО ПО НЕЙ, потому что поперёк линии меряет она
  * одна. Это та же граница осей, по которой построен `strokeGeometry`: ВДОЛЬ линии (период волны,
  * шаг прокола, ритм пунктира) считает длина стежка, ПОПЕРЁК (амплитуда, зазор между рядами, вылет
@@ -1322,6 +1344,11 @@ export type RailProps = {
   cropTool: boolean;
   cropFill: ExpandFill;
   onCropFill: (fill: ExpandFill) => void;
+  /** Запертое отношение сторон кадра; `null` — свободная рамка (E-18). */
+  cropRatio: number | null;
+  /** Отношение сторон НЫНЕШНЕГО листа — им живёт чип «sheet». */
+  sheetRatio: number;
+  onCropRatio: (ratio: number | null) => void;
 
   nodeCount: number;
   nodeSelected: number;
@@ -2049,6 +2076,73 @@ export function VectorBrushRail(p: RailProps) {
       {p.cropTool && (
         <div className='flex flex-col gap-1' data-crop-rail=''>
           <GroupLabel flush>crop</GroupLabel>
+          {/* ═══ ФОРМА КАДРА (E-18) ═══════════════════════════════════════════════════════════
+              Владелец: «для кропа должна быть возможность выбрать aspect ratio».
+
+              ЧИПЫ, А НЕ ДВА ЧИСЛОВЫХ ПОЛЯ. Пара «W × H», как у фотошопа, просит НАБРАТЬ то, что
+              человек и так знает именем: 4:5 — это одно нажатие против шести клавиш и одного
+              промаха. Свободных чисел здесь нет и потому, что кроп в этом редакторе меряет ЛИСТ,
+              а не печать: разрешения у него нет вовсе, и «1000 × 1250 px» значило бы не то.
+
+              `free` — ПЕРВЫМ И ЭТО УМОЛЧАНИЕ: рамка без ограничения — то, чем кроп был вчера, и
+              отношение обязано быть тем, что человек ДОБАВЛЯЕТ, а не тем, что ему навязали.
+              `sheet` — форма нынешнего листа; ею возвращаются к исходным пропорциям снимка,
+              которые числом никто не помнит. */}
+          <div className='flex flex-wrap items-center gap-1.5' data-crop-ratios=''>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
+              ratio
+            </Text>
+            <Chip
+              selected={p.cropRatio === null}
+              pressed={p.cropRatio === null}
+              disabled={p.frozen}
+              data-crop-ratio='free'
+              onClick={() => p.onCropRatio(null)}
+            >
+              free
+            </Chip>
+            {/* ⚠ «SHEET» ИСЧЕЗАЕТ, КОГДА У ФОРМЫ ЛИСТА ЕСТЬ ИМЯ, И ЭТО ЗАМЕРЕННАЯ ПРАВКА, А НЕ
+                осторожность. Плата по умолчанию 4:5 — и на снимке ГОРЕЛИ ОБА чипа разом: два
+                органа, подсвеченных за одно и то же состояние, читаются как «я выбрал что-то
+                дважды». Чип существует ровно затем, чтобы назвать форму, У КОТОРОЙ ИМЕНИ НЕТ:
+                плата берёт пропорции у снятой фотографии, а они редко попадают в пресет. Там,
+                где имя есть, называть ту же форму вторым способом нечем и незачем. */}
+            {!CROP_RATIOS.some((r) => sameRatio(r.value, p.sheetRatio)) && (
+              <Chip
+                selected={sameRatio(p.cropRatio, p.sheetRatio)}
+                pressed={sameRatio(p.cropRatio, p.sheetRatio)}
+                disabled={p.frozen}
+                data-crop-ratio='sheet'
+                onClick={() => p.onCropRatio(p.sheetRatio)}
+              >
+                sheet
+              </Chip>
+            )}
+            {CROP_RATIOS.map((r) => (
+              <Chip
+                key={r.label}
+                selected={sameRatio(p.cropRatio, r.value)}
+                pressed={sameRatio(p.cropRatio, r.value)}
+                disabled={p.frozen}
+                data-crop-ratio={r.label}
+                onClick={() => p.onCropRatio(r.value)}
+              >
+                {r.label}
+              </Chip>
+            ))}
+            {/* ПЕРЕВЕРНУТЬ — ОДИН ОРГАН НА ВСЕ ПАРЫ. Отдельные чипы 4:5 и 5:4, 16:9 и 9:16
+                удвоили бы ряд ради того же самого числа, перевёрнутого; портрет и альбом — это
+                не два формата, а один и его поворот. На свободной рамке и на квадрате
+                переворачивать нечего, и чип честно выключен. */}
+            <Chip
+              disabled={p.frozen || p.cropRatio === null || sameRatio(p.cropRatio, 1)}
+              data-crop-ratio-swap=''
+              title='turn the ratio on its side'
+              onClick={() => p.cropRatio && p.onCropRatio(1 / p.cropRatio)}
+            >
+              ⇄
+            </Chip>
+          </div>
           <div className='flex flex-wrap items-center gap-1.5'>
             <Text size='nano' variant='label' component='span' className='uppercase'>
               margin
@@ -2140,14 +2234,14 @@ export function VectorBrushRail(p: RailProps) {
           ⚠ ИНДЕКС `0` В РАЗМЕТКЕ — КОНСТАНТА, А НЕ ПОРЯДКОВЫЙ НОМЕР: половина проб редактора
           якорится на `data-sel-row="0"` и `data-sel-feather-input="0"`, и выбрасывать индекс
           ради нуля информации значило бы переписать их все. */}
+      {/* ⚠ ПОЯСНИТЕЛЬНЫЙ АБЗАЦ ОТСЮДА УБРАН (E-20), И ЭТО ТРЕТИЙ ТАКОЙ ЖЕ УХОД: раньше ушли
+          `data-base-note` и `data-pixels-note` (Y-3). Все три объясняли ТО, ЧТО ВИДНО НА ЭКРАНЕ:
+          дорожка области нарисована муравьями, поле растушёвки стоит в той же строке и подписано
+          `feather`, а новая обводка заменяет прежнюю прямо под рукой. Три строки текста над
+          одним числом читаются один раз и стоят места в рейке КАЖДЫЙ раз. */}
       {p.sel && (
         <div>
           <GroupLabel flush>selection</GroupLabel>
-          <Text size='nano' variant='label' component='p' className='mb-1'>
-            an area holds the pixel tools inside it and cuts the lines at its edge. Feather is that
-            area&rsquo;s own softness: it is how far the paint fades at the edge, and it is the
-            radius «soften inside» blurs the pixels by. Drawing a new outline replaces this one.
-          </Text>
           <div
             className='flex items-center gap-1.5 border-b border-hairline py-1'
             data-sel-row='0'

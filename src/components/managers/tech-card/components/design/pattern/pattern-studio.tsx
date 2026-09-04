@@ -1,20 +1,14 @@
-import type {
-  GetDesignBandResponse,
-  common_AdminColorwayRef,
-  common_MediaFull,
-} from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX } from '../assets/model';
 import { InertDoor } from '../bench-slot';
-import { colorwayLabel } from '../colorway-picker';
 import { serverSpeaksDesign } from '../capability';
 import { isRunLive, useElapsed } from '../generation';
 import { patternRuns, refusalAdvice } from './model';
@@ -92,34 +86,44 @@ import { useStartDesignRun } from '../render/use-design-run';
  * выдуманному росту.
  */
 
+/**
+ * ═══ КОЛОРВЕЙ УШЁЛ С ЭТОГО ЭКРАНА — E-1 ══════════════════════════════════════════════════════
+ *
+ * Владелец, дословно: «в MAKE A PATTERN оставь только имя убери колорвей».
+ *
+ * ЧТО СНЯТО: ряд `colourway` (второе поле жеста), состояние `colorwayId`, проп `colorways` и
+ * приписка «Filing it on ROSSO takes that colourway off whatever else was wearing it» — она
+ * описывала разрушительное последствие, которого больше не бывает.
+ *
+ * ЧТО ЕДЕТ ТЕПЕРЬ. `params.colorway_id: 0`. Контракт поле ПРИНИМАЕТ на этом роде
+ * (`DesignRunKindTakesColorway` перечисляет pattern — сверено на `origin/beta`), и ноль — не
+ * пропуск, а ЗАКОННОЕ ЗНАЧЕНИЕ «ничей». `keepPatternTx` читает живую колонку прогона и при
+ * `cw > 0` зовёт `stealColorwayTx`; при нуле он этой ветки не касается вовсе — готовая плитка
+ * встаёт на полку карточки НИЧЬЕЙ, ровно в то же состояние, в которое её и так переводит FK при
+ * удалении колорвея. То есть посадка на полку (одно нажатие = плитка на карточке) НЕ ПОТЕРЯНА,
+ * потеряна только атрибуция, которую владелец просил убрать.
+ *
+ * ⚠ И ЭТО ЖЕ ОТВЕЧАЕТ НА ВТОРУЮ ПОЛОВИНУ E-15. «Keep» перестаёт быть жестом, после которого
+ * ткань сама становится текстурой рендера: одевать колорвей больше нечем, а рендер и так не
+ * читает носку — он читает выбор в сетке TEXTURE & COLOUR, сделанный руками.
+ */
 export function PatternStudio({
   band,
   techCardId,
   disabled,
-  colorways,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
-  /**
-   * Колорвеи карточки — для третьего акта. Приходят СВЕРХУ, из общего состояния студии, а не
-   * читаются здесь вторым запросом: два чтения одной карточки расходятся ровно тем, чем расходятся
-   * два кэша.
-   */
-  colorways?: common_AdminColorwayRef[];
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
   const run = useStartDesignRun(techCardId);
   const [source, setSource] = useState<common_MediaFull | null>(null);
   const sourceId = source?.id ?? 0;
-  /* ИМЯ И КОЛОРВЕЯ — ЭТО ЖЕСТ ЦЕЛИКОМ (J-12). Владелец дословно: «тут мы делаем только сам
-     паттерн выбираем ему название и колорвей и все». Оба уезжают В ПРОГОН, а не назначаются
-     потом над сохранённым ассетом: с круга 15 `keepPatternTx` сажает готовую плитку на полку
-     В ТОЙ ЖЕ транзакции, что закрывает прогон, и читает оба поля именно оттуда. Старый довод
-     G-15 («колорвея у плитки нет, прогон её отвергает») ПЕРЕСТАЛ БЫТЬ ПРАВДОЙ — на бете
-     `DesignRunKindTakesColorway` перечисляет pattern. */
+  /* ИМЯ — ВЕСЬ ЖЕСТ (E-1). Владелец: «оставь только имя убери колорвей». Оно уезжает В ПРОГОН,
+     а не назначается потом над сохранённым ассетом: с круга 15 `keepPatternTx` сажает готовую
+     плитку на полку В ТОЙ ЖЕ транзакции, что закрывает прогон, и читает имя именно оттуда. */
   const [name, setName] = useState('');
-  const [colorwayId, setColorwayId] = useState(0);
   /* РОДИТЕЛЬ ПЛИТКИ, когда источник взят чипом полки. Ноль — «не назван», и это ЧЕСТНОЕ
      состояние для файла из библиотеки или из буфера: у них родителя нет. Контракт сужает
      поле до ткани или другого паттерна ЭТОЙ карточки, и сервер это проверяет. */
@@ -169,12 +173,11 @@ export function PatternStudio({
           }}
           disabled={disabled}
         >
-        {/* ─── НАЗВАТЬ И ОТДАТЬ ЦВЕТУ — ДВА ПОЛЯ, НЕ ТРИ ───────────────────────────────────
-            Весь жест владельца в одну строку: «выбираем ему название и колорвей и все». Поля
-            стоят НАД дверью, потому что читаются они до нажатия, а не после: имя обязательно,
-            и дверь без него не открывается. Колорвея необязательна — плитка без неё ложится на
-            полку ничьей, и это законное состояние (`keepPatternTx` читает живую колонку, а FK
-            гасит её при удалении колорвеи). */}
+        {/* ─── НАЗВАТЬ — ОДНО ПОЛЕ (E-1) ────────────────────────────────────────────────────
+            Владелец: «оставь только имя убери колорвей». Поле стоит НАД дверью, потому что
+            читается оно до нажатия, а не после: имя обязательно, и дверь без него не
+            открывается — сервер отказал бы `pattern_name_required` бесплатно, но отказ, который
+            человек читает только после клика, это отказ, о котором экран знал и промолчал. */}
         <div className='flex flex-col gap-2'>
           <label className='flex flex-col gap-1' htmlFor='design-pattern-name'>
             <Text size='micro' variant='label' component='span'>
@@ -194,28 +197,6 @@ export function PatternStudio({
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
             />
           </label>
-          {colorways && colorways.length > 0 ? (
-            /* ⚠ ЯКОРЬ ВИСИТ НА ОБЁРТКЕ, А НЕ НА `Select`. Radix-корень разбирает ЗАКРЫТЫЙ список
-               пропов и неизвестные в DOM не пропускает: `data-*`, поставленный на сам компонент,
-               не доедет никуда, и проба на нём была бы ВАКУУМНО ЗЕЛЁНОЙ — прошла бы на
-               отсутствующем узле. Тот же приём у `ColorwaySelect`. */
-            <label className='flex flex-col gap-1' data-pattern-colorway={colorwayId}>
-              <Text size='micro' variant='label' component='span'>
-                colourway
-              </Text>
-              <Select
-                name='design-pattern-colorway'
-                disabled={disabled}
-                value={String(colorwayId)}
-                placeholder='— no colourway —'
-                items={[
-                  { value: '0', label: '— no colourway —' },
-                  ...colorways.map((c) => ({ value: String(c.colorwayId ?? 0), label: colorwayLabel(c) })),
-                ]}
-                onValueChange={(v: string) => setColorwayId(Number(v) || 0)}
-              />
-            </label>
-          ) : null}
         </div>
 
         {/* ─── ДВЕРЬ. ИНВЕНТАРЬ — ЭТО ЕЁ ПОДПИСЬ, БЛОКА БОЛЬШЕ НЕТ ────────────────────────── */}
@@ -236,19 +217,16 @@ export function PatternStudio({
                     // список — утверждение «этот прогон не просит ни одной стороны», и сервер
                     // сверяет его длину.
                     views: [],
-                    // ═══ И КОЛОРВЕЯ У ПЛИТКИ НЕТ — ПРОГОН ЕГО ОТВЕРГАЕТ (G-15) ═══════════════
-                    // `params.colorway_id` осмыслен на render / recolor / threed и отвергается на
-                    // pattern токеном `colorway_forbidden`. Это не пробел контракта: плитка
-                    // делается ОДИН РАЗ и живёт тканью КАРТОЧКИ; чей она цвет — вопрос не к
-                    // прогону, а к назначению (`SetDesignAssetColorway`), и задаётся он в третьем
-                    // акте ниже, над сохранённым ассетом, а не над платной генерацией.
-                    // ═══ КОЛОРВЕЯ ЕДЕТ В ПРОГОН (J-12) ══════════════════════════════════════
-                    // Здесь стоял ЛИТЕРАЛЬНЫЙ НОЛЬ с доводом «плитке колорвей отвергают».
-                    // На бете круга 15 это больше не так: `DesignRunKindTakesColorway`
-                    // перечисляет pattern, и `keepPatternTx` сажает готовую плитку НА ЭТОТ
-                    // колорвей в той же транзакции, что закрывает прогон. Ноль остаётся
-                    // законным значением и значит «ничей», а не «не сказано».
-                    colorwayId,
+                    // ═══ ПЛИТКА ЕДЕТ БЕЗ КОЛОРВЕЯ — E-1 ════════════════════════════════════
+                    // Владелец: «оставь только имя убери колорвей». Поле контракт на этом роде
+                    // ПРИНИМАЕТ (`DesignRunKindTakesColorway` перечисляет pattern, сверено на
+                    // `origin/beta`), поэтому ноль здесь — не «поле не задано» и не отказ, а
+                    // ЗАКОННОЕ ЗНАЧЕНИЕ «ничей». `keepPatternTx` читает живую колонку прогона и
+                    // при нуле не касается `stealColorwayTx` вовсе: готовая плитка встаёт на
+                    // полку карточки ничьей — ровно туда же, куда её переводит FK при удалении
+                    // колорвея. Посадка на полку при этом НЕ ПОТЕРЯНА: её решает ИМЯ, а имя
+                    // осталось и обязательно.
+                    colorwayId: 0,
                     layout: '',
                     colour: undefined,
                     threed: undefined,
@@ -300,21 +278,13 @@ export function PatternStudio({
             {sourceId ? `one picture — media ${sourceId}` : 'one picture — none attached yet'} · no
             scale stated, so the model chooses the density itself · priced by the server when the
             run starts. No other picture from this card travels: not the bench, not the references.
-            {/* ⚠ ЭТО НЕ УКРАШЕНИЕ ФРАЗЫ, А РАСКРЫТИЕ РАЗРУШИТЕЛЬНОГО ДЕЙСТВИЯ. Прежняя
-                редакция обещала «ничего больше с карточки не едет», и это перестало быть
-                правдой в ту минуту, когда колорвея поехала в прогон: `keepPatternTx` зовёт
-                `stealColorwayTx`, и названный колорвей ПЕРЕСТАЁТ носить то, что носил.
-                Соседний БЕСПЛАТНЫЙ жест в библиотеке об этом предупреждает дословно —
-                платный молчать не имеет права. */}
-            {colorwayId > 0 ? (
-              <>
-                {' '}
-                Filing it on{' '}
-                <b>{colorwayLabel(colorways?.find((c) => (c.colorwayId ?? 0) === colorwayId))}</b>{' '}
-                takes that colourway off whatever else was wearing it — one colourway wears one
-                cloth.
-              </>
-            ) : null}
+            {/* ⚠ ЗДЕСЬ СТОЯЛО РАСКРЫТИЕ РАЗРУШИТЕЛЬНОГО ДЕЙСТВИЯ — «Filing it on ROSSO takes that
+                colourway off whatever else was wearing it». Оно ушло вместе с самим действием
+                (E-1): прогон больше не называет колорвея, `keepPatternTx` при нуле не касается
+                `stealColorwayTx` вовсе, и снимать что-то с чего-то стало нечем. Строка снята
+                ИМЕННО ПОТОМУ, что описываемого ею последствия больше не бывает; оставить её
+                значило бы предупреждать о том, чего не произойдёт. */}{' '}
+            It lands on the card&apos;s shelf under the name above, owned by no colourway.
           </Text>
         </div>
         </PatternInput>
@@ -372,12 +342,7 @@ export function PatternStudio({
       </Section>
 
       {/* ═══════════════════ АКТ 2 — ХРАНИТЬ, СУДИТЬ СТЫК И ОТДАТЬ КОЛОРВЕЮ ═══════════════════ */}
-      <PatternLibrary
-        band={band}
-        techCardId={techCardId}
-        colorways={colorways ?? []}
-        disabled={disabled}
-      />
+      <PatternLibrary band={band} techCardId={techCardId} disabled={disabled} />
     </>
   );
 }

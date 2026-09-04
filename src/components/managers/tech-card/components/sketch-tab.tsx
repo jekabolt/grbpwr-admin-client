@@ -496,7 +496,7 @@ function TechCardGallery({
       // грамматики: где-то деталь чипом, где-то селектом, где-то Enter переносит строку, где-то
       // закрывает. Различие у карточного указания ровно одно — привязка размера, и она приходит
       // сюда слотом, а не второй формой.
-      renderEditor={(key, { close }) => {
+      renderEditor={(key, { close, arrows }) => {
         const i = keyToIndex.get(key);
         const c = i != null ? calloutValues[i] : undefined;
         if (i == null || !c) return null;
@@ -549,22 +549,11 @@ function TechCardGallery({
               close();
             }}
             onClose={close}
-            // РАЗЖАЛОВАТЬ ФИГУРУ В ТОЧКУ. Единственный способ избавиться от неудачной геометрии,
-            // СОХРАНИВ выноску: ручки ниже минимума точек не опускаются, а удалить и поставить
-            // заново — значит получить новый номер, а на номер ссылаются деталь, операция и дефект.
-            onDemote={
-              (c.kind ?? 'pin') === 'pin'
-                ? undefined
-                : () => {
-                    history.record();
-                    setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
-                    setValue(`callouts.${i}.points`, [], { shouldDirty: true });
-                    // Пунктир и штриховка у точки не значат ничего: сервер обнулил бы их сам, а
-                    // расхождение формы с хранимым делает карточку «изменённой» после сохранения.
-                    setValue(`callouts.${i}.dashed`, false, { shouldDirty: true });
-                    setValue(`callouts.${i}.filled`, false, { shouldDirty: true });
-                  }
-            }
+            // ЛУЧИ ЗАПИСКИ приходят от листа: взвод «жду клик по кадру» принадлежит кадру, а не
+            // форме, и держит его `FocusedAnnotator` — редактор стоит НАД рядом снимков.
+            // Здесь стояла «make it a point» (разжаловать фигуру в нумерованную точку) — владелец
+            // её убрал; вместе с пином из палитры у неё не осталось и смысла.
+            arrows={arrows}
             // Имена, а не ключи: сравнение — по правилу карточки, иначе легаси-имя в другом
             // регистре даёт два чипа на одну деталь.
             sameKey={(a, b) => normalizePieceName(a) === normalizePieceName(b)}

@@ -89,6 +89,27 @@ export function StripCell({
    * рисует и раскладку не выбирает: она только объявляет, что резать здесь есть что.
    */
   onSplit,
+  /**
+   * ЯЧЕЙКА ТОЛЬКО ЧТО УВЕЛА РЯД В ПРОСМОТРЩИК (E-4). Извещение, а не дверь: зум по-прежнему
+   * открывает сам примитив. Раздел, держащий открытую колоду, узнаёт факт и решает, складывать
+   * ли её, — разбор целиком у `PictureTile.onZoom`.
+   */
+  onZoom,
+  /**
+   * УГОЛ ПОМЕТКИ (E-25). Владелец: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на
+   * карточку а не кнопками снизу». Ячейка, как и с `split`, объявляет только ЧТО здесь можно
+   * сделать; где рисовать орган — решение примитива.
+   *
+   * ⚠ СЮДА ПЕРЕЕЗЖАЕТ ТОЛЬКО ЖИВАЯ ДВЕРЬ. Отказ («сервер не знает пометки», «карточка только для
+   * чтения») обязан остаться ПОД кадром словами: этот файл уже платил за обратное — «Угол это
+   * ТИХИЙ орган: он появляется по наведению, то есть отказ называл орган, которого на экране не
+   * видно» (`render/outputs.tsx`, разбор двери `split first ▸`).
+   */
+  onSelect,
+  /* Правка кадра — тот же угол, что и у сплита (E-3). Пробрасывается, а не решается здесь:
+     кто имеет право править и что именно, знает раздел, а не ячейка. */
+  onEdit,
+  selectLabel,
   offeredPictureId,
   /**
    * КАКУЮ КАРТИНКУ ЯЧЕЙКА ПОКАЗЫВАЕТ. Едет в разметку как `data-cell-picture` и существует по той
@@ -111,6 +132,10 @@ export function StripCell({
   gallery?: MediaViewerItem;
   onOpen?: () => void;
   onSplit?: PictureTileAction;
+  onZoom?: () => void;
+  onSelect?: PictureTileAction;
+  onEdit?: PictureTileAction;
+  selectLabel?: string;
   offeredPictureId?: number;
   cellPictureId?: number;
   empty?: React.ReactNode;
@@ -139,7 +164,11 @@ export function StripCell({
           selected={emphasis}
           gallery={gallery}
           onOpen={onOpen}
+          onZoom={onZoom}
           onSplit={onSplit}
+          onSelect={onSelect}
+          onEdit={onEdit}
+          selectLabel={selectLabel}
           className='w-full bg-bgColor'
         />
       ) : (
@@ -157,7 +186,14 @@ export function StripCell({
         </Text>
       ))}
 
-      {action && <div className='mt-auto pt-0.5'>{action}</div>}
+      {/* ЯКОРЬ РЯДА ДВЕРЕЙ. Заведён по той же причине, что `data-offered` и `data-cell-picture`
+          выше: «под карточкой ничего не осталось» (E-25) — это утверждение о КОРОБКЕ, и держать
+          его за css-класс раскладки значит проверять оформление вместо смысла. */}
+      {action && (
+        <div data-cell-doors='' className='mt-auto pt-0.5'>
+          {action}
+        </div>
+      )}
     </div>
   );
 }

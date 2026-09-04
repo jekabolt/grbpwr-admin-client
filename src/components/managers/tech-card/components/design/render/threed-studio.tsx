@@ -7,7 +7,6 @@ import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import { ViewSwitch } from 'ui/components/view-switch';
 
-import { type ColorwayChoice } from '../colorway-picker';
 import { useCardFit, useThreedDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow, LockBar } from './generate-row';
@@ -71,7 +70,6 @@ export function ThreedStudio({
   band,
   techCardId,
   disabled,
-  colorway,
   /**
    * Switch the band's strip to another representation — what the input strip's `ask for it ▸` and
    * the doors of the lock bar do. The studio does not own the strip, so when the composer does not
@@ -83,26 +81,22 @@ export function ThreedStudio({
   techCardId: number;
   disabled?: boolean;
   onGoToKind?: (kind: 'flat' | 'render') => void;
-  /**
-   * ═══ СКОУП СБОРКИ — ТЕПЕРЬ ТОЛЬКО ЧИТАЕТСЯ, НО ПРИХОДИТ ПО-ПРЕЖНЕМУ (J-27) ═══════════════
-   *
-   * До J-27 это был выбор, сделанный ЗДЕСЬ, и рядом стоял пикер. Владелец пикер снял: ткань в
-   * 3D-прогон уезжает пикселями рендеров, а `colorway_id` до модели не доходит. Осталось РОВНО
-   * ТО, ЧЕМ ЭТО ЗНАЧЕНИЕ БЫЛО ВСЕГДА, — адрес верстака, который прочитает сервер
-   * (`designSelectBench`) и по членству в котором откроется дверь (`no_fabric_render`).
-   *
-   * ⚠ ПРОП ОСТАЁТСЯ ОБЪЕКТОМ ВЫБОРА, А НЕ ЧИСЛОМ, И ЭТО НАМЕРЕННО. Состояние общее со студией
-   * (`useColorwayChoice`), и меняется оно на FABRIC RENDER; сузить проп до `number` значило бы
-   * тронуть композитора, который этим экраном не занимается. Что здесь изменилось — не форма
-   * пропа, а то, что писателя у него на этом экране больше нет.
-   *
-   * `undefined` — карточка без оси: сборка идёт с безколорвейного верстака (`colorwayId = 0`),
-   * ровно как до появления колорвеев.
-   */
-  colorway?: ColorwayChoice;
 }): JSX.Element {
-  const colorwayId = colorway?.colorwayId ?? 0;
-  const colorwayName = colorway?.label ?? '';
+  /**
+   * ═══ СКОУП СБОРКИ — ПОСТОЯННЫЙ НОЛЬ ПОСЛЕ E-16 ═══════════════════════════════════════════
+   *
+   * До J-27 колорвей выбирали ЗДЕСЬ; владелец пикер снял, и осталось чтение общего состояния
+   * студии. Кругом 16 он снял и само состояние («в GENERATION — FABRIC RENDER мы полностью
+   * убираем колорвеи»), поэтому проп `colorway` ушёл вместе с ним.
+   *
+   * ⚠ ЭТО ЗНАЧЕНИЕ НЕСУЩЕЕ, И ИМЕННО ПОЭТОМУ ОНО НОЛЬ. Оно адресует верстак, который прочитает
+   * сервер (`designSelectBench`) и по членству в котором откроется дверь (`no_fabric_render`).
+   * FABRIC RENDER теперь пишет ТОЛЬКО безколорвейный верстак — значит читать здесь любой другой
+   * значило бы показывать пустой вход над карточкой с готовыми рендерами и отправлять прогон,
+   * собранный из пустоты. Одно число на обе половины, потому что выбора больше нет вовсе.
+   */
+  const colorwayId = 0;
+  const colorwayName = '';
   const { draft, patch } = useThreedDraft();
   const cardFit = useCardFit();
   const { dictionary } = useDictionary();
@@ -228,12 +222,26 @@ export function ThreedStudio({
 
   return (
     <>
-      {/* ⚠ `techCardId` И `disabled` БОЛЬШЕ НЕ ПЕРЕДАЮТСЯ, И ЭТО НЕ УБОРКА ПРОПОВ. Полоса стала
-          ЗЕРКАЛОМ верстака (J-26): у неё не осталось ни одной записи, а карточка, которую нечем
-          править, не нуждается в слове «read-only». Слоты пишутся на FABRIC RENDER, и там же
-          гаснут двери. */}
+      {/* ═══ У ПОЛОСЫ СНОВА ЕСТЬ ОДНА ЗАПИСЬ, И ЭТО СЛОВО ВЛАДЕЛЬЦА (E-6) ═══════════════════════
+          Здесь стояла записка «`techCardId` и `disabled` больше не передаются»: полоса была
+          ЗЕРКАЛОМ верстака (J-26), у неё не осталось ни одной записи, и карточка, которую нечем
+          править, не нуждалась в слове «read-only».
+
+          Владелец: «в 3д INPUT — RENDERS BY VIEW мультивью карточек тоже должно отображаться и
+          если его расколапсить под мультивью кнока аплай сплитед и они уходят в инпут». Это
+          ЗАПИСЬ, и она возвращает пропы.
+
+          ⚠ ЧЕГО J-26 БОЯЛСЯ И ПОЧЕМУ ЭТОГО БОЛЬШЕ НЕТ. Он боялся ВТОРОГО ПИСАТЕЛЯ ОДНОГО СЛОТА на
+          двух вкладках: два экрана, две прочитанные полосы, два CAS-токена одной строки и ДВА
+          РАЗНЫХ СКОУПА — тот колорвей, что выбран здесь, и тот, что выбран там. Третьего из
+          четырёх больше не существует: колорвей снят со всей студии (E-1/E-16), и обе вкладки
+          адресуют ОДИН верстак, `0`. Остальные три — обычная цена любых двух писателей, и обе
+          записи идут одним и тем же вызовом одной и той же функции (`ApplySplitDoor`), а не
+          двумя похожими. */}
       <ThreedInputStrip
         band={band}
+        techCardId={techCardId}
+        disabled={disabled}
         lock={input}
         onGoToKind={onGoToKind}
         colorwayId={colorwayId}

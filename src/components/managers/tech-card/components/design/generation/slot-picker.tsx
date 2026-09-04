@@ -3,7 +3,13 @@ import { useMemo, useState } from 'react';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
-import { COLORWAY_NONE, colorwayOf, pictureBenchKind, refColorwayFor } from '../bench-kinds';
+import {
+  COLORWAY_NONE,
+  colorwayOf,
+  pictureBenchKind,
+  refColorwayFor,
+  type Representation,
+} from '../bench-kinds';
 import { displayDetailName, readBench } from '../bench-slot';
 import { NewDetailModal } from '../modals';
 import { useDesignWrites } from '../use-design-band';
@@ -53,16 +59,46 @@ function noBenchReason(picture: common_DesignPicture): string {
   return `no bench takes kind «${kind}»`;
 }
 
+/**
+ * ═══ ПЕРЕКРАС В СЛОТ НЕ СТАВИТСЯ ВОВСЕ (E-12) ════════════════════════════════════════════════
+ *
+ * Владелец, дословно: «в GENERATION HISTORY в ON MODEL в REPRESENTATION ON MODEL не должно быть
+ * возможности это маркнуть в слот какой-то».
+ *
+ * ⚠ ЭТО ПОЧИНКА, А НЕ ЗАПРЕТ ПО ВКУСУ, И ЕЁ ЦЕНА — ЧУЖОЙ ОПЛАЧЕННЫЙ ПРОГОН. Выходы перекраса
+ * приезжают с `kind: "render"` — бэкенд называет это «правдой, а не удобством», и `bench-kinds`
+ * повторяет дословно: отличить фотографию человека от плиты фабрик-рендера по одной строке
+ * картинки НЕЛЬЗЯ, это умеет только её ПРОГОН. Значит `pictureBenchKind` честно отвечал `render`,
+ * пикер честно предлагал четыре стороны верстака рендера, и снимок на живой модели вставал в
+ * слот, из которого 3D собирает сборку (`INPUT — RENDERS BY VIEW`). Дальше человек нажимал
+ * GENERATE и платил за сборку, собранную из фотографии.
+ *
+ * ПОЭТОМУ РОД ПРОГОНА ПРИХОДИТ СВЕРХУ, А НЕ ЧИТАЕТСЯ ЗДЕСЬ. `runOfPicture` нашёл бы прогон только
+ * на ПЕРВОЙ странице полосы: продолжения ленты (`useMoreHistory`) в `band.runs` не лежат, и на
+ * второй странице истории гейт молча перестал бы срабатывать — то есть починка была бы
+ * наполовину, а наполовину чинить деньги нельзя. Строка ленты прогон держит в руках и называет
+ * его сама.
+ */
+const ONMODEL_NO_SLOT =
+  'an on-model photograph stands in no slot — it is the garment on a person, not a plate';
+
 export function SlotPicker({
   band,
   techCardId,
   picture,
+  rep,
   disabled,
   className,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   picture: common_DesignPicture;
+  /**
+   * Род ПРОГОНА, из которого вышла эта картинка, когда вызывающий его знает. `undefined` — «не
+   * назван», и тогда решает один лишь род картинки, как было всегда. Единственное, что этот
+   * ответ сегодня меняет, — перекрас (E-12, разбор у `ONMODEL_NO_SLOT` выше).
+   */
+  rep?: Representation | null;
   disabled?: boolean;
   className?: string;
 }) {
@@ -109,8 +145,13 @@ export function SlotPicker({
   // NO BENCH TAKES THIS KIND — the reason stands where the picker would, in the tile's own quiet
   // voice (`data-inert` with the reason, the wave's rule for a cut door: never absence, never a
   // dead control).
-  if (!kind) {
-    const reason = noBenchReason(picture);
+  //
+  // ⚠ И РОД ПРОГОНА СУДИТ РАНЬШЕ РОДА КАРТИНКИ (E-12). Это единственный случай, когда они
+  // расходятся, и расходятся они на проводе, а не здесь: перекрас подписывает свои выходы словом
+  // `render`. Порядок веток поэтому не безразличен — прочитанный вторым, род прогона не успел бы
+  // ничего решить, потому что первая ветка уже нашла бы верстак.
+  if (!kind || rep === 'onmodel') {
+    const reason = rep === 'onmodel' ? ONMODEL_NO_SLOT : noBenchReason(picture);
     return (
       <span data-inert={reason} title={reason} className={className}>
         <Text size='nano' variant='label' component='span'>

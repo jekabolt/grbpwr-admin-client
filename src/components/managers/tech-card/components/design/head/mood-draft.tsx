@@ -299,12 +299,11 @@ export function MoodDraft({
         >
           draft the idea ▸
         </Button>
-        <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
-          reads the pictures, the description and every note pinned on them — knowing which
-          picture and which spot each note marks — and offers description lines, the design
-          aspects it sees, and the callouts that are missing.{' '}
-          <b>Nothing is written until you add a line.</b>
-        </Text>
+        {/* ЗДЕСЬ СТОЯЛО ОБЪЯСНЕНИЕ ТОГО, ЧТО КНОПКА ДЕЛАЕТ («reads the pictures, the description
+            and every note pinned on them…»). Владелец убрал его дословно (E-31).
+            Ничего оно не гейтило: цену звонка называет `title` кнопки, отказ — строка ниже, а
+            «пока не нажмёшь add, ничего не записано» видно по самим чипам add/dismiss у каждой
+            строки. Текст занимал всю ширину блока ради того, что и так на экране. */}
       </div>
 
       {refusal && (

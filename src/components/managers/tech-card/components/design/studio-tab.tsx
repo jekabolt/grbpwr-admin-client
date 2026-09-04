@@ -13,7 +13,6 @@ import { DesignCapabilityProvider } from './capability';
 import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
 import { PatternStudio } from './pattern';
-import { useColorwayChoice } from './colorway-picker';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
 import { PickModeProvider, usePickMode } from './pick-mode';
@@ -99,13 +98,20 @@ export function StudioTab({
      было бы отказом, а не решением. */
   useStudioKindSwitch(techCardId ?? 0, kind, setKind);
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
-  /* КОЛОРВЕЙ — ВТОРОЕ СОСТОЯНИЕ СТУДИИ, И ЖИВЁТ ОНО ЗДЕСЬ ПО ТОМУ ЖЕ ДОВОДУ, ЧТО `kind` (L-2/L-3).
-     Рендер-верстак теперь на колорвей, 3D читает РОВНО ОДИН из них, а палитра засевается тканью
-     выбранного — три экрана, один вопрос, и второй его владелец сделал бы возможной студию, где
-     вход показывает ROSSO, а прогон уезжает за OLIVE.
-     ⚠ ХУК СТОИТ ВЫШЕ ЛЮБОГО РАННЕГО ВОЗВРАТА, как и `kind`: ниже них он исполнялся бы через раз,
-     число хуков менялось бы между отрисовками, и React снёс бы всю вкладку ошибкой 310. */
-  const colorway = useColorwayChoice(techCardId, band);
+  /* ═══ КОЛОРВЕЯ У СТУДИИ БОЛЬШЕ НЕТ — E-1 + E-16 ═══════════════════════════════════════════
+     Владелец: «в MAKE A PATTERN оставь только имя убери колорвей» и «в GENERATION — FABRIC RENDER
+     мы полностью убираем колорвеи только имена остаются».
+
+     ЗДЕСЬ СТОЯЛ `useColorwayChoice` — ВТОРОЕ СОСТОЯНИЕ СТУДИИ, — и снят он ЦЕЛИКОМ, а не заглушен
+     в экранах. Довод не в чистоте: у хука было УМОЛЧАНИЕ («первый колорвей, у которого уже есть
+     рендеры»), то есть студия открывалась на ИМЕНОВАННОМ верстаке сама. Сними органы, оставив
+     хук, — и осталось бы невидимое состояние, которое никто не может ни увидеть, ни переключить:
+     FABRIC RENDER писал бы слоты в верстак ROSSO, 3D читало бы его же, а человек не знал бы, что
+     работает не на том, где лежит вся его история.
+
+     ⚠ ОСЬ ПРИ ЭТОМ ЖИВА НА ПРОВОДЕ И В БАЗЕ. Теперь ВСЯ студия адресует безколорвейный верстак —
+     `0`, законное и вечное значение, на котором стоит каждый рендер, сделанный до появления оси.
+     Вход и прогон согласны ПО ПОСТРОЕНИЮ: одно число, потому что числа больше нет вовсе. */
 
   // A card that has not been created yet has no band and cannot have one: every write below is
   // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
@@ -233,28 +239,28 @@ export function StudioTab({
                   значило бы завести второй ответ на вопрос «во что обошлась эта карточка». */}
               {kind === 'pattern' && (
                 <>
-                  {/* ПАТТЕРН НЕ ПОКАЗЫВАЕТ ОБЩЕГО ПИКЕРА И РЕМОУНТА НЕ ТРЕБУЕТ, но довод у этого
-                      теперь ДРУГОЙ. Прежний («прогон паттерна колорвея не принимает вовсе,
-                      `colorway_forbidden`») перестал быть правдой в круге 15: на бете
-                      `DesignRunKindTakesColorway` перечисляет pattern, и колорвей уезжает В САМ
-                      ПРОГОН. Живой довод: колорвей здесь — не область экрана, а ОДНО ПОЛЕ жеста
-                      («выбираем ему название и колорвей и все»), поэтому он стоит рядом с именем
-                      внутри студии, а не общей полосой сверху, которая переключала бы весь экран. */}
-                  <PatternStudio
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    colorways={colorway.colorways}
-                  />
+                  {/* ПАТТЕРН НЕ ПОКАЗЫВАЕТ ПИКЕРА И РЕМОУНТА НЕ ТРЕБУЕТ, и довод переписан УЖЕ
+                      ДВАЖДЫ — оба раза потому, что переживал свою причину. Сегодня он такой:
+                      колорвеи нет НИ НА ОДНОМ из этих экранов (E-1, E-16 круга 16), прогон шлёт
+                      ноль, и плитка ложится на полку карточки ничьей. Ось при этом жива на
+                      проводе и в базе — снят только орган выбора. */}
+                  <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
                   {/* ЛЕНТА ОТКРЫВАЕТСЯ НА СВОЁМ РОДЕ, А НЕ НА «ALL» (J-12). Переключатель при этом
                       остаётся — владелец просил «с возможностью переключить», — и `defaultRep`
                       это именно НАЧАЛЬНОЕ положение, к которому лента возвращается при смене
                       карточки, а не запрет. */}
+                  {/* ═══ И ЗАКРЫТОЙ (E-21) ═══════════════════════════════════════════════════
+                      Владелец: «в PATTERN GENERATION HISTORY по дефолту заколапшена».
+                      Довод общий для четырёх вкладок и записан один раз — у пропа `defaultOpen`
+                      в `generation-history.tsx`: над лентой здесь стоит `PATTERNS OF THIS CARD`,
+                      то есть те же плитки крупнее и ближе к работе. Свёрнута только ЧАСТЬ БЛОКА:
+                      опрос живого прогона идёт, и шапка продолжает называть его. */}
                   <GenerationHistory
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     defaultRep='pattern'
+                    defaultOpen={false}
                   />
                 </>
               )}
@@ -263,43 +269,51 @@ export function StudioTab({
                   этих видах нет — принесённый руками файл кладут во флэт. */}
               {kind === 'render' && (
                 <>
-                  {/* `key={colorwayId}` — ПЕРЕКЛЮЧЕНИЕ КОЛОРВЕЯ ПЕРЕСЕВАЕТ ЧЕРНОВИКИ, А НЕ ПРАВИТ ИХ.
-                      Черновик рецепта засеян ТКАНЬЮ ВЫБРАННОГО колорвея и по правилу «seeded once,
-                      until touched» больше не пересевается сам; без ремоунта человек, переключивший
-                      цвет, увидел бы под новым именем рецепт предыдущего и заплатил за него. */}
+                  {/* ЗДЕСЬ СТОЯЛ `key={colorwayId}` — РЕМОУНТ ПРИ СМЕНЕ КОЛОРВЕИ, чтобы черновик
+                      рецепта не показал под новым именем рецепт предыдущего и не был за него
+                      оплачен. Переключать больше нечего: пикер снят (E-16), студия всегда стоит
+                      на нулевом верстаке, и ремоунт сторожил бы событие, которого не бывает. */}
                   <RenderStudio
-                    key={colorway.colorwayId}
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     onGoToKind={setKind}
-                    colorway={colorway}
                   />
                   {/* J-18: «в GENERATION HISTORY по дефолту должен быть фильтр по фабрик
-                      рендерам с возможностью переключить». */}
+                      рендерам с возможностью переключить».
+                      E-22: «в FABRIC RENDER GENERATION HISTORY по дефолту заколапшена» — над ней
+                      стоит `RENDERS OF THIS CARD`. */}
                   <GenerationHistory
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     defaultRep='render'
+                    defaultOpen={false}
                   />
                 </>
               )}
               {kind === 'threed' && (
                 <>
+                  {/* ⚠ `colorway` СНЯТ И ЗДЕСЬ, ХОТЯ ВЛАДЕЛЕЦ 3D НЕ НАЗЫВАЛ. Это не расширение
+                      его слова, а его СЛЕДСТВИЕ: 3D строится из рендер-верстака ВЫБРАННОГО цвета
+                      (`threedSides`), а заполняет этот верстак FABRIC RENDER — и он теперь пишет
+                      только безколорвейный. Оставь здесь прежнее умолчание, и вход 3D показывал бы
+                      «0 of 4» на карточке с четырьмя готовыми рендерами. Проп необязателен, и его
+                      отсутствие читается ровно как `colorwayId = 0`. */}
                   <ThreedStudio
-                    key={colorway.colorwayId}
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     onGoToKind={setKind}
-                    colorway={colorway}
                   />
+                  {/* E-23: «в 3D GENERATION HISTORY по дефолту заколапшена и также в on model».
+                      Над ней стоит `3D MODELS OF THIS CARD`. */}
                   <GenerationHistory
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     defaultRep='threed'
+                    defaultOpen={false}
                   />
                 </>
               )}
@@ -311,12 +325,15 @@ export function StudioTab({
               {kind === 'onmodel' && (
                 <>
                   <OnModelStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                  {/* J-31: «GENERATION HISTORY в этой вкладке по дефолту сортирует в on model». */}
+                  {/* J-31: «GENERATION HISTORY в этой вкладке по дефолту сортирует в on model».
+                      E-23, вторая половина: «и также в on model» — над ней стоит
+                      `ON-MODEL PICTURES OF THIS CARD`. */}
                   <GenerationHistory
                     band={band}
                     techCardId={techCardId}
                     disabled={readOnly}
                     defaultRep='onmodel'
+                    defaultOpen={false}
                   />
                 </>
               )}
