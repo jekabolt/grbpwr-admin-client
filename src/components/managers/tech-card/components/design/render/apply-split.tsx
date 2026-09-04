@@ -230,7 +230,11 @@ export function ApplySplitDoor({
         await writes.setBenchSlot.mutateAsync({
           // Род СПЕЛЛИТСЯ всегда: пустое поле сервер читает как `flat`, и «что бы ни стало
           // умолчанием» завтра. Колорвей — тот же, под которым этот экран читает верстак.
-          slot: { viewKey: step.view, slotId: 0, kind: benchKind, colorwayId },
+          /* ⚠ `slotId` НЕ СТАВИТСЯ ВОВСЕ. `view_key` и `slot_id` — ЧЛЕНЫ ОДНОГО `oneof`, и
+             ноль в proto-JSON это ЗАДАННОЕ поле: сервер отвечал «oneof … is already set» и не
+             записывал НИ ОДНОЙ стороны. Верстак флэтов всегда слал только `viewKey` — поэтому
+             работал он, а эти двери не работали ни разу. */
+          slot: { viewKey: step.view, kind: benchKind, colorwayId },
           pictureId: step.pictureId,
           expectedSlotRev: step.slotRev,
         });

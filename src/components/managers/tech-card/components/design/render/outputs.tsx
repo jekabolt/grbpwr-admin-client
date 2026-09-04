@@ -17,6 +17,7 @@ import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
 import { VectorModal } from '../modals';
 import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
+import { useBringOwnModel } from '../threed/model-upload-cell';
 import { useDesignWrites } from '../use-design-band';
 import { SILHOUETTE_VIEWS, viewLabel } from '../views';
 import {
@@ -153,6 +154,19 @@ export function OutputsSection({
   const [openDeck, setOpenDeck] = useState<number | null>(null);
 
   /**
+   * ═══ ДВЕРЬ «ПРИНЕСТИ СВОЮ МОДЕЛЬ» — ДВА УЗЛА В РАЗНЫХ МЕСТАХ ДОКУМЕНТА (E-13) ══════════════
+   *
+   * Хук, а не компонент, и по той же причине, по которой хуком отдаётся окно разреза строкой
+   * выше: у двери есть ЯЧЕЙКА (внутрь полосы) и СООБЩЕНИЕ ОБ ОТКАЗЕ (над ней, во всю ширину
+   * блока). Отказ здесь — текст в несколько предложений, и в колонке 132 пикселя он встаёт
+   * красной стеной выше самого кадра; замерено снимком. Разбор целиком — в `../threed/model-upload-cell`.
+   *
+   * ⚠ ЗОВЁТСЯ БЕЗУСЛОВНО, ВЫШЕ РАННЕГО ВЫХОДА, как и все хуки этого файла: вызов под условием
+   * рода менял бы их число между отрисовками и уносил бы всё дерево (React #310).
+   */
+  const bring = useBringOwnModel(techCardId);
+
+  /**
    * ═══ РЯД ЯЧЕЕК: ДЛЯ РЕНДЕРОВ — КАРТИНКА, ДЛЯ 3D — РЕЗУЛЬТАТ ═══════════════════════════════
    *
    * ⚠ ПРОГОН 3D ОТДАЁТ ДВЕ СТРОКИ НА ОДИН ПРЕДМЕТ, и до этой правки раздел считал их за два:
@@ -248,15 +262,47 @@ export function OutputsSection({
       return families.rootOf.get(pictureId) === current ? current : null;
     });
 
-  if (!rows.length) return null;
+  const writesOff = !!disabled || !speaks;
+
+  /**
+   * ═══ ПРИНЕСТИ СВОЮ 3D-МОДЕЛЬ (E-13) ═══════════════════════════════════════════════════════
+   *
+   * Владелец, дословно: «в 3D в 3D MODELS OF THIS CARD добавь возможность загрузить свою 3d
+   * модель». Дверь — ячейка полосы (`useBringOwnModel`), и весь разбор «почему не `MediaSlot`»
+   * живёт у неё; здесь решается только ГДЕ она стоит и КОГДА раздел существует.
+   *
+   * ⚠ ТОЛЬКО У 3D. Раздел один на два экрана, и `.glb` у рендеров — не файл этого рода: дверь
+   * там предлагала бы положить модель в список цветных плит, откуда её нечем ни открыть, ни
+   * поставить.
+   *
+   * ⚠ ПРИ ВЫКЛЮЧЕННОЙ ЗАПИСИ ЯЧЕЙКИ НЕТ ВОВСЕ, и это НЕ противоречит закону «отказ обязан быть
+   * виден» двумя сотнями строк ниже. Тот закон про дверь, которая СТОИТ НА КАДРЕ и молча исчезла
+   * бы вместе с наведением; здесь же не рисуется ЦЕЛАЯ ЯЧЕЙКА, ровно как `+ flat` в полосе входа
+   * рендера (`{!disabled && …}`): человек видит не пропавшую кнопку, а список без места для
+   * добавления — то же, что на всякой другой полосе этой карточки в режиме чтения.
+   */
+  const bringsOwnModel = kind === 'threed' && !writesOff;
+
+  /**
+   * ⚠ ПУСТОЙ РАЗДЕЛ БОЛЬШЕ НЕ ИСЧЕЗАЕТ, КОГДА В НЁМ ЕСТЬ ДВЕРЬ. Здесь стояло безусловное
+   * `if (!rows.length) return null`, и с дверью оно прятало бы её ровно на той карточке, ради
+   * которой она заведена: у карточки БЕЗ единой модели выходов нет, значит раздела нет, значит
+   * принести свою некуда. Без двери правило остаётся прежним — пустой раздел, в котором нельзя
+   * ничего сделать, это заголовок над пустотой.
+   */
+  if (!rows.length && !bringsOwnModel) return null;
 
   // Does the binary that answered state the mark at all? With `EmitUnpopulated` a server that
   // knows the field sends it on EVERY picture (as `false` when unset), so one picture is a
   // truthful sample for all of them — and `undefined` means «rolled-back binary», against which
   // the verb's own route would 404 too, so the doors are drawn inert rather than collecting it.
-  const carries = serverStatesSelected(rows[0].picture);
+  //
+  // ⚠ БЕЗ ЕДИНОЙ СТРОКИ ОБРАЗЦА НЕТ, И ЭТО «НЕ СКАЗАНО», А НЕ «НЕ УМЕЕТ». Пустой список бывает
+  // теперь и на живом сервере (раздел держится дверью), а `false` здесь читается ниже как
+  // признание «бинарь старше поля» — то есть напечатал бы про откат на карточке, где просто ещё
+  // нет моделей. Поэтому у самого признания стоит второе условие: строки.
+  const carries = rows.length > 0 ? serverStatesSelected(rows[0].picture) : false;
   const marked = rows.filter((r) => pictureIsSelected(r.picture)).length;
-  const writesOff = !!disabled || !speaks;
 
   /**
    * ═══ У РЕНДЕРОВ ПОМЕТКИ БОЛЬШЕ НЕТ (J-23) ═══════════════════════════════════════════════════
@@ -304,7 +350,9 @@ export function OutputsSection({
       // слота, ОБА адресуемые `view_key: 'front'`; пустое поле читается сервером как flat, и плита
       // уехала бы в чужой верстак, где её отвергли бы по роду кадра (`wrong_kind`).
       {
-        slot: { viewKey: view, slotId: 0, kind: 'render', colorwayId: bench },
+        /* ⚠ БЕЗ `slotId`: он в одном `oneof` с `viewKey`, и ноль там — заданное поле, от
+           которого сервер отвергал запись целиком. */
+        slot: { viewKey: view, kind: 'render', colorwayId: bench },
         pictureId,
         expectedSlotRev: side.slotRev,
       },
@@ -655,6 +703,12 @@ export function OutputsSection({
 
   return (
     <Section
+      /* ОБЪЯВЛЕННЫЙ ЯКОРЬ КОРОБКИ — тем же приёмом, что `id='design-threed-generation'` у меню
+         над ней. Он нужен именно ОТРИЦАТЕЛЬНЫМ утверждениям: «принесённую модель нельзя маркнуть
+         ни в один слот» — это утверждение об ОТСУТСТВИИ органа, и без объявленной коробки оно
+         одинаково зеленело бы и на снятой двери, и на пробе, смотрящей не туда. Класс для этого
+         не годится: он переживает правку смысла. */
+      id={kind === 'threed' ? 'design-threed-outputs' : 'design-render-outputs'}
       title={kind === 'threed' ? '3D models of this card' : 'renders of this card'}
       question={
         /* ОХВАТ НАЗЫВАЕТСЯ У ОБОИХ РОДОВ, А НЕ ТОЛЬКО У РЕНДЕРОВ. До J-19 про «страницу ленты
@@ -716,7 +770,7 @@ export function OutputsSection({
       {/* ПРИЗНАНИЕ ПРО ОТКАЧЕННЫЙ БИНАРЬ СТОИТ ТАМ, ГДЕ ЕСТЬ ДВЕРЬ. У рендеров пометки больше нет
           (J-23), и «doors below stay shut» описывало бы двери, которых на экране не существует —
           то есть отправляло бы человека искать несломанное. */}
-      {selectable && !carries && (
+      {selectable && rows.length > 0 && !carries && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
             <b>this server does not state the mark at all.</b> `DesignPicture.selected` is on this
@@ -728,7 +782,21 @@ export function OutputsSection({
         </CalloutBox>
       )}
 
+      {/* ⚠ ОТКАЗ ДВЕРИ СТОИТ НАД ПОЛОСОЙ, А НЕ В ЕЁ ЯЧЕЙКЕ. Ячейка — колонка в 132 пикселя, и
+          фраза «модель 51 MB, потолок 50 MB, вот что делать» встаёт в ней красной стеной в восемь
+          строк, выше самого кадра (замерено снимком). `CalloutBox` — тот орган системы, у которого
+          на это есть ширина, и он не исчезает сам: «a callout stays until it is resolved». */}
+      {bringsOwnModel && bring.notice}
+
       <Strip>
+        {/* ═══ ДВЕРЬ СТОИТ ПЕРВОЙ, И ЭТО ЗАМЕР, А НЕ ВКУС (E-13) ══════════════════════════════
+            Сервер отдаёт выходы `ORDER BY o.id DESC` — новейшее первым, — поэтому только что
+            принесённая модель становится строкой НОЛЬ. Дверь в хвосте горизонтального скроллера
+            уводила бы собственный ответ за край экрана: человек нажал, что-то произошло, и ничего
+            не видно. Первой она к тому же НЕ ПЕРЕЕЗЖАЕТ между пустой и полной полосой — один орган
+            стоит в одном месте, — и это ровно та позиция, что у `+ flat` в полосе входа рендера:
+            голова того списка, в который она добавляет. */}
+        {bringsOwnModel && bring.cell}
         {rows.map((row) => {
           const rootId = row.picture.id ?? 0;
           // Кусок рисуется ТОЛЬКО под своим листом — иначе закрытая колода показала бы его вопреки
@@ -777,6 +845,26 @@ export function OutputsSection({
           );
         })}
       </Strip>
+
+      {/* ⚠ «ПУСТО» ГОВОРИТСЯ СЛОВОМ, И СЛОВО НАЗЫВАЕТ ВТОРОЙ ПУТЬ. Полоса из одной пунктирной
+          ячейки читается как «сюда кладут модели», но НЕ отвечает на вопрос, который человек
+          задаёт следующим: а разве их не делает генерация? Отвечает эта строка — один раз, без
+          мастера и без уговоров. */}
+      {rows.length === 0 && bringsOwnModel && (
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          data-outputs-empty=''
+          /* ПРЕДЕЛ ДЛИНЫ СТРОКИ. Блок тянется во всю ширину монитора, и без потолка это полторы
+             сотни знаков в строке — глаз теряет начало следующей. */
+          className='max-w-[70ch] normal-case'
+        >
+          No model on this card yet. GENERATION — 3D builds one out of the marked render sides and
+          charges for it; the cell on the left takes a .glb you already have, and costs nothing.
+        </Text>
+      )}
+
       {/* ОДНО ОКНО РЕЗА НА ВЕСЬ РАЗДЕЛ. Оно рисуется хуком и монтируется только когда цель
           выбрана; кадры размечает человек, а `for_input: false` уезжает на провод из самого хука
           (довод — у его вызова выше). */}

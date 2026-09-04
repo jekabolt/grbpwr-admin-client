@@ -99,9 +99,12 @@ export function FabricRenderSlots({
   const filled = sides.filter((side) => !!side.picture).length;
 
   /** Адрес стороны на ЭТОМ верстаке. Род спеллится всегда — пустое поле читается сервером как flat. */
+  /* ⚠ `slotId` ОТСУТСТВУЕТ НАМЕРЕННО, и это не небрежность. Он в одном `oneof` с `viewKey`;
+     ноль в proto-JSON — ЗАДАННОЕ поле, второй член выбивает первый, и сервер отвергает запись
+     с «oneof admin.DesignBenchSlotRef.slot is already set». Так эти слоты не наполнялись НИ
+     РАЗУ с выпуска. Образец — `bench.tsx`, где ссылка всегда была без него. */
   const sideRef = (view: string): DesignBenchSlotRef => ({
     viewKey: view,
-    slotId: 0,
     kind: 'render',
     colorwayId,
   });
