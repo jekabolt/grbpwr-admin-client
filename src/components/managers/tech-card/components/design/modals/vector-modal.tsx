@@ -17,6 +17,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import { FIT_INSET, FIT_MIN, fitView, revealDelta, toWorld, zoomAt, type View } from '../../canvas-view';
+import { exactPalette, isMapInk, planHex } from '../colour-plan/model';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
 import { findMediaUrlInBand, useDesignWrites } from '../use-design-band';
@@ -159,6 +160,7 @@ import {
   cutoutInside,
   cutoutRect,
   drawCutout,
+  exportColourMapPng,
   exportRasterPng,
   markRect,
   maskBox,
@@ -427,6 +429,24 @@ const TOOL_BANDS: { material: Material; label: string; tools: Tool[] }[] = [
    */
   { material: 'view', label: 'area & view', tools: ['lasso', 'crop', 'pan'] },
 ];
+
+/**
+ * ПОЛОСЫ РЕЖИМА ЦВЕТОВОЙ КАРТЫ — СУЖЕНИЕ ТОГО ЖЕ СПИСКА, А НЕ ВТОРОЙ СПИСОК.
+ *
+ * ⚠ ЗДЕСЬ НЕТ ЛИНИЙ, И ЭТО УТВЕРЖДЕНИЕ. Карта — плоские заливки по чертежу, который УЖЕ нарисован;
+ * штрих на ней не метка (у него нет площади, скан его не увидит) и не чертёж (чертёж приехал
+ * снизу). Нет клона, штампа, лечилки и заплатки: все четверо КОПИРУЮТ пиксели с одного места на
+ * другое, то есть размазывают чужие полутона — ровно то, чего точный скан не досчитается. Нет
+ * кропа: он пересчитывает лист, а карта обязана совпасть с флэтом пиксель в пиксель, иначе метки
+ * лягут не на те детали.
+ */
+const COLOUR_TOOL_BANDS: { material: Material; label: string; tools: Tool[] }[] = [
+  { material: 'pixels', label: 'colour', tools: ['paint', 'fill', 'erase'] },
+  { material: 'view', label: 'area & view', tools: ['lasso', 'pan'] },
+];
+
+/** Тот же список, множеством — им гейтится ЕДИНСТВЕННЫЙ писатель инструмента (`switchTool`). */
+const COLOUR_TOOLS = new Set<Tool>(COLOUR_TOOL_BANDS.flatMap((b) => b.tools));
 
 /** Инструменты, красящие ПИКСЕЛИ. Их жест копится в буфере растра, а не в списке штрихов. */
 const isRasterTool = (t: Tool): t is 'paint' | 'erase' | 'stamp' =>
@@ -861,6 +881,11 @@ export function VectorModal({
   slot,
   disabled,
   onFlattened,
+  mode = 'edit',
+  colourLabel = '',
+  mapSrc = '',
+  seedInks,
+  onColourMap,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -876,11 +901,58 @@ export function VectorModal({
   disabled?: boolean;
   /** The new picture, for a caller that wants to walk to it. */
   onFlattened?: (picture: common_DesignPicture) => void;
+  /**
+   * ═══ РЕЖИМ ЦВЕТОВОЙ КАРТЫ — ЭТОТ ЖЕ РЕДАКТОР, СУЖЕННЫЙ, А НЕ ВТОРОЙ РЕДАКТОР ════════════════
+   *
+   * Владелец просил «заливкой и брашем выбрать кастомные колорс для разных деталей». Всё названное
+   * здесь уже есть: ведро с допуском и лассо, которое его держит, пиксельная кисть с цветом в
+   * руке, ластик, пипетка, отмена, зум, прокси для CORS и один шов загрузки. Второй маляр означал
+   * бы второй растровый движок, который надо держать в согласии с первым, — ровно тот класс
+   * расхождения, который этот репозиторий уже оплатил дважды (растеризатор, движок заливки).
+   *
+   * ЧТО РЕЖИМ МЕНЯЕТ, ПОИМЁННО: полос две вместо трёх (`paint / fill / erase` и `lasso / pan` —
+   * ни линий, ни клона, ни штампа, ни лечилки, ни заплатки, ни кропа: ни один из них карту не
+   * делает); жёсткость и непрозрачность заперты на 100 (внутренности заливки обязаны быть ТОЧНОЙ
+   * краской, иначе скан палитры не досчитается их); ластик ВОЗВРАЩАЕТ чертёж вместо бумаги; в
+   * шапке ОДНА кнопка — `use as colour map`, и никогда пара «слой / картинка»: карта не слой и не
+   * снимок карточки.
+   *
+   * ⚠ И СЛОЙ ЭТОГО ФЛЭТА В ЭТОМ РЕЖИМЕ НЕ ЧИТАЕТСЯ И НЕ ПИШЕТСЯ ВОВСЕ. У слоя ключ
+   * `(карточка, база)` — один на базу, — поэтому карта, сохранённая слоем, столкнулась бы с
+   * обводкой того же флэта и стёрла бы её. Здесь она и не сохраняется слоем: наружу уезжает
+   * отдельная картинка, а план её адресует.
+   */
+  mode?: 'edit' | 'colour';
+  /** Имя вида для шапки в режиме карты: `colour — front`. */
+  colourLabel?: string;
+  /** Адрес УЖЕ ПОКРАШЕННОЙ карты этого вида: документ заводится из него, подложка — из флэта. */
+  mapSrc?: string;
+  /**
+   * ПАЛИТРА, ЗАПИСАННАЯ В ПРОШЛЫЙ ЗАХОД. Засевает множество кандидатов, чтобы скан не гадал: цвет,
+   * которым красили вчера и не трогали сегодня, обязан остаться меткой, а не исчезнуть из меню.
+   */
+  seedInks?: readonly string[];
+  /**
+   * КАРТА ГОТОВА: картинка уже в библиотеке, палитра посчитана точным совпадением.
+   *
+   * ⚠ ВОЗВРАЩАЕТ «ПРИНЯТО ЛИ», И ЭТО НЕ ФОРМАЛЬНОСТЬ. Приёмщик пишет план под сверкой ревизии, и
+   * коллега, сохранивший свою покраску минуту назад, этот вызов ОТКЛОНИТ. Закрыться на отказе
+   * значило бы выбросить минуты работы, которые ещё видны на экране, — поэтому редактор остаётся
+   * открытым и говорит словами. Загруженный файл при этом остаётся ничьим в библиотеке; это цена
+   * того, что скан идёт ДО загрузки, а не после неё.
+   */
+  onColourMap?: (map: {
+    mediaId: number;
+    url: string;
+    palette: { hex: string; px: number }[];
+  }) => boolean | Promise<boolean>;
 }) {
   const { showMessage } = useSnackBarStore();
   const { setBenchSlot } = useDesignWrites(techCardId);
   const { saveLayer, flattenLayer } = useEditLayerWrites(techCardId);
 
+  /** Режим карты цветов — читается двумя десятками мест ниже, поэтому назван один раз здесь. */
+  const colourMode = mode === 'colour';
   const baseMedia = base?.media;
   const baseMediaId = baseMedia?.id ?? 0;
   const baseSrc =
@@ -903,7 +975,11 @@ export function VectorModal({
   );
   const knownId = known?.id ?? 0;
   const knownRev = known?.rev ?? 0;
-  const layerQuery = useDesignEditLayer(techCardId, open ? knownId : 0);
+  /* ⚠ В РЕЖИМЕ КАРТЫ СЛОЙ НЕ ЧИТАЕТСЯ ВОВСЕ, И ЭТО НЕ ЭКОНОМИЯ ЗАПРОСА. Прочитанный слой поставил
+     бы на плату чужие штрихи (обводку, ретушь) — а карта обязана совпадать с тем чертежом, который
+     уезжает в слоте, то есть с ЧИСТЫМ флэтом. И не прочитанный слой невозможно перезаписать: ключ
+     `(карточка, база)` один на базу, и сохранение карты слоем стёрло бы обводку того же флэта. */
+  const layerQuery = useDesignEditLayer(techCardId, open && !colourMode ? knownId : 0);
   const loaded = layerQuery.data?.layer;
 
   const [strokes, setStrokes] = useState<VectorStroke[]>([]);
@@ -932,6 +1008,34 @@ export function VectorModal({
   const [dashed, setDashed] = useState(false);
   /** Цвет нити в руке. Чёрный при входе: цвет — утверждение, и его делает человек, не машина. */
   const [ink, setInk] = useState<string>(DEFAULT_INK);
+  /**
+   * ═══ ЧЕРНИЛА, КОТОРЫМИ ЗДЕСЬ КРАСИЛИ, — ЗАПИСЬ, А НЕ СКАН ════════════════════════════════════
+   *
+   * ⚠ ЭТО ЛОВУШКА, НАЗВАННАЯ ДИЗАЙНОМ ПОИМЁННО, И ОНА СТОИТ ДЕНЕГ. Собрать «какие цвета
+   * использованы» проходом по готовому холсту НЕЛЬЗЯ: у заливки мягкая полоса края красит
+   * «настолько, насколько похоже», у кисти есть антиалиасинг, под ними лежит JPEG со своим шумом, —
+   * и такой проход возвращает сотни оттенков, которых никто не выбирал. Человек назначал бы ткани
+   * цветам, которых на экране нет, а платный промпт объявлял бы модели детали, размеченные
+   * несуществующей меткой.
+   *
+   * Поэтому кандидаты записываются В МОМЕНТ КОММИТА — там, где цвет ТОЧНО был в руке: кисть в
+   * `endRasterGesture`, ведро в `fillAt`. Скан потом только СВЕРЯЕТ точным равенством, сколько
+   * пикселей каждого записанного цвета выжило (`exactPalette`), — множество закрыто, выдумать в
+   * нём нечего. Чёрное и белое не пишутся: это чернила чертежа и бумага.
+   *
+   * ⚠ РЕФ, А НЕ СОСТОЯНИЕ, У ПИСАТЕЛЯ. Коммит жеста и обработчик заливки зовутся вне рендера, и
+   * значение из замыкания прошлого кадра потеряло бы цвет, взятый пипеткой секунду назад. Рядом
+   * живёт состояние — им рисуется ряд чернил на рейке.
+   */
+  const [usedInks, setUsedInks] = useState<string[]>([]);
+  const usedInksRef = useRef<string[]>([]);
+  const recordInk = useCallback((hex?: string | null) => {
+    const v = planHex(hex);
+    if (!isMapInk(v)) return;
+    if (usedInksRef.current.includes(v)) return;
+    usedInksRef.current = [...usedInksRef.current, v];
+    setUsedInks(usedInksRef.current);
+  }, []);
   /* УМОЛЧАНИЕ БЕРЁТСЯ ИЗ `DEFAULT_GAUGE`, А НЕ ИЗ ТАБЛИЦЫ СТАРЫХ СЛОВ. `WEIGHT_GAUGE` — это
      расшифровка формата (что значит `weight: 'thin'` у уже сохранённого штриха), и она заморожена
      на прежних числах намеренно. Брать оттуда толщину НОВОЙ кисти значило бы, что диапазон
@@ -1525,7 +1629,7 @@ export function VectorModal({
     const view = viewCanvasRef.current;
     if (!layer || !view) return;
     const live = liveRef.current;
-    if (live) stageScratch(layer, maskRef.current);
+    if (live) stageScratch(layer, maskRef.current, live.mode);
     renderView(view, layer, live);
   }, []);
 
@@ -1610,7 +1714,9 @@ export function VectorModal({
     if (!expandedRef.current) setRatio(baseMediaId > 0 ? wireRatio : doc.ratio);
     setUnreadable(doc.unreadable);
     setSelected(null);
-    setTool('line');
+    /* В РЕЖИМЕ КАРТЫ РУКА НАЧИНАЕТ С ВЕДРА — это первое слово владельца («заливкой и брашем») и
+       единственный инструмент, которым красят деталь целиком одним нажатием. */
+    setTool(colourMode ? 'fill' : 'line');
     // КИСТЬ ПРИ ВХОДЕ — plain: шов — промышленное утверждение о машине, и пока человек сам не взял
     // кисть-шов, ни один штрих машины не называет. Это перенос старого запрета пред-заполнения:
     // запрещено НАЗНАЧЕННОЕ МАШИНОЙ, а не выбранное человеком.
@@ -1621,8 +1727,17 @@ export function VectorModal({
     setStep(DEFAULT_STEP);
     setStepOwn(false);
     setNib(DEFAULT_NIB);
-    setHardness(80);
+    /* ⚠ НА КАРТЕ ЖЁСТКОСТЬ И НЕПРОЗРАЧНОСТЬ ЗАПЕРТЫ НА 100, И ЭТО НЕ ВКУС. Мягкий край и
+       полупрозрачность дают ПРОМЕЖУТОЧНЫЕ пиксели, которых скан не досчитается точным
+       равенством: залитая на 60% деталь ушла бы из палитры целиком, и человек увидел бы «я
+       красил, а его нет». Органы этих двух чисел в режиме карты не рисуются вовсе — тогда и
+       нечем разойтись. */
+    setHardness(colourMode ? 100 : 80);
     setOpacity(100);
+    /* ЗАПИСАННЫЕ ЧЕРНИЛА — СОСТОЯНИЕ ВИЗИТА, засеянное палитрой прошлой покраски. Пережив
+       открытие над ДРУГИМ видом, вчерашний цвет объявил бы меткой то, чего на этой карте нет. */
+    usedInksRef.current = (seedInks ?? []).map(planHex).filter(isMapInk);
+    setUsedInks(usedInksRef.current);
     setPicking(false);
     setStampSrc(null);
     stampOffset.current = null;
@@ -1671,7 +1786,7 @@ export function VectorModal({
     resetHistory();
     // `baseSrc` и `disabled` ушли из зависимостей вместе с развилкой входа (H-1): читала их
     // только она. Оставленные, они пересеивали бы визит на каждое прибытие подложки.
-  }, [open, knownId, knownRev, known, band, baseMediaId, loaded, wireRatio, resetHistory]);
+  }, [open, knownId, knownRev, known, band, baseMediaId, loaded, wireRatio, resetHistory, colourMode, seedInks]);
 
   /**
    * THE EDITOR IS FROZEN UNTIL IT KNOWS WHAT IS ALREADY THERE — a correctness gate, not a spinner:
@@ -2357,7 +2472,16 @@ export function VectorModal({
        * А `storedRasterId === 0` — это «никогда не красили», и тогда копия подложки и есть
        * правильное начало. Молча: терять нечего, и говорить не о чем.
        */
-      const layer = await seedRaster((!dropped && storedRasterUrl) || baseSrc, box);
+      /**
+       * ⚠ У КАРТЫ ЦВЕТОВ ДВА ИСТОЧНИКА, И ОНИ РАЗНЫЕ ПО СМЫСЛУ. Документ заводится из УЖЕ
+       * ПОКРАШЕННОЙ карты, когда она есть (доработка вместо покраски с нуля), а нетронутая
+       * подложка — ВСЕГДА из чистого флэта: ластик-возврат обязан приносить чертёж, а не
+       * вчерашнюю краску. Хранимая живопись СЛОЯ здесь не читается вовсе (`colourMode` закрыл и
+       * чтение слоя выше): у флэта своя обводка, и карта её не касается.
+       */
+      const layer = colourMode
+        ? await seedRaster(mapSrc || baseSrc, box, baseSrc)
+        : await seedRaster((!dropped && storedRasterUrl) || baseSrc, box);
       rasterRef.current = layer;
       setRasterReady(true);
       return layer;
@@ -2370,7 +2494,7 @@ export function VectorModal({
       seeding.current = false;
       setBusy(null);
     }
-  }, [baseMedia, baseSrc, ratio, storedRasterId, storedRasterUrl, storedRasterGone]);
+  }, [baseMedia, baseSrc, ratio, storedRasterId, storedRasterUrl, storedRasterGone, colourMode, mapSrc]);
 
   /**
    * НАРИСОВАТЬ ДОКУМЕНТ В ВИДИМЫЙ ХОЛСТ — и когда растр только появился, и КАЖДЫЙ РАЗ, когда холст
@@ -2449,8 +2573,16 @@ export function VectorModal({
     );
   }, [showMessage]);
 
-  /** Режим пиксельного жеста: ластик вычитает, кисть и штамп кладут. */
-  const paintModeOf = (t: Tool): PaintMode => (t === 'erase' ? 'erase' : 'paint');
+  /**
+   * Режим пиксельного жеста: кисть и штамп кладут, ластик кладёт бумагу — а НА КАРТЕ ЦВЕТОВ
+   * ВОЗВРАЩАЕТ ЧЕРТЁЖ.
+   *
+   * ⚠ ТРЕТИЙ РЕЖИМ, А НЕ ФЛАГ У ВТОРОГО. Забелить и вернуть — разные работы: белое пятно на месте
+   * линии сносит стенку, вдоль которой держится заливка, и следующее ведро выливается на весь
+   * лист. Довод целиком — у `RasterLayer.base`.
+   */
+  const paintModeOf = (t: Tool): PaintMode =>
+    t === 'erase' ? (colourMode ? 'restore' : 'erase') : 'paint';
 
   /**
    * ИНСТРУМЕНТ, КОТОРЫМ НАЧАЛСЯ ЖЕСТ, — И ИМ ЖЕ ЖЕСТ КОНЧИТСЯ.
@@ -2662,7 +2794,7 @@ export function VectorModal({
       }
     }
 
-    if (layer) stageScratch(layer, maskRef.current);
+    if (layer) stageScratch(layer, maskRef.current, paintModeOf(t));
     const gone = timeline.current.recordCombined(
       layer,
       strokesRef.current,
@@ -2677,6 +2809,11 @@ export function VectorModal({
     if (gone.pixels) {
       rasterDirtyRef.current = true;
       setRasterDirty(true);
+      /* ⚠ ПЕРВЫЙ ИЗ ДВУХ ШВОВ ЗАПИСИ ЧЕРНИЛ, И СТОИТ ОН ПОСЛЕ ТОГО, КАК ЛЕНТА ПОДТВЕРДИЛА,
+         ЧТО ПИКСЕЛИ ЛЕГЛИ. Записать на нажатии значило бы объявить меткой цвет, которым провели
+         по пустому месту или мимо активной области, — и он остался бы в меню навсегда, ничего
+         не покрывая. Ластик сюда не пишет: он не кладёт цвет, он возвращает чертёж. */
+      if (colourMode && t === 'paint') recordInk(ink);
     }
     if (gone.lines) {
       strokesRef.current = next;
@@ -2788,6 +2925,11 @@ export function VectorModal({
    * Функция дешёвая, зовут её от нажатия пальцем, и мемоизация здесь покупала бы только этот риск.
    */
   const switchTool = (t: Tool) => {
+      /* ⚠ ГЛАГОЛ-КЛАВИША ТОЖЕ ПРОХОДИТ ЗДЕСЬ, И ЭТО ЕДИНСТВЕННАЯ ДВЕРЬ. В режиме карты полос две,
+         но клавиши инструментов живут всё время: `p` открыло бы перо, которого на экране нет, — и
+         человек рисовал бы линии, которых скан палитры не увидит никогда. Гейт стоит у ОДНОГО
+         писателя `tool`, а не у ряда чипов, потому что ряд чипов — не единственный вход. */
+      if (colourMode && !COLOUR_TOOLS.has(t)) return;
       if (penRef.current) commitPen();
       /**
        * СМЕНА ИНСТРУМЕНТА ЗАКРЫВАЕТ РАМКУ — И ПО-РАЗНОМУ У РАЗНЫХ ХОЗЯЕВ.
@@ -5217,6 +5359,10 @@ export function VectorModal({
     if (!changed) return;
     rasterDirtyRef.current = true;
     setRasterDirty(true);
+    /* ВТОРОЙ ШОВ ЗАПИСИ ЧЕРНИЛ — И ОН ТОЖЕ ЗА `changed`. Ведро, которому нечего было залить,
+       отвечает отказом словами выше и метки не рождает: множество кандидатов растёт только там,
+       где краска действительно легла. */
+    if (colourMode) recordInk(ink);
     bumpTl();
   };
 
@@ -5512,6 +5658,69 @@ export function VectorModal({
       }),
     [baseSrc, ratio, strokes],
   );
+
+  /**
+   * ═══ «USE AS COLOUR MAP» — ЕДИНСТВЕННАЯ КНОПКА РЕЖИМА КАРТЫ ══════════════════════════════════
+   *
+   * Ни слоя, ни картинки карточки: карта — ни то, ни другое. Слой у флэта один (ключ
+   * `(карточка, база)`), и карта, сохранённая слоем, снесла бы обводку того же чертежа; картинка
+   * карточки предлагалась бы слотам верстака и стояла бы в ARTIFACTS как РИСУНОК ВЕЩИ, которым
+   * карта ровно не является. Поэтому наружу уезжает обычная загрузка в библиотеку, а адресует её
+   * цветовой план — как это уже делает разметка `fix-markup` со своей копией платы.
+   *
+   * ПОРЯДОК ОБЯЗАТЕЛЕН: сначала СКАН (он может отказать бесплатно), потом байты и загрузка. Обратный
+   * порядок оставлял бы в библиотеке файл, о котором никто не узнает, каждый раз, когда человек
+   * нажал кнопку, ничего не покрасив.
+   */
+  const useAsColourMap = async () => {
+    if (frozen || busy) return;
+    const layer = rasterRef.current;
+    if (!layer) {
+      setRefusal(
+        'nothing is painted yet — flood a part with the bucket or brush it, then this button has something to hand over.',
+      );
+      return;
+    }
+    setRefusal(null);
+    try {
+      setBusy('reading the colours…');
+      const pixels = rasterCtx(layer.doc).getImageData(0, 0, layer.w, layer.h).data;
+      /* ⚠ КАНДИДАТЫ — ТОЛЬКО ЗАПИСАННЫЕ ЧЕРНИЛА. Открой множество, и мягкий край заливки станет
+         десятком «использованных цветов», которых никто не выбирал. Довод целиком — у `usedInks`. */
+      const palette = exactPalette(pixels, usedInksRef.current);
+      if (palette.length === 0) {
+        setRefusal(
+          'no colour is marked on this drawing. Black and white are the drawing’s own ink and its paper, so painting in them marks nothing — pick a colour and flood a part with it.',
+        );
+        return;
+      }
+      setBusy('uploading the colour map…');
+      const media = await uploadRaster(exportColourMapPng(layer));
+      const mediaId = media.id ?? 0;
+      if (!mediaId) throw new Error('the colour map went up but came back without an id');
+      const accepted =
+        (await onColourMap?.({
+          mediaId,
+          url: media.media?.fullSize?.mediaUrl || '',
+          palette,
+        })) ?? true;
+      if (!accepted) {
+        setRefusal(
+          'the colour plan was not saved, so this painting has not been filed — it is still on screen and nothing was lost. The reason is in the message that just appeared; deal with it and press the button again.',
+        );
+        return;
+      }
+      /* СОХРАНЁННОЕ ПЕРЕСТАЁТ БЫТЬ НЕСОХРАНЁННЫМ — иначе страж выхода спросил бы про правки,
+         которые только что уехали, и человек решил бы, что кнопка не сработала. */
+      rasterDirtyRef.current = false;
+      setRasterDirty(false);
+      onOpenChange(false);
+    } catch (error) {
+      setRefusal(layerRefusalText(error));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const saveAsPicture = async () => {
     if (frozen || tooLarge || !anyContent || busy) return;
@@ -6194,12 +6403,16 @@ export function VectorModal({
                 которую жалуется абзац выше: картинка мудборда рода не несёт вовсе (её база
                 собирается из медиа, а не из кадра полосы), и правка фотографии объявлялась
                 правкой флэта. Безродный кадр называется кадром. */}
-            {base
-              ? `vector edit — ${(base.kind || '').trim() || 'a picture'}`
-              : 'vector edit — a new drawing'}
+            {colourMode
+              ? `colour${colourLabel ? ` — ${colourLabel}` : ''}`
+              : base
+                ? `vector edit — ${(base.kind || '').trim() || 'a picture'}`
+                : 'vector edit — a new drawing'}
           </Dialog.Title>
           <Dialog.Description className='sr-only'>
-            strokes over the picture on a pan and zoom canvas; the raster underneath is never touched
+            {colourMode
+              ? 'flood and brush the parts of this flat in flat colours; those colours are labels for cloths, not the garment’s own'
+              : 'strokes over the picture on a pan and zoom canvas; the raster underneath is never touched'}
           </Dialog.Description>
 
           <div className='flex h-full flex-col gap-2'>
@@ -6212,7 +6425,7 @@ export function VectorModal({
                 component='span'
                 className='font-bold'
               >
-                vector edit
+                {colourMode ? `colour${colourLabel ? ` — ${colourLabel}` : ''}` : 'vector edit'}
               </Text>
               {base ? (
                 <>
@@ -6331,6 +6544,22 @@ export function VectorModal({
                 }
                 {frozen ? (
                   <Pill tone='mut'>read-only</Pill>
+                ) : colourMode ? (
+                  /* ⚠ ОДНА КНОПКА, И НИКОГДА ПАРА «СЛОЙ / КАРТИНКА». Карта не слой (у флэта слой
+                     один, и она снесла бы его обводку) и не снимок карточки (её предлагали бы
+                     слотам верстака как рисунок вещи, которым она не является). Обе кнопки той
+                     пары здесь были бы дверьми в неверные места. */
+                  <Button
+                    type='button'
+                    variant='main'
+                    size='sm'
+                    disabled={!!busy}
+                    data-colour-map-commit=''
+                    onClick={() => void useAsColourMap()}
+                    title='hand this painting over as the colour map of this view — the colours become the rows of the parts menu'
+                  >
+                    {busy ?? 'use as colour map'}
+                  </Button>
                 ) : (
                   /* Писатели живут вместе с холстом — и он здесь безусловен (H-1). */
                   <>
@@ -6464,13 +6693,20 @@ export function VectorModal({
                   nibLabel={isNibTool(tool) ? TOOL_LABEL[tool] : ''}
                   rasterTool={needsRaster(tool)}
                   lineTool={!needsRaster(tool)}
+                  colourMode={colourMode}
+                  usedInks={usedInks}
                   hardness={hardness}
+                  /* ⚠ ВТОРОЙ ЗАМОК НА ТЕХ ЖЕ ДВУХ ЧИСЛАХ, И ОН НЕ ЛИШНИЙ. Первый — отсутствие
+                     органа на рейке; но `RailProps` принимает обработчик, а не запрет, и
+                     единственный способ гарантировать сотню на карте — не пустить сюда другое
+                     значение. Иначе замок держался бы разметкой, то есть держался бы до первой
+                     правки соседнего файла. */
                   onHardness={(n: number) =>
-                    setHardness(Math.min(100, Math.max(0, Math.round(n) || 0)))
+                    setHardness(colourMode ? 100 : Math.min(100, Math.max(0, Math.round(n) || 0)))
                   }
                   opacity={opacity}
                   onOpacity={(n: number) =>
-                    setOpacity(Math.min(100, Math.max(1, Math.round(n) || 1)))
+                    setOpacity(colourMode ? 100 : Math.min(100, Math.max(1, Math.round(n) || 1)))
                   }
                   undoDepth={tl.depth}
                   undoBytes={tl.bytes}
@@ -6601,7 +6837,7 @@ export function VectorModal({
                         то, ЧТО инструмент производит: линию, которую потом можно править вечно,
                         или пиксели, которые лягут в картинку. Один общий ряд чипов стёр бы это
                         различие, а оно решает, что человек получит на выходе. */}
-                    {TOOL_BANDS.map((band) => (
+                    {(colourMode ? COLOUR_TOOL_BANDS : TOOL_BANDS).map((band) => (
                       <span
                         key={band.material}
                         className='flex min-w-0 items-center gap-1.5'

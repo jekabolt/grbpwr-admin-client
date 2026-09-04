@@ -2,6 +2,8 @@ import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-h
 import { useMemo, useState, type JSX } from 'react';
 import { Section } from 'ui/components/section';
 
+import { colourPlanGate, planRecipe } from '../colour-plan/model';
+import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
 import { FabricRenderSlots } from './fabric-render-slots';
@@ -121,6 +123,12 @@ export function RenderStudio({
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
 }): JSX.Element {
   const draft = useColourDraft(band, colorwayId, colorwayRef);
+  /**
+   * ⚠ ПЛАН ЖИВЁТ ЗДЕСЬ, А НЕ В ПАЛИТРЕ, И ПО ТОМУ ЖЕ ДОВОДУ, ЧТО ЧЕРНОВИК. Ворота и тело запроса
+   * читают его вместе с ведомостью цветов; два вызова хука дали бы два документа с разными
+   * ревизиями — экран сохранял бы под одной, а отказывал бы по другой.
+   */
+  const colourPlan = useColourPlan(techCardId, band);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
@@ -185,13 +193,41 @@ export function RenderStudio({
     [draft.recipe, draft.cloth],
   );
 
+  /**
+   * ЧТО УЕДЕТ НА САМОМ ДЕЛЕ — рецепт, ПОДМЕНЁННЫЙ ПЛАНОМ, когда с прогоном уезжают карты цветов.
+   * Без карт это `sent` байт в байт: непокрашенный прогон не изменился ни одним полем.
+   */
+  const wire = useMemo(
+    () => planRecipe(band, colourPlan.plan, sent),
+    [band, colourPlan.plan, sent],
+  );
+
   const gate: Gate = useMemo(() => {
     /* АРХИВНОЕ ИМЯ ОТКАЗЫВАЕТ ПЕРВЫМ — раньше даже пустого верстака: под снятым цветом «front and
        back must hold a drawing» посылает чертить то, что всё равно не купится. Довод целиком — у
        `archivedColorwayGate`. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
     if (!base.ok) return base;
-    if (!recipeIsStated(sent)) {
+    /* ⚠ ВОРОТА ПОКРАСКИ СТОЯТ ПЕРЕД ВОРОТАМИ РЕЦЕПТА, потому что покрашенный цвет без ткани — это
+       заявление ЧЕЛОВЕКА, оставшееся без ответа, а не пустой рецепт. Три из четырёх их отказов —
+       зеркало дверей сервера (ревью `5dbb3b5`): метка без карты, одна картинка в двух ролях,
+       и карта, которая уже уезжает плитой или референсом. Сервер откажет словами; экран обязан
+       не доводить до отказа. */
+    const painted = colourPlanGate(band, colourPlan.plan);
+    if (!painted.ok) return painted;
+    /**
+     * ⚠ ПОД ПОКРАСКОЙ ЗАЯВЛЕНИЕ О ТКАНИ ЖИВЁТ ПО ДЕТАЛЯМ, А НЕ В СКАЛЯРАХ, И ЭТО НЕ ПОСЛАБЛЕНИЕ.
+     *
+     * `recipeIsStated` спрашивает ровно три СКАЛЯРА прогона — главную фотографию, цвет и слова. Это
+     * верно для прогона, у которого ткань одна на всё изделие. У покрашенного она другая на каждой
+     * детали: цвет и слова стоят НА СТРОКАХ, и прогон, где каждой детали назван свой простой цвет,
+     * имеет пустые скаляры и при этом заявлен полностью. Отказ здесь звал бы человека сказать про
+     * ткань то, что он только что сказал шесть раз.
+     *
+     * Пустым такой прогон быть не может: ворота выше уже отказали каждому покрашенному цвету, о
+     * котором не сказано ничего, — то есть непустой `colour_maps` уже означает «сказано про всё».
+     */
+    if ((wire.colourMaps ?? []).length === 0 && !recipeIsStated(wire)) {
       return {
         ok: false,
         reason:
@@ -199,7 +235,7 @@ export function RenderStudio({
       };
     }
     return { ok: true };
-  }, [band, sent, colorwayArchived, colorwayLabel]);
+  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel]);
 
   const generate = () => {
     run.start({
@@ -231,12 +267,12 @@ export function RenderStudio({
       detailSlotIds: [],
       layout: 'one',
         colour: {
-          ...sent,
+          ...wire,
           // DERIVED AT THE DOOR, NOT HELD BY A CONTROL. `source` predates combination and cannot
           // spell «a photo and a picked colour together»; it is written here purely so recipes
           // already stored stay readable, and it never decides what travels — the three populated
           // fields do.
-          source: wireColourSource(sent),
+          source: wireColourSource(wire),
         },
         threed: undefined,
         fixTarget: '',
@@ -278,6 +314,7 @@ export function RenderStudio({
           techCardId={techCardId}
           disabled={disabled}
           draft={draft}
+          colourPlan={colourPlan}
           /* K-16: вторая дверь у полки текстур. Приехала сюда вместе с самой полкой (E-7); без
              `onGoToKind` её нет вовсе — кнопка, которой некуда вести, хуже её отсутствия. */
           onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
@@ -292,7 +329,7 @@ export function RenderStudio({
             views.length > 1
               ? `1 picture · ${views.length} views in a row`
               : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`,
-            madeOfLine(sent),
+            madeOfLine(wire),
             views.length > 1 ? 'split into the slots afterwards' : '',
           ]
             .filter(Boolean)
@@ -350,7 +387,7 @@ export function RenderStudio({
         kind='render'
         /* МОДАЛКА О ЧИПАХ НЕ ЗНАЕТ И НЕ ДОЛЖНА: ей отдаётся ТО ЖЕ предложение, что уедет на провод,
            одной строкой слов. Иначе «что получит модель» показывало бы не то, что получит модель. */
-        recipe={sent}
+        recipe={wire}
         cardFit={cardFit}
       />
     </>

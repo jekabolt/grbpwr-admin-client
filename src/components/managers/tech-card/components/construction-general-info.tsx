@@ -10,6 +10,7 @@ import Textarea from 'ui/components/text-area';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
 import { FIT_OPTIONS } from './design/render/model';
+import { upsertDetailText } from './form-writers';
 import { HeaderMetaFields } from './header-meta-fields';
 import { TechCardFormData } from './schema';
 
@@ -165,19 +166,11 @@ function DetailTextField({
   }>;
   const value = details.find((d) => d.key === detailKey)?.text ?? '';
 
-  const write = (text: string) => {
-    const cur = (getValues('details') ?? []) as typeof details;
-    const k = cur.findIndex((d) => d.key === detailKey);
-    const base = k >= 0 ? cur[k] : { key: detailKey, text: '', mediaIds: [] };
-    const merged = { key: detailKey, text, mediaIds: base.mediaIds ?? [] };
-    const empty = !text.trim() && merged.mediaIds.length === 0;
-    const next = empty
-      ? cur.filter((d) => d.key !== detailKey)
-      : k >= 0
-        ? [...cur.slice(0, k), merged, ...cur.slice(k + 1)]
-        : [...cur, merged];
-    setValue('details', next as never, { shouldDirty: true });
-  };
+  // ПИСАТЕЛЬ ОДИН НА ТРИ ПОВЕРХНОСТИ — `form-writers.ts`. Здесь стояла его первая копия (вторая
+  // жила в `details-editor.tsx`, третья родилась бы в черновике construction); правило строки
+  // («ни текста, ни картинок ⇒ строку снять») уехало туда дословно, вместе с чтением через
+  // `getValues`, а не через снимок рендера.
+  const write = (text: string) => upsertDetailText(getValues, setValue, detailKey, text);
 
   return (
     <div className='space-y-1' data-c19-field={detailKey}>

@@ -10,10 +10,9 @@ import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Toolbar } from 'ui/components/toolbar';
+import { upsertDetail, type FormDetail } from './form-writers';
 import { TechCardFormData } from './schema';
 import { detailAspects, detailKeyLabel } from './tech-card-options';
-
-type FormDetail = { key?: string; text?: string; mediaIds?: number[] };
 
 const STANDARD_KEYS = detailAspects.map((a) => a.key);
 
@@ -66,25 +65,12 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
 
   const detailByKey = (key: string) => details.find((d) => d.key === key);
 
-  // upsert the aspect's row by key; drop it when it has neither text nor images
-  const upsert = (key: string, patch: Partial<FormDetail>) => {
-    const cur = (getValues('details') ?? []) as FormDetail[];
-    const k = cur.findIndex((d) => d.key === key);
-    const base = k >= 0 ? cur[k] : { key, text: '', mediaIds: [] };
-    const merged: FormDetail = {
-      key,
-      text: base.text ?? '',
-      mediaIds: base.mediaIds ?? [],
-      ...patch,
-    };
-    const empty = !merged.text?.trim() && (merged.mediaIds?.length ?? 0) === 0;
-    const next = empty
-      ? cur.filter((d) => d.key !== key)
-      : k >= 0
-        ? [...cur.slice(0, k), merged, ...cur.slice(k + 1)]
-        : [...cur, merged];
-    setValue('details', next as never, { shouldDirty: true });
-  };
+  // upsert the aspect's row by key; drop it when it has neither text nor images.
+  // ТЕЛО УЕХАЛО В `form-writers.ts` — там же, где рождаются указания и строки BOM. Здесь была
+  // ВТОРАЯ копия одного правила (первая — поля общих сведений), и черновик construction завёл бы
+  // третью; расхождение таких копий видно только полной перезаписью на сохранении.
+  const upsert = (key: string, patch: Partial<FormDetail>) =>
+    upsertDetail(getValues, setValue, key, patch);
 
   const addImages = (key: string, picked: common_MediaFull[]) => {
     const ids = picked.map((m) => m.id).filter((x): x is number => x != null);

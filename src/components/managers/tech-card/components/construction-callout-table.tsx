@@ -11,8 +11,8 @@ import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
-import { newClientRequestId } from './design/use-design-band';
 import { machineTypeLabelWithStitch, stitchTypeNumber } from './equipment-options';
+import { bornCallout } from './form-writers';
 import { operationHeading, seamClassLabel } from './operation-options';
 import { TechCardFormData } from './schema';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
@@ -99,25 +99,13 @@ export function ConstructionCalloutTable({ frozen }: { frozen: boolean }) {
   // «+ add callout row» — an UNPINNED callout: it is about the garment, not about a picture, and
   // the sheet prints it with the pinned ones. Pin it later from ARTIFACTS. Born exactly like the
   // sketch-born ones (zero number + client ref = «mint me»), and dropped on save if left empty (K-3).
+  //
+  // КОНСТРУКТОР УЕХАЛ В `form-writers.ts` (`bornCallout`) — потому что у него появилось ВТОРОЕ
+  // место рождения: строка, принятая из черновика construction. Форма строки обязана быть одна,
+  // иначе поле, дописанное в схему, окажется у рукописной строки и не окажется у принятой.
   const addRow = () => {
     const cur = (getValues('callouts') ?? []) as FormCallout[];
-    const born: FormCallout = {
-      number: 0,
-      part: '',
-      parts: [],
-      description: '',
-      dimensions: '',
-      mediaId: 0,
-      posX: '',
-      posY: '',
-      kind: 'pin',
-      points: [],
-      color: '',
-      dashed: false,
-      filled: false,
-      clientRef: newClientRequestId(),
-    };
-    setValue('callouts', [...cur, born] as never, { shouldDirty: true });
+    setValue('callouts', [...cur, bornCallout()] as never, { shouldDirty: true });
   };
 
   // СНЯТЬ СТРОКУ. До круга 20 единственным путём было «стереть текст и сохранить» — правило K-3,

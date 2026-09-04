@@ -108,6 +108,20 @@ export type RasterLayer = {
    * (коробка меньше изменения) оставила бы после ⌘Z ободок — её здесь нет по построению.
    */
   bounds: Bounds | null;
+  /**
+   * НЕТРОНУТАЯ ПОДЛОЖКА — ТОЛЬКО У ЦВЕТОВОЙ КАРТЫ, и только ради ластика-возврата.
+   *
+   * В обычном редакторе её нет и быть не должно: там ластик кладёт БУМАГУ (J-33, «стирать просто
+   * белым цветом а не удалять фон»), потому что чистят фотографию. На карте цветов работа другая —
+   * человек залил деталь не тем цветом и хочет ВЕРНУТЬ чертёж, а не забелить его: белое пятно на
+   * месте линий стёрло бы стенку, вдоль которой заливка держится, и следующее ведро вылилось бы на
+   * весь лист. Поэтому третий режим кладёт сюда пиксели ОРИГИНАЛА через маску мазка.
+   *
+   * ⚠ ЭТО КОПИЯ ФЛЭТА, А НЕ КОПИЯ ДОКУМЕНТА. При доработке уже покрашенной карты документ
+   * заводится из ЕЁ png, а сюда всё равно ложится чистый флэт: иначе «вернуть» возвращало бы
+   * вчерашнюю краску, то есть не возвращало бы ничего.
+   */
+  base?: HTMLCanvasElement;
 };
 
 /** Расширить коробку жеста отпечатком радиуса `r` в точке. */
@@ -185,14 +199,33 @@ function blankRaster(box: RasterBox): RasterLayer {
  * испачканный чужим origin, не отдаёт ни `getImageData`, ни `toDataURL`, и растровый редактор без
  * чтения пикселей — не редактор.
  */
-export async function seedRaster(baseSrc: string, box: RasterBox): Promise<RasterLayer> {
+export async function seedRaster(
+  baseSrc: string,
+  box: RasterBox,
+  /**
+   * АДРЕС НЕТРОНУТОЙ ПОДЛОЖКИ для ластика-возврата (цветовая карта). Отдельным параметром, а не
+   * «взять копию `doc`»: документ карты заводится из ЕЁ png, и копия его была бы копией краски.
+   */
+  restoreFrom?: string,
+): Promise<RasterLayer> {
   const layer = blankRaster(box);
-  if (!baseSrc) return layer;
-  const dataUrl = await urlToDataUrl(baseSrc);
-  const img = new Image();
-  img.src = dataUrl;
-  await img.decode();
-  ctxOf(layer.doc).drawImage(img, 0, 0, box.w, box.h);
+  const draw = async (src: string, into: HTMLCanvasElement) => {
+    const dataUrl = await urlToDataUrl(src);
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    ctxOf(into).drawImage(img, 0, 0, box.w, box.h);
+  };
+  if (baseSrc) await draw(baseSrc, layer.doc);
+  if (restoreFrom) {
+    const base = make(box.w, box.h);
+    /* ТОТ ЖЕ АДРЕС — ТОТ ЖЕ ПИКСЕЛЬ: копия холста вместо второго похода через прокси. Это самый
+       частый путь (карту красят с нуля), и второе декодирование той же картинки стоило бы человеку
+       лишнего ожидания ровно там, где он ждёт открытия редактора. */
+    if (restoreFrom === baseSrc) ctxOf(base).drawImage(layer.doc, 0, 0);
+    else await draw(restoreFrom, base);
+    layer.base = base;
+  }
   return layer;
 }
 
@@ -458,7 +491,11 @@ export function selectionMask(
  * коммит читают ОДИН и тот же `stage`: иначе «что видно» и «что легло» разошлись бы ровно на
  * растушёвке, то есть ровно там, где человек и смотрит.
  */
-export function stageScratch(layer: RasterLayer, mask: HTMLCanvasElement | null): void {
+export function stageScratch(
+  layer: RasterLayer,
+  mask: HTMLCanvasElement | null,
+  mode: PaintMode = 'paint',
+): void {
   const ctx = ctxOf(layer.stage);
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, layer.w, layer.h);
@@ -468,9 +505,31 @@ export function stageScratch(layer: RasterLayer, mask: HTMLCanvasElement | null)
     ctx.drawImage(mask, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
   }
+  /**
+   * ⚠ ВОЗВРАТ ЖИВЁТ ЗДЕСЬ, А НЕ В `commitStage`, И ЭТО НЕСУЩЕЕ РЕШЕНИЕ.
+   *
+   * `stage` — единственное, что читают ОБА: живое превью (`renderView`) и укладка
+   * (`commitStage`). Собери маску возврата только на укладке — и под рукой рисовалась бы белая
+   * полоса, а ложился бы чертёж: «что видно, то и ляжет» держится ровно тем, что стадия одна.
+   *
+   * `source-in` оставляет пиксели ПОДЛОЖКИ там, где у мазка есть альфа, и ничего больше: ни
+   * второй арифметики края, ни отдельной кисти. Нет подложки — режим вырождается в обычную
+   * укладку тем, чем красили (бумагой), и это честнее, чем молча ничего не делать.
+   */
+  if (mode === 'restore' && layer.base) {
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.drawImage(layer.base, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
 }
 
-export type PaintMode = 'paint' | 'erase';
+/**
+ * ТРИ РЕЖИМА ПИКСЕЛЬНОГО ЖЕСТА. `paint` кладёт краску, `erase` кладёт БУМАГУ (J-33), `restore`
+ * возвращает НЕТРОНУТУЮ ПОДЛОЖКУ — ластик цветовой карты, у которого работа «верни чертёж», а не
+ * «забели». Композит у всех трёх один; различает их то, ЧЕМ заполнена стадия (см. `stageScratch`)
+ * и — у `erase` — резка линий на отпускании.
+ */
+export type PaintMode = 'paint' | 'erase' | 'restore';
 
 /**
  * ЛАСТИК КЛАДЁТ БУМАГУ, А НЕ ПРОГРЫЗАЕТ ДЫРКУ (круг 15, J-33).
@@ -491,6 +550,11 @@ export type PaintMode = 'paint' | 'erase';
  * ⚠ ШАХМАТКУ НЕ СНОСИМ. Слои, сохранённые ДО этого круга, несут прозрачные дырки, и она
  * по-прежнему единственный орган, которым их видно. У нового ластика альфа не падает нигде —
  * значит и шахматка под ним не появляется; это утверждение, а не совпадение, и его сторожит проба.
+ *
+ * ⚠ И ТРЕТИЙ РЕЖИМ (`restore`) ТОЖЕ НЕ ВЕТВИТСЯ ЗДЕСЬ — ОН УЖЕ ПОТРАЧЕН. Стадия к этому моменту
+ * заполнена пикселями нетронутой подложки (`stageScratch`), и класть её надо тем же композитом и
+ * той же альфой, что и краску. Разведи их — и превью показывало бы одно, а ложилось бы другое,
+ * ровно там, где вся эта пара функций и написана, чтобы этого не случалось.
  */
 export function commitStage(layer: RasterLayer, mode: PaintMode, opacity: number): void {
   const ctx = ctxOf(layer.doc);
@@ -693,4 +757,24 @@ export function renderView(
  */
 export function exportRasterPng(layer: RasterLayer): string {
   return layer.doc.toDataURL('image/png');
+}
+
+/**
+ * ВТОРОЙ ШОВ НАРУЖУ — КАРТА ЦВЕТОВ, И У НЕЁ ЗЕМЛЯ БЕЛАЯ.
+ *
+ * Довод обратен документу и тот же, что у флэттена: карта — это КАРТИНКА, которую увидит модель, и
+ * дырка на ней должна читаться как бумага, а не как «что окажется под ней завтра». Прозрачный
+ * пиксель на входе платного прогона — это цвет, которого никто не выбирал, и он попал бы в кадр
+ * ровно там, где человек стирал.
+ *
+ * ⚠ И ЭТО НЕ ФЛЭТТЕН: штрихи сюда не рисуются вовсе. Карта обязана совпадать с тем чертежом,
+ * который видит модель в слоте, а слоты уезжают чистыми.
+ */
+export function exportColourMapPng(layer: RasterLayer): string {
+  const out = make(layer.w, layer.h);
+  const ctx = ctxOf(out);
+  ctx.fillStyle = PAPER_INK;
+  ctx.fillRect(0, 0, layer.w, layer.h);
+  ctx.drawImage(layer.doc, 0, 0);
+  return out.toDataURL('image/png');
 }

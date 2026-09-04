@@ -471,11 +471,16 @@ function RenderBody({
                 .map(
                   (f) =>
                     /* ⚠ «→ the whole garment» БОЛЬШЕ НЕ УТВЕРЖДАЕТСЯ. Части выводились из
-                       меток на флэтах; экрана меток нет с J-21, `fabricUses` шлёт `parts`
-                       пустым ВСЕГДА, и левая ветка мертва. Печатать «каждая ткань кроет всё
-                       изделие» там, где провод говорит «разделение за вами», — это панель,
-                       противоречащая телу запроса, на котором стоит цена. */
-                    `${(f.name ?? '').trim() || 'cloth'}${(f.parts ?? '').trim() ? ` → ${(f.parts ?? '').trim()}` : ''}`,
+                       меток на флэтах; экрана меток нет с J-21, и печатать «каждая ткань кроет
+                       всё изделие» там, где провод говорит «разделение за вами», — это панель,
+                       противоречащая телу запроса, на котором стоит цена.
+                       ⚠ У ПОЛЯ СНОВА ЕСТЬ АВТОР, И ИХ ДВА РАЗНЫХ (фича A). `map_hex` — МЕТКА НА
+                       КАРТЕ, то есть размещение картинкой; `parts` — человечьи слова про ту же
+                       деталь. Строка печатает то, что уедет, и в том же порядке, в каком это
+                       печатает сервер: сначала слова, потом краска. */
+                    `${(f.name ?? '').trim() || 'cloth'}${
+                      (f.parts ?? '').trim() ? ` → ${(f.parts ?? '').trim()}` : ''
+                    }${(f.mapHex ?? '').trim() ? ` → painted ${(f.mapHex ?? '').trim()}` : ''}`,
                 )
                 .join(' · ')}
               {cloths.length > 1 ? (
@@ -484,6 +489,33 @@ function RenderBody({
                   — <b>each travels as its own image</b>, and the prompt carries the list
                 </>
               ) : null}
+            </Text>
+          </div>
+        )}
+        {/* ═══ КАРТЫ ЦВЕТОВ — ОТДЕЛЬНОЙ СТРОКОЙ ОПИСИ, ПОТОМУ ЧТО ЭТО ОТДЕЛЬНЫЕ КАРТИНКИ ═════
+            Опись обязана называть ВСЁ, что уезжает. Карта едет в РЕЦЕПТЕ, а не среди референсов,
+            и подпись у неё своя («colour map of the front flat — those colours label which cloth
+            covers which part»); прочитанная под общей подписью референса, она была бы чертежом
+            вещи в неправдоподобных цветах. Строка рисуется только когда карты есть: пустая
+            говорила бы про прогон то, чего в нём нет. */}
+        {(recipe?.colourMaps ?? []).length > 0 && (
+          <div
+            data-sent-colour-maps={(recipe?.colourMaps ?? []).length}
+            className='flex items-start gap-2 border-b border-hairline py-1'
+          >
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='w-[92px] shrink-0 uppercase'
+            >
+              colour maps
+            </Text>
+            <Text size='micro' component='span' className='min-w-0 flex-1'>
+              {(recipe?.colourMaps ?? [])
+                .map((m) => `${viewLabel((m.view ?? '').trim())} · media ${m.mediaId ?? 0}`)
+                .join(' · ')}{' '}
+              — <b>each travels as its own image</b>, and the prompt says which flat it labels
             </Text>
           </div>
         )}
@@ -1071,7 +1103,20 @@ function plainText({
       // входов, в котором этой строки нет, там просто неверен.
       `cloths: ${
         (recipe?.fabrics ?? [])
-          .map((f) => (f.name ?? '').trim() || 'cloth')
+          .map(
+            (f) =>
+              // ⚠ МЕТКА ПЕЧАТАЕТСЯ И ЗДЕСЬ. Текст уезжает в буфер и живёт дальше без экрана; список
+              // тканей без сказанного «на какой детали» читался бы там как прогон, у которого
+              // разделение отдано модели, — а купленный промпт говорит обратное.
+              `${(f.name ?? '').trim() || 'cloth'}${
+                (f.mapHex ?? '').trim() ? ` (painted ${(f.mapHex ?? '').trim()})` : ''
+              }`,
+          )
+          .join(', ') || '—'
+      }`,
+      `colour maps: ${
+        (recipe?.colourMaps ?? [])
+          .map((m) => `${viewLabel((m.view ?? '').trim())} media ${m.mediaId ?? 0}`)
           .join(', ') || '—'
       }`,
       `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,

@@ -22,7 +22,7 @@ import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
 import { serverSpeaksDesign } from './capability';
-import { CONCEPT_MAX, MoodDraft } from './head/mood-draft';
+import { ConstructionDraft } from './head/construction-draft';
 import { VectorModal } from './modals';
 import { useMoodCallouts } from './mood-callouts';
 import { TILE_CORNER } from './picture-tile';
@@ -54,6 +54,18 @@ import { useDesignBand } from './use-design-band';
  * (Г1/R7): сколько указаний умрёт вместе с плиткой — они не живут больше нигде. Молчащий ✕ уже
  * стоил звонка «а куда делись мои пометки на мудборде».
  */
+
+/**
+ * Потолок поля `concept` — ЕДИНСТВЕННОЕ НАПИСАНИЕ ЭТОГО ЧИСЛА В ПОЛОСЕ, и живёт оно у редактора
+ * поля: `maxLength` textarea ниже, проверка `takeLegacyNote` рядом с ней и черновик construction
+ * (которому число передаётся пропом) читают ОДНУ константу. Два разных потолка на одно поле — это
+ * способ молча потерять хвост описания на том из них, который меньше.
+ *
+ * Раньше число стояло в `head/mood-draft.tsx`, а редактор поля — здесь: файл, где поля нет, владел
+ * его пределом. `MoodDraft` снесён вместе с прозаическим черновиком (фича 9), и предел вернулся к
+ * своему полю.
+ */
+export const CONCEPT_MAX = 2000;
 
 export const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
 
@@ -914,13 +926,17 @@ export function MoodBoard({
           </CalloutBox>
         )}
 
-        {/* ЧЕРНОВИК ИДЕИ — `moodDraftHtml` прототипа, который зовёт его ПОСЛЕДНИМ внутри доски
-            (`proto.html:3271`), поэтому и здесь он стоит внизу этой же секции.
+        {/* ЧЕРНОВИК CONSTRUCTION — `moodDraftHtml` прототипа, который зовёт его ПОСЛЕДНИМ внутри
+            доски (`proto.html:3271`), поэтому и здесь он стоит внизу этой же секции.
             Здесь стоял черновик, собиравшийся В БРАУЗЕРЕ: он склеивал общую записку с текстами
             указаний и называл это «read the board». Слова были честные, но органом прототипа это
-            не было — тот просит прозу у модели. Бэкенд отдаёт `DraftDesignIdea`, и теперь зовётся
-            он. */}
-        <MoodDraft techCardId={techCardId} disabled={readOnly} />
+            не было — тот просит прозу у модели. Потом стоял `MoodDraft`: прогон уже был платный и
+            многомодальный, но ответ приходил ПРОЗОЙ и садился в одно поле — `concept`.
+            Теперь стоит `ConstructionDraft` (фича 9, слово владельца: «вместо кнопки DRAFT THE
+            IDEA мы генерируем ВЕСЬ construction info»): тот же один прогон, но ответ структурный и
+            раскладывается предложением на четыре группы, которые CONSTRUCTION рисует ниже. Ни одна
+            строка не попадает в форму сама — см. подпись органа. */}
+        <ConstructionDraft techCardId={techCardId} disabled={readOnly} conceptMax={CONCEPT_MAX} />
       </div>
 
       <ConfirmationModal

@@ -83,6 +83,17 @@ export function GenerateRow({
    * и тот же на всех пяти рядах.
    */
   trailing,
+  /**
+   * ПОДПИСЬ ДВЕРИ. Умолчание — `GENERATE`, и оно остаётся у всех пяти картиночных рядов.
+   *
+   * ⚠ ЩЕЛЬ ЗАВЕДЕНА, ЧТОБЫ НЕ ЗАВЁЛСЯ ШЕСТОЙ РЯД. Черновик construction (фича 9) — это ТОТ ЖЕ
+   * платный прогон с той же метрикой и той же логикой ожидания, но человек нажимает на нём не
+   * «сгенерируй картинку», а «прочитай доску»: `draft the construction ▸`. Форкнуть ради одного
+   * слова весь ряд значило бы вернуть ровно то состояние, которое этот файл и свёл — пять рядов,
+   * совпадающих ПО СОВПАДЕНИЮ. Подпись ожидания (`starting…`) общая нарочно: она про машину, а
+   * не про экран.
+   */
+  label = 'GENERATE',
 }: {
   gate: Gate;
   shape?: string;
@@ -91,6 +102,7 @@ export function GenerateRow({
   onGenerate: () => void;
   onInspect?: () => void;
   trailing?: ReactNode;
+  label?: string;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
 
@@ -115,13 +127,13 @@ export function GenerateRow({
           курсором. Флэт-генерация, которую владелец назвал образцом, всегда делала иначе: коробка
           остаётся, меняется слово. Здесь теперь то же самое. */}
       {frozen ? (
-        <InertDoor label='GENERATE' reason={frozen} size='sm' />
+        <InertDoor label={label} reason={frozen} size='sm' />
       ) : gate.ok ? (
         <Button variant='main' size='sm' onClick={onGenerate} disabled={pending}>
-          {pending ? 'starting…' : 'GENERATE'}
+          {pending ? 'starting…' : label}
         </Button>
       ) : (
-        <InertDoor label='GENERATE' reason={gate.reason} size='sm' />
+        <InertDoor label={label} reason={gate.reason} size='sm' />
       )}
 
       {/* ═══ СТАНДАРТНЫЙ ХВОСТ — ТОЛЬКО ТОМУ, КТО НАЗВАЛ `shape` ══════════════════════════════

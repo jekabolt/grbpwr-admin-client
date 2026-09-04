@@ -24,7 +24,10 @@ import {
 } from '../assets/model';
 import { ColourPicker } from '../assets/colour-picker';
 import { useAssetWrites } from '../assets/use-assets';
+import { PartsRow } from '../colour-plan/parts-row';
+import type { ColourPlanWrites } from '../colour-plan/use-colour-plan';
 import { PictureTile } from '../picture-tile';
+import { benchSides } from './model';
 import { ClothIsRow } from './cloth-is';
 import type { ColourDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
@@ -155,12 +158,30 @@ function TextureGrid({
   state,
   disabled,
   onMakePattern,
+  armed,
+  onAssign,
+  assignedTo,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   state: ColourDraft;
   disabled?: boolean;
   onMakePattern?: () => void;
+  /**
+   * ═══ СЕТКА ВЗВЕДЕНА ПОКРАШЕННЫМ ЦВЕТОМ (фича A) ══════════════════════════════════════════════
+   *
+   * Пусто — сетка работает ровно как работала: тычок в плитку добавляет ткань в прогон и снимает
+   * её. Непустой hex — тот же тычок НАЗНАЧАЕТ ткань этому цвету карты.
+   *
+   * ⚠ ОДНА СЕТКА НА ДВА ЖЕСТА, А НЕ ДВЕ СЕТКИ. Вторая решётка, выбирающая то же самое из той же
+   * полки, была бы ложным расщеплением: у неё не оказалось бы ни двери `+ texture`, ни
+   * `make a pattern`, ни потолка активов, ни удаления с карточки — и первое же расхождение человек
+   * встретил бы вопросом «а почему тут нельзя завести ткань».
+   */
+  armed?: string;
+  onAssign?: (assetId: number) => void;
+  /** Какие покрашенные цвета носит эта ткань — ярлык плитки под покраской. */
+  assignedTo?: Map<number, string[]>;
 }): JSX.Element {
   const writes = useAssetWrites(techCardId);
   const { showMessage } = useSnackBarStore();
@@ -215,6 +236,14 @@ function TextureGrid({
    */
   const pick = (id: number) => {
     if (id <= 0) return;
+    /* ⚠ ВЗВЕДЁННЫЙ ЦВЕТ ПЕРЕХВАТЫВАЕТ ТЫЧОК ЦЕЛИКОМ, а не «ещё и добавляет ткань в прогон».
+       Под покраской список тканей СОБИРАЕТСЯ ИЗ ПЛАНА (`planFabrics`), и добавленная сюда чипом
+       ткань уехала бы без метки — то есть как «ещё одна ткань неизвестно на чём», ровно рядом с
+       размеченными. Один жест — одно последствие. */
+    if (armed && onAssign) {
+      onAssign(id);
+      return;
+    }
     const ids = chosen.map((f) => f.assetId ?? 0).filter((v) => v > 0);
     const next = ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id];
     state.echo({ from: 'cloths', fabrics: next.length ? fabricUses(band, next) : [] });
@@ -228,7 +257,12 @@ function TextureGrid({
           const name = assetLabel(a);
           const url = assetThumb(a);
           const n = ordinalOf(id);
-          const on = n > 0;
+          /* ⚠ ПОД ПОКРАСКОЙ «ВЫБРАНА» ЗНАЧИТ «НЕСЁТ ХОТЯ БЫ ОДИН ПОКРАШЕННЫЙ ЦВЕТ». Порядковый
+             номер прогона там ничего не описывает: список тканей собирается из палитры, а не из
+             очерёдности тычков, и нарисованная «1» на плитке была бы номером, которого никто не
+             назначал. */
+          const serves = assignedTo?.get(id) ?? [];
+          const on = armed !== undefined && assignedTo ? serves.length > 0 : n > 0;
           const pattern = assetIsPattern(a);
           return (
             <div key={id} className='flex min-w-0 flex-col gap-1' data-texture={id}>
@@ -250,7 +284,25 @@ function TextureGrid({
                    а не оформление. Порядок, который нельзя увидеть, нельзя и исправить: человек
                    снял бы не ту ткань, чтобы поменять их местами. Номер — тот же носитель («есть
                    ярлык / нет ярлыка»), только говорящий вторую половину. */
-                badge={on ? String(n) : undefined}
+                badge={
+                  serves.length > 0 ? (
+                    /* ПЛИТКА ГОВОРИТ, КАКИЕ ПОКРАШЕННЫЕ ЦВЕТА ОНА НОСИТ, — ОБРАЗЦАМИ, а не
+                       числом: числу «2» на этой сетке уже назначен другой смысл (порядок в
+                       прогоне), и одно место с двумя значениями — это ведро под двумя смыслами. */
+                    <span className='flex items-center gap-0.5'>
+                      {serves.map((hex) => (
+                        <span
+                          key={hex}
+                          data-texture-serves={hex}
+                          className='block h-2 w-2 border border-textColor'
+                          style={{ background: hex }}
+                        />
+                      ))}
+                    </span>
+                  ) : on ? (
+                    String(n)
+                  ) : undefined
+                }
                 /* ПОВЕРХНОСТЬ ВЫБИРАЕТ — ЖЕСТОМ МЫШИ. Объявленный орган — чип ниже; довод целиком
                    в шапке файла. */
                 onOpen={disabled ? undefined : () => pick(id)}
@@ -283,9 +335,13 @@ function TextureGrid({
                 disabled={disabled}
                 data-texture-pick={id}
                 title={
-                  on
-                    ? `cloth ${n} of this run — press again to drop it. ${name} stays on the card`
-                    : `add ${name} to this run as cloth ${chosen.length + 1}`
+                  armed
+                    ? `make ${name} the cloth of the parts painted ${armed}`
+                    : serves.length > 0
+                      ? `${name} is the cloth of ${serves.join(', ')} on the colour map — change it on that row below`
+                      : on
+                        ? `cloth ${n} of this run — press again to drop it. ${name} stays on the card`
+                        : `add ${name} to this run as cloth ${chosen.length + 1}`
                 }
                 onClick={() => pick(id)}
               >
@@ -552,6 +608,7 @@ export function Palette({
   disabled,
   /** Supplied by `RenderStudio`, so the palette and the studio's gate read one draft. */
   draft,
+  colourPlan,
   band,
   techCardId,
   onMakePattern,
@@ -565,6 +622,14 @@ export function Palette({
    * Состояние подаёт студия; ворота и палитра обязаны читать ОДИН черновик.
    */
   draft: ColourDraft;
+  /**
+   * ⚠ ПЛАН ПОДАЁТСЯ СВЕРХУ ПО ТОМУ ЖЕ ДОВОДУ, ЧТО И ЧЕРНОВИК, И ЭТО НЕ СИММЕТРИЯ РАДИ КРАСОТЫ.
+   * `useColourPlan` держит ЭХО последней записи — ревизию, которую полоса ещё не догнала. Позови
+   * его здесь вторым разом, и у экрана оказалось бы ДВА документа с разными ревизиями: ворота
+   * студии считали бы по вчерашнему, а эта ведомость сохраняла бы под сегодняшним — то есть
+   * первый же CAS отказал бы сам себе.
+   */
+  colourPlan: ColourPlanWrites;
   /** Полка ткани теперь ЗАПИСЫВАЕТСЯ здесь (E-7), и записи адресуются карточкой. */
   techCardId: number;
   /** K-16: уход на вкладку PATTERN со второй двери. Не задан — двери нет вовсе. */
@@ -579,6 +644,29 @@ export function Palette({
   const willSay = statedWords(state);
   const clothAbove = stated.photo;
   const colourAbove = !stated.photo && stated.colour;
+
+  /* ═══ ЦВЕТОВОЙ ПЛАН (фича A). `plan === undefined` — сервер про него не говорит вовсе, и тогда
+     на экране нет ни двери, ни ряда: клиент новее сервера отправил бы прогон, у которого protojson
+     молча выбросил бы карты и метки, — то есть купил бы картинку по вопросу, которого никто не
+     задавал. Та же доктрина, что у `has_fabric_render`. */
+  const plan = colourPlan;
+  /** Взведённый покрашенный цвет. Читают двое — ведомость и сетка, — поэтому хранится ОДИН раз. */
+  const [armed, setArmed] = useState('');
+  /** Вид, который сейчас красят. Дверей две (кнопка заголовка и плитка вида), переменная одна. */
+  const [painting, setPainting] = useState('');
+
+  /** Какие покрашенные цвета носит каждая ткань — ярлык плиток и подсказки сетки. */
+  const assignedTo = useMemo(() => {
+    const by = new Map<number, string[]>();
+    for (const c of plan.plan?.cloths ?? []) {
+      if (c.assetId <= 0) continue;
+      by.set(c.assetId, [...(by.get(c.assetId) ?? []), c.hex]);
+    }
+    return by;
+  }, [plan.plan]);
+
+  const painted = (plan.plan?.maps.length ?? 0) > 0;
+  const firstSide = useMemo(() => benchSides(band).find((s) => !!s.picture)?.view ?? '', [band]);
 
   return (
     <div>
@@ -601,7 +689,29 @@ export function Palette({
           по-настоящему — палец над GENERATE, — его говорят сами ворота: «pick a cloth, pick a
           colour, say what the cloth is, or describe it in words above. Any one of them is enough,
           and they may be combined». */}
-      <GroupLabel flush>texture &amp; colour</GroupLabel>
+      {/* ⚠ ОДНА КНОПКА НА ВСЮ ФИЧУ, И СТОИТ ОНА В СЛОТЕ ДЕЙСТВИЯ ЗАГОЛОВКА — там, где до круга 19
+          жила снятая оговорка группы. Больше дверей покраски на этом экране НЕТ: у каждого вида
+          есть своя `paint` на плитке ниже, но она появляется только когда ряд уже есть. Дверь
+          гаснет вместе с планом: сервер, не знающий глагола, обязан быть назван словами, а не
+          показан живой кнопкой, которая молча ничего не сделает. */}
+      <GroupLabel
+        flush
+        action={
+          !disabled && plan.plan && firstSide && !painted ? (
+            <Button
+              variant='secondary'
+              size='xs'
+              data-paint-parts=''
+              onClick={() => setPainting(firstSide)}
+              title='flood the drawing part by part in flat colours; each colour then picks its own cloth below'
+            >
+              paint the parts ▸
+            </Button>
+          ) : undefined
+        }
+      >
+        texture &amp; colour
+      </GroupLabel>
 
       {/* ═══ ТЕКСТУРА И ЦВЕТ — ОДНОЙ СТРОКОЙ (D-8) ═══════════════════════════════════════════
           Владелец, дословно: «GENERATION — FABRIC RENDER TEXTURE и COLOUR пусть будут в одной
@@ -624,6 +734,39 @@ export function Palette({
               state={state}
               disabled={disabled}
               onMakePattern={onMakePattern}
+              /* ⚠ СЕТКА ПЕРЕХОДИТ НА ЯЗЫК ПОКРАСКИ ТОЛЬКО КОГДА КАРТЫ ЕСТЬ, и это не осторожность.
+                 `assignedTo` заданный, но пустой, переопределяет ВЫБРАННОСТЬ плиток на «носит ли
+                 она покрашенный цвет» — то есть на карточке с пустым планом обесцветил бы каждый
+                 выбранный чип, ничего не сказав. Пустой план — это «не красили», и сетка обязана
+                 в нём работать ровно как вчера. */
+              armed={painted ? armed : undefined}
+              assignedTo={painted ? assignedTo : undefined}
+              onAssign={(assetId) => {
+                const doc = plan.plan;
+                if (!doc || !armed) return;
+                const prev = doc.cloths.find((c) => c.hex === armed);
+                /* ПОВТОРНЫЙ ТЫЧОК В ТУ ЖЕ ПЛИТКУ СНИМАЕТ ТКАНЬ — тот же жест, что у чипов полосы,
+                   и единственный способ передумать, не выбирая «никакую» из списка, которого нет. */
+                const next = prev?.assetId === assetId ? 0 : assetId;
+                void plan.save({
+                  maps: doc.maps,
+                  cloths: [
+                    ...doc.cloths.filter((c) => c.hex !== armed),
+                    ...(next > 0 || prev?.colourHex || prev?.words
+                      ? [
+                          {
+                            hex: armed,
+                            assetId: next,
+                            colourHex: prev?.colourHex ?? '',
+                            words: prev?.words ?? '',
+                            parts: prev?.parts ?? '',
+                          },
+                        ]
+                      : []),
+                  ],
+                });
+                setArmed('');
+              }}
             />
           </div>
           <ColourTile band={band} state={state} disabled={disabled} />
@@ -641,6 +784,25 @@ export function Palette({
             не потеряна и держится тем же, чем держалась: ОБЕ читают `clothWordsRank`. Проба
             сверяет `data-words-rank` экрана с `data-fabric-authority` модалки. */}
       </FieldRow>
+
+      {/* ═══ PARTS — ПОКРАШЕННЫЕ ЦВЕТА И ТКАНЬ КАЖДОГО (фича A) ══════════════════════════════
+          Стоит ПОД сеткой, потому что читается сверху вниз как работа: вот полка тканей → вот
+          виды, которые я покрасил → вот что каждый цвет значит. И ряд рисуется только когда
+          сервер про план говорит: иначе экран предлагал бы разметку, которую провод молча
+          выбросит. */}
+      {plan.plan && (painted || painting) && (
+        <PartsRow
+          band={band}
+          techCardId={techCardId}
+          plan={plan.plan}
+          writes={plan}
+          armed={armed}
+          onArm={setArmed}
+          painting={painting}
+          onPaint={setPainting}
+          disabled={disabled}
+        />
+      )}
 
       {/* ── WHAT THE CLOTH IS — H-13. Свойство ТОЙ ЖЕ ткани, что в сетке, и уезжает в то же поле
           провода, что слова ниже. ⚠ РЯД ЗНАЕТ ПРО ФОТОГРАФИЮ (E-2): именно у него стоит теперь

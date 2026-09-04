@@ -60,7 +60,6 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { flattenFieldErrors } from 'utils/field-errors';
-import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
 import { BomWastageSuggestion, laysProvenancePhrase } from './bom-wastage-suggestion';
 import {
@@ -90,42 +89,17 @@ import {
   roleCollision,
   roleSuggestions,
 } from './bom-roles';
+import { bornBomLine, emptyBomItem } from './form-writers';
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { bomUnitKind, markersForLine } from './nesting/marker-io';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
-// A new catalog article — meta + price only. Colour, placement and consumption are chosen
-// per colourway on the colorways tab.
-const emptyBomItem = {
-  section: 'TECH_CARD_BOM_SECTION_FABRIC',
-  // НАЗНАЧЕНИЕ (0265): unset until someone answers for it. The add flow asks on every roll-goods
-  // line, so a new fabric never actually reaches the grid unsorted — but the default has to be the
-  // honest one, because this template is also what a non-roll-goods line is built from.
-  purpose: UNSET_PURPOSE,
-  purposeNote: '',
-  // ЧТО ЭТО ЗА ПОЗИЦИЯ (0278): same honest default on the other axis — unset until answered.
-  kind: UNSET_KIND,
-  kindNote: '',
-  isSample: false,
-  name: '',
-  supplier: '',
-  supplierRef: '',
-  color: '',
-  composition: '',
-  spec: '',
-  unit: '',
-  unitPrice: '',
-  currency: '',
-  comment: '',
-  fabricWidth: '',
-  fabricWeightGsm: '',
-  fabricDirection: 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
-  wastagePercent: '',
-  materialId: 0,
-  id: 0,
-  lineKey: '', // minted on append (see BomField) so downstream refs are stable from creation
-};
+// БОЛВАНКА НОВОЙ СТРОКИ ПЕРЕЕХАЛА В `form-writers.ts` (`emptyBomItem` + `bornBomLine`), И ЭТО
+// ПЕРЕНОС, А НЕ ВТОРОЙ АДРЕС. У строки BOM появилось второе место рождения — принятое
+// предложение черновика construction, — а BOM пишется upsert'ом полной заменой по `line_key`:
+// ключ, который есть в одной болванке и забыт в другой, уезжает на сервер zod-дефолтом, то есть
+// командой «очисти это». Здесь остался только вызов; `section` ниже по-прежнему читает её же.
 
 // Fabric width/weight read from the typed CTI attrs, falling back to the legacy flat fields —
 // shared by the link-time snapshot, the linked-line catalog plate AND the length→kg weight basis
@@ -1695,8 +1669,9 @@ export function BomField({
     const m = addMaterial;
     const materialId = wireInt(m?.id);
     if (!m || !materialId || !roleAnswered || !addPurposeAnswered) return;
-    append({
-      ...emptyBomItem,
+    // `bornBomLine` — тот же конструктор, которым рождается строка, принятая из черновика
+    // construction. `lineKey` он минтит САМ и вызывающему не отдаёт (довод — у него же).
+    append(bornBomLine({
       ...materialLineFields(m),
       // Роль СПРАШИВАЕТСЯ ТОЛЬКО ТАМ, ГДЕ НАЗНАЧЕНИЕ НЕ ОТВЕЧАЕТ.
       //
@@ -1717,8 +1692,7 @@ export function BomField({
       kind: addKindEligible ? addKind : UNSET_KIND,
       isSample: addSample,
       materialId,
-      lineKey: ulid(),
-    });
+    }) as never);
     warnNoPrice(m);
     setAddMaterial(undefined);
     setAdding(false);
