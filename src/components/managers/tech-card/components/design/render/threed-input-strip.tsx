@@ -26,6 +26,7 @@ import { LockBar } from './generate-row';
 import {
   outputsOfKind,
   pictureIsComposite,
+  pictureOffersSplit,
   pictureThumb,
   slotOrigin,
   slotOriginLine,
@@ -434,13 +435,17 @@ export function ThreedInputStrip({
         noun='render'
       />
     ) : (
-      /* Куски без стороны силуэта — детали: применить их некуда, и дверь говорит это словом,
-         а не молчит на нажатие (тот же разбор, что у `set` в `render/outputs.tsx`). */
-      <InertDoor
-        className={INERT_DOOR}
-        label='apply splitted'
-        reason='nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in'
-      />
+      /* ═══ КУСКИ БЕЗ СТОРОНЫ СИЛУЭТА — ДВЕРИ НЕТ ВОВСЕ (F-11a) ══════════════════════════════
+         Здесь стояла ПОГАШЕННАЯ `apply splitted` с причиной «в этом разрезе не названа ни одна
+         сторона». Довод был честный — «дверь говорит словом, а не молчит на нажатие», — но он
+         решал задачу, которой на этом экране нет: полоса флэтов, тот же глагол и тот же разрез,
+         в этом же случае не рисует НИЧЕГО (`render-input-strip.tsx`, `: null`). Два написания
+         одного состояния — и владелец видит погашенную дверь на одной полосе и чистую ячейку на
+         соседней, про один и тот же лист.
+         Владелец (F-14), дословно: «нет лишнего текста ничего не перекосоебано». Выбрано
+         молчание: разрез из одних деталей — это не отказ органа, а отсутствие повода его звать;
+         сам факт «сторон тут не названо» уже написан под кадром строкой видов. */
+      null
     );
 
     return (
@@ -484,9 +489,13 @@ export function ThreedInputStrip({
         onZoom={() => foldOnForeignZoom(id)}
         onEdit={editCorner(deck.sheet)}
         /* Угол `split` — только у неразрезанного склеенного листа (F-8): у разрезанного глагол уже
-           другой, `expand ▸`, и два глагола на одном кадре читаются как один сломанный. */
+           другой, `expand ▸`, и два глагола на одном кадре читаются как один сломанный.
+           ⚠ ОБА ЧЛЕНА — У `pictureOffersSplit` (`render/model.ts`), одного на все четыре экрана:
+           правило, переписанное на месте, теряет член молча (так плитка референса и предъявляла
+           угол любому снимку). `composite` рядом остаётся — он тут ещё и ПОДПИСЫВАЕТ ячейку
+           («multi-view» против «sheet»), а это другой вопрос, чем «предлагать ли рез». */
         onSplit={
-          canWrite && composite && !cut
+          canWrite && pictureOffersSplit(deck.sheet, cut)
             ? {
                 onClick: () => split.openForPicture(deck.sheet, `sheet ${id}`),
                 ariaLabel: `split the multi-view render ${id} into views`,
@@ -571,12 +580,25 @@ export function ThreedInputStrip({
                       style={PLACEHOLDER_SURFACE}
                       title={`no render stands in ${label}. Put one in from the right of the line, or on FABRIC RENDER.`}
                     >
-                      <span className='flex flex-col gap-0.5 text-labelColor'>
+                      {/* ⚠ ЭТО БЫЛ ГОЛЫЙ `<span>` — ЕДИНСТВЕННАЯ ЗАГЛУШКА ПОЛОСЫ МИМО `Text`.
+                          Соседняя пустая ячейка (`EmptyStripCell`, `render/strip-cell.tsx`) пишет
+                          имя стороны через `Text micro/label/tracking-label` капслоком; здесь имя
+                          той же стороны шло базовым размером и без разрядки, то есть КРУПНЕЕ и
+                          иначе, чем ровно та же подпись двумя ячейками левее. Слово `empty` —
+                          `textColor`: это ответ, а не подпись, и `Text` держит его тон вложенным
+                          span'ом, как и раньше. */}
+                      <Text
+                        size='micro'
+                        variant='label'
+                        tracking='label'
+                        component='span'
+                        className='flex flex-col gap-0.5 uppercase'
+                      >
                         <span>{label}</span>
                         <span className='text-textColor'>
                           <b>empty</b>
                         </span>
-                      </span>
+                      </Text>
                     </div>
                   )}
 
@@ -593,7 +615,14 @@ export function ThreedInputStrip({
                     </Text>
                   )}
                   {canWrite && (
-                    <Text size='nano' variant='label' component='span'>
+                    /* `min-w-0 break-words` — как у двух соседей выше: ячейка узкая (132px), и
+                       строка без них не даёт колонке сжаться, а раздвигает её собой. */
+                    <Text
+                      size='nano'
+                      variant='label'
+                      component='span'
+                      className='min-w-0 break-words'
+                    >
                       ⌘V · drop · browse
                     </Text>
                   )}
@@ -756,9 +785,18 @@ export function ThreedInputStrip({
         })()}
 
       {/* ⚠ ПУСТОЙ ВЕРСТАК (`next: 'render'`) ПОЛОСУ НЕ РИСУЕТ — довод в шапке (F-12). Остальные
-          отказы говорят то, чего по ячейкам не прочесть, и остаются со своими дверями. */}
+          отказы говорят то, чего по ячейкам не прочесть, и остаются со своими дверями.
+
+          ⚠ ЭТО ПОДАВЛЕНИЕ СТАНОВИТСЯ ПОДТЯЖКАМИ ПОВЕРХ РЕМНЯ. Соседняя волна снимает заголовок
+          `what is missing` из самой `LockBar` (`render/generate-row.tsx`) — то есть ту часть
+          полосы, ради которой её здесь и глушили целиком (F-12: владелец про лишний заголовок).
+          Когда правка `LockBar` подтвердится НА БЕТЕ ЖИВЫМ ЭКРАНОМ, эту ветку `!== 'render'`
+          можно снять, и пустой верстак получит свою дверь наравне с остальными отказами.
+          СНИМАТЬ РАНЬШЕ ПОДТВЕРЖДЕНИЯ НЕЛЬЗЯ: цена ошибки несимметрична — лишнее подавление
+          прячет одну дверь, снятое рано возвращает владельцу ровно тот заголовок, который он
+          просил убрать, и возвращает его на самом частом состоянии карточки. */}
       {lock && !lock.ok && lock.next !== 'render' && (
-        <LockBar reason={lock.reason}>
+        <LockBar>
           {/* ═══ ДВЕРЬ ОТВЕЧАЕТ ИМЕННО ЭТОМУ ОТКАЗУ (J-26) ══════════════════════════════════════
               Отказов у 3D два, и сервер их различает поимённо: `no_fabric_render` («на верстаке
               нет ничего») и `no_front_render` («есть, но не спереди»). Следующий жест у них
@@ -771,53 +809,54 @@ export function ThreedInputStrip({
                   бесплатен: переложить одну сторону. Пара дверей рисуется РОВНО в одном случае —
                   у карточки нет ни одного рендера вовсе, и тогда путь и правда может начинаться
                   с чертежа. */}
+              {/* ═══ ДВЕРЬ ПОЛОСЫ — ТА ЖЕ КНОПКА, ЧТО И ВСЯ ОСТАЛЬНАЯ ПОЛОСА (пункт 14) ══════════
+                  Владелец: «сделай полировку импекабл что бы все было ровно все кнопки ровные».
+
+                  Здесь стояли сырые подчёркнутые `<button>` с `Text micro` внутри — единственные
+                  органы полосы, написанные мимо примитива: без рамки, без отбивок, со своим
+                  фокусным кольцом и без `uppercase`/`tracking-label`. Дверь говорила тем же
+                  глаголом, что `split ▸` и `expand ▸` двумя сотнями строк выше, а выглядела
+                  ссылкой — один глагол двумя почерками на одном экране.
+
+                  ⚠ `w-full` СЮДА НЕ ПЕРЕЕХАЛ, И ЭТО НЕ НЕДОДЕЛКА. У соседей по полосе он стоит
+                  потому, что там родитель — СТОЛБЕЦ ЯЧЕЙКИ фиксированной ширины, и дверь по слову
+                  читалась бы в нём второй вещью. Здесь родитель другой — РЯД `LockBar`
+                  (`flex flex-wrap items-center gap-2`, `render/generate-row.tsx`), и `w-full` дал
+                  бы каждой двери основу во всю ширину, то есть поставил бы их СТОЛБИКОМ, по одной
+                  на строку. Ровность тут даёт МЕТРИКА, а не ширина: `secondary` + `xs` — рамка,
+                  `px-1.5 py-px`, `text-micro`, капс с `tracking-label`, — высота и отбивки у всех
+                  четырёх одни и те же, а `items-center` ряда ставит их на одну линию.
+
+                  ПОДПИСИ ОСТАЛИСЬ СТРОЧНЫМИ В ИСХОДНИКЕ — как `split ▸`, `expand ▸`, `fold ▾` и
+                  все прочие: капс вешает `size='xs'`. Написать их заглавными в тексте значило бы
+                  завести второе написание того же правила, и разойдётся оно в первый же раз,
+                  когда метрика сменится. */}
               {lock.next === 'front-slot' && (
-                <button
-                  type='button'
-                  onClick={() => onGoToKind('render')}
-                  className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  <Text size='micro' variant='label' component='span'>
-                    put a render into FRONT ▸
-                  </Text>
-                </button>
+                <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+                  put a render into FRONT ▸
+                </Button>
               )}
               {lock.next === 'refill' && (
-                <button
-                  type='button'
-                  onClick={() => onGoToKind('render')}
-                  className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  <Text size='micro' variant='label' component='span'>
-                    re-fill the odd sides on FABRIC RENDER ▸
-                  </Text>
-                </button>
+                <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+                  re-fill the odd sides on FABRIC RENDER ▸
+                </Button>
               )}
               {lock.next === 'flat' && (
-                <button
-                  type='button'
-                  onClick={() => onGoToKind('flat')}
-                  className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  <Text size='micro' variant='label' component='span'>
-                    generate a flat ▸
-                  </Text>
-                </button>
+                <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+                  generate a flat ▸
+                </Button>
               )}
               {(lock.next === 'flat' || !lock.next) && (
-                <button
-                  type='button'
-                  onClick={() => onGoToKind('render')}
-                  className='cursor-pointer underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  <Text size='micro' variant='label' component='span'>
-                    generate a render ▸
-                  </Text>
-                </button>
+                <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+                  generate a render ▸
+                </Button>
               )}
             </>
           ) : (
+            /* `INERT_DOOR` — как у всех прочих неживых дверей полосы: без него `InertDoor` встаёт
+               `inline-flex` по слову и оказывается единственным органом ряда шириной по тексту. */
             <InertDoor
+              className={INERT_DOOR}
               label='generate a render ▸'
               reason='the way out is the strip of representations above — FLAT draws the missing side, FABRIC RENDER colours it and puts it into a slot, and 3D turns what stands there'
             />

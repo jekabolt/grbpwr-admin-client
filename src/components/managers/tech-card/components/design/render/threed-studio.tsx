@@ -9,7 +9,7 @@ import { ViewSwitch } from 'ui/components/view-switch';
 
 import { useCardFit, useThreedDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
-import { GenerateRow, LockBar } from './generate-row';
+import { GenerateRow } from './generate-row';
 import {
   PRESENTATIONS,
   fitChoices,
@@ -76,27 +76,34 @@ export function ThreedStudio({
    * hand this in the doors become inert WITH THEIR REASON rather than vanishing.
    */
   onGoToKind,
+  colorwayId = 0,
+  colorwayLabel = '',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   onGoToKind?: (kind: 'flat' | 'render') => void;
-}): JSX.Element {
   /**
-   * ═══ СКОУП СБОРКИ — ПОСТОЯННЫЙ НОЛЬ ПОСЛЕ E-16 ═══════════════════════════════════════════
+   * ═══ СКОУП СБОРКИ — ЧИСЛО СВЕРХУ, А НЕ КОНСТАНТА (J-27 → E-16 → круг 19, C1) ══════════════
    *
-   * До J-27 колорвей выбирали ЗДЕСЬ; владелец пикер снял, и осталось чтение общего состояния
-   * студии. Кругом 16 он снял и само состояние («в GENERATION — FABRIC RENDER мы полностью
-   * убираем колорвеи»), поэтому проп `colorway` ушёл вместе с ним.
+   * ТРИ СОСТОЯНИЯ У ОДНОЙ СТРОКИ, И ТРЕТЬЕ ЧИТАЕТСЯ ТОЛЬКО ВМЕСТЕ С ПЕРВЫМИ ДВУМЯ:
+   *   · до J-27 колорвей выбирали ЗДЕСЬ — свой пикер на экране 3D; владелец его снял;
+   *   · круг 16 снял и само общее состояние («в GENERATION — FABRIC RENDER мы полностью убираем
+   *     колорвеи»), и проп ушёл: значение стало ЖЁСТКИМ НУЛЁМ — правильно и ровно потому, что
+   *     FABRIC RENDER писал тогда ТОЛЬКО безымянный верстак. Читай 3D что-нибудь другое — и вход
+   *     показывал бы «0 of 4» над карточкой с четырьмя готовыми рендерами;
+   *   · круг 19 вернул ВЫБОР — один на всю студию, в ряду представлений. Писатель верстака снова
+   *     умеет писать именованный, значит и читатель обязан читать названный, а не ноль.
    *
-   * ⚠ ЭТО ЗНАЧЕНИЕ НЕСУЩЕЕ, И ИМЕННО ПОЭТОМУ ОНО НОЛЬ. Оно адресует верстак, который прочитает
-   * сервер (`designSelectBench`) и по членству в котором откроется дверь (`no_fabric_render`).
-   * FABRIC RENDER теперь пишет ТОЛЬКО безколорвейный верстак — значит читать здесь любой другой
-   * значило бы показывать пустой вход над карточкой с готовыми рендерами и отправлять прогон,
-   * собранный из пустоты. Одно число на обе половины, потому что выбора больше нет вовсе.
+   * ⚠ ЗНАЧЕНИЕ НЕСУЩЕЕ, И ДОВОД ТОТ ЖЕ, ЧТО БЫЛ. Оно адресует верстак, который прочитает СЕРВЕР
+   * (`designSelectBench`) и по членству в котором откроется ДВЕРЬ (`no_fabric_render`). Одно число
+   * на обе половины — но теперь потому, что оно ОДНО НА СТУДИЮ, а не потому, что выбора нет.
+   * Своего пикера здесь не заводится: J-27 не отменён, орган остаётся один и живёт наверху.
    */
-  const colorwayId = 0;
-  const colorwayName = '';
+  colorwayId?: number;
+  /** Имя выбранного; `''` под `no colourway` — отказ двери говорит это словами, а не пустотой. */
+  colorwayLabel?: string;
+}): JSX.Element {
   const { draft, patch } = useThreedDraft();
   const cardFit = useCardFit();
   const { dictionary } = useDictionary();
@@ -118,8 +125,8 @@ export function ThreedStudio({
    * полосой картинок — это указание не на тот орган.
    */
   const input: Gate = useMemo(
-    () => threedGate(band, colorwayId, colorwayName),
-    [band, colorwayId, colorwayName],
+    () => threedGate(band, colorwayId, colorwayLabel),
+    [band, colorwayId, colorwayLabel],
   );
 
   const gate: Gate = useMemo(() => {
@@ -245,7 +252,7 @@ export function ThreedStudio({
         lock={input}
         onGoToKind={onGoToKind}
         colorwayId={colorwayId}
-        colorwayLabel={colorwayName}
+        colorwayLabel={colorwayLabel}
       />
 
       <Section
@@ -277,11 +284,27 @@ export function ThreedStudio({
             ⚠ И МОЛЧАНИЯ ИЗ ЭТОГО НЕ ВЫШЛО. Прогон стоит $1.20, и экран, не называющий, ИЗ ЧЕГО
             он собирается, продавал бы сборку вслепую. Название верстака осталось там, где стоит
             сам верстак, — в вопросе полосы входа над этой секцией («the render bench of ROSSO»).
-            Это УТВЕРЖДЕНИЕ о том, что уедет, а не поле выбора; сменить колорвей по-прежнему можно
-            на FABRIC RENDER, где меняются и сами слоты. */}
-        {/* ТОЛЬКО ПРИЧИНЫ МЕНЮ: то, чего не хватает на входе, уже названо под входной полосой, и
-            повторять это здесь значило бы показать один отказ дважды. */}
-        {input.ok && !gate.ok && <LockBar reason={gate.reason} />}
+            Это УТВЕРЖДЕНИЕ о том, что уедет, а не поле выбора; сменить колорвей можно ОДНИМ
+            органом на всю студию — селектом в правом конце ряда представлений (круг 19, C1).
+            Прежняя редакция звала за этим на FABRIC RENDER; там его больше нет, и адрес был бы
+            ложным. */}
+        {/* ═══ ПОЛОСА ПРИЧИН МЕНЮ СНЯТА, И СНЯТА КАК МЁРТВЫЙ ОРГАН, А НЕ КАК СВЕДЕНИЯ ═══════════
+            Здесь стояло `{input.ok && !gate.ok && <LockBar reason={gate.reason} />}`. Полоса звалась
+            БЕЗ ДВЕРЕЙ, а `LockBar` без детей возвращает `null` (`./generate-row`): выражение не
+            рисовало НИЧЕГО ни в одном состоянии экрана с того круга, когда владелец попросил снять
+            заголовок «what is missing» и прозу под ним. Оставить его значило бы держать на экране
+            орган-обманку — тот, к которому следующий автор подвесит строку и пойдёт искать её глазами.
+
+            ⚠ И ЭТО НЕ ПОТЕРЯ СВЕДЕНИЙ — ПОТОМУ ЧТО ТЕРЯТЬ БЫЛО НЕЧЕГО. `LockBar` повод не читала уже
+            до этой правки: поля не было в деструктуризации, оно принималось и выбрасывалось. Тот же
+            `gate.reason` держит инертная дверь `GENERATE` ряда генерации В ЭТОЙ ЖЕ СЕКЦИИ
+            (`<GenerateRow gate={gate} …>` ниже → `InertDoor … reason={gate.reason}`) — и держит его
+            как `title` и `data-inert`, то есть по наведению и для пробы, а не строкой на экране.
+            Экран от снятия зова не меняется НИ ОДНИМ ПИКСЕЛЕМ; отказ остаётся при том органе, к
+            которому человек и тянется, когда ворота закрыты.
+
+            А то, чего не хватает на ВХОДЕ, по-прежнему говорит своя полоса под входом
+            (`ThreedInputStrip lock={input}`) — и говорит РЯДОМ ДВЕРЕЙ, а не второй копией слова. */}
 
         <FieldRow label='presentation'>
           {/* A SEGMENTED STRIP, NOT A SELECT. Both options are on screen at all times, so the strip
@@ -393,7 +416,7 @@ export function ThreedStudio({
         kind='threed'
         disabled={disabled}
         colorwayId={colorwayId}
-        colorwayLabel={colorwayName}
+        colorwayLabel={colorwayLabel}
       />
 
       <WhatModelGetsRenderModal
@@ -406,7 +429,7 @@ export function ThreedStudio({
         models={models}
         sizeName={sizeName}
         colorwayId={colorwayId}
-        colorwayLabel={colorwayName}
+        colorwayLabel={colorwayLabel}
       />
     </>
   );

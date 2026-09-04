@@ -96,10 +96,32 @@ import { COLOUR_NAME_MAX, fabricStatement, hexIsPaintable, statedWords } from '.
  *
  * ПРОВОД НЕ ИЗМЕНИЛСЯ НИ ОДНИМ ПОЛЕМ. `params.colour = {fabrics, fabricMediaId, code, hex, words,
  * source}` собирается там же, где собирался (`render-studio.tsx`), из того же черновика, теми же
- * дверями (`draft.typed` / `draft.echo({from:'cloths'})`), и `fabrics` по-прежнему длины 0 или 1.
+ * дверями (`draft.typed` / `draft.echo({from:'cloths'})`).
  *
- * ⚠ ПЛИТКА РИСУЕТ ТО, ЧТО УЕДЕТ, А НЕ СВОЙ ВЫБОР. Выбранная читается из `draft.recipe.fabrics[0]`
- * — того самого объекта, который читают ворота, строка денег и модалка «what the model gets».
+ * ═══ ПОТОЛОК «ОДНА ТКАНЬ НА ПРОГОН» СНЯТ (круг 19, C2) ═══════════════════════════════════════
+ *
+ * ⚠ ОН БЫЛ ТОЛЬКО ЗДЕСЬ, И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО. `common.DesignColourRecipe.fabrics` —
+ * `repeated` с первого дня; воркер прикладывает ПО КАРТИНКЕ НА ТКАНЬ при двух и более
+ * (`snapshot.go`, `len(statedCloths) >= 2`), промпт печатает список тканей и клаузу «made of two
+ * different cloths» (`renderprompt.go`), опись «what the model gets» перечисляет их из того же
+ * поля, а строка денег склеивает их через ` + `. Единственным местом, где N сжималось в 1, была
+ * эта сетка: `chosenId = fabrics[0].assetId` и `pick(id)`, заменявший список целиком.
+ *
+ * ЧТО ИЗ ЭТОГО СЛЕДУЕТ ДЛЯ ЭКРАНА:
+ *   · выбор — МНОЖЕСТВО (`chosen`), нажатие — ПЕРЕКЛЮЧАТЕЛЬ, а не замена;
+ *   · ПОРЯДОК ВЫБОРА — ЗНАЧЕНИЕ, А НЕ ОФОРМЛЕНИЕ. Промпт зовёт первую CLOTH 1, и скаляры цвета
+ *     (`code`/`hex`) говорят про НЕЁ (`renderprompt.go`). Значит порядок обязан быть ВИДЕН —
+ *     отсюда порядковый номер в углу кадра; переизбрание CLOTH 1 снимает её, и CLOTH 2 становится
+ *     первой у всех на глазах;
+ *   · `fabric_media_id` по-прежнему ПЕРВАЯ ФОТОГРАФИЯ СПИСКА (`echoOf`, ветка `cloths`) — правило
+ *     не менялось, просто раньше список не бывал длиннее одной;
+ *   · `parts` («какая ткань на какой детали») с этого экрана НЕ ПИШЕТСЯ и не будет: его авторит
+ *     цветовая карта фичи A. Две ткани без `parts` — ЗАКОННОЕ состояние, и промпт говорит про него
+ *     дословно: «the division is yours to make. Use every cloth on this list, and change cloth only
+ *     on a seam, a panel edge or a finished edge the drawings actually show».
+ *
+ * ⚠ ПЛИТКА РИСУЕТ ТО, ЧТО УЕДЕТ, А НЕ СВОЙ ВЫБОР. Выбранные читаются из `draft.recipe.fabrics` —
+ * того самого объекта, который читают ворота, строка денег и модалка «what the model gets».
  * Экран, у которого выбор хранится отдельно от посылки, однажды покажет одно, а купит другое.
  */
 
@@ -152,7 +174,15 @@ function TextureGrid({
     return [...all.filter(assetIsPattern), ...all.filter((a) => !assetIsPattern(a))];
   }, [band]);
 
-  const chosenId = (state.recipe.fabrics ?? [])[0]?.assetId ?? 0;
+  /**
+   * ПОРЯДОК ВЫБРАННЫХ — ЭТО САМ СПИСОК `fabrics`, а не отдельное состояние рядом с ним. Второе
+   * хранилище порядка разошлось бы с посылкой при первом же восстановлении рецепта из истории или
+   * засеве колорвеем: экран показывал бы «1, 2», а уезжало бы «2, 1» — и скаляры цвета говорили бы
+   * про другую ткань, чем та, что помечена первой.
+   */
+  const chosen = state.recipe.fabrics ?? [];
+  /** Порядковый номер ткани в прогоне, 1-based; `0` — «в этом прогоне её нет». */
+  const ordinalOf = (id: number) => chosen.findIndex((f) => (f.assetId ?? 0) === id) + 1;
 
   /**
    * ПОТОЛОК СЧИТАЕТСЯ ПО ВСЕЙ КАРТОЧКЕ — ОН ЗЕРКАЛО СЕРВЕРНОГО: `UpsertDesignAsset` отвергает
@@ -170,9 +200,25 @@ function TextureGrid({
         ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, and every one of them is hardware from the removed ASSETS shelves — nothing on this screen can free a place, so this card cannot take a texture`
         : `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets: ${shelf.length} in this grid and ${unmanaged.length} hardware from the removed ASSETS shelves, which no screen can remove any more — free a place by removing a texture here`;
 
-  /** Выбрать или снять. `0` — «этот прогон ткани не заявляет»; полка при этом не тронута. */
-  const pick = (id: number) =>
-    state.echo({ from: 'cloths', fabrics: id > 0 ? fabricUses(band, [id]) : [] });
+  /**
+   * ПЕРЕКЛЮЧАТЕЛЬ, А НЕ ЗАМЕНА (круг 19, C2). Раньше здесь стояло `fabrics: [эта одна]`, и потолок
+   * «одна ткань на прогон» держался ровно этой строкой — на проводе его нет ни в одном поле.
+   *
+   * ДОБАВЛЕННАЯ ВСТАЁТ В КОНЕЦ, СНЯТАЯ ПРОСТО УХОДИТ, ОСТАЛЬНЫЕ НЕ ДВИГАЮТСЯ. Это и есть «порядок
+   * выбора»: первая названная — CLOTH 1, про которую говорят скаляры цвета в промпте. Снятие
+   * CLOTH 1 поднимает CLOTH 2 на её место — видимо, номерами в углах кадров, а не молча.
+   *
+   * ⚠ СПИСОК ПЕРЕСОБИРАЕТСЯ `fabricUses` ЦЕЛИКОМ, А НЕ СШИВАЕТСЯ ИЗ СТАРЫХ КОПИЙ. Замороженная
+   * копия в черновике могла быть снята с полки до переименования или перекраски ассета; ткань,
+   * попавшая в прогон под старым именем, — это промпт, ссылающийся на слово, которого на экране
+   * уже нет. Один сборщик на весь список держит их всех одного возраста.
+   */
+  const pick = (id: number) => {
+    if (id <= 0) return;
+    const ids = chosen.map((f) => f.assetId ?? 0).filter((v) => v > 0);
+    const next = ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id];
+    state.echo({ from: 'cloths', fabrics: next.length ? fabricUses(band, next) : [] });
+  };
 
   return (
     <>
@@ -181,7 +227,8 @@ function TextureGrid({
           const id = a.id ?? 0;
           const name = assetLabel(a);
           const url = assetThumb(a);
-          const on = id === chosenId;
+          const n = ordinalOf(id);
+          const on = n > 0;
           const pattern = assetIsPattern(a);
           return (
             <div key={id} className='flex min-w-0 flex-col gap-1' data-texture={id}>
@@ -195,11 +242,18 @@ function TextureGrid({
                 selected={on}
                 className='w-full bg-bgColor'
                 /* ⚠ ЯРЛЫК — ТРЕТИЙ НОСИТЕЛЬ СОСТОЯНИЯ, а не украшение: заливка чипа и толщина
-                   рамки — оба зрительные, и на миниатюре набивки рамка читается плохо. */
-                badge={on ? 'in this run' : undefined}
+                   рамки — оба зрительные, и на миниатюре набивки рамка читается плохо.
+                   ⚠ И ТЕПЕРЬ ОН НЕСЁТ ЕЩЁ ОДИН ФАКТ — ПОРЯДКОВЫЙ НОМЕР. Здесь стояло слово
+                   «in this run», и при одной ткани оно говорило ВСЁ, что было правдой. При
+                   нескольких (круг 19, C2) правды стало больше: промпт зовёт первую CLOTH 1 и
+                   скаляры цвета относит К НЕЙ (`renderprompt.go`), то есть порядок — это ДЕНЬГИ,
+                   а не оформление. Порядок, который нельзя увидеть, нельзя и исправить: человек
+                   снял бы не ту ткань, чтобы поменять их местами. Номер — тот же носитель («есть
+                   ярлык / нет ярлыка»), только говорящий вторую половину. */
+                badge={on ? String(n) : undefined}
                 /* ПОВЕРХНОСТЬ ВЫБИРАЕТ — ЖЕСТОМ МЫШИ. Объявленный орган — чип ниже; довод целиком
                    в шапке файла. */
-                onOpen={disabled ? undefined : () => pick(on ? 0 : id)}
+                onOpen={disabled ? undefined : () => pick(id)}
                 gallery={
                   url
                     ? { src: assetFull(a) || url, thumbnail: url, type: 'image', alt: name }
@@ -230,10 +284,10 @@ function TextureGrid({
                 data-texture-pick={id}
                 title={
                   on
-                    ? `press again — this run then states no texture. ${name} stays on the card`
-                    : `this run is rendered in ${name}`
+                    ? `cloth ${n} of this run — press again to drop it. ${name} stays on the card`
+                    : `add ${name} to this run as cloth ${chosen.length + 1}`
                 }
-                onClick={() => pick(on ? 0 : id)}
+                onClick={() => pick(id)}
               >
                 <span className='block max-w-full truncate'>{name}</span>
               </Chip>
@@ -334,9 +388,10 @@ function TextureGrid({
               там же и уводит туда же (её `title` называет и что оттуда вернётся);
             · «прогон без текстуры законен» — единственный факт абзаца, которого не видно из
               кнопок, и он сказан на этом же экране ТРИЖДЫ помимо него: вопросом секции («the
-              cloth: a texture, a colour, or both»), оговоркой этой группы («a texture, a colour,
-              or both — one texture per run») и рядом CLOTH IS, который на пустой полке прямо
-              говорит «No texture picture rides on this run, so these words govern the cloth».
+              cloth: a texture, a colour, or both») и рядом CLOTH IS, который на пустой полке
+              прямо говорит «No texture picture rides on this run, so these words govern the
+              cloth». (Третьим носителем была оговорка этой группы; круг 19 снял её вместе с
+              потолком «одна текстура на прогон», который она объявляла.)
               А в момент, когда это знание нужно по-настоящему — палец над GENERATE, — его говорят
               сами ворота: `recipeIsStated` отказывает словами «pick a cloth, pick a colour, say
               what the cloth is, or describe it in words above. Any one of them is enough».
@@ -536,16 +591,17 @@ export function Palette({
           пропов и лишние молча выбрасывает — атрибут не доехал бы до DOM, а проба на нём была бы
           ВАКУУМНО ЗЕЛЁНОЙ. Заголовок группы проверяется текстом; коробку объявляет ряд ниже
           (`data-fabric-pair`) и сама секция (`id='design-fabric-menu'`). */}
-      <GroupLabel
-        flush
-        action={
-          <Text size='micro' variant='label' component='span' className='normal-case'>
-            a texture, a colour, or both — one texture per run
-          </Text>
-        }
-      >
-        texture &amp; colour
-      </GroupLabel>
+      {/* ═══ ОГОВОРКА ГРУППЫ СНЯТА ВМЕСТЕ С ПОТОЛКОМ, КОТОРЫЙ ОНА ОБЪЯВЛЯЛА (круг 19, C2) ══════
+          Здесь стояло «a texture, a colour, or both — one texture per run». Вторая половина
+          («one texture per run») перестала быть правдой в тот же коммит, которым сетка научилась
+          выбирать N, — и оставить её значило бы напечатать на экране запрет, которого нет.
+          ПЕРВАЯ ПОЛОВИНА СНЯТА ВМЕСТЕ С НЕЙ, А НЕ ОСТАВЛЕНА ОБРЕЗКОМ: «a texture, a colour, or
+          both» — ДОСЛОВНО вопрос секции строкой выше («the cloth: a texture, a colour, or both»),
+          то есть повтор в двух сантиметрах от оригинала. А в момент, когда это знание нужно
+          по-настоящему — палец над GENERATE, — его говорят сами ворота: «pick a cloth, pick a
+          colour, say what the cloth is, or describe it in words above. Any one of them is enough,
+          and they may be combined». */}
+      <GroupLabel flush>texture &amp; colour</GroupLabel>
 
       {/* ═══ ТЕКСТУРА И ЦВЕТ — ОДНОЙ СТРОКОЙ (D-8) ═══════════════════════════════════════════
           Владелец, дословно: «GENERATION — FABRIC RENDER TEXTURE и COLOUR пусть будут в одной

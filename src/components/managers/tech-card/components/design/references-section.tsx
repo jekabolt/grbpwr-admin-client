@@ -32,9 +32,11 @@ import {
   useFlatSlotsSend,
   useFlatSlotsSendWrites,
 } from './flat-slots-send';
+import { cropFamilies } from './generation/composite';
 import { RecalledRunPrompt } from './history-recall';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
+import { pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
 import { DETAIL_VIEW, normaliseViewKey } from './views';
 import { useDesignWrites } from './use-design-band';
@@ -181,6 +183,57 @@ export function ReferencesSection({
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
   }, [libraryMap, picked, band.batches, band.runs]);
+
+  /**
+   * ═══ ПРЕДЛАГАТЬ ЛИ РЕЗ НА ЭТОЙ СТРОКЕ ВХОДА (F-8, F-18) ══════════════════════════════════════
+   *
+   * Владелец, дословно: «везде где картинка не мультивью флет или рендер там не должно на ховер
+   * показываться сплит» и «на уже заспличеных картинках на ховер сплит писать не нужно».
+   *
+   * ⚠ ЭТА ПЛИТКА БЫЛА ЕДИНСТВЕННЫМ МЕСТОМ, ГДЕ УГОЛ НЕ СВЕРЯЛСЯ НИ С ОДНИМ ИЗ ДВУХ УСЛОВИЙ.
+   * Ворота стояли `!readOnly && url` — то есть «файл есть и карточка пишется», — и потому `split`
+   * предъявлялся ЛЮБОМУ снимку, принесённому в референсы руками: одиночной фотографии ткани,
+   * куску чужого разреза, уже разрезанному листу. Правило при этом было записано прозой в
+   * `picture-tile.tsx` и переписано на трёх других экранах; здесь его просто не переписали.
+   * Носитель правила теперь один — `pictureOffersSplit` (`render/model.ts`), и эта карта готовит
+   * ему ровно два факта, которых у строки входа нет на руках.
+   *
+   * СТРОКА ВХОДА — ЭТО `media_id`, А ПРЕДИКАТ СПРАШИВАЕТ ПРО `DesignPicture`. Разрешение идёт по
+   * тому же обходу, что и `mediaById` выше (прогоны и партии полосы), и результат — ТРОИЧНЫЙ по
+   * смыслу, хотя и хранится булевым: медиа, за которым чертежа полосы нет вовсе, в карту не
+   * попадает, и `?? false` у места вызова означает «разрешить не удалось — угла нет». Так велит
+   * сама роль: угол это тихий орган, и предъявлять его на догадке нельзя.
+   *
+   * `alreadyCut` — транзитивно, через `cropFamilies`: внук листа делает лист резаным ровно так же,
+   * как прямой кусок (та же карта, что рисует колоды на полосах). Скрытые чертежи из пула НЕ
+   * выкидываются намеренно: вопрос здесь «резали ли уже», а не «видно ли результат», и спрятанный
+   * кусок — доказательство реза не хуже видимого.
+   *
+   * КОЛЛИЗИЯ РАЗРЕШАЕТСЯ В ПОЛЬЗУ НОВЕЙШЕЙ СТРОКИ. Один файл может стоять за двумя чертежами
+   * (пере-регистрация загрузки заводит НОВУЮ строку с пустым `composite_views`), и говорить про
+   * кадр надо той строкой, которую карточка показывает сейчас.
+   */
+  const splitOffered = useMemo(() => {
+    const pool: common_DesignPicture[] = [];
+    for (const run of band.runs ?? []) pool.push(...(run.pictures ?? []));
+    for (const batch of band.batches ?? []) pool.push(...(batch.pictures ?? []));
+
+    const families = cropFamilies(pool);
+    const newestOf = new Map<number, common_DesignPicture>();
+    for (const picture of pool) {
+      const mediaId = picture.media?.id ?? 0;
+      if (mediaId <= 0 || (picture.id ?? 0) <= 0) continue;
+      const seen = newestOf.get(mediaId);
+      if (!seen || (picture.id ?? 0) > (seen.id ?? 0)) newestOf.set(mediaId, picture);
+    }
+
+    const offers = new Map<number, boolean>();
+    for (const [mediaId, picture] of newestOf) {
+      const cut = (families.membersOf.get(picture.id ?? 0) ?? []).length > 0;
+      offers.set(mediaId, pictureOffersSplit(picture, cut));
+    }
+    return offers;
+  }, [band.runs, band.batches]);
 
   // Запись состава карточки — ПО КОРНЮ массива, как и на доске: два экземпляра поля-массива на одно
   // имя не синхронизируются, а мудборд смонтирован рядом и правит вторую половину того же списка.
@@ -667,6 +720,8 @@ export function ReferencesSection({
                 const full = mediaById.get(mediaId);
                 if (full) split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
               }}
+              /* Разрешить не удалось — угла нет: разбор у самой карты (`splitOffered`). */
+              offersSplit={splitOffered.get(mediaId) ?? false}
               /* ═══ КРОП ЭТОЙ ЖЕ СТРОКИ (J-8) ═════════════════════════════════════════════════
                  Та же дверь режет, что и `split`, и потому стоит с ним в одном кластере (закон
                  углов, `picture-tile.tsx`); разный у них ИСХОД: сплит рождает несколько картинок
@@ -1214,6 +1269,7 @@ function ReferenceCell({
   onNote,
   onRemove,
   onSplit,
+  offersSplit,
   onCrop,
   splitPending,
 }: {
@@ -1233,6 +1289,12 @@ function ReferenceCell({
   onNote: (note: string) => void;
   onRemove: () => void;
   onSplit: () => void;
+  /**
+   * ОБЪЯВЛЯТЬ ЛИ РОЛЬ `split` ВООБЩЕ. Считает вызывающий (`splitOffered`), потому что ответ живёт
+   * в полосе, а не в строке входа: ячейка держит `media_id`, а правило спрашивает про чертёж —
+   * «мультивью ли он и не резан ли уже» (`pictureOffersSplit`, `render/model.ts`).
+   */
+  offersSplit: boolean;
   /** Кроп этой же картинки на месте (J-8) — см. вызывающего. */
   onCrop: () => void;
   splitPending: boolean;
@@ -1289,8 +1351,15 @@ function ReferenceCell({
               { ...mediaFullToViewerItem(full), thumbnail: url, alt: label }
             : undefined
         }
+        /* ═══ РЕЗ ПРЕДЛАГАЕТСЯ ТОЛЬКО СКЛЕЕННОМУ И ЕЩЁ НЕ РЕЗАНОМУ КАДРУ (F-8, F-18) ═══════════
+           Здесь стояло `!readOnly && url` — «файл есть и карточка пишется», — и это были ЕДИНСТВЕННЫЕ
+           ворота угла на всём экране: ни «мультивью ли», ни «не резан ли». Владелец, дословно:
+           «везде где картинка не мультивью флет или рендер там не должно на ховер показываться
+           сплит». Оба факта считает секция и передаёт одним словом; правило — `pictureOffersSplit`.
+           `onCrop` рядом НЕ трогается: кроп режет один кадр из любого снимка, и его условие —
+           другое условие, а не копия этого. */
         onSplit={
-          !readOnly && url
+          !readOnly && url && offersSplit
             ? {
                 onClick: onSplit,
                 pending: splitPending,

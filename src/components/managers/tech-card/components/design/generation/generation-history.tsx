@@ -1558,18 +1558,13 @@ export function GenerationHistory({
       question='— nothing is deleted; archive folds a whole generation away'
       collapsible
       defaultOpen={defaultOpen}
-      /* ⚠ ЖИВОЙ ПРОГОН ПЕРЕЖИВАЕТ СВЁРТКУ, И ЭТО ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ ИЗ F-2 — РАДИ ДЕНЕГ.
-         Свёрнутая лента показывает только имя и стрелку (F-2), но прогон, который идёт прямо
-         сейчас, назван и там: невидимый прогон — это второй платёж, потому что человек нажмёт
-         GENERATE ещё раз. Счётчик прогонов и серая клауза свёртку НЕ переживают: они отвечают на
-         вопрос, который в свёрнутом виде не задают. */
-      collapsedNote={
-        liveRun ? (
-          <Text size='micro' component='span' className='uppercase tracking-label text-warning'>
-            {runHandle(liveRun.id)} now
-          </Text>
-        ) : null
-      }
+      /* ⚠ СВЁРНУТАЯ ЛЕНТА НЕ НЕСЁТ НИЧЕГО, КРОМЕ ИМЕНИ И СТРЕЛКИ.
+         Здесь стоял `collapsedNote` с маркером идущего прогона (`run N now`) — исключение «ради
+         денег» из F-2. Владелец, круг 19, дословно: «в свернутом варианте GENERATION HISTORY
+         должен быть только текст GENERATION HISTORY и стрелочка и все». Проп снесён и в самом
+         примитиве (`ui/components/section.tsx`), разбор — там. Живой прогон остаётся названным в
+         развёрнутом `action` ниже, в строке живого прогона студии и в подписи кнопки старта
+         (`starting…`). */
       action={
         <div className='flex flex-wrap items-baseline gap-2'>
           {liveRun && (

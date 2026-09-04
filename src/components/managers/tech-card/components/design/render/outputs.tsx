@@ -34,6 +34,7 @@ import {
   outputsHorizon,
   outputsOfKind,
   pictureIsComposite,
+  pictureOffersSplit,
   serverStatesOutputs,
   pictureIsSelected,
   pictureThumb,
@@ -513,13 +514,55 @@ export function OutputsSection({
    *
    * ⚠ ОТКАЗ ОДНОЙ СТОРОНЫ НЕ ОСТАНАВЛИВАЕТ ОСТАЛЬНЫЕ: батча у глагола верстака нет, стороны
    * независимы, и брошенный цикл оставляет БОЛЬШЕ несогласованного, а не меньше.
+   *
+   * ═══ АДРЕСУЕТСЯ ВЕРСТАК СЕКЦИИ, А НЕ ВЕРСТАК ЛИСТА (F-7, круг 19) ═════════════════════════
+   *
+   * Здесь стояло `colorwayOf(sheet)` — колорвей ЛИСТА, — а блок, который человек в этот момент
+   * видит, смонтирован колорвеем СЕКЦИИ (`FabricRenderSlots colorwayId={colorwayId}` в
+   * `render-studio.tsx`). Пока два числа совпадают, разницы нет; расходятся они не гипотетически:
+   * на сервере БЕЗ поля `outputs` список сужается колорвеем ПРОГОНА, а `colorwayOf(sheet)` читает
+   * колорвей КАРТИНКИ, и загруженная плита с `run_colorway_id: 0` и собственным колорвеем ROSSO
+   * проходит фильтр безымянной секции (разбор — у `outputsOfKind`, `render/model.ts`). Тогда `set`
+   * писал В ВЕРСТАК, КОТОРОГО НА ЭКРАНЕ НЕТ: слоты ниже не менялись, кнопка отрабатывала молча и
+   * «успешно», а стороны заполнялись у другого цвета. Молчаливая запись не в тот верстак — худший
+   * из исходов, потому что она не оставляет следа даже в виде отказа.
+   *
+   * ПОДПИСЬ ДВЕРИ И ЕСТЬ ДОВОД: «the render input becomes exactly this split» — «the render input»
+   * это блок ПОД ЭТОЙ СЕКЦИЕЙ, и обещание двери обязано указывать на него. `markInto` рядом
+   * адресует верстак ПЛИТЫ, и это не разнобой: там жест называет одну плиту («поставь ВОТ ЭТУ»),
+   * а сервер сверяет колорвей плиты с колорвеем слота (`colorway_mismatch`).
+   *
+   * ДВА ОТКАЗА ВМЕСТО ЗАПИСИ, ОБА СЛОВАМИ (`refusal`), И НИ ОДИН НЕ МОЛЧИТ:
+   *   · секция не сужена колорвеем вовсе (`colorwayId === undefined`) — верстака, в который
+   *     «надо», не существует как факта, и выбрать его за человека нельзя;
+   *   · лист принадлежит ДРУГОМУ колорвею — сервер отверг бы каждую сторону по
+   *     `colorway_mismatch`, а до починки мы бы вместо этого тихо заполнили чужой верстак.
    */
-  const setStepsFor = (rootId: number) => {
+  const setStepsFor = (
+    rootId: number,
+  ): { bench: number; steps: ReturnType<typeof applyPlan>; refusal: string } => {
+    const empty = { bench: 0, steps: [] as ReturnType<typeof applyPlan> };
     const sheet = rowById.get(rootId)?.picture;
     const pieces = piecesOf(rootId);
-    if (!sheet || !pieces.length) return { bench: 0, steps: [] as ReturnType<typeof applyPlan> };
-    const bench = refColorwayFor('render', colorwayOf(sheet));
-    return { bench, steps: applyPlan(threedSides(band, bench), pieces) };
+    // Шагов нет по составу разреза — причину говорит прежняя фраза двери, не эта.
+    if (!sheet || !pieces.length) return { ...empty, refusal: '' };
+    if (colorwayId === undefined)
+      return {
+        ...empty,
+        refusal:
+          'this section is not narrowed to a colourway, and a render bench is addressed by one — ' +
+          'putting the split anywhere would fill a bench you are not looking at',
+      };
+    if (colorwayOf(sheet) !== colorwayOf({ colorwayId }))
+      return {
+        ...empty,
+        refusal:
+          'this sheet belongs to another colourway than the slots below, and a plate of one ' +
+          'colourway cannot stand in the bench of another — the server refuses it outright. ' +
+          'Open that colourway and set the split there.',
+      };
+    const bench = refColorwayFor('render', colorwayId);
+    return { bench, steps: applyPlan(threedSides(band, bench), pieces), refusal: '' };
   };
 
   const runSet = async (rootId: number) => {
@@ -676,11 +719,16 @@ export function OutputsSection({
            кроп — второй смысл у одного слова.
 
            ДВА ЧЛЕНА ПРЕДИКАТА, И КАЖДЫЙ — СВОЙ ВОПРОС ЧЕЛОВЕКА:
-             · `composite` — «есть ли в этом файле несколько видов». Нет — резать нечего, и угол
-               обещал бы кроп, которого этот экран не делает;
-             · `!deck` — «а не разрезан ли он уже». Разрезан — жест другой и слово другое
-               (`expand` / `set` в ряду дверей), а второй разрез того же листа завёл бы вторую
-               колоду тех же видов.
+             · «есть ли в этом файле несколько видов». Нет — резать нечего, и угол обещал бы кроп,
+               которого этот экран не делает;
+             · «а не разрезан ли он уже». Разрезан — жест другой и слово другое (`expand` / `set`
+               в ряду дверей), а второй разрез того же листа завёл бы вторую колоду тех же видов.
+
+           ⚠ ОБА ВОПРОСА ЗАДАЁТ ТЕПЕРЬ `pictureOffersSplit` (`render/model.ts`), И ЭТО НЕ КОСМЕТИКА.
+           Этот файл был ЭТАЛОНОМ правила, но эталон, стоящий литералом, копируется, а копия рано
+           или поздно теряет член: плитка референса предъявляла угол по `!readOnly && url`, то есть
+           не сверялась ни с одним из двух. Здесь остались только вопросы, которые знает ТОЛЬКО
+           этот экран, — род и право писать; «мультивью и не резан» спрашивается у общего предиката.
            У 3D угла нет по-прежнему: резать модель нечем, а её постер поглощён парой. */
         /* ═══ ПОМЕТКА — УГОЛ КАДРА, А НЕ КНОПКА ПОД НИМ (E-25) ════════════════════════════════
            Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на карточку
@@ -731,7 +779,7 @@ export function OutputsSection({
             : undefined
         }
         onSplit={
-          kind === 'render' && !writesOff && !modelUrl && composite && !deck
+          kind === 'render' && !writesOff && !modelUrl && pictureOffersSplit(picture, !!deck)
             ? {
                 onClick: () => split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim()),
                 ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
@@ -823,7 +871,13 @@ export function OutputsSection({
                         запроса, ни ошибки, ни слова. Соседняя реализация того же глагола этот
                         случай закрывает (`if (!pieces.length) return null`); здесь он назван
                         причиной, потому что колода уже раскрыта и исчезнувшая дверь читалась бы
-                        как пропажа. */}
+                        как пропажа.
+
+                        ⚠ И ТРЕТИЙ ВИД ПУСТОГО ПЛАНА — КОЛОРВЕЙНЫЙ (круг 19): `setStepsFor` теперь
+                        ОТКАЗЫВАЕТ вместо записи, когда верстак секции назвать нечем или лист чужого
+                        цвета. Такой отказ несёт свои слова (`refusal`), и они встают ПЕРЕД общей
+                        фразой про детали — иначе дверь объясняла бы отказ причиной, которой у него
+                        нет, а это хуже молчания: человек пошёл бы резать лист заново. */}
                     {writesOff || !setStepsFor(picture.id ?? 0).steps.length ? (
                       <InertDoor
                         className='flex-1 [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor'
@@ -833,7 +887,8 @@ export function OutputsSection({
                             ? 'this card is read-only for you — putting the split into the sides is an edit of the card'
                             : !speaks
                               ? 'this server does not answer the design routes'
-                              : 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.'
+                              : setStepsFor(picture.id ?? 0).refusal ||
+                                'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.'
                         }
                       />
                     ) : (
@@ -858,22 +913,25 @@ export function OutputsSection({
                       set
                     </Button>
                     )}
-                    <button
-                      type='button'
+                    {/* ⚠ ЭТО БЫЛ СЫРОЙ `<button>` — ЕДИНСТВЕННЫЙ КОНТРОЛ РЯДА МИМО `buttonVariants`,
+                        и он один держал СВОЮ рамку, СВОЙ ховер и СВОЙ фокус, переписанные тут же
+                        строкой классов. Пока их четыре штуки совпадали с примитивом на глаз, он
+                        читался ровно; расходятся такие копии не «иногда», а при первой же правке
+                        кнопки — то есть ряд разъезжается там, где никто не смотрел.
+                        Квадрат 20×20 остаётся квадратом: `size='xs'` даёт метрику текста, а
+                        `h-5 w-5 p-0` — саму клетку, в которой стоит один глиф. */}
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      className='h-5 w-5 shrink-0 bg-bgColor p-0'
                       aria-expanded
                       aria-label={`fold the pieces of render ${picture.ordinal ?? ''} back behind the sheet`.trim()}
                       data-deck-fold={picture.id || undefined}
                       title='fold these pieces back behind the sheet'
                       onClick={() => setOpenDeck(null)}
-                      className={
-                        'h-5 w-5 shrink-0 cursor-pointer border border-borderColor bg-bgColor ' +
-                        'text-micro leading-none text-textColor hover:bg-textColor hover:text-bgColor ' +
-                        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ' +
-                        'focus-visible:outline-textColor'
-                      }
                     >
                       ▾
-                    </button>
+                    </Button>
                   </>
                 ) : (
                   <Button
@@ -896,8 +954,18 @@ export function OutputsSection({
                     `the server refuses a second placement outright. Empty that side first — the ✕ on its ` +
                     `plate in FABRIC RENDER SLOTS.`
                   }
+                  /* ⚠ САМЫЙ ЗАМЕТНЫЙ «СКАЧОК» РЯДА, И ОН БЫЛ У ЧИТАЕМОЙ ПЛАШКИ, А НЕ У КНОПКИ.
+                     `Pill` — `inline-flex` по содержимому и 19px высотой (`py-px` без класса
+                     высоты): в ряду, где каждый сосед занимает всю ширину ячейки и ровно 20px, она
+                     сидела короткой и прижатой влево, и это читалось как «здесь что-то не
+                     дорисовалось». Ширину даёт обёртка (`flex w-full` — сам `span` с `title` был
+                     `inline`, то есть шириной по тексту), высоту и центровку — три класса на самой
+                     плашке. Слово и тон не трогаются: это по-прежнему статус, а не дверь. */
+                  className='flex w-full'
                 >
-                  <Pill>in {viewLabel((held.viewKey ?? '').trim()) || 'a slot'}</Pill>
+                  <Pill className='h-5 w-full justify-center leading-4'>
+                    in {viewLabel((held.viewKey ?? '').trim()) || 'a slot'}
+                  </Pill>
                 </span>
               ) : composite ? (
                 /* ═══ У ЛИСТА ДВЕРЬ ЖИВАЯ, И ЭТО ПОЧИНКА, А НЕ УКРАШЕНИЕ ══════════════════════
@@ -1001,10 +1069,16 @@ export function OutputsSection({
                 А ВОТ ОТКАЗ ПОМЕТКИ ОСТАЛСЯ ЗДЕСЬ, И ЭТО НЕ НЕДОДЕЛКА: дверь, которой нельзя
                 воспользоваться, обязана быть ВИДНА без наведения — довод у пропа `onSelect`
                 выше. Живая пометка ушла на кадр; неживая говорит словом на прежнем месте. */}
+            {/* ⚠ `INERT_DOOR` НА ОБОИХ НЕЖИВЫХ СОСТОЯНИЯХ, И ЭТО ОДИН ДЕФЕКТ, А НЕ ДВА. Без него
+                `InertDoor` — `inline-flex` по слову: «select» занимал бы 46px там, где живая дверь
+                занимает всю ширину ячейки, и ряд ехал бы при КАЖДОЙ смене состояния той же самой
+                двери. Разведка назвала первую ветку; вторая — та же дверь, и починить одну значило
+                бы оставить скачок ровно между её состояниями. */}
             {!selectable ? null : !carries ? (
-            <InertDoor label='select' reason={SELECT_MARK_NOT_STATED} />
+            <InertDoor className={INERT_DOOR} label='select' reason={SELECT_MARK_NOT_STATED} />
           ) : writesOff ? (
             <InertDoor
+              className={INERT_DOOR}
               label={chosen ? 'un-select' : 'select'}
               reason={
                 disabled

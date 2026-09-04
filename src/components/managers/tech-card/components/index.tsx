@@ -2252,6 +2252,13 @@ export function TechCardForm({
                 techCardId={numId}
                 disabled={frozen}
                 constructionAspects={<DetailsEditor techCard={techCard} />}
+                /* ОДИН ПИСАТЕЛЬ АДРЕСА НА ВСЮ СТРАНИЦУ. Студия держала СВОЮ копию этой записи
+                   (`?tab=` + чистка `sample`/`fits` + `replace`) — не по выбору, а потому что
+                   волне, писавшей блоки CONSTRUCTION, было запрещено трогать этот файл. Читатель
+                   у копии и оригинала один и тот же (`activeTab` берётся из `?tab=`), поэтому
+                   двум писателям оставалось только разойтись. Довод целиком — у пропа в
+                   `studio-tab.tsx`. */
+                navTo={(t, extra) => navTo(t as TabId, extra)}
               />
             )}
 

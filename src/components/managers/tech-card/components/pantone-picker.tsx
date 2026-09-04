@@ -9,10 +9,19 @@ import { PANTONE_CODE_RE, findPantone, searchPantone } from './pantone-swatches'
  * A Pantone reference picked by searching — «Search Pantone code or colour» (owner, C-8 snapshot).
  *
  * THE PRIMITIVE HOLDS NO VALUE AND KNOWS NO SCHEMA. What the picked code is written to is the
- * caller's decision, and the caller says so next to the trigger: today the one place a per-article
- * Pantone lives is the catalogue material (`Material.pantone`), so the BOM sheet writes there and
- * says «catalogue» out loud. The same control can bind to `TechCardBomItem.pantone` the day that
- * field exists, without a second picker.
+ * caller's decision, and the caller says so next to the trigger.
+ *
+ * THAT DAY CAME. The header used to end «the same control can bind to `TechCardBomItem.pantone` the
+ * day that field exists, without a second picker» — the field exists (backend `50a1fb2`, migration
+ * 0363), the BOM sheet binds to it, and no second picker was written. The catalogue article is no
+ * longer written from here at all: `Material.pantone` is a fact about what will be BOUGHT and is
+ * edited in the materials manager, while this row holds what the line INTENDS, which is decided
+ * before an article is chosen.
+ *
+ * `label` IS WHERE AN INHERITED VALUE GOES. The trigger renders `value` in ink and `label` in the
+ * grey label variant, so a caller with a senior fallback (the linked article's own pantone) passes
+ * it as `label`: the row then reads «shown, but not mine» without a second control and without this
+ * file learning what a BOM line is.
  *
  * TYPED CODES ARE ACCEPTED AS TYPED. The swatch list is a suggestion list of ~120 common references;
  * the dyehouse's own number («19-4005 TCX») is not refused because it is not in it — the list

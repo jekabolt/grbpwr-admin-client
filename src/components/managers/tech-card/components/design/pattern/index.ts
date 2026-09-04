@@ -1,18 +1,25 @@
 /**
  * THE PATTERN VIEW OF THE DESIGN BAND — «pattern creation», K-13.
  *
- * `PatternStudio` is the whole of the view: hand it the band and it draws the source, the menu, the
- * tiles and the answer to «do I still have to fill in CLOTH». The organs underneath are exported
- * because two of them have readers outside this folder — `patternOutputs` and `pictureFull` are
- * what ARTIFACTS lists its PATTERNS segment from — and because a composer may want the preview
- * alone. They are not meant to be reassembled by hand into the screen the studio already assembles.
+ * `PatternStudio` is the whole of the view, and since round 19 it is ONE `Section` titled
+ * `patterns`: hand it the band and it draws the maker row (frame · name · GENERATE), a hairline,
+ * and the grid the answers land in. `PatternInput` and `PatternLibrary` are its two halves and are
+ * exported because two organs underneath have readers outside this folder — `patternOutputs` and
+ * `pictureFull` are what ARTIFACTS lists its PATTERNS segment from. They are not meant to be
+ * reassembled by hand into the screen the studio already assembles: `PatternLibrary` in particular
+ * no longer carries a `Section` of its own, so mounting it alone yields a body with no head.
  *
  * ONE READ, ONE WRITE, plus two the band already owns. The read is the band's own `useDesignBand`,
- * passed in as a prop and never called a second time here. The write is `StartDesignRun`
- * (`useStartPatternRun`). The two borrowed ones are the band's own seams: the mark «chosen»
+ * passed in as a prop and never called a second time here. The write is `StartDesignRun`.
+ * The two borrowed ones are the band's own seams: the mark «chosen»
  * (`useDesignWrites().setPictureSelected`) and the card's asset shelf
- * (`useAssetWrites().upsertAsset`) — a tile kept as cloth is an ordinary `design_asset` of kind
- * `pattern`, which is exactly what makes it visible to FABRIC RENDER.
+ * (`useAssetWrites().upsertAsset`).
+ *
+ * ⚠ NEITHER OF THOSE TWO IS THE SAVE PATH, and the header that said otherwise has been corrected
+ * (see `pattern-library.tsx`). A named pattern run files its own `design_asset{kind:pattern}` on
+ * the server, inside the transaction that closes the run (`keepPatternTx`), which is what makes it
+ * visible to FABRIC RENDER. `upsertAsset` from this folder means `rename`, or the legacy `keep`
+ * door that adopts tiles from runs frozen before round 15 and runs that hit `library_full`.
  */
 export { PatternStudio } from './pattern-studio';
 export { PatternInput } from './pattern-input';

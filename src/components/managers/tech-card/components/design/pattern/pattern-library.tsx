@@ -1,11 +1,15 @@
-import type { GetDesignBandResponse, common_DesignAsset } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignAsset,
+  common_DesignRun,
+} from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
+import { Placeholder } from 'ui/components/placeholder';
 import { Tiles } from 'ui/components/tiles';
 import Text from 'ui/components/text';
 
@@ -14,6 +18,7 @@ import { useAssetWrites } from '../assets/use-assets';
 import { runIsOnPage } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
+import { useElapsed } from '../generation';
 import { PictureTile } from '../picture-tile';
 import { useDesignWrites } from '../use-design-band';
 import { Strip, StripCell } from '../render/strip-cell';
@@ -57,18 +62,34 @@ import {
  * (`media-viewer-zoom.tsx`), а стрелки листают ВСЁ, что на экране, потому что ряд собирает
  * `PictureGalleryProvider` в порядке документа.
  *
- * ═══ ⚠ ДВЕРЬ `KEEP` ЖИВА И СТОИТ ЗДЕСЬ, В ПОЛОСЕ «MADE EARLIER, NOT KEPT» ════════════════════
+ * ═══ ⚠ ПЛИТКА САДИТСЯ НА ПОЛКУ САМА. `KEEP` — ПОДБОРЩИК ЛЕГАСИ, А НЕ ПУТЬ СОХРАНЕНИЯ ══════════
  *
- * Снести её вместе с блоком TILES было НЕЛЬЗЯ, и это не осторожность, а арифметика: сервер
- * плитку на полку карточки НЕ КЛАДЁТ — прогон отдаёт картинку в ленту, а ассет заводит человек
- * (`UpsertDesignAsset`). Автоматическая посадка при закрытии прогона — правка бэкенда, которой на
- * бете нет. Без этой двери каждый оплаченный прогон паттерна становился бы картинкой, которую ни
- * один рендер не увидит никогда.
+ * ⚠⚠ ЗДЕСЬ СТОЯЛО ПРЯМО ПРОТИВОПОЛОЖНОЕ УТВЕРЖДЕНИЕ, И ОНО БЫЛО ЛОЖНЫМ. Дословно: «сервер плитку
+ * на полку карточки НЕ КЛАДЁТ — прогон отдаёт картинку в ленту, а ассет заводит человек;
+ * автоматическая посадка — правка бэкенда, которой на бете нет». Оно было написано ЗА КРУГ ДО
+ * ТОГО, как эта правка приехала, и с тех пор пережило её молча.
  *
- * Поэтому «блок TILES не нужен» исполнен как СНОС БЛОКА, а не как снос акта: плитки, вернувшиеся
- * из прогонов и не положенные на полку, стоят полосой ВНУТРИ этого блока, под своей подписью, с
- * зумом и одной кнопкой. Полоса исчезает целиком, когда таких плиток нет, — а это нормальное
- * состояние карточки, где всё положено.
+ * ЧТО НА САМОМ ДЕЛЕ, СВЕРЕНО НА `origin/beta` (круг 19): `keepPatternTx`
+ * (`internal/store/design/assets.go:167`) вызывается из транзакции, ЗАКРЫВАЮЩЕЙ ПРОГОН
+ * (`queue.go:897`, при `run.Kind == pattern`), и заводит `design_asset{kind:pattern, name,
+ * media_id, repeat_mm, colorway_id}` из замороженного `params.pattern.name` прогона и живой
+ * колонки `run.colorway_id`. То есть КАЖДЫЙ НАЗВАННЫЙ ПРОГОН ПАТТЕРНА СТАНОВИТСЯ СТРОКОЙ ПОЛКИ
+ * САМ, без единого нажатия. Имя же теперь есть всегда: пустое поле на экране-делателе уезжает
+ * как `pattern N` (разбор — у `fallbackName` в `pattern-studio.tsx`).
+ *
+ * ПОЧЕМУ ЛОЖНАЯ ШАПКА СТОИЛА ДЕНЕГ, А НЕ ТОЛЬКО ТОЧНОСТИ. Владелец спросил ДОСЛОВНО: «как
+ * сохранять паттерны» — при том, что они сохраняются сами. Вопрос родился из СЛОВАРЯ этого
+ * экрана: счётчик писал `N kept`, полоса зовётся `made earlier, not kept`, у двери `keep`
+ * тултип «name this tile». Три органа хором учили, что сохранение — ручной жест. Круг 19 снял
+ * первое (`N kept` → `N` в заголовке общей секции) и свёл делателя и полку в ОДИН блок, чтобы
+ * плитка появлялась там же, где стояла пунктирная дыра прогона. Второе и третье остались, потому
+ * что относятся к настоящему остатку — см. ниже.
+ *
+ * ЧТО ТОГДА ПОДБИРАЕТ `KEEP`, И ПОЧЕМУ ДВЕРЬ НЕ СНЕСЕНА. Ровно два рода плиток, у которых полка
+ * не завелась: (a) прогоны, ЗАМОРОЖЕННЫЕ ДО КРУГА 15, — у них в `params` нет имени вовсе, и
+ * `keepPatternTx` их пропускает (`assets.go:169-173`); (b) прогоны, упёршиеся в `library_full`.
+ * Полоса исчезает целиком, когда таких плиток нет, — а это нормальное состояние любой карточки,
+ * заведённой после круга 15.
  *
  * ═══ E-15 — ЧТО ЗНАЧИТ `KEEP` ТЕПЕРЬ, И ЧЕГО ОНО БОЛЬШЕ НЕ ЗНАЧИТ ════════════════════════════
  *
@@ -131,15 +152,12 @@ function Card({
   disabled,
   techCardId,
   seam,
-  runId,
 }: {
   asset: common_DesignAsset;
   disabled?: boolean;
   techCardId: number;
   /** Сервер померил стык этой плитки и нашёл его видимым. Читается с ПРОГОНА, не с ассета. */
   seam: boolean;
-  /** Прогон, сделавший плитку, если он ещё на странице ленты. `0` — спрашивать не у кого. */
-  runId: number;
 }): JSX.Element {
   const { upsertAsset, deleteAsset } = useAssetWrites(techCardId);
   const speaks = serverSpeaksDesign();
@@ -261,17 +279,18 @@ function Card({
       {/* ⚠ СТРОКА «worn by ROSSO» СНЯТА ВМЕСТЕ С ЧИПАМИ НОСКИ (E-15). Она называла факт, у
           которого не осталось ни одного читателя, — а подпись под фактом без читателя учит, что
           механизм жив. Осталось то, чего не видно на картинке. */}
-      {(asset.repeatMm || runId > 0) && (
+      {/* ⚠ ПОЛОВИНА `run N` СНЯТА (круг 19). Владелец: «сделай его максимально простым сейчас
+          там хуй пойми что». Номер прогона — АДРЕС В ЛЕНТЕ, а не свойство ткани: он ничего не
+          говорит о плитке, отличается у двух одинаковых и пропадает сам, стоит прогону уехать со
+          страницы истории (тогда строка молча становилась короче — то есть подпись под плиткой
+          зависела от пагинации СОСЕДНЕГО блока). Осталось `N mm`, и только когда оно есть.
+
+          ЛЕГАСИ-ЧИСЛО ПОКАЗЫВАЕТСЯ ТОЛЬКО ТОГДА, КОГДА ОНО ЕСТЬ. Новые паттерны его не несут
+          (J-12 снял ряд SCALE, и `repeat_mm` уезжает нулём), а у старых оно настоящее и
+          по-прежнему доезжает в промпт многоткани — молчать о нём было бы потерей. */}
+      {!!asset.repeatMm && (
         <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {[
-            /* ЛЕГАСИ-ЧИСЛО ПОКАЗЫВАЕТСЯ ТОЛЬКО ТОГДА, КОГДА ОНО ЕСТЬ. Новые паттерны его не несут
-               (J-12 снял ряд SCALE, и `repeat_mm` уезжает нулём), а у старых оно настоящее и
-               по-прежнему доезжает в промпт многоткани — молчать о нём было бы потерей. */
-            asset.repeatMm ? `${asset.repeatMm} mm` : '',
-            runId > 0 ? `run ${runId}` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ')}
+          {`${asset.repeatMm} mm`}
         </Text>
       )}
 
@@ -350,14 +369,45 @@ function Card({
   );
 }
 
+/**
+ * ═══ ПУНКТИРНАЯ ПЛИТКА ЖИВОГО ПРОГОНА — ДЫРА ФОРМЫ ОТВЕТА (круг 19) ══════════════════════════
+ *
+ * Здесь у прогона была СТРОКА в блоке-делателе: «a pattern is being made · 0:42 — it lands in
+ * PATTERNS OF THIS CARD when the provider answers». Она ОБЕЩАЛА СЛОВАМИ, где появится плитка, —
+ * стоя при этом в другой секции, чем названная. Дыра формы плитки, стоящая в самой сетке первой,
+ * говорит то же самое и не может соврать: готовая плитка встанет ровно сюда.
+ *
+ * ОТДЕЛЬНЫМ КОМПОНЕНТОМ РАДИ ХУКА: `useElapsed` тикает раз в секунду, и вызванный в теле полки он
+ * перерисовывал бы вместе с собой ВСЮ сетку, включая замощённые лица всех сохранённых плиток.
+ * Здесь он перерисовывает одну ячейку.
+ */
+function PendingTile({ startedAt }: { startedAt?: string | null }): JSX.Element {
+  const elapsed = useElapsed(startedAt ?? undefined);
+  return (
+    <div data-pattern-pending className='flex flex-col gap-1'>
+      <Placeholder dashed aspect='square' className='w-full' />
+      <Text size='nano' variant='label' component='span'>
+        {elapsed || '0:00'}
+      </Text>
+    </div>
+  );
+}
+
 export function PatternLibrary({
   band,
   techCardId,
   disabled,
+  live,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /**
+   * ЖИВЫЕ ПРОГОНЫ ПАТТЕРНА, СЧИТАННЫЕ ВЫЗЫВАЮЩИМ. Пропом, а не вторым чтением полосы: делатель
+   * уже держит этот список ради собственного `pending`, и второй `patternRuns(band).filter(...)`
+   * был бы вторым ответом на вопрос «что сейчас в работе» — с шансом разойтись на одном кадре.
+   */
+  live?: common_DesignRun[];
 }): JSX.Element {
   const { upsertAsset } = useAssetWrites(techCardId);
   /**
@@ -377,13 +427,11 @@ export function PatternLibrary({
    * Прогон, вытесненный со страницы ленты, здесь не найдётся, и это честный ответ «спросить не у
    * кого»: вердикт о стыке живёт на попытках прогона, а не на ассете.
    */
-  const runOfAsset = useMemo(() => {
-    const m = new Map<number, { seam: boolean; runId: number }>();
+  const seamOfAsset = useMemo(() => {
+    const m = new Map<number, boolean>();
     for (const { picture, run } of outputs) {
       const mediaId = picture.media?.id ?? 0;
-      if (mediaId > 0 && !m.has(mediaId)) {
-        m.set(mediaId, { seam: seamWarningOf(run), runId: run.id ?? 0 });
-      }
+      if (mediaId > 0 && !m.has(mediaId)) m.set(mediaId, seamWarningOf(run));
     }
     return m;
   }, [outputs]);
@@ -395,42 +443,55 @@ export function PatternLibrary({
   );
 
   const shelfFull = shelfIsFull(band);
+  const pending = live ?? [];
 
   return (
-    <Section
-      title='patterns of this card'
-      question='— the tiles it has named; each one is an artifact and a texture FABRIC RENDER can pick'
-      action={
-        <Text size='micro' variant='label' component='span' className='uppercase'>
-          {assets.length} kept
-        </Text>
-      }
-    >
-      {assets.length === 0 ? (
-        <Text size='micro' variant='label' component='p' data-pattern-empty className='normal-case'>
-          No pattern is named yet. Attach a picture above and press GENERATE — what comes back is
-          named here, and a named tile is listed in ARTIFACTS and offered in the texture grid under
-          FABRIC RENDER. It is offered there, never chosen for you.
-        </Text>
-      ) : (
+    /* ═══ СВОЕЙ СЕКЦИИ У ПОЛКИ БОЛЬШЕ НЕТ (круг 19) ═══════════════════════════════════════════
+       Владелец: «переделай юай создания паттернов сделай его максимально простым сейчас там хуй
+       пойми что». Полка была ВТОРЫМ белым блоком на сером грунте, и между ней и делателем стояли
+       24 пикселя `SectionStack` — то есть вход и выход одной вещи читались как два равновесных
+       заявления. Теперь это тело ОДНОЙ секции `patterns`, а её заголовок и счётчик принадлежат
+       `PatternStudio`.
+
+       ЧТО УШЛО ВМЕСТЕ С СЕКЦИЕЙ:
+         · ЗАГОЛОВОК `patterns of this card` — секция называется `patterns`, и повторять слово
+           «карточки» внутри карточки незачем;
+         · ВОПРОС-ПОДЗАГОЛОВОК «— the tiles it has named; each one is an artifact and a texture
+           FABRIC RENDER can pick». Проза, и вдобавок неверная в главном слове: плитки называет
+           не человек («it has named»), а прогон, а полку заводит сервер;
+         · СЧЁТЧИК `N kept`. Слово `kept` учило, что сохранение — ручной жест, которого на самом
+           деле нет; в заголовке общей секции стоит просто `N` (разбор — в шапке файла);
+         · ПУСТОЕ СОСТОЯНИЕ — абзац «No pattern is named yet. Attach a picture above and press
+           GENERATE…». Он пересказывал словами ряд, стоящий В ТРЁХ САНТИМЕТРАХ ВЫШЕ: пустая рамка
+           `+ picture` рядом с инертной дверью GENERATE и есть пустое состояние этого экрана, и
+           она показывает жест вместо того, чтобы его описывать. */
+    <>
+      {/* ЛИНИЯ ПОЯВЛЯЕТСЯ ВМЕСТЕ С ТЕМ, ЧТО ОНА ОТБИВАЕТ, И НИКОГДА РАНЬШЕ. Правило лестницы:
+          1px `hairline` — ВНУТРЕННЯЯ линия между рядами блока (DESIGN.md, «две серых»). Линия над
+          пустым полем — это обещание содержимого, которого нет. */}
+      {(assets.length > 0 || pending.length > 0) && (
         /* 220 px — НИЖНЯЯ ГРАНИЦА, ПРИ КОТОРОЙ ЛИЦО ЕЩЁ ОТВЕЧАЕТ НА СВОЙ ВОПРОС: каждая из
            четырёх копий ≈ 110 px, и стык в центре читается без наведения. Дорожка `1fr` растит
            карточки дальше на широком экране, где места и правда больше. */
-        <Tiles min={220}>
-          {assets.map((a) => {
-            const found = runOfAsset.get(a.mediaId ?? 0);
-            return (
+        <div className='border-t border-hairline pt-3'>
+          <Tiles min={220}>
+            {/* ЖИВЫЕ — ПЕРВЫМИ, И ЭТО НЕ «новое сверху», А АДРЕС ОТВЕТА. Готовая плитка встаёт
+                в голову списка (полоса отдаёт ассеты новейшими вперёд), значит пунктирная дыра
+                обязана стоять там же, иначе плитка появится не на месте своей дыры. */}
+            {pending.map((r) => (
+              <PendingTile key={r.id ?? `live-${r.startedAt ?? ''}`} startedAt={r.startedAt ?? r.createdAt} />
+            ))}
+            {assets.map((a) => (
               <Card
                 key={a.id}
                 asset={a}
                 disabled={disabled}
                 techCardId={techCardId}
-                seam={!!found?.seam}
-                runId={found?.runId ?? 0}
+                seam={!!seamOfAsset.get(a.mediaId ?? 0)}
               />
-            );
-          })}
-        </Tiles>
+            ))}
+          </Tiles>
+        </div>
       )}
 
       {/* ═══ ПЛИТКИ, КОТОРЫЕ ВЕРНУЛИСЬ И НЕ ЛЕГЛИ НА ПОЛКУ ══════════════════════════════════════
@@ -538,6 +599,6 @@ export function PatternLibrary({
           </Strip>
         </>
       )}
-    </Section>
+    </>
   );
 }

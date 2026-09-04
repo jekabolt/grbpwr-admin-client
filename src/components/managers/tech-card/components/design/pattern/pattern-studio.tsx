@@ -1,17 +1,21 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
-import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX } from '../assets/model';
-import { InertDoor } from '../bench-slot';
-import { serverSpeaksDesign } from '../capability';
-import { isRunLive, useElapsed } from '../generation';
-import { patternRuns, refusalAdvice } from './model';
+import { isRunLive } from '../generation';
+import { GenerateRow } from '../render/generate-row';
+import type { Gate } from '../render/model';
+import {
+  nextPatternName,
+  patternAssets,
+  patternGate,
+  patternRuns,
+  refusalAdvice,
+} from './model';
 import { PatternInput } from './pattern-input';
 import { PatternLibrary } from './pattern-library';
 import { useStartDesignRun } from '../render/use-design-run';
@@ -50,14 +54,18 @@ import { useStartDesignRun } from '../render/use-design-run';
  *     в `params.pattern.repeat_mm`, и сервер при `RepeatMM > 0` дописывал в промпт «Draw the motif
  *     at the scale of a N mm repeat». ТЕПЕРЬ УЕЗЖАЕТ ЛИТЕРАЛЬНЫЙ 0, и промпт о плотности не
  *     говорит НИЧЕГО — её выбирает модель. Это ЕДИНСТВЕННОЕ изменение провода на этом экране, оно
- *     стоит денег, и потому сказано и здесь, и в строке инвентаря под самой кнопкой.
+ *     стоит денег, и потому сказано здесь. ⚠ СТРОКИ ИНВЕНТАРЯ ПОД КНОПКОЙ БОЛЬШЕ НЕТ (круг 19):
+ *     она пересказывала провод словами, и разбор её сноса стоит у самого `GenerateRow`.
  *   · БЛОК `TILES` целиком (сцена 3×3, линейка `ScaleStrip`, чип `selected`, `KEEP IN LIBRARY`,
  *     рельс). ⚠ ВОПРОС, НА КОТОРЫЙ ОН ОТВЕЧАЛ, НЕ ВЫБРОШЕН ВМЕСТЕ С НИМ: «оно тайлится?» решается
  *     теперь на лице карточки паттерна (плитка нарисована 2×2, стык — в центре) и в зуме до 8×.
- *   · ⚠ ДВЕРЬ `KEEP IN LIBRARY` НЕ УДАЛЕНА, А ПЕРЕЕХАЛА. Без неё ни один оплаченный прогон не мог
- *     бы стать тканью карточки вовсе: сервер плитку на полку не кладёт (это отдельная правка
- *     бэкенда, и её на бете НЕТ). Теперь она стоит в полосе `made earlier, not kept` внутри блока
- *     `patterns of this card` — там, где человек и смотрит на то, чем карточка располагает.
+ *   · ⚠ ДВЕРЬ `KEEP IN LIBRARY` НЕ УДАЛЕНА, А ПЕРЕЕХАЛА — в полосу `made earlier, not kept`.
+ *     ⚠⚠ ДОВОД, ПО КОТОРОМУ ЕЁ СОХРАНИЛИ («сервер плитку на полку не кладёт»), УСТАРЕЛ, И ЭТО
+ *     ПРОВЕРЕНО НА `origin/beta` (круг 19): `keepPatternTx` (`internal/store/design/assets.go:167`)
+ *     заводит строку полки В ТОЙ ЖЕ транзакции, что закрывает прогон (`queue.go:897`). То есть
+ *     названный прогон садится на полку САМ. Дверь `keep` при этом жива не как путь сохранения, а
+ *     как ПОДБОРЩИК ЛЕГАСИ: плитки прогонов, замороженных до круга 15 (без имени), и прогонов,
+ *     упёршихся в `library_full`. Разбор целиком — в шапке `pattern-library.tsx`.
  *   · ⚠ ПОМЕТКА `selected` НЕ ОСИРОТЕЛА. Её читает ARTIFACTS (сегмент PATTERNS сужается по ней), и
  *     ставится она ТАМ ЖЕ — у каждой плиты панели ARTIFACTS есть своя дверь `select`. Фильтр и его
  *     переключатель остались на одном экране; здесь стоял ВТОРОЙ писатель одного факта.
@@ -116,7 +124,6 @@ export function PatternStudio({
   techCardId: number;
   disabled?: boolean;
 }): JSX.Element {
-  const speaks = serverSpeaksDesign();
   const run = useStartDesignRun(techCardId);
   const [source, setSource] = useState<common_MediaFull | null>(null);
   const sourceId = source?.id ?? 0;
@@ -131,242 +138,262 @@ export function PatternStudio({
   const patternName = name.trim();
   const live = useMemo(() => patternRuns(band).filter(isRunLive), [band]);
 
-  /* ВОРОТА СОБИРАЮТСЯ ЗДЕСЬ, А НЕ ЧИТАЮТСЯ ИЗ `patternGate`, ПО ОДНОЙ ПРИЧИНЕ: к условиям полосы
-     добавляются два, которые полоса знать не может — право на запись и то, говорит ли этот сервер
-     вообще на языке DESIGN. Порядок отказов — от самого широкого к самому узкому, чтобы первая
-     фраза, которую читает человек, была той же, что сказал бы сервер.
+  /* ═══ ВОРОТА ЧИТАЮТСЯ ИЗ `patternGate`, И ТЕПЕРЬ ЭТО СНОВА ЧЕСТНО (круг 19) ═════════════════
+
+     Здесь стояла СВОЯ сборка ворот из двух условий, потому что второе — «названо ли» — полосе
+     было неизвестно. Второе условие снято (имя стало необязательным, разбор у поля), и от местной
+     сборки остался бы ДОСЛОВНЫЙ ДВОЙНИК `patternGate`: одно правило, записанное в двух файлах
+     разными словами. Двойник — это второе место, где фраза отказа может разойтись, и разошлась бы
+     она молча.
+
+     ⚠ ДВУХ ШИРОЧАЙШИХ УСЛОВИЙ ЗДЕСЬ НЕТ И НЕ БЫЛО ПОСЛЕ F-1. Право на запись и то, говорит ли
+     этот сервер на языке DESIGN, называет сам ряд (`GenerateRow`) — теми же словами и в том же
+     порядке (read-only → сервер молчит → ворота экрана).
 
      ТРЕТЬИМ ЗДЕСЬ СТОЯЛ ДНЕВНОЙ ПОТОЛОК. Он снят целиком — и на сервере, и во всех воротах
      полосы: «у нас в принципе не должно быть потолка похуй чем он съеден убери потолок». */
-  const frozen = disabled
-    ? 'this card is read-only for you — a run spends money, so it is one of the writes that stops here'
-    : !speaks
-      ? 'this server does not serve the design band, so there is nothing to start a run on'
-      : !sourceId
-        ? 'no picture is attached — a pattern is made out of exactly one picture. Attach one above: from the library, from the clipboard, or one of this card’s cloths'
-        : !patternName
-          ? /* СЕРВЕР ОТКАЗЫВАЕТ `pattern_name_required` БЕСПЛАТНО, ДО РЕЗЕРВА. Эта дверь
-               говорит то же самое ДО нажатия: отказ, который человек читает только после
-               клика, — это отказ, о котором экран знал и промолчал. */
-            'this pattern has no name — it is filed on the card’s shelf under one, and a nameless tile reaches a later prompt as the bare word «pattern»'
-          : null;
+  const gate: Gate = patternGate(band, sourceId);
+
+  /* ═══ ИМЯ, КОТОРОЕ УЕДЕТ, ЕСЛИ ПОЛЕ ОСТАЛОСЬ ПУСТЫМ (круг 19) ══════════════════════════════
+     Сервер отказывает `pattern_name_required` бесплатно, и до этого круга дверь держали закрытой,
+     пока человек не придумает слово. Но серверу нужно КАКОЕ-ТО имя, а не ИМЕННО ЭТО: `nextPatternName`
+     минтит `pattern N` по занятым именам полки — ровно то же, что делает легаси-дверь `keep`, — а
+     `rename` стоит на лице готовой плитки для второй мысли. То же выражение стоит `placeholder`'ом
+     у поля, поэтому напечатано здесь ОДНО, а прочитано в двух местах. */
+  const fallbackName = nextPatternName(band);
 
   const advice = run.refusal ? refusalAdvice(run.refusal) : '';
+  const kept = useMemo(() => patternAssets(band), [band]);
 
   return (
-    <>
-      {/* ═══════════════════ АКТ 1 — СДЕЛАТЬ ПЛИТКУ ═══════════════════ */}
-      <Section
-        title='make a pattern'
-        question='— one picture in, a seamless repeat out; it lands in the block below'
-      >
-        <PatternInput
-          band={band}
-          source={source}
-          onPick={(media, assetId) => {
-            setSource(media);
-            setSourceAssetId(assetId ?? 0);
-          }}
-          onClear={() => {
-            setSource(null);
-            setSourceAssetId(0);
-          }}
-          disabled={disabled}
-        >
-        {/* ─── НАЗВАТЬ — ОДНО ПОЛЕ (E-1) ────────────────────────────────────────────────────
-            Владелец: «оставь только имя убери колорвей». Поле стоит НАД дверью, потому что
-            читается оно до нажатия, а не после: имя обязательно, и дверь без него не
-            открывается — сервер отказал бы `pattern_name_required` бесплатно, но отказ, который
-            человек читает только после клика, это отказ, о котором экран знал и промолчал. */}
-        <div className='flex flex-col gap-2'>
-          <label className='flex flex-col gap-1' htmlFor='design-pattern-name'>
-            <Text size='micro' variant='label' component='span'>
-              name
-            </Text>
-            <Input
-              name='design-pattern-name'
-              data-pattern-name
-              value={name}
-              disabled={disabled}
-              // ПРЕДЕЛ ЖИВЁТ В ОДНОМ МЕСТЕ (`ASSET_NAME_MAX`), а не переписан числом: у
-              // колонки `design_asset.name` VARCHAR(60), у двери то же правило, и соседний
-              // экран библиотеки уже читает эту же константу. Второе определение разошлось
-              // бы молча в тот день, когда сдвинется первое.
-              maxLength={ASSET_NAME_MAX}
-              placeholder='chevron, washed denim, oil slick…'
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-            />
-          </label>
-        </div>
+    /* ═══ ОДНА СЕКЦИЯ ВМЕСТО ДВУХ, И ЭТО ГЛАВНАЯ ПРАВКА КРУГА 19 ══════════════════════════════
+       Владелец: «переделай юай создания паттернов сделай его максимально простым сейчас там хуй
+       пойми что используй импакбл».
 
-        {/* ─── ДВЕРЬ. ИНВЕНТАРЬ — ЭТО ЕЁ ПОДПИСЬ, БЛОКА БОЛЬШЕ НЕТ ────────────────────────── */}
-        {/* ⚠ РЯД ТОЙ ЖЕ МЕТРИКИ, ЧТО НА ФЛЭТ-ГЕНЕРАЦИИ (F-1). Владелец: «в PATTERN - MAKE A
+       ДВА БЛОКА БЫЛИ ВХОДОМ И ВЫХОДОМ ОДНОЙ ВЕЩИ, а стояли двумя равновесными заявлениями на
+       сером грунте `SectionStack` — и, что дороже, между ними стояла ФРАЗА («it lands in the
+       block below»), объяснявшая словами то, что должно быть видно глазом. Теперь это видно:
+       нажатие ставит пунктирный квадрат в сетку под линией, и на его месте появляется готовая
+       плитка. Обещание, заменённое местом, перестаёт быть обещанием.
+
+       ⚠ И ЭТО ЖЕ — ПОЛОВИНА ОТВЕТА НА ВОПРОС ВЛАДЕЛЬЦА «как сохранять паттерны». Плитка садится
+       на полку САМА, серверной транзакцией, закрывающей прогон (`keepPatternTx`); экран же был
+       устроен так, будто сохранение — отдельный жест в отдельном блоке. Теперь сетка стоит там
+       же, где дверь, и её счётчик в заголовке растёт на глазах у того, кто нажал.
+
+       ЗАГОЛОВОК — `patterns`, БЕЗ ВОПРОСА-ПОДЗАГОЛОВКА. `action` — число плиток на полке; при
+       нуле не рисуется вовсе, потому что «0» — это не сведение, а пустая сетка и так пуста. */
+    <Section
+      title='patterns'
+      action={
+        kept.length > 0 ? (
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            {kept.length}
+          </Text>
+        ) : undefined
+      }
+    >
+      <PatternInput
+        band={band}
+        source={source}
+        onPick={(media, assetId) => {
+          setSource(media);
+          setSourceAssetId(assetId ?? 0);
+        }}
+        onClear={() => {
+          setSource(null);
+          setSourceAssetId(0);
+        }}
+        disabled={disabled}
+      >
+        {/* ─── НАЗВАТЬ — ОДНО ПОЛЕ, И ОНО БОЛЬШЕ НЕ ОБЯЗАТЕЛЬНО (E-1 + круг 19) ─────────────
+            Владелец, круг 17: «оставь только имя убери колорвей» — ПОЛЕ ОСТАЁТСЯ, и это его
+            слово. Владелец, круг 19: «сделай его максимально простым сейчас там хуй пойми что».
+
+            ЧТО ИМЕННО ИЗМЕНИЛОСЬ: ворота больше не закрыты, пока не придумано слово. Довод, по
+            которому они закрывались, был верен наполовину — сервер и правда отказывает
+            `pattern_name_required` бесплатно, — но неверна была ПОСЫЛКА: серверу нужно КАКОЕ-ТО
+            имя, чтобы записать строку полки, а не ИМЕННО ЭТО. Ворота, требующие выдумать слово
+            до нажатия, превращали двухсекундный жест в форму — а имя правится на лице готовой
+            плитки (`rename`), то есть у второй мысли уже есть своё место.
+
+            ПОДСКАЗКА ПОЛЯ — БУКВАЛЬНОЕ ИМЯ, КОТОРОЕ УЕДЕТ, А НЕ ПРИМЕР. Здесь стояло «chevron,
+            washed denim, oil slick…»: три выдуманных слова, из которых не следует, что будет,
+            если поле оставить пустым. Теперь в подсказке стоит `pattern N` — ровно та строка,
+            которую пошлёт прогон, и та же, которую минтит легаси-дверь `keep`. Подсказка,
+            которая называет исход, отвечает на вопрос вместо абзаца о нём. */}
+        <label className='flex flex-col gap-1' htmlFor='design-pattern-name'>
+          <Text size='micro' variant='label' component='span'>
+            name
+          </Text>
+          <Input
+            name='design-pattern-name'
+            data-pattern-name
+            value={name}
+            disabled={disabled}
+            // ПРЕДЕЛ ЖИВЁТ В ОДНОМ МЕСТЕ (`ASSET_NAME_MAX`), а не переписан числом: у
+            // колонки `design_asset.name` VARCHAR(60), у двери то же правило, и соседний
+            // экран библиотеки уже читает эту же константу. Второе определение разошлось
+            // бы молча в тот день, когда сдвинется первое.
+            maxLength={ASSET_NAME_MAX}
+            placeholder={fallbackName}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+          />
+        </label>
+
+        {/* ─── ДВЕРЬ, И БОЛЬШЕ НИЧЕГО ────────────────────────────────────────────────────── */}
+        {/* ⚠ РЯД — ОБЩИЙ ОРГАН, А НЕ КОПИЯ ЕГО РАЗМЕТКИ (F-1). Владелец: «в PATTERN - MAKE A
             PATTERN сделай кноку генерейт такого же размера как на флет генерации вообще везде
             сделай ее одиаковой и логику и отступы».
-            Три расхождения, каждое видимое: отступ ряда (`py-1` против ничего), размер двери
-            отказа (`InertDoor` был прибит к `xs`, а живая кнопка `sm` — и на ЭТОМ экране ворота
-            закрыты дольше всего, пока не введено имя, поэтому маленькую дверь здесь и видели),
-            и ожидание (`loading` подменяет надпись полосой в 175px, раздувая кнопку втрое в
-            момент нажатия). */}
-        <div className='flex flex-wrap items-center gap-2 py-1'>
-          {frozen ? (
-            <InertDoor label='GENERATE' reason={frozen} size='sm' />
-          ) : (
-            <Button
-              variant='main'
-              size='sm'
-              disabled={run.isPending}
-              onClick={() =>
-                run.start({
-                  kind: 'pattern',
-                  ask: '',
-                  params: {
-                    // ПЛИТКА НЕ ИМЕЕТ ВИДА ИЗДЕЛИЯ. Список пуст ЯВНО, а не отсутствует: пустой
-                    // список — утверждение «этот прогон не просит ни одной стороны», и сервер
-                    // сверяет его длину.
-                    views: [],
-                    // ═══ ПЛИТКА ЕДЕТ БЕЗ КОЛОРВЕЯ — E-1 ════════════════════════════════════
-                    // Владелец: «оставь только имя убери колорвей». Поле контракт на этом роде
-                    // ПРИНИМАЕТ (`DesignRunKindTakesColorway` перечисляет pattern, сверено на
-                    // `origin/beta`), поэтому ноль здесь — не «поле не задано» и не отказ, а
-                    // ЗАКОННОЕ ЗНАЧЕНИЕ «ничей». `keepPatternTx` читает живую колонку прогона и
-                    // при нуле не касается `stealColorwayTx` вовсе: готовая плитка встаёт на
-                    // полку карточки ничьей — ровно туда же, куда её переводит FK при удалении
-                    // колорвея. Посадка на полку при этом НЕ ПОТЕРЯНА: её решает ИМЯ, а имя
-                    // осталось и обязательно.
-                    colorwayId: 0,
-                    layout: '',
-                    colour: undefined,
-                    threed: undefined,
-                    fixTarget: '',
-                    // ⚠ ИМЯ ПОЛЯ ГОВОРИТ «EXTRA», А ВЕЗЁТ ОНО ЗДЕСЬ ЕДИНСТВЕННЫЙ ВХОД. Это
-                    // переиспользование из контракта, а не небрежность: на рендере это правда
-                    // «сверх слотов», на `pattern` — та самая одна картинка, из которой строится
-                    // плитка, и сервер отвергает любое другое их число.
-                    extraInputMediaIds: [sourceId],
-                    fixTargets: [],
-                    fixSlotIds: [],
-                    autoSplit: false,
-                    detailSlotIds: [],
-                    // ═══ РАППОРТ УЕЗЖАЕТ ЛИТЕРАЛЬНЫМ НУЛЁМ (J-12) ═══════════════════════════
-                    // Владелец: «SCALE этот мне сейчас вообще не кажется нужным … он только
-                    // путает». Ряд снят, и число НЕ СОБИРАЕТСЯ НИОТКУДА — ни из поля, ни из
-                    // чипа, ни из прошлого прогона. Ноль здесь — ОТВЕТ («плотность выбирает
-                    // модель»), а не пропуск: сервер при `RepeatMM == 0` не пишет о масштабе в
-                    // промпт ни слова (`designgen/patternprompt.go`), и это ровно то, о чём
-                    // просили. Поле названо явно, потому что контракт требует назвать его.
-                    // ИМЯ ОБЯЗАТЕЛЬНО, И ДВЕРЬ ВЫШЕ НЕ ОТКРЫВАЕТСЯ БЕЗ НЕГО. `sourceAssetId`
-                    // приходит ненулевым РОВНО ТОГДА, когда источник взят чипом полки:
-                    // тогда родитель известен и его нельзя терять. Файл из библиотеки или
-                    // из буфера родителя не имеет, и ноль там — утверждение, а не пропуск.
-                    pattern: { repeatMm: 0, name: patternName, sourceAssetId },
-                    useFlatSlots: false,
-                    // Поле НАРАЩИВАЕТ `use_flat_slots` и осмысленно только на kind=flat; здесь оно ИГНОРИРУЕТСЯ
-                    // сервером, а пустой список и так значит «все заполненные». Стоит явно, потому что
-                    // контракт требует назвать поле, а не потому, что этому прогону есть что им сказать.
-                    flatSlotIds: [],
-                  },
-                })
-              }
-            >
-              {run.isPending ? 'starting…' : 'GENERATE'}
-            </Button>
-          )}
-          {/* ИНВЕНТАРЬ ПРОМПТА, ОДНОЙ СТРОКОЙ И ДОСЛОВНО. У двух соседних экранов он — панель,
-              потому что там уезжают плиты верстака, референсы, посадка и рецепт цвета. Здесь
-              уезжают ДВА факта, и список из двух строк за дверью — это дверь, за которой человек
-              уже знает, что найдёт, притом что деньги он тратит прямо под ней. */}
-          <Text
-            size='micro'
-            variant='label'
-            component='span'
-            data-probe='payload'
-            className='min-w-0 normal-case'
-          >
-            {sourceId ? `one picture — media ${sourceId}` : 'one picture — none attached yet'} · no
-            scale stated, so the model chooses the density itself · priced by the server when the
-            run starts. No other picture from this card travels: not the bench, not the references.
-            {/* ⚠ ЗДЕСЬ СТОЯЛО РАСКРЫТИЕ РАЗРУШИТЕЛЬНОГО ДЕЙСТВИЯ — «Filing it on ROSSO takes that
-                colourway off whatever else was wearing it». Оно ушло вместе с самим действием
-                (E-1): прогон больше не называет колорвея, `keepPatternTx` при нуле не касается
-                `stealColorwayTx` вовсе, и снимать что-то с чего-то стало нечем. Строка снята
-                ИМЕННО ПОТОМУ, что описываемого ею последствия больше не бывает; оставить её
-                значило бы предупреждать о том, чего не произойдёт. */}{' '}
-            It lands on the card&apos;s shelf under the name above, owned by no colourway.
-          </Text>
-        </div>
-        </PatternInput>
 
-        {/* ⚠ ОТКАЗ ДЕРЖИТСЯ НА ЭКРАНЕ И ЦИТИРУЕТСЯ ДОСЛОВНО.
-            Тост живёт четыре секунды и уезжает сам — а отказ без ключа НАЗЫВАЕТ ПЕРЕМЕННУЮ
-            ОКРУЖЕНИЯ, то есть ровно то, ради чего его и читают. Наша половина — приписка «что с
-            этим делать»; она стоит НИЖЕ строки сервера и никогда вместо неё.
-            ⚠ Атрибут пробы висит на ВНУТРЕННЕМ div: `CalloutBox` принимает ровно три пропа и
-            лишние молча выбрасывает, то есть `data-*` на нём до DOM не доезжает. */}
-        {run.refusal && (
-          <CalloutBox tone='error'>
-            <div data-probe='refusal' className='flex items-start gap-2'>
-              <div className='min-w-0 flex-1 space-y-1'>
-                <Text size='micro' component='p' className='normal-case'>
-                  <b>the run did not start.</b> The server said, in its own words:
-                </Text>
-                <Text
-                  size='micro'
-                  component='p'
-                  data-probe='refusal-verbatim'
-                  className='break-words border border-hairline bg-bgZebra px-2 py-1 normal-case'
-                >
-                  {run.refusal}
-                </Text>
-                {advice && (
-                  <Text size='micro' variant='label' component='p' className='normal-case'>
-                    {advice}
-                  </Text>
-                )}
-              </div>
-              <button
-                type='button'
-                onClick={run.dismissRefusal}
-                className='shrink-0 uppercase text-labelColor hover:text-textColor focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            ═══ ХВОСТ РЯДА СНЯТ ЦЕЛИКОМ, И ЭТО САМАЯ БОЛЬШАЯ ПРАВКА КРУГА 19 ══════════════════
+            Владелец: «переделай юай создания паттернов сделай его максимально простым сейчас
+            там хуй пойми что». Под дверью стояла ОПИСЬ ПРОВОДА в четыре предложения: «one
+            picture — media 12 · no scale stated, so the model chooses the density itself ·
+            priced by the server when the run starts. No other picture from this card travels:
+            not the bench, not the references. It lands on the card's shelf under the name
+            above, owned by no colourway.» Это был самый длинный текст экрана, и он ПЕРЕСКАЗЫВАЛ
+            ПРОВОД словами.
+
+            ПОЧЕМУ ЭТО НЕ ПОТЕРЯ ДЕНЕЖНОГО ФАКТА, ПО ПУНКТАМ:
+              · «что уедет» — картинка, и она стоит в рамке в двух сантиметрах левее. Кадр
+                отвечает на этот вопрос точнее любой строки, потому что показывает СОДЕРЖИМОЕ,
+                а не идентификатор;
+              · «почём» — цену называет строка прогона в GENERATION HISTORY, как на всех
+                остальных экранах полосы. Второй голос о той же цене — это место, где две
+                формулировки расходятся;
+              · «ничего другого не едет» — утверждение об ОТСУТСТВИИ, и его нечем проверить
+                глазом; предупреждать о том, чего не происходит, значит учить искать это;
+              · «садится на полку» — теперь ВИДНО: пунктирный квадрат встаёт в сетку под
+                линией, и на его месте появляется плитка. Ровно в этой же секции.
+
+            ⚠ `shape` НЕ ПЕРЕДАЁТСЯ ТОЖЕ, И ЭТО НАМЕРЕННО. Ряд печатает свой стандартный хвост
+            («{shape} · priced by the server…») РОВНО ТОГДА, когда экран назвал `shape`; здесь
+            не называется ни он, ни `trailing`, и ряд остаётся одной дверью. */}
+        <GenerateRow
+          gate={gate}
+          pending={run.isPending}
+          disabled={disabled}
+          onGenerate={() =>
+            run.start({
+              kind: 'pattern',
+              ask: '',
+              params: {
+                // ПЛИТКА НЕ ИМЕЕТ ВИДА ИЗДЕЛИЯ. Список пуст ЯВНО, а не отсутствует: пустой
+                // список — утверждение «этот прогон не просит ни одной стороны», и сервер
+                // сверяет его длину.
+                views: [],
+                // ═══ ПЛИТКА ЕДЕТ БЕЗ КОЛОРВЕЯ — E-1 ════════════════════════════════════
+                // Владелец: «оставь только имя убери колорвей». Поле контракт на этом роде
+                // ПРИНИМАЕТ (`DesignRunKindTakesColorway` перечисляет pattern, сверено на
+                // `origin/beta`), поэтому ноль здесь — не «поле не задано» и не отказ, а
+                // ЗАКОННОЕ ЗНАЧЕНИЕ «ничей». `keepPatternTx` читает живую колонку прогона и
+                // при нуле не касается `stealColorwayTx` вовсе: готовая плитка встаёт на
+                // полку карточки ничьей — ровно туда же, куда её переводит FK при удалении
+                // колорвея. Посадка на полку при этом НЕ ПОТЕРЯНА: её решает ИМЯ, а имя
+                // теперь есть ВСЕГДА (см. `fallbackName`).
+                colorwayId: 0,
+                layout: '',
+                colour: undefined,
+                threed: undefined,
+                fixTarget: '',
+                // ⚠ ИМЯ ПОЛЯ ГОВОРИТ «EXTRA», А ВЕЗЁТ ОНО ЗДЕСЬ ЕДИНСТВЕННЫЙ ВХОД. Это
+                // переиспользование из контракта, а не небрежность: на рендере это правда
+                // «сверх слотов», на `pattern` — та самая одна картинка, из которой строится
+                // плитка, и сервер отвергает любое другое их число.
+                extraInputMediaIds: [sourceId],
+                fixTargets: [],
+                fixSlotIds: [],
+                autoSplit: false,
+                detailSlotIds: [],
+                // ═══ РАППОРТ УЕЗЖАЕТ ЛИТЕРАЛЬНЫМ НУЛЁМ (J-12) ═══════════════════════════
+                // Владелец: «SCALE этот мне сейчас вообще не кажется нужным … он только
+                // путает». Ряд снят, и число НЕ СОБИРАЕТСЯ НИОТКУДА — ни из поля, ни из
+                // чипа, ни из прошлого прогона. Ноль здесь — ОТВЕТ («плотность выбирает
+                // модель»), а не пропуск: сервер при `RepeatMM == 0` не пишет о масштабе в
+                // промпт ни слова (`designgen/patternprompt.go`), и это ровно то, о чём
+                // просили. Поле названо явно, потому что контракт требует назвать его.
+                //
+                // ═══ ИМЯ: СВОЁ, А ЕСЛИ НЕ НАЗВАНО — `pattern N` (круг 19) ═══════════════
+                // Пустое поле больше не запирает дверь; вместо отказа уезжает та же строка,
+                // что стоит в подсказке поля, поэтому человек ПРОЧИТАЛ имя до нажатия. Ноль
+                // имён на проводе при этом невозможен, и `pattern_name_required` с этого
+                // экрана прийти уже не может.
+                //
+                // `sourceAssetId` приходит ненулевым РОВНО ТОГДА, когда источник взят чипом
+                // полки: тогда родитель известен и его нельзя терять. Файл из библиотеки или
+                // из буфера родителя не имеет, и ноль там — утверждение, а не пропуск.
+                pattern: { repeatMm: 0, name: patternName || fallbackName, sourceAssetId },
+                useFlatSlots: false,
+                // Поле НАРАЩИВАЕТ `use_flat_slots` и осмысленно только на kind=flat; здесь оно ИГНОРИРУЕТСЯ
+                // сервером, а пустой список и так значит «все заполненные». Стоит явно, потому что
+                // контракт требует назвать поле, а не потому, что этому прогону есть что им сказать.
+                flatSlotIds: [],
+              },
+            })
+          }
+        />
+      </PatternInput>
+
+      {/* ⚠ ОТКАЗ ДЕРЖИТСЯ НА ЭКРАНЕ И ЦИТИРУЕТСЯ ДОСЛОВНО.
+          Тост живёт четыре секунды и уезжает сам — а отказ без ключа НАЗЫВАЕТ ПЕРЕМЕННУЮ
+          ОКРУЖЕНИЯ, то есть ровно то, ради чего его и читают. Наша половина — приписка «что с
+          этим делать»; она стоит НИЖЕ строки сервера и никогда вместо неё.
+          ⚠ Атрибут пробы висит на ВНУТРЕННЕМ div: `CalloutBox` принимает ровно три пропа и
+          лишние молча выбрасывает, то есть `data-*` на нём до DOM не доезжает.
+          ⚠ ЭТО ЕДИНСТВЕННЫЙ ТЕКСТОВЫЙ БЛОК, ПЕРЕЖИВШИЙ КРУГ 19, и переживает он его ПОТОМУ,
+          что не наш: это слова сервера о непотраченных деньгах, и они условны — на покоящемся
+          экране их нет вовсе. */}
+      {run.refusal && (
+        <CalloutBox tone='error'>
+          <div data-probe='refusal' className='flex items-start gap-2'>
+            <div className='min-w-0 flex-1 space-y-1'>
+              <Text size='micro' component='p' className='normal-case'>
+                <b>the run did not start.</b> The server said, in its own words:
+              </Text>
+              <Text
+                size='micro'
+                component='p'
+                data-probe='refusal-verbatim'
+                className='break-words border border-hairline bg-bgZebra px-2 py-1 normal-case'
               >
-                <Text size='nano' variant='uppercase' tracking='label' component='span'>
-                  dismiss
+                {run.refusal}
+              </Text>
+              {advice && (
+                <Text size='micro' variant='label' component='p' className='normal-case'>
+                  {advice}
                 </Text>
-              </button>
+              )}
             </div>
-          </CalloutBox>
-        )}
-
-        {/* ЖИВОЙ ПРОГОН РИСУЕТСЯ ЗДЕСЬ, А НЕ ТОЛЬКО В ИСТОРИИ. Человек, нажавший GENERATE, смотрит
-            на эту кнопку, а не на ленту двумя блоками ниже; экран, который после нажатия не
-            меняется, читается как «ничего не произошло», и следующее, что он делает, — платит
-            второй раз. */}
-        {live.length > 0 && (
-          <div className='flex flex-wrap items-center gap-2 pt-1'>
-            <Placeholder dashed label='' className='size-[44px] shrink-0' />
-            <LiveLine startedAt={live[0].startedAt ?? live[0].createdAt} count={live.length} />
+            <button
+              type='button'
+              onClick={run.dismissRefusal}
+              className='shrink-0 uppercase text-labelColor hover:text-textColor focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            >
+              <Text size='nano' variant='uppercase' tracking='label' component='span'>
+                dismiss
+              </Text>
+            </button>
           </div>
-        )}
-      </Section>
+        </CalloutBox>
+      )}
 
-      {/* ═══════════════════ АКТ 2 — ХРАНИТЬ, СУДИТЬ СТЫК И ОТДАТЬ КОЛОРВЕЮ ═══════════════════ */}
-      <PatternLibrary band={band} techCardId={techCardId} disabled={disabled} />
-    </>
-  );
-}
+      {/* ═══ ЖИВОЙ ПРОГОН ПЕРЕЕХАЛ В СЕТКУ ПУНКТИРНОЙ ПЛИТКОЙ (круг 19) ═════════════════════
+          Здесь стояла СТРОКА: 44-пиксельный пунктирный квадратик и текст «a pattern is being
+          made · 0:42 — it lands in PATTERNS OF THIS CARD when the provider answers. No ETA is
+          claimed: nothing on the wire states how long this takes.»
 
-/**
- * Строка живого прогона. Отдельным компонентом РАДИ ХУКА: `useElapsed` тикает раз в секунду, и
- * вызванный в теле студии он перерисовывал бы вместе с собой всю вкладку, включая сцену с
- * фоновыми плитками. Здесь он перерисовывает одну строку.
- */
-function LiveLine({ startedAt, count }: { startedAt?: string | null; count: number }): JSX.Element {
-  const elapsed = useElapsed(startedAt ?? undefined);
-  return (
-    <Text size='micro' variant='label' component='span' className='normal-case'>
-      {count === 1 ? 'a pattern is being made' : `${count} patterns are being made`}
-      {elapsed ? ` · ${elapsed}` : ''} — it lands in PATTERNS OF THIS CARD when the provider
-      answers. No ETA is claimed: nothing on the wire states how long this takes.
-    </Text>
+          ПРИЧИНА, ПО КОТОРОЙ СТРОКА ЗДЕСЬ ВООБЩЕ СТОЯЛА, ОСТАЁТСЯ ВЕРНОЙ: экран, который после
+          нажатия не меняется, читается как «ничего не произошло», и следующее, что делает
+          человек, — платит второй раз. Сменился НОСИТЕЛЬ ответа. Строка ОБЕЩАЛА СЛОВАМИ, где
+          появится плитка («in PATTERNS OF THIS CARD»), — и обещала это, стоя в ДРУГОЙ секции,
+          чем названная. Теперь дыра ФОРМЫ ПЛИТКИ стоит ровно на том месте сетки, куда плитка и
+          встанет: `PendingTile` в `pattern-library.tsx`, первым в ряду. Отсчёт (`useElapsed`)
+          уехал туда же вместе с местом.
+
+          «No ETA is claimed» снято как приписка о том, чего экран НЕ утверждает: секундомер без
+          прогресс-бара и так не обещает срока. */}
+      <PatternLibrary band={band} techCardId={techCardId} disabled={disabled} live={live} />
+    </Section>
   );
 }

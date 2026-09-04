@@ -1,9 +1,7 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
-import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { SECTION } from 'constants/routes';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -17,10 +15,7 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionAudit } from './construction-audit';
-import { ConstructionBomTable } from './construction-bom-table';
-import { ConstructionCalloutTable } from './construction-callout-table';
 import { ConstructionField } from './construction-field';
-import { ConstructionGeneralInfo } from './construction-general-info';
 import { zoneOptions } from './operation-options';
 import {
   ColorwayArticles,
@@ -534,17 +529,13 @@ export function ConstructionTab({
   // всеми строками рельса) на каждый символ, набранный в любом поле BOM на соседней вкладке.
   // Подписка на ткань живёт ниже, в `useEffect` через `watch(cb)`, и рендер вызывает только на
   // смене отпечатка — см. там же.
-  const { getValues, watch, control } = useFormContext<TechCardFormData>();
+  const { getValues, watch } = useFormContext<TechCardFormData>();
 
-  // C-5 · GENERAL INFORMATION reads the same two gates the CLASSIFICATION block applied to these
-  // fields before they moved here: an auxiliary card has neither fit nor category (its AUXILIARY
-  // TYPE classifies it), and the Radix select has to be told about a released card explicitly —
-  // the outer `<fieldset disabled>` silences native inputs, not the portalled listbox.
-  const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
-  const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
-  const { canWrite } = usePermissions();
-  const canWriteCard = canWrite(SECTION.techCards);
-  const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+  // ЗДЕСЬ ЧИТАЛИСЬ `purpose` / `isAux` / `canWriteCard` / `frozen` — ГЕЙТЫ БЛОКА C-5, и они сняты
+  // вместе с ним: подписка на `purpose` и запрос прав, которые никто больше не спрашивает, — это
+  // лишний рендер вкладки и лишний вопрос к правам на каждое открытие. Признак выпущенной карточки
+  // ниже по-прежнему считается там, где потребляется (`OperationsField`, `ConstructionAudit`) — он
+  // и раньше писался у них выражением, а не через эту переменную.
 
   // Sketch pin ↔ operation and BOM line ↔ operation are the same mechanism, so both come from the
   // shared hook the pieces tab reuses for its mini-diagram.
@@ -754,19 +745,22 @@ export function ConstructionTab({
 
   return (
     <div className='flex flex-col gap-3.5'>
-      {/* C-5 · GENERAL INFORMATION — first, before the how: fit / category / base model / base
-          sample size moved here from the CLASSIFICATION block of the header (same form fields, same
-          components, one writer each), plus the derived size range and the two free-text aspects.
-          The seam-allowance and equipment defaults stay in «standards» below — two blocks, not one
-          in place of the other (C-6). */}
-      <Section title='general information' question='— what this style is, before how it is made'>
-        <ConstructionGeneralInfo
-          isAux={isAux}
-          readOnly={!canWriteCard || frozen}
-          onGoTab={onGoTab ? (t) => onGoTab(t) : undefined}
-        />
-      </Section>
+      {/* ═══ ЗДЕСЬ СТОЯЛИ ТРИ БЛОКА КРУГА 20 — И ОНИ УЕХАЛИ В СТУДИЮ ═══════════════════════════
+          C-5 GENERAL INFORMATION, C-7 таблица указаний и C-8 спецификация были смонтированы на
+          ЭТОЙ вкладке. Адрес был неверный: владелец назвал цель цитатой заголовка и подзаголовка
+          — «в CONSTRUCTION — described aspect by aspect; prints after the concept», — а это
+          секция ВКЛАДКИ STUDIO, где живут аспекты сборки, а не одноимённая вкладка. Блоки
+          переехали туда целиком (`design/studio-tab.tsx`, довод у самого блока).
 
+          МОНТАЖ ОСТАЛСЯ ОДИН НА КАЖДЫЙ. Оставить их и здесь «на всякий случай» значило бы
+          завести двух всегда-смонтированных писателей над одной формой: `bomItems`, `callouts` и
+          `details` правятся через `useFormContext`, и второй экземпляр разошёлся бы с первым
+          ровно так, как разошлись два `DetailsEditor` (U-9).
+
+          ЧТО ОСТАЛОСЬ НА ЭТОЙ ВКЛАДКЕ: сводка, эскиз-схема сборки с легендой деталей, разбор
+          (`ConstructionAudit`), стандарты карточки (`CardStandards` — припуск и оборудование,
+          пункт C-6 их не двигал) и сам рельс операций. То есть вкладка стала тем, чем и
+          называлась: КАК это собирают. */}
       <ConstructionSummary />
 
       {/* The sketch is a reference, not the work: a fixed 320px column reads it fine and leaves the
@@ -873,12 +867,6 @@ export function ConstructionTab({
         </div>
       </div>
 
-      {/* C-7 · the callouts as a table — the second face of the pins drawn above, joined to the
-          steps that reference them. C-8 · the BOM as a spec sheet — the second face of the lines
-          on the BOM tab, joined to the catalogue. Both are leaves with their own subscriptions, so
-          a keystroke in either re-renders that table and not the workspace above. */}
-      <ConstructionCalloutTable frozen={frozen} />
-      <ConstructionBomTable techCard={techCard} canWrite={canWriteCard} onGoTab={onGoTab} />
     </div>
   );
 }

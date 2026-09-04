@@ -406,6 +406,15 @@ const bomItemSchema = z
     supplier: z.string().optional().default(''),
     supplierRef: z.string().optional().default(''),
     color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
+    // ЦВЕТ PANTONE ЭТОЙ СТРОКИ (бэкенд 50a1fb2, миграция 0363) — намерение стадии замысла, СОБСТВЕННОЕ
+    // поле строки, а не снимок каталога: артикул выбирают позже, чем решают цвет. Возится ровно как
+    // `color` рядом — свободная строка с пустотой по умолчанию.
+    //
+    // ⚠ ПОЛЕ ЗАВЕДЕНО ЗДЕСЬ НЕ РАДИ ПИКЕРА, А ПРОТИВ ПОТЕРИ. BOM пишется upsert'ом полной заменой по
+    // `line_key`, а маппер записи перечисляет поля строки поимённо; пока `pantone` не было ни в
+    // схеме, ни в мапперах, ЛЮБОЕ сохранение тех-карты из этого клиента затирало цвет, поставленный
+    // где угодно ещё. Та же порода, что «шесть стираний личности строки» у purposeNote ниже.
+    pantone: z.string().optional().default(''),
     composition: z.string().optional().default(''),
     spec: z.string().optional().default(''),
     unit: z.string().optional().default(''),
@@ -2325,6 +2334,9 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     supplier: b.supplier || '',
     supplierRef: b.supplierRef || '',
     color: b.color || '',
+    // Дословно, как `color` над ней: строка, сохранённая до 0363, приезжает без ключа — и «сервер не
+    // прислал» и «прислал пустое» сходятся в одну пустоту, которая уедет обратно нетронутой.
+    pantone: b.pantone || '',
     composition: b.composition || '',
     spec: b.spec || '',
     unit: b.unit || '',
@@ -3286,6 +3298,10 @@ export function mapFormToTechCardInsert(
       supplier: b.supplier?.trim() || '',
       supplierRef: b.supplierRef?.trim() || '',
       color: b.color?.trim() || '',
+      // Цвет PANTONE строки — тем же протоколом, что `color` над ним: всегда явным значением, а не
+      // отсутствием ключа. Пустая строка здесь ОСМЫСЛЕННА и означает «на строке цвета нет» — иначе
+      // «очистить пантон» было бы невыразимо (upsert по line_key сохранил бы старый навсегда).
+      pantone: b.pantone?.trim() || '',
       composition: b.composition?.trim() || '',
       spec: b.spec?.trim() || '',
       unit: b.unit?.trim() || '',

@@ -5,7 +5,6 @@ import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-v
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { serverStatesOutputs } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { isRunLive, runOutcomeNote } from '../generation/run-state';
@@ -111,17 +110,12 @@ export function OnModelOutputs({
   return (
     <Section
       title='on-model pictures of this card'
-      /* ═══ ОХВАТ СПИСКА ЖИВЁТ ЗДЕСЬ, А НЕ В СНОСКЕ ПОД ПЛИТКАМИ (F-16) ═══════════════════════
-         Владелец снял абзац целиком. Из него уцелел ровно один факт, которого не говорит ни один
-         орган экрана: ЧТО ИМЕННО перечислено — все перекраски карточки или только те, что
-         приехали страницей ленты. Он и переехал сюда, в обеих редакциях: вопрос секции — то
-         место, где DESIGN.md велит говорить, ДЛЯ ЧЕГО блок, и он виден всегда, а не отдельной
-         строкой прозы под полосой. Тот же приём, которым J-19 снял сноску у RENDERS. */
-      question={
-        serverStatesOutputs(band)
-          ? '— every recolour this card holds, newest first, one picture per photograph, and which are chosen'
-          : '— the recolours on this page of the feed, one picture per photograph, and which are chosen'
-      }
+      /* ═══ ВОПРОСА У СЕКЦИИ БОЛЬШЕ НЕТ (F-16, круг 19) ═══════════════════════════════════════
+         Здесь стоял `question` — переехавший в шапку остаток снятого абзаца, в двух редакциях
+         («every recolour this card holds, newest first…» / «the recolours on this page of the
+         feed…»). Владелец снял и его: он убирает прозу, а не переписывает её, поэтому проп не
+         заменён другой формулировкой, а не передаётся вовсе. Разбор того, что уцелело из абзаца
+         и где, — в записке под плитками. */
       action={
         <Text size='micro' variant='label' component='span' className='uppercase'>
           {outputs.length} picture{outputs.length === 1 ? '' : 's'}
@@ -277,12 +271,11 @@ export function OnModelOutputs({
       {/* F-16 (владелец, дословно): сноска «Every recolour this card holds, newest first…» снята
           целиком — вместе с редакцией про страницу ленты, фразой «The mark is a verdict…» и
           предложением «More than one may be chosen». Что из неё уцелело и где:
-            · ОХВАТ («вся карточка» против «страницы ленты») — в `question` шапки, обе редакции;
-              там же он читает БИНАРЬ, а не длину списка, и это по-прежнему несущее: раздел
-              рисуется и с нулём картинок (живой или павший прогон), то есть «список пуст» и
-              «сервер поля не знает» встречаются здесь одновременно, а фраза про страницу ленты
-              над полным ответом сервера сказала бы владельцу, что часть ОПЛАЧЕННЫХ перекрасок
-              потерялась, тогда как не пришло ни одной;
+            · ОХВАТ («вся карточка» против «страницы ленты») — уезжал в `question` шапки, но
+              КРУГ 19 СНЯЛ И ПОДЗАГОЛОВОК ТОЖЕ: владелец назвал ту же фразу второй раз, уже в
+              шапке, и `question` у этой секции больше не передаётся вовсе (см. записку у
+              `<Section>` выше). Значит охват на экране больше не назван словами — это принято
+              сознательно: владелец убирает прозу, а не ищет ей новое место;
             · МНОЖЕСТВЕННОСТЬ ПОМЕТКИ — в словах угла `select`, то есть там, где её и ставят, и в
               счёте шапки («· N selected»), как только помечена вторая.
           ЧТО УШЛО НАСОВСЕМ: различение «помечено ≠ скрыто» и слова про свёрнутые скрытые. Тем же

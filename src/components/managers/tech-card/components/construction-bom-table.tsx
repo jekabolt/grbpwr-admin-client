@@ -1,7 +1,6 @@
 import { common_Material, common_TechCard } from 'api/proto-http/admin';
 import { materialCompositionText } from 'components/managers/materials/components/material-code';
-import { useMaterials, useSaveMaterial } from 'components/managers/materials/components/useMaterials';
-import { useSnackBarStore } from 'lib/stores/store';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -33,12 +32,20 @@ import { TechCardFormData, wireInt } from './schema';
 //     (supplier, composition, width, price) are written together. A picker here that set only
 //     `materialId` would leave the price snapshot of the previous article on the line, and costing
 //     would run on it. One writer, one click away.
-//   · pantone — the only place a per-article Pantone lives today is the CATALOGUE (`Material.pantone`);
-//     the BOM line has `color` but no pantone, and the per-colourway one needs a colourway. So the
-//     picker writes the material card, through the same `UpdateMaterial` the materials manager
-//     uses, and the cell says «catalogue». A line-level intent («this component, this colour, no
-//     article chosen yet») has no home and is not stored anywhere silently — that field is named
-//     in the wave report.
+//   · pantone — THE LINE'S OWN `pantone` (backend `50a1fb2`, migration 0363), through the ordinary
+//     form and the ordinary save. The field the wave report asked for exists now, so the reason
+//     this cell used to write the CATALOGUE article (`UpdateMaterial`) is gone, and writing it from
+//     here would be wrong twice over: `Material.pantone` is a fact about what will be BOUGHT, it is
+//     shared by every card that links the article, and it was written here by a side effect no
+//     «save» button was responsible for. The article's pantone is still SHOWN — as the senior
+//     fallback, greyed, when the line has none of its own — because that is what the dyehouse will
+//     actually receive; the owner's decision («this component, this colour, no article chosen yet»)
+//     now has a home of its own and rides with the card.
+//
+//     ⚠ AND THIS CLOSES A DATA LOSS, not just a gap. The BOM is a full-replace upsert keyed by
+//     `line_key` and the write mapper enumerates the line's fields by name; while `pantone` was
+//     missing from the schema and the two mappers, every save from this client silently erased a
+//     line pantone set anywhere else. Guarded by `scripts/bom-pantone-probe.mjs` (quote + mutation).
 //   · nothing else. Adding a line is the BOM tab's two-step dialog (article, then role); it is not
 //     duplicated here.
 
@@ -79,7 +86,7 @@ export function ConstructionBomTable({
   canWrite: boolean;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const lines = (useWatch({ control, name: 'bomItems' }) ?? []) as Line[];
   // The catalogue query the BOM tab and the construction workspace already hold — a cache hit.
   const { data } = useMaterials('', true);
@@ -102,27 +109,15 @@ export function ConstructionBomTable({
     return m;
   }, [techCard?.techCard?.bomItems]);
 
-  const save = useSaveMaterial();
-  const { showMessage } = useSnackBarStore();
-  const pickPantone = (m: common_Material, code: string) => {
-    save.mutate(
-      { ...m, pantone: code },
-      {
-        onSuccess: () =>
-          showMessage(
-            code
-              ? `${m.name || 'material'} · pantone ${code} — saved to the material card`
-              : `${m.name || 'material'} · pantone cleared on the material card`,
-            'success',
-          ),
-        onError: (e) =>
-          showMessage(
-            `pantone was not saved to ${m.name || 'the material'}: ${(e as Error)?.message || 'the catalogue refused'}`,
-            'error',
-          ),
-      },
-    );
-  };
+  // Пишем ПУТЁМ, а не через `useFieldArray`: массив `bomItems` уже держит ровно один field array
+  // (редактор BOM), и второй над тем же именем в этом RHF молча терял бы строки первого — тот же
+  // закон, по которому пишет таблица указаний рядом. Индекс здесь — настоящий индекс формы: строки
+  // не фильтруются, порядок таблицы и порядок массива это одно и то же.
+  //
+  // '' — законное значение, а не «ничего»: маппер записи шлёт его явным ключом, и только поэтому
+  // «снять цвет» вообще выразимо под upsert'ом по line_key (см. цитату В пробы).
+  const pickPantone = (index: number, code: string) =>
+    setValue(`bomItems.${index}.pantone` as never, code as never, { shouldDirty: true });
 
   const goToLine = (line: Line) =>
     onGoTab?.('bom', line.lineKey?.trim() ? { bom: line.lineKey.trim() } : {});
@@ -168,7 +163,12 @@ export function ConstructionBomTable({
                 const kind = kindLabel(line.kind) ?? '';
                 const fiber = m ? materialCompositionText(m) : (line.composition ?? '').trim();
                 const color = m?.color?.trim() || line.color?.trim() || '';
-                const pantone = m?.pantone?.trim() || '';
+                // Два разных утверждения, и они НЕ схлопываются в одно: `pantone` — решение этой
+                // строки, `inherited` — цвет артикула, который реально купят. Строка без своего
+                // цвета показывает каталожный (старший, ровно как говорит контракт поля), но
+                // показывает его серым и не присваивает: правка пишет только строку.
+                const pantone = line.pantone?.trim() || '';
+                const inherited = m?.pantone?.trim() || '';
                 const usage = estUsage(techCard, line, lineKeyByBomId);
                 const unit = (line.unit || m?.unit || '').trim();
                 const supplier = [m?.supplier?.trim() || line.supplier?.trim(), m?.supplierRef?.trim() || line.supplierRef?.trim()]
@@ -216,23 +216,35 @@ export function ConstructionBomTable({
                       {color || <EmptyCell />}
                     </td>
                     <td data-align='left' className='min-w-[140px]' data-c19-bom-pantone={i}>
-                      {m && canWrite ? (
+                      {canWrite ? (
+                        // Ждать артикула здесь больше нечего: цвет живёт НА СТРОКЕ, и строка без
+                        // ссылки на материал — ровно тот случай, ради которого поле заведено.
+                        // Каталожный цвет уходит в `label`, то есть в серый текст незаполненного
+                        // триггера: показан, но не присвоен.
                         <PantonePicker
                           name={`bom-${i}`}
                           value={pantone}
-                          disabled={save.isPending}
-                          onPick={(code) => pickPantone(m, code)}
+                          label={inherited || 'pick'}
+                          onPick={(code) => pickPantone(i, code)}
                         />
-                      ) : pantone ? (
-                        <Text component='span' className='uppercase'>
-                          {pantone}
+                      ) : pantone || inherited ? (
+                        <Text
+                          component='span'
+                          className='uppercase'
+                          variant={pantone ? 'default' : 'label'}
+                        >
+                          {pantone || inherited}
                         </Text>
                       ) : (
                         <EmptyCell />
                       )}
-                      <Text size='micro' variant='label' component='p'>
-                        {m ? 'catalogue' : linked ? 'catalogue · loading' : 'link a material first'}
-                      </Text>
+                      {/* Подпись отвечает ровно на один вопрос — ЧЕЙ это цвет. Молчит, когда цвета
+                          нет вовсе: подпись под пустым местом объясняла бы отсутствие. */}
+                      {(pantone || inherited) && (
+                        <Text size='micro' variant='label' component='p'>
+                          {pantone ? 'on this line' : "the article's — not set on the line"}
+                        </Text>
+                      )}
                     </td>
                     <td className='tabular-nums' data-c19-bom-usage={i}>
                       {usage.text ? (
@@ -258,9 +270,9 @@ export function ConstructionBomTable({
           </DataTable>
         )}
         <Text size='micro' variant='label' className='mt-1.5'>
-          fiber, colour, pantone and supplier are the linked article's catalogue facts — picking a
-          pantone here updates the material card; est usage is the colourway recipes' norm where
-          every colourway agrees
+          fiber, colour and supplier are the linked article's catalogue facts; pantone is this
+          line's own and saves with the card — a greyed code is the article's, shown until the line
+          picks one; est usage is the colourway recipes' norm where every colourway agrees
         </Text>
       </div>
     </Section>

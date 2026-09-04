@@ -63,6 +63,16 @@ export const insertsOptions = [
 // add custom keys too. key is the stable proto value; label is what the tailor sees.
 export const detailAspects: Array<{ key: string; label: string }> = [
   { key: 'silhouette', label: 'silhouette / fit' },
+  // ТКАНЬ — ИМЕНОВАННЫЙ АСПЕКТ, А НЕ САМОДЕЛЬНЫЙ КЛЮЧ. Владелец, круг 20, пункт 5: «плюс новые поля
+  // SIZE RANGE, SILHOUETTE (фритекст, напр. „Sleeveless V-neck tank top“), FABRIC (фритекст, напр.
+  // „Stretch knit jersey“)». Блок GENERAL INFORMATION пишет `details[]` по ключу `fabric` — ровно
+  // как по соседнему `silhouette`; пока ключа не было в этом словаре, редактор аспектов показывал
+  // его сырым («fabric» без подписи, в конце списка, среди самодельных), то есть ОДНО И ТО ЖЕ поле
+  // на двух поверхностях выглядело как два разных.
+  //
+  // Стоит вторым, сразу за силуэтом: это два аспекта, которые правятся ещё и из общих сведений, и
+  // порядок словаря — это порядок карточек аспектов на экране.
+  { key: 'fabric', label: 'fabric' },
   { key: 'collar', label: 'collar / neckline' },
   { key: 'fastening', label: 'fastening' },
   { key: 'pockets', label: 'pockets' },

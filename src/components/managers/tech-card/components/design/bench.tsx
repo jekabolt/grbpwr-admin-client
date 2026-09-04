@@ -4,9 +4,11 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -91,29 +93,88 @@ const FLAT_BENCH: BenchKind = 'flat';
  * `kind`: «пустое читается как ноль» — правило провода, а не наше утверждение, и день, когда
  * умолчание изменится, не должен быть днём, когда эти рефы начнут означать другое.
  */
-const sideRef = (view: string): DesignBenchSlotRef => ({
-  viewKey: view,
-  kind: FLAT_BENCH,
-  colorwayId: COLORWAY_NONE,
-});
+/**
+ * ═══ РЕФ НЕСЁТ РОВНО ОДИН АДРЕС — СТОРОЖ, А НЕ ПРИДИРКА (F-11b) ═══════════════════════════════
+ *
+ * `DesignBenchSlotRef.slot` — это proto3 **oneof** `view_key | slot_id`, и в protojson член ставит
+ * САМО ПРИСУТСТВИЕ ключа, а не его значение. Отсюда обе аварии этой семьи, и обе тихие:
+ *
+ *  · ОБА ЧЛЕНА СРАЗУ. `{viewKey:'front', slotId:0}` ставит oneof дважды, сервер роняет ВЕСЬ body
+ *    («oneof … is already set») и не пишет НИ ОДНОЙ стороны — то самое «0 of 3 sides were
+ *    written», где двойка вместо нуля казалась бы куда более вероятным исходом. Починено в
+ *    `bdf21ee2` (`render/apply-split.tsx`, `render/outputs.tsx`, `render/fabric-render-slots.tsx`).
+ *  · НИ ОДНОГО ЧЛЕНА. `detailRef(undefined)` собирал `{slotId: undefined}`, а `JSON.stringify`
+ *    выбрасывает `undefined` целиком — уезжал реф, не называющий НИЧЕГО. Это второй конец той же
+ *    ошибки, и он оставался живым до этого круга.
+ *
+ * ⚠ `?? 0` СЮДА НЕ СТАВИТСЯ, И ЭТО ПРЯМОЙ УРОК ПЕРВОГО СЛУЧАЯ: ноль — не «пусто», а ЗАДАННЫЙ
+ * адрес, которым и был сломан соседний экран. Молчаливая подстановка нуля превратила бы «мы не
+ * знаем адреса» в «адрес слот номер ноль» — то есть худшую из двух аварий вместо лучшей.
+ *
+ * СТОРОЖ ВСЕГДА ВКЛЮЧЁН, а не под `DEV`, и довод тот же, что у `assertKnownStrokeKeys`
+ * (`modals/vector-expand.ts`): в этом репозитории ТИПЫ НЕ ГЕЙТЯТ ДЕПЛОЙ — Vercel собирает голым
+ * `vite build`, CI нет, `tsc` запускается руками. Типовой сторож — записка тому, кто помнит;
+ * рантаймный — единственный, кто остановит молчаливую запись у того, кто не помнит. Бросок здесь
+ * дешёв: рефы собираются в рендере ячейки, поэтому падает ОДНА карточка с именем ошибки, а не
+ * запрос, ушедший в сервер с бессмысленным адресом.
+ */
+class BenchRefError extends Error {
+  constructor(ref: DesignBenchSlotRef) {
+    const byView = ((ref.viewKey ?? '').trim().length > 0 && 'view_key') || '';
+    const byId = (ref.slotId !== undefined && 'slot_id') || '';
+    super(
+      byView && byId
+        ? `a bench slot ref names BOTH ${byView} and ${byId}; they are one oneof, ` +
+          'and the server refuses the whole write'
+        : 'a bench slot ref names NEITHER view_key nor slot_id — it addresses no row at all',
+    );
+    this.name = 'BenchRefError';
+  }
+}
+
+/** РОВНО ОДИН ЧЛЕН `oneof`. Через неё проходит КАЖДЫЙ реф, собранный этим файлом. */
+function oneAddress(ref: DesignBenchSlotRef): DesignBenchSlotRef {
+  const byView = (ref.viewKey ?? '').trim().length > 0;
+  // ПРИСУТСТВИЕ, а не истинность: `slotId: 0` для провода — заданное поле (см. шапку выше).
+  const byId = ref.slotId !== undefined;
+  if (byView === byId) throw new BenchRefError(ref);
+  return ref;
+}
+
+const sideRef = (view: string): DesignBenchSlotRef =>
+  oneAddress({
+    viewKey: view,
+    kind: FLAT_BENCH,
+    colorwayId: COLORWAY_NONE,
+  });
 
 /** An existing slot by its minted id. `kind` is ignored here by the contract — an id names its own
  *  bench, and a kind disagreeing with it would be a contradiction nobody could adjudicate. The
  *  colourway travels for the same reason and with the same outcome: the SLOT'S OWN colourway wins
  *  beside a `slot_id`, and 0 is «not stated», which is what lets it. A detail slot is a flat-bench
- *  row anyway — details are the flat bench's alone. */
-const detailRef = (slotId?: number): DesignBenchSlotRef => ({
-  slotId,
-  kind: undefined,
-  colorwayId: COLORWAY_NONE,
-});
+ *  row anyway — details are the flat bench's alone.
+ *
+ *  ⚠ `slotId` ОБЯЗАТЕЛЕН ПО ТИПУ, и это первая из двух половин починки: раньше он был
+ *  `slotId?: number`, вызывающий передавал возможно-`undefined` `slot.id`, а TS не видел в этом
+ *  ничего. Вторая половина — `oneAddress` ниже и отказ на неположительный id: тип не отличает
+ *  «настоящий адрес» от нуля, а провод отличает. */
+const detailRef = (slotId: number): DesignBenchSlotRef => {
+  if (!Number.isFinite(slotId) || slotId <= 0)
+    throw new BenchRefError({ slotId: undefined, kind: undefined, colorwayId: COLORWAY_NONE });
+  return oneAddress({
+    slotId,
+    kind: undefined,
+    colorwayId: COLORWAY_NONE,
+  });
+};
 
 /** `view_key = detail` is the MINT VERB, not an address: it names no row and requires a name. */
-const mintDetailRef = (): DesignBenchSlotRef => ({
-  viewKey: 'detail',
-  kind: FLAT_BENCH,
-  colorwayId: COLORWAY_NONE,
-});
+const mintDetailRef = (): DesignBenchSlotRef =>
+  oneAddress({
+    viewKey: 'detail',
+    kind: FLAT_BENCH,
+    colorwayId: COLORWAY_NONE,
+  });
 
 type Optimistic = {
   ref: DesignBenchSlotRef;
@@ -445,8 +506,39 @@ export function Bench({
       </GroupLabel>
 
       <Tiles min={160}>
-        {bench.details.map((slot) => {
-          const ref: DesignBenchSlotRef = detailRef(slot.id);
+        {bench.details.map((slot, index) => {
+          /* ═══ СТРОКА БЕЗ ИДЕНТИФИКАТОРА ГОВОРИТ ЭТО ВСЛУХ, А НЕ ПРОПАДАЕТ (F-11b) ═══════════
+             `readBench` не фильтрует по `id`, и деталь без него — законно возможная форма ответа
+             (старый бинарь, недописанная строка). Раньше она молча уезжала в `detailRef(undefined)`
+             и рождала реф, не называющий НИ ОДНОЙ стороны oneof; теперь тип этого не позволяет, и
+             остаётся выбрать, ЧТО рисовать вместо ячейки.
+             Не `null`: пропавшая деталь — это потеря без следа, а плитка со всеми дверями была бы
+             четырьмя органами, каждый из которых промахивается. Поэтому — полосатая заглушка со
+             словами, ровно как у всякой неживой двери этого раздела.
+             ⚠ КЛЮЧ ПО ИНДЕКСУ ЗАКОНЕН РОВНО ЗДЕСЬ: `slot.id` и есть то, чего у строки нет, а
+             `bench.details` отсортирован по нему же — списку без личности другого ключа взять
+             негде. */
+          const slotId = slot.id ?? 0;
+          if (slotId <= 0)
+            return (
+              <div
+                key={`detail-without-id-${index}`}
+                className={cn(
+                  placeholderClass({ dashed: true, tone: 'error' }),
+                  'min-h-[120px] px-2 text-center',
+                )}
+                style={PLACEHOLDER_SURFACE}
+                title='the server sent this detail row without a slot id, so nothing on it can be addressed — reload the card, and report it if it comes back'
+              >
+                {/* ЧЕТЫРЕ СЛОВА, А НЕ ПРЕДЛОЖЕНИЕ: коробка заглушки капслочит содержимое
+                    (`placeholderClass`), а капслок в этой системе разрешён ярлыку, но не фразе
+                    (DESIGN.md §3). Предложение целиком живёт в `title` над ним. */}
+                <Text size='micro' variant='errorLabel' component='span'>
+                  ! detail without an id
+                </Text>
+              </div>
+            );
+          const ref: DesignBenchSlotRef = detailRef(slotId);
           const rev = slot.slotRev ?? 0;
           const name = displayDetailName(bench.details, slot);
           const picture = shownPicture(ref, slot.picture);

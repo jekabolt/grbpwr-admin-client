@@ -10,11 +10,12 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
-import { InertDoor, displayDetailName, readBench } from '../bench-slot';
+import { displayDetailName, readBench } from '../bench-slot';
 import { filledFlatSlots, sentFlatSlotIds, useFlatSlotsSend } from '../flat-slots-send';
 import { markedPlatesOf } from '../fix-markup';
 import { WhatModelGetsModal } from '../modals';
 import { serverSpeaksDesign } from '../capability';
+import { GenerateRow } from '../render/generate-row';
 import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from '../views';
 import { useStartRun } from './use-generation';
 
@@ -200,7 +201,12 @@ export function GenerationForm({
   // чем он съеден убери потолок». Деньги не ушли — цена ПРОГОНА по-прежнему называется на его
   // строке в истории, о чём говорит подпись у кнопки.
   const gateReason = !speaks
-    ? 'this server does not speak the design band yet — nothing can be generated here'
+    ? /* ⚠ ЭТУ ФРАЗУ БОЛЬШЕ НЕ ПОКАЗЫВАЮТ, И ЭТО НАРОЧНО. Ряд (`GenerateRow`) сам спрашивает
+         `serverSpeaksDesign()` ПЕРВЫМ и печатает свою формулировку — ту же, что на трёх соседних
+         экранах; так владелец и просил («и логику»). Ветка осталась ЗАМКОМ ПРОВОДА: `submit`
+         ниже заперт этой же переменной, и снять её значило бы разрешить отправку туда, где
+         сервер про DESIGN не знает вовсе. */
+      'this server does not speak the design band yet — nothing can be generated here'
     : disabled
       ? 'this card is read-only'
       : noViews
@@ -443,30 +449,47 @@ export function GenerationForm({
           настоящий отправленный промпт хранится на прогоне (`design_run.prompt`). S-2/S-3 прошлых
           кругов: подпись о нумерации живёт в строке истории, FIT — в классификации хедера. */}
 
-      <div className='flex flex-wrap items-center gap-2 py-1'>
-        {gateReason ? (
-          /* Размер двери отказа равен размеру живой кнопки под ней — см. `InertDoor` (F-1). */
-          <InertDoor label='GENERATE' reason={gateReason} size='sm' />
-        ) : (
-          <Button variant='main' size='sm' onClick={submit} disabled={startRun.isPending}>
-            {startRun.isPending ? 'starting…' : 'GENERATE'}
-          </Button>
-        )}
-        <Text size='micro' variant='label' component='span'>
-          {outputsLine}
-        </Text>
-        {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — `wmgModal` прототипа. Единственное место, где человек видит
-            ПОЛНЫЙ состав запроса до того, как заплатит за прогон: доска, роли референсов, тексты
-            указаний, замысел и посадка. Без него форма просит согласиться на то, чего не показывает. */}
-        <Button variant='secondary' size='xs' onClick={() => setWmgOpen(true)}>
-          what the model gets ▸
-        </Button>
-        {/* T-12: дневная полоса «today $x of $y» снята — показывается только цена генерации, и
-            живёт она на строке прогона в истории; три слова справа говорят, где её искать. */}
-        <Text size='micro' variant='label' component='span' className='ml-auto'>
-          priced on its history row
-        </Text>
-      </div>
+      {/* ⚠ РЯД — ОБЩИЙ ОРГАН, А НЕ ОБРАЗЕЦ ДЛЯ КОПИРОВАНИЯ (F-1). Владелец: «сделай кноку генерейт
+          такого же размера как на флет генерации вообще везде сделай ее одиаковой и логику и
+          отступы». Образцом он назвал ИМЕННО ЭТОТ экран — потому здесь ничего и не двигалось,
+          двигалось у соседей. Но разметка образца стояла ЗДЕСЬ ЖЕ вторым определением: тот же
+          `py-1`, та же `Button main sm`, та же дверь отказа `sm`, та же подмена подписи на
+          `starting…`. Пока их два, «такая же» — это совпадение, которое держится на памяти
+          правящего. Теперь ряд рисует `GenerateRow`, и образец стал самим органом.
+
+          ХВОСТ ОСТАЛСЯ СВОИМ, ПОТОМУ ЧТО ОН И ЕСТЬ СВОЙ: состав выхода (`outputsLine`), дверь
+          описи и три слова о том, где искать цену. Стандартный хвост ряда говорит о том же одной
+          фразой («… · priced by the server when the run starts»), и подставить её сюда значило бы
+          сказать про деньги дважды в шести пикселях друг от друга — `shape` поэтому не передаётся.
+
+          ⚠ `disabled` РЯДУ НЕ ПЕРЕДАЁТСЯ, И ЭТО НЕ ЗАБЫТО. Право на запись уже названо в
+          `gateReason` теми словами, которыми этот экран говорил всегда («this card is read-only»),
+          и ТОЙ ЖЕ переменной заперт `submit`. Передать его вторым путём значило бы, что дверь и
+          провод читают разные источники одного факта, а расходятся такие пары молча. */}
+      <GenerateRow
+        gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
+        pending={startRun.isPending}
+        onGenerate={submit}
+        trailing={
+          <>
+            <Text size='micro' variant='label' component='span'>
+              {outputsLine}
+            </Text>
+            {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — `wmgModal` прототипа. Единственное место, где человек видит
+                ПОЛНЫЙ состав запроса до того, как заплатит за прогон: доска, роли референсов,
+                тексты указаний, замысел и посадка. Без него форма просит согласиться на то, чего
+                не показывает. */}
+            <Button variant='secondary' size='xs' onClick={() => setWmgOpen(true)}>
+              what the model gets ▸
+            </Button>
+            {/* T-12: дневная полоса «today $x of $y» снята — показывается только цена генерации, и
+                живёт она на строке прогона в истории; три слова справа говорят, где её искать. */}
+            <Text size='micro' variant='label' component='span' className='ml-auto'>
+              priced on its history row
+            </Text>
+          </>
+        }
+      />
 
       {/* THE MARKS DO NOT TRAVEL, SAID WHERE THE MONEY IS SPENT. Since the fix cycle was removed
           (S-15) there is NO road from an edit layer into a run's input — see the header — and the
