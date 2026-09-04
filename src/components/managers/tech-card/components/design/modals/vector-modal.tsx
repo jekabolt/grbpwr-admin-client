@@ -6188,8 +6188,15 @@ export function VectorModal({
             {/* ⚠ РОД КАДРА, А НЕ СЛОВО «FLAT» ВСЕГДА. Редактор открывается и над рендером — с
                 круга 16 прямо из полосы рендеров, — и заголовок называл его флэтом в ста
                 процентах случаев. Правка при этом ничего не переносит между верстаками:
-                `FlattenEditLayer` наследует род и колорвею родителя. */}
-            {base ? `vector edit — ${(base.kind || 'flat').trim()}` : 'vector edit — a new drawing'}
+                `FlattenEditLayer` наследует род и колорвею родителя.
+
+                ⚠ И ПУСТОЙ РОД — ТОЖЕ НЕ «FLAT». Фолбэк `|| 'flat'` возвращал ровно ту ложь, на
+                которую жалуется абзац выше: картинка мудборда рода не несёт вовсе (её база
+                собирается из медиа, а не из кадра полосы), и правка фотографии объявлялась
+                правкой флэта. Безродный кадр называется кадром. */}
+            {base
+              ? `vector edit — ${(base.kind || '').trim() || 'a picture'}`
+              : 'vector edit — a new drawing'}
           </Dialog.Title>
           <Dialog.Description className='sr-only'>
             strokes over the picture on a pan and zoom canvas; the raster underneath is never touched

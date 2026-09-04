@@ -96,10 +96,12 @@ export function polygonCentroid(pts: ShapePoint[]): ShapePoint {
  */
 export const BRACKET_DROP = 10;
 
-const mid = (p: ShapePoint, q: ShapePoint): ShapePoint => ({
+/** Середина отрезка. Экспортируется: от неё же Shift держит изгиб кривой (D-17). */
+export const midpoint = (p: ShapePoint, q: ShapePoint): ShapePoint => ({
   x: (p.x + q.x) / 2,
   y: (p.y + q.y) / 2,
 });
+const mid = midpoint;
 
 /** Нормаль к отрезку p→q длиной `d`. Вырожденный отрезок даёт нулевую длину — делить не на что. */
 function offsetNormal(p: ShapePoint, q: ShapePoint, d: number): ShapePoint {
@@ -121,6 +123,91 @@ export function bracketPath(p: ShapePoint, q: ShapePoint): string {
     .join(' L')}`;
 }
 
+// ── НАКОНЕЧНИКИ (круг 18, D-19/D-20) ────────────────────────────────────────────────────────────
+
+/** Полудлина засечки, пикселей кадра. Была `TICK` в отрисовке; здесь — потому что ею же меряет проба. */
+export const TICK_HALF = 7;
+
+/** Два конца фигуры с единичными касательными, направленными НАРУЖУ фигуры. */
+export type ShapeEnds = { a: ShapePoint; ta: ShapePoint; b: ShapePoint; tb: ShapePoint };
+
+const unit = (v: ShapePoint): ShapePoint => {
+  const l = Math.hypot(v.x, v.y) || 1;
+  return { x: v.x / l, y: v.y / l };
+};
+
+export function lineEnds(p: ShapePoint, q: ShapePoint): ShapeEnds {
+  const t = unit({ x: q.x - p.x, y: q.y - p.y });
+  return { a: p, ta: { x: -t.x, y: -t.y }, b: q, tb: t };
+}
+
+/**
+ * Касательные квадратичной Безье в концах: P0→C и C→P2 — поэтому засечка на кривой стоит поперёк
+ * САМОЙ кривой, а не поперёк хорды. Вырожденный конец (C совпал с ним) падает на хорду.
+ */
+export function arcEnds(p0: ShapePoint, p1: ShapePoint, p2: ShapePoint): ShapeEnds {
+  const c = arcControlPoint(p0, p1, p2);
+  const chord = unit({ x: p2.x - p0.x, y: p2.y - p0.y });
+  const da = { x: p0.x - c.x, y: p0.y - c.y };
+  const db = { x: p2.x - c.x, y: p2.y - c.y };
+  return {
+    a: p0,
+    ta: Math.hypot(da.x, da.y) > 1e-9 ? unit(da) : { x: -chord.x, y: -chord.y },
+    b: p2,
+    tb: Math.hypot(db.x, db.y) > 1e-9 ? unit(db) : chord,
+  };
+}
+
+/** Засечка: отрезок поперёк касательной, центром в конце. */
+export function tickPath(at: ShapePoint, t: ShapePoint, half = TICK_HALF): string {
+  const nx = -t.y * half;
+  const ny = t.x * half;
+  return `M${at.x - nx},${at.y - ny} L${at.x + nx},${at.y + ny}`;
+}
+
+/**
+ * Ножка скобы на конце КРИВОЙ: от конца по правой нормали к ходу линии, длиной `BRACKET_DROP`.
+ * «Правая» — та же сторона, куда отстоит перекладина у прямой скобы (`offsetNormal`), поэтому
+ * прямая и кривая со скобой смотрят ножками в одну сторону. `travel` — направление ХОДА линии в
+ * этом конце (в начале — внутрь фигуры, в конце — наружу).
+ */
+export function legPath(at: ShapePoint, travel: ShapePoint, drop = BRACKET_DROP): string {
+  const t = unit(travel);
+  return `M${at.x},${at.y} L${at.x - t.y * drop},${at.y + t.x * drop}`;
+}
+
+// ── SHIFT: 0° · 45° · 90° (круг 18, D-17) ─────────────────────────────────────────────────────
+
+/** Восемь направлений фотошопа — таблицей, чтобы 45° давало РАВНЫЕ приращения, а не cos ≠ sin. */
+const DIRS: ShapePoint[] = [
+  { x: 1, y: 0 },
+  { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+  { x: 0, y: 1 },
+  { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
+  { x: -1, y: 0 },
+  { x: -Math.SQRT1_2, y: -Math.SQRT1_2 },
+  { x: 0, y: -1 },
+  { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
+];
+
+/**
+ * Точка, прижатая к ближайшему из восьми направлений от якоря — как в фотошопе с зажатым Shift.
+ *
+ * СЧИТАЕТСЯ В ПИКСЕЛЯХ, не в долях: доли по X и Y — разные единицы, и «45°» в долях на альбомном
+ * кадре не 45° на экране. ПРОЕКЦИЯ на направление, а не поворот вектора: точка остаётся там,
+ * куда её довели вдоль удержанной оси, меняется только вторая координата. Совпавшая с якорем
+ * точка возвращается как есть — направления у неё нет.
+ */
+export function constrainTo45(anchor: ShapePoint, p: ShapePoint): ShapePoint {
+  const dx = p.x - anchor.x;
+  const dy = p.y - anchor.y;
+  if (dx === 0 && dy === 0) return p;
+  const i = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+  const u = DIRS[i];
+  const len = dx * u.x + dy * u.y;
+  return { x: anchor.x + len * u.x, y: anchor.y + len * u.y };
+}
+
 // ── ЛИДЕР ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -132,16 +219,26 @@ export function bracketPath(p: ShapePoint, q: ShapePoint): string {
  *
  * `null` — у вида лидера нет вовсе (пин, след): у первого нет линии, у второго плашка стоит на
  * самом штрихе.
+ *
+ * `caps` — ДЕЙСТВУЮЩИЙ наконечник (`effectiveCaps`), не хранимый: у линии только скоба отстоит
+ * от хорды, и лидер обязан прийти на перекладину; ключ вида этого больше не говорит (D-19).
+ *
+ * ⚠ АРГУМЕНТ ОБЯЗАТЕЛЬНЫЙ, И ЭТО НЕ ПЕДАНТИЗМ. С умолчанием `''` вызывающий, забывший его,
+ * получал БЕЗ ЕДИНОГО ПРЕДУПРЕЖДЕНИЯ середину хорды у каждой скобы — то есть лидер, уехавший с
+ * перекладины, — а до D-19 ключ `bracket` давал перекладину ВСЕГДА. Умолчание молча меняло
+ * поведение в пользу самого частого случая и наказывало за забывчивость картинкой, а не ошибкой.
+ * Пустая строка передаётся явно там, где наконечника у вида нет (зона, след): это утверждение,
+ * а не пропуск.
  */
-export function leaderTarget(kindKey: string, pts: ShapePoint[]): ShapePoint | null {
+export function leaderTarget(kindKey: string, pts: ShapePoint[], caps: string): ShapePoint | null {
   if (pts.length === 0) return null;
   switch (kindKey) {
     case 'dim':
-      return pts.length >= 2 ? mid(pts[0], pts[1]) : null;
     case 'bracket': {
       if (pts.length < 2) return null;
-      const n = offsetNormal(pts[0], pts[1], BRACKET_DROP);
       const m = mid(pts[0], pts[1]);
+      if (caps !== 'bracket') return m;
+      const n = offsetNormal(pts[0], pts[1], BRACKET_DROP);
       return { x: m.x + n.x, y: m.y + n.y };
     }
     case 'arc':

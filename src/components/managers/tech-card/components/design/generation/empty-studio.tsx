@@ -90,26 +90,31 @@ export function EmptyStudio({
         <Button variant='secondary' size='sm' onClick={gotoInput}>
           + add files
         </Button>
-        {onGenerate && speaks ? (
-          <Button variant='main' size='sm' onClick={onGenerate} disabled={disabled}>
-            GENERATE ▸
-          </Button>
-        ) : (
-          <InertDoor
-            label='GENERATE ▸'
-            /* ⚠ `sm`, А НЕ УМОЛЧАНИЕ (F-1). Тремя строками выше стоит ЖИВАЯ кнопка `size='sm'` —
-               эта дверь заменяет ИМЕННО ЕЁ, в том же ряду. Замерено: дверь была 20px с паддингом
-               1/6, кнопка 26px с паддингом 4/10, и ряд подпрыгивал ровно на этой замене. */
-            size='sm'
-            reason={
-              !speaks
-                ? 'this server does not speak the design band yet — bring the pictures in by hand instead; the bench treats them identically.'
-                : 'the generation form is not mounted on this screen.'
-            }
-          />
-        )}
+        {/* ⚠ ОТСУТСТВИЕ `onGenerate` — ЭТО «ДВЕРИ ЗДЕСЬ НЕТ», А НЕ «ДВЕРЬ ВЫКЛЮЧЕНА».
+            Раньше обе ветки рисовали дверь, и после D-1 (форма перестала складываться и стоит
+            развёрнутой прямо над этим блоком) владелец снял проп — а блок нарисовал ПОГАШЕННУЮ
+            дверь с причиной «the generation form is not mounted on this screen», которая на
+            двести пикселей выше опровергается сама собой. Погашенная дверь обязана объяснять
+            невозможность; здесь она объясняла своё собственное отсутствие. */}
+        {onGenerate &&
+          (speaks ? (
+            <Button variant='main' size='sm' onClick={onGenerate} disabled={disabled}>
+              GENERATE ▸
+            </Button>
+          ) : (
+            <InertDoor
+              label='GENERATE ▸'
+              /* ⚠ `sm`, А НЕ УМОЛЧАНИЕ (F-1). Строкой выше стоит ЖИВАЯ кнопка `size='sm'` — эта
+                 дверь заменяет ИМЕННО ЕЁ, в том же ряду. Замерено: дверь была 20px с паддингом
+                 1/6, кнопка 26px с паддингом 4/10, и ряд подпрыгивал ровно на этой замене. */
+              size='sm'
+              reason='this server does not speak the design band yet — bring the pictures in by hand instead; the bench treats them identically.'
+            />
+          ))}
         <Text size='micro' variant='label' component='span'>
-          two equal doors — nothing on this card requires a run
+          {onGenerate
+            ? 'two equal doors — nothing on this card requires a run'
+            : 'nothing on this card requires a run — the form above is the door'}
         </Text>
       </div>
     </Section>

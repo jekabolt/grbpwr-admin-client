@@ -8,7 +8,7 @@ import { clockStamp } from '../handles';
 import { RecallDoors } from '../history-recall';
 import { viewLabel } from '../views';
 import { formatMoney } from './money';
-import { isCancelling, isRunLive, viewsLine } from './run-state';
+import { isCancelling, isRunLive, runFailureText, runStatus, viewsLine } from './run-state';
 import { Thumb } from './thumb';
 import { useGenerationWrites } from './use-generation';
 
@@ -216,6 +216,8 @@ export function RunPanel({
 
   const fit = (run.fitAtLaunch ?? '').trim();
   const sent = (run.prompt ?? '').trim();
+  /** Полный ответ провайдера об отказе — довод у самой строки ниже (D-4). */
+  const failure = runFailureText(run);
 
 
   return (
@@ -310,6 +312,50 @@ export function RunPanel({
           </Text>
         )}
       </PanelRow>
+
+      {/* ═══ ПОЧЕМУ ЭТОТ ПРОГОН УПАЛ — ЦЕЛИКОМ, И ИМЕННО ЗДЕСЬ (D-4) ═══════════════════════════
+          Строка истории носит исход в `Pill`, а `Pill` по построению `whitespace-nowrap`: текст
+          провайдера длиной до 4 000 знаков (`designMaxErrorText`) уносил бы там страницу вбок
+          на шестнадцать экранов. Поэтому чип обрезан, а НЕОБРЕЗАННЫЙ ответ живёт на панели —
+          поверхности, которая умеет переносить абзац. Ничего не потеряно и ничего не пересказано
+          своими словами: код провайдера и его же текст, как есть.
+
+          `break-words` + `whitespace-pre-wrap` — та же пара, что у base text выше: ответ
+          провайдера регулярно приезжает как JSON без единого пробела на строке. */}
+      {/* ⚠ ЗАГОЛОВОК РЯДА ЗАВИСИТ ОТ СТАТУСА, А НЕ ОТ НАЛИЧИЯ ТЕКСТА. Код и текст последней
+          ошибки живут на строке И У ЖИВОГО, И У ОТМЕНЁННОГО прогона — `runOutcomeNote` разбирает
+          ровно эти три случая: живой прогон с кодом это ПОВТОР после неудачи, отменённый с кодом
+          это то, что человек оборвал. Безусловное «why it failed» утверждало провал про прогон,
+          который в двух сантиметрах выше подписан «retrying» или «cancelled», — две несогласные
+          фразы об одном прогоне на одном экране. */}
+      {(failure.code || failure.text) && (
+        <PanelRow
+          k={
+            runStatus(run) === 'failed'
+              ? 'why it failed'
+              : runStatus(run) === 'cancelled'
+                ? 'what was cut short'
+                : 'the attempt before this one'
+          }
+          title='the provider’s own code and message, stored on the run'
+        >
+          {failure.code && (
+            <Text size='micro' component='span' className='uppercase tracking-label'>
+              {failure.code}
+            </Text>
+          )}
+          {failure.text && (
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              className='max-w-[75ch] whitespace-pre-wrap break-words'
+            >
+              {failure.text}
+            </Text>
+          )}
+        </PanelRow>
+      )}
 
       {/* ATTEMPTS ARE THE HONEST HALF OF THE MONEY: without per-attempt rows, `price_actual` reads
           as the price of the LAST attempt and the budget bar undercounts every retry. «Failed, and
