@@ -22,25 +22,21 @@ import type { EditHistory } from 'ui/components/annotation/history';
 import {
   AnnotationSurface,
   noteArrowsOf,
-  rememberPen,
   type AnnotationSurfaceProps,
   type NoteArrows,
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
 } from 'ui/components/annotation/surface';
-import { kindDef, PALETTE_KINDS } from 'ui/components/annotation/kinds';
-import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
+import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
 import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
@@ -53,6 +49,7 @@ import {
   serverStatesOutputs,
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
+import { CalloutRail } from './callout-rail';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
 import { VectorModal } from './modals';
@@ -335,7 +332,22 @@ export function runKindByMediaId(band: GetDesignBandResponse): Map<number, strin
  */
 export function bandPlates(
   band: GetDesignBandResponse,
-  kind: 'pattern' | 'render' | 'threed' | 'onmodel',
+  /**
+   * ═══ ФЛЭТ ЗДЕСЬ С КРУГА 20, И ДО ЭТОГО ЕГО ЗДЕСЬ НЕ ХВАТАЛО (B-2) ══════════════════════════
+   *
+   * Владелец, дословно: «когда нажал генерейт в FLAT — SHEET новую генерацию по дефолту не
+   * показывает в фильтре флетс а должно». Сегмент `flats` — ЕДИНСТВЕННЫЙ из пяти, у кого читателя
+   * выходов не было вовсе: он складывался из медиа документа и флэт-верстака, то есть из того, что
+   * УЖЕ приняли на карточку. Свежий прогон классифицировался верно и не попадал никуда, а сегмент
+   * этот — ДЕФОЛТНЫЙ, и открытый лист показывал вчерашние стороны там, где минуту назад нажали
+   * GENERATE. Пустое состояние вдобавок советовало «положите флэт в сторону ниже» — совет человеку,
+   * который уже сделал ровно это платным прогоном.
+   *
+   * ⚠ ЭТО НЕ ОТМЕНЯЕТ ПРАВИЛА «СЛОТ И ЕСТЬ ВЫБОР ФЛЭТА». Верстак по-прежнему решает, какой флэт —
+   * официальная сторона: `sideCells` расставляет по сторонам плиты СЛОТОВ и карточки, а выходы
+   * ленты становятся хвостом ряда. Изменилось одно — хвост перестал быть пустым.
+   */
+  kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel',
   already: Set<number>,
 ): { plates: DocumentPlate[]; filteredToSelected: boolean; serverStates: boolean } {
   /* ПЛИТКИ БЕРУТСЯ СВОИМ ЧИТАТЕЛЕМ, А НЕ ЧЕРЕЗ `outputsOfKind`. Та функция сужена типом до
@@ -369,11 +381,13 @@ export function bandPlates(
      типом до `'render' | 'threed'`, а `recolorOutputs` держит то же правило чтения (вся карточка,
      когда сервер её называет, иначе страница ленты) и живёт рядом со своим экраном. */
   const rows =
-    kind === 'pattern'
-      ? patternOutputs(band)
-      : kind === 'onmodel'
-        ? recolorOutputs(band)
-        : outputsOfKind(band, kind);
+    kind === 'flat'
+      ? flatOutputRows(band)
+      : kind === 'pattern'
+        ? patternOutputs(band)
+        : kind === 'onmodel'
+          ? recolorOutputs(band)
+          : outputsOfKind(band, kind);
   const outputs = rows.filter(({ picture }) => !pictureIsModel(picture));
   /**
    * ЧТО СТОИТ ЗА РАСТРОМ 3D — ФАЙЛ МОДЕЛИ (D-26). Свод пары «модель + её миниатюра» один на всю
@@ -480,26 +494,31 @@ export function bandPlates(
 }
 
 /**
- * ═══ КАДРЫ ТОЛЬКО ДЛЯ ПОКАЗА ОДНОГО ПРЕДСТАВЛЕНИЯ (D-24) — читатель для флэтов ══════════════════
+ * ═══ ВЫХОДЫ ФЛЭТОВ ВСЕЙ КАРТОЧКИ — ЧИТАТЕЛЬ, КОТОРОГО У СЕГМЕНТА `flats` НЕ БЫЛО (B-2) ══════════
  *
- * Сегменты рендеров, плиток, 3D и перекраса получают такие кадры даром, через `bandPlates`: их
- * читатели идут по `outputs` карточки, где лежит и загруженное руками. У флэтов читателя выходов
- * на этом экране нет — их сегмент это документ плюс верстак, — и витринный флэт без этой
- * функции не появлялся бы нигде.
+ * ВСЯ КАРТОЧКА, КОГДА СЕРВЕР ЕЁ НАЗЫВАЕТ (`cardOutputRows`), иначе — прогоны загруженной страницы
+ * ленты плюс пачки загрузок. Ровно тот же двухветочный договор, что у `outputsOfKind`,
+ * `patternOutputs` и `recolorOutputs`, — четвёртый диалект одной мысли разошёлся бы с тремя молча.
  *
- * ВСЯ КАРТОЧКА, КОГДА СЕРВЕР ЕЁ НАЗЫВАЕТ (`cardOutputRows`), иначе — прогоны страницы и пачки
- * загрузок: на старом бинаре поля `display_only` нет вовсе, и ветка честно отдаёт пусто.
+ * ⚠ РОД СПРАШИВАЕТСЯ У `runRepresentation`, А НЕ СРАВНЕНИЕМ `run.kind === 'flat'`. Флэт приезжает
+ * ТРЕМЯ родами прогона — `flat`, `vector` и `draft_idea` (машинная перерисовка и текстовый черновик
+ * это работа НАД флэтом, и сервер согласен: обе он файлит под `flat`). Сравнение со строкой
+ * потеряло бы две трети из них, и потеряло бы ТИХО.
+ *
+ * ЭТА ФУНКЦИЯ БЫЛА `displayOnlyPlates` И ОТДАВАЛА ТОЛЬКО ВИТРИННЫЕ КАДРЫ (D-24). Отбор по
+ * `display_only` стоял ВНУТРИ читателя — то есть читатель существовал, звался с `'flat'` и
+ * выбрасывал всё остальное; сегмент из-за этого видел ровно ту часть выходов, которую человек
+ * пометил «для показа», и ни одного прогона. Отбор переехал в `bandPlates`, где он живёт для всех
+ * пяти родов одной строкой, а читатель остался читателем.
  */
-export function displayOnlyPlates(
+export function flatOutputRows(
   band: GetDesignBandResponse,
-  rep: 'flat',
-  already: Set<number>,
-): DocumentPlate[] {
-  const rows =
-    cardOutputRows(band, rep) ??
+): { picture: common_DesignPicture; run: common_DesignRun }[] {
+  return (
+    cardOutputRows(band, 'flat') ??
     [
       ...(band.runs ?? [])
-        .filter((run) => runRepresentation(run) === rep)
+        .filter((run) => runRepresentation(run) === 'flat')
         .flatMap((run) => (run.pictures ?? []).map((picture) => ({ picture, run }))),
       ...(band.batches ?? []).flatMap((batch) =>
         (batch.pictures ?? []).map((picture) => ({
@@ -507,26 +526,8 @@ export function displayOnlyPlates(
           run: { id: 0 } as common_DesignRun,
         })),
       ),
-    ].filter(({ picture }) => !isPictureHidden(picture));
-  const plates: DocumentPlate[] = [];
-  for (const { picture, run } of rows) {
-    if (!pictureIsDisplayOnly(picture)) continue;
-    const mediaId = picture.media?.id ?? 0;
-    if (mediaId <= 0 || already.has(mediaId)) continue;
-    already.add(mediaId);
-    plates.push({
-      key: `m-${mediaId}`,
-      name: pictureHandle(picture).toUpperCase(),
-      mediaId,
-      media: picture.media,
-      origin: 'run',
-      chosen: pictureIsSelected(picture),
-      pictureId: picture.id ?? 0,
-      displayOnly: true,
-      note: (run.id ?? 0) > 0 ? `run ${run.id}` : 'no run',
-    });
-  }
-  return plates;
+    ].filter(({ picture }) => !isPictureHidden(picture))
+  );
 }
 
 /**
@@ -994,11 +995,11 @@ export function ArtifactsPanel({
 
     const onCard = new Set(plates.map((p) => p.mediaId));
 
-    // ФЛЭТЫ: документ + флэт-верстак (`plates`) + витринные флэты; стороны по порядку.
-    const flatAll = mark([
-      ...plates.filter((p) => of(p) === 'flat'),
-      ...displayOnlyPlates(band, 'flat', new Set(onCard)),
-    ]);
+    // ФЛЭТЫ: документ + флэт-верстак (`plates`) + ВЫХОДЫ ЛЕНТЫ (B-2); стороны по порядку.
+    // Свой `Set` — как у трёх соседей: `onCard` считан один раз на все пять сегментов, и читатель,
+    // дописывающий в него, вычеркнул бы свои плиты из следующего.
+    const flatBand = bandPlates(band, 'flat', new Set(onCard));
+    const flatAll = mark([...plates.filter((p) => of(p) === 'flat'), ...flatBand.plates]);
     const flat = sideCells('flat', flatSides, flatAll, cardViewOf);
 
     // РЕНДЕРЫ: плиты рендер-верстака — ДО выходов ленты и вместе с карточными: слот старше
@@ -1020,7 +1021,19 @@ export function ArtifactsPanel({
     const threedAll = mark([...plates.filter((p) => of(p) === 'threed'), ...threedBand.plates]);
     const onmodelAll = mark([...plates.filter((p) => of(p) === 'onmodel'), ...onmodelBand.plates]);
     return {
-      flat: { plates: flat.ordered, cells: flat.cells, filteredToSelected: false, serverStates: true },
+      /* ⚠ ОБА ФЛАГА СЧИТАЮТСЯ, А НЕ ЗАШИТЫ (B-2). Стояло `filteredToSelected: false,
+         serverStates: true` — два утверждения о списке, которого у сегмента не было; с приходом
+         читателя они стали неправдой о настоящем списке. Считаются они ТЕМ ЖЕ выражением, что у
+         четырёх соседей: «если карточка пометила хоть один флэт — сегмент это помеченные». Сегодня
+         помечать флэт нечем (дверь пометки закрыта роду `flat` — выбор флэта это слот верстака), и
+         значение выходит ложным само; сравняться с соседями по ПОСТРОЕНИЮ дешевле, чем повторить
+         этот довод третьим местом и однажды его пережить. */
+      flat: {
+        plates: flat.ordered,
+        cells: flat.cells,
+        filteredToSelected: flatBand.filteredToSelected,
+        serverStates: flatBand.serverStates,
+      },
       // K-15 — ПЛИТКИ ПОПАДАЮТ СЮДА ТЕМ ЖЕ ПУТЁМ, ЧТО РЕНДЕРЫ: сначала те, что уже в медиа
       // карточки, потом помеченные `selected` из ленты. Сужение до помеченных — то же правило и
       // ПО РОДУ: вердикт «эта плитка» ничего не говорит о том, какой рендер выбран.
@@ -1187,6 +1200,12 @@ export function ArtifactsPanel({
           color: c.color ?? '',
           dashed: !!c.dashed,
           filled: !!c.filled,
+          /* НАКОНЕЧНИК ЕДЕТ НА ПЛИТУ ВМЕСТЕ С ФИГУРОЙ (B-8b, вторая половина). Без этого поля
+             поверхность звала `effectiveCaps(kind, undefined)` и рисовала УМОЛЧАНИЕ вида: линия,
+             которой на эскизе выбрали засечки, здесь показывала стрелки. Не «мелочь оформления» —
+             указание на листе и указание в окне это ОДНА строка формы, и два разных наконечника у
+             неё означают, что один из двух экранов врёт о том, что сохранено. */
+          caps: c.caps ?? '',
         };
       });
 
@@ -1656,9 +1675,12 @@ export function ArtifactsPanel({
    * по документу целиком; индекс строки в полном массиве при этом цел (довод ниже не менялся).
    */
   const sheetRows = useMemo(() => {
-    const onTab = new Set(onScreen.map((p) => p.mediaId));
+    // ИМЯ ПЛИТЫ СЧИТАЕТСЯ ЗДЕСЬ ЖЕ, а не внутри меню: с переездом меню в общий орган
+    // (`./callout-rail`) «где стоит указание» стало ПРОСТО СТРОКОЙ — у листа это имя плиты, у
+    // доски «picture N». Общему органу неоткуда знать ни про плиты, ни про доску, и знать не надо.
+    const onTab = new Map(onScreen.map((p) => [p.mediaId, p.name] as const));
     return callouts
-      .map((c, index) => ({ c, index }))
+      .map((c, index) => ({ c, index, where: onTab.get(c.mediaId ?? 0) ?? null }))
       .filter(({ c }) => onTab.has(c.mediaId ?? 0));
   }, [callouts, onScreen]);
 
@@ -1711,12 +1733,16 @@ export function ArtifactsPanel({
                       поймал на соседнем экране. Читается БИНАРЬ (`serverStatesOutputs`), а не
                       длина списка: на сервере старше поля читатели по-прежнему обходят страницу,
                       и прежние слова там по-прежнему верны. */}
-                  {kind !== 'flat' &&
-                    (segment.filteredToSelected
-                      ? ' · the chosen ones'
-                      : serverStatesOutputs(band)
-                        ? ' · everything this card holds'
-                        : ' · everything on this page')}
+                  {/* ⚠ ФЛЭТЫ БОЛЬШЕ НЕ МОЛЧАТ (B-2). Условие `kind !== 'flat'` стояло по честной
+                      причине: у сегмента не было читателя выходов, его список был «документ плюс
+                      верстак», и фраза про охват ленты над ним ничего бы не значила. Читатель
+                      пришёл — причина ушла вместе с ним, и немой сегмент стал бы единственным, о
+                      чьём охвате не сказано ничего, ровно там, где охват впервые больше страницы. */}
+                  {segment.filteredToSelected
+                    ? ' · the chosen ones'
+                    : serverStatesOutputs(band)
+                      ? ' · everything this card holds'
+                      : ' · everything on this page'}
                 </Text>
                 {/* ═══ ДВЕРЬ «ТОЛЬКО ДЛЯ ПОКАЗА» — В ШАПКЕ РЯДА, А НЕ ВТОРОЙ ПЛИТОЙ (D-24) ═══════
                     Слот «+ add …» в конце ряда кладёт файл В ДОКУМЕНТ (или в слот); эта дверь —
@@ -1936,9 +1962,19 @@ export function ArtifactsPanel({
           }
           className='lg:w-[340px] lg:shrink-0'
         >
-          <CalloutPanel
+          {/* ⚠ ТОТ ЖЕ ОРГАН, ЧТО У МУДБОРДА (B-9). Тело переехало отсюда в `./callout-rail`
+              целиком — со списком, правкой, наведением и пиктограммой вида, — потому что владелец
+              потребовал у доски «такое же меню как в артифактах, логика должна там быть такая-же»,
+              а вторая копия расходится с первой первой же правкой. Здесь остались ровно те факты,
+              которые про ЛИСТ: номер выноски (у доски его нет), деталь и мерка (у доски их нет) и
+              имя плиты в `where`.
+              ⚠ `caps` ТЕПЕРЬ ПЕРЕДАЁТСЯ (B-8b). Чипов наконечника здесь не было ни до переезда, ни
+              после: `AnnotationStyleRow` рисует их только вместе с `onCaps`, а его не передавал
+              никто — круг 18 снял чипы `dimension`/`span` с палитры и подключил замену только к
+              эскизу. Владелец прочёл это как поломку («нет выбора вида стрелки»), и он прав: D-19
+              и D-20 обещают смену наконечника В МЕНЮ УКАЗАНИЯ, а меню на листе одно — это. */}
+          <CalloutRail
             rows={sheetRows}
-            plates={onScreen}
             selected={selected}
             onSelect={setSelected}
             hoverIndex={hoverIndex}
@@ -1955,6 +1991,8 @@ export function ArtifactsPanel({
                   })
             }
             focusToken={focusEditor}
+            caps
+            emptyLabel='none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
           />
         </Section>
       </SectionStack>
@@ -2204,10 +2242,21 @@ const PLATE_FRAME_HEIGHT = 680;
  * ЧИТАЕТСЯ ИЗ РЕЕСТРА, А НЕ ПИШЕТСЯ КЛЮЧОМ: палитра принадлежит `ui/annotation`, и её первый
  * чип — её решение; лист лишь берёт то, что палитра считает первым жестом.
  *
- * ЦЕНА НАЗВАНА: пока инструмент взведён, клик по уже стоящей выноске НА ПЛИТЕ не выбирает её
- * (поверхность прозрачна для попаданий во время постановки — иначе точку под чужой фигурой не
- * поставить). Выбирают из списка CALLOUTS рядом, где и пишут текст; чип «cancel» отдаёт руку
- * чтению, если надо потаскать маркеры кликом по плите.
+ * ЦЕНА НАЗВАНА — И ПЕРЕПИСАНА В КРУГЕ 20 (B-8). Здесь стояло: «пока инструмент взведён, клик по
+ * уже стоящей выноске НА ПЛИТЕ не выбирает её». Это БОЛЬШЕ НЕ ПРАВДА и было починкой B-8: жалоба
+ * владельца звучала ровно как «не могу их двигать и ничего не могу с ними делать».
+ *
+ * Правило теперь делит не по «идёт ли жест», а ПО ТОМУ, ВО ЧТО ПОПАЛИ. Булавка и плита — это
+ * РУЧКИ органа: клик по ним выбирает и таскает, всегда, взведён инструмент или нет. Штрих и
+ * залитая площадь — это КАРТИНКА: пока инструмент взведён, хит-путь невыбранной фигуры вообще не
+ * тестируется на попадание, поэтому точку можно поставить прямо поверх чужой линии и внутри чужой
+ * зоны. Два клика больше не могут столкнуться, потому что хит-путь жеста не видит.
+ *
+ * ОСТАТОЧНАЯ ЦЕНА, замерена, а не прикинута: первая точка не ляжет (а) на 18px кружок булавки и на
+ * коробку плиты — это и есть плата за то, что у выносок появились ручки; (б) на собственную полосу
+ * ОДНОЙ ВЫБРАННОЙ сейчас фигуры, а у выбранной залитой зоны — на всю её площадь. Снимается Esc или
+ * кликом по пустому месту. Недостижимым не становится ничто: у безымянной зоны нет плиты, но её
+ * выбирает строка в списке CALLOUTS, после чего она таскается за площадь.
  */
 const DEFAULT_TOOL: string = PALETTE_KINDS[0]?.key ?? 'label';
 
@@ -3062,74 +3111,6 @@ function CalloutHighlight({ callout }: { callout: SurfaceCallout }) {
 }
 
 /**
- * ═══ ПИКТОГРАММА ВИДА УКАЗАНИЯ В СПИСКЕ (C-2) ═══════════════════════════════════════════════════
- *
- * Владелец: «в этом меню пиктограмкой помечать какой это вид колаута кривая там линия и тд».
- *
- * ВИД ЧИТАЕТСЯ ИЗ РЕЕСТРА (`kindDef`), И ГЛИФ КЛЮЧУЕТСЯ ЕГО ПОЛЕМ `tool` — тем же, каким палитра
- * сводит виды хранения к чипам: `dim` и `bracket` дают один глиф линии, `label` и `multi` — один
- * глиф записки. Ярлык и подсказка — тоже реестра: переименует его соседняя волна («line»,
- * «curve») — переименуется и здесь, без правки этого файла. Незнакомый вид рисуется словом, а не
- * пустотой: реестр отвечает пином на всё неизвестное, и глиф пина у него есть.
- */
-function KindGlyph({ kind }: { kind: string }) {
-  const def = kindDef(kind);
-  const tool = def.tool;
-  const common = {
-    viewBox: '0 0 12 12',
-    'aria-hidden': true as const,
-    className: 'h-3 w-3 shrink-0',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.25,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-  };
-  const glyph =
-    tool === 'label' ? (
-      <svg {...common}>
-        <path d='M1.5 10.5 6 6' />
-        <rect x='5.5' y='1.5' width='5' height='4' />
-      </svg>
-    ) : tool === 'dim' ? (
-      <svg {...common}>
-        <path d='M1.5 6h9M1.5 3.5v5M10.5 3.5v5' />
-      </svg>
-    ) : tool === 'arc' ? (
-      <svg {...common}>
-        <path d='M1.5 9.5C3 2 9 2 10.5 9.5' />
-      </svg>
-    ) : tool === 'polygon' ? (
-      <svg {...common}>
-        <path d='M2 3.5 8 1.5l2.5 5.5L6 10.5 1.5 8z' />
-      </svg>
-    ) : tool === 'ink' ? (
-      <svg {...common}>
-        <path d='M1.5 8C3 2 5 10 7 5s3 4 3.5-2' />
-      </svg>
-    ) : tool === 'pin' ? (
-      <svg {...common}>
-        <circle cx='6' cy='6' r='3.5' />
-        <circle cx='6' cy='6' r='1' fill='currentColor' />
-      </svg>
-    ) : null;
-  return (
-    <span
-      data-callout-kind={tool}
-      title={`${def.label} — ${def.hint}`}
-      aria-label={def.label}
-      className='inline-flex h-4 w-4 shrink-0 items-center justify-center text-labelColor'
-    >
-      {glyph ?? (
-        <Text size='nano' variant='label' component='span'>
-          {def.label}
-        </Text>
-      )}
-    </span>
-  );
-}
-
-/**
  * Орган в углу кадра. НЕ `<Button>`, а span с ролью: он живёт внутри общего `<fieldset disabled>`
  * выпущенной карточки, а у нативной кнопки под таким предком `click` не стреляет (замерено в
  * Chromium: гасятся ровно `click` и `focus`). Увеличение — единственный способ прочесть мерку на
@@ -3195,306 +3176,3 @@ function PlateCorner({
     </span>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * The callout panel — and ONE EDIT ON SCREEN AT A TIME, which is the invariant this component
- * exists to hold. Every row is a line; the selected one, and only it, opens its fields. Two open
- * editors on one sheet is how a person types into the wrong callout.
- *
- * ОДИН ВЫБОР НА ЭКРАН, И ЭТО НЕ СОВПАДЕНИЕ: `selected` — то же число, которым плита подсвечивает
- * свой маркер. Нажатие на строку открывает правку И зажигает выноску на картинке; нажатие на пин
- * открывает эту строку. Второе состояние выбора рядом с первым означало бы, что человек правит не
- * ту выноску, которую видит выделенной.
- *
- * WHAT IS WRITTEN HERE AND WHAT IS NOT.
- * Writes are LEAF writes on a dotted path — `callouts.3.description` — which is the same mechanism
- * the surface uses for the same fields. They touch no array identity, so they cannot desynchronise
- * the `useFieldArray` instances that other organs hold over `callouts`; the ROOT write
- * (`setValue('callouts', next)`) is the one that re-syncs them, and this panel needs it for exactly
- * one act — deleting a row — which is why deletion is handed in from the panel that owns the array.
- * ГЕОМЕТРИЯ (якоря, положение маркера) правится ЖЕСТОМ НА ПЛИТЕ, а не полем: доля кадра, набранная
- * с клавиатуры, — это координата, которую человек не видит.
- *
- * СПИСОК ПРИХОДИТ УЖЕ ОТФИЛЬТРОВАННЫМ (`sheetRows`, R-14): только выноски на плитах документа —
- * без открученных («unpinned») и без мудбордных. Каждая строка несёт СВОЙ индекс в полном массиве
- * `callouts`: leaf-запись `callouts.N.description` и `selected` адресуют по нему, и панель,
- * пересчитавшая индексы от видимого списка, писала бы текст в чужую выноску.
- */
-function CalloutPanel({
-  rows,
-  plates,
-  selected,
-  onSelect,
-  hoverIndex,
-  onHover,
-  disabled,
-  onRemove,
-  arrows,
-  focusToken = 0,
-}: {
-  rows: { c: SheetCallout; index: number }[];
-  plates: DocumentPlate[];
-  selected: number | null;
-  onSelect: (index: number | null) => void;
-  /**
-   * НАВЕДЕНИЕ НА СТРОКУ (C-2) — индекс формы, как у выбора. Мышью И фокусом: у клавиатуры ховера
-   * не бывает, и подсветка только для мыши была бы органом не для всех (тот же довод, что у
-   * `hoverNotes` поверхности).
-   */
-  hoverIndex: number | null;
-  onHover: (index: number | null) => void;
-  disabled?: boolean;
-  /** Удалить выноску целиком, или `undefined` — и двери нет: на выпущенной карточке её и не должно быть. */
-  onRemove?: (index: number) => void;
-  /**
-   * ЛУЧИ ВЫБРАННОЙ ЗАПИСКИ. Считаются ОДНОЙ функцией с редактором под кадром (`noteArrowsOf`):
-   * ответ на вопрос «есть ли у этого указания лучи» обязан совпадать на всех экранах.
-   */
-  arrows?: NoteArrows;
-  /**
-   * Просьба поставить курсор в правку выбранной строки: растёт по жесту выбора на плите.
-   *
-   * СЧЁТЧИКОМ, А НЕ ФЛАГОМ, и это тот же довод, что у `EditorPanel` листа эскиза. Данные строки
-   * приходят из `useWatch`, то есть новой ссылкой на каждую запись под формой: наводись фокус «при
-   * изменении выбранного», он уезжал бы сюда из любого другого поля экрана после первого набранного
-   * символа. Число меняется РОВНО в `onSelect`.
-   */
-  focusToken?: number;
-}) {
-  const form = useFormContext<TechCardFormData>();
-  const plateName = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const p of plates) map.set(p.mediaId, p.name);
-    return map;
-  }, [plates]);
-
-  // rows — ПАРЫ «выноска + её индекс В ФОРМЕ», а не отфильтрованный массив. Разница несущая:
-  // запись идёт по `callouts.${index}`, и если бы сюда приехал просто отфильтрованный список,
-  // индекс сместился бы на каждой скрытой строке — правка уехала бы в ЧУЖУЮ выноску молча.
-  if (rows.length === 0) {
-    return (
-      <Text size='micro' variant='label' component='p'>
-        none on this tab yet. A callout is placed on the picture itself — click a plate; the row
-        appears here the moment it exists, and this is where its text is written.
-      </Text>
-    );
-  }
-
-  // ОДНА leaf-запись на все поля строки, включая оформление: путь `callouts.N.field` не трогает
-  // идентичность массива, поэтому соседние читатели пути не рассинхронизируются.
-  const write = (
-    index: number,
-    field: 'description' | 'part' | 'dimensions' | 'color' | 'dashed' | 'filled',
-    value: string | boolean,
-  ) => {
-    form.setValue(`callouts.${index}.${field}` as never, value as never, { shouldDirty: true });
-  };
-
-  return (
-    <div>
-      {rows.map(({ c, index }) => {
-        const open = selected === index;
-        const anchored = (c.mediaId ?? 0) > 0;
-        const where = anchored ? plateName.get(c.mediaId ?? 0) : null;
-        const hot = hoverIndex === index;
-        return (
-          <div
-            key={index}
-            data-callout-row={index}
-            data-callout-hot={hot ? 'true' : undefined}
-            /* СТРОКА ПОД КУРСОРОМ ЗАЛИВАЕТСЯ ПАНЕЛЬЮ (`bgSecondary` — «a fill, not a container»),
-               а плита в тот же миг подсвечивает выноску: два конца одного жеста. */
-            className={cn('border-b border-hairline py-1 px-1 -mx-1', hot && 'bg-bgSecondary')}
-            onPointerEnter={() => onHover(index)}
-            onPointerLeave={() => onHover(null)}
-            onFocusCapture={() => onHover(index)}
-            onBlurCapture={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onHover(null);
-            }}
-          >
-            <div className='flex items-center gap-2'>
-              <Text size='nano' variant='uppercase' component='span' className='w-5 shrink-0'>
-                {c.number || '—'}
-              </Text>
-              <KindGlyph kind={c.kind ?? 'pin'} />
-              <button
-                type='button'
-                onClick={() => onSelect(open ? null : index)}
-                aria-expanded={open}
-                className='min-w-0 flex-1 cursor-pointer text-left'
-              >
-                <Text size='micro' component='span' className='block truncate'>
-                  {(c.description ?? '').trim() || (c.part ?? '').trim() || 'no text'}
-                </Text>
-              </button>
-              {/* ОДНА ВЕТКА, И ЭТО НЕ УПРОЩЕНИЕ, А СЛЕДСТВИЕ. Сюда приезжает только `sheetRows` —
-                  выноски, стоящие на плитах ДОКУМЕНТА, — поэтому «off the sheet» (мудбордные) и
-                  «unpinned» (открученные) недостижимы по построению. Оставить их значило бы
-                  держать на экране две ветки, которые никогда не исполнятся, и обещать людям
-                  состояния, которых больше нет: владелец снял раздел «unpinned» прямым словом. */}
-              {where ? <Pill tone='mut'>{where}</Pill> : null}
-            </div>
-
-            {open && (
-              <CalloutEditRow focusToken={focusToken} index={index}>
-                {/* CONTROLLED, NOT DEFAULT-VALUED, and the difference is a bug that would only
-                    show up after a successful save. The page resets the form to what the SERVER
-                    returned (`form.reset(settled.values)` — and the mint does the same), and an
-                    uncontrolled field keeps whatever was typed into it: the screen would go on
-                    showing a note the card no longer holds, with nothing saying so. The value is
-                    read back through the same `useWatch` that feeds this list, so a draft restore
-                    and an undo land here too. */}
-                <Textarea
-                  name={`artifacts-callout-${index}-description`}
-                  value={c.description ?? ''}
-                  disabled={disabled}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                    write(index, 'description', e.target.value)
-                  }
-                />
-                <div className='flex gap-1'>
-                  <Input
-                    name={`artifacts-callout-${index}-part`}
-                    value={c.part ?? ''}
-                    disabled={disabled}
-                    placeholder='part'
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      write(index, 'part', e.target.value)
-                    }
-                  />
-                  <Input
-                    name={`artifacts-callout-${index}-dimensions`}
-                    value={c.dimensions ?? ''}
-                    disabled={disabled}
-                    placeholder='dimensions'
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      write(index, 'dimensions', e.target.value)
-                    }
-                  />
-                </div>
-                {/* ЦВЕТ · ПУНКТИР · ШТРИХОВКА — ТОТ ЖЕ РЯД, ЧТО В РЕДАКТОРЕ ЭСКИЗА, а не второй
-                    набор свотчей: указание красят одинаково, где бы оно ни стояло. Правка стиля
-                    запоминается ПЕРОМ, поэтому следующая выноска родится тем же цветом — у
-                    человека одна рука, и серия штрихов одним цветом не должна перекрашиваться
-                    поштучно. */}
-                {!disabled && (
-                  <AnnotationStyleRow
-                    kind={c.kind ?? 'pin'}
-                    color={c.color ?? ''}
-                    dashed={!!c.dashed}
-                    filled={!!c.filled}
-                    onColor={(v) => {
-                      rememberPen({ color: v });
-                      write(index, 'color', v);
-                    }}
-                    onDashed={(v) => {
-                      rememberPen({ dashed: v });
-                      write(index, 'dashed', v);
-                    }}
-                    onFilled={(v) => {
-                      rememberPen({ filled: v });
-                      write(index, 'filled', v);
-                    }}
-                  />
-                )}
-                <div className='flex flex-wrap items-center gap-1.5'>
-                  {onRemove && (
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      onClick={() => onRemove(index)}
-                      title='delete this callout — its number is never handed to another one'
-                    >
-                      delete
-                    </Button>
-                  )}
-                  {/* НА МЕСТЕ «MAKE IT A PIN» — «+ POINT», И ЭТО ОБМЕН, А НЕ ДВЕ ПРАВКИ.
-                      Убрана она вместе с «make it a point» редактора (E-27): жест один, имён было
-                      два, и оставленная здесь кнопка вернула бы на соседний экран ровно то, что
-                      владелец убрал. Смысла у неё тоже не осталось — пин ушёл из палитры (E-29).
-                      Пришедшая на её место кнопка добавляет записке ещё один луч и заменяет собой
-                      весь бывший «мультилидер». */}
-                  {arrows &&
-                    selected === index &&
-                    (arrows.arming ? (
-                      <Button
-                        variant='secondary'
-                        size='xs'
-                        data-arrows='cancel'
-                        onClick={arrows.cancel}
-                        title='stop waiting for the click'
-                      >
-                        cancel
-                      </Button>
-                    ) : (
-                      <Button
-                        variant='secondary'
-                        size='xs'
-                        data-arrows='add'
-                        disabled={arrows.full}
-                        onClick={arrows.arm}
-                        title={
-                          arrows.full
-                            ? `a note points at ${arrows.max} places at most`
-                            : 'point this note at one more place — then click it on the plate'
-                        }
-                      >
-                        + point
-                      </Button>
-                    ))}
-                  <Text size='nano' variant='label' component='span' className='normal-case'>
-                    {arrows && arrows.count > 1
-                      ? `${arrows.count} points · shape and position are dragged on the plate itself`
-                      : 'shape and position are dragged on the plate itself'}
-                  </Text>
-                </div>
-              </CalloutEditRow>
-            )}
-          </div>
-        );
-      })}
-      <Text size='micro' variant='label' component='p' className='mt-2'>
-        The server takes a cut piece’s name from its callout text, and paper always prints these —
-        the current ones, never a frozen copy. A deleted number leaves a hole; numbers are never
-        reused.
-      </Text>
-    </div>
-  );
-}
-
-/**
- * Раскрытая строка выноски: якорь для серверного отказа И место, куда приезжает курсор.
- *
- * ЯКОРЬ. `data-field` — канонный адрес этой выноски, и ЕДИНСТВЕННЫЙ: поверхность своего не
- * ставит, поэтому `revealField('callouts.N.description')` приходит именно сюда.
- *
- * КУРСОР. Ставится ТОЛЬКО по жесту выбора (счётчик меняется в `onSelect` поверхности), а не при
- * каждом изменении данных строки: значения приходят из `useWatch`, то есть новой ссылкой на каждую
- * запись под формой, — фокус, наведённый «по изменению», уезжал бы сюда из любого другого поля
- * экрана после первого набранного символа.
- */
-function CalloutEditRow({
-  focusToken,
-  index,
-  children,
-}: {
-  focusToken: number;
-  index: number;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (focusToken === 0) return;
-    ref.current?.querySelector<HTMLElement>('textarea, input')?.focus();
-  }, [focusToken]);
-  return (
-    <div ref={ref} className='mt-1 space-y-1' data-field={`callouts.${index}.description`}>
-      {children}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-

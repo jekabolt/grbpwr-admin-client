@@ -1,8 +1,10 @@
 // Точка входа пробы «у aux-карты не все поля нужны» (п.13 волны ux-0825).
 //
-// Здесь НАСТОЯЩИЕ органы хедера: `HeaderMetaFields` (браузер категорий + базовая модель) и
-// `StyleFactsField` (fit / care / storefront-превью И staged-запись стилевых фактов). Стенд даёт
-// ровно то, что даёт карточка: контекст формы, react-query, роутер и провайдер стейджинга.
+// Здесь НАСТОЯЩИЕ органы хедера: `CategoryBrowser` + `BaseModelFields` (до круга 20 их держала
+// вместе обёртка `HeaderMetaFields`; B-27 развёл эти поля по двум блокам, и стенд следует за
+// карточкой, а не за снесённой обёрткой) и `StyleFactsField` (fit / care / storefront-превью И
+// staged-запись стилевых фактов). Стенд даёт ровно то, что даёт карточка: контекст формы,
+// react-query, роутер и провайдер стейджинга.
 //
 // ПОЧЕМУ СТЕНД МОНТИРУЕТ ПАНЕЛЬ ТАК ЖЕ, КАК ЕЁ МОНТИРУЕТ КАРТОЧКА. Проверяется не разметка, а
 // СОХРАНЁННОСТЬ ЗАПИСИ: `StyleFactsField` — единственный писатель brand / collection / season /
@@ -18,7 +20,10 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 
-import { HeaderMetaFields } from 'components/managers/tech-card/components/header-meta-fields';
+import {
+  BaseModelFields,
+  CategoryBrowser,
+} from 'components/managers/tech-card/components/header-meta-fields';
 import { StyleFactsField } from 'components/managers/tech-card/components/style-facts-field';
 import {
   TechCardStagingProvider,
@@ -72,8 +77,15 @@ function Harness({ isAux }: { isAux: boolean }) {
     <FormProvider {...form}>
       <TechCardStagingProvider>
         <StagedReadout />
-        <Section title={isAux ? 'base model & sample size' : 'category & base model'}>
-          <HeaderMetaFields hideCategory={isAux} />
+        {/* Гейт категории тот же, что у карточки, — только теперь он ветка МОНТАЖА у
+            вызывающего, а не проп `hideCategory` внутри снесённой обёртки. */}
+        {!isAux && (
+          <Section title='category'>
+            <CategoryBrowser />
+          </Section>
+        )}
+        <Section title='base model & sample size'>
+          <BaseModelFields />
         </Section>
         {isAux ? (
           <StyleFactsField styleId={7} canEdit hideFitCare />

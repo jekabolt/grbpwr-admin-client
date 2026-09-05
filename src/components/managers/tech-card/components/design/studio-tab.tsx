@@ -1,24 +1,23 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { SECTION } from 'constants/routes';
 import { useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
-import { ConstructionBomTable } from '../construction-bom-table';
-import { ConstructionCalloutTable } from '../construction-callout-table';
 import { ConstructionGeneralInfo } from '../construction-general-info';
 import type { TechCardFormData } from '../schema';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
 import { ColorwaySelect, useColorwayChoice } from './colorway-picker';
+import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
 import { KindsStrip, type DesignKind } from './kinds-strip';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
+import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
 import { PatternStudio } from './pattern';
@@ -85,9 +84,15 @@ export function StudioTab({
    * одного из двух, и вкладка вела бы себя по-разному в зависимости от того, какая кнопка её
    * открыла, — расхождение, которого не видно ни в типах, ни в сборке.
    *
-   * Проп ОБЯЗАТЕЛЕН, а не «не задан — двери нет»: две двери отсюда («связать материал ›» в
-   * спецификации и размерный ряд в общих сведениях) — это работа, а не украшение, и композитор,
-   * смонтированный без адресата, обязан не собраться, а не тихо потерять их.
+   * Проп ОБЯЗАТЕЛЕН, а не «не задан — двери нет»: дверь отсюда — это работа, а не украшение, и
+   * композитор, смонтированный без адресата, обязан не собраться, а не тихо её потерять.
+   *
+   * ⚠ КРУГ 20: ЧИТАТЕЛЕЙ У ЭТОГО ПРОПА СЕЙЧАС НОЛЬ, И ОН ВСЁ РАВНО ОСТАЁТСЯ. Обе двери, которые
+   * им пользовались, сняты словом владельца в один вечер: «связать материал ›» — вместе с блоком
+   * спецификации (B-12), размерный ряд — вместе с SIZE RANGE (B-4). Снять следом контракт значило
+   * бы переписать сигнатуру композитора ради одного вечера: на место спецификации в ЭТУ ЖЕ секцию
+   * приходит таблица слотов материалов (B-16/B-19/B-20), и первое, что ей понадобится, — та же
+   * дверь на вкладку BOM. Проп держится как ОБЪЯВЛЕННЫЙ адрес секции, а не как забытый аргумент.
    */
   navTo: (tab: string, extra?: Record<string, string>) => void;
   /**
@@ -131,19 +136,21 @@ export function StudioTab({
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
 
   /* ═══ ЧТО НУЖНО БЛОКАМ CONSTRUCTION, И ПОЧЕМУ ОНО ЧИТАЕТСЯ ЗДЕСЬ ══════════════════════════════
-     ВСЕ ЧЕТЫРЕ ХУКА СТОЯТ ВЫШЕ РАННИХ ВОЗВРАТОВ (их два: «карточка ещё не создана» и «полоса
+     ВСЕ ТРИ ХУКА СТОЯТ ВЫШЕ РАННИХ ВОЗВРАТОВ (их два: «карточка ещё не создана» и «полоса
      грузится»). Ниже них число хуков зависело бы от загрузки — React отвечает ошибкой 310 и
      сносит вкладку в белое целиком; ровно этот довод записан у `useState` выше, и он тот же.
 
      СОСТОЯНИЕ НЕ ПЕРЕЕЗЖАЕТ ВМЕСТЕ С БЛОКАМИ, И ЭТО ГЛАВНОЕ. Все поля, которые они правят
-     (`fit`, `categoryId`, `sizeIds`, `details[]`, `callouts[]`, `bomItems[]`), живут в ОДНОЙ форме
-     тех-карты и берутся через `useFormContext`. Переезд — это смена места монтажа, а не второй
-     путь к данным: ни один проп ниже не заводит копию состояния.
+     (`fit`, `categoryId`, `details[]`), живут в ОДНОЙ форме тех-карты и берутся через
+     `useFormContext`. Переезд — это смена места монтажа, а не второй путь к данным: ни один проп
+     ниже не заводит копию состояния.
 
-     ЧИТАЮЩИЙ СНИМОК КАРТОЧКИ — попадание в кэш: `index.tsx` держит тот же `useTechCard(numId)`
-     под тем же ключом. Спецификации он нужен ради колорвейных рецептов (столбец «est usage»),
-     которых в форме нет: их правят на вкладке колорвеев. */
-  const { data: techCard } = useTechCard(techCardId);
+     ⚠ КРУГ 20 (B-12): ЗДЕСЬ СТОЯЛ ЕЩЁ `useTechCard(techCardId)`, И ОН СНЯТ ВМЕСТЕ СО СВОИМ
+     ЕДИНСТВЕННЫМ ЧИТАТЕЛЕМ. Снимок карточки нужен был спецификации ради колорвейных рецептов
+     (столбец «est usage»), которых в форме нет; блока спецификации на этой секции больше нет,
+     и подписка, у которой не осталось читателя, — это лишний рендер студии на каждую
+     инвалидацию ключа карточки, а не запас на будущее. Новой таблице слотов (B-16) снимок
+     понадобится — тогда она и попросит его СЕБЕ, у своего места монтажа. */
   const { control } = useFormContext<TechCardFormData>();
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
@@ -255,26 +262,44 @@ export function StudioTab({
               ОДИН на каждый блок: два всегда-смонтированных писателя над одной формой — это
               дефект U-9 под новым именем.
 
-              ЧЕТЫРЕ БЛОКА, А НЕ ОДИН С ЧЕТЫРЬМЯ ЯРУСАМИ ВНУТРИ. `Section` запрещает коробку в
-              коробке дословно («A block NEVER contains another block», ui/components/section.tsx),
-              а `ConstructionCalloutTable` и `ConstructionBomTable` рисуют СВОЙ `Section` каждая.
-              Значит порядок владельца («общие сведения → аспекты → указания → спецификация»)
-              выражается соседством в `SectionStack`, а не вложением: четыре блока подряд, между
-              первым и третьим стоят аспекты — ровно то, что просит пункт 6.
+              ⚠ КРУГ 20, B-11 И B-12 — ИЗ ЧЕТЫРЁХ БЛОКОВ ОСТАЛОСЬ ДВА, И ЭТО СЛОВО ВЛАДЕЛЬЦА.
+              Дословно: «CALLOUTS — every numbered note on the sketch, with the step and the stitch
+              behind it - этот блок полностью убрать» (B-11) и «BILL OF MATERIALS — the BOM lines of
+              this card, read as a spec sheet - этот блок полностью убрать» (B-12). Сняты ОБА
+              монтажа и ОБА файла (`construction-callout-table.tsx`, `construction-bom-table.tsx`) —
+              не спрятаны за флагом: спрятанный блок возвращается следующим вызывающим.
+
+              ⚠ B-12 СНИМАЕТ БЛОК, А НЕ ПОНЯТИЕ. На место спецификации в этой же секции приходит
+              ТАБЛИЦА СЛОТОВ МАТЕРИАЛОВ (B-16/B-19/B-20 того же сообщения: «в место BILL OF
+              MATERIALS оно должно распозновать сколько видов тканей и какие у нас слоты могут
+              быть»), и её собирает соседняя рука этой же волны.
+
+              ⚠ ЗДЕСЬ СТОЯЛО «`pantone-picker.tsx` И `pantone-swatches.ts` ОСТАЛИСЬ — НОВАЯ ТАБЛИЦА
+              БЕРЁТ ИХ СЕБЕ», И ЭТО НЕ СБЫЛОСЬ. Таблица слотов колонку цвета взяла и НЕ ПОКАЗЫВАЕТ
+              осознанно (B-20 дословно требует снять COLOR и PANTONE; разбор — в шапке
+              `design/material-slots.tsx`), так что оба файла остались без единого вызывающего во
+              всём `src/`. Они сняты вместе с блоком, который их звал, — по тому же правилу, что и
+              сами блоки: спрятанный орган возвращается следующим вызывающим, а мёртвый файл под
+              обещанием «его возьмут» живёт кругами.
+
+              ПОЛЕ `bomItems[].pantone` ЖИВО, И ЕГО ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ ТЕПЕРЬ — МОДЕЛЬ: черновик
+              construction (`head/construction-draft-model.ts`) кладёт пантон на строку, схема и
+              мапперы возят его против потери (0363), а ЧЕЛОВЕК выбирает цвет там, где у цвета есть
+              адрес, — на колорвее. Ручного редактора у поля в этом клиенте нет ни на одной вкладке.
+
+              ДВА БЛОКА, А НЕ ОДИН С ДВУМЯ ЯРУСАМИ ВНУТРИ. `Section` запрещает коробку в коробке
+              дословно («A block NEVER contains another block», ui/components/section.tsx). Значит
+              порядок владельца («общие сведения → аспекты») выражается соседством в
+              `SectionStack`, а не вложением.
 
               Слот аспектов по-прежнему может быть пуст (`components/index.tsx` отдаёт сюда свой
-              единственный `DetailsEditor`); пустой он не рисует ни секции, ни отступа, а соседи
-              рисуются в любом случае: общие сведения и спецификация — это поля формы, а не
-              содержимое слота. */}
+              единственный `DetailsEditor`); пустой он не рисует ни секции, ни отступа, а сосед
+              рисуется в любом случае: общие сведения — это поля формы, а не содержимое слота. */}
           <Section
             title='general information'
             question='— what this style is, before how it is made'
           >
-            <ConstructionGeneralInfo
-              isAux={isAux}
-              readOnly={readOnly || !canWriteCard}
-              onGoTab={navTo}
-            />
+            <ConstructionGeneralInfo isAux={isAux} readOnly={readOnly || !canWriteCard} />
           </Section>
           {constructionAspects && (
             <Section
@@ -284,8 +309,42 @@ export function StudioTab({
               {constructionAspects}
             </Section>
           )}
-          <ConstructionCalloutTable frozen={readOnly} />
-          <ConstructionBomTable techCard={techCard} canWrite={canWriteCard} onGoTab={navTo} />
+          {/* ═══ ТАБЛИЦА СЛОТОВ — НА МЕСТО СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20) ═════════════
+              Владелец назвал место сам: «в место BILL OF MATERIALS». Значит третий блок ЭТОГО
+              ряда, сразу после аспектов, в порядке «общие сведения → аспекты → спецификация», —
+              а не орган внутри мудборда: черновик construction стоит ВНУТРИ блока доски, и
+              таблица там была бы блоком в блоке.
+
+              Блок рисуется ВСЕГДА, даже на пустой карточке, и это не оплошность: пустая
+              спецификация — такое же утверждение о карточке, как непустая, и именно её пустота
+              зовёт нажать «draft the construction» выше. `Section`-обёртку блок держит СВОЮ
+              (в отличие от аспектов, которым её выдаёт этот файл): у него есть собственный
+              `action` — три пунктирных чипа рождения слота, — и заголовок с ними связан.
+
+              `navTo` СНОВА ЖИВОЙ ПОСЛЕ КРУГА 20: обе прежние двери сняты словом владельца
+              (B-12 и B-4), и первым, кто вернул пропу читателя, стала эта таблица — `›` ведёт в
+              редактор ЭТОЙ строки на вкладке BOM, где выбирают артикул. */}
+          <MaterialSlots
+            techCardId={techCardId}
+            readOnly={readOnly || !canWriteCard}
+            onGoTab={navTo}
+          />
+          {/* ═══ КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ — ЧЕТВЁРТЫЙ БЛОК РЯДА (B-25, D5) ════════════
+              Владелец: «…и это было отдельным блоком». Место названо соседством, а не вкусом:
+              цвета предлагаются ПО СЛОТАМ, поэтому блок стоит сразу под таблицей слотов и читается
+              её продолжением — «вот слоты; вот чем их красят».
+
+              ⚠ ОДНУ НОЧЬ ЭТОТ ОРГАН ПРОСТОЯЛ ПОДСТРУКТУРОЙ ВНУТРИ ЧЕРНОВИКА, и не по замыслу:
+              этот файл в тот момент держала другая рука. Черновик сам живёт внутри блока мудборда,
+              то есть колорвеи оказывались БЛОКОМ В БЛОКЕ — дословный запрет DESIGN.md. Монтаж
+              переехал сюда; связь с прогоном держит модульный стор, а не соседство в разметке,
+              поэтому предложения переживают и уход на COLORWAYS, и возврат.
+
+              `Section`-ОБЁРТКУ БЛОК ДЕРЖИТ СВОЮ — как соседняя таблица слотов, и по своей причине:
+              блока НЕТ ВОВСЕ, пока черновик ничего не предложил. Условие знает только орган (оно
+              в модульном сторе), и вытащить его сюда значило бы завести второго читателя того же
+              стора ради пустой белой рамки на каждой карточке. */}
+          <ColourwayProposals techCardId={techCardId} readOnly={readOnly || !canWriteCard} />
           {/* ═══ ФИЛЬТР «ЧЕЙ ЭТО РЕНДЕР» — В РЯДУ ПРЕДСТАВЛЕНИЙ, НА ТРЁХ ВИДАХ ИЗ ПЯТИ ══════════
               ГЕЙТ — ЭТО ДВА РАЗНЫХ «НЕТ», И ОБА НАЗВАНЫ:
                 · `flat` — у листа оси НЕТ ПО ПРИРОДЕ: чертёж один на все цвета, и колорвейного

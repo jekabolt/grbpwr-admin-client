@@ -1,36 +1,61 @@
-import { formatSizeName } from 'components/managers/product/utility/sizes';
-import {
-  useSizeNames,
-  useSizeOrdering,
-} from 'components/managers/model/components/use-size-systems';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
 import { FIT_OPTIONS } from './design/render/model';
 import { upsertDetailText } from './form-writers';
-import { HeaderMetaFields } from './header-meta-fields';
+import { CategoryBrowser } from './header-meta-fields';
 import { TechCardFormData } from './schema';
 
-// C-5 · GENERAL INFORMATION — the block the owner asked for in CONSTRUCTION: «FIT, CATEGORY, BASE
-// MODEL, BASE SIZE (moved from CLASSIFICATION) + SIZE RANGE + SILHOUETTE + FABRIC».
+// C-5 · GENERAL INFORMATION — the block the owner asked for in CONSTRUCTION.
 //
-// ГДЕ ОН СТОИТ: в секции CONSTRUCTION вкладки STUDIO, первым из четырёх блоков («общие сведения →
-// аспекты → указания → спецификация»), а не на одноимённой вкладке — владелец назвал место цитатой
-// подзаголовка «described aspect by aspect; prints after the concept». Монтаж один, довод — там же,
-// в `design/studio-tab.tsx`.
+// ГДЕ ОН СТОИТ: в секции CONSTRUCTION вкладки STUDIO, первым из двух блоков («общие сведения →
+// аспекты»), а не на одноимённой вкладке — владелец назвал место цитатой подзаголовка «described
+// aspect by aspect; prints after the concept». Монтаж один, довод — там же, в `design/studio-tab.tsx`.
+//
+// ═══ КРУГ 20 — ЧТО ВЛАДЕЛЕЦ ОТСЮДА ЗАБРАЛ, И ЧЕМ ЭТО ОПЛАЧЕНО ════════════════════════════════
+//
+// B-4, дословно: «в GENERAL INFORMATION давай уберем SIZE RANGE и скомпонуем более удачно
+// импакблом что бы оно все было не криво как сейчас».
+//   · SIZE RANGE СНЯТ ЦЕЛИКОМ — вместе с плашками, счётчиком «N sizes» и дверью «edit the run on
+//     PATTERNS». Способность не потеряна ни на грамм: ряд размеров ЖИВЁТ на PATTERNS и правится
+//     только там, а здесь он и был read-only проекцией `sizeIds`. Ушёл ЧИТАТЕЛЬ, писателя тут
+//     никогда не было — поэтому и `onGoTab` у блока больше нет: последняя дверь была его.
+//
+// B-27, дословно: «BASE MODEL и BASE SAMPLE SIZE выдели в отдельный блок на который занимает две
+// колонки и находится под IDENTIFICATION и CLASSIFICATION».
+//   · Оба селекта УЕХАЛИ В ШАПКУ карточки (`components/index.tsx`, блок «base»); их содержимое —
+//     `BaseModelFields` в `header-meta-fields.tsx`. Это переезд одного экземпляра, а не второй:
+//     поля формы те же, писатель тот же, второго монтажа не заведено.
+//   · КАТЕГОРИЯ ОСТАЛАСЬ ЗДЕСЬ и зовётся теперь по имени — `CategoryBrowser`. Обёртки
+//     `HeaderMetaFields`, которая держала её вместе с двумя уехавшими полями, больше нет: она
+//     была «одним неделимым компонентом» ровно до тех пор, пока эти трое стояли рядом.
+//
+// ═══ ПОЧЕМУ ГРИД ИМЕННО ТАКОЙ (B-4, «не криво») ══════════════════════════════════════════════
+//
+// «Криво» было не оформлением, а МЕХАНИКОЙ. Стояло три колонки по `space-y`, и в каждой лежало
+// разное число органов разного роста: слева селект + семь плашек размерного ряда, посередине
+// браузер категорий с подсказкой и два селекта, справа две текстареи. Три вертикальных списка
+// разной длины дают рваный низ при ЛЮБОМ наполнении, а подписи полей в соседних колонках не
+// стоят на одной линии ни в одном ряду — глазу не за что зацепиться.
+//
+// Теперь полей четыре, и они делятся ПО ПРИРОДЕ ОТВЕТА, а не по остатку места:
+//   ряд 1 — FIT и CATEGORY: закрытые словари, отвечает выбор;
+//   ряд 2 — SILHOUETTE и FABRIC: свободный текст, отвечают слова.
+// Грид (а не два флекс-ряда) даёт то, чего `space-y` дать не может: подписи одного ряда всегда на
+// одной линии, колонки равной ширины, которые содержимое растянуть не может (`minmax(0,1fr)`), и
+// перенос в один столбец на узком экране без единого брейкпоинта в разметке.
+//
+// Зазоры — два разных токена, и это ритм, а не разнобой: 16px между КОЛОНКАМИ (`spacing.block`)
+// отделяют соседей сильнее, чем 10px между РЯДАМИ (`spacing.stack`, тот же шаг, каким `Section`
+// раскладывает своих детей). Разделительных линий внутри блока нет и быть не может: блок один,
+// и рисовать в нём вторую рамку — коробка в коробке (DESIGN.md, §5).
 //
 // NOTHING HERE IS A SECOND PLACE FOR A FACT THAT ALREADY HAS ONE — that is the whole discipline of
 // this file, aspect by aspect:
-//   · fit / category / base model / base sample size — THE SAME FORM FIELDS the CLASSIFICATION block
-//     used to render (`fit`, `categoryId`, `baseModelId`, `baseSampleSizeId`), moved, not copied;
-//     `HeaderMetaFields` is the same component, and `fit` is still carried to the server by the
-//     staged `UpdateStyle` in the hidden `StyleFactsField` — this select writes the form field only.
-//   · size range — DERIVED from `sizeIds`, which is edited on PATTERNS and nowhere else. Read-only
-//     here on purpose: a second editor over the run would need the removal confirmations the
-//     PATTERNS one carries (graded norms, markers, DXF per size).
+//   · fit / category — THE SAME FORM FIELDS the CLASSIFICATION block used to render (`fit`,
+//     `categoryId`), moved, not copied; `fit` is still carried to the server by the staged
+//     `UpdateStyle` in the hidden `StyleFactsField` — this select writes the form field only.
 //   · silhouette — the `details[]` aspect that ALREADY exists under key `silhouette` («silhouette /
 //     fit» in the construction aspects). The same row, edited from a second surface.
 //   · fabric — a `details[]` row under key `fabric`. Free text, as the owner asked («Stretch knit
@@ -41,35 +66,36 @@ import { TechCardFormData } from './schema';
 export function ConstructionGeneralInfo({
   isAux,
   readOnly,
-  onGoTab,
 }: {
   isAux: boolean;
   /** No write permission, or a released card — the Radix select ignores the outer fieldset. */
   readOnly: boolean;
-  onGoTab?: (tab: string) => void;
 }) {
   return (
-    <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3' data-c19-general=''>
-      <div className='space-y-2.5'>
-        {/* Auxiliary cards carry no fit — the same gate the CLASSIFICATION block applied. */}
-        {!isAux && (
-          <div data-c19-field='fit'>
-            <SelectField name='fit' label='fit' items={fitFormOptions} readOnly={readOnly} />
-          </div>
-        )}
-        <SizeRangeReadout onGoTab={onGoTab} />
-      </div>
-      {/* Category browser + base model + base sample size — one indivisible component, so it takes
-          a column of its own rather than being split across the grid. */}
-      <div data-c19-field='meta'>
-        <HeaderMetaFields hideCategory={isAux} />
-      </div>
-      <div className='space-y-2.5'>
+    <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-c19-general=''>
+      {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
+          applied, and the same one `hideCategory` used to carry. У aux-карты классификацию задаёт
+          AUXILIARY TYPE в шапке; скрывается ТОЛЬКО орган, значение `categoryId` остаётся в форме и
+          раунд-трипится. Когда прячутся оба, ряд «слова» просто становится первым — авторазмещение
+          грида не оставляет дыр там, где поля нет. */}
+      {!isAux && (
+        <div className='min-w-0' data-c19-field='fit'>
+          <SelectField name='fit' label='fit' items={fitFormOptions} readOnly={readOnly} />
+        </div>
+      )}
+      {!isAux && (
+        <div className='min-w-0' data-c19-field='meta'>
+          <CategoryBrowser />
+        </div>
+      )}
+      <div className='min-w-0' data-c19-field-cell='silhouette'>
         <DetailTextField
           detailKey='silhouette'
           label='silhouette'
           placeholder='e.g. sleeveless V-neck tank top'
         />
+      </div>
+      <div className='min-w-0' data-c19-field-cell='fabric'>
         <DetailTextField detailKey='fabric' label='fabric' placeholder='e.g. stretch knit jersey' />
       </div>
     </div>
@@ -79,67 +105,6 @@ export function ConstructionGeneralInfo({
 // U-2: the fit dictionary is the exported copy in `design/render/model.ts` — the same one the
 // CLASSIFICATION select imported. Not a third copy.
 const fitFormOptions = FIT_OPTIONS.map((f) => ({ label: f, value: f }));
-
-// The size run as PATTERNS holds it, with the base sample size marked in ink: the base size select
-// next door lists the same ids, and seeing the chosen one inside the run is what makes «base» mean
-// something. Ordered by the dictionary's sku order, not by insertion.
-//
-// МЕТРИКА ПЛАШЕК СВЕРЕНА (круг 20, остаток пункта 5) и осталась без правок: это домашний `Pill`
-// БЕЗ единого класса поверх — то есть ровно тот же 10px/`tracking-pill`/`px-[7px]`, каким плашки
-// нарисованы у соседей (спецификация, разбор сборки, применение раскладки). Свой размер здесь
-// когда-нибудь захочется задать классом — этого делать нельзя: у примитива один рост, и второй
-// завёлся бы молча, как уже заводился у секций до появления `Section`.
-function SizeRangeReadout({ onGoTab }: { onGoTab?: (tab: string) => void }) {
-  const { control } = useFormContext<TechCardFormData>();
-  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
-  const baseSizeId = (useWatch({ control, name: 'baseSampleSizeId' }) as number | undefined) ?? 0;
-  const names = useSizeNames();
-  const order = useSizeOrdering();
-  const ordered = order(sizeIds);
-
-  return (
-    <div className='space-y-1' data-c19-field='size-range'>
-      <FormLabel>size range</FormLabel>
-      {ordered.length === 0 ? (
-        <Text size='micro' variant='label' data-c19-size-empty=''>
-          no sizes yet
-        </Text>
-      ) : (
-        <div className='flex flex-wrap gap-1'>
-          {ordered.map((id) => {
-            const base = id === baseSizeId;
-            return (
-              <Pill
-                key={id}
-                tone={base ? 'ink' : 'mut'}
-                data-c19-size={id}
-                data-base={base ? '1' : undefined}
-                title={base ? 'base sample size' : undefined}
-              >
-                {formatSizeName(names.get(id) ?? `#${id}`)}
-              </Pill>
-            );
-          })}
-        </div>
-      )}
-      <Text size='micro' variant='label'>
-        {ordered.length > 0 ? `${ordered.length} sizes · ` : ''}
-        {onGoTab ? (
-          <button
-            type='button'
-            className='underline hover:text-textColor'
-            data-c19-go-patterns=''
-            onClick={() => onGoTab('patterns')}
-          >
-            edit the run on PATTERNS
-          </button>
-        ) : (
-          'edited on PATTERNS'
-        )}
-      </Text>
-    </div>
-  );
-}
 
 // One construction aspect as a plain text field. Writes the SAME `details[]` row the aspects editor
 // on STUDIO writes, with the same rule: a row with neither text nor images is dropped, not kept

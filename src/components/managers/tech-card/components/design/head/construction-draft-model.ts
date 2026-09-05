@@ -84,6 +84,21 @@ export function foldAspectKey(s?: string | null): string {
   return Array.from(normText(s)).slice(0, 64).join('');
 }
 
+/**
+ * ЧИСЛО `google.type.Decimal` СЛОВАМИ ФОРМЫ. Провод везёт `{value:'1.4'}`, форма держит СТРОКУ, и
+ * различие «пусто» vs «нет ключа» у неё несущее (`estUsageOut` в `schema.ts`).
+ *
+ * ⚠ НЕРАЗБИРАЕМОЕ ЧИСЛО ОТДАЁТСЯ ПУСТОТОЙ, А НЕ НУЛЁМ. Ноль — это утверждение «расхода нет»,
+ * подписываемое вместе с картой; «модель написала ерунду» обязано читаться как молчание.
+ */
+function decimalText(v: unknown): string {
+  const raw =
+    typeof v === 'object' && v !== null ? (v as { value?: string | null }).value : (v as unknown);
+  const text = normText(raw == null ? '' : String(raw));
+  if (!text) return '';
+  return Number.isFinite(Number(text)) ? text : '';
+}
+
 /* ─── СХЕМА ОТВЕТА ────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -100,6 +115,16 @@ export const constructionDraftSchema = z.object({
   fit: wireString,
   concept: wireString,
   aspects: z.array(z.object({ key: wireString, text: wireString })).nullish(),
+  /**
+   * ⚠ КЛЮЧ ЖИВ В СХЕМЕ, ХОТЯ ЭКРАН ЕГО БОЛЬШЕ НЕ ПОКАЗЫВАЕТ (B-13 круга 20).
+   *
+   * Владелец: «DRAFT OF THE CONSTRUCTION не должен добавлять коллауты все это можно добавить в
+   * CONSTRUCTION аспектами». Промпт про указания больше НЕ СПРАШИВАЕТ, и `diffProposal` не рождает
+   * из них ни одной строки. Но прогон, отвеченный ДО B-13, пересобирается на повторе из своего
+   * сохранённого канонического JSON — и схема, разучившаяся читать этот ключ, отвергла бы такой
+   * ответ ЦЕЛИКОМ, то есть потеряла бы вместе с указаниями и силуэт, и ткань, и аспекты.
+   * Читаем и молчим: разобрать — не значит показать.
+   */
   callouts: z
     .array(z.object({ feature: wireString, details: wireString, dimensions: wireString }))
     .nullish(),
@@ -115,10 +140,46 @@ export const constructionDraftSchema = z.object({
         pantone: wireString,
         // int64 приезжает то числом, то строкой — та же ложь генерённого типа, что у `wireInt`.
         materialId: z.union([z.number(), z.string()]).nullish(),
+        // ОЦЕНКА РАСХОДА (B-16) — `google.type.Decimal`, то есть ОБЪЕКТ `{value}`, а не число.
+        // Читается снисходительно: строка, число и объект — три написания одного, и ни одно из
+        // них не повод отвергнуть весь ответ.
+        estUsage: z.union([z.object({ value: wireString }), z.number(), z.string()]).nullish(),
+        unit: wireString,
       }),
     )
     .nullish(),
   missing: z.array(z.string()).nullish(),
+  /**
+   * ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ (B-25). Владелец: «DRAFT OF THE CONSTRUCTION могло предложить мне
+   * создать несколько колорвеев … и что бы если мы вконфирмили этот колорвей появлялся далее уже
+   * во вкладке колорвей».
+   *
+   * ⚠ ЗДЕСЬ НЕТ НИ ОДНОЙ ПРОВЕРКИ, КОТОРУЮ УЖЕ СДЕЛАЛ СЕРВЕР, И ЭТО РЕШЕНИЕ. Код цвета уже сложен
+   * на словарь (не сложившийся приходит пустым), дубли уже схлопнуты (первое предложение на код
+   * побеждает, поздним код обнулён), hex уже проверен `^#[0-9a-fA-F]{6}$`, пустые предложения уже
+   * выброшены, безымянные уже названы, потолки (4 × 15) уже применены. Вторая проверка тех же
+   * правил на клиенте — это второе место, где они записаны, и расходятся такие пары молча.
+   */
+  colourways: z
+    .array(
+      z.object({
+        name: wireString,
+        colorCode: wireString,
+        pantone: wireString,
+        hex: wireString,
+        slots: z
+          .array(
+            z.object({
+              slot: wireString,
+              pantone: wireString,
+              hex: wireString,
+              colour: wireString,
+            }),
+          )
+          .nullish(),
+      }),
+    )
+    .nullish(),
 });
 
 export type ConstructionDraft = z.infer<typeof constructionDraftSchema>;
@@ -145,7 +206,8 @@ export function parseConstructionDraft(input: unknown): ConstructionDraft | null
     (d.aspects?.length ?? 0) > 0 ||
     (d.callouts?.length ?? 0) > 0 ||
     (d.bom?.length ?? 0) > 0 ||
-    (d.missing?.length ?? 0) > 0;
+    (d.missing?.length ?? 0) > 0 ||
+    (d.colourways?.length ?? 0) > 0;
   return any ? d : null;
 }
 
@@ -162,7 +224,6 @@ export type ProposalWrite =
   | { kind: 'detail'; key: string; text: string }
   | { kind: 'fit'; value: string }
   | { kind: 'concept'; text: string }
-  | { kind: 'callout'; part: string; description: string; dimensions: string }
   | {
       kind: 'bom';
       line: {
@@ -174,6 +235,8 @@ export type ProposalWrite =
         color?: string;
         pantone?: string;
         materialId?: number;
+        estUsage?: string;
+        unit?: string;
       };
     };
 
@@ -184,7 +247,7 @@ export type ProposalRow = {
    * на соседа, как только принятая строка ушла в `same`, — и квитанция «added» встала бы не на ту.
    */
   id: string;
-  group: 'general' | 'aspects' | 'callouts' | 'bom';
+  group: 'general' | 'aspects' | 'bom';
   /** Нано-подпись, называющая поле-адресат: `silhouette`, `collar / neckline`, `fabric · main`. */
   label: string;
   /** Предложенное значение — чернилами. */
@@ -200,8 +263,13 @@ export type FormSnapshot = {
   fit?: string;
   concept?: string;
   details?: Array<{ key?: string; text?: string }>;
-  callouts?: Array<{ part?: string }>;
-  bomItems?: Array<{ name?: string }>;
+  /**
+   * ⚠ `lineKey` ЧИТАЕТСЯ НЕ РАДИ ДЕДУПА, А РАДИ ЖИВОСТИ ЗАПИСИ (B-14). Дедуп слотов стоит на
+   * СВЁРНУТОМ ИМЕНИ и стоял на нём всегда; ключ строки нужен журналу заполнений, чтобы ответить
+   * «рождённая черновиком строка ещё на карточке?» — вопрос, на который имя ответить не может:
+   * человек имя переименовывает, а строка при этом остаётся той же самой.
+   */
+  bomItems?: Array<{ name?: string; lineKey?: string }>;
 };
 
 function detailText(form: FormSnapshot, key: string): string {
@@ -218,19 +286,22 @@ function scalarState(proposed: string, current: string): ProposalState {
  * `diffProposal` — ОДНО МЕСТО, ГДЕ РЕШАЕТСЯ, ЧТО ЧЕЛОВЕКУ ПРЕДЛОЖЕНО.
  *
  * ПРАВИЛА, ПО ГРУППАМ:
- *   · скаляры (силуэт, ткань, посадка) — сравниваются с карточкой; `replace` требует СВОЕГО клика
- *     по СВОЕЙ строке и не бывает побочным действием соседней;
+ *   · скаляры (силуэт, ткань, посадка) — сравниваются с карточкой; `replace` — это РЕШЕНИЕ
+ *     ЧЕЛОВЕКА и никогда не бывает побочным действием соседней строки (B-14 не изменил этого:
+ *     сам собой пишется только ПУСТОЙ адресат, см. `draft-fills.ts`);
  *   · концепт — предлагается ТОЛЬКО когда собственный концепт карточки пуст. Слова дизайнера
  *     старше слов модели, и предложение, спорящее с ними, заставляло бы человека защищать то, что
  *     он уже написал. Непустой концепт ⇒ строки нет ВОВСЕ (не `same`: спорить не с чем);
  *   · аспекты — тот же скалярный разбор, но по ключу строки `details[]`;
- *   · списки (указания, спецификация) — ТОЛЬКО ДОБАВЛЕНИЕ. Совпавшая по имени строка приходит
- *     `same`; ни одна строка списка никогда не переписывается и не удаляется, поэтому набранное
- *     руками не может исчезнуть от чужого клика.
+ *   · спецификация (слоты материалов) — ТОЛЬКО ДОБАВЛЕНИЕ. Совпавшая по свёрнутому имени строка
+ *     приходит `same`; ни одна строка списка никогда не переписывается и не удаляется, поэтому
+ *     набранное руками не может исчезнуть ни от клика, ни от само-заполнения.
  *
- * ⚠ ДЕДУП УКАЗАНИЙ ИДЁТ ПО ВСЕМ `callouts` КАРТОЧКИ, А НЕ ТОЛЬКО ПО КОНСТРУКЦИОННЫМ. Связь
- * «деталь кроя ↔ указание» стоит на ИМЕНИ, значит два указания с одинаковым именем — это
- * настоящее столкновение, где бы второе ни было приколото.
+ * ⚠ ГРУППЫ `callouts` ЗДЕСЬ БОЛЬШЕ НЕТ (B-13 круга 20). Владелец: «DRAFT OF THE CONSTRUCTION не
+ * должен добавлять коллауты все это можно добавить в CONSTRUCTION аспектами». Ключ `callouts`
+ * ЖИВ В СХЕМЕ (сохранённый прогон обязан разбираться), но строки из него не рождаются: разобрать
+ * — не значит показать, и уж тем более не значит записать. Блок CALLOUTS с этого круга снесён
+ * (B-11), так что строка «указание» вела бы предложение в поле, которого на экране нет вовсе.
  */
 export function diffProposal(
   draft: ConstructionDraft | null,
@@ -320,31 +391,6 @@ export function diffProposal(
     });
   }
 
-  /* ── указания ── */
-  const knownCallouts = new Set(
-    (form.callouts ?? []).map((c) => foldToken(c.part)).filter(Boolean),
-  );
-  const seenCallout = new Set<string>();
-  for (const c of draft.callouts ?? []) {
-    const part = normText(c.feature);
-    const description = normText(c.details);
-    const dimensions = normText(c.dimensions);
-    if (!part && !description) continue;
-    const key = foldToken(part) || foldToken(description);
-    if (seenCallout.has(key)) continue;
-    seenCallout.add(key);
-    const value = [part, description].filter(Boolean).join(' — ') + (dimensions ? ` (${dimensions})` : '');
-    rows.push({
-      id: `callout:${key}`,
-      group: 'callouts',
-      label: 'callout',
-      value,
-      current: '',
-      state: knownCallouts.has(foldToken(part)) && !!part ? 'same' : 'add',
-      write: { kind: 'callout', part, description, dimensions },
-    });
-  }
-
   /* ── спецификация ── */
   const knownBom = new Set((form.bomItems ?? []).map((b) => foldToken(b.name)).filter(Boolean));
   const seenBom = new Set<string>();
@@ -361,6 +407,12 @@ export function diffProposal(
     const colour = normText(b.colour);
     const pantone = normText(b.pantone);
     const materialId = Number(b.materialId ?? 0) || 0;
+    // ОЦЕНКА РАСХОДА И ЕЁ ЕДИНИЦА (B-16) — они приезжают ТЕМ ЖЕ платным прогоном, и не взять их
+    // значило бы выбросить оплаченный ответ. Обе — по правилу отсутствия ниже: ключа нет, когда
+    // модель промолчала; у `estUsage` это различие видит маппер записи, и подставленная здесь
+    // пустая строка приехала бы на сервер числом.
+    const estUsage = decimalText(b.estUsage);
+    const unit = normText(b.unit);
     const labelParts = [
       section ? sectionShort(section) : '',
       purpose && purpose !== UNSET_PURPOSE ? bomPurposeLabel(purpose) : '',
@@ -388,6 +440,8 @@ export function diffProposal(
           ...(colour ? { color: colour } : {}),
           ...(pantone ? { pantone } : {}),
           ...(materialId ? { materialId } : {}),
+          ...(estUsage ? { estUsage } : {}),
+          ...(unit ? { unit } : {}),
         },
       },
     });
@@ -397,10 +451,16 @@ export function diffProposal(
   return { rows, missing };
 }
 
-/** Порядок групп на экране — тот же, каким CONSTRUCTION рисует свои четыре блока. */
-export const PROPOSAL_GROUPS: Array<{ key: ProposalRow['group']; title: string }> = [
-  { key: 'general', title: 'general information' },
-  { key: 'aspects', title: 'aspects' },
-  { key: 'callouts', title: 'callouts' },
-  { key: 'bom', title: 'bill of materials' },
-];
+/**
+ * ⚠ `PROPOSAL_GROUPS` СНЯТ ВМЕСТЕ СО СВОИМ ЭКРАНОМ (B-14 круга 20), А НЕ ЗАБЫТ.
+ *
+ * Он задавал порядок ЧЕТЫРЁХ ГРУПП ПРИНЯТЫХ СТРОК на органе. С B-14 принятого списка нет вовсе:
+ * написанное видно там, где живёт, а на органе остаётся только спорное («to decide») — плоский
+ * список, у которого нет двух групп, чтобы их упорядочивать. Оставленный экспорт без читателя
+ * протух бы молча: он всё ещё называл бы группу `callouts`-соседкой, которой уже нет (B-13).
+ *
+ * ЗНАНИЕ ИЗ НЕГО НЕ ПРОПАЛО. Заголовок группы спецификации звучал «material slots», а не «bill of
+ * materials», по слову владельца (B-20: «как то его нормально назвать»), — и это слово теперь
+ * стоит там, где ему и место: на самой секции (`design/material-slots.tsx`). Ключи групп живы в
+ * `ProposalRow['group']` и по-прежнему различают строки.
+ */

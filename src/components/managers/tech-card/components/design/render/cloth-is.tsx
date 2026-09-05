@@ -200,33 +200,36 @@ export function ClothIsRow({
           Отступ переноса измерен, а не угадан: колонка подписи `FieldRow` — 92px плюс 8px зазора,
           тот же, что у продолжения каждого ряда этой секции.
 
-          ГОВОРИТСЯ ВСЕГДА, А НЕ ТОЛЬКО ПРИ ФОТОГРАФИИ. Строка, появляющаяся ровно тогда, когда
-          выбор перестал работать, читается как ошибка экрана; строка, стоящая всегда, — это
-          ПРАВИЛО, и человек узнаёт его до того, как оно его настигнет. Меняется одно слово-глагол,
-          и оно же несёт состояние. */}
-      <div className='w-full pl-[100px]'>
-        <Text
-          size='micro'
-          variant='label'
-          component='p'
-          data-words-rank={rank.governs ? 'governs' : 'outranked'}
-          className='normal-case'
-        >
-          {rank.governs ? (
-            <>
-              No texture picture rides on this run, so these words <b>govern the cloth</b>: the
-              model builds the weave, the weight, the surface and the drape from them. A stated
-              colour states colour and nothing else.
-            </>
-          ) : (
-            <>
-              A texture picture rides on this run, and a photograph states transparency, weight and
-              drape as surely as it states the weave — so against it these words are{' '}
-              <b>description, not instruction</b>. Take the texture off above to let them govern the
-              cloth.
-            </>
-          )}
-        </Text>
+          ⚠ КРУГ 20, B-23 — ВТОРАЯ ПОЛОВИНА ЭТОЙ СТРОКИ СНЯТА СЛОВОМ ВЛАДЕЛЬЦА. Дословно: «"A
+          texture picture rides on this run, and a photograph states transparency, weight and drape
+          as surely as it states the weave — so against it these words are description, not
+          instruction. Take the texture off above to let them govern the cloth." этот текст убрать».
+          Убрана ровно процитированная ветка — та, что печаталась ПОД ФОТОГРАФИЕЙ; ветка «слова
+          управляют» не названа и осталась дословно, потому что она говорит про ДРУГОЕ состояние.
+
+          Прежний довод («говорится ВСЕГДА, иначе строка читается как ошибка экрана») этим и
+          отменён: владелец третий круг подряд снимает объясняющие абзацы, и его слово сильнее
+          нашего правила. Теперь под фотографией не печатается ничего — а сам порядок старшинства
+          не потерян: его полностью перечисляет модалка «what the model gets», и обе поверхности
+          по-прежнему читают ОДНУ функцию `clothWordsRank`.
+
+          ⚠ ЯКОРЬ `data-words-rank` ОСТАЁТСЯ НА МЕСТЕ И В ОБОИХ СОСТОЯНИЯХ. Он и заведён не ради
+          текста, а ради сверки экрана с модалкой (`data-fabric-authority`): исчезни он вместе с
+          фразой — проба перестала бы отличать «под фотографией сказали лишнее» от «экран вообще
+          не знает, кто кого перебивает». Поэтому под фотографией узел ЕСТЬ и пуст, а `hidden`
+          снимает ему коробку целиком: ни строки, ни отступа, ни зазора флекса. */}
+      <div
+        className='w-full pl-[100px]'
+        data-words-rank={rank.governs ? 'governs' : 'outranked'}
+        hidden={!rank.governs}
+      >
+        {rank.governs && (
+          <Text size='micro' variant='label' component='p' className='normal-case'>
+            No texture picture rides on this run, so these words <b>govern the cloth</b>: the model
+            builds the weave, the weight, the surface and the drape from them. A stated colour
+            states colour and nothing else.
+          </Text>
+        )}
       </div>
     </FieldRow>
   );

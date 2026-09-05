@@ -101,7 +101,10 @@ function BrowserColumn({
 // One trigger showing the whole path opens a Finder-style three-column browser (the tree is already
 // in the dictionary — no request). Clicking a level-1 row re-parents levels 2–3, same for 2 → 3.
 // Sub and type stay optional: a level-1-only selection is valid and the trigger reads «outerwear».
-function CategoryBrowser() {
+//
+// ЭКСПОРТИРУЕТСЯ С КРУГА 20 (B-27): базовая модель и базовый размер уехали отсюда в СВОЙ блок
+// шапки, и обёртки, которая держала бы категорию с ними вместе, больше нет. Браузер зовут по имени.
+export function CategoryBrowser() {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
@@ -280,9 +283,25 @@ function CategoryBrowser() {
   );
 }
 
-// Header classification FKs (category leaf / base model / base sample size).
+// ═══ BASE MODEL + BASE SAMPLE SIZE — ДВА ПОЛЯ, КОТОРЫЕ ТЕПЕРЬ СОСТАВЛЯЮТ СВОЙ БЛОК ═══════════
+//
+// КРУГ 20, B-27, дословно: «BASE MODEL и BASE SAMPLE SIZE выдели в отдельный блок на который
+// занимает две колонки и находится под IDENTIFICATION и CLASSIFICATION». Блок рисует
+// `components/index.tsx` (там живёт грид шапки и там же считается его `lg:col-span-2`); здесь —
+// только содержимое, потому что ОПЦИИ обоих селектов выводятся из данных, а не из вёрстки:
+// модели приезжают запросом, а список базовых размеров — это `sizeIds` ЭТОЙ формы.
+//
+// ⚠ ЭТО ПЕРЕЕЗД, А НЕ КОПИЯ. Обёртка `HeaderMetaFields`, которая держала эти два поля вместе с
+// браузером категорий, снесена: категория осталась в GENERAL INFORMATION вкладки CONSTRUCTION и
+// зовётся там по имени (`CategoryBrowser`), а два поля ниже уехали в шапку. Поля формы те же
+// (`baseModelId`, `baseSampleSizeId`), тот же `valueAsNumber`, тот же `loading`, та же серверная
+// кросс-валидация базового размера по диапазону карточки. Второго писателя не завелось.
+//
+// ДВА ПОЛЯ РЯДОМ, А НЕ ДРУГ ПОД ДРУГОМ. Блок занимает обе колонки шапки, и селект высотой 22px,
+// растянутый на всю её ширину, читался бы как поле ввода абзаца. Ряды равноправны: модель — это
+// «на ком построено», размер — «на чём считается себестоимость»; ни одно не следствие другого.
 // base_sample_size_id is restricted to the card's size range (cross-validated server-side).
-export function HeaderMetaFields({ hideCategory = false }: { hideCategory?: boolean }) {
+export function BaseModelFields() {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const { data: models, isLoading: modelsLoading } = useAllModels();
@@ -312,10 +331,7 @@ export function HeaderMetaFields({ hideCategory = false }: { hideCategory?: bool
   ];
 
   return (
-    <div className='space-y-2.5'>
-      {/* Браузер категорий прячется у aux-карты: там классификацию задаёт AUXILIARY TYPE.
-          Скрывается ТОЛЬКО орган — значение categoryId остаётся в форме и раунд-трипится. */}
-      {!hideCategory && <CategoryBrowser />}
+    <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-b27-base=''>
       {/* K-21 · ОБЫЧНЫЕ ПОЛЯ, НЕ РАСКРЫВАШКА. Владелец: «бейс модел и семпл сайз сделать обычным
           не колапс инпутом как все остальные в карточке».
           Прежний довод за `<details>` («чтобы шапка начиналась с категории») стоил дороже, чем
@@ -323,11 +339,6 @@ export function HeaderMetaFields({ hideCategory = false }: { hideCategory?: bool
           базового размера берётся без фолбэка), то есть поле, спрятанное под словом «optional»,
           молча решало деньги. Схлопнутое поле к тому же не показывает, что оно уже заполнено, —
           оператор не видел ни значения, ни его отсутствия.
-          Форма полей не тронута: те же два `SelectField`, те же имена, тот же `valueAsNumber`,
-          тот же `loading`, та же серверная кросс-валидация по диапазону размеров. Сетка снята
-          намеренно — соседи по блоку `classification` (purpose / auxiliary type / target gender /
-          fit) стоят полной шириной один под другим, и «как все остальные» здесь значит именно
-          общий вертикальный ряд, а не собственный двухколоночный островок.
           Обязательность помечать не нужно: в этой форме маркер несут ТРЕБУЕМЫЕ поля («name *»),
           так что немаркированное поле и читается как необязательное — слово «optional» из
           заголовка раскрывашки не потерялось, оно было избыточным. */}

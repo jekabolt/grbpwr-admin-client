@@ -88,8 +88,22 @@ const UNMOUNT_BROKEN = `        {!isAux && (
             <StyleFactsField styleId={7} canEdit />
           </Section>
         )}`;
-const CATEGORY_FIX = `      {!hideCategory && <CategoryBrowser />}`;
-const CATEGORY_BROKEN = `      <CategoryBrowser />`;
+// КРУГ 20, B-27: ГЕЙТ КАТЕГОРИИ ПЕРЕЕХАЛ ИЗ ОБЁРТКИ В ВЫЗЫВАЮЩЕГО, И МУТАЦИЯ ЗА НИМ.
+// Была `{!hideCategory && <CategoryBrowser />}` внутри `header-meta-fields.tsx` — той самой
+// обёртки `HeaderMetaFields`, которую B-27 снёс, разведя её поля по двум блокам карточки.
+// Теперь гейт — ветка МОНТАЖА у вызывающего (в карточке это `construction-general-info.tsx`,
+// в стенде — его точка входа), поэтому и ломается он там же. Ломается ровно тем же способом:
+// условие снимается, браузер категорий рисуется ВСЕГДА, и цитата про aux обязана покраснеть.
+const CATEGORY_FIX = `        {!isAux && (
+          <Section title='category'>
+            <CategoryBrowser />
+          </Section>
+        )}`;
+const CATEGORY_BROKEN = `        {(
+          <Section title='category'>
+            <CategoryBrowser />
+          </Section>
+        )}`;
 
 const patcher = (filter, pairs, loader) => ({
   name: 'aux-header-mutation',
@@ -109,7 +123,7 @@ const plugins = [];
 if (MUT.unmount)
   plugins.push(patcher(/aux-header-fields-entry\.tsx$/, [[UNMOUNT_FIX, UNMOUNT_BROKEN]], 'tsx'));
 if (MUT.category)
-  plugins.push(patcher(/header-meta-fields\.tsx$/, [[CATEGORY_FIX, CATEGORY_BROKEN]], 'tsx'));
+  plugins.push(patcher(/aux-header-fields-entry\.tsx$/, [[CATEGORY_FIX, CATEGORY_BROKEN]], 'tsx'));
 
 const outfile = resolve(tmpdir(), `aux-header-${process.pid}.js`);
 await esbuild({
@@ -247,8 +261,15 @@ head('ЦИТАТА 0 — ЯКОРЬ: карточка монтирует пан�
     !/\{!isAux &&[\s\S]{0,200}?<StyleFactsField/.test(card),
     'ветки `{!isAux && <StyleFactsField…>}` (снятие с монтажа) в карточке нет',
   );
+  // КРУГ 20, B-27: браузер категорий больше не в шапке. Он остался в GENERAL INFORMATION вкладки
+  // CONSTRUCTION, а гейт стал веткой монтажа у вызывающего — читаем ТОТ файл, а не этот, иначе
+  // проверка сторожила бы мёртвую строку и зеленела бы на любом коде.
+  const general = readFileSync(
+    resolve(REPO, 'src/components/managers/tech-card/components/construction-general-info.tsx'),
+    'utf8',
+  );
   ck(
-    card.includes('<HeaderMetaFields hideCategory={isAux} />'),
+    /\{!isAux && \([\s\S]{0,200}?<CategoryBrowser \/>/.test(general),
     'браузер категорий гейтится тем же живым isAux',
   );
 }

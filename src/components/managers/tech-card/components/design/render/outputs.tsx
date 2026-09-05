@@ -151,8 +151,13 @@ function Bay({ groupOf, children }: { groupOf?: number; children: React.ReactNod
  * ОТДЕЛЬНЫМ КОМПОНЕНТОМ РАДИ ХУКА: `useElapsed` тикает раз в секунду, и позванный в теле раздела
  * он перерисовывал бы вместе с собой ВСЮ полосу — каждую замощённую плитку, каждую открытую колоду.
  * Здесь он перерисовывает одну ячейку.
+ *
+ * ⚠ ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ХОЗЯИНА, А НЕ «НА ВСЯКИЙ СЛУЧАЙ» (B-24). Владелец потребовал,
+ * чтобы правая половина полосы входа 3D показывала ТО ЖЕ, что этот раздел на FABRIC RENDER, — с
+ * теми же органами. Дыра живого прогона — один из них, и второе её написание разошлось бы с этим
+ * первым же круглым числом (пропорция кадра, слово состояния с провода, тик секунд).
  */
-function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
+export function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
   const elapsed = useElapsed(run.startedAt ?? run.createdAt);
   return (
     <div data-outputs-pending={run.id ?? 0} className={cn('flex flex-col gap-1', CELL_WIDTH)}>

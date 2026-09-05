@@ -161,8 +161,39 @@ export type FocusedAnnotatorProps = {
    * `document.body`, то есть ВНЕ `<fieldset disabled>` карточки со всем содержимым, — и текст
    * подписанной выноски правился на выпущенной карточке молча. Плюс это был ВТОРОЙ способ
    * записать текст указания: у снимка шага он всегда жил в редакторе под кадром.
+   *
+   * ⚠ НЕОБЯЗАТЕЛЕН, И ЭТО НЕ ПОСЛАБЛЕНИЕ, А ВТОРАЯ ЗАКОННАЯ РАСКЛАДКА (круг 20, B-9). Владелец
+   * увёл всю правку указаний мудборда в БОКОВУЮ ПАНЕЛЬ — «все управление колаутами должно было
+   * переехать в панель слева как в артифактах … все только в правом блоке», — и там правка уже
+   * живёт (`design/callout-rail.tsx`, тот же орган, что у листа ARTIFACTS: у него `renderEditor`
+   * не было НИКОГДА). Не задан — полосы редактора под кадрами нет вовсе: ни самой правки, ни её
+   * пустого состояния. Второй редактор на то же поле означал бы драку за фокус и правку, которую
+   * не видно.
+   *
+   * ⚠ УВЕЛИЧЕННЫЙ ВИД ПРИ ЭТОМ БЕЗ ПРАВКИ НЕ ОСТАЁТСЯ — у него свой проп, см. `renderZoomEditor`.
    */
-  renderEditor: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
+  renderEditor?: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
+  /**
+   * ═══ РЕДАКТОР ТОЛЬКО ДЛЯ УВЕЛИЧЕННОГО ВИДА — ОТДЕЛЬНЫЙ ПРОП, И ЭТО НЕСУЩЕЕ ══════════════════
+   *
+   * Увеличенный вид — Radix `Dialog`: оверлей, модальность, ловушка фокуса. Владелец, у которого
+   * правка живёт СНАРУЖИ (боковое меню мудборда, B-9), внутри открытого зума недостижим ФИЗИЧЕСКИ:
+   * просьба поставить курсор уезжает в поле за оверлеем, и фокус-скоуп немедленно тащит фокус
+   * обратно. То есть указание, поставленное в зуме — а по миллиметровой детали его ставят именно
+   * там, — нельзя ни назвать, ни покрасить, ни удалить, не закрыв окно.
+   *
+   * Поэтому раскладок ДВЕ, и они независимы:
+   *   · `renderEditor` — полоса под кадрами НА СТРАНИЦЕ (эскиз, примерка). Задан — она есть;
+   *   · `renderZoomEditor` — тело правки ВНУТРИ диалога. Задан — правка достижима в зуме.
+   * Мудборд задаёт ТОЛЬКО второй: «брови» над картинками у него нет (владелец снял её дословно), а
+   * правка в зуме обязана быть. Кто задал только первый, получает прежнее поведение — тот же
+   * редактор в обоих местах.
+   *
+   * ⚠ И ФОКУС ТОГДА НАРУЖУ НЕ ПРОСИТСЯ: при заданном `renderZoomEditor` жест выбора внутри зума
+   * отдаёт владельцу `focus: false` — курсор ставит сам диалог, своим `EditorSlot`. Иначе две
+   * половины дрались бы за фокус через границу модалки, и выигрывала бы ловушка.
+   */
+  renderZoomEditor?: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
   /** Optional header title inside a note (e.g. a part code, or a constant "fit note"). */
 
   /** Commit newly-picked media (caller dedupes + appends) and return the ids actually added, so the
@@ -238,7 +269,29 @@ export type FocusedAnnotatorProps = {
    * ему не нужно.
    */
   selectedKey?: string | null;
-  onSelectedChange?: (key: string | null) => void;
+  /**
+   * ⚠ `opts.focus` — ТРЕТИЙ ТАКТ ЖЕСТА «клик — клик — напиши, что это», и он обязан доехать до
+   * владельца. Поверхность просит поставить курсор в правку (постановка указания и Enter на
+   * выбранном), а правка с B-9 может стоять снаружи — в боковой панели. Без этого поля мудборд
+   * ставил бы указание и молчал: строка в панели есть, курсора в ней нет.
+   */
+  onSelectedChange?: (key: string | null, opts?: { focus?: boolean }) => void;
+  /**
+   * ВЗВОД «+ POINT» СНАРУЖИ — ТА ЖЕ ЧАСТИЧНАЯ УПРАВЛЯЕМОСТЬ, ЧТО У ВЫБОРА, И ПО ТОМУ ЖЕ ПОВОДУ.
+   *
+   * Кнопка «+ point» стоит у РЕДАКТОРА выбранного указания, а клик, которого она ждёт, приходит на
+   * кадр; пока редактор был здесь (`renderEditor`), обе половины жеста жили внутри и взвод не
+   * требовал пропа. С переездом правки в боковую панель (B-9, `design/callout-rail.tsx`) кнопка
+   * уехала наружу, а кадр остался здесь — и второе состояние взвода рядом с первым дало бы кнопку
+   * «cancel», которая не снимает ожидание кадра.
+   *
+   * `undefined` — владелец про взвод не говорит, и тот целиком внутренний, как был; `null` —
+   * законное значение снаружи («ничего не взведено»), поэтому проверка на `undefined`. Внутреннее
+   * состояние двигается всегда, чтобы владелец, давший `addingKey` без `onAddingChange`, не
+   * получил молча мёртвую кнопку.
+   */
+  addingKey?: string | null;
+  onAddingChange?: (key: string | null) => void;
   /**
    * ПОДСВЕЧЕННОЕ СНАРУЖИ. Наведение на строку бокового меню обязано подсветить саму выноску на
    * кадре (C-2), а наведение на кадр — строку меню; изнутри поверхность знает только второе.
@@ -368,6 +421,7 @@ export function FocusedAnnotator({
   onMoveCallout,
   onRemoveCallout,
   renderEditor,
+  renderZoomEditor,
   onPickMedia,
   onRemoveMedia,
   addLabel,
@@ -403,6 +457,8 @@ export function FocusedAnnotator({
   selectedKey,
   onSelectedChange,
   hoveredKey,
+  addingKey,
+  onAddingChange,
 }: FocusedAnnotatorProps) {
   /**
    * Инструмент постановки. ОДНО состояние вместо трёх (`addMode` + `shapeKind` + набранные точки):
@@ -430,9 +486,9 @@ export function FocusedAnnotator({
    * ничего, — молчаливо.
    */
   const selected = selectedKey === undefined ? ownSelected : selectedKey;
-  const setSelected = (key: string | null) => {
+  const setSelected = (key: string | null, opts?: { focus?: boolean }) => {
     setOwnSelected(key);
-    onSelectedChange?.(key);
+    onSelectedChange?.(key, opts);
   };
   /**
    * ВЗВОД «+ POINT» ЖИВЁТ ЗДЕСЬ, А НЕ В ПЛИТКЕ, ПОТОМУ ЧТО КНОПКА ЖИВЁТ ЗДЕСЬ.
@@ -440,8 +496,18 @@ export function FocusedAnnotator({
    * Редактор листа стоит НАД рядом кадров (иначе клик по выноске раздвигал бы плитку и двигал
    * соседние снимки — см. довод у `selected`), а клик, которого ждёт взвод, приходит на плитку.
    * Одно состояние на обе половины — та же пара пропов, что у выбора.
+   *
+   * ⚠ И ТА ЖЕ ЧАСТИЧНАЯ УПРАВЛЯЕМОСТЬ, что у выбора (B-9): кнопка «+ point» уехала в боковую
+   * панель мудборда, а кадр остался здесь, и владелец, у которого кнопка, обязан уметь взвести
+   * ожидание кадра. Внутреннее состояние двигается ВСЕГДА — иначе владелец с `addingKey` и без
+   * `onAddingChange` получил бы молча мёртвую кнопку.
    */
-  const [adding, setAdding] = useState<string | null>(null);
+  const [ownAdding, setOwnAdding] = useState<string | null>(null);
+  const adding = addingKey === undefined ? ownAdding : addingKey;
+  const setAdding = (key: string | null) => {
+    setOwnAdding(key);
+    onAddingChange?.(key);
+  };
   const [focusEditor, setFocusEditor] = useState(0);
   const [placed, setPlaced] = useState(0);
   /** Индекс кадра, открытого во весь экран. */
@@ -587,8 +653,25 @@ export function FocusedAnnotator({
     cancel: () => setAdding(null),
   });
 
+  // ⚠ БЕЗ `renderEditor` ПОЛОСЫ НЕТ ВОВСЕ — НИ РЕДАКТОРА, НИ ЕГО ПУСТОГО СОСТОЯНИЯ (B-9). Владелец
+  // снял «бровь» над картинками мудборда дословно: «не должно быть этой брови над картинками "no
+  // callout selected — …" все только в правом блоке». Резерв высоты снимается ВМЕСТЕ с ней: пустая
+  // полоса существовала затем, чтобы кадр не дёргался при выборе, а кадру, у которого редактора
+  // нет ни в одном состоянии, дёргаться не от чего.
+  //
+  // ТРИ ОБЕЩАНИЯ СНЯТОЙ СТРОКИ ИСПОЛНЯЮТСЯ ПО-ПРЕЖНЕМУ, И НИ ОДНО ИЗ НИХ НЕ ЖИЛО ЗДЕСЬ: выбор —
+  // клик по указанию на кадре И строка боковой панели (`selectedKey`/`onSelectedChange`),
+  // Backspace — слушатель окна у самой поверхности (`annotation/surface.tsx`), Enter — тот же
+  // слушатель, чей запрос фокуса теперь доезжает до владельца через `opts.focus`.
+  /**
+   * КТО РИСУЕТ ПРАВКУ В УВЕЛИЧЕННОМ ВИДЕ. Свой редактор зума старше общего: владелец, увёзший
+   * правку в боковое меню (B-9), задаёт ТОЛЬКО `renderZoomEditor` — полосы на странице у него нет,
+   * а в модалке правка обязана быть достижима, потому что меню за оверлеем недостижимо.
+   */
+  const zoomEditor = renderZoomEditor ?? renderEditor;
+
   const editorSlot =
-    !readOnly && hasMedia ? (
+    renderEditor && !readOnly && hasMedia ? (
       <div className='shrink-0 overflow-hidden' style={{ height: editorHeight }}>
         {selected != null && zoomIndex == null ? (
           <EditorPanel focusToken={focusEditor}>
@@ -608,6 +691,21 @@ export function FocusedAnnotator({
 
   // ОДНО ЗНАНИЕ — ОДНО МЕСТО. Грамматика выбора живёт в пустом состоянии полосы редактора (она
   // ровно там, где ею пользуются), поэтому здесь остаётся только то, чего там нет.
+  //
+  // ⚠ У `pinText === 'hover'` ПОКОЯЩЕЙСЯ СТРОКИ БОЛЬШЕ НЕТ — СНЯТА ВЛАДЕЛЬЦЕМ (круг 20, B-10),
+  // дословно: «"a note reads on the picture; an old numbered
+  // pin shows its text on hover or focus ·
+  // ⌘V pastes a picture" этот текст тут не нужен». Носитель этой ветки ровно один — мудборд
+  // (единственный `pinText='hover'` во всём `src/`), и владелец говорил про него.
+  //
+  // ЧТО ИЗ НЕЁ УЦЕЛЕЛО. Оба факта, которые она несла, — читательские, и оба уже написаны жестом:
+  // текст пина показывает сам пин по наведению или фокусу (`pinText='hover'`, то есть строка
+  // объясняла то, что происходит при наведении на маркер), а ⌘V вставляет картинку на ЛЮБОЙ
+  // поверхности полосы, и об этом же говорит пустое состояние доски («drop a picture, paste one
+  // with ⌘V, or browse the library»). Полоса при этом не онемела: `busy`, `dragging` и подсказка
+  // постановки (`placingHint`) остаются — они говорят о происходящем ПРЯМО СЕЙЧАС, а снята была
+  // строка ПОКОЯ. Пустая строка не рисуется вовсе (см. оба узла `{hint && …}` ниже): `Text` с
+  // пустым содержимым оставлял бы в полосе член нулевой ширины и его отбивки.
   const hint = intake.busy
     ? 'taking the picture from the clipboard…'
     : intake.dragging
@@ -615,8 +713,7 @@ export function FocusedAnnotator({
       : tool
         ? placingHint(tool, placed)
         : pinText === 'hover'
-          ? // Легенды нет — обещать её значило бы отправить человека искать несуществующий список.
-            'a note reads on the picture; an old numbered pin shows its text on hover or focus · ⌘V pastes a picture'
+          ? ''
           : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
@@ -651,9 +748,11 @@ export function FocusedAnnotator({
             {/* `kindsFirst`: виды указаний уходят в левый край, переключатель вида — в правый.
                 Полоса одна и та же; переставлены ровно два узла, подсказка остаётся между ними. */}
             {kindsFirst && modeToggles}
-            <Text size='micro' variant='label' component='span'>
-              {hint}
-            </Text>
+            {hint && (
+              <Text size='micro' variant='label' component='span'>
+                {hint}
+              </Text>
+            )}
             <ToolbarSpacer />
             {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДА — ЧИТАТЕЛЬСКИЙ ОРГАН, поэтому стоит до режимов постановки и живёт
                 на выпущенной карточке тоже. */}
@@ -687,9 +786,15 @@ export function FocusedAnnotator({
           </Toolbar>
         ) : (
           <div className='flex flex-wrap items-center justify-between gap-2.5'>
-            <Text size='micro' variant='label' component='span'>
-              {hint}
-            </Text>
+            {hint ? (
+              <Text size='micro' variant='label' component='span'>
+                {hint}
+              </Text>
+            ) : (
+              // Пустой член ряда, а не отсутствие члена: раскладка здесь `justify-between`, и без
+              // левой половины переключатели уехали бы к левому краю блока.
+              <span />
+            )}
             {modeToggles}
           </div>
         ))}
@@ -809,7 +914,7 @@ export function FocusedAnnotator({
                     addingKey={adding}
                     onAddingChange={setAdding}
                     onSelect={(key, opts) => {
-                      setSelected(key);
+                      setSelected(key, opts);
                       // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая запись.
                       setAdding(null);
                       if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
@@ -966,7 +1071,7 @@ export function FocusedAnnotator({
                 addingKey={adding}
                 onAddingChange={setAdding}
                 onSelect={(key, opts) => {
-                  setSelected(key);
+                  setSelected(key, opts);
                   setAdding(null);
                   if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
                 }}
@@ -1084,7 +1189,11 @@ export function FocusedAnnotator({
           addingKey={adding}
           onAddingChange={setAdding}
           onSelect={(key, opts) => {
-            setSelected(key);
+            // ⚠ ФОКУС НАРУЖУ НЕ ПРОСИТСЯ, КОГДА ПРАВКА ЖИВЁТ ВНУТРИ ДИАЛОГА. Владелец мудборда
+            // держит правку в боковом меню и на `opts.focus` ставит курсор ТУДА — за оверлей, где
+            // ловушка фокуса Radix немедленно отбирает его назад. Курсор внутри зума ставит сам
+            // диалог (`EditorSlot` поверхности), поэтому наружу уезжает жест выбора БЕЗ просьбы.
+            setSelected(key, renderZoomEditor ? { ...opts, focus: false } : opts);
             setAdding(null);
             if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
           }}
@@ -1095,12 +1204,21 @@ export function FocusedAnnotator({
           hoverNotes={pinText === 'hover'}
           // Резерв под редактор — чтобы выбор пина не дёргал кадр `flex-1`; высота та же, что у
           // самого редактора, одно число на оба (см. довод у пропа).
-          editorReserveHeight={zoomEditorReserve ? editorHeight : undefined}
+          editorReserveHeight={
+            // Резерв — под РЕДАКТОР; без него он резервировал бы место под «бровь», то
+            // есть под ровно тот орган, который владелец снял (B-9). Высота назначена под ПОЛОСУ
+            // (`editorHeight`), поэтому резерв просят только те, кто эту полосу и держит: у тела
+            // бокового меню рядов больше, и зажатое в чужое число оно обрезалось бы `overflow`.
+            zoomEditorReserve && renderEditor && !renderZoomEditor ? editorHeight : undefined
+          }
           // РЕДАКТОР ЕДЕТ В УВЕЛИЧЕННЫЙ ВИД. Его здесь не было вовсе: выбрав указание в зуме,
           // человек правил его в редакторе, который рисовался на СТРАНИЦЕ ПОЗАДИ модалки — то есть
           // нигде. А ставят указание по миллиметровой детали именно в зуме. Диалог прокидывает
           // проп в поверхность спредом, `EditorSlot` и тёмная подложка под кадром уже готовы.
-          renderEditor={renderEditor}
+          //
+          // ⚠ СОБСТВЕННЫЙ РЕДАКТОР ЗУМА СТАРШЕ ОБЩЕГО: владелец, у которого правка снаружи (B-9),
+          // задаёт только его — и тогда полосы на странице по-прежнему нет, а в зуме правка есть.
+          renderEditor={zoomEditor}
         />
       )}
 

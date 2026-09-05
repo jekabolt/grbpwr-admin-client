@@ -2357,6 +2357,21 @@ export type TechCardBomItem = {
   // СВОБОДНЫЙ ТЕКСТ, А НЕ ЗАКРЫТЫЙ СПИСОК: PANTONE это чужой каталог из тысяч кодов, он
   // обновляется, и словарь на нашей стороне устарел бы молча, отвергая законный код.
   pantone: string | undefined;
+  // ОЦЕНКА РАСХОДА НА ИЗДЕЛИЕ (0365, B-16) — «сколько этого примерно уйдёт», в ЕДИНИЦЕ ЭТОЙ СТРОКИ
+  // (`unit`): метры ткани и нитки, штуки фурнитуры. Второго поля единицы у оценки нет намеренно —
+  // это тот же вопрос «сколько», а не второй словарь.
+  // СОВЕЩАТЕЛЬНАЯ, И ЭТО НЕСУЩЕЕ. Её не читают ни костинг, ни план материалов, ни кат-лист, ни
+  // проекция подписи MATERIALS. Настоящие числа живут в двух других местах и остаются там: мерная
+  // норма — в `TechCardColorwayUsage.consumption` (per-colourway, с провенансом manual|marker|dxf),
+  // счётная — в `qty_per_garment`/`spare_qty` выше (подписанная норма закупки). Оценка отвечает
+  // РАНЬШЕ обеих: на стадии замысла рецепта колорвея ещё нет вовсе, а класть приближение модели в
+  // подписанную норму значило бы сделать кнопку черновика правкой денег.
+  // ⚠ ТА ЖЕ ЛОВУШКА ПРОВОДА, ЧТО У ПАРЫ qty_per_garment/spare_qty: у google.type.Decimal нет
+  // `optional`, и пустое приезжает либо nil'ом, либо Decimal{value:""} — сервер считает пустым и то,
+  // и другое. Поэтому ОТСУТСТВИЕ поля = «не трогай сохранённое» (вкладка со старым бандлом), а
+  // ОЧИСТИТЬ можно ТОЛЬКО явным Decimal{value:""}. Присутствие здесь одиночное: у оценки нет
+  // второй половины, в отличие от счётной пары.
+  estUsage: googletype_Decimal | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -5573,11 +5588,21 @@ export type DesignConstructionDraft = {
   // and a proposal that competes with them would ask a person to defend what they already wrote.
   concept: string | undefined;
   aspects: DesignConstructionAspect[] | undefined;
+  // UNPINNED rows for the construction table.
+  // ⚠ THE PROMPT NO LONGER ASKS FOR THESE (B-13), AND THE FIELD STAYS ANYWAY. Two reasons, both
+  // load-bearing: a run answered before B-13 is replayed from its stored canonical JSON and must
+  // still parse, and proto fields are never renumbered. Construction features — seams, closures,
+  // edges, pockets — are now asked for under `aspects`, where the owner said they belong. A model
+  // that volunteers callouts anyway is still parsed and still carried; the client draws none.
   callouts: DesignConstructionCallout[] | undefined;
   bom: DesignConstructionBomLine[] | undefined;
   // What deserves a pinned note and has none. READ-ONLY ADVICE: it names a picture and a spot, it
   // proposes no value, and there is nothing on the card for it to land in.
   missing: string[] | undefined;
+  // Colour combinations the board supports (B-25). 2 to 4, empty when the pictures state no
+  // colour. A PROPOSAL LIKE EVERY OTHER FIELD HERE: nothing is created until a person confirms
+  // one, because confirming writes a PRODUCT (a colourway of this style) and not a form value.
+  colourways: DesignColourwayProposal[] | undefined;
 };
 
 // DesignConstructionAspect is one row of the aspects editor: its key and its text.
@@ -5615,6 +5640,52 @@ export type DesignConstructionBomLine = {
   colour: string | undefined;
   pantone: string | undefined;
   materialId: number | undefined;
+  // ДВА КЛЮЧА ОЦЕНКИ (B-16), КОТОРЫХ ПРОГОНУ НЕ ХВАТАЛО: «сколько примерно уйдёт» и «в чём».
+  // ЕДУТ ТЕМ ЖЕ ПЛАТНЫМ ПРОГОНОМ, А НЕ ВТОРОЙ КНОПКОЙ: входы вопроса — те же ≤12 картинок и те же
+  // строки спеки, которые этот ответ уже держит; отдельный прогон «оцени расход» стоил бы вторую
+  // историю и второй счёт за те же изображения. Цена здесь — две строки в JSON-контракте промпта.
+  // est_usage — на изделие БАЗОВОГО размера, в `unit`; обе пустые, когда картинки не дают основания
+  // (правило 1 промпта: не выдумывать то, чего не видно). Разбор снимает неразбираемое число и
+  // считает это в лог (BomEstDropped) — строка при этом ОСТАЁТСЯ: человеку нужнее слот без оценки,
+  // чем отсутствие слота.
+  estUsage: googletype_Decimal | undefined;
+  // unit — КОРОТКОЕ имя члена MaterialUnit в нижнем регистре («m», «pcs», «kg»), а не сам энум:
+  // строка BOM хранит единицу свободным текстом (`TechCardBomItem.unit` внутри ПОДПИСАННОГО
+  // дайджеста MATERIALS), и предложение обязано говорить на языке того поля, куда оно ляжет.
+  // Неузнанное словарём написание («yd») отдаётся пустым, а не сырым: клиент покажет семейное
+  // умолчание, вместо того чтобы записать в подписываемую колонку слово, которого мы не знаем.
+  unit: string | undefined;
+};
+
+// DesignColourwayProposal is ONE proposed colourway: what to call it, which dictionary colour it
+// is, what the swatch looks like, and which Pantone goes on which cloth slot.
+// THE SHAPE IS EXACTLY WHAT THE COLORWAYS TAB ALREADY NEEDS AND NOTHING MORE. `color_code` is what
+// CreateColorway requires (a colourway is a product and a product needs a dictionary colour);
+// name / pantone / hex are the colourway's own development row; `slots` are the recipe rows keyed
+// by the BOM line the slot's NAME folds onto. Nothing is invented for the wire that the tab does
+// not already draw.
+export type DesignColourwayProposal = {
+  name: string | undefined;
+  // A code the SERVER VERIFIED against the colour dictionary, or '' when none was close.
+  // ⚠ '' IS A LEGAL ANSWER AND THE CLIENT MUST ASK FOR A CODE. A model that names a colour we do
+  // not stock produces a proposal that cannot become a product; an unverified code would produce
+  // one that fails at CreateColorway with the server's own words instead of ours.
+  colorCode: string | undefined;
+  pantone: string | undefined;
+  hex: string | undefined;
+  // One entry per cloth slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index or
+  // id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
+  // binds to them and to hand-typed slots of the same name alike.
+  slots: DesignColourwaySlotColour[] | undefined;
+};
+
+// DesignColourwaySlotColour is one cloth slot wearing one colour, in the two spellings the recipe
+// row holds: a Pantone code and the words a person reads.
+export type DesignColourwaySlotColour = {
+  slot: string | undefined;
+  pantone: string | undefined;
+  hex: string | undefined;
+  colour: string | undefined;
 };
 
 export type OrderFactor =

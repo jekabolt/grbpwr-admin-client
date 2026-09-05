@@ -60,9 +60,15 @@ import {
   common_TechCardAnnotation,
   common_TechCardAnnotationColor,
   common_TechCardAnnotationKind,
+  googletype_Decimal,
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
-import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
+import {
+  decimalToInput,
+  inputToDecimal,
+  normalizeDecimalInput,
+  parseDecimalNumber,
+} from 'utils/decimal';
 import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
@@ -418,6 +424,21 @@ const bomItemSchema = z
     composition: z.string().optional().default(''),
     spec: z.string().optional().default(''),
     unit: z.string().optional().default(''),
+    // ОЦЕНКА РАСХОДА НА ИЗДЕЛИЕ (0365, B-16) — «сколько этого примерно уйдёт», в единице строки
+    // (`unit`). СОВЕЩАТЕЛЬНАЯ: её не читает ни костинг, ни план материалов, ни кат-лист, ни
+    // проекция подписи MATERIALS. Настоящие числа живут в двух других местах и остаются там —
+    // мерная норма в рецепте колорвея, счётная в `qty_per_garment`; оценка отвечает РАНЬШЕ обеих,
+    // когда рецепта ещё нет вовсе, и класть приближение модели в подписанную норму значило бы
+    // сделать кнопку черновика правкой денег.
+    //
+    // ⚠ БЕЗ `.default('')`, И ЭТО НЕСУЩЕЕ, А НЕ НЕДОСМОТР. У `google.type.Decimal` нет `optional`,
+    // поэтому сервер различает ровно два состояния: ключа НЕТ — «не трогай сохранённое»,
+    // `{value:''}` — «очисти». Дефолт `''` в схеме сделал бы ТРЕТЬЕ невыразимым: вкладка со старым
+    // бандлом и черновик из localStorage, не знающие поля, доехали бы сюда пустой строкой и на
+    // сохранении СТЁРЛИ бы чужую оценку — ровно та порода потери, которой этот репозиторий уже
+    // терял пантон строки. `undefined` = «эта форма не знает», `''` = «человек очистил ячейку»;
+    // различие доезжает до провода (см. `estUsageOut` у маппера записи).
+    estUsage: z.string().optional(),
     unitPrice: z.string().optional().default(''), // decimal as string
     currency: z.string().optional().default(''),
     comment: z.string().optional().default(''),
@@ -2340,6 +2361,12 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     composition: b.composition || '',
     spec: b.spec || '',
     unit: b.unit || '',
+    // ОЦЕНКА — РАСПАКОВАННОЙ, И ТОЛЬКО КОГДА ОНА ЕСТЬ. `google.type.Decimal` едет по проводу
+    // ОБЪЕКТОМ (`{"value":"1.6"}`), а незаполненный message приходит с гейтвея ЯВНЫМ null
+    // (EmitUnpopulated) — поэтому «сервер не прислал» и «прислал пустое» здесь сходятся в одно
+    // `undefined`, а не в пустую строку: пустая строка означала бы «человек очистил», и первое же
+    // сохранение чужой карточки отправило бы команду «очисти» вместо молчания.
+    estUsage: decimalToInput(b.estUsage) || undefined,
     unitPrice: decimalToInput(b.unitPrice),
     currency: b.currency || '',
     comment: b.comment || '',
@@ -2960,6 +2987,25 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
 
 // Merge the edited fields over the original insert. Every section is form-managed;
 // `original` is still spread so any future-added proto field survives.
+/**
+ * ОЦЕНКА РАСХОДА НА ПРОВОД — ТРИ СОСТОЯНИЯ, А НЕ ДВА, И ПОТОМУ НЕ `inputToDecimal`.
+ *
+ * У `google.type.Decimal` нет `optional`, и сервер читает провод так: ключа НЕТ — «не трогай
+ * сохранённое», `Decimal{value:''}` — «очисти», иначе — «запиши». Готовый `inputToDecimal`
+ * складывает первые два в одно (пустая строка → ключ уронен), и под upsert'ом полной замены
+ * ОЧИСТИТЬ оценку рукой стало бы невозможно: сохранённое число пережило бы любую правку ячейки.
+ *
+ * Поэтому форма держит различие САМА: `undefined` — «эта форма про поле не знает» (карточка
+ * приехала без оценки; черновик из localStorage старого бандла; строка, рождённая болванкой), и
+ * ключ НЕ ЕДЕТ ВОВСЕ; `''` — «человек очистил ячейку», и едет явное `{value:''}`. Первое — та
+ * половина защиты от `techcard-draft-restore-wipes-absent-fields`, которая живёт в коде: чтобы
+ * стереть чужую оценку, форме пришлось бы сначала её ПОКАЗАТЬ.
+ */
+function estUsageOut(raw?: string): googletype_Decimal | undefined {
+  if (raw == null) return undefined;
+  return { value: normalizeDecimalInput(raw) };
+}
+
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
@@ -3305,6 +3351,8 @@ export function mapFormToTechCardInsert(
       composition: b.composition?.trim() || '',
       spec: b.spec?.trim() || '',
       unit: b.unit?.trim() || '',
+      // Присутствие решается формой, а не пустотой значения, — довод целиком у `estUsageOut`.
+      estUsage: estUsageOut(b.estUsage),
       // ДЕНЬГИ СТРОКИ — ТОЛЬКО ОТ РЕДАКТОРА С costing:write, тем же verbatim-протоколом
       // «поля нет = сохрани что было», что у пары провенанса ниже и у costing в конце файла.
       // Аккаунту без права сервер вырезает цены на чтении, форма держит пустоту — и отправка

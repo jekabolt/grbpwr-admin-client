@@ -4344,14 +4344,17 @@ function CreateColorwayForm({
       showMessage('Pick a colour', 'error');
       return;
     }
-    create.mutate(colorCode, {
-      onSuccess: (res) => {
-        showMessage('Draft colourway created', 'success');
-        setColorCode('');
-        onCreated(res?.colorwayId);
+    create.mutate(
+      { colorCode },
+      {
+        onSuccess: (res) => {
+          showMessage('Draft colourway created', 'success');
+          setColorCode('');
+          onCreated(res?.colorwayId);
+        },
+        onError: (e) => showMessage(createColorwayErrorMessage(e), 'error'),
       },
-      onError: (e) => showMessage(createColorwayErrorMessage(e), 'error'),
-    });
+    );
   };
 
   return (

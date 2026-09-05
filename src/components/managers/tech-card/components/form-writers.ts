@@ -3,16 +3,23 @@ import { ulid } from 'utils/ulid';
 
 import { UNSET_KIND } from './bom-kind';
 import { UNSET_PURPOSE } from './bom-purpose-labels';
-import { newClientRequestId } from './design/use-design-band';
-import type { CalloutForm, TechCardFormData } from './schema';
+import type { TechCardFormData } from './schema';
 
 /**
- * ТРИ ПИСАТЕЛЯ ФОРМЫ, КОТОРЫХ ТЕПЕРЬ РОВНО ПО ОДНОМУ.
+ * ДВА ПИСАТЕЛЯ ФОРМЫ, КОТОРЫХ ТЕПЕРЬ РОВНО ПО ОДНОМУ.
  *
- * Здесь не заведено ни одного нового правила — сюда ПЕРЕЕХАЛИ три уже работавших: upsert строки
- * `details[]` по ключу (жил дважды: в `construction-general-info.tsx` и в `details-editor.tsx`),
- * рождение строки `callouts[]` (жило в `construction-callout-table.tsx:addRow`) и болванка строки
- * `bomItems[]` (жила в `bom-field.tsx` как `emptyBomItem` + `lineKey: ulid()` на месте вызова).
+ * Здесь не заведено ни одного нового правила — сюда ПЕРЕЕХАЛИ два уже работавших: upsert строки
+ * `details[]` по ключу (жил дважды: в `construction-general-info.tsx` и в `details-editor.tsx`) и
+ * болванка строки `bomItems[]` (жила в `bom-field.tsx` как `emptyBomItem` + `lineKey: ulid()`
+ * на месте вызова).
+ *
+ * ⚠ ТРЕТЬИМ ЗДЕСЬ ЖИЛО РОЖДЕНИЕ СТРОКИ `callouts[]`, И ЕГО БОЛЬШЕ НЕТ. Конструктор пережил снос
+ * своей таблицы (B-11) ровно потому, что им же рождал строки черновик construction; B-13 снял и
+ * это — «DRAFT OF THE CONSTRUCTION не должен добавлять коллауты», — и последний вызывающий ушёл
+ * вместе с веткой записи. Писатель без вызывающего — не запас, а обещание: он молча расходится со
+ * схемой, пока кто-нибудь не позовёт его через полгода и не запишет строку позапрошлой формы.
+ * Указание на карточке теперь рождается РОВНО В ОДНОМ месте — на доске, где у него есть адрес
+ * (`design/mood-callouts.tsx:246`), — и второго конструктора этой строке не нужно.
  *
  * ⚠ ПОВОД ПЕРЕЕЗДА — НЕ ОПРЯТНОСТЬ, А ЧЕРНОВИК CONSTRUCTION. Орган `head/construction-draft.tsx`
  * принимает предложения модели построчно, и КАЖДАЯ принятая строка обязана родиться ровно тем же
@@ -76,43 +83,6 @@ export function upsertDetailText(
   text: string,
 ): void {
   upsertDetail(getValues, setValue, key, { text });
-}
-
-/**
- * РОЖДЕНИЕ НЕПРИКОЛОТОГО УКАЗАНИЯ — «+ add callout row» и принятая строка черновика рождаются
- * ОДНИМ конструктором.
- *
- * `number: 0` + непустой `clientRef` — это гейт минта на сервере («сминти мне номер»); нулевой
- * номер БЕЗ ключа значит легаси-строку, которую трогать нельзя, поэтому ключ здесь обязателен и
- * минтится всегда.
- *
- * ⚠ `part` И `parts[0]` РОЖДАЮТСЯ В ПАРЕ. Связь «деталь кроя ↔ указание» стоит на ИМЕНИ, и
- * писатель таблицы держит эти две половины в шаге друг с другом на каждой правке. Строка,
- * рождённая с именем в `part` и пустым `parts`, была бы половиной связи — и то, какая половина
- * доедет до сервера, зависело бы от того, тронул ли человек поле после рождения.
- */
-export function bornCallout(values?: {
-  part?: string;
-  description?: string;
-  dimensions?: string;
-}): CalloutForm {
-  const part = (values?.part ?? '').trim();
-  return {
-    number: 0,
-    part,
-    parts: part ? [part] : [],
-    description: values?.description ?? '',
-    dimensions: values?.dimensions ?? '',
-    mediaId: 0,
-    posX: '',
-    posY: '',
-    kind: 'pin',
-    points: [],
-    color: '',
-    dashed: false,
-    filled: false,
-    clientRef: newClientRequestId(),
-  };
 }
 
 /**

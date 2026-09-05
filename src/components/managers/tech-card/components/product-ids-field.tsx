@@ -2,11 +2,36 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
 import { Link, useParams } from 'react-router-dom';
+import Media from 'ui/components/media';
+import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
-import { Row } from 'ui/components/row';
+import { Tile, Tiles } from 'ui/components/tiles';
 
 function productName(product?: common_Colorway): string {
   return product?.display?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`;
+}
+
+/**
+ * ═══ B-5 · СНИМОК ПРОДУКТА, А НЕ СТРОКА «SKU — имя» ══════════════════════════════════════════
+ *
+ * Владелец, круг 20: «LINKED PRODUCTS давай как-то более удачно показывать пиктограмки с
+ * тамбнейлом и название продукта».
+ *
+ * ⚠ ВТОРОГО ЗАПРОСА НЕ ЗАВЕДЕНО, И ЭТО ГЛАВНОЕ В ЭТОЙ ПРАВКЕ. Миниатюра приезжает В ТОМ ЖЕ
+ * ОБЪЕКТЕ, который блок уже читал ради имени: `useProductsByIds` отдаёт `common_Colorway`, а у
+ * него `display.thumbnail` — это `common_MediaFull` целиком. Адрес читается ровно тем же путём,
+ * каким его читают все остальные экраны админки с миниатюрой продукта
+ * (`display?.thumbnail?.media?.thumbnail?.mediaUrl` — каталог товаров, пикер героя, пикер
+ * кастом-заказа, рельс архива): один путь, одна форма отказа. Заводить здесь второй резолвер
+ * значило бы платить N запросов за факт, который уже лежит в кэше react-query.
+ *
+ * НЕТ АДРЕСА — ПОЛОСАТЫЙ КАДР, А НЕ ПУСТОЙ БЕЛЫЙ. Пустая белая коробка читается как поломка,
+ * полосатая — как «слот, в котором пока ничего нет»; это правило `Placeholder`, а не выбор
+ * этого экрана. Пропорция кадра 3/4 — портрет, как снимают продукт, и она ОДНА на все плитки:
+ * `Media` держит её сама, поэтому ряд не разъезжается по низу от того, какой снимок приехал.
+ */
+function productThumb(product?: common_Colorway): string {
+  return product?.display?.thumbnail?.media?.thumbnail?.mediaUrl ?? '';
 }
 
 // Catalog products linked to this tech card — read-only. Post R1-merge, a colourway IS a
@@ -58,31 +83,44 @@ export function ProductIdsField() {
           no colourways yet
         </Text>
       ) : (
-        <div>
-          {colorwayIds.map((cwId) => {
-            const product = productMap.get(cwId);
-            const name = product ? productName(product) : `#${cwId}`;
-            return (
-              <Row
-                key={cwId}
-                label={
-                  <Text size='small' component='span' variant='inactive'>
-                    SKU
-                  </Text>
-                }
-                value={
-                  <span className='flex min-w-0 items-center gap-2'>
-                    <span className='truncate' title={name}>
-                      {name}
-                    </span>
-                    <Text variant='inactive' size='small' component='span'>
-                      #{cwId}
-                    </Text>
-                  </span>
-                }
-              />
-            );
-          })}
+        /* ПЛИТКИ, А НЕ РЯДЫ. `Row` — это подпись и ЧИСЛО: он выравнивает второй столбец вправо и
+           табулирует его, чтобы стопка цифр читалась как ведомость. Здесь во втором столбце стояло
+           имя товара, то есть ряд обещал ведомость и печатал прозу, а подпись «SKU» повторялась
+           на каждой строке, ничего не различая. Продукт узнают по снимку — значит плитка.
+           Дорожка 96px — наименьший кадр, на котором вещь ещё узнаётся; сетка сама решает, сколько
+           их встанет в ряд, поэтому блок одинаково работает и в половину ширины шапки, и во всю. */
+        <div data-b5-products=''>
+          <Tiles min={96}>
+            {colorwayIds.map((cwId) => {
+              const product = productMap.get(cwId);
+              const name = product ? productName(product) : `#${cwId}`;
+              const url = productThumb(product);
+              return (
+                /* Обёртка несёт якорь пробы, а не разметку: `Tiles` кладёт `[&>*]:min-w-0` на
+                   ДЕТЕЙ грида, то есть на неё, и заворачивать плитку в свой div — объявленный
+                   приём примитива, а не обход. Плитка внутри тянется `h-full`. */
+                <div key={cwId} data-b5-product={cwId}>
+                  <Tile
+                    title={name}
+                    name={name}
+                    /* Подпись снимается, когда продукт НЕ разрешился: там `name` уже вырожден в
+                       `#502`, и вторая строка печатала бы то же самое число второй раз — плитка
+                       выглядела бы сломанной ровно в тот момент, когда важно понять, что вещи
+                       просто нет. `sub` у `Tile` необязателен и рисуется через `{sub && …}`,
+                       поэтому `undefined` честно убирает строку, а не оставляет пустую. */
+                    sub={product ? `#${cwId}` : undefined}
+                    media={
+                      url ? (
+                        <Media src={url} alt={name} aspectRatio='3/4' fit='cover' />
+                      ) : (
+                        <Placeholder aspect='3/4' />
+                      )
+                    }
+                  />
+                </div>
+              );
+            })}
+          </Tiles>
         </div>
       )}
     </div>

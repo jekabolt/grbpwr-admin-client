@@ -88,6 +88,7 @@ import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
 import { PiecesTab } from './pieces-tab';
+import { BaseModelFields } from './header-meta-fields';
 import { ProductIdsField } from './product-ids-field';
 import { DevExpensesField } from './dev-expenses-field';
 import { ReleasesField } from './releases-field';
@@ -262,13 +263,26 @@ const ERROR_TAB: Record<string, TabId> = {
   // Without this row it would fall through to the header default and the toast would name a field
   // that tab does not contain.
   requiredSeamAllowanceMm: 'construction',
-  // C-5 (круг 19): the four classification FKs render in GENERAL INFORMATION on CONSTRUCTION now
-  // (construction-general-info.tsx). Card-level fields still, so without these rows a server
-  // violation on any of them would route to the header tab and name a field it no longer shows.
-  fit: 'construction',
-  categoryId: 'construction',
-  baseModelId: 'construction',
-  baseSampleSizeId: 'construction',
+  // C-5 (круг 19) → ⚠ ИСПРАВЛЕНО В КРУГЕ 20. Эти четыре строки указывали на `construction` и после
+  // круга 20 стали ЛОЖЬЮ — ровно тем видом лжи, от которого предостерегает комментарий выше:
+  // нарушение сервера приводило на вкладку, которая этого поля больше не показывает.
+  //   · `fit` и `categoryId` живут в GENERAL INFORMATION (`construction-general-info.tsx`), а он
+  //     смонтирован РОВНО ОДИН раз — `design/studio-tab.tsx:290`. Значит вкладка — STUDIO.
+  //   · `baseModelId` и `baseSampleSizeId` ушли в СВОЙ блок шапки (B-27, `BaseModelFields` ниже в
+  //     этом же файле), и шапка живёт внутри `<SectionStack hidden={activeTab !== 'studio'}>`
+  //     (`:1939`) — то есть рисуется ТОЛЬКО на STUDIO. Значит `studio` здесь не «сойдёт любая», а
+  //     единственное верное значение, ровно как и у первых двух. Строки оставлены, а не удалены:
+  //     молчаливое падение в фолбэк выглядело бы как «про эти поля никто не думал».
+  //     ⚠ ЗДЕСЬ РАНЬШЕ СТОЯЛ ЛОЖНЫЙ ДОВОД: «шапка стоит вне условия вкладки, поэтому годится
+  //     любая». Значение он давал правильное СЛУЧАЙНО, и следующий переезд шапки на нём бы и
+  //     сломался. Довод, который приводит к верному ответу по неверной причине, опаснее явной
+  //     ошибки: его не проверяют.
+  // Урок на следующий переезд: ERROR_TAB обязан обходиться вместе с монтажами, иначе он тихо
+  // протухает — сломать его нельзя ни типом, ни сборкой, он врёт только в тосте у пользователя.
+  fit: 'studio',
+  categoryId: 'studio',
+  baseModelId: 'studio',
+  baseSampleSizeId: 'studio',
   operations: 'construction',
   labels: 'labels',
   packaging: 'labels',
@@ -1927,7 +1941,7 @@ export function TechCardForm({
                 Маржа, а не обёртка: при `hidden` (display:none) она исчезает вместе со стеком и на
                 другие вкладки не протекает. */}
             <SectionStack hidden={activeTab !== 'studio'} className='mb-gutter'>
-              {/* V-18 · ЧЕТЫРЕ ПЛИТКИ ШАПКИ — ОДИН ГРИД, А НЕ ДВА FLEX-РЯДА. Владелец: «сделать
+              {/* V-18 · ПЛИТКИ ШАПКИ — ОДИН ГРИД, А НЕ ДВА FLEX-РЯДА. Владелец: «сделать
                   что бы они всегда ровно отображались… одинаковой высоты в ряду и одинаковой
                   ширины в колонку». «Криво» было не оформлением, а механикой: `SectionStack row`
                   кладёт соседей `lg:items-start`, то есть каждый блок высотой в своё содержимое —
@@ -1942,24 +1956,44 @@ export function TechCardForm({
                   плитки (замеренный здесь дефект «плитка-кнопка ложится поверх соседней»; наезд и
                   обрезка замерены пробой tmp-стенда этой волны). Выпадашки внутри плиток портятся
                   в body (Radix Portal в select/popover/date-picker), поэтому скролл-контейнер их
-                  не клипает. Группировка осталась 2×2 — identification/classification это
-                  «что за стиль», roles/products под ними — «кто и что к нему привязано»; слить их
-                  в два мегаблока значило бы потерять четыре именованных вопроса прототипа. */}
+                  не клипает. Группировка — ТРИ РЯДА, по одному вопросу на ряд (круг 20, B-27):
+                  identification/classification — «что за стиль», база во всю ширину — «от чего его
+                  считают», roles/products — «кто и что к нему привязано»; слить их в мегаблоки
+                  значило бы потерять пять именованных вопросов ради одной рамки. */}
               <div className='grid grid-cols-1 gap-gutter lg:grid-cols-2'>
                 <Section
                   title='identification'
                   question='— what this style is called'
                   className='min-w-0 overflow-x-auto'
                 >
-                  <StyleNumberField isIdea={isIdea} />
-                  {isIdea && (
-                    <Text variant='inactive' size='small'>
-                      optional while this is an idea — a real style number is required before the
-                      card can advance to PROTO
-                    </Text>
-                  )}
-                  <InputField name='name' label='name *' placeholder='garment name' />
-                  {/* K-19 · ПОСЛЕДСТВИЕ СМЕНЫ СЕЗОНА СЪЕХАЛО С ЭКРАНА НА ОРГАН. Владелец снёс
+                  {/* ═══ B-18 · ТРИ РЯДА, НАЗВАННЫЕ ВЛАДЕЛЬЦЕМ ПОИМЁННО ═══════════════════════
+                      Дословно: «в IDENTIFICATION COLLECTION и SEASON пусть будут в одной строчке и
+                      в первой затем во второй на всю шиирну блока NAME и по половинкам
+                      STYLE NUMBER * и BRAND».
+                        ряд 1 — COLLECTION | SEASON
+                        ряд 2 — NAME, во всю ширину блока
+                        ряд 3 — STYLE NUMBER * | BRAND
+                      Порядок в разметке РОВНО этот, и он же порядок табуляции: на узком экране
+                      грид схлопывается в одну колонку и читается сверху вниз теми же пятью
+                      полями, без второго набора классов под брейкпоинт.
+
+                      ПОЧЕМУ ГРИД, А НЕ ДВА ФЛЕКС-РЯДА С `w-1/2`. Колонки грида —
+                      `minmax(0,1fr)`, то есть их ширину НЕ МОЖЕТ РАСТЯНУТЬ содержимое: длинное
+                      имя коллекции не отберёт места у сезона, а подсказка сезона (она длиннее
+                      всех и переносится) не сдвинет соседа ни на пиксель. `w-1/2` во флексе это
+                      обещание не даёт — там базис ещё и растёт от контента.
+
+                      ЗАЗОРЫ — ДВА ТОКЕНА, И ЭТО РИТМ: 16px между колонками (`spacing.block`),
+                      10px между рядами (`spacing.stack` — тот же шаг, каким `Section` раскладывает
+                      своих детей, поэтому грид не выпадает из вертикального ритма блока).
+                      Линий внутри не рисуется: блок один, вторая рамка была бы коробкой в
+                      коробке (DESIGN.md §5). */}
+                  <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-b18-id=''>
+                    <div className='min-w-0'>
+                      <CollectionField />
+                    </div>
+                    <div className='min-w-0'>
+                      {/* K-19 · ПОСЛЕДСТВИЕ СМЕНЫ СЕЗОНА СЪЕХАЛО С ЭКРАНА НА ОРГАН. Владелец снёс
                       абзац — это третий круг просьб убрать объясняющие простыни, поэтому замены
                       «абзацем покороче» здесь нет. Но перед сносом проверено грепом по src/:
                       факт «смена сезона перевыпускает SKU каждой расцветки» не сказан больше
@@ -1972,21 +2006,39 @@ export function TechCardForm({
                       ради краткости: `clone` в клиенте не существует ни под каким именем (греп
                       по src/ — ноль совпадений), то есть абзац отправлял оператора к
                       несуществующему органу. */}
-                  <SeasonField
-                    pickHint={
-                      isEditMode
-                        ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
-                        : undefined
-                    }
-                  />
-                  <CollectionField />
-                  {/* brand sits inline with the rest of the card's identity rather than behind a
-                    disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
-                    never changed, but hiding it made it look absent rather than defaulted. The
-                    legacy freeform `status` is still not rendered — it has no downstream consumer —
-                    yet its stored value round-trips, since RHF keeps the field from defaultValues
-                    and the full-replace save (mapFormToTechCardInsert) sends it back verbatim. */}
-                  <InputField name='brand' label='brand' />
+                      <SeasonField
+                        pickHint={
+                          isEditMode
+                            ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
+                            : undefined
+                        }
+                      />
+                    </div>
+                    {/* NAME — ВО ВСЮ ШИРИНУ БЛОКА, и это не только приказ владельца: имя изделия
+                        длиннее любого другого значения в блоке, а поле в половину ширины обрезало
+                        бы его в единственном месте карточки, где его читают целиком. */}
+                    <div className='min-w-0 sm:col-span-2'>
+                      <InputField name='name' label='name *' placeholder='garment name' />
+                    </div>
+                    <div className='min-w-0'>
+                      <StyleNumberField isIdea={isIdea} />
+                      {isIdea && (
+                        <Text variant='inactive' size='small' className='mt-1'>
+                          optional while this is an idea — a real style number is required before
+                          the card can advance to PROTO
+                        </Text>
+                      )}
+                    </div>
+                    {/* brand sits inline with the rest of the card's identity rather than behind a
+                      disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
+                      never changed, but hiding it made it look absent rather than defaulted. The
+                      legacy freeform `status` is still not rendered — it has no downstream consumer —
+                      yet its stored value round-trips, since RHF keeps the field from defaultValues
+                      and the full-replace save (mapFormToTechCardInsert) sends it back verbatim. */}
+                    <div className='min-w-0'>
+                      <InputField name='brand' label='brand' />
+                    </div>
+                  </div>
                 </Section>
 
                 <Section
@@ -2085,18 +2137,43 @@ export function TechCardForm({
                     когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
                     (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
                     бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
-                  {/* C-5 (круг 19) · FIT, CATEGORY, BASE MODEL и BASE SAMPLE SIZE УЕХАЛИ ОТСЮДА
-                    в блок GENERAL INFORMATION вкладки CONSTRUCTION (`construction-general-info.tsx`)
-                    — прямое указание владельца: «эти все аспекты надо перенести из CLASSIFICATION».
-                    Это ПЕРЕЕЗД, а не копия: те же поля формы (`fit`, `categoryId`, `baseModelId`,
-                    `baseSampleSizeId`), тот же `HeaderMetaFields`, и `fit` по-прежнему уносит на
+                  {/* C-5 (круг 19) · FIT и CATEGORY УЕХАЛИ ОТСЮДА в блок GENERAL INFORMATION
+                    вкладки CONSTRUCTION (`construction-general-info.tsx`) — прямое указание
+                    владельца: «эти все аспекты надо перенести из CLASSIFICATION». Это ПЕРЕЕЗД, а
+                    не копия: те же поля формы (`fit`, `categoryId`), и `fit` по-прежнему уносит на
                     сервер staged `UpdateStyle` из `StyleFactsField` ниже — он остаётся единственным
                     писателем, а сам селект пишет только поле формы. Маршрут отказов этих полей
                     переведён на `construction` в ERROR_TAB выше — иначе тост называл бы поле,
-                    которого на этой вкладке больше нет. */}
+                    которого на этой вкладке больше нет.
+                    ⚠ КРУГ 20, B-27: BASE MODEL и BASE SAMPLE SIZE ПРОШЛИ ЭТОТ ЖЕ ПУТЬ ОБРАТНО —
+                    но не сюда, а в СВОЙ блок строкой ниже. Слово владельца дословно приведено там. */}
                 </Section>
 
-                {/* R-1 · ВТОРОЙ РЯД ТОГО ЖЕ ГРИДА, а не третья колонка (владелец: «RESPONSIBLE
+                {/* ═══ B-27 · БАЗОВАЯ МОДЕЛЬ И БАЗОВЫЙ РАЗМЕР — СВОЙ БЛОК, ВО ВСЮ ШИРИНУ ═══════
+                    Владелец, дословно: «BASE MODEL и BASE SAMPLE SIZE выдели в отдельный блок на
+                    который занимает две колонки и находится под IDENTIFICATION и CLASSIFICATION».
+
+                    ПОЧЕМУ ОТДЕЛЬНЫЙ БЛОК — ЭТО ПРАВДА, А НЕ ТОЛЬКО ПРИКАЗ. Эти два поля не
+                    отвечают ни на вопрос IDENTIFICATION («как этот стиль называется»), ни на
+                    вопрос CLASSIFICATION («что это за вещь»). Они говорят, ОТ ЧЕГО СЧИТАЮТ:
+                    базовая модель — посадка, от которой градуируется ряд, базовый размер — тот
+                    единственный, по норме которого берётся себестоимость (без фолбэка). Третьего
+                    именованного вопроса в шапке до сих пор не было, и оба поля кочевали по чужим
+                    блокам ровно поэтому.
+
+                    ПОЛНАЯ ШИРИНА, А НЕ ПОЛОВИНА: `lg:col-span-2` в том же гриде шапки. Блок стоит
+                    ПЕРВЫМ во втором ряду — «под IDENTIFICATION и CLASSIFICATION» читается
+                    буквально, — а роли и продукты уходят в третий ряд, где им и место: они про
+                    привязанное к карточке, а не про то, от чего её считают. */}
+                <Section
+                  title='base model & sample size'
+                  question='— what this style is built on, and the size its cost is figured at'
+                  className='min-w-0 overflow-x-auto lg:col-span-2'
+                >
+                  <BaseModelFields />
+                </Section>
+
+                {/* R-1 · ТРЕТИЙ РЯД ТОГО ЖЕ ГРИДА, а не третья колонка (владелец: «RESPONSIBLE
                     ROLES и LINKED PRODUCTS расположи под IDENTIFICATION и CLASSIFICATION»).
                     Плитки условные: у несохранённой карты нет ролей (нужен сохранённый id), у
                     sellable-карты нет причин прятать продукты, у aux — наоборот. Когда в ряду

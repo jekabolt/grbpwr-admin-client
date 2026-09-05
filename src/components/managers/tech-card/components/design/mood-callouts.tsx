@@ -93,21 +93,39 @@ export type MoodCalloutsHandle = {
   calloutsFor: (mediaId: number) => SurfaceCallout[];
   /** Строка по ключу поверхности — редактору нужны и индекс, и значение. */
   at: (key: string) => { index: number; value: MoodCallout } | null;
+  /**
+   * Обратный перевод: индекс формы → ключ поверхности. Нужен ровно одному месту — БОКОВОМУ МЕНЮ
+   * (B-9): оно адресует строки индексом (им идёт leaf-запись), а кадр — ключом, и выбор у них
+   * ОДИН. Второе состояние выбора вместо перевода означало бы подсвеченную строку меню и другое
+   * указание, горящее на картинке.
+   */
+  keyOf: (index: number) => string | null;
+  /**
+   * Строки одной картинки В ВИДЕ ФОРМЫ — не вью-модель поверхности. Меню правит поля (`part`,
+   * `caps`, `color`), а вью-модель их уже раскрыла и переименовала; читать правку из неё значило
+   * бы писать в форму то, что нарисовано, а не то, что хранится.
+   */
+  rowsOn: (mediaId: number) => { index: number; key: string; value: MoodCallout }[];
   add: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
   editPoints: (key: string, points: ShapePoint[]) => void;
   moveLabel: (key: string, x: number, y: number) => void;
   removeByKey: (key: string) => void;
-  setText: (index: number, value: string) => void;
-  setColor: (index: number, value: string) => void;
-  setDashed: (index: number, value: boolean) => void;
-  setFilled: (index: number, value: boolean) => void;
   /**
-   * Наконечник (D-19/D-20) приходит ПАРОЙ «вид хранения + caps» — так его отдаёт ряд оформления
-   * (`capsStorage`): засечки и скоба это два ВИДА, точки и стрелки — `dim` плюс `caps`. Пишутся
-   * оба поля одной записью, иначе «скоба» осталась бы `dim` без caps, то есть засечками.
+   * ⚠ ЗДЕСЬ БЫЛИ ПИСАТЕЛИ ПОЛЕЙ — `setText`, `setColor`, `setDashed`, `setFilled`, `setCaps` и
+   * `demote`, — И ИХ БОЛЬШЕ НЕТ, ПОТОМУ ЧТО ПРАВИЛО НЕ ИМЕЕТ ПРАВА ЖИТЬ В ДВУХ ДОМАХ.
+   *
+   * Звал их РОВНО ОДИН орган — `renderEditor` доски, снятый владельцем (B-9). Правку мудбордного
+   * указания пишет теперь тело строки бокового меню (`./callout-rail`, `CalloutRowBody`) — тем же
+   * приёмом (leaf-запись по точечному пути) и в единственном экземпляре, включая пару «вид хранения
+   * + caps»: наконечник приходит от ряда оформления парой (засечки и скоба — два ВИДА, точки и
+   * стрелки — `dim` плюс `caps`), и записать только `caps` значило бы молча превратить нарисованные
+   * стрелки в засечки. Оставленный здесь второй экземпляр этого рассуждения — это и есть «два
+   * расходящихся места», которые круг 20 закрывал.
+   *
+   * Геометрия (`editPoints`, `moveLabel`) и жизнь строки (`add`, `removeByKey`, `removeOn`) остаются
+   * здесь: они пишут по КОРНЮ массива либо переводят ключ в индекс, а это владение массивом, а не
+   * правка поля.
    */
-  setCaps: (index: number, next: { kind: string; caps: string }) => void;
-  demote: (index: number) => void;
   /** Сколько указаний стоит на этой картинке — цитата для ✕ плитки. */
   countOn: (mediaId: number) => number;
   /** Указания умирают ВМЕСТЕ с плиткой: жить им больше негде (Г1). */
@@ -180,6 +198,16 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
     return value ? { index, value } : null;
   };
 
+  const keyOf = (index: number) => fa.fields[index]?.id ?? null;
+
+  const rowsOn = (mediaId: number) =>
+    fa.fields
+      .map((f, index) => ({ index, key: f.id, value: values[index] }))
+      .filter(
+        (row): row is { index: number; key: string; value: MoodCallout } =>
+          !!row.value && (row.value.mediaId ?? 0) === mediaId && mediaId > 0,
+      );
+
   const add = (mediaId: number, kind: string, pts: ShapePoint[], pen: PenStyle) => {
     if (!pts.length || !mediaId) return;
     const pin = kind === 'pin';
@@ -250,26 +278,6 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
     writeCallouts(((getValues('callouts') ?? []) as MoodCallout[]).filter((_, ci) => ci !== i));
   };
 
-  const setText = (i: number, v: string) =>
-    setValue(`callouts.${i}.description`, v, { shouldDirty: true });
-  const setColor = (i: number, v: string) =>
-    setValue(`callouts.${i}.color`, v as AnnotationColor, { shouldDirty: true });
-  const setDashed = (i: number, v: boolean) =>
-    setValue(`callouts.${i}.dashed`, v, { shouldDirty: true });
-  const setFilled = (i: number, v: boolean) =>
-    setValue(`callouts.${i}.filled`, v, { shouldDirty: true });
-  const setCaps = (i: number, next: { kind: string; caps: string }) => {
-    setValue(`callouts.${i}.kind`, next.kind as AnnotationKind, { shouldDirty: true });
-    setValue(`callouts.${i}.caps`, next.caps as AnnotationCaps, { shouldDirty: true });
-  };
-
-  // Разжаловать фигуру в точку — единственный способ избавиться от неудачной геометрии, СОХРАНИВ
-  // текст: ручки ниже минимума точек не опускаются.
-  const demote = (i: number) => {
-    setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
-    setValue(`callouts.${i}.points`, [], { shouldDirty: true });
-  };
-
   const countOn = (mediaId: number) =>
     values.reduce((n, c) => n + ((c?.mediaId ?? 0) === mediaId && mediaId > 0 ? 1 : 0), 0);
 
@@ -287,16 +295,12 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
   return {
     calloutsFor,
     at,
+    keyOf,
+    rowsOn,
     add,
     editPoints,
     moveLabel,
     removeByKey,
-    setText,
-    setColor,
-    setDashed,
-    setFilled,
-    setCaps,
-    demote,
     countOn,
     removeOn,
     texts,

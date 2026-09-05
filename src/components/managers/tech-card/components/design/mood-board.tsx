@@ -4,11 +4,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { AnnotationEditor, ANNOTATION_EDITOR_H_COMPACT } from 'ui/components/annotation/editor';
-import { leaderTarget, type ShapePoint } from 'ui/components/annotation/geometry';
-import { effectiveCaps, kindDef } from 'ui/components/annotation/kinds';
-import { AnnotationDefs, CalloutShape } from 'ui/components/annotation/shapes';
-import { rememberPen, type SurfaceCallout } from 'ui/components/annotation/surface';
+import { noteArrowsOf } from 'ui/components/annotation/surface';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -21,6 +17,7 @@ import Textarea from 'ui/components/text-area';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
+import { CalloutRail, CalloutRowBody, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { ConstructionDraft } from './head/construction-draft';
 import { VectorModal } from './modals';
@@ -199,196 +196,43 @@ export function takeIntoInput(
 }
 
 /**
- * ═══ БОКОВОЕ МЕНЮ УКАЗАНИЙ ДОСКИ (D-27, круг 18) ═════════════════════════════════════════════
+ * ═══ БОКОВОЕ МЕНЮ УКАЗАНИЙ ДОСКИ — ТЕПЕРЬ ТОТ ЖЕ ОРГАН, ЧТО У ЛИСТА (B-9, круг 20) ═══════════════
  *
- * Владелец, дословно: «мудборд должен получить такое же боковое меню колаутов как в артефактах».
- * В ARTIFACTS это блок `callouts` справа от листа (`artifacts-panel.tsx`, `CalloutPanel`): строка
- * на выноску, рядом — на какой плите она стоит. Здесь ТА ЖЕ РАСКЛАДКА (`SectionStack row`: доска
- * `flex-1`, справа блок в 340px) и та же грамматика строки.
+ * Владелец, дословно: «в мудборде все управление колаутами должно было переехать в панель слева
+ * как в артифактах логика должна там быть такая-же и не должно быть этой брови над картинками "no
+ * callout selected — click a note or a line on a frame · Backspace deletes it · Enter opens this
+ * editor" все только в правом блоке».
  *
- * ⚠ ЭТО ВРЕМЕННЫЙ ОРГАН ИЗ ОБЩИХ ПРИМИТИВОВ, А НЕ КОПИЯ `CalloutPanel`. Меню артефактов живёт
- * внутри чужого файла и прямо сейчас переписывается (круг 19: только выноски текущего листа,
- * подсветка выноски по наведению на строку, пиктограмма вида в каждой строке). Скопировать его
- * тело сюда значило бы завести два места, где правила расходятся. Поэтому строка собрана из
- * примитивов указаний (`CalloutShape` рисует пиктограмму, реестр `kindDef` называет вид), а
- * извлечение ОДНОГО общего `CalloutRail` из `artifacts-panel.tsx` названо в отчёте волны.
+ * ЧТО СТОЯЛО ЗДЕСЬ ДО ЭТОГО КРУГА. Кругом 18 (D-27) доска получила СВОЁ меню — «временный орган из
+ * общих примитивов», чья собственная подпись честно перечисляла, чего в нём нет: выбора по клику,
+ * подсветки по наведению и правки. Причина была названа там же: у `FocusedAnnotator` не было
+ * управляемых пропов, а меню ARTIFACTS переписывалось соседней волной, и копировать его тело
+ * значило завести два расходящихся места. Обе причины кончились: пропы есть
+ * (`selectedKey`/`onSelectedChange`, `hoveredKey`, `addingKey`), а тело меню ИЗВЛЕЧЕНО в
+ * `./callout-rail` и монтируется обоими экранами. Долг, названный подписью D-27, закрыт.
  *
- * ЧТО ЗДЕСЬ ЕСТЬ И ЧЕГО ПОКА НЕТ.
- *   есть  — только указания ДОСКИ (по построению: `useMoodCallouts` фильтрует по `media_id`
- *           плиток доски; строка с `media_id = 0` и строка входа сюда не попадают);
- *   есть  — пиктограмма вида: не иконка из словаря, а САМА фигура, нарисованная общим
- *           `CalloutShape` в 22×14 — с её цветом, пунктиром и наконечниками, то есть регистр видов
- *           здесь не перечисляется, читается реестр;
- *   есть  — на какой картинке стоит (номер плитки доски, тот же, что печатается в её углу);
- *   нет   — выбор указания кликом по строке и подсветка выноски по наведению: выбор и наведение
- *           принадлежат `FocusedAnnotator`/`AnnotationSurface`, у которых нет управляемых пропов
- *           (`selectedKey`/`onSelectedChange`, `hoveredKey`). Строка поэтому НЕ кнопка: орган,
- *           который ничего не делает по клику, обещал бы жест, которого нет. Пропы названы в отчёте.
+ * ЧТО ИЗ ЭТОГО СЛЕДУЕТ ДЛЯ ДОСКИ, ПО ПУНКТАМ ВЛАДЕЛЬЦА:
+ *   · выбор — клик по строке меню выбирает указание НА КАДРЕ, и наоборот (один `selectedKey`);
+ *   · Backspace — слушатель окна у самой поверхности (`annotation/surface.tsx`), он и был там;
+ *   · Enter — тот же слушатель просит фокус, и просьба доезжает до меню через `opts.focus`,
+ *     который панель превращает в `focusToken`;
+ *   · «бровь» над картинками не рисуется вовсе: `renderEditor` доске больше не передаётся, а без
+ *     него полосы редактора под кадрами нет — ни правки, ни её пустого состояния (см. довод в
+ *     `ui/components/focused-annotator.tsx`);
+ *   · а вот В УВЕЛИЧЕННОМ ВИДЕ правка ЕСТЬ, и это не отступление от B-9, а его условие. Зум —
+ *     модалка с ловушкой фокуса: меню за оверлеем недостижимо физически, и указание, поставленное
+ *     в зуме (а по миллиметровой детали его ставят именно там), нельзя было бы ни назвать, ни
+ *     покрасить, ни удалить, не закрыв окно. Поэтому доска задаёт `renderZoomEditor` — ТО ЖЕ ТЕЛО
+ *     строки меню (`CalloutRowBody` из `./callout-rail`), а не второй редактор: орган один, мест
+ *     монтажа два, достижимо одновременно ровно одно.
+ *
+ * ⚠ ПИКТОГРАММА ВИДА ТЕПЕРЬ ОБЩАЯ (`KindGlyph` реестра), И ЭТО ОБМЕН, СДЕЛАННЫЙ СОЗНАТЕЛЬНО.
+ * Здесь стоял свой `CalloutGlyph` — САМА фигура, нарисованная общим `CalloutShape` в 22×14, со
+ * своим цветом, пунктиром и наконечниками. Он был богаче, и его не жалко ровно по одной причине:
+ * владелец потребовал «логика должна там быть такая-же», а две пиктограммы на один вопрос «что
+ * это за указание» — это и есть два словаря видов, от которых уходил весь этот файл. Победил тот,
+ * что уже стоит в ARTIFACTS.
  */
-
-/**
- * ПИКТОГРАММА ВИДА — фигура указания, нарисованная тем же `CalloutShape`, что рисует её на кадре,
- * в коробке 22×14 (координаты — в 44×28, чтобы засечки, скоба и стрелки, чьи размеры заданы
- * пикселями в `geometry.ts`, вошли в коробку вдвое мельче). Опорные точки выбираются ПО ГРАММАТИКЕ
- * реестра (`grammar`, `capped`, `tool`), а не по списку ключей: новый вид с известной грамматикой
- * получит пиктограмму без правки этого места; неизвестный, как всюду, читается пином.
- *
- * Подпись у фигуры ставится в ЦЕЛЬ ЛИДЕРА (`leaderTarget`), поэтому лидер нулевой длины и в
- * пиктограмме не виден: пиктограмма показывает фигуру, а не её плашку.
- */
-const GLYPH_W = 44;
-const GLYPH_H = 28;
-
-function glyphGeometry(kind: string, caps: string): { pts: ShapePoint[]; label: ShapePoint } {
-  const d = kindDef(kind);
-  if (d.grammar === 'ink') {
-    return {
-      pts: [
-        { x: 4, y: 20 },
-        { x: 12, y: 8 },
-        { x: 20, y: 20 },
-        { x: 28, y: 8 },
-        { x: 36, y: 20 },
-        { x: 40, y: 14 },
-      ],
-      label: { x: 22, y: 14 },
-    };
-  }
-  if (d.grammar === 'arc') {
-    const pts = [
-      { x: 4, y: 22 },
-      { x: 22, y: 6 },
-      { x: 40, y: 22 },
-    ];
-    return { pts, label: leaderTarget(d.key, pts, effectiveCaps(d.key, caps)) ?? pts[1] };
-  }
-  if (d.grammar === 'polygon') {
-    const pts = [
-      { x: 6, y: 4 },
-      { x: 38, y: 4 },
-      { x: 38, y: 24 },
-      { x: 6, y: 24 },
-    ];
-    return { pts, label: leaderTarget(d.key, pts, '') ?? { x: 22, y: 14 } };
-  }
-  if (d.tool === 'label') {
-    // Записка: стрелка от плашки к месту; у записки с лучами — два луча.
-    const pts =
-      d.points[0] >= 2
-        ? [
-            { x: 38, y: 22 },
-            { x: 38, y: 6 },
-          ]
-        : [{ x: 38, y: 22 }];
-    return { pts, label: { x: 8, y: d.points[0] >= 2 ? 14 : 6 } };
-  }
-  if (d.capped) {
-    // Линия: две точки, наконечники — какие хранятся (`effectiveCaps` раскрывает «не задано»).
-    const pts = [
-      { x: 6, y: 14 },
-      { x: 38, y: 14 },
-    ];
-    return { pts, label: leaderTarget(d.key, pts, effectiveCaps(d.key, caps)) ?? { x: 22, y: 14 } };
-  }
-  // Пин и всё неизвестное: одна точка.
-  return { pts: [{ x: 22, y: 14 }], label: { x: 22, y: 14 } };
-}
-
-function CalloutGlyph({
-  kind,
-  caps,
-  color,
-  dashed,
-  filled,
-}: {
-  kind: string;
-  caps?: string;
-  color?: string;
-  dashed?: boolean;
-  filled?: boolean;
-}) {
-  const d = kindDef(kind);
-  const { pts, label } = glyphGeometry(kind, caps ?? '');
-  return (
-    <svg
-      role='img'
-      aria-label={d.label}
-      width={GLYPH_W / 2}
-      height={GLYPH_H / 2}
-      viewBox={`0 0 ${GLYPH_W} ${GLYPH_H}`}
-      className='shrink-0 overflow-visible text-textColor'
-      data-mood-glyph={d.key}
-    >
-      {/* Маркеры стрелок и штриховка — те же определения, что кладёт в `<defs>` сам кадр; в каждой
-          пиктограмме свои, потому что она рисуется и там, где ни одного кадра на экране нет. */}
-      <defs>
-        <AnnotationDefs />
-      </defs>
-      {d.key === 'pin' ? (
-        // Пин на кадре — HTML-кружок с номером, а не SVG-фигура (`CalloutShape` рисует ему только
-        // точку привязки), поэтому его пиктограмма — тот же кружок.
-        <circle cx={22} cy={14} r={6} fill='none' stroke='currentColor' strokeWidth={2} />
-      ) : (
-        <CalloutShape
-          kind={kind}
-          pts={pts}
-          label={label}
-          color={color || undefined}
-          dashed={dashed}
-          filled={filled}
-          caps={caps}
-          strokeWidth={2}
-        />
-      )}
-    </svg>
-  );
-}
-
-/** Строка меню: указание доски вместе с номером плитки, на которой оно стоит. */
-type RailRow = SurfaceCallout & { picture: number };
-
-function MoodCalloutRail({ rows }: { rows: RailRow[] }): JSX.Element {
-  if (rows.length === 0) {
-    return (
-      <Text size='micro' variant='label' component='p' data-mood-rail=''>
-        none yet. A note is put on the picture itself — arm a kind above the board and click a
-        picture; the row appears here the moment it exists.
-      </Text>
-    );
-  }
-  return (
-    <div data-mood-rail=''>
-      {rows.map((row) => {
-        const text = (row.text ?? '').trim();
-        return (
-          <div
-            key={row.key}
-            data-mood-callout={row.key}
-            data-mood-callout-kind={kindDef(row.kind).key}
-            className='flex items-center gap-2 border-b border-hairline py-1'
-          >
-            <CalloutGlyph
-              kind={row.kind}
-              caps={row.caps}
-              color={row.color}
-              dashed={row.dashed}
-              filled={row.filled}
-            />
-            <Text
-              size='micro'
-              component='span'
-              className={cn('min-w-0 flex-1 truncate', !text && 'text-labelColor')}
-            >
-              {text || 'no text'}
-            </Text>
-            <Pill tone='mut'>picture {row.picture}</Pill>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
  * ═══ ПРАВКА КАРТИНКИ ДОСКИ ПО НАВЕДЕНИЮ (C-3, круг 18) ═══════════════════════════════════════
  *
@@ -529,9 +373,10 @@ export function MoodBoard({
   // одном из режимов, поэтому пины по-прежнему ложатся на снимок один в один.
   // Стрип — умолчание (владелец: «стрип мод по дефолту в мудборде»): доску чаще читают лентой.
   const [mode, setMode] = useState<'strip' | 'grid'>('strip');
-  // 380 в стрипе — «высоту картинок сделать чуть больше» (R-7). Ровно на эти же 40px ужата
-  // полоса редактора (148 → ANNOTATION_EDITOR_H_COMPACT = 108): рост отдан КАРТИНКЕ, а суммарная
-  // высота блока не выросла. Двигая одно из двух чисел, двигай оба — иначе блок снова растёт.
+  // 380 в стрипе — «высоту картинок сделать чуть больше» (R-7). Раньше эти 40px были ЗАНЯТЫ у
+  // полосы редактора (148 → 108), чтобы суммарная высота блока не выросла, и оба числа полагалось
+  // двигать вместе. С B-9 полосы редактора под кадрами нет вовсе (правка уехала в меню справа),
+  // парного числа не осталось, и все её 108px блок отдал обратно странице.
   const rowHeight = mode === 'strip' ? 380 : 280;
 
   // ── дверь добавления ────────────────────────────────────────────────────────────────────────
@@ -673,12 +518,37 @@ export function MoodBoard({
   // отвечает на вопрос «стоит ли разворачивать» молчанием.
   const [open, setOpen] = useState(true);
 
-  // ── строки бокового меню (D-27) — в порядке доски, с номером плитки ─────────────────────────
+  // ── боковое меню указаний (B-9) — выбор, наведение, правка ──────────────────────────────────
   //
-  // `calloutsFor` уже отдаёт вью-модель поверхности — ту же, что видит кадр, — поэтому меню и кадр
-  // не могут разойтись ни в цвете, ни в наконечнике, ни в тексте: один источник на оба.
-  const railRows: RailRow[] = views.flatMap((v, i) =>
-    callouts.calloutsFor(v.mediaId).map((c) => ({ ...c, picture: i + 1 })),
+  // ВЫБОР ЖИВЁТ ЗДЕСЬ, ОДИН НА КАДР И НА МЕНЮ. Кадр адресует указание КЛЮЧОМ поля-массива, меню —
+  // ИНДЕКСОМ в форме (им идёт leaf-запись), и перевод между ними делает `useMoodCallouts`. Держать
+  // по состоянию на каждую половину значило бы получить экран, где подсвечена одна строка, а горит
+  // другое указание.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedRow = selectedKey ? callouts.at(selectedKey) : null;
+  const selectedIndex = selectedRow?.index ?? null;
+  /** Строка под курсором в меню — её же подсвечивает кадр (`hoveredKey`). Индекс, как и выбор. */
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  /** Счётчик просьб «поставь курсор в правку»: растёт РОВНО по жесту выбора, см. `CalloutRail`. */
+  const [focusEditor, setFocusEditor] = useState(0);
+  /** Взвод «+ point»: кнопка в меню, клик — на кадре, поэтому состояние общее и живёт здесь. */
+  const [addingKey, setAddingKey] = useState<string | null>(null);
+
+  // ЛУЧИ СЧИТАЮТСЯ ТОЙ ЖЕ ФУНКЦИЕЙ, ЧТО И У КАДРА (`noteArrowsOf`): ответ на вопрос «есть ли у
+  // этого указания лучи и сколько их ещё можно» обязан совпадать на обеих половинах экрана.
+  const arrows = noteArrowsOf(readOnly ? undefined : selectedRow?.value, {
+    arming: addingKey !== null && addingKey === selectedKey,
+    arm: () => setAddingKey(selectedKey),
+    cancel: () => setAddingKey(null),
+  });
+
+  // Строки меню — в порядке доски, с номером картинки. Форма, а не вью-модель: меню правит поля.
+  const railRows: CalloutRailRow[] = views.flatMap((v, i) =>
+    callouts.rowsOn(v.mediaId).map((row) => ({
+      index: row.index,
+      c: row.value,
+      where: `picture ${i + 1}`,
+    })),
   );
 
   const canEdit = !readOnly && speaks;
@@ -736,10 +606,22 @@ export function MoodBoard({
           preferNaturalAspect
           // Текст пина — по наведению или фокусу на маркер, не постоянной легендой (R-9).
           pinText='hover'
-          // Узкая полоса редактора (R-2) и тот же резерв в зуме (R-6): одно число на резерв и
-          // корпус, см. `heightPx` у AnnotationEditor ниже — разъехавшись, они возвращают дёрганье.
-          editorHeight={ANNOTATION_EDITOR_H_COMPACT}
-          zoomEditorReserve
+          /* ═══ ВЫБОР, НАВЕДЕНИЕ И ВЗВОД — СНАРУЖИ (B-9) ═════════════════════════════════════
+             Три пары пропов на три половинчатых жеста: выбрать можно и на кадре, и строкой меню;
+             подсветить — наведя мышь на кадр или на строку; взвести «+ point» — кнопкой в меню,
+             а клик, которого она ждёт, приходит на кадр. Каждое второе состояние здесь дало бы
+             экран, где меню и картинка говорят про разные указания. */
+          selectedKey={selectedKey}
+          onSelectedChange={(key, opts) => {
+            setSelectedKey(key);
+            setAddingKey(null);
+            // ТРЕТИЙ ТАКТ ЖЕСТА «клик — клик — напиши, что это», и он же исполнение Enter: обе
+            // просьбы приходят от поверхности одним флагом и обе кончаются курсором в поле меню.
+            if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+          }}
+          hoveredKey={hoverIndex == null ? null : callouts.keyOf(hoverIndex)}
+          addingKey={addingKey}
+          onAddingChange={setAddingKey}
           viewControls={
             <ChipRow>
               {(['strip', 'grid'] as const).map((m) => (
@@ -810,55 +692,60 @@ export function MoodBoard({
               )}
             </>
           )}
-          renderEditor={(key, { close, arrows }) => {
+          /* ⚠ `renderEditor` ДОСКЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ — И ЭТО B-9, А НЕ ПОТЕРЯ. Здесь стоял
+             `AnnotationEditor` в узком корпусе (R-2), полосой под кадрами; вместе с ним стояла
+             «бровь» — его пустое состояние («no callout selected — …»), которую владелец назвал
+             дословно и снял. Вся правка мудбордного указания — текст, цвет, пунктир, штриховка,
+             наконечник, «+ point» и удаление — уехала в боковое меню справа (`./callout-rail`),
+             и второй редактор на те же поля означал бы драку за фокус и правку, которую не видно.
+             Вместе с полосой ушли `editorHeight` и `zoomEditorReserve`: и то и другое резервировало
+             высоту ПОД РЕДАКТОР, а кадру, у которого редактора нет ни в одном состоянии, дёргаться
+             не от чего — 108px вертикали доска получила назад. */
+          /* ═══ А В УВЕЛИЧЕННОМ ВИДЕ ПРАВКА ЕСТЬ, И ЭТО ТО ЖЕ САМОЕ ТЕЛО ═══════════════════════
+             Зум — Radix `Dialog`: оверлей, модальность, ловушка фокуса. Пока правка жила ТОЛЬКО в
+             меню справа, открытый зум делал её недостижимой физически — просьба поставить курсор
+             уезжала в textarea ЗА оверлеем, и фокус-скоуп немедленно утаскивал фокус обратно.
+             Поставленную в зуме записку нельзя было ни назвать, ни покрасить, ни дать ей второй
+             луч, ни удалить, не закрыв окно, — а ставят указание по миллиметровой детали именно в
+             зуме, и этот код так и говорит про себя (`zoom · pan · edit`).
+
+             ⚠ ЭТО НЕ ВОСКРЕШЕНИЕ «БРОВИ» И НЕ ВТОРОЙ РЕДАКТОР. Возвращается не снятый орган
+             (`AnnotationEditor` + его пустое состояние), а РОВНО ТЕЛО СТРОКИ МЕНЮ — та же функция
+             `CalloutRowBody`, которую рисует `CalloutRail`. Правило по-прежнему в одном месте (в
+             том числе пара «вид + caps», которую B-9 и звал «двумя расходящимися местами»), а
+             достижимо одновременно ровно одно из двух: пока модалка открыта, меню за ней
+             недостижимо по построению. Пустого состояния у тела нет вовсе — без выбора поверхность
+             слот не рисует, — так что «брови» не появляется ни в одном состоянии. */
+          renderZoomEditor={(key, { arrows: zoomArrows }) => {
             const row = callouts.at(key);
             if (!row) return null;
-            const { index, value } = row;
             return (
-              <AnnotationEditor
-                // Узкий корпус (R-2): у мудбордной выноски нет ни номера, ни деталей, ни размера —
-                // полная полоса стояла бы наполовину пустой. То же число уходит в `editorHeight`
-                // выше: резерв и корпус обязаны совпадать, иначе возвращается сдвиг кадров.
-                heightPx={ANNOTATION_EDITOR_H_COMPACT}
-                kind={value.kind ?? 'pin'}
-                // НОМЕРА НЕТ И В РЕДАКТОРЕ: мудбордную пометку не адресует ни деталь, ни операция,
-                // ни дефект, и нарисованный номер обещал бы адрес, которого не существует.
-                text={value.description ?? ''}
-                color={value.color ?? ''}
-                dashed={!!value.dashed}
-                filled={!!value.filled}
-                caps={value.caps ?? ''}
-                // Деталей кроя у мудбордной пометки нет: она про настроение, а не про изделие.
-                pieceKeys={[]}
-                onPieces={() => {}}
-                onText={(v) => callouts.setText(index, v)}
-                onColor={(v) => {
-                  rememberPen({ color: v });
-                  callouts.setColor(index, v);
-                }}
-                // НАКОНЕЧНИКИ (D-19/D-20) — пара «вид хранения + caps» пишется целиком; перо
-                // помнит ВЫБРАННОЕ (`chosen`), потому что скоба в хранении — `bracket` без caps.
-                onCaps={(next, chosen) => {
-                  rememberPen({ caps: chosen });
-                  callouts.setCaps(index, next);
-                }}
-                onDashed={(v) => {
-                  rememberPen({ dashed: v });
-                  callouts.setDashed(index, v);
-                }}
-                onFilled={(v) => {
-                  rememberPen({ filled: v });
-                  callouts.setFilled(index, v);
-                }}
-                // ЛУЧИ ЗАПИСКИ приходят от поверхности: взвод «жду клик по кадру» принадлежит
-                // кадру, а не форме. Здесь стояла «make it a point» — владелец её убрал (E-27), и
-                // вместе с ней ушёл единственный смысл разжалования: пина в палитре больше нет.
-                arrows={arrows}
-                onRemove={() => {
-                  callouts.removeByKey(key);
-                  close();
-                }}
-                onClose={close}
+              <CalloutRowBody
+                index={row.index}
+                c={row.value}
+                disabled={readOnly}
+                onRemove={
+                  readOnly
+                    ? undefined
+                    : (index) => {
+                        const k = callouts.keyOf(index);
+                        if (!k) return;
+                        callouts.removeByKey(k);
+                        // Выбор снимается ВМЕСТЕ со строкой — тот же довод, что у меню справа:
+                        // индекс под ним после удаления адресует уже соседнее указание.
+                        setSelectedKey(null);
+                        setAddingKey(null);
+                      }
+                }
+                /* ЛУЧИ БЕРУТСЯ У ПОВЕРХНОСТИ, А НЕ СЧИТАЮТСЯ ЗАНОВО: диалог отдаёт их слотом
+                   (`renderEditor(key, { arrows })`), посчитав ТОЙ ЖЕ `noteArrowsOf`, что и меню
+                   справа. Взвод при этом общий — `addingKey` живёт здесь, и «+ point», нажатый в
+                   зуме, ждёт клик по тому же кадру. */
+                arrows={zoomArrows}
+                /* НОМЕРА И ДЕТАЛИ КРОЯ У МУДБОРДНОГО УКАЗАНИЯ НЕТ — те же два пропа, что у меню
+                   справа, и по той же причине. */
+                detailFields={false}
+                caps
               />
             );
           }}
@@ -891,10 +778,21 @@ export function MoodBoard({
             placeholder='what this thing is — the idea, the reference, the purpose'
             className='resize-none'
           />
-          <Text size='micro' variant='label' className='mt-px'>
-            printed for the factory · part of the DESIGN signature · read by «draft the idea» below
-            — the garment description for generation is a different field, in the input block
-          </Text>
+          {/* ⚠ ПОДПИСИ ПОД ПОЛЕМ БОЛЬШЕ НЕТ — СНЯТА ВЛАДЕЛЬЦЕМ (круг 20, B-3), дословно:
+              «"printed for the factory ·
+              part of the DESIGN signature · read by «draft the idea»
+              below — the garment description for generation is a different field, in the input
+              block" убрать текст».
+
+              ЧТО ОНА ГОВОРИЛА И ЧТО ИЗ ЭТОГО УЦЕЛЕЛО. Три факта: текст печатается в тех-паке,
+              входит в подпись DESIGN и читается черновиком ниже; плюс оговорка «это не описание
+              изделия для генерации». Первые три — свойства поля, которые человек узнаёт по месту:
+              `ConstructionDraft` стоит той же секцией ниже и называет своё чтение сам, а печать и
+              подпись видны на бумаге и в блоке подписи. Четвёртый — различение двух документов —
+              живёт там, где его и путают: в панели WHAT THE MODEL GETS, у которой обе двери
+              (`edit the concept ▸` и `edit the description ▸`) названы поимённо, и в самом блоке
+              референсов, где `garment description` подписана «goes into every run».
+              Возвращать строку сюда — значит вернуть абзац прозы в блок, где владелец её снял. */}
         </div>
 
         {/* ЛЕГАСИ-ЗАПИСКА ДОСКИ. Существует только на карточках, писавших `moodNote` до слияния
@@ -993,9 +891,16 @@ export function MoodBoard({
       )}
     </Section>
 
-      {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (D-27) — тот же блок, что стоит справа от листа в ARTIFACTS:
-          заголовок `callouts`, счётчик пилюлей, строка на указание. Сворачивается вместе с доской:
-          меню про то, что на доске, и без доски ему не о чем. */}
+      {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (B-9) — ТОТ ЖЕ ОРГАН, что стоит справа от листа в ARTIFACTS, и
+          теперь буквально тот же: заголовок `callouts`, счётчик пилюлей, строка на указание,
+          правка выбранной строки внутри неё. Сворачивается вместе с доской: меню про то, что на
+          доске, и без доски ему не о чем.
+          `caps` ПЕРЕДАЁТСЯ — у мудбордного указания редактор наконечника был всегда (он стоял в
+          `AnnotationEditor` под кадрами), и переезд правки в панель не имел права его терять.
+          ⚠ ЗДЕСЬ СТОЯЛО «в отличие от листа: у листа его нет, и чинит это та волна» — волна
+          прошла В ЭТОМ ЖЕ КРУГЕ: лист артефактов передаёт `caps` тем же пропом (B-8,
+          `artifacts-panel.tsx`). Оговорка звала чинить починенное, и это единственное, что
+          изменилось в этой строке. */}
       {open && (
         <Section
           title='callouts'
@@ -1007,7 +912,39 @@ export function MoodBoard({
           }
           className='lg:w-[340px] lg:shrink-0'
         >
-          <MoodCalloutRail rows={railRows} />
+          <CalloutRail
+            rows={railRows}
+            selected={selectedIndex}
+            onSelect={(index) => {
+              setSelectedKey(index == null ? null : callouts.keyOf(index));
+              // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
+              setAddingKey(null);
+            }}
+            hoverIndex={hoverIndex}
+            onHover={setHoverIndex}
+            disabled={readOnly}
+            onRemove={
+              readOnly
+                ? undefined
+                : (index) => {
+                    const key = callouts.keyOf(index);
+                    if (!key) return;
+                    callouts.removeByKey(key);
+                    // Выбор снимается ВМЕСТЕ со строкой: индекс под ним после удаления адресует
+                    // уже соседнее указание, и оставленный выбор открыл бы правку чужого текста.
+                    setSelectedKey(null);
+                    setAddingKey(null);
+                  }
+            }
+            arrows={arrows}
+            focusToken={focusEditor}
+            /* НОМЕРА У МУДБОРДНОГО УКАЗАНИЯ НЕТ, И ДЕТАЛИ КРОЯ ТОЖЕ (см. шапку `mood-callouts.tsx`):
+               оно про настроение, его не адресует ни деталь, ни операция, ни дефект. */
+            numbered={false}
+            detailFields={false}
+            caps
+            emptyLabel='none yet. A note is put on the picture itself — arm a kind above the board and click a picture; the row appears here the moment it exists, and this is where its text is written.'
+          />
         </Section>
       )}
     </SectionStack>

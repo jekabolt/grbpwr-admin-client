@@ -24,6 +24,7 @@ import { SILHOUETTE_VIEWS, normaliseViewKey, viewLabel } from '../views';
 import { ApplySplitDoor } from './apply-split';
 import { LockBar } from './generate-row';
 import {
+  liveRunsOfKind,
   outputsOfKind,
   pictureIsComposite,
   pictureOffersSplit,
@@ -34,6 +35,7 @@ import {
   threedSides,
   type Gate,
 } from './model';
+import { PendingCell } from './outputs';
 import { sheetsOf, type FlatSheet } from './render-input-strip';
 import { uploadItem } from '../upload-item';
 import {
@@ -81,16 +83,24 @@ import {
  *   · левая половина — `threedSides(band, colorway)`, тот же верстак и тот же скоуп, что у прогона;
  *   · снятия (`unmark`) здесь нет: ✕ на плите в FABRIC RENDER SLOTS показывает, что встанет взамен;
  *   · одна запись на сторону, одним CAS-токеном, прочитанным ЭТИМ рендером.
- * Что вернулось: правая половина — все рендеры этого колорвея, которые в стороны ещё не встали, —
- * тем же органом, что INPUT — FLATS OF THIS CARD: линия, одиночные кадры с `mark ▸`, листы
+ * Что вернулось: правая половина — все рендеры этого колорвея (с круга 20 — ВСЕ, а не только
+ * ещё не поставленные, см. ниже) — тем же органом, что INPUT — FLATS OF THIS CARD: линия,
+ * дыры живых прогонов, одиночные кадры с `mark ▸`, листы
  * колодами (`expand ▸` / `apply splitted` + `fold ▾`), раскрытая группа на затемнённом грунте.
  * Полоса входа 3D и полоса входа рендера — ОДИН орган под двумя заголовками, и «везде одинаково»
  * теперь верно и для них.
  *
- * ⚠ ПРАВАЯ ПОЛОВИНА СУЖЕНА КОЛОРВЕЕМ ВЕРСТАКА (`outputsOfKind(band, 'render', colorway)`). Кадр
- * чужого колорвея в этот верстак не встаёт (`colorway_mismatch`), и предлагать его значило бы
- * предлагать отказ. Что стоит в ЛЮБОМ слоте карточки (`slotHolding`) — тоже не предлагается: одна
- * плита стоит в одном слоте, сервер отказывает второй постановке наотрез.
+ * ⚠ ПРАВАЯ ПОЛОВИНА СУЖЕНА КОЛОРВЕЕМ ВЕРСТАКА (`outputsOfKind(band, 'render', colorway)`), И
+ * БОЛЬШЕ НИЧЕМ (B-24, круг 20). Кадр чужого колорвея в этот верстак не встаёт
+ * (`colorway_mismatch`), и предлагать его значило бы предлагать отказ.
+ *
+ * А ВОТ ПЛИТА, УЖЕ СТОЯЩАЯ В СЛОТЕ, ОТСЮДА БОЛЬШЕ НЕ ПРОПАДАЕТ. Прежде её выбрасывал `slotHolding`
+ * — «одна плита стоит в одном слоте», — и на карточке с четырьмя занятыми сторонами вся правая
+ * половина оказывалась пуста со словами «no render is off the bench». Владелец потребовал ровно
+ * обратного: «после дивайдера должно показывать тоже самое что в RENDERS OF THIS CARD во вкладке
+ * FABRIC RENDER», то есть ВЕСЬ список этого колорвея, с его органами — колодой, дырой живого
+ * прогона, тонированным отсеком. Правило сервера при этом не отменено, а переехало С СПИСКА НА
+ * ДВЕРЬ: у такой плиты `mark ▸` стоит ИНЕРТНОЙ и называет сторону, в которой плита уже стоит.
  *
  * ⚠ ЛИСТЫ — ЧЕРЕЗ `sheetsOf`, А НЕ `splitDecks`. Правило одно на обе полосы: лист — это КОРЕНЬ
  * родословной с кусками, объявил он виды или нет; ручной рендер, разрезанный человеком, — лист по
@@ -198,7 +208,23 @@ export function ThreedInputStrip({
   const canWrite = !!techCardId && !disabled;
 
   /**
-   * ═══ ПРАВАЯ ПОЛОВИНА — РЕНДЕРЫ ЭТОГО КОЛОРВЕЯ, ЕЩЁ НЕ СТОЯЩИЕ НИ В ОДНОЙ СТОРОНЕ (D-11) ═══════
+   * ═══ ПРАВАЯ ПОЛОВИНА — ТО ЖЕ, ЧТО «RENDERS OF THIS CARD» НА FABRIC RENDER (B-24, круг 20) ═════
+   *
+   * Владелец, дословно: «в INPUT — RENDERS BY VIEW в 3D после дивайдера должно показывать тоже
+   * самое что в RENDERS OF THIS CARD во вкладке FABRIC RENDER».
+   *
+   * ЧТО БЫЛО ДО ЭТОГО КРУГА И ПОЧЕМУ ЭТО ПРИШЛОСЬ ПОМЕНЯТЬ. Полоса показывала СУЖЕННЫЙ список —
+   * «рендеры этого колорвея, ещё не стоящие ни в одной стороне» (D-11): всё, что человек уже
+   * положил в слот, из неё исчезало. Отсюда и жалоба: заполнив четыре стороны, он получал справа
+   * от линии слово «no render is off the bench» на карточке, у которой рендеров полдюжины.
+   * Раздел `RENDERS OF THIS CARD` не сужает ничем, кроме рода и колорвея, — теперь и здесь так же.
+   *
+   * ДВА НАБОРА ВМЕСТО ОДНОГО, И РАЗЛИЧИЕ НЕСУЩЕЕ:
+   *   · `shown` — ЧТО ВИДНО. Весь пул, как в `RENDERS OF THIS CARD`.
+   *   · `markable` — У ЧЕГО ЖИВАЯ ДВЕРЬ `mark ▸`. Композит в сторону не встаёт вовсе (он лист, его
+   *     сначала режут), а плита, уже стоящая в слоте, второй постановки не переживает: сервер
+   *     отказывает наотрез, одна плита — один слот. Предлагать такую дверь значило бы предлагать
+   *     отказ, поэтому она стоит ИНЕРТНОЙ С ПРИЧИНОЙ, а не пропадает вместе со своей плиткой.
    *
    * `outputsOfKind` — вся карточка, когда сервер её называет (`outputs`), иначе страница ленты;
    * скрытые выброшены там же. Пул родословной — ВСЕ рендеры колорвея, включая стоящие в слоте:
@@ -207,7 +233,8 @@ export function ThreedInputStrip({
   const outputs = useMemo(() => outputsOfKind(band, 'render', colorway), [band, colorway]);
   const pool = useMemo(() => outputs.map((row) => row.picture), [outputs]);
   const families = useMemo(() => cropFamilies(pool), [pool]);
-  const offered = useMemo(
+  const shown = useMemo(() => new Set(pool.map((picture) => picture.id ?? 0)), [pool]);
+  const markable = useMemo(
     () =>
       new Set(
         pool
@@ -219,7 +246,7 @@ export function ThreedInputStrip({
       ),
     [pool, band],
   );
-  const sheets = useMemo(() => sheetsOf(pool, families, offered), [pool, families, offered]);
+  const sheets = useMemo(() => sheetsOf(pool, families, shown), [pool, families, shown]);
   /** Одиночные рендеры: то, что не ушло за свой лист и само не стало листом. Новейшее первым. */
   const loose = useMemo(() => {
     const folded = new Set<number>();
@@ -228,10 +255,22 @@ export function ThreedInputStrip({
       for (const member of members) folded.add(member.id ?? 0);
     }
     return pool
-      .filter((picture) => offered.has(picture.id ?? 0) && !folded.has(picture.id ?? 0))
+      .filter((picture) => shown.has(picture.id ?? 0) && !folded.has(picture.id ?? 0))
       .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
-  }, [pool, offered, sheets]);
-  const notMarked = loose.length + sheets.reduce((n, { members }) => n + members.length, 0);
+  }, [pool, shown, sheets]);
+  /**
+   * ЖИВЫЕ ПРОГОНЫ ЭТОГО ЖЕ РОДА И КОЛОРВЕЯ — пунктирные ячейки в голове правой половины (B-24).
+   * Тот же орган и тот же список, что в `RENDERS OF THIS CARD` (`PendingCell`, `liveRunsOfKind`):
+   * без него полоса в состоянии покоя ничем не признаётся, что прогон уже заказан и оплачен.
+   */
+  const pending = useMemo(() => liveRunsOfKind(band, 'render', colorway), [band, colorway]);
+  /** Сколько показанных рендеров ещё можно положить в сторону — счёт по ДВЕРИ, а не по списку. */
+  const notMarked =
+    loose.filter((picture) => markable.has(picture.id ?? 0)).length +
+    sheets.reduce(
+      (n, { members }) => n + members.filter((m) => markable.has(m.id ?? 0)).length,
+      0,
+    );
 
   /** Какие стороны заняты — «что вытеснит пометка», сказанное списком (F-5). */
   const occupied = useMemo(
@@ -332,6 +371,12 @@ export function ThreedInputStrip({
     const views = [...SILHOUETTE_VIEWS].sort((a, b) =>
       a === ghost ? -1 : b === ghost ? 1 : 0,
     );
+    /* ГДЕ УЖЕ СТОИТ ЭТА ПЛИТА (B-24). С расширением списка до «всех рендеров карточки» плитка,
+       занявшая сторону, стоит теперь и справа от линии — и её подпись обязана это СКАЗАТЬ:
+       «not marked» на плите, которая стоит во фронте, — прямая ложь. Сторону называем по имени,
+       потому что она ЕСТЬ у человека на экране, слева от той же линии. */
+    const inSlot = slotHolding(band, id);
+    const standsIn = inSlot ? normaliseViewKey(inSlot.viewKey) : '';
     return (
       <StripCell
         key={`pic-${id}`}
@@ -341,10 +386,27 @@ export function ThreedInputStrip({
         gallery={frameOf(picture)}
         onZoom={() => foldOnForeignZoom(id)}
         onEdit={editCorner(picture)}
-        lines={['not marked', provenance]}
+        lines={[
+          inSlot ? `in slot · ${standsIn ? viewLabel(standsIn) : 'a side'}` : 'not marked',
+          provenance,
+        ]}
         action={
           !canWrite ? (
             <InertDoor className={INERT_DOOR} label='mark ▸' reason={READ_ONLY_REASON} />
+          ) : !markable.has(id) ? (
+            /* ⚠ ДВЕРЬ ГАСНЕТ, А НЕ ПРОПАДАЕТ (Д19). Сервер отказывает второй постановке одной
+               плиты наотрез — одна плита стоит в одном слоте, — и живая `mark ▸` здесь продавала
+               бы отказ. Снять её вовсе значило бы учить, что жеста не существует; погашенная с
+               причиной учит, что именно стоит на пути и где это снимается. */
+            <InertDoor
+              className={INERT_DOOR}
+              label='mark ▸'
+              reason={
+                standsIn
+                  ? `this render already stands in ${viewLabel(standsIn)} — take it out there, or put another one into the side you need`
+                  : 'this render already stands in a side of the input — one picture stands in one slot'
+              }
+            />
           ) : (
             <span className='block' data-mark-door={id || undefined} title={MARK_TITLE}>
               <SelectComponent
@@ -693,6 +755,18 @@ export function ThreedInputStrip({
             при пустой правой половине: она делит вопросы, а не непустые списки. */}
         <StripDivider />
 
+        {/* ═══ ЖИВОЙ ПРОГОН — В ГОЛОВЕ ПРАВОЙ ПОЛОВИНЫ (B-24) ══════════════════════════════════
+            Тот же орган, что в `RENDERS OF THIS CARD` (`PendingCell` из `./outputs`), и стоит он
+            там же — первым в списке, куда встанет ответ: сервер отдаёт выходы `ORDER BY o.id DESC`,
+            значит вернувшаяся плита будет строкой НОЛЬ, и дыра обязана стоять на её месте.
+            ⚠ ЭТО ДЕНЬГИ, а не украшение: без признака заказанного прогона человек жмёт GENERATE
+            второй раз и покупает второй. Разбор — у самого `PendingCell`. */}
+        {pending.map((run) => (
+          <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
+            <PendingCell run={run} />
+          </Bay>
+        ))}
+
         {/* ═══ ОДИНОЧНЫЕ РЕНДЕРЫ, НОВЕЙШИЙ ПЕРВЫМ, ПОТОМ ЛИСТЫ (D-11, E-6) ══════════════════════
             Тот же порядок, что у полосы флэтов: одиночный помечается В ОДНУ сторону, лист
             адресует ВЕСЬ вход разом, и жест, переписывающий четыре стороны, стоит после жестов,
@@ -748,8 +822,13 @@ export function ThreedInputStrip({
         })}
 
         {/* «Пусто» справа от линии — словом, а не голой линией: пустая правая половина под
-            линией читалась бы как «полоса недорисована». */}
-        {!loose.length && !sheets.length && (
+            линией читалась бы как «полоса недорисована».
+            ⚠ СЛОВА ПЕРЕПИСАНЫ ВМЕСТЕ СО СПИСКОМ (B-24). «off the bench» описывало прежнее сужение
+            — «рендеры, ещё не стоящие в стороне», — и на карточке с четырьмя занятыми сторонами
+            читалось как «рендеров нет», хотя их полдюжины. Список теперь тот же, что в RENDERS OF
+            THIS CARD, и пусто он бывает ровно в одном случае: у этого колорвея нет ни одного
+            рендера вовсе. */}
+        {!loose.length && !sheets.length && !pending.length && (
           <Text
             size='micro'
             variant='inactive'
@@ -758,8 +837,8 @@ export function ThreedInputStrip({
             data-threed-input-empty=''
           >
             {named
-              ? `no render of ${named} is off the bench — generate one on FABRIC RENDER, or drop a file into an empty side.`
-              : 'no render is off the bench — generate one on FABRIC RENDER, or drop a file into an empty side.'}
+              ? `no render of ${named} on this card yet — generate one on FABRIC RENDER, or drop a file into an empty side.`
+              : 'no render on this card yet — generate one on FABRIC RENDER, or drop a file into an empty side.'}
           </Text>
         )}
       </Strip>

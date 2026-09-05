@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_TechCardColorwayUsage } from 'api/proto-http/admin';
+import {
+  common_ColorwayDevelopmentInsert,
+  common_TechCardColorwayUsage,
+} from 'api/proto-http/admin';
 import { warehouseKeys } from 'components/managers/materials/components/useWarehouse';
 import { productionRunKeys } from 'components/managers/production-runs/components/useProductionRuns';
 import { stockChangeHistoryKeys } from 'components/managers/product/components/stock/useStockChangeHistory';
@@ -45,6 +48,24 @@ export function recipeSaveErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : 'Failed to save recipe';
 }
 
+/**
+ * ВХОД СОЗДАНИЯ: код цвета — и НЕОБЯЗАТЕЛЬНАЯ карточка разработки.
+ *
+ * Прибавилось ради предложенных черновиком колорвеев (B-25 круга 20): предложение приносит имя,
+ * пантон и hex, и без этого ключа они пропали бы ровно на пороге — созданный колорвей встал бы на
+ * вкладке безымянным кодом, а имя и пантон, за которые заплачен прогон, остались бы на экране,
+ * который человек закроет.
+ *
+ * ⚠ `development.usages` СЮДА НЕ КЛАДЁТСЯ НИКОГДА. Сервер отказывает вложенному рецепту прямым
+ * текстом («call UpdateColorwayRecipe separately»): рецепт — это отдельная запись под своим
+ * замком версии. Вход объявлен `common_ColorwayDevelopmentInsert` целиком нарочно — сузить его
+ * своим типом значило бы завести второе описание того же ключа, расходящееся молча.
+ */
+export type CreateColorwayInput = {
+  colorCode: string;
+  development?: common_ColorwayDevelopmentInsert;
+};
+
 // Minimal inline colourway creation (§35): normally a colourway (product) is created from the
 // product manager, which forces a ping-pong away from the tech card just to add a colour before
 // its recipe can be edited. This spins up a bare DRAFT — colour identity only, everything else
@@ -55,7 +76,7 @@ export function recipeSaveErrorMessage(e: unknown): string {
 export function useCreateColorway(techCardId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (colorCode: string) =>
+    mutationFn: ({ colorCode, development }: CreateColorwayInput) =>
       adminService.CreateColorway({
         styleId: techCardId,
         merchandising: {
@@ -67,7 +88,7 @@ export function useCreateColorway(techCardId: number) {
           dictionaryColor: undefined,
           countryCode: undefined,
         },
-        development: undefined,
+        development,
         thumbnailMediaId: undefined,
         secondaryThumbnailMediaId: undefined,
         mediaIds: undefined,

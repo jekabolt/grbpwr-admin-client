@@ -18,6 +18,7 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { TechCardFormData } from '../schema';
+import { detailKeyLabel } from '../tech-card-options';
 import {
   INPUT_MAX,
   REFERENCE_KIND,
@@ -25,7 +26,7 @@ import {
   isInputRow,
   type BoardItem,
 } from './mood-board';
-import { displayDetailName, readBench } from './bench-slot';
+import { InertDoor, displayDetailName, readBench } from './bench-slot';
 import {
   filledFlatSlots,
   sentFlatSlotIds,
@@ -98,6 +99,14 @@ import { useDesignWrites } from './use-design-band';
  * законный выбор: примитив селекта пропускает пустоту только когда её кто-то предложил, иначе
  * гасит фантомную пустоту скрытого нативного `<select>`.
  */
+/**
+ * Потолок `garmentDescription` — ЕДИНСТВЕННОЕ НАПИСАНИЕ ЭТОГО ЧИСЛА. Его читают `maxLength`
+ * самого поля и дверь «from construction ▸» (B-15), которая обязана отказать словами, а не
+ * молча обрезать хвост описания. Два разных потолка на одно поле — это способ потерять текст на
+ * том из них, который меньше (ровно тот же довод, что у `CONCEPT_MAX` в `./mood-board`).
+ */
+const GARMENT_MAX = 2000;
+
 const ROLE_ITEMS = [
   { value: '', label: '— not in prompt —' },
   { value: 'front', label: 'front' },
@@ -546,6 +555,51 @@ export function ReferencesSection({
   const garment = useController({ control, name: 'garmentDescription' });
   const garmentId = useId();
 
+  // ── описание из аспектов CONSTRUCTION (B-15) ────────────────────────────────────────────────
+  //
+  // ЧИТАЕТСЯ ТО ЖЕ, ЧТО РИСУЕТ `DetailsEditor`: массив `details[]`, где ключ — аспект, а текст —
+  // его описание. Порядок сохраняется тот, что в форме, то есть тот, в котором аспекты стоят на
+  // экране CONSTRUCTION: перечисление, переставленное по дороге, читается как другой документ.
+  // Имя аспекта берётся ОДНОЙ функцией со всеми прочими экранами (`detailKeyLabel`), поэтому
+  // переименование словаря доезжает и сюда.
+  const aspects = (useWatch({ control, name: 'details' }) ?? []) as {
+    key?: string;
+    text?: string;
+  }[];
+  const aspectText = useMemo(
+    () =>
+      aspects
+        .map((d) => ({ label: detailKeyLabel(d.key), text: (d.text ?? '').trim() }))
+        .filter((d) => !!d.text)
+        .map((d) => `${d.label}: ${d.text}`)
+        .join('\n'),
+    [aspects],
+  );
+  /** Перезапись НЕПУСТОГО описания спрашивается: чужой текст исчезает без единого следа (PRODUCT.md). */
+  const [askTakeAspects, setAskTakeAspects] = useState(false);
+
+  function writeAspects() {
+    if (aspectText.length > GARMENT_MAX) {
+      // Молча обрезанное описание — это предложение, потерявшее хвост без единого слова об этом.
+      showMessage(
+        `the aspects do not fit — the description holds ${GARMENT_MAX} characters and they are ${aspectText.length}; shorten them in CONSTRUCTION first`,
+        'error',
+      );
+      return;
+    }
+    setValue('garmentDescription', aspectText, { shouldDirty: true });
+    showMessage('the description is taken from the construction aspects', 'success');
+  }
+
+  function takeAspects() {
+    if (!aspectText) return;
+    if (((getValues('garmentDescription') ?? '') as string).trim()) {
+      setAskTakeAspects(true);
+      return;
+    }
+    writeAspects();
+  }
+
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
   // `addToInput` СКАЗАН ЯВНО и только здесь: кадры разреза становятся референсами лишь тогда,
   // когда режут референс ИЗ ЭТОГО блока. Верстак зовёт тот же хук молча и входа не пополняет —
@@ -677,10 +731,52 @@ export function ReferencesSection({
         <GroupLabel
           flush
           action={
-            <Text size='micro' variant='label' component='span'>
-              read with all {members.length} picture{members.length === 1 ? '' : 's'} · goes into
-              every run
-            </Text>
+            /* ДВА ЧЛЕНА, А НЕ ОБЁРТКА С ФОНОМ: слот `action` у `GroupLabel` сам по себе ряд по
+               базовой линии, и коробка вокруг двери была бы коробкой внутри коробки. */
+            <span className='flex items-baseline gap-2'>
+              <Text size='micro' variant='label' component='span'>
+                read with all {members.length} picture{members.length === 1 ? '' : 's'} · goes into
+                every run
+              </Text>
+              {/* ═══ ВЗЯТЬ ОПИСАНИЕ ИЗ CONSTRUCTION (B-15) ═══════════════════════════════════
+                  Владелец, дословно: «в INPUT — REFERENCES добавить кнопку взять GARMENT
+                  DESCRIPTION из CONSTRUCTION — described aspect by aspect; prints after the
+                  concept только что бы это все было лаконично и в дизайне не вырожденно
+                  смотрелось».
+
+                  ОДНА ДВЕРЬ И НИ СТРОКИ ПРОЗЫ ПРО НЕЁ. Она стоит У САМОГО ПОЛЯ, в правом краю его
+                  подписи, и говорит одним глаголом, откуда берёт; всё остальное — `title` и
+                  вопрос при перезаписи, то есть текст, который человек видит тогда, когда он ему
+                  нужен, а не всегда. Метрика — `secondary/xs`, та же, что у каждой панельной
+                  двери полосы: второй метрики на этом экране не заводится.
+
+                  ⚠ ЧТО ИМЕННО БЕРЁТСЯ. `details[]` — аспекты CONSTRUCTION, ровно те и в том
+                  порядке, в каком их рисует `DetailsEditor` (словарь `detailAspects`, затем
+                  самодельные ключи). Пустые аспекты не берутся: строка «pockets:» без слов — это
+                  не описание, а его отсутствие, уехавшее в промпт.
+
+                  ⚠ ПОЛЕ ТРЁХСОСТОЯНИЙНОЕ (`schema.ts`: отсутствует = сохрани, `''` = сотри,
+                  значение = поставь). Дверь ставит ЗНАЧЕНИЕ и только его: пустых аспектов у неё
+                  не бывает (иначе она погашена), поэтому команду «сотри» она не отдаёт никогда. */}
+              {readOnly ? null : aspectText ? (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  data-take-aspects=''
+                  onClick={takeAspects}
+                  title='fill this description from the CONSTRUCTION aspects — one line per filled aspect, in the order they are described there'
+                >
+                  from construction ▸
+                </Button>
+              ) : (
+                /* ДВЕРЬ НЕ ПРОПАДАЕТ, А НАЗЫВАЕТ ПРИЧИНУ (Д19): исчезнувшая читается как «так
+                   нельзя вообще», и человек идёт искать её в CONSTRUCTION. */
+                <InertDoor
+                  label='from construction ▸'
+                  reason='no construction aspect is filled in yet — describe the garment aspect by aspect in CONSTRUCTION first'
+                />
+              )}
+            </span>
           }
         >
           garment description
@@ -699,7 +795,7 @@ export function ReferencesSection({
           disabled={readOnly}
           value={garment.field.value ?? ''}
           rows={3}
-          maxLength={2000}
+          maxLength={GARMENT_MAX}
           placeholder='what the garment is — read together with every picture below'
           className='resize-none'
         />
@@ -1037,6 +1133,27 @@ export function ReferencesSection({
             If the same picture also stands on the moodboard, that tile stays where it is.
           </Text>
         </div>
+      </ConfirmationModal>
+
+      {/* ЦЕНА ДВЕРИ «FROM CONSTRUCTION» НАЗЫВАЕТСЯ ДО ЖЕСТА, И ТОЛЬКО КОГДА ЕСТЬ ЧТО ТЕРЯТЬ (B-15).
+          Пустое поле заполняется молча — спрашивать там не о чем; непустое перезаписывается
+          вопросом, потому что текст, набранный руками, не живёт больше нигде. */}
+      <ConfirmationModal
+        open={askTakeAspects}
+        onOpenChange={(open) => !open && setAskTakeAspects(false)}
+        onConfirm={() => {
+          setAskTakeAspects(false);
+          writeAspects();
+        }}
+        onCancel={() => setAskTakeAspects(false)}
+        title='replace the garment description?'
+        confirmLabel='replace it'
+        width='sm'
+      >
+        <Text size='control'>
+          The description below is replaced by the construction aspects, one line each. What is
+          written there now is not kept anywhere else — copy it first if you need it.
+        </Text>
       </ConfirmationModal>
     </Section>
   );
