@@ -124,6 +124,17 @@ function RoleRow({
           </GenericPopover>
         )}
       </div>
+      {/* WAVE2 p.3 · WHO ASSIGNED — A VISIBLE LINE, NOT ONLY A `title`. The chip keeps its tooltip,
+          but the prototype's seam rule holds here too: a fact that lives only in `title` is a fact
+          nobody sees on touch, in print or in a probe. One line per role, one clause per person. */}
+      {mine.some((a) => a.assignedBy) && (
+        <Text size='micro' variant='label' component='span' className='normal-case'>
+          {mine
+            .filter((a) => a.assignedBy)
+            .map((a) => `${a.adminUsername || `#${a.adminId}`} — assigned by ${a.assignedBy}`)
+            .join(' · ')}
+        </Text>
+      )}
     </div>
   );
 }

@@ -25,7 +25,7 @@ import Text from 'ui/components/text';
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';
 import { runHandle } from './handles';
-import type { DesignKind } from './kinds-strip';
+import type { DesignKind } from './bench-kinds';
 import {
   INPUT_MAX,
   REFERENCE_KIND,

@@ -13,7 +13,8 @@ import { Bench } from './bench';
 import { ColorwaySelect, useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
-import { KindsStrip, type DesignKind } from './kinds-strip';
+import type { DesignKind } from './bench-kinds';
+import { ChainRail } from './chain-rail';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
@@ -63,6 +64,7 @@ function PickBanner() {
 export function StudioTab({
   techCardId,
   disabled,
+  cardDetails,
   constructionAspects,
   navTo,
 }: {
@@ -117,6 +119,26 @@ export function StudioTab({
    * аспектов стояли бы прямо на сером грунте страницы (DESIGN.md, Filled-Block Rule).
    */
   constructionAspects?: ReactNode;
+  /**
+   * ═══ CARD DETAILS — STEP 0 OF THE CHAIN, AS A SLOT, NOT A MOVE (WAVE2 p.1) ═══════════════════
+   *
+   * The header of the card (identification / classification / base model / roles / linked products)
+   * is the first step of the rail and is drawn FIRST in the studio's stack, above the moodboard. It
+   * arrives as a node from the owner of the header (`components/index.tsx`), by the same device as
+   * `constructionAspects` below, and for two reasons that are correctness, not taste:
+   *   · the fields inside it (`name`, `styleNumber`, …) must render on a card that DOES NOT EXIST
+   *     YET — otherwise a new card cannot be created at all. The studio returns early on
+   *     `!techCardId` and on `isLoading`; a header living inside those branches would vanish exactly
+   *     when it is the only thing a person can fill. Hence the slot is drawn in ALL THREE returns;
+   *   · `StyleFactsField` — the ONE writer of brand / collection / season / targetGender through its
+   *     own `UpdateStyle` — stays in `index.tsx`, mounted unconditionally. Moved under
+   *     `activeTab === 'studio'` it would silently roll those fields back on every other tab.
+   *
+   * The slot is wrapped in a `data-field='design.step.card'` anchor so the rail's STEP 0 cell can
+   * scroll to it through `openDoor`; the wrapper is a flex column with the stack's own gutter so the
+   * blocks inside keep the 24px rhythm they had as direct children of the header's `SectionStack`.
+   */
+  cardDetails?: ReactNode;
 }) {
   // ВИД — состояние студии, как `state.kind` в прототипе. Живёт здесь, у композитора: полоса
   // представлений его показывает, а экраны читают, и третьего владельца у него быть не должно.
@@ -180,9 +202,18 @@ export function StudioTab({
 
   // A card that has not been created yet has no band and cannot have one: every write below is
   // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
+  // STEP 0 IS DRAWN IN EVERY BRANCH — including the two early returns — or the header of a card
+  // that is not saved yet would disappear together with the studio it hangs off (see `cardDetails`).
+  const stepCard = cardDetails ? (
+    <div data-field='design.step.card' className='flex flex-col gap-gutter'>
+      {cardDetails}
+    </div>
+  ) : null;
+
   if (!techCardId) {
     return (
       <SectionStack>
+        {stepCard}
         <Section title='studio' question='— what this style looks like, before it is frozen'>
           <Text variant='inactive' size='control'>
             Save this tech card first. The studio hangs off the card, so there is nothing to hang it
@@ -196,6 +227,7 @@ export function StudioTab({
   if (isLoading) {
     return (
       <SectionStack>
+        {stepCard}
         <Section title='studio'>
           <Text variant='inactive' size='control'>
             loading…
@@ -250,7 +282,13 @@ export function StudioTab({
               верстака; кадры сплита приезжают во вход уже с ролью вида (R-17), поэтому полки им
               не нужно. Единственная роль полки, которую больше некому играть, — отвечать режиму
               выбора за пачечные картинки — живёт в `PickTray` над верстаком. */}
-          <MoodBoard techCardId={techCardId} disabled={readOnly} />
+          {/* ═══ STEP 0 · CARD DETAILS — the header, first (WAVE2 p.1; argument on the prop) ═══ */}
+          {stepCard}
+          {/* ═══ STEP 1 · MOODBOARD. The anchor is the rail's door to this step: the board stamps
+              only its description textarea, and landing there would skip the pictures. */}
+          <div data-field='design.step.mood'>
+            <MoodBoard techCardId={techCardId} disabled={readOnly} />
+          </div>
           {/* ═══ CONSTRUCTION — СРАЗУ ПОД МУДБОРДОМ (K-8, довод у пропа `constructionAspects`) ═══
               Порядок читается как рассказ: сначала чем стиль выглядит, потом чем он собран.
 
@@ -358,10 +396,19 @@ export function StudioTab({
               ПОЛОСА БЕЗ ПОЛОСЫ: `bandless` (сервер не умеет полосу) орган не рисует — читать
               `renderBenchColorwayIds` не у кого, а селект без точек и без верстака предлагал бы
               выбор, за которым ничего нет. */}
-          <KindsStrip
+          {/* ═══ THE CHAIN — THE ONE NAVIGATOR OF THE STUDIO (Ф1) ═══════════════════════════════
+              It stands AFTER the blocks of steps 0 and 1 (always on screen) and BEFORE the switched
+              screen — where `KindsStrip` stood. The strip is gone: two navigators for one gesture
+              would be two places disagreeing about where a person is. The rail's cells navigate,
+              carry the strip's counters (one classifier, `pictureRepresentation`), name a state, and
+              under them a visible bar names the nearest obstacle with its door (`core/chain.ts`).
+              The `action` slot — `ColorwaySelect` on three views of five — is the strip's, unchanged. */}
+          <ChainRail
             band={band}
+            bandless={bandless}
             kind={kind}
             onKindChange={setKind}
+            colorway={{ id: colorway.colorwayId, label: colorway.label, archived: colorway.archived }}
             action={
               !bandless && (kind === 'render' || kind === 'threed' || kind === 'onmodel') ? (
                 <ColorwaySelect band={band} choice={colorway} disabled={readOnly} />
@@ -530,7 +577,7 @@ export function StudioTab({
               )}
               {/* ═══ ON MODEL — ПЕРЕКРАС ФОТОГРАФИИ НА ЖИВОМ ЧЕЛОВЕКЕ (K-17) ══════════════════
                   Ячейка полосы была МЁРТВОЙ и объясняла, почему такого экрана нет; теперь он есть,
-                  и объяснение снято вместе с механизмом (см. `kinds-strip.tsx`).
+                  и объяснение снято вместе с механизмом (полоса `kinds-strip.tsx` с тех пор сама снесена — её место занял рельс `chain-rail.tsx`).
                   История — та же и по той же причине, что у трёх соседей выше: без неё
                   `useRunPolling` не смонтирован, и перекрас показывал бы `pending` бесконечно. */}
               {kind === 'onmodel' && (

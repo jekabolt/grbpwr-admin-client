@@ -91,7 +91,7 @@ export type Representation = (typeof REPRESENTATIONS)[number];
 
 /**
  * `DesignKind` — the same five members under the name the studio's own state uses (`state.kind` of
- * the prototype). Declared here, re-exported by `kinds-strip.tsx` for its existing importers: one
+ * the prototype). Declared here, formerly re-exported by `kinds-strip.tsx` (now `chain-rail.tsx`; importers read it from here): one
  * union, two names, and the names cannot drift apart because there is only one declaration.
  *
  * ЕГО СОБСТВЕННЫЙ ДОВОД, ПЕРЕЕХАВШИЙ СЮДА ВМЕСТЕ С НИМ: `pattern` добавлен волной K-13 («вкладка

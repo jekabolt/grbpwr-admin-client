@@ -269,8 +269,9 @@ const ERROR_TAB: Record<string, TabId> = {
   //   · `fit` и `categoryId` живут в GENERAL INFORMATION (`construction-general-info.tsx`), а он
   //     смонтирован РОВНО ОДИН раз — `design/studio-tab.tsx:290`. Значит вкладка — STUDIO.
   //   · `baseModelId` и `baseSampleSizeId` ушли в СВОЙ блок шапки (B-27, `BaseModelFields` ниже в
-  //     этом же файле), и шапка живёт внутри `<SectionStack hidden={activeTab !== 'studio'}>`
-  //     (`:1939`) — то есть рисуется ТОЛЬКО на STUDIO. Значит `studio` здесь не «сойдёт любая», а
+  //     этом же файле), а шапка с Ф1 уезжает слотом `cardDetails` в `StudioTab`, который смонтирован
+  //     ТОЛЬКО при `activeTab === 'studio'` (до Ф1 — `<SectionStack hidden={activeTab !== 'studio'}>`,
+  //     тот же ответ). Значит `studio` здесь не «сойдёт любая», а
   //     единственное верное значение, ровно как и у первых двух. Строки оставлены, а не удалены:
   //     молчаливое падение в фолбэк выглядело бы как «про эти поля никто не думал».
   //     ⚠ ЗДЕСЬ РАНЬШЕ СТОЯЛ ЛОЖНЫЙ ДОВОД: «шапка стоит вне условия вкладки, поэтому годится
@@ -1453,6 +1454,312 @@ export function TechCardForm({
     }
   }
 
+  // ═══ CARD DETAILS — STEP 0 OF THE CHAIN, HANDED TO THE STUDIO AS A SLOT (WAVE2 p.1) ═══════════
+  // The header's blocks are drawn FIRST in the studio's stack, above the moodboard, by `StudioTab`
+  // (`design/studio-tab.tsx`, prop `cardDetails`) — in all three of its return branches, so a card
+  // that is not saved yet still shows the fields it is created with. The JSX is the header's own,
+  // moved, not rewritten. `StyleFactsField` does NOT ride along: it is the one writer of brand /
+  // collection / season / targetGender and stays mounted unconditionally below.
+  const cardDetails = (
+    <>
+    <div className='grid grid-cols-1 gap-gutter lg:grid-cols-2'>
+      <Section
+        title='identification'
+        question='— what this style is called'
+        className='min-w-0 overflow-x-auto'
+      >
+        {/* ═══ B-18 · ТРИ РЯДА, НАЗВАННЫЕ ВЛАДЕЛЬЦЕМ ПОИМЁННО ═══════════════════════
+            Дословно: «в IDENTIFICATION COLLECTION и SEASON пусть будут в одной строчке и
+            в первой затем во второй на всю шиирну блока NAME и по половинкам
+            STYLE NUMBER * и BRAND».
+              ряд 1 — COLLECTION | SEASON
+              ряд 2 — NAME, во всю ширину блока
+              ряд 3 — STYLE NUMBER * | BRAND
+            Порядок в разметке РОВНО этот, и он же порядок табуляции: на узком экране
+            грид схлопывается в одну колонку и читается сверху вниз теми же пятью
+            полями, без второго набора классов под брейкпоинт.
+
+            ПОЧЕМУ ГРИД, А НЕ ДВА ФЛЕКС-РЯДА С `w-1/2`. Колонки грида —
+            `minmax(0,1fr)`, то есть их ширину НЕ МОЖЕТ РАСТЯНУТЬ содержимое: длинное
+            имя коллекции не отберёт места у сезона, а подсказка сезона (она длиннее
+            всех и переносится) не сдвинет соседа ни на пиксель. `w-1/2` во флексе это
+            обещание не даёт — там базис ещё и растёт от контента.
+
+            ЗАЗОРЫ — ДВА ТОКЕНА, И ЭТО РИТМ: 16px между колонками (`spacing.block`),
+            10px между рядами (`spacing.stack` — тот же шаг, каким `Section` раскладывает
+            своих детей, поэтому грид не выпадает из вертикального ритма блока).
+            Линий внутри не рисуется: блок один, вторая рамка была бы коробкой в
+            коробке (DESIGN.md §5). */}
+        <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-b18-id=''>
+          <div className='min-w-0'>
+            <CollectionField />
+          </div>
+          <div className='min-w-0'>
+            {/* K-19 · ПОСЛЕДСТВИЕ СМЕНЫ СЕЗОНА СЪЕХАЛО С ЭКРАНА НА ОРГАН. Владелец снёс
+            абзац — это третий круг просьб убрать объясняющие простыни, поэтому замены
+            «абзацем покороче» здесь нет. Но перед сносом проверено грепом по src/:
+            факт «смена сезона перевыпускает SKU каждой расцветки» не сказан больше
+            НИГДЕ в клиенте, и он единственный тут не самоназывается. Отказ сервер
+            называет сам (techCardErrorMessage пропускает его текст наружу), а вот
+            МОЛЧАЛИВЫЙ перевыпуск на УСПЕШНОМ сохранении не называет никто: оператор
+            узнал бы о нём по печатным ярлыкам. Поэтому фраза осталась ровно одна и
+            ровно подсказкой на «pick» — единственном писателе поля (input readOnly).
+            Клауза «for that case there is clone for season» выброшена целиком, и не
+            ради краткости: `clone` в клиенте не существует ни под каким именем (греп
+            по src/ — ноль совпадений), то есть абзац отправлял оператора к
+            несуществующему органу. */}
+            <SeasonField
+              pickHint={
+                isEditMode
+                  ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
+                  : undefined
+              }
+            />
+          </div>
+          {/* NAME — ВО ВСЮ ШИРИНУ БЛОКА, и это не только приказ владельца: имя изделия
+              длиннее любого другого значения в блоке, а поле в половину ширины обрезало
+              бы его в единственном месте карточки, где его читают целиком. */}
+          <div className='min-w-0 sm:col-span-2'>
+            <InputField name='name' label='name *' placeholder='garment name' />
+          </div>
+          <div className='min-w-0'>
+            <StyleNumberField isIdea={isIdea} />
+            {isIdea && (
+              <Text variant='inactive' size='small' className='mt-1'>
+                optional while this is an idea — a real style number is required before
+                the card can advance to PROTO
+              </Text>
+            )}
+          </div>
+          {/* brand sits inline with the rest of the card's identity rather than behind a
+            disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
+            never changed, but hiding it made it look absent rather than defaulted. The
+            legacy freeform `status` is still not rendered — it has no downstream consumer —
+            yet its stored value round-trips, since RHF keeps the field from defaultValues
+            and the full-replace save (mapFormToTechCardInsert) sends it back verbatim. */}
+          <div className='min-w-0'>
+            <InputField name='brand' label='brand' />
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title='classification'
+        question='— what kind of thing it is'
+        className='min-w-0 overflow-x-auto'
+      >
+        <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
+        {/* NF-07: the server refuses a purpose flip once the card is referenced — runs,
+          LIVE colourways, sold colourways, assembly usage. Live colourways are the one arm
+          the client can see (they come back on the card), so say it here rather than let
+          the operator discover it by failing the save — and say it only about the live
+          ones, exactly as the server counts them. The other arms are known server-side
+          only; that refusal names itself, and techCardErrorMessage now passes the server's
+          own text through (it arrives as a 400 — grpc-gateway maps FailedPrecondition
+          there, not to 412). */}
+        {/* K-20 · ЗАПРЕТ ОСТАЁТСЯ, КРИК УХОДИТ. Владелец: «размер этого текста должен
+            быть меньше». Кричал он не размером как таковым, а РЕГИСТРОМ: `variant='error'`
+            зашивает `uppercase` в примитиве, а `size='small'` — это устаревший алиас
+            `default`, то есть рабочие 12px. Получалось предложение в 20 слов капслоком
+            в полную ширину блока — ровно то, что DESIGN.md §3 запрещает («капслок = ярлык
+            в четыре слова и короче; предложения и подсказки остаются обычным регистром»).
+            Теперь это `errorLabel` + `micro` — та же геометрия, что у соседней подсказки
+            «unclassified — …» ниже в этом же блоке, то есть «как у соседних полей».
+            Красный и ведущий `!` сохранены: это настоящий запрет, а не примечание, и
+            состояние не должно держаться одним цветом. */}
+        {/* WAVE2 p.2 · THE «purpose is locked while N live colourways are linked» STRIP IS
+            GONE, on the owner's word («полосы `purpose is locked` быть не должно»). The
+            RULE is the server's and is unchanged: a flip to auxiliary with live colourways
+            still meets the archive-first offer (`flipsToAuxiliary` below) and the server
+            refuses in its own words. What is removed is the red sentence standing on every
+            sellable card with colourways — a lock announced where nothing is locked yet. */}
+        {/* 0252: the OTHER purpose lock, and the one the operator can actually clear from
+          here. A registered colour — active or retired — pins the card as auxiliary,
+          because the colour owns a warehouse bucket that a sellable card has no place for.
+          Unlike the colourway arm there is no "archive them for me" offer: deleting a
+          variant is a stock-bearing decision (see the panel's own confirm), so it stays a
+          deliberate trip to the header tab.
+          NOT gated on `isAux`: that reads the FORM, so gating on it would hide this the
+          instant the operator selects «sellable» — the one moment it is worth reading. A
+          variant can only exist on a card the server holds as auxiliary, so its presence
+          is the whole condition. */}
+        {/* K-20 · тот же приём, что у соседа выше: это второй арм того же запрета,
+            и оставить его капслоком значило бы получить два разных голоса на одну
+            мысль в одном блоке. */}
+        {/* WAVE2 p.2, second arm: the «purpose is locked while N colour variant(s) are
+            registered» sentence is removed with the first. The pin itself is the server's
+            (a colour variant keeps the card auxiliary) and its refusal names itself. */}
+        {/* Purpose is mutually exclusive with the output material and the save is a full
+          replace — flag the destruction BEFORE it happens, it's not reversible. There is
+          no matching warning for the other direction: a colourway links itself to a style
+          (R1), so switching to auxiliary unlinks nothing this save could destroy. */}
+        {/* K-20 · третья реплика того же блока. Она короче, но стоит вплотную к двум
+            предыдущим: оставленная капслоком, она читалась бы как более важная из
+            трёх, хотя это ровно наоборот — здесь предупреждение, а не запрет. */}
+        {!isAux && outputMaterialId > 0 && (
+          <Text variant='errorLabel' size='micro'>
+            ! saving as sellable clears the output material
+          </Text>
+        )}
+        {/* WS7: what KIND of auxiliary item this card makes. Auxiliary-only — the dto
+          rejects a subtype on a sellable card, and the save mapper clears it on a purpose
+          flip, so hiding the control is not hiding a value that survives. Left
+          unclassified, every consumer that groups by subtype (the assembly bill's
+          component type, the labels/packaging pickers' type filter) can only file this
+          card under "unknown". */}
+        {isAux && (
+          <>
+            <SelectField
+              name='auxSubtype'
+              label='auxiliary type'
+              items={techCardAuxSubtypeFormOptions}
+            />
+            {auxSubtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN' && (
+              <Text variant='label' size='micro'>
+                unclassified — the assembly bill and the labels/packaging pickers file
+                this card under «unknown» until a type is set
+              </Text>
+            )}
+          </>
+        )}
+        <SelectField
+          name='targetGender'
+          label='target gender'
+          items={techCardGenderOptions}
+        />
+        {/* measurement unit больше не рисуется: мы всегда меряем в миллиметрах, а орган
+          в хедере только приглашал ошибиться. Поле НЕ удалено ни из схемы, ни из
+          маппера — как легаси-`status` выше, оно продолжает круговой рейс
+          GET → defaultValues → full-replace UPSERT нетронутым. Карты, сохранённые
+          когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
+          (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
+          бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
+        {/* C-5 (круг 19) · FIT и CATEGORY УЕХАЛИ ОТСЮДА в блок GENERAL INFORMATION
+          вкладки CONSTRUCTION (`construction-general-info.tsx`) — прямое указание
+          владельца: «эти все аспекты надо перенести из CLASSIFICATION». Это ПЕРЕЕЗД, а
+          не копия: те же поля формы (`fit`, `categoryId`), и `fit` по-прежнему уносит на
+          сервер staged `UpdateStyle` из `StyleFactsField` ниже — он остаётся единственным
+          писателем, а сам селект пишет только поле формы. Маршрут отказов этих полей
+          переведён на `construction` в ERROR_TAB выше — иначе тост называл бы поле,
+          которого на этой вкладке больше нет.
+          ⚠ КРУГ 20, B-27: BASE MODEL и BASE SAMPLE SIZE ПРОШЛИ ЭТОТ ЖЕ ПУТЬ ОБРАТНО —
+          но не сюда, а в СВОЙ блок строкой ниже. Слово владельца дословно приведено там. */}
+      </Section>
+
+      {/* ═══ B-27 · БАЗОВАЯ МОДЕЛЬ И БАЗОВЫЙ РАЗМЕР — СВОЙ БЛОК, ВО ВСЮ ШИРИНУ ═══════
+          Владелец, дословно: «BASE MODEL и BASE SAMPLE SIZE выдели в отдельный блок на
+          который занимает две колонки и находится под IDENTIFICATION и CLASSIFICATION».
+
+          ПОЧЕМУ ОТДЕЛЬНЫЙ БЛОК — ЭТО ПРАВДА, А НЕ ТОЛЬКО ПРИКАЗ. Эти два поля не
+          отвечают ни на вопрос IDENTIFICATION («как этот стиль называется»), ни на
+          вопрос CLASSIFICATION («что это за вещь»). Они говорят, ОТ ЧЕГО СЧИТАЮТ:
+          базовая модель — посадка, от которой градуируется ряд, базовый размер — тот
+          единственный, по норме которого берётся себестоимость (без фолбэка). Третьего
+          именованного вопроса в шапке до сих пор не было, и оба поля кочевали по чужим
+          блокам ровно поэтому.
+
+          ПОЛНАЯ ШИРИНА, А НЕ ПОЛОВИНА: `lg:col-span-2` в том же гриде шапки. Блок стоит
+          ПЕРВЫМ во втором ряду — «под IDENTIFICATION и CLASSIFICATION» читается
+          буквально, — а роли и продукты уходят в третий ряд, где им и место: они про
+          привязанное к карточке, а не про то, от чего её считают. */}
+      <Section
+        title='base model & sample size'
+        question='— what this style is built on, and the size its cost is figured at'
+        className='min-w-0 overflow-x-auto lg:col-span-2'
+      >
+        <BaseModelFields />
+      </Section>
+
+      {/* R-1 · ТРЕТИЙ РЯД ТОГО ЖЕ ГРИДА, а не третья колонка (владелец: «RESPONSIBLE
+          ROLES и LINKED PRODUCTS расположи под IDENTIFICATION и CLASSIFICATION»).
+          Плитки условные: у несохранённой карты нет ролей (нужен сохранённый id), у
+          sellable-карты нет причин прятать продукты, у aux — наоборот. Когда в ряду
+          живёт ОДНА плитка, она честно берёт обе колонки (`lg:col-span-2`): одинокая
+          полуширинная плитка рядом с пустой клеткой земли читалась бы как блок,
+          который не загрузился. Зазор — тот же `gap-gutter`: 24px земли И ЕСТЬ
+          разделитель, второй величины зазора в этом админе нет. */}
+      {isEditMode && numId && (
+        <Section
+          title='responsible roles'
+          question='— admin accounts, saved immediately, not part of the card’s draft'
+          className={`min-w-0 overflow-x-auto${isAux ? ' lg:col-span-2' : ''}`}
+        >
+          <RolesField
+            techCardId={numId}
+            canEdit={canWrite(SECTION.techCards) && !frozen}
+            initialAssignments={techCard?.roleAssignments}
+          />
+        </Section>
+      )}
+      {!isAux && (
+        <Section
+          title='linked products'
+          className={`min-w-0 overflow-x-auto${!(isEditMode && !!numId) ? ' lg:col-span-2' : ''}`}
+        >
+          <ProductIdsField />
+        </Section>
+      )}
+    </div>
+
+    {isAux && (
+      <Section title='output material'>
+        {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
+            the single picker below stops being the answer — showing both would offer two
+            contradictory places to say where the goods land. The variants are their own
+            immediate RPC writes, so this branch needs a SAVED card; an unsaved one has no
+            id to write against and only ever sees the legacy picker. */}
+        {isEditMode && numId && outputVariants.length > 0 ? (
+          <OutputVariantsPanel
+            techCardId={numId}
+            variants={outputVariants}
+            canEdit={canWrite(SECTION.techCards)}
+          />
+        ) : (
+          <>
+            <Text variant='inactive' size='small'>
+              runs of this card receipt into material stock, not product stock. Pick the
+              packaging material this card produces (required before its first run).
+            </Text>
+            <div className='max-w-md'>
+              <MaterialPicker
+                value={outputMaterialId}
+                onChange={(mid) =>
+                  form.setValue('outputMaterialId', mid, { shouldDirty: true })
+                }
+                section='TECH_CARD_BOM_SECTION_PACKAGING'
+                disabled={!canWrite(SECTION.techCards)}
+                placeholder='search packaging material'
+              />
+            </div>
+            {canWrite(SECTION.techCards) && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setMaterialModalOpen(true)}
+              >
+                + create material
+              </Button>
+            )}
+            {/* The way INTO per-colour mode without stranding the balance already on the
+                books: adopt this very material as the first colour rather than minting a
+                second bucket beside it. Hidden until there is something to adopt, and
+                until the card exists to hang it on. */}
+            {isEditMode && numId ? (
+              <AdoptLegacyOutputButton
+                techCardId={numId}
+                materialId={outputMaterialId}
+                canEdit={canWrite(SECTION.techCards)}
+              />
+            ) : null}
+          </>
+        )}
+      </Section>
+    )}
+    </>
+  );
+
   return (
     <Form {...form}>
       {/* TWO-TIER CHROME (-mx-2.5 cancels the Layout content px-2.5 so the bar spans full width).
@@ -1935,383 +2242,54 @@ export function TechCardForm({
             {/* ШАПКА СТУДИИ — `topRowHtml` прототипа (`proto.html:3172`).
                 Прототип не даёт карточной шапке вкладки вовсе: identification, classification,
                 responsible roles, базовая модель и связанные продукты стоят ПЕРВЫМ блочным рядом
-                СТУДИИ (скриншот `proto-02-worked-brief.png`). Разметка уже стояла здесь — выше
-                монтирования студии, — поэтому переезд это смена условия видимости, а не перенос
-                двухсот строк: порядок в DOM и так совпадает с `topRowHtml() + moodboardHtml() + …`. */}
-            {/* R-1 · `mb-gutter` — разделитель между шапкой и мудбордом. Шапка и `StudioTab` —
-                сиблинги в fieldset без единого spacing-класса, то есть между последним блоком шапки
-                и первым блоком студии земли не было ВОВСЕ: два белых блока впритык = разделитель
-                исчез (DESIGN.md: зазор 24px и есть разделитель, линии не рисуются). Владелец просил
-                «чуть больше гэп между мудбордом» — больше, чем ноль, это ровно один токен
-                `--spacing-gutter`, а не локальное число: второй величины зазора в этом админе нет.
-                Маржа, а не обёртка: при `hidden` (display:none) она исчезает вместе со стеком и на
-                другие вкладки не протекает. */}
-            <SectionStack hidden={activeTab !== 'studio'} className='mb-gutter'>
-              {/* V-18 · ПЛИТКИ ШАПКИ — ОДИН ГРИД, А НЕ ДВА FLEX-РЯДА. Владелец: «сделать
-                  что бы они всегда ровно отображались… одинаковой высоты в ряду и одинаковой
-                  ширины в колонку». «Криво» было не оформлением, а механикой: `SectionStack row`
-                  кладёт соседей `lg:items-start`, то есть каждый блок высотой в своё содержимое —
-                  ряд с рваным низом при ЛЮБОЙ разнице наполнения (а classification с браузером
-                  категорий всегда выше identification). Грид даёт оба равенства КОНСТРУКЦИЕЙ:
-                  `grid-cols-2` = repeat(2, minmax(0,1fr)) — колонки равной ширины, которые контент
-                  растянуть не может; растяжение по умолчанию (align stretch) — блоки одного ряда
-                  всегда одной высоты, при любом содержимом. Пара `min-w-0 overflow-x-auto` на
-                  плитке несущая, и это ДВЕ разные гарантии: min-w-0 снимает min-width:auto
-                  грид-элемента (иначе длинное значение раздувало бы саму плитку), а overflow-x-auto
-                  обрезает ОТРИСОВКУ рамкой — без него неразрывное значение красится ПОВЕРХ соседней
-                  плитки (замеренный здесь дефект «плитка-кнопка ложится поверх соседней»; наезд и
-                  обрезка замерены пробой tmp-стенда этой волны). Выпадашки внутри плиток портятся
-                  в body (Radix Portal в select/popover/date-picker), поэтому скролл-контейнер их
-                  не клипает. Группировка — ТРИ РЯДА, по одному вопросу на ряд (круг 20, B-27):
-                  identification/classification — «что за стиль», база во всю ширину — «от чего его
-                  считают», roles/products — «кто и что к нему привязано»; слить их в мегаблоки
-                  значило бы потерять пять именованных вопросов ради одной рамки. */}
-              <div className='grid grid-cols-1 gap-gutter lg:grid-cols-2'>
-                <Section
-                  title='identification'
-                  question='— what this style is called'
-                  className='min-w-0 overflow-x-auto'
-                >
-                  {/* ═══ B-18 · ТРИ РЯДА, НАЗВАННЫЕ ВЛАДЕЛЬЦЕМ ПОИМЁННО ═══════════════════════
-                      Дословно: «в IDENTIFICATION COLLECTION и SEASON пусть будут в одной строчке и
-                      в первой затем во второй на всю шиирну блока NAME и по половинкам
-                      STYLE NUMBER * и BRAND».
-                        ряд 1 — COLLECTION | SEASON
-                        ряд 2 — NAME, во всю ширину блока
-                        ряд 3 — STYLE NUMBER * | BRAND
-                      Порядок в разметке РОВНО этот, и он же порядок табуляции: на узком экране
-                      грид схлопывается в одну колонку и читается сверху вниз теми же пятью
-                      полями, без второго набора классов под брейкпоинт.
+                СТУДИИ. С Ф1 это буквально так: блоки собраны в `cardDetails` (выше, перед
+                `return`) и уезжают СЛОТОМ в `StudioTab`, который рисует их нулевым шагом рельса —
+                над мудбордом и в каждой из своих трёх веток возврата. Здесь, вне условия вкладки,
+                остаётся только то, что обязано быть смонтированным ВСЕГДА — `StyleFactsField`. */}
+            {/* U-2 · CARE SYMBOLS И CARE GUIDE УБРАНЫ ИЗ ПОЛОСЫ — прямое указание владельца.
+              Убран ТОЛЬКО экран: care хранится один раз, на care-ярлыке, и редактируется на
+              вкладке LABELS — это буквально то же поле, поэтому способность не потеряна.
+              ПАНЕЛЬ ПРИ ЭТОМ ОСТАЁТСЯ СМОНТИРОВАННОЙ, и это условие корректности, а не
+              осторожность: `StyleFactsField` — единственный писатель
+              brand / collection / season / targetGender / fit. Их редактируют выше, в шапке, а
+              `UpdateTechCard` их намеренно не пишет (R4/§14.7, «ни один факт не пишется двумя
+              путями»). Сняв её с монтажа, мы получили бы «saved» и молчаливый откат значения
+              после перезагрузки. `hideFitCare` возвращает null ПОСЛЕ всех хуков
+              (style-facts-field.tsx:473) — невидимая панель пишет ровно то же, что видимая. */}
+            <StyleFactsField
+              styleId={numId}
+              canEdit={canWrite(SECTION.techCards) && !frozen}
+              careEntries={techCard?.careEntries}
+              hideFitCare
+            />
 
-                      ПОЧЕМУ ГРИД, А НЕ ДВА ФЛЕКС-РЯДА С `w-1/2`. Колонки грида —
-                      `minmax(0,1fr)`, то есть их ширину НЕ МОЖЕТ РАСТЯНУТЬ содержимое: длинное
-                      имя коллекции не отберёт места у сезона, а подсказка сезона (она длиннее
-                      всех и переносится) не сдвинет соседа ни на пиксель. `w-1/2` во флексе это
-                      обещание не даёт — там базис ещё и растёт от контента.
+            {/* U-9 · ВТОРОГО РЕДАКТОРА `concept` ЗДЕСЬ БОЛЬШЕ НЕТ. Тут стоял второй блок
+              «concept & construction description» со своим `TextareaField name='concept'`, и он
+              был смонтирован ВСЕГДА — этот `SectionStack` прячется атрибутом `hidden`, то есть
+              display:none, а не размонтированием. Над одним полем формы жили два редактора: этот
+              и `design/concept-section.tsx`, открывавшийся в студии (сам этот файл потом снесён по
+              V-16, а поле переехало в записку доски); тот же дубль был и у
+              `DetailsEditor` (два экземпляра со своими локальными наборами показанных аспектов).
+              Вместе с блоком ушёл подблок `notes` («internal · not sent to the factory · outside
+              the DESIGN signature») — прямое указание владельца.
+              ПОЛЕ `notes` ИЗ СХЕМЫ НЕ УДАЛЕНО: уже написанные заметки продолжают круговой рейс
+              GET → defaultValues → full-replace UPSERT и сохранением не стираются.
+              `DetailsEditor` не потерялся — он стоит блоком «construction» ниже в этой же
+              шапке (V-17), и экземпляр по-прежнему ровно один.
+              U-8 (блок «TECH PACK · DESCRIPTION SHEET») в этом файле не рождался и не вернулся —
+              его носителем был `design/concept-section.tsx`, УДАЛЁННЫЙ С ДИСКА вместе с самим
+              блоком; описание живёт теперь одной запиской доски (`design/mood-board.tsx`). */}
 
-                      ЗАЗОРЫ — ДВА ТОКЕНА, И ЭТО РИТМ: 16px между колонками (`spacing.block`),
-                      10px между рядами (`spacing.stack` — тот же шаг, каким `Section` раскладывает
-                      своих детей, поэтому грид не выпадает из вертикального ритма блока).
-                      Линий внутри не рисуется: блок один, вторая рамка была бы коробкой в
-                      коробке (DESIGN.md §5). */}
-                  <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-b18-id=''>
-                    <div className='min-w-0'>
-                      <CollectionField />
-                    </div>
-                    <div className='min-w-0'>
-                      {/* K-19 · ПОСЛЕДСТВИЕ СМЕНЫ СЕЗОНА СЪЕХАЛО С ЭКРАНА НА ОРГАН. Владелец снёс
-                      абзац — это третий круг просьб убрать объясняющие простыни, поэтому замены
-                      «абзацем покороче» здесь нет. Но перед сносом проверено грепом по src/:
-                      факт «смена сезона перевыпускает SKU каждой расцветки» не сказан больше
-                      НИГДЕ в клиенте, и он единственный тут не самоназывается. Отказ сервер
-                      называет сам (techCardErrorMessage пропускает его текст наружу), а вот
-                      МОЛЧАЛИВЫЙ перевыпуск на УСПЕШНОМ сохранении не называет никто: оператор
-                      узнал бы о нём по печатным ярлыкам. Поэтому фраза осталась ровно одна и
-                      ровно подсказкой на «pick» — единственном писателе поля (input readOnly).
-                      Клауза «for that case there is clone for season» выброшена целиком, и не
-                      ради краткости: `clone` в клиенте не существует ни под каким именем (греп
-                      по src/ — ноль совпадений), то есть абзац отправлял оператора к
-                      несуществующему органу. */}
-                      <SeasonField
-                        pickHint={
-                          isEditMode
-                            ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
-                            : undefined
-                        }
-                      />
-                    </div>
-                    {/* NAME — ВО ВСЮ ШИРИНУ БЛОКА, и это не только приказ владельца: имя изделия
-                        длиннее любого другого значения в блоке, а поле в половину ширины обрезало
-                        бы его в единственном месте карточки, где его читают целиком. */}
-                    <div className='min-w-0 sm:col-span-2'>
-                      <InputField name='name' label='name *' placeholder='garment name' />
-                    </div>
-                    <div className='min-w-0'>
-                      <StyleNumberField isIdea={isIdea} />
-                      {isIdea && (
-                        <Text variant='inactive' size='small' className='mt-1'>
-                          optional while this is an idea — a real style number is required before
-                          the card can advance to PROTO
-                        </Text>
-                      )}
-                    </div>
-                    {/* brand sits inline with the rest of the card's identity rather than behind a
-                      disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
-                      never changed, but hiding it made it look absent rather than defaulted. The
-                      legacy freeform `status` is still not rendered — it has no downstream consumer —
-                      yet its stored value round-trips, since RHF keeps the field from defaultValues
-                      and the full-replace save (mapFormToTechCardInsert) sends it back verbatim. */}
-                    <div className='min-w-0'>
-                      <InputField name='brand' label='brand' />
-                    </div>
-                  </div>
-                </Section>
-
-                <Section
-                  title='classification'
-                  question='— what kind of thing it is'
-                  className='min-w-0 overflow-x-auto'
-                >
-                  <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
-                  {/* NF-07: the server refuses a purpose flip once the card is referenced — runs,
-                    LIVE colourways, sold colourways, assembly usage. Live colourways are the one arm
-                    the client can see (they come back on the card), so say it here rather than let
-                    the operator discover it by failing the save — and say it only about the live
-                    ones, exactly as the server counts them. The other arms are known server-side
-                    only; that refusal names itself, and techCardErrorMessage now passes the server's
-                    own text through (it arrives as a 400 — grpc-gateway maps FailedPrecondition
-                    there, not to 412). */}
-                  {/* K-20 · ЗАПРЕТ ОСТАЁТСЯ, КРИК УХОДИТ. Владелец: «размер этого текста должен
-                      быть меньше». Кричал он не размером как таковым, а РЕГИСТРОМ: `variant='error'`
-                      зашивает `uppercase` в примитиве, а `size='small'` — это устаревший алиас
-                      `default`, то есть рабочие 12px. Получалось предложение в 20 слов капслоком
-                      в полную ширину блока — ровно то, что DESIGN.md §3 запрещает («капслок = ярлык
-                      в четыре слова и короче; предложения и подсказки остаются обычным регистром»).
-                      Теперь это `errorLabel` + `micro` — та же геометрия, что у соседней подсказки
-                      «unclassified — …» ниже в этом же блоке, то есть «как у соседних полей».
-                      Красный и ведущий `!` сохранены: это настоящий запрет, а не примечание, и
-                      состояние не должно держаться одним цветом. */}
-                  {liveColorways.length > 0 && (
-                    <Text variant='errorLabel' size='micro'>
-                      ! purpose is locked while {liveColorways.length} live colourway(s) are linked
-                      — saving as auxiliary offers to archive them first (archived ones do not
-                      count)
-                    </Text>
-                  )}
-                  {/* 0252: the OTHER purpose lock, and the one the operator can actually clear from
-                    here. A registered colour — active or retired — pins the card as auxiliary,
-                    because the colour owns a warehouse bucket that a sellable card has no place for.
-                    Unlike the colourway arm there is no "archive them for me" offer: deleting a
-                    variant is a stock-bearing decision (see the panel's own confirm), so it stays a
-                    deliberate trip to the header tab.
-                    NOT gated on `isAux`: that reads the FORM, so gating on it would hide this the
-                    instant the operator selects «sellable» — the one moment it is worth reading. A
-                    variant can only exist on a card the server holds as auxiliary, so its presence
-                    is the whole condition. */}
-                  {/* K-20 · тот же приём, что у соседа выше: это второй арм того же запрета,
-                      и оставить его капслоком значило бы получить два разных голоса на одну
-                      мысль в одном блоке. */}
-                  {outputVariants.length > 0 && (
-                    <Text variant='errorLabel' size='micro'>
-                      ! purpose is locked while {outputVariants.length} colour variant(s) are
-                      registered — delete them on the header tab first (a colour variant pins the
-                      auxiliary purpose)
-                    </Text>
-                  )}
-                  {/* Purpose is mutually exclusive with the output material and the save is a full
-                    replace — flag the destruction BEFORE it happens, it's not reversible. There is
-                    no matching warning for the other direction: a colourway links itself to a style
-                    (R1), so switching to auxiliary unlinks nothing this save could destroy. */}
-                  {/* K-20 · третья реплика того же блока. Она короче, но стоит вплотную к двум
-                      предыдущим: оставленная капслоком, она читалась бы как более важная из
-                      трёх, хотя это ровно наоборот — здесь предупреждение, а не запрет. */}
-                  {!isAux && outputMaterialId > 0 && (
-                    <Text variant='errorLabel' size='micro'>
-                      ! saving as sellable clears the output material
-                    </Text>
-                  )}
-                  {/* WS7: what KIND of auxiliary item this card makes. Auxiliary-only — the dto
-                    rejects a subtype on a sellable card, and the save mapper clears it on a purpose
-                    flip, so hiding the control is not hiding a value that survives. Left
-                    unclassified, every consumer that groups by subtype (the assembly bill's
-                    component type, the labels/packaging pickers' type filter) can only file this
-                    card under "unknown". */}
-                  {isAux && (
-                    <>
-                      <SelectField
-                        name='auxSubtype'
-                        label='auxiliary type'
-                        items={techCardAuxSubtypeFormOptions}
-                      />
-                      {auxSubtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN' && (
-                        <Text variant='label' size='micro'>
-                          unclassified — the assembly bill and the labels/packaging pickers file
-                          this card under «unknown» until a type is set
-                        </Text>
-                      )}
-                    </>
-                  )}
-                  <SelectField
-                    name='targetGender'
-                    label='target gender'
-                    items={techCardGenderOptions}
-                  />
-                  {/* measurement unit больше не рисуется: мы всегда меряем в миллиметрах, а орган
-                    в хедере только приглашал ошибиться. Поле НЕ удалено ни из схемы, ни из
-                    маппера — как легаси-`status` выше, оно продолжает круговой рейс
-                    GET → defaultValues → full-replace UPSERT нетронутым. Карты, сохранённые
-                    когда-то в CM, поэтому остаются в CM: единица — это подпись к числам выносок
-                    (sketch-tab) и к печати тех-пака, а не конвертер, и штамп MM молча превратил
-                    бы «5 см» в «5 мм». Новые карты и так пишутся MM (DEFAULT_MEASUREMENT_UNIT). */}
-                  {/* C-5 (круг 19) · FIT и CATEGORY УЕХАЛИ ОТСЮДА в блок GENERAL INFORMATION
-                    вкладки CONSTRUCTION (`construction-general-info.tsx`) — прямое указание
-                    владельца: «эти все аспекты надо перенести из CLASSIFICATION». Это ПЕРЕЕЗД, а
-                    не копия: те же поля формы (`fit`, `categoryId`), и `fit` по-прежнему уносит на
-                    сервер staged `UpdateStyle` из `StyleFactsField` ниже — он остаётся единственным
-                    писателем, а сам селект пишет только поле формы. Маршрут отказов этих полей
-                    переведён на `construction` в ERROR_TAB выше — иначе тост называл бы поле,
-                    которого на этой вкладке больше нет.
-                    ⚠ КРУГ 20, B-27: BASE MODEL и BASE SAMPLE SIZE ПРОШЛИ ЭТОТ ЖЕ ПУТЬ ОБРАТНО —
-                    но не сюда, а в СВОЙ блок строкой ниже. Слово владельца дословно приведено там. */}
-                </Section>
-
-                {/* ═══ B-27 · БАЗОВАЯ МОДЕЛЬ И БАЗОВЫЙ РАЗМЕР — СВОЙ БЛОК, ВО ВСЮ ШИРИНУ ═══════
-                    Владелец, дословно: «BASE MODEL и BASE SAMPLE SIZE выдели в отдельный блок на
-                    который занимает две колонки и находится под IDENTIFICATION и CLASSIFICATION».
-
-                    ПОЧЕМУ ОТДЕЛЬНЫЙ БЛОК — ЭТО ПРАВДА, А НЕ ТОЛЬКО ПРИКАЗ. Эти два поля не
-                    отвечают ни на вопрос IDENTIFICATION («как этот стиль называется»), ни на
-                    вопрос CLASSIFICATION («что это за вещь»). Они говорят, ОТ ЧЕГО СЧИТАЮТ:
-                    базовая модель — посадка, от которой градуируется ряд, базовый размер — тот
-                    единственный, по норме которого берётся себестоимость (без фолбэка). Третьего
-                    именованного вопроса в шапке до сих пор не было, и оба поля кочевали по чужим
-                    блокам ровно поэтому.
-
-                    ПОЛНАЯ ШИРИНА, А НЕ ПОЛОВИНА: `lg:col-span-2` в том же гриде шапки. Блок стоит
-                    ПЕРВЫМ во втором ряду — «под IDENTIFICATION и CLASSIFICATION» читается
-                    буквально, — а роли и продукты уходят в третий ряд, где им и место: они про
-                    привязанное к карточке, а не про то, от чего её считают. */}
-                <Section
-                  title='base model & sample size'
-                  question='— what this style is built on, and the size its cost is figured at'
-                  className='min-w-0 overflow-x-auto lg:col-span-2'
-                >
-                  <BaseModelFields />
-                </Section>
-
-                {/* R-1 · ТРЕТИЙ РЯД ТОГО ЖЕ ГРИДА, а не третья колонка (владелец: «RESPONSIBLE
-                    ROLES и LINKED PRODUCTS расположи под IDENTIFICATION и CLASSIFICATION»).
-                    Плитки условные: у несохранённой карты нет ролей (нужен сохранённый id), у
-                    sellable-карты нет причин прятать продукты, у aux — наоборот. Когда в ряду
-                    живёт ОДНА плитка, она честно берёт обе колонки (`lg:col-span-2`): одинокая
-                    полуширинная плитка рядом с пустой клеткой земли читалась бы как блок,
-                    который не загрузился. Зазор — тот же `gap-gutter`: 24px земли И ЕСТЬ
-                    разделитель, второй величины зазора в этом админе нет. */}
-                {isEditMode && numId && (
-                  <Section
-                    title='responsible roles'
-                    question='— admin accounts, saved immediately, not part of the card’s draft'
-                    className={`min-w-0 overflow-x-auto${isAux ? ' lg:col-span-2' : ''}`}
-                  >
-                    <RolesField
-                      techCardId={numId}
-                      canEdit={canWrite(SECTION.techCards) && !frozen}
-                      initialAssignments={techCard?.roleAssignments}
-                    />
-                  </Section>
-                )}
-                {!isAux && (
-                  <Section
-                    title='linked products'
-                    className={`min-w-0 overflow-x-auto${!(isEditMode && !!numId) ? ' lg:col-span-2' : ''}`}
-                  >
-                    <ProductIdsField />
-                  </Section>
-                )}
-              </div>
-
-              {/* U-2 · CARE SYMBOLS И CARE GUIDE УБРАНЫ ИЗ ПОЛОСЫ — прямое указание владельца.
-                Убран ТОЛЬКО экран: care хранится один раз, на care-ярлыке, и редактируется на
-                вкладке LABELS — это буквально то же поле, поэтому способность не потеряна.
-                ПАНЕЛЬ ПРИ ЭТОМ ОСТАЁТСЯ СМОНТИРОВАННОЙ, и это условие корректности, а не
-                осторожность: `StyleFactsField` — единственный писатель
-                brand / collection / season / targetGender / fit. Их редактируют выше, в шапке, а
-                `UpdateTechCard` их намеренно не пишет (R4/§14.7, «ни один факт не пишется двумя
-                путями»). Сняв её с монтажа, мы получили бы «saved» и молчаливый откат значения
-                после перезагрузки. `hideFitCare` возвращает null ПОСЛЕ всех хуков
-                (style-facts-field.tsx:473) — невидимая панель пишет ровно то же, что видимая. */}
-              <StyleFactsField
-                styleId={numId}
-                canEdit={canWrite(SECTION.techCards) && !frozen}
-                careEntries={techCard?.careEntries}
-                hideFitCare
-              />
-
-              {/* U-9 · ВТОРОГО РЕДАКТОРА `concept` ЗДЕСЬ БОЛЬШЕ НЕТ. Тут стоял второй блок
-                «concept & construction description» со своим `TextareaField name='concept'`, и он
-                был смонтирован ВСЕГДА — этот `SectionStack` прячется атрибутом `hidden`, то есть
-                display:none, а не размонтированием. Над одним полем формы жили два редактора: этот
-                и `design/concept-section.tsx`, открывавшийся в студии (сам этот файл потом снесён по
-                V-16, а поле переехало в записку доски); тот же дубль был и у
-                `DetailsEditor` (два экземпляра со своими локальными наборами показанных аспектов).
-                Вместе с блоком ушёл подблок `notes` («internal · not sent to the factory · outside
-                the DESIGN signature») — прямое указание владельца.
-                ПОЛЕ `notes` ИЗ СХЕМЫ НЕ УДАЛЕНО: уже написанные заметки продолжают круговой рейс
-                GET → defaultValues → full-replace UPSERT и сохранением не стираются.
-                `DetailsEditor` не потерялся — он стоит блоком «construction» ниже в этой же
-                шапке (V-17), и экземпляр по-прежнему ровно один.
-                U-8 (блок «TECH PACK · DESCRIPTION SHEET») в этом файле не рождался и не вернулся —
-                его носителем был `design/concept-section.tsx`, УДАЛЁННЫЙ С ДИСКА вместе с самим
-                блоком; описание живёт теперь одной запиской доски (`design/mood-board.tsx`). */}
-
-              {isAux && (
-                <Section title='output material'>
-                  {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
-                      the single picker below stops being the answer — showing both would offer two
-                      contradictory places to say where the goods land. The variants are their own
-                      immediate RPC writes, so this branch needs a SAVED card; an unsaved one has no
-                      id to write against and only ever sees the legacy picker. */}
-                  {isEditMode && numId && outputVariants.length > 0 ? (
-                    <OutputVariantsPanel
-                      techCardId={numId}
-                      variants={outputVariants}
-                      canEdit={canWrite(SECTION.techCards)}
-                    />
-                  ) : (
-                    <>
-                      <Text variant='inactive' size='small'>
-                        runs of this card receipt into material stock, not product stock. Pick the
-                        packaging material this card produces (required before its first run).
-                      </Text>
-                      <div className='max-w-md'>
-                        <MaterialPicker
-                          value={outputMaterialId}
-                          onChange={(mid) =>
-                            form.setValue('outputMaterialId', mid, { shouldDirty: true })
-                          }
-                          section='TECH_CARD_BOM_SECTION_PACKAGING'
-                          disabled={!canWrite(SECTION.techCards)}
-                          placeholder='search packaging material'
-                        />
-                      </div>
-                      {canWrite(SECTION.techCards) && (
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='lg'
-                          className='uppercase'
-                          onClick={() => setMaterialModalOpen(true)}
-                        >
-                          + create material
-                        </Button>
-                      )}
-                      {/* The way INTO per-colour mode without stranding the balance already on the
-                          books: adopt this very material as the first colour rather than minting a
-                          second bucket beside it. Hidden until there is something to adopt, and
-                          until the card exists to hang it on. */}
-                      {isEditMode && numId ? (
-                        <AdoptLegacyOutputButton
-                          techCardId={numId}
-                          materialId={outputMaterialId}
-                          canEdit={canWrite(SECTION.techCards)}
-                        />
-                      ) : null}
-                    </>
-                  )}
-                </Section>
-              )}
-
-              {/* K-8 · «помести карточку CONSTRUCTION под мудборд».
-                  Круг 9 переставляет её ещё раз, и это ТРЕТЬЕ её место: сначала она стояла
-                  последним органом студии, ниже пяти экранов генерации; по V-17 поднялась в конец
-                  шапки, вплотную НАД мудбордом; теперь владелец просит её ПОД мудбордом. Смежность
-                  та же, сторона другая — и решает это тот, кто ходит по экрану каждый день.
-                  ЭКЗЕМПЛЯР ПО-ПРЕЖНЕМУ ОДИН. Он уезжает пропом в студию, и здесь его больше нет:
-                  два всегда-смонтированных DetailsEditor расходились локальными наборами
-                  показанных аспектов — это дефект U-9, и он вернулся бы в тот же день.
-                  `Section`-обёртка уехала вместе с ним: DetailsEditor рисует голый div и без блока
-                  стоял бы прямо на сером грунте, просвечивая землёй сквозь рамки аспектов. */}
-            </SectionStack>
+            {/* K-8 · «помести карточку CONSTRUCTION под мудборд».
+                Круг 9 переставляет её ещё раз, и это ТРЕТЬЕ её место: сначала она стояла
+                последним органом студии, ниже пяти экранов генерации; по V-17 поднялась в конец
+                шапки, вплотную НАД мудбордом; теперь владелец просит её ПОД мудбордом. Смежность
+                та же, сторона другая — и решает это тот, кто ходит по экрану каждый день.
+                ЭКЗЕМПЛЯР ПО-ПРЕЖНЕМУ ОДИН. Он уезжает пропом в студию, и здесь его больше нет:
+                два всегда-смонтированных DetailsEditor расходились локальными наборами
+                показанных аспектов — это дефект U-9, и он вернулся бы в тот же день.
+                `Section`-обёртка уехала вместе с ним: DetailsEditor рисует голый div и без блока
+                стоял бы прямо на сером грунте, просвечивая землёй сквозь рамки аспектов. */}
 
             {/* STUDIO — полоса DESIGN, где на стиль смотрят.
 
@@ -2334,6 +2312,7 @@ export function TechCardForm({
               <StudioTab
                 techCardId={numId}
                 disabled={frozen}
+                cardDetails={cardDetails}
                 constructionAspects={<DetailsEditor techCard={techCard} />}
                 /* ОДИН ПИСАТЕЛЬ АДРЕСА НА ВСЮ СТРАНИЦУ. Студия держала СВОЮ копию этой записи
                    (`?tab=` + чистка `sample`/`fits` + `replace`) — не по выбору, а потому что
