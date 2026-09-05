@@ -1,48 +1,44 @@
-import type {
-  GetDesignBandResponse,
-  common_DesignRun,
-  common_MediaFull,
-} from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
+import {
+  CopyWords,
+  InventoryLine,
+  NotSent,
+  WmgGroup,
+  WmgShell,
+  WordsAsSent,
+  latestRunOfKind,
+} from '../core';
 import { openDoor } from '../doors';
-import { isRunLive } from '../generation/run-state';
-import { clockStamp, runHandle } from '../handles';
 import type { BoardItem } from '../mood-board';
 import type { CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 
 /**
- * WHAT THE MODEL GETS — the card's own prompt-facing inventory, in one read-only place.
+ * WHAT THE MODEL GETS — THE FLAT ARM: a reader of the FORM.
  *
- * IT SAYS OUT LOUD THAT NOTHING IS DISPATCHED FROM HERE, and that is the first line rather than a
- * footnote. The generative machine is CUT in this wave — the same measured reasons `kinds-strip.tsx`
- * carries on the strip: the backend parses no pictures out of a model's answer, there is no
- * provider, and the answer ceiling is smaller than one base64 PNG. A screen that listed «the
- * prompt» without saying so would be a promise nothing keeps.
+ * THE MARKUP IS NOT HERE. It is `core/wmg.tsx`, one for every step (contract §B); this file is the
+ * SUPPLIER — it knows which form fields make up the flat dispatch and in what order, and it hands
+ * the parts to the shared lines. The render / 3D / recolour arms live in `render/what-model-gets`
+ * and read the BAND; the two files stay apart because their dependency sets have nothing in common,
+ * not because their panels may look different.
  *
- * SO WHY IT EXISTS AT ALL. Because every line of it is a REAL, LIVE fact about this card and there
- * is nowhere else that assembles them: which reference pictures carry a role and in what order,
- * which sit on the card carrying none, which pictures the prompt would never see whatever happens
- * (a moodboard tile is mood, not instruction), and the words the card states about the garment. A
- * technologist handing this style to a studio outside reads exactly this list, and today he has to
- * reconstruct it from four blocks on two tabs.
+ * EVERY LINE OF IT IS A REAL, LIVE FACT ABOUT THIS CARD and there is nowhere else that assembles
+ * them: which reference pictures carry a role and in what order, which sit on the card carrying
+ * none, which pictures the prompt would never see whatever happens (a moodboard tile is mood, not
+ * instruction), and the words the card states about the garment. A technologist handing this style
+ * to a studio outside reads exactly this list.
  *
  * NOTHING HERE IS EDITABLE, AND THAT IS THE DESIGN. Edits happen at the field's home; a second
  * writer for a role or a note would be a second opinion about the same row. Where an address exists
- * the line is a DOOR (`revealField` walks to the rendered field and pulses it); where the block
- * carries no `data-field` the modal names the block in words instead of drawing a button that
- * cannot lead anywhere.
+ * the line is a DOOR (`openDoor` walks to the rendered field and pulses it); where the block carries
+ * no `data-field` the panel names the block in words instead of drawing a button that cannot lead
+ * anywhere.
  *
  * THE PROMPT NUMBERS ARE DENSE AND DERIVED, exactly as the references block computes them: a scan
  * in board order, skipping the roleless. A stored number would need N writes every time a role is
@@ -52,13 +48,8 @@ import { viewLabel } from '../views';
  * there are comments/example prompts I wrote, why weren't they added». His paragraphs WERE in every
  * dispatch; nothing on any screen showed the words, so the inventory above read as the whole story.
  * The worker stores the composed base instruction at dispatch (never rebuilt on read), and this
- * panel now shows that text verbatim. The inventory stays: it answers «which pictures travelled»,
- * the text answers «in what words».
- *
- * ⚠ AN EMPTY `prompt` MEANS TWO DIFFERENT THINGS and the contract forbids collapsing them: either
- * no worker has picked the run up yet (a live row), or the run predates the column (migration 0352
- * — historical rows are empty FOREVER, the text was never kept). «Not dispatched yet» over an old
- * finished run would be a lie about history, so the two are told apart by the run's state below.
+ * panel shows that text verbatim. The inventory answers «which pictures travelled», the text
+ * answers «in what words».
  */
 
 const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
@@ -93,11 +84,10 @@ export function WhatModelGetsModal({
   // react-hook-form 7.62 — a defect this band has already paid for once.
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
-  // `garment_description` (W-3), NOT `concept`. This line used to read `concept`, and the two are
-  // different documents: `concept` is prose printed for the factory, `garment_description` is the
-  // sentence the operator writes FOR THE MODEL and which goes into every run. Showing one under
-  // the other's name made this panel state, next to a price, that the model receives words it does
-  // not receive — and hides the words it does.
+  // `garment_description` (W-3), NOT `concept`. The two are different documents: `concept` is
+  // prose printed for the factory, `garment_description` is the sentence the operator writes FOR
+  // THE MODEL and which goes into every run. Showing one under the other's name made this panel
+  // state, next to a price, that the model receives words it does not receive.
   const garment = (useWatch({ control, name: 'garmentDescription' }) ?? '') as string;
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
 
@@ -109,10 +99,9 @@ export function WhatModelGetsModal({
     return map;
   }, [band.references]);
 
-  // The reference's note. It used to be read off the board row's `caption`; it now lives on
-  // `DesignReference.note`, beside the role, because it is a statement about the INPUT and not
-  // about the picture. Reading the old place would have shown every note as blank — the quietest
-  // possible way for this panel to under-report what the model is given.
+  // The reference's note lives on `DesignReference.note`, beside the role, because it is a
+  // statement about the INPUT and not about the picture. Reading the board row's `caption` would
+  // show every note as blank — the quietest possible way for this panel to under-report.
   const noteOf = useMemo(() => {
     const map = new Map<number, string>();
     for (const r of band.references ?? []) {
@@ -149,22 +138,13 @@ export function WhatModelGetsModal({
   }, [items, roleOf, noteOf]);
 
   const moodCount = items.filter((i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId)).length;
+  const total = lines.inPrompt.length + lines.onCardOnly.length;
 
   /**
-   * THE LATEST FLAT RUN — the newest row of THIS door's kind. This modal is the flat form's panel
-   * («what the model gets — flat»); a render's or a vector's text under its title would answer a
-   * question nobody asked here. Newest by id, not by array position: the band's page order is a
-   * server detail this panel has no business trusting.
+   * THE LATEST FLAT RUN — the newest row of THIS door's kind. A render's or a vector's text under
+   * this title would answer a question nobody asked here.
    */
-  const lastRun = useMemo(() => {
-    let best: common_DesignRun | null = null;
-    for (const run of band.runs ?? []) {
-      if ((run.kind ?? '').trim().toLowerCase() !== 'flat') continue;
-      if ((run.id ?? 0) > (best?.id ?? 0)) best = run;
-    }
-    return best;
-  }, [band.runs]);
-  const sentText = (lastRun?.prompt ?? '').trim();
+  const lastRun = useMemo(() => latestRunOfKind(band.runs, 'flat'), [band.runs]);
   /**
    * The contract's own deviation notes, spoken beside the text so nobody reads «base» as
    * «transcript»: on `per_view` each paid call got «view: …» appended, and only the single-call
@@ -180,230 +160,134 @@ export function WhatModelGetsModal({
       [
         `garment: ${garment.trim() || '—'}`,
         `fit: ${fit.trim() || '—'} (from the card)`,
-        `references in the prompt: ${lines.inPrompt.length} of ${lines.inPrompt.length + lines.onCardOnly.length}`,
+        `references in the prompt: ${lines.inPrompt.length} of ${total}`,
       ].join('\n'),
-    [garment, fit, lines],
+    [garment, fit, lines, total],
   );
-
-  const copy = async () => {
-    // `navigator.clipboard`, NEVER `document.execCommand('copy')`. execCommand writes whatever the
-    // document's SELECTION is at that moment, and this dialog opens over a form — the last thing
-    // that took a selection was somebody's text field, and the copy would silently land there
-    // instead. That has happened in this repo before.
-    if (!navigator.clipboard?.writeText) {
-      showMessage(
-        'this browser does not offer the clipboard — select the text and copy it',
-        'error',
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(words);
-      showMessage('copied as text', 'success');
-    } catch {
-      showMessage('the browser refused the clipboard — select the text and copy it', 'error');
-    }
-  };
 
   return (
-    <ConfirmationModal
+    <WmgShell
       open={open}
       onOpenChange={onOpenChange}
-      onConfirm={() => onOpenChange(false)}
-      closeOnConfirm={false}
-      width='lg'
-      title='what the model gets — flat'
-      cancelLabel='close'
-      confirmLabel='close'
-      footerHint='nothing here is editable — every fact is edited at its own field'
+      kindWord='flat'
+      intro={
+        <>
+          <b>this is what the model is given.</b> Pressing GENERATE sends exactly the pictures and
+          words listed below — nothing on the moodboard travels, and neither does anything absent
+          from this list. The same inventory is what a studio outside would need to be handed.
+        </>
+      }
     >
-      <div className='space-y-stack'>
-        {/* This box used to say «nothing is sent from this admin — there is no generator behind
-            the button». That was true for exactly as long as the button answered Unimplemented.
-            It now starts a paid run, and a panel that opens beside a price is the last place that
-            may describe the previous world. */}
-        <CalloutBox tone='note'>
-          <Text size='micro' component='p'>
-            <b>this is what the model is given.</b> Pressing GENERATE sends exactly the pictures and
-            words listed below — nothing on the moodboard travels, and neither does anything absent
-            from this list. The same inventory is what a studio outside would need to be handed.
-          </Text>
-        </CalloutBox>
+      <WmgGroup flush label='pictures' aside={`${lines.inPrompt.length} of ${total} on the card`}>
+        {lines.inPrompt.length === 0 ? (
+          <Empty>no picture on this card carries a role, so none of them would be shown.</Empty>
+        ) : (
+          lines.inPrompt.map((line) => (
+            <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
+          ))
+        )}
+      </WmgGroup>
 
-        <div>
-          <GroupLabel
-            flush
-            action={
-              <Text size='micro' variant='label' component='span'>
-                {lines.inPrompt.length} of {lines.inPrompt.length + lines.onCardOnly.length} on the
-                card
-              </Text>
-            }
-          >
-            pictures
-          </GroupLabel>
-          {lines.inPrompt.length === 0 ? (
-            <Text size='micro' variant='label' component='p'>
-              no picture on this card carries a role, so none of them would be shown.
-            </Text>
-          ) : (
-            lines.inPrompt.map((line) => (
-              <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
-            ))
-          )}
-        </div>
+      <WmgGroup label='words' aside='read from the card at dispatch'>
+        <InventoryLine
+          name='garment'
+          origin='linked'
+          text={
+            garment.trim() || (
+              <span className='text-error'>
+                the card states no description; the pictures go in unexplained
+              </span>
+            )
+          }
+        />
+        <InventoryLine name='fit' origin='linked' text={`${fit.trim() || '—'} (from the card)`} />
+      </WmgGroup>
 
-        <div>
-          <GroupLabel
-            action={
-              <Text size='micro' variant='label' component='span'>
-                {lines.onCardOnly.length} · on the card only
-              </Text>
-            }
-          >
-            not sent
-          </GroupLabel>
-          {lines.onCardOnly.length === 0 ? (
-            <Text size='micro' variant='label' component='p'>
-              every picture in the input carries a role.
-            </Text>
-          ) : (
-            lines.onCardOnly.map((line) => (
-              <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
-            ))
-          )}
-          <Text size='nano' variant='label' component='p' className='mt-1'>
+      <WmgGroup
+        label='on the card, not in the prompt'
+        aside={`${lines.onCardOnly.length} · on the card only`}
+        note={
+          <>
             a role is given in the <b>input — references</b> block on STUDIO; clearing one takes the
             picture out of the prompt and leaves it on the card
-          </Text>
-        </div>
+          </>
+        }
+      >
+        {lines.onCardOnly.length === 0 ? (
+          <Empty>every picture in the input carries a role.</Empty>
+        ) : (
+          lines.onCardOnly.map((line) => (
+            <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
+          ))
+        )}
+      </WmgGroup>
 
-        <div>
-          <GroupLabel
-            action={
-              <Text size='micro' variant='label' component='span'>
-                what a model would have no knowledge of
-              </Text>
-            }
-          >
-            not sent at all
-          </GroupLabel>
-          <ChipRow>
-            <Chip title='mood is for the human — it is never instruction'>
-              moodboard · {moodCount}
-            </Chip>
-            <Chip
-              title='the callouts on the sheet'
-              onClick={
-                callouts.length
-                  ? () =>
-                      openDoor(
-                        'callouts.0.description',
-                        'the callouts are on ARTIFACTS, beside the sheet',
-                        showMessage,
-                      )
-                  : undefined
-              }
-            >
-              callouts · {callouts.length}
-            </Chip>
-            {/* The `notes` chip is gone with its field: U-9 removed the notes editor from the band,
-                so this door led to a block that no longer exists — a chip that opens nothing is
-                worse than no chip, because it teaches the reader that the panel's other doors
-                might be decorative too. The field itself still round-trips; it is simply not
-                authored here and never was sent to the model. */}
-            <Chip title='the bill of materials lives on its own tab'>BOM</Chip>
-            <Chip title='colourways live on their own tab'>colourways</Chip>
-          </ChipRow>
-        </div>
+      <NotSent
+        items={[
+          {
+            label: `moodboard · ${moodCount}`,
+            reason: 'mood is for the human — it is never instruction',
+          },
+          {
+            label: `callouts · ${callouts.length}`,
+            reason: 'the callouts on the sheet are for the factory; the flat run never reads them',
+            door: callouts.length
+              ? () =>
+                  openDoor(
+                    'callouts.0.description',
+                    'the callouts are on ARTIFACTS, beside the sheet',
+                    showMessage,
+                  )
+              : undefined,
+          },
+          /* The `notes` item is gone with its field: U-9 removed the notes editor from the band, so
+             a door here led to a block that no longer exists. The field itself still round-trips;
+             it is simply not authored here and never was sent to the model. */
+          {
+            label: 'BOM',
+            reason:
+              'the bill of materials lives on its own tab and describes the make, not the look',
+          },
+          {
+            label: 'colourways',
+            reason: 'colourways live on their own tab; a flat is drawn uncoloured',
+          },
+        ]}
+      />
 
-        <div>
-          <GroupLabel
-            action={
-              <Button variant='secondary' size='xs' onClick={copy}>
-                copy as text
-              </Button>
-            }
-          >
-            words
-          </GroupLabel>
-          {/* A PANEL FILL, NOT A SECOND BOX. `bgSecondary` is a tint inside the block; a bordered
-              rectangle here would be a box in a box, which this system forbids. */}
-          <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
-            {words}
-          </pre>
-          <div className='mt-1 flex flex-wrap gap-1.5'>
-            <Button
-              variant='secondary'
-              size='xs'
-              onClick={() =>
-                openDoor(
-                  'concept',
-                  'the concept is in the description block on STUDIO',
-                  showMessage,
-                )
-              }
-            >
-              edit the concept ▸
-            </Button>
-            <Button
-              variant='secondary'
-              size='xs'
-              onClick={() => openDoor('fit', 'the fit is on HEADER', showMessage)}
-            >
-              edit the fit ▸
-            </Button>
-          </div>
-        </div>
+      <CopyWords
+        words={words}
+        say={showMessage}
+        doors={[
+          {
+            label: 'edit the description ▸',
+            onClick: () =>
+              openDoor(
+                'garmentDescription',
+                'the garment description is in INPUT — REFERENCES, on STUDIO',
+                showMessage,
+              ),
+          },
+          {
+            label: 'edit the fit ▸',
+            onClick: () => openDoor('fit', 'the fit is on HEADER', showMessage),
+          },
+        ]}
+      />
 
-        <div>
-          <GroupLabel
-            action={
-              lastRun ? (
-                <Text size='micro' variant='label' component='span'>
-                  {runHandle(lastRun.id)} · {clockStamp(lastRun.createdAt)}
-                </Text>
-              ) : undefined
-            }
-          >
-            words as sent
-          </GroupLabel>
-          {!lastRun ? (
-            <Text size='micro' variant='label' component='p'>
-              no flat run yet — the worker composes the sent text at dispatch, and this panel shows
-              the latest run’s copy.
-            </Text>
-          ) : sentText ? (
-            <>
-              {/* The same panel fill as «words», for the same reason — a tint, never a box in a
-                  box. The text is paragraphs long, so it scrolls INSIDE its own frame: wrapped and
-                  broken, never widening the page — a horizontal page scroll under a modal is the
-                  one defect this block could add. */}
-              <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
-                {sentText}
-              </pre>
-              <Text size='nano' variant='label' component='p' className='mt-1'>
-                {sentCaveat}
-              </Text>
-            </>
-          ) : isRunLive(lastRun) ? (
-            <Text size='micro' variant='label' component='p'>
-              {runHandle(lastRun.id)} has not been dispatched yet — the worker writes the sent text
-              the moment it picks the run up.
-            </Text>
-          ) : (
-            /* A FINISHED run with no text is HISTORY, not a pending dispatch: rows older than the
-               prompt column never kept their text (and a run refused before dispatch never had
-               one). «Not sent yet» here would lie about the past — so it is never said. */
-            <Text size='micro' variant='label' component='p'>
-              no sent text on record for {runHandle(lastRun.id)} — the run predates the prompt
-              record or never reached dispatch; older runs never kept their text.
-            </Text>
-          )}
-        </div>
-      </div>
-    </ConfirmationModal>
+      <WordsAsSent
+        run={lastRun}
+        text={(lastRun?.prompt ?? '').trim()}
+        kindWord='flat'
+        caveat={sentCaveat}
+        whenNone='no flat run yet — the worker composes the sent text at dispatch, and this panel shows the latest run’s copy.'
+      />
+    </WmgShell>
   );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <InventoryLine name='—' text={<span className='text-labelColor'>{children}</span>} />;
 }
 
 /**
@@ -414,46 +298,19 @@ export function WhatModelGetsModal({
  * studio sees a photograph and guesses. That is a defect of the card, so it is worded as one.
  */
 function ReferenceLine({ line, media }: { line: Line; media?: common_MediaFull }) {
-  const url = thumbOf(media);
   return (
-    <div className='flex items-center gap-2 border-b border-hairline py-1'>
-      {/* мат под снимком белый (R-12); пустоту называет СЛОВО — сосед-текст говорит о роли,
-          а не о снимке, так что молчащая белая рамка читалась бы как «белая картинка» */}
-      <span className='relative block h-10 w-8 shrink-0 border border-borderColor bg-bgColor'>
-        {url ? (
-          <img src={url} alt='' loading='lazy' className='h-full w-full object-cover' />
-        ) : (
-          <span className='absolute inset-0 flex items-center justify-center px-0.5 text-center'>
-            <Text size='nano' variant='label' component='span'>
-              no image
-            </Text>
-          </span>
-        )}
-      </span>
-      <span
-        className={
-          line.number
-            ? 'flex h-4 w-4 shrink-0 items-center justify-center bg-textColor text-bgColor'
-            : 'flex h-4 w-4 shrink-0 items-center justify-center border border-borderColor'
-        }
-      >
-        <Text size='nano' component='span'>
-          {line.number ?? '—'}
-        </Text>
-      </span>
-      <Text size='micro' component='span' className='min-w-0 flex-1'>
-        {line.role ? (
-          <b>{viewLabel(line.role)}</b>
-        ) : (
-          <span className='text-labelColor'>no role</span>
-        )}
-        {' — '}
-        {line.note ? (
+    <InventoryLine
+      name={line.role ? viewLabel(line.role) : <span className='text-labelColor'>no role</span>}
+      number={line.number ?? null}
+      thumb={thumbOf(media)}
+      origin={line.role ? 'linked' : undefined}
+      text={
+        line.note ? (
           line.note
         ) : (
           <span className='text-error'>note is missing; the picture goes unexplained</span>
-        )}
-      </Text>
-    </div>
+        )
+      }
+    />
   );
 }

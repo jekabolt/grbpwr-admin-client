@@ -2,7 +2,6 @@ import type {
   GetDesignBandResponse,
   common_Color,
   common_DesignColourRecipe,
-  common_DesignPicture,
   common_MediaFull,
   common_Model,
 } from 'api/proto-http/admin';
@@ -10,15 +9,20 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, type JSX } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
 import { assetById, assetThumb } from '../assets/model';
+import {
+  CopyWords,
+  InventoryLine,
+  NotSent,
+  WmgGroup,
+  WmgShell,
+  WordsAsSent,
+  latestRunOfKind,
+} from '../core';
 import { openDoor, openDoorAcrossKind } from '../doors';
 import { viewLabel } from '../views';
 import type { ThreedDraft } from './drafts';
@@ -50,7 +54,9 @@ import {
  * and the submission draft sitting in the menu three lines below the button. Folding them into one
  * component would give it two unrelated dependency sets and one prop bag that is half-empty in
  * either direction; the shared thing between the arms is the SHAPE of the panel, and that is what
- * `Group` and `InventoryLine` below carry.
+ * `core/wmg.tsx` carries — ONE markup for every step (contract §B), supplied here with the band's
+ * parts and in `modals/what-model-gets-modal.tsx` with the form's. This file draws nothing of its
+ * own: every row is an `InventoryLine`, every exclusion a `NotSent` item with its reason.
  *
  * ═══ WHY IT MAY BE OPENED AT ALL, GIVEN THAT THE PROFILE IS SERVER-SIDE ════════════════════════
  *
@@ -228,108 +234,69 @@ export function WhatModelGetsRenderModal({
     ],
   );
 
-  const copy = async () => {
-    // `navigator.clipboard`, NEVER `document.execCommand('copy')`: execCommand writes wherever the
-    // document's SELECTION is, and this dialog opens over a form — the copy would land in whichever
-    // text field was last focused. That has happened in this repo before.
-    if (!navigator.clipboard?.writeText) {
-      showMessage('this browser does not offer the clipboard — select the text and copy it', 'error');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(words);
-      showMessage('copied as text', 'success');
-    } catch {
-      showMessage('the browser refused the clipboard — select the text and copy it', 'error');
-    }
-  };
+  /**
+   * THE TEXT AS THE SERVER KEPT IT — the newest run of THIS kind. `kind` here is also the wire's
+   * `run.kind` (`render` / `threed` / `recolor`), so no map is needed between the two.
+   */
+  const lastRun = useMemo(() => latestRunOfKind(band.runs, kind), [band.runs, kind]);
 
   return (
     /**
-     * ДИАЛОГ НИЧЕГО НЕ РЕШАЕТ — ЗНАЧИТ И КНОПОК РЕШЕНИЯ У НЕГО НЕТ (L-7).
-     *
-     * Здесь стояли `cancelLabel='close'` И `confirmLabel='close'`, то есть ДВЕ кнопки с одним
-     * словом и одним действием, плюс третий выход — ✕ в шапке. Владелец увидел это на 3D, но
-     * модалка одна на три студии (рендер, 3D, on model), и лишняя кнопка была во всех трёх.
-     *
-     * Два органа с одним смыслом — не мелочь оформления: человек ищет между ними разницу, потому
-     * что интерфейс её пообещал. `hideActions` снимает обе; ✕ в шапке остаётся и достаточен, а
-     * подпись подвала — единственное, что этому диалогу в подвале нужно, — теперь переживает
-     * `hideActions` (правка в самом примитиве: до неё она уходила вместе с кнопками).
+     * ДИАЛОГ НИЧЕГО НЕ РЕШАЕТ — ЗНАЧИТ И КНОПОК РЕШЕНИЯ У НЕГО НЕТ (L-7). Оболочка общая
+     * (`WmgShell`): `hideActions`, ✕ в шапке, подпись подвала — одна на все руки.
      */
-    <ConfirmationModal
+    <WmgShell
       open={open}
       onOpenChange={onOpenChange}
-      /* Обязателен по контракту примитива и при `hideActions` не вызывается ничем: кнопки, которая
-         его звала, больше нет. Закрытием заведует ✕ — тот же приём, что у просмотра DXF и модели. */
-      onConfirm={() => onOpenChange(false)}
-      width='lg'
-      title={`what the model gets — ${kindLabel(kind)}`}
-      hideActions
-      footerHint='nothing here is editable — every fact is edited at its own field'
+      kindWord={kindLabel(kind)}
+      intro={
+        /* THE PROFILE SENTENCE, KEPT AND MOVED RATHER THAN DELETED. It was the whole reason this
+           door was dead; it is true, and it belongs beside the inventory instead of in place of
+           it — a person reading this list must know it is the PAYLOAD and not the whole prompt. */
+        <>
+          <b>this is what this CARD contributes.</b> The prompt itself is assembled server-side
+          from a prompt PROFILE — server configuration, not a card field — and the profile's name
+          and version reach this screen only as the stamp on a run that has already happened. So
+          the wording around these facts is not shown here, because it is not knowable here. The
+          facts are, and they are the part you are paying for.
+        </>
+      }
     >
-      <div className='space-y-stack'>
-        {/* THE PROFILE SENTENCE, KEPT AND MOVED RATHER THAN DELETED. It was the whole reason this
-            door was dead; it is true, and it belongs beside the inventory instead of in place of
-            it — a person reading this list must know it is the PAYLOAD and not the whole prompt. */}
-        <CalloutBox tone='note'>
-          <Text size='micro' component='p'>
-            <b>this is what this CARD contributes.</b> The prompt itself is assembled server-side
-            from a prompt PROFILE — server configuration, not a card field — and the profile's name
-            and version reach this screen only as the stamp on a run that has already happened. So
-            the wording around these facts is not shown here, because it is not knowable here. The
-            facts are, and they are the part you are paying for.
-          </Text>
-        </CalloutBox>
+      {body}
 
-        {body}
+      <CopyWords
+        words={words}
+        say={showMessage}
+        doors={[
+          {
+            label: 'edit the description ▸',
+            onClick: () =>
+              /* ЧЕРЕЗ ВИД, А НЕ НА МЕСТЕ. Панель открыта со стороны FABRIC RENDER или 3D, а
+                 описание изделия живёт в INPUT — REFERENCES, то есть на FLAT: отсюда блок
+                 размонтирован, и `openDoor` честно ответил бы «не на этой вкладке», оставив
+                 переход человеку. Дверь закрывает панель, переводит студию и ждёт монтажа. */
+              openDoorAcrossKind(
+                'garmentDescription',
+                'flat',
+                'the garment description is in INPUT — REFERENCES, on FLAT',
+                showMessage,
+                () => onOpenChange(false),
+              ),
+          },
+          {
+            label: 'edit the fit ▸',
+            onClick: () => openDoor('fit', 'the fit is on the card header', showMessage),
+          },
+        ]}
+      />
 
-        <div>
-          <GroupLabel
-            action={
-              <Button variant='secondary' size='xs' onClick={copy}>
-                copy as text
-              </Button>
-            }
-          >
-            words
-          </GroupLabel>
-          {/* A PANEL FILL, NOT A SECOND BOX — a bordered rectangle here would be a box inside a
-              box, which this system forbids. */}
-          <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
-            {words}
-          </pre>
-          <div className='mt-1 flex flex-wrap gap-1.5'>
-            <Button
-              variant='secondary'
-              size='xs'
-              onClick={() =>
-                /* ЧЕРЕЗ ВИД, А НЕ НА МЕСТЕ. Панель открыта со стороны FABRIC RENDER или 3D, а
-                   описание изделия живёт в INPUT — REFERENCES, то есть на FLAT: отсюда блок
-                   размонтирован, и `openDoor` честно ответил бы «не на этой вкладке», оставив
-                   переход человеку. Дверь закрывает панель, переводит студию и ждёт монтажа. */
-                openDoorAcrossKind(
-                  'garmentDescription',
-                  'flat',
-                  'the garment description is in INPUT — REFERENCES, on FLAT',
-                  showMessage,
-                  () => onOpenChange(false),
-                )
-              }
-            >
-              edit the description ▸
-            </Button>
-            <Button
-              variant='secondary'
-              size='xs'
-              onClick={() => openDoor('fit', 'the fit is on the card header', showMessage)}
-            >
-              edit the fit ▸
-            </Button>
-          </div>
-        </div>
-      </div>
-    </ConfirmationModal>
+      <WordsAsSent
+        run={lastRun}
+        text={(lastRun?.prompt ?? '').trim()}
+        kindWord={kindLabel(kind)}
+        caveat='stored at dispatch — the text the provider received, profile wording included'
+      />
+    </WmgShell>
   );
 }
 
@@ -357,7 +324,6 @@ function RenderBody({
   garment: string;
   resolved: Resolved;
 }): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
   /** Ткани этого прогона — то самое поле провода, а не второй список рядом с ним. */
@@ -369,22 +335,31 @@ function RenderBody({
 
   return (
     <>
-      <div>
-        <GroupLabel
-          flush
-          action={
-            <Text size='micro' variant='label' component='span'>
-              {filled.length} of 4 sides
-            </Text>
-          }
-        >
-          inputs — the plates in the slots
-        </GroupLabel>
+      <WmgGroup
+        flush
+        label='inputs — the plates in the slots'
+        aside={`${filled.length} of 4 sides`}
+        note={
+          <>
+            {views.length > 1 ? (
+              <>
+                One picture comes back: <b>{views.length} views in a row</b> on one sheet, left to
+                right — {views.map(viewLabel).join(', ')} — split into the slots afterwards.
+              </>
+            ) : (
+              <>One picture comes back. </>
+            )}{' '}
+            A slot is filled on the input strip of this very screen —
+            <b> input — flats of this card</b>, above the menu.
+          </>
+        }
+      >
         {sides.map((side) => (
           <InventoryLine
             key={side.view}
             name={viewLabel(side.view)}
-            picture={side.picture}
+            thumb={pictureThumb(side.picture)}
+            origin={side.picture ? 'linked' : undefined}
             text={
               side.picture ? (
                 stripProvenance(band, side.picture)
@@ -396,19 +371,7 @@ function RenderBody({
             }
           />
         ))}
-        <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
-          {views.length > 1 ? (
-            <>
-              One picture comes back: <b>{views.length} views in a row</b> on one sheet, left to
-              right — {views.map(viewLabel).join(', ')} — split into the slots afterwards.
-            </>
-          ) : (
-            <>One picture comes back. </>
-          )}{' '}
-          A slot is filled on the input strip of this very screen —
-          <b> input — flats of this card</b>, above the menu.
-        </Text>
-      </div>
+      </WmgGroup>
 
       <div>
         {/* ⚠ ЭТА ПОДПИСЬ — ПОСЛЕДНЯЯ ПОВЕРХНОСТЬ ПЕРЕД ДЕНЬГАМИ, И ДО ЭТОГО КРУГА ОНА ЗДЕСЬ ЛГАЛА.
@@ -435,12 +398,17 @@ function RenderBody({
         >
           fabric
         </GroupLabel>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={22} />
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            <b>{colourLabel(recipe, resolved.colors)}</b> — {colourSubtitle(recipe, resolved.colors)}
-          </Text>
-        </div>
+        <InventoryLine
+          name='colour'
+          lead={<Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={22} />}
+          origin='recipe'
+          text={
+            <>
+              <b>{colourLabel(recipe, resolved.colors)}</b> —{' '}
+              {colourSubtitle(recipe, resolved.colors)}
+            </>
+          }
+        />
         {/* ═══ ТКАНИ ЭТОГО ПРОГОНА — СТРОКА, КОТОРОЙ ЗДЕСЬ НЕ БЫЛО ВОВСЕ ═══════════════════════
             Опись перечисляла входы ЗАКРЫТЫМ списком («fabric photo · picked colour · fabric in
             words · garment») и закрывала его утвердительной фразой «not sent: …». `recipe.fabrics`
@@ -457,40 +425,37 @@ function RenderBody({
              же факта — блок COPY AS TEXT, который тоже лежит в DOM. Утверждение по тексту ВСЕГО
              диалога проходило бы за счёт копируемой строки и молчало бы о снятом ряде: ровно та
              ложная зелень, что уже случилась здесь однажды. Замерено мутацией M8. */
-          <div data-sent-cloths className='flex items-start gap-2 border-b border-hairline py-1'>
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='w-[92px] shrink-0 uppercase'
-            >
-              cloths
-            </Text>
-            <Text size='micro' component='span' className='min-w-0 flex-1'>
-              {cloths
-                .map(
-                  (f) =>
-                    /* ⚠ «→ the whole garment» БОЛЬШЕ НЕ УТВЕРЖДАЕТСЯ. Части выводились из
-                       меток на флэтах; экрана меток нет с J-21, и печатать «каждая ткань кроет
-                       всё изделие» там, где провод говорит «разделение за вами», — это панель,
-                       противоречащая телу запроса, на котором стоит цена.
-                       ⚠ У ПОЛЯ СНОВА ЕСТЬ АВТОР, И ИХ ДВА РАЗНЫХ (фича A). `map_hex` — МЕТКА НА
-                       КАРТЕ, то есть размещение картинкой; `parts` — человечьи слова про ту же
-                       деталь. Строка печатает то, что уедет, и в том же порядке, в каком это
-                       печатает сервер: сначала слова, потом краска. */
-                    `${(f.name ?? '').trim() || 'cloth'}${
-                      (f.parts ?? '').trim() ? ` → ${(f.parts ?? '').trim()}` : ''
-                    }${(f.mapHex ?? '').trim() ? ` → painted ${(f.mapHex ?? '').trim()}` : ''}`,
-                )
-                .join(' · ')}
-              {cloths.length > 1 ? (
-                <>
-                  {' '}
-                  — <b>each travels as its own image</b>, and the prompt carries the list
-                </>
-              ) : null}
-            </Text>
-          </div>
+          <InventoryLine
+            data-sent-cloths=''
+            name='cloths'
+            origin='recipe'
+            text={
+              <>
+                {cloths
+                  .map(
+                    (f) =>
+                      /* ⚠ «→ the whole garment» БОЛЬШЕ НЕ УТВЕРЖДАЕТСЯ. Части выводились из
+                         меток на флэтах; экрана меток нет с J-21, и печатать «каждая ткань кроет
+                         всё изделие» там, где провод говорит «разделение за вами», — это панель,
+                         противоречащая телу запроса, на котором стоит цена.
+                         ⚠ У ПОЛЯ СНОВА ЕСТЬ АВТОР, И ИХ ДВА РАЗНЫХ (фича A). `map_hex` — МЕТКА НА
+                         КАРТЕ, то есть размещение картинкой; `parts` — человечьи слова про ту же
+                         деталь. Строка печатает то, что уедет, и в том же порядке, в каком это
+                         печатает сервер: сначала слова, потом краска. */
+                      `${(f.name ?? '').trim() || 'cloth'}${
+                        (f.parts ?? '').trim() ? ` → ${(f.parts ?? '').trim()}` : ''
+                      }${(f.mapHex ?? '').trim() ? ` → painted ${(f.mapHex ?? '').trim()}` : ''}`,
+                  )
+                  .join(' · ')}
+                {cloths.length > 1 ? (
+                  <>
+                    {' '}
+                    — <b>each travels as its own image</b>, and the prompt carries the list
+                  </>
+                ) : null}
+              </>
+            }
+          />
         )}
         {/* ═══ КАРТЫ ЦВЕТОВ — ОТДЕЛЬНОЙ СТРОКОЙ ОПИСИ, ПОТОМУ ЧТО ЭТО ОТДЕЛЬНЫЕ КАРТИНКИ ═════
             Опись обязана называть ВСЁ, что уезжает. Карта едет в РЕЦЕПТЕ, а не среди референсов,
@@ -499,80 +464,70 @@ function RenderBody({
             вещи в неправдоподобных цветах. Строка рисуется только когда карты есть: пустая
             говорила бы про прогон то, чего в нём нет. */}
         {(recipe?.colourMaps ?? []).length > 0 && (
-          <div
+          <InventoryLine
             data-sent-colour-maps={(recipe?.colourMaps ?? []).length}
-            className='flex items-start gap-2 border-b border-hairline py-1'
-          >
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='w-[92px] shrink-0 uppercase'
-            >
-              colour maps
-            </Text>
-            <Text size='micro' component='span' className='min-w-0 flex-1'>
-              {(recipe?.colourMaps ?? [])
-                .map((m) => `${viewLabel((m.view ?? '').trim())} · media ${m.mediaId ?? 0}`)
-                .join(' · ')}{' '}
-              — <b>each travels as its own image</b>, and the prompt says which flat it labels
-            </Text>
-          </div>
+            name='colour maps'
+            origin='recipe'
+            text={
+              <>
+                {(recipe?.colourMaps ?? [])
+                  .map((m) => `${viewLabel((m.view ?? '').trim())} · media ${m.mediaId ?? 0}`)
+                  .join(' · ')}{' '}
+                — <b>each travels as its own image</b>, and the prompt says which flat it labels
+              </>
+            }
+          />
         )}
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            photo
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {stated.photo ? (
+        <InventoryLine
+          name='photo'
+          origin={stated.photo ? 'recipe' : undefined}
+          text={
+            stated.photo ? (
               <>
                 media {recipe?.fabricMediaId} — goes out as an image; the weave, texture and drape
                 are read from it
               </>
             ) : (
               <span className='text-labelColor'>none — no material is stated by a picture</span>
-            )}
-          </Text>
-        </div>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            words
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {(recipe?.words ?? '').trim() || (
+            )
+          }
+        />
+        <InventoryLine
+          name='words'
+          origin={(recipe?.words ?? '').trim() ? 'recipe' : undefined}
+          text={
+            (recipe?.words ?? '').trim() || (
               <span className='text-labelColor'>none — nothing is added beyond the two above</span>
-            )}
-          </Text>
-        </div>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            garment
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {garment || (
+            )
+          }
+        />
+        <InventoryLine
+          name='garment'
+          origin='linked'
+          text={
+            garment || (
               <span className='text-error'>
                 the card states no description; the render goes in unexplained
               </span>
-            )}
-          </Text>
-        </div>
+            )
+          }
+        />
       </div>
 
       <NotSent
-        showMessage={showMessage}
-        chips={[
+        items={[
           {
             label: `references · ${references}`,
-            title:
+            reason:
               'a fabric render is coloured over the FLATS of this card — the reference photographs ' +
               'were read once, when the flats were drawn, and the render never sees them. They are ' +
               'on the FLAT view of the strip above',
           },
           {
             label: 'moodboard',
-            title: 'mood is for the human — it is never instruction, on any of the three views',
+            reason: 'mood is for the human — it is never instruction, on any of the three views',
           },
-          { label: 'callouts', title: 'the callouts on the sheet live on ARTIFACTS' },
+          { label: 'callouts', reason: 'the callouts on the sheet live on ARTIFACTS' },
         ]}
       />
     </>
@@ -606,7 +561,6 @@ function RecolorBody({
   garment: string;
   resolved: Resolved;
 }): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   const shots = sources ?? [];
   const stated = fabricStatement(recipe);
 
@@ -631,18 +585,13 @@ function RecolorBody({
 
   return (
     <>
-      <div>
-        <GroupLabel
-          flush
-          action={
-            <Text size='micro' variant='label' component='span'>
-              {shots.length} photograph{shots.length === 1 ? '' : 's'} · {shots.length} paid call
-              {shots.length === 1 ? '' : 's'}
-            </Text>
-          }
-        >
-          inputs — the photographs, one call each
-        </GroupLabel>
+      <WmgGroup
+        flush
+        label='inputs — the photographs, one call each'
+        aside={`${shots.length} photograph${shots.length === 1 ? '' : 's'} · ${shots.length} paid call${
+          shots.length === 1 ? '' : 's'
+        }`}
+      >
         {shots.length === 0 ? (
           <Text size='micro' variant='inactive' component='p' className='py-1 normal-case'>
             No photograph is in the menu, so there is nothing to recolour and nothing to buy.
@@ -653,6 +602,7 @@ function RecolorBody({
               key={media.id ?? index}
               name={`photo ${index + 1}`}
               thumb={mediaThumb(media)}
+              origin='linked'
               text={
                 <>
                   media <b>{media.id ?? '—'}</b> — its own paid call, recoloured on its own. The
@@ -662,7 +612,7 @@ function RecolorBody({
             />
           ))
         )}
-      </div>
+      </WmgGroup>
 
       <div>
         {/* ⚠ ЗАГОЛОВОК НАЗЫВАЕТ ТО, ЧТО ПОД НИМ, И НЕ БОЛЬШЕ. Ткань добавилась В БЛОК ЦВЕТА, а не
@@ -679,6 +629,7 @@ function RecolorBody({
           <InventoryLine
             name='the cloth'
             thumb={cloth.thumb}
+            origin='recipe'
             text={
               <>
                 <b>{cloth.name}</b> — media {cloth.mediaId}, <b>image 2 of every call</b>: the
@@ -691,59 +642,61 @@ function RecolorBody({
             }
           />
         )}
-        <div className='flex flex-wrap items-start gap-3 border-b border-hairline py-1'>
-          <Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={32} />
-          <div className='min-w-0 flex-1'>
-            <Text size='micro' component='p'>
+        <InventoryLine
+          name='colour'
+          lead={<Swatch hex={colourSwatchHex(recipe, resolved.colors)} size={32} />}
+          origin='recipe'
+          text={
+            <>
               <b>{colourLabel(recipe, resolved.colors)}</b>
-            </Text>
-            <Text size='micro' variant='label' component='p' className='normal-case'>
-              {colourSubtitle(recipe, resolved.colors)}
-            </Text>
-          </div>
-        </div>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            in words
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {stated.words ? (
+              <br />
+              <span className='text-labelColor'>{colourSubtitle(recipe, resolved.colors)}</span>
+            </>
+          }
+        />
+        <InventoryLine
+          name='in words'
+          origin={stated.words ? 'recipe' : undefined}
+          text={
+            stated.words ? (
               (recipe?.words ?? '').trim()
             ) : (
               <span className='text-labelColor'>nothing said in words</span>
-            )}
-          </Text>
-        </div>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            garment
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {garment || <span className='text-labelColor'>the card states no description</span>}
-          </Text>
-        </div>
+            )
+          }
+        />
+        <InventoryLine
+          name='garment'
+          origin='linked'
+          text={
+            garment || <span className='text-labelColor'>the card states no description</span>
+          }
+        />
       </div>
 
       <NotSent
-        showMessage={showMessage}
-        chips={[
+        items={[
           {
             label: 'the flats',
-            title:
+            reason:
               'a recolour repaints a photograph that exists — the card\u2019s drawings would be a second, contradictory description of the same garment',
           },
           {
             label: 'the bench',
-            title: 'the bench is what a fabric render is built from; a recolour is built from the photograph you handed it',
+            reason:
+              'the bench is what a fabric render is built from; a recolour is built from the photograph you handed it',
           },
           {
             label: 'the other photographs',
-            title:
+            reason:
               'each shot is its own paid call and the model sees only that one — what keeps them the same shade is the colour you named, not that they went together',
           },
-          { label: 'references', title: 'reference photographs belong to FLAT and never reach this run' },
-          { label: 'moodboard', title: 'mood is for the human — it is never instruction' },
-          { label: 'the fit', title: 'fit describes a garment being drawn; this one has already been photographed on a body' },
+          { label: 'references', reason: 'reference photographs belong to FLAT and never reach this run' },
+          { label: 'moodboard', reason: 'mood is for the human — it is never instruction' },
+          {
+            label: 'the fit',
+            reason: 'fit describes a garment being drawn; this one has already been photographed on a body',
+          },
         ]}
       />
     </>
@@ -774,7 +727,6 @@ function ThreedBody({
   colorwayId: number;
   colorwayLabel: string;
 }): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   /**
    * ⚠ ЧИТАЕТСЯ РЕНДЕР-ВЕРСТАК, А НЕ ЛЕНТА (V-14). Инвентарь обязан называть ровно те картинки,
    * которые уедут в сборку, а уедут плиты слотов `kind: render` — это отбирает сервер
@@ -786,18 +738,13 @@ function ThreedBody({
 
   return (
     <>
-      <div>
-        <GroupLabel
-          flush
-          action={
-            <Text size='micro' variant='label' component='span'>
-              {present} of 4 marked · front required
-            </Text>
-          }
-        >
-          inputs — renders by view
-          {colorwayLabel.trim() ? ` · ${colorwayLabel.trim()}` : ' · no colourway'}
-        </GroupLabel>
+      <WmgGroup
+        flush
+        label={`inputs — renders by view${
+          colorwayLabel.trim() ? ` · ${colorwayLabel.trim()}` : ' · no colourway'
+        }`}
+        aside={`${present} of 4 marked · front required`}
+      >
         {sides.map((side) => {
           /**
            * ⚠ РЕВИЗИЯ И РОД ПРОГОНА — СО ШТАМПА СЛОТА, А НЕ ИЗ ПОСТРАНИЧНОГО ПОИСКА.
@@ -818,7 +765,8 @@ function ThreedBody({
             <InventoryLine
               key={side.view}
               name={viewLabel(side.view)}
-              picture={side.picture}
+              thumb={pictureThumb(side.picture)}
+              origin={side.picture ? 'linked' : undefined}
               text={
                 side.picture ? (
                   <span
@@ -848,166 +796,92 @@ function ThreedBody({
             />
           );
         })}
-      </div>
+      </WmgGroup>
 
-      <div>
-        <GroupLabel>how it sits</GroupLabel>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            presentation
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {threed?.presentation === 'model'
+      <WmgGroup label='how it sits'>
+        <InventoryLine
+          name='presentation'
+          origin='typed'
+          text={
+            threed?.presentation === 'model'
               ? `on ${bodyLine(resolved.models, threed)} · garment ${
                   resolved.sizeName(threed?.garmentSizeId ?? 0) || '— no size chosen —'
                 }`
-              : 'in the air — no figure'}
-          </Text>
-        </div>
+              : 'in the air — no figure'
+          }
+        />
         {threed?.presentation === 'model' && (
-          <div className='flex items-center gap-2 border-b border-hairline py-1'>
-            <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-              the body
-            </Text>
-            {/* ЧТО ИЗ ЭТОГО ДОХОДИТ ДО МОДЕЛИ, СКАЗАНО ЗДЕСЬ, потому что ради этого панель и
-                открывают: слово о телосложении уезжает в промпт, а `model_id` — нет, у снимка нет
-                поля ни под имя модели, ни под её мерки. Человек, тратящий деньги, обязан знать,
-                какая половина его выбора управляет картинкой, а какая только записывает факт. */}
-            <Text size='micro' component='span' className='min-w-0 flex-1'>
-              {(threed?.bodyType ?? '').trim() ? (
-                <>
-                  build <b>{threed?.bodyType}</b> — travels to the model as a word.{' '}
-                </>
-              ) : (
-                <>no build stated — the generator picks one. </>
-              )}
-              {threed?.modelId ? (
-                <span className='text-labelColor'>
-                  the chosen model is recorded on the run and is not described to the generator
-                </span>
-              ) : (
-                <span className='text-labelColor'>no model named</span>
-              )}
-            </Text>
-          </div>
+          /* ЧТО ИЗ ЭТОГО ДОХОДИТ ДО МОДЕЛИ, СКАЗАНО ЗДЕСЬ, потому что ради этого панель и
+             открывают: слово о телосложении уезжает в промпт, а `model_id` — нет, у снимка нет
+             поля ни под имя модели, ни под её мерки. Человек, тратящий деньги, обязан знать,
+             какая половина его выбора управляет картинкой, а какая только записывает факт. */
+          <InventoryLine
+            name='the body'
+            origin={(threed?.bodyType ?? '').trim() ? 'typed' : undefined}
+            text={
+              <>
+                {(threed?.bodyType ?? '').trim() ? (
+                  <>
+                    build <b>{threed?.bodyType}</b> — travels to the model as a word.{' '}
+                  </>
+                ) : (
+                  <>no build stated — the generator picks one. </>
+                )}
+                {threed?.modelId ? (
+                  <span className='text-labelColor'>
+                    the chosen model is recorded on the run and is not described to the generator
+                  </span>
+                ) : (
+                  <span className='text-labelColor'>no model named</span>
+                )}
+              </>
+            }
+          />
         )}
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            fit
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {(threed?.fitOverride ?? '').trim() ? (
+        <InventoryLine
+          name='fit'
+          origin={(threed?.fitOverride ?? '').trim() ? 'typed' : 'linked'}
+          text={
+            (threed?.fitOverride ?? '').trim() ? (
               <>
                 <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge,
                 and the card still says {cardFit || '—'}
               </>
             ) : (
               `${cardFit || '—'} (from the card)`
-            )}
-          </Text>
-        </div>
-        <div className='flex items-center gap-2 border-b border-hairline py-1'>
-          <Text size='micro' variant='label' component='span' className='w-[92px] shrink-0 uppercase'>
-            garment
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1'>
-            {garment || (
-              <span className='text-labelColor'>the card states no description</span>
-            )}
-          </Text>
-        </div>
-      </div>
+            )
+          }
+        />
+        <InventoryLine
+          name='garment'
+          origin='linked'
+          text={
+            garment || <span className='text-labelColor'>the card states no description</span>
+          }
+        />
+      </WmgGroup>
 
       <NotSent
-        showMessage={showMessage}
-        chips={[
+        items={[
           {
             label: 'references',
-            title:
+            reason:
               'a 3D model is built out of the marked RENDERS — the reference photographs are two ' +
               'steps upstream and are not shown to it. They are on the FLAT view of the strip',
           },
-          { label: 'moodboard', title: 'mood is for the human — it is never instruction' },
-          { label: 'the flats', title: '3D is built from the renders, not from the drawings underneath them' },
-          { label: 'notes', title: 'notes are internal and reach neither the factory nor a model' },
+          { label: 'moodboard', reason: 'mood is for the human — it is never instruction' },
+          {
+            label: 'the flats',
+            reason: '3D is built from the renders, not from the drawings underneath them',
+          },
+          { label: 'notes', reason: 'notes are internal and reach neither the factory nor a model' },
         ]}
       />
     </>
   );
 }
 
-/* ─────────────────────────── the shared shapes ─────────────────────────── */
-
-/** One line of the inventory: a thumbnail, the name of the slot or view, and what stands in it. */
-function InventoryLine({
-  name,
-  picture,
-  thumb,
-  text,
-}: {
-  name: string;
-  picture?: common_DesignPicture | null;
-  /**
-   * An address for a line whose subject is NOT a card picture — the recolour arm's inputs are raw
-   * media, and there is no `DesignPicture` to derive a thumbnail from. Supplied wins; the picture
-   * is still accepted so the two older arms are untouched.
-   */
-  thumb?: string;
-  text: React.ReactNode;
-}): JSX.Element {
-  const url = thumb || pictureThumb(picture);
-  return (
-    <div className='flex items-center gap-2 border-b border-hairline py-1'>
-      {/* мат под снимком белый (R-12) */}
-      <span className='block h-10 w-8 shrink-0 border border-borderColor bg-bgColor'>
-        {url ? <img src={url} alt='' loading='lazy' className='h-full w-full object-contain' /> : null}
-      </span>
-      <Text size='nano' variant='uppercase' component='span' className='w-[72px] shrink-0'>
-        {name}
-      </Text>
-      <Text size='micro' component='span' className='min-w-0 flex-1'>
-        {text}
-      </Text>
-    </div>
-  );
-}
-
-/**
- * WHAT THE MODEL HAS NO KNOWLEDGE OF — the half of the inventory that is easiest to be wrong about,
- * and the reason this panel matters more on these two screens than on FLAT.
- */
-function NotSent({
-  chips,
-  showMessage,
-}: {
-  chips: { label: string; title: string }[];
-  showMessage: (message: string, type: 'error' | 'success') => void;
-}): JSX.Element {
-  return (
-    <div>
-      <GroupLabel
-        action={
-          <Text size='micro' variant='label' component='span'>
-            what a model would have no knowledge of
-          </Text>
-        }
-      >
-        not sent at all
-      </GroupLabel>
-      <ChipRow>
-        {chips.map((chip) => (
-          <Chip
-            key={chip.label}
-            title={chip.title}
-            onClick={() => showMessage(chip.title, 'success')}
-          >
-            {chip.label}
-          </Chip>
-        ))}
-      </ChipRow>
-    </div>
-  );
-}
+/* ─────────────────────────── the shared shapes live in core/wmg.tsx ─────────────────────────── */
 
 function modelCaptionOf(
   models: readonly common_Model[] | undefined,

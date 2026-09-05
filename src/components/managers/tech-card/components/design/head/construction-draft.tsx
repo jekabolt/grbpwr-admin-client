@@ -1,4 +1,5 @@
-import type { common_DesignRun } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
+import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -11,10 +12,12 @@ import Text from 'ui/components/text';
 import { bornBomLine, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
 import { proposedColourways } from '../colourway-proposals-model';
+import { InventoryLine, NotSent, WmgGroup, WmgShell, WordsAsSent, latestRunOfKind } from '../core';
 import { formatMoney } from '../generation/money';
+import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
-import { newClientRequestId } from '../use-design-band';
+import { newClientRequestId, useDesignBand } from '../use-design-band';
 import {
   diffProposal,
   parseConstructionDraft,
@@ -223,6 +226,10 @@ export function ConstructionDraft({
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
   const draftIdea = useDraftDesignIdea(techCardId);
+  // ПОЛОСА — РАДИ ОДНОЙ СТРОКИ: последнего прогона `draft_idea`, чей `output_text` печатает опись
+  // (`WHAT THE MODEL GETS ▸`). Тот же ключ react-query, что и у доски выше, — второго чтения нет.
+  const { band } = useDesignBand(techCardId);
+  const [inspecting, setInspecting] = useState(false);
 
   // ЖУРНАЛ ЗАПОЛНЕНИЙ И ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ ЖИВУТ В МОДУЛЬНОМ СТОРЕ, А НЕ ЗДЕСЬ: студия
   // монтируется условно, и `useState` органа умер бы от одного захода на COLORWAYS и обратно —
@@ -527,20 +534,31 @@ export function ConstructionDraft({
     <div data-c19-draft=''>
       <GroupLabel>draft of the construction</GroupLabel>
 
+      {/* СТАНДАРТНЫЙ ХВОСТ РЯДА, КАК У ЧЕТЫРЁХ ШАГОВ (SPEC п.4: «дуплет обязателен и у черновика
+          мудборда»). Здесь стоял свой хвост без двери — на том основании, что «вход собирает сервер
+          сам, и панели у доски не существует». Первое верно и печатается ПЕРВОЙ строкой панели;
+          второе было отказом, а не фактом: что сервер ЧИТАЕТ (сколько картинок, сколько указаний,
+          есть ли описание) известно точно, и это опись ФАКТОВ, а не догадка о тексте. `shape`
+          называет состав, и строка про деньги — та же самая, дословно. */}
       <GenerateRow
         gate={gate}
         label='draft the construction ▸'
         pending={draftIdea.isPending}
         disabled={readOnly}
         onGenerate={askForDraft}
-        trailing={
-          /* СВОЙ ХВОСТ, А НЕ СТАНДАРТНЫЙ: `shape` включил бы ещё и дверь описи промпта, которой у
-             этого экрана нет — вход собирает сервер сам, и панели «what the model gets» у доски не
-             существует. Фраза про деньги — та же самая, дословно: цену называет сервер на старте. */
-          <Text size='micro' variant='label' component='span' data-probe='run-price'>
-            priced by the server when the run starts
-          </Text>
-        }
+        shape={`${items.length} picture${items.length === 1 ? '' : 's'} · ${boardNotes.length} note${
+          boardNotes.length === 1 ? '' : 's'
+        }`}
+        onInspect={() => setInspecting(true)}
+      />
+      <DraftInventoryModal
+        open={inspecting}
+        onOpenChange={setInspecting}
+        band={band}
+        items={items}
+        callouts={callouts}
+        concept={concept}
+        boardDirty={boardDirty}
       />
 
       {staged && (
@@ -824,4 +842,174 @@ function DraftJournal({
       ))}
     </div>
   );
+}
+
+/**
+ * ═══ WHAT THE MODEL GETS — THE MOODBOARD DRAFT: AN INVENTORY OF FACTS, NOT OF WORDS ═════════════
+ *
+ * THE INPUT IS ASSEMBLED BY THE SERVER (`DraftDesignIdea`) FROM THE SAVED CARD, and this client
+ * never sees the text it composes. So the panel does not pretend to: it lists what the server
+ * READS — the board's pictures, the notes pinned to them, whether a description stands — and, for
+ * the last draft that ran, what the server KEPT: its stored text as sent (if the row carries one)
+ * and its answer verbatim. Nothing here is inferred; every line is a count or a stored column.
+ *
+ * SAME SHELL, SAME LINES AS THE FOUR STEPS (`core/wmg.tsx`): between steps only the composition
+ * differs, never the markup. The reader who has opened this door on FLAT finds the same organ here.
+ *
+ * READS THE FORM VALUES IT IS HANDED, NOT THE FORM. The caller already subscribes to the board
+ * (`useWatch`) and hands the values down — a second subscription in the modal would be the same
+ * rows watched twice, and the shared parts are forbidden to touch the form at all.
+ */
+function DraftInventoryModal({
+  open,
+  onOpenChange,
+  band,
+  items,
+  callouts,
+  concept,
+  boardDirty,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  band: GetDesignBandResponse;
+  items: readonly { mediaId?: number }[];
+  callouts: readonly { mediaId?: number; part?: string; description?: string }[];
+  concept: string;
+  boardDirty: boolean;
+}): JSX.Element {
+  const mediaById = useMediaMap();
+  const lastRun = useMemo(() => latestRunOfKind(band.runs, 'draft_idea'), [band.runs]);
+  const boardIds = useMemo(
+    () => new Set(items.map((i) => i.mediaId).filter((id): id is number => !!id)),
+    [items],
+  );
+  const notesOf = useMemo(() => {
+    const m = new Map<number, string[]>();
+    for (const c of callouts) {
+      const id = c.mediaId ?? 0;
+      if (!boardIds.has(id)) continue;
+      const text = (c.description ?? '').trim();
+      if (!text) continue;
+      const list = m.get(id) ?? [];
+      list.push(text);
+      m.set(id, list);
+    }
+    return m;
+  }, [callouts, boardIds]);
+  const noteCount = [...notesOf.values()].reduce((n, list) => n + list.length, 0);
+
+  return (
+    <WmgShell
+      open={open}
+      onOpenChange={onOpenChange}
+      kindWord='moodboard draft'
+      intro={
+        <>
+          <b>the server assembles this run itself,</b> from the SAVED card — the pictures on the
+          moodboard, the notes pinned to them and the description. This client never sees the
+          text it composes, so what is listed here is what the server READS, not how it words it.
+          {boardDirty ? (
+            <>
+              {' '}
+              <span className='text-warning'>
+                The board has unsaved changes — the draft reads the saved card, so save first.
+              </span>
+            </>
+          ) : null}
+        </>
+      }
+    >
+      <WmgGroup
+        flush
+        label='pictures — the moodboard'
+        aside={`${items.length} read · ${noteCount} note${noteCount === 1 ? '' : 's'}`}
+        note='every picture on the board is read, with the notes pinned to it; a note on a picture that is not on the board is not read'
+      >
+        {items.length === 0 ? (
+          <InventoryLine
+            name='—'
+            text={<span className='text-labelColor'>no picture on the moodboard</span>}
+          />
+        ) : (
+          items.map((item, index) => {
+            const id = item.mediaId ?? 0;
+            const notes = notesOf.get(id) ?? [];
+            return (
+              <InventoryLine
+                key={id || index}
+                name={`picture ${index + 1}`}
+                thumb={thumbOf(mediaById.get(id))}
+                origin='linked'
+                text={
+                  notes.length ? (
+                    notes.join(' · ')
+                  ) : (
+                    <span className='text-labelColor'>no note pinned — the picture goes as is</span>
+                  )
+                }
+              />
+            );
+          })
+        )}
+      </WmgGroup>
+
+      <WmgGroup label='words' aside='read from the saved card'>
+        <InventoryLine
+          name='description'
+          origin={concept.trim() ? 'linked' : undefined}
+          text={
+            concept.trim() || (
+              <span className='text-labelColor'>
+                none — the board is read from its pictures alone
+              </span>
+            )
+          }
+        />
+      </WmgGroup>
+
+      <NotSent
+        items={[
+          {
+            label: 'the construction',
+            reason:
+              'the draft PROPOSES the construction and is compared against it afterwards — what stands in it is not read',
+          },
+          {
+            label: 'the fit',
+            reason: 'not among what the server reads for a draft; it is compared against the proposal afterwards',
+          },
+          { label: 'BOM', reason: 'the bill of materials is proposed by the draft, not read by it' },
+          { label: 'colourways', reason: 'colourways are proposed by the draft and created on your click' },
+          {
+            label: 'reference roles',
+            reason: 'roles and reference notes belong to the flat run; the draft reads the board, not the input',
+          },
+        ]}
+      />
+
+      <WordsAsSent
+        run={lastRun}
+        text={(lastRun?.prompt ?? '').trim()}
+        kindWord='draft'
+        caveat='stored by the server at dispatch — its own wording, kept on the run'
+        whenNone='no draft has run yet — once one has, this shows the text the server kept for it, if it kept one.'
+        data-c19-draft-sent=''
+      />
+      <WordsAsSent
+        run={lastRun}
+        text={lastRun ? runOutputText(lastRun) : ''}
+        kindWord='draft'
+        label='what came back'
+        noun='answer'
+        caveat='the answer verbatim — the proposal above was parsed out of this text'
+        whenNone='no draft has run yet.'
+        data-c19-draft-answer=''
+      />
+    </WmgShell>
+  );
+}
+
+function thumbOf(media?: common_MediaFull): string {
+  const m = media?.media;
+  return m?.thumbnail?.mediaUrl || m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || '';
 }
