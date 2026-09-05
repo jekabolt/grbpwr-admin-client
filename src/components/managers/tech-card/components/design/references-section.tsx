@@ -34,6 +34,7 @@ import {
   useFlatSlotsSendWrites,
 } from './flat-slots-send';
 import { cropFamilies } from './generation/composite';
+import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { AskModal } from './core';
 import { VectorModal } from './modals';
@@ -78,15 +79,15 @@ import { useDesignWrites } from './use-design-band';
  * нарушение, а законная форма референса. На экране такой референс ничем не отличается от
  * остальных: роль меняется, записка пишется, ✕ снимает его целиком.
  *
- * ✕ УНОСИТ СУЩНОСТЬ ЦЕЛИКОМ — картинку входа, её роль и её записку — и спрашивает перед этим,
+ * ✕ УНОСИТ СУЩНОСТЬ ЦЕЛИКОМ — картинку входа и её роль — и спрашивает перед этим,
  * называя, в скольких прогонах эта картинка участвовала. Доски он не касается: там своя строка со
  * своим ✕, который называет свою цену.
  *
- * БЛОК СТАТИЧЕН (T-11, круг 4): «INPUT — REFERENCES статичны там только референсы и тексты промпта
- * все остальное там не нужно». Здесь нет и не должно появиться ни состояний прогона, ни описей
- * снимка («the pictures it was given», «the plates it was given» — НИКОГДА, слово владельца), ни
- * кнопки запуска: прогон стартует только из GENERATION — FLAT → GENERATE. Всё, что рисует этот
- * блок, — описание изделия, картинки входа с ролями и записками и дверь добавления.
+ * ОПИСЕЙ СНИМКА ЗДЕСЬ НЕТ (T-11, круг 4): «the pictures it was given», «the plates it was given» —
+ * НИКОГДА, слово владельца; опись того, что уедет, живёт в модалке «what the model gets ▸».
+ * ⚠ РЯД GENERATE ТЕПЕРЬ СТОИТ В ЭТОЙ ЖЕ СЕКЦИИ (SPEC п.7, `./flat-run-row.tsx`): владелец слил
+ * отдельный блок `GENERATION — FLAT` с входом — то, что модели дают, и то, что у неё просят, один
+ * запрос. Записки у картинок больше нет (SPEC п.10): один общий текст — garment description.
  *
  * ФЛЭТЫ САМИ СЮДА НЕ ПОПАДАЮТ (T-15): «в INPUT — REFERENCES не должны уходить все флеты если мы их
  * явно туда сами не добавим». Строку входа заводят ровно три ЖЕСТА ЧЕЛОВЕКА — слот «+ reference»
@@ -383,73 +384,43 @@ export function ReferencesSection({
 
   /**
    * @param detailSlotId — ТОЛЬКО когда вызывающий ЗНАЕТ слот детали (J-9). Опущенный параметр
-   * едет нулём, а ноль на проводе значит «оставь как было», НЕ «очисти»: правка одной записки не
-   * смеет разорвать связь с деталью, о которой её никто не спрашивал. Роль, отличная от `detail`,
-   * очищает связь на сервере сама — присылать что-либо ради этого не нужно.
+   * едет нулём, а ноль на проводе значит «оставь как было», НЕ «очисти». Роль, отличная от
+   * `detail`, очищает связь на сервере сама.
+   *
+   * ⚠ ЗАПИСКА С ЭКРАНА СНЯТА (SPEC п.10, CONTRACT §F), НО С ПРОВОДА — НЕТ. `SetDesignReferenceRole`
+   * пишет `role+note+detailSlotId` ОДНИМ upsert, и у `note` три состояния: ОТСУТСТВИЕ поля —
+   * «оставь как было», ПРИСУТСТВИЕ с `''` — «сотри» (`use-design-band.ts`). Поэтому здесь `note`
+   * НЕ передаётся вовсе: `undefined` выбрасывается `JSON.stringify` и до сервера не доезжает, и
+   * записка, которую кто-то писал раньше (или пишет другой клиент), переживает смену роли
+   * нетронутой. Передать `''` значило бы стереть чужие слова молча — ровно та потеря, от которой
+   * этот параграф. Единственный вызов, который несёт записку, — перенос на кроп
+   * (`replaceReference`), и он несёт значение, ПРИШЕДШЕЕ С СЕРВЕРА, а не своё.
    */
-  function writeRef(mediaId: number, role: string, note: string, detailSlotId?: number) {
+  function writeRef(mediaId: number, role: string, detailSlotId?: number) {
     // ORDINAL — ЭТО ПОЗИЦИЯ ВО ВХОДЕ, а не номер промпта. Номер промпта выводится сканом (см.
-    // выше), и класть его в хранимое поле значило бы завести второй источник одной величины,
-    // который расходится с первым при каждом снятии роли.
+    // выше), и класть его в хранимое поле значило бы завести второй источник одной величины.
     setReferenceRole.mutate({
       mediaId,
       role,
       ordinal: role ? ordinalOf(mediaId) : 0,
-      note,
       detailSlotId,
     });
   }
 
   function setRole(mediaId: number, role: string) {
-    const note = refOf.get(mediaId)?.note ?? '';
-    /* ─── РОЛЬ `detail` ЗАВОДИТ СЛОТ, А НЕ ТОЛЬКО ПОДПИСЫВАЕТ КАРТИНКУ ───
-     *
-     * Владелец (V-1): «я добавил в INPUT — REFERENCES реффренс с фото детали но GENERATION — FLAT
-     * его не оказалось и выбрать генерацию детали нельзя». Жест был ВЕРНЫЙ — в списке ролей стоит
-     * `detail`, он его и выбрал. Дефект в том, что выбор роли говорил только «модель увидит эту
-     * картинку как деталь» и НЕ заводил слота на верстаке, а форма генерации предлагает ровно
-     * слоты (`bench.details` → `detail_slot_ids` круга 4). Деталь существовала для модели и не
-     * существовала для человека.
-     *
-     * ПОЧЕМУ СЛОТ РОЖДАЕТСЯ ПУСТЫМ. Слот держит ПЛИТУ — технический чертёж детали, который и
-     * печатается на листе. Референс — это фотография, которую модель СМОТРИТ. Положить фотографию
-     * в слот значило бы напечатать снимок там, где обязан быть чертёж. Поэтому слот заводится
-     * пустым и ждёт того, что вернёт генерация, а фотография остаётся референсом с ролью.
-     *
-     * ИМЯ ОБЯЗАТЕЛЬНО, И ЭТО НЕ ФОРМАЛЬНОСТЬ: `detail_slot_ids` адресует деталь ИМЕНЕМ СЛОТА, и
-     * безымянный слот приезжает в промпт словом «detail» — ровно тем, от чего уходили в круге 4.
-     * Комментарий необязателен и едет ЗАПИСКОЙ РЕФЕРЕНСА: это и есть «что эта картинка добавляет»,
-     * поле уже существует и уже читается промптом. Второго места для тех же слов заводить нельзя. */
+    /* ─── РОЛЬ `detail` ЗАВОДИТ СЛОТ, А НЕ ТОЛЬКО ПОДПИСЫВАЕТ КАРТИНКУ (V-1) ───
+     * Форма генерации предлагает ровно слоты (`bench.details` → `detail_slot_ids`), поэтому выбор
+     * `detail` заводит ПУСТОЙ именованный слот на верстаке (плиту — чертёж детали — вернёт прогон;
+     * фотография остаётся референсом с ролью). Имя обязательно: безымянный слот приезжает в промпт
+     * словом «detail». Имя спрашивается ДО записи — `DetailNamingModal`. */
     if (normaliseViewKey(role) === DETAIL_VIEW) {
-      setNamingDetail({ mediaId, note });
+      setNamingDetail({ mediaId });
       return;
     }
-    // СНЯТИЕ РОЛИ УНОСИТ ЗАПИСКУ, и это не наш выбор, а форма хранения: строка полосы И ЕСТЬ
-    // существование роли, записка — её колонка. Раз цена не наша, тем более она обязана быть
-    // названа ДО, а не обнаружена после: молчащий селект стёр бы набранные руками слова.
-    if (!role && note.trim()) {
-      setPendingRoleClear(mediaId);
-      return;
-    }
-    // Записка переносится на новую роль ЯВНО. Не передать её — значит стереть: у поля семантика
-    // «пустая строка на живой строке очищает».
-    writeRef(mediaId, role, note);
+    // Пустая роль удаляет строку полосы (и записку на ней — по контракту провода). Записки на
+    // экране больше нет, спрашивать о ней нечего; сама роль — не потеря: селект стоит рядом.
+    writeRef(mediaId, role);
   }
-
-  /**
-   * Записка коммитится по УХОДУ ФОКУСА, а не по нажатию клавиши: это сетевой upsert, и запрос на
-   * каждый символ — это и деньги, и гонка, в которой побеждает самый медленный ответ.
-   */
-  function commitNote(mediaId: number, note: string) {
-    const current = refOf.get(mediaId);
-    // Без роли записку хранить негде — строки полосы не существует. Поле в этом состоянии и не
-    // редактируется (см. ячейку), но сторож стоит и здесь: путь записи один, и он обязан отвечать
-    // за себя сам.
-    if (!current) return;
-    if ((current.note ?? '') === note) return;
-    writeRef(mediaId, current.role, note);
-  }
-
   function addReferences(added: common_MediaFull[]) {
     const result = appendBoardPictures({
       live: (getValues('moodboardMedia') ?? []) as BoardItem[],
@@ -470,10 +441,8 @@ export function ReferencesSection({
   // ── ✕ референса: цитата перед уничтожением ──────────────────────────────────────────────────
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);
   const pendingRuns = pendingRemove == null ? 0 : runsByMedia.get(pendingRemove) ?? 0;
-  /** Снятие роли, которое уносит с собой набранную записку, — спрашивается отдельно. */
-  const [pendingRoleClear, setPendingRoleClear] = useState<number | null>(null);
-  /** Референс, который назначают деталью: ждём имени (обязательного) и комментария. */
-  const [namingDetail, setNamingDetail] = useState<{ mediaId: number; note: string } | null>(null);
+  /** Референс, который назначают деталью: ждём имени (обязательного). */
+  const [namingDetail, setNamingDetail] = useState<{ mediaId: number } | null>(null);
 
   function confirmRemove() {
     const mediaId = pendingRemove;
@@ -489,60 +458,54 @@ export function ReferencesSection({
     );
   }
 
-  // ── clear: весь вход одним движением (R-15) ─────────────────────────────────────────────────
+  // ── clear: ТОЛЬКО ПРОМПТ, картинки остаются (SPEC п.8, CONTRACT §B) ─────────────────────────
   const [clearAsk, setClearAsk] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const flatSend = useFlatSlotsSend(techCardId);
+  const { setOn: setFlatSendOn } = useFlatSlotsSendWrites();
 
   /**
-   * СНОС ВХОДА — картинки, роли, записки, описание изделия. Три вещи, которые обязаны быть
-   * сказаны, потому что их диктует провод, а не наш вкус:
+   * ЧТО ЧИСТИТСЯ: слова (`garmentDescription`), роли референсов (и с ними — порядок промпта),
+   * переключатель «also send the flat slots» вместе с поимённым списком снятых плит.
+   * ЧТО НЕ ТРОГАЕТСЯ: строки входа. Здесь стоял фильтр, вырезавший их из `moodboardMedia`, то есть
+   * `clear` УНОСИЛ КАРТИНКИ; макет говорит обратное — «The pictures stay». Строка входа без роли
+   * сегодня и есть «картинка есть, в промпте нет» (модель читает только `design_reference`), так
+   * что ей не нужно ни менять `kind`, ни переезжать на доску: она остаётся на своём месте с
+   * плашкой «not in prompt», и её есть чем вернуть в промпт — тем же селектом.
    *
-   * 1. РОЛИ СНИМАЮТСЯ ПО ОДНОЙ. Bulk-глагола на проводе нет — это N вызовов
-   *    `SetDesignReferenceRole(role='')`, и они НЕ атомарны. Поэтому (а) перед сносом стоит
-   *    вопрос с числами (разрушение без вопроса запрещено правилами продукта), (б) частичный
-   *    провал НЕ съедается: роль, которую снять не удалось, ОСТАЁТСЯ на экране вместе со своей
-   *    строкой входа, и итог говорит «cleared K of N», а не «готово».
-   * 2. ПОРЯДОК: сначала роли, потом строки — тот же, что у одиночного ✕: снятая строка при живой
-   *    роли рождала бы носителя роли без строки на карточке (стрея) на ровном месте.
-   * 3. ОПИСАНИЕ ИЗДЕЛИЯ чистится ТОЛЬКО В ФОРМЕ — у поля нет своего RPC, оно едет с документом.
-   *    `''` здесь — не «пусто по незнанию», а КОМАНДА «сотри» трёхсостоянийного протокола
-   *    (absent = сохрани, '' = сотри): следующий сейв карточки унесёт описание и с сервера.
-   *    До сейва — и при закрытой без сейва вкладке — сервер держит старый текст. Вопрос ниже
-   *    называет это словами, чтобы «clear» не обещал больше, чем делает.
+   * 1. РОЛИ СНИМАЮТСЯ ПО ОДНОЙ. Bulk-глагола на проводе нет — N вызовов `SetDesignReferenceRole
+   *    (role='')`, и они НЕ атомарны: частичный провал НЕ съедается, итог говорит «cleared K of N».
+   *    Пустая роль удаляет строку полосы целиком (это и есть её существование) — записка на ней
+   *    уходит с ней по контракту провода, других записей этот жест не делает.
+   * 2. ОПИСАНИЕ чистится ТОЛЬКО В ФОРМЕ — у поля нет своего RPC, оно едет с документом. `''` —
+   *    команда «сотри» трёхсостоянийного протокола; до сейва сервер держит старый текст. Вопрос
+   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает.
+   * 3. `flatSlotsSend` — местное состояние вкладки, выключается вместе со списком исключений.
    */
   async function runClear() {
     setClearAsk(false);
     setClearing(true);
     const roleIds = [...refOf.keys()];
     const failed = new Set<number>();
-    // Последовательно, а не залпом: залп из N мутаций делает порядок отказов случайным, а «кто
-    // не очистился» должно совпадать с тем, что осталось на экране, детерминированно.
+    // Последовательно, а не залпом: «кто не очистился» должно совпадать с тем, что осталось на
+    // экране, детерминированно.
     for (const mediaId of roleIds) {
       try {
-        await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0, note: '' });
+        await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0 });
       } catch {
         failed.add(mediaId);
       }
     }
-    // Строки входа: уходят все, КРОМЕ носителей неснявшейся роли — их референс переживает снос
-    // ЦЕЛИКОМ (картинка+роль+записка), чтобы на экране осталась ровно та сущность, которую есть
-    // чем снять повторно. Доски фильтр не касается.
-    writeItems(
-      ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(
-        (i) => !isInputRow(i) || failed.has(i.mediaId),
-      ),
-    );
     setValue('garmentDescription', '', { shouldDirty: true });
+    setFlatSendOn(techCardId, false);
     setClearing(false);
     if (failed.size) {
-      // Каждый отказ уже прокричал своей сноской из шва записи; эта строка — ИТОГ, по которому
-      // видно, что снос был частичным, даже если сноски отказа промелькнули.
       showMessage(
-        `cleared ${roleIds.length - failed.size} of ${roleIds.length} prompt roles — ${failed.size} reference${failed.size === 1 ? '' : 's'} stayed`,
+        `cleared ${roleIds.length - failed.size} of ${roleIds.length} prompt roles — ${failed.size} reference${failed.size === 1 ? '' : 's'} kept ${failed.size === 1 ? 'its' : 'their'} role`,
         'error',
       );
     } else {
-      showMessage('the input is clear', 'success');
+      showMessage('the prompt is clear — the pictures stay', 'success');
     }
   }
 
@@ -556,24 +519,34 @@ export function ReferencesSection({
   const garment = useController({ control, name: 'garmentDescription' });
   const garmentId = useId();
 
-  // ── описание из аспектов CONSTRUCTION (B-15) ────────────────────────────────────────────────
+  // ── описание из CONSTRUCTION (B-15) ─────────────────────────────────────────────────────────
   //
   // ЧИТАЕТСЯ ТО ЖЕ, ЧТО РИСУЕТ `DetailsEditor`: массив `details[]`, где ключ — аспект, а текст —
-  // его описание. Порядок сохраняется тот, что в форме, то есть тот, в котором аспекты стоят на
-  // экране CONSTRUCTION: перечисление, переставленное по дороге, читается как другой документ.
-  // Имя аспекта берётся ОДНОЙ функцией со всеми прочими экранами (`detailKeyLabel`), поэтому
-  // переименование словаря доезжает и сюда.
+  // его описание, в порядке формы. Имя аспекта берётся ОДНОЙ функцией со всеми прочими экранами
+  // (`detailKeyLabel`). ПЛЮС `fit` — поле GENERAL INFORMATION, отдельной строкой перед аспектами:
+  // посадка — тоже конструкция, а `silhouette` и `fabric` уже есть среди аспектов `details[]`.
+  // `concept` НЕ берётся намеренно: это проза для цеха, другой документ (входит в подпись DESIGN).
   const aspects = (useWatch({ control, name: 'details' }) ?? []) as {
     key?: string;
     text?: string;
+    mediaIds?: number[];
   }[];
-  const aspectText = useMemo(
-    () =>
-      aspects
-        .map((d) => ({ label: detailKeyLabel(d.key), text: (d.text ?? '').trim() }))
-        .filter((d) => !!d.text)
-        .map((d) => `${d.label}: ${d.text}`)
-        .join('\n'),
+  const fit = ((useWatch({ control, name: 'fit' }) ?? '') as string).trim();
+  const aspectText = useMemo(() => {
+    const lines = aspects
+      .map((d) => ({ label: detailKeyLabel(d.key), text: (d.text ?? '').trim() }))
+      .filter((d) => !!d.text)
+      .map((d) => `${d.label}: ${d.text}`);
+    return [...(fit ? [`fit: ${fit}`] : []), ...lines].join('\n');
+  }, [aspects, fit]);
+  /**
+   * КАРТИНКИ АСПЕКТОВ НЕ ЕДУТ (WAVE2 п.6). `from construction ▸` материализует ТОЛЬКО ТЕКСТ; у
+   * аспекта могут быть приколотые картинки (`details[].mediaIds`), и молчание о них читалось бы
+   * как «поехали вместе со словами». Число считается здесь дёшево, из той же формы, и говорится
+   * состоянием у самой двери — только пока такие картинки есть.
+   */
+  const aspectPictures = useMemo(
+    () => aspects.reduce((n, d) => n + (d.mediaIds?.length ?? 0), 0),
     [aspects],
   );
   /** Перезапись НЕПУСТОГО описания спрашивается: чужой текст исчезает без единого следа (PRODUCT.md). */
@@ -695,21 +668,21 @@ export function ReferencesSection({
   const [drawOpen, setDrawOpen] = useState(false);
 
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
-  const nothingToClear =
-    members.length === 0 && refOf.size === 0 && !(garment.field.value ?? '').trim();
+  const garmentChars = ((garment.field.value ?? '') as string).trim().length;
+  const nothingToClear = refOf.size === 0 && garmentChars === 0 && !flatSend.on;
 
   return (
     <Section
       title='input — references'
-      question='— what the model is shown when it draws a flat'
+      question='— what the model is shown when it draws a flat, and the run itself'
       action={
         <span className='flex items-center gap-3'>
           <Text size='micro' variant='label' component='span'>
             {members.length} picture{members.length === 1 ? '' : 's'} · {inPrompt} in the prompt
           </Text>
-          {/* CLEAR СНОСИТ ВЕСЬ ВХОД (R-15) и потому спрашивает: под ним N сетевых снятий ролей
-              вместе с записками. Кнопка стоит у заголовка блока — она про блок целиком, а не про
-              одну ячейку. */}
+          {/* CLEAR ЧИСТИТ ПРОМПТ — слова, роли, переключатель плит — и спрашивает, называя объём:
+              под ним N сетевых снятий ролей. Картинки остаются (SPEC п.8). Кнопка стоит у
+              заголовка блока — она про блок целиком, а не про одну ячейку. */}
           {!readOnly && (
             <Button
               size='xs'
@@ -765,7 +738,7 @@ export function ReferencesSection({
                   size='xs'
                   data-take-aspects=''
                   onClick={takeAspects}
-                  title='fill this description from the CONSTRUCTION aspects — one line per filled aspect, in the order they are described there'
+                  title='fill this description from CONSTRUCTION — fit first, then one line per filled aspect, in the order they are described there'
                 >
                   from construction ▸
                 </Button>
@@ -774,7 +747,7 @@ export function ReferencesSection({
                    нельзя вообще», и человек идёт искать её в CONSTRUCTION. */
                 <InertDoor
                   label='from construction ▸'
-                  reason='no construction aspect is filled in yet — describe the garment aspect by aspect in CONSTRUCTION first'
+                  reason='no construction text yet — fill FIT in GENERAL INFORMATION or describe the garment aspect by aspect in CONSTRUCTION first'
                 />
               )}
             </span>
@@ -801,8 +774,19 @@ export function ReferencesSection({
           className='resize-none'
         />
         <Text size='micro' variant='label' className='mt-px'>
-          one description for the whole garment. each picture below adds a line about itself.
+          one description for the whole garment — the only words the model reads, beside the roles
+          of the pictures below.
         </Text>
+        {/* КАРТИНКИ АСПЕКТОВ НЕ ЕДУТ, И ЭТО СКАЗАНО СОСТОЯНИЕМ (WAVE2 п.6) — только пока они есть:
+            постоянная оговорка на каждой чистой карточке была бы шумом. */}
+        {aspectPictures > 0 && (
+          <Text size='micro' variant='label' component='p' data-aspect-pictures={aspectPictures}>
+            from construction ▸ takes the words only — the {aspectPictures} picture
+            {aspectPictures === 1 ? '' : 's'} pinned to the aspects {aspectPictures === 1 ? 'does' : 'do'}{' '}
+            not travel. Add {aspectPictures === 1 ? 'it' : 'them'} as references here if the model
+            should see {aspectPictures === 1 ? 'it' : 'them'}.
+          </Text>
+        )}
       </div>
 
       <div>
@@ -827,19 +811,15 @@ export function ReferencesSection({
               full={mediaById.get(mediaId)}
               role={refOf.get(mediaId)?.role ?? ''}
               number={promptNumber.get(mediaId)}
-              note={refOf.get(mediaId)?.note ?? ''}
               /* J-9: УКАЗАТЕЛЬ И РАЗРЕШЁННОЕ ПО НЕМУ ИМЯ — ДВА РАЗНЫХ ФАКТА, и ячейке нужны оба.
                  По имени она печатает `detail · collar`; по указателю РАЗЛИЧАЕТ два молчания —
                  «строка старше поля» (0) и «слот удалён» (id есть, слота нет), — которые зовут
                  к одной и той же двери, но врать друг за друга не должны. */
               detailSlotId={refOf.get(mediaId)?.detailSlotId ?? 0}
               detailName={detailNameOf(refOf.get(mediaId)?.detailSlotId ?? 0)}
-              onNameDetail={() =>
-                setNamingDetail({ mediaId, note: refOf.get(mediaId)?.note ?? '' })
-              }
+              onNameDetail={() => setNamingDetail({ mediaId })}
               readOnly={readOnly}
               onRole={(role) => setRole(mediaId, role)}
-              onNote={(note) => commitNote(mediaId, note)}
               onRemove={() => setPendingRemove(mediaId)}
               onSplit={() => {
                 const full = mediaById.get(mediaId);
@@ -972,6 +952,14 @@ export function ReferencesSection({
         firstNumber={inPrompt + 1}
         referenceMediaNumbers={promptNumber}
       />
+      {/* ═══ ПОДВАЛ: САМ ПРОГОН (SPEC п.7) ═══════════════════════════════════════════════════════
+          Виды, раскладка, GENERATE и дверь «what the model gets ▸» стоят ЗДЕСЬ, ниже плит, — одна
+          секция на вход и прогон вместо двух подряд. Отдельным компонентом, чтобы его хуки не
+          вмешивались в порядок хуков этой секции.
+          ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ (`collapsible`/`Fold`): ниже смонтирован приёмник рекола
+          `RecalledRunPrompt`, при размонтировании реестр стирает выбор (`recalled.delete`), и жест
+          теряется молча. */}
+      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Панели «recalled — run N» с описью снимка здесь больше НЕТ: жест
           на строке истории просто добавляет картинки и тексты того прогона в обычные референсы
@@ -1008,28 +996,29 @@ export function ReferencesSection({
         />
       )}
 
-      {/* ВОПРОС ПЕРЕД СНОСОМ ВХОДА (R-15) — с числами и с границей честности: роли и записки
-          уходят с сервера СЕЙЧАС, строки и описание — с карточки при её сохранении. */}
+      {/* ВОПРОС ПЕРЕД ЧИСТКОЙ ПРОМПТА (SPEC п.8) — объём числами, и граница честности: роли
+          уходят с сервера СЕЙЧАС, слова — с карточки при её сохранении. Картинки остаются. */}
       <ConfirmationModal
         open={clearAsk}
         onOpenChange={(open) => !open && setClearAsk(false)}
         onConfirm={runClear}
         onCancel={() => setClearAsk(false)}
-        title='clear the input'
-        confirmLabel='clear it all'
+        title='clear the prompt'
+        confirmLabel='clear the prompt'
         width='sm'
       >
         <div className='space-y-2'>
-          <Text size='control'>
-            This takes out all {members.length} picture{members.length === 1 ? '' : 's'}
+          <Text size='control' data-clear-scope={`${garmentChars}:${inPrompt}`}>
+            clears {garmentChars > 0 ? `the words (${garmentChars} characters)` : 'the words'}
             {inPrompt > 0
-              ? ` — ${inPrompt} of them in the prompt, with their notes —`
-              : ''}{' '}
-            and clears the garment description.
+              ? ` and ${inPrompt} reference role${inPrompt === 1 ? '' : 's'}`
+              : ' — no reference carries a role'}
+            {flatSend.on ? ', and turns “also send the flat slots” off' : ''}. The pictures stay.
           </Text>
           <Text size='control'>
-            Roles and notes are removed from the server now, one by one. The picture rows and the
-            description leave the card when you next save it. The moodboard is not touched.
+            Roles are removed from the server now, one by one; the words leave the card when you
+            next save it. The {members.length} picture{members.length === 1 ? ' stays' : 's stay'} in
+            the input, out of the prompt until given a role again. The moodboard is not touched.
           </Text>
         </div>
       </ConfirmationModal>
@@ -1041,9 +1030,8 @@ export function ReferencesSection({
           тех же слов заводить нельзя. */}
       <DetailNamingModal
         open={namingDetail != null}
-        initialNote={namingDetail?.note ?? ''}
         onCancel={() => setNamingDetail(null)}
-        onConfirm={async (name, comment) => {
+        onConfirm={async (name) => {
           const target = namingDetail;
           setNamingDetail(null);
           if (!target) return;
@@ -1085,29 +1073,10 @@ export function ReferencesSection({
           // Ноль сюда доехать может только если сервер завёл слот и не назвал его id — состояние,
           // которого контракт не допускает. Проводом это читается как «оставь связь как была», то
           // есть деградация до вчерашнего поведения, а не порча чужой связи.
-          writeRef(target.mediaId, DETAIL_VIEW, comment, slotId);
-          showMessage(`detail “${name}” added — tick it in generation — flat`, 'success');
+          writeRef(target.mediaId, DETAIL_VIEW, slotId);
+          showMessage(`detail “${name}” added — tick it in the flat run below`, 'success');
         }}
       />
-
-      <ConfirmationModal
-        open={pendingRoleClear != null}
-        onOpenChange={(open) => !open && setPendingRoleClear(null)}
-        onConfirm={() => {
-          const mediaId = pendingRoleClear;
-          setPendingRoleClear(null);
-          if (mediaId != null) writeRef(mediaId, '', '');
-        }}
-        onCancel={() => setPendingRoleClear(null)}
-        title='take it out of the prompt'
-        confirmLabel='take it out'
-        width='sm'
-      >
-        <Text size='control'>
-          The note on this picture goes with the role — the two are one row, and there is nowhere to
-          keep a note for a picture the prompt never sees. Copy it first if you want to keep it.
-        </Text>
-      </ConfirmationModal>
 
       <ConfirmationModal
         open={pendingRemove != null}
@@ -1120,7 +1089,7 @@ export function ReferencesSection({
       >
         <div className='space-y-2'>
           <Text size='control'>
-            The picture, its role and its note go together — a reference is one thing.
+            The picture and its role go together — a reference is one thing.
           </Text>
           {pendingRuns > 0 && (
             <Text size='control'>
@@ -1405,13 +1374,11 @@ function ReferenceCell({
   full,
   role,
   number,
-  note,
   detailSlotId,
   detailName,
   onNameDetail,
   readOnly,
   onRole,
-  onNote,
   onRemove,
   onSplit,
   splitOffer,
@@ -1422,7 +1389,6 @@ function ReferenceCell({
   full?: common_MediaFull;
   role: string;
   number?: number;
-  note: string;
   /** `design_bench_slot(id)` этой детали, 0 = не сказано (строка старше поля или слот удалён). */
   detailSlotId: number;
   /** Имя, разрешённое по указателю из живого верстака, или null — если разрешить не удалось. */
@@ -1431,7 +1397,6 @@ function ReferenceCell({
   onNameDetail: () => void;
   readOnly: boolean;
   onRole: (role: string) => void;
-  onNote: (note: string) => void;
   onRemove: () => void;
   onSplit: () => void;
   /**
@@ -1445,30 +1410,7 @@ function ReferenceCell({
   onCrop: () => void;
   splitPending: boolean;
 }) {
-  const noteId = useId();
   const url = thumbUrl(full);
-  const off = !role;
-
-  /**
-   * ЧЕРНОВИК ЗАПИСКИ ЖИВЁТ В ЯЧЕЙКЕ, а уходит на сервер по потере фокуса.
-   *
-   * Записка — это `design_reference.note`, то есть СЕТЕВОЙ upsert, а не поле формы: запрос на
-   * каждое нажатие клавиши стоил бы и денег, и гонки, в которой выигрывает самый медленный ответ.
-   * Черновик пере-синхронизируется по `note` из полосы (ключ ниже), поэтому пришедший ответ
-   * сервера — и чужая правка из соседней вкладки — видны сразу, а не после перезагрузки.
-   */
-  const [draft, setDraft] = useState(note);
-  const [seen, setSeen] = useState(note);
-  // Синхронизация по ИЗМЕНЕНИЮ ПРИШЕДШЕГО, а не по расхождению с ним. Разница видна ровно на
-  // отказе: сравнивая с `note`, черновик откатывался бы к старому тексту сразу после потери
-  // фокуса — то есть набранное исчезало бы с экрана раньше, чем сервер вообще ответил, и
-  // навсегда, если ответ был ошибкой. Сравнение с ПРЕДЫДУЩИМ значением полосы этого не делает:
-  // не изменилось на проводе — не трогаем набранное.
-  if (seen !== note) {
-    setSeen(note);
-    setDraft(note);
-  }
-
   const label = `reference ${number ?? mediaId}`;
 
   return (
@@ -1533,7 +1475,7 @@ function ReferenceCell({
                 pending: splitPending,
                 ariaLabel: `crop ${label} in place`,
                 title:
-                  'crop — cut one frame out of this picture and put it in this row, with the same role and note',
+                  'crop — cut one frame out of this picture and put it in this row, with the same role',
               }
             : undefined
         }
@@ -1541,8 +1483,8 @@ function ReferenceCell({
           !readOnly
             ? {
                 onClick: onRemove,
-                ariaLabel: `remove ${label} — picture, role and note together`,
-                title: 'remove this reference — picture, role and note together',
+                ariaLabel: `remove ${label} — picture and role together`,
+                title: 'remove this reference — picture and role together',
               }
             : undefined
         }
@@ -1559,9 +1501,10 @@ function ReferenceCell({
         )}
       </PictureTile>
 
-      {/* ПРАВАЯ КОЛОНКА РОСТОМ В КАДР: строка роли фиксированной высоты, записка занимает
-          остаток. Иначе поле записки росло бы по тексту и рвало ряд грида. */}
-      <div className='grid h-[200px] min-w-0 grid-rows-[26px_1fr] gap-1.5'>
+      {/* ПРАВАЯ КОЛОНКА: одна строка — роль. Записки «что эта картинка добавляет» здесь больше
+          нет (SPEC п.10, CONTRACT §F): один общий текст промпта — garment description выше.
+          Поле на проводе живо и не трогается — см. `writeRef`. */}
+      <div className='flex h-[200px] min-w-0 flex-col gap-1.5'>
         {/* ═══ РОЛЬ, А У ДЕТАЛИ — ЕЁ ИМЯ (J-9) ══════════════════════════════════════════════════
             Владелец: «когда мы добавляем в INPUT — REFERENCES detail у нас должен в плейсхолдере
             разметки меняться название на то что мы вписали».
@@ -1612,34 +1555,6 @@ function ReferenceCell({
           )}
         </div>
 
-        <label htmlFor={noteId} className='sr-only'>
-          what this picture adds
-        </label>
-        {/* ЗАПИСКА ЖИВЁТ НА СТРОКЕ РОЛИ, поэтому без роли её негде хранить — и поле говорит это
-            словами вместо того, чтобы принять текст и потерять его. Это не наш выбор интерфейса:
-            строка полосы И ЕСТЬ существование роли (см. `DesignReference`). */}
-        <Textarea
-          name={`ref-note-${mediaId}`}
-          id={noteId}
-          // ЯКОРЬ ДЛЯ ПРОБЫ, а не украшение: примитив `Textarea` кладёт `name` в `id`, поэтому
-          // адресовать записку по имени поля невозможно, а `useId` от прогона к прогону разный.
-          data-ref-note={mediaId}
-          // ЗАМОК ОДИН — «нет роли» (S-6): записка живёт на строке роли, и у носителя роли она
-          // пишется всегда, держит ли карточка строку или нет. Второй замок `!onCard` был тихой
-          // половиной снятой плашки «off the card» — отказом без слов при живом плейсхолдере.
-          disabled={readOnly || off}
-          value={draft}
-          maxLength={500}
-          autoGrow={false}
-          placeholder={
-            off ? 'give it a role first — the note rides with it' : '+ what this picture adds'
-          }
-          className='h-full resize-none'
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
-          onBlur={() => {
-            if (draft !== note) onNote(draft);
-          }}
-        />
       </div>
     </div>
   );
@@ -1659,36 +1574,28 @@ function ReferenceCell({
  */
 function DetailNamingModal({
   open,
-  initialNote,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
-  initialNote: string;
   onCancel: () => void;
-  onConfirm: (name: string, comment: string) => void;
+  onConfirm: (name: string) => void;
 }) {
   const [name, setName] = useState('');
-  const [comment, setComment] = useState('');
   const [seenOpen, setSeenOpen] = useState(false);
-
-  // Поля сбрасываются на КАЖДОЕ открытие, а не на монтировании: диалог живёт весь сеанс, и
-  // второй референс унаследовал бы имя первого.
   if (open !== seenOpen) {
     setSeenOpen(open);
-    if (open) {
-      setName('');
-      setComment(initialNote);
-    }
+    if (open) setName('');
   }
-
   const ready = name.trim().length > 0;
-
+  /* Поле «comment — goes to the model with the picture» снято вместе с запиской референса
+     (SPEC п.10): оно и было той же записью `design_reference.note`. Слова модели — в garment
+     description, один текст на весь промпт. */
   return (
     <ConfirmationModal
       open={open}
       onOpenChange={(next) => !next && onCancel()}
-      onConfirm={() => ready && onConfirm(name.trim(), comment.trim())}
+      onConfirm={() => ready && onConfirm(name.trim())}
       onCancel={onCancel}
       title='name this detail'
       confirmLabel='add the detail'
@@ -1710,23 +1617,6 @@ function DetailNamingModal({
             autoFocus
             placeholder='collar, patch pocket, cuff…'
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-          />
-        </div>
-        <div className='space-y-1'>
-          <label htmlFor='detail-comment' className='block'>
-            <Text size='nano' variant='label' component='span' className='uppercase'>
-              comment — optional, goes to the model with the picture
-            </Text>
-          </label>
-          <Textarea
-            name='detail-comment'
-            id='detail-comment'
-            value={comment}
-            maxLength={500}
-            autoGrow={false}
-            placeholder='+ what this picture adds'
-            className='h-20 resize-none'
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setComment(e.target.value)}
           />
         </div>
         <Text size='nano' variant='label' component='p'>

@@ -2,7 +2,7 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useState } from 'react';
 
 import { EmptyStudio } from './empty-studio';
-import { GenerationForm, hasAnyPictures, hasFlatRun } from './generation-form';
+import { hasAnyPictures } from './generation-form';
 import { GenerationHistory } from './generation-history';
 
 /**
@@ -38,17 +38,14 @@ export function GenerationStudio({
   techCardId: number;
   disabled?: boolean;
 }) {
-  /* Складывания у формы флэта больше нет (D-1) — вместе с ним ушло и состояние, которым эта
-     студия им управляла. Осталось ровно то, что решает СОСТАВ экрана, а не позу формы. */
+  /* ⚠ ФОРМЫ ФЛЭТА ЗДЕСЬ БОЛЬШЕ НЕТ (SPEC п.7). Органы прогона — чипы видов, раскладка, ряд
+     GENERATE с дверью «what the model gets ▸» — стоят подвалом секции INPUT — REFERENCES
+     (`../flat-run-row.tsx`), которая монтируется над этой студией в `studio-tab.tsx`. Студии
+     осталось решать ровно одно: лента истории или пустой стенд. */
   const anyContent = hasAnyPictures(band);
 
   return (
     <>
-      <GenerationForm
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-      />
       {anyContent ? (
         /* ═══ ЛЕНТА ФЛЭТА ОТКРЫВАЕТСЯ НА ФЛЭТАХ И РАЗВЁРНУТОЙ (E-14, и НЕ E-21…E-23) ══════════
          *
@@ -72,11 +69,9 @@ export function GenerationStudio({
           defaultOpen
         />
       ) : (
-        /* ⚠ ПУСТОЙ СТЕНД БОЛЬШЕ НЕ ЗАВИСИТ ОТ ПОЗЫ ФОРМЫ (D-1). Он рисовался «когда форма
-           сложена», а формы, которая складывается, больше нет: условием осталось то, чем он и
-           был — на карточке НЕЧЕГО показывать. Дверь `GENERATE ▸` ему теперь не нужна: форма
-           стоит тут же, развёрнутая, и вести к ней нажатием значило бы вести к тому, что уже
-           видно. */
+        /* ПУСТОЙ СТЕНД рисуется, когда на карточке НЕЧЕГО показывать. Дверь `GENERATE ▸` ему не
+           нужна: ряд GENERATE стоит в подвале INPUT — REFERENCES прямо над ним, и вести к нему
+           нажатием значило бы вести к тому, что уже видно. */
         <EmptyStudio band={band} techCardId={techCardId} disabled={disabled} />
       )}
     </>

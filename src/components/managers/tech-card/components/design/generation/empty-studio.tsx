@@ -114,7 +114,7 @@ export function EmptyStudio({
         <Text size='micro' variant='label' component='span'>
           {onGenerate
             ? 'two equal doors — nothing on this card requires a run'
-            : 'nothing on this card requires a run — the form above is the door'}
+            : 'nothing on this card requires a run — GENERATE stands in input — references above'}
         </Text>
       </div>
     </Section>
