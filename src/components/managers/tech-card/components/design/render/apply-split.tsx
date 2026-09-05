@@ -1,11 +1,13 @@
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
 import { cardOutputRows, pictureRepresentation, type Representation } from '../bench-kinds';
+import { InertDoor } from '../bench-slot';
+import { AskModal } from '../core';
 import { cropFamilies } from '../generation/composite';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
@@ -210,6 +212,9 @@ export function ApplySplitDoor({
   disabled,
   /** Как этот экран зовёт то, что кладёт в сторону, — «render» или «flat». Для слов вопроса. */
   noun,
+  refusal = null,
+  className,
+  doorClassName,
 }: {
   techCardId: number;
   sides: BenchSide[];
@@ -218,6 +223,27 @@ export function ApplySplitDoor({
   colorwayId: number;
   disabled?: boolean;
   noun: string;
+  /**
+   * ═══ ОТКАЗ ВЫЗЫВАЮЩЕГО — ДВЕРЬ ПОГАШЕНА, ПРИЧИНА НАПЕЧАТАНА, НА ПРОВОД НЕ УХОДИТ НИЧЕГО ═════
+   *
+   * Заведён для третьего хозяина этой двери — раскрытой колоды в `outputs.tsx` (Ф4). У него есть
+   * два отказа, которых у полос входа нет ПО ПОСТРОЕНИЮ (полоса читает верстак своего же
+   * колорвея, лист там чужим быть не может):
+   *   · секция выходов не сужена колорвеем — верстака, в который «надо», не существует как факта;
+   *   · лист принадлежит ДРУГОМУ колорвею, чем слоты под секцией, — до починки круга 19 дверь
+   *     ТИХО ЗАПОЛНЯЛА ЧУЖОЙ ВЕРСТАК (дефект L-1 под другим именем): стороны наполнялись у другого
+   *     цвета, экран не менялся, следа не оставалось даже в виде отказа.
+   *
+   * Отказ решается ВЫЗЫВАЮЩИМ, потому что только он знает, чем сужена его секция; дверь при
+   * заданном отказе рисуется `InertDoor` со СТРОКОЙ причины (`Reason`, `reasonVisible`) — колода
+   * раскрыта, и исчезнувшая дверь читалась бы как пропажа, а серая без слов — как поломка. Пустой
+   * `pieces` при заданном отказе тоже рисуется: причина важнее состава.
+   */
+  refusal?: string | null;
+  /** Класс обёртки — хозяин ряда дверей задаёт ячейке свою ширину (`flex-1 min-w-0`). */
+  className?: string;
+  /** Класс самой кнопки — ряд дверей выходов держит все свои двери одной метрикой (`h-5`, F-9). */
+  doorClassName?: string;
 }): JSX.Element | null {
   const writes = useDesignWrites(techCardId);
   const [asking, setAsking] = useState(false);
@@ -233,7 +259,20 @@ export function ApplySplitDoor({
   /** Сколько сторон ТЕРЯЮТ то, что на них стоит. Ровно это и есть разрушительная половина жеста. */
   const losing = steps.filter((s) => s.displaces);
 
-  if (!pieces.length) return null;
+  if (!pieces.length && !refusal) return null;
+
+  /* ОТКАЗ ХОЗЯИНА — дверь стоит, но мертва, и говорит почему. Ни одной записи: `run` ниже
+     недостижим, потому что живой кнопки нет. */
+  if (refusal) {
+    return (
+      <InertDoor
+        className={cn('[&>button]:w-full', className)}
+        label='apply splitted'
+        reason={refusal}
+        reasonVisible
+      />
+    );
+  }
 
   const run = async () => {
     if (busy) return;
@@ -275,14 +314,14 @@ export function ApplySplitDoor({
   const losingWords = losing.map((s) => viewLabel(s.view)).join(', ');
 
   return (
-    <div className='flex flex-col gap-1' data-apply-split={pieces.length}>
+    <div className={cn('flex flex-col gap-1', className)} data-apply-split={pieces.length}>
       {/* `w-full` — та же ширина, что у соседних дверей полосы: все они — кнопки `xs` во всю
           ячейку, на одной линии (F-14). Потеря названа на самой двери, до нажатия, подсказкой;
           вопрос — между нажатием и записью. */}
       <Button
         variant='secondary'
         size='xs'
-        className='w-full'
+        className={cn('w-full', doorClassName)}
         loading={busy}
         disabled={disabled}
         data-apply-split-door=''
@@ -297,38 +336,48 @@ export function ApplySplitDoor({
         apply splitted
       </Button>
 
-      <ConfirmationModal
+      {/* ═══ ВОПРОС ПЕЧАТАЕТ ОБЩИЙ ОРГАН (Ф4) ═══════════════════════════════════════════════════
+          `AskModal` из `../core` — ОДИН принтер разрушительного вопроса на всю студию. Он только
+          рисует: числа и имена сторон посчитаны ВЫШЕ, `applyPlan`, — тем же кодом, что исполняет
+          жест, — и читаются вопросом и записью из одного `steps`. Второго калькулятора здесь нет.
+          Текст вопроса — посимвольно прежний. `note={null}`: строка «there is no undo» здесь была
+          бы ложью — вопрос сам говорит, что ничего не удаляется и всё можно вернуть по стороне.
+          ⚠ `sentence` встаёт ВНУТРЬ `<Text component='p'>` органа, поэтому два абзаца — это два
+          блочных `span`, а не два `p`: `p` внутри `p` браузер разрывает. */}
+      <AskModal
         open={asking}
-        onOpenChange={setAsking}
+        onClose={() => setAsking(false)}
         title='replace the whole input with this split?'
-        confirmLabel='replace the input'
-        onConfirm={() => {
+        verb='replace the input'
+        note={null}
+        onDo={() => {
           setAsking(false);
           void run();
         }}
-      >
-        <div className='flex flex-col gap-2'>
-          <Text size='control' component='p' className='normal-case'>
-            {places.length > 0 && (
-              <>
-                <b>{placeWords}</b> take the pieces of this split.{' '}
-              </>
-            )}
-            {clears.length > 0 && (
-              <>
-                <b>{clearWords}</b> {clears.length === 1 ? 'is' : 'are'} emptied — the split does not
-                name {clears.length === 1 ? 'that side' : 'those sides'}.
-              </>
-            )}
-          </Text>
-          <Text size='control' component='p' className='normal-case'>
-            {losing.length} of the four sides {losing.length === 1 ? 'holds a' : 'hold a'} {noun}{' '}
-            right now, and {losing.length === 1 ? 'it goes' : 'they go'} out of the input:{' '}
-            {losing.map((s) => viewLabel(s.view)).join(', ')}. Nothing is deleted — every picture
-            stays on the card and can be put back one side at a time.
-          </Text>
-        </div>
-      </ConfirmationModal>
+        sentence={
+          <>
+            <span className='block normal-case'>
+              {places.length > 0 && (
+                <>
+                  <b>{placeWords}</b> take the pieces of this split.{' '}
+                </>
+              )}
+              {clears.length > 0 && (
+                <>
+                  <b>{clearWords}</b> {clears.length === 1 ? 'is' : 'are'} emptied — the split does
+                  not name {clears.length === 1 ? 'that side' : 'those sides'}.
+                </>
+              )}
+            </span>
+            <span className='mt-2 block normal-case'>
+              {losing.length} of the four sides {losing.length === 1 ? 'holds a' : 'hold a'} {noun}{' '}
+              right now, and {losing.length === 1 ? 'it goes' : 'they go'} out of the input:{' '}
+              {losing.map((s) => viewLabel(s.view)).join(', ')}. Nothing is deleted — every picture
+              stays on the card and can be put back one side at a time.
+            </span>
+          </>
+        }
+      />
 
       {/* ⚠ ОТЧЁТ ОБ ОТКАЗЕ СТОИТ В КОЛОНКЕ ШИРИНОЙ 132px, И ЭТО ОПРЕДЕЛЯЕТ ЕГО ФОРМУ (F-14).
           Здесь стояли четыре предложения в `CalloutBox` — на ячейке полосы они вставали красной

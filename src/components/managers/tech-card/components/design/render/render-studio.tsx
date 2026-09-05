@@ -7,7 +7,7 @@ import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
 import { FabricRenderSlots } from './fabric-render-slots';
-import { GenerateRow } from './generate-row';
+import { GenerateRow, RunRefusal } from './generate-row';
 import {
   hexIsPaintable,
   madeOfLine,
@@ -319,6 +319,11 @@ export function RenderStudio({
              `onGoToKind` её нет вовсе — кнопка, которой некуда вести, хуже её отсутствия. */
           onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
         />
+
+        {/* ОТКАЗ ПОСЛЕДНЕГО НАЖАТИЯ, ДОСЛОВНО И СТОЙКО (Ф4). Этот экран его не рисовал вовсе —
+            отказ жил секунды всплывашки, а деньги при нём двигаются. Стоит НАД рядом GENERATE,
+            который его и снимает; форма общая с 3D — `RunRefusal`. */}
+        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
 
         {/* СТРОКА ИНВЕНТАРЯ НАЗЫВАЕТ И ТКАНЬ (H-12). «made of pattern 2» — вторая половина работы
             снесённого заголовка-заявления: правда прогона стоит в двух шагах от денег, там, где на

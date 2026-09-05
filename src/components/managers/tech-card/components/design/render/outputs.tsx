@@ -3,7 +3,6 @@ import { cn } from 'lib/utility';
 import { Fragment, useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Pill } from 'ui/components/pill';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Placeholder } from 'ui/components/placeholder';
@@ -31,7 +30,7 @@ import {
   viewLabel,
   type SilhouetteView,
 } from '../views';
-import { applyPlan, type SplitPiece } from './apply-split';
+import { ApplySplitDoor, type SplitPiece } from './apply-split';
 import {
   SELECT_MARK_NOT_STATED,
   liveRunsOfKind,
@@ -291,29 +290,15 @@ export function OutputsSection({
   const [openDeck, setOpenDeck] = useState<number | null>(null);
 
   /**
-   * ═══ ДВЕРЬ `set` РАСКРЫТОЙ КОЛОДЫ — ТРИ СОСТОЯНИЯ, ТРИ ЗНАЧЕНИЯ (F-7) ═════════════════════
+   * ═══ ДВЕРЬ РАСКРЫТОЙ КОЛОДЫ БОЛЬШЕ НЕ ДЕРЖИТ СВОЕГО СОСТОЯНИЯ (F-7 → Ф4) ═════════════════════
    *
-   * `applyingRoot` — какой лист сейчас пишется (занятость АДРЕСНАЯ: общий `isPending` сказал бы
-   * «saving» на всех сразу); `askingRoot` — какой лист ждёт подтверждения; `applyFailed` —
-   * стороны, которые сервер не принял.
-   *
-   * ⚠ ХУКИ ВЫШЕ РАННЕГО ВЫХОДА, как и все остальные в этом файле (React #310).
+   * Здесь стояли `applyingRoot` / `askingRoot` / `applyFailed` — занятость, вопрос и отчёт
+   * ТРЕТЬЕГО написания глагола `set`. Теперь дверь — `ApplySplitDoor` из `./apply-split`, тот же
+   * орган, что на полосах входа флэта и 3D; занятость, вопрос и отчёт живут в нём. Отчёт при этом
+   * по-прежнему «носит имя своей колоды»: дверь смонтирована ВНУТРИ раскрытой колоды и уходит
+   * вместе с ней — то самое правило «строка отчёта, севшая на чужую строку, не путает её, а
+   * СТИРАЕТ», только теперь оно держится монтированием, а не ключом `root`.
    */
-  const [applyingRoot, setApplyingRoot] = useState(0);
-  const [askingRoot, setAskingRoot] = useState(0);
-  /**
-   * ⚠ ОТЧЁТ ОБ ОТКАЗЕ НОСИТ ИМЯ СВОЕЙ КОЛОДЫ, А НЕ ВИСИТ НАД ПОЛОСОЙ САМ ПО СЕБЕ.
-   *
-   * Без `root` он переживал и складывание своей колоды, и раскрытие ЧУЖОЙ: человек видел «press
-   * set again» там, где кнопки `set` уже нет, а после открытия соседнего листа тот же красный
-   * текст читался как отказ ЭТОГО листа и толкал применить не тот разрез. Это ровно тот класс,
-   * где «строка отчёта, севшая на чужую строку, не путает её, а СТИРАЕТ»: отчёт обязан исчезать
-   * вместе с тем, о чём он.
-   */
-  const [applyFailed, setApplyFailed] = useState<{
-    root: number;
-    list: { view: string; reason: string }[];
-  }>({ root: 0, list: [] });
 
   /**
    * ═══ ДВЕРЬ «ПРИНЕСТИ СВОЮ МОДЕЛЬ» — ДВА УЗЛА В РАЗНЫХ МЕСТАХ ДОКУМЕНТА (E-13) ══════════════
@@ -568,24 +553,19 @@ export function OutputsSection({
   };
 
   /**
-   * ═══ `set` — ВХОД РЕНДЕРА СТАНОВИТСЯ РОВНО ЭТИМ РАЗРЕЗОМ (F-7) ════════════════════════════
+   * ═══ «APPLY SPLITTED» — ВХОД РЕНДЕРА СТАНОВИТСЯ РОВНО ЭТИМ РАЗРЕЗОМ (F-7 → Ф4) ═════════════
    *
    * Владелец, дословно: «когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
-   * RENDER SLOTS и ставить те что в сплите».
+   * RENDER SLOTS и ставить те что в сплите». Глагол при этом был ТРЕТЬИМ написанием одного
+   * жеста — `set` здесь против «apply splitted» на двух полосах входа, со своей модалкой и своим
+   * отчётом. Контракт §F: «два слова `apply splitted`/`set` (остаётся одно)». Остался общий орган:
+   * дверь, вопрос, запись и отчёт — `ApplySplitDoor` из `./apply-split`; здесь считаются только
+   * АДРЕС верстака и ДВА ОТКАЗА, которых у полос входа нет по построению.
    *
-   * ⚠ ПЛАН СЧИТАЕТ ЧУЖОЙ МОДУЛЬ, И ЭТО РЕШЕНИЕ. `applyPlan` живёт в `render/apply-split.tsx`
-   * вместе с дверью «apply splitted» двух полос входа — тот же глагол, те же три правила
-   * (названную сторону ЗАНЯТЬ, неназванную занятую ОЧИСТИТЬ, неназванную пустую НЕ ТРОГАТЬ) и та
-   * же нетривиальная причина: `slot_rev` — CAS-токен, и буквальное «сначала снять все, потом
-   * положить» даёт ДВЕ записи на сторону, из которых вторая отказывает. Второе написание этих
-   * правил разошлось бы с первым на первой же правке.
-   *
-   * ⚠ БЕЗ `slotId`. `view_key` и `slot_id` — ЧЛЕНЫ ОДНОГО `oneof`, и ноль в proto-JSON это
-   * ЗАДАННОЕ поле: сервер отвечает «oneof … is already set» и не пишет НИ ОДНОЙ стороны. Форма
-   * тела здесь ровно та же, что у `markInto` выше и у `bench.tsx:95`.
-   *
-   * ⚠ ОТКАЗ ОДНОЙ СТОРОНЫ НЕ ОСТАНАВЛИВАЕТ ОСТАЛЬНЫЕ: батча у глагола верстака нет, стороны
-   * независимы, и брошенный цикл оставляет БОЛЬШЕ несогласованного, а не меньше.
+   * Правила записи живут там же и не повторяются: три правила плана (названную сторону ЗАНЯТЬ,
+   * неназванную занятую ОЧИСТИТЬ, неназванную пустую НЕ ТРОГАТЬ), `slot_rev` как CAS без «снять
+   * потом положить», `viewKey` без `slotId` (члены одного `oneof`), `kind` всегда спеллится, отказ
+   * одной стороны не останавливает остальные.
    *
    * ═══ АДРЕСУЕТСЯ ВЕРСТАК СЕКЦИИ, А НЕ ВЕРСТАК ЛИСТА (F-7, круг 19) ═════════════════════════
    *
@@ -609,59 +589,31 @@ export function OutputsSection({
    *     «надо», не существует как факта, и выбрать его за человека нельзя;
    *   · лист принадлежит ДРУГОМУ колорвею — сервер отверг бы каждую сторону по
    *     `colorway_mismatch`, а до починки мы бы вместо этого тихо заполнили чужой верстак.
+   * Оба уезжают в `ApplySplitDoor` пропом `refusal`: при заданном отказе дверь погашена, причина
+   * напечатана строкой, и на провод не уходит ни одной записи. Порядок отказов — от общего к
+   * частному: карточка только читается / сервер молчит → верстак не назван → лист чужой → в разрезе
+   * нет ни одной стороны силуэта (куски — детали, а у детали нет слота).
    */
-  const setStepsFor = (
-    rootId: number,
-  ): { bench: number; steps: ReturnType<typeof applyPlan>; refusal: string } => {
-    const empty = { bench: 0, steps: [] as ReturnType<typeof applyPlan> };
+  const applyRefusalFor = (rootId: number): string | null => {
+    if (disabled)
+      return 'this card is read-only for you — putting the split into the sides is an edit of the card';
+    if (!speaks) return 'this server does not answer the design routes';
     const sheet = rowById.get(rootId)?.picture;
-    const pieces = piecesOf(rootId);
-    // Шагов нет по составу разреза — причину говорит прежняя фраза двери, не эта.
-    if (!sheet || !pieces.length) return { ...empty, refusal: '' };
+    if (!sheet) return null;
     if (colorwayId === undefined)
-      return {
-        ...empty,
-        refusal:
-          'this section is not narrowed to a colourway, and a render bench is addressed by one — ' +
-          'putting the split anywhere would fill a bench you are not looking at',
-      };
+      return (
+        'this section is not narrowed to a colourway, and a render bench is addressed by one — ' +
+        'putting the split anywhere would fill a bench you are not looking at'
+      );
     if (colorwayOf(sheet) !== colorwayOf({ colorwayId }))
-      return {
-        ...empty,
-        refusal:
-          'this sheet belongs to another colourway than the slots below, and a plate of one ' +
-          'colourway cannot stand in the bench of another — the server refuses it outright. ' +
-          'Open that colourway and set the split there.',
-      };
-    const bench = refColorwayFor('render', colorwayId);
-    return { bench, steps: applyPlan(threedSides(band, bench), pieces), refusal: '' };
-  };
-
-  const runSet = async (rootId: number) => {
-    const { bench, steps } = setStepsFor(rootId);
-    if (!steps.length) return;
-    setApplyingRoot(rootId);
-    setApplyFailed({ root: rootId, list: [] });
-    const failed: { view: string; reason: string }[] = [];
-    for (const step of steps) {
-      try {
-        await setBenchSlot.mutateAsync({
-          slot: { viewKey: step.view, kind: 'render', colorwayId: bench },
-          pictureId: step.pictureId,
-          expectedSlotRev: step.slotRev,
-        });
-      } catch (error) {
-        // Причина берётся С ОТКАЗА, а не сочиняется: слова сервера — единственное, из чего
-        // человек поймёт, повторять ему жест.
-        failed.push({
-          view: step.view,
-          reason: (error as Error)?.message?.trim() || 'the server refused without saying why',
-        });
-      }
-    }
-    setApplyingRoot(0);
-    // Полный успех не рапортуется: он ВИДЕН — стороны заполнились ниже, на этом же экране.
-    setApplyFailed({ root: rootId, list: failed });
+      return (
+        'this sheet belongs to another colourway than the slots below, and a plate of one ' +
+        'colourway cannot stand in the bench of another — the server refuses it outright. ' +
+        'Open that colourway and apply the split there.'
+      );
+    if (!piecesOf(rootId).length)
+      return 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.';
+    return null;
   };
 
   /**
@@ -793,7 +745,7 @@ export function OutputsSection({
            ДВА ЧЛЕНА ПРЕДИКАТА, И КАЖДЫЙ — СВОЙ ВОПРОС ЧЕЛОВЕКА:
              · «есть ли в этом файле несколько видов». Нет — резать нечего, и угол обещал бы кроп,
                которого этот экран не делает;
-             · «а не разрезан ли он уже». Разрезан — жест другой и слово другое (`expand` / `set`
+             · «а не разрезан ли он уже». Разрезан — жест другой и слово другое (`expand` / `apply splitted`
                в ряду дверей), а второй разрез того же листа завёл бы вторую колоду тех же видов.
 
            ⚠ ОБА ВОПРОСА ЗАДАЁТ ТЕПЕРЬ `pictureOffersSplit` (`render/model.ts`), И ЭТО НЕ КОСМЕТИКА.
@@ -903,7 +855,7 @@ export function OutputsSection({
                   · «в какой стороне это уже стоит» — читаемая плашка (Pill), не кнопка: сторону
                     освобождает ✕ на самой плите в FABRIC RENDER SLOTS, и второй глагол снятия
                     здесь был бы вторым реестром одного действия;
-                  · «этот лист уже разрезан — где куски» — `expand ▸`, а раскрытым `set` + `▾`
+                  · «этот лист уже разрезан — где куски» — `expand ▸`, а раскрытым `apply splitted` + `▾`
                     (F-7, разбор у самой ветки);
                   · «этот лист ещё не разрезан» — живой `split ▸`;
                   · «почему дверь мертва» — карточка только читается либо сервер молчит;
@@ -913,7 +865,7 @@ export function OutputsSection({
                 зелёным над отсутствующим узлом. Тот же приём, что у `ColorwaySelect`. */}
             {kind === 'render' &&
               (deck ? (
-                /* ═══ РАЗРЕЗАННЫЙ ЛИСТ: `expand ▸` ЗАКРЫТЫМ, `set` + `▾` РАСКРЫТЫМ (F-7) ═══════
+                /* ═══ РАЗРЕЗАННЫЙ ЛИСТ: `expand ▸` ЗАКРЫТЫМ, `apply splitted` + `▾` РАСКРЫТЫМ (F-7 → Ф4) ═══
                    Владелец, дословно: «для уже сплитнутых … мы не должны показывать кнопку SPLIT ▸
                    тк оно уже заслитано надо писать экспанд или что-то вроде того пока оно не
                    открыто а когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
@@ -934,57 +886,36 @@ export function OutputsSection({
                   <>
                     {/* ⚠ ОТКАЗ НАЗЫВАЕТ СЕБЯ СЛОВОМ, А НЕ СЕРОЙ КНОПКОЙ. Тот же закон, что у
                         `split ▸` и `mark ▸` двумя ветками ниже: выключенная дверь без причины
-                        отправляет человека искать, что он сделал не так. */}
-                    {/* ⚠ ПУСТОЙ ПЛАН — ЭТО ТОЖЕ ОТКАЗ, А НЕ ЖИВАЯ КНОПКА, КОТОРАЯ МОЛЧИТ.
-                        Разрез законно даёт кусок БЕЗ стороны силуэта: человек мог вырезать деталь,
-                        и `apply-split.tsx` говорит это прямым текстом («применить его некуда: он
-                        не называет слот»). Тогда `piecesOf` пуст, `applyPlan` отдаёт ноль шагов, и
-                        дверь, нарисованная живой, на нажатие не делала БУКВАЛЬНО НИЧЕГО — ни
-                        запроса, ни ошибки, ни слова. Соседняя реализация того же глагола этот
-                        случай закрывает (`if (!pieces.length) return null`); здесь он назван
-                        причиной, потому что колода уже раскрыта и исчезнувшая дверь читалась бы
-                        как пропажа.
+                        отправляет человека искать, что он сделал не так.
 
-                        ⚠ И ТРЕТИЙ ВИД ПУСТОГО ПЛАНА — КОЛОРВЕЙНЫЙ (круг 19): `setStepsFor` теперь
-                        ОТКАЗЫВАЕТ вместо записи, когда верстак секции назвать нечем или лист чужого
-                        цвета. Такой отказ несёт свои слова (`refusal`), и они встают ПЕРЕД общей
-                        фразой про детали — иначе дверь объясняла бы отказ причиной, которой у него
-                        нет, а это хуже молчания: человек пошёл бы резать лист заново. */}
-                    {writesOff || !setStepsFor(picture.id ?? 0).steps.length ? (
-                      <InertDoor
-                        className='flex-1 [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor'
-                        label='set'
-                        reason={
-                          disabled
-                            ? 'this card is read-only for you — putting the split into the sides is an edit of the card'
-                            : !speaks
-                              ? 'this server does not answer the design routes'
-                              : setStepsFor(picture.id ?? 0).refusal ||
-                                'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.'
-                        }
-                      />
-                    ) : (
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      className='h-5 flex-1 bg-bgColor'
-                      loading={applyingRoot === (picture.id ?? 0)}
-                      disabled={applyingRoot > 0}
-                      data-set-split={picture.id || undefined}
-                      onClick={() => {
-                        const { steps } = setStepsFor(picture.id ?? 0);
-                        if (!steps.length) return;
-                        if (steps.some((s) => s.displaces)) setAskingRoot(picture.id ?? 0);
-                        else void runSet(picture.id ?? 0);
-                      }}
-                      title={
-                        'the render input becomes exactly this split: every side named by it takes ' +
-                        'its piece, and every side it does not name is emptied'
-                      }
-                    >
-                      set
-                    </Button>
-                    )}
+                        ДВЕРЬ — ОБЩИЙ ОРГАН (Ф4): `ApplySplitDoor`, та же, что на полосах входа
+                        флэта и 3D. Глагол один — «apply splitted», вопрос один, отчёт один.
+                        Этот экран отдаёт ей адрес верстака СЕКЦИИ и свои отказы (`refusal`,
+                        разбор у `applyRefusalFor`): при отказе дверь стоит погашенной со строкой
+                        причины — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа.
+                        Пустой план (куски без стороны силуэта) — тоже отказ, а не живая кнопка,
+                        которая молчит; полосы входа на него дверь не рисуют вовсе, здесь она
+                        обязана остаться на месте и сказать почему.
+
+                        Ширина и метрика — ряда дверей (F-9): `flex-1` ячейке, `h-5 bg-bgColor`
+                        кнопке, как у соседей. */}
+                    {(() => {
+                      const rootId = picture.id ?? 0;
+                      const bench = refColorwayFor('render', colorwayId ?? 0);
+                      return (
+                        <ApplySplitDoor
+                          techCardId={techCardId}
+                          sides={threedSides(band, bench)}
+                          pieces={piecesOf(rootId)}
+                          benchKind='render'
+                          colorwayId={bench}
+                          noun='render'
+                          refusal={applyRefusalFor(rootId)}
+                          className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor'
+                          doorClassName='h-5 bg-bgColor'
+                        />
+                      );
+                    })()}
                     {/* ⚠ ЭТО БЫЛ СЫРОЙ `<button>` — ЕДИНСТВЕННЫЙ КОНТРОЛ РЯДА МИМО `buttonVariants`,
                         и он один держал СВОЮ рамку, СВОЙ ховер и СВОЙ фокус, переписанные тут же
                         строкой классов. Пока их четыре штуки совпадали с примитивом на глаз, он
@@ -1258,28 +1189,10 @@ export function OutputsSection({
           на это есть ширина, и он не исчезает сам: «a callout stays until it is resolved». */}
       {bringsOwnModel && bring.notice}
 
-      {/* ⚠ ОТКАЗ `set` СТОИТ НАД ПОЛОСОЙ, А НЕ В ЯЧЕЙКЕ, и по той же причине, что отказ модели
-          абзацем выше: «сторона front — slot_rev mismatch» в колонке 132 пикселя встаёт красной
-          стеной выше самого кадра. Стороны независимы, поэтому отчёт называет ИМЕНА, а не число:
-          повторять жест человеку по одной. */}
-      {applyFailed.list.length > 0 && applyFailed.root === openDeck && (
-        <CalloutBox tone='error'>
-          <Text
-            size='micro'
-            component='p'
-            className='normal-case'
-            data-set-failed={applyFailed.list.length}
-          >
-            <b>
-              {applyFailed.list.length} side{applyFailed.list.length === 1 ? '' : 's'} of the input{' '}
-              {applyFailed.list.length === 1 ? 'was' : 'were'} not written.
-            </b>{' '}
-            {applyFailed.list.map((f) => `${viewLabel(f.view)} — ${f.reason}`).join('; ')}. Nothing
-            was undone: the sides are separate slots, and taking a good one back would be another
-            write that can fail in its turn. Press <b>set</b> again — it reads the bench afresh.
-          </Text>
-        </CalloutBox>
-      )}
+      {/* ОТЧЁТ ОБ ОТКАЗЕ ДВЕРИ РАЗРЕЗА БОЛЬШЕ НЕ СТОИТ НАД ПОЛОСОЙ (Ф4). Он живёт в самой
+          `ApplySplitDoor`, в ячейке раскрытой колоды — сжатой формой F-14 («2 of 4 written · back
+          failed — press again», полный разбор по сторонам в `title`), и уходит вместе с колодой.
+          Один орган — один отчёт; второе написание здесь стояло ровно до этой фазы. */}
 
       <Strip>
         {/* ═══ ДВЕРЬ СТОИТ ПЕРВОЙ, И ЭТО ЗАМЕР, А НЕ ВКУС (E-13) ══════════════════════════════
@@ -1338,7 +1251,7 @@ export function OutputsSection({
                 }
                 open={open}
                 onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
-                /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `set` + `▾`), а не своей
+                /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `apply splitted` + `▾`), а не своей
                    строкой под кадром: F-9, разбор у ветки `deck` в `cell`. */
                 hostDoor
               >
@@ -1378,57 +1291,9 @@ export function OutputsSection({
           (довод — у его вызова выше). */}
       {split.modal}
 
-      {/* ═══ ВОПРОС ДВЕРИ `set` — ОДИН НА РАЗДЕЛ, ПО ИМЕНИ ЛИСТА (F-7) ═══════════════════════
-          «Guard the irreversible» (PRODUCT.md): `set` очищает стороны, о которых разрез молчит, и
-          вытесняет то, что стоит в названных. Вопрос задаётся ТОЛЬКО когда терять есть что —
-          пустой путь этих людей не пáдят («wizard-style over-explained flows»), и решает это
-          ветка `steps.some(s => s.displaces)` у самой двери.
-          ⚠ ОКНО ОДНО, А НЕ ПО ОДНОМУ НА ЯЧЕЙКУ: булев флаг внутри ячейки открыл бы их разом над
-          всеми листами — тот же довод, что у `VectorModal` ниже. */}
-      {askingRoot > 0 &&
-        (() => {
-          const { steps } = setStepsFor(askingRoot);
-          const places = steps.filter((s) => s.act === 'place');
-          const clears = steps.filter((s) => s.act === 'clear');
-          const losing = steps.filter((s) => s.displaces);
-          return (
-            <ConfirmationModal
-              open
-              onOpenChange={(next: boolean) => !next && setAskingRoot(0)}
-              title='replace the whole render input with this split?'
-              confirmLabel='replace the input'
-              onConfirm={() => {
-                const target = askingRoot;
-                setAskingRoot(0);
-                void runSet(target);
-              }}
-            >
-              <div className='flex flex-col gap-2' data-set-ask={askingRoot}>
-                <Text size='control' component='p' className='normal-case'>
-                  {places.length > 0 && (
-                    <>
-                      <b>{places.map((s) => viewLabel(s.view)).join(', ')}</b> take the pieces of
-                      this split.{' '}
-                    </>
-                  )}
-                  {clears.length > 0 && (
-                    <>
-                      <b>{clears.map((s) => viewLabel(s.view)).join(', ')}</b>{' '}
-                      {clears.length === 1 ? 'is' : 'are'} emptied — the split does not name{' '}
-                      {clears.length === 1 ? 'that side' : 'those sides'}.
-                    </>
-                  )}
-                </Text>
-                <Text size='control' component='p' className='normal-case'>
-                  {losing.length} of the sides {losing.length === 1 ? 'holds a render' : 'hold renders'}
-                  right now, and {losing.length === 1 ? 'it goes' : 'they go'} out of the input:{' '}
-                  {losing.map((s) => viewLabel(s.view)).join(', ')}. Nothing is deleted — every
-                  picture stays on the card and can be put back one side at a time.
-                </Text>
-              </div>
-            </ConfirmationModal>
-          );
-        })()}
+      {/* ВОПРОС ДВЕРИ РАЗРЕЗА ЗАДАЁТ `ApplySplitDoor` САМА (Ф4) — `AskModal` из `../core`, один
+          на всю студию, по тому же плану, что исполняет запись. Здесь стояла вторая
+          `ConfirmationModal` с почти тем же текстом; «почти» и есть дефект, который снят. */}
 
       {/* ОДИН РЕДАКТОР НА ВЕСЬ РАЗДЕЛ, ПО ИМЕНИ ЦЕЛИ (E-3). Держать его внутри ячейки значило
           бы столько модалок, сколько плиток; булев флаг открыл бы их разом над всеми.

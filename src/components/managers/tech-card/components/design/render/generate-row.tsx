@@ -222,6 +222,61 @@ export function GenerateRow({
  * Зов без дверей И без повода — это коробка с отступами, которая ничего не говорит и никуда не
  * ведёт; зов с одним поводом (полоса причин меню на 3D) законен и рисует ровно строку.
  */
+/**
+ * ═══ ОТКАЗ ПРОГОНА — СТОЙКАЯ ПОЛОСА, А НЕ СЕКУНДЫ СНЕКБАРА (Ф4, контракт §E) ══════════════════
+ *
+ * `useStartDesignRun` кладёт отказ сервера в `refusal` и даёт `dismissRefusal`. Три экрана его
+ * РИСОВАЛИ (on model, pattern, flat); render и 3D — нет: отказ жил секунды всплывашки, а деньги при
+ * этом двигаются (резервация освобождена, попытка списана). Молчать нельзя. Форма СПИСАНА с
+ * `onmodel/studio.tsx` (заголовок, слова сервера в «», приписка про деньги) и `pattern-studio.tsx`
+ * (дверь `dismiss`), не выдумана.
+ *
+ * ЧТО ГОВОРИТСЯ И ОТ ЧЬЕГО ИМЕНИ:
+ *   · слова сервера — ДОСЛОВНО, они единственное, что называет причину (переменную окружения,
+ *     недостающую половину запроса); наша проза их не подменяет;
+ *   · «Nothing was filed and nothing was charged.» — фраза контракта §E, и она печатается ТОЛЬКО
+ *     если сервер сам не говорил о деньгах: отказ, упоминающий charge/reserv/budget/paid/quota,
+ *     стоит один — иначе мы бы противоречили серверу его же полосой;
+ *   · про «GENERATE carries the same request id» НЕ ГОВОРИТСЯ: `clientRequestId` из хука наружу
+ *     не выходит, и утверждать факт, которого экран не видит, нельзя. Хук держит ключ в ledger по
+ *     отпечатку запроса — это правда механизма, но не наблюдение этого органа.
+ *
+ * `dismiss` ничего не отменяет — человек прочёл. Снятие — глагол, а не таймер: исправление
+ * отказа часто НЕ новое нажатие (дописать цвет, добавить фото), и отказ без двери стоял бы поверх
+ * работы после того, как его прочли.
+ */
+export function RunRefusal({
+  refusal,
+  onDismiss,
+}: {
+  refusal: string | null | undefined;
+  onDismiss: () => void;
+}): JSX.Element | null {
+  const words = (refusal ?? '').trim();
+  if (!words) return null;
+  const serverSpokeOfMoney = /charg|reserv|budget|paid|quota|balance/i.test(words);
+  return (
+    <CalloutBox tone='error'>
+      <div data-probe='refusal' className='flex items-start gap-2'>
+        <Text size='micro' component='p' className='min-w-0 flex-1 normal-case'>
+          <b>the run did not start.</b> The server answered: «
+          <span data-probe='refusal-verbatim'>{words}</span>». These are its words, printed as they
+          arrived.{serverSpokeOfMoney ? '' : ' Nothing was filed and nothing was charged.'}
+        </Text>
+        <button
+          type='button'
+          onClick={onDismiss}
+          className='shrink-0 uppercase text-labelColor hover:text-textColor focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        >
+          <Text size='nano' variant='uppercase' tracking='label' component='span'>
+            dismiss
+          </Text>
+        </button>
+      </div>
+    </CalloutBox>
+  );
+}
+
 export function LockBar({
   /**
    * ПОЧЕМУ ЗАКРЫТО — словами, на экране, а не по наведению. Необязателен: у полосы бывает работа и

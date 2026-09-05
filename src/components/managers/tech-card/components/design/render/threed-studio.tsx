@@ -9,7 +9,7 @@ import { ViewSwitch } from 'ui/components/view-switch';
 
 import { useCardFit, useThreedDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
-import { GenerateRow, LockBar } from './generate-row';
+import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   PRESENTATIONS,
   fitChoices,
@@ -421,6 +421,13 @@ export function ThreedStudio({
             a one-run override for this submission only — the card stays the single place of truth
           </Hint>
         </FieldRow>
+
+        {/* ОТКАЗ ПОСЛЕДНЕГО НАЖАТИЯ, ДОСЛОВНО И СТОЙКО (Ф4). Этот экран его не рисовал вовсе —
+            отказ жил секунды всплывашки, а деньги при нём двигаются ($1.20 за прогон). Стоит НАД
+            рядом GENERATE, который его и снимает; форма общая с FABRIC RENDER — `RunRefusal`.
+            С `LockBar` выше не спорит: та говорит, почему нельзя нажать, эта — что ответил сервер
+            на нажатие; одновременно они появляются законно (нажали, получили отказ, сняли сторону). */}
+        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
 
         <GenerateRow
           gate={gate}
