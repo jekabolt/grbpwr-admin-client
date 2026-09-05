@@ -22,7 +22,7 @@ import {
 } from './model';
 import { BodyPicker } from './model-picker';
 import { OutputsSection } from './outputs';
-import { ThreedInputStrip } from './threed-input-strip';
+import { SideRows } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
@@ -38,7 +38,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * ⚠ «СТОРОНА» — ЭТО СЛОТ ВЕРСТАКА, А НЕ «ПОСЛЕДНИЙ РЕНДЕР» (V-14). Экран считал вход сам, из ленты
  * прогонов, а сервер собирал тот же прогон из слотов `kind: render` — два списка без единого общего
  * писателя. Полоса входа теперь показывает ровно тот верстак, который читает сервер, и marking в
- * неё — явный жест человека; довод целиком в `./threed-input-strip.tsx`.
+ * неё — явный жест человека. С Ф5 полосу заменил блок строк `./side-row.tsx`; здесь он читатель.
  *
  * «ON A MODEL» IS A WINDOW INTO AN EXISTING DICTIONARY. The models are the admin's own fit-model
  * profiles (`ListModels`), not a second list invented for this menu — and they are picked BY THEIR
@@ -261,15 +261,27 @@ export function ThreedStudio({
           вкладок свой пикер — и скоупы разойдутся ровно так, как боялся J-26.
 
           Остальные три — обычная цена любых двух писателей, и обе записи идут одним и тем же
-          вызовом одной и той же функции (`ApplySplitDoor`), а не двумя похожими. */}
-      <ThreedInputStrip
+          вызовом одной и той же функции (`ApplySplitDoor`), а не двумя похожими.
+
+          ═══ Ф5 (WAVE2 п.7): ЛЕНТА 3D СНЯТА, ВХОД — ТОТ ЖЕ БЛОК СТРОК, ЧТО НА FABRIC RENDER ═══
+          Владелец прочёл три ряда одинаковых ячеек как одно и то же трижды. Верстак теперь один
+          орган — `SideRows` (строка на сторону: чертёж → рендер → идёт ли в 3D), и здесь он
+          ЧИТАЕТ (`readOnly`): записи рендер-оси остались на FABRIC RENDER, куда ведут двери пустых
+          сторон и полосы причин. Довод J-26 «второй писатель одного слота» этим монтажом
+          исполняется буквально: писатель один и он там. `LockBar` с дверями прежней ленты
+          («put a render into FRONT ▸», «re-fill the odd sides ▸», «generate a flat/render ▸»)
+          стоит под строками — причины отказа с экрана не ушли. */}
+      <SideRows
         band={band}
         techCardId={techCardId}
         disabled={disabled}
-        lock={input}
-        onGoToKind={onGoToKind}
         colorwayId={colorwayId}
         colorwayLabel={colorwayLabel}
+        onGoToKind={onGoToKind}
+        readOnly
+        lock={input}
+        id='design-threed-input'
+        title='input — renders by view'
       />
 
       <Section
@@ -326,7 +338,7 @@ export function ThreedStudio({
             `what is missing` — разбор обоих решений в её шапке.
 
             А то, чего не хватает на ВХОДЕ, по-прежнему говорит своя полоса под входом
-            (`ThreedInputStrip lock={input}`) — и говорит РЯДОМ ДВЕРЕЙ. Две полосы взаимно
+            (`SideRows lock={input}`) — и говорит РЯДОМ ДВЕРЕЙ. Две полосы взаимно
             исключены условием `input.ok`: одновременно они не появляются никогда. */}
         {input.ok && !gate.ok && <LockBar reason={gate.reason} />}
 

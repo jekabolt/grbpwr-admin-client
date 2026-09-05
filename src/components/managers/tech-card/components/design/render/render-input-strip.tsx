@@ -440,10 +440,22 @@ export function RenderInputStrip({
   band,
   techCardId,
   disabled,
+  bare = false,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /**
+   * ═══ ТОЛЬКО ПРАВАЯ ПОЛОВИНА, БЕЗ СВОЕЙ КОРОБКИ (Ф5, WAVE2 п.7/п.9) ═══════════════════════════
+   *
+   * Шесть слотов слева от линии теперь СТРОКИ блока «одна строка на сторону» (`./side-row.tsx`),
+   * и эта лента стоит ПОД его разделителем как «что ещё есть на карточке»: неразмеченные чертежи,
+   * колоды листов, фильтр происхождения, дверь `+ flat`, дочитывание ленты (`useWholeCardFeed`).
+   * `bare` снимает `Section` и шесть слотов с линией, оставляя счёт одной строкой над лентой;
+   * ни один читатель и ни один писатель правой половины при этом не меняется — это тот же орган,
+   * а не его копия. Без пропа лента рисуется ровно как рисовалась.
+   */
+  bare?: boolean;
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
   const split = useSplitToInput({ techCardId, band });
@@ -1035,34 +1047,27 @@ export function RenderInputStrip({
         ? { note: 'reading older pages…', title: READING_TITLE }
         : { note: 'newest page only', title: PAGE_TITLE };
 
-  return (
-    <Section
-      /* ОБЪЯВЛЕННЫЙ ЯКОРЬ КОРОБКИ. Утверждение E-7 — это утверждение ОТСУТСТВИЯ («в этой секции
-         нет ни одной плитки ткани»), а такое утверждение стоит ровно столько, сколько стоит
-         объявленная коробка, по которой его можно проверить. Класс для этого не годится: он
-         переживает правку смысла и оставляет пробу зелёной над сломанным экраном. */
-      id='design-render-input'
-      title='input — flats of this card'
-      question='— the drawings the render is made from, one per side'
-      action={
-        <Text
-          size='micro'
-          variant='label'
-          component='span'
-          className='uppercase'
-          data-input-count=''
-          data-input-coverage={coverage ? more.state : 'whole'}
-          /* Оговорка охвата несёт предложение целиком — F-5, разбор у `PAGE_TITLE`. */
-          title={coverage?.title}
-        >
-          {/* Одной строкой, а не двумя: JSX схлопывает перенос в ПРОБЕЛ, и «0 sheet s» вылезло бы
-              ровно из аккуратного форматирования. */}
-          {marked.length} marked · {others.length} not marked
-          {sheets.length > 0 ? ` · ${sheets.length} sheet${sheets.length === 1 ? '' : 's'}` : ''}
-          {coverage ? ` · ${coverage.note}` : ''}
-        </Text>
-      }
+  const count = (
+    <Text
+      size='micro'
+      variant='label'
+      component='span'
+      className='uppercase'
+      data-input-count=''
+      data-input-coverage={coverage ? more.state : 'whole'}
+      /* Оговорка охвата несёт предложение целиком — F-5, разбор у `PAGE_TITLE`. */
+      title={coverage?.title}
     >
+      {/* Одной строкой, а не двумя: JSX схлопывает перенос в ПРОБЕЛ, и «0 sheet s» вылезло бы
+          ровно из аккуратного форматирования. */}
+      {marked.length} marked · {others.length} not marked
+      {sheets.length > 0 ? ` · ${sheets.length} sheet${sheets.length === 1 ? '' : 's'}` : ''}
+      {coverage ? ` · ${coverage.note}` : ''}
+    </Text>
+  );
+
+  const body = (
+    <>
       {/* ═══ ОДНА ЛЕНТА, ДВА ВОПРОСА ═══════════════════════════════════════════════════════════
           Порядок ленты: четыре слота → ЛИНИЯ → дверь руками → одиночные чертежи (новейшее
           первым) → склеенные листы (новейший первым, куски за своим листом).
@@ -1077,8 +1082,9 @@ export function RenderInputStrip({
             Пробег идёт по `sides`, а не по `marked`: порядок обхода (`SILHOUETTE_VIEWS`) — это и
             есть порядок слотов, и пустой вид обязан стоять на СВОЁМ месте между занятыми, иначе
             «чего не хватает» приходится вычислять, а не читать. Счётчики в шапке секции считают
-            по-прежнему занятые (`marked`) — теперь они совпадают с тем, что видит глаз. */}
-        {sides.map((side) => {
+            по-прежнему занятые (`marked`) — теперь они совпадают с тем, что видит глаз.
+            ⚠ ПОД `bare` СЛОТОВ И ЛИНИИ НЕТ: они — строки блока `side-row.tsx` над этой лентой. */}
+        {!bare && sides.map((side) => {
           const picture = side.picture;
           if (!picture) {
             return (
@@ -1132,8 +1138,9 @@ export function RenderInputStrip({
         })}
 
         {/* The line. It stands even when one side is empty: it separates two QUESTIONS, not two
-            non-empty lists, and a divider that comes and goes stops reading as a boundary. */}
-        <StripDivider />
+            non-empty lists, and a divider that comes and goes stops reading as a boundary.
+            Под `bare` линии нет — первый вопрос отвечают строки блока выше. */}
+        {!bare && <StripDivider />}
 
         {/* ═══ ФИЛЬТР ПО ПРОИСХОЖДЕНИЮ — СРАЗУ ЗА ЛИНИЕЙ, СТОЛБИКОМ (D-5) ═══════════════════════
             Владелец: «после дивайдера не показывают фильтр». Стоит там, где назван: первым
@@ -1341,6 +1348,35 @@ export function RenderInputStrip({
             />
           ) : null;
         })()}
+    </>
+  );
+
+  if (bare) {
+    return (
+      <div className='flex flex-col gap-1' data-input-flats-pool=''>
+        <span className='flex items-center justify-between gap-2'>
+          <Text size='nano' variant='label' component='span' className='uppercase'>
+            flats of this card
+          </Text>
+          {count}
+        </span>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Section
+      /* ОБЪЯВЛЕННЫЙ ЯКОРЬ КОРОБКИ. Утверждение E-7 — это утверждение ОТСУТСТВИЯ («в этой секции
+         нет ни одной плитки ткани»), а такое утверждение стоит ровно столько, сколько стоит
+         объявленная коробка, по которой его можно проверить. Класс для этого не годится: он
+         переживает правку смысла и оставляет пробу зелёной над сломанным экраном. */
+      id='design-render-input'
+      title='input — flats of this card'
+      question='— the drawings the render is made from, one per side'
+      action={count}
+    >
+      {body}
     </Section>
   );
 }

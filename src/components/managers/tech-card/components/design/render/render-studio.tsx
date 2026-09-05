@@ -6,7 +6,6 @@ import { colourPlanGate, planRecipe } from '../colour-plan/model';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
-import { FabricRenderSlots } from './fabric-render-slots';
 import { GenerateRow, RunRefusal } from './generate-row';
 import {
   hexIsPaintable,
@@ -20,7 +19,7 @@ import {
 } from './model';
 import { OutputsSection } from './outputs';
 import { Palette } from './palette';
-import { RenderInputStrip } from './render-input-strip';
+import { SideRows } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
@@ -121,6 +120,7 @@ export function RenderStudio({
    * рассинхронил бы полосу вкладок со своим же содержимым.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
+  // (`SideRows` зовёт его только с `'flat' | 'render'` — сужение на месте вызова законно.)
 }): JSX.Element {
   const draft = useColourDraft(band, colorwayId, colorwayRef);
   /**
@@ -299,7 +299,21 @@ export function RenderStudio({
 
   return (
     <>
-      <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} />
+      {/* ═══ ОДНА СТРОКА НА СТОРОНУ — Ф5 (WAVE2 п.7) ══════════════════════════════════════════
+          Здесь стояла лента флэтов (`RenderInputStrip`), а внизу экрана — `FabricRenderSlots`:
+          два верстака двумя рядами по шесть ячеек, и владелец прочёл их как одно и то же дважды.
+          Теперь один блок: строка на сторону — чертёж, что ушёл в рендер (читается), рендер, что
+          вернулся (пишется здесь), и идёт ли сторона в 3D (вывод). Под его разделителем — правая
+          половина прежней ленты флэтов, тем же органом. Стоит ПЕРВЫМ по тому же закону, по которому
+          стояла лента: на материал смотрят до меню. */}
+      <SideRows
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        colorwayId={colorwayId}
+        colorwayLabel={colorwayLabel}
+        onGoToKind={onGoToKind}
+      />
 
       <Section
         /* ЯКОРЬ ОБЪЯВЛЕН по тому же доводу, что у полосы входа: об этом блоке делаются
@@ -359,22 +373,10 @@ export function RenderStudio({
         colorwayLabel={colorwayLabel}
       />
 
-      {/* ═══ FABRIC RENDER SLOTS — ПОСЛЕ ВЫХОДОВ, ПОТОМУ ЧТО ЗАПОЛНЯЕТСЯ ИЗ НИХ (J-25) ══════════
-          Владелец: «отдельные независимые слоты именно для фабрик рендеров которые можно заполнять
-          в разделе RENDERS OF THIS CARD и там же можно и сплитить их». Порядок экрана поэтому
-          читается как рассказ: из чего рендерим (флэты) → чем (ткань) → что вышло (выходы) →
-          что из вышедшего пошло в дело (слоты). Тот же закон «сначала материал, потом сборка», по
-          которому флэтовый верстак стоит под лентой прогонов.
-          ⚠ FLAT SLOTS на этой вкладке НЕТ и не возвращается: гейт `kind === 'flat'` в
-          `studio-tab.tsx` (J-14/J-18/J-30). Этот блок — не его переодетая копия, а второй
-          верстак: другой род, другой скоуп, другие двери. */}
-      <FabricRenderSlots
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        colorwayId={colorwayId}
-        colorwayLabel={colorwayLabel}
-      />
+      {/* ═══ FABRIC RENDER SLOTS ЗДЕСЬ БОЛЬШЕ НЕ СТОЯТ (Ф5) ═══════════════════════════════════
+          Рендер-слоты — колонка WHAT CAME BACK блока `SideRows` в голове экрана; заполняются они
+          по-прежнему из `RENDERS OF THIS CARD` выше (`mark ▸`, `apply splitted`) и дверью
+          `fill N empty sides ▸` в шапке блока. Второго органа того же верстака на экране нет. */}
 
       {/* ═══ БЛОК ПРИМЕРКИ (FABRIC FITTING) СНЕСЁН ЦЕЛИКОМ — J-21 ══════════════════════════════
           Владелец, дословно: «в FABRIC FITTING давай удалим полностью эту функцальность она

@@ -22,12 +22,11 @@
  */
 export { ClothIsRow } from './cloth-is';
 export { ColourStatementRow, COLOUR_NAME_MAX } from './colour-statement';
-export { FabricRenderSlots } from './fabric-render-slots';
 export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
 export { RenderStudio } from './render-studio';
-export { ThreedInputStrip } from './threed-input-strip';
+export { SideRows } from './side-row';
 export { ThreedStudio } from './threed-studio';
 export { BodyPicker, modelCaption, modelFacts, modelName } from './model-picker';
 export { WhatModelGetsRenderModal } from './what-model-gets';
