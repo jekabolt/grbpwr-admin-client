@@ -11,6 +11,7 @@ import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
+import { Reason } from './core';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import MediaComponent from 'ui/components/media';
@@ -312,6 +313,7 @@ export function InertDoor({
   reason,
   size = 'xs',
   className,
+  reasonVisible = false,
 }: {
   label: React.ReactNode;
   reason: string;
@@ -329,12 +331,23 @@ export function InertDoor({
    */
   size?: 'xs' | 'sm';
   className?: string;
+  /**
+   * Print the reason UNDER the door as well as in `title`. Off by default — the sixteen existing
+   * doors stand in rows where a second line would push their neighbours; a screen that has the
+   * room opts in. `title` stays either way, so a hover still reads it.
+   */
+  reasonVisible?: boolean;
 }) {
   return (
-    <span data-inert={reason} title={reason} className={cn('inline-flex', className)}>
+    <span
+      data-inert={reason}
+      title={reason}
+      className={cn(reasonVisible ? 'inline-flex flex-col items-start gap-0.5' : 'inline-flex', className)}
+    >
       <Button variant='secondary' size={size} disabled>
         {label}
       </Button>
+      {reasonVisible && <Reason>{reason}</Reason>}
     </span>
   );
 }

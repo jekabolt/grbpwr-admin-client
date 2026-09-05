@@ -33,7 +33,8 @@
 // `CompareModal` жила здесь и умерла вместе с циклом починки (S-15): её единственная дверь —
 // «compare ▸» на полосе «fix is in» — снята, а модалка без двери — это экспорт в никуда.
 export { NewDetailModal } from './new-detail-modal';
-export { VectorModal } from './vector-modal';
+// ЛЕНИВО. Редактор — 7800 строк, а открывается он по одной двери на экран; см. `vector-modal-lazy`.
+export { VectorModal, type VectorModalProps } from './vector-modal-lazy';
 export { WhatModelGetsModal } from './what-model-gets-modal';
 
 export {

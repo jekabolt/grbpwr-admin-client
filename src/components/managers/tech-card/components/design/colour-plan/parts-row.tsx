@@ -9,7 +9,7 @@ import { Tiles } from 'ui/components/tiles';
 
 import { assetById, assetLabel, assetThumb } from '../assets/model';
 import { ColourPicker } from '../assets/colour-picker';
-import { VectorModal } from '../modals/vector-modal';
+import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { benchSides } from '../render/model';
 import { FieldRow, Hint, Swatch } from '../render/field-row';

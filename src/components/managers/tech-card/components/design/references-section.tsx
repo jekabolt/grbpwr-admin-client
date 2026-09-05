@@ -35,6 +35,7 @@ import {
 } from './flat-slots-send';
 import { cropFamilies } from './generation/composite';
 import { RecalledRunPrompt } from './history-recall';
+import { AskModal } from './core';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { pictureOffersSplit } from './render/model';
@@ -1138,23 +1139,20 @@ export function ReferencesSection({
       {/* ЦЕНА ДВЕРИ «FROM CONSTRUCTION» НАЗЫВАЕТСЯ ДО ЖЕСТА, И ТОЛЬКО КОГДА ЕСТЬ ЧТО ТЕРЯТЬ (B-15).
           Пустое поле заполняется молча — спрашивать там не о чем; непустое перезаписывается
           вопросом, потому что текст, набранный руками, не живёт больше нигде. */}
-      <ConfirmationModal
+      <AskModal
         open={askTakeAspects}
-        onOpenChange={(open) => !open && setAskTakeAspects(false)}
-        onConfirm={() => {
+        onDo={() => {
           setAskTakeAspects(false);
           writeAspects();
         }}
-        onCancel={() => setAskTakeAspects(false)}
+        onClose={() => setAskTakeAspects(false)}
         title='replace the garment description?'
-        confirmLabel='replace it'
-        width='sm'
-      >
-        <Text size='control'>
-          The description below is replaced by the construction aspects, one line each. What is
-          written there now is not kept anywhere else — copy it first if you need it.
-        </Text>
-      </ConfirmationModal>
+        verb='replace it'
+        // The sentence already says «not kept anywhere else»; a second «no undo» under it would be
+        // the same warning twice, and this port is meant to change nothing the eye can see.
+        note={null}
+        sentence='The description below is replaced by the construction aspects, one line each. What is written there now is not kept anywhere else — copy it first if you need it.'
+      />
     </Section>
   );
 }
