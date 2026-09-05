@@ -12,7 +12,26 @@ import { cn } from 'lib/utility';
  * `variant="grid"` is the matrix form (fabric map, size chart): every cell bordered
  * and centred, first column left-aligned on the zebra tint.
  *
- * The horizontal-scroll wrapper is built in — callers must not add their own.
+ * The horizontal-scroll wrapper is built in — callers must not add their own, and it is
+ * `relative` ON PURPOSE.
+ *
+ * ⚠ A STATIC SCROLL CONTAINER DOES NOT CONTAIN ITS OWN ABSOLUTE DESCENDANTS, AND THAT IS HOW A
+ * TABLE PUSHES THE WHOLE PAGE SIDEWAYS. `overflow-x: auto` clips and scrolls the in-flow table
+ * box, so a table twice the width of the window costs the page nothing — measured. But an
+ * absolutely positioned descendant resolves against the nearest POSITIONED ancestor, and while
+ * this wrapper was `position: static` that ancestor was somewhere far above it: such a descendant
+ * is neither clipped by this scroll container nor counted into it, and it lands in the ROOT's
+ * scrollable overflow at whatever x the wide table put it. Every `srLabel` field, every
+ * `<span class="sr-only">` header and the hidden native `<select>` Radix renders under its trigger
+ * is exactly such a descendant — 1px wide, invisible, and enough to hand the document a second
+ * screen of horizontal scroll (measured at 1135px on a 1024px window, D-4).
+ *
+ * This is why `overflow: hidden` is NOT the cure and was measured not to be: clipping is not the
+ * mechanism. One word of `position` is, because it makes the wrapper the containing block those
+ * descendants were missing. Nothing else moves — `relative` with `z-index: auto` opens no stacking
+ * context, so the semantic z-scale is untouched, and no caller keeps an absolutely positioned
+ * element inside a table that is MEANT to escape it (Radix popovers and menus portal to the body
+ * and never see this box).
  */
 export function DataTable({
   children,
@@ -24,7 +43,7 @@ export function DataTable({
   className?: string;
 }) {
   return (
-    <div className='w-full overflow-x-auto'>
+    <div className='relative w-full overflow-x-auto'>
       <table
         data-variant={variant}
         className={cn(

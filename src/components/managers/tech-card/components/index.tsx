@@ -1862,9 +1862,15 @@ export function TechCardForm({
           horizontal scroll strip — the sidebar is a desktop affordance and the
           fitting-room phone use is real. */}
       <div className='grid gap-2.5 pt-3 lg:grid-cols-[150px_1fr]'>
+        {/* `min-w-0` IS WHAT LETS THE STRIP BELOW `lg` ACTUALLY SCROLL. The rail is a grid item,
+            and a grid item's automatic minimum size is its MIN-CONTENT, not zero — so without this
+            the track was forced to the full width of all 14 section entries laid end to end (942px
+            measured), the inner `overflow-x-auto` never got to scroll, and the whole PAGE moved
+            sideways instead (92px at a 860px window, D-4). The horizontal strip promised in the
+            comment above only exists once the item is allowed to be narrower than its contents. */}
         <aside
           aria-label='Tech card sections'
-          className='top-16 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'
+          className='top-16 min-w-0 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'
         >
           <div className='flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
             {TAB_GROUPS.map((group, gi) => {
