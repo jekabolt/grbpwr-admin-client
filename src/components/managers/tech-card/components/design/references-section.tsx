@@ -1124,7 +1124,8 @@ function OneMoreCell({
           <DrawHalf
             anchor='reference'
             label='draw a reference'
-            title='opens the picture editor on a blank plate; what you draw joins the input'
+            /* Единственное, чем эта половина отличается от трёх соседних: адрес — не слот. */
+            into='the input'
             onClick={onDraw}
           />
         </>

@@ -85,6 +85,40 @@ export function PatternStudio({
   const nameRef = useRef<HTMLInputElement | null>(null);
   const slotRef = useRef<HTMLDivElement | null>(null);
 
+  /**
+   * ═══ КАРТОЧКА СМЕНИЛАСЬ — ЗАГОТОВКА ПРОГОНА НАЧИНАЕТСЯ ЗАНОВО ═════════════════════════════
+   *
+   * ⚠ СБРОСА ЗДЕСЬ НЕ БЫЛО ВОВСЕ, И ЭТО СТОИЛО БЫ ДЕНЕГ. Три состояния выше — заготовка ПЛАТНОГО
+   * прогона, а `PatternStudio` не ключуется `techCardId` и `StudioTab` при смене карточки не
+   * размонтируется (инвариант 12). Картинка-источник, имя и цвет карточки A встают на экран
+   * карточки B, ворота открываются, и GENERATE уходит с ЧУЖИМ входом — плитка из чужого снимка,
+   * под чужим именем, на счёт этой карточки. Имя вдобавок проверяется на двойника по `band`
+   * ТЕКУЩЕЙ карточки, так что «имя занято» ловилось бы не там, где имя занято.
+   *
+   * ⚠⚠ ПРОВЕРЯТЬ ЭТО НА ХОЛОДНОЙ КАРТОЧКЕ БЕСПОЛЕЗНО, И ИМЕННО ТАК ЭТОТ СБРОС СНЕСУТ. У карточки,
+   * которую в этой сессии ещё не открывали, `useDesignBand` отдаёт `isLoading: true`, `StudioTab`
+   * подменяет весь шаг на «loading…» (`decided !== 'card' && techCardId && isLoading`), и блок
+   * размонтируется САМ — состояние пропадает без всякого сброса. Опасен обычный ход человека
+   * «A → B → A»: у уже посещённой карточки данные в кэше, `isLoading` ложно, экран не
+   * подменяется, узел живёт. ЗАМЕРЕНО на стенде: сцена E в `probe-pattern.mjs` прогревает обе
+   * карточки и без этих трёх строк показывает имя и цвет карточки 7 на карточке 8 при
+   * `sameNode: true`.
+   *
+   * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ (инвариант 12): эффект оставил бы один закоммиченный кадр с
+   * новой карточкой и старым входом — а один кадр это одно нажатие GENERATE. Образец —
+   * `generation/generation-history.tsx` (`shownCard`).
+   *
+   * `wasPending` НЕ ТРОГАЕТСЯ: он про ЖИЗНЬ МУТАЦИИ, а не про карточку, и обнуление здесь
+   * стёрло бы память о запросе, который ещё летит.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (source) setSource(null);
+    if (name) setName('');
+    if (colour) setColour(null);
+  }
+
   const { refs: colourways, loading: colourwaysLoading } = usePatternColourways(techCardId);
   /* История цвета уже лежит на проводе — она заморожена в `params.colour` прошлых прогонов. */
   const recentColours = useMemo(() => recentPatternColours(band), [band]);

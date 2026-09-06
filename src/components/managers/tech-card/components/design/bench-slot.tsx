@@ -645,7 +645,6 @@ function EmptyCell({
                 anchor={label}
                 label='draw'
                 ariaLabel={`draw ${label}`}
-                title='opens the picture editor on a blank plate; what you draw takes this slot'
                 onClick={onDraw}
               />
             )}

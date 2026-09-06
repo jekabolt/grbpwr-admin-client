@@ -12,7 +12,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
-import { AskModal, Reason } from '../core';
+import { AskModal, EMPTY_WORD, Reason } from '../core';
 import { mediaThumb } from '../render/model';
 import type { ShotDraft } from './drafts';
 import {
@@ -169,7 +169,7 @@ export function ShotGroup({
                 {shot.source === 'fitting' ? 'from a fitting' : 'from the media library'}
               </Pill>
             ) : (
-              <Pill tone='mut'>empty</Pill>
+              <Pill tone='mut'>{EMPTY_WORD}</Pill>
             )}
             <Pill tone='mut'>one paid call</Pill>
           </span>

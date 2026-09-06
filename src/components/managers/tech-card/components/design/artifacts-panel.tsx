@@ -50,6 +50,7 @@ import {
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
 import { CalloutRail } from './callout-rail';
+import { EMPTY_WORD } from './core';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
 import { VectorModal } from './modals';
@@ -2939,7 +2940,7 @@ function SlotTile({
             {label}
           </Text>
           <Pill tone={required ? 'attention' : 'mut'}>
-            {required ? 'empty · required' : 'empty'}
+            {required ? `${EMPTY_WORD} · required` : EMPTY_WORD}
           </Pill>
         </div>
         <span className={cn(PLATE_BADGE_CHIP, TILE_QUIET)}>

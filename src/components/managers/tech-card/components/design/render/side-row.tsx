@@ -14,7 +14,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { InertDoor, pictureUrl } from '../bench-slot';
-import { PlaceOrDrawCell, Counter } from '../core';
+import { PlaceOrDrawCell, Counter, EMPTY_WORD } from '../core';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { readProvenance } from '../provenance';
@@ -74,6 +74,14 @@ const CELL_PX = 138;
  */
 const PLATE_FOOTER_PX = 24;
 const EMPTY_PX = CELL_PX + PLATE_FOOTER_PX;
+/**
+ * ПУСТАЯ РЕНДЕР-СТОРОНА — ОДИН ТЕКСТ НА ДВЕ ЛЕНТЫ. Она говорилась двумя фразами: «empty · mark
+ * one below» в таблице SIDES и «empty · fill it on the fabric render» в ленте входа 3D. Состояние
+ * у них ОДНО, и разными в них были только двери — а дверь называет `title`, стоящий на самой
+ * коробке. Слово состояния берётся у студии (`EMPTY_WORD`), глагол — общий: пометку ставят на
+ * самой картинке, где бы список картинок ни лежал.
+ */
+const EMPTY_RENDER_SIDE = `${EMPTY_WORD} · mark one`;
 /** The strip's cell — the mockup's `.pstrip-i`. */
 const CELL = 'flex w-[138px] shrink-0 flex-col gap-1';
 /** The plate is square, as the mockup's `.ph`; a drawing is contained in it, never cropped. */
@@ -264,11 +272,24 @@ function Caption({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** «in the 3D run» / «not in the 3D run» — a fact derived from the plate, the prototype's third fact. */
+/**
+ * ЧТО 3D ДЕЛАЕТ С ЭТОЙ СТОРОНОЙ — и это утверждение о ЧТЕНИИ, а не о будущем прогоне.
+ *
+ * ⚠ РАНЬШЕ ЗДЕСЬ СТОЯЛО «in the 3D run», И ЭТО БЫЛО ЛОЖЬЮ НА ЦЕЛОМ КЛАССЕ КАРТОЧЕК. Фраза
+ * выводилась из ОДНОЙ занятости слота, а попадёт ли сторона в прогон, решают ворота
+ * (`threedGate`): архивный колорвей и колорвей вне `renderBenchColorwayIds` отказывают ДО денег,
+ * и на таком экране шесть плит уверенно сообщали, что они «в прогоне», которого не будет.
+ *
+ * ЧИТАТЬ ВОРОТА ЗДЕСЬ БЫЛО БЫ ВТОРЫМ ИХ НАПИСАНИЕМ: отказ уже назван словами у самой кнопки
+ * GENERATE, ровно один раз и полной причиной. Поэтому колонка говорит то, что знает сама и что
+ * верно всегда: провайдер читает четыре названные стороны, и вот эта — одна из них.
+ *
+ * Пилюля рисуется ТОЛЬКО под занятой плитой (вызывающий гейтит `side.picture`), поэтому ветки
+ * «пусто» здесь нет: пустоту говорит сама коробка, и второе её написание было бы шестой пилюлей
+ * из ничего.
+ */
 function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
-  const cardinal = isCardinalView(side.view);
-  const has = !!side.picture;
-  if (!cardinal) {
+  if (!isCardinalView(side.view)) {
     return (
       <Pill
         title={`3D reads the four named sides — front, back, side L, side R; a ${viewLabel(side.view)} render stands on the bench but is not read`}
@@ -277,12 +298,14 @@ function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
       </Pill>
     );
   }
-  return has ? (
-    <Pill tone='ink' data-threed-in=''>
-      in the 3D run
+  return (
+    <Pill
+      tone='ink'
+      data-threed-in=''
+      title='3D reads the four named sides, and this one holds a render — whether a build may be asked for is answered at GENERATE'
+    >
+      read by 3D
     </Pill>
-  ) : (
-    <Pill>not in the 3D run</Pill>
   );
 }
 
@@ -313,7 +336,14 @@ function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
 /** Ширина колонки плиты — та же 138px, что у ячейки ленты: один шаг на весь шаг рендера. */
 const COL_PX = 138;
 
-/** Приговор колонки 3D — одна короткая фраза, читаемая с плиты; ни пилюль, ни дверей. */
+/**
+ * Приговор колонки 3D — одна короткая фраза, читаемая с плиты; ни пилюль, ни дверей.
+ *
+ * ⚠ ФРАЗА НАЗЫВАЕТ ЧТЕНИЕ, А НЕ ПРОГОН, и разбор этому — у `ThreedWord` выше: «goes into the 3D
+ * run» выводилось из одной занятости слота и было ложным всюду, где ворота 3D закрыты (архивный
+ * колорвей, колорвей вне `renderBenchColorwayIds`). Две ленты говорят это ОДНИМ словарём — иначе
+ * таблица и полоса входа разошлись бы на первой же правке.
+ */
 function threedWords(side: BenchSide): JSX.Element {
   const has = !!side.picture;
   if (!isCardinalView(side.view)) {
@@ -326,7 +356,7 @@ function threedWords(side: BenchSide): JSX.Element {
   if (has) {
     return (
       <Text size='micro' component='span' className='min-w-0 break-words' data-threed-in=''>
-        <b>goes into the 3D run</b>
+        <b>read by 3D</b>
       </Text>
     );
   }
@@ -372,9 +402,18 @@ export function SidesSection({
    * ОДИН РЕДАКТОР НА БЛОК, НАЗВАННЫЙ ПО ЦЕЛИ. Два булевых флага открыли бы обе модалки разом;
    * `null` — закрыто. `draw` рисует С НУЛЯ в пустую флэт-сторону (`base: null` + `slot`), `edit`
    * правит стоящую плиту рендера (`slot: null` — результат ложится на карточку новой картинкой).
+   *
+   * ⚠ CAS-ТОКЕН ЗДЕСЬ НЕ ЛЕЖИТ, И ЭТО НЕСУЩЕЕ. Раньше `slotRev` снимался в момент КЛИКА и жил всё
+   * время открытой модалки — а модалка живёт долго (человек рисует), и банд за это время
+   * перечитывается на каждой чужой записи. Стоит кому-то положить картинку в ту же сторону, и
+   * замороженный токен устаревает: сплющенный рисунок ложится на карточку, а в слот не встаёт —
+   * то есть работа выглядит сделанной и не сделана. Соседний верстак этой ловушки не имеет,
+   * потому что отдаёт `VectorModal` ЖИВОЙ проп (`bench-slot.tsx`: `slot={{ ref, label, slotRev }}`
+   * прямо из пропов ячейки). Здесь так же: состояние держит только СТОРОНУ, а `slotRev` читается
+   * из `flats` при рендере.
    */
   const [editor, setEditor] = useState<
-    { mode: 'draw'; view: string; slotRev: number } | { mode: 'edit'; pictureId: number } | null
+    { mode: 'draw'; view: string } | { mode: 'edit'; pictureId: number } | null
   >(null);
 
   /* ⚠ NO `slotId` — a `oneof` with `viewKey`; a zero is a SET field in proto-JSON and the server
@@ -412,6 +451,8 @@ export function SidesSection({
     editor?.mode === 'edit'
       ? renders.find((s) => (s.picture?.id ?? 0) === editor.pictureId)?.picture ?? null
       : null;
+  /** Сторона, в которую сейчас рисуют, — ЖИВАЯ строка верстака, вместе со своим `slotRev`. */
+  const drawing = editor?.mode === 'draw' ? flats.find((s) => s.view === editor.view) ?? null : null;
 
   /* ─────────────────────────────── the two cells of a row ─────────────────────────────── */
 
@@ -423,20 +464,23 @@ export function SidesSection({
       );
     }
     if (!canWrite) {
-      return <EmptyBox hint='nothing marked' title={`no drawing is marked for ${label}.`} />;
+      /* СЛОВО СОСТОЯНИЯ — СТУДИИНО (`EMPTY_WORD`), а не своё: «nothing marked» рядом с «empty»
+         соседних лент читалось как ДРУГОЕ состояние. Дверь называет `title`, не слово. */
+      return <EmptyBox hint={EMPTY_WORD} title={`no drawing is marked for ${label}.`} />;
     }
     return (
       <>
         {/* ПУСТАЯ КОРОБКА ДЕЛИТСЯ ПОПОЛАМ: верх — библиотека (клик / ⌘V / бросок), низ — перо.
             Обе половины заводят ОДИН предмет — чертёж этой стороны, — поэтому это одна плитка с
-            линией посередине, а не плитка с кнопкой под ней (r2 п.28). */}
+            линией посередине, а не плитка с кнопкой под ней (r2 п.28).
+            Имя стороны — ЧИСТОЕ: «+» ставит сам орган на лице верхней половины, потому что это же
+            имя уезжает в речь обеих половин (`draw — front`, а не `draw — + front`). */}
         <PlaceOrDrawCell
-          label={`+ ${label}`}
+          label={label}
           heightPx={EMPTY_PX}
           purpose={`design · flat for the ${label} slot`}
           onSelect={(media) => placeFlat(media, side.view, side.slotRev)}
-          onDraw={() => setEditor({ mode: 'draw', view: side.view, slotRev: side.slotRev })}
-          drawTitle={`draw ${label} from nothing — saving puts the drawing straight into this slot`}
+          onDraw={() => setEditor({ mode: 'draw', view: side.view })}
           data-side-flat-door={side.view}
         />
         {busy === busyKey('flat', side.view) ? <Caption>saving…</Caption> : null}
@@ -450,7 +494,7 @@ export function SidesSection({
     if (!side.picture) {
       return (
         <EmptyBox
-          hint='empty · mark one below'
+          hint={EMPTY_RENDER_SIDE}
           title={`no render stands in ${label}. Put one in from RENDERS OF THIS CARD, below — the door «mark ▸» stands on the picture itself.`}
         />
       );
@@ -586,7 +630,7 @@ export function SidesSection({
 
       {/* ОДИН РЕДАКТОР НА БЛОК, ПО ИМЕНИ ЦЕЛИ. `draw` пишет В СЛОТ (флэт-верстак, CAS этой
           стороны); `edit` кладёт результат на карточку обычной картинкой и в слот не пишет. */}
-      {editor?.mode === 'draw' && (
+      {drawing && (
         <VectorModal
           open
           onOpenChange={(next: boolean) => !next && setEditor(null)}
@@ -594,9 +638,10 @@ export function SidesSection({
           band={band}
           base={null}
           slot={{
-            ref: flatRef(editor.view),
-            label: viewLabel(editor.view),
-            slotRev: editor.slotRev,
+            ref: flatRef(drawing.view),
+            label: viewLabel(drawing.view),
+            /* ЧИТАЕТСЯ ПРИ РЕНДЕРЕ, А НЕ СНИМАЕТСЯ ПРИ КЛИКЕ — разбор у объявления `editor`. */
+            slotRev: drawing.slotRev,
           }}
           disabled={disabled}
         />
@@ -682,9 +727,13 @@ export function RendersByViewGroup({
                 <EmptyBox
                   label={label}
                   required={required}
-                  hint='empty · fill it on the fabric render'
+                  hint={EMPTY_RENDER_SIDE}
                   onOpen={toRender}
-                  title={`fill ${label} on FABRIC RENDER — from the renders of this card or from a file`}
+                  /* ⚠ ФАЙЛ ЭТА СТОРОНА БОЛЬШЕ НЕ ПРИНИМАЕТ (r2 п.29/30): у пустой рендер-стороны
+                     нет ни половины «из медиатеки», ни `apply splitted` — единственный жест это
+                     `mark ▸` на самой картинке в RENDERS OF THIS CARD. Подсказка «or from a file»
+                     обещала дверь, которой на том экране нет вовсе, и посылала искать её. */
+                  title={`fill ${label} on FABRIC RENDER — from RENDERS OF THIS CARD (mark ▸)`}
                 />
               )}
               {/* The 3D word stands under a FILLED plate only: an empty side is in no run, and

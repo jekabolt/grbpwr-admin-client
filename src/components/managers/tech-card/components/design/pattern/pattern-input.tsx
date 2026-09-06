@@ -11,6 +11,7 @@ import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX } from '../assets/model';
 import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, SlotCap } from '../bench-slot';
+import { EMPTY_WORD } from '../core';
 
 /**
  * ═══ THE CELL IS THE FLAT SLOTS CELL — 138 × 162, PORTRAIT (owner, r2 §25) ══════════════════════
@@ -156,7 +157,7 @@ export function PatternInput({
               className='block w-full'
             >
               <Placeholder
-                label='empty'
+                label={EMPTY_WORD}
                 style={{ aspectRatio: FRAME_ASPECT, minHeight: 0 }}
                 className='w-full border-0'
               />

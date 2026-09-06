@@ -1214,41 +1214,35 @@ export function OutputsSection({
 
       {kind === 'threed' ? (
         /* ═══ THE SHELF — `.fgrid`, minmax 148px: the models built here and the ones brought, one
-           grid, told apart by their corner. Empty → the mockup's one dashed line. */
-        rows.length === 0 && pending.length === 0 && !bringsOwnModel ? (
-          /* ПУСТАЯ ПОЛКА БЕЗ ЕДИНОЙ ДВЕРИ — одна пунктирная строка. Пока дверь «принести свою»
-             есть, эта строка не нужна: пустая полка И ЕСТЬ одна ячейка-плейсхолдер. */
-          <div
-            data-outputs-empty=''
-            className='flex flex-wrap items-baseline gap-2 border border-dashed border-borderColor bg-bgColor px-2.5 py-2'
-          >
-            <Text size='control' variant='uppercase' tracking='label' component='span'>
-              no model on this card yet
-            </Text>
-            <Text size='micro' variant='label' component='span' className='normal-case'>
-              · <b>GENERATE above</b>
-            </Text>
-          </div>
-        ) : (
-          <Tiles min={148}>
-            {/* ═══ «ПРИНЕСТИ СВОЮ» — ПЕРВАЯ КАРТОЧКА ПОЛКИ (r2 п.32) ═══════════════════════════
-                Владелец: «вместо отдельного поля — первой карточкой в 3D MODELS OF THIS CARD».
-                Группа `BRING YOUR OWN` со своей подписью, пилюлей `free` и счётчиком принесённых
-                снята целиком: «построить» и «принести» — две двери к ОДНОЙ полке, и вторая из них
-                стояла под полкой отдельным полем, ни на что вокруг не похожим. Ячейка стоит ПЕРВОЙ
-                и до дыры живого прогона: у неё собственный замер («один орган — одно место»), и
-                пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
-            {bringsOwnModel && <Bay key='bring-your-own'>{bring.cell}</Bay>}
-            {pending.map((run) => (
-              <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
-                <PendingCell run={run} />
-              </Bay>
-            ))}
-            {rows.map((row) => (
-              <Bay key={row.picture.id ?? 0}>{cell(row)}</Bay>
-            ))}
-          </Tiles>
-        )
+           grid, told apart by their corner.
+           ⚠ ВТОРОЙ ВЕТКИ «ПУСТАЯ ПОЛКА БЕЗ ЕДИНОЙ ДВЕРИ» ЗДЕСЬ НЕТ, И ЭТО НЕ УПУЩЕНИЕ. Она стояла
+           и была НЕДОСТИЖИМА: её условие (`!rows && !pending && !bringsOwnModel`) — слово в слово
+           то, по которому раздел возвращает `null` двумя сотнями строк выше, поэтому строка «no
+           model on this card yet · GENERATE above» не рисовалась НИ РАЗУ и ни на одном сервере.
+           Хуже, чем ничего: она обещала признание в режиме чтения (где GENERATE как раз погашен),
+           и следующий читатель чинил бы её текст вместо её условия. Что видит человек на самом
+           деле: при живой записи — полка из одной ячейки «принести свою» (владелец, r2 п.32:
+           пустая полка И ЕСТЬ этот плейсхолдер), при выключенной — раздела нет вовсе, ровно как
+           у всякой другой полосы карточки в режиме чтения, а причина отказа названа словами один
+           раз, у самой кнопки GENERATE. */
+        <Tiles min={148}>
+          {/* ═══ «ПРИНЕСТИ СВОЮ» — ПЕРВАЯ КАРТОЧКА ПОЛКИ (r2 п.32) ═══════════════════════════
+              Владелец: «вместо отдельного поля — первой карточкой в 3D MODELS OF THIS CARD».
+              Группа `BRING YOUR OWN` со своей подписью, пилюлей `free` и счётчиком принесённых
+              снята целиком: «построить» и «принести» — две двери к ОДНОЙ полке, и вторая из них
+              стояла под полкой отдельным полем, ни на что вокруг не похожим. Ячейка стоит ПЕРВОЙ
+              и до дыры живого прогона: у неё собственный замер («один орган — одно место»), и
+              пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
+          {bringsOwnModel && <Bay key='bring-your-own'>{bring.cell}</Bay>}
+          {pending.map((run) => (
+            <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
+              <PendingCell run={run} />
+            </Bay>
+          ))}
+          {rows.map((row) => (
+            <Bay key={row.picture.id ?? 0}>{cell(row)}</Bay>
+          ))}
+        </Tiles>
       ) : (
         <Strip>
           {/* ═══ ЖИВОЙ ПРОГОН — В ГОЛОВЕ РЯДА, И ЭТО АДРЕС ОТВЕТА, А НЕ «НОВОЕ СВЕРХУ» ═══════════

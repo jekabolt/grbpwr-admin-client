@@ -6,6 +6,7 @@ import type { MediaViewerItem } from 'ui/components/media-viewer';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
+import { EMPTY_WORD } from '../core';
 import { PictureTile, type PictureTileAction } from '../picture-tile';
 import { viewLabel } from '../views';
 
@@ -304,7 +305,7 @@ export function EmptyStripCell({
         component='span'
         className={cn('min-w-0 break-words', required ? 'text-error' : 'text-labelColor')}
       >
-        <b>empty</b>
+        <b>{EMPTY_WORD}</b>
         {required ? ' · the render needs it' : ''}
       </Text>
 

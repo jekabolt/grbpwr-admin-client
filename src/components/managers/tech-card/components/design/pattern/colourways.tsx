@@ -86,24 +86,65 @@ export function PatternColourRow({
   return (
     <div data-pattern-colour-row='' className='flex flex-col gap-3'>
       {colour ? (
-        <div
-          data-colour-picked-tile={colour.code || colour.hex}
-          className='flex w-fit items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px]'
-        >
-          <Swatch hex={colourSwatchHex(colour)} size={16} title={colour.code || colour.hex} />
-          <Text component='span' size='micro' className='uppercase'>
-            {colour.code || colour.hex}
-          </Text>
-          {!disabled && (
-            <Button
-              variant='secondary'
-              size='xs'
-              data-colour-clear=''
-              title='take the colour off — a tile is generated without one just as well'
-              onClick={() => onPick(null)}
+        <div className='flex flex-col gap-1'>
+          <div
+            data-colour-picked-tile={colour.code || colour.hex}
+            className='flex w-fit items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px]'
+          >
+            <Swatch hex={colourSwatchHex(colour)} size={16} title={colour.code || colour.hex} />
+            <Text component='span' size='micro' className='uppercase'>
+              {colour.code || colour.hex}
+            </Text>
+            {!disabled && (
+              <Button
+                variant='secondary'
+                size='xs'
+                data-colour-clear=''
+                title='take the colour off — a tile is generated without one just as well'
+                onClick={() => onPick(null)}
+              >
+                ✕
+              </Button>
+            )}
+          </div>
+          {/**
+           * ═══ СВОТЧ — НАШ, А НЕ МОДЕЛИ, И ЭТО НАДО СКАЗАТЬ ЗДЕСЬ ══════════════════════════════
+           *
+           * Ряд подписан пилюлей «goes to the model» и показывает КВАДРАТИК ЦВЕТА — и вместе они
+           * читаются как обещание «модель получит вот этот цвет». На проводе же уезжает
+           * `params.colour = {code, hex}`, а `hex` у выбранного пантона ПУСТ (довод —
+           * `patternColourRecipe`), и сервер печатает в промпт ровно `colourway 18-1248 TCX`
+           * (`designgen/renderprompt.go`, `colourPhrase`: пара печатается как «colourway CODE —
+           * the exact value is #hex», а один код — как есть). Словаря пантонов у сервера нет ни
+           * одного; для image-модели TCX-код — это ТЕКСТ, а не цвет, и плитка возвращается какой
+           * угодно. Экран при этом показывал приближение из локального списка, и человек узнавал
+           * о расхождении только по счёту за прогон.
+           *
+           * ⚠ ПОЧЕМУ НЕ ПОСЛАТЬ ЭКРАННЫЙ HEX ВМЕСТО ЭТОЙ СТРОКИ. Две причины, и обе с чужой
+           * стороны провода:
+           *   · `pantone-swatches.ts` о своём `hex` говорит дословно «APPROXIMATE screen
+           *     rendering … never a colour standard», и пикер повторяет это человеку («swatches
+           *     are approximate on screen»). Сервер же напечатал бы «the EXACT value is #…» —
+           *     то есть наше приближение уехало бы в платный промпт как точное значение;
+           *   · и хуже: у сервера `hex` НЕ равнозначен коду, а СТАРШЕ его — «a person may then
+           *     type a different hex, and that typed value IS a deliberate deviation from the
+           *     code» (там же). Заполнив его из таблицы, клиент подделал бы решение человека,
+           *     которого никто не принимал, и модель красила бы по подделке.
+           * Поэтому едет один код, а строка ниже говорит это прямо — там, где стоит свотч.
+           */}
+          {/* Оба условия несущие: без кода печатать «told “”» было бы хуже молчания, а с
+              настоящим hex (он приезжает из `params.colour` прошлых прогонов) цвет уезжает
+              значением, и признаваться не в чем. */}
+          {!colour.hex.trim() && !!colour.code.trim() && (
+            <Text
+              size='nano'
+              variant='label'
+              component='span'
+              data-colour-code-only=''
+              className='normal-case'
             >
-              ✕
-            </Button>
+              code only — the model is told “{colour.code}”, not this swatch
+            </Text>
           )}
         </div>
       ) : (
@@ -113,7 +154,8 @@ export function PatternColourRow({
             label='+ colour'
             disabled={disabled}
             /* Пантон — это КОД. Экранный свотчик списка приблизителен и в платный промпт не едет
-               (довод у `patternColourRecipe`), поэтому hex здесь пустой намеренно. */
+               (полный довод — у строки «code only» выше и у `patternColourRecipe`), поэтому hex
+               здесь пустой намеренно, а не по забывчивости. */
             onPick={(code) => onPick(code.trim() ? { code: code.trim(), hex: '' } : null)}
           />
         </div>

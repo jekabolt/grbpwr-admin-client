@@ -4,7 +4,7 @@ import { useTechCard, techCardKeys } from 'components/managers/tech-cards/compon
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -174,6 +174,40 @@ export function ColourwayProposals({
   const [handName, setHandName] = useState('');
   const [handCode, setHandCode] = useState('');
   const [handMade, setHandMade] = useState<Array<{ colorwayId: number; name: string }>>([]);
+
+  /**
+   * ═══ КАРТОЧКА СМЕНИЛАСЬ — РУЧНАЯ СТРОКА И ЕЁ КВИТАНЦИИ НАЧИНАЮТСЯ ЗАНОВО ══════════════════
+   *
+   * ⚠ ЭТО НЕ ОСТОРОЖНОСТЬ, А ЗАКРЫТИЕ ЛОЖНОГО УТВЕРЖДЕНИЯ О ЧУЖОЙ КАРТОЧКЕ. Три состояния выше
+   * — местные, и ничто их не сбрасывало: `ColourwayProposals` не ключуется `techCardId`, а
+   * `StudioTab` при смене карточки НЕ размонтируется (инвариант 12). Квитанция «NAME · created ·
+   * see it on COLORWAYS ▸», заработанная на карточке A, остаётся стоять на карточке B — то есть
+   * экран сообщает, что у B ЗАВЕДЁН колорвей, которого у неё нет, и дверь ведёт смотреть его на
+   * её вкладку COLORWAYS. Полу-набранное имя и выбранный код уезжают туда же и уходят в
+   * `CreateColorway` уже под чужой карточкой.
+   *
+   * ⚠⚠ ПРОВЕРЯТЬ ЭТО НА ХОЛОДНОЙ КАРТОЧКЕ БЕСПОЛЕЗНО, И ИМЕННО ТАК ЭТОТ СБРОС СНЕСУТ. У карточки,
+   * которую в этой сессии ещё не открывали, `useDesignBand` отдаёт `isLoading: true`, `StudioTab`
+   * подменяет весь шаг на «loading…», и блок размонтируется САМ — состояние пропадает без всякого
+   * сброса. Опасен обычный ход человека «A → B → A»: у уже посещённой карточки данные в кэше,
+   * `isLoading` ложно, экран не подменяется, узел живёт. ЗАМЕРЕНО на стенде: сцена E в
+   * `probe-mood.mjs` прогревает обе карточки и без этих трёх строк показывает квитанцию карточки
+   * 7 на карточке 8 при `sameNode: true`.
+   *
+   * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ (инвариант 12): эффект оставил бы один закоммиченный кадр, в
+   * котором карточка уже новая, а квитанция ещё чужая — и этого кадра хватает, чтобы по ней
+   * нажать. Образец — `generation/generation-history.tsx` (`shownCard`).
+   *
+   * `busy` НЕ СБРАСЫВАЕТСЯ НАРОЧНО: он снимается в `finally` уже идущего запроса, и обнулить его
+   * здесь значило бы отпустить кнопку под живой мутацией.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (handName) setHandName('');
+    if (handCode) setHandCode('');
+    if (handMade.length) setHandMade([]);
+  }
 
   const savedSlots = useMemo(
     () => (techCard?.techCard?.bomItems ?? []).map((b) => ({ name: b.name, lineKey: b.lineKey })),

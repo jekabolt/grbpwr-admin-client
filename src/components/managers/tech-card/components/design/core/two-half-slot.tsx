@@ -65,13 +65,28 @@ export const HALF_FACE =
 export const SLOT_HALVES: React.CSSProperties = { display: 'grid', gridTemplateRows: '1fr 1fr' };
 
 /**
+ * ═══ ОДИН ФАКТ — ОДНА ФРАЗА, А ВЫЗЫВАЮЩИЙ ДАЁТ ТОЛЬКО СУЩЕСТВИТЕЛЬНОЕ ════════════════════════
+ *
+ * Факт у всех четырёх лент один: перо открывает редактор на чистой плите, и нарисованное встаёт
+ * ТУДА, откуда перо нажали. До этой правки он был написан ЧЕТЫРЬМЯ РАЗНЫМИ фразами («…takes this
+ * slot», «…joins the input», «draw front from nothing — saving puts the drawing straight into
+ * this slot», плюс мёртвое умолчание). Четыре редакции одного обещания — это четыре места, где
+ * оно разойдётся, и на трёх экранах из четырёх человек читал бы про чуть-чуть другое поведение.
+ *
+ * ПОЭТОМУ ПРЕДЛОЖЕНИЕ ЖИВЁТ ЗДЕСЬ, А ЛЕНТА НАЗЫВАЕТ ТОЛЬКО АДРЕС: `this slot`, `the input`.
+ * Существительное — единственное, что у лент действительно различается.
+ */
+export const drawTitle = (into: string): string =>
+  `opens the picture editor on a blank plate; what you draw goes into ${into}`;
+
+/**
  * НИЖНЯЯ ПОЛОВИНА ПЛЕЙСХОЛДЕРА — «нарисовать». Отдельный экспорт потому, что ВЕРХНЮЮ половину на
  * разных лентах держат разные коробки (квадрат референса, кадр верстака, плита стороны), а нижняя
  * везде одна и та же: второе её начертание разъехалось бы с первым в первый же день.
  */
 export function DrawHalf({
   label,
-  title,
+  into = 'this slot',
   onClick,
   anchor,
   ariaLabel,
@@ -79,7 +94,11 @@ export function DrawHalf({
   ...rest
 }: {
   label: string;
-  title?: string;
+  /**
+   * КУДА встанет нарисованное — существительным, а не целой фразой: предложение пишет
+   * `drawTitle` один раз на всю студию (разбор у него).
+   */
+  into?: string;
   onClick: () => void;
   /** Якорь пробы: чем эта половина является на своём экране. */
   anchor?: string;
@@ -94,7 +113,7 @@ export function DrawHalf({
       data-draw-half={anchor ?? ''}
       {...rest}
       aria-label={ariaLabel}
-      title={title}
+      title={drawTitle(into)}
       onClick={onClick}
       style={{ minHeight: 0 }}
       className={cn(HALF_FACE, 'border-t border-dashed border-borderColor', className)}
@@ -115,7 +134,11 @@ export function DrawHalf({
  * общая коробка.
  */
 export function PlaceOrDrawCell({
-  /** Имя слота — едет в подпись пикера и в `aria-label` обеих половин. */
+  /**
+   * ЧИСТОЕ ИМЯ СЛОТА, БЕЗ «+». Плюс — это лицо ВЕРХНЕЙ половины (двери в библиотеку), и ставит
+   * его орган, а не вызывающий: с `label="+ front"` речь читала «draw — + front», то есть
+   * зачитывала читалке пунктуацию чужой кнопки как часть имени стороны.
+   */
   label,
   /** Рост коробки в пикселях: она обязана совпадать с занятой плитой соседней ячейки. */
   heightPx,
@@ -123,7 +146,8 @@ export function PlaceOrDrawCell({
   onSelect,
   onDraw,
   drawLabel = 'draw',
-  drawTitle,
+  /** Адрес нарисованного — существительным; предложение пишет `drawTitle`. */
+  into,
   className,
   ...rest
 }: {
@@ -133,7 +157,7 @@ export function PlaceOrDrawCell({
   onSelect: (media: common_MediaFull) => void;
   onDraw: () => void;
   drawLabel?: string;
-  drawTitle?: string;
+  into?: string;
   className?: string;
   [k: `data-${string}`]: unknown;
 }): JSX.Element {
@@ -153,7 +177,8 @@ export function PlaceOrDrawCell({
       <div style={{ minHeight: 0, overflow: 'hidden' }} className='min-w-0'>
         <MediaSlot
           aspectRatio={['Custom']}
-          label={label}
+          /* «+» ЖИВЁТ ЗДЕСЬ — на лице двери, а не в имени слота: имя едет ещё и в речь. */
+          label={`+ ${label}`}
           hint={null}
           purpose={purpose}
           showVideos={false}
@@ -171,10 +196,7 @@ export function PlaceOrDrawCell({
         anchor={label}
         label={drawLabel}
         ariaLabel={`${drawLabel} — ${label}`}
-        title={
-          drawTitle ??
-          'opens the picture editor on a blank plate; what you draw goes into this slot'
-        }
+        into={into}
         onClick={onDraw}
       />
     </div>
