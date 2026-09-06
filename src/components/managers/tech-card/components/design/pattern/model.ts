@@ -9,7 +9,6 @@ import type {
 
 import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, assetLabel, shelfOf } from '../assets/model';
 import { cardOutputRows } from '../bench-kinds';
-import { colorwayLabel } from '../colorway-picker';
 import type { Gate } from '../render';
 
 /**
@@ -256,23 +255,80 @@ export function colourwayHex(ref?: common_AdminColorwayRef | null): string {
 }
 
 /**
+ * ═══ ЦВЕТ ПЛИТКИ НИ К ЧЕМУ НЕ ОБЯЗЫВАЕТ (владелец, r2 §26) ═════════════════════════════════════
+ *
+ * Владелец: «выбор цвета, который нас ни к чему не обязывает». Раньше цвет ПЛИТКИ выбирался из
+ * КОЛОРВЕЕВ карточки — то есть, чтобы покрасить пробную плитку, надо было сначала завести колорвей,
+ * а на момент первых генераций колорвеев у карточки обычно нет вовсе (тот же довод, по которому
+ * плитка не привязывается к колорвею при создании, E-1). Цвет теперь — ПАРА СТРОК, ничья: код
+ * (пантон или что набрали) и его экранный hex. Ничего на карточке от этого выбора не заводится и
+ * ничего не меняется — он живёт ровно один прогон.
+ */
+export type PatternColour = {
+  /** Ссылка, как её назвал человек: пантон `18-1248 TCX` или свой номер красильни. */
+  code: string;
+  /** ЭКРАННЫЙ hex — чтобы плитку было видно. Может быть пустым: пантон — это код, а не пиксели. */
+  hex: string;
+};
+
+/**
  * THE COLOUR AS THE RUN CARRIES IT — `params.colour`, the SAME field the render and the recolour
  * state theirs in. The server writes it into every kind's prompt without looking at the kind
  * (`designgen/snapshot.go`: `if c := p.Colour; c != nil { write("colour", colourStatement(c)) }`),
- * and its phrase is `colourway ROSSO — the exact value is #8d3a33`; with no hex on the colourway
- * the name alone still travels. Nothing else of the recipe is stated: a tile has no cloth list and
- * no colour maps, and an empty list here is an empty list on the wire, not a second spelling.
+ * and its phrase is `colourway ROSSO — the exact value is #8d3a33`; with no hex the code alone
+ * still travels. Nothing else of the recipe is stated: a tile has no cloth list and no colour
+ * maps, and an empty list here is an empty list on the wire, not a second spelling.
+ *
+ * ⚠ ПРИБЛИЗИТЕЛЬНЫЙ HEX В ПЛАТНЫЙ ПРОМПТ НЕ УЕЗЖАЕТ. Свотчи пантонов в этом клиенте — экранное
+ * приближение, и так сказано у самого списка (`pantone-swatches.ts`); серверная фраза при этом
+ * читается как «the EXACT value is #…». Поэтому hex едет только тогда, когда он настоящий — то
+ * есть пришёл с прошлого прогона, где его уже кто-то заявил, — а выбранный по коду пантон едет
+ * ОДНИМ КОДОМ. Пустой hex сервер переживает: он печатает то, что названо.
  */
-export function patternColourRecipe(ref: common_AdminColorwayRef): common_DesignColourRecipe {
+export function patternColourRecipe(colour: PatternColour): common_DesignColourRecipe {
   return {
     source: '',
-    code: colorwayLabel(ref),
-    hex: colourwayHex(ref),
+    code: colour.code.trim(),
+    hex: colour.hex.trim(),
     words: '',
     fabricMediaId: 0,
     fabrics: [],
     colourMaps: [],
   };
+}
+
+/** Ключ цвета для сравнения и дедупликации: код важнее hex, регистр не значит ничего. */
+export function patternColourKey(colour: PatternColour): string {
+  return (colour.code.trim() || colour.hex.trim()).toLowerCase();
+}
+
+/**
+ * ═══ НЕДАВНИЕ ЦВЕТА — ИЗ ПРОГОНОВ ЭТОЙ КАРТОЧКИ, А НЕ ИЗ НАСТРОЙКИ ════════════════════════════
+ *
+ * Владелец: «история использованных последних цветов при генерации». История цвета УЖЕ существует
+ * на проводе и ничего заводить под неё не надо: `params.colour` замораживается на прогоне (то же
+ * поле читает `render/drafts.ts`, когда засевает рецепт колорвея). Читаются прогоны рода
+ * `pattern` ЭТОЙ карточки, новейшие первыми (`band.runs` приходит новейшим вперёд), одинаковые
+ * цвета схлопываются, и берётся не больше `max` — ряд историей быть должен, а не свалкой.
+ *
+ * ⚠ ПРЕДЕЛ ЧЕСТНЫЙ: `band.runs` — ПЕРВАЯ СТРАНИЦА ленты, а не вся история карточки. Цвет, чей
+ * прогон с неё уже свалился, в ряду не появится, и это ухудшение против ничего: сегодня ряда нет.
+ */
+export function recentPatternColours(band: GetDesignBandResponse, max = 6): PatternColour[] {
+  const out: PatternColour[] = [];
+  const seen = new Set<string>();
+  for (const run of patternRuns(band)) {
+    const c = run.params?.colour;
+    if (!c) continue;
+    const colour: PatternColour = { code: (c.code ?? '').trim(), hex: (c.hex ?? '').trim() };
+    if (!colour.code && !colour.hex) continue;
+    const key = patternColourKey(colour);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(colour);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 /** Живые колорвеи карточки для выбора цвета и привязки; архивный — только пока он уже выбран. */

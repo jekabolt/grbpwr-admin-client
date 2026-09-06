@@ -104,7 +104,7 @@ function BrowserColumn({
 //
 // ЭКСПОРТИРУЕТСЯ С КРУГА 20 (B-27): базовая модель и базовый размер уехали отсюда в СВОЙ блок
 // шапки, и обёртки, которая держала бы категорию с ними вместе, больше нет. Браузер зовут по имени.
-export function CategoryBrowser() {
+export function CategoryBrowser({ hint = true }: { hint?: boolean } = {}) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
@@ -247,9 +247,14 @@ export function CategoryBrowser() {
           />
         </div>
       </GenericPopover>
-      <Text size='micro' variant='label'>
-        only the top category is required — sub-category and type are optional
-      </Text>
+      {/* Подсказка про необязательные уровни. На CARD DETAILS владелец её снял (`hint={false}`):
+          колонки браузера и так подписаны «sub · optional» / «type · optional», строка повторяла
+          их третий раз. Остальные вызывающие (CONSTRUCTION) её печатают как печатали. */}
+      {hint && (
+        <Text size='micro' variant='label'>
+          only the top category is required — sub-category and type are optional
+        </Text>
+      )}
 
       <ConfirmationModal
         open={pending != null}

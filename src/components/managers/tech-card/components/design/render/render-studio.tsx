@@ -20,33 +20,32 @@ import {
   type Gate,
 } from './model';
 import { OutputsSection } from './outputs';
-import { RenderInputStrip } from './render-input-strip';
 import { Palette } from './palette';
-import { InputFlatsGroup, SidesGroup } from './side-row';
+import { SidesSection } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
- * THE FABRIC RENDER STUDIO — step 4 of the chain, ONE BLOCK, as the prototype draws it
- * (`_step-render.js`, `RENDER['step-render']`):
+ * THE FABRIC RENDER STUDIO — step 4 of the chain, FOUR BLOCKS IN THE ORDER OF THE WORK:
  *
  *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
- *   ── INPUT FLATS ──── the flat bench, read only, one cell per side (6)
- *   ── SIDES ────────── the render bench of the studio's colourway, THE writer of that axis
  *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
  *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
+ *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
+ *   RENDERS OF THIS CARD  the plates themselves, and every door that puts one into a side
+ *   GENERATION HISTORY    (mounted by the step screen)
  *
- * The rows are separated by group rules (`GroupLabel`), never by nested boxes: a block never
- * contains another block (DESIGN.md). The order is the order of the work — first what the render is
- * made FROM, then what came BACK, then what it is made WITH. Under the block stands the section of
- * the card's renders (`OutputsSection`: `mark ▸`, split, apply splitted — the doors that put a
- * render into a side from the card's own pictures), and under that the generation history.
+ * The rows INSIDE the first block are separated by group rules (`GroupLabel`), never by nested
+ * boxes: a block never contains another block (DESIGN.md).
  *
- * ⚠ THE OWNER SAW THE BETA AND SAID «это не как в референсе». What stood here — a four-column table
- * «flats in · renders back · 3D» and a block titled «generation — fabric render» — is gone; the
- * organs are the same, the shape is the mockup's.
+ * ⚠ ДВЕ ЛЕНТЫ С ВЕРХА ЭТОГО БЛОКА СНЯТЫ (r2 п.29–30, рулинги r1 §8.3/§8.10). Владелец, дословно:
+ * «в FABRIC RENDER раньше было лучше чем сейчас … только таблицу вместо двух лент» и «весь блок
+ * FLATS OF THIS CARD в FABRIC RENDER убери полностью и маркировка в SIDES будет происходить только
+ * в блоке RENDERS OF THIS CARD». Поэтому здесь больше НЕТ ни `InputFlatsGroup`, ни `SidesGroup`, ни
+ * пула неразмеченных чертежей (`RenderInputStrip bare`): стороны — своим блоком ниже, а разметка —
+ * у самих картинок, в `OutputsSection`, где лежит материал.
  *
  * THE REFERENCES ARE NOT DRAWN HERE: a fabric render is coloured over THE FLATS OF THIS CARD, and
  * the model never sees the reference photographs. They belong to FLAT, one click away.
@@ -61,7 +60,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *
  * ═══ THE COLOURWAY IS ONE NUMBER FOR THE WHOLE STUDIO (round 19, C1) ═══════════════════════════
  * The choice is on the rail, not here; the number arrives as a prop. The render bench is WRITTEN
- * here (`SidesGroup`, `OutputsSection` → `mark ▸`), READ on 3D and ASSEMBLED by the server
+ * here (`SidesSection` unmarks, `OutputsSection` → `mark ▸` fills), READ on 3D and ASSEMBLED by the server
  * (`designSelectBench`); a second owner of the number would have 3D looking into one bench while
  * the render fills another. `key={colorwayId}` on the composer remounts this screen on a change of
  * colour, so `useColourDraft` seeds ONCE PER MOUNT and anew per colour.
@@ -239,19 +238,6 @@ export function RenderStudio({
         question='· the cloth on the flats'
         action={<Pill tone='ink'>step 4</Pill>}
       >
-        {/* ═══ INPUT FLATS — read only; the flat bench is written on FLAT and under the divider. */}
-        <InputFlatsGroup band={band} onGoToKind={onGoToKind} />
-
-        {/* ═══ SIDES — the render bench of this colourway, the one writer of that axis. Under its
-            strip: the divider and the sheets not yet raised into it (`RenderInputStrip`, bare). */}
-        <SidesGroup
-          band={band}
-          techCardId={techCardId}
-          disabled={disabled}
-          colorwayId={colorwayId}
-          onGoToKind={onGoToKind}
-        />
-
         {/* ═══ CLOTH AND COLOUR · CLOTH IS · IN WORDS — the recipe, three group rows. The palette
             owns them because they write one draft (`useColourDraft`) and the gate above reads
             the same one. ⚠ THE ANCHOR `#design-fabric-menu` STAYS ON THE GRID: E-7 («no cloth
@@ -283,18 +269,21 @@ export function RenderStudio({
           onInspect={() => setInspecting(true)}
         />
 
-        {/* ═══ UNDER A RULE AT THE END — THE SHEETS NOT YET RAISED INTO THE STRIP ══════════════
-            The prototype's own words: «ниже полосы — разделитель и мультивью-листы, которые ещё не
-            подняты в полосу; под разделителем сырьё, над ним размеченный результат». The mockup
-            has no such rail, so it stands LAST, under a hairline, and not between the strip and
-            the recipe: the same organ as before (`RenderInputStrip`, bare) — the unmarked
-            drawings with `mark ▸`, the sheets and their decks, the `+ flat` door. */}
-        {!disabled && (
-          <div className='mt-3 border-t border-hairline pt-2' data-side-rows-pool=''>
-            <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} bare />
-          </div>
-        )}
       </Section>
+
+      {/* ═══ SIDES — СВОЙ БЛОК, НАД РЕНДЕРАМИ КАРТОЧКИ (r2 п.29) ══════════════════════════════
+          Строка на сторону: слева — чертёж, который пошёл в прогон (пустой заводится прямо тут:
+          половина «из медиатеки», половина «draw»), справа — рендер, который вернулся. Класть
+          рендер в сторону эта таблица не умеет намеренно — жест `mark ▸` стоит у самой картинки,
+          в блоке ниже. */}
+      <SidesSection
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        colorwayId={colorwayId}
+        colorwayLabel={colorwayLabel}
+        onGoToKind={onGoToKind}
+      />
 
       {/* The renders this card holds — where `mark ▸`, `split ▸` and `apply splitted` live: the
           doors that put a render into a side from the card's own pictures. `mark ▸` addresses the

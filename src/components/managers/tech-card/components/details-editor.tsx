@@ -1,5 +1,6 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
-import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -14,15 +15,14 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Toolbar } from 'ui/components/toolbar';
 import { InertDoor } from './design/bench-slot';
-import { Counter, EmptyState } from './design/core';
 import {
   BoardMovedPill,
-  FromMoodboardPill,
   GoTo,
   LockedBar,
   ProvenancePill,
   scrollToOrgan,
   useProvenance,
+  type Provenance,
 } from './design/head/mood-organs';
 import { REFERENCE_KIND } from './design/mood-board';
 import { upsertDetail, type FormDetail } from './form-writers';
@@ -32,11 +32,31 @@ import { detailAspects, detailKeyLabel } from './tech-card-options';
 /**
  * CONSTRUCTION — ОПИСАНО АСПЕКТ ЗА АСПЕКТОМ (блок шага MOODBOARD, макет `_step-mood.js`,
  * `zAspectsBlock`). Хранится в `details[]`; показываются только аспекты с содержимым или добавленные
- * в этой сессии — не стена пустых полей. Каждый аспект: подпись капслоком, справа пилюля
- * происхождения и `✕`; под ней текст; под текстом лента картинок 100×100 с `✕` в углу и приёмным
- * слотом `+ image`. Пустые аспекты не сохраняются (маппер их роняет) и уходят из вида на следующей
- * загрузке; стандартный аспект, показанный в сессии, остаётся на месте и с пустым текстом — карточка
- * не исчезает из-под курсора.
+ * в этой сессии — не стена пустых полей. Пустые аспекты не сохраняются (маппер их роняет) и уходят
+ * из вида на следующей загрузке; стандартный аспект, показанный в сессии, остаётся на месте и с
+ * пустым текстом — карточка не исчезает из-под курсора.
+ *
+ * ═══ КАК ВЫГЛЯДИТ РЯД АСПЕКТА ПОСЛЕ r2 (пп. 5–8, слово владельца) ═══════════════════════════════
+ *
+ * Было: подпись 11px чернилами, под текстом — лента кадров 100×100, и в КАЖДОМ аспекте, даже
+ * пустом, ВСЕГДА стоял полосатый приёмный квадрат 100×100. Владелец (2026-09-06, п.7): «у каждого
+ * аспекта плейсхолдер картинки — при многих аспектах 2/3 экрана пустота». Считать легко: четыре
+ * аспекта без картинок — четыре пустых квадрата с полями, больше четырёхсот пикселей ни о чём.
+ *
+ * Стало:
+ *   · п.8 — ПОДПИСЬ АСПЕКТА ЕСТЬ ЯРЛЫК: 10px, капслок, серый — та же метрика, какой подписаны поля
+ *     GENERAL INFORMATION. Имя созданного аспекта не правится (и не правилось), и теперь это ВИДНО:
+ *     ярлык не притворяется значением, правится ровно то, что под ним, — текст.
+ *   · п.7 — ДВЕРЬ КАРТИНКИ ОДНА И ТА ЖЕ ВЕЗДЕ: текстовый чип `+ image` одной строкой под текстом.
+ *     Кадры, если они есть, стоят лентой НАД ней; нет кадров — нет и пустого квадрата, только
+ *     дверь. Один орган в одном месте, а не «маленькая кнопка тут, большой квадрат там».
+ *     Три жеста при этом целы: клик открывает библиотеку (`MediaSelector`), а ⌘V и брошенный файл
+ *     ловит `useMediaIntake` НА ВСЁМ РЯДУ аспекта (`AspectRow`) — то же, что делал слот, только
+ *     приёмник теперь размером с ряд, а не с квадрат.
+ *   · п.6 — ДВЕРЬ `+ aspect` УЕХАЛА ВНИЗ СПИСКА, плейсхолдер-рядом под последним аспектом; из
+ *     шапки блока убрана. Место двери — там, где появится её результат.
+ *   · п.5 — из шапки сняты `FROM THE MOODBOARD` и счётчик `N OF M DRAFTED ASPECTS`; осталось одно
+ *     предупреждение `MOODBOARD MOVED ON` — оно про потерю, не про счёт.
  *
  * ═══ ЧТО ЗДЕСЬ НЕ РИСУЕТСЯ — SILHOUETTE И FABRIC ══════════════════════════════════════════════
  *
@@ -48,11 +68,10 @@ import { detailAspects, detailKeyLabel } from './tech-card-options';
  * ═══ ШАПКА БЛОКА — СВОЯ, И РЯД ПИЛЮЛЬ СТОИТ В НЕЙ (r1, по макету `step-1.png`) ═════════════════
  *
  * Редактор рисует СВОЮ `Section` — `construction · described aspect by aspect` — и ставит
- * `ConstructionAction` (`FROM THE MOODBOARD · N OF M DRAFTED ASPECTS · + ASPECT · MOODBOARD MOVED
- * ON`) в её `action`, в правый угол линейки, как макет. Раньше обёртку держал композитор
- * (`design/studio-tab.tsx`) и слота `action` не отдавал, и ряд стоял первой строкой ПОД линейкой.
- * Счёты (`drafted`, `allKeys`) и дверь `+ aspect` знает только этот файл, поэтому обёртка здесь, а
- * не у композитора — тем же приёмом, что у `MaterialSlots`. Экземпляр по-прежнему один
+ * `ConstructionAction` (после r2 — только `MOODBOARD MOVED ON`, когда он есть) в её `action`, в
+ * правый угол линейки, как макет. Раньше обёртку держал композитор (`design/studio-tab.tsx`) и
+ * слота `action` не отдавал, и ряд стоял первой строкой ПОД линейкой. Обёртка осталась здесь тем
+ * же приёмом, что у `MaterialSlots`. Экземпляр по-прежнему один
  * (`components/index.tsx` отдаёт его в студию пропом `constructionAspects`), и композитор кладёт
  * его в стек КАК ЕСТЬ, без своей `Section` вокруг, — иначе коробка в коробке.
  *
@@ -200,8 +219,6 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
   const remainingStandard = detailAspects.filter(
     (a) => !GENERAL_KEYS.includes(a.key) && !shownStandard.includes(a.key),
   );
-  const drafted = allKeys.filter((k) => prov({ kind: 'detail', key: k }) === 'drafted').length;
-
   // ЧТО УЕХАЛО БЫ ВО ФЛЭТ ДВЕРЬЮ «FROM CONSTRUCTION»: посадка, затем по строке на заполненный
   // аспект — правило двери у поля-адресата (`references-section.tsx`, `takeAspects`). Здесь только
   // ЧИСЛО, тем же счётом; текст не собирается — второго писателя у правила нет.
@@ -223,172 +240,96 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     setPicker(false);
   };
 
-  const addChip = (
-    <Chip dashed onClick={() => setPicker((v) => !v)} pressed={picker} data-c19-aspect-add=''>
-      + aspect
-    </Chip>
-  );
-
   return (
-    /* СВОЯ `Section`, ряд пилюль и дверь `+ aspect` — в её `action` (разбор в шапке файла).
+    /* СВОЯ `Section`; в её `action` — одно предупреждение доски (разбор в шапке файла).
        `data-c19-aspects` — якорь проб, остался на содержимом блока. */
     <Section
       title='construction'
       question='· described aspect by aspect'
-      action={
-        <ConstructionAction
-          techCardId={techCardId}
-          drafted={drafted}
-          total={allKeys.length}
-          add={addChip}
-        />
-      }
+      action={<ConstructionAction techCardId={techCardId} />}
     >
       <div className='space-y-2.5' data-c19-aspects=''>
-      {allKeys.length === 0 && (
-        <EmptyState action={addChip}>
-          <span className='uppercase text-textColor'>no aspects yet</span>
-        </EmptyState>
-      )}
-
-      {allKeys.length > 0 && (
-        <div data-c19-aspect-list=''>
-          {allKeys.map((key) => {
-            const d = detailByKey(key);
-            const ids = d?.mediaIds ?? [];
-            return (
-              <div key={key} className='border-b border-hairline pb-2 pt-1.5' data-c19-aspect={key}>
-                <div className='flex flex-wrap items-center gap-2'>
-                  <Text
-                    size='control'
-                    variant='uppercase'
-                    tracking='label'
-                    component='span'
-                    className='min-w-0 flex-1 truncate'
-                  >
-                    {detailKeyLabel(key)}
-                  </Text>
-                  <ProvenancePill state={prov({ kind: 'detail', key })} data-c19-prov={key} />
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    aria-label={`remove aspect ${detailKeyLabel(key)}`}
-                    onClick={() => removeAspect(key)}
-                    data-c19-aspect-drop={key}
-                  >
-                    ✕
-                  </Button>
-                </div>
-                <Textarea
-                  name={`detail-${key}`}
-                  rows={2}
-                  maxLength={2000}
-                  value={d?.text ?? ''}
-                  placeholder='how this aspect is made'
-                  className='mt-1'
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                    upsert(key, { text: e.target.value })
-                  }
-                />
-                {/* 100px, not the 40px these used to be: a construction reference is looked AT —
-                    a seam finish or a pocket bartack is unreadable at thumbnail size. Под кадром —
-                    пилюля `in the input`, если та же картинка стоит референсом флэта. */}
-                <div className='mt-1.5 flex flex-wrap items-start gap-1.5'>
-                  {ids.map((id, imgIndex) => {
-                    const url = urlOf(id);
-                    return (
-                      <div key={id} className='min-w-[100px]' data-c19-aspect-pic={id}>
-                        <div className='relative size-[100px] border border-borderColor bg-bgZebra'>
-                          <button
-                            type='button'
-                            onClick={() =>
-                              url && setViewer({ items: viewerItemsFor(ids), index: imgIndex })
-                            }
-                            disabled={!url}
-                            aria-label='view the image'
-                            className='block size-full cursor-zoom-in'
-                          >
-                            {url ? (
-                              <Media src={url} alt='ref' aspectRatio='1/1' fit='cover' />
-                            ) : (
-                              <span className='flex size-full items-center justify-center text-micro'>
-                                #{id}
-                              </span>
-                            )}
-                          </button>
-                          <button
-                            type='button'
-                            aria-label='remove image'
-                            onClick={() => removeImage(key, id)}
-                            className='absolute right-0.5 top-0.5 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor'
-                          >
-                            ✕
-                          </button>
-                        </div>
-                        {inputIds.has(id) && (
-                          <div className='pt-0.5'>
-                            <Pill tone='ink'>in the input</Pill>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {/* Той же клеткой, что и снимки рядом: пустое место и есть слот. ⌘V кладёт сюда
-                      скриншот из мессенджера, минуя библиотеку. */}
-                  <MediaSlot
-                    aspectRatio={['Custom']}
-                    frameAspect='1/1'
-                    heightPx={100}
-                    compact
-                    label='+ image'
-                    purpose='construction reference'
-                    allowMultiple
-                    showVideos={false}
-                    onSelect={(picked) => addImages(key, picked)}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ПИКЕР АСПЕКТА — по клику на `+ aspect`, полосой контролов (`Toolbar` — единственная
-          рамка, которой внутри блока можно): словарь, своё имя, `add`, `close`. */}
-      {picker && (
-        <Toolbar data-c19-aspect-picker=''>
-          {remainingStandard.length > 0 && (
-            <select
-              aria-label='aspect kind'
-              value={newStandard}
-              onChange={(e) => setNewStandard(e.target.value)}
-              className='min-h-[22px] w-44 appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
-            >
-              <option value=''>— not set —</option>
-              {remainingStandard.map((a) => (
-                <option key={a.key} value={a.key}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          )}
-          <Input
-            name='new-aspect'
-            aria-label='your own aspect'
-            value={newAspect}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAspect(e.target.value)}
-            placeholder='or your own, e.g. lining'
-            className='w-48'
-          />
-          <Button type='button' variant='secondary' size='xs' onClick={addAspect} data-c19-aspect-confirm=''>
-            add
-          </Button>
-          <Button type='button' variant='secondary' size='xs' onClick={() => setPicker(false)}>
-            close
-          </Button>
-        </Toolbar>
-      )}
+      {/* СПИСОК И ЕГО ПОСЛЕДНИЙ, ПУСТОЙ РЯД — ОДИН СТОЛБИК. Дверь `+ aspect` стоит там, где
+          появится аспект, а не в шапке блока (п.6): ряд-плейсхолдер держит тот же левый край и тот
+          же ритм, что заполненные ряды над ним, поэтому «добавить» читается как продолжение
+          списка, а не как отдельный орган. Пустой список ничего не объясняет словами — там этот
+          ряд и есть всё содержимое блока, и он сам говорит, что делать. */}
+      <div data-c19-aspect-list=''>
+        {allKeys.map((key) => {
+          const d = detailByKey(key);
+          return (
+            <AspectRow
+              key={key}
+              aspectKey={key}
+              text={d?.text ?? ''}
+              ids={d?.mediaIds ?? []}
+              prov={prov({ kind: 'detail', key })}
+              inputIds={inputIds}
+              urlOf={urlOf}
+              onText={(text) => upsert(key, { text })}
+              onAddImages={(picked) => addImages(key, picked)}
+              onRemoveImage={(id) => removeImage(key, id)}
+              onRemoveAspect={() => removeAspect(key)}
+              onOpenViewer={(index, ids) => setViewer({ items: viewerItemsFor(ids), index })}
+            />
+          );
+        })}
+        {!picker ? (
+          <button
+            type='button'
+            onClick={() => setPicker(true)}
+            data-c19-aspect-add=''
+            className='flex w-full items-center border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          >
+            + aspect
+          </button>
+        ) : (
+          /* ПИКЕР ВСТАЁТ РОВНО НА МЕСТО РЯДА-ПЛЕЙСХОЛДЕРА — той же последней строкой списка, а не
+             отдельным органом ниже: двух дверей «добавить» на экране не бывает ни на миг. Полоса
+             контролов (`Toolbar` — единственная рамка, которой внутри блока можно): словарь, своё
+             имя, `add`, `close`. Якорь проб стоит на обёртке: `Toolbar` чужие пропы не пропускает,
+             и `data-*` на нём молча терялся бы. */
+          <div data-c19-aspect-picker=''>
+            <Toolbar>
+              {remainingStandard.length > 0 && (
+                <select
+                  aria-label='aspect kind'
+                  value={newStandard}
+                  onChange={(e) => setNewStandard(e.target.value)}
+                  className='min-h-[22px] w-44 appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
+                >
+                  <option value=''>— not set —</option>
+                  {remainingStandard.map((a) => (
+                    <option key={a.key} value={a.key}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Input
+                name='new-aspect'
+                aria-label='your own aspect'
+                value={newAspect}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAspect(e.target.value)}
+                placeholder='or your own, e.g. lining'
+                className='w-48'
+              />
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                onClick={addAspect}
+                data-c19-aspect-confirm=''
+              >
+                add
+              </Button>
+              <Button type='button' variant='secondary' size='xs' onClick={() => setPicker(false)}>
+                close
+              </Button>
+            </Toolbar>
+          </div>
+        )}
+      </div>
 
       {/* ДВЕРЬ ВСТАВКИ ВО ФЛЭТ — см. шапку файла: живая стоит у поля-адресата на шаге FLAT, здесь —
           инертная с причиной, и число строк тем же правилом. */}
@@ -431,32 +372,171 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
 }
 
 /**
- * ПРАВЫЙ УГОЛ ШАПКИ БЛОКА (макет: `zFromBoard() + counter(drafted, 'drafted aspect', n) +
- * chip('+ aspect') + zMoved()`). Стоит в `action` собственной `Section` редактора (см. шапку
- * файла); экспорт оставлен композитору, который захочет собрать блок из частей. Счётчик не
- * рисуется при нуле аспектов (макет: «не рисуется, если аспектов 0»).
+ * ПРАВЫЙ УГОЛ ШАПКИ БЛОКА. Макет рисовал здесь `zFromBoard() + counter(drafted, 'drafted aspect',
+ * n) + chip('+ aspect') + zMoved()`; владелец (2026-09-06, п.5): «в CONSTRUCTION FROM THE MOODBOARD
+ * · 5 OF 5 DRAFTED ASPECTS выглядит криво и излишне» — пилюля источника и счётчик сняты, дверь
+ * `+ aspect` уехала вниз списка (п.6). Остаётся ОДНО предупреждение — «moodboard moved on», когда
+ * доска ушла вперёд после черновика: оно про потерю, а не про счёт. Стоит в `action` собственной
+ * `Section` редактора; экспорт оставлен композитору, который захочет собрать блок из частей.
  */
-export function ConstructionAction({
-  techCardId,
-  drafted,
-  total,
-  add,
-}: {
-  techCardId: number;
-  drafted: number;
-  total: number;
-  add?: JSX.Element;
-}): JSX.Element {
+export function ConstructionAction({ techCardId }: { techCardId: number }): JSX.Element {
   return (
     <div className='flex flex-wrap items-center justify-end gap-1.5' data-c19-aspects-action=''>
-      <FromMoodboardPill />
-      {total > 0 && (
-        <span className='contents' data-c19-aspects-drafted=''>
-          <Counter n={drafted} noun='drafted aspect' total={total} />
-        </span>
-      )}
-      {add}
       <BoardMovedPill techCardId={techCardId} />
+    </div>
+  );
+}
+
+/**
+ * ОДИН АСПЕКТ — ЯРЛЫК, ТЕКСТ, КАДРЫ, ДВЕРЬ (пп. 7–8; разбор в шапке файла).
+ *
+ * ⚠ ЭТО ОТДЕЛЬНЫЙ КОМПОНЕНТ РАДИ ХУКА, А НЕ РАДИ ОПРЯТНОСТИ. Приёмник медиа (`useMediaIntake`)
+ * держит своё состояние — наведение, фокус, очередь приёмки, — и у каждого аспекта оно СВОЁ:
+ * ⌘V обязан лечь в тот ряд, над которым указатель, а не во все сразу. В теле `.map()` хук
+ * вызвать нельзя (их число менялось бы с числом аспектов), значит ряд обязан быть компонентом.
+ */
+function AspectRow({
+  aspectKey,
+  text,
+  ids,
+  prov,
+  inputIds,
+  urlOf,
+  onText,
+  onAddImages,
+  onRemoveImage,
+  onRemoveAspect,
+  onOpenViewer,
+}: {
+  aspectKey: string;
+  text: string;
+  ids: number[];
+  prov: Provenance;
+  /** Кадры, которые ТА ЖЕ карточка держит референсом входа шага FLAT. */
+  inputIds: Set<number>;
+  urlOf: (id: number) => string;
+  onText: (text: string) => void;
+  onAddImages: (picked: common_MediaFull[]) => void;
+  onRemoveImage: (id: number) => void;
+  onRemoveAspect: () => void;
+  onOpenViewer: (index: number, ids: number[]) => void;
+}): JSX.Element {
+  const label = detailKeyLabel(aspectKey);
+  // ПРИЁМНИК РАЗМЕРОМ С РЯД. Раньше ⌘V и бросок ловил полосатый квадрат `+ image`; квадрата больше
+  // нет, а жесты остались — теперь их принимает весь ряд аспекта, включая его текстовое поле.
+  // Текстовая вставка сюда не доходит: приёмник берёт из буфера только файлы.
+  const intake = useMediaIntake({
+    accept: 'image',
+    purpose: 'construction reference',
+    onMedia: onAddImages,
+  });
+
+  return (
+    <div
+      {...intake.regionHandlers}
+      className='border-b border-hairline py-3'
+      data-c19-aspect={aspectKey}
+    >
+      {/* ЯРЛЫК, А НЕ ЗНАЧЕНИЕ (п.8): метрика подписи поля — 10px, капслок, серый. Имя созданного
+          аспекта не правится, и строка это показывает собой. */}
+      <div className='flex items-center gap-2'>
+        <Text
+          size='micro'
+          variant='label'
+          tracking='label'
+          component='span'
+          className='min-w-0 flex-1 truncate uppercase'
+        >
+          {label}
+        </Text>
+        <ProvenancePill state={prov} data-c19-prov={aspectKey} />
+        <Button
+          type='button'
+          variant='secondary'
+          size='xs'
+          aria-label={`remove aspect ${label}`}
+          onClick={onRemoveAspect}
+          data-c19-aspect-drop={aspectKey}
+        >
+          ✕
+        </Button>
+      </div>
+
+      <Textarea
+        name={`detail-${aspectKey}`}
+        rows={2}
+        maxLength={2000}
+        value={text}
+        placeholder='how this aspect is made'
+        className='mt-1.5'
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onText(e.target.value)}
+      />
+
+      {/* ЛЕНТА КАДРОВ И ЕЁ ДВЕРЬ — ОДНА СТРОКА, ВСЕГДА ОДНА И ТА ЖЕ (п.7). Ветки «есть кадры /
+          нет кадров» здесь НЕТ: строка рисуется одна, дверь стоит последней в ней. Нет кадров —
+          в строке остаётся только дверь, и ряд аспекта короче прежнего на добрую треть; есть —
+          дверь встаёт хвостом ленты, ничего не прибавляя к её высоте.
+          100px, not the 40px these used to be: a construction reference is looked AT — a seam
+          finish or a pocket bartack is unreadable at thumbnail size. Под кадром — пилюля
+          `in the input`, если та же картинка стоит референсом флэта. */}
+      {/* `items-start`, не `items-center`: у кадра, который стоит и во входе, под рамкой висит
+          пилюля, и центрирование по строке уводило бы СОСЕДНИЙ кадр вниз на половину её высоты —
+          лента переставала стоять по верхнему краю. */}
+      <div className='mt-2 flex flex-wrap items-start gap-1.5'>
+        {ids.map((id, imgIndex) => {
+          const url = urlOf(id);
+          return (
+            <div key={id} className='min-w-[100px]' data-c19-aspect-pic={id}>
+              <div className='relative size-[100px] border border-borderColor bg-bgZebra'>
+                <button
+                  type='button'
+                  onClick={() => url && onOpenViewer(imgIndex, ids)}
+                  disabled={!url}
+                  aria-label='view the image'
+                  className='block size-full cursor-zoom-in'
+                >
+                  {url ? (
+                    <Media src={url} alt='ref' aspectRatio='1/1' fit='cover' />
+                  ) : (
+                    <span className='flex size-full items-center justify-center text-micro'>
+                      #{id}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type='button'
+                  aria-label='remove image'
+                  onClick={() => onRemoveImage(id)}
+                  className='absolute right-0.5 top-0.5 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor'
+                >
+                  ✕
+                </button>
+              </div>
+              {inputIds.has(id) && (
+                <div className='pt-0.5'>
+                  <Pill tone='ink'>in the input</Pill>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {/* Дверь — хвост ленты. Она же говорит про бросок, пока файл тащат над рядом: слово вместо
+            подсветки рамки, которой у ряда больше нет. */}
+        <MediaSelector
+          label='+ image'
+          purpose='construction reference'
+          aspectRatio={['Custom']}
+          allowMultiple
+          showVideos={false}
+          saveSelectedMedia={onAddImages}
+          trigger={
+            <Chip dashed data-c19-aspect-image-add={aspectKey}>
+              {intake.dragging ? 'drop the image' : '+ image'}
+            </Chip>
+          }
+        />
+      </div>
+      {intake.dialog}
     </div>
   );
 }

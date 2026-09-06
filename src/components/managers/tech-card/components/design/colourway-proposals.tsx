@@ -46,10 +46,15 @@ import { useCardMemory, useDraftMemory, type ColourwayVerdict } from './head/use
  * STUDIO, сразу под таблицей слотов: цвета назначаются ПО СЛОТАМ, и соседство читается как фраза.
  *
  * `Section`-ОБЁРТКА ЖИВЁТ ЗДЕСЬ, А НЕ У ВЫЗЫВАЮЩЕГО, И ЭТО НЕ СТИЛЬ — тем же приёмом, каким её
- * держит соседняя таблица слотов. Причина в условности: блока НЕТ ВОВСЕ, пока нечего сказать
- * (ранний возврат ниже), а решает это состояние модульного стора, которое знает только орган.
- * Обёртка у вызывающего означала бы либо пустую белую рамку с подписью на каждой карточке, либо
- * второй читатель того же стора в композиторе — то есть второй ответ на один вопрос.
+ * держит соседняя таблица слотов. Причина: условие «рисоваться или нет» знает только орган
+ * (состояние модульного стора плюс права), а обёртка у вызывающего потребовала бы ВТОРОГО
+ * читателя того же стора в композиторе — то есть второго ответа на один вопрос.
+ *
+ * ⚠ С КРУГА r2 БЛОК СТОИТ НА КАРТОЧКЕ ВСЕГДА, а не только после прогона черновика: владелец
+ * попросил снизу плейсхолдер «+ colourway» (п. 15), а дверь, которая появляется только после
+ * платного прогона, дверью не является. Единственное исключение — карточка только для чтения:
+ * там нет ни плейсхолдера, ни предложений, и рамка с одним заголовком не сказала бы ничего
+ * (ранний возврат ниже).
  *
  * ═══ ЗДЕСЬ КЛИК ОБЯЗАТЕЛЕН, И ЭТО НЕ ПРОТИВОРЕЧИТ B-14 ═════════════════════════════════════
  *
@@ -75,6 +80,9 @@ function Swatch({ hex, title }: { hex?: string; title?: string }): JSX.Element {
 
 const cell =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+
+/** Ключ занятости для ручной строки — свой, чтобы «идёт создание» не гасило кнопки предложений. */
+const HAND = 'hand:new';
 
 /**
  * ТРЁХШАГОВАЯ ЗАПИСЬ, ТОЧНО ТА ЖЕ, КАКОЙ ЕЁ ДЕЛАЕТ ВКЛАДКА: сперва личность, потом рецепт.
@@ -161,6 +169,11 @@ export function ColourwayProposals({
   const { confirm, pending } = useConfirmColourway(techCardId);
   const [busy, setBusy] = useState<string | null>(null);
   const [, setParams] = useSearchParams();
+  /* Строка «завести руками» — своё имя, свой цвет и свои квитанции; в сторе черновика её нет и
+     быть не должно: она не предложение модели, а действие человека. */
+  const [handName, setHandName] = useState('');
+  const [handCode, setHandCode] = useState('');
+  const [handMade, setHandMade] = useState<Array<{ colorwayId: number; name: string }>>([]);
 
   const savedSlots = useMemo(
     () => (techCard?.techCard?.bomItems ?? []).map((b) => ({ name: b.name, lineKey: b.lineKey })),
@@ -208,13 +221,44 @@ export function ColourwayProposals({
     [colours],
   );
 
-  // ⚠ БЛОКА НЕТ ВОВСЕ, ПОКА ЕМУ НЕЧЕГО СКАЗАТЬ, И ВОЗВРАТ СТОИТ ВЫШЕ `Section` ИМЕННО ПОЭТОМУ.
-  // Пустое состояние здесь было бы обещанием экрана, который появляется только после платного
-  // прогона: рамка с подписью «колорвеев не предложено» стоит на карточке всегда и учит, что
-  // кнопка сломана. Вместе с блоком уходит и отступ — стопка STUDIO разделяет соседей полем
-  // грунта, а не правилом, и несмонтированный ребёнок не оставляет в ней дыры.
+  /**
+   * ⚠ РАНЬШЕ ЗДЕСЬ СТОЯЛ РАННИЙ ВОЗВРАТ: «блока нет вовсе, пока нечего сказать». Владелец (п. 15
+   * круга r2, дословно) попросил обратное: «в COLOURWAYS снизу плейсхолдер для добавления нового
+   * колорвея». Плейсхолдер, который виден только после платного прогона черновика, — это не
+   * дверь, а лотерея, поэтому блок теперь стоит ВСЕГДА, и пустой он говорит ровно одно: колорвей
+   * можно завести отсюда. Довод старого возврата («рамка с подписью учит, что кнопка сломана»)
+   * снят не отменой, а тем, что подпись больше не про кнопку прогона: в пустом блоке стоит
+   * работающая дверь.
+   */
   const visible = proposals.filter((p) => verdicts[p.id]?.status !== 'dismissed');
-  if (visible.length === 0) return null;
+
+  /* ⚠ ОДНО ИСКЛЮЧЕНИЕ ИЗ «БЛОК СТОИТ ВСЕГДА»: карточка только для чтения. Плейсхолдера там нет
+     по построению, предложений тоже, и остаётся пустая белая рамка с одним заголовком — то есть
+     ровно то, чего боялся старый ранний возврат. Читателю она не сообщает ничего. */
+  if (readOnly && visible.length === 0 && handMade.length === 0) return null;
+
+  /**
+   * ВОРОТА РУЧНОЙ СТРОКИ — ТЕ ЖЕ САМЫЕ, ЧТО У ПРЕДЛОЖЕНИЯ, И ЭТО ОДНА ФУНКЦИЯ, А НЕ ВТОРОЙ
+   * СПИСОК ОТКАЗОВ: права, словарь, несохранённая карточка и занятый цвет говорят здесь ровно
+   * то же и теми же словами. Отличие ровно одно — привязка слотов: у колорвея, заведённого
+   * рукой, слотов НЕТ вовсе (рецепт не пишется, `usages` пуст), поэтому вопрос «сколько из них
+   * стоит на сохранённой карточке» ему не задаётся, и `boundCount` ниже означает «неприменимо».
+   *
+   * Имя спрашивается сверх этого: у предложения оно приезжает от модели, а здесь его вводит
+   * человек — и колорвей без имени читается на вкладке COLORWAYS одним кодом цвета.
+   */
+  const handRefusal =
+    confirmRefusal({
+      readOnly,
+      dirty,
+      colorCode: handCode,
+      usedCodes,
+      dictionaryHasAny: colours.length > 0,
+      dictionaryHasColours: choosable.size > 0,
+      codeChoosable: !handCode || choosable.has(handCode),
+      codeKnown: true,
+      boundCount: 1,
+    }) ?? (handName.trim() ? null : 'give it a name — it is what the colourway is called');
 
   const goToColorways = () =>
     setParams(
@@ -231,7 +275,7 @@ export function ColourwayProposals({
   return (
     <Section
       title='colourways'
-      question='— proposed by the draft; a confirmed one lives on the COLORWAYS tab'
+      question='— proposed by the draft or added by hand; a confirmed one lives on the COLORWAYS tab'
     >
       <div data-b25-colourways=''>
         {visible.map((p) => {
@@ -439,6 +483,148 @@ export function ColourwayProposals({
             </div>
           );
         })}
+
+        {/* КВИТАНЦИЯ РУЧНОГО КОЛОРВЕЯ — ТА ЖЕ ФОРМА, ЧТО У ПОДТВЕРЖДЁННОГО ПРЕДЛОЖЕНИЯ. Создание
+            необратимо формой (это продукт на сервере), поэтому строка обязана остаться на экране
+            и увести туда, где колорвей теперь живёт. */}
+        {handMade.map((m, i) => (
+          <div
+            key={`${m.colorwayId}:${i}`}
+            className='mt-1.5 flex flex-wrap items-baseline gap-2 border-b border-hairline py-1'
+            data-b25-receipt={`hand:${m.colorwayId}`}
+          >
+            <Text size='micro' component='span' className='uppercase'>
+              {m.name}
+            </Text>
+            <Pill tone='ok'>created</Pill>
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='ml-auto'
+              onClick={goToColorways}
+            >
+              see it on COLORWAYS ▸
+            </Button>
+          </div>
+        ))}
+
+        {/**
+         * ═══ ПЛЕЙСХОЛДЕР «+ COLOURWAY» — ВНИЗУ БЛОКА, ОДНОЙ ДВЕРЬЮ (п. 15 владельца) ═══════════
+         *
+         * Дословно: «в COLOURWAYS снизу плейсхолдер для добавления нового колорвея». Пунктирная
+         * строка — та же грамматика «здесь появится запись», что у плейсхолдера слотов выше и у
+         * пустых ячеек верстака.
+         *
+         * ⚠ ПИСАТЕЛЬ ОДИН, И ОН УЖЕ БЫЛ: `useConfirmColourway` — тот самый путь, которым уходит
+         * `confirm ▸` у предложения черновика (`CreateColorway`, а затем рецепт). У ручного
+         * колорвея слотов нет вовсе, поэтому второй шаг не делается сам собой: `usages` пуст, и
+         * функция возвращается сразу после создания. Второго писателя колорвеев не заводится —
+         * иначе обработка ошибок, инвалидация кэша и порядок двух вызовов разошлись бы по двум
+         * местам, и разошлись бы молча.
+         */}
+        {!readOnly && (
+          <div
+            data-b25-add-row=''
+            className='mt-2 flex flex-wrap items-end gap-2 border border-dashed border-borderColor px-2.5 py-2'
+          >
+            {/* Обе половины несут СВОЙ минимум ширины: без него на узком экране поле имени
+                сжималось в 60 пикселей (замерено при окне 375), вместо того чтобы честно
+                перенестись на свою строку. */}
+            <label className='flex min-w-[180px] flex-1 flex-col gap-0.5'>
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                name
+              </Text>
+              <Input
+                value={handName}
+                maxLength={64}
+                placeholder='name this colourway'
+                data-b25-new-name=''
+                onChange={(e: { target: { value: string } }) => setHandName(e.target.value)}
+              />
+            </label>
+            <label className='flex min-w-[200px] flex-1 flex-col gap-0.5'>
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                colour
+              </Text>
+              <span className='flex items-center gap-2'>
+                {/* Квадратик рисуется только когда цвет ВЫБРАН: пустая рамка рядом с селектом
+                    читается как невыбранный чекбокс, то есть как ещё один орган. */}
+                {!!handCode && (
+                  <Swatch
+                    hex={colours.find((c) => c.code === handCode)?.hex ?? undefined}
+                    title={handCode}
+                  />
+                )}
+                <select
+                  className={cn(cell, 'max-w-[240px]')}
+                  value={handCode}
+                  data-b25-new-code=''
+                  onChange={(e) => setHandCode(e.target.value)}
+                >
+                  <option value=''>— select colour —</option>
+                  {colours.map((c) => (
+                    <option
+                      key={c.code}
+                      value={c.code}
+                      disabled={usedCodes.has(c.code ?? '') || !!c.archived}
+                    >
+                      {c.code} · {c.name}
+                      {c.archived ? ' (archived)' : ''}
+                      {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </span>
+            </label>
+            <span className='ml-auto'>
+              {handRefusal ? (
+                <InertDoor label='+ colourway' reason={handRefusal} size='sm' />
+              ) : (
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  data-b25-add=''
+                  disabled={pending || busy === HAND}
+                  loading={busy === HAND}
+                  onClick={async () => {
+                    setBusy(HAND);
+                    try {
+                      const v = await confirm(
+                        {
+                          id: HAND,
+                          name: handName.trim(),
+                          colorCode: handCode,
+                          pantone: '',
+                          hex: '',
+                          slots: [],
+                        },
+                        [],
+                      );
+                      setHandMade((prev) => [
+                        ...prev,
+                        {
+                          colorwayId: v.status === 'confirmed' ? v.colorwayId : 0,
+                          name: handName.trim() || handCode,
+                        },
+                      ]);
+                      setHandName('');
+                      setHandCode('');
+                      showMessage('colourway created', 'success');
+                    } catch (e) {
+                      showMessage(createColorwayErrorMessage(e), 'error');
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  + colourway
+                </Button>
+              )}
+            </span>
+          </div>
+        )}
       </div>
     </Section>
   );

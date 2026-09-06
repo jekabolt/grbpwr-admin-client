@@ -1,21 +1,22 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import type { common_TechCardBomKind } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
-import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
+import { parseComposition } from 'components/managers/product/components/composition/composition-picker';
+import { CompositionModal } from 'components/managers/product/components/composition/composition-modal/composition-modal';
+import { compositionToValue } from 'components/managers/product/components/composition/composition-modal/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { Counter, EmptyState } from './core';
+import { EmptyState } from './core';
 import {
   BoardMovedPill,
-  FromMoodboardPill,
   ProvenancePill,
   useProvenance,
   type Provenance,
@@ -116,15 +117,15 @@ type Family = 'cloth' | 'thread' | 'hardware';
 
 const FAMILY_ORDER: Family[] = ['cloth', 'thread', 'hardware'];
 
-/** Слово семейства — на чипе рождения (`+ cloth`) и на пилюле вида в строке (макет: `CLOTH` ink,
- *  `THREAD` / `HARDWARE` обычная). Одно слово, как в макете: «& trims» — не второе семейство. */
+/** Слово семейства — в плейсхолдере рождения внизу таблицы и на пилюле строки (макет: `CLOTH`
+ *  ink, `THREAD` / `HARDWARE` обычная). Одно слово, как в макете: «& trims» — не семейство. */
 const FAMILY_TITLE: Record<Family, string> = {
   cloth: 'cloth',
   thread: 'thread',
   hardware: 'hardware',
 };
 
-/** Секция, которой рождается строка по нажатию чипа своего семейства. */
+/** Секция, которой рождается строка по выбору своего семейства в плейсхолдере. */
 const FAMILY_SEED_SECTION: Record<Family, string> = {
   cloth: 'TECH_CARD_BOM_SECTION_FABRIC',
   thread: 'TECH_CARD_BOM_SECTION_THREAD',
@@ -237,42 +238,51 @@ export function MaterialSlots({
   const prov = useProvenance(techCardId ?? 0);
   const provOf = (line: Line): Provenance =>
     line.lineKey?.trim() ? prov({ kind: 'slot', lineKey: line.lineKey.trim() }) : null;
-  const drafted = lines.filter((l) => provOf(l) === 'drafted').length;
 
-  const addChips = readOnly ? null : (
-    <ChipRow>
+  /**
+   * ОДНА ДВЕРЬ РОЖДЕНИЯ, И ОНА ВНИЗУ СПИСКА (п. 13 владельца, дословно: «вместо + CLOTH + THREAD
+   * + HARDWARE сверху — снизу просто плейсхолдер, где выбираешь пункт»).
+   *
+   * Три чипа в шапке были ТРЕМЯ кнопками на один жест, да ещё и в противоположном от списка
+   * углу: рука выбирала семейство наверху, а строка появлялась внизу. Теперь орган один и стоит
+   * там, где появится результат, — селект в последней строке таблицы; выбор семейства И ЕСТЬ
+   * нажатие, поэтому второй кнопки «добавить» рядом нет. Селект возвращается в исходную подпись
+   * сразу после рождения: он не хранит состояние, он его СОВЕРШАЕТ.
+   */
+  const addPlaceholder = readOnly ? null : (
+    <select
+      data-b16-family-select=''
+      aria-label='add a material slot'
+      value=''
+      onChange={(e) => {
+        const family = e.target.value as Family | '';
+        if (family) addSlot(family);
+      }}
+      className='min-h-[26px] w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize text-labelColor hover:text-textColor focus:border-solid focus:border-textColor focus:outline-none'
+    >
+      <option value=''>+ add a slot ▾</option>
       {FAMILY_ORDER.map((family) => (
-        <Chip key={family} dashed data-b16-add={family} onClick={() => addSlot(family)}>
-          + {FAMILY_TITLE[family]}
-        </Chip>
+        <option key={family} value={family}>
+          {FAMILY_TITLE[family]}
+        </option>
       ))}
-    </ChipRow>
+    </select>
   );
 
   return (
     <Section
       title='material slots'
       question='— what this is made of'
-      /* ПРАВЫЙ УГОЛ ШАПКИ — МАКЕТА: `FROM THE MOODBOARD · N OF M DRAFTED SLOTS · + CLOTH · + THREAD
-         · + HARDWARE · MOODBOARD MOVED ON`. Счётчик не рисуется при нуле строк. */
-      action={
-        /* Свой перенос: слот `action` шапки не переносит, а пять органов в нём шире узкого экрана
-           (замерено: 388px документа при окне 375). */
-        <span className='flex flex-wrap items-center justify-end gap-1.5'>
-          <FromMoodboardPill />
-          {lines.length > 0 && (
-            <span className='contents' data-b16-drafted=''>
-              <Counter n={drafted} noun='drafted slot' total={lines.length} />
-            </span>
-          )}
-          {addChips}
-          <BoardMovedPill techCardId={techCardId ?? 0} />
-        </span>
-      }
+      /* ⚠ ШАПКА ПУСТА, КРОМЕ ПРЕДУПРЕЖДЕНИЯ, И ЭТО РЕШЕНИЕ ВЛАДЕЛЬЦА (п. 12): «FROM THE MOODBOARD
+         · 4 OF 6 DRAFTED SLOTS — не нужно, убрать». Пилюля происхождения и счётчик черновика
+         ушли; провенанс отдельной строки по-прежнему стоит в её собственной колонке `from`, где
+         он относится к чему-то конкретному. `moodboard moved on` остаётся: это не украшение
+         счёта, а предупреждение, что доска ушла вперёд написанного. */
+      action={<BoardMovedPill techCardId={techCardId ?? 0} />}
     >
       <div data-b16-slots=''>
         {lines.length === 0 ? (
-          <EmptyState action={addChips ?? undefined}>
+          <EmptyState action={addPlaceholder ? <div className='w-40'>{addPlaceholder}</div> : undefined}>
             <span className='uppercase text-textColor'>no material slots yet</span>
             {readOnly ? '' : ' · draft the construction above, or add one by hand'}
           </EmptyState>
@@ -310,20 +320,32 @@ export function MaterialSlots({
            * дайджест MATERIALS, и запись туда как побочный эффект набора совещательного числа
            * протухила бы подпись — ту самую, которую эта колонка обязана не трогать.
            */
-          <DataTable>
+          /* ⚠ `py-2.5` ВМЕСТО ШТАТНЫХ `py-1` — ПРОСЬБА ВЛАДЕЛЬЦА (п. 14: «между рядами сделай
+             больше гэп»), и она не про вкус: в строке теперь три составных органа (имя+пилюля,
+             состав, число+единица), и на четырёх пикселях они читались одной кашей. Волосяная
+             линия остаётся — разделяет по-прежнему она, воздух её только даёт разглядеть. */
+          <DataTable className='[&_td]:py-2.5'>
             <thead>
               <tr>
                 <th data-align='left'>component</th>
-                <th data-align='left'>from</th>
+                {/* ОДНА КОЛОНКА НА ДВЕ ВЗАИМОИСКЛЮЧАЮЩИЕ ОСИ: назначение бывает только у
+                    рулонного товара, вид — только вне его (и не у лейблов), поэтому в ячейке
+                    всегда ровно один контрол или прочерк, и двух тут не бывает по построению. */}
+                <th data-align='left' className='w-[150px]'>
+                  purpose / kind
+                </th>
                 <th data-align='left'>composition</th>
                 <th className='w-[150px]'>est usage</th>
-                <th className='w-[120px]'>
+                <th data-align='left' className='w-[90px]'>
+                  from
+                </th>
+                <th className='w-[110px]'>
                   <span className='sr-only'>row actions</span>
                 </th>
               </tr>
             </thead>
-            {/* ПЛОСКИЙ СПИСОК, ПИЛЮЛЯ ВИДА В КАЖДОЙ СТРОКЕ — как в макете; заголовков семейств
-                нет. Порядок — семействами (ткань, нитки, фурнитура), позициями формы. */}
+            {/* ПЛОСКИЙ СПИСОК, ПИЛЮЛЯ СЕМЕЙСТВА В КАЖДОЙ СТРОКЕ — как в макете; заголовков
+                семейств нет. Порядок — семействами (ткань, нитки, фурнитура), позициями формы. */}
             <tbody>
               {families.flatMap((family) =>
                 family.rows.map((index) => (
@@ -339,6 +361,14 @@ export function MaterialSlots({
                     blockersOf={blockersOf}
                   />
                 )),
+              )}
+              {addPlaceholder && (
+                <tr data-b16-add-row=''>
+                  {/* Строка без волосяной линии снизу: это не запись, а место, где она появится. */}
+                  <td colSpan={6} data-align='left' className='border-b-0'>
+                    <div className='max-w-[280px]'>{addPlaceholder}</div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </DataTable>
@@ -444,38 +474,64 @@ function SlotRow({
 
   return (
     <tr data-b16-row={index}>
-      <td data-align='left' className='min-w-[180px] align-top'>
-        {readOnly ? (
-          <Text component='span' className='font-bold' data-b16-name={index}>
-            {line.name?.trim() || 'unnamed'}
-          </Text>
-        ) : (
-          <InputField
-            name={`bomItems.${index}.name`}
-            label='role in the garment'
-            srLabel
-            placeholder={rolePlaceholder}
-            data-b16-name={index}
-          />
-        )}
-        {/* ВИД СЕМЕЙСТВА — ПИЛЮЛЕЙ В СТРОКЕ (макет: `CLOTH` ink, `THREAD`/`HARDWARE` обычная),
-            вместо заголовков семейств над группами строк. */}
-        <div className='mt-0.5'>
+      {/**
+       * ═══ ОДНА СТРОКА — ОДНО ПОЛЕ И ОДНА ПИЛЮЛЯ (п. 9 владельца) ════════════════════════════
+       *
+       * Дословно: «три прямоугольника, два кликабельных один под другим (CLOTH), расстояния
+       * разные, слишком близко, неорганично». Стопка была не «плотной», а РАЗНОРОДНОЙ: поле
+       * имени, читаемая пилюля и чужой по смыслу селект оси стояли одной колонкой с тремя
+       * разными зазорами, и глаз читал их как три равных органа.
+       *
+       * Теперь: имя — единственный контрол ячейки, пилюля семейства стоит СПРАВА от него на той
+       * же линии (она read-only и по типу — `Pill`, а не `Chip`, то есть нажать её нельзя по
+       * построению), ось назначения/вида уехала в СВОЮ колонку. Зазор в строке ровно один.
+       */}
+      <td data-align='left' className='min-w-[200px] align-top'>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <div className='min-w-[110px] flex-1'>
+            {readOnly ? (
+              <Text component='span' className='font-bold' data-b16-name={index}>
+                {line.name?.trim() || 'unnamed'}
+              </Text>
+            ) : (
+              <InputField
+                name={`bomItems.${index}.name`}
+                label='role in the garment'
+                srLabel
+                placeholder={rolePlaceholder}
+                data-b16-name={index}
+              />
+            )}
+          </div>
+          {/* СЕМЕЙСТВО — ПИЛЮЛЕЙ (макет: `CLOTH` ink, `THREAD`/`HARDWARE` обычная), вместо
+              заголовков семейств над группами строк. */}
           <Pill tone={family === 'cloth' ? 'ink' : 'mut'} data-b16-kind={family}>
             {FAMILY_TITLE[family]}
           </Pill>
+          {/* Совещательное предупреждение живёт на той же линии, а не четвёртым этажом. */}
+          {duplicate && (
+            <Pill tone='mut' data-b16-dup={index}>
+              same role
+            </Pill>
+          )}
         </div>
-        {/* ВТОРАЯ СТРОКА ЯЧЕЙКИ — ТА ОСЬ, КОТОРАЯ У СЕКЦИИ ЕСТЬ, И РОВНО ОДНА ИЗ ДВУХ. Назначение
-            законно только на рулонной строке, вид — только вне рулонных и вне лейблов; сервер
-            отвергает пару вроде «hardware + purpose=main» напрямую, поэтому контрол, которому
-            здесь не место, не рисуется вовсе, а не рисуется отключённым. */}
+      </td>
+      {/* ОСЬ СТРОКИ — СВОЯ КОЛОНКА, И В НЕЙ РОВНО ОДНА ИЗ ДВУХ. Назначение законно только на
+          рулонной строке, вид — только вне рулонных и вне лейблов; сервер отвергает пару вроде
+          «hardware + purpose=main» напрямую, поэтому контрол, которому здесь не место, не
+          рисуется вовсе, а не рисуется отключённым, — и у лейбла ячейка честно пуста. */}
+      <td data-align='left' className='w-[150px] align-top' data-b16-axis-cell={index}>
         {rollGoods &&
           (readOnly ? (
             <Text size='micro' variant='label' component='p' data-b16-axis={index}>
               {bomPurposeLabel(line.purpose)}
             </Text>
           ) : (
-            <div className='mt-0.5' data-b16-axis={index}>
+            /* ПОДПИСЬ КОНТРОЛА — В ЗАГОЛОВКЕ КОЛОНКИ, А НЕ НАД КАЖДОЙ ЯЧЕЙКОЙ. `SelectField`
+               рисует `FormLabel` всегда и `srLabel` не знает (общий примитив, чужой файл),
+               поэтому она глушится здесь — экранному читателю она по-прежнему слышна, а
+               глаз получает ряд контролов на одной линии вместо лесенки из подписей. */
+            <div data-b16-axis={index} className='[&_label]:sr-only'>
               <SelectField
                 name={`bomItems.${index}.purpose`}
                 label='purpose'
@@ -500,7 +556,7 @@ function SlotRow({
               {kindLabel(line.kind) ?? sectionShort(section)}
             </Text>
           ) : (
-            <div className='mt-0.5' data-b16-axis={index}>
+            <div data-b16-axis={index} className='[&_label]:sr-only'>
               <SelectField
                 name={`bomItems.${index}.kind`}
                 label='kind'
@@ -524,17 +580,7 @@ function SlotRow({
               />
             </div>
           ))}
-        {duplicate && (
-          <div className='mt-0.5'>
-            <Pill tone='mut' data-b16-dup={index}>
-              same role
-            </Pill>
-          </div>
-        )}
-      </td>
-      <td data-align='left' className='align-top' data-b16-from={index}>
-        {/* ОТКУДА СТРОКА — пилюля из журнала черновика; пусто, когда журнал о ней не знает. */}
-        <ProvenancePill state={prov} />
+        {!rollGoods && !kindEligible && <EmptyCell />}
       </td>
       <td data-align='left' className='min-w-[180px] align-top' data-b16-fiber-cell={index}>
         {readOnly || linked ? (
@@ -546,13 +592,7 @@ function SlotRow({
             {readableFiber || rawFiber || <EmptyCell />}
           </Text>
         ) : (
-          /* ПИКЕР, А НЕ ТЕКСТОВОЕ ПОЛЕ — ТОТ ЖЕ, ЧТО У НЕПРИВЯЗАННОЙ СТРОКИ НА ВКЛАДКЕ BOM
-             (`bom-field.tsx:1243`). Состав — не свободная строка: его формы ждут ОБА парсера
-             (`parseCompositionCode` и генератор care-лейбла), и набранное мимо формы даёт им ноль
-             долей, то есть молча выпадает из ярлыка ухода. Два писателя РАЗНОЙ ФОРМЫ над одним
-             полем — это способ получить карточку, состав которой читается на одной вкладке и не
-             читается на другой; писатель поэтому один, и он общий. */
-          <CompositionPicker name={`bomItems.${index}.composition`} label='fibre content' />
+          <FibreField index={index} raw={rawFiber} readable={readableFiber} />
         )}
         {linked && !readOnly && (
           /* ПРИЧИНА ОТКАЗА СТОИТ РЯДОМ С ОТКАЗОМ, А НЕ В ДОКУМЕНТАЦИИ. Ячейка, которая просто не
@@ -576,16 +616,30 @@ function SlotRow({
             <EmptyCell />
           )
         ) : (
-          <div className='flex items-start justify-end gap-1'>
-            <div className='w-16'>
+          /**
+           * ЧИСЛО И ЕДИНИЦА — ОДНА КОРОБКА (п. 11 владельца: «два тупо белых прямоугольника»).
+           *
+           * Два поля рядом были ДВУМЯ утверждениями об одном ответе: «1.45» и «m» — это одна
+           * величина, и рамка вокруг каждой половины предлагала читать их порознь. Рамку теперь
+           * рисует коробка, половинки — нет (`border-none`), делит их волосяная линия; фокус
+           * подсвечивает коробку целиком (`focus-within`), поэтому орган ведёт себя как ОДНО
+           * поле, оставаясь двумя настоящими контролами формы (число — десятичное, единица —
+           * открытый список: закрытый Radix стёр бы чужое написание, довод выше).
+           */
+          <div
+            data-b16-est-box={index}
+            className='flex min-h-[26px] items-stretch border border-borderColor bg-bgColor focus-within:border-textColor'
+          >
+            <div className='min-w-0 flex-1'>
               <DecimalField
                 name={`bomItems.${index}.estUsage`}
                 label='est usage'
                 srLabel
                 data-b16-est={index}
+                className='min-h-[24px] border-none bg-transparent text-right focus:border-none'
               />
             </div>
-            <div className='w-14'>
+            <div className='w-[52px] shrink-0 border-l border-hairline' data-b16-unit={index}>
               {linked ? (
                 /* ЕДИНИЦА ПРИВЯЗАННОЙ СТРОКИ — СНИМОК КАТАЛОГА, ровно как её состав слева:
                    `materialLineFields` кладёт сюда `material.unit` при привязке, и вкладка BOM
@@ -594,11 +648,8 @@ function SlotRow({
                    B-17 снял. */
                 <Text
                   component='span'
-                  data-b16-unit={index}
                   data-b16-unit-locked=''
-                  /* Высота поля, а не высота буквы: рядом стоит настоящий контрол, и текст,
-                     прижатый к верху ячейки, читался бы как съехавший, а не как запертый. */
-                  className='flex min-h-[22px] items-center'
+                  className='flex min-h-[24px] items-center px-[7px]'
                 >
                   {unit || <EmptyCell>{unitHint}</EmptyCell>}
                 </Text>
@@ -609,13 +660,18 @@ function SlotRow({
                   srLabel
                   options={unitOptions}
                   placeholder={unitHint}
+                  className='min-h-[24px] border-none bg-transparent text-labelColor focus:border-none'
                 />
               )}
             </div>
           </div>
         )}
       </td>
-      <td className='w-[120px] align-top'>
+      <td data-align='left' className='w-[90px] align-top' data-b16-from={index}>
+        {/* ОТКУДА СТРОКА — пилюля из журнала черновика; пусто, когда журнал о ней не знает. */}
+        <ProvenancePill state={prov} />
+      </td>
+      <td className='w-[110px] align-top'>
         <div className='flex items-start justify-end gap-1'>
           {onGo && (
             <Button
@@ -652,5 +708,85 @@ function SlotRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * ═══ СОСТАВ — ОДИН ОРГАН, ОДНА ВЫСОТА, ОДИН КЕГЛЬ (п. 10 владельца) ════════════════════════════
+ *
+ * Дословно: «FIBRE CONTENT и кнопки CLEAR и SELECT разного размера». Так и было: общий пикер
+ * (`CompositionPicker`) рисует ПОДПИСЬ поля, плиту значения и рядом ДВЕ кнопки разных размеров
+ * (`xs` у clear, `sm` у select) — в форме продукта, где у поля есть своя строка, это читается, а в
+ * ячейке таблицы, где подпись уже дал заголовок колонки, распадается на три разнокалиберных
+ * прямоугольника.
+ *
+ * ЗДЕСЬ — ТА ЖЕ САМАЯ ДВЕРЬ, ДРУГАЯ ОПРАВА. Редактор состава остаётся ровно один на весь
+ * репозиторий — `CompositionModal`, и пишет он тем же `compositionToValue`, что и пикер: второго
+ * ПИСАТЕЛЯ этой строки не заводится (свободный текст над этим полем уже однажды молча портил
+ * снимок каталога — довод в ячейке выше). Меняется только оправа: значение, ✕ и `select ▸` стоят
+ * в ОДНОЙ рамке, одной высоты и одного кегля, а подпись поля живёт в заголовке колонки.
+ *
+ * Плита НЕ кнопка: ✕ и дверь — настоящие кнопки, и класть их внутрь третьей было бы невалидной
+ * разметкой, которую браузер чинит на свой вкус.
+ */
+function FibreField({
+  index,
+  raw,
+  readable,
+}: {
+  index: number;
+  raw: string;
+  readable: string;
+}) {
+  const { setValue } = useFormContext<TechCardFormData>();
+  const [open, setOpen] = useState(false);
+  const name = `bomItems.${index}.composition`;
+  const write = (value: string) =>
+    setValue(name as never, value as never, { shouldDirty: true, shouldValidate: true });
+
+  return (
+    <>
+      <div
+        data-b16-fiber-box={index}
+        className='flex min-h-[26px] items-stretch border border-borderColor bg-bgColor focus-within:border-textColor'
+      >
+        <Text
+          component='span'
+          data-b16-fiber={index}
+          className={cn(
+            'flex min-w-0 flex-1 items-center truncate px-[7px] py-[3px]',
+            !readable && !raw && 'text-textInactiveColor',
+          )}
+        >
+          {readable || raw || 'not stated'}
+        </Text>
+        {!!raw && (
+          <button
+            type='button'
+            data-b16-fiber-clear={index}
+            title='clear the composition'
+            aria-label='clear the composition'
+            onClick={() => write('')}
+            className='flex shrink-0 items-center px-2 text-textBaseSize text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+          >
+            ✕
+          </button>
+        )}
+        <button
+          type='button'
+          data-b16-fiber-door={index}
+          onClick={() => setOpen(true)}
+          className='flex shrink-0 items-center border-l border-hairline px-[7px] text-textBaseSize hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        >
+          select ▸
+        </button>
+      </div>
+      <CompositionModal
+        isOpen={open}
+        selectedComposition={parseComposition(raw)}
+        selectComposition={(c) => write(compositionToValue(c))}
+        onClose={() => setOpen(false)}
+      />
+    </>
   );
 }

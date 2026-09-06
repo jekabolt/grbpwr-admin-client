@@ -6,15 +6,21 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 
 import { ASSETS_PER_CARD_MAX } from '../assets/model';
-import { colorwayLabel } from '../colorway-picker';
 import { Counter, Money, Reason } from '../core';
 import { stepById } from '../core/chain';
 import { isRunLive } from '../generation';
 import { GenerateRow, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
-import { ColourTiles, usePatternColourways } from './colourways';
+import { PatternColourRow, usePatternColourways } from './colourways';
 import { LockLine } from './organs';
-import { patternColourRecipe, patternGate, patternRuns, refusalAdvice } from './model';
+import {
+  patternColourRecipe,
+  patternGate,
+  patternRuns,
+  recentPatternColours,
+  refusalAdvice,
+  type PatternColour,
+} from './model';
 import { PatternInput } from './pattern-input';
 import { PatternLibrary } from './pattern-library';
 
@@ -27,7 +33,8 @@ import { PatternLibrary } from './pattern-library';
  * studio, shared with every generative step).
  *
  *   SOURCE PICTURE   the cell on the left (one picture, exactly) · NAME * on the right
- *   COLOUR           the card's colourways as filled tiles; a click paints, a second click clears
+ *   COLOUR           one door `+ colour` (the product's pantone picker) · the recent colours of
+ *                    this card's own runs · the pick standing as ONE tile with `✕`
  *   the run          the lock bar naming what is missing and its door · GENERATE · the money line
  *   TILES ON THIS CARD   the shelf; and under it MADE EARLIER, NOT KEPT when there is such a thing
  *
@@ -50,6 +57,13 @@ import { PatternLibrary } from './pattern-library';
  * door is not drawn on this step by the owner's decision: the whole of what travels is two organs
  * standing on this screen, the picture and the colour.
  *
+ * ⚠ И ЦВЕТ ТЕПЕРЬ ТОЖЕ НЕ КОЛОРВЕЙ (владелец, r2 §26: «выбор цвета, который нас ни к чему не
+ * обязывает»). Ряд COLOUR читал КОЛОРВЕИ КАРТОЧКИ — то есть на карточке без колорвеев он показывал
+ * пустоту с дверью на соседний шаг, и покрасить пробную плитку было нельзя, не заведя запись о
+ * продукте. Цвет — ничья пара «код + hex» (`PatternColour`), выбирается пантон-пикером продукта и
+ * живёт ровно один прогон. `usePatternColourways` тут остаётся, но ТОЛЬКО ради полки: `worn by`
+ * под плиткой — по-прежнему связь с колорвеем, и это другой вопрос, а не тот же.
+ *
  * ═══ NOTHING HERE OWNS A SAVE. A named run lands on the shelf by itself (`keepPatternTx`). ═════
  */
 export function PatternStudio({
@@ -65,15 +79,15 @@ export function PatternStudio({
   const [source, setSource] = useState<common_MediaFull | null>(null);
   const sourceId = source?.id ?? 0;
   const [name, setName] = useState('');
-  const [colourId, setColourId] = useState(0);
+  /* ЦВЕТ НИЧЕЙ (владелец, r2 §26): пара «код + hex», а не ссылка на колорвей карточки. `null` —
+     законное и обычное состояние: плитка генерится и без цвета. */
+  const [colour, setColour] = useState<PatternColour | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const slotRef = useRef<HTMLDivElement | null>(null);
 
   const { refs: colourways, loading: colourwaysLoading } = usePatternColourways(techCardId);
-  const picked = useMemo(
-    () => colourways.find((c) => (c.colorwayId ?? 0) === colourId) ?? null,
-    [colourways, colourId],
-  );
+  /* История цвета уже лежит на проводе — она заморожена в `params.colour` прошлых прогонов. */
+  const recentColours = useMemo(() => recentPatternColours(band), [band]);
 
   const live = useMemo(() => patternRuns(band).filter(isRunLive), [band]);
   const shelf = (band.assets ?? []).length;
@@ -147,16 +161,13 @@ export function PatternStudio({
       />
 
       {/* ─── COLOUR ─────────────────────────────────────────────────────────────────────── */}
+      {/* ДВЕ ПИЛЮЛИ, А БЫЛО ТРИ. Третья повторяла словами то, что ряд под ней показывает лицом
+          («no colour» / имя выбранного) — владелец про этот шаг: «не пихай кучу кнопок в одном
+          месте». Остались два ФАКТА, которых на лице ряда нет: что цвет не обязателен и что он
+          всё-таки уезжает в платный промпт. */}
       <GroupLabel
         action={
           <>
-            {picked ? (
-              <Pill tone='ink' data-colour-picked={picked.colorwayId}>
-                {colorwayLabel(picked)}
-              </Pill>
-            ) : (
-              <Pill data-colour-picked='none'>no colour</Pill>
-            )}
             <Pill tone='ink'>goes to the model</Pill>
             <Pill>optional</Pill>
           </>
@@ -164,12 +175,11 @@ export function PatternStudio({
       >
         colour
       </GroupLabel>
-      <ColourTiles
-        refs={colourways}
-        picked={colourId}
-        onPick={setColourId}
+      <PatternColourRow
+        colour={colour}
+        recent={recentColours}
+        onPick={setColour}
         disabled={disabled}
-        techCardId={techCardId}
       />
 
       {/* ─── the run: the bar, the door, the money ──────────────────────────────────────── */}
@@ -213,7 +223,7 @@ export function PatternStudio({
               layout: '',
               // THE COLOUR THAT PAINTS THE TILE — the same field every other kind states its
               // colour in, and the server writes it into the prompt for every kind.
-              colour: picked ? patternColourRecipe(picked) : undefined,
+              colour: colour ? patternColourRecipe(colour) : undefined,
               threed: undefined,
               fixTarget: '',
               // The field says «extra»; here it carries the ONE input a tile is built from,

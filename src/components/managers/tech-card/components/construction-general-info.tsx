@@ -5,12 +5,7 @@ import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
-import {
-  BoardMovedPill,
-  ProvenancePill,
-  useProvenance,
-  type Provenance,
-} from './design/head/mood-organs';
+import { BoardMovedPill } from './design/head/mood-organs';
 import { FIT_OPTIONS } from './design/render/model';
 import { upsertDetailText } from './form-writers';
 import { CategoryBrowser } from './header-meta-fields';
@@ -22,14 +17,15 @@ import { TechCardFormData } from './schema';
 // черновиком, над CONSTRUCTION и MATERIAL SLOTS (макет `_step-mood.js`, `zGeneralBlock`). Монтаж
 // один, довод — там же, в `design/studio-tab.tsx`.
 //
-// ═══ РАСКЛАДКА МАКЕТА: ГРИД 2×2, ПИЛЮЛЯ ПРОИСХОЖДЕНИЯ В СТРОКЕ ПОДПИСИ ═══════════════════════
+// ═══ РАСКЛАДКА: ГРИД 2×2, ПОДПИСЬ ПОЛЯ И БОЛЬШЕ НИЧЕГО (r2, п.4) ══════════════════════════════
 //
-// Владелец, увидев бету: «не как в референсе». Макет держит четыре поля гридом два на два,
-// подпись поля — nano капслоком, и В ТОЙ ЖЕ СТРОКЕ подписи стоит пилюля происхождения:
-// `FIT [DRAFTED]`, `FABRIC [DRAFTED, EDITED]`. Пилюля только у заполненного поля, и только когда
-// происхождение ИЗВЕСТНО — читается из журнала заполнений черновика (`head/mood-organs.tsx`,
-// `useProvenance`); поле без записи в журнале пилюли не носит вовсе (не `by hand`: журнал
-// сессионный, и после перезагрузки надиктованное неотличимо от набранного).
+// Макет держал четыре поля гридом два на два и В ТОЙ ЖЕ СТРОКЕ подписи — пилюлю происхождения:
+// `SILHOUETTE [DRAFTED]`, `FABRIC [DRAFTED]`. Владелец, увидев это на бете (2026-09-06, п.4):
+// «SILHOUETTE (DRAFTED) и FABRIC (DRAFTED) выглядит криво» — пер-полевые пилюли сняты ЦЕЛИКОМ.
+// Довод не только про вид: происхождение поля здесь ничего не решает — читатель этого блока
+// правит текст, а не разбирается, кто его написал; разбор «что предложил черновик» стоит одним
+// местом выше, блоком CONSTRUCTION DRAFT, где у каждой строки есть `show ▸` с обеими редакциями.
+// Строка подписи снова несёт ровно одно слово, и два поля рядом читаются одинаково.
 //
 // ═══ ШАПКА БЛОКА — СВОЯ, И РЯД ПИЛЮЛЬ СТОИТ В НЕЙ (r1, по макету `step-1.png`) ═════════════════
 //
@@ -51,9 +47,8 @@ import { TechCardFormData } from './schema';
 // поле с описанием доски (V-16, владелец: «CONCEPT & CONSTRUCTION DESCRIPTION это и есть SHARED
 // NOTE»), и оно стоит блоком DESCRIPTION выше; второго редактора того же поля здесь не заводится.
 // Его место в гриде занимает CATEGORY — поле карточки, которого в макете нет, но которое обязано
-// где-то стоять (aux-карта его прячет, см. ниже). Черновичных полей здесь три: fit, silhouette,
-// fabric — их происхождение читается пилюлей у поля; общий счётчик «N of 3 drafted fields» владелец
-// снял (рулинг 11).
+// где-то стоять (aux-карта его прячет, см. ниже). Общий счётчик «N of 3 drafted fields» и пилюлю
+// `FROM THE MOODBOARD` владелец снял (рулинг 11), пер-полевые пилюли происхождения — п.4 r2.
 //
 // ═══ КРУГ 20 — ЧТО ВЛАДЕЛЕЦ ОТСЮДА ЗАБРАЛ, И ЧЕМ ЭТО ОПЛАЧЕНО ════════════════════════════════
 //
@@ -81,34 +76,29 @@ export function ConstructionGeneralInfo({
   readOnly: boolean;
 }) {
   const techCardId = useTechCardIdFromRoute();
-  const prov = useProvenance(techCardId);
-  const provFit = prov({ kind: 'fit' });
-  const provSilhouette = prov({ kind: 'detail', key: 'silhouette' });
-  const provFabric = prov({ kind: 'detail', key: 'fabric' });
 
   return (
-    /* СВОЯ `Section`, ряд пилюль — в её `action` (разбор в шапке файла). Пояснялка в грамматике
-       макета: «· что это». */
+    /* СВОЯ `Section`, предупреждение доски — в её `action` (разбор в шапке файла). Пояснялка в
+       грамматике макета: «· что это». */
     <Section
       title='general information'
       question='· what this style is'
-      action={
-        <GeneralInformationAction techCardId={techCardId} />
-      }
+      action={<GeneralInformationAction techCardId={techCardId} />}
     >
       {/* Грид два на два: подписи одного ряда всегда на одной линии, колонки равной ширины, которые
           содержимое растянуть не может (`minmax(0,1fr)`), перенос в один столбец на узком экране.
-          16px между КОЛОНКАМИ, 10px между РЯДАМИ — тот же ритм, каким `Section` кладёт детей.
-          `data-c19-general` — якорь проб, остался на содержимом блока. */}
+          24px между КОЛОНКАМИ и РЯДАМИ (r2, слово владельца «дай больше спейсинга»): без пилюль в
+          строке подписи ряды сомкнулись, и шов между FIT/CATEGORY и SILHOUETTE/FABRIC перестал
+          читаться. `data-c19-general` — якорь проб, остался на содержимом блока. */}
       <div
-        className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2'
+        className='grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2'
         data-c19-general=''
         data-c19-general-grid=''
       >
         {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
             applied. У aux-карты классификацию задаёт AUXILIARY TYPE в шапке; скрывается ТОЛЬКО
             орган, значение `categoryId` остаётся в форме и раунд-трипится. */}
-        {!isAux && <FitField readOnly={readOnly} prov={provFit} />}
+        {!isAux && <FitField readOnly={readOnly} />}
         {!isAux && (
           <div className='min-w-0' data-c19-field='meta'>
             <CategoryBrowser />
@@ -118,7 +108,6 @@ export function ConstructionGeneralInfo({
           <DetailTextField
             detailKey='silhouette'
             label='silhouette'
-            prov={provSilhouette}
             placeholder='what this garment is, before how it is made'
           />
         </div>
@@ -126,7 +115,6 @@ export function ConstructionGeneralInfo({
           <DetailTextField
             detailKey='fabric'
             label='fabric'
-            prov={provFabric}
             placeholder='the cloth this style is cut from'
           />
         </div>
@@ -139,9 +127,9 @@ export function ConstructionGeneralInfo({
  * ПРАВЫЙ УГОЛ ШАПКИ БЛОКА. Макет рисовал здесь `zFromBoard() + counter(written, 'drafted field') +
  * zMoved()`; владелец (2026-09-06, рулинг 11): «в GENERAL INFORMATION FROM THE MOODBOARD 0 OF 3
  * DRAFTED FIELDS не нужны» — пилюля источника и счётчик сняты. Остаётся ОДНО предупреждение —
- * «moodboard moved on», когда доска ушла вперёд после черновика (оно про потерю, не про счёт).
- * Происхождение каждого поля по-прежнему стоит пилюлей у самого поля (`ProvenancePill`).
- * Экспорт оставлен — композитору, который захочет собрать блок из частей.
+ * «moodboard moved on», когда доска ушла вперёд после черновика (оно про потерю, не про счёт);
+ * пер-полевые пилюли происхождения сняты следом (п.4 r2). Экспорт оставлен композитору, который
+ * захочет собрать блок из частей.
  */
 export function GeneralInformationAction({ techCardId }: { techCardId: number }): JSX.Element {
   return (
@@ -165,32 +153,22 @@ function useTechCardIdFromRoute(): number {
 }
 
 /**
- * Подпись поля с пилюлей происхождения В ТОЙ ЖЕ СТРОКЕ. Метрика подписи поля (`FormLabel`: 10px,
- * капслок, серый), а не линейка группы: линейка делила бы одно поле с пустотой.
+ * Подпись поля — ОДНО СЛОВО И БОЛЬШЕ НИЧЕГО (r2, п.4). Метрика подписи поля (`FormLabel`: 10px,
+ * капслок, серый), а не линейка группы: линейка делила бы одно поле с пустотой. Пилюля
+ * происхождения стояла здесь же, второй вещью в строке, и снята — разбор в шапке файла.
  */
-function FieldLabel({
-  htmlFor,
-  pill,
-  children,
-}: {
-  htmlFor?: string;
-  pill?: ReactNode;
-  children: ReactNode;
-}): JSX.Element {
+function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNode }): JSX.Element {
   return (
-    <div className='flex items-center gap-1.5'>
-      <Text
-        size='micro'
-        variant='label'
-        tracking='label'
-        component={htmlFor ? 'label' : 'span'}
-        htmlFor={htmlFor}
-        className='leading-none uppercase'
-      >
-        {children}
-      </Text>
-      {pill}
-    </div>
+    <Text
+      size='micro'
+      variant='label'
+      tracking='label'
+      component={htmlFor ? 'label' : 'span'}
+      htmlFor={htmlFor}
+      className='block leading-none uppercase'
+    >
+      {children}
+    </Text>
   );
 }
 
@@ -199,20 +177,18 @@ function FieldLabel({
 const fitFormOptions = FIT_OPTIONS.map((f) => ({ label: f, value: f }));
 
 /**
- * FIT — тот же примитив `Select`, что стоит под `SelectField`, но с подписью, которая умеет нести
- * пилюлю: `SelectField` рисует свою `FormLabel` и второго органа в её строку не пускает. Писатель
+ * FIT — тот же примитив `Select`, что стоит под `SelectField`, но со своей подписью: `SelectField`
+ * рисует `FormLabel` собственной метрикой, а четыре поля этого грида обязаны нести одну. Писатель
  * тот же — поле формы `fit` через `useController`; `data-field` — якорь `revealField`, который у
  * `FormItem` ставится сам, а здесь — рукой.
  */
-function FitField({ readOnly, prov }: { readOnly: boolean; prov: Provenance }): JSX.Element {
+function FitField({ readOnly }: { readOnly: boolean }): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
   const { field } = useController({ control, name: 'fit' });
   const id = useId();
   return (
-    <div className='min-w-0 space-y-px' data-field='fit' data-c19-field='fit'>
-      <FieldLabel htmlFor={id} pill={<ProvenancePill state={prov} data-c19-prov='fit' />}>
-        fit
-      </FieldLabel>
+    <div className='min-w-0 space-y-1' data-field='fit' data-c19-field='fit'>
+      <FieldLabel htmlFor={id}>fit</FieldLabel>
       <Select
         id={id}
         name='fit'
@@ -238,12 +214,10 @@ function FitField({ readOnly, prov }: { readOnly: boolean; prov: Provenance }): 
 function DetailTextField({
   detailKey,
   label,
-  prov,
   placeholder,
 }: {
   detailKey: string;
   label: string;
-  prov: Provenance;
   placeholder: string;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
@@ -262,10 +236,8 @@ function DetailTextField({
   const write = (text: string) => upsertDetailText(getValues, setValue, detailKey, text);
 
   return (
-    <div className='space-y-px' data-c19-field={detailKey}>
-      <FieldLabel htmlFor={id} pill={<ProvenancePill state={prov} data-c19-prov={detailKey} />}>
-        {label}
-      </FieldLabel>
+    <div className='space-y-1' data-c19-field={detailKey}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Textarea
         id={id}
         name={`construction-${detailKey}`}

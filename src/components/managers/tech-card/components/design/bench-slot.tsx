@@ -6,16 +6,15 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
-import { Reason } from './core';
+import { DrawHalf, HALF_FACE, SLOT_HALVES, Reason } from './core';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
+import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
@@ -442,14 +441,15 @@ export type BenchSlotProps = {
  *   · ЗАПОЛНЕННАЯ — сплошная чернильная рамка, кадр 1:1 без своей рамки, ПОДВАЛ (`.cap`) с именем
  *     стороны и звёздочкой обязательной; никакой полосы происхождения — она уехала в `title`
  *     подвала (`slotFootnote`), потому что макет её не рисует, а стереть факт нельзя;
- *   · ПУСТАЯ — пунктирная рамка, имя стороны и строка жеста «click to fill · ⌘V · drop» прямо на
- *     ячейке: состояние показывается, а не рассказывается абзацем под полосой.
+ *   · ПУСТАЯ — ТА ЖЕ КОРОБКА (R2 п.24): пунктирная рамка, кадр 1:1, ТОТ ЖЕ подвал с именем
+ *     стороны; внутри кадра — две половины, «from media» и «draw» (R2 п.16). Состояние
+ *     показывается, а не рассказывается абзацем под полосой.
  *
- * ⚠ ЖЕСТ «CLICK TO FILL» — ЭТО БИБЛИОТЕКА, ⌘V И БРОСОК, а не «первый свободный флэт из пула», как
- * в прототипе (`f:fill` там — названное упрощение, см. `steps/flat.md`). На проводе слот берёт
+ * ⚠ ЗАПОЛНИТЬ СЛОТ — ЭТО БИБЛИОТЕКА, ⌘V, БРОСОК ИЛИ РИСУНОК, а не «первый свободный флэт из пула»,
+ * как в прототипе (`f:fill` там — названное упрощение, см. `steps/flat.md`). На проводе слот берёт
  * `picture_id` или `media_id` конкретной картинки; картинку полосы в слот кладёт пикер «— slot —»
- * под плиткой истории (`slot-picker.tsx`). Ячейка держит три жеста ОДНИМ обработчиком, как всякий
- * слот медиа админки: клик — `MediaSelector`, ⌘V и бросок — `useMediaIntake`.
+ * под плиткой истории (`slot-picker.tsx`). Первые три жеста держит ОДИН орган — `MediaSlot`
+ * админки; четвёртый — векторный редактор на чистой плате, и он пишет в ЭТОТ ЖЕ слот.
  *
  * ⚠ КЛИК ПО СТОЯЩЕЙ ПЛИТЕ НЕ СНИМАЕТ ЕЁ. Макет делает всю плиту кнопкой `f:take`; у продукта
  * поверхность плитки — закон углов `PictureTile` (владелец: «сделай везде одинаково … компонентом»):
@@ -458,20 +458,93 @@ export type BenchSlotProps = {
  * записью за каждый неточный клик. Строка под полосой называет ✕.
  */
 
-/** Кожа кадра пустой ячейки — та же полосатая поверхность, что у всякого слота медиа. Рост
- *  (138px, кадр 1:1 ленты) — инлайном: стенд читает CSS готовой сборки, где класса, которого не
- *  было в дереве на момент сборки, нет; продовая сборка его выпустила бы, стенд — нет. */
-const CELL_PX = 138;
-const EMPTY_FACE_STYLE: React.CSSProperties = { ...PLACEHOLDER_SURFACE, minHeight: CELL_PX };
-const EMPTY_FACE =
-  'flex h-full w-full cursor-pointer flex-col items-center justify-center gap-1 px-2 text-center ' +
-  'text-labelColor hover:border-textColor hover:text-textColor ' +
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+/**
+ * ═══ ПУСТАЯ ЯЧЕЙКА — ТА ЖЕ КОРОБКА, ЧТО ЗАПОЛНЕННАЯ (R2 п.24) ═══════════════════════════════════
+ *
+ * Владелец, дословно: «в FLAT SLOTS плейсхолдеры больше самих блоков тамбнейлов — сделай
+ * одинакового размера». Раньше пустая ячейка была ОДНОЙ кнопкой ростом `minHeight: 138`, а
+ * заполненная — рамкой с кадром 1:1 и подвалом под ним. Две разные разметки одной ячейки
+ * расходились на высоту подвала, и лента стояла ступеньками.
+ *
+ * ТЕПЕРЬ РАЗМЕР НЕ «СОГЛАСОВАН», А ВЫВЕДЕН ИЗ ОДНОЙ РАЗМЕТКИ: рамка 1px, внутри неё кадр
+ * `aspect-ratio: 1/1` (его ширина — ширина ячейки МИНУС рамка, ровно как у `PictureTile` в
+ * заполненной ветке) и ОДИН И ТОТ ЖЕ подвал `SlotCap`. Совпадение проверяется измерением на
+ * стенде, а не глазом: у обеих ветвей общий подвал и общая арифметика кадра.
+ *
+ * ═══ ДВЕ ПОЛОВИНЫ ОДНОЙ ПЛИТКИ (R2 п.16) ═══════════════════════════════════════════════════════
+ *
+ * Верх — слот медиа (клик в библиотеку, ⌘V, бросок файла, фотоглиф — всё внутри `MediaSlot`);
+ * низ — «draw» в векторный редактор на чистой плате. Две двери В ОДНУ КОМНАТУ: обе кладут
+ * картинку В ЭТОТ слот, и потому стоят на одной коробке, а не рядом с ней кнопками.
+ *
+ * ЛИНИЯ МЕЖДУ НИМИ ОДНА. Своей рамки у половин нет — рамку несёт коробка; иначе посередине встала
+ * бы двойная линия из двух стыкующихся рамок (та же беда, которую в `8d29fd83` лечили заездом на
+ * пиксель). Деление — строками грида, ИНЛАЙНОМ: стенд читает CSS готовой сборки, в котором
+ * произвольного класса деления нет, а геометрия деления не должна зависеть от сканера классов.
+ */
+/**
+ * ⚠ `minHeight: 0` НА САМОМ КАДРЕ — ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ПОЧИНКИ. Кадр стоит элементом
+ * колоночного флекса (коробка ячейки), а у элемента флекса `min-height: auto`, то есть
+ * содержательный минимум ПЕРЕБИВАЕТ `aspect-ratio`. Замерено: без нуля коробка вырастала до 366
+ * при 162 у заполненной — «квадрат» проигрывал содержимому половин.
+ */
+const SLOT_FRAME: React.CSSProperties = {
+  ...PLACEHOLDER_SURFACE,
+  aspectRatio: '1/1',
+  minHeight: 0,
+};
+/*
+ * ДВЕ ПОЛОВИНЫ ПЛЕЙСХОЛДЕРА (перо, лицо половины, деление коробки надвое) ЖИВУТ В `./core`
+ * (`core/two-half-slot.tsx`): тот же орган стоит в INPUT — REFERENCES и во флэт-сторонах рендера,
+ * и второе его начертание разъехалось бы с первым молча — так уже разъехалась кожа в волне r2.
+ */
 
 /**
- * ПУСТАЯ ЯЧЕЙКА — имя стороны, строка жеста, три входа. Локальный орган этого файла; макетный
- * `slotCell` в пустом состоянии. Просится в `core`, если пустые ячейки понадобятся ещё одной
- * полосе (у рендер-верстака свой файл, `render/side-row.tsx`).
+ * ПОДВАЛ ЯЧЕЙКИ — имя стороны и звёздочка обязательной. ОДИН на обе ветви (заполненную и пустую):
+ * именно он держит обещание «одна коробка», и вторая его копия сломала бы её молча.
+ */
+function SlotCap({
+  label,
+  required,
+  requiredNote,
+  title,
+  trailing,
+}: {
+  label: string;
+  required?: boolean;
+  requiredNote?: string;
+  title?: string;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <div
+      className='flex min-w-0 items-baseline gap-1 border-t border-hairline px-1.5 py-1'
+      title={title || undefined}
+      data-bench-cap={label}
+    >
+      <Text
+        size='micro'
+        variant='uppercase'
+        tracking='label'
+        component='span'
+        className='min-w-0 truncate'
+      >
+        {label}
+      </Text>
+      {required && (
+        <Text size='micro' component='span' className='text-error' title={requiredNote}>
+          *
+        </Text>
+      )}
+      {trailing}
+    </div>
+  );
+}
+
+/**
+ * ПУСТАЯ ЯЧЕЙКА — коробка, две двери, подвал. Локальный орган этого файла; макетный `slotCell` в
+ * пустом состоянии. Просится в `core`, если пустые ячейки понадобятся ещё одной полосе (у
+ * рендер-верстака свой файл, `render/side-row.tsx`).
  */
 function EmptyCell({
   label,
@@ -481,6 +554,7 @@ function EmptyCell({
   disabled,
   picking,
   onPlaceMedia,
+  onDraw,
 }: {
   label: string;
   required?: boolean;
@@ -489,62 +563,71 @@ function EmptyCell({
   disabled?: boolean;
   picking?: boolean;
   onPlaceMedia: (media: common_MediaFull) => void;
+  /** Есть — у ячейки вторая половина «draw». Нет — кадр целиком под слот медиа. */
+  onDraw?: () => void;
 }) {
   const take = (media: common_MediaFull[]) => {
     const first = media[0];
     if (first?.id) onPlaceMedia(first);
   };
-  const intake = useMediaIntake({
-    enabled: !disabled,
-    accept: 'image',
-    limit: 1,
-    purpose,
-    onMedia: take,
-  });
-  const face = (
-    <button
-      type='button'
-      aria-label={`${label} · empty — click to fill`}
-      disabled={disabled}
+  const halved = !disabled && !!onDraw;
+  return (
+    <div
       data-bench-empty={label}
-      style={EMPTY_FACE_STYLE}
+      /* Обе половины подписаны одинаково на всех шести ячейках («from media» / «draw»), и на слух
+         они неразличимы. Имя стороны даёт группа — оно же напечатано в подвале. */
+      role='group'
+      aria-label={`${label} — empty slot`}
       className={cn(
-        placeholderClass({ dashed: true }),
-        EMPTY_FACE,
-        (intake.dragging || picking) && 'border-textColor text-textColor',
-        disabled && 'cursor-default hover:border-borderColor hover:text-labelColor',
+        'flex min-w-0 flex-col overflow-hidden border border-dashed',
+        picking ? 'border-textColor' : 'border-borderColor',
       )}
     >
-      <span className='text-micro uppercase tracking-label text-textColor'>
-        {label}
-        {required && (
-          <span className='text-error' title={requiredNote}>
-            {' '}
-            *
-          </span>
+      <div
+        style={{ ...SLOT_FRAME, ...(halved ? SLOT_HALVES : {}) }}
+        className={cn(!halved && 'flex items-center justify-center')}
+      >
+        {disabled ? (
+          <Text size='micro' variant='uppercase' tracking='label' component='span'>
+            empty
+          </Text>
+        ) : (
+          <>
+            {/* ВЕРХНЯЯ ПОЛОВИНА — слот медиа как он есть: клик в библиотеку, ⌘V, бросок и
+                фотоглиф живут ВНУТРИ примитива, и второго их написания здесь не заводится.
+                Рамка снята (`border-0`): её несёт коробка ячейки.
+
+                ⚠ ОБЁРТКА С `minHeight: 0` НЕСУЩАЯ, А НЕ УБОРКА. У элемента грида
+                `min-height: auto`, а внутри стоит кнопка со СВОИМИ пропорциями (`4/5`): её
+                содержательная высота растягивала строку, строка растягивала кадр, и «квадрат
+                1:1» превращался в 340 пикселей — замерено на стенде (366 против 162 у
+                заполненной ячейки). С нулевым минимумом высоту строки задаёт ТОЛЬКО пропорция
+                кадра, а `h-full` кнопки разрешается уже об неё. */}
+            <div style={{ minHeight: 0, overflow: 'hidden' }} className='min-w-0'>
+              <MediaSlot
+                label='from media'
+                purpose={purpose}
+                aspectRatio={['Custom']}
+                allowMultiple={false}
+                showVideos={false}
+                onSelect={take}
+                sizeClassName='h-full w-full'
+                className='border-0'
+              />
+            </div>
+            {onDraw && (
+              <DrawHalf
+                anchor={label}
+                label='draw'
+                ariaLabel={`draw ${label}`}
+                title='opens the picture editor on a blank plate; what you draw takes this slot'
+                onClick={onDraw}
+              />
+            )}
+          </>
         )}
-      </span>
-      <span className='text-micro normal-case leading-tight tracking-normal'>
-        {intake.dragging ? 'drop the image' : disabled ? 'empty' : 'click to fill · ⌘V · drop'}
-      </span>
-    </button>
-  );
-  return (
-    <div {...(disabled ? {} : intake.regionHandlers)} className='flex h-full min-w-0 flex-col'>
-      {disabled ? (
-        face
-      ) : (
-        <MediaSelector
-          label={`+ fill ${label}`}
-          purpose={purpose}
-          aspectRatio={['Custom']}
-          allowMultiple={false}
-          showVideos={false}
-          saveSelectedMedia={take}
-          trigger={face}
-        />
-      )}
-      {intake.dialog}
+      </div>
+      <SlotCap label={label} required={required} requiredNote={requiredNote} />
     </div>
   );
 }
@@ -649,32 +732,21 @@ export function BenchSlot(props: BenchSlotProps) {
             }
           />
           {/* ПОДВАЛ — имя стороны и звёздочка; происхождение плиты (`AI · run 5 · a`) уехало в
-              `title`: макет его не печатает, а факт остаётся в одном наведении. */}
-          <div
-            className='flex min-w-0 items-baseline gap-1 border-t border-hairline px-1.5 py-1'
-            title={footnote || undefined}
-            data-bench-cap={label}
-          >
-            <Text
-              size='micro'
-              variant='uppercase'
-              tracking='label'
-              component='span'
-              className='min-w-0 truncate'
-            >
-              {label}
-            </Text>
-            {required && (
-              <Text size='micro' component='span' className='text-error' title={requiredNote}>
-                *
-              </Text>
-            )}
-            {saving && (
-              <Text size='nano' variant='label' component='span' className='ml-auto uppercase'>
-                saving…
-              </Text>
-            )}
-          </div>
+              `title`: макет его не печатает, а факт остаётся в одном наведении. Тот же орган, что
+              у пустой ветки, — этим и держится «одна коробка». */}
+          <SlotCap
+            label={label}
+            required={required}
+            requiredNote={requiredNote}
+            title={footnote}
+            trailing={
+              saving ? (
+                <Text size='nano' variant='label' component='span' className='ml-auto uppercase'>
+                  saving…
+                </Text>
+              ) : null
+            }
+          />
         </div>
       ) : (
         <EmptyCell
@@ -685,6 +757,11 @@ export function BenchSlot(props: BenchSlotProps) {
           disabled={disabled}
           picking={picking}
           onPlaceMedia={onPlaceMedia}
+          /* НИЖНЯЯ ПОЛОВИНА ПИШЕТ В ЭТОТ ЖЕ СЛОТ: редактор получает `slotRef` и `slotRev` ячейки,
+             то есть `kind:'flat'`, `colorwayId: 0`, адрес одним членом oneof и живой CAS-токен.
+             Там, где редактора нет по существу (`editable={false}` — рендер-слоты), нет и
+             половины: дверь, которая молча делает не то, хуже отсутствующей. */
+          onDraw={!disabled && editable ? () => setVectorOpen(true) : undefined}
         />
       )}
 
@@ -732,14 +809,18 @@ export function BenchSlot(props: BenchSlotProps) {
       )}
 
       {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. `editable`
-          снимает и дверь, и МОНТАЖ: модалка держит своё состояние холста и подписки на клавиши. */}
-      {!disabled && editable && picture && (
+          снимает и дверь, и МОНТАЖ: модалка держит своё состояние холста и подписки на клавиши.
+          ⚠ У ПУСТОГО СЛОТА ОН ТОЖЕ ЖИВЁТ, но только пока открыт: `base={null}` — заявленный режим
+          «рисунок с нуля» (слой с `base_media_id = 0`), а `slot` тот же, поэтому сплющенная
+          картинка встаёт РОВНО В ЭТУ ячейку. Держать его смонтированным под закрытой дверью
+          значило бы отбирать оконные клавиши у страницы. */}
+      {!disabled && editable && (picture || vectorOpen) && (
         <VectorModal
           open={vectorOpen}
           onOpenChange={setVectorOpen}
           techCardId={techCardId}
           band={band}
-          base={picture}
+          base={picture ?? null}
           slot={{ ref: slotRef, label, slotRev }}
           disabled={disabled}
         />
@@ -850,26 +931,28 @@ export function NewDetailCell({
           }}
         />
       ) : (
-        <button
-          type='button'
-          disabled={disabled}
-          onClick={demandName}
-          aria-label='name the detail first'
-          style={EMPTY_FACE_STYLE}
+        /* ТА ЖЕ КОРОБКА, ЧТО У ВСЯКОЙ ЯЧЕЙКИ ЛЕНТЫ (R2 п.24): рамка, кадр 1:1, подвал. Двери
+           внутри кадра нет — сначала имя: безымянный слот сервер отвергает
+           (`detail_name_required`), и кнопка, которая нажимается и молча ничего не делает,
+           читается как сломанная. */
+        <div
           className={cn(
-            placeholderClass({ dashed: true }),
-            EMPTY_FACE,
-            bad && 'border-error text-error',
-            disabled && 'cursor-default hover:border-borderColor hover:text-labelColor',
+            'flex min-w-0 flex-col overflow-hidden border border-dashed',
+            bad ? 'border-error' : 'border-borderColor',
           )}
         >
-          <span className={cn('text-micro uppercase tracking-label', bad ? 'text-error' : 'text-textColor')}>
-            + detail
-          </span>
-          <span className='text-micro normal-case leading-tight tracking-normal'>
-            name it, then fill it
-          </span>
-        </button>
+          <button
+            type='button'
+            disabled={disabled}
+            onClick={demandName}
+            aria-label='name the detail first'
+            style={SLOT_FRAME}
+            className={cn(HALF_FACE, bad && 'text-error', disabled && 'cursor-default')}
+          >
+            <span className='leading-tight'>name it, then fill it</span>
+          </button>
+          <SlotCap label='+ detail' />
+        </div>
       )}
 
       <Input

@@ -17,10 +17,8 @@ import {
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
-import type { ViewSwitchOption } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
 import { isPickablePicture } from '../band-feed';
@@ -69,18 +67,21 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * THE GENERATION HISTORY — runs, and only runs. ONE organ on five steps.
  *
  * ═══ THE LAYOUT IS THE MOCK-UP'S `histBlock()` (`_core.js`), THE MECHANISM IS THE PRODUCT'S ═════
- * Top to bottom, as on `step-2.png`:
- *   · header  `GENERATION HISTORY · nothing here is deleted`            [N RUNS]
- *   · row     `KIND [flats ▾] [1 OF 1 RUN] loaded [3 PICTURES]`      [· 0 ARCHIVED ▸]
- *   · fold    `RUNS ─────────────────────────────────────────────── [HIDE ▾ | SHOW ▸]`
+ * Top to bottom (r2 п.22, п.23, п.27 — три правки владельца поверх макета):
+ *   · header  `GENERATION HISTORY · nothing here is deleted`        [23 RUNS ▾]  ← И СВЁРТКА ТОЖЕ
+ *   · row     `[1 OF 1 RUN] loaded [3 PICTURES]`                  [· 0 ARCHIVED ▸]
  *   · body    rows of runs: the tiles of what came back, then the meta line
- *             `RUN 7 · FLAT · DONE · alina · 14:12 · $0.38 · RECALL ▸ · + RESULTS ▸ · META ▸ … ARCHIVE ▸`,
+ *             `alina · 14:12 · $0.38` и под ней ряд дверей `recall ▸  + results ▸  meta ▸ … archive ▸`,
  *             then the pager `‹ newer · page N of M · older › … show all`
  *   · shelf   `ARCHIVED [N RUNS] [HIDE ▾]` + its rows, under the window, only while open.
- * The five steps differ in TWO values only: the opening filter (`defaultRep`) and whether the RUNS
- * fold starts open (`defaultOpen`: open on FLAT, closed on the four steps that have their own
- * outputs section above). The block itself is never collapsed: its header and the KIND row are
- * always on screen, as in the mock-up.
+ * Пилюль `RUN 7 · FLAT · DONE` больше нет (п.22): состояние — словом и только пока прогон не
+ * закончен; номер и род не сказаны, потому что род задан шагом и не выбирается (п.27 — селект
+ * KIND снят), а строку читают по часам и автору. Счётчик прогонов и дверь свёртки — ОДИН орган в
+ * шапке (п.23): отдельной линейки `RUNS ─── HIDE ▾` больше нет.
+ * The five steps differ in TWO values only: the kind of the step (`defaultRep`, now a hard filter)
+ * and whether the RUNS fold starts open (`defaultOpen`: open on FLAT, closed on the four steps that
+ * have their own outputs section above). The block itself is never collapsed: its header and the
+ * loaded row are always on screen.
  *
  * What the mock-up shows as gestures the product does with ITS OWN RPC and rules, unchanged here:
  * NOTHING IS EVER DELETED and the generation is the unit that collapses (archive is a flag on the
@@ -109,15 +110,6 @@ const AUTOFILL_PAGES = 1;
 
 /** The tile track of the outputs grid — the mock-up's `.fgrid` (`minmax(148px, 1fr)`). */
 const TRACK = 148;
-
-/**
- * The «on» pill — filled ink, white word — for a run in flight. Explicit classes rather than
- * `Pill` + `className`, because the built stylesheet orders `.text-textColor` after
- * `.text-bgColor`, so a `Pill tone='ink'` handed `text-bgColor` stays black on black. Просится в
- * core: an `on` tone on `Pill`.
- */
-const PILL_ON =
-  'inline-flex items-center whitespace-nowrap border border-textColor bg-textColor px-[7px] py-px text-micro uppercase tracking-pill text-bgColor';
 
 /* ────────────────────────────── reading ────────────────────────────── */
 
@@ -470,15 +462,21 @@ function RunTile({
 /* ────────────────────────────── the row ────────────────────────────── */
 
 /**
- * The state pill of a run — the mock-up's `histStatus` + `histTone`, seven positions, computed and
- * never stored: `done` · `done · 1 of 2` (ink) · `running 0:12` · `reserved` (filled) ·
- * `failed · CODE` · `cancelled` (dashed). The product adds `retrying · CODE` for a live run that
- * already failed once (S-12) and `cancelling…` for a stop that may still be paid for.
+ * СОСТОЯНИЕ ПРОГОНА — СЛОВОМ, И ТОЛЬКО ПОКА О НЁМ ЕСТЬ ЧТО СКАЗАТЬ (r2 п.22).
  *
- * ⚠ TWO READINGS OF ONE OUTCOME (D-4): the pill shows the truncated chip — the provider's text runs
- * to 4 000 characters and a nowrap pill would carry the page sideways — and its `title` the whole.
+ * Владелец о ряде пилюль на строке: «RUN 30 · FLAT · DONE — эти все иконки надо убрать». Пилюли
+ * состояния больше нет; `null` здесь означает «прогон кончился ровно так, как его просили» — такая
+ * строка молчит вовсе, о её исходе говорят её же картинки под ней. Все остальные положения
+ * (`running 0:12`, `reserved`, `retrying · CODE`, `cancelling…`, `failed · CODE`, `cancelled`,
+ * `done · 1 of 2` — доставлено меньше, чем просили) остаются словом в мета-строке.
+ *
+ * ⚠ ДВА ЧТЕНИЯ ОДНОГО ИСХОДА (D-4): слово — усечённый `runOutcomeChip` (текст провайдера бывает до
+ * 4 000 знаков и увёл бы страницу вбок), `title` — целый `runOutcomeNote`.
  */
-function StatusPill({ run, elapsed }: { run: common_DesignRun; elapsed: string }) {
+function runStateWord(
+  run: common_DesignRun,
+  elapsed: string,
+): { word: string; note?: string } | null {
   const status = runStatus(run);
   const note = runOutcomeNote(run);
   const chip = runOutcomeChip(run);
@@ -490,19 +488,14 @@ function StatusPill({ run, elapsed }: { run: common_DesignRun; elapsed: string }
         ? 'reserved'
         : chip;
     const clock = status === 'running' || failedOnce ? elapsed : '';
-    return (
-      <span className={PILL_ON} title={isCancelling(run) ? undefined : note}>
-        {word}
-        {clock ? ` ${clock}` : ''}
-      </span>
-    );
+    return {
+      word: clock ? `${word} ${clock}` : word,
+      note: isCancelling(run) ? undefined : note,
+    };
   }
-  if (status === 'failed' || status === 'cancelled') return <GapPill title={note}>{chip}</GapPill>;
-  return (
-    <Pill tone='ink' title={note}>
-      {chip}
-    </Pill>
-  );
+  // «done» без остатка — единственное молчаливое состояние; «done · 1 of 2» это уже недостача.
+  if (status === 'done' && note === 'done') return null;
+  return { word: chip, note };
 }
 
 function RunRow({
@@ -581,6 +574,22 @@ function RunRow({
   const handle = runHandle(runId);
   const expected = expectedTileCount(run);
   const noPictures = !live && !textRun && pictures.length === 0;
+  /** Состояние строки словом, `null` — законченный без остатка прогон (r2 п.22). */
+  const state = runStateWord(run, elapsed);
+  /** КТО И КОГДА — то, по чему строку теперь и узнают, раз номер и род с неё сняты. */
+  const stamp =
+    [(run.author ?? '').trim(), clockStamp(run.createdAt)].filter(Boolean).join(' · ') ||
+    'author not stated';
+  /**
+   * ОГОВОРКИ САМОЙ СТРОКИ — тем же серым текстом, а не пилюлями рядом. Их две, и обе редкие:
+   * что прогону велели перерисовать/починить, и чьим повтором он был (`rerun_of` — ребро сервера).
+   */
+  const notes = [
+    ...(fixNames.length > 0
+      ? [isVector ? `redraw of ${fixNames.join(', ')}` : `fix: ${fixNames.join(', ')} · from the slots`]
+      : []),
+    ...(rerunOf > 0 ? [`repeat of ${runHandle(rerunOf)}`] : []),
+  ];
 
   /* ═══ WHAT CAME BACK — the mock-up's `histOutputs` ═══════════════════════════════════════════
      A run in flight: dashed cells, `running 0:12` in the first while it runs, `reserved` in the
@@ -746,82 +755,93 @@ function RunRow({
     >
       {outputs}
 
-      {/* ═══ THE META LINE — the mock-up's `histRow` line, left to right ═══════════════════════════
-          RUN 7 · FLAT · DONE · alina · 14:12 · $0.38 · [NOTHING WENT IN] RECALL ▸ · [reason]
-          + RESULTS ▸ · META ▸ … ARCHIVE ▸. The product's own facts about a row — a repeat, a fix
-          selection — stand as extra grey pills after the state; they appear only on such rows. */}
-      <div className={cn('flex flex-wrap items-center gap-1.5', outputs ? 'mt-2' : undefined)}>
-        <Pill tone='ink'>{handle || 'run'}</Pill>
-        <Pill tone='mut'>{kindWord(run, rep)}</Pill>
-        <StatusPill run={run} elapsed={elapsed} />
-        {fixNames.length > 0 &&
-          (isVector ? (
-            <Pill tone='mut' title='which plate the machine was asked to redraw as vector curves'>
-              redraw of {fixNames.join(', ')}
-            </Pill>
-          ) : (
-            <Pill tone='mut'>fix: {fixNames.join(', ')} · from the slots</Pill>
-          ))}
-        {/* THE LINEAGE OF A RERUN, READ FROM THE ROW ITSELF: `rerun_of` is the server's own edge. */}
-        {rerunOf > 0 && <Pill tone='mut'>repeat of {runHandle(rerunOf)}</Pill>}
-        <Text size='nano' variant='label' component='span'>
-          {[(run.author ?? '').trim(), clockStamp(run.createdAt)].filter(Boolean).join(' · ') ||
-            'author not stated'}
-        </Text>
-        {/* ABSENT MONEY IS «NOT STATED», NEVER `$0.00` (`money.ts`): a finished row without a price
-            is a row this account may not see the price of, and the pill is simply not drawn. */}
-        {price && (
-          <Pill
-            tone='mut'
-            title={
-              run.priceActual
-                ? 'the sum of every paid attempt of this run'
-                : 'reserved against the day at dispatch; the actual sum arrives with the answer'
-            }
-          >
-            {price}
-          </Pill>
-        )}
+      {/* ═══ THE META LINE — ОДНА СПОКОЙНАЯ СТРОКА, ПОД НЕЙ РЯД ДВЕРЕЙ (r2 п.22) ═══════════════════
+          Было: `RUN 7 · FLAT · DONE · repeat of RUN 5` — россыпь из четырёх-пяти пилюль впритык, и
+          сразу за ними, тем же ростом, двери. Владелец: «эти все иконки надо убрать».
 
-        {/* РЕКОЛ — ДВЕ ДВЕРИ И ВОПРОС ПЕРЕД НИМИ (V-12, V-13), и все три живут в
+          Стало ДВА яруса и ни одной пилюли:
+            · факт строки — серый текст `alina · 14:12 · $0.38`, состояние словом впереди и только
+              пока прогон не «done» (`runStateWord`), продуктовые оговорки (перерисовка, правка,
+              повтор) — тем же текстом через `·`;
+            · жест — отдельный ряд `recall ▸ · + results ▸ · meta ▸ … archive ▸` с широким шагом.
+          НОМЕР ПРОГОНА И ЕГО РОД СНЯТЫ НАМЕРЕННО: после п.27 история шага держит РОВНО ОДИН род,
+          а строку читают по часам и автору. Номер никуда не делся — он в `data-run`, в
+          `aria-label` каждой двери и в панели `meta ▸`, то есть везде, где его ищут глазами. */}
+      <div className={cn('space-y-1.5', outputs ? 'mt-2.5' : undefined)}>
+        {/* ЯКОРЬ ЭТОЙ СТРОКИ — `data-run-line`, а НЕ `data-run-meta`: последним уже помечена панель
+            `meta ▸` (`run-panel.tsx`), и два разных органа под одним именем читались бы как один. */}
+        <Text size='nano' variant='label' component='p' data-run-line={runId || undefined}>
+          {state && (
+            <>
+              <span className='text-textColor' title={state.note}>
+                {state.word}
+              </span>
+              {' · '}
+            </>
+          )}
+          {/* ABSENT MONEY IS «NOT STATED», NEVER `$0.00` (`money.ts`): a finished row without a
+              price is a row this account may not see the price of, and the word is simply absent. */}
+          {stamp}
+          {price && (
+            <>
+              {' · '}
+              <span
+                title={
+                  run.priceActual
+                    ? 'the sum of every paid attempt of this run'
+                    : 'reserved against the day at dispatch; the actual sum arrives with the answer'
+                }
+              >
+                {price}
+              </span>
+            </>
+          )}
+          {notes.length > 0 && ` · ${notes.join(' · ')}`}
+        </Text>
+
+        {/* РЯД ДВЕРЕЙ. Шаг между ними шире, чем был (`gap-x-3` против `gap-1.5`), потому что это
+            РАЗНЫЕ жесты, а не одна группа: «не пихай кучу кнопок в одном месте».
+            РЕКОЛ — ДВЕ ДВЕРИ И ВОПРОС ПЕРЕД НИМИ (V-12, V-13), и все три живут в
             `history-recall.tsx`, а не здесь: строка объявляет только МЕСТО жеста. Погашенная дверь
             несёт свою причину пилюлей ПЕРЕД собой. Кнопки RERUN здесь нет и не будет (T-10). */}
-        <RecallDoors techCardId={techCardId} band={band} run={run} disabled={disabled} />
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
+          <RecallDoors techCardId={techCardId} band={band} run={run} disabled={disabled} />
 
-        <Button
-          variant='secondary'
-          size='xs'
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-label={`${open ? 'hide' : 'show'} what went into ${handle || 'this run'}`}
-          title='what this run was given, what it sent and what it cost — launch-time copies'
-        >
-          {open ? 'meta ▾' : 'meta ▸'}
-        </Button>
-
-        {/* ARCHIVE IS THE ONE COLLAPSE VERB LEFT, AND IT TAKES THE WHOLE GENERATION (T-14). It is
-            reversible and asks nothing. ⚠ No client-side refusal stands in front of it (J-22):
-            `ArchiveRun` on the server is one UPDATE of `archived_at` and holds none of the
-            preconditions the old `archiveBlockReason` copied from `HideDesignPicture`. Dark only on
-            a run in flight — the state pill beside it says why — and on a read-only card. */}
-        <span className='ml-auto'>
           <Button
             variant='secondary'
             size='xs'
-            disabled={disabled || live || archiveRun.isPending}
-            onClick={() => archiveRun.mutate({ runId, archived: !archived })}
-            aria-label={archived ? `put ${handle} back on the card` : `fold ${handle} away`}
-            title={
-              disabled || live
-                ? undefined
-                : archived
-                  ? 'put this generation back into the window'
-                  : 'fold this whole generation away · reversible, and it hides no picture from anywhere else'
-            }
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-label={`${open ? 'hide' : 'show'} what went into ${handle || 'this run'}`}
+            title='what this run was given, what it sent and what it cost — launch-time copies'
           >
-            {archived ? 'unarchive' : 'archive ▸'}
+            {open ? 'meta ▾' : 'meta ▸'}
           </Button>
-        </span>
+
+          {/* ARCHIVE IS THE ONE COLLAPSE VERB LEFT, AND IT TAKES THE WHOLE GENERATION (T-14). It is
+              reversible and asks nothing. ⚠ No client-side refusal stands in front of it (J-22):
+              `ArchiveRun` on the server is one UPDATE of `archived_at` and holds none of the
+              preconditions the old `archiveBlockReason` copied from `HideDesignPicture`. Dark only
+              on a run in flight — the state word above says why — and on a read-only card. */}
+          <span className='ml-auto'>
+            <Button
+              variant='secondary'
+              size='xs'
+              disabled={disabled || live || archiveRun.isPending}
+              onClick={() => archiveRun.mutate({ runId, archived: !archived })}
+              aria-label={archived ? `put ${handle} back on the card` : `fold ${handle} away`}
+              title={
+                disabled || live
+                  ? undefined
+                  : archived
+                    ? 'put this generation back into the window'
+                    : 'fold this whole generation away · reversible, and it hides no picture from anywhere else'
+              }
+            >
+              {archived ? 'unarchive' : 'archive ▸'}
+            </Button>
+          </span>
+        </div>
       </div>
 
       {open && <RunPanel techCardId={techCardId} band={band} run={run} disabled={disabled} />}
@@ -832,37 +852,27 @@ function RunRow({
 /* ────────────────────────────── the representation filter ────────────────────────────── */
 
 /**
- * ═══ ФИЛЬТР РОДА НАД ИСТОРИЕЙ (G-1) — ФИЛЬТР СТРОК, А НЕ ПЛИТОК ═══════════════════════════════
+ * ═══ РОД НАД ИСТОРИЕЙ (G-1) — СУЖЕНИЕ СТРОК, А НЕ ПЛИТОК ══════════════════════════════════════
  * Кроп и правка наследуют `run_id` предка НА СЕРВЕРЕ, поэтому они уже рисуются ВНУТРИ строки своей
- * генерации — и фильтр, отбирающий строки, уносит их вместе с ней по построению. Словарь —
- * `runRepresentation`, тот же, что у полосы представлений. Прогон рода, которого эта сборка не
- * знает (`null`), виден только под `all`.
+ * генерации — и сужение, отбирающее строки, уносит их вместе с ней по построению. Словарь —
+ * `runRepresentation`, тот же, что у полосы представлений.
+ *
+ * ⚠ ВЫБОРОМ ЭТО БЫТЬ ПЕРЕСТАЛО (r2 п.27): род задаёт ШАГ (`defaultRep`), селекта нет. `all`
+ * остаётся выразимым только в типе — ни один композитор его не передаёт.
  */
 export type RepFilter = 'all' | Representation;
 
-const REP_FILTERS: readonly ViewSwitchOption<RepFilter>[] = [
-  { value: 'all', label: 'all', hint: 'every generation this card has, newest first' },
-  {
-    value: 'flat',
-    label: 'flats',
-    hint: 'the drawings the floor sews from — a machine redraw and a text draft are work on the flat, and crops and edits of a flat filter with it',
-  },
-  { value: 'pattern', label: 'patterns', hint: 'repeating tiles' },
-  {
-    value: 'render',
-    label: 'renders',
-    hint: 'runs that coloured the flats — crops and edits of a render filter with it',
-  },
-  { value: 'threed', label: '3D', hint: '3D models' },
-  {
-    value: 'onmodel',
-    label: 'on model',
-    hint: 'the garment recoloured on a photograph — its outputs say «render» on the wire, so this segment reads the run',
-  },
-];
+/** Слово рода во множественном числе — только для фраз о пустоте: `no archived flats …`. */
+const REP_LABEL: Record<RepFilter, string> = {
+  all: 'runs',
+  flat: 'flats',
+  pattern: 'patterns',
+  render: 'renders',
+  threed: '3D',
+  onmodel: 'on model',
+};
 
-const repLabel = (rep: RepFilter): string =>
-  REP_FILTERS.find((o) => o.value === rep)?.label ?? String(rep);
+const repLabel = (rep: RepFilter): string => REP_LABEL[rep] ?? String(rep);
 
 /** The word of the empty-window sentence: `no flat generations among the loaded runs`. */
 const repWord = (rep: RepFilter): string => (rep === 'all' ? 'run' : REP_NOUN[rep]);
@@ -950,8 +960,15 @@ export function GenerationHistory({
 
   const [archShown, setArchShown] = useState(false);
   const [page, setPage] = useState(0);
-  /** Преходящее, намеренно НЕ сохраняемое: способ смотреть, а не свойство карточки. */
-  const [rep, setRep] = useState<RepFilter>(defaultRep);
+  /**
+   * ═══ РОД ЭТОГО ШАГА — ЖЁСТКИЙ ФИЛЬТР, А НЕ ВЫБОР (r2 п.27) ═══════════════════════════════════
+   * Владелец: «в истории PATTERN не должно быть сортировки по kind — только паттерны; так же во
+   * флэтах, рендерах, 3D, on model». Селект KIND снят вместе со своим состоянием: история шага
+   * показывает род своего шага и ничего больше. Все пять композиторов (`generation/studio.tsx` и
+   * четыре ветки `studio-tab.tsx`) передают КОНКРЕТНЫЙ род, поэтому `all` с экрана недостижим —
+   * положение фильтра осталось выразимым только в типе, ради `repLabel`/`repWord`.
+   */
+  const rep: RepFilter = defaultRep;
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
   /** Свёртка RUNS (макет: `fold('hist.'+kind, …)`). */
@@ -974,7 +991,6 @@ export function GenerationHistory({
   const shownDefaults = useRef(`${defaultRep}|${defaultOpen}`);
   if (shownDefaults.current !== `${defaultRep}|${defaultOpen}`) {
     shownDefaults.current = `${defaultRep}|${defaultOpen}`;
-    if (rep !== defaultRep) setRep(defaultRep);
     if (runsOpen !== defaultOpen) setRunsOpen(defaultOpen);
     if (page !== 0) setPage(0);
     if (openDeck !== null) setOpenDeck(null);
@@ -991,7 +1007,6 @@ export function GenerationHistory({
     if (page !== 0) setPage(0);
     if (showAll) setShowAll(false);
     if (archShown) setArchShown(false);
-    if (rep !== defaultRep) setRep(defaultRep);
     if (splitting) setSplitting(null);
     if (openDeck !== null) setOpenDeck(null);
   }
@@ -1216,13 +1231,25 @@ export function GenerationHistory({
         id='design-history'
         title='generation history'
         question='· nothing here is deleted'
-        /* ТОЛЬКО КАРТОЧКА: живые прогоны всей ленты (`total − archived`), не строки на экране. */
+        /* ═══ ОДИН ОРГАН СВОРАЧИВАНИЯ, И ОН СТОИТ ТАМ, ГДЕ СТОЯЛО ЧИСЛО (r2 п.23) ══════════════
+           Владелец: «кнопка HIDE должна быть на месте „23 RUNS“ и выглядеть органично». Было ДВА
+           органа об одном и том же: пилюля-счётчик в шапке и отдельная линейка `RUNS ─── HIDE ▾`
+           под рядом KIND. Счётчик и дверь слиты в одну кнопку: число говорит, сколько их, стрелка —
+           открыты ли они. Отдельной линейки больше нет.
+           ЧИСЛО — ТОЛЬКО О КАРТОЧКЕ: живые прогоны всей ленты (`total − archived`), не строки на
+           экране; загруженное считает пилюля в ряду ниже. */
         action={
-          <CountPill
-            n={liveOnCard}
-            noun='run'
-            title={`${totalRuns} generation${totalRuns === 1 ? '' : 's'} have ever run on this card, ${archivedRuns} of them archived. What is loaded and shown right now is counted beside the KIND filter below.`}
-          />
+          <Button
+            variant='secondary'
+            size='xs'
+            aria-expanded={runsOpen}
+            aria-controls='design-history-runs'
+            aria-label={`${runsOpen ? 'hide' : 'show'} the ${liveOnCard} run${liveOnCard === 1 ? '' : 's'} of this card`}
+            onClick={() => setRunsOpen((v) => !v)}
+            title={`${totalRuns} generation${totalRuns === 1 ? '' : 's'} have ever run on this card, ${archivedRuns} of them archived. What is loaded and shown right now is counted in the row below.`}
+          >
+            {liveOnCard} {liveOnCard === 1 ? 'run' : 'runs'} {runsOpen ? '▾' : '▸'}
+          </Button>
         }
       >
         {!speaks && (
@@ -1231,40 +1258,13 @@ export function GenerationHistory({
           </CalloutBox>
         )}
 
-        {/* ═══ THE KIND ROW — the mock-up's filter line ═══════════════════════════════════════════
-            `KIND [flats ▾] [1 OF 1 RUN] loaded [3 PICTURES] … [· 0 ARCHIVED ▸]`. A LIST, not a
-            segment strip (J-3: «дропдаун списком а не кнопками»). The counts beside it are the
-            LOADED ones, said so; the archived door carries its number itself and stands in the row,
-            not in the header, where a count must be a pill. `data-rep-filter` — якорь на обёртке:
-            примитив списка не пробрасывает атрибуты в `Select.Trigger`. */}
-        <div className='flex flex-wrap items-center gap-2'>
-          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-            kind
-          </Text>
-          <div
-            data-rep-filter={rep}
-            title={REP_FILTERS.find((option) => option.value === rep)?.hint}
-            className='w-[132px]'
-          >
-            <Select
-              name='representation'
-              placeholder='kind of generation'
-              value={rep}
-              items={REP_FILTERS.map((option) => ({ value: option.value, label: option.label }))}
-              onValueChange={(next) => {
-                // Пустота сюда не доедет — примитив её гасит сам (`offersEmptyOption`); сузить тип
-                // нечем, и чужую строку молча в `RepFilter` не приводим.
-                const hit = REP_FILTERS.find((option) => option.value === next);
-                if (!hit) return;
-                setRep(hit.value);
-                // Состав сменился, и «страница 3» указывала бы в пустоту; колода складывается
-                // вместе с окном. «Показать все» НЕ сбрасывается: это способ смотреть, а не место.
-                setPage(0);
-                setOpenDeck(null);
-              }}
-              fullWidth
-            />
-          </div>
+        {/* ═══ THE LOADED ROW — что этот экран уже прочитал, и полка архива ═══════════════════════
+            `[1 OF 1 RUN] loaded [3 PICTURES] … [· 0 ARCHIVED ▸]`. СЕЛЕКТА KIND ЗДЕСЬ БОЛЬШЕ НЕТ
+            (r2 п.27): род задан шагом и не выбирается — см. `rep` выше. Счёт рядом — ЗАГРУЖЕННОЕ,
+            так и сказано; дверь архива несёт своё число сама и стоит в ряду, а не в шапке, где
+            теперь живёт единственный орган свёртки. `data-rep-filter` остаётся якорем: по нему
+            читают, каким родом эта история сужена. */}
+        <div data-rep-filter={rep} className='flex flex-wrap items-center gap-2'>
           <span data-loaded-note className='flex flex-wrap items-center gap-2'>
             <CountPill
               n={visible.length}
@@ -1299,28 +1299,12 @@ export function GenerationHistory({
           </span>
         </div>
 
-        {/* ═══ THE RUNS FOLD — the mock-up's `fold('hist.<kind>', 'runs', …)` ═══════════════════
-            A `GroupLabel` rule with the one door; the body is MOUNTED only while open, and that is
-            the gate under the autofill (`HistoryWindowAutofill`): a closed fold reads nothing. */}
-        <GroupLabel
-          flush
-          action={
-            <Button
-              variant='secondary'
-              size='xs'
-              aria-expanded={runsOpen}
-              aria-label={runsOpen ? 'hide runs' : 'show runs'}
-              onClick={() => setRunsOpen((v) => !v)}
-            >
-              {runsOpen ? 'hide ▾' : 'show ▸'}
-            </Button>
-          }
-        >
-          runs
-        </GroupLabel>
-
+        {/* ═══ СВЁРТКА RUNS — ЕЁ ДВЕРЬ СТОИТ В ШАПКЕ БЛОКА (r2 п.23) ══════════════════════════════
+            Здесь была линейка `RUNS ──── HIDE ▾` — второй орган об одном и том же. Осталось только
+            ТЕЛО: оно МОНТИРУЕТСЯ лишь пока открыто, и это тот самый гейт под дочитывателем
+            (`HistoryWindowAutofill`) — свёрнутая лента не читает ничего. */}
         {runsOpen && (
-          <>
+          <div id='design-history-runs' className='space-y-stack'>
             {!showAll && (
               <HistoryWindowAutofill
                 want={PAGE * (current + 1)}
@@ -1357,40 +1341,26 @@ export function GenerationHistory({
                 >
                   <span data-probe='rep-empty'>every run on this card is archived</span>
                 </EmptyState>
-              ) : rep !== 'all' && unfiltered.length > 0 ? (
-                <EmptyState
-                  action={
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      onClick={() => {
-                        setRep('all');
-                        setPage(0);
-                        setOpenDeck(null);
-                      }}
-                    >
-                      all runs
-                    </Button>
-                  }
-                >
-                  <span data-probe='rep-empty'>
-                    no {repWord(rep)} generations among the loaded runs
-                  </span>
-                </EmptyState>
               ) : (
-                <EmptyState
-                  action={
-                    <Button variant='secondary' size='xs' onClick={goToRun}>
-                      go to the run
-                    </Button>
-                  }
-                >
-                  <span data-probe='rep-empty'>
-                    {rep !== 'all'
-                      ? `no ${repWord(rep)} generations among the loaded runs`
-                      : 'no runs to show'}
-                  </span>
-                </EmptyState>
+                /* ⚠ ЗДЕСЬ БЫЛА ДВЕРЬ «ALL RUNS» — она вела в положение фильтра, которого больше нет
+                   (r2 п.27): история шага сужена его родом жёстко, и предлагать «покажи все роды»
+                   значило бы обещать экран, которого не существует. Пустота теперь говорит одно и
+                   то же в обоих случаях: этого рода среди прочитанных прогонов нет. */
+                (
+                  <EmptyState
+                    action={
+                      <Button variant='secondary' size='xs' onClick={goToRun}>
+                        go to the run
+                      </Button>
+                    }
+                  >
+                    <span data-probe='rep-empty'>
+                      {rep !== 'all'
+                        ? `no ${repWord(rep)} generations among the loaded runs`
+                        : 'no runs to show'}
+                    </span>
+                  </EmptyState>
+                )
               ))}
 
             {/* THE PAGER, AND THE DOOR THAT SWITCHES IT OFF (T-17): pages are for reading a long
@@ -1475,7 +1445,7 @@ export function GenerationHistory({
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* ═══ ПОЛКА АРХИВА — ПОД ОКНОМ, после свёртки (J-22, макет `histShelfBody`) ══════════════

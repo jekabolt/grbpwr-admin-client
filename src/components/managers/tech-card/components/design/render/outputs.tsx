@@ -8,7 +8,6 @@ import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-v
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
-import { GroupLabel } from 'ui/components/group-label';
 import { Tiles } from 'ui/components/tiles';
 
 import SelectComponent from 'ui/components/select';
@@ -80,7 +79,20 @@ const EMPTY_FAMILIES: CropFamilies = { membersOf: new Map(), rootOf: new Map() }
  * `action` стоят КОЛОНКИ (кнопка + абзац последствия у `ApplySplitDoor`): фиксированные 20px
  * обрезали бы их молча.
  */
-const DOOR_ROW = 'flex h-5 items-center gap-1';
+/* ⚠ `min-h-5`, А НЕ `h-5` — И ЭТО ПОЧИНКА БАГА, А НЕ ОСЛАБЛЕНИЕ ЗАМЕРА (r2 п.31). Владелец:
+   «APPLY SPLITTED не помещается в кнопку, из-за этого вертикальный скролл в блоке». Механизм:
+   полоса выходов объявлена `overflow-x-auto`, а по CSS ось, оставленная `visible` рядом с
+   не-`visible`, ВЫЧИСЛЯЕТСЯ в `auto` — то есть любое содержимое выше жёстких 20px делало полосу
+   вертикально прокручиваемой. Переносил текст двери (починен `whitespace-nowrap` у самой двери) и
+   растил её редкий отчёт об отказе. Высота ряда по-прежнему ОДНА (20px) во всех здоровых
+   состояниях — это и есть замер F-9, — но она больше не режет содержимое молча. */
+/* ⚠ ЗАЗОР РЯДА — 2px, А НЕ 4px, И ЭТО ЗАМЕР (r2 п.31). В ячейке 132px раскрытая колода держит два
+   органа: дверь `apply splitted` и складывающую `▾` (20px). При зазоре 4px коробка двери мерилась
+   106px против 107px подписи — то есть подпись вылезала за кнопку ровно на пиксель, и владелец
+   видел это как «не помещается». Двух пикселей хватает: 110px против 107px. Поля самой кнопки не
+   трогаются — `px-1.5` метрики `size='xs'` едина для всех дверей ряда, и сузить её у одной значило
+   бы завести вторую метрику там, где весь смысл ряда в одной. */
+const DOOR_ROW = 'flex min-h-5 items-center gap-0.5';
 /** ⚠ `bg-bgColor` ЯВНО, А НЕ ПО УМОЛЧАНИЮ. Вторичная кнопка системы — «white fill, 1px edge
  *  border», но БЕЛОГО В НЕЙ НЕТ: она полагается на белую страницу под собой. Над затемнённым
  *  грунтом группы (`Bay`) сквозь неё просвечивал #ededed, и `set` читался залитым — то есть
@@ -1203,7 +1215,9 @@ export function OutputsSection({
       {kind === 'threed' ? (
         /* ═══ THE SHELF — `.fgrid`, minmax 148px: the models built here and the ones brought, one
            grid, told apart by their corner. Empty → the mockup's one dashed line. */
-        rows.length === 0 && pending.length === 0 ? (
+        rows.length === 0 && pending.length === 0 && !bringsOwnModel ? (
+          /* ПУСТАЯ ПОЛКА БЕЗ ЕДИНОЙ ДВЕРИ — одна пунктирная строка. Пока дверь «принести свою»
+             есть, эта строка не нужна: пустая полка И ЕСТЬ одна ячейка-плейсхолдер. */
           <div
             data-outputs-empty=''
             className='flex flex-wrap items-baseline gap-2 border border-dashed border-borderColor bg-bgColor px-2.5 py-2'
@@ -1212,11 +1226,19 @@ export function OutputsSection({
               no model on this card yet
             </Text>
             <Text size='micro' variant='label' component='span' className='normal-case'>
-              · <b>GENERATE above, or bring a .glb below</b>
+              · <b>GENERATE above</b>
             </Text>
           </div>
         ) : (
           <Tiles min={148}>
+            {/* ═══ «ПРИНЕСТИ СВОЮ» — ПЕРВАЯ КАРТОЧКА ПОЛКИ (r2 п.32) ═══════════════════════════
+                Владелец: «вместо отдельного поля — первой карточкой в 3D MODELS OF THIS CARD».
+                Группа `BRING YOUR OWN` со своей подписью, пилюлей `free` и счётчиком принесённых
+                снята целиком: «построить» и «принести» — две двери к ОДНОЙ полке, и вторая из них
+                стояла под полкой отдельным полем, ни на что вокруг не похожим. Ячейка стоит ПЕРВОЙ
+                и до дыры живого прогона: у неё собственный замер («один орган — одно место»), и
+                пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
+            {bringsOwnModel && <Bay key='bring-your-own'>{bring.cell}</Bay>}
             {pending.map((run) => (
               <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
                 <PendingCell run={run} />
@@ -1293,40 +1315,6 @@ export function OutputsSection({
           })}
         </Strip>
       )}
-
-      {/* ═══ BRING YOUR OWN — the second door to the same shelf, under its own rule (E-13, mockup
-          `p4Bring`): «построить» и «принести» — две равные двери к одной полке. FREE, and the
-          count of the models that came by hand (no run behind them). */}
-      {kind === 'threed' && (
-        <>
-          <GroupLabel
-            action={
-              <span className='flex flex-wrap items-center gap-1.5'>
-                <Pill tone='ink'>free</Pill>
-                <Counter
-                  n={rows.filter((r) => (r.run.id ?? 0) === 0).length}
-                  noun='brought model'
-                />
-              </span>
-            }
-          >
-            bring your own
-          </GroupLabel>
-          {bringsOwnModel ? (
-            bring.cell
-          ) : (
-            <InertDoor
-              label='bring your own'
-              reason={
-                disabled
-                  ? 'this card is read-only for you — filing a model is an edit of the card'
-                  : 'this server does not answer the design routes'
-              }
-            />
-          )}
-        </>
-      )}
-
 
       {/* ОДНО ОКНО РЕЗА НА ВЕСЬ РАЗДЕЛ. Оно рисуется хуком и монтируется только когда цель
           выбрана; кадры размечает человек, а `for_input: false` уезжает на провод из самого хука

@@ -96,6 +96,28 @@ function filledMeta(values: unknown[]): number {
 }
 
 /**
+ * ОДИН ШОВ МЕЖДУ ГРУППАМИ БЛОКА — 20px, одинаковый на всех четырёх стыках.
+ *
+ * Владелец: «между IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE и RESPONSIBLE ROLES
+ * с LINKED PRODUCTS сделай чуть больше гэп, чтобы не казалось так скучено».
+ *
+ * До этого зазор рисовали ДВА разных органа: `space-y-stack` секции (10px) и `mt-3` у
+ * неприжатого `GroupLabel` (12px, схлопывался с соседним, а не складывался). Отсюда 10 / 12 / 12
+ * / 10 — четыре шва трёх разных весов, что и читалось как «скучено» и неровно. Здесь шов один и
+ * задаётся ОДНИМ классом на самой секции: `mt` сверху у каждого ребёнка кроме первого и снятый
+ * `mb` у всех (иначе к 20px прибавились бы 10px от `space-y-stack`). Утилиты `space-y-*` в
+ * tailwind v4 завёрнуты в `:where(...)` — нулевая специфичность, поэтому обе строки ниже их
+ * честно перекрывают, а не «случайно выигрывают порядком».
+ *
+ * 20px, а не 24px: 24px — это `--spacing-gutter`, зазор МЕЖДУ блоками. Группы внутри блока обязаны
+ * дышать слабее, чем блоки между собой, иначе одна коробка читается как четыре.
+ *
+ * Все `GroupLabel` внутри — `flush`: свой `mt-3` они больше не приносят, вес шва живёт в одном
+ * месте.
+ */
+const GROUP_SEAM = '[&>*+*]:mt-5 [&>*]:mb-0';
+
+/**
  * Six tracks, 16px between columns, 10px between rows — the prototype's `.cardgrid`.
  *
  * `[&_label]:min-h-[19px]` is the prototype's «rowline:first-child{min-height:19px}»: the style
@@ -416,7 +438,7 @@ export function CardDetails({
       question='— who and what this card is'
       action={<Counter n={filled} noun='field' total={META_FIELDS.length} />}
       id='card-details'
-      className='min-w-0'
+      className={cn('min-w-0', GROUP_SEAM)}
     >
       {/* ── IDENTIFICATION — 3+3, then 2+2+2 ─────────────────────────────────────────────── */}
       <div className='min-w-0' data-card-group='identification'>
@@ -445,12 +467,12 @@ export function CardDetails({
 
       {/* ── CLASSIFICATION — 2+2+2 ───────────────────────────────────────────────────────── */}
       <div className='min-w-0' data-card-group='classification'>
-        <GroupLabel>classification</GroupLabel>
+        <GroupLabel flush>classification</GroupLabel>
         <div className={GRID}>
           {/* The category cascade — three columns in one popover over a single stored leaf.
               Its trigger stretches to the whole cell like the selects beside it. */}
           <div className={W2}>
-            <CategoryBrowser />
+            <CategoryBrowser hint={false} />
           </div>
           <div className={W2}>
             <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
@@ -494,7 +516,7 @@ export function CardDetails({
 
       {/* ── BASE MODEL & SAMPLE SIZE — 3+3 ───────────────────────────────────────────────── */}
       <div className='min-w-0' data-card-group='base'>
-        <GroupLabel>base model &amp; sample size</GroupLabel>
+        <GroupLabel flush>base model &amp; sample size</GroupLabel>
         <div className='[&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center'>
           <BaseModelFields />
         </div>

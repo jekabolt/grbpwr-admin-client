@@ -26,7 +26,7 @@ export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderInputStrip } from './render-input-strip';
 export { RenderStudio } from './render-studio';
-export { InputFlatsGroup, RendersByViewGroup, SidesGroup } from './side-row';
+export { RendersByViewGroup, SidesSection } from './side-row';
 export { ThreedStudio } from './threed-studio';
 export { BodyPicker, modelCaption, modelFacts, modelName } from './model-picker';
 export { WhatModelGetsRenderModal } from './what-model-gets';

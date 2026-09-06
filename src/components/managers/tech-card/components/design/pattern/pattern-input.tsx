@@ -9,36 +9,49 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX } from '../assets/model';
+import { STRIP_CELL_PX, STRIP_FRAME_ASPECT } from '../render/strip-cell';
 
 /**
- * ═══ THE CELL IS THE STRIP'S CELL — 138 px SQUARE, INLINE (owner) ══════════════════════════════
+ * ═══ THE CELL IS THE STRIP'S CELL — 132 × 148, PORTRAIT, INLINE (owner, r2 §25) ════════════════
  *
  * The owner, on the beta: «why is the placeholder in SOURCE PICTURE so crooked». It stood as a
  * 4:1 band «the height of the NAME column beside it» with three rows of text inside — and a
  * flattened striped band with text spilling over reads as a picture that failed to load, not as a
- * slot. The ruling: a NORMAL slot cell, the one FLAT SLOTS draws — a 1:1 square the width of a
- * strip cell (`bench.tsx` `CELL_STYLE`, 138 px), the label on the face, the gesture line ONE line,
- * the striped dashed surface of `MediaSlot`. Empty and filled are the SAME square: the frame does
- * not jump when a picture lands in it, and the NAME column beside it aligns to the cell's top
- * (`items-start`) instead of dictating its height.
+ * slot. The first answer was a 138 px SQUARE, argued from the tile's own geometry.
  *
- * The width is inline, not a class, for the same reason the bench's is: the harness reads the CSS
- * of the built bundle, where a class that was not in the tree at build time does not exist; the
- * cell's width is the strip's geometry, not skin.
+ * ⚠ ТОТ ДОВОД ВЛАДЕЛЕЦ ОТМЕНИЛ, И ЭТО НАПИСАНО ЗДЕСЬ, ЧТОБЫ КВАДРАТ НЕ ВЕРНУЛСЯ «ПО ЛОГИКЕ».
+ * Дословно (r2 §25): «SOURCE PICTURE — плейсхолдер нормальной формы, как все остальные:
+ * прямоугольный портретный». Правило теперь ОДНО НА ВСЕ ЯЧЕЙКИ СТУДИИ: ячейка ленты — 132 px
+ * шириной, кадр 132/148 (`render/strip-cell.tsx`). Довод сильнее геометрии плитки: человек читает
+ * экран ФОРМОЙ ячеек, и одна ячейка другой формы читается как другой род вещи. Что кадр не в
+ * пропорциях снимка — здесь честно: `object-contain` внутри коробки, и ничего дробного (выносок,
+ * маркеров) на этом кадре не рисуется. Правка кадра под содержимое живёт в `crop ▸` под ним.
  *
- * Square, not portrait: the source is a swatch photographed any old way, and a portrait frame
- * would crop it for nothing; the tile that comes out of it is square too.
+ * ЧИСЛА ИМПОРТИРУЮТСЯ, А НЕ ПЕРЕПИСЫВАЮТСЯ. Второе написание «132» разошлось бы с первым молча —
+ * это довод самого `strip-cell.tsx`, и он же действует через границу папки. Ширина при этом идёт
+ * ИНЛАЙНОМ, а не классом: стенд читает CSS собранного бандла, где класса, которого не было в
+ * дереве на момент сборки, не существует вовсе.
  */
-const CELL_PX = 138;
+const CELL_PX = STRIP_CELL_PX;
 const CELL_STYLE: React.CSSProperties = { width: CELL_PX, flex: `0 0 ${CELL_PX}px` };
-/** The NAME column takes the rest of the row and drops under the cell when the row is narrow. */
-const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0 };
+/** Пропорция кадра — та же, что у ячейки ленты и пустой ячейки FLAT SLOTS. */
+const FRAME_ASPECT = STRIP_FRAME_ASPECT;
+/**
+ * The NAME column takes the rest of the row and drops under the cell when the row is narrow.
+ *
+ * ПОТОЛОК ШИРИНЫ — НЕ КОСМЕТИКА. Поле держит 60 знаков (`ASSET_NAME_MAX`), а без потолка оно
+ * растягивалось на всю оставшуюся ширину блока (около 1100 px на десктопе): поле в пять раз шире
+ * того, что в него влезает, читается как «сюда пишут абзац», и рядом с ним ячейка картинки
+ * выглядит обрезком. Ограничение стоит на КОЛОНКЕ, а не на инпуте, чтобы подпись, пилюля `not
+ * sent` и строка под ними стояли по той же мерке.
+ */
+const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0, maxWidth: 420 };
 
 /**
  * ═══ THE GESTURE LINE IS DRAWN HERE, ONE LINE, UNDER THE CELL ══════════════════════════════════
  *
  * `MediaSlot` writes its own gesture line («⌘V · drag a file · click to browse») and hides it by
- * the SLOT'S OWN width below 11 rem — at a strip cell's 138 px it never shows, by the primitive's
+ * the SLOT'S OWN width below 11 rem — at a strip cell's 132 px it never shows, by the primitive's
  * design, and shown it would wrap into the three rows the owner called broken. So the slot is
  * told `hint={null}` (its documented «no room for a second line» case) and the gesture is said
  * once, in the bench's own words, as the cell's caption — the same row the filled cell puts its
@@ -118,14 +131,19 @@ export function PatternInput({
             title='this card is read-only for you — a run spends money, so attaching its input stops here too'
             className='block w-full'
           >
-            <Placeholder label='source picture' dashed aspect='square' className='w-full' />
+            <Placeholder
+              label='source picture'
+              dashed
+              style={{ aspectRatio: FRAME_ASPECT }}
+              className='w-full'
+            />
           </span>
         ) : (
           <MediaSlot
             aspectRatio={['Custom']}
-            /* ONE SQUARE FOR BOTH STATES (owner): the empty cell is the square the tile will be,
-               not a band the height of the column beside it. */
-            frameAspect='1/1'
+            /* ONE FRAME FOR BOTH STATES (owner, r2 §25): the empty cell is the same portrait box
+               the filled one is, and the same box every other cell of the studio draws. */
+            frameAspect={FRAME_ASPECT}
             label='source picture *'
             hint={null}
             purpose='design · the picture a pattern is made from'

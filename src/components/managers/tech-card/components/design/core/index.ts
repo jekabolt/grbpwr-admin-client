@@ -4,6 +4,7 @@
 export { AskModal } from './ask';
 export { Counter, EmptyState, Money, PRICED_LATER } from './organs';
 export { Reason } from './reason';
+export { DrawHalf, HALF_FACE, PenGlyph, PlaceOrDrawCell, SLOT_HALVES } from './two-half-slot';
 export {
   CopyWords,
   InventoryLine,

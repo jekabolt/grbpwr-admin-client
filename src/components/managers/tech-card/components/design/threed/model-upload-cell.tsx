@@ -12,7 +12,29 @@ import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 import { InertDoor } from '../bench-slot';
 import { TILE_CORNER, TILE_QUIET } from '../picture-tile';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
+import { STRIP_FRAME_ASPECT } from '../render/strip-cell';
 import { MODEL_FILE_ACCEPT, isGlbFile, modelFileError, modelUploadErrorMessage } from './model-file';
+
+/**
+ * Глиф пустого кадра — коробка модели, тем же штрихом 1.25 и в той же коробке 24×24, что фотоглиф
+ * слота медиа: полосатый прямоугольник без знака читается как «тут что-то сломалось».
+ */
+function ModelGlyph({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox='0 0 24 24'
+      aria-hidden='true'
+      className={cn('h-5 w-5 shrink-0', className)}
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.25'
+    >
+      <path d='M12 2.75 20.5 7v10L12 21.25 3.5 17V7z' />
+      <path d='M3.5 7 12 11.25 20.5 7' />
+      <path d='M12 11.25v10' />
+    </svg>
+  );
+}
 
 /**
  * ═══ ПРИНЕСТИ СВОЮ 3D-МОДЕЛЬ — ДВЕРЬ В ПОЛОСЕ `3D MODELS OF THIS CARD` (E-13) ═════════════════
@@ -309,10 +331,14 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
     <div
       data-model-upload=''
       data-model-staged={has || undefined}
-      /* THE MOCKUP'S DOOR IS WIDE (`p4Bring`, «BRING YOUR OWN · .glb up to 50 MB …»): one dashed
-         cell under its own rule, not a strip cell of 132px — it stands alone in its group, so the
-         width is its own. Capped so the hint does not become a ruler on a wide monitor. */
-      className='flex w-full max-w-[300px] flex-col gap-1'
+      /* ═══ ЭТО ПЕРВАЯ КАРТОЧКА ПОЛКИ, А НЕ ОТДЕЛЬНАЯ ГРУППА ПОД НЕЙ (r2 п.32) ══════════════════
+         Владелец, дословно: «3D: BRING YOUR OWN — плейсхолдер как везде по форме, и не отдельным
+         полем/группой, а ПЕРВОЙ карточкой в сетке 3D MODELS OF THIS CARD». Широкая плоская дверь
+         (`max-w-[300px]`, `min-h-[72px]`) под своей подписью была ЕДИНСТВЕННЫМ органом этой
+         вкладки, не похожим ни на одну соседнюю ячейку. Теперь ячейка берёт ширину дорожки сетки,
+         а кадр — ту же портретную пропорцию, что кадры всех прочих ячеек (`STRIP_FRAME_ASPECT`).
+         Путь загрузки не тронут: те же `UploadContentModel` + `registerUpload`, тот же вход. */
+      className='flex w-full flex-col gap-1'
     >
       {/* КАДР САМ И ЕСТЬ ДВЕРЬ, а не коробка с кнопкой под ней: тот же довод, что у пустого слота
           верстака — два органа на один слот заставляют выбирать между ними. Кадр остаётся дверью и
@@ -343,13 +369,18 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
             setDragging(false);
             take(Array.from(e.dataTransfer?.files ?? []));
           }}
-          style={previewUrl ? { ...PLACEHOLDER_SURFACE, aspectRatio: '4/3' } : PLACEHOLDER_SURFACE}
+          /* ОДНА ПРОПОРЦИЯ И С ФАЙЛОМ, И БЕЗ: коробка не имеет права менять рост оттого, что в
+             неё положили файл, — соседние ячейки сетки поехали бы за ней. */
+          style={{ ...PLACEHOLDER_SURFACE, aspectRatio: STRIP_FRAME_ASPECT }}
           className={cn(
             placeholderClass({ dashed: true }),
             // ПОДПИСЬ — ЧИТАЕМЫЙ ТЕКСТ: `placeholderClass` красит содержимое в `textInactiveColor`
             // (#ccc), годный для рамок и выключенного, но на полосатом фоне дающий полтора к одному.
             // Здесь это единственное, что объясняет жест.
-            'relative min-h-[72px] w-full cursor-pointer flex-col gap-1 overflow-hidden px-3 py-3 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+            'relative w-full cursor-pointer flex-col gap-1 overflow-hidden px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+            // Глиф и вторая строка прячутся по ШИРИНЕ САМОЙ ЯЧЕЙКИ, а не по вкусу вызывающего —
+            // тем же приёмом, что в `MediaSlot`: в узкой рамке они съедают подпись.
+            '@container',
             dragging && 'border-textColor text-textColor',
             busy && 'cursor-wait',
           )}
@@ -368,6 +399,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
                one hint. No ⌘V: the clipboard does not carry a model file, and a promised gesture
                that does nothing is worse than a missing one. */
             <>
+              <ModelGlyph className='hidden @[6rem]:block' />
               <Text
                 size='control'
                 variant='uppercase'
@@ -378,8 +410,17 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
                 {word}
               </Text>
               {!busy && !dragging && !staged.model && (
-                <Text size='nano' variant='label' component='span' className='normal-case'>
-                  .glb up to 50 MB · a preview picture is optional · click · drop
+                /* Порог — 7rem, а не 9rem: контейнерный запрос меряет СОДЕРЖИМОЕ кадра (ширина
+                   минус поля и рамки), и в дорожке сетки 149px это 131px. При 9rem строка молчала
+                   бы ровно там, где ячейка и стоит, а «какой файл сюда кладут» — единственное, чего
+                   не говорит подпись. */
+                <Text
+                  size='nano'
+                  variant='label'
+                  component='span'
+                  className='hidden normal-case @[7rem]:block'
+                >
+                  .glb · up to 50 MB
                 </Text>
               )}
             </>
@@ -474,7 +515,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
         </>
       ) : (
         <Text size='nano' variant='label' component='span' className='min-w-0 normal-case'>
-          <b>free</b> · nothing is charged for a file you already have
+          <b>free</b> · nothing is charged
         </Text>
       )}
     </div>

@@ -226,6 +226,16 @@ export function FlatRunRow({
           onGenerate={submit}
           trailing={
             <>
+              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
+                  до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке).
+                  ⚠ ЭТА ДВЕРЬ СТОИТ РЯДОМ С GENERATE, А НЕ У ПРАВОГО КРАЯ (R2 п.20), слово
+                  владельца: «WHAT THE MODEL GETS ▸ помести рядом с GENERATE». Прежний `ml-auto`
+                  разносил две двери одного решения по краям ряда, и глаз шёл через всю ширину
+                  блока за ответом на вопрос «а что именно уедет». Правило макета («дверь описи у
+                  правого края») остаётся у остальных четырёх рядов — они этот хвост не рисуют. */}
+              <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
+                what the model gets ▸
+              </Button>
               <Text
                 size='micro'
                 variant='label'
@@ -240,16 +250,6 @@ export function FlatRunRow({
                 ) : null}
                 {PRICED_LATER}
               </Text>
-              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
-                  до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке). */}
-              <Button
-                variant='secondary'
-                size='sm'
-                className='ml-auto'
-                onClick={() => setWmgOpen(true)}
-              >
-                what the model gets ▸
-              </Button>
             </>
           }
         />

@@ -1,26 +1,26 @@
 import type { common_AdminColorwayRef } from 'api/proto-http/admin';
+import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
+import { findPantone } from 'components/managers/tech-card/components/pantone-swatches';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { cn } from 'lib/utility';
 import { useMemo, type JSX } from 'react';
+import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
-import { Tile, Tiles } from 'ui/components/tiles';
+import Text from 'ui/components/text';
 
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { EmptyState } from '../core';
 import { Swatch } from '../render/field-row';
-import { colourwayHex, pickableColourways } from './model';
-import { CornerLabel, GoToStep } from './organs';
+import { colourwayHex, patternColourKey, pickableColourways, type PatternColour } from './model';
+import { GoToStep } from './organs';
 
 /**
- * TWO ORGANS OVER THE CARD'S COLOURWAYS — the colour that goes INTO a tile, and the colourway a
- * finished tile is WORN BY. They read the same list and are shaped differently on purpose:
+ * TWO ORGANS ABOUT COLOUR ON THIS STEP, AND THEY ARE NOT THE SAME QUESTION:
  *
- *   · COLOUR is an INPUT of the generation, and a colour has to be SEEN — so it is picked as a
- *     TILE with a filled face, the same form FABRIC RENDER draws its colour in;
- *   · WORN BY is a LINK, not an input, and a link has to be READ — so it is a row of CHIPS, and
- *     the form itself says this is another kind of thing.
+ *   · COLOUR is an INPUT of the generation — a free reference that binds this card to nothing
+ *     (`PatternColourRow` below);
+ *   · WORN BY is a LINK from a finished tile to a colourway of the card, read off the shelf
+ *     (`WornByChips`), and it is drawn as chips because a link is READ, not seen.
  *
  * ⚠ NO COLOURWAY IS PICKED ON CREATION (owner, E-1). At the time of the first generations the
  * card usually has no colourways at all; the binding lives under each tile on the shelf and is
@@ -40,71 +40,115 @@ export function usePatternColourways(techCardId: number): {
   return { refs, loading: isLoading };
 }
 
+/** Экранный цвет ссылки: свой hex, а если его нет — приближение из списка пантонов. */
+export function colourSwatchHex(colour: PatternColour): string {
+  return colour.hex.trim() || findPantone(colour.code)?.hex || '';
+}
+
 /**
- * THE COLOUR GRID. One tile per live colourway (an archived one only while it is the pick, and
- * dimmed); the face is the colourway's own hex, the corner says `colour`, the pick carries `in`.
- * A click picks, a second click takes the colour off. No colourways → the reason is a visible
- * line with the door to where colourways come from; an empty grid is not allowed to stay silent.
+ * ═══ COLOUR — ОДИН РЯД, ОДНА ДВЕРЬ, И НИКАКИХ ОБЯЗАТЕЛЬСТВ (владелец, r2 §26) ══════════════════
+ *
+ * Дословно: «выбор цвета, который нас ни к чему не обязывает; история использованных последних
+ * цветов при генерации; плейсхолдер для добавления цвета; меню пантоновское, где можно выбрать по
+ * пантону».
+ *
+ * ЧТО СТОЯЛО ЗДЕСЬ ДО ЭТОГО И ПОЧЕМУ СНЕСЕНО. Здесь была сетка ПЛИТОК ПО КОЛОРВЕЯМ КАРТОЧКИ: чтобы
+ * покрасить пробную плитку, надо было сначала завести колорвей — то есть выбор цвета обязывал к
+ * записи о продукте, а на момент первых генераций колорвеев у карточки обычно нет вовсе, и сетка
+ * честно показывала пустоту с дверью на соседний шаг. Это ровно то, что владелец назвал «обязывает».
+ * Цвет теперь — ничья пара «код + экранный hex» (`PatternColour`), живущая один прогон.
+ *
+ * ТРИ ОРГАНА, И НИ ОДНОГО ЛИШНЕГО:
+ *   · выбранный цвет — ОДНА плитка со свотчем, кодом и `✕` (владелец: «одна плитка с ✕»);
+ *   · нет выбранного — ОДНА дверь `+ colour`, и это ТРИГГЕР САМОГО ПАНТОН-ПИКЕРА ПРОДУКТА
+ *     (`pantone-picker.tsx`, поиск «Search Pantone code or colour» + сетка свотчей). Второй пикер
+ *     не написан: этот восстановлен ровно тем файлом, каким он был, когда его унесло вместе с
+ *     последним вызывающим;
+ *   · `recent` — недавние цвета прогонов ЭТОЙ карточки, свотчами. Это не второй способ выбрать
+ *     цвет вместо пикера, а ярлык к уже сделанному выбору, и он подписан своим словом.
+ *
+ * ПОМЕНЯТЬ ЦВЕТ = снять `✕` и выбрать заново. Дверь и плитка меняются местами, а не стоят рядом:
+ * два органа на один жест — это ровно то, чего владелец просил не делать.
  */
-export function ColourTiles({
-  refs,
-  picked,
+export function PatternColourRow({
+  colour,
+  recent,
   onPick,
   disabled,
-  techCardId,
 }: {
-  refs: readonly common_AdminColorwayRef[];
-  picked: number;
-  onPick: (colorwayId: number) => void;
+  /** Выбранный цвет или `null` — цвет необязателен, и `null` это нормальное состояние. */
+  colour: PatternColour | null;
+  recent: readonly PatternColour[];
+  onPick: (next: PatternColour | null) => void;
   disabled?: boolean;
-  techCardId: number;
 }): JSX.Element {
-  const list = pickableColourways(refs, picked, archivedRef);
-  if (!list.length) {
-    return (
-      <div data-colour-empty=''>
-        <EmptyState
-          action={<GoToStep kind='render' label='fabric render ›' techCardId={techCardId} />}
-        >
-          this card carries no colour yet
-        </EmptyState>
-      </div>
-    );
-  }
+  const pickedKey = colour ? patternColourKey(colour) : '';
   return (
-    <Tiles min={118} className='max-w-[560px]'>
-      {list.map((c) => {
-        const cid = c.colorwayId ?? 0;
-        const on = cid === picked;
-        const hex = colourwayHex(c);
-        const label = colorwayLabel(c);
-        const archived = archivedRef(c);
-        return (
-          /* The wrapper carries the probe hook: `Tile` does not pass `data-*` through. */
-          <div key={cid} data-colour-tile={cid} data-colour-on={on || undefined} className='min-w-0'>
-            <Tile
-              pressed={on}
-              selected={on}
-              onClick={disabled ? undefined : () => onPick(on ? 0 : cid)}
-              title={on ? `take the colour off · ${label}` : `paint in ${label}`}
-              className={cn(archived && 'opacity-40 focus-within:opacity-100 hover:opacity-100')}
-              media={
-                <span
-                  data-colour-face={hex || 'none'}
-                  className='relative block aspect-square w-full border border-hairline'
-                  style={hex ? { background: hex } : PLACEHOLDER_SURFACE}
-                >
-                  <CornerLabel at='bl'>colour</CornerLabel>
-                  {on && <CornerLabel at='tr'>in</CornerLabel>}
-                </span>
-              }
-              name={label}
-              sub={hex || 'no value'}
-            />
-          </div>
-        );
-      })}
-    </Tiles>
+    <div data-pattern-colour-row='' className='flex flex-col gap-3'>
+      {colour ? (
+        <div
+          data-colour-picked-tile={colour.code || colour.hex}
+          className='flex w-fit items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px]'
+        >
+          <Swatch hex={colourSwatchHex(colour)} size={16} title={colour.code || colour.hex} />
+          <Text component='span' size='micro' className='uppercase'>
+            {colour.code || colour.hex}
+          </Text>
+          {!disabled && (
+            <Button
+              variant='secondary'
+              size='xs'
+              data-colour-clear=''
+              title='take the colour off — a tile is generated without one just as well'
+              onClick={() => onPick(null)}
+            >
+              ✕
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className='w-fit' data-colour-door=''>
+          <PantonePicker
+            name='pattern-colour'
+            label='+ colour'
+            disabled={disabled}
+            /* Пантон — это КОД. Экранный свотчик списка приблизителен и в платный промпт не едет
+               (довод у `patternColourRecipe`), поэтому hex здесь пустой намеренно. */
+            onPick={(code) => onPick(code.trim() ? { code: code.trim(), hex: '' } : null)}
+          />
+        </div>
+      )}
+
+      {recent.length > 0 && (
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-2' data-colour-recent=''>
+          <Text size='nano' variant='label' component='span' className='uppercase'>
+            recent
+          </Text>
+          {recent.map((r) => {
+            const key = patternColourKey(r);
+            const on = key === pickedKey;
+            const label = r.code || r.hex;
+            return (
+              <button
+                key={key}
+                type='button'
+                data-colour-recent-item={label}
+                data-colour-on={on || undefined}
+                disabled={disabled}
+                title={on ? `${label} · already picked` : `paint in ${label}`}
+                onClick={() => onPick(r)}
+                className='flex items-center gap-1.5 border border-transparent px-1 py-0.5 hover:border-borderColor focus-visible:border-borderColor disabled:opacity-40'
+              >
+                <Swatch hex={colourSwatchHex(r)} size={16} />
+                <Text size='nano' variant='label' component='span' className='uppercase'>
+                  {label}
+                </Text>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
