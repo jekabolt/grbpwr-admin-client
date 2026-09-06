@@ -3,9 +3,15 @@
  *
  * `RenderStudio` and `ThreedStudio` are the whole of a view: hand one of them the band and it draws
  * its inputs, its menu and its GENERATE. The organs underneath are exported because they are the
- * prototype's own vocabulary and a composer may want them apart — the input strip alone above a
- * different menu, the palette alone in a dialog — not because they are meant to be reassembled by
- * hand into a screen the studios already assemble correctly.
+ * prototype's own vocabulary and a composer may want them apart — the palette alone in a dialog —
+ * not because they are meant to be reassembled by hand into a screen the studios already assemble
+ * correctly.
+ *
+ * ⚠ `RenderInputStrip` СНЯТ ВМЕСТЕ СО СВОИМ ФАЙЛОМ (r3, пул), и с ним `renderPlacements` /
+ * `RenderPlacement` из `./model`. Полоса перестала монтироваться откуда бы то ни было кругом r2 —
+ * две ленты с верха FABRIC RENDER сняты по слову владельца, разметка уехала к самим картинкам в
+ * `outputs.tsx`, — но продолжала жить 1382 строками и утягивать за собой живой реэкспорт. Ноль
+ * потребителей проверен грепом по всему `src/` до сноса.
  *
  * COLOUR HISTORY IS GONE, ON THE OWNER'S WORD («COLOUR HISTORY нам не нужен», round 4 / T-19), and
  * with it the whole restore-a-recipe-by-chip mechanism: the chips, their staleness mark, the recipe
@@ -24,7 +30,6 @@ export { ClothIsRow } from './cloth-is';
 export { ColourStatementRow, COLOUR_NAME_MAX } from './colour-statement';
 export { OutputsSection } from './outputs';
 export { Palette } from './palette';
-export { RenderInputStrip } from './render-input-strip';
 export { RenderStudio } from './render-studio';
 export { RendersByViewGroup, SidesSection } from './side-row';
 export { ThreedStudio } from './threed-studio';
@@ -73,7 +78,6 @@ export {
   runOfPicture,
   statedWords,
   serverStatesSelected,
-  renderPlacements,
   slotOrigin,
   slotOriginLine,
   threedGate,
@@ -91,6 +95,5 @@ export type {
   ClothOpacity,
   FabricStatement,
   Gate,
-  RenderPlacement,
   SlotOrigin,
 } from './model';

@@ -2,17 +2,19 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState, type JSX } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
+import type { TechCardFormData } from '../../schema';
 import { InertDoor } from '../bench-slot';
-import { Counter } from '../core';
+import { GROUP_GAP, GROUP_SEAM } from '../core';
 import { useCardFit, useThreedDraft } from './drafts';
+import { FieldRow, Hint } from './field-row';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   benchSides,
@@ -36,12 +38,13 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *
  *   3D · one model of this card                                                      [STEP 5]
  *   ── INPUT · RENDERS BY VIEW ── the render bench, read only, a door back on every empty side
- *   ── GENERATION ──── [1 MODEL · FROM N SIDES]
- *      PRESENTATION  in the air | on a model    no figure · the garment stands alone
- *      (on a model)  THE BODY: build chips + model tiles · GARMENT SIZE *
- *      FIT  select · [REGULAR FROM THE CARD]
+ *   ── GENERATION ──── [1 MODEL · FROM N SIDES]        ← ОДНА КОЛОНКА ПОЛЕЙ (r3 п.35)
+ *      PRESENTATION   in the air | on a model
+ *      THE BODY       one picker: any body · a build · one of our models      (on a model only)
+ *      GARMENT SIZE * the card's own size run                                 (on a model only)
+ *      FIT            the card's fit, or a stated deviation for this run
  *      LOCKED …  · FILL THE EMPTY SIDES ›
- *      GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
+ *      GENERATE · WHAT THE MODEL GETS ▸
  *   3D MODELS OF THIS CARD · built here or brought — the shelf, and BRING YOUR OWN (`./outputs`)
  *
  * 3D IS BUILT FROM THE RENDERS, NOT FROM THE DRAWINGS: the input lists the RENDER bench by view,
@@ -104,6 +107,41 @@ export function ThreedStudio({
   const sizeName = (id: number) =>
     (sizes.find((s) => s.id === id)?.name ?? '').trim() || (id ? `size ${id}` : '');
 
+  /**
+   * ═══ РАЗМЕРНЫЙ РЯД КАРТОЧКИ (r3 п.36) ════════════════════════════════════════════════════════
+   *
+   * Владелец: «GARMENT SIZE * — только размеры, доступные для этого типа одежды».
+   *
+   * ИСТОЧНИК — ФОРМА, А НЕ ВТОРОЙ ВЫВОД ИЗ КАТЕГОРИИ. `sizeIds` — это ряд, который карточка уже
+   * объявила своим в CARD DETAILS: он сужен разрешёнными для категории системами (`SizeIdsField`
+   * → `permittedSizeSystems`) и по нему градуируются выкройки, нормы и раскрой. Вывести ряд здесь
+   * заново из категории значило бы завести ВТОРОЙ ответ на тот же вопрос — и он разошёлся бы с
+   * первым в тот день, когда технолог снимет размер с карточки.
+   *
+   * ⚠ ФОРМА МОЖЕТ БЫТЬ НЕ СМОНТИРОВАНА (студию собирает и стенд, и просмотр без формы), поэтому
+   * контекст читается мягко. ⚠ И ПУСТОЙ РЯД — ЭТО НЕ ПУСТОЙ СПИСОК: карточка без объявленного ряда
+   * законна, а поле помечено `*` и держит ворота прогона; пустой список сделал бы 3D недостижимым
+   * молча. Тогда предлагается словарь целиком — ровно как до этой правки.
+   */
+  const form = useFormContext<TechCardFormData>() as ReturnType<
+    typeof useFormContext<TechCardFormData>
+  > | null;
+  const cardSizeIds = (useWatch({ control: form?.control, name: 'sizeIds' }) ?? []) as number[];
+  const baseSizeId = Number(useWatch({ control: form?.control, name: 'baseSampleSizeId' }) ?? 0);
+  const sizeItems = useMemo(() => {
+    const run = new Set(cardSizeIds.filter((id) => (id ?? 0) > 0));
+    const offered = run.size ? sizes.filter((s) => run.has(s.id ?? 0)) : sizes;
+    return offered
+      .filter((s) => (s.id ?? 0) > 0)
+      .map((s) => {
+        const name = (s.name ?? '').trim() || `size ${s.id}`;
+        return {
+          value: String(s.id),
+          label: s.id === baseSizeId ? `${name} · base` : name,
+        };
+      });
+  }, [sizes, cardSizeIds, baseSizeId]);
+
   /** The refusal over the INPUT — the render bench and the colourway; an obstacle of the chain. */
   const input: Gate = useMemo(
     () => threedGate(band, colorwayId, colorwayLabel, colorwayArchived),
@@ -143,8 +181,6 @@ export function ThreedStudio({
   const fitStated = (cardFit ?? '').trim();
   const fitDiffers = !!draft.fitOverride && draft.fitOverride !== fitStated;
 
-  const named = !!draft.modelId || !!draft.bodyType;
-  const modelCount = (models ?? []).filter((m) => (m.id ?? 0) > 0).length;
 
   const generate = () => {
     const sourcePictureIds = turntableSourceIds(sides);
@@ -250,156 +286,145 @@ export function ThreedStudio({
         title='3d'
         question='· one model of this card'
         action={<Pill tone='ink'>step 5</Pill>}
+        /* ГЭПЫ КАК В CARD DETAILS (r3 п.38) — ТОТ ЖЕ ТОКЕН, ЧТО НА CARD DETAILS И FABRIC RENDER.
+           `GROUP_SEAM` разводит группы блока (вход · генерация · ряд прогона) швом в 20px,
+           `GROUP_GAP` на самих линейках держит зазор «подпись → содержимое» в 12px. Обе группы
+           обёрнуты своим `<div>`, иначе шов встал бы и внутри них. */
+        className={GROUP_SEAM}
       >
         {/* ═══ INPUT · RENDERS BY VIEW — a READING of the render bench; every empty cell is a
             door back to FABRIC RENDER, where a side is filled. */}
         <RendersByViewGroup band={band} colorwayId={colorwayId} onGoToKind={onGoToKind} />
 
-        {/* ═══ GENERATION ═══════════════════════════════════════════════════════════════════ */}
-        <GroupLabel
-          action={
-            <Pill tone='ink' data-threed-shape=''>
-              {shape}
-            </Pill>
-          }
-        >
-          generation
-        </GroupLabel>
-
-        <div className='flex flex-wrap items-center gap-2' data-presentation=''>
-          <Text
-            size='micro'
-            variant='label'
-            tracking='label'
-            component='span'
-            className='uppercase'
+        {/* ═══ GENERATION — ОДНА КОЛОНКА ПОЛЕЙ ОДНОЙ ВЫСОТЫ (r3 п.35) ═══════════════════════
+            Владелец: «3D GENERATION: слишком много разных кнопок — упростить».
+            ЧТО ЗДЕСЬ БЫЛО: четыре ряда РАЗНОЙ грамматики и разного роста — подпись+сегментированная
+            полоса+фраза справа, потом ЛИНЕЙКА ГРУППЫ с двумя пилюлями, под ней стопка из чипов,
+            поиска и галереи фотографий, потом подпись+селект+фраза, потом подпись+селект+пилюля.
+            Три предмета говорили одно и то же тремя способами (пилюля `named` / `not named yet`,
+            счётчик моделей, пилюли фита), и ни один не был вопросом, на который человек отвечает.
+            ЧТО СТАЛО: ЧЕТЫРЕ РЯДА `FieldRow` — тот же орган, которым набраны PARTS и COLOURWAY, с
+            колонкой подписи в 92px и рулёной линией `#e6e6e6` под каждым. Подписи стоят столбиком,
+            контролы стоят столбиком, рост у всех рядов один. Пилюли и счётчик сняты; фраза про фит
+            осталась ОДНА и только когда она правда (`fitDiffers`). */}
+        <div>
+          <GroupLabel
+            flush
+            className={GROUP_GAP}
+            action={
+              <Pill tone='ink' data-threed-shape=''>
+                {shape}
+              </Pill>
+            }
           >
-            presentation
-          </Text>
-          {/* A SEGMENTED STRIP, NOT A SELECT: both options on screen at all times. */}
-          <ViewSwitch<Presentation>
-            className='shrink-0'
-            label='presentation'
-            value={draft.presentation}
-            disabled={disabled}
-            options={PRESENTATIONS.map((p) => ({ value: p.value, label: p.label }))}
-            onChange={(next) => patch({ presentation: next })}
-          />
-          <Text size='micro' variant='label' component='span' className='ml-auto normal-case'>
-            {draft.presentation === 'model'
-              ? 'a figure wears it · say whose body, or what build, below'
-              : 'no figure · the garment stands alone'}
-          </Text>
-        </div>
+            generation
+          </GroupLabel>
 
-        {/* THE BODY AND THE SIZE ONLY ON «ON A MODEL»: a figure picker for a figure that is not in
-            the picture is an organ without an act. */}
-        {draft.presentation === 'model' && (
-          <>
-            <GroupLabel
-              action={
-                <span className='flex flex-wrap items-center gap-1.5'>
-                  {named ? <Pill tone='ink'>named</Pill> : <Pill>not named yet</Pill>}
-                  <Counter n={modelCount} noun='model' />
-                </span>
-              }
-            >
-              the body
-            </GroupLabel>
-            <BodyPicker
-              models={models}
-              loading={modelsLoading}
-              modelId={draft.modelId}
-              bodyType={draft.bodyType}
-              sizeName={sizeName}
+          <FieldRow label='presentation' data-presentation=''>
+            {/* A SEGMENTED STRIP, NOT A SELECT: both options on screen at all times. */}
+            <ViewSwitch<Presentation>
+              className='shrink-0'
+              label='presentation'
+              value={draft.presentation}
               disabled={disabled}
-              onModel={(id) => patch({ modelId: id })}
-              onBodyType={(value) => patch({ bodyType: value })}
+              options={PRESENTATIONS.map((p) => ({ value: p.value, label: p.label }))}
+              onChange={(next) => patch({ presentation: next })}
             />
-            <div className='flex flex-wrap items-center gap-2' data-garment-size=''>
-              <Text
-                size='micro'
-                variant='label'
-                tracking='label'
-                component='span'
-                className='uppercase'
-              >
-                garment size <span className='font-bold text-textColor'>*</span>
-              </Text>
-              <div className='w-[160px] shrink-0'>
-                <SelectComponent
-                  name='design-threed-size'
-                  value={draft.garmentSizeId ? String(draft.garmentSizeId) : NO_SIZE}
-                  placeholder='not set'
+          </FieldRow>
+
+          {/* THE BODY AND THE SIZE ONLY ON «ON A MODEL»: a figure picker for a figure that is not in
+              the picture is an organ without an act. */}
+          {draft.presentation === 'model' && (
+            <>
+              {/* ОДИН ПИКЕР ТЕЛА (r3 п.37) — селект с превью вместо чипов, поиска и галереи;
+                  разбор целиком в шапке `./model-picker`. */}
+              <FieldRow label='the body' data-body=''>
+                <BodyPicker
+                  models={models}
+                  loading={modelsLoading}
+                  modelId={draft.modelId}
+                  bodyType={draft.bodyType}
+                  sizeName={sizeName}
                   disabled={disabled}
-                  items={[
-                    { value: NO_SIZE, label: 'not set' },
-                    ...sizes
-                      .filter((s) => (s.id ?? 0) > 0)
-                      .map((s) => ({
-                        value: String(s.id),
-                        label: (s.name ?? '').trim() || `size ${s.id}`,
-                      })),
-                  ]}
-                  onValueChange={(value: string) =>
-                    patch({ garmentSizeId: value === NO_SIZE ? 0 : Number(value) || 0 })
-                  }
-                  fullWidth
+                  onModel={(id) => patch({ modelId: id })}
+                  onBodyType={(value) => patch({ bodyType: value })}
                 />
-              </div>
-              <Text size='micro' variant='label' component='span' className='normal-case'>
-                this garment size on that body · free to try, changes nothing on the card
-              </Text>
-            </div>
-          </>
-        )}
+              </FieldRow>
 
-        {/* FIT — in both presentations: the garment hangs in the air and sits on a figure equally
-            cut. The override is a STATED DEVIATION for this run only; the card stays the truth. */}
-        <div className='flex flex-wrap items-center gap-2' data-fit=''>
-          <Text
-            size='micro'
-            variant='label'
-            tracking='label'
-            component='span'
-            className='uppercase'
-          >
-            fit
-          </Text>
-          <div className='w-[210px] shrink-0'>
-            <SelectComponent
-              name='design-threed-fit'
-              value={draft.fitOverride || CARD_FIT}
-              placeholder='not set'
-              disabled={disabled}
-              items={[
-                { value: CARD_FIT, label: fitStated ? `${fitStated} · from the card` : 'not set' },
-                ...fitOptions.map((fit) => ({ value: fit, label: fit })),
-              ]}
-              onValueChange={(value: string) =>
-                patch({ fitOverride: value === CARD_FIT ? '' : value })
-              }
-              fullWidth
-            />
-          </div>
-          {fitDiffers ? (
-            <Pill tone='attention' title='the result will carry the badge; the card is not changed'>
-              differs from the card
-            </Pill>
-          ) : fitStated ? (
-            <Pill tone='ink'>{fitStated} from the card</Pill>
-          ) : (
-            <Pill>the card does not name a fit</Pill>
+              {/* ═══ РАЗМЕРЫ — РЯД КАРТОЧКИ, А НЕ ВЕСЬ СЛОВАРЬ (r3 п.36) ══════════════════════
+                  Владелец: «GARMENT SIZE * — только размеры, доступные для этого типа одежды».
+                  Источник — `sizeIds` формы: тот самый ряд, который карточка объявляет своим
+                  (CARD DETAILS → BASE MODEL & SAMPLE SIZE) и по которому градуируются выкройки и
+                  нормы. Базовый помечен словом, а не порядком: он и есть «этот размер по
+                  умолчанию». ⚠ ПУСТОЙ РЯД — НЕ ПУСТОЙ СПИСОК: карточка без ряда законна, и селект
+                  на ней предлагает словарь целиком, иначе поле, помеченное `*`, стало бы
+                  невыполнимым требованием, а прогон — недостижимым. */}
+              <FieldRow label='garment size *' data-garment-size=''>
+                <div className='w-[200px] shrink-0'>
+                  <SelectComponent
+                    name='design-threed-size'
+                    value={draft.garmentSizeId ? String(draft.garmentSizeId) : NO_SIZE}
+                    placeholder='not set'
+                    disabled={disabled}
+                    items={[{ value: NO_SIZE, label: 'not set' }, ...sizeItems]}
+                    onValueChange={(value: string) =>
+                      patch({ garmentSizeId: value === NO_SIZE ? 0 : Number(value) || 0 })
+                    }
+                    fullWidth
+                  />
+                </div>
+              </FieldRow>
+            </>
           )}
+
+          {/* FIT — in both presentations: the garment hangs in the air and sits on a figure equally
+              cut. The override is a STATED DEVIATION for this run only; the card stays the truth. */}
+          <FieldRow label='fit' data-fit=''>
+            <div className='w-[210px] shrink-0'>
+              <SelectComponent
+                name='design-threed-fit'
+                value={draft.fitOverride || CARD_FIT}
+                placeholder='not set'
+                disabled={disabled}
+                items={[
+                  {
+                    value: CARD_FIT,
+                    label: fitStated ? `${fitStated} · from the card` : 'the card names no fit',
+                  },
+                  ...fitOptions.map((fit) => ({ value: fit, label: fit })),
+                ]}
+                onValueChange={(value: string) =>
+                  patch({ fitOverride: value === CARD_FIT ? '' : value })
+                }
+                fullWidth
+              />
+            </div>
+            {/* ⚠ ТРИ ПИЛЮЛИ СНЯТЫ, ОДНА ФРАЗА ОСТАЛАСЬ. Две из трёх пересказывали выбранный пункт
+                («regular from the card» под пунктом «regular · from the card»; «the card does not
+                name a fit» под пунктом «the card names no fit»). Третья говорила то, чего в
+                списке НЕ ВИДНО: что отклонение будет проштамповано на результате, а карточка при
+                этом не меняется. Она и осталась — и только когда она правда. */}
+            {fitDiffers && (
+              <Hint>
+                this run only · the result carries the badge and the card is not changed
+              </Hint>
+            )}
+          </FieldRow>
         </div>
 
         {/* ═══ THE RUN DOORS — the LOCKED bar with its door, the server's last refusal verbatim,
             then GENERATE · money · WHAT THE MODEL GETS ▸ (one row on every generative screen). */}
         {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
+        {/* ⚠ `shape` ЗДЕСЬ НЕ ПЕРЕДАЁТСЯ, И ЭТО СНЯТИЕ ДУБЛЯ, А НЕ ПОТЕРЯ. Ряд печатал
+            `1 model · from 3 sides · priced by the server when the run starts` — ту же самую
+            строку, посимвольно, что стоит пилюлей на линейке GENERATION в трёх рядах выше
+            (`data-threed-shape`). Одно утверждение дважды на одном экране — ровно то, на что
+            владелец жалуется пунктом 35 («слишком много»); а цена «по факту в истории» (п.27)
+            касается обоих платных экранов, не одного. Дверь описи осталась: она висит на
+            `onInspect`, а не на `shape` (разбор в `./generate-row`). */}
         <GenerateRow
           gate={gate}
-          shape={shape}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}

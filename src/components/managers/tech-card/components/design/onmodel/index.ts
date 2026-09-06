@@ -23,6 +23,7 @@ export type { PaintDraft, ShotDraft } from './drafts';
 export {
   NO_PAINT,
   RECOLOR_SOURCES_MAX,
+  addShots,
   asRowGate,
   chosenCloth,
   clothChoices,
@@ -40,6 +41,7 @@ export {
   recolorRuns,
   recolorShape,
   recolourWireColour,
+  shotMediaIds,
   shotName,
   shotOrigin,
   targetIsStated,
@@ -52,7 +54,6 @@ export type {
   OnModelGate,
   OnModelPaint,
   OnModelShot,
-  PaintMode,
   RecolorCharge,
   ShotSource,
 } from './model';

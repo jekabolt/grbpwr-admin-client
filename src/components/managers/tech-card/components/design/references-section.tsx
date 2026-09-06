@@ -1,16 +1,14 @@
 import { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
-import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
+import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -35,9 +33,9 @@ import {
   useFlatSlotsSendWrites,
 } from './flat-slots-send';
 import { cropFamilies } from './generation/composite';
-import { FlatRunRow } from './flat-run-row';
+import { ControlLabel, FlatRunRow, PLATE_PX, ROW_CONTROL_STYLE } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
-import { DrawHalf, AskModal, Counter, EmptyState } from './core';
+import { AskModal, EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { LockBar } from './render/generate-row';
@@ -143,15 +141,17 @@ const fullUrl = (full?: common_MediaFull): string =>
 type CalloutRow = NonNullable<TechCardFormData['callouts']>[number];
 
 /**
- * ПРЕДЛАГАТЬ ЛИ РЕЗ — ОТВЕТ ТРОИЧНЫЙ, И ТРЕТЬЕ ЗНАЧЕНИЕ ТЕПЕРЬ НАЗВАНО ТИПОМ, А НЕ `?? false`.
+ * ЧТО ПОДСКАЗКА РЕЗА ВПРАВЕ УТВЕРЖДАТЬ О ЭТОЙ КАРТИНКЕ — ответ троичный, и он назван типом.
  *
  *   · `declared` — полоса ЗАЯВИЛА виды (`composite_views`), и подсказка вправе говорить факт;
- *   · `no`       — полоса заявила обратное (одновидовой чертёж, уже резаный кадр) — угла нет;
+ *   · `no`       — полоса заявила обратное (одновидовой чертёж, уже резаный кадр);
  *   · `unknown`  — за медиа чертежа полосы нет вовсе (обычная ссылка из библиотеки). Система не
- *                  знает и знать не может; угол стоит, но ПРЕДЛАГАЕТ, а не утверждает.
+ *                  знает и знать не может.
  *
- * Булев тип третье состояние выразить не мог, и оно молча становилось вторым — ровно тот приём,
- * которого стоит избегать: сначала спроси, нельзя ли сделать неправильное состояние невыразимым.
+ * ⚠ С r3 ЭТО БОЛЬШЕ НЕ ВОРОТА ДВЕРИ, А ТОЛЬКО ЕЁ СЛОВА. Владелец: «на референсах должна быть
+ * возможность маркать мультивью» — мультивью объявляет ЧЕЛОВЕК, и `no` (файл ничего не заявил)
+ * не значит «резать нечего». Дверь стоит на всех трёх значениях; различаются подсказки, и на
+ * двух из трёх подсказка честно говорит «only you can tell» (разбор у самой двери, ниже).
  */
 type SplitOffer = 'declared' | 'no' | 'unknown';
 
@@ -192,39 +192,35 @@ export function ReferencesSection({
   }, [libraryMap, picked, band.batches, band.runs]);
 
   /**
-   * ═══ ПРЕДЛАГАТЬ ЛИ РЕЗ НА ЭТОЙ СТРОКЕ ВХОДА (F-8, F-18) ══════════════════════════════════════
+   * ═══ ЧТО ПОДСКАЗКА РЕЗА ЗНАЕТ ОБ ЭТОЙ СТРОКЕ ВХОДА (F-8, F-18 → r3 п.4) ═════════════════════
    *
-   * Владелец, дословно: «везде где картинка не мультивью флет или рендер там не должно на ховер
+   * Владелец, круг F: «везде где картинка не мультивью флет или рендер там не должно на ховер
    * показываться сплит» и «на уже заспличеных картинках на ховер сплит писать не нужно».
+   * Владелец, r3 п.4: «на референсах должна быть возможность маркать мультивью».
    *
-   * ⚠ ЭТА ПЛИТКА БЫЛА ЕДИНСТВЕННЫМ МЕСТОМ, ГДЕ УГОЛ НЕ СВЕРЯЛСЯ НИ С ОДНИМ ИЗ ДВУХ УСЛОВИЙ.
-   * Ворота стояли `!readOnly && url` — то есть «файл есть и карточка пишется», — и потому `split`
-   * предъявлялся ЛЮБОМУ снимку, принесённому в референсы руками: одиночной фотографии ткани,
-   * куску чужого разреза, уже разрезанному листу. Правило при этом было записано прозой в
-   * `picture-tile.tsx` и переписано на трёх других экранах; здесь его просто не переписали.
-   * Носитель правила теперь один — `pictureOffersSplit` (`render/model.ts`), и эта карта готовит
+   * ⚠ КРУГ ЗАМКНУЛСЯ, И ЭТО СКАЗАНО ЧЕСТНО. Круг F-8/F-18 УБРАЛ дверь у кадра, который видов не
+   * заявил; r3 п.4 её ВЕРНУЛ — но не откатом, а с другим носителем смысла. Тогда дверь ставилась
+   * молча и утверждала собой «здесь несколько видов»; теперь она ПРЕДЛАГАЕТ, а утверждение живёт
+   * в подсказке, которую эта карта и считает. Жалоба владельца была на ЛОЖЬ угла, а не на его
+   * присутствие, и словами её снимает подсказка, а не отсутствие двери.
+   * Носитель правила один — `pictureOffersSplit` (`render/model.ts`), и эта карта готовит
    * ему ровно два факта, которых у строки входа нет на руках.
    *
    * СТРОКА ВХОДА — ЭТО `media_id`, А ПРЕДИКАТ СПРАШИВАЕТ ПРО `DesignPicture`. Разрешение идёт по
    * тому же обходу, что и `mediaById` выше (прогоны и партии полосы), и результат ТРОИЧЕН — теперь
    * и по типу, а не только по смыслу.
    *
-   * ⚠ ТРЕТЬЕ ЗНАЧЕНИЕ ХРАНИЛОСЬ БУЛЕВЫМ И СХЛОПЫВАЛОСЬ В `false` У МЕСТА ВЫЗОВА (`?? false`), А
-   * ДОВОД РЯДОМ ЗВУЧАЛ ТАК: «угол это тихий орган, и предъявлять его на догадке нельзя». Довод
-   * верен ровно наполовину, и вторую половину видно только рядом с полосой флэтов. Ссылка,
-   * ВЫБРАННАЯ ИЗ БИБЛИОТЕКИ, чертежа полосы не имеет вовсе — за ней не стоит ни прогона, ни
-   * партии, — то есть в «разрешить не удалось» попадает НЕ край, а обычный, ежедневный случай.
-   * Исход: лукбук на четыре вида, брошенный в INPUT — REFERENCES, не режется НИГДЕ. `onCrop`
-   * рядом жив, но он режет ОДИН кадр и замещает им строку — это другой глагол, а не замена.
-   * А полоса флэтов на тот же вопрос отвечает ИНАЧЕ: там для этого заведено именованное
-   * исключение (`broughtByHandAndUncut`), потому что у принесённого руками листа `composite_views`
-   * пусты ПО ОПРЕДЕЛЕНИЮ и объявить его многовидовым может только человек. Два экрана отвечали на
-   * один вопрос по-разному, и одна из двух копий правила просто не была дописана.
+   * ⚠ ПОЧЕМУ ДВЕРЬ БОЛЬШЕ НЕ ГЕЙТИТСЯ ЭТОЙ КАРТОЙ ВОВСЕ. Ссылка, ВЫБРАННАЯ ИЗ БИБЛИОТЕКИ, чертежа
+   * полосы не имеет — за ней не стоит ни прогона, ни партии, — а у принесённого руками листа
+   * `composite_views` пусты ПО ОПРЕДЕЛЕНИЮ: объявить его многовидовым может только человек. То
+   * есть под «полоса заявила обратное» и «разрешить не удалось» попадал не край, а обычный,
+   * ежедневный случай, и исход был ровно один: лукбук на четыре вида, брошенный в
+   * INPUT — REFERENCES, не резался НИГДЕ. `onCrop` рядом жив, но он режет ОДИН кадр и замещает
+   * им строку — это другой глагол, а не замена.
    *
-   * ПОЭТОМУ «НЕ ЗНАЮ» ЗДЕСЬ БОЛЬШЕ НЕ ЗНАЧИТ «НЕТ»: `unknown` — своё значение, и угол на нём
-   * стоит. Ценой ОДНОГО условия: он ПРЕДЛАГАЕТ ДЕЙСТВИЕ и ничего не утверждает о файле — то же
-   * правило и та же формула, что у флэтов («nothing on record says it does, so only you can
-   * tell»). Тихим орган остаётся не отсутствием, а тем, что не врёт.
+   * Полоса флэтов отвечала на тот же вопрос ИНАЧЕ — там для этого заведено именованное исключение
+   * (`broughtByHandAndUncut`), — и одна из двух копий правила просто не была дописана. Теперь обе
+   * ленты отвечают одинаково: дверь стоит, а знание о файле живёт в её словах.
    *
    * `alreadyCut` — транзитивно, через `cropFamilies`: внук листа делает лист резаным ровно так же,
    * как прямой кусок (та же карта, что рисует колоды на полосах). Скрытые чертежи из пула НЕ
@@ -652,6 +648,8 @@ export function ReferencesSection({
 
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
   const garmentChars = ((garment.field.value ?? '') as string).trim().length;
+  /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
+  const garmentLen = ((garment.field.value ?? '') as string).length;
   const nothingToClear = refOf.size === 0 && garmentChars === 0 && !flatSend.on;
 
   /**
@@ -790,27 +788,63 @@ export function ReferencesSection({
           `garmentDescription`; `data-field` — якорь двери «edit the description ▸» из панели
           WHAT THE MODEL GETS (`revealField` ищет по `[data-field]`). */}
       <div>
-        <div className='mb-0.5 flex flex-wrap items-center gap-1.5'>
-          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-            words
-          </Text>
-          {garmentChars > 0 && <Counter n={garmentChars} noun='character' />}
-        </div>
+        {/* ЗАЗОР «ПОДПИСЬ → ПОЛЕ» — ОДИН ТОКЕН НА ВСЮ СТУДИЮ (`GROUP_GAP`, r3 п.3/5). Здесь стоял
+            свой `mb-0.5` (2px): подпись липла к полю, и владелец назвал это на четырёх экранах
+            разом («больше спейсинга от хедеров к контенту, как в CARD DETAILS»). */}
+        <Text
+          size='nano'
+          variant='label'
+          component='span'
+          className={cn('block uppercase tracking-label', GROUP_GAP)}
+        >
+          words
+        </Text>
         <label htmlFor={garmentId} className='sr-only'>
           words for the model
         </label>
-        <Textarea
-          {...garment.field}
-          data-field='garmentDescription'
-          id={garmentId}
-          disabled={readOnly}
-          value={garment.field.value ?? ''}
-          rows={3}
-          maxLength={GARMENT_MAX}
-          placeholder='what this flat has to show'
-          aria-label='words for the model'
-          className='resize-y'
-        />
+        {/* ═══ СЧЁТЧИК ЖИВЁТ ВНУТРИ ПОЛЯ, В ЕГО ПРАВОМ НИЖНЕМ УГЛУ (r3 п.7) ═══════════════════
+            Владелец: «счётчик characters у WORDS — внутри поля снизу справа, и ограничитель по
+            размеру». Снаружи он был ОТДЕЛЬНОЙ СТРОКОЙ над полем и появлялся только когда текст
+            уже набран — то есть ровно тогда, когда он ничего не подсказывает, и никогда тогда,
+            когда человек ещё решает, сколько писать. Внутри он стоит всегда и печатает ОБА числа,
+            `N / 2000`: потолок — это и есть то, что он обещает, а `maxLength` его молча режет.
+
+            ⚠ ЧИСЛО — СЫРАЯ ДЛИНА, А НЕ ОБРЕЗАННАЯ. Режет `maxLength` по сырой длине; счётчик,
+            считавший `trim()`, показывал бы 1998 на поле, которое уже не принимает символ.
+            (`garmentChars` рядом — обрезанная длина, и она остаётся у вопроса CLEAR: там речь о
+            том, есть ли ЧТО терять, а пробел терять нечего.)
+
+            ⚠ `pointer-events-none` НЕСУЩИЙ: счётчик лежит НАД полем, и без него клик в правый
+            нижний угол поля не ставил бы каретку. Место под него выгорожено нижним отступом
+            самого поля (20px), поэтому последняя строка текста под него не заезжает. */}
+        <div className='relative'>
+          <Textarea
+            {...garment.field}
+            data-field='garmentDescription'
+            id={garmentId}
+            disabled={readOnly}
+            value={garment.field.value ?? ''}
+            rows={3}
+            maxLength={GARMENT_MAX}
+            placeholder='what this flat has to show'
+            aria-label='words for the model'
+            /* Полка под счётчик — ИНЛАЙНОМ, как и его посадка: `pb-5` и `bottom-1.5` в собранном
+               CSS не существуют, если этих классов не было в дереве на момент сборки, и стенд
+               намерил бы счётчик ПОД полем, показав зелёное там, где у человека он внутри. */
+            style={{ paddingBottom: 20 }}
+            className='resize-y'
+          />
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            data-words-count={garmentLen}
+            style={{ position: 'absolute', bottom: 6, right: 8 }}
+            className='pointer-events-none tabular-nums'
+          >
+            {garmentLen} / {GARMENT_MAX}
+          </Text>
+        </div>
         {/* КАРТИНКИ АСПЕКТОВ НЕ ЕДУТ, И ЭТО СКАЗАНО СОСТОЯНИЕМ (WAVE2 п.6) — только пока они есть. */}
         {aspectPictures > 0 && (
           <Text size='micro' variant='label' component='p' data-aspect-pictures={aspectPictures}>
@@ -822,94 +856,170 @@ export function ReferencesSection({
         )}
       </div>
 
-      {/* ═══ 1.3 ДВЕ ДВЕРИ ПРОМПТА: FROM CONSTRUCTION ▸ · ALSO SEND THE FLAT SLOTS. Погашенная
-          дверь объясняется ПОЛОСОЙ под рядом, не title.
-          ⚠ CLEAR ОТСЮДА УЕХАЛ В ШАПКУ БЛОКА (R2 п.19) и второй копией здесь не остался: две
-          кнопки с одним глаголом на одном экране — это ровно то, что владелец просил не делать. */}
-      <div className='flex flex-wrap items-center gap-2' data-prompt-doors=''>
-        {/* ВЗЯТЬ ОПИСАНИЕ ИЗ CONSTRUCTION (B-15): `details[]` — аспекты в порядке `DetailsEditor`,
-            плюс `fit` первой строкой; пустые аспекты не берутся. Поле трёхсостоянийное (schema.ts):
-            дверь ставит ЗНАЧЕНИЕ и только его — команду «сотри» она не отдаёт никогда. Непустое
-            описание перезаписывается с вопросом (`AskModal` ниже). */}
-        {readOnly ? null : aspectText ? (
-          <Button
-            variant='secondary'
-            size='sm'
-            data-take-aspects=''
-            onClick={takeAspects}
-            title='fill the words from CONSTRUCTION — fit first, then one line per filled aspect, in the order they are described there'
-          >
-            from construction ▸
-          </Button>
-        ) : (
-          <InertDoor
-            label='from construction ▸'
-            size='sm'
-            reason='no construction text yet — fill GENERAL INFORMATION or CONSTRUCTION above'
-          />
-        )}
-        {/* ТУМБЛЕР ПЛИТ — ЧИП: состояние `on` несёт заливка + `aria-pressed`. Погашен, пока ни
-            одна плита не стоит; причина — полосой ниже. */}
-        <Chip
-          selected={flatSend.on}
-          pressed={flatSend.on}
-          disabled={readOnly || plates.length === 0}
-          data-use-flat-slots=''
-          onClick={() => setFlatSendOn(techCardId, !flatSend.on)}
-          title='the plates standing in FLAT SLOTS go to the model after the references — they are usually flats it drew before, so it tends to redraw them'
-        >
-          also send the flat slots
-        </Chip>
-      </div>
-      {!readOnly && !aspectText && (
-        <LockBar reason='no construction text yet · fill GENERAL INFORMATION or CONSTRUCTION above'>
-          <Button variant='secondary' size='xs' onClick={gotoGeneral}>
-            general information ›
-          </Button>
-        </LockBar>
-      )}
-      {plates.length === 0 && <LockBar reason='no flat slots are filled · nothing extra to send' />}
-      {flatSend.on && plates.length > 0 && (
-        <div data-flat-plates={plates.length}>
-          <ChipRow>
-            {plates.map((plate) => {
-              const travels = sentIds.has(plate.slotId);
-              const already = promptNumber.get(plate.mediaId);
-              return (
-                <Chip
-                  key={plate.slotId}
-                  selected={travels}
-                  pressed={travels}
-                  disabled={readOnly}
-                  data-flat-plate={plate.slotId}
-                  aria-label={`${plate.label} plate`}
-                  title={
-                    already != null
-                      ? `its file already travels as reference #${already} — the server keeps the first copy`
-                      : travels
-                        ? 'travels after the references — click to take it off by name'
-                        : 'taken off by name — click to send it again'
-                  }
-                  onClick={() =>
-                    travels
-                      ? exclude(techCardId, plate.slotId)
-                      : restore(techCardId, plate.slotId)
-                  }
-                >
-                  {plate.label}
-                </Chip>
-              );
-            })}
-          </ChipRow>
-        </div>
-      )}
+      {/* ═══ 1.3–1.5 ТРИ РЯДА ПРОГОНА (r3 п.5) — ОДИН КОМПОНЕНТ, ОДИН РИТМ ════════════════════
+          Владелец: «после WORDS очень много кнопок разного размера с минимальными отступами».
+          Их и было много: ряд дверей, две полосы LOCKED, лента чипов плит, ряд видов и ряд
+          запуска — пять полос вперемешку, три разные высоты органов. Теперь их три, и порядок
+          назван владельцем: (1) виды и раскладка ответа, (2) ИСТОЧНИКИ — что ещё уедет вместе с
+          референсами, (3) запуск.
 
-      {/* ═══ 1.4 РЯД ЗАПУСКА (`runDoors('flat')` макета) — виды, GENERATE, деньги, дверь описи.
-          Отдельным компонентом, чтобы его хуки не вмешивались в порядок хуков этой секции.
+          ⚠ ИСТОЧНИКИ ПРИЕЗЖАЮТ СЮДА ЩЕЛЬЮ, А НЕ ПЕРЕЕЗЖАЮТ В `FlatRunRow`. Обе двери ряда пишут
+          в ЭТОТ блок — одна в поле `garmentDescription` формы, вторая в хранилище исключений
+          карточки, — и утащить их в компонент прогона значило бы протащить туда же половину
+          состояния секции. Ряд прогона держит РИТМ трёх полос, а не их содержимое.
+
           ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ (`collapsible`/`Fold`): ниже смонтирован приёмник рекола
           `RecalledRunPrompt`, при размонтировании реестр стирает выбор (`recalled.delete`), и жест
           теряется молча. */}
-      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
+      <FlatRunRow
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        sources={
+          <>
+            <div className='flex flex-wrap items-center gap-2' data-prompt-doors=''>
+              {/* ВЗЯТЬ ОПИСАНИЕ ИЗ CONSTRUCTION (B-15): `details[]` — аспекты в порядке
+                  `DetailsEditor`, плюс `fit` первой строкой; пустые аспекты не берутся. Поле
+                  трёхсостоянийное (schema.ts): дверь ставит ЗНАЧЕНИЕ и только его — команду
+                  «сотри» она не отдаёт никогда. Непустое описание перезаписывается с вопросом
+                  (`AskModal` ниже). */}
+              {readOnly ? null : aspectText ? (
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  data-take-aspects=''
+                  onClick={takeAspects}
+                  title='fill the words from CONSTRUCTION — fit first, then one line per filled aspect, in the order they are described there'
+                >
+                  <ControlLabel>from construction ▸</ControlLabel>
+                </Button>
+              ) : (
+                <InertDoor
+                  label={<ControlLabel>from construction ▸</ControlLabel>}
+                  size='sm'
+                  reason='no construction text yet — fill GENERAL INFORMATION or CONSTRUCTION above'
+                />
+              )}
+              {/* ТУМБЛЕР ПЛИТ — ЧИП РОСТОМ С КНОПКУ (`ROW_CONTROL_STYLE`): состояние `on` несёт
+                  заливка + `aria-pressed`.
+
+                  ⚠ ПРИЧИНА ПОГАШЕНИЯ ПЕРЕЕХАЛА В `title` ИЗ ОТДЕЛЬНОЙ ПОЛОСЫ. Под рядом стояла
+                  вечная полоса LOCKED «no flat slots are filled · nothing extra to send» — целая
+                  полоса ради отсутствия, и стояла она на КАЖДОЙ карточке, у которой верстак ещё
+                  пуст, то есть почти всегда. Само состояние при этом видно глазами двумя блоками
+                  ниже (FLAT SLOTS, «0 OF 6 SIDES»), а погашенный чип говорит его словами. */}
+              <Chip
+                selected={flatSend.on}
+                pressed={flatSend.on}
+                disabled={readOnly || plates.length === 0}
+                data-use-flat-slots=''
+                style={ROW_CONTROL_STYLE}
+                onClick={() => setFlatSendOn(techCardId, !flatSend.on)}
+                title={
+                  plates.length === 0
+                    ? 'no flat slots are filled — nothing extra to send. Put a plate into FLAT SLOTS below first'
+                    : 'the plates standing in FLAT SLOTS go to the model after the references — they are usually flats it drew before, so it tends to redraw them'
+                }
+              >
+                also send the flat slots
+              </Chip>
+            </div>
+            {!readOnly && !aspectText && (
+              <LockBar reason='no construction text yet · fill GENERAL INFORMATION or CONSTRUCTION above'>
+                {/* РАЗМЕР ДВЕРИ — РАЗМЕР ВСЕХ ОРГАНОВ ЭТИХ РЯДОВ (r3 п.5): `xs` рядом с `sm`
+                    читался как ещё одна, третья кнопка другого рода. */}
+                <Button variant='secondary' size='sm' onClick={gotoGeneral}>
+                  <ControlLabel>general information ›</ControlLabel>
+                </Button>
+              </LockBar>
+            )}
+            {/* ═══ ПЛИТЫ — ЛЕНТА МИНИАТЮР, И ТОЛЬКО ПРИ ВКЛЮЧЁННОМ ТУМБЛЕРЕ (r3 п.5) ══════════
+                Владелец, r2 (J-10): «сами картинки должны быть в тамбнейлах … с серой пеленой
+                поверх типо инэктив и должны убираться по кнопке». Здесь стоял ряд ТЕКСТОВЫХ
+                чипов — то есть ещё одна лента кнопок под рядом кнопок, и по именам сторон нельзя
+                было понять, ЧТО именно уедет. Теперь это снимки: залитый — едет, под пеленой —
+                снят поимённо. Что уедет и под какими номерами, целиком перечисляет модалка
+                WHAT THE MODEL GETS ▸; здесь только выключатели.
+
+                ⚠ ДУБЛИКАТ ЧЕСТЕН В `title`: плита, чей файл уже стоит референсом, в
+                `flat_slot_ids` уезжает как всякая не снятая (человек её не снимал), но новой
+                картинки в промпт не добавляет — сервер дедуплицирует и оставляет первое
+                вхождение, референс. Замерено на стенде. */}
+            {flatSend.on && plates.length > 0 && (
+              <div
+                data-flat-plates={plates.length}
+                className='flex flex-wrap items-start gap-2'
+              >
+                {plates.map((plate) => {
+                  const travels = sentIds.has(plate.slotId);
+                  const already = promptNumber.get(plate.mediaId);
+                  const url = thumbUrl(plate.media) || thumbUrl(mediaById.get(plate.mediaId));
+                  return (
+                    <button
+                      key={plate.slotId}
+                      type='button'
+                      data-flat-plate={plate.slotId}
+                      aria-pressed={travels}
+                      aria-label={`${plate.label} plate`}
+                      disabled={readOnly}
+                      style={{ width: PLATE_PX + 12 }}
+                      title={
+                        already != null
+                          ? `its file already travels as reference #${already} — the server keeps the first copy`
+                          : travels
+                            ? 'travels after the references — click to take it off by name'
+                            : 'taken off by name — click to send it again'
+                      }
+                      onClick={() =>
+                        travels
+                          ? exclude(techCardId, plate.slotId)
+                          : restore(techCardId, plate.slotId)
+                      }
+                      className='flex min-w-0 flex-col items-center gap-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
+                    >
+                      {/* СОСТОЯНИЕ НЕСУТ ТРИ ЗНАКА, А НЕ ОДИН: рамка (чернила — едет, серая —
+                          снята), пелена на снимке и цвет имени. Одной пеленой на бледном флэте
+                          «едет / снята» не различить — замерено глазами на стенде. */}
+                      <span
+                        style={{ width: PLATE_PX, height: PLATE_PX }}
+                        className={cn(
+                          'block shrink-0 overflow-hidden border bg-bgColor',
+                          travels ? 'border-textColor' : 'border-borderColor',
+                        )}
+                      >
+                        {url ? (
+                          /* ПЕЛЕНА — НА САМОМ СНИМКЕ, А НЕ НА КОРОБКЕ: рамка и имя обязаны
+                             остаться читаемыми, снятая плита — не отключённый орган. */
+                          <img
+                            src={url}
+                            alt=''
+                            className='h-full w-full object-cover'
+                            /* Пелена — ИНЛАЙНОМ по тому же доводу, что и всё новое в этих рядах:
+                               класса `opacity-20` в собранном CSS нет, и стенд намерил бы снятую
+                               плиту такой же яркой, как едущую. */
+                            style={!travels ? { opacity: 0.2 } : undefined}
+                          />
+                        ) : null}
+                      </span>
+                      <Text
+                        size='nano'
+                        variant='label'
+                        component='span'
+                        className={cn(
+                          'w-full truncate text-center uppercase tracking-label',
+                          travels && 'text-textColor',
+                        )}
+                      >
+                        {plate.label}
+                      </Text>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        }
+      />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Видимого органа у него нет — он рисует только вопрос про описание
           изделия, и только когда описание уже непустое. Внутри блока, не сворачивать. */}
@@ -1056,13 +1166,12 @@ export function ReferencesSection({
  * «ONE MORE» и ДВУМЯ ОБЫЧНЫМИ КНОПКАМИ внутри — то самое «классической кнопкой», на которое
  * владелец жаловался кругом раньше.
  *
- * ДВЕ ПОЛОВИНЫ ОДНОЙ ПЛИТКИ, А НЕ ПЛИТКА С КНОПКАМИ. Верх — слот медиа как он есть (клик в
- * библиотеку, ⌘V, бросок файла, фотоглиф — всё внутри примитива, и второго их написания здесь не
- * заводится); низ — перо и «draw a reference» на той же полосатой поверхности. Одна линия между
- * половинами: рамку несёт коробка, у половин своей нет.
- *
- * ТА ЖЕ ПАРА ПОЛОВИН СТОИТ НА ПУСТОЙ ЯЧЕЙКЕ FLAT SLOTS, и обе рисует ОДИН орган — `DrawHalf`
- * (`./bench-slot`). Второе начертание половины разъехалось бы с первым молча.
+ * ⚠ ПЛИТКА ЖИВЁТ В `core/two-half-slot.tsx` И БОЛЬШЕ НИГДЕ (пул r3). До этой правки её чертили
+ * ТРИЖДЫ — здесь, в `bench-slot.tsx` (пустая ячейка верстака) и в `core` (флэт-стороны рендера), —
+ * и в волне r2 три копии уже разъехались на пиксель. Здесь осталось ровно то, чем лента входа
+ * отличается от двух других: квадрат по своей ширине, множественный выбор (человек приносит
+ * пачку разом), адрес нарисованного — `the input`, а не слот, и слово состояния «the input is
+ * full» вместо дверей на потолке `INPUT_MAX`.
  *
  * ЯРЛЫКА «ONE MORE» БОЛЬШЕ НЕТ: две половины сами говорят, что они такое, а третья строка над
  * ними отбирала у них половину высоты.
@@ -1078,59 +1187,33 @@ function OneMoreCell({
   onDraw: () => void;
 }) {
   return (
-    <div
+    <PlaceOrDrawCell
       data-ref-placeholder=''
-      /* Рост и деление — ИНЛАЙНОМ: стенд читает CSS готовой сборки, где произвольного класса,
-         которого не было в дереве на момент сборки, нет вовсе (замерено на `h-[calc(50%+1px)]`
-         этой же ячейки раньше). Геометрия деления — не кожа системы. */
-      style={{
-        ...PLACEHOLDER_SURFACE,
-        /* КВАДРАТ, КАК КАДР СОСЕДА, И ЭТО ОБЯЗАНО БЫТЬ ОПРЕДЕЛЁННОЙ ВЫСОТОЙ. Пока высота была
-           «сколько получится» (`h-full` + `minHeight`), строку грида распирало СОДЕРЖИМОЕ верхней
-           половины — у кнопки слота свои пропорции 4/5, — и плитка вырастала до 500 пикселей при
-           231 у соседней ячейки (замерено). С определённой высотой две строки `1fr` просто делят
-           её пополам, а `alignSelf: start` не даёт растянуть коробку под ряд. */
-        aspectRatio: '1/1',
-        alignSelf: 'start',
-        minHeight: 0,
-        ...(full ? {} : { display: 'grid', gridTemplateRows: '1fr 1fr' }),
-      }}
-      className={cn(
-        'min-w-0 overflow-hidden border border-dashed border-borderColor',
-        full && 'flex items-center justify-center px-2 text-center',
-      )}
-    >
-      {full ? (
-        <Text size='micro' variant='uppercase' tracking='label' component='span'>
-          the input is full
-        </Text>
-      ) : (
-        <>
-          {/* Обёртка с нулевым минимумом — см. разбор у `EmptyCell` в `./bench-slot`: без неё
-              собственные пропорции кнопки слота растягивают строку грида, и половина перестаёт
-              быть половиной. */}
-          <div style={{ minHeight: 0, overflow: 'hidden' }} className='min-w-0'>
-            <MediaSlot
-              label='+ reference'
-              purpose='design reference'
-              aspectRatio={['Custom']}
-              allowMultiple
-              showVideos={false}
-              onSelect={onSelect}
-              sizeClassName='h-full w-full'
-              className='border-0'
-            />
-          </div>
-          <DrawHalf
-            anchor='reference'
-            label='draw a reference'
-            /* Единственное, чем эта половина отличается от трёх соседних: адрес — не слот. */
-            into='the input'
-            onClick={onDraw}
-          />
-        </>
-      )}
-    </div>
+      label='reference'
+      mediaLabel='+ reference'
+      showGestures
+      /* КВАДРАТ, КАК КАДР СОСЕДА, И `topAligned` К НЕМУ В ПАРЕ. Пока коробку растягивала строка
+         грида, её распирало содержимое верхней половины — у кнопки слота свои пропорции 4/5, — и
+         плитка вырастала до 500 пикселей при 231 у соседней ячейки (замерено). Пропорция задаёт
+         рост, а `alignSelf: start` не даёт строке растянуть коробку под самого высокого соседа
+         (у ячейки референса под кадром стоит ещё и селект роли). */
+      aspect='1/1'
+      topAligned
+      purpose='design reference'
+      onSelectAll={onSelect}
+      onDraw={onDraw}
+      drawLabel='draw a reference'
+      drawAriaLabel='draw a reference'
+      /* Единственное, чем эта половина отличается от трёх соседних: адрес — не слот. */
+      into='the input'
+      instead={
+        full ? (
+          <Text size='micro' variant='uppercase' tracking='label' component='span'>
+            the input is full
+          </Text>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -1208,11 +1291,23 @@ function ReferenceCell({
               { ...mediaFullToViewerItem(full), thumbnail: url, alt: label }
             : undefined
         }
-        /* РЕЗ ПРЕДЛАГАЕТСЯ ТОЛЬКО СКЛЕЕННОМУ И ЕЩЁ НЕ РЕЗАНОМУ КАДРУ (F-8, F-18); третье значение
-           «не знаю» ПРЕДЛАГАЕТ и ничего не утверждает о файле — та же формула, что на полосе
-           флэтов (`render/render-input-strip.tsx`). */
+        /* ═══ РЕЗ ПРЕДЛАГАЕТСЯ ЛЮБОЙ КАРТИНКЕ ВХОДА (r3 п.4) ═════════════════════════════════
+           Владелец: «на референсах должна быть возможность маркать мультивью». До r3 угол
+           стоял только на кадре, который САМ объявил себя склейкой (`composite_views`), и на
+           том, про который не удалось узнать; на всём остальном его не было вовсе. Но
+           «мультивью» — это утверждение ЧЕЛОВЕКА о снимке, а не свойство файла: лукбук на
+           четыре вида, снятый на телефон и брошенный во вход, никаких видов не объявляет и
+           объявить не может. Отказывать ему значило отказывать ровно тому случаю, ради
+           которого дверь и заведена — модалка режет кадрами, размеченными руками, и умеет это
+           на картинке без объявленных видов («every frame is named here by hand»).
+
+           ⚠ РАЗЛИЧАТЬ СЛУЧАИ ПРОДОЛЖАЕТ `title`, И ЭТО НЕ УКРАШЕНИЕ: дверь ПРЕДЛАГАЕТ действие
+           и ничего не утверждает о файле — та же формула, что на полосе флэтов. `declared` —
+           это факт полосы («held several views at once»), всё остальное — «only you can
+           tell». Пропасть дверь не может: тихий орган остаётся тихим не отсутствием, а тем,
+           что не врёт. */
         onSplit={
-          !readOnly && url && splitOffer !== 'no'
+          !readOnly && url
             ? {
                 onClick: onSplit,
                 pending: splitPending,

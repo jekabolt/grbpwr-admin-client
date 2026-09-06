@@ -125,13 +125,32 @@ export function DrawHalf({
 }
 
 /**
- * ЦЕЛАЯ ПУСТАЯ ПЛИТКА НА ДВЕ ПОЛОВИНЫ, КОГДА У НЕЁ ЗАДАН РОСТ В ПИКСЕЛЯХ — флэт-стороны рендера
- * (r2 п.28). Коробка обязана совпадать с занятой плитой соседней ячейки той же строки, поэтому
- * рост приходит числом, а не пропорцией: у ленты сторон плита меряется рядом, не собой.
+ * ═══ ЦЕЛАЯ ПУСТАЯ ПЛИТКА НА ДВЕ ПОЛОВИНЫ — ОДИН ОРГАН НА ВСЕ ТРИ ЛЕНТЫ ══════════════════════════
  *
- * Ленты, где коробка задана ПРОПОРЦИЕЙ (референсы, верстак флэтов), собирают те же две половины
- * у себя вокруг своей коробки — `MediaSlot` сверху и `DrawHalf` снизу; общий здесь орган, а не
- * общая коробка.
+ * ⚠ ДО r3 ЭТА ПЛИТКА БЫЛА СОБРАНА ТРИЖДЫ, и это ровно тот дефект, ради которого файл заводился.
+ * Здесь стояла коробка ТОЛЬКО с ростом в пикселях (флэт-стороны рендера), а две другие ленты
+ * собирали ту же пару половин у себя: `OneMoreCell` в `references-section.tsx` (квадрат 1:1,
+ * множественный выбор, состояние «вход полон») и `EmptyCell` в `bench-slot.tsx` (квадрат 1:1 плюс
+ * подвал с именем стороны и слово `empty` на выпущенной карточке). Три написания одной плитки —
+ * это три места, где она разъедется: в волне r2 кожа уже разъехалась на пиксель, и разъезд увидел
+ * только тот, кто держал два экрана рядом.
+ *
+ * ПОЭТОМУ РАЗЛИЧИЯ ЛЕНТ СТАЛИ ПРОПАМИ, А НЕ ПОВОДОМ ФОРКНУТЬ ПЛИТКУ. Их ровно четыре, и каждое —
+ * факт о ленте, а не вкус:
+ *   · КАК МЕРЯЕТСЯ КОРОБКА. `heightPx` — рост числом (лента сторон рендера: плита обязана совпасть
+ *     с занятой ячейкой СОСЕДА, а сосед меряется не собой); `aspect` — пропорция (референсы и
+ *     верстак флэтов: коробка меряется своей шириной). Ровно одно из двух.
+ *   · ПОДВАЛ (`cap`). У верстака флэтов под кадром стоит имя стороны со звёздочкой — третье
+ *     слагаемое его высоты 162; у двух других лент подвала нет вовсе.
+ *   · ВМЕСТО ПОЛОВИН (`instead`). «the input is full» и «empty» — это СОСТОЯНИЕ КОРОБКИ, а не
+ *     другая коробка: рамка, кадр и подвал остаются на месте, дверей просто нет.
+ *   · ЛИЦО ВЕРХНЕЙ ПОЛОВИНЫ (`mediaLabel`). У сторон это `+ front`, у верстака — `from media`
+ *     (имя стороны уже напечатано в подвале, и «+ front» повторял бы его в двух сантиметрах), у
+ *     входа — `+ reference`. Умолчание — `+ {label}`.
+ *
+ * ЯКОРЯ ПРОБ ПЕРЕЖИВАЮТ СВЕДЕНИЕ: `data-place-or-draw` на коробке и `data-draw-half` на пере
+ * стоят здесь, а имя ленты (`data-ref-placeholder`, `data-bench-empty`, `data-side-flat-door`)
+ * приезжает от вызывающего через `...rest`.
  */
 export function PlaceOrDrawCell({
   /**
@@ -140,65 +159,137 @@ export function PlaceOrDrawCell({
    * зачитывала читалке пунктуацию чужой кнопки как часть имени стороны.
    */
   label,
-  /** Рост коробки в пикселях: она обязана совпадать с занятой плитой соседней ячейки. */
   heightPx,
+  aspect,
+  mediaLabel,
+  showGestures,
   purpose,
   onSelect,
+  onSelectAll,
   onDraw,
   drawLabel = 'draw',
+  drawAriaLabel,
   /** Адрес нарисованного — существительным; предложение пишет `drawTitle`. */
   into,
+  cap,
+  instead,
+  topAligned,
+  role,
+  ariaLabel,
   className,
   ...rest
 }: {
   label: string;
-  heightPx: number;
+  /** Рост коробки в пикселях: она обязана совпадать с занятой плитой соседней ячейки. */
+  heightPx?: number;
+  /** ИЛИ пропорция кадра (`'1/1'`) — там, где коробка меряется своей шириной. */
+  aspect?: string;
+  /** Лицо верхней половины; умолчание — `+ {label}`. */
+  mediaLabel?: string;
+  /**
+   * Печатать ли под лицом строку жестов примитива («⌘V · drag a file · click to browse»).
+   *
+   * ⚠ УМОЛЧАНИЕ — МОЛЧАТЬ, и это не вкус. У ленты сторон рендера коробка ростом в 96px, и третья
+   * строка в ней съедала половину пера. Владелец назвал строку жестов частью плейсхолдера ровно
+   * там, где для неё есть место (r2 п.16, вход и верстак флэтов) — эти две ленты её и просят.
+   */
+  showGestures?: boolean;
   purpose: string;
-  onSelect: (media: common_MediaFull) => void;
-  onDraw: () => void;
+  /** Первая выбранная картинка. Ленты, берущие по одной, дают только его. */
+  onSelect?: (media: common_MediaFull) => void;
+  /** Множественный выбор: получает ВЕСЬ список. Задан — верхняя половина принимает пачку. */
+  onSelectAll?: (media: common_MediaFull[]) => void;
+  /** Нет пера — верхняя половина занимает кадр целиком (лента, где рисовать нечем). */
+  onDraw?: () => void;
   drawLabel?: string;
+  /** Шесть половин с надписью «draw» в одной ленте неразличимы на слух — здесь их различают. */
+  drawAriaLabel?: string;
   into?: string;
+  /** Подвал под кадром — имя слота и звёздочка обязательной (верстак флэтов). */
+  cap?: React.ReactNode;
+  /** Слово состояния ВМЕСТО половин: «the input is full», «empty». Коробка остаётся своя. */
+  instead?: React.ReactNode;
+  /** Не растягивать коробку по строке грида: её рост задаёт пропорция, а не сосед. */
+  topAligned?: boolean;
+  role?: string;
+  ariaLabel?: string;
   className?: string;
   [k: `data-${string}`]: unknown;
 }): JSX.Element {
+  const halved = !instead && !!onDraw;
   return (
     <div
       {...rest}
       data-place-or-draw=''
-      /* Рост и деление — ИНЛАЙНОМ: стенд читает CSS готовой сборки, где произвольного класса,
-         которого не было в дереве на момент сборки, нет вовсе (замерено на `h-[calc(50%+1px)]`). */
-      style={{ ...PLACEHOLDER_SURFACE, ...SLOT_HALVES, height: heightPx }}
+      role={role}
+      aria-label={ariaLabel}
+      /* Рост — ИНЛАЙНОМ: стенд читает CSS готовой сборки, где произвольного класса, которого не
+         было в дереве на момент сборки, нет вовсе (замерено на `h-[calc(50%+1px)]`). */
+      style={{ ...(heightPx != null ? { height: heightPx } : null), ...(topAligned ? { alignSelf: 'start' } : null) }}
       className={cn(
-        'w-full min-w-0 overflow-hidden border border-dashed border-borderColor',
+        'flex w-full min-w-0 flex-col overflow-hidden border border-dashed border-borderColor',
         className,
       )}
     >
-      {/* ⚠ ОБЁРТКА С НУЛЕВЫМ МИНИМУМОМ НЕСУЩАЯ, А НЕ УБОРКА — см. разбор у `SLOT_HALVES`. */}
-      <div style={{ minHeight: 0, overflow: 'hidden' }} className='min-w-0'>
-        <MediaSlot
-          aspectRatio={['Custom']}
-          /* «+» ЖИВЁТ ЗДЕСЬ — на лице двери, а не в имени слота: имя едет ещё и в речь. */
-          label={`+ ${label}`}
-          hint={null}
-          purpose={purpose}
-          showVideos={false}
-          editMode
-          onSelect={(media) => {
-            const first = media[0];
-            if (first?.id) onSelect(first);
-          }}
-          sizeClassName='h-full w-full'
-          className='border-0'
-        />
+      {/* ═══ КАДР — ТО, ЧТО ДЕЛИТСЯ ПОПОЛАМ. Полосатая поверхность живёт ЗДЕСЬ, а не на коробке:
+          подвал под кадром — белая полка с именем, и полоски под ним читались бы как вторая
+          пустая ячейка. Нулевой минимум несущий: у элемента флекса `min-height: auto`, то есть
+          содержательная высота кнопки слота (её собственные пропорции 4/5) перебивает и
+          пропорцию кадра, и деление надвое — замерено, 366 против 162 у заполненной ячейки. */}
+      <div
+        style={{
+          ...PLACEHOLDER_SURFACE,
+          minHeight: 0,
+          ...(aspect ? { aspectRatio: aspect } : { flex: '1 1 auto' }),
+          ...(halved ? SLOT_HALVES : null),
+        }}
+        /* ⚠ ПОЛЯ И ЦЕНТРИРОВАНИЕ ТЕКСТА — ТОЛЬКО СЛОВУ СОСТОЯНИЯ. Кадр без пера (ячейка, которой
+           рисовать нечем) отдан слоту медиа целиком: `px-2` там вжал бы кнопку на 8px с каждой
+           стороны, то есть сузил бы саму дверь. */
+        className={cn(
+          !halved && 'flex items-center justify-center',
+          instead && 'px-2 text-center',
+        )}
+      >
+        {instead ?? (
+          <>
+            {/* ⚠ ОБЁРТКА С НУЛЕВЫМ МИНИМУМОМ НЕСУЩАЯ, А НЕ УБОРКА — см. разбор у `SLOT_HALVES`. */}
+            <div style={{ minHeight: 0, overflow: 'hidden' }} className='min-w-0'>
+              <MediaSlot
+                aspectRatio={['Custom']}
+                /* «+» ЖИВЁТ ЗДЕСЬ — на лице двери, а не в имени слота: имя едет ещё и в речь. */
+                label={mediaLabel ?? `+ ${label}`}
+                hint={showGestures ? undefined : null}
+                purpose={purpose}
+                showVideos={false}
+                allowMultiple={!!onSelectAll}
+                editMode
+                onSelect={(media) => {
+                  if (onSelectAll) {
+                    onSelectAll(media);
+                    return;
+                  }
+                  const first = media[0];
+                  if (first?.id) onSelect?.(first);
+                }}
+                sizeClassName='h-full w-full'
+                className='border-0'
+              />
+            </div>
+            {onDraw && (
+              <DrawHalf
+                data-place-or-draw-pen=''
+                anchor={label}
+                label={drawLabel}
+                ariaLabel={drawAriaLabel ?? `${drawLabel} — ${label}`}
+                into={into}
+                onClick={onDraw}
+              />
+            )}
+          </>
+        )}
       </div>
-      <DrawHalf
-        data-place-or-draw-pen=''
-        anchor={label}
-        label={drawLabel}
-        ariaLabel={`${drawLabel} — ${label}`}
-        into={into}
-        onClick={onDraw}
-      />
+      {cap}
     </div>
   );
 }

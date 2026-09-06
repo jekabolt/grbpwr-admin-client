@@ -1,18 +1,16 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 
 import { ASSETS_PER_CARD_MAX } from '../assets/model';
-import { Counter, Money, Reason } from '../core';
+import { Counter, GROUP_GAP, Money, Reason } from '../core';
 import { stepById } from '../core/chain';
 import { isRunLive } from '../generation';
 import { GenerateRow, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
-import { PatternColourRow, usePatternColourways } from './colourways';
-import { LockLine } from './organs';
+import { PatternColourRow } from './colourways';
 import {
   patternColourRecipe,
   patternGate,
@@ -35,7 +33,7 @@ import { PatternLibrary } from './pattern-library';
  *   SOURCE PICTURE   the cell on the left (one picture, exactly) · NAME * on the right
  *   COLOUR           one door `+ colour` (the product's pantone picker) · the recent colours of
  *                    this card's own runs · the pick standing as ONE tile with `✕`
- *   the run          the lock bar naming what is missing and its door · GENERATE · the money line
+ *   the run          GENERATE (dimmed, with its reason, until the gate opens) · the money line
  *   TILES ON THIS CARD   the shelf; and under it MADE EARLIER, NOT KEPT when there is such a thing
  *
  * ═══ THE CONTRACT OF CREATION — three fields, and each knows whether it TRAVELS ══════════════════
@@ -44,25 +42,27 @@ import { PatternLibrary } from './pattern-library';
  *     name      REQUIRED, unique        NOT SENT           (the name is yours, not the model's)
  *     colour    optional                INPUT of the run   (it paints the tile itself)
  *
- * The difference is shown on the organ's own face: `in the prompt` on the filled cell,
- * `not sent` under the name, `goes to the model` on the colour rule. The colour travels as
- * `params.colour` — the SAME field the render states its colour in; the server writes it into
- * every kind's prompt (`designgen/snapshot.go`), so a picked colour is a fact of the paid run,
- * not a decoration of the screen.
+ * ⚠ ТРИ ПИЛЮЛИ, КОТОРЫЕ ЭТО ОБЪЯВЛЯЛИ, СНЯТЫ (владелец, r3 пп.12 и 14): `in the prompt` на
+ * заполненной ячейке, `not sent` под именем и `goes to the model` на линейке цвета. Сведения не
+ * потеряны — они переехали туда, где на них смотрят: под именем стоит одна серая строка, а цвет
+ * признаётся кодом на самой выбранной плитке. Сам факт при этом не меняется: цвет едет как
+ * `params.colour` — тем же полем, каким называет свой цвет рендер, и сервер пишет его в промпт
+ * любого рода (`designgen/snapshot.go`), так что выбранный цвет есть факт оплаченного прогона.
  *
  * ═══ NO COLOURWAY ON CREATION (owner, E-1) — and no prompt inventory door (owner) ═════════════
  *
- * The colourway is bound on the shelf, under the tile (`worn by`), after the fact: at the time of
- * the first generations the card has no colourways to choose from. The `what the model gets ▸`
- * door is not drawn on this step by the owner's decision: the whole of what travels is two organs
- * standing on this screen, the picture and the colour.
+ * ⚠ И НА ПОЛКЕ ТОЖЕ БОЛЬШЕ НЕТ КОЛОРВЕЯ (владелец, r3 п.18: «TILES ON THIS CARD: никакой связи с
+ * колорвеями — убрать WORN BY и NOT BOUND»). Ряд чипов `worn by` под каждой плиткой и пилюля
+ * `not bound` сняты вместе с вызовом `SetDesignAssetColorway`: связь плитки с колорвеем решается
+ * на оси колорвеев, а не на экране, где плитку делают. `what the model gets ▸` на этом шаге не
+ * рисуется по решению владельца: всё, что уезжает, — два органа, стоящих на этом экране.
  *
  * ⚠ И ЦВЕТ ТЕПЕРЬ ТОЖЕ НЕ КОЛОРВЕЙ (владелец, r2 §26: «выбор цвета, который нас ни к чему не
  * обязывает»). Ряд COLOUR читал КОЛОРВЕИ КАРТОЧКИ — то есть на карточке без колорвеев он показывал
  * пустоту с дверью на соседний шаг, и покрасить пробную плитку было нельзя, не заведя запись о
  * продукте. Цвет — ничья пара «код + hex» (`PatternColour`), выбирается пантон-пикером продукта и
- * живёт ровно один прогон. `usePatternColourways` тут остаётся, но ТОЛЬКО ради полки: `worn by`
- * под плиткой — по-прежнему связь с колорвеем, и это другой вопрос, а не тот же.
+ * живёт ровно один прогон. `usePatternColourways` больше не зовётся отсюда вовсе: он стоял ради
+ * полки, а полка колорвеев не знает (п.18) — то есть экран перестал ходить в `GetTechCard`.
  *
  * ═══ NOTHING HERE OWNS A SAVE. A named run lands on the shelf by itself (`keepPatternTx`). ═════
  */
@@ -82,8 +82,6 @@ export function PatternStudio({
   /* ЦВЕТ НИЧЕЙ (владелец, r2 §26): пара «код + hex», а не ссылка на колорвей карточки. `null` —
      законное и обычное состояние: плитка генерится и без цвета. */
   const [colour, setColour] = useState<PatternColour | null>(null);
-  const nameRef = useRef<HTMLInputElement | null>(null);
-  const slotRef = useRef<HTMLDivElement | null>(null);
 
   /**
    * ═══ КАРТОЧКА СМЕНИЛАСЬ — ЗАГОТОВКА ПРОГОНА НАЧИНАЕТСЯ ЗАНОВО ═════════════════════════════
@@ -119,7 +117,6 @@ export function PatternStudio({
     if (colour) setColour(null);
   }
 
-  const { refs: colourways, loading: colourwaysLoading } = usePatternColourways(techCardId);
   /* История цвета уже лежит на проводе — она заморожена в `params.colour` прошлых прогонов. */
   const recentColours = useMemo(() => recentPatternColours(band), [band]);
 
@@ -129,7 +126,13 @@ export function PatternStudio({
 
   /* THE GATE, in the order of the prototype: the source, the name, a twin of the name. The full
      shelf is NOT a gate — the run goes and is paid for, and the tile falls into «made earlier,
-     not kept», where `keep it` is dimmed under its own bar. */
+     not kept», where `keep it` is dimmed under its own bar.
+     ⚠ ПОЛОСЫ LOCKED БОЛЬШЕ НЕТ (владелец, r3 п.16: «LOCKED “a repeating tile is made out of
+     exactly one picture · + PICTURE ›” — удалить полностью»). Ворота живы и остались ОДНИ: их
+     ответ носит сам `GenerateRow` — при закрытых он рисует `InertDoor` с этим же поводом в
+     `title` и в `data-inert`, то есть GENERATE просто погашен, а причина стоит на нём. Полоса
+     говорила третьим органом то же, что дверь и погашенная кнопка, и вела на ту же ячейку,
+     которая и так стоит первой на экране. */
   const gate = patternGate(band, sourceId, name);
 
   /* THE NAME IS SPENT BY THE RUN: once a run has started (the mutation settled with no refusal)
@@ -140,18 +143,6 @@ export function PatternStudio({
     if (wasPending.current && !run.isPending && !run.refusal) setName('');
     wasPending.current = run.isPending;
   }, [run.isPending, run.refusal]);
-
-  /* THE DOORS OF THE LOCK BAR FIX THEIR OWN REASON. `+ picture ›` opens the same picker the cell
-     opens (the cell's trigger is the library button); `name it ›` puts the caret in the field and
-     selects it — no redraw, a redraw would blow the focus this door just set. */
-  const openSlot = () => {
-    slotRef.current?.scrollIntoView({ block: 'nearest' });
-    slotRef.current?.querySelector<HTMLButtonElement>('button')?.click();
-  };
-  const focusName = () => {
-    nameRef.current?.focus();
-    nameRef.current?.select();
-  };
 
   const advice = run.refusal ? refusalAdvice(run.refusal.words) : '';
 
@@ -165,7 +156,10 @@ export function PatternStudio({
           <Pill tone='ink' data-step-pill=''>
             {`step ${step.n}`}
           </Pill>
-          <Pill>optional</Pill>
+          {/* ПИЛЮЛЯ `OPTIONAL` СНЯТА ОБЕИМИ СВОИМИ КОПИЯМИ (владелец, r3 п.14). На этом экране она
+              стояла ДВАЖДЫ — здесь про шаг и ниже про цвет, — и второе прочтение первой («что
+              именно тут необязательно?») стоило человеку взгляда. Что шаг можно пропустить,
+              говорит рельс цепочки, а не шапка блока. */}
           <span data-assets-count=''>
             <Counter n={shelf} noun='asset' total={ASSETS_PER_CARD_MAX} />
           </span>
@@ -175,6 +169,7 @@ export function PatternStudio({
       {/* ─── SOURCE PICTURE · NAME ────────────────────────────────────────────────────────── */}
       <GroupLabel
         flush
+        className={GROUP_GAP}
         action={
           <span data-source-count=''>
             <Counter n={sourceId > 0 ? 1 : 0} noun='picture' total={1} />
@@ -189,26 +184,17 @@ export function PatternStudio({
         onClear={() => setSource(null)}
         name={name}
         onName={setName}
-        nameRef={nameRef}
-        slotRef={slotRef}
         disabled={disabled}
       />
 
       {/* ─── COLOUR ─────────────────────────────────────────────────────────────────────── */}
-      {/* ДВЕ ПИЛЮЛИ, А БЫЛО ТРИ. Третья повторяла словами то, что ряд под ней показывает лицом
-          («no colour» / имя выбранного) — владелец про этот шаг: «не пихай кучу кнопок в одном
-          месте». Остались два ФАКТА, которых на лице ряда нет: что цвет не обязателен и что он
-          всё-таки уезжает в платный промпт. */}
-      <GroupLabel
-        action={
-          <>
-            <Pill tone='ink'>goes to the model</Pill>
-            <Pill>optional</Pill>
-          </>
-        }
-      >
-        colour
-      </GroupLabel>
+      {/* ⚠ ПИЛЮЛЬ НА ЭТОЙ ЛИНЕЙКЕ БОЛЬШЕ НЕТ (владелец, r3 п.14: «убрать “GOES TO THE MODEL” и
+          “OPTIONAL”»). Их было три, потом две; обе оставшиеся называли не то, что видно на ряду
+          под ними, а ПРАВИЛА — и ровно поэтому читались как шум над каждым заголовком студии.
+          Ни один факт при этом не потерян: что цвет уезжает в промпт КОДОМ, сказано на самой
+          выбранной плитке («code only — the model is told “…”»), где на это и смотрят; что цвет
+          необязателен — тем, что ворота GENERATE его не спрашивают. */}
+      <GroupLabel className={GROUP_GAP}>colour</GroupLabel>
       <PatternColourRow
         colour={colour}
         recent={recentColours}
@@ -216,26 +202,7 @@ export function PatternStudio({
         disabled={disabled}
       />
 
-      {/* ─── the run: the bar, the door, the money ──────────────────────────────────────── */}
-      {!gate.ok && (
-        <LockLine reason={gate.reason} data-pattern-gate={gate.door}>
-          {gate.door === 'name' ? (
-            <Button variant='secondary' size='xs' onClick={focusName} data-gate-door='name'>
-              name it ›
-            </Button>
-          ) : (
-            <Button
-              variant='secondary'
-              size='xs'
-              onClick={openSlot}
-              disabled={disabled}
-              data-gate-door='picture'
-            >
-              + picture ›
-            </Button>
-          )}
-        </LockLine>
-      )}
+      {/* ─── the run: GENERATE and the money ─────────────────────────────────────────────── */}
       <GenerateRow
         gate={gate}
         pending={run.isPending}
@@ -293,9 +260,6 @@ export function PatternStudio({
         disabled={disabled}
         live={live}
         hasSource={sourceId > 0}
-        onAttach={openSlot}
-        colourways={colourways}
-        colourwaysLoading={colourwaysLoading}
       />
     </Section>
   );

@@ -2,7 +2,15 @@
  * THE STUDIO CORE — the organs every band screen shares. One import surface, no state, no wire.
  */
 export { AskModal } from './ask';
-export { Counter, EMPTY_WORD, EmptyState, Money, PRICED_LATER } from './organs';
+export {
+  Counter,
+  EMPTY_WORD,
+  EmptyState,
+  GROUP_GAP,
+  GROUP_SEAM,
+  Money,
+  PRICED_LATER,
+} from './organs';
 export { Reason } from './reason';
 export {
   DrawHalf,

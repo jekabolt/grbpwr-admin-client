@@ -27,11 +27,6 @@ export const ROLES: { role: common_TechCardRole; label: string; required: boolea
   { role: 'TECH_CARD_ROLE_APPROVER', label: 'approver', required: false },
 ];
 
-/** Roles with at least one person — the prototype's `rolesFilled()`, read by the group counter. */
-export function rolesFilled(assignments: common_TechCardRoleAssignment[]): number {
-  return ROLES.filter((r) => assignments.some((a) => a.role === r.role)).length;
-}
-
 /**
  * One row: `LABEL *` · the people as chips (✕ in the chip takes them off) · `NONE` while empty ·
  * `+ assign`, which opens the picker.
@@ -203,8 +198,11 @@ function RoleRow({
  * (phase 19 exception, 19.5). On a card that is not saved yet the four rows still stand, empty and
  * without the door, and say why.
  *
- * `assignments` is handed in rather than read here: the caller draws the `N of 4 roles` counter in
- * the group rule off the same list, so count and chips cannot disagree.
+ * `assignments` is handed in rather than read here: the caller already reads the assignment list
+ * for the card, and one read feeds one panel — the rows cannot disagree with anything above them.
+ *
+ * СЧЁТЧИКА «N OF 4 ROLES» НАД ЭТИМ ПАНЕЛЕМ БОЛЬШЕ НЕТ (владелец, r3 п.2: «и так видно»); вместе с
+ * ним ушёл и экспорт `rolesFilled` — его читал только тот счётчик.
  */
 export function RolesField({
   techCardId,

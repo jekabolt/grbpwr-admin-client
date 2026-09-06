@@ -69,7 +69,7 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * ═══ THE LAYOUT IS THE MOCK-UP'S `histBlock()` (`_core.js`), THE MECHANISM IS THE PRODUCT'S ═════
  * Top to bottom (r2 п.22, п.23, п.27 — три правки владельца поверх макета):
  *   · header  `GENERATION HISTORY · nothing here is deleted`  [2 PATTERN RUNS ▾]  ← И СВЁРТКА ТОЖЕ
- *   · row     `[3 PICTURES] loaded`                              [· 0 ARCHIVED ▸]
+ *   · row                                                          [· 0 ARCHIVED ▸]
  *   · body    rows of runs: the tiles of what came back, then the meta line
  *             `alina · 14:12 · $0.38` и под ней ряд дверей `recall ▸  + results ▸  meta ▸ … archive ▸`,
  *             then the pager `‹ newer · page N of M · older › … show all`
@@ -78,12 +78,12 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * закончен; номер и род не сказаны, потому что род задан шагом и не выбирается (п.27 — селект
  * KIND снят), а строку читают по часам и автору. Счётчик прогонов и дверь свёртки — ОДИН орган в
  * шапке (п.23): отдельной линейки `RUNS ─── HIDE ▾` больше нет.
- * ⚠ ЧИСЛО В ШАПКЕ СЧИТАЕТ РОД ЭТОГО ШАГА, А НЕ КАРТОЧКУ (ревью Codex r2) — разбор у `liveShown`;
- * поэтому в ряду «loaded» второго счётчика прогонов нет, там остались только картинки.
+ * ⚠ ЧИСЛО В ШАПКЕ СЧИТАЕТ РОД ЭТОГО ШАГА, А НЕ КАРТОЧКУ (ревью Codex r2) — разбор у `liveShown`.
+ * В ряду под шапкой счётчиков больше нет вовсе (r3 п.8): осталась одна дверь архива.
  * The five steps differ in TWO values only: the kind of the step (`defaultRep`, now a hard filter)
  * and whether the RUNS fold starts open (`defaultOpen`: open on FLAT, closed on the four steps that
  * have their own outputs section above). The block itself is never collapsed: its header and the
- * loaded row are always on screen.
+ * shelf door are always on screen.
  *
  * What the mock-up shows as gestures the product does with ITS OWN RPC and rules, unchanged here:
  * NOTHING IS EVER DELETED and the generation is the unit that collapses (archive is a flag on the
@@ -118,8 +118,23 @@ const TRACK = 148;
 
 type SlotOfPicture = {
   ref: DesignBenchSlotRef;
-  /** The badge on the tile: `front`, or `render · front` — a bench other than the flat one says its name. */
+  /**
+   * THE SLOT'S FULL NAME, FOR PROSE: `front`, or `render · front` — a bench other than the flat one
+   * says its name, because «FRONT» alone names two different slots. Read by `unmark`'s label and
+   * title, where the sentence has to be unambiguous on its own («take this picture out of …»).
+   * ⚠ NOT the badge — see `badge` below.
+   */
   label: string;
+  /**
+   * THE WORD ON THE TILE'S BADGE — the side, and only the side (r3 п.33). Владелец, дословно: «в
+   * истории на FABRIC RENDER в миниатюрах не писать род RENDER FRONT». Род здесь сказан ДВАЖДЫ до
+   * того, как его прочтут: шаг, на котором открыта история, уже сузил её до своего рода, и подпись
+   * под кадром печатает его словом (`render · front`). Третье повторение на самом кадре — шум, и
+   * оно съедало ширину ярлыка, у которого есть свой потолок в примитиве.
+   * ⚠ ЭТО ПОЛЕ, А НЕ `label.split()` У ВЫЗЫВАЮЩЕГО: два имени одного слота обязаны считаться там
+   * же, где считается его адрес, иначе они разойдутся молча — ровно как разошлись роды верстаков.
+   */
+  badge: string;
   /** The caption's word for the place: `front`, `cuff (2)`. */
   place: string;
   rev: number;
@@ -146,8 +161,10 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
            в `../bench-kinds`. */
         ref: { viewKey: view, kind, colorwayId: colorwayOf(row) },
         // The flat bench keeps its bare labels — the look every tile has always had; any other
-        // bench says its name, because «FRONT» alone now names two different slots.
+        // bench says its name, because «FRONT» alone now names two different slots. That is the
+        // PROSE name; the badge on the tile carries the side alone (r3 п.33).
         label: kind === 'flat' ? viewLabel(view) : `${kind} · ${viewLabel(view)}`,
+        badge: viewLabel(view),
         place: viewLabel(view),
         rev: row.slotRev ?? 0,
       };
@@ -157,7 +174,9 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
       // A minted id already names its bench AND its colourway; both are ignored/deferred to beside
       // a slot_id, so 0 here is «not stated» and lets the row's own value stand.
       ref: { slotId: row.id, kind: undefined, colorwayId: COLORWAY_NONE },
+      // Именованная деталь рода не носила никогда — её имя и есть её адрес.
       label: name,
+      badge: name,
       place: name,
       rev: row.slotRev ?? 0,
     };
@@ -261,16 +280,19 @@ function RunTile({
    * Прогон считается целиком: и `.glb`, и его растровая миниатюра приезжают с родом `threed`.
    */
   const threedFile = (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(url);
+  /** Плитка ткани: ни в один слот не встаёт и об этом не объясняется (r3 п.20, `footer` ниже). */
+  const patternTile = (picture.kind ?? '').trim().toLowerCase() === 'pattern' || rep === 'pattern';
   const galleryGroup = galleryIndex == null ? undefined : { key: galleryKey, index: galleryIndex };
 
   /**
-   * ONE BADGE — the mock-up's top-left tag. A plate a slot reads wears its SIDE (a fact); a sheet
-   * wears `N views`; a picture standing nowhere wears nothing. ⚠ NOT `ghost_view`: «A guess, never
-   * a fact» by contract, and a plate STANDING in front and a plate the machine merely guessed as
-   * front must not wear the same word (F-17). The guess is kept where it is useful — as the ORDER
-   * of the slot picker below.
+   * ONE BADGE — the mock-up's top-left tag. A plate a slot reads wears its SIDE and nothing else
+   * (r3 п.33 — the bench's own name lives in the prose, `inSlot.label`); a sheet wears `N views`;
+   * a picture standing nowhere wears nothing. ⚠ NOT `ghost_view`: «A guess, never a fact» by
+   * contract, and a plate STANDING in front and a plate the machine merely guessed as front must
+   * not wear the same word (F-17). The guess is kept where it is useful — as the ORDER of the slot
+   * picker below.
    */
-  const badge = composite ? `${facts.views.length} views` : inSlot ? inSlot.label : undefined;
+  const badge = composite ? `${facts.views.length} views` : inSlot ? inSlot.badge : undefined;
   const place = composite
     ? `sheet of ${facts.views.length}`
     : inSlot
@@ -279,6 +301,11 @@ function RunTile({
 
   // `flat · front` — the mock-up's `picName`. The address (`run 7 · b`), the provenance and the
   // composite tail ride in the title: the row already says which run, and the caption is one line.
+  //
+  // ⚠ У ПЛИТКИ ТКАНИ ВТОРОЙ ПОЛОВИНЫ НЕТ (r3 п.20, вторая половина того же пункта). «pattern · not
+  // standing» — то же самое утверждение, что и снятая фраза «стоит не в слоте», сказанное мельче:
+  // паттерн НЕ СТОИТ НИГДЕ ПО УСТРОЙСТВУ, и «не стоит» под каждым кадром ленты — это не факт о
+  // работе, а повторение определения. Остаётся род, который на смешанной ленте ещё различает кадры.
   const caption = (
     <>
       <Text
@@ -287,7 +314,7 @@ function RunTile({
         className='mt-1 truncate'
         title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}`}
       >
-        {word} · {place}
+        {patternTile && !inSlot ? word : `${word} · ${place}`}
       </Text>
       {fitMismatch && (
         // Слово, а не только цвет: система обязана читаться в монохроме, и «≠» здесь несёт смысл
@@ -376,10 +403,17 @@ function RunTile({
         unmark
       </Button>
     );
-  } else if (!composite) {
+  } else if (!composite && !patternTile) {
     // NO SLOT PICKER UNDER A COMPOSITE, AND THAT IS THE RULE: a slot holds one view and that file
     // holds several, so its only door is the split in the corner. `rep` — the RUN'S kind — is
     // load-bearing (E-12): a recolour's outputs say «render» on the wire.
+    // ⚠ И НИ ПИКЕРА, НИ ФРАЗЫ ПОД ПЛИТКОЙ ПАТТЕРНА (r3 п.20). Владелец, дословно: «в истории на
+    // PATTERN убрать текст a repeating tile stands in no slot — it is cloth, not a view». Пикер
+    // рисовал на её месте объяснение, почему двери нет, — по общему правилу волны «никогда не
+    // отсутствие, никогда мёртвый орган». Правило верно там, где человек ИЩЕТ дверь; здесь он её
+    // не ищет: шаг называется PATTERN, и ни одна плитка на нём в слот не встаёт, так что фраза
+    // повторялась под КАЖДЫМ кадром ленты, одна и та же. Объяснение живёт там, где оно ещё нужно,
+    // — у 3D-кадра и у снимка на модели, где рядом СТОЯТ плитки, у которых дверь есть.
     // `min-h`, not `h`: one branch of the picker draws a phrase, not a control, and a fixed height
     // painted it over the next row's meta line (measured on beta, tab ALL, 1400 wide).
     footer = !disabled && (
@@ -1196,8 +1230,6 @@ export function GenerationHistory({
    * карточными. ⚠ `totalRuns > 0` в проверке живых — сторож против сервера, который агрегата не
    * считает вовсе: «0 − 0» тогда не должно читаться как «всё прочитано».
    */
-  const picturesIn = (rows: common_DesignRun[]) =>
-    rows.reduce((n, run) => n + (run.pictures ?? []).length, 0);
   const liveShown = visible.length;
   const liveFloor =
     more.hasMore && !(totalRuns > 0 && unfiltered.length >= totalRuns - archivedRuns);
@@ -1291,28 +1323,15 @@ export function GenerationHistory({
           </CalloutBox>
         )}
 
-        {/* ═══ THE LOADED ROW — что этот экран уже прочитал, и полка архива ═══════════════════════
-            `[3 PICTURES] loaded … [· 0 ARCHIVED ▸]`. СЕЛЕКТА KIND ЗДЕСЬ БОЛЬШЕ НЕТ (r2 п.27): род
-            задан шагом и не выбирается — см. `rep` выше. ПИЛЮЛИ ПРОГОНОВ ЗДЕСЬ ТОЖЕ НЕТ: после
-            того как число в шапке стало числом СВОЕГО РОДА, «1 of 1 run loaded» повторяло его теми
-            же цифрами — два органа об одном факте, ровно то, что п.23 отсюда и убирал. Осталось
-            то, чего шапка не говорит: сколько картинок под прочитанными строками. Дверь архива
-            несёт своё число сама. `data-rep-filter` остаётся якорем: по нему читают, каким родом
-            эта история сужена. */}
+        {/* ═══ THE SHELF DOOR — единственный орган этого ряда ═════════════════════════════════════
+            Здесь стоял ещё счётчик «[3 PICTURES] loaded». Владелец (r3 п.8), дословно: «6 PICTURES
+            loaded — не показывать». И это не только вкус: число картинок под прочитанными строками
+            — свойство ПАГИНАЦИИ, а не работы. Оно менялось само собой от нажатия «show all» или от
+            дочитывателя окна, ничего не сообщая о карточке, и стояло третьим числом подряд под
+            двумя, которые говорят о деле (счётчик прогонов в шапке и число архива на двери). Факт
+            не потерян: сколько картинок принёс прогон, видно в самой его строке.
+            `data-rep-filter` остаётся якорем: по нему читают, каким родом эта история сужена. */}
         <div data-rep-filter={rep} className='flex flex-wrap items-center gap-2'>
-          <span data-loaded-note className='flex flex-wrap items-center gap-2'>
-            <CountPill
-              n={picturesIn(visible)}
-              noun='picture'
-              title={
-                'the pictures under the rows this screen has actually read — the first page of the feed plus every continuation asked for' +
-                (more.hasMore ? '; the server has earlier pages this screen has not read yet' : '')
-              }
-            />
-            <Text size='nano' variant='label' component='span'>
-              loaded
-            </Text>
-          </span>
           <span className='ml-auto'>
             <Button
               variant='secondary'

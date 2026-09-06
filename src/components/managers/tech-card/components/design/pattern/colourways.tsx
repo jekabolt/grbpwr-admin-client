@@ -1,45 +1,24 @@
-import type { common_AdminColorwayRef } from 'api/proto-http/admin';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
 import { findPantone } from 'components/managers/tech-card/components/pantone-swatches';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useMemo, type JSX } from 'react';
+import { type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import { archivedRef, colorwayLabel } from '../colorway-picker';
-import { EmptyState } from '../core';
 import { Swatch } from '../render/field-row';
-import { colourwayHex, patternColourKey, pickableColourways, type PatternColour } from './model';
-import { GoToStep } from './organs';
+import { patternColourKey, type PatternColour } from './model';
 
 /**
- * TWO ORGANS ABOUT COLOUR ON THIS STEP, AND THEY ARE NOT THE SAME QUESTION:
+ * ОДИН ОРГАН О ЦВЕТЕ НА ЭТОМ ШАГЕ, И ЭТО ВХОД ПРОГОНА, А НЕ ЗАПИСЬ О ПРОДУКТЕ.
  *
- *   · COLOUR is an INPUT of the generation — a free reference that binds this card to nothing
- *     (`PatternColourRow` below);
- *   · WORN BY is a LINK from a finished tile to a colourway of the card, read off the shelf
- *     (`WornByChips`), and it is drawn as chips because a link is READ, not seen.
+ * Их было два: COLOUR (свободная ссылка, ни к чему не обязывающая) и WORN BY (связь готовой
+ * плитки с колорвеем карточки). Второй снесён владельцем в r3 (п.18) — разбор в конце файла.
  *
  * ⚠ NO COLOURWAY IS PICKED ON CREATION (owner, E-1). At the time of the first generations the
- * card usually has no colourways at all; the binding lives under each tile on the shelf and is
- * corrected after the fact — otherwise the tiles made first would be orphans forever.
+ * card usually has no colourways at all.
  */
 
-/** The card's colourways, once per screen; every organ below takes the list as a prop. */
-export function usePatternColourways(techCardId: number): {
-  refs: common_AdminColorwayRef[];
-  loading: boolean;
-} {
-  const { data, isLoading } = useTechCard(techCardId);
-  const refs = useMemo(
-    () => (data?.colorways ?? []).filter((c) => (c.colorwayId ?? 0) > 0),
-    [data],
-  );
-  return { refs, loading: isLoading };
-}
-
+/* `usePatternColourways` СНЕСЁН ВМЕСТЕ С ЧИПАМИ (п.18): он был ЕДИНСТВЕННЫМ читателем
+   `useTechCard` на этом шаге и держался только ради списка колорвеев под плиткой. */
 /** Экранный цвет ссылки: свой hex, а если его нет — приближение из списка пантонов. */
 export function colourSwatchHex(colour: PatternColour): string {
   return colour.hex.trim() || findPantone(colour.code)?.hex || '';
@@ -194,105 +173,19 @@ export function PatternColourRow({
   );
 }
 
-/**
- * WORN BY — the chips of a shelf tile. One chip per live colourway (the archived one only while
- * the tile wears it); the one worn is filled and `aria-pressed`; a click binds, a click on the
- * worn one unbinds. The tail names the state in a second way: the worn colourway's swatch, or the
- * pill `not bound`.
- *
- * ⚠ A COLOURWAY WEARS ONE FABRIC, and that is the server's invariant, not our caution: the column
- * is one, and assigning X to N is executed in ONE transaction that takes N off every other asset
- * of the card. The client does not imitate it and sends no second call; the tile that lost its
- * colourway reads `not bound` after the band refetches. The chip's title says so, at the one place
- * the pointer rests before the choice.
- *
- * A DELETED colourway leaves the column pointing at a row that is gone; the band still says the
- * number. It is drawn as a chip `#42 (deleted)` — worn, so it can be taken off — rather than
- * silently reset: fixing a server fact on mount would write to the base for the person, unasked.
- */
-export function WornByChips({
-  refs,
-  wornBy,
-  onBind,
-  disabled,
-  pending,
-  loading,
-  techCardId,
-}: {
-  refs: readonly common_AdminColorwayRef[];
-  wornBy: number;
-  onBind: (colorwayId: number) => void;
-  disabled?: boolean;
-  pending?: boolean;
-  /** The card's colourways are still on their way: say nothing definite yet. */
-  loading?: boolean;
-  techCardId: number;
-}): JSX.Element {
-  const list = pickableColourways(refs, wornBy, archivedRef);
-  /* «Deleted» is a claim about the server, and it is made only once the list has actually
-     arrived — before that a bound tile would flash `(deleted)` on every mount. */
-  const orphan = !loading && wornBy > 0 && !list.some((c) => (c.colorwayId ?? 0) === wornBy);
-  if (loading && !list.length) {
-    return (
-      <ChipRow>
-        <Pill title='loading the colourways of this card'>…</Pill>
-      </ChipRow>
-    );
-  }
-  if (!list.length && !orphan) {
-    return (
-      <div data-worn-by-empty=''>
-        <EmptyState
-          action={<GoToStep kind='render' label='fabric render ›' techCardId={techCardId} />}
-        >
-          no colourways yet · this tile can be bound later
-        </EmptyState>
-      </div>
-    );
-  }
-  const worn = list.find((c) => (c.colorwayId ?? 0) === wornBy);
-  return (
-    <ChipRow>
-      {list.map((c) => {
-        const cid = c.colorwayId ?? 0;
-        const on = cid === wornBy;
-        const label = colorwayLabel(c);
-        return (
-          <Chip
-            key={cid}
-            data-bind-colourway={cid}
-            selected={on}
-            pressed={on}
-            disabled={disabled || pending}
-            title={
-              on
-                ? `unbind from ${label}`
-                : `bind to ${label} — a colourway wears one fabric, so this takes it off whatever else wore it`
-            }
-            onClick={() => onBind(on ? 0 : cid)}
-          >
-            {label}
-            {archivedRef(c) ? ' (archived)' : ''}
-          </Chip>
-        );
-      })}
-      {orphan && (
-        <Chip
-          data-bind-colourway={wornBy}
-          selected
-          pressed
-          disabled={disabled || pending}
-          title='this colourway was deleted — the tile still names it; click to take it off'
-          onClick={() => onBind(0)}
-        >
-          {`#${wornBy} (deleted)`}
-        </Chip>
-      )}
-      {worn ? (
-        <Swatch hex={colourwayHex(worn)} size={18} title={colorwayLabel(worn)} />
-      ) : (
-        <Pill data-not-bound=''>not bound</Pill>
-      )}
-    </ChipRow>
-  );
-}
+/* ═══ `WornByChips` СНЕСЁН ЦЕЛИКОМ ВМЕСТЕ СО СВОИМ ВЫЗОВОМ (владелец, r3 п.18) ═══════════════════
+   Дословно: «TILES ON THIS CARD: никакой связи с колорвеями — снять селектор WORN BY и пилюлю NOT
+   BOUND; SetDesignAssetColorway из этого экрана не звать».
+
+   ЧТО ИМЕННО УШЛО, ЧТОБЫ ЭТО НЕ ПРОЧЛИ ПОТОМ КАК СЛУЧАЙНУЮ ПОТЕРЮ: ряд чипов колорвеев под каждой
+   плиткой полки, пилюля `not bound`, свотч надетого колорвея, чип `#N (deleted)` для строки,
+   указывающей на удалённый колорвей, и пустое состояние «no colourways yet · this tile can be
+   bound later» с дверью на FABRIC RENDER. Вместе с ними ушёл ЕДИНСТВЕННЫЙ на этом шаге вызов
+   `SetDesignAssetColorway` и запрос `GetTechCard` (`usePatternColourways`), который стоял только
+   ради этих чипов.
+
+   ⚠ СВЯЗЬ НЕ УДАЛЕНА, УДАЛЁН ЕЁ ОРГАН ЗДЕСЬ. Колонка `design_asset.colorway_id` жива, сервер
+   по-прежнему держит инвариант «колорвей носит одну ткань», и палитра FABRIC RENDER читает эту
+   связь (`fabric of`). Владелец сказал, что решается она на оси колорвеев, а не на экране, где
+   плитку ДЕЛАЮТ: на момент первых генераций колорвеев у карточки обычно нет вовсе, и селектор
+   стоял пустым под каждой плиткой. Возвращать его сюда — только с ответом на п.29/п.41. */

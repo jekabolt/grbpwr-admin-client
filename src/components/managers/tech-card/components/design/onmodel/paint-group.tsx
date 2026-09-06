@@ -4,6 +4,7 @@ import type {
   common_DesignColourRecipe,
 } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { Button } from 'ui/components/button';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, type JSX, type ReactNode } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -14,33 +15,35 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
-import { ColourPicker } from '../assets/colour-picker';
-import { ASSETS_PER_CARD_MAX, ASSET_FABRIC, clothShelf, normaliseHex } from '../assets/model';
+import { PantonePicker } from '../../pantone-picker';
+import { findPantone } from '../../pantone-swatches';
+import { ASSETS_PER_CARD_MAX, ASSET_FABRIC, clothShelf } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { COLORWAY_NONE } from '../bench-kinds';
 import { archivedRef, colorwayLabel as nameOfColorway } from '../colorway-picker';
-import { EmptyState, Reason } from '../core';
-import { hexIsPaintable } from '../render/model';
+import { EmptyState, GROUP_GAP, Reason } from '../core';
 import type { PaintDraft } from './drafts';
-import {
-  flatColours,
-  paintModeWord,
-  type ClothChoice,
-  type OnModelPaint,
-  type OnModelShot,
-} from './model';
+import { paintModeWord, type ClothChoice, type OnModelPaint } from './model';
 
 /**
- * ═══ WHAT IT IS REPAINTED IN — three mutually exclusive answers in ONE group ═══════════════════
+ * ═══ WHAT IT IS REPAINTED IN — A CLOTH, A COLOUR, OR BOTH (r3 п.43) ═══════════════════════════
  *
- * The prototype's `omTarget`: the shelf of this card's cloths as picture tiles (corner CLOTH, mark
- * IN), the door `+ make a new cloth`, then «OR A FLAT COLOUR» — colour tiles (corner COLOUR) and
- * the picker for a colour the card does not know yet — then «COLOURWAY», the link written on the
- * picture that comes back. Exclusivity is STATE (`useOnModelPaint`), not click discipline.
+ * ⚠ «ONE OF THREE» IS GONE, BY NAME. The owner: «ткань и цвет вместе — не „одно из"». The two
+ * axes were exclusive by STATE (`useOnModelPaint` wiped one when the other was touched) on the
+ * prototype's grammar alone; the server takes them together and has always had a sentence for the
+ * pair — «re-clothed in nylon twill, re-tinted to 18-1248 TCX». Nothing enforces a choice now, and
+ * the group pill says which axes are stated.
  *
- * WITHOUT A SHOT THERE IS NOTHING HERE TO CLICK. The paint is kept on the shot; showing live tiles
- * over an empty slot would take a click that has nowhere to be written. The group then says so in
- * one line and waits.
+ * ⚠ THE COLOUR IS A PANTONE REFERENCE, AND THE REFERENCE IS THE DESCRIPTION (r3 п.43/23:
+ * «пантон и есть описание»). What stood here — a grid of the card's known hex tiles PLUS a free
+ * hue picker with a hex field — was two doors onto one field, and neither said anything a
+ * dyehouse could act on. One door replaces them: the studio's own `PantonePicker`, the same organ
+ * the pattern step and the BOM sheet use, searched by code or by colour name. The swatch beside it
+ * is a PREVIEW, not a second door: it has no click of its own.
+ *
+ * WITHOUT A SHOT THERE IS NOTHING HERE TO CLICK. The paint is a property of the run; showing live
+ * tiles over an empty strip would take a click that has nowhere to be written. The group then says
+ * so in one line and waits.
  *
  * «MAKE A NEW CLOTH» IS THE PRODUCT'S OWN DOOR, NOT A DETOUR. The prototype sends the person to
  * FABRIC RENDER to build a texture and come back; this admin already makes a cloth from a picture
@@ -48,19 +51,14 @@ import {
  * writes — so the chip opens the library, the picture lands on the shelf as `cloth N` and is
  * picked as the paint the moment the server answers. `pending` is the mid-flight pill.
  *
- * THE COLOURWAY — CHIPS THAT BIND AND UNBIND, OVER THE COMPOSER'S ONE STATE. The mock-up draws
- * the card's colourways as a row of chips under «COLOURWAY» (`colourwayChips(s.colorwayId,
- * 'om:way')`: the bound one is filled, a click on it unbinds, a click on another binds, an
- * archived name shows only while it is the bound one). The studio still has ONE colourway STATE —
- * `useColorwayChoice` in `studio-tab.tsx`, the number the select on the rail also writes — and
- * the chips are a second DOOR to that one setter (`onColorwayChange`), never a second copy of the
- * number: the group holds nothing, and a click here and a pick on the rail land in the same place.
- * Without the setter (a composer that did not hand it in) the group prints the binding and says
- * where it is changed, as it did before the chips. It is NOT SENT to the model: it becomes the
- * `colorway_id` of the run, i.e. the name the returned picture is filed under.
+ * THE COLOURWAY — CHIPS THAT BIND AND UNBIND, OVER THE COMPOSER'S ONE STATE. One chip per
+ * colourway of the card, the bound one filled; a click on the bound one unbinds, a click on
+ * another binds, an archived name is offered only while it is the one bound. The studio still has
+ * ONE colourway STATE — `useColorwayChoice` in `studio-tab.tsx`, the number the select on the rail
+ * also writes — and the chips are a second DOOR to that one setter (`onColorwayChange`), never a
+ * second copy of the number. It is NOT SENT to the model: it becomes the `colorway_id` of the run,
+ * i.e. the name the returned pictures are filed under.
  */
-
-const SQUARE = '1/1';
 
 /**
  * THE NAME OF A NEW CLOTH — the palette's rule, spelled once more because the palette keeps its
@@ -104,23 +102,27 @@ function ClothFace({ choice, on }: { choice: ClothChoice; on: boolean }): JSX.El
   );
 }
 
-/** The square face of a flat colour: a solid fill — the one thing the tile is picked for. */
-function ColourFace({ hex, on, dim }: { hex: string; on: boolean; dim?: boolean }): JSX.Element {
+/**
+ * THE SWATCH BESIDE THE PICKER — A PREVIEW, NOT A DOOR. It carries no click: the reference is
+ * picked in one place, and a square that also opened the picker would be the second button for
+ * one thing this round was asked to remove. A reference the swatch list cannot colour (a
+ * dyehouse's own number) shows the striped ground and its code, which is the truth about it.
+ */
+function ColourSwatch({ hex, code }: { hex: string; code: string }): JSX.Element {
   return (
     <span
-      className={`relative block aspect-square w-full overflow-hidden ${dim ? 'opacity-45' : ''}`}
-      style={{ background: hex }}
-    >
-      <Corner at='bl'>colour</Corner>
-      {on && <Corner at='tr'>in</Corner>}
-    </span>
+      aria-hidden
+      data-om-swatch={code || 'none'}
+      className='block size-14 shrink-0 border border-borderColor'
+      style={hex ? { background: hex } : PLACEHOLDER_SURFACE}
+    />
   );
 }
 
 export function PaintGroup({
   band,
   techCardId,
-  shot,
+  hasShots,
   paint,
   draft,
   choices,
@@ -134,7 +136,8 @@ export function PaintGroup({
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
-  shot: OnModelShot | null;
+  /** Whether the strip carries anything at all — the paint is a property of the RUN, not of a slot. */
+  hasShots: boolean;
   paint: OnModelPaint;
   draft: PaintDraft;
   /** The shelf, already judged against the shot (`clothChoices`): a cloth that IS the shot is blocked. */
@@ -153,7 +156,6 @@ export function PaintGroup({
   const writes = useAssetWrites(techCardId);
   const { showMessage } = useSnackBarStore();
   const shelf = useMemo(() => clothShelf(band), [band]);
-  const known = useMemo(() => flatColours(band), [band]);
   const totalAssets = (band.assets ?? []).length;
   const full = totalAssets >= ASSETS_PER_CARD_MAX;
   const fullReason = `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets · take a cloth off the shelf on FABRIC RENDER first`;
@@ -165,15 +167,15 @@ export function PaintGroup({
     (c) => !archivedRef(c) || (c.colorwayId ?? 0) === colorwayId,
   );
 
-  if (!shot) {
+  if (!hasShots) {
     return (
       <div id='design-onmodel-paint' data-om-paint='waiting'>
-        <GroupLabel action={<Pill tone='mut'>waiting for a shot</Pill>}>
+        <GroupLabel className={GROUP_GAP} action={<Pill tone='mut'>waiting for a shot</Pill>}>
           what it is repainted in
         </GroupLabel>
         <CalloutBox tone='note'>
           <Text size='micro' component='p' className='normal-case'>
-            the paint is kept on the shot · pick a photograph first
+            the paint travels with the run · put a photograph in the strip first
           </Text>
         </CalloutBox>
       </div>
@@ -181,11 +183,11 @@ export function PaintGroup({
   }
 
   const modeWord = paintModeWord(paint);
-  const hexOn = paint.mode === 'colour' ? normaliseHex(paint.hex) : '';
-  const typedHex = paint.mode === 'colour' ? paint.hex : '';
-  /** The picker's own tile shows the colour it holds only when no known tile already shows it. */
-  const pickerHolds = hexOn && !known.some((c) => c.hex === hexOn) ? hexOn : '';
-  const colourName = hexOn ? (known.find((c) => c.hex === hexOn)?.name ?? hexOn) : '';
+  const code = paint.code.trim();
+  /** The screen colour of the picked reference — the swatch list's own, or nothing to show. */
+  const swatchHex = paint.hex || findPantone(code)?.hex || '';
+  const clothOn = paint.assetId > 0;
+  const axes = [clothOn ? 'cloth' : '', code ? 'colour' : ''].filter(Boolean).join('+') || 'none';
 
   const newCloth = disabled ? (
     <Chip dashed disabled title='this card is read-only for you' data-om-door='new-cloth'>
@@ -235,14 +237,10 @@ export function PaintGroup({
   );
 
   return (
-    <div id='design-onmodel-paint' data-om-paint={paint.mode || 'none'}>
+    <div id='design-onmodel-paint' data-om-paint={axes}>
       <GroupLabel
-        action={
-          <span className='flex flex-wrap items-center gap-1.5'>
-            <Pill tone={modeWord === 'nothing picked' ? 'mut' : 'ink'}>{modeWord}</Pill>
-            <Pill tone='mut'>one of three</Pill>
-          </span>
-        }
+        className={GROUP_GAP}
+        action={<Pill tone={modeWord === 'nothing picked' ? 'mut' : 'ink'}>{modeWord}</Pill>}
       >
         what it is repainted in
       </GroupLabel>
@@ -252,7 +250,7 @@ export function PaintGroup({
       ) : (
         <Tiles min={118}>
           {choices.map((choice) => {
-            const on = paint.mode === 'texture' && paint.assetId === choice.assetId;
+            const on = paint.assetId === choice.assetId;
             const shut = disabled || !!choice.blocked;
             return (
               <Tile
@@ -299,76 +297,47 @@ export function PaintGroup({
       </div>
 
       <GroupLabel
+        className={GROUP_GAP}
         action={
           <span className='flex flex-wrap items-center gap-1.5'>
-            {colourName ? <Pill tone='ink'>{colourName}</Pill> : <Pill tone='mut'>no colour</Pill>}
+            {code ? <Pill tone='ink'>{code}</Pill> : <Pill tone='mut'>no colour</Pill>}
             <Pill tone='ink'>goes to the model</Pill>
           </span>
         }
       >
-        or a flat colour
+        and a colour
       </GroupLabel>
 
-      <Tiles min={118}>
-        {known.map((c) => {
-          const on = hexOn === c.hex;
-          return (
-            <Tile
-              key={c.hex}
-              selected={on}
-              pressed={on}
-              title={on ? `take the colour off · ${c.name}` : `paint in ${c.name}`}
-              onClick={disabled ? undefined : () => draft.toggleColour(c.hex)}
-              media={<ColourFace hex={c.hex} on={on} />}
-              name={c.name}
-              sub={c.hex}
-            />
-          );
-        })}
-        {/* THE PICKER'S TILE — the door to a colour this card does not know yet. The same picker
-            as the palette's (square, hue bar, hex field, dropper, the card's recipes as chips);
-            only the FACE is a tile here. Empty it is the striped «+ colour». */}
-        <div
-          className={`flex h-full min-w-0 flex-col items-stretch border bg-bgColor p-1.5 ${
-            pickerHolds ? 'border-2 border-textColor' : 'border-borderColor'
-          }`}
-          data-om-colour-picker={pickerHolds || 'empty'}
-        >
-          <ColourPicker
-            hex={typedHex}
+      {/* ONE DOOR, AND THE SWATCH IS NOT A SECOND ONE. The reference names the colour the way a
+          dyehouse names it; the square shows what that number looks like on a screen, which is an
+          approximation and never the authority. */}
+      <div className='flex flex-wrap items-center gap-3' data-om-colour={code || 'none'}>
+        <ColourSwatch hex={swatchHex} code={code} />
+        <div className='flex min-w-0 flex-col items-start gap-1'>
+          <PantonePicker
+            name='onmodel-paint'
+            value={code}
             disabled={disabled}
-            recent={known.map((c) => ({ hex: c.hex, code: c.name }))}
-            label='pick a colour of your own'
-            onPick={(next) => draft.setColour(next)}
-            onPickRecent={(next) => draft.setColour(next)}
-            face={
-              pickerHolds ? (
-                <ColourFace hex={pickerHolds} on />
-              ) : (
-                <span
-                  data-colour-swatch
-                  style={{ ...PLACEHOLDER_SURFACE, aspectRatio: SQUARE }}
-                  className={`${placeholderClass({ dashed: true })} w-full`}
-                >
-                  + colour
-                </span>
-              )
-            }
+            label='pick a pantone'
+            onPick={(next) => draft.setColour(findPantone(next)?.hex ?? '', next)}
           />
-          <Text size='micro' className='mt-1 truncate font-bold uppercase'>
-            {pickerHolds ? 'your colour' : 'a new colour'}
-          </Text>
-          <Text size='micro' variant='label' className='truncate'>
-            {pickerHolds
-              ? pickerHolds
-              : typedHex && !hexIsPaintable(typedHex)
-                ? `${typedHex} · not a colour yet`
-                : 'hex · dropper · picker'}
+          <Text size='nano' variant='label' component='span' className='normal-case'>
+            {code
+              ? swatchHex
+                ? `${code} · ${swatchHex.toUpperCase()} on screen`
+                : `${code} · no screen colour for this reference`
+              : 'searched by code or by colour name'}
           </Text>
         </div>
-      </Tiles>
+        {code && !disabled && (
+          <Button variant='secondary' size='xs' onClick={() => draft.setColour('', '')}>
+            take the colour off
+          </Button>
+        )}
+      </div>
 
       <GroupLabel
+        className={GROUP_GAP}
         action={
           <span className='flex flex-wrap items-center gap-1.5'>
             {colorwayLabel ? (
@@ -376,8 +345,9 @@ export function PaintGroup({
             ) : (
               <Pill tone='mut'>not bound</Pill>
             )}
+            {/* «OPTIONAL» СНЯТ: «not bound» уже говорит, что связи может не быть, а две пилюли об
+                одном читаются как два разных факта (та же правка, что п.14 у паттерна). */}
             <Pill tone='mut'>not sent</Pill>
-            <Pill tone='mut'>optional</Pill>
           </span>
         }
       >
@@ -391,7 +361,7 @@ export function PaintGroup({
            pulled from under them. Every chip is a real `<button type='button'>` (Chip with
            `onClick`), so the form is never submitted by a bind. */
         ways.length === 0 ? (
-          <EmptyState>no colourways yet · the shot keeps its own name</EmptyState>
+          <EmptyState>no colourways yet · the pictures keep their own name</EmptyState>
         ) : (
           <div
             className='flex flex-wrap items-center gap-1.5'

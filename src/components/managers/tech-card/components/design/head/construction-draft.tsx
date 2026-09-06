@@ -14,10 +14,13 @@ import Text from 'ui/components/text';
 
 import { bornBomLine, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
+import { readBench } from '../bench-slot';
 import { proposedColourways } from '../colourway-proposals-model';
 import {
   Counter,
   EmptyState,
+  GROUP_GAP,
+  GROUP_SEAM,
   InventoryLine,
   NotSent,
   WmgGroup,
@@ -29,13 +32,14 @@ import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
 import { calloutWords, type CalloutLike } from '../render/what-model-gets';
-import { newClientRequestId } from '../use-design-band';
+import { newClientRequestId, useDesignBand, useDesignWrites } from '../use-design-band';
 import {
   diffProposal,
   draftSays,
   parseConstructionDraft,
   wordDiff,
   type ConstructionDraft,
+  type DetailSuggestion,
   type FormSnapshot,
   type ProposalRow,
 } from './construction-draft-model';
@@ -249,6 +253,22 @@ export function ConstructionDraft({
   const draftIdea = useDraftDesignIdea(techCardId);
   const [inspecting, setInspecting] = useState(false);
 
+  /* ═══ ФЛЭТ-ВЕРСТАК — ВТОРОЙ АДРЕСАТ ЧЕРНОВИКА (r3 п.6) ═══════════════════════════════════════
+     Предложенная деталь заводится СТРОКОЙ НА СЕРВЕРЕ, а не значением формы, поэтому органу нужны
+     две вещи, которых у него до сих пор не было: полоса (какие детали уже стоят) и писатели
+     верстака.
+
+     ⚠ ЭТО НЕ ВТОРОЙ КЭШ. `useDesignBand` — `useQuery` с ключом НА КАРТОЧКУ (`designKeys.band`), и
+     соседний вызов из `mood-board.tsx`, которая монтирует этот блок, читает ТУ ЖЕ запись react-query:
+     ни второго запроса, ни второго состояния. Пропом полоса сюда не доезжает — `mood-board` её не
+     передаёт, а править чужой файл этот заход права не имеет.
+
+     `serverSpeaks` НЕСУЩИЙ: на бинаре без полосы верстака нет вовсе, и предлагать заводить в нём
+     детали значило бы рисовать дверь, за которой отказ. */
+  const { band, serverSpeaks } = useDesignBand(techCardId);
+  const writes = useDesignWrites(techCardId);
+  const benchDetails = useMemo(() => readBench(band, 'flat').details, [band]);
+
   // ЖУРНАЛ ЗАПОЛНЕНИЙ И ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ ЖИВУТ В МОДУЛЬНОМ СТОРЕ, А НЕ ЗДЕСЬ: студия
   // монтируется условно, и `useState` органа умер бы от одного захода на COLORWAYS и обратно —
   // вместе с единственной записью о том, что стояло на карточке ДО черновика (см. `use-draft-fills`).
@@ -396,6 +416,7 @@ export function ConstructionDraft({
           // Отметки и раскрытия строк — тоже про строки прошлого ответа.
           setTaken({});
           setShown({});
+          setWantedDetails({});
           // Колорвеи — ПРЕДЛОЖЕНИЕ, и они ждут клика: подтверждение создаёт продукт (B-25).
           setProposals(techCardId, proposedColourways(parsed));
           // …а поля карточки заполняются САМИ, и только пустые (B-14).
@@ -532,6 +553,30 @@ export function ConstructionDraft({
     } else if (t.kind === 'concept') {
       setValue('concept', fill.before, { shouldDirty: true });
       setStaged((prev) => (prev ? { ...prev, fingerprint: stampOf(fill.before) } : prev));
+    } else if (t.kind === 'detailSlot') {
+      // ВОЗВРАТ ЗАВЕДЁННОЙ ДЕТАЛИ — ТОТ ЖЕ ГЛАГОЛ, КОТОРЫМ ЕЁ СНОСИТ САМ ВЕРСТАК
+      // (`DeleteDesignDetailSlot`), а не второй способ сделать то же самое. Слот заводился ПУСТЫМ
+      // и живёт минуты, поэтому вопроса здесь нет: снести пустую деталь нечем навредить, а
+      // владелец сказал «если мы захотим то удалим» — не «спроси ещё раз». Если человек успел
+      // положить в неё картинку, СЕРВЕР ОТКАЗЫВАЕТ САМ (`slot_filled`: «slot N still holds a
+      // plate»), и отказ приезжает снекбаром общего писателя — второй такой же проверки на
+      // клиенте нет намеренно: она разошлась бы с серверной молча.
+      //
+      // ⚠ ЖУРНАЛ ЗАБЫВАЕТ ЗАПИСЬ ТОЛЬКО ПОСЛЕ УСПЕХА, И ЭТО ЕДИНСТВЕННОЕ МЕСТО В `undo`, ГДЕ ТАК.
+      // Четыре остальных возврата — записи в форму, они не отказывают; этот уходит на сервер и
+      // отказать может. Забыв запись сразу, мы стёрли бы `✕` у слота, который ОСТАЛСЯ стоять, —
+      // человек увидел бы «вернул» там, где не вернулось ничего. Ранний возврат нужен и по второй
+      // причине: снятие квитанций ниже относится к строкам предложения, а у слота их нет.
+      //
+      // ⚠ `mutateAsync` ПО ТОМУ ЖЕ ДОВОДУ, ЧТО У ЗАВЕДЕНИЯ: `undo all` зовёт этот возврат в цикле,
+      // и колбэки `mutate` у второго вызова стёрли бы колбэки первого — журнал забыл бы одну
+      // запись из двух, а вторую держал бы после успешного сноса.
+      writes.deleteDetailSlot
+        .mutateAsync(t.slotId)
+        .then(() => forget(techCardId, fill.id))
+        // Отказ уже сказан снекбаром общего писателя; здесь ловится сам промис.
+        .catch(() => {});
+      return;
     } else {
       const cur = (getValues('bomItems') ?? []) as { lineKey?: string }[];
       setValue('bomItems', cur.filter((r) => r.lineKey !== t.lineKey) as never, {
@@ -567,10 +612,21 @@ export function ConstructionDraft({
   // принятая строка обязана сама стать `same`, а рукописная правка соседнего поля — сама поменять
   // «add» на «replace», без единого пере-запроса.
   const formSnapshot: FormSnapshot = useMemo(
-    () => ({ fit, concept, details, bomItems }),
-    [fit, concept, details, bomItems],
+    () => ({
+      fit,
+      concept,
+      details,
+      bomItems,
+      // ⚠ `undefined`, А НЕ ПУСТОЙ МАССИВ, ПОКА СЕРВЕР НЕ ОТВЕТИЛ ПРО ВЕРСТАК. Разница читается в
+      // `isLive`: пустой массив — утверждение «слотов нет» и гасит записи журнала, отсутствие —
+      // «не знаем» и оставляет их. На бинаре без полосы у человека иначе исчезал бы `✕`.
+      detailSlots: serverSpeaks
+        ? benchDetails.map((s) => ({ id: s.id ?? 0, name: (s.detailName ?? '').trim() }))
+        : undefined,
+    }),
+    [fit, concept, details, bomItems, serverSpeaks, benchDetails],
   );
-  const { rows, missing } = useMemo(
+  const { rows, missing, details: detailIdeas } = useMemo(
     () => diffProposal(staged?.draft ?? null, formSnapshot),
     [staged, formSnapshot],
   );
@@ -605,8 +661,20 @@ export function ConstructionDraft({
   // заполненной карточке все предложения возвращаются `same`, а совет модель всё равно даёт — и
   // человек читал приглашение пролистать мимо ЕДИНСТВЕННОГО, что прогон произвёл. Это регрессия
   // самого восстановления: пока блок не рисовался, условие было верным.
+  /**
+   * ДЕТАЛИ, КОТОРЫХ НА ВЕРСТАКЕ ЕЩЁ НЕТ (r3 п.6) — единственное, что орган предлагает ЗАВЕСТИ.
+   * Уже стоящая деталь не рисуется чипом вовсе: чип, который ничего не изменит, — это кнопка,
+   * притворяющаяся работой.
+   */
+  const openDetails = useMemo(() => detailIdeas.filter((d) => !d.onBench), [detailIdeas]);
   const nothingNew =
-    rows.length > 0 && proposed === 0 && live.length === 0 && missing.length === 0;
+    rows.length > 0 &&
+    proposed === 0 &&
+    live.length === 0 &&
+    missing.length === 0 &&
+    // Предложенная деталь — это тоже «новое», и без неё пилюля «карточка уже это говорит» стояла
+    // бы прямо над единственным, что прогон произвёл (тот же довод, что у `missing` выше).
+    openDetails.length === 0;
 
   /* ═══ ОТМЕТКА, КОТОРАЯ НИЧЕГО НЕ ПИШЕТ (макет `_step-mood.js`: `mood:take` · `mood:mode` ·
      `mood:write`) ═══════════════════════════════════════════════════════════════════════════════
@@ -618,6 +686,13 @@ export function ConstructionDraft({
      изменился жест, не запись. */
   const [taken, setTaken] = useState<Record<string, 'replace' | 'append'>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
+  /**
+   * ОТМЕЧЕННЫЕ ДЕТАЛИ И ЧИСЛО ЗАПИСЕЙ В ПОЛЁТЕ (r3 п.6). Та же грамматика, что у `taken`: чип
+   * отмечает, пишет ОДНА кнопка внизу группы. Значение — просто `true`: у заведения слота нет
+   * второго режима (нечего «приписывать»), и карта режимов здесь врала бы про выбор, которого нет.
+   */
+  const [wantedDetails, setWantedDetails] = useState<Record<string, boolean>>({});
+  const [minting, setMinting] = useState(0);
   const [logOpen, setLogOpen] = useState(false);
   /** Квитанция записи по АДРЕСУ ЖУРНАЛА — пилюля `added` / `replaced` в строке WRITTEN. */
   const [receiptByFill, setReceiptByFill] = useState<Record<string, Receipt>>({});
@@ -686,6 +761,81 @@ export function ConstructionDraft({
     setLogOpen(true);
   }
 
+  /**
+   * ЗАВЕДЕНИЕ ОТМЕЧЕННЫХ ДЕТАЛЕЙ НА ФЛЭТ-ВЕРСТАКЕ (r3 п.6) — ОДНА КНОПКА НА ВСЮ ГРУППУ.
+   *
+   * ⚠ ЭТО ЗАПИСЬ НА СЕРВЕР, И КАЖДАЯ ЕЁ ЧАСТЬ — СЛОВО КОНТРАКТА, А НЕ ВКУС (инвариант 4):
+   *   · `viewKey: 'detail'` — ЕДИНСТВЕННОЕ написание минта; `slotId` НЕ ДОПИСЫВАЕТСЯ ВОВСЕ
+   *     (адрес — oneof, дописанный ноль = отказ всей записи);
+   *   · `kind: 'flat'` спеллится, а не опускается: род — вторая половина адреса, и писатель,
+   *     который его не называет, полагается на умолчание колонки вместо того, чтобы сказать, что
+   *     имел в виду;
+   *   · `colorwayId: 0` — у флэта колорвейной оси нет, положительный получает `colorway_forbidden`;
+   *   · `expectedSlotRev: 0` — строки ещё нет, и сервер отвергает любое другое число;
+   *   · `pictureId: 0` — СЛОТ РОЖДАЕТСЯ ПУСТЫМ. Ровно то, о чём просил владелец: на FLAT SLOTS
+   *     видно, какие крупные планы стоит снять, а картинку человек положит сам.
+   *
+   * ⚠ КАЖДАЯ ДЕТАЛЬ — СВОЯ ЗАПИСЬ И СВОЙ ИСХОД. Пачки на проводе нет, и делать вид, что она есть
+   * (один снекбар на N), значило бы прятать отказ по одной строке за успехом остальных: имя,
+   * которое сервер не принял, обязано остаться отмеченным, а принятые — уйти в журнал.
+   *
+   * ⚠ `mutateAsync`, А НЕ `mutate` С КОЛБЭКАМИ, И ЭТО ЗАМЕРЕННЫЙ ДЕФЕКТ, А НЕ ВКУС.
+   * `useMutation` — ОДИН обсервер, и у него ОДИН `currentMutation`. Второй `mutate` подряд
+   * ЗАМЕЩАЕТ первый: колбэки вызова, который замещён, не срабатывают ВООБЩЕ. Первая редакция
+   * этого органа так и была написана — цикл из `mutate(..., { onSuccess })`, — и стенд поймал
+   * ровно это: два слота на сервере завелись ОБА, а в журнал легла ОДНА запись, то есть у второго
+   * слота не было ни строки, ни `✕`. Промис `mutateAsync` привязан к СВОЕЙ строке мутации, поэтому
+   * ответ приходит тому вызову, который его и заказывал. Последовательно (`await` в цикле), а не
+   * пачкой: очередь из двух-трёх записей мгновенна, зато отказ на второй не гонится с третьей.
+   */
+  async function addDetailSlots() {
+    if (readOnly || !serverSpeaks) return;
+    const picked = openDetails.filter((d) => wantedDetails[d.id]);
+    if (!picked.length) return;
+    const at = hhmm();
+    setMinting((n) => n + picked.length);
+    // Раскрытие журнала открывается СРАЗУ: первая же запись уедет туда, и открывать его после
+    // ответа значило бы дёрнуть страницу под рукой человека.
+    setLogOpen(true);
+    for (const idea of picked) {
+      try {
+        const res = await writes.setBenchSlot.mutateAsync({
+          slot: { viewKey: 'detail', kind: 'flat', colorwayId: 0 },
+          pictureId: 0,
+          expectedSlotRev: 0,
+          newDetailName: idea.name,
+        });
+        const slotId = res.slot?.id ?? 0;
+        // Отметка снимается ТОЛЬКО у той, что прошла: неудачная остаётся отмеченной, и следующее
+        // нажатие пробует ровно её.
+        setWantedDetails((prev) => {
+          const next = { ...prev };
+          delete next[idea.id];
+          return next;
+        });
+        // ⚠ БЕЗ id ЗАПИСИ В ЖУРНАЛ НЕТ. Строка журнала — это обещание вернуть как было, а вернуть
+        // слот, адреса которого мы не знаем, нечем: `✕` печатался бы кнопкой, которая не может
+        // сработать. Слот при этом заведён, и он виден там, где живёт.
+        if (slotId > 0) {
+          record(techCardId, {
+            id: fillIdOf({ kind: 'detailSlot', slotId }),
+            target: { kind: 'detailSlot', slotId },
+            label: 'detail slot',
+            before: '',
+            after: idea.name,
+            at,
+          });
+        }
+      } catch {
+        // Отказ уже сказан снекбаром общего писателя (`useDesignWrites.onError`). Здесь ловится
+        // только сам промис: неперехваченный `mutateAsync` роняет unhandledrejection в консоль и
+        // ничего не добавляет к тому, что человек уже прочитал.
+      } finally {
+        setMinting((n) => Math.max(0, n - 1));
+      }
+    }
+  }
+
   /** «keep mine» — отклонить навсегда: строка уходит из TO DECIDE в DISMISSED, с дверью обратно. */
   function keepMine(row: ProposalRow) {
     setTaken((prev) => {
@@ -706,6 +856,10 @@ export function ConstructionDraft({
 
   const kept = decide.filter((r) => receipts[r.id] === 'dismissed');
   const takenRows = open.filter((r) => taken[r.id]);
+  // Считается ПО ЖИВОМУ СПИСКУ, а не по числу ключей в карте отметок: имя, которое уже уехало на
+  // верстак (или пришло `onBench` со следующим прогоном), обязано перестать считаться выбранным,
+  // иначе кнопка обещала бы завести слот, которого в списке больше нет.
+  const wantedDetailCount = openDetails.filter((d) => wantedDetails[d.id]).length;
   const hasAnswer = !!staged && !draftIdea.isPending;
   // Журнал живёт в сторе дольше ответа: раскрытие рисуется и без прогона, пока есть что вернуть.
   const showLog = hasAnswer || live.length > 0;
@@ -757,6 +911,13 @@ export function ConstructionDraft({
       title='construction draft'
       question='— what the model proposes'
       action={status}
+      /* ЗАЗОР «ШАПКА БЛОКА → СОДЕРЖИМОЕ» — ТЕМ ЖЕ ТОКЕНОМ, ЧТО У CARD DETAILS (r3 п.3/15/34/38).
+         Владелец: «больший отступ от хединга вниз к содержимому, как в CARD DETAILS». ЗАМЕРЕНО, а
+         не выведено: без него шов здесь был 10px против 20px эталона — `mb-2.5` шапки и `mt` от
+         `space-y-stack` СХЛОПЫВАЮТСЯ (соседние маржины в обычном потоке), и десять из десяти
+         оставалось десятью. `GROUP_SEAM` снимает `mb` у шапки и ставит `mt-5` следующему ребёнку,
+         поэтому схлопываться больше нечему. Своего размера здесь нет ни одного. */
+      className={GROUP_SEAM}
     >
       <div data-c19-draft=''>
         {/* ВОРОТА — ВИДИМОЙ ПОЛОСОЙ, а не только `title` погашенной двери: причина никогда не живёт
@@ -816,7 +977,7 @@ export function ConstructionDraft({
             НЕ написал: спор со словами человека. */}
         {hasAnswer && (
           <div className='mt-3 border-t-2 border-textColor pt-3' data-c19-draft-cut=''>
-            <GroupLabel flush action={<Counter n={open.length} noun='line' />}>
+            <GroupLabel flush className={GROUP_GAP} action={<Counter n={open.length} noun='line' />}>
               to decide
             </GroupLabel>
             {open.length > 0 ? (
@@ -879,6 +1040,89 @@ export function ConstructionDraft({
                 not argue with a single written field
               </EmptyState>
             )}
+
+            {/* ═══ ДЕТАЛИ ДЛЯ FLAT SLOTS (r3 п.6) ═══════════════════════════════════════════════
+                Владелец: «CONSTRUCTION DRAFT должен ТАКЖЕ предлагать DETAILS для FLAT SLOTS, чтобы
+                на STEP 2 FLAT было видно, какие потенциальные детали стоит показать на тех-карте».
+
+                ⚠ ОДИН ЖЕСТ И ОДНА КНОПКА, А НЕ ПО ДВЕ НА ИМЯ. Владелец в этом же круге: «не пихай
+                кучу кнопок в одном месте, не делай разные кнопки для одного и того же». Поэтому
+                грамматика взята у соседней очереди, а не придумана вторая: чип ОТМЕЧАЕТ, пишет одна
+                кнопка внизу группы — ровно как `take` и `write N taken ▸` над ней. Отдельного
+                «dismiss» у имени НЕТ намеренно: неотмеченное и есть оставленное (тот же довод, что
+                у `DecideRow`), а второй орган на каждый чип и был бы той самой кучей кнопок.
+
+                ⚠ ГРУППА СТОИТ ВНУТРИ РАЗДЕЛА `to decide`, А НЕ СВОИМ БЛОКОМ. Это тоже работа, ждущая
+                решения, и второй блок под тем же заголовком объявил бы черновик двумя органами.
+
+                ⚠ ЧТО ГОВОРИТ ПОДПИСЬ — ЭТО ПРОВЕРЯЕМАЯ ПРАВДА, А НЕ ОБОРОТ РЕЧИ. Сервер отдельного
+                списка деталей НЕ ДАЁТ (см. `DetailSuggestion` в модели), и имена здесь — это
+                НАЗВАННЫЕ МОДЕЛЬЮ АСПЕКТЫ, то есть узлы, которые она увидела на картинках. Строка
+                «the aspects the draft named» именно это и произносит: обещать «модель выбрала, что
+                снять крупным планом» было бы обещанием чужого решения. */}
+            {serverSpeaks && detailIdeas.length > 0 && (
+              <div className='mt-5' data-c19-draft-details={detailIdeas.length}>
+                <GroupLabel
+                  flush
+                  className={GROUP_GAP}
+                  action={<Counter n={openDetails.length} noun='detail' />}
+                >
+                  details for flat
+                </GroupLabel>
+                {openDetails.length > 0 ? (
+                  <>
+                    <Text size='micro' variant='label' component='p' className='mb-2.5'>
+                      the aspects the draft named · each can become an empty named slot under
+                      DETAILS on FLAT SLOTS, ready for its close-up
+                    </Text>
+                    <ChipRow>
+                      {openDetails.map((idea) => (
+                        <Chip
+                          key={idea.id}
+                          disabled={readOnly || minting > 0}
+                          selected={!!wantedDetails[idea.id]}
+                          pressed={!!wantedDetails[idea.id]}
+                          onClick={() =>
+                            setWantedDetails((prev) => {
+                              const next = { ...prev };
+                              if (next[idea.id]) delete next[idea.id];
+                              else next[idea.id] = true;
+                              return next;
+                            })
+                          }
+                          data-c19-draft-detail={idea.id}
+                          title={idea.why}
+                        >
+                          {idea.name}
+                        </Chip>
+                      ))}
+                    </ChipRow>
+                    <div className='mb-3 mt-2.5 flex justify-end'>
+                      <Button
+                        type='button'
+                        variant='main'
+                        size='sm'
+                        disabled={readOnly || minting > 0 || wantedDetailCount === 0}
+                        onClick={addDetailSlots}
+                        data-c19-draft-add-details={wantedDetailCount}
+                        aria-label={`add ${wantedDetailCount} empty detail slot${
+                          wantedDetailCount === 1 ? '' : 's'
+                        } to the flat bench`}
+                      >
+                        {minting > 0
+                          ? 'adding…'
+                          : `add ${wantedDetailCount} detail slot${wantedDetailCount === 1 ? '' : 's'} ▸`}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState className='py-1'>
+                    <span className='uppercase text-textColor'>every detail is already there</span> ·
+                    each aspect the draft named has a slot on FLAT SLOTS
+                  </EmptyState>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -897,7 +1141,9 @@ export function ConstructionDraft({
             onToggle={() => setLogOpen((v) => !v)}
             data-c19-draft-log=''
           >
-            <GroupLabel action={<Counter n={live.length} noun='write' />}>written</GroupLabel>
+            <GroupLabel className={GROUP_GAP} action={<Counter n={live.length} noun='write' />}>
+              written
+            </GroupLabel>
             {live.length > 0 ? (
               <div data-c19-journal=''>
                 {live.map((fill) => (
@@ -929,9 +1175,13 @@ export function ConstructionDraft({
                       data-c19-undo-all=''
                       onClick={() => {
                         for (const f of live) undo(f);
+                        // ⚠ ЗАВЕДЁННЫЕ ДЕТАЛИ ЗДЕСЬ НЕ ЗАБЫВАЮТСЯ: их возврат уходит на сервер и
+                        // забывает себя сам, ПОСЛЕ успеха. Стереть их отсюда значило бы убрать из
+                        // журнала слот, который сервер отказался снести, — и `✕` пропал бы вместе
+                        // со слотом, оставшимся на верстаке.
                         forgetMany(
                           techCardId,
-                          live.map((f) => f.id),
+                          live.filter((f) => f.target.kind !== 'detailSlot').map((f) => f.id),
                         );
                       }}
                     >
@@ -947,7 +1197,9 @@ export function ConstructionDraft({
               </EmptyState>
             )}
 
-            <GroupLabel action={<Counter n={kept.length} noun='line' />}>dismissed</GroupLabel>
+            <GroupLabel className={GROUP_GAP} action={<Counter n={kept.length} noun='line' />}>
+              dismissed
+            </GroupLabel>
             {kept.length > 0 ? (
               kept.map((row) => (
                 <KeptRow key={row.id} row={row} readOnly={readOnly} onReopen={() => putBack(row)} />
@@ -963,7 +1215,9 @@ export function ConstructionDraft({
                 предложение: у строк нет ни `take`, ни `✕` — на карточке нет поля, в которое
                 булавка легла бы сама. Ставить сюда дверь значило бы обещать действие, которого
                 организм не умеет. Ключ несёт позицию: `missing` нигде не дедуплицируется. */}
-            <GroupLabel action={<Counter n={missing.length} noun='hint' />}>hints</GroupLabel>
+            <GroupLabel className={GROUP_GAP} action={<Counter n={missing.length} noun='hint' />}>
+              hints
+            </GroupLabel>
             {missing.length > 0 ? (
               <div data-c19-draft-missing=''>
                 {missing.map((line, i) => (
@@ -1169,6 +1423,10 @@ function areaOf(target: FillTarget): string {
       return 'description';
     case 'slot':
       return 'material slots';
+    // Единственная область, которая живёт НЕ НА ЭТОМ ШАГЕ: слот детали стоит на FLAT SLOTS, и
+    // пилюля обязана это сказать — иначе человек ищет заведённое на мудборде.
+    case 'detailSlot':
+      return 'flat slots';
   }
 }
 

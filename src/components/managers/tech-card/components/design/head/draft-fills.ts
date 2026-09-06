@@ -45,7 +45,18 @@ export type FillTarget =
   | { kind: 'detail'; key: string }
   | { kind: 'fit' }
   | { kind: 'concept' }
-  | { kind: 'slot'; lineKey: string };
+  | { kind: 'slot'; lineKey: string }
+  /**
+   * ЗАВЕДЁННАЯ ДЕТАЛЬ ФЛЭТ-ВЕРСТАКА (r3 п.6) — АДРЕС НА СЕРВЕРЕ, А НЕ В ФОРМЕ.
+   *
+   * Пятая цель журнала и единственная, чей адресат — не поле тех-карты. Она здесь ровно по той же
+   * причине, по которой здесь четыре остальных: владелец сказал «и если мы захотим то удалим», а
+   * удалить можно только то, про что записано, ЧТО именно завели. `slotId` минтит сервер
+   * (`createDetailSlot`, ключ — uuid), поэтому адрес берётся ИЗ ОТВЕТА, а не выдумывается: имя
+   * адресом быть не может — две детали, названные человеком одинаково, законно остаются двумя
+   * слотами, и имя одной из них указывало бы на обе.
+   */
+  | { kind: 'detailSlot'; slotId: number };
 
 /** ЧТО СТОЯЛО И ЧТО СТАЛО — одна запись журнала. `before` — это вся возможность отката. */
 export type Fill = {
@@ -71,6 +82,8 @@ export function fillIdOf(target: FillTarget): string {
       return 'concept';
     case 'slot':
       return `slot:${target.lineKey}`;
+    case 'detailSlot':
+      return `detailSlot:${target.slotId}`;
   }
 }
 
@@ -98,6 +111,10 @@ export function currentOf(target: FillTarget, form: FormSnapshot): string {
       return normText(form.concept);
     case 'slot':
       return '';
+    // Слот верстака — ВЕЩЬ, а не текст, ровно как строка спецификации: скалярного «что стоит по
+    // этому адресу» у него нет, и живость его меряет `isLive` своей веткой.
+    case 'detailSlot':
+      return '';
   }
 }
 
@@ -117,6 +134,23 @@ export function isLive(fill: Fill, form: FormSnapshot): boolean {
   if (fill.target.kind === 'slot') {
     const key = fill.target.lineKey;
     return (form.bomItems ?? []).some((b) => b.lineKey === key);
+  }
+  /**
+   * ⚠ У СЛОТА ВЕРСТАКА МЕРА ТА ЖЕ, ЧТО У СТРОКИ СПЕЦИФИКАЦИИ (вещь, а не текст), НО ИСТОЧНИК —
+   * ПОЛОСА, А НЕ ФОРМА, И ОТСУТСТВИЕ ИСТОЧНИКА ЧИТАЕТСЯ КАК «ЕЩЁ ЖИВ».
+   *
+   * `detailSlots === undefined` значит «верстак не прочитан» (полосы нет, сервер её не отдаёт,
+   * ответ ещё в полёте), и на этом ответе запись обязана ОСТАТЬСЯ: пустой массив по умолчанию
+   * означал бы «слотов нет», журнал погасил бы свою же строку и человек лишился бы `✕` на слот,
+   * который стоит. Пустой массив, ПРИШЕДШИЙ ЯВНО, — это уже утверждение, и оно честно гасит.
+   */
+  if (fill.target.kind === 'detailSlot') {
+    // Идентификатор снимается ДО замыкания: сужение по `fill.target.kind` внутрь колбэка не
+    // доезжает (это свойство, а не переменная), и `some` читал бы союз целиком.
+    const slotId = fill.target.slotId;
+    const slots = form.detailSlots;
+    if (!slots) return true;
+    return slots.some((s) => (s.id ?? 0) === slotId);
   }
   return currentOf(fill.target, form) === normText(fill.after);
 }

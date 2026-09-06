@@ -1,4 +1,4 @@
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { create } from 'zustand';
 
 import { displayDetailName, readBench } from './bench-slot';
@@ -119,6 +119,13 @@ export type FilledFlatSlot = {
   label: string;
   /** Медиа плиты: им плита совпадает с референсом, если человек положил одну картинку дважды. */
   mediaId: number;
+  /**
+   * САМ ФАЙЛ ПЛИТЫ, а не только его id — ряд источников рисует плиты МИНИАТЮРАМИ (r3 п.5), и
+   * разрешать `mediaId` через библиотечную карту он не может: плита почти всегда родилась в
+   * полосе (прогон, кроп, рисунок), а в библиотечную карту такие файлы попадают только со
+   * следующим её перечтением. Адрес приезжает вместе с плитой — она его уже несёт.
+   */
+  media?: common_MediaFull;
 };
 
 /**
@@ -143,6 +150,7 @@ export function filledFlatSlots(band: GetDesignBandResponse): FilledFlatSlot[] {
       slotId: slot.id ?? 0,
       label: viewLabel(view),
       mediaId: slot.picture.media?.id ?? 0,
+      media: slot.picture.media,
     });
   }
   for (const slot of bench.details) {
@@ -151,6 +159,7 @@ export function filledFlatSlots(band: GetDesignBandResponse): FilledFlatSlot[] {
       slotId: slot.id ?? 0,
       label: displayDetailName(bench.details, slot),
       mediaId: slot.picture.media?.id ?? 0,
+      media: slot.picture.media,
     });
   }
   return out;

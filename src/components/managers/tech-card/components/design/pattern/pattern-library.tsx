@@ -1,6 +1,5 @@
 import type {
   GetDesignBandResponse,
-  common_AdminColorwayRef,
   common_DesignAsset,
   common_DesignRun,
 } from 'api/proto-http/admin';
@@ -19,19 +18,16 @@ import {
   assetFull,
   assetLabel,
   assetThumb,
-  assetWornBy,
 } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { runIsOnPage } from '../bench-kinds';
-import { colorwayLabel } from '../colorway-picker';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
-import { AskModal, Counter, EmptyState } from '../core';
+import { AskModal, Counter, EmptyState, GROUP_GAP } from '../core';
 import { useElapsed } from '../generation';
 import { formatMoney } from '../generation/money';
 import { PictureTile } from '../picture-tile';
 import { useDesignWrites } from '../use-design-band';
-import { WornByChips } from './colourways';
 import {
   assetOfMedia,
   nextPatternName,
@@ -78,8 +74,6 @@ function Card({
   techCardId,
   disabled,
   verdict,
-  colourways,
-  colourwaysLoading,
   autoRename,
   onRenameTaken,
 }: {
@@ -88,13 +82,11 @@ function Card({
   techCardId: number;
   disabled?: boolean;
   verdict: Verdict;
-  colourways: readonly common_AdminColorwayRef[];
-  colourwaysLoading?: boolean;
   /** `keep it` just filed this tile — open its name for the second thought right away. */
   autoRename?: boolean;
   onRenameTaken?: () => void;
 }): JSX.Element {
-  const { upsertAsset, deleteAsset, setAssetColorway } = useAssetWrites(techCardId);
+  const { upsertAsset, deleteAsset } = useAssetWrites(techCardId);
   const speaks = serverSpeaksDesign();
   const writesOff = !!disabled || !speaks;
 
@@ -112,8 +104,6 @@ function Card({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRename]);
 
-  const wornBy = assetWornBy(asset);
-  const worn = colourways.find((c) => (c.colorwayId ?? 0) === wornBy);
   const twin = renaming ? patternTwin(band, name, id) : undefined;
 
   /**
@@ -154,11 +144,7 @@ function Card({
   /* WHAT IS LOST WITH THE TILE — computed once, read by the question and by nothing else: the
      act itself only deletes the row. The picture is not among the losses: it goes back to
      «made earlier, not kept», and the sentence says so first. */
-  const losses = [
-    'its name',
-    mm ? `its ${mm} mm repeat` : '',
-    worn ? `the colourway ${colorwayLabel(worn).toUpperCase()}` : '',
-  ].filter(Boolean);
+  const losses = ['its name', mm ? `its ${mm} mm repeat` : ''].filter(Boolean);
   const lossPhrase =
     losses.length > 1
       ? `${losses.slice(0, -1).join(', ')} and ${losses[losses.length - 1]} are not kept with it.`
@@ -174,6 +160,44 @@ function Card({
           className='w-full'
           face={<TiledFace url={full} alt={label} />}
           gallery={{ src: full, thumbnail: thumb || full, type: 'image', alt: label }}
+          /* ═══ RENAME И ✕ — УГЛОВЫЕ ОРГАНЫ КАДРА (владелец, r3 п.19) ══════════════════════════
+             Дословно: «RENAME и ✕ — на картинку, не кнопками снизу». Оба стояли ПОД плиткой
+             отдельным рядом, то есть на сетке из десяти плиток внизу каждой висела пара кнопок —
+             двадцать органов, видимых всегда. Углы `PictureTile` тихие: они появляются по
+             наведению И по фокусу, а на устройстве без наведения видны всегда, и это тот же орган,
+             которым на соседних экранах студии режут, зумят и правят.
+             ⚠ ЯКОРЬ ПРОБЫ ПЕРЕЕХАЛ НА `aria-label`: угол примитива данных-атрибутов не принимает,
+             а заводить их ему ради одного экрана значило бы править общий орган под частный
+             случай. Имя при этом читаемое, а не служебное. */
+          onEdit={{
+            onClick: () => {
+              if (renaming) rename();
+              else {
+                setName(label);
+                setRenaming(true);
+              }
+            },
+            ariaLabel: renaming ? `save the new name of ${label}` : `rename ${label}`,
+            title:
+              writesOff
+                ? disabled
+                  ? 'this card is read-only for you — the library is card data'
+                  : 'this server does not answer the design routes'
+                : 'the prompt cites this fabric BY NAME, so «IMG_4471» reaches the model as the name of the cloth',
+            disabled: writesOff,
+            pending: upsertAsset.isPending,
+          }}
+          editLabel={renaming ? 'done' : 'rename'}
+          onRemove={{
+            onClick: () => setAsking(true),
+            ariaLabel: `delete ${label}`,
+            title: writesOff
+              ? disabled
+                ? 'this card is read-only for you — the library is card data'
+                : 'this server does not answer the design routes'
+              : `delete ${label}`,
+            disabled: writesOff,
+          }}
         >
           {/* THE VERDICT ON THE FACE, where it is seen. Solid for a wrap that closes, dashed for
               a join that shows; no red — red in this admin means loss. Absent when the run that
@@ -217,65 +241,53 @@ function Card({
         </Text>
       )}
 
-      {/* ─── worn by ───────────────────────────────────────────────────────────────────── */}
-      <div data-pattern-worn-by={id || undefined} className='flex min-w-0 flex-col gap-1'>
-        <Text size='nano' variant='label' tracking='label' component='span' className='uppercase'>
-          worn by
-        </Text>
-        <WornByChips
-          refs={colourways}
-          wornBy={wornBy}
-          disabled={writesOff}
-          pending={setAssetColorway.isPending}
-          loading={colourwaysLoading}
-          techCardId={techCardId}
-          onBind={(colorwayId) => setAssetColorway.mutate({ assetId: id, colorwayId })}
-        />
-      </div>
-
-      {/* ─── rename · ✕ ───────────────────────────────────────────────────────────────── */}
-      <div className='mt-auto flex flex-wrap items-center gap-1 pt-0.5'>
-        {writesOff ? (
-          <InertDoor
-            label='rename'
-            reason={
-              disabled
-                ? 'this card is read-only for you — the library is card data'
-                : 'this server does not answer the design routes'
-            }
-          />
-        ) : (
-          <Button
-            variant='secondary'
-            size='xs'
-            data-rename={id}
-            aria-expanded={renaming}
-            loading={upsertAsset.isPending}
-            onClick={() => {
-              if (renaming) rename();
-              else {
-                setName(label);
-                setRenaming(true);
+      {/* ⚠ РЯД КНОПОК ПОД ПЛИТКОЙ ОСТАЛСЯ ТОЛЬКО У КАДРА, КОТОРОГО НЕТ. Углы живут НА картинке, и
+          у строки без картинки вешать их некуда — а переименовать и удалить её надо тем более
+          (именно она чаще всего и есть ошибка). Это не второй способ сделать одно: у плитки с
+          кадром этого ряда нет вовсе. */}
+      {!full && (
+        <div className='mt-auto flex flex-wrap items-center gap-1 pt-0.5'>
+          {writesOff ? (
+            <InertDoor
+              label='rename'
+              reason={
+                disabled
+                  ? 'this card is read-only for you — the library is card data'
+                  : 'this server does not answer the design routes'
               }
-            }}
-            title='the prompt cites this fabric BY NAME, so «IMG_4471» reaches the model as the name of the cloth'
-          >
-            {renaming ? 'done' : 'rename'}
-          </Button>
-        )}
-        <span className='flex-1' />
-        {!writesOff && (
-          <Button
-            variant='secondary'
-            size='xs'
-            data-delete-asset={id}
-            aria-label={`delete ${label}`}
-            onClick={() => setAsking(true)}
-          >
-            ✕
-          </Button>
-        )}
-      </div>
+            />
+          ) : (
+            <>
+              <Button
+                variant='secondary'
+                size='xs'
+                data-rename={id}
+                aria-expanded={renaming}
+                loading={upsertAsset.isPending}
+                onClick={() => {
+                  if (renaming) rename();
+                  else {
+                    setName(label);
+                    setRenaming(true);
+                  }
+                }}
+              >
+                {renaming ? 'done' : 'rename'}
+              </Button>
+              <span className='flex-1' />
+              <Button
+                variant='secondary'
+                size='xs'
+                data-delete-asset={id}
+                aria-label={`delete ${label}`}
+                onClick={() => setAsking(true)}
+              >
+                ✕
+              </Button>
+            </>
+          )}
+        </div>
+      )}
 
       {renaming && (
         <div className='flex flex-col gap-0.5'>
@@ -346,21 +358,14 @@ export function PatternLibrary({
   disabled,
   live,
   hasSource,
-  onAttach,
-  colourways,
-  colourwaysLoading,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /** Live pattern runs, counted by the caller — one answer to «what is in flight» per screen. */
   live?: common_DesignRun[];
-  /** Is a source attached above? The empty shelf's door depends on it. */
+  /** Is a source attached above? The empty shelf's one line says what to do next. */
   hasSource: boolean;
-  /** Opens the same picker the source cell does. */
-  onAttach: () => void;
-  colourways: readonly common_AdminColorwayRef[];
-  colourwaysLoading?: boolean;
 }): JSX.Element {
   const { upsertAsset } = useAssetWrites(techCardId);
   const { setPictureSelected } = useDesignWrites(techCardId);
@@ -397,6 +402,7 @@ export function PatternLibrary({
   return (
     <>
       <GroupLabel
+        className={GROUP_GAP}
         action={
           <span data-tiles-count=''>
             <Counter n={assets.length} noun='tile' />
@@ -407,21 +413,16 @@ export function PatternLibrary({
       </GroupLabel>
 
       {assets.length === 0 && pending.length === 0 ? (
+        /* ═══ ПУСТАЯ ПОЛКА — ОДНА СТРОКА, БЕЗ ДВЕРИ (владелец, r3 п.17) ═════════════════════
+           Дословно: «пустое состояние TILES ON THIS CARD — без кнопки “ATTACH A PICTURE ›”».
+           Дверь вела в тот же пикер, что ячейка SOURCE PICTURE, стоящая на том же экране двумя
+           линейками выше и уже пустая с подписью `+ picture`: второй орган на тот же жест. Строка
+           при этом по-прежнему говорит, ЧТО делать дальше, — просто словами, а не кнопкой. */
         <div data-shelf-empty=''>
-          <EmptyState
-            action={
-              hasSource ? (
-                <Text size='micro' component='span' className='font-bold'>
-                  run GENERATE above
-                </Text>
-              ) : (
-                <Button variant='secondary' size='xs' onClick={onAttach} data-attach-picture=''>
-                  attach a picture ›
-                </Button>
-              )
-            }
-          >
-            no tile is kept on this card yet
+          <EmptyState>
+            {hasSource
+              ? 'no tile is kept on this card yet · run GENERATE above'
+              : 'no tile is kept on this card yet · fill SOURCE PICTURE above to make one'}
           </EmptyState>
         </div>
       ) : (
@@ -442,8 +443,6 @@ export function PatternLibrary({
               techCardId={techCardId}
               disabled={disabled}
               verdict={verdictOf.get(a.mediaId ?? 0)}
-              colourways={colourways}
-              colourwaysLoading={colourwaysLoading}
               autoRename={renameMedia > 0 && (a.mediaId ?? 0) === renameMedia}
               onRenameTaken={() => setRenameMedia(0)}
             />
@@ -456,7 +455,7 @@ export function PatternLibrary({
           until the door is pressed no render sees them. Absent when there are none. */}
       {unkept.length > 0 && (
         <>
-          <GroupLabel action={<Counter n={unkept.length} noun='tile' />}>
+          <GroupLabel className={GROUP_GAP} action={<Counter n={unkept.length} noun='tile' />}>
             made earlier, not kept
           </GroupLabel>
           {shelfFull && (

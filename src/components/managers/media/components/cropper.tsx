@@ -7,7 +7,6 @@ import {
   ReactNode,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -143,7 +142,6 @@ export const MediaCropper: FC<CropperInterface> = ({
   // открывался уже наполовину отрезанным, без единого слова об этом.
   const startAspect = lockedAspect ?? initialAspect;
 
-  const stageRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ w: 0, h: 0 });
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [rotation, setRotation] = useState(0);
@@ -183,8 +181,39 @@ export const MediaCropper: FC<CropperInterface> = ({
     };
   }, [selectedFile, reloadKey]);
 
-  useLayoutEffect(() => {
-    const el = stageRef.current;
+  /**
+   * ═══ СЦЕНА МЕРЯЕТСЯ, КОГДА ОНА ПОЯВИЛАСЬ, А НЕ КОГДА СМОНТИРОВАЛСЯ КОМПОНЕНТ ═════════════════
+   *
+   * ⚠ ЗДЕСЬ СТОЯЛ `useLayoutEffect(..., [])` С `if (!el) return`, И ЭТО БЫЛ ВЕЧНЫЙ «LOADING THE
+   * IMAGE» (владелец, r3 п.11: «выбрал картинку → сразу кроп → экран LOADING THE IMAGE навсегда»).
+   *
+   * ЗАМЕР НА СТЕНДЕ, а не догадка. `MediaRecropDialog` держит адрес источника в СВОЁМ состоянии и
+   * заполняет его эффектом ПОСЛЕ первой отрисовки (сначала прямой адрес, потом блоб). Значит на
+   * первом кадре `selectedFile === undefined`, и этот компонент выходит через `if (!selectedFile)
+   * return null` — сцены в документе нет вовсе. А хуки идут ВЫШЕ раннего возврата (иначе React
+   * #310), поэтому эффект с пустыми зависимостями отрабатывал ИМЕННО на том кадре: `stageRef.current`
+   * пуст, `return` — и наблюдателя больше не заводит никто. `stage` навсегда `{0,0}`, `disp` навсегда
+   * `null`, и ветка рисует «loading the image», хотя картинка загрузилась и её размеры уже стоят в
+   * подвале («SOURCE 600×600 · 1:1»). Замерено пробой `probe-pattern.mjs` (сцена F, стенд одного
+   * окна): дерево — `loading:false, frame:true`; тот же стенд на файле из HEAD — `loading:true,
+   * frame:false` при ИЗМЕРЕННОЙ в документе сцене 866 × 442. То есть коробка была, а состояния не
+   * было: дефект — в непроведённом измерении, а не в картинке и не в вёрстке.
+   *
+   * ⚠ И ЭТО НЕ ОДИН ЭКРАН. Кадр «`media` и `open` истинны в одном коммите» пишет `media/index.tsx`
+   * прямо в разметке (`open={!!recropping}`), то есть кроп из просмотрщика медиатеки висел так же.
+   * Шаг PATTERN такого кадра больше не производит (кроп открывается отдельным нажатием на углу), и
+   * снять причину только там значило бы починить симптом одного вызывающего.
+   *
+   * ПОЧЕМУ CALLBACK-REF, А НЕ `[selectedFile]` В ЗАВИСИМОСТЯХ. Зависимость лечит ЭТОТ путь, но
+   * повторяет ту же ставку: «к моменту эффекта узел уже в документе». Callback-ref вызывается самим
+   * React'ом ровно тогда, когда узел появился и когда он исчез, — то есть измерение привязано к
+   * СУЩЕСТВОВАНИЮ сцены, а не к номеру отрисовки, и следующий вызывающий с отложенным адресом не
+   * воскресит дефект.
+   */
+  const roRef = useRef<ResizeObserver | null>(null);
+  const stageRef = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
     if (!el) return;
     const read = () => {
       const r = el.getBoundingClientRect();
@@ -197,7 +226,7 @@ export const MediaCropper: FC<CropperInterface> = ({
     read();
     const ro = new ResizeObserver(read);
     ro.observe(el);
-    return () => ro.disconnect();
+    roRef.current = ro;
   }, []);
 
   // Поворот меняет не картинку, а КАДР: у повёрнутого исходника стороны меняются местами,

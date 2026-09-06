@@ -15,6 +15,7 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Toolbar } from 'ui/components/toolbar';
 import { InertDoor } from './design/bench-slot';
+import { GROUP_SEAM } from './design/core';
 import {
   BoardMovedPill,
   GoTo,
@@ -247,6 +248,16 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
       title='construction'
       question='· described aspect by aspect'
       action={<ConstructionAction techCardId={techCardId} />}
+      /* ЗАЗОР «ШАПКА БЛОКА → СОДЕРЖИМОЕ» — ТЕМ ЖЕ ТОКЕНОМ, ЧТО У CARD DETAILS (r3 п.3/15/34/38),
+         объявленным в `design/core`. ЗАМЕРЕНО: без него шов здесь 10px против 20px эталона —
+         `mb-2.5` шапки и `mt` от `space-y-stack` секции СХЛОПЫВАЮТСЯ (соседние маржины в обычном
+         потоке), и max(10,10) остаётся десятью.
+
+         ⚠ `GROUP_GAP` СЮДА НЕ ПРИМЕНЯЕТСЯ, И ЭТО НЕ ПРОПУСК: он живёт на `GroupLabel`, а в этом
+         блоке НИ ОДНОЙ линейки группы нет — список аспектов начинается прямо под шапкой. Завести
+         тут группу только ради того, чтобы было куда положить токен, значило бы придумать ярус,
+         которого владелец не просил. */
+      className={GROUP_SEAM}
     >
       <div className='space-y-2.5' data-c19-aspects=''>
       {/* СПИСОК И ЕГО ПОСЛЕДНИЙ, ПУСТОЙ РЯД — ОДИН СТОЛБИК. Дверь `+ aspect` стоит там, где

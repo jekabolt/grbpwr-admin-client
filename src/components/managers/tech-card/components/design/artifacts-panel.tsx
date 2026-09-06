@@ -42,15 +42,16 @@ import { ViewSwitch } from 'ui/components/view-switch';
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import {
   COLORWAY_NONE,
+  benchKindOf,
   cardOutputRows,
+  colorwayOf,
   refColorwayFor,
   runIsOnPage,
   runRepresentation,
-  serverStatesOutputs,
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
 import { CalloutRail } from './callout-rail';
-import { EMPTY_WORD } from './core';
+import { EMPTY_WORD, GROUP_GAP } from './core';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
 import { VectorModal } from './modals';
@@ -73,15 +74,16 @@ import {
 } from './render';
 import { pictureIsModel, threedResults } from './threed/media';
 import { ThreedModelModal } from './threed/model-modal';
-import {
-  DISPLAY_ONLY_NOT_STATED,
-  pictureIsDisplayOnly,
-  serverStatesDisplayOnly,
-  type WireUploadItem,
-} from './threed/wire';
+import { pictureIsDisplayOnly, type WireUploadItem } from './threed/wire';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
-import { SHEET_MIN_VIEWS, viewLabel } from './views';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
+import {
+  SHEET_MIN_VIEWS,
+  SILHOUETTE_VIEWS,
+  isSilhouetteView,
+  normaliseViewKey,
+  viewLabel,
+  type SilhouetteView,
+} from './views';
 import { isPictureHidden } from './visibility';
 
 /**
@@ -216,9 +218,13 @@ export const ARTIFACT_KINDS: { value: ArtifactKind; label: string; hint: string 
     hint: 'repeating tiles; print too, once they are in the card’s media',
   },
   {
+    /* H-39 — ПОДСКАЗКА НАЗЫВАЕТ ИСТОЧНИК, потому что источник у этого сегмента сузился: не «все
+       рендеры карточки», а те, что СТОЯТ В СЛОТАХ рендер-верстака (любого колорвея) плюс уже
+       принятые на карточку. Не сказать этого значило бы оставить человека гадать, почему вчерашний
+       выход прогона здесь не виден. */
     value: 'render',
     label: 'renders',
-    hint: 'coloured over the flats; prints too, once it is in the card’s media',
+    hint: 'the renders marked into the FABRIC RENDER slots, at any colourway — plus any already in the card’s media',
   },
   {
     value: 'threed',
@@ -330,6 +336,15 @@ export function runKindByMediaId(band: GetDesignBandResponse): Map<number, strin
  * unhidden picture of that kind on the loaded page — and the panel says WHICH of the two lists is
  * on screen, rather than letting «renders · 3» read as «three chosen renders» when nothing has
  * been chosen at all.
+ *
+ * ⚠ РЕНДЕРЫ ЭТОГО ЧИТАТЕЛЯ БОЛЬШЕ НЕ ЗОВУТ (H-39), и абзац выше их больше не описывает: сегмент
+ * `renders` собирается из рендер-верстака и медиа карточки, а не из выходов. Функция по-прежнему
+ * принимает `'render'` — типом и по построению, — но с этой волны ни один вызов с ним не приходит.
+ *
+ * ⚠ И «ПАНЕЛЬ ГОВОРИТ, КАКОЙ ИЗ ДВУХ СПИСКОВ НА ЭКРАНЕ» — ТОЖЕ БОЛЬШЕ НЕПРАВДА. Строка `· the
+ * chosen ones` / `· everything this card holds` снята целиком по слову владельца (H-40). Сужение
+ * до помеченных при этом ЖИВО и работает как работало; сказано о нём теперь только заголовком
+ * органа `un-select`, который его и снимает.
  */
 export function bandPlates(
   band: GetDesignBandResponse,
@@ -532,36 +547,64 @@ export function flatOutputRows(
 }
 
 /**
- * ═══ ПЛИТЫ РЕНДЕР-ВЕРСТАКА — ЧТО СТОИТ В FABRIC RENDER SLOTS (D-15) ══════════════════════════════
+ * ═══ ПЛИТЫ РЕНДЕР-ВЕРСТАКА — И ЭТО ВЕСЬ ИСТОЧНИК СЕГМЕНТА `renders` (H-39) ═══════════════════════
  *
- * Тот же верстак, который читает 3D (`threedSides`) и собирает сервер (`designSelectBench`), и по
- * той же функции (`benchSides`): лист показывает рендер-слоты, а не свой список «что мы считаем
- * рендерами». Скоуп — безколорвейный верстак (`COLORWAY_NONE`), единственный, который пишет
- * студия после E-16.
+ * Владелец, дословно: «в renders должны быть ТОЛЬКО размеченные рендеры (плиты рендер-верстака
+ * `band.bench` kind:'render', любой колорвей), не все выходы подряд».
+ *
+ * ═══ ЧТО ИМЕННО БЫЛО СЛОМАНО, И ПОЧЕМУ ЖАЛОБА ЗВУЧАЛА КАК «КАРТИНКИ НЕ ОТОБРАЖАЮТСЯ» ═══════════
+ *
+ * Читатель звался `benchSides(band, 'render', COLORWAY_NONE)` — то есть видел ТОЛЬКО безколорвейное
+ * ведро. Рендер-верстак колорвейный по построению (`benchScopesColorway('render')` истинно, и
+ * `side-row.tsx` пишет слот текущим `colorwayId`), поэтому на карточке, чьи рендеры размечены под
+ * колорвеем, этот читатель отдавал ПУСТО — а лист рисовал шесть пустых сторон во всю высоту кадра
+ * и уводил настоящие снимки за правый край ленты. Плиты были, видно их не было. Замерено пробой
+ * `probe-artifacts.mjs` (сцена R, `--base`): первая ячейка ряда — пустой слот, ни одной картинки в
+ * видимой части ленты.
+ *
+ * ЧИТАЕТСЯ ВЕСЬ ВЕРСТАК, ЛЮБЫМ КОЛОРВЕЕМ. Порядок — по стороне (`SILHOUETTE_VIEWS`), внутри
+ * стороны — по колорвею: ряд остаётся читаемым как ряд сторон, а второй колорвей встаёт рядом со
+ * своим соседом, а не в конце списка.
+ *
+ * ⚠ ИМЯ ОБЯЗАНО РАЗЛИЧАТЬ ДВА КОЛОРВЕЯ ОДНОЙ СТОРОНЫ. Два «FRONT» в одном ряду — это разметка не
+ * той картинки (тот же довод, что у `TILE 0` в `bandPlates`), поэтому колорвейная плита несёт имя
+ * колорвея: `FRONT · ROSSO`, а без читаемого имени — `FRONT · CW 3`.
  *
  * Плита, которая УЖЕ в медиа карточки, приходит отсюда карточной: документ старше верстака, и
  * сузить её до «bench» значило бы спрятать `✕` и пилюлю «on paper» у картинки, которая печатается.
  */
 export function renderBenchPlates(
-  sides: BenchSide[],
+  band: GetDesignBandResponse,
   onCard: Set<number>,
   already: Set<number>,
+  /** Имя колорвея для подписи, или пусто — тогда плита назовёт его номером. */
+  colourwayName: (colorwayId: number) => string,
 ): DocumentPlate[] {
+  const rows = (band.bench ?? [])
+    .filter((row) => benchKindOf(row) === 'render')
+    .map((row) => ({ row, view: normaliseViewKey(row.viewKey), cw: colorwayOf(row) }))
+    .filter(({ view }) => isSilhouetteView(view))
+    .sort(
+      (a, b) =>
+        SILHOUETTE_VIEWS.indexOf(a.view as SilhouetteView) -
+          SILHOUETTE_VIEWS.indexOf(b.view as SilhouetteView) || a.cw - b.cw,
+    );
   const plates: DocumentPlate[] = [];
-  for (const side of sides) {
-    const picture = side.picture;
+  for (const { row, view, cw } of rows) {
+    const picture = row.picture;
     const mediaId = picture?.media?.id ?? 0;
     if (!picture || mediaId <= 0 || already.has(mediaId)) continue;
     already.add(mediaId);
+    const named = cw > 0 ? colourwayName(cw).trim() || `CW ${cw}` : '';
     plates.push({
       key: `m-${mediaId}`,
-      name: viewLabel(side.view).toUpperCase(),
+      name: [viewLabel(view).toUpperCase(), named.toUpperCase()].filter(Boolean).join(' · '),
       mediaId,
       media: picture.media,
       origin: onCard.has(mediaId) ? 'card' : 'bench',
       benchKind: 'render',
-      viewKey: side.view,
-      door: benchDoor({ viewKey: side.view, id: side.slot?.id }),
+      viewKey: view,
+      door: benchDoor({ viewKey: view, id: row.id }),
       pictureId: picture.id ?? 0,
       chosen: pictureIsSelected(picture),
       displayOnly: pictureIsDisplayOnly(picture) || undefined,
@@ -654,20 +697,22 @@ export function frameFraction(value: string | number | null | undefined, fallbac
  * are not in that list, so a plate of theirs cannot carry a callout as it stands. R-13 is the reason
  * the door exists at all — «к любому артефакту можно делать все виды колаутов».
  *
- * ДВЕРЬ ЗОВЁТСЯ `take in` И ЖИВЁТ В ВЕРХНЕМ ПРАВОМ УГЛУ НА ХОВЕР (V-20, K-7). Имена этой двери шли
- * так: «take in to draw on it ▸» → `edit` → `take in`. Средний шаг снял МЕХАНИКУ из названия по
- * жалобе владельца («я не понимаю зачем она нужна»), но занял слово, которое ему понадобилось для
- * другого: круг K-7 — «в артифактс фабрик рендерс кнопка эдит должна открывать растр эдитор». Имя
- * `edit` ушло растровому редактору, а этой двери досталось имя её собственного действия.
+ * ═══ ДВЕРИ `take in` БОЛЬШЕ НЕТ, И ЭТО СЛОВО ВЛАДЕЛЬЦА (H-41) ══════════════════════════════════
  *
- * Сам шаг не выдуман и не убран: он есть цена, которую нельзя не заплатить, потому что выноска
- * физически адресует медиа карточки. Цена не спрятана — она в заголовке органа, который читалка
- * объявляет вместе с именем.
+ * Дословно: «кнопки „take in“ быть не должно: если размечено в студии (стоит в верстаке) — на
+ * листе по умолчанию; лист читает верстак напрямую». Ровно так теперь и есть: сегмент `renders`
+ * ЕСТЬ рендер-верстак (H-39), сегмент `flats` — флэт-верстак, и нажимать «внеси это на лист» не
+ * над чем: оно уже на листе.
  *
- * ОДНОТАКТНАЯ, А НЕ СОСТАВНАЯ, С ТЕХ ПОР КАК ПЛИТА РИСУЕТ САМА. Дверь была парой «взять + открыть
- * редактор», и вторая половина была дефектом T-20: редактор разрешал свежий media_id через
- * СОХРАНЁННУЮ карточку, которая о нём ещё не знала. Открывать теперь нечего — взятая плита
- * становится рабочей на месте.
+ * ⚠ САМ АКТ НИКУДА НЕ ДЕЛСЯ, И ДЕТЬСЯ НЕ МОГ: `media_id` выноски физически адресует медиа
+ * КАРТОЧКИ, поэтому первое указание, поставленное на верстачной плите, вносит её (`addCalloutOn` →
+ * `takeIntoCard`, D-18) и говорит об этом одной строкой. Цена осталась ровно та же, исчезла только
+ * кнопка, которая просила подтвердить решение, уже принятое в студии.
+ *
+ * ⚠ И ЭТО НЕ «АВТОМАТИЧЕСКАЯ ЗАПИСЬ В ФОРМУ». `technicalMedia` хешируется дайджестом DESIGN
+ * (`signoffs-field.tsx`), поэтому лист НЕ дописывает туда ничего сам: показ выведен из `band`, а
+ * запись по-прежнему происходит только от жеста человека — от первого указания. Иначе подпись
+ * карточки плыла бы от одного открытия вкладки.
  *
  * ОТЦЕПИТЬ ВЕРСТАЧНУЮ ПЛИТУ ЗДЕСЬ ВСЁ РАВНО НЕЛЬЗЯ, и причина пережила снос минта: слот
  * продолжает держать картинку, а список плит собирается из верстака заново при каждом чтении
@@ -971,14 +1016,36 @@ export function ArtifactsPanel({
   }, [band.runs]);
 
   /**
-   * ═══ ВЕРСТАКИ, ЧЬИМ ВТОРЫМ ЛИЦОМ СТАЛ ЛИСТ (D-15) ══════════════════════════════════════════
+   * ═══ ФЛЭТ-ВЕРСТАК, ЧЬИМ ВТОРЫМ ЛИЦОМ СТАЛ ЛИСТ (D-15) ══════════════════════════════════════
    *
-   * Флэт-верстак уже читался (`bench`, для плит документа); рендер-верстак — тот же, что у 3D
-   * (`threedSides` = `benchSides(band, 'render', 0)`), и лист показывает его СТОРОНАМИ: заполненная
-   * — плитой, пустая — плейсхолдером, который пишет в слот.
+   * Флэт-верстак уже читался (`bench`, для плит документа); здесь он читается СТОРОНАМИ: заполненная
+   * — плитой, пустая — плейсхолдером, который пишет в слот. У флэта колорвейной оси нет по существу
+   * (L-4), поэтому «в какой слот ляжет положенный файл» у него однозначно.
+   *
+   * ⚠ РЕНДЕР-ВЕРСТАК СТОРОНАМИ ЗДЕСЬ БОЛЬШЕ НЕ ЧИТАЕТСЯ, И ЭТО ТА ЖЕ ПОЧИНКА, ЧТО H-39. Он
+   * колорвейный, значит у пустой стороны нет ОДНОГО ответа на вопрос «в какой колорвей положить»:
+   * прежний плейсхолдер молча писал в безколорвейное ведро (`refColorwayFor(…, COLORWAY_NONE)`) и
+   * на карточке, размеченной под колорвеем, заводил седьмую картинку рядом с шестью. Разметка
+   * рендера живёт на STUDIO → FABRIC RENDER, где колорвей назван; лист её ЧИТАЕТ. Своя дверь у
+   * листа осталась одна и однозначная — `+ add a render` (кладёт в медиа карточки).
    */
   const flatSides = useMemo(() => benchSides(band, 'flat', COLORWAY_NONE), [band]);
-  const renderSides = useMemo(() => benchSides(band, 'render', COLORWAY_NONE), [band]);
+
+  /**
+   * Имя колорвея для подписи плиты. `colorCode` — то же слово, которым колорвей зовут на вкладке
+   * COLOURWAYS; `baseSku` — запасное, когда кода нет. Ни одного нового запроса: карточка уже здесь.
+   */
+  const colourwayName = useMemo(() => {
+    const byId = new Map<number, string>();
+    /* ОБА ИСТОЧНИКА КАРТОЧКИ, ТЕМ ЖЕ ПОРЯДКОМ, ЧТО У `resolved`: переданная страницей карточка и
+       загруженная этим экраном. Один из двух бывает пуст в зависимости от того, кто смонтировал
+       вкладку, и подпись плиты не должна зависеть от этого. */
+    for (const ref of [...(techCard?.colorways ?? []), ...(card?.colorways ?? [])]) {
+      const id = ref.colorwayId ?? 0;
+      if (id > 0 && !byId.has(id)) byId.set(id, (ref.colorCode || ref.baseSku || '').trim());
+    }
+    return (id: number) => byId.get(id) ?? '';
+  }, [techCard?.colorways, card?.colorways]);
 
   const segments = useMemo(() => {
     const of = (p: DocumentPlate) => artifactKindOf(p.mediaId, runKinds, cardKindOf.get(p.mediaId));
@@ -1003,17 +1070,24 @@ export function ArtifactsPanel({
     const flatAll = mark([...plates.filter((p) => of(p) === 'flat'), ...flatBand.plates]);
     const flat = sideCells('flat', flatSides, flatAll, cardViewOf);
 
-    // РЕНДЕРЫ: плиты рендер-верстака — ДО выходов ленты и вместе с карточными: слот старше
-    // списка «всё, что есть». Занятые слотом медиа не предлагаются второй раз из ленты.
+    /* ═══ РЕНДЕРЫ: ТОЛЬКО РАЗМЕЧЕННОЕ (H-39) ═══════════════════════════════════════════════════
+       Владелец: «в renders должны быть ТОЛЬКО размеченные рендеры … не все выходы подряд». Читателя
+       выходов (`bandPlates(band, 'render', …)`) здесь больше нет вовсе: сегмент — это плиты медиа
+       карточки (документ) плюс плиты рендер-верстака ЛЮБОГО колорвея, и ничего кроме.
+
+       ЧТО ИМЕННО УШЛО С НИМ, чтобы это не пришлось выяснять по пустому месту: выход прогона, не
+       стоящий ни в одном слоте, и витринный кадр рода `render` (`display_only`). Оба остаются
+       видны там, где они и живут, — в истории генераций и на самом шаге FABRIC RENDER; на ЛИСТЕ их
+       не должно быть по слову владельца.
+
+       Ряд стоит на плитах и только на плитах — пустых сторон у рендеров больше нет (довод у
+       `flatSides`), поэтому и `sideCells` здесь не зовётся. */
     const seenRender = new Set(onCard);
-    const benchRender = renderBenchPlates(renderSides, onCard, seenRender);
-    const renderBand = bandPlates(band, 'render', seenRender);
+    const benchRender = renderBenchPlates(band, onCard, seenRender, colourwayName);
     const renderAll = mark([
       ...plates.filter((p) => of(p) === 'render'),
       ...benchRender.filter((p) => p.origin === 'bench'),
-      ...renderBand.plates,
     ]);
-    const render = sideCells('render', renderSides, renderAll, cardViewOf);
 
     const patternBand = bandPlates(band, 'pattern', new Set(onCard));
     const threedBand = bandPlates(band, 'threed', new Set(onCard));
@@ -1032,7 +1106,6 @@ export function ArtifactsPanel({
       flat: {
         plates: flat.ordered,
         cells: flat.cells,
-        filteredToSelected: flatBand.filteredToSelected,
         serverStates: flatBand.serverStates,
       },
       // K-15 — ПЛИТКИ ПОПАДАЮТ СЮДА ТЕМ ЖЕ ПУТЁМ, ЧТО РЕНДЕРЫ: сначала те, что уже в медиа
@@ -1041,29 +1114,28 @@ export function ArtifactsPanel({
       pattern: {
         plates: patternAll,
         cells: asCells(patternAll),
-        filteredToSelected: patternBand.filteredToSelected,
         serverStates: patternBand.serverStates,
       },
+      /* РЕНДЕРЫ НЕ НЕСУТ `serverStates`, И ЭТО НЕ ПРОПУСК. Флаг живёт ровно ради двери `select`, а
+         у рендера выбор — СЛОТ ВЕРСТАКА, ровно как у флэта. Вторая метка над тем же решением была
+         бы вторым реестром одних выборов: «не делай разные кнопки для одного и того же». */
       render: {
-        plates: render.ordered,
-        cells: render.cells,
-        filteredToSelected: renderBand.filteredToSelected,
-        serverStates: renderBand.serverStates,
+        plates: renderAll,
+        cells: asCells(renderAll),
+        serverStates: false,
       },
       threed: {
         plates: threedAll,
         cells: asCells(threedAll),
-        filteredToSelected: threedBand.filteredToSelected,
         serverStates: threedBand.serverStates,
       },
       onmodel: {
         plates: onmodelAll,
         cells: asCells(onmodelAll),
-        filteredToSelected: onmodelBand.filteredToSelected,
         serverStates: onmodelBand.serverStates,
       },
     };
-  }, [plates, band, runKinds, cardKindOf, chosenMedia, flatSides, renderSides]);
+  }, [plates, band, runKinds, cardKindOf, chosenMedia, flatSides, colourwayName]);
 
   const [selected, setSelected] = useState<number | null>(null);
   /** Which representation is on screen. `flat` is the default because the SHEET is made of flats. */
@@ -1111,6 +1183,17 @@ export function ArtifactsPanel({
   const onScreen = segment.plates;
 
   /**
+   * ═══ ГДЕ ПОМЕТКА `chosen` ВООБЩЕ ЕСТЬ ВЕРДИКТ — И ГДЕ ЕЁ ВЫНОСИТ СЛОТ (H-39/H-41) ══════════════
+   *
+   * Флэт выбирают, поставив его в слот флэт-верстака; после H-39 ровно так же выбирают и РЕНДЕР —
+   * сегмент `renders` и есть рендер-верстак. Значит на обоих списках дверь `select` была бы вторым
+   * реестром одного и того же решения («не делай разные кнопки для одного и того же»), а
+   * погашенная — обещанием жеста, которого нет. Остаются три рода, у которых слота не существует
+   * по контракту (`pictureBenchKind` отвечает `null`): плитка, кадр турнтейбла и снимок на модели.
+   */
+  const marksChosen = kind !== 'flat' && kind !== 'render';
+
+  /**
    * ═══ РИСОВАНИЕ ЖИВЁТ НА САМИХ ПЛИТАХ, И МОДАЛКИ БОЛЬШЕ НЕТ (T-21) ═══════════════════════════
    *
    * Слова владельца: «для выставления колаутов не нужна модалка оно должно быть инлайн». Раньше
@@ -1143,11 +1226,9 @@ export function ArtifactsPanel({
     : 'the form’s undo history was not handed to this screen, and a gesture without an undo is not one to offer';
 
   /**
-   * ПРИЧИНЫ ДВУХ МЁРТВЫХ ДВЕРЕЙ ВЫПУЩЕННОЙ КАРТОЧКИ, И ОНИ РАЗНЫЕ (K-7). «Взять к себе» правит
-   * СПИСОК медиа карточки; «править» заводит НОВУЮ картинку. Одно общее «карточка только для
-   * чтения» на обеих дверях читалось бы как одна запертая дверь, показанная дважды.
+   * ПРИЧИНА МЁРТВОЙ ДВЕРИ `edit` НА ВЫПУЩЕННОЙ КАРТОЧКЕ (K-7). Рядом стояла вторая — у `take in`;
+   * она ушла вместе со своей дверью (H-41), а не потому, что причина перестала быть верной.
    */
-  const takeInInert = 'this card is read-only for you — taking a picture onto the card is an edit of the card';
   const editInert =
     'this card is read-only for you — a drawing is filed as a new picture, and that is an edit of the card';
 
@@ -1157,11 +1238,11 @@ export function ArtifactsPanel({
    * `media_id` выноски по-прежнему адресует медиа КАРТОЧКИ — это провод, и он не тронут. Что
    * изменилось: шаг «сначала возьми плиту к себе» больше не стоит ПЕРЕД первым кликом, а
    * исполняется ИМ. Владелец: «колаут мод должен быть сразу включен тк там уже сразу выбранные
-   * нами в слоты медиа» — то есть плита в слоте для него уже своя, и просить нажать `take in`
-   * ради права поставить точку — это просить подтвердить решение, которое он принял, кладя
-   * картинку в слот. `addCalloutOn` дописывает медиа в форму тем же путём, что `take in`, и
-   * говорит об этом одной строкой; сама дверь `take in` остаётся для тех, кто хочет взять плиту
-   * на бумагу без единого указания.
+   * нами в слоты медиа» — то есть плита в слоте для него уже своя, и просить нажать кнопку ради
+   * права поставить точку — это просить подтвердить решение, которое он принял, кладя картинку в
+   * слот. `addCalloutOn` дописывает медиа в форму и говорит об этом одной строкой. С H-41 это
+   * ЕДИНСТВЕННЫЙ путь плиты на бумагу с этого экрана: отдельной двери «взять без указания» больше
+   * нет — она и была тем самым «take in», которого «быть не должно».
    *
    * Нельзя только там, где рисовать не по чему: файл модели без растра (`modelOnly`).
    */
@@ -1471,7 +1552,7 @@ export function ArtifactsPanel({
    * Тот же вызов, что у полосы входа (`threed-input-strip.tsx:placeMedia`, D-10) и у верстака
    * (`bench.tsx:placeMedia`): `RegisterDesignUpload` заводит медиа в полосу И кладёт кадр в
    * сторону, названную в `target`. Лист ничего не пишет в форму: слот принадлежит студии, а
-   * лист — его второе лицо; на карточку плита придёт первым указанием (D-18) или дверью `take in`.
+   * лист — его второе лицо; на карточку плита придёт первым указанием (D-18).
    *   · `kind` — род ВЕРСТАКА, в который положили: под стороной флэтов приходит флэт, под
    *     стороной рендеров — рендер, и ничто ниже не восстановит это по пикселям;
    *   · `ghostView` — сторона, которую человек ТОЛЬКО ЧТО НАЗВАЛ, положив файл в этот слот;
@@ -1513,45 +1594,19 @@ export function ArtifactsPanel({
     }
   }
 
-  /**
-   * ═══ МЕДИА ТОЛЬКО ДЛЯ ПОКАЗА — БЕЗ СЛОТА, БЕЗ ПРОМПТА (D-24) ═══════════════════════════════════
+  /* ═══ ДВЕРЬ «+ DISPLAY ONLY» СНЯТА ЦЕЛИКОМ (H-40) ═══════════════════════════════════════════
    *
-   * Владелец: «в THE SHEET должна быть возможность добавить отдельно медиа без слотов КОТОРЫЕ НЕ
-   * ПОЙДУТ в промпты они нужны только для визуализации в артефактах дополнительной». Кадр
-   * заводится в полосу ТЕМ ЖЕ `RegisterDesignUpload`, но с `display_only`: сервер сам откажет ему
-   * в слоте, в референсах и у денежной двери, и клиенту остаётся только назвать, ЧТО он положил.
+   * Владелец, дословно: «20 pictures · everything this card holds и дверь + DISPLAY ONLY — убрать
+   * вообще». Здесь стояла `displayOnlyFromLibrary`: она заводила кадр в полосу с `display_only`,
+   * то есть «покажи на листе, но никогда не отправляй в промпт».
    *
-   * РОД — ПО ВКЛАДКЕ, где человек стоит: витринный флэт под флэтами, витринный рендер под
-   * рендерами. У перекраса своего рода загрузки нет (`kind` знает flat | render | threed |
-   * pattern), и на вкладке ON MODEL витринный кадр честно файлится рендером — дверь говорит это
-   * заголовком до нажатия, а не тостом после.
+   * ЦЕНА НАЗВАНА, А НЕ СПРЯТАНА. Завести витринный кадр с ЭТОГО экрана больше нельзя — ни одной
+   * другой двери с `display_only` в клиенте нет. Уже заведённые кадры не потеряны и никуда не
+   * делись: они по-прежнему приезжают в полосе, по-прежнему видны в сегментах `flats`, `patterns`,
+   * `3D` и `on model` и по-прежнему носят на плите свою пилюлю. Не видны они теперь только среди
+   * `renders` — и это второе слово того же владельца (H-39: «только размеченные рендеры»), а не
+   * побочный эффект этой правки.
    */
-  function displayOnlyFromLibrary(items: common_MediaFull[]) {
-    const uploadKind: 'flat' | 'render' | 'threed' | 'pattern' =
-      kind === 'onmodel' ? 'render' : kind;
-    const lands = ARTIFACT_KINDS.find((k) => k.value === uploadKind)?.label ?? uploadKind;
-    const wire: WireUploadItem[] = items
-      .filter((it) => (it.id ?? 0) > 0)
-      .map((it) => ({
-        mediaId: it.id as number,
-        ghostView: '',
-        kind: uploadKind,
-        colorwayId: COLORWAY_NONE,
-        compositeViews: undefined,
-        displayOnly: true,
-      }));
-    if (!wire.length) return;
-    registerUpload.mutate(
-      { clientRequestId: newClientRequestId(), items: wire },
-      {
-        onSuccess: () =>
-          showMessage(
-            `${wire.length === 1 ? 'one picture' : `${wire.length} pictures`} filed for display only — shown under ${lands}, never sent to a prompt`,
-            'success',
-          ),
-      },
-    );
-  }
 
   /**
    * ═══ ПОЛОЖИТЬ НА ЛИСТ КАРТИНКУ ИЗ БИБЛИОТЕКИ ════════════════════════════════════════════════
@@ -1688,12 +1743,6 @@ export function ArtifactsPanel({
   /** Read once, so the question and the act cannot disagree about how many are at stake. */
   const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
 
-  /**
-   * ЖИВА ЛИ ДВЕРЬ «ТОЛЬКО ДЛЯ ПОКАЗА» ПРОТИВ ЭТОГО БИНАРЯ (D-24). `false` — сервер поля не знает,
-   * и дверь стоит инертной с причиной; `true`/`null` — живой (довод у `serverStatesDisplayOnly`).
-   */
-  const displayOnlyDoor = useMemo(() => serverStatesDisplayOnly(band), [band]);
-
   return (
     <SectionStack>
       <SectionStack row>
@@ -1708,6 +1757,7 @@ export function ArtifactsPanel({
               правый край шапки, где раньше жили чипы версий, теперь свободен и пуст. */}
           <GroupLabel
             flush
+            className={GROUP_GAP}
             lead={
               <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
                 <ViewSwitch<ArtifactKind>
@@ -1724,67 +1774,6 @@ export function ArtifactsPanel({
                 />
               </div>
             }
-            action={
-              <div className='flex flex-wrap items-center gap-2'>
-                <Text size='micro' variant='label' component='span'>
-                  {segment.plates.length} picture{segment.plates.length === 1 ? '' : 's'}
-                  {/* ⚠ ОХВАТ НАЗЫВАЕТСЯ ТЕМ, ЧЕМ ОН СТАЛ. Список этого сегмента — плиты карточки
-                      плюс ВЫХОДЫ ВСЕЙ КАРТОЧКИ (H-9), и фраза про страницу ленты над сорока
-                      рендерами двадцати прогонов — ровно та неправда охватом, которую владелец
-                      поймал на соседнем экране. Читается БИНАРЬ (`serverStatesOutputs`), а не
-                      длина списка: на сервере старше поля читатели по-прежнему обходят страницу,
-                      и прежние слова там по-прежнему верны. */}
-                  {/* ⚠ ФЛЭТЫ БОЛЬШЕ НЕ МОЛЧАТ (B-2). Условие `kind !== 'flat'` стояло по честной
-                      причине: у сегмента не было читателя выходов, его список был «документ плюс
-                      верстак», и фраза про охват ленты над ним ничего бы не значила. Читатель
-                      пришёл — причина ушла вместе с ним, и немой сегмент стал бы единственным, о
-                      чьём охвате не сказано ничего, ровно там, где охват впервые больше страницы. */}
-                  {segment.filteredToSelected
-                    ? ' · the chosen ones'
-                    : serverStatesOutputs(band)
-                      ? ' · everything this card holds'
-                      : ' · everything on this page'}
-                </Text>
-                {/* ═══ ДВЕРЬ «ТОЛЬКО ДЛЯ ПОКАЗА» — В ШАПКЕ РЯДА, А НЕ ВТОРОЙ ПЛИТОЙ (D-24) ═══════
-                    Слот «+ add …» в конце ряда кладёт файл В ДОКУМЕНТ (или в слот); эта дверь —
-                    наоборот, никуда: кадр остаётся в полосе витринным. Две пунктирные плиты
-                    по 680px в конце каждого ряда спорили бы друг с другом ростом, а не
-                    смыслом; тихая кнопка у счёта говорит своё одной строкой заголовка.
-                    Сама библиотека — тот же `MediaSelector`, что за слотом: свой пикер завёл
-                    бы второй диалект выбора. */}
-                {!disabled &&
-                  (displayOnlyDoor === false ? (
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      disabled
-                      data-display-only-door='inert'
-                      title={`+ display only — ${DISPLAY_ONLY_NOT_STATED}`}
-                    >
-                      + display only
-                    </Button>
-                  ) : (
-                    <MediaSelector
-                      label='+ display only'
-                      purpose='display only · shown on the sheet, never sent to a prompt'
-                      aspectRatio={['Custom']}
-                      allowMultiple
-                      showVideos={false}
-                      saveSelectedMedia={displayOnlyFromLibrary}
-                      trigger={
-                        <Button
-                          variant='secondary'
-                          size='xs'
-                          data-display-only-door='live'
-                          title={`a picture shown under ${ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind} for looking at only — it goes into no slot and is never sent to a prompt${kind === 'onmodel' ? '; the card has no on-model upload kind, so it is filed as a render' : ''}`}
-                        >
-                          + display only
-                        </Button>
-                      }
-                    />
-                  ))}
-              </div>
-            }
           >
             what you are marking up
           </GroupLabel>
@@ -1798,9 +1787,10 @@ export function ArtifactsPanel({
                 печать        → пилюля `on paper` на самой плите карточки (свой `title`) и подсказки
                                 сегментов в `ARTIFACT_KINDS` («prints too, once it is in the card’s
                                 media»);
-                состав списка → строка справа от заголовка ряда: `· the chosen ones` против
-                                `· everything this card holds` (и `· everything on this page` на
-                                сервере старше поля `outputs`);
+                состав списка → БОЛЬШЕ НЕ ГОВОРИТСЯ ВОВСЕ, и это слово владельца (H-40, дословно:
+                                «20 pictures · everything this card holds … убрать вообще»). Строка
+                                справа от заголовка ряда снята; «сколько их» человек читает по
+                                самому ряду, а «каких именно» — по вкладке, на которой стоит;
                 путь туда     → `title` живой метки `select` («the segment narrows to the chosen
                                 ones of this kind»);
                 путь обратно  → `title` метки `un-select` («with none of this kind chosen, the
@@ -1825,6 +1815,7 @@ export function ArtifactsPanel({
               снятых слов. */}
           {drawableHere && (
             <GroupLabel
+              className={GROUP_GAP}
               lead={
                 <AnnotationToolbar
                   tool={tool}
@@ -1853,11 +1844,16 @@ export function ArtifactsPanel({
                 просили. Теперь ряд рисуется всегда, и в пустом сегменте он состоит из слотов
                 сторон (у флэтов и рендеров) и одного добавляющего слота. */}
             {onScreen.length === 0 && (
-              <Text size='micro' variant='label' component='p'>
+              /* `max-w-[75ch]` — предел длины строки прозы. Без него подсказка тянется во всю
+                 ширину блока (на 1440 это ~145 знаков), и глаз теряет начало следующей строки. */
+              <Text size='micro' variant='label' component='p' className='max-w-[75ch]'>
                 {kind === 'flat'
                   ? 'nothing is drawn on this card yet. Put a flat into a side below, or draw one on STUDIO — callouts are placed on the plate itself, here, once one exists.'
                   : kind === 'render'
-                    ? 'no render of this card yet. A fabric render is made on STUDIO, from the flats standing in the bench slots — or put your own file into a side below.'
+                    ? /* H-39: РЕНДЕРЫ — ЭТО ВЕРСТАК, и пустое состояние обязано звать туда, где их
+                         размечают, а не к стороне на этом экране: сторон у рендеров здесь больше
+                         нет (довод у `flatSides`). */
+                      'nothing is marked as a render of this card yet. Mark one on STUDIO → FABRIC RENDER and it appears here — or put your own file on the sheet with the door below.'
                     : kind === 'pattern'
                       ? 'no tile of this card yet. A repeating tile is made on STUDIO → PATTERN, out of one picture; the ones you mark as chosen there are listed here — or put your own file into the slot below.'
                       : kind === 'onmodel'
@@ -1917,18 +1913,14 @@ export function ArtifactsPanel({
                    рендерс кнопка эдит должна открывать растр эдитор». Прежний акт этой двери
                    (внести картинку в медиа карточки) никуда не делся и не мог: `media_id` выноски
                    адресует медиа КАРТОЧКИ, и без этого шага на рендере полосы указание не
-                   поставить вовсе. Он переехал в свой орган — `take in`, в верхний правый ряд, к
-                   `✕`: обе двери про ОДНО И ТО ЖЕ — состоит ли картинка в медиа карточки, — и
-                   стоять они обязаны на одной оси. */
+                   поставить вовсе. Он исполняется первым же указанием (D-18); отдельной кнопки
+                   у него больше нет (H-41). */
                 onEdit={!disabled ? setRasterOn : undefined}
                 editInert={editInert}
-                onTakeIn={!disabled ? takeIntoCard : undefined}
-                takeInInert={takeInInert}
-                /* THE MARK'S DOOR RIDES ONLY THE NON-FLAT LISTS. A flat is chosen by standing in a
-                   bench slot, not by the mark, so a select door there would be a second registry of
-                   one election. */
+                /* THE MARK'S DOOR RIDES ONLY THE LISTS WITH NO BENCH OF THEIR OWN — довод у
+                   `marksChosen`. */
                 onToggleChosen={
-                  kind !== 'flat' && !disabled && segment.serverStates
+                  marksChosen && !disabled && segment.serverStates
                     ? (plate) =>
                         setPictureSelected.mutate({
                           pictureId: plate.pictureId ?? 0,
@@ -1937,7 +1929,7 @@ export function ArtifactsPanel({
                     : undefined
                 }
                 chosenInert={
-                  kind === 'flat'
+                  !marksChosen
                     ? undefined
                     : disabled
                       ? 'the card is read-only for you — the mark is an edit of the card'
@@ -2055,7 +2047,7 @@ export function ArtifactsPanel({
           `slot` НЕ ПЕРЕДАЁТСЯ: плита листа — не слот верстака, и результат правки никуда не обязан
           вставать. Он рождается сиблингом основы (наследует её `run_id` или `batch_id`) и попадает
           в историю генераций или на полку загрузок — туда же, куда попадает правка из тех мест.
-          Положить его на ЭТОТ лист — отдельное решение, и оно принимается дверью `take in`. */}
+          Положить его на ЭТОТ лист — отдельное решение, и его принимает первое указание. */}
       {rasterOn && (
         <VectorModal
           open
@@ -2303,12 +2295,17 @@ const PLATE_BADGE_BAR =
 /**
  * ЯРЛЫК УСТУПАЕТ РОВНО СТОЛЬКО, СКОЛЬКО ЗАНЯЛ ПРОТИВОПОЛОЖНЫЙ УГОЛ (K-7).
  *
- * 96px в базовом классе — это `zoom · ✕` с их полями. У плиты, которой в медиа карточки ещё нет,
- * между ними встаёт третий орган (`take in`), и ряд вырастает примерно до 150px. Оставить резерв
- * прежним значило бы, что имя вида уезжает под кнопку ровно на тех плитах, где имя нужнее всего:
- * это ряд выходов прогона, и различают их именно по имени.
+ * 96px в базовом классе — это `zoom · ✕` с их полями. Третий орган в этом ряду теперь ровно один и
+ * появляется он у одной плиты из пяти сегментов — `3D` у постера, за которым стоит модель (D-26);
+ * ряд тогда вырастает примерно до 150px. Оставить резерв прежним значило бы, что имя вида уезжает
+ * под кнопку.
  *
- * Резерв ДВУХ ЗНАЧЕНИЙ, а не одно широкое на все плиты: у карточной плиты третьего органа нет, и
+ * ⚠ УСЛОВИЕ БЫЛО `origin !== 'card'` И СТАЛО `plate.model`, ПОТОМУ ЧТО ТРЕТИЙ ОРГАН СМЕНИЛСЯ. Им
+ * был `take in`, снятый в H-41; резерв, оставленный по прежнему условию, отбирал бы 64 пикселя у
+ * КАЖДОЙ верстачной плиты, где третьего органа больше нет вовсе, и не давал бы их постеру 3D,
+ * который на карточке лежит.
+ *
+ * Резерв ДВУХ ЗНАЧЕНИЙ, а не одно широкое на все плиты: у плиты без модели третьего органа нет, и
  * отобранные у ярлыка 64 пикселя резали бы длинное имя без всякой причины.
  */
 const PLATE_BADGE_BAR_WIDE_RESERVE = 'max-w-[calc(100%-160px)]';
@@ -2346,19 +2343,18 @@ const PLATE_BADGE_CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 bg-bgColo
  * указаний (T-21, «оно должно быть инлайн»), и обернуть её в плитку значило бы вернуть модалку
  * рисования, которую владелец снял. Поэтому общий не компонент, а закон:
  *
- *      верх справа  — zoom, take in, ✕                 ← ряд, кладётся в `cornerSlot` поверхности
- *      низ слева    — select / un-select (метка W-12)
+ *      верх справа  — zoom, 3D, ✕                      ← ряд, кладётся в `cornerSlot` поверхности
+ *      низ слева    — select / un-select (метка W-12, только там, где у рода нет верстака)
  *      низ справа   — edit
  *
- * ВЕРХНИЙ ПРАВЫЙ РЯД — ОДНА ОСЬ: состоит ли картинка в медиа карточки. `take in` вносит, `✕`
- * выносит, и второй появляется ровно там, где первого уже не нужно. Ось эта существует не ради
- * симметрии: `media_id` выноски адресует медиа КАРТОЧКИ, поэтому на плите прогона или верстака
- * указание не поставить, пока её не внесли.
+ * ВЕРХНЕГО ПРАВОГО `take in` БОЛЬШЕ НЕТ (H-41). Ряд стоял «на одной оси» с `✕` — вносит и выносит,
+ * — и ось эта была верной, пока лист был СПИСКОМ ПРЕДЛОЖЕНИЙ, из которого выбирают. После H-39 он
+ * второе лицо верстака: что размечено в студии, то на листе, и вносить руками нечего. `✕` остался:
+ * он снимает с ЛИСТА плиту медиа карточки, а это по-прежнему решение человека.
  *
  * ЧТО ТАКОЕ `edit` ЗДЕСЬ (K-7). Растровый редактор — тот же `VectorModal`, что открывают плитка
  * истории генераций и плита верстака. Слова владельца: «в артифактс фабрик рендерс кнопка эдит
- * должна открывать растр эдитор». До этого круга дверь с тем же именем вносила картинку в медиа
- * карточки; акт остался, имя у него теперь своё (`take in`), и путать их больше нечем.
+ * должна открывать растр эдитор».
  *
  * `edit` СТОИТ НА КАЖДОЙ ПЛИТЕ. Раньше карточная плита нижнего правого органа не имела вовсе —
  * довод был «она правится кликом по себе». Клик по себе ставит УКАЗАНИЕ; кисть — другое умение, и
@@ -2390,8 +2386,6 @@ function PlateGrid({
   detachInert,
   onEdit,
   editInert,
-  onTakeIn,
-  takeInInert,
   onToggleChosen,
   chosenInert,
   chosenPending,
@@ -2445,13 +2439,6 @@ function PlateGrid({
    */
   onEdit?: (plate: DocumentPlate) => void;
   editInert: string;
-  /**
-   * `take in` верхнего правого ряда: внести картинку верстака или прогона в медиа карточки, чтобы
-   * на ней вообще можно было поставить указание. До K-7 этот акт носил имя `edit`, а до того —
-   * «take in to draw on it ▸».
-   */
-  onTakeIn?: (plate: DocumentPlate) => void;
-  takeInInert: string;
   /**
    * Flip the mark «chosen» on the picture behind a plate (W-12), or `undefined` — and then
    * `chosenInert` says why not. BOTH absent means the door is not part of this list at all: a flat
@@ -2559,7 +2546,7 @@ function PlateGrid({
             <div
               className={cn(
                 PLATE_BADGE_BAR,
-                plate.origin !== 'card' && PLATE_BADGE_BAR_WIDE_RESERVE,
+                !!plate.model && PLATE_BADGE_BAR_WIDE_RESERVE,
               )}
             >
               <div className={PLATE_BADGE_CHIP}>
@@ -2686,16 +2673,10 @@ function PlateGrid({
                 // ZOOM ЖИВ И НА ВЫПУЩЕННОЙ КАРТОЧКЕ: мерку и дугу на плите иначе не разглядеть, а
                 // увеличение и есть способ их прочесть. ✕ (detach) — правка листа, поэтому гаснет.
                 //
-                // ═══ И ЗДЕСЬ ЖЕ ВТОРАЯ ПОЛОВИНА ОДНОЙ ОСИ — `take in` (K-7) ══════════════════
-                // Ряд отвечает на один вопрос: СОСТОИТ ЛИ КАРТИНКА В МЕДИА КАРТОЧКИ. `✕` выносит
-                // её оттуда, `take in` вносит. Держать вход и выход в разных углах плиты значило
-                // бы, что одна и та же ось читается в двух местах — ровно то «везде по-разному»,
-                // из-за которого закон углов вообще появился.
-                //
-                // ТОЛЬКО У ПЛИТЫ, КОТОРОЙ В МЕДИА КАРТОЧКИ ЕЩЁ НЕТ. У карточной плиты вносить
-                // нечего, и живая дверь «внести» рядом с живой «вынести» читалась бы как выбор
-                // там, где выбора нет. Погашенной её тоже не рисуем: `✕` по соседству уже
-                // говорит, что плита на листе.
+                // ═══ ЗДЕСЬ СТОЯЛ `take in`, И ЕГО СНЯЛИ (H-41) ═════════════════════════════
+                // «Кнопки take in быть не должно: если размечено в студии — на листе по
+                // умолчанию». Ряд отвечает теперь на один вопрос — ПОСМОТРЕТЬ (zoom, 3D) — плюс
+                // `✕`, который снимает плиту с листа.
                 cornerSlot={
                   <>
                     <PlateCorner label={`zoom · ${plate.name}`} onPress={() => onZoom(index)}>
@@ -2712,19 +2693,6 @@ function PlateGrid({
                         3D
                       </PlateCorner>
                     )}
-                    {plate.origin !== 'card' &&
-                      (onTakeIn ? (
-                        <PlateCorner
-                          label={`take ${plate.name} into the card’s media — from that moment a callout can be placed on it right here, and it prints on the tech pack’s technical sketch page`}
-                          onPress={() => onTakeIn(plate)}
-                        >
-                          take in
-                        </PlateCorner>
-                      ) : (
-                        <PlateCorner label={`take ${plate.name} in`} reason={takeInInert}>
-                          take in
-                        </PlateCorner>
-                      ))}
                     {detachReason ? (
                       <PlateCorner label={`detach ${plate.name}`} reason={detachReason}>
                         ✕
@@ -2777,7 +2745,7 @@ function PlateGrid({
                     {/* ═══ НИЗ СПРАВА — `edit`, И ОН ОТКРЫВАЕТ РАСТРОВЫЙ РЕДАКТОР (K-7) ═════════
                         Владелец: «в артифактс фабрик рендерс кнопка эдит должна открывать растр
                         эдитор». Здесь этой дверью вносили картинку в медиа карточки; тот акт жив,
-                        но зовётся `take in` и стоит в верхнем правом ряду, на своей оси.
+                        но исполняется первым указанием, а своей кнопки у него больше нет (H-41).
 
                         СТОИТ НА КАЖДОЙ ПЛИТЕ, БЕЗ ВЕТКИ ПО ПРОИСХОЖДЕНИЮ. Прежнее `compound ?`
                         оставляло карточную плиту вовсе без нижнего правого органа: рисовать на ней

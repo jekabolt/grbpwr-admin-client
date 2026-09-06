@@ -1,4 +1,9 @@
-import type { GetDesignBandResponse, common_DesignAsset } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignAsset,
+  common_MediaFull,
+} from 'api/proto-http/admin';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState, type JSX } from 'react';
@@ -27,12 +32,12 @@ import { useAssetWrites } from '../assets/use-assets';
 import { PartsRow } from '../colour-plan/parts-row';
 import type { ColourPlanWrites } from '../colour-plan/use-colour-plan';
 import { InertDoor } from '../bench-slot';
-import { Counter } from '../core';
+import { GROUP_GAP, GROUP_SEAM } from '../core';
 import { PictureTile } from '../picture-tile';
 import { benchSides } from './model';
 import { ClothIsRow } from './cloth-is';
 import type { ColourDraft } from './drafts';
-import { COLOUR_NAME_MAX, fabricStatement, hexIsPaintable, statedWords } from './model';
+import { COLOUR_NAME_MAX, fabricStatement, hexIsPaintable } from './model';
 
 /**
  * TEXTURE & COLOUR — what a render is clothed and coloured with, and the ONLY place on the band
@@ -147,6 +152,166 @@ function nextClothName(taken: common_DesignAsset[]): string {
 const TEXTURE_ASPECT = '1/1';
 
 /**
+ * ПОТОЛОК АКТИВОВ — ОДНА ФУНКЦИЯ НА ВСЕХ, КТО ЕГО НАЗЫВАЕТ (r3 п.22).
+ *
+ * Считается по ВСЕЙ карточке — он зеркало серверного: `UpsertDesignAsset` отвергает 41-й актив
+ * независимо от полки. Но ОТЧЁТ раздельный (Д-2): сколько мест держит эта сетка и сколько — то,
+ * чего она не показывает; иначе человек читает «40 активов», не имея ни одного способа освободить
+ * место и ни одного слова о том, чем оно занято.
+ *
+ * ⚠ ФУНКЦИЯ, А НЕ ТРИ КОПИИ СТРОКИ. Дверь ткани переехала в ДВА места (пустая полка — квадрат в
+ * сетке, непустая — тихая дверь в заголовке группы), и повод отказа обязан быть у них дословно
+ * один: разошедшись, они объявили бы человеку два разных потолка на одной карточке.
+ */
+function clothCeiling(
+  band: GetDesignBandResponse,
+  shelf: common_DesignAsset[],
+): { full: boolean; reason: string } {
+  const totalAssets = (band.assets ?? []).length;
+  const unmanaged = unmanagedAssets(band);
+  const full = totalAssets >= ASSETS_PER_CARD_MAX;
+  const reason =
+    unmanaged.length === 0
+      ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, all of them in this grid — remove one to make room`
+      : shelf.length === 0
+        ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, and every one of them is hardware from the removed ASSETS shelves — nothing on this screen can free a place, so this card cannot take a texture`
+        : `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets: ${shelf.length} in this grid and ${unmanaged.length} hardware from the removed ASSETS shelves, which no screen can remove any more — free a place by removing a texture here`;
+  return { full, reason };
+}
+
+/**
+ * ═══ ОДНА ДВЕРЬ ТКАНИ, ДВА МЕСТА, И ЭТО НЕ ДВЕ КНОПКИ ЗА ОДНО (r3 п.21/22) ════════════════════
+ *
+ * Владелец, дословно: «огромная кнопка MAKE A PATTERN ▸ не нужна; при выбранном паттерне
+ * плейсхолдер «+ CLOTH» остаётся — зачем» и «убери текст ⌘V · drop · browse».
+ *
+ * ЧТО БЫЛО. В сетке стояла КОЛОНКА ИЗ ТРЁХ ОРГАНОВ: полосатый квадрат `+ cloth`, под ним строка
+ * жестов «⌘V · drop · browse», под ней кнопка `make a pattern ▸` во всю ширину дорожки. Три вещи
+ * на одну задачу, и все три стояли на карточке, где ткань уже выбрана, — то есть между выбранной
+ * тканью и квадратом цвета вклинивался пустой кадр, который в этот момент никому не нужен.
+ *
+ * ЧТО СТАЛО, И ПОЧЕМУ ИМЕННО ТАК:
+ *   · СТРОКА ЖЕСТОВ СНЯТА. Она пересказывала кнопку, на которую человек смотрит, а сами жесты
+ *     (⌘V, бросок файла) продолжают работать — их держит `MediaSlot`, а не эта подпись.
+ *   · КНОПКА `make a pattern ▸` СНЯТА КАК КНОПКА и вернулась ДВЕРЬЮ ВНУТРИ ПУСТОЙ РАМКИ (`doors`
+ *     примитива, приём J-7): «огромной» её делал именно отдельный ряд под квадратом. Внутри рамки
+ *     она перестаёт спорить с квадратом за внимание и остаётся ровно там, где о ней спрашивают, —
+ *     на пустом месте, которое надо чем-то заполнить.
+ *   · КВАДРАТ РИСУЕТСЯ ТОЛЬКО НА ПУСТОЙ ПОЛКЕ. Когда ткань уже есть, дверь становится ТИХОЙ —
+ *     вторичной кнопкой в заголовке группы, где живут органы про группу целиком. Сетка тогда
+ *     показывает ровно то, что на карточке есть: ткани и цвет, без дыры между ними.
+ *
+ * ⚠ ДВЕРЬ ОДНА И ТА ЖЕ, ПРОСТО В ДВУХ КОЖАХ. Библиотека — единственный способ принести на карточку
+ * фотографию ткани, и потерять его было нельзя: `PATTERN` умеет только ПЛАТНУЮ плитку. Поэтому
+ * запись здесь написана ОДИН раз, а `variant` выбирает лицо.
+ */
+function ClothIntake({
+  band,
+  techCardId,
+  shelf,
+  variant,
+  onMakePattern,
+}: {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  shelf: common_DesignAsset[];
+  /** `slot` — полосатый квадрат последней клеткой сетки; `door` — тихая кнопка в заголовке. */
+  variant: 'slot' | 'door';
+  /** Вторая дверь пустой рамки: уход на STUDIO → PATTERN. Не задана — двери нет вовсе. */
+  onMakePattern?: () => void;
+}): JSX.Element {
+  const writes = useAssetWrites(techCardId);
+  const { showMessage } = useSnackBarStore();
+  const { full, reason } = clothCeiling(band, shelf);
+
+  /* ВТОРАЯ ПРОВЕРКА ПОТОЛКА, И ОНА ГОВОРИТ ВСЛУХ. Дверь погашена по полосе, прочитанной ЭТИМ
+     рендером, а между её отрисовкой и подтверждением модалки стоит целая прогулка человека:
+     соседняя вкладка успевает добрать потолок. */
+  const take = (media: common_MediaFull[]) => {
+    const first = media[0];
+    if (!first?.id) return;
+    if ((band.assets ?? []).length >= ASSETS_PER_CARD_MAX) {
+      showMessage(reason, 'error');
+      return;
+    }
+    writes.upsertAsset.mutate({
+      // `assetId: 0` заводит. Род — УТВЕРЖДЕНИЕ этой двери: она стоит под подписью CLOTH AND
+      // COLOUR, значит через неё приходит ткань. По пикселям это не восстановимо.
+      assetId: 0,
+      kind: ASSET_FABRIC,
+      name: nextClothName(shelf),
+      mediaId: first.id,
+    });
+  };
+
+  if (variant === 'door') {
+    /* ТИХАЯ ДВЕРЬ ЗАГОЛОВКА. `MediaSelector` принимает свой триггер (`asChild`), поэтому это
+       ОДНА вторичная кнопка ряда заголовка, а не второй квадрат рядом с первым. ⌘V и бросок
+       файла у неё нет — их носит рамка, а рамки здесь нет; библиотека остаётся. */
+    if (full) return <InertDoor label='+ cloth' reason={reason} />;
+    return (
+      <MediaSelector
+        label='+ cloth'
+        purpose='design · cloth texture of this tech card'
+        aspectRatio={['Custom']}
+        allowMultiple={false}
+        showVideos={false}
+        saveSelectedMedia={take}
+        trigger={
+          <Button variant='secondary' size='xs' data-cloth-add-door>
+            + cloth
+          </Button>
+        }
+      />
+    );
+  }
+
+  /* ═══ ДВЕРЬ НА ПОТОЛКЕ ГАСНЕТ, А НЕ ГЛОТАЕТ (Д-2). Здесь стоял живой `MediaSlot`, а отказ жил
+     ПОСЛЕДНЕЙ строкой обработчика: человек проходил приёмную модалку целиком — превью, кроп,
+     подтверждение — и не происходило НИЧЕГО, без единого слова. Теперь на потолке рисуется
+     мёртвый кадр с причиной. */
+  if (full) {
+    return (
+      <span data-inert={reason} title={reason} className='block w-full'>
+        <span
+          style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
+          className={`${placeholderClass({ dashed: true })} w-full`}
+        >
+          + cloth
+        </span>
+      </span>
+    );
+  }
+  return (
+    <MediaSlot
+      aspectRatio={['Custom']}
+      frameAspect={TEXTURE_ASPECT}
+      label='+ cloth'
+      hint={null}
+      purpose='design · cloth texture of this tech card'
+      showVideos={false}
+      editMode
+      /* ВТОРАЯ ДВЕРЬ ЖИВЁТ ВНУТРИ РАМКИ (J-7), а не отдельной кнопкой под ней: ровно эту кнопку
+         владелец и назвал «огромной». Ведёт на STUDIO → PATTERN — туда, где из одной картинки
+         делают бесшовную плитку, и она возвращается в эту же сетку, названной. */
+      doors={
+        onMakePattern
+          ? [
+              {
+                label: 'pattern ▸',
+                onClick: onMakePattern,
+                title:
+                  'go to STUDIO → PATTERN: one picture in, a seamless repeating tile out. It comes back into this grid once it is named',
+              },
+            ]
+          : undefined
+      }
+      onSelect={take}
+    />
+  );
+}
+
+/**
  * THE CORNERS OF A TILE OF THE MOCKUP (`tile()`): the ROLE bottom left («cloth» / «colour»), the
  * mark «in» top left. Ink labels on the frame, the same organ `PictureTile` draws its badge with —
  * a second spelling of the corner would drift by a pixel on the first edit.
@@ -238,8 +403,8 @@ function TextureGrid({
    */
   trailing?: React.ReactNode;
 }): JSX.Element {
+  /* ТОЛЬКО СНЯТИЕ. Заведение уехало в `ClothIntake` — оно нужно двум местам, снятие одному. */
   const writes = useAssetWrites(techCardId);
-  const { showMessage } = useSnackBarStore();
   const [pendingRemove, setPendingRemove] = useState<common_DesignAsset | null>(null);
 
   /* ОДНА ФУНКЦИЯ НА ЧИТАТЕЛЯ И ПИСАТЕЛЯ (Д-1): ровно та полка, которую наполняет дверь `+ texture`
@@ -260,21 +425,8 @@ function TextureGrid({
   /** Порядковый номер ткани в прогоне, 1-based; `0` — «в этом прогоне её нет». */
   const ordinalOf = (id: number) => chosen.findIndex((f) => (f.assetId ?? 0) === id) + 1;
 
-  /**
-   * ПОТОЛОК СЧИТАЕТСЯ ПО ВСЕЙ КАРТОЧКЕ — ОН ЗЕРКАЛО СЕРВЕРНОГО: `UpsertDesignAsset` отвергает
-   * 41-й ассет карточки независимо от полки. Но ОТЧЁТ раздельный (Д-2): сколько мест держит эта
-   * сетка и сколько — то, чего она не показывает; иначе человек читает «40 активов», не имея ни
-   * одного способа освободить место и ни одного слова о том, чем оно занято.
-   */
-  const totalAssets = (band.assets ?? []).length;
-  const unmanaged = useMemo(() => unmanagedAssets(band), [band]);
-  const full = totalAssets >= ASSETS_PER_CARD_MAX;
-  const fullReason =
-    unmanaged.length === 0
-      ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, all of them in this grid — remove one to make room`
-      : shelf.length === 0
-        ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, and every one of them is hardware from the removed ASSETS shelves — nothing on this screen can free a place, so this card cannot take a texture`
-        : `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets: ${shelf.length} in this grid and ${unmanaged.length} hardware from the removed ASSETS shelves, which no screen can remove any more — free a place by removing a texture here`;
+  /** Потолок активов — ОДНА функция на всех, кто его называет (разбор у `clothCeiling`). */
+  const { full, reason: fullReason } = clothCeiling(band, shelf);
 
   /**
    * ПЕРЕКЛЮЧАТЕЛЬ, А НЕ ЗАМЕНА (круг 19, C2). Раньше здесь стояло `fabrics: [эта одна]`, и потолок
@@ -418,77 +570,21 @@ function TextureGrid({
           );
         })}
 
-        {!disabled && (
+        {/* ═══ КВАДРАТ ДВЕРИ — ТОЛЬКО НА ПУСТОЙ ПОЛКЕ (r3 п.22) ═══════════════════════════════
+            Владелец: «при выбранном паттерне плейсхолдер «+ CLOTH» остаётся — зачем». Незачем:
+            на карточке, где ткань уже принесена, пустой кадр вклинивался МЕЖДУ выбранной тканью и
+            квадратом цвета и читался как третий предмет ряда. Когда полка непуста, та же дверь
+            стоит тихой кнопкой в заголовке группы (`ClothIntake variant='door'`) — одна дверь, два
+            лица, и ни одного места, где её нет вовсе. */}
+        {!disabled && shelf.length === 0 && (
           <div className='flex min-w-0 flex-col gap-1' data-texture-add={full ? 'inert' : 'live'}>
-            {/* ═══ ДВЕРЬ НА ПОТОЛКЕ ГАСНЕТ, А НЕ ГЛОТАЕТ (Д-2) ═══════════════════════════════
-                Здесь стоял живой `MediaSlot`, а отказ жил ПОСЛЕДНЕЙ строкой обработчика: человек
-                проходил приёмную модалку целиком — превью, кроп, подтверждение — и не происходило
-                НИЧЕГО, без единого слова. Теперь на потолке рисуется мёртвый кадр с причиной. */}
-            {full ? (
-              <span data-inert={fullReason} title={fullReason} className='block w-full'>
-                <span
-                  style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
-                  className={`${placeholderClass({ dashed: true })} w-full`}
-                >
-                  + cloth
-                </span>
-              </span>
-            ) : (
-              <MediaSlot
-                aspectRatio={['Custom']}
-                frameAspect={TEXTURE_ASPECT}
-                label='+ cloth'
-                hint={null}
-                purpose='design · cloth texture of this tech card'
-                showVideos={false}
-                editMode
-                onSelect={(media) => {
-                  const first = media[0];
-                  if (!first?.id) return;
-                  /* ВТОРАЯ ПРОВЕРКА ПОТОЛКА, И ОНА ГОВОРИТ ВСЛУХ. Дверь погашена по полосе,
-                     прочитанной ЭТИМ рендером, а между её отрисовкой и подтверждением модалки
-                     стоит целая прогулка человека: соседняя вкладка успевает добрать потолок. */
-                  if (totalAssets >= ASSETS_PER_CARD_MAX) {
-                    showMessage(fullReason, 'error');
-                    return;
-                  }
-                  writes.upsertAsset.mutate({
-                    // `assetId: 0` заводит. Род — УТВЕРЖДЕНИЕ этой двери: она стоит под подписью
-                    // TEXTURE, значит через неё приходит ткань. По пикселям это не восстановимо.
-                    assetId: 0,
-                    kind: ASSET_FABRIC,
-                    name: nextClothName(shelf),
-                    mediaId: first.id,
-                  });
-                }}
-              />
-            )}
-            <Text size='nano' variant='label' component='span' className='normal-case'>
-              {full
-                ? unmanaged.length === 0
-                  ? `${ASSETS_PER_CARD_MAX} of ${ASSETS_PER_CARD_MAX} — remove one`
-                  : `${ASSETS_PER_CARD_MAX} of ${ASSETS_PER_CARD_MAX} — ${shelf.length} here, ${unmanaged.length} hardware`
-                : '⌘V · drop · browse'}
-            </Text>
-            {/* ═══ ВТОРАЯ ДВЕРЬ (K-16) ═══════════════════════════════════════════════════════
-                Дословно владелец: «на плейсхолдере фабрик можно выбрать из библиотеки или же оно
-                должно предлагать сделать это как паттерн». Две двери, «или же», на одной ячейке.
-                Она НЕ гаснет на потолке активов: сделать плитку можно всегда, упрётся только
-                дверь `keep` на PATTERN, и упрётся своими словами. */}
-            {onMakePattern && (
-              /* ⚠ `w-full` НЕСУЩИЙ, А НЕ УБОРКА. `<button>` внутри дорожки грида меряется ПО
-                 СОДЕРЖИМОМУ и вылезает за её 104px, ложась на соседнюю плитку; ровно этот дефект
-                 однажды уже был оплачен в `Tiles`. Ширину задаёт дорожка, а не подпись. */
-              <Button
-                variant='secondary'
-                size='xs'
-                className='w-full'
-                onClick={onMakePattern}
-                title='go to STUDIO → PATTERN: one picture in, a seamless repeating tile out. It comes back into this grid once it is named'
-              >
-                make a pattern ▸
-              </Button>
-            )}
+            <ClothIntake
+              band={band}
+              techCardId={techCardId}
+              shelf={shelf}
+              variant='slot'
+              onMakePattern={onMakePattern}
+            />
           </div>
         )}
 
@@ -717,11 +813,6 @@ export function Palette({
   const state = draft;
   const recipe = state.recipe;
   const stated = fabricStatement(recipe);
-  /** ЖИВАЯ КОМПОЗИЦИЯ — ТА ЖЕ ФУНКЦИЯ, ЧТО УЕДЕТ НА ПРОВОД. Второе написание склейки обещало бы
-   *  человеку одно, а покупало бы другое; поэтому подпись читает `statedWords`, а не собирается. */
-  const willSay = statedWords(state);
-  const clothAbove = stated.photo;
-  const colourAbove = !stated.photo && stated.colour;
 
   /* ═══ ЦВЕТОВОЙ ПЛАН (фича A). `plan === undefined` — сервер про него не говорит вовсе, и тогда
      на экране нет ни двери, ни ряда: клиент новее сервера отправил бы прогон, у которого protojson
@@ -746,8 +837,18 @@ export function Palette({
   const painted = (plan.plan?.maps.length ?? 0) > 0;
   const firstSide = useMemo(() => benchSides(band).find((s) => !!s.picture)?.view ?? '', [band]);
 
+  /** Полка карточки — читатель заголовка (нужна ли ему тихая дверь) и `ClothIntake`. */
+  const shelf = useMemo(() => clothShelf(band), [band]);
+
   return (
-    <div>
+    /* ═══ ШОВ МЕЖДУ ГРУППАМИ — ТОТ ЖЕ ТОКЕН, ЧТО В CARD DETAILS (r3 п.34) ════════════════════
+       Владелец: «больше спейсинга от хедеров к контенту, как в CARD DETAILS». Зазор внутри группы
+       («линейка → первое содержимое») задаёт `GROUP_GAP` на самой линейке, шов МЕЖДУ группами —
+       `GROUP_SEAM` здесь. Оба живут в `../core`, объявлены один раз на всю полосу: свой размер тут
+       разошёлся бы с карточкой на первой же правке. Каждая группа обёрнута своим `<div>` — иначе
+       шов встал бы и между линейкой и её собственным содержимым. */
+    <div className={GROUP_SEAM}>
+      <div>
       {/* ═══ ОДНА ГРУППА НА ДВА ОДНОРОДНЫХ ПРЕДМЕТА (E-8) ════════════════════════════════════
           `GroupLabel` — вес «под-группа» лестницы DESIGN.md (1px `#cccccc`), на ступень выше
           рулёных рядов ниже (`#e6e6e6`). Это верный вес: текстура с цветом теперь самая крупная
@@ -772,11 +873,18 @@ export function Palette({
           есть своя `paint` на плитке ниже, но она появляется только когда ряд уже есть. Дверь
           гаснет вместе с планом: сервер, не знающий глагола, обязан быть назван словами, а не
           показан живой кнопкой, которая молча ничего не сделает. */}
+      {/* ⚠ СЧЁТЧИК `N of M cloths` СНЯТ (r3, слово владельца по п.2: «не нужно, и так видно»).
+          Он пересчитывал ровно то, что стоит под ним ЯРЛЫКАМИ: у каждой выбранной ткани в углу
+          кадра стоит «in» с её номером, а вся полка — это сама сетка. Место счётчика заняла
+          единственная дверь, которой на непустой полке больше негде стоять. */}
       <GroupLabel
+        flush
+        className={GROUP_GAP}
         action={
           <span className='flex flex-wrap items-center gap-1.5'>
-            {/* `N of M cloths` — the cloths of this run against the shelf of the card. */}
-            <Counter n={(recipe.fabrics ?? []).length} noun='cloth' total={clothShelf(band).length} />
+            {!disabled && shelf.length > 0 && (
+              <ClothIntake band={band} techCardId={techCardId} shelf={shelf} variant='door' />
+            )}
             {!disabled && plan.plan && firstSide && !painted ? (
               <Button
                 variant='secondary'
@@ -887,61 +995,59 @@ export function Palette({
           disabled={disabled}
         />
       )}
+      </div>
 
       {/* ── WHAT THE CLOTH IS — H-13. Свойство ТОЙ ЖЕ ткани, что в сетке, и уезжает в то же поле
           провода, что слова ниже. ⚠ РЯД ЗНАЕТ ПРО ФОТОГРАФИЮ (E-2): именно у него стоит теперь
-          единственная строка о том, кто кого перебивает. */}
+          единственная строка о том, кто кого перебивает.
+          Своей обёрткой он уже является (`<div data-cloth-is>`), поэтому шов группы применяется
+          к нему как к одному ребёнку, а его собственная линейка держит `GROUP_GAP` внутри. */}
       <ClothIsRow draft={state} disabled={disabled} />
 
       {/* ── IN WORDS — the free text of the recipe: the lowest rank, and a legal statement on its
           own (mockup `r3WordsRow`). The door FROM CONSTRUCTION ▸ stands where the mockup puts it,
           INERT WITH ITS REASON: the render prompt is assembled by the SERVER from the card, and a
           pasted part of the construction is not on the wire — there is nothing to paste it into. */}
-      <GroupLabel
-        action={
-          <span className='flex flex-wrap items-center gap-1.5'>
-            {!disabled && stated.words && (
-              <Button variant='secondary' size='xs' onClick={() => state.clear('words')}>
-                clear
-              </Button>
-            )}
-            <InertDoor
-              label='from construction ▸'
-              reason='the render prompt is assembled by the server from the card itself; a pasted part of the construction is not on the wire, so there is nothing here to paste it into'
-            />
-          </span>
-        }
-      >
-        in words
-      </GroupLabel>
-      <Input
-        name='design-fabric-words'
-        aria-label='the cloth in words'
-        value={recipe.words ?? ''}
-        disabled={disabled}
-        placeholder='fine rib jersey, matte'
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => state.typed({ words: e.target.value })}
-      />
-      {/* ONE LIVE LINE — WHAT TRAVELS AS WORDS. The controls above write ONE wire field; the line
-          shows the result BEFORE the money, in the words of the modal «what the model gets»,
-          because it reads the same function (`statedWords`). An empty composition is a legal
-          answer and is named too. */}
-      <Text
-        size='micro'
-        variant='label'
-        component='p'
-        data-stated-words={willSay ? 'stated' : 'nothing'}
-        className='mt-1 normal-case'
-      >
-        the words above travel with the recipe ·{' '}
-        {willSay
-          ? `goes to the model as «${willSay}»`
-          : clothAbove
-            ? 'nothing added · the cloth above already states the material'
-            : colourAbove
-              ? 'nothing added · only a colour is stated above, so the material is left to the model'
-              : 'nothing added · nothing above states the cloth yet either'}
-      </Text>
+      <div>
+        <GroupLabel
+          flush
+          className={GROUP_GAP}
+          action={
+            <span className='flex flex-wrap items-center gap-1.5'>
+              {!disabled && stated.words && (
+                <Button variant='secondary' size='xs' onClick={() => state.clear('words')}>
+                  clear
+                </Button>
+              )}
+              <InertDoor
+                label='from construction ▸'
+                reason='the render prompt is assembled by the server from the card itself; a pasted part of the construction is not on the wire, so there is nothing here to paste it into'
+              />
+            </span>
+          }
+        >
+          in words
+        </GroupLabel>
+        <Input
+          name='design-fabric-words'
+          aria-label='the cloth in words'
+          value={recipe.words ?? ''}
+          disabled={disabled}
+          placeholder='fine rib jersey, matte'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            state.typed({ words: e.target.value })
+          }
+        />
+        {/* ⚠ СТРОКА «the words above travel with the recipe · goes to the model as «…»» СНЯТА
+            (r3 п.26, слово владельца: «убрать»). Она эхом печатала СОДЕРЖИМОЕ поля, которое
+            человек в этот момент печатает, — и стояла в двух сантиметрах под ним. Всё, что она
+            добавляла сверх эха, — оговорка «уедет вместе с рецептом», а это ровно то, чем поле
+            под подписью IN WORDS и является.
+            ⚠ ЗНАНИЕ НЕ ПОТЕРЯНО, И ЭТО ПРОВЕРЯЕТСЯ, А НЕ ОБЕЩАЕТСЯ. Полная склейка (`statedWords`
+            — та же функция, что уезжает на провод) печатается в модалке «what the model gets», в
+            одном нажатии отсюда, в ряду GENERATE. Там её читают, когда ПРОВЕРЯЮТ, а не когда
+            печатают. */}
+      </div>
     </div>
   );
 }

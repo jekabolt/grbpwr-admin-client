@@ -10,7 +10,7 @@ import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { WhatModelGetsRenderModal } from '../render/what-model-gets';
 import { useOnModelPaint, useOnModelShot } from './drafts';
-import { asRowGate, clothChoices, onModelGate, paintWire } from './model';
+import { asRowGate, clothChoices, onModelGate, paintWire, shotMediaIds } from './model';
 import { OnModelOutputs } from './outputs';
 import { PaintGroup } from './paint-group';
 import { ShotGroup, libraryShot } from './shot-group';
@@ -23,20 +23,24 @@ import { ShotGroup, libraryShot } from './shot-group';
  * without a number, and the LOCKED bar under the rail never names it. Its own refusals stand INSIDE
  * this block, above its GENERATE.
  *
- * THE ORDER OF THE BLOCK IS THE ARGUMENT. First WHAT is repainted (the one shot), then WHAT IT IS
- * REPAINTED IN (a cloth off the shelf, a new cloth, or a flat colour — one of three), then the
+ * THE ORDER OF THE BLOCK IS THE ARGUMENT. First WHAT is repainted (the strip of shots), then WHAT
+ * IT IS REPAINTED IN (a cloth off the shelf, a new cloth, a pantone colour — or a cloth AND a
+ * colour together, r3 п.43), then the
  * doors of the run (the lock bar with its door, GENERATE, the money line, the inventory), and in
  * the next block what came back. The prototype puts the material above the decision on every
  * generative step, and so does this one.
  *
- * ONE SHOT, ONE PAID CALL. The wire takes a list (`extra_input_media_ids`); one shot travels as a
- * list of one, and the contract is untouched. The price is a TARIFF, not a sum — and this admin
- * owns no tariff (`price_estimate` is output-only), so the money line says what it can:
- * «one paid call · priced by the server when the run starts».
+ * ONE PAID CALL PER PHOTOGRAPH, AND THE STRIP HOLDS UP TO 24 (r3 п.42). The wire field is a list
+ * (`extra_input_media_ids`) and always was; the round before this one narrowed the screen to one
+ * shot and the owner sent it back. The price is a TARIFF, not a sum — and this admin owns no
+ * tariff (`price_estimate` is output-only) — so the money line names the RULE and never a number
+ * of dollars multiplied out of `shots.length`: «one call per photograph · priced by the server
+ * when the run starts».
  *
  * REFUSALS ARE PRINTED, NEVER HIDDEN IN A TITLE. The gate (`onModelGate`) asks two things — is
- * there something to repaint, and something to repaint it with — after the archived-name check;
- * each refusal is a lock bar with the door that lifts it: `+ photo ›` opens the fittings chooser
+ * there something to repaint, and something to repaint it with (a cloth, a colour, or BOTH — the
+ * exclusive «one of three» is gone, r3 п.43) — after the archived-name check; each refusal is a
+ * lock bar with the door that lifts it: `+ photo ›` opens the fittings chooser
  * (or the library when the card has no fittings with pictures), `the paint ›` carries the eye and
  * the caret to the paint group on this same screen — no step switch, no re-render that would blow
  * the focus away.
@@ -91,14 +95,12 @@ export function OnModelStudio({
   /** Whether the card has a fitting with a picture — the `+ photo ›` door picks its target by it. */
   const [fittingsHavePictures, setFittingsHavePictures] = useState(false);
 
-  const shot = shotDraft.shot;
-  const shotMediaId = shot?.media.id ?? 0;
+  const shots = shotDraft.shots;
+  /** THE LIST, IN THE ORDER IT LEAVES — the gate, the shelf and the wire all read this one array. */
+  const mediaIds = useMemo(() => shotMediaIds(shots), [shots]);
   const paint = paintDraft.paint;
 
-  const choices = useMemo(
-    () => clothChoices(band, shotMediaId > 0 ? [shotMediaId] : []),
-    [band, shotMediaId],
-  );
+  const choices = useMemo(() => clothChoices(band, mediaIds), [band, mediaIds]);
 
   /**
    * ONE OBJECT FOR THE GATE, THE PILLS, THE INVENTORY AND THE WIRE (J-31): `params.colour` exactly
@@ -108,12 +110,12 @@ export function OnModelStudio({
   const wireColour = useMemo(() => paintWire(band, paint), [band, paint]);
 
   const gate = useMemo(
-    () => onModelGate(shotMediaId, wireColour, colorwayArchived, colorwayLabel),
-    [shotMediaId, wireColour, colorwayArchived, colorwayLabel],
+    () => onModelGate(mediaIds, wireColour, colorwayArchived, colorwayLabel),
+    [mediaIds, wireColour, colorwayArchived, colorwayLabel],
   );
 
   const generate = () => {
-    if (shotMediaId <= 0) return;
+    if (mediaIds.length === 0) return;
     run.start({
       kind: 'recolor',
       // Nothing is typed on this screen; everything the model gets is in the fields it shows.
@@ -129,9 +131,9 @@ export function OnModelStudio({
         colour: wireColour,
         threed: undefined,
         fixTarget: '',
-        // THE PHOTOGRAPH BEING RECOLOURED — the contract's own name for this list on a recolour.
-        // One shot, a list of one.
-        extraInputMediaIds: [shotMediaId],
+        // THE PHOTOGRAPHS BEING RECOLOURED — the contract's own name for this list on a recolour,
+        // in the order the strip shows them; the run returns one picture per entry.
+        extraInputMediaIds: mediaIds,
         fixTargets: [],
         fixSlotIds: [],
         autoSplit: false,
@@ -162,7 +164,7 @@ export function OnModelStudio({
         action={
           <>
             <Pill tone='ink'>outside the chain</Pill>
-            <Counter n={shot ? 1 : 0} noun='shot' total={1} />
+            <Counter n={shots.length} noun='shot' />
           </>
         }
       >
@@ -178,7 +180,7 @@ export function OnModelStudio({
         <PaintGroup
           band={band}
           techCardId={techCardId}
-          shot={shot}
+          hasShots={shots.length > 0}
           paint={paint}
           draft={paintDraft}
           choices={choices}
@@ -203,13 +205,12 @@ export function OnModelStudio({
               ) : (
                 <MediaSelector
                   label='+ photo'
-                  purpose='design · the photograph this run repaints'
+                  purpose='design · the photographs this run repaints'
                   aspectRatio={['Custom']}
-                  allowMultiple={false}
                   showVideos={false}
+                  allowMultiple
                   saveSelectedMedia={(media) => {
-                    const first = media[0];
-                    if (first?.id) shotDraft.put(libraryShot(first));
+                    shotDraft.add(media.filter((m) => m.id).map(libraryShot));
                   }}
                   trigger={
                     <Button variant='secondary' size='xs'>
@@ -228,7 +229,7 @@ export function OnModelStudio({
 
         <GenerateRow
           gate={asRowGate(gate)}
-          shape='one paid call'
+          shape='one call per photograph'
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
@@ -245,7 +246,7 @@ export function OnModelStudio({
         band={band}
         kind='recolor'
         recipe={wireColour}
-        sources={shot ? [shot.media] : []}
+        sources={shots.map((s) => s.media)}
         cardFit=''
         colorwayId={colorwayId}
         colorwayLabel={colorwayLabel}

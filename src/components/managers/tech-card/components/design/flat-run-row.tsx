@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -8,7 +8,7 @@ import { ViewSwitch } from 'ui/components/view-switch';
 
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
-import { PRICED_LATER, latestRunOfKind } from './core';
+import { GROUP_GAP, PRICED_LATER, latestRunOfKind } from './core';
 import { filledFlatSlots, sentFlatSlotIds, useFlatSlotsSend } from './flat-slots-send';
 import { markedPlatesOf } from './fix-markup';
 import { formatMoney } from './generation/money';
@@ -44,6 +44,49 @@ import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from './views';
  * пяти рядах GENERATE (`PRICED_LATER`). Нет ни одного прогона — только фраза.
  */
 
+/**
+ * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ ТРЁХ РЯДОВ (r3 п.5) ══════════════════════════════════════════════
+ *
+ * Владелец, дословно: «после WORDS очень много кнопок разного размера с минимальными отступами …
+ * сделать по уму». «Разного размера» — это измеримо и это была правда: `Button size='sm'` (рамка +
+ * `py-1` + `leading-4`) ростом 26px стояла вплотную к `Chip` и к сегменту `ViewSwitch` ростом 19px,
+ * и три ряда органов читались как три разных класса вещей.
+ *
+ * ЭТАЛОН ВЫБРАН НЕ ГОЛОСОВАНИЕМ: 26px — рост `GENERATE`, а её разметку держит общий ряд
+ * (`render/generate-row.tsx`, зона G1), то есть подогнать надо было ВСЁ ОСТАЛЬНОЕ к ней, а не
+ * наоборот. Число живёт здесь одно, и ленты берут его отсюда.
+ *
+ * ⚠ ИНЛАЙНОМ, А НЕ КЛАССОМ, И ЭТО НЕ НЕБРЕЖНОСТЬ. Класса на 26px в tailwind нет (`h-6` = 24), а
+ * произвольного (`h-[26px]`) НЕТ В СОБРАННОМ CSS, если его не было в дереве на момент сборки —
+ * стенд читает именно собранный CSS и намерил бы неправильную геометрию, показав зелёное там, где
+ * у человека разъехалось (память `probe-served-a-stale-bundle`).
+ */
+export const ROW_CONTROL_PX = 26;
+export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX };
+
+/** Сторона миниатюры плиты в ряду источников — снимок, а не иконка, и не выше двух рядов текста. */
+export const PLATE_PX = 44;
+
+/**
+ * ═══ ПОДПИСЬ ВТОРОСТЕПЕННОЙ КНОПКИ — РАЗМЕРОМ КОНТРОЛА, А НЕ ТЕЛА ТЕКСТА (r3 п.5) ══════════════
+ *
+ * Владелец просил ещё и ОДИН РАЗМЕР ШРИФТА в этих рядах. Замерено: чипы и сегменты раскладки
+ * печатают 10px, а `Button size='sm'` — 12px, хотя DESIGN.md на второстепенную кнопку говорит
+ * ровно «10px label type uppercase». Разница не в вызове: `buttonVariants` кладёт на одну кнопку
+ * И `text-textBaseSize` (от `variant`), И `text-micro` (от `size`), а `cva` их не мирит — спор
+ * решает порядок утилит в собранном CSS, и `text-textBaseSize` там ПОЗЖЕ. То есть `text-micro`
+ * размера `sm` мёртв во всей админке, и класс с места вызова умрёт так же.
+ *
+ * ПОЭТОМУ РАЗМЕР НАЗЫВАЕТ ПОДПИСЬ, А НЕ КНОПКА: у вложенного `span` конкурента нет. Это не обход
+ * системы, а её же значение — 10px, `text-micro`, — возвращённое туда, где примитив его теряет.
+ * ⚠ ПОЧИНКА ПО СУЩЕСТВУ ЖИВЁТ В `ui/components/button.tsx` (снять `text-textBaseSize` с вариантов
+ * или помирить классы через `twMerge`); она за пределами этой зоны и названа в отчёте. Главную
+ * кнопку (`GENERATE`) это не касается: 12px у неё — по системе.
+ */
+export function ControlLabel({ children }: { children: ReactNode }): JSX.Element {
+  return <span className='text-micro'>{children}</span>;
+}
+
 const LAYOUT_OPTIONS = [
   { value: 'one' as const, label: 'one picture', hint: 'all the ticked views drawn into one file' },
   {
@@ -58,10 +101,18 @@ export function FlatRunRow({
   band,
   techCardId,
   disabled,
+  sources,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /**
+   * ВТОРОЙ РЯД — ИСТОЧНИКИ (r3 п.5): «from construction ▸ · also send the flat slots» и лента
+   * миниатюр плит при включённом тумблере. Приезжает щелью, потому что ОБЕ его двери пишут в
+   * блок референсов (поле формы и хранилище исключений карточки), а этот компонент держит РИТМ
+   * трёх полос, а не их содержимое. Разбор — у места вызова.
+   */
+  sources?: ReactNode;
 }): JSX.Element {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
@@ -139,7 +190,14 @@ export function FlatRunRow({
   };
 
   return (
-    <div data-flat-run='' className='space-y-2'>
+    /* ═══ ТРИ РЯДА, ОДИН ЗАЗОР, ОДИН РОСТ ОРГАНОВ (r3 п.5) ══════════════════════════════════════
+       Владелец: «сделать по уму … три спокойных ряда … дай больше спейсинга». Ряды идут в его
+       порядке: виды → источники → запуск. Зазор — 12px, ТОТ ЖЕ ШАГ, что `GROUP_GAP` («линейка
+       группы → содержимое», `core/organs.tsx`): между полосами одного решения он обязан быть тем
+       же, что между подписью и её содержимым, и меньше шва между блоками (16px у секции).
+       Классом `GROUP_GAP` его не выразить — тот margin-bottom на подписи, а здесь нужен ритм
+       между рядами; поэтому шаг один, а написаний два, и оба названы здесь. */
+    <div data-flat-run='' className='space-y-3'>
       {!speaks && (
         <CalloutBox tone='note'>
           this server does not speak the design band yet — the controls are here, but nothing can be
@@ -147,11 +205,13 @@ export function FlatRunRow({
         </CalloutBox>
       )}
 
-      {/* ═══ ВИДЫ — одна строка: ярлык, чипы сторон и деталей, справа раскладка ответа ═══════
+      {/* ═══ РЯД 1 · ВИДЫ — ярлык, чипы сторон и деталей, справа раскладка ответа ═══════════════
           Отмеченный чип заливается чернилами — это и есть состояние; «слот заполнен / пуст»
           живёт в title, потому что лента FLAT SLOTS стоит на той же вкладке и показывает то же
           глазами. Раскладка имеет смысл от двух видов; при одном она ничего не меняет и молчит
-          (`title`), а не пропадает: положение переключателя — предпочтение, оно переживает галки. */}
+          (`title`), а не пропадает: положение переключателя — предпочтение, оно переживает галки.
+          Ярлык `views` — единственный текст ряда; рост у чипов и у полосы раскладки тот же, что у
+          кнопок двух рядов ниже (`ROW_CONTROL_STYLE`). */}
       <div className='flex flex-wrap items-center gap-2' data-flat-views=''>
         <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
           views
@@ -167,6 +227,7 @@ export function FlatRunRow({
                 selected={on}
                 pressed={on}
                 disabled={writesOff}
+                style={ROW_CONTROL_STYLE}
                 title={
                   slotFilled
                     ? 'its flat slot below is already filled'
@@ -189,6 +250,7 @@ export function FlatRunRow({
                 selected={on}
                 pressed={on}
                 disabled={writesOff}
+                style={ROW_CONTROL_STYLE}
                 title={`detail described in the flat slots: ${displayDetailName(bench.details, d)}`}
                 onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
               >
@@ -197,8 +259,12 @@ export function FlatRunRow({
             );
           })}
         </ChipRow>
+        {/* ПЕРЕКЛЮЧАТЕЛЬ РАСКЛАДКИ — В КОНЦЕ ТОГО ЖЕ РЯДА (слово владельца), и рост ему задаёт
+            обёртка: у самой полосы сегменты растянуты (`items-stretch`), поэтому высоту довольно
+            назвать один раз снаружи. */}
         <span
-          className='ml-auto'
+          className='ml-auto flex'
+          style={ROW_CONTROL_STYLE}
           title={
             ticked.length <= 1
               ? 'one view is asked — both layouts return one picture, so this changes nothing here'
@@ -211,11 +277,16 @@ export function FlatRunRow({
             options={LAYOUT_OPTIONS}
             disabled={writesOff}
             onChange={setLayout}
+            className='h-full'
           />
         </span>
       </div>
 
-      {/* ═══ РЯД ЗАПУСКА — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
+      {/* ═══ РЯД 2 · ИСТОЧНИКИ — что ещё уедет вместе с референсами. Содержимое даёт блок
+          референсов (разбор — у места вызова); здесь его место в ритме. */}
+      {sources}
+
+      {/* ═══ РЯД 3 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
           названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
           хвост здесь свой — деньги слева от двери описи, дверь у правого края, как в макете.
           `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
@@ -234,7 +305,7 @@ export function FlatRunRow({
                   блока за ответом на вопрос «а что именно уедет». Правило макета («дверь описи у
                   правого края») остаётся у остальных четырёх рядов — они этот хвост не рисуют. */}
               <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
-                what the model gets ▸
+                <ControlLabel>what the model gets ▸</ControlLabel>
               </Button>
               <Text
                 size='micro'

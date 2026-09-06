@@ -6,12 +6,11 @@ import { Section } from 'ui/components/section';
 
 import { colourPlanGate, planRecipe } from '../colour-plan/model';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
-import { viewLabel } from '../views';
+import { GROUP_SEAM } from '../core';
 import { useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   hexIsPaintable,
-  madeOfLine,
   recipeIsStated,
   renderGate,
   renderSheetViews,
@@ -208,15 +207,19 @@ export function RenderStudio({
     });
   };
 
-  const shape = [
-    views.length > 1
-      ? `1 picture · ${views.length} views in a row`
-      : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`,
-    madeOfLine(wire),
-    views.length > 1 ? 'split into the slots afterwards' : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots
+     afterwards · priced by the server when the run starts». Владелец: «убрать».
+     ЧТО ОНА ГОВОРИЛА И ГДЕ ЭТО ОСТАЛОСЬ, ПОШТУЧНО, потому что снимать строку, не проверив каждый
+     её член, — это и есть тихая потеря:
+       · «1 picture · N views in a row» и «split into the slots afterwards» — форма листа. Живёт в
+         модалке «what the model gets», дверь которой стоит в ЭТОМ ЖЕ ряду, у правого края;
+       · «made of …» (`madeOfLine`) — из чего сделан рецепт. Это дословный пересказ сетки CLOTH AND
+         COLOUR, стоящей на три сантиметра выше: ткани там помечены «in» с номером, цвет — квадратом;
+       · «priced by the server when the run starts» — цена. Владелец: «цена — по факту в истории»,
+         и она там печатается строкой прогона (`priceActual`).
+     ПОЭТОМУ `shape` БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ, а не подменяется пустой строкой: у `GenerateRow` это
+     ровно тот проп, которым экран объявляет «мой состав называю стандартными словами». Дверь описи
+     при этом осталась — она висит на `onInspect`, а не на `shape` (разбор там же). */
 
   /* THE DOOR OF A REFUSAL: where it is fixed, when that is another step. Missing flats → the flat
      bench; the archived colourway → the select on the rail (no door here); everything else is this
@@ -237,6 +240,11 @@ export function RenderStudio({
         title='fabric render'
         question='· the cloth on the flats'
         action={<Pill tone='ink'>step 4</Pill>}
+        /* ГЭПЫ КАК В CARD DETAILS (r3 п.34) — ОДИН ТОКЕН НА ВСЮ ПОЛОСУ. `GROUP_SEAM` разводит
+           прямых детей блока (рецепт · полоса замка · отказ · ряд GENERATE) одним швом в 20px
+           вместо `space-y-stack` в 10px; зазор «линейка группы → содержимое» внутри рецепта
+           держит `GROUP_GAP` на самих линейках (`./palette`). */
+        className={GROUP_SEAM}
       >
         {/* ═══ CLOTH AND COLOUR · CLOTH IS · IN WORDS — the recipe, three group rows. The palette
             owns them because they write one draft (`useColourDraft`) and the gate above reads
@@ -262,13 +270,11 @@ export function RenderStudio({
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
         <GenerateRow
           gate={gate}
-          shape={shape}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
         />
-
       </Section>
 
       {/* ═══ SIDES — СВОЙ БЛОК, НАД РЕНДЕРАМИ КАРТОЧКИ (r2 п.29) ══════════════════════════════

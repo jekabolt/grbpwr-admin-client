@@ -7,10 +7,14 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
+import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+
+import { GROUP_GAP } from '../core';
+import { PictureTile } from '../picture-tile';
 import { viewLabel } from '../views';
 import { formatMoney } from './money';
 import { isCancelling, isRunLive, runFailureText, runStatus, viewsLine } from './run-state';
-import { Thumb } from './thumb';
+import { Thumb, thumbUrl } from './thumb';
 import { useGenerationWrites } from './use-generation';
 
 /**
@@ -219,6 +223,7 @@ export function RunPanel({
     <div data-run-meta={run.id || undefined} className='mt-2 border-l border-hairline pl-2'>
       <GroupLabel
         flush
+        className={GROUP_GAP}
         action={
           <span className='flex flex-wrap items-center gap-1'>
             <CountPill n={refs.length} noun='picture' />
@@ -237,22 +242,64 @@ export function RunPanel({
       </GroupLabel>
 
       {/* THE INPUT PICTURES, IN A ROW, NUMBERED. The prompt says «- image 3: …», and without the
-          number a person would have to count left to right — repeating the work the screen owes. */}
+          number a person would have to count left to right — repeating the work the screen owes.
+
+          ═══ И КАЖДЫЙ КАДР ОТКРЫВАЕТ ОБЩИЙ ПРОСМОТРЩИК (r3 п.9) ══════════════════════════════════
+          Владелец, дословно: «в WHAT WENT IN по клику на картинку — зум». Это ровно тот же пункт,
+          что T-8 закрыл у выходов («по всем картинкам из всех генераций итерироваться … и сделай
+          везде одинаково»), а вход прогона остался единственным местом полосы, где картинка
+          нажатия не принимала вовсе — притом что смотрят на неё за тем же самым: «что уехало
+          модели» читается по кадру, а не по подписи.
+
+          ⚠ ЭТО `PictureTile`, А НЕ КНОПКА ВОКРУГ `Thumb`, И ПРИЧИНА НЕ В КРАСОТЕ. Ряд
+          просмотрщика собирает `PictureGalleryProvider`, и кадры в него кладут САМИ ПЛИТКИ по
+          своему месту в документе — `openAt` наружу не объявлен вовсе. Значит своя кнопка либо
+          завела бы второй `MediaViewer` со своим рядом (тот самый дефект, который T-8 убирал в
+          пяти местах), либо не открыла бы ничего. Плитка же встаёт в ОБЩИЙ ряд ровно там, где
+          стоит панель, — между выходами строки выше и строками ниже, — и «дальше» уводит из входа
+          в остальную ленту, как и просил владелец.
+
+          ФАЙЛ, КОТОРОГО БОЛЬШЕ НЕТ, ОСТАЁТСЯ `Thumb`: снимок замораживает `media_id`, и удалённый
+          файл приезжает без `media`. Ему нечего дать просмотрщику — ряд из пустого кадра приводил
+          бы человека к пустой сцене, — поэтому он рисуется словом «deleted» и нажатия не обещает.
+
+          КАДР 44px, А НЕ 28px: у плитки органы живут В УГЛАХ (закон углов, `picture-tile.tsx`), и
+          угловой `zoom` на кадре в 28px накрыл бы собой всю картинку. Ряд от этого стал реже —
+          отсюда же `gap-x-3` вместо `gap-2`. */}
       {refs.length > 0 ? (
-        <div className='flex flex-wrap items-center gap-2'>
-          {refs.map((ref, i) => (
-            <span
-              key={`${ref.mediaId}-${i}`}
-              title={`image ${i + 1}: ${ref.caption}`}
-              className='flex items-center gap-1'
-              data-sent-picture={i + 1}
-            >
-              <Thumb media={ref.media} gone={ref.deleted} alt={ref.caption} className='h-7 w-7' />
-              <Text size='nano' variant='label' component='span' className='truncate'>
-                {i + 1} · {ref.name}
-              </Text>
-            </span>
-          ))}
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-2'>
+          {refs.map((ref, i) => {
+            const url = thumbUrl(ref.media);
+            return (
+              <span
+                key={`${ref.mediaId}-${i}`}
+                title={`image ${i + 1}: ${ref.caption}`}
+                className='flex items-center gap-1.5'
+                data-sent-picture={i + 1}
+              >
+                {url && ref.media ? (
+                  <PictureTile
+                    url={url}
+                    alt={`image ${i + 1} — ${ref.caption}`}
+                    aspect='1/1'
+                    fit='contain'
+                    gallery={mediaFullToViewerItem(ref.media)}
+                    className='w-11 shrink-0'
+                  />
+                ) : (
+                  <Thumb
+                    media={ref.media}
+                    gone={ref.deleted}
+                    alt={ref.caption}
+                    className='h-11 w-11'
+                  />
+                )}
+                <Text size='nano' variant='label' component='span' className='truncate'>
+                  {i + 1} · {ref.name}
+                </Text>
+              </span>
+            );
+          })}
         </div>
       ) : (
         <Text size='nano' variant='label' component='p'>

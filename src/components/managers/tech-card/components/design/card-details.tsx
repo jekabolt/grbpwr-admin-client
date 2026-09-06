@@ -17,7 +17,6 @@ import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
@@ -29,12 +28,12 @@ import { fieldErrorSummary, revealField } from 'utils/field-errors';
 
 import { CollectionField } from '../collection-field';
 import { BaseModelFields, CategoryBrowser } from '../header-meta-fields';
-import { ROLES, RolesField, rolesFilled } from '../roles-field';
+import { RolesField } from '../roles-field';
 import type { TechCardFormData } from '../schema';
 import { SeasonField } from '../season-field';
 import { parseSeasonToSku } from '../season-util';
 import { useRoleAssignments } from '../useRoles';
-import { Counter, EmptyState } from './core';
+import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
 import { LockBar } from './render/generate-row';
 
 /**
@@ -96,35 +95,13 @@ function filledMeta(values: unknown[]): number {
 }
 
 /**
- * ОДИН ШОВ МЕЖДУ ГРУППАМИ БЛОКА — 20px, одинаковый на всех четырёх стыках.
- *
- * Владелец: «между IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE и RESPONSIBLE ROLES
- * с LINKED PRODUCTS сделай чуть больше гэп, чтобы не казалось так скучено».
- *
- * До этого зазор рисовали ДВА разных органа: `space-y-stack` секции (10px) и `mt-3` у
- * неприжатого `GroupLabel` (12px, схлопывался с соседним, а не складывался). Отсюда 10 / 12 / 12
- * / 10 — четыре шва трёх разных весов, что и читалось как «скучено» и неровно. Здесь шов один и
- * задаётся ОДНИМ классом на самой секции: `mt` сверху у каждого ребёнка кроме первого и снятый
- * `mb` у всех (иначе к 20px прибавились бы 10px от `space-y-stack`). Утилиты `space-y-*` в
- * tailwind v4 завёрнуты в `:where(...)` — нулевая специфичность, поэтому обе строки ниже их
- * честно перекрывают, а не «случайно выигрывают порядком».
- *
- * 20px, а не 24px: 24px — это `--spacing-gutter`, зазор МЕЖДУ блоками. Группы внутри блока обязаны
- * дышать слабее, чем блоки между собой, иначе одна коробка читается как четыре.
- *
- * Все `GroupLabel` внутри — `flush`: свой `mt-3` они больше не приносят, вес шва живёт в одном
- * месте.
- */
-const GROUP_SEAM = '[&>*+*]:mt-5 [&>*]:mb-0';
-
-/**
  * Six tracks, 16px between columns, 10px between rows — the prototype's `.cardgrid`.
  *
- * `[&_label]:min-h-[19px]` is the prototype's «rowline:first-child{min-height:19px}»: the style
- * number's label line carries a provenance pill (~19px tall) while a bare label is ~10px, and
- * without a common minimum the two inputs of one row would sit at different heights. The rule is
- * put on the grid rather than on each field, because half of the fields here draw their label
- * inside a primitive (`FormLabel`) this file does not own.
+ * `[&_label]:min-h-[19px]` is the prototype's «rowline:first-child{min-height:19px}» — ОДНА высота
+ * строки подписи на весь блок, чтобы два поля одного ряда начинались на одной линии независимо от
+ * того, что стоит в подписи (у части полей это не голый текст, а подпись с органом справа). Правило
+ * висит на сетке, а не на каждом поле, потому что половина полей рисует подпись внутри примитива
+ * (`FormLabel`), которым этот файл не владеет.
  */
 const GRID =
   'grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-6 [&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center';
@@ -139,8 +116,12 @@ const MANUAL = 'STYLE_NUMBER_SOURCE_MANUAL';
  *
  * `{SEASON}-{SEQ}` and nothing else; the server names the next free number (SuggestStyleNumber)
  * and guards uniqueness. Typing flips the source to MANUAL — the ONE place the number becomes
- * «by hand» — and SUGGEST writes GENERATED past that path. The provenance is SHOWN as a pill on
- * the label line (only while the number is non-empty), not told in a tooltip.
+ * «by hand» — and SUGGEST writes GENERATED past that path.
+ *
+ * ПРОВЕНАНС НЕ ПОКАЗЫВАЕТСЯ (владелец, r3 п.1: «STYLE NUMBER * в рамке (SUGGESTED) не надо
+ * показывать»). `styleNumberSource` живёт дальше — он идёт на провод и решает, чем считать
+ * номер, — но пилюли `suggested` / `by hand` на подписи больше нет: человек и так знает, набрал
+ * он номер сам или нажал SUGGEST секунду назад, а пилюля добавляла второй орган в ряд подписи.
  *
  * Without a season the button is disabled and the cause stands as a VISIBLE `LockBar` with a door
  * to the season field — never as a `title` on a dead control (the prototype's rule, kept).
@@ -183,11 +164,7 @@ function StyleNumberCell({ isIdea }: { isIdea: boolean }) {
         const value = (field.value as string | undefined) ?? '';
         return (
           <FormItem data-card-style-number=''>
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <FormLabel>{isIdea ? 'style number' : 'style number *'}</FormLabel>
-              {value.trim() &&
-                (source === GENERATED ? <Pill tone='ink'>suggested</Pill> : <Pill>by hand</Pill>)}
-            </div>
+            <FormLabel>{isIdea ? 'style number' : 'style number *'}</FormLabel>
             <div className='flex items-start gap-1.5'>
               <div className='min-w-0 flex-1'>
                 <FormControl>
@@ -442,7 +419,9 @@ export function CardDetails({
     >
       {/* ── IDENTIFICATION — 3+3, then 2+2+2 ─────────────────────────────────────────────── */}
       <div className='min-w-0' data-card-group='identification'>
-        <GroupLabel flush>identification</GroupLabel>
+        <GroupLabel flush className={GROUP_GAP}>
+          identification
+        </GroupLabel>
         <div className={GRID}>
           <div className={W3}>
             <InputField name='name' label='name *' placeholder='what this style is called' />
@@ -467,7 +446,9 @@ export function CardDetails({
 
       {/* ── CLASSIFICATION — 2+2+2 ───────────────────────────────────────────────────────── */}
       <div className='min-w-0' data-card-group='classification'>
-        <GroupLabel flush>classification</GroupLabel>
+        <GroupLabel flush className={GROUP_GAP}>
+          classification
+        </GroupLabel>
         <div className={GRID}>
           {/* The category cascade — three columns in one popover over a single stored leaf.
               Its trigger stretches to the whole cell like the selects beside it. */}
@@ -516,7 +497,9 @@ export function CardDetails({
 
       {/* ── BASE MODEL & SAMPLE SIZE — 3+3 ───────────────────────────────────────────────── */}
       <div className='min-w-0' data-card-group='base'>
-        <GroupLabel flush>base model &amp; sample size</GroupLabel>
+        <GroupLabel flush className={GROUP_GAP}>
+          base model &amp; sample size
+        </GroupLabel>
         <div className='[&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center'>
           <BaseModelFields />
         </div>
@@ -534,10 +517,10 @@ export function CardDetails({
           )}
           data-card-group='roles'
         >
-          <GroupLabel
-            flush
-            action={<Counter n={rolesFilled(assignments)} noun='role' total={ROLES.length} />}
-          >
+          {/* БЕЗ СЧЁТЧИКА. Владелец (r3 п.2): «RESPONSIBLE ROLES „2 OF 4 ROLES“ не нужно, и так
+              видно». Четыре ряда стоят прямо под линейкой, каждый со своими чипами или пилюлей
+              `none` — счётчик пересказывал то, что читается с одного взгляда. */}
+          <GroupLabel flush className={GROUP_GAP}>
             responsible roles
           </GroupLabel>
           <RolesField techCardId={techCardId} canEdit={canEdit} assignments={assignments} />
@@ -548,6 +531,7 @@ export function CardDetails({
           <div className='flex min-w-0 flex-1 flex-col' data-card-group='products'>
             <GroupLabel
               flush
+              className={GROUP_GAP}
               action={
                 /* two organs on one line: the count, then the one door out — `Button` is a block,
                    so without the row the door would drop under the pill */

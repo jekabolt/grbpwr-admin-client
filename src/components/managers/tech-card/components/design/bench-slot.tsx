@@ -6,12 +6,11 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
-import { DrawHalf, HALF_FACE, SLOT_HALVES, Reason } from './core';
+import { HALF_FACE, PlaceOrDrawCell, Reason } from './core';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
@@ -567,9 +566,14 @@ export function SlotCap({
 }
 
 /**
- * ПУСТАЯ ЯЧЕЙКА — коробка, две двери, подвал. Локальный орган этого файла; макетный `slotCell` в
- * пустом состоянии. Просится в `core`, если пустые ячейки понадобятся ещё одной полосе (у
- * рендер-верстака свой файл, `render/side-row.tsx`).
+ * ПУСТАЯ ЯЧЕЙКА — коробка, две двери, подвал. Макетный `slotCell` в пустом состоянии.
+ *
+ * ⚠ САМА ПЛИТКА БОЛЬШЕ НЕ НАЧЕРЧЕНА ЗДЕСЬ. До r3 этот файл рисовал две половины СВОЕЙ разметкой,
+ * а `references-section.tsx` и `render/side-row.tsx` — своими; три написания одной плитки в волне
+ * r2 уже разъехались на пиксель. Теперь коробка, деление надвое, перо и слово состояния приходят
+ * из `core/two-half-slot.tsx`, а этот файл заявляет ТОЛЬКО то, чем ячейка верстака отличается:
+ * квадрат по своей ширине (`BENCH_FRAME_ASPECT`), подвал с именем стороны и лицо верхней половины
+ * `from media` — имя стороны уже напечатано в подвале, и `+ front` повторял бы его вплотную.
  */
 function EmptyCell({
   label,
@@ -591,68 +595,33 @@ function EmptyCell({
   /** Есть — у ячейки вторая половина «draw». Нет — кадр целиком под слот медиа. */
   onDraw?: () => void;
 }) {
-  const take = (media: common_MediaFull[]) => {
-    const first = media[0];
-    if (first?.id) onPlaceMedia(first);
-  };
-  const halved = !disabled && !!onDraw;
   return (
-    <div
+    <PlaceOrDrawCell
       data-bench-empty={label}
       /* Обе половины подписаны одинаково на всех шести ячейках («from media» / «draw»), и на слух
          они неразличимы. Имя стороны даёт группа — оно же напечатано в подвале. */
       role='group'
-      aria-label={`${label} — empty slot`}
-      className={cn(
-        'flex min-w-0 flex-col overflow-hidden border border-dashed',
-        picking ? 'border-textColor' : 'border-borderColor',
-      )}
-    >
-      <div
-        style={{ ...SLOT_FRAME, ...(halved ? SLOT_HALVES : {}) }}
-        className={cn(!halved && 'flex items-center justify-center')}
-      >
-        {disabled ? (
+      ariaLabel={`${label} — empty slot`}
+      label={label}
+      mediaLabel='from media'
+      showGestures
+      aspect={BENCH_FRAME_ASPECT}
+      purpose={purpose}
+      onSelect={onPlaceMedia}
+      onDraw={disabled ? undefined : onDraw}
+      drawAriaLabel={`draw ${label}`}
+      /* ВЫПУЩЕННАЯ КАРТОЧКА: дверей нет, а коробка и подвал остаются — иначе лента вставала бы
+         ступеньками ровно там, где карточку уже нельзя править. */
+      instead={
+        disabled ? (
           <Text size='micro' variant='uppercase' tracking='label' component='span'>
             empty
           </Text>
-        ) : (
-          <>
-            {/* ВЕРХНЯЯ ПОЛОВИНА — слот медиа как он есть: клик в библиотеку, ⌘V, бросок и
-                фотоглиф живут ВНУТРИ примитива, и второго их написания здесь не заводится.
-                Рамка снята (`border-0`): её несёт коробка ячейки.
-
-                ⚠ ОБЁРТКА С `minHeight: 0` НЕСУЩАЯ, А НЕ УБОРКА. У элемента грида
-                `min-height: auto`, а внутри стоит кнопка со СВОИМИ пропорциями (`4/5`): её
-                содержательная высота растягивала строку, строка растягивала кадр, и «квадрат
-                1:1» превращался в 340 пикселей — замерено на стенде (366 против 162 у
-                заполненной ячейки). С нулевым минимумом высоту строки задаёт ТОЛЬКО пропорция
-                кадра, а `h-full` кнопки разрешается уже об неё. */}
-            <div style={{ minHeight: 0, overflow: 'hidden' }} className='min-w-0'>
-              <MediaSlot
-                label='from media'
-                purpose={purpose}
-                aspectRatio={['Custom']}
-                allowMultiple={false}
-                showVideos={false}
-                onSelect={take}
-                sizeClassName='h-full w-full'
-                className='border-0'
-              />
-            </div>
-            {onDraw && (
-              <DrawHalf
-                anchor={label}
-                label='draw'
-                ariaLabel={`draw ${label}`}
-                onClick={onDraw}
-              />
-            )}
-          </>
-        )}
-      </div>
-      <SlotCap label={label} required={required} requiredNote={requiredNote} />
-    </div>
+        ) : undefined
+      }
+      className={picking ? 'border-textColor' : undefined}
+      cap={<SlotCap label={label} required={required} requiredNote={requiredNote} />}
+    />
   );
 }
 

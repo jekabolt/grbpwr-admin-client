@@ -4,18 +4,23 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useState, type JSX } from 'react';
+import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
-import { AskModal, EMPTY_WORD, Reason } from '../core';
+import { Counter, GROUP_GAP, Reason } from '../core';
+import { PictureTile } from '../picture-tile';
 import { mediaThumb } from '../render/model';
+import { CELL_WIDTH, STRIP_FRAME_ASPECT, Strip } from '../render/strip-cell';
 import type { ShotDraft } from './drafts';
 import {
+  RECOLOR_SOURCES_MAX,
   fittingShots,
   fittingsWithShots,
   shotName,
@@ -25,26 +30,40 @@ import {
 } from './model';
 
 /**
- * ═══ THE SHOT THIS RUN REPAINTS — one slot, two doors into it ═════════════════════════════════
+ * ═══ THE SHOTS THIS RUN REPAINTS — A STRIP, UP TO 24, TWO DOORS INTO IT (r3 п.42) ═════════════
  *
- * The prototype's grammar (`omShotGroup`): a group line with the source pill and «one paid call»,
- * then two columns — the SLOT on the left (the product's own `MediaSlot`: the striped frame that
- * is itself the library door, drop target and ⌘V target), the two add-chips on the right —
- * `+ from the fittings N` and `+ from the media library`. A reason for a dead chip is a VISIBLE
- * line under it, never only a `title`; the door stays ONE per source, or the row drifts.
+ * ⚠ THIS WAS A SINGLE SLOT LAST ROUND, AND THE OWNER TOOK THE ARGUMENT APART BY NAME: «до 24
+ * снимков за прогон · вернуть ленту снимков». The slot's own header claimed one shot was «a
+ * grammar, not a cap»; the wire field it filled (`extra_input_media_ids`) has always been a list,
+ * and the server has always taken up to `RECOLOR_SOURCES_MAX` of them in one go. A person with
+ * four sides of one garment was paying four visits to this screen for what one visit buys.
+ *
+ * THE STRIP IS THE ONE THE OTHER GENERATIVE STEPS DRAW — the shared `Strip` / cell width /
+ * 132×148 frame of `render/strip-cell.tsx`, so the render's flats, the 3D's renders and these
+ * photographs are read on one baseline. What differs is said out loud and is only this: these
+ * cells stand for MEDIA, not for pictures of the card (the reason is in `./drafts.ts`), so a cell
+ * carries a number and a provenance and nothing else.
+ *
+ * ONE DOOR PER SOURCE, AND THE STRIP'S OWN TAIL IS ONE OF THEM. The trailing cell IS the library
+ * door — the product's `MediaSlot`: click to browse, ⌘V, drop a file, several at a time. A second
+ * «+ from the media library» chip beside it (which this group carried while the slot was one)
+ * would be two buttons for one thing, which is exactly what the owner asked us to stop doing. The
+ * fittings are a source the strip cannot open by itself, so THEY keep a chip.
  *
  * FROM THE FITTINGS — THE CARD'S OWN TRY-ONS. `ListFittings` filtered by this card
  * (`useTechCardFittings`, the same read the sample panels make) hands back each fitting with its
  * resolved media; the chip counts the fittings that carry a photograph and opens a chooser of
  * those photographs, grouped by fitting. A fitting's date and sample size are printed and KEPT ON
- * THE CARD — the pill row under the chips says so — and never reach the model.
+ * THE CARD — never on the wire. The chooser stays open while several are taken: picking four
+ * photographs of one fitting is the ordinary gesture, and a modal that shut on the first would
+ * make it four round trips.
  *
- * REPLACING A STANDING SHOT ASKS FIRST, with the studio's one question organ (`AskModal`):
- * «change the photograph · replaces the fitting photo taken on 12 Aug. The paint and the colourway
- * stay.» Filling an empty slot asks nothing — there is nothing to lose.
+ * ⚠ NOTHING ASKS A QUESTION HERE ANY MORE. Adding to a list destroys nothing, so the replacement
+ * modal («change the photograph · replaces the fitting photo taken on 12 Aug») has no subject
+ * left; a wrong photograph is taken off by the ✕ on its own cell.
  */
 
-const PURPOSE = 'design · the photograph this run repaints';
+const PURPOSE = 'design · the photographs this run repaints';
 
 export function libraryShot(media: common_MediaFull): OnModelShot {
   return { media, source: 'library', fittingId: 0, stamp: '', size: '' };
@@ -94,11 +113,13 @@ export function ShotGroup({
   /** Told once the read lands: whether any fitting carries a picture (the `+ photo ›` door reads it). */
   onFittingsKnown?: (havePictures: boolean) => void;
 }): JSX.Element {
-  const shot = draft.shot;
+  const shots = draft.shots;
+  const count = shots.length;
+  const room = RECOLOR_SOURCES_MAX - count;
   const { dictionary } = useDictionary();
   const sizes = dictionary?.sizes ?? [];
   const fittings = useTechCardFittings(techCardId);
-  const shots = useMemo(
+  const rows = useMemo(
     () =>
       // A size the dictionary cannot name is still a size: `size 3` beats a blank pill.
       fittingShots(
@@ -107,32 +128,26 @@ export function ShotGroup({
       ),
     [fittings.data, sizes],
   );
-  const fittingCount = fittingsWithShots(shots);
+  const fittingCount = fittingsWithShots(rows);
   useEffect(() => {
     onFittingsKnown?.(fittingCount > 0);
   }, [fittingCount, onFittingsKnown]);
 
-  /** A replacement waiting for its question. `null` — no question is open. */
-  const [pending, setPending] = useState<OnModelShot | null>(null);
+  /**
+   * WHAT THE LAST GESTURE ACTUALLY DID, when it did less than it was asked for. A ⌘V of ten files
+   * onto a strip with room for three takes three; a snackbar for that would name a loss on top of
+   * the screen that already shows it, and silence would let a person believe ten went in.
+   */
+  const [dropped, setDropped] = useState(0);
 
-  const propose = (next: OnModelShot) => {
-    if (!shot) {
-      draft.put(next);
-      return;
-    }
-    if ((shot.media.id ?? 0) === (next.media.id ?? 0)) return;
-    setPending(next);
+  const take = (next: OnModelShot[]) => {
+    const landed = draft.add(next);
+    setDropped(next.length - landed);
   };
 
-  const was = shot
-    ? shot.source === 'fitting'
-      ? shot.stamp
-        ? `the fitting photo taken on ${shot.stamp}`
-        : 'the fitting photo'
-      : 'the photo taken from the media library'
-    : '';
+  const taken = new Set(shots.map((s) => s.media.id ?? 0));
 
-  const fittingsDead = disabled || fittings.isLoading || fittingCount === 0;
+  const fittingsDead = disabled || fittings.isLoading || fittingCount === 0 || room <= 0;
   const fittingsWhy = disabled
     ? 'this card is read-only for you'
     : fittings.isLoading
@@ -141,13 +156,15 @@ export function ShotGroup({
         ? 'the fittings of this item could not be read · upload a photo instead'
         : fittingCount === 0
           ? 'no fittings recorded for this item · upload a photo instead'
-          : '';
+          : room <= 0
+            ? `the strip is full · ${RECOLOR_SOURCES_MAX} photographs is the most one run takes`
+            : '';
 
   /** The chooser, grouped by fitting in the order the server gave them (newest first). */
   const groups = useMemo(() => {
     const order: number[] = [];
     const by = new Map<number, FittingShot[]>();
-    for (const s of shots) {
+    for (const s of rows) {
       const list = by.get(s.fittingId);
       if (list) list.push(s);
       else {
@@ -156,124 +173,149 @@ export function ShotGroup({
       }
     }
     return order.map((id) => by.get(id)!);
-  }, [shots]);
+  }, [rows]);
 
   return (
-    <div data-om-shot={shot ? shot.media.id : 'empty'}>
+    <div data-om-shots={count}>
       <GroupLabel
         flush
+        className={GROUP_GAP}
         action={
           <span className='flex flex-wrap items-center gap-1.5'>
-            {shot ? (
-              <Pill tone='ink'>
-                {shot.source === 'fitting' ? 'from a fitting' : 'from the media library'}
-              </Pill>
-            ) : (
-              <Pill tone='mut'>{EMPTY_WORD}</Pill>
+            <Counter n={count} noun='shot' total={RECOLOR_SOURCES_MAX} />
+            {/* THE PRICE IS A TARIFF, NOT A SUM: «one call per photograph», never a number of
+                dollars multiplied out of `shots.length` (pool item, r3). */}
+            <Pill tone='mut'>one call per photograph</Pill>
+            {!disabled && count > 0 && (
+              <Button variant='secondary' size='xs' onClick={draft.clear}>
+                remove all {count}
+              </Button>
             )}
-            <Pill tone='mut'>one paid call</Pill>
           </span>
         }
       >
-        the shot this run repaints
+        the shots this run repaints
       </GroupLabel>
 
-      <div className='grid gap-5 md:grid-cols-2'>
-        {/* THE SLOT. One frame; empty it is the library door, filled it shows the shot with the
-            product's own «change · remove» bar. Square, like the shelf tiles beside it. */}
-        <div className='min-w-0 max-w-[220px]'>
-          <MediaSlot
-            aspectRatio={['Custom']}
-            frameAspect='1/1'
-            mediaUrl={shot ? mediaThumb(shot.media) : undefined}
-            alt={shot ? shotName(shot) : 'the photograph'}
-            label='the photograph *'
-            hint='from a fitting · or the media library'
-            purpose={PURPOSE}
-            showVideos={false}
-            editMode={!disabled}
-            onSelect={(media) => {
-              const first = media[0];
-              if (first?.id) propose(libraryShot(first));
-            }}
-            onClear={disabled ? undefined : draft.clear}
-          />
-          {shot && (
-            <div className='mt-1 flex flex-wrap items-center justify-between gap-1'>
-              <Text size='nano' variant='uppercase' component='span' className='min-w-0 truncate'>
+      <Strip>
+        {shots.map((shot, index) => {
+          const id = shot.media.id ?? 0;
+          return (
+            <div key={id} className={`flex flex-col gap-1 ${CELL_WIDTH}`} data-om-shot={id}>
+              <PictureTile
+                url={mediaThumb(shot.media)}
+                alt={`photograph ${index + 1}`}
+                aspect={STRIP_FRAME_ASPECT}
+                fit='contain'
+                selected
+                /* A NUMBER, NOT A VIEW. Nothing declares which side this photograph shows — not
+                   the file, not the server — and the results come back one per shot, read in
+                   this same order. */
+                badge={String(index + 1)}
+                gallery={mediaFullToViewerItem(shot.media)}
+                onRemove={
+                  disabled
+                    ? undefined
+                    : {
+                        onClick: () => {
+                          draft.remove(id);
+                          setDropped(0);
+                        },
+                        ariaLabel: `take photograph ${index + 1} out of the strip`,
+                        title: `take ${shotName(shot)} out`,
+                      }
+                }
+                className='w-full bg-bgColor'
+              />
+              {/* TWO LINES, TWO DIFFERENT FACTS. The name says where the photograph came from
+                  («fitting on 12 Aug» / «picture 4012»); the second line says WHICH MEDIA it is,
+                  because the cells stand for media and the media number is the one thing a person
+                  can carry to another screen. Printing the origin twice — which this cell did on
+                  its first draft, «fitting on 12 Aug» over «from fitting 12 Aug» — is a line that
+                  answers a question already answered. */}
+              <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
                 {shotName(shot)}
               </Text>
-              <Pill tone='mut'>{shotOrigin(shot)}</Pill>
+              <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                media {id}
+              </Text>
             </div>
-          )}
-        </div>
+          );
+        })}
 
-        <div className='min-w-0'>
-          <div className='flex flex-wrap items-center gap-1'>
-            <Chip
-              dashed
-              disabled={fittingsDead}
-              title={fittingsWhy || 'take the shot from a fitting of this item'}
-              aria-label='take the shot from a fitting of this item'
-              data-om-door='fittings'
-              onClick={() => onChooserOpenChange(true)}
-            >
-              + from the fittings{' '}
-              <span className='tabular-nums opacity-65'>
-                {fittings.isLoading ? '…' : fittingCount}
-              </span>
-            </Chip>
-            {disabled ? (
-              <Chip dashed disabled title='this card is read-only for you' data-om-door='library'>
-                + from the media library
-              </Chip>
-            ) : (
-              <MediaSelector
-                label='from the media library'
-                purpose={PURPOSE}
-                aspectRatio={['Custom']}
-                allowMultiple={false}
-                showVideos={false}
-                saveSelectedMedia={(media) => {
-                  const first = media[0];
-                  if (first?.id) propose(libraryShot(first));
-                }}
-                trigger={
-                  <Chip
-                    dashed
-                    onClick={() => {}}
-                    aria-label='take the shot from the media library'
-                    data-om-door='library'
-                  >
-                    + from the media library
-                  </Chip>
-                }
-              />
-            )}
+        {!disabled && room > 0 && (
+          <div className={`flex flex-col gap-1 ${CELL_WIDTH}`}>
+            {/* THE TAIL OF THE STRIP IS THE LIBRARY DOOR — the product's own slot, with ⌘V, drop
+                and browse living inside the primitive. `PlaceOrDrawCell` was the other candidate
+                and is refused on purpose: its lower half opens the drawing editor, and a drawn
+                plate is not a photograph of a garment on a person. */}
+            <MediaSlot
+              aspectRatio={['Custom']}
+              frameAspect={STRIP_FRAME_ASPECT}
+              label='+ photo'
+              hint={null}
+              purpose={PURPOSE}
+              showVideos={false}
+              editMode
+              allowMultiple
+              limit={room}
+              onSelect={(media) => take(media.filter((m) => m.id).map(libraryShot))}
+            />
+            <Text size='nano' variant='label' component='span'>
+              from the library
+            </Text>
           </div>
+        )}
+      </Strip>
 
-          {/* THE REASON OF A DEAD CHIP IS A VISIBLE LINE, and the door is still ONE — the library
-              chip above; a second «upload» button here would be the drift the prototype names. */}
-          {!disabled && !fittings.isLoading && fittingCount === 0 && (
-            <CalloutBox tone='note' className='mt-2'>
-              <Text size='micro' component='p' className='normal-case'>
-                {fittingsWhy}
-              </Text>
-            </CalloutBox>
-          )}
-          {disabled && <Reason className='mt-2'>this card is read-only for you</Reason>}
-
-          {shot?.source === 'fitting' && (
-            <div className='mt-2 flex flex-wrap items-center gap-1.5'>
-              {shot.size && <Pill tone='mut'>sample {shot.size}</Pill>}
-              <Pill tone='mut'>not sent</Pill>
-              <Text size='nano' variant='label' component='span' className='normal-case'>
-                the date and the sample size stay on the card
-              </Text>
-            </div>
-          )}
-        </div>
+      <div className='mt-2 flex flex-wrap items-center gap-1.5'>
+        <Chip
+          dashed
+          disabled={fittingsDead}
+          title={fittingsWhy || 'take photographs from the fittings of this item'}
+          aria-label='take photographs from the fittings of this item'
+          data-om-door='fittings'
+          onClick={() => onChooserOpenChange(true)}
+        >
+          + from the fittings{' '}
+          <span className='tabular-nums opacity-65'>{fittings.isLoading ? '…' : fittingCount}</span>
+        </Chip>
       </div>
+
+      {/* THE REASON OF A DEAD CHIP IS A VISIBLE LINE, never only a `title`. */}
+      {!disabled && !fittings.isLoading && fittingCount === 0 && (
+        <CalloutBox tone='note' className='mt-2'>
+          <Text size='micro' component='p' className='normal-case'>
+            {fittingsWhy}
+          </Text>
+        </CalloutBox>
+      )}
+      {disabled && <Reason className='mt-2'>this card is read-only for you</Reason>}
+      {!disabled && room <= 0 && (
+        <Reason className='mt-2'>
+          the strip is full · {RECOLOR_SOURCES_MAX} photographs is the most one run takes
+        </Reason>
+      )}
+      {dropped > 0 && (
+        <Reason className='mt-2'>
+          {dropped} of them did not go in · already in the strip, or over the {RECOLOR_SOURCES_MAX}
+          {' '}the run takes
+        </Reason>
+      )}
+      {/* ONE QUIET LINE, NOT TWO. What does not travel (the fitting's date and size) and what
+          these cells ARE (media, not pictures of the card) are one sentence about the same list;
+          two grey rows under the strip read as two warnings. */}
+      {count > 0 && (
+        <div className='mt-2 flex flex-wrap items-center gap-1.5'>
+          <Pill tone='mut'>not sent</Pill>
+          <Text size='nano' variant='label' component='span' className='normal-case'>
+            these are media, not pictures of this card
+            {shots.some((s) => s.source === 'fitting')
+              ? ' · the fitting date and the sample size stay on the card'
+              : ''}
+          </Text>
+        </div>
+      )}
 
       {/* THE CHOOSER — the photographs of this card's fittings, one group per fitting. */}
       <ConfirmationModal
@@ -282,7 +324,7 @@ export function ShotGroup({
         onConfirm={() => onChooserOpenChange(false)}
         hideActions
         width='lg'
-        title='the photograph · from the fittings'
+        title='the photographs · from the fittings'
         footerHint='the fitting date and the sample size stay on the card — only the photograph goes to the model'
       >
         <div className='space-y-stack'>
@@ -291,17 +333,18 @@ export function ShotGroup({
               {fittingsWhy || 'no photographs on the fittings of this item'}
             </Text>
           )}
-          {groups.map((rows) => {
-            const head = rows[0];
+          {groups.map((list) => {
+            const head = list[0];
             return (
               <div key={head.fittingId} data-om-fitting={head.fittingId}>
                 <GroupLabel
                   flush
+                  className={GROUP_GAP}
                   action={
                     <span className='flex flex-wrap items-center gap-1.5'>
                       {head.size && <Pill tone='mut'>sample {head.size}</Pill>}
                       <Pill tone='mut'>
-                        {rows.length} photograph{rows.length === 1 ? '' : 's'}
+                        {list.length} photograph{list.length === 1 ? '' : 's'}
                       </Pill>
                     </span>
                   }
@@ -310,22 +353,26 @@ export function ShotGroup({
                   {head.stamp ? ` · ${head.stamp}` : ''}
                 </GroupLabel>
                 <Tiles min={148}>
-                  {rows.map((row, i) => {
+                  {list.map((row, i) => {
                     const id = row.media.id ?? 0;
-                    const on = (shot?.media.id ?? 0) === id;
+                    const on = taken.has(id);
                     return (
                       <Tile
                         key={id}
                         selected={on}
                         pressed={on}
-                        title={on ? 'this photograph is the shot' : 'take this photograph'}
+                        title={on ? 'this photograph is in the strip · take it out' : 'add this photograph to the strip'}
                         onClick={() => {
-                          onChooserOpenChange(false);
-                          propose(fittingShot(row));
+                          if (on) {
+                            draft.remove(id);
+                            setDropped(0);
+                            return;
+                          }
+                          take([fittingShot(row)]);
                         }}
                         media={<ShotFace src={mediaThumb(row.media)} alt={`photograph ${i + 1}`} />}
                         name={`photograph ${i + 1}`}
-                        sub={on ? 'the shot' : `media ${id}`}
+                        sub={on ? 'in the strip' : `media ${id}`}
                       />
                     );
                   })}
@@ -335,18 +382,6 @@ export function ShotGroup({
           })}
         </div>
       </ConfirmationModal>
-
-      <AskModal
-        open={!!pending}
-        title='change the photograph'
-        sentence={`replaces ${was}. The paint and the colourway stay.`}
-        verb='replace the photo'
-        onDo={() => {
-          if (pending) draft.put(pending);
-          setPending(null);
-        }}
-        onClose={() => setPending(null)}
-      />
     </div>
   );
 }

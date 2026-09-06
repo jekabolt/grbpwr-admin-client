@@ -424,14 +424,21 @@ export function targetIsStated(recipe: common_DesignColourRecipe | null | undefi
    ON MODEL · THE ASIDE — one photograph, one paint, one paid call (studio v3, `_step-aside.js`).
 
    TWO AXES, BOTH SPOKEN OUT LOUD ON THE SCREEN:
-     WHAT IS REPAINTED   shot.source: fitting | library      ONE photograph per run
-     WHAT IT IS PAINTED  paint.mode:  texture | colour       exactly one of the two
+     WHAT IS REPAINTED   a strip of shots, fitting | library     up to RECOLOR_SOURCES_MAX
+     WHAT IT IS PAINTED  a cloth, a colour, or BOTH TOGETHER
 
-   THE SHOT IS ONE, AND THAT IS A GRAMMAR, NOT A CAP. «Changing the source REPLACES the photo» is
-   the grammar of a SLOT; a strip of up to 24 shots (the previous round's `RECOLOR_SOURCES_MAX`)
-   counted something that no longer exists on this screen. The wire still takes a list —
-   `extra_input_media_ids` — and one shot travels as a list of one; the server's contract is kept
-   untouched and the cap above is left in place for it.
+   ⚠ THE SHOT IS A LIST AGAIN, AND THE ROUND BEFORE THIS ONE WAS WRONG ABOUT IT (r3 п.42). This
+   header used to argue that «one shot is a GRAMMAR, not a cap» and that the strip «counted
+   something that no longer exists on this screen». The owner answered the argument by name: up to
+   24 photographs per run, the strip back. The wire never changed — `extra_input_media_ids` is a
+   list and always was — so what the slot did was narrow a screen to a fraction of a contract the
+   server had open the whole time, and a person with four sides of one garment paid four visits to
+   this screen to buy what one visit buys.
+
+   THE PRICE IS A TARIFF, NOT A SUM, AND THE SCREEN DOES NOT MULTIPLY IT. Each photograph is its
+   own paid call; this admin owns no tariff (`price_estimate` is output-only), so the shape beside
+   GENERATE says «one call per photograph» and never `N × money`. A number of dollars printed from
+   `shots.length` would be an invention (pool item, r3).
 
    THE COLOURWAY IS NOT REQUIRED. Under `colour` there is no colourway at all: the person named a
    colour, not a pair «cloth and colour». It is a LINK written on the picture that comes back
@@ -453,21 +460,32 @@ export type OnModelShot = {
   size: string;
 };
 
-export type PaintMode = '' | 'texture' | 'colour';
-
 /**
- * WHAT THE PHOTOGRAPH IS PAINTED IN — exactly one of two, held as STATE, not as click discipline:
- * a texture pick clears the colour and a colour pick clears the texture (`useOnModelPaint`).
+ * WHAT THE PHOTOGRAPH IS PAINTED IN — A CLOTH, A COLOUR, OR BOTH (r3 п.43).
+ *
+ * ⚠ «ONE OF THREE» IS GONE, AND IT WAS NEVER THE SERVER'S RULE. The state used to hold a `mode`
+ * that made the two axes exclusive: a texture pick wiped the colour and a colour pick wiped the
+ * texture. The server takes both in one call and has a name for the result — «the garment made of
+ * the cloth in image 2», re-tinted to the stated colour (`recolorShape` has printed that exact
+ * sentence, «re-clothed in X, re-tinted to Y», the whole time). Exclusivity was a client rule with
+ * no owner; the owner has now refused it in as many words.
+ *
  * `assetId` is a NUMBER, not a list: the server refuses two cloths (`one_cloth_only`) and a type
  * that cannot express the second one is worth more than a rule that promises not to add it.
+ *
+ * `code` IS THE PANTONE REFERENCE, AND IT IS THE DESCRIPTION (r3 п.43/23: «пантон и есть
+ * описание»). E-11 stripped `code` at this screen's door on a premise that has expired: it was
+ * stripped because a NAME could arrive from a recipe chip without the person ever seeing it. The
+ * colour is now picked by its reference, in a picker that shows nothing else, so the name on the
+ * wire is the name under the picker's own trigger — see `paintWire`.
  */
 export type OnModelPaint = {
-  mode: PaintMode;
   assetId: number;
   hex: string;
+  code: string;
 };
 
-export const NO_PAINT: OnModelPaint = { mode: '', assetId: 0, hex: '' };
+export const NO_PAINT: OnModelPaint = { assetId: 0, hex: '', code: '' };
 
 /** One photograph of one fitting — what the «from the fittings» chooser lists. */
 export type FittingShot = {
@@ -576,12 +594,22 @@ export function paintWire(
 ): common_DesignColourRecipe {
   const recipe: common_DesignColourRecipe = {
     ...EMPTY_RECIPE,
-    hex: paint.mode === 'colour' ? paint.hex : '',
+    hex: paint.hex,
+    /**
+     * ⚠ THE PANTONE REFERENCE RIDES, AND THAT IS A CHANGE OF PREMISE, NOT A RELAXATION (r3 п.43).
+     * E-11 stripped `code` here because the colour organ of the day (the recipe chips of
+     * `ColourStatementRow`) could hand back a NAME together with a value, and this screen showed
+     * no name — «the screen would buy a prompt with a name the person never saw». The colour is
+     * now picked by its reference alone, and that reference is printed on the picker's trigger and
+     * under the swatch. The prompt quotes the pair («18-1248 TCX — the exact value is #9a8b7f»),
+     * which is what a Pantone number is FOR: a colour named the same way in the dyehouse.
+     */
+    code: paint.code,
   };
-  return {
-    ...recolourWireColour(band, recipe, paint.mode === 'texture' ? paint.assetId : 0),
-    code: '',
-  };
+  // BOTH AXES AT ONCE. `recolourWireColour` already merges them — the cloth into `fabrics` (+ the
+  // `fabric_media_id` echo the worker reads) and the hex bare — so nothing here decides between
+  // them; that decision was the client's own and is gone.
+  return recolourWireColour(band, recipe, paint.assetId);
 }
 
 /**
@@ -591,16 +619,22 @@ export function paintWire(
  */
 export function paintText(colour: common_DesignColourRecipe): string {
   const cloth = (colour.fabrics ?? []).find((f) => (f.mediaId ?? 0) > 0);
-  if (cloth) return `texture "${(cloth.name ?? '').trim() || 'the picked cloth'}"`;
+  const clothWord = cloth ? `texture "${(cloth.name ?? '').trim() || 'the picked cloth'}"` : '';
+  const code = (colour.code ?? '').trim();
   const hex = normaliseHex(colour.hex);
-  if (hex) return `colour ${hex.toUpperCase()}`;
-  return '';
+  const colourWord = code ? `colour ${code}` : hex ? `colour ${hex.toUpperCase()}` : '';
+  // BOTH, WHEN BOTH ARE STATED (r3 п.43). One of the two spellings printed alone would be the old
+  // exclusive screen speaking over the new body of the request.
+  return [clothWord, colourWord].filter(Boolean).join(' · ');
 }
 
-/** The words on the group pill: which of the modes is on, or that none is. */
+/** The words on the group pill: which axes are stated, or that neither is. */
 export function paintModeWord(paint: OnModelPaint): string {
-  if (paint.mode === 'texture' && paint.assetId > 0) return 'a cloth off the shelf';
-  if (paint.mode === 'colour' && hexIsPaintable(paint.hex)) return 'a flat colour';
+  const cloth = paint.assetId > 0;
+  const colour = !!paint.code.trim() || hexIsPaintable(paint.hex);
+  if (cloth && colour) return 'a cloth and a colour';
+  if (cloth) return 'a cloth off the shelf';
+  if (colour) return 'a colour';
   return 'nothing picked';
 }
 
@@ -628,27 +662,42 @@ export type OnModelGate =
  * media number the person has to take out).
  */
 export function onModelGate(
-  shotMediaId: number,
+  /** THE WHOLE STRIP, in the order it will leave — the same list `extra_input_media_ids` carries. */
+  shotMediaIds: readonly number[],
   colour: common_DesignColourRecipe,
   colorwayArchived: boolean,
   colorwayLabel: string,
 ): OnModelGate {
   const named = archivedColorwayGate(colorwayArchived, colorwayLabel, 'on-model picture');
   if (!named.ok) return { ok: false, reason: named.reason };
-  if (shotMediaId <= 0) {
+  const ids = shotMediaIds.filter((id) => id > 0);
+  if (ids.length === 0) {
     return {
       ok: false,
-      reason: 'nothing to repaint · pick a photo from the fittings or upload one',
+      reason: 'nothing to repaint · pick photos from the fittings or upload some',
       door: 'photo',
     };
   }
-  const dup = (colour.fabrics ?? []).find((f) => (f.mediaId ?? 0) === shotMediaId);
+  /**
+   * THE CAP IS THE SERVER'S, AND IT IS SAID WITH ITS OWN WORDS. `recolorGate` already spells the
+   * refusal the server would give for free; the strip cannot pass its ceiling by hand, but a
+   * ⌘V of a dozen files can, and the run must not be bought to learn it.
+   */
+  if (ids.length > RECOLOR_SOURCES_MAX) {
+    const server = recolorGate(ids, colour);
+    return {
+      ok: false,
+      reason: server.ok ? `at most ${RECOLOR_SOURCES_MAX} photographs in one run` : server.reason,
+      door: 'photo',
+    };
+  }
+  const dup = (colour.fabrics ?? []).find((f) => ids.includes(f.mediaId ?? 0));
   if (dup) {
-    const server = recolorGate([shotMediaId], colour);
+    const server = recolorGate(ids, colour);
     return {
       ok: false,
       reason: server.ok
-        ? `media ${shotMediaId} is both the photograph and the cloth to lay on it · pick another texture`
+        ? `media ${dup.mediaId} is both a photograph and the cloth to lay on it · pick another texture`
         : server.reason,
       door: 'paint',
     };
@@ -657,11 +706,40 @@ export function onModelGate(
     return {
       ok: false,
       reason:
-        'nothing to paint with · pick a texture, make one, or choose a colour. Any one is enough',
+        'nothing to paint with · pick a cloth, make one, or choose a colour. Either one is enough, and both together are allowed',
       door: 'paint',
     };
   }
   return { ok: true };
+}
+
+/**
+ * ═══ THE STRIP, GROWN BY A GESTURE — one place, so the cap and the duplicates are one answer ══
+ *
+ * Two doors add to it (the fittings chooser and the library, which hands several files at once)
+ * and both land here. A photograph already in the strip is NOT added twice: the server refuses a
+ * call carrying one media id twice, and the strip is `extra_input_media_ids` itself. Over the cap
+ * the extras are DROPPED rather than queued — the caller says so out loud (`shot-group.tsx`).
+ */
+export function addShots(
+  current: readonly OnModelShot[],
+  incoming: readonly OnModelShot[],
+): OnModelShot[] {
+  const out = [...current];
+  const seen = new Set(out.map((s) => s.media.id ?? 0));
+  for (const next of incoming) {
+    const id = next.media.id ?? 0;
+    if (id <= 0 || seen.has(id)) continue;
+    if (out.length >= RECOLOR_SOURCES_MAX) break;
+    seen.add(id);
+    out.push(next);
+  }
+  return out;
+}
+
+/** The ids of the strip, in its order — what the gate judges and the wire carries. */
+export function shotMediaIds(shots: readonly OnModelShot[]): number[] {
+  return shots.map((s) => s.media.id ?? 0).filter((id) => id > 0);
 }
 
 /** The product's `Gate` shape of the same answer — what the shared generate row reads. */

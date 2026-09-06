@@ -5,6 +5,7 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
+import { GROUP_GAP } from '../core';
 import type { ColourDraft } from './drafts';
 import {
   CLOTH_GSM_MAX,
@@ -68,7 +69,13 @@ export function ClothIsRow({
 
   return (
     <div data-cloth-is data-words-rank={rank.governs ? 'governs' : 'outranked'}>
+      {/* ГЭП КАК В CARD DETAILS (r3 п.34) — ТОТ ЖЕ ТОКЕН, ЧТО У ДВУХ СОСЕДНИХ ГРУПП. `flush`
+          обязателен вместе с ним: свой `mt-3` примитива сложился бы со швом группы, который эта
+          строка уже получает от `GROUP_SEAM` на обёртке палитры, и один стык из трёх оказался бы
+          толще остальных. */}
       <GroupLabel
+        flush
+        className={GROUP_GAP}
         action={
           light ? (
             <Pill

@@ -102,6 +102,13 @@ const EMPTY_BAND: GetDesignBandResponse = {
   // stated» by `renderBenchOccupied`, which then answers «occupied» and lets the SERVER refuse if
   // it must — the same posture `hasFabricRender` above takes.
   renderBenchColorwayIds: undefined,
+  // `undefined`, AND EXPLICITLY NOT `false` — the doctrine the field's own contract states in so
+  // many words: ABSENT ≠ FALSE. The flag is a CAPABILITY («this server rewrites `colorway_id` 0 → N
+  // when a sample plate is placed into colourway N's slot»), and `false` is a positive claim that
+  // the server refuses that placement. A binary older than the flag makes no claim at all; painting
+  // `false` for it would be honest by accident and dishonest the moment the field means something
+  // else. Every reader treats absence as «not stated» and draws the door the conservative way.
+  benchAdoptsUnattributed: undefined,
 };
 
 export type DesignBandState = {
